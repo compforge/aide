@@ -2,11 +2,11 @@
 
 Aide 是运行在自己服务器上的个人 Agent。它接下临时交办，把持续关注和定期处理保存为长期安排，再由时间或事件推动执行；需要补充信息时向用户提问，收到回答后继续。
 
-当前提供可运行的单用户原型：网页 Channel、Task / Routine、Plugin Controller runtime、Codex Harness 和 Resource 文件持久化。飞书适配器还未接入。网页和后续 Channel 共用同一条请求与执行链路。
+当前提供可运行的单用户原型：网页和飞书单聊 Channel、Task / Routine、Plugin Controller runtime、Codex Harness 和 Resource 文件持久化。不同 Channel 共用同一条请求与执行链路。
 
 ## 启动
 
-使用 Node.js 22+ 安装依赖；服务运行于随依赖安装的 Bun 1.4.2。还需要已安装、完成登录的 Codex CLI。执行环境中的 CLI（如 larkcli、bytedcli）及其登录态直接供 Codex 使用。
+使用 Node.js 22+ 安装依赖；服务运行于随依赖安装的 Bun 1.4.2。还需要已安装、完成登录的 Codex CLI。执行环境中的 CLI（如 lark-cli、bytedcli）及其登录态直接供 Codex 使用。
 
 ```sh
 npm ci
@@ -31,6 +31,12 @@ npm start
 
 例如：`AIDE_CWD=/path/to/work AIDE_TIMEZONE=Asia/Shanghai npm start`。AI 执行统一由 Harness 提供，权限沿用 Codex 配置、执行环境和 CLI。请求识别的提示词禁止执行工作或调用工具。
 
+## 飞书单聊
+
+配置 `AIDE_FEISHU_APP_ID` 和 `AIDE_FEISHU_APP_SECRET` 后，Aide 通过官方 SDK 长连接收消息，无需公网回调地址。可通过飞书交办、回答追问、暂停或继续安排；后台结果和 Routine 通知也会回到原单聊。未配置时只启动网页 Channel。
+
+创建机器人、设置权限和订阅事件的步骤见 [飞书接入](docs/feishu.md)。机器人应用的可用范围先设为自己。当前支持单聊文字，不处理群聊、图片或文件；原生 Harness 授权请求仍通过网页处理。
+
 ## 交办与查看结果
 
 ```sh
@@ -42,7 +48,7 @@ curl -s 'http://127.0.0.1:7433/work?conversationId=me'
 curl -s 'http://127.0.0.1:7433/messages?conversationId=me'
 ```
 
-POST 返回识别后的回复，执行在后台继续。GET `/messages` 读取持久化的 Aide 消息，包括异步结果和问题；加 `after=<message-id>` 可增量读取，`role=all` 可读取包括用户输入的完整对话。Channel 适配器应保存游标，负责把这些消息送给用户。用户回答仍提交到 `/messages`，使用相同 `conversationId` 和新的消息 `id`。
+POST 返回识别后的回复，执行在后台继续。GET `/messages` 读取持久化的 Aide 消息，包括异步结果和问题；加 `after=<message-id>` 可增量读取，`role=all` 可读取包括用户输入的完整对话。飞书 Channel 独立记录已投递消息，将结果送回原会话。用户回答仍提交到 `/messages`，使用相同 `conversationId` 和新的消息 `id`。
 
 入站消息的 `id` 在会话内用于投递去重；重试同一消息应沿用原 id。不同会话的工作分别匹配，但它们仍属于同一个人的 Aide。
 
@@ -74,7 +80,7 @@ Reconcile 调用 Harness 推进工作。执行结果分为完成、询问用户�
 
 Controller 默认总执行容量为 1；等待 Harness verb 时释放执行位，同一个 Resource 始终串行。暂停阻止后续推进，不能撤销已执行的 CLI 操作。关机错过的时间触发恢复后合并执行一次；运行中崩溃或调用失败会标为 `uncertain`，由用户核对结果后明确要求继续。基础设施 Reconcile 重试不会自动重放结果不明的业务执行。
 
-personal Plugin 在独立 Worker 中通过 `context.verbs.harness` 请求执行。执行内核通过 Session、Lane、HarnessInvocation 和 Turn 管理执行，Codex 使用 `app-server` 协议；Aide 注入当前工作和最近 20 条工作历史。请求识别超时为 1 分钟，单次执行为 15 分钟。尚未提供通用长期记忆、完整上下文压缩、飞书等消息推送适配器或多实例部署。
+personal Plugin 在独立 Worker 中通过 `context.verbs.harness` 请求执行。执行内核通过 Session、Lane、HarnessInvocation 和 Turn 管理执行，Codex 使用 `app-server` 协议；Aide 注入当前工作和最近 20 条工作历史。请求识别超时为 1 分钟，单次执行为 15 分钟。尚未提供通用长期记忆、完整上下文压缩或多实例部署。
 
 ## Linux 常驻部署
 

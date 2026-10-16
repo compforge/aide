@@ -7,6 +7,8 @@ import { Aide } from "../plugins/personal/aide.ts";
 import { CodexAdapter } from "./runtime/harness/codex/adapter.ts";
 import { FileHookTrustStore } from "./runtime/config/hook.ts";
 import { httpChannel } from "./channel/http.ts";
+import { FeishuChannel } from "./channel/feishu.ts";
+import { feishuConfig, feishuTransport } from "./channel/feishu-client.ts";
 import { withAsyncFileLock } from "./runtime/file-lock.ts";
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
@@ -16,6 +18,7 @@ const sandbox = z.enum(["read-only", "workspace-write", "danger-full-access"]).o
 const port = z.coerce.number().int().min(1).max(65535).parse(process.env.AIDE_PORT ?? "7433");
 const timezone = process.env.AIDE_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 new Intl.DateTimeFormat("en", { timeZone: timezone });
+const feishu = feishuConfig(process.env);
 
 await withAsyncFileLock(path, async () => {
   const aide = new Aide(home, {
@@ -28,6 +31,8 @@ await withAsyncFileLock(path, async () => {
   server.listen(port, "127.0.0.1");
   await once(server, "listening");
   await aide.start();
+  const bot = feishu ? new FeishuChannel(home, feishu.appId, aide, feishuTransport(feishu, log), log) : undefined;
+  if (bot) void bot.start().catch(() => log.error("Feishu channel startup failed; check credentials and network"));
   log.info({ port, path }, "Aide listening on localhost");
   await new Promise<void>((done) => {
     const stop = () => {
@@ -39,6 +44,8 @@ await withAsyncFileLock(path, async () => {
     process.on("SIGINT", stop);
   });
   server.close();
+  const closingBot = bot?.close();
   await aide.close();
+  await closingBot;
   log.info("Aide stopped");
 }, 0);

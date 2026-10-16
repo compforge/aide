@@ -13,6 +13,8 @@ src/
   main.ts                  # Bun 服务入口，装配 CodexAdapter 与 HTTP
   channel/
     http.ts                # 本地 HTTP Channel
+    feishu.ts              # 飞书单聊、持久收件与出站投递
+    feishu-client.ts       # 飞书官方 SDK、长连接与发送接口
     web.html               # 网页对话、事项与安排
   runtime/                 # 执行内核
     plugin/runner/         # Worker / Supervisor / IPC
