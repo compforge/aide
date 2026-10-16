@@ -21,6 +21,7 @@
   button:disabled { opacity: .5; cursor: wait; } button:focus-visible, textarea:focus-visible { outline: 3px solid #83a38b; outline-offset: 2px; }
   #notice { min-height: 22px; margin-top: 10px; font-size: 13px; color: #68776c; } #notice.error { color: #a0362a; }
   aside { padding: 24px 20px; border-left: 1px solid #d8dfd5; overflow: auto; } aside h2 { font-size: 16px; margin: 0 0 18px; }
+  .work-group + .work-group { margin-top: 28px; padding-top: 24px; border-top: 1px solid #d8dfd5; }
   .work { background: white; border-radius: 10px; border: 1px solid #e1e6dc; padding: 14px; margin-bottom: 12px; }
   .work strong { display: block; margin: 8px 0; font-size: 14px; overflow-wrap: anywhere; }
   .work p { font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -39,7 +40,16 @@
     </form>
     <div id="notice" role="status">Enter 发送 · Shift + Enter 换行</div>
   </section>
-  <aside><h2>事项与安排 <span id="count" class="muted"></span></h2><div id="works"></div></aside>
+  <aside>
+    <section class="work-group" aria-labelledby="tasks-heading">
+      <h2 id="tasks-heading">事项 <span id="task-count" class="muted">0</span></h2>
+      <div id="tasks"></div>
+    </section>
+    <section class="work-group" aria-labelledby="routines-heading">
+      <h2 id="routines-heading">安排 <span id="routine-count" class="muted">0</span></h2>
+      <div id="routines"></div>
+    </section>
+  </aside>
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -80,11 +90,18 @@
   function renderWork(works) {
     const signature = JSON.stringify(works);
     if (signature === lastWork) return;
-    lastWork = signature; $('count').textContent = works.length || ''; $('works').replaceChildren();
-    if (!works.length) $('works').append(element('p', '接下的事项和安排会出现在这里。', 'muted'));
+    lastWork = signature;
+    renderWorkGroup(works.filter((work) => work.kind === 'task'), 'tasks', 'task-count', '还没有事项，交办一件事试试。');
+    renderWorkGroup(works.filter((work) => work.kind === 'routine'), 'routines', 'routine-count', '还没有安排，可以告诉我想定期处理或长期关注什么。');
+  }
+  function renderWorkGroup(works, listId, countId, emptyText) {
+    $(countId).textContent = works.length;
+    const list = $(listId);
+    list.replaceChildren();
+    if (!works.length) list.append(element('p', emptyText, 'muted'));
     for (const work of [...works].reverse()) {
       const node = element('article', undefined, 'work');
-      node.append(element('span', (work.kind === 'task' ? '事项' : '安排') + ' · ' + labels[work.status], 'badge ' + work.status), element('strong', work.title));
+      node.append(element('span', labels[work.status], 'badge ' + work.status), element('strong', work.title));
       if (work.question) node.append(element('p', work.question));
       if (work.status === 'uncertain') node.append(element('p', '执行中断或失败。请核对外部结果，再发消息决定是否继续。'));
       if (work.nextAt) node.append(element('p', '下次：' + new Date(work.nextAt).toLocaleString(), 'muted'));
@@ -92,7 +109,7 @@
       detail.append(element('summary', '查看目标与进展'), element('p', work.instruction));
       const latest = [...work.history].reverse().find((entry) => entry.role === 'aide');
       if (latest) detail.append(element('p', latest.text));
-      node.append(detail); $('works').append(node);
+      node.append(detail); list.append(node);
     }
   }
   async function poll() {
