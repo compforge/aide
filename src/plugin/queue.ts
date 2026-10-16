@@ -1,4 +1,11 @@
-type ReconcileKey = string;
+import type {
+  ReconcileKey,
+  ReconcileScope,
+} from "./controller.ts";
+import {
+  reconcileResourceOwner,
+  sameReconcileScope,
+} from "./reconcile-scope.ts";
 
 interface QueuedReconcile {
   key: ReconcileKey;
@@ -80,6 +87,7 @@ export class ReconcileCapacity {
 
 /**
  * @spec Suspending a reconcile releases its capacity slot for the full external wait and reacquires a slot before the original continuation resumes.
+ * @rule A Plugin verb wait must suspend both the Controller-local and Manager-global leases so one human wait cannot block unrelated Resources at either limit.
  */
 export interface ReconcileCapacityLease {
   suspend<T>(wait: Promise<T>): Promise<T>;
@@ -87,7 +95,17 @@ export interface ReconcileCapacityLease {
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
-function reconcileKeyId(key: ReconcileKey): string { return key; }
+export function reconcileKeyId(key: ReconcileKey): string {
+  return JSON.stringify([
+    key.hostId,
+    key.pluginInstanceId,
+    key.namespace,
+    key.resourceApiVersion,
+    key.resourceKind,
+    key.resourceId,
+    reconcileResourceOwner(key),
+  ]);
+}
 
 function queuedReconcile(key: ReconcileKey): QueuedReconcile {
   let resolve!: () => void;
@@ -110,6 +128,7 @@ function timestamp(now: () => Date, label: string): number {
  * pending key 去重；运行期间的新触发只保留一次 dirty follow-up。
  */
 export class ReconcileQueue {
+  private readonly completions = new Set<Promise<void>>();
   private readonly pending = new Map<string, QueuedReconcile>();
   private readonly admitting = new Set<string>();
   private readonly running = new Set<string>();
@@ -130,16 +149,22 @@ export class ReconcileQueue {
 
   enqueue(key: ReconcileKey): Promise<void> {
     if (this.closed) {
-      return Promise.reject(new Error("reconcile queue is closed"));
+      return Promise.reject(new Error("plugin Controller is closed"));
     }
     const id = reconcileKeyId(key);
     const existing = this.pending.get(id);
     if (existing) return existing.completion;
 
     const item = queuedReconcile(key);
+    const tracked = item.completion.catch(() => {}).finally(() => this.completions.delete(tracked));
+    this.completions.add(tracked);
     this.pending.set(id, item);
     this.drain();
     return item.completion;
+  }
+
+  async settled(): Promise<void> {
+    while (this.completions.size) await Promise.all([...this.completions]);
   }
 
   /** Drop a dirty follow-up after the running reconcile deletes its Resource. */
@@ -153,7 +178,7 @@ export class ReconcileQueue {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    const error = new Error("reconcile queue is closed");
+    const error = new Error("plugin Controller is closed");
     for (const item of this.pending.values()) item.reject(error);
     this.pending.clear();
   }
@@ -196,7 +221,8 @@ export class ReconcileQueue {
 }
 
 /**
- * A single timer wakes due work. Persisted work owns due times; this map is process-local.
+ * Manager 级动态唤醒队列。所有 Controller 共享一个 timer；持久真相仍在
+ * PluginResourceStore control state，当前 Map 只负责本进程唤醒。
  */
 export class ReconcileDueQueue {
   private readonly entries = new Map<string, DueReconcile>();
@@ -223,6 +249,16 @@ export class ReconcileDueQueue {
     this.arm();
   }
 
+  removeScope(scope: ReconcileScope): void {
+    let changed = false;
+    for (const [id, entry] of this.entries) {
+      if (!sameReconcileScope(entry.key, scope)) continue;
+      this.entries.delete(id);
+      changed = true;
+    }
+    if (changed) this.arm();
+  }
+
   close(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
@@ -240,7 +276,7 @@ export class ReconcileDueQueue {
 
     const delay = Math.min(
       MAX_TIMER_DELAY_MS,
-      Math.max(0, earliest - timestamp(this.now, "reconcile due queue")),
+      Math.max(0, earliest - timestamp(this.now, "plugin due queue")),
     );
     this.timer = setTimeout(() => this.fire(), delay);
     this.timer.unref?.();
@@ -248,7 +284,7 @@ export class ReconcileDueQueue {
 
   private fire(): void {
     this.timer = undefined;
-    const nowMs = timestamp(this.now, "reconcile due queue");
+    const nowMs = timestamp(this.now, "plugin due queue");
     const due: ReconcileKey[] = [];
     for (const [id, entry] of this.entries) {
       if (entry.dueAtMs > nowMs) continue;
