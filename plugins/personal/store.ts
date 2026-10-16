@@ -22,8 +22,8 @@ export class Store {
     const works = this.resources.list<WorkSpec, WorkStatus>(WORK_TYPE);
     const conversations = this.resources.list<{ conversationId: string }, Delivery>(CONVERSATION_TYPE);
     return {
-      works: works.map(toWork),
-      messages: [...works, ...conversations].flatMap((resource) => resource.status.messages ?? [])
+      works: works.filter((resource) => !resource.metadata.deletionTimestamp).map(toWork),
+      messages: [...new Map([...works, ...conversations].flatMap((resource) => resource.status.messages ?? []).map((item) => [item.id, item])).values()]
         .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)),
     };
   }
@@ -42,6 +42,25 @@ export class Store {
 
   hasEvent(id: string, key: string): boolean {
     return this.resources.get<WorkSpec, WorkStatus>(WORK_TYPE, id).status.events.includes(key);
+  }
+
+  /** @spec Deleting work retains its channel outbox and accepted-input receipts. In-flight results cannot recreate it. */
+  delete(id: string): void {
+    const current = this.resources.get<WorkSpec, WorkStatus>(WORK_TYPE, id);
+    const name = createHash("sha256").update(current.spec.conversationId).digest("hex");
+    const conversation = this.resources.find<{ conversationId: string }, Delivery>(CONVERSATION_TYPE, name);
+    const previous = conversation?.status ?? delivery();
+    const status: Delivery = {
+      messages: [...new Map([...previous.messages, ...current.status.messages].map((item) => [item.id, item])).values()],
+      inputs: [...new Map([...previous.inputs, ...current.status.inputs].map((item) => [item.key, item])).values()],
+      events: previous.events,
+    };
+    if (conversation) this.replace(conversation, conversation.spec, status);
+    else this.resources.create({ type: CONVERSATION_TYPE, name, spec: { conversationId: current.spec.conversationId }, status });
+    // Archive first: a crash can duplicate retained messages, but cannot lose a receipt.
+    for (const update of this.resources.requestDeletion(WORK_TYPE, id)) {
+      this.changed({ kind: "deletion-requested", pluginInstanceId: this.resources.pluginInstanceId, ...update });
+    }
   }
 
   save(work: Work, messages: Message[] = [], inputKey?: string, eventKey?: string): void {

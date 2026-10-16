@@ -6,7 +6,7 @@ Aide 是运行在自己服务器上的个人 Agent。它接下临时交办，把
 
 ## 启动
 
-使用 Node.js 22+ 安装依赖；服务运行于随依赖安装的 Bun 1.4.2。还需要已安装、完成登录的 Codex CLI。执行环境中的 CLI（如 lark-cli、bytedcli）及其登录态直接供 Codex 使用。
+使用 Node.js 22.19+ 安装依赖；服务运行于随依赖安装的 Bun 1.4.2。还需要已安装、完成登录的 Codex CLI。执行环境中的 CLI（如 lark-cli、bytedcli）及其登录态直接供 Codex 使用。
 
 ```sh
 npm ci
@@ -84,7 +84,7 @@ personal Plugin 在独立 Worker 中通过 `context.verbs.harness` 请求执行�
 
 ## Linux 常驻部署
 
-在服务器上的 checkout 安装依赖，确认 `node --version` 为 22+、`codex` 已登录，再运行：
+在服务器上的 checkout 安装依赖，确认 `node --version` 为 22.19+、`codex` 已登录，再运行：
 
 ```sh
 npm ci
@@ -116,8 +116,10 @@ ssh -N -L 7433:127.0.0.1:7433 user@your-server
 
 ## 开发
 
+内置 [Pi Agent](docs/pi.md) 提供对话与 Work CRUD 工具，并可通过 Pi Harness Adapter 嵌入宿主。默认飞书／网页入口仍使用上述 Codex 流程。
+
 ```sh
 npm run check
 ```
 
-测试覆盖问答恢复、Task / Routine 转换、触发去重、调度恢复、并发输入与状态更新、HTTP 到 Harness 的流程，以及 Resource 乐观锁、级联删除、Source / Watch、Controller 重试、Plugin 激活回滚和共享容量。测试运行真实 Plugin Worker，使用模拟 Harness Adapter，不需要登录，也不代表真实飞书或业务 CLI 已验证。
+测试覆盖问答恢复、Task / Routine 转换、触发去重、调度恢复、并发输入与状态更新、HTTP 到 Harness 的流程，以及 Resource 乐观锁、级联删除、Source / Watch、Controller 重试、Plugin 激活回滚和共享容量。Personal 测试运行真实 Plugin Worker 与模拟 Harness Adapter；Pi 测试运行真实 SDK 与本地模拟模型服务，不需要登录，也不代表真实模型、飞书或业务 CLI 已验证。

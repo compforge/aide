@@ -32,6 +32,9 @@ plugins/                   # 内置插件；personal 是其中一个
     model.ts               # Task / Routine 业务状态
     resources.ts           # Work / Intake / Conversation 资源契约
     store.ts               # 宿主端输入提交与消息投影
+    work.ts                # Work 创建/更新规则与会话范围 CRUD
+agent/
+  pi/                      # 内置 Pi Agent、提示词与 Work 工具
 packages/plugin/           # @compforge/aide-plugin 公共契约
 tests/                     # 内核契约与 personal 业务验证
 scripts/install-service.sh # Linux 用户级 systemd 服务
@@ -43,5 +46,6 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Task / Routine 共用 Work 身份，spec.kind 区分类别；转换保留 uid、历史与去重记录。
 - status、出站回复与投递去重一起提交。等待用户是持久状态，不保持执行位。
 - Harness 完成不等于业务目标完成，personal 校验结果后决定工作终态。
+- 内置 Agent 通过宿主绑定的 WorkService 操作 Personal 数据；Pi Adapter 只接收会话工厂，不导入业务模型。接入边界见 `docs/pi.md`。
 - Worker 或 Harness 中断可能已经产生外部副作用；保留 uncertain，不自动重放。
 - 用 `npm run check` 验证。真实 Worker + 模拟 Adapter 的测试不等于真实 Codex 或业务 CLI 验证。
