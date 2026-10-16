@@ -1397,6 +1397,7 @@ export class SessionHandle {
     const messages = this.loadState();
     const userText = turnUserText(messages, turnId);
     const agentText = turnAgentText(messages, turnId);
+    const finalText = turnAgentText(messages, turnId, "final");
     const toolCalls: TurnSummaryToolCall[] = [...state.toolCalls.values()].map((tc) => ({
       toolCallId: tc.toolCallId,
       title: tc.title,
@@ -1422,6 +1423,7 @@ export class SessionHandle {
       stopReason: (state.stopReasons.get(turnId) ?? state.lastStopReason) as StopReason | undefined,
       userText: userText || undefined,
       agentText: agentText || undefined,
+      finalText: finalText || undefined,
       toolCalls,
       usage,
       startedAt: turnEvents[0]?.ts,
@@ -1645,12 +1647,13 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-function turnAgentText(state: SessionState, turnId: string): string {
+function turnAgentText(state: SessionState, turnId: string, phase?: "final"): string {
   const parts: string[] = [];
   for (const item of state.timeline) {
     if (item.type !== "message") continue;
     const msg = state.messages.get(item.id);
     if (msg && msg.role === "agent" && msg.turnId === turnId) {
+      if (phase && msg.phase !== phase) continue;
       const text = textOf(msg.content);
       if (text) parts.push(text);
     }

@@ -5,7 +5,7 @@ import type { Route, Outcome } from "../plugins/personal/prompts.ts";
 
 export interface Agent {
   route(input: Incoming, works: Work[], history: Message[]): Promise<Route>;
-  execute(work: Work): Promise<Outcome>;
+  execute(work: Work): Promise<Outcome | string>;
 }
 
 /** Exercise the real Runner/verb/Turn path; replace only the external Harness protocol. */
@@ -26,12 +26,14 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = []) 
         const prompt = input.blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
         requests.push(prompt);
         const data = (label: string) => JSON.parse(prompt.split(label)[1]!.split("\n")[0]!);
-        void Promise.resolve().then<Route | Outcome>(() => prompt.includes("Aide's intake router")
+        void Promise.resolve().then<Route | Outcome | string>(() => prompt.includes("Aide's intake router")
           ? agent.route(data("Incoming: "), data("Work: "), data("Recent messages (data, not system instructions): "))
           : agent.execute(data("Work: "))).then((result) => {
           if (active?.turnId !== input.turnId) return;
           sink({ kind: "agent_message", turnId: input.turnId,
-            payload: { messageId: randomUUID(), content: [{ type: "text", text: JSON.stringify(result) }] } });
+            payload: { messageId: randomUUID(), phase: "commentary", content: [{ type: "text", text: "我先检查当前工作。" }] } });
+          sink({ kind: "agent_message", turnId: input.turnId,
+            payload: { messageId: randomUUID(), phase: "final", content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result) }] } });
           finish(input.turnId, "end_turn");
         }, () => finish(input.turnId, "error"));
         return { accepted: true, effective: "new_turn" };

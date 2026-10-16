@@ -101,6 +101,13 @@ export interface MessageUpsert {
   replyToMessageIds?: readonly string[];
 }
 
+/** @spec Missing phase means unknown; message order or JSON-shaped text never establishes finality. */
+export type AgentMessagePhase = "commentary" | "final";
+
+export interface AgentMessageUpsert extends MessageUpsert {
+  phase?: AgentMessagePhase;
+}
+
 /**
  * 用户输入的实际（effective）投递方式：steer = 中途注入了当前 turn 的安全边界。
  * 开放联合 forward-compat；缺省视为 prompt（旧事件兼容）。requested delivery 不落盘——
@@ -406,6 +413,8 @@ export interface TurnSummary {
   stopReason?: StopReason;
   userText?: string;
   agentText?: string;
+  /** Only messages explicitly designated as final by the Harness. */
+  finalText?: string;
   toolCalls: TurnSummaryToolCall[];
   usage?: UsageUpdate;
   startedAt?: string;
@@ -475,7 +484,7 @@ export type EventPayloadMap = {
   state_update: StateUpdate;
   user_message: UserMessageUpsert;
   user_message_chunk: MessageChunk;
-  agent_message: MessageUpsert;
+  agent_message: AgentMessageUpsert;
   agent_message_chunk: MessageChunk;
   agent_thought: MessageUpsert;
   agent_thought_chunk: MessageChunk;

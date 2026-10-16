@@ -28,7 +28,8 @@ task: a finite goal, including watching until a specific condition. routine: ong
 scheduled processing or discovery, with a cron expression (5 fields) and/or named event.
 create/update require full kind, title, instruction and trigger (null for task).
 update may convert task to routine or routine to task while keeping its id and history.
-answer attaches information to an existing work; resume explicitly retries uncertain or paused work.
+answer attaches information to an existing work; resume explicitly continues uncertain, invalid_result or paused work.
+invalid_result means execution ended but its final result could not be validated; do not assume failure or repeat external actions without verifying recorded evidence.
 pause stops future work but cannot undo an already running command.
 reply is for questions about progress, conversation, or clarification when a target/schedule is unclear.
 Do not invent work ids, schedules, user intent or outcomes. Use only work supplied in this conversation.

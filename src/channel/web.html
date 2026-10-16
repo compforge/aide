@@ -26,7 +26,7 @@
   .work strong { display: block; margin: 8px 0; font-size: 14px; overflow-wrap: anywhere; }
   .work p { font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
   .badge { display: inline-block; padding: 3px 7px; background: #edf1e8; border-radius: 5px; font-size: 11px; }
-  .waiting, .uncertain { color: #9b5b11; background: #fff1d9; } .running { background: #dceee1; }
+  .waiting, .uncertain, .invalid_result { color: #9b5b11; background: #fff1d9; } .running { background: #dceee1; }
   details { font-size: 12px; color: #68776c; margin-top: 8px; }
   #interactions { max-height: 45vh; overflow: auto; }
   .interaction { border: 1px solid #cfac72; border-radius: 12px; padding: 14px; margin-bottom: 12px; background: #fff8e9; }
@@ -60,7 +60,7 @@
   const $ = (id) => document.getElementById(id);
   const conversationId = new URL(location.href).searchParams.get('conversation') || 'me';
   const query = '?conversationId=' + encodeURIComponent(conversationId);
-  const labels = { ready: '准备执行', running: '执行中', waiting: '等你回答', scheduled: '等待触发', paused: '已暂停', done: '已完成', uncertain: '需要核对结果' };
+  const labels = { ready: '准备执行', running: '执行中', waiting: '等你回答', scheduled: '等待触发', paused: '已暂停', done: '已完成', uncertain: '需要核对结果', invalid_result: '结果解析失败' };
   let lastMessages = '', lastWork = '', lastInteractions = '', polling = false, sending = false, draft = null;
   function element(tag, text, className) {
     const node = document.createElement(tag);
@@ -109,6 +109,7 @@
       node.append(element('span', labels[work.status], 'badge ' + work.status), element('strong', work.title));
       if (work.question) node.append(element('p', work.question));
       if (work.status === 'uncertain') node.append(element('p', '执行中断或失败。请核对外部结果，再发消息决定是否继续。'));
+      if (work.status === 'invalid_result') node.append(element('p', '执行已结束，但最终结果解析失败。请核对执行记录，再决定是否继续。'));
       if (work.nextAt) node.append(element('p', '下次：' + new Date(work.nextAt).toLocaleString(), 'muted'));
       const detail = element('details');
       detail.append(element('summary', '查看目标与进展'), element('p', work.instruction));

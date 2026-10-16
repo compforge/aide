@@ -37,6 +37,8 @@ export interface TurnSummary {
   readonly stopReason?: string;
   readonly userText?: string;
   readonly agentText?: string;
+  /** Harness-designated final answer; absent when the Harness did not identify one. */
+  readonly finalText?: string;
   readonly toolCalls: readonly TurnSummaryToolCall[];
   readonly usage?: Readonly<{
     inputTokens?: number;

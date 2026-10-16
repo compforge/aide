@@ -268,6 +268,8 @@ export function codexItemLifecycleDrafts(
           payload: {
             messageId: String(item.id),
             content: [{ type: "text", text: String(item.text ?? "") }],
+            ...(item.phase === "final_answer" ? { phase: "final" as const }
+              : item.phase === "commentary" ? { phase: "commentary" as const } : {}),
           },
         }]
       : [];

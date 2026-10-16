@@ -15,7 +15,7 @@ export const WorkSchema = z.object({
   title: z.string(),
   instruction: z.string(),
   trigger: TriggerSchema.nullable(),
-  status: z.enum(["ready", "running", "waiting", "scheduled", "paused", "done", "uncertain"]),
+  status: z.enum(["ready", "running", "waiting", "scheduled", "paused", "done", "uncertain", "invalid_result"]),
   revision: z.number().int(),
   nextAt: z.string().nullable(),
   question: z.string().nullable(),
