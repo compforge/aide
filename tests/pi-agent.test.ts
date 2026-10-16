@@ -84,7 +84,10 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
 
 test("Pi answers directly without work and resumes its native history", { timeout: 20_000 }, async (t) => {
   const fixture = await setup(t, () => ({ text: "你好，有什么可以帮你？" }));
+  assert.equal((fixture.binding().resumeState.data as { empty: boolean }).empty, true);
+  assert.equal((await fixture.reopen()).resumed, false);
   const summary = await fixture.run("你好", "greeting");
+  assert.equal((fixture.binding().resumeState.data as { empty: boolean }).empty, false);
   assert.equal(summary.finalText, "你好，有什么可以帮你？");
   assert.equal(summary.stopReason, "end_turn");
   assert.deepEqual(fixture.work.list(), []);

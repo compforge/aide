@@ -51,7 +51,7 @@ const adapter = createHarnessAdapter(
 
 `agentDir` 省略时使用 Pi 默认配置目录，模型省略时使用 Pi 的选择机制。凭证和模型端点由 Pi 的 `auth.json`、`models.json` 及环境配置管理；Aide 不保存另一份凭证。Pi 模型配置格式见 [官方文档](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。SDK 固定版本随 lockfile 安装。
 
-原生会话由 Pi 自己持久化。Adapter 将会话 id 和文件路径通过 Harness binding 保存，恢复时要求文件存在且工作目录、对话范围一致。内置 Agent 加载工作目录的上下文与 Skills，启用明确列出的文件、CLI 和 Work 工具；不自动加载扩展、提示词命令或交互主题。
+原生会话由 Pi 自己持久化。Adapter 将会话 id 和文件路径通过 Harness binding 保存。Pi 在第一条对话消息时创建文件，因此 binding 区分尚未落盘的空会话和已有历史：空会话可以重新建立，已有历史恢复时要求文件存在且工作目录、对话范围一致。内置 Agent 加载工作目录的上下文与 Skills，启用明确列出的文件、CLI 和 Work 工具；不自动加载扩展、提示词命令或交互主题。
 
 ## 执行契约
 

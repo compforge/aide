@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { HarnessAdapter, HarnessEventSink, HarnessSessionBindingSink, HarnessSessionHandle,
   NativeEventSink, OpenOptions, PromptInput, SendTurnReceipt } from "../adapter.ts";
@@ -15,6 +16,7 @@ interface Turn {
 }
 interface Session {
   native: PiSession; sink: HarnessEventSink; unsubscribe: () => void; active?: Turn;
+  binding: HarnessSessionBindingSink; materialized: boolean;
 }
 
 /**
@@ -31,17 +33,18 @@ export class PiAdapter implements HarnessAdapter {
     if (options.env && Object.keys(options.env).length) throw new Error("Embedded Pi does not support per-session environment overrides");
     let sessionFile: string | undefined;
     if (options.resumeState) {
-      const data = options.resumeState.data as { sessionFile?: unknown } | null;
+      const data = options.resumeState.data as { sessionFile?: unknown; empty?: boolean } | null;
       if (options.resumeState.version !== 1 || typeof data?.sessionFile !== "string" || !data.sessionFile) throw new Error("Unsupported Pi resume state");
-      sessionFile = data.sessionFile;
+      // Pi allocates a filename before it persists any conversation. Only a known-empty missing file may start anew.
+      if (!data.empty || existsSync(data.sessionFile)) sessionFile = data.sessionFile;
     } else if (options.resumeSessionId) throw new Error("Pi resume requires its native session file");
     const native = await this.options.createSession({ cwd: options.cwd, ...(sessionFile ? { sessionFile } : {}) });
     const handleId = randomUUID();
-    const session: Session = { native, sink, unsubscribe: () => {} };
+    const session: Session = { native, sink, binding, materialized: false, unsubscribe: () => {} };
     try {
       if (!native.sessionFile) throw new Error("PiAdapter requires a persistent native session");
       session.unsubscribe = native.subscribe((event) => this.observe(session, event));
-      binding({ identity: { id: native.sessionId }, resumeState: { version: 1, data: { sessionFile: native.sessionFile } } });
+      this.publishBinding(session);
       this.sessions.set(handleId, session);
     } catch (error) { session.unsubscribe(); native.dispose(); throw error; }
     return { harness: this.harness, handleId, resumed: !!sessionFile };
@@ -94,6 +97,7 @@ export class PiAdapter implements HarnessAdapter {
 
   private observe(session: Session, event: AgentSessionEvent): void {
     this.options.nativeEvent?.({ direction: "in", name: event.type, payload: event });
+    if (!session.materialized && session.native.sessionFile && existsSync(session.native.sessionFile)) this.publishBinding(session);
     const turn = session.active;
     if (!turn) return;
     if (event.type === "message_end" && event.message.role === "assistant") {
@@ -118,6 +122,12 @@ export class PiAdapter implements HarnessAdapter {
       else if (turn.lastMessage?.stop === "stop" && turn.lastMessage.text.trim()) turn.settled = { reason: "end_turn" };
       else turn.settled = { reason: "error", error: turn.lastMessage?.error ?? `Pi settled without a complete answer (${turn.lastMessage?.stop ?? "no assistant message"})` };
     }
+  }
+
+  private publishBinding(session: Session): void {
+    session.materialized = !!session.native.sessionFile && existsSync(session.native.sessionFile);
+    session.binding({ identity: { id: session.native.sessionId }, resumeState: { version: 1,
+      data: { sessionFile: session.native.sessionFile, empty: !session.materialized } } });
   }
 
   private finish(session: Session, reason: "end_turn" | "error" | "cancelled", error?: string): void {
