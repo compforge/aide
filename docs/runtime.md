@@ -1,6 +1,6 @@
 # Aide 的运行机制
 
-Aide 的新增业务集中在 `src/personal/` 和 `src/channel/`。`src/runtime/` 保存从 Baton 复制的执行内核，`packages/plugin/` 保存原公共契约；本次迁入文件没有语义修改或接口改名。复制基线和文件清单见 [baton-runtime.json](baton-runtime.json)。单实例服务的文件锁仍是 Aide 的启动装配。
+技术上，Aide 是保留执行内核、以 Channel 替代 TUI，并内置 personal Plugin 的 Baton。Aide 的新增业务集中在 `plugins/personal/` 和 `src/channel/`。`src/runtime/` 保存从 Baton 复制的执行内核，`packages/plugin/` 保存原公共契约；本次迁入文件没有语义修改或接口改名。复制基线和文件清单见 [baton-runtime.json](baton-runtime.json)。单实例服务的文件锁仍是 Aide 的启动装配。
 
 ```text
 Aide 服务进程

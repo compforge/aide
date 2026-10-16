@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
-import { Aide } from "../src/personal/aide.ts";
-import type { Outcome, Route } from "../src/personal/prompts.ts";
-import { nextOccurrence, type Work } from "../src/personal/model.ts";
+import { Aide } from "../plugins/personal/aide.ts";
+import type { Outcome, Route } from "../plugins/personal/prompts.ts";
+import { nextOccurrence, type Work } from "../plugins/personal/model.ts";
 
 import { fakeOptions, type Agent } from "./fake-harness.ts";
 import { SessionStore } from "../src/runtime/store/store.ts";

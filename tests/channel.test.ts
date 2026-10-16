@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { once } from "node:events";
 import { test } from "node:test";
 import pino from "pino";
-import { Aide } from "../src/personal/aide.ts";
+import { Aide } from "../plugins/personal/aide.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { httpChannel } from "../src/channel/http.ts";
 

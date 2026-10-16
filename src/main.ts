@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { once } from "node:events";
 import pino from "pino";
 import { z } from "zod";
-import { Aide } from "./personal/aide.ts";
+import { Aide } from "../plugins/personal/aide.ts";
 import { CodexAdapter } from "./runtime/harness/codex/adapter.ts";
 import { FileHookTrustStore } from "./runtime/config/hook.ts";
 import { httpChannel } from "./channel/http.ts";

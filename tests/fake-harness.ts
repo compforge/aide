@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { HarnessAdapter, HarnessEventSink, PromptInput } from "../src/runtime/harness/adapter.ts";
-import type { Incoming, Message, Work } from "../src/personal/model.ts";
-import type { Route, Outcome } from "../src/personal/prompts.ts";
+import type { Incoming, Message, Work } from "../plugins/personal/model.ts";
+import type { Route, Outcome } from "../plugins/personal/prompts.ts";
 
 export interface Agent {
   route(input: Incoming, works: Work[], history: Message[]): Promise<Route>;
