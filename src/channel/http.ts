@@ -2,8 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { Logger } from "pino";
-import type { Aide } from "../core/aide.ts";
-import { IncomingSchema } from "../core/model.ts";
+import type { Aide } from "../personal/aide.ts";
+import { IncomingSchema } from "../personal/model.ts";
 
 const EventSchema = IncomingSchema.omit({ text: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),

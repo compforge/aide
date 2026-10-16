@@ -1,5 +1,4 @@
-import { afterEach, describe, test } from "node:test";
-import { expect } from "expect";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -11,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PluginInstanceStore } from "../src/plugin/instance.ts";
+import { PluginInstanceStore } from "../src/runtime/plugin/instance.ts";
 
 const roots: string[] = [];
 
@@ -49,7 +48,7 @@ describe("PluginInstanceStore", () => {
 
     expect(created.pluginInstanceId).toMatch(/^pi_/);
     expect(created).toMatchObject({
-      hostId: "bs_test",
+      batonSessionId: "bs_test",
       pluginId: "qiankun/reqloop",
       marketplace: "reqloop",
       packageVersion: "1.2.0",
@@ -155,7 +154,7 @@ describe("PluginInstanceStore", () => {
       path,
       JSON.stringify({
         pluginInstanceId: "another",
-        hostId: "bs_test",
+        batonSessionId: "bs_test",
         pluginId: "qiankun/reqloop",
         packageVersion: "1.2.0",
         enabled: true,

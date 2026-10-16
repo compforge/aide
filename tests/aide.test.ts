@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
-import { Aide } from "../src/core/aide.ts";
-import type { Agent, Outcome, Route } from "../src/core/agent.ts";
-import { nextOccurrence, type Work } from "../src/core/model.ts";
+import { Aide } from "../src/personal/aide.ts";
+import type { Outcome, Route } from "../src/personal/prompts.ts";
+import { nextOccurrence, type Work } from "../src/personal/model.ts";
+
+import { fakeOptions, type Agent } from "./fake-harness.ts";
+import { SessionStore } from "../src/runtime/store/store.ts";
 
 const log = pino({ level: "silent" });
 const done: Outcome = { action: "done", summary: "Checked and finished", notification: "完成了", question: null, nextAt: null };
@@ -15,7 +18,7 @@ const create: Route = { action: "create", workId: null, kind: "task", title: "�
 function setup(t: TestContext, agent: Agent) {
   const dir = mkdtempSync(join(tmpdir(), "aide-test-"));
   const path = dir;
-  const aide = new Aide(path, agent, log);
+  const aide = new Aide(path, fakeOptions(agent, path), log);
   t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
   aide.start();
   return { aide, path };
@@ -39,7 +42,7 @@ test("Task asks, persists a question across restart, then completes after an ans
   await aide.settled();
   assert.equal(aide.store.read().works[0]?.status, "waiting");
   await aide.close();
-  const restarted = new Aide(path, agent, log);
+  const restarted = new Aide(path, fakeOptions(agent, path), log);
   t.after(() => restarted.close());
   restarted.start();
   assert.equal(restarted.store.read().works[0]?.question, "使用哪个项目？");
@@ -108,7 +111,7 @@ test("overdue work is woken after restart, without replaying missed occurrences"
   await aide.receive(input());
   await aide.close();
   aide.store.save({ ...aide.store.read().works[0]!, nextAt: "2000-01-01T00:00:00Z" });
-  const restarted = new Aide(path, { route: async () => create, execute: async () => { runs++; return done; } }, log);
+  const restarted = new Aide(path, fakeOptions({ route: async () => create, execute: async () => { runs++; return done; } }, path), log);
   t.after(() => restarted.close());
   restarted.start();
   await new Promise((resolve) => setTimeout(resolve, 25));
@@ -126,7 +129,7 @@ test("interrupted and failed executions become uncertain and are not auto-replay
   assert.equal(aide.store.read().works[0]?.status, "uncertain");
   await aide.close();
   aide.store.save({ ...aide.store.read().works[0]!, status: "running" });
-  const restarted = new Aide(path, agent, log);
+  const restarted = new Aide(path, fakeOptions(agent, path), log);
   t.after(() => restarted.close());
   restarted.start();
   await restarted.settled();
@@ -153,16 +156,19 @@ test("a pause arriving during execution survives its eventual result", async (t)
 
 test("an update during execution is reconciled using the latest instruction", async (t) => {
   let finish!: (outcome: Outcome) => void;
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => { started = resolve; });
   let id = "";
   const seen: Work[] = [];
   const { aide } = setup(t, {
     route: async () => id ? { ...create, action: "update", workId: id, instruction: "处理新目标" } : create,
     execute: async (work) => {
-      seen.push(work);
+      seen.push(work); started();
       return seen.length === 1 ? new Promise((resolve) => { finish = resolve; }) : done;
     },
   });
   id = (await aide.receive(input())).workId!;
+  await running;
   await aide.receive(input("update", "换成新目标"));
   finish(done);
   await aide.settled();
@@ -186,4 +192,36 @@ test("router cannot attach work from a different conversation", async (t) => {
 test("cron schedules use the specified timezone", () => {
   assert.equal(nextOccurrence({ cron: "0 9 * * *", timezone: "Asia/Shanghai", event: null },
     new Date("2026-10-16T00:00:00Z")), "2026-10-16T01:00:00.000Z");
+});
+
+test("personal Worker crash cancels its invocation and preserves uncertain work across restart", async (t) => {
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => { started = resolve; });
+  let runs = 0;
+  const agent: Agent = { route: async () => create, execute: async () => {
+    runs++; started(); return new Promise(() => {});
+  } };
+  const { aide, path } = setup(t, agent);
+  await aide.receive(input());
+  await running;
+  const sessions = new SessionStore(path);
+  const session = sessions.openSession(sessions.listSessions()[0]!.batonSessionId);
+  let pid = 0;
+  for (let attempt = 0; attempt < 100 && !pid; attempt++) {
+    const lines = readFileSync(join(session.dir, "session.log"), "utf8").trim().split("\n");
+    pid = lines.map((line) => JSON.parse(line)).find((entry) => entry.message === "Personal Plugin worker activated")?.attributes?.pid ?? 0;
+    if (!pid) await Bun.sleep(10);
+  }
+  assert.ok(pid && pid !== process.pid);
+  process.kill(pid, "SIGKILL");
+  for (let attempt = 0; attempt < 200 && aide.plugins.isInstanceActive("personal"); attempt++) await Bun.sleep(10);
+  assert.equal(aide.plugins.isInstanceActive("personal"), false);
+  assert.equal(aide.store.read().works[0]?.status, "uncertain");
+  assert.ok(aide.plugins.listHarnessInvocations().some((invocation) => invocation.phase === "cancelled" || invocation.phase === "failed"));
+  await aide.close();
+  const restarted = new Aide(path, fakeOptions(agent, path), log);
+  t.after(() => restarted.close());
+  await restarted.start(); await restarted.settled();
+  assert.equal(restarted.store.read().works[0]?.status, "uncertain");
+  assert.equal(runs, 1);
 });

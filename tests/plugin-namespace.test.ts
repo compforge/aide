@@ -1,5 +1,4 @@
-import { describe, test } from "node:test";
-import { expect } from "expect";
+import { describe, expect, test } from "bun:test";
 
 import {
   namespaceContains,
@@ -7,7 +6,7 @@ import {
   projectResourceNamespace,
   resourceNamespaceScope,
   sessionResourceNamespace,
-} from "../src/plugin/namespace.ts";
+} from "../src/runtime/plugin/namespace.ts";
 
 describe("Resource namespace", () => {
   test("constructs canonical project and Session namespaces", () => {

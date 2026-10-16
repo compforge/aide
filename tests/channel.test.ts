@@ -5,22 +5,18 @@ import { join } from "node:path";
 import { once } from "node:events";
 import { test } from "node:test";
 import pino from "pino";
-import { Aide } from "../src/core/aide.ts";
-import { PersonalAgent } from "../src/core/agent.ts";
+import { Aide } from "../src/personal/aide.ts";
+import { fakeOptions } from "./fake-harness.ts";
 import { httpChannel } from "../src/channel/http.ts";
-import type { StructuredRequest } from "../src/harness/types.ts";
 
 test("HTTP input -> model routing -> persisted task -> execution -> outgoing message", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-channel-"));
-  const requests: StructuredRequest[] = [];
+  const requests: string[] = [];
   const log = pino({ level: "silent" });
-  const agent = new PersonalAgent({ generate: async (request) => {
-    requests.push(request);
-    return requests.length === 1
-      ? { action: "create", kind: "task", workId: null, title: "工作总结", instruction: "读取今日工作并总结", trigger: null, response: "开始整理" }
-      : { action: "done", summary: "Read work log", notification: "今天完成了三件事", question: null, nextAt: null };
-  } }, { cwd: dir, timezone: "Asia/Shanghai" });
-  const aide = new Aide(dir, agent, log);
+  const aide = new Aide(dir, fakeOptions({
+    route: async () => ({ action: "create", kind: "task", workId: null, title: "工作总结", instruction: "读取今日工作并总结", trigger: null, response: "开始整理" }),
+    execute: async () => ({ action: "done", summary: "Read work log", notification: "今天完成了三件事", question: null, nextAt: null }),
+  }, dir, requests), log);
   const server = httpChannel(aide, log);
   t.after(async () => {
     await aide.close();
@@ -61,9 +57,7 @@ test("HTTP input -> model routing -> persisted task -> execution -> outgoing mes
   const works = await (await fetch(`${url}/work?conversationId=me`)).json() as { status: string; id: string }[];
   assert.equal(works[0]?.status, "done");
   assert.equal(works[0]?.id, ack.workId);
-  assert.equal(requests[0]?.sandbox, "read-only");
-  assert.equal(requests[1]?.cwd, dir);
-  assert.match(requests[1]!.prompt, /读取今日工作并总结/);
+  assert.match(requests[1]!, /读取今日工作并总结/);
   assert.equal((await fetch(`${url}/messages?conversationId=me&after=missing`)).status, 400);
   assert.deepEqual(await (await fetch(`${url}/work?conversationId=other`)).json(), []);
 });

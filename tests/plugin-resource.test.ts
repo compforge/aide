@@ -1,11 +1,10 @@
-import { afterEach, describe, test } from "node:test";
-import { expect } from "expect";
+import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PluginResourceStore } from "../src/plugin/resource.ts";
-import { createResourceClient } from "../src/plugin/resource-client.ts";
+import { PluginResourceStore } from "../src/runtime/plugin/resource.ts";
+import { createResourceClient } from "../src/runtime/plugin/resource-client.ts";
 
 const roots: string[] = [];
 const REQ_LOOP_RUN = {
@@ -382,7 +381,7 @@ describe("PluginResourceStore", () => {
           session: { id: "../escape", dir: root },
           pluginInstanceId: "reqloop_default",
         }),
-    ).toThrow("hostId");
+    ).toThrow("batonSessionId");
 
     const resources = store(root);
     expect(() =>
