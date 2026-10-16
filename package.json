@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit",
@@ -16,5 +18,9 @@
     "tsx": "^4.20.6",
     "zod": "^4.1.12"
   },
-  "devDependencies": { "@types/node": "^24.0.0", "typescript": "^5.9.0" }
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "expect": "^30.5.2",
+    "typescript": "^5.9.0"
+  }
 }

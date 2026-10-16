@@ -6,7 +6,6 @@ import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { Aide } from "../src/core/aide.ts";
 import type { Agent, Outcome, Route } from "../src/core/agent.ts";
-import { Store } from "../src/core/store.ts";
 import { nextOccurrence, type Work } from "../src/core/model.ts";
 
 const log = pino({ level: "silent" });
@@ -15,8 +14,8 @@ const create: Route = { action: "create", workId: null, kind: "task", title: "�
 
 function setup(t: TestContext, agent: Agent) {
   const dir = mkdtempSync(join(tmpdir(), "aide-test-"));
-  const path = join(dir, "state.json");
-  const aide = new Aide(new Store(path), agent, log);
+  const path = dir;
+  const aide = new Aide(path, agent, log);
   t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
   aide.start();
   return { aide, path };
@@ -40,7 +39,7 @@ test("Task asks, persists a question across restart, then completes after an ans
   await aide.settled();
   assert.equal(aide.store.read().works[0]?.status, "waiting");
   await aide.close();
-  const restarted = new Aide(new Store(path), agent, log);
+  const restarted = new Aide(path, agent, log);
   t.after(() => restarted.close());
   restarted.start();
   assert.equal(restarted.store.read().works[0]?.question, "使用哪个项目？");
@@ -108,15 +107,14 @@ test("overdue work is woken after restart, without replaying missed occurrences"
   });
   await aide.receive(input());
   await aide.close();
-  const store = new Store(path);
-  store.update((state) => { state.works[0]!.nextAt = "2000-01-01T00:00:00Z"; });
-  const restarted = new Aide(store, { route: async () => create, execute: async () => { runs++; return done; } }, log);
+  aide.store.save({ ...aide.store.read().works[0]!, nextAt: "2000-01-01T00:00:00Z" });
+  const restarted = new Aide(path, { route: async () => create, execute: async () => { runs++; return done; } }, log);
   t.after(() => restarted.close());
   restarted.start();
   await new Promise((resolve) => setTimeout(resolve, 25));
   await restarted.settled();
   assert.equal(runs, 1);
-  assert.ok(Date.parse(store.read().works[0]!.nextAt!) > Date.now());
+  assert.ok(Date.parse(restarted.store.read().works[0]!.nextAt!) > Date.now());
 });
 
 test("interrupted and failed executions become uncertain and are not auto-replayed", async (t) => {
@@ -127,13 +125,12 @@ test("interrupted and failed executions become uncertain and are not auto-replay
   await aide.settled();
   assert.equal(aide.store.read().works[0]?.status, "uncertain");
   await aide.close();
-  const store = new Store(path);
-  store.update((state) => { state.works[0]!.status = "running"; });
-  const restarted = new Aide(store, agent, log);
+  aide.store.save({ ...aide.store.read().works[0]!, status: "running" });
+  const restarted = new Aide(path, agent, log);
   t.after(() => restarted.close());
   restarted.start();
   await restarted.settled();
-  assert.equal(store.read().works[0]?.status, "uncertain");
+  assert.equal(restarted.store.read().works[0]?.status, "uncertain");
   assert.equal(runs, 1);
 });
 
