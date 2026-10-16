@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { Logger } from "pino";
 import type { ResourceType } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/runtime/plugin/manager.ts";
@@ -10,7 +10,8 @@ import { INTAKE_TYPE } from "./resources.ts";
 import type { IntakeSpec, IntakeStatus } from "./plugin.ts";
 import { PluginInstanceStore } from "../../src/runtime/plugin/instance.ts";
 import { RouteSchema, type Route } from "./prompts.ts";
-import { IncomingSchema, nextOccurrence, validateTrigger, type Incoming, type Message, type Work } from "./model.ts";
+import { IncomingSchema, type Incoming, type Message, type Work } from "./model.ts";
+import { newWork, changeWork, WorkService } from "./work.ts";
 import { message, Store, WORK_TYPE } from "./store.ts";
 
 /** Classification failed before any personal work was created or updated. */
@@ -59,6 +60,9 @@ export class Aide {
   }
 
   start(): Promise<void> { return this.starting ??= this.startOnce(); }
+
+  /** Bind agent tools to this host's existing Work persistence and reconciler. */
+  work(conversationId: string): WorkService { return new WorkService(this.store, conversationId, this.log); }
 
   private async startOnce(): Promise<void> {
     this.recoverInterrupted();
@@ -129,34 +133,15 @@ export class Aide {
   private apply(input: Incoming, route: Route, key: string): Message {
     let work: Work | undefined;
     const now = new Date();
-    if (route.action === "create" || route.action === "update") {
-      if (!route.kind || !route.title?.trim() || !route.instruction?.trim()) throw new Error("Work needs a kind, title and instruction");
-      validateTrigger(route.kind, route.trigger, now);
-    }
     if (route.action === "create") {
-      work = { id: randomUUID(), conversationId: input.conversationId, kind: route.kind!, title: route.title!,
-        instruction: route.instruction!, trigger: route.trigger, status: route.kind === "routine" ? "scheduled" : "ready",
-        revision: 1, nextAt: nextOccurrence(route.trigger, now), question: null, history: [],
-      };
+      work = newWork(input.conversationId, { kind: route.kind!, title: route.title!, instruction: route.instruction!, trigger: route.trigger }, now);
     } else if (route.action !== "reply") {
       work = this.store.read().works.find((item) => item.id === route.workId && item.conversationId === input.conversationId);
       if (!work) throw new Error(`Unknown work in this conversation: ${route.workId}`);
-      if (route.action === "update") {
-        Object.assign(work, { kind: route.kind, title: route.title, instruction: route.instruction, trigger: route.trigger });
-        if (work.status !== "running") {
-          work.status = work.kind === "routine" ? "scheduled" : "ready";
-          work.nextAt = nextOccurrence(work.trigger, now);
-        }
-      } else if (route.action === "pause") {
-        work.status = "paused"; work.nextAt = null;
-      } else {
-        if (route.action === "answer" && work.status !== "waiting") throw new Error(`Work ${work.id} is not waiting for an answer`);
-        if (work.status !== "running") work.status = "ready";
-        work.nextAt = null;
-      }
-      work.question = null; work.revision++;
+      work = changeWork(work, { revision: work.revision, action: route.action, note: input.text,
+        ...(route.action === "update" ? { changes: { kind: route.kind!, title: route.title!, instruction: route.instruction!, trigger: route.trigger } } : {}) }, now);
     }
-    work?.history.push({ at: now.toISOString(), role: "user", text: input.text });
+    if (route.action === "create") work?.history.push({ at: now.toISOString(), role: "user", text: input.text });
     const inbound = { ...message(input.conversationId, input.text, work?.id ?? null), role: "user" as const };
     const response = message(input.conversationId, route.response, work?.id ?? null);
     const messages: Message[] = [inbound, response];

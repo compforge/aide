@@ -11,6 +11,7 @@ import { probeCodexTarget } from "./codex/catalog.ts";
 import { resolveCodexTargetConfig } from "./codex/config.ts";
 import { codexSessionInspector } from "./codex/native-session.ts";
 import { DshAdapter } from "./dsh/adapter.ts";
+import { PiAdapter, type PiSessionFactory } from "./pi/adapter.ts";
 import { resolveDshTargetConfig } from "./dsh/config.ts";
 import {
   targetEnvironmentFor,
@@ -26,6 +27,8 @@ import type { HarnessTarget, HarnessTargetProbeResult } from "./target.ts";
 export { HARNESSES, parseHarness, type HarnessName };
 
 export interface HarnessAdapterOptions {
+  /** Host-bound embedded Pi agent factory, including its application tools. */
+  piSession?: PiSessionFactory;
   /** Adapter 工厂的实例坐标；工厂负责把 Target 配置 lowering 成具体 Adapter 依赖。 */
   target: HarnessTarget;
   openInteraction: OpenInteraction;
@@ -70,6 +73,15 @@ export interface HarnessProbeOptions {
 
 /** 首批内置 harness；扩展支持只在这里注册，不进入 AideSession core。 */
 export const HARNESS_REGISTRY = [
+  {
+    ...HARNESS_IDENTITIES.pi,
+    label: "Pi", sessionKey: "pi", shortName: "pi", color: "#a6da95",
+    create: ({ piSession, log, nativeEvent, env }) => {
+      if (!piSession) throw new Error("Pi target requires a host-bound Pi agent factory");
+      if (env && Object.keys(env).length) throw new Error("Embedded Pi targets do not support environment overrides; configure Pi's agentDir instead");
+      return new PiAdapter({ createSession: piSession, log, nativeEvent });
+    },
+  },
   {
     ...HARNESS_IDENTITIES.codex,
     label: "Codex",
