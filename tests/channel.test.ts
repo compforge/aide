@@ -11,12 +11,16 @@ import { httpChannel } from "../src/channel/http.ts";
 import type { InputRequest } from "../src/runtime/message/types.ts";
 import type { InteractionResult } from "../src/runtime/interaction/types.ts";
 
-test("HTTP input -> model routing -> persisted task -> execution -> outgoing message", async (t) => {
+test("HTTP failed intake -> explicit retry -> persisted task -> execution -> outgoing message", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-channel-"));
   const requests: string[] = [];
+  let routes = 0;
   const log = pino({ level: "silent" });
   const aide = new Aide(dir, fakeOptions({
-    route: async () => ({ action: "create", kind: "task", workId: null, title: "工作总结", instruction: "读取今日工作并总结", trigger: null, response: "开始整理" }),
+    route: async () => {
+      if (++routes === 1) throw new Error("Temporary classification failure");
+      return { action: "create", kind: "task", workId: null, title: "工作总结", instruction: "读取今日工作并总结", trigger: null, response: "开始整理" };
+    },
     execute: async () => ({ action: "done", summary: "Read work log", notification: "今天完成了三件事", question: null, nextAt: null }),
   }, dir, requests), log);
   const server = httpChannel(aide, log);
@@ -43,6 +47,13 @@ test("HTTP input -> model routing -> persisted task -> execution -> outgoing mes
   })).status, 403);
   assert.equal((await fetch(`${url}/messages`, { method: "POST", body: "{}" })).status, 415);
   assert.equal(requests.length, 0);
+  const failed = await fetch(`${url}/messages`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "msg-1", conversationId: "me", text: "总结今日工作" }),
+  });
+  assert.equal(failed.status, 503);
+  assert.match((await failed.json() as { error: string }).error, /尚未创建或更新事项/);
+  assert.equal(aide.store.read().works.length, 0);
   const response = await fetch(`${url}/messages`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "msg-1", conversationId: "me", text: "总结今日工作" }),
@@ -59,7 +70,7 @@ test("HTTP input -> model routing -> persisted task -> execution -> outgoing mes
   const works = await (await fetch(`${url}/work?conversationId=me`)).json() as { status: string; id: string }[];
   assert.equal(works[0]?.status, "done");
   assert.equal(works[0]?.id, ack.workId);
-  assert.match(requests[1]!, /读取今日工作并总结/);
+  assert.match(requests[2]!, /读取今日工作并总结/);
   assert.equal((await fetch(`${url}/messages?conversationId=me&after=missing`)).status, 400);
   assert.deepEqual(await (await fetch(`${url}/work?conversationId=other`)).json(), []);
 });

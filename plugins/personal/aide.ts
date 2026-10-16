@@ -13,6 +13,9 @@ import { RouteSchema, type Route } from "./prompts.ts";
 import { IncomingSchema, nextOccurrence, validateTrigger, type Incoming, type Message, type Work } from "./model.ts";
 import { message, Store, WORK_TYPE } from "./store.ts";
 
+/** Classification failed before any personal work was created or updated. */
+export class IntakeError extends Error {}
+
 /** Channel intake changes desired state; the personal Plugin alone reconciles Work. */
 export class Aide {
   readonly store: Store;
@@ -102,14 +105,21 @@ export class Aide {
     const state = this.store.read();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable; restart Aide to recover");
     const id = createHash("sha256").update(key).digest("hex");
-    if (!this.store.resources.find(INTAKE_TYPE, id)) this.store.resources.create<IntakeSpec, IntakeStatus>({
-      type: INTAKE_TYPE, name: id, spec: { input, timezone: this.options.timezone,
+    const spec: IntakeSpec = { input, timezone: this.options.timezone,
         works: state.works.filter((work) => work.conversationId === input.conversationId),
-        history: state.messages.filter((item) => item.conversationId === input.conversationId) }, status: {},
-    });
+        history: state.messages.filter((item) => item.conversationId === input.conversationId) };
+    const previous = this.store.resources.find<IntakeSpec, IntakeStatus>(INTAKE_TYPE, id);
+    if (!previous) this.store.resources.create<IntakeSpec, IntakeStatus>({ type: INTAKE_TYPE, name: id, spec, status: {} });
+    else if (previous.status.error && !previous.status.route) {
+      // @spec Explicit redelivery retries failed classification only; accepted input receipts never execute again.
+      // Refresh its snapshot because other work may have changed since the failed attempt.
+      this.store.resources.replaceSpec(INTAKE_TYPE, id, spec);
+      this.store.resources.patchStatus<IntakeSpec, IntakeStatus>(INTAKE_TYPE, id, { error: null });
+      this.log.info({ conversationId: input.conversationId, intakeId: id }, "Retrying failed intake");
+    }
     await this.enqueue(INTAKE_TYPE, id);
     const status = this.store.resources.get<IntakeSpec, IntakeStatus>(INTAKE_TYPE, id).status;
-    if (status.error) throw new Error(`Intake failed: ${status.error}`);
+    if (status.error) throw new IntakeError(`Intake failed: ${status.error}`);
     const route = RouteSchema.parse(status.route);
     const response = this.apply(input, route, key);
     this.log.info({ conversationId: input.conversationId, workId: response.workId, action: route.action }, "Routed input");

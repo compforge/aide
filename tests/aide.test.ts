@@ -66,6 +66,27 @@ test("duplicate inbound delivery creates and executes a Task once", async (t) =>
   assert.equal(runs, 1);
 });
 
+test("explicit retry after failed classification succeeds once, including after restart", async (t) => {
+  let routes = 0;
+  let runs = 0;
+  const agent: Agent = {
+    route: async () => { if (++routes === 1) throw new Error("Temporary Harness failure"); return create; },
+    execute: async () => { runs++; return done; },
+  };
+  const { aide, path } = setup(t, agent);
+  await assert.rejects(aide.receive(input()), /Intake failed/);
+  assert.equal(aide.store.read().works.length, 0);
+  await aide.close();
+  const restarted = new Aide(path, fakeOptions(agent, path), log);
+  t.after(() => restarted.close());
+  const accepted = await restarted.receive(input());
+  await restarted.settled();
+  assert.equal((await restarted.receive(input())).id, accepted.id);
+  assert.equal(restarted.store.read().works[0]?.status, "done");
+  assert.equal(routes, 2);
+  assert.equal(runs, 1);
+});
+
 test("Routine can be triggered by event, deduplicates deliveries, and stays active", async (t) => {
   let runs = 0;
   const { aide } = setup(t, {

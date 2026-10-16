@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { Logger } from "pino";
-import type { Aide } from "../../plugins/personal/aide.ts";
+import { IntakeError, type Aide } from "../../plugins/personal/aide.ts";
 import { IncomingSchema } from "../../plugins/personal/model.ts";
 
 const EventSchema = IncomingSchema.omit({ text: true }).extend({
@@ -100,6 +100,9 @@ export function httpChannel(aide: Aide, log: Logger) {
       }
     } catch (error) {
       log.error({ err: error, path: request.url }, "Channel request failed");
+      if (error instanceof IntakeError) {
+        json(response, 503, { error: "请求识别未完成，尚未创建或更新事项。请重试。" }); return;
+      }
       json(response, error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 500,
         { error: "Request failed; check the Aide log" });
     }
