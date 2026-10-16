@@ -36,7 +36,7 @@ export interface HarnessBindingOptions {
 }
 
 /**
- * 一个 Lane × HarnessTarget 在当前 BatonSession 中的 live 绑定：
+ * 一个 Lane × HarnessTarget 在当前 AideSession 中的 live 绑定：
  * Lane 可跨 Target 接力；每个 Target 在该 Lane 内拥有自己的 Adapter 与 HarnessSession。
  *
  * 绑定拥有启动、resume、配置恢复与关闭；Turn 调度、上下文注入和 Event 持久化仍由
@@ -309,7 +309,7 @@ export class HarnessBinding {
   private async closeActive(): Promise<void> {
     // close() can race a cold Adapter.open(). Waiting for that owner boundary is
     // required: otherwise Controller sees no ref, returns, and the late child
-    // process survives after Baton has released the Session lock.
+    // process survives after Aide has released the Session lock.
     await this.starting?.catch(() => undefined);
     const ref = this.ref;
     this.ref = undefined;

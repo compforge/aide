@@ -26,8 +26,8 @@ export interface HarnessInputDispatch {
   readonly operation: "new_turn" | "steer";
 }
 
-/** Reference to a Harness-originated Baton Event after Core commits it. */
-export interface BatonEventReference {
+/** Reference to a Harness-originated Aide Event after Core commits it. */
+export interface AideEventReference {
   readonly kind: string;
   readonly harnessTargetId: string;
   readonly laneId: string;
@@ -41,7 +41,7 @@ export interface HookSubjectMap {
   readonly "view.input": ViewInputRecord;
   readonly "view.output": ViewOutput;
   readonly "harness.input": HarnessInputDispatch;
-  readonly "harness.output": BatonEventReference;
+  readonly "harness.output": AideEventReference;
 }
 
 /**

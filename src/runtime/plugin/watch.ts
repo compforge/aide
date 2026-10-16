@@ -1,7 +1,7 @@
 import type {
   ReconcileRequest,
   Watch,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import type { ResourceClientChange } from "./resource-client.ts";
 import {

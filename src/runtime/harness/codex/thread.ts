@@ -31,7 +31,7 @@ export function mapThreadStatus(
 
 /**
  * 计入"turn 有产出"的事件 kind（空回合判定，见 CodexTurn.sawOutput）。
- * usage/state 等记账类事件不算产出；`_baton_run_status`（compaction 等运行阶段）算——
+ * usage/state 等记账类事件不算产出；`_aide_run_status`（compaction 等运行阶段）算——
  * 纯 compaction turn 合法无消息产出，不应误报空回合。
  */
 export const OUTPUT_EVENT_KINDS: ReadonlySet<string> = new Set([
@@ -43,7 +43,7 @@ export const OUTPUT_EVENT_KINDS: ReadonlySet<string> = new Set([
   "tool_call_content_chunk",
   "plan_update",
   "plan_remove",
-  "_baton_run_status",
+  "_aide_run_status",
 ]);
 
 export interface CodexThreadPeer {
@@ -74,7 +74,7 @@ export function serviceTierFrom(response: unknown): string | null {
 }
 
 /**
- * 恢复优先；原生 thread 已丢失时新建，BatonSession 会在宿主层补齐历史。
+ * 恢复优先；原生 thread 已丢失时新建，AideSession 会在宿主层补齐历史。
  *
  * `approvalsReviewer` 只在用户显式配置时下发；resume 时同样如此——codex 会把 reviewer
  * 随 thread 持久化，不传就沿用该 thread 原有的选择（thread_resume_preserves_persisted_
@@ -136,7 +136,7 @@ export type CodexPromptItem =
   | { type: "image"; url: string }
   | { type: "localImage"; path: string };
 
-/** Baton prompt blocks → app-server v2 UserInput. */
+/** Aide prompt blocks → app-server v2 UserInput. */
 export function codexPromptInput(blocks: PromptBlock[]): CodexPromptItem[] {
   return blocks.map((block) => {
     if (block.type === "text") return { type: "text", text: block.text };

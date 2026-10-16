@@ -64,7 +64,7 @@ export class Store {
     }
   }
 
-  private replace<S, T>(current: import("@compforge/baton-plugin").Resource<S, T>, spec: S, status: T) {
+  private replace<S, T>(current: import("@compforge/aide-plugin").Resource<S, T>, spec: S, status: T) {
     const desired = this.resources.replaceSpec(current, current.metadata.name, spec,
       { expectedResourceVersion: current.metadata.resourceVersion });
     return this.resources.patchStatus<S, T>(desired, desired.metadata.name, status,

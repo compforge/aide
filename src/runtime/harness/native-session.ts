@@ -1,4 +1,4 @@
-import { targetConfigFor, type BatonConfig, type HarnessTargetConfig } from "../config/config.ts";
+import { targetConfigFor, type AideConfig, type HarnessTargetConfig } from "../config/config.ts";
 import { configuredHarnessTargets, harnessDefinitionFor, parseHarness } from "./registry.ts";
 import type { HarnessTarget } from "./target.ts";
 import type {
@@ -58,7 +58,7 @@ export interface HarnessSessionSource {
 }
 
 export interface HarnessSessionResolutionOptions {
-  config: BatonConfig;
+  config: AideConfig;
   cwd: string;
   choose?: (
     matches: readonly ResolvedHarnessSession[],
@@ -78,7 +78,7 @@ function qualifiedReference(
   return { harness, sessionId };
 }
 
-function registeredHarnessSessionSources(config: BatonConfig): HarnessSessionSource[] {
+function registeredHarnessSessionSources(config: AideConfig): HarnessSessionSource[] {
   return configuredHarnessTargets(config).flatMap((target) => {
     const definition = harnessDefinitionFor(target.harness);
     if (!definition?.sessionInspector) return [];
@@ -188,7 +188,7 @@ export async function resolveHarnessSession(
   throw new Error(`HarnessSession not found: ${reference}`);
 }
 
-/** 把 Harness 文本历史还原成 Baton 的逻辑 turn；连续 assistant 消息属于同一轮回复。 */
+/** 把 Harness 文本历史还原成 Aide 的逻辑 turn；连续 assistant 消息属于同一轮回复。 */
 export function harnessHistoryTurns(
   transcript: readonly HarnessTranscriptEntry[],
 ): HarnessHistoryTurn[] {
@@ -216,7 +216,7 @@ export interface AdoptedHarnessSessionResult {
   reused: boolean;
 }
 
-/** HarnessHistorySnapshot 先 adoption 为 BatonSession；后续 resume/fork 只走统一语义。 */
+/** HarnessHistorySnapshot 先 adoption 为 AideSession；后续 resume/fork 只走统一语义。 */
 export function adoptHarnessSession(
   store: SessionStore,
   match: ResolvedHarnessSession,

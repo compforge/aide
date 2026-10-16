@@ -229,7 +229,7 @@ export class CodexAdapter implements HarnessAdapter {
     await rt.peer.request(
       "initialize",
       {
-        clientInfo: { name: "baton", version: "0.0.1", title: "baton" },
+        clientInfo: { name: "aide", version: "0.0.1", title: "aide" },
         capabilities: { experimentalApi: true },
       },
       { timeoutMs: STARTUP_REQUEST_TIMEOUT_MS },
@@ -255,14 +255,14 @@ export class CodexAdapter implements HarnessAdapter {
         );
         for (const warning of this.hookTrustStore.takeWarnings?.() ?? []) {
           this.emit(rt, {
-            kind: "_baton_notice",
+            kind: "_aide_notice",
             payload: { level: "warning", title: "Could not load saved hook trust", detail: warning },
           });
         }
         let trustAll = hooks.length > 0 && hooksNeedingUserTrust.length === 0;
         if (trustAll) {
           this.emit(rt, {
-            kind: "_baton_notice",
+            kind: "_aide_notice",
             payload: {
               level: "info",
               title: `Enabled ${hooks.length} previously trusted Codex hook${hooks.length === 1 ? "" : "s"}`,
@@ -287,7 +287,7 @@ export class CodexAdapter implements HarnessAdapter {
           trustAll = trust;
         }
         if (trustAll) {
-          // app-server 没有写 trust 的 RPC。Baton 已持久校验精确 hash 后，用官方 bypass 参数
+          // app-server 没有写 trust 的 RPC。Aide 已持久校验精确 hash 后，用官方 bypass 参数
           // 重启；旧进程尚未创建 thread/turn，退出不会丢 harness 状态。
           rt.closing = true;
           rt.peer.close("codex app-server restarting with trusted hooks");
@@ -326,7 +326,7 @@ export class CodexAdapter implements HarnessAdapter {
     }
   }
 
-  /** ApprovalRoutable：报告 codex 回吐的生效路由，而非 baton 请求的值（企业策略可能打回）。 */
+  /** ApprovalRoutable：报告 codex 回吐的生效路由，而非 aide 请求的值（企业策略可能打回）。 */
   approvalRoute(ref: HarnessSessionHandle): ApprovalRoute | null {
     return this.threads.get(ref.handleId)?.approvalRoute ?? null;
   }
@@ -564,7 +564,7 @@ export class CodexAdapter implements HarnessAdapter {
   }
 
   /**
-   * 统一输入入口：有匹配的活跃 Baton turn 时映射原生 `turn/steer`，否则发
+   * 统一输入入口：有匹配的活跃 Aide turn 时映射原生 `turn/steer`，否则发
    * `turn/start`。Adapter 以自身运行态做最终判断，Controller 不感知 Codex turn id。
    */
   async sendTurn(
@@ -644,8 +644,8 @@ export class CodexAdapter implements HarnessAdapter {
     const turn: CodexTurn = { turnId: input.turnId, finalized: false, replies: new MessageReplies([input.messageId]) };
     rt.turnId = input.turnId;
     rt.activeTurn = turn;
-    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 BatonSession
-    // 的事实，且入参 blocks 可能含 <baton-sync> prepend，不能进正典历史）；adapter 只在
+    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 AideSession
+    // 的事实，且入参 blocks 可能含 <aide-sync> prepend，不能进正典历史）；adapter 只在
     // steer 成功时补 delivery:"steer" 的用户消息。
 
     // 跨 harness catch-up 随本 turn 送达：additionalContext 按 key 的 contextual
@@ -659,7 +659,7 @@ export class CodexAdapter implements HarnessAdapter {
       .request("turn/start", {
         threadId: rt.threadId,
         input: codexPromptInput(input.blocks),
-        ...(syncText ? { additionalContext: { "baton-sync": { value: syncText, kind: "untrusted" } } } : {}),
+        ...(syncText ? { additionalContext: { "aide-sync": { value: syncText, kind: "untrusted" } } } : {}),
         ...(collaborationMode
           ? { collaborationMode }
           : {
@@ -719,7 +719,7 @@ export class CodexAdapter implements HarnessAdapter {
     // 宿主主动关闭：活跃 turn 读作 cancelled；先终结再 kill，child close 回调就不会再合成 failed
     this.finishTurn(rt, rt.activeTurn, "interrupted");
     rt.closing = true;
-    rt.peer.close("codex app-server closed by Baton");
+    rt.peer.close("codex app-server closed by Aide");
     const closed = await terminateCodexProcess(
       rt.child,
       this.options.shutdownGraceMs ?? SHUTDOWN_GRACE_MS,
@@ -764,7 +764,7 @@ export class CodexAdapter implements HarnessAdapter {
       this.emit(
         rt,
         {
-          kind: "_baton_notice",
+          kind: "_aide_notice",
           payload: {
             level: "warning",
             title: "Codex returned an empty turn (no output)",

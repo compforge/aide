@@ -1,9 +1,9 @@
 import type {
-  BatonEventReference,
+  AideEventReference,
   HarnessInputDispatch,
   HookStage,
   HookSubjectMap,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import type {
   HarnessEvent,
@@ -79,11 +79,11 @@ export class HarnessHookCoordinator {
   }
 
   acceptHarnessEvent(binding: HarnessBinding, event: HarnessEvent): void {
-    // BatonSession records and reduces the Harness output before Plugin
+    // AideSession records and reduces the Harness output before Plugin
     // notification. Hooks can emit Verbs, so notifying them first would allow
     // durable effects whose triggering Harness fact was lost on crash.
     const envelope = this.options.append(binding, event);
-    const record: BatonEventReference = Object.freeze({
+    const record: AideEventReference = Object.freeze({
       kind: event.kind,
       harnessTargetId: binding.target.id,
       laneId: binding.laneId,
@@ -130,7 +130,7 @@ export class HarnessHookCoordinator {
   private logFailure(stage: HarnessHookStage, error: unknown): void {
     this.options.log({
       level: "warn",
-      source: "baton",
+      source: "aide",
       component: "controller.hook",
       message: "Harness Hook gateway failed open",
       error: logError(error),

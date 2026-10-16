@@ -159,7 +159,7 @@ function compareCandidates(
   return left.item.id.localeCompare(right.item.id);
 }
 
-/** Baton 按 PluginInstance + Resource Type 分配 Board 容量；Plugin 只提供条目优先级。 */
+/** Aide 按 PluginInstance + Resource Type 分配 Board 容量；Plugin 只提供条目优先级。 */
 export function selectBoardItems(
   candidates: readonly BoardItemCandidate[],
 ): readonly BoardItem[] {

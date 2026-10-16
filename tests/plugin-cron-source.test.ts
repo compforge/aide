@@ -8,10 +8,10 @@ import {
 import { validateSources } from "../src/runtime/plugin/source.ts";
 
 const scope: ReconcileScope = {
-  batonSessionId: "bs_test",
+  aideSessionId: "bs_test",
   pluginInstanceId: "reqloop_default",
   namespace: "v1",
-  resourceApiVersion: "reqloop.baton.dev/v1alpha1",
+  resourceApiVersion: "reqloop.aide.dev/v1alpha1",
   resourceKind: "Requirement",
 };
 

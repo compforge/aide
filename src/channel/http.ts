@@ -72,7 +72,7 @@ export function httpChannel(aide: Aide, log: Logger) {
             && !pending.request.options.some((option) => option.optionId === result.optionId)))) {
           json(response, 400, { error: "Answer does not match the pending interaction" }); return;
         }
-        // @spec Channel answers settle Baton's original Interaction; no separate approval state.
+        // @spec Channel answers settle Aide's original Interaction; no separate approval state.
         const receipt = await aide.channel.resolveInteraction({ kind: "interaction_response", messageId }, async () => result);
         log.info({ messageId, kind: result.kind, completed: receipt.result }, "Channel interaction response");
         json(response, receipt.result ? 200 : 409, { completed: receipt.result });

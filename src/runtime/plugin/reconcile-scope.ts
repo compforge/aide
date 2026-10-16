@@ -7,7 +7,7 @@ export function reconcileResourceOwner(
   scope: ReconcileScope,
 ): ReconcileResourceOwner {
   const owner = scope.resourceOwner ?? "plugin";
-  if (owner !== "plugin" && owner !== "baton") {
+  if (owner !== "plugin" && owner !== "aide") {
     throw new Error(`reconcile resourceOwner is invalid: ${String(owner)}`);
   }
   return owner;
@@ -15,7 +15,7 @@ export function reconcileResourceOwner(
 
 export function reconcileScopeId(scope: ReconcileScope): string {
   return JSON.stringify([
-    scope.batonSessionId,
+    scope.aideSessionId,
     scope.pluginInstanceId,
     scope.namespace,
     reconcileResourceOwner(scope),
@@ -28,8 +28,8 @@ export function reconcileScopeLabel(scope: ReconcileScope): string {
   const kind =
     reconcileResourceOwner(scope) === "plugin"
       ? scope.resourceKind
-      : `baton:${scope.resourceKind}`;
-  return `${scope.batonSessionId}/${scope.pluginInstanceId}/${scope.namespace}/${scope.resourceApiVersion}/${kind}`;
+      : `aide:${scope.resourceKind}`;
+  return `${scope.aideSessionId}/${scope.pluginInstanceId}/${scope.namespace}/${scope.resourceApiVersion}/${kind}`;
 }
 
 export function sameReconcileScope(
@@ -37,7 +37,7 @@ export function sameReconcileScope(
   right: ReconcileScope,
 ): boolean {
   return (
-    left.batonSessionId === right.batonSessionId &&
+    left.aideSessionId === right.aideSessionId &&
     left.pluginInstanceId === right.pluginInstanceId &&
     left.namespace === right.namespace &&
     left.resourceApiVersion === right.resourceApiVersion &&

@@ -28,7 +28,7 @@ export async function withCodexPeer<T>(
   child.once("close", (code) => peer.close(`codex app-server exited (${code})`));
   try {
     await peer.request("initialize", {
-      clientInfo: { name: "baton", version: "0.0.1", title: "baton" },
+      clientInfo: { name: "aide", version: "0.0.1", title: "aide" },
       capabilities: { experimentalApi: true },
     }, { timeoutMs: STARTUP_REQUEST_TIMEOUT_MS });
     peer.notify("initialized", {});

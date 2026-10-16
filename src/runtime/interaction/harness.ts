@@ -89,7 +89,7 @@ export class HarnessInteractionContinuations<
       this.settle(
         messageId,
         { kind: "cancelled", reason: "turn" },
-        { type: "baton" },
+        { type: "aide" },
       );
     }
   }

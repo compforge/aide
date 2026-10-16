@@ -20,11 +20,11 @@ export interface CodexAdapterOptions {
   nativeEvent?: NativeEventSink;
   /** HarnessTarget 固定环境；同名项覆盖每次 open 传入的动态环境。 */
   env?: Readonly<Record<string, string>>;
-  /** 缺省由 auto-review 审批；显式 user 时请求进入 Baton TUI。 */
+  /** 缺省由 auto-review 审批；显式 user 时请求进入 Aide TUI。 */
   approvalReviewer?: "user" | "auto_review";
   /** 覆盖二进制，测试用 */
   command?: string[];
-  /** 用户审过的精确 hook 指纹；缺省落 ~/.baton/state/hook.json 的 trust 区。 */
+  /** 用户审过的精确 hook 指纹；缺省落 ~/.aide/state/hook.json 的 trust 区。 */
   hookTrustStore?: HookTrustStore;
   /** Adapter close 等待 SIGTERM 的时间；仅测试需要覆盖。 */
   shutdownGraceMs?: number;
@@ -43,7 +43,7 @@ export interface CodexTurn {
   /**
    * 本 turn 是否产生过任何可见产出（消息/思考/工具/计划/审批…）。completed 且零产出
    * 是异常（prompt 在进模型前被丢弃，如 UserPromptSubmit hook 拦截），不能静默当正常
-   * end_turn——事故形态是用户看到 baton 回 idle 但消息像被吞掉。
+   * end_turn——事故形态是用户看到 aide 回 idle 但消息像被吞掉。
    */
   sawOutput?: boolean;
   /** UserPromptSubmit/SessionStart hook 拦截信息：空回合的已知原因（hook/completed 通知报告） */
@@ -62,14 +62,14 @@ export interface ThreadRuntime {
   /** 最近一次发布的完整 session config 快照，供 settings 通知原地校准 Fast。 */
   configOptions?: SessionConfigOption[];
   sink: HarnessEventSink;
-  /** 最近一次 submit 的 baton turn id：迟到通知（tokenUsage 等）也用它标注信封 */
+  /** 最近一次 submit 的 aide turn id：迟到通知（tokenUsage 等）也用它标注信封 */
   turnId?: string;
   /** 当前被接受、尚未逻辑终结的 turn */
   activeTurn?: CodexTurn;
   codexTurnId?: string;
   /** Native receipt ownership survives the active Turn changing. */
   turnsByNativeId?: Map<string, CodexTurn>;
-  /** turn/steer 已接受、但尚未收到 Codex userMessage 消费回执的 Baton messageId。 */
+  /** turn/steer 已接受、但尚未收到 Codex userMessage 消费回执的 Aide messageId。 */
   pendingSteerMessageIds?: Set<string>;
   /** userMessage 回执可能先于 turn/steer RPC；保留到 admission waiter 消费。 */
   appliedSteerMessageIds?: Set<string>;
@@ -84,14 +84,14 @@ export interface ThreadRuntime {
   pendingCancel?: boolean;
   /** Live unified-exec PTY processes reported by commandExecution items. */
   activeCommandProcesses?: Map<string, number>;
-  /** 用户在 baton 中选择的模型；作为下一次 turn/start override。 */
+  /** 用户在 aide 中选择的模型；作为下一次 turn/start override。 */
   model?: string;
   /** 下一次 turn/start 使用的实际 effort；default 会先解析成当前模型的默认值。 */
   effort?: string;
   /** 仅显式选择返回值；default 对外仍显示为 null。 */
   effortSelection?: string;
   effortUsesDefault?: boolean;
-  /** Baton 统一暴露的 Codex collaboration mode；undefined 表示沿用原生默认。 */
+  /** Aide 统一暴露的 Codex collaboration mode；undefined 表示沿用原生默认。 */
   mode?: "default" | "plan";
   /** mode preset 对 effort 的覆盖；Plan 当前由 app-server catalog 返回 medium。 */
   modeEffort?: string;
@@ -102,7 +102,7 @@ export interface ThreadRuntime {
   prevUsage?: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningOutputTokens: number };
   /**
    * 收到过 requestApproval 的 item：declined 终态的对账依据——某 item 被拒但从未
-   * 问过 baton，说明有 harness 侧策略（如 auto-review）替用户做了决定，必须显式
+   * 问过 aide，说明有 harness 侧策略（如 auto-review）替用户做了决定，必须显式
    * 提示而不是静默渲染。启动参数注入（codexLaunchCommand）防已知配置，这里防未知。
    */
   approvalSeenItemIds?: Set<string>;

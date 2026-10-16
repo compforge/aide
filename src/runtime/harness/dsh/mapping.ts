@@ -169,7 +169,7 @@ export function toolKind(name: string): ToolKind {
   return "other";
 }
 
-/** DSH only supplies raw tool arguments, so prove shell reads with Baton's shared recognizer. */
+/** DSH only supplies raw tool arguments, so prove shell reads with Aide's shared recognizer. */
 export function toolEffect(name: string, input: unknown): ToolEffect | undefined {
   const kind = toolKind(name);
   const direct = kindEffect(kind);

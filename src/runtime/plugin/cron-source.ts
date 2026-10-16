@@ -1,6 +1,6 @@
 import { CronExpressionParser } from "cron-parser";
 
-import type { CronSource } from "@compforge/baton-plugin";
+import type { CronSource } from "@compforge/aide-plugin";
 import type { ReconcileScope } from "./controller.ts";
 import {
   reconcileScopeId,

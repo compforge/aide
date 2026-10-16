@@ -1,4 +1,4 @@
-import type { CommandContext, CommandInput } from "@compforge/baton-plugin";
+import type { CommandContext, CommandInput } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/runtime/plugin/manager.ts";
 import { newId } from "../../src/runtime/event/ids.ts";
 

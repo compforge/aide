@@ -9,7 +9,7 @@ import {
   type SessionHandle,
   type SessionStore,
 } from "../store/store.ts";
-import type { Mention } from "@compforge/baton-plugin";
+import type { Mention } from "@compforge/aide-plugin";
 
 /** @bs_<ULID>：Mention 上线前的 Session token，继续兼容已有输入。 */
 const MENTION_PATTERN = /@(bs_[0-9A-HJKMNP-TV-Z]{26})/g;
@@ -18,7 +18,7 @@ const MENTION_PATTERN = /@(bs_[0-9A-HJKMNP-TV-Z]{26})/g;
 export const DEFAULT_MENTION_BUDGET_CHARS = 4096;
 
 export interface ParsedMention {
-  batonSessionId: string;
+  aideSessionId: string;
 }
 
 interface TurnSummaryRecord {
@@ -40,7 +40,7 @@ export function parseMentions(text: string): ParsedMention[] {
     const id = m[1] as string;
     if (!seen.has(id)) {
       seen.add(id);
-      out.push({ batonSessionId: id });
+      out.push({ aideSessionId: id });
     }
   }
   return out;
@@ -73,16 +73,16 @@ function turnBlock(
  */
 export function buildSessionContext(
   store: SessionStore,
-  batonSessionId: string,
+  aideSessionId: string,
   budgetChars: number = DEFAULT_MENTION_BUDGET_CHARS,
 ): string {
-  const session = store.openSession(batonSessionId);
+  const session = store.openSession(aideSessionId);
   const summaries = session.loadState().turnSummaries;
   const title = sessionDisplayTitle(session.meta);
   const harnesses = session.meta.harnessTargets
     ? Object.keys(session.meta.harnessTargets).join(", ")
     : "unknown";
-  const header = `# Session summary: ${title} (id: ${batonSessionId}, agent: ${harnesses})`;
+  const header = `# Session summary: ${title} (id: ${aideSessionId}, agent: ${harnesses})`;
 
   if (summaries.length === 0) {
     return `${header}\n(no completed turns in this session yet)`;
@@ -116,7 +116,7 @@ function turnSummaries(handle: SessionHandle): TurnSummaryRecord[] {
   const projected = new Map(handle.loadState().turnSummaries.map((summary) => [summary.turnId, summary]));
   return handle.ledger
     .read()
-    .filter((event) => event.kind === "_baton_turn_summary")
+    .filter((event) => event.kind === "_aide_turn_summary")
     .map((event) => {
       const summary = projected.get(event.payload.turnId);
       return {
@@ -129,7 +129,7 @@ function turnSummaries(handle: SessionHandle): TurnSummaryRecord[] {
 }
 
 /**
- * 生成 Lane 尚未同步的 BatonSession 历史，并返回本批覆盖到的事件水位。
+ * 生成 Lane 尚未同步的 AideSession 历史，并返回本批覆盖到的事件水位。
  * 新建原生会话时 includeTargetTurns=true，从零恢复完整逻辑历史；resume 时只补当前
  * Lane × HarnessTarget binding 未亲历的增量。
  *
@@ -138,7 +138,7 @@ function turnSummaries(handle: SessionHandle): TurnSummaryRecord[] {
  *   其它 Lane 的进展也必须注入；
  * - **throughSeq = 全量 summary 尾 seq（含自己的）**：亲历即已同步，水位越过它是正确的。
  *   注意 summary 事件本身不进注入文本，其 userText 已由 summarize 时的
- *   stripBatonInjectedContext 剥掉 <baton-sync> 标签——sync 块不经 summary 递归放大；
+ *   stripAideInjectedContext 剥掉 <aide-sync> 标签——sync 块不经 summary 递归放大；
  * - **预算裁剪是有意的有损压缩**：从最新往回装，装不下的早期 turn 以
  *   "(N earlier turns omitted)" 一句代偿且不回补（throughSeq 照常推进）。
  */
@@ -170,8 +170,8 @@ export function buildTargetCatchUpContext(
   if (missed.length === 0) return null;
 
   const header = opts.includeTargetTurns
-    ? "# BatonSession history (auto-restored by baton)"
-    : "# Latest progress from other agents in this session (auto-synced by baton)";
+    ? "# AideSession history (auto-restored by aide)"
+    : "# Latest progress from other agents in this session (auto-synced by aide)";
   const budgetChars = opts.budgetChars ?? DEFAULT_MENTION_BUDGET_CHARS;
   const picked: string[] = [];
   let used = header.length;
@@ -207,12 +207,12 @@ export function expandMentions(
   const mentions = parseMentions(text);
   if (mentions.length === 0) return { prompt: text, mentions };
   const perMentionBudget = Math.floor(budgetChars / mentions.length);
-  const contexts = mentions.map((m) => buildSessionContext(store, m.batonSessionId, perMentionBudget));
+  const contexts = mentions.map((m) => buildSessionContext(store, m.aideSessionId, perMentionBudget));
   const prompt = [
-    "<baton-context>",
+    "<aide-context>",
     "Summaries of other agent sessions referenced by the user, provided as background context only:",
     ...contexts,
-    "</baton-context>",
+    "</aide-context>",
     "",
     text,
   ].join("\n\n");
@@ -233,18 +233,18 @@ export function sessionMention(
       return store
         .listSessions()
         .filter((session) =>
-          session.batonSessionId !== options.excludeSessionId
+          session.aideSessionId !== options.excludeSessionId
         )
         .filter((session) =>
-          session.batonSessionId.toLowerCase().startsWith(normalized) ||
+          session.aideSessionId.toLowerCase().startsWith(normalized) ||
           (
             normalized !== "" &&
             sessionDisplayTitle(session).toLowerCase().includes(normalized)
           )
         )
         .map((session) => ({
-          id: session.batonSessionId,
-          label: `@${session.batonSessionId.slice(0, 12)}…`,
+          id: session.aideSessionId,
+          label: `@${session.aideSessionId.slice(0, 12)}…`,
           description: sessionDisplayTitle(session),
         }));
     },

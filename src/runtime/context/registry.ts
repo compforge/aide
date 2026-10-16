@@ -1,4 +1,4 @@
-import type { Mention } from "@compforge/baton-plugin";
+import type { Mention } from "@compforge/aide-plugin";
 
 const LOCAL_KIND = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const REFERENCE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -34,7 +34,7 @@ function bounded(text: string, maxChars: number): string {
 }
 
 /**
- * Shared registry for Baton-owned and Plugin-provided explicit mentions.
+ * Shared registry for Aide-owned and Plugin-provided explicit mentions.
  * The caller's namespace scopes identity; mentions never construct or
  * parse the stable mention token themselves.
  */

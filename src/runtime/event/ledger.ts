@@ -20,10 +20,10 @@ export interface EventLedgerOptions {
 }
 
 /**
- * BatonSession 的 append-only 事实记录。
+ * AideSession 的 append-only 事实记录。
  *
  * Ledger 是 WAL 和历史回放边界，不负责 reduce、调度或通知消费者。
- * 实时状态由 BatonSession 直接将同一 Event reduce 为 Projection。
+ * 实时状态由 AideSession 直接将同一 Event reduce 为 Projection。
  */
 export class EventLedger {
   private ready = false;
@@ -41,7 +41,7 @@ export class EventLedger {
     } catch (error) {
       this.options.log?.({
         level: "error",
-        source: "baton",
+        source: "aide",
         component: "ledger",
         message: "failed to record Event Ledger",
         error: logError(error),

@@ -1,17 +1,17 @@
 // /effort 与 /model 一样是用户级运行偏好，不改写 config.yaml。session 自己已有的
-// effort 优先；这里仅让新 BatonSession / 新进程沿用各 HarnessTarget 最近一次显式选择。
+// effort 优先；这里仅让新 AideSession / 新进程沿用各 HarnessTarget 最近一次显式选择。
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { batonRoot } from "./config.ts";
+import { aideRoot } from "./config.ts";
 
 interface PersistedEffortPreferences {
   efforts?: Record<string, unknown>;
 }
 
 export function effortPreferencesPath(rootDir?: string): string {
-  return join(batonRoot(rootDir), "state", "effort.json");
+  return join(aideRoot(rootDir), "state", "effort.json");
 }
 
 export function loadEffortPreferences(rootDir?: string): Record<string, string> {

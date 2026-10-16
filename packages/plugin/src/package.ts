@@ -8,7 +8,7 @@ export type PluginConfig = Record<string, unknown>;
 
 export interface PluginInstance {
   readonly pluginInstanceId: string;
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly pluginId: string;
   readonly marketplace?: string;
   readonly packageVersion: string;
@@ -19,7 +19,7 @@ export interface PluginInstance {
 }
 
 export interface PluginSessionContext {
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly cwd?: string;
 }
 
@@ -31,14 +31,14 @@ export interface PluginSessionContext {
  * their host-owned APIs.
  */
 export interface PluginDataDirectories {
-  /** Shared by this Plugin across all Baton Projects and Sessions. */
+  /** Shared by this Plugin across all Aide Projects and Sessions. */
   readonly global: string;
   /**
-   * Shared across Sessions in the current Baton Project. From a Plugin's
+   * Shared across Sessions in the current Aide Project. From a Plugin's
    * perspective this is its workspace scope.
    */
   readonly project: string;
-  /** Private to this Plugin in the current BatonSession. */
+  /** Private to this Plugin in the current AideSession. */
   readonly session: string;
   /** Private to this concrete Plugin Binding. */
   readonly instance: string;
@@ -75,7 +75,7 @@ export interface PluginLogContext {
 }
 
 export interface PluginLogger {
-  /** Best-effort diagnostics owned, enriched and persisted by the Baton host. */
+  /** Best-effort diagnostics owned, enriched and persisted by the Aide host. */
   debug(message: string, context?: PluginLogContext): void;
   info(message: string, context?: PluginLogContext): void;
   warn(message: string, context?: PluginLogContext): void;

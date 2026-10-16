@@ -18,7 +18,7 @@ export type PluginConfig = Record<string, unknown>;
 
 export interface PluginInstance {
   readonly pluginInstanceId: string;
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly pluginId: string;
   readonly marketplace?: string;
   readonly packageVersion: string;
@@ -38,7 +38,7 @@ export interface CreatePluginInstance {
 }
 
 export interface PluginInstanceRepository {
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly session: Readonly<Pick<SessionHandle, "id" | "dir">>;
   create(input: CreatePluginInstance): PluginInstance;
   get(pluginInstanceId: string): PluginInstance;
@@ -111,20 +111,20 @@ function writeJsonAtomic(path: string, value: unknown): void {
 }
 
 /**
- * BatonSession 内 Plugin 配置身份的事实来源。Resource 与执行事实仍由各自 owner 管理。
+ * AideSession 内 Plugin 配置身份的事实来源。Resource 与执行事实仍由各自 owner 管理。
  */
 export class PluginInstanceStore implements PluginInstanceRepository {
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly session: Readonly<Pick<SessionHandle, "id" | "dir">>;
   private readonly now: () => Date;
 
   constructor(options: PluginInstanceStoreOptions) {
-    assertPathSegment("batonSessionId", options.session.id);
+    assertPathSegment("aideSessionId", options.session.id);
     this.session = Object.freeze({
       id: options.session.id,
       dir: options.session.dir,
     });
-    this.batonSessionId = options.session.id;
+    this.aideSessionId = options.session.id;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -148,7 +148,7 @@ export class PluginInstanceStore implements PluginInstanceRepository {
       const timestamp = this.timestamp();
       const instance: PluginInstance = {
         pluginInstanceId,
-        batonSessionId: this.batonSessionId,
+        aideSessionId: this.aideSessionId,
         pluginId: input.pluginId,
         ...(input.marketplace === undefined
           ? {}
@@ -257,8 +257,8 @@ export class PluginInstanceStore implements PluginInstanceRepository {
       if (instance.pluginInstanceId !== expectedId) {
         throw new Error(`pluginInstanceId must be ${expectedId}`);
       }
-      if (instance.batonSessionId !== this.batonSessionId) {
-        throw new Error(`batonSessionId must be ${this.batonSessionId}`);
+      if (instance.aideSessionId !== this.aideSessionId) {
+        throw new Error(`aideSessionId must be ${this.aideSessionId}`);
       }
       nonEmptyString("pluginId", instance.pluginId);
       if (instance.marketplace !== undefined) {
@@ -273,7 +273,7 @@ export class PluginInstanceStore implements PluginInstanceRepository {
       isoTimestamp("updatedAt", instance.updatedAt);
       return deepFreeze({
         pluginInstanceId: instance.pluginInstanceId,
-        batonSessionId: instance.batonSessionId,
+        aideSessionId: instance.aideSessionId,
         pluginId: instance.pluginId,
         ...(instance.marketplace === undefined
           ? {}

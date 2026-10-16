@@ -15,7 +15,7 @@ export interface PackageLoaderOptions {
     version: string,
     options?: { fresh?: boolean; marketplace?: string },
   ): Promise<PluginPackage>;
-  /** Resolve an immutable entry without importing it into Baton. */
+  /** Resolve an immutable entry without importing it into Aide. */
   loadPackageEntry?(
     pluginId: string,
     version: string,

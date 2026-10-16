@@ -1,6 +1,6 @@
 import type {
   ResourceNamespace,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 

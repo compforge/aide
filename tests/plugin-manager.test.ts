@@ -21,21 +21,21 @@ interface Spec {
 }
 
 const roots: string[] = [];
-const API_VERSION = "tests.baton.dev/v1alpha1";
+const API_VERSION = "tests.aide.dev/v1alpha1";
 
 function resourceType(kind: string) {
   return { apiVersion: API_VERSION, kind };
 }
 
 function testRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "baton-plugin-manager-"));
+  const root = mkdtempSync(join(tmpdir(), "aide-plugin-manager-"));
   roots.push(root);
   return root;
 }
 
 function scope(pluginInstanceId: string, resourceKind: string = "Requirement"): ReconcileScope {
   return {
-    batonSessionId: "bs_test",
+    aideSessionId: "bs_test",
     pluginInstanceId,
     namespace: "v1",
     resourceApiVersion: API_VERSION,
@@ -145,7 +145,7 @@ describe("plugin Manager", () => {
       },
     });
     const reconcileKey = {
-      batonSessionId: session.id,
+      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,
@@ -213,7 +213,7 @@ describe("plugin Manager", () => {
     });
 
     await manager.enqueue({
-      batonSessionId: session.id,
+      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,
@@ -259,7 +259,7 @@ describe("plugin Manager", () => {
       },
     });
     const reconcile = manager.enqueue({
-      batonSessionId: session.id,
+      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,
@@ -324,7 +324,7 @@ describe("plugin Manager", () => {
       },
     });
     const reconcileKey = {
-      batonSessionId: session.id,
+      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,
@@ -355,13 +355,13 @@ describe("plugin Manager", () => {
     expect(session.ledger.read().filter((event) =>
       event.kind === "interaction.requested" ||
       event.kind === "interaction.answered" ||
-      event.kind === "_baton_harness_invocation_recorded" ||
-      event.kind === "_baton_harness_invocation_scheduled"
+      event.kind === "_aide_harness_invocation_recorded" ||
+      event.kind === "_aide_harness_invocation_scheduled"
     ).map((event) => event.kind)).toEqual([
       "interaction.requested",
       "interaction.answered",
-      "_baton_harness_invocation_recorded",
-      "_baton_harness_invocation_scheduled",
+      "_aide_harness_invocation_recorded",
+      "_aide_harness_invocation_scheduled",
     ]);
     expect(states).toEqual([]);
     selectedHarnessTargetId = "codex";
@@ -382,8 +382,8 @@ describe("plugin Manager", () => {
       },
     });
     session.appendEvent({
-      kind: "_baton_turn_summary",
-      source: { type: "baton" },
+      kind: "_aide_turn_summary",
+      source: { type: "aide" },
       harness: "claude",
       harnessTargetId: input.harnessTargetId,
       turnId: input.turnId,
@@ -453,7 +453,7 @@ describe("plugin Manager", () => {
       },
     });
     const firstReconcile = manager.enqueue({
-      batonSessionId: session.id,
+      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,
@@ -497,7 +497,7 @@ describe("plugin Manager", () => {
       laneId: MAIN_LANE_ID,
     });
     const secondReconcile = manager.enqueue({
-      batonSessionId: session.id,
+      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,
@@ -578,7 +578,7 @@ describe("plugin Manager", () => {
       },
     });
     const reconcileKey = (resourceId: string) => ({
-      batonSessionId: session.id,
+      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,
@@ -662,7 +662,7 @@ describe("plugin Manager", () => {
     });
 
     const reconcileKey = {
-      batonSessionId: session.id,
+      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,
@@ -728,7 +728,7 @@ describe("plugin Manager", () => {
       },
     });
     const reconcileKey = (resourceId: string) => ({
-      batonSessionId: session.id,
+      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,

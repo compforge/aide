@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Logger } from "pino";
-import type { ResourceType } from "@compforge/baton-plugin";
+import type { ResourceType } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/runtime/plugin/manager.ts";
 import { Channel, type ChannelControllerOptions } from "../../src/runtime/channel/index.ts";
 import { SessionStore, type SessionHandle } from "../../src/runtime/store/store.ts";
@@ -31,7 +31,7 @@ export class Aide {
   }, private readonly log: Logger) {
     const sessions = new SessionStore(home);
     const previous = sessions.listSessions({ cwd: options.cwd })[0];
-    this.session = previous ? sessions.openSession(previous.batonSessionId)
+    this.session = previous ? sessions.openSession(previous.aideSessionId)
       : sessions.createSession({ cwd: options.cwd, title: "Aide" });
     const target = { id: "default", harness: "codex" };
     this.session.setHarnessTarget(target.id, { harnessTargetId: target.id, harness: target.harness,
@@ -75,7 +75,7 @@ export class Aide {
   }
 
   private enqueue(type: ResourceType, id: string): Promise<void> {
-    return this.plugins.enqueue({ batonSessionId: this.session.id, pluginInstanceId: "personal", namespace: "v1",
+    return this.plugins.enqueue({ aideSessionId: this.session.id, pluginInstanceId: "personal", namespace: "v1",
       resourceApiVersion: type.apiVersion, resourceKind: type.kind, resourceId: id });
   }
 

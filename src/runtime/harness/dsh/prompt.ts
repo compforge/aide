@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import type { SdkPromptContentBlock } from "@deepseek-ai/dsh-sdk-client";
 import type { PromptBlock } from "../../input/blocks.ts";
 
-/** Convert Baton attachments to the SDK's durable inline-image admission format. */
+/** Convert Aide attachments to the SDK's durable inline-image admission format. */
 export async function dshPromptInput(blocks: PromptBlock[]): Promise<SdkPromptContentBlock[]> {
   const content: SdkPromptContentBlock[] = [];
   for (const block of blocks) {

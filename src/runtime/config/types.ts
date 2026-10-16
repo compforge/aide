@@ -15,7 +15,7 @@ export interface NotificationConfig {
   bell: boolean;
 }
 
-export interface BatonConfig {
+export interface AideConfig {
   /** 打开 TUI / REPL 时默认选择的 HarnessTarget id。 */
   defaultTarget: string;
   /** HarnessTarget id → 该目标的 Harness 与启动配置。 */

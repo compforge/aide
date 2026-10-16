@@ -1,10 +1,7 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/qiankunli/baton/main/docs/assets/baton-icon.png" alt="baton icon" width="112" />
-</p>
+# @compforge/aide-plugin
 
-<h1 align="center">@compforge/baton-plugin</h1>
 
-Public, host-independent authoring contract for Baton plugins.
+Public, host-independent authoring contract for Aide plugins.
 
 ```ts
 import {
@@ -12,10 +9,10 @@ import {
   type Resource as ExampleResource,
   type PluginContext,
   type PluginPackage,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 const EXAMPLE_RESOURCE = {
-  apiVersion: "example.baton.dev/v1alpha1",
+  apiVersion: "example.aide.dev/v1alpha1",
   kind: "Example",
   shortNames: ["ex"],
 } as const;
@@ -110,7 +107,7 @@ const plugin: PluginPackage = {
 export default plugin;
 ```
 
-This package contains protocol types only. Baton host implementations such as
+This package contains protocol types only. Aide host implementations such as
 Daemon, Plugin Host, Worker, Manager, Binding, Controller, Store, Marketplace,
 persistence, and Harness routing are intentionally excluded.
 
@@ -118,7 +115,7 @@ persistence, and Harness routing are intentionally excluded.
 
 Builtin and Plugin commands share `Command`, `CommandInput`, `CommandContext`,
 `CommandVerbs`, and `CommandResult`. The host assigns each command's namespace:
-`baton` for builtins, the Plugin ID for plugins. A Plugin registers a
+`aide` for builtins, the Plugin ID for plugins. A Plugin registers a
 `CommandDefinition` (the same contract without namespace). Short names and aliases
 must not collide; namespace identifies ownership, not a second execution path.
 
@@ -154,16 +151,16 @@ catalog is not a probe failure. Each model lists its supported efforts, includin
 `CommandContext.target` also supplies the effective selection after inline input hooks.
 
 ```ts
-import type { BatonTargetResourceSpec, BatonTargetResourceStatus } from "@compforge/baton-plugin";
+import type { AideTargetResourceSpec, AideTargetResourceStatus } from "@compforge/aide-plugin";
 
 context.commands.register({
   name: "choose-model",
   description: "Choose an available model",
   async execute(input, command) {
-    const targets = await context.resources.list({ apiVersion: "baton.dev/v1alpha1", kind: "Target" });
+    const targets = await context.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Target" });
     const selected = targets.find((target) => target.metadata.name === command.target?.id);
     if (!selected) throw new Error("Target unavailable");
-    const target = await context.resources.get<BatonTargetResourceSpec, BatonTargetResourceStatus>({
+    const target = await context.resources.get<AideTargetResourceSpec, AideTargetResourceStatus>({
       apiVersion: selected.apiVersion, kind: selected.kind,
       namespace: selected.metadata.namespace, name: selected.metadata.name, uid: selected.metadata.uid,
     });
@@ -180,7 +177,7 @@ context.commands.register({
 });
 ```
 
-Baton validates model configuration at the Adapter boundary before changing either
+Aide validates model configuration at the Adapter boundary before changing either
 value. Preset commands such as `/easy` and `/hard` use `configureModel` as a shortcut
 for `/model` plus `/effort`; the choice persists for subsequent turns and Sessions.
 If a command also submits a task, it awaits successful configuration first.
@@ -208,7 +205,7 @@ const everyExample = await context.resources.list(EXAMPLE_RESOURCE, {
 ```
 
 `present()` may return a finite numeric `priority`; higher values are shown
-first and omitted values default to `0`. Baton compares priority only within the
+first and omitted values default to `0`. Aide compares priority only within the
 same Plugin instance and Resource type, then shows at most five items from that
 group. Returning `undefined` still hides the Resource from the Board entirely.
 When `url` is present, compatible terminal UIs render the title as a native
@@ -218,7 +215,7 @@ individual Plugins.
 
 Plugins may opt into Kubernetes-style current-state conditions by extending
 `ConditionedStatus`. `conditions` remains optional and lives inside the
-Plugin-owned status schema; Baton stores it but does not interpret condition
+Plugin-owned status schema; Aide stores it but does not interpret condition
 types, reasons, transitions, or lifecycle policy. Keep at most one current
 condition per `type`, and update `lastTransitionTime` only when that condition's
 `status` changes.
@@ -227,8 +224,8 @@ condition per `type`, and update `lastTransitionTime` only when that condition's
 caused by an operation or state transition. Ongoing state belongs in Resource
 status and an optional Board presentation; do not emit a toast on every reconcile.
 
-`context.logger` writes best-effort diagnostics to the owning BatonSession.
-Baton adds the Plugin identity and owns the log path and persistence. Use
+`context.logger` writes best-effort diagnostics to the owning AideSession.
+Aide adds the Plugin identity and owns the log path and persistence. Use
 `debug/info/warn/error(message, context)` with structured JSON `attributes`
 for troubleshooting context. Never include secrets or use diagnostics as
 Resource state. Keep lifecycle and aggregate results at `info`, entity details
@@ -236,7 +233,7 @@ at `debug`, and deduplicate repeated polling output.
 
 `context.mentions.register` exposes searchable, read-only context that a user can
 explicitly add to one Harness turn with `@`. `namespace` is local to the Package;
-Baton qualifies it as `<pluginName>@<namespace>`, groups picker candidates by that
+Aide qualifies it as `<pluginName>@<namespace>`, groups picker candidates by that
 identity, and removes the registration with the Plugin Binding. Keep `search`
 local and side-effect free; `resolve` runs only after the user selects a
 reference and submits the turn.
@@ -268,11 +265,11 @@ Hook exposes the four stable View and Harness IO boundaries:
 | `view.input` | durable `ViewInputRecord` | inline, before Core lowering |
 | `view.output` | published `ViewOutput` | deferred, after publication |
 | `harness.input` | read-only `HarnessInputDispatch` | inline, before the Adapter call |
-| `harness.output` | committed `BatonEventReference` | deferred, after Event commit |
+| `harness.output` | committed `AideEventReference` | deferred, after Event commit |
 
 Inline stages wait for every matching Hook concurrently. Failure or timeout is
 logged and fails open. Deferred stages use a bounded, best-effort host queue and
-never extend the main IO path. `view.output` means Baton published a View update;
+never extend the main IO path. `view.output` means Aide published a View update;
 it does not prove that a person saw it.
 
 The Hook itself returns no replacement, allow/deny decision, or output value.
@@ -290,11 +287,11 @@ current Session without introducing another Hook stage:
 
 ```ts
 const BINDING = {
-  apiVersion: "baton.dev/v1alpha1",
+  apiVersion: "aide.dev/v1alpha1",
   kind: "SessionTargetBinding",
 } as const;
 const TARGET = {
-  apiVersion: "baton.dev/v1alpha1",
+  apiVersion: "aide.dev/v1alpha1",
   kind: "Target",
 } as const;
 
@@ -327,7 +324,7 @@ Controller Sources have two narrow roles:
 
 - A `Source` performs initial discovery, installs live subscriptions,
   and calls `emit(resource)` when it observes a Resource owned by that Controller.
-  Baton materializes a missing Resource, treats an identical repeated value as a
+  Aide materializes a missing Resource, treats an identical repeated value as a
   keyed wakeup, and rejects an implicit spec change. `start()` resolves only
   after the initial scan and subscription are ready; the owning Binding aborts
   its signal on close.
@@ -349,7 +346,7 @@ Labels are constrained, machine-readable selection metadata:
 ```ts
 const openForgeTasks = await context.resources.list(TASK, {
   matchLabels: {
-    "example.baton.dev/source": "forge",
+    "example.aide.dev/source": "forge",
     state: "open",
   },
 });
@@ -377,7 +374,7 @@ if (!current) return; // Deleted or replaced while this continuation waited.
 matches. Omitting `uid` intentionally performs a name-based lookup that may
 resolve a replacement. Namespace isolation is still enforced.
 
-`ResourceClient.delete()` requests deletion. Baton persists
+`ResourceClient.delete()` requests deletion. Aide persists
 `metadata.deletionTimestamp`, cascades the request to structural descendants,
 hides terminating Resources from the Board, and removes each Resource after
 its Controller reconciles successfully. A failed terminating reconcile keeps
@@ -391,7 +388,7 @@ import type {
   EventHandler,
   EventResource,
   ReconcileRequest,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 function requests(workspace: EventResource): readonly ReconcileRequest[] {
   const status = workspace.status as {
@@ -423,7 +420,7 @@ context.controllers.register({
 
 For an update, map both the old and new Resource so removed relationships still
 wake their former owner, then deduplicate the resulting requests. A Watch
-routes Resources already stored by Baton; a Source discovers external state
+routes Resources already stored by Aide; a Source discovers external state
 and materializes the primary Resource before it is reconciled.
 
 A Controller receives a `ReconcileContext`, reads current facts from
@@ -453,15 +450,15 @@ await associate(decision.value);
 
 A command can return `search.mode: "local"` to let chat-tui filter its current
 options, or `"remote"` to receive later query text in
-`CommandInput.searchQuery`. Baton debounces remote queries and ignores
+`CommandInput.searchQuery`. Aide debounces remote queries and ignores
 responses superseded by a newer query. A remote result may contain no options;
 return the same remote-search picker shape so the field stays open.
 
 The Promise stays pending until the user answers, dismisses the Interaction, or
-the required timeout expires. Baton preserves the current async continuation,
+the required timeout expires. Aide preserves the current async continuation,
 but releases both the Controller concurrency slot and the Manager-wide slot
 while it waits, so other Resources can reconcile. The result is persisted before
-the original continuation resumes; Baton does not re-enqueue the Resource to
+the original continuation resumes; Aide does not re-enqueue the Resource to
 deliver the answer.
 
 Every verb returns the same closed outer outcome:
@@ -481,19 +478,19 @@ business value. The Plugin decides how each non-success outcome degrades.
 `ReconcileContext.verbs` contains typed Core verbs rather than generic messages.
 Every verb first materializes a Core-owned Interaction. `draft` continues only
 after its suggested input is submitted; `harness` continues only after its
-mandatory gate is approved. A host policy may auto-approve that gate, but Baton
+mandatory gate is approved. A host policy may auto-approve that gate, but Aide
 still persists the requested and answered Interaction facts before creating a
 HarnessInvocation. Plugins cannot select a topic, provide a routing callback,
 or pass a Harness-native DTO through Core.
 
-Each choice `value` is the stable answer value persisted by Baton and returned
+Each choice `value` is the stable answer value persisted by Aide and returned
 as `decision.value`; `label` and `description` are presentation only. A closed
 choice ask preserves the literal union of those values. Setting
 `allowOther: true` permits arbitrary non-empty text and therefore widens the
 answer type to `string`; omit `choices` and set `allowOther: true` for a pure
 free-text ask.
 
-Baton gives each live reconcile a Core-issued Plugin execution identity. Verb
+Aide gives each live reconcile a Core-issued Plugin execution identity. Verb
 continuation is correlated with that execution, not with the triggering
 Resource and not with a caller-provided operation key. Resource deletion does
 not implicitly dismiss an Interaction. If the Worker or Core crashes, the
@@ -509,12 +506,12 @@ explicitly declares the Lane for execution:
 - `newLane: true` allocates a new asynchronous Lane from `laneId`; omitted or
   `false` continues that Lane.
 
-Baton owns target selection, admission, execution, cancellation, ledger and
-recovery. Lane is a Baton-native task line rather than a Plugin-private
+Aide owns target selection, admission, execution, cancellation, ledger and
+recovery. Lane is a Aide-native task line rather than a Plugin-private
 execution type:
 
 An explicit `draft.harnessTargetId` fixes the Target and is shown with the
-editable draft. When omitted, Baton resolves the host's current selection when
+editable draft. When omitted, Aide resolves the host's current selection when
 the user submits the draft and persists that final Target before scheduling.
 An omitted `harness.harnessTargetId` is resolved immediately because direct
 execution has no editing phase.

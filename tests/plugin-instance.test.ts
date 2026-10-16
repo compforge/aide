@@ -15,7 +15,7 @@ import { PluginInstanceStore } from "../src/runtime/plugin/instance.ts";
 const roots: string[] = [];
 
 function testRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "baton-plugin-instance-"));
+  const root = mkdtempSync(join(tmpdir(), "aide-plugin-instance-"));
   roots.push(root);
   return root;
 }
@@ -43,17 +43,17 @@ describe("PluginInstanceStore", () => {
       pluginId: "qiankun/reqloop",
       marketplace: "reqloop",
       packageVersion: "1.2.0",
-      config: { project: "baton" },
+      config: { project: "aide" },
     });
 
     expect(created.pluginInstanceId).toMatch(/^pi_/);
     expect(created).toMatchObject({
-      batonSessionId: "bs_test",
+      aideSessionId: "bs_test",
       pluginId: "qiankun/reqloop",
       marketplace: "reqloop",
       packageVersion: "1.2.0",
       enabled: true,
-      config: { project: "baton" },
+      config: { project: "aide" },
     });
     expect(instances.get(created.pluginInstanceId)).toEqual(created);
     expect(instances.list()).toEqual([created]);
@@ -83,7 +83,7 @@ describe("PluginInstanceStore", () => {
     });
     const disabled = instances.setEnabled("reqloop_default", false);
     const upgraded = instances.setPackageVersion("reqloop_default", "1.3.0");
-    const configured = instances.replaceConfig("reqloop_default", { project: "baton" });
+    const configured = instances.replaceConfig("reqloop_default", { project: "aide" });
 
     expect(disabled.enabled).toBe(false);
     expect(upgraded.packageVersion).toBe("1.3.0");
@@ -92,7 +92,7 @@ describe("PluginInstanceStore", () => {
       pluginId: created.pluginId,
       packageVersion: "1.3.0",
       enabled: false,
-      config: { project: "baton" },
+      config: { project: "aide" },
       createdAt: created.createdAt,
       updatedAt: "2026-07-24T04:00:00.000Z",
     });
@@ -104,12 +104,12 @@ describe("PluginInstanceStore", () => {
       pluginInstanceId: "reqloop_default",
       pluginId: "qiankun/reqloop",
       packageVersion: "1.2.0",
-      config: { project: "baton" },
+      config: { project: "aide" },
     });
 
     expect(instances.setEnabled("reqloop_default", true)).toEqual(created);
     expect(instances.setPackageVersion("reqloop_default", "1.2.0")).toEqual(created);
-    expect(instances.replaceConfig("reqloop_default", { project: "baton" })).toEqual(created);
+    expect(instances.replaceConfig("reqloop_default", { project: "aide" })).toEqual(created);
   });
 
   test("rejects duplicate, unsafe, and non-JSON values", () => {
@@ -154,7 +154,7 @@ describe("PluginInstanceStore", () => {
       path,
       JSON.stringify({
         pluginInstanceId: "another",
-        batonSessionId: "bs_test",
+        aideSessionId: "bs_test",
         pluginId: "qiankun/reqloop",
         packageVersion: "1.2.0",
         enabled: true,

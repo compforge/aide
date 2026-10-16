@@ -1,4 +1,4 @@
-import type { CommandContext } from "@compforge/baton-plugin";
+import type { CommandContext } from "@compforge/aide-plugin";
 import {
   Controller,
   type ReconcileFailure,
@@ -11,12 +11,12 @@ import {
 
 export type { ReconcileFailure } from "./controller.ts";
 import {
-  BatonResourceController,
-  type BatonResourceObservation,
-  type BatonResourceControllerOptions,
-  type BatonResourceKind,
-  BatonResourceIndex,
-} from "./baton-resource-controller.ts";
+  AideResourceController,
+  type AideResourceObservation,
+  type AideResourceControllerOptions,
+  type AideResourceKind,
+  AideResourceIndex,
+} from "./aide-resource-controller.ts";
 import {
   type CreatePluginInstance,
   type PluginInstance,
@@ -35,9 +35,9 @@ import {
   type Resource,
   type ResourceRef,
   type ResourceType,
-  BATON_SYSTEM_NAMESPACE,
-  BATON_RESOURCE_TYPES,
-  BATON_TURN_RESOURCE_TYPE,
+  AIDE_SYSTEM_NAMESPACE,
+  AIDE_RESOURCE_TYPES,
+  AIDE_TURN_RESOURCE_TYPE,
   type PluginLogRecord,
   type ToastMessage,
   type ToastTone,
@@ -96,13 +96,13 @@ import {
 import { preparePluginDataDirectories } from "./data.ts";
 import type { ScheduledHarnessInvocation } from "./harness-invocation.ts";
 import { namespaceContains } from "./namespace.ts";
-import type { ResourceNamespace } from "@compforge/baton-plugin";
+import type { ResourceNamespace } from "@compforge/aide-plugin";
 import { Verb, type VerbOptions } from "./verb.ts";
 import { HookRegistry, HookRuntime } from "./hook.ts";
 import {
-  BatonResourceProvider,
-  type BatonSessionObservation,
-} from "./baton-resource.ts";
+  AideResourceProvider,
+  type AideSessionObservation,
+} from "./aide-resource.ts";
 import { ResourceRegistry } from "./resource-registry.ts";
 import type { HarnessTarget } from "../harness/target.ts";
 
@@ -129,8 +129,8 @@ export interface ControllerDefinition<TSpec, TStatus>
   now?: () => Date;
 }
 
-type BatonResourceControllerDefinition<K extends BatonResourceKind> = Pick<
-  BatonResourceControllerOptions<K>,
+type AideResourceControllerDefinition<K extends AideResourceKind> = Pick<
+  AideResourceControllerOptions<K>,
   "pluginInstanceId" | "namespace" | "resourceKind" | "sources" | "watches" | "reconcile" | "maxConcurrency" | "now"
 >;
 
@@ -142,12 +142,12 @@ export interface PluginToast {
 export interface ManagerOptions {
   /** 所有 Controller 合计可占用的执行容量；默认 1。 */
   maxTotalConcurrency?: number;
-  /** Manager 与所有 Plugin 数据共享的 BatonSession owner。 */
+  /** Manager 与所有 Plugin 数据共享的 AideSession owner。 */
   instances: PluginInstanceRepository;
   /**
-   * 启用 Baton-owned Resource 与 ReconcileContext verbs 时传完整 SessionHandle。只持有
+   * 启用 Aide-owned Resource 与 ReconcileContext verbs 时传完整 SessionHandle。只持有
    * PluginInstanceRepository 的调用方
-   * 仍可使用 Plugin Resource Controller，但不能观察 Baton-owned Resource。
+   * 仍可使用 Plugin Resource Controller，但不能观察 Aide-owned Resource。
    */
   session?: Pick<
     SessionHandle,
@@ -163,14 +163,14 @@ export interface ManagerOptions {
     | "requireLane"
     | "setTargetBinding"
   >;
-  /** Configured HarnessTargets exposed as Baton Target Resources. */
+  /** Configured HarnessTargets exposed as Aide Target Resources. */
   harnessTargets?: readonly HarnessTarget[];
   probeTarget?: import("./target-catalog.ts").TargetProbe;
-  /** Known BatonSessions exposed as limited Session/SessionTargetBinding projections. */
-  sessions?: () => readonly BatonSessionObservation[];
+  /** Known AideSessions exposed as limited Session/SessionTargetBinding projections. */
+  sessions?: () => readonly AideSessionObservation[];
   /** 当前进程可激活的可信、不可变 Package 版本。 */
   packages?: PackageLoaderOptions["packages"];
-  /** reconcile 调用前读取并冻结的当前 BatonSession 视图。 */
+  /** reconcile 调用前读取并冻结的当前 AideSession 视图。 */
   snapshot?: () => ReconcileSnapshot;
   /** Current host selection used by an implicit harness() or a submitted draft(). */
   selectedHarnessTargetId?: () => string | undefined;
@@ -179,7 +179,7 @@ export interface ManagerOptions {
   /** 按需加载已安装 Package；fresh 用于开发期 `/reload-plugins` 绕过模块缓存。 */
   loadPackage?: PackageLoaderOptions["loadPackage"];
   /**
-   * Resolve an immutable entry without importing it into Baton. When supplied
+   * Resolve an immutable entry without importing it into Aide. When supplied
    * with a PluginSupervisor, Marketplace Plugin code runs in a per-Binding
    * child process.
    */
@@ -201,9 +201,9 @@ export interface ManagerOptions {
   onToast?(toast: PluginToast): void;
   /** Plugin command 注册或 Binding 生命周期变化；宿主据此刷新命令补全。 */
   onCommandsChanged?(): void;
-  /** Baton core 已占用的 slash command 名称，Plugin 不得覆盖。 */
+  /** Aide core 已占用的 slash command 名称，Plugin 不得覆盖。 */
   reservedCommandNames?: readonly string[];
-  /** Baton-owned and Plugin-provided explicit mentions share one registry. */
+  /** Aide-owned and Plugin-provided explicit mentions share one registry. */
   mentions?: MentionRegistry;
   /** Default timeout for one Hook handler. */
   hookTimeoutMs?: number;
@@ -269,7 +269,7 @@ function pluginName(pluginId: string): string {
  */
 export class Manager {
   /** Core installs its GVKs before any Plugin Binding can register. */
-  private readonly resourceRegistry = new ResourceRegistry(BATON_RESOURCE_TYPES);
+  private readonly resourceRegistry = new ResourceRegistry(AIDE_RESOURCE_TYPES);
   private readonly controllers = new Map<string, ManagedController>();
   private readonly board: BoardProjection;
   private readonly commandRegistry: PluginCommandRegistry;
@@ -284,9 +284,9 @@ export class Manager {
   private readonly bindings = new Map<string, PluginBinding>();
   private readonly activations = new Map<string, Promise<void>>();
   private readonly capacity: ReconcileCapacity;
-  private readonly batonResources?: BatonResourceIndex;
-  private readonly batonResourceProvider?: BatonResourceProvider;
-  private readonly unsubscribeBatonResources?: () => void;
+  private readonly aideResources?: AideResourceIndex;
+  private readonly aideResourceProvider?: AideResourceProvider;
+  private readonly unsubscribeAideResources?: () => void;
   private readonly onToast: ManagerOptions["onToast"];
   private readonly onCommandsChanged: ManagerOptions["onCommandsChanged"];
   private readonly onActivationError: ManagerOptions["onActivationError"];
@@ -316,7 +316,7 @@ export class Manager {
         options.session.dir !== this.instances.session.dir)
     ) {
       throw new Error(
-        "plugin Manager session and PluginInstanceRepository must own the same BatonSession",
+        "plugin Manager session and PluginInstanceRepository must own the same AideSession",
       );
     }
     this.log = options.session
@@ -331,7 +331,7 @@ export class Manager {
       onRefreshError: (error) => {
         this.log?.({
           level: "error",
-          source: "baton",
+          source: "aide",
           component: "plugin.board",
           message: "Could not refresh Plugin Board projection",
           error: logError(error),
@@ -358,7 +358,7 @@ export class Manager {
             const selected = options.selectedHarnessTargetId?.();
             return selected === undefined
               ? undefined
-              : this.batonResourceProvider?.resolveTarget(selected) ?? selected;
+              : this.aideResourceProvider?.resolveTarget(selected) ?? selected;
           }
         : undefined,
       harnessInvocationGate: options.harnessInvocationGate,
@@ -408,24 +408,24 @@ export class Manager {
         this.enqueueCronSourceResources(scope, sources),
     });
     if (options.session) {
-      this.batonResources = new BatonResourceIndex({
+      this.aideResources = new AideResourceIndex({
         session: options.session,
       });
-      this.batonResourceProvider = new BatonResourceProvider({
+      this.aideResourceProvider = new AideResourceProvider({
         session: options.session,
-        turns: this.batonResources,
+        turns: this.aideResources,
         ...(options.sessions === undefined ? {} : { sessions: options.sessions }),
         targets: () => options.harnessTargets ?? [],
         probeTarget: options.probeTarget,
         onProbeError: (target, error) => this.log?.({
-          level: "warn", source: "baton", component: "target.catalog",
+          level: "warn", source: "aide", component: "target.catalog",
           message: "Target model discovery failed", harnessTargetId: target.id, error: logError(error),
         }),
         now: this.now,
       });
-      this.unsubscribeBatonResources = this.batonResources.subscribe((resource) => {
+      this.unsubscribeAideResources = this.aideResources.subscribe((resource) => {
         this.board.invalidate();
-        this.enqueueBatonResource(resource);
+        this.enqueueAideResource(resource);
       });
     }
   }
@@ -441,9 +441,9 @@ export class Manager {
     suspended: boolean,
   ): ControllerRegistration {
     if (this.closed) throw new Error("plugin Manager is closed");
-    if (definition.store.batonSessionId !== this.instances.session.id) {
+    if (definition.store.aideSessionId !== this.instances.session.id) {
       throw new Error(
-        `plugin Controller batonSessionId must be ${this.instances.session.id}, got ${definition.store.batonSessionId}`,
+        `plugin Controller aideSessionId must be ${this.instances.session.id}, got ${definition.store.aideSessionId}`,
       );
     }
     const controller: Controller<TSpec, TStatus> = new Controller({
@@ -480,25 +480,25 @@ export class Manager {
     return this.installController(controller, suspended);
   }
 
-  private registerBatonResourceController<K extends BatonResourceKind>(
-    definition: BatonResourceControllerDefinition<K>,
+  private registerAideResourceController<K extends AideResourceKind>(
+    definition: AideResourceControllerDefinition<K>,
   ): ControllerRegistration {
-    return this.registerBatonResourceControllerInternal(definition, false);
+    return this.registerAideResourceControllerInternal(definition, false);
   }
 
-  private registerBatonResourceControllerInternal<K extends BatonResourceKind>(
-    definition: BatonResourceControllerDefinition<K>,
+  private registerAideResourceControllerInternal<K extends AideResourceKind>(
+    definition: AideResourceControllerDefinition<K>,
     suspended: boolean,
   ): ControllerRegistration {
     if (this.closed) throw new Error("plugin Manager is closed");
-    if (!this.batonResources) {
+    if (!this.aideResources) {
       throw new Error(
-        "plugin Manager requires a SessionHandle to watch Baton-owned Resources",
+        "plugin Manager requires a SessionHandle to watch Aide-owned Resources",
       );
     }
-    const controller: BatonResourceController<K> = new BatonResourceController({
+    const controller: AideResourceController<K> = new AideResourceController({
       ...definition,
-      resources: this.batonResources,
+      resources: this.aideResources,
       snapshot: (key, resource) => this.snapshotFor(key, resource),
       invokeVerb: (context, request) => this.verb.invoke(context, request),
       executeReconcile: (scope, localLease, execute) =>
@@ -540,15 +540,15 @@ export class Manager {
     if (exact) return exact;
     if (
       reconcileResourceOwner(key) !== "plugin" ||
-      key.namespace === BATON_SYSTEM_NAMESPACE
+      key.namespace === AIDE_SYSTEM_NAMESPACE
     ) {
       return;
     }
     return [...this.controllers.values()].find((controller) => {
       const scope = controller.scope;
       return reconcileResourceOwner(scope) === "plugin" &&
-        scope.namespace !== BATON_SYSTEM_NAMESPACE &&
-        scope.batonSessionId === key.batonSessionId &&
+        scope.namespace !== AIDE_SYSTEM_NAMESPACE &&
+        scope.aideSessionId === key.aideSessionId &&
         scope.pluginInstanceId === key.pluginInstanceId &&
         scope.resourceApiVersion === key.resourceApiVersion &&
         scope.resourceKind === key.resourceKind &&
@@ -591,10 +591,10 @@ export class Manager {
       throw new Error(`plugin Instance is disabled: ${pluginInstanceId}`);
     }
     const packageSource = await this.packageLoader.load(instance);
-    const batonSession = this.snapshot().session;
-    if (batonSession.batonSessionId !== this.instances.session.id) {
+    const aideSession = this.snapshot().session;
+    if (aideSession.aideSessionId !== this.instances.session.id) {
       throw new Error(
-        `PluginContext batonSessionId must be ${this.instances.session.id}, got ${batonSession.batonSessionId}`,
+        `PluginContext aideSessionId must be ${this.instances.session.id}, got ${aideSession.aideSessionId}`,
       );
     }
 
@@ -606,12 +606,12 @@ export class Manager {
       (change) => this.handlePluginResourceChange(change),
       (resourceType) =>
         this.resourceRegistry.registerMaterialized(instance.pluginId, resourceType),
-      this.batonResourceProvider,
+      this.aideResourceProvider,
     );
     const dataDirs = preparePluginDataDirectories(
       {
-        batonSessionId: batonSession.batonSessionId,
-        ...(batonSession.cwd === undefined ? {} : { cwd: batonSession.cwd }),
+        aideSessionId: aideSession.aideSessionId,
+        ...(aideSession.cwd === undefined ? {} : { cwd: aideSession.cwd }),
         dir: this.instances.session.dir,
       },
       instance,
@@ -619,8 +619,8 @@ export class Manager {
     const binding = new PluginBinding(
       instance,
       {
-        batonSessionId: batonSession.batonSessionId,
-        ...(batonSession.cwd === undefined ? {} : { cwd: batonSession.cwd }),
+        aideSessionId: aideSession.aideSessionId,
+        ...(aideSession.cwd === undefined ? {} : { cwd: aideSession.cwd }),
       },
       dataDirs,
       {
@@ -634,7 +634,7 @@ export class Manager {
         registerHook: (hook) =>
           this.hookRegistry.register(
             {
-              batonSessionId: instance.batonSessionId,
+              aideSessionId: instance.aideSessionId,
               pluginInstanceId: instance.pluginInstanceId,
               pluginId: instance.pluginId,
               namespace: "v1",
@@ -709,7 +709,7 @@ export class Manager {
           this.bindings.set(pluginInstanceId, binding);
           this.log?.({
             level: "info",
-            source: "baton",
+            source: "aide",
             component: "plugin.activation",
             message: "Plugin activated",
             pluginId: instance.pluginId,
@@ -802,12 +802,12 @@ export class Manager {
 
   /** Resolve the current Core-owned SessionTargetBinding after inline Hooks settle. */
   resolveHarnessTargetId(requestedTargetId: string): string {
-    return this.batonResourceProvider?.resolveTarget(requestedTargetId) ?? requestedTargetId;
+    return this.aideResourceProvider?.resolveTarget(requestedTargetId) ?? requestedTargetId;
   }
 
   /** Preserve `/target <id>` as an exact Human choice over Plugin routing. */
   selectExactHarnessTargetId(targetId: string): void {
-    this.batonResourceProvider?.selectExactTarget(targetId);
+    this.aideResourceProvider?.selectExactTarget(targetId);
   }
 
   /**
@@ -894,7 +894,7 @@ export class Manager {
   }
 
   /**
-   * 重载当前 BatonSession 的全部 enabled Instance。Package 每个版本只 fresh load 一次；
+   * 重载当前 AideSession 的全部 enabled Instance。Package 每个版本只 fresh load 一次；
    * 单个 Package 或 Instance 失败不阻断其它插件，也不改变用户的 enabled 配置。
    */
   async reload(): Promise<PluginReloadResult> {
@@ -995,14 +995,14 @@ export class Manager {
     return this.verb.cancelHarnessInvocation(identifier);
   }
 
-  getBatonResource<K extends BatonResourceKind>(
+  getAideResource<K extends AideResourceKind>(
     kind: K,
     resourceId: string,
-  ): BatonResourceObservation<K> {
-    if (!this.batonResources) {
-      throw new Error("Baton-owned resources are not available");
+  ): AideResourceObservation<K> {
+    if (!this.aideResources) {
+      throw new Error("Aide-owned resources are not available");
     }
-    return this.batonResources.get(kind, resourceId);
+    return this.aideResources.get(kind, resourceId);
   }
 
   private snapshotFor(key: ReconcileKey, resource: ResourceRef): ReconcileSnapshot {
@@ -1062,9 +1062,9 @@ export class Manager {
   ): () => void {
     if (
       resourceTypeKey(pluginController.resourceType) ===
-        resourceTypeKey(BATON_TURN_RESOURCE_TYPE)
+        resourceTypeKey(AIDE_TURN_RESOURCE_TYPE)
     ) {
-      return this.bindBatonResourceController(
+      return this.bindAideResourceController(
         instance.pluginInstanceId,
         pluginController,
       );
@@ -1108,7 +1108,7 @@ export class Manager {
       true,
     );
     const sourceId = reconcileScopeId({
-      batonSessionId: this.instances.session.id,
+      aideSessionId: this.instances.session.id,
       pluginInstanceId,
       namespace: "v1",
       resourceApiVersion: pluginController.resourceType.apiVersion,
@@ -1140,27 +1140,27 @@ export class Manager {
     };
   }
 
-  private bindBatonResourceController<TSpec, TStatus>(
+  private bindAideResourceController<TSpec, TStatus>(
     pluginInstanceId: string,
     pluginController: PluginResourceController<TSpec, TStatus>,
   ): () => void {
-    if (!this.batonResources) {
+    if (!this.aideResources) {
       throw new Error(
         `Resource type ${pluginController.resourceType.apiVersion}/${pluginController.resourceType.kind} requires a SessionHandle`,
       );
     }
-    const resourceKind = BATON_TURN_RESOURCE_TYPE.kind;
+    const resourceKind = AIDE_TURN_RESOURCE_TYPE.kind;
     const namespace = "v1" as const;
     const sources = pluginController.sources ?? [];
     if (sources.some((source) => source.type === "resource")) {
       throw new Error(
-        "Controller resource Sources cannot materialize Baton-owned Resources",
+        "Controller resource Sources cannot materialize Aide-owned Resources",
       );
     }
     const cronSources = sources.filter(
       (source): source is CronSource => source.type === "cron",
     );
-    const registration = this.registerBatonResourceControllerInternal(
+    const registration = this.registerAideResourceControllerInternal(
       {
         pluginInstanceId,
         namespace,
@@ -1171,7 +1171,7 @@ export class Manager {
         reconcile: async (context, resource) =>
           await pluginController.reconcile(
             context,
-            this.exposeBatonResource<TSpec, TStatus>(
+            this.exposeAideResource<TSpec, TStatus>(
               pluginInstanceId,
               resource,
             ),
@@ -1181,12 +1181,12 @@ export class Manager {
       true,
     );
     const sourceId = reconcileScopeId({
-      batonSessionId: this.instances.session.id,
+      aideSessionId: this.instances.session.id,
       pluginInstanceId,
       namespace,
-      resourceApiVersion: BATON_TURN_RESOURCE_TYPE.apiVersion,
+      resourceApiVersion: AIDE_TURN_RESOURCE_TYPE.apiVersion,
       resourceKind,
-      resourceOwner: "baton",
+      resourceOwner: "aide",
     });
     let unregisterBoardSource: (() => void) | undefined;
     if (pluginController.present) {
@@ -1198,10 +1198,10 @@ export class Manager {
           presentBoardSource<TSpec, TStatus>({
             pluginId,
             pluginInstanceId,
-            resourceType: BATON_TURN_RESOURCE_TYPE,
+            resourceType: AIDE_TURN_RESOURCE_TYPE,
             list: () =>
-              this.batonResources!.list(resourceKind).map((resource) =>
-                this.exposeBatonResource<TSpec, TStatus>(
+              this.aideResources!.list(resourceKind).map((resource) =>
+                this.exposeAideResource<TSpec, TStatus>(
                   pluginInstanceId,
                   resource,
                 ),
@@ -1216,16 +1216,16 @@ export class Manager {
     };
   }
 
-  private exposeBatonResource<TSpec, TStatus>(
+  private exposeAideResource<TSpec, TStatus>(
     _pluginInstanceId: string,
-    resource: BatonResourceObservation<typeof BATON_TURN_RESOURCE_TYPE.kind>,
+    resource: AideResourceObservation<typeof AIDE_TURN_RESOURCE_TYPE.kind>,
   ): Readonly<Resource<TSpec, TStatus>> {
     return Object.freeze({
-      apiVersion: BATON_TURN_RESOURCE_TYPE.apiVersion,
+      apiVersion: AIDE_TURN_RESOURCE_TYPE.apiVersion,
       kind: resource.kind,
       metadata: Object.freeze({
         name: resource.metadata.resourceId,
-        namespace: BATON_SYSTEM_NAMESPACE,
+        namespace: AIDE_SYSTEM_NAMESPACE,
         uid: resource.metadata.sourceEventId,
         generation: 1,
         resourceVersion: String(resource.metadata.revision),
@@ -1253,8 +1253,8 @@ export class Manager {
     this.suspendedControllers.clear();
     this.dueQueue.close();
     this.cronSourceQueue.close();
-    this.unsubscribeBatonResources?.();
-    this.batonResources?.close();
+    this.unsubscribeAideResources?.();
+    this.aideResources?.close();
     this.verb.close();
     try {
       await this.pluginSupervisor?.close();
@@ -1268,7 +1268,7 @@ export class Manager {
   private reportActivationFailure(failure: PluginActivationFailure): void {
     this.log?.({
       level: "error",
-      source: "baton",
+      source: "aide",
       component: "plugin.activation",
       message: "Plugin activation failed",
       pluginInstanceId: failure.pluginInstanceId,
@@ -1306,8 +1306,8 @@ export class Manager {
       if (
         reconcileResourceOwner(controller.scope) === "plugin" &&
         (
-          controller.scope.namespace === BATON_SYSTEM_NAMESPACE ||
-          change.resource.metadata.namespace === BATON_SYSTEM_NAMESPACE ||
+          controller.scope.namespace === AIDE_SYSTEM_NAMESPACE ||
+          change.resource.metadata.namespace === AIDE_SYSTEM_NAMESPACE ||
           !namespaceContains(
             controller.scope.namespace,
             change.resource.metadata.namespace,
@@ -1340,7 +1340,7 @@ export class Manager {
   ): void {
     this.log?.({
       level: "error",
-      source: "baton",
+      source: "aide",
       component: "plugin.watch",
       message: "Plugin Controller EventHandler failed",
       pluginInstanceId: scope.pluginInstanceId,
@@ -1433,7 +1433,7 @@ export class Manager {
     this.verb.failInstance(pluginInstanceId, error.message);
     this.log?.({
       level: "error",
-      source: "baton",
+      source: "aide",
       component: "plugin.runner",
       message: "Plugin Runner stopped unexpectedly",
       pluginInstanceId,
@@ -1528,7 +1528,7 @@ export class Manager {
       try {
         this.log?.({
           level: "error",
-          source: "baton",
+          source: "aide",
           component: "plugin.source",
           message: `Plugin source ${sourceId} failed`,
           pluginInstanceId: controller.scope.pluginInstanceId,
@@ -1570,12 +1570,12 @@ export class Manager {
     }
   }
 
-  private enqueueBatonResource(resource: BatonResourceObservation): void {
+  private enqueueAideResource(resource: AideResourceObservation): void {
     if (!this.started || this.closed) return;
     for (const controller of this.controllers.values()) {
       if (this.suspendedControllers.has(reconcileScopeId(controller.scope))) continue;
       if (
-        reconcileResourceOwner(controller.scope) !== "baton" ||
+        reconcileResourceOwner(controller.scope) !== "aide" ||
         controller.scope.resourceKind !== resource.kind
       ) {
         continue;
@@ -1606,7 +1606,7 @@ export class Manager {
   private reportFailure(failure: ReconcileFailure): void {
     this.log?.({
       level: "error",
-      source: "baton",
+      source: "aide",
       component: "plugin.reconcile",
       message: "Plugin reconcile failed",
       pluginInstanceId: failure.key.pluginInstanceId,

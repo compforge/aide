@@ -1,5 +1,5 @@
 // Claude Code 接入：官方 Agent SDK 进程内直调（TS 宿主不需要 tutti 那样的 sidecar）。
-// SDK 以子进程拉起 claude CLI；可执行文件可换成公司包装器（BATON_CLAUDE_BIN），
+// SDK 以子进程拉起 claude CLI；可执行文件可换成公司包装器（AIDE_CLAUDE_BIN），
 // 凭证零持有，复用本机登录态。见 docs/harness/claude-code.md。
 
 import {
@@ -87,7 +87,7 @@ export interface ClaudeAdapterOptions {
   nativeEvent?: NativeEventSink;
   /** HarnessTarget 固定环境；同名项覆盖每次 open 传入的动态环境。 */
   env?: Readonly<Record<string, string>>;
-  /** claude 可执行文件路径；默认 BATON_CLAUDE_BIN 环境变量，再默认交给 SDK 自己找 */
+  /** claude 可执行文件路径；默认 AIDE_CLAUDE_BIN 环境变量，再默认交给 SDK 自己找 */
   executablePath?: string;
   /** 测试注入点；生产始终使用 Agent SDK 的 query。 */
   queryFactory?: typeof query;
@@ -363,7 +363,7 @@ export class ClaudeAdapter implements HarnessAdapter {
   /**
    * 统一输入入口，对齐 T3Code 的 Claude runtime：
    * - 空闲时在长生命周期 streaming query 上开启新 turn；
-   * - 运行中且 Baton turnId 匹配时，把消息投进同一 prompt stream，作为当前 turn 的 steer；
+   * - 运行中且 Aide turnId 匹配时，把消息投进同一 prompt stream，作为当前 turn 的 steer；
    * - turnId 不匹配时拒绝，由 Controller 排成 follow-up，绝不误注入别的回合。
    */
   async sendTurn(
@@ -396,7 +396,7 @@ export class ClaudeAdapter implements HarnessAdapter {
           reason: "Claude streaming input is unavailable",
         };
       }
-      // offer 只代表 Baton 把消息交给 SDK input stream；原生 queued/started
+      // offer 只代表 Aide 把消息交给 SDK input stream；原生 queued/started
       // lifecycle 才决定它何时离开 Composer Queue。投递回执走 input_delivery_update，
       // 不再寄生 user_message.deliveryState。
       const pendingOffers = (rt.pendingOfferUuids ??= new Map());
@@ -432,7 +432,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     const turn: ClaudeTurn = { turnId: input.turnId, finalized: false, cancelRequested: false, replies: new MessageReplies([input.messageId]) };
     rt.activeTurn = turn;
     rt.currentTurn = turn;
-    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 BatonSession
+    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 AideSession
     // 的事实，不等 harness 就绪）；adapter 只报告 harness 执行过程与终态。
 
     try {
@@ -452,7 +452,7 @@ export class ClaudeAdapter implements HarnessAdapter {
 
   private ensureStreamingQuery(rt: ClaudeRuntime): void {
     if (rt.activeQuery) return;
-    const executable = this.options.executablePath ?? process.env.BATON_CLAUDE_BIN;
+    const executable = this.options.executablePath ?? process.env.AIDE_CLAUDE_BIN;
     const sdkOptions: Options = {
       cwd: rt.cwd,
       env: {
@@ -464,7 +464,7 @@ export class ClaudeAdapter implements HarnessAdapter {
       },
       resume: rt.claudeSessionId,
       includePartialMessages: true,
-      // Baton exposes per-task stop in /parallel. With this declaration Esc only aborts
+      // Aide exposes per-task stop in /parallel. With this declaration Esc only aborts
       // the foreground turn and leaves background work individually controllable.
       perTaskStopAffordance: true,
       // Agent SDK 默认使用空 system prompt；显式恢复 Claude Code 语义，确保
@@ -570,7 +570,7 @@ export class ClaudeAdapter implements HarnessAdapter {
         this.finishTurn(rt, emit, current, "cancelled");
       } else {
         emit({
-          kind: "_baton_error_update",
+          kind: "_aide_error_update",
           payload: { message: error instanceof Error ? error.message : String(error) },
         });
         this.finishTurn(rt, emit, current, "error");
@@ -616,7 +616,7 @@ export class ClaudeAdapter implements HarnessAdapter {
       this.emit(
         rt,
         {
-          kind: "_baton_notice",
+          kind: "_aide_notice",
           payload: {
             level: "warning",
             title: "Queued message was not applied",

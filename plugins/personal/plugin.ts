@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { PluginPackage, PluginContext, ReconcileContext } from "@compforge/baton-plugin";
+import type { PluginPackage, PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { OutcomeSchema, RouteSchema, executionPrompt, routePrompt } from "./prompts.ts";
 import { nextOccurrence, type Incoming, type Message, type Work } from "./model.ts";
 import { INTAKE_TYPE, WORK_TYPE, toWork, type WorkResource, type WorkSpec, type WorkStatus } from "./resources.ts";

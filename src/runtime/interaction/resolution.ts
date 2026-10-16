@@ -8,7 +8,7 @@ import { validInputResult } from "./answer.ts";
 /** @spec Only a pending request can accept an authorized, typed resolution. */
 export function canResolveRequest(request: InputRequest, result: InteractionResult, actor: ActorRef): boolean {
   return request.status === "pending"
-    && (actor.kind === "user" || actor.kind === "baton")
+    && (actor.kind === "user" || actor.kind === "aide")
     && validInputResult(request.request, result);
 }
 

@@ -1,7 +1,7 @@
-import type { PluginPackage } from "@compforge/baton-plugin";
+import type { PluginPackage } from "@compforge/aide-plugin";
 
 const PROCESS_RESOURCE_TYPE = {
-  apiVersion: "tests.baton.dev/v1alpha1",
+  apiVersion: "tests.aide.dev/v1alpha1",
   kind: "ProcessCheck",
 } as const;
 
@@ -86,11 +86,11 @@ const plugin: PluginPackage = {
           hook.subject.input.text === "route from hook"
         ) {
           const bindingType = {
-            apiVersion: "baton.dev/v1alpha1",
+            apiVersion: "aide.dev/v1alpha1",
             kind: "SessionTargetBinding",
           } as const;
           const targetType = {
-            apiVersion: "baton.dev/v1alpha1",
+            apiVersion: "aide.dev/v1alpha1",
             kind: "Target",
           } as const;
           const binding = (await context.resources.list(bindingType))[0];
@@ -144,7 +144,7 @@ const plugin: PluginPackage = {
     });
     context.controllers.register({
       resourceType: {
-        apiVersion: "baton.dev/v1alpha1",
+        apiVersion: "aide.dev/v1alpha1",
         kind: "Turn",
       },
       async reconcile(ctx, turn) {

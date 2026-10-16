@@ -8,7 +8,7 @@ import type {
   ViewInput,
   ViewInputRecord,
   ViewOutput,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import {
   Controller,
@@ -90,7 +90,7 @@ export type ChannelProjectionListener = (
 const activeSessionChannels = new Set<string>();
 
 /**
- * One BatonSession lease 的活跃协调边界与 composition root。
+ * One AideSession lease 的活跃协调边界与 composition root。
  *
  * Channel 装配 Controller、Plugin Manager、Hook gateway 和 Interaction 路由，
  * 并为 ViewInput 提供固定的 typed path。它只拥有进程期生命周期和组件引用；
@@ -112,9 +112,9 @@ export class Channel implements ChannelHookGateway {
       throw new Error("Channel plugins and external hooks cannot both be configured");
     }
     if (activeSessionChannels.has(options.session.dir)) {
-      throw new Error(`BatonSession already has an active Channel: ${options.session.id}`);
+      throw new Error(`AideSession already has an active Channel: ${options.session.id}`);
     }
-    // openBatonSession may already hold the process lease after recovery. The
+    // openAideSession may already hold the process lease after recovery. The
     // Channel becomes its sole live owner and always releases it from close().
     options.session.acquireLock();
     activeSessionChannels.add(options.session.dir);
@@ -202,9 +202,9 @@ export class Channel implements ChannelHookGateway {
       return await executeCommand(this, command, input, record, target, this.options.commandPreferences);
     } catch (error) {
       this.options.session.log({
-        level: "error", source: "baton", component: "command",
+        level: "error", source: "aide", component: "command",
         message: "Command execution failed", error: logError(error),
-        ...(command.namespace !== "baton" ? { pluginId: command.namespace } : {}),
+        ...(command.namespace !== "aide" ? { pluginId: command.namespace } : {}),
         attributes: {
           namespace: command.namespace, command: command.name, inputId: record.inputId,
           phase: input.searchQuery !== undefined ? "search" : "invoke",
@@ -363,7 +363,7 @@ export class Channel implements ChannelHookGateway {
         : undefined,
       snapshot: () =>
         createReconcileSnapshot({
-          batonSessionId: this.options.session.id,
+          aideSessionId: this.options.session.id,
           cwd: this.options.session.meta.cwd,
           state: this.options.session.projection,
           harnessInputs: this.controller.harnessInputs,
@@ -424,7 +424,7 @@ export class Channel implements ChannelHookGateway {
     this.hooks = undefined;
     this.options.session.log({
       level: "info",
-      source: "baton",
+      source: "aide",
       component: "channel.lifecycle",
       message: "Channel closed",
     });
@@ -456,7 +456,7 @@ export class Channel implements ChannelHookGateway {
   ): void {
     this.options.session.appendEvent({
       kind: "input.settled",
-      source: { type: "baton" },
+      source: { type: "aide" },
       parentEventId: record.eventId,
       payload: {
         inputId: record.inputId,
@@ -491,7 +491,7 @@ export class Channel implements ChannelHookGateway {
   private logFailure(stage: HookStage, error: unknown): void {
     this.options.session.log({
       level: "warn",
-      source: "baton",
+      source: "aide",
       component: "channel",
       message: "Channel Hook gateway failed open",
       error: logError(error),

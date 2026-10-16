@@ -191,15 +191,15 @@ const DEFAULT_SIDE_LANE_CONCURRENCY = 4;
 export const INTERRUPTED_NOTICE_TITLE = "Conversation interrupted — tell the agent what to do differently";
 
 /**
- * 一个 BatonSession 的唯一 turn 编排入口：统一负责 harness 恢复、上下文追平与 Lane 调度。
- * UI 只提交输入和消费 BatonSession Projection，不能分别维护
+ * 一个 AideSession 的唯一 turn 编排入口：统一负责 harness 恢复、上下文追平与 Lane 调度。
+ * UI 只提交输入和消费 AideSession Projection，不能分别维护
  * 各 harness 的并发状态。
  *
  * Lane 与 Turn 都只是归属边界：Lane 表达长期并发通道，Turn 表达一次 Harness loop
  * 的 start/end。Queue 负责调度，Harness 负责执行，Controller 负责协调；Turn 本身不干活。
  *
  * 生命周期由 state event 驱动（workflow）：adapter.sendTurn 只确认接收，turn 的
- * 完成以 `state_update(idle)` 为准，经 finalize 按 baton turn id 幂等收口——
+ * 完成以 `state_update(idle)` 为准，经 finalize 按 aide turn id 幂等收口——
  * 重复/迟到的物理终态（reconnect、transport race）不会二次终结，也不会关闭更新的 turn。
  *
  * Event Ledger 只保留可回放的事实历史；TurnRegistry 只是按 turnId 建立的运行期 scope 索引。
@@ -235,12 +235,12 @@ export class Controller {
     this.deliveryAttempts = new DeliveryAttempts(
       (binding, event) =>
         this.appendEvent(binding, event, {
-          type: "baton",
-        }) as EventEnvelope<"_baton_delivery_attempt_update">,
+          type: "aide",
+        }) as EventEnvelope<"_aide_delivery_attempt_update">,
       options.session.ledger.read(),
     );
     this.contextDeliveries = new ContextDeliveries(
-      (binding, event) => this.appendEvent(binding, event, { type: "baton" }),
+      (binding, event) => this.appendEvent(binding, event, { type: "aide" }),
       options.session.ledger.read(),
     );
     this.harnessInteractions = new HarnessInteractionContinuations(
@@ -283,7 +283,7 @@ export class Controller {
           enqueueSeq.set(event.payload.messageId, event.seq);
         }
         latest.set(event.payload.messageId, event);
-      } else if (event.kind === "_baton_queue_reordered") {
+      } else if (event.kind === "_aide_queue_reordered") {
         queueOrder.set(event.payload.laneId, [...event.payload.orderedMessageIds]);
       }
     }
@@ -322,7 +322,7 @@ export class Controller {
       if (!target || !this.options.session.meta.lanes[input.laneId]) {
         this.options.session.log({
           level: "warn",
-          source: "baton",
+          source: "aide",
           component: "controller.input-recovery",
           message: "queued Harness Input could not be restored",
           attributes: {
@@ -406,8 +406,8 @@ export class Controller {
           this.recordHarnessInputTransition(input, status, update),
         (orderedMessageIds) => {
           this.options.session.appendEvent({
-            kind: "_baton_queue_reordered",
-            source: { type: "baton" },
+            kind: "_aide_queue_reordered",
+            source: { type: "aide" },
             laneId,
             payload: { laneId, orderedMessageIds: [...orderedMessageIds] },
           });
@@ -639,7 +639,7 @@ export class Controller {
    * 用户输入的统一入口。Input 先获得稳定 messageId 并进入主 Lane Queue；没有更早 follow-up、
    * 目标与当前 Queue run 一致且 HarnessSession 已就绪时，Controller 原子 claim 队头，
    * 再交给 Adapter 依据原生运行态决定 same-turn send。Adapter 拒绝时同一 Input 回到队头。
-   * 没有对应 Queue run 的 Turn 不接受 steer——Baton 不拥有其投递生命周期。
+   * 没有对应 Queue run 的 Turn 不接受 steer——Aide 不拥有其投递生命周期。
    *
    * @spec 每次用户提交只创建一个 Input/messageId；steer rejection 降级 follow-up 时保持身份不变。
    * @see {@link ../../docs/workflow.md}
@@ -719,7 +719,7 @@ export class Controller {
       ) {
         // The admission receipt lost the race with Esc. This Adapter cannot
         // carry native pending input across cancel, so the still-unapplied
-        // claimed Input returns to Baton's queue instead of being attached
+        // claimed Input returns to Aide's queue instead of being attached
         // to an already retired Turn. Adapter 已接受并落过 steer 正文，
         // 重放按回收 steer 语义落成可见 follow-up。
         queue.requeueClaimed(input, { fromAcceptedSteer: true });
@@ -741,7 +741,7 @@ export class Controller {
             turnId: active.turnId,
             payload: { messageId: input.messageId, state: "applied" },
           },
-          { type: "baton" },
+          { type: "aide" },
         );
       }
       if (active.status === "active") {
@@ -760,7 +760,7 @@ export class Controller {
     }
     if (receipt.effective === "new_turn") {
       const error = new Error(
-        `adapter ${active.binding.adapter.harness} opened a new turn while Baton turn ${active.turnId} is active`,
+        `adapter ${active.binding.adapter.harness} opened a new turn while Aide turn ${active.turnId} is active`,
       );
       queue.abandonClaimed(input);
       this.changed();
@@ -1012,7 +1012,7 @@ export class Controller {
     } catch (error) {
       this.options.session.log({
         level: "error",
-        source: "baton",
+        source: "aide",
         component: "controller.compact",
         harness: target.harness,
         harnessTargetId,
@@ -1134,7 +1134,7 @@ export class Controller {
     } catch (error) {
       this.options.session.log({
         level: "error",
-        source: "baton",
+        source: "aide",
         component: "controller.cancel",
         harness: active.binding.adapter.harness,
         harnessTargetId: active.binding.target.id,
@@ -1153,7 +1153,7 @@ export class Controller {
   /**
    * Some Harnesses bind pending steer input to the active native Turn. Once
    * that Turn is interrupted the input is provably unapplied and unreachable;
-   * reclaim it into Baton's Queue before cancel can synchronously emit idle.
+   * reclaim it into Aide's Queue before cancel can synchronously emit idle.
    */
   private reclaimPendingSteers(active: QueueRun<HarnessBinding>): void {
     if (active.binding.adapter.steering?.cancelOwnership !== "unreachable") return;
@@ -1182,7 +1182,7 @@ export class Controller {
             detail: "steer became unreachable after cancel; reclaimed into the queue",
           },
         },
-        { type: "baton" },
+        { type: "aide" },
       );
     }
     this.queueForLane(active.laneId).requeueSteers(active, pendingIds);
@@ -1203,7 +1203,7 @@ export class Controller {
         binding.close().catch((error) => {
           this.options.session.log({
             level: "warn",
-            source: "baton",
+            source: "aide",
             component: "controller.close",
             harness: binding.adapter.harness,
             harnessTargetId: binding.target.id,
@@ -1325,7 +1325,7 @@ export class Controller {
         turnId: opts.turnId,
         payload: { state: "running" },
       },
-      { type: "baton" },
+      { type: "aide" },
     );
     const record = this.turns.get(opts.turnId);
     if (!record) throw new Error(`Turn ${opts.turnId} did not open`);
@@ -1341,10 +1341,10 @@ export class Controller {
       startedAt: Date.now(),
     });
 
-    // 出队即入账、即落盘：用户输入是 BatonSession 的事实，owner 是 controller——
+    // 出队即入账、即落盘：用户输入是 AideSession 的事实，owner 是 controller——
     // 不等 harness 冷启动（codex 首启要 spawn → initialize → thread resume/start，
     // 可达数秒，期间 Transcript 必须已能看到这条输入）。落盘的是**原始输入** input.blocks：
-    // <baton-sync> 注入只进 harness transport（syncContext / prepend），不进正典历史。
+    // <aide-sync> 注入只进 harness transport（syncContext / prepend），不进正典历史。
     let binding: HarnessBinding;
     let record: TurnRecord<HarnessBinding>;
     let run: QueueRun<HarnessBinding>;
@@ -1371,18 +1371,18 @@ export class Controller {
       this.appendEvent(
         binding,
         {
-          kind: "_baton_run_status",
+          kind: "_aide_run_status",
           turnId: input.turnId,
           payload: { phase: "starting", title: `Starting ${input.target.harness}…` },
         },
-        { type: "baton" },
+        { type: "aide" },
       );
     }
 
     try {
       await this.ensureHarness(input.laneId, input.target.id);
       // A cold open can finish after close() has frozen scheduling. The Binding
-      // has already released that late handle; close the accepted Baton Turn as
+      // has already released that late handle; close the accepted Aide Turn as
       // cancelled and leave later queued Inputs durable for the next resume.
       if (this.lifecycleState !== "open") {
         this.synthesizeTerminal(record, { stopReason: "cancelled" });
@@ -1395,11 +1395,11 @@ export class Controller {
         this.appendEvent(
           binding,
           {
-            kind: "_baton_run_status",
+            kind: "_aide_run_status",
             turnId: input.turnId,
             payload: { phase: null },
           },
-          { type: "baton" },
+          { type: "aide" },
         );
       }
 
@@ -1441,7 +1441,7 @@ export class Controller {
         });
         const syncBlock: PromptBlock = {
           type: "text",
-          text: `<baton-sync>\n${catchUp.text}\n</baton-sync>`,
+          text: `<aide-sync>\n${catchUp.text}\n</aide-sync>`,
         };
         if (isContextSynchronizable(binding.adapter)) {
           await binding.adapter.syncContext(binding.ref, [syncBlock]);
@@ -1506,7 +1506,7 @@ export class Controller {
               ? `: ${receipt.reason}`
               : "";
           throw new Error(
-            `adapter ${binding.adapter.harness} rejected new Baton turn ${input.turnId}${reason}`,
+            `adapter ${binding.adapter.harness} rejected new Aide turn ${input.turnId}${reason}`,
           );
         }
       } catch (error) {
@@ -1528,7 +1528,7 @@ export class Controller {
               implementationTurnId: input.turnId,
             },
           },
-          { type: "baton" },
+          { type: "aide" },
         );
       }
       if (submitContext) {
@@ -1549,7 +1549,7 @@ export class Controller {
       const detail = error instanceof Error ? error.message : String(error);
       this.options.session.log({
         level: "error",
-        source: "baton",
+        source: "aide",
         component: "controller.turn",
         harness: input.target.harness,
         harnessTargetId: targetKey,
@@ -1560,7 +1560,7 @@ export class Controller {
       // 启动/admission 失败：合成结构化终态（error + idle + summary）——user_message 已
       // 落盘，必须有结局，不允许"输入消失且无历史"的半状态；随后仍上抛给 submit 调用方。
       this.synthesizeTerminal(run, { message: detail, stopReason: "error" });
-      throw new Error(`BatonSession ${this.options.session.id} · ${targetKey}: ${detail}`, {
+      throw new Error(`AideSession ${this.options.session.id} · ${targetKey}: ${detail}`, {
         cause: error,
       });
     } finally {
@@ -1603,7 +1603,7 @@ export class Controller {
   }
 
   /**
-   * HarnessEvent 与 Controller 自有 Event draft 的统一提交入口。BatonSession 先完成
+   * HarnessEvent 与 Controller 自有 Event draft 的统一提交入口。AideSession 先完成
    * WAL record，再直接 reduce 当前 Projection；Controller 随后只处理 Turn
    * scope 等协调逻辑。Ledger 不在这条实时链路上广播 Event。
    */
@@ -1625,7 +1625,7 @@ export class Controller {
         // Event 已先落盘，再建立 Turn scope 的运行期索引。
         this.turns.open(binding, envelope.turnId);
       } else if (p.state === "idle") {
-        // 终态一律按 baton turn id 查表路由（不看 binding）。无 turnId 的终态：
+        // 终态一律按 aide turn id 查表路由（不看 binding）。无 turnId 的终态：
         // 已持久化留痕，但无法归属任何 turn，不驱动生命周期（adapter 契约要求
         // 终态必带 turnId，由契约测试钉住）。
         if (envelope.turnId) {
@@ -1636,7 +1636,7 @@ export class Controller {
         }
       }
     }
-    // Projection 已在 BatonSession 内同步 reduce；终态对 Controller 私有台账的
+    // Projection 已在 AideSession 内同步 reduce；终态对 Controller 私有台账的
     // 变更仍由 finalize 自己通知。
     return envelope;
   }
@@ -1645,7 +1645,7 @@ export class Controller {
    * 所有 Turn 的统一有序收界路径：终态已持久化 → interrupted notice → summary →
    * 同步元数据 → 若有关联 Queue run，则释放它并推进队列。Harness 自行打开的 Turn
    * 同样会被汇总，让后台产出进入 @ 引用与跨 Harness catch-up 的正典历史。
-   * 按 baton turn id 幂等：迟到/重复/未知终态一律 inert，不会关闭更新的 turn。
+   * 按 aide turn id 幂等：迟到/重复/未知终态一律 inert，不会关闭更新的 turn。
    */
   private finalize(terminal: EventEnvelope<"state_update">): void {
     const turnId = terminal.turnId;
@@ -1667,8 +1667,8 @@ export class Controller {
     // 用户打断的 turn 在时间线留下醒目标记；排队的后续输入会自然跟在标记后面
     if (run && stopReason === "cancelled") {
       session.appendEvent({
-        kind: "_baton_notice",
-        source: { type: "baton" },
+        kind: "_aide_notice",
+        source: { type: "aide" },
         harness: record.harness,
         harnessTargetId: record.harnessTargetId,
         laneId: record.laneId,
@@ -1727,7 +1727,7 @@ export class Controller {
       .catch((error) => {
         session.log({
           level: "warn",
-          source: "baton",
+          source: "aide",
           component: "textgen",
           message: "session title generation failed",
           attributes: { error: error instanceof Error ? error.message : String(error) },
@@ -1783,7 +1783,7 @@ export class Controller {
         // 候选构造也是降级链的一部分；某个 provider 配置损坏不能阻断其他家。
         this.options.session.log({
           level: "warn",
-          source: "baton",
+          source: "aide",
           component: "textgen",
           harness: target.harness,
           harnessTargetId: target.id,
@@ -1809,11 +1809,11 @@ export class Controller {
       this.appendEvent(
         record.binding,
         {
-          kind: "_baton_error_update",
+          kind: "_aide_error_update",
           turnId: record.turnId,
           payload: { message: opts.message, retryable: false },
         },
-        { type: "baton" },
+        { type: "aide" },
       );
     }
     this.appendEvent(
@@ -1823,7 +1823,7 @@ export class Controller {
         turnId: record.turnId,
         payload: { state: "idle", stopReason: opts.stopReason },
       },
-      { type: "baton" },
+      { type: "aide" },
     );
   }
 

@@ -49,7 +49,7 @@ function consumedUserMessageUuids(correlation: {
     (correlation.user_message_uuid ? [correlation.user_message_uuid] : []);
 }
 
-/** Maps Claude SDK messages and permission callbacks into Baton protocol events. */
+/** Maps Claude SDK messages and permission callbacks into Aide protocol events. */
 export class ClaudeEventHandler {
   constructor(private options: ClaudeEventHandlerOptions) {}
   async handleCanUseTool(
@@ -66,7 +66,7 @@ export class ClaudeEventHandler {
       return {
         behavior: "deny",
         message:
-          "Baton captured the proposed plan. Stop here and wait for user feedback or a later implementation request.",
+          "Aide captured the proposed plan. Stop here and wait for user feedback or a later implementation request.",
       };
     }
     const suggestions = meta.suggestions ?? [];
@@ -96,7 +96,7 @@ export class ClaudeEventHandler {
       // 返回，即 CLI "Yes, don't ask again" 的同款授权路径
       return { behavior: "allow", updatedInput: input, updatedPermissions: suggestions };
     }
-    return { behavior: "deny", message: "denied by baton user" };
+    return { behavior: "deny", message: "denied by aide user" };
   }
 
   private async handleQuestion(
@@ -162,7 +162,7 @@ export class ClaudeEventHandler {
   /**
    * Claude may coalesce several queued user messages into one model turn. Newer SDKs report the
    * complete consumed batch in user_message_uuids; consuming only the representative singular UUID
-   * leaves the other Baton inputs stuck in the Composer Queue. Delete before emitting so the
+   * leaves the other Aide inputs stuck in the Composer Queue. Delete before emitting so the
    * partial/assistant/result and command-lifecycle correlation paths remain idempotent.
    */
   private applyConsumedOffers(
@@ -202,7 +202,7 @@ export class ClaudeEventHandler {
       case "command_lifecycle": {
         const key = commandLifecycleKey(msg);
         const offer = rt.pendingOfferUuids?.get(key);
-        // 首轮 prompt 和 CLI 内部 command 也有 lifecycle；只处理 Baton 发出的 steer uuid。
+        // 首轮 prompt 和 CLI 内部 command 也有 lifecycle；只处理 Aide 发出的 steer uuid。
         if (!offer) break;
         if (msg.state === "queued") break;
         if (msg.state === "started" || msg.state === "completed") {
@@ -226,7 +226,7 @@ export class ClaudeEventHandler {
             raw: msg,
           });
           emit({
-            kind: "_baton_notice",
+            kind: "_aide_notice",
             payload: {
               level: "warning",
               title: "Queued message was not applied",
@@ -262,7 +262,7 @@ export class ClaudeEventHandler {
           // 只有 compacting 值得成为可见阶段；requesting 是普通运行态，与 null 一样
           // 归一成"无阶段"（回落默认 thinking），未来未知 status 同样安全降级。
           emit({
-            kind: "_baton_run_status",
+            kind: "_aide_run_status",
             payload:
               msg.status === "compacting"
                 ? { phase: "compacting", title: "Compacting context…" }
@@ -499,7 +499,7 @@ export class ClaudeEventHandler {
         if (msg.subtype === "success" && typeof msg.api_error_status === "number") {
           const status = msg.api_error_status;
           emit({
-            kind: "_baton_error_update",
+            kind: "_aide_error_update",
             payload: {
               code: `api_error_${status}`,
               message:

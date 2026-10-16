@@ -42,7 +42,7 @@ import type {
   ViewInputRecord,
   ViewOutput,
   Watch,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 import type { PluginInstance } from "./instance.ts";
 import type { ResourceClient } from "./resource-client.ts";
 import { validateResourceType } from "./resource.ts";
@@ -91,31 +91,31 @@ export type {
   ViewInputRecord,
   ViewOutput,
   Watch,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
-export const BATON_SYSTEM_NAMESPACE = "baton-system" as const;
-export const BATON_TURN_RESOURCE_TYPE = Object.freeze({
-  apiVersion: "baton.dev/v1alpha1",
+export const AIDE_SYSTEM_NAMESPACE = "aide-system" as const;
+export const AIDE_TURN_RESOURCE_TYPE = Object.freeze({
+  apiVersion: "aide.dev/v1alpha1",
   kind: "Turn",
 } as const satisfies ResourceType);
-export const BATON_SESSION_RESOURCE_TYPE = Object.freeze({
-  apiVersion: "baton.dev/v1alpha1",
+export const AIDE_SESSION_RESOURCE_TYPE = Object.freeze({
+  apiVersion: "aide.dev/v1alpha1",
   kind: "Session",
 } as const satisfies ResourceType);
-export const BATON_TARGET_RESOURCE_TYPE = Object.freeze({
-  apiVersion: "baton.dev/v1alpha1",
+export const AIDE_TARGET_RESOURCE_TYPE = Object.freeze({
+  apiVersion: "aide.dev/v1alpha1",
   kind: "Target",
 } as const satisfies ResourceType);
-export const BATON_SESSION_TARGET_BINDING_RESOURCE_TYPE = Object.freeze({
-  apiVersion: "baton.dev/v1alpha1",
+export const AIDE_SESSION_TARGET_BINDING_RESOURCE_TYPE = Object.freeze({
+  apiVersion: "aide.dev/v1alpha1",
   kind: "SessionTargetBinding",
 } as const satisfies ResourceType);
 
-export const BATON_RESOURCE_TYPES = Object.freeze([
-  BATON_TURN_RESOURCE_TYPE,
-  BATON_SESSION_RESOURCE_TYPE,
-  BATON_TARGET_RESOURCE_TYPE,
-  BATON_SESSION_TARGET_BINDING_RESOURCE_TYPE,
+export const AIDE_RESOURCE_TYPES = Object.freeze([
+  AIDE_TURN_RESOURCE_TYPE,
+  AIDE_SESSION_RESOURCE_TYPE,
+  AIDE_TARGET_RESOURCE_TYPE,
+  AIDE_SESSION_TARGET_BINDING_RESOURCE_TYPE,
 ] as const);
 
 function uniqueRequests(

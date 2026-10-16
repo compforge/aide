@@ -1,6 +1,6 @@
 // Adapter 统一抽象："小核心 + 可选能力"（见 docs/harness.md）。
 // 各家用原生协议接入，归一成 HarnessEvent 交给 sink；source / harness /
-// harnessTargetId 由宿主在可信边界补齐，提交后才成为 Baton Event。
+// harnessTargetId 由宿主在可信边界补齐，提交后才成为 Aide Event。
 
 import type {
   ConfigValue,
@@ -24,7 +24,7 @@ export type { HarnessEvent, HarnessEventSink } from "./event.ts";
 export interface HarnessSessionHandle {
   harness: string;
   handleId: string;
-  /** 是否成功恢复了既有原生会话；false 表示新建，宿主需要从 BatonSession 补历史。 */
+  /** 是否成功恢复了既有原生会话；false 表示新建，宿主需要从 AideSession 补历史。 */
   resumed?: boolean;
 }
 
@@ -67,8 +67,8 @@ export interface OpenOptions {
  * 内部映射，不进 controller 契约。
  *
  * 普通 prompt 的 `user_message` / `state_update(running)` 由 controller 在出队时落盘
- * （用户输入是 BatonSession 的事实，不等 harness 冷启动；且新 turn 的 blocks 可能
- * 含 <baton-sync> prepend，不能进正典历史）——adapter **不得**为 prompt 重复发这两个
+ * （用户输入是 AideSession 的事实，不等 harness 冷启动；且新 turn 的 blocks 可能
+ * 含 <aide-sync> prepend，不能进正典历史）——adapter **不得**为 prompt 重复发这两个
  * 事件；messageId 仅供 same-turn send 成功路径发 delivery:"steer" 的 user_message upsert。
  */
 export type PromptInput = Pick<HarnessInput, "turnId" | "messageId" | "blocks"> & {
@@ -149,7 +149,7 @@ export interface AdapterCapabilities {
     stop?: CapabilityMarker;
   };
   inputs?: {
-    /** 声明后必须实现 InputCancellable：按 Baton messageId 取消单条 Harness 原生待处理输入。 */
+    /** 声明后必须实现 InputCancellable：按 Aide messageId 取消单条 Harness 原生待处理输入。 */
     cancel?: CapabilityMarker;
   };
   interactions?: {
@@ -166,8 +166,8 @@ export interface AdapterCapabilities {
  *
  * 终态硬性约定：每个被 sendTurn 以 `new_turn` 接受的 turn，adapter 在**任何退出路径**（正常结束、
  * wire fatal error、子进程退出、transport close）都必须恰好报告或合成一次
- * `state_update(idle)`；错误路径先发 `_baton_error_update` 再发 idle。重复/迟到的
- * 物理终态允许存在，由 controller 按 baton turn id 幂等 finalize。
+ * `state_update(idle)`；错误路径先发 `_aide_error_update` 再发 idle。重复/迟到的
+ * 物理终态允许存在，由 controller 按 aide turn id 幂等 finalize。
  */
 export interface HarnessAdapter {
   readonly harness: string;
@@ -178,7 +178,7 @@ export interface HarnessAdapter {
    *   applied/failed/uncertain；`ack-only` = 接受即应用，由 Core 合成 applied，无后续回执。
    * - `cancelOwnership`：cancel/interrupt 后原生队列里未应用的 steer 是否仍可达。
    *   survives = Adapter 保留投递责任并报告结果（不能确认时为 uncertain）；unreachable = 不可达，Controller 会在
-   *   发 cancel 前把它们收回 Baton Queue。
+   *   发 cancel 前把它们收回 Aide Queue。
    */
   readonly steering?: {
     readonly deliveryTracking: "ack-only" | "explicit";
@@ -196,7 +196,7 @@ export interface HarnessAdapter {
   /**
    * 发送输入。Adapter 根据自己的活跃 turn 决定开启新 turn、same-turn steer 或拒绝：
    * - 无活跃 turn 时，接受后必须返回 `new_turn`；
-   * - `input.turnId` 与活跃 Baton turn 一致时，可以返回 `steer`；
+   * - `input.turnId` 与活跃 Aide turn 一致时，可以返回 `steer`；
    * - 活跃 turn 不匹配、不可 steer 或原生协议拒绝时返回 `rejected`，不得擅自并行开 turn。
    *
    * throw 只表示 Adapter 尚未接受投递责任；resolve 为 accepted 后的失败必须经事件流
@@ -353,7 +353,7 @@ export function isReconcilable(adapter: HarnessAdapter): adapter is HarnessAdapt
 }
 
 /**
- * 审批路由的归一值：`user` = 请求进 baton TUI；`delegated` = harness 侧 reviewer 代批
+ * 审批路由的归一值：`user` = 请求进 aide TUI；`delegated` = harness 侧 reviewer 代批
  * （必须留下带 id 的回执，见 docs/approval-lifecycle.md）。harness 的方言词
  * （codex 的 `auto_review` / `guardian_subagent`）在 adapter 边界收口，不越界。
  */
@@ -363,7 +363,7 @@ export interface ApprovalRoutable {
   /**
    * 当前**实际生效**的审批路由。
    *
-   * 必须是权威值——由 harness 自己解析后报告，不是 baton 从配置意图反推的。反推必错：
+   * 必须是权威值——由 harness 自己解析后报告，不是 aide 从配置意图反推的。反推必错：
    * codex 的 reviewer 解析链含云端下发的企业 requirements（`allowed_approvals_reviewers`），
    * 能覆盖用户 config.toml 里写死的值、也能覆盖启动参数。无法确知时返回 null——
    * 不知道就别声称（不变量 #2），投影据此静默而不是编一个。
@@ -412,7 +412,7 @@ export function isContextCompactable(adapter: HarnessAdapter): adapter is Harnes
   return typeof (adapter as Partial<ContextCompactable>).compactContext === "function";
 }
 
-/** 可把 BatonSession 的缺失历史追加到 harness 自己的 model-visible history。 */
+/** 可把 AideSession 的缺失历史追加到 harness 自己的 model-visible history。 */
 export interface ContextSynchronizable {
   syncContext(ref: HarnessSessionHandle, blocks: PromptBlock[]): Promise<void>;
 }

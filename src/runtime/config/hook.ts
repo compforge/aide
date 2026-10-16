@@ -1,4 +1,4 @@
-// Codex app-server 只提供 hooks/list，没有持久 trust 写接口。Baton 因而按 HarnessTarget
+// Codex app-server 只提供 hooks/list，没有持久 trust 写接口。Aide 因而按 HarnessTarget
 // 保存用户已审过的 hook 精确定义指纹；定义或执行目标变化时都重新询问。
 
 import { createHash } from "node:crypto";
@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 
 import type { HookTrustCandidate } from "../interaction/types.ts";
 import { withFileLock } from "../store/file-lock.ts";
-import { batonRoot } from "./config.ts";
+import { aideRoot } from "./config.ts";
 
 interface PersistedHookState extends Record<string, unknown> {
   trust?: unknown;
@@ -27,13 +27,13 @@ export interface HookTrustStore {
 }
 
 export function hookStatePath(rootDir?: string): string {
-  return join(batonRoot(rootDir), "state", "hook.json");
+  return join(aideRoot(rootDir), "state", "hook.json");
 }
 
 /** currentHash 是 Codex 对完整 hook definition 的权威指纹；缺失时用同字段稳定降级。 */
 export function hookTrustFingerprint(hook: HookTrustCandidate): string {
   if (hook.currentHash?.trim()) return hook.currentHash;
-  return `baton-sha256:${createHash("sha256")
+  return `aide-sha256:${createHash("sha256")
     .update(
       JSON.stringify({
         key: hook.key,

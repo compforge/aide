@@ -7,7 +7,7 @@ import type {
   ResourceRef,
   ResourceNamespace,
   ResourceType,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import { PluginResourceStore } from "./resource.ts";
 
@@ -41,7 +41,7 @@ export type ResourceClientChange = {
     }
 );
 
-export interface BatonResourceAccess {
+export interface AideResourceAccess {
   handles(type: ResourceType): boolean;
   get<TSpec, TStatus>(
     ref: ResourceRef,
@@ -68,7 +68,7 @@ export function createResourceClient(
   store: PluginResourceStore,
   onChange?: (change: ResourceClientChange) => void,
   assertCanCreateType?: (type: ResourceType) => void,
-  batonResources?: BatonResourceAccess,
+  aideResources?: AideResourceAccess,
 ): ResourceClient {
   const changed = (
     kind: "created" | "status-updated" | "metadata-updated" | "deleted",
@@ -97,9 +97,9 @@ export function createResourceClient(
   const assertOwned = (
     resource: Readonly<Resource<unknown, unknown>>,
   ): void => {
-    if (resource.metadata.namespace === "baton-system") {
+    if (resource.metadata.namespace === "aide-system") {
       throw new Error(
-        `plugin ResourceClient cannot mutate Baton-owned ${resource.kind}/${resource.metadata.name}`,
+        `plugin ResourceClient cannot mutate Aide-owned ${resource.kind}/${resource.metadata.name}`,
       );
     }
   };
@@ -107,12 +107,12 @@ export function createResourceClient(
   async function get<TSpec, TStatus>(
     ref: ResourceRef,
   ): Promise<Readonly<Resource<TSpec, TStatus>> | undefined> {
-    if (batonResources?.handles(ref)) {
-      return batonResources.get<TSpec, TStatus>(ref);
+    if (aideResources?.handles(ref)) {
+      return aideResources.get<TSpec, TStatus>(ref);
     }
-    if (ref.namespace === "baton-system") {
+    if (ref.namespace === "aide-system") {
       throw new Error(
-        `plugin ResourceClient cannot access Baton-owned ${ref.kind}/${ref.name}`,
+        `plugin ResourceClient cannot access Aide-owned ${ref.kind}/${ref.name}`,
       );
     }
     const current = store.find<TSpec, TStatus>(
@@ -135,8 +135,8 @@ export function createResourceClient(
       type: ResourceType,
       options?: ResourceListOptions,
     ) {
-      if (batonResources?.handles(type)) {
-        return batonResources.list<TSpec, TStatus>(type, options);
+      if (aideResources?.handles(type)) {
+        return aideResources.list<TSpec, TStatus>(type, options);
       }
       return store
         .list<TSpec, TStatus>(type, options)
@@ -201,8 +201,8 @@ export function createResourceClient(
       resource: Readonly<Resource<TSpec, TStatus>>,
       patch: ResourceMergePatch,
     ) {
-      if (batonResources?.handles(resource)) {
-        return batonResources.patch(resource, patch);
+      if (aideResources?.handles(resource)) {
+        return aideResources.patch(resource, patch);
       }
       throw new Error(
         `Resource ${resource.apiVersion}/${resource.kind} does not support generic patch`,

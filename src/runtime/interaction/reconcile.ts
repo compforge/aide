@@ -7,7 +7,7 @@ import type {
   DraftInput,
   HarnessInvocationInput,
   VerbResult,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import { resolutionEvent, requestResult } from "./resolution.ts";
 import { actorOf } from "../message/actor.ts";
@@ -274,7 +274,7 @@ export class ReconcileInteractionStore {
       this.settle(
         interaction.messageId,
         { kind: "harness_invocation", outcome: "approved" },
-        { type: "baton" },
+        { type: "aide" },
       );
     }
     const result = await this.waitFor(interaction.messageId);
@@ -307,7 +307,7 @@ export class ReconcileInteractionStore {
       this.settle(
         messageId,
         { kind: "cancelled", reason: "recovery", detail: error },
-        { type: "baton" },
+        { type: "aide" },
       );
     }
   }
@@ -354,9 +354,9 @@ export class ReconcileInteractionStore {
     scope: ExecutionScope,
     request: PluginInteractionRequest,
   ): InputRequest {
-    if (scope.batonSessionId !== this.session.id) {
+    if (scope.aideSessionId !== this.session.id) {
       throw new Error(
-        `plugin Interaction batonSessionId must be ${this.session.id}, got ${scope.batonSessionId}`,
+        `plugin Interaction aideSessionId must be ${this.session.id}, got ${scope.aideSessionId}`,
       );
     }
     const interaction = createInputRequest(
@@ -443,7 +443,7 @@ export class ReconcileInteractionStore {
       this.settle(
         messageId,
         { kind: "cancelled", reason: "timeout" },
-        { type: "baton" },
+        { type: "aide" },
       );
     }
     this.arm();

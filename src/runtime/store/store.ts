@@ -1,7 +1,7 @@
-// 会话存储：~/.baton/projects/<project key>/sessions/<id>/。
-// Project 只负责按 cwd 组织 BatonSession；session.jsonl 承载统一逻辑历史，
-// session/plugins/ 承载以该 BatonSession 为 owner 的 Plugin 数据。
-// HarnessSession 元数据只用于优先恢复 harness 私有状态，缺失时仍可从 BatonSession 重建上下文。
+// 会话存储：~/.aide/projects/<project key>/sessions/<id>/。
+// Project 只负责按 cwd 组织 AideSession；session.jsonl 承载统一逻辑历史，
+// session/plugins/ 承载以该 AideSession 为 owner 的 Plugin 数据。
+// HarnessSession 元数据只用于优先恢复 harness 私有状态，缺失时仍可从 AideSession 重建上下文。
 
 import { createHash } from "node:crypto";
 import { turnUserText } from "./message-relations.ts";
@@ -88,12 +88,12 @@ export interface LegacyHarnessSessionMeta extends HarnessSessionMeta {
 
 /** fork 谱系：child 复制了哪个会话、复制到哪个事件水位（将来从消息 fork 时即边界）。 */
 export interface SessionForkOrigin {
-  batonSessionId: string;
+  aideSessionId: string;
   /** 源会话中被复制历史的最后一个事件 seq */
   throughSeq: number;
 }
 
-/** 从 HarnessSession 接入 Baton 时的不可变来源坐标。 */
+/** 从 HarnessSession 接入 Aide 时的不可变来源坐标。 */
 export interface AdoptedHarnessSession {
   harnessTargetId: string;
   harness: string;
@@ -125,7 +125,7 @@ export interface NativeSessionOrigin {
 }
 
 export interface SessionMeta {
-  batonSessionId: string;
+  aideSessionId: string;
   /** Session 名称：可由用户显式指定；fork 未命名时由第一条 queue 补齐。 */
   title?: string;
   /** 第一条真实用户输入的紧凑预览，只写一次；供 resume/list/@ 发现会话。 */
@@ -139,7 +139,7 @@ export interface SessionMeta {
   harnessTargets: Record<string, HarnessTargetMeta>;
   /** Core-owned desired route exposed as SessionTargetBinding. */
   targetBinding?: SessionTargetBindingMeta;
-  /** Baton-native task lines. A Lane may traverse multiple HarnessTargets. */
+  /** Aide-native task lines. A Lane may traverse multiple HarnessTargets. */
   lanes: Record<string, LaneMeta>;
   /** @deprecated in-memory compatibility projection; omitted from new meta.json writes. */
   harnessSessions: Record<string, LegacyHarnessSessionMeta>;
@@ -151,7 +151,7 @@ export interface SessionMeta {
 }
 
 export interface SessionCleanupFailure {
-  batonSessionId: string;
+  aideSessionId: string;
   cwd: string;
   error: string;
 }
@@ -193,7 +193,7 @@ const SESSION_PREVIEW_SCAN_BYTES = 256 * 1024;
 
 /** 对齐 Codex resume：取第一条有效用户输入的首个非空行，并做有界字符截断。 */
 export function sessionPreview(text: string): string | undefined {
-  const firstLine = stripBatonInjectedContext(text)
+  const firstLine = stripAideInjectedContext(text)
     .split(/\r?\n/)
     // chat-tui 的图片粘贴目前以本地路径进入文本；它是附件，不是可辨识的会话名称。
     .map((line) =>
@@ -310,7 +310,7 @@ export interface NativeSessionMaterialization {
 }
 
 export interface HarnessHistoryEvent {
-  source: "user" | "baton" | "harness";
+  source: "user" | "aide" | "harness";
   event: AnyEventDraft;
 }
 
@@ -380,7 +380,7 @@ export class SessionStore {
     rootDir?: string,
     loggerOptions: { readonly level?: LogLevel } = {},
   ) {
-    this.rootDir = rootDir ?? join(homedir(), ".baton");
+    this.rootDir = rootDir ?? join(homedir(), ".aide");
     this.loggerOptions = loggerOptions;
   }
 
@@ -389,7 +389,7 @@ export class SessionStore {
   }
 
   /**
-   * 旧布局（~/.baton/sessions/<id> 和 projects/<cwd escaped>/<id>）一次性迁移到
+   * 旧布局（~/.aide/sessions/<id> 和 projects/<cwd escaped>/<id>）一次性迁移到
    * projects/<project key>/sessions/<id>。
    * meta 缺失或损坏的目录原地保留，不阻塞正常使用。
    */
@@ -414,7 +414,7 @@ export class SessionStore {
     this.ensureProject(cwd);
     mkdirSync(dir, { recursive: true });
     const meta: SessionMeta = {
-      batonSessionId: id,
+      aideSessionId: id,
       title: opts.title,
       cwd,
       createdAt: new Date().toISOString(),
@@ -429,7 +429,7 @@ export class SessionStore {
     return new SessionHandle(id, dir, meta, this.loggerOptions);
   }
 
-  /** 把只读 HarnessHistorySnapshot 接入唯一 BatonSession owner。 */
+  /** 把只读 HarnessHistorySnapshot 接入唯一 AideSession owner。 */
   adoptHarnessSession(
     source: HarnessSessionAdoptionSource,
   ): { session: SessionHandle; reused: boolean } {
@@ -438,7 +438,7 @@ export class SessionStore {
     try {
       const existing = this.findByHarnessSession(source.session);
       if (existing) {
-        const session = this.openSession(existing.batonSessionId);
+        const session = this.openSession(existing.aideSessionId);
         const ownsLock = session.acquireLock();
         try {
           this.reconcileHarnessSession(session, source);
@@ -520,13 +520,13 @@ export class SessionStore {
     const summaries = session.ledger
       .read()
       .filter(
-        (event): event is EventEnvelope<"_baton_turn_summary"> =>
-          event.kind === "_baton_turn_summary" &&
+        (event): event is EventEnvelope<"_aide_turn_summary"> =>
+          event.kind === "_aide_turn_summary" &&
           event.harnessTargetId === harnessTargetId,
       );
     if (summaries.length > source.turns.length) {
       throw new Error(
-        `HarnessSession history is behind its Baton owner for ${harnessTargetId}/${identity.id}`,
+        `HarnessSession history is behind its Aide owner for ${harnessTargetId}/${identity.id}`,
       );
     }
 
@@ -688,7 +688,7 @@ export class SessionStore {
       }
       return new SessionHandle(id, dir, meta, this.loggerOptions);
     }
-    throw new Error(`baton session not found: ${id}`);
+    throw new Error(`aide session not found: ${id}`);
   }
 
   listSessions(opts: { cwd?: string } = {}): SessionMeta[] {
@@ -753,9 +753,9 @@ export class SessionStore {
       const observedActivity = Date.parse(candidate.updatedAt ?? candidate.createdAt);
       if (!Number.isFinite(observedActivity) || observedActivity >= cutoff) continue;
 
-      if (basename(dir) !== candidate.batonSessionId) {
+      if (basename(dir) !== candidate.aideSessionId) {
         result.failures.push({
-          batonSessionId: candidate.batonSessionId,
+          aideSessionId: candidate.aideSessionId,
           cwd: candidate.cwd,
           error: "session directory and metadata identity do not match",
         });
@@ -769,7 +769,7 @@ export class SessionStore {
 
       let ownsLock = false;
       try {
-        ownsLock = acquireSessionLock(lockPath, candidate.batonSessionId);
+        ownsLock = acquireSessionLock(lockPath, candidate.aideSessionId);
         if (!ownsLock) {
           result.skippedActive.push(candidate);
           continue;
@@ -779,7 +779,7 @@ export class SessionStore {
           readFileSync(join(dir, "meta.json"), "utf8"),
         ) as SessionMeta;
         if (
-          persisted.batonSessionId !== candidate.batonSessionId ||
+          persisted.aideSessionId !== candidate.aideSessionId ||
           resolve(persisted.cwd) !== resolve(candidate.cwd)
         ) {
           throw new Error("session metadata identity changed during cleanup");
@@ -798,7 +798,7 @@ export class SessionStore {
           result.skippedActive.push(candidate);
         } else {
           result.failures.push({
-            batonSessionId: candidate.batonSessionId,
+            aideSessionId: candidate.aideSessionId,
             cwd: candidate.cwd,
             error: error instanceof Error ? error.message : String(error),
           });
@@ -812,12 +812,12 @@ export class SessionStore {
   }
 
   /** Read-only liveness observation for Session Resource projection. */
-  isSessionActive(meta: Pick<SessionMeta, "batonSessionId" | "cwd">): boolean {
-    const path = join(this.sessionDir(resolve(meta.cwd), meta.batonSessionId), "lock");
+  isSessionActive(meta: Pick<SessionMeta, "aideSessionId" | "cwd">): boolean {
+    const path = join(this.sessionDir(resolve(meta.cwd), meta.aideSessionId), "lock");
     return sessionLockIsActive(path);
   }
 
-  /** adoptedFrom 是 owner 索引；当前 mutable binding 只为尚未 adoption 的 Baton 会话兜底。 */
+  /** adoptedFrom 是 owner 索引；当前 mutable binding 只为尚未 adoption 的 Aide 会话兜底。 */
   findByHarnessSession(source: AdoptedHarnessSession): SessionMeta | undefined {
     const { harnessTargetId, harness, identity } = source;
     const matches = this.listSessions().filter((meta) => {
@@ -837,9 +837,9 @@ export class SessionStore {
       );
     });
     if (matches.length > 1) {
-      const owners = matches.map((meta) => meta.batonSessionId).join(", ");
+      const owners = matches.map((meta) => meta.aideSessionId).join(", ");
       throw new Error(
-        `HarnessSession ${harnessTargetId}/${identity.id} is owned by multiple BatonSessions: ${owners}`,
+        `HarnessSession ${harnessTargetId}/${identity.id} is owned by multiple AideSessions: ${owners}`,
       );
     }
     return matches[0];
@@ -859,13 +859,13 @@ export class SessionStore {
   }
 
   /**
-   * Fork 一个 BatonSession：把 throughSeq（默认 head）之前的事件历史复制进新会话。
+   * Fork 一个 AideSession：把 throughSeq（默认 head）之前的事件历史复制进新会话。
    * 复制的前缀与源是同一段逻辑历史（git-branch 语义）：seq 与 turn/message/toolCall/
    * interaction 等领域对象 ID 原样保留，只换 session scope。Event 是 ledger append 的身份，
    * 换 scope 时重新签发 eventId，保证一个 eventId 只属于一个权威 ledger。
    * 谱系由 meta.forkedFrom 表达。
    * child 继承 HarnessTarget 偏好和逻辑 Lane 拓扑，但清空所有原生 session binding
-   * （否则两个 BatonSession 会写进同一份 Harness 历史）；child 首次使用某个
+   * （否则两个 AideSession 会写进同一份 Harness 历史）；child 首次使用某个
    * Lane × Target 时创建 fresh native session + 新 ContextEpoch，并从复制历史补课。
    * opts.cwd 支持跨 project fork：历史跟源走，project 归属跟 fork 发起位置走；
    * 缺省沿用源 cwd。
@@ -889,7 +889,7 @@ export class SessionStore {
         JSON.stringify({
           ...ev,
           eventId: newId("ev"),
-          scope: { type: "session", batonSessionId: id },
+          scope: { type: "session", aideSessionId: id },
         }),
       );
       writeFileSync(join(dir, "session.jsonl"), `${lines.join("\n")}\n`);
@@ -913,7 +913,7 @@ export class SessionStore {
       ]),
     );
     const meta: SessionMeta = {
-      batonSessionId: id,
+      aideSessionId: id,
       title: opts.title,
       description: `fork: ${sourceQuestion}`,
       cwd,
@@ -922,7 +922,7 @@ export class SessionStore {
       harnessTargets,
       lanes,
       harnessSessions: {},
-      forkedFrom: { batonSessionId: sourceSessionId, throughSeq: events.at(-1)?.seq ?? 0 },
+      forkedFrom: { aideSessionId: sourceSessionId, throughSeq: events.at(-1)?.seq ?? 0 },
     };
     writeMetaAtomic(dir, meta);
     return new SessionHandle(id, dir, meta, this.loggerOptions);
@@ -972,7 +972,7 @@ export class SessionStore {
         continue;
       }
       if (Number.isFinite(holder) && holder > 0 && pidAlive(holder)) {
-        throw new Error(`another baton process is adopting a HarnessSession (pid ${holder})`);
+        throw new Error(`another aide process is adopting a HarnessSession (pid ${holder})`);
       }
       rmSync(path, { force: true });
     }
@@ -1078,7 +1078,7 @@ export class SessionHandle {
   }
 
   /**
-   * BatonSession 的统一 Event 入口。当前策略先完成 WAL record，再直接 reduce；
+   * AideSession 的统一 Event 入口。当前策略先完成 WAL record，再直接 reduce；
    * Ledger 只是 Recorder，不承担实时分发。
    */
   appendEvent<K extends EventKind>(event: NewEvent<K>): EventEnvelope<K> {
@@ -1096,7 +1096,7 @@ export class SessionHandle {
       eventId: newId("ev"),
       ts: new Date().toISOString(),
       seq: this.nextEventSeq,
-      scope: { type: "session", batonSessionId: this.id },
+      scope: { type: "session", aideSessionId: this.id },
       ...event,
       ...(harnessTargetId === undefined ? {} : { harnessTargetId }),
     };
@@ -1109,9 +1109,9 @@ export class SessionHandle {
       } catch (error) {
         this.log({
           level: "error",
-          source: "baton",
+          source: "aide",
           component: "session.event",
-          message: "BatonSession event listener threw",
+          message: "AideSession event listener threw",
           error: logError(error),
           attributes: { seq: envelope.seq, kind: envelope.kind },
         });
@@ -1161,7 +1161,7 @@ export class SessionHandle {
         path,
         `${JSON.stringify({
           ts: new Date().toISOString(),
-          batonSessionId: this.id,
+          aideSessionId: this.id,
           harnessTargetId,
           ...(laneId ? { laneId } : {}),
           harness,
@@ -1201,7 +1201,7 @@ export class SessionHandle {
     return reduceEvents(this.ledger.read());
   }
 
-  updateMeta(patch: Partial<Omit<SessionMeta, "batonSessionId">>): void {
+  updateMeta(patch: Partial<Omit<SessionMeta, "aideSessionId">>): void {
     this.meta = normalizeSessionMeta({ ...this.meta, ...patch });
     writeMetaAtomic(this.dir, this.meta);
   }
@@ -1368,7 +1368,7 @@ export class SessionHandle {
   }
 
   /**
-   * 汇总一个 turn 并落盘 _baton_turn_summary 事件。
+   * 汇总一个 turn 并落盘 _aide_turn_summary 事件。
    * 幂等：同一 turnId 已有 summary 时直接返回已有的，不重复追加。
    */
   summarizeTurn(turnId: string): TurnSummary {
@@ -1376,11 +1376,11 @@ export class SessionHandle {
   }
 
   /** 与 summarizeTurn 相同，但返回 envelope，供 live reducer 消费实际落盘事件。 */
-  summarizeTurnEvent(turnId: string): EventEnvelope<"_baton_turn_summary"> {
+  summarizeTurnEvent(turnId: string): EventEnvelope<"_aide_turn_summary"> {
     const events = this.ledger.read();
     const existing = events.find(
-      (e): e is EventEnvelope<"_baton_turn_summary"> =>
-        e.kind === "_baton_turn_summary" && e.payload.turnId === turnId,
+      (e): e is EventEnvelope<"_aide_turn_summary"> =>
+        e.kind === "_aide_turn_summary" && e.payload.turnId === turnId,
     );
     if (existing) return existing;
 
@@ -1427,33 +1427,33 @@ export class SessionHandle {
       startedAt: turnEvents[0]?.ts,
       endedAt: turnEvents[turnEvents.length - 1]?.ts,
     };
-    const harness = turnEvents[0]?.harness ?? "baton";
+    const harness = turnEvents[0]?.harness ?? "aide";
     const harnessTargetId = turnEvents.find((event) => event.harnessTargetId)?.harnessTargetId;
     const laneId = turnEvents.find((event) => event.laneId)?.laneId;
     const event = this.appendEvent({
-      kind: "_baton_turn_summary",
-      source: { type: "baton" },
+      kind: "_aide_turn_summary",
+      source: { type: "aide" },
       payload: summary,
       harness,
       ...(harnessTargetId ? { harnessTargetId } : {}),
       ...(laneId ? { laneId } : {}),
       turnId,
-    }) as EventEnvelope<"_baton_turn_summary">;
+    }) as EventEnvelope<"_aide_turn_summary">;
     this.updateMeta({ updatedAt: summary.endedAt ?? new Date().toISOString() });
     return event;
   }
 }
 
 const HISTORY_OPERATIONAL_KINDS = new Set<EventKind>([
-  "_baton_turn_summary",
-  "_baton_delivery_attempt_update",
-  "_baton_context_snapshot",
-  "_baton_context_delivery_receipt",
-  "_baton_queue_reordered",
+  "_aide_turn_summary",
+  "_aide_delivery_attempt_update",
+  "_aide_context_snapshot",
+  "_aide_context_delivery_receipt",
+  "_aide_queue_reordered",
 ]);
 
 function canonicalHistoryValue(value: unknown, key?: string): unknown {
-  // Baton 和 Harness 各自签发的局部 ID、时间戳不属于历史语义；保留它们会让同一事实
+  // Aide 和 Harness 各自签发的局部 ID、时间戳不属于历史语义；保留它们会让同一事实
   // 因承载坐标不同而误报 divergence。
   if (key && (/Id$/.test(key) || key === "ts" || key.endsWith("At"))) return undefined;
   if (Array.isArray(value)) {
@@ -1534,7 +1534,7 @@ function adoptionFor(meta: SessionMeta): HarnessSessionAdoption | undefined {
 
 function materializedHistoryTurns(
   session: SessionHandle,
-  summaries: readonly EventEnvelope<"_baton_turn_summary">[],
+  summaries: readonly EventEnvelope<"_aide_turn_summary">[],
 ): HarnessHistoryTurn[] {
   const events = session.ledger.read();
   // 新事件流里 steer 的投递事实在 input_delivery_update；未证应用的 steer 内容不进历史。
@@ -1567,7 +1567,7 @@ function materializedHistoryTurns(
           ? "user"
           : event.source.type === "harness"
             ? "harness"
-            : "baton";
+            : "aide";
       return [{
         source,
         event: {
@@ -1617,7 +1617,7 @@ function acquireSessionLock(path: string, sessionId: string): boolean {
     if (holder === process.pid) return false;
     if (Number.isFinite(holder) && holder > 0 && pidAlive(holder)) {
       throw new SessionInUseError(
-        `baton session ${sessionId} is in use by another baton process (pid ${holder})`,
+        `aide session ${sessionId} is in use by another aide process (pid ${holder})`,
       );
     }
     rmSync(path, { force: true });
@@ -1665,8 +1665,8 @@ function materializedEventSource(
   switch (source) {
     case "user":
       return { type: "user" };
-    case "baton":
-      return { type: "baton" };
+    case "aide":
+      return { type: "aide" };
     case "harness":
       return { type: "harness", harnessTargetId };
   }
@@ -1676,6 +1676,6 @@ function comparableTurnText(text: string | undefined): string {
   return text?.replace(/\r\n/g, "\n").replace(/\n{2,}/g, "\n").trim() ?? "";
 }
 
-function stripBatonInjectedContext(text: string): string {
-  return text.replace(/<baton-(context|sync)>[\s\S]*?<\/baton-\1>\s*/g, "").trim();
+function stripAideInjectedContext(text: string): string {
+  return text.replace(/<aide-(context|sync)>[\s\S]*?<\/aide-\1>\s*/g, "").trim();
 }

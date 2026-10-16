@@ -75,7 +75,7 @@ export function turnUserText(state: SessionState, turnId: string): string {
     const text = textOf(message.content);
     if (text) parts.push(text);
   }
-  return parts.join("\n").replace(/<baton-(context|sync)>[\s\S]*?<\/baton-\1>\s*/g, "").trim();
+  return parts.join("\n").replace(/<aide-(context|sync)>[\s\S]*?<\/aide-\1>\s*/g, "").trim();
 }
 
 export function refreshConsumedSummary(state: SessionState, turnId: string | undefined, seq: number): void {

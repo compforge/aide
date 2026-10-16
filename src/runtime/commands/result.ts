@@ -1,4 +1,4 @@
-import type { CommandRef, CommandResult } from "@compforge/baton-plugin";
+import type { CommandRef, CommandResult } from "@compforge/aide-plugin";
 
 function nonEmptyCommandText(name: string, value: string): void {
   if (!value.trim()) throw new Error(`${name} must not be empty`);

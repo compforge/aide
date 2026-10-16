@@ -1,8 +1,8 @@
 import type { ContentBlock } from "../event/index.ts";
 import type { InteractionAnswer, InteractionCancellationReason, InteractionDraft } from "../interaction/types.ts";
 
-import type { ActorRef } from "@compforge/baton-plugin";
-export type { ActorKind, ActorRef } from "@compforge/baton-plugin";
+import type { ActorRef } from "@compforge/aide-plugin";
+export type { ActorKind, ActorRef } from "@compforge/aide-plugin";
 
 /**
  * @spec Message identity and authorship survive content updates, delivery receipts and replay.

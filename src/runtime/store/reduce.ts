@@ -82,7 +82,7 @@ export interface ProposedPlanState extends ProposedPlan {
 }
 
 export interface HarnessTaskState extends HarnessTaskUpdate {
-  /** Baton identity; taskId remains the Harness-native identity. */
+  /** Aide identity; taskId remains the Harness-native identity. */
   taskKey: string;
   harness?: string;
   harnessTargetId?: string;
@@ -314,7 +314,7 @@ function getOrCreateMessage(
       ? inputMessage(id, createdAt, state.harnessInputs.get(id)?.source ?? source, harnessTargetId)
       : {
           kind: "output", messageId: id, role, content: [], createdAt,
-          source: harnessTargetId ? { kind: "harness", key: harnessTargetId } : actorOf(source ?? { type: "baton" }),
+          source: harnessTargetId ? { kind: "harness", key: harnessTargetId } : actorOf(source ?? { type: "aide" }),
           target: { ...HUMAN_ACTOR },
         };
     msg = {
@@ -631,7 +631,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
     case "harness_input.updated":
       applyHarnessInputUpdate(state, ev);
       break;
-    case "_baton_queue_reordered":
+    case "_aide_queue_reordered":
       // Queue order is execution state restored by Controller; the View reads
       // the Controller's ordered snapshots rather than duplicating that index.
       break;
@@ -807,7 +807,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       }
       break;
     }
-    case "_baton_delivery_attempt_update": {
+    case "_aide_delivery_attempt_update": {
       const update = ev.payload;
       const request =
         update.phase === "prepared"
@@ -825,7 +825,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       }
       break;
     }
-    case "_baton_harness_invocation_recorded": {
+    case "_aide_harness_invocation_recorded": {
       if (state.harnessInvocations.has(ev.payload.invocationId)) break;
       state.harnessInvocations.set(ev.payload.invocationId, {
         invocationId: ev.payload.invocationId,
@@ -844,7 +844,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       });
       break;
     }
-    case "_baton_harness_invocation_scheduled": {
+    case "_aide_harness_invocation_scheduled": {
       const request = state.harnessInvocations.get(ev.payload.invocationId);
       if (!request) break;
       request.phase = "queued";
@@ -854,7 +854,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       request.turnId = ev.payload.turnId;
       break;
     }
-    case "_baton_harness_invocation_cancelled": {
+    case "_aide_harness_invocation_cancelled": {
       const request = state.harnessInvocations.get(ev.payload.invocationId);
       if (
         request && request.phase !== "completed" && request.phase !== "failed"
@@ -864,7 +864,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       }
       break;
     }
-    case "_baton_harness_invocation_failed": {
+    case "_aide_harness_invocation_failed": {
       const request = state.harnessInvocations.get(ev.payload.invocationId);
       if (
         request && request.phase !== "completed" && request.phase !== "cancelled"
@@ -874,7 +874,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       }
       break;
     }
-    case "_baton_error_update": {
+    case "_aide_error_update": {
       const errorEntry = {
         ...ev.payload,
         seq: ev.seq,
@@ -887,7 +887,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       state.timeline.push({ type: "error", id: errorId });
       break;
     }
-    case "_baton_run_status": {
+    case "_aide_run_status": {
       const p = ev.payload;
       // per-turn 运行阶段；无 turnId 或未命中活跃 turn 时丢弃——phase 是短寿命
       // 短寿命装饰信息；turn 已收口后的迟到 phase 没有呈现意义。
@@ -895,7 +895,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       if (turn) turn.phase = p.phase === null ? undefined : { phase: p.phase, title: p.title };
       break;
     }
-    case "_baton_notice":
+    case "_aide_notice":
       state.notices.push({
         ...ev.payload,
         seq: ev.seq,
@@ -903,7 +903,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       });
       state.timeline.push({ type: "notice", id: `n_${ev.seq}` });
       break;
-    case "_baton_turn_summary": {
+    case "_aide_turn_summary": {
       const summary: TurnSummaryState = {
         ...ev.payload,
         harness: ev.harness,

@@ -1,12 +1,12 @@
-// baton 内部事件模型：词汇对齐 ACP v2（state_update / 按 messageId 的消息 upsert + chunk 追加 /
+// aide 内部事件模型：词汇对齐 ACP v2（state_update / 按 messageId 的消息 upsert + chunk 追加 /
 // tool_call_update upsert），wire 协议不必是 ACP——adapter 负责把各家原生协议归一到这里。
-// baton 自有扩展事件用 _baton_ 前缀；公共归一契约见 docs/harness.md。
+// aide 自有扩展事件用 _aide_ 前缀；公共归一契约见 docs/harness.md。
 
 import type { InputRequestCreated, InputRequestCancelled } from "./interaction.ts";
 import type { InputResponse } from "../message/types.ts";
 import type { HarnessDeliveryAttemptUpdate } from "../controller/attempt.ts";
 import type { HarnessInputUpdate } from "../harness/input.ts";
-import type { ViewInput } from "@compforge/baton-plugin";
+import type { ViewInput } from "@compforge/aide-plugin";
 import type {
   ContextDeliveryReceipt,
   ContextSnapshot,
@@ -37,14 +37,14 @@ export const ENVELOPE_VERSION = 7 as const;
  * 或其它执行坐标反推来源。
  */
 export type EventSource =
-  | { type: "baton" }
+  | { type: "aide" }
   | { type: "user" }
   | { type: "harness"; harnessTargetId: string }
   | { type: "plugin"; pluginInstanceId: string }
   | { type: "schedule"; scheduleId: string };
 
-/** Event 只属于一个 BatonSession ledger；scope 是归属与查询键，不是 payload 的授权范围。 */
-export type EventScope = { type: "session"; batonSessionId: string };
+/** Event 只属于一个 AideSession ledger；scope 是归属与查询键，不是 payload 的授权范围。 */
+export type EventScope = { type: "session"; aideSessionId: string };
 
 export type SessionRunState = "running" | "idle" | "requires_action";
 
@@ -257,7 +257,7 @@ export interface HarnessTaskUpdate {
 /**
  * 自动审批（auto-review）回执：reviewer 替用户对某操作作出的决策，供诚实留痕（见
  * docs/approval-lifecycle.md §3）。与 Interaction 的交互待决流正交——
- * auto-review 开启时审批卡不触发，baton 只观测这条回执。归一自 codex
+ * auto-review 开启时审批卡不触发，aide 只观测这条回执。归一自 codex
  * `item/autoApprovalReview/*`（**UNSTABLE**）：字段全部按可选容忍，原始形状保留在 envelope.raw。
  *
  * 一等审计对象：按自己的 `reviewId` 归档（见 docs/approval-lifecycle.md）。`reviewId` 让"无 target 的
@@ -328,7 +328,7 @@ export interface ConfigOptionUpdate {
 
 /**
  * Legacy context 占用/成本快照，对应 ACP v2 的 usage_update，仅用于历史 Ledger replay。
- * 与 baton 的 `usage_update`（token 增量）刻意分名：已落盘事件的语义不可静默翻转，
+ * 与 aide 的 `usage_update`（token 增量）刻意分名：已落盘事件的语义不可静默翻转，
  * 旧 session.jsonl 的 delta replay 必须继续得到相同累计结果（见 docs/workflow.md）。
  */
 export interface ContextUsageUpdate {
@@ -431,7 +431,7 @@ export interface HarnessInvocationScheduled {
   messageId: string;
   turnId: string;
   harnessTargetId: string;
-  /** Baton-owned task line reserved for this invocation. */
+  /** Aide-owned task line reserved for this invocation. */
   laneId: string;
 }
 
@@ -470,7 +470,7 @@ export type EventPayloadMap = {
   "input.received": ViewInputReceived;
   "input.settled": ViewInputSettled;
   "harness_input.updated": HarnessInputUpdate;
-  _baton_queue_reordered: QueueReordered;
+  _aide_queue_reordered: QueueReordered;
   input_delivery_update: InputDeliveryUpdate;
   state_update: StateUpdate;
   user_message: UserMessageUpsert;
@@ -496,17 +496,17 @@ export type EventPayloadMap = {
   context_window_update: ContextWindowUpdate;
   /** Legacy replay only. New adapters emit context_window_update. */
   context_usage_update: ContextUsageUpdate;
-  _baton_error_update: ErrorUpdate;
-  _baton_notice: Notice;
-  _baton_run_status: RunStatusUpdate;
-  _baton_context_snapshot: ContextSnapshot;
-  _baton_context_delivery_receipt: ContextDeliveryReceipt;
-  _baton_delivery_attempt_update: HarnessDeliveryAttemptUpdate;
-  _baton_turn_summary: TurnSummary;
-  _baton_harness_invocation_recorded: HarnessInvocationRecorded;
-  _baton_harness_invocation_scheduled: HarnessInvocationScheduled;
-  _baton_harness_invocation_cancelled: HarnessInvocationCancelled;
-  _baton_harness_invocation_failed: HarnessInvocationFailed;
+  _aide_error_update: ErrorUpdate;
+  _aide_notice: Notice;
+  _aide_run_status: RunStatusUpdate;
+  _aide_context_snapshot: ContextSnapshot;
+  _aide_context_delivery_receipt: ContextDeliveryReceipt;
+  _aide_delivery_attempt_update: HarnessDeliveryAttemptUpdate;
+  _aide_turn_summary: TurnSummary;
+  _aide_harness_invocation_recorded: HarnessInvocationRecorded;
+  _aide_harness_invocation_scheduled: HarnessInvocationScheduled;
+  _aide_harness_invocation_cancelled: HarnessInvocationCancelled;
+  _aide_harness_invocation_failed: HarnessInvocationFailed;
 };
 
 export type EventKind = keyof EventPayloadMap;
@@ -526,11 +526,11 @@ export interface EventEnvelope<K extends EventKind = EventKind> {
   source: EventSource;
   /** 本 Event 的直接上游 Event；不表示 ledger 顺序或领域归属。 */
   parentEventId?: string;
-  /** 事件关联的 harness 执行上下文；Baton / user / Plugin 事实可缺省。 */
+  /** 事件关联的 harness 执行上下文；Aide / user / Plugin 事实可缺省。 */
   harness?: string;
-  /** 实际投递/产出事件的配置目标；Baton 自身事件或未进入 controller 的外部事实可缺省。 */
+  /** 实际投递/产出事件的配置目标；Aide 自身事件或未进入 controller 的外部事实可缺省。 */
   harnessTargetId?: string;
-  /** Baton-native task line; new Harness execution facts must carry it. */
+  /** Aide-native task line; new Harness execution facts must carry it. */
   laneId?: string;
   harnessSessionId?: string;
   turnId?: string;
@@ -549,7 +549,7 @@ export type AnyEventEnvelope = { [K in EventKind]: EventEnvelope<K> }[EventKind]
 /** NewEvent 的判别联合版本，事件 sink 的入参类型 */
 export type AnyNewEvent = { [K in EventKind]: NewEvent<K> }[EventKind];
 
-/** 进入 BatonSession 时补齐 v/eventId/ts/seq/scope。 */
+/** 进入 AideSession 时补齐 v/eventId/ts/seq/scope。 */
 export type NewEvent<K extends EventKind = EventKind> = Omit<
   EventEnvelope<K>,
   "v" | "eventId" | "ts" | "seq" | "scope"
