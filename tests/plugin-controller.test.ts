@@ -1,15 +1,18 @@
-import { afterEach, describe, test } from "node:test";
-import { expect } from "expect";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  MAX_VERB_TIMEOUT_MS,
+  type AskInput,
+} from "@compforge/baton-plugin";
 
 import {
   Controller,
   type ControllerOptions,
   type ReconcileKey,
-} from "../src/plugin/controller.ts";
-import { PluginResourceStore } from "../src/plugin/resource.ts";
+} from "../src/runtime/plugin/controller.ts";
+import { PluginResourceStore } from "../src/runtime/plugin/resource.ts";
 
 interface Spec {
   requirement: string;
@@ -52,7 +55,7 @@ function store(root: string): PluginResourceStore {
 
 function key(resourceId: string = "run_1"): ReconcileKey {
   return {
-    hostId: "bs_test",
+    batonSessionId: "bs_test",
     pluginInstanceId: "reqloop_default",
     namespace: "v1",
     resourceApiVersion: REQ_LOOP_RUN.apiVersion,
@@ -112,7 +115,15 @@ describe("plugin Controller", () => {
       }],
       async reconcile(_context, resource) {
         reconciled.push(resource.metadata.namespace);
-        actionNamespaces.push(_context.namespace);
+        await _context.verbs.confirm({
+          timeoutMs: 1_000,
+          title: "Confirm",
+          prompt: "Continue?",
+        });
+      },
+      async invokeVerb(scope) {
+        actionNamespaces.push(scope.namespace);
+        return { state: "success", value: "accepted" };
       },
     });
 
@@ -672,6 +683,50 @@ describe("plugin Controller", () => {
     await expect(
       controller.enqueue({ ...key(), pluginInstanceId: "another_instance" }),
     ).rejects.toThrow("reconcile key is outside controller scope");
+    const invalidDeadline = new Controller<Spec, Status>({
+      store: resources,
+      resourceType: REQ_LOOP_RUN,
+      async reconcile(ctx) {
+        await ctx.verbs.ask({
+          timeoutMs: 0,
+          title: "Review",
+          prompt: "Continue?",
+          allowOther: true,
+        });
+      },
+    });
+    await expect(invalidDeadline.enqueue(key())).rejects.toThrow(
+      "ask timeoutMs must be a positive integer",
+    );
+    const excessiveDeadline = new Controller<Spec, Status>({
+      store: resources,
+      resourceType: REQ_LOOP_RUN,
+      async reconcile(ctx) {
+        await ctx.verbs.ask({
+          timeoutMs: MAX_VERB_TIMEOUT_MS + 1,
+          title: "Review",
+          prompt: "Continue?",
+          allowOther: true,
+        });
+      },
+    });
+    await expect(excessiveDeadline.enqueue(key())).rejects.toThrow(
+      `ask timeoutMs must not exceed ${MAX_VERB_TIMEOUT_MS}`,
+    );
+    const ambiguousAsk = new Controller<Spec, Status>({
+      store: resources,
+      resourceType: REQ_LOOP_RUN,
+      async reconcile(ctx) {
+        await ctx.verbs.ask({
+          timeoutMs: 1_000,
+          title: "Review",
+          prompt: "Continue?",
+        } as AskInput);
+      },
+    });
+    await expect(ambiguousAsk.enqueue(key())).rejects.toThrow(
+      "ask without choices must set allowOther to true",
+    );
     expect(
       () =>
         new Controller({

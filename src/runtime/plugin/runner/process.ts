@@ -1,0 +1,605 @@
+import type {
+  CommandDefinition,
+  CommandContext,
+  CommandInput,
+  CommandSubmitInput,
+  CommandSubmitReceipt,
+  Controller,
+  EventHandler,
+  Hook,
+  HookStage,
+  HookSubjectMap,
+  Mention,
+  PluginContext,
+  PluginDataDirectories,
+  PluginInstance,
+  PluginLogContext,
+  PluginLogLevel,
+  PluginPackage,
+  ReconcileSnapshot,
+  PluginSessionContext,
+  Resource,
+  ResourceClient,
+  ResourceListOptions,
+  ResourceMergePatch,
+  ResourceOwnerReference,
+  ResourceRef,
+  ResourceNamespace,
+  ResourceType,
+  Source,
+  SourceContext,
+  ToastMessage,
+  Watch,
+} from "@compforge/baton-plugin";
+import type { PluginLogRecord } from "../package.ts";
+import {
+  createHookContext,
+  createReconcileContext,
+  type ExecutionScope,
+  type VerbResponse,
+} from "../verb.ts";
+
+import {
+  type ActivationResult,
+  type ChildCall,
+  type ChildMessage,
+  type ChildReply,
+  type ControllerRegistration,
+  type HostRequest,
+  type ParentMessage,
+  type ParentReply,
+  type PluginPackageEntry,
+  type PluginRegistration,
+  type RunnerRequest,
+  restoredError,
+  serializedError,
+} from "./protocol.ts";
+
+interface PendingCall {
+  readonly resolve: (value: unknown) => void;
+  readonly reject: (error: unknown) => void;
+}
+
+const handlers = new Map<string, (...args: never[]) => unknown>();
+const sourceSignals = new Map<string, AbortController>();
+const cleanups: Array<() => Promise<void> | void> = [];
+const pendingHostCalls = new Map<number, PendingCall>();
+let nextHandlerId = 1;
+let nextHostCallId = 1;
+let active = false;
+let closing = false;
+
+function send(message: ChildMessage): void {
+  if (!process.send) throw new Error("Plugin Runner IPC is unavailable");
+  process.send(message);
+}
+
+function handler(
+  scope: string,
+  callback: (...args: never[]) => unknown,
+): string {
+  const handlerId = `${scope}:${nextHandlerId++}`;
+  handlers.set(handlerId, callback);
+  return handlerId;
+}
+
+function callHost<T>(request: HostRequest): Promise<T> {
+  if (closing) {
+    return Promise.reject(new Error("Plugin Runner is closing"));
+  }
+  const callId = nextHostCallId++;
+  return new Promise<unknown>((resolve, reject) => {
+    pendingHostCalls.set(callId, { resolve, reject });
+    try {
+      send({
+        kind: "child-call",
+        callId,
+        request,
+      } satisfies ChildCall);
+    } catch (error) {
+      pendingHostCalls.delete(callId);
+      reject(error);
+    }
+  }) as Promise<T>;
+}
+
+async function getResource<TSpec, TStatus>(
+  ref: ResourceRef,
+): Promise<Readonly<Resource<TSpec, TStatus>> | undefined> {
+  return await callHost<Readonly<Resource<TSpec, TStatus>> | undefined>({
+    method: "resource.get",
+    ref,
+  });
+}
+
+const resources: ResourceClient = Object.freeze({
+  get: getResource,
+  async list<TSpec, TStatus>(
+    type: ResourceType,
+    options?: ResourceListOptions,
+  ) {
+    return await callHost<readonly Readonly<Resource<TSpec, TStatus>>[]>({
+      method: "resource.list",
+      type,
+      options,
+    });
+  },
+  async create<TSpec, TStatus>(
+    type: ResourceType,
+    init: {
+      name: string;
+      namespace?: ResourceNamespace;
+      labels?: Readonly<Record<string, string>>;
+      annotations?: Readonly<Record<string, string>>;
+      owner?: ResourceOwnerReference;
+      spec: TSpec;
+    },
+  ) {
+    return await callHost<Readonly<Resource<TSpec, TStatus>>>({
+      method: "resource.create",
+      type,
+      init,
+    });
+  },
+  async delete(
+    type: ResourceType,
+    name: string,
+    namespace?: ResourceNamespace,
+  ) {
+    await callHost<void>({
+      method: "resource.delete",
+      type,
+      name,
+      ...(namespace === undefined ? {} : { namespace }),
+    });
+  },
+  async patch<TSpec, TStatus>(
+    resource: Readonly<Resource<TSpec, TStatus>>,
+    patch: ResourceMergePatch,
+  ) {
+    return await callHost<Readonly<Resource<TSpec, TStatus>>>({
+      method: "resource.patch",
+      resource: resource as Readonly<Resource<unknown, unknown>>,
+      patch,
+    });
+  },
+  async patchMetadata<TSpec, TStatus>(
+    resource: Readonly<Resource<TSpec, TStatus>>,
+    patch: {
+      readonly labels?: Readonly<Record<string, string | null>>;
+      readonly annotations?: Readonly<Record<string, string | null>>;
+    },
+  ) {
+    return await callHost<Readonly<Resource<TSpec, TStatus>>>({
+      method: "resource.patchMetadata",
+      resource: resource as Readonly<Resource<unknown, unknown>>,
+      patch,
+    });
+  },
+  async patchStatus<TSpec, TStatus>(
+    resource: Readonly<Resource<TSpec, TStatus>>,
+    patch: Partial<TStatus>,
+  ) {
+    return await callHost<Readonly<Resource<TSpec, TStatus>>>({
+      method: "resource.patchStatus",
+      resource: resource as Readonly<Resource<unknown, unknown>>,
+      patch: patch as Readonly<Record<string, unknown>>,
+    });
+  },
+});
+
+function commandRegistration(command: CommandDefinition): PluginRegistration {
+  return {
+    input: command.input,
+    aliases: command.aliases,
+    runPolicy: command.runPolicy,
+    scope: command.scope,
+    kind: "command",
+    handlerId: handler(
+      `command:${command.name}`,
+      (async (input: CommandInput, snapshot: Omit<CommandContext, "verbs">) => {
+        let active = true;
+        const invoke = (request: HostRequest) => {
+          if (!active) throw new Error("Command execution is no longer active");
+          return callHost(request);
+        };
+        try {
+          return await command.execute(input, Object.freeze({
+            ...snapshot,
+            verbs: Object.freeze({
+              submit: async (input: CommandSubmitInput) =>
+                await invoke({ method: "command.verb", executionId: snapshot.executionId, verb: "submit", input }) as CommandSubmitReceipt,
+              configureModel: async (input: { model?: string; effort?: string }) => {
+                await invoke({ method: "command.verb", executionId: snapshot.executionId, verb: "configureModel", input });
+              },
+            }),
+          }));
+        } finally { active = false; }
+      }) as (...args: never[]) => unknown,
+    ),
+    name: command.name,
+    description: command.description,
+  };
+}
+
+function mentionRegistration(mention: Mention): PluginRegistration {
+  return {
+    kind: "mention",
+    namespace: mention.namespace,
+    searchHandlerId: handler(
+      `mention:${mention.namespace}:search`,
+      mention.search.bind(mention) as (...args: never[]) => unknown,
+    ),
+    resolveHandlerId: handler(
+      `mention:${mention.namespace}:resolve`,
+      mention.resolve.bind(mention) as (...args: never[]) => unknown,
+    ),
+  };
+}
+
+function hookRegistration(hook: Hook): PluginRegistration {
+  return {
+    kind: "hook",
+    hookId: hook.hookId,
+    stage: hook.stage,
+    ...(hook.timeoutMs === undefined ? {} : { timeoutMs: hook.timeoutMs }),
+    handlerId: handler(
+      `hook:${hook.stage}:${hook.hookId}`,
+      (async <S extends HookStage>(
+        stage: S,
+        subject: Readonly<HookSubjectMap[S]>,
+        snapshot: ReconcileSnapshot,
+        context: ExecutionScope,
+      ) =>
+        await hook.run(
+          createHookContext(
+            stage,
+            subject,
+            snapshot,
+            context,
+            async (verbContext, request) =>
+              await callHost<VerbResponse>({
+                method: "verb.invoke",
+                context: verbContext,
+                request,
+              }),
+          ),
+        )) as (...args: never[]) => unknown,
+    ),
+  };
+}
+
+function watchRegistration(
+  controllerId: string,
+  watch: Watch,
+  index: number,
+): ControllerRegistration["watches"][number] {
+  const prefix = `${controllerId}:watch:${index}`;
+  return {
+    resourceType: watch.resourceType,
+    createHandlerId: handler(
+      `${prefix}:create`,
+      watch.handler.create.bind(watch.handler) as (...args: never[]) => unknown,
+    ),
+    updateHandlerId: handler(
+      `${prefix}:update`,
+      watch.handler.update.bind(watch.handler) as (...args: never[]) => unknown,
+    ),
+    deleteHandlerId: handler(
+      `${prefix}:delete`,
+      watch.handler.delete.bind(watch.handler) as (...args: never[]) => unknown,
+    ),
+  };
+}
+
+function controllerRegistration(
+  controller: Controller<unknown, unknown>,
+): PluginRegistration {
+  const controllerId =
+    `controller:${controller.resourceType.apiVersion}:${controller.resourceType.kind}`;
+  return {
+    kind: "controller",
+    controllerId,
+    resourceType: controller.resourceType,
+    reconcileHandlerId: handler(
+      `${controllerId}:reconcile`,
+      (async (snapshot, context, resource) =>
+        await controller.reconcile(
+          createReconcileContext(
+            snapshot,
+            context,
+            async (verbContext, request) =>
+              await callHost<VerbResponse>({
+                method: "verb.invoke",
+                context: verbContext,
+                request,
+              }),
+          ),
+          resource,
+        )) as (...args: never[]) => unknown,
+    ),
+    ...(controller.present === undefined
+      ? {}
+      : {
+          presentHandlerId: handler(
+            `${controllerId}:present`,
+            controller.present.bind(controller) as (...args: never[]) => unknown,
+          ),
+        }),
+    ...(controller.maxConcurrency === undefined
+      ? {}
+      : { maxConcurrency: controller.maxConcurrency }),
+    sources: Object.freeze(
+      (controller.sources ?? []).map((source) =>
+        source.type === "cron"
+          ? {
+              type: "cron" as const,
+              sourceId: source.sourceId,
+              cron: source.cron,
+              timeZone: source.timeZone,
+            }
+          : {
+              type: "resource" as const,
+              sourceId: source.sourceId,
+              startHandlerId: handler(
+                `${controllerId}:source:${source.sourceId}`,
+                source.start.bind(source) as (...args: never[]) => unknown,
+              ),
+            }
+      ),
+    ),
+    watches: Object.freeze(
+      (controller.watches ?? []).map((watch, index) =>
+        watchRegistration(controllerId, watch, index)
+      ),
+    ),
+  };
+}
+
+async function activate(
+  entry: PluginPackageEntry,
+  instance: PluginInstance,
+  session: PluginSessionContext,
+  dataDirs: PluginDataDirectories,
+): Promise<ActivationResult> {
+  if (active) throw new Error("Plugin Runner already has an active Binding");
+  if (closing) throw new Error("Plugin Runner is closing");
+  const module = await import(entry.entryUrl) as { default?: unknown };
+  const plugin = module.default as PluginPackage | undefined;
+  if (!plugin || typeof plugin.activate !== "function") {
+    throw new Error(`Plugin entry must default export a PluginPackage: ${entry.entryUrl}`);
+  }
+  if (plugin.pluginId !== entry.pluginId || plugin.version !== entry.version) {
+    throw new Error(
+      `loaded Package identity ${plugin.pluginId}@${plugin.version} does not match ${entry.pluginId}@${entry.version}`,
+    );
+  }
+  const registrations: PluginRegistration[] = [];
+  let sealed = false;
+  const assertRegistering = (): void => {
+    if (sealed) throw new Error("Plugin Binding activation is complete");
+  };
+  const context: PluginContext = Object.freeze({
+    instance,
+    session,
+    dataDirs: Object.freeze({ ...dataDirs }),
+    resources,
+    toast: Object.freeze({
+      show(message: ToastMessage) {
+        send({ kind: "toast", message });
+      },
+    }),
+    logger: pluginLogger(),
+    commands: Object.freeze({
+      register(command: CommandDefinition) {
+        assertRegistering();
+        registrations.push(commandRegistration(command));
+      },
+    }),
+    mentions: Object.freeze({
+      register(mention: Mention) {
+        assertRegistering();
+        registrations.push(mentionRegistration(mention));
+      },
+    }),
+    controllers: Object.freeze({
+      register<TSpec, TStatus>(controller: Controller<TSpec, TStatus>) {
+        assertRegistering();
+        registrations.push(
+          controllerRegistration(controller as Controller<unknown, unknown>),
+        );
+      },
+    }),
+    hooks: Object.freeze({
+      register(hook: Hook) {
+        assertRegistering();
+        registrations.push(hookRegistration(hook));
+      },
+    }),
+    lifecycle: Object.freeze({
+      onClose(cleanup: () => Promise<void> | void) {
+        assertRegistering();
+        cleanups.push(cleanup);
+      },
+    }),
+  });
+  try {
+    await plugin.activate(context);
+    sealed = true;
+    active = true;
+    return {
+      registrations: Object.freeze(registrations),
+    };
+  } catch (error) {
+    sealed = true;
+    await closeBinding();
+    throw error;
+  }
+}
+
+function pluginLogger(): PluginContext["logger"] {
+  const write = (
+    level: PluginLogLevel,
+    message: string,
+    context?: PluginLogContext,
+  ): void => {
+    try {
+      const record: PluginLogRecord = {
+        level,
+        message,
+        ...(context ? { context } : {}),
+      };
+      send({ kind: "log", record });
+    } catch {
+      // Logging is best-effort and must not change Plugin behavior.
+    }
+  };
+  return Object.freeze({
+    debug: (message: string, context?: PluginLogContext) =>
+      write("debug", message, context),
+    info: (message: string, context?: PluginLogContext) =>
+      write("info", message, context),
+    warn: (message: string, context?: PluginLogContext) =>
+      write("warn", message, context),
+    error: (message: string, context?: PluginLogContext) =>
+      write("error", message, context),
+  });
+}
+
+async function startSource(
+  handlerId: string,
+  sourceRunId: string,
+): Promise<void> {
+  const callback = handlers.get(handlerId) as Source<unknown>["start"] | undefined;
+  if (!callback) throw new Error(`Unknown Plugin handler: ${handlerId}`);
+  if (sourceSignals.has(sourceRunId)) {
+    throw new Error(`Plugin Source is already running: ${sourceRunId}`);
+  }
+  const abort = new AbortController();
+  sourceSignals.set(sourceRunId, abort);
+  const context: SourceContext<unknown> = Object.freeze({
+    signal: abort.signal,
+    async emit(
+      resource: Parameters<SourceContext<unknown>["emit"]>[0],
+    ) {
+      if (abort.signal.aborted) return;
+      await callHost<void>({
+        method: "source.emit",
+        sourceRunId,
+        resource,
+      });
+    },
+    reportError(error: unknown) {
+      if (abort.signal.aborted) return;
+      send({
+        kind: "source-error",
+        sourceRunId,
+        error: serializedError(error),
+      });
+    },
+  });
+  try {
+    await callback(context);
+  } catch (error) {
+    sourceSignals.delete(sourceRunId);
+    abort.abort();
+    throw error;
+  }
+}
+
+function stopSource(sourceRunId: string): void {
+  const abort = sourceSignals.get(sourceRunId);
+  sourceSignals.delete(sourceRunId);
+  abort?.abort();
+}
+
+async function closeBinding(): Promise<void> {
+  if (closing) return;
+  closing = true;
+  for (const abort of sourceSignals.values()) abort.abort();
+  sourceSignals.clear();
+  const errors: unknown[] = [];
+  for (const cleanup of cleanups.reverse()) {
+    try {
+      await cleanup();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  cleanups.length = 0;
+  handlers.clear();
+  for (const pending of pendingHostCalls.values()) {
+    pending.reject(new Error("Plugin Runner is closing"));
+  }
+  pendingHostCalls.clear();
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) {
+    throw new AggregateError(errors, "Could not close Plugin Runner");
+  }
+}
+
+async function dispatch(request: RunnerRequest): Promise<unknown> {
+  switch (request.method) {
+    case "activate":
+      return await activate(
+        request.entry,
+        request.instance,
+        request.session,
+        request.dataDirs,
+      );
+    case "invoke": {
+      const callback = handlers.get(request.handlerId);
+      if (!callback) throw new Error(`Unknown Plugin handler: ${request.handlerId}`);
+      return await callback(...request.args as never[]);
+    }
+    case "start-source":
+      await startSource(request.handlerId, request.sourceRunId);
+      return undefined;
+    case "stop-source":
+      stopSource(request.sourceRunId);
+      return undefined;
+    case "close":
+      await closeBinding();
+      return undefined;
+  }
+}
+
+function handleParentReply(reply: ParentReply): void {
+  const pending = pendingHostCalls.get(reply.callId);
+  if (!pending) return;
+  pendingHostCalls.delete(reply.callId);
+  if (reply.ok) pending.resolve(reply.value);
+  else pending.reject(restoredError(reply.error));
+}
+
+process.on("message", (message: ParentMessage) => {
+  if (message.kind === "parent-reply") {
+    handleParentReply(message);
+    return;
+  }
+  void dispatch(message.request).then(
+    (value) => {
+      send({
+        kind: "child-reply",
+        callId: message.callId,
+        ok: true,
+        value,
+      } satisfies ChildReply);
+      if (message.request.method === "close") {
+        process.disconnect?.();
+      }
+    },
+    (error) => {
+      send({
+        kind: "child-reply",
+        callId: message.callId,
+        ok: false,
+        error: serializedError(error),
+      } satisfies ChildReply);
+    },
+  );
+});
+
+process.on("disconnect", () => {
+  void closeBinding().finally(() => process.exit(0));
+});

@@ -1,0 +1,575 @@
+// baton 内部事件模型：词汇对齐 ACP v2（state_update / 按 messageId 的消息 upsert + chunk 追加 /
+// tool_call_update upsert），wire 协议不必是 ACP——adapter 负责把各家原生协议归一到这里。
+// baton 自有扩展事件用 _baton_ 前缀；公共归一契约见 docs/harness.md。
+
+import type { InputRequestCreated, InputRequestCancelled } from "./interaction.ts";
+import type { InputResponse } from "../message/types.ts";
+import type { HarnessDeliveryAttemptUpdate } from "../controller/attempt.ts";
+import type { HarnessInputUpdate } from "../harness/input.ts";
+import type { ViewInput } from "@compforge/baton-plugin";
+import type {
+  ContextDeliveryReceipt,
+  ContextSnapshot,
+} from "../context/delivery.ts";
+import type {
+  AudioBlock,
+  EmbeddedResourceBlock,
+  ImageBlock,
+  PromptBlock,
+  ResourceLinkBlock,
+  TextBlock,
+} from "../input/blocks.ts";
+export type {
+  AudioBlock,
+  EmbeddedResourceBlock,
+  ImageBlock,
+  PromptBlock,
+  ResourceLinkBlock,
+  TextBlock,
+} from "../input/blocks.ts";
+export const ENVELOPE_VERSION = 7 as const;
+
+/**
+ * 事实来源：回答“谁对这条 Event 负责”，不是 payload 中行为主体的角色，也不承载执行坐标。
+ * 例如 controller admit 的 user_message 来源是 user；Harness 确认接收 steer 后补报的
+ * user_message 来源是 harness。
+ * harness / plugin / schedule 的具体实例身份跟随各自分支，避免消费者再从 payload
+ * 或其它执行坐标反推来源。
+ */
+export type EventSource =
+  | { type: "baton" }
+  | { type: "user" }
+  | { type: "harness"; harnessTargetId: string }
+  | { type: "plugin"; pluginInstanceId: string }
+  | { type: "schedule"; scheduleId: string };
+
+/** Event 只属于一个 BatonSession ledger；scope 是归属与查询键，不是 payload 的授权范围。 */
+export type EventScope = { type: "session"; batonSessionId: string };
+
+export type SessionRunState = "running" | "idle" | "requires_action";
+
+// (string & {}) 让联合保持开放：未知值不破坏解析（ACP v2 的 forward-compat 约定）
+export type StopReason = "end_turn" | "max_tokens" | "refusal" | "cancelled" | (string & {});
+
+export interface DiffChange {
+  operation: "add" | "delete" | "modify" | "move" | (string & {});
+  path: string;
+  oldPath?: string;
+}
+
+/**
+ * 文件改动内容块（tool_call 的 content 里使用），形状对齐 ACP v2 diff content：
+ * changes 供结构化渲染（文件树/统计），patch 是可选的可渲染文本。
+ *
+ * 契约：patch 若存在必须是标准 unified diff（含 `---`/`+++`/`@@` 头）——渲染层的
+ * 行号与 split 视图信任这一点，adapter 负责在自己层内把各家私有格式转成标准 patch，
+ * 拼不出合法 patch 时宁可只发 changes（渲染层退化为 op+path 标题行）。
+ * 约定 patch 与 changes[0] 对应：adapter 按单文件发块，多文件改动发多个 DiffBlock。
+ */
+export interface DiffBlock {
+  type: "diff";
+  changes: DiffChange[];
+  patch?: string;
+}
+
+export type ContentBlock = TextBlock | ImageBlock | DiffBlock | { type: string; [key: string]: unknown };
+
+// ---- prompt input blocks ----
+// 输入与输出刻意不共用开放的 ContentBlock（见 docs/harness.md“sendTurn”）：
+// prompt 是 adapter 的入参契约，必须是可显式 admission 的闭合集合——不支持某 block 时
+// 报带类型的错误，而不是被 textOf() 之类静默降级；输出侧保持开放联合以容纳 harness 差异。
+// 词汇对齐 ACP/MCP content（text/image/audio/resource/resource_link）。
+
+export type MessageRole = "user" | "agent" | "thought";
+
+// ---- payloads ----
+
+export interface StateUpdate {
+  state: SessionRunState;
+  /** 仅在 idle 且结束了活跃工作时携带 */
+  stopReason?: StopReason;
+}
+
+/**
+ * 整消息 upsert，按 messageId 键控。三态 patch 语义：
+ * content 省略=不变；null 或 []=清空；具体数组=整体替换（含此前 chunk 累积的内容）。
+ */
+export interface MessageUpsert {
+  messageId: string;
+  content?: ContentBlock[] | null;
+  /** Replies to these existing Session messages, not all consumed inputs. Omitted = unknown/unchanged; [] = no specific reply target. */
+  replyToMessageIds?: readonly string[];
+}
+
+/**
+ * 用户输入的实际（effective）投递方式：steer = 中途注入了当前 turn 的安全边界。
+ * 开放联合 forward-compat；缺省视为 prompt（旧事件兼容）。requested delivery 不落盘——
+ * steer 被拒降级成 follow-up 时，落盘的是降级后的事实（见 docs/workflow.md）。
+ */
+export type SubmitDelivery = "prompt" | "steer" | "follow_up" | (string & {});
+
+/** user_message 专属 upsert：比通用 MessageUpsert 多 delivery 标记 */
+export interface UserMessageUpsert extends MessageUpsert {
+  delivery?: SubmitDelivery;
+  /**
+   * Legacy replay only：老 ledger 里 steer 的投递进度寄生在消息补丁上。
+   * 新事件流用 `input_delivery_update` 一等事件表达（HarnessInput.deliveryOutcome），
+   * Adapter 不再写这个字段；reduce 仍会消费它还原老会话。
+   */
+  deliveryState?: "pending" | "applied" | "failed" | "uncertain";
+}
+
+/**
+ * Harness 对 steer 输入的投递回执（Adapter → Core）：applied = 已写入模型上下文，
+ * failed = Harness 明确丢弃；uncertain = 连接丢失等导致无法确认，禁止自动重投。投递事实是 Input 的一等状态，不再寄生 user_message；
+ * 回执可能迟到于 Turn 收口（原生队列跨 Turn），不回迁调度 status；首次 applied 确认消息的实际执行归属。
+ * deliveryTracking = "ack-only" 的 Harness 没有后续回执，接受即由 Core 合成 applied。
+ */
+export interface InputDeliveryUpdate {
+  messageId: string;
+  state: "applied" | "failed" | "uncertain";
+  detail?: string;
+  /** Proven consumption anchor when the receipt arrives after its corresponding output. Omitted = observed stream position. */
+  beforeMessageId?: string;
+}
+
+/** chunk 永远是追加语义；role 由事件 kind 决定（user_/agent_/agent_thought_ 前缀） */
+export interface MessageChunk {
+  messageId: string;
+  content: ContentBlock;
+  /** Same patch semantics as MessageUpsert; chunks must not retarget an existing reply implicitly. */
+  replyToMessageIds?: readonly string[];
+}
+
+/**
+ * 工具终态词汇。declined 是一等成员而非 failed 的别名：它表示"被用户/策略拒绝、
+ * 操作没有执行"，展示待遇（⊘/warning 色）与后续动作（重发并授权）都不同于执行出错。
+ * adapter 边界负责把 harness 词汇翻译到这里，且必须白名单式映射——只有明确的成功值
+ * 才映射 completed，未知终态悲观归 failed；乐观兜底曾把 codex 的 declined 渲染成绿勾。
+ */
+export type ToolCallStatus = "pending" | "in_progress" | "completed" | "failed" | "declined" | (string & {});
+
+export type ToolKind =
+  | "read"
+  | "edit"
+  | "delete"
+  | "move"
+  | "search"
+  | "execute"
+  | "think"
+  | "fetch"
+  | "other"
+  | (string & {});
+
+/**
+ * 工具调用对世界的效果声明，与 kind（动作词汇）正交：kind 说"做了什么动作"，
+ * effect 说"有没有改东西"。read = 已证明纯只读；write = 已确认有副作用。
+ * adapter 边界负责按 harness 的工具语义填写；不上报 = 未知。安全消费者可以保守按
+ * write 处理 unknown，View 则独立计算 ViewPolicy，不能把保守决策当成写入事实。
+ * 开放联合留扩展位（如交互式）。
+ */
+export type ToolEffect = "read" | "write" | (string & {});
+
+/**
+ * 工具调用 upsert：首个未见过的 toolCallId 即创建（无独立 create 事件，对齐 ACP v2）。
+ * 三态 patch：字段省略=不变；null=清除；具体值=替换。数组字段整体替换。
+ */
+export interface ToolCallUpdate {
+  toolCallId: string;
+  title?: string | null;
+  kind?: ToolKind | null;
+  effect?: ToolEffect | null;
+  status?: ToolCallStatus | null;
+  content?: ContentBlock[] | null;
+  locations?: string[] | null;
+  rawInput?: unknown;
+  rawOutput?: unknown;
+}
+
+/** 向工具调用追加单个 content 项（流式），不重发整个数组 */
+export interface ToolCallContentChunk {
+  toolCallId: string;
+  content: ContentBlock;
+}
+
+export interface PlanEntry {
+  /** Stable within its Plan. Adapters preserve native IDs or derive one when the wire has none. */
+  id: string;
+  content: string;
+  priority: "high" | "medium" | "low" | (string & {});
+  status: "pending" | "in_progress" | "completed" | (string & {});
+}
+
+/** 执行中的计划快照；同一 planId 标识同一份计划。 */
+export interface Plan {
+  planId: string;
+  entries: PlanEntry[];
+}
+
+/** 每次 plan_update 整体替换该 planId 的 entries；首次出现即创建。 */
+export interface PlanUpdate extends Plan {}
+
+/** 显式撤下执行中的计划；Event Ledger 仍保留其历史事实。 */
+export interface PlanRemove {
+  planId: string;
+}
+
+/**
+ * Agent 已完成、等待用户反馈或另行要求执行的计划提案。
+ * 它是不可变产物，不是执行中的 plan_update，也不代表用户已授权执行。
+ */
+export interface ProposedPlan {
+  planId: string;
+  content: string;
+}
+
+/** 用户明确以某个计划提案为来源启动了执行 turn。 */
+export interface ProposedPlanImplementationStarted {
+  planId: string;
+  implementationTurnId: string;
+}
+
+export interface HarnessTaskUsage {
+  totalTokens?: number;
+  toolUses?: number;
+  durationMs?: number;
+}
+
+/**
+ * 后台任务 / subagent 的一等生命周期 upsert。与 TaskCreate/TodoWrite 的“工作清单”
+ * 不同：这里描述 Harness 已经启动的执行实体。
+ */
+export interface HarnessTaskUpdate {
+  taskId: string;
+  status: "in_progress" | "completed" | "failed" | "stopped";
+  title?: string;
+  taskType?: string;
+  /** false 表示仍阻塞主 Turn；转为 true 后才进入 Parallel 区域。 */
+  backgrounded?: boolean;
+  /** subagent 嵌套深度；顶层为 1。 */
+  spawnDepth?: number;
+  summary?: string;
+  lastToolName?: string;
+  usage?: HarnessTaskUsage;
+  skipTranscript?: boolean;
+}
+
+/**
+ * 自动审批（auto-review）回执：reviewer 替用户对某操作作出的决策，供诚实留痕（见
+ * docs/approval-lifecycle.md §3）。与 Interaction 的交互待决流正交——
+ * auto-review 开启时审批卡不触发，baton 只观测这条回执。归一自 codex
+ * `item/autoApprovalReview/*`（**UNSTABLE**）：字段全部按可选容忍，原始形状保留在 envelope.raw。
+ *
+ * 一等审计对象：按自己的 `reviewId` 归档（见 docs/approval-lifecycle.md）。`reviewId` 让"无 target 的
+ * review"也能留痕、同一操作上的多次决策各自成条、不再靠被审 `toolCallId` 覆盖。回执只在
+ * reviewer 决策**终态**（codex `/completed`）铸造，`toolCallId` 是可选的被审目标。
+ */
+export interface ApprovalReviewUpdate {
+  /** 本回执自身的稳定 id（`arv_` 前缀），adapter 在终态铸造；归档与投影的主键 */
+  reviewId: string;
+  /** 被审操作对应的 tool call / item id（对齐 codex targetItemId）；缺省表示无具体目标（如网络策略审查） */
+  toolCallId?: string;
+  /**
+   * reviewer 终态决策，**闭合三态**：adapter 边界已 fail-closed 收口（未知 → aborted），
+   * 内部不再面对开放值。approved→留痕、denied→拒绝、aborted→未决/异常（投影呈 failed）。
+   */
+  decision: "approved" | "denied" | "aborted";
+  /** harness 给出时透传的风险等级 */
+  riskLevel?: "low" | "medium" | "high" | "critical" | (string & {});
+  /**
+   * harness 回吐的授权等级（非“回退给用户”，不改变委托语义）。Codex compact low-risk
+   * allow 可能合成 unknown；这是 wire 上的明确值，照常保真，只有字段缺失才表示未返回。
+   */
+  userAuthorization?: "unknown" | "low" | "medium" | "high" | (string & {});
+  /** 决策理由，审计 / 诊断展示用 */
+  rationale?: string;
+  /** 被审操作类型：command / execve / applyPatch / networkAccess / mcpToolCall 等 */
+  actionType?: string;
+}
+
+/** harness 声明的可用 slash command（形状对齐 ACP available command） */
+export interface AvailableCommand {
+  name: string;
+  description?: string;
+  input?: { hint: string };
+}
+
+/** 完整快照：每次整体替换当前 HarnessTarget command 列表，不做增量合并（对齐 ACP） */
+export interface AvailableCommandsUpdate {
+  commands: AvailableCommand[];
+}
+
+export type ConfigValue = string | boolean;
+
+/** session 级配置项（model/mode/thought_level…），category 只影响 UI 摆放，不影响正确性 */
+export type SessionConfigOption =
+  | {
+      id: string;
+      type: "select";
+      name: string;
+      description?: string;
+      category?: string;
+      value: string;
+      options: Array<{ value: string; name: string; description?: string }>;
+    }
+  | {
+      id: string;
+      type: "boolean";
+      name: string;
+      description?: string;
+      category?: string;
+      value: boolean;
+    };
+
+/** 完整快照：model 变化可能联动 reasoning 等选项，整体替换避免 UI 残留旧项 */
+export interface ConfigOptionUpdate {
+  options: SessionConfigOption[];
+}
+
+/**
+ * Legacy context 占用/成本快照，对应 ACP v2 的 usage_update，仅用于历史 Ledger replay。
+ * 与 baton 的 `usage_update`（token 增量）刻意分名：已落盘事件的语义不可静默翻转，
+ * 旧 session.jsonl 的 delta replay 必须继续得到相同累计结果（见 docs/workflow.md）。
+ */
+export interface ContextUsageUpdate {
+  /** 产生本快照时使用的 adapter model selection；用于避免切 model 后展示旧窗口。 */
+  model?: string;
+  contextUsed?: number;
+  contextSize?: number;
+  cost?: { amount: number; currency: string };
+}
+
+/**
+ * 最近一次主/root 模型请求的 context window 快照。
+ * usedTokens 只统计输入侧（含 cache read/write，不含 output）；capacityTokens 与
+ * effectiveModel 必须来自同一次已解析路由。modelSelection 用于切换模型后判定旧快照失效。
+ */
+export interface ContextWindowUpdate {
+  modelSelection: string;
+  effectiveModel?: string;
+  usedTokens: number;
+  capacityTokens: number;
+}
+
+/**
+ * 结构化错误，不能只塞 stopReason。willRetry=true 表示 harness 仍在重试，
+ * 此时 session 不得被切 idle（见 docs/workflow.md“Turn 收口”）。
+ */
+export interface ErrorUpdate {
+  code?: string;
+  message: string;
+  retryable?: boolean;
+  willRetry?: boolean;
+}
+
+/** 非错误提示（warning/deprecation/auth、配置提醒），不伪装成 agent message 进时间线 */
+export interface Notice {
+  level: "info" | "warning" | "error" | (string & {});
+  title: string;
+  detail?: string;
+}
+
+/**
+ * 短寿命运行阶段快照（compacting…），见 docs/workflow.md“Adapter 归一”。
+ * phase 开放字符串（forward-compat）；null = 阶段结束，投影层回落默认 thinking。
+ * 刻意不塞 state_update：那是驱动 busy/idle finalize 的生命周期语义（§5.9）。
+ */
+export interface RunStatusUpdate {
+  phase: string | null;
+  /** 可展示文案（如 "Compacting context…"）；缺省由投影层按 phase 兜底 */
+  title?: string;
+}
+
+/** 语义为增量：reducer 直接累加。adapter 拿到累计快照时须先差分再发。当前窗口快照见 ContextWindowUpdate。 */
+export interface UsageUpdate {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  isEstimated?: boolean;
+}
+
+export interface TurnSummaryToolCall {
+  toolCallId: string;
+  title?: string;
+  kind?: string;
+  status?: string;
+}
+
+/**
+ * turn 结束时落盘的汇总事件：人可 grep、@ 引用的紧凑投影数据源、reduce 的 checkpoint。
+ * 见 docs/workflow.md“append、reduce 与 Projection”。
+ */
+export interface TurnSummary {
+  turnId: string;
+  stopReason?: StopReason;
+  userText?: string;
+  agentText?: string;
+  toolCalls: TurnSummaryToolCall[];
+  usage?: UsageUpdate;
+  startedAt?: string;
+  endedAt?: string;
+}
+
+export interface HarnessInvocationRecorded {
+  invocationId: string;
+  executionId: string;
+  verb: "draft" | "harness";
+  title: string;
+  prompt: string;
+  /** User-edited Input captured by a preceding suggested-input Interaction. */
+  blocks?: PromptBlock[];
+  /** Existing Lane used as the execution Lane or as the parent of a new Lane. */
+  laneId: string;
+  newLane: boolean;
+  harnessTargetId: string;
+}
+
+export interface HarnessInvocationScheduled {
+  invocationId: string;
+  messageId: string;
+  turnId: string;
+  harnessTargetId: string;
+  /** Baton-owned task line reserved for this invocation. */
+  laneId: string;
+}
+
+export interface HarnessInvocationCancelled {
+  invocationId: string;
+  reason: "user" | "timeout" | "recovery";
+  detail?: string;
+}
+
+export interface HarnessInvocationFailed {
+  invocationId: string;
+  reason: "dispatch" | "recovery";
+  detail: string;
+}
+
+export interface ViewInputReceived {
+  inputId: string;
+  input: ViewInput;
+}
+
+export type ViewInputOutcome = "succeeded" | "failed" | "cancelled";
+
+export interface ViewInputSettled {
+  inputId: string;
+  outcome: ViewInputOutcome;
+  detail?: string;
+}
+
+/** Full durable order for one Lane's still-queued HarnessInputs. */
+export interface QueueReordered {
+  laneId: string;
+  orderedMessageIds: string[];
+}
+
+export type EventPayloadMap = {
+  "input.received": ViewInputReceived;
+  "input.settled": ViewInputSettled;
+  "harness_input.updated": HarnessInputUpdate;
+  _baton_queue_reordered: QueueReordered;
+  input_delivery_update: InputDeliveryUpdate;
+  state_update: StateUpdate;
+  user_message: UserMessageUpsert;
+  user_message_chunk: MessageChunk;
+  agent_message: MessageUpsert;
+  agent_message_chunk: MessageChunk;
+  agent_thought: MessageUpsert;
+  agent_thought_chunk: MessageChunk;
+  tool_call_update: ToolCallUpdate;
+  tool_call_content_chunk: ToolCallContentChunk;
+  plan_update: PlanUpdate;
+  plan_remove: PlanRemove;
+  proposed_plan: ProposedPlan;
+  proposed_plan_implementation_started: ProposedPlanImplementationStarted;
+  task_update: HarnessTaskUpdate;
+  "interaction.requested": InputRequestCreated;
+  "interaction.answered": InputResponse;
+  "interaction.cancelled": InputRequestCancelled;
+  approval_review_update: ApprovalReviewUpdate;
+  usage_update: UsageUpdate;
+  available_commands_update: AvailableCommandsUpdate;
+  config_option_update: ConfigOptionUpdate;
+  context_window_update: ContextWindowUpdate;
+  /** Legacy replay only. New adapters emit context_window_update. */
+  context_usage_update: ContextUsageUpdate;
+  _baton_error_update: ErrorUpdate;
+  _baton_notice: Notice;
+  _baton_run_status: RunStatusUpdate;
+  _baton_context_snapshot: ContextSnapshot;
+  _baton_context_delivery_receipt: ContextDeliveryReceipt;
+  _baton_delivery_attempt_update: HarnessDeliveryAttemptUpdate;
+  _baton_turn_summary: TurnSummary;
+  _baton_harness_invocation_recorded: HarnessInvocationRecorded;
+  _baton_harness_invocation_scheduled: HarnessInvocationScheduled;
+  _baton_harness_invocation_cancelled: HarnessInvocationCancelled;
+  _baton_harness_invocation_failed: HarnessInvocationFailed;
+};
+
+export type EventKind = keyof EventPayloadMap;
+
+/** session.jsonl 每行一条。payload 供渲染/检索/摘要，raw 保真原始 wire 消息。 */
+export interface EventEnvelope<K extends EventKind = EventKind> {
+  v: typeof ENVELOPE_VERSION;
+  /** Event 事实身份；定序与游标仍使用 ledger-local seq。 */
+  eventId: string;
+  /** ISO 8601 */
+  ts: string;
+  /** ledger 内单调递增，reduce 定序靠它（不靠 ID、不靠 ts） */
+  seq: number;
+  /** Event 的唯一权威 ledger。 */
+  scope: EventScope;
+  /** 事实来源；与执行坐标正交。 */
+  source: EventSource;
+  /** 本 Event 的直接上游 Event；不表示 ledger 顺序或领域归属。 */
+  parentEventId?: string;
+  /** 事件关联的 harness 执行上下文；Baton / user / Plugin 事实可缺省。 */
+  harness?: string;
+  /** 实际投递/产出事件的配置目标；Baton 自身事件或未进入 controller 的外部事实可缺省。 */
+  harnessTargetId?: string;
+  /** Baton-native task line; new Harness execution facts must carry it. */
+  laneId?: string;
+  harnessSessionId?: string;
+  turnId?: string;
+  kind: K;
+  payload: EventPayloadMap[K];
+  raw?: unknown;
+  /** 子 agent 归属（Claude Task 子会话 / Codex 子 agent），挂回父会话 */
+  parentSessionId?: string;
+  agentId?: string;
+  agentType?: string;
+}
+
+/** 按 kind 分发的判别联合：switch(ev.kind) 时 payload 能正确收窄 */
+export type AnyEventEnvelope = { [K in EventKind]: EventEnvelope<K> }[EventKind];
+
+/** NewEvent 的判别联合版本，事件 sink 的入参类型 */
+export type AnyNewEvent = { [K in EventKind]: NewEvent<K> }[EventKind];
+
+/** 进入 BatonSession 时补齐 v/eventId/ts/seq/scope。 */
+export type NewEvent<K extends EventKind = EventKind> = Omit<
+  EventEnvelope<K>,
+  "v" | "eventId" | "ts" | "seq" | "scope"
+>;
+
+/**
+ * 尚未由可信宿主入口归因的 Event 草稿。Harness Adapter 只能产出这种形状，
+ * Controller / CLI 在接入边界补 source、Harness 与 HarnessTarget 后才允许写入 Store。
+ */
+export type EventDraft<K extends EventKind = EventKind> = Omit<
+  NewEvent<K>,
+  "source" | "harness" | "harnessTargetId" | "laneId"
+>;
+
+/** EventDraft 的判别联合版本，供 adapter sink 按 kind 正确收窄 payload。 */
+export type AnyEventDraft = { [K in EventKind]: EventDraft<K> }[EventKind];
+
+export function textOf(blocks: ReadonlyArray<ContentBlock | PromptBlock>): string {
+  return blocks
+    .filter((b): b is TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("");
+}

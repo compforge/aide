@@ -1,16 +1,14 @@
-import { setTimeout as sleep } from "node:timers/promises";
-import { describe, test } from "node:test";
-import { expect } from "expect";
+import { describe, expect, test } from "bun:test";
 
-import type { ReconcileScope } from "../src/plugin/controller.ts";
+import type { ReconcileScope } from "../src/runtime/plugin/controller.ts";
 import {
   CronSourceQueue,
   nextCronSourceAt,
-} from "../src/plugin/cron-source.ts";
-import { validateSources } from "../src/plugin/source.ts";
+} from "../src/runtime/plugin/cron-source.ts";
+import { validateSources } from "../src/runtime/plugin/source.ts";
 
 const scope: ReconcileScope = {
-  hostId: "bs_test",
+  batonSessionId: "bs_test",
   pluginInstanceId: "reqloop_default",
   namespace: "v1",
   resourceApiVersion: "reqloop.baton.dev/v1alpha1",
@@ -24,7 +22,7 @@ async function waitFor(
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error("timed out waiting for condition");
-    await sleep(5);
+    await Bun.sleep(5);
   }
 }
 
@@ -144,7 +142,7 @@ describe("Controller cron Sources", () => {
     queue.removeScope(scope);
     now = new Date("2026-07-26T00:00:01.000Z");
 
-    await sleep(30);
+    await Bun.sleep(30);
     expect(due).toBe(0);
     queue.close();
   });

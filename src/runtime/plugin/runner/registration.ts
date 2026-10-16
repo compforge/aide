@@ -1,0 +1,163 @@
+import {
+  PluginBinding,
+  type SourceContext,
+  type Watch,
+} from "../package.ts";
+import {
+  reconcileScope,
+  reconcileSnapshot,
+  hookScope,
+} from "../verb.ts";
+import type { PluginRunnerClient } from "./client.ts";
+import type {
+  CommandRegistration,
+  ControllerRegistration,
+  HookRegistration,
+  MentionRegistration,
+  PluginRegistration,
+} from "./protocol.ts";
+
+/** Installs one Runner protocol registration into its Plugin Binding. */
+export function installRegistration(
+  binding: PluginBinding,
+  runner: PluginRunnerClient,
+  registration: PluginRegistration,
+): void {
+  if (registration.kind === "command") {
+    installCommand(binding, runner, registration);
+    return;
+  }
+  if (registration.kind === "mention") {
+    installMention(binding, runner, registration);
+    return;
+  }
+  if (registration.kind === "hook") {
+    installHook(binding, runner, registration);
+    return;
+  }
+  installController(binding, runner, registration);
+}
+
+function installCommand(
+  binding: PluginBinding,
+  runner: PluginRunnerClient,
+  registration: CommandRegistration,
+): void {
+  binding.commands.register({
+    input: registration.input,
+    aliases: registration.aliases,
+    runPolicy: registration.runPolicy,
+    scope: registration.scope,
+    name: registration.name,
+    description: registration.description,
+    execute: async (input, context) =>
+      await runner.invokeCommand(
+        registration.handlerId,
+        input,
+        context,
+      ),
+  });
+}
+
+function installMention(
+  binding: PluginBinding,
+  runner: PluginRunnerClient,
+  registration: MentionRegistration,
+): void {
+  binding.mentions.register({
+    namespace: registration.namespace,
+    search: async (query) =>
+      await runner.invoke(
+        registration.searchHandlerId,
+        query,
+      ),
+    resolve: async (id, options) =>
+      await runner.invoke<string | undefined>(
+        registration.resolveHandlerId,
+        id,
+        options,
+      ),
+  });
+}
+
+function installHook(
+  binding: PluginBinding,
+  runner: PluginRunnerClient,
+  registration: HookRegistration,
+): void {
+  binding.hooks.register({
+    hookId: registration.hookId,
+    stage: registration.stage,
+    ...(registration.timeoutMs === undefined
+      ? {}
+      : { timeoutMs: registration.timeoutMs }),
+    run: async (context) =>
+      await runner.invoke(
+        registration.handlerId,
+        context.stage,
+        context.subject,
+        context.snapshot,
+        hookScope(context),
+      ),
+  });
+}
+
+function installController(
+  binding: PluginBinding,
+  runner: PluginRunnerClient,
+  registration: ControllerRegistration,
+): void {
+  const sources = registration.sources.map((source) =>
+    source.type === "cron"
+      ? {
+          type: "cron" as const,
+          sourceId: source.sourceId,
+          cron: source.cron,
+          timeZone: source.timeZone,
+        }
+      : {
+          type: "resource" as const,
+          sourceId: source.sourceId,
+          start: async (context: SourceContext<unknown>) =>
+            await runner.startSource(
+              source.startHandlerId,
+              context,
+            ),
+        }
+  );
+  const watches: Watch[] = registration.watches.map((watch) => ({
+    resourceType: watch.resourceType,
+    handler: {
+      create: async (event) =>
+        await runner.invoke(watch.createHandlerId, event),
+      update: async (event) =>
+        await runner.invoke(watch.updateHandlerId, event),
+      delete: async (event) =>
+        await runner.invoke(watch.deleteHandlerId, event),
+    },
+  }));
+  binding.controllers.register({
+    resourceType: registration.resourceType,
+    sources,
+    watches,
+    ...(registration.maxConcurrency === undefined
+      ? {}
+      : { maxConcurrency: registration.maxConcurrency }),
+    reconcile: async (context, resource) =>
+      await runner.invoke(
+        registration.reconcileHandlerId,
+        reconcileSnapshot(context),
+        reconcileScope(context),
+        resource,
+      ),
+    ...(registration.presentHandlerId === undefined
+      ? {}
+      : {
+          present: async (resource) =>
+            await runner.invoke(
+              registration.presentHandlerId!,
+              resource,
+            ),
+        }),
+  });
+}

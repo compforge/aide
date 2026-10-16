@@ -5,22 +5,20 @@ import { join } from "node:path";
 import { once } from "node:events";
 import { test } from "node:test";
 import pino from "pino";
-import { Aide } from "../src/core/aide.ts";
-import { PersonalAgent } from "../src/core/agent.ts";
+import { Aide } from "../plugins/personal/aide.ts";
+import { fakeOptions } from "./fake-harness.ts";
 import { httpChannel } from "../src/channel/http.ts";
-import type { StructuredRequest } from "../src/harness/types.ts";
+import type { InputRequest } from "../src/runtime/message/types.ts";
+import type { InteractionResult } from "../src/runtime/interaction/types.ts";
 
 test("HTTP input -> model routing -> persisted task -> execution -> outgoing message", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-channel-"));
-  const requests: StructuredRequest[] = [];
+  const requests: string[] = [];
   const log = pino({ level: "silent" });
-  const agent = new PersonalAgent({ generate: async (request) => {
-    requests.push(request);
-    return requests.length === 1
-      ? { action: "create", kind: "task", workId: null, title: "工作总结", instruction: "读取今日工作并总结", trigger: null, response: "开始整理" }
-      : { action: "done", summary: "Read work log", notification: "今天完成了三件事", question: null, nextAt: null };
-  } }, { cwd: dir, timezone: "Asia/Shanghai" });
-  const aide = new Aide(dir, agent, log);
+  const aide = new Aide(dir, fakeOptions({
+    route: async () => ({ action: "create", kind: "task", workId: null, title: "工作总结", instruction: "读取今日工作并总结", trigger: null, response: "开始整理" }),
+    execute: async () => ({ action: "done", summary: "Read work log", notification: "今天完成了三件事", question: null, nextAt: null }),
+  }, dir, requests), log);
   const server = httpChannel(aide, log);
   t.after(async () => {
     await aide.close();
@@ -61,9 +59,61 @@ test("HTTP input -> model routing -> persisted task -> execution -> outgoing mes
   const works = await (await fetch(`${url}/work?conversationId=me`)).json() as { status: string; id: string }[];
   assert.equal(works[0]?.status, "done");
   assert.equal(works[0]?.id, ack.workId);
-  assert.equal(requests[0]?.sandbox, "read-only");
-  assert.equal(requests[1]?.cwd, dir);
-  assert.match(requests[1]!.prompt, /读取今日工作并总结/);
+  assert.match(requests[1]!, /读取今日工作并总结/);
   assert.equal((await fetch(`${url}/messages?conversationId=me&after=missing`)).status, 400);
   assert.deepEqual(await (await fetch(`${url}/work?conversationId=other`)).json(), []);
+});
+
+test("web answers the original Harness interaction and rejects stale or mismatched responses", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "aide-interaction-"));
+  const log = pino({ level: "silent" });
+  let decision: InteractionResult | undefined;
+  const options = fakeOptions({
+    route: async () => ({ action: "reply", workId: null, kind: null, title: null, instruction: null, trigger: null, response: "已继续" }),
+    execute: async () => { throw new Error("No work expected"); },
+  }, dir);
+  const aide = new Aide(dir, { ...options, createAdapter: (_target, ports) => {
+    const adapter = options.createAdapter();
+    const open = adapter.open.bind(adapter);
+    adapter.open = async (...args) => {
+      decision = await ports.openInteraction({ kind: "hook_trust", harnessName: "Test Harness", hooks: [
+        { key: "session_start", source: "test", sourcePath: "/test/hooks.json", trustStatus: "modified", command: "test-hook" },
+      ] });
+      return open(...args);
+    };
+    return adapter;
+  } }, log);
+  const server = httpChannel(aide, log);
+  t.after(async () => {
+    await aide.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const url = `http://127.0.0.1:${address.port}`;
+  const post = (path: string, value: unknown) => fetch(url + path, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value),
+  });
+  const receiving = post("/messages", { id: "interaction-input", conversationId: "me", text: "继续" });
+  let pending: InputRequest | undefined;
+  for (let attempt = 0; attempt < 100 && !pending; attempt++) {
+    [pending] = await (await fetch(url + "/interactions")).json() as InputRequest[];
+    if (!pending) await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.ok(pending, "Adapter startup should publish a pending request");
+  assert.equal(decision, undefined);
+  assert.equal((await post("/interactions", { messageId: pending.messageId,
+    result: { kind: "permission", outcome: "selected", optionId: "allow" } })).status, 400);
+  const answer = { messageId: pending.messageId, result: { kind: "hook_trust", outcome: "trusted" } };
+  assert.equal((await post("/interactions", answer)).status, 200);
+  assert.deepEqual(decision, answer.result);
+  assert.equal((await post("/interactions", answer)).status, 409);
+  assert.equal((await receiving).status, 200);
+  assert.deepEqual(await (await fetch(url + "/interactions")).json(), []);
+  const resolved = aide.channel.projection.interactions.get(pending.messageId)?.request;
+  assert.equal(resolved?.status, "answered");
+  assert.ok(resolved?.responseMessageId);
 });

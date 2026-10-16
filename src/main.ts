@@ -3,10 +3,10 @@ import { resolve } from "node:path";
 import { once } from "node:events";
 import pino from "pino";
 import { z } from "zod";
-import { Aide } from "./core/aide.ts";
-import { PersonalAgent } from "./core/agent.ts";
+import { Aide } from "../plugins/personal/aide.ts";
+import { CodexAdapter } from "./runtime/harness/codex/adapter.ts";
+import { FileHookTrustStore } from "./runtime/config/hook.ts";
 import { httpChannel } from "./channel/http.ts";
-import { generateCodexStructured } from "./harness/codex.ts";
 import { withAsyncFileLock } from "./runtime/file-lock.ts";
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
@@ -18,11 +18,12 @@ const timezone = process.env.AIDE_TIMEZONE ?? Intl.DateTimeFormat().resolvedOpti
 new Intl.DateTimeFormat("en", { timeZone: timezone });
 
 await withAsyncFileLock(path, async () => {
-  const shutdown = new AbortController();
-  const agent = new PersonalAgent({ generate: (request) => generateCodexStructured({ ...request, signal: shutdown.signal }) }, {
-    cwd: resolve(process.env.AIDE_CWD ?? process.cwd()), timezone, sandbox, model: process.env.AIDE_MODEL,
-  });
-  const aide = new Aide(home, agent, log);
+  const aide = new Aide(home, {
+    cwd: resolve(process.env.AIDE_CWD ?? process.cwd()), timezone, model: process.env.AIDE_MODEL,
+    createAdapter: (_target, ports) => new CodexAdapter({ ...ports,
+      ...(sandbox ? { command: ["codex", "app-server", "-c", `sandbox_mode="${sandbox}"`] } : {}),
+      hookTrustStore: new FileHookTrustStore(_target.id, home) }),
+  }, log);
   const server = httpChannel(aide, log);
   server.listen(port, "127.0.0.1");
   await once(server, "listening");
@@ -38,7 +39,6 @@ await withAsyncFileLock(path, async () => {
     process.on("SIGINT", stop);
   });
   server.close();
-  shutdown.abort();
   await aide.close();
   log.info("Aide stopped");
 }, 0);
