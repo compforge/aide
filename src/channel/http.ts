@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { Logger } from "pino";
 import type { Aide } from "../core/aide.ts";
@@ -26,9 +27,27 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 
 /** Local channel bridge: accept messages/events and let adapters poll the durable outgoing log. */
 export function httpChannel(aide: Aide, log: Logger) {
+  const page = readFileSync(new URL("./web.html", import.meta.url), "utf8");
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
+      // Browsers can be directed to a local agent by unrelated websites.
+      if (request.headers.origin && request.headers.origin !== `http://${request.headers.host}`) {
+        json(response, 403, { error: "Cross-origin requests are not allowed" }); return;
+      }
+      if (request.method === "POST" && request.headers["content-type"]?.split(";", 1)[0]?.trim() !== "application/json") {
+        json(response, 415, { error: "Content-Type must be application/json" }); return;
+      }
+      if (request.method === "GET" && url.pathname === "/") {
+        response.writeHead(200, {
+          "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
+          "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+        });
+        response.end(page); return;
+      }
+      if (request.method === "GET" && url.pathname === "/health") {
+        json(response, 200, { status: "ok", revision: process.env.AIDE_REVISION ?? "development" }); return;
+      }
       if (request.method === "POST" && url.pathname === "/messages") {
         const input = IncomingSchema.parse(await body(request));
         json(response, 200, await aide.receive(input));
@@ -41,7 +60,8 @@ export function httpChannel(aide: Aide, log: Logger) {
         if (url.pathname === "/work") {
           json(response, 200, state.works.filter((work) => work.conversationId === conversationId));
         } else {
-          const messages = state.messages.filter((item) => item.conversationId === conversationId && item.role === "aide");
+          const messages = state.messages.filter((item) => item.conversationId === conversationId
+            && (url.searchParams.get("role") === "all" || item.role === "aide"));
           const after = url.searchParams.get("after");
           const index = after ? messages.findIndex((item) => item.id === after) : -1;
           if (after && index < 0) { json(response, 400, { error: "Unknown message cursor" }); return; }
