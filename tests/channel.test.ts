@@ -34,6 +34,18 @@ test("HTTP input -> model routing -> persisted task -> execution -> outgoing mes
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const url = `http://127.0.0.1:${address.port}`;
+  const page = await fetch(url);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get("content-security-policy")!, /frame-ancestors 'none'/);
+  assert.match(await page.text(), /交办事情或回答问题/);
+  assert.equal((await (await fetch(`${url}/health`)).json() as { status: string }).status, "ok");
+  // A website must not be able to submit work to the local agent through a visitor's browser.
+  assert.equal((await fetch(`${url}/messages`, {
+    method: "POST", headers: { origin: "https://unrelated.example", "content-type": "application/json" },
+    body: JSON.stringify({ id: "foreign", conversationId: "me", text: "do work" }),
+  })).status, 403);
+  assert.equal((await fetch(`${url}/messages`, { method: "POST", body: "{}" })).status, 415);
+  assert.equal(requests.length, 0);
   const response = await fetch(`${url}/messages`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "msg-1", conversationId: "me", text: "总结今日工作" }),
@@ -44,6 +56,9 @@ test("HTTP input -> model routing -> persisted task -> execution -> outgoing mes
   const outgoing = await (await fetch(`${url}/messages?conversationId=me&after=${ack.id}`)).json() as { text: string }[];
   assert.equal(outgoing.length, 1);
   assert.equal(outgoing[0]?.text, "今天完成了三件事");
+  const history = await (await fetch(`${url}/messages?conversationId=me&role=all`)).json() as { role: string; text: string }[];
+  assert.equal(history.length, 3);
+  assert.deepEqual(history[0], { ...history[0], role: "user", text: "总结今日工作" });
   const works = await (await fetch(`${url}/work?conversationId=me`)).json() as { status: string; id: string }[];
   assert.equal(works[0]?.status, "done");
   assert.equal(works[0]?.id, ack.workId);

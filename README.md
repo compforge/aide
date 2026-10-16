@@ -2,7 +2,7 @@
 
 Aide 是运行在自己服务器上的个人 Agent。它接下临时交办，把持续关注和定期处理保存为长期安排，再由时间或事件推动执行；需要补充信息时向用户提问，收到回答后继续。
 
-当前提供可运行的单用户原型：HTTP Channel、Task / Routine、Codex Harness 和文件持久化。飞书适配器还未接入。HTTP 入口可以用于本地试用，也作为后续 Channel 的接入点。
+当前提供可运行的单用户原型：网页对话、HTTP Channel、Task / Routine、Codex Harness 和文件持久化。飞书适配器还未接入。网页和后续 Channel 共用同一条请求与执行链路。
 
 ## 启动
 
@@ -12,6 +12,8 @@ Aide 是运行在自己服务器上的个人 Agent。它接下临时交办，把
 npm ci
 npm start
 ```
+
+打开 <http://127.0.0.1:7433> 即可交办事情、回答问题和查看事项与安排。默认会话为 `me`；使用 `/?conversation=另一会话名` 可以分别试验不同场景。刷新页面会恢复已有对话。模型回复按纯文本展示。
 
 默认监听 `127.0.0.1:7433`，数据保存到 `~/.aide/state.json`。同一个数据目录只允许一个 Aide 进程。部署到自己的服务器后，保持该进程运行即可继续处理安排；HTTP 接口是本机可信入口，没有认证，不直接暴露公网。
 
@@ -40,7 +42,7 @@ curl -s 'http://127.0.0.1:7433/work?conversationId=me'
 curl -s 'http://127.0.0.1:7433/messages?conversationId=me'
 ```
 
-POST 返回识别后的回复，执行在后台继续。GET `/messages` 读取持久化的 Aide 消息，包括异步结果和问题；加 `after=<message-id>` 可增量读取。Channel 适配器应保存游标，负责把这些消息送给用户。用户回答仍提交到 `/messages`，使用相同 `conversationId` 和新的消息 `id`。
+POST 返回识别后的回复，执行在后台继续。GET `/messages` 读取持久化的 Aide 消息，包括异步结果和问题；加 `after=<message-id>` 可增量读取，`role=all` 可读取包括用户输入的完整对话。Channel 适配器应保存游标，负责把这些消息送给用户。用户回答仍提交到 `/messages`，使用相同 `conversationId` 和新的消息 `id`。
 
 入站消息的 `id` 在会话内用于投递去重；重试同一消息应沿用原 id。不同会话的工作分别匹配，但它们仍属于同一个人的 Aide。
 
@@ -70,7 +72,37 @@ Reconcile 调用 Harness 推进工作。执行结果分为完成、询问用户�
 
 这个原型采用单进程串行执行和原子 JSON 快照。暂停阻止后续推进，不能撤销已执行的 CLI 操作。关机错过的时间触发恢复后合并执行一次；运行中崩溃或调用失败会标为 `uncertain`，由用户核对结果后明确要求继续，避免自动重放外部操作。
 
-每次 Codex 调用独立运行，Aide 注入当前工作和最近 20 条工作历史。请求识别超时为 1 分钟，单次执行为 15 分钟。尚未提供通用长期记忆、完整上下文压缩、消息主动推送适配器或多实例部署。
+每次 Codex 调用独立运行，Aide 注入当前工作和最近 20 条工作历史。请求识别超时为 1 分钟，单次执行为 15 分钟。尚未提供通用长期记忆、完整上下文压缩、飞书等消息推送适配器或多实例部署。
+
+## Linux 常驻部署
+
+在服务器上的 checkout 安装依赖，确认 `node --version` 为 22+、`codex` 已登录，再运行：
+
+```sh
+npm ci
+bash scripts/install-service.sh
+loginctl enable-linger "$(id -un)"
+```
+
+安装脚本生成用户级 `aide.service`，固定当前 checkout 与 Node 路径。Linger 让用户服务在 SSH 退出后仍然运行；如果机器禁止普通用户开启，可由管理员执行该命令。服务自动重启，日志进入 journal。
+
+在 `~/.config/aide/env` 配置 `AIDE_CWD`、`AIDE_TIMEZONE` 等变量，然后 `systemctl --user restart aide`。建议把工作目录设为一个专门的目录，分别管理工作资料和服务源码。凭证沿用该 Linux 用户的 Codex / CLI 登录态。
+
+```sh
+systemctl --user status aide
+journalctl --user -u aide -f
+curl -s http://127.0.0.1:7433/health
+```
+
+`/health` 只报告 HTTP 服务存活及部署版本，不代表模型或业务 CLI 连通。通过真实任务验证模型和 CLI。服务更新后重新运行安装脚本；通过文件同步部署时可用 `AIDE_REVISION=<commit>` 标识源码版本。
+
+在自己的电脑建立转发后打开 <http://127.0.0.1:7433>：
+
+```sh
+ssh -N -L 7433:127.0.0.1:7433 user@your-server
+```
+
+关闭转发只会断开浏览器连接，服务器仍会执行安排。停止服务使用 `systemctl --user stop aide`。
 
 ## 开发
 

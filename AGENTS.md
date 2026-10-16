@@ -10,6 +10,7 @@ Aide 是一个小型、自托管的 personal agent。Channel 输入归入 Task /
 src/
   main.ts             # 进程装配、配置、单实例锁与关闭
   channel/http.ts     # 本地 Channel 入站与出站消息读取
+  channel/web.html    # 无构建依赖的网页对话与工作状态展示
   core/
     model.ts          # Task / Routine、触发与状态契约
     agent.ts          # 意图识别、执行提示词与结构化结果校验
@@ -18,6 +19,7 @@ src/
   harness/            # Codex 子进程协议，不理解 Task / Routine
   runtime/            # 工作队列、时间唤醒与文件锁
 tests/                # 核心状态流转、Channel 联通和子进程测试
+scripts/              # 用户级 systemd 服务安装
 ```
 
 ## 关键约定

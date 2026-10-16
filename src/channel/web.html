@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aide · 个人助手</title>
+<style>
+  :root { color-scheme: light; font-family: system-ui, sans-serif; color: #20342b; background: #f5f5ef; }
+  * { box-sizing: border-box; } body { margin: 0; }
+  header { padding: 20px 32px; border-bottom: 1px solid #d8dfd5; display: flex; align-items: center; gap: 18px; }
+  h1 { font-size: 24px; margin: 0; letter-spacing: -.8px; } .muted { color: #68776c; font-size: 13px; }
+  main { max-width: 1240px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 320px; height: calc(100dvh - 70px); }
+  .conversation { padding: 24px; min-height: 0; display: flex; flex-direction: column; }
+  #messages { flex: 1; overflow: auto; padding: 0 12px 24px 0; }
+  .message { padding: 16px 18px; background: white; border: 1px solid #e1e6dc; border-radius: 12px; margin: 12px 0; }
+  .message.user { background: #e8eee3; margin-left: 10%; }
+  .message p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; line-height: 1.65; }
+  .empty { margin: 10vh auto; max-width: 480px; } .empty h2 { font-size: 26px; font-weight: 500; }
+  .empty p { line-height: 1.8; color: #68776c; } form { display: flex; align-items: end; gap: 12px; }
+  textarea { width: 100%; resize: vertical; min-height: 80px; max-height: 200px; border: 1px solid #bdcbbb; border-radius: 12px; padding: 14px; font: inherit; background: white; }
+  button { border: 0; border-radius: 10px; padding: 13px 20px; background: #294f3a; color: white; font: inherit; cursor: pointer; white-space: nowrap; }
+  button:disabled { opacity: .5; cursor: wait; } button:focus-visible, textarea:focus-visible { outline: 3px solid #83a38b; outline-offset: 2px; }
+  #notice { min-height: 22px; margin-top: 10px; font-size: 13px; color: #68776c; } #notice.error { color: #a0362a; }
+  aside { padding: 24px 20px; border-left: 1px solid #d8dfd5; overflow: auto; } aside h2 { font-size: 16px; margin: 0 0 18px; }
+  .work { background: white; border-radius: 10px; border: 1px solid #e1e6dc; padding: 14px; margin-bottom: 12px; }
+  .work strong { display: block; margin: 8px 0; font-size: 14px; overflow-wrap: anywhere; }
+  .work p { font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .badge { display: inline-block; padding: 3px 7px; background: #edf1e8; border-radius: 5px; font-size: 11px; }
+  .waiting, .uncertain { color: #9b5b11; background: #fff1d9; } .running { background: #dceee1; }
+  details { font-size: 12px; color: #68776c; margin-top: 8px; }
+  @media(max-width: 760px) { header { padding: 16px; } main { display: block; height: auto; } .conversation { height: 75dvh; padding: 16px; } aside { border-left: 0; border-top: 1px solid #d8dfd5; } }
+</style>
+<header><h1>Aide</h1><span class="muted">把事情交给我，持续为你推进。</span><span id="connection" class="muted" style="margin-left:auto" aria-live="polite">连接中</span></header>
+<main>
+  <section class="conversation" aria-label="对话">
+    <div id="messages" role="log" aria-label="消息记录"></div>
+    <form id="composer">
+      <textarea id="input" aria-label="交办事情或回答问题" placeholder="交办一件事，或者告诉我你想长期关注什么…" maxlength="32000" required></textarea>
+      <button id="send" type="submit">发送</button>
+    </form>
+    <div id="notice" role="status">Enter 发送 · Shift + Enter 换行</div>
+  </section>
+  <aside><h2>事项与安排 <span id="count" class="muted"></span></h2><div id="works"></div></aside>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const conversationId = new URL(location.href).searchParams.get('conversation') || 'me';
+  const query = '?conversationId=' + encodeURIComponent(conversationId);
+  const labels = { ready: '准备执行', running: '执行中', waiting: '等你回答', scheduled: '等待触发', paused: '已暂停', done: '已完成', uncertain: '需要核对结果' };
+  let lastMessages = '', lastWork = '', polling = false, sending = false, draft = null;
+  function element(tag, text, className) {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  }
+  async function api(path, options) {
+    const response = await fetch(path, options);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '请求失败');
+    return data;
+  }
+  function renderMessages(messages) {
+    const signature = JSON.stringify(messages);
+    if (signature === lastMessages) return;
+    lastMessages = signature;
+    const nearBottom = $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
+    $('messages').replaceChildren();
+    if (!messages.length) {
+      const empty = element('div', undefined, 'empty');
+      empty.append(element('h2', '从一件具体的事开始'), element('p', '例如：总结工作目录里的 README；每天上午检查项目进展；关注某件事，发生变化时告诉我。'));
+      $('messages').append(empty);
+    }
+    for (const message of messages) {
+      const node = element('article', undefined, 'message ' + message.role);
+      node.append(element('div', (message.role === 'user' ? '你' : 'Aide') + ' · ' + new Date(message.at).toLocaleTimeString(), 'muted'), element('p', message.text));
+      $('messages').append(node);
+    }
+    if (nearBottom) $('messages').scrollTop = $('messages').scrollHeight;
+  }
+  function renderWork(works) {
+    const signature = JSON.stringify(works);
+    if (signature === lastWork) return;
+    lastWork = signature; $('count').textContent = works.length || ''; $('works').replaceChildren();
+    if (!works.length) $('works').append(element('p', '接下的事项和安排会出现在这里。', 'muted'));
+    for (const work of [...works].reverse()) {
+      const node = element('article', undefined, 'work');
+      node.append(element('span', (work.kind === 'task' ? '事项' : '安排') + ' · ' + labels[work.status], 'badge ' + work.status), element('strong', work.title));
+      if (work.question) node.append(element('p', work.question));
+      if (work.status === 'uncertain') node.append(element('p', '执行中断或失败。请核对外部结果，再发消息决定是否继续。'));
+      if (work.nextAt) node.append(element('p', '下次：' + new Date(work.nextAt).toLocaleString(), 'muted'));
+      const detail = element('details');
+      detail.append(element('summary', '查看目标与进展'), element('p', work.instruction));
+      const latest = [...work.history].reverse().find((entry) => entry.role === 'aide');
+      if (latest) detail.append(element('p', latest.text));
+      node.append(detail); $('works').append(node);
+    }
+  }
+  async function poll() {
+    if (polling) return;
+    polling = true;
+    try {
+      const [messages, works] = await Promise.all([api('/messages' + query + '&role=all'), api('/work' + query)]);
+      renderMessages(messages); renderWork(works); $('connection').textContent = '已连接';
+    } catch { $('connection').textContent = '连接断开 · 正在重试'; }
+    finally { polling = false; }
+  }
+  $('composer').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const text = $('input').value.trim();
+    if (!text || sending) return;
+    sending = true; $('send').disabled = true; $('input').disabled = true;
+    $('notice').className = ''; $('notice').textContent = '正在理解你的请求…';
+    if (!draft || draft.text !== text) draft = { id: crypto.randomUUID(), conversationId, text };
+    try {
+      await api('/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(draft) });
+      draft = null; $('input').value = ''; $('notice').textContent = '已接收，后续进展会显示在这里。';
+      await poll(); $('messages').scrollTop = $('messages').scrollHeight;
+    } catch { $('notice').className = 'error'; $('notice').textContent = '发送未确认，请重试。原消息编号会保留，避免重复交办。'; }
+    finally { sending = false; $('send').disabled = false; $('input').disabled = false; $('input').focus(); }
+  });
+  $('input').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('composer').requestSubmit(); }
+  });
+  poll(); setInterval(poll, 1500);
+</script>
+</html>
