@@ -21,7 +21,7 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
-WorkingDirectory="$aide_repo"
+WorkingDirectory=$aide_repo
 ExecStart="$aide_node" --import tsx "$aide_repo/src/main.ts"
 Environment="PATH=$PATH"
 Environment="AIDE_REVISION=$aide_revision"
@@ -35,6 +35,7 @@ UMask=0077
 [Install]
 WantedBy=default.target
 EOF
+systemd-analyze --user verify "$HOME/.config/systemd/user/aide.service"
 systemctl --user daemon-reload
 systemctl --user enable aide.service
 systemctl --user restart aide.service
