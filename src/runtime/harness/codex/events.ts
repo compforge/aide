@@ -31,15 +31,15 @@ interface CodexEventHandlerOptions {
   flushPendingCancel(runtime: ThreadRuntime): void;
 }
 
-/** Maps Codex app-server notifications and server requests into Baton protocol events. */
+/** Maps Codex app-server notifications and server requests into Aide protocol events. */
 export class CodexEventHandler {
   constructor(private options: CodexEventHandlerOptions) {}
   /**
-   * codex 给了 baton 认不出的审批候选 → 显式提示，不静默降级。
+   * codex 给了 aide 认不出的审批候选 → 显式提示，不静默降级。
    *
    * 悲观丢弃（structuredApprovalChoice 读不出就不给）保证了"不猜"，但那只是不变量 #2 的
    * 前半句；"绝不失声"要求把降级本身说出来：codex 迭代频繁、新增 decision 属于常态，
-   * 静默丢弃会让用户在毫不知情下长期少一个本可用的选项，也让 baton 落后于上游这件事
+   * 静默丢弃会让用户在毫不知情下长期少一个本可用的选项，也让 aide 落后于上游这件事
    * 无人发现。按形状键在 thread 内去重——否则新增一种 decision 会让每次审批都刷屏。
    */
   private noticeUnmappedDecisions(
@@ -56,15 +56,15 @@ export class CodexEventHandler {
     this.options.emit(
       rt,
       {
-        kind: "_baton_notice",
+        kind: "_aide_notice",
         payload: {
           level: "warning",
           title: "Unrecognized approval choices from codex",
-          detail: `baton does not understand ${novel.join(", ")} — ${
+          detail: `aide does not understand ${novel.join(", ")} — ${
             fellBack
-              ? "showing baton's standard options instead of codex's own"
+              ? "showing aide's standard options instead of codex's own"
               : "those choices are hidden from the card"
-          }. Upgrade baton if codex added new approval types.`,
+          }. Upgrade aide if codex added new approval types.`,
         },
       },
       params,
@@ -74,7 +74,7 @@ export class CodexEventHandler {
   /** 错误路径终态：先留结构化 error，再合成 idle（见 docs/workflow.md） */
   failTurn(rt: ThreadRuntime, turn: CodexTurn | undefined, message: string): void {
     if (!turn || turn.finalized) return;
-    this.options.emit(rt, { kind: "_baton_error_update", payload: { message } }, undefined, turn);
+    this.options.emit(rt, { kind: "_aide_error_update", payload: { message } }, undefined, turn);
     this.options.finishTurn(rt, turn, "failed");
   }
 
@@ -175,7 +175,7 @@ export class CodexEventHandler {
           !["agentMessage", "reasoning", "userMessage", "plan", "contextCompaction", "collabAgentToolCall"].includes(
             itemType,
           );
-        // 对账：declined 却从未向 baton 发过 requestApproval → 决策权被 harness 侧
+        // 对账：declined 却从未向 aide 发过 requestApproval → 决策权被 harness 侧
         // 策略（auto-review 等）截走了，用户全程不知情。显式提示，不静默渲染。
         if (
           isTool &&
@@ -186,7 +186,7 @@ export class CodexEventHandler {
           this.options.emit(
             rt,
             {
-              kind: "_baton_notice",
+              kind: "_aide_notice",
               payload: {
                 level: "warning",
                 title: "Approval bypassed by harness-side policy",
@@ -237,7 +237,7 @@ export class CodexEventHandler {
         this.options.emit(
           rt,
           {
-            kind: "_baton_run_status",
+            kind: "_aide_run_status",
             payload: method.endsWith("/started")
               ? { phase: "reviewing_approval", title: "Reviewing approval…" }
               : { phase: null },
@@ -322,7 +322,7 @@ export class CodexEventHandler {
         this.options.emit(
           rt,
           {
-            kind: "_baton_error_update",
+            kind: "_aide_error_update",
             payload: {
               message: String(error.message ?? "Codex turn failed"),
               ...(code ? { code } : {}),
@@ -359,7 +359,7 @@ export class CodexEventHandler {
         this.options.emit(
           rt,
           {
-            kind: "_baton_notice",
+            kind: "_aide_notice",
             payload: {
               level: "warning",
               title: `Codex ${eventName} hook blocked the prompt`,
@@ -400,7 +400,7 @@ export class CodexEventHandler {
       case "item/permissions/requestApproval":
       case "execCommandApproval":
       case "applyPatchApproval": {
-        // 登记"问过 baton"的 item：declined 对账（见 approvalSeenItemIds）以此判定
+        // 登记"问过 aide"的 item：declined 对账（见 approvalSeenItemIds）以此判定
         // 拒绝是否出自用户之手。v1 两代方法用 callId 指代 item，一并登记。
         for (const idField of [p.itemId, p.callId]) {
           if (idField === undefined) continue;
@@ -425,7 +425,7 @@ export class CodexEventHandler {
         }
         // result 按 interactionId 路由回来，kind 必配对 permission；意外不配保守拒绝。
         const optionId = result.kind === "permission" ? result.optionId : "";
-        // 选不中就回 decline，不把 optionId 原样透传：结构化候选的 optionId 是 baton 铸的
+        // 选不中就回 decline，不把 optionId 原样透传：结构化候选的 optionId 是 aide 铸的
         // 合成 id（acceptWithExecpolicyAmendment:1），不是 codex wire 值；空串更不是"拒绝"，
         // 而是个非法 wire 值——曾经这里以为透传就等于 fail-closed，其实没有。
         return {

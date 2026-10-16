@@ -1,9 +1,9 @@
 import type { AvailableCommand } from "../event/index.ts";
-import type { BatonTargetModel } from "@compforge/baton-plugin";
+import type { AideTargetModel } from "@compforge/aide-plugin";
 import type { EffortOption, ModelOption } from "./adapter.ts";
 
 /**
- * Baton 配置与调度侧的 Harness 目标。`harness` 选择执行协议，`id` 标识一份具体配置；
+ * Aide 配置与调度侧的 Harness 目标。`harness` 选择执行协议，`id` 标识一份具体配置；
  * 同一种 Harness 可以有多个 target，但它们不能共享 HarnessBinding 或原生 session。
  */
 export interface HarnessTarget {
@@ -16,14 +16,14 @@ export interface HarnessTarget {
  * model / command 等静态目录可在用户真正发 turn 前安全查询。
  */
 export interface HarnessTargetProbeResult {
-  modelCatalog?: readonly BatonTargetModel[];
+  modelCatalog?: readonly AideTargetModel[];
   models?: ModelOption[];
   efforts?: EffortOption[];
   commands?: AvailableCommand[];
 }
 
 /**
- * 一次 Harness open 实际采用的不可变配置。它属于 Baton 控制面，不穿透 Adapter 实例；
+ * 一次 Harness open 实际采用的不可变配置。它属于 Aide 控制面，不穿透 Adapter 实例；
  * Adapter 工厂只消费 HarnessTarget 来选择实现和 lowering 实例级依赖，controller 仍把
  * cwd / model / effort 映射成 Adapter 的 OpenOptions 与能力调用。
  */

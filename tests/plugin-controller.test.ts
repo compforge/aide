@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   MAX_VERB_TIMEOUT_MS,
   type AskInput,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import {
   Controller,
@@ -25,16 +25,16 @@ interface Status {
 
 const roots: string[] = [];
 const REQ_LOOP_RUN = {
-  apiVersion: "reqloop.baton.dev/v1alpha1",
+  apiVersion: "reqloop.aide.dev/v1alpha1",
   kind: "Requirement",
 } as const;
 const WORKSPACE = {
-  apiVersion: "reqloop.baton.dev/v1alpha1",
+  apiVersion: "reqloop.aide.dev/v1alpha1",
   kind: "Workspace",
 } as const;
 
 function testRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "baton-plugin-controller-"));
+  const root = mkdtempSync(join(tmpdir(), "aide-plugin-controller-"));
   roots.push(root);
   return root;
 }
@@ -55,7 +55,7 @@ function store(root: string): PluginResourceStore {
 
 function key(resourceId: string = "run_1"): ReconcileKey {
   return {
-    batonSessionId: "bs_test",
+    aideSessionId: "bs_test",
     pluginInstanceId: "reqloop_default",
     namespace: "v1",
     resourceApiVersion: REQ_LOOP_RUN.apiVersion,

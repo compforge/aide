@@ -4,7 +4,7 @@ import type {
   CommandResult,
 } from "../package.ts";
 import type { PluginInstance } from "../instance.ts";
-import type { CommandContext } from "@compforge/baton-plugin";
+import type { CommandContext } from "@compforge/aide-plugin";
 import { CommandRegistry } from "../../commands/registry.ts";
 import { validateCommandResult } from "../../commands/result.ts";
 
@@ -60,7 +60,7 @@ export class PluginCommandRegistry {
     declarations.register({ ...registered, namespace: instance.pluginId });
     const tokens = declarations.names();
     for (const token of tokens) {
-      if (this.reservedNames.has(token)) throw new Error(`plugin command name is reserved by Baton: /${token}`);
+      if (this.reservedNames.has(token)) throw new Error(`plugin command name is reserved by Aide: /${token}`);
       const owner = this.commandKeysByName.get(token);
       if (owner && owner !== key) throw new Error(`plugin command name is already registered: /${token}`);
     }

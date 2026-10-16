@@ -5,7 +5,7 @@
 // 任何失败都静默降级为 sessionPreview——标题是增强，不是主流程。
 
 import { textOf } from "../event/index.ts";
-import type { BatonConfig } from "../config/config.ts";
+import type { AideConfig } from "../config/config.ts";
 import { configuredHarnessTargets } from "../harness/registry.ts";
 import type { HarnessTarget } from "../harness/target.ts";
 import {
@@ -19,7 +19,7 @@ import type { LogSink } from "../logging.ts";
 import { sessionPreview, type SessionHandle } from "../store/store.ts";
 
 /** 已配置 Target 的 textgen 降级链候选；controller 会把当前 Target 前置。 */
-export function configuredTextgenTargets(config: BatonConfig): HarnessTarget[] {
+export function configuredTextgenTargets(config: AideConfig): HarnessTarget[] {
   return configuredHarnessTargets(config);
 }
 
@@ -93,7 +93,7 @@ export async function maybeGenerateSessionTitle(opts: {
   session.updateMeta({ title });
   log?.({
     level: "info",
-    source: "baton",
+    source: "aide",
     component: "textgen",
     harness: result.harness,
     message: "session title generated",

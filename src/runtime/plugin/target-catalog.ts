@@ -1,4 +1,4 @@
-import type { BatonTargetModelCatalog } from "@compforge/baton-plugin";
+import type { AideTargetModelCatalog } from "@compforge/aide-plugin";
 import type { HarnessTarget, HarnessTargetProbeResult } from "../harness/target.ts";
 
 const CATALOG_TTL_MS = 60_000;
@@ -11,7 +11,7 @@ export type TargetProbe = (target: HarnessTarget) => Promise<HarnessTargetProbeR
  * bounds subprocess/connection use, and concurrent reads of one Target coalesce.
  */
 export class TargetCatalog {
-  private readonly observed = new Map<string, { value: BatonTargetModelCatalog; version: number; expiresAt: number }>();
+  private readonly observed = new Map<string, { value: AideTargetModelCatalog; version: number; expiresAt: number }>();
   private readonly pending = new Map<string, Promise<void>>();
   private tail = Promise.resolve();
 
@@ -21,7 +21,7 @@ export class TargetCatalog {
     private readonly onError?: (target: HarnessTarget, error: unknown) => void,
   ) {}
 
-  snapshot(targetId: string): { value: BatonTargetModelCatalog; version: string } {
+  snapshot(targetId: string): { value: AideTargetModelCatalog; version: string } {
     const entry = this.observed.get(targetId);
     return { value: entry?.value ?? { phase: "Pending" }, version: String(entry?.version ?? 1) };
   }
@@ -32,7 +32,7 @@ export class TargetCatalog {
     const pending = this.pending.get(target.id);
     if (pending) return pending;
     const work = this.tail.then(async () => {
-      let value: BatonTargetModelCatalog;
+      let value: AideTargetModelCatalog;
       try {
         const result = await this.probe?.(target);
         const observedAt = this.now().toISOString();

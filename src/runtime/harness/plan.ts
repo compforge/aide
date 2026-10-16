@@ -7,7 +7,7 @@ export type PlanSnapshotDraft =
   | EventDraft<"plan_update">
   | EventDraft<"plan_remove">;
 
-/** Harness 完整快照 → Baton Plan upsert/remove。空快照显式撤下当前 Plan。 */
+/** Harness 完整快照 → Aide Plan upsert/remove。空快照显式撤下当前 Plan。 */
 export function planSnapshotDraft(
   planId: string,
   entries: readonly PlanEntry[],

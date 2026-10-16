@@ -10,7 +10,7 @@ export type HarnessInputStatus =
   | "recalled"
   | "interrupted";
 
-/** Identifies the actor that submitted a prompt Input to Baton. */
+/** Identifies the actor that submitted a prompt Input to Aide. */
 export type HarnessInputSource =
   | { readonly type: "user" }
   | {
@@ -18,7 +18,7 @@ export type HarnessInputSource =
       readonly pluginInstanceId: string;
     };
 
-export type ActorKind = "user" | "harness" | "plugin" | "baton" | (string & {});
+export type ActorKind = "user" | "harness" | "plugin" | "aide" | (string & {});
 
 export interface ActorRef {
   readonly kind: ActorKind;
@@ -51,7 +51,7 @@ export interface TurnSummary {
 }
 
 export interface SessionSnapshot {
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly cwd?: string;
   readonly runState: SessionRunState;
   readonly revision: number;

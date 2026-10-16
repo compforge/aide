@@ -97,7 +97,7 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export function reconcileKeyId(key: ReconcileKey): string {
   return JSON.stringify([
-    key.batonSessionId,
+    key.aideSessionId,
     key.pluginInstanceId,
     key.namespace,
     key.resourceApiVersion,

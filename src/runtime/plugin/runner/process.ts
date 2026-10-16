@@ -30,7 +30,7 @@ import type {
   SourceContext,
   ToastMessage,
   Watch,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../package.ts";
 import {
   createHookContext,

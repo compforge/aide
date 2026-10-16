@@ -14,7 +14,7 @@ export type VerbResult<T> =
   | { readonly state: "failure"; readonly error?: string };
 
 interface VerbInput {
-  /** Maximum time Baton may wait; must be between 1 and MAX_VERB_TIMEOUT_MS. */
+  /** Maximum time Aide may wait; must be between 1 and MAX_VERB_TIMEOUT_MS. */
   readonly timeoutMs: number;
 }
 
@@ -69,7 +69,7 @@ export type ConfirmResult = VerbResult<ConfirmValue>;
 export interface HarnessInvocationInput extends VerbInput {
   readonly title: string;
   readonly prompt: string;
-  /** Existing Baton Lane to continue, including the reserved main Lane ID `main`. */
+  /** Existing Aide Lane to continue, including the reserved main Lane ID `main`. */
   readonly laneId: string;
   /** Create a new side Lane from laneId instead of continuing it. Defaults to false. */
   readonly newLane?: boolean;
@@ -98,7 +98,7 @@ export type HarnessResult = VerbResult<HarnessValue>;
 export type DraftResult = VerbResult<CompletedHarnessValue>;
 
 /**
- * @spec Every Plugin verb first persists a Core-owned Interaction and suspends the same live Plugin execution until a terminal result; Baton never re-enqueues a Resource merely to deliver that result.
+ * @spec Every Plugin verb first persists a Core-owned Interaction and suspends the same live Plugin execution until a terminal result; Aide never re-enqueues a Resource merely to deliver that result.
  * @rule Correlate verb continuation with the Core-issued execution identity, never with Resource identity or a caller-provided key; a crashed execution fails instead of replaying its call stack.
  * @rule Require one total timeout for every verb; draft and harness deadlines cover their Interaction gate and the resulting HarnessInvocation through terminal Turn.
  * @see {@link docs/plugin.md}

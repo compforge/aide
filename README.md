@@ -74,7 +74,7 @@ Reconcile 调用 Harness 推进工作。执行结果分为完成、询问用户�
 
 Controller 默认总执行容量为 1；等待 Harness verb 时释放执行位，同一个 Resource 始终串行。暂停阻止后续推进，不能撤销已执行的 CLI 操作。关机错过的时间触发恢复后合并执行一次；运行中崩溃或调用失败会标为 `uncertain`，由用户核对结果后明确要求继续。基础设施 Reconcile 重试不会自动重放结果不明的业务执行。
 
-personal Plugin 在独立 Worker 中通过 `context.verbs.harness` 请求执行。Baton 原有的 Session、Lane、HarnessInvocation 和 Turn 管理执行，Codex 使用 `app-server` 协议；Aide 注入当前工作和最近 20 条工作历史。请求识别超时为 1 分钟，单次执行为 15 分钟。尚未提供通用长期记忆、完整上下文压缩、飞书等消息推送适配器或多实例部署。
+personal Plugin 在独立 Worker 中通过 `context.verbs.harness` 请求执行。执行内核通过 Session、Lane、HarnessInvocation 和 Turn 管理执行，Codex 使用 `app-server` 协议；Aide 注入当前工作和最近 20 条工作历史。请求识别超时为 1 分钟，单次执行为 15 分钟。尚未提供通用长期记忆、完整上下文压缩、飞书等消息推送适配器或多实例部署。
 
 ## Linux 常驻部署
 

@@ -1,17 +1,17 @@
 // /model 是用户级运行偏好，不改写手工维护的 config.yaml。按 HarnessTarget 记住最近一次
-// 显式选择，让新 BatonSession / 新进程沿用；session 自己已有的 model 仍优先。
+// 显式选择，让新 AideSession / 新进程沿用；session 自己已有的 model 仍优先。
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { batonRoot } from "./config.ts";
+import { aideRoot } from "./config.ts";
 
 interface PersistedModelPreferences {
   models?: Record<string, unknown>;
 }
 
 export function modelPreferencesPath(rootDir?: string): string {
-  return join(batonRoot(rootDir), "state", "model.json");
+  return join(aideRoot(rootDir), "state", "model.json");
 }
 
 export function loadModelPreferences(rootDir?: string): Record<string, string> {

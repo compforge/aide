@@ -1,4 +1,4 @@
-import type { TurnSummary } from "@compforge/baton-plugin";
+import type { TurnSummary } from "@compforge/aide-plugin";
 
 import { newId } from "../event/ids.ts";
 import type {
@@ -66,10 +66,10 @@ export interface ScheduledHarnessInvocation {
 }
 
 interface InvocationState {
-  readonly recorded: EventEnvelope<"_baton_harness_invocation_recorded">;
-  scheduled?: EventEnvelope<"_baton_harness_invocation_scheduled">;
-  cancelled?: EventEnvelope<"_baton_harness_invocation_cancelled">;
-  failed?: EventEnvelope<"_baton_harness_invocation_failed">;
+  readonly recorded: EventEnvelope<"_aide_harness_invocation_recorded">;
+  scheduled?: EventEnvelope<"_aide_harness_invocation_scheduled">;
+  cancelled?: EventEnvelope<"_aide_harness_invocation_cancelled">;
+  failed?: EventEnvelope<"_aide_harness_invocation_failed">;
   admitted: boolean;
   uncertain: boolean;
   result?: TurnSummary;
@@ -192,9 +192,9 @@ export class HarnessInvocationStore {
   }
 
   record(draft: ReconcileHarnessInvocation): HarnessInvocationSnapshot {
-    if (draft.scope.batonSessionId !== this.session.id) {
+    if (draft.scope.aideSessionId !== this.session.id) {
       throw new Error(
-        `HarnessInvocation batonSessionId must be ${this.session.id}, got ${draft.scope.batonSessionId}`,
+        `HarnessInvocation aideSessionId must be ${this.session.id}, got ${draft.scope.aideSessionId}`,
       );
     }
     if (
@@ -209,7 +209,7 @@ export class HarnessInvocationStore {
     const invocationId = newId("hinv");
     const invocation = draft.invocation;
     this.session.appendEvent({
-      kind: "_baton_harness_invocation_recorded",
+      kind: "_aide_harness_invocation_recorded",
       source: {
         type: "plugin",
         pluginInstanceId: draft.scope.pluginInstanceId,
@@ -296,8 +296,8 @@ export class HarnessInvocationStore {
     const state = this.states.get(invocationId);
     if (!state || state.result || state.cancelled || state.failed) return false;
     this.session.appendEvent({
-      kind: "_baton_harness_invocation_cancelled",
-      source: reason === "user" ? { type: "user" } : { type: "baton" },
+      kind: "_aide_harness_invocation_cancelled",
+      source: reason === "user" ? { type: "user" } : { type: "aide" },
       parentEventId: state.scheduled?.eventId ?? state.recorded.eventId,
       payload: {
         invocationId,
@@ -316,8 +316,8 @@ export class HarnessInvocationStore {
     const state = this.states.get(invocationId);
     if (!state || state.result || state.cancelled || state.failed) return false;
     this.session.appendEvent({
-      kind: "_baton_harness_invocation_failed",
-      source: { type: "baton" },
+      kind: "_aide_harness_invocation_failed",
+      source: { type: "aide" },
       parentEventId: state.scheduled?.eventId ?? state.recorded.eventId,
       payload: { invocationId, reason, detail },
     });
@@ -364,8 +364,8 @@ export class HarnessInvocationStore {
       laneId: recorded.newLane ? newId("hl") : recorded.laneId,
     };
     this.session.appendEvent({
-      kind: "_baton_harness_invocation_scheduled",
-      source: { type: "baton" },
+      kind: "_aide_harness_invocation_scheduled",
+      source: { type: "aide" },
       parentEventId: state.recorded.eventId,
       payload: scheduled,
     });
@@ -375,7 +375,7 @@ export class HarnessInvocationStore {
   private apply(event: AnyEventEnvelope, notify: boolean): void {
     let changed: InvocationState | undefined;
     switch (event.kind) {
-      case "_baton_harness_invocation_recorded": {
+      case "_aide_harness_invocation_recorded": {
         if (this.states.has(event.payload.invocationId)) return;
         this.states.set(event.payload.invocationId, {
           recorded: event,
@@ -384,7 +384,7 @@ export class HarnessInvocationStore {
         });
         return;
       }
-      case "_baton_harness_invocation_scheduled": {
+      case "_aide_harness_invocation_scheduled": {
         const state = this.states.get(event.payload.invocationId);
         if (!state || state.scheduled) return;
         state.scheduled = event;
@@ -407,7 +407,7 @@ export class HarnessInvocationStore {
         changed = state;
         break;
       }
-      case "_baton_delivery_attempt_update": {
+      case "_aide_delivery_attempt_update": {
         const update = event.payload;
         let id = this.invocationIdByAttempt.get(update.attemptId);
         if (update.phase === "prepared") {
@@ -422,7 +422,7 @@ export class HarnessInvocationStore {
         changed = state;
         break;
       }
-      case "_baton_turn_summary": {
+      case "_aide_turn_summary": {
         const id = this.invocationIdByTurn.get(event.payload.turnId);
         const state = id ? this.states.get(id) : undefined;
         if (!state || state.result || state.cancelled || state.failed) return;
@@ -431,14 +431,14 @@ export class HarnessInvocationStore {
         changed = state;
         break;
       }
-      case "_baton_harness_invocation_cancelled": {
+      case "_aide_harness_invocation_cancelled": {
         const state = this.states.get(event.payload.invocationId);
         if (!state || state.cancelled || state.failed || state.result) return;
         state.cancelled = event;
         changed = state;
         break;
       }
-      case "_baton_harness_invocation_failed": {
+      case "_aide_harness_invocation_failed": {
         const state = this.states.get(event.payload.invocationId);
         if (!state || state.failed || state.cancelled || state.result) return;
         state.failed = event;

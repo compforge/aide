@@ -68,15 +68,15 @@ export interface ClaudeRuntime extends ClaudeDurableMappingState {
   currentTurn?: ClaudeTurn;
   /** effort 无动态控制接口；变更后在下个新 turn 前重建 streaming query。 */
   queryOptionsDirty?: boolean;
-  /** 用户在 baton 中选择的模型；已有 streaming query 通过 setModel 动态更新。 */
+  /** 用户在 aide 中选择的模型；已有 streaming query 通过 setModel 动态更新。 */
   model?: string;
   models?: ModelOption[];
   modelInfos?: ModelInfo[];
-  /** 用户在 baton 中选择的推理强度；下次 query 创建时生效。 */
+  /** 用户在 aide 中选择的推理强度；下次 query 创建时生效。 */
   effort?: EffortLevel;
   /** SDK 报告的实际 effort，仅用于解释 default，不反向固定用户选择。 */
   appliedEffort?: EffortLevel;
-  /** Baton 只统一 Claude Code 与 Codex 共有的 Default / Plan 两态。 */
+  /** Aide 只统一 Claude Code 与 Codex 共有的 Default / Plan 两态。 */
   permissionMode?: Extract<PermissionMode, "default" | "plan">;
   /** 已归一成 plan_update 的 tool_use id：其 tool_result 也要跳过，避免时间线出现重复工具卡 */
   suppressedToolIds: Set<string>;
@@ -106,7 +106,7 @@ export interface ClaudeRuntime extends ClaudeDurableMappingState {
   lastContextSample?: ClaudeContextSample;
   /** 最近一次已发布的 context window；后续 message_start 复用其容量，实时刷新当前占用。 */
   lastContextWindow?: ClaudePublishedContextWindow;
-  /** system/init 声明的终端专属 slash command；Baton 作为 SDK host 不展示这些命令。 */
+  /** system/init 声明的终端专属 slash command；Aide 作为 SDK host 不展示这些命令。 */
   terminalSlashCommands?: Set<string>;
   /** 最近一次 command catalog；system/init 每 Turn 重发名称时用它保留已知描述。 */
   availableCommands?: Map<string, AvailableCommand>;
@@ -159,7 +159,7 @@ export function commandLifecycleKey(msg: ClaudeCommandLifecycleMessage): string 
 
 /**
  * Agent SDK 只有 streaming input 才能在一个运行中回合继续收用户输入。这个单消费者
- * channel 是 Baton 侧的最小 prompt queue：query 生命周期内持续打开，close 时丢弃
+ * channel 是 Aide 侧的最小 prompt queue：query 生命周期内持续打开，close 时丢弃
  * 尚未消费的输入并唤醒 generator。
  */
 export function claudePromptChannel(): ClaudePromptChannel {

@@ -15,8 +15,8 @@ import {
   type ClaudeDurableMappingState,
 } from "./adapter.ts";
 
-function stripBatonInjectedContext(text: string): string {
-  return text.replace(/<baton-(context|sync)>[\s\S]*?<\/baton-\1>\s*/g, "").trim();
+function stripAideInjectedContext(text: string): string {
+  return text.replace(/<aide-(context|sync)>[\s\S]*?<\/aide-\1>\s*/g, "").trim();
 }
 
 function directTextContent(value: unknown): string {
@@ -48,7 +48,7 @@ interface ClaudeNativeTurnBuilder {
   running: boolean;
 }
 
-/** Claude getSessionMessages durable history → 与 live adapter 同构的 Baton turns。 */
+/** Claude getSessionMessages durable history → 与 live adapter 同构的 Aide turns。 */
 export function claudeHistoryTurns(messages: SessionMessage[]): HarnessHistoryTurn[] {
   const turns: HarnessHistoryTurn[] = [];
   const state: ClaudeDurableMappingState = {
@@ -72,7 +72,7 @@ export function claudeHistoryTurns(messages: SessionMessage[]): HarnessHistoryTu
     if (turn.running) return;
     turn.running = true;
     turn.events.push({
-      source: "baton",
+      source: "aide",
       event: { kind: "state_update", payload: { state: "running" } },
     });
   };
@@ -101,7 +101,7 @@ export function claudeHistoryTurns(messages: SessionMessage[]): HarnessHistoryTu
     if (message.type !== "user" && message.type !== "assistant") continue;
     const userText =
       message.type === "user"
-        ? stripBatonInjectedContext(directTextContent(message.message))
+        ? stripAideInjectedContext(directTextContent(message.message))
         : "";
     if (userText) {
       flush();
@@ -170,7 +170,7 @@ export const claudeSessionInspector: HarnessSessionInspector = {
       title:
         info?.customTitle ||
         info?.summary ||
-        (info?.firstPrompt ? stripBatonInjectedContext(info.firstPrompt) : undefined),
+        (info?.firstPrompt ? stripAideInjectedContext(info.firstPrompt) : undefined),
       turns,
       observedThrough: harnessHistoryBoundary(turns),
     };

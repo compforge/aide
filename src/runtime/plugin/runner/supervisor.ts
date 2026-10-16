@@ -2,7 +2,7 @@ import type {
   PluginDataDirectories,
   PluginInstance,
   PluginSessionContext,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import {
   PluginRunnerClient,
@@ -23,7 +23,7 @@ export interface PluginSupervisorOptions {
   readonly requestTimeoutMs?: number;
 }
 
-/** Baton-owned lifecycle boundary for per-Binding Plugin Runner processes. */
+/** Aide-owned lifecycle boundary for per-Binding Plugin Runner processes. */
 export class PluginSupervisor {
   private readonly active = new Set<PluginRunnerClient>();
   private readonly requestTimeoutMs?: number;

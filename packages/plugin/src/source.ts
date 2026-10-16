@@ -47,7 +47,7 @@ export interface Source<TSpec = Record<string, unknown>> {
   start(context: SourceContext<TSpec>): Promise<void>;
 }
 
-/** Baton-owned fixed resync schedule; Plugins do not implement its timer. */
+/** Aide-owned fixed resync schedule; Plugins do not implement its timer. */
 export interface CronSource {
   readonly type: "cron";
   /** Stable within one Controller. */

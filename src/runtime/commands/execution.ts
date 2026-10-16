@@ -1,4 +1,4 @@
-import type { Command, CommandContext, CommandInput, CommandResult, ViewInputRecord } from "@compforge/baton-plugin";
+import type { Command, CommandContext, CommandInput, CommandResult, ViewInputRecord } from "@compforge/aide-plugin";
 import type { Channel } from "../channel/index.ts";
 import { saveModelPreference } from "../config/model-preferences.ts";
 import { saveEffortPreference } from "../config/effort-preferences.ts";

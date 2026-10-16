@@ -75,7 +75,7 @@ export type CommandResult =
 /** Builtin and Plugin commands share identity, invocation and presentation contracts. */
 export interface Command extends CommandRef {
   readonly description: string;
-  readonly scope?: "baton" | "harness";
+  readonly scope?: "aide" | "harness";
   readonly runPolicy?: "always" | "idle";
   readonly input?: CommandInputShape;
   readonly aliases?: readonly CommandAlias[];

@@ -1,4 +1,4 @@
-import type { Resource } from "@compforge/baton-plugin";
+import type { Resource } from "@compforge/aide-plugin";
 import { WorkSchema, type Work, type Message } from "./model.ts";
 export const WORK_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Work" } as const;
 export const CONVERSATION_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Conversation" } as const;

@@ -7,7 +7,7 @@ import type {
   ResourceRef,
   ResourceType,
   Watch,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import type { PluginResource } from "./resource.ts";
 import type { ResourceClientChange } from "./resource-client.ts";
@@ -32,15 +32,15 @@ import {
   type InvokeVerb,
 } from "./verb.ts";
 
-export type ReconcileResourceOwner = "plugin" | "baton";
+export type ReconcileResourceOwner = "plugin" | "aide";
 
 export interface ReconcileScope {
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly pluginInstanceId: string;
   readonly namespace: AnyResourceNamespace;
   readonly resourceApiVersion: string;
   readonly resourceKind: string;
-  /** 旧 key 缺省为 plugin；baton 表示只读 Baton-owned Resource。 */
+  /** 旧 key 缺省为 plugin；aide 表示只读 Aide-owned Resource。 */
   readonly resourceOwner?: ReconcileResourceOwner;
 }
 
@@ -165,7 +165,7 @@ export interface ControllerOptions<TSpec, TStatus> {
   present?: PluginController<TSpec, TStatus>["present"];
   maxConcurrency?: number;
   now?: () => Date;
-  /** 每次执行前读取最新 BatonSession 只读视图。 */
+  /** 每次执行前读取最新 AideSession 只读视图。 */
   snapshot?: (key: ReconcileKey, resource: ResourceRef) => ReconcileSnapshot;
   invokeVerb?: InvokeVerb;
   /** Manager 注入的进程总容量；缺省表示不额外限流。 */
@@ -192,7 +192,7 @@ export interface ControllerOptions<TSpec, TStatus> {
 
 function ownedKey(key: ReconcileKey): ReconcileKey {
   const copy = {
-    batonSessionId: key.batonSessionId,
+    aideSessionId: key.aideSessionId,
     pluginInstanceId: key.pluginInstanceId,
     namespace: key.namespace,
     resourceApiVersion: key.resourceApiVersion,
@@ -203,7 +203,7 @@ function ownedKey(key: ReconcileKey): ReconcileKey {
       : { resourceOwner: key.resourceOwner }),
   };
   for (const [name, value] of Object.entries({
-    batonSessionId: copy.batonSessionId,
+    aideSessionId: copy.aideSessionId,
     pluginInstanceId: copy.pluginInstanceId,
     namespace: copy.namespace,
     resourceApiVersion: copy.resourceApiVersion,
@@ -215,7 +215,7 @@ function ownedKey(key: ReconcileKey): ReconcileKey {
   if (
     copy.resourceOwner !== undefined &&
     copy.resourceOwner !== "plugin" &&
-    copy.resourceOwner !== "baton"
+    copy.resourceOwner !== "aide"
   ) {
     throw new Error(`reconcile key resourceOwner is invalid: ${String(copy.resourceOwner)}`);
   }
@@ -285,7 +285,7 @@ export class Controller<TSpec, TStatus> {
     this.now = options.now ?? (() => new Date());
     validateSources(options.sources, this.now());
     this.snapshot =
-      options.snapshot ?? (() => emptyReconcileSnapshot(options.store.batonSessionId));
+      options.snapshot ?? (() => emptyReconcileSnapshot(options.store.aideSessionId));
     this.executeWithCapacity =
       options.executeWithCapacity ?? (async (execute) => await execute());
     this.invokeVerb = options.invokeVerb ?? (async () => {
@@ -295,7 +295,7 @@ export class Controller<TSpec, TStatus> {
       (async (_scope, _localLease, execute) => await execute());
     this.onWatchError = options.onWatchError;
     this.scope = Object.freeze({
-      batonSessionId: options.store.batonSessionId,
+      aideSessionId: options.store.aideSessionId,
       pluginInstanceId: options.store.pluginInstanceId,
       namespace: "v1",
       resourceApiVersion: options.resourceType.apiVersion,
@@ -310,7 +310,7 @@ export class Controller<TSpec, TStatus> {
     this.queue = new ReconcileQueue({
       execute: (key, localLease) => {
         const executionScope = Object.freeze({
-          batonSessionId: key.batonSessionId,
+          aideSessionId: key.aideSessionId,
           pluginInstanceId: key.pluginInstanceId,
           namespace: key.namespace as ResourceNamespace,
           executionId: newId("pex"),
@@ -376,8 +376,8 @@ export class Controller<TSpec, TStatus> {
   ): Promise<readonly ReconcileKey[]> {
     if (
       change.pluginInstanceId !== this.scope.pluginInstanceId ||
-      this.scope.namespace === "baton-system" ||
-      change.resource.metadata.namespace === "baton-system" ||
+      this.scope.namespace === "aide-system" ||
+      change.resource.metadata.namespace === "aide-system" ||
       !namespaceContains(
         this.scope.namespace,
         change.resource.metadata.namespace,
@@ -442,8 +442,8 @@ export class Controller<TSpec, TStatus> {
     if (
       resource.apiVersion !== this.resourceType.apiVersion ||
       resource.kind !== this.resourceType.kind ||
-      resource.namespace === "baton-system" ||
-      this.scope.namespace === "baton-system" ||
+      resource.namespace === "aide-system" ||
+      this.scope.namespace === "aide-system" ||
       !namespaceContains(this.scope.namespace, resource.namespace)
     ) {
       return false;
@@ -511,9 +511,9 @@ export class Controller<TSpec, TStatus> {
           uid: resource.metadata.uid,
         });
         const snapshot = deepFreeze(this.snapshot(key, resourceRef));
-        if (snapshot.session.batonSessionId !== this.scope.batonSessionId) {
+        if (snapshot.session.aideSessionId !== this.scope.aideSessionId) {
           throw new Error(
-            `ReconcileSnapshot batonSessionId must be ${this.scope.batonSessionId}, got ${snapshot.session.batonSessionId}`,
+            `ReconcileSnapshot aideSessionId must be ${this.scope.aideSessionId}, got ${snapshot.session.aideSessionId}`,
           );
         }
         const context = createReconcileContext(
@@ -577,17 +577,17 @@ export class Controller<TSpec, TStatus> {
 
   private assertOwns(key: ReconcileKey): void {
     if (
-      key.batonSessionId !== this.scope.batonSessionId ||
+      key.aideSessionId !== this.scope.aideSessionId ||
       key.pluginInstanceId !== this.scope.pluginInstanceId ||
-      key.namespace === "baton-system" ||
-      this.scope.namespace === "baton-system" ||
+      key.namespace === "aide-system" ||
+      this.scope.namespace === "aide-system" ||
       !namespaceContains(this.scope.namespace, key.namespace) ||
       key.resourceApiVersion !== this.scope.resourceApiVersion ||
       key.resourceKind !== this.scope.resourceKind ||
       reconcileResourceOwner(key) !== reconcileResourceOwner(this.scope)
     ) {
       throw new Error(
-        `reconcile key is outside controller scope: ${key.batonSessionId}/${key.pluginInstanceId}/${key.resourceApiVersion}/${key.resourceKind}/${key.resourceId}`,
+        `reconcile key is outside controller scope: ${key.aideSessionId}/${key.pluginInstanceId}/${key.resourceApiVersion}/${key.resourceKind}/${key.resourceId}`,
       );
     }
   }

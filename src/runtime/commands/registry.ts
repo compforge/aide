@@ -1,5 +1,5 @@
-import type { Command, CommandInputShape } from "@compforge/baton-plugin";
-export type { CommandDefinition } from "@compforge/baton-plugin";
+import type { Command, CommandInputShape } from "@compforge/aide-plugin";
+export type { CommandDefinition } from "@compforge/aide-plugin";
 
 export interface DirectCommandable {
   kind: "command";

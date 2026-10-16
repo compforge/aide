@@ -93,7 +93,7 @@ export class DeliveryAttemptLedger {
   }
 
   apply(event: AnyEventEnvelope): HarnessDeliveryAttemptState | undefined {
-    if (event.kind !== "_baton_delivery_attempt_update") return undefined;
+    if (event.kind !== "_aide_delivery_attempt_update") return undefined;
     const update = event.payload;
     const existing = this.attempts.get(update.attemptId);
 
@@ -171,13 +171,13 @@ function canTransition(
   }
 }
 
-type AttemptDraft = EventDraft<"_baton_delivery_attempt_update"> & {
+type AttemptDraft = EventDraft<"_aide_delivery_attempt_update"> & {
   /** recovery 没有 live HarnessBinding，需沿用 prepared 时已持久化的执行归属。 */
   harness?: string;
   harnessTargetId?: string;
   laneId?: string;
 };
-type AttemptEnvelope = EventEnvelope<"_baton_delivery_attempt_update">;
+type AttemptEnvelope = EventEnvelope<"_aide_delivery_attempt_update">;
 
 export type DeliveryAttemptAppender<TContext> = (
   context: TContext,
@@ -222,7 +222,7 @@ export class DeliveryAttempts<TContext> {
   ): HarnessDeliveryAttemptState {
     const attemptId = newId("att");
     this.record(context, {
-      kind: "_baton_delivery_attempt_update",
+      kind: "_aide_delivery_attempt_update",
       parentEventId: opts.inputEventId,
       harnessSessionId: opts.harnessSessionId,
       turnId: opts.turnId,
@@ -292,7 +292,7 @@ export class DeliveryAttempts<TContext> {
   }
 
   /**
-   * Harness idle 是执行 owner 的终态 Receipt；Baton 合成 idle 只能结束本地 Turn，
+   * Harness idle 是执行 owner 的终态 Receipt；Aide 合成 idle 只能结束本地 Turn，
    * 不能冒充远端已停止，已 dispatch 的 Attempt 因此转 uncertain 等待对账。
    */
   observeTerminal(
@@ -313,7 +313,7 @@ export class DeliveryAttempts<TContext> {
         this.markUncertain(
           context,
           attempt,
-          `Baton finalized turn without a Harness terminal receipt (${terminal.payload.stopReason ?? "unknown"})`,
+          `Aide finalized turn without a Harness terminal receipt (${terminal.payload.stopReason ?? "unknown"})`,
           terminal.eventId,
         );
       }
@@ -353,7 +353,7 @@ export class DeliveryAttempts<TContext> {
     harnessSessionId: string | undefined = attempt.harnessSessionId,
   ): void {
     this.record(context, {
-      kind: "_baton_delivery_attempt_update",
+      kind: "_aide_delivery_attempt_update",
       parentEventId,
       harness: attempt.harness,
       harnessTargetId: attempt.harnessTargetId,

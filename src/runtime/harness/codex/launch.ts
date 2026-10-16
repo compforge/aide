@@ -1,10 +1,10 @@
 import type { HookTrustCandidate } from "../../interaction/types.ts";
 
 /**
- * 审批路由**不由 baton 定默认**：`thread/start` 原生收 `approvalsReviewer`，缺省
+ * 审批路由**不由 aide 定默认**：`thread/start` 原生收 `approvalsReviewer`，缺省
  * （undefined）就交给 codex 自己解析——config.toml、profile、企业 requirements 全部照常
- * 生效，baton 与 codex 天然一致。codex 自己的默认是 `user`（且 guardian feature 开着
- * 也不变），baton 没有比上游更激进的理由。用户显式配了才传，作为 opt-in 委托。
+ * 生效，aide 与 codex 天然一致。codex 自己的默认是 `user`（且 guardian feature 开着
+ * 也不变），aide 没有比上游更激进的理由。用户显式配了才传，作为 opt-in 委托。
  *
  * 曾经的做法是往 argv 注入 `-c approvals_reviewer=...`：既覆盖了用户的 codex 配置，
  * 又反推不出生效值——企业 requirements（allowed_approvals_reviewers）能把注入的值打回，

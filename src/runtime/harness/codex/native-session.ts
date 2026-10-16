@@ -61,7 +61,7 @@ function codexStopReason(status: string): string {
       : status;
 }
 
-/** app-server full Turn → 与 live Codex adapter 同构的 Baton turn。 */
+/** app-server full Turn → 与 live Codex adapter 同构的 Aide turn。 */
 export function codexHistoryTurns(turns: unknown[]): HarnessHistoryTurn[] {
   return turns.map((rawTurn, index) => {
     const turn = (rawTurn ?? {}) as Record<string, unknown>;
@@ -82,7 +82,7 @@ export function codexHistoryTurns(turns: unknown[]): HarnessHistoryTurn[] {
       if (running) return;
       running = true;
       events.push({
-        source: "baton",
+        source: "aide",
         event: {
           kind: "state_update",
           payload: { state: "running" },
@@ -130,7 +130,7 @@ export function codexHistoryTurns(turns: unknown[]): HarnessHistoryTurn[] {
       events.push({
         source: "harness",
         event: {
-          kind: "_baton_error_update",
+          kind: "_aide_error_update",
           payload: {
             message: String(detail.message ?? "Codex turn failed"),
             ...(typeof detail.codexErrorInfo === "string"

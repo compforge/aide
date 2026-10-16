@@ -252,7 +252,7 @@ export function codexToolTerminalStatus(rawStatus: unknown): ToolCallStatus {
 
 /**
  * Codex ThreadItem 的持久语义归一。live notification 与只读 full Turn 导入共同走这里，
- * 避免中途接管时得到一套“只有首尾文本”的缩水 BatonSession。
+ * 避免中途接管时得到一套“只有首尾文本”的缩水 AideSession。
  */
 export function codexItemLifecycleDrafts(
   lifecycle: "started" | "completed",
@@ -302,7 +302,7 @@ export function codexItemLifecycleDrafts(
 
   if (itemType === "contextCompaction") {
     return [{
-      kind: "_baton_run_status",
+      kind: "_aide_run_status",
       payload:
         lifecycle === "started"
           ? { phase: "compacting", title: "Compacting context…" }

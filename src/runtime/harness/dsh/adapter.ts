@@ -1,5 +1,5 @@
 // DeepSeek Harness Agent SDK adapter：DSH 原生 session/event 协议只在本目录出现，
-// controller / store / TUI 继续只消费 Baton Event。追加走 SDK 原生 inbox；
+// controller / store / TUI 继续只消费 Aide Event。追加走 SDK 原生 inbox；
 // 取消仍通过关闭 runtime 收口，后续 turn 用同一 session id 重连。
 
 import {
@@ -190,7 +190,7 @@ export class DshAdapter implements HarnessAdapter {
       // DSH can report a claim before its RPC identity resolves. Do not attribute
       // new output to the old prompt while that additional input is in flight.
       active.replies.current = undefined;
-      // 原生接受只代表 Baton 承担投递责任；ack 之后是否 applied 由
+      // 原生接受只代表 Aide 承担投递责任；ack 之后是否 applied 由
       // input_delivery_update 决定。Core 只为 Queue 驱动的新 Turn 落 user_message，
       // same-turn steer 必须由 Adapter 补 delivery:"steer" 的用户消息，
       // 否则 applied 后它既离开 Queue 又无从进入 Transcript。
@@ -229,7 +229,7 @@ export class DshAdapter implements HarnessAdapter {
         this.emit(runtime, turn, { kind: "input_delivery_update", payload: {
           messageId, state, ...(detail ? { detail } : {}), ...(beforeMessageId ? { beforeMessageId } : {}),
         } }, raw);
-        if (state === "uncertain") this.emit(runtime, turn, { kind: "_baton_notice", payload: {
+        if (state === "uncertain") this.emit(runtime, turn, { kind: "_aide_notice", payload: {
           level: "warning", title: "DSH input delivery is uncertain",
           detail: `${messageId}: ${detail}. Confirm its result before sending it again.`,
         } });
@@ -619,7 +619,7 @@ export class DshAdapter implements HarnessAdapter {
       // Offload changes the model's retained context, not the user's original
       // Message or attachment. Keep originals intact and surface a notice only.
       this.emit(runtime, turn, {
-        kind: "_baton_notice",
+        kind: "_aide_notice",
         payload: {
           level: "info",
           title: "DSH unloaded older images from model context",
@@ -661,7 +661,7 @@ export class DshAdapter implements HarnessAdapter {
     if (turn.errorEmitted || turn.finalized) return;
     turn.errorEmitted = true;
     this.emit(runtime, turn, {
-      kind: "_baton_error_update",
+      kind: "_aide_error_update",
       payload: { ...(failure.code ? { code: failure.code } : {}), message: failure.message },
     });
   }

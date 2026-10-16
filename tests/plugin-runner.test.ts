@@ -16,7 +16,7 @@ import type {
   DeferredHookStage,
   HookSubjectMap,
   InlineHookStage,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import { Channel } from "../src/runtime/channel/index.ts";
 import { PluginInstanceStore } from "../src/runtime/plugin/instance.ts";
@@ -31,7 +31,7 @@ import { SessionHandle } from "../src/runtime/store/store.ts";
 const roots: string[] = [];
 
 function stores() {
-  const root = mkdtempSync(join(tmpdir(), "baton-plugin-runner-"));
+  const root = mkdtempSync(join(tmpdir(), "aide-plugin-runner-"));
   roots.push(root);
   const session = {
     id: "bs_runner",
@@ -41,7 +41,7 @@ function stores() {
     session.id,
     session.dir,
     {
-      batonSessionId: session.id,
+      aideSessionId: session.id,
       cwd: root,
       createdAt: new Date().toISOString(),
       harnessTargets: {},
@@ -60,7 +60,7 @@ function stores() {
   const entry = join(packageDir, "index.ts");
   mkdirSync(packageDir, { recursive: true });
   // Installed Marketplace Packages have no node_modules. Type-only imports
-  // must erase cleanly instead of resolving through Baton's dependency tree.
+  // must erase cleanly instead of resolving through Aide's dependency tree.
   cpSync(join(import.meta.dir, "fixtures", "process-plugin.ts"), entry);
   return {
     root,
@@ -105,8 +105,8 @@ describe("Plugin Runner process boundary", () => {
   test("routes reconcile capabilities across the process boundary", async () => {
     const { instances, session, entry } = stores();
     session.appendEvent({
-      kind: "_baton_turn_summary",
-      source: { type: "baton" },
+      kind: "_aide_turn_summary",
+      source: { type: "aide" },
       harness: "codex",
       harnessTargetId: "codex_default",
       turnId: "turn_runner",
@@ -346,8 +346,8 @@ describe("Plugin Runner process boundary", () => {
   test("withdraws registrations and settles a waiting verb after a crash", async () => {
     const { root, instances, session, entry } = stores();
     session.appendEvent({
-      kind: "_baton_turn_summary",
-      source: { type: "baton" },
+      kind: "_aide_turn_summary",
+      source: { type: "aide" },
       harness: "codex",
       harnessTargetId: "codex_default",
       turnId: "turn_crash",

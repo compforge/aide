@@ -1,7 +1,7 @@
 import type { PromptBlock } from "../event/index.ts";
 import type { HarnessTarget } from "./target.ts";
 
-/** The actor that caused a prompt Input to enter Baton. */
+/** The actor that caused a prompt Input to enter Aide. */
 export type HarnessInputSource =
   | { type: "user" }
   | {
@@ -42,7 +42,7 @@ export interface HarnessInput {
   /** Controller scheduling coordinate: reserved for a prompt or targeted by a steer. Not proof of actual consumption. */
   turnId: string;
   target: HarnessTarget;
-  /** Baton-owned logical execution channel selected before admission. */
+  /** Aide-owned logical execution channel selected before admission. */
   laneId: string;
   blocks: PromptBlock[];
   source: HarnessInputSource;

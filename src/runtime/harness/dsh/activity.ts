@@ -6,7 +6,7 @@ interface PendingInput { messageId: string; steer: boolean; nativeId?: string }
 type InboxTarget = "next-turn" | "next-step";
 
 /**
- * One Baton turn can contain several DSH inbox messages; only their receipts prove consumption.
+ * One Aide turn can contain several DSH inbox messages; only their receipts prove consumption.
  *
  * @spec Durable inbox insertion keeps a steer pending; only a claimed entry that reaches
  * user/message is applied. A claimed entry missing at idle is failed instead of hanging.
@@ -87,7 +87,7 @@ export class DshActivity {
   /**
    * DSH persists inbox insertion before admission. Only the later pure deletion
    * claims a batch for a step, and the following user/message makes one claimed
-   * entry model-visible. Keep that distinction so Baton's Queue does not retire
+   * entry model-visible. Keep that distinction so Aide's Queue does not retire
    * an input merely because DSH durably queued it.
    */
   private observeSessionEvent(notification: HarnessNotification): void {

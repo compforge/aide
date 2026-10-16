@@ -32,16 +32,16 @@ export interface ResourceOwnerReference extends ResourceRef {
 export interface ResourceMetadata {
   /** Stable name within one namespace and Resource type. */
   readonly name: string;
-  /** Concrete Resource scope. Baton-owned Resources use a Baton-reserved namespace. */
+  /** Concrete Resource scope. Aide-owned Resources use a Aide-reserved namespace. */
   readonly namespace: AnyResourceNamespace;
-  /** Baton-assigned identity for this concrete incarnation. */
+  /** Aide-assigned identity for this concrete incarnation. */
   readonly uid: string;
   /** Desired-state revision. Only spec changes advance it. */
   readonly generation: number;
   /** Opaque optimistic-concurrency token. */
   readonly resourceVersion: string;
   readonly creationTimestamp: string;
-  /** Structural owner used by Baton for cascading deletion. */
+  /** Structural owner used by Aide for cascading deletion. */
   readonly owner?: ResourceOwnerReference;
   /** Set after deletion is requested and retained until reconcile succeeds. */
   readonly deletionTimestamp?: string;
@@ -144,28 +144,28 @@ export interface ResourceClient extends ResourceReader, ResourceWriter {
   ): Promise<Readonly<Resource<TSpec, TStatus>> | undefined>;
 }
 
-export type BatonTurnResourceApiVersion = "baton.dev/v1alpha1";
-export type BatonTurnResourceKind = "Turn";
+export type AideTurnResourceApiVersion = "aide.dev/v1alpha1";
+export type AideTurnResourceKind = "Turn";
 
-export type BatonSessionResourceKind = "Session";
-export type BatonTargetResourceKind = "Target";
-export type BatonSessionTargetBindingResourceKind = "SessionTargetBinding";
+export type AideSessionResourceKind = "Session";
+export type AideTargetResourceKind = "Target";
+export type AideSessionTargetBindingResourceKind = "SessionTargetBinding";
 
-export interface BatonSessionResourceStatus {
+export interface AideSessionResourceStatus {
   readonly phase: "Active" | "Inactive";
 }
 
-export interface BatonTargetResourceSpec {
+export interface AideTargetResourceSpec {
   readonly harness: string;
 }
 
-export interface BatonTargetResourceStatus {
+export interface AideTargetResourceStatus {
   readonly phase: "Ready" | "Unavailable";
   /** list returns the last observation; get refreshes missing/expired discovery without opening a HarnessSession. */
-  readonly modelCatalog?: BatonTargetModelCatalog;
+  readonly modelCatalog?: AideTargetModelCatalog;
 }
 
-export interface BatonTargetModel {
+export interface AideTargetModel {
   readonly id: string;
   readonly label: string;
   readonly description?: string;
@@ -173,60 +173,60 @@ export interface BatonTargetModel {
 }
 
 /** Discovery state is independent of whether a Target is configured/eligible for routing. */
-export type BatonTargetModelCatalog =
+export type AideTargetModelCatalog =
   | { readonly phase: "Pending" }
   | { readonly phase: "Unavailable"; readonly observedAt: string }
   | { readonly phase: "Failed"; readonly observedAt: string; readonly message: string }
-  | { readonly phase: "Ready"; readonly observedAt: string; readonly models: readonly BatonTargetModel[] };
+  | { readonly phase: "Ready"; readonly observedAt: string; readonly models: readonly AideTargetModel[] };
 
-export interface BatonSessionTargetBindingResourceSpec {
+export interface AideSessionTargetBindingResourceSpec {
   readonly sessionRef: ResourceRef;
   readonly eligibleTargetRefs: readonly ResourceRef[];
   readonly targetRef?: ResourceRef;
 }
 
-export interface BatonSessionTargetBindingResourceStatus {
+export interface AideSessionTargetBindingResourceStatus {
   readonly observedGeneration: number;
   readonly effectiveTargetRef?: ResourceRef;
   readonly phase: "Pending" | "Bound" | "Failed";
 }
 
-export type BatonTurnResourceData = TurnSummary & {
+export type AideTurnResourceData = TurnSummary & {
   readonly harness?: string;
   readonly harnessTargetId?: string;
   readonly laneId?: string;
   readonly harnessSessionId?: string;
 };
 
-/** Read-only Resource shape exposed by Baton-owned Turn observations. */
-export type BatonTurnResource = Resource<
+/** Read-only Resource shape exposed by Aide-owned Turn observations. */
+export type AideTurnResource = Resource<
   Record<string, never>,
-  BatonTurnResourceData
+  AideTurnResourceData
 > & {
-  readonly apiVersion: BatonTurnResourceApiVersion;
-  readonly kind: BatonTurnResourceKind;
+  readonly apiVersion: AideTurnResourceApiVersion;
+  readonly kind: AideTurnResourceKind;
 };
 
-export type BatonSessionResource = Resource<
+export type AideSessionResource = Resource<
   Record<string, never>,
-  BatonSessionResourceStatus
+  AideSessionResourceStatus
 > & {
-  readonly apiVersion: BatonTurnResourceApiVersion;
-  readonly kind: BatonSessionResourceKind;
+  readonly apiVersion: AideTurnResourceApiVersion;
+  readonly kind: AideSessionResourceKind;
 };
 
-export type BatonTargetResource = Resource<
-  BatonTargetResourceSpec,
-  BatonTargetResourceStatus
+export type AideTargetResource = Resource<
+  AideTargetResourceSpec,
+  AideTargetResourceStatus
 > & {
-  readonly apiVersion: BatonTurnResourceApiVersion;
-  readonly kind: BatonTargetResourceKind;
+  readonly apiVersion: AideTurnResourceApiVersion;
+  readonly kind: AideTargetResourceKind;
 };
 
-export type BatonSessionTargetBindingResource = Resource<
-  BatonSessionTargetBindingResourceSpec,
-  BatonSessionTargetBindingResourceStatus
+export type AideSessionTargetBindingResource = Resource<
+  AideSessionTargetBindingResourceSpec,
+  AideSessionTargetBindingResourceStatus
 > & {
-  readonly apiVersion: BatonTurnResourceApiVersion;
-  readonly kind: BatonSessionTargetBindingResourceKind;
+  readonly apiVersion: AideTurnResourceApiVersion;
+  readonly kind: AideSessionTargetBindingResourceKind;
 };

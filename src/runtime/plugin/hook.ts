@@ -5,7 +5,7 @@ import type {
   HookSubjectMap,
   InlineHookStage,
   ResourceNamespace,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import { newId } from "../event/ids.ts";
 import { type LogSink, logError } from "../logging.ts";
@@ -21,7 +21,7 @@ export const DEFAULT_HOOK_TIMEOUT_MS = 10_000;
 export const DEFAULT_DEFERRED_HOOK_QUEUE_LIMIT = 256;
 
 export interface HookRegistrationOwner {
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly pluginInstanceId: string;
   readonly pluginId: string;
   readonly namespace: ResourceNamespace;
@@ -146,7 +146,7 @@ export class HookRuntime {
     subject: Readonly<HookSubjectMap[S]>,
   ): Promise<void> {
     const scope: ExecutionScope = Object.freeze({
-      batonSessionId: registration.owner.batonSessionId,
+      aideSessionId: registration.owner.aideSessionId,
       pluginInstanceId: registration.owner.pluginInstanceId,
       namespace: registration.owner.namespace,
       executionId: newId("pex"),
@@ -204,7 +204,7 @@ export class HookRuntime {
   ): void {
     this.log?.({
       level: outcome === "failed" || outcome === "dropped" ? "warn" : "debug",
-      source: "baton",
+      source: "aide",
       component: "plugin.hook",
       message: `Plugin Hook ${outcome}`,
       pluginId: registration.owner.pluginId,

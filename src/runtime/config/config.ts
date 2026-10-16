@@ -1,4 +1,4 @@
-// ~/.baton/config.yaml：用户级配置。HarnessTarget 拥有 Harness 专属启动配置，
+// ~/.aide/config.yaml：用户级配置。HarnessTarget 拥有 Harness 专属启动配置，
 // 根配置只负责全局选项、Target 索引和默认 Target。
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -10,11 +10,11 @@ import { parse, stringify } from "yaml";
 import { DEFAULT_CLAUDE_TARGET_CONFIG } from "../harness/claude/config.ts";
 import { DEFAULT_CODEX_TARGET_CONFIG } from "../harness/codex/config.ts";
 import { DEFAULT_DSH_TARGET_CONFIG } from "../harness/dsh/config.ts";
-import type { BatonConfig, HarnessTargetConfig, NotificationConfig } from "./types.ts";
+import type { AideConfig, HarnessTargetConfig, NotificationConfig } from "./types.ts";
 
-export type { BatonConfig, HarnessTargetConfig, NotificationConfig } from "./types.ts";
+export type { AideConfig, HarnessTargetConfig, NotificationConfig } from "./types.ts";
 
-export const DEFAULT_CONFIG: BatonConfig = {
+export const DEFAULT_CONFIG: AideConfig = {
   defaultTarget: "codex",
   targets: {
     codex: DEFAULT_CODEX_TARGET_CONFIG,
@@ -27,19 +27,19 @@ export const DEFAULT_CONFIG: BatonConfig = {
   logLevel: "info",
 };
 
-export function batonRoot(rootDir?: string): string {
-  return rootDir ?? join(homedir(), ".baton");
+export function aideRoot(rootDir?: string): string {
+  return rootDir ?? join(homedir(), ".aide");
 }
 
 export function configPath(rootDir?: string): string {
-  return join(batonRoot(rootDir), "config.yaml");
+  return join(aideRoot(rootDir), "config.yaml");
 }
 
 /** 不存在则写入默认配置，返回文件路径。只在入口调用一次，load 本身无副作用。 */
 export function ensureConfigFile(rootDir?: string): string {
   const path = configPath(rootDir);
   if (!existsSync(path)) {
-    mkdirSync(batonRoot(rootDir), { recursive: true });
+    mkdirSync(aideRoot(rootDir), { recursive: true });
     writeFileSync(path, stringify(DEFAULT_CONFIG));
   }
   return path;
@@ -82,13 +82,13 @@ function loadNotifications(value: unknown): NotificationConfig {
   return { enabled, bell };
 }
 
-export function targetConfigFor(config: BatonConfig, targetId: string): HarnessTargetConfig {
+export function targetConfigFor(config: AideConfig, targetId: string): HarnessTargetConfig {
   const target = config.targets[targetId];
   if (!target) throw new Error(`HarnessTarget not configured: ${targetId}`);
   return target;
 }
 
-/** Adapter/probe 创建边界的严格校验：账号选择不能因坏配置静默回落到 Baton 进程环境。 */
+/** Adapter/probe 创建边界的严格校验：账号选择不能因坏配置静默回落到 Aide 进程环境。 */
 export function targetEnvironmentFor(
   config: HarnessTargetConfig,
   targetId: string,
@@ -110,7 +110,7 @@ export function targetEnvironmentFor(
   return Object.keys(environment).length > 0 ? Object.freeze(environment) : undefined;
 }
 
-export function loadConfig(rootDir?: string): BatonConfig {
+export function loadConfig(rootDir?: string): AideConfig {
   let fromFile: Record<string, unknown> = {};
   const path = configPath(rootDir);
   if (existsSync(path)) {
@@ -138,7 +138,7 @@ export function loadConfig(rootDir?: string): BatonConfig {
   const logLevel =
     typeof fromFile.logLevel === "string" &&
     ["debug", "info", "warn", "error"].includes(fromFile.logLevel)
-      ? fromFile.logLevel as BatonConfig["logLevel"]
+      ? fromFile.logLevel as AideConfig["logLevel"]
       : DEFAULT_CONFIG.logLevel;
   const textgenPrefer =
     typeof fromFile.textgenPrefer === "string" && targets[fromFile.textgenPrefer]

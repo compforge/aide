@@ -40,7 +40,7 @@ export async function generateStructuredWithFallback(
     } catch (error) {
       opts.log?.({
         level: "warn",
-        source: "baton",
+        source: "aide",
         component: "textgen",
         harness: candidate.harness,
         message: "textgen candidate failed, falling back",
@@ -82,13 +82,13 @@ const GENERIC_SESSION_TITLES = new Set([
 ]);
 
 /**
- * 初始标题 prompt（编辑规则移植自 t3code TextGenerationPrompts，按 baton 语境调整）：
+ * 初始标题 prompt（编辑规则移植自 t3code TextGenerationPrompts，按 aide 语境调整）：
  * 目标是"几周后还能认出这个 session"，先归约 Subject/Outcome 再命名，丢弃过程性指令。
  */
 export function buildSessionTitlePrompt(userText: string): string {
   const message =
     userText.length <= TITLE_INPUT_MAX_CHARS ? userText : `${userText.slice(0, TITLE_INPUT_MAX_CHARS)}…`;
-  return `Generate a title that will help the user recognize this Baton session weeks later.
+  return `Generate a title that will help the user recognize this Aide session weeks later.
 Return JSON with exactly one key: title.
 
 Before answering, silently reduce the request to:

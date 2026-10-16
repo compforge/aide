@@ -1,5 +1,5 @@
 /**
- * A semantic Human operation normalized by a Baton View, not a Message.
+ * A semantic Human operation normalized by a Aide View, not a Message.
  * Core may create a Message, change configuration or control execution from it.
  */
 export type ViewInput =
@@ -50,7 +50,7 @@ export interface ViewInputRecord {
 }
 
 /**
- * Notification that a projection update was published through a Baton View.
+ * Notification that a projection update was published through a Aide View.
  * It carries no Message body and does not prove rendering, reading or completion.
  * One publication may cover multiple Messages, or only non-message view state.
  */

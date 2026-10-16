@@ -19,7 +19,7 @@ type SnapshotReadonly<T> =
         : T;
 
 export interface SessionSnapshot {
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly cwd?: string;
   readonly runState: SessionState["runState"];
   /** Event Ledger 当前水位。 */
@@ -62,7 +62,7 @@ export interface PendingInteractionSnapshot {
 }
 
 /**
- * Plugin reconcile 开始时冻结的 BatonSession 只读视图。
+ * Plugin reconcile 开始时冻结的 AideSession 只读视图。
  *
  * Snapshot 只暴露 Plugin 做当前决策所需的稳定视图；内部 Controller、Store、HarnessBinding
  * 和其他可变 owner 不穿透这条边界。
@@ -78,7 +78,7 @@ export interface ReconcileSnapshot {
 }
 
 interface CreateReconcileSnapshotOptions {
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly cwd?: string;
   readonly state: Pick<
     SessionState,
@@ -100,7 +100,7 @@ export function createReconcileSnapshot(options: CreateReconcileSnapshotOptions)
   const latestTurn = options.state.turnSummaries.at(-1);
   return deepFreeze({
     session: {
-      batonSessionId: options.batonSessionId,
+      aideSessionId: options.aideSessionId,
       ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
       runState: options.state.runState,
       revision: options.state.lastSeq,
@@ -149,10 +149,10 @@ export function createReconcileSnapshot(options: CreateReconcileSnapshotOptions)
   });
 }
 
-export function emptyReconcileSnapshot(batonSessionId: string): ReconcileSnapshot {
+export function emptyReconcileSnapshot(aideSessionId: string): ReconcileSnapshot {
   return deepFreeze({
     session: {
-      batonSessionId,
+      aideSessionId,
       runState: "idle",
       revision: 0,
     },

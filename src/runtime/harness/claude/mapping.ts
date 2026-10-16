@@ -24,11 +24,11 @@ export interface ClaudeApprovalHints {
 }
 
 /**
- * 审批候选。always 项只在 SDK 给出 permission suggestions 时提供：baton 不自造
+ * 审批候选。always 项只在 SDK 给出 permission suggestions 时提供：aide 不自造
  * 授权规则，只透传 CLI "don't ask again" 的同款路径（选中后把整组 suggestions
  * 作为 updatedPermissions 返回，规则作用域由 SDK 决定，通常是 session 级）。
  *
- * lifetime 取 `persistent` 而非 `session`：作用域实际由 SDK 定、baton 不确知，
+ * lifetime 取 `persistent` 而非 `session`：作用域实际由 SDK 定、aide 不确知，
  * 而在审批展示上低报持续性才是危险的一侧（用户以为一次性、实则长期）。悲观取强档，
  * 与 name 的 "don't ask again" 一致（不变量 #2）。SDK 要求 suppress 时删除该项；
  * defaultToNo 时把拒绝放首位，对齐 chat-tui 默认选中第一项的交互。
@@ -167,7 +167,7 @@ export function applyTaskOp(
     tasks.delete(op.taskId);
     return;
   }
-  // upsert：resume 场景下任务可能建于 baton 观察不到的历史，缺 subject 时以 id 兜底
+  // upsert：resume 场景下任务可能建于 aide 观察不到的历史，缺 subject 时以 id 兜底
   const prev = tasks.get(op.taskId);
   tasks.set(op.taskId, {
     subject: op.subject ?? prev?.subject ?? `Task #${op.taskId}`,
@@ -324,7 +324,7 @@ export function claudeProposedPlanDraft(
 }
 
 /**
- * Claude durable user/assistant message → Baton drafts。
+ * Claude durable user/assistant message → Aide drafts。
  *
  * 这里只消费 live 与 getSessionMessages 都会持久化的内容块；stream delta、result
  * usage 和只存在于 live message.tool_use_result 的私有 structuredPatch 不做猜测。

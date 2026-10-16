@@ -15,8 +15,8 @@ import {
   type HookSubjectMap,
   type PluginVerbs,
   type ReconcileContext,
-} from "@compforge/baton-plugin";
-import type { ResourceNamespace } from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
+import type { ResourceNamespace } from "@compforge/aide-plugin";
 
 import type { PromptBlock } from "../event/index.ts";
 import type { InteractionResult } from "../interaction/types.ts";
@@ -40,7 +40,7 @@ import type {
 import type { ReconcileSnapshot } from "./reconcile-snapshot.ts";
 
 export interface ExecutionScope {
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly pluginInstanceId: string;
   /** Namespace of the Resource or session boundary that initiated the action. */
   readonly namespace: ResourceNamespace;
@@ -338,7 +338,7 @@ export class Verb {
     if (
       !execution ||
       execution.scope.pluginInstanceId !== context.pluginInstanceId ||
-      execution.scope.batonSessionId !== context.batonSessionId ||
+      execution.scope.aideSessionId !== context.aideSessionId ||
       execution.scope.namespace !== context.namespace
     ) {
       throw new Error(`Plugin execution is not active: ${context.executionId}`);
@@ -605,7 +605,7 @@ export class Verb {
         );
         this.log?.({
           level: "error",
-          source: "baton",
+          source: "aide",
           component: "plugin.harness-invocation",
           message: "HarnessInvocation dispatch failed",
           pluginInstanceId: request.pluginInstanceId,

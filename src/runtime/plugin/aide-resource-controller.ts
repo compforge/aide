@@ -8,7 +8,7 @@ import type {
   ResourceRef,
   ResourceNamespace,
   Watch,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 import type { SessionHandle } from "../store/store.ts";
 import { newId } from "../event/ids.ts";
 import {
@@ -38,11 +38,11 @@ import type {
   CronSource,
 } from "./package.ts";
 import {
-  BATON_SYSTEM_NAMESPACE,
-  BATON_TURN_RESOURCE_TYPE,
+  AIDE_SYSTEM_NAMESPACE,
+  AIDE_TURN_RESOURCE_TYPE,
 } from "./package.ts";
 
-export const BATON_TURN_RESOURCE_KIND = BATON_TURN_RESOURCE_TYPE.kind;
+export const AIDE_TURN_RESOURCE_KIND = AIDE_TURN_RESOURCE_TYPE.kind;
 
 export type DeepReadonly<T> =
   T extends (...args: never[]) => unknown
@@ -53,45 +53,45 @@ export type DeepReadonly<T> =
         ? { readonly [Key in keyof T]: DeepReadonly<T[Key]> }
         : T;
 
-export type BatonTurnResourceData = DeepReadonly<TurnSummary> & {
+export type AideTurnResourceData = DeepReadonly<TurnSummary> & {
   readonly harness?: string;
   readonly harnessTargetId?: string;
   readonly laneId?: string;
   readonly harnessSessionId?: string;
 };
 
-export interface BatonResourceDataMap {
-  [BATON_TURN_RESOURCE_KIND]: BatonTurnResourceData;
+export interface AideResourceDataMap {
+  [AIDE_TURN_RESOURCE_KIND]: AideTurnResourceData;
 }
 
-export type BatonResourceKind = keyof BatonResourceDataMap;
+export type AideResourceKind = keyof AideResourceDataMap;
 
-export interface BatonResourceObservationMetadata {
-  readonly batonSessionId: string;
+export interface AideResourceObservationMetadata {
+  readonly aideSessionId: string;
   readonly resourceId: string;
-  /** 产生当前 Resource 的 ledger seq；Baton-owned Resource 自身不另设持久真相。 */
+  /** 产生当前 Resource 的 ledger seq；Aide-owned Resource 自身不另设持久真相。 */
   readonly revision: number;
   readonly sourceEventId: string;
   readonly observedAt: string;
 }
 
-export interface BatonResourceObservation<K extends BatonResourceKind = BatonResourceKind> {
+export interface AideResourceObservation<K extends AideResourceKind = AideResourceKind> {
   readonly kind: K;
-  readonly metadata: BatonResourceObservationMetadata;
-  readonly data: BatonResourceDataMap[K];
+  readonly metadata: AideResourceObservationMetadata;
+  readonly data: AideResourceDataMap[K];
 }
 
-export type AnyBatonResourceObservation = {
-  [K in BatonResourceKind]: BatonResourceObservation<K>;
-}[BatonResourceKind];
+export type AnyAideResourceObservation = {
+  [K in AideResourceKind]: AideResourceObservation<K>;
+}[AideResourceKind];
 
-type BatonResourceSession = Pick<
+type AideResourceSession = Pick<
   SessionHandle,
   "id" | "dir" | "ledger" | "subscribe"
 >;
 
-export interface BatonResourceIndexOptions {
-  session: BatonResourceSession;
+export interface AideResourceIndexOptions {
+  session: AideResourceSession;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -102,12 +102,12 @@ function deepFreeze<T>(value: T): T {
 }
 
 function turnResource(
-  event: EventEnvelope<"_baton_turn_summary">,
-): BatonResourceObservation<typeof BATON_TURN_RESOURCE_KIND> {
+  event: EventEnvelope<"_aide_turn_summary">,
+): AideResourceObservation<typeof AIDE_TURN_RESOURCE_KIND> {
   return deepFreeze({
-    kind: BATON_TURN_RESOURCE_KIND,
+    kind: AIDE_TURN_RESOURCE_KIND,
     metadata: {
-      batonSessionId: event.scope.batonSessionId,
+      aideSessionId: event.scope.aideSessionId,
       resourceId: event.payload.turnId,
       revision: event.seq,
       sourceEventId: event.eventId,
@@ -129,31 +129,31 @@ function turnResource(
   });
 }
 
-function batonResourceRef(resource: BatonResourceObservation): ResourceRef {
+function aideResourceRef(resource: AideResourceObservation): ResourceRef {
   return Object.freeze({
-    ...BATON_TURN_RESOURCE_TYPE,
-    namespace: BATON_SYSTEM_NAMESPACE,
+    ...AIDE_TURN_RESOURCE_TYPE,
+    namespace: AIDE_SYSTEM_NAMESPACE,
     name: resource.metadata.resourceId,
     uid: resource.metadata.sourceEventId,
   });
 }
 
 /**
- * Event Ledger 派生出的只读 Baton Resource 索引。它不创建第二份事实，也不提供 patch API。
+ * Event Ledger 派生出的只读 Aide Resource 索引。它不创建第二份事实，也不提供 patch API。
  */
-export class BatonResourceIndex {
-  readonly batonSessionId: string;
+export class AideResourceIndex {
+  readonly aideSessionId: string;
   readonly session: Readonly<Pick<SessionHandle, "id" | "dir">>;
   private readonly turns = new Map<
     string,
-    BatonResourceObservation<typeof BATON_TURN_RESOURCE_KIND>
+    AideResourceObservation<typeof AIDE_TURN_RESOURCE_KIND>
   >();
-  private readonly listeners = new Set<(resource: AnyBatonResourceObservation) => void>();
+  private readonly listeners = new Set<(resource: AnyAideResourceObservation) => void>();
   private readonly unsubscribeSession: () => void;
   private closed = false;
 
-  constructor(options: BatonResourceIndexOptions) {
-    this.batonSessionId = options.session.id;
+  constructor(options: AideResourceIndexOptions) {
+    this.aideSessionId = options.session.id;
     this.session = Object.freeze({
       id: options.session.id,
       dir: options.session.dir,
@@ -164,27 +164,27 @@ export class BatonResourceIndex {
     });
   }
 
-  get<K extends BatonResourceKind>(
+  get<K extends AideResourceKind>(
     kind: K,
     resourceId: string,
-  ): BatonResourceObservation<K> {
+  ): AideResourceObservation<K> {
     this.assertKind(kind);
     const resource = this.turns.get(resourceId);
     if (!resource) {
-      throw new Error(`Baton resource not found: ${kind}/${resourceId}`);
+      throw new Error(`Aide resource not found: ${kind}/${resourceId}`);
     }
-    return resource as BatonResourceObservation<K>;
+    return resource as AideResourceObservation<K>;
   }
 
-  list<K extends BatonResourceKind>(kind: K): BatonResourceObservation<K>[] {
+  list<K extends AideResourceKind>(kind: K): AideResourceObservation<K>[] {
     this.assertKind(kind);
     return [...this.turns.values()]
       .sort((left, right) => left.metadata.revision - right.metadata.revision)
-      .map((resource) => resource as BatonResourceObservation<K>);
+      .map((resource) => resource as AideResourceObservation<K>);
   }
 
-  subscribe(listener: (resource: AnyBatonResourceObservation) => void): () => void {
-    if (this.closed) throw new Error("Baton resource index is closed");
+  subscribe(listener: (resource: AnyAideResourceObservation) => void): () => void {
+    if (this.closed) throw new Error("Aide resource index is closed");
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
@@ -197,7 +197,7 @@ export class BatonResourceIndex {
   }
 
   private project(event: AnyEventEnvelope, notify: boolean): void {
-    if (event.kind !== "_baton_turn_summary") return;
+    if (event.kind !== "_aide_turn_summary") return;
     const resource = turnResource(event);
     const current = this.turns.get(resource.metadata.resourceId);
     if (current && current.metadata.revision >= resource.metadata.revision) return;
@@ -206,15 +206,15 @@ export class BatonResourceIndex {
     for (const listener of this.listeners) listener(resource);
   }
 
-  private assertKind(kind: string): asserts kind is BatonResourceKind {
-    if (kind !== BATON_TURN_RESOURCE_KIND) {
-      throw new Error(`unsupported Baton resource kind: ${kind}`);
+  private assertKind(kind: string): asserts kind is AideResourceKind {
+    if (kind !== AIDE_TURN_RESOURCE_KIND) {
+      throw new Error(`unsupported Aide resource kind: ${kind}`);
     }
   }
 }
 
-export interface BatonResourceControllerOptions<K extends BatonResourceKind> {
-  resources: BatonResourceIndex;
+export interface AideResourceControllerOptions<K extends AideResourceKind> {
+  resources: AideResourceIndex;
   pluginInstanceId: string;
   namespace: ResourceNamespace;
   resourceKind: K;
@@ -222,11 +222,11 @@ export interface BatonResourceControllerOptions<K extends BatonResourceKind> {
   watches?: readonly Watch[];
   reconcile(
     context: ReconcileContext,
-    resource: Readonly<BatonResourceObservation<K>>,
+    resource: Readonly<AideResourceObservation<K>>,
   ): Promise<ReconcileResult | void>;
   maxConcurrency?: number;
   now?: () => Date;
-  /** 每次执行前读取最新 BatonSession 只读视图。 */
+  /** 每次执行前读取最新 AideSession 只读视图。 */
   snapshot?: (key: ReconcileKey, resource: ResourceRef) => ReconcileSnapshot;
   invokeVerb?: InvokeVerb;
   executeReconcile?: <T>(
@@ -252,28 +252,28 @@ function validatedResult(result: ReconcileResult | void): ReconcileResult {
 }
 
 /**
- * 一个 Plugin 对一种 Baton-owned Resource 的只读 Controller。
+ * 一个 Plugin 对一种 Aide-owned Resource 的只读 Controller。
  * 重放和 live event 最终都只入同一 keyed queue，Controller 每次重新读取最新 Resource。
  */
-export class BatonResourceController<K extends BatonResourceKind> {
+export class AideResourceController<K extends AideResourceKind> {
   readonly scope: ReconcileScope;
   readonly sources: readonly ControllerSource[];
   readonly watches: readonly Watch[];
-  private readonly resources: BatonResourceIndex;
+  private readonly resources: AideResourceIndex;
   private readonly resourceKind: K;
-  private readonly reconcileResource: BatonResourceControllerOptions<K>["reconcile"];
+  private readonly reconcileResource: AideResourceControllerOptions<K>["reconcile"];
   private readonly now: () => Date;
-  private readonly snapshot: NonNullable<BatonResourceControllerOptions<K>["snapshot"]>;
+  private readonly snapshot: NonNullable<AideResourceControllerOptions<K>["snapshot"]>;
   private readonly invokeVerb: InvokeVerb;
   private readonly executeReconcile: NonNullable<
-    BatonResourceControllerOptions<K>["executeReconcile"]
+    AideResourceControllerOptions<K>["executeReconcile"]
   >;
-  private readonly onWatchError?: BatonResourceControllerOptions<K>["onWatchError"];
+  private readonly onWatchError?: AideResourceControllerOptions<K>["onWatchError"];
   private readonly queue: ReconcileQueue;
   private readonly retry?: ReconcileRetry;
   private closed = false;
 
-  constructor(options: BatonResourceControllerOptions<K>) {
+  constructor(options: AideResourceControllerOptions<K>) {
     if (!options.pluginInstanceId.trim()) {
       throw new Error("pluginInstanceId must not be empty");
     }
@@ -286,24 +286,24 @@ export class BatonResourceController<K extends BatonResourceKind> {
     this.watches = Object.freeze([...(options.watches ?? [])]);
     if (this.sources.some((source) => source.type === "resource")) {
       throw new Error(
-        "Controller resource Sources cannot materialize Baton-owned Resources",
+        "Controller resource Sources cannot materialize Aide-owned Resources",
       );
     }
     this.resources.list(options.resourceKind);
     this.reconcileResource = options.reconcile;
     this.snapshot =
       options.snapshot ??
-      (() => emptyReconcileSnapshot(options.resources.batonSessionId));
+      (() => emptyReconcileSnapshot(options.resources.aideSessionId));
     this.invokeVerb = options.invokeVerb ?? (async () => {
-      throw new Error("Baton Resource Controller has no reconcile capability host");
+      throw new Error("Aide Resource Controller has no reconcile capability host");
     });
     this.scope = Object.freeze({
-      batonSessionId: options.resources.batonSessionId,
+      aideSessionId: options.resources.aideSessionId,
       pluginInstanceId: options.pluginInstanceId,
       namespace: options.namespace,
-      resourceApiVersion: BATON_TURN_RESOURCE_TYPE.apiVersion,
+      resourceApiVersion: AIDE_TURN_RESOURCE_TYPE.apiVersion,
       resourceKind: options.resourceKind,
-      resourceOwner: "baton",
+      resourceOwner: "aide",
     });
     this.executeReconcile = options.executeReconcile ??
       (async <T>(
@@ -320,7 +320,7 @@ export class BatonResourceController<K extends BatonResourceKind> {
     this.queue = new ReconcileQueue({
       execute: (key, localLease) => {
         const executionScope = Object.freeze({
-          batonSessionId: key.batonSessionId,
+          aideSessionId: key.aideSessionId,
           pluginInstanceId: key.pluginInstanceId,
           namespace: this.scope.namespace as ResourceNamespace,
           executionId: newId("pex"),
@@ -328,11 +328,11 @@ export class BatonResourceController<K extends BatonResourceKind> {
         return this.executeReconcile(executionScope, localLease, async () => {
           if (this.closed) throw new Error("plugin Controller is closed");
           const resource = this.resources.get(this.resourceKind, key.resourceId);
-          const resourceRef = batonResourceRef(resource);
+          const resourceRef = aideResourceRef(resource);
           const snapshot = deepFreeze(this.snapshot(key, resourceRef));
-          if (snapshot.session.batonSessionId !== this.scope.batonSessionId) {
+          if (snapshot.session.aideSessionId !== this.scope.aideSessionId) {
             throw new Error(
-              `ReconcileSnapshot batonSessionId must be ${this.scope.batonSessionId}, got ${snapshot.session.batonSessionId}`,
+              `ReconcileSnapshot aideSessionId must be ${this.scope.aideSessionId}, got ${snapshot.session.aideSessionId}`,
             );
           }
           const context = createReconcileContext(
@@ -369,7 +369,7 @@ export class BatonResourceController<K extends BatonResourceKind> {
     } catch (error) {
       return Promise.reject(error);
     }
-    return this.queue.enqueue(Object.freeze({ ...key, resourceOwner: "baton" }));
+    return this.queue.enqueue(Object.freeze({ ...key, resourceOwner: "aide" }));
   }
 
   cronSources(): readonly CronSource[] {
@@ -427,14 +427,14 @@ export class BatonResourceController<K extends BatonResourceKind> {
   /** Exact incarnation guard for Event-driven wakeups such as HarnessInvocation results. */
   ownsResource(resource: ResourceRef): boolean {
     if (
-      resource.apiVersion !== BATON_TURN_RESOURCE_TYPE.apiVersion ||
+      resource.apiVersion !== AIDE_TURN_RESOURCE_TYPE.apiVersion ||
       resource.kind !== this.resourceKind ||
-      resource.namespace !== BATON_SYSTEM_NAMESPACE
+      resource.namespace !== AIDE_SYSTEM_NAMESPACE
     ) {
       return false;
     }
     try {
-      return batonResourceRef(
+      return aideResourceRef(
         this.resources.get(this.resourceKind, resource.name),
       ).uid === resource.uid;
     } catch {
@@ -444,15 +444,15 @@ export class BatonResourceController<K extends BatonResourceKind> {
 
   private assertOwns(key: ReconcileKey): void {
     if (
-      key.batonSessionId !== this.scope.batonSessionId ||
+      key.aideSessionId !== this.scope.aideSessionId ||
       key.pluginInstanceId !== this.scope.pluginInstanceId ||
       key.namespace !== this.scope.namespace ||
       key.resourceApiVersion !== this.scope.resourceApiVersion ||
       key.resourceKind !== this.scope.resourceKind ||
-      reconcileResourceOwner(key) !== "baton"
+      reconcileResourceOwner(key) !== "aide"
     ) {
       throw new Error(
-        `reconcile key is outside controller scope: ${key.batonSessionId}/${key.pluginInstanceId}/${key.resourceApiVersion}/${key.resourceKind}/${key.resourceId}`,
+        `reconcile key is outside controller scope: ${key.aideSessionId}/${key.pluginInstanceId}/${key.resourceApiVersion}/${key.resourceKind}/${key.resourceId}`,
       );
     }
   }

@@ -205,7 +205,7 @@ test("personal Worker crash cancels its invocation and preserves uncertain work 
   await aide.receive(input());
   await running;
   const sessions = new SessionStore(path);
-  const session = sessions.openSession(sessions.listSessions()[0]!.batonSessionId);
+  const session = sessions.openSession(sessions.listSessions()[0]!.aideSessionId);
   let pid = 0;
   for (let attempt = 0; attempt < 100 && !pid; attempt++) {
     const lines = readFileSync(join(session.dir, "session.log"), "utf8").trim().split("\n");

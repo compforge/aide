@@ -12,6 +12,6 @@ export function resolveClaudeTargetConfig(config: HarnessTargetConfig): ClaudeTa
   const configured = typeof config.executable === "string" && config.executable.trim()
     ? config.executable
     : undefined;
-  const executable = process.env.BATON_CLAUDE_BIN || configured;
+  const executable = process.env.AIDE_CLAUDE_BIN || configured;
   return executable ? { executable } : {};
 }

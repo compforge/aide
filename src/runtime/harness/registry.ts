@@ -14,7 +14,7 @@ import { DshAdapter } from "./dsh/adapter.ts";
 import { resolveDshTargetConfig } from "./dsh/config.ts";
 import {
   targetEnvironmentFor,
-  type BatonConfig,
+  type AideConfig,
   type HarnessTargetConfig,
 } from "../config/config.ts";
 import { FileHookTrustStore } from "../config/hook.ts";
@@ -56,7 +56,7 @@ export interface HarnessDefinition<Id extends string = string> {
   color: string;
   create(options: HarnessAdapterOptions): HarnessAdapter;
   probe?: (options: HarnessProbeOptions) => Promise<HarnessTargetProbeResult>;
-  /** Baton 外部 HarnessSession 的只读历史观察；不得启动或修改会话。 */
+  /** Aide 外部 HarnessSession 的只读历史观察；不得启动或修改会话。 */
   sessionInspector?: HarnessSessionInspector;
 }
 
@@ -68,7 +68,7 @@ export interface HarnessProbeOptions {
   targetConfig: HarnessTargetConfig;
 }
 
-/** 首批内置 harness；扩展支持只在这里注册，不进入 BatonSession core。 */
+/** 首批内置 harness；扩展支持只在这里注册，不进入 AideSession core。 */
 export const HARNESS_REGISTRY = [
   {
     ...HARNESS_IDENTITIES.codex,
@@ -151,7 +151,7 @@ export function harnessDefinitionFor(idOrSessionKey: string): HarnessDefinition 
 
 /** 配置中的 Target id 是唯一查找键；Harness 名只选择 Definition，不充当 Target identity。 */
 export function resolveHarnessTarget(
-  config: BatonConfig,
+  config: AideConfig,
   harnessTargetId: string,
 ): HarnessTarget | undefined {
   const targetConfig = config.targets[harnessTargetId];
@@ -162,7 +162,7 @@ export function resolveHarnessTarget(
     : undefined;
 }
 
-export function configuredHarnessTargets(config: BatonConfig): HarnessTarget[] {
+export function configuredHarnessTargets(config: AideConfig): HarnessTarget[] {
   return Object.keys(config.targets).flatMap((targetId) => {
     const target = resolveHarnessTarget(config, targetId);
     return target ? [target] : [];
@@ -171,7 +171,7 @@ export function configuredHarnessTargets(config: BatonConfig): HarnessTarget[] {
 
 /** CLI/TUI 选择：Target id 精确匹配优先，Harness id/alias 只选择该家的默认 Target。 */
 export function resolveHarnessTargetSelection(
-  config: BatonConfig,
+  config: AideConfig,
   value: string,
 ): HarnessTarget | undefined {
   const exact = resolveHarnessTarget(config, value);

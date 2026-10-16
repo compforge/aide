@@ -6,21 +6,21 @@ import type {
 } from "../event/index.ts";
 
 /**
- * ContextSource 先只承载已经被两种内置 Harness 共同使用的 BatonSession 历史。
+ * ContextSource 先只承载已经被两种内置 Harness 共同使用的 AideSession 历史。
  * 后续 Board / Plugin / Resource 各自增加 kind，不为第一种来源预造 registry。
  */
 export type ContextSource = {
   kind: "session_history";
-  /** owner 内稳定；同一 BatonSession 的正典历史始终使用这个 key。 */
+  /** owner 内稳定；同一 AideSession 的正典历史始终使用这个 key。 */
   key: "history";
-  owner: { type: "baton_session"; batonSessionId: string };
+  owner: { type: "aide_session"; aideSessionId: string };
 };
 
-export function sessionHistoryContextSource(batonSessionId: string): ContextSource {
+export function sessionHistoryContextSource(aideSessionId: string): ContextSource {
   return {
     kind: "session_history",
     key: "history",
-    owner: { type: "baton_session", batonSessionId },
+    owner: { type: "aide_session", aideSessionId },
   };
 }
 
@@ -57,11 +57,11 @@ export interface ContextEpoch {
   receiptEventId: string;
 }
 
-export type ContextSnapshotEnvelope = EventEnvelope<"_baton_context_snapshot">;
-type ReceiptEnvelope = EventEnvelope<"_baton_context_delivery_receipt">;
+export type ContextSnapshotEnvelope = EventEnvelope<"_aide_context_snapshot">;
+type ReceiptEnvelope = EventEnvelope<"_aide_context_delivery_receipt">;
 type ContextDeliveryDraft =
-  | EventDraft<"_baton_context_snapshot">
-  | EventDraft<"_baton_context_delivery_receipt">;
+  | EventDraft<"_aide_context_snapshot">
+  | EventDraft<"_aide_context_delivery_receipt">;
 type ContextDeliveryEnvelope = ContextSnapshotEnvelope | ReceiptEnvelope;
 
 /**
@@ -85,7 +85,7 @@ export class ContextDeliveryLedger {
   }
 
   apply(event: AnyEventEnvelope): ContextDeliveryEnvelope | undefined {
-    if (event.kind === "_baton_context_snapshot") {
+    if (event.kind === "_aide_context_snapshot") {
       const snapshot = event.payload;
       if (snapshot.afterSeq > snapshot.throughSeq) {
         throw new Error(
@@ -93,14 +93,14 @@ export class ContextDeliveryLedger {
         );
       }
       // fork 会把同一段历史事实复制到 child ledger，但 source owner 仍是当时实际组装
-      // snapshot 的 BatonSession；不能用当前 event scope 覆写或拒绝这段 provenance。
+      // snapshot 的 AideSession；不能用当前 event scope 覆写或拒绝这段 provenance。
       if (!this.snapshots.has(snapshot.snapshotId)) {
         this.snapshots.set(snapshot.snapshotId, event);
       }
       return event;
     }
 
-    if (event.kind !== "_baton_context_delivery_receipt") return undefined;
+    if (event.kind !== "_aide_context_delivery_receipt") return undefined;
     const receipt = event.payload;
     const snapshot = this.snapshots.get(receipt.snapshotId);
     if (!snapshot) {
@@ -153,7 +153,7 @@ export class ContextDeliveries<TContext> {
     },
   ): ContextSnapshotEnvelope {
     const event = this.append(context, {
-      kind: "_baton_context_snapshot",
+      kind: "_aide_context_snapshot",
       harnessSessionId: opts.harnessSessionId,
       turnId: opts.turnId,
       payload: {
@@ -178,7 +178,7 @@ export class ContextDeliveries<TContext> {
     },
   ): ReceiptEnvelope {
     const event = this.append(context, {
-      kind: "_baton_context_delivery_receipt",
+      kind: "_aide_context_delivery_receipt",
       parentEventId: snapshot.eventId,
       harnessSessionId: opts.harnessSessionId,
       turnId: snapshot.turnId,

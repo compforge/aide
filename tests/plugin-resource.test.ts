@@ -8,16 +8,16 @@ import { createResourceClient } from "../src/runtime/plugin/resource-client.ts";
 
 const roots: string[] = [];
 const REQ_LOOP_RUN = {
-  apiVersion: "reqloop.baton.dev/v1alpha1",
+  apiVersion: "reqloop.aide.dev/v1alpha1",
   kind: "Requirement",
 } as const;
 const OTHER = {
-  apiVersion: "reqloop.baton.dev/v1alpha1",
+  apiVersion: "reqloop.aide.dev/v1alpha1",
   kind: "OtherKind",
 } as const;
 
 function testRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "baton-plugin-resource-"));
+  const root = mkdtempSync(join(tmpdir(), "aide-plugin-resource-"));
   roots.push(root);
   return root;
 }
@@ -95,7 +95,7 @@ describe("PluginResourceStore", () => {
     const created = resources.create({
       type: REQ_LOOP_RUN,
       labels: {
-        "reqloop.baton.dev/requirement": "REQ-1",
+        "reqloop.aide.dev/requirement": "REQ-1",
       },
       annotations: {
         "example.com/display-name": "Ship it",
@@ -111,7 +111,7 @@ describe("PluginResourceStore", () => {
         generation: 1,
         resourceVersion: "1",
         labels: {
-          "reqloop.baton.dev/requirement": "REQ-1",
+          "reqloop.aide.dev/requirement": "REQ-1",
         },
         annotations: {
           "example.com/display-name": "Ship it",
@@ -139,7 +139,7 @@ describe("PluginResourceStore", () => {
       "namespaces",
       "v1",
       "resources",
-      "reqloop.baton.dev",
+      "reqloop.aide.dev",
       "v1alpha1",
       "Requirement",
       `${created.metadata.name}.json`,
@@ -231,7 +231,7 @@ describe("PluginResourceStore", () => {
         },
         annotations: {
           "example.com/remove": null,
-          "reqloop.baton.dev/delete-after": "2026-08-01T00:00:00.000Z",
+          "reqloop.aide.dev/delete-after": "2026-08-01T00:00:00.000Z",
         },
       },
       { expectedResourceVersion: created.metadata.resourceVersion },
@@ -244,7 +244,7 @@ describe("PluginResourceStore", () => {
     });
     expect(patched.metadata.annotations).toEqual({
       "example.com/keep": "yes",
-      "reqloop.baton.dev/delete-after": "2026-08-01T00:00:00.000Z",
+      "reqloop.aide.dev/delete-after": "2026-08-01T00:00:00.000Z",
     });
     expect(() =>
       resources.patchMetadata(REQ_LOOP_RUN, "run_1", {
@@ -261,7 +261,7 @@ describe("PluginResourceStore", () => {
       type: REQ_LOOP_RUN,
       name: "run_1",
       labels: {
-        "reqloop.baton.dev/source": "forge",
+        "reqloop.aide.dev/source": "forge",
         state: "open",
       },
       annotations: {
@@ -275,7 +275,7 @@ describe("PluginResourceStore", () => {
       type: REQ_LOOP_RUN,
       name: "run_2",
       labels: {
-        "reqloop.baton.dev/source": "forge",
+        "reqloop.aide.dev/source": "forge",
         state: "closed",
       },
       spec: { requirement: "second" },
@@ -284,7 +284,7 @@ describe("PluginResourceStore", () => {
     expect(
       resources.list(REQ_LOOP_RUN, {
         matchLabels: {
-          "reqloop.baton.dev/source": "forge",
+          "reqloop.aide.dev/source": "forge",
           state: "open",
         },
       }),
@@ -341,7 +341,7 @@ describe("PluginResourceStore", () => {
       {
         labels: { "example.com/extra": "preserved" },
         annotations: {
-          "reqloop.baton.dev/delete-after": "2026-08-01T00:00:00.000Z",
+          "reqloop.aide.dev/delete-after": "2026-08-01T00:00:00.000Z",
         },
       },
     );
@@ -381,7 +381,7 @@ describe("PluginResourceStore", () => {
           session: { id: "../escape", dir: root },
           pluginInstanceId: "reqloop_default",
         }),
-    ).toThrow("batonSessionId");
+    ).toThrow("aideSessionId");
 
     const resources = store(root);
     expect(() =>
@@ -412,7 +412,7 @@ describe("PluginResourceStore", () => {
       "namespaces",
       "v1",
       "resources",
-      "reqloop.baton.dev",
+      "reqloop.aide.dev",
       "v1alpha1",
       "Requirement",
       "run_1.json",
@@ -563,7 +563,7 @@ describe("PluginResourceStore", () => {
   test("keeps the same kind and name isolated across apiVersions", () => {
     const resources = store(testRoot());
     const nextVersion = {
-      apiVersion: "reqloop.baton.dev/v1beta1",
+      apiVersion: "reqloop.aide.dev/v1beta1",
       kind: REQ_LOOP_RUN.kind,
     } as const;
     resources.create({

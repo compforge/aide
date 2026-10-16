@@ -7,7 +7,7 @@ export interface HarnessTaskIdentity {
 }
 
 /**
- * Baton-stable key for a Harness task inside one BatonSession.
+ * Aide-stable key for a Harness task inside one AideSession.
  * Different Lane, HarnessTarget, or HarnessSession owners must remain distinct even when their
  * native taskId matches; Controller actions later use this key to recover the exact owner.
  */

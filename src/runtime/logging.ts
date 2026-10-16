@@ -27,7 +27,7 @@ export interface LogError {
 
 export interface LogEntry {
   readonly level: LogLevel;
-  readonly source: "baton" | "harness" | "plugin";
+  readonly source: "aide" | "harness" | "plugin";
   readonly component: string;
   readonly message: string;
   readonly harness?: string;
@@ -83,7 +83,7 @@ export class SessionLogger {
 
   constructor(
     private readonly path: string,
-    private readonly batonSessionId: string,
+    private readonly aideSessionId: string,
     options: SessionLoggerOptions = {},
   ) {
     this.minimumPriority = LEVEL_PRIORITY[options.level ?? "info"];
@@ -157,7 +157,7 @@ export class SessionLogger {
       if (droppedEntries > 0) {
         lines.unshift(this.serialize({
           level: "warn",
-          source: "baton",
+          source: "aide",
           component: "logging",
           message: "Log entries were dropped because the in-memory queue was full",
           attributes: { droppedEntries },
@@ -187,14 +187,14 @@ export class SessionLogger {
   private serialize(entry: LogEntry): string {
     const base = {
       timestamp: new Date().toISOString(),
-      batonSessionId: this.batonSessionId,
+      aideSessionId: this.aideSessionId,
       ...normalizeLogEntry(entry),
     };
     let line = `${JSON.stringify(base)}\n`;
     if (Buffer.byteLength(line) <= this.maxEntryBytes) return line;
     line = `${JSON.stringify({
       timestamp: base.timestamp,
-      batonSessionId: this.batonSessionId,
+      aideSessionId: this.aideSessionId,
       level: entry.level,
       source: entry.source,
       component: boundedString(entry.component),

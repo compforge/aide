@@ -1,9 +1,9 @@
-import type { ResourceType } from "@compforge/baton-plugin";
+import type { ResourceType } from "@compforge/aide-plugin";
 
 import { resourceTypeKey } from "./resource.ts";
 
-interface BatonRegistration {
-  readonly owner: "baton";
+interface AideRegistration {
+  readonly owner: "aide";
 }
 
 interface PluginRegistration {
@@ -13,7 +13,7 @@ interface PluginRegistration {
   materialized: boolean;
 }
 
-type ResourceTypeRegistration = BatonRegistration | PluginRegistration;
+type ResourceTypeRegistration = AideRegistration | PluginRegistration;
 
 /**
  * Resource GVK registration is first-register-wins; a later Plugin registration
@@ -22,12 +22,12 @@ type ResourceTypeRegistration = BatonRegistration | PluginRegistration;
 export class ResourceRegistry {
   private readonly registrations = new Map<string, ResourceTypeRegistration>();
 
-  constructor(batonTypes: readonly ResourceType[]) {
-    for (const type of batonTypes) this.registerBaton(type);
+  constructor(aideTypes: readonly ResourceType[]) {
+    for (const type of aideTypes) this.registerAide(type);
   }
 
-  isBaton(type: ResourceType): boolean {
-    return this.registrations.get(resourceTypeKey(type))?.owner === "baton";
+  isAide(type: ResourceType): boolean {
+    return this.registrations.get(resourceTypeKey(type))?.owner === "aide";
   }
 
   registerController(pluginId: string, type: ResourceType): () => void {
@@ -55,12 +55,12 @@ export class ResourceRegistry {
     this.pluginRegistration(pluginId, type).materialized = true;
   }
 
-  private registerBaton(type: ResourceType): void {
+  private registerAide(type: ResourceType): void {
     const key = resourceTypeKey(type);
     if (this.registrations.has(key)) {
       throw new Error(`Resource type is already registered: ${key}`);
     }
-    this.registrations.set(key, { owner: "baton" });
+    this.registrations.set(key, { owner: "aide" });
   }
 
   private pluginRegistration(
@@ -69,8 +69,8 @@ export class ResourceRegistry {
   ): PluginRegistration {
     const key = resourceTypeKey(type);
     const current = this.registrations.get(key);
-    if (current?.owner === "baton") {
-      throw new Error(`Resource type is already registered by Baton: ${key}`);
+    if (current?.owner === "aide") {
+      throw new Error(`Resource type is already registered by Aide: ${key}`);
     }
     if (current?.owner === "plugin" && current.pluginId !== pluginId) {
       throw new Error(

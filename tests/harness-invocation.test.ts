@@ -11,19 +11,19 @@ import { SessionStore } from "../src/runtime/store/store.ts";
 const roots: string[] = [];
 
 function session() {
-  const root = mkdtempSync(join(tmpdir(), "baton-harness-invocation-"));
+  const root = mkdtempSync(join(tmpdir(), "aide-harness-invocation-"));
   roots.push(root);
   return new SessionStore(root).createSession({ cwd: "/repo" });
 }
 
 function invocation(
-  batonSessionId: string,
+  aideSessionId: string,
   overrides: Partial<ReconcileHarnessInvocation["invocation"]> = {},
   executionId = "pex_1",
 ): ReconcileHarnessInvocation {
   return {
     scope: {
-      batonSessionId,
+      aideSessionId,
       pluginInstanceId: "reqloop_default",
       namespace: "v1",
       executionId,
@@ -77,8 +77,8 @@ describe("HarnessInvocationStore", () => {
       },
     });
     handle.appendEvent({
-      kind: "_baton_turn_summary",
-      source: { type: "baton" },
+      kind: "_aide_turn_summary",
+      source: { type: "aide" },
       harness: "codex",
       harnessTargetId: scheduled.harnessTargetId,
       laneId: scheduled.laneId,

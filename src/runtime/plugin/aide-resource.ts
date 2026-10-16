@@ -1,14 +1,14 @@
 import type {
-  BatonSessionResource,
-  BatonSessionTargetBindingResource,
-  BatonTargetResource,
-  BatonTurnResource,
+  AideSessionResource,
+  AideSessionTargetBindingResource,
+  AideTargetResource,
+  AideTurnResource,
   Resource,
   ResourceListOptions,
   ResourceMergePatch,
   ResourceRef,
   ResourceType,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import type { HarnessTarget } from "../harness/target.ts";
 import { TargetCatalog, type TargetProbe } from "./target-catalog.ts";
@@ -17,17 +17,17 @@ import {
   type SessionHandle,
   type SessionMeta,
 } from "../store/store.ts";
-import type { BatonResourceIndex } from "./baton-resource-controller.ts";
+import type { AideResourceIndex } from "./aide-resource-controller.ts";
 import {
-  BATON_SESSION_RESOURCE_TYPE,
-  BATON_SESSION_TARGET_BINDING_RESOURCE_TYPE,
-  BATON_SYSTEM_NAMESPACE,
-  BATON_TARGET_RESOURCE_TYPE,
-  BATON_TURN_RESOURCE_TYPE,
+  AIDE_SESSION_RESOURCE_TYPE,
+  AIDE_SESSION_TARGET_BINDING_RESOURCE_TYPE,
+  AIDE_SYSTEM_NAMESPACE,
+  AIDE_TARGET_RESOURCE_TYPE,
+  AIDE_TURN_RESOURCE_TYPE,
 } from "./package.ts";
 import { resourceTypeKey } from "./resource.ts";
 
-export interface BatonSessionObservation {
+export interface AideSessionObservation {
   readonly meta: SessionMeta;
   readonly active: boolean;
 }
@@ -37,10 +37,10 @@ type WritableBindingSession = Pick<
   "id" | "meta" | "setTargetBinding"
 >;
 
-export interface BatonResourceProviderOptions {
+export interface AideResourceProviderOptions {
   readonly session: WritableBindingSession;
-  readonly turns?: BatonResourceIndex;
-  readonly sessions?: () => readonly BatonSessionObservation[];
+  readonly turns?: AideResourceIndex;
+  readonly sessions?: () => readonly AideSessionObservation[];
   readonly targets?: () => readonly HarnessTarget[];
   readonly probeTarget?: TargetProbe;
   readonly onProbeError?: (target: HarnessTarget, error: unknown) => void;
@@ -74,16 +74,16 @@ function jsonObject(name: string, value: unknown): Record<string, unknown> {
  * Core-owned Resource provider. Public clients see ordinary Resources; their
  * authoritative state remains in Session, HarnessTarget configuration, and Ledger.
  */
-export class BatonResourceProvider {
+export class AideResourceProvider {
   private readonly session: WritableBindingSession;
-  private readonly turns?: BatonResourceIndex;
-  private readonly sessions?: BatonResourceProviderOptions["sessions"];
-  private readonly targets: NonNullable<BatonResourceProviderOptions["targets"]>;
+  private readonly turns?: AideResourceIndex;
+  private readonly sessions?: AideResourceProviderOptions["sessions"];
+  private readonly targets: NonNullable<AideResourceProviderOptions["targets"]>;
   private readonly now: () => Date;
   private readonly targetCreationTimestamp: string;
   private readonly catalogs: TargetCatalog;
 
-  constructor(options: BatonResourceProviderOptions) {
+  constructor(options: AideResourceProviderOptions) {
     this.session = options.session;
     this.turns = options.turns;
     this.sessions = options.sessions;
@@ -92,31 +92,31 @@ export class BatonResourceProvider {
     this.catalogs = new TargetCatalog(options.probeTarget, this.now, options.onProbeError);
     const created = this.now();
     if (Number.isNaN(created.getTime())) {
-      throw new Error("Baton Resource provider now() returned an invalid Date");
+      throw new Error("Aide Resource provider now() returned an invalid Date");
     }
     this.targetCreationTimestamp = created.toISOString();
   }
 
   handles(type: ResourceType): boolean {
     return [
-      BATON_TURN_RESOURCE_TYPE,
-      BATON_SESSION_RESOURCE_TYPE,
-      BATON_TARGET_RESOURCE_TYPE,
-      BATON_SESSION_TARGET_BINDING_RESOURCE_TYPE,
+      AIDE_TURN_RESOURCE_TYPE,
+      AIDE_SESSION_RESOURCE_TYPE,
+      AIDE_TARGET_RESOURCE_TYPE,
+      AIDE_SESSION_TARGET_BINDING_RESOURCE_TYPE,
     ].some((candidate) => typeMatches(candidate, type));
   }
 
   async get<TSpec, TStatus>(
     ref: ResourceRef,
   ): Promise<Readonly<Resource<TSpec, TStatus>> | undefined> {
-    if (ref.namespace !== BATON_SYSTEM_NAMESPACE || !this.handles(ref)) return undefined;
+    if (ref.namespace !== AIDE_SYSTEM_NAMESPACE || !this.handles(ref)) return undefined;
     const resource = this.list<TSpec, TStatus>(ref).find(
       (candidate) => candidate.metadata.name === ref.name,
     );
     if (!resource || (ref.uid !== undefined && resource.metadata.uid !== ref.uid)) {
       return undefined;
     }
-    if (typeMatches(ref, BATON_TARGET_RESOURCE_TYPE)) {
+    if (typeMatches(ref, AIDE_TARGET_RESOURCE_TYPE)) {
       const target = this.configuredTargets().find((candidate) => candidate.id === ref.name)!;
       await this.catalogs.refresh(target);
       return this.targetResource(target) as Readonly<Resource<TSpec, TStatus>>;
@@ -129,19 +129,19 @@ export class BatonResourceProvider {
     options?: ResourceListOptions,
   ): readonly Readonly<Resource<TSpec, TStatus>>[] {
     if (
-      (options?.namespace !== undefined && options.namespace !== BATON_SYSTEM_NAMESPACE) ||
+      (options?.namespace !== undefined && options.namespace !== AIDE_SYSTEM_NAMESPACE) ||
       Object.keys(options?.matchLabels ?? {}).length > 0
     ) {
       return [];
     }
     let resources: readonly Resource<unknown, unknown>[];
-    if (typeMatches(type, BATON_SESSION_RESOURCE_TYPE)) {
+    if (typeMatches(type, AIDE_SESSION_RESOURCE_TYPE)) {
       resources = this.sessionObservations().map((session) => this.sessionResource(session));
-    } else if (typeMatches(type, BATON_TARGET_RESOURCE_TYPE)) {
+    } else if (typeMatches(type, AIDE_TARGET_RESOURCE_TYPE)) {
       resources = this.configuredTargets().map((target) => this.targetResource(target));
-    } else if (typeMatches(type, BATON_SESSION_TARGET_BINDING_RESOURCE_TYPE)) {
+    } else if (typeMatches(type, AIDE_SESSION_TARGET_BINDING_RESOURCE_TYPE)) {
       resources = this.sessionObservations().map((session) => this.bindingResource(session.meta));
-    } else if (typeMatches(type, BATON_TURN_RESOURCE_TYPE)) {
+    } else if (typeMatches(type, AIDE_TURN_RESOURCE_TYPE)) {
       resources = this.turnResources();
     } else {
       return [];
@@ -153,13 +153,13 @@ export class BatonResourceProvider {
     resource: Readonly<Resource<TSpec, TStatus>>,
     patch: ResourceMergePatch,
   ): Readonly<Resource<TSpec, TStatus>> {
-    if (!typeMatches(resource, BATON_SESSION_TARGET_BINDING_RESOURCE_TYPE)) {
+    if (!typeMatches(resource, AIDE_SESSION_TARGET_BINDING_RESOURCE_TYPE)) {
       throw new Error(
         `Resource ${resource.apiVersion}/${resource.kind} does not support patch`,
       );
     }
     if (
-      resource.metadata.namespace !== BATON_SYSTEM_NAMESPACE ||
+      resource.metadata.namespace !== AIDE_SYSTEM_NAMESPACE ||
       resource.metadata.name !== this.session.id ||
       resource.metadata.uid !== this.bindingUid(this.session.id)
     ) {
@@ -221,10 +221,10 @@ export class BatonResourceProvider {
     );
   }
 
-  private sessionObservations(): readonly BatonSessionObservation[] {
+  private sessionObservations(): readonly AideSessionObservation[] {
     const observed = new Map(
       (this.sessions?.() ?? []).map((session) => [
-        session.meta.batonSessionId,
+        session.meta.aideSessionId,
         session,
       ]),
     );
@@ -233,7 +233,7 @@ export class BatonResourceProvider {
       active: true,
     });
     return [...observed.values()].sort((left, right) =>
-      left.meta.batonSessionId.localeCompare(right.meta.batonSessionId)
+      left.meta.aideSessionId.localeCompare(right.meta.aideSessionId)
     );
   }
 
@@ -241,14 +241,14 @@ export class BatonResourceProvider {
     return [...this.targets()].sort((left, right) => left.id.localeCompare(right.id));
   }
 
-  private sessionResource(observation: BatonSessionObservation): BatonSessionResource {
+  private sessionResource(observation: AideSessionObservation): AideSessionResource {
     const { meta, active } = observation;
     return deepFreeze({
-      ...BATON_SESSION_RESOURCE_TYPE,
+      ...AIDE_SESSION_RESOURCE_TYPE,
       metadata: {
-        name: meta.batonSessionId,
-        namespace: BATON_SYSTEM_NAMESPACE,
-        uid: meta.batonSessionId,
+        name: meta.aideSessionId,
+        namespace: AIDE_SYSTEM_NAMESPACE,
+        uid: meta.aideSessionId,
         generation: 1,
         resourceVersion: meta.updatedAt ?? meta.createdAt,
         creationTimestamp: meta.createdAt,
@@ -258,13 +258,13 @@ export class BatonResourceProvider {
     });
   }
 
-  private targetResource(target: HarnessTarget): BatonTargetResource {
+  private targetResource(target: HarnessTarget): AideTargetResource {
     const catalog = this.catalogs.snapshot(target.id);
     return deepFreeze({
-      ...BATON_TARGET_RESOURCE_TYPE,
+      ...AIDE_TARGET_RESOURCE_TYPE,
       metadata: {
         name: target.id,
-        namespace: BATON_SYSTEM_NAMESPACE,
+        namespace: AIDE_SYSTEM_NAMESPACE,
         uid: this.targetUid(target.id),
         generation: 1,
         resourceVersion: catalog.version,
@@ -275,7 +275,7 @@ export class BatonResourceProvider {
     });
   }
 
-  private bindingResource(meta: SessionMeta): BatonSessionTargetBindingResource {
+  private bindingResource(meta: SessionMeta): AideSessionTargetBindingResource {
     const binding = sessionTargetBindingMeta(meta);
     const targets = this.configuredTargets();
     const selected = binding.targetId === undefined
@@ -283,17 +283,17 @@ export class BatonResourceProvider {
       : targets.find((target) => target.id === binding.targetId);
     const targetRef = selected ? this.targetRef(selected.id) : undefined;
     return deepFreeze({
-      ...BATON_SESSION_TARGET_BINDING_RESOURCE_TYPE,
+      ...AIDE_SESSION_TARGET_BINDING_RESOURCE_TYPE,
       metadata: {
-        name: meta.batonSessionId,
-        namespace: BATON_SYSTEM_NAMESPACE,
-        uid: this.bindingUid(meta.batonSessionId),
+        name: meta.aideSessionId,
+        namespace: AIDE_SYSTEM_NAMESPACE,
+        uid: this.bindingUid(meta.aideSessionId),
         generation: binding.generation,
         resourceVersion: String(binding.resourceVersion),
         creationTimestamp: meta.createdAt,
       },
       spec: {
-        sessionRef: this.sessionRef(meta.batonSessionId),
+        sessionRef: this.sessionRef(meta.aideSessionId),
         eligibleTargetRefs: targets.map((target) => this.targetRef(target.id)),
         ...(targetRef === undefined ? {} : { targetRef }),
       },
@@ -309,33 +309,33 @@ export class BatonResourceProvider {
     });
   }
 
-  private turnResources(): readonly BatonTurnResource[] {
+  private turnResources(): readonly AideTurnResource[] {
     if (!this.turns) return [];
-    return this.turns.list(BATON_TURN_RESOURCE_TYPE.kind).map((turn) =>
+    return this.turns.list(AIDE_TURN_RESOURCE_TYPE.kind).map((turn) =>
       deepFreeze({
-        ...BATON_TURN_RESOURCE_TYPE,
+        ...AIDE_TURN_RESOURCE_TYPE,
         metadata: {
           name: turn.metadata.resourceId,
-          namespace: BATON_SYSTEM_NAMESPACE,
+          namespace: AIDE_SYSTEM_NAMESPACE,
           uid: turn.metadata.sourceEventId,
           generation: 1,
           resourceVersion: String(turn.metadata.revision),
           creationTimestamp: turn.metadata.observedAt,
         },
         spec: {},
-        status: turn.data as unknown as BatonTurnResource["status"],
-      }) as BatonTurnResource
+        status: turn.data as unknown as AideTurnResource["status"],
+      }) as AideTurnResource
     );
   }
 
   private targetId(ref: Record<string, unknown>): string {
     if (
-      ref.apiVersion !== BATON_TARGET_RESOURCE_TYPE.apiVersion ||
-      ref.kind !== BATON_TARGET_RESOURCE_TYPE.kind ||
-      ref.namespace !== BATON_SYSTEM_NAMESPACE ||
+      ref.apiVersion !== AIDE_TARGET_RESOURCE_TYPE.apiVersion ||
+      ref.kind !== AIDE_TARGET_RESOURCE_TYPE.kind ||
+      ref.namespace !== AIDE_SYSTEM_NAMESPACE ||
       typeof ref.name !== "string"
     ) {
-      throw new Error("SessionTargetBinding targetRef must reference a Baton Target");
+      throw new Error("SessionTargetBinding targetRef must reference a Aide Target");
     }
     const target = this.configuredTargets().find((candidate) => candidate.id === ref.name);
     if (!target) throw new Error(`SessionTargetBinding target is not eligible: ${ref.name}`);
@@ -347,8 +347,8 @@ export class BatonResourceProvider {
 
   private sessionRef(sessionId: string): ResourceRef {
     return Object.freeze({
-      ...BATON_SESSION_RESOURCE_TYPE,
-      namespace: BATON_SYSTEM_NAMESPACE,
+      ...AIDE_SESSION_RESOURCE_TYPE,
+      namespace: AIDE_SYSTEM_NAMESPACE,
       name: sessionId,
       uid: sessionId,
     });
@@ -356,8 +356,8 @@ export class BatonResourceProvider {
 
   private targetRef(targetId: string): ResourceRef {
     return Object.freeze({
-      ...BATON_TARGET_RESOURCE_TYPE,
-      namespace: BATON_SYSTEM_NAMESPACE,
+      ...AIDE_TARGET_RESOURCE_TYPE,
+      namespace: AIDE_SYSTEM_NAMESPACE,
       name: targetId,
       uid: this.targetUid(targetId),
     });

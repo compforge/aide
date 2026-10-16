@@ -56,7 +56,7 @@ export async function generateCodexStructured(
   options: CodexTextgenOptions = {},
 ): Promise<unknown> {
   // mkdtempSync 已保证目录唯一，文件名无需再带随机部分。
-  const dir = mkdtempSync(join(tmpdir(), "baton-textgen-"));
+  const dir = mkdtempSync(join(tmpdir(), "aide-textgen-"));
   const schemaPath = join(dir, "schema.json");
   const outputPath = join(dir, "output.json");
   try {

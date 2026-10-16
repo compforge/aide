@@ -11,7 +11,7 @@ import type {
   ResourceClient,
   SourceContext,
   ToastMessage,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../package.ts";
 import type {
   ExecutionScope,
@@ -76,7 +76,7 @@ export interface PluginRunnerClientOptions extends PluginRunnerCallbacks {
 
 /**
  * One PluginBinding's child-process client. Third-party code and synchronous
- * subprocess calls cannot occupy Baton's event loop.
+ * subprocess calls cannot occupy Aide's event loop.
  *
  * @rule Exclude a pending host-side Plugin verb from the generic Runner watchdog because the verb owns that wait's timeout; re-arm the watchdog after the host reply.
  * @rule Restore the host async causal scope by executionId before handling a Runner verb callback.

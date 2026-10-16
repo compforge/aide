@@ -14,7 +14,7 @@ import type {
   ResourceNamespace,
   ResourceType,
   ToastMessage,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../package.ts";
 import type {
   ExecutionScope,
@@ -31,7 +31,7 @@ export interface CommandRegistration {
   readonly input?: CommandInputShape;
   readonly aliases?: readonly CommandAlias[];
   readonly runPolicy?: "always" | "idle";
-  readonly scope?: "baton" | "harness";
+  readonly scope?: "aide" | "harness";
   readonly kind: "command";
   readonly handlerId: string;
   readonly name: string;

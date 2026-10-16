@@ -1,12 +1,12 @@
 {
-  "name": "@compforge/baton-plugin",
+  "name": "@compforge/aide-plugin",
   "version": "0.11.0",
-  "description": "Public protocol and authoring types for Baton plugins.",
+  "description": "Public protocol and authoring types for Aide plugins.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/qiankunli/baton.git",
+    "url": "https://github.com/compforge/aide.git",
     "directory": "packages/plugin"
   },
   "exports": {

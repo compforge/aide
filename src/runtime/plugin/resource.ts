@@ -16,7 +16,7 @@ import type {
   ResourceNamespace,
   ResourceOwnerReference,
   ResourceType,
-} from "@compforge/baton-plugin";
+} from "@compforge/aide-plugin";
 
 import { newId } from "../event/ids.ts";
 import { withAsyncFileLock, withFileLock } from "../store/file-lock.ts";
@@ -296,14 +296,14 @@ function writeJsonAtomic(path: string, value: unknown): void {
 
 export class PluginResourceStore {
   private readonly sessionDir: string;
-  readonly batonSessionId: string;
+  readonly aideSessionId: string;
   readonly pluginInstanceId: string;
 
   constructor(options: PluginResourceStoreOptions) {
-    assertPathSegment("batonSessionId", options.session.id);
+    assertPathSegment("aideSessionId", options.session.id);
     assertPathSegment("pluginInstanceId", options.pluginInstanceId);
     this.sessionDir = options.session.dir;
-    this.batonSessionId = options.session.id;
+    this.aideSessionId = options.session.id;
     this.pluginInstanceId = options.pluginInstanceId;
   }
 
@@ -420,8 +420,8 @@ export class PluginResourceStore {
     options: ResourceListOptions = {},
   ): PluginResource<TSpec, TStatus>[] {
     validateResourceType(type);
-    if (options.namespace === "baton-system") {
-      throw new Error("PluginResourceStore cannot list Baton-owned resources");
+    if (options.namespace === "aide-system") {
+      throw new Error("PluginResourceStore cannot list Aide-owned resources");
     }
     const namespace = this.resourceNamespace(options.namespace ?? "v1");
     const matchLabels = labelMap(

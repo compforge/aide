@@ -5,7 +5,7 @@ export type BoardItemTone =
   | "warning"
   | "error";
 
-/** Plugin 对一份 Resource 的 Board 展示内容；身份与归属由 Baton 补齐。 */
+/** Plugin 对一份 Resource 的 Board 展示内容；身份与归属由 Aide 补齐。 */
 export interface BoardPresentation {
   readonly title: string;
   /** Optional terminal-native hyperlink for this Board item. */
