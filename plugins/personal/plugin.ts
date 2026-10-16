@@ -19,7 +19,7 @@ class InvalidResultError extends Error {
 async function infer<T>(context: ReconcileContext, title: string, prompt: string, schema: z.ZodType<T>, timeoutMs: number,
   lane: { laneId: string; newLane?: boolean }): Promise<{ value: T; laneId: string; turnId: string }> {
   const result = await context.verbs.harness({ title, ...lane, timeoutMs,
-    prompt: `${prompt}\nReturn only JSON matching this schema, without Markdown:\n${JSON.stringify(z.toJSONSchema(schema))}`,
+    prompt: `${prompt}\nYour final answer must be only JSON matching this schema, without Markdown. Keep any progress commentary in separate messages, outside the final answer:\n${JSON.stringify(z.toJSONSchema(schema))}`,
   });
   if (result.state !== "success") throw new Error(`Harness ${result.state}${result.state === "failure" ? `: ${result.error}` : ""}`);
   if (result.value.outcome !== "completed") throw new Error("Harness invocation declined");
