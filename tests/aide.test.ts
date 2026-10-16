@@ -26,6 +26,29 @@ function setup(t: TestContext, agent: Agent) {
 
 function input(id = "one", text = "帮我处理待办") { return { id, text, conversationId: "me" }; }
 
+test("completed execution with invalid final output is distinct from interruption and never automatically replayed", async (t) => {
+  for (const result of ["我已经做完了", { ...done, summary: "" }, { ...done, action: "ask" as const, question: null },
+    { ...done, action: "wait" as const, nextAt: "2000-01-01T00:00:00Z" }]) {
+    let runs = 0;
+    const agent: Agent = { route: async () => create, execute: async () => { runs++; return result; } };
+    const { aide, path } = setup(t, agent);
+    await aide.receive(input());
+    await aide.settled();
+    const work = aide.store.read().works[0]!;
+    assert.equal(work.status, "invalid_result");
+    assert.match(work.history.at(-1)!.text, /Execution completed but result validation failed/);
+    assert.match(aide.store.read().messages.at(-1)!.text, /执行已结束，但最终结果解析失败/);
+    const invocations = aide.plugins.listHarnessInvocations();
+    assert.ok(invocations.every((invocation) => invocation.phase === "completed"));
+    await aide.close();
+    const restarted = new Aide(path, fakeOptions(agent, path), log);
+    t.after(() => restarted.close());
+    await restarted.start(); await restarted.settled();
+    assert.equal(restarted.store.read().works[0]!.status, "invalid_result");
+    assert.equal(runs, 1);
+  }
+});
+
 test("Task asks, persists a question across restart, then completes after an answer", async (t) => {
   let id = "";
   let runs = 0;
@@ -50,6 +73,26 @@ test("Task asks, persists a question across restart, then completes after an ans
   await restarted.settled();
   assert.equal(restarted.store.read().works[0]?.status, "done");
   assert.equal(runs, 2);
+});
+
+test("Personal requires a designated final answer even when the transcript contains valid JSON", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "aide-missing-final-"));
+  let executed = false;
+  const options = fakeOptions({ route: async () => create, execute: async () => { executed = true; return done; } }, dir);
+  const aide = new Aide(dir, { ...options, createAdapter: () => {
+    const adapter = options.createAdapter();
+    const open = adapter.open.bind(adapter);
+    adapter.open = (config, sink, binding) => open(config, (event) => {
+      if (executed && event.kind === "agent_message") {
+        sink({ ...event, payload: { ...event.payload, phase: undefined } });
+      } else sink(event);
+    }, binding);
+    return adapter;
+  } }, log);
+  t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
+  await aide.receive(input()); await aide.settled();
+  assert.equal(aide.store.read().works[0]!.status, "invalid_result");
+  assert.match(aide.store.read().works[0]!.history.at(-1)!.text, /without a designated final answer/);
 });
 
 test("duplicate inbound delivery creates and executes a Task once", async (t) => {

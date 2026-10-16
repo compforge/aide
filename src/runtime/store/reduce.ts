@@ -392,6 +392,10 @@ function applyMessageUpsert(
   );
   if (!msg) return;
   applyMessageReplies(state, msg, p.replyToMessageIds);
+  if (ev.kind === "agent_message" && msg.kind === "output") {
+    const phase = (ev as EventEnvelope<"agent_message">).payload.phase;
+    if (phase !== undefined) msg.phase = phase;
+  }
   // 三态：省略=不变；null/[]=清空；数组=整体替换
   // A managed Input already owns its original body. Harness echoes may contain
   // transport Context or repeat that body; they only confirm execution here.

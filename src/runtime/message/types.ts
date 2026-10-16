@@ -1,4 +1,4 @@
-import type { ContentBlock } from "../event/index.ts";
+import type { AgentMessagePhase, ContentBlock } from "../event/index.ts";
 import type { InteractionAnswer, InteractionCancellationReason, InteractionDraft } from "../interaction/types.ts";
 
 import type { ActorRef } from "@compforge/aide-plugin";
@@ -30,6 +30,7 @@ export interface Output extends ContentMessage {
   kind: "output";
   role: "agent" | "thought";
   streamStatus?: "in_progress" | "completed";
+  phase?: AgentMessagePhase;
 }
 
 export interface InputRequest extends MessageBase {

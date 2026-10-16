@@ -16,6 +16,10 @@ Aide 服务进程
 
 ## 职责边界
 
+Harness 消息的 `phase` 区分进度说明（`commentary`）与最终答复（`final`）。Adapter 保留提供方明确给出的阶段；没有阶段时保持未知，不根据消息位置或文本内容推断。Codex 的实时消息和历史导入共用同一映射。
+
+Turn 的 `agentText` 是整轮对话文本，用于上下文与查看记录；`finalText` 只包含明确标记的最终答复，随汇总持久化并经 Harness verb 交给 Plugin。Personal 仅解析 `finalText` 的 JSON，执行结束但答复缺失、格式或业务结果字段不合法时记录为 `invalid_result`，保留 Lane 和 Turn 线索。执行失败或中断仍记录为 `uncertain`。两者都等待用户明确继续，不自动重放外部动作。
+
 执行内核管理 Runner、Supervisor、IPC、注册与撤销、Resource、Controller、Source、Watch、cron、队列、容量、退避和 verb 生命周期。Harness 通过 Adapter 接入，Session Binding、HarnessInvocation、Turn 和事件流承载执行状态。
 
 Plugin 只经公共 Resource API 和 `ReconcileContext.verbs` 与宿主协作。Worker 不持有宿主 Store、Harness 进程或 SDK。宿主通过原有 Channel 装配 Plugin Manager 与 Harness Controller，执行先持久化，再交给 Adapter；接受请求与执行完成是不同事实。

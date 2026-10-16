@@ -8,18 +8,32 @@ import { INTAKE_TYPE, WORK_TYPE, toWork, type WorkResource, type WorkSpec, type 
 export interface IntakeSpec { input: Incoming; works: Work[]; history: Message[]; timezone: string }
 export interface IntakeStatus { route?: z.infer<typeof RouteSchema>; error?: string | null }
 
+/** @spec A completed execution with an invalid result is not an interrupted execution and must not be replayed automatically. */
+class InvalidResultError extends Error {
+  constructor(message: string, readonly laneId: string, readonly turnId: string) {
+    super(message); this.name = "InvalidResultError";
+  }
+}
+
 /** Personal decisions consume a completed Harness Turn; the runtime owns execution and cancellation. */
 async function infer<T>(context: ReconcileContext, title: string, prompt: string, schema: z.ZodType<T>, timeoutMs: number,
-  lane: { laneId: string; newLane?: boolean }): Promise<{ value: T; laneId: string }> {
+  lane: { laneId: string; newLane?: boolean }): Promise<{ value: T; laneId: string; turnId: string }> {
   const result = await context.verbs.harness({ title, ...lane, timeoutMs,
-    prompt: `${prompt}\nReturn only JSON matching this schema, without Markdown:\n${JSON.stringify(z.toJSONSchema(schema))}`,
+    prompt: `${prompt}\nYour final answer must be only JSON matching this schema, without Markdown. Keep any progress commentary in separate messages, outside the final answer:\n${JSON.stringify(z.toJSONSchema(schema))}`,
   });
   if (result.state !== "success") throw new Error(`Harness ${result.state}${result.state === "failure" ? `: ${result.error}` : ""}`);
   if (result.value.outcome !== "completed") throw new Error("Harness invocation declined");
   const turn = result.value.turn;
   if (turn.stopReason !== "end_turn") throw new Error(`Harness did not complete: ${turn.stopReason}`);
-  const text = (turn.agentText ?? "").trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, "$1");
-  return { value: schema.parse(JSON.parse(text)), laneId: result.value.laneId };
+  const { laneId } = result.value;
+  const text = turn.finalText?.trim();
+  if (!text) throw new InvalidResultError("Harness completed without a designated final answer", laneId, turn.turnId);
+  let data: unknown;
+  try { data = JSON.parse(text); }
+  catch { throw new InvalidResultError("Final answer is not valid JSON", laneId, turn.turnId); }
+  const parsed = schema.safeParse(data);
+  if (!parsed.success) throw new InvalidResultError("Final answer does not match the result schema", laneId, turn.turnId);
+  return { value: parsed.data, laneId, turnId: turn.turnId };
 }
 
 function reference(resource: WorkResource) {
@@ -73,11 +87,23 @@ async function reconcileWork(context: PluginContext, execution: ReconcileContext
     const completed = await infer(execution, work.title, executionPrompt(work), OutcomeSchema, 15 * 60_000,
       resource.status.laneId ? { laneId: resource.status.laneId } : { laneId: "main", newLane: true });
     result = completed.value; laneId = completed.laneId;
-    if (result.action === "ask" && !result.question?.trim()) throw new Error("ask requires a question");
+    if (result.action === "ask" && !result.question?.trim()) throw new InvalidResultError("ask requires a question", laneId, completed.turnId);
     if (result.action === "wait" && (!result.nextAt || !Number.isFinite(Date.parse(result.nextAt)) || Date.parse(result.nextAt) <= Date.now())) {
-      throw new Error("wait requires a future nextAt");
+      throw new InvalidResultError("wait requires a future nextAt", laneId, completed.turnId);
     }
   } catch (error) {
+    if (error instanceof InvalidResultError) {
+      context.logger.error("Execution completed with an invalid result", {
+        error, attributes: { workId: work.id, laneId: error.laneId, turnId: error.turnId },
+      });
+      await record(context, resource, (current) => {
+        current.status = "invalid_result"; current.nextAt = null; current.question = null;
+        current.history.push({ at: new Date().toISOString(), role: "aide",
+          text: `Execution completed but result validation failed: ${error.message}. Turn: ${error.turnId}. Verify the recorded output before explicitly continuing.` });
+        return `「${current.title}」执行已结束，但最终结果解析失败，尚未确认事项完成。请核对执行记录后，再决定是否继续。`;
+      }, error.laneId);
+      return;
+    }
     context.logger.error("Execution outcome uncertain", { error, attributes: { workId: work.id } });
     await uncertain(context, resource);
     return;
