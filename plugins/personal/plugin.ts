@@ -6,7 +6,7 @@ import { nextOccurrence, type Incoming, type Message, type Work } from "./model.
 import { INTAKE_TYPE, WORK_TYPE, toWork, type WorkResource, type WorkSpec, type WorkStatus } from "./resources.ts";
 
 export interface IntakeSpec { input: Incoming; works: Work[]; history: Message[]; timezone: string }
-export interface IntakeStatus { route?: z.infer<typeof RouteSchema>; error?: string }
+export interface IntakeStatus { route?: z.infer<typeof RouteSchema>; error?: string | null }
 
 /** Personal decisions consume a completed Harness Turn; the runtime owns execution and cancellation. */
 async function infer<T>(context: ReconcileContext, title: string, prompt: string, schema: z.ZodType<T>, timeoutMs: number,

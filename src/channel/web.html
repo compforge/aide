@@ -188,7 +188,7 @@
       await api('/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(draft) });
       draft = null; $('input').value = ''; $('notice').textContent = '已接收，后续进展会显示在这里。';
       await poll(); $('messages').scrollTop = $('messages').scrollHeight;
-    } catch { $('notice').className = 'error'; $('notice').textContent = '发送未确认，请重试。原消息编号会保留，避免重复交办。'; }
+    } catch (error) { $('notice').className = 'error'; $('notice').textContent = error.message + ' 原消息编号会保留，避免重复交办。'; }
     finally { sending = false; $('send').disabled = false; $('input').disabled = false; $('input').focus(); }
   });
   $('input').addEventListener('keydown', (event) => {

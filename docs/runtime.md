@@ -31,6 +31,8 @@ Aide 当前装配一个常驻 Session，一个 personal Instance 和一个 Codex
 3. Work Controller 观察 ready 或已到期的 scheduled，先保存 running，再请求 Harness 执行。正常结果、问题和状态一起写入 status。IPC 等待期间用户可能更新指令，提交结果前按 uid 重新读取资源，保留最新指令和暂停状态；版本冲突只重试提交，不重复执行外部工作。
 4. ask 保存为 waiting 并结束本次调用，用户回答再唤醒。wait 返回动态唤醒时间；Routine 单次完成后保留安排，Task 则结束。事件触发改变 Work，并经过同一队列和 Reconcile。
 
+识别失败时保留错误，不自动重放。用户显式重试同一消息会刷新待办与对话快照，再执行识别；已经接收成功的消息直接返回原回执。这个重试边界只覆盖创建或更新工作之前的识别阶段，执行结果不明的 Work 仍需用户核对后继续。
+
 宿主端使用 Aide 的 `replaceSpec` 和 `patchStatus` 顺序提交用户更新；status、回复和输入去重记录在同一次 status 写入中提交。没有增加跨 spec/status 的事务接口。
 
 普通对话回复保存在 Conversation Resource；网页读取 Work / Conversation outbox。消息是持久事实，浏览器关闭不影响服务器工作。按绿地方式开发，不迁移早期 Aide 数据布局。
