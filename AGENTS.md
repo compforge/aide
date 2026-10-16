@@ -37,7 +37,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 ## 关键约定
 
-- Personal 业务不进入 runtime；Plugin 通过公共 Resource API 和 verbs 请求动作，不持有 Harness 或宿主 Store。
+- Personal 业务不进入 runtime；Plugin Worker 通过公共 Resource API 和 verbs 请求动作，不持有 Harness 或宿主 Store；`aide.ts` 和 `store.ts` 是宿主装配与输入投影。
 - Task / Routine 共用 Work 身份，spec.kind 区分类别；转换保留 uid、历史与去重记录。
 - status、出站回复与投递去重一起提交。等待用户是持久状态，不保持执行位。
 - Harness 完成不等于业务目标完成，personal 校验结果后决定工作终态。

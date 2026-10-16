@@ -20,7 +20,9 @@ Runner、Supervisor、IPC、注册与撤销、Resource、Controller、Source、W
 
 Plugin 只经公共 Resource API 和 `ReconcileContext.verbs` 与宿主协作。Worker 不持有宿主 Store、Harness 进程或 SDK。宿主通过原有 Channel 装配 Plugin Manager 与 Harness Controller，执行先持久化，再交给 Adapter；接受请求与执行完成是不同事实。
 
-Aide 当前装配一个常驻 Session，一个 personal Instance 和一个 Codex Target。请求识别使用主 Lane；每项工作首次执行通过 `newLane: true` 创建支线，后续继续同一 Lane，避免每次触发都创建新的执行会话。Baton 的 TUI、CLI 入口和用户级 daemon 未接入；复制的 Command、Hook 等机制仍保留原契约，网页没有为它们增加产品入口。
+Aide 当前装配一个常驻 Session，一个 personal Instance 和一个 Codex Target。请求识别使用主 Lane；每项工作首次执行通过 `newLane: true` 创建支线，后续继续同一 Lane，避免每次触发都创建新的执行会话。Baton 的 TUI、CLI 入口和用户级 daemon 未接入；复制的 Command、Hook 等机制仍保留原契约。
+
+网页通过 `/interactions` 展示当前 Session 的待决请求，并经原有 `Channel.resolveInteraction` 回答，不另建审批状态。当前支持 Hooks 信任、工具权限选择与取消；其它原生交互会展示内容但暂只能取消。这个收件区属于同一个本地用户，跨 personal 对话可见；当前的 conversationId 只是对话分组，不是用户隔离边界。
 
 ## Personal 工作流程
 

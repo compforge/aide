@@ -9,6 +9,15 @@ const EventSchema = IncomingSchema.omit({ text: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
 
+const InteractionResponseSchema = z.object({
+  messageId: z.string().min(1),
+  result: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("hook_trust"), outcome: z.enum(["trusted", "skipped"]) }),
+    z.object({ kind: z.literal("permission"), outcome: z.literal("selected"), optionId: z.string() }),
+    z.object({ kind: z.literal("cancelled"), reason: z.literal("user") }),
+  ]),
+});
+
 async function body(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -48,7 +57,26 @@ export function httpChannel(aide: Aide, log: Logger) {
       if (request.method === "GET" && url.pathname === "/health") {
         json(response, 200, { status: "ok", revision: process.env.AIDE_REVISION ?? "development" }); return;
       }
-      if (request.method === "POST" && url.pathname === "/messages") {
+      // This is the local user's Session-wide inbox, independent of personal conversation IDs.
+      if (request.method === "GET" && url.pathname === "/interactions") {
+        json(response, 200, [...aide.channel.projection.interactions.values()]
+          .map((item) => item.request).filter((item) => item.status === "pending"));
+      } else if (request.method === "POST" && url.pathname === "/interactions") {
+        const { messageId, result } = InteractionResponseSchema.parse(await body(request));
+        const pending = aide.channel.projection.interactions.get(messageId)?.request;
+        if (!pending || pending.status !== "pending") {
+          json(response, 409, { error: "This interaction is no longer pending" }); return;
+        }
+        if (result.kind !== "cancelled" && (result.kind !== pending.request.kind
+          || (result.kind === "permission" && pending.request.kind === "permission"
+            && !pending.request.options.some((option) => option.optionId === result.optionId)))) {
+          json(response, 400, { error: "Answer does not match the pending interaction" }); return;
+        }
+        // @spec Channel answers settle Baton's original Interaction; no separate approval state.
+        const receipt = await aide.channel.resolveInteraction({ kind: "interaction_response", messageId }, async () => result);
+        log.info({ messageId, kind: result.kind, completed: receipt.result }, "Channel interaction response");
+        json(response, receipt.result ? 200 : 409, { completed: receipt.result });
+      } else if (request.method === "POST" && url.pathname === "/messages") {
         const input = IncomingSchema.parse(await body(request));
         json(response, 200, await aide.receive(input));
       } else if (request.method === "POST" && url.pathname === "/events") {

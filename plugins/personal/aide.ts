@@ -21,7 +21,7 @@ export class Aide {
   private starting?: Promise<void>;
   private closed = false;
 
-  private readonly channel: Channel;
+  readonly channel: Channel;
   private readonly session: SessionHandle;
   private readonly pending = new Set<Promise<unknown>>();
 
