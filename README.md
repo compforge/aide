@@ -13,6 +13,8 @@ npm ci
 npm start
 ```
 
+查看当前 checkout 的产品版本：`npm exec -- aide version`。通过 `npm link` 安装命令后，可在任意目录运行 `aide version`（也支持 `--version` / `-v`）。命令读取仓库根目录的 `VERSION`，不启动服务或加载模型配置。
+
 打开 <http://127.0.0.1:7433> 即可交办事情、回答问题和查看事项与安排。默认会话为 `me`；使用 `/?conversation=另一会话名` 可以分别试验不同场景。刷新页面会恢复已有对话。模型回复按纯文本展示。
 
 默认监听 `127.0.0.1:7433`，Session、Plugin 配置和 Resource 保存到 `~/.aide/projects/`。同一个数据目录只允许一个 Aide 进程。部署到自己的服务器后，保持该进程运行即可继续处理安排；HTTP 接口是本机可信入口，没有认证，不直接暴露公网。
