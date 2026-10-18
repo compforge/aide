@@ -5,17 +5,23 @@
 ```text
 Pi SDK delta / tool event → Pi Adapter → Core Event → Session Projection
                                                         ↓
-Conversation / Input / Message → conversationView → SSE → 网页
+Conversation / Input / Message → conversationView → AgentUE UIModel
+                                                        ↓
+                          PatchEmitter → encodeSse → 浏览器 applyPatch → 网页
 ```
 
 Pi Adapter 将 `text_delta` / `thinking_delta` 映射到现有 `agent_message_chunk` / `agent_thought_chunk`，消息结束时使用相同 ID 提交完整内容。工具循环的中间发言保持 commentary，只有成功收口的最后答复标为 final。展示进展不改变 Harness 的完成语义，也不触发 Work CRUD。
 
-`src/channel/view.ts` 从已有 Session Projection 选择当前 Conversation 的 Chief Target 和活跃 Turn，只输出其 agent / thought / tool 内容，不发送内部提示词或整个工具原始响应。`src/channel/stream.ts` 通过 `GET /stream?conversationId=...` 发送具名 `view` SSE 事件，每次是完整的 messages / activity 快照。首次连接和重连都从当前投影生成快照，浏览器直接替换，不重放业务操作，也不累加重复文本。
+`src/channel/view.ts` 从已有 Session Projection 选择当前 Conversation 的 Chief Target 和活跃 Turn，不发送内部提示词或整个工具原始响应。它生成 `biz: aide.conversation` 的 AgentUE UIModel：`meta.conversation_id` 和 `meta.activity` 表示会话与当前执行状态，按顺序排列的 block 分为正式 `message`、实时 `thought` / `text` / `tool`。不同类别的 ID 有前缀，避免业务消息与执行事件的身份冲突。
 
-流式变更按 100 ms 合并，空闲连接每 15 秒发送心跳，Work 独立写入的 outbox 每 1.5 秒检查一次。发送阻塞时等待 drain，只保留最新投影；断开连接清理订阅和计时器，不取消服务端执行。服务退出时关闭 SSE 连接。网页只更新进展节点的文字，保留展开状态、输入焦点和用户浏览历史时的滚动位置。
+`src/channel/stream.ts` 使用 SDK 的 `PatchEmitter` 和 `encodeSse`，通过 `GET /stream?conversationId=...` 输出 AgentUE SSE。首次连接与重连发送 `start` 完整快照，之后新增或更正 block 用 `set`，正文增长用 `append`，执行状态变化用 `meta.activity` 的 `set`。协议没有删除操作，因此完成后移除进度、或消息插入导致 block 顺序变化时发送新的 `start` 替换模型。
 
-这一结构参考 AgentUE 的状态快照和 SSE 传输边界，以及 Baton / chat-tui 将事实、展示投影、Activity 分开的方式。Aide 已有 Core reducer，所以不额外接入另一套 reducer 或复制终端组件；当前 SSE 是 Aide 自己的快照接口，不声明实现完整 AgentUE 协议。
+流式变更按 100 ms 合并，空闲连接每 15 秒发送 AgentUE `ping`，Work 独立写入的 outbox 每 1.5 秒检查一次。发送阻塞时等待 drain，基于上次已写出的模型计算最新 patch。每个连接最长持续 5 分钟，以 `end` 正常结束，由 EventSource 自动重连；投影失败发送 `error` 后 `end`。首次投影失败则直接返回 HTTP 500。断开连接清理订阅和计时器，不取消服务端执行；进程退出或网络中断属于传输中断，客户端从新快照恢复。
+
+依赖固定为已发布的 `@compforge/agentue@0.0.1`，使用它的协议 1.0。服务端与浏览器直接引用同一 SDK，不复制协议实现。`web-sdk.ts` 仅导出浏览器所需的 `applyPatch` / `parsePatchEvent`，由现有 Bun 在首次请求时打包并缓存，经同源 `/agentue.js` 提供。浏览器按 SDK reducer 更新展示模型，Aide 负责将 block 渲染到页面并保留展开状态、输入焦点和用户浏览历史时的滚动位置。
+
+Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职责独立。Baton / chat-tui 仅作为事实与 View 分层的理念参考，没有引入终端 UI。每次连接的 seq 属于该次交付，不保存 UI patch 日志或按 Last-Event-ID 重放；执行事件仍由既有 Ledger 持久化。
 
 进度不写入 Channel 出站 Message，因此不会让飞书收到逐 token 消息。完成后的网页仍保留正式答复；执行过程的原始事件保存在既有 Session Ledger，此版没有增加网页历史轨迹查看器。
 
-`tests/pi-agent.test.ts` 使用真实 Pi SDK 和受控模型 SSE，验证完成前已有思考和正文增量、最终文本不重复。`tests/web-progress.test.ts` 使用真实 Host / Runner / HTTP 和模拟 Harness，验证会话隔离、执行中可见、重连恢复、断开不取消、最终消息替换，以及进度不进入出站消息。
+`tests/pi-agent.test.ts` 使用真实 Pi SDK 和受控模型 SSE，验证完成前已有思考和正文增量、最终文本不重复。`tests/web-progress.test.ts` 使用真实 Host / Runner / HTTP 和模拟 Harness，下载 HTTP 提供的浏览器 bundle，用其真实 AgentUE reducer 消费 SSE，验证会话隔离、增量更新、重连恢复、断开不取消、最终消息替换、错误收口，以及进度不进入出站消息。

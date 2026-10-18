@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { Logger } from "pino";
 import type { Aide } from "../../plugins/personal/aide.ts";
@@ -40,6 +41,7 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 /** Local channel bridge: accept messages/events and let adapters poll the durable outgoing log. */
 export function httpChannel(aide: Aide, log: Logger) {
   const page = readFileSync(new URL("./web.html", import.meta.url), "utf8");
+  let webSdk: Promise<string> | undefined;
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
@@ -53,9 +55,19 @@ export function httpChannel(aide: Aide, log: Logger) {
       if (request.method === "GET" && url.pathname === "/") {
         response.writeHead(200, {
           "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
-          "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+          "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         });
         response.end(page); return;
+      }
+      if (request.method === "GET" && url.pathname === "/agentue.js") {
+        webSdk ??= Bun.build({ entrypoints: [fileURLToPath(new URL("./web-sdk.ts", import.meta.url))], target: "browser", format: "esm", minify: true })
+          .then(async (build) => {
+            if (!build.success) throw new AggregateError(build.logs, "AgentUE browser bundle failed");
+            return build.outputs[0]!.text();
+          });
+        const script = await webSdk;
+        response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" });
+        response.end(script); return;
       }
       if (request.method === "GET" && url.pathname === "/health") {
         json(response, 200, { status: "ok", revision: process.env.AIDE_REVISION ?? "development" }); return;

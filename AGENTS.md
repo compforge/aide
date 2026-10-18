@@ -14,7 +14,8 @@ src/
   channel/
     http.ts                # 本地 HTTP Channel
     view.ts                # 从内置对象和 Core Projection 投影会话进展
-    stream.ts              # SSE 快照推送、合并与连接清理
+    stream.ts              # AgentUE patch / SSE 推送、合并与连接清理
+    web-sdk.ts             # 浏览器使用的 AgentUE reducer 打包入口
     feishu.ts              # 飞书单聊、持久收件与出站投递
     feishu-client.ts       # 飞书官方 SDK、长连接与发送接口
     web.html               # 网页对话、事项与安排
@@ -64,7 +65,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - status、出站回复与投递去重一起提交。等待用户是持久状态，不保持执行位。
 - Harness 完成不等于业务目标完成，personal 校验结果后决定工作终态。
 - Chief 接话用 Pi，Work 执行用 Codex；Source 先提交持久 Input 再推进水位，不直接创建 Work。问答复用 Core Interaction，见 `docs/chief.md`。
-- 网页进度消费 Core Projection；Pi 的流式事件在 Adapter 归一。进度不写入业务 Message、不触发 Work，重连只恢复快照；见 `docs/web-progress.md`。
+- 网页进度消费 Core Projection，Channel 映射成 AgentUE UIModel；服务端复用 PatchEmitter / encodeSse，浏览器复用 applyPatch。Pi 的流式事件在 Adapter 归一。进度不写入业务 Message、不触发 Work，重连从 start 快照恢复；见 `docs/web-progress.md`。
 - 内置 Agent 通过宿主绑定的 WorkService 操作 Personal 数据；Pi Adapter 只接收会话工厂，不导入业务模型。接入边界见 `docs/pi.md`。
 - Worker 或 Harness 中断可能已经产生外部副作用；保留 uncertain，不自动重放。
 - 用 `npm run check` 验证。真实 Worker + 模拟 Adapter 的测试不等于真实 Codex 或业务 CLI 验证。
