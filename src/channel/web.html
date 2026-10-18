@@ -22,6 +22,8 @@
   .activity-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; margin: 6px 0; }
   .activity-block.thought .activity-content, .activity-block.tool .activity-content { max-height: 220px; overflow: auto; color: #68776c; }
   .activity-block summary { cursor: pointer; }
+  .execution-history { margin: 12px 0; padding: 12px 18px; border: 1px solid #e1e6dc; border-radius: 12px; }
+  .execution-history > summary { cursor: pointer; color: #68776c; font-size: 13px; }
   @keyframes pulse { 50% { opacity: .3; } }
   @media(prefers-reduced-motion: reduce) { .activity-heading::before { animation: none; } }
   .empty { margin: 10vh auto; max-width: 480px; } .empty h2 { font-size: 26px; font-weight: 500; }
@@ -85,26 +87,55 @@
     if (!response.ok) throw new Error(data.error || '请求失败');
     return data;
   }
-  function renderMessages(messages) {
-    const signature = JSON.stringify(messages);
+  function renderMessages(blocks) {
+    const liveIds = new Set(blocks.filter((block) => block.type === 'execution' && block.status === 'running').map((block) => block.id));
+    const history = blocks.filter((block) => !liveIds.has(block.id) && !liveIds.has(block.parent_id));
+    const signature = JSON.stringify(history);
     if (signature === lastMessages) return;
     lastMessages = signature;
     const nearBottom = $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
+    const expanded = new Map([...$('history').querySelectorAll('details')].map((node) => [node.dataset.blockId, node.open]));
     $('history').replaceChildren();
-    if (!messages.length) {
+    if (!history.length) {
       const empty = element('div', undefined, 'empty');
       empty.append(element('h2', '从一件具体的事开始'), element('p', '例如：总结工作目录里的 README；每天上午检查项目进展；关注某件事，发生变化时告诉我。'));
       $('history').append(empty);
     }
-    for (const message of messages) {
-      const node = element('article', undefined, 'message ' + message.role);
-      node.append(element('div', (message.role === 'user' ? '你' : 'Aide') + ' · ' + new Date(message.at).toLocaleTimeString(), 'muted'), element('p', message.text));
-      $('history').append(node);
+    for (const block of history.filter((block) => !block.parent_id)) {
+      if (block.type === 'message') {
+        const node = element('article', undefined, 'message ' + block.role);
+        node.append(element('div', (block.role === 'user' ? '你' : 'Aide') + ' · ' + new Date(block.at).toLocaleTimeString(), 'muted'), element('p', block.content));
+        $('history').append(node);
+      } else if (block.type === 'execution') {
+        const node = element('details', undefined, 'execution-history'); node.dataset.blockId = block.id; node.open = expanded.get(block.id) ?? false;
+        const status = block.status === 'completed' ? '已完成' : '已中断';
+        node.append(element('summary', '查看思考与执行过程 · ' + status));
+        for (const child of history.filter((child) => child.parent_id === block.id)) {
+          const detail = progressNode(child.type); detail.dataset.blockId = child.id;
+          if (child.type !== 'text') detail.open = expanded.get(child.id) ?? true;
+          updateProgress(detail, child.type, child.content, child.status, child.detail);
+          node.append(detail);
+        }
+        $('history').append(node);
+      }
     }
     if (nearBottom) $('messages').scrollTop = $('messages').scrollHeight;
   }
   let activityId;
   const activityNodes = new Map();
+  const toolLabels = { in_progress: '执行中', pending: '等待执行', completed: '已完成', failed: '失败', declined: '已拒绝' };
+  function progressNode(kind) {
+    const node = element(kind === 'text' ? 'div' : 'details', undefined, 'activity-block ' + kind);
+    if (kind !== 'text') { node.open = true; node.append(element('summary')); }
+    node.append(element('div', '', 'activity-content')); return node;
+  }
+  function updateProgress(node, kind, text, status, detail) {
+    if (kind === 'thought') node.querySelector('summary').textContent = '思考过程';
+    if (kind === 'tool') node.querySelector('summary').textContent = text + ' · ' + (toolLabels[status] || status || '状态未知');
+    const content = node.querySelector('.activity-content');
+    const value = kind === 'tool' ? detail || '' : text;
+    if (content.textContent !== value) content.textContent = value;
+  }
   function renderActivity(activity) {
     const area = $('activity');
     const nearBottom = $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
@@ -121,19 +152,12 @@
     $('activity-heading').textContent = label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : '');
     const ids = new Set(activity.blocks.map((block) => block.id));
     for (const [id, node] of activityNodes) if (!ids.has(id)) { node.remove(); activityNodes.delete(id); }
-    const toolLabels = { in_progress: '执行中', pending: '等待执行', completed: '已完成', failed: '失败', declined: '已拒绝' };
     for (const block of activity.blocks) {
       let node = activityNodes.get(block.id);
       if (!node) {
-        node = element(block.kind === 'text' ? 'div' : 'details', undefined, 'activity-block ' + block.kind);
-        if (block.kind !== 'text') { node.open = true; node.append(element('summary')); }
-        node.append(element('div', '', 'activity-content')); activityNodes.set(block.id, node); area.append(node);
+        node = progressNode(block.kind); activityNodes.set(block.id, node); area.append(node);
       }
-      if (block.kind === 'thought') node.querySelector('summary').textContent = '思考过程';
-      if (block.kind === 'tool') node.querySelector('summary').textContent = block.text + ' · ' + (toolLabels[block.status] || block.status || '状态未知');
-      const content = node.querySelector('.activity-content');
-      const text = block.kind === 'tool' ? block.detail || '' : block.text;
-      if (content.textContent !== text) content.textContent = text;
+      updateProgress(node, block.kind, block.text, block.status, block.detail);
     }
     if (nearBottom) $('messages').scrollTop = $('messages').scrollHeight;
   }
@@ -262,8 +286,9 @@
       const patch = parsePatchEvent(event.data);
       view = applyPatch(view, patch);
       if (patch.op === 'ping' || patch.op === 'end') return;
-      renderMessages(view.blocks.filter((block) => block.type === 'message').map((block) => ({ ...block, text: block.content })));
-      renderActivity(view.meta.activity && { ...view.meta.activity, blocks: view.blocks.filter((block) => block.type !== 'message')
+      renderMessages(view.blocks);
+      const liveIds = new Set(view.blocks.filter((block) => block.type === 'execution' && block.status === 'running').map((block) => block.id));
+      renderActivity(view.meta.activity && { ...view.meta.activity, blocks: view.blocks.filter((block) => liveIds.has(block.parent_id))
         .map((block) => ({ ...block, kind: block.type, text: block.content })) });
       $('connection').textContent = view.meta.error ? view.meta.error.message : '实时连接';
     } catch {

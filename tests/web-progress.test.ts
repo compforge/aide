@@ -9,7 +9,7 @@ import { decodeSse, PatchEmitter, applyPatch, type PatchEvent } from "@compforge
 import { Aide } from "../plugins/personal/aide.ts";
 import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { httpChannel } from "../src/channel/http.ts";
-import type { ConversationView } from "../src/channel/view.ts";
+import { conversationView, type ConversationView } from "../src/channel/view.ts";
 import { conversationPatches } from "../src/channel/stream.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -86,12 +86,15 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   await aide.receive({ id: "b1", conversationId: "b", text: "另一会话的私有内容" });
   await until(() => emitters.has(chiefTarget("a")) && emitters.has(chiefTarget("b")));
   const { sink, turnId } = emitters.get(chiefTarget("a"))!;
+  const other = emitters.get(chiefTarget("b"))!;
+  other.sink({ kind: "agent_thought_chunk", turnId: other.turnId, payload: { messageId: "thought-b", content: { type: "text", text: "另一会话的思考" } } });
   sink({ kind: "agent_thought_chunk", turnId, payload: { messageId: "thought-a", content: { type: "text", text: "先检查资料" } } });
   sink({ kind: "tool_call_update", turnId, payload: { toolCallId: "read-a", title: "read", status: "in_progress", rawInput: { path: "/tmp/README" } } });
   sink({ kind: "agent_message_chunk", turnId, payload: { messageId: "text-a", content: { type: "text", text: "正在整理" } } });
   await until(() => first.views.some((view) => view.blocks.some((block) => block.content === "正在整理")));
   const progress = first.views.at(-1)!;
-  assert.equal(progress.blocks.filter((block) => block.type !== "message").length, 3);
+  assert.equal(progress.blocks.filter((block) => block.parent_id).length, 3);
+  assert.equal(progress.blocks.find((block) => block.type === "execution")!.status, "running");
   assert.equal(progress.blocks.find((block) => block.type === "tool")!.detail, "/tmp/README");
   assert.doesNotMatch(JSON.stringify(progress), /另一会话/);
   assert.equal(aide.messages().filter((message) => message.role === "aide").length, 0);
@@ -105,9 +108,18 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(second.events[0]!.op, "start");
   assert.equal(second.views[0]!.blocks.at(-1)!.content, "正在整理重点，请稍候");
   release(); await aide.settled();
-  await until(() => second.views.at(-1)?.meta.activity === null && second.views.at(-1)!.blocks.length === 2);
+  await until(() => second.views.at(-1)?.meta.activity === null && second.views.at(-1)!.blocks.filter((block) => block.type === "message").length === 2);
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.role === "aide").length, 1);
-  assert.equal(second.views.at(-1)!.blocks.at(-1)!.content, "最终答复");
+  assert.equal(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content, "最终答复");
+  const completed = second.views.at(-1)!;
+  assert.equal(completed.blocks.find((block) => block.type === "execution")!.status, "completed");
+  assert.equal(completed.blocks.find((block) => block.type === "thought")!.content, "先检查资料");
+  assert.equal(completed.blocks.find((block) => block.type === "tool")!.detail, "/tmp/README");
+  assert.doesNotMatch(JSON.stringify(completed), /另一会话/);
+  const refreshed = await connect("a");
+  await until(() => refreshed.views.length > 0);
+  assert.deepEqual(refreshed.views[0], completed);
+  await refreshed.close();
   assert.equal(aide.store.read().works.length, 0);
   const messages = aide.messages.bind(aide);
   aide.messages = () => { throw new Error("projection unavailable"); };
@@ -118,6 +130,18 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
     assert.equal((await fetch(base + "/stream?conversationId=a")).status, 500);
   } finally { aide.messages = messages; }
   await second.close();
+  await aide.receive({ id: "a2", conversationId: "a", text: "再聊一个问题" });
+  await aide.settled();
+  const later = conversationView(aide, "a");
+  assert.equal(later.blocks.filter((block) => block.type === "execution").length, 2);
+  assert.equal(later.blocks.find((block) => block.type === "thought")!.parent_id,
+    completed.blocks.find((block) => block.type === "execution")!.id);
+  await aide.close();
+  const reopened = new Aide(root, options, log);
+  try {
+    assert.deepEqual(conversationView(reopened, "a"), later);
+    assert.doesNotMatch(JSON.stringify(conversationView(reopened, "a")), /另一会话/);
+  } finally { await reopened.close(); }
 });
 
 test("AgentUE reducer reconstructs growing, corrected and removed progress without duplicated text", () => {
