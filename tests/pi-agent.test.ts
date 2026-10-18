@@ -15,7 +15,7 @@ import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 import type { HarnessEvent, HarnessSessionBinding } from "../src/host/harness/adapter.ts";
 
-type Reply = { text: string; stop?: string } | { tool: string; args: unknown } | { error: true } | { hold: true };
+type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown } | { error: true } | { hold: true };
 
 /** Real Pi SDK and HTTP protocol; only the remote model is scripted. No external credentials or network. */
 async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply) {
@@ -35,8 +35,10 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
         id: `reply-${requests.length}`, object: "chat.completion.chunk", created: 1, model: "test-model",
         choices: [{ index: 0, delta, finish_reason }],
       })}\n\n`);
+      if ("thought" in reply) chunk({ role: "assistant", reasoning_content: reply.thought }, null);
       chunk({ role: "assistant", ...("tool" in reply ? { content: "我来处理。", tool_calls: [{ index: 0,
         id: `tool-${requests.length}`, type: "function", function: { name: reply.tool, arguments: JSON.stringify(reply.args) } }] } : { content: reply.text }) }, null);
+      if ("pause" in reply) await reply.pause;
       chunk({}, "tool" in reply ? "tool_calls" : reply.stop ?? "stop");
       res.end("data: [DONE]\n\n");
     } catch (error) { res.writeHead(500); res.end(String(error)); }
@@ -82,6 +84,24 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   return { work, config, session, adapter, events, requests, run, ref: () => ref, binding: () => binding!,
     reopen: async () => { await adapter.close(ref); ref = await open(); return ref; } };
 }
+
+test("Pi streams thought and answer before completion without duplicating the final text", { timeout: 20_000 }, async (t) => {
+  let release!: () => void;
+  const pause = new Promise<void>((resolve) => { release = resolve; });
+  t.after(() => release());
+  const fixture = await setup(t, () => ({ text: "逐步出现的回复", thought: "先查看现有资料", pause }));
+  const running = fixture.run("检查流式输出", "streaming");
+  try {
+    for (let i = 0; i < 200 && !fixture.events.some((event) => event.kind === "agent_message_chunk"); i++) await Bun.sleep(10);
+    assert.ok(fixture.events.some((event) => event.kind === "agent_message_chunk"));
+    assert.ok(fixture.events.some((event) => event.kind === "agent_thought_chunk"));
+    assert.ok(!fixture.events.some((event) => event.kind === "state_update" && event.payload.state === "idle"));
+  } finally { release(); }
+  assert.equal((await running).finalText, "逐步出现的回复");
+  const outputs = [...fixture.session.projection.messages.values()].filter((message) => message.kind === "output");
+  assert.equal(outputs.filter((message) => message.role === "agent").length, 1);
+  assert.equal(outputs.filter((message) => message.role === "thought").length, 1);
+});
 
 test("Pi answers directly without work and resumes its native history", { timeout: 20_000 }, async (t) => {
   const fixture = await setup(t, () => ({ text: "你好，有什么可以帮你？" }));

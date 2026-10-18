@@ -46,6 +46,7 @@ await withAsyncFileLock(path, async () => {
     process.on("SIGINT", stop);
   });
   server.close();
+  server.closeAllConnections(); // Close long-lived web streams and release their subscriptions on shutdown.
   const closingBot = bot?.close();
   await aide.close();
   await closingBot;

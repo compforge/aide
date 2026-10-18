@@ -11,6 +11,7 @@ export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscr
 export type PiSessionFactory = (options: { cwd: string; sessionFile?: string }) => Promise<PiSession>;
 interface Turn {
   id: string; done?: Promise<void>; cancelled: boolean;
+  streaming?: { messageId: string; thoughtId: string };
   lastMessage?: { id: string; text: string; stop: string; error?: string };
   settled?: { reason: "end_turn" | "error" | "cancelled"; error?: string };
 }
@@ -100,12 +101,25 @@ export class PiAdapter implements HarnessAdapter {
     if (!session.materialized && session.native.sessionFile && existsSync(session.native.sessionFile)) this.publishBinding(session);
     const turn = session.active;
     if (!turn) return;
-    if (event.type === "message_end" && event.message.role === "assistant") {
+    if (event.type === "message_start" && event.message.role === "assistant") {
       const previous = turn.lastMessage;
       if (previous?.text) session.sink({ kind: "agent_message", turnId: turn.id,
         payload: { messageId: previous.id, phase: "commentary", content: [{ type: "text", text: previous.text }] } });
+      turn.streaming = { messageId: randomUUID(), thoughtId: randomUUID() };
+    } else if (event.type === "message_update" && event.message.role === "assistant") {
+      const delta = event.assistantMessageEvent;
+      if (delta.type !== "text_delta" && delta.type !== "thinking_delta") return;
+      const ids = turn.streaming ??= { messageId: randomUUID(), thoughtId: randomUUID() };
+      session.sink({ kind: delta.type === "text_delta" ? "agent_message_chunk" : "agent_thought_chunk", turnId: turn.id,
+        payload: { messageId: delta.type === "text_delta" ? ids.messageId : ids.thoughtId, content: { type: "text", text: delta.delta } } });
+    } else if (event.type === "message_end" && event.message.role === "assistant") {
       const message = event.message;
-      turn.lastMessage = { id: randomUUID(), text: message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n"),
+      const ids = turn.streaming ?? { messageId: randomUUID(), thoughtId: randomUUID() };
+      turn.streaming = undefined;
+      const thought = message.content.filter((part) => part.type === "thinking").map((part) => part.thinking).join("\n");
+      if (thought) session.sink({ kind: "agent_thought", turnId: turn.id,
+        payload: { messageId: ids.thoughtId, content: [{ type: "text", text: thought }] } });
+      turn.lastMessage = { id: ids.messageId, text: message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n"),
         stop: message.stopReason, error: message.errorMessage };
       if (turn.lastMessage.text) session.sink({ kind: "agent_message", turnId: turn.id,
         payload: { messageId: turn.lastMessage.id, content: [{ type: "text", text: turn.lastMessage.text }] } });
