@@ -22,7 +22,7 @@ interface Session {
 
 /**
  * @spec Every accepted turn terminates once, after Pi settles or rejects. Tool-loop messages never become finalText.
- * @link docs/pi.md
+ * @link docs/harness/pi.md
  */
 export class PiAdapter implements HarnessAdapter {
   readonly harness: "pi" | "chief";

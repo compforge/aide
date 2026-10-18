@@ -22,7 +22,7 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 运行机制中的 Source 负责初始发现和订阅，将观察到的资源交给 Host；CronSource 定期唤醒已有资源。Watch 将其它资源的变化映射为本 Controller 的 Reconcile 请求。它们负责触发，业务进展由 Reconcile 决定。
 
-Personal 的“需求 Source”是一项业务能力：它用 RequirementSource 资源表达关注范围，借助 Controller 和定时再入队调用 Connector、比较观察并提交 Input。这个业务 Source 与框架的 Source 注册接口有联系，但不是同一个层级的概念，具体流程见 [Connector 与 Source](connectors.md)。
+Personal 的“需求 Source”是一项业务能力：它用 RequirementSource 资源表达关注范围，借助 Controller 和定时再入队调用 Connector、比较观察并提交 Input。这个业务 Source 与框架的 Source 注册接口有联系，但不是同一个层级的概念，具体流程见 [Connector 与 Source](../connector/README.md)。
 
 ## Verb 与 Harness
 
@@ -45,4 +45,4 @@ Harness 返回执行结束不等于资源目标完成。结果校验、下一步
 
 Task 与 Routine 的公共执行辅助代码留在 Personal 内部。Work 是它们的业务视图，没有另一份 Work 资源。Chief Agent 与工具在 `agents/chief/`，宿主端 Personal 装配负责绑定会话范围和数据服务。
 
-添加新插件时复用 Resource / Reconcile / verb 机制，在插件内定义其领域模型。公共契约与示例见 [aide-plugin](../packages/plugin/README.md)，Personal 的决策和生命周期见 [Personal](personal.md)。
+添加新插件时复用 Resource / Reconcile / verb 机制，在插件内定义其领域模型。公共契约与示例见 [aide-plugin](../../packages/plugin/README.md)，Personal 的决策和生命周期见 [Personal](personal.md)。

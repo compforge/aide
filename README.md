@@ -13,7 +13,7 @@ Chief 是负责接话与判断的入口 Agent：普通问题直接回答，需�
 
 一次提问不必产生 Task。创建工作表示已接下目标，完成与结果通知会异步出现。改变 Task / Routine 类型时，Chief 创建新工作，再按意图暂停或删除原工作。
 
-主动发现由 Source 获取关注范围内的外部变化，交给 Chief 判断是否通知、询问或跟进。当前可观察 Meego 中指定负责人名下的近期需求，查询 GitHub / GitLab 的 PR 状态与评论。配置与覆盖范围见 [Connector 与 Source](docs/connectors.md)。
+主动发现由 Source 获取关注范围内的外部变化，交给 Chief 判断是否通知、询问或跟进。当前可观察 Meego 中指定负责人名下的近期需求，查询 GitHub / GitLab 的 PR 状态与评论。配置与覆盖范围见 [Connector 与 Source](docs/connector/README.md)。
 
 ## 快速开始
 
@@ -28,7 +28,7 @@ AIDE_CWD=/path/to/work AIDE_TIMEZONE=Asia/Shanghai npm start
 
 网页左侧选择会话，中间显示消息、流式回复和执行过程，右侧查看该会话的事项与安排。已结束的思考与工具过程可以展开，刷新后仍保留。默认会话为 `me`；`/?conversation=另一会话名` 可以进入指定会话。
 
-配置 `AIDE_FEISHU_APP_ID` 和 `AIDE_FEISHU_APP_SECRET` 后，可通过飞书机器人单聊收发消息，无需公网回调地址。创建机器人与权限配置见 [Feishu Channel](docs/feishu.md)。
+配置 `AIDE_FEISHU_APP_ID` 和 `AIDE_FEISHU_APP_SECRET` 后，可通过飞书机器人单聊收发消息，无需公网回调地址。创建机器人与权限配置见 [Feishu Channel](docs/channel/feishu.md)。
 
 查看版本：
 
@@ -55,8 +55,8 @@ npm run check
 自动测试使用真实 Plugin Runner / Pi SDK 与模拟外部服务；不代表真实模型判断、飞书或业务 CLI 已验证。真实验收步骤见 [E2E](docs/e2e.md)。
 
 - [整体机制](docs/kernel.md)：Host / Runner、内置对象与 Harness。
-- [插件运行机制](docs/plugin.md)：Resource / Reconcile 与扩展边界，Personal 是一个内置插件。
-- [Personal 业务模型](docs/personal.md)：Chief、Task / Routine、主动发现与问答。
-- [Channel 总览](docs/channel.md)：Web 与 Feishu 如何组织输入、会话和回复。
-- [Pi 与 Chief Harness](docs/pi.md)：通用执行与业务工具的装配。
+- [插件运行机制](docs/plugin/README.md)：Resource / Reconcile 与扩展边界，Personal 是一个内置插件。
+- [Personal 业务模型](docs/plugin/personal.md)：Chief、Task / Routine、主动发现与问答。
+- [Channel 总览](docs/channel/README.md)：Web 与 Feishu 如何组织输入、会话和回复。
+- [Harness](docs/harness/README.md)：通用执行边界；[Pi](docs/harness/pi.md) 与 [Chief](docs/harness/chief.md)。
 - 修改代码前阅读 [AGENTS.md](AGENTS.md)；插件接口见 [aide-plugin](packages/plugin/README.md)。

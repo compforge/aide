@@ -1,6 +1,6 @@
 # Web Channel
 
-Web 是 Aide 的浏览器 Channel，提供会话导航、聊天、工作列表与用户交互。与 Feishu 的共同边界见 [Channel](channel.md)。
+Web 是 Aide 的浏览器 Channel，提供会话导航、聊天、工作列表与用户交互。与 Feishu 的共同边界见 [Channel](README.md)。
 
 ## 实时进展与历史
 
@@ -60,4 +60,4 @@ curl -s http://127.0.0.1:7433/events \
   -d '{"id":"event-1","conversationId":"me","name":"docs.changed","text":"项目需求文档有更新"}'
 ```
 
-该接口唤醒匹配的 Routine，不自动创建 Work。接口面向本机可信调用，没有认证，不直接暴露公网；远程访问方式见 [部署](deployment.md)。
+该接口唤醒匹配的 Routine，不自动创建 Work。接口面向本机可信调用，没有认证，不直接暴露公网；远程访问方式见 [部署](../deployment.md)。

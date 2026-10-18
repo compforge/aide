@@ -19,7 +19,7 @@ export interface PiAgentOptions {
 
 /**
  * @spec The generic Pi agent owns SDK sessions and native tools; application policy and tools are injected by its caller.
- * @link docs/pi.md
+ * @link docs/harness/pi.md
  */
 export async function createPiAgent(options: PiAgentOptions): Promise<AgentSession> {
   const cwd = resolve(options.cwd);

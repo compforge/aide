@@ -2,7 +2,7 @@
 
 Public, host-independent contracts for Aide plugins. A plugin defines resources and business callbacks; the host owns persistence, scheduling, interactions and Harness execution. The package contains types and small shared values, not a host or Runner implementation.
 
-See [plugin runtime](../../docs/plugin.md) for the process model and [Personal](../../docs/personal.md) for a built-in consumer. Start with the exported contracts in [src/index.ts](src/index.ts).
+See [plugin runtime](../../docs/plugin/README.md) for the process model and [Personal](../../docs/plugin/personal.md) for a built-in consumer. Start with the exported contracts in [src/index.ts](src/index.ts).
 
 ## A small plugin
 
@@ -107,4 +107,4 @@ Inline hooks fail open on failure or timeout. Deferred hooks use best-effort bou
 
 `context.toast` is non-durable feedback. Ongoing state belongs in resource status. `context.logger` writes host-owned structured diagnostics with plugin identity; log transitions and errors, avoid repeated polling noise and secrets, and do not use logs as business state.
 
-See [Channel](../../docs/channel.md) for the current Web / Feishu experience and [Kernel](../../docs/kernel.md) for execution ownership.
+See [Channel](../../docs/channel/README.md) for the current Web / Feishu experience and [Kernel](../../docs/kernel.md) for execution ownership.

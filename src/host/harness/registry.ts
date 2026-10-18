@@ -78,7 +78,7 @@ export interface HarnessProbeOptions {
 
 /**
  * @spec Pi and Chief have distinct Harness identities but share the Pi adapter; only composition binds Personal tools.
- * @link docs/pi.md
+ * @link docs/harness/README.md
  */
 export const HARNESS_REGISTRY = [
   {

@@ -1,6 +1,6 @@
 # Feishu Channel
 
-飞书 Channel 把机器人单聊接到现有 Personal 请求入口，再把持久消息送回原单聊。它是当前两个 [Channel](channel.md) 之一，负责平台协议、收发记录和重连；Chief 负责接话与判断，Task / Routine 由 Personal Plugin 推进。
+飞书 Channel 把机器人单聊接到现有 Personal 请求入口，再把持久消息送回原单聊。它是当前两个 [Channel](README.md) 之一，负责平台协议、收发记录和重连；Chief 负责接话与判断，Task / Routine 由 Personal Plugin 推进。
 
 ## 配置机器人
 
@@ -45,4 +45,4 @@ journalctl --user -u aide -f
 
 当前只接收用户单聊文字，其他消息类型会提示改发文字，群聊与机器人消息忽略。Codex 的原生工具授权和 Hook 信任仍到网页处理；飞书文字不会被当作这些授权的自动确认。图片、卡片、群聊、多账号和通用 Channel SDK 暂不提供。
 
-Chief 的 ask/confirm 可直接在单聊作答；明确回复“确认”或“拒绝”处理确认问题。自由问题直接回复文字。一次只有一个待答问题；Hooks 信任和工具权限仍通过网页处理。详见 [Personal](personal.md)。
+Chief 的 ask/confirm 可直接在单聊作答；明确回复“确认”或“拒绝”处理确认问题。自由问题直接回复文字。一次只有一个待答问题；Hooks 信任和工具权限仍通过网页处理。详见 [Personal](../plugin/personal.md)。

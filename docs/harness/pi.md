@@ -1,0 +1,32 @@
+# Pi Harness
+
+Pi 是通用 Harness，使用 `agents/pi/` 中的 Pi Agent 和 `PiAdapter` 提供模型对话、文件与 CLI 操作。它不依赖 Personal，也不预装 Work、问答或 Connector 业务工具。共同执行契约见 [Harness](README.md)，Personal 版本见独立的 [Chief](chief.md)。
+
+## 会话与能力
+
+通用 Agent 创建 Pi SDK 会话，加载工作目录上下文与 Skills，启用文件和 CLI 原生工具。调用方可以注入提示词、工具与会话范围。默认使用 Pi 的提示词，不承担 Chief 的工作识别与主动发现策略。
+
+PiAdapter 处理 open、sendTurn、cancel、close、事件归一和恢复句柄，不解释工具背后的业务含义。每个原生会话一次执行一个 Turn，忙时由宿主排队；当前支持文本输入、取消与恢复，不声明媒体或同轮 steer 能力。
+
+## 装配与模型配置
+
+通用 Pi 可以直接通过注册表创建，不需要 Personal：
+
+```ts
+const adapter = createHarnessAdapter(
+  { id: "general", harness: "pi" },
+  { ...ports, targetConfig: { harness: "pi" }, rootDir: aideHome },
+);
+```
+
+需要绑定自定义配置或工具时提供 `piSession` 工厂。模型和凭证沿用 Pi 的 auth.json、models.json 与环境配置，默认目录为 `~/.pi/agent`；工厂可指定 agentDir 和模型。嵌入式 SDK 不支持每会话环境覆盖。配置格式见 [Pi 上游文档](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。
+
+原生会话由 Pi SDK 持久化，Adapter 保存文件位置与恢复状态。恢复时校验工作目录与调用方绑定的范围。尚未落盘的空会话可以重新建立，已有历史文件缺失或范围不符则报错。
+
+Agent 不自动加载扩展、提示词命令或交互主题，并禁用自动整轮重试。完整执行期限由 Harness 调用方管理。
+
+## 输出与验证
+
+Adapter 将文字、思考、工具和用量转换为 Core 事件。多轮工具调用中的中间发言保留为进度，只有成功收口的最后答复进入 finalText；失败、取消、截断或空答复不作为成功结果。原生调用栈清理完毕后才释放执行位。
+
+`tests/pi-agent.test.ts` 使用真实 SDK 与模拟模型验证通用工具集合、原生历史恢复、范围拒绝、流式输出、失败与取消。Chief 复用这套机制，其业务链路和优化方向见 [Chief](chief.md)。

@@ -19,7 +19,7 @@ export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
 /**
  * @spec Live and historical progress share Ledger-backed Turn identity and remain scoped to the conversation's Chief target.
  * @why Completion folds execution details; it never deletes them or creates extra delivered Messages.
- * @link docs/web.md
+ * @link docs/channel/web.md
  */
 export function conversationView(aide: Aide, conversationId: string): ConversationView {
   const state = aide.channel.projection;
@@ -84,7 +84,7 @@ export interface ConversationSummary {
 
 /**
  * @spec Navigation includes Channel/Source conversations and work-only scopes; summaries never expose input prompts or execution details.
- * @link docs/web.md
+ * @link docs/channel/web.md
  */
 export function conversationList(aide: Aide): ConversationSummary[] {
   const summaries = new Map<string, ConversationSummary>();

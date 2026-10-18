@@ -7,7 +7,7 @@ import { conversationView, type ConversationView } from "./view.ts";
 /**
  * @spec AgentUE owns patch semantics; Aide selects the conversation's renderable state.
  * @why Removed/reordered blocks require a replacement start because AgentUE has no delete operation.
- * @link docs/web.md
+ * @link docs/channel/web.md
  */
 export function conversationPatches(emitter: PatchEmitter, previous: ConversationView | undefined, next: ConversationView): PatchEvent[] {
   if (!previous || previous.blocks.some((block, index) => next.blocks[index]?.id !== block.id)) return [emitter.start(next)];

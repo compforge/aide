@@ -1,6 +1,6 @@
 // aide 内部事件模型：词汇对齐 ACP v2（state_update / 按 messageId 的消息 upsert + chunk 追加 /
 // tool_call_update upsert），wire 协议不必是 ACP——adapter 负责把各家原生协议归一到这里。
-// aide 自有扩展事件用 _aide_ 前缀；公共归一契约见 docs/harness.md。
+// aide 自有扩展事件用 _aide_ 前缀；公共归一契约见 docs/harness/README.md。
 
 import type { InputRequestCreated, InputRequestCancelled } from "./interaction.ts";
 import type { InputResponse } from "../message/types.ts";
@@ -75,7 +75,7 @@ export interface DiffBlock {
 export type ContentBlock = TextBlock | ImageBlock | DiffBlock | { type: string; [key: string]: unknown };
 
 // ---- prompt input blocks ----
-// 输入与输出刻意不共用开放的 ContentBlock（见 docs/harness.md“sendTurn”）：
+// 输入与输出刻意不共用开放的 ContentBlock（见 docs/harness/README.md“sendTurn”）：
 // prompt 是 adapter 的入参契约，必须是可显式 admission 的闭合集合——不支持某 block 时
 // 报带类型的错误，而不是被 textOf() 之类静默降级；输出侧保持开放联合以容纳 harness 差异。
 // 词汇对齐 ACP/MCP content（text/image/audio/resource/resource_link）。

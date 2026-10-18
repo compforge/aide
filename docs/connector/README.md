@@ -10,7 +10,7 @@ Connector 提供访问外部系统和映射数据的能力。Source 定义关注
 
 每个 watch 默认使用 `source:<watch-id>` 会话，也可配置已有 conversationId。Source 不直接调用模型或创建 Task，Chief 根据已有委托选择询问、CRUD Work 或静默忽略。路由到已有飞书会话的消息才会沿该 Channel 投递，独立 Source 会话可在 Web 查看。
 
-框架的 Source / Controller 如何调度这项业务见 [Plugin](plugin.md)；决策策略见 [Personal](personal.md)。
+框架的 Source / Controller 如何调度这项业务见 [Plugin](../plugin/README.md)；决策策略见 [Personal](../plugin/personal.md)。
 
 ## 配置
 

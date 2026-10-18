@@ -59,9 +59,9 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 ## References
 
 - [Kernel](docs/kernel.md)：整体机制、输入对象、执行事实与恢复。
-- [Plugin](docs/plugin.md)：插件运行、资源生命周期与调度；[公共契约](packages/plugin/README.md)。
-- [Personal](docs/personal.md)：Chief、Task / Routine 和业务决策。
-- [Pi 与 Chief](docs/pi.md)：Agent、工具和 Harness 装配。
-- [Channel](docs/channel.md)：Web 与 Feishu；[Web](docs/web.md)、[Feishu](docs/feishu.md)。
-- [Connector 与 Source](docs/connectors.md)：关注范围、连接器配置和覆盖限制。
+- [Plugin](docs/plugin/README.md)：插件运行、资源生命周期与调度；[公共契约](packages/plugin/README.md)。
+- [Personal](docs/plugin/personal.md)：Chief、Task / Routine 和业务决策。
+- [Harness](docs/harness/README.md)：通用执行契约；[Pi](docs/harness/pi.md)、[Chief](docs/harness/chief.md)。Chief 文档承载提示词、上下文与记忆优化方向。
+- [Channel](docs/channel/README.md)：Web 与 Feishu；[Web](docs/channel/web.md)、[Feishu](docs/channel/feishu.md)。
+- [Connector 与 Source](docs/connector/README.md)：关注范围、连接器配置和覆盖限制。
 - [部署与诊断](docs/deployment.md)、[真实验收](docs/e2e.md)。

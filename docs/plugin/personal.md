@@ -16,13 +16,13 @@ Source 外部观察 ──┘                              │                  
                                                               各自 Reconcile → Harness
 ```
 
-Chief 是业务角色。Chief Controller 消费输入、组织上下文并续接问答；Chief Harness 执行 `agents/chief/` 中的 Agent，使用通用 Pi 能力以及 Personal 工具。Task / Routine 默认使用 Codex 执行。Harness 的装配见 [Pi 与 Chief](pi.md)，插件机制见 [Plugin](plugin.md)。
+Chief 是业务角色。Chief Controller 消费输入、组织上下文并续接问答；Chief Harness 执行 `agents/chief/` 中的 Agent，使用通用 Pi 能力以及 Personal 工具。Task / Routine 默认使用 Codex 执行。Chief 的提示词、上下文和记忆优化方向见 [Chief Harness](../harness/chief.md)，插件机制见 [Plugin](README.md)。
 
 ## 输入与上下文
 
 Chief 观察 Host 内置 Conversation 的变化，按会话串行消费 Input。一个会话同时只有一个活跃输入；其它输入排队，避免争用同一份 Work 工具绑定。等待某个会话的用户或 Harness 时，其它会话可以继续。
 
-Input 与 Work 有不同生命周期。普通提问可以处理完就回复，只有有限目标或持续职责才进入 Work。Channel 与 Source 决定输入所属会话，具体映射见 [Channel](channel.md) 和 [Connector 与 Source](connectors.md)；内置对象的存储由 [Kernel](kernel.md) 管理。
+Input 与 Work 有不同生命周期。普通提问可以处理完就回复，只有有限目标或持续职责才进入 Work。Channel 与 Source 决定输入所属会话，具体映射见 [Channel](../channel/README.md) 和 [Connector 与 Source](../connector/README.md)；内置对象的存储由 [Kernel](../kernel.md) 管理。
 
 每个会话绑定一个 Chief Target；每份输入使用独立 Lane，询问后的续答继续同一原生 Pi 会话。Chief 获取近期消息，并通过工具查询已有工作和外部详情；当前没有通用长期记忆。
 
@@ -72,4 +72,4 @@ Chief 的问答使用 Core Interaction 与当前回调续接，调用栈不跨�
 
 ## 验证
 
-`tests/chief.test.ts` 验证真实 Runner、Pi SDK、需求观察、确认拒绝、自由回答和创建工作的链路；模型、平台与 Codex 执行使用替身。会话、独立 Task / Routine 生命周期和中断处理另有契约测试。真实环境验收见 [E2E](e2e.md)。
+`tests/chief.test.ts` 验证真实 Runner、Pi SDK、需求观察、确认拒绝、自由回答和创建工作的链路；模型、平台与 Codex 执行使用替身。会话、独立 Task / Routine 生命周期和中断处理另有契约测试。真实环境验收见 [E2E](../e2e.md)。

@@ -1,4 +1,4 @@
-// Adapter 统一抽象："小核心 + 可选能力"（见 docs/harness.md）。
+// Adapter 统一抽象："小核心 + 可选能力"（见 docs/harness/README.md）。
 // 各家用原生协议接入，归一成 HarnessEvent 交给 sink；source / harness /
 // harnessTargetId 由宿主在可信边界补齐，提交后才成为 Aide Event。
 
@@ -62,7 +62,7 @@ export interface OpenOptions {
 
 /**
  * `sendTurn` 的调用参数，不是独立的 Harness IO 概念。ID 都由 controller 分配
- * （见 docs/harness.md）：新 turn 在入队时分配 turnId；
+ * （见 docs/harness/README.md）：新 turn 在入队时分配 turnId；
  * same-turn send 复用当前 turnId。harness 侧各自的 turn/message id 只进 raw 或 adapter
  * 内部映射，不进 controller 契约。
  *
@@ -111,7 +111,7 @@ export interface CapabilityMarker {
 }
 
 /**
- * 可展示的能力 descriptor（见 docs/harness.md）：声明"这个 adapter 支持哪些可选能力"，
+ * 可展示的能力 descriptor（见 docs/harness/README.md）：声明"这个 adapter 支持哪些可选能力"，
  * 供 controller/UI 决策（如不支持 image 时 admission 报错）。
  * 行为仍由可选接口承载（ModelConfigurable、EffortConfigurable、CommandDiscoverable/
  * SessionConfigurable/interaction handler）；契约测试保证"声明支持就必须实现对应接口"。
@@ -160,7 +160,7 @@ export interface AdapterCapabilities {
 }
 
 /**
- * Adapter 生命周期（见 docs/harness.md）：open 时绑定事件出口，sendTurn 只确认接收，
+ * Adapter 生命周期（见 docs/harness/README.md）：open 时绑定事件出口，sendTurn 只确认接收，
  * turn 进展与终结全部经 sink 的事件报告；controller 以 state event 驱动 busy/idle，
  * 不以任何 Promise 生命周期推断。
  *
@@ -201,7 +201,7 @@ export interface HarnessAdapter {
    *
    * throw 只表示 Adapter 尚未接受投递责任；resolve 为 accepted 后的失败必须经事件流
    * 给出终态。入参是闭合的 PromptBlock（非开放 ContentBlock）：不支持的 block 类型
-   * 必须在 admission 前报带类型的明确错误，禁止静默丢弃（见 docs/harness.md）。
+   * 必须在 admission 前报带类型的明确错误，禁止静默丢弃（见 docs/harness/README.md）。
    */
   sendTurn(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt>;
   /** 请求中断当前 turn；确认以最终 `idle/cancelled` 事件为准，发出后仍接受在途 update */

@@ -29,4 +29,4 @@ Chief 的问答可通过两个 Channel 回答。当前原生 Harness 授权和 H
 
 新的 Channel 需要解决平台消息接收、会话映射、去重与回复投递，并复用已有输入与交互入口。业务判断留在插件，Agent 执行留在 Harness。当前使用具体适配器，尚未抽取通用 Channel SDK。
 
-内核对象与持久化见 [Kernel](kernel.md)，Personal 判断流程见 [Personal](personal.md)，部署见 [部署与诊断](deployment.md)。
+内核对象与持久化见 [Kernel](../kernel.md)，Personal 判断流程见 [Personal](../plugin/personal.md)，部署见 [部署与诊断](../deployment.md)。

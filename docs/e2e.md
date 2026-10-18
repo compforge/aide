@@ -1,6 +1,6 @@
 # 真实 Channel 验证
 
-`npm run check` 使用真实 Plugin Worker 和模拟 Harness Adapter。以下验收通过已部署服务、[Web / Feishu Channel](channel.md)、真实 Chief Harness 与 Codex 执行，不计入该自动测试结果。测试限定在独立开发实例和测试工作目录；记录 `/health` 的 revision、测试会话名、时间、Work id、状态与回复，证据放在工作区测试产物目录中，不提交登录态或完整私人会话。
+`npm run check` 使用真实 Plugin Worker 和模拟 Harness Adapter。以下验收通过已部署服务、[Web / Feishu Channel](channel/README.md)、真实 Chief Harness 与 Codex 执行，不计入该自动测试结果。测试限定在独立开发实例和测试工作目录；记录 `/health` 的 revision、测试会话名、时间、Work id、状态与回复，证据放在工作区测试产物目录中，不提交登录态或完整私人会话。
 
 前提：服务正常运行，Pi 模型已配置、Codex 已登录，网页能够连接。Hooks 信任与工具权限按网页显示的具体请求由用户决定；请求超时算阻塞或失败，不算通过。相同消息编号只做传输去重；Chief 失败后需核对状态，再用新消息交办。运行前在服务的工作目录中准备只含测试数据的文件，验收完成后暂停测试安排。
 
@@ -34,4 +34,4 @@
 
 在两个独立会话中分别发送不同的验证标记。从 Web 左栏切换会话，检查消息、已保存的思考与工具过程、Task / Routine 均属于所选会话。刷新和浏览器返回后，所选会话由 URL 恢复；发送消息仍进入该会话。
 
-在 Chief 执行期间观察真实流式状态，完成后展开历史并刷新页面，确认过程仍可查看。Core Interaction 是 Session 级收件区，不能将它跨会话可见误记为消息隔离失败。Feishu 验证另按 [接入文档](feishu.md) 执行，并记录真实投递证据。
+在 Chief 执行期间观察真实流式状态，完成后展开历史并刷新页面，确认过程仍可查看。Core Interaction 是 Session 级收件区，不能将它跨会话可见误记为消息隔离失败。Feishu 验证另按 [接入文档](channel/feishu.md) 执行，并记录真实投递证据。

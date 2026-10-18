@@ -55,4 +55,4 @@ ssh -N -L 7433:127.0.0.1:7433 user@your-server
 
 HTTP 与 Personal 装配日志进入标准输出；Session 的 `session.log` 保存执行和插件日志，`session.jsonl` 保存执行事实。Runner 激活日志记录 pid，可与 Host 区分。检查问题时先记录版本、revision、conversationId、Work id 与对应 Turn，再核对外部操作是否已经发生。
 
-模型凭证沿用 Pi / Codex 的配置，连接器设置见 [Connector 与 Source](connectors.md)，飞书机器人设置见 [Feishu](feishu.md)。通过 `/health` 不能证明这些依赖可用。
+模型凭证沿用 Pi / Codex 的配置，连接器设置见 [Connector 与 Source](connector/README.md)，飞书机器人设置见 [Feishu](channel/feishu.md)。通过 `/health` 不能证明这些依赖可用。
