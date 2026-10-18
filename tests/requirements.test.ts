@@ -1,3 +1,5 @@
+import { ConversationStore } from "../src/host/conversation/store.ts";
+import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,7 +12,7 @@ import { SessionStore } from "../src/host/store/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
 import { observeRequirements, SOURCE_TYPE } from "../plugins/personal/source.ts";
-import { CHIEF_TYPE } from "../plugins/personal/chief-model.ts";
+import { INPUT_TYPE } from "../plugins/personal/chief-model.ts";
 
 test("Meego selects assigned user keys, not participants or display names, and preserves unfinished states", async () => {
   const captured: string[][] = [];
@@ -38,7 +40,8 @@ test("Requirement Source commits the inbox before its watermark and never create
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const sessions = new SessionStore(root); const session = sessions.createSession({ cwd: root });
   const store = new PluginResourceStore({ session, pluginInstanceId: "personal" });
-  const resources = createResourceClient(store);
+  const conversations = new ConversationStore(session);
+  const resources = createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, conversations }));
   const watch: Watch = { id: "mine", source: "work", conversationId: "me", intervalMs: 300_000, repositories: [] };
   const resource = store.create({ type: SOURCE_TYPE, name: "mine", spec: watch, status: {} });
   let updatedAt = "1";
@@ -49,18 +52,19 @@ test("Requirement Source commits the inbox before its watermark and never create
   }, async get() { throw new Error("Source should fetch summaries only"); } }], []);
   const logger = { debug() {}, info() {}, warn() {}, error() {} };
   await assert.rejects(observeRequirements({ logger, resources: { ...resources, async patchStatus() { throw new Error("Interrupted after emission"); } } }, resource, connectors), /Interrupted/);
-  assert.equal(store.list(CHIEF_TYPE).length, 1);
+  assert.equal(conversations.inputs().length, 1);
   assert.deepEqual(store.get(SOURCE_TYPE, "mine").status, {});
   await observeRequirements({ logger, resources }, resource, connectors);
-  assert.equal(store.list(CHIEF_TYPE).length, 1);
+  assert.equal(conversations.inputs().length, 1);
   // Reopen persisted state, as a restarted worker would.
   const reopened = new PluginResourceStore({ session: sessions.openSession(session.id), pluginInstanceId: "personal" });
-  const context = { logger, resources: createResourceClient(reopened) };
+  const restoredConversations = new ConversationStore(session);
+  const context = { logger, resources: createResourceClient(reopened, undefined, undefined, new AideResourceProvider({ session, conversations: restoredConversations })) };
   await observeRequirements(context, reopened.get(SOURCE_TYPE, "mine"), connectors);
-  assert.equal(reopened.list(CHIEF_TYPE).length, 1);
+  assert.equal(restoredConversations.inputs().length, 1);
   updatedAt = "2";
   await observeRequirements(context, reopened.get(SOURCE_TYPE, "mine"), connectors);
-  assert.equal(reopened.list(CHIEF_TYPE).length, 2);
+  assert.equal(restoredConversations.inputs().length, 2);
   const before = reopened.get(SOURCE_TYPE, "mine").status;
   fail = true;
   await assert.rejects(observeRequirements(context, reopened.get(SOURCE_TYPE, "mine"), connectors), /Unavailable/);
@@ -76,4 +80,16 @@ test("Discovery requires an explicit assignee scope and unique watch identity", 
   config.requirements.work.userKeys = ["me"]; writeFileSync(path, JSON.stringify(config));
   assert.equal(loadWatches(path)[0]!.intervalMs, 300_000);
   config.watches.push(watch); writeFileSync(path, JSON.stringify(config)); assert.throws(() => loadWatches(path), /Duplicate/);
+});
+
+test("Watches sharing a connector get separate conversations unless explicitly routed together", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-watch-routing-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, "connectors.json");
+  writeFileSync(path, JSON.stringify({
+    requirements: { work: { provider: "meego", projectKey: "project", userKeys: ["me"] } },
+    watches: [{ id: "mine", source: "work" }, { id: "team", source: "work" },
+      { id: "urgent", source: "work", conversationId: "feishu:bot:chat" }],
+  }));
+  assert.deepEqual(loadWatches(path).map((watch) => watch.conversationId), ["source:mine", "source:team", "feishu:bot:chat"]);
 });

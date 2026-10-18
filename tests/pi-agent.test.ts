@@ -1,3 +1,4 @@
+import { ConversationStore } from "../src/host/conversation/store.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -49,7 +50,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   } } }));
   const sessions = new SessionStore(root);
   const session = sessions.createSession({ cwd: root });
-  const store = new Store(new PluginResourceStore({ session, pluginInstanceId: "personal" }), () => {});
+  const store = new Store(new PluginResourceStore({ session, pluginInstanceId: "personal" }), () => {}, new ConversationStore(session));
   const work = new WorkService(store, "me", pino({ level: "silent" }));
   const config = { work, cwd: root, agentDir, sessionDir: join(root, "pi-sessions"), model: { provider: "fixture", id: "test-model" } };
   const events: HarnessEvent[] = [];

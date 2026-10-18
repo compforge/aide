@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import pino from "pino";
 import { Aide } from "../plugins/personal/aide.ts";
-import { CHIEF_TYPE, digest, type ChiefSpec, type ChiefStatus } from "../plugins/personal/chief-model.ts";
+import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "../plugins/personal/chief-model.ts";
 import { PiAdapter } from "../src/host/harness/pi/adapter.ts";
 import { FeishuChannel } from "../src/channel/feishu.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -123,7 +123,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   await aide.start();
   await until(() => aide.questions().some((q) => q.request.status === "pending")).catch((error) => {
     const sessions = new SessionStore(root); const session = sessions.openSession(sessions.listSessions()[0]!.aideSessionId);
-    console.error({ modelCalls, inputs: aide.store.resources.list(CHIEF_TYPE), log: readFileSync(join(session.dir, "session.log"), "utf8") });
+    console.error({ modelCalls, inputs: aide.store.conversations.inputs(), log: readFileSync(join(session.dir, "session.log"), "utf8") });
     throw error;
   });
   assert.equal(executions, 0); assert.equal(aide.store.read().works.length, 0);
@@ -145,10 +145,10 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   assert.deepEqual(toolsSeen, ["read_requirement", "list_work", "confirm", "create_work", "ask", "create_work"]);
   assert.equal(aide.store.read().works[0]!.conversationId, conversationId);
   assert.ok(sent.includes("实现已完成"));
-  const discoveries = aide.store.resources.list<ChiefSpec, ChiefStatus>(CHIEF_TYPE).filter((item) => item.spec.origin === "source");
+  const discoveries = aide.store.conversations.inputs().filter((item) => item.spec.origin === "source");
   assert.equal(discoveries.length, 1);
   assert.equal(discoveries[0]!.status.phase, "done");
-  assert.equal(aide.store.resources.get<ChiefSpec, ChiefStatus>(CHIEF_TYPE, digest([conversationId, "decline"])).spec.replyTo,
+  assert.equal(aide.store.conversations.input(digest([conversationId, "decline"]))!.spec.replyTo,
     aide.questions()[0]!.request.messageId);
   const source = aide.store.resources.list(SOURCE_TYPE)[0]!;
   const sessions = new SessionStore(root);
@@ -158,7 +158,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   assert.equal(modelCalls, 10, "Unchanged observations must not call the model again");
   writeFileSync(join(bin, "meegle"), `#!/usr/bin/env node\nconsole.log(JSON.stringify({ data: [${JSON.stringify({ ...record, updated_at: "2026-10-19" })}] }));\n`, { mode: 0o755 });
   await poll();
-  await until(() => aide.store.resources.list<ChiefSpec, ChiefStatus>(CHIEF_TYPE).some((item) => item.status.phase === "done" && !!item.status.quietReason));
+  await until(() => aide.store.conversations.inputs().some((item) => item.status.phase === "done" && !!item.status.quietReason));
   await bot.deliver();
   assert.equal(executions, 1);
   assert.ok(!aide.messages().some((m) => m.text.includes("internal summary")));

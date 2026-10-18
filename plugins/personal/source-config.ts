@@ -4,14 +4,14 @@ import { loadMeegoRequirementConfigs } from "../../connectors/requirements/meego
 
 export const RepositorySchema = z.object({ forge: z.string().min(1), path: z.string().min(1) });
 export const WatchSchema = z.object({
-  id: z.string().min(1), source: z.string().min(1), conversationId: z.string().min(1),
+  id: z.string().min(1), source: z.string().min(1), conversationId: z.string().min(1).optional(),
   intervalMs: z.number().int().min(30_000).default(300_000),
   repositories: z.array(RepositorySchema).default([]),
 });
-export type Watch = z.infer<typeof WatchSchema>;
+export type Watch = Omit<z.infer<typeof WatchSchema>, "conversationId"> & { conversationId: string };
 
 export function loadWatches(path = connectorConfigPath()): Watch[] {
-  const watches = z.array(WatchSchema).parse(loadConnectorConfig(path)?.watches ?? []);
+  const watches: Watch[] = z.array(WatchSchema).parse(loadConnectorConfig(path)?.watches ?? []).map((watch) => ({ ...watch, conversationId: watch.conversationId ?? `source:${watch.id}` }));
   if (new Set(watches.map((item) => item.id)).size !== watches.length) throw new Error("Duplicate watch id");
   const requirements = loadMeegoRequirementConfigs(path);
   for (const watch of watches) {

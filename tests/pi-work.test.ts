@@ -1,3 +1,4 @@
+import { ConversationStore } from "../src/host/conversation/store.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,7 +20,7 @@ function setup(t: TestContext) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const session = new SessionStore(root).createSession({ cwd: root });
   let writes = 0;
-  const store = new Store(new PluginResourceStore({ session, pluginInstanceId: "personal" }), () => writes++);
+  const store = new Store(new PluginResourceStore({ session, pluginInstanceId: "personal" }), () => writes++, new ConversationStore(session));
   return { store, service: new WorkService(store, "me", log), writes: () => writes };
 }
 

@@ -1,4 +1,6 @@
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
+import { CONVERSATION_TYPE } from "@compforge/aide-plugin";
+import { ConversationStore } from "../conversation/store.ts";
 import type { CommandContext } from "@compforge/aide-plugin";
 import {
   Controller,
@@ -268,6 +270,7 @@ function pluginName(pluginId: string): string {
  * Plugin 域统一入口：注册和路由 Controller，并限制所有 Plugin 的进程总并发。
  */
 export class Manager {
+  readonly conversations?: ConversationStore;
   /** Core installs its GVKs before any Plugin Binding can register. */
   private readonly resourceRegistry = new ResourceRegistry(AIDE_RESOURCE_TYPES);
   private readonly controllers = new Map<string, ManagedController>();
@@ -408,12 +411,15 @@ export class Manager {
         this.enqueueCronSourceResources(scope, sources),
     });
     if (options.session) {
+      this.conversations = new ConversationStore(options.session);
       this.aideResources = new AideResourceIndex({
         session: options.session,
+        conversations: this.conversations,
       });
       this.aideResourceProvider = new AideResourceProvider({
         session: options.session,
         turns: this.aideResources,
+        conversations: this.conversations,
         ...(options.sessions === undefined ? {} : { sessions: options.sessions }),
         targets: () => options.harnessTargets ?? [],
         probeTarget: options.probeTarget,
@@ -1061,8 +1067,8 @@ export class Manager {
     pluginController: PluginResourceController<TSpec, TStatus>,
   ): () => void {
     if (
-      resourceTypeKey(pluginController.resourceType) ===
-        resourceTypeKey(AIDE_TURN_RESOURCE_TYPE)
+      [AIDE_TURN_RESOURCE_TYPE, CONVERSATION_TYPE].some((type) =>
+        resourceTypeKey(pluginController.resourceType) === resourceTypeKey(type))
     ) {
       return this.bindAideResourceController(
         instance.pluginInstanceId,
@@ -1149,7 +1155,7 @@ export class Manager {
         `Resource type ${pluginController.resourceType.apiVersion}/${pluginController.resourceType.kind} requires a SessionHandle`,
       );
     }
-    const resourceKind = AIDE_TURN_RESOURCE_TYPE.kind;
+    const resourceKind = pluginController.resourceType.kind as AideResourceKind;
     const namespace = "v1" as const;
     const sources = pluginController.sources ?? [];
     if (sources.some((source) => source.type === "resource")) {
@@ -1198,7 +1204,7 @@ export class Manager {
           presentBoardSource<TSpec, TStatus>({
             pluginId,
             pluginInstanceId,
-            resourceType: AIDE_TURN_RESOURCE_TYPE,
+            resourceType: pluginController.resourceType,
             list: () =>
               this.aideResources!.list(resourceKind).map((resource) =>
                 this.exposeAideResource<TSpec, TStatus>(
@@ -1218,7 +1224,7 @@ export class Manager {
 
   private exposeAideResource<TSpec, TStatus>(
     _pluginInstanceId: string,
-    resource: AideResourceObservation<typeof AIDE_TURN_RESOURCE_TYPE.kind>,
+    resource: AideResourceObservation,
   ): Readonly<Resource<TSpec, TStatus>> {
     return Object.freeze({
       apiVersion: AIDE_TURN_RESOURCE_TYPE.apiVersion,

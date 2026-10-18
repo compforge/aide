@@ -23,6 +23,7 @@ src/
     controller/            # HarnessInput / Queue / Turn 执行协调
     harness/               # HarnessAdapter 与 provider 协议
     store/                 # Session 与事件投影
+    conversation/store.ts  # 内置 Conversation / Input / Message 持久化与原子提交
     file-lock.ts           # Aide 服务入口的单实例文件锁
   runner/                  # Plugin 子进程实现
     process.ts             # 子进程入口：加载插件，执行 Source / Reconcile 等回调
@@ -36,11 +37,11 @@ plugins/                   # 内置插件；personal 是其中一个
     plugin.ts              # 独立 Worker 入口，装配 Chief / Source / Work Controller
     prompts.ts             # Personal 提示词与结构化结果校验
     model.ts               # Task / Routine 业务状态
-    resources.ts           # Work / Conversation 资源契约
+    resources.ts           # Work 自定义资源契约
     store.ts               # 宿主端输入提交与消息投影
     work.ts                # Work 创建/更新规则与会话范围 CRUD
-    chief-model.ts         # ChiefInput 身份、观察与状态
-    chief.ts               # Chief Controller，调用 Harness 与 Core ask/confirm
+    chief-model.ts         # Chief Target 身份与内置 Input 契约入口
+    chief.ts               # 按内置 Conversation 调度的 Chief Controller
     source.ts              # 需求发现、水位与调度
     source-config.ts       # 关注范围和目标会话配置
 agent/
@@ -53,12 +54,14 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 ## 关键约定
 
+- 根目录 `VERSION` 记录 Aide 产品版本，采用 `major.minor.patch`。每次提交改动都同步递增，默认 bump patch；同一提交只递增一次。
 - Personal 业务不进入 Host / Runner；Plugin Runner 通过公共 Resource API 和 verbs 请求动作，不持有 Harness 或宿主 Store；`aide.ts` 和 `store.ts` 是宿主装配与输入投影。
 - Host 与 Runner 不相互导入实现；Host 仅通过子进程入口启动 `runner/process.ts`。两端复用代码按职责放在 `src/` 下：通信契约放 `protocol/`，Plugin 上下文构造放 `plugin-context.ts`；共享模块不依赖 Host 或 Runner。Resource 存储、Watch / Queue 调度、Harness 执行和 Runner 生命周期管理均留在 Host。
+- Conversation / Input / Message 是 Host 内置对象，不写入 PluginResourceStore。Chief 观察内置 Conversation 投影，按会话串行消费 Input；Channel Input 引用 Message，Source Input 携带观察。Channel / Source 决定 conversationId，共享上下文按该身份隔离。
 - Task / Routine 共用 Work 身份，spec.kind 区分类别；转换保留 uid、历史与去重记录。
 - status、出站回复与投递去重一起提交。等待用户是持久状态，不保持执行位。
 - Harness 完成不等于业务目标完成，personal 校验结果后决定工作终态。
-- Chief 接话用 Pi，Work 执行用 Codex；Source 先提交持久 ChiefInput 再推进水位，不直接创建 Work。问答复用 Core Interaction，见 `docs/chief.md`。
+- Chief 接话用 Pi，Work 执行用 Codex；Source 先提交持久 Input 再推进水位，不直接创建 Work。问答复用 Core Interaction，见 `docs/chief.md`。
 - 内置 Agent 通过宿主绑定的 WorkService 操作 Personal 数据；Pi Adapter 只接收会话工厂，不导入业务模型。接入边界见 `docs/pi.md`。
 - Worker 或 Harness 中断可能已经产生外部副作用；保留 uncertain，不自动重放。
 - 用 `npm run check` 验证。真实 Worker + 模拟 Adapter 的测试不等于真实 Codex 或业务 CLI 验证。

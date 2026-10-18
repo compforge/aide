@@ -11,6 +11,8 @@ import type {
 } from "@compforge/aide-plugin";
 
 import type { HarnessTarget } from "../harness/target.ts";
+import { CONVERSATION_TYPE, INPUT_TYPE, type InputSpec, type InputStatus } from "@compforge/aide-plugin";
+import { ConversationStore, conversationKey } from "../conversation/store.ts";
 import { TargetCatalog, type TargetProbe } from "./target-catalog.ts";
 import {
   sessionTargetBindingMeta,
@@ -38,6 +40,7 @@ type WritableBindingSession = Pick<
 >;
 
 export interface AideResourceProviderOptions {
+  readonly conversations?: ConversationStore;
   readonly session: WritableBindingSession;
   readonly turns?: AideResourceIndex;
   readonly sessions?: () => readonly AideSessionObservation[];
@@ -72,9 +75,10 @@ function jsonObject(name: string, value: unknown): Record<string, unknown> {
 
 /**
  * Core-owned Resource provider. Public clients see ordinary Resources; their
- * authoritative state remains in Session, HarnessTarget configuration, and Ledger.
+ * authoritative state remains in Session, HarnessTarget configuration, Ledger, and ConversationStore.
  */
 export class AideResourceProvider {
+  private readonly conversations?: ConversationStore;
   private readonly session: WritableBindingSession;
   private readonly turns?: AideResourceIndex;
   private readonly sessions?: AideResourceProviderOptions["sessions"];
@@ -84,6 +88,7 @@ export class AideResourceProvider {
   private readonly catalogs: TargetCatalog;
 
   constructor(options: AideResourceProviderOptions) {
+    this.conversations = options.conversations;
     this.session = options.session;
     this.turns = options.turns;
     this.sessions = options.sessions;
@@ -99,6 +104,7 @@ export class AideResourceProvider {
 
   handles(type: ResourceType): boolean {
     return [
+      CONVERSATION_TYPE, INPUT_TYPE,
       AIDE_TURN_RESOURCE_TYPE,
       AIDE_SESSION_RESOURCE_TYPE,
       AIDE_TARGET_RESOURCE_TYPE,
@@ -130,12 +136,20 @@ export class AideResourceProvider {
   ): readonly Readonly<Resource<TSpec, TStatus>>[] {
     if (
       (options?.namespace !== undefined && options.namespace !== AIDE_SYSTEM_NAMESPACE) ||
-      Object.keys(options?.matchLabels ?? {}).length > 0
+      (type.kind !== INPUT_TYPE.kind && Object.keys(options?.matchLabels ?? {}).length > 0)
     ) {
       return [];
     }
     let resources: readonly Resource<unknown, unknown>[];
-    if (typeMatches(type, AIDE_SESSION_RESOURCE_TYPE)) {
+    if (typeMatches(type, INPUT_TYPE)) {
+      resources = (this.conversations?.inputs() ?? []).filter((item) => Object.entries(options?.matchLabels ?? {})
+        .every(([key, value]) => item.metadata.labels?.[key] === value));
+    } else if (typeMatches(type, CONVERSATION_TYPE)) {
+      resources = (this.conversations?.list() ?? []).map((item) => ({ ...CONVERSATION_TYPE, metadata: {
+        name: conversationKey(item.id), namespace: AIDE_SYSTEM_NAMESPACE, uid: `conversation:${conversationKey(item.id)}`,
+        generation: 1, resourceVersion: String(item.revision), creationTimestamp: item.createdAt,
+      }, spec: {}, status: item }));
+    } else if (typeMatches(type, AIDE_SESSION_RESOURCE_TYPE)) {
       resources = this.sessionObservations().map((session) => this.sessionResource(session));
     } else if (typeMatches(type, AIDE_TARGET_RESOURCE_TYPE)) {
       resources = this.configuredTargets().map((target) => this.targetResource(target));
@@ -183,6 +197,18 @@ export class AideResourceProvider {
       this.now(),
     );
     return this.bindingResource(this.session.meta) as Readonly<Resource<TSpec, TStatus>>;
+  }
+
+  create<S, T>(type: ResourceType, name: string, spec: S): Readonly<Resource<S, T>> {
+    if (!typeMatches(type, INPUT_TYPE) || !this.conversations) throw new Error(`Cannot create builtin ${type.kind}`);
+    return this.conversations.submit(name, spec as InputSpec) as unknown as Resource<S, T>;
+  }
+
+  patchStatus<S, T>(resource: Readonly<Resource<S, T>>, patch: Partial<T>): Readonly<Resource<S, T>> {
+    if (!typeMatches(resource, INPUT_TYPE) || resource.metadata.namespace !== AIDE_SYSTEM_NAMESPACE || !this.conversations) {
+      throw new Error(`Cannot update builtin ${resource.kind}`);
+    }
+    return this.conversations.update(resource as unknown as Resource<InputSpec, InputStatus>, patch as Partial<InputStatus>) as unknown as Resource<S, T>;
   }
 
   /**
