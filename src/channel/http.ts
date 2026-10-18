@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 import type { Aide } from "../../plugins/personal/aide.ts";
 import { validInputResult } from "../host/interaction/answer.ts";
 import { IncomingSchema } from "../../plugins/personal/model.ts";
+import { streamConversation } from "./stream.ts";
 
 const EventSchema = IncomingSchema.omit({ text: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
@@ -58,6 +59,11 @@ export function httpChannel(aide: Aide, log: Logger) {
       }
       if (request.method === "GET" && url.pathname === "/health") {
         json(response, 200, { status: "ok", revision: process.env.AIDE_REVISION ?? "development" }); return;
+      }
+      if (request.method === "GET" && url.pathname === "/stream") {
+        const conversationId = url.searchParams.get("conversationId");
+        if (!conversationId || conversationId.length > 200) { json(response, 400, { error: "conversationId is required (max 200 characters)" }); return; }
+        streamConversation(response, aide, conversationId, log); return;
       }
       // This is the local user's Session-wide inbox, independent of personal conversation IDs.
       if (request.method === "GET" && url.pathname === "/interactions") {

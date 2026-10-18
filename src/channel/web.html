@@ -14,6 +14,16 @@
   .message { padding: 16px 18px; background: white; border: 1px solid #e1e6dc; border-radius: 12px; margin: 12px 0; }
   .message.user { background: #e8eee3; margin-left: 10%; }
   .message p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; line-height: 1.65; }
+  #activity { margin: 12px 0; padding: 16px 18px; border: 1px solid #cbd9cc; border-radius: 12px; background: #f0f5ed; }
+  #activity[hidden] { display: none; }
+  .activity-heading { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #42634c; }
+  .activity-heading::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #64886b; animation: pulse 1.4s ease-in-out infinite; }
+  .activity-block { margin-top: 12px; font-size: 13px; }
+  .activity-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; margin: 6px 0; }
+  .activity-block.thought .activity-content, .activity-block.tool .activity-content { max-height: 220px; overflow: auto; color: #68776c; }
+  .activity-block summary { cursor: pointer; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  @media(prefers-reduced-motion: reduce) { .activity-heading::before { animation: none; } }
   .empty { margin: 10vh auto; max-width: 480px; } .empty h2 { font-size: 26px; font-weight: 500; }
   .empty p { line-height: 1.8; color: #68776c; } form { display: flex; align-items: end; gap: 12px; }
   textarea { width: 100%; resize: vertical; min-height: 80px; max-height: 200px; border: 1px solid #bdcbbb; border-radius: 12px; padding: 14px; font: inherit; background: white; }
@@ -37,7 +47,7 @@
 <header><h1>Aide</h1><span class="muted">把事情交给我，持续为你推进。</span><span id="connection" class="muted" style="margin-left:auto" aria-live="polite">连接中</span></header>
 <main>
   <section class="conversation" aria-label="对话">
-    <div id="messages" role="log" aria-label="消息记录"></div>
+    <div id="messages" role="log" aria-label="消息记录"><div id="history"></div><section id="activity" aria-label="Aide 执行进展" hidden></section></div>
     <div id="interactions" aria-label="等待你处理的执行请求" aria-live="polite"></div>
     <form id="composer">
       <textarea id="input" aria-label="交办事情或回答问题" placeholder="交办一件事，或者告诉我你想长期关注什么…" maxlength="32000" required></textarea>
@@ -79,16 +89,50 @@
     if (signature === lastMessages) return;
     lastMessages = signature;
     const nearBottom = $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
-    $('messages').replaceChildren();
+    $('history').replaceChildren();
     if (!messages.length) {
       const empty = element('div', undefined, 'empty');
       empty.append(element('h2', '从一件具体的事开始'), element('p', '例如：总结工作目录里的 README；每天上午检查项目进展；关注某件事，发生变化时告诉我。'));
-      $('messages').append(empty);
+      $('history').append(empty);
     }
     for (const message of messages) {
       const node = element('article', undefined, 'message ' + message.role);
       node.append(element('div', (message.role === 'user' ? '你' : 'Aide') + ' · ' + new Date(message.at).toLocaleTimeString(), 'muted'), element('p', message.text));
-      $('messages').append(node);
+      $('history').append(node);
+    }
+    if (nearBottom) $('messages').scrollTop = $('messages').scrollHeight;
+  }
+  let activityId;
+  const activityNodes = new Map();
+  function renderActivity(activity) {
+    const area = $('activity');
+    const nearBottom = $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
+    area.hidden = !activity;
+    if (!activity) { area.replaceChildren(); activityNodes.clear(); activityId = undefined; return; }
+    if (activity.id !== activityId) {
+      activityId = activity.id; activityNodes.clear(); area.replaceChildren();
+      const heading = element('div', '', 'activity-heading'); heading.id = 'activity-heading'; heading.setAttribute('role', 'status'); area.append(heading);
+    }
+    const last = activity.blocks.at(-1);
+    const label = activity.phase === 'waiting' ? '等待你回答' : activity.phase === 'queued' ? '正在排队'
+      : last?.kind === 'tool' && last.status === 'in_progress' ? '正在调用工具'
+      : last?.kind === 'thought' ? '正在思考' : last?.kind === 'text' ? '正在回复' : '正在处理';
+    $('activity-heading').textContent = label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : '');
+    const ids = new Set(activity.blocks.map((block) => block.id));
+    for (const [id, node] of activityNodes) if (!ids.has(id)) { node.remove(); activityNodes.delete(id); }
+    const toolLabels = { in_progress: '执行中', pending: '等待执行', completed: '已完成', failed: '失败', declined: '已拒绝' };
+    for (const block of activity.blocks) {
+      let node = activityNodes.get(block.id);
+      if (!node) {
+        node = element(block.kind === 'text' ? 'div' : 'details', undefined, 'activity-block ' + block.kind);
+        if (block.kind !== 'text') { node.open = true; node.append(element('summary')); }
+        node.append(element('div', '', 'activity-content')); activityNodes.set(block.id, node); area.append(node);
+      }
+      if (block.kind === 'thought') node.querySelector('summary').textContent = '思考过程';
+      if (block.kind === 'tool') node.querySelector('summary').textContent = block.text + ' · ' + (toolLabels[block.status] || block.status || '状态未知');
+      const content = node.querySelector('.activity-content');
+      const text = block.kind === 'tool' ? block.detail || '' : block.text;
+      if (content.textContent !== text) content.textContent = text;
     }
     if (nearBottom) $('messages').scrollTop = $('messages').scrollHeight;
   }
@@ -188,9 +232,9 @@
     if (polling) return;
     polling = true;
     try {
-      const [messages, works, interactions] = await Promise.all([api('/messages' + query + '&role=all'), api('/work' + query), api('/interactions')]);
-      renderMessages(messages); renderWork(works); renderInteractions(interactions); $('connection').textContent = '已连接';
-    } catch { $('connection').textContent = '连接断开 · 正在重试'; }
+      const [works, interactions] = await Promise.all([api('/work' + query), api('/interactions')]);
+      renderWork(works); renderInteractions(interactions);
+    } catch { $('notice').textContent = '事项或交互暂时无法更新，正在重试。'; }
     finally { polling = false; }
   }
   $('composer').addEventListener('submit', async (event) => {
@@ -210,6 +254,14 @@
   $('input').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('composer').requestSubmit(); }
   });
+  const stream = new EventSource('/stream' + query);
+  stream.addEventListener('view', (event) => {
+    const view = JSON.parse(event.data);
+    renderMessages(view.messages); renderActivity(view.activity);
+    $('connection').textContent = '实时连接';
+  });
+  stream.onopen = () => { $('connection').textContent = '实时连接'; };
+  stream.onerror = () => { $('connection').textContent = '连接断开 · 正在重连'; };
   poll(); setInterval(poll, 1500);
 </script>
 </html>
