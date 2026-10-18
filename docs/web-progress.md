@@ -25,3 +25,8 @@ Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职
 进度不写入 Channel 出站 Message，因此不会让飞书收到逐 token 消息。历史过程直接从既有 Session Ledger 重放形成的投影读取，没有另一份轨迹存储。执行时展开实时内容，结束后默认折叠；同页后续消息更新保留用户的展开选择。刷新或重启后仍可展开查看旧轮次，未正常结束的执行标为中断。
 
 `tests/pi-agent.test.ts` 使用真实 Pi SDK 和受控模型 SSE，验证完成前已有思考和正文增量、最终文本不重复。`tests/web-progress.test.ts` 使用真实 Host / Runner / HTTP 和模拟 Harness，下载 HTTP 提供的浏览器 bundle，用其真实 AgentUE reducer 消费 SSE，验证会话隔离、增量更新、重连恢复、断开不取消、最终答复与过程历史同时保留、后续轮次分组、重开 Aide 后的 Ledger 恢复、错误收口，以及进度不进入出站消息。
+
+
+网页左栏通过 `GET /conversations` 汇总已有 Conversation 与仅有工作记录的会话范围，展示首条用户消息标题、最近消息摘要和会话 ID，按最近输入或消息时间排序。摘要不包含 Source 观察正文或 Harness 执行细节。默认对话与当前 URL 指定的空会话仍可进入；浏览列表不创建会话。
+
+点击会话导航到 `/?conversation=...`，消息 SSE 与事项查询使用同一个 conversationId。页面导航重新建立该会话的展示快照，刷新和前进后退保留 URL 选择；后台执行不受影响。列表更新失败保留已显示条目并独立提示，不覆盖发送状态。Core Interaction 仍是本地用户的 Session 级收件区。

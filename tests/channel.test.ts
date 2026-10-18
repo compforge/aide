@@ -124,3 +124,48 @@ test("web answers the original Harness interaction and rejects stale or mismatch
   assert.equal(resolved?.status, "answered");
   assert.ok(resolved?.responseMessageId);
 });
+
+test("conversation navigation lists persisted scopes without creating them and keeps messages/work scoped", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "aide-conversation-list-"));
+  const log = pino({ level: "silent" });
+  const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("Browsing must not execute work"); } }, dir), log);
+  const server = httpChannel(aide, log);
+  t.after(async () => {
+    await aide.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const url = `http://127.0.0.1:${address.port}`;
+  const list = async () => await (await fetch(url + "/conversations")).json() as
+    { id: string; title: string; preview: string; updatedAt: string }[];
+  assert.deepEqual(await list(), []);
+  await fetch(url + "/?conversation=unsent");
+  assert.equal(aide.store.conversations.list().length, 0);
+  const group = "feishu:app:群 & #1";
+  const base = Date.now() + 60_000;
+  const at = (offset: number) => new Date(base + offset).toISOString();
+  aide.store.conversations.archive("me", [{ id: "m1", conversationId: "me", at: at(0), role: "user", text: "默认会话问题", workId: null }]);
+  aide.store.conversations.archive(group, [
+    { id: "m2", conversationId: group, at: at(1), role: "user", text: "检查 <项目>\n进展", workId: null },
+    { id: "m3", conversationId: group, at: at(2), role: "aide", text: "群会话的回复", workId: null },
+  ]);
+  aide.store.conversations.submit("source-observation", { conversationId: "source:requirements", origin: "source", text: "private observation" }, { phase: "done" });
+  aide.work("work-only").create({ kind: "routine", title: "定期检查", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "changed" } });
+  const task = aide.work(group).create({ kind: "task", title: "检查项目", instruction: "check", trigger: null });
+  const before = aide.store.conversations.list();
+  const summaries = await list();
+  assert.deepEqual(summaries.map((item) => item.id), [group, "me", "source:requirements", "work-only"]);
+  assert.deepEqual(summaries[0], { id: group, title: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2) });
+  assert.equal(summaries.find((item) => item.id === "source:requirements")?.preview, "");
+  assert.ok(!JSON.stringify(summaries).includes("private observation"));
+  assert.deepEqual(aide.store.conversations.list(), before);
+  const messages = await (await fetch(url + "/messages?role=all&conversationId=" + encodeURIComponent(group))).json() as { conversationId: string }[];
+  assert.equal(messages.length, 2);
+  assert.ok(messages.every((message) => message.conversationId === group));
+  const works = await (await fetch(url + "/work?conversationId=" + encodeURIComponent(group))).json() as { id: string }[];
+  assert.deepEqual(works.map((item) => item.id), [task.id]);
+  assert.deepEqual(await (await fetch(url + "/work?conversationId=me")).json(), []);
+  assert.equal((await fetch(url + "/conversations", { headers: { origin: "https://unrelated.example" } })).status, 403);
+});

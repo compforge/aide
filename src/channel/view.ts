@@ -73,3 +73,45 @@ export function conversationView(aide: Aide, conversationId: string): Conversati
     } : null },
   };
 }
+
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  preview: string;
+  updatedAt: string;
+}
+
+/**
+ * @spec Navigation includes Channel/Source conversations and work-only scopes; summaries never expose input prompts or execution details.
+ * @link docs/web-progress.md
+ */
+export function conversationList(aide: Aide): ConversationSummary[] {
+  const summaries = new Map<string, ConversationSummary>();
+  const ensure = (id: string) => {
+    let summary = summaries.get(id);
+    if (!summary) {
+      summary = { id, title: id === "me" ? "默认对话" : id, preview: "", updatedAt: "" };
+      summaries.set(id, summary);
+    }
+    return summary;
+  };
+  for (const conversation of aide.store.conversations.list()) ensure(conversation.id).updatedAt = conversation.createdAt;
+  for (const input of aide.store.conversations.inputs()) {
+    const summary = ensure(input.spec.conversationId);
+    if (input.metadata.creationTimestamp > summary.updatedAt) summary.updatedAt = input.metadata.creationTimestamp;
+  }
+  for (const work of aide.store.read().works) ensure(work.conversationId);
+  const titled = new Set<string>();
+  for (const message of aide.messages()) {
+    const summary = ensure(message.conversationId);
+    const text = message.text.replace(/\s+/g, " ").trim();
+    if (message.role === "user" && text && !titled.has(summary.id)) {
+      summary.title = text.slice(0, 40); titled.add(summary.id);
+    }
+    // Messages are chronological; preview remains the latest delivered message even after a quiet Source input.
+    summary.preview = text.slice(0, 100);
+    if (message.at > summary.updatedAt) summary.updatedAt = message.at;
+  }
+  return [...summaries.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+}
