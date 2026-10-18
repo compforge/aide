@@ -18,7 +18,9 @@ import type {
   EventSource,
 } from "../event/index.ts";
 import type { PromptBlock } from "../input/blocks.ts";
-import type { ExecutionScope } from "../plugin/verb.ts";
+import type {
+  ExecutionScope,
+} from "../../protocol/verbs.ts";
 import type { SessionHandle } from "../store/store.ts";
 import type {
   InteractionDraft,

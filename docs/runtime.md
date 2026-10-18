@@ -1,22 +1,28 @@
 # Aide 的运行机制
 
-Aide 通过 Channel 接收用户消息，以 Plugin 表达业务职责，由执行内核调度 Harness 完成工作。`src/channel/` 承载网页适配器，`plugins/personal/` 负责个人助理业务，`src/runtime/` 提供执行与持久化能力。插件通过 `@compforge/aide-plugin` 公共契约接入。
+Aide 通过 Channel 接收用户消息，以 Plugin 表达业务职责，由 Host 调度 Harness 完成工作。`src/channel/` 承载网页与飞书适配器，`plugins/personal/` 负责个人助理业务，`src/host/` 提供主进程的执行与持久化能力，`src/runner/` 承载插件子进程实现。两端共用的通信契约和上下文构造按职责独立放在 `src/` 下。插件通过 `@compforge/aide-plugin` 公共契约接入。
 
 ```text
-Aide 服务进程
+Aide Host（主进程）
 ├── 网页 / 飞书 Channel → ChiefInput
 ├── Aide Session / Channel / Controller
 │   ├── PiAdapter → Chief → 对话 / Connector / Work 工具
 │   └── CodexAdapter → codex app-server → CLI
-└── Aide Plugin Manager / Supervisor
-    ├── Resource store / Controller / Source / Watch / cron / queue
-    └── personal Worker（独立 Bun 进程）
-        ├── Source Controller → Connector → ChiefInput
-        ├── Chief Controller → verbs.harness / ask / confirm
-        └── Work Controller   → verbs.harness → 推进 Task / Routine
+└── Plugin Manager / Supervisor / IPC Client
+    └── Resource store / Controller 调度 / Source / Watch / cron / queue
+             ⇅ IPC
+Plugin Runner（独立 Bun 子进程）
+└── personal Plugin
+    ├── Source Controller → Connector → ChiefInput
+    ├── Chief Controller → verbs.harness / ask / confirm
+    └── Work Controller   → verbs.harness → 推进 Task / Routine
 ```
 
 ## 职责边界
+
+Host 决定何时调度回调、保存 Resource 和执行事实，并负责 Harness 调用、用户交互以及子进程生命周期。Runner 加载 Plugin，执行 Source、Reconcile、Hook 等回调，经 IPC 访问宿主能力。当前 personal Instance 对应一个 Runner；增加插件实例时可以启动更多 Runner，并非整个 Aide 永远只有两个操作系统进程，Harness 也可能创建自己的子进程。
+
+`src/host/plugin/runner/` 是宿主侧的 Supervisor、IPC Client 和注册代理。`src/runner/process.ts` 只作为子进程入口启动，Host 与 Runner 不相互导入实现。双方共享 `src/protocol/` 中的 IPC 与 verb 契约，以及 `src/plugin-context.ts` 中的上下文构造和参数校验；共享模块不加载 Host 或 Runner 实现。`packages/plugin` 面向插件开发者，`src/protocol` 是 Aide 内部通信契约，插件不需要了解 IPC。此目录拆分保持原有 IPC 消息和执行行为不变。
 
 Harness 消息的 `phase` 区分进度说明（`commentary`）与最终答复（`final`）。Adapter 保留提供方明确给出的阶段；没有阶段时保持未知，不根据消息位置或文本内容推断。Codex 的实时消息和历史导入共用同一映射。
 

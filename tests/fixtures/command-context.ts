@@ -1,6 +1,6 @@
 import type { CommandContext, CommandInput } from "@compforge/aide-plugin";
-import type { Manager } from "../../src/runtime/plugin/manager.ts";
-import { newId } from "../../src/runtime/event/ids.ts";
+import type { Manager } from "../../src/host/plugin/manager.ts";
+import { newId } from "../../src/host/event/ids.ts";
 
 export function commandContext(namespace: string, name: string): CommandContext {
   return {

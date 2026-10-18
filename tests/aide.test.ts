@@ -9,7 +9,7 @@ import type { Outcome } from "../plugins/personal/prompts.ts";
 import { nextOccurrence, type Work } from "../plugins/personal/model.ts";
 
 import { fakeOptions, type Agent } from "./fake-harness.ts";
-import { SessionStore } from "../src/runtime/store/store.ts";
+import { SessionStore } from "../src/host/store/store.ts";
 
 const log = pino({ level: "silent" });
 const done: Outcome = { action: "done", summary: "Checked and finished", notification: "完成了", question: null, nextAt: null };

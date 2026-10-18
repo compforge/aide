@@ -1,4 +1,4 @@
-import { requestResult } from "../src/runtime/interaction/resolution.ts";
+import { requestResult } from "../src/host/interaction/resolution.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,14 +7,14 @@ import { join } from "node:path";
 import type {
   ReconcileKey,
   ReconcileScope,
-} from "../src/runtime/plugin/controller.ts";
-import { emptyReconcileSnapshot } from "../src/runtime/plugin/reconcile-snapshot.ts";
-import { Manager } from "../src/runtime/plugin/manager.ts";
-import { PluginInstanceStore } from "../src/runtime/plugin/instance.ts";
-import { PluginResourceStore } from "../src/runtime/plugin/resource.ts";
-import type { ScheduledHarnessInvocation } from "../src/runtime/plugin/harness-invocation.ts";
-import { MAIN_LANE_ID } from "../src/runtime/lane.ts";
-import { SessionStore } from "../src/runtime/store/store.ts";
+} from "../src/host/plugin/controller.ts";
+import { emptyReconcileSnapshot } from "../src/host/plugin/reconcile-snapshot.ts";
+import { Manager } from "../src/host/plugin/manager.ts";
+import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource.ts";
+import type { ScheduledHarnessInvocation } from "../src/host/plugin/harness-invocation.ts";
+import { MAIN_LANE_ID } from "../src/host/lane.ts";
+import { SessionStore } from "../src/host/store/store.ts";
 
 interface Spec {
   value: string;

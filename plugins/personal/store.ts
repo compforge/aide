@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { PluginResourceStore } from "../../src/runtime/plugin/resource.ts";
-import type { ResourceClientChange } from "../../src/runtime/plugin/resource-client.ts";
+import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
+import type { ResourceClientChange } from "../../src/host/plugin/resource-client.ts";
 import { WorkSchema, type Message, type Work } from "./model.ts";
 import { CHIEF_TYPE } from "./chief-model.ts";
 

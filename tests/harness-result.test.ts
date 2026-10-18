@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { codexItemLifecycleDrafts } from "../src/runtime/harness/codex/mapping.ts";
-import { codexHistoryTurns } from "../src/runtime/harness/codex/native-session.ts";
-import { SessionStore } from "../src/runtime/store/store.ts";
+import { codexItemLifecycleDrafts } from "../src/host/harness/codex/mapping.ts";
+import { codexHistoryTurns } from "../src/host/harness/codex/native-session.ts";
+import { SessionStore } from "../src/host/store/store.ts";
 
 const progress = { type: "agentMessage", id: "progress", phase: "commentary", text: "我先检查当前可访问的代码仓。" };
 const answer = { type: "agentMessage", id: "answer", phase: "final_answer", text: '{"action":"done"}' };

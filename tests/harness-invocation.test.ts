@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ReconcileHarnessInvocation } from "../src/runtime/plugin/harness-invocation.ts";
-import { HarnessInvocationStore } from "../src/runtime/plugin/harness-invocation.ts";
-import { MAIN_LANE_ID } from "../src/runtime/lane.ts";
-import { SessionStore } from "../src/runtime/store/store.ts";
+import type { ReconcileHarnessInvocation } from "../src/host/plugin/harness-invocation.ts";
+import { HarnessInvocationStore } from "../src/host/plugin/harness-invocation.ts";
+import { MAIN_LANE_ID } from "../src/host/lane.ts";
+import { SessionStore } from "../src/host/store/store.ts";
 
 const roots: string[] = [];
 

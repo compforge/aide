@@ -7,7 +7,7 @@ import {
   reconcileScope,
   reconcileSnapshot,
   hookScope,
-} from "../verb.ts";
+} from "../../../plugin-context.ts";
 import type { PluginRunnerClient } from "./client.ts";
 import type {
   CommandRegistration,
@@ -15,7 +15,7 @@ import type {
   HookRegistration,
   MentionRegistration,
   PluginRegistration,
-} from "./protocol.ts";
+} from "../../../protocol/ipc.ts";
 
 /** Installs one Runner protocol registration into its Plugin Binding. */
 export function installRegistration(

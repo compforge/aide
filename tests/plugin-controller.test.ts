@@ -11,8 +11,8 @@ import {
   Controller,
   type ControllerOptions,
   type ReconcileKey,
-} from "../src/runtime/plugin/controller.ts";
-import { PluginResourceStore } from "../src/runtime/plugin/resource.ts";
+} from "../src/host/plugin/controller.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 
 interface Spec {
   requirement: string;

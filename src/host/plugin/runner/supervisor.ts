@@ -11,7 +11,7 @@ import {
 import type {
   ActivationResult,
   PluginPackageEntry,
-} from "./protocol.ts";
+} from "../../../protocol/ipc.ts";
 
 export interface ActivePluginRunner {
   readonly client: PluginRunnerClient;
@@ -98,4 +98,4 @@ export class PluginSupervisor {
 
 export type {
   PluginPackageEntry,
-} from "./protocol.ts";
+} from "../../../protocol/ipc.ts";

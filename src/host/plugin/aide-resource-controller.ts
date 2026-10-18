@@ -30,9 +30,11 @@ import { validateSources } from "./source.ts";
 import { validateWatches, watchRequests } from "./watch.ts";
 import {
   createReconcileContext,
+} from "../../plugin-context.ts";
+import {
   type ExecutionScope,
   type InvokeVerb,
-} from "./verb.ts";
+} from "../../protocol/verbs.ts";
 import type {
   ControllerSource,
   CronSource,

@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import type { ReconcileScope } from "../src/runtime/plugin/controller.ts";
+import type { ReconcileScope } from "../src/host/plugin/controller.ts";
 import {
   CronSourceQueue,
   nextCronSourceAt,
-} from "../src/runtime/plugin/cron-source.ts";
-import { validateSources } from "../src/runtime/plugin/source.ts";
+} from "../src/host/plugin/cron-source.ts";
+import { validateSources } from "../src/host/plugin/source.ts";
 
 const scope: ReconcileScope = {
   aideSessionId: "bs_test",

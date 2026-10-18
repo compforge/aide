@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { Logger } from "pino";
 import type { Aide } from "../../plugins/personal/aide.ts";
-import { validInputResult } from "../runtime/interaction/answer.ts";
+import { validInputResult } from "../host/interaction/answer.ts";
 import { IncomingSchema } from "../../plugins/personal/model.ts";
 
 const EventSchema = IncomingSchema.omit({ text: true }).extend({

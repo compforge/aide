@@ -8,8 +8,8 @@ import pino from "pino";
 import { Aide } from "../plugins/personal/aide.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { httpChannel } from "../src/channel/http.ts";
-import type { InputRequest } from "../src/runtime/message/types.ts";
-import type { InteractionResult } from "../src/runtime/interaction/types.ts";
+import type { InputRequest } from "../src/host/message/types.ts";
+import type { InteractionResult } from "../src/host/interaction/types.ts";
 
 test("HTTP accepts Chief input durably and exposes asynchronous failure without replay", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-channel-"));

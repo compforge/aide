@@ -19,4 +19,4 @@ export type {
   PluginRegistration,
   SourceRegistration,
   WatchRegistration,
-} from "./protocol.ts";
+} from "../../../protocol/ipc.ts";

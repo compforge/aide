@@ -8,8 +8,8 @@ import { Aide } from "../plugins/personal/aide.ts";
 import { Store, message } from "../plugins/personal/store.ts";
 import { WorkService, type WorkDefinition } from "../plugins/personal/work.ts";
 import { WORK_TYPE } from "../plugins/personal/resources.ts";
-import { SessionStore } from "../src/runtime/store/store.ts";
-import { PluginResourceStore } from "../src/runtime/plugin/resource.ts";
+import { SessionStore } from "../src/host/store/store.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });

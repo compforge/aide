@@ -4,6 +4,8 @@ import type {
   CommandSubmitInput,
   PluginDataDirectories,
   PluginInstance,
+  PluginLogLevel,
+  PluginLogContext,
   PluginSessionContext,
   HookStage,
   Resource,
@@ -15,11 +17,16 @@ import type {
   ResourceType,
   ToastMessage,
 } from "@compforge/aide-plugin";
-import type { PluginLogRecord } from "../package.ts";
 import type {
   ExecutionScope,
   VerbRequest,
-} from "../verb.ts";
+} from "./verbs.ts";
+
+export interface PluginLogRecord {
+  readonly level: PluginLogLevel;
+  readonly message: string;
+  readonly context?: PluginLogContext;
+}
 
 export interface PluginPackageEntry {
   readonly pluginId: string;

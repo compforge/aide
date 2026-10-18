@@ -77,7 +77,7 @@ Reconcile 调用 Harness 推进工作。执行结果分为完成、询问用户�
 
 主动发现可以由 Routine 执行，也可由 Source 观察外部系统。内置需求 Source 定期读取 Meego 中配置负责人名下的近期需求，去重后交给 Chief；Chief 判断是否通知、询问或创建／更新 Work。连接器配置、问答机制与当前覆盖限制见 [Chief 与主动发现](docs/chief.md)。
 
-工作保存在 `Work` Resource 中，`spec.kind` 区分 Task 与 Routine。Plugin Manager 统一管理 Controller、Source、Watch、队列、cron、动态唤醒和重试；业务回复随 Resource status 保存，问题由原有 Core Interaction 持久化，Channel 从两者投影消息。运行机制与扩展入口见 [runtime 设计](docs/runtime.md)。
+工作保存在 `Work` Resource 中，`spec.kind` 区分 Task 与 Routine。Host 主进程统一管理 Resource、调度、Harness 和用户交互；Plugin Runner 子进程执行插件的 Source、Reconcile 等回调，通过 IPC 请求宿主能力。业务回复随 Resource status 保存，问题由原有 Core Interaction 持久化，Channel 从两者投影消息。进程边界、运行机制与扩展入口见 [运行机制](docs/runtime.md)。
 
 Controller 默认总执行容量为 1；等待 Harness verb 时释放执行位，同一个 Resource 始终串行。暂停阻止后续推进，不能撤销已执行的 CLI 操作。关机错过的时间触发恢复后合并执行一次；运行中崩溃或调用失败会标为 `uncertain`。执行已结束、但最终答复无法解析或校验时标为 `invalid_result`，网页显示“结果解析失败”。这两种情况都由用户核对执行记录后明确要求继续，基础设施 Reconcile 重试不会自动重放业务执行。
 

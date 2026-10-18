@@ -4,7 +4,7 @@
 
 Aide 是小型、自托管的 personal agent，由 Channel、执行内核和 Plugin 组成。Channel / Source 输入交给 Chief，普通问题直接回复，需要持续推进时才 CRUD Task / Routine；personal Plugin 的 Reconcile 通过 Harness 推进工作。按绿地视角开发，不迁移旧数据，不建设账号权限中心或共享 SDK。
 
-personal 是内置 Plugin 之一，业务逻辑放在 `plugins/personal/`。执行、调度与恢复优先使用 `src/runtime/` 已有机制；修改核心接口前先说明具体产品需求与现有能力的缺口。运行机制见 `docs/runtime.md`。
+personal 是内置 Plugin 之一，业务逻辑放在 `plugins/personal/`。执行、调度与恢复优先使用 `src/host/` 已有机制；修改核心接口前先说明具体产品需求与现有能力的缺口。运行机制见 `docs/runtime.md`。
 
 ## 代码地图
 
@@ -16,14 +16,20 @@ src/
     feishu.ts              # 飞书单聊、持久收件与出站投递
     feishu-client.ts       # 飞书官方 SDK、长连接与发送接口
     web.html               # 网页对话、事项与安排
-  runtime/                 # 执行内核
-    plugin/runner/         # Worker / Supervisor / IPC
+  host/                    # Aide 主进程：执行、调度与持久化
+    plugin/runner/         # 宿主侧 Supervisor / IPC Client / 注册代理
     plugin/                # Resource / Controller / Source / Watch / verb
     channel/               # Session 与执行组件装配；不同于网页适配器
     controller/            # HarnessInput / Queue / Turn 执行协调
     harness/               # HarnessAdapter 与 provider 协议
     store/                 # Session 与事件投影
     file-lock.ts           # Aide 服务入口的单实例文件锁
+  runner/                  # Plugin 子进程实现
+    process.ts             # 子进程入口：加载插件，执行 Source / Reconcile 等回调
+  protocol/                # Host / Runner 共用的内部通信契约
+    ipc.ts                 # 双向 IPC 消息、注册描述与错误序列化
+    verbs.ts               # ExecutionScope、verb 请求/响应与调用接口
+  plugin-context.ts        # 两端共用的 Plugin 上下文构造与 verb 参数校验
 plugins/                   # 内置插件；personal 是其中一个
   personal/
     aide.ts                # Session/Plugin 装配、Chief 输入、问题投影与恢复
@@ -47,7 +53,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 ## 关键约定
 
-- Personal 业务不进入 runtime；Plugin Worker 通过公共 Resource API 和 verbs 请求动作，不持有 Harness 或宿主 Store；`aide.ts` 和 `store.ts` 是宿主装配与输入投影。
+- Personal 业务不进入 Host / Runner；Plugin Runner 通过公共 Resource API 和 verbs 请求动作，不持有 Harness 或宿主 Store；`aide.ts` 和 `store.ts` 是宿主装配与输入投影。
+- Host 与 Runner 不相互导入实现；Host 仅通过子进程入口启动 `runner/process.ts`。两端复用代码按职责放在 `src/` 下：通信契约放 `protocol/`，Plugin 上下文构造放 `plugin-context.ts`；共享模块不依赖 Host 或 Runner。Resource 存储、Watch / Queue 调度、Harness 执行和 Runner 生命周期管理均留在 Host。
 - Task / Routine 共用 Work 身份，spec.kind 区分类别；转换保留 uid、历史与去重记录。
 - status、出站回复与投递去重一起提交。等待用户是持久状态，不保持执行位。
 - Harness 完成不等于业务目标完成，personal 校验结果后决定工作终态。

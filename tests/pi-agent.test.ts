@@ -9,10 +9,10 @@ import pino from "pino";
 import { createPiAgent } from "../agent/pi/agent.ts";
 import { WorkService } from "../plugins/personal/work.ts";
 import { Store } from "../plugins/personal/store.ts";
-import { SessionStore } from "../src/runtime/store/store.ts";
-import { PluginResourceStore } from "../src/runtime/plugin/resource.ts";
-import { createHarnessAdapter } from "../src/runtime/harness/registry.ts";
-import type { HarnessEvent, HarnessSessionBinding } from "../src/runtime/harness/adapter.ts";
+import { SessionStore } from "../src/host/store/store.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource.ts";
+import { createHarnessAdapter } from "../src/host/harness/registry.ts";
+import type { HarnessEvent, HarnessSessionBinding } from "../src/host/harness/adapter.ts";
 
 type Reply = { text: string; stop?: string } | { tool: string; args: unknown } | { error: true } | { hold: true };
 

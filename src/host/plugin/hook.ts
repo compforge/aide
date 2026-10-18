@@ -12,10 +12,12 @@ import { type LogSink, logError } from "../logging.ts";
 import type { ReconcileSnapshot } from "./reconcile-snapshot.ts";
 import {
   createHookContext,
+} from "../../plugin-context.ts";
+import {
   type ExecutionScope,
   type InvokeVerb,
-  type Verb,
-} from "./verb.ts";
+} from "../../protocol/verbs.ts";
+import type { Verb } from "./verb.ts";
 
 export const DEFAULT_HOOK_TIMEOUT_MS = 10_000;
 export const DEFAULT_DEFERRED_HOOK_QUEUE_LIMIT = 256;

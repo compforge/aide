@@ -1,19 +1,19 @@
 import { join } from "node:path";
 import type { Logger } from "pino";
 import type { ResourceType } from "@compforge/aide-plugin";
-import type { Manager } from "../../src/runtime/plugin/manager.ts";
-import { Channel, type ChannelControllerOptions } from "../../src/runtime/channel/index.ts";
-import { SessionStore, type SessionHandle } from "../../src/runtime/store/store.ts";
-import { PluginResourceStore } from "../../src/runtime/plugin/resource.ts";
-import { PluginSupervisor } from "../../src/runtime/plugin/runner/index.ts";
-import { PluginInstanceStore } from "../../src/runtime/plugin/instance.ts";
+import type { Manager } from "../../src/host/plugin/manager.ts";
+import { Channel, type ChannelControllerOptions } from "../../src/host/channel/index.ts";
+import { SessionStore, type SessionHandle } from "../../src/host/store/store.ts";
+import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
+import { PluginSupervisor } from "../../src/host/plugin/runner/index.ts";
+import { PluginInstanceStore } from "../../src/host/plugin/instance.ts";
 import { IncomingSchema, type Incoming, type Message } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { message, Store, WORK_TYPE } from "./store.ts";
 import { CHIEF_TYPE, chiefTarget, digest, type ChiefSpec, type ChiefStatus } from "./chief-model.ts";
 import { chiefTools } from "../../agent/pi/chief-tools.ts";
 import { createPiAgent, type PiAgentOptions } from "../../agent/pi/agent.ts";
-import type { PiSessionFactory } from "../../src/runtime/harness/pi/adapter.ts";
+import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
 import { Connectors } from "../../connectors/index.ts";
 import { loadWatches } from "./source-config.ts";
 
