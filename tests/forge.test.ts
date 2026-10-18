@@ -167,6 +167,12 @@ describe("GitHubForgeConnector", () => {
           mergeable: false,
         });
       }
+      if (url.includes("/pulls/17/comments?")) {
+        return json([
+          { id: 1, updated_at: "2026-07-26T07:00:00Z" },
+          { id: 2, updated_at: "2026-07-26T07:30:00Z" },
+        ]);
+      }
       if (url.endsWith("/graphql")) {
         return json({
           data: {
@@ -414,8 +420,12 @@ describe("GitHubForgeConnector", () => {
     expect(new URL(requestedUrl).searchParams.get("per_page")).toBe("100");
   });
 
-  test("changes the activity key when a review comment changes", async () => {
-    let commentId = "PRRC_1";
+  test("tracks earlier comment edits across pages and rejects incomplete snapshots", async () => {
+    let updatedAt = "2026-07-26T07:00:00Z";
+    let resolved = false;
+    let deleted = false;
+    let failPage = false;
+    const pages: string[] = [];
     const fetch: Fetch = async (input) => {
       const url = String(input);
       if (url.endsWith("/pulls/5")) {
@@ -435,10 +445,10 @@ describe("GitHubForgeConnector", () => {
                 reviewThreads: {
                   nodes: [{
                     id: "PRRT_1",
-                    isResolved: false,
+                    isResolved: resolved,
                     comments: {
                       nodes: [{
-                        id: commentId,
+                        id: "PRRC_2",
                         updatedAt: "2026-07-26T08:00:00Z",
                       }],
                     },
@@ -449,6 +459,17 @@ describe("GitHubForgeConnector", () => {
             },
           },
         });
+      }
+      if (url.includes("/pulls/5/comments?")) {
+        const page = new URL(url).searchParams.get("page")!;
+        pages.push(page);
+        if (page === "1") {
+          return json([{ id: 2, updated_at: "2026-07-26T08:00:00Z" }], {
+            link: '<https://api.github.com/repos/owner/repo/pulls/5/comments?per_page=100&page=2>; rel="next"',
+          });
+        }
+        if (failPage) return new Response("unavailable", { status: 503 });
+        return json(deleted ? [] : [{ id: 1, updated_at: updatedAt }]);
       }
       return new Response("not found", { status: 404 });
     };
@@ -465,12 +486,29 @@ describe("GitHubForgeConnector", () => {
     };
 
     const first = await connector.get(identity);
-    commentId = "PRRC_2";
+    updatedAt = "2026-07-26T09:00:00Z";
     const second = await connector.get(identity);
 
     expect(first.reviewActivityKey).toEqual(expect.any(String));
     expect(second.reviewActivityKey).toEqual(expect.any(String));
     expect(second.reviewActivityKey).not.toBe(first.reviewActivityKey);
+    expect(pages).toEqual(["1", "2", "1", "2"]);
+    expect((await connector.get(identity)).reviewActivityKey).toBe(second.reviewActivityKey);
+
+    resolved = true;
+    const third = await connector.get(identity);
+    expect(third.reviewThreads).toBe("resolved");
+    expect(third.reviewActivityKey).not.toBe(second.reviewActivityKey);
+
+    deleted = true;
+    const fourth = await connector.get(identity);
+    expect(fourth.reviewActivityKey).toEqual(expect.any(String));
+    expect(fourth.reviewActivityKey).not.toBe(third.reviewActivityKey);
+
+    failPage = true;
+    const incomplete = await connector.get(identity);
+    expect(incomplete.reviewThreads).toBe("unknown");
+    expect(incomplete.reviewActivityKey).toBeUndefined();
   });
 
   test("nests review replies under top-level comments", async () => {

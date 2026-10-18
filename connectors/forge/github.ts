@@ -316,6 +316,12 @@ export class GitHubForgeConnector implements ForgeConnector {
     throw new Error("GitHub comment pagination limit exceeded");
   }
 
+  /**
+   * @spec Review activity includes thread resolution and every comment's id and edit time.
+   * @why The newest reply does not reflect edits to earlier comments; REST pagination covers all threads.
+   * @case id=review_comment_history,desc=`Edit an older comment on another page`,expect=`Activity key changes`
+   * @see {@link ../../tests/forge.test.ts}
+   */
   async #reviewThreads(
     identity: PullRequestIdentity,
   ): Promise<{
@@ -340,7 +346,6 @@ export class GitHubForgeConnector implements ForgeConnector {
                     nodes{
                       id
                       isResolved
-                      comments(last:1){nodes{id updatedAt}}
                     }
                     pageInfo{hasNextPage endCursor}
                   }
@@ -387,33 +392,10 @@ export class GitHubForgeConnector implements ForgeConnector {
         if (typeof thread.isResolved !== "boolean") {
           throw new Error("GitHub review thread has no resolution state");
         }
-        const comments = record(
-          "GitHub GraphQL reviewThread.comments",
-          thread.comments,
-        );
-        const commentNodes = records(
-          "GitHub GraphQL reviewThread.comments.nodes",
-          comments.nodes,
-        );
-        const latest = commentNodes.at(-1);
-        const commentId = latest?.id;
-        const updatedAt = latest?.updatedAt;
-        if (latest && (typeof commentId !== "string" || !commentId)) {
-          throw new Error("GitHub review comment has no id");
-        }
-        if (
-          latest &&
-          updatedAt !== undefined &&
-          typeof updatedAt !== "string"
-        ) {
-          throw new Error("GitHub review comment updatedAt is invalid");
-        }
         unresolved ||= thread.isResolved === false;
         activityTokens.push(JSON.stringify([
           thread.id,
           thread.isResolved,
-          commentId ?? null,
-          updatedAt ?? null,
         ]));
       }
       const pageInfo = record(
@@ -422,6 +404,27 @@ export class GitHubForgeConnector implements ForgeConnector {
       );
       if (pageInfo.hasNextPage !== true) {
         if (activityTokens.length === 0) return { state: "none" };
+        const comments = await this.#commentRows(
+          `${this.#restBase}/repos/${repositoryPath(identity.path)}/pulls/${identity.number}/comments`,
+        );
+        for (const comment of comments) {
+          if (
+            (typeof comment.id !== "string" && typeof comment.id !== "number") ||
+            !String(comment.id)
+          ) {
+            throw new Error("GitHub review comment has no id");
+          }
+          if (
+            comment.updated_at !== undefined &&
+            typeof comment.updated_at !== "string"
+          ) {
+            throw new Error("GitHub review comment updated_at is invalid");
+          }
+          activityTokens.push(JSON.stringify([
+            String(comment.id),
+            comment.updated_at ?? null,
+          ]));
+        }
         return {
           state: unresolved ? "unresolved" : "resolved",
           activityKey: reviewActivityKey("github", activityTokens),
