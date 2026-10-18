@@ -6,9 +6,9 @@ import { test } from "node:test";
 import { Connectors } from "../connectors/index.ts";
 import { loadWatches, type Watch } from "../plugins/personal/source-config.ts";
 import { MeegleCliRequirementConnector } from "../connectors/requirements/meego.ts";
-import { SessionStore } from "../src/runtime/store/store.ts";
-import { PluginResourceStore } from "../src/runtime/plugin/resource.ts";
-import { createResourceClient } from "../src/runtime/plugin/resource-client.ts";
+import { SessionStore } from "../src/host/store/store.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource.ts";
+import { createResourceClient } from "../src/host/plugin/resource-client.ts";
 import { observeRequirements, SOURCE_TYPE } from "../plugins/personal/source.ts";
 import { CHIEF_TYPE } from "../plugins/personal/chief-model.ts";
 

@@ -6,7 +6,7 @@ import {
   projectResourceNamespace,
   resourceNamespaceScope,
   sessionResourceNamespace,
-} from "../src/runtime/plugin/namespace.ts";
+} from "../src/host/plugin/namespace.ts";
 
 describe("Resource namespace", () => {
   test("constructs canonical project and Session namespaces", () => {

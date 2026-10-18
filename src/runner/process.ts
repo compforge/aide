@@ -31,13 +31,13 @@ import type {
   ToastMessage,
   Watch,
 } from "@compforge/aide-plugin";
-import type { PluginLogRecord } from "../package.ts";
+import type { PluginLogRecord } from "./protocol.ts";
 import {
   createHookContext,
   createReconcileContext,
   type ExecutionScope,
   type VerbResponse,
-} from "../verb.ts";
+} from "./context.ts";
 
 import {
   type ActivationResult,

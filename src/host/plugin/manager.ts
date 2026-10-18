@@ -1,3 +1,4 @@
+import type { PluginLogRecord } from "../../runner/protocol.ts";
 import type { CommandContext } from "@compforge/aide-plugin";
 import {
   Controller,
@@ -38,7 +39,6 @@ import {
   AIDE_SYSTEM_NAMESPACE,
   AIDE_RESOURCE_TYPES,
   AIDE_TURN_RESOURCE_TYPE,
-  type PluginLogRecord,
   type ToastMessage,
   type ToastTone,
 } from "./package.ts";

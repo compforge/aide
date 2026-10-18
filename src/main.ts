@@ -4,13 +4,13 @@ import { once } from "node:events";
 import pino from "pino";
 import { z } from "zod";
 import { Aide } from "../plugins/personal/aide.ts";
-import { CodexAdapter } from "./runtime/harness/codex/adapter.ts";
-import { PiAdapter } from "./runtime/harness/pi/adapter.ts";
-import { FileHookTrustStore } from "./runtime/config/hook.ts";
+import { CodexAdapter } from "./host/harness/codex/adapter.ts";
+import { PiAdapter } from "./host/harness/pi/adapter.ts";
+import { FileHookTrustStore } from "./host/config/hook.ts";
 import { httpChannel } from "./channel/http.ts";
 import { FeishuChannel } from "./channel/feishu.ts";
 import { feishuConfig, feishuTransport } from "./channel/feishu-client.ts";
-import { withAsyncFileLock } from "./runtime/file-lock.ts";
+import { withAsyncFileLock } from "./host/file-lock.ts";
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
 const home = resolve(process.env.AIDE_HOME ?? `${homedir()}/.aide`);

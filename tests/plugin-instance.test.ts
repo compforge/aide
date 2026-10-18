@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PluginInstanceStore } from "../src/runtime/plugin/instance.ts";
+import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 
 const roots: string[] = [];
 

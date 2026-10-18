@@ -30,7 +30,7 @@ WorkService 与 Channel 输入共用 Personal 的创建、更新规则及 Store�
 
 ```ts
 import { createPiAgent } from "../agent/pi/agent.ts";
-import { createHarnessAdapter } from "../src/runtime/harness/registry.ts";
+import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 
 const work = aide.work(conversationId);
 const adapter = createHarnessAdapter(

@@ -30,7 +30,7 @@ import {
   createReconcileContext,
   type ExecutionScope,
   type InvokeVerb,
-} from "./verb.ts";
+} from "../../runner/context.ts";
 
 export type ReconcileResourceOwner = "plugin" | "aide";
 

@@ -1,4 +1,4 @@
-import { requestResult } from "../src/runtime/interaction/resolution.ts";
+import { requestResult } from "../src/host/interaction/resolution.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { commandContext, executeCommand } from "./fixtures/command-context.ts";
 import {
@@ -18,15 +18,15 @@ import type {
   InlineHookStage,
 } from "@compforge/aide-plugin";
 
-import { Channel } from "../src/runtime/channel/index.ts";
-import { PluginInstanceStore } from "../src/runtime/plugin/instance.ts";
-import { Manager, type PluginRunnerFailure } from "../src/runtime/plugin/manager.ts";
-import { PluginSupervisor } from "../src/runtime/plugin/runner/index.ts";
+import { Channel } from "../src/host/channel/index.ts";
+import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
+import { Manager, type PluginRunnerFailure } from "../src/host/plugin/manager.ts";
+import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
 import {
   restoredError,
   serializedError,
-} from "../src/runtime/plugin/runner/protocol.ts";
-import { SessionHandle } from "../src/runtime/store/store.ts";
+} from "../src/runner/protocol.ts";
+import { SessionHandle } from "../src/host/store/store.ts";
 
 const roots: string[] = [];
 

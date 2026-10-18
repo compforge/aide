@@ -1,3 +1,4 @@
+import type { PluginLogRecord } from "../../runner/protocol.ts";
 import type {
   BoardPresentation,
   BoardItemTone,
@@ -187,11 +188,6 @@ interface PluginRegistrars {
   writeLog(record: PluginLogRecord): void;
 }
 
-export interface PluginLogRecord {
-  readonly level: PluginLogLevel;
-  readonly message: string;
-  readonly context?: PluginLogContext;
-}
 
 function nonEmpty(name: string, value: string): void {
   if (!value.trim()) throw new Error(`${name} must not be empty`);

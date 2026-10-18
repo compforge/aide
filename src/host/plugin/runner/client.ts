@@ -12,12 +12,12 @@ import type {
   SourceContext,
   ToastMessage,
 } from "@compforge/aide-plugin";
-import type { PluginLogRecord } from "../package.ts";
+import type { PluginLogRecord } from "../../../runner/protocol.ts";
 import type {
   ExecutionScope,
   VerbRequest,
   VerbResponse,
-} from "../verb.ts";
+} from "../../../runner/context.ts";
 
 import {
   type ActivationResult,
@@ -31,7 +31,7 @@ import {
   type RunnerRequest,
   restoredError,
   serializedError,
-} from "./protocol.ts";
+} from "../../../runner/protocol.ts";
 
 interface PendingCall {
   readonly resolve: (value: unknown) => void;
@@ -122,7 +122,7 @@ export class PluginRunnerClient {
     this.child = Bun.spawn(
       [
         process.execPath,
-        fileURLToPath(new URL("./process.ts", import.meta.url)),
+        fileURLToPath(new URL("../../../runner/process.ts", import.meta.url)),
       ],
       {
         stdin: "ignore",

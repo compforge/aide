@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { HarnessAdapter, HarnessEventSink, PromptInput } from "../src/runtime/harness/adapter.ts";
+import type { HarnessAdapter, HarnessEventSink, PromptInput } from "../src/host/harness/adapter.ts";
 import type { Work } from "../plugins/personal/model.ts";
 import type { Outcome } from "../plugins/personal/prompts.ts";
 

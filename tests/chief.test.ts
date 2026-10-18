@@ -8,10 +8,10 @@ import { test } from "node:test";
 import pino from "pino";
 import { Aide } from "../plugins/personal/aide.ts";
 import { CHIEF_TYPE, digest, type ChiefSpec, type ChiefStatus } from "../plugins/personal/chief-model.ts";
-import { PiAdapter } from "../src/runtime/harness/pi/adapter.ts";
+import { PiAdapter } from "../src/host/harness/pi/adapter.ts";
 import { FeishuChannel } from "../src/channel/feishu.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { SessionStore } from "../src/runtime/store/store.ts";
+import { SessionStore } from "../src/host/store/store.ts";
 import { SOURCE_TYPE } from "../plugins/personal/source.ts";
 
 const log = pino({ level: "silent" });

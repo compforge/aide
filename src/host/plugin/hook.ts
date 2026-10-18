@@ -14,8 +14,8 @@ import {
   createHookContext,
   type ExecutionScope,
   type InvokeVerb,
-  type Verb,
-} from "./verb.ts";
+} from "../../runner/context.ts";
+import type { Verb } from "./verb.ts";
 
 export const DEFAULT_HOOK_TIMEOUT_MS = 10_000;
 export const DEFAULT_DEFERRED_HOOK_QUEUE_LIMIT = 256;

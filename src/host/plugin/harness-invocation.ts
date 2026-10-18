@@ -10,7 +10,7 @@ import type {
   PromptBlock,
 } from "../event/index.ts";
 import type { SessionHandle } from "../store/store.ts";
-import type { ExecutionScope } from "./verb.ts";
+import type { ExecutionScope } from "../../runner/context.ts";
 
 export type HarnessInvocationPhase =
   | "queued"
