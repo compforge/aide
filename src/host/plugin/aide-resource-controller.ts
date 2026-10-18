@@ -10,6 +10,8 @@ import type {
   Watch,
 } from "@compforge/aide-plugin";
 import type { SessionHandle } from "../store/store.ts";
+import { CONVERSATION_TYPE, type Conversation } from "@compforge/aide-plugin";
+import { ConversationStore, conversationKey } from "../conversation/store.ts";
 import { newId } from "../event/ids.ts";
 import {
   type ControllerRetryOptions,
@@ -64,6 +66,7 @@ export type AideTurnResourceData = DeepReadonly<TurnSummary> & {
 
 export interface AideResourceDataMap {
   [AIDE_TURN_RESOURCE_KIND]: AideTurnResourceData;
+  Conversation: Conversation;
 }
 
 export type AideResourceKind = keyof AideResourceDataMap;
@@ -71,7 +74,7 @@ export type AideResourceKind = keyof AideResourceDataMap;
 export interface AideResourceObservationMetadata {
   readonly aideSessionId: string;
   readonly resourceId: string;
-  /** 产生当前 Resource 的 ledger seq；Aide-owned Resource 自身不另设持久真相。 */
+  /** Revision from the authoritative host object (ledger seq or Conversation revision). */
   readonly revision: number;
   readonly sourceEventId: string;
   readonly observedAt: string;
@@ -94,6 +97,7 @@ type AideResourceSession = Pick<
 
 export interface AideResourceIndexOptions {
   session: AideResourceSession;
+  conversations?: ConversationStore;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -134,16 +138,17 @@ function turnResource(
 function aideResourceRef(resource: AideResourceObservation): ResourceRef {
   return Object.freeze({
     ...AIDE_TURN_RESOURCE_TYPE,
+    kind: resource.kind,
     namespace: AIDE_SYSTEM_NAMESPACE,
     name: resource.metadata.resourceId,
     uid: resource.metadata.sourceEventId,
   });
 }
 
-/**
- * Event Ledger 派生出的只读 Aide Resource 索引。它不创建第二份事实，也不提供 patch API。
- */
+/** Host-owned object projections. Ledger and ConversationStore remain authoritative; this index only schedules observations. */
 export class AideResourceIndex {
+  private readonly conversations = new Map<string, AideResourceObservation<"Conversation">>();
+  private readonly unsubscribeConversations?: () => void;
   readonly aideSessionId: string;
   readonly session: Readonly<Pick<SessionHandle, "id" | "dir">>;
   private readonly turns = new Map<
@@ -161,6 +166,8 @@ export class AideResourceIndex {
       dir: options.session.dir,
     });
     for (const event of options.session.ledger.read()) this.project(event, false);
+    for (const conversation of options.conversations?.list() ?? []) this.projectConversation(conversation, false);
+    this.unsubscribeConversations = options.conversations?.subscribe((conversation) => this.projectConversation(conversation, true));
     this.unsubscribeSession = options.session.subscribe((event) => {
       this.project(event, true);
     });
@@ -171,7 +178,7 @@ export class AideResourceIndex {
     resourceId: string,
   ): AideResourceObservation<K> {
     this.assertKind(kind);
-    const resource = this.turns.get(resourceId);
+    const resource = kind === CONVERSATION_TYPE.kind ? this.conversations.get(resourceId) : this.turns.get(resourceId);
     if (!resource) {
       throw new Error(`Aide resource not found: ${kind}/${resourceId}`);
     }
@@ -180,7 +187,7 @@ export class AideResourceIndex {
 
   list<K extends AideResourceKind>(kind: K): AideResourceObservation<K>[] {
     this.assertKind(kind);
-    return [...this.turns.values()]
+    return [...(kind === CONVERSATION_TYPE.kind ? this.conversations.values() : this.turns.values())]
       .sort((left, right) => left.metadata.revision - right.metadata.revision)
       .map((resource) => resource as AideResourceObservation<K>);
   }
@@ -195,6 +202,7 @@ export class AideResourceIndex {
     if (this.closed) return;
     this.closed = true;
     this.unsubscribeSession();
+    this.unsubscribeConversations?.();
     this.listeners.clear();
   }
 
@@ -209,9 +217,18 @@ export class AideResourceIndex {
   }
 
   private assertKind(kind: string): asserts kind is AideResourceKind {
-    if (kind !== AIDE_TURN_RESOURCE_KIND) {
+    if (kind !== AIDE_TURN_RESOURCE_KIND && kind !== CONVERSATION_TYPE.kind) {
       throw new Error(`unsupported Aide resource kind: ${kind}`);
     }
+  }
+
+  private projectConversation(conversation: Conversation, notify: boolean): void {
+    const id = conversationKey(conversation.id);
+    const resource: AideResourceObservation<"Conversation"> = deepFreeze({ kind: CONVERSATION_TYPE.kind,
+      metadata: { aideSessionId: this.aideSessionId, resourceId: id, revision: conversation.revision,
+        sourceEventId: `conversation:${id}`, observedAt: conversation.createdAt }, data: conversation });
+    this.conversations.set(id, resource);
+    if (notify && !this.closed) for (const listener of this.listeners) listener(resource);
   }
 }
 

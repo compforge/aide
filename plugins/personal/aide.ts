@@ -10,7 +10,8 @@ import { PluginInstanceStore } from "../../src/host/plugin/instance.ts";
 import { IncomingSchema, type Incoming, type Message } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { message, Store, WORK_TYPE } from "./store.ts";
-import { CHIEF_TYPE, chiefTarget, digest, type ChiefSpec, type ChiefStatus } from "./chief-model.ts";
+import { CONVERSATION_TYPE, chiefTarget, digest } from "./chief-model.ts";
+import { conversationKey } from "../../src/host/conversation/store.ts";
 import { chiefTools } from "../../agent/pi/chief-tools.ts";
 import { createPiAgent, type PiAgentOptions } from "../../agent/pi/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
@@ -58,8 +59,9 @@ export class Aide {
     });
     this.plugins = this.channel.pluginManager!;
     this.store = new Store(new PluginResourceStore({ session: this.session, pluginInstanceId: "personal" }),
-      ({ resource }) => this.wake(resource, resource.metadata.name));
-    for (const input of this.store.resources.list<ChiefSpec, ChiefStatus>(CHIEF_TYPE)) this.registerConversation(input.spec.conversationId);
+      ({ resource }) => this.wake(resource, resource.metadata.name), this.plugins.conversations!);
+    for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
+    this.store.conversations.subscribe((conversation) => this.registerConversation(conversation.id));
     for (const watch of loadWatches()) this.registerConversation(watch.conversationId);
   }
 
@@ -76,20 +78,18 @@ export class Aide {
     const conversationId = this.conversations.get(targetId);
     if (!conversationId) throw new Error("Unknown Chief target");
     const active = () => {
-      const inputs = this.store.resources.list<ChiefSpec, ChiefStatus>(CHIEF_TYPE).filter((item) =>
+      const inputs = this.store.conversations.inputs().filter((item) =>
         item.spec.conversationId === conversationId && item.status.phase === "running");
       if (inputs.length !== 1 || inputs[0]!.status.question || inputs[0]!.status.quietReason) throw new Error("Chief is not accepting further mutations in this turn");
       return inputs[0]!;
     };
     const tools = chiefTools(Connectors.load(), (question) => {
       const input = active();
-      this.store.resources.patchStatus<ChiefSpec, ChiefStatus>(input, input.metadata.name, { question },
-        { expectedResourceVersion: input.metadata.resourceVersion });
+      this.store.conversations.update(input, { question });
     }, (quietReason) => {
       const input = active();
       if (input.spec.origin !== "source") throw new Error("Only Source observations can be dismissed silently");
-      this.store.resources.patchStatus<ChiefSpec, ChiefStatus>(input, input.metadata.name, { quietReason },
-        { expectedResourceVersion: input.metadata.resourceVersion });
+      this.store.conversations.update(input, { quietReason });
     });
     return (options) => createPiAgent({ ...options, ...settings, work: this.work(conversationId),
       sessionDir: join(this.home, "pi-sessions"), tools, beforeWorkMutation: () => { active(); } });
@@ -105,15 +105,15 @@ export class Aide {
     await this.channel.start();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin failed to start");
     for (const work of this.store.read().works) this.wake(WORK_TYPE, work.id);
-    for (const input of this.store.resources.list<ChiefSpec, ChiefStatus>(CHIEF_TYPE)) {
-      if (!input.status.phase) this.wake(CHIEF_TYPE, input.metadata.name);
+    for (const conversation of this.store.conversations.list()) {
+      if (conversation.pendingInputIds.length) this.wake(CONVERSATION_TYPE, conversationKey(conversation.id));
     }
   }
 
   private recoverInterrupted(): void {
-    for (const input of this.store.resources.list<ChiefSpec, ChiefStatus>(CHIEF_TYPE)) {
+    for (const input of this.store.conversations.inputs()) {
       if (input.status.phase !== "running" && input.status.phase !== "waiting") continue;
-      this.store.resources.patchStatus<ChiefSpec, ChiefStatus>(input, input.metadata.name, {
+      this.store.conversations.update(input, {
         phase: "failed", question: null, messages: [...input.status.messages ?? [],
           message(input.spec.conversationId, "上次处理已中断，可能已有部分操作生效。请核对后重新交办。")],
       });
@@ -130,7 +130,8 @@ export class Aide {
 
   private enqueue(type: ResourceType, id: string): Promise<void> {
     return this.plugins.enqueue({ aideSessionId: this.session.id, pluginInstanceId: "personal", namespace: "v1",
-      resourceApiVersion: type.apiVersion, resourceKind: type.kind, resourceId: id });
+      resourceApiVersion: type.apiVersion, resourceKind: type.kind, resourceId: id,
+      ...(type.kind === CONVERSATION_TYPE.kind ? { resourceOwner: "aide" as const } : {}) });
   }
 
   private wake(type: ResourceType, id: string): void {
@@ -170,7 +171,7 @@ export class Aide {
 
   private async submit(input: Incoming): Promise<Message> {
     const id = digest([input.conversationId, input.id]);
-    const previous = this.store.resources.find<ChiefSpec, ChiefStatus>(CHIEF_TYPE, id);
+    const previous = this.store.conversations.input(id);
     if (previous) return previous.status.messages?.[0] ?? message(input.conversationId, "已接收该消息");
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
     this.registerConversation(input.conversationId);
@@ -188,25 +189,21 @@ export class Aide {
       if (!value && (!question.choices?.length || question.allowOther)) value = raw;
       if (value) {
         // Persist the reply identity before settling the Core Interaction. A redelivery cannot become a new command.
-        const resource = this.store.resources.create<ChiefSpec, ChiefStatus>({ type: CHIEF_TYPE, name: id,
-          spec: { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel", replyTo: request.messageId },
-          status: { phase: "done", messages: [inbound] } });
+        const resource = this.store.conversations.submit(id, { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel", replyTo: request.messageId }, { phase: "done", messages: [inbound] });
         const receipt = await this.channel.resolveInteraction({ kind: "interaction_response", messageId: request.messageId },
           async () => ({ kind: "question", outcome: "answered", answers: { [question.questionId]: [value!] } }));
         if (!receipt.result) {
-          this.store.resources.patchStatus<ChiefSpec, ChiefStatus>(resource, id, { phase: "failed",
+          this.store.conversations.update(resource, { phase: "failed",
             messages: [inbound, message(input.conversationId, "这个问题已失效，答复没有继续执行。请重新交办。")] });
         }
         return inbound;
       }
       const notice = message(input.conversationId, "请先明确回复当前问题的选项（确认 / 拒绝），也可以从网页取消这次等待。");
-      this.store.resources.create<ChiefSpec, ChiefStatus>({ type: CHIEF_TYPE, name: id,
-        spec: { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel" }, status: { phase: "done", messages: [inbound, notice] } });
+      this.store.conversations.submit(id, { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel" }, { phase: "done", messages: [inbound, notice] });
       return inbound;
     }
-    this.store.resources.create<ChiefSpec, ChiefStatus>({ type: CHIEF_TYPE, name: id,
-      spec: { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel" }, status: { messages: [inbound] } });
-    this.wake(CHIEF_TYPE, id);
+    this.store.conversations.submit(id, { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel" }, { messages: [inbound] });
+    this.wake(CONVERSATION_TYPE, conversationKey(input.conversationId));
     this.log.info({ conversationId: input.conversationId, inputId: id }, "Accepted Chief input");
     return inbound;
   }

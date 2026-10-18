@@ -1,7 +1,7 @@
 import type { PluginContext, Resource } from "@compforge/aide-plugin";
 import { Connectors } from "../../connectors/index.ts";
 import { loadWatches, type Watch } from "./source-config.ts";
-import { CHIEF_TYPE, digest, type ChiefSpec, type ChiefStatus } from "./chief-model.ts";
+import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "./chief-model.ts";
 
 export const SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "RequirementSource" } as const;
 interface SourceStatus { seen?: Record<string, string>; lastObservedAt?: string; error?: string | null }
@@ -17,11 +17,11 @@ export async function observeRequirements(context: Pick<PluginContext, "resource
     if (seen[identity] === fingerprint) continue;
     if (requirement.state === "completed" || requirement.state === "closed") { seen[identity] = fingerprint; continue; }
     const name = digest([resource.metadata.uid, identity, fingerprint]);
-    if (!await context.resources.get({ ...CHIEF_TYPE, namespace: "v1", name })) {
-      await context.resources.create<ChiefSpec, ChiefStatus>(CHIEF_TYPE, { name, spec: {
+    if (!await context.resources.get({ ...INPUT_TYPE, namespace: "aide-system", name })) {
+      await context.resources.create<InputSpec, InputStatus>(INPUT_TYPE, { name, spec: {
         conversationId: resource.spec.conversationId, origin: "source",
         text: "发现分配给用户的需求或其变化。读取详情与相关工作，判断是否需要通知、询问或推进已有委托。",
-        discovery: { watch: resource.spec, requirement },
+        observation: { watch: resource.spec, requirement },
       } });
       discovered++;
     }

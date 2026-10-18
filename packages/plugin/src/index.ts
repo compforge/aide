@@ -169,3 +169,5 @@ export type {
   TurnSummary,
   TurnSummaryToolCall,
 } from "./snapshot.ts";
+export { CONVERSATION_TYPE, INPUT_TYPE } from "./conversation.ts";
+export type { Conversation, ConversationMessage, InputSpec, InputStatus, InputQuestion } from "./conversation.ts";

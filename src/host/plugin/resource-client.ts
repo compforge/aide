@@ -42,6 +42,8 @@ export type ResourceClientChange = {
 );
 
 export interface AideResourceAccess {
+  create?<S, T>(type: ResourceType, name: string, spec: S): Readonly<Resource<S, T>>;
+  patchStatus?<S, T>(resource: Readonly<Resource<S, T>>, patch: Partial<T>): Readonly<Resource<S, T>>;
   handles(type: ResourceType): boolean;
   get<TSpec, TStatus>(
     ref: ResourceRef,
@@ -153,6 +155,10 @@ export function createResourceClient(
         spec: TSpec;
       },
     ) {
+      if (aideResources?.handles(type)) {
+        if (!aideResources.create) throw new Error(`Cannot create builtin ${type.kind}`);
+        return aideResources.create<TSpec, TStatus>(type, init.name, init.spec);
+      }
       assertCanCreateType?.(type);
       const created = deepFreeze(
         store.create<TSpec, TStatus>({
@@ -239,6 +245,10 @@ export function createResourceClient(
       resource: Readonly<Resource<TSpec, TStatus>>,
       patch: Partial<TStatus>,
     ) {
+      if (aideResources?.handles(resource)) {
+        if (!aideResources.patchStatus) throw new Error(`Cannot update builtin ${resource.kind}`);
+        return aideResources.patchStatus(resource, patch);
+      }
       assertOwned(resource);
       const patched = deepFreeze(
         store.patchStatus<TSpec, TStatus>(

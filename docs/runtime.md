@@ -4,7 +4,7 @@ Aide 通过 Channel 接收用户消息，以 Plugin 表达业务职责，由 Hos
 
 ```text
 Aide Host（主进程）
-├── 网页 / 飞书 Channel → ChiefInput
+├── 网页 / 飞书 Channel → Input
 ├── Aide Session / Channel / Controller
 │   ├── PiAdapter → Chief → 对话 / Connector / Work 工具
 │   └── CodexAdapter → codex app-server → CLI
@@ -13,7 +13,7 @@ Aide Host（主进程）
              ⇅ IPC
 Plugin Runner（独立 Bun 子进程）
 └── personal Plugin
-    ├── Source Controller → Connector → ChiefInput
+    ├── Source Controller → Connector → Input
     ├── Chief Controller → verbs.harness / ask / confirm
     └── Work Controller   → verbs.harness → 推进 Task / Routine
 ```
@@ -38,8 +38,8 @@ Aide 当前装配一个常驻 Session、一个 personal Instance、一个 Codex 
 
 ## Personal 工作流程
 
-1. Channel 按会话和消息 id 去重，持久化 ChiefInput 并立即返回回执。Source 按外部身份与观察指纹去重，同样提交 ChiefInput。
-2. Chief Controller 通过 Harness 调用 Pi。普通问答直接进入消息 outbox；需要跟进时由 Work 工具创建、读取、更新或删除工作。Task 与 Routine 共用 Work 身份，`spec.kind` 区分两类，转换保留 uid 与历史。Chief 的问题通过 Core ask/confirm 等待答复，模型执行位先释放。
+1. Channel 按会话和消息 id 去重，持久化 Input 并立即返回回执。Source 按外部身份与观察指纹去重，同样提交 Input。
+2. Chief Controller 观察内置 Conversation 的变化，按会话串行消费待处理 Input，通过 Harness 调用 Pi。普通问答直接进入消息 outbox；需要跟进时由 Work 工具创建、读取、更新或删除工作。Task 与 Routine 共用 Work 身份，`spec.kind` 区分两类，转换保留 uid 与历史。Chief 的问题通过 Core ask/confirm 等待答复，模型执行位先释放。
 3. Work Controller 观察 ready 或已到期的 scheduled，先保存 running，再请求 Harness 执行。正常结果、问题和状态一起写入 status。IPC 等待期间用户可能更新指令，提交结果前按 uid 重新读取资源，保留最新指令和暂停状态；版本冲突只重试提交，不重复执行外部工作。
 4. ask 保存为 waiting 并结束本次调用，用户回答再唤醒。wait 返回动态唤醒时间；Routine 单次完成后保留安排，Task 则结束。事件触发改变 Work，并经过同一队列和 Reconcile。
 
@@ -47,7 +47,7 @@ Chief 输入执行失败或被中断后标记 failed，不自动重放工具。�
 
 宿主端使用 Aide 的 `replaceSpec` 和 `patchStatus` 顺序提交用户更新；status、回复和输入去重记录在同一次 status 写入中提交。没有增加跨 spec/status 的事务接口。
 
-普通对话回复保存在 ChiefInput Resource；网页读取 ChiefInput / Work / Conversation outbox 及 Core 问题投影。消息是持久事实，浏览器关闭不影响服务器工作。按绿地方式开发，不迁移早期 Aide 数据布局。
+Conversation / Input / Message 由 Host 的 ConversationStore 持久化，内置 Resource 只是访问和调度投影。Channel Input 引用 Message；Source Input 保存观察；输入状态与回复消息一起提交。网页读取 Conversation 消息、Work outbox 及 Core 问题投影。消息是持久事实，浏览器关闭不影响服务器工作。按绿地方式开发，不迁移早期 Aide 数据布局。
 
 ## 生命周期与故障
 

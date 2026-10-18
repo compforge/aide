@@ -1,31 +1,29 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
 import type { ResourceClientChange } from "../../src/host/plugin/resource-client.ts";
 import { WorkSchema, type Message, type Work } from "./model.ts";
-import { CHIEF_TYPE } from "./chief-model.ts";
+import { ConversationStore } from "../../src/host/conversation/store.ts";
 
 export { WORK_TYPE, toWork, type WorkResource } from "./resources.ts";
-import { WORK_TYPE, CONVERSATION_TYPE, toWork, type WorkSpec, type WorkStatus, type Delivery } from "./resources.ts";
+import { WORK_TYPE, toWork, type WorkSpec, type WorkStatus, type Delivery } from "./resources.ts";
 const delivery = (): Delivery => ({ messages: [], inputs: [], events: [] });
 let lastMessageTime = 0;
 
 /**
- * @spec Work Resources are the sole work-state authority. Replies and input receipts commit in the same Resource.
+ * @spec Work Resources own work state and its outbox. ConversationStore owns chat and retains deleted work delivery receipts.
  * @why A per-resource outbox preserves results without a second state store or cross-file transaction.
  * @link docs/runtime.md
  */
 export class Store {
-  constructor(readonly resources: PluginResourceStore, private readonly changed: (change: ResourceClientChange) => void) {
+  constructor(readonly resources: PluginResourceStore, private readonly changed: (change: ResourceClientChange) => void, readonly conversations: ConversationStore) {
     for (const item of this.read().messages) lastMessageTime = Math.max(lastMessageTime, Date.parse(item.at));
   }
 
   read(): { works: Work[]; messages: Message[] } {
     const works = this.resources.list<WorkSpec, WorkStatus>(WORK_TYPE);
-    const conversations = this.resources.list<{ conversationId: string }, Delivery>(CONVERSATION_TYPE);
-    const inputs = this.resources.list<unknown, Partial<Delivery>>(CHIEF_TYPE);
     return {
       works: works.filter((resource) => !resource.metadata.deletionTimestamp).map(toWork),
-      messages: [...new Map([...works, ...conversations, ...inputs].flatMap((resource) => resource.status.messages ?? []).map((item) => [item.id, item])).values()]
+      messages: [...new Map([...works.flatMap((resource) => resource.status.messages ?? []), ...this.conversations.list().flatMap((item) => item.messages)].map((item) => [item.id, item])).values()]
         .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)),
     };
   }
@@ -33,11 +31,11 @@ export class Store {
   get(id: string): Work { return toWork(this.resources.get<WorkSpec, WorkStatus>(WORK_TYPE, id)); }
 
   response(key: string): Message | undefined {
-    for (const type of [WORK_TYPE, CONVERSATION_TYPE]) {
-      for (const resource of this.resources.list<unknown, Delivery>(type)) {
-        const receipt = resource.status.inputs?.find((input) => input.key === key);
-        if (receipt) return resource.status.messages.find((item) => item.id === receipt.responseId);
-      }
+    const archived = this.conversations.response(key);
+    if (archived) return archived;
+    for (const resource of this.resources.list<unknown, Delivery>(WORK_TYPE)) {
+      const receipt = resource.status.inputs?.find((input) => input.key === key);
+      if (receipt) return resource.status.messages.find((item) => item.id === receipt.responseId);
     }
     return undefined;
   }
@@ -49,16 +47,7 @@ export class Store {
   /** @spec Deleting work retains its channel outbox and accepted-input receipts. In-flight results cannot recreate it. */
   delete(id: string): void {
     const current = this.resources.get<WorkSpec, WorkStatus>(WORK_TYPE, id);
-    const name = createHash("sha256").update(current.spec.conversationId).digest("hex");
-    const conversation = this.resources.find<{ conversationId: string }, Delivery>(CONVERSATION_TYPE, name);
-    const previous = conversation?.status ?? delivery();
-    const status: Delivery = {
-      messages: [...new Map([...previous.messages, ...current.status.messages].map((item) => [item.id, item])).values()],
-      inputs: [...new Map([...previous.inputs, ...current.status.inputs].map((item) => [item.key, item])).values()],
-      events: previous.events,
-    };
-    if (conversation) this.replace(conversation, conversation.spec, status);
-    else this.resources.create({ type: CONVERSATION_TYPE, name, spec: { conversationId: current.spec.conversationId }, status });
+    this.conversations.archive(current.spec.conversationId, current.status.messages, current.status.inputs);
     // Archive first: a crash can duplicate retained messages, but cannot lose a receipt.
     for (const update of this.resources.requestDeletion(WORK_TYPE, id)) {
       this.changed({ kind: "deletion-requested", pluginInstanceId: this.resources.pluginInstanceId, ...update });
@@ -93,14 +82,7 @@ export class Store {
   }
 
   reply(conversationId: string, messages: Message[], key: string): void {
-    const name = createHash("sha256").update(conversationId).digest("hex");
-    const current = this.resources.find<{ conversationId: string }, Delivery>(CONVERSATION_TYPE, name);
-    const previous = current?.status ?? delivery();
-    const status = { ...previous, messages: [...previous.messages, ...messages],
-      inputs: [...previous.inputs, { key, responseId: messages.at(-1)!.id }],
-    };
-    if (current) this.replace(current, current.spec, status);
-    else this.resources.create({ type: CONVERSATION_TYPE, name, spec: { conversationId }, status });
+    this.conversations.archive(conversationId, messages, [{ key, responseId: messages.at(-1)!.id }]);
   }
 }
 
