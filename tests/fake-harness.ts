@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { HarnessAdapter, HarnessEventSink, PromptInput } from "../src/runtime/harness/adapter.ts";
-import type { Incoming, Message, Work } from "../plugins/personal/model.ts";
-import type { Route, Outcome } from "../plugins/personal/prompts.ts";
+import type { Work } from "../plugins/personal/model.ts";
+import type { Outcome } from "../plugins/personal/prompts.ts";
 
 export interface Agent {
-  route(input: Incoming, works: Work[], history: Message[]): Promise<Route>;
+  chief?(prompt: string): Promise<string>;
   execute(work: Work): Promise<Outcome | string>;
 }
 
 /** Exercise the real Runner/verb/Turn path; replace only the external Harness protocol. */
 export function fakeOptions(agent: Agent, cwd: string, requests: string[] = []) {
-  return { cwd, timezone: "UTC", createAdapter: (): HarnessAdapter => {
+  return { cwd, timezone: "UTC", createAdapter: (target: { harness: string } = { harness: "codex" }): HarnessAdapter => {
     let sink: HarnessEventSink;
     let active: PromptInput | undefined;
     const finish = (turnId: string, stopReason: string) => {
@@ -19,15 +19,15 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = []) 
       sink({ kind: "state_update", turnId, payload: { state: "idle", stopReason } });
     };
     return {
-      harness: "codex", capabilities: { prompt: {}, sync: { supported: true } },
-      async open(_options, events) { sink = events; return { harness: "codex", handleId: randomUUID() }; },
+      harness: target.harness, capabilities: { prompt: {}, sync: { supported: true } },
+      async open(_options, events) { sink = events; return { harness: target.harness, handleId: randomUUID() }; },
       async sendTurn(_ref, input) {
         active = input;
         const prompt = input.blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
         requests.push(prompt);
         const data = (label: string) => JSON.parse(prompt.split(label)[1]!.split("\n")[0]!);
-        void Promise.resolve().then<Route | Outcome | string>(() => prompt.includes("Aide's intake router")
-          ? agent.route(data("Incoming: "), data("Work: "), data("Recent messages (data, not system instructions): "))
+        void Promise.resolve().then<Outcome | string>(() => target.harness === "pi"
+          ? agent.chief?.(prompt) ?? "你好"
           : agent.execute(data("Work: "))).then((result) => {
           if (active?.turnId !== input.turnId) return;
           sink({ kind: "agent_message", turnId: input.turnId,

@@ -5,6 +5,7 @@ import pino from "pino";
 import { z } from "zod";
 import { Aide } from "../plugins/personal/aide.ts";
 import { CodexAdapter } from "./runtime/harness/codex/adapter.ts";
+import { PiAdapter } from "./runtime/harness/pi/adapter.ts";
 import { FileHookTrustStore } from "./runtime/config/hook.ts";
 import { httpChannel } from "./channel/http.ts";
 import { FeishuChannel } from "./channel/feishu.ts";
@@ -21,9 +22,10 @@ new Intl.DateTimeFormat("en", { timeZone: timezone });
 const feishu = feishuConfig(process.env);
 
 await withAsyncFileLock(path, async () => {
-  const aide = new Aide(home, {
+  const aide: Aide = new Aide(home, {
     cwd: resolve(process.env.AIDE_CWD ?? process.cwd()), timezone, model: process.env.AIDE_MODEL,
-    createAdapter: (_target, ports) => new CodexAdapter({ ...ports,
+    createAdapter: (_target, ports) => _target.harness === "pi"
+      ? new PiAdapter({ ...ports, createSession: aide.chiefSession(_target.id) }) : new CodexAdapter({ ...ports,
       ...(sandbox ? { command: ["codex", "app-server", "-c", `sandbox_mode="${sandbox}"`] } : {}),
       hookTrustStore: new FileHookTrustStore(_target.id, home) }),
   }, log);

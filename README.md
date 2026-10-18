@@ -2,11 +2,11 @@
 
 Aide 是运行在自己服务器上的个人 Agent。它接下临时交办，把持续关注和定期处理保存为长期安排，再由时间或事件推动执行；需要补充信息时向用户提问，收到回答后继续。
 
-当前提供可运行的单用户原型：网页和飞书单聊 Channel、Task / Routine、Plugin Controller runtime、Codex Harness 和 Resource 文件持久化。不同 Channel 共用同一条请求与执行链路。
+当前提供可运行的单用户原型：网页和飞书单聊 Channel、Task / Routine、Chief（内置 Pi Agent）、Meego / Forge Connector、Plugin Controller runtime、Codex Harness 和 Resource 文件持久化。不同 Channel 共用同一条请求与执行链路。
 
 ## 启动
 
-使用 Node.js 22.19+ 安装依赖；服务运行于随依赖安装的 Bun 1.4.2。还需要已安装、完成登录的 Codex CLI。执行环境中的 CLI（如 lark-cli、bytedcli）及其登录态直接供 Codex 使用。
+使用 Node.js 22.19+ 安装依赖；服务运行于随依赖安装的 Bun 1.4.2。还需要配置好模型的 Pi（`~/.pi/agent`），以及已安装、完成登录的 Codex CLI。Chief 使用 Pi 接话；交办的开发工作由 Codex 执行。执行环境中的 CLI 及其登录态直接供 Agent 使用。
 
 ```sh
 npm ci
@@ -25,11 +25,12 @@ npm start
 | `AIDE_CWD` | CLI 执行工作目录，默认启动目录 |
 | `AIDE_PORT` | 本地端口，默认 `7433` |
 | `AIDE_TIMEZONE` | 默认时区，默认服务器时区；可设 `Asia/Shanghai` |
+| `AIDE_CONNECTORS` | Connector / Source 配置文件，默认 `$AIDE_HOME/connectors.json` |
 | `AIDE_MODEL` | Codex 模型，默认沿用 Codex 配置 |
 | `AIDE_SANDBOX` | 执行时的 Codex sandbox，未设时沿用 Codex 默认配置；可选 `read-only`、`workspace-write`、`danger-full-access` |
 | `LOG_LEVEL` | 结构化日志级别，默认 `info` |
 
-例如：`AIDE_CWD=/path/to/work AIDE_TIMEZONE=Asia/Shanghai npm start`。AI 执行统一由 Harness 提供，权限沿用 Codex 配置、执行环境和 CLI。请求识别的提示词禁止执行工作或调用工具。
+例如：`AIDE_CWD=/path/to/work AIDE_TIMEZONE=Asia/Shanghai npm start`。AI 能力由 Harness 提供，工具使用执行环境中已有的配置和凭证。Chief 可以直接查信息、回答问题，也可以按需操作 Work。
 
 ## 飞书单聊
 
@@ -48,7 +49,7 @@ curl -s 'http://127.0.0.1:7433/work?conversationId=me'
 curl -s 'http://127.0.0.1:7433/messages?conversationId=me'
 ```
 
-POST 返回识别后的回复，执行在后台继续。GET `/messages` 读取持久化的 Aide 消息，包括异步结果和问题；加 `after=<message-id>` 可增量读取，`role=all` 可读取包括用户输入的完整对话。飞书 Channel 独立记录已投递消息，将结果送回原会话。用户回答仍提交到 `/messages`，使用相同 `conversationId` 和新的消息 `id`。
+POST 返回已持久化的用户消息回执，Chief 在后台处理，答案异步出现。GET `/messages` 读取持久化的 Aide 消息，包括异步结果和问题；加 `after=<message-id>` 可增量读取，`role=all` 可读取包括用户输入的完整对话。飞书 Channel 独立记录已投递消息，将结果送回原会话。用户回答仍提交到 `/messages`，使用相同 `conversationId` 和新的消息 `id`。
 
 入站消息的 `id` 在会话内用于投递去重；重试同一消息应沿用原 id。不同会话的工作分别匹配，但它们仍属于同一个人的 Aide。
 
@@ -74,13 +75,13 @@ Task 表示有限目标，Routine 表示持续职责。请求可以创建工作�
 
 Reconcile 调用 Harness 推进工作。执行结果分为完成、询问用户和等待指定时间。Routine 的“完成”只结束本次执行，之后继续等待下一次触发。问答存入状态，不依赖一个长期挂起的调用栈。
 
-主动发现通过带有明确关注目标的 Routine 表达：定时或事件唤醒、读取 CLI 信息、对照历史、通知有价值的变化。当前可建议创建后续 Task / Routine，用户再通过消息交办；尚未实现自动派生工作。
+主动发现可以由 Routine 执行，也可由 Source 观察外部系统。内置需求 Source 定期读取 Meego 中配置负责人名下的近期需求，去重后交给 Chief；Chief 判断是否通知、询问或创建／更新 Work。连接器配置、问答机制与当前覆盖限制见 [Chief 与主动发现](docs/chief.md)。
 
-工作保存在 `Work` Resource 中，`spec.kind` 区分 Task 与 Routine。Plugin Manager 统一管理 Controller、Source、Watch、队列、cron、动态唤醒和重试；每个 Resource 的 status、回复和投递去重记录一起原子落盘，网页读取这些记录的投影。运行机制与扩展入口见 [runtime 设计](docs/runtime.md)。
+工作保存在 `Work` Resource 中，`spec.kind` 区分 Task 与 Routine。Plugin Manager 统一管理 Controller、Source、Watch、队列、cron、动态唤醒和重试；业务回复随 Resource status 保存，问题由原有 Core Interaction 持久化，Channel 从两者投影消息。运行机制与扩展入口见 [runtime 设计](docs/runtime.md)。
 
 Controller 默认总执行容量为 1；等待 Harness verb 时释放执行位，同一个 Resource 始终串行。暂停阻止后续推进，不能撤销已执行的 CLI 操作。关机错过的时间触发恢复后合并执行一次；运行中崩溃或调用失败会标为 `uncertain`。执行已结束、但最终答复无法解析或校验时标为 `invalid_result`，网页显示“结果解析失败”。这两种情况都由用户核对执行记录后明确要求继续，基础设施 Reconcile 重试不会自动重放业务执行。
 
-personal Plugin 在独立 Worker 中通过 `context.verbs.harness` 请求执行。执行内核通过 Session、Lane、HarnessInvocation 和 Turn 管理执行，Codex 使用 `app-server` 协议；Aide 注入当前工作和最近 20 条工作历史。请求识别超时为 1 分钟，单次执行为 15 分钟。尚未提供通用长期记忆、完整上下文压缩或多实例部署。
+personal Plugin 在独立 Worker 中通过 `context.verbs.harness` 请求执行。执行内核通过 Session、Lane、HarnessInvocation 和 Turn 管理执行，Codex 使用 `app-server` 协议；Aide 注入当前工作和最近 20 条工作历史。Chief 每轮执行超时为 3 分钟，问答等待上限为 24 小时，单次 Work 执行为 15 分钟。尚未提供通用长期记忆、完整上下文压缩或多实例部署。
 
 ## Linux 常驻部署
 

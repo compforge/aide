@@ -70,7 +70,7 @@ test("Work service writes wake the existing Worker and reconcile; deletion durin
   let started!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const running = new Promise<void>((resolve) => { started = resolve; });
-  const aide = new Aide(root, fakeOptions({ route: async () => { throw new Error("No intake classification expected"); },
+  const aide = new Aide(root, fakeOptions({ chief: async () => { throw new Error("No conversation expected"); },
     execute: async () => { started(); await gate;
       return { action: "done", summary: "checked", notification: "完成", question: null, nextAt: null }; },
   }, root), log);

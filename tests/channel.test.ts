@@ -11,16 +11,13 @@ import { httpChannel } from "../src/channel/http.ts";
 import type { InputRequest } from "../src/runtime/message/types.ts";
 import type { InteractionResult } from "../src/runtime/interaction/types.ts";
 
-test("HTTP failed intake -> explicit retry -> persisted task -> execution -> outgoing message", async (t) => {
+test("HTTP accepts Chief input durably and exposes asynchronous failure without replay", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-channel-"));
   const requests: string[] = [];
   let routes = 0;
   const log = pino({ level: "silent" });
   const aide = new Aide(dir, fakeOptions({
-    route: async () => {
-      if (++routes === 1) throw new Error("Temporary classification failure");
-      return { action: "create", kind: "task", workId: null, title: "工作总结", instruction: "读取今日工作并总结", trigger: null, response: "开始整理" };
-    },
+    chief: async () => { if (++routes === 1) throw new Error("Model failed"); return "今天完成了三件事"; },
     execute: async () => ({ action: "done", summary: "Read work log", notification: "今天完成了三件事", question: null, nextAt: null }),
   }, dir, requests), log);
   const server = httpChannel(aide, log);
@@ -51,26 +48,25 @@ test("HTTP failed intake -> explicit retry -> persisted task -> execution -> out
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "msg-1", conversationId: "me", text: "总结今日工作" }),
   });
-  assert.equal(failed.status, 503);
-  assert.match((await failed.json() as { error: string }).error, /尚未创建或更新事项/);
+  assert.equal(failed.status, 200);
+  await aide.settled();
+  assert.match(aide.messages().at(-1)!.text, /本次处理未完成/);
   assert.equal(aide.store.read().works.length, 0);
   const response = await fetch(`${url}/messages`, {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id: "msg-1", conversationId: "me", text: "总结今日工作" }),
+    body: JSON.stringify({ id: "msg-2", conversationId: "me", text: "总结今日工作" }),
   });
   assert.equal(response.status, 200);
   const ack = await response.json() as { id: string; workId: string };
   await aide.settled();
-  const outgoing = await (await fetch(`${url}/messages?conversationId=me&after=${ack.id}`)).json() as { text: string }[];
+  const outgoing = await (await fetch(`${url}/messages?conversationId=me&role=all&after=${ack.id}`)).json() as { text: string }[];
   assert.equal(outgoing.length, 1);
   assert.equal(outgoing[0]?.text, "今天完成了三件事");
   const history = await (await fetch(`${url}/messages?conversationId=me&role=all`)).json() as { role: string; text: string }[];
-  assert.equal(history.length, 3);
+  assert.equal(history.length, 4);
   assert.deepEqual(history[0], { ...history[0], role: "user", text: "总结今日工作" });
   const works = await (await fetch(`${url}/work?conversationId=me`)).json() as { status: string; id: string }[];
-  assert.equal(works[0]?.status, "done");
-  assert.equal(works[0]?.id, ack.workId);
-  assert.match(requests[2]!, /读取今日工作并总结/);
+  assert.deepEqual(works, []);
   assert.equal((await fetch(`${url}/messages?conversationId=me&after=missing`)).status, 400);
   assert.deepEqual(await (await fetch(`${url}/work?conversationId=other`)).json(), []);
 });
@@ -80,11 +76,11 @@ test("web answers the original Harness interaction and rejects stale or mismatch
   const log = pino({ level: "silent" });
   let decision: InteractionResult | undefined;
   const options = fakeOptions({
-    route: async () => ({ action: "reply", workId: null, kind: null, title: null, instruction: null, trigger: null, response: "已继续" }),
+    chief: async () => "已继续",
     execute: async () => { throw new Error("No work expected"); },
   }, dir);
   const aide = new Aide(dir, { ...options, createAdapter: (_target, ports) => {
-    const adapter = options.createAdapter();
+    const adapter = options.createAdapter(_target);
     const open = adapter.open.bind(adapter);
     adapter.open = async (...args) => {
       decision = await ports.openInteraction({ kind: "hook_trust", harnessName: "Test Harness", hooks: [

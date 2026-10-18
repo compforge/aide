@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { join } from "node:path";
 import type { Logger } from "pino";
 import type { ResourceType } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/runtime/plugin/manager.ts";
@@ -6,18 +6,18 @@ import { Channel, type ChannelControllerOptions } from "../../src/runtime/channe
 import { SessionStore, type SessionHandle } from "../../src/runtime/store/store.ts";
 import { PluginResourceStore } from "../../src/runtime/plugin/resource.ts";
 import { PluginSupervisor } from "../../src/runtime/plugin/runner/index.ts";
-import { INTAKE_TYPE } from "./resources.ts";
-import type { IntakeSpec, IntakeStatus } from "./plugin.ts";
 import { PluginInstanceStore } from "../../src/runtime/plugin/instance.ts";
-import { RouteSchema, type Route } from "./prompts.ts";
-import { IncomingSchema, type Incoming, type Message, type Work } from "./model.ts";
-import { newWork, changeWork, WorkService } from "./work.ts";
+import { IncomingSchema, type Incoming, type Message } from "./model.ts";
+import { WorkService } from "./work.ts";
 import { message, Store, WORK_TYPE } from "./store.ts";
+import { CHIEF_TYPE, chiefTarget, digest, type ChiefSpec, type ChiefStatus } from "./chief-model.ts";
+import { chiefTools } from "../../agent/pi/chief-tools.ts";
+import { createPiAgent, type PiAgentOptions } from "../../agent/pi/agent.ts";
+import type { PiSessionFactory } from "../../src/runtime/harness/pi/adapter.ts";
+import { Connectors } from "../../connectors/index.ts";
+import { loadWatches } from "./source-config.ts";
 
-/** Classification failed before any personal work was created or updated. */
-export class IntakeError extends Error {}
-
-/** Channel intake changes desired state; the personal Plugin alone reconciles Work. */
+/** Channels and Sources submit durable input; Chief decides whether Work is needed. */
 export class Aide {
   readonly store: Store;
   readonly plugins: Manager;
@@ -28,8 +28,10 @@ export class Aide {
   readonly channel: Channel;
   private readonly session: SessionHandle;
   private readonly pending = new Set<Promise<unknown>>();
+  private readonly conversations = new Map<string, string>();
+  private readonly targets = [{ id: "default", harness: "codex" }];
 
-  constructor(home: string, private readonly options: {
+  constructor(private readonly home: string, private readonly options: {
     cwd: string; timezone: string; model?: string;
     createAdapter: ChannelControllerOptions["createAdapter"];
   }, private readonly log: Logger) {
@@ -37,7 +39,7 @@ export class Aide {
     const previous = sessions.listSessions({ cwd: options.cwd })[0];
     this.session = previous ? sessions.openSession(previous.aideSessionId)
       : sessions.createSession({ cwd: options.cwd, title: "Aide" });
-    const target = { id: "default", harness: "codex" };
+    const target = this.targets[0]!;
     this.session.setHarnessTarget(target.id, { harnessTargetId: target.id, harness: target.harness,
       ...(options.model ? { model: options.model } : {}) });
     const instances = new PluginInstanceStore({ session: this.session });
@@ -46,8 +48,8 @@ export class Aide {
     }
     this.channel = new Channel({ session: this.session,
       controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter,
-        resolveTarget: (id) => id === target.id ? target : undefined },
-      plugins: { instances, harnessTargets: [target], selectedHarnessTargetId: () => target.id,
+        resolveTarget: (id) => this.targets.find((item) => item.id === id) },
+      plugins: { instances, harnessTargets: this.targets, selectedHarnessTargetId: () => target.id,
         harnessInvocationGate: () => "auto_approve", pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => ({ pluginId, version,
           entryUrl: new URL("./plugin.ts", import.meta.url).href }),
@@ -57,6 +59,40 @@ export class Aide {
     this.plugins = this.channel.pluginManager!;
     this.store = new Store(new PluginResourceStore({ session: this.session, pluginInstanceId: "personal" }),
       ({ resource }) => this.wake(resource, resource.metadata.name));
+    for (const input of this.store.resources.list<ChiefSpec, ChiefStatus>(CHIEF_TYPE)) this.registerConversation(input.spec.conversationId);
+    for (const watch of loadWatches()) this.registerConversation(watch.conversationId);
+  }
+
+  private registerConversation(conversationId: string): void {
+    const id = chiefTarget(conversationId);
+    if (this.conversations.has(id)) return;
+    this.conversations.set(id, conversationId);
+    this.targets.push({ id, harness: "pi" });
+    this.session.setHarnessTarget(id, { harnessTargetId: id, harness: "pi" });
+  }
+
+  /** Composition binds a Pi session to one conversation; the adapter remains business-agnostic. */
+  chiefSession(targetId: string, settings: Pick<PiAgentOptions, "agentDir" | "model"> = {}): PiSessionFactory {
+    const conversationId = this.conversations.get(targetId);
+    if (!conversationId) throw new Error("Unknown Chief target");
+    const active = () => {
+      const inputs = this.store.resources.list<ChiefSpec, ChiefStatus>(CHIEF_TYPE).filter((item) =>
+        item.spec.conversationId === conversationId && item.status.phase === "running");
+      if (inputs.length !== 1 || inputs[0]!.status.question || inputs[0]!.status.quietReason) throw new Error("Chief is not accepting further mutations in this turn");
+      return inputs[0]!;
+    };
+    const tools = chiefTools(Connectors.load(), (question) => {
+      const input = active();
+      this.store.resources.patchStatus<ChiefSpec, ChiefStatus>(input, input.metadata.name, { question },
+        { expectedResourceVersion: input.metadata.resourceVersion });
+    }, (quietReason) => {
+      const input = active();
+      if (input.spec.origin !== "source") throw new Error("Only Source observations can be dismissed silently");
+      this.store.resources.patchStatus<ChiefSpec, ChiefStatus>(input, input.metadata.name, { quietReason },
+        { expectedResourceVersion: input.metadata.resourceVersion });
+    });
+    return (options) => createPiAgent({ ...options, ...settings, work: this.work(conversationId),
+      sessionDir: join(this.home, "pi-sessions"), tools, beforeWorkMutation: () => { active(); } });
   }
 
   start(): Promise<void> { return this.starting ??= this.startOnce(); }
@@ -69,9 +105,20 @@ export class Aide {
     await this.channel.start();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin failed to start");
     for (const work of this.store.read().works) this.wake(WORK_TYPE, work.id);
+    for (const input of this.store.resources.list<ChiefSpec, ChiefStatus>(CHIEF_TYPE)) {
+      if (!input.status.phase) this.wake(CHIEF_TYPE, input.metadata.name);
+    }
   }
 
   private recoverInterrupted(): void {
+    for (const input of this.store.resources.list<ChiefSpec, ChiefStatus>(CHIEF_TYPE)) {
+      if (input.status.phase !== "running" && input.status.phase !== "waiting") continue;
+      this.store.resources.patchStatus<ChiefSpec, ChiefStatus>(input, input.metadata.name, {
+        phase: "failed", question: null, messages: [...input.status.messages ?? [],
+          message(input.spec.conversationId, "上次处理已中断，可能已有部分操作生效。请核对后重新交办。")],
+      });
+      this.log.warn({ inputId: input.metadata.name }, "Recovered interrupted Chief input without replay");
+    }
     for (const work of this.store.read().works) {
       if (work.status !== "running") continue;
       work.status = "uncertain"; work.nextAt = null;
@@ -97,57 +144,71 @@ export class Aide {
   receive(raw: Incoming): Promise<Message> {
     if (this.closed) return Promise.reject(new Error("Aide is shutting down"));
     const input = IncomingSchema.parse(raw);
-    const result = this.intake.then(async () => { await this.start(); return this.route(input); });
+    const result = this.intake.then(async () => { await this.start(); return this.submit(input); });
     this.intake = result.catch(() => {});
     return result;
   }
 
-  private async route(input: Incoming): Promise<Message> {
-    const key = JSON.stringify([input.conversationId, input.id]);
-    const existing = this.store.response(key);
-    if (existing) return existing;
-    const state = this.store.read();
-    if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable; restart Aide to recover");
-    const id = createHash("sha256").update(key).digest("hex");
-    const spec: IntakeSpec = { input, timezone: this.options.timezone,
-        works: state.works.filter((work) => work.conversationId === input.conversationId),
-        history: state.messages.filter((item) => item.conversationId === input.conversationId) };
-    const previous = this.store.resources.find<IntakeSpec, IntakeStatus>(INTAKE_TYPE, id);
-    if (!previous) this.store.resources.create<IntakeSpec, IntakeStatus>({ type: INTAKE_TYPE, name: id, spec, status: {} });
-    else if (previous.status.error && !previous.status.route) {
-      // @spec Explicit redelivery retries failed classification only; accepted input receipts never execute again.
-      // Refresh its snapshot because other work may have changed since the failed attempt.
-      this.store.resources.replaceSpec(INTAKE_TYPE, id, spec);
-      this.store.resources.patchStatus<IntakeSpec, IntakeStatus>(INTAKE_TYPE, id, { error: null });
-      this.log.info({ conversationId: input.conversationId, intakeId: id }, "Retrying failed intake");
-    }
-    await this.enqueue(INTAKE_TYPE, id);
-    const status = this.store.resources.get<IntakeSpec, IntakeStatus>(INTAKE_TYPE, id).status;
-    if (status.error) throw new IntakeError(`Intake failed: ${status.error}`);
-    const route = RouteSchema.parse(status.route);
-    const response = this.apply(input, route, key);
-    this.log.info({ conversationId: input.conversationId, workId: response.workId, action: route.action }, "Routed input");
-    return response;
+  /** Project original Core questions into the same channel outbox; delivery has its own dedup receipts. */
+  questions() {
+    const invocations = this.plugins.listHarnessInvocations();
+    return [...this.channel.projection.interactions.values()].flatMap((item) => {
+      if (item.request.request.kind !== "question" || !item.pluginContext) return [];
+      const invocation = invocations.find((entry) => entry.executionId === item.pluginContext!.executionId);
+      const conversationId = invocation?.harnessTargetId ? this.conversations.get(invocation.harnessTargetId) : undefined;
+      return conversationId ? [{ conversationId, request: item.request }] : [];
+    });
   }
 
-  private apply(input: Incoming, route: Route, key: string): Message {
-    let work: Work | undefined;
-    const now = new Date();
-    if (route.action === "create") {
-      work = newWork(input.conversationId, { kind: route.kind!, title: route.title!, instruction: route.instruction!, trigger: route.trigger }, now);
-    } else if (route.action !== "reply") {
-      work = this.store.read().works.find((item) => item.id === route.workId && item.conversationId === input.conversationId);
-      if (!work) throw new Error(`Unknown work in this conversation: ${route.workId}`);
-      work = changeWork(work, { revision: work.revision, action: route.action, note: input.text,
-        ...(route.action === "update" ? { changes: { kind: route.kind!, title: route.title!, instruction: route.instruction!, trigger: route.trigger } } : {}) }, now);
+  messages(): Message[] {
+    return [...this.store.read().messages, ...this.questions().map(({ conversationId, request }) => ({
+      id: request.messageId, conversationId, role: "aide" as const, at: request.createdAt, workId: null,
+      text: request.request.kind === "question" ? request.request.questions.map((question) =>
+        [question.question, ...(question.choices ?? []).map((choice) => `${choice.label} (${choice.value})`)].join("\n")).join("\n") : "",
+    }))].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  }
+
+  private async submit(input: Incoming): Promise<Message> {
+    const id = digest([input.conversationId, input.id]);
+    const previous = this.store.resources.find<ChiefSpec, ChiefStatus>(CHIEF_TYPE, id);
+    if (previous) return previous.status.messages?.[0] ?? message(input.conversationId, "已接收该消息");
+    if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
+    this.registerConversation(input.conversationId);
+    const inbound: Message = { ...message(input.conversationId, input.text), role: "user" };
+    const pending = this.questions().filter((item) => item.conversationId === input.conversationId && item.request.status === "pending");
+    const request = pending.length === 1 ? pending[0]!.request : undefined;
+    if (request?.request.kind === "question" && request.request.questions.length === 1) {
+      const question = request.request.questions[0]!;
+      const raw = input.text.trim();
+      let value = question.choices?.find((choice) => choice.value === raw || choice.label === raw)?.value;
+      if (!value && question.choices?.some((choice) => choice.value === "accept")) {
+        if (/^(同意|确认|可以|好的|是|yes|y)$/i.test(raw)) value = "accept";
+        if (/^(拒绝|不同意|不|否|不要|no|n)$/i.test(raw)) value = "decline";
+      }
+      if (!value && (!question.choices?.length || question.allowOther)) value = raw;
+      if (value) {
+        // Persist the reply identity before settling the Core Interaction. A redelivery cannot become a new command.
+        const resource = this.store.resources.create<ChiefSpec, ChiefStatus>({ type: CHIEF_TYPE, name: id,
+          spec: { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel", replyTo: request.messageId },
+          status: { phase: "done", messages: [inbound] } });
+        const receipt = await this.channel.resolveInteraction({ kind: "interaction_response", messageId: request.messageId },
+          async () => ({ kind: "question", outcome: "answered", answers: { [question.questionId]: [value!] } }));
+        if (!receipt.result) {
+          this.store.resources.patchStatus<ChiefSpec, ChiefStatus>(resource, id, { phase: "failed",
+            messages: [inbound, message(input.conversationId, "这个问题已失效，答复没有继续执行。请重新交办。")] });
+        }
+        return inbound;
+      }
+      const notice = message(input.conversationId, "请先明确回复当前问题的选项（确认 / 拒绝），也可以从网页取消这次等待。");
+      this.store.resources.create<ChiefSpec, ChiefStatus>({ type: CHIEF_TYPE, name: id,
+        spec: { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel" }, status: { phase: "done", messages: [inbound, notice] } });
+      return inbound;
     }
-    if (route.action === "create") work?.history.push({ at: now.toISOString(), role: "user", text: input.text });
-    const inbound = { ...message(input.conversationId, input.text, work?.id ?? null), role: "user" as const };
-    const response = message(input.conversationId, route.response, work?.id ?? null);
-    const messages: Message[] = [inbound, response];
-    if (work) this.store.save(work, messages, key);
-    else this.store.reply(input.conversationId, messages, key);
-    return response;
+    this.store.resources.create<ChiefSpec, ChiefStatus>({ type: CHIEF_TYPE, name: id,
+      spec: { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel" }, status: { messages: [inbound] } });
+    this.wake(CHIEF_TYPE, id);
+    this.log.info({ conversationId: input.conversationId, inputId: id }, "Accepted Chief input");
+    return inbound;
   }
 
   event(input: { id: string; conversationId: string; name: string; text: string }): number {
