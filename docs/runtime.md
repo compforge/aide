@@ -15,7 +15,8 @@ Plugin Runner（独立 Bun 子进程）
 └── personal Plugin
     ├── Source Controller → Connector → Input
     ├── Chief Controller → verbs.harness / ask / confirm
-    └── Work Controller   → verbs.harness → 推进 Task / Routine
+    ├── Task Controller   → verbs.harness → 推进有限目标
+    └── Routine Controller → verbs.harness → 推进本轮并安排下次触发
 ```
 
 ## 职责边界
@@ -26,7 +27,7 @@ Host 决定何时调度回调、保存 Resource 和执行事实，并负责 Harn
 
 Harness 消息的 `phase` 区分进度说明（`commentary`）与最终答复（`final`）。Adapter 保留提供方明确给出的阶段；没有阶段时保持未知，不根据消息位置或文本内容推断。Codex 的实时消息和历史导入共用同一映射。
 
-Turn 的 `agentText` 是整轮对话文本，用于上下文与查看记录；`finalText` 只包含明确标记的最终答复，随汇总持久化并经 Harness verb 交给 Plugin。Work Controller 仅解析 `finalText` 的 JSON，执行结束但答复缺失、格式或业务结果字段不合法时记录为 `invalid_result`，保留 Lane 和 Turn 线索。执行失败或中断仍记录为 `uncertain`。两者都等待用户明确继续，不自动重放外部动作。
+Turn 的 `agentText` 是整轮对话文本，用于上下文与查看记录；`finalText` 只包含明确标记的最终答复，随汇总持久化并经 Harness verb 交给 Plugin。Task / Routine Controller 仅解析 `finalText` 的 JSON，执行结束但答复缺失、格式或业务结果字段不合法时记录为 `invalid_result`，保留 Lane 和 Turn 线索。执行失败或中断仍记录为 `uncertain`。两者都等待用户明确继续，不自动重放外部动作。
 
 执行内核管理 Runner、Supervisor、IPC、注册与撤销、Resource、Controller、Source、Watch、cron、队列、容量、退避和 verb 生命周期。Harness 通过 Adapter 接入，Session Binding、HarnessInvocation、Turn 和事件流承载执行状态。
 
@@ -39,9 +40,15 @@ Aide 当前装配一个常驻 Session、一个 personal Instance、一个 Codex 
 ## Personal 工作流程
 
 1. Channel 按会话和消息 id 去重，持久化 Input 并立即返回回执。Source 按外部身份与观察指纹去重，同样提交 Input。
-2. Chief Controller 观察内置 Conversation 的变化，按会话串行消费待处理 Input，通过 Harness 调用 Pi。普通问答直接进入消息 outbox；需要跟进时由 Work 工具创建、读取、更新或删除工作。Task 与 Routine 共用 Work 身份，`spec.kind` 区分两类，转换保留 uid 与历史。Chief 的问题通过 Core ask/confirm 等待答复，模型执行位先释放。
-3. Work Controller 观察 ready 或已到期的 scheduled，先保存 running，再请求 Harness 执行。正常结果、问题和状态一起写入 status。IPC 等待期间用户可能更新指令，提交结果前按 uid 重新读取资源，保留最新指令和暂停状态；版本冲突只重试提交，不重复执行外部工作。
-4. ask 保存为 waiting 并结束本次调用，用户回答再唤醒。wait 返回动态唤醒时间；Routine 单次完成后保留安排，Task 则结束。事件触发改变 Work，并经过同一队列和 Reconcile。
+2. Chief Controller 观察内置 Conversation 的变化，按会话串行消费待处理 Input，通过 Harness 调用 Pi。普通问答直接进入消息 outbox；需要跟进时由 Work 工具创建、读取、更新或删除工作。Task 与 Routine 是独立自定义资源，Work 是它们的业务统称与工具视图。Chief 的问题通过 Core ask/confirm 等待答复，模型执行位先释放。
+3. Task 与 Routine 各自的 Controller 观察 ready 或已到期的 scheduled，先保存 running，再请求 Harness 执行。正常结果、问题和状态一起写入 status。IPC 等待期间用户可能更新指令，提交结果前按 uid 重新读取资源，保留最新指令和暂停状态；版本冲突只重试提交，不重复执行外部工作。
+4. ask 保存为 waiting 并结束本次调用，用户回答再唤醒。wait 返回动态唤醒时间；Routine 单次完成后保留安排，Task 则结束。事件触发更新匹配的 Routine，由 Routine Controller 推进。
+
+`task.ts` 与 `routine.ts` 分别拥有 Reconcile：Task 完成后进入 done，Routine 完成本轮后回到 scheduled，并按自己的触发规则计算下次时间。两者共享 personal 内部的 Harness 调用、结果校验、并发更新处理和 outbox 记录；这些辅助操作位于 `execution.ts`，不进入通用 Host / Runner。
+
+资源类型决定身份，spec 不另存 kind；Task 没有周期触发配置，Routine 必须有 cron 或事件触发。Work 工具与网页聚合这两类资源，对外仍返回 task / routine 分类。Chief 继续观察内置 Conversation。
+
+改变工作类型由 Chief 组合现有工具：读取原工作的目标与结果，创建目标类型的新工作，再按用户意图暂停或删除原工作。新工作使用独立 id 和执行 Lane，相关上下文写入指令；保留原工作可查看完整历史，删除则将已交付消息与输入回执归档到 Conversation。各步分别持久化，不承诺跨资源的原子转换；中断后应查询现状再继续。暂停和删除都不取消已经运行的外部动作。
 
 Chief 输入执行失败或被中断后标记 failed，不自动重放工具。同一消息 id 的重投只返回原入站回执；业务重试需要用户核对后新发消息。重启不恢复等待中的问答调用栈，Core 问题收口并提示重新交办。
 
@@ -59,6 +66,6 @@ Chief 每轮 Harness timeout 为 3 分钟，Core 问题为 24 小时，工作执
 
 ## 验证与诊断
 
-`npm run check` 执行类型检查和测试。内核测试覆盖 IPC、注册撤销、资源冲突、Source / Watch、调度、verb 等待与崩溃收口；业务测试通过真实 Worker 和模拟 Adapter 覆盖网页交办、问答恢复、转换、事件去重、并发更新及 Worker 被杀后的 uncertain 恢复。
+`npm run check` 执行类型检查和测试。内核测试覆盖 IPC、注册撤销、资源冲突、Source / Watch、调度、verb 等待与崩溃收口；业务测试通过真实 Worker 和模拟 Adapter 覆盖网页交办、两类资源的问答恢复、工作替换、事件去重、并发更新及 Worker 被杀后的 uncertain 恢复。
 
 HTTP 和 personal 宿主日志进入标准输出；Aide 执行与 Plugin 日志保存在 AIDE_HOME 下 Session 的 `session.log`，执行事实在 `session.jsonl`。Worker 激活日志记录 pid，可与服务进程区分。真实 Codex 和业务 CLI 连通需要部署后的单独验证。

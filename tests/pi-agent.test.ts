@@ -125,17 +125,25 @@ test("Pi answers directly without work and resumes its native history", { timeou
 });
 
 test("Pi executes all five Work tools through the SDK and keeps commentary out of finalText", { timeout: 30_000 }, async (t) => {
-  let id = "";
+  let id = "", routineId = "";
   const fixture = await setup(t, (_request, index) => {
-    const work = fixture.work.list()[0];
+    const works = fixture.work.list();
+    const work = works.find((item) => item.kind === "task");
+    const routine = works.find((item) => item.kind === "routine");
     if (work) id = work.id;
+    if (routine) routineId = routine.id;
     switch (index) {
       case 0: return { tool: "create_work", args: { kind: "task", title: "检查仓库", instruction: "检查 aide", trigger: null } };
       case 1: return { tool: "list_work", args: {} };
       case 2: return { tool: "read_work", args: { id } };
-      case 3: return { tool: "update_work", args: { id, revision: 1, action: "update",
-        changes: { kind: "routine", trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } } } };
-      case 4: assert.equal(work?.kind, "routine"); return { tool: "delete_work", args: { id, revision: 2 } };
+      case 3: return { tool: "update_work", args: { id, revision: 1, action: "pause" } };
+      case 4: assert.equal(work?.status, "paused"); return { tool: "create_work", args: {
+        kind: "routine", title: "定期检查仓库", instruction: "检查 aide", trigger: { cron: "0 9 * * *", timezone: "UTC", event: null },
+      } };
+      case 5: assert.notEqual(id, routineId); return { tool: "update_work", args: { id: routineId, revision: 1,
+        action: "update", changes: { title: "每天检查仓库" } } };
+      case 6: assert.equal(routine?.title, "每天检查仓库"); return { tool: "delete_work", args: { id, revision: 2 } };
+      case 7: return { tool: "delete_work", args: { id: routineId, revision: 2 } };
       default: return { text: "已完成创建、查询、更新和删除。" };
     }
   });
@@ -143,7 +151,7 @@ test("Pi executes all five Work tools through the SDK and keeps commentary out o
   assert.equal(summary.stopReason, "end_turn");
   assert.equal(summary.finalText, "已完成创建、查询、更新和删除。");
   assert.match(summary.agentText!, /我来处理/);
-  assert.deepEqual(summary.toolCalls.map((tool) => tool.status), Array(5).fill("completed"));
+  assert.deepEqual(summary.toolCalls.map((tool) => tool.status), Array(8).fill("completed"));
   assert.deepEqual(fixture.work.list(), []);
   assert.equal(fixture.events.filter((event) => event.kind === "state_update").length, 1);
 });

@@ -12,7 +12,7 @@ export type WorkDefinition = z.infer<typeof WorkDefinitionSchema>;
 export const WorkUpdateSchema = z.object({
   revision: z.number().int().positive(),
   action: z.enum(["update", "pause", "resume", "answer"]),
-  changes: WorkDefinitionSchema.partial().optional(),
+  changes: WorkDefinitionSchema.omit({ kind: true }).partial().optional(),
   note: z.string().trim().min(1).optional(),
 }).strict();
 export type WorkUpdate = z.infer<typeof WorkUpdateSchema>;
@@ -25,7 +25,7 @@ export function newWork(conversationId: string, definition: WorkDefinition, now 
     nextAt: nextOccurrence(desired.trigger, now), question: null, history: [] };
 }
 
-/** @spec User changes preserve Work identity; only the reconciler can declare execution complete. */
+/** @spec User changes preserve resource kind and identity; only the reconciler can declare execution complete. */
 export function changeWork(work: Work, update: WorkUpdate, now = new Date()): Work {
   const request = WorkUpdateSchema.parse(update);
   if (request.revision !== work.revision) throw new Error(`Work ${work.id} revision changed; read it again before updating`);
@@ -57,7 +57,7 @@ export function changeWork(work: Work, update: WorkUpdate, now = new Date()): Wo
 }
 
 /**
- * @spec Tools operate on the caller-bound conversation, never a model-supplied scope. Writes wake the existing Work reconciler.
+ * @spec Tools operate on the caller-bound conversation, never a model-supplied scope. Writes wake the corresponding Task or Routine reconciler.
  * @link docs/pi.md
  */
 export class WorkService {

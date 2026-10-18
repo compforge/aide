@@ -9,7 +9,8 @@ import { PluginSupervisor } from "../../src/host/plugin/runner/index.ts";
 import { PluginInstanceStore } from "../../src/host/plugin/instance.ts";
 import { IncomingSchema, type Incoming, type Message } from "./model.ts";
 import { WorkService } from "./work.ts";
-import { message, Store, WORK_TYPE } from "./store.ts";
+import { message, Store } from "./store.ts";
+import { workType } from "./resources.ts";
 import { CONVERSATION_TYPE, chiefTarget, digest } from "./chief-model.ts";
 import { conversationKey } from "../../src/host/conversation/store.ts";
 import { chiefTools } from "../../agent/pi/chief-tools.ts";
@@ -97,14 +98,14 @@ export class Aide {
 
   start(): Promise<void> { return this.starting ??= this.startOnce(); }
 
-  /** Bind agent tools to this host's existing Work persistence and reconciler. */
+  /** Bind agent tools to this host's Task/Routine persistence and reconcilers. */
   work(conversationId: string): WorkService { return new WorkService(this.store, conversationId, this.log); }
 
   private async startOnce(): Promise<void> {
     this.recoverInterrupted();
     await this.channel.start();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin failed to start");
-    for (const work of this.store.read().works) this.wake(WORK_TYPE, work.id);
+    for (const work of this.store.read().works) this.wake(workType(work.kind), work.id);
     for (const conversation of this.store.conversations.list()) {
       if (conversation.pendingInputIds.length) this.wake(CONVERSATION_TYPE, conversationKey(conversation.id));
     }
@@ -213,7 +214,7 @@ export class Aide {
     const key = JSON.stringify([input.conversationId, input.id]);
     let count = 0;
     for (const work of this.store.read().works) {
-      if (work.conversationId !== input.conversationId || work.trigger?.event !== input.name
+      if (work.kind !== "routine" || work.conversationId !== input.conversationId || work.trigger?.event !== input.name
         || !["scheduled", "ready", "running"].includes(work.status) || this.store.hasEvent(work.id, key)) continue;
       work.history.push({ at: new Date().toISOString(), role: "event", text: `${input.name}: ${input.text}` });
       if (work.status !== "running") work.status = "ready";
