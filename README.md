@@ -75,13 +75,13 @@ curl -s http://127.0.0.1:7433/events \
 
 ## 工作方式与边界
 
-Task 表示有限目标，Routine 表示持续职责。请求可以创建工作、补充已有工作、回答问题、暂停或继续，也可以更新类型完成 Task / Routine 转换，保留 id 和历史。匹配和意图识别由模型完成，不能保证每次判断正确；信息不足时应询问用户。
+Task 表示有限目标，Routine 表示持续职责。请求可以创建工作、补充已有工作、回答问题、暂停或继续，需要改变类型时，助手创建新的工作，再按意图暂停或删除原工作；新工作拥有独立 id。匹配和意图识别由模型完成，不能保证每次判断正确；信息不足时应询问用户。
 
 Reconcile 调用 Harness 推进工作。执行结果分为完成、询问用户和等待指定时间。Routine 的“完成”只结束本次执行，之后继续等待下一次触发。问答存入状态，不依赖一个长期挂起的调用栈。
 
 主动发现可以由 Routine 执行，也可由 Source 观察外部系统。内置需求 Source 定期读取 Meego 中配置负责人名下的近期需求，去重后交给 Chief；Chief 判断是否通知、询问或创建／更新 Work。连接器配置、问答机制与当前覆盖限制见 [Chief 与主动发现](docs/chief.md)。
 
-工作保存在 `Work` Resource 中，`spec.kind` 区分 Task 与 Routine。Host 主进程统一管理 Resource、调度、Harness 和用户交互；Plugin Runner 子进程执行插件的 Source、Reconcile 等回调，通过 IPC 请求宿主能力。业务回复随 Resource status 保存，问题由原有 Core Interaction 持久化，Channel 从两者投影消息。进程边界、运行机制与扩展入口见 [运行机制](docs/runtime.md)。
+Task 与 Routine 各自保存为独立 Resource，由各自的 Controller 推进；工具和网页统一将它们称为 Work。Host 主进程统一管理 Resource、调度、Harness 和用户交互；Plugin Runner 子进程执行插件的 Source、Reconcile 等回调，通过 IPC 请求宿主能力。业务回复随 Resource status 保存，问题由原有 Core Interaction 持久化，Channel 从两者投影消息。进程边界、运行机制与扩展入口见 [运行机制](docs/runtime.md)。
 
 Controller 默认总执行容量为 1；等待 Harness verb 时释放执行位，同一个 Resource 始终串行。暂停阻止后续推进，不能撤销已执行的 CLI 操作。关机错过的时间触发恢复后合并执行一次；运行中崩溃或调用失败会标为 `uncertain`。执行已结束、但最终答复无法解析或校验时标为 `invalid_result`，网页显示“结果解析失败”。这两种情况都由用户核对执行记录后明确要求继续，基础设施 Reconcile 重试不会自动重放业务执行。
 
@@ -127,4 +127,4 @@ ssh -N -L 7433:127.0.0.1:7433 user@your-server
 npm run check
 ```
 
-测试覆盖问答恢复、Task / Routine 转换、触发去重、调度恢复、并发输入与状态更新、HTTP 到 Harness 的流程，以及 Resource 乐观锁、级联删除、Source / Watch、Controller 重试、Plugin 激活回滚和共享容量。Personal 测试运行真实 Plugin Worker 与模拟 Harness Adapter；Pi 测试运行真实 SDK 与本地模拟模型服务，不需要登录，也不代表真实模型、飞书或业务 CLI 已验证。
+测试覆盖问答恢复、Task / Routine 独立生命周期、工作替换、触发去重、调度恢复、并发输入与状态更新、HTTP 到 Harness 的流程，以及 Resource 乐观锁、级联删除、Source / Watch、Controller 重试、Plugin 激活回滚和共享容量。Personal 测试运行真实 Plugin Worker 与模拟 Harness Adapter；Pi 测试运行真实 SDK 与本地模拟模型服务，不需要登录，也不代表真实模型、飞书或业务 CLI 已验证。

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PluginContext, ReconcileContext, Resource, Conversation } from "@compforge/aide-plugin";
 import { INPUT_TYPE, CONVERSATION_TYPE, chiefTarget, type InputSpec, type InputStatus } from "./chief-model.ts";
-import { WORK_TYPE, type Delivery } from "./resources.ts";
+import { WORK_TYPES, type Delivery } from "./resources.ts";
 
 /** @spec Chief inputs are durable before invoking tools; interrupted inputs are never replayed automatically.
  * @link docs/chief.md
@@ -39,7 +39,7 @@ async function processInput(context: PluginContext, execution: ReconcileContext,
   context.logger.info("Chief input started", { attributes: { conversationId: original.spec.conversationId, inputId: original.metadata.name, origin: original.spec.origin } });
   try {
     const currentConversation = await context.resources.get<Record<string, never>, Conversation>({ ...CONVERSATION_TYPE, ...conversation.metadata });
-    const works = await context.resources.list<unknown, Partial<Delivery>>(WORK_TYPE);
+    const works = (await Promise.all(WORK_TYPES.map((type) => context.resources.list<unknown, Partial<Delivery>>(type)))).flat();
     const history = [...(currentConversation?.status.messages ?? conversation.status.messages), ...works.flatMap((item) => item.status.messages ?? [])]
       .filter((item) => item.conversationId === original.spec.conversationId)
       .sort((a, b) => a.at.localeCompare(b.at)).slice(-30);

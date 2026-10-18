@@ -7,8 +7,8 @@ import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { Aide } from "../plugins/personal/aide.ts";
 import { Store, message } from "../plugins/personal/store.ts";
-import { WorkService, type WorkDefinition } from "../plugins/personal/work.ts";
-import { WORK_TYPE } from "../plugins/personal/resources.ts";
+import { WorkService, WorkUpdateSchema, type WorkDefinition } from "../plugins/personal/work.ts";
+import { TASK_TYPE, ROUTINE_TYPE, workType } from "../plugins/personal/resources.ts";
 import { SessionStore } from "../src/host/store/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -24,21 +24,23 @@ function setup(t: TestContext) {
   return { store, service: new WorkService(store, "me", log), writes: () => writes };
 }
 
-test("Work CRUD preserves identity, enforces revisions and conversation scope, and archives delivery on deletion", (t) => {
+for (const definition of [task, { ...task, kind: "routine" as const, trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } }])
+test(`${definition.kind} CRUD preserves identity, enforces revisions and conversation scope, and archives delivery on deletion`, (t) => {
   const { store, service, writes } = setup(t);
-  const work = service.create(task);
-  const uid = store.resources.get(WORK_TYPE, work.id).metadata.uid;
+  const work = service.create(definition);
+  const type = workType(definition.kind);
+  const uid = store.resources.get(type, work.id).metadata.uid;
   const response = message("me", "已接下", work.id);
   store.save(work, [response], "accepted-input");
   assert.equal(service.list().length, 1);
   const beforeRead = writes();
-  assert.equal(service.read(work.id).status, "ready");
+  assert.equal(service.read(work.id).kind, definition.kind);
   assert.equal(writes(), beforeRead);
   const updated = service.update(work.id, { revision: 1, action: "update",
-    changes: { kind: "routine", trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } } });
-  assert.equal(updated.kind, "routine");
-  assert.equal(updated.status, "scheduled");
-  assert.equal(store.resources.get(WORK_TYPE, work.id).metadata.uid, uid);
+    changes: { instruction: "检查更新后的 aide 仓库" } });
+  assert.equal(updated.kind, definition.kind);
+  assert.equal(updated.instruction, "检查更新后的 aide 仓库");
+  assert.equal(store.resources.get(type, work.id).metadata.uid, uid);
   assert.throws(() => service.update(work.id, { revision: 1, action: "pause" }), /revision changed/);
   assert.throws(() => service.delete(work.id, 1), /revision changed/);
   const other = new WorkService(store, "other", log);
@@ -55,7 +57,8 @@ test("Work tools validate schedules and answers without corrupting existing work
   const { store, service } = setup(t);
   assert.throws(() => service.create({ ...task, kind: "routine" }), /Routine needs/);
   const work = service.create(task);
-  assert.throws(() => service.update(work.id, { revision: 1, action: "update", changes: { kind: "routine" } }), /Routine needs/);
+  assert.throws(() => WorkUpdateSchema.parse({ revision: 1, action: "update", changes: { kind: "routine" } }), /Unrecognized key/);
+  assert.throws(() => service.update(work.id, { revision: 1, action: "update", changes: { trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } } }), /Task cannot/);
   assert.throws(() => service.update(work.id, { revision: 1, action: "answer", note: "aide" }), /waiting/);
   assert.equal(service.read(work.id).revision, 1);
   work.status = "waiting"; work.question = "哪个仓库？"; store.save(work);
@@ -85,5 +88,27 @@ test("Work service writes wake the existing Worker and reconcile; deletion durin
   release(); await aide.settled();
   assert.deepEqual(tools.list(), []);
   assert.equal(aide.store.read().messages.length, 0);
-  assert.equal(aide.store.resources.find(WORK_TYPE, work.id), undefined);
+  assert.equal(aide.store.resources.find(TASK_TYPE, work.id), undefined);
+});
+
+
+test("Work view aggregates separate Task and Routine resources without persisting spec.kind", (t) => {
+  const { store, service } = setup(t);
+  const finite = service.create(task);
+  const recurring = service.create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "changed" } });
+  const taskResource = store.resources.get(TASK_TYPE, finite.id);
+  const routineResource = store.resources.get(ROUTINE_TYPE, recurring.id);
+  assert.equal(taskResource.kind, "Task");
+  assert.equal(routineResource.kind, "Routine");
+  assert.equal("kind" in taskResource.spec, false);
+  assert.equal("kind" in routineResource.spec, false);
+  assert.equal("trigger" in taskResource.spec, false);
+  assert.equal((routineResource.spec.trigger as { event: string }).event, "changed");
+  assert.deepEqual(service.list().map((work) => work.kind).sort(), ["routine", "task"]);
+  assert.equal(store.resources.list({ apiVersion: TASK_TYPE.apiVersion, kind: "Work" }).length, 0);
+  const reply = message("me", "routine result", recurring.id);
+  store.save(recurring, [reply], "routine-input", "event-1");
+  assert.equal(store.hasEvent(recurring.id, "event-1"), true);
+  assert.equal(store.response("routine-input")?.id, reply.id);
+  assert.equal(store.read().messages.length, 1);
 });

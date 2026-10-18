@@ -48,7 +48,8 @@ test("completed execution with invalid final output is distinct from interruptio
   }
 });
 
-test("Task asks, persists a question across restart, then completes after an answer", async (t) => {
+for (const definition of [task, { ...task, kind: "routine" as const, trigger: { cron: null, timezone: "UTC", event: "start" } }])
+test(`${definition.kind} asks, persists a question across restart, then records completion after an answer`, async (t) => {
   let id = "";
   let runs = 0;
   const agent: Agent = {
@@ -59,7 +60,8 @@ test("Task asks, persists a question across restart, then completes after an ans
     },
   };
   const { aide, path } = await setup(t, agent);
-  id = aide.work("me").create(task).id;
+  id = aide.work("me").create(definition).id;
+  if (definition.kind === "routine") aide.event({ id: "first", conversationId: "me", name: "start", text: "start" });
   await aide.settled();
   assert.equal(aide.store.read().works[0]?.status, "waiting");
   await aide.close();
@@ -68,9 +70,9 @@ test("Task asks, persists a question across restart, then completes after an ans
   restarted.start();
   assert.equal(restarted.store.read().works[0]?.question, "使用哪个项目？");
   await restarted.start();
-  restarted.work("me").update(id, { revision: 1, action: "answer", note: "项目 A" });
+  restarted.work("me").update(id, { revision: restarted.work("me").read(id).revision, action: "answer", note: "项目 A" });
   await restarted.settled();
-  assert.equal(restarted.store.read().works[0]?.status, "done");
+  assert.equal(restarted.store.read().works[0]?.status, definition.kind === "task" ? "done" : "scheduled");
   assert.equal(runs, 2);
 });
 
@@ -111,20 +113,24 @@ test("Routine can be triggered by event, deduplicates deliveries, and stays acti
   assert.equal(aide.store.read().messages.filter((m) => m.role === "aide").length, 0);
 });
 
-test("a Task can become a Routine without losing identity and history", async (t) => {
-  let id = "";
-  const { aide } = await setup(t, {
-    execute: async () => done,
-  });
-  id = aide.work("me").create(task).id;
+test("replacing a Task with a Routine uses distinct identities and retains the completed Task's messages", async (t) => {
+  const { aide } = await setup(t, { execute: async () => done });
+  const tools = aide.work("me");
+  const original = tools.create(task);
   await aide.settled();
-  aide.work("me").update(id, { revision: 1, action: "update", changes: { kind: "routine", trigger: { cron: "0 9 * * *", timezone: "Asia/Shanghai", event: null } } });
-  const work = aide.store.read().works[0]!;
-  assert.equal(work.id, id);
-  assert.equal(work.kind, "routine");
-  assert.equal(work.status, "scheduled");
-  assert.ok(work.history.some((entry) => entry.text === done.summary));
-  assert.ok(work.nextAt);
+  const prior = tools.read(original.id);
+  const routine = tools.create({ kind: "routine", title: prior.title,
+    instruction: `${prior.instruction}\nPrevious result: ${prior.history.at(-1)!.text}`,
+    trigger: { cron: null, timezone: "UTC", event: "check.again" } });
+  tools.delete(original.id, prior.revision);
+  await aide.settled();
+  assert.notEqual(routine.id, original.id);
+  assert.deepEqual(tools.list().map((work) => work.id), [routine.id]);
+  assert.ok(aide.messages().some((item) => item.workId === original.id && item.text === done.notification));
+  assert.equal(aide.event({ id: "next", conversationId: "me", name: "check.again", text: "检查更新" }), 1);
+  await aide.settled();
+  assert.equal(tools.read(routine.id).status, "scheduled");
+  assert.ok(aide.messages().some((item) => item.workId === routine.id && item.text === done.notification));
 });
 
 test("overdue work is woken after restart, without replaying missed occurrences", async (t) => {
@@ -234,4 +240,24 @@ test("personal Worker crash cancels its invocation and preserves uncertain work 
   await restarted.start(); await restarted.settled();
   assert.equal(restarted.store.read().works[0]?.status, "uncertain");
   assert.equal(runs, 1);
+});
+
+
+for (const definition of [task, { ...task, kind: "routine" as const, trigger: { cron: null, timezone: "UTC", event: "start" } }])
+test(`${definition.kind} requeues a dynamic wait and applies its own completion rule`, async (t) => {
+  let runs = 0;
+  const { aide } = await setup(t, { execute: async () => ++runs === 1
+    ? { ...done, action: "wait", nextAt: new Date(Date.now() + 200).toISOString() } : done });
+  const work = aide.work("me").create(definition);
+  if (definition.kind === "routine") aide.event({ id: "first", conversationId: "me", name: "start", text: "start" });
+  const expected = definition.kind === "task" ? "done" : "scheduled";
+  // Timer-triggered reconciles are owned by Manager, not Aide's explicit wake promises.
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const current = aide.work("me").read(work.id);
+    if (runs === 2 && current.status === expected && current.history.length === 2) break;
+    await Bun.sleep(10);
+  }
+  assert.equal(runs, 2);
+  assert.equal(aide.work("me").read(work.id).status, definition.kind === "task" ? "done" : "scheduled");
+  assert.equal(aide.work("me").read(work.id).nextAt, null);
 });

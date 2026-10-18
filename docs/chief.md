@@ -15,8 +15,10 @@ flowchart LR
   Pi -->|提出问题| Controller
   Controller -->|ask / confirm| Interaction[Core Interaction]
   Interaction --> Channel
-  Work --> Reconcile[Work Controller]
-  Reconcile -->|harness verb| Codex[Codex / CLI]
+  Work --> Task[Task Controller]
+  Work --> Routine[Routine Controller]
+  Task -->|harness verb| Codex[Codex / CLI]
+  Routine -->|harness verb| Codex
 ```
 
 ## 身份与职责
@@ -33,7 +35,7 @@ Input 与 Work 有不同生命周期。输入按会话内消息 id 或 Source �
 
 Channel 自己决定 conversationId：当前飞书单聊使用机器人账号与 chat ID，网页使用 URL 的 conversation 参数；群聊按群划分的路由可沿用该接口，但本轮没有开启飞书群消息接收。Source 的每个 watch 默认使用 `source:<watch-id>`，与 Connector 身份无关；显式配置 conversationId 可投到已有会话。独立 Source 会话可用网页 `/?conversation=source:<watch-id>` 查看；只有路由到已有 Channel 会话时才沿用该 Channel 投递。
 
-每个会话绑定一个 Pi Target；每份输入使用独立 Lane，询问后的续答继续同一原生 Pi 会话。近期 30 条持久消息进入上下文，Work 工具可查询完整工作记录；这还不是长期记忆系统。开发工作继续使用原有 Codex Target、Work Controller 和结果校验。
+每个会话绑定一个 Pi Target；每份输入使用独立 Lane，询问后的续答继续同一原生 Pi 会话。近期 30 条持久消息进入上下文，Work 工具可查询完整工作记录；这还不是长期记忆系统。开发工作继续使用原有 Codex Target、Task / Routine Controller 和结果校验。
 
 编程领域沿用 `Repository = forge + path` 身份；Requirement 为 `source + category + id`，PR/MR 为 `forge + path + number`。关注配置携带候选仓库，Chief 在 Work instruction 中保留具体身份和工作目录。第一版没有额外的需求—Work—PR 关联表，也没有自动匹配仓库 checkout。
 

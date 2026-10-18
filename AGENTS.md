@@ -37,10 +37,13 @@ src/
 plugins/                   # 内置插件；personal 是其中一个
   personal/
     aide.ts                # Session/Plugin 装配、Chief 输入、问题投影与恢复
-    plugin.ts              # 独立 Worker 入口，装配 Chief / Source / Work Controller
+    plugin.ts              # 独立 Worker 入口，装配 Chief / Source / Task / Routine Controller
     prompts.ts             # Personal 提示词与结构化结果校验
     model.ts               # Task / Routine 业务状态
-    resources.ts           # Work 自定义资源契约
+    resources.ts           # Task / Routine 资源契约与 Work 视图
+    task.ts                # Task Reconcile：推进有限目标并结束
+    routine.ts             # Routine Reconcile：执行本轮并安排下次触发
+    execution.ts           # personal 共用的执行、结果校验与记录
     store.ts               # 宿主端输入提交与消息投影
     work.ts                # Work 创建/更新规则与会话范围 CRUD
     chief-model.ts         # Chief Target 身份与内置 Input 契约入口
@@ -61,7 +64,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Personal 业务不进入 Host / Runner；Plugin Runner 通过公共 Resource API 和 verbs 请求动作，不持有 Harness 或宿主 Store；`aide.ts` 和 `store.ts` 是宿主装配与输入投影。
 - Host 与 Runner 不相互导入实现；Host 仅通过子进程入口启动 `runner/process.ts`。两端复用代码按职责放在 `src/` 下：通信契约放 `protocol/`，Plugin 上下文构造放 `plugin-context.ts`；共享模块不依赖 Host 或 Runner。Resource 存储、Watch / Queue 调度、Harness 执行和 Runner 生命周期管理均留在 Host。
 - Conversation / Input / Message 是 Host 内置对象，不写入 PluginResourceStore。Chief 观察内置 Conversation 投影，按会话串行消费 Input；Channel Input 引用 Message，Source Input 携带观察。Channel / Source 决定 conversationId，共享上下文按该身份隔离。
-- Task / Routine 共用 Work 身份，spec.kind 区分类别；转换保留 uid、历史与去重记录。
+- Task / Routine 是独立资源类型，各有 Controller / Reconcile；Work 是工具与 Channel 的统一业务视图。资源类型不可变，转换由 Chief 组合创建、暂停或删除完成，目标工作拥有新 id。
 - status、出站回复与投递去重一起提交。等待用户是持久状态，不保持执行位。
 - Harness 完成不等于业务目标完成，personal 校验结果后决定工作终态。
 - Chief 接话用 Pi，Work 执行用 Codex；Source 先提交持久 Input 再推进水位，不直接创建 Work。问答复用 Core Interaction，见 `docs/chief.md`。
