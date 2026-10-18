@@ -2,7 +2,7 @@
 
 ## 项目边界
 
-Aide 是小型、自托管的 personal agent，由 Channel、执行内核和 Plugin 组成。Channel 输入归入 Task / Routine，personal Plugin 的 Reconcile 通过 Harness 推进工作。按绿地视角开发，不迁移旧数据，不建设账号权限中心或共享 SDK。
+Aide 是小型、自托管的 personal agent，由 Channel、执行内核和 Plugin 组成。Channel / Source 输入交给 Chief，普通问题直接回复，需要持续推进时才 CRUD Task / Routine；personal Plugin 的 Reconcile 通过 Harness 推进工作。按绿地视角开发，不迁移旧数据，不建设账号权限中心或共享 SDK。
 
 personal 是内置 Plugin 之一，业务逻辑放在 `plugins/personal/`。执行、调度与恢复优先使用 `src/runtime/` 已有机制；修改核心接口前先说明具体产品需求与现有能力的缺口。运行机制见 `docs/runtime.md`。
 
@@ -10,7 +10,7 @@ personal 是内置 Plugin 之一，业务逻辑放在 `plugins/personal/`。执�
 
 ```text
 src/
-  main.ts                  # Bun 服务入口，装配 CodexAdapter 与 HTTP
+  main.ts                  # Bun 服务入口，装配 Pi / Codex Adapter 与 Channel
   channel/
     http.ts                # 本地 HTTP Channel
     feishu.ts              # 飞书单聊、持久收件与出站投递
@@ -26,15 +26,20 @@ src/
     file-lock.ts           # Aide 服务入口的单实例文件锁
 plugins/                   # 内置插件；personal 是其中一个
   personal/
-    aide.ts                # Session/Plugin 装配、Intake 提交、用户更新与恢复
-    plugin.ts              # 独立 Worker 入口，Intake / Work Controller
+    aide.ts                # Session/Plugin 装配、Chief 输入、问题投影与恢复
+    plugin.ts              # 独立 Worker 入口，装配 Chief / Source / Work Controller
     prompts.ts             # Personal 提示词与结构化结果校验
     model.ts               # Task / Routine 业务状态
-    resources.ts           # Work / Intake / Conversation 资源契约
+    resources.ts           # Work / Conversation 资源契约
     store.ts               # 宿主端输入提交与消息投影
     work.ts                # Work 创建/更新规则与会话范围 CRUD
+    chief-model.ts         # ChiefInput 身份、观察与状态
+    chief.ts               # Chief Controller，调用 Harness 与 Core ask/confirm
+    source.ts              # 需求发现、水位与调度
+    source-config.ts       # 关注范围和目标会话配置
 agent/
   pi/                      # 内置 Pi Agent、提示词与 Work 工具
+connectors/                # Meego / GitHub / GitLab 协议适配；Personal 定义关注策略
 packages/plugin/           # @compforge/aide-plugin 公共契约
 tests/                     # 内核契约与 personal 业务验证
 scripts/install-service.sh # Linux 用户级 systemd 服务
@@ -46,6 +51,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Task / Routine 共用 Work 身份，spec.kind 区分类别；转换保留 uid、历史与去重记录。
 - status、出站回复与投递去重一起提交。等待用户是持久状态，不保持执行位。
 - Harness 完成不等于业务目标完成，personal 校验结果后决定工作终态。
+- Chief 接话用 Pi，Work 执行用 Codex；Source 先提交持久 ChiefInput 再推进水位，不直接创建 Work。问答复用 Core Interaction，见 `docs/chief.md`。
 - 内置 Agent 通过宿主绑定的 WorkService 操作 Personal 数据；Pi Adapter 只接收会话工厂，不导入业务模型。接入边界见 `docs/pi.md`。
 - Worker 或 Harness 中断可能已经产生外部副作用；保留 uncertain，不自动重放。
 - 用 `npm run check` 验证。真实 Worker + 模拟 Adapter 的测试不等于真实 Codex 或业务 CLI 验证。

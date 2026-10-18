@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager, SettingsManager,
-  type AgentSession } from "@earendil-works/pi-coding-agent";
+  type AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { WorkService } from "../../plugins/personal/work.ts";
 import { workTools } from "./work-tools.ts";
 
@@ -14,6 +14,8 @@ export interface PiAgentOptions {
   sessionDir: string;
   sessionFile?: string;
   model?: { provider: string; id: string };
+  tools?: ToolDefinition[];
+  beforeWorkMutation?: () => void;
 }
 
 const systemPrompt = `You are Aide, a personal assistant. Converse naturally and answer simple questions directly.
@@ -50,7 +52,12 @@ export async function createPiAgent(options: PiAgentOptions): Promise<AgentSessi
   const modelRuntime = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: join(agentDir, "models.json") });
   const model = options.model ? modelRuntime.getModel(options.model.provider, options.model.id) : undefined;
   if (options.model && !model) throw new Error(`Unknown Pi model: ${options.model.provider}/${options.model.id}`);
-  const tools = workTools(options.work);
+  const tools = [...workTools(options.work).map((tool) => {
+    if (!["create_work", "update_work", "delete_work"].includes(tool.name)) return tool;
+    return { ...tool, execute: (...args: Parameters<typeof tool.execute>) => {
+      options.beforeWorkMutation?.(); return tool.execute(...args);
+    } };
+  }), ...options.tools ?? []];
   const { session } = await createAgentSession({ cwd, agentDir, sessionManager: manager, modelRuntime,
     settingsManager: settings, resourceLoader: loader, ...(model ? { model } : {}),
     tools: ["read", "bash", "edit", "write", "grep", "find", "ls", ...tools.map((tool) => tool.name)], customTools: tools });

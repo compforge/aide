@@ -25,20 +25,12 @@ function fakeTransport() {
   return { transport, sent };
 }
 
-test("Feishu inbox survives restart; duplicate events do not execute twice; ask/answer uses the same Task", async (t) => {
+test("Feishu inbox survives restart; duplicate events do not execute twice; ordinary conversation does not create Work", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-feishu-"));
   let routes = 0;
   const aide = new Aide(home, fakeOptions({
-    async route(_input, works) {
-      routes++;
-      if (works.length) return { action: "answer", workId: works[0]!.id, kind: null, title: null, instruction: null, trigger: null, response: "收到回答" };
-      return { action: "create", kind: "task", workId: null, title: "问候", instruction: "问名字再问候", trigger: null, response: "开始处理" };
-    },
-    async execute(work) {
-      return work.history.some((entry) => entry.text === "小明")
-        ? { action: "done", summary: "已问候", notification: "你好，小明", question: null, nextAt: null }
-        : { action: "ask", summary: "需要名字", notification: null, question: "怎么称呼你？", nextAt: null };
-    },
+    async chief(prompt) { routes++; return prompt.includes('小明') ? "你好，小明" : "怎么称呼你？"; },
+    async execute() { throw new Error("No work expected"); },
   }, home), log);
   const { transport, sent } = fakeTransport();
   let channel = new FeishuChannel(home, "cli_test", aide, transport, log);
@@ -52,23 +44,20 @@ test("Feishu inbox survives restart; duplicate events do not execute twice; ask/
   await aide.settled();
   await channel.deliver();
   assert.equal(routes, 1);
-  assert.deepEqual(sent.map((message) => message.text), ["开始处理", "怎么称呼你？"]);
-  const workId = aide.store.read().works[0]!.id;
-  assert.equal(aide.store.read().works[0]!.status, "waiting");
+  assert.deepEqual(sent.map((message) => message.text), ["怎么称呼你？"]);
+  assert.equal(aide.store.read().works.length, 0);
   await channel.close();
   channel = new FeishuChannel(home, "cli_test", aide, transport, log);
   channel.receive(event("om_1", "写个问候"));
   await channel.dispatch();
   await channel.deliver();
-  assert.equal(sent.length, 2, "Restart must not resend delivered messages");
+  assert.equal(sent.length, 1, "Restart must not resend delivered messages");
   channel.receive(event("om_2", "小明"));
   await channel.dispatch();
   await aide.settled();
   await channel.deliver();
   assert.equal(routes, 2);
-  assert.equal(aide.store.read().works.length, 1);
-  assert.equal(aide.store.read().works[0]!.id, workId);
-  assert.equal(aide.store.read().works[0]!.status, "done");
+  assert.equal(aide.store.read().works.length, 0);
   assert.equal(sent.at(-1)!.text, "你好，小明");
   assert.ok(sent.every((message) => message.chatId === "oc_chat"));
 });
@@ -76,7 +65,7 @@ test("Feishu inbox survives restart; duplicate events do not execute twice; ask/
 test("Feishu sends proactive output, retries the same part id after failure, and isolates apps/chats", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-feishu-outbox-"));
   const messages: Message[] = [];
-  const aide = { receive: async () => { throw new Error("unused"); }, store: { read: () => ({ messages, works: [] }) } };
+  const aide = { receive: async () => { throw new Error("unused"); }, messages: () => messages };
   const { transport, sent } = fakeTransport();
   let channel = new FeishuChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
@@ -106,7 +95,7 @@ test("Feishu sends proactive output, retries the same part id after failure, and
 test("Feishu ignores group/bot events and reports unsupported input and intake failure without automatic reexecution", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-feishu-errors-"));
   let received = 0;
-  const aide = { receive: async () => { received++; throw new Error("private data"); }, store: { read: () => ({ messages: [], works: [] }) } };
+  const aide = { receive: async () => { received++; throw new Error("private data"); }, messages: () => [] };
   const { transport, sent } = fakeTransport();
   const channel = new FeishuChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });

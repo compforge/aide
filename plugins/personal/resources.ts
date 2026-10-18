@@ -16,6 +16,3 @@ export function toWork(resource: WorkResource): Work {
   const { messages: _messages, inputs: _inputs, events: _events, laneId: _lane, ...observation } = resource.status;
   return WorkSchema.parse({ id: resource.metadata.name, ...resource.spec, ...observation });
 }
-
-
-export const INTAKE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Intake" } as const;

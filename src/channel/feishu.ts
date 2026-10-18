@@ -20,7 +20,7 @@ type State = z.infer<typeof StateSchema>;
 
 /**
  * @spec Persist inbound messages before acknowledging Feishu; acknowledge outbound delivery only after send succeeds.
- * @why Routing can take a minute, while Feishu expects an event acknowledgement within seconds.
+ * @why Platform acknowledgement must not depend on business processing or model latency.
  * @see {@link ../../docs/feishu.md}
  */
 export class FeishuChannel {
@@ -33,7 +33,7 @@ export class FeishuChannel {
   private stopped = false;
   private retryAt = 0;
 
-  constructor(home: string, appId: string, private readonly aide: { receive: Aide["receive"]; store: Pick<Aide["store"], "read"> },
+  constructor(home: string, appId: string, private readonly aide: Pick<Aide, "receive" | "messages">,
     private readonly transport: FeishuTransport, private readonly log: Logger) {
     this.prefix = `feishu:${appId}:`;
     this.path = join(home, "channels", `feishu-${createHash("sha256").update(appId).digest("hex").slice(0, 16)}.json`);
@@ -106,7 +106,7 @@ export class FeishuChannel {
   }
 
   private async drainOutbox(): Promise<void> {
-    const messages = [...this.aide.store.read().messages, ...this.state.notices]
+    const messages = [...this.aide.messages(), ...this.state.notices]
       .filter((message) => message.role === "aide" && message.conversationId.startsWith(this.prefix))
       .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
     for (const message of messages) {

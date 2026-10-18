@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { PluginResourceStore } from "../../src/runtime/plugin/resource.ts";
 import type { ResourceClientChange } from "../../src/runtime/plugin/resource-client.ts";
 import { WorkSchema, type Message, type Work } from "./model.ts";
+import { CHIEF_TYPE } from "./chief-model.ts";
 
 export { WORK_TYPE, toWork, type WorkResource } from "./resources.ts";
 import { WORK_TYPE, CONVERSATION_TYPE, toWork, type WorkSpec, type WorkStatus, type Delivery } from "./resources.ts";
@@ -21,9 +22,10 @@ export class Store {
   read(): { works: Work[]; messages: Message[] } {
     const works = this.resources.list<WorkSpec, WorkStatus>(WORK_TYPE);
     const conversations = this.resources.list<{ conversationId: string }, Delivery>(CONVERSATION_TYPE);
+    const inputs = this.resources.list<unknown, Partial<Delivery>>(CHIEF_TYPE);
     return {
       works: works.filter((resource) => !resource.metadata.deletionTimestamp).map(toWork),
-      messages: [...new Map([...works, ...conversations].flatMap((resource) => resource.status.messages ?? []).map((item) => [item.id, item])).values()]
+      messages: [...new Map([...works, ...conversations, ...inputs].flatMap((resource) => resource.status.messages ?? []).map((item) => [item.id, item])).values()]
         .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)),
     };
   }

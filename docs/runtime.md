@@ -4,13 +4,15 @@ Aide 通过 Channel 接收用户消息，以 Plugin 表达业务职责，由执�
 
 ```text
 Aide 服务进程
-├── 网页 Channel → personal Intake → Work spec/status
+├── 网页 / 飞书 Channel → ChiefInput
 ├── Aide Session / Channel / Controller
-│   └── HarnessAdapter → codex app-server → CLI
+│   ├── PiAdapter → Chief → 对话 / Connector / Work 工具
+│   └── CodexAdapter → codex app-server → CLI
 └── Aide Plugin Manager / Supervisor
     ├── Resource store / Controller / Source / Watch / cron / queue
     └── personal Worker（独立 Bun 进程）
-        ├── Intake Controller → verbs.harness → 请求识别
+        ├── Source Controller → Connector → ChiefInput
+        ├── Chief Controller → verbs.harness / ask / confirm
         └── Work Controller   → verbs.harness → 推进 Task / Routine
 ```
 
@@ -18,28 +20,28 @@ Aide 服务进程
 
 Harness 消息的 `phase` 区分进度说明（`commentary`）与最终答复（`final`）。Adapter 保留提供方明确给出的阶段；没有阶段时保持未知，不根据消息位置或文本内容推断。Codex 的实时消息和历史导入共用同一映射。
 
-Turn 的 `agentText` 是整轮对话文本，用于上下文与查看记录；`finalText` 只包含明确标记的最终答复，随汇总持久化并经 Harness verb 交给 Plugin。Personal 仅解析 `finalText` 的 JSON，执行结束但答复缺失、格式或业务结果字段不合法时记录为 `invalid_result`，保留 Lane 和 Turn 线索。执行失败或中断仍记录为 `uncertain`。两者都等待用户明确继续，不自动重放外部动作。
+Turn 的 `agentText` 是整轮对话文本，用于上下文与查看记录；`finalText` 只包含明确标记的最终答复，随汇总持久化并经 Harness verb 交给 Plugin。Work Controller 仅解析 `finalText` 的 JSON，执行结束但答复缺失、格式或业务结果字段不合法时记录为 `invalid_result`，保留 Lane 和 Turn 线索。执行失败或中断仍记录为 `uncertain`。两者都等待用户明确继续，不自动重放外部动作。
 
 执行内核管理 Runner、Supervisor、IPC、注册与撤销、Resource、Controller、Source、Watch、cron、队列、容量、退避和 verb 生命周期。Harness 通过 Adapter 接入，Session Binding、HarnessInvocation、Turn 和事件流承载执行状态。
 
 Plugin 只经公共 Resource API 和 `ReconcileContext.verbs` 与宿主协作。Worker 不持有宿主 Store、Harness 进程或 SDK。宿主通过原有 Channel 装配 Plugin Manager 与 Harness Controller，执行先持久化，再交给 Adapter；接受请求与执行完成是不同事实。
 
-Aide 当前装配一个常驻 Session，一个 personal Instance 和一个 Codex Target。请求识别使用主 Lane；每项工作首次执行通过 `newLane: true` 创建支线，后续继续同一 Lane，避免每次触发都创建新的执行会话。
+Aide 当前装配一个常驻 Session、一个 personal Instance、一个 Codex Target 和按会话绑定的 Chief Pi Target。Chief 每个输入建立独立 Lane，问答续轮保留同一 Lane；每项工作首次执行通过 `newLane: true` 创建支线，后续继续同一 Lane，避免每次触发都创建新的执行会话。
 
-网页通过 `/interactions` 展示当前 Session 的待决请求，并经原有 `Channel.resolveInteraction` 回答，不另建审批状态。当前支持 Hooks 信任、工具权限选择与取消；其它原生交互会展示内容但暂只能取消。这个收件区属于同一个本地用户，跨 personal 对话可见；当前的 conversationId 只是对话分组，不是用户隔离边界。
+网页通过 `/interactions` 展示当前 Session 的待决请求，并经原有 `Channel.resolveInteraction` 回答，不另建审批状态。当前支持 Hooks 信任、工具权限选择、问题答复与取消；其它原生交互会展示内容但暂只能取消。这个收件区属于同一个本地用户，跨 personal 对话可见；当前的 conversationId 只是对话分组，不是用户隔离边界。
 
 ## Personal 工作流程
 
-1. 网页消息按会话和消息 id 去重，建立 Intake Resource。Intake Controller 在 Worker 中调用 `verbs.harness`，校验完成 Turn 的 JSON 结果并保存路由决定。
-2. personal 宿主端将决定应用到 Work。Task 与 Routine 共用 Work 身份，`spec.kind` 区分两类，转换保留 uid、历史和去重记录。spec 保存目标与触发条件；status 保存观测、问题、下次执行时间和回复 outbox。
+1. Channel 按会话和消息 id 去重，持久化 ChiefInput 并立即返回回执。Source 按外部身份与观察指纹去重，同样提交 ChiefInput。
+2. Chief Controller 通过 Harness 调用 Pi。普通问答直接进入消息 outbox；需要跟进时由 Work 工具创建、读取、更新或删除工作。Task 与 Routine 共用 Work 身份，`spec.kind` 区分两类，转换保留 uid 与历史。Chief 的问题通过 Core ask/confirm 等待答复，模型执行位先释放。
 3. Work Controller 观察 ready 或已到期的 scheduled，先保存 running，再请求 Harness 执行。正常结果、问题和状态一起写入 status。IPC 等待期间用户可能更新指令，提交结果前按 uid 重新读取资源，保留最新指令和暂停状态；版本冲突只重试提交，不重复执行外部工作。
 4. ask 保存为 waiting 并结束本次调用，用户回答再唤醒。wait 返回动态唤醒时间；Routine 单次完成后保留安排，Task 则结束。事件触发改变 Work，并经过同一队列和 Reconcile。
 
-识别失败时保留错误，不自动重放。用户显式重试同一消息会刷新待办与对话快照，再执行识别；已经接收成功的消息直接返回原回执。这个重试边界只覆盖创建或更新工作之前的识别阶段，执行结果不明的 Work 仍需用户核对后继续。
+Chief 输入执行失败或被中断后标记 failed，不自动重放工具。同一消息 id 的重投只返回原入站回执；业务重试需要用户核对后新发消息。重启不恢复等待中的问答调用栈，Core 问题收口并提示重新交办。
 
 宿主端使用 Aide 的 `replaceSpec` 和 `patchStatus` 顺序提交用户更新；status、回复和输入去重记录在同一次 status 写入中提交。没有增加跨 spec/status 的事务接口。
 
-普通对话回复保存在 Conversation Resource；网页读取 Work / Conversation outbox。消息是持久事实，浏览器关闭不影响服务器工作。按绿地方式开发，不迁移早期 Aide 数据布局。
+普通对话回复保存在 ChiefInput Resource；网页读取 ChiefInput / Work / Conversation outbox 及 Core 问题投影。消息是持久事实，浏览器关闭不影响服务器工作。按绿地方式开发，不迁移早期 Aide 数据布局。
 
 ## 生命周期与故障
 
@@ -47,7 +49,7 @@ Worker 按 PluginInstance 激活，完成后注册封口。Source、Watch、Hook
 
 Worker 崩溃或超时后撤销 Binding、让未完成 verb 以 failure 收口，并取消关联执行；不自动重启 Worker，也不恢复调用栈。personal 宿主端把运行中事项标为 uncertain。重启 Aide 会创建新 Worker，但不会重复执行这些事项，用户核对外部结果后再明确要求继续。
 
-请求识别 timeout 为 1 分钟，工作执行为 15 分钟。Aide 通过宿主现有 policy 自动批准自身发起的 Harness invocation，仍记录 Interaction 决议；不新增账号权限管理。Harness 原生权限与 CLI 凭证沿用执行环境。
+Chief 每轮 Harness timeout 为 3 分钟，Core 问题为 24 小时，工作执行为 15 分钟。Aide 通过宿主现有 policy 自动批准自身发起的 Harness invocation，仍记录 Interaction 决议；不新增账号权限管理。Harness 原生权限与 CLI 凭证沿用执行环境。
 
 ## 验证与诊断
 

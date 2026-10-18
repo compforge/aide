@@ -2,7 +2,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { Logger } from "pino";
-import { IntakeError, type Aide } from "../../plugins/personal/aide.ts";
+import type { Aide } from "../../plugins/personal/aide.ts";
+import { validInputResult } from "../runtime/interaction/answer.ts";
 import { IncomingSchema } from "../../plugins/personal/model.ts";
 
 const EventSchema = IncomingSchema.omit({ text: true }).extend({
@@ -15,6 +16,7 @@ const InteractionResponseSchema = z.object({
     z.object({ kind: z.literal("hook_trust"), outcome: z.enum(["trusted", "skipped"]) }),
     z.object({ kind: z.literal("permission"), outcome: z.literal("selected"), optionId: z.string() }),
     z.object({ kind: z.literal("cancelled"), reason: z.literal("user") }),
+    z.object({ kind: z.literal("question"), outcome: z.literal("answered"), answers: z.record(z.string(), z.array(z.string().min(1))) }),
   ]),
 });
 
@@ -67,9 +69,7 @@ export function httpChannel(aide: Aide, log: Logger) {
         if (!pending || pending.status !== "pending") {
           json(response, 409, { error: "This interaction is no longer pending" }); return;
         }
-        if (result.kind !== "cancelled" && (result.kind !== pending.request.kind
-          || (result.kind === "permission" && pending.request.kind === "permission"
-            && !pending.request.options.some((option) => option.optionId === result.optionId)))) {
+        if (!validInputResult(pending.request, result)) {
           json(response, 400, { error: "Answer does not match the pending interaction" }); return;
         }
         // @spec Channel answers settle Aide's original Interaction; no separate approval state.
@@ -88,7 +88,7 @@ export function httpChannel(aide: Aide, log: Logger) {
         if (url.pathname === "/work") {
           json(response, 200, state.works.filter((work) => work.conversationId === conversationId));
         } else {
-          const messages = state.messages.filter((item) => item.conversationId === conversationId
+          const messages = aide.messages().filter((item) => item.conversationId === conversationId
             && (url.searchParams.get("role") === "all" || item.role === "aide"));
           const after = url.searchParams.get("after");
           const index = after ? messages.findIndex((item) => item.id === after) : -1;
@@ -100,9 +100,6 @@ export function httpChannel(aide: Aide, log: Logger) {
       }
     } catch (error) {
       log.error({ err: error, path: request.url }, "Channel request failed");
-      if (error instanceof IntakeError) {
-        json(response, 503, { error: "请求识别未完成，尚未创建或更新事项。请重试。" }); return;
-      }
       json(response, error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 500,
         { error: "Request failed; check the Aide log" });
     }

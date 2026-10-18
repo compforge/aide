@@ -65,4 +65,4 @@ Adapter 记录原生工具开始与结束、消息和 token 用量。一次 Pi �
 
 `tests/pi-agent.test.ts` 运行真实 Pi SDK 和本地模拟模型 HTTP 服务，覆盖直接回答、全部五个 Work 工具、原生会话恢复、最终答案提取、模型失败和取消。`tests/pi-work.test.ts` 覆盖持久化、revision 冲突、对话范围、删除后消息保留，以及真实 Personal Worker 被工具写入唤醒。
 
-`npm start` 的飞书／网页入口当前仍使用 Codex Intake。内置 Pi Agent 和 Adapter 可由宿主装配使用；对话入口切换与 Operator 的 Target 选择独立配置，不由 Work 工具决定。这些协议测试不代表真实模型的意图识别效果或业务 CLI 已验证。
+`npm start` 的网页／飞书入口由 Chief 使用 Pi 接话，Work Controller 使用 Codex 执行长期工作。Chief 的 Source 输入、连接器工具与持久问答见 [Chief 与主动发现](chief.md)。`tests/chief.test.ts` 验证完整装配；这些协议测试不代表真实模型的意图识别效果或业务 CLI 已验证。

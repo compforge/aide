@@ -135,7 +135,7 @@
           actions.querySelectorAll('button').forEach((button) => button.disabled = true);
           try {
             await api('/interactions', { method: 'POST', headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ messageId: item.messageId, result }) });
+              body: JSON.stringify({ messageId: item.messageId, result: typeof result === 'function' ? result() : result }) });
             node.remove();
             await poll();
           } catch (error) {
@@ -160,6 +160,21 @@
         node.append(element('strong', request.title));
         if (request.description) node.append(element('p', request.description));
         for (const option of request.options) action(option.name, { kind: 'permission', outcome: 'selected', optionId: option.optionId });
+      } else if (request.kind === 'question') {
+        const fields = [];
+        for (const question of request.questions) {
+          node.append(element('strong', question.header), element('p', question.question));
+          if (request.questions.length === 1) {
+            for (const choice of question.choices || []) action(choice.label,
+              { kind: 'question', outcome: 'answered', answers: { [question.questionId]: [choice.value] } });
+          }
+          if (question.allowOther || !question.choices?.length) {
+            const field = element('input'); field.placeholder = '输入答复'; node.append(field);
+            fields.push({ id: question.questionId, field });
+          }
+        }
+        if (fields.length === request.questions.length) action('提交答复', () => ({ kind: 'question', outcome: 'answered',
+          answers: Object.fromEntries(fields.map(({ id, field }) => [id, [field.value]])) }));
       } else {
         node.append(element('strong', '执行正在等待用户回应'),
           element('p', '网页暂不支持此类回应，可以取消本次执行。'), element('pre', JSON.stringify(request, null, 2)));

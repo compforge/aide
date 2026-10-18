@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { PluginPackage, PluginContext, ReconcileContext } from "@compforge/aide-plugin";
-import { OutcomeSchema, RouteSchema, executionPrompt, routePrompt } from "./prompts.ts";
-import { nextOccurrence, type Incoming, type Message, type Work } from "./model.ts";
-import { INTAKE_TYPE, WORK_TYPE, toWork, type WorkResource, type WorkSpec, type WorkStatus } from "./resources.ts";
-
-export interface IntakeSpec { input: Incoming; works: Work[]; history: Message[]; timezone: string }
-export interface IntakeStatus { route?: z.infer<typeof RouteSchema>; error?: string | null }
+import { OutcomeSchema, executionPrompt } from "./prompts.ts";
+import { nextOccurrence, type Work } from "./model.ts";
+import { WORK_TYPE, toWork, type WorkResource, type WorkSpec, type WorkStatus } from "./resources.ts";
+import { registerChief } from "./chief.ts";
+import { registerSources } from "./source.ts";
 
 /** @spec A completed execution with an invalid result is not an interrupted execution and must not be replayed automatically. */
 class InvalidResultError extends Error {
@@ -129,18 +128,8 @@ const plugin: PluginPackage = {
   pluginId: "aide.personal", version: "0.1.0",
   async activate(context) {
     context.logger.info("Personal Plugin worker activated", { attributes: { pid: process.pid } });
-    context.controllers.register<IntakeSpec, IntakeStatus>({
-      resourceType: INTAKE_TYPE,
-      async reconcile(execution, resource) {
-        if (resource.metadata.deletionTimestamp || resource.status.route || resource.status.error) return;
-        const { input, works, history, timezone } = resource.spec;
-        let status: IntakeStatus;
-        try { status = { route: (await infer(execution, "识别用户请求", routePrompt(input, works, history, timezone), RouteSchema, 60_000,
-          { laneId: "main" })).value }; }
-        catch (error) { status = { error: error instanceof Error ? error.message : String(error) }; }
-        await context.resources.patchStatus(resource, status);
-      },
-    });
+    registerChief(context);
+    registerSources(context);
     context.controllers.register<WorkSpec, WorkStatus>({
       resourceType: WORK_TYPE,
       async reconcile(execution, resource) {
