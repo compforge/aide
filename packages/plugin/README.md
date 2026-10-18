@@ -1,104 +1,33 @@
 # @compforge/aide-plugin
 
+Public, host-independent contracts for Aide plugins. A plugin defines resources and business callbacks; the host owns persistence, scheduling, interactions and Harness execution. The package contains types and small shared values, not a host or Runner implementation.
 
-Public, host-independent authoring contract for Aide plugins.
+See [plugin runtime](../../docs/plugin.md) for the process model and [Personal](../../docs/personal.md) for a built-in consumer. Start with the exported contracts in [src/index.ts](src/index.ts).
+
+## A small plugin
 
 ```ts
-import {
-  type ConditionedStatus,
-  type Resource as ExampleResource,
-  type PluginContext,
-  type PluginPackage,
-} from "@compforge/aide-plugin";
+import type { PluginPackage } from "@compforge/aide-plugin";
 
-const EXAMPLE_RESOURCE = {
-  apiVersion: "example.aide.dev/v1alpha1",
-  kind: "Example",
-  shortNames: ["ex"],
-} as const;
-
-// Creation may attach Plugin-defined string metadata:
-// await context.resources.create(EXAMPLE_RESOURCE, {
-//   name: "example-1",
-//   labels: { "example.com/team": "platform" },
-//   annotations: { "example.com/display-name": "First example" },
-//   spec: { title: "Hello" },
-// });
-
-interface ExampleStatus extends ConditionedStatus {
-  readonly phase?: "active" | "done";
-}
-
-type Example = ExampleResource<{ title: string }, ExampleStatus>;
+const EXAMPLE = { apiVersion: "example.aide.dev/v1alpha1", kind: "Example" } as const;
 
 const plugin: PluginPackage = {
   pluginId: "example/plugin",
   version: "0.1.0",
-  async activate(context: PluginContext) {
-    context.logger.info("Example plugin activated", {
-      component: "activation",
-      attributes: { resourceTypes: [EXAMPLE_RESOURCE.kind] },
-    });
-    context.toast.show({ text: "Example plugin ready", tone: "success" });
-    context.commands.register({
-      name: "examples",
-      description: "List examples",
-      async execute() {
-        return {
-          kind: "picker",
-          title: "Examples",
-          search: {
-            mode: "remote",
-            query: "",
-            placeholder: "Search examples",
-          },
-          options: [{ name: "Hello", value: "hello" }],
-        };
-      },
-    });
-    context.mentions.register({
-      namespace: "example",
-      async search(query) {
-        const resources = await context.resources.list<
-          { title: string },
-          ExampleStatus
-        >(EXAMPLE_RESOURCE);
-        return resources
-          .filter((resource) =>
-            resource.spec.title.toLowerCase().includes(query.toLowerCase())
-          )
-          .map((resource) => ({
-            id: resource.metadata.name,
-            label: resource.spec.title,
-            description: resource.status.phase,
-          }));
-      },
-      async resolve(id, { maxChars }) {
-        const resource = await context.resources.get<
-          { title: string },
-          ExampleStatus
-        >(EXAMPLE_RESOURCE, id);
-        return `Example: ${resource.spec.title}`.slice(0, maxChars);
-      },
-    });
-    context.controllers.register({
-      resourceType: EXAMPLE_RESOURCE,
+  async activate(context) {
+    context.controllers.register<{ title: string }, { phase?: string }>({
+      resourceType: EXAMPLE,
       sources: [{
-        type: "cron",
-        sourceId: "periodic-refresh",
-        cron: "*/5 * * * *",
-        timeZone: "UTC",
+        type: "resource",
+        sourceId: "initial",
+        async start(source) {
+          await source.emit({ name: "hello", spec: { title: "Hello" } });
+        },
       }],
-      async reconcile(_ctx, resource: Example) {
-        // Observe current facts and patch status through context.resources.
-      },
-      async present(resource) {
-        return {
-          title: resource.spec.title,
-          url: resource.status.url,
-          status: resource.status.phase,
-          priority: resource.status.phase === "blocked" ? 100 : 0,
-        };
+      async reconcile(_execution, resource) {
+        if (resource.metadata.deletionTimestamp || resource.status.phase === "done") return;
+        context.logger.info("Example observed", { attributes: { name: resource.metadata.name } });
+        await context.resources.patchStatus(resource, { phase: "done" });
       },
     });
   },
@@ -107,436 +36,75 @@ const plugin: PluginPackage = {
 export default plugin;
 ```
 
-This package contains protocol types only. Aide host implementations such as
-Daemon, Plugin Host, Worker, Manager, Binding, Controller, Store, Marketplace,
-persistence, and Harness routing are intentionally excluded.
+An enabled instance has a host Binding and a Runner process. Register capabilities during activation and use `context.lifecycle.onClose` for cleanup. A plugin may manage resources in different namespaces; scope belongs to each resource, not to the package.
 
-## Commands
+## Resources and scheduling
 
-Builtin and Plugin commands share `Command`, `CommandInput`, `CommandContext`,
-`CommandVerbs`, and `CommandResult`. The host assigns each command's namespace:
-`aide` for builtins, the Plugin ID for plugins. A Plugin registers a
-`CommandDefinition` (the same contract without namespace). Short names and aliases
-must not collide; namespace identifies ownership, not a second execution path.
+[ResourceClient](src/resource.ts) provides create, get, list, patch, status update and deletion. Namespace defaults to user-global `v1`; list can include descendants and match exact label values. Annotations are opaque metadata, while labels support selection.
 
-`execute(input, command)` receives an invocation-scoped context. Results only
-present messages or pickers; host actions must be awaited through `command.verbs`:
-
-Like `PluginVerbs`, `CommandVerbs` is a collection of concrete typed actions. The
-distinction is the calling context and its authority, not the kind of feature.
-The current Command verbs are:
-
-- `submit({ prompt })` admits a new turn on the effective Target, using its current configuration.
-  The receipt contains `messageId` and `queued`, not a consumption or completion verdict. A scheduled Turn identity is internal to the host.
-- `configureModel({ model?, effort? })` changes that Target's defaults. Builtin
-  `/model` and `/effort` use this same capability and persist Target preferences.
-
-Context identity and Target come from Core, after inline input hooks. Capabilities
-expire when the invocation settles or its Worker/Channel closes; remote picker
-search cannot invoke actions. Picker selections are fresh invocations pinned to
-the original command namespace. Background Hook/reconcile work uses `PluginVerbs`
-and its Interaction gates; it cannot retain a Command's human-action authority.
-
-Models are discovered through the builtin `Target` Resource, available to Commands,
-Hooks and Controllers through the same Resource API. `list(Target)` returns the
-last observation without native I/O; `get(targetRef)` refreshes missing/expired
-discovery without opening a HarnessSession. Observations are cached for 60 seconds,
-concurrent reads coalesce, and each host runs at most one native probe at a time.
-
-`status.modelCatalog.phase` distinguishes `Pending`, `Ready`, `Unavailable` (no
-discovery capability), and `Failed`; only `Ready` contains `models`. An empty Ready
-catalog is not a probe failure. Each model lists its supported efforts, including
-`default` when supported. Native credentials and account environment are not exposed.
-`SessionTargetBinding.status.effectiveTargetRef` identifies a Session's bound Target;
-`CommandContext.target` also supplies the effective selection after inline input hooks.
-
-```ts
-import type { AideTargetResourceSpec, AideTargetResourceStatus } from "@compforge/aide-plugin";
-
-context.commands.register({
-  name: "choose-model",
-  description: "Choose an available model",
-  async execute(input, command) {
-    const targets = await context.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Target" });
-    const selected = targets.find((target) => target.metadata.name === command.target?.id);
-    if (!selected) throw new Error("Target unavailable");
-    const target = await context.resources.get<AideTargetResourceSpec, AideTargetResourceStatus>({
-      apiVersion: selected.apiVersion, kind: selected.kind,
-      namespace: selected.metadata.namespace, name: selected.metadata.name, uid: selected.metadata.uid,
-    });
-    const catalog = target?.status.modelCatalog;
-    if (catalog?.phase !== "Ready") throw new Error(`Model discovery: ${catalog?.phase ?? "Unavailable"}`);
-    if (!input.selectedValue) return {
-      kind: "picker",
-      title: `Models for ${command.target?.id}`,
-      options: catalog.models.map((model) => ({ name: model.label, value: model.id })),
-    };
-    await command.verbs.configureModel({ model: input.selectedValue, effort: "default" });
-    return { kind: "message", text: `Default model: ${input.selectedValue}` };
-  },
-});
-```
-
-Aide validates model configuration at the Adapter boundary before changing either
-value. Preset commands such as `/easy` and `/hard` use `configureModel` as a shortcut
-for `/model` plus `/effort`; the choice persists for subsequent turns and Sessions.
-If a command also submits a task, it awaits successful configuration first.
-Command submissions always start a new turn, queueing while busy. Native
-availability may change between discovery and configuration.
-
-One enabled Plugin instance has one Binding and one Worker. A Plugin is the
-organization and ownership unit for Resource schemas, Controllers, Sources, and
-Connectors; it does not declare a scope or namespace. Each Resource carries its
-own canonical namespace, so one Plugin may manage global, Project, and Session
-Resources at the same time. Omitting `namespace` from `create()` or `emit()`
-uses the user-global `v1` namespace.
-
-```ts
-await context.resources.create(EXAMPLE_RESOURCE, {
-  name: "project-example",
-  namespace: "v1/project/project-a",
-  spec: { title: "Project example" },
-});
-
-const everyExample = await context.resources.list(EXAMPLE_RESOURCE, {
-  namespace: "v1",
-  includeDescendants: true,
-});
-```
-
-`present()` may return a finite numeric `priority`; higher values are shown
-first and omitted values default to `0`. Aide compares priority only within the
-same Plugin instance and Resource type, then shows at most five items from that
-group. Returning `undefined` still hides the Resource from the Board entirely.
-When `url` is present, compatible terminal UIs render the title as a native
-hyperlink that users can open with their terminal's link-click gesture.
-Detail overflow is handled consistently by the UI rather than configured by
-individual Plugins.
-
-Plugins may opt into Kubernetes-style current-state conditions by extending
-`ConditionedStatus`. `conditions` remains optional and lives inside the
-Plugin-owned status schema; Aide stores it but does not interpret condition
-types, reasons, transitions, or lifecycle policy. Keep at most one current
-condition per `type`, and update `lastTransitionTime` only when that condition's
-`status` changes.
-
-`context.toast` is session-scoped and non-durable. Use it for one-off feedback
-caused by an operation or state transition. Ongoing state belongs in Resource
-status and an optional Board presentation; do not emit a toast on every reconcile.
-
-`context.logger` writes best-effort diagnostics to the owning AideSession.
-Aide adds the Plugin identity and owns the log path and persistence. Use
-`debug/info/warn/error(message, context)` with structured JSON `attributes`
-for troubleshooting context. Never include secrets or use diagnostics as
-Resource state. Keep lifecycle and aggregate results at `info`, entity details
-at `debug`, and deduplicate repeated polling output.
-
-`context.mentions.register` exposes searchable, read-only context that a user can
-explicitly add to one Harness turn with `@`. `namespace` is local to the Package;
-Aide qualifies it as `<pluginName>@<namespace>`, groups picker candidates by that
-identity, and removes the registration with the Plugin Binding. Keep `search`
-local and side-effect free; `resolve` runs only after the user selects a
-reference and submits the turn.
-
-`context.hooks.register` subscribes a Plugin to Core coordination boundaries:
-
-```ts
-context.hooks.register({
-  hookId: "observe-view-input",
-  stage: "view.input",
-  async run(hook) {
-    if (hook.subject.input.kind !== "prompt") return;
-    const decision = await hook.verbs.confirm({
-      title: "Autopilot",
-      prompt: `Inspect ${hook.subject.inputId}?`,
-      timeoutMs: 30_000,
-    });
-    // The Hook itself returns no decision or replacement payload.
-    // Any effect is requested through hook.verbs.
-    void decision;
-  },
-});
-```
-
-Hook exposes the four stable View and Harness IO boundaries:
-
-| stage | subject | delivery |
-|---|---|---|
-| `view.input` | durable `ViewInputRecord` | inline, before Core lowering |
-| `view.output` | published `ViewOutput` | deferred, after publication |
-| `harness.input` | read-only `HarnessInputDispatch` | inline, before the Adapter call |
-| `harness.output` | committed `AideEventReference` | deferred, after Event commit |
-
-Inline stages wait for every matching Hook concurrently. Failure or timeout is
-logged and fails open. Deferred stages use a bounded, best-effort host queue and
-never extend the main IO path. `view.output` means Aide published a View update;
-it does not prove that a person saw it.
-
-The Hook itself returns no replacement, allow/deny decision, or output value.
-Patch explicitly writable Core Resource fields through `context.resources`, and
-request other effects through typed `hook.verbs`; Core then owns authorization,
-persistence, routing, and lifecycle. Core mechanics such as `input.settled` and
-Adapter admission remain Event, Attempt, or Snapshot facts instead of becoming
-additional Hook stages.
-
-Core registers its Resource GVKs before Plugin activation. Plugins read them
-through the same `ResourceReader` used for Plugin-owned Resources; a later
-registration of the same `apiVersion + kind` fails instead of replacing Core.
-For example, an inline `view.input` Hook may select one eligible Target for the
-current Session without introducing another Hook stage:
-
-```ts
-const BINDING = {
-  apiVersion: "aide.dev/v1alpha1",
-  kind: "SessionTargetBinding",
-} as const;
-const TARGET = {
-  apiVersion: "aide.dev/v1alpha1",
-  kind: "Target",
-} as const;
-
-const [binding] = await context.resources.list(BINDING);
-const target = (await context.resources.list(TARGET)).find(
-  (candidate) => candidate.metadata.name === "codex2",
-);
-if (binding && target) {
-  await context.resources.patch(binding, {
-    type: "merge",
-    value: {
-      spec: {
-        targetRef: {
-          ...TARGET,
-          namespace: target.metadata.namespace,
-          name: target.metadata.name,
-          uid: target.metadata.uid,
-        },
-      },
-    },
-  });
-}
-```
-
-`Session`, `Target`, and `Turn` are read-only projections. The
-`SessionTargetBinding` provider accepts only `spec.targetRef` for the current
-Session, checks `resourceVersion`, and rejects targets outside its eligible set.
-
-Controller Sources have two narrow roles:
-
-- A `Source` performs initial discovery, installs live subscriptions,
-  and calls `emit(resource)` when it observes a Resource owned by that Controller.
-  Aide materializes a missing Resource, treats an identical repeated value as a
-  keyed wakeup, and rejects an implicit spec change. `start()` resolves only
-  after the initial scan and subscription are ready; the owning Binding aborts
-  its signal on close.
-- A `CronSource` periodically enqueues every current Resource owned by that
-  Controller.
-
-Both paths use the same keyed reconcile queue as Resource changes and
-`requeueAfterMs`. Sources never update status or use reconcile capabilities;
-those remain exclusively owned by `reconcile`.
-
-Resources may set one `metadata.owner` when they are created or emitted. The
-owner must be an existing Resource in the same concrete Resource namespace and
-must include its `uid`, so a replacement with the same name does not inherit
-dependents. Use this only for structural ownership, not discovery provenance or
-domain references.
-
-Labels are constrained, machine-readable selection metadata:
-
-```ts
-const openForgeTasks = await context.resources.list(TASK, {
-  matchLabels: {
-    "example.aide.dev/source": "forge",
-    state: "open",
-  },
-});
-```
-
-Every `matchLabels` entry must match exactly. Annotations are opaque string
-metadata and are not selectable. Use `patchMetadata()` to update either map by
-key; a `null` value removes that key without replacing unrelated entries.
-
-Use `get(ref)` to read a Resource. Omit `uid` for a name-based lookup that may
-resolve the current incarnation. Include `uid` when continuing work from an
-earlier observation, especially after awaiting a Core verb:
+Read by a resource reference:
 
 ```ts
 const current = await context.resources.get({
-  ...EXAMPLE_RESOURCE,
+  ...EXAMPLE,
   namespace: resource.metadata.namespace,
   name: resource.metadata.name,
   uid: resource.metadata.uid,
 });
-if (!current) return; // Deleted or replaced while this continuation waited.
+if (!current) return;
 ```
 
-`get(ref)` returns `undefined` when the name is absent or its `uid` no longer
-matches. Omitting `uid` intentionally performs a name-based lookup that may
-resolve a replacement. Namespace isolation is still enforced.
+Include uid when continuing after an asynchronous wait so a same-name replacement is not mistaken for the original resource. Omit uid only for an intentional name lookup. Updates check resourceVersion; re-read current state before retrying a conflict. Do not retry external execution merely because its result commit conflicted.
 
-`ResourceClient.delete()` requests deletion. Aide persists
-`metadata.deletionTimestamp`, cascades the request to structural descendants,
-hides terminating Resources from the Board, and removes each Resource after
-its Controller reconciles successfully. A failed terminating reconcile keeps
-the Resource durable and uses the normal retry path.
+A resource may have one structural owner in the same concrete namespace. Ownership includes uid; it is not a provenance link. Deletion persists deletionTimestamp, cascades to structural descendants and waits for successful terminating reconciliation before removing the resource.
 
-Controllers may also declare `watches` to map changes from secondary Resources
-to primary `ReconcileRequest`s:
+[Controller](src/reconcile.ts) owns one resource type and its reconcile policy. Resource changes, watches, source emissions and requeue requests feed the same keyed queue. One resource reconciles serially.
+
+- [Source](src/source.ts) performs initial discovery and live subscription. `start` resolves when ready; its signal is aborted on close. Identical emissions wake an existing resource, while implicit spec changes are rejected.
+- CronSource periodically enqueues current resources of its Controller.
+- [Watch](src/watch.ts) maps changes to secondary resources into primary requests. For updates, consider both old and new relationships so removed links also wake their former owner.
+- `requeueAfterMs` schedules a later observation without a separate timer loop in the plugin.
+
+Status belongs to the plugin. [ConditionedStatus](src/condition.ts) optionally represents current conditions, with one entry per type and transition time changing only when the condition status changes. The host does not interpret domain completion.
+
+## Verbs and interactions
+
+A [ReconcileContext](src/reconcile-context.ts) supplies snapshots and typed Core verbs. Every verb returns a closed outcome: success, dismissed, timeout or failure. A negative confirmation is a successful business value, not an execution error.
 
 ```ts
-import type {
-  EventHandler,
-  EventResource,
-  ReconcileRequest,
-} from "@compforge/aide-plugin";
-
-function requests(workspace: EventResource): readonly ReconcileRequest[] {
-  const status = workspace.status as {
-    readonly repositories?: readonly string[];
-  };
-  return (status.repositories ?? []).map((name) => ({ name }));
-}
-
-const repositories: EventHandler = {
-  async create(event) {
-    return requests(event.object);
-  },
-  async update(event) {
-    return [...requests(event.oldObject), ...requests(event.newObject)];
-  },
-  async delete(event) {
-    return requests(event.object);
-  },
-};
-
-context.controllers.register({
-  resourceType: "Repository",
-  watches: [{ resourceType: "Workspace", handler: repositories }],
-  async reconcile(_ctx, repository) {
-    // Reconcile repository.metadata.name from the latest stored state.
-  },
+const decision = await execution.verbs.confirm({
+  title: "Continue work",
+  prompt: "Proceed with the proposed change?",
+  timeoutMs: 60_000,
 });
+// Inspect the typed result before requesting any follow-up action.
 ```
 
-For an update, map both the old and new Resource so removed relationships still
-wake their former owner, then deduplicate the resulting requests. A Watch
-routes Resources already stored by Aide; a Source discovers external state
-and materializes the primary Resource before it is reconciled.
+`ask` and `confirm` collect a decision. `draft` lets the user edit proposed input; `harness` requests execution. Action verbs pass through a durable Interaction gate, which host policy may approve automatically. Only an approved or submitted action creates a HarnessInvocation.
 
-A Controller receives a `ReconcileContext`, reads current facts from
-`ctx.snapshot`, and can await a typed user decision directly:
+For execution, `laneId` selects a Lane and `newLane: true` creates a side Lane. An explicit harnessTargetId pins the Target. A direct Harness request resolves an omitted Target immediately; a draft resolves it when submitted. The returned Turn records execution, not domain acceptance.
 
-`snapshot.pendingInteractions` identifies each pending request by `messageId`.
-Its `source` and `target` are `ActorRef` values (`kind` + `key`); they identify
-the participants independently of the optional execution `turnId`. Interaction
-is the family name for InputRequest and InputResponse messages, not another identity.
+Every verb requires timeoutMs covering its entire gate, queue and execution wait. Waiting releases Controller and Manager capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
-```ts
-const decision = await ctx.verbs.ask({
-  title: "Associate pull request",
-  prompt: "Which requirement should own this pull request?",
-  timeoutMs: 10 * 60_000,
-  choices: [
-    { value: "req_1", label: "REQ-1" },
-    { value: "standalone", label: "Do not associate" },
-  ],
-});
-if (decision.state !== "success") {
-  // dismissed, timeout, or failure: apply the domain's fallback policy.
-  return;
-}
-await associate(decision.value);
-```
+## Hooks, commands and presentation
 
-A command can return `search.mode: "local"` to let chat-tui filter its current
-options, or `"remote"` to receive later query text in
-`CommandInput.searchQuery`. Aide debounces remote queries and ignores
-responses superseded by a newer query. A remote result may contain no options;
-return the same remote-search picker shape so the field stays open.
+[Hooks](src/hook.ts) observe four coordination boundaries:
 
-The Promise stays pending until the user answers, dismisses the Interaction, or
-the required timeout expires. Aide preserves the current async continuation,
-but releases both the Controller concurrency slot and the Manager-wide slot
-while it waits, so other Resources can reconcile. The result is persisted before
-the original continuation resumes; Aide does not re-enqueue the Resource to
-deliver the answer.
+| Stage | Delivery |
+| --- | --- |
+| `view.input` | Inline, before Core lowers the input |
+| `harness.input` | Inline, before Adapter dispatch |
+| `view.output` | Deferred, after publishing a view update |
+| `harness.output` | Deferred, after committing an execution event |
 
-Every verb returns the same closed outer outcome:
+Inline hooks fail open on failure or timeout. Deferred hooks use best-effort bounded delivery. Hooks return no replacement or allow/deny value; request effects through their typed verbs or writable resource fields. Publishing an output does not prove a person saw it.
 
-```ts
-type VerbResult<T> =
-  | { state: "success"; value: T }
-  | { state: "dismissed" }
-  | { state: "timeout" }
-  | { state: "failure"; error?: string };
-```
+[Commands](src/command.ts) receive invocation-scoped capabilities. Command verbs submit a turn or configure model defaults; capabilities expire with the invocation. Picker selections are new invocations, and remote search cannot retain a prior invocation's authority.
 
-`dismissed` means the user saw the Interaction and pressed Esc or closed it. A
-deliberate negative answer, such as declining a confirmation, is a successful
-business value. The Plugin decides how each non-success outcome degrades.
+[Target and Session projections](src/resource.ts) expose host facts through the same resource API. Core registers its resource types before plugin activation. Model discovery belongs to Target; changing SessionTargetBinding is limited to supported fields and eligible Targets.
 
-`ReconcileContext.verbs` contains typed Core verbs rather than generic messages.
-Every verb first materializes a Core-owned Interaction. `draft` continues only
-after its suggested input is submitted; `harness` continues only after its
-mandatory gate is approved. A host policy may auto-approve that gate, but Aide
-still persists the requested and answered Interaction facts before creating a
-HarnessInvocation. Plugins cannot select a topic, provide a routing callback,
-or pass a Harness-native DTO through Core.
+[Mentions](src/mention.ts) supply searchable, read-only context for explicit user selection. Keep search side-effect free; resolve is for selected references. [Board presentations](src/board.ts), pickers, mentions and toast are optional presentation contracts. Actual rendering depends on the consuming Channel; the current Web / Feishu adapters do not expose every authoring capability.
 
-Each choice `value` is the stable answer value persisted by Aide and returned
-as `decision.value`; `label` and `description` are presentation only. A closed
-choice ask preserves the literal union of those values. Setting
-`allowOther: true` permits arbitrary non-empty text and therefore widens the
-answer type to `string`; omit `choices` and set `allowOther: true` for a pure
-free-text ask.
+`context.toast` is non-durable feedback. Ongoing state belongs in resource status. `context.logger` writes host-owned structured diagnostics with plugin identity; log transitions and errors, avoid repeated polling noise and secrets, and do not use logs as business state.
 
-Aide gives each live reconcile a Core-issued Plugin execution identity. Verb
-continuation is correlated with that execution, not with the triggering
-Resource and not with a caller-provided operation key. Resource deletion does
-not implicitly dismiss an Interaction. If the Worker or Core crashes, the
-in-memory continuation is not replayed and its unfinished verb becomes
-`failure`.
-
-A Controller uses `ctx.verbs.draft` to let the user edit a prompt, or `ctx.verbs.harness`
-to enqueue a ready prompt for Harness execution. Both pass through Interaction;
-only an approved/submitted result creates the HarnessInvocation. The Plugin
-explicitly declares the Lane for execution:
-
-- `laneId` names an existing Lane to continue. `main` is the reserved main Lane ID.
-- `newLane: true` allocates a new asynchronous Lane from `laneId`; omitted or
-  `false` continues that Lane.
-
-Aide owns target selection, admission, execution, cancellation, ledger and
-recovery. Lane is a Aide-native task line rather than a Plugin-private
-execution type:
-
-An explicit `draft.harnessTargetId` fixes the Target and is shown with the
-editable draft. When omitted, Aide resolves the host's current selection when
-the user submits the draft and persists that final Target before scheduling.
-An omitted `harness.harnessTargetId` is resolved immediately because direct
-execution has no editing phase.
-
-```ts
-const execution = await ctx.verbs.harness({
-  title: "Implement",
-  prompt: "Implement the example and run its focused tests.",
-  timeoutMs: 30 * 60_000,
-  laneId: "main",
-  newLane: true,
-});
-if (execution.state !== "success") return;
-if (execution.value.outcome === "declined") return;
-// Inspect execution.value.turn.stopReason and update Resource status.
-```
-
-The successful result's `laneId` is the actual execution Lane and can be passed
-to a later call to continue the same side task. `completed` means the Turn
-closed, not that domain acceptance succeeded. A manual gate rejection returns
-`{ state: "success", value: { outcome: "declined" } }`. Closing a draft or
-pressing Esc returns `dismissed` and creates no HarnessInvocation when the gate
-has not passed. Dispatch errors and process interruption return `failure`.
-
-`timeoutMs` is mandatory on `ask`, `confirm`, `draft`, and `harness`. For an
-action verb, one deadline covers its Interaction gate, admission, and final
-Turn; approval does not reset the clock. Its value must be an integer between
-`1` and `MAX_VERB_TIMEOUT_MS` (2,147,483,647 milliseconds).
+See [Channel](../../docs/channel.md) for the current Web / Feishu experience and [Kernel](../../docs/kernel.md) for execution ownership.

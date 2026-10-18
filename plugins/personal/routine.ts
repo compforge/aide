@@ -4,7 +4,7 @@ import { executeWork, recordOutcome, scheduledReconcile } from "./execution.ts";
 import { nextOccurrence } from "./model.ts";
 
 /** @spec Routine completion ends one occurrence and schedules the next; event-only routines remain subscribed.
- * @link docs/runtime.md
+ * @link docs/personal.md
  */
 export async function reconcileRoutine(context: PluginContext, execution: ReconcileContext, resource: RoutineResource) {
   if (resource.metadata.deletionTimestamp) return;

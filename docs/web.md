@@ -1,4 +1,8 @@
-# 网页实时进展
+# Web Channel
+
+Web 是 Aide 的浏览器 Channel，提供会话导航、聊天、工作列表与用户交互。与 Feishu 的共同边界见 [Channel](channel.md)。
+
+## 实时进展与历史
 
 网页把聊天记录和当前执行进展分开呈现。接收 Input 后显示排队或处理状态，Chief 执行时显示 Harness 返回的思考内容、工具名称及状态、逐步生成的回复正文；完成后显示正式 Message，并将该轮过程折叠为“查看思考与执行过程”。模型未提供思考内容时只显示真实状态，不生成占位思考文本。当前覆盖 Chief 接话过程，Work 的后台执行仍通过事项卡片展示状态。
 
@@ -16,17 +20,44 @@ Pi Adapter 将 `text_delta` / `thinking_delta` 映射到现有 `agent_message_ch
 
 `src/channel/stream.ts` 使用 SDK 的 `PatchEmitter` 和 `encodeSse`，通过 `GET /stream?conversationId=...` 输出 AgentUE SSE。首次连接与重连发送 `start` 完整快照，之后新增或更正 block 用 `set`，正文增长用 `append`，执行状态变化用 `meta.activity` 的 `set`。完成只改变 execution 状态，不移除其内容；消息插入导致 block 顺序变化时发送新的 `start` 替换模型。
 
-流式变更按 100 ms 合并，空闲连接每 15 秒发送 AgentUE `ping`，Work 独立写入的 outbox 每 1.5 秒检查一次。发送阻塞时等待 drain，基于上次已写出的模型计算最新 patch。每个连接最长持续 5 分钟，以 `end` 正常结束，由 EventSource 自动重连；投影失败发送 `error` 后 `end`。首次投影失败则直接返回 HTTP 500。断开连接清理订阅和计时器，不取消服务端执行；进程退出或网络中断属于传输中断，客户端从新快照恢复。
+流式变更合并后发送，空闲连接发送 AgentUE `ping`，独立写入的 Work outbox 定期检查。发送阻塞时等待 drain，基于上次已写出的模型计算最新 patch。连接定期以 `end` 正常结束，由 EventSource 自动重连；投影失败发送 `error` 后 `end`。首次投影失败则直接返回 HTTP 500。断开连接清理订阅和计时器，不取消服务端执行；进程退出或网络中断属于传输中断，客户端从新快照恢复。
 
-依赖固定为已发布的 `@compforge/agentue@0.0.1`，使用它的协议 1.0。服务端与浏览器直接引用同一 SDK，不复制协议实现。`web-sdk.ts` 仅导出浏览器所需的 `applyPatch` / `parsePatchEvent`，由现有 Bun 在首次请求时打包并缓存，经同源 `/agentue.js` 提供。浏览器按 SDK reducer 更新展示模型，Aide 负责将 block 渲染到页面并保留展开状态、输入焦点和用户浏览历史时的滚动位置。
+使用已发布的 `@compforge/agentue` SDK，版本由 lockfile 固定。服务端与浏览器直接引用同一 SDK，不复制协议实现。`web-sdk.ts` 仅导出浏览器所需的 `applyPatch` / `parsePatchEvent`，由现有 Bun 在首次请求时打包并缓存，经同源 `/agentue.js` 提供。浏览器按 SDK reducer 更新展示模型，Aide 负责将 block 渲染到页面并保留展开状态、输入焦点和用户浏览历史时的滚动位置。
 
-Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职责独立。Baton / chat-tui 仅作为事实与 View 分层的理念参考，没有引入终端 UI。每次连接的 seq 属于该次交付，不保存 UI patch 日志或按 Last-Event-ID 重放；执行事件仍由既有 Ledger 持久化。
+Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职责独立。每次连接的 seq 属于该次交付，不保存 UI patch 日志或按 Last-Event-ID 重放；执行事件仍由既有 Ledger 持久化。
 
 进度不写入 Channel 出站 Message，因此不会让飞书收到逐 token 消息。历史过程直接从既有 Session Ledger 重放形成的投影读取，没有另一份轨迹存储。执行时展开实时内容，结束后默认折叠；同页后续消息更新保留用户的展开选择。刷新或重启后仍可展开查看旧轮次，未正常结束的执行标为中断。
 
 `tests/pi-agent.test.ts` 使用真实 Pi SDK 和受控模型 SSE，验证完成前已有思考和正文增量、最终文本不重复。`tests/web-progress.test.ts` 使用真实 Host / Runner / HTTP 和模拟 Harness，下载 HTTP 提供的浏览器 bundle，用其真实 AgentUE reducer 消费 SSE，验证会话隔离、增量更新、重连恢复、断开不取消、最终答复与过程历史同时保留、后续轮次分组、重开 Aide 后的 Ledger 恢复、错误收口，以及进度不进入出站消息。
 
+## 会话导航
 
 网页左栏通过 `GET /conversations` 汇总已有 Conversation 与仅有工作记录的会话范围，展示首条用户消息标题、最近消息摘要和会话 ID，按最近输入或消息时间排序。摘要不包含 Source 观察正文或 Harness 执行细节。默认对话与当前 URL 指定的空会话仍可进入；浏览列表不创建会话。
 
 点击会话导航到 `/?conversation=...`，消息 SSE 与事项查询使用同一个 conversationId。页面导航重新建立该会话的展示快照，刷新和前进后退保留 URL 选择；后台执行不受影响。列表更新失败保留已显示条目并独立提示，不覆盖发送状态。Core Interaction 仍是本地用户的 Session 级收件区。
+
+## 本地 HTTP 接口
+
+Web 页面与 HTTP 调用共用服务入口。提交消息后先返回持久化回执，Chief 在后台处理：
+
+```sh
+curl -s http://127.0.0.1:7433/messages \
+  -H 'content-type: application/json' \
+  -d '{"id":"msg-1","conversationId":"me","text":"读取当前项目 README，告诉我如何启动"}'
+
+curl -s 'http://127.0.0.1:7433/conversations'
+curl -s 'http://127.0.0.1:7433/messages?conversationId=me&role=all'
+curl -s 'http://127.0.0.1:7433/work?conversationId=me'
+```
+
+GET `/messages` 默认返回 Aide 消息；`role=all` 包含用户输入，`after=<message-id>` 可增量读取。重投同一入站消息使用相同 id；用户回答或核对后的业务重试使用新的 id。接收回执不表示执行完成。
+
+已配置事件触发 Routine 后，可提交对应事件：
+
+```sh
+curl -s http://127.0.0.1:7433/events \
+  -H 'content-type: application/json' \
+  -d '{"id":"event-1","conversationId":"me","name":"docs.changed","text":"项目需求文档有更新"}'
+```
+
+该接口唤醒匹配的 Routine，不自动创建 Work。接口面向本机可信调用，没有认证，不直接暴露公网；远程访问方式见 [部署](deployment.md)。

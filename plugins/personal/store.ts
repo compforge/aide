@@ -11,7 +11,7 @@ let lastMessageTime = 0;
 /**
  * @spec Task and Routine Resources own work state and its outbox. ConversationStore owns chat and retains deleted work delivery receipts.
  * @why A per-resource outbox preserves results without a second state store or cross-file transaction.
- * @link docs/runtime.md
+ * @link docs/personal.md
  */
 export class Store {
   constructor(readonly resources: PluginResourceStore, private readonly changed: (change: ResourceClientChange) => void, readonly conversations: ConversationStore) {

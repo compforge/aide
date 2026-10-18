@@ -32,7 +32,7 @@ export const conversationKey = (id: string) => createHash("sha256").update(id).d
 /**
  * @spec Input state and its messages commit atomically; a Channel input references one stored user Message.
  * @why Session's single-host lease owns writes. Plugins access projections over IPC, never these files.
- * @see {@link ../../../docs/chief.md}
+ * @see {@link ../../../docs/kernel.md}
  */
 export class ConversationStore {
   private readonly path: string;

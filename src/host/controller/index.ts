@@ -104,7 +104,6 @@ function eventSourceOf(source: HarnessInputSource): EventSource {
 
 /**
  * Control：与 Input / Interaction result 并列的第三种用户信号
- * （见 docs/workflow.md“Input 到 Harness”）。
  * 不携带内容、不到达 model——是对 turn **生命周期**的命令，必须 out-of-band 够到正在跑的
  * turn（不进 queue，否则会排在它要打断的 turn 后面而死锁）。当前唯一 kind 是 `interrupt`
  * （Esc）；pause / abort-bash / shutdown 等作为新 kind 加入时按 kernel 演进规则处理。
@@ -642,7 +641,6 @@ export class Controller {
    * 没有对应 Queue run 的 Turn 不接受 steer——Aide 不拥有其投递生命周期。
    *
    * @spec 每次用户提交只创建一个 Input/messageId；steer rejection 降级 follow-up 时保持身份不变。
-   * @see {@link ../../docs/workflow.md}
    */
   async sendTurn(
     harnessTargetId: string,

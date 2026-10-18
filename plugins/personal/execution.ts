@@ -39,7 +39,7 @@ function reference(resource: WorkResource) {
 
 /**
  * @spec Rebase the observation after IPC waits; retry persistence conflicts without repeating Harness execution.
- * @link docs/runtime.md
+ * @link docs/personal.md
  */
 async function record(context: PluginContext, original: WorkResource, update: (work: Work) => string | null,
   laneId?: string): Promise<Work | undefined> {

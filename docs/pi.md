@@ -1,70 +1,63 @@
-# 内置 Pi Agent
+# Pi 与 Chief Harness
 
-内置 Agent 位于 `agent/pi/`，用 Pi SDK 提供对话、文件与 CLI 操作，以及 Work 工具。`PiAdapter` 把这个 Agent 接入 Aide 的 Harness 生命周期。Agent 不依赖 Harness Controller，Adapter 不依赖 Personal 业务类型；宿主通过会话工厂把两者装配起来。
+`pi` 和 `chief` 是两个可独立选择的 Harness。它们共用 Pi SDK 和 `PiAdapter` 的执行机制；差异在于 Agent 的职责、提示词和工具。配置、日志及执行记录使用各自的 Harness 身份。
+
+| Harness | Agent | 能力 |
+| --- | --- | --- |
+| `pi` | `agents/pi/` | 通用对话、文件与 CLI 工具，加载工作目录上下文与 Skills |
+| `chief` | `agents/chief/` | 通用 Pi 能力，加上 Personal 提示词、Work 工具，以及装配注入的问答和 Connector 工具 |
+
+## Agent 与 Adapter
+
+通用 Pi Agent 创建 SDK 会话，管理模型配置、原生工具和会话文件，不依赖 Personal 类型。调用方可以注入提示词、工具和会话范围。
+
+Chief Agent 调用通用 Pi 工厂，绑定 WorkService 并添加业务工具；Work 状态、Controller 和调度仍由 Personal 拥有。Chief Controller 通过 Harness 调用这个 Agent，具体决策规则见 [Personal](personal.md)。
+
+PiAdapter 负责 open、sendTurn、cancel、close、事件归一与恢复句柄，不解释 Work 或 Connector。注册表为 `pi` / `chief` 创建相应身份的 Adapter；Chief 的会话工厂必须由 Personal 装配提供，不能默默回落为无业务工具的 Pi。
 
 ```text
-宿主绑定 conversationId → Personal WorkService → Task / Routine → 各自 Reconcile
-                                 ↑
-                           Pi Work tools
-                                 ↑
-Harness Controller → PiAdapter → 内置 Pi Agent → Pi 模型与原生工具
+Harness registry
+├── pi    → PiAdapter(pi)    → agents/pi
+└── chief → PiAdapter(chief) → agents/chief → agents/pi
+                                  │
+                        WorkService / 问答 / Connector
 ```
 
-## Work 工具
+## 装配与配置
 
-| 工具 | 行为 |
-| --- | --- |
-| `list_work` | 列出绑定对话中的 Task / Routine |
-| `read_work` | 读取目标、进度、历史、当前 revision 和待回答问题 |
-| `create_work` | 创建有限目标或持续安排，唤醒已有 Reconcile |
-| `update_work` | 修改定义、补充回答、暂停或恢复，类型不可变 |
-| `delete_work` | 删除工作并停止未来调度，保留对话消息和入站去重记录 |
-
-普通问答和即时查询可以直接使用原生工具，不要求创建 Work。工具返回持久化后的状态；创建成功不表示目标完成。读取不会唤醒执行，更新和删除需要最近读取的 revision。工具没有任意写 status 的入口，执行是否完成由对应 Task / Routine Reconcile 决定。
-
-改变类型由 Chief 组合 create / pause / delete 工具完成；新工作拥有独立 id，相关上下文写入新指令。
-
-WorkService 与 Channel 输入共用 Personal 的创建、更新规则及 Store。工具使用宿主绑定的 conversationId，不接受模型另传一个对话范围。删除不撤销外部动作、不取消已运行的命令；运行结果通过 uid 读取原资源，删除后不能重建它。删除前将 outbox 和输入回执归档至 Conversation，保留 Channel 投递与去重依据。删除请求立即使工作退出可见列表，物理清理由既有 Resource 删除生命周期完成。
-
-## 装配
-
-在已启动的 Aide 宿主中，绑定一份对话范围，再将工厂交给 Harness registry：
+通用 Pi Harness 可以直接创建，不需要 Personal：
 
 ```ts
-import { createPiAgent } from "../agent/pi/agent.ts";
 import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 
-const work = aide.work(conversationId);
 const adapter = createHarnessAdapter(
-  { id: "assistant", harness: "pi" },
-  {
-    ...ports, // Controller 提供 openInteraction、log、nativeEvent
-    targetConfig: { harness: "pi" },
-    piSession: (options) => createPiAgent({
-      ...options,
-      work,
-      sessionDir: "/path/to/aide/pi-sessions",
-      agentDir: "/home/user/.pi/agent",
-      model: { provider: "your-provider", id: "your-model" },
-    }),
-  },
+  { id: "general", harness: "pi" },
+  { ...ports, targetConfig: { harness: "pi" }, rootDir: aideHome },
 );
 ```
 
-`agentDir` 省略时使用 Pi 默认配置目录，模型省略时使用 Pi 的选择机制。凭证和模型端点由 Pi 的 `auth.json`、`models.json` 及环境配置管理；Aide 不保存另一份凭证。Pi 模型配置格式见 [官方文档](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。SDK 固定版本随 lockfile 安装。
+宿主提供自定义 Pi 会话工厂时使用 `piSession`。Chief 则使用 `chiefSession`，由 Personal 将 conversationId、WorkService、问题回调和连接器工具绑定到同一会话：
 
-原生会话由 Pi 自己持久化。Adapter 将会话 id 和文件路径通过 Harness binding 保存。Pi 在第一条对话消息时创建文件，因此 binding 区分尚未落盘的空会话和已有历史：空会话可以重新建立，已有历史恢复时要求文件存在且工作目录、对话范围一致。内置 Agent 加载工作目录的上下文与 Skills，启用明确列出的文件、CLI 和 Work 工具；不自动加载扩展、提示词命令或交互主题。
+```ts
+const adapter = createHarnessAdapter(
+  { id: chiefTargetId, harness: "chief" },
+  { ...ports, targetConfig: { harness: "chief" },
+    chiefSession: aide.chiefSession(chiefTargetId) },
+);
+```
 
-## 执行契约
+模型和凭证由 Pi 的 `auth.json`、`models.json` 与环境配置管理，默认目录为 `~/.pi/agent`。工厂可指定 agentDir 与模型；Aide 不另存模型凭证。`AIDE_MODEL` 控制默认 Codex Target，不改变 Chief 的 Pi 模型。Pi 模型配置见 [上游文档](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。
 
-每个 Pi 会话一次执行一个 Turn，忙时拒绝新输入，由 Controller 排队。当前提供文本输入、取消、关闭和持久会话恢复，不声明同轮 steer 或媒体能力。嵌入式 SDK 不支持每会话修改进程环境，账户配置使用独立 agentDir。
+原生会话由 Pi SDK 持久化，Adapter 保存文件位置与恢复状态。通用 Pi 与 Chief 使用各自的会话范围；恢复时校验工作目录和范围，Chief 的范围绑定 conversationId。空会话尚未落盘时可以重新建立，已有历史文件缺失或范围不符则报错，避免悄悄换成新会话。
 
-Adapter 记录原生工具开始与结束、消息和 token 用量。一次 Pi 运行可能包含多轮工具调用；只有收到 `agent_settled` 且最后模型响应以正常 stop 结束，才将其标为最终答案。对话进度保留在 agentText，最终答复进入 finalText。等待 Pi prompt 调用栈结束后才释放执行位，防止下一轮撞上尚未清理完的原生会话。
+## 执行与展示
 
-失败、取消、截断和空答复不能伪装成成功。Adapter 对已接收的 Turn 恰好发一次 idle，错误先发诊断事件。内置 Agent 禁用自动整轮重试，模型连接空闲超时为 60 秒；完整执行期限仍由 Harness 调用方管理，HTTP 连接管理沿用 Pi SDK。
+每个 Pi 会话一次执行一个 Turn，忙时由 Controller 排队。当前支持文本输入、取消与恢复；嵌入式 SDK 不支持每会话环境覆盖。Agent 不自动加载扩展、提示词命令或交互主题。
 
-## 验证与接入边界
+Adapter 将文字、思考、工具和用量转换为 Core 事件。一次运行可能经历多轮工具调用；只有成功收口的最后模型答复进入 finalText，中间输出留作进度。取消、失败、截断或空答复不能作为成功结果。原生调用栈清理结束后才释放执行位。
 
-`tests/pi-agent.test.ts` 运行真实 Pi SDK 和本地模拟模型 HTTP 服务，覆盖直接回答、全部五个 Work 工具、原生会话恢复、最终答案提取、模型失败和取消。`tests/pi-work.test.ts` 覆盖持久化、revision 冲突、对话范围、删除后消息保留，以及真实 Personal Worker 被工具写入唤醒。
+内置 Agent 禁用自动整轮重试，完整期限由 Harness 调用方管理。Pi / Chief 共用同一套流式与取消逻辑；网页消费这些事件的方式见 [Web](web.md)。
 
-`npm start` 的网页／飞书入口由 Chief 使用 Pi 接话，Task / Routine Controller 使用 Codex 执行长期工作。Chief 的 Source 输入、连接器工具与持久问答见 [Chief 与主动发现](chief.md)。`tests/chief.test.ts` 验证完整装配；这些协议测试不代表真实模型的意图识别效果或业务 CLI 已验证。
+## 验证
+
+`tests/pi-agent.test.ts` 使用真实 SDK 与模拟模型，检查通用 Pi 的工具集合、Chief 的五个 Work 工具、身份与会话恢复边界、流式回复、失败和取消。`tests/chief.test.ts` 验证 Source → Chief → 用户决定 → Work 的完整装配。它们不代表真实模型判断质量或业务账号已经验证。

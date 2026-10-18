@@ -10,7 +10,6 @@ type InboxTarget = "next-turn" | "next-step";
  *
  * @spec Durable inbox insertion keeps a steer pending; only a claimed entry that reaches
  * user/message is applied. A claimed entry missing at idle is failed instead of hanging.
- * @see {@link ../../../docs/harness/deepseek-harness.md}
  */
 export class DshActivity {
   readonly done: Promise<void>;

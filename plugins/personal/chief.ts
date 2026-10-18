@@ -4,7 +4,7 @@ import { INPUT_TYPE, CONVERSATION_TYPE, chiefTarget, type InputSpec, type InputS
 import { WORK_TYPES, type Delivery } from "./resources.ts";
 
 /** @spec Chief inputs are durable before invoking tools; interrupted inputs are never replayed automatically.
- * @link docs/chief.md
+ * @link docs/personal.md
  */
 export function registerChief(context: PluginContext): void {
   context.controllers.register<Record<string, never>, Conversation>({
