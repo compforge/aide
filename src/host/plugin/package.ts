@@ -1,4 +1,4 @@
-import type { PluginLogRecord } from "../../runner/protocol.ts";
+import type { PluginLogRecord } from "../../protocol/ipc.ts";
 import type {
   BoardPresentation,
   BoardItemTone,

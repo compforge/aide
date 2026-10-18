@@ -28,9 +28,11 @@ import { validateWatches, watchRequests } from "./watch.ts";
 import { namespaceContains } from "./namespace.ts";
 import {
   createReconcileContext,
+} from "../../plugin-context.ts";
+import {
   type ExecutionScope,
   type InvokeVerb,
-} from "../../runner/context.ts";
+} from "../../protocol/verbs.ts";
 
 export type ReconcileResourceOwner = "plugin" | "aide";
 

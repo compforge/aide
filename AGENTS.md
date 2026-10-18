@@ -24,10 +24,12 @@ src/
     harness/               # HarnessAdapter 与 provider 协议
     store/                 # Session 与事件投影
     file-lock.ts           # Aide 服务入口的单实例文件锁
-  runner/                  # Plugin 子进程及 Host/Runner 共享调用契约
+  runner/                  # Plugin 子进程实现
     process.ts             # 子进程入口：加载插件，执行 Source / Reconcile 等回调
-    protocol.ts            # 双向 IPC 消息与错误序列化
-    context.ts             # Plugin 调用上下文、verb 参数校验与传输接口
+  protocol/                # Host / Runner 共用的内部通信契约
+    ipc.ts                 # 双向 IPC 消息、注册描述与错误序列化
+    verbs.ts               # ExecutionScope、verb 请求/响应与调用接口
+  plugin-context.ts        # 两端共用的 Plugin 上下文构造与 verb 参数校验
 plugins/                   # 内置插件；personal 是其中一个
   personal/
     aide.ts                # Session/Plugin 装配、Chief 输入、问题投影与恢复
@@ -52,7 +54,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 ## 关键约定
 
 - Personal 业务不进入 Host / Runner；Plugin Runner 通过公共 Resource API 和 verbs 请求动作，不持有 Harness 或宿主 Store；`aide.ts` 和 `store.ts` 是宿主装配与输入投影。
-- `src/runner/` 不依赖 `src/host/`。Host 可以使用 Runner 的 IPC 协议与上下文构造，但只能通过子进程入口启动 `runner/process.ts`，不能导入该入口。Resource 存储、Watch / Queue 调度、Harness 执行和 Runner 生命周期管理均留在 Host。
+- Host 与 Runner 不相互导入实现；Host 仅通过子进程入口启动 `runner/process.ts`。两端复用代码按职责放在 `src/` 下：通信契约放 `protocol/`，Plugin 上下文构造放 `plugin-context.ts`；共享模块不依赖 Host 或 Runner。Resource 存储、Watch / Queue 调度、Harness 执行和 Runner 生命周期管理均留在 Host。
 - Task / Routine 共用 Work 身份，spec.kind 区分类别；转换保留 uid、历史与去重记录。
 - status、出站回复与投递去重一起提交。等待用户是持久状态，不保持执行位。
 - Harness 完成不等于业务目标完成，personal 校验结果后决定工作终态。

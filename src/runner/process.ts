@@ -31,13 +31,15 @@ import type {
   ToastMessage,
   Watch,
 } from "@compforge/aide-plugin";
-import type { PluginLogRecord } from "./protocol.ts";
+import type { PluginLogRecord } from "../protocol/ipc.ts";
 import {
   createHookContext,
   createReconcileContext,
+} from "../plugin-context.ts";
+import {
   type ExecutionScope,
   type VerbResponse,
-} from "./context.ts";
+} from "../protocol/verbs.ts";
 
 import {
   type ActivationResult,
@@ -53,7 +55,7 @@ import {
   type RunnerRequest,
   restoredError,
   serializedError,
-} from "./protocol.ts";
+} from "../protocol/ipc.ts";
 
 interface PendingCall {
   readonly resolve: (value: unknown) => void;

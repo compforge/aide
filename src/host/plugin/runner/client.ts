@@ -12,12 +12,12 @@ import type {
   SourceContext,
   ToastMessage,
 } from "@compforge/aide-plugin";
-import type { PluginLogRecord } from "../../../runner/protocol.ts";
+import type { PluginLogRecord } from "../../../protocol/ipc.ts";
 import type {
   ExecutionScope,
   VerbRequest,
   VerbResponse,
-} from "../../../runner/context.ts";
+} from "../../../protocol/verbs.ts";
 
 import {
   type ActivationResult,
@@ -31,7 +31,7 @@ import {
   type RunnerRequest,
   restoredError,
   serializedError,
-} from "../../../runner/protocol.ts";
+} from "../../../protocol/ipc.ts";
 
 interface PendingCall {
   readonly resolve: (value: unknown) => void;

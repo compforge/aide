@@ -25,7 +25,7 @@ import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
 import {
   restoredError,
   serializedError,
-} from "../src/runner/protocol.ts";
+} from "../src/protocol/ipc.ts";
 import { SessionHandle } from "../src/host/store/store.ts";
 
 const roots: string[] = [];

@@ -12,9 +12,11 @@ import { type LogSink, logError } from "../logging.ts";
 import type { ReconcileSnapshot } from "./reconcile-snapshot.ts";
 import {
   createHookContext,
+} from "../../plugin-context.ts";
+import {
   type ExecutionScope,
   type InvokeVerb,
-} from "../../runner/context.ts";
+} from "../../protocol/verbs.ts";
 import type { Verb } from "./verb.ts";
 
 export const DEFAULT_HOOK_TIMEOUT_MS = 10_000;

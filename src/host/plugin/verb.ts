@@ -20,7 +20,11 @@ import type {
 } from "./queue.ts";
 import type { ReconcileSnapshot } from "./reconcile-snapshot.ts";
 
-import type { ExecutionScope, VerbRequest, VerbResponse } from "../../runner/context.ts";
+import type {
+  ExecutionScope,
+  VerbRequest,
+  VerbResponse,
+} from "../../protocol/verbs.ts";
 
 type VerbSession = Pick<
   SessionHandle,

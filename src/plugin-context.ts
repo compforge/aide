@@ -15,51 +15,9 @@ import {
   type PluginVerbs,
   type ReconcileContext,
   type ReconcileSnapshot,
-  type ResourceNamespace,
 } from "@compforge/aide-plugin";
 
-export interface ExecutionScope {
-  readonly aideSessionId: string;
-  readonly pluginInstanceId: string;
-  /** Namespace of the Resource or session boundary that initiated the action. */
-  readonly namespace: ResourceNamespace;
-  /** Core-issued identity for one live Plugin execution. */
-  readonly executionId: string;
-}
-
-/**
- * Plugin-facing typed Core verbs. Every operation-producing verb first becomes
- * an Interaction; draft/harness create a HarnessInvocation only after that gate
- * settles positively. Runner never sends an opaque message.
- */
-export type VerbRequest =
-  | {
-      readonly verb: "ask";
-      readonly input: AskInput;
-    }
-  | {
-      readonly verb: "confirm";
-      readonly input: ConfirmInput;
-    }
-  | {
-      readonly verb: "draft";
-      readonly input: DraftInput;
-    }
-  | {
-      readonly verb: "harness";
-      readonly input: HarnessInvocationInput;
-    };
-
-export type VerbResponse =
-  | AskResult
-  | ConfirmResult
-  | DraftResult
-  | HarnessResult;
-
-export type InvokeVerb = (
-  context: ExecutionScope,
-  request: VerbRequest,
-) => Promise<VerbResponse>;
+import type { ExecutionScope, InvokeVerb } from "./protocol/verbs.ts";
 
 const reconcileScopes = new WeakMap<ReconcileContext, ExecutionScope>();
 const hookScopes = new WeakMap<HookContext, ExecutionScope>();
@@ -140,7 +98,7 @@ function validateDraft(input: DraftInput): void {
 /**
  * @spec Host and Runner use the same facade; only the invocation transport differs.
  * @rule Context construction depends only on the public Plugin contract, never Host execution or storage.
- * @see {@link ../../docs/runtime.md}
+ * @see {@link ../docs/runtime.md}
  */
 export function createPluginVerbs(
   scope: ExecutionScope,

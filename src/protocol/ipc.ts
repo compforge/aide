@@ -20,7 +20,7 @@ import type {
 import type {
   ExecutionScope,
   VerbRequest,
-} from "./context.ts";
+} from "./verbs.ts";
 
 export interface PluginLogRecord {
   readonly level: PluginLogLevel;
