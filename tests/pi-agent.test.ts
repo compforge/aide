@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
-import { createPiAgent } from "../agent/pi/agent.ts";
+import { createPiAgent } from "../agents/pi/agent.ts";
+import { createChiefAgent } from "../agents/chief/agent.ts";
 import { WorkService } from "../plugins/personal/work.ts";
 import { Store } from "../plugins/personal/store.ts";
 import { SessionStore } from "../src/host/store/store.ts";
@@ -18,7 +19,7 @@ import type { HarnessEvent, HarnessSessionBinding } from "../src/host/harness/ad
 type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown } | { error: true } | { hold: true };
 
 /** Real Pi SDK and HTTP protocol; only the remote model is scripted. No external credentials or network. */
-async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply) {
+async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" = "pi") {
   const root = mkdtempSync(join(tmpdir(), "aide-pi-sdk-"));
   const requests: Record<string, unknown>[] = [];
   const held = new Set<ServerResponse>();
@@ -54,20 +55,23 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const session = sessions.createSession({ cwd: root });
   const store = new Store(new PluginResourceStore({ session, pluginInstanceId: "personal" }), () => {}, new ConversationStore(session));
   const work = new WorkService(store, "me", pino({ level: "silent" }));
-  const config = { work, cwd: root, agentDir, sessionDir: join(root, "pi-sessions"), model: { provider: "fixture", id: "test-model" } };
+  const config = { cwd: root, agentDir, sessionDir: join(root, "pi-sessions"), model: { provider: "fixture", id: "test-model" } };
   const events: HarnessEvent[] = [];
   let binding: HarnessSessionBinding | undefined;
   let finished: (() => void) | undefined;
-  const adapter = createHarnessAdapter({ id: "assistant", harness: "pi" }, {
-    targetConfig: { harness: "pi" }, openInteraction: async () => { throw new Error("Unexpected interaction"); },
+  const adapter = createHarnessAdapter({ id: "assistant", harness }, {
+    targetConfig: { harness }, openInteraction: async () => { throw new Error("Unexpected interaction"); },
     piSession: (input) => createPiAgent({ ...config, ...input }),
+    chiefSession: (input) => createChiefAgent({ ...config, ...input, work }),
   });
   const open = () => adapter.open({ cwd: root, ...(binding ? { resumeState: binding.resumeState } : {}) }, (event) => {
     events.push(event);
-    session.appendEvent({ ...event, source: { type: "harness", harnessTargetId: "assistant" }, harness: "pi", harnessTargetId: "assistant", laneId: "main" });
+    session.appendEvent({ ...event, source: { type: "harness", harnessTargetId: "assistant" }, harness, harnessTargetId: "assistant", laneId: "main" });
     if (event.kind === "state_update" && event.payload.state === "idle") finished?.();
   }, (value) => { binding = value; });
   let ref = await open();
+  assert.equal(adapter.harness, harness);
+  assert.equal(ref.harness, harness);
   t.after(async () => {
     await adapter.close(ref);
     for (const response of held) response.destroy();
@@ -111,6 +115,11 @@ test("Pi answers directly without work and resumes its native history", { timeou
   assert.equal((fixture.binding().resumeState.data as { empty: boolean }).empty, false);
   assert.equal(summary.finalText, "你好，有什么可以帮你？");
   assert.equal(summary.stopReason, "end_turn");
+  const definitions = fixture.requests[0]!.tools as { function: { name: string } }[];
+  const names = definitions.map((tool) => tool.function.name);
+  assert.ok(names.includes("read") && names.includes("bash"));
+  assert.ok(!names.some((name) => name.endsWith("_work") || ["ask", "confirm", "list_connectors"].includes(name)));
+  assert.doesNotMatch(JSON.stringify(fixture.requests[0]!.messages), /You are Chief|Work tools/);
   assert.deepEqual(fixture.work.list(), []);
   assert.equal((await fixture.run("谢谢", "same-session")).stopReason, "end_turn");
   const identity = fixture.binding().identity.id;
@@ -119,12 +128,11 @@ test("Pi answers directly without work and resumes its native history", { timeou
   assert.equal(fixture.binding().identity.id, identity);
   assert.match(JSON.stringify(fixture.requests[1]!.messages), /你好/);
   const data = fixture.binding().resumeState.data as { sessionFile: string };
-  await assert.rejects(createPiAgent({ ...fixture.config, sessionFile: data.sessionFile,
-    work: { ...fixture.work, conversationId: "another" } as WorkService }), /does not belong/);
+  await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile: data.sessionFile, work: fixture.work }), /does not belong/);
   await assert.rejects(createPiAgent({ ...fixture.config, sessionFile: join(fixture.config.sessionDir, "missing.jsonl") }), /missing/);
 });
 
-test("Pi executes all five Work tools through the SDK and keeps commentary out of finalText", { timeout: 30_000 }, async (t) => {
+test("Chief executes all five Work tools through the SDK and keeps commentary out of finalText", { timeout: 30_000 }, async (t) => {
   let id = "", routineId = "";
   const fixture = await setup(t, (_request, index) => {
     const works = fixture.work.list();
@@ -146,7 +154,7 @@ test("Pi executes all five Work tools through the SDK and keeps commentary out o
       case 7: return { tool: "delete_work", args: { id: routineId, revision: 2 } };
       default: return { text: "已完成创建、查询、更新和删除。" };
     }
-  });
+  }, "chief");
   const summary = await fixture.run("验证 Work 的增删改查", "crud");
   assert.equal(summary.stopReason, "end_turn");
   assert.equal(summary.finalText, "已完成创建、查询、更新和删除。");
@@ -154,6 +162,12 @@ test("Pi executes all five Work tools through the SDK and keeps commentary out o
   assert.deepEqual(summary.toolCalls.map((tool) => tool.status), Array(8).fill("completed"));
   assert.deepEqual(fixture.work.list(), []);
   assert.equal(fixture.events.filter((event) => event.kind === "state_update").length, 1);
+  assert.equal((await fixture.reopen()).resumed, true);
+  assert.equal((await fixture.run("继续聊天", "chief-resumed")).stopReason, "end_turn");
+  const sessionFile = (fixture.binding().resumeState.data as { sessionFile: string }).sessionFile;
+  await assert.rejects(createPiAgent({ ...fixture.config, sessionFile }), /does not belong/);
+  await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile,
+    work: { ...fixture.work, conversationId: "another" } as WorkService }), /does not belong/);
 });
 
 test("Pi model failure and cancellation settle once, without a successful final answer", { timeout: 30_000 }, async (t) => {
@@ -187,4 +201,12 @@ test("Pi refuses unsupported input before admission and does not promote truncat
   assert.equal(summary.stopReason, "error");
   assert.equal(summary.finalText, undefined);
   assert.match(summary.agentText!, /未完成的回答/);
+});
+
+test("Pi can be constructed without Personal while Chief requires its bound factory", () => {
+  const ports = { openInteraction: async () => { throw new Error("Unexpected interaction"); } };
+  assert.equal(createHarnessAdapter({ id: "plain", harness: "pi" }, { ...ports, targetConfig: { harness: "pi" } }).harness, "pi");
+  assert.throws(() => createHarnessAdapter({ id: "chief", harness: "chief" }, {
+    ...ports, targetConfig: { harness: "chief" },
+  }), /Chief agent factory/);
 });

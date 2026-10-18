@@ -22,13 +22,15 @@ interface Session {
 
 /**
  * @spec Every accepted turn terminates once, after Pi settles or rejects. Tool-loop messages never become finalText.
- * @link docs/pi.md
+ * @link docs/harness/pi.md
  */
 export class PiAdapter implements HarnessAdapter {
-  readonly harness = "pi";
+  readonly harness: "pi" | "chief";
   readonly capabilities = { prompt: {} };
   private readonly sessions = new Map<string, Session>();
-  constructor(private readonly options: { createSession: PiSessionFactory; log?: LogSink; nativeEvent?: NativeEventSink }) {}
+  constructor(private readonly options: { harness?: "pi" | "chief"; createSession: PiSessionFactory; log?: LogSink; nativeEvent?: NativeEventSink }) {
+    this.harness = options.harness ?? "pi";
+  }
 
   async open(options: OpenOptions, sink: HarnessEventSink, binding: HarnessSessionBindingSink): Promise<HarnessSessionHandle> {
     if (options.env && Object.keys(options.env).length) throw new Error("Embedded Pi does not support per-session environment overrides");
@@ -158,6 +160,6 @@ export class PiAdapter implements HarnessAdapter {
 
   private log(message: string, turnId: string, reason?: string): void {
     this.options.log?.({ level: reason === "error" ? "error" : "info", source: "harness", component: "pi.adapter",
-      harness: "pi", message, turnId, ...(reason ? { attributes: { reason } } : {}) });
+      harness: this.harness, message, turnId, ...(reason ? { attributes: { reason } } : {}) });
   }
 }

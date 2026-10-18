@@ -30,7 +30,7 @@ import { readClaudeSettings } from "./settings.ts";
 export interface ClaudeTurn {
   turnId: string;
   replies?: MessageReplies;
-  /** 保证任何退出路径（result 消息 / 流异常 / 流结束无 result）只发一次终态（见 docs/harness.md） */
+  /** 保证任何退出路径（result 消息 / 流异常 / 流结束无 result）只发一次终态（见 docs/harness/README.md） */
   finalized: boolean;
   /** 用户主动中断时，SDK 会以 error result 结束消息流；该错误应归一成 cancelled。 */
   cancelRequested: boolean;

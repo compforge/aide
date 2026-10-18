@@ -3,7 +3,7 @@ import { TASK_TYPE, type TaskSpec, type TaskResource, type WorkStatus } from "./
 import { executeWork, recordOutcome, scheduledReconcile } from "./execution.ts";
 
 /** @spec Task completion ends the finite goal; wait may still schedule a continuation.
- * @link docs/runtime.md
+ * @link docs/plugin/personal.md
  */
 export async function reconcileTask(context: PluginContext, execution: ReconcileContext, resource: TaskResource) {
   if (resource.metadata.deletionTimestamp) return;

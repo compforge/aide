@@ -260,7 +260,6 @@ export class Queue<TBinding extends QueueBinding> {
 
   /**
    * @spec 只有仍位于队头的 HarnessInput 才能被 same-turn dispatch claim；claim 后不可被 composer recall。
-   * @see {@link ../docs/workflow.md}
    */
   claimFirstForSteer(input: QueueItem): boolean {
     if (this.dispatching || this.queue[0] !== input) return false;
@@ -339,7 +338,6 @@ export class Queue<TBinding extends QueueBinding> {
    * Reorder only adjacent user-owned items; read-only Plugin work is never crossed.
    *
    * @spec Queue reorder is recorded before the in-memory order changes, and user actions cannot cross HarnessInvocation work.
-   * @see {@link ../docs/workflow.md}
    */
   moveUserById(
     messageId: string,
@@ -362,7 +360,6 @@ export class Queue<TBinding extends QueueBinding> {
    * Plugin-owned work because that work has a separate cancellation lifecycle.
    *
    * @spec Dispatch-now preserves Input identity and may only promote across user-manageable queued work.
-   * @see {@link ../docs/workflow.md}
    */
   promoteUserById(messageId: string): QueueSnapshot | undefined {
     const index = this.queue.findIndex((input) => input.messageId === messageId);

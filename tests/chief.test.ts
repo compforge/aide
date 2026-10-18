@@ -8,7 +8,7 @@ import { test } from "node:test";
 import pino from "pino";
 import { Aide } from "../plugins/personal/aide.ts";
 import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "../plugins/personal/chief-model.ts";
-import { PiAdapter } from "../src/host/harness/pi/adapter.ts";
+import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 import { FeishuChannel } from "../src/channel/feishu.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { SessionStore } from "../src/host/store/store.ts";
@@ -108,8 +108,9 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   let executions = 0;
   const coding = fakeOptions({ execute: async (work) => { executions++; assert.match(work.instruction, /work\/story\/123/);
     return { action: "done", summary: "Implemented and verified", notification: "实现已完成", question: null, nextAt: null }; } }, root);
-  const aide: Aide = new Aide(root, { ...coding, createAdapter: (target, ports) => target.harness === "pi"
-    ? new PiAdapter({ ...ports, createSession: aide.chiefSession(target.id, { agentDir, model: { provider: "fixture", id: "test-model" } }) })
+  const aide: Aide = new Aide(root, { ...coding, createAdapter: (target, ports) => target.harness === "chief"
+    ? createHarnessAdapter(target, { ...ports, targetConfig: { harness: "chief" },
+      chiefSession: aide.chiefSession(target.id, { agentDir, model: { provider: "fixture", id: "test-model" } }) })
     : coding.createAdapter(target) }, log);
   const sent: string[] = [];
   const bot = new FeishuChannel(root, "cli_fixture", aide, { async start() {}, close() {}, async send(_chat, text) { sent.push(text); } }, log);

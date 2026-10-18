@@ -13,8 +13,8 @@ import { message, Store } from "./store.ts";
 import { workType } from "./resources.ts";
 import { CONVERSATION_TYPE, chiefTarget, digest } from "./chief-model.ts";
 import { conversationKey } from "../../src/host/conversation/store.ts";
-import { chiefTools } from "../../agent/pi/chief-tools.ts";
-import { createPiAgent, type PiAgentOptions } from "../../agent/pi/agent.ts";
+import { chiefTools } from "../../agents/chief/chief-tools.ts";
+import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
 import { Connectors } from "../../connectors/index.ts";
 import { loadWatches } from "./source-config.ts";
@@ -70,12 +70,12 @@ export class Aide {
     const id = chiefTarget(conversationId);
     if (this.conversations.has(id)) return;
     this.conversations.set(id, conversationId);
-    this.targets.push({ id, harness: "pi" });
-    this.session.setHarnessTarget(id, { harnessTargetId: id, harness: "pi" });
+    this.targets.push({ id, harness: "chief" });
+    this.session.setHarnessTarget(id, { harnessTargetId: id, harness: "chief" });
   }
 
-  /** Composition binds a Pi session to one conversation; the adapter remains business-agnostic. */
-  chiefSession(targetId: string, settings: Pick<PiAgentOptions, "agentDir" | "model"> = {}): PiSessionFactory {
+  /** Personal binds a Chief session and its tools to one conversation; the adapter remains business-agnostic. */
+  chiefSession(targetId: string, settings: Pick<ChiefAgentOptions, "agentDir" | "model"> = {}): PiSessionFactory {
     const conversationId = this.conversations.get(targetId);
     if (!conversationId) throw new Error("Unknown Chief target");
     const active = () => {
@@ -92,8 +92,8 @@ export class Aide {
       if (input.spec.origin !== "source") throw new Error("Only Source observations can be dismissed silently");
       this.store.conversations.update(input, { quietReason });
     });
-    return (options) => createPiAgent({ ...options, ...settings, work: this.work(conversationId),
-      sessionDir: join(this.home, "pi-sessions"), tools, beforeWorkMutation: () => { active(); } });
+    return (options) => createChiefAgent({ ...options, ...settings, work: this.work(conversationId),
+      sessionDir: join(this.home, "chief-sessions"), tools, beforeWorkMutation: () => { active(); } });
   }
 
   start(): Promise<void> { return this.starting ??= this.startOnce(); }

@@ -98,7 +98,7 @@ function validateDraft(input: DraftInput): void {
 /**
  * @spec Host and Runner use the same facade; only the invocation transport differs.
  * @rule Context construction depends only on the public Plugin contract, never Host execution or storage.
- * @see {@link ../docs/runtime.md}
+ * @see {@link ../docs/kernel.md}
  */
 export function createPluginVerbs(
   scope: ExecutionScope,

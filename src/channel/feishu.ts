@@ -21,7 +21,7 @@ type State = z.infer<typeof StateSchema>;
 /**
  * @spec Persist inbound messages before acknowledging Feishu; acknowledge outbound delivery only after send succeeds.
  * @why Platform acknowledgement must not depend on business processing or model latency.
- * @see {@link ../../docs/feishu.md}
+ * @see {@link ../../docs/channel/feishu.md}
  */
 export class FeishuChannel {
   private readonly path: string;

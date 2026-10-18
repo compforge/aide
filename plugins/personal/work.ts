@@ -58,7 +58,7 @@ export function changeWork(work: Work, update: WorkUpdate, now = new Date()): Wo
 
 /**
  * @spec Tools operate on the caller-bound conversation, never a model-supplied scope. Writes wake the corresponding Task or Routine reconciler.
- * @link docs/pi.md
+ * @link docs/plugin/personal.md
  */
 export class WorkService {
   constructor(private readonly store: Store, readonly conversationId: string, private readonly log: Logger) {

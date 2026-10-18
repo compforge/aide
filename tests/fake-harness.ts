@@ -26,7 +26,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = []) 
         const prompt = input.blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
         requests.push(prompt);
         const data = (label: string) => JSON.parse(prompt.split(label)[1]!.split("\n")[0]!);
-        void Promise.resolve().then<Outcome | string>(() => target.harness === "pi"
+        void Promise.resolve().then<Outcome | string>(() => target.harness === "chief"
           ? agent.chief?.(prompt) ?? "你好"
           : agent.execute(data("Work: "))).then((result) => {
           if (active?.turnId !== input.turnId) return;

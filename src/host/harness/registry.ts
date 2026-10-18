@@ -2,6 +2,8 @@
 // wire/持久化 key、展示名、认色和 adapter 工厂在这里组装成 HarnessDefinition。
 // 任何按名字分发、贴标签、着色的代码都必须经本模块归一。
 
+import { join } from "node:path";
+import { createPiAgent } from "../../../agents/pi/agent.ts";
 import type { HarnessAdapter, OpenInteraction, NativeEventSink } from "./adapter.ts";
 import { ClaudeAdapter, probeClaudeTarget } from "./claude/adapter.ts";
 import { resolveClaudeTargetConfig } from "./claude/config.ts";
@@ -14,6 +16,7 @@ import { DshAdapter } from "./dsh/adapter.ts";
 import { PiAdapter, type PiSessionFactory } from "./pi/adapter.ts";
 import { resolveDshTargetConfig } from "./dsh/config.ts";
 import {
+  aideRoot,
   targetEnvironmentFor,
   type AideConfig,
   type HarnessTargetConfig,
@@ -27,8 +30,10 @@ import type { HarnessTarget, HarnessTargetProbeResult } from "./target.ts";
 export { HARNESSES, parseHarness, type HarnessName };
 
 export interface HarnessAdapterOptions {
-  /** Host-bound embedded Pi agent factory, including its application tools. */
+  /** Optional generic Pi factory; by default uses Pi configuration and native tools. */
   piSession?: PiSessionFactory;
+  /** Personal composition supplies the Chief agent and conversation-scoped capabilities. */
+  chiefSession?: PiSessionFactory;
   /** Adapter 工厂的实例坐标；工厂负责把 Target 配置 lowering 成具体 Adapter 依赖。 */
   target: HarnessTarget;
   openInteraction: OpenInteraction;
@@ -71,15 +76,27 @@ export interface HarnessProbeOptions {
   targetConfig: HarnessTargetConfig;
 }
 
-/** 首批内置 harness；扩展支持只在这里注册，不进入 AideSession core。 */
+/**
+ * @spec Pi and Chief have distinct Harness identities but share the Pi adapter; only composition binds Personal tools.
+ * @link docs/harness/README.md
+ */
 export const HARNESS_REGISTRY = [
   {
     ...HARNESS_IDENTITIES.pi,
     label: "Pi", sessionKey: "pi", shortName: "pi", color: "#a6da95",
-    create: ({ piSession, log, nativeEvent, env }) => {
-      if (!piSession) throw new Error("Pi target requires a host-bound Pi agent factory");
+    create: ({ piSession, target, rootDir, log, nativeEvent, env }) => {
       if (env && Object.keys(env).length) throw new Error("Embedded Pi targets do not support environment overrides; configure Pi's agentDir instead");
-      return new PiAdapter({ createSession: piSession, log, nativeEvent });
+      return new PiAdapter({ createSession: piSession ?? ((options) => createPiAgent({ ...options,
+        sessionDir: join(aideRoot(rootDir), "pi-sessions"), scope: `pi:${target.id}` })), log, nativeEvent });
+    },
+  },
+  {
+    ...HARNESS_IDENTITIES.chief,
+    label: "Chief", sessionKey: "chief", shortName: "chief", color: "#a6da95",
+    create: ({ chiefSession, log, nativeEvent, env }) => {
+      if (!chiefSession) throw new Error("Chief target requires a host-bound Chief agent factory");
+      if (env && Object.keys(env).length) throw new Error("Embedded Chief targets do not support environment overrides; configure Pi's agentDir instead");
+      return new PiAdapter({ harness: "chief", createSession: chiefSession, log, nativeEvent });
     },
   },
   {

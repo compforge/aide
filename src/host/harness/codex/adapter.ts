@@ -192,7 +192,7 @@ export class CodexAdapter implements HarnessAdapter {
       sink,
     };
     // transport 终结 = 该 session 所有在途工作的终结点：pending JSON-RPC request 全部 reject，
-    // 活跃 turn 必须在此合成终态，否则 controller 永远等不到 idle（见 docs/harness.md）。
+    // 活跃 turn 必须在此合成终态，否则 controller 永远等不到 idle（见 docs/harness/README.md）。
     child.on("close", (code) => {
       if (!rt.closing && code !== 0) {
         log({

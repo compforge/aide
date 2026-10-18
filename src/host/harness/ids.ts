@@ -9,6 +9,7 @@ export const HARNESS_IDENTITIES = {
   claude: { id: "claude", aliases: ["cc"] },
   dsh: { id: "dsh", aliases: ["deepseek"] },
   pi: { id: "pi", aliases: [] },
+  chief: { id: "chief", aliases: [] },
 } as const;
 
 export type HarnessName = keyof typeof HARNESS_IDENTITIES;
