@@ -63,10 +63,10 @@ export function progressCard(view: FeishuProgress, streaming: boolean) {
     schema: "2.0",
     config: { update_multi: true, width_mode: "default", streaming_mode: streaming },
     header: { title: { tag: "plain_text", content: "Aide" }, template: "blue" },
-    body: { elements: [cardPanel("思考与回答", [
+    body: { elements: [cardPanel("过程与回答", [
       { tag: "div", element_id: "thought_preview", ...fields.thought_preview },
       { tag: "div", element_id: "tool_preview", ...fields.tool_preview },
-      cardPanel("思考与执行 · 查看详情", [{ tag: "markdown", element_id: "think", content: cardThought(view) }], false),
+      cardPanel("过程 · 查看详情", [{ tag: "markdown", element_id: "think", content: cardThought(view) }], false),
       { tag: "div", element_id: "answer_preview", ...fields.answer_preview },
       cardPanel("回答 · 查看详情", [{ tag: "markdown", element_id: "content", content: cardContent(view) }], false),
     ], true)] },
@@ -77,7 +77,7 @@ export function cardPreviews(view: FeishuProgress) {
   const live = view.phase === "running" || view.phase === "queued";
   const process = view.process ?? processPreview(view.phase, view.think ? [{ type: "thought", content: view.think }] : []);
   return {
-    thought_preview: { text: { tag: "plain_text", content: live ? `思考：${process.thought}` : `思考与执行：${process.summary}`, lines: 1 } },
+    thought_preview: { text: { tag: "plain_text", content: live ? `思考：${process.thought}` : `过程：${process.summary}`, lines: 1 } },
     tool_preview: { text: { tag: "plain_text", content: live ? `工具：${process.tool}` : "", lines: 1 } },
     answer_preview: { text: { tag: "plain_text", content: `回答：${view.liveAnswer ?? answerPreview(cardContent(view).trim(), view.phase)}`,
       lines: view.phase === "waiting" || view.phase === "failed" ? 1000 : 3 } },

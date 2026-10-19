@@ -179,7 +179,7 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview,
       const node = replyRegion('input:' + groupId + ':whole', title, true);
       node.className = 'message aide assistant-reply reply-envelope'; node.dataset.inputId = groupId;
       if (executions.size || block.group_id || process.length) {
-        const thought = replyPart('input:' + groupId + ':think', '思考与执行', phase, 'process');
+        const thought = replyPart('input:' + groupId + ':think', '过程', phase, 'process');
         updateProcess(thought, phase, process);
         appendProgress(thought, process, expanded);
         if (!process.length) thought.append(element('p', '没有可展示的思考或工具记录。', 'muted'));
@@ -222,7 +222,7 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview,
       activityId = activity.id; activityNodes.clear(); area.replaceChildren();
       const envelope = replyRegion('input:' + activity.id + ':whole', 'Aide · 正在处理', true); envelope.className = 'reply-envelope';
       const heading = envelope.querySelector('summary'); heading.id = 'activity-heading'; heading.className = 'activity-heading'; heading.setAttribute('role', 'status');
-      const thought = replyPart('input:' + activity.id + ':think', '思考与执行', activity.phase, 'process'); thought.id = 'activity-thought';
+      const thought = replyPart('input:' + activity.id + ':think', '过程', activity.phase, 'process'); thought.id = 'activity-thought';
       const reply = replyPart('input:' + activity.id + ':answer', '回答', activity.phase, 'answer');
       const body = element('div', undefined, 'markdown message-body'); body.id = 'activity-answer'; reply.append(body);
       envelope.append(thought, reply); area.append(envelope);

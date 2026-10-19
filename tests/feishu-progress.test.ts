@@ -93,7 +93,7 @@ test("Feishu collapses completed long replies with a bounded preview and preserv
   const { envelope: panel, thought, answer: answerPanel } = cardRegions(card);
   assert.equal(panel.tag, "collapsible_panel"); assert.equal(panel.expanded, true);
   assert.equal(panel.header.title.tag, "plain_text");
-  assert.equal(panel.header.title.content, "思考与回答");
+  assert.equal(panel.header.title.content, "过程与回答");
   const preview = cardPreviews({ id: "preview", phase: "done", think: "", content: text, messageIds: [], overflow: false }).answer_preview;
   assert.equal(preview.text.tag, "plain_text"); assert.equal(preview.text.lines, 3);
   assert.ok(preview.text.content.startsWith("回答：已建好监控，每 5 分钟检查一次。 项 值 环境 hf"));
