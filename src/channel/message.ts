@@ -1,6 +1,7 @@
 import { z } from "zod";
 export const IncomingSchema = z.object({
   id: z.string().min(1).max(200),
+  sessionId: z.string().min(1).max(200),
   conversationId: z.string().min(1).max(200),
   text: z.string().min(1).max(32_000),
 });

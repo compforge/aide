@@ -44,7 +44,7 @@ test("Sessions from different execution directories share one home and reopen or
   assert.deepEqual(fork.projection.messages.get("message-side"), first.projection.messages.get("message-side"));
   assert.deepEqual(new Set(store.listSessions().map((s) => s.aideSessionId)), new Set([first.id, second.id, fork.id]));
   assert.deepEqual(readdirSync(root), ["sessions"]);
-  assert.throws(() => store.openSession("../outside"), /invalid aide session id/);
+  assert.throws(() => store.openSession("../outside"), /path separators/);
 
   const instance = { pluginId: "tests/plugin", pluginInstanceId: "default" };
   const data = (session: typeof first) => preparePluginDataDirectories({ aideSessionId: session.id, dir: session.dir }, instance);
@@ -82,4 +82,22 @@ test("Session liveness and cleanup use the flat directory after cwd changes", as
   const reopened = store.openSession(active.id);
   assert.equal(reopened.meta.cwd, join(root, "code-c"));
   await reopened.closeLogs();
+});
+
+test("externally assigned Session IDs round-trip safely, preserve metadata and remain cleanable", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-named-session-"));
+  const store = new SessionStore(root);
+  const id = "feishu:app:群 & #1";
+  const session = store.createSession({ id, cwd: root });
+  t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
+  assert.equal(session.id, id);
+  assert.equal(store.openSession(id).id, id);
+  assert.equal(store.openSession(id).dir, session.dir);
+  assert.equal(store.listSessions()[0]!.aideSessionId, id);
+  assert.throws(() => store.createSession({ id, cwd: root }), /already exists/);
+  assert.throws(() => store.createSession({ id: "../outside", cwd: root }), /path separators/);
+  session.updateMeta({ updatedAt: "2000-01-01T00:00:00.000Z" });
+  const clean = store.cleanSessions({ before: new Date("2001-01-01") });
+  assert.deepEqual(clean.removed.map((item) => item.aideSessionId), [id]);
+  assert.deepEqual(clean.failures, []);
 });

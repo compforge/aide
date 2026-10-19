@@ -165,7 +165,7 @@ test("Feishu projects real Harness thought and text before final reply and isola
     adapter.sendTurn = async (ref, input) => { emitter = { sink, turnId: input.turnId }; return send(ref, input); }; return adapter;
   } }, log);
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ id: "om_live", conversationId, text: "查看工作" });
+  await aide.receive({ id: "om_live", sessionId: conversationId, conversationId, text: "查看工作" });
   for (let i = 0; i < 200 && !emitter; i++) await Bun.sleep(10);
   assert.ok(emitter);
   emitter.sink({ kind: "agent_thought_chunk", turnId: emitter.turnId, payload: { messageId: "thought", content: { type: "text", text: "先读资料" } } });

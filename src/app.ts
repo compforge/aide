@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { Personal } from "../plugins/personal/aide.ts";
 import { parseWatches, validateWatchScopes } from "../plugins/personal/source-config.ts";
+import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
 import { Connectors } from "../connectors/index.ts";
 import type { AideConfig } from "./config.ts";
@@ -10,36 +11,65 @@ import { CoreSession, type CoreControllerOptions } from "./host/core/index.ts";
 import { SessionStore } from "./host/store/store.ts";
 import { PluginInstanceStore } from "./host/plugin/instance.ts";
 import { PluginSupervisor } from "./host/plugin/runner/index.ts";
+import { IncomingSchema, type Incoming } from "./channel/message.ts";
 
 export interface AideOptions {
   cwd: string; timezone: string; model?: string; config?: AideConfig; connectors?: ConnectorClient;
   createAdapter: CoreControllerOptions["createAdapter"];
 }
 
-/** Application composition chooses installed business plugins; Core owns their mechanisms. */
-export class Aide extends Personal {
-  constructor(home: string, options: AideOptions, log: Logger) {
+/**
+ * @spec Channel/Source owns stable Session identity; Core owns its persisted execution and lease.
+ * @why Restore every Session at startup so autonomous work does not depend on another user message.
+ * @link docs/kernel.md
+ */
+export class Aide {
+  private readonly storage: SessionStore;
+  private readonly active = new Map<string, Personal>();
+  private readonly listeners = new Set<() => void>();
+  private readonly watches: ReturnType<typeof parseWatches>;
+  private readonly connectors: ConnectorClient;
+  private starting?: Promise<void>;
+  private closed = false;
+
+  constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
     const config = options.config;
-    const watches = parseWatches(config?.plugins.personal);
-    validateWatchScopes(watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
-    const connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
-    const sessions = new SessionStore(home);
-    const previous = sessions.listSessions()[0];
-    const session = previous ? sessions.openSession(previous.aideSessionId) : sessions.createSession({ cwd: options.cwd, title: "Aide" });
-    const cwd = resolve(options.cwd);
-    if (session.meta.cwd !== cwd) session.updateMeta({ cwd });
-    log.info({ sessionId: session.id, cwd, resumed: Boolean(previous) }, "Opened Aide session");
+    this.watches = parseWatches(config?.plugins.personal);
+    validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
+    this.connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
+    this.storage = new SessionStore(home);
+    for (const meta of this.storage.listSessions()) this.session(meta.aideSessionId);
+    for (const watch of this.watches) {
+      const scope = this.session(watch.sessionId);
+      this.claimConversation(scope, watch.conversationId);
+    }
+  }
+
+  sessions(): readonly Personal[] { return [...this.active.values()]; }
+
+  /** Opening a page never creates a Session; only an input or explicit work request does. */
+  findConversation(conversationId: string): Personal | undefined {
+    return this.sessions().find((scope) => scope.conversationIds().includes(conversationId));
+  }
+
+  session(id: string): Personal {
+    if (this.closed) throw new Error("Aide is shutting down");
+    const existing = this.active.get(id);
+    if (existing) return existing;
+    const previous = this.storage.listSessions().find((meta) => meta.aideSessionId === id);
+    const session = previous ? this.storage.openSession(id) : this.storage.createSession({ id, cwd: this.options.cwd, title: id });
+    const connectors = this.connectors;
     const targets = [{ id: "default", harness: "codex" }];
-    session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex", ...(options.model ? { model: options.model } : {}) });
+    session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex", ...(this.options.model ? { model: this.options.model } : {}) });
     const instances = new PluginInstanceStore({ session });
     if (!instances.list().some((item) => item.pluginInstanceId === "personal")) {
       instances.create({ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin" });
     }
-    instances.replaceConfig("personal", { watches });
+    instances.replaceConfig("personal", { watches: this.watches.filter((watch) => watch.sessionId === id) });
     const packages = new Map([["aide.personal@0.1.0", new URL("../plugins/personal/plugin.ts", import.meta.url).href]]);
     let application: Personal;
     const core = new CoreSession({ session,
-      controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter, resolveTarget: (id) => targets.find((item) => item.id === id) },
+      controller: { mentionBudgetChars: 0, createAdapter: this.options.createAdapter, resolveTarget: (id) => targets.find((item) => item.id === id) },
       plugins: { instances, connectors, harnessTargets: targets, selectedHarnessTargetId: () => "default",
         harnessInvocationGate: () => "auto_approve", pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => {
@@ -48,12 +78,75 @@ export class Aide extends Personal {
           return { pluginId, version, entryUrl };
         },
         onRunnerFailure: ({ error }) => {
-          log.error({ err: error }, "Plugin Runner stopped");
-          void application.recoverInterrupted().catch((err) => log.error({ err }, "Recovery failed"));
+          this.log.error({ err: error, sessionId: id }, "Plugin Runner stopped");
+          void application.recoverInterrupted().catch((err) => this.log.error({ err, sessionId: id }, "Recovery failed"));
         },
       },
     });
-    super(home, { timezone: options.timezone, chiefModel: config?.harnesses.chief.model }, log, { core, session, connectors, targets, watches });
-    application = this;
+    // CoreSession has acquired the lease before changing execution metadata.
+    const cwd = resolve(this.options.cwd);
+    if (session.meta.cwd !== cwd) {
+      // Native providers can bind history to cwd. Keep Aide facts, but start fresh provider contexts.
+      session.updateMeta({ cwd, lanes: Object.fromEntries(Object.entries(session.meta.lanes)
+        .map(([key, lane]) => [key, { ...lane, harnessSessions: {} }])) });
+      this.log.info({ sessionId: id, previousCwd: previous?.cwd, cwd }, "Execution directory changed; cleared native Harness bindings");
+    }
+    application = new Personal({ timezone: this.options.timezone, chiefModel: this.options.config?.harnesses.chief.model }, this.log.child({ sessionId: id }),
+      { core, session, connectors, targets, watches: this.watches.filter((watch) => watch.sessionId === id) });
+    this.active.set(id, application);
+    core.subscribe(() => this.notify());
+    application.conversations.subscribe(() => this.notify());
+    this.log.info({ sessionId: id, resumed: Boolean(previous) }, "Opened Aide session");
+    if (this.starting) void application.start().catch((err) => this.log.error({ err, sessionId: id }, "Session startup failed"));
+    return application;
+  }
+
+  private claimConversation(scope: Personal, conversationId: string): void {
+    const owner = this.findConversation(conversationId);
+    if (owner && owner !== scope) throw new Error(`Conversation ${conversationId} belongs to Session ${owner.id}`);
+    if (!scope.conversations.get(conversationId)) scope.conversations.archive(conversationId, []);
+  }
+
+  async receive(raw: Incoming) {
+    const input = IncomingSchema.parse(raw);
+    const scope = this.session(input.sessionId);
+    this.claimConversation(scope, input.conversationId);
+    await this.start();
+    return scope.receive(input);
+  }
+
+  async event(input: Incoming & { name: string }): Promise<number> {
+    const scope = this.session(input.sessionId);
+    this.claimConversation(scope, input.conversationId);
+    await this.start(); await scope.start();
+    return scope.event(input);
+  }
+
+  work(conversationId: string) {
+    const scope = this.findConversation(conversationId) ?? this.session(conversationId);
+    this.claimConversation(scope, conversationId);
+    return scope.work(conversationId);
+  }
+
+  chiefSession(targetId: string, settings: Parameters<Personal["chiefSession"]>[1] = {}) {
+    const scope = this.sessions().find((item) => item.conversationIds().some((id) => chiefTarget(id) === targetId));
+    if (!scope) throw new Error(`Unknown Chief target: ${targetId}`);
+    return scope.chiefSession(targetId, settings);
+  }
+
+  messages() { return this.sessions().flatMap((scope) => scope.messages()).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
+  works() { return this.sessions().flatMap((scope) => scope.works()); }
+  questions() { return this.sessions().flatMap((scope) => scope.questions()); }
+  invocations() { return this.sessions().flatMap((scope) => scope.invocations()); }
+  conversationIds() { return this.sessions().flatMap((scope) => scope.conversationIds()); }
+  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  private notify(): void { for (const listener of this.listeners) listener(); }
+  start(): Promise<void> { return this.starting ??= Promise.all(this.sessions().map((scope) => scope.start())).then(() => {}); }
+  async settled(): Promise<void> { await this.start(); await Promise.all(this.sessions().map((scope) => scope.settled())); }
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
+    await Promise.all(this.sessions().map((scope) => scope.close()));
+    this.listeners.clear();
   }
 }

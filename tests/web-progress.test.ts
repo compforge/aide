@@ -84,8 +84,8 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   await until(() => first.views.length > 0);
   assert.equal(first.events[0]!.op, "start");
   assert.deepEqual(first.views[0], { version: "1.0", biz: "aide.conversation", blocks: [], meta: { conversation_id: "a", activity: null } });
-  await aide.receive({ id: "a1", conversationId: "a", text: "查看资料" });
-  await aide.receive({ id: "b1", conversationId: "b", text: "另一会话的私有内容" });
+  await aide.receive({ id: "a1", sessionId: "a", conversationId: "a", text: "查看资料" });
+  await aide.receive({ id: "b1", sessionId: "b", conversationId: "b", text: "另一会话的私有内容" });
   await until(() => emitters.has(chiefTarget("a")) && emitters.has(chiefTarget("b")));
   const { sink, turnId } = emitters.get(chiefTarget("a"))!;
   const other = emitters.get(chiefTarget("b"))!;
@@ -126,7 +126,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   await until(() => refreshed.views.length > 0);
   assert.deepEqual(refreshed.views[0], completed);
   await refreshed.close();
-  assert.equal(aide.store.read().works.length, 0);
+  assert.equal(aide.works().length, 0);
   const messages = aide.messages.bind(aide);
   aide.messages = () => { throw new Error("projection unavailable"); };
   try {
@@ -136,7 +136,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
     assert.equal((await fetch(base + "/stream?conversationId=a")).status, 500);
   } finally { aide.messages = messages; }
   await second.close();
-  await aide.receive({ id: "a2", conversationId: "a", text: "再聊一个问题" });
+  await aide.receive({ id: "a2", sessionId: "a", conversationId: "a", text: "再聊一个问题" });
   await aide.settled();
   const later = conversationView(aide, "a");
   assert.equal(later.blocks.filter((block) => block.type === "execution").length, 2);

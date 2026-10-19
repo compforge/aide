@@ -108,7 +108,7 @@ export class FeishuChannel {
     // Group normalization yields; concurrent duplicate deliveries must still persist only once.
     if (this.stopped) throw new Error("Feishu channel is stopping");
     if (this.state.received.includes(id)) return;
-    const input = IncomingSchema.safeParse({ id, conversationId, text });
+    const input = IncomingSchema.safeParse({ id, sessionId: conversationId, conversationId, text });
     this.save({ ...this.state,
       pending: input.success ? [...this.state.pending, input.data] : this.state.pending,
       notices: input.success ? this.state.notices : [...this.state.notices,

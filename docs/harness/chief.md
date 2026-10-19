@@ -8,7 +8,7 @@ Chief 使用独立的 `chief` Harness 身份，Agent 位于 `agents/chief/`；�
 
 Chief Agent 拥有 Personal 提示词和工具，负责具体判断。Chief Controller 按 Conversation 消费 Input、准备本轮上下文、调用 Harness 并续接用户答复。Task / Routine 的持久状态与 Reconcile 属于 Personal，Agent 通过工具访问，不能直接宣告资源完成。
 
-Personal 为每个 Conversation 绑定 Chief Target 和 WorkService，并提供问答与 Connector 工具。宿主装配使用 `chiefSession` 工厂；缺少绑定时创建 Chief Harness 会报错，不会降级为通用 Pi。
+Personal 在所属 Session 内为每个 Conversation 绑定固定 Lane、Chief Target 和 WorkService，并提供问答与 Connector 工具。宿主装配使用 `chiefSession` 工厂；缺少绑定时创建 Chief Harness 会报错，不会降级为通用 Pi。
 
 ```ts
 const adapter = createHarnessAdapter(
@@ -21,7 +21,7 @@ const adapter = createHarnessAdapter(
 Chief 的模型选择与能力包配置位于 `harnesses.chief`，完整来源、优先级和同步流程见 [配置](../configuration.md)。
 显式 model 优先于工厂默认值和 Pi 默认模型；未配置时沿用 Pi。`AIDE_MODEL` 控制默认 Codex Target，不改变 Chief 模型。
 Chief 只加载已同步的声明包中的 skills，不继承用户或项目的自动 skill 发现；角色规则与 Work 工具仍由代码绑定。
-原生会话由 Pi SDK 存放在自己的默认目录，与通用 Pi 一样；Chief 角色通过 scope 区分，不靠另建 chief-sessions 目录区分。原生恢复范围绑定 conversationId，不能把另一会话或通用 Pi 的会话文件当成当前上下文。
+原生会话由 Pi SDK 存放在自己的默认目录，与通用 Pi 一样；Chief 角色通过 scope 区分，不靠另建 chief-sessions 目录区分。连续输入复用该 Lane × Target 的原生会话，服务重启后 Core 把保存的 resumeState 交回 Adapter；新的 Input 创建新 Turn。原生恢复范围绑定 conversationId，不能把另一会话或通用 Pi 的会话文件当成当前上下文。
 
 ## 提示词与工具
 

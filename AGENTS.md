@@ -11,7 +11,7 @@ Aide 是小型、自托管的 personal agent。Web / Feishu Channel 与 Source �
 ```text
 src/
   main.ts                  # 启动 Channel 与 Harness
-  app.ts                   # 应用装配：安装 Personal，创建 CoreSession
+  app.ts                   # 按入口 Session ID 装配 CoreSession / Personal，恢复与汇总各会话
   web/                     # 浏览器页面、脚本、样式与 Markdown 渲染
   api/                     # HTTP handler、静态资源与 SSE，调用 Core / Personal 能力
   channel/                 # Feishu 适配、共享消息协议与执行投影
@@ -53,8 +53,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。环境发现只读配置，不代表连通性、健康或操作授权；Personal watch 策略归 `plugins.personal`。
 - 配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.chief` 管模型与能力包，包仅显式同步，Chief 不继承用户或项目的自动 skill 发现。
-- Session 是持久执行作用域，保留 Ledger、Lane、Turn 与恢复绑定；CoreSession 负责进程期装配。Session 统一位于 `$AIDE_HOME/sessions/<id>/`，不按 project / cwd 分组。cwd 只是执行环境；插件私有数据仅有 global、session、instance 三个目录作用域。
-- Conversation 是 builtin resource，convId 标识交流分组，不替代 Session / Lane / Turn 的执行身份。Conversation / Input / Message 由 Host 管理。Channel / Source 决定 conversationId，Chief 按会话串行消费输入；会话分组不是权限边界。
+- Session 是持久执行作用域，保留 Ledger、Lane、Turn 与恢复绑定；CoreSession 负责进程期装配。Session 统一位于 `$AIDE_HOME/sessions/<id>/`，不按 project / cwd 分组。逻辑 ID 的目录编码由 SessionStore 负责。启动时恢复全部 Session 的工作和 Source；watch 仅装配到所属 Session。cwd 只是执行环境，改变时保留 Aide 历史并清空原生恢复绑定；插件私有数据仅有 global、session、instance 三个目录作用域。
+- Conversation 是 builtin resource，convId 标识交流分组，不替代 Session / Lane / Turn 的执行身份。Conversation / Input / Message 由 Host 管理。Channel / Source 提供稳定 sessionId，conversationId 可沿用它；Core 按 Session 恢复执行，Chief 按 Conversation 串行消费输入并复用固定 Lane。会话分组不是权限边界。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。类型转换组合创建、暂停或删除，目标工作拥有新 id。
 - Harness 原生 Session 由各 Harness 管理并使用其默认目录；Aide 按 Session × Lane × Target 保存原生身份和 Adapter 的 resumeState。
 - `pi` 提供通用 Agent，`chief` 加入 Personal 工具，两者复用 PiAdapter。通用 Pi 不依赖 Personal，Chief 的 WorkService 由宿主绑定范围；默认 Work 执行使用 Codex。

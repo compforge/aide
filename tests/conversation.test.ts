@@ -1,5 +1,8 @@
+import { loadConfig } from "../src/config.ts";
+import { emptyConnectors } from "../src/connector-client.ts";
+import { SOURCE_TYPE } from "../plugins/personal/source.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -51,18 +54,18 @@ test("Chief serializes inputs within a conversation while another conversation c
     return `answer:${spec.text}`;
   }, async execute() { throw new Error("Unexpected work"); } }, root), pino({ level: "silent" }));
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ id: "1", conversationId: "feishu:bot:group-a", text: "a-first" });
+  await aide.receive({ id: "1", sessionId: "feishu:bot:group-a", conversationId: "feishu:bot:group-a", text: "a-first" });
   await until(() => calls.length === 1);
-  await aide.receive({ id: "2", conversationId: "feishu:bot:group-a", text: "a-second" });
-  await aide.receive({ id: "1", conversationId: "feishu:bot:group-b", text: "b-first" });
+  await aide.receive({ id: "2", sessionId: "feishu:bot:group-a", conversationId: "feishu:bot:group-a", text: "a-second" });
+  await aide.receive({ id: "1", sessionId: "feishu:bot:group-b", conversationId: "feishu:bot:group-b", text: "b-first" });
   await until(() => calls.some((call) => call.text === "b-first"));
   assert.equal(calls.some((call) => call.text === "a-second"), false);
   assert.doesNotMatch(calls.find((call) => call.text === "b-first")!.prompt, /a-first|a-second/);
   release(); await aide.settled();
   assert.deepEqual(calls.filter((call) => call.conversationId.endsWith("group-a")).map((call) => call.text), ["a-first", "a-second"]);
-  assert.equal(aide.store.conversations.list().length, 2);
-  assert.equal(aide.store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "ChiefInput" }).length, 0);
-  assert.equal(aide.store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Conversation" }).length, 0);
+  assert.equal(aide.conversationIds().length, 2);
+  assert.equal(aide.session("feishu:bot:group-a").store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "ChiefInput" }).length, 0);
+  assert.equal(aide.session("feishu:bot:group-a").store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Conversation" }).length, 0);
 });
 
 test("Startup resumes queued inputs but fails interrupted input without replaying its actions", async (t) => {
@@ -70,9 +73,9 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
   const calls: string[] = [];
   const options = fakeOptions({ async chief(prompt) { calls.push(prompt); return "finished"; }, async execute() { throw new Error("Unexpected work"); } }, root);
   let aide = new Aide(root, options, pino({ level: "silent" }));
-  const active = aide.store.conversations.submit("active", { conversationId: "a", text: "do-not-replay", origin: "channel" });
-  aide.store.conversations.update(active, { phase: "running" });
-  aide.store.conversations.submit("queued", { conversationId: "b", text: "process-after-restart", origin: "channel" });
+  const active = aide.session("a").conversations.submit("active", { conversationId: "a", text: "do-not-replay", origin: "channel" });
+  aide.session("a").conversations.update(active, { phase: "running" });
+  aide.session("b").conversations.submit("queued", { conversationId: "b", text: "process-after-restart", origin: "channel" });
   await aide.close();
   aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
@@ -80,6 +83,38 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
   assert.equal(calls.length, 1);
   assert.match(calls[0]!, /process-after-restart/);
   assert.doesNotMatch(calls[0]!, /do-not-replay/);
-  assert.equal(aide.store.conversations.input("active")!.status.phase, "failed");
-  assert.equal(aide.store.conversations.input("queued")!.status.phase, "done");
+  assert.equal(aide.session("a").conversations.input("active")!.status.phase, "failed");
+  assert.equal(aide.session("b").conversations.input("queued")!.status.phase, "done");
+});
+
+test("Source watches restore independently and are installed only in their assigned Session", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-source-routing-"));
+  const path = join(root, "config.yaml");
+  writeFileSync(path, JSON.stringify({ connectors: { requirements: { work: { provider: "meego", projectKey: "p", userKeys: ["me"] } } },
+    plugins: { personal: { watches: [
+      { id: "one", source: "work", sessionId: "source:one", conversationId: "conv-one" },
+      { id: "two", source: "work", sessionId: "source:two" },
+    ] } } }));
+  let polls = 0;
+  const options = { ...fakeOptions({ execute: async () => { throw new Error("Unexpected execution"); } }, root), config: loadConfig(path),
+    connectors: { ...emptyConnectors, requirements: { ...emptyConnectors.requirements, list: async () => { polls++; return []; } } } };
+  let aide = new Aide(root, options, pino({ level: "silent" }));
+  t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
+  await aide.start(); await aide.settled();
+  assert.ok(polls >= 2);
+  const initialPolls = polls;
+  await aide.receive({ sessionId: "web:one", conversationId: "web-conv", id: "hello", text: "hello" }); await aide.settled();
+  assert.equal(polls, initialPolls);
+  assert.equal(aide.session("web:one").store.resources.list(SOURCE_TYPE).length, 0);
+  for (const id of ["source:one", "source:two"]) assert.equal(aide.session(id).store.resources.list(SOURCE_TYPE).length, 1);
+  assert.equal(aide.findConversation("conv-one")!.id, "source:one");
+  assert.equal(aide.findConversation("web-conv")!.id, "web:one");
+  const sourceIds = ["source:one", "source:two"].map((id) => aide.session(id).store.resources.list(SOURCE_TYPE)[0]!.metadata.uid);
+  await aide.close();
+  aide = new Aide(root, options, pino({ level: "silent" }));
+  await aide.start(); await aide.settled();
+  assert.equal(aide.sessions().length, 3);
+  assert.deepEqual(["source:one", "source:two"].map((id) => aide.session(id).store.resources.list(SOURCE_TYPE)[0]!.metadata.uid), sourceIds);
+  assert.equal(aide.session("web:one").store.resources.list(SOURCE_TYPE).length, 0);
+  assert.equal(aide.findConversation("conv-one")!.id, "source:one");
 });

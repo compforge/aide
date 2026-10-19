@@ -4,6 +4,7 @@
 // HarnessSession 元数据只用于优先恢复 harness 私有状态，缺失时仍可从 AideSession 重建上下文。
 
 import { createHash } from "node:crypto";
+import { assertSessionId } from "./session-id.ts";
 import { turnUserText } from "./message-relations.ts";
 import {
   appendFileSync,
@@ -22,7 +23,7 @@ import {
   writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   type LogEntry,
@@ -375,11 +376,12 @@ export class SessionStore {
     this.loggerOptions = loggerOptions;
   }
 
-  createSession(opts: { cwd: string; title?: string }): SessionHandle {
-    const id = newId("bs");
+  createSession(opts: { id?: string; cwd: string; title?: string }): SessionHandle {
+    const id = opts.id ?? newId("bs");
     const cwd = resolve(opts.cwd);
     const dir = this.sessionDir(id);
     mkdirSync(dir, { recursive: true });
+    if (existsSync(join(dir, "meta.json"))) throw new Error(`aide session already exists: ${id}`);
     const meta: SessionMeta = {
       aideSessionId: id,
       title: opts.title,
@@ -708,7 +710,7 @@ export class SessionStore {
       const observedActivity = Date.parse(candidate.updatedAt ?? candidate.createdAt);
       if (!Number.isFinite(observedActivity) || observedActivity >= cutoff) continue;
 
-      if (basename(dir) !== candidate.aideSessionId) {
+      if (dir !== this.sessionDir(candidate.aideSessionId)) {
         result.failures.push({
           aideSessionId: candidate.aideSessionId,
           cwd: candidate.cwd,
@@ -878,10 +880,10 @@ export class SessionStore {
   }
 
   private sessionDir(sessionId: string): string {
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(sessionId)) {
-      throw new Error(`invalid aide session id: ${sessionId}`);
-    }
-    return join(this.rootDir, "sessions", sessionId);
+    assertSessionId(sessionId);
+    const directory = /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(sessionId) ? sessionId
+      : `~${createHash("sha256").update(sessionId).digest("hex")}`;
+    return join(this.rootDir, "sessions", directory);
   }
 
   private acquireHarnessSessionAdoptionLock(): () => void {

@@ -45,6 +45,7 @@ export type IdPrefix =
   | "pi"
   | "pr"
   | "pex"
+  | "cc" // Connector call
   | "cex"
   | "hinv"
   | "hia"

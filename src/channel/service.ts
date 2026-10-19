@@ -5,9 +5,15 @@ import type { InputRequest } from "../host/message/types.ts";
 import type { Incoming, Message } from "./message.ts";
 
 /** Channel-facing Core projections and input port; independent of any particular Controller or Harness. */
-export interface ChannelService {
+export interface ChannelSession {
+  readonly id: string;
   readonly core: CoreSession;
   readonly conversations: ConversationStore;
+}
+export interface ChannelService {
+  sessions(): readonly ChannelSession[];
+  findConversation(conversationId: string): ChannelSession | undefined;
+  subscribe(listener: () => void): () => void;
   receive(input: Incoming): Promise<Message>;
   messages(): Message[];
   questions(): { conversationId: string; request: InputRequest }[];

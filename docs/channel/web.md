@@ -42,9 +42,9 @@ Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职
 
 ## 会话导航
 
-网页左栏通过 `GET /conversations` 汇总已有 Conversation 与仅有工作记录的会话范围，展示首条用户消息标题、最近消息摘要和会话 ID，按最近输入或消息时间排序。摘要不包含 Source 观察正文或 Harness 执行细节。默认对话与当前 URL 指定的空会话仍可进入；浏览列表不创建会话。
+网页左栏通过 `GET /conversations` 汇总各 Session 的 Conversation 与仅有工作记录的会话范围，列表携带所属 sessionId，展示首条用户消息标题、最近消息摘要和会话 ID，按最近输入或消息时间排序。摘要不包含 Source 观察正文或 Harness 执行细节。默认对话与当前 URL 指定的空会话仍可进入；浏览列表不创建会话。
 
-点击会话导航到 `/?conversation=...`，消息 SSE 与事项查询使用同一个 conversationId。页面导航重新建立该会话的展示快照，刷新和前进后退保留 URL 选择；后台执行不受影响。列表更新失败保留已显示条目并独立提示，不覆盖发送状态。关联问题按 Conversation 展示；未关联会话的宿主 Interaction 保留在本地收件区。
+点击会话导航到 `/?conversation=...`，消息 SSE 与事项查询使用同一个 conversationId。发送消息读取列表中的 sessionId；尚未创建的会话使用 conversationId 作为新 sessionId。页面导航重新建立该会话的展示快照，刷新和前进后退保留 URL 选择；后台执行不受影响。列表更新失败保留已显示条目并独立提示，不覆盖发送状态。关联问题按 Conversation 展示；未关联会话的宿主 Interaction 保留在本地收件区。
 
 ## 工作管理
 
@@ -59,7 +59,7 @@ Web 页面与 HTTP 调用共用服务入口。提交消息后先返回持久化�
 ```sh
 curl -s http://127.0.0.1:7433/messages \
   -H 'content-type: application/json' \
-  -d '{"id":"msg-1","conversationId":"me","text":"读取当前项目 README，告诉我如何启动"}'
+  -d '{"id":"msg-1","sessionId":"me","conversationId":"me","text":"读取当前项目 README，告诉我如何启动"}'
 
 curl -s 'http://127.0.0.1:7433/conversations'
 curl -s 'http://127.0.0.1:7433/messages?conversationId=me&role=all'
@@ -73,7 +73,7 @@ GET `/messages` 默认返回 Aide 消息；`role=all` 包含用户输入，`afte
 ```sh
 curl -s http://127.0.0.1:7433/events \
   -H 'content-type: application/json' \
-  -d '{"id":"event-1","conversationId":"me","name":"docs.changed","text":"项目需求文档有更新"}'
+  -d '{"id":"event-1","sessionId":"me","conversationId":"me","name":"docs.changed","text":"项目需求文档有更新"}'
 ```
 
 该接口唤醒匹配的 Routine，不自动创建 Work。接口面向本机可信调用，没有认证，不直接暴露公网；远程访问方式见 [部署](../deployment.md)。

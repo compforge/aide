@@ -21,7 +21,7 @@ Aide 以单个服务实例管理自己的状态目录。配置模型、CLI 和�
 
 ## 状态目录
 
-Session 统一存放在 `$AIDE_HOME/sessions/<id>/`，包含执行历史、日志、Conversation 和插件资源。`AIDE_CWD` 只选择执行目录，改变它不会另开一组 Session。服务启动时恢复最近的 Session；没有 Session 时创建一个。
+Session 统一存放在 `$AIDE_HOME/sessions/<directory>/`，包含执行历史、日志、Conversation 和插件资源。带命名空间的逻辑 ID 使用编码目录，原始 sessionId 见 meta.json。`AIDE_CWD` 只选择执行目录，改变它保留 Aide 数据并清空原生 Harness 绑定。服务启动时恢复所有已有 Session 和配置的 Source；新的 Channel 上下文按输入的 sessionId 创建 Session。
 
 插件私有文件分为全局 `plugins/<pluginId>/`、Session 内的 `sessions/<id>/plugins/<pluginId>/` 和其下的实例目录，不提供 project 级目录。
 
@@ -63,6 +63,6 @@ ssh -N -L 7433:127.0.0.1:7433 user@your-server
 
 ## 执行诊断
 
-HTTP 与 Personal 装配日志进入标准输出；Session 的 `session.log` 保存执行和插件日志，`session.jsonl` 保存执行事实。Runner 激活日志记录 pid，可与 Host 区分。检查问题时先记录版本、revision、conversationId、Work id 与对应 Turn，再核对外部操作是否已经发生。
+HTTP 与 Personal 装配日志进入标准输出；Session 的 `session.log` 保存执行和插件日志，`session.jsonl` 保存执行事实。Runner 激活日志记录 pid，可与 Host 区分。检查问题时先记录版本、revision、sessionId、conversationId、Work id 与对应 Turn，再核对外部操作是否已经发生。
 
 模型凭证沿用 Pi / Codex 的配置，连接器设置见 [Connector 与 Source](connector/README.md)，飞书机器人设置见 [Feishu](channel/feishu.md)。通过 `/health` 不能证明这些依赖可用。

@@ -477,6 +477,8 @@ export interface QueueReordered {
 }
 
 export type EventPayloadMap = {
+  "connector.started": ExecutionAssociation & { callId: string; executionId: string; request: import("../../protocol/connectors.ts").ConnectorRequest };
+  "connector.settled": { callId: string; outcome: "success" | "failure" | "timeout" | "interrupted"; error?: string };
   "input.received": ViewInputReceived;
   "input.settled": ViewInputSettled;
   "harness_input.updated": HarnessInputUpdate;

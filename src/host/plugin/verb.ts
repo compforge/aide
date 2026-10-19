@@ -1,5 +1,6 @@
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { dispatchConnector, emptyConnectors } from "../../connector-client.ts";
+import { newId } from "../event/ids.ts";
 import { MAIN_LANE_ID } from "@compforge/aide-plugin";
 import type { PromptBlock } from "../event/index.ts";
 import type { InteractionResult } from "../interaction/types.ts";
@@ -61,6 +62,8 @@ export interface VerbOptions {
 /** Plugin typed verbs and the live executions suspended while those verbs settle. */
 export class Verb {
   private readonly connectors: ConnectorClient;
+  private readonly session?: VerbSession;
+  private readonly connectorCalls = new Map<string, { pluginInstanceId: string }>();
   private readonly capacity: ReconcileCapacity;
   private readonly snapshot: () => ReconcileSnapshot;
   private readonly selectedHarnessTargetId?: () => string | undefined;
@@ -78,6 +81,12 @@ export class Verb {
   private readonly performVerb?: NonNullable<VerbOptions["performVerb"]>;
 
   constructor(options: VerbOptions) {
+    this.session = options.session;
+    for (const event of options.session?.ledger.read() ?? []) {
+      if (event.kind === "connector.started" && event.source.type === "plugin") {
+        this.connectorCalls.set(event.payload.callId, { pluginInstanceId: event.source.pluginInstanceId });
+      } else if (event.kind === "connector.settled") this.connectorCalls.delete(event.payload.callId);
+    }
     this.capacity = options.capacity;
     this.connectors = options.connectors ?? emptyConnectors;
     this.snapshot = options.snapshot;
@@ -187,6 +196,7 @@ export class Verb {
   }
 
   failInstance(pluginInstanceId: string, error: string): void {
+    for (const [id, call] of this.connectorCalls) if (call.pluginInstanceId === pluginInstanceId) this.settleConnector(id, "interrupted", error);
     for (const execution of this.executions.values()) {
       if (execution.scope.pluginInstanceId !== pluginInstanceId) continue;
       this.failExecution(execution.scope.executionId, error);
@@ -195,6 +205,7 @@ export class Verb {
   }
 
   failAll(error: string): void {
+    for (const id of this.connectorCalls.keys()) this.settleConnector(id, "interrupted", error);
     for (const execution of this.executions.values()) {
       this.failExecution(execution.scope.executionId, error);
       this.endRemote(execution.scope.executionId);
@@ -202,6 +213,7 @@ export class Verb {
   }
 
   failOrphans(): void {
+    for (const id of this.connectorCalls.keys()) this.settleConnector(id, "interrupted", "Core restarted; external outcome is unknown");
     this.interactions?.failOrphans(
       "Plugin execution was interrupted by Core restart",
     );
@@ -215,17 +227,36 @@ export class Verb {
     this.harnessInvocations?.close();
   }
 
+  private settleConnector(callId: string, outcome: "success" | "failure" | "timeout" | "interrupted", error?: string): void {
+    const call = this.connectorCalls.get(callId);
+    if (!call) return; // A late provider completion cannot overwrite a recorded interruption.
+    this.session?.appendEvent({ kind: "connector.settled", source: { type: "plugin", pluginInstanceId: call.pluginInstanceId },
+      payload: { callId, outcome, ...(error ? { error } : {}) } });
+    this.connectorCalls.delete(callId);
+  }
+
   private async perform(
     context: ExecutionScope,
     request: VerbRequest,
   ): Promise<VerbResponse> {
     if (request.verb === "connector") {
+      const callId = newId("cc");
+      // @spec Persist intent before dispatch; restart records an unknown outcome instead of replaying external effects.
+      this.session?.appendEvent({ kind: "connector.started", source: { type: "plugin", pluginInstanceId: context.pluginInstanceId },
+        payload: { callId, executionId: context.executionId, request: request.input.request,
+          resourceRef: context.resourceRef, conversationId: context.conversationId, inputId: context.inputId } });
+      this.connectorCalls.set(callId, { pluginInstanceId: context.pluginInstanceId });
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        return await Promise.race([
+        const result = await Promise.race([
           dispatchConnector(this.connectors, request.input.request).then((value) => ({ state: "success" as const, value })),
-          new Promise<VerbResponse>((resolve) => { timer = setTimeout(() => resolve({ state: "timeout" }), request.input.timeoutMs); }),
+          new Promise<{ state: "timeout" }>((resolve) => { timer = setTimeout(() => resolve({ state: "timeout" }), request.input.timeoutMs); }),
         ]);
+        this.settleConnector(callId, result.state);
+        return result;
+      } catch (error) {
+        this.settleConnector(callId, "failure", error instanceof Error ? error.message : String(error));
+        throw error;
       } finally { if (timer) clearTimeout(timer); }
     }
     if (this.performVerb) return await this.performVerb(context, request);

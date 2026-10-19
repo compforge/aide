@@ -53,10 +53,7 @@ export function streamConversation(response: ServerResponse, aide: ChannelServic
   };
   // Coalesce token bursts without delaying model execution or rebuilding the page for each token.
   const schedule = () => { if (!closed && !timer) timer = setTimeout(flush, 100); };
-  const unsubscribe = aide.core.subscribe(schedule);
-  const unsubscribeConversation = aide.conversations.subscribe((conversation) => {
-    if (conversation.id === conversationId) schedule();
-  });
+  const unsubscribe = aide.subscribe(schedule);
   // Domain Work outboxes can change independently of the Core event stream.
   const refresh = setInterval(schedule, 1500);
   const heartbeat = setInterval(() => { if (!closed && !blocked) blocked = !response.write(encodeSse(emitter.ping())); }, 15_000);
@@ -66,7 +63,7 @@ export function streamConversation(response: ServerResponse, aide: ChannelServic
   response.on("close", () => {
     closed = true;
     clearTimeout(timer); clearTimeout(lifetime); clearInterval(refresh); clearInterval(heartbeat);
-    unsubscribe(); unsubscribeConversation();
+    unsubscribe();
   });
   blocked = !response.write(encodeSse(emitter.start(initial)));
 }
