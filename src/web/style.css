@@ -54,7 +54,9 @@
   textarea { width: 100%; resize: vertical; min-height: 80px; max-height: 200px; border: 1px solid #bdcbbb; border-radius: 12px; padding: 14px; font: inherit; background: white; }
   button { border: 0; border-radius: 10px; padding: 13px 20px; background: #294f3a; color: white; font: inherit; cursor: pointer; white-space: nowrap; }
   button:disabled { opacity: .5; cursor: wait; } button:focus-visible, textarea:focus-visible { outline: 3px solid #83a38b; outline-offset: 2px; }
-  #notice { min-height: 22px; margin-top: 10px; font-size: 13px; color: #68776c; } #notice.error { color: #a0362a; }
+  #notice { min-height: 22px; margin-top: 10px; }
+  #notice, #work-notice { font-size: 13px; color: #68776c; }
+  #notice.error, #work-notice.error { color: #a0362a; }
   aside { padding: 24px 20px; border-left: 1px solid #d8dfd5; overflow: auto; } aside h2 { font-size: 16px; margin: 0 0 18px; }
   .work-group + .work-group { margin-top: 28px; padding-top: 24px; border-top: 1px solid #d8dfd5; }
   .work { background: white; border-radius: 10px; border: 1px solid #e1e6dc; padding: 14px; margin-bottom: 12px; }
