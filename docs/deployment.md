@@ -25,6 +25,8 @@ Session 统一存放在 `$AIDE_HOME/sessions/<id>/`，包含执行历史、日�
 
 插件私有文件分为全局 `plugins/<pluginId>/`、Session 内的 `sessions/<id>/plugins/<pluginId>/` 和其下的实例目录，不提供 project 级目录。
 
+Harness 原生会话沿用各自默认目录；Pi / Chief 通常位于 `~/.pi/agent/sessions/`。Aide Session 只保存恢复绑定与统一执行事实。已保存的 Pi 原生文件仍通过恢复句柄打开，不按新目录重新猜测身份。
+
 开发阶段不自动迁移或读取旧的 `projects/` 布局，也不删除其中数据。升级后若只有旧布局，服务将从空 Session 开始。
 
 ## Linux 常驻部署

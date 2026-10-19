@@ -360,7 +360,7 @@ function withSessionPreview(dir: string, meta: SessionMeta): SessionMeta {
 }
 
 /**
- * @spec Sessions belong to the Aide home; cwd never partitions their identity or storage.
+ * @spec Sessions persist execution history, Lanes and native bindings; cwd never partitions their identity or storage.
  * @link component://docs/kernel.md
  */
 export class SessionStore {

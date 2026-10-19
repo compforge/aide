@@ -2,7 +2,6 @@
 // wire/持久化 key、展示名、认色和 adapter 工厂在这里组装成 HarnessDefinition。
 // 任何按名字分发、贴标签、着色的代码都必须经本模块归一。
 
-import { join } from "node:path";
 import { createPiAgent } from "../../../agents/pi/agent.ts";
 import type { HarnessAdapter, OpenInteraction, NativeEventSink } from "./adapter.ts";
 import { ClaudeAdapter, probeClaudeTarget } from "./claude/adapter.ts";
@@ -16,7 +15,6 @@ import { DshAdapter } from "./dsh/adapter.ts";
 import { PiAdapter, type PiSessionFactory } from "./pi/adapter.ts";
 import { resolveDshTargetConfig } from "./dsh/config.ts";
 import {
-  aideRoot,
   targetEnvironmentFor,
   type AideConfig,
   type HarnessTargetConfig,
@@ -84,10 +82,10 @@ export const HARNESS_REGISTRY = [
   {
     ...HARNESS_IDENTITIES.pi,
     label: "Pi", sessionKey: "pi", shortName: "pi", color: "#a6da95",
-    create: ({ piSession, target, rootDir, log, nativeEvent, env }) => {
+    create: ({ piSession, target, log, nativeEvent, env }) => {
       if (env && Object.keys(env).length) throw new Error("Embedded Pi targets do not support environment overrides; configure Pi's agentDir instead");
       return new PiAdapter({ createSession: piSession ?? ((options) => createPiAgent({ ...options,
-        sessionDir: join(aideRoot(rootDir), "pi-sessions"), scope: `pi:${target.id}` })), log, nativeEvent });
+        scope: `pi:${target.id}` })), log, nativeEvent });
     },
   },
   {

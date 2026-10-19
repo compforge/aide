@@ -21,7 +21,7 @@ const adapter = createHarnessAdapter(
 Chief 的模型选择与能力包配置位于 `harnesses.chief`，完整来源、优先级和同步流程见 [配置](../configuration.md)。
 显式 model 优先于工厂默认值和 Pi 默认模型；未配置时沿用 Pi。`AIDE_MODEL` 控制默认 Codex Target，不改变 Chief 模型。
 Chief 只加载已同步的声明包中的 skills，不继承用户或项目的自动 skill 发现；角色规则与 Work 工具仍由代码绑定。
-原生恢复范围绑定 conversationId，不能把另一会话或通用 Pi 的会话文件当成当前上下文。
+原生会话由 Pi SDK 存放在自己的默认目录，与通用 Pi 一样；Chief 角色通过 scope 区分，不靠另建 chief-sessions 目录区分。原生恢复范围绑定 conversationId，不能把另一会话或通用 Pi 的会话文件当成当前上下文。
 
 ## 提示词与工具
 

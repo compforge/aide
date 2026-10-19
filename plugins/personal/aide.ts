@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type { Logger } from "pino";
 import type { ResourceType } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/host/plugin/manager.ts";
@@ -75,7 +74,7 @@ export class Personal {
     });
     return (options) => createChiefAgent({ ...options, ...settings,
       model: this.options.chiefModel ?? settings.model, work: this.work(conversationId),
-      sessionDir: join(this.home, "chief-sessions"), tools, beforeWorkMutation: () => { active(); } });
+      tools, beforeWorkMutation: () => { active(); } });
   }
 
   get conversations() { return this.store.conversations; }

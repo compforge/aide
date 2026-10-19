@@ -2,10 +2,10 @@ import { createResourceClient } from "../src/host/plugin/resource-client.ts";
 import { ConversationStore } from "../src/host/conversation/store.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { createPiAgent } from "../agents/pi/agent.ts";
@@ -57,7 +57,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
   const store = new Store(resources, createResourceClient(resources), new ConversationStore(session));
   const work = new WorkService(store, "me", pino({ level: "silent" }));
-  const config = { cwd: root, agentDir, sessionDir: join(root, "pi-sessions"), model: { provider: "fixture", id: "test-model" } };
+  const config = { cwd: root, agentDir, model: { provider: "fixture", id: "test-model" } };
   const events: HarnessEvent[] = [];
   let binding: HarnessSessionBinding | undefined;
   let finished: (() => void) | undefined;
@@ -74,6 +74,13 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   let ref = await open();
   assert.equal(adapter.harness, harness);
   assert.equal(ref.harness, harness);
+  const sessionFile = (binding!.resumeState.data as { sessionFile: string }).sessionFile;
+  const nativeRoot = join(agentDir, "sessions");
+  assert.ok(relative(nativeRoot, sessionFile).length > 0);
+  assert.ok(!relative(nativeRoot, sessionFile).startsWith(".."));
+  assert.notEqual(dirname(sessionFile), session.dir);
+  assert.equal(existsSync(join(root, "pi-sessions")), false);
+  assert.equal(existsSync(join(root, "chief-sessions")), false);
   t.after(async () => {
     await adapter.close(ref);
     for (const response of held) response.destroy();
@@ -131,7 +138,7 @@ test("Pi answers directly without work and resumes its native history", { timeou
   assert.match(JSON.stringify(fixture.requests[1]!.messages), /你好/);
   const data = fixture.binding().resumeState.data as { sessionFile: string };
   await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile: data.sessionFile, work: fixture.work }), /does not belong/);
-  await assert.rejects(createPiAgent({ ...fixture.config, sessionFile: join(fixture.config.sessionDir, "missing.jsonl") }), /missing/);
+  await assert.rejects(createPiAgent({ ...fixture.config, sessionFile: join(fixture.config.agentDir, "sessions", "missing.jsonl") }), /missing/);
 });
 
 test("Chief loads declared skills and excludes ambient Pi skills and packages", { timeout: 20_000 }, async (t) => {

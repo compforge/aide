@@ -51,7 +51,7 @@ Host 与 Runner 不相互导入实现。Host 通过入口启动 Runner；两端�
 
 ### 输入与交流记录
 
-Conversation 表达一组交流上下文，Input 表达一次待处理触发，Message 表达交流记录。Channel Input 引用用户 Message，Source Input 携带观察；外部观察不会自动成为一条聊天消息。
+Conversation 是 Host 提供的 builtin resource，表达一组交流上下文；convId 是它的标识。Input 表达一次待处理触发，Message 表达交流记录。Channel Input 引用用户 Message，Source Input 携带观察；外部观察不会自动成为一条聊天消息。
 
 三者由 Core 的 ConversationStore 管理，以普通记录持久化，并通过内置 Resource API 提供访问与调度投影。它们不进入插件的 Resource 文件存储。输入状态和对应消息一起提交，避免只写完成状态却遗漏答复。
 
@@ -61,9 +61,23 @@ Conversation 的划分由输入方确定，消费顺序与处理策略由插件�
 
 HarnessAdapter 统一启动、提交、取消、恢复和事件流。Target 标识一份具体执行配置，`harness` 字段选择 Harness；同一 Harness 可以有多个 Target。具体契约与职责见 [Harness](harness/README.md)，实现分别见 [Pi](harness/pi.md) 与 [Chief](harness/chief.md)。
 
-Session 保存执行上下文和事件；Lane 组织一条执行支线；HarnessInvocation 表达执行请求；Turn 记录一轮执行事实。请求先持久化，再交给 Adapter。接受请求、执行结束和业务目标完成是不同事实，目标是否达成由调用方校验。
+Session 是宿主管理一组执行历史和恢复状态的持久作用域，不是进程，也不是 Harness 原生会话。它保留 Ledger、执行投影、Lane 和恢复绑定。CoreSession 装配进程期的 Controller、Adapter 和订阅；关闭运行组件会释放句柄与锁，持久 Session 仍可恢复。
 
-Session 归属于 Aide 状态目录，统一存放在 `sessions/<id>/`，不按项目或 `cwd` 分组。`cwd` 只表示执行工作目录；服务重启后续用最近的 Session，并按当前配置更新执行目录。Conversation 仍负责组织用户交流，Session 不代替 Conversation。
+```text
+Session
+├── Ledger / 执行投影
+└── Lane：串行执行支线
+    ├── Turn：一次执行的事实归属
+    └── Harness Target → 原生 Session identity + resumeState
+```
+
+同一 Lane 串行推进，不同 Lane 可并行；Lane 可以在不同 Target 之间接力。同一 Target 在不同 Lane 上使用独立原生会话。绑定按 `Session × Lane × HarnessTarget` 定位；原生会话重建不改变 Lane 身份。fork 复制逻辑历史和 Lane 身份，但清空原生绑定，避免两个 Session 写入同一份 Harness 历史。
+
+Conversation 与其它资源一样，通过资源引用和可选的 conversationId / inputId 关联执行。资源标识不替代执行身份，也不强制对应一个 Lane 或原生会话。Chief 按 Conversation 组织上下文，是 Personal 的业务策略。
+
+HarnessInvocation 表达执行请求，Turn 记录一段执行事实。请求先持久化，再交给 Adapter。接受请求、执行结束和业务目标完成是不同事实，目标是否达成由调用方校验。
+
+Session 归属于 Aide 状态目录，统一存放在 `sessions/<id>/`，不按项目或 `cwd` 分组。`cwd` 只表示执行工作目录；服务重启后续用最近的 Session，并按当前配置更新执行目录。当前服务恢复一个内部 Session，不向用户暴露 Session 选择器。
 
 Adapter 保留提供方明确给出的消息阶段。`agentText` 用于整轮记录，`finalText` 仅包含明确标记的最终答复；未标阶段的文本不能靠位置猜成最终答案。流式内容先归一为执行事件，Channel 再投影为展示内容。
 

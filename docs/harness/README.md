@@ -12,9 +12,12 @@ Harness 向 Aide 提供 Agent 执行能力。宿主通过统一接口提交输�
 | Target | 一份具体执行配置；同一 Harness 可以有多个 Target |
 | Adapter | 把原生会话、工具与消息协议转换为宿主契约 |
 | Agent | 决定如何使用模型与工具；内置 Agent 可有自己的提示词和上下文策略 |
-| Session / Lane / Turn | 宿主保存执行上下文、支线与每轮事实 |
+| Aide Session / Lane / Turn | 宿主持久执行作用域、串行支线与每段执行的事实归属 |
+| HarnessSession | Harness 自己管理的原生上下文与历史 |
 
 Target 的 id 与 harness 字段分开：前者定位具体配置，后者选择实现。进程内会话句柄只用于路由调用；持久恢复依赖 Adapter 发布的原生身份与版本化恢复状态，宿主不能从临时句柄猜测稳定身份。
+
+原生 Session 文件由 Harness 使用自己的默认目录保存，Aide 不托管或直接改写这些文件。Aide 的 Ledger 保存统一执行事实，不能由某一家原生历史替代。宿主按 `Session × Lane × Target` 保存原生 identity 与 Adapter 的 `resumeState`；恢复时原样交回 Adapter，进程期 Handle 不作为恢复身份。Session 的执行模型见 [Kernel](../kernel.md#harness-与执行事实)。
 
 ## 执行契约
 

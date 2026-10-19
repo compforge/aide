@@ -11,6 +11,14 @@ test("Sessions from different execution directories share one home and reopen or
   const store = new SessionStore(root);
   const first = store.createSession({ cwd: join(root, "code-a") });
   const second = store.createSession({ cwd: join(root, "code-b") });
+  first.setHarnessTarget("coding", { harnessTargetId: "coding", harness: "codex" });
+  first.ensureHarnessInvocationLane("side", "invocation-side", "main");
+  const mainBinding = { harness: "codex", harnessSessionId: "native-main", resumeState: { version: 1, data: { id: "native-main" } } };
+  const sideBinding = { harness: "codex", harnessSessionId: "native-side", resumeState: { version: 1, data: { id: "native-side" } } };
+  first.setLaneHarnessSession("main", "coding", mainBinding);
+  first.setLaneHarnessSession("side", "coding", sideBinding);
+  const event = first.appendEvent({ kind: "user_message", source: { type: "user" }, laneId: "side", turnId: "turn-side",
+    payload: { messageId: "message-side", content: [{ type: "text", text: "保留执行历史" }] } });
   const fork = store.forkSession(first.id, { cwd: join(root, "code-c") });
   const reopened = new SessionStore(root).openSession(first.id);
   t.after(async () => {
@@ -23,6 +31,17 @@ test("Sessions from different execution directories share one home and reopen or
   assert.equal(fork.meta.forkedFrom?.aideSessionId, first.id);
   assert.equal(fork.meta.cwd, join(root, "code-c"));
   assert.equal(reopened.dir, first.dir);
+  assert.deepEqual(reopened.meta.lanes.main!.harnessSessions.coding, mainBinding);
+  assert.deepEqual(reopened.meta.lanes.side!.harnessSessions.coding, sideBinding);
+  assert.equal(reopened.ledger.read()[0]!.eventId, event.eventId);
+  assert.equal(reopened.projection.messages.get("message-side")?.kind, "input");
+  assert.deepEqual(reopened.projection.messages.get("message-side"), first.projection.messages.get("message-side"));
+  assert.deepEqual(fork.meta.lanes.main!.harnessSessions, {});
+  assert.deepEqual(fork.meta.lanes.side!.harnessSessions, {});
+  assert.equal(fork.meta.lanes.side!.createdFor.type, "harness_invocation");
+  assert.notEqual(fork.ledger.read()[0]!.eventId, event.eventId);
+  assert.deepEqual(fork.ledger.read()[0]!.scope, { type: "session", aideSessionId: fork.id });
+  assert.deepEqual(fork.projection.messages.get("message-side"), first.projection.messages.get("message-side"));
   assert.deepEqual(new Set(store.listSessions().map((s) => s.aideSessionId)), new Set([first.id, second.id, fork.id]));
   assert.deepEqual(readdirSync(root), ["sessions"]);
   assert.throws(() => store.openSession("../outside"), /invalid aide session id/);
