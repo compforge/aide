@@ -1,11 +1,13 @@
+import { resolvePiConfig } from "../src/host/harness/pi/config.ts";
+import { resolveChiefConfig } from "../src/host/harness/chief/config.ts";
 import { test, expect } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import pino from "pino";
 import { loadConfig } from "../src/config.ts";
-import { loadChiefSkills, syncChiefPackages } from "../src/harness-config.ts";
+import { loadChiefSkills, syncChiefPackages } from "../src/host/harness/chief/packages.ts";
 import { withAsyncFileLock } from "../src/host/file-lock.ts";
 
 const log = pino({ level: "silent" });
@@ -120,5 +122,42 @@ test("Git packages install explicitly and a changed ref cannot silently load the
     declare("missing-ref");
     await expect(sync()).rejects.toThrow();
     await expect(loadChiefSkills(home, successful, log, file)).rejects.toThrow("run aide harness sync chief");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("model definitions and explicit credentials resolve without Pi registration and do not leak on errors", async () => {
+  const home = mkdtempSync(join(tmpdir(), "aide-model-config-"));
+  try {
+    writeFileSync(join(home, "auth.json"), JSON.stringify({ custom: { type: "api_key", key: "old-key" } }));
+    const input = { provider: "custom", id: "deployment", api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1",
+      apiKeyEnv: "TEST_MODEL_KEY", reasoning: false, contextWindow: 8192, maxTokens: 1024 };
+    const sources = { cwd: home, agentDir: home, skillPaths: [], environment: { TEST_MODEL_KEY: "new-private-key" } };
+    const config = await resolveChiefConfig({ model: input, packages: [] }, sources);
+    expect(config.model).toMatchObject({ id: "deployment", reasoning: false, contextWindow: 8192, maxTokens: 1024 });
+    expect((await config.modelRuntime.getAuth(config.model))?.auth.apiKey).toBe("new-private-key");
+    expect(readFileSync(join(home, "auth.json"), "utf8")).not.toContain("new-private-key");
+    expect(existsSync(join(home, "models.json"))).toBe(false);
+    await expect(resolveChiefConfig({ model: input, packages: [] }, { ...sources, environment: {} })).rejects.toThrow("model.apiKeyEnv");
+    await expect(resolveChiefConfig({ model: { ...input, api: "unsupported" }, packages: [] }, sources)).rejects.toThrow("model.api");
+    await expect(resolveChiefConfig({ model: { provider: "unknown", id: "missing" }, packages: [] }, sources)).rejects.toThrow("model.api");
+    writeFileSync(join(home, "models.json"), '{"providers": DO-NOT-PRINT');
+    try { await resolvePiConfig(sources); throw new Error("expected failure"); }
+    catch (error) { expect(String(error)).toContain("Invalid Pi models"); expect(String(error)).not.toContain("DO-NOT-PRINT"); }
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("invalid Chief model stops Aide before listening or restoring persisted Sessions", () => {
+  const home = mkdtempSync(join(tmpdir(), "aide-invalid-startup-"));
+  const file = join(home, "config.yaml");
+  writeFileSync(file, JSON.stringify({ harnesses: { chief: { model: { provider: "missing-provider", id: "missing-model" } } } }));
+  try {
+    const result = spawnSync(process.execPath, ["src/main.ts"], { cwd: process.cwd(), encoding: "utf8", timeout: 15000,
+      env: { ...process.env, AIDE_HOME: home, AIDE_CONFIG: file, AIDE_CWD: home, PI_CODING_AGENT_DIR: join(home, "pi") } });
+    expect(result.status).not.toBe(0);
+    expect(result.error).toBeUndefined();
+    expect(result.stderr).toContain("harnesses.chief");
+    expect(result.stderr).toContain("model.api");
+    expect(result.stdout).not.toContain("Aide listening");
+    expect(existsSync(join(home, "sessions"))).toBe(false);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

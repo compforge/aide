@@ -13,13 +13,14 @@ PiAdapter 处理 open、sendTurn、cancel、close、事件归一和恢复句柄�
 通用 Pi 可以直接通过注册表创建，不需要 Personal：
 
 ```ts
+const piConfig = await resolvePiConfig({ cwd });
 const adapter = createHarnessAdapter(
   { id: "general", harness: "pi" },
-  { ...ports, targetConfig: { harness: "pi" }, rootDir: aideHome },
+  { ...ports, piConfig, targetConfig: { harness: "pi" }, rootDir: aideHome },
 );
 ```
 
-需要绑定自定义配置或工具时提供 `piSession` 工厂。模型和凭证沿用 Pi 的 auth.json、models.json 与环境配置，默认目录为 `~/.pi/agent`；工厂可指定 agentDir 和模型。嵌入式 SDK 不支持每会话环境覆盖。配置格式见 [Pi 上游文档](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。
+启动装配调用 `resolvePiConfig` 读取 Pi settings/models 并应用显式覆盖，传入 `piConfig`。需要绑定自定义工具时提供消费该配置的 `piSession` 工厂。模型定义和 settings 保留在内存中，SDK refresh 不重新读取原文件；认证沿用 Pi auth.json 和 SDK 的刷新机制，默认目录为 `~/.pi/agent`。嵌入式 SDK 不支持每会话环境覆盖。配置格式见 [Pi 上游文档](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。
 
 原生会话由 Pi SDK 按默认布局持久化在 `<agentDir>/sessions/<encoded-cwd>/`，通常为 `~/.pi/agent/sessions/` 下的目录；指定 agentDir 时也由 SDK 选择对应路径。Pi 自己按 cwd 组织文件，不意味着 Aide 恢复 Project 分组。通用 Pi 和 Chief 都沿用此机制，Aide 不再指定 pi-sessions / chief-sessions 目录。Adapter 保存文件位置与恢复状态。恢复时校验工作目录与调用方绑定的范围。尚未落盘的空会话可以重新建立，已有历史文件缺失或范围不符则报错。
 

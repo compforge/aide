@@ -1,7 +1,8 @@
 # Aide 配置
 
 Host 在启动时加载一份配置快照，验证后按职责装配 Connector、Harness 和 Plugin。
-`config.yaml` 是 Aide 声明的事实来源；修改配置后重启服务，不做逐轮重读或隐式合并多份文件。
+`config.yaml` 是 Aide 声明的事实来源。启动时完成模块校验后才恢复 Session 和启动 Channel；修改配置后重启服务。
+新建、恢复和重建 Harness 都复用启动配置，运行期间修改 Aide 或 Pi 的 models/settings 文件不会改变它。
 
 ## 来源与优先级
 
@@ -46,9 +47,39 @@ plugins:
 
 ## Chief 默认值与外部配置
 
-`harnesses.chief.model` 显式指定 provider/id 时优先于 Pi 的默认模型；模型必须已由 Pi 配置，
-不存在时直接报错。省略该字段时沿用 Pi 的模型选择。认证及模型提供方定义继续由 Pi 的
-`auth.json` / `models.json` 管理，默认位于 `~/.pi/agent`，不复制凭证到 Aide 配置。
+Chief 模型的优先级是 **Aide 显式字段 > 同一模型的 Pi 定义 > SDK 默认值**。
+模型配置由 `src/host/harness/chief/config.ts` 和 `pi/config.ts` 在启动阶段解析；Agent 只接收有效配置。
+
+- 已注册的模型可以只声明 `provider/id`；省略整个 `model` 时使用 Pi settings 的 `defaultProvider/defaultModel`，两者都未设置时使用 SDK 可用模型列表的首项。
+- 新 ID 可以直接在 Aide 定义；连接信息可继承同一 provider。provider 有多种 API 且无法唯一确定时，必须显式指定 `api`。
+- 新 ID 不继承另一个模型的推理能力和容量。缺省遵循锁定 Pi SDK 的自定义模型默认值：`reasoning: false`、`input: [text]`、`contextWindow: 128000`、`maxTokens: 16384`；应按部署模型的实际能力配置。
+- 显式 `false` 和支持的空列表不会回退；无效字段、未知 API、缺少连接信息或认证来源会阻止启动。
+- 恢复原生会话时，启动模型选择优先于历史记录中的模型；对话历史继续保留。
+
+```yaml
+harnesses:
+  chief:
+    model:
+      provider: custom
+      id: your-deployment
+      api: openai-completions
+      baseUrl: https://model.example.com/v1
+      apiKeyEnv: MODEL_API_KEY
+      # 以下能力按实际模型填写，此处仅为示例。
+      reasoning: false
+      input: [text]
+      contextWindow: 32768
+      maxTokens: 4096
+    packages: []
+```
+
+`name` 可选。`api` 使用 Pi 已注册的 API 类型；`contextWindow` 和 `maxTokens` 必须为正整数。
+`apiKeyEnv` 指定启动环境中的变量名，变量缺失或为空时报错；其值优先于继承的 Pi 凭证，仅在本进程内使用。
+未声明时复用 Pi 认证。Aide 不改写 `~/.pi/agent/models.json` 或 `auth.json`，认证 token 刷新仍由 SDK 管理。
+Chief 和普通 Pi 各自解析配置，Chief 的覆盖不修改普通 Pi 的模型与 skills。
+
+启动日志记录所选 provider/model、配置来源和 skills 数量，不输出密钥。校验确认配置可解析及认证已配置，
+不代表模型远端一定可用；部署验收仍需完成一次真实模型请求。
 
 `harnesses.chief.packages` 默认为 `[]`，Chief 只加载其中包所声明的 skills。
 不会继承 Pi 的 packages、`~/.agents/skills` 或项目自动发现的 skills。普通 `pi` Harness 保持其原生发现行为。
@@ -56,6 +87,8 @@ plugins:
 后两者相对所选配置文件目录解析，不随服务工作目录改变。
 
 `AIDE_MODEL` 目前只控制默认 Codex Target，不参与 Chief 的模型优先级。
+Codex 启动命令、sandbox 和模型选择从启动环境确定。外部 CLI 的原生配置由其自身接口管理；
+Aide 的快照不等于冻结了外部 CLI 的所有文件和登录态。
 服务端口、工作目录、时区、飞书和代理仍使用[部署文档](deployment.md)中的环境变量；
 它们与当前 YAML 字段没有重叠覆盖关系。
 
@@ -76,3 +109,10 @@ aide harness sync chief
 同步包不会安装 ascli 等业务 CLI；它们及凭证由运行环境独立提供。
 
 环境配置见 [Connector](connector/README.md)，Chief 的角色、工具和会话行为见 [Chief](harness/chief.md)。
+
+## 模块归属
+
+顶层 `src/config.ts` 加载文件并组合各模块 schema。Harness 配置位于 `src/host/harness/<name>/config.ts`，
+Connector 配置由 `connectors/config.ts` 组合，Environment 和 Meego 分别声明自己的字段与校验。
+配置输入允许缺省和引用；有效配置已补齐默认值、解析模型与路径，并在创建运行实例之前验证。
+Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。整体原则见 [Kernel](kernel.md#配置所有权与生命周期)。

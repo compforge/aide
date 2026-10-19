@@ -31,7 +31,7 @@ export class Personal {
   private readonly chiefConversations = new Map<string, string>();
   private readonly targets: { id: string; harness: string }[];
 
-  constructor(private readonly options: { timezone: string; chiefModel?: ChiefAgentOptions["model"] }, private readonly log: Logger,
+  constructor(private readonly options: { timezone: string }, private readonly log: Logger,
     runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; watches: ReturnType<typeof parseWatches> }) {
     this.core = runtime.core;
     this.session = runtime.session;
@@ -56,7 +56,7 @@ export class Personal {
   }
 
   /** Personal binds a Chief session and its tools to one conversation; the adapter remains business-agnostic. */
-  chiefSession(targetId: string, settings: Pick<ChiefAgentOptions, "agentDir" | "model" | "skillPaths"> = {}): PiSessionFactory {
+  chiefSession(targetId: string, config: ChiefAgentOptions["config"]): PiSessionFactory {
     const conversationId = this.chiefConversations.get(targetId);
     if (!conversationId) throw new Error("Unknown Chief target");
     const active = () => {
@@ -73,8 +73,7 @@ export class Personal {
       if (input.spec.origin !== "source") throw new Error("Only Source observations can be dismissed silently");
       this.store.conversations.update(input, { quietReason });
     });
-    return (options) => createChiefAgent({ ...options, ...settings,
-      model: this.options.chiefModel ?? settings.model, work: this.work(conversationId),
+    return (options) => createChiefAgent({ ...options, config, work: this.work(conversationId),
       tools, beforeWorkMutation: () => { active(); } });
   }
 

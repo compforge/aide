@@ -1,6 +1,7 @@
 import type { ConnectorClient, EnvironmentDirectory, ForgeConnector, RequirementConnector } from "@compforge/aide-plugin";
 import { createForgeConnectors } from "./forge/config.ts";
 import { createMeegoRequirementConnectors } from "./requirements/meego.ts";
+import { resolveEnvironmentConfig } from "./environments/config.ts";
 import { Environments } from "./environments.ts";
 
 /** One host-owned set of provider clients; plugins receive only read capabilities. */
@@ -27,8 +28,8 @@ export class Connectors implements ConnectorClient {
     } satisfies ConnectorClient["forges"]);
   }
 
-  static fromConfig(config: { environments?: Record<string, unknown>; requirements?: Record<string, unknown>; forges?: Record<string, unknown> }): Connectors {
-    return new Connectors(createMeegoRequirementConnectors(config), createForgeConnectors(config), new Environments(config.environments));
+  static fromConfig(config: { environments?: Record<string, unknown>; requirements?: Record<string, unknown>; forges?: Record<string, unknown> }, environment: Readonly<Record<string, string | undefined>> = process.env): Connectors {
+    return new Connectors(createMeegoRequirementConnectors(config), createForgeConnectors(config, { environment }), new Environments(resolveEnvironmentConfig(config.environments)));
   }
 
   async describe() {
