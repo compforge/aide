@@ -36,6 +36,8 @@ const plugin: PluginPackage = {
 export default plugin;
 ```
 
+`context.dataDirs` provides `global` (shared across Sessions), `session`, and `instance` directories for plugin-private files. Session storage is independent of execution cwd; there is no project directory scope.
+
 An enabled instance has a host Binding and a Runner process. Register capabilities during activation and use `context.lifecycle.onClose` for cleanup. A plugin may manage resources in different namespaces; scope belongs to each resource, not to the package.
 
 ## Global connectors

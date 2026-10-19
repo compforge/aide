@@ -261,3 +261,41 @@ test(`${definition.kind} requeues a dynamic wait and applies its own completion 
   assert.equal(aide.work("me").read(work.id).status, definition.kind === "task" ? "done" : "scheduled");
   assert.equal(aide.work("me").read(work.id).nextAt, null);
 });
+
+// @case restart_new_cwd: changing execution cwd preserves personal work and conversation state.
+test("Aide resumes the same Session and personal state when execution cwd changes", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-cwd-restart-"));
+  const agent: Agent = { chief: async () => "记住了", execute: async () => { throw new Error("Unexpected execution"); } };
+  const first = new Aide(root, fakeOptions(agent, join(root, "code-a")), log);
+  let restarted: Aide | undefined;
+  t.after(async () => { await first.close(); await restarted?.close(); rmSync(root, { recursive: true, force: true }); });
+  await first.receive({ id: "hello", conversationId: "me", text: "你好" });
+  await first.settled();
+  const routine = await first.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "manual" } });
+  const originalId = new SessionStore(root).listSessions()[0]!.aideSessionId;
+  const messages = first.store.read().messages;
+  await first.close();
+
+  const executionCwds: string[] = [];
+  const options = fakeOptions(agent, join(root, "code-b"));
+  restarted = new Aide(root, { ...options, createAdapter: (target) => {
+    const adapter = options.createAdapter(target);
+    const open = adapter.open.bind(adapter);
+    adapter.open = (config, sink, binding) => {
+      executionCwds.push(config.cwd);
+      return open(config, sink, binding);
+    };
+    return adapter;
+  } }, log);
+  await restarted.start(); await restarted.settled();
+  const sessions = new SessionStore(root).listSessions();
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0]!.aideSessionId, originalId);
+  assert.equal(sessions[0]!.cwd, join(root, "code-b"));
+  assert.equal(restarted.work("me").read(routine.id).title, routine.title);
+  assert.deepEqual(restarted.store.read().messages, messages);
+  await restarted.receive({ id: "again", conversationId: "me", text: "继续聊" });
+  await restarted.settled();
+  assert.ok(executionCwds.length > 0);
+  assert.ok(executionCwds.every((cwd) => cwd === join(root, "code-b")));
+});

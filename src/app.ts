@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { Logger } from "pino";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { Personal } from "../plugins/personal/aide.ts";
@@ -23,8 +24,11 @@ export class Aide extends Personal {
     validateWatchScopes(watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
     const connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
     const sessions = new SessionStore(home);
-    const previous = sessions.listSessions({ cwd: options.cwd })[0];
+    const previous = sessions.listSessions()[0];
     const session = previous ? sessions.openSession(previous.aideSessionId) : sessions.createSession({ cwd: options.cwd, title: "Aide" });
+    const cwd = resolve(options.cwd);
+    if (session.meta.cwd !== cwd) session.updateMeta({ cwd });
+    log.info({ sessionId: session.id, cwd, resumed: Boolean(previous) }, "Opened Aide session");
     const targets = [{ id: "default", harness: "codex" }];
     session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex", ...(options.model ? { model: options.model } : {}) });
     const instances = new PluginInstanceStore({ session });

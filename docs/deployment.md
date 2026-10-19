@@ -19,6 +19,14 @@ Aide 以单个服务实例管理自己的状态目录。配置模型、CLI 和�
 
 例如：`AIDE_CWD=/path/to/work AIDE_TIMEZONE=Asia/Shanghai npm start`。AI 能力由 Harness 提供，工具使用执行环境中已有的配置和凭证。Chief 可以直接查信息、回答问题，也可以按需操作 Work。
 
+## 状态目录
+
+Session 统一存放在 `$AIDE_HOME/sessions/<id>/`，包含执行历史、日志、Conversation 和插件资源。`AIDE_CWD` 只选择执行目录，改变它不会另开一组 Session。服务启动时恢复最近的 Session；没有 Session 时创建一个。
+
+插件私有文件分为全局 `plugins/<pluginId>/`、Session 内的 `sessions/<id>/plugins/<pluginId>/` 和其下的实例目录，不提供 project 级目录。
+
+开发阶段不自动迁移或读取旧的 `projects/` 布局，也不删除其中数据。升级后若只有旧布局，服务将从空 Session 开始。
+
 ## Linux 常驻部署
 
 在服务器上的 checkout 安装依赖，确认 `node --version` 为 22.19+、Pi 模型已配置且 `codex` 已登录，再运行：

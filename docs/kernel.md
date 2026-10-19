@@ -63,6 +63,8 @@ HarnessAdapter 统一启动、提交、取消、恢复和事件流。Target 标�
 
 Session 保存执行上下文和事件；Lane 组织一条执行支线；HarnessInvocation 表达执行请求；Turn 记录一轮执行事实。请求先持久化，再交给 Adapter。接受请求、执行结束和业务目标完成是不同事实，目标是否达成由调用方校验。
 
+Session 归属于 Aide 状态目录，统一存放在 `sessions/<id>/`，不按项目或 `cwd` 分组。`cwd` 只表示执行工作目录；服务重启后续用最近的 Session，并按当前配置更新执行目录。Conversation 仍负责组织用户交流，Session 不代替 Conversation。
+
 Adapter 保留提供方明确给出的消息阶段。`agentText` 用于整轮记录，`finalText` 仅包含明确标记的最终答复；未标阶段的文本不能靠位置猜成最终答案。流式内容先归一为执行事件，Channel 再投影为展示内容。
 
 ## 第二部分：一次业务处理的执行时序

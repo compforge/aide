@@ -32,13 +32,8 @@ export interface PluginSessionContext {
  * their host-owned APIs.
  */
 export interface PluginDataDirectories {
-  /** Shared by this Plugin across all Aide Projects and Sessions. */
+  /** Shared by this Plugin across all Aide Sessions. */
   readonly global: string;
-  /**
-   * Shared across Sessions in the current Aide Project. From a Plugin's
-   * perspective this is its workspace scope.
-   */
-  readonly project: string;
   /** Private to this Plugin in the current AideSession. */
   readonly session: string;
   /** Private to this concrete Plugin Binding. */
