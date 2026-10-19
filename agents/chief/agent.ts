@@ -34,6 +34,6 @@ export function createChiefAgent(options: ChiefAgentOptions): Promise<AgentSessi
       beforeWorkMutation?.(); return tool.execute(...args);
     } };
   });
-  return createPiAgent({ ...pi, scope: `chief:${work.conversationId}`, systemPrompt,
+  return createPiAgent({ ...pi, skillPaths: pi.skillPaths ?? [], scope: `chief:${work.conversationId}`, systemPrompt,
     tools: [...workCapabilities, ...tools] });
 }

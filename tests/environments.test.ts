@@ -79,7 +79,7 @@ test("config defaults, explicit path, YAML/JSON, and structural errors are deter
     delete process.env.AIDE_CONFIG;
     process.env.AIDE_HOME = join(file, "..");
     expect(configPath("/home/aide")).toBe("/home/aide/config.yaml");
-    expect(loadConfig()).toEqual({ connectors: { environments: {}, requirements: {}, forges: {} }, plugins: {} });
+    expect(loadConfig()).toEqual({ connectors: { environments: {}, requirements: {}, forges: {} }, plugins: {}, harnesses: { chief: { packages: [] } } });
     expect(() => loadConfig(file)).toThrow("Aide config not found");
     process.env.AIDE_CONFIG = file;
     expect(configPath("/ignored")).toBe(file);
@@ -89,6 +89,7 @@ test("config defaults, explicit path, YAML/JSON, and structural errors are deter
       expect(() => loadConfig(file)).toThrow(/Invalid Aide/);
     }
     writeFileSync(file, JSON.stringify({ connectors: { environments: { dev: { kind: "host" } } } }));
+    process.env.AIDE_CONFIG = `${file}.missing`;
     expect(loadConfig(file).connectors.environments).toEqual({ dev: { kind: "host" } });
   } finally {
     if (previous === undefined) delete process.env.AIDE_CONFIG; else process.env.AIDE_CONFIG = previous;

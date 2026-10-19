@@ -5,6 +5,11 @@ import { parseDocument } from "yaml";
 import { z } from "zod";
 
 const record = z.record(z.string(), z.unknown());
+const ChiefConfigSchema = z.object({
+  model: z.object({ provider: z.string().trim().min(1), id: z.string().trim().min(1) }).strict().optional(),
+  packages: z.array(z.string().trim().min(1)).default([]),
+}).strict();
+/** @spec Explicit values win; defaults apply only to absent fields, never to empty lists or invalid values. */
 const ConfigSchema = z.object({
   connectors: z.object({
     environments: record.default({}),
@@ -12,6 +17,7 @@ const ConfigSchema = z.object({
     forges: record.default({}),
   }).strict().default({ environments: {}, requirements: {}, forges: {} }),
   plugins: z.record(z.string(), record).default({}),
+  harnesses: z.object({ chief: ChiefConfigSchema.default({ packages: [] }) }).strict().default({ chief: { packages: [] } }),
 }).strict();
 export type AideConfig = z.infer<typeof ConfigSchema>;
 
@@ -19,7 +25,11 @@ export function configPath(home = process.env.AIDE_HOME ?? join(homedir(), ".aid
   return process.env.AIDE_CONFIG ?? join(home, "config.yaml");
 }
 
-/** @spec The host loads one configuration snapshot; plugins receive capabilities and their own config, never credentials. */
+/**
+ * @spec The host loads one validated snapshot. Explicit path > AIDE_CONFIG > AIDE_HOME/config.yaml.
+ * @link docs/configuration.md
+ * @case tests/harness-config.test.ts
+ */
 export function loadConfig(explicitPath?: string): AideConfig {
   const path = explicitPath ?? configPath();
   let text: string;
@@ -37,6 +47,9 @@ export function loadConfig(explicitPath?: string): AideConfig {
   try { value = document.toJS(); }
   catch { throw new Error(`Invalid Aide YAML config: ${path}`); }
   const parsed = ConfigSchema.safeParse(value ?? {});
-  if (!parsed.success) throw new Error(`Invalid Aide config structure: ${path}`);
+  if (!parsed.success) {
+    const fields = parsed.error.issues.map((issue) => `${issue.path.join(".") || "<root>"} (${issue.code})`).join(", ");
+    throw new Error(`Invalid Aide config structure: ${path}: ${fields}`);
+  }
   return parsed.data;
 }

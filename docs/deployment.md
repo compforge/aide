@@ -12,7 +12,7 @@ Aide 以单个服务实例管理自己的状态目录。配置模型、CLI 和�
 | `AIDE_CWD` | CLI 执行工作目录，默认启动目录 |
 | `AIDE_PORT` | 本地端口，默认 `7433` |
 | `AIDE_TIMEZONE` | 默认时区，默认服务器时区；可设 `Asia/Shanghai` |
-| `AIDE_CONFIG` | 全局 Connector 与 Plugin 配置，默认 `$AIDE_HOME/config.yaml` |
+| `AIDE_CONFIG` | 全局 Connector、Harness 与 Plugin 配置，默认 `$AIDE_HOME/config.yaml`；[字段与优先级](configuration.md) |
 | `AIDE_MODEL` | Codex 模型，默认沿用 Codex 配置 |
 | `AIDE_SANDBOX` | 执行时的 Codex sandbox，未设时沿用 Codex 默认配置；可选 `read-only`、`workspace-write`、`danger-full-access` |
 | `LOG_LEVEL` | 结构化日志级别，默认 `info` |

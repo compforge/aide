@@ -49,7 +49,7 @@ export class Aide extends Personal {
         },
       },
     });
-    super(home, { timezone: options.timezone }, log, { core, session, connectors, targets, watches });
+    super(home, { timezone: options.timezone, chiefModel: config?.harnesses.chief.model }, log, { core, session, connectors, targets, watches });
     application = this;
   }
 }

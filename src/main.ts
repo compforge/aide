@@ -1,4 +1,5 @@
 import { loadConfig } from "./config.ts";
+import { loadChiefSkills } from "./harness-config.ts";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { once } from "node:events";
@@ -22,13 +23,15 @@ new Intl.DateTimeFormat("en", { timeZone: timezone });
 const feishu = feishuConfig(process.env);
 
 await withAsyncFileLock(path, async () => {
+  const config = loadConfig();
+  const skillPaths = await loadChiefSkills(home, config, log);
   const aide: Aide = new Aide(home, {
-    config: loadConfig(),
+    config,
     cwd: resolve(process.env.AIDE_CWD ?? process.cwd()), timezone, model: process.env.AIDE_MODEL,
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
       targetConfig: { harness: target.harness,
         ...(target.harness === "codex" && sandbox ? { command: ["codex", "app-server", "-c", `sandbox_mode="${sandbox}"`] } : {}) },
-      ...(target.harness === "chief" ? { chiefSession: aide.chiefSession(target.id) } : {}),
+      ...(target.harness === "chief" ? { chiefSession: aide.chiefSession(target.id, { skillPaths }) } : {}),
     }),
   }, log);
   const server = httpChannel(aide, log);
