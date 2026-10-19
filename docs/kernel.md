@@ -6,7 +6,7 @@ Aide 由 Channel、Source、资源与 Controller、Connector、Harness 等组件
 
 ![Aide 组件图：Channel、Source、资源、Controller、Connector、Harness 与 Agent Tools 的职责和协作关系](assets/kernel.svg)
 
-图中展示逻辑协作关系；进程边界见下文。Chief、Task、Routine 是 Personal Plugin 的具体业务，其他 Plugin 可以定义自己的资源和 Controller。
+图中左侧是输入，上方是业务逻辑，右侧是能力与外部系统；中央协作引擎连接三个领域，由 Host + Runner 承载。Connector 在输入观察与动作调用两侧复用同一能力。组件位置表达逻辑协作关系，进程所有权见下文。Chief、Task、Routine 是 Personal Plugin 的具体业务，其他 Plugin 可以定义自己的资源和 Controller。
 
 | 概念 | 职责 |
 | --- | --- |
