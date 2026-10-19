@@ -49,6 +49,12 @@ Host 持有资源、消息和执行事实，管理 Harness、用户交互及 Run
 
 Host 与 Runner 不相互导入实现。Host 通过入口启动 Runner；两端共用的 IPC 与 verb 契约放在 `src/protocol/`，上下文构造放在 `src/plugin-context.ts`，队列和定时机制放在 `src/reconcile/`。应用装配位于 `src/app.ts`，宿主会话协调器称为 CoreSession。插件开发者依赖 `packages/plugin/`，无需处理 IPC。插件运行细节见 [Plugin](plugin/README.md)。
 
+### 配置所有权与生命周期
+
+各模块声明自身的配置契约、默认值与校验规则，Aide 在启动时统一读取配置来源、执行覆盖与解析，形成各模块的有效配置。运行实例只消费有效配置，不感知配置来源，也不自行读取配置文件。有效配置在 Aide 进程生命周期内保持不变，修改配置后重启生效。
+
+字段、来源和覆盖规则见 [配置](configuration.md)。
+
 ### 输入与交流记录
 
 Conversation 是 Host 提供的 builtin resource，表达一组交流上下文；convId 是它的标识。Input 表达一次待处理触发，Message 表达交流记录。Channel Input 引用用户 Message，Source Input 携带观察；外部观察不会自动成为一条聊天消息。

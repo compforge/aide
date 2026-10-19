@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import pino from "pino";
 import { loadConfig } from "./config.ts";
-import { syncChiefPackages } from "./harness-config.ts";
+import { syncChiefPackages } from "./host/harness/chief/packages.ts";
 import { withAsyncFileLock } from "./host/file-lock.ts";
 
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });

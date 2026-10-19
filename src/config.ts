@@ -4,20 +4,15 @@ import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { z } from "zod";
 
+import { HarnessesConfigSchema } from "./host/harness/config.ts";
+import { ConnectorsConfigSchema } from "../connectors/config.ts";
+
 const record = z.record(z.string(), z.unknown());
-const ChiefConfigSchema = z.object({
-  model: z.object({ provider: z.string().trim().min(1), id: z.string().trim().min(1) }).strict().optional(),
-  packages: z.array(z.string().trim().min(1)).default([]),
-}).strict();
 /** @spec Explicit values win; defaults apply only to absent fields, never to empty lists or invalid values. */
 const ConfigSchema = z.object({
-  connectors: z.object({
-    environments: record.default({}),
-    requirements: record.default({}),
-    forges: record.default({}),
-  }).strict().default({ environments: {}, requirements: {}, forges: {} }),
+  connectors: ConnectorsConfigSchema.prefault({}),
   plugins: z.record(z.string(), record).default({}),
-  harnesses: z.object({ chief: ChiefConfigSchema.default({ packages: [] }) }).strict().default({ chief: { packages: [] } }),
+  harnesses: HarnessesConfigSchema.prefault({}),
 }).strict();
 export type AideConfig = z.infer<typeof ConfigSchema>;
 

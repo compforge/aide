@@ -2,6 +2,7 @@
 // wire/持久化 key、展示名、认色和 adapter 工厂在这里组装成 HarnessDefinition。
 // 任何按名字分发、贴标签、着色的代码都必须经本模块归一。
 
+import type { PiConfig } from "./pi/config.ts";
 import { createPiAgent } from "../../../agents/pi/agent.ts";
 import type { HarnessAdapter, OpenInteraction, NativeEventSink } from "./adapter.ts";
 import { ClaudeAdapter, probeClaudeTarget } from "./claude/adapter.ts";
@@ -30,6 +31,7 @@ export { HARNESSES, parseHarness, type HarnessName };
 export interface HarnessAdapterOptions {
   /** Optional generic Pi factory; by default uses Pi configuration and native tools. */
   piSession?: PiSessionFactory;
+  piConfig?: PiConfig;
   /** Personal composition supplies the Chief agent and conversation-scoped capabilities. */
   chiefSession?: PiSessionFactory;
   /** Adapter 工厂的实例坐标；工厂负责把 Target 配置 lowering 成具体 Adapter 依赖。 */
@@ -82,9 +84,10 @@ export const HARNESS_REGISTRY = [
   {
     ...HARNESS_IDENTITIES.pi,
     label: "Pi", sessionKey: "pi", shortName: "pi", color: "#a6da95",
-    create: ({ piSession, target, log, nativeEvent, env }) => {
+    create: ({ piSession, piConfig, target, log, nativeEvent, env }) => {
       if (env && Object.keys(env).length) throw new Error("Embedded Pi targets do not support environment overrides; configure Pi's agentDir instead");
-      return new PiAdapter({ createSession: piSession ?? ((options) => createPiAgent({ ...options,
+      if (!piSession && !piConfig) throw new Error("Pi target requires startup-resolved configuration");
+      return new PiAdapter({ createSession: piSession ?? ((options) => createPiAgent({ ...options, config: piConfig!,
         scope: `pi:${target.id}` })), log, nativeEvent });
     },
   },

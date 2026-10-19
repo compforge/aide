@@ -4,12 +4,13 @@ import { createResourceClient } from "../src/host/plugin/resource-client.ts";
 import { ConversationStore } from "../src/host/conversation/store.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { createServer, type ServerResponse } from "node:http";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { createServer, type IncomingHttpHeaders, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
+import { resolvePiConfig, type PiModelConfigInput } from "../src/host/harness/pi/config.ts";
 import { createPiAgent } from "../agents/pi/agent.ts";
 import { createChiefAgent } from "../agents/chief/agent.ts";
 import { WorkService } from "../plugins/personal/work.ts";
@@ -22,15 +23,16 @@ import type { HarnessEvent, HarnessSessionBinding } from "../src/host/harness/ad
 type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown } | { error: true } | { hold: true };
 
 /** Real Pi SDK and HTTP protocol; only the remote model is scripted. No external credentials or network. */
-async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" = "pi") {
+async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" = "pi", model: PiModelConfigInput = { provider: "fixture", id: "test-model" }) {
   const root = mkdtempSync(join(tmpdir(), "aide-pi-sdk-"));
   const requests: Record<string, unknown>[] = [];
+  const requestHeaders: IncomingHttpHeaders[] = [];
   const held = new Set<ServerResponse>();
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     try {
       const request = JSON.parse(body) as Record<string, unknown>;
-      requests.push(request);
+      requests.push(request); requestHeaders.push(req.headers);
       const reply = respond(request, requests.length - 1);
       if ("hold" in reply) { held.add(res); res.on("close", () => held.delete(res)); return; }
       if ("error" in reply) { res.writeHead(400, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { message: "scripted model failure" } })); return; }
@@ -51,15 +53,16 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const port = (server.address() as { port: number }).port;
   const agentDir = join(root, "pi"); mkdirSync(agentDir);
   writeFileSync(join(agentDir, "models.json"), JSON.stringify({ providers: { fixture: {
-    baseUrl: `http://127.0.0.1:${port}/v1`, api: "openai-completions", apiKey: "fixture-only",
-    models: [{ id: "test-model", reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096 }],
+    baseUrl: `http://127.0.0.1:${port}/v1`, api: "openai-completions", apiKey: "fixture-only", headers: { "x-provider": "snapshot" },
+    models: [{ id: "test-model", headers: { "x-model": "snapshot" }, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096 }],
   } } }));
   const sessions = new SessionStore(root);
   const session = sessions.createSession({ cwd: root });
   const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
   const store = new Store(resources, createResourceClient(resources), new ConversationStore(session));
   const work = new WorkService(store, "me", pino({ level: "silent" }));
-  const config = { cwd: root, agentDir, model: { provider: "fixture", id: "test-model" } };
+  const inputs = { cwd: root, agentDir, model };
+  const config = { ...inputs, config: await resolvePiConfig({ ...inputs, ...(harness === "chief" ? { skillPaths: [] } : {}) }) };
   const events: HarnessEvent[] = [];
   let binding: HarnessSessionBinding | undefined;
   let finished: (() => void) | undefined;
@@ -96,7 +99,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
     await terminal;
     return session.summarizeTurn(turnId);
   }
-  return { work, config, session, adapter, events, requests, run, ref: () => ref, binding: () => binding!,
+  return { work, config, session, adapter, events, requests, requestHeaders, run, ref: () => ref, binding: () => binding!,
     reopen: async () => { await adapter.close(ref); ref = await open(); return ref; } };
 }
 
@@ -125,6 +128,8 @@ test("Pi answers directly without work and resumes its native history", { timeou
   const summary = await fixture.run("你好", "greeting");
   assert.equal((fixture.binding().resumeState.data as { empty: boolean }).empty, false);
   assert.equal(summary.finalText, "你好，有什么可以帮你？");
+  assert.equal(fixture.requestHeaders[0]!["x-provider"], "snapshot");
+  assert.equal(fixture.requestHeaders[0]!["x-model"], "snapshot");
   assert.equal(summary.stopReason, "end_turn");
   const definitions = fixture.requests[0]!.tools as { function: { name: string } }[];
   const names = definitions.map((tool) => tool.function.name);
@@ -155,7 +160,7 @@ test("Chief loads declared skills and excludes ambient Pi skills and packages", 
   writeFileSync(join(fixture.config.agentDir, "settings.json"), JSON.stringify({
     packages: ["git:example.invalid/unwanted/package"], defaultProvider: "unconfigured-default", defaultModel: "wrong-model",
   }));
-  const agent = await createChiefAgent({ ...fixture.config, work: fixture.work, skillPaths: [declared] });
+  const agent = await createChiefAgent({ ...fixture.config, work: fixture.work, config: await resolvePiConfig({ ...fixture.config, skillPaths: [declared] }) });
   try {
     assert.match(agent.systemPrompt, /You are Chief/);
     assert.equal(agent.model?.provider, "fixture");
@@ -241,9 +246,11 @@ test("Pi refuses unsupported input before admission and does not promote truncat
   assert.match(summary.agentText!, /未完成的回答/);
 });
 
-test("Pi can be constructed without Personal while Chief requires its bound factory", () => {
+test("Pi requires startup configuration and Chief requires its bound factory", async (t) => {
+  const fixture = await setup(t, () => ({ text: "ready" }));
   const ports = { openInteraction: async () => { throw new Error("Unexpected interaction"); } };
-  assert.equal(createHarnessAdapter({ id: "plain", harness: "pi" }, { ...ports, targetConfig: { harness: "pi" } }).harness, "pi");
+  assert.equal(createHarnessAdapter({ id: "plain", harness: "pi" }, { ...ports, targetConfig: { harness: "pi" }, piConfig: fixture.config.config }).harness, "pi");
+  assert.throws(() => createHarnessAdapter({ id: "plain", harness: "pi" }, { ...ports, targetConfig: { harness: "pi" } }), /startup-resolved/);
   assert.throws(() => createHarnessAdapter({ id: "chief", harness: "chief" }, {
     ...ports, targetConfig: { harness: "chief" },
   }), /Chief agent factory/);
@@ -257,7 +264,7 @@ test("Aide routes stable Sessions and resumes real Chief native context across i
   let aide: Aide;
   const open = (cwd = fixture.config.cwd) => new Aide(home, { cwd, timezone: "UTC", createAdapter: (target, ports) =>
     createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
-      chiefSession: aide.chiefSession(target.id, { agentDir: fixture.config.agentDir, model: fixture.config.model, skillPaths: [] }) }) }, log);
+      chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }, log);
   const send = async (sessionId: string, conversationId: string, id: string) => {
     await aide.receive({ sessionId, conversationId, id, text: `question-${id}` }); await aide.settled();
     assert.equal(aide.findConversation(conversationId)!.conversations.inputs().at(-1)!.status.phase, "done");
@@ -294,4 +301,64 @@ test("Aide routes stable Sessions and resumes real Chief native context across i
     assert.notEqual(binding("feishu:app:group-a", "conv-a").harnessSessionId, original.harnessSessionId);
     assert.equal(aide.messages().filter((message) => message.conversationId === "conv-a").length, 8);
   } finally { await aide.close(); }
+});
+
+// @case startup_config_snapshot: file changes and SDK refresh cannot change subsequent native sessions.
+test("Chief accepts an Aide-only model and freezes configuration across SDK refresh and new sessions", { timeout: 20_000 }, async (t) => {
+  const fixture = await setup(t, () => ({ text: "snapshot answer" }), "chief", {
+    provider: "fixture", id: "aide-only-model", contextWindow: 64000, maxTokens: 2048, reasoning: false,
+  });
+  const modelFile = join(fixture.config.agentDir, "models.json");
+  assert.doesNotMatch(readFileSync(modelFile, "utf8"), /aide-only-model/);
+  assert.equal((await fixture.run("first", "first-config")).finalText, "snapshot answer");
+  assert.equal(fixture.requests[0]!.model, "aide-only-model");
+  const native = JSON.parse(readFileSync(modelFile, "utf8"));
+  native.providers.fixture.headers["x-provider"] = "changed";
+  native.providers.fixture.models.push({ id: "aide-only-model", reasoning: true, contextWindow: 32000, maxTokens: 1024 });
+  writeFileSync(modelFile, JSON.stringify(native));
+  writeFileSync(join(fixture.config.agentDir, "settings.json"), JSON.stringify({
+    defaultProvider: "fixture", defaultModel: "test-model", packages: ["git:invalid.example/must-not-install"],
+  }));
+  await fixture.config.config.modelRuntime.refresh({ allowNetwork: false });
+  await fixture.reopen();
+  await fixture.run("after config change", "second-config");
+  assert.equal(fixture.requests.at(-1)!.model, "aide-only-model");
+  assert.equal(fixture.requestHeaders.at(-1)!["x-provider"], "snapshot");
+  assert.equal(fixture.config.config.modelRuntime.getModel("fixture", "aide-only-model")!.contextWindow, 64000);
+  const fresh = await createChiefAgent({ ...fixture.config, work: fixture.work });
+  try { await fresh.prompt("new native session"); assert.equal(fixture.requests.at(-1)!.model, "aide-only-model"); }
+  finally { fresh.dispose(); }
+  // A new startup can see the changed source. Explicit false/limits still win when supplied.
+  const restarted = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir, skillPaths: [],
+    model: { provider: "fixture", id: "aide-only-model" } });
+  assert.equal(restarted.model.contextWindow, 32000);
+  assert.equal(restarted.model.reasoning, true);
+});
+
+test("restart configuration overrides the restored model without losing conversation history or affecting Pi", { timeout: 20_000 }, async (t) => {
+  const fixture = await setup(t, () => ({ text: "history retained" }), "chief");
+  await fixture.run("remember the original request", "before-restart");
+  const previous = fixture.config.config;
+  fixture.config.config = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir, skillPaths: [],
+    model: { provider: "fixture", id: "new-deployment" } });
+  await fixture.reopen();
+  await fixture.run("continue", "after-restart");
+  assert.equal(fixture.requests.at(-1)!.model, "new-deployment");
+  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /remember the original request/);
+  assert.equal(previous.model.id, "test-model");
+  assert.equal(previous.modelRuntime.getModel("fixture", "new-deployment"), undefined);
+  assert.equal(previous.modelRuntime.getModel("fixture", "test-model")!.maxTokens, 4096);
+  // New IDs use SDK defaults, not the old model's maxTokens.
+  assert.equal(fixture.config.config.model.maxTokens, 16384);
+});
+
+test("an entirely Aide-defined provider performs a real SDK request with explicit credentials", { timeout: 20_000 }, async (t) => {
+  const fixture = await setup(t, () => ({ text: "independent provider" }), "chief");
+  fixture.config.config = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir, skillPaths: [],
+    model: { provider: "only-in-aide", id: "deployment", api: "openai-completions",
+      baseUrl: fixture.config.config.model.baseUrl, apiKeyEnv: "AIDE_TEST_KEY" }, environment: { AIDE_TEST_KEY: "explicit-test-key" } });
+  await fixture.reopen();
+  assert.equal((await fixture.run("check", "independent-provider")).finalText, "independent provider");
+  assert.equal(fixture.requests.at(-1)!.model, "deployment");
+  assert.equal(fixture.requestHeaders.at(-1)!.authorization, "Bearer explicit-test-key");
 });

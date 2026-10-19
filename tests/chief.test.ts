@@ -1,3 +1,4 @@
+import { resolveChiefConfig } from "../src/host/harness/chief/config.ts";
 import { conversationView } from "../src/channel/view.ts";
 import { loadConfig } from "../src/config.ts";
 import assert from "node:assert/strict";
@@ -112,9 +113,11 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   let executions = 0;
   const coding = fakeOptions({ execute: async (work) => { executions++; assert.match(work.instruction, /work\/story\/123/);
     return { action: "done", summary: "Implemented and verified", notification: "实现已完成", question: null, nextAt: null }; } }, root);
-  const aide: Aide = new Aide(root, { ...coding, config: loadConfig(configPath), createAdapter: (target, ports) => target.harness === "chief"
+  const config = loadConfig(configPath);
+  const chiefConfig = await resolveChiefConfig(config.harnesses.chief, { cwd: root, agentDir, skillPaths: [] });
+  const aide: Aide = new Aide(root, { ...coding, config, createAdapter: (target, ports) => target.harness === "chief"
     ? createHarnessAdapter(target, { ...ports, targetConfig: { harness: "chief" },
-      chiefSession: aide.chiefSession(target.id, { agentDir, model: { provider: "unused-default", id: "unused-default" } }) })
+      chiefSession: aide.chiefSession(target.id, chiefConfig) })
     : coding.createAdapter(target) }, log);
   const sent: string[] = [];
   const bot = new FeishuChannel(root, "cli_fixture", aide, { async start() {}, close() {}, async send(_chat, text) { sent.push(text); } }, log);

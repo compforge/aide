@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DefaultPackageManager, loadSkills, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { Logger } from "pino";
-import { configPath, type AideConfig } from "./config.ts";
+import { configPath, type AideConfig } from "../../../config.ts";
 
 function chiefPackages(home: string, config: AideConfig, file: string) {
   const packages = config.harnesses.chief.packages.map((source) => {

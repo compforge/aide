@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, configPath } from "../src/config.ts";
 import { Connectors } from "../connectors/index.ts";
-import { Environments } from "../connectors/environments.ts";
+import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
 
 const roots: string[] = [];
 function path() {
@@ -58,7 +58,7 @@ test("invalid or ambiguous declarations fail at startup without echoing credenti
     { dev: { aliases: ["prod"] }, prod: {} },
     { dev: { aliases: ["dev"] } },
     { dev: { aliases: ["shared"] }, prod: { aliases: ["shared"] } },
-  ]) expect(() => new Environments(config)).toThrow("Duplicate environment name or alias");
+  ]) expect(() => resolveEnvironmentConfig(config)).toThrow("Duplicate environment name or alias");
   for (const config of [
     { dev: { kind: "kubernetes" } },
     { dev: { host: { name: "vm", transport: "ssh" } } },
@@ -67,8 +67,8 @@ test("invalid or ambiguous declarations fail at startup without echoing credenti
     { dev: { kind: "unsupported" } },
     { dev: { token: "DO-NOT-PRINT" } },
     { dev: { provider: "static" } },
-  ]) expect(() => new Environments(config)).toThrow("Invalid environment declaration: dev");
-  expect(() => new Environments({ " ": {} })).toThrow("Environment names");
+  ]) expect(() => resolveEnvironmentConfig(config)).toThrow("Invalid environment declaration: dev");
+  expect(() => resolveEnvironmentConfig({ " ": {} })).toThrow("Environment names");
 });
 
 test("config defaults, explicit path, YAML/JSON, and structural errors are deterministic", () => {

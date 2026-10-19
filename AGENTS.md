@@ -21,7 +21,7 @@ src/
       runner/              # 宿主侧 Supervisor / IPC Client / 注册代理
     core/                  # CoreSession 执行组件装配
     controller/            # HarnessInput / Queue / Turn 执行协调
-    harness/               # Harness 注册、Adapter 与提供方协议
+    harness/               # 模块配置契约与启动解析、Harness 注册、Adapter 与提供方协议
     store/                 # Session、Ledger 与执行投影
   runner/                  # Plugin 注册、Watch、队列、重试、Source 与 Reconcile
   reconcile/               # 共用的去重队列、容量与定时机制
@@ -52,7 +52,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 根目录 `VERSION` 是产品版本。每次提交同步递增，默认 patch，同一提交只递增一次。
 - Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。环境发现只读配置，不代表连通性、健康或操作授权；Personal watch 策略归 `plugins.personal`。
-- 配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.chief` 管模型与能力包，包仅显式同步，Chief 不继承用户或项目的自动 skill 发现。
+- 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.chief` 管模型与能力包，包仅显式同步，Chief 不继承用户或项目的自动 skill 发现。
 - Session 是持久执行作用域，保留 Ledger、Lane、Turn 与恢复绑定；CoreSession 负责进程期装配。Session 统一位于 `$AIDE_HOME/sessions/<id>/`，不按 project / cwd 分组。逻辑 ID 的目录编码由 SessionStore 负责。启动时恢复全部 Session 的工作和 Source；watch 仅装配到所属 Session。cwd 只是执行环境，改变时保留 Aide 历史并清空原生恢复绑定；插件私有数据仅有 global、session、instance 三个目录作用域。
 - Conversation 是 builtin resource，convId 标识交流分组，不替代 Session / Lane / Turn 的执行身份。Conversation / Input / Message 由 Host 管理。Channel / Source 提供稳定 sessionId，conversationId 可沿用它；Core 按 Session 恢复执行，Chief 按 Conversation 串行消费输入并复用固定 Lane。会话分组不是权限边界。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。类型转换组合创建、暂停或删除，目标工作拥有新 id。

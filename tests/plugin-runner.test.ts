@@ -1,3 +1,4 @@
+import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
 import { requestResult } from "../src/host/interaction/resolution.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { commandContext, executeCommand } from "./fixtures/command-context.ts";
@@ -103,7 +104,7 @@ describe("Plugin Runner process boundary", () => {
       source: "work", provider: "fixture", async list() { reads++; return [requirement]; }, async get() { return requirement; },
     }], [{
       forge: "forge", provider: "github", async list() { return [identity]; }, async get() { return pull; }, async comments() { return []; },
-    }], new Environments({ dev: { kind: "host", aliases: ["开发"], host: { name: "vm", transport: "ssh", address: "not-contacted.invalid" } } }));
+    }], new Environments(resolveEnvironmentConfig({ dev: { kind: "host", aliases: ["开发"], host: { name: "vm", transport: "ssh", address: "not-contacted.invalid" } } })));
     const failures: unknown[] = [];
     const manager = new Manager({
       instances, session, connectors, pluginSupervisor: new PluginSupervisor(),

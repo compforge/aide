@@ -91,7 +91,7 @@ export class Aide {
         .map(([key, lane]) => [key, { ...lane, harnessSessions: {} }])) });
       this.log.info({ sessionId: id, previousCwd: previous?.cwd, cwd }, "Execution directory changed; cleared native Harness bindings");
     }
-    application = new Personal({ timezone: this.options.timezone, chiefModel: this.options.config?.harnesses.chief.model }, this.log.child({ sessionId: id }),
+    application = new Personal({ timezone: this.options.timezone }, this.log.child({ sessionId: id }),
       { core, session, connectors, targets, watches: this.watches.filter((watch) => watch.sessionId === id) });
     this.active.set(id, application);
     core.subscribe(() => this.notify());
@@ -128,10 +128,10 @@ export class Aide {
     return scope.work(conversationId);
   }
 
-  chiefSession(targetId: string, settings: Parameters<Personal["chiefSession"]>[1] = {}) {
+  chiefSession(targetId: string, config: Parameters<Personal["chiefSession"]>[1]) {
     const scope = this.sessions().find((item) => item.conversationIds().some((id) => chiefTarget(id) === targetId));
     if (!scope) throw new Error(`Unknown Chief target: ${targetId}`);
-    return scope.chiefSession(targetId, settings);
+    return scope.chiefSession(targetId, config);
   }
 
   messages() { return this.sessions().flatMap((scope) => scope.messages()).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
