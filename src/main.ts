@@ -6,6 +6,7 @@ import { z } from "zod";
 import { Aide } from "../plugins/personal/aide.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
 import { httpChannel } from "./channel/http.ts";
+import { feishuProgress } from "./channel/feishu-card.ts";
 import { FeishuChannel } from "./channel/feishu.ts";
 import { feishuConfig, feishuTransport } from "./channel/feishu-client.ts";
 import { withAsyncFileLock } from "./host/file-lock.ts";
@@ -32,7 +33,7 @@ await withAsyncFileLock(path, async () => {
   server.listen(port, "127.0.0.1");
   await once(server, "listening");
   await aide.start();
-  const bot = feishu ? new FeishuChannel(home, feishu.appId, aide, feishuTransport(feishu, log), log) : undefined;
+  const bot = feishu ? new FeishuChannel(home, feishu.appId, aide, feishuTransport(feishu, log), log, (id) => feishuProgress(aide, id)) : undefined;
   if (bot) void bot.start().catch(() => log.error("Feishu channel startup failed; check credentials and network"));
   log.info({ port, path }, "Aide listening on localhost");
   await new Promise<void>((done) => {
