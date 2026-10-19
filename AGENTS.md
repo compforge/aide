@@ -10,21 +10,23 @@ Aide 是小型、自托管的 personal agent。Web / Feishu Channel 与 Source �
 
 ```text
 src/
-  main.ts                  # 装配 Channel、Personal 与 Harness
+  main.ts                  # 启动 Channel 与 Harness
+  app.ts                   # 应用装配：安装 Personal，创建 CoreSession
   channel/                 # Web / Feishu 适配，消息与执行投影
-  host/                    # 主进程：持久化、调度、交互与执行
+  host/                    # 主进程：持久化、交互与执行事实
     conversation/          # 内置 Conversation / Input / Message
     plugin/                # Resource / Controller / Source / Watch / verb
       runner/              # 宿主侧 Supervisor / IPC Client / 注册代理
-    channel/               # Session 执行组件装配，不是 Web/Feishu 适配器
+    core/                  # CoreSession 执行组件装配
     controller/            # HarnessInput / Queue / Turn 执行协调
     harness/               # Harness 注册、Adapter 与提供方协议
     store/                 # Session、Ledger 与执行投影
-  runner/                  # Plugin 子进程入口与回调执行
+  runner/                  # Plugin 注册、Watch、队列、重试、Source 与 Reconcile
+  reconcile/               # 共用的去重队列、容量与定时机制
   protocol/                # Host / Runner 共用 IPC 与 verb 契约
   plugin-context.ts        # 共用上下文构造与 verb 参数校验
 plugins/personal/
-  aide.ts                  # 宿主装配、Chief 会话绑定、输入与恢复
+  aide.ts                  # Personal 服务：Chief 会话绑定、输入与恢复
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
   chief.ts                 # 按 Conversation 消费 Input、续接问答
   source.ts                # 需求观察、水位和调度
@@ -53,6 +55,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - `pi` 提供通用 Agent，`chief` 加入 Personal 工具，两者复用 PiAdapter。通用 Pi 不依赖 Personal，Chief 的 WorkService 由宿主绑定范围；默认 Work 执行使用 Codex。
 - Source 先提交持久 Input 再推进观察水位。输入状态、业务回复和去重记录按现有原子提交边界保存，不能用投递失败重新触发业务执行。
 - Harness 结束不等于业务目标完成，Personal 校验结果后决定终态。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
+- 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。
+- 执行上下文显式携带主资源和可选 Conversation/Input 关联；Channel 不通过 Chief Target 推导问题和进度归属。
 - Chief 问答复用 Core Interaction；Task / Routine 的 waiting 是业务持久状态。两者的跨重启行为见 Personal 文档。
 - Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Message，不另建轨迹存储。
 - `npm run check` 验证类型与测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或飞书已验证。

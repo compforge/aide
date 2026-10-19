@@ -18,7 +18,7 @@ import type {
   InlineHookStage,
 } from "@compforge/aide-plugin";
 
-import { Channel } from "../src/host/channel/index.ts";
+import { CoreSession } from "../src/host/core/index.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { Manager, type PluginRunnerFailure } from "../src/host/plugin/manager.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
@@ -336,7 +336,7 @@ describe("Plugin Runner process boundary", () => {
     await manager.start();
 
     const outputKinds: string[] = [];
-    const channel = new Channel({
+    const channel = new CoreSession({
       session,
       controller: {
         mentionBudgetChars: 1_000,
@@ -527,6 +527,27 @@ describe("Plugin Runner process boundary", () => {
     });
 
     await manager.close();
+  });
+
+  test("Controller watchdog terminates a blocked Reconcile while Host remains responsive", async () => {
+    const { instances, session, entry } = stores();
+    instances.create({ pluginInstanceId: "controller_timeout", pluginId: "tests/process-plugin", marketplace: "fixtures", packageVersion: "1.0.0" });
+    const failures: PluginRunnerFailure[] = [];
+    const manager = new Manager({ instances, session,
+      pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
+      async loadPackageEntry(pluginId, version) { return { pluginId, version, namespace: "v1", entryUrl: pathToFileURL(entry).href }; },
+      onRunnerFailure(failure) { failures.push(failure); },
+    });
+    try {
+      await manager.start();
+      await manager.resourceClient("controller_timeout").create({ apiVersion: "tests.aide.dev/v1alpha1", kind: "ProcessCheck" }, { name: "blocked", spec: { blockMs: 2000 } });
+      const completion = manager.settled().then(() => "completed");
+      expect(await Promise.race([Bun.sleep(25).then(() => "heartbeat"), completion])).toBe("heartbeat");
+      await waitFor(() => failures.length > 0, 2000);
+      expect(String(failures[0]!.error)).toMatch(/Controller execution .* timed out/);
+      await completion;
+      await waitFor(() => !manager.isInstanceActive("controller_timeout"));
+    } finally { await manager.close(); }
   });
 
   test("terminates a Runner whose handler exceeds its deadline", async () => {

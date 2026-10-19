@@ -1,3 +1,5 @@
+import type { ConnectorRequest } from "./connectors.ts";
+import type { ExecutionAssociation } from "@compforge/aide-plugin";
 import type {
   AskInput,
   AskResult,
@@ -10,7 +12,7 @@ import type {
   ResourceNamespace,
 } from "@compforge/aide-plugin";
 
-export interface ExecutionScope {
+export interface ExecutionScope extends ExecutionAssociation {
   readonly aideSessionId: string;
   readonly pluginInstanceId: string;
   /** Namespace of the Resource or session boundary that initiated the action. */
@@ -20,11 +22,11 @@ export interface ExecutionScope {
 }
 
 /**
- * Plugin-facing typed Core verbs. Every operation-producing verb first becomes
- * an Interaction; draft/harness create a HarnessInvocation only after that gate
- * settles positively. Runner never sends an opaque message.
+ * Controller action outlet. Connector calls run directly; human interactions and
+ * Harness gates keep their own lifecycle. Other Core callers need not use Verb.
  */
 export type VerbRequest =
+  | { readonly verb: "connector"; readonly input: { readonly request: ConnectorRequest; readonly timeoutMs: number } }
   | {
       readonly verb: "ask";
       readonly input: AskInput;
@@ -46,6 +48,7 @@ export type VerbResponse =
   | AskResult
   | ConfirmResult
   | DraftResult
+  | import("@compforge/aide-plugin").VerbResult<unknown>
   | HarnessResult;
 
 export type InvokeVerb = (

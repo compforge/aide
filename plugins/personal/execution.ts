@@ -79,6 +79,7 @@ interface CompletedWork {
 
 /** @spec Execution admission, result validation and failure recording are shared; each controller owns successful completion. */
 export async function executeWork(context: PluginContext, execution: ReconcileContext, resource: WorkResource): Promise<CompletedWork | undefined> {
+  execution = execution.withContext({ conversationId: resource.spec.conversationId });
   const work = toWork(resource);
   if (work.status === "running") { await uncertain(context, resource); return; }
   if (work.status !== "ready" && !(work.status === "scheduled" && work.nextAt && Date.parse(work.nextAt) <= Date.now())) return;

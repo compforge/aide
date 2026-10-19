@@ -1,3 +1,5 @@
+import type { ConnectorClient } from "@compforge/aide-plugin";
+import { dispatchConnector, emptyConnectors } from "../../connector-client.ts";
 import { MAIN_LANE_ID } from "@compforge/aide-plugin";
 import type { PromptBlock } from "../event/index.ts";
 import type { InteractionResult } from "../interaction/types.ts";
@@ -17,7 +19,7 @@ import {
 import type {
   ReconcileCapacity,
   ReconcileCapacityLease,
-} from "./queue.ts";
+} from "../../reconcile/queue.ts";
 import type { ReconcileSnapshot } from "./reconcile-snapshot.ts";
 
 import type {
@@ -39,6 +41,7 @@ interface ActiveExecution {
 export interface VerbOptions {
   session?: VerbSession;
   capacity: ReconcileCapacity;
+  connectors?: ConnectorClient;
   snapshot: () => ReconcileSnapshot;
   selectedHarnessTargetId?: () => string | undefined;
   harnessInvocationGate?:
@@ -57,6 +60,7 @@ export interface VerbOptions {
 
 /** Plugin typed verbs and the live executions suspended while those verbs settle. */
 export class Verb {
+  private readonly connectors: ConnectorClient;
   private readonly capacity: ReconcileCapacity;
   private readonly snapshot: () => ReconcileSnapshot;
   private readonly selectedHarnessTargetId?: () => string | undefined;
@@ -67,6 +71,7 @@ export class Verb {
   private readonly cancelHostHarnessInvocation:
     VerbOptions["cancelHarnessInvocation"];
   private readonly dispatchedHarnessInvocations = new Set<string>();
+  private readonly remoteCompletions = new Map<string, () => void>();
   private readonly executions = new Map<string, ActiveExecution>();
   private readonly now: () => Date;
   private readonly log?: LogSink;
@@ -74,6 +79,7 @@ export class Verb {
 
   constructor(options: VerbOptions) {
     this.capacity = options.capacity;
+    this.connectors = options.connectors ?? emptyConnectors;
     this.snapshot = options.snapshot;
     this.selectedHarnessTargetId = options.selectedHarnessTargetId;
     this.enqueueHarnessInvocation = options.enqueueHarnessInvocation;
@@ -137,6 +143,26 @@ export class Verb {
     return await execution.suspend(operation);
   }
 
+  async beginRemote(scope: ExecutionScope): Promise<void> {
+    let release!: () => void;
+    const completion = new Promise<void>((resolve) => { release = resolve; });
+    let ready!: () => void;
+    let failed!: (error: unknown) => void;
+    const admitted = new Promise<void>((resolve, reject) => { ready = resolve; failed = reject; });
+    const running = this.trackExecution(scope, async (wait) => await wait, async () => {
+      this.remoteCompletions.set(scope.executionId, release);
+      ready();
+      await completion;
+    });
+    void running.catch(failed);
+    await admitted;
+  }
+
+  endRemote(executionId: string): void {
+    this.remoteCompletions.get(executionId)?.();
+    this.remoteCompletions.delete(executionId);
+  }
+
   async execute<T>(
     scope: ExecutionScope,
     localLease: ReconcileCapacityLease,
@@ -164,12 +190,14 @@ export class Verb {
     for (const execution of this.executions.values()) {
       if (execution.scope.pluginInstanceId !== pluginInstanceId) continue;
       this.failExecution(execution.scope.executionId, error);
+      this.endRemote(execution.scope.executionId);
     }
   }
 
   failAll(error: string): void {
     for (const execution of this.executions.values()) {
       this.failExecution(execution.scope.executionId, error);
+      this.endRemote(execution.scope.executionId);
     }
   }
 
@@ -191,6 +219,15 @@ export class Verb {
     context: ExecutionScope,
     request: VerbRequest,
   ): Promise<VerbResponse> {
+    if (request.verb === "connector") {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          dispatchConnector(this.connectors, request.input.request).then((value) => ({ state: "success" as const, value })),
+          new Promise<VerbResponse>((resolve) => { timer = setTimeout(() => resolve({ state: "timeout" }), request.input.timeoutMs); }),
+        ]);
+      } finally { if (timer) clearTimeout(timer); }
+    }
     if (this.performVerb) return await this.performVerb(context, request);
     if (!this.interactions) {
       throw new Error(

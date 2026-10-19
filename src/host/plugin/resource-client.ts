@@ -153,6 +153,7 @@ export function createResourceClient(
         annotations?: Readonly<Record<string, string>>;
         owner?: ResourceOwnerReference;
         spec: TSpec;
+        status?: TStatus;
       },
     ) {
       if (aideResources?.handles(type)) {
@@ -173,10 +174,20 @@ export function createResourceClient(
             : { annotations: init.annotations }),
           ...(init.owner === undefined ? {} : { owner: init.owner }),
           spec: init.spec,
+          status: init.status,
         }),
       );
       changed("created", created);
       return created;
+    },
+    async replace<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, spec: TSpec, status: TStatus) {
+      assertOwned(resource);
+      if (store.get(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace).metadata.uid !== resource.metadata.uid) throw new Error("Resource incarnation changed before replacement");
+      const updated = deepFreeze(store.replace(resource, resource.metadata.name, spec, status, {
+        expectedResourceVersion: resource.metadata.resourceVersion, namespace: resource.metadata.namespace as ResourceNamespace,
+      }));
+      if (updated.metadata.resourceVersion !== resource.metadata.resourceVersion) changed("status-updated", updated, resource);
+      return updated;
     },
     async delete(
       type: ResourceType,

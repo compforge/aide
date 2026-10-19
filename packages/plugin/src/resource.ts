@@ -96,8 +96,10 @@ export interface ResourceWriter {
       annotations?: Readonly<Record<string, string>>;
       owner?: ResourceOwnerReference;
       spec: TSpec;
+      status?: TStatus;
     },
   ): Promise<Readonly<Resource<TSpec, TStatus>>>;
+  replace<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, spec: TSpec, status: TStatus): Promise<Readonly<Resource<TSpec, TStatus>>>;
   /** Requests cascading deletion; final removal follows successful reconcile. */
   delete(
     type: ResourceType,

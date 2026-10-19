@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import pino from "pino";
-import { Aide } from "../plugins/personal/aide.ts";
+import { Aide } from "../src/app.ts";
 import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "../plugins/personal/chief-model.ts";
 import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 import { FeishuChannel } from "../src/channel/feishu.ts";

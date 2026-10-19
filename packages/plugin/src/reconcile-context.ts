@@ -1,3 +1,5 @@
+import type { ConnectorClient } from "./connectors/index.ts";
+import type { ResourceRef } from "./resource.ts";
 import type { ReconcileSnapshot, TurnSummary } from "./snapshot.ts";
 
 /** Largest timeout supported by JavaScript timers. */
@@ -98,12 +100,13 @@ export type HarnessResult = VerbResult<HarnessValue>;
 export type DraftResult = VerbResult<CompletedHarnessValue>;
 
 /**
- * @spec Every Plugin verb first persists a Core-owned Interaction and suspends the same live Plugin execution until a terminal result; Aide never re-enqueues a Resource merely to deliver that result.
+ * @spec Controller verbs suspend the same live Plugin execution until a terminal result; ask/confirm persist a Core-owned Interaction; Aide never re-enqueues a Resource merely to deliver that result.
  * @rule Correlate verb continuation with the Core-issued execution identity, never with Resource identity or a caller-provided key; a crashed execution fails instead of replaying its call stack.
  * @rule Require one total timeout for every verb; draft and harness deadlines cover their Interaction gate and the resulting HarnessInvocation through terminal Turn.
  * @see {@link docs/plugin.md}
  */
 export interface PluginVerbs {
+  connectors(options: { timeoutMs: number }): ConnectorClient;
   ask<const TInput extends AskInput>(
     input: TInput,
   ): Promise<AskResult<AskValue<TInput>>>;
@@ -112,7 +115,15 @@ export interface PluginVerbs {
   harness(input: HarnessInvocationInput): Promise<HarnessResult>;
 }
 
+export interface ExecutionAssociation {
+  readonly resourceRef?: ResourceRef;
+  readonly conversationId?: string;
+  readonly inputId?: string;
+}
+
 export interface ReconcileContext {
+  /** Associate subsequent actions with business input, independently of Harness selection. */
+  withContext(context: Pick<ExecutionAssociation, "conversationId" | "inputId">): ReconcileContext;
   readonly snapshot: ReconcileSnapshot;
   readonly verbs: PluginVerbs;
 }

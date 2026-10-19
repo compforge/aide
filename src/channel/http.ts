@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { Logger } from "pino";
-import type { Aide } from "../../plugins/personal/aide.ts";
+import type { ChannelService, WebService } from "./service.ts";
 import { validInputResult } from "../host/interaction/answer.ts";
-import { IncomingSchema } from "../../plugins/personal/model.ts";
+import { IncomingSchema } from "./message.ts";
 import { conversationList } from "./view.ts";
 import { streamConversation } from "./stream.ts";
 
@@ -40,7 +40,7 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 }
 
 /** Local channel bridge: accept messages/events and let adapters poll the durable outgoing log. */
-export function httpChannel(aide: Aide, log: Logger) {
+export function httpChannel(aide: WebService, log: Logger) {
   const page = readFileSync(new URL("./web.html", import.meta.url), "utf8");
   let webSdk: Promise<string> | undefined;
   return createServer(async (request, response) => {
@@ -81,13 +81,14 @@ export function httpChannel(aide: Aide, log: Logger) {
       if (request.method === "GET" && url.pathname === "/conversations") {
         json(response, 200, conversationList(aide)); return;
       }
-      // This is the local user's Session-wide inbox, independent of personal conversation IDs.
+      // Unscoped interactions remain in the local inbox; scoped questions follow their conversation.
       if (request.method === "GET" && url.pathname === "/interactions") {
-        json(response, 200, [...aide.channel.projection.interactions.values()]
+        json(response, 200, [...aide.core.projection.interactions.values()]
+          .filter((item) => !url.searchParams.has("conversationId") || !item.pluginContext?.conversationId || item.pluginContext.conversationId === url.searchParams.get("conversationId"))
           .map((item) => item.request).filter((item) => item.status === "pending"));
       } else if (request.method === "POST" && url.pathname === "/interactions") {
         const { messageId, result } = InteractionResponseSchema.parse(await body(request));
-        const pending = aide.channel.projection.interactions.get(messageId)?.request;
+        const pending = aide.core.projection.interactions.get(messageId)?.request;
         if (!pending || pending.status !== "pending") {
           json(response, 409, { error: "This interaction is no longer pending" }); return;
         }
@@ -95,20 +96,19 @@ export function httpChannel(aide: Aide, log: Logger) {
           json(response, 400, { error: "Answer does not match the pending interaction" }); return;
         }
         // @spec Channel answers settle Aide's original Interaction; no separate approval state.
-        const receipt = await aide.channel.resolveInteraction({ kind: "interaction_response", messageId }, async () => result);
+        const receipt = await aide.core.resolveInteraction({ kind: "interaction_response", messageId }, async () => result);
         log.info({ messageId, kind: result.kind, completed: receipt.result }, "Channel interaction response");
         json(response, receipt.result ? 200 : 409, { completed: receipt.result });
       } else if (request.method === "POST" && url.pathname === "/messages") {
         const input = IncomingSchema.parse(await body(request));
         json(response, 200, await aide.receive(input));
       } else if (request.method === "POST" && url.pathname === "/events") {
-        json(response, 200, { matched: aide.event(EventSchema.parse(await body(request))) });
+        json(response, 200, { matched: await aide.event(EventSchema.parse(await body(request))) });
       } else if (request.method === "GET" && ["/messages", "/work"].includes(url.pathname)) {
         const conversationId = url.searchParams.get("conversationId");
         if (!conversationId) { json(response, 400, { error: "conversationId is required" }); return; }
-        const state = aide.store.read();
         if (url.pathname === "/work") {
-          json(response, 200, state.works.filter((work) => work.conversationId === conversationId));
+          json(response, 200, aide.works().filter((work) => work.conversationId === conversationId));
         } else {
           const messages = aide.messages().filter((item) => item.conversationId === conversationId
             && (url.searchParams.get("role") === "all" || item.role === "aide"));

@@ -6,13 +6,13 @@ Aide 由 Channel、Source、资源与 Controller、Connector、Harness 等组件
 
 ![Aide 组件图：Channel、Source、资源、Controller、Connector、Harness 与 Agent Tools 的职责和协作关系](assets/kernel.svg)
 
-图中左侧是输入，上方是业务逻辑，右侧是能力与外部系统；中央 Core 连接三个领域；框下的 Host + Runner 标注其进程实现。Source 的外部观察与 Reconcile 的动作请求都经 Core 的 Verb 入口，再由 Connector、Harness 或交互能力执行。组件位置表达逻辑协作关系，进程所有权见下文。Chief、Task、Routine 是 Personal Plugin 的具体业务，其他 Plugin 可以定义自己的资源和 Controller。
+图中左侧是输入，上方是业务逻辑，右侧是能力与外部系统；中央 Core 连接三个领域；框下的 Host + Runner 标注其进程实现。Source 通过 Core 服务观察外部变化；Reconcile 通过 Verb 发起动作，再由 Connector、Harness 或交互能力执行。组件位置表达逻辑协作关系，进程所有权见下文。Chief、Task、Routine 是 Personal Plugin 的具体业务，其他 Plugin 可以定义自己的资源和 Controller。
 
 | 概念 | 职责 |
 | --- | --- |
 | Channel | 接收用户消息，提交 Input / Message，并展示答复、问题与执行进展；Web 和 Feishu 是两个实现 |
 | Source | 定义观察范围，通过 Core 请求外部查询或订阅，把观察结果转为资源或 Input |
-| Core / Verb | Core 提供共享协作机制，Verb 统一表达观察、外部操作、AI 执行和用户交互等动作请求 |
+| Core / Verb | Core 提供共享协作机制，Verb 是 Controller 的动作出口，表达外部查询、操作、AI 执行和用户交互 |
 | Connector | 适配外部系统与环境，由 Core 装配并调用，处理提供方协议与数据映射 |
 | Resource | 保存业务身份、目标与进展；内置对象有 Resource 投影，Plugin 也可定义自己的资源类型（CRD） |
 | Controller / Reconcile | 围绕主资源读取最新事实、决定动作、保存结果，并安排下一次处理 |
@@ -21,19 +21,21 @@ Aide 由 Channel、Source、资源与 Controller、Connector、Harness 等组件
 
 这里沿用 Kubernetes Operator 的工作方式：用资源表达需要持续推进的目标，用 Reconcile 根据当前事实推进目标。业务增加时，在 Plugin 内定义相应的资源和 Controller；一个较大的业务可以由多组资源与 Reconcile 协作完成。
 
-### Core 与统一动作入口
+### Core 与 Controller 的动作出口
 
-Core 是系统共享的协作引擎，组件层面统一承接资源、调度、交互与执行职责。Verb 表达调用方向 Core 发起的一次动作请求，涵盖外部查询与订阅、外部操作、Harness 执行以及 ask / confirm 等用户交互。调用 Connector 也属于 verb；观察外部变化和改变外部状态都经过同一能力边界。
+Core 是系统共享的协作引擎，组件层面统一承接资源、调度、交互与执行职责。Verb 表达 Controller 向 Core 发起的动作，涵盖 Connector 查询与操作、Harness 执行以及 ask / confirm 等用户交互。Reconcile 读取资源、决定动作，再通过 Verb 请求执行；资源进展经 ResourceClient 保存。
 
-Source 决定关注什么、如何解释观察结果，Core 承接查询或订阅请求，再通过 Connector 访问外部系统。Reconcile 决定下一步业务动作，通过 Core 发起执行。Agent 工具对这些能力的调用同样回到 Core，明确的流程和 AI 决策因此共用动作治理入口。
+Source 决定关注什么、如何解释观察结果，Core 承接查询或订阅请求，再通过 Connector 访问外部系统。Reconcile 决定下一步业务动作，通过 Core 发起执行。Agent 工具、Channel 和框架 Source 可以按职责直接调用 Core 服务，不要求经过 Verb。例如 Chief 的 Work 工具调用 Core ResourceClient，Connector 工具调用 Core ConnectorClient。
 
-Core 在这一入口上组织审计、授权、超时与执行记录，Connector 专注外部协议，Controller 专注业务判断。组件图按这个完整职责模型展示审计与授权。
+Core 在资源和能力边界上组织审计、授权、超时与执行记录，Connector 专注外部协议，Controller 专注业务判断。组件图按这个完整职责模型展示审计与授权。
 
-当前实现中，Connector 已由 Host 装配，Runner 经 IPC 调用；代码仍分别提供 Connector API 和 `ctx.verbs`，尚未把 Connector 请求合入统一 verb 协议，也未实现图中统一的审计与授权机制。本文定义它们在模型中的归属，具体接口现状见 [Plugin](plugin/README.md) 和 [Connector](connector/README.md)。
+Controller 使用 `ctx.verbs.connectors({ timeoutMs })` 调用 Connector，普通组件使用 ConnectorClient；两者访问同一份 Host 客户端。Connector verb 直接执行，不创建用户 Interaction。超时表示等待结束，不保证提供方操作已取消。图中的审计与授权表达 Core 的职责，当前未建设完整的授权策略或通用审计流水。
 
 ### Controller 与资源协作
 
 每个 Controller 的 `resourceType` 指定一种主资源，Reconcile 围绕其中一个资源实例运行。`watches` 可以监听其他资源类型，并将变化映射为主资源的 Reconcile 请求。
+
+所有业务资源写入，包括 Agent 工具的 CRUD，都经 Core ResourceClient 发布变更。主资源的创建、spec / metadata 变化和删除会自动唤醒 Controller；纯 status 更新交给显式 Watch，避免 Reconcile 写入自身状态导致忙循环。
 
 多个 Controller 因而可以通过资源状态协调：一个 Controller 保存结果，另一个 Controller 通过 Watch 感知变化，再读取结果推进自己的目标。例如，一个复合业务可以拥有父资源和多个子资源；子资源各自执行，父 Controller 监听子资源变化，汇总进度并决定父目标是否完成。这是扩展方式示例，具体关联和完成条件由业务定义。
 
@@ -43,9 +45,9 @@ Core 内部拆分 Host 与 Runner，主要为了隔离 Plugin、CRD 相关处理
 
 Runner 的设计定位是一个相对单纯、参考 Kubernetes controller-runtime 的单进程运行环境：加载 Plugin，承载 CRD / Controller 注册以及 Source、Watch、Reconcile 回调。同一 Runner 内的这些工作共享一个进程，通过 Core 的资源与能力接口协作。这里借用的是 controller-runtime 的资源协调模型。
 
-当前实现中，Host 持有存储、队列与调度，管理 Harness 调用、用户交互及 Runner 生命周期；Runner 主要负责插件注册和回调执行，经 IPC 请求 Host 能力。因此 controller-runtime 的完整机制目前由 Core 两端共同实现。每个启用的插件实例有自己的 Runner；Harness 也可能创建子进程。
+Host 持有资源、消息和执行事实，管理 Harness、用户交互及 Runner 生命周期。Runner 拥有插件 Controller 的 Watch 映射、队列、并发容量、Source、重试和定时唤醒，经 IPC 读取资源及请求动作。Host 为一次执行签发身份并核对结果提交，调度容量只由 Runner 管理，避免跨进程重复限流造成相互等待。每个启用的插件实例有自己的 Runner；Harness 也可能创建子进程。
 
-Host 与 Runner 不相互导入实现。Host 通过入口启动 Runner；两端共用的 IPC 与 verb 契约放在 `src/protocol/`，上下文构造放在 `src/plugin-context.ts`。插件开发者依赖 `packages/plugin/`，无需处理 IPC。插件运行细节见 [Plugin](plugin/README.md)。
+Host 与 Runner 不相互导入实现。Host 通过入口启动 Runner；两端共用的 IPC 与 verb 契约放在 `src/protocol/`，上下文构造放在 `src/plugin-context.ts`，队列和定时机制放在 `src/reconcile/`。应用装配位于 `src/app.ts`，宿主会话协调器称为 CoreSession。插件开发者依赖 `packages/plugin/`，无需处理 IPC。插件运行细节见 [Plugin](plugin/README.md)。
 
 ### 输入与交流记录
 
@@ -94,7 +96,7 @@ Reconcile 可以直接执行已明确的步骤，也可以把需要判断的部�
 
 ### 动作与状态的边界
 
-统一模型中，Connector、Harness 与用户交互都由 Core 接收 verb 后调用。请求的来源决定业务上下文，具体能力接口决定可执行范围，结果再交回调用方解释。当前内置 Connector 以读取需求、PR 和环境声明为主，详见 [Connector](connector/README.md)。Agent 工具也可封装这些能力，其具体组合由 Agent 的业务职责决定。
+Controller 发起的 Connector、Harness 与用户交互通过 Verb 调用；其它组件可直接使用 Core 的对应服务。请求的来源决定业务上下文，具体能力接口决定可执行范围，结果再交回调用方解释。当前内置 Connector 以读取需求、PR 和环境声明为主，详见 [Connector](connector/README.md)。Agent 工具也可封装这些能力，其具体组合由 Agent 的业务职责决定。
 
 Plugin 的自定义资源用 spec 表达目标，用 status 保存领域进展。Harness 结束、用户给出答复或 Connector 返回数据，都需要由 Reconcile 判断其业务含义，再更新状态。一次 Agent 执行也可能已经通过工具改变了资源，调用方应结合这些最新事实解释结果。
 
@@ -110,7 +112,7 @@ Interaction 保存问题、答复、取消和超时。插件通过 ask / confirm
 
 Worker 或 Host 中断后不重放内存调用栈，未完成 verb 以 failure 收口。插件依据领域状态决定如何恢复；对于可能已经产生外部副作用的工作，Personal 保留待核对状态，规则见 [Personal](plugin/personal.md)。
 
-Channel 从持久消息与执行投影恢复展示。浏览器断开不会取消服务端工作；消息投递失败也不能让已完成工作重新执行。当前网页 Interaction 收件区属于整个 Session，跨 Conversation 可见。Channel 接入与展示边界见 [Channel](channel/README.md)。
+Channel 从持久消息与执行投影恢复展示。浏览器断开不会取消服务端工作；消息投递失败也不能让已完成工作重新执行。执行上下文显式关联主资源以及可选的 conversationId / inputId，Interaction 和 HarnessInvocation 持久化这些关联。Channel 据此归属问题和执行进度，Harness Target 只选择执行配置。网页按 Conversation 筛选关联问题，未关联会话的宿主交互仍显示在本地收件区。Channel 接入与展示边界见 [Channel](channel/README.md)。
 
 ### 验证
 

@@ -1,5 +1,5 @@
 import type { Command, CommandContext, CommandInput, CommandResult, ViewInputRecord } from "@compforge/aide-plugin";
-import type { Channel } from "../channel/index.ts";
+import type { CoreSession } from "../core/index.ts";
 import { saveModelPreference } from "../config/model-preferences.ts";
 import { saveEffortPreference } from "../config/effort-preferences.ts";
 import { newId } from "../event/ids.ts";
@@ -18,7 +18,7 @@ export interface CommandPreferences {
  * @rule Target and causal identity come from the accepted Human input, never from a Worker request. Search has no action authority.
  */
 export async function executeCommand(
-  channel: Channel,
+  channel: CoreSession,
   command: Command,
   input: CommandInput,
   record: ViewInputRecord,

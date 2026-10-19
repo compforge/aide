@@ -23,18 +23,7 @@ export const WorkSchema = z.object({
 });
 export type Work = z.infer<typeof WorkSchema>;
 
-export const IncomingSchema = z.object({
-  id: z.string().min(1).max(200),
-  conversationId: z.string().min(1).max(200),
-  text: z.string().min(1).max(32_000),
-});
-export type Incoming = z.infer<typeof IncomingSchema>;
-
-export const MessageSchema = z.object({
-  id: z.string(), conversationId: z.string(), at: z.string(),
-  role: z.enum(["user", "aide"]), text: z.string(), workId: z.string().nullable(),
-});
-export type Message = z.infer<typeof MessageSchema>;
+export { IncomingSchema, MessageSchema, type Incoming, type Message } from "../../src/channel/message.ts";
 
 /** @spec Task completion ends a goal; Routine completion only ends its current occurrence. */
 export function nextOccurrence(trigger: Trigger | null, now: Date): string | null {

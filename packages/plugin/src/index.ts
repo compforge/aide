@@ -172,3 +172,5 @@ export type {
 export { CONVERSATION_TYPE, INPUT_TYPE } from "./conversation.ts";
 export type { Conversation, ConversationMessage, InputSpec, InputStatus, InputQuestion } from "./conversation.ts";
 export type * from "./connectors/index.ts";
+
+export type { ExecutionAssociation } from "./reconcile-context.ts";

@@ -1,3 +1,6 @@
+import { RunnerController } from "./runner/controller.ts";
+import type { PluginRunnerClient } from "./runner/client.ts";
+import type { ControllerRegistration as RemoteRegistration, HostRequest } from "../../protocol/ipc.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { emptyConnectors } from "../../connector-client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
@@ -54,10 +57,10 @@ import {
   reconcileKeyId,
   ReconcileCapacity,
   ReconcileDueQueue,
-} from "./queue.ts";
+} from "../../reconcile/queue.ts";
 import {
   CronSourceQueue,
-} from "./cron-source.ts";
+} from "../../reconcile/cron-source.ts";
 import {
   PluginResourceStore,
   resourceTypeKey,
@@ -87,7 +90,7 @@ import {
   reconcileScopeId,
   reconcileScopeLabel,
   sameReconcileScope,
-} from "./reconcile-scope.ts";
+} from "../../reconcile/reconcile-scope.ts";
 import {
   type AvailablePluginCommand,
   PluginCommandRegistry,
@@ -314,7 +317,8 @@ export class Manager {
   private closing?: Promise<void>;
 
   constructor(options: ManagerOptions) {
-    this.capacity = new ReconcileCapacity(options.maxTotalConcurrency ?? 1);
+    this.remoteConcurrency = options.maxTotalConcurrency ?? 1;
+    this.capacity = new ReconcileCapacity(this.remoteConcurrency);
     this.now = options.now ?? (() => new Date());
     this.instances = options.instances;
     this.connectors = options.connectors ?? emptyConnectors;
@@ -358,6 +362,7 @@ export class Manager {
       options.snapshot ??
       (() => emptyReconcileSnapshot(this.instances.session.id));
     this.verb = new Verb({
+      connectors: this.connectors,
       session: options.session,
       capacity: this.capacity,
       snapshot: this.snapshot,
@@ -439,6 +444,24 @@ export class Manager {
         this.enqueueAideResource(resource);
       });
     }
+  }
+
+  /** @spec All callers publish resource changes through the same Watch dispatcher. */
+  private readonly remoteConcurrency: number;
+  private readonly pendingReconciles = new Set<Promise<unknown>>();
+
+  async settled(): Promise<void> {
+    do {
+      await Promise.allSettled([...this.pendingReconciles]);
+      await Promise.all([...this.controllers.values()].filter((item): item is RunnerController => item instanceof RunnerController).map((item) => item.settled()));
+    } while (this.pendingReconciles.size);
+  }
+
+  resourceClient(pluginInstanceId: string) {
+    const instance = this.instances.get(pluginInstanceId);
+    return createResourceClient(new PluginResourceStore({ session: this.instances.session, pluginInstanceId }),
+      (change) => this.handlePluginResourceChange(change),
+      (type) => this.resourceRegistry.registerMaterialized(instance.pluginId, type), this.aideResourceProvider);
   }
 
   registerController<TSpec, TStatus>(
@@ -543,7 +566,10 @@ export class Manager {
     if (this.suspendedControllers.has(reconcileScopeId(controller.scope))) {
       return Promise.reject(new Error("plugin Controller is not active"));
     }
-    return controller.enqueue(key);
+    const pending = controller.enqueue(key);
+    this.pendingReconciles.add(pending);
+    void pending.finally(() => this.pendingReconciles.delete(pending)).catch(() => {});
+    return pending;
   }
 
   private controllerForKey(key: ReconcileScope): ManagedController | undefined {
@@ -609,16 +635,7 @@ export class Manager {
       );
     }
 
-    const resources = createResourceClient(
-      new PluginResourceStore({
-        session: this.instances.session,
-        pluginInstanceId: instance.pluginInstanceId,
-      }),
-      (change) => this.handlePluginResourceChange(change),
-      (resourceType) =>
-        this.resourceRegistry.registerMaterialized(instance.pluginId, resourceType),
-      this.aideResourceProvider,
-    );
+    const resources = this.resourceClient(instance.pluginInstanceId);
     const dataDirs = preparePluginDataDirectories(
       {
         aideSessionId: aideSession.aideSessionId,
@@ -678,6 +695,7 @@ export class Manager {
               dataDirs,
               {
                 resources,
+                controllerRequest: (request) => this.handleControllerRequest(instance, request),
                 connectors: binding.connectors,
                 invokeVerb: (context, request) => {
                   if (context.pluginInstanceId !== instance.pluginInstanceId) {
@@ -710,11 +728,9 @@ export class Manager {
             // withdraws host registrations before terminating third-party code.
             binding.lifecycle.onClose(() => runner.close());
             for (const registration of runner.activation.registrations) {
-              installRegistration(
-                binding,
-                runner.client,
-                registration,
-              );
+              if (registration.kind === "controller") {
+                binding.lifecycle.onClose(this.bindRunnerController(instance, runner.client, registration, resources));
+              } else installRegistration(binding, runner.client, registration);
             }
           }
           binding.completeActivation();
@@ -1069,6 +1085,42 @@ export class Manager {
     );
   }
 
+  private bindRunnerController(instance: PluginInstance, runner: PluginRunnerClient, definition: RemoteRegistration, resources: import("@compforge/aide-plugin").ResourceClient): () => void {
+    const builtin = [AIDE_TURN_RESOURCE_TYPE, CONVERSATION_TYPE].some((type) => resourceTypeKey(type) === resourceTypeKey(definition.resourceType));
+    const release = builtin ? () => {} : this.resourceRegistry.registerController(instance.pluginId, definition.resourceType);
+    const store = new PluginResourceStore({ session: this.instances.session, pluginInstanceId: instance.pluginInstanceId });
+    const scope: ReconcileScope = { aideSessionId: instance.aideSessionId, pluginInstanceId: instance.pluginInstanceId, namespace: "v1",
+      resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, resourceOwner: builtin ? "aide" : "plugin" };
+    const controller = new RunnerController({ scope, registration: definition, runner, store, resources, verb: this.verb,
+      snapshot: (key, resource) => this.snapshotFor(key, resource), changed: (change) => this.handlePluginResourceChange(change),
+      maxTotalConcurrency: this.remoteConcurrency, retryBackoff: this.retryBackoff });
+    let registration: ControllerRegistration;
+    try { registration = this.installController(controller, true); } catch (error) { release(); throw error; }
+    const unregisterBoard = definition.presentHandlerId ? this.board.registerSource(reconcileScopeId(scope), {
+      pluginInstanceId: instance.pluginInstanceId,
+      present: () => presentBoardSource({ pluginId: instance.pluginId, pluginInstanceId: instance.pluginInstanceId, resourceType: definition.resourceType,
+        list: () => builtin ? this.aideResources!.list(definition.resourceType.kind as AideResourceKind).map((item) => this.exposeAideResource(instance.pluginInstanceId, item)) : store.list(definition.resourceType),
+        present: (resource) => runner.invoke(definition.presentHandlerId!, resource) }),
+    }) : undefined;
+    return () => { unregisterBoard?.(); registration.close(); release(); };
+  }
+
+  private async handleControllerRequest(instance: PluginInstance, request: Extract<HostRequest, { method: "controller.begin" | "controller.finish" | "controller.schedule" }>): Promise<unknown> {
+    const ref = request.method === "controller.finish" ? request.scope.resourceRef : undefined;
+    const key: ReconcileKey = request.method !== "controller.finish" ? request.key : {
+      aideSessionId: request.scope.aideSessionId, pluginInstanceId: request.scope.pluginInstanceId,
+      namespace: ref?.namespace === "aide-system" ? "v1" : request.scope.namespace,
+      resourceApiVersion: ref!.apiVersion, resourceKind: ref!.kind, resourceId: ref!.name,
+      resourceOwner: ref?.namespace === "aide-system" ? "aide" : "plugin",
+    };
+    if (key.pluginInstanceId !== instance.pluginInstanceId || key.aideSessionId !== instance.aideSessionId) throw new Error("Runner Controller scope mismatch");
+    const controller = this.controllerForKey(key);
+    if (!(controller instanceof RunnerController)) throw new Error(`Unknown Runner Controller: ${key.resourceKind}`);
+    if (request.method === "controller.begin") return await controller.begin(key);
+    if (request.method === "controller.schedule") return controller.schedule(key, request.nextAt);
+    return controller.finish(request.scope, request.resource, request.requeueAfterMs, request.failed);
+  }
+
   private bindController<TSpec, TStatus>(
     instance: PluginInstance,
     pluginController: PluginResourceController<TSpec, TStatus>,
@@ -1296,7 +1348,9 @@ export class Manager {
 
   private handlePluginResourceChange(change: ResourceClientChange): void {
     this.board.invalidate();
-    void this.routePluginResourceChange(change);
+    const pending = this.routePluginResourceChange(change);
+    this.pendingReconciles.add(pending);
+    void pending.finally(() => this.pendingReconciles.delete(pending)).catch(() => {});
   }
 
   private async routePluginResourceChange(
@@ -1340,7 +1394,7 @@ export class Manager {
     }
 
     for (const { controller, key } of pending.values()) {
-      void controller.enqueue(key).catch(() => {
+      void this.enqueue(key).catch(() => {
         // Reconcile failures use the Controller retry path; close races need no extra reaction.
       });
     }
@@ -1524,7 +1578,7 @@ export class Manager {
 
   private enqueueInitial(controller: ManagedController): void {
     for (const key of controller.initialReconciles?.() ?? []) {
-      void controller.enqueue(key).catch(() => {
+      void this.enqueue(key).catch(() => {
         // Queue callback has already scheduled retry and reported diagnostics.
       });
     }
@@ -1577,7 +1631,7 @@ export class Manager {
       return;
     }
     for (const key of controller.resourceKeys?.() ?? []) {
-      void controller.enqueue(key).catch(() => {
+      void this.enqueue(key).catch(() => {
         // Queue callback has already scheduled retry and reported diagnostics.
       });
     }

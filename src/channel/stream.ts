@@ -1,6 +1,6 @@
 import type { ServerResponse } from "node:http";
 import type { Logger } from "pino";
-import type { Aide } from "../../plugins/personal/aide.ts";
+import type { ChannelService, WebService } from "./service.ts";
 import { encodeSse, PatchEmitter, type PatchEvent } from "@compforge/agentue/ui";
 import { conversationView, type ConversationView } from "./view.ts";
 
@@ -26,7 +26,7 @@ export function conversationPatches(emitter: PatchEmitter, previous: Conversatio
 }
 
 /** Every connection starts a fresh delivery from the authoritative projection, without replaying actions. */
-export function streamConversation(response: ServerResponse, aide: Aide, conversationId: string, log: Logger): void {
+export function streamConversation(response: ServerResponse, aide: ChannelService, conversationId: string, log: Logger): void {
   const initial = conversationView(aide, conversationId);
   response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", "x-accel-buffering": "no" });
   const emitter = new PatchEmitter();
@@ -53,8 +53,8 @@ export function streamConversation(response: ServerResponse, aide: Aide, convers
   };
   // Coalesce token bursts without delaying model execution or rebuilding the page for each token.
   const schedule = () => { if (!closed && !timer) timer = setTimeout(flush, 100); };
-  const unsubscribe = aide.channel.subscribe(schedule);
-  const unsubscribeConversation = aide.store.conversations.subscribe((conversation) => {
+  const unsubscribe = aide.core.subscribe(schedule);
+  const unsubscribeConversation = aide.conversations.subscribe((conversation) => {
     if (conversation.id === conversationId) schedule();
   });
   // Domain Work outboxes can change independently of the Core event stream.

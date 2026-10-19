@@ -1,4 +1,4 @@
-import type { Aide } from "../../plugins/personal/aide.ts";
+import type { ChannelService, WebService } from "./service.ts";
 import { conversationView } from "./view.ts";
 
 export interface FeishuProgress {
@@ -16,12 +16,11 @@ const labels = { queued: "排队中", running: "正在处理", waiting: "等待�
  * @spec Feishu reads the same thought/text/tool projection as Web; progress is never persisted as a business Message.
  * @link docs/channel/feishu.md
  */
-export function feishuProgress(aide: Aide, conversationId: string): FeishuProgress[] {
+export function feishuProgress(aide: ChannelService, conversationId: string): FeishuProgress[] {
   const view = conversationView(aide, conversationId);
-  const inputs = aide.store.conversations.inputs(conversationId);
+  const inputs = aide.conversations.inputs(conversationId);
   return inputs.filter((input) => input.spec.origin === "channel" && !input.spec.replyTo).map((input) => {
-    const turnIds = new Set([...aide.channel.projection.harnessInputs.values()]
-      .filter((turn) => input.status.laneId && turn.laneId === input.status.laneId).map((turn) => `execution:${turn.turnId}`));
+    const turnIds = new Set(aide.invocations().filter((turn) => turn.inputId === input.metadata.name).map((turn) => `execution:${turn.turnId}`));
     const executions = view.blocks.filter((block) => block.type === "execution" &&
       (turnIds.has(block.id) || (!input.status.laneId && view.meta.activity?.id === input.metadata.name && block.status === "running")));
     const parents = new Set(executions.map((block) => block.id));

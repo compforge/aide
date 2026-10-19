@@ -1,5 +1,4 @@
-import type { Aide } from "../../plugins/personal/aide.ts";
-import { chiefTarget } from "../../plugins/personal/chief-model.ts";
+import type { ChannelService, WebService } from "./service.ts";
 import { PROTOCOL_VERSION, type BaseBlock, type ModelMeta, type UIModel } from "@compforge/agentue/ui";
 
 export interface ConversationBlock extends BaseBlock {
@@ -17,19 +16,19 @@ interface ConversationMeta extends ModelMeta {
 export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
 
 /**
- * @spec Live and historical progress share Ledger-backed Turn identity and remain scoped to the conversation's Chief target.
+ * @spec Live and historical progress share Ledger-backed Turn identity and use the explicit execution conversation association.
  * @why Completion folds execution details; it never deletes them or creates extra delivered Messages.
  * @link docs/channel/web.md
  */
-export function conversationView(aide: Aide, conversationId: string): ConversationView {
-  const state = aide.channel.projection;
-  const inputs = aide.store.conversations.inputs(conversationId);
+export function conversationView(aide: ChannelService, conversationId: string): ConversationView {
+  const state = aide.core.projection;
+  const inputs = aide.conversations.inputs(conversationId);
   const active = inputs.find((input) => input.status.phase === "running" || input.status.phase === "waiting");
   const queued = inputs.filter((input) => !input.status.phase).length;
-  const target = chiefTarget(conversationId);
-  const turns = new Map([...state.harnessInputs.values()].filter((input) => input.harnessTargetId === target)
+  const relatedTurns = new Set(aide.invocations().filter((item) => item.conversationId === conversationId).map((item) => item.turnId));
+  const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.turnId))
     .map((input) => [input.turnId, input]));
-  const summaries = new Map(state.turnSummaries.filter((turn) => turn.harnessTargetId === target).map((turn) => [turn.turnId, turn]));
+  const summaries = new Map(state.turnSummaries.filter((turn) => relatedTurns.has(turn.turnId)).map((turn) => [turn.turnId, turn]));
   const executions = new Map<string, { header: ConversationBlock; blocks: ConversationBlock[] }>();
   const roots: ConversationBlock[] = aide.messages().filter((message) => message.conversationId === conversationId)
     .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text }));
@@ -86,7 +85,7 @@ export interface ConversationSummary {
  * @spec Navigation includes Channel/Source conversations and work-only scopes; summaries never expose input prompts or execution details.
  * @link docs/channel/web.md
  */
-export function conversationList(aide: Aide): ConversationSummary[] {
+export function conversationList(aide: ChannelService): ConversationSummary[] {
   const summaries = new Map<string, ConversationSummary>();
   const ensure = (id: string) => {
     let summary = summaries.get(id);
@@ -96,12 +95,12 @@ export function conversationList(aide: Aide): ConversationSummary[] {
     }
     return summary;
   };
-  for (const conversation of aide.store.conversations.list()) ensure(conversation.id).updatedAt = conversation.createdAt;
-  for (const input of aide.store.conversations.inputs()) {
+  for (const conversation of aide.conversations.list()) ensure(conversation.id).updatedAt = conversation.createdAt;
+  for (const input of aide.conversations.inputs()) {
     const summary = ensure(input.spec.conversationId);
     if (input.metadata.creationTimestamp > summary.updatedAt) summary.updatedAt = input.metadata.creationTimestamp;
   }
-  for (const work of aide.store.read().works) ensure(work.conversationId);
+  for (const id of aide.conversationIds()) ensure(id);
   const titled = new Set<string>();
   for (const message of aide.messages()) {
     const summary = ensure(message.conversationId);

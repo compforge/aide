@@ -1,7 +1,7 @@
 import type {
   ReconcileKey,
   ReconcileScope,
-} from "./controller.ts";
+} from "../protocol/reconcile.ts";
 import {
   reconcileResourceOwner,
   sameReconcileScope,

@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import type { Logger } from "pino";
 import { z } from "zod";
-import type { Aide } from "../../plugins/personal/aide.ts";
-import { IncomingSchema, MessageSchema, type Message } from "../../plugins/personal/model.ts";
+import type { ChannelService, WebService } from "./service.ts";
+import { IncomingSchema, MessageSchema, type Message } from "./message.ts";
 import { progressCard, cardContent, cardThought, type FeishuProgressReader, type FeishuProgress } from "./feishu-card.ts";
 import type { FeishuTransport } from "./feishu-client.ts";
 
@@ -39,7 +39,7 @@ export class FeishuChannel {
   private retryAt = 0;
   private readonly cardRetry = new Map<string, number>();
 
-  constructor(home: string, appId: string, private readonly aide: Pick<Aide, "receive" | "messages">,
+  constructor(home: string, appId: string, private readonly aide: Pick<ChannelService, "receive" | "messages">,
     private readonly transport: FeishuTransport, private readonly log: Logger, private readonly progress?: FeishuProgressReader) {
     this.prefix = `feishu:${appId}:`;
     this.path = join(home, "channels", `feishu-${createHash("sha256").update(appId).digest("hex").slice(0, 16)}.json`);

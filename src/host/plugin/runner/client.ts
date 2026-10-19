@@ -11,7 +11,6 @@ import type {
   PluginInstance,
   PluginSessionContext,
   ResourceClient,
-  SourceContext,
   ToastMessage,
 } from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../../../protocol/ipc.ts";
@@ -48,12 +47,8 @@ interface ExecutionCall {
   blockers: number;
 }
 
-interface SourceCallbacks {
-  readonly emit: SourceContext<unknown>["emit"];
-  readonly reportError: SourceContext<unknown>["reportError"];
-}
-
 export interface PluginRunnerCallbacks {
+  readonly controllerRequest?: (request: Extract<HostRequest, { method: "controller.begin" | "controller.finish" | "controller.schedule" }>) => Promise<unknown>;
   readonly connectors?: ConnectorClient;
   readonly resources: ResourceClient;
   readonly invokeVerb: (
@@ -85,6 +80,7 @@ export interface PluginRunnerClientOptions extends PluginRunnerCallbacks {
  * @rule Restore the host async causal scope by executionId before handling a Runner verb callback.
  */
 export class PluginRunnerClient {
+  private readonly controllerTimers = new Map<string, { timer?: ReturnType<typeof setTimeout>; blockers: number }>();
   private readonly commandContexts = new Map<string, CommandContext>();
 
   async invokeCommand(
@@ -106,9 +102,7 @@ export class PluginRunnerClient {
   private readonly requestTimeoutMs: number;
   private readonly pending = new Map<number, PendingCall>();
   private readonly executionCalls = new Map<string, ExecutionCall>();
-  private readonly sources = new Map<string, SourceCallbacks>();
   private nextCallId = 1;
-  private nextSourceRunId = 1;
   private closing = false;
   private failed?: Error;
 
@@ -227,38 +221,6 @@ export class PluginRunnerClient {
     }) as T;
   }
 
-  async startSource(
-    handlerId: string,
-    context: SourceContext<unknown>,
-  ): Promise<void> {
-    const sourceRunId = `source:${this.nextSourceRunId++}`;
-    this.sources.set(sourceRunId, {
-      emit: context.emit,
-      reportError: context.reportError,
-    });
-    const stop = (): void => {
-      context.signal.removeEventListener("abort", stop);
-      this.sources.delete(sourceRunId);
-      void this.call({
-        method: "stop-source",
-        sourceRunId,
-      }).catch(() => {
-        // Runner close and Source cancellation can race.
-      });
-    };
-    context.signal.addEventListener("abort", stop, { once: true });
-    try {
-      await this.call({
-        method: "start-source",
-        handlerId,
-        sourceRunId,
-      });
-    } catch (error) {
-      stop();
-      throw error;
-    }
-  }
-
   async close(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
@@ -272,7 +234,7 @@ export class PluginRunnerClient {
         ]);
       }
     } finally {
-      this.sources.clear();
+    for (const id of this.controllerTimers.keys()) this.clearControllerTimeout(id);
       if (this.child.exitCode === null) this.child.kill();
       this.child.disconnect();
       this.fail(new Error("Plugin Runner is closed"));
@@ -347,12 +309,6 @@ export class PluginRunnerClient {
       this.callbacks.onLog(childMessage.record);
       return;
     }
-    if (childMessage.kind === "source-error") {
-      this.sources.get(childMessage.sourceRunId)?.reportError(
-        restoredError(childMessage.error),
-      );
-      return;
-    }
     this.fail(
       new Error(`Plugin Runner sent an unknown IPC message: ${message.kind}`),
       true,
@@ -372,7 +328,7 @@ export class PluginRunnerClient {
 
   private async handleChildCall(call: ChildCall): Promise<void> {
     const resumeTimeout = call.request.method === "verb.invoke"
-      ? this.pauseExecutionTimeout(call.request.context.executionId)
+      ? this.pauseControllerTimeout(call.request.context.executionId) ?? this.pauseExecutionTimeout(call.request.context.executionId)
       : undefined;
     try {
       const execution = call.request.method === "verb.invoke"
@@ -416,8 +372,27 @@ export class PluginRunnerClient {
     }
   }
 
+  request(request: RunnerRequest): Promise<unknown> { return this.call(request); }
+
   private async handleHostRequest(request: HostRequest): Promise<unknown> {
     switch (request.method) {
+      case "controller.begin":
+      case "controller.finish":
+      case "controller.schedule": {
+        if (!this.callbacks.controllerRequest || this.failed || this.closing) throw new Error("Controller runtime is unavailable");
+        try {
+          const result = await this.callbacks.controllerRequest(request);
+          if (request.method === "controller.begin" && result) {
+            const { scope } = result as { scope: ExecutionScope };
+            this.controllerTimers.set(scope.executionId, { blockers: 0 });
+            this.armControllerTimeout(scope.executionId);
+          }
+          return result;
+        } finally {
+          if (request.method === "controller.finish") this.clearControllerTimeout(request.scope.executionId);
+        }
+      }
+
       case "connector.read":
         if (this.failed || this.closing) throw new Error("Plugin Runner is no longer active");
         return dispatchConnector(this.callbacks.connectors ?? emptyConnectors, request.request);
@@ -433,6 +408,8 @@ export class PluginRunnerClient {
           request.context,
           request.request,
         );
+      case "resource.replace":
+        return await this.callbacks.resources.replace(request.resource, request.spec, request.status);
       case "resource.get":
         return await this.callbacks.resources.get(request.ref);
       case "resource.list":
@@ -467,14 +444,7 @@ export class PluginRunnerClient {
           request.resource,
           request.patch,
         );
-      case "source.emit": {
-        const source = this.sources.get(request.sourceRunId);
-        if (!source) {
-          throw new Error(`Plugin Source is not active: ${request.sourceRunId}`);
-        }
-        await source.emit(request.resource);
-        return undefined;
-      }
+
     }
   }
 
@@ -490,10 +460,7 @@ export class PluginRunnerClient {
       execution.asyncResource.emitDestroy();
     }
     this.executionCalls.clear();
-    for (const source of this.sources.values()) {
-      source.reportError(this.failed);
-    }
-    this.sources.clear();
+    for (const id of this.controllerTimers.keys()) this.clearControllerTimeout(id);
     if (!this.closing) {
       try {
         this.callbacks.onFailure?.(this.failed);
@@ -530,7 +497,28 @@ export class PluginRunnerClient {
     execution.asyncResource.emitDestroy();
   }
 
+  private clearControllerTimeout(id: string): void {
+    const execution = this.controllerTimers.get(id);
+    if (execution?.timer) clearTimeout(execution.timer);
+    this.controllerTimers.delete(id);
+  }
+  private armControllerTimeout(id: string): void {
+    const execution = this.controllerTimers.get(id);
+    if (!execution || execution.blockers || this.closing || this.failed) return;
+    execution.timer = setTimeout(() => this.fail(new Error(`Plugin Runner Controller execution ${id} timed out after ${this.requestTimeoutMs}ms`), true), this.requestTimeoutMs);
+    execution.timer.unref?.();
+  }
+  private pauseControllerTimeout(id: string): (() => void) | undefined {
+    const execution = this.controllerTimers.get(id);
+    if (!execution) return;
+    execution.blockers++;
+    if (execution.timer) clearTimeout(execution.timer);
+    execution.timer = undefined;
+    return () => { execution.blockers--; if (this.controllerTimers.get(id) === execution) this.armControllerTimeout(id); };
+  }
+
   private armCallTimeout(callId: number, pending: PendingCall): void {
+    if (pending.request.method === "controller.enqueue" || pending.request.method === "controllers.settled") return;
     if (pending.timeout) clearTimeout(pending.timeout);
     pending.timeout = setTimeout(() => {
       if (!this.pending.has(callId)) return;

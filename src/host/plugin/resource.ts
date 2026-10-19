@@ -455,6 +455,20 @@ export class PluginResourceStore {
       );
   }
 
+  /** @spec Desired state and its initial observation commit atomically under one resource version. */
+  replace<TSpec, TStatus>(type: ResourceType, name: string, spec: TSpec, status: TStatus, options: MutationOptions = {}): PluginResource<TSpec, TStatus> {
+    const desired = jsonObject("spec", spec);
+    const observed = jsonObject("status", status);
+    return this.mutate<TSpec, TStatus>(type, name, options, (current) => {
+      const specChanged = !isDeepStrictEqual(current.object.spec, desired);
+      if (!specChanged && isDeepStrictEqual(current.object.status, observed)) return current;
+      return { ...current, object: { ...current.object, spec: desired, status: observed,
+        metadata: { ...current.object.metadata,
+          generation: current.object.metadata.generation + (specChanged ? 1 : 0),
+          resourceVersion: nextResourceVersion(current.object.metadata.resourceVersion) } } };
+    }).object;
+  }
+
   replaceSpec<TSpec, TStatus = Record<string, unknown>>(
     type: ResourceType,
     name: string,

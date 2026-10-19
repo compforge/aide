@@ -21,6 +21,7 @@ export function registerChief(context: PluginContext): void {
 
 async function processInput(context: PluginContext, execution: ReconcileContext,
   original: Readonly<Resource<InputSpec, InputStatus>>, conversation: Readonly<Resource<Record<string, never>, Conversation>>): Promise<void> {
+  execution = execution.withContext({ conversationId: original.spec.conversationId, inputId: original.metadata.name });
   const ref = { ...INPUT_TYPE, ...original.metadata };
   const latest = async () => {
     const resource = await context.resources.get<InputSpec, InputStatus>(ref);

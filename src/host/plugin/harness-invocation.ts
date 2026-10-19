@@ -1,3 +1,4 @@
+import type { ExecutionAssociation } from "@compforge/aide-plugin";
 import type { TurnSummary } from "@compforge/aide-plugin";
 
 import { newId } from "../event/ids.ts";
@@ -22,7 +23,7 @@ export type HarnessInvocationPhase =
   | "cancelled"
   | "failed";
 
-export interface HarnessInvocationSnapshot {
+export interface HarnessInvocationSnapshot extends ExecutionAssociation {
   readonly invocationId: string;
   readonly executionId: string;
   readonly verb: "draft" | "harness";
@@ -117,6 +118,9 @@ function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
   return Object.freeze({
     invocationId: recorded.invocationId,
     executionId: recorded.executionId,
+    ...(recorded.conversationId ? { conversationId: recorded.conversationId } : {}),
+    ...(recorded.inputId ? { inputId: recorded.inputId } : {}),
+    ...(recorded.resourceRef ? { resourceRef: recorded.resourceRef } : {}),
     verb: recorded.verb,
     phase: phaseOf(state),
     newLane: recorded.newLane,
@@ -219,6 +223,7 @@ export class HarnessInvocationStore {
       payload: {
         invocationId,
         executionId: draft.scope.executionId,
+        conversationId: draft.scope.conversationId, inputId: draft.scope.inputId, resourceRef: draft.scope.resourceRef,
         verb: invocation.verb,
         title: invocation.title,
         prompt: invocation.prompt,

@@ -1,3 +1,4 @@
+import { deepFreeze } from "../../reconcile/snapshot.ts";
 import type {
   Controller as PluginController,
   ControllerSource,
@@ -16,9 +17,9 @@ import {
   PluginResourceStore,
   validateResourceType,
 } from "./resource.ts";
-import { reconcileKeyId, ReconcileQueue } from "./queue.ts";
-import type { ReconcileCapacityLease } from "./queue.ts";
-import { reconcileResourceOwner } from "./reconcile-scope.ts";
+import { reconcileKeyId, ReconcileQueue } from "../../reconcile/queue.ts";
+import type { ReconcileCapacityLease } from "../../reconcile/queue.ts";
+import { reconcileResourceOwner } from "../../reconcile/reconcile-scope.ts";
 import {
   emptyReconcileSnapshot,
   type ReconcileSnapshot,
@@ -34,31 +35,8 @@ import {
   type InvokeVerb,
 } from "../../protocol/verbs.ts";
 
-export type ReconcileResourceOwner = "plugin" | "aide";
-
-export interface ReconcileScope {
-  readonly aideSessionId: string;
-  readonly pluginInstanceId: string;
-  readonly namespace: AnyResourceNamespace;
-  readonly resourceApiVersion: string;
-  readonly resourceKind: string;
-  /** 旧 key 缺省为 plugin；aide 表示只读 Aide-owned Resource。 */
-  readonly resourceOwner?: ReconcileResourceOwner;
-}
-
-export interface ReconcileKey extends ReconcileScope {
-  readonly resourceId: string;
-}
-
-export interface ReconcileResult {
-  /** 一次性动态唤醒间隔；Controller 负责换算并持久化 nextReconcileAt。 */
-  requeueAfterMs?: number;
-}
-
-export interface ScheduledReconcile {
-  readonly key: ReconcileKey;
-  readonly nextReconcileAt: Date;
-}
+export type { ReconcileResourceOwner, ReconcileScope, ReconcileKey, ReconcileResult, ScheduledReconcile } from "../../protocol/reconcile.ts";
+import type { ReconcileResourceOwner, ReconcileScope, ReconcileKey, ReconcileResult, ScheduledReconcile } from "../../protocol/reconcile.ts";
 
 export interface ReconcileRetryBackoff {
   readonly initialDelayMs: number;
@@ -224,13 +202,6 @@ function ownedKey(key: ReconcileKey): ReconcileKey {
   return Object.freeze(copy);
 }
 
-function deepFreeze<T>(value: T): T {
-  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
-  Object.freeze(value);
-  for (const child of Object.values(value)) deepFreeze(child);
-  return value;
-}
-
 function validatedResult(result: ReconcileResult | void): ReconcileResult {
   if (!result) return {};
   if (
@@ -390,6 +361,7 @@ export class Controller<TSpec, TStatus> {
     const keys = new Map<string, ReconcileKey>();
     if (
       change.kind !== "deleted" &&
+      (change.kind !== "status-updated" || change.oldResource.metadata.generation !== change.resource.metadata.generation) &&
       change.resource.apiVersion === this.resourceType.apiVersion &&
       change.resource.kind === this.resourceType.kind
     ) {
@@ -520,7 +492,7 @@ export class Controller<TSpec, TStatus> {
         }
         const context = createReconcileContext(
           snapshot,
-          executionScope,
+          { ...executionScope, resourceRef },
           this.invokeVerb,
         );
         const result = validatedResult(

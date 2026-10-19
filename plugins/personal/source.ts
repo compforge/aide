@@ -34,17 +34,16 @@ export async function observeRequirements(context: Pick<PluginContext, "resource
 export function registerSources(context: PluginContext): void {
   const watches = parseWatches(context.instance.config);
   if (!watches.length) return;
-  const connectors = context.connectors;
   context.controllers.register<Watch, SourceStatus>({ resourceType: SOURCE_TYPE,
     sources: [{ type: "resource", sourceId: "configured-requirements", async start(source) {
       for (const watch of watches) await source.emit({ name: digest(watch), spec: watch });
     } }],
-    async reconcile(_execution, resource) {
+    async reconcile(execution, resource) {
       if (resource.metadata.deletionTimestamp) return;
       const configured = watches.find((item) => item.id === resource.spec.id);
       // Config changes create a fresh observation scope; obsolete resources stop polling.
       if (!configured || digest(configured) !== digest(resource.spec)) return;
-      try { await observeRequirements(context, resource, connectors); }
+      try { await observeRequirements(context, resource, execution.verbs.connectors({ timeoutMs: 30_000 })); }
       catch (error) {
         context.logger.error("Requirement discovery failed; watermark retained", { error, attributes: { watchId: resource.spec.id } });
         const current = await context.resources.get<Watch, SourceStatus>({ ...SOURCE_TYPE, ...resource.metadata });
