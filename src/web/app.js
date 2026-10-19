@@ -66,7 +66,7 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
   function appendProgress(parent, blocks, expanded) {
     for (const block of blocks) {
       const node = progressNode(block.type); node.dataset.blockId = block.id;
-      if (block.type !== 'text') node.open = expanded.get(block.id) ?? true;
+      if (block.type !== 'text') node.open = expanded.get(block.id) ?? block.type !== 'question';
       updateProgress(node, block.type, block.content, block.status, block.detail);
       parent.append(node);
     }
@@ -105,13 +105,16 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
       const children = history.filter((item) => executions.has(item.parent_id));
       const answers = group.filter((item) => item.type === 'message' && item.role === 'aide').map((item) => item.content);
       const lastText = children.filter((item) => item.type === 'text').at(-1);
-      const answer = answers.join('\n\n') || lastText?.content || '';
-      const process = children.filter((item) => item.type !== 'text' || (answers.length ? item.phase !== 'final' && !answers.includes(item.content) : item !== lastText));
+      const questions = group.filter((item) => item.type === 'question');
+      const pending = questions.filter((item) => item.status === 'pending');
+      const answer = pending.map((item) => item.content).join('\n\n') || answers.join('\n\n') || lastText?.content || '';
+      const process = children.filter((item) => item.type !== 'text' || (answers.length ? item.phase !== 'final' && !answers.includes(item.content) : item !== lastText))
+        .concat(questions.filter((item) => item.status !== 'pending'));
       const failed = group.some((item) => item.status === 'failed' || item.status === 'interrupted');
-      const title = 'Aide · ' + (failed ? '处理已中断' : '已完成') + (answer ? ' · ' + replyPreview(answer) : '');
-      const node = replyRegion('input:' + groupId + ':whole', title, failed);
+      const title = 'Aide · ' + (pending.length ? '等待你回答' : failed ? '处理已中断' : '已完成') + (answer ? ' · ' + replyPreview(answer) : '');
+      const node = replyRegion('input:' + groupId + ':whole', title, failed || pending.length > 0);
       node.className = 'message aide assistant-reply reply-envelope'; node.dataset.inputId = groupId;
-      if (executions.size || block.group_id) {
+      if (executions.size || block.group_id || process.length) {
         const thought = replyRegion('input:' + groupId + ':think', '思考与执行过程', false);
         appendProgress(thought, process, expanded);
         if (!process.length) thought.append(element('p', '没有可展示的思考或工具记录。', 'muted'));
@@ -136,6 +139,7 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
   }
   function updateProgress(node, kind, text, status, detail) {
     if (kind === 'thought') node.querySelector('summary').textContent = '思考过程';
+    if (kind === 'question') node.querySelector('summary').textContent = '问题 · ' + (status === 'answered' ? '已回答' : status === 'cancelled' ? '已取消' : '等待回答');
     if (kind === 'tool') node.querySelector('summary').textContent = text + ' · ' + (toolLabels[status] || status || '状态未知');
     const content = node.querySelector('.activity-content');
     const value = kind === 'tool' ? detail || '' : text;
@@ -165,10 +169,12 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
       : last?.kind === 'thought' ? '正在思考' : last?.kind === 'text' ? '正在回复' : '正在处理';
     $('activity-heading').textContent = 'Aide · ' + label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : '');
     const lastText = activity.blocks.filter((block) => block.kind === 'text').at(-1);
-    const answer = activity.answers.join('\n\n') || lastText?.text || '';
+    const pending = activity.questions.filter((block) => block.status === 'pending');
+    const answer = pending.map((block) => block.content).join('\n\n') || activity.answers.join('\n\n') || lastText?.text || '';
     updateMarkdown($('activity-answer'), answer || (activity.phase === 'waiting' ? '等待你回答。' : '正在整理回复…'));
     const process = activity.blocks.filter((block) => block.kind !== 'text' ||
-      (activity.answers.length ? block.phase !== 'final' && !activity.answers.includes(block.text) : block !== lastText));
+      (activity.answers.length ? block.phase !== 'final' && !activity.answers.includes(block.text) : block !== lastText))
+      .concat(activity.questions.filter((block) => block.status !== 'pending').map((block) => ({ ...block, kind: block.type, text: block.content })));
     const ids = new Set(process.map((block) => block.id));
     for (const [id, node] of activityNodes) if (!ids.has(id)) { node.remove(); activityNodes.delete(id); }
     for (const block of process) {
@@ -331,7 +337,8 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
       const liveIds = new Set(view.blocks.filter((block) => block.type === 'execution' &&
         (block.status === 'running' || (view.meta.activity && block.group_id === view.meta.activity.id))).map((block) => block.id));
       renderActivity(view.meta.activity && { ...view.meta.activity,
-        answers: view.blocks.filter((block) => block.role === 'aide' && block.group_id === view.meta.activity.id).map((block) => block.content),
+        answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === view.meta.activity.id).map((block) => block.content),
+        questions: view.blocks.filter((block) => block.type === 'question' && block.group_id === view.meta.activity.id),
         blocks: view.blocks.filter((block) => liveIds.has(block.parent_id))
           .map((block) => ({ ...block, kind: block.type, text: block.content })) });
       $('connection').textContent = view.meta.error ? view.meta.error.message : '实时连接';

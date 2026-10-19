@@ -2,7 +2,7 @@ import type { ChannelService } from "./service.ts";
 import { PROTOCOL_VERSION, type BaseBlock, type ModelMeta, type UIModel } from "@compforge/agentue/ui";
 
 export interface ConversationBlock extends BaseBlock {
-  type: "message" | "execution" | "thought" | "text" | "tool";
+  type: "message" | "question" | "execution" | "thought" | "text" | "tool";
   content: string;
   role?: "user" | "aide";
   at?: string;
@@ -18,6 +18,7 @@ export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
 /**
  * @spec Live and historical progress share Ledger-backed Turn identity and use the explicit execution conversation association.
  * @spec AgentUE group_id binds executions and official replies to their persisted Input ownership.
+ * @spec Questions retain their Core identity and state; they never become final-answer text.
  * @why Completion folds execution details; it never deletes them or creates extra delivered Messages.
  * @link docs/channel/web.md
  */
@@ -33,19 +34,21 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   const inputPhases = new Map(inputs.map((input) => [input.metadata.name, input.status.phase]));
   const messageInputs = new Map(inputs.flatMap((input) => (input.status.messages ?? [])
     .filter((message) => message.role === "aide").map((message) => [message.id, input.metadata.name] as const)));
+  const questionStatuses = new Map<string, "pending" | "answered" | "cancelled">();
   for (const interaction of state.interactions.values()) {
-    if (interaction.pluginContext?.conversationId === conversationId && interaction.pluginContext.inputId) {
-      messageInputs.set(interaction.request.messageId, interaction.pluginContext.inputId);
-    }
+    if (interaction.request.request.kind !== "question" || interaction.pluginContext?.conversationId !== conversationId) continue;
+    questionStatuses.set(interaction.request.messageId, interaction.request.status);
+    if (interaction.pluginContext.inputId) messageInputs.set(interaction.request.messageId, interaction.pluginContext.inputId);
   }
   const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.turnId))
     .map((input) => [input.turnId, input]));
   const summaries = new Map(state.turnSummaries.filter((turn) => relatedTurns.has(turn.turnId)).map((turn) => [turn.turnId, turn]));
   const executions = new Map<string, { header: ConversationBlock; blocks: ConversationBlock[] }>();
   const roots: ConversationBlock[] = aide.messages().filter((message) => message.conversationId === conversationId)
-    .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text,
+    .map((message) => ({ id: `message:${message.id}`, type: questionStatuses.has(message.id) ? "question" : "message", role: message.role, at: message.at, content: message.text,
       ...(message.role === "aide" && messageInputs.has(message.id) ? { group_id: messageInputs.get(message.id),
-        status: inputPhases.get(messageInputs.get(message.id)!) } : {}) }));
+        status: inputPhases.get(messageInputs.get(message.id)!) } : {}),
+      ...(questionStatuses.has(message.id) ? { status: questionStatuses.get(message.id) } : {}) }));
   const append = (turnId: string, block: ConversationBlock) => {
     const input = turns.get(turnId);
     if (!input) return;
