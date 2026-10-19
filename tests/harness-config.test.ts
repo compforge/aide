@@ -50,7 +50,8 @@ test("Chief resolves nested package skills relative to config and rejects missin
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test("sync CLI shares the running service lock and accepts an empty package list", async () => {
+/** @case An interrupted sync leaves a dead holder; the next invocation recovers without a manual retry. */
+test("sync CLI recovers a stale service lock, excludes a live holder and accepts empty packages", async () => {
   const home = mkdtempSync(join(tmpdir(), "aide-harness-cli-"));
   writeFileSync(join(home, "config.yaml"), "harnesses:\n  chief:\n    packages: []\n");
   const run = async () => {
@@ -61,6 +62,12 @@ test("sync CLI shares the running service lock and accepts an empty package list
   };
   try {
     expect((await run()).code).toBe(0);
+    const stopped = spawnSync("node", ["-e", "process.exit(0)"]);
+    expect(stopped.status).toBe(0);
+    writeFileSync(join(home, "host.lock"), `${stopped.pid}:interrupted-sync`);
+    const recovered = await run();
+    expect(recovered.code).toBe(0);
+    expect(existsSync(join(home, "host.lock"))).toBe(false);
     await withAsyncFileLock(join(home, "host"), async () => {
       const result = await run();
       expect(result.code).toBe(1);
