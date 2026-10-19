@@ -117,6 +117,23 @@ test("Feishu ignores unaddressed group/bot events and reports unsupported input 
   assert.ok(sent.every((message) => !message.text.includes("private data")));
 });
 
+test("Feishu malformed-event diagnostics identify invalid fields without logging message content", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-feishu-invalid-"));
+  const entries: string[] = [];
+  const diagnosticLog = pino({ level: "warn" }, { write(line) { entries.push(line); } });
+  const { transport } = fakeTransport();
+  const channel = new FeishuChannel(home, "cli_invalid", {
+    receive: async () => { throw new Error("Invalid events must not execute"); }, messages: () => [],
+  }, transport, diagnosticLog);
+  t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
+  await channel.receive({ ...event("invalid", "sensitive message body"), sender: { sender_type: null } });
+  assert.equal(entries.length, 1);
+  const entry = JSON.parse(entries[0]!);
+  assert.deepEqual(entry.issues[0].path, ["sender", "sender_type"]);
+  assert.equal(entry.issues[0].code, "invalid_type");
+  assert.ok(!entries[0]!.includes("sensitive message body"));
+});
+
 test("Feishu accepts exact bot mentions, strips SDK placeholders, isolates chats and deduplicates concurrent group events", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-feishu-group-"));
   const prompts: string[] = [];
@@ -154,6 +171,39 @@ test("Feishu accepts exact bot mentions, strips SDK placeholders, isolates chats
     "feishu:cli_group:oc_group", "feishu:cli_group:oc_other_group", "feishu:cli_group:oc_direct",
   ]));
   assert.equal(aide.store.read().works.length, 0);
+});
+
+test("Feishu accepts nullable permission-restricted user IDs and still requires the bot open ID", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-feishu-null-ids-"));
+  const received: { id: string; text: string }[] = [];
+  const { transport } = fakeTransport({ openId: "ou_aide", name: "Aide" });
+  const channel = new FeishuChannel(home, "cli_null_ids", {
+    receive: async (input) => {
+      received.push(input);
+      return { ...input, role: "user", at: new Date().toISOString(), workId: null };
+    }, messages: () => [],
+  }, transport, log);
+  t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
+  // @case Live Feishu group events may expose open_id while withholding user_id as null.
+  const group = {
+    sender: { sender_type: "user", sender_id: { open_id: "ou_sender", user_id: null } },
+    message: { ...event("null-ids", "@_user_1 看下 @_user_2 的需求", "oc_group").message, chat_type: "group",
+      mentions: [
+        { key: "@_user_1", name: "Aide", id: { open_id: "ou_aide", user_id: null } },
+        { key: "@_user_2", name: "小王", id: { open_id: "ou_wang", user_id: null } },
+      ] },
+  };
+  await channel.receive(group);
+  await channel.receive({ ...group, message: { ...group.message, message_id: "other-bot",
+    mentions: [{ key: "@_user_1", name: "Aide", id: { open_id: "ou_other", user_id: null } }] } });
+  await channel.receive({ ...group, message: { ...group.message, message_id: "no-open-id",
+    mentions: [{ key: "@_user_1", name: "Aide", id: { user_id: null } }] } });
+  await channel.receive({ ...event("direct-null-id", "单聊仍可用"), sender: group.sender });
+  await channel.dispatch();
+  assert.deepEqual(received.map(({ id, text }) => ({ id, text })), [
+    { id: "null-ids", text: "看下 @小王 的需求" },
+    { id: "direct-null-id", text: "单聊仍可用" },
+  ]);
 });
 
 test("Feishu leaves group mentions disabled without bot identity and handles empty or non-text mentions without executing Chief", async (t) => {
