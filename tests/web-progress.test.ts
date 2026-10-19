@@ -178,12 +178,12 @@ test("Web associates failed replies with their Input so interruption warnings re
     execute: async () => { throw new Error("No Work expected"); },
   }, root), pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ id: "failed-reply", conversationId: "failed", text: "检查展示故障" });
+  await aide.receive({ id: "failed-reply", sessionId: "failed", conversationId: "failed", text: "检查展示故障" });
   await aide.settled();
   const view = conversationView(aide, "failed");
   const reply = view.blocks.find((block) => block.role === "aide")!;
   assert.equal(reply.status, "failed");
-  assert.equal(reply.group_id, aide.conversations.inputs("failed")[0]!.metadata.name);
+  assert.equal(reply.group_id, aide.session("failed").conversations.inputs("failed")[0]!.metadata.name);
   assert.ok(aide.invocations().some((invocation) => invocation.inputId === reply.group_id));
   assert.match(reply.content, /未完成/);
 });
