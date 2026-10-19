@@ -115,6 +115,10 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content, "最终答复");
   const completed = second.views.at(-1)!;
   assert.equal(completed.blocks.find((block) => block.type === "execution")!.status, "completed");
+  const groupId = completed.blocks.find((block) => block.type === "execution")!.group_id;
+  assert.ok(groupId, "Execution grouping must use durable Input ownership");
+  assert.equal(completed.blocks.find((block) => block.role === "aide")!.group_id, groupId);
+  assert.equal(completed.blocks.find((block) => block.role === "user")!.group_id, undefined);
   assert.equal(completed.blocks.find((block) => block.type === "thought")!.content, "先检查资料");
   assert.equal(completed.blocks.find((block) => block.type === "tool")!.detail, "/tmp/README");
   assert.doesNotMatch(JSON.stringify(completed), /另一会话/);
@@ -136,6 +140,10 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   await aide.settled();
   const later = conversationView(aide, "a");
   assert.equal(later.blocks.filter((block) => block.type === "execution").length, 2);
+  assert.equal(new Set(later.blocks.filter((block) => block.type === "execution").map((block) => block.group_id)).size, 2);
+  for (const reply of later.blocks.filter((block) => block.role === "aide")) {
+    assert.ok(later.blocks.some((block) => block.type === "execution" && block.group_id === reply.group_id));
+  }
   assert.equal(later.blocks.find((block) => block.type === "thought")!.parent_id,
     completed.blocks.find((block) => block.type === "execution")!.id);
   await aide.close();
@@ -160,4 +168,22 @@ test("AgentUE reducer reconstructs growing, corrected and removed progress witho
     assert.deepEqual(snapshot, next);
     previous = next;
   }
+});
+
+
+test("Web associates failed replies with their Input so interruption warnings remain visible", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-web-failed-reply-"));
+  const aide = new Aide(root, fakeOptions({
+    chief: async () => { throw new Error("controlled model failure"); },
+    execute: async () => { throw new Error("No Work expected"); },
+  }, root), pino({ level: "silent" }));
+  t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
+  await aide.receive({ id: "failed-reply", conversationId: "failed", text: "检查展示故障" });
+  await aide.settled();
+  const view = conversationView(aide, "failed");
+  const reply = view.blocks.find((block) => block.role === "aide")!;
+  assert.equal(reply.status, "failed");
+  assert.equal(reply.group_id, aide.conversations.inputs("failed")[0]!.metadata.name);
+  assert.ok(aide.invocations().some((invocation) => invocation.inputId === reply.group_id));
+  assert.match(reply.content, /未完成/);
 });

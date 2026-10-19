@@ -45,8 +45,6 @@
   .activity-content.markdown { white-space: normal; }
   .activity-block.thought .activity-content, .activity-block.tool .activity-content { max-height: 220px; overflow: auto; color: #68776c; }
   .activity-block summary { cursor: pointer; }
-  .execution-history { margin: 12px 0; padding: 12px 18px; border: 1px solid #e1e6dc; border-radius: 12px; }
-  .execution-history > summary { cursor: pointer; color: #68776c; font-size: 13px; }
   @keyframes pulse { 50% { opacity: .3; } }
   @media(prefers-reduced-motion: reduce) { .activity-heading::before { animation: none; } }
   .empty { margin: 10vh auto; max-width: 480px; } .empty h2 { font-size: 26px; font-weight: 500; }
@@ -74,3 +72,14 @@
   .interaction p, .interaction pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   @media(max-width: 1000px) { header { padding: 16px; } main { display: block; height: auto; } .conversations { max-height: 220px; border-right: 0; border-bottom: 1px solid #d8dfd5; padding: 16px; } .conversation { height: 75dvh; padding: 16px; } aside { border-left: 0; border-top: 1px solid #d8dfd5; } }
+
+  .reply-region { margin-top: 12px; color: inherit; font-size: 14px; }
+  .reply-region > summary { cursor: pointer; padding: 6px 0; color: #42634c; overflow-wrap: anywhere; }
+  .reply-region > summary:focus-visible { outline: 2px solid #83a38b; outline-offset: 3px; border-radius: 4px; }
+  .reply-region > .message-body { padding-top: 6px; }
+  .reply-region + .reply-region { border-top: 1px solid #e1e6dc; padding-top: 6px; }
+
+  .reply-envelope > summary { cursor: pointer; color: #42634c; font-size: 14px; overflow-wrap: anywhere; }
+  .reply-envelope > summary:focus-visible { outline: 2px solid #83a38b; outline-offset: 3px; border-radius: 4px; }
+  .reply-envelope > .activity-heading { display: list-item; }
+  .reply-envelope > .activity-heading::before { display: inline-block; margin-right: 8px; }

@@ -1,4 +1,4 @@
-import { applyPatch, parsePatchEvent, renderMarkdown } from '/agentue.js';
+import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agentue.js';
   const $ = (id) => document.getElementById(id);
   const conversationId = new URL(location.href).searchParams.get('conversation') || 'me';
   const query = '?conversationId=' + encodeURIComponent(conversationId);
@@ -53,39 +53,76 @@ import { applyPatch, parsePatchEvent, renderMarkdown } from '/agentue.js';
       $('conversation-notice').textContent = '';
     } catch { $('conversation-notice').textContent = '会话列表暂时无法更新，正在重试。'; }
   }
-  function renderMessages(blocks) {
-    const liveIds = new Set(blocks.filter((block) => block.type === 'execution' && block.status === 'running').map((block) => block.id));
-    const history = blocks.filter((block) => !liveIds.has(block.id) && !liveIds.has(block.parent_id));
+  const regionChoices = new Map();
+  function replyRegion(id, title, defaultOpen) {
+    const node = element('details', undefined, 'reply-region');
+    node.dataset.blockId = id; node.open = regionChoices.get(id) ?? defaultOpen;
+    const summary = element('summary', title);
+    summary.addEventListener('click', () => {
+      regionChoices.set(id, !node.open);
+    });
+    node.append(summary); return node;
+  }
+  function appendProgress(parent, blocks, expanded) {
+    for (const block of blocks) {
+      const node = progressNode(block.type); node.dataset.blockId = block.id;
+      if (block.type !== 'text') node.open = expanded.get(block.id) ?? true;
+      updateProgress(node, block.type, block.content, block.status, block.detail);
+      parent.append(node);
+    }
+  }
+  /** @spec Each Input renders one collapsible reply with independently collapsible process and answer regions; final text appears once. */
+  function renderMessages(blocks, activity) {
+    const liveIds = new Set(blocks.filter((block) => block.type === 'execution' &&
+      (block.status === 'running' || (activity && block.group_id === activity.id))).map((block) => block.id));
+    const history = blocks.filter((block) => !liveIds.has(block.id) && !liveIds.has(block.parent_id) &&
+      (!activity || block.group_id !== activity.id));
     const signature = JSON.stringify(history);
     if (signature === lastMessages) return;
     lastMessages = signature;
     const nearBottom = $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
-    const expanded = new Map([...$('history').querySelectorAll('details')].map((node) => [node.dataset.blockId, node.open]));
+    const expanded = new Map([...$('messages').querySelectorAll('details')].map((node) => [node.dataset.blockId, node.open]));
     $('history').replaceChildren();
     if (!history.length) {
       const empty = element('div', undefined, 'empty');
       empty.append(element('h2', '从一件具体的事开始'), element('p', '例如：总结工作目录里的 README；每天上午检查项目进展；关注某件事，发生变化时告诉我。'));
       $('history').append(empty);
     }
-    for (const block of history.filter((block) => !block.parent_id)) {
-      if (block.type === 'message') {
-        const node = element('article', undefined, 'message ' + block.role);
-        const body = element('div', undefined, 'markdown message-body');
-        updateMarkdown(body, block.content);
-        node.append(element('div', (block.role === 'user' ? '你' : 'Aide') + ' · ' + new Date(block.at).toLocaleTimeString(), 'muted'), body);
-        $('history').append(node);
-      } else if (block.type === 'execution') {
-        const node = element('details', undefined, 'execution-history'); node.dataset.blockId = block.id; node.open = expanded.get(block.id) ?? false;
-        const status = block.status === 'completed' ? '已完成' : '已中断';
-        node.append(element('summary', '查看思考与执行过程 · ' + status));
-        for (const child of history.filter((child) => child.parent_id === block.id)) {
-          const detail = progressNode(child.type); detail.dataset.blockId = child.id;
-          if (child.type !== 'text') detail.open = expanded.get(child.id) ?? true;
-          updateProgress(detail, child.type, child.content, child.status, child.detail);
-          node.append(detail);
-        }
-        $('history').append(node);
+    const rendered = new Set();
+    const roots = history.filter((block) => !block.parent_id);
+    for (const block of roots) {
+      if (block.type === 'message' && block.role === 'user') {
+        const node = element('article', undefined, 'message user');
+        const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, block.content);
+        node.append(element('div', '你 · ' + new Date(block.at).toLocaleTimeString(), 'muted'), body);
+        $('history').append(node); continue;
       }
+      const groupId = block.group_id || block.id;
+      if (rendered.has(groupId)) continue;
+      rendered.add(groupId);
+      const group = block.group_id ? roots.filter((item) => item.group_id === block.group_id) : [block];
+      const executions = new Set(group.filter((item) => item.type === 'execution').map((item) => item.id));
+      const children = history.filter((item) => executions.has(item.parent_id));
+      const answers = group.filter((item) => item.type === 'message' && item.role === 'aide').map((item) => item.content);
+      const lastText = children.filter((item) => item.type === 'text').at(-1);
+      const answer = answers.join('\n\n') || lastText?.content || '';
+      const process = children.filter((item) => item.type !== 'text' || (answers.length ? item.phase !== 'final' && !answers.includes(item.content) : item !== lastText));
+      const failed = group.some((item) => item.status === 'failed' || item.status === 'interrupted');
+      const title = 'Aide · ' + (failed ? '处理已中断' : '已完成') + (answer ? ' · ' + replyPreview(answer) : '');
+      const node = replyRegion('input:' + groupId + ':whole', title, failed);
+      node.className = 'message aide assistant-reply reply-envelope'; node.dataset.inputId = groupId;
+      if (executions.size || block.group_id) {
+        const thought = replyRegion('input:' + groupId + ':think', '思考与执行过程', false);
+        appendProgress(thought, process, expanded);
+        if (!process.length) thought.append(element('p', '没有可展示的思考或工具记录。', 'muted'));
+        node.append(thought);
+      }
+      if (answer) {
+        const reply = replyRegion('input:' + groupId + ':answer', '回答', true);
+        const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, answer);
+        reply.append(body); node.append(reply);
+      }
+      $('history').append(node);
     }
     if (nearBottom) $('messages').scrollTop = $('messages').scrollHeight;
   }
@@ -115,20 +152,28 @@ import { applyPatch, parsePatchEvent, renderMarkdown } from '/agentue.js';
     if (!activity) { area.replaceChildren(); activityNodes.clear(); activityId = undefined; return; }
     if (activity.id !== activityId) {
       activityId = activity.id; activityNodes.clear(); area.replaceChildren();
-      const heading = element('div', '', 'activity-heading'); heading.id = 'activity-heading'; heading.setAttribute('role', 'status'); area.append(heading);
+      const envelope = replyRegion('input:' + activity.id + ':whole', 'Aide · 正在处理', true); envelope.className = 'reply-envelope';
+      const heading = envelope.querySelector('summary'); heading.id = 'activity-heading'; heading.className = 'activity-heading'; heading.setAttribute('role', 'status');
+      const thought = replyRegion('input:' + activity.id + ':think', '思考与执行过程', false); thought.id = 'activity-thought';
+      const reply = replyRegion('input:' + activity.id + ':answer', '回答', true);
+      const body = element('div', undefined, 'markdown message-body'); body.id = 'activity-answer'; reply.append(body);
+      envelope.append(thought, reply); area.append(envelope);
     }
     const last = activity.blocks.at(-1);
     const label = activity.phase === 'waiting' ? '等待你回答' : activity.phase === 'queued' ? '正在排队'
       : last?.kind === 'tool' && last.status === 'in_progress' ? '正在调用工具'
       : last?.kind === 'thought' ? '正在思考' : last?.kind === 'text' ? '正在回复' : '正在处理';
-    $('activity-heading').textContent = label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : '');
-    const ids = new Set(activity.blocks.map((block) => block.id));
+    $('activity-heading').textContent = 'Aide · ' + label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : '');
+    const lastText = activity.blocks.filter((block) => block.kind === 'text').at(-1);
+    const answer = activity.answers.join('\n\n') || lastText?.text || '';
+    updateMarkdown($('activity-answer'), answer || (activity.phase === 'waiting' ? '等待你回答。' : '正在整理回复…'));
+    const process = activity.blocks.filter((block) => block.kind !== 'text' ||
+      (activity.answers.length ? block.phase !== 'final' && !activity.answers.includes(block.text) : block !== lastText));
+    const ids = new Set(process.map((block) => block.id));
     for (const [id, node] of activityNodes) if (!ids.has(id)) { node.remove(); activityNodes.delete(id); }
-    for (const block of activity.blocks) {
+    for (const block of process) {
       let node = activityNodes.get(block.id);
-      if (!node) {
-        node = progressNode(block.kind); activityNodes.set(block.id, node); area.append(node);
-      }
+      if (!node) { node = progressNode(block.kind); activityNodes.set(block.id, node); $('activity-thought').append(node); }
       updateProgress(node, block.kind, block.text, block.status, block.detail);
     }
     if (nearBottom) $('messages').scrollTop = $('messages').scrollHeight;
@@ -282,10 +327,13 @@ import { applyPatch, parsePatchEvent, renderMarkdown } from '/agentue.js';
       const patch = parsePatchEvent(event.data);
       view = applyPatch(view, patch);
       if (patch.op === 'ping' || patch.op === 'end') return;
-      renderMessages(view.blocks);
-      const liveIds = new Set(view.blocks.filter((block) => block.type === 'execution' && block.status === 'running').map((block) => block.id));
-      renderActivity(view.meta.activity && { ...view.meta.activity, blocks: view.blocks.filter((block) => liveIds.has(block.parent_id))
-        .map((block) => ({ ...block, kind: block.type, text: block.content })) });
+      renderMessages(view.blocks, view.meta.activity);
+      const liveIds = new Set(view.blocks.filter((block) => block.type === 'execution' &&
+        (block.status === 'running' || (view.meta.activity && block.group_id === view.meta.activity.id))).map((block) => block.id));
+      renderActivity(view.meta.activity && { ...view.meta.activity,
+        answers: view.blocks.filter((block) => block.role === 'aide' && block.group_id === view.meta.activity.id).map((block) => block.content),
+        blocks: view.blocks.filter((block) => liveIds.has(block.parent_id))
+          .map((block) => ({ ...block, kind: block.type, text: block.content })) });
       $('connection').textContent = view.meta.error ? view.meta.error.message : '实时连接';
     } catch {
       stream.close(); $('connection').textContent = '无法读取对话进展，请刷新页面重试';
