@@ -14,9 +14,3 @@ export interface ChannelService {
   invocations(): readonly HarnessInvocationSnapshot[];
   conversationIds(): string[];
 }
-
-/** Product-specific sidebar and external event input supplied by application composition. */
-export interface WebService extends ChannelService {
-  works(): readonly { conversationId: string }[];
-  event(input: Incoming & { name: string }): Promise<number>;
-}

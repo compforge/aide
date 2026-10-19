@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { renderMarkdown } from "../src/channel/markdown.ts";
+import { renderMarkdown } from "../src/web/markdown.ts";
 
 test("Markdown renders headings, nested lists, tables, quotes, links and code as readable HTML", () => {
   const html = renderMarkdown(`# 项目进展

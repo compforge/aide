@@ -91,6 +91,6 @@ export class WorkService {
     const work = this.read(id);
     if (work.revision !== revision) throw new Error(`Work ${id} revision changed; read it again before deleting`);
     await this.store.delete(id);
-    this.log.info({ workId: id, revision }, "Work tool deleted work");
+    this.log.info({ workId: id, conversationId: this.conversationId, kind: work.kind, revision }, "Deleted work");
   }
 }

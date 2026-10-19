@@ -2,6 +2,10 @@
 
 Web 是 Aide 的浏览器 Channel，提供会话导航、聊天、工作列表与用户交互。与 Feishu 的共同边界见 [Channel](README.md)。
 
+## 前后端分工
+
+`src/web/` 放浏览器页面、脚本、样式与 Markdown 渲染。`src/api/` 提供 HTTP 路由、输入校验、响应与 SSE，handler 通过应用提供的接口调用 Core / Personal 能力；Work 生命周期规则由 WorkService 负责。共享的消息和执行展示投影仍在 `src/channel/`，供 Web 与 Feishu 使用。
+
 ## 消息与 Markdown
 
 用户消息、Aide 正式回复，以及执行过程中的思考与文字输出使用同一 Markdown 渲染器，支持标题、列表、引用、代码块、表格和链接。流式内容按当前完整文本重新解析，历史记录和重连快照使用相同规则。表格与代码块可横向滚动。
@@ -24,11 +28,11 @@ Pi Adapter 将 `text_delta` / `thinking_delta` 映射到现有 `agent_message_ch
 
 `src/channel/view.ts` 从已有 Session Projection 选择显式关联当前 Conversation 的 HarnessInvocation 及其 Turn，不发送内部提示词或整个工具原始响应。它生成 `biz: aide.conversation` 的 AgentUE UIModel：`meta.conversation_id` 和 `meta.activity` 表示会话与当前执行状态，正式 `message` 和每个 Turn 对应的 `execution` 按时间排序；`thought` / `text` / `tool` 通过 `parent_id` 归属到该 execution，内部保持 Ledger 时间线顺序。不同类别的 ID 有前缀，避免业务消息与执行事件的身份冲突。
 
-`src/channel/stream.ts` 使用 SDK 的 `PatchEmitter` 和 `encodeSse`，通过 `GET /stream?conversationId=...` 输出 AgentUE SSE。首次连接与重连发送 `start` 完整快照，之后新增或更正 block 用 `set`，正文增长用 `append`，执行状态变化用 `meta.activity` 的 `set`。完成只改变 execution 状态，不移除其内容；消息插入导致 block 顺序变化时发送新的 `start` 替换模型。
+`src/api/stream.ts` 使用 SDK 的 `PatchEmitter` 和 `encodeSse`，通过 `GET /stream?conversationId=...` 输出 AgentUE SSE。首次连接与重连发送 `start` 完整快照，之后新增或更正 block 用 `set`，正文增长用 `append`，执行状态变化用 `meta.activity` 的 `set`。完成只改变 execution 状态，不移除其内容；消息插入导致 block 顺序变化时发送新的 `start` 替换模型。
 
 流式变更合并后发送，空闲连接发送 AgentUE `ping`，独立写入的 Work outbox 定期检查。发送阻塞时等待 drain，基于上次已写出的模型计算最新 patch。连接定期以 `end` 正常结束，由 EventSource 自动重连；投影失败发送 `error` 后 `end`。首次投影失败则直接返回 HTTP 500。断开连接清理订阅和计时器，不取消服务端执行；进程退出或网络中断属于传输中断，客户端从新快照恢复。
 
-使用已发布的 `@compforge/agentue` SDK，版本由 lockfile 固定。服务端与浏览器直接引用同一 SDK，不复制协议实现。`web-sdk.ts` 仅导出浏览器所需的 `applyPatch` / `parsePatchEvent`，由现有 Bun 在首次请求时打包并缓存，经同源 `/agentue.js` 提供。浏览器按 SDK reducer 更新展示模型，Aide 负责将 block 渲染到页面并保留展开状态、输入焦点和用户浏览历史时的滚动位置。
+使用已发布的 `@compforge/agentue` SDK，版本由 lockfile 固定。服务端与浏览器直接引用同一 SDK，不复制协议实现。`src/web/sdk.ts` 仅导出浏览器所需的 `applyPatch` / `parsePatchEvent`，由现有 Bun 在首次请求时打包并缓存，经同源 `/agentue.js` 提供。浏览器按 SDK reducer 更新展示模型，Aide 负责将 block 渲染到页面并保留展开状态、输入焦点和用户浏览历史时的滚动位置。
 
 Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职责独立。每次连接的 seq 属于该次交付，不保存 UI patch 日志或按 Last-Event-ID 重放；执行事件仍由既有 Ledger 持久化。
 
@@ -41,6 +45,12 @@ Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职
 网页左栏通过 `GET /conversations` 汇总已有 Conversation 与仅有工作记录的会话范围，展示首条用户消息标题、最近消息摘要和会话 ID，按最近输入或消息时间排序。摘要不包含 Source 观察正文或 Harness 执行细节。默认对话与当前 URL 指定的空会话仍可进入；浏览列表不创建会话。
 
 点击会话导航到 `/?conversation=...`，消息 SSE 与事项查询使用同一个 conversationId。页面导航重新建立该会话的展示快照，刷新和前进后退保留 URL 选择；后台执行不受影响。列表更新失败保留已显示条目并独立提示，不覆盖发送状态。关联问题按 Conversation 展示；未关联会话的宿主 Interaction 保留在本地收件区。
+
+## 工作管理
+
+事项和安排卡片都可手动删除，确认后通过会话范围内的 WorkService 执行。删除保留已有消息，并停止后续跟进；已发起的外部操作可能仍会完成。失败时展示原因，工作版本变化时需刷新后重新确认。
+
+`POST /work/delete` 接收 `id`、`conversationId` 和 `revision`，沿用 Work 工具的删除流程。当前会话找不到工作返回 404，版本不匹配返回 409。
 
 ## 本地 HTTP 接口
 

@@ -1,4 +1,4 @@
-import type { ChannelService, WebService } from "./service.ts";
+import type { ChannelService } from "./service.ts";
 import { conversationView } from "./view.ts";
 
 export interface FeishuProgress {

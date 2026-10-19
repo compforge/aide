@@ -3,15 +3,19 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { Logger } from "pino";
-import type { ChannelService, WebService } from "./service.ts";
+import type { WebService } from "./service.ts";
 import { validInputResult } from "../host/interaction/answer.ts";
-import { IncomingSchema } from "./message.ts";
-import { conversationList } from "./view.ts";
+import { IncomingSchema } from "../channel/message.ts";
+import { conversationList } from "../channel/view.ts";
 import { streamConversation } from "./stream.ts";
 
 const EventSchema = IncomingSchema.omit({ text: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
+
+const DeleteWorkSchema = IncomingSchema.pick({ id: true, conversationId: true }).extend({
+  revision: z.number().int().positive(),
+}).strict();
 
 const InteractionResponseSchema = z.object({
   messageId: z.string().min(1),
@@ -41,7 +45,13 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 
 /** Local channel bridge: accept messages/events and let adapters poll the durable outgoing log. */
 export function httpChannel(aide: WebService, log: Logger) {
-  const page = readFileSync(new URL("./web.html", import.meta.url), "utf8");
+  const files = [
+    ["/", "index.html", "text/html"],
+    ["/app.js", "app.js", "text/javascript"],
+    ["/style.css", "style.css", "text/css"],
+  ] as const;
+  const assets = new Map<string, { type: string; content: string }>(files.map(([path, file, type]) =>
+    [path, { type, content: readFileSync(new URL(`../web/${file}`, import.meta.url), "utf8") }]));
   let webSdk: Promise<string> | undefined;
   return createServer(async (request, response) => {
     try {
@@ -53,15 +63,16 @@ export function httpChannel(aide: WebService, log: Logger) {
       if (request.method === "POST" && request.headers["content-type"]?.split(";", 1)[0]?.trim() !== "application/json") {
         json(response, 415, { error: "Content-Type must be application/json" }); return;
       }
-      if (request.method === "GET" && url.pathname === "/") {
+      const asset = assets.get(url.pathname);
+      if (request.method === "GET" && asset) {
         response.writeHead(200, {
-          "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
-          "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+          "content-type": `${asset.type}; charset=utf-8`, "cache-control": "no-store",
+          "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         });
-        response.end(page); return;
+        response.end(asset.content); return;
       }
       if (request.method === "GET" && url.pathname === "/agentue.js") {
-        webSdk ??= Bun.build({ entrypoints: [fileURLToPath(new URL("./web-sdk.ts", import.meta.url))], target: "browser", format: "esm", minify: true })
+        webSdk ??= Bun.build({ entrypoints: [fileURLToPath(new URL("../web/sdk.ts", import.meta.url))], target: "browser", format: "esm", minify: true })
           .then(async (build) => {
             if (!build.success) throw new AggregateError(build.logs, "AgentUE browser bundle failed");
             return build.outputs[0]!.text();
@@ -102,6 +113,16 @@ export function httpChannel(aide: WebService, log: Logger) {
       } else if (request.method === "POST" && url.pathname === "/messages") {
         const input = IncomingSchema.parse(await body(request));
         json(response, 200, await aide.receive(input));
+      } else if (request.method === "POST" && url.pathname === "/work/delete") {
+        const { id, conversationId, revision } = DeleteWorkSchema.parse(await body(request));
+        const work = aide.works().find((item) => item.id === id && item.conversationId === conversationId);
+        if (!work) { json(response, 404, { error: "该工作已删除或不属于当前会话。" }); return; }
+        if (work.revision !== revision) {
+          json(response, 409, { error: "工作已更新，请刷新后重新确认删除。" }); return;
+        }
+        // @spec Web deletion uses the same scoped, revision-checked lifecycle as Chief's Work tools.
+        await aide.work(conversationId).delete(id, revision);
+        json(response, 200, { deleted: true });
       } else if (request.method === "POST" && url.pathname === "/events") {
         json(response, 200, { matched: await aide.event(EventSchema.parse(await body(request))) });
       } else if (request.method === "GET" && ["/messages", "/work"].includes(url.pathname)) {

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import type { Logger } from "pino";
 import { z } from "zod";
-import type { ChannelService, WebService } from "./service.ts";
+import type { ChannelService } from "./service.ts";
 import { IncomingSchema, MessageSchema, type Message } from "./message.ts";
 import { progressCard, cardContent, cardThought, type FeishuProgressReader, type FeishuProgress } from "./feishu-card.ts";
 import type { FeishuTransport } from "./feishu-client.ts";

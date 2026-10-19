@@ -7,7 +7,7 @@ import pino from "pino";
 import { z } from "zod";
 import { Aide } from "./app.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
-import { httpChannel } from "./channel/http.ts";
+import { httpChannel } from "./api/index.ts";
 import { feishuProgress } from "./channel/feishu-card.ts";
 import { FeishuChannel } from "./channel/feishu.ts";
 import { feishuConfig, feishuTransport } from "./channel/feishu-client.ts";

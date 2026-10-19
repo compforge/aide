@@ -7,7 +7,7 @@ import { test } from "node:test";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { httpChannel } from "../src/channel/http.ts";
+import { httpChannel } from "../src/api/index.ts";
 import type { InputRequest } from "../src/host/message/types.ts";
 import type { InteractionResult } from "../src/host/interaction/types.ts";
 
@@ -35,6 +35,7 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   const page = await fetch(url);
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-security-policy")!, /frame-ancestors 'none'/);
+  assert.match(page.headers.get("content-security-policy")!, /style-src 'self'/);
   assert.match(await page.text(), /交办事情或回答问题/);
   assert.equal((await (await fetch(`${url}/health`)).json() as { status: string }).status, "ok");
   // A website must not be able to submit work to the local agent through a visitor's browser.
@@ -168,4 +169,57 @@ test("conversation navigation lists persisted scopes without creating them and k
   assert.deepEqual(works.map((item) => item.id), [task.id]);
   assert.deepEqual(await (await fetch(url + "/work?conversationId=me")).json(), []);
   assert.equal((await fetch(url + "/conversations", { headers: { origin: "https://unrelated.example" } })).status, 403);
+});
+
+/** @case Web deletion is scoped and revision checked, preserves messages and stops future Work dispatch. */
+test("Web deletes Tasks and Routines through WorkService and preserves other conversations", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "aide-web-delete-"));
+  const requests: string[] = [];
+  const log = pino({ level: "silent" });
+  const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("Deleted work must not execute"); } }, dir, requests), log);
+  const server = httpChannel(aide, log);
+  t.after(async () => {
+    await aide.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const group = "feishu:app:群 & #1";
+  const work = aide.work(group);
+  const initialTask = await work.create({ kind: "task", title: "检查项目", instruction: "check", trigger: null });
+  const task = await work.update(initialTask.id, { revision: initialTask.revision, action: "pause" });
+  const routine = await work.create({ kind: "routine", title: "监控内存", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "memory.changed" } });
+  const foreign = await aide.work("other").create({ kind: "routine", title: "其他会话", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "memory.changed" } });
+  await aide.store.save(routine, [{ id: "retained-reply", conversationId: group, at: new Date().toISOString(), role: "aide", text: "已建立监控", workId: routine.id }]);
+  await aide.start(); await aide.settled();
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const base = `http://127.0.0.1:${address.port}`;
+  const remove = (id: string, revision: number, conversationId = group) => fetch(base + "/work/delete", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, revision, conversationId }),
+  });
+  for (const [path, type] of [["/app.js", "javascript"], ["/style.css", "text/css"]]) {
+    const response = await fetch(base + path);
+    assert.equal(response.status, 200);
+    assert.ok(response.headers.get("content-type")!.includes(type!));
+    assert.ok((await response.text()).length > 0);
+  }
+  assert.equal((await fetch(base + "/work/delete", { method: "POST", body: "{}" })).status, 415);
+  assert.equal((await fetch(base + "/work/delete", { method: "POST", headers: { "content-type": "application/json", origin: "https://unrelated.example" }, body: JSON.stringify({ id: task.id, revision: task.revision, conversationId: group }) })).status, 403);
+  assert.equal((await remove(task.id, 0)).status, 400);
+  assert.equal((await remove(foreign.id, foreign.revision)).status, 404);
+  assert.equal((await remove(task.id, initialTask.revision)).status, 409);
+  assert.equal(work.list().length, 2);
+  for (const item of [task, routine]) {
+    const response = await remove(item.id, item.revision);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { deleted: true });
+    assert.equal((await remove(item.id, item.revision)).status, 404);
+  }
+  await aide.settled();
+  assert.deepEqual(await (await fetch(base + "/work?conversationId=" + encodeURIComponent(group))).json(), []);
+  assert.deepEqual(aide.work("other").list().map((item) => item.id), [foreign.id]);
+  assert.equal(aide.messages().find((item) => item.id === "retained-reply")?.text, "已建立监控");
+  assert.equal(await aide.event({ id: "after-delete", conversationId: group, name: "memory.changed", text: "changed" }), 0);
+  await aide.settled();
+  assert.equal(requests.length, 0);
 });
