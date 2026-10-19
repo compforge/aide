@@ -2,7 +2,7 @@
 
 ## 项目定位与边界
 
-Aide 是小型、自托管的 personal agent。Web / Feishu Channel 与 Source 提交输入，Personal 插件的 Chief 负责判断，普通问题直接回复，需要跟进时操作 Task / Routine。Host / Runner 提供可供其它插件使用的运行机制。
+Aide 是小型、自托管的 personal agent，围绕用户交付的目标跨执行与等待持续跟进，减少用户催进度、重复背景与纠错的负担。Web / Feishu Channel 与 Source 提交输入，Personal 插件的 Chief 负责判断，普通问题直接回复，需要跟进时操作 Task / Routine。Host / Runner 提供可供其它插件使用的运行机制。
 
 按绿地视角开发，先走通个人助手场景，不建设账号权限中心、共享 SDK 或多实例平台。业务判断放在 Personal 与 Chief Agent；修改通用机制前先说明具体需求和现有能力缺口。
 
@@ -56,15 +56,15 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
 - Session 是持久执行作用域，保留 Ledger、Lane、Turn 与恢复绑定；CoreSession 负责进程期装配。Session 统一位于 `$AIDE_HOME/sessions/<id>/`，不按 project / cwd 分组。逻辑 ID 的目录编码由 SessionStore 负责。启动时恢复全部 Session 的工作和 Source；watch 仅装配到所属 Session。cwd 只是执行环境，改变时保留 Aide 历史并清空原生恢复绑定；插件私有数据仅有 global、session、instance 三个目录作用域。
 - Conversation 是 builtin resource，convId 标识交流分组，不替代 Session / Lane / Turn 的执行身份。Conversation / Input / Message 由 Host 管理。Channel / Source 提供稳定 sessionId，conversationId 可沿用它；Core 按 Session 恢复执行，Chief 按 Conversation 串行消费输入并复用固定 Lane。会话分组不是权限边界。
-- Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。类型转换组合创建、暂停或删除，目标工作拥有新 id。
+- Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。
 - Harness 原生 Session 由各 Harness 管理并使用其默认目录；Aide 按 Session × Lane × Target 保存原生身份和 Adapter 的 resumeState。
-- 记忆由 Harness 组合开源实现；Chief 内置 pi-hermes-memory，Personal 不感知记忆能力，Core 不新增记忆存储或协议。扩展生命周期由 PiAdapter 驱动，原生配置与共享范围见 Chief 文档。
+- 业务进展以资源和执行事实为准，记忆辅助理解与判断。记忆由 Harness 组合开源实现；Chief 内置 pi-hermes-memory，Personal 不感知记忆能力，Core 不新增记忆存储或协议。扩展生命周期由 PiAdapter 驱动，原生配置与共享范围见 Chief 文档。
 - `pi` 提供通用 Agent，`chief` 加入 Personal 工具，两者复用 PiAdapter。通用 Pi 不依赖 Personal，Chief 的 WorkService 由宿主绑定范围；默认 Work 执行由根级 `defaultHarness` 选择，缺省为通用 Pi。
 - Source 先提交持久 Input 再推进观察水位。输入状态、业务回复和去重记录按现有原子提交边界保存，不能用投递失败重新触发业务执行。
-- Harness 结束不等于业务目标完成，Personal 校验结果后决定终态。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
+- Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 保存执行事实。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
 - 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。
 - 执行上下文显式携带主资源和可选 Conversation/Input 关联；Channel 不通过 Chief Target 推导问题和进度归属。
-- Session heartbeat 默认关闭、间隔 3600 秒；开关只控制新定时 Input。say 保存普通 Message，不创建 Interaction；Chief 负责主动回顾的业务判断。
+- Session heartbeat 开关只控制新定时 Input。持续委托与主动沟通策略归 Personal / Chief，Core 提供通用触发与执行机制；Chief 根据已有委托和新事实决定推进、say、ask / confirm 或静默。say 保存普通 Message，不创建 Interaction；记忆中的偏好不自动成为执行委托。
 - Chief 问答复用 Core Interaction；Task / Routine 的 waiting 是业务持久状态。两者的跨重启行为见 Personal 文档。
 - Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Message，不另建轨迹存储。
 - `npm run check` 验证类型与测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或飞书已验证。
