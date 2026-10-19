@@ -9,13 +9,17 @@ import { IncomingSchema, MessageSchema, type Message } from "./message.ts";
 import { progressCard, cardContent, cardThought, type FeishuProgressReader, type FeishuProgress } from "./feishu-card.ts";
 import type { FeishuTransport } from "./feishu-client.ts";
 
+/** @why Feishu can return null for permission-restricted user_id; SDK normalization expects absent IDs as undefined. */
+const UserIdsSchema = z.object({ open_id: z.string().optional(),
+  user_id: z.string().nullish().transform((value) => value ?? undefined), union_id: z.string().optional() });
+
 const EventSchema = z.object({
   sender: z.object({ sender_type: z.string(),
-    sender_id: z.object({ open_id: z.string().optional(), user_id: z.string().optional(), union_id: z.string().optional() }).optional() }),
+    sender_id: UserIdsSchema.optional() }),
   message: z.object({ message_id: z.string().min(1), chat_id: z.string().min(1),
     chat_type: z.string(), message_type: z.string(), content: z.string(),
     mentions: z.array(z.object({ key: z.string().min(1), name: z.string().optional(),
-      id: z.object({ open_id: z.string().optional(), user_id: z.string().optional(), union_id: z.string().optional() }) })).optional() }),
+      id: UserIdsSchema })).optional() }),
 });
 const CardSchema = z.object({ cardId: z.string(), sent: z.boolean(), sequence: z.number().int(),
   streaming: z.boolean(), think: z.string(), content: z.string(), signature: z.string() });
@@ -68,7 +72,11 @@ export class FeishuChannel {
   async receive(raw: unknown): Promise<void> {
     if (this.stopped) throw new Error("Feishu channel is stopping");
     const parsed = EventSchema.safeParse(raw);
-    if (!parsed.success) { this.log.warn("Ignoring malformed Feishu message event"); return; }
+    if (!parsed.success) {
+      this.log.warn({ issues: parsed.error.issues.map(({ path, code, message }) => ({ path, code, message })) },
+        "Ignoring malformed Feishu message event");
+      return;
+    }
     const { sender, message } = parsed.data;
     if (sender.sender_type !== "user") {
       this.log.debug({ messageId: message.message_id, senderType: sender.sender_type }, "Ignoring Feishu non-user message");
