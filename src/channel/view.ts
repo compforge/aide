@@ -60,7 +60,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
       const summary = summaries.get(turnId);
       const live = state.activeTurns.has(turnId);
       const at = summary?.startedAt ?? state.messages.get(input.messageId)?.createdAt;
-      execution = { header: { id: `execution:${turnId}`, type: "execution", content: "思考与执行过程", at, group_id: turnInputs.get(turnId),
+      execution = { header: { id: `execution:${turnId}`, type: "execution", content: "过程", at, group_id: turnInputs.get(turnId),
         status: live ? "running" : summary?.stopReason === "end_turn" ? "completed" : "interrupted" }, blocks: [] };
       executions.set(turnId, execution); roots.push(execution.header);
     }

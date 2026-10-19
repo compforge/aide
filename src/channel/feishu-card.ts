@@ -1,4 +1,4 @@
-import { replyText } from "./reply-layout.ts";
+import { answerPreview, processPreview, replyLabels } from "./reply-layout.ts";
 import type { ChannelService } from "./service.ts";
 import { conversationView } from "./view.ts";
 
@@ -7,11 +7,13 @@ export interface FeishuProgress {
   phase: "queued" | "running" | "waiting" | "done" | "failed";
   think: string;
   content: string;
+  process?: ReturnType<typeof processPreview>;
+  liveAnswer?: string;
   messageIds: string[];
   overflow: boolean;
 }
 export type FeishuProgressReader = (conversationId: string) => FeishuProgress[];
-const labels = { queued: "排队中", running: "正在处理", waiting: "等待你回答", done: "已完成", failed: "处理已中断" };
+const labels = replyLabels;
 
 /**
  * @spec Feishu reads the same thought/text/tool projection as Web; progress is never persisted as a business Message.
@@ -39,6 +41,8 @@ export function feishuProgress(aide: ChannelService, conversationId: string): Fe
     const points = Array.from(text), thought = Array.from(think);
     const result: FeishuProgress = { id: input.metadata.name, phase, think: thought.length > 2000 ? "（仅展示最近过程，完整记录可在网页查看）\n" + thought.slice(-2000).join("") : think,
       content: points.slice(0, 4000).join(""), overflow: points.length > 4000,
+      process: processPreview(phase, blocks),
+      liveAnswer: phase === "running" || phase === "queued" ? answerPreview(text, phase) : undefined,
       messageIds: responses.map((message) => message.id) };
     // Include the nested JSON escaping of the CardKit envelope in the size budget.
     while (Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(result, false)) })) > 28_000) {
@@ -50,25 +54,33 @@ export function feishuProgress(aide: ChannelService, conversationId: string): Fe
 }
 
 /**
- * @spec One reply has a collapsible outer envelope and independent thought/answer panels; completed replies show a three-line answer preview above collapsed details.
- * @why Finished cards should not crowd the chat while retaining the full Markdown reply in the same message.
- * @link docs/channel/feishu.md
+ * @spec Stable panels retain reader-owned expansion while text previews change from live progress to completed summaries.
+ * @link docs/channel/README.md#回复展示状态
  */
 export function progressCard(view: FeishuProgress, streaming: boolean) {
-  const thought = { tag: "markdown", element_id: "think", content: cardThought(view) };
-  const content = { tag: "markdown", element_id: "content", content: cardContent(view) };
-  const compact = !streaming && view.phase === "done";
+  const fields = cardPreviews(view);
   return {
     schema: "2.0",
-    config: { update_multi: true, width_mode: "default", streaming_mode: streaming,
-      summary: { content: streaming ? "Aide · 处理中" : view.content.slice(0, 100) || labels[view.phase] } },
-    header: { title: { tag: "plain_text", content: `Aide · ${labels[view.phase]}` }, template: view.phase === "failed" ? "orange" : "blue" },
-    body: { elements: [
-      ...(compact ? [{ tag: "div", text: { tag: "plain_text", content: replyText(view.content), lines: 3 } }] : []),
-      cardPanel(compact ? "查看完整回复" : "思考与回答", [
-        cardPanel("思考与执行过程", [thought], false), cardPanel("回答", [content], true),
-      ], !compact),
-    ] },
+    config: { update_multi: true, width_mode: "default", streaming_mode: streaming },
+    header: { title: { tag: "plain_text", content: "Aide" }, template: "blue" },
+    body: { elements: [cardPanel("过程与回答", [
+      { tag: "div", element_id: "thought_preview", ...fields.thought_preview },
+      { tag: "div", element_id: "tool_preview", ...fields.tool_preview },
+      cardPanel("过程 · 查看详情", [{ tag: "markdown", element_id: "think", content: cardThought(view) }], false),
+      { tag: "div", element_id: "answer_preview", ...fields.answer_preview },
+      cardPanel("回答 · 查看详情", [{ tag: "markdown", element_id: "content", content: cardContent(view) }], false),
+    ], true)] },
+  };
+}
+
+export function cardPreviews(view: FeishuProgress) {
+  const live = view.phase === "running" || view.phase === "queued";
+  const process = view.process ?? processPreview(view.phase, view.think ? [{ type: "thought", content: view.think }] : []);
+  return {
+    thought_preview: { text: { tag: "plain_text", content: live ? `思考：${process.thought}` : `过程：${process.summary}`, lines: 1 } },
+    tool_preview: { text: { tag: "plain_text", content: live ? `工具：${process.tool}` : "", lines: 1 } },
+    answer_preview: { text: { tag: "plain_text", content: `回答：${view.liveAnswer ?? answerPreview(cardContent(view).trim(), view.phase)}`,
+      lines: view.phase === "waiting" || view.phase === "failed" ? 1000 : 3 } },
   };
 }
 
@@ -85,5 +97,5 @@ export function cardContent(view: FeishuProgress): string {
 }
 
 export function cardThought(view: FeishuProgress): string {
-  return view.think || labels[view.phase];
+  return view.think || labels[view.phase]!;
 }

@@ -17,6 +17,7 @@ export interface FeishuCardTransport {
   create(card: unknown): Promise<string>;
   send(chatId: string, cardId: string, id: string): Promise<void>;
   content(cardId: string, elementId: string, content: string, sequence: number, id: string): Promise<void>;
+  patch(cardId: string, elements: Record<string, unknown>, sequence: number, id: string): Promise<void>;
   settings(cardId: string, streaming: boolean, sequence: number, id: string): Promise<void>;
   update(cardId: string, card: unknown, sequence: number, id: string): Promise<void>;
 }
@@ -99,6 +100,13 @@ export function feishuTransport(config: FeishuConfig, log: Logger): FeishuTransp
       },
       async content(cardId, elementId, content, sequence, id) {
         checkCard(await client.cardkit.v1.cardElement.content({ path: { card_id: cardId, element_id: elementId }, data: { content, sequence, uuid: id } }), "content");
+      },
+      async patch(cardId, elements, sequence, id) {
+        const actions = Object.entries(elements).map(([element_id, partial_element]) => ({
+          action: "partial_update_element", params: { element_id, partial_element },
+        }));
+        checkCard(await client.cardkit.v1.card.batchUpdate({ path: { card_id: cardId },
+          data: { actions: JSON.stringify(actions), sequence, uuid: id } }), "batchUpdate");
       },
       async settings(cardId, streaming, sequence, id) {
         checkCard(await client.cardkit.v1.card.settings({ path: { card_id: cardId },

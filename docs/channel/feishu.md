@@ -44,15 +44,15 @@ journalctl --user -u aide -f
 
 ## 过程反馈与最终答复
 
-Feishu Channel 使用 CardKit 的 JSON 2.0 卡片承接 Chief 过程反馈。收到输入后先显示排队或处理状态；同一张卡片的正文支持整体展开、收起，内部包含“思考与执行过程”和“回答”两个可独立展开、收起的区域；执行中分别更新其中 think 与 content 两个 Markdown 元素。思考区域默认收起，回答区域默认展开。处理中、待答问题和失败时，外层默认展开。think 来自已有思考与工具状态，content 来自模型文字增量，未输出思考时显示真实处理状态。
+Feishu Channel 使用 CardKit JSON 2.0 卡片，遵循 [Channel 的三态展示约定](README.md#回复展示状态)。卡片外层默认展开，内部包含「过程」和「回答」，各自有可见预览及原生折叠详情。执行中，最新思考与当前工具各占最多一行；回答展示最新正文节选，最多三行。完成后，过程显示结果概况，回答切换为开头三行。客户端按实际宽度截断并显示省略号；正文预览是纯文本，详情保留 Markdown。
 
-每秒合并当前完整文本并串行更新，使用飞书的原生打字机效果。卡片创建、发送、元素更新与收尾复用官方 SDK 客户端、凭证和超时；同一张卡片的更新使用持久化递增 sequence。卡片实体 ID 和发送 uuid 保存到 Channel 状态，重试继续同一张卡片。
+原生折叠操作由飞书客户端控制。内容更新只修改有稳定 ID 的文本组件，并调整 streaming_mode，不重建折叠面板或重新写入 expanded；用户查看详情时，流式输出、结束及问答续轮都保留其选择。等待回答与中断提示取消预览行数限制，使需处理的信息可见。进行中的回答节选取最近文本，飞书负责三行截断；完整文字同时积累在详情区域。
 
-结束或等待用户时，先关闭 streaming_mode，再全量更新为静态卡片：折叠思考过程。完成后，卡片正文先显示最多三行的回答预览，由飞书原生文本组件按客户端宽度换行，超过三行自动显示省略号；下方的“查看完整回复”默认收起，点击后展开同一张卡片中的思考与回答区域，完整 Markdown 正文仍保留。预览从整份回答提取可读纯文本，去除 Markdown 标记并合并空白，不再只截取首行或固定 80 字，也不另调模型生成摘要。完成静态更新后才确认对应业务 Message 已投递，避免再发一份相同答案。用户答复 Chief 问题后，可恢复同一张卡片的动态更新；原生 Harness 授权仍在 Web 处理。
+每秒合并当前内容，所有更新串行复用官方 SDK 客户端、凭证和超时。同一张卡片共享持久化递增 sequence，卡片 ID、发送 uuid 与已更新组件内容保存到 Channel 状态；重启或重试继续更新同一卡片。仅在旧布局卡片恢复时做一次布局替换，之后使用组件局部更新。
 
-过程更新不写入业务 Message，不改变工作状态，不触发新的执行。卡片失败时保留最终文本投递，进程恢复后继续收尾已有卡片。卡片仅展示近期过程与有限正文，超长答复仍通过既有分段文本完整发送。Task / Routine 的异步通知继续走文本 outbox。
+结束或等待用户时关闭 streaming_mode，更新最终正文与预览后才确认业务 Message 已投递。用户回答 Chief 问题后，继续更新原卡片。过程反馈不写入业务 Message，不改变工作状态。卡片失败时保留最终文本投递；超长答复沿用分段文本完整发送，卡片过程受平台体积预算限制，完整执行记录可在 Web 查看。Task / Routine 的异步通知继续走文本 outbox。
 
-需要额外开通 `cardkit:card:write` 并发布应用，客户端需支持 Card JSON 2.0。协议依据：[创建卡片实体](https://open.feishu.cn/document/cardkit-v1/card/create)、[流式更新文本](https://open.feishu.cn/document/cardkit-v1/card-element/content)、[更新卡片配置](https://open.feishu.cn/document/cardkit-v1/card/settings)、[全量更新](https://open.feishu.cn/document/cardkit-v1/card/update)。
+需要额外开通 `cardkit:card:write` 并发布应用，客户端需支持 Card JSON 2.0。协议依据：[创建卡片实体](https://open.feishu.cn/document/cardkit-v1/card/create)、[流式更新文本](https://open.feishu.cn/document/cardkit-v1/card-element/content)、[更新卡片配置](https://open.feishu.cn/document/cardkit-v1/card/settings)、[批量局部更新](https://open.feishu.cn/document/cardkit-v1/card/batch_update)、[全量更新](https://open.feishu.cn/document/cardkit-v1/card/update)。
 
 ## 验证与边界
 

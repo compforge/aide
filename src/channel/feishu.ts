@@ -6,7 +6,7 @@ import { z } from "zod";
 import { normalize } from "@larksuiteoapi/node-sdk";
 import type { ChannelService } from "./service.ts";
 import { IncomingSchema, MessageSchema, type Message } from "./message.ts";
-import { progressCard, cardContent, cardThought, type FeishuProgressReader, type FeishuProgress } from "./feishu-card.ts";
+import { progressCard, cardPreviews, cardContent, cardThought, type FeishuProgressReader, type FeishuProgress } from "./feishu-card.ts";
 import type { FeishuTransport } from "./feishu-client.ts";
 
 /** @why Feishu can return null for permission-restricted user_id; SDK normalization expects absent IDs as undefined. */
@@ -22,6 +22,7 @@ const EventSchema = z.object({
       id: UserIdsSchema })).optional() }),
 });
 const CardSchema = z.object({ cardId: z.string(), sent: z.boolean(), sequence: z.number().int(),
+  layout: z.number().default(0), previews: z.string().default(""),
   streaming: z.boolean(), think: z.string(), content: z.string(), signature: z.string() });
 type Card = z.infer<typeof CardSchema>;
 const StateSchema = z.object({
@@ -200,9 +201,9 @@ export class FeishuChannel {
     // Completed history without a live card uses the existing durable text outbox.
     if (!card && !live && view.phase !== "waiting") return;
     if (!card) {
-      const initial = { ...view, content: "", think: "", overflow: false };
-      card = { cardId: await transport.create(progressCard(initial, true)), sent: false, sequence: 0,
-        streaming: true, think: cardThought(initial), content: cardContent(initial), signature: "" };
+      card = { cardId: await transport.create(progressCard(view, live)), sent: false, sequence: 0,
+        layout: 1, previews: JSON.stringify(cardPreviews(view)),
+        streaming: live, think: cardThought(view), content: cardContent(view), signature: "" };
       this.saveCard(view.id, card);
     }
     if (!card.sent) {
@@ -216,27 +217,33 @@ export class FeishuChannel {
       card.sequence++; this.saveCard(view.id, card);
       await run(card.sequence, this.deliveryId(`card:${view.id}`, card.sequence));
     };
-    if (live) {
-      if (!card.streaming) {
-        await operation((sequence, id) => transport.settings(card.cardId, true, sequence, id));
-        await operation((sequence, id) => transport.update(card.cardId, progressCard(view, true), sequence, id));
-        card.streaming = true; card.think = cardThought(view); card.content = cardContent(view);
-      } else {
-        if (card.think !== cardThought(view)) {
-          await operation((sequence, id) => transport.content(card.cardId, "think", cardThought(view), sequence, id));
-          card.think = cardThought(view); this.saveCard(view.id, card);
-        }
-        if (card.content !== cardContent(view)) {
-          await operation((sequence, id) => transport.content(card.cardId, "content", cardContent(view), sequence, id));
-          card.content = cardContent(view); this.saveCard(view.id, card);
-        }
-      }
-    } else {
-      if (card.streaming) {
-        await operation((sequence, id) => transport.settings(card.cardId, false, sequence, id));
-        card.streaming = false; this.saveCard(view.id, card);
-      }
-      await operation((sequence, id) => transport.update(card.cardId, progressCard(view, false), sequence, id));
+    if (card.streaming !== live) {
+      await operation((sequence, id) => transport.settings(card.cardId, live, sequence, id));
+      card.streaming = live; this.saveCard(view.id, card);
+    }
+    if (card.layout !== 1) {
+      await operation((sequence, id) => transport.update(card.cardId, progressCard(view, live), sequence, id));
+      card.layout = 1; card.think = cardThought(view); card.content = cardContent(view);
+      card.previews = JSON.stringify(cardPreviews(view)); this.saveCard(view.id, card);
+      this.log.info({ inputId: view.id, cardId: card.cardId }, "Feishu card upgraded to stable reply panels");
+    }
+    const patches: Record<string, unknown> = {};
+    for (const [field, elementId, text] of [["think", "think", cardThought(view)], ["content", "content", cardContent(view)]] as const) {
+      if (card[field] === text) continue;
+      if (live) {
+        await operation((sequence, id) => transport.content(card.cardId, elementId, text, sequence, id));
+        card[field] = text; this.saveCard(view.id, card);
+      } else patches[elementId] = { content: text };
+    }
+    const previews = cardPreviews(view), previewSignature = JSON.stringify(previews);
+    if (card.previews !== previewSignature) Object.assign(patches, previews);
+    // Text-only patches never write expanded or replace panels, including at completion and resumption.
+    if (Object.keys(patches).length) {
+      await operation((sequence, id) => transport.patch(card.cardId, patches, sequence, id));
+      card.think = cardThought(view); card.content = cardContent(view); card.previews = previewSignature;
+      this.saveCard(view.id, card);
+    }
+    if (!live) {
       if (!view.overflow) {
         const receipts = view.messageIds.map((id) => this.deliveryId(id, 0));
         this.save({ ...this.state, delivered: [...new Set([...this.state.delivered, ...receipts])] });
