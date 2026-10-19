@@ -2,7 +2,7 @@
 
 Connector 是 Aide Host 提供的全局读取能力，所有 Plugin 和 Chief 都能使用。Host 加载配置、创建连接器并持有提供方客户端；Plugin Runner 通过现有 IPC 查询，不自行读取全局配置。Source 定义个人关注范围和观察策略，Chief 判断变化是否值得通知或推进。
 
-当前支持环境目录、Meego 需求和 GitHub / GitLab PR。环境目录只读取声明；Meego 通过已有 `meegle` CLI 访问，Forge 使用统一 HTTP 客户端。Connector 不创建 Work，也不代替用户决定下一步。
+支持环境目录、Kubernetes Workload 采样、Meego 需求和 GitHub / GitLab PR。环境目录读取声明，Workload 采样读取运行态；Meego 通过已有 `meegle` CLI 访问，Forge 使用统一 HTTP 客户端。Connector 不创建 Work，也不代替用户决定下一步。
 
 ## 配置与所有权
 
@@ -80,7 +80,43 @@ const requirements = await context.connectors.requirements.list("work");
 
 目录不绑定 Personal，也不生成 Resource、Task、Source 或持久观察状态。宿主公共接口不返回提供方凭证；这不是插件安全隔离机制，Runner 仍使用服务用户的执行身份。
 
-quality-harness 的 ClientProvider / EnvironmentContext / ClientManager 解决实际访问与生命周期问题，本次只复用环境身份契约。后续需要执行诊断时再按执行范围创建 toolbox 客户端并关闭；全局目录不意味着永久持有所有客户端。TypeScript toolbox 当前的 Kubernetes 访问不能被当作已支持 Python Host worker 的 SSH 能力。
+Workload 采样复用 `@compforge/harness-toolbox` 的原生 Kubernetes ResourceAccess 和 Pod 解析。每次采样建立有界访问范围，结束或失败时取消剩余请求；全局目录不永久持有所有环境的客户端。
+
+## Environment 变化
+
+`connectors.environments.workloads(name, namespace?)` 返回规范环境名、namespace、采样时间与 Workload 快照。
+namespace 优先取参数，否则取环境声明；两者都缺失时拒绝采样。读取使用 Aide 所在机器的 kubeconfig，支持 `~/` 路径。
+SSH Host 不作为本地配置使用：开启该环境的 watch 时会拒绝启动。每次采样总超时 25 秒，单请求 10 秒，并发 2，单个列表上限 8 MiB。
+
+Personal 用 `environmentWatches` 选择观察范围和接收会话，与需求 `watches` 分别配置：
+
+```yaml
+plugins:
+  personal:
+    environmentWatches:
+      - id: dev-workloads
+        environment: dev
+        namespace: app              # 可省略，沿用 connectors.environments.dev.namespace
+        conversationId: my-chat    # 指向已有聊天，或创建可在 Web 查看独立会话
+        # sessionId: my-session    # 缺省沿用 conversationId
+        intervalMs: 300000          # 默认 5 分钟，最小 30 秒
+```
+
+未配置时不观察任何环境。两个 ID 都省略时使用 `environment:<watch-id>`；Session 与 Conversation 的路由规则与需求 Source 一致。
+每个 watch 只装配到指定 Session；关闭 Heartbeat 不关闭 Source。配置修改后重启生效，观察声明改变会静默建立新的基线。
+
+观察以 namespace 内的 Deployment、StatefulSet、DaemonSet 和无 Controller 的独立 Pod 为范围，ReplicaSet 用来追溯 Pod 到 Deployment 的归属。
+归属按 ownerReference 的 Controller UID 解析，不猜 Pod 名称前缀。Job/CronJob、独立 ReplicaSet 和自定义 Controller 的 Pod 不在此范围。
+Workload 身份是环境、namespace、kind、name；UID 表达同名资源的新一代实例。这里没有把 Kubernetes Service 当作 quality-harness 的业务 Service，也不凭资源名推断 Component 归属。
+
+镜像、generation、副本数、Pod UID、容器重启数、最近退出原因、运行状态和就绪状态参与比较；资源列表顺序、resourceVersion 和时间戳不产生变化。
+只保存这些运行事实，不把完整 manifest、环境变量或 Secret 内容写入 Input。一次轮询的所有变化合成一个 `workload.changed` 观察，包含各 Workload 的 before/after；新增只有 after，移除只有 before。
+
+首次成功采样静默建立基线，不向 Chief 提交历史变化。后续变化先保存 Input，再推进基线；若在二者之间中断，先用已保存 Input 恢复那次基线，再继续观察。
+输入身份包含观察序号，因此 A→B→A→B 会保留两次 A→B。读取失败、分页不完整或 Pod 归属采样不完整时保留基线，记录错误并按间隔重试，不把采集失败当作资源删除。
+
+这是周期采样的状态差异，不是 Kubernetes 审计流：不能覆盖两次采样之间已经消失的短暂变化，也不保证跨资源列表的原子快照。
+Pod 替换或镜像变化是事实，不能据此断言有人发布，更不能猜测操作者。Chief 结合目标会话的近期关注、已有委托和记忆判断是否 `say`、`ask/confirm`、更新 Work 或静默忽略；Source 不直接通知用户、不创建 Task/Routine。
 
 ## 观察流程
 
@@ -101,5 +137,7 @@ Forge 的配置 key 是逻辑身份，`api_host` 可以覆盖 API 域名，`uids
 ## 验证
 
 配置测试覆盖名称与别名冲突、结构错误、缺失文件和启动快照；真实 Runner 测试验证多个插件共享 Connector、跨 IPC 查询和错误传播。真实 Pi SDK 配合模拟模型服务验证 Chief 环境工具，并回归 Source → Chief → 用户决定 → Work 链路。
+
+环境测试通过模拟 Kubernetes HTTP 服务验证 toolbox 原生访问、归属和变化归一化，通过真实 Runner 验证 Connector Verb → Input → Chief、会话隔离及重启恢复；模型与集群仍是替身。
 
 需求测试覆盖负责人筛选、观察水位与去重；Forge 测试覆盖协议映射、评论、限流与错误行为。测试未连接真实环境、账号或模型，不能证明网络可达、部署健康或提示词效果。

@@ -1,3 +1,4 @@
+import { readWorkloads } from "./environments/workloads.ts";
 import type { EnvironmentDefinition, EnvironmentDirectory, EnvironmentSummary } from "@compforge/aide-plugin";
 
 /**
@@ -15,6 +16,8 @@ export class Environments implements EnvironmentDirectory {
       this.definitions.set(value.name, value);
     }
   }
+
+  async workloads(name: string, namespace?: string) { return readWorkloads(await this.get(name), namespace); }
 
   async list(): Promise<readonly EnvironmentSummary[]> {
     return [...this.definitions.values()].map(({ name, kind, description, aliases }) => ({

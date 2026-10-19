@@ -33,6 +33,8 @@ plugins/personal/
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
   chief.ts                 # 按 Conversation 消费 Input、续接问答
   source.ts                # 需求观察、水位和调度
+  environment-source.ts    # Workload 观察、基线和变化 Input
+  environment-config.ts    # 环境观察范围与会话路由
   resources.ts             # 独立 Task / Routine 契约与 Work 视图
   task.ts                  # 有限目标 Reconcile
   routine.ts               # 持续职责 Reconcile

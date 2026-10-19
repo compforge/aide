@@ -48,6 +48,7 @@ An enabled instance has a host Binding and a Runner process. Register capabiliti
 const catalog = await context.connectors.describe();
 const environments = await context.connectors.environments.list();
 const environment = await context.connectors.environments.get("dev");
+const snapshot = await context.connectors.environments.workloads("dev", "app");
 ```
 
 Environment names and aliases resolve to a canonical name. Listing returns compact declarations; reading returns access coordinates, without opening kubeconfig files or connecting to the target. Unknown targets reject. The Environment / Host identity contracts come from `@compforge/harness-common`; no toolbox access lifecycle is implied.

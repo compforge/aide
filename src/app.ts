@@ -2,6 +2,9 @@ import { resolve } from "node:path";
 import type { Logger } from "pino";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { Personal } from "../plugins/personal/aide.ts";
+import { parseEnvironmentWatches } from "../plugins/personal/environment-config.ts";
+import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
+import { observationNamespace } from "../connectors/environments/workloads.ts";
 import { parseWatches, validateWatchScopes } from "../plugins/personal/source-config.ts";
 import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
@@ -31,6 +34,7 @@ export class Aide {
   private readonly active = new Map<string, Personal>();
   private readonly listeners = new Set<() => void>();
   private readonly watches: ReturnType<typeof parseWatches>;
+  private readonly environmentWatches: ReturnType<typeof parseEnvironmentWatches>;
   private readonly connectors: ConnectorClient;
   private starting?: Promise<void>;
   private closed = false;
@@ -40,11 +44,17 @@ export class Aide {
     this.defaultTarget = Object.freeze({ ...options.defaultTarget });
     const config = options.config;
     this.watches = parseWatches(config?.plugins.personal);
+    const environments = resolveEnvironmentConfig(config?.connectors.environments);
+    this.environmentWatches = parseEnvironmentWatches(config?.plugins.personal).map((watch) => {
+      const environment = environments.find((item) => item.name === watch.environment || item.aliases?.includes(watch.environment));
+      if (!environment) throw new Error(`Watch ${watch.id}: unknown environment ${watch.environment}`);
+      return { ...watch, environment: environment.name, namespace: observationNamespace(environment, watch.namespace) };
+    });
     validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
     this.connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
     this.storage = new SessionStore(home);
     for (const meta of this.storage.listSessions()) this.session(meta.aideSessionId);
-    for (const watch of this.watches) {
+    for (const watch of [...this.watches, ...this.environmentWatches]) {
       const scope = this.session(watch.sessionId);
       this.claimConversation(scope, watch.conversationId);
     }
@@ -71,7 +81,8 @@ export class Aide {
     if (!instances.list().some((item) => item.pluginInstanceId === "personal")) {
       instances.create({ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin" });
     }
-    instances.replaceConfig("personal", { watches: this.watches.filter((watch) => watch.sessionId === id) });
+    instances.replaceConfig("personal", { watches: this.watches.filter((watch) => watch.sessionId === id),
+      environmentWatches: this.environmentWatches.filter((watch) => watch.sessionId === id) });
     const packages = new Map([["aide.personal@0.1.0", new URL("../plugins/personal/plugin.ts", import.meta.url).href]]);
     let application: Personal;
     const core = new CoreSession({ session,
@@ -113,7 +124,7 @@ export class Aide {
       this.log.info({ sessionId: id, previousCwd: previous?.cwd, cwd }, "Execution directory changed; cleared native Harness bindings");
     }
     application = new Personal({ timezone: this.options.timezone }, this.log.child({ sessionId: id }),
-      { core, session, connectors, targets, watches: this.watches.filter((watch) => watch.sessionId === id) });
+      { core, session, connectors, targets, watches: [...this.watches, ...this.environmentWatches].filter((watch) => watch.sessionId === id) });
     this.active.set(id, application);
     core.subscribe(() => this.notify());
     application.conversations.subscribe(() => this.notify());

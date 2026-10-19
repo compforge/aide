@@ -7,6 +7,7 @@ export function createConnectorClient(invoke: <T>(request: ConnectorRequest) => 
     describe: () => invoke({ operation: "describe" }),
     environments: Object.freeze({
       list: () => invoke({ operation: "environments.list" }),
+      workloads: (name, namespace) => invoke({ operation: "environments.workloads", name, namespace }),
       get: (name: string) => invoke({ operation: "environments.get", name }),
     } satisfies ConnectorClient["environments"]),
     requirements: Object.freeze({
@@ -25,6 +26,7 @@ export function dispatchConnector(client: ConnectorClient, request: ConnectorReq
   switch (request.operation) {
     case "describe": return client.describe();
     case "environments.list": return client.environments.list();
+    case "environments.workloads": return client.environments.workloads(request.name, request.namespace);
     case "environments.get": return client.environments.get(request.name);
     case "requirements.list": return client.requirements.list(request.source, request.query);
     case "requirements.get": return client.requirements.get(request.identity);

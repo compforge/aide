@@ -14,7 +14,6 @@ import { conversationKey } from "../../src/host/conversation/store.ts";
 import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
-import { parseWatches } from "./source-config.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 
 /** Channels and Sources submit durable input; Chief decides whether Work is needed. */
@@ -34,7 +33,7 @@ export class Personal {
   private readonly targets: { id: string; harness: string }[];
 
   constructor(private readonly options: { timezone: string }, private readonly log: Logger,
-    runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; watches: ReturnType<typeof parseWatches> }) {
+    runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; watches: readonly { conversationId: string }[] }) {
     this.core = runtime.core;
     this.session = runtime.session;
     this.connectors = runtime.connectors;

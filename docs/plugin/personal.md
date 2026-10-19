@@ -51,6 +51,10 @@ Chief 回顾当前 Conversation 的相关 Work 和已有目标，按需核实进
 
 Chief 可以推进已有委托、用普通消息提出建议、请求 ask/confirm，或调用 `dismiss_observation` 静默结束。`say` 只保存 Message，由 Channel 独立投递，不创建等待回答的 Interaction。用户回复 say 是普通 Channel Input。飞书的定时回顾不发送过程卡片；只有实际消息或问题才通知用户，静默回顾的内部总结不渲染为回复。
 
+## 环境观察
+
+Personal 的 EnvironmentSource 经 Connector Verb 周期采样 Workload；首次静默建立基线，后续将变化合并为 `workload.changed` Input，交给指定 Conversation 的 Chief。它与需求 Source、Heartbeat 共用接话流程，不为每个事件新建 Work。范围、配置、比较与恢复规则见 [Environment 变化](../connector/README.md#environment-变化)。
+
 ## 决策与问答
 
 Chief 拥有原生文件/CLI 工具、五个 Work 工具，以及 `read_requirement`、`list_pull_requests`、`read_pull_request`、`read_pull_request_comments`、`list_connectors`。
