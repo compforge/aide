@@ -3,6 +3,7 @@ import type { PullRequestIdentity, PullRequestListQuery, RequirementIdentity, Re
 export type ConnectorRequest =
   | { readonly operation: "describe" }
   | { readonly operation: "environments.list" }
+  | { readonly operation: "environments.workloads"; readonly name: string; readonly namespace?: string }
   | { readonly operation: "environments.get"; readonly name: string }
   | { readonly operation: "requirements.list"; readonly source: string; readonly query?: RequirementListQuery }
   | { readonly operation: "requirements.get"; readonly identity: RequirementIdentity }

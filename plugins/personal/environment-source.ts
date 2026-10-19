@@ -1,0 +1,97 @@
+import type { ConnectorClient, EnvironmentSnapshot, PluginContext, Resource, WorkloadSnapshot } from "@compforge/aide-plugin";
+import { parseEnvironmentWatches, type EnvironmentWatch } from "./environment-config.ts";
+import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "./chief-model.ts";
+
+export const ENVIRONMENT_SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "EnvironmentSource" } as const;
+export interface EnvironmentSourceStatus {
+  baseline?: EnvironmentSnapshot;
+  sequence?: number;
+  lastObservedAt?: string;
+  error?: string | null;
+}
+interface WorkloadChange { before?: WorkloadSnapshot; after?: WorkloadSnapshot }
+interface WorkloadEvent {
+  type: "workload.changed";
+  environment: string;
+  namespace: string;
+  observedAt: string;
+  previousObservedAt: string;
+  changes: WorkloadChange[];
+}
+const identity = (workload: WorkloadSnapshot) => `${workload.kind}/${workload.name}`;
+
+export function workloadChanges(before: EnvironmentSnapshot, after: EnvironmentSnapshot): WorkloadChange[] {
+  const previous = new Map(before.workloads.map((item) => [identity(item), item]));
+  const current = new Map(after.workloads.map((item) => [identity(item), item]));
+  return [...new Set([...previous.keys(), ...current.keys()])].sort().flatMap((key) => {
+    const before = previous.get(key); const after = current.get(key);
+    return digest(before ?? null) === digest(after ?? null) ? [] : [{ ...(before ? { before } : {}), ...(after ? { after } : {}) }];
+  });
+}
+
+/**
+ * @spec Initial observation is silent. Inputs are durable before the baseline advances.
+ * @why A sequence identifies an occurrence, so A→B→A→B is not suppressed as a duplicate.
+ * @case tests/environment-source.test.ts
+ * @link docs/connector/README.md
+ */
+export async function observeEnvironment(context: Pick<PluginContext, "resources" | "logger">,
+  resource: Resource<EnvironmentWatch, EnvironmentSourceStatus>, connectors: ConnectorClient): Promise<void> {
+  const sequence = (resource.status.sequence ?? 0) + 1;
+  const name = digest([resource.metadata.uid, sequence]);
+  const existing = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "aide-system", name });
+  if (existing && resource.status.baseline) {
+    // Resume the exact emitted transition before sampling again, even if the live environment has moved on.
+    const event = existing.spec.observation as unknown as WorkloadEvent;
+    const workloads = new Map(resource.status.baseline.workloads.map((item) => [identity(item), item]));
+    for (const change of event.changes) {
+      if (change.after) workloads.set(identity(change.after), change.after);
+      else if (change.before) workloads.delete(identity(change.before));
+    }
+    await context.resources.patchStatus(resource, { sequence, error: null, lastObservedAt: event.observedAt,
+      baseline: { ...resource.status.baseline, observedAt: event.observedAt, workloads: [...workloads.values()] } });
+    context.logger.info("Environment observation recovered", { attributes: { watchId: resource.spec.id, inputId: name, sequence } });
+    return;
+  }
+  const snapshot = await connectors.environments.workloads(resource.spec.environment, resource.spec.namespace);
+  const baseline = resource.status.baseline;
+  const changes = baseline ? workloadChanges(baseline, snapshot) : [];
+  if (changes.length) {
+    const event: WorkloadEvent = { type: "workload.changed", environment: snapshot.environment, namespace: snapshot.namespace,
+      observedAt: snapshot.observedAt, previousObservedAt: baseline!.observedAt, changes };
+    await context.resources.create<InputSpec, InputStatus>(INPUT_TYPE, { name, spec: {
+      sessionId: resource.spec.sessionId, conversationId: resource.spec.conversationId, origin: "source",
+      text: "环境中的 Workload 发生变化。结合本会话近期关注和已有委托判断是否值得主动告知、询问或推进；无关变化保持安静。Pod 替换、镜像变化或重启不证明有人发布；操作者与原因需另行取证。",
+      observation: { ...event },
+    } });
+  }
+  await context.resources.patchStatus(resource, { baseline: snapshot, sequence: changes.length ? sequence : resource.status.sequence ?? 0,
+    lastObservedAt: snapshot.observedAt, error: null });
+  context.logger.info(baseline ? "Environment observation completed" : "Environment baseline established", {
+    attributes: { watchId: resource.spec.id, environment: snapshot.environment, namespace: snapshot.namespace,
+      workloads: snapshot.workloads.length, changed: changes.length, ...(changes.length ? { inputId: name } : {}) },
+  });
+}
+
+export function registerEnvironmentSources(context: PluginContext): void {
+  const watches = parseEnvironmentWatches(context.instance.config);
+  if (!watches.length) return;
+  context.controllers.register<EnvironmentWatch, EnvironmentSourceStatus>({ resourceType: ENVIRONMENT_SOURCE_TYPE,
+    sources: [{ type: "resource", sourceId: "configured-environments", async start(source) {
+      for (const watch of watches) await source.emit({ name: digest(watch), spec: watch });
+    } }],
+    async reconcile(execution, resource) {
+      if (resource.metadata.deletionTimestamp) return;
+      const configured = watches.find((watch) => watch.id === resource.spec.id);
+      if (!configured || digest(configured) !== digest(resource.spec)) return;
+      try { await observeEnvironment(context, resource, execution.verbs.connectors({ timeoutMs: 30_000 })); }
+      catch (error) {
+        context.logger.error("Environment observation failed; baseline retained", { error,
+          attributes: { watchId: resource.spec.id, environment: resource.spec.environment, namespace: resource.spec.namespace ?? "" } });
+        const current = await context.resources.get<EnvironmentWatch, EnvironmentSourceStatus>({ ...ENVIRONMENT_SOURCE_TYPE, ...resource.metadata });
+        if (current) await context.resources.patchStatus(current, { error: error instanceof Error ? error.message : String(error) });
+      }
+      return { requeueAfterMs: resource.spec.intervalMs };
+    },
+  });
+}
