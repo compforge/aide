@@ -134,6 +134,33 @@ test("Pi answers directly without work and resumes its native history", { timeou
   await assert.rejects(createPiAgent({ ...fixture.config, sessionFile: join(fixture.config.sessionDir, "missing.jsonl") }), /missing/);
 });
 
+test("Chief loads declared skills and excludes ambient Pi skills and packages", { timeout: 20_000 }, async (t) => {
+  const fixture = await setup(t, () => ({ text: "configured skill available" }), "chief");
+  const declared = join(fixture.config.cwd, "declared", "as-ops");
+  const ambient = join(fixture.config.agentDir, "skills", "ambient");
+  for (const [path, name] of [[declared, "as-ops"], [ambient, "ambient"]] as const) {
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, "SKILL.md"), `---\nname: ${name}\ndescription: ${name} capability marker.\n---\nFull skill body stays on disk.\n`);
+  }
+  // This missing Git package would cause Pi's normal loader to attempt installation.
+  writeFileSync(join(fixture.config.agentDir, "settings.json"), JSON.stringify({
+    packages: ["git:example.invalid/unwanted/package"], defaultProvider: "unconfigured-default", defaultModel: "wrong-model",
+  }));
+  const agent = await createChiefAgent({ ...fixture.config, work: fixture.work, skillPaths: [declared] });
+  try {
+    assert.match(agent.systemPrompt, /You are Chief/);
+    assert.equal(agent.model?.provider, "fixture");
+    assert.equal(agent.model?.id, "test-model");
+    assert.match(agent.systemPrompt, /as-ops capability marker/);
+    assert.doesNotMatch(agent.systemPrompt, /ambient capability marker|Full skill body stays on disk/);
+    await agent.prompt("Verify configured capability.");
+    assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /as-ops capability marker/);
+  } finally { agent.dispose(); }
+  const empty = await createChiefAgent({ ...fixture.config, work: fixture.work });
+  try { assert.doesNotMatch(empty.systemPrompt, /ambient capability marker|as-ops capability marker/); }
+  finally { empty.dispose(); }
+});
+
 test("Chief executes all five Work tools through the SDK and keeps commentary out of finalText", { timeout: 30_000 }, async (t) => {
   let id = "", routineId = "";
   const fixture = await setup(t, (_request, index) => {

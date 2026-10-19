@@ -52,7 +52,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   const bin = join(root, "bin"); mkdirSync(bin, { recursive: true });
   const configPath = join(root, "config.yaml");
   const conversationId = "feishu:cli_fixture:oc_me";
-  writeFileSync(configPath, JSON.stringify({ connectors: { environments: { dev: { kind: "kubernetes", kubeconfig: "~/.kube/dev", namespace: "app", aliases: ["开发"] } }, requirements: { work: { provider: "meego", projectKey: "project", categories: ["story"], userKeys: ["user-me"] } } }, plugins: { personal: {
+  writeFileSync(configPath, JSON.stringify({ harnesses: { chief: { model: { provider: "fixture", id: "test-model" } } }, connectors: { environments: { dev: { kind: "kubernetes", kubeconfig: "~/.kube/dev", namespace: "app", aliases: ["开发"] } }, requirements: { work: { provider: "meego", projectKey: "project", categories: ["story"], userKeys: ["user-me"] } } }, plugins: { personal: {
     watches: [{ id: "mine", source: "work", conversationId, intervalMs: 30_000, repositories: [{ forge: "github.com", path: "compforge/aide" }] }] } } }));
   const record = { work_item_id: "123", name: "实现需求", work_item_status: "进行中", current_status_operator: [{ user_key: "user-me", name: "Me" }], updated_at: "2026-10-18", description: "给 aide 加一个功能" };
   writeFileSync(join(bin, "meegle"), `#!/usr/bin/env node\nconsole.log(JSON.stringify(process.argv.includes("config") ? "project.example.com" : { data: [${JSON.stringify(record)}] }));\n`, { mode: 0o755 });
@@ -113,7 +113,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
     return { action: "done", summary: "Implemented and verified", notification: "实现已完成", question: null, nextAt: null }; } }, root);
   const aide: Aide = new Aide(root, { ...coding, config: loadConfig(configPath), createAdapter: (target, ports) => target.harness === "chief"
     ? createHarnessAdapter(target, { ...ports, targetConfig: { harness: "chief" },
-      chiefSession: aide.chiefSession(target.id, { agentDir, model: { provider: "fixture", id: "test-model" } }) })
+      chiefSession: aide.chiefSession(target.id, { agentDir, model: { provider: "unused-default", id: "unused-default" } }) })
     : coding.createAdapter(target) }, log);
   const sent: string[] = [];
   const bot = new FeishuChannel(root, "cli_fixture", aide, { async start() {}, close() {}, async send(_chat, text) { sent.push(text); } }, log);

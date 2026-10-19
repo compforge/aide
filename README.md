@@ -18,6 +18,7 @@ Chief 是负责接话与判断的入口 Agent：普通问题直接回答，需�
 ## 快速开始
 
 需要 Node.js 22.19+ 安装依赖；服务使用依赖中的 Bun。先配置 Pi 的模型与登录态（默认 `~/.pi/agent`），并安装、登录 Codex CLI。执行环境中的 CLI 和凭证直接供 Agent 使用。
+环境、Chief 模型与能力包、Personal 关注策略统一声明在 `~/.aide/config.yaml`，见 [配置与优先级](docs/configuration.md)。
 
 ```sh
 npm ci

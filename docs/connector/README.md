@@ -6,7 +6,7 @@ Connector 是 Aide Host 提供的全局读取能力，所有 Plugin 和 Chief �
 
 ## 配置与所有权
 
-默认读取 `$AIDE_HOME/config.yaml`（通常为 `~/.aide/config.yaml`），可用 `AIDE_CONFIG` 指定 YAML 或 JSON 文件。Host 启动时读取一次，修改后重启。默认文件不存在时使用空配置；显式指定的文件缺失或声明无效时启动失败。
+全局文件的选择、字段优先级和默认值规则见 [配置](../configuration.md)。Connector 声明由 Host 在启动时装配，修改后重启。
 
 环境直接声明在 `connectors.environments.<name>`，配置 key 就是环境身份。没有 `provider: static` 或另一个 registry 路径。Meego / Forge 连接信息也放在全局 `connectors`；Personal 的 watches 属于 `plugins.personal`：
 
