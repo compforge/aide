@@ -1,3 +1,4 @@
+import { conversationView } from "../src/channel/view.ts";
 import { loadConfig } from "../src/config.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";
@@ -131,6 +132,11 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
     throw error;
   });
   assert.match(JSON.stringify(prompts[2]), /~\/.kube\/dev/);
+  const questionId = "message:" + aide.questions()[0]!.request.messageId;
+  const pendingQuestion = conversationView(aide, conversationId).blocks.find((block) => block.id === questionId)!;
+  assert.equal(pendingQuestion.type, "question"); assert.equal(pendingQuestion.status, "pending");
+  assert.ok(pendingQuestion.group_id);
+
   assert.equal(executions, 0); assert.equal(aide.store.read().works.length, 0);
   assert.ok(aide.plugins.listHarnessInvocations().every((item) => item.phase === "completed"), "Pi must release its turn before waiting for the user");
   receive("decline", "拒绝"); await bot.deliver();
@@ -138,11 +144,21 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   await bot.dispatch();
   await until(() => aide.messages().some((m) => m.text === "已保留需求信息，暂不开始实现。"));
   assert.match(JSON.stringify(prompts[7]), /declined/);
+  const completedView = conversationView(aide, conversationId);
+  const answeredQuestion = completedView.blocks.find((block) => block.id === questionId)!;
+  assert.equal(answeredQuestion.type, "question"); assert.equal(answeredQuestion.status, "answered");
+  const finalReply = completedView.blocks.find((block) => block.type === "message" && block.role === "aide" && block.group_id === answeredQuestion.group_id)!;
+  assert.equal(finalReply.content, "已保留需求信息，暂不开始实现。");
+  assert.deepEqual(completedView.blocks.filter((block) => block.type === "message" && block.role === "aide" && block.group_id === finalReply.group_id).map((block) => block.content), [finalReply.content]);
+
   assert.equal(aide.store.read().works.length, 0);
   receive("decline", "拒绝"); await bot.dispatch();
   assert.equal(modelCalls, 8, "Duplicate answers cannot become fresh user commands");
   receive("start", "现在开始实现"); await bot.dispatch();
   await until(() => aide.questions().some((q) => q.request.status === "pending"));
+  const secondQuestion = conversationView(aide, conversationId).blocks.filter((block) => block.type === "question");
+  assert.deepEqual(secondQuestion.map((block) => block.status), ["answered", "pending"]);
+  assert.notEqual(secondQuestion[0]!.group_id, secondQuestion[1]!.group_id);
   receive("directory", root); await bot.dispatch();
   await until(() => aide.store.read().works[0]?.status === "done"); await aide.settled();
   await bot.deliver();
