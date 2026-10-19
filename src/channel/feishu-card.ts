@@ -1,4 +1,4 @@
-import { replyPreview } from "./reply-layout.ts";
+import { replyText } from "./reply-layout.ts";
 import type { ChannelService } from "./service.ts";
 import { conversationView } from "./view.ts";
 
@@ -50,7 +50,7 @@ export function feishuProgress(aide: ChannelService, conversationId: string): Fe
 }
 
 /**
- * @spec One reply has a collapsible outer envelope and independent thought/answer panels; completed replies default to collapsed.
+ * @spec One reply has a collapsible outer envelope and independent thought/answer panels; completed replies show a three-line answer preview above collapsed details.
  * @why Finished cards should not crowd the chat while retaining the full Markdown reply in the same message.
  * @link docs/channel/feishu.md
  */
@@ -63,9 +63,12 @@ export function progressCard(view: FeishuProgress, streaming: boolean) {
     config: { update_multi: true, width_mode: "default", streaming_mode: streaming,
       summary: { content: streaming ? "Aide · 处理中" : view.content.slice(0, 100) || labels[view.phase] } },
     header: { title: { tag: "plain_text", content: `Aide · ${labels[view.phase]}` }, template: view.phase === "failed" ? "orange" : "blue" },
-    body: { elements: [cardPanel(compact ? `查看完整回复 · ${replyPreview(view.content)}` : "思考与回答", [
-      cardPanel("思考与执行过程", [thought], false), cardPanel("回答", [content], true),
-    ], !compact)] },
+    body: { elements: [
+      ...(compact ? [{ tag: "div", text: { tag: "plain_text", content: replyText(view.content), lines: 3 } }] : []),
+      cardPanel(compact ? "查看完整回复" : "思考与回答", [
+        cardPanel("思考与执行过程", [thought], false), cardPanel("回答", [content], true),
+      ], !compact),
+    ] },
   };
 }
 

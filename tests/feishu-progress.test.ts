@@ -19,7 +19,7 @@ const event = { sender: { sender_type: "user" }, message: { message_id: "om_inpu
 const message = (id: string, text: string): Message => ({ id, text, conversationId, role: "aide", workId: null, at: new Date().toISOString() });
 
 function cardRegions(card: ReturnType<typeof progressCard>) {
-  const envelope = card.body.elements[0]!;
+  const envelope = card.body.elements.find((element) => "elements" in element)!;
   return { envelope, thought: envelope.elements[0] as typeof envelope, answer: envelope.elements[1] as typeof envelope };
 }
 
@@ -81,7 +81,13 @@ test("Feishu collapses completed long replies with a bounded preview and preserv
   const { envelope: panel, thought, answer: answerPanel } = cardRegions(card);
   assert.equal(panel.tag, "collapsible_panel"); assert.equal(panel.expanded, false);
   assert.equal(panel.header.title.tag, "plain_text");
-  assert.equal(panel.header.title.content, "查看完整回复 · 已建好监控，每 5 分钟检查一次。");
+  assert.equal(panel.header.title.content, "查看完整回复");
+  const preview = card.body.elements[0]!;
+  assert.ok("text" in preview);
+  assert.equal(preview.tag, "div"); assert.equal(preview.text.tag, "plain_text");
+  assert.equal(preview.text.lines, 3);
+  assert.ok(preview.text.content.startsWith("已建好监控，每 5 分钟检查一次。 项 值 环境 hf"));
+  assert.ok(!preview.text.content.includes("**"));
   assert.equal(thought.expanded, false); assert.equal(answerPanel.expanded, true);
   const body = answerPanel.elements[0] as { element_id: string; content: string };
   assert.equal(body.element_id, "content"); assert.equal(body.content, text);
@@ -89,8 +95,10 @@ test("Feishu collapses completed long replies with a bounded preview and preserv
   const before = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, before);
 
   const longLine = progressCard({ id: "unicode", phase: "done", think: "", content: "😀".repeat(400), messageIds: [], overflow: false }, false);
-  const preview = longLine.body.elements.at(-1)! as { header: { title: { content: string } } };
-  assert.equal(preview.header.title.content, "查看完整回复 · " + "😀".repeat(80) + "…");
+  const unicode = longLine.body.elements[0]!;
+  assert.ok("text" in unicode);
+  assert.equal(unicode.text.content, "😀".repeat(400), "Feishu applies the visual line limit without cutting Unicode or losing the excerpt");
+  assert.equal(unicode.text.lines, 3);
 });
 
 test("Feishu folds completed replies as a whole while questions, failures and streaming replies stay open", () => {
@@ -100,13 +108,24 @@ test("Feishu folds completed replies as a whole while questions, failures and st
     ["failed", false, "处理中断\n".repeat(40)], ["running", true, "正在输出\n".repeat(40)],
   ] as const) {
     const card = progressCard({ ...base, phase, content }, streaming);
-    assert.equal(card.body.elements.length, 1);
+    assert.equal(card.body.elements.length, phase === "done" ? 2 : 1);
     const { envelope, thought, answer } = cardRegions(card);
     assert.equal(envelope.expanded, phase !== "done");
     assert.equal(thought.expanded, false); assert.equal(answer.expanded, true);
     const reply = answer.elements[0] as { element_id: string; content: string };
     assert.equal(reply.element_id, "content"); assert.equal(reply.content, content);
   }
+});
+
+test("Feishu previews answer text across paragraphs, lists and code without truncating at the first line", () => {
+  const text = "## hf 内存\n\n当前 **1.8 GiB**，容器 `server`。\n\n- request: 2 GiB\n- limit: 4 GiB\n\n```text\n无 OOM\n```";
+  const card = progressCard({ id: "preview", phase: "done", think: "查询过程", content: text, messageIds: [], overflow: false }, false);
+  const preview = card.body.elements[0]!;
+  assert.ok("text" in preview);
+  assert.deepEqual(preview.text, { tag: "plain_text", lines: 3,
+    content: "hf 内存 当前 1.8 GiB，容器 server。 request: 2 GiB limit: 4 GiB 无 OOM" });
+  const { answer } = cardRegions(card);
+  assert.equal((answer.elements[0] as { content: string }).content, text, "Expanded answer keeps its original Markdown");
 });
 
 test("Feishu preserves card ID and send uuid after an ambiguous card send", async (t) => {
