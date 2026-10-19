@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="1140" viewBox="0 0 1480 1140" role="img" aria-labelledby="title desc">
-<title id="title">Aide：一次业务处理的执行时序</title>
-<desc id="desc">输入方提交变化，资源调度唤醒 Controller 的 Reconcile。读取当前状态后，可以直接调用 Connector 或用户交互，也可以调用 Harness，由 Agent 选择工具。Chief 的 Work 工具操作 Task 和 Routine。Controller 核对结果并保存进展，Channel 按需展示答复与执行进展。两种动作路径可按业务需要组合。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1480" height="1260" viewBox="0 0 1480 1260" role="img" aria-labelledby="title desc">
+<title id="title">Aide：经 Core 统一动作入口推进业务的执行时序</title>
+<desc id="desc">输入方提交变化，Core 调度 Controller 的 Reconcile。Controller 经 Core 发起 verb，可以调用 Connector 或用户交互，也可以调用 Harness，由 Agent 选择工具。工具的资源与能力请求仍回到 Core。Core 统一承接审计、授权和执行记录，Controller 核对结果并保存进展。两种动作路径可以组合。</desc>
 <defs>
   <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#536b68"/></marker>
   <style>
@@ -12,37 +12,37 @@
     .flow { stroke: #536b68; stroke-width: 2; fill: none; marker-end: url(#arrow); }
   </style>
 </defs>
-<rect width="1480" height="1140" fill="#f8faf8"/>
+<rect width="1480" height="1260" fill="#f8faf8"/>
 <text x="40" y="48" class="title">Aide · 一次业务处理的执行时序</text>
-<text x="40" y="78" class="small">由资源变化进入 Reconcile；动作可以直接执行，也可以交给 Agent 选择工具。</text>
-<rect x="550" y="390" width="900" height="525" rx="12" fill="#f0f4ee" stroke="#9bb0a6" stroke-width="1.5"/>
-<path d="M550 555 H1450" stroke="#9bb0a6" stroke-dasharray="6 5"/>
+<text x="40" y="78" class="small">代码明确动作，或由 Agent 选择工具；两种方式都经 Core 承接。</text>
+<rect x="280" y="390" width="1170" height="660" rx="12" fill="#f0f4ee" stroke="#9bb0a6" stroke-width="1.5"/>
+<path d="M280 620 H1450" stroke="#9bb0a6" stroke-dasharray="6 5"/>
 <text x="570" y="420" class="heading">直接调用 · 动作及顺序已明确</text>
-<text x="570" y="590" class="heading">Agent 决策 · 结合上下文选择工具</text>
+<text x="570" y="655" class="heading">Agent 决策 · 结合上下文选择工具</text>
 
-<path d="M110 170 V1050" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
+<path d="M110 170 V1180" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
 <rect x="10" y="105" width="200" height="65" rx="12" fill="#e8eff4" stroke="#78948d" stroke-width="1.5"/>
 <text x="110" y="132" text-anchor="middle" class="heading">输入方</text>
 <text x="110" y="157" text-anchor="middle" class="small">Channel / Source</text>
-<path d="M360 170 V1050" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
+<path d="M360 170 V1180" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
 <rect x="260" y="105" width="200" height="65" rx="12" fill="#e8eff4" stroke="#78948d" stroke-width="1.5"/>
-<text x="360" y="132" text-anchor="middle" class="heading">资源与调度</text>
-<text x="360" y="157" text-anchor="middle" class="small">Host</text>
-<path d="M610 170 V1050" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
+<text x="360" y="132" text-anchor="middle" class="heading">Core</text>
+<text x="360" y="157" text-anchor="middle" class="small">资源 / 调度 / Verb</text>
+<path d="M610 170 V1180" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
 <rect x="510" y="105" width="200" height="65" rx="12" fill="#e8eff4" stroke="#78948d" stroke-width="1.5"/>
 <text x="610" y="132" text-anchor="middle" class="heading">Controller</text>
 <text x="610" y="157" text-anchor="middle" class="small">Reconcile</text>
-<path d="M860 170 V1050" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
+<path d="M860 170 V1180" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
 <rect x="760" y="105" width="200" height="65" rx="12" fill="#e8eff4" stroke="#78948d" stroke-width="1.5"/>
 <text x="860" y="132" text-anchor="middle" class="heading">Harness</text>
 <text x="860" y="157" text-anchor="middle" class="small">Agent</text>
-<path d="M1110 170 V1050" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
+<path d="M1110 170 V1180" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
 <rect x="1010" y="105" width="200" height="65" rx="12" fill="#e8eff4" stroke="#78948d" stroke-width="1.5"/>
 <text x="1110" y="132" text-anchor="middle" class="heading">Tool</text>
 <text x="1110" y="157" text-anchor="middle" class="small">业务工具</text>
-<path d="M1360 170 V1050" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
+<path d="M1360 170 V1180" stroke="#b1beb8" stroke-width="1.5" stroke-dasharray="6 7"/>
 <rect x="1260" y="105" width="200" height="65" rx="12" fill="#e8eff4" stroke="#78948d" stroke-width="1.5"/>
-<text x="1360" y="132" text-anchor="middle" class="heading">外部能力</text>
+<text x="1360" y="132" text-anchor="middle" class="heading">能力执行</text>
 <text x="1360" y="157" text-anchor="middle" class="small">Connector / 用户交互</text>
 <path d="M110 215 H360" class="flow"/>
 <text x="235.0" y="205" text-anchor="middle" class="label">提交 Input / Message / 资源</text>
@@ -52,26 +52,34 @@
 <text x="485.0" y="315" text-anchor="middle" class="label">读取当前资源与相关事实</text>
 <path d="M360 370 H610" class="flow" stroke-dasharray="6 5"/>
 <text x="485.0" y="360" text-anchor="middle" class="label">目标与进展</text>
-<path d="M610 470 H1360" class="flow"/>
-<text x="985.0" y="460" text-anchor="middle" class="label">调用 Connector / ask / confirm 等能力</text>
-<path d="M1360 530 H610" class="flow" stroke-dasharray="6 5"/>
-<text x="985.0" y="520" text-anchor="middle" class="label">返回数据或用户决定</text>
-<path d="M610 640 H860" class="flow"/>
-<text x="735.0" y="630" text-anchor="middle" class="label">调用 Harness</text>
-<path d="M860 690 H1110" class="flow"/>
-<text x="985.0" y="680" text-anchor="middle" class="label">选择并调用 Tool</text>
-<path d="M1110 740 H360" class="flow"/>
-<text x="735.0" y="730" text-anchor="middle" class="label">Work CRUD：创建或更新 Task / Routine（Chief 示例）</text>
-<path d="M360 785 H1110" class="flow" stroke-dasharray="6 5"/>
-<text x="735.0" y="775" text-anchor="middle" class="label">操作结果；资源变化另行唤醒其 Controller</text>
-<path d="M1110 830 H860" class="flow" stroke-dasharray="6 5"/>
-<text x="985.0" y="820" text-anchor="middle" class="label">工具结果</text>
-<path d="M860 880 H610" class="flow" stroke-dasharray="6 5"/>
-<text x="735.0" y="870" text-anchor="middle" class="label">Agent 执行结果</text>
-<path d="M610 970 H360" class="flow"/>
-<text x="485.0" y="960" text-anchor="middle" class="label">核对最新事实，保存进展</text>
-<path d="M360 1020 H110" class="flow" stroke-dasharray="6 5"/>
-<text x="235.0" y="1010" text-anchor="middle" class="label">按需投影答复与执行进展</text>
-<text x="40" y="1090" class="small">两种路径按业务需要选用，可在一次处理中组合；执行进展可在处理期间持续投影。</text>
-<text x="40" y="1120" class="small">Reconcile 保存等待条件或安排再次唤醒；下一次处理重新读取当前状态。</text>
+<path d="M610 460 H360" class="flow"/>
+<text x="485.0" y="450" text-anchor="middle" class="label">Connector / 交互 verb</text>
+<path d="M360 505 H1360" class="flow"/>
+<text x="860.0" y="495" text-anchor="middle" class="label">Core 调用相应能力</text>
+<path d="M1360 550 H360" class="flow" stroke-dasharray="6 5"/>
+<text x="860.0" y="540" text-anchor="middle" class="label">返回数据或用户决定</text>
+<path d="M360 595 H610" class="flow" stroke-dasharray="6 5"/>
+<text x="485.0" y="585" text-anchor="middle" class="label">verb 结果</text>
+<path d="M610 705 H360" class="flow"/>
+<text x="485.0" y="695" text-anchor="middle" class="label">harness verb</text>
+<path d="M360 750 H860" class="flow"/>
+<text x="610.0" y="740" text-anchor="middle" class="label">Core 调用 Harness</text>
+<path d="M860 795 H1110" class="flow"/>
+<text x="985.0" y="785" text-anchor="middle" class="label">选择并调用 Tool</text>
+<path d="M1110 840 H360" class="flow"/>
+<text x="735.0" y="830" text-anchor="middle" class="label">经 Core 操作资源或请求动作（如 Chief Work CRUD）</text>
+<path d="M360 885 H1110" class="flow" stroke-dasharray="6 5"/>
+<text x="735.0" y="875" text-anchor="middle" class="label">操作结果；资源变化唤醒对应 Controller</text>
+<path d="M1110 930 H860" class="flow" stroke-dasharray="6 5"/>
+<text x="985.0" y="920" text-anchor="middle" class="label">工具结果</text>
+<path d="M860 975 H360" class="flow" stroke-dasharray="6 5"/>
+<text x="610.0" y="965" text-anchor="middle" class="label">Agent 执行结果</text>
+<path d="M360 1020 H610" class="flow" stroke-dasharray="6 5"/>
+<text x="485.0" y="1010" text-anchor="middle" class="label">harness verb 结果</text>
+<path d="M610 1100 H360" class="flow"/>
+<text x="485.0" y="1090" text-anchor="middle" class="label">核对最新事实，保存进展</text>
+<path d="M360 1150 H110" class="flow" stroke-dasharray="6 5"/>
+<text x="235.0" y="1140" text-anchor="middle" class="label">按需投影答复与执行进展</text>
+<text x="40" y="1210" class="small">Core 在统一动作入口承载审计、授权、超时与执行记录；两种路径可以在一次处理中组合。</text>
+<text x="40" y="1240" class="small">Reconcile 保存等待条件或安排再次唤醒；执行进展可在处理期间持续投影。</text>
 </svg>
