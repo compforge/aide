@@ -17,7 +17,7 @@ Source 外部观察 ──┘                              │                  
                                                               各自 Reconcile → Harness
 ```
 
-Chief 是业务角色。Chief Controller 消费输入、组织上下文并续接问答；Chief Harness 执行 `agents/chief/` 中的 Agent，使用通用 Pi 能力以及 Personal 工具。Task / Routine 默认使用 Codex 执行。Chief 的提示词、上下文和记忆优化方向见 [Chief Harness](../harness/chief.md)，插件机制见 [Plugin](README.md)。
+Chief 是业务角色。Chief Controller 消费输入、组织上下文并续接问答；Chief Harness 执行 `agents/chief/` 中的 Agent，使用通用 Pi 能力以及 Personal 工具。Task / Routine 默认使用通用 Pi 执行。Chief 的提示词、上下文和记忆优化方向见 [Chief Harness](../harness/chief.md)，插件机制见 [Plugin](README.md)。
 
 ## 输入与上下文
 
@@ -85,4 +85,4 @@ Chief 的问答使用 Core Interaction 与当前回调续接，调用栈不跨�
 
 ## 验证
 
-`tests/chief.test.ts` 验证真实 Runner、Pi SDK、需求观察、确认拒绝、自由回答和创建工作的链路；模型、平台与 Codex 执行使用替身。会话、独立 Task / Routine 生命周期和中断处理另有契约测试。真实环境验收见 [E2E](../e2e.md)。
+`tests/chief.test.ts` 验证真实 Runner、Pi SDK、需求观察、确认拒绝、自由回答和创建工作的链路；模型、平台与 Work 执行使用替身。会话、独立 Task / Routine 生命周期和中断处理另有契约测试。真实环境验收见 [E2E](../e2e.md)。

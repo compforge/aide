@@ -61,8 +61,11 @@
   aside { padding: 24px 20px; border-left: 1px solid #d8dfd5; overflow: auto; } aside h2 { font-size: 16px; margin: 0 0 18px; }
   .work-group + .work-group { margin-top: 28px; padding-top: 24px; border-top: 1px solid #d8dfd5; }
   .work { background: white; border-radius: 10px; border: 1px solid #e1e6dc; padding: 14px; margin-bottom: 12px; }
-  .work-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-  .work-delete { padding: 4px 8px; border: 1px solid #d8dfd5; background: white; color: #8a3f35; border-radius: 6px; font-size: 12px; }
+  .work-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+  .work-actions { display: flex; gap: 6px; }
+  .work-actions button { padding: 4px 8px; border: 1px solid #d8dfd5; background: white; border-radius: 6px; font-size: 12px; }
+  .work-copy { color: #42634c; }
+  .work-delete { color: #8a3f35; }
   .work strong { display: block; margin: 8px 0; font-size: 14px; overflow-wrap: anywhere; }
   .work p { font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
   .badge { display: inline-block; padding: 3px 7px; background: #edf1e8; border-radius: 5px; font-size: 11px; }

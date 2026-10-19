@@ -49,7 +49,7 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
   assert.equal(aide.works().length, 0);
 });
 
-test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durable discovery and released model turns", { timeout: 30_000 }, async (t) => {
+test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Pi, with durable discovery and released model turns", { timeout: 30_000 }, async (t) => {
   const root = process.env.AIDE_CHIEF_TEST_ROOT ?? mkdtempSync(join(tmpdir(), "aide-chief-pi-"));
   const agentDir = join(root, "pi"); mkdirSync(agentDir, { recursive: true });
   const bin = join(root, "bin"); mkdirSync(bin, { recursive: true });

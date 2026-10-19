@@ -92,7 +92,7 @@ Meego 的“我名下”按指定负责人字段中的稳定 user key 匹配，�
 
 Forge 的配置 key 是逻辑身份，`api_host` 可以覆盖 API 域名，`uids` 可选过滤 PR 作者。`GITHUB_TOKEN` / `GH_TOKEN`、`GITLAB_TOKEN` 优先于文件 token；没有凭证的 Forge 不启用。服务环境需能找到 `meegle` 并访问其登录态，不能只在交互 shell 中配置 PATH。
 
-飞书目标为 `feishu:<app-id>:<chat-id>`，可从入站日志的 conversationId 获取。机器人需要已经收到过该单聊的消息，才会向其投递。模型沿用 Pi 的 `~/.pi/agent` 配置；`AIDE_MODEL` 只控制开发用 Codex。
+飞书目标为 `feishu:<app-id>:<chat-id>`，可从入站日志的 conversationId 获取。机器人需要已经收到过该单聊的消息，才会向其投递。Chief 与 Work 模型分别由 `harnesses.chief` 和 `harnesses.pi` 配置，缺省时沿用 Pi 原生配置。
 
 当前 Meego 每个类别读取最近更新的 50 条，再筛选负责人；不保证覆盖高流量项目的全量变更。首次连接会把这批范围内尚未结束的条目交给 Chief；配置范围改变也会建立新的观察范围。后续仅在指纹变化时再次提交。尚未接 webhook、全量分页或 Forge 定时 Source；Forge 当前供 Chief 查询 PR 状态与评论。
 

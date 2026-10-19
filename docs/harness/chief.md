@@ -19,7 +19,7 @@ const adapter = createHarnessAdapter(
 ```
 
 Chief 的模型选择与能力包配置位于 `harnesses.chief`，完整来源、优先级和同步流程见 [配置](../configuration.md)。
-启动装配解析模型定义、认证来源和能力包，并将有效配置注入 `chiefSession`；Personal 只绑定业务工具。显式 model 覆盖 Pi 定义，缺省规则见配置文档。`AIDE_MODEL` 控制默认 Codex Target，不改变 Chief 模型。
+启动装配解析模型定义、认证来源和能力包，并将有效配置注入 `chiefSession`；Personal 只绑定业务工具。显式 model 覆盖 Pi 定义，缺省规则见配置文档。Task / Routine 使用独立的 `harnesses.pi` 配置。
 Chief 加载已同步的声明包中的 skills，以及内置 Hermes 扩展提供的记忆工具与自维护 skills；不继承用户或项目的自动扩展、skill 包发现。角色规则与 Work 工具仍由代码绑定。
 原生会话由 Pi SDK 存放在自己的默认目录，与通用 Pi 一样；Chief 角色通过 scope 区分，不靠另建 chief-sessions 目录区分。连续输入复用该 Lane × Target 的原生会话，服务重启后 Core 把保存的 resumeState 交回 Adapter；新的 Input 创建新 Turn。原生恢复范围绑定 conversationId，不能把另一会话或通用 Pi 的会话文件当成当前上下文。
 
