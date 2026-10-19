@@ -1,4 +1,12 @@
+import { z } from "zod";
 import type { HarnessTargetConfig } from "../../config/types.ts";
+
+const text = z.string().trim().min(1);
+export const DshConfigSchema = z.object({
+  dshBin: text.optional(), profile: text.optional(), dshHome: text.optional(),
+  provider: text.optional(), model: text.optional(), reasoningEffort: text.optional(),
+  patches: z.array(text).optional(), maxTokens: z.number().int().positive().optional(),
+}).strict();
 
 export interface DshTargetConfig {
   dshBin?: string;

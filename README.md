@@ -39,7 +39,7 @@ npm exec -- aide version
 
 ## 运行边界
 
-当前 Chief 使用 `chief` Harness，它基于 Pi 并带有 Work、问答和 Connector 工具；Task / Routine 默认使用通用 Pi 执行。另有独立的通用 `pi` Harness，提供文件与 CLI 能力，不预装 Personal 工具。
+当前 Chief 使用 `chief` Harness，它基于 Pi 并带有 Work、问答和 Connector 工具；Task / Routine 按根级 `defaultHarness` 选择执行实现，缺省为通用 Pi。另有独立的通用 `pi` Harness，提供文件与 CLI 能力，不预装 Personal 工具。
 
 状态默认保存在 `~/.aide`，由一个 Aide 服务进程管理。当前面向单用户，本地 HTTP 入口没有认证，会话分组不提供账号或权限隔离。飞书接收单聊和群内 @本机器人的文字；原生 Harness 权限请求仍在网页处理。
 

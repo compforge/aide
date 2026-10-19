@@ -1,4 +1,11 @@
+import { z } from "zod";
 import type { HarnessTargetConfig } from "../../config/types.ts";
+
+export const CodexConfigSchema = z.object({
+  command: z.array(z.string().trim().min(1)).min(1).optional(),
+  approvalReviewer: z.enum(["user", "auto_review"]).optional(),
+  model: z.string().trim().min(1).optional(),
+}).strict();
 
 export interface CodexTargetConfig {
   command: string[];

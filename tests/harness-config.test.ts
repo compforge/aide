@@ -179,12 +179,66 @@ test("startup resolves independent Pi and Chief models with explicit package ski
     } }));
     const config = loadConfig(file);
     const resolved = await resolveHarnessConfigs(config, { home, cwd: home, file, environment: { TEST_MODEL_KEY: "fixture-key" }, log });
-    expect(resolved.pi.model.id).toBe("work-model");
+    expect(resolved.pi!.model.id).toBe("work-model");
     expect(resolved.chief.model.id).toBe("chief-model");
-    expect(resolved.pi.modelRuntime).not.toBe(resolved.chief.modelRuntime);
-    expect(resolved.pi.skillPaths).toEqual([]);
+    expect(resolved.pi!.modelRuntime).not.toBe(resolved.chief.modelRuntime);
+    expect(resolved.pi!.skillPaths).toEqual([]);
     expect(resolved.chief.skillPaths).toEqual([]);
-    expect(resolved.pi.settings.packages).toEqual([]);
-    expect(resolved.pi.settings.skills).toEqual([]);
+    expect(resolved.pi!.settings.packages).toEqual([]);
+    expect(resolved.pi!.settings.skills).toEqual([]);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+
+test("defaultHarness is an Aide root setting with a Pi default and strict registered execution choices", () => {
+  const home = mkdtempSync(join(tmpdir(), "aide-default-selection-"));
+  const file = join(home, "config.yaml");
+  try {
+    writeFileSync(file, "{}"); expect(loadConfig(file).defaultHarness).toBe("pi");
+    for (const harness of ["pi", "codex", "claude", "dsh"] as const) {
+      writeFileSync(file, JSON.stringify({ defaultHarness: harness }));
+      expect(loadConfig(file).defaultHarness).toBe(harness);
+    }
+    for (const value of [null, "", "chief", "unknown", "cx", 42]) {
+      writeFileSync(file, JSON.stringify({ defaultHarness: value }));
+      expect(() => loadConfig(file)).toThrow("defaultHarness");
+    }
+    writeFileSync(file, JSON.stringify({ harnesses: { default: "codex" } }));
+    expect(() => loadConfig(file)).toThrow("harnesses");
+    for (const invalid of [{ codex: { command: [] } }, { codex: { approvalReviewer: "invalid" } },
+      { claude: { executable: "" } }, { dsh: { maxTokens: -1 } }, { dsh: { command: ["dsh"] } }]) {
+      writeFileSync(file, JSON.stringify({ harnesses: invalid }));
+      expect(() => loadConfig(file)).toThrow("Invalid Aide config structure");
+    }
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+for (const harness of ["codex", "claude", "dsh"] as const)
+test(`${harness} selection resolves native settings without loading inactive Pi packages or models`, async () => {
+  const home = mkdtempSync(join(tmpdir(), "aide-native-selection-"));
+  const file = join(home, "config.yaml");
+  const native = {
+    codex: { command: ["fixture-codex", "app-server"], approvalReviewer: "auto_review", model: "native-model" },
+    claude: { executable: "/fixture/claude", model: "native-model" },
+    dsh: { model: "native-model", patches: [] },
+  };
+  try {
+    writeFileSync(file, JSON.stringify({ defaultHarness: harness, harnesses: {
+      chief: { model: { provider: "fixture", id: "chief-model", api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1", apiKeyEnv: "TEST_MODEL_KEY" } },
+      pi: { model: { provider: "missing", id: "inactive" }, packages: ["git:fixture.invalid/unsynced"] },
+      [harness]: native[harness],
+    } }));
+    const config = loadConfig(file);
+    const resolved = await resolveHarnessConfigs(config, { home, cwd: home, file,
+      environment: { TEST_MODEL_KEY: "fixture-key", AIDE_CLAUDE_BIN: "/ambient/claude" }, log });
+    expect(resolved.defaultTarget).toEqual({ id: "default", harness, model: "native-model" });
+    expect(resolved.defaultTargetConfig).toMatchObject({ harness, ...native[harness] });
+    expect(resolved.chief.model.id).toBe("chief-model");
+    expect(resolved.pi).toBeUndefined();
+    config.defaultHarness = "pi";
+    if (harness === "codex") config.harnesses.codex.command![0] = "changed-command";
+    expect(resolved.defaultTarget.harness).toBe(harness);
+    expect(resolved.defaultTargetConfig).toMatchObject({ harness, ...native[harness] });
+    expect(existsSync(join(home, "harnesses", "pi", "synced"))).toBe(false);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

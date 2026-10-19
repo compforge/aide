@@ -6,7 +6,8 @@ import { parseWatches, validateWatchScopes } from "../plugins/personal/source-co
 import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
 import { Connectors } from "../connectors/index.ts";
-import type { AideConfig } from "./config.ts";
+import type { AideConfig, DefaultHarness } from "./config.ts";
+import { harnessSessionKey } from "./host/harness/registry.ts";
 import { CoreSession, type CoreControllerOptions } from "./host/core/index.ts";
 import { SessionStore } from "./host/store/store.ts";
 import { PluginInstanceStore } from "./host/plugin/instance.ts";
@@ -15,6 +16,7 @@ import { IncomingSchema, type Incoming } from "./channel/message.ts";
 
 export interface AideOptions {
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
+  defaultTarget: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
   createAdapter: CoreControllerOptions["createAdapter"];
 }
 
@@ -25,6 +27,7 @@ export interface AideOptions {
  */
 export class Aide {
   private readonly storage: SessionStore;
+  private readonly defaultTarget: AideOptions["defaultTarget"];
   private readonly active = new Map<string, Personal>();
   private readonly listeners = new Set<() => void>();
   private readonly watches: ReturnType<typeof parseWatches>;
@@ -34,6 +37,7 @@ export class Aide {
   private heartbeatTimer?: ReturnType<typeof setInterval>;
 
   constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
+    this.defaultTarget = Object.freeze({ ...options.defaultTarget });
     const config = options.config;
     this.watches = parseWatches(config?.plugins.personal);
     validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
@@ -60,8 +64,9 @@ export class Aide {
     const previous = this.storage.listSessions().find((meta) => meta.aideSessionId === id);
     const session = previous ? this.storage.openSession(id) : this.storage.createSession({ id, cwd: this.options.cwd, title: id });
     const connectors = this.connectors;
-    const targets = [{ id: "default", harness: "pi" }];
-    session.setHarnessTarget("default", { harnessTargetId: "default", harness: "pi" });
+    const { id: targetId, harness, model } = this.defaultTarget;
+    const targets = [{ id: targetId, harness }];
+    session.setHarnessTarget(targetId, { harnessTargetId: targetId, harness, ...(model ? { model } : {}) });
     const instances = new PluginInstanceStore({ session });
     if (!instances.list().some((item) => item.pluginInstanceId === "personal")) {
       instances.create({ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin" });
@@ -71,7 +76,7 @@ export class Aide {
     let application: Personal;
     const core = new CoreSession({ session,
       controller: { mentionBudgetChars: 0, createAdapter: this.options.createAdapter, resolveTarget: (id) => targets.find((item) => item.id === id) },
-      plugins: { instances, connectors, harnessTargets: targets, selectedHarnessTargetId: () => "default",
+      plugins: { instances, connectors, harnessTargets: targets, selectedHarnessTargetId: () => targetId,
         harnessInvocationGate: () => "auto_approve", pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => {
           const entryUrl = packages.get(`${pluginId}@${version}`);
@@ -86,17 +91,18 @@ export class Aide {
     });
     // CoreSession has acquired the lease before changing execution metadata.
     // @spec A default Harness change preserves Aide history but cannot reuse another provider's native binding.
+    const sessionKey = harnessSessionKey(harness);
     const incompatible = Object.values(session.meta.lanes).filter((lane) =>
-      lane.harnessSessions.default && lane.harnessSessions.default.harness !== "pi");
+      lane.harnessSessions[targetId] && lane.harnessSessions[targetId].harness !== sessionKey);
     if (incompatible.length) {
       const lanes = { ...session.meta.lanes };
       for (const lane of incompatible) {
-        const { default: _previous, ...harnessSessions } = lane.harnessSessions;
+        const { [targetId]: _previous, ...harnessSessions } = lane.harnessSessions;
         lanes[lane.laneId] = { ...lane, harnessSessions };
       }
       // Clear the compatibility projection too; normalization otherwise restores the removed main-Lane binding.
       session.updateMeta({ lanes, harnessSessions: {} });
-      this.log.info({ sessionId: id, harness: "pi", lanes: incompatible.length },
+      this.log.info({ sessionId: id, harness, harnessTargetId: targetId, lanes: incompatible.length },
         "Default Harness changed; cleared incompatible native bindings");
     }
     const cwd = resolve(this.options.cwd);

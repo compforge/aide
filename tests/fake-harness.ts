@@ -10,7 +10,7 @@ export interface Agent {
 
 /** Exercise the real Runner/verb/Turn path; replace only the external Harness protocol. */
 export function fakeOptions(agent: Agent, cwd: string, requests: string[] = []) {
-  return { cwd, timezone: "UTC", createAdapter: (target: { harness: string } = { harness: "pi" }): HarnessAdapter => {
+  return { cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): HarnessAdapter => {
     let sink: HarnessEventSink;
     let active: PromptInput | undefined;
     const finish = (turnId: string, stopReason: string) => {

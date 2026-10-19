@@ -265,7 +265,7 @@ test("Aide routes stable Sessions and resumes real Chief native context across i
   const home = join(fixture.config.cwd, "aide");
   const log = pino({ level: "silent" });
   let aide: Aide;
-  const open = (cwd = fixture.config.cwd) => new Aide(home, { cwd, timezone: "UTC", createAdapter: (target, ports) =>
+  const open = (cwd = fixture.config.cwd) => new Aide(home, { cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" }, createAdapter: (target, ports) =>
     createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
       chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }, log);
   const send = async (sessionId: string, conversationId: string, id: string) => {
@@ -432,7 +432,7 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
   writeFileSync(join(skill, "SKILL.md"), "---\nname: fixture-as-ops\ndescription: Inspect AgentSphere environment evidence.\n---\nRead-only environment operations.\n");
   const piConfig = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir,
     model: { provider: "fixture", id: "work-model" }, skillPaths: [join(skill, "SKILL.md")] });
-  const aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", createAdapter: (target, ports) =>
+  const aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" }, createAdapter: (target, ports) =>
     createHarnessAdapter(target, { ...ports, piConfig, targetConfig: { harness: target.harness } }) }, pino({ level: "silent" }));
   t.after(() => aide.close());
   await aide.start();

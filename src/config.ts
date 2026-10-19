@@ -4,12 +4,19 @@ import { join } from "node:path";
 import { parseDocument } from "yaml";
 import { z } from "zod";
 
+import { HARNESSES } from "./host/harness/ids.ts";
 import { HarnessesConfigSchema } from "./host/harness/config.ts";
 import { ConnectorsConfigSchema } from "../connectors/config.ts";
 
 const record = z.record(z.string(), z.unknown());
+/** @spec Aide owns default execution selection; Chief remains a separately bound role.
+ * @link docs/kernel.md
+ */
+export const DefaultHarnessSchema = z.enum(HARNESSES).exclude(["chief"]).default("pi");
+export type DefaultHarness = z.infer<typeof DefaultHarnessSchema>;
 /** @spec Explicit values win; defaults apply only to absent fields, never to empty lists or invalid values. */
 const ConfigSchema = z.object({
+  defaultHarness: DefaultHarnessSchema,
   connectors: ConnectorsConfigSchema.prefault({}),
   plugins: z.record(z.string(), record).default({}),
   harnesses: HarnessesConfigSchema.prefault({}),
