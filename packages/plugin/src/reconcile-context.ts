@@ -20,6 +20,10 @@ interface VerbInput {
   readonly timeoutMs: number;
 }
 
+/** Persists a message for Channel delivery; success does not mean the recipient has read it. */
+export interface SayInput { readonly text: string }
+export type SayResult = VerbResult<{ readonly messageId: string }>;
+
 export interface AskChoice<TValue extends string = string> {
   /** Stable domain value returned when the user selects this choice. */
   readonly value: TValue;
@@ -102,10 +106,11 @@ export type DraftResult = VerbResult<CompletedHarnessValue>;
 /**
  * @spec Controller verbs suspend the same live Plugin execution until a terminal result; ask/confirm persist a Core-owned Interaction; Aide never re-enqueues a Resource merely to deliver that result.
  * @rule Correlate verb continuation with the Core-issued execution identity, never with Resource identity or a caller-provided key; a crashed execution fails instead of replaying its call stack.
- * @rule Require one total timeout for every verb; draft and harness deadlines cover their Interaction gate and the resulting HarnessInvocation through terminal Turn.
+ * @rule Waiting verbs require one total timeout; say only persists a message without waiting for delivery; draft and harness deadlines cover their Interaction gate and the resulting HarnessInvocation through terminal Turn.
  * @see {@link docs/plugin.md}
  */
 export interface PluginVerbs {
+  say(input: SayInput): Promise<SayResult>;
   connectors(options: { timeoutMs: number }): ConnectorClient;
   ask<const TInput extends AskInput>(
     input: TInput,

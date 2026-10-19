@@ -13,6 +13,8 @@ const EventSchema = IncomingSchema.omit({ text: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
 
+const HeartbeatSchema = IncomingSchema.pick({ sessionId: true, conversationId: true }).extend({ enabled: z.boolean() }).strict();
+
 const DeleteWorkSchema = IncomingSchema.pick({ id: true, conversationId: true }).extend({
   revision: z.number().int().positive(),
 }).strict();
@@ -114,6 +116,12 @@ export function httpChannel(aide: WebService, log: Logger) {
       } else if (request.method === "POST" && url.pathname === "/messages") {
         const input = IncomingSchema.parse(await body(request));
         json(response, 200, await aide.receive(input));
+      } else if (request.method === "POST" && url.pathname === "/sessions/heartbeat") {
+        const { sessionId, conversationId, enabled } = HeartbeatSchema.parse(await body(request));
+        if (aide.findConversation(conversationId)?.id !== sessionId) {
+          json(response, 404, { error: "Session 或会话不存在。" }); return;
+        }
+        json(response, 200, aide.setHeartbeat(sessionId, conversationId, enabled));
       } else if (request.method === "POST" && url.pathname === "/work/delete") {
         const { id, conversationId, revision } = DeleteWorkSchema.parse(await body(request));
         const work = aide.works().find((item) => item.id === id && item.conversationId === conversationId);

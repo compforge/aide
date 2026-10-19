@@ -6,7 +6,8 @@ import { INPUT_TYPE, type Conversation, type ConversationMessage, type InputSpec
 
 const MessageSchema = z.object({ id: z.string(), conversationId: z.string(), at: z.string(),
   role: z.enum(["user", "aide"]), text: z.string(), workId: z.string().nullable() });
-const SpecSchema = z.object({ conversationId: z.string().min(1).max(200), origin: z.enum(["channel", "source"]),
+const SpecSchema = z.object({ conversationId: z.string().min(1).max(200), origin: z.enum(["channel", "source", "heartbeat"]),
+  sessionId: z.string().min(1).max(200).optional(),
   text: z.string().min(1).max(32_000), timezone: z.string().optional(), replyTo: z.string().optional(),
   observation: z.record(z.string(), z.unknown()).optional() });
 const StatusSchema = z.object({ phase: z.enum(["running", "waiting", "done", "failed"]).optional(),
@@ -61,6 +62,7 @@ export class ConversationStore {
 
   submit(id: string, raw: InputSpec, status: InputStatus = {}): Resource<InputSpec, InputStatus> {
     const spec = SpecSchema.parse(raw);
+    if (spec.origin === "heartbeat" && !spec.sessionId) throw new Error("Heartbeat Input requires sessionId");
     const previous = this.input(id);
     if (previous) {
       if (previous.spec.conversationId !== spec.conversationId) throw new Error("Input identity belongs to another conversation");

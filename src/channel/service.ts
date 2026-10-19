@@ -9,6 +9,7 @@ export interface ChannelSession {
   readonly id: string;
   readonly core: CoreSession;
   readonly conversations: ConversationStore;
+  readonly heartbeat: { readonly config: import("../host/heartbeat.ts").HeartbeatConfig };
 }
 export interface ChannelService {
   sessions(): readonly ChannelSession[];

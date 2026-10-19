@@ -53,6 +53,8 @@ export type {
 
 export type {
   AskChoice,
+  SayInput,
+  SayResult,
   AskInput,
   AskResult,
   AskValue,

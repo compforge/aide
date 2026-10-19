@@ -6,6 +6,7 @@ Personal 是 Aide 的内置个人助手插件：Chief 接收输入并判断是�
 
 ```text
 Channel 用户消息 ──┐
+Heartbeat 定时回顾 ──┤
                   ├→ Input → Conversation → Chief Controller → Chief Harness
 Source 外部观察 ──┘                              │                  │
                                                  │ ask / confirm    ├→ 直接回复 / 忽略观察
@@ -24,9 +25,21 @@ Chief 是业务角色。Chief Controller 消费输入、组织上下文并续接
 
 Input 与 Work 有不同生命周期。普通提问可以处理完就回复，只有有限目标或持续职责才进入 Work。Channel 与 Source 决定输入所属会话，具体映射见 [Channel](../channel/README.md) 和 [Connector 与 Source](../connector/README.md)；内置对象的存储由 [Kernel](../kernel.md) 管理。
 
-每个会话绑定一个 Chief Target；每份输入使用独立 Lane，询问后的续答继续同一原生 Pi 会话。Chief 获取近期消息，并通过工具查询已有工作和外部详情；当前没有通用长期记忆。
+每个会话绑定一个 Chief Target 和固定 Lane，普通消息、定时回顾及询问后的续答沿用原生 Harness 会话。Chief 获取近期消息，并通过工具查询已有工作和外部详情；记忆由 Chief Harness 组合上游能力，Personal 不感知其实现。
 
 编程领域使用 Repository = forge + path、Requirement = source + category + id、PR/MR = forge + path + number。Chief 在工作指令中保留实体身份与工作目录，不根据仓库名字猜测本地 checkout。
+
+## Session 定时回顾
+
+Session 的 `meta.json` 保存 `heartbeat: { enabled: false, intervalSeconds: 3600 }`。默认关闭，间隔为正整数秒；Web 只切换 enabled，不编辑间隔。修改文件中的间隔需要停止服务后编辑并重启，运行中开关通过 API 修改。
+
+一个 Host 调度器检查所有 Session 的持久截止时间。开启后等待一个周期，产生带 `sessionId`、`conversationId` 和 `origin: heartbeat` 的 Input；这不是用户 Message。首次开启选择当前 Conversation 作为该 Session 的回顾入口，多会话共用 Session 时开关同步，后续切换不隐式改变入口。重启沿用截止时间，停机错过的周期合并成一次回顾。Session 已有排队、运行或待回答 Input 时跳过本周期，不堆积回顾。
+
+关闭只停止新定时 Input，已入队和执行中的 Input、Task、Routine、Source 都不受影响。Input 先持久化，再推进下一次时间；同一截止时间使用稳定 ID 去重。
+
+Chief 回顾当前 Conversation 的相关 Work 和已有目标，按需核实进展、阻塞和期限。记忆中的意向不自动成为执行委托；不要重复提出没有新依据或用户回应的建议。当前 Work 工具仍限于所属 Conversation，不做全 Session 或跨群的信息汇总。
+
+Chief 可以推进已有委托、用普通消息提出建议、请求 ask/confirm，或调用 `dismiss_observation` 静默结束。`say` 只保存 Message，由 Channel 独立投递，不创建等待回答的 Interaction。用户回复 say 是普通 Channel Input。飞书的定时回顾不发送过程卡片；只有实际消息或问题才通知用户，静默回顾的内部总结不渲染为回复。
 
 ## 决策与问答
 
@@ -38,7 +51,7 @@ Chief 拥有原生文件/CLI 工具、五个 Work 工具，以及 `read_requirem
 
 Source 观察没有用户指令的地位。Chief 应读取详情、查询已有 Work；在已有委托内可以推进工作，缺少目标或授权时询问。不值得打扰的观察可调用 `dismiss_observation`，保存原因但不向 Channel 发消息。
 
-普通回复保存到 Conversation 的 Message 流，Input 保留消息引用，Core 问题按原 messageId 投影到同一 Channel 消息流。POST `/messages` 返回入站持久回执，业务结果异步出现；没有每次固定发出的“已创建事项”回复。模型进度不会重复投递为最终回复。
+普通回复由 Chief Controller 调用 `say` 保存到 Conversation 的 Message 流，Input 保留消息引用，Core 问题按原 messageId 投影到同一 Channel 消息流。POST `/messages` 返回入站持久回执，业务结果异步出现；没有每次固定发出的“已创建事项”回复。模型进度不会重复投递为最终回复。
 
 Chief 可能调用有副作用的工具，因此运行中断、失败或重启均不自动重放。状态和失败提示保留，用户核对后用新消息重新交办。同一输入 id 的传输重投永远不作为业务重试。等待中的调用栈不跨重启恢复，Core 问题会收口，Input 标记 failed；Work 的结果处理见下文。
 

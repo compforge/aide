@@ -23,6 +23,7 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
     return data;
   }
   let lastConversations = '';
+  const heartbeatUpdates = new Set();
   function renderConversations(conversations) {
     const items = [...conversations];
     for (const id of new Set([conversationId, 'me'])) {
@@ -43,12 +44,38 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
       link.title = item.title + ' · ' + item.id;
       link.append(element('strong', item.title), element('span', item.id, 'muted'));
       if (item.preview) link.append(element('span', item.preview, 'muted'));
-      return link;
+      const row = element('div', undefined, 'conversation-row'); row.append(link);
+      if (item.sessionId) {
+        const label = element('label', undefined, 'heartbeat-switch');
+        const toggle = element('input'); toggle.type = 'checkbox'; toggle.checked = item.heartbeat.enabled;
+        toggle.setAttribute('role', 'switch');
+        toggle.setAttribute('aria-label', item.title + '：主动回顾');
+        toggle.disabled = heartbeatUpdates.has(item.sessionId);
+        label.title = '开启后定时回顾；关闭不影响已有事项与安排。';
+        toggle.addEventListener('change', async () => {
+          heartbeatUpdates.add(item.sessionId);
+          for (const control of document.querySelectorAll('.heartbeat-switch input')) control.disabled = true;
+          try {
+            await api('/sessions/heartbeat', { method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ sessionId: item.sessionId, conversationId: item.id, enabled: toggle.checked }) });
+            $('conversation-notice').textContent = '';
+          } catch (error) {
+            toggle.checked = item.heartbeat.enabled;
+            $('conversation-notice').textContent = '开关保存失败：' + error.message;
+          } finally {
+            heartbeatUpdates.delete(item.sessionId); lastConversations = '';
+            try { renderConversations(await api('/conversations')); } catch { for (const control of document.querySelectorAll('.heartbeat-switch input')) control.disabled = false; }
+          }
+        });
+        label.append(toggle, element('span', '主动回顾')); row.append(label);
+      }
+      return row;
     });
     $('conversation-list').replaceChildren(...links);
   }
   async function refreshConversations() {
     try {
+      if (heartbeatUpdates.size) return;
       renderConversations(await api('/conversations'));
       $('conversation-notice').textContent = '';
     } catch { $('conversation-notice').textContent = '会话列表暂时无法更新，正在重试。'; }

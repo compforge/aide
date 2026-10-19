@@ -1,0 +1,36 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Verb } from "../src/host/plugin/verb.ts";
+import { SessionStore } from "../src/host/store/store.ts";
+import { ConversationStore } from "../src/host/conversation/store.ts";
+import { ReconcileCapacity } from "../src/reconcile/queue.ts";
+import { emptyReconcileSnapshot } from "../src/host/plugin/reconcile-snapshot.ts";
+import { createPluginVerbs } from "../src/plugin-context.ts";
+
+test("say persists an ordinary scoped Message without an Interaction and validates Input ownership", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-say-"));
+  const session = new SessionStore(root).createSession({ id: "owner", cwd: root });
+  const conversations = new ConversationStore(session);
+  conversations.submit("tick", { sessionId: session.id, conversationId: "private", origin: "heartbeat", text: "review" });
+  conversations.archive("other", []);
+  const verb = new Verb({ session, conversations: () => conversations, capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot(session.id) });
+  t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
+  const context = { aideSessionId: session.id, pluginInstanceId: "test", namespace: "v1" as const, executionId: "exec", conversationId: "private", inputId: "tick" };
+  await verb.beginRemote(context);
+  const verbs = createPluginVerbs(context, (scope, request) => verb.invoke(scope, request));
+  const result = await verbs.say({ text: "可以继续了" });
+  assert.equal(result.state, "success");
+  assert.equal(conversations.get("private")!.messages.length, 1);
+  assert.equal(conversations.input("tick")!.status.messages![0]!.text, "可以继续了");
+  assert.equal(session.projection.interactions.size, 0);
+  assert.equal(conversations.input("tick")!.status.phase, undefined);
+  assert.equal((await verb.invoke({ ...context, conversationId: "other" }, { verb: "say", input: { text: "wrong scope" } })).state, "failure");
+  assert.equal((await verb.invoke({ ...context, conversationId: undefined }, { verb: "say", input: { text: "no scope" } })).state, "failure");
+  await assert.rejects(verbs.say({ text: " " }));
+  assert.equal((await verb.invoke({ ...context, inputId: undefined }, { verb: "say", input: { text: "standalone message" } })).state, "success");
+  assert.equal(new ConversationStore(session).get("private")!.messages.length, 2);
+  verb.endRemote(context.executionId);
+});

@@ -77,3 +77,9 @@ curl -s http://127.0.0.1:7433/events \
 ```
 
 该接口唤醒匹配的 Routine，不自动创建 Work。接口面向本机可信调用，没有认证，不直接暴露公网；远程访问方式见 [部署](../deployment.md)。
+
+## 主动回顾开关
+
+会话列表的「主动回顾」开关修改对应 Session 的 heartbeat，默认关闭、间隔 3600 秒。多个 Conversation 共用 Session 时显示同一状态。尚未通过输入创建的空会话没有开关。页面不提供间隔编辑。
+
+`GET /conversations` 返回 `sessionId` 和 `heartbeat`；`POST /sessions/heartbeat` 接收 `{ sessionId, conversationId, enabled }`，校验会话归属后持久化，拒绝额外的间隔字段。关闭不会取消已有输入或委托。调度和判断见 [Personal](../plugin/personal.md#session-定时回顾)。

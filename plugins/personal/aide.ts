@@ -1,4 +1,5 @@
 import type { Logger } from "pino";
+import { SessionHeartbeat } from "../../src/host/heartbeat.ts";
 import type { ResourceType } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/host/plugin/manager.ts";
 import { CoreSession } from "../../src/host/core/index.ts";
@@ -26,6 +27,7 @@ export class Personal {
   private closed = false;
 
   readonly core: CoreSession;
+  readonly heartbeat: SessionHeartbeat;
   private readonly session: SessionHandle;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly chiefConversations = new Map<string, string>();
@@ -40,6 +42,13 @@ export class Personal {
     this.plugins = this.core.pluginManager!;
     this.store = new Store(new PluginResourceStore({ session: this.session, pluginInstanceId: "personal" }),
       this.plugins.resourceClient("personal"), this.plugins.conversations!);
+    this.heartbeat = new SessionHeartbeat(this.session, this.conversations, (id, conversationId) => {
+      if (this.closed || !this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable for heartbeat input");
+      this.conversations.submit(id, { sessionId: this.id, conversationId, origin: "heartbeat", timezone: this.options.timezone,
+        text: "例行回顾：检查已有关注范围和相关工作，按需核实最新事实，判断有没有值得推进的下一步。没有值得处理的事情就保持安静。" });
+      this.wake(CONVERSATION_TYPE, conversationKey(conversationId));
+      this.log.info({ inputId: id, conversationId }, "Accepted heartbeat input");
+    });
     const watches = runtime.watches;
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
     this.store.conversations.subscribe((conversation) => this.registerConversation(conversation.id));
@@ -70,7 +79,7 @@ export class Personal {
       this.store.conversations.update(input, { question });
     }, (quietReason) => {
       const input = active();
-      if (input.spec.origin !== "source") throw new Error("Only Source observations can be dismissed silently");
+      if (input.spec.origin === "channel") throw new Error("Channel input cannot be dismissed silently");
       this.store.conversations.update(input, { quietReason });
     });
     return (options) => createChiefAgent({ ...options, config, work: this.work(conversationId),

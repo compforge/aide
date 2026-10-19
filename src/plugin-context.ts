@@ -106,6 +106,10 @@ export function createPluginVerbs(
   invoke: InvokeVerb,
 ): PluginVerbs {
   return Object.freeze({
+    async say(input: import("@compforge/aide-plugin").SayInput) {
+      nonEmpty("say text", input.text);
+      return await invoke(scope, { verb: "say", input }) as import("@compforge/aide-plugin").SayResult;
+    },
     connectors(options: { timeoutMs: number }) {
       validateTimeout("connector", options.timeoutMs);
       return createConnectorClient(async <T>(request: import("./protocol/connectors.ts").ConnectorRequest): Promise<T> => {
