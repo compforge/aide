@@ -89,3 +89,17 @@
   .reply-envelope > summary:focus-visible { outline: 2px solid #83a38b; outline-offset: 3px; border-radius: 4px; }
   .reply-envelope > .activity-heading { display: list-item; }
   .reply-envelope > .activity-heading::before { display: inline-block; margin-right: 8px; }
+
+  .reply-part > summary { list-style: none; }
+  .reply-part > summary::-webkit-details-marker { display: none; }
+  .reply-part-title { font-weight: 500; }
+  .reply-toggle { float: right; font-size: 12px; }
+  .reply-toggle::after { content: '展开详情 ▾'; }
+  .reply-part[open] > summary .reply-toggle::after { content: '收起 ▴'; }
+  .reply-preview { margin-top: 6px; color: #20342b; font-size: 14px; line-height: 1.65; }
+  .reply-preview-line { display: block; }
+  .reply-part[open] > summary .reply-preview { display: none; }
+  .reply-part[data-kind="process"] .reply-preview-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reply-part[data-kind="answer"] .reply-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
+  .reply-part[data-kind="answer"][data-state="live"] .reply-preview { display: block; max-height: 4.95em; overflow: hidden; }
+  .reply-part[data-phase="waiting"] > summary .reply-part-title, .reply-part[data-phase="failed"] > summary .reply-part-title { color: #9b5b11; }

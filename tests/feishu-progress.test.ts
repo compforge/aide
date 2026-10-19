@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -8,7 +8,7 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
 import type { Message } from "../plugins/personal/model.ts";
 import { FeishuChannel } from "../src/channel/feishu.ts";
-import { feishuProgress, progressCard, type FeishuProgress } from "../src/channel/feishu-card.ts";
+import { feishuProgress, progressCard, cardPreviews, type FeishuProgress } from "../src/channel/feishu-card.ts";
 import { feishuTransport, type FeishuTransport } from "../src/channel/feishu-client.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -20,7 +20,8 @@ const message = (id: string, text: string): Message => ({ id, text, conversation
 
 function cardRegions(card: ReturnType<typeof progressCard>) {
   const envelope = card.body.elements.find((element) => "elements" in element)!;
-  return { envelope, thought: envelope.elements[0] as typeof envelope, answer: envelope.elements[1] as typeof envelope };
+  const panels = envelope.elements.filter((element) => (element as { tag: string }).tag === "collapsible_panel");
+  return { envelope, thought: panels[0] as typeof envelope, answer: panels[1] as typeof envelope };
 }
 
 function setup(t: TestContext) {
@@ -28,15 +29,26 @@ function setup(t: TestContext) {
   const messages: Message[] = [], calls: { kind: string; args: unknown[] }[] = [];
   let view: FeishuProgress = { id: "input", phase: "queued", think: "", content: "", messageIds: [], overflow: false };
   const record = (kind: string, args: unknown[]) => { calls.push({ kind, args }); };
+  let card!: ReturnType<typeof progressCard>;
+  const patchElement = (elements: unknown[], id: string, patch: unknown): void => {
+    for (const item of elements) {
+      const element = item as { element_id?: string; elements?: unknown[] };
+      if (element.element_id === id) Object.assign(element, patch);
+      if (element.elements) patchElement(element.elements, id, patch);
+    }
+  };
   const transport: FeishuTransport = { async start() {}, close() {}, async send(...args) { record("text", args); },
-    cards: { async create(...args) { record("create", args); return "card-1"; }, async send(...args) { record("send", args); },
-      async content(...args) { record("content", args); }, async settings(...args) { record("settings", args); }, async update(...args) { record("update", args); } } };
+    cards: { async create(...args) { record("create", args); card = structuredClone(args[0]) as typeof card; return "card-1"; }, async send(...args) { record("send", args); },
+      async content(...args) { record("content", args); patchElement(card.body.elements, args[1], { content: args[2] }); },
+      async patch(...args) { record("patch", args); for (const [id, value] of Object.entries(args[1])) patchElement(card.body.elements, id, value); },
+      async settings(...args) { record("settings", args); card.config.streaming_mode = args[1]; },
+      async update(...args) { record("update", args); card = structuredClone(args[1]) as typeof card; } } };
   const aide = { receive: async () => { throw new Error("Delivery must not execute input"); }, messages: () => messages };
   const reader = (id: string) => { assert.equal(id, conversationId); return [view]; };
   let channel = new FeishuChannel(home, "cli_progress", aide, transport, log, reader);
   channel.receive(event);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  return { calls, messages, transport, get channel() { return channel; }, view: (next: Partial<FeishuProgress>) => { view = { ...view, ...next }; },
+  return { home, calls, messages, transport, get card() { return card; }, get channel() { return channel; }, view: (next: Partial<FeishuProgress>) => { view = { ...view, ...next }; },
     async reopen() { await channel.close(); channel = new FeishuChannel(home, "cli_progress", aide, transport, log, reader); } };
 }
 
@@ -55,7 +67,7 @@ test("Feishu streams think/content in one card, closes on question, resumes and 
   f.view({ phase: "waiting", content: "确认继续吗？", messageIds: ["question"] });
   await f.channel.deliver();
   assert.ok(f.calls.find((call) => call.kind === "settings" && call.args[1] === false));
-  const card = f.calls.filter((call) => call.kind === "update").at(-1)!.args[1] as ReturnType<typeof progressCard>;
+  const card = f.card;
   assert.equal(cardRegions(card).thought.expanded, false); assert.equal(cardRegions(card).envelope.expanded, true);
   assert.equal(f.calls.filter((call) => call.kind === "text").length, 0);
   const before = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, before);
@@ -65,7 +77,7 @@ test("Feishu streams think/content in one card, closes on question, resumes and 
   assert.equal(f.calls.filter((call) => call.kind === "create").length, 1);
   assert.equal(f.calls.filter((call) => call.kind === "send").length, 1);
   assert.equal(f.calls.filter((call) => call.kind === "text").length, 0, "A finalized card replaces normal delivery of the same Message");
-  const updates = f.calls.filter((call) => ["content", "settings", "update"].includes(call.kind));
+  const updates = f.calls.filter((call) => ["content", "settings", "update", "patch"].includes(call.kind));
   const sequences = updates.map((call) => call.args[call.kind === "content" ? 3 : 2] as number);
   assert.ok(sequences.every((value, index) => index === 0 || value > sequences[index - 1]!));
   const after = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, after);
@@ -77,41 +89,39 @@ test("Feishu collapses completed long replies with a bounded preview and preserv
   f.messages.push(message("long-table", text));
   f.view({ phase: "done", think: "已创建 Routine", content: text, messageIds: ["long-table"] });
   await f.channel.deliver();
-  const card = f.calls.filter((call) => call.kind === "update").at(-1)!.args[1] as ReturnType<typeof progressCard>;
+  const card = f.card;
   const { envelope: panel, thought, answer: answerPanel } = cardRegions(card);
-  assert.equal(panel.tag, "collapsible_panel"); assert.equal(panel.expanded, false);
+  assert.equal(panel.tag, "collapsible_panel"); assert.equal(panel.expanded, true);
   assert.equal(panel.header.title.tag, "plain_text");
-  assert.equal(panel.header.title.content, "查看完整回复");
-  const preview = card.body.elements[0]!;
-  assert.ok("text" in preview);
-  assert.equal(preview.tag, "div"); assert.equal(preview.text.tag, "plain_text");
-  assert.equal(preview.text.lines, 3);
-  assert.ok(preview.text.content.startsWith("已建好监控，每 5 分钟检查一次。 项 值 环境 hf"));
+  assert.equal(panel.header.title.content, "思考与回答");
+  const preview = cardPreviews({ id: "preview", phase: "done", think: "", content: text, messageIds: [], overflow: false }).answer_preview;
+  assert.equal(preview.text.tag, "plain_text"); assert.equal(preview.text.lines, 3);
+  assert.ok(preview.text.content.startsWith("回答：已建好监控，每 5 分钟检查一次。 项 值 环境 hf"));
   assert.ok(!preview.text.content.includes("**"));
-  assert.equal(thought.expanded, false); assert.equal(answerPanel.expanded, true);
+  assert.equal(thought.expanded, false); assert.equal(answerPanel.expanded, false);
   const body = answerPanel.elements[0] as { element_id: string; content: string };
   assert.equal(body.element_id, "content"); assert.equal(body.content, text);
   assert.equal(f.calls.filter((call) => call.kind === "text").length, 0);
   const before = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, before);
 
-  const longLine = progressCard({ id: "unicode", phase: "done", think: "", content: "😀".repeat(400), messageIds: [], overflow: false }, false);
-  const unicode = longLine.body.elements[0]!;
-  assert.ok("text" in unicode);
-  assert.equal(unicode.text.content, "😀".repeat(400), "Feishu applies the visual line limit without cutting Unicode or losing the excerpt");
+  const unicode = cardPreviews({ id: "unicode", phase: "done", think: "", content: "😀".repeat(400), messageIds: [], overflow: false }).answer_preview;
+  assert.equal(unicode.text.content, "回答：" + "😀".repeat(400), "Feishu clamps visual lines without cutting Unicode");
   assert.equal(unicode.text.lines, 3);
+
 });
 
-test("Feishu folds completed replies as a whole while questions, failures and streaming replies stay open", () => {
+test("Feishu keeps stable panels with compact defaults and exposes questions and failures in the preview", () => {
   const base: FeishuProgress = { id: "visible", phase: "done", think: "", content: "已完成。", messageIds: [], overflow: false };
   for (const [phase, streaming, content] of [
     ["done", false, base.content], ["waiting", false, "需要确认的项目\n".repeat(40)],
     ["failed", false, "处理中断\n".repeat(40)], ["running", true, "正在输出\n".repeat(40)],
   ] as const) {
     const card = progressCard({ ...base, phase, content }, streaming);
-    assert.equal(card.body.elements.length, phase === "done" ? 2 : 1);
+    assert.equal(card.body.elements.length, 1);
     const { envelope, thought, answer } = cardRegions(card);
-    assert.equal(envelope.expanded, phase !== "done");
-    assert.equal(thought.expanded, false); assert.equal(answer.expanded, true);
+    assert.equal(envelope.expanded, true);
+    assert.equal(thought.expanded, false); assert.equal(answer.expanded, false);
+    assert.equal(cardPreviews({ ...base, phase, content }).answer_preview.text.lines, phase === "waiting" || phase === "failed" ? 1000 : 3);
     const reply = answer.elements[0] as { element_id: string; content: string };
     assert.equal(reply.element_id, "content"); assert.equal(reply.content, content);
   }
@@ -120,12 +130,30 @@ test("Feishu folds completed replies as a whole while questions, failures and st
 test("Feishu previews answer text across paragraphs, lists and code without truncating at the first line", () => {
   const text = "## hf 内存\n\n当前 **1.8 GiB**，容器 `server`。\n\n- request: 2 GiB\n- limit: 4 GiB\n\n```text\n无 OOM\n```";
   const card = progressCard({ id: "preview", phase: "done", think: "查询过程", content: text, messageIds: [], overflow: false }, false);
-  const preview = card.body.elements[0]!;
-  assert.ok("text" in preview);
+  const preview = cardPreviews({ id: "preview", phase: "done", think: "", content: text, messageIds: [], overflow: false }).answer_preview;
   assert.deepEqual(preview.text, { tag: "plain_text", lines: 3,
-    content: "hf 内存 当前 1.8 GiB，容器 server。 request: 2 GiB limit: 4 GiB 无 OOM" });
+    content: "回答：hf 内存 当前 1.8 GiB，容器 server。 request: 2 GiB limit: 4 GiB 无 OOM" });
   const { answer } = cardRegions(card);
   assert.equal((answer.elements[0] as { content: string }).content, text, "Expanded answer keeps its original Markdown");
+});
+
+test("Feishu text updates preserve reader expansion across completion, reconnection and question resumption", async (t) => {
+  const f = setup(t); await f.channel.deliver();
+  const { envelope, thought, answer } = cardRegions(f.card);
+  thought.expanded = true; answer.expanded = true; envelope.expanded = false;
+  f.view({ phase: "running", think: "当前思考", content: "正在回答" }); await f.channel.deliver();
+  f.view({ phase: "waiting", content: "请确认" }); await f.channel.deliver();
+  await f.reopen();
+  f.view({ phase: "running", content: "继续执行" }); await f.channel.deliver();
+  f.messages.push(message("done", "最终回答"));
+  f.view({ phase: "done", content: "最终回答", messageIds: ["done"] }); await f.channel.deliver();
+  const current = cardRegions(f.card);
+  assert.equal(current.envelope, envelope); assert.equal(current.envelope.expanded, false);
+  assert.equal(current.thought.expanded, true); assert.equal(current.answer.expanded, true);
+  assert.equal(f.calls.filter((call) => call.kind === "update").length, 0, "Never replace panels during normal updates");
+  for (const call of f.calls.filter((call) => call.kind === "patch")) assert.ok(!JSON.stringify(call.args[1]).includes('"expanded"'));
+  assert.equal((current.answer.elements[0] as { content: string }).content, "最终回答");
+  const count = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, count);
 });
 
 test("Feishu preserves card ID and send uuid after an ambiguous card send", async (t) => {
@@ -153,12 +181,12 @@ test("Feishu card failure falls back to final text without reexecuting work", as
 test("Feishu retries the live layout when resuming a question card fails", async (t) => {
   const f = setup(t); await f.channel.deliver();
   f.view({ phase: "waiting", content: "哪个项目？" }); await f.channel.deliver();
-  const update = f.transport.cards!.update;
+  const update = f.transport.cards!.patch;
   let fail = true;
-  f.transport.cards!.update = async (...args) => { if (fail) { fail = false; throw new Error("layout update failed"); } await update(...args); };
+  f.transport.cards!.patch = async (...args) => { if (fail) { fail = false; throw new Error("layout update failed"); } await update(...args); };
   f.view({ phase: "running", think: "读取答复", content: "继续" }); await f.channel.deliver();
   await f.reopen(); await f.channel.deliver();
-  const card = f.calls.filter((call) => call.kind === "update").at(-1)!.args[1] as { config: { streaming_mode: boolean }; body: { elements: { tag: string }[] } };
+  const card = f.card;
   assert.equal(card.config.streaming_mode, true);
   assert.equal(card.body.elements[0]?.tag, "collapsible_panel");
 });
@@ -192,9 +220,15 @@ test("Feishu projects real Harness thought and text before final reply and isola
   const live = feishuProgress(aide, conversationId)[0]!;
   assert.equal(live.phase, "running"); assert.equal(live.think, "先读资料"); assert.equal(live.content, "正在核对");
   assert.deepEqual(feishuProgress(aide, "me"), []);
-  emitter.sink({ kind: "agent_message_chunk", turnId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "\u0000".repeat(4000) } } });
+  emitter.sink({ kind: "tool_call_update", turnId: emitter.turnId, payload: { toolCallId: "active", title: "采集内存", status: "in_progress" } });
+  emitter.sink({ kind: "tool_call_update", turnId: emitter.turnId, payload: { toolCallId: "finished", title: "读取环境", status: "completed" } });
+  assert.equal(feishuProgress(aide, conversationId)[0]!.process?.tool, "采集内存 · 执行中");
+  emitter.sink({ kind: "tool_call_update", turnId: emitter.turnId, payload: { toolCallId: "active", status: "failed" } });
+  assert.ok(feishuProgress(aide, conversationId)[0]!.think.includes("failed"), "Tool failure remains available in details");
+  emitter.sink({ kind: "agent_message_chunk", turnId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "\u0000".repeat(4000) + "最新结果已到达" } } });
   const large = feishuProgress(aide, conversationId)[0]!;
   assert.ok(large.overflow);
+  assert.ok(cardPreviews(large).answer_preview.text.content.endsWith("最新结果已到达"));
   assert.ok(Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(large, false)) })) <= 28_000);
   release(); await aide.settled();
   const done = feishuProgress(aide, conversationId)[0]!;
@@ -222,12 +256,30 @@ test("official SDK creates, sends, streams and finalizes CardKit cards through t
   await cards.send("oc_chat", "card-1", "stable-send");
   await cards.content("card-1", "think", "思考全文", 1, "seq-1");
   await cards.settings("card-1", false, 2, "seq-2");
-  await cards.update("card-1", { schema: "2.0" }, 3, "seq-3");
+  await cards.patch("card-1", { answer_preview: { text: { tag: "plain_text", content: "三行预览", lines: 3 } } }, 3, "seq-3");
   assert.equal(calls[0]!.body.type, "card_json");
   assert.deepEqual(JSON.parse(calls[1]!.body.content as string), { type: "card", data: { card_id: "card-1" } });
   assert.ok(calls[2]!.url.endsWith("/cardkit/v1/cards/card-1/elements/think/content"));
   assert.equal(calls[2]!.body.content, "思考全文");
   assert.deepEqual(JSON.parse(calls[3]!.body.settings as string), { config: { streaming_mode: false } });
+  assert.ok(calls[4]!.url.endsWith("/cardkit/v1/cards/card-1/batch_update"));
+  assert.deepEqual(JSON.parse(calls[4]!.body.actions as string), [{ action: "partial_update_element",
+    params: { element_id: "answer_preview", partial_element: { text: { tag: "plain_text", content: "三行预览", lines: 3 } } } }]);
   rejectUpdate = true;
-  await assert.rejects(cards.update("card-1", {}, 4, "seq-4"), /code 99991672/);
+  await assert.rejects(cards.patch("card-1", {}, 4, "seq-4"), /code 99991672/);
+});
+
+
+test("Feishu upgrades persisted legacy panels only once when execution continues", async (t) => {
+  const f = setup(t); await f.channel.deliver(); await f.channel.close();
+  const path = join(f.home, "channels", readdirSync(join(f.home, "channels"))[0]!);
+  const state = JSON.parse(readFileSync(path, "utf8"));
+  delete state.cards.input.layout; delete state.cards.input.previews;
+  writeFileSync(path, JSON.stringify(state));
+  await f.reopen();
+  f.view({ phase: "running", think: "继续处理" }); await f.channel.deliver();
+  assert.equal(f.calls.filter((call) => call.kind === "update").length, 1);
+  f.view({ think: "新进展" }); await f.channel.deliver();
+  assert.equal(f.calls.filter((call) => call.kind === "update").length, 1);
+  assert.equal(f.calls.filter((call) => call.kind === "send").length, 1);
 });

@@ -1,4 +1,4 @@
-import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agentue.js';
+import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview, replyLabels, toolLabels } from '/agentue.js';
   const $ = (id) => document.getElementById(id);
   const conversationId = new URL(location.href).searchParams.get('conversation') || 'me';
   const query = '?conversationId=' + encodeURIComponent(conversationId);
@@ -87,8 +87,44 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
     const summary = element('summary', title);
     summary.addEventListener('click', () => {
       regionChoices.set(id, !node.open);
+      if (node.dataset.phase) node.dataset.state = !node.open ? 'full' : isLive(node.dataset.phase) ? 'live' : 'compact';
+      if (node.dataset.kind === 'answer' && isLive(node.dataset.phase)) requestAnimationFrame(() => {
+        const preview = node.querySelector('.reply-preview'); preview.scrollTop = preview.scrollHeight;
+      });
     });
     node.append(summary); return node;
+  }
+  const isLive = (phase) => phase === 'running' || phase === 'queued';
+  /** @spec Execution phase and reader expansion are independent; streaming and completion preserve explicit choices. */
+  function replyPart(id, title, phase, kind) {
+    const node = replyRegion(id, '', kind === 'answer' && (phase === 'waiting' || phase === 'failed'));
+    node.dataset.kind = kind; node.dataset.title = title;
+    const summary = node.querySelector('summary');
+    summary.append(element('span', title, 'reply-part-title'), element('span', '', 'reply-toggle'), element('div', '', 'reply-preview'));
+    node.classList.add('reply-part');
+    updatePart(node, phase, []);
+    return node;
+  }
+  function updatePart(node, phase, lines) {
+    node.dataset.phase = phase;
+    node.dataset.state = node.open ? 'full' : isLive(phase) ? 'live' : 'compact';
+    const preview = node.querySelector('.reply-preview');
+    const signature = JSON.stringify(lines);
+    if (preview.dataset.signature !== signature) {
+      preview.dataset.signature = signature;
+      preview.replaceChildren(...lines.map((line) => element('span', line, 'reply-preview-line')));
+    }
+    node.querySelector('.reply-part-title').textContent = node.dataset.title + ' · ' + (replyLabels[phase] || phase);
+    if (isLive(phase) && node.dataset.kind === 'answer') preview.scrollTop = preview.scrollHeight;
+  }
+  function updateAnswer(node, phase, answer) {
+    if (!regionChoices.has(node.dataset.blockId)) node.open = phase === 'waiting' || phase === 'failed';
+    updatePart(node, phase, [answer.trim() ? replyText(answer) : phase === 'failed' ? '本次处理已中断，请核对后重新交办。' : phase === 'waiting' ? '等待你回答。' : phase === 'done' ? '回复已完成' : '等待生成回答…']);
+    updateMarkdown(node.querySelector('.message-body'), answer || (phase === 'failed' ? '本次处理已中断，请核对后重新交办。' : phase === 'waiting' ? '等待你回答。' : '等待生成回答…'));
+  }
+  function updateProcess(node, phase, blocks) {
+    const preview = processPreview(phase, blocks);
+    updatePart(node, phase, isLive(phase) ? ['思考：' + preview.thought, '工具：' + preview.tool] : [preview.summary]);
   }
   function appendProgress(parent, blocks, expanded) {
     for (const block of blocks) {
@@ -138,19 +174,21 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
       const process = children.filter((item) => item.type !== 'text' || (answers.length ? item.phase !== 'final' && !answers.includes(item.content) : item !== lastText))
         .concat(questions.filter((item) => item.status !== 'pending'));
       const failed = group.some((item) => item.status === 'failed' || item.status === 'interrupted');
-      const title = 'Aide · ' + (pending.length ? '等待你回答' : failed ? '处理已中断' : '已完成') + (answer ? ' · ' + replyPreview(answer) : '');
-      const node = replyRegion('input:' + groupId + ':whole', title, failed || pending.length > 0);
+      const phase = pending.length ? 'waiting' : failed ? 'failed' : 'done';
+      const title = 'Aide · ' + replyLabels[phase];
+      const node = replyRegion('input:' + groupId + ':whole', title, true);
       node.className = 'message aide assistant-reply reply-envelope'; node.dataset.inputId = groupId;
       if (executions.size || block.group_id || process.length) {
-        const thought = replyRegion('input:' + groupId + ':think', '思考与执行过程', false);
+        const thought = replyPart('input:' + groupId + ':think', '思考与执行', phase, 'process');
+        updateProcess(thought, phase, process);
         appendProgress(thought, process, expanded);
         if (!process.length) thought.append(element('p', '没有可展示的思考或工具记录。', 'muted'));
         node.append(thought);
       }
       if (answer) {
-        const reply = replyRegion('input:' + groupId + ':answer', '回答', true);
+        const reply = replyPart('input:' + groupId + ':answer', '回答', phase, 'answer');
         const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, answer);
-        reply.append(body); node.append(reply);
+        reply.append(body); updateAnswer(reply, phase, answer); node.append(reply);
       }
       $('history').append(node);
     }
@@ -158,7 +196,6 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
   }
   let activityId;
   const activityNodes = new Map();
-  const toolLabels = { in_progress: '执行中', pending: '等待执行', completed: '已完成', failed: '失败', declined: '已拒绝' };
   function progressNode(kind) {
     const node = element(kind === 'text' ? 'div' : 'details', undefined, 'activity-block ' + kind);
     if (kind !== 'text') { node.open = true; node.append(element('summary')); }
@@ -185,8 +222,8 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
       activityId = activity.id; activityNodes.clear(); area.replaceChildren();
       const envelope = replyRegion('input:' + activity.id + ':whole', 'Aide · 正在处理', true); envelope.className = 'reply-envelope';
       const heading = envelope.querySelector('summary'); heading.id = 'activity-heading'; heading.className = 'activity-heading'; heading.setAttribute('role', 'status');
-      const thought = replyRegion('input:' + activity.id + ':think', '思考与执行过程', false); thought.id = 'activity-thought';
-      const reply = replyRegion('input:' + activity.id + ':answer', '回答', true);
+      const thought = replyPart('input:' + activity.id + ':think', '思考与执行', activity.phase, 'process'); thought.id = 'activity-thought';
+      const reply = replyPart('input:' + activity.id + ':answer', '回答', activity.phase, 'answer');
       const body = element('div', undefined, 'markdown message-body'); body.id = 'activity-answer'; reply.append(body);
       envelope.append(thought, reply); area.append(envelope);
     }
@@ -198,10 +235,11 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
     const lastText = activity.blocks.filter((block) => block.kind === 'text').at(-1);
     const pending = activity.questions.filter((block) => block.status === 'pending');
     const answer = pending.map((block) => block.content).join('\n\n') || activity.answers.join('\n\n') || lastText?.text || '';
-    updateMarkdown($('activity-answer'), answer || (activity.phase === 'waiting' ? '等待你回答。' : '正在整理回复…'));
+    updateAnswer($('activity-answer').parentElement, activity.phase, answer);
     const process = activity.blocks.filter((block) => block.kind !== 'text' ||
       (activity.answers.length ? block.phase !== 'final' && !activity.answers.includes(block.text) : block !== lastText))
       .concat(activity.questions.filter((block) => block.status !== 'pending').map((block) => ({ ...block, kind: block.type, text: block.content })));
+    updateProcess($('activity-thought'), activity.phase, process.map((block) => ({ type: block.kind, content: block.text, status: block.status })));
     const ids = new Set(process.map((block) => block.id));
     for (const [id, node] of activityNodes) if (!ids.has(id)) { node.remove(); activityNodes.delete(id); }
     for (const block of process) {
