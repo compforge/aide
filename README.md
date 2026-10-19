@@ -6,7 +6,7 @@ Chief 是负责接话与判断的入口 Agent：普通问题直接回答，需�
 
 ## 聊天、事项与安排
 
-- **Conversation（会话）**组织消息和上下文。不同飞书单聊、网页会话和 Source 关注范围可以有各自的会话。
+- **Conversation（会话）**组织消息和上下文。不同飞书单聊、群聊、网页会话和 Source 关注范围可以有各自的会话。
 - **Task（事项）**负责一个有限目标，完成后结束，例如“实现这个需求并验证”。
 - **Routine（安排）**负责持续职责，由时间或事件推动，例如“每天检查项目待办，有新阻塞时告诉我”。
 - **Work** 是 Task 与 Routine 的统称。Chief 可以读取、创建、更新或删除 Work，也可以把输入关联到已有工作。
@@ -29,7 +29,7 @@ AIDE_CWD=/path/to/work AIDE_TIMEZONE=Asia/Shanghai npm start
 
 网页左侧选择会话，中间显示消息、流式回复和执行过程，右侧查看该会话的事项与安排。已结束的思考与工具过程可以展开，刷新后仍保留。默认会话为 `me`；`/?conversation=另一会话名` 可以进入指定会话。
 
-配置 `AIDE_FEISHU_APP_ID` 和 `AIDE_FEISHU_APP_SECRET` 后，可通过飞书机器人单聊收发消息，无需公网回调地址。开启 CardKit 权限后，Chief 的思考、进展和回复可在同一张流式卡片中展示。创建机器人与权限配置见 [Feishu Channel](docs/channel/feishu.md)。
+配置 `AIDE_FEISHU_APP_ID` 和 `AIDE_FEISHU_APP_SECRET` 后，可通过飞书机器人单聊或群内 @机器人收发消息，无需公网回调地址。开启 CardKit 权限后，Chief 的思考、进展和回复可在同一张流式卡片中展示。创建机器人与权限配置见 [Feishu Channel](docs/channel/feishu.md)。
 
 查看版本：
 
@@ -41,7 +41,7 @@ npm exec -- aide version
 
 当前 Chief 使用 `chief` Harness，它基于 Pi 并带有 Work、问答和 Connector 工具；Task / Routine 默认使用 Codex 执行。另有独立的通用 `pi` Harness，提供文件与 CLI 能力，不预装 Personal 工具。
 
-状态默认保存在 `~/.aide`，由一个 Aide 服务进程管理。当前面向单用户，本地 HTTP 入口没有认证，会话分组不提供账号或权限隔离。飞书支持单聊文字；原生 Harness 权限请求仍在网页处理。
+状态默认保存在 `~/.aide`，由一个 Aide 服务进程管理。当前面向单用户，本地 HTTP 入口没有认证，会话分组不提供账号或权限隔离。飞书接收单聊和群内 @本机器人的文字；原生 Harness 权限请求仍在网页处理。
 
 模型判断可能出错。执行中断或结果无法校验时，Aide 保留记录并等待用户核对后明确继续；暂停或删除工作不能撤销已经发生的外部动作。目前未提供通用长期记忆、完整上下文压缩或多实例部署。
 

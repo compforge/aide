@@ -3,15 +3,19 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import type { Logger } from "pino";
 import { z } from "zod";
+import { normalize } from "@larksuiteoapi/node-sdk";
 import type { ChannelService } from "./service.ts";
 import { IncomingSchema, MessageSchema, type Message } from "./message.ts";
 import { progressCard, cardContent, cardThought, type FeishuProgressReader, type FeishuProgress } from "./feishu-card.ts";
 import type { FeishuTransport } from "./feishu-client.ts";
 
 const EventSchema = z.object({
-  sender: z.object({ sender_type: z.string() }),
+  sender: z.object({ sender_type: z.string(),
+    sender_id: z.object({ open_id: z.string().optional(), user_id: z.string().optional(), union_id: z.string().optional() }).optional() }),
   message: z.object({ message_id: z.string().min(1), chat_id: z.string().min(1),
-    chat_type: z.string(), message_type: z.string(), content: z.string() }),
+    chat_type: z.string(), message_type: z.string(), content: z.string(),
+    mentions: z.array(z.object({ key: z.string().min(1), name: z.string().optional(),
+      id: z.object({ open_id: z.string().optional(), user_id: z.string().optional(), union_id: z.string().optional() }) })).optional() }),
 });
 const CardSchema = z.object({ cardId: z.string(), sent: z.boolean(), sequence: z.number().int(),
   streaming: z.boolean(), think: z.string(), content: z.string(), signature: z.string() });
@@ -56,28 +60,55 @@ export class FeishuChannel {
     this.log.info("Feishu channel started; connection state is reported separately");
   }
 
-  receive(raw: unknown): void {
+  /**
+   * @spec Group input requires an exact mention of the authenticated bot; group and direct chats retain separate conversation IDs.
+   * @link docs/channel/feishu.md
+   * @case tests/feishu.test.ts
+   */
+  async receive(raw: unknown): Promise<void> {
     if (this.stopped) throw new Error("Feishu channel is stopping");
     const parsed = EventSchema.safeParse(raw);
     if (!parsed.success) { this.log.warn("Ignoring malformed Feishu message event"); return; }
     const { sender, message } = parsed.data;
-    if (sender.sender_type !== "user" || message.chat_type !== "p2p") return;
+    if (sender.sender_type !== "user") {
+      this.log.debug({ messageId: message.message_id, senderType: sender.sender_type }, "Ignoring Feishu non-user message");
+      return;
+    }
+    if (message.chat_type !== "p2p" && message.chat_type !== "group") {
+      this.log.debug({ messageId: message.message_id, chatType: message.chat_type }, "Ignoring unsupported Feishu chat type");
+      return;
+    }
+    const botIdentity = this.transport.botIdentity;
+    if (message.chat_type === "group" && (!botIdentity || !message.mentions?.some((mention) => mention.id.open_id === botIdentity.openId))) {
+      this.log.debug({ messageId: message.message_id, chatId: message.chat_id,
+        reason: botIdentity ? "bot_not_mentioned" : "bot_identity_unavailable" }, "Ignoring unaddressed Feishu group message");
+      return;
+    }
     const { message_id: id, chat_id: chatId } = message;
     if (this.state.received.includes(id)) return;
     const conversationId = this.prefix + chatId;
     let text: unknown;
     if (message.message_type === "text") {
-      try { text = JSON.parse(message.content).text; } catch { /* Send a helpful response below. */ }
+      if (message.chat_type === "group") {
+        const normalized = await normalize({ sender: { ...sender, sender_id: sender.sender_id ?? {} },
+          message: { ...message, chat_type: "group" } }, { botIdentity: botIdentity!, stripBotMentions: true });
+        text = normalized.content;
+      } else {
+        try { text = JSON.parse(message.content).text; } catch { /* Send a helpful response below. */ }
+      }
     }
+    // Group normalization yields; concurrent duplicate deliveries must still persist only once.
+    if (this.stopped) throw new Error("Feishu channel is stopping");
+    if (this.state.received.includes(id)) return;
     const input = IncomingSchema.safeParse({ id, conversationId, text });
     this.save({ ...this.state,
       pending: input.success ? [...this.state.pending, input.data] : this.state.pending,
       notices: input.success ? this.state.notices : [...this.state.notices,
-        this.notice(id, conversationId, "目前支持单聊文字消息，请发送不超过 32000 字的文字。")],
+        this.notice(id, conversationId, "目前支持文字消息，请发送不超过 32000 字的非空文字；群内请 @Aide 后描述问题。")],
       received: [...this.state.received, id],
       chats: this.state.chats.includes(chatId) ? this.state.chats : [...this.state.chats, chatId],
     });
-    this.log.info({ messageId: id, conversationId, accepted: input.success }, "Feishu message received");
+    this.log.info({ messageId: id, conversationId, chatType: message.chat_type, accepted: input.success }, "Feishu message received");
   }
 
   dispatch(): Promise<void> {

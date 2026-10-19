@@ -22,8 +22,9 @@ export interface FeishuCardTransport {
 }
 
 export interface FeishuTransport {
+  readonly botIdentity?: Lark.BotIdentity;
   cards?: FeishuCardTransport;
-  start(receive: (event: unknown) => void): Promise<void>;
+  start(receive: (event: unknown) => void | Promise<void>): Promise<void>;
   send(chatId: string, text: string, id: string): Promise<void>;
   close(): void;
 }
@@ -51,6 +52,7 @@ export function feishuTransport(config: FeishuConfig, log: Logger): FeishuTransp
   };
   const options = { ...config, domain: Lark.Domain.Feishu, logger, loggerLevel: Lark.LoggerLevel.warn, httpInstance };
   const client = new Lark.Client({ ...options, appType: Lark.AppType.SelfBuild });
+  let botIdentity: Lark.BotIdentity | undefined;
   const proxy = process.env.https_proxy || process.env.HTTPS_PROXY || process.env.http_proxy || process.env.HTTP_PROXY;
   const ws = new Lark.WSClient({ ...options, ...(proxy ? { agent: new HttpsProxyAgent(proxy) } : {}),
     handshakeTimeoutMs: 15_000,
@@ -60,7 +62,18 @@ export function feishuTransport(config: FeishuConfig, log: Logger): FeishuTransp
     onError: () => log.error("Feishu WebSocket failed; check app configuration and restart Aide"),
   });
   return {
+    get botIdentity() { return botIdentity; },
     async start(receive) {
+      try {
+        const response = await client.request<{ code?: number; bot?: { open_id?: string; app_name?: string } }>({
+          url: "/open-apis/bot/v3/info", method: "GET",
+        });
+        if (response.code !== 0 || !response.bot?.open_id) throw new Error("Bot identity unavailable");
+        botIdentity = { openId: response.bot.open_id, name: response.bot.app_name ?? "Aide" };
+        log.info({ botOpenId: botIdentity.openId }, "Feishu bot identity resolved");
+      } catch {
+        log.warn("Feishu bot identity unavailable; group mentions disabled, direct messages remain available");
+      }
       const eventDispatcher = new Lark.EventDispatcher({ logger }).register({ "im.message.receive_v1": async (event) => receive(event) });
       await ws.start({ eventDispatcher });
     },
