@@ -17,8 +17,8 @@ Chief 是负责接话与判断的入口 Agent：普通问题直接回答，需�
 
 ## 快速开始
 
-需要 Node.js 22.19+ 安装依赖；服务使用依赖中的 Bun。先配置 Pi 的模型与登录态（默认 `~/.pi/agent`），并安装、登录 Codex CLI。执行环境中的 CLI 和凭证直接供 Agent 使用。
-环境、Chief 模型与能力包、Personal 关注策略统一声明在 `~/.aide/config.yaml`，见 [配置与优先级](docs/configuration.md)。
+需要 Node.js 22.19+ 安装依赖；服务使用依赖中的 Bun。先配置 Chief 和 Pi 的模型与认证，缺省时沿用 Pi 原生配置（默认 `~/.pi/agent`）。执行环境中的 CLI 和凭证直接供 Agent 使用。
+环境、Pi / Chief 模型与能力包、Personal 关注策略统一声明在 `~/.aide/config.yaml`，见 [配置与优先级](docs/configuration.md)。
 
 ```sh
 npm ci
@@ -39,7 +39,7 @@ npm exec -- aide version
 
 ## 运行边界
 
-当前 Chief 使用 `chief` Harness，它基于 Pi 并带有 Work、问答和 Connector 工具；Task / Routine 默认使用 Codex 执行。另有独立的通用 `pi` Harness，提供文件与 CLI 能力，不预装 Personal 工具。
+当前 Chief 使用 `chief` Harness，它基于 Pi 并带有 Work、问答和 Connector 工具；Task / Routine 默认使用通用 Pi 执行。另有独立的通用 `pi` Harness，提供文件与 CLI 能力，不预装 Personal 工具。
 
 状态默认保存在 `~/.aide`，由一个 Aide 服务进程管理。当前面向单用户，本地 HTTP 入口没有认证，会话分组不提供账号或权限隔离。飞书接收单聊和群内 @本机器人的文字；原生 Harness 权限请求仍在网页处理。
 

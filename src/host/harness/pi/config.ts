@@ -10,6 +10,11 @@ export const PiModelConfigSchema = z.object({
   reasoning: z.boolean().optional(), input: z.array(z.enum(["text", "image"])).min(1).optional(),
   contextWindow: z.number().int().positive().optional(), maxTokens: z.number().int().positive().optional(),
 }).strict();
+export const PiConfigSchema = z.object({
+  model: PiModelConfigSchema.optional(),
+  packages: z.array(text).default([]),
+}).strict();
+
 export type PiModelConfigInput = z.infer<typeof PiModelConfigSchema>;
 type Model = NonNullable<ReturnType<ModelRuntime["getModel"]>>;
 type Provider = NonNullable<ReturnType<ModelRuntime["getProvider"]>>;

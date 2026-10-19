@@ -30,10 +30,10 @@ await withAsyncFileLock(path, async () => {
   const harnesses = await resolveHarnessConfigs(config, { home, cwd, file, environment, log });
   const aide: Aide = new Aide(home, {
     config, connectors: Connectors.fromConfig(config.connectors, environment),
-    cwd, timezone, model: harnesses.codexModel,
+    cwd, timezone,
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
-      targetConfig: { harness: target.harness,
-        ...(target.harness === "codex" ? harnesses.codex : {}) },
+      targetConfig: { harness: target.harness },
+      ...(target.harness === "pi" ? { piConfig: harnesses.pi } : {}),
       ...(target.harness === "chief" ? { chiefSession: aide.chiefSession(target.id, harnesses.chief) } : {}),
     }),
   }, log);

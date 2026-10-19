@@ -18,11 +18,11 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 | 配置 | 所有者与用途 |
 |---|---|
 | `connectors` | Host 装配全局环境目录、需求与 Forge 访问能力 |
-| `harnesses` | Host 装配 Agent 的模型选择和扩展能力；当前支持 `chief` |
+| `harnesses` | Host 装配 Agent 的模型选择和扩展能力；当前支持 `pi` 与 `chief` |
 | `plugins` | 各 Plugin 校验和使用自己的业务配置；例如 Personal watches |
 
 没有声明的 Connector/watch/package 列表默认为空。Connector 和 Plugin 的具体字段由所属实现校验，
-不放宽顶层或 Chief 的字段检查。配置不是 Plugin 之间传递凭证的通道。
+不放宽顶层或 Harness 的字段检查。配置不是 Plugin 之间传递凭证的通道。
 
 ```yaml
 connectors:
@@ -33,6 +33,12 @@ connectors:
       namespace: example
 
 harnesses:
+  pi:
+    model:
+      provider: your-provider
+      id: your-work-model
+    packages:
+      - git:github.com/your-org/agent-skills@v1
   chief:
     model:
       provider: your-provider
@@ -45,9 +51,9 @@ plugins:
     watches: []
 ```
 
-## Chief 默认值与外部配置
+## Pi / Chief 默认值与外部配置
 
-Chief 模型的优先级是 **Aide 显式字段 > 同一模型的 Pi 定义 > SDK 默认值**。
+两种 Harness 分别按自己的 `model` 解析，模型的优先级是 **Aide 显式字段 > 同一模型的 Pi 定义 > SDK 默认值**。
 模型配置由 `src/host/harness/chief/config.ts` 和 `pi/config.ts` 在启动阶段解析；Agent 只接收有效配置。
 
 - 已注册的模型可以只声明 `provider/id`；省略整个 `model` 时使用 Pi settings 的 `defaultProvider/defaultModel`，两者都未设置时使用 SDK 可用模型列表的首项。
@@ -76,19 +82,18 @@ harnesses:
 `name` 可选。`api` 使用 Pi 已注册的 API 类型；`contextWindow` 和 `maxTokens` 必须为正整数。
 `apiKeyEnv` 指定启动环境中的变量名，变量缺失或为空时报错；其值优先于继承的 Pi 凭证，仅在本进程内使用。
 未声明时复用 Pi 认证。Aide 不改写 `~/.pi/agent/models.json` 或 `auth.json`，认证 token 刷新仍由 SDK 管理。
-Chief 和普通 Pi 各自解析配置，Chief 的覆盖不修改普通 Pi 的模型与 skills。
+Chief 和通用 Pi 各自解析配置；同一模型需分别声明或使用 YAML anchor 复用声明。模型 ID 属于运行配置，代码不提供固定业务模型默认值。
 
 启动日志记录所选 provider/model、配置来源和 skills 数量，不输出密钥。校验确认配置可解析及认证已配置，
 不代表模型远端一定可用；部署验收仍需完成一次真实模型请求。
 
-`harnesses.chief.packages` 默认为 `[]`，Chief 只加载其中包所声明的 skills。
-不会继承 Pi 的 packages、`~/.agents/skills` 或项目自动发现的 skills。普通 `pi` Harness 保持其原生发现行为。
+`harnesses.pi.packages` 和 `harnesses.chief.packages` 均默认为 `[]`。内置装配只加载各自声明包中的 skills；
+空列表明确关闭包技能，不继承用户或项目的自动发现。直接使用通用 Pi 工厂的调用方仍可自行决定是否启用原生发现。
 包来源使用 Pi 的 Git/npm/本地目录格式；本地路径写成绝对路径、`~/...` 或 `./...` / `../...`，
 后两者相对所选配置文件目录解析，不随服务工作目录改变。
 
-`AIDE_MODEL` 目前只控制默认 Codex Target，不参与 Chief 的模型优先级。
-Codex 启动命令、sandbox 和模型选择从启动环境确定。外部 CLI 的原生配置由其自身接口管理；
-Aide 的快照不等于冻结了外部 CLI 的所有文件和登录态。
+Task / Routine 的默认 Target 使用通用 Pi，由 `harnesses.pi` 决定模型和能力包。
+外部 CLI Adapter 的原生配置由其自身接口管理。
 服务端口、工作目录、时区、飞书和代理仍使用[部署文档](deployment.md)中的环境变量；
 它们与当前 YAML 字段没有重叠覆盖关系。
 
@@ -97,11 +102,12 @@ Aide 的快照不等于冻结了外部 CLI 的所有文件和登录态。
 修改 packages 后，先停止服务，在相同的运行用户和 `AIDE_HOME` / `AIDE_CONFIG` 下执行：
 
 ```bash
+aide harness sync pi
 aide harness sync chief
 ```
 
-源码 checkout 可使用 `node bin/aide.js harness sync chief`。该命令调用 Pi 原生 package manager，
-缓存放在 `$AIDE_HOME/harnesses/chief/`，不写 Pi 的个人 settings.json。未固定 ref 的 Git 包在显式同步时
+源码 checkout 可使用 `node bin/aide.js harness sync pi` 或 `node bin/aide.js harness sync chief`。该命令调用 Pi 原生 package manager，
+缓存分别放在 `$AIDE_HOME/harnesses/pi/` 与 `$AIDE_HOME/harnesses/chief/`，不写 Pi 的个人 settings.json。未固定 ref 的 Git 包在显式同步时
 更新；需要可复现的版本时固定 commit。同步与服务共用单实例锁，运行中不能更新正在读取的包。
 
 启动只读取同步成功的包；缺包、声明改变、无 skills 或 skill 元数据无效时报错。

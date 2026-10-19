@@ -200,6 +200,25 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
     for (const work of [...works].reverse()) {
       const node = element('article', undefined, 'work');
       const header = element('div', undefined, 'work-header');
+      const actions = element('div', undefined, 'work-actions');
+      const copy = element('button', '复制 ID', 'work-copy');
+      copy.type = 'button'; copy.title = work.id;
+      copy.setAttribute('aria-label', '复制' + (work.kind === 'task' ? '事项' : '安排') + ' ID：' + work.title);
+      copy.setAttribute('aria-live', 'polite');
+      copy.addEventListener('click', async () => {
+        copy.disabled = true;
+        $('work-notice').className = 'muted'; $('work-notice').textContent = '';
+        try {
+          await navigator.clipboard.writeText(work.id);
+          copy.textContent = '已复制';
+        } catch {
+          copy.disabled = false;
+          $('work-notice').className = 'error';
+          $('work-notice').textContent = '复制失败，请手动复制 ID：' + work.id;
+          return;
+        }
+        setTimeout(() => { copy.textContent = '复制 ID'; copy.disabled = false; }, 1500);
+      });
       const remove = element('button', deletingWork.has(work.id) ? '删除中…' : '删除', 'work-delete');
       remove.type = 'button';
       remove.setAttribute('aria-label', '删除' + (work.kind === 'task' ? '事项：' : '安排：') + work.title);
@@ -219,7 +238,8 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
           await poll();
         }
       });
-      header.append(element('span', labels[work.status], 'badge ' + work.status), remove);
+      actions.append(copy, remove);
+      header.append(element('span', labels[work.status], 'badge ' + work.status), actions);
       node.append(header, element('strong', work.title));
       if (work.question) node.append(element('p', work.question));
       if (work.status === 'uncertain') node.append(element('p', '执行中断或失败。请核对外部结果，再发消息决定是否继续。'));

@@ -5,7 +5,6 @@ set -euo pipefail
 aide_repo=$(cd "$(dirname "$0")/.." && pwd)
 aide_bun="$aide_repo/node_modules/.bin/bun"
 test -x "$aide_bun" || { echo 'Run npm ci before installing the service.' >&2; exit 1; }
-command -v codex >/dev/null
 mkdir -p "$HOME/.config/systemd/user" "$HOME/.config/aide"
 if ! test -f "$HOME/.config/aide/env"; then
   (umask 077; printf '# AIDE_CWD=/path/to/work\n# AIDE_TIMEZONE=Asia/Shanghai\n' > "$HOME/.config/aide/env")

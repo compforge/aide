@@ -422,3 +422,34 @@ export default function (pi) {
     assert.equal(readFileSync(eventsFile, "utf8"), "start\nstop\n");
   }
 });
+
+
+test("Task and Routine execute with the default Pi Harness and its configured package skill", { timeout: 30_000 }, async (t) => {
+  const outcome = { action: "done", summary: "checked", notification: "verified", question: null, nextAt: null };
+  const fixture = await setup(t, () => ({ text: JSON.stringify(outcome) }));
+  const home = join(fixture.config.cwd, "work-home");
+  const skill = join(fixture.config.cwd, "capabilities", "as-ops"); mkdirSync(skill, { recursive: true });
+  writeFileSync(join(skill, "SKILL.md"), "---\nname: fixture-as-ops\ndescription: Inspect AgentSphere environment evidence.\n---\nRead-only environment operations.\n");
+  const piConfig = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir,
+    model: { provider: "fixture", id: "work-model" }, skillPaths: [join(skill, "SKILL.md")] });
+  const aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", createAdapter: (target, ports) =>
+    createHarnessAdapter(target, { ...ports, piConfig, targetConfig: { harness: target.harness } }) }, pino({ level: "silent" }));
+  t.after(() => aide.close());
+  await aide.start();
+  await aide.work("me").create({ kind: "task", title: "inspect once", instruction: "Check evidence", trigger: null });
+  await aide.settled();
+  assert.equal(aide.works()[0]!.status, "done");
+  await aide.work("me").create({ kind: "routine", title: "inspect on event", instruction: "Check evidence", trigger: { cron: null, timezone: "UTC", event: "sample" } });
+  await aide.event({ id: "sample-1", sessionId: "me", conversationId: "me", name: "sample", text: "sample" });
+  await aide.settled();
+  assert.equal(aide.works().find((work) => work.kind === "routine")!.status, "scheduled");
+  const requests = fixture.requests.filter((request) => request.model === "work-model");
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.match(JSON.stringify(request.messages), /fixture-as-ops/);
+    assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|create_work/);
+  }
+  const session = new SessionStore(home).openSession("me");
+  assert.equal(session.meta.harnessTargets.default!.harness, "pi");
+  assert.ok(Object.values(session.meta.lanes).some((lane) => lane.harnessSessions.default?.harness === "pi"));
+});

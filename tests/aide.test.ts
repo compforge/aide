@@ -299,3 +299,30 @@ test("Aide resumes the same Session and personal state when execution cwd change
   assert.ok(executionCwds.length > 0);
   assert.ok(executionCwds.every((cwd) => cwd === join(root, "code-b")));
 });
+
+
+test("default Work target uses Pi and discards stale Codex native bindings while preserving the Session", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-default-pi-"));
+  const session = new SessionStore(root).createSession({ id: "me", cwd: root });
+  session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex", model: "previous-model" });
+  const lane = session.meta.lanes.main!;
+  session.setLane("main", { ...lane, harnessSessions: { default: {
+    harness: "codex", harnessSessionId: "old-native-id", resumeState: { version: 1, data: { id: "old-native-id" } },
+  } } });
+  const seen: string[] = [];
+  const options = fakeOptions({ execute: async () => done }, root);
+  const aide = new Aide(root, { ...options, createAdapter: (target) => {
+    seen.push(target.harness);
+    return options.createAdapter(target);
+  } }, log);
+  t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
+  const restored = new SessionStore(root).openSession("me");
+  assert.equal(restored.meta.harnessTargets.default!.harness, "pi");
+  assert.equal(restored.meta.harnessTargets.default!.model, undefined);
+  assert.equal(restored.meta.lanes.main!.harnessSessions.default?.resumeState, undefined);
+  assert.equal(restored.meta.lanes.main!.harnessSessions.default?.harnessSessionId, undefined);
+  await aide.start();
+  await aide.work("me").create(task); await aide.settled();
+  assert.equal(aide.works()[0]!.status, "done");
+  assert.deepEqual(seen, ["pi"]);
+});

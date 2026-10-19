@@ -1,10 +1,7 @@
 import { z } from "zod";
-import { PiModelConfigSchema, resolvePiConfig } from "../pi/config.ts";
+import { PiConfigSchema, resolvePiConfig } from "../pi/config.ts";
 
-export const ChiefConfigSchema = z.object({
-  model: PiModelConfigSchema.optional(),
-  packages: z.array(z.string().trim().min(1)).default([]),
-}).strict();
+export const ChiefConfigSchema = PiConfigSchema;
 export type ChiefConfigInput = z.infer<typeof ChiefConfigSchema>;
 
 /** @spec Chief inherits model settings explicitly and loads only its declared package skills. */

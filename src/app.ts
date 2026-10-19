@@ -14,7 +14,7 @@ import { PluginSupervisor } from "./host/plugin/runner/index.ts";
 import { IncomingSchema, type Incoming } from "./channel/message.ts";
 
 export interface AideOptions {
-  cwd: string; timezone: string; model?: string; config?: AideConfig; connectors?: ConnectorClient;
+  cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   createAdapter: CoreControllerOptions["createAdapter"];
 }
 
@@ -59,8 +59,8 @@ export class Aide {
     const previous = this.storage.listSessions().find((meta) => meta.aideSessionId === id);
     const session = previous ? this.storage.openSession(id) : this.storage.createSession({ id, cwd: this.options.cwd, title: id });
     const connectors = this.connectors;
-    const targets = [{ id: "default", harness: "codex" }];
-    session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex", ...(this.options.model ? { model: this.options.model } : {}) });
+    const targets = [{ id: "default", harness: "pi" }];
+    session.setHarnessTarget("default", { harnessTargetId: "default", harness: "pi" });
     const instances = new PluginInstanceStore({ session });
     if (!instances.list().some((item) => item.pluginInstanceId === "personal")) {
       instances.create({ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin" });
@@ -84,6 +84,20 @@ export class Aide {
       },
     });
     // CoreSession has acquired the lease before changing execution metadata.
+    // @spec A default Harness change preserves Aide history but cannot reuse another provider's native binding.
+    const incompatible = Object.values(session.meta.lanes).filter((lane) =>
+      lane.harnessSessions.default && lane.harnessSessions.default.harness !== "pi");
+    if (incompatible.length) {
+      const lanes = { ...session.meta.lanes };
+      for (const lane of incompatible) {
+        const { default: _previous, ...harnessSessions } = lane.harnessSessions;
+        lanes[lane.laneId] = { ...lane, harnessSessions };
+      }
+      // Clear the compatibility projection too; normalization otherwise restores the removed main-Lane binding.
+      session.updateMeta({ lanes, harnessSessions: {} });
+      this.log.info({ sessionId: id, harness: "pi", lanes: incompatible.length },
+        "Default Harness changed; cleared incompatible native bindings");
+    }
     const cwd = resolve(this.options.cwd);
     if (session.meta.cwd !== cwd) {
       // Native providers can bind history to cwd. Keep Aide facts, but start fresh provider contexts.
