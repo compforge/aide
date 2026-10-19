@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 import pino from "pino";
 import { ConversationStore } from "../src/host/conversation/store.ts";
-import { Aide } from "../plugins/personal/aide.ts";
+import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 async function until(check: () => boolean) {

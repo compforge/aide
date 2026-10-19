@@ -22,8 +22,8 @@ import {
   type ScheduledReconcile,
 } from "./controller.ts";
 import type { ResourceClientChange } from "./resource-client.ts";
-import { ReconcileQueue, type ReconcileCapacityLease } from "./queue.ts";
-import { reconcileResourceOwner } from "./reconcile-scope.ts";
+import { ReconcileQueue, type ReconcileCapacityLease } from "../../reconcile/queue.ts";
+import { reconcileResourceOwner } from "../../reconcile/reconcile-scope.ts";
 import {
   emptyReconcileSnapshot,
   type ReconcileSnapshot,
@@ -356,7 +356,7 @@ export class AideResourceController<K extends AideResourceKind> {
           }
           const context = createReconcileContext(
             snapshot,
-            executionScope,
+            { ...executionScope, resourceRef },
             this.invokeVerb,
           );
           const result = validatedResult(

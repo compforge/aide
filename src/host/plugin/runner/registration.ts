@@ -1,17 +1,12 @@
 import {
   PluginBinding,
-  type SourceContext,
-  type Watch,
 } from "../package.ts";
 import {
-  reconcileScope,
-  reconcileSnapshot,
   hookScope,
 } from "../../../plugin-context.ts";
 import type { PluginRunnerClient } from "./client.ts";
 import type {
   CommandRegistration,
-  ControllerRegistration,
   HookRegistration,
   MentionRegistration,
   PluginRegistration,
@@ -35,7 +30,7 @@ export function installRegistration(
     installHook(binding, runner, registration);
     return;
   }
-  installController(binding, runner, registration);
+  throw new Error("Controller registrations belong to the Runner runtime");
 }
 
 function installCommand(
@@ -99,65 +94,5 @@ function installHook(
         context.snapshot,
         hookScope(context),
       ),
-  });
-}
-
-function installController(
-  binding: PluginBinding,
-  runner: PluginRunnerClient,
-  registration: ControllerRegistration,
-): void {
-  const sources = registration.sources.map((source) =>
-    source.type === "cron"
-      ? {
-          type: "cron" as const,
-          sourceId: source.sourceId,
-          cron: source.cron,
-          timeZone: source.timeZone,
-        }
-      : {
-          type: "resource" as const,
-          sourceId: source.sourceId,
-          start: async (context: SourceContext<unknown>) =>
-            await runner.startSource(
-              source.startHandlerId,
-              context,
-            ),
-        }
-  );
-  const watches: Watch[] = registration.watches.map((watch) => ({
-    resourceType: watch.resourceType,
-    handler: {
-      create: async (event) =>
-        await runner.invoke(watch.createHandlerId, event),
-      update: async (event) =>
-        await runner.invoke(watch.updateHandlerId, event),
-      delete: async (event) =>
-        await runner.invoke(watch.deleteHandlerId, event),
-    },
-  }));
-  binding.controllers.register({
-    resourceType: registration.resourceType,
-    sources,
-    watches,
-    ...(registration.maxConcurrency === undefined
-      ? {}
-      : { maxConcurrency: registration.maxConcurrency }),
-    reconcile: async (context, resource) =>
-      await runner.invoke(
-        registration.reconcileHandlerId,
-        reconcileSnapshot(context),
-        reconcileScope(context),
-        resource,
-      ),
-    ...(registration.presentHandlerId === undefined
-      ? {}
-      : {
-          present: async (resource) =>
-            await runner.invoke(
-              registration.presentHandlerId!,
-              resource,
-            ),
-        }),
   });
 }

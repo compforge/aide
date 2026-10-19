@@ -23,10 +23,12 @@ Source 也能提交 Input，但属于外部观察入口。它可使用独立 Con
 
 思考、工具调用和文字增量属于执行进展，来自 Harness 事件与 Ledger 投影。Web 使用 Markdown 展示；Feishu 使用原生流式卡片，合并更新思考与正文，最终收口到同一张卡片。进展不写成新的用户 Input，也不触发 Work。
 
-Chief 的问答可通过两个 Channel 回答。当前原生 Harness 授权和 Hook 信任通过 Web 处理；网页的 Interaction 收件区属于整个 Session，跨 Conversation 可见。
+Chief 的问答可通过两个 Channel 回答。当前原生 Harness 授权和 Hook 信任通过 Web 处理；网页按 Conversation 筛选已关联的问题，未关联会话的宿主交互保留在本地收件区。
 
 ## 扩展边界
 
 新的 Channel 需要解决平台消息接收、会话映射、去重与回复投递，并复用已有输入与交互入口。业务判断留在插件，Agent 执行留在 Harness。当前使用具体适配器，尚未抽取通用 Channel SDK。
 
 内核对象与持久化见 [Kernel](../kernel.md)，Personal 判断流程见 [Personal](../plugin/personal.md)，部署见 [部署与诊断](../deployment.md)。
+
+Channel 通过 `src/channel/service.ts` 的输入与投影接口接入应用，不依赖 Personal 或 Chief 的实现。Web 的 Work 侧栏与事件入口由应用额外提供。

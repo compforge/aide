@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
-import type { ResourceClientChange } from "../../src/host/plugin/resource-client.ts";
+import type { ResourceClient, ResourceNamespace } from "@compforge/aide-plugin";
 import { WorkSchema, validateTrigger, type Message, type Work } from "./model.ts";
 import { ConversationStore } from "../../src/host/conversation/store.ts";
 
@@ -14,7 +14,7 @@ let lastMessageTime = 0;
  * @link docs/plugin/personal.md
  */
 export class Store {
-  constructor(readonly resources: PluginResourceStore, private readonly changed: (change: ResourceClientChange) => void, readonly conversations: ConversationStore) {
+  constructor(readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly conversations: ConversationStore) {
     for (const item of this.read().messages) lastMessageTime = Math.max(lastMessageTime, Date.parse(item.at));
   }
 
@@ -61,16 +61,14 @@ export class Store {
   }
 
   /** @spec Deleting work retains its channel outbox and accepted-input receipts. In-flight results cannot recreate it. */
-  delete(id: string): void {
+  async delete(id: string): Promise<void> {
     const current = this.getResource(id);
     this.conversations.archive(current.spec.conversationId, current.status.messages, current.status.inputs);
     // Archive first: a crash can duplicate retained messages, but cannot lose a receipt.
-    for (const update of this.resources.requestDeletion(current, id)) {
-      this.changed({ kind: "deletion-requested", pluginInstanceId: this.resources.pluginInstanceId, ...update });
-    }
+    await this.client.delete(current, id, current.metadata.namespace as ResourceNamespace);
   }
 
-  save(work: Work, messages: Message[] = [], inputKey?: string, eventKey?: string): void {
+  async save(work: Work, messages: Message[] = [], inputKey?: string, eventKey?: string): Promise<void> {
     WorkSchema.parse(work);
     validateTrigger(work.kind, work.trigger, new Date());
     const { id, conversationId, kind, title, instruction, trigger, revision, ...observation } = work;
@@ -86,19 +84,8 @@ export class Store {
       inputs: [...previous.inputs, ...(inputKey ? [{ key: inputKey, responseId: messages.at(-1)!.id }] : [])],
       events: [...previous.events, ...(eventKey ? [eventKey] : [])],
     };
-    const resource = current ? this.replace(current, spec, status)
-      : this.resources.create({ type, name: id, spec, status });
-    if (!current) this.changed({ kind: "created", pluginInstanceId: this.resources.pluginInstanceId, resource });
-    else if (resource.metadata.resourceVersion !== current.metadata.resourceVersion) {
-      this.changed({ kind: "status-updated", pluginInstanceId: this.resources.pluginInstanceId, oldResource: current, resource });
-    }
-  }
-
-  private replace<S, T>(current: import("@compforge/aide-plugin").Resource<S, T>, spec: S, status: T) {
-    const desired = this.resources.replaceSpec(current, current.metadata.name, spec,
-      { expectedResourceVersion: current.metadata.resourceVersion });
-    return this.resources.patchStatus<S, T>(desired, desired.metadata.name, status,
-      { expectedResourceVersion: desired.metadata.resourceVersion });
+    if (current) await this.client.replace(current, spec, status);
+    else await this.client.create(type, { name: id, spec, status });
   }
 
   reply(conversationId: string, messages: Message[], key: string): void {

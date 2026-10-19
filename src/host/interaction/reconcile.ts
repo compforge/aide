@@ -372,7 +372,7 @@ export class ReconcileInteractionStore {
         type: "plugin",
         pluginInstanceId: scope.pluginInstanceId,
       },
-      payload: { ...interaction, pluginContext: { executionId: scope.executionId, verb: request.verb } },
+      payload: { ...interaction, pluginContext: { executionId: scope.executionId, verb: request.verb, conversationId: scope.conversationId, inputId: scope.inputId, resourceRef: scope.resourceRef } },
     });
     return interaction;
   }

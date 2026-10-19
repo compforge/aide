@@ -1,3 +1,4 @@
+import { Controllers } from "./controllers.ts";
 import { createConnectorClient } from "../connector-client.ts";
 import type {
   CommandDefinition,
@@ -64,11 +65,11 @@ interface PendingCall {
 }
 
 const handlers = new Map<string, (...args: never[]) => unknown>();
-const sourceSignals = new Map<string, AbortController>();
 const cleanups: Array<() => Promise<void> | void> = [];
 const pendingHostCalls = new Map<number, PendingCall>();
 let nextHandlerId = 1;
 let nextHostCallId = 1;
+let controllers: Controllers | undefined;
 let active = false;
 let closing = false;
 
@@ -136,6 +137,7 @@ const resources: ResourceClient = Object.freeze({
       annotations?: Readonly<Record<string, string>>;
       owner?: ResourceOwnerReference;
       spec: TSpec;
+      status?: TStatus;
     },
   ) {
     return await callHost<Readonly<Resource<TSpec, TStatus>>>({
@@ -143,6 +145,9 @@ const resources: ResourceClient = Object.freeze({
       type,
       init,
     });
+  },
+  async replace<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, spec: TSpec, status: TStatus) {
+    return await callHost<Readonly<Resource<TSpec, TStatus>>>({ method: "resource.replace", resource, spec, status });
   },
   async delete(
     type: ResourceType,
@@ -272,90 +277,11 @@ function hookRegistration(hook: Hook): PluginRegistration {
   };
 }
 
-function watchRegistration(
-  controllerId: string,
-  watch: Watch,
-  index: number,
-): ControllerRegistration["watches"][number] {
-  const prefix = `${controllerId}:watch:${index}`;
+function controllerRegistration(controller: Controller<unknown, unknown>): ControllerRegistration {
   return {
-    resourceType: watch.resourceType,
-    createHandlerId: handler(
-      `${prefix}:create`,
-      watch.handler.create.bind(watch.handler) as (...args: never[]) => unknown,
-    ),
-    updateHandlerId: handler(
-      `${prefix}:update`,
-      watch.handler.update.bind(watch.handler) as (...args: never[]) => unknown,
-    ),
-    deleteHandlerId: handler(
-      `${prefix}:delete`,
-      watch.handler.delete.bind(watch.handler) as (...args: never[]) => unknown,
-    ),
-  };
-}
-
-function controllerRegistration(
-  controller: Controller<unknown, unknown>,
-): PluginRegistration {
-  const controllerId =
-    `controller:${controller.resourceType.apiVersion}:${controller.resourceType.kind}`;
-  return {
-    kind: "controller",
-    controllerId,
+    kind: "controller", controllerId: `controller:${controller.resourceType.apiVersion}:${controller.resourceType.kind}`,
     resourceType: controller.resourceType,
-    reconcileHandlerId: handler(
-      `${controllerId}:reconcile`,
-      (async (snapshot, context, resource) =>
-        await controller.reconcile(
-          createReconcileContext(
-            snapshot,
-            context,
-            async (verbContext, request) =>
-              await callHost<VerbResponse>({
-                method: "verb.invoke",
-                context: verbContext,
-                request,
-              }),
-          ),
-          resource,
-        )) as (...args: never[]) => unknown,
-    ),
-    ...(controller.present === undefined
-      ? {}
-      : {
-          presentHandlerId: handler(
-            `${controllerId}:present`,
-            controller.present.bind(controller) as (...args: never[]) => unknown,
-          ),
-        }),
-    ...(controller.maxConcurrency === undefined
-      ? {}
-      : { maxConcurrency: controller.maxConcurrency }),
-    sources: Object.freeze(
-      (controller.sources ?? []).map((source) =>
-        source.type === "cron"
-          ? {
-              type: "cron" as const,
-              sourceId: source.sourceId,
-              cron: source.cron,
-              timeZone: source.timeZone,
-            }
-          : {
-              type: "resource" as const,
-              sourceId: source.sourceId,
-              startHandlerId: handler(
-                `${controllerId}:source:${source.sourceId}`,
-                source.start.bind(source) as (...args: never[]) => unknown,
-              ),
-            }
-      ),
-    ),
-    watches: Object.freeze(
-      (controller.watches ?? []).map((watch, index) =>
-        watchRegistration(controllerId, watch, index)
-      ),
-    ),
+    ...(controller.present ? { presentHandlerId: handler("controller:present", controller.present.bind(controller) as (...args: never[]) => unknown) } : {}),
   };
 }
 
@@ -377,6 +303,7 @@ async function activate(
       `loaded Package identity ${plugin.pluginId}@${plugin.version} does not match ${entry.pluginId}@${entry.version}`,
     );
   }
+  controllers = new Controllers(session, instance.pluginInstanceId, resources, callHost, pluginLogger());
   const registrations: PluginRegistration[] = [];
   let sealed = false;
   const assertRegistering = (): void => {
@@ -409,9 +336,9 @@ async function activate(
     controllers: Object.freeze({
       register<TSpec, TStatus>(controller: Controller<TSpec, TStatus>) {
         assertRegistering();
-        registrations.push(
-          controllerRegistration(controller as Controller<unknown, unknown>),
-        );
+        const registration = controllerRegistration(controller as Controller<unknown, unknown>);
+        controllers!.register((registration as ControllerRegistration).controllerId, controller as Controller<unknown, unknown>);
+        registrations.push(registration);
       },
     }),
     hooks: Object.freeze({
@@ -470,58 +397,10 @@ function pluginLogger(): PluginContext["logger"] {
   });
 }
 
-async function startSource(
-  handlerId: string,
-  sourceRunId: string,
-): Promise<void> {
-  const callback = handlers.get(handlerId) as Source<unknown>["start"] | undefined;
-  if (!callback) throw new Error(`Unknown Plugin handler: ${handlerId}`);
-  if (sourceSignals.has(sourceRunId)) {
-    throw new Error(`Plugin Source is already running: ${sourceRunId}`);
-  }
-  const abort = new AbortController();
-  sourceSignals.set(sourceRunId, abort);
-  const context: SourceContext<unknown> = Object.freeze({
-    signal: abort.signal,
-    async emit(
-      resource: Parameters<SourceContext<unknown>["emit"]>[0],
-    ) {
-      if (abort.signal.aborted) return;
-      await callHost<void>({
-        method: "source.emit",
-        sourceRunId,
-        resource,
-      });
-    },
-    reportError(error: unknown) {
-      if (abort.signal.aborted) return;
-      send({
-        kind: "source-error",
-        sourceRunId,
-        error: serializedError(error),
-      });
-    },
-  });
-  try {
-    await callback(context);
-  } catch (error) {
-    sourceSignals.delete(sourceRunId);
-    abort.abort();
-    throw error;
-  }
-}
-
-function stopSource(sourceRunId: string): void {
-  const abort = sourceSignals.get(sourceRunId);
-  sourceSignals.delete(sourceRunId);
-  abort?.abort();
-}
-
 async function closeBinding(): Promise<void> {
   if (closing) return;
   closing = true;
-  for (const abort of sourceSignals.values()) abort.abort();
-  sourceSignals.clear();
+  controllers?.close();
   const errors: unknown[] = [];
   for (const cleanup of cleanups.reverse()) {
     try {
@@ -544,6 +423,16 @@ async function closeBinding(): Promise<void> {
 
 async function dispatch(request: RunnerRequest): Promise<unknown> {
   switch (request.method) {
+    case "controllers.settled": return await controllers!.settled();
+    case "controller.start":
+      return await controllers!.start(request.controllerId, request.maxTotalConcurrency, request.retryBackoff);
+    case "controller.enqueue":
+      return await controllers!.enqueue(request.controllerId, request.key);
+    case "controller.change":
+      return await controllers!.changed(request.controllerId, request.change);
+    case "controller.stop":
+      return controllers!.stop(request.controllerId);
+
     case "activate":
       return await activate(
         request.entry,
@@ -556,12 +445,6 @@ async function dispatch(request: RunnerRequest): Promise<unknown> {
       if (!callback) throw new Error(`Unknown Plugin handler: ${request.handlerId}`);
       return await callback(...request.args as never[]);
     }
-    case "start-source":
-      await startSource(request.handlerId, request.sourceRunId);
-      return undefined;
-    case "stop-source":
-      stopSource(request.sourceRunId);
-      return undefined;
     case "close":
       await closeBinding();
       return undefined;

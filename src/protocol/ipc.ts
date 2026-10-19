@@ -1,3 +1,4 @@
+import type { ReconcileKey } from "./reconcile.ts";
 import type { ConnectorRequest } from "./connectors.ts";
 import type {
   CommandInputShape,
@@ -61,39 +62,11 @@ export interface HookRegistration {
   readonly handlerId: string;
 }
 
-export interface ResourceSourceRegistration {
-  readonly type: "resource";
-  readonly sourceId: string;
-  readonly startHandlerId: string;
-}
-
-export interface CronSourceRegistration {
-  readonly type: "cron";
-  readonly sourceId: string;
-  readonly cron: string;
-  readonly timeZone: string;
-}
-
-export type SourceRegistration =
-  | ResourceSourceRegistration
-  | CronSourceRegistration;
-
-export interface WatchRegistration {
-  readonly resourceType: ResourceType;
-  readonly createHandlerId: string;
-  readonly updateHandlerId: string;
-  readonly deleteHandlerId: string;
-}
-
 export interface ControllerRegistration {
   readonly kind: "controller";
   readonly controllerId: string;
   readonly resourceType: ResourceType;
-  readonly reconcileHandlerId: string;
   readonly presentHandlerId?: string;
-  readonly maxConcurrency?: number;
-  readonly sources: readonly SourceRegistration[];
-  readonly watches: readonly WatchRegistration[];
 }
 
 export type PluginRegistration =
@@ -107,6 +80,12 @@ export interface ActivationResult {
 }
 
 export type RunnerRequest =
+  | { readonly method: "controllers.settled" }
+  | { readonly method: "controller.start"; readonly controllerId: string; readonly maxTotalConcurrency: number; readonly retryBackoff: { initialDelayMs: number; maxDelayMs: number } }
+  | { readonly method: "controller.enqueue"; readonly controllerId: string; readonly key: ReconcileKey }
+  | { readonly method: "controller.change"; readonly controllerId: string; readonly change: { kind: string; resource: Resource<unknown, unknown>; oldResource?: Resource<unknown, unknown> } }
+  | { readonly method: "controller.stop"; readonly controllerId: string }
+
   | {
       readonly method: "activate";
       readonly entry: PluginPackageEntry;
@@ -120,19 +99,15 @@ export type RunnerRequest =
       readonly args: readonly unknown[];
     }
   | {
-      readonly method: "start-source";
-      readonly handlerId: string;
-      readonly sourceRunId: string;
-    }
-  | {
-      readonly method: "stop-source";
-      readonly sourceRunId: string;
-    }
-  | {
       readonly method: "close";
     };
 
 export type HostRequest =
+  | { readonly method: "controller.begin"; readonly key: ReconcileKey }
+  | { readonly method: "controller.finish"; readonly scope: ExecutionScope; readonly resource: Resource<unknown, unknown>; readonly requeueAfterMs?: number; readonly failed?: string }
+  | { readonly method: "controller.schedule"; readonly key: ReconcileKey; readonly nextAt: string }
+
+  | { readonly method: "resource.replace"; readonly resource: Resource<unknown, unknown>; readonly spec: unknown; readonly status: unknown }
   | { readonly method: "connector.read"; readonly request: ConnectorRequest }
   | { readonly method: "command.verb"; readonly executionId: string; readonly verb: "submit"; readonly input: CommandSubmitInput }
   | { readonly method: "command.verb"; readonly executionId: string; readonly verb: "configureModel"; readonly input: { readonly model?: string; readonly effort?: string } }
@@ -160,6 +135,7 @@ export type HostRequest =
         readonly annotations?: Readonly<Record<string, string>>;
         readonly owner?: ResourceOwnerReference;
         readonly spec: unknown;
+        readonly status?: unknown;
       };
     }
   | {
@@ -185,17 +161,6 @@ export type HostRequest =
       readonly method: "resource.patchStatus";
       readonly resource: Readonly<Resource<unknown, unknown>>;
       readonly patch: Readonly<Record<string, unknown>>;
-    }
-  | {
-      readonly method: "source.emit";
-      readonly sourceRunId: string;
-      readonly resource: {
-        readonly name: string;
-        readonly labels?: Readonly<Record<string, string>>;
-        readonly annotations?: Readonly<Record<string, string>>;
-        readonly owner?: ResourceOwnerReference;
-        readonly spec: unknown;
-      };
     };
 
 export type RunnerSignal =
@@ -206,11 +171,6 @@ export type RunnerSignal =
   | {
       readonly kind: "log";
       readonly record: PluginLogRecord;
-    }
-  | {
-      readonly kind: "source-error";
-      readonly sourceRunId: string;
-      readonly error: SerializedError;
     };
 
 export interface SerializedError {

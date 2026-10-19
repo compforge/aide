@@ -1,3 +1,4 @@
+import type { ExecutionAssociation } from "@compforge/aide-plugin";
 // aide 内部事件模型：词汇对齐 ACP v2（state_update / 按 messageId 的消息 upsert + chunk 追加 /
 // tool_call_update upsert），wire 协议不必是 ACP——adapter 负责把各家原生协议归一到这里。
 // aide 自有扩展事件用 _aide_ 前缀；公共归一契约见 docs/harness/README.md。
@@ -421,7 +422,7 @@ export interface TurnSummary {
   endedAt?: string;
 }
 
-export interface HarnessInvocationRecorded {
+export interface HarnessInvocationRecorded extends ExecutionAssociation {
   invocationId: string;
   executionId: string;
   verb: "draft" | "harness";

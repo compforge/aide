@@ -1,6 +1,6 @@
 # @compforge/aide-plugin
 
-Public, host-independent contracts for Aide plugins. A plugin defines resources and business callbacks; the host owns persistence, scheduling, interactions and Harness execution. The package contains types and small shared values, not a host or Runner implementation.
+Public, host-independent contracts for Aide plugins. A plugin defines resources and business callbacks; Core owns persistence, scheduling, interactions and Harness execution; Runner schedules Controllers and Host owns durable state and external capabilities. The package contains types and small shared values, not a host or Runner implementation.
 
 See [plugin runtime](../../docs/plugin/README.md) for the process model and [Personal](../../docs/plugin/personal.md) for a built-in consumer. Start with the exported contracts in [src/index.ts](src/index.ts).
 
@@ -70,6 +70,8 @@ if (!current) return;
 
 Include uid when continuing after an asynchronous wait so a same-name replacement is not mistaken for the original resource. Omit uid only for an intentional name lookup. Updates check resourceVersion; re-read current state before retrying a conflict. Do not retry external execution merely because its result commit conflicted.
 
+All business mutations, including host-bound agent tools, use ResourceClient so secondary Watches see the same changes. Create accepts initial status; replace atomically updates spec and status against a resource version. Primary reconciliation follows creation, spec/metadata changes and deletion. Status-only changes remain visible to explicit Watches without automatically waking the primary controller.
+
 A resource may have one structural owner in the same concrete namespace. Ownership includes uid; it is not a provenance link. Deletion persists deletionTimestamp, cascades to structural descendants and waits for successful terminating reconciliation before removing the resource.
 
 [Controller](src/reconcile.ts) owns one resource type and its reconcile policy. Resource changes, watches, source emissions and requeue requests feed the same keyed queue. One resource reconciles serially.
@@ -83,7 +85,7 @@ Status belongs to the plugin. [ConditionedStatus](src/condition.ts) optionally r
 
 ## Verbs and interactions
 
-A [ReconcileContext](src/reconcile-context.ts) supplies snapshots and typed Core verbs. Every verb returns a closed outcome: success, dismissed, timeout or failure. A negative confirmation is a successful business value, not an execution error.
+A [ReconcileContext](src/reconcile-context.ts) supplies snapshots and typed Core verbs. Interaction and Harness verbs return a closed outcome: success, dismissed, timeout or failure. The typed connector facade returns provider values and throws on failure or timeout. A negative confirmation is a successful business value, not an execution error.
 
 ```ts
 const decision = await execution.verbs.confirm({
@@ -94,11 +96,15 @@ const decision = await execution.verbs.confirm({
 // Inspect the typed result before requesting any follow-up action.
 ```
 
-`ask` and `confirm` collect a decision. `draft` lets the user edit proposed input; `harness` requests execution. Action verbs pass through a durable Interaction gate, which host policy may approve automatically. Only an approved or submitted action creates a HarnessInvocation.
+`execution.withContext({ conversationId, inputId })` associates actions with their conversation independently of Harness selection. Core also records the initiating resource.
+
+Controllers use `execution.verbs.connectors({ timeoutMs })` for connector actions. Other components may use `context.connectors` directly. Connector verbs do not create an Interaction; timeout ends the wait without promising cancellation of the underlying provider operation.
+
+`ask` and `confirm` collect a decision. `draft` lets the user edit proposed input; `harness` requests execution. Draft and Harness requests pass through a durable Interaction gate, which host policy may approve automatically. Only an approved or submitted action creates a HarnessInvocation.
 
 For execution, `laneId` selects a Lane and `newLane: true` creates a side Lane. An explicit harnessTargetId pins the Target. A direct Harness request resolves an omitted Target immediately; a draft resolves it when submitted. The returned Turn records execution, not domain acceptance.
 
-Every verb requires timeoutMs covering its entire gate, queue and execution wait. Waiting releases Controller and Manager capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
+Every verb requires timeoutMs covering its entire gate, queue and execution wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
 ## Hooks, commands and presentation
 

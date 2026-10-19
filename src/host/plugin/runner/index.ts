@@ -17,6 +17,4 @@ export type {
   MentionRegistration,
   ControllerRegistration,
   PluginRegistration,
-  SourceRegistration,
-  WatchRegistration,
 } from "../../../protocol/ipc.ts";

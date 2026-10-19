@@ -1,7 +1,7 @@
 import type {
   ReconcileResourceOwner,
   ReconcileScope,
-} from "./controller.ts";
+} from "../protocol/reconcile.ts";
 
 export function reconcileResourceOwner(
   scope: ReconcileScope,

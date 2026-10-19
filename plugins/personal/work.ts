@@ -57,7 +57,7 @@ export function changeWork(work: Work, update: WorkUpdate, now = new Date()): Wo
 }
 
 /**
- * @spec Tools operate on the caller-bound conversation, never a model-supplied scope. Writes wake the corresponding Task or Routine reconciler.
+ * @spec Tools operate on the caller-bound conversation, never a model-supplied scope. Writes notify all matching resource watches.
  * @link docs/plugin/personal.md
  */
 export class WorkService {
@@ -73,24 +73,24 @@ export class WorkService {
     return work;
   }
 
-  create(definition: WorkDefinition): Work {
+  async create(definition: WorkDefinition): Promise<Work> {
     const work = newWork(this.conversationId, definition);
-    this.store.save(work);
+    await this.store.save(work);
     this.log.info({ workId: work.id, conversationId: this.conversationId, kind: work.kind }, "Work tool created work");
     return work;
   }
 
-  update(id: string, request: WorkUpdate): Work {
+  async update(id: string, request: WorkUpdate): Promise<Work> {
     const work = changeWork(this.read(id), request);
-    this.store.save(work);
+    await this.store.save(work);
     this.log.info({ workId: id, revision: work.revision, action: request.action }, "Work tool updated work");
     return work;
   }
 
-  delete(id: string, revision: number): void {
+  async delete(id: string, revision: number): Promise<void> {
     const work = this.read(id);
     if (work.revision !== revision) throw new Error(`Work ${id} revision changed; read it again before deleting`);
-    this.store.delete(id);
+    await this.store.delete(id);
     this.log.info({ workId: id, revision }, "Work tool deleted work");
   }
 }

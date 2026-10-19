@@ -4,7 +4,7 @@ import type { ReconcileScope } from "../src/host/plugin/controller.ts";
 import {
   CronSourceQueue,
   nextCronSourceAt,
-} from "../src/host/plugin/cron-source.ts";
+} from "../src/reconcile/cron-source.ts";
 import { validateSources } from "../src/host/plugin/source.ts";
 
 const scope: ReconcileScope = {

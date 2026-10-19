@@ -2,11 +2,9 @@ import { join } from "node:path";
 import type { Logger } from "pino";
 import type { ResourceType } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/host/plugin/manager.ts";
-import { Channel, type ChannelControllerOptions } from "../../src/host/channel/index.ts";
-import { SessionStore, type SessionHandle } from "../../src/host/store/store.ts";
+import { CoreSession } from "../../src/host/core/index.ts";
+import { type SessionHandle } from "../../src/host/store/store.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
-import { PluginSupervisor } from "../../src/host/plugin/runner/index.ts";
-import { PluginInstanceStore } from "../../src/host/plugin/instance.ts";
 import { IncomingSchema, type Incoming, type Message } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { message, Store } from "./store.ts";
@@ -16,14 +14,11 @@ import { conversationKey } from "../../src/host/conversation/store.ts";
 import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
-import { Connectors } from "../../connectors/index.ts";
-import { parseWatches, validateWatchScopes } from "./source-config.ts";
-import { loadMeegoRequirementConfigs } from "../../connectors/requirements/meego.ts";
+import { parseWatches } from "./source-config.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
-import type { AideConfig } from "../../src/config.ts";
 
 /** Channels and Sources submit durable input; Chief decides whether Work is needed. */
-export class Aide {
+export class Personal {
   readonly store: Store;
   readonly plugins: Manager;
   private readonly connectors: ConnectorClient;
@@ -31,48 +26,22 @@ export class Aide {
   private starting?: Promise<void>;
   private closed = false;
 
-  readonly channel: Channel;
+  readonly core: CoreSession;
   private readonly session: SessionHandle;
   private readonly pending = new Set<Promise<unknown>>();
-  private readonly conversations = new Map<string, string>();
-  private readonly targets = [{ id: "default", harness: "codex" }];
+  private readonly chiefConversations = new Map<string, string>();
+  private readonly targets: { id: string; harness: string }[];
 
-  constructor(private readonly home: string, private readonly options: {
-    cwd: string; timezone: string; model?: string;
-    config?: AideConfig;
-    connectors?: ConnectorClient;
-    createAdapter: ChannelControllerOptions["createAdapter"];
-  }, private readonly log: Logger) {
-    const config = options.config;
-    const watches = parseWatches(config?.plugins.personal);
-    validateWatchScopes(watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
-    this.connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
-    this.log.info({ environments: Object.keys(config?.connectors.environments ?? {}).length, watches: watches.length }, "Loaded host connector configuration");
-    const sessions = new SessionStore(home);
-    const previous = sessions.listSessions({ cwd: options.cwd })[0];
-    this.session = previous ? sessions.openSession(previous.aideSessionId)
-      : sessions.createSession({ cwd: options.cwd, title: "Aide" });
-    const target = this.targets[0]!;
-    this.session.setHarnessTarget(target.id, { harnessTargetId: target.id, harness: target.harness,
-      ...(options.model ? { model: options.model } : {}) });
-    const instances = new PluginInstanceStore({ session: this.session });
-    if (!instances.list().some((instance) => instance.pluginInstanceId === "personal")) {
-      instances.create({ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin" });
-    }
-    instances.replaceConfig("personal", { watches });
-    this.channel = new Channel({ session: this.session,
-      controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter,
-        resolveTarget: (id) => this.targets.find((item) => item.id === id) },
-      plugins: { instances, connectors: this.connectors, harnessTargets: this.targets, selectedHarnessTargetId: () => target.id,
-        harnessInvocationGate: () => "auto_approve", pluginSupervisor: new PluginSupervisor(),
-        loadPackageEntry: async (pluginId, version) => ({ pluginId, version,
-          entryUrl: new URL("./plugin.ts", import.meta.url).href }),
-        onRunnerFailure: ({ error }) => { this.log.error({ err: error }, "Personal Plugin worker stopped"); this.recoverInterrupted(); },
-      },
-    });
-    this.plugins = this.channel.pluginManager!;
+  constructor(private readonly home: string, private readonly options: { timezone: string }, private readonly log: Logger,
+    runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; watches: ReturnType<typeof parseWatches> }) {
+    this.core = runtime.core;
+    this.session = runtime.session;
+    this.connectors = runtime.connectors;
+    this.targets = runtime.targets;
+    this.plugins = this.core.pluginManager!;
     this.store = new Store(new PluginResourceStore({ session: this.session, pluginInstanceId: "personal" }),
-      ({ resource }) => this.wake(resource, resource.metadata.name), this.plugins.conversations!);
+      this.plugins.resourceClient("personal"), this.plugins.conversations!);
+    const watches = runtime.watches;
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
     this.store.conversations.subscribe((conversation) => this.registerConversation(conversation.id));
     for (const watch of watches) this.registerConversation(watch.conversationId);
@@ -80,15 +49,15 @@ export class Aide {
 
   private registerConversation(conversationId: string): void {
     const id = chiefTarget(conversationId);
-    if (this.conversations.has(id)) return;
-    this.conversations.set(id, conversationId);
+    if (this.chiefConversations.has(id)) return;
+    this.chiefConversations.set(id, conversationId);
     this.targets.push({ id, harness: "chief" });
     this.session.setHarnessTarget(id, { harnessTargetId: id, harness: "chief" });
   }
 
   /** Personal binds a Chief session and its tools to one conversation; the adapter remains business-agnostic. */
   chiefSession(targetId: string, settings: Pick<ChiefAgentOptions, "agentDir" | "model"> = {}): PiSessionFactory {
-    const conversationId = this.conversations.get(targetId);
+    const conversationId = this.chiefConversations.get(targetId);
     if (!conversationId) throw new Error("Unknown Chief target");
     const active = () => {
       const inputs = this.store.conversations.inputs().filter((item) =>
@@ -108,14 +77,19 @@ export class Aide {
       sessionDir: join(this.home, "chief-sessions"), tools, beforeWorkMutation: () => { active(); } });
   }
 
+  get conversations() { return this.store.conversations; }
+  invocations() { return this.plugins.listHarnessInvocations(); }
+  conversationIds() { return [...new Set([...this.store.conversations.list().map((item) => item.id), ...this.works().map((item) => item.conversationId)])]; }
+  works() { return this.store.read().works; }
+
   start(): Promise<void> { return this.starting ??= this.startOnce(); }
 
   /** Bind agent tools to this host's Task/Routine persistence and reconcilers. */
   work(conversationId: string): WorkService { return new WorkService(this.store, conversationId, this.log); }
 
   private async startOnce(): Promise<void> {
-    this.recoverInterrupted();
-    await this.channel.start();
+    await this.recoverInterrupted();
+    await this.core.start();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin failed to start");
     for (const work of this.store.read().works) this.wake(workType(work.kind), work.id);
     for (const conversation of this.store.conversations.list()) {
@@ -123,7 +97,7 @@ export class Aide {
     }
   }
 
-  private recoverInterrupted(): void {
+  async recoverInterrupted(): Promise<void> {
     for (const input of this.store.conversations.inputs()) {
       if (input.status.phase !== "running" && input.status.phase !== "waiting") continue;
       this.store.conversations.update(input, {
@@ -135,7 +109,7 @@ export class Aide {
     for (const work of this.store.read().works) {
       if (work.status !== "running") continue;
       work.status = "uncertain"; work.nextAt = null;
-      this.store.save(work, [message(work.conversationId,
+      await this.store.save(work, [message(work.conversationId,
         `「${work.title}」执行被中断，结果未知。请核对外部结果后告诉我是否继续。`, work.id)]);
       this.log.warn({ workId: work.id }, "Recovered interrupted work as uncertain");
     }
@@ -165,11 +139,9 @@ export class Aide {
 
   /** Project original Core questions into the same channel outbox; delivery has its own dedup receipts. */
   questions() {
-    const invocations = this.plugins.listHarnessInvocations();
-    return [...this.channel.projection.interactions.values()].flatMap((item) => {
+    return [...this.core.projection.interactions.values()].flatMap((item) => {
       if (item.request.request.kind !== "question" || !item.pluginContext) return [];
-      const invocation = invocations.find((entry) => entry.executionId === item.pluginContext!.executionId);
-      const conversationId = invocation?.harnessTargetId ? this.conversations.get(invocation.harnessTargetId) : undefined;
+      const conversationId = item.pluginContext.conversationId;
       return conversationId ? [{ conversationId, request: item.request }] : [];
     });
   }
@@ -203,7 +175,7 @@ export class Aide {
       if (value) {
         // Persist the reply identity before settling the Core Interaction. A redelivery cannot become a new command.
         const resource = this.store.conversations.submit(id, { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel", replyTo: request.messageId }, { phase: "done", messages: [inbound] });
-        const receipt = await this.channel.resolveInteraction({ kind: "interaction_response", messageId: request.messageId },
+        const receipt = await this.core.resolveInteraction({ kind: "interaction_response", messageId: request.messageId },
           async () => ({ kind: "question", outcome: "answered", answers: { [question.questionId]: [value!] } }));
         if (!receipt.result) {
           this.store.conversations.update(resource, { phase: "failed",
@@ -221,7 +193,7 @@ export class Aide {
     return inbound;
   }
 
-  event(input: { id: string; conversationId: string; name: string; text: string }): number {
+  async event(input: { id: string; conversationId: string; name: string; text: string }): Promise<number> {
     if (this.closed) throw new Error("Aide is shutting down");
     const key = JSON.stringify([input.conversationId, input.id]);
     let count = 0;
@@ -231,7 +203,7 @@ export class Aide {
       work.history.push({ at: new Date().toISOString(), role: "event", text: `${input.name}: ${input.text}` });
       if (work.status !== "running") work.status = "ready";
       work.revision++;
-      this.store.save(work, [], undefined, key); count++;
+      await this.store.save(work, [], undefined, key); count++;
     }
     this.log.info({ eventId: input.id, name: input.name, count }, "Accepted event");
     return count;
@@ -240,12 +212,12 @@ export class Aide {
   async settled(): Promise<void> {
     await this.starting;
     await this.intake;
-    do { await Promise.all([...this.pending]); } while (this.pending.size);
+    do { await Promise.all([...this.pending]); await this.plugins.settled(); } while (this.pending.size);
   }
 
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    await this.starting; await this.channel.close(); await this.intake;
+    await this.starting; await this.core.close(); await this.intake;
   }
 }

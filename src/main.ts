@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { once } from "node:events";
 import pino from "pino";
 import { z } from "zod";
-import { Aide } from "../plugins/personal/aide.ts";
+import { Aide } from "./app.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
 import { httpChannel } from "./channel/http.ts";
 import { feishuProgress } from "./channel/feishu-card.ts";

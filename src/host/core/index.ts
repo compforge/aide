@@ -31,7 +31,7 @@ import { createReconcileSnapshot } from "../plugin/reconcile-snapshot.ts";
 import type { SessionState } from "../store/reduce.ts";
 import type { SessionHandle } from "../store/store.ts";
 
-export interface ChannelHookGateway {
+export interface CoreHookGateway {
   has(stage: HookStage): boolean;
   inline<S extends InlineHookStage>(
     stage: S,
@@ -43,14 +43,14 @@ export interface ChannelHookGateway {
   ): void;
 }
 
-export type ChannelLifecycle = "open" | "closing" | "closed";
+export type CoreLifecycle = "open" | "closing" | "closed";
 
-export type ChannelControllerOptions = Omit<
+export type CoreControllerOptions = Omit<
   ControllerOptions,
   "session" | "hooks"
 >;
 
-export type ChannelPluginOptions = Omit<
+export type CorePluginOptions = Omit<
   ManagerOptions,
   | "session"
   | "snapshot"
@@ -64,60 +64,60 @@ export type ChannelPluginOptions = Omit<
   })[];
 };
 
-export interface ChannelOptions {
+export interface CoreOptions {
   readonly commandPreferences?: CommandPreferences;
   readonly session: SessionHandle;
-  readonly controller: ChannelControllerOptions;
-  readonly plugins?: ChannelPluginOptions;
+  readonly controller: CoreControllerOptions;
+  readonly plugins?: CorePluginOptions;
   /** Test/embedder Hook boundary when no Plugin Manager is composed. */
-  readonly hooks?: ChannelHookGateway;
+  readonly hooks?: CoreHookGateway;
 }
 
 export interface DispatchReceipt<T> {
-  /** Durable ViewInput accepted by this Channel. */
+  /** Durable ViewInput accepted by this CoreSession. */
   readonly input: ViewInputRecord;
   readonly accepted: true;
   /** Immediate receipt from the state owner; long-running settlement stays separate. */
   readonly result: T;
 }
 
-export type ChannelProjectionListener = (
+export type CoreProjectionListener = (
   projection: SessionState,
   event: AnyEventEnvelope,
 ) => void;
 
 /** Same-process guard complementing SessionHandle's cross-process lease. */
-const activeSessionChannels = new Set<string>();
+const activeCoreSessions = new Set<string>();
 
 /**
  * One AideSession lease 的活跃协调边界与 composition root。
  *
- * Channel 装配 Controller、Plugin Manager、Hook gateway 和 Interaction 路由，
+ * CoreSession 装配 Controller、Plugin Manager、Hook gateway 和 Interaction 路由，
  * 并为 ViewInput 提供固定的 typed path。它只拥有进程期生命周期和组件引用；
  * Session、Queue、Turn、Interaction、Resource 的可恢复状态和状态机仍归原 owner。
  */
-export class Channel implements ChannelHookGateway {
+export class CoreSession implements CoreHookGateway {
   readonly controller: Controller;
   readonly pluginManager: Manager | undefined;
 
-  private hooks: ChannelHookGateway | undefined;
-  private lifecycleState: ChannelLifecycle = "open";
+  private hooks: CoreHookGateway | undefined;
+  private lifecycleState: CoreLifecycle = "open";
   private startPromise: Promise<void> | undefined;
   private closePromise: Promise<void> | undefined;
   private viewOutputRevision = 0;
   private readonly subscriptions = new Set<() => void>();
 
-  constructor(private readonly options: ChannelOptions) {
+  constructor(private readonly options: CoreOptions) {
     if (options.plugins && options.hooks) {
-      throw new Error("Channel plugins and external hooks cannot both be configured");
+      throw new Error("CoreSession plugins and external hooks cannot both be configured");
     }
-    if (activeSessionChannels.has(options.session.dir)) {
-      throw new Error(`AideSession already has an active Channel: ${options.session.id}`);
+    if (activeCoreSessions.has(options.session.dir)) {
+      throw new Error(`AideSession already has an active CoreSession: ${options.session.id}`);
     }
     // openAideSession may already hold the process lease after recovery. The
-    // Channel becomes its sole live owner and always releases it from close().
+    // CoreSession becomes its sole live owner and always releases it from close().
     options.session.acquireLock();
-    activeSessionChannels.add(options.session.dir);
+    activeCoreSessions.add(options.session.dir);
     try {
       this.controller = new Controller({
         ...options.controller,
@@ -131,17 +131,17 @@ export class Channel implements ChannelHookGateway {
         ? this.pluginHooks(this.pluginManager)
         : options.hooks;
     } catch (error) {
-      activeSessionChannels.delete(options.session.dir);
+      activeCoreSessions.delete(options.session.dir);
       options.session.releaseLock();
       throw error;
     }
   }
 
-  get lifecycle(): ChannelLifecycle {
+  get lifecycle(): CoreLifecycle {
     return this.lifecycleState;
   }
 
-  /** Current Session-owned Projection; Channel does not copy or own it. */
+  /** Current Session-owned Projection; CoreSession does not copy or own it. */
   get projection(): SessionState {
     return this.options.session.projection;
   }
@@ -154,8 +154,8 @@ export class Channel implements ChannelHookGateway {
     return this.startPromise;
   }
 
-  /** Observe Session projection changes through the active Channel lifetime. */
-  subscribe(listener: ChannelProjectionListener): () => void {
+  /** Observe Session projection changes through the active CoreSession lifetime. */
+  subscribe(listener: CoreProjectionListener): () => void {
     this.assertOpen();
     const unsubscribeSession = this.options.session.subscribe((event) => {
       listener(this.options.session.projection, event);
@@ -352,7 +352,7 @@ export class Channel implements ChannelHookGateway {
     }
   }
 
-  private createPluginManager(options: ChannelPluginOptions): Manager {
+  private createPluginManager(options: CorePluginOptions): Manager {
     const { harnessTargets = [], ...manager } = options;
     return new Manager({
       ...manager,
@@ -398,7 +398,7 @@ export class Channel implements ChannelHookGateway {
     });
   }
 
-  private pluginHooks(manager: Manager): ChannelHookGateway {
+  private pluginHooks(manager: Manager): CoreHookGateway {
     return {
       has: (stage) => manager.hasHook(stage),
       inline: (stage, subject) => manager.inlineHook(stage, subject),
@@ -426,26 +426,26 @@ export class Channel implements ChannelHookGateway {
       level: "info",
       source: "aide",
       component: "channel.lifecycle",
-      message: "Channel closed",
+      message: "CoreSession closed",
     });
     try {
       await this.options.session.closeLogs();
     } catch (error) {
       errors.push(error);
     } finally {
-      activeSessionChannels.delete(this.options.session.dir);
+      activeCoreSessions.delete(this.options.session.dir);
       this.options.session.releaseLock();
       this.lifecycleState = "closed";
     }
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) {
-      throw new AggregateError(errors, "could not close Channel");
+      throw new AggregateError(errors, "could not close CoreSession");
     }
   }
 
   private assertOpen(): void {
     if (this.lifecycleState !== "open") {
-      throw new Error(`Channel is ${this.lifecycleState}`);
+      throw new Error(`CoreSession is ${this.lifecycleState}`);
     }
   }
 
@@ -493,7 +493,7 @@ export class Channel implements ChannelHookGateway {
       level: "warn",
       source: "aide",
       component: "channel",
-      message: "Channel Hook gateway failed open",
+      message: "CoreSession Hook gateway failed open",
       error: logError(error),
       attributes: { stage },
     });

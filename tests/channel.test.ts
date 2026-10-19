@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { once } from "node:events";
 import { test } from "node:test";
 import pino from "pino";
-import { Aide } from "../plugins/personal/aide.ts";
+import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { httpChannel } from "../src/channel/http.ts";
 import type { InputRequest } from "../src/host/message/types.ts";
@@ -120,7 +120,7 @@ test("web answers the original Harness interaction and rejects stale or mismatch
   assert.equal((await post("/interactions", answer)).status, 409);
   assert.equal((await receiving).status, 200);
   assert.deepEqual(await (await fetch(url + "/interactions")).json(), []);
-  const resolved = aide.channel.projection.interactions.get(pending.messageId)?.request;
+  const resolved = aide.core.projection.interactions.get(pending.messageId)?.request;
   assert.equal(resolved?.status, "answered");
   assert.ok(resolved?.responseMessageId);
 });
@@ -152,8 +152,8 @@ test("conversation navigation lists persisted scopes without creating them and k
     { id: "m3", conversationId: group, at: at(2), role: "aide", text: "群会话的回复", workId: null },
   ]);
   aide.store.conversations.submit("source-observation", { conversationId: "source:requirements", origin: "source", text: "private observation" }, { phase: "done" });
-  aide.work("work-only").create({ kind: "routine", title: "定期检查", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "changed" } });
-  const task = aide.work(group).create({ kind: "task", title: "检查项目", instruction: "check", trigger: null });
+  (await aide.work("work-only").create({ kind: "routine", title: "定期检查", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "changed" } }));
+  const task = (await aide.work(group).create({ kind: "task", title: "检查项目", instruction: "check", trigger: null }));
   const before = aide.store.conversations.list();
   const summaries = await list();
   assert.deepEqual(summaries.map((item) => item.id), [group, "me", "source:requirements", "work-only"]);

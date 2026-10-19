@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import * as Lark from "@larksuiteoapi/node-sdk";
-import { Aide } from "../plugins/personal/aide.ts";
+import { Aide } from "../src/app.ts";
 import type { Message } from "../plugins/personal/model.ts";
 import { FeishuChannel } from "../src/channel/feishu.ts";
 import { feishuProgress, progressCard, type FeishuProgress } from "../src/channel/feishu-card.ts";

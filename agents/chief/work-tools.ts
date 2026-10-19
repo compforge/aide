@@ -31,7 +31,7 @@ export function workTools(work: WorkService): ToolDefinition[] {
     tool({ name: "create_work", label: "Create work",
       description: "Entrust a finite goal (task) or ongoing responsibility (routine) to Aide. Ordinary questions and immediate CLI queries do not need work items. Task trigger must be null; routine needs cron or event.",
       parameters: Type.Object(definition, { additionalProperties: false }),
-      async execute(_id, args, signal) { signal?.throwIfAborted(); return result(work.create(args)); },
+      async execute(_id, args, signal) { signal?.throwIfAborted(); return result(await work.create(args)); },
     }),
     tool({ name: "update_work", label: "Update work",
       description: "Use the latest revision. update changes the definition, without changing task/routine kind; answer supplies a note to waiting work; resume explicitly continues work; pause stops future execution. Verify uncertain/invalid_result history before resuming. To change kind, create a new work item and pause or delete the original as appropriate. Cannot declare completion.",
@@ -40,13 +40,13 @@ export function workTools(work: WorkService): ToolDefinition[] {
         changes: Type.Optional(Type.Partial(Type.Object({ title: definition.title, instruction: definition.instruction, trigger: definition.trigger }, { additionalProperties: false }))),
         note: Type.Optional(Type.String({ minLength: 1 })),
       }, { additionalProperties: false }),
-      async execute(_id, { id, ...args }, signal) { signal?.throwIfAborted(); return result(work.update(id, args)); },
+      async execute(_id, { id, ...args }, signal) { signal?.throwIfAborted(); return result(await work.update(id, args)); },
     }),
     tool({ name: "delete_work", label: "Delete work",
       description: "Delete explicitly unwanted work using its latest revision. Keeps conversation messages; does not undo external actions or cancel an already running command.",
       parameters: Type.Object({ id, revision }, { additionalProperties: false }),
       async execute(_id, args, signal) {
-        signal?.throwIfAborted(); work.delete(args.id, args.revision); return result({ id: args.id, deleted: true });
+        signal?.throwIfAborted(); await work.delete(args.id, args.revision); return result({ id: args.id, deleted: true });
       },
     }),
   ];

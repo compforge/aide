@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import pino from "pino";
 import { decodeSse, PatchEmitter, applyPatch, type PatchEvent } from "@compforge/agentue/ui";
-import { Aide } from "../plugins/personal/aide.ts";
+import { Aide } from "../src/app.ts";
 import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { httpChannel } from "../src/channel/http.ts";
 import { conversationView, type ConversationView } from "../src/channel/view.ts";

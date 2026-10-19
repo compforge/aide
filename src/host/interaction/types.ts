@@ -1,3 +1,4 @@
+import type { ExecutionAssociation } from "@compforge/aide-plugin";
 /**
  * InputRequest / InputResponse 的强类型请求、答案与执行边界。
  *
@@ -109,7 +110,7 @@ export type InteractionDraft =
   | HookTrustInteraction;
 
 /** Durable correlation for an Interaction emitted by one live Plugin execution. */
-export interface ReconcileInteractionContext {
+export interface ReconcileInteractionContext extends ExecutionAssociation {
   executionId: string;
   verb: "ask" | "confirm" | "draft" | "harness";
 }

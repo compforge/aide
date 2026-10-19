@@ -1,3 +1,4 @@
+import { createConnectorClient } from "./connector-client.ts";
 import {
   MAX_VERB_TIMEOUT_MS,
   type AskInput,
@@ -105,6 +106,14 @@ export function createPluginVerbs(
   invoke: InvokeVerb,
 ): PluginVerbs {
   return Object.freeze({
+    connectors(options: { timeoutMs: number }) {
+      validateTimeout("connector", options.timeoutMs);
+      return createConnectorClient(async <T>(request: import("./protocol/connectors.ts").ConnectorRequest): Promise<T> => {
+        const result = await invoke(scope, { verb: "connector", input: { request, timeoutMs: options.timeoutMs } });
+        if (result.state !== "success") throw new Error(`Connector ${request.operation} ${result.state}${result.state === "failure" ? `: ${result.error}` : ""}`);
+        return result.value as T;
+      });
+    },
     async ask<const TInput extends AskInput>(input: TInput) {
       validateAsk(input);
       return await invoke(scope, {
@@ -141,7 +150,8 @@ export function createReconcileContext(
   scope: ExecutionScope,
   invoke: InvokeVerb,
 ): ReconcileContext {
-  const context = Object.freeze({
+  const context: ReconcileContext = Object.freeze({
+    withContext: (association: Pick<import("@compforge/aide-plugin").ExecutionAssociation, "conversationId" | "inputId">) => createReconcileContext(snapshot, { ...scope, ...association }, invoke),
     snapshot,
     verbs: createPluginVerbs(scope, invoke),
   });

@@ -138,9 +138,13 @@ const plugin: PluginPackage = {
         });
       },
     });
-    context.controllers.register({
+    context.controllers.register<{ blockMs?: number }, Record<string, never>>({
       resourceType: PROCESS_RESOURCE_TYPE,
-      async reconcile() {},
+      async reconcile(_execution, resource) {
+        const delay = Number(resource.spec.blockMs ?? 0);
+        const deadline = Date.now() + delay;
+        while (Date.now() < deadline) { /* Occupy only the Runner event loop. */ }
+      },
     });
     context.controllers.register({
       resourceType: {

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1820" height="940" viewBox="0 0 1820 940" role="img" aria-labelledby="title desc">
   <title id="title">Aide 组件图：输入、业务逻辑与外部能力通过协作引擎连接</title>
-  <desc id="desc">左侧是 Channel 与 Source 输入，上方是 Chief 等业务 Controller，右侧是 Connector、外部系统与 Harness。中央大框是协作引擎，包含动作调用、内置 Conversation、Input、Message、自定义资源及调度机制。Host 加 Runner 标注在中央框下方。Controller 通过资源变化被唤醒，通过 verb 或 Connector API 调用能力；Harness 的 Agent 工具也可操作资源。Source 和 Controller 都通过 Core 的统一 Verb 入口请求能力。审计与授权是 Core 的通用机制。</desc>
+  <desc id="desc">左侧是 Channel 与 Source 输入，上方是 Chief 等业务 Controller，右侧是 Connector、外部系统与 Harness。中央大框是协作引擎，包含动作调用、内置 Conversation、Input、Message、自定义资源及调度机制。Host 加 Runner 标注在中央框下方。Controller 通过资源变化被唤醒，通过 Verb 调用能力；Harness 的 Agent 工具也可操作资源。Controller 经 Verb 请求动作；Source 和 Agent 工具可直接使用 Core 服务。审计与授权是 Core 的通用机制。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#4d6260"/></marker>
     <style>
@@ -71,8 +71,8 @@
   <text x="1500" y="775" text-anchor="middle" class="small">Agent / 业务 Tools</text>
 
   <!-- Relations, not an execution timeline. -->
-  <path d="M540 155 H570 V440 H700" class="flow" marker-start="url(#arrow)"/>
-  <text x="550" y="418" text-anchor="end" class="label">观察 verb / 结果</text>
+  <path d="M540 155 H570 V390 H600" class="flow" marker-start="url(#arrow)"/>
+  <text x="550" y="418" text-anchor="end" class="label">Connector API / 结果</text>
 
   <path d="M355 230 V590 H630" class="flow"/>
   <text x="382" y="576" class="label">Input / 业务资源</text>

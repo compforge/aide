@@ -340,7 +340,7 @@
     if (polling) return;
     polling = true;
     try {
-      const [works, interactions] = await Promise.all([api('/work' + query), api('/interactions'), refreshConversations()]);
+      const [works, interactions] = await Promise.all([api('/work' + query), api('/interactions' + query), refreshConversations()]);
       renderWork(works); renderInteractions(interactions);
       $('poll-notice').textContent = '';
     } catch { $('poll-notice').textContent = '事项或交互暂时无法更新，正在重试。'; }
