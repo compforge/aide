@@ -12,6 +12,7 @@ Aide 是小型、自托管的 personal agent。Web / Feishu Channel 与 Source �
 src/
   main.ts                  # 启动 Channel 与 Harness
   app.ts                   # 按入口 Session ID 装配 CoreSession / Personal，恢复与汇总各会话
+  host/heartbeat.ts           # Session 定时 Input 的开关、截止时间与去重
   web/                     # 浏览器页面、脚本、样式与 Markdown 渲染
   api/                     # HTTP handler、静态资源与 SSE，调用 Core / Personal 能力
   channel/                 # Feishu 适配、共享消息协议与执行投影
@@ -63,6 +64,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Harness 结束不等于业务目标完成，Personal 校验结果后决定终态。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
 - 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。
 - 执行上下文显式携带主资源和可选 Conversation/Input 关联；Channel 不通过 Chief Target 推导问题和进度归属。
+- Session heartbeat 默认关闭、间隔 3600 秒；开关只控制新定时 Input。say 保存普通 Message，不创建 Interaction；Chief 负责主动回顾的业务判断。
 - Chief 问答复用 Core Interaction；Task / Routine 的 waiting 是业务持久状态。两者的跨重启行为见 Personal 文档。
 - Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Message，不另建轨迹存储。
 - `npm run check` 验证类型与测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或飞书已验证。

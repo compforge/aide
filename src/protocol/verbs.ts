@@ -26,6 +26,7 @@ export interface ExecutionScope extends ExecutionAssociation {
  * Harness gates keep their own lifecycle. Other Core callers need not use Verb.
  */
 export type VerbRequest =
+  | { readonly verb: "say"; readonly input: import("@compforge/aide-plugin").SayInput }
   | { readonly verb: "connector"; readonly input: { readonly request: ConnectorRequest; readonly timeoutMs: number } }
   | {
       readonly verb: "ask";

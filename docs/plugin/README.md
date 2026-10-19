@@ -26,7 +26,7 @@ Personal 的“需求 Source”是一项业务能力：它用 RequirementSource 
 
 ## Verb 与 Harness
 
-Reconcile 通过 `ctx.verbs` 请求 ask、confirm、draft、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。ask/confirm 保存 Interaction，draft/harness 按交互结果发起 HarnessInvocation；Connector verb 直接执行。插件只需表达意图、期限和目标，不处理提供方原生协议。
+Reconcile 通过 `ctx.verbs` 请求 say、ask、confirm、draft、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。say 在关联 Conversation 中保存普通 Message，不建立 Interaction 或等待用户；成功表示持久化，投递由 Channel 负责。ask/confirm 保存 Interaction，draft/harness 按交互结果发起 HarnessInvocation；Connector verb 直接执行。插件只需表达意图、期限和目标，不处理提供方原生协议。
 
 等待 verb 时释放 Controller 和 Runner 容量，同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。拒绝确认是正常业务答案；取消、超时和失败需要插件自行决定业务结果。
 

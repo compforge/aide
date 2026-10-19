@@ -29,7 +29,8 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   const inputs = scope.conversations.inputs(conversationId);
   const active = inputs.find((input) => input.status.phase === "running" || input.status.phase === "waiting");
   const queued = inputs.filter((input) => !input.status.phase).length;
-  const invocations = aide.invocations().filter((item) => item.conversationId === conversationId);
+  const quietInputs = new Set(inputs.filter((input) => input.status.quietReason).map((input) => input.metadata.name));
+  const invocations = aide.invocations().filter((item) => item.conversationId === conversationId && !quietInputs.has(item.inputId ?? ""));
   const relatedTurns = new Set(invocations.map((item) => item.turnId));
   // Group presentation by persisted Input ownership, never by message order or similar text.
   const turnInputs = new Map(invocations.map((item) => [item.turnId, item.inputId]));
@@ -97,6 +98,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
 export interface ConversationSummary {
   id: string;
   sessionId: string;
+  heartbeat: import("../host/heartbeat.ts").HeartbeatConfig;
   title: string;
   preview: string;
   updatedAt: string;
@@ -111,7 +113,7 @@ export function conversationList(aide: ChannelService): ConversationSummary[] {
   const ensure = (id: string) => {
     let summary = summaries.get(id);
     if (!summary) {
-      summary = { id, sessionId: aide.findConversation(id)!.id, title: id === "me" ? "默认对话" : id, preview: "", updatedAt: "" };
+      summary = { id, sessionId: aide.findConversation(id)!.id, heartbeat: aide.findConversation(id)!.heartbeat.config, title: id === "me" ? "默认对话" : id, preview: "", updatedAt: "" };
       summaries.set(id, summary);
     }
     return summary;

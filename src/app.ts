@@ -31,6 +31,7 @@ export class Aide {
   private readonly connectors: ConnectorClient;
   private starting?: Promise<void>;
   private closed = false;
+  private heartbeatTimer?: ReturnType<typeof setInterval>;
 
   constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
     const config = options.config;
@@ -141,11 +142,36 @@ export class Aide {
   conversationIds() { return this.sessions().flatMap((scope) => scope.conversationIds()); }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(): void { for (const listener of this.listeners) listener(); }
-  start(): Promise<void> { return this.starting ??= Promise.all(this.sessions().map((scope) => scope.start())).then(() => {}); }
+  setHeartbeat(sessionId: string, conversationId: string, enabled: boolean) {
+    const scope = this.active.get(sessionId);
+    if (!scope || this.findConversation(conversationId) !== scope) throw new Error("Session does not own this Conversation");
+    const heartbeat = scope.heartbeat.setEnabled(enabled, conversationId);
+    this.log.info({ sessionId, conversationId, ...heartbeat }, "Session heartbeat configured");
+    this.notify();
+    return heartbeat;
+  }
+
+  private tick(): void {
+    if (this.closed) return;
+    for (const scope of this.sessions()) {
+      try { scope.heartbeat.tick(); }
+      catch (err) { this.log.error({ err, sessionId: scope.id }, "Session heartbeat failed"); }
+    }
+  }
+
+  start(): Promise<void> {
+    return this.starting ??= Promise.all(this.sessions().map((scope) => scope.start())).then(() => {
+      if (this.closed) return;
+      this.tick();
+      this.heartbeatTimer = setInterval(() => this.tick(), 1000);
+      this.heartbeatTimer.unref();
+    });
+  }
   async settled(): Promise<void> { await this.start(); await Promise.all(this.sessions().map((scope) => scope.settled())); }
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     await Promise.all(this.sessions().map((scope) => scope.close()));
     this.listeners.clear();
   }

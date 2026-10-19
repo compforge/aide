@@ -362,6 +362,7 @@ export class Manager {
       options.snapshot ??
       (() => emptyReconcileSnapshot(this.instances.session.id));
     this.verb = new Verb({
+      conversations: () => this.conversations,
       connectors: this.connectors,
       session: options.session,
       capacity: this.capacity,

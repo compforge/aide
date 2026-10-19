@@ -23,7 +23,7 @@ Aide 由 Channel、Source、资源与 Controller、Connector、Harness 等组件
 
 ### Core 与 Controller 的动作出口
 
-Core 是系统共享的协作引擎，组件层面统一承接资源、调度、交互与执行职责。Verb 表达 Controller 向 Core 发起的动作，涵盖 Connector 查询与操作、Harness 执行以及 ask / confirm 等用户交互。Reconcile 读取资源、决定动作，再通过 Verb 请求执行；资源进展经 ResourceClient 保存。
+Core 是系统共享的协作引擎，组件层面统一承接资源、调度、交互与执行职责。Verb 表达 Controller 向 Core 发起的动作，涵盖 Connector 查询与操作、Harness 执行以及 say / ask / confirm 等用户交互。Reconcile 读取资源、决定动作，再通过 Verb 请求执行；资源进展经 ResourceClient 保存。
 
 Source 决定关注什么、如何解释观察结果，Core 承接查询或订阅请求，再通过 Connector 访问外部系统。Reconcile 决定下一步业务动作，通过 Core 发起执行。Agent 工具、Channel 和框架 Source 可以按职责直接调用 Core 服务，不要求经过 Verb。例如 Chief 的 Work 工具调用 Core ResourceClient，Connector 工具调用 Core ConnectorClient。
 
@@ -57,9 +57,9 @@ Host 与 Runner 不相互导入实现。Host 通过入口启动 Runner；两端�
 
 ### 输入与交流记录
 
-Conversation 是 Host 提供的 builtin resource，表达一组交流上下文；convId 是它的标识。Input 表达一次待处理触发，Message 表达交流记录。Channel Input 引用用户 Message，Source Input 携带观察；外部观察不会自动成为一条聊天消息。
+Conversation 是 Host 提供的 builtin resource，表达一组交流上下文；convId 是它的标识。Input 表达一次待处理触发，Message 表达交流记录。Channel Input 引用用户 Message，Source Input 携带观察，heartbeat Input 携带 Session 身份并触发定时检查；这两类输入不会自动成为用户聊天消息。
 
-三者由 Core 的 ConversationStore 管理，以普通记录持久化，并通过内置 Resource API 提供访问与调度投影。它们不进入插件的 Resource 文件存储。输入状态和对应消息一起提交，避免只写完成状态却遗漏答复。
+三者由 Core 的 ConversationStore 管理，以普通记录持久化，并通过内置 Resource API 提供访问与调度投影。它们不进入插件的 Resource 文件存储。Channel 入站 Message 和 Input 一起提交。say 先持久化 Message 并关联 Input，Controller 再提交处理完成；成功表示消息已记录，不表示 Channel 已投递。若两步之间中断，保留已记录消息，Input 按中断规则处理，不重放业务动作。
 
 Channel / Source 提供稳定 sessionId，Core 按 ID 创建或恢复持久 Session，再在该作用域内保存 Input / Message。飞书用应用与聊天身份、Web 新会话用自己的会话身份，Source 用配置的观察范围确定 ID。Conversation 可以沿用 sessionId 作为自己的 ID，也可以使用独立 ID；当前入口查询要求一个 Conversation 仅属于一个 Session。Conversation 的划分由输入方确定，消费顺序与处理策略由插件决定。Personal 的 Chief 按会话串行消费 Input；这是 [Personal](plugin/personal.md) 的业务约定。各 Session 隔离执行历史与原生上下文，但仍使用同一服务用户和 CLI 能力；conversationId 不是权限边界。
 

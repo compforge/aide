@@ -14,7 +14,9 @@ export interface ConversationMessage {
 /** Submission/view shape. Channel text is resolved from a Message reference in persistent storage. */
 export interface InputSpec {
   conversationId: string;
-  origin: "channel" | "source";
+  origin: "channel" | "source" | "heartbeat";
+  /** Required for scheduled Inputs, identifying the persistent execution scope. */
+  sessionId?: string;
   text: string;
   timezone?: string;
   replyTo?: string;
