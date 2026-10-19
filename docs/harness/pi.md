@@ -24,7 +24,7 @@ const adapter = createHarnessAdapter(
 
 原生会话由 Pi SDK 按默认布局持久化在 `<agentDir>/sessions/<encoded-cwd>/`，通常为 `~/.pi/agent/sessions/` 下的目录；指定 agentDir 时也由 SDK 选择对应路径。Pi 自己按 cwd 组织文件，不意味着 Aide 恢复 Project 分组。通用 Pi 和 Chief 都沿用此机制，Aide 不再指定 pi-sessions / chief-sessions 目录。Adapter 保存文件位置与恢复状态。恢复时校验工作目录与调用方绑定的范围。尚未落盘的空会话可以重新建立，已有历史文件缺失或范围不符则报错。
 
-Agent 不自动加载扩展、提示词命令或交互主题，并禁用自动整轮重试。完整执行期限由 Harness 调用方管理。
+Agent 不自动发现环境中的扩展、提示词命令或交互主题；装配方可通过 extensionPaths 显式提供扩展路径，工具和钩子由 Pi SDK 加载。Adapter 负责扩展启动与退出事件。通用 Pi 默认不携带记忆扩展，并禁用自动整轮重试。完整执行期限由 Harness 调用方管理。
 
 ## 输出与验证
 

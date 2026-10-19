@@ -57,6 +57,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Conversation 是 builtin resource，convId 标识交流分组，不替代 Session / Lane / Turn 的执行身份。Conversation / Input / Message 由 Host 管理。Channel / Source 提供稳定 sessionId，conversationId 可沿用它；Core 按 Session 恢复执行，Chief 按 Conversation 串行消费输入并复用固定 Lane。会话分组不是权限边界。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。类型转换组合创建、暂停或删除，目标工作拥有新 id。
 - Harness 原生 Session 由各 Harness 管理并使用其默认目录；Aide 按 Session × Lane × Target 保存原生身份和 Adapter 的 resumeState。
+- 记忆由 Harness 组合开源实现；Chief 内置 pi-hermes-memory，Personal 不感知记忆能力，Core 不新增记忆存储或协议。扩展生命周期由 PiAdapter 驱动，原生配置与共享范围见 Chief 文档。
 - `pi` 提供通用 Agent，`chief` 加入 Personal 工具，两者复用 PiAdapter。通用 Pi 不依赖 Personal，Chief 的 WorkService 由宿主绑定范围；默认 Work 执行使用 Codex。
 - Source 先提交持久 Input 再推进观察水位。输入状态、业务回复和去重记录按现有原子提交边界保存，不能用投递失败重新触发业务执行。
 - Harness 结束不等于业务目标完成，Personal 校验结果后决定终态。中断可能已经产生外部副作用，保留待核对状态，不自动重放。

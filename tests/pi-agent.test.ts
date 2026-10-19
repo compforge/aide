@@ -1,3 +1,4 @@
+import { memoryAgentDir } from "./pi-memory-fixture.ts";
 import { Aide } from "../src/app.ts";
 import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
@@ -136,6 +137,7 @@ test("Pi answers directly without work and resumes its native history", { timeou
   assert.ok(names.includes("read") && names.includes("bash"));
   assert.ok(!names.some((name) => name.endsWith("_work") || ["ask", "confirm", "list_connectors"].includes(name)));
   assert.doesNotMatch(JSON.stringify(fixture.requests[0]!.messages), /You are Chief|Work tools/);
+  assert.ok(!definitions.some((tool) => tool.function.name === "memory_add"));
   assert.deepEqual(fixture.work.list(), []);
   assert.equal((await fixture.run("谢谢", "same-session")).stopReason, "end_turn");
   const identity = fixture.binding().identity.id;
@@ -162,6 +164,7 @@ test("Chief loads declared skills and excludes ambient Pi skills and packages", 
   }));
   const agent = await createChiefAgent({ ...fixture.config, work: fixture.work, config: await resolvePiConfig({ ...fixture.config, skillPaths: [declared] }) });
   try {
+    await agent.bindExtensions({ mode: "rpc" });
     assert.match(agent.systemPrompt, /You are Chief/);
     assert.equal(agent.model?.provider, "fixture");
     assert.equal(agent.model?.id, "test-model");
@@ -169,10 +172,10 @@ test("Chief loads declared skills and excludes ambient Pi skills and packages", 
     assert.doesNotMatch(agent.systemPrompt, /ambient capability marker|Full skill body stays on disk/);
     await agent.prompt("Verify configured capability.");
     assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /as-ops capability marker/);
-  } finally { agent.dispose(); }
+  } finally { await agent.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); agent.dispose(); }
   const empty = await createChiefAgent({ ...fixture.config, work: fixture.work });
   try { assert.doesNotMatch(empty.systemPrompt, /ambient capability marker|as-ops capability marker/); }
-  finally { empty.dispose(); }
+  finally { await empty.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); empty.dispose(); }
 });
 
 test("Chief executes all five Work tools through the SDK and keeps commentary out of finalText", { timeout: 30_000 }, async (t) => {
@@ -361,4 +364,61 @@ test("an entirely Aide-defined provider performs a real SDK request with explici
   assert.equal((await fixture.run("check", "independent-provider")).finalText, "independent provider");
   assert.equal(fixture.requests.at(-1)!.model, "deployment");
   assert.equal(fixture.requestHeaders.at(-1)!.authorization, "Bearer explicit-test-key");
+});
+
+/** @case Hermes tools and policy run inside Chief; native dialogue and persistent memory have independent lifetimes. */
+test("Chief uses bundled Hermes memory across fresh native sessions while generic Pi stays unchanged", { timeout: 30_000 }, async (t) => {
+  const marker = `AideMemory${Date.now()}`;
+  const writer = await setup(t, (_request, index) => index === 0
+    ? { tool: "memory_add", args: { target: "user", content: `${marker}: prefers concise Chinese answers.` } }
+    : { text: "已记住。" }, "chief");
+  const written = await writer.run("Remember my response preference.", "memory-write");
+  assert.equal(written.stopReason, "end_turn");
+  assert.match(readFileSync(join(memoryAgentDir, "pi-hermes-memory", "USER.md"), "utf8"), new RegExp(marker));
+  assert.match(JSON.stringify(writer.requests[0]!.messages), /memory-policy/);
+  const names = (writer.requests[0]!.tools as { function: { name: string } }[]).map((tool) => tool.function.name);
+  for (const name of ["memory_add", "memory_replace", "memory_remove", "memory_search", "session_search", "create_work"]) assert.ok(names.includes(name), name);
+  await writer.adapter.close(writer.ref());
+
+  const reader = await setup(t, (_request, index) => index === 0
+    ? { tool: "memory_search", args: { query: marker, target: "user" } }
+    : { text: "已找到偏好。" }, "chief");
+  assert.notEqual(writer.binding().identity.id, reader.binding().identity.id);
+  assert.doesNotMatch(JSON.stringify(reader.requests), /prefers concise Chinese answers/);
+  await reader.run("Find my saved response preference.", "memory-read");
+  const result = (reader.requests[1]!.messages as { role: string; content: unknown }[]).filter((message) => message.role === "tool");
+  assert.match(JSON.stringify(result), new RegExp(marker));
+  assert.match(JSON.stringify(result), /prefers concise Chinese answers/);
+  assert.equal(reader.work.list().length, 0);
+});
+
+/** @case Explicit Pi extensions initialize on open and finish shutdown even when startup fails. */
+test("Pi adapter completes extension lifecycle and reports startup failures", async (t) => {
+  const fixture = await setup(t, () => ({ text: "ok" }));
+  for (const fail of [false, true]) {
+    const eventsFile = join(fixture.config.cwd, `extension-${fail}.log`);
+    const extension = join(fixture.config.cwd, `extension-${fail}.ts`);
+    writeFileSync(extension, `import { appendFileSync } from "node:fs";
+export default function (pi) {
+  pi.on("session_start", () => { appendFileSync(${JSON.stringify(eventsFile)}, "start\\n"); ${fail ? 'throw new Error("controlled extension startup failure");' : ""} });
+  pi.on("session_shutdown", async () => { await new Promise(resolve => setTimeout(resolve, 10)); appendFileSync(${JSON.stringify(eventsFile)}, "stop\\n"); });
+}`);
+    const errors: string[] = [];
+    const adapter = createHarnessAdapter({ id: "extensions", harness: "pi" }, {
+      targetConfig: { harness: "pi" }, openInteraction: async () => { throw new Error("Unexpected interaction"); },
+      piSession: (input) => createPiAgent({ ...fixture.config, ...input, extensionPaths: [extension] }),
+      log: (entry) => { if (entry.level === "error") errors.push(entry.error?.message ?? entry.message); },
+    });
+    const open = () => adapter.open({ cwd: fixture.config.cwd }, () => {}, () => {});
+    if (fail) {
+      await assert.rejects(open(), /Pi extension startup failed.*controlled extension startup failure/);
+      assert.ok(errors.some((error) => error.includes("controlled extension startup failure")));
+    } else {
+      const handle = await open();
+      assert.equal(readFileSync(eventsFile, "utf8"), "start\n");
+      await adapter.close(handle);
+      await adapter.close(handle);
+    }
+    assert.equal(readFileSync(eventsFile, "utf8"), "start\nstop\n");
+  }
 });

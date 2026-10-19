@@ -7,7 +7,7 @@ import { unsupportedPromptBlocks } from "../adapter.ts";
 import type { LogSink } from "../../logging.ts";
 
 /** The composition root binds tools; the adapter only speaks Pi's session API. */
-export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose">;
+export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner">;
 export type PiSessionFactory = (options: { cwd: string; sessionFile?: string }) => Promise<PiSession>;
 interface Turn {
   id: string; done?: Promise<void>; cancelled: boolean;
@@ -47,9 +47,25 @@ export class PiAdapter implements HarnessAdapter {
     try {
       if (!native.sessionFile) throw new Error("PiAdapter requires a persistent native session");
       session.unsubscribe = native.subscribe((event) => this.observe(session, event));
+      const startupErrors: string[] = [];
+      let starting = true;
+      await native.bindExtensions({ mode: "rpc", onError: (error) => {
+        if (starting) startupErrors.push(`${error.extensionPath}: ${error.error}`);
+        this.options.log?.({ level: "error", source: "harness", component: "pi.extension", harness: this.harness,
+          message: "Pi extension failed", error: { message: error.error },
+          attributes: { extension: error.extensionPath, event: error.event ?? "unknown", sessionId: native.sessionId } });
+      } });
+      starting = false;
+      if (startupErrors.length) throw new Error(`Pi extension startup failed: ${startupErrors.join("; ")}`);
+      this.options.log?.({ level: "info", source: "harness", component: "pi.extension", harness: this.harness,
+        message: "Pi extensions started", attributes: { sessionId: native.sessionId } });
       this.publishBinding(session);
       this.sessions.set(handleId, session);
-    } catch (error) { session.unsubscribe(); native.dispose(); throw error; }
+    } catch (error) {
+      try { await native.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); }
+      finally { session.unsubscribe(); native.dispose(); }
+      throw error;
+    }
     return { harness: this.harness, handleId, resumed: !!sessionFile };
   }
 
@@ -89,7 +105,11 @@ export class PiAdapter implements HarnessAdapter {
     const session = this.sessions.get(ref.handleId);
     if (!session) return;
     try { await this.cancel(ref); }
-    finally { session.unsubscribe(); session.native.dispose(); this.sessions.delete(ref.handleId); }
+    finally {
+      // @spec Extensions finish persistence and release resources before their native context is disposed.
+      try { await session.native.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); }
+      finally { session.unsubscribe(); session.native.dispose(); this.sessions.delete(ref.handleId); }
+    }
   }
 
   private require(ref: HarnessSessionHandle): Session {
