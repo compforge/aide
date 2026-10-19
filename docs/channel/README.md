@@ -31,4 +31,4 @@ Chief 的问答可通过两个 Channel 回答。当前原生 Harness 授权和 H
 
 内核对象与持久化见 [Kernel](../kernel.md)，Personal 判断流程见 [Personal](../plugin/personal.md)，部署见 [部署与诊断](../deployment.md)。
 
-Channel 通过 `src/channel/service.ts` 的输入与投影接口接入应用，不依赖 Personal 或 Chief 的实现。Web 的 Work 侧栏与事件入口由应用额外提供。
+Channel 通过 `src/channel/service.ts` 的输入与投影接口接入应用，不依赖 Personal 或 Chief 的实现。Web 的 HTTP handler 位于 `src/api/`，通过扩展接口 `src/api/service.ts` 使用应用提供的 Work 侧栏、删除与事件能力；浏览器代码位于 `src/web/`。

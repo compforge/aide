@@ -1,8 +1,8 @@
 import type { ServerResponse } from "node:http";
 import type { Logger } from "pino";
-import type { ChannelService, WebService } from "./service.ts";
+import type { ChannelService } from "../channel/service.ts";
 import { encodeSse, PatchEmitter, type PatchEvent } from "@compforge/agentue/ui";
-import { conversationView, type ConversationView } from "./view.ts";
+import { conversationView, type ConversationView } from "../channel/view.ts";
 
 /**
  * @spec AgentUE owns patch semantics; Aide selects the conversation's renderable state.

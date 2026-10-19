@@ -12,7 +12,9 @@ Aide 是小型、自托管的 personal agent。Web / Feishu Channel 与 Source �
 src/
   main.ts                  # 启动 Channel 与 Harness
   app.ts                   # 应用装配：安装 Personal，创建 CoreSession
-  channel/                 # Web / Feishu 适配，消息与执行投影
+  web/                     # 浏览器页面、脚本、样式与 Markdown 渲染
+  api/                     # HTTP handler、静态资源与 SSE，调用 Core / Personal 能力
+  channel/                 # Feishu 适配、共享消息协议与执行投影
   host/                    # 主进程：持久化、交互与执行事实
     conversation/          # 内置 Conversation / Input / Message
     plugin/                # Resource / Controller / Source / Watch / verb

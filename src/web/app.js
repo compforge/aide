@@ -1,114 +1,4 @@
-<!doctype html>
-<html lang="zh-CN">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Aide · 个人助手</title>
-<style>
-  :root { color-scheme: light; font-family: system-ui, sans-serif; color: #20342b; background: #f5f5ef; }
-  * { box-sizing: border-box; } body { margin: 0; }
-  header { padding: 20px 32px; border-bottom: 1px solid #d8dfd5; display: flex; align-items: center; gap: 18px; }
-  h1 { font-size: 24px; margin: 0; letter-spacing: -.8px; } .muted { color: #68776c; font-size: 13px; }
-  main { max-width: 1480px; margin: 0 auto; display: grid; grid-template-columns: 230px minmax(0, 1fr) 290px; height: calc(100dvh - 70px); }
-  .conversation { min-width: 0; padding: 24px; min-height: 0; display: flex; flex-direction: column; }
-  .conversations { padding: 24px 12px; border-right: 1px solid #d8dfd5; overflow: auto; }
-  .conversations h2 { font-size: 16px; margin: 0 10px 18px; }
-  .conversation-link { display: block; color: inherit; text-decoration: none; padding: 12px 10px; border-radius: 10px; margin-bottom: 6px; }
-  .conversation-link:hover { background: #edf1e8; }
-  .conversation-link[aria-current="page"] { background: #dfeadd; }
-  .conversation-link:focus-visible { outline: 3px solid #83a38b; outline-offset: -3px; }
-  .conversation-link strong, .conversation-link span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .conversation-link strong { font-size: 14px; margin-bottom: 6px; }
-  .conversation-link span { margin-top: 4px; }
-  #conversation-notice { margin: 10px; color: #9b5b11; }
-  #conversation-heading { font-size: 16px; margin: 0 0 6px; overflow-wrap: anywhere; }
-  #conversation-id { overflow-wrap: anywhere; margin-bottom: 12px; }
-  #messages { flex: 1; overflow: auto; padding: 0 12px 24px 0; }
-  .message { padding: 16px 18px; background: white; border: 1px solid #e1e6dc; border-radius: 12px; margin: 12px 0; }
-  .message.user { background: #e8eee3; margin-left: 10%; }
-  .markdown { white-space: normal; overflow-wrap: anywhere; line-height: 1.65; }
-  .message-body { margin-top: 8px; }
-  .markdown > :first-child { margin-top: 0; } .markdown > :last-child { margin-bottom: 0; }
-  .markdown p, .markdown ul, .markdown ol, .markdown blockquote, .markdown pre, .markdown table { margin: .7em 0; }
-  .markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 { margin: 1em 0 .45em; line-height: 1.4; letter-spacing: normal; }
-  .markdown h1 { font-size: 1.4em; } .markdown h2 { font-size: 1.25em; } .markdown h3 { font-size: 1.1em; }
-  .markdown ul, .markdown ol { padding-left: 1.6em; } .markdown li + li { margin-top: .25em; }
-  .markdown li > p { margin: .3em 0; }
-  .markdown a { color: #285f43; text-decoration: underline; text-underline-offset: 2px; }
-  .markdown blockquote { border-left: 3px solid #bdcbbb; padding-left: 1em; color: #68776c; }
-  .markdown code { font-family: ui-monospace, monospace; font-size: .9em; background: #edf1e8; border-radius: 4px; padding: .15em .3em; }
-  .markdown pre { white-space: pre; overflow: auto; background: #edf1e8; border-radius: 8px; padding: 12px; }
-  .markdown pre code { padding: 0; background: none; }
-  .markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
-  .markdown th, .markdown td { border: 1px solid #d8dfd5; padding: 6px 10px; text-align: left; }
-  .markdown th { background: #edf1e8; }
-  .markdown hr { border: 0; border-top: 1px solid #d8dfd5; margin: 1em 0; }
-  #activity { margin: 12px 0; padding: 16px 18px; border: 1px solid #cbd9cc; border-radius: 12px; background: #f0f5ed; }
-  #activity[hidden] { display: none; }
-  .activity-heading { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #42634c; }
-  .activity-heading::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #64886b; animation: pulse 1.4s ease-in-out infinite; }
-  .activity-block { margin-top: 12px; font-size: 13px; }
-  .activity-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; margin: 6px 0; }
-  .activity-content.markdown { white-space: normal; }
-  .activity-block.thought .activity-content, .activity-block.tool .activity-content { max-height: 220px; overflow: auto; color: #68776c; }
-  .activity-block summary { cursor: pointer; }
-  .execution-history { margin: 12px 0; padding: 12px 18px; border: 1px solid #e1e6dc; border-radius: 12px; }
-  .execution-history > summary { cursor: pointer; color: #68776c; font-size: 13px; }
-  @keyframes pulse { 50% { opacity: .3; } }
-  @media(prefers-reduced-motion: reduce) { .activity-heading::before { animation: none; } }
-  .empty { margin: 10vh auto; max-width: 480px; } .empty h2 { font-size: 26px; font-weight: 500; }
-  .empty p { line-height: 1.8; color: #68776c; } form { display: flex; align-items: end; gap: 12px; }
-  textarea { width: 100%; resize: vertical; min-height: 80px; max-height: 200px; border: 1px solid #bdcbbb; border-radius: 12px; padding: 14px; font: inherit; background: white; }
-  button { border: 0; border-radius: 10px; padding: 13px 20px; background: #294f3a; color: white; font: inherit; cursor: pointer; white-space: nowrap; }
-  button:disabled { opacity: .5; cursor: wait; } button:focus-visible, textarea:focus-visible { outline: 3px solid #83a38b; outline-offset: 2px; }
-  #notice { min-height: 22px; margin-top: 10px; font-size: 13px; color: #68776c; } #notice.error { color: #a0362a; }
-  aside { padding: 24px 20px; border-left: 1px solid #d8dfd5; overflow: auto; } aside h2 { font-size: 16px; margin: 0 0 18px; }
-  .work-group + .work-group { margin-top: 28px; padding-top: 24px; border-top: 1px solid #d8dfd5; }
-  .work { background: white; border-radius: 10px; border: 1px solid #e1e6dc; padding: 14px; margin-bottom: 12px; }
-  .work strong { display: block; margin: 8px 0; font-size: 14px; overflow-wrap: anywhere; }
-  .work p { font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .badge { display: inline-block; padding: 3px 7px; background: #edf1e8; border-radius: 5px; font-size: 11px; }
-  .waiting, .uncertain, .invalid_result { color: #9b5b11; background: #fff1d9; } .running { background: #dceee1; }
-  details { font-size: 12px; color: #68776c; margin-top: 8px; }
-  #poll-notice { color: #9b5b11; font-size: 13px; }
-  #poll-notice:not(:empty) { margin-bottom: 12px; }
-  #interactions { max-height: 45vh; overflow: auto; }
-  .interaction { border: 1px solid #cfac72; border-radius: 12px; padding: 14px; margin-bottom: 12px; background: #fff8e9; }
-  .interaction p, .interaction pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-  @media(max-width: 1000px) { header { padding: 16px; } main { display: block; height: auto; } .conversations { max-height: 220px; border-right: 0; border-bottom: 1px solid #d8dfd5; padding: 16px; } .conversation { height: 75dvh; padding: 16px; } aside { border-left: 0; border-top: 1px solid #d8dfd5; } }
-</style>
-<header><h1>Aide</h1><span class="muted">把事情交给我，持续为你推进。</span><span id="connection" class="muted" style="margin-left:auto" aria-live="polite">连接中</span></header>
-<main>
-  <nav class="conversations" aria-label="会话列表">
-    <h2>会话</h2>
-    <div id="conversation-list"></div>
-    <div id="conversation-notice" class="muted" role="status"></div>
-  </nav>
-  <section class="conversation" aria-label="对话">
-    <h2 id="conversation-heading">默认对话</h2>
-    <div id="conversation-id" class="muted"></div>
-    <div id="messages" role="log" aria-label="消息记录"><div id="history"></div><section id="activity" aria-label="Aide 执行进展" hidden></section></div>
-    <div id="poll-notice" role="status"></div>
-    <div id="interactions" aria-label="等待你处理的执行请求" aria-live="polite"></div>
-    <form id="composer">
-      <textarea id="input" aria-label="交办事情或回答问题" placeholder="交办一件事，或者告诉我你想长期关注什么…" maxlength="32000" required></textarea>
-      <button id="send" type="submit">发送</button>
-    </form>
-    <div id="notice" role="status">Enter 发送 · Shift + Enter 换行</div>
-  </section>
-  <aside>
-    <section class="work-group" aria-labelledby="tasks-heading">
-      <h2 id="tasks-heading">事项 <span id="task-count" class="muted">0</span></h2>
-      <div id="tasks"></div>
-    </section>
-    <section class="work-group" aria-labelledby="routines-heading">
-      <h2 id="routines-heading">安排 <span id="routine-count" class="muted">0</span></h2>
-      <div id="routines"></div>
-    </section>
-  </aside>
-</main>
-<script type="module">
-  import { applyPatch, parsePatchEvent, renderMarkdown } from '/agentue.js';
+import { applyPatch, parsePatchEvent, renderMarkdown } from '/agentue.js';
   const $ = (id) => document.getElementById(id);
   const conversationId = new URL(location.href).searchParams.get('conversation') || 'me';
   const query = '?conversationId=' + encodeURIComponent(conversationId);
@@ -243,6 +133,7 @@
     }
     if (nearBottom) $('messages').scrollTop = $('messages').scrollHeight;
   }
+  const deletingWork = new Set();
   function renderWork(works) {
     const signature = JSON.stringify(works);
     if (signature === lastWork) return;
@@ -257,7 +148,28 @@
     if (!works.length) list.append(element('p', emptyText, 'muted'));
     for (const work of [...works].reverse()) {
       const node = element('article', undefined, 'work');
-      node.append(element('span', labels[work.status], 'badge ' + work.status), element('strong', work.title));
+      const header = element('div', undefined, 'work-header');
+      const remove = element('button', deletingWork.has(work.id) ? '删除中…' : '删除', 'work-delete');
+      remove.type = 'button';
+      remove.setAttribute('aria-label', '删除' + (work.kind === 'task' ? '事项：' : '安排：') + work.title);
+      remove.disabled = deletingWork.has(work.id);
+      remove.addEventListener('click', async () => {
+        if (deletingWork.has(work.id) || !confirm('删除「' + work.title + '」？\n删除后停止后续跟进，已有消息会保留。已发起的操作可能仍会完成。')) return;
+        deletingWork.add(work.id); remove.disabled = true; remove.textContent = '删除中…';
+        $('work-notice').className = 'muted'; $('work-notice').textContent = '';
+        try {
+          await api('/work/delete', { method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ id: work.id, conversationId, revision: work.revision }) });
+          $('work-notice').textContent = '已删除「' + work.title + '」。';
+        } catch (error) {
+          $('work-notice').className = 'error'; $('work-notice').textContent = error.message;
+        } finally {
+          deletingWork.delete(work.id); remove.disabled = false; remove.textContent = '删除';
+          await poll();
+        }
+      });
+      header.append(element('span', labels[work.status], 'badge ' + work.status), remove);
+      node.append(header, element('strong', work.title));
       if (work.question) node.append(element('p', work.question));
       if (work.status === 'uncertain') node.append(element('p', '执行中断或失败。请核对外部结果，再发消息决定是否继续。'));
       if (work.status === 'invalid_result') node.append(element('p', '执行已结束，但最终结果解析失败。请核对执行记录，再决定是否继续。'));
@@ -383,5 +295,3 @@
   stream.onerror = () => { $('connection').textContent = '连接断开 · 正在重连'; };
   renderConversations([]);
   poll(); setInterval(poll, 1500);
-</script>
-</html>

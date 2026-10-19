@@ -8,9 +8,9 @@ import pino from "pino";
 import { decodeSse, PatchEmitter, applyPatch, type PatchEvent } from "@compforge/agentue/ui";
 import { Aide } from "../src/app.ts";
 import { chiefTarget } from "../plugins/personal/chief-model.ts";
-import { httpChannel } from "../src/channel/http.ts";
+import { httpChannel } from "../src/api/index.ts";
 import { conversationView, type ConversationView } from "../src/channel/view.ts";
-import { conversationPatches } from "../src/channel/stream.ts";
+import { conversationPatches } from "../src/api/stream.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
@@ -46,11 +46,11 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const page = await fetch(base);
   assert.match(page.headers.get("content-security-policy")!, /script-src 'self'/);
-  assert.match(await page.text(), /import .* from '\/agentue.js'/);
+  assert.match(await page.text(), /src="\/app.js"/);
   const bundle = await fetch(base + "/agentue.js");
   assert.equal(bundle.status, 200);
   assert.match(bundle.headers.get("content-type")!, /javascript/);
-  const browserSdk = await import(`data:text/javascript;base64,${Buffer.from(await bundle.text()).toString("base64")}`) as typeof import("../src/channel/web-sdk.ts");
+  const browserSdk = await import(`data:text/javascript;base64,${Buffer.from(await bundle.text()).toString("base64")}`) as typeof import("../src/web/sdk.ts");
   assert.match(browserSdk.renderMarkdown("## 网页回复\n\n- **已完成**"), /<h2>网页回复<\/h2>[\s\S]*<strong>已完成<\/strong>/);
   assert.doesNotMatch(browserSdk.renderMarkdown('<script>alert(1)</script>'), /<script>/);
   async function connect(conversationId: string) {
