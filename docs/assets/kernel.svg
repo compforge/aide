@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1820" height="940" viewBox="0 0 1820 940" role="img" aria-labelledby="title desc">
+  <title id="title">Aide 组件图：输入、业务逻辑与外部能力通过协作引擎连接</title>
+  <desc id="desc">左侧是 Channel 与 Source 输入，上方是 Chief 等业务 Controller，右侧是 Connector、外部系统与 Harness。中央大框是协作引擎，包含动作调用、内置 Conversation、Input、Message、自定义资源及调度机制。Host 加 Runner 标注在中央框下方。Controller 通过资源变化被唤醒，通过 verb 或 Connector API 调用能力；Harness 的 Agent 工具也可操作资源。Source 和 Controller 都通过 Core 的统一 Verb 入口请求能力。审计与授权是 Core 的通用机制。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#4d6260"/></marker>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', sans-serif; fill: #233b38; }
+      .title { font-size: 28px; font-weight: 650; }
+      .heading { font-size: 25px; font-weight: 600; }
+      .body { font-size: 23px; }
+      .small { font-size: 18px; fill: #526864; }
+      .box { stroke: #6f8580; stroke-width: 2.5; }
+      .flow { fill: none; stroke: #4d6260; stroke-width: 2.5; marker-end: url(#arrow); stroke-linejoin: round; }
+      .label { font-size: 18px; paint-order: stroke; stroke: #fafbf9; stroke-width: 7px; stroke-linejoin: round; }
+    </style>
+  </defs>
+  <rect width="1820" height="940" fill="#fafbf9"/>
+  <text x="40" y="44" class="title">Aide · 组件与协作关系</text>
+  <text x="600" y="54" class="heading">业务逻辑 · Plugin Controllers</text>
+
+  <!-- Inputs: human messages and observations of external changes. -->
+  <path d="M330 80 H470 L540 155 L470 230 H330 Z" class="box" fill="#eaf0f6"/>
+  <text x="420" y="147" text-anchor="middle" class="body">Source</text>
+  <text x="420" y="180" text-anchor="middle" class="small">发现 / 订阅</text>
+
+  <circle cx="90" cy="640" r="27" class="box" fill="#fff"/>
+  <path d="M90 667 V745 M40 700 H140 M90 745 L40 800 M90 745 L140 800" fill="none" stroke="#6f8580" stroke-width="3" stroke-linecap="round"/>
+  <text x="90" y="839" text-anchor="middle" class="body">用户</text>
+  <rect x="330" y="650" width="210" height="115" rx="16" class="box" fill="#eaf0f6"/>
+  <text x="435" y="698" text-anchor="middle" class="body">Channel</text>
+  <text x="435" y="735" text-anchor="middle" class="small">Web / Feishu</text>
+  <path d="M170 685 H330" class="flow"/>
+  <path d="M330 745 H170" class="flow"/>
+
+  <!-- Business definitions sit above the shared mechanism. -->
+  <rect x="600" y="90" width="260" height="150" rx="18" class="box" fill="#e6eee9"/>
+  <text x="730" y="142" text-anchor="middle" class="heading">Chief Controller</text>
+  <text x="730" y="182" text-anchor="middle" class="body">Reconcile</text>
+  <text x="730" y="214" text-anchor="middle" class="small">Conversation</text>
+  <rect x="890" y="90" width="430" height="150" rx="18" class="box" fill="#e6eee9"/>
+  <text x="1105" y="142" text-anchor="middle" class="heading">Task / Routine / 其他 Controller</text>
+  <text x="1105" y="182" text-anchor="middle" class="body">Reconcile</text>
+  <text x="1105" y="214" text-anchor="middle" class="small">各自的主资源与业务判断</text>
+
+  <!-- One large collaboration engine, without drawing process partitions. -->
+  <rect x="600" y="330" width="720" height="510" rx="20" class="box" fill="#eaf0f6"/>
+  <text x="625" y="362" class="small">Core · 协作引擎 / 运行机制</text>
+  <path d="M700 440 L960 375 L1220 440 L960 505 Z" class="box" fill="#fcf0d4"/>
+  <text x="960" y="436" text-anchor="middle" class="heading">Verb</text>
+  <text x="960" y="468" text-anchor="middle" class="small">观察 / 执行 / 询问</text>
+  <path d="M630 550 Q630 540 640 540 H890 Q900 540 900 550 V695 Q835 670 765 695 Q700 720 630 695 Z" class="box" fill="#fff"/>
+  <text x="765" y="584" text-anchor="middle" class="small">内置对象 / Resource 投影</text>
+  <text x="765" y="624" text-anchor="middle" class="body">Conversation</text>
+  <text x="765" y="660" text-anchor="middle" class="body">Input / Message</text>
+  <path d="M1020 550 Q1020 540 1030 540 H1280 Q1290 540 1290 550 V695 Q1225 670 1155 695 Q1090 720 1020 695 Z" class="box" fill="#fff"/>
+  <text x="1155" y="584" text-anchor="middle" class="small">Plugin 自定义资源（CRD）</text>
+  <text x="1155" y="624" text-anchor="middle" class="body">Task / Routine / …</text>
+  <text x="1155" y="660" text-anchor="middle" class="small">spec：目标 · status：进展</text>
+  <text x="630" y="795" class="small">持久化 · 队列 · Watch · 定时调度</text>
+  <text x="630" y="815" class="small">审计 · 授权 · 超时 · 交互与执行记录</text>
+  <text x="960" y="867" text-anchor="middle" class="heading">Host + Runner</text>
+
+  <!-- Capabilities and external systems sit to the right. -->
+  <text x="1400" y="345" class="heading">能力与外部系统</text>
+  <rect x="1400" y="390" width="200" height="90" rx="45" class="box" fill="#eee8f6"/>
+  <text x="1500" y="444" text-anchor="middle" class="body">Connector</text>
+  <path d="M1660 408 C1642 376 1674 352 1699 366 C1714 335 1755 346 1758 377 C1794 370 1810 406 1790 428 C1815 461 1785 495 1757 483 C1735 513 1698 495 1698 478 C1660 492 1638 459 1658 437 C1642 430 1645 416 1660 408 Z" class="box" fill="#eee8f6"/>
+  <text x="1725" y="432" text-anchor="middle" class="body">外部系统</text>
+  <rect x="1400" y="690" width="200" height="115" rx="16" class="box" fill="#eee8f6"/>
+  <text x="1500" y="736" text-anchor="middle" class="body">Harness</text>
+  <text x="1500" y="775" text-anchor="middle" class="small">Agent / 业务 Tools</text>
+
+  <!-- Relations, not an execution timeline. -->
+  <path d="M540 155 H570 V440 H700" class="flow" marker-start="url(#arrow)"/>
+  <text x="550" y="418" text-anchor="end" class="label">观察 verb / 结果</text>
+
+  <path d="M355 230 V590 H630" class="flow"/>
+  <text x="382" y="576" class="label">Input / 业务资源</text>
+  <path d="M540 685 H630" class="flow"/>
+  <path d="M650 330 V240" class="flow"/>
+  <text x="660" y="315" text-anchor="start" class="label">Conversation 变化</text>
+  <path d="M940 330 V240" class="flow"/>
+  <text x="960" y="264" class="label">资源变化 / Watch</text>
+  <path d="M800 240 V280 H880 V395" class="flow"/>
+  <text x="802" y="270" class="label">verb</text>
+  <path d="M1140 240 V280 H1040 V395" class="flow"/>
+  <text x="1155" y="277" class="label">verb</text>
+  <path d="M1220 440 H1400" class="flow"/>
+  <text x="1310" y="425" text-anchor="middle" class="label">Connector 调用</text>
+  <path d="M1600 435 H1650" class="flow"/>
+  <path d="M935 500 V750 H540" class="flow"/>
+  <text x="700" y="740" class="label">答复 / 问题 / 进展</text>
+  <path d="M985 500 V745 H1400" class="flow"/>
+  <text x="1335" y="733" text-anchor="end" class="label">harness verb</text>
+  <path d="M1400 790 H1190 V699" class="flow" stroke-dasharray="6 5"/>
+  <text x="1400" y="845" text-anchor="start" class="small">Agent Tools 可操作资源</text>
+
+  <text x="40" y="917" class="small">Core 统一承接观察与动作请求；业务逻辑、输入与外部能力通过同一协作机制连接。</text>
+</svg>
