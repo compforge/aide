@@ -120,7 +120,7 @@ export function conversationList(aide: ChannelService): ConversationSummary[] {
   };
   for (const conversation of aide.sessions().flatMap((scope) => scope.conversations.list())) ensure(conversation.id).updatedAt = conversation.createdAt;
   for (const input of aide.sessions().flatMap((scope) => scope.conversations.inputs())) {
-    const summary = ensure(input.spec.conversationId);
+    const summary = ensure(input.conversationId);
     if (input.metadata.creationTimestamp > summary.updatedAt) summary.updatedAt = input.metadata.creationTimestamp;
   }
   for (const id of aide.conversationIds()) ensure(id);

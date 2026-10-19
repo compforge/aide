@@ -19,6 +19,7 @@ export interface ResourceType {
  * name-based lookup that may resolve to a replacement Resource.
  */
 export interface ResourceRef extends ResourceType {
+  readonly sessionId?: string;
   readonly namespace: AnyResourceNamespace;
   readonly name: string;
   readonly uid?: string;
@@ -30,6 +31,7 @@ export interface ResourceOwnerReference extends ResourceRef {
 }
 
 export interface ResourceMetadata {
+  readonly sessionId?: string;
   /** Stable name within one namespace and Resource type. */
   readonly name: string;
   /** Concrete Resource scope. Aide-owned Resources use a Aide-reserved namespace. */
@@ -62,6 +64,8 @@ export interface Resource<
 
 /** Exact-match label selector. All entries must match the Resource. */
 export interface ResourceListOptions {
+  /** Explicit Session selection; "*" lists active host Sessions. Omitted means current Session. */
+  readonly sessionId?: string;
   /** Exact namespace to query. Plugin-owned Resources default to user-global `v1`. */
   readonly namespace?: AnyResourceNamespace;
   /** Include every descendant namespace below `namespace`. */
@@ -89,6 +93,7 @@ export interface ResourceWriter {
   create<TSpec, TStatus>(
     type: ResourceType,
     init: {
+      sessionId?: string;
       name: string;
       /** Concrete Resource namespace. Defaults to the user-global `v1`. */
       namespace?: ResourceNamespace;

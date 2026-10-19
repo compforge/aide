@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1820" height="940" viewBox="0 0 1820 940" role="img" aria-labelledby="title desc">
   <title id="title">Aide 组件图：输入、业务逻辑与外部能力通过协作引擎连接</title>
-  <desc id="desc">左侧是 Channel 与 Source 输入，上方是 Chief 等业务 Controller，右侧是 Connector、外部系统与 Harness。中央大框是协作引擎，包含动作调用、内置 Conversation、Input、Message、自定义资源及调度机制。Host 加 Runner 标注在中央框下方。Controller 通过资源变化被唤醒，通过 Verb 调用能力；Harness 的 Agent 工具也可操作资源。Controller 经 Verb 请求动作；Source 和 Agent 工具可直接使用 Core 服务。审计与授权是 Core 的通用机制。</desc>
+  <desc id="desc">左侧是 Channel 与 Source 输入，上方是 Chief 等业务 Controller，右侧是 Connector、外部系统与 Harness。中央大框是协作引擎，包含动作调用、内置 Input、执行 Message、自定义资源及调度机制。Host 加 Runner 标注在中央框下方。Controller 通过资源变化被唤醒，通过 Verb 调用能力；Harness 的 Agent 工具也可操作资源。Controller 经 Verb 请求动作；Source 和 Agent 工具可直接使用 Core 服务。审计与授权是 Core 的通用机制。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#4d6260"/></marker>
     <style>
@@ -36,7 +36,7 @@
   <rect x="600" y="90" width="260" height="150" rx="18" class="box" fill="#e6eee9"/>
   <text x="730" y="142" text-anchor="middle" class="heading">Chief Controller</text>
   <text x="730" y="182" text-anchor="middle" class="body">Reconcile</text>
-  <text x="730" y="214" text-anchor="middle" class="small">Conversation</text>
+  <text x="730" y="214" text-anchor="middle" class="small">Input / Conversation</text>
   <rect x="890" y="90" width="430" height="150" rx="18" class="box" fill="#e6eee9"/>
   <text x="1105" y="142" text-anchor="middle" class="heading">Task / Routine / 其他 Controller</text>
   <text x="1105" y="182" text-anchor="middle" class="body">Reconcile</text>
@@ -50,11 +50,11 @@
   <text x="960" y="468" text-anchor="middle" class="small">观察 / 执行 / 询问</text>
   <path d="M630 550 Q630 540 640 540 H890 Q900 540 900 550 V695 Q835 670 765 695 Q700 720 630 695 Z" class="box" fill="#fff"/>
   <text x="765" y="584" text-anchor="middle" class="small">内置对象 / Resource 投影</text>
-  <text x="765" y="624" text-anchor="middle" class="body">Conversation</text>
+  <text x="765" y="624" text-anchor="middle" class="body">Session</text>
   <text x="765" y="660" text-anchor="middle" class="body">Input / Message</text>
   <path d="M1020 550 Q1020 540 1030 540 H1280 Q1290 540 1290 550 V695 Q1225 670 1155 695 Q1090 720 1020 695 Z" class="box" fill="#fff"/>
   <text x="1155" y="584" text-anchor="middle" class="small">Plugin 自定义资源（CRD）</text>
-  <text x="1155" y="624" text-anchor="middle" class="body">Task / Routine / …</text>
+  <text x="1155" y="624" text-anchor="middle" class="body">Conversation / Task / Routine</text>
   <text x="1155" y="660" text-anchor="middle" class="small">spec：目标 · status：进展</text>
   <text x="630" y="795" class="small">持久化 · 队列 · Watch · 定时调度</text>
   <text x="630" y="815" class="small">审计 · 授权 · 超时 · 交互与执行记录</text>
@@ -78,7 +78,7 @@
   <text x="382" y="576" class="label">Input / 业务资源</text>
   <path d="M540 685 H630" class="flow"/>
   <path d="M650 330 V240" class="flow"/>
-  <text x="660" y="315" text-anchor="start" class="label">Conversation 变化</text>
+  <text x="660" y="315" text-anchor="start" class="label">Input / 资源变化</text>
   <path d="M940 330 V240" class="flow"/>
   <text x="960" y="264" class="label">资源变化 / Watch</text>
   <path d="M800 240 V280 H880 V395" class="flow"/>

@@ -1,4 +1,4 @@
-import { ConversationStore } from "../src/host/conversation/store.ts";
+import { InputStore } from "../src/host/input/store.ts";
 import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -40,9 +40,9 @@ test("Requirement Source commits the inbox before its watermark and never create
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const sessions = new SessionStore(root); const session = sessions.createSession({ cwd: root });
   const store = new PluginResourceStore({ session, pluginInstanceId: "personal" });
-  const conversations = new ConversationStore(session);
-  const resources = createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, conversations }));
-  const watch: Watch = { sessionId: "source:mine", id: "mine", source: "work", conversationId: "me", intervalMs: 300_000, repositories: [] };
+  const conversations = new InputStore(session.dir);
+  const resources = createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, inputs: conversations }));
+  const watch: Watch = { sessionId: "source:mine", id: "mine", source: "work", intervalMs: 300_000, repositories: [] };
   const resource = store.create({ type: SOURCE_TYPE, name: "mine", spec: watch, status: {} });
   let updatedAt = "1";
   let fail = false;
@@ -52,19 +52,19 @@ test("Requirement Source commits the inbox before its watermark and never create
   }, async get() { throw new Error("Source should fetch summaries only"); } }], []);
   const logger = { debug() {}, info() {}, warn() {}, error() {} };
   await assert.rejects(observeRequirements({ logger, resources: { ...resources, async patchStatus() { throw new Error("Interrupted after emission"); } } }, resource, connectors), /Interrupted/);
-  assert.equal(conversations.inputs().length, 1);
+  assert.equal(conversations.list().length, 1);
   assert.deepEqual(store.get(SOURCE_TYPE, "mine").status, {});
   await observeRequirements({ logger, resources }, resource, connectors);
-  assert.equal(conversations.inputs().length, 1);
+  assert.equal(conversations.list().length, 1);
   // Reopen persisted state, as a restarted worker would.
   const reopened = new PluginResourceStore({ session: sessions.openSession(session.id), pluginInstanceId: "personal" });
-  const restoredConversations = new ConversationStore(session);
-  const context = { logger, resources: createResourceClient(reopened, undefined, undefined, new AideResourceProvider({ session, conversations: restoredConversations })) };
+  const restoredConversations = new InputStore(session.dir);
+  const context = { logger, resources: createResourceClient(reopened, undefined, undefined, new AideResourceProvider({ session, inputs: restoredConversations })) };
   await observeRequirements(context, reopened.get(SOURCE_TYPE, "mine"), connectors);
-  assert.equal(restoredConversations.inputs().length, 1);
+  assert.equal(restoredConversations.list().length, 1);
   updatedAt = "2";
   await observeRequirements(context, reopened.get(SOURCE_TYPE, "mine"), connectors);
-  assert.equal(restoredConversations.inputs().length, 2);
+  assert.equal(restoredConversations.list().length, 2);
   const before = reopened.get(SOURCE_TYPE, "mine").status;
   fail = true;
   await assert.rejects(observeRequirements(context, reopened.get(SOURCE_TYPE, "mine"), connectors), /Unavailable/);
@@ -87,7 +87,7 @@ test("Discovery requires an explicit assignee scope and unique watch identity", 
 test("Watches sharing a connector get separate conversations unless explicitly routed together", () => {
   const watches = parseWatches({
     watches: [{ id: "mine", source: "work" }, { id: "team", source: "work" },
-      { id: "urgent", source: "work", conversationId: "feishu:bot:chat" }],
+      { id: "urgent", source: "work", sessionId: "feishu:bot:chat" }],
   });
-  assert.deepEqual(watches.map((watch) => watch.conversationId), ["source:mine", "source:team", "feishu:bot:chat"]);
+  assert.deepEqual(watches.map((watch) => watch.sessionId), ["source:mine", "source:team", "feishu:bot:chat"]);
 });

@@ -51,7 +51,6 @@ harnesses:
 plugins:
   personal:
     watches: []
-    environmentWatches: []
 ```
 
 ## 默认执行 Harness

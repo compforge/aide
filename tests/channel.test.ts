@@ -1,3 +1,4 @@
+import { seedInput } from "./conversation-fixture.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -147,12 +148,12 @@ test("conversation navigation lists persisted scopes without creating them and k
   const group = "feishu:app:群 & #1";
   const base = Date.now() + 60_000;
   const at = (offset: number) => new Date(base + offset).toISOString();
-  aide.session("me").conversations.archive("me", [{ id: "m1", conversationId: "me", at: at(0), role: "user", text: "默认会话问题", workId: null }]);
-  aide.session(group).conversations.archive(group, [
+  await aide.session("me").conversations.archive("me", [{ id: "m1", conversationId: "me", at: at(0), role: "user", text: "默认会话问题", workId: null }]);
+  await aide.session(group).conversations.archive(group, [
     { id: "m2", conversationId: group, at: at(1), role: "user", text: "检查 <项目>\n进展", workId: null },
     { id: "m3", conversationId: group, at: at(2), role: "aide", text: "群会话的回复", workId: null },
   ]);
-  aide.session("source:requirements").conversations.submit("source-observation", { conversationId: "source:requirements", origin: "source", text: "private observation" }, { phase: "done" });
+  await seedInput(aide.session("source:requirements").conversations, "source-observation", { conversationId: "source:requirements", origin: "source", text: "private observation" }, { phase: "done" });
   (await aide.work("work-only").create({ kind: "routine", title: "定期检查", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "changed" } }));
   const task = (await aide.work(group).create({ kind: "task", title: "检查项目", instruction: "check", trigger: null }));
   const before = aide.sessions().flatMap((scope) => scope.conversations.list());

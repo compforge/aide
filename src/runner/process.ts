@@ -131,6 +131,7 @@ const resources: ResourceClient = Object.freeze({
   async create<TSpec, TStatus>(
     type: ResourceType,
     init: {
+      sessionId?: string;
       name: string;
       namespace?: ResourceNamespace;
       labels?: Readonly<Record<string, string>>;

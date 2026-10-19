@@ -59,11 +59,15 @@ Aide 的根级 `defaultHarness` 选择默认工作执行实现，`harnesses.<nam
 
 ### 输入与交流记录
 
-Conversation 是 Host 提供的 builtin resource，表达一组交流上下文；convId 是它的标识。Input 表达一次待处理触发，Message 表达交流记录。Channel Input 引用用户 Message，Source Input 携带观察，heartbeat Input 携带 Session 身份并触发定时检查；这两类输入不会自动成为用户聊天消息。
+Input 是独立的 Host 内置资源，记录输入内容、来源和可选的目标 sessionId。Channel 知道聊天对应的 Session，Source 也可以提交没有目标的外部观察。接收输入的执行 Session 与输入声明的目标 Session 分别记录；前者负责持久执行，后者表达来源已知的路由范围。输入事实统一保存在 `$AIDE_HOME/inputs.json`，供多个插件资源引用。
 
-三者由 Core 的 ConversationStore 管理，以普通记录持久化，并通过内置 Resource API 提供访问与调度投影。它们不进入插件的 Resource 文件存储。Channel 入站 Message 和 Input 一起提交。say 先持久化 Message 并关联 Input，Controller 再提交处理完成；成功表示消息已记录，不表示 Channel 已投递。若两步之间中断，保留已记录消息，Input 按中断规则处理，不重放业务动作。
+Conversation 是 Personal 定义的资源：spec 保存所属 Session 和追加的 inputIds，status 保存各 Input 的消费进度与消息 outbox。它与 Task、Routine 一样使用通用 Resource CRUD、版本检查和 Watch。来源无需知道 Conversation，Personal 决定交流上下文的组织方式。一个 Input 可以被多个 Conversation 引用，各会话独立消费。
 
-Channel / Source 提供稳定 sessionId，Core 按 ID 创建或恢复持久 Session，再在该作用域内保存 Input / Message。飞书用应用与聊天身份、Web 新会话用自己的会话身份，Source 用配置的观察范围确定 ID。Conversation 可以沿用 sessionId 作为自己的 ID，也可以使用独立 ID；当前入口查询要求一个 Conversation 仅属于一个 Session。Conversation 的划分由输入方确定，消费顺序与处理策略由插件决定。Personal 的 Chief 按会话串行消费 Input；这是 [Personal](plugin/personal.md) 的业务约定。各 Session 隔离执行历史与原生上下文，但仍使用同一服务用户和 CLI 能力；conversationId 不是权限边界。
+Personal 的 Chief 先 Reconcile Input：已知 Session 的常见输入走确定路由，无目标的输入根据会话摘要和关联工作决定去向。目标计划先持久化，再通过资源 Update 向 Conversation 追加 inputId；多目标追加中断时恢复同一计划。Conversation 的 spec 变化触发另一个 Reconcile，加载本会话上下文并执行。这里不需要额外的路由 Verb。
+
+Core 的 ResourceClient 可显式读取和更新其它 Session 的插件资源。写入仍经目标 Session 的资源客户端，版本检查和 Watch 通知属于同一个提交路径；默认查询只访问当前 Session。各 Session 隔离执行历史与 Harness 原生上下文，Conversation 不是权限边界。
+
+Message 表达交流记录。Core 定义执行消息、Interaction 与 say 契约，应用装配持久消息出口；Personal 把面向用户的消息与消费状态保存在 Conversation outbox。say 成功表示消息已记录，不表示 Channel 已投递。业务完成与消息投递分别记录，投递失败不重新执行已完成动作。
 
 ### Harness 与执行事实
 
@@ -144,7 +148,7 @@ Plugin 的自定义资源用 spec 表达目标，用 status 保存领域进展�
 
 ### Personal 的具体流程
 
-Chief Controller 以内置 Conversation 为主资源，按会话串行消费 Input，调用 Chief Harness 决定直接答复、询问用户或操作 Work。Task 和 Routine 各有独立 CRD 与 Reconcile，分别推进有限目标和持续职责；Work 是二者的业务统称。
+Chief 通过 Input Reconcile 决定输入去向，再由 Conversation Reconcile 按会话串行消费，调用 Chief Harness 决定直接答复、询问用户或操作 Work。Task 和 Routine 各有独立 CRD 与 Reconcile，分别推进有限目标和持续职责；Work 是二者的业务统称。
 
 Personal 的需求观察由 RequirementSource 资源及其 Controller 承担：定时经 Core 调用 Connector，比较观察结果，先持久化 Input，再推进观察水位，交给 Chief 判断。框架 Source 则负责资源的初始发现与订阅；其他 Plugin 可以直接由 Source 建立自己的业务资源。两者的联系见 [Plugin 的 Source 与 Watch](plugin/README.md#source-与-watch)。
 

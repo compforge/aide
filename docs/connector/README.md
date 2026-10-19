@@ -47,7 +47,7 @@ plugins:
     watches:
       - id: my-requirements
         source: work
-        conversationId: me
+        sessionId: me
         intervalMs: 300000
         repositories:
           - forge: github.com
@@ -86,24 +86,11 @@ Workload 采样复用 `@compforge/harness-toolbox` 的原生 Kubernetes Resource
 
 `connectors.environments.workloads(name, namespace?)` 返回规范环境名、namespace、采样时间与 Workload 快照。
 namespace 优先取参数，否则取环境声明；两者都缺失时拒绝采样。读取使用 Aide 所在机器的 kubeconfig，支持 `~/` 路径。
-SSH Host 不作为本地配置使用：开启该环境的 watch 时会拒绝启动。每次采样总超时 25 秒，单请求 10 秒，并发 2，单个列表上限 8 MiB。
+SSH Host 不作为本地配置使用：自动观察会跳过该环境。每次采样总超时 25 秒，单请求 10 秒，并发 2，单个列表上限 8 MiB。
 
-Personal 用 `environmentWatches` 选择观察范围和接收会话，与需求 `watches` 分别配置：
+Personal 从已配置的 Environment 自动生成观察资源，无需额外 watch 清单或会话 ID。支持本地 Kubernetes 访问且声明了 namespace 的环境每五分钟采样一次；Host / generic 环境、SSH 访问和缺少 namespace 的声明会跳过并记录原因。
 
-```yaml
-plugins:
-  personal:
-    environmentWatches:
-      - id: dev-workloads
-        environment: dev
-        namespace: app              # 可省略，沿用 connectors.environments.dev.namespace
-        conversationId: my-chat    # 指向已有聊天，或创建可在 Web 查看独立会话
-        # sessionId: my-session    # 缺省沿用 conversationId
-        intervalMs: 300000          # 默认 5 分钟，最小 30 秒
-```
-
-未配置时不观察任何环境。两个 ID 都省略时使用 `environment:<watch-id>`；Session 与 Conversation 的路由规则与需求 Source 一致。
-每个 watch 只装配到指定 Session；关闭 Heartbeat 不关闭 Source。配置修改后重启生效，观察声明改变会静默建立新的基线。
+环境 Source 统一在 `source:environments` Session 中维护基线与调度，只观察一次，不随聊天 Session 数量重复采样。变化生成不带目标 sessionId 的 Input，Chief 根据已有会话近期关注与 Work 判断去向。关闭聊天 Heartbeat 不关闭环境观察；修改环境配置后重启生效，观察范围改变会静默建立新的基线。
 
 观察以 namespace 内的 Deployment、StatefulSet、DaemonSet 和无 Controller 的独立 Pod 为范围，ReplicaSet 用来追溯 Pod 到 Deployment 的归属。
 归属按 ownerReference 的 Controller UID 解析，不猜 Pod 名称前缀。Job/CronJob、独立 ReplicaSet 和自定义 Controller 的 Pod 不在此范围。
@@ -122,13 +109,13 @@ Pod 替换或镜像变化是事实，不能据此断言有人发布，更不能�
 
 需求 Source 按负责人和项目范围读取近期摘要，比较实体身份与观察指纹。新观察先持久化为 Input，再推进水位；中断后的重试依靠输入身份去重。已完成或关闭的需求不会创建新的待处理输入。
 
-每个 watch 默认使用 `source:<watch-id>` 作为 sessionId 和 conversationId，也可分别指定。仅配置已有 conversationId 时，sessionId 默认沿用它，适合与同 ID 的飞书 Session 共享上下文；显式指定不同 ID 时，两者的归属保存在该 Session 内。watch 只装配到指定 Session，创建其它聊天不会重复轮询。Host 校验 watch 的负责人范围后，通过 Plugin instance config 下发；重启时以当前配置替换旧 watch 声明。Source 不直接调用模型或创建 Task，Chief 根据已有委托选择询问、CRUD Work 或静默忽略。路由到已有飞书会话的消息才会沿该 Channel 投递，独立 Source 会话可在 Web 查看。
+需求 watch 默认使用 `source:<watch-id>` 作为 sessionId，也可指定已知聊天 Session。Source 只填写 sessionId，不填写 conversationId；Personal 管理该 Session 的 Conversation。watch 只装配到所属 Session，创建其它聊天不会重复轮询。Host 校验负责人范围后下发有效配置。Source 不直接调用模型或创建 Task，Chief 根据已有委托选择询问、CRUD Work 或静默忽略。
 
 Meego 的“我名下”按指定负责人字段中的稳定 user key 匹配，不按参与人或显示名。默认字段是当前节点处理人；项目若用单独的需求负责人字段，必须配置 `assigneeField`。`userKeys` 对开启的 watch 必填，避免意外观察整个项目。Meegle 单命令超时 20 秒、输出上限 4 MiB。
 
 Forge 的配置 key 是逻辑身份，`api_host` 可以覆盖 API 域名，`uids` 可选过滤 PR 作者。`GITHUB_TOKEN` / `GH_TOKEN`、`GITLAB_TOKEN` 优先于文件 token；没有凭证的 Forge 不启用。服务环境需能找到 `meegle` 并访问其登录态，不能只在交互 shell 中配置 PATH。
 
-飞书目标为 `feishu:<app-id>:<chat-id>`，可从入站日志的 conversationId 获取。机器人需要已经收到过该单聊的消息，才会向其投递。Chief 与 Work 模型分别由 `harnesses.chief` 和 `harnesses.pi` 配置，缺省时沿用 Pi 原生配置。
+飞书目标为 `feishu:<app-id>:<chat-id>`，可从入站日志的 sessionId 获取。机器人需要已经收到过该单聊的消息，才会向其投递。Chief 与 Work 模型分别由 `harnesses.chief` 和 `harnesses.pi` 配置，缺省时沿用 Pi 原生配置。
 
 当前 Meego 每个类别读取最近更新的 50 条，再筛选负责人；不保证覆盖高流量项目的全量变更。首次连接会把这批范围内尚未结束的条目交给 Chief；配置范围改变也会建立新的观察范围。后续仅在指纹变化时再次提交。尚未接 webhook、全量分页或 Forge 定时 Source；Forge 当前供 Chief 查询 PR 状态与评论。
 

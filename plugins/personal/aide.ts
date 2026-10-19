@@ -9,8 +9,11 @@ import { IncomingSchema, type Incoming, type Message } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { message, Store } from "./store.ts";
 import { workType } from "./resources.ts";
-import { CONVERSATION_TYPE, chiefTarget, digest } from "./chief-model.ts";
-import { conversationKey } from "../../src/host/conversation/store.ts";
+import { CONVERSATION_TYPE, INPUT_TYPE, chiefTarget, chiefRouterTarget, digest } from "./chief-model.ts";
+import { inboundMessage } from "./conversation-model.ts";
+import { ConversationStore, conversationKey } from "./conversation-store.ts";
+import { createPiAgent } from "../../agents/pi/agent.ts";
+import type { InputStore } from "../../src/host/input/store.ts";
 import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
@@ -30,28 +33,34 @@ export class Personal {
   private readonly session: SessionHandle;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly chiefConversations = new Map<string, string>();
+  private readonly hasSources: boolean;
   private readonly targets: { id: string; harness: string }[];
 
   constructor(private readonly options: { timezone: string }, private readonly log: Logger,
-    runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; watches: readonly { conversationId: string }[] }) {
+    runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; inputs: InputStore; watches: readonly { sessionId: string }[] }) {
     this.core = runtime.core;
     this.session = runtime.session;
     this.connectors = runtime.connectors;
     this.targets = runtime.targets;
     this.plugins = this.core.pluginManager!;
-    this.store = new Store(new PluginResourceStore({ session: this.session, pluginInstanceId: "personal" }),
-      this.plugins.resourceClient("personal"), this.plugins.conversations!);
-    this.heartbeat = new SessionHeartbeat(this.session, this.conversations, (id, conversationId) => {
+    const resources = new PluginResourceStore({ session: this.session, pluginInstanceId: "personal" });
+    const client = this.plugins.resourceClient("personal");
+    this.store = new Store(resources, client, new ConversationStore(this.id, resources, client, runtime.inputs));
+    const router = chiefRouterTarget(this.id);
+    this.targets.push({ id: router, harness: "chief" });
+    if (!this.session.meta.lanes[router]) this.session.setLane(router, { laneId: router, createdFor: { type: "session" }, harnessSessions: {} });
+    this.session.setHarnessTarget(router, { harnessTargetId: router, harness: "chief" });
+    this.heartbeat = new SessionHeartbeat(this.session, this.conversations, async (id, _conversationId) => {
       if (this.closed || !this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable for heartbeat input");
-      this.conversations.submit(id, { sessionId: this.id, conversationId, origin: "heartbeat", timezone: this.options.timezone,
+      await this.conversations.submit(id, { sessionId: this.id, origin: "heartbeat", timezone: this.options.timezone,
         text: "例行回顾：检查已有关注范围和相关工作，按需核实最新事实，判断有没有值得推进的下一步。没有值得处理的事情就保持安静。" });
-      this.wake(CONVERSATION_TYPE, conversationKey(conversationId));
-      this.log.info({ inputId: id, conversationId }, "Accepted heartbeat input");
+      this.wake(INPUT_TYPE, id);
+      this.log.info({ inputId: id, sessionId: this.id }, "Accepted heartbeat input");
     });
     const watches = runtime.watches;
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
     this.store.conversations.subscribe((conversation) => this.registerConversation(conversation.id));
-    for (const watch of watches) this.registerConversation(watch.conversationId);
+    this.hasSources = watches.length > 0;
   }
 
   private registerConversation(conversationId: string): void {
@@ -65,21 +74,23 @@ export class Personal {
 
   /** Personal binds a Chief session and its tools to one conversation; the adapter remains business-agnostic. */
   chiefSession(targetId: string, config: ChiefAgentOptions["config"]): PiSessionFactory {
+    if (targetId === chiefRouterTarget(this.id)) return (options) => createPiAgent({ ...options, config, scope: targetId,
+      nativeTools: [], systemPrompt: "You are Chief routing. Select relevant conversations from the supplied summaries. Return the requested JSON only. Do not execute actions." });
     const conversationId = this.chiefConversations.get(targetId);
     if (!conversationId) throw new Error("Unknown Chief target");
     const active = () => {
       const inputs = this.store.conversations.inputs().filter((item) =>
-        item.spec.conversationId === conversationId && item.status.phase === "running");
+        item.conversationId === conversationId && item.status.phase === "running");
       if (inputs.length !== 1 || inputs[0]!.status.question || inputs[0]!.status.quietReason) throw new Error("Chief is not accepting further mutations in this turn");
       return inputs[0]!;
     };
-    const tools = chiefTools(this.connectors, (question) => {
+    const tools = chiefTools(this.connectors, async (question) => {
       const input = active();
-      this.store.conversations.update(input, { question });
-    }, (quietReason) => {
+      await this.store.conversations.update(input, { question });
+    }, async (quietReason) => {
       const input = active();
       if (input.spec.origin === "channel") throw new Error("Channel input cannot be dismissed silently");
-      this.store.conversations.update(input, { quietReason });
+      await this.store.conversations.update(input, { quietReason });
     });
     return (options) => createChiefAgent({ ...options, config, work: this.work(conversationId),
       tools, beforeWorkMutation: () => { active(); } });
@@ -97,6 +108,7 @@ export class Personal {
   work(conversationId: string): WorkService { return new WorkService(this.store, conversationId, this.log); }
 
   private async startOnce(): Promise<void> {
+    if (this.hasSources) await this.conversations.ensure();
     await this.recoverInterrupted();
     await this.core.start();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin failed to start");
@@ -109,9 +121,9 @@ export class Personal {
   async recoverInterrupted(): Promise<void> {
     for (const input of this.store.conversations.inputs()) {
       if (input.status.phase !== "running" && input.status.phase !== "waiting") continue;
-      this.store.conversations.update(input, {
+      await this.store.conversations.update(input, {
         phase: "failed", question: null, messages: [...input.status.messages ?? [],
-          message(input.spec.conversationId, "上次处理已中断，可能已有部分操作生效。请核对后重新交办。")],
+          message(input.conversationId, "上次处理已中断，可能已有部分操作生效。请核对后重新交办。")],
       });
       this.log.warn({ inputId: input.metadata.name }, "Recovered interrupted Chief input without replay");
     }
@@ -127,7 +139,7 @@ export class Personal {
   private enqueue(type: ResourceType, id: string): Promise<void> {
     return this.plugins.enqueue({ aideSessionId: this.session.id, pluginInstanceId: "personal", namespace: "v1",
       resourceApiVersion: type.apiVersion, resourceKind: type.kind, resourceId: id,
-      ...(type.kind === CONVERSATION_TYPE.kind ? { resourceOwner: "aide" as const } : {}) });
+      ...(type.kind === INPUT_TYPE.kind ? { resourceOwner: "aide" as const } : {}) });
   }
 
   private wake(type: ResourceType, id: string): void {
@@ -163,13 +175,14 @@ export class Personal {
     }))].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
   }
 
-  private async submit(input: Incoming): Promise<Message> {
+  private async submit(incoming: Incoming): Promise<Message> {
+    const input = { ...incoming, conversationId: this.id };
+    await this.conversations.ensure();
     const id = digest([input.conversationId, input.id]);
     const previous = this.store.conversations.input(id);
     if (previous) return previous.status.messages?.[0] ?? message(input.conversationId, "已接收该消息");
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
     this.registerConversation(input.conversationId);
-    const inbound: Message = { ...message(input.conversationId, input.text), role: "user" };
     const pending = this.questions().filter((item) => item.conversationId === input.conversationId && item.request.status === "pending");
     const request = pending.length === 1 ? pending[0]!.request : undefined;
     if (request?.request.kind === "question" && request.request.questions.length === 1) {
@@ -183,23 +196,49 @@ export class Personal {
       if (!value && (!question.choices?.length || question.allowOther)) value = raw;
       if (value) {
         // Persist the reply identity before settling the Core Interaction. A redelivery cannot become a new command.
-        const resource = this.store.conversations.submit(id, { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel", replyTo: request.messageId }, { phase: "done", messages: [inbound] });
+        const resource = await this.acceptChannel(id, input, [], "done", request.messageId);
+        const inbound = resource.status.messages![0]!;
         const receipt = await this.core.resolveInteraction({ kind: "interaction_response", messageId: request.messageId },
           async () => ({ kind: "question", outcome: "answered", answers: { [question.questionId]: [value!] } }));
         if (!receipt.result) {
-          this.store.conversations.update(resource, { phase: "failed",
+          await this.store.conversations.update(this.conversations.input(id, this.id)!, { phase: "failed",
             messages: [inbound, message(input.conversationId, "这个问题已失效，答复没有继续执行。请重新交办。")] });
         }
         return inbound;
       }
       const notice = message(input.conversationId, "请先明确回复当前问题的选项（确认 / 拒绝），也可以从网页取消这次等待。");
-      this.store.conversations.submit(id, { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel" }, { phase: "done", messages: [inbound, notice] });
-      return inbound;
+      const accepted = await this.acceptChannel(id, input, [notice], "done", request.messageId);
+      return accepted.status.messages![0]!;
     }
-    this.store.conversations.submit(id, { conversationId: input.conversationId, text: input.text, timezone: this.options.timezone, origin: "channel" }, { messages: [inbound] });
+    const accepted = await this.acceptChannel(id, input, []);
     this.wake(CONVERSATION_TYPE, conversationKey(input.conversationId));
     this.log.info({ conversationId: input.conversationId, inputId: id }, "Accepted Chief input");
-    return inbound;
+    return accepted.status.messages![0]!;
+  }
+
+  private async acceptChannel(id: string, input: Incoming, messages: Message[], phase?: "done", replyTo?: string) {
+    const fact = await this.conversations.submit(id, { sessionId: this.id, text: input.text, timezone: this.options.timezone, origin: "channel", ...(replyTo ? { replyTo } : {}) });
+    const delivered = [inboundMessage(fact, this.id), ...messages.filter((message) => message.role !== "user")];
+    for (let attempt = 0; ; attempt++) {
+      const c = await this.conversations.ensure();
+      const ids = new Set(c.status.messages.map((m) => m.id));
+      const extra = delivered.filter((m) => !ids.has(m.id));
+      const attached = c.spec.inputIds.includes(id);
+      if (attached && !extra.length) break;
+      try {
+        await this.plugins.resourceClient("personal").replace(c, { ...c.spec, inputIds: [...new Set([...c.spec.inputIds, id])] }, {
+          ...c.status, processing: { ...c.status.processing, [id]: { ...c.status.processing[id], ...(phase ? { phase } : {}), messages: delivered } },
+          messages: [...c.status.messages, ...extra],
+        });
+        break;
+      } catch (error) {
+        if (attempt >= 4 || !/version|conflict/i.test(String(error))) throw error;
+      }
+    }
+    const latest = this.conversations.inputStore.get(id)!;
+    const c = this.conversations.resource(this.id)!;
+    if (!latest.status.routing) this.conversations.inputStore.update(latest, { routing: { phase: "done", reason: "Channel Session", targets: [{ sessionId: this.id, name: c.metadata.name, uid: c.metadata.uid }] } });
+    return this.conversations.input(fact.metadata.name, this.id)!;
   }
 
   async event(input: { id: string; conversationId: string; name: string; text: string }): Promise<number> {

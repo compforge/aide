@@ -19,7 +19,7 @@ export async function observeRequirements(context: Pick<PluginContext, "resource
     const name = digest([resource.metadata.uid, identity, fingerprint]);
     if (!await context.resources.get({ ...INPUT_TYPE, namespace: "aide-system", name })) {
       await context.resources.create<InputSpec, InputStatus>(INPUT_TYPE, { name, spec: {
-        conversationId: resource.spec.conversationId, origin: "source",
+        sessionId: resource.spec.sessionId, origin: "source",
         text: "发现分配给用户的需求或其变化。读取详情与相关工作，判断是否需要通知、询问或推进已有委托。",
         observation: { watch: resource.spec, requirement },
       } });

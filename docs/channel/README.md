@@ -9,13 +9,11 @@ Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、确定
 
 ## 输入、会话与回复
 
-Channel 提交用户消息时提供稳定 sessionId、conversationId 与消息去重身份；同一上下文沿用 sessionId，Core 按它创建或恢复执行作用域。新 Conversation 可以直接沿用 sessionId。Host 持久化 Message 和引用它的 Input，先返回接收回执，再由 Chief 异步处理。接收成功不代表模型已经回答，更不代表目标已完成。
+Channel 提交用户消息时提供稳定 sessionId 与消息去重身份，不需要理解 Personal 的 Conversation。飞书使用应用与聊天身份，Web 使用选中会话所属的 Session。Core 保存 Input，Personal 为该 Session 组织交流上下文；接收成功不代表模型已经回答或目标已经完成。
 
-Channel 决定自己的原生会话如何映射为 Conversation，不决定创建 Task 还是 Routine。Chief 普通回答直接进入消息流，需要跟进时才操作 Work。同一会话后续消息可以回答问题或补充已有工作。
+Personal 决定输入进入哪个 Conversation、是否创建 Work。普通回答直接进入消息流，需要持续跟进时才操作 Task / Routine。同一 Session 的后续消息可以回答问题或补充已有工作。Web 的 Conversation 列表是 Personal 的业务视图，可以查看飞书或 Source 会话。
 
-Source 也能提交 Input，但属于外部观察入口。它可使用独立 Conversation，或明确路由到已有 Channel 会话。Conversation 不由某一个页面独占：Web 可以查看飞书或 Source 会话，并从会话列表读取其 sessionId，继续提交到原 Session；回复是否送达飞书由 Feishu 的已有会话路由决定。
-
-当前会话划分用于组织上下文与工作，所有 Channel 共用单用户执行身份和 CLI 能力，不提供多用户权限隔离。
+Source 是外部观察入口，可以提交带目标 sessionId 或完全没有目标的 Input。Chief 路由后，在目标会话决定如何沟通；飞书投递使用已建立的聊天路由。
 
 ## 投递与进度
 

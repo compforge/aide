@@ -9,16 +9,16 @@ const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<
 const identity = { forge: text, path: text, number: Type.Integer({ minimum: 1 }) };
 
 /** ask/confirm stage intent; the Controller opens the original Core Interaction after the Pi turn settles. */
-export function chiefTools(connectors: ConnectorClient, ask: (question: ChiefQuestion) => void, dismiss: (reason: string) => void): ToolDefinition[] {
+export function chiefTools(connectors: ConnectorClient, ask: (question: ChiefQuestion) => void | Promise<void>, dismiss: (reason: string) => void | Promise<void>): ToolDefinition[] {
   return [
     tool({ name: "dismiss_observation", label: "Dismiss observation", description: "Record why a Source or heartbeat observation needs no user notification or follow-up. Only for Source or heartbeat input; then end this turn with a short internal summary.",
-      parameters: Type.Object({ reason: text }), async execute(_id, args, signal) { signal?.throwIfAborted(); dismiss(args.reason); return result({ notify: false }); } }),
+      parameters: Type.Object({ reason: text }), async execute(_id, args, signal) { signal?.throwIfAborted(); await dismiss(args.reason); return result({ notify: false }); } }),
     tool({ name: "ask", label: "Ask user", description: "Ask a durable question, then end this turn. Wait for the user's next answer before acting on it.",
       parameters: Type.Object({ title: text, prompt: text, choices: Type.Optional(Type.Array(Type.Object({ value: text, label: text }))) }),
-      async execute(_id, args, signal) { signal?.throwIfAborted(); ask({ kind: "ask", ...args }); return result({ waiting: true, instruction: "End this turn now. The controller will ask the user." }); } }),
+      async execute(_id, args, signal) { signal?.throwIfAborted(); await ask({ kind: "ask", ...args }); return result({ waiting: true, instruction: "End this turn now. The controller will ask the user." }); } }),
     tool({ name: "confirm", label: "Confirm with user", description: "Request a yes/no decision, then end this turn. Declining is a valid decision; never treat it as permission to proceed.",
       parameters: Type.Object({ title: text, prompt: text }),
-      async execute(_id, args, signal) { signal?.throwIfAborted(); ask({ kind: "confirm", ...args }); return result({ waiting: true, instruction: "End this turn now. The controller will ask the user." }); } }),
+      async execute(_id, args, signal) { signal?.throwIfAborted(); await ask({ kind: "confirm", ...args }); return result({ waiting: true, instruction: "End this turn now. The controller will ask the user." }); } }),
     tool({ name: "list_connectors", label: "List connectors", description: "List configured external systems without credentials.",
       parameters: Type.Object({}), async execute() { return result(await connectors.describe()); } }),
     tool({ name: "list_environments", label: "List environments", description: "List configured environment identities and aliases. Declarations do not prove reachability or health.",

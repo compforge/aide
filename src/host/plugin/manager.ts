@@ -4,8 +4,9 @@ import type { ControllerRegistration as RemoteRegistration, HostRequest } from "
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { emptyConnectors } from "../../connector-client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
-import { CONVERSATION_TYPE } from "@compforge/aide-plugin";
-import { ConversationStore } from "../conversation/store.ts";
+import { INPUT_TYPE } from "@compforge/aide-plugin";
+import { InputStore } from "../input/store.ts";
+import { scopedResources, type ResourceDirectory } from "./resource-directory.ts";
 import type { CommandContext } from "@compforge/aide-plugin";
 import {
   Controller,
@@ -148,6 +149,10 @@ export interface PluginToast {
 
 export interface ManagerOptions {
   readonly connectors?: ConnectorClient;
+  readonly inputs?: InputStore;
+  readonly resourceDirectory?: ResourceDirectory;
+  readonly say?: VerbOptions["say"];
+  readonly onResourceChange?: (change: ResourceClientChange) => void;
   /** 所有 Controller 合计可占用的执行容量；默认 1。 */
   maxTotalConcurrency?: number;
   /** Manager 与所有 Plugin 数据共享的 AideSession owner。 */
@@ -276,7 +281,9 @@ function pluginName(pluginId: string): string {
  * Plugin 域统一入口：注册和路由 Controller，并限制所有 Plugin 的进程总并发。
  */
 export class Manager {
-  readonly conversations?: ConversationStore;
+  readonly inputs?: InputStore;
+  private readonly resourceDirectory?: ResourceDirectory;
+  private readonly resourceChanged?: (change: ResourceClientChange) => void;
   /** Core installs its GVKs before any Plugin Binding can register. */
   private readonly resourceRegistry = new ResourceRegistry(AIDE_RESOURCE_TYPES);
   private readonly controllers = new Map<string, ManagedController>();
@@ -362,7 +369,7 @@ export class Manager {
       options.snapshot ??
       (() => emptyReconcileSnapshot(this.instances.session.id));
     this.verb = new Verb({
-      conversations: () => this.conversations,
+      say: options.say,
       connectors: this.connectors,
       session: options.session,
       capacity: this.capacity,
@@ -421,16 +428,18 @@ export class Manager {
       onDue: (scope, sources) =>
         this.enqueueCronSourceResources(scope, sources),
     });
+    this.resourceDirectory = options.resourceDirectory;
+    this.resourceChanged = options.onResourceChange;
     if (options.session) {
-      this.conversations = new ConversationStore(options.session);
+      this.inputs = options.inputs ?? new InputStore(options.session.dir);
       this.aideResources = new AideResourceIndex({
         session: options.session,
-        conversations: this.conversations,
+        inputs: this.inputs,
       });
       this.aideResourceProvider = new AideResourceProvider({
         session: options.session,
         turns: this.aideResources,
-        conversations: this.conversations,
+        inputs: this.inputs,
         ...(options.sessions === undefined ? {} : { sessions: options.sessions }),
         targets: () => options.harnessTargets ?? [],
         probeTarget: options.probeTarget,
@@ -460,9 +469,10 @@ export class Manager {
 
   resourceClient(pluginInstanceId: string) {
     const instance = this.instances.get(pluginInstanceId);
-    return createResourceClient(new PluginResourceStore({ session: this.instances.session, pluginInstanceId }),
-      (change) => this.handlePluginResourceChange(change),
+    const local = createResourceClient(new PluginResourceStore({ session: this.instances.session, pluginInstanceId }),
+      (change) => { this.handlePluginResourceChange(change); this.resourceChanged?.(change); },
       (type) => this.resourceRegistry.registerMaterialized(instance.pluginId, type), this.aideResourceProvider);
+    return scopedResources(local, this.instances.session.id, pluginInstanceId, this.resourceDirectory);
   }
 
   registerController<TSpec, TStatus>(
@@ -1087,7 +1097,7 @@ export class Manager {
   }
 
   private bindRunnerController(instance: PluginInstance, runner: PluginRunnerClient, definition: RemoteRegistration, resources: import("@compforge/aide-plugin").ResourceClient): () => void {
-    const builtin = [AIDE_TURN_RESOURCE_TYPE, CONVERSATION_TYPE].some((type) => resourceTypeKey(type) === resourceTypeKey(definition.resourceType));
+    const builtin = [AIDE_TURN_RESOURCE_TYPE, INPUT_TYPE].some((type) => resourceTypeKey(type) === resourceTypeKey(definition.resourceType));
     const release = builtin ? () => {} : this.resourceRegistry.registerController(instance.pluginId, definition.resourceType);
     const store = new PluginResourceStore({ session: this.instances.session, pluginInstanceId: instance.pluginInstanceId });
     const scope: ReconcileScope = { aideSessionId: instance.aideSessionId, pluginInstanceId: instance.pluginInstanceId, namespace: "v1",
@@ -1127,7 +1137,7 @@ export class Manager {
     pluginController: PluginResourceController<TSpec, TStatus>,
   ): () => void {
     if (
-      [AIDE_TURN_RESOURCE_TYPE, CONVERSATION_TYPE].some((type) =>
+      [AIDE_TURN_RESOURCE_TYPE, INPUT_TYPE].some((type) =>
         resourceTypeKey(pluginController.resourceType) === resourceTypeKey(type))
     ) {
       return this.bindAideResourceController(
@@ -1297,8 +1307,8 @@ export class Manager {
         resourceVersion: String(resource.metadata.revision),
         creationTimestamp: resource.metadata.observedAt,
       }),
-      spec: Object.freeze({}) as TSpec,
-      status: resource.data as TStatus,
+      spec: (resource.kind === "Input" ? (resource.data as import("@compforge/aide-plugin").Resource<unknown, unknown>).spec : Object.freeze({})) as TSpec,
+      status: (resource.kind === "Input" ? (resource.data as import("@compforge/aide-plugin").Resource<unknown, unknown>).status : resource.data) as TStatus,
     });
   }
 
@@ -1648,7 +1658,7 @@ export class Manager {
       ) {
         continue;
       }
-      void controller.enqueue({
+      void this.enqueue({
         ...controller.scope,
         resourceId: resource.metadata.resourceId,
       }).catch(() => {

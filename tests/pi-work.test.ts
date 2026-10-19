@@ -1,5 +1,5 @@
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
-import { ConversationStore } from "../src/host/conversation/store.ts";
+import { ConversationStore, seedInput } from "./conversation-fixture.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

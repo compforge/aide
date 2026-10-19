@@ -8,6 +8,7 @@ import { SessionStore } from "../src/host/store/store.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
+import { ConversationStore } from "./conversation-fixture.ts";
 import { Store } from "../plugins/personal/store.ts";
 import { WorkService } from "../plugins/personal/work.ts";
 import { conversationView } from "../src/channel/view.ts";
@@ -33,7 +34,8 @@ test("Work tool -> Runner Watch -> Connector verb -> direct ask -> Harness uses 
   });
   const manager = core.pluginManager!;
   const resources = new PluginResourceStore({ session, pluginInstanceId: "fixture" });
-  const store = new Store(resources, manager.resourceClient("fixture"), manager.conversations!);
+  const conversations = new ConversationStore(session);
+  const store = new Store(resources, manager.resourceClient("fixture"), conversations);
   const work = new WorkService(store, "group-a", pino({ level: "silent" }));
   try {
     await core.start();
@@ -50,8 +52,8 @@ test("Work tool -> Runner Watch -> Connector verb -> direct ask -> Harness uses 
     await manager.settled();
     const observer = { apiVersion: "tests.aide.dev/v1alpha1", kind: "WorkObserver" };
     expect(resources.get(observer, "observer", "v1/project/coordination").status).toMatchObject({ answer: "继续", count: 1 });
-    const projection: ChannelService = { sessions: () => [{ id: session.id, core, conversations: manager.conversations!, heartbeat: { config: { enabled: false, intervalSeconds: 3600 } } }],
-      findConversation: (id) => id === "group-a" ? { id: session.id, core, conversations: manager.conversations!, heartbeat: { config: { enabled: false, intervalSeconds: 3600 } } } : undefined,
+    const projection: ChannelService = { sessions: () => [{ id: session.id, core, conversations: conversations, heartbeat: { config: { enabled: false, intervalSeconds: 3600 } } }],
+      findConversation: (id) => id === "group-a" ? { id: session.id, core, conversations: conversations, heartbeat: { config: { enabled: false, intervalSeconds: 3600 } } } : undefined,
       subscribe: (listener) => core.subscribe(listener), messages: () => [], questions: () => [], invocations: () => manager.listHarnessInvocations(), conversationIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
     expect(conversationView(projection, "group-a").blocks.some((block) => block.type === "execution")).toBe(true);
     expect(conversationView(projection, "group-b").blocks).toHaveLength(0);

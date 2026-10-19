@@ -1,4 +1,3 @@
-import type { ConversationStore } from "../conversation/store.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { dispatchConnector, emptyConnectors } from "../../connector-client.ts";
 import { newId } from "../event/ids.ts";
@@ -41,7 +40,7 @@ interface ActiveExecution {
 }
 
 export interface VerbOptions {
-  conversations?: () => ConversationStore | undefined;
+  say?: (context: ExecutionScope, text: string) => Promise<{ messageId: string }>;
   session?: VerbSession;
   capacity: ReconcileCapacity;
   connectors?: ConnectorClient;
@@ -64,7 +63,7 @@ export interface VerbOptions {
 /** Plugin typed verbs and the live executions suspended while those verbs settle. */
 export class Verb {
   private readonly connectors: ConnectorClient;
-  private readonly conversations: VerbOptions["conversations"];
+  private readonly say: VerbOptions["say"];
   private readonly session?: VerbSession;
   private readonly connectorCalls = new Map<string, { pluginInstanceId: string }>();
   private readonly capacity: ReconcileCapacity;
@@ -85,7 +84,7 @@ export class Verb {
 
   constructor(options: VerbOptions) {
     this.session = options.session;
-    this.conversations = options.conversations;
+    this.say = options.say;
     for (const event of options.session?.ledger.read() ?? []) {
       if (event.kind === "connector.started" && event.source.type === "plugin") {
         this.connectorCalls.set(event.payload.callId, { pluginInstanceId: event.source.pluginInstanceId });
@@ -244,20 +243,14 @@ export class Verb {
     request: VerbRequest,
   ): Promise<VerbResponse> {
     if (request.verb === "say") {
-      const conversations = this.conversations?.();
-      const conversationId = context.conversationId;
-      if (!conversations || !conversationId || !conversations.get(conversationId)) throw new Error("say requires an existing Conversation in this Session");
+      if (!this.say) throw new Error("No Channel message sink is installed");
       if (typeof request.input.text !== "string" || !request.input.text.trim()) throw new Error("say text must not be empty");
-      const message = { id: newId("m"), conversationId, at: this.now().toISOString(), role: "aide" as const, text: request.input.text, workId: null };
-      if (context.inputId) {
-        const input = conversations.input(context.inputId);
-        if (!input || input.spec.conversationId !== conversationId) throw new Error("say Input belongs to another Conversation");
-        conversations.update(input, { messages: [...input.status.messages ?? [], message] });
-      } else conversations.archive(conversationId, [message]);
+      const value = await this.say(context, request.input.text);
       this.log?.({ level: "info", source: "plugin", component: "verb.say", pluginInstanceId: context.pluginInstanceId,
-        message: "Message persisted for Channel delivery", attributes: { conversationId, messageId: message.id, executionId: context.executionId } });
-      return { state: "success", value: { messageId: message.id } };
+        message: "Message persisted for Channel delivery", attributes: { messageId: value.messageId, executionId: context.executionId } });
+      return { state: "success", value };
     }
+
     if (request.verb === "connector") {
       const callId = newId("cc");
       // @spec Persist intent before dispatch; restart records an unknown outcome instead of replaying external effects.

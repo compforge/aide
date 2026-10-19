@@ -32,7 +32,7 @@ export class Controllers {
   register(id: string, definition: Controller<unknown, unknown>): void {
     if (this.registrations.has(id)) throw new Error(`Duplicate Controller: ${id}`);
     validateSources(definition.sources, new Date());
-    const builtin = definition.resourceType.apiVersion === "aide.dev/v1alpha1" && ["Conversation", "Turn"].includes(definition.resourceType.kind);
+    const builtin = definition.resourceType.apiVersion === "aide.dev/v1alpha1" && ["Input", "Turn"].includes(definition.resourceType.kind);
     if (builtin && definition.sources?.some((source) => source.type === "resource")) throw new Error("Resource Sources cannot materialize builtin resources");
     this.registrations.set(id, { definition, abort: new AbortController(), attempts: new Map(),
       scope: { aideSessionId: this.session.aideSessionId, pluginInstanceId: this.pluginInstanceId, namespace: "v1",

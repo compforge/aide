@@ -129,6 +129,7 @@ export type HostRequest =
       readonly method: "resource.create";
       readonly type: ResourceType;
       readonly init: {
+        readonly sessionId?: string;
         readonly name: string;
         readonly namespace?: ResourceNamespace;
         readonly labels?: Readonly<Record<string, string>>;
