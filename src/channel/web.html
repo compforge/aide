@@ -25,13 +25,30 @@
   #messages { flex: 1; overflow: auto; padding: 0 12px 24px 0; }
   .message { padding: 16px 18px; background: white; border: 1px solid #e1e6dc; border-radius: 12px; margin: 12px 0; }
   .message.user { background: #e8eee3; margin-left: 10%; }
-  .message p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0 0; line-height: 1.65; }
+  .markdown { white-space: normal; overflow-wrap: anywhere; line-height: 1.65; }
+  .message-body { margin-top: 8px; }
+  .markdown > :first-child { margin-top: 0; } .markdown > :last-child { margin-bottom: 0; }
+  .markdown p, .markdown ul, .markdown ol, .markdown blockquote, .markdown pre, .markdown table { margin: .7em 0; }
+  .markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 { margin: 1em 0 .45em; line-height: 1.4; letter-spacing: normal; }
+  .markdown h1 { font-size: 1.4em; } .markdown h2 { font-size: 1.25em; } .markdown h3 { font-size: 1.1em; }
+  .markdown ul, .markdown ol { padding-left: 1.6em; } .markdown li + li { margin-top: .25em; }
+  .markdown li > p { margin: .3em 0; }
+  .markdown a { color: #285f43; text-decoration: underline; text-underline-offset: 2px; }
+  .markdown blockquote { border-left: 3px solid #bdcbbb; padding-left: 1em; color: #68776c; }
+  .markdown code { font-family: ui-monospace, monospace; font-size: .9em; background: #edf1e8; border-radius: 4px; padding: .15em .3em; }
+  .markdown pre { white-space: pre; overflow: auto; background: #edf1e8; border-radius: 8px; padding: 12px; }
+  .markdown pre code { padding: 0; background: none; }
+  .markdown table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+  .markdown th, .markdown td { border: 1px solid #d8dfd5; padding: 6px 10px; text-align: left; }
+  .markdown th { background: #edf1e8; }
+  .markdown hr { border: 0; border-top: 1px solid #d8dfd5; margin: 1em 0; }
   #activity { margin: 12px 0; padding: 16px 18px; border: 1px solid #cbd9cc; border-radius: 12px; background: #f0f5ed; }
   #activity[hidden] { display: none; }
   .activity-heading { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #42634c; }
   .activity-heading::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #64886b; animation: pulse 1.4s ease-in-out infinite; }
   .activity-block { margin-top: 12px; font-size: 13px; }
   .activity-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; margin: 6px 0; }
+  .activity-content.markdown { white-space: normal; }
   .activity-block.thought .activity-content, .activity-block.tool .activity-content { max-height: 220px; overflow: auto; color: #68776c; }
   .activity-block summary { cursor: pointer; }
   .execution-history { margin: 12px 0; padding: 12px 18px; border: 1px solid #e1e6dc; border-radius: 12px; }
@@ -91,7 +108,7 @@
   </aside>
 </main>
 <script type="module">
-  import { applyPatch, parsePatchEvent } from '/agentue.js';
+  import { applyPatch, parsePatchEvent, renderMarkdown } from '/agentue.js';
   const $ = (id) => document.getElementById(id);
   const conversationId = new URL(location.href).searchParams.get('conversation') || 'me';
   const query = '?conversationId=' + encodeURIComponent(conversationId);
@@ -102,6 +119,12 @@
     if (text !== undefined) node.textContent = text;
     if (className) node.className = className;
     return node;
+  }
+  const markdownSources = new WeakMap();
+  function updateMarkdown(node, source) {
+    if (markdownSources.get(node) === source) return;
+    node.innerHTML = renderMarkdown(source);
+    markdownSources.set(node, source);
   }
   async function api(path, options) {
     const response = await fetch(path, options);
@@ -157,7 +180,9 @@
     for (const block of history.filter((block) => !block.parent_id)) {
       if (block.type === 'message') {
         const node = element('article', undefined, 'message ' + block.role);
-        node.append(element('div', (block.role === 'user' ? '你' : 'Aide') + ' · ' + new Date(block.at).toLocaleTimeString(), 'muted'), element('p', block.content));
+        const body = element('div', undefined, 'markdown message-body');
+        updateMarkdown(body, block.content);
+        node.append(element('div', (block.role === 'user' ? '你' : 'Aide') + ' · ' + new Date(block.at).toLocaleTimeString(), 'muted'), body);
         $('history').append(node);
       } else if (block.type === 'execution') {
         const node = element('details', undefined, 'execution-history'); node.dataset.blockId = block.id; node.open = expanded.get(block.id) ?? false;
@@ -187,7 +212,11 @@
     if (kind === 'tool') node.querySelector('summary').textContent = text + ' · ' + (toolLabels[status] || status || '状态未知');
     const content = node.querySelector('.activity-content');
     const value = kind === 'tool' ? detail || '' : text;
-    if (content.textContent !== value) content.textContent = value;
+    if (kind === 'tool') {
+      if (content.textContent !== value) content.textContent = value;
+    } else {
+      content.classList.add('markdown'); updateMarkdown(content, value);
+    }
   }
   function renderActivity(activity) {
     const area = $('activity');

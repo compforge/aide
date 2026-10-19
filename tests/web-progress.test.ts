@@ -50,7 +50,9 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const bundle = await fetch(base + "/agentue.js");
   assert.equal(bundle.status, 200);
   assert.match(bundle.headers.get("content-type")!, /javascript/);
-  const browserSdk = await import(`data:text/javascript;base64,${Buffer.from(await bundle.text()).toString("base64")}`) as typeof import("@compforge/agentue/ui");
+  const browserSdk = await import(`data:text/javascript;base64,${Buffer.from(await bundle.text()).toString("base64")}`) as typeof import("../src/channel/web-sdk.ts");
+  assert.match(browserSdk.renderMarkdown("## 网页回复\n\n- **已完成**"), /<h2>网页回复<\/h2>[\s\S]*<strong>已完成<\/strong>/);
+  assert.doesNotMatch(browserSdk.renderMarkdown('<script>alert(1)</script>'), /<script>/);
   async function connect(conversationId: string) {
     const controller = new AbortController(); connections.push(controller);
     const response = await fetch(`${base}/stream?conversationId=${conversationId}`, { signal: controller.signal });
