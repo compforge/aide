@@ -1,3 +1,4 @@
+import "./pi-memory-fixture.ts";
 import { resolveChiefConfig } from "../src/host/harness/chief/config.ts";
 import { conversationView } from "../src/channel/view.ts";
 import { loadConfig } from "../src/config.ts";

@@ -20,7 +20,7 @@ const adapter = createHarnessAdapter(
 
 Chief 的模型选择与能力包配置位于 `harnesses.chief`，完整来源、优先级和同步流程见 [配置](../configuration.md)。
 启动装配解析模型定义、认证来源和能力包，并将有效配置注入 `chiefSession`；Personal 只绑定业务工具。显式 model 覆盖 Pi 定义，缺省规则见配置文档。`AIDE_MODEL` 控制默认 Codex Target，不改变 Chief 模型。
-Chief 只加载已同步的声明包中的 skills，不继承用户或项目的自动 skill 发现；角色规则与 Work 工具仍由代码绑定。
+Chief 加载已同步的声明包中的 skills，以及内置 Hermes 扩展提供的记忆工具与自维护 skills；不继承用户或项目的自动扩展、skill 包发现。角色规则与 Work 工具仍由代码绑定。
 原生会话由 Pi SDK 存放在自己的默认目录，与通用 Pi 一样；Chief 角色通过 scope 区分，不靠另建 chief-sessions 目录区分。连续输入复用该 Lane × Target 的原生会话，服务重启后 Core 把保存的 resumeState 交回 Adapter；新的 Input 创建新 Turn。原生恢复范围绑定 conversationId，不能把另一会话或通用 Pi 的会话文件当成当前上下文。
 
 ## 提示词与工具
@@ -36,33 +36,43 @@ Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 
 提示词表达判断策略，工具边界保证持久化与会话范围。Work 写工具在提出问题后暂停接受修改，直到用户答复进入续轮；这项约束不能只依赖模型记住提示。
 
-## 当前上下文与记忆边界
+## 上下文与记忆
 
-当前每个输入建立独立 Lane；同一输入内的问答续轮保留原生 Pi 会话。Controller 读取当前 Conversation 的近期消息和工作回复作为上下文，Chief 还可以通过 Work / Connector 工具按需补充事实。
+Aide 组合开源产品的记忆能力，不自行实现记忆提取、存储、检索或整理。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。Personal 只调用 Chief Harness，不感知它是否具有记忆，也不提供 Memory Service、资源或工具。
 
-现有持久数据承担不同职责：
+连续输入复用 Conversation 对应的固定 Lane 和原生 Pi 会话；Pi 负责原生历史与压缩，Controller 仍补充当前输入、近期消息与工作回复。长期记忆独立于原生会话，由 Hermes 的工具和生命周期钩子维护，重建原生会话不会清空记忆。Task / Routine 仍是工作状态的权威来源。
 
-| 数据 | 当前用途 |
-| --- | --- |
-| Conversation / Message | 交流历史和近期上下文 |
-| Task / Routine | 已承担工作的目标、状态与执行记录 |
-| Session Ledger | 执行过程、展示与诊断 |
-| Pi 原生会话 | 当前输入及问答续轮的模型上下文与恢复 |
+Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Aide 不另建摘要任务，也不通过 Personal 直接调用模型做记忆维护。
 
-这些记录提供历史来源，但当前没有专门的长期记忆提取、修订与召回机制，也没有自动跨 Conversation 召回。会话文件存在不等于 Chief 已能持续记住用户偏好或在新输入中检索所有历史。
+### 存储与配置
 
-## 优化重点
+默认根目录是 `~/.pi/agent`，Hermes 在模块加载时读取进程级 `PI_CODING_AGENT_DIR`，可用它切换根目录。只修改工厂的 `agentDir` 不会改变 Hermes 的目录；需要在启动 Aide 前设置环境变量，不能按会话修改进程环境。
 
-以下是后续设计方向，本次未新增记忆存储或检索实现：
+```text
+~/.pi/agent/
+├── hermes-memory-config.json       # Hermes 原生配置
+├── pi-hermes-memory/
+│   ├── MEMORY.md                   # 长期事实的 Markdown 存储/导出
+│   ├── USER.md                     # 用户画像
+│   ├── STANDING.md                 # 用户明确固定的要求
+│   ├── sessions.db                 # SQLite 记忆与会话检索
+│   └── skills/                     # 扩展维护的技能
+├── projects-memory/<project>/      # Hermes 按工作目录识别的项目记忆
+└── sessions/                       # Pi 原生会话
+```
 
-- **提示词组织**：明确稳定角色规则、动态事实和输入内容各自的位置，收敛 Agent 与 Controller 中重复的判断规则。用真实场景检查普通问答是否过度创建工作、工作关联是否准确、何时应询问用户。
-- **上下文选择**：围绕当前输入选择相关工作与事实，保留来源和时效，减少无关历史；上下文不足时补查，而不是靠模型猜测。
-- **长期记忆**：确定哪些稳定偏好、工作背景与长期关注值得保存，何时写入、修订、遗忘和召回。Task / Routine 仍是工作状态的权威来源，避免记忆另存一套过期进展。
-- **跨会话使用**：把可共享的长期背景与各会话的即时交流区分开。是否共享、共享什么需要明确设计，不把不同群或不同 Source 的完整聊天直接拼在一起。
-- **效果验证**：通过可回放场景检验正确关联工作、必要追问、纠正过期记忆，以及是否减少遗漏和无效打扰。持续记录效果与成本，再决定需要增加哪种机制。
+`hermes-memory-config.json` 中的 `memoryDir` 可单独更改全局记忆目录；其它选项和文件由 [上游配置文档](https://github.com/chandra447/pi-hermes-memory#configuration) 定义。依赖随 `npm install` 安装，不需要另运行 `pi install` 或 `aide sync`。
 
-具体记忆形态与存储尚未选定。先优化一个真实工作场景的判断与跟进效果，保持通用 Harness 接口稳定，将个人助手策略留在 Chief / Personal。
+此处全局记忆由同一进程根目录下的 Chief 共享，项目记忆按 Hermes 的 cwd 规则划分，**不按 Aide Session 或 Conversation 隔离**。不同群的原生对话上下文仍独立，但扩展的长期记忆和会话检索可能跨会话使用。不要把 Conversation 分组理解为记忆访问边界。
+
+### 扩展生命周期
+
+PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_start`；Pi 在执行中驱动提示词、工具和压缩钩子；close 先取消正在执行的 Turn，再等待 `session_shutdown`，最后 dispose 原生会话。这样 Hermes 能完成整理与数据库清理。扩展加载或启动失败会阻止本次 Harness open，并记录错误；运行期钩子错误通过 `pi.extension` 日志报告。
+
+自动学习和压缩/退出整理可能产生额外模型调用与等待，遵循 Hermes 自己的策略、期限和失败处理。这些内部维护调用不作为 Personal Work 或独立 Aide Turn 展示。
 
 ## 验证
 
-现有测试覆盖 Chief Work CRUD、会话恢复边界，以及 Source → Chief → 用户决定 → Work 的装配。模型与外部服务使用替身，可以证明工具和执行契约，不能证明提示词效果或尚未实现的长期记忆能力。真实 Channel 验收见 [E2E](../e2e.md)。
+`tests/pi-agent.test.ts` 使用真实 Pi SDK、Hermes 扩展、临时 Markdown/SQLite 存储和模拟模型，验证 Chief 工具与策略注入、跨全新原生会话写入和召回，以及通用 Pi 不自动获得记忆工具。Adapter 的扩展启动/退出与失败处理也有契约验证。测试关闭扩展的自动模型整理，避免影响脚本化模型请求。
+
+现有 Source → Chief → 用户决定 → Work 验证继续覆盖 Personal 装配。以上不能证明真实模型会正确选择值得保存的事实，或后台提炼、压缩后召回的实际质量；这些效果需要真实使用评估。真实 Channel 验收见 [E2E](../e2e.md)。
