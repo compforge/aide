@@ -10,7 +10,7 @@ PiAdapter 处理 open、sendTurn、cancel、close、事件归一和恢复句柄�
 
 ## 装配与模型配置
 
-Task / Routine 默认使用通用 Pi。Aide 在启动时从 `harnesses.pi.model` 和 `harnesses.pi.packages` 准备模型与技能；能力包通过 `aide harness sync pi` 显式同步，与 Chief 分别存放。
+当根级 `defaultHarness` 选择 `pi`（缺省值）时，Task / Routine 使用通用 Pi。Aide 在启动时从 `harnesses.pi.model` 和 `harnesses.pi.packages` 准备模型与技能；能力包通过 `aide harness sync pi` 显式同步，与 Chief 分别存放。
 
 通用 Pi 也可以直接通过注册表创建，不需要 Personal：
 

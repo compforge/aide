@@ -13,18 +13,20 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 不因值为空而恢复默认。`null`、错误类型或不支持的字段报错，不通过默认值掩盖错误。
 数组整体取配置值，不与另一份文件中的数组拼接。错误指出字段路径和错误类别，不回显配置值。
 
-顶层配置只有三个命名空间：
+顶层 `defaultHarness` 是 Aide 的执行选择，模块配置分别位于以下三个命名空间：
 
 | 配置 | 所有者与用途 |
 |---|---|
 | `connectors` | Host 装配全局环境目录、需求与 Forge 访问能力 |
-| `harnesses` | Host 装配 Agent 的模型选择和扩展能力；当前支持 `pi` 与 `chief` |
+| `harnesses` | Host 装配 Agent 的模型选择和扩展能力；支持 `pi`、`chief`、`codex`、`claude`、`dsh` |
 | `plugins` | 各 Plugin 校验和使用自己的业务配置；例如 Personal watches |
 
 没有声明的 Connector/watch/package 列表默认为空。Connector 和 Plugin 的具体字段由所属实现校验，
 不放宽顶层或 Harness 的字段检查。配置不是 Plugin 之间传递凭证的通道。
 
 ```yaml
+defaultHarness: pi
+
 connectors:
   environments:
     dev:
@@ -50,6 +52,36 @@ plugins:
   personal:
     watches: []
 ```
+
+## 默认执行 Harness
+
+根级 `defaultHarness` 缺省为 `pi`，可选 `pi`、`codex`、`claude`、`dsh`。这是 Aide 的装配选择，
+`harnesses.<name>` 只声明对应实现的配置。Chief 始终负责接话与调度，其角色不受默认工作执行选择影响。
+未知值、空值和 `chief` 均报错；代码不将无效选择静默降级为 Pi。
+
+启动时准备 Chief 与选中的执行 Harness，生成固定的默认 Target。只有 Pi 被选中时才解析执行 Pi 的模型、技能与同步收据；
+未选中的模块配置仍需满足字段结构。CLI 的登录态、原生配置与可用性由相应提供方负责，启动解析不代表远端连通。
+修改选择后重启生效；已有 Aide 工作和历史保留，不同 Harness 的原生恢复绑定会清除，中断待核对的工作不会自动重试。
+
+例如，使用 Codex 执行 Task / Routine：
+
+```yaml
+defaultHarness: codex
+harnesses:
+  codex:
+    command: [codex, app-server]
+    approvalReviewer: auto_review
+    model: your-codex-model
+```
+
+| Harness 配置 | 字段 |
+|---|---|
+| `harnesses.pi` / `harnesses.chief` | `model` 对象、`packages` 列表，见下文 |
+| `harnesses.codex` | `command` 非空参数数组、`approvalReviewer`（`user` / `auto_review`）、`model` 字符串 |
+| `harnesses.claude` | `executable`、`model` 字符串；显式 executable 优先于启动环境的 `AIDE_CLAUDE_BIN` |
+| `harnesses.dsh` | `dshBin`、`profile`、`dshHome`、`provider`、`model`、`reasoningEffort`、`patches`、`maxTokens` |
+
+省略 CLI 的模型时沿用原生提供方配置；各模块保留已有命令默认值。
 
 ## Pi / Chief 默认值与外部配置
 
@@ -92,7 +124,7 @@ Chief 和通用 Pi 各自解析配置；同一模型需分别声明或使用 YAM
 包来源使用 Pi 的 Git/npm/本地目录格式；本地路径写成绝对路径、`~/...` 或 `./...` / `../...`，
 后两者相对所选配置文件目录解析，不随服务工作目录改变。
 
-Task / Routine 的默认 Target 使用通用 Pi，由 `harnesses.pi` 决定模型和能力包。
+当 `defaultHarness: pi` 时，Task / Routine 使用的模型和能力包由 `harnesses.pi` 决定。
 外部 CLI Adapter 的原生配置由其自身接口管理。
 服务端口、工作目录、时区、飞书和代理仍使用[部署文档](deployment.md)中的环境变量；
 它们与当前 YAML 字段没有重叠覆盖关系。
