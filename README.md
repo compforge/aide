@@ -28,7 +28,7 @@ AIDE_CWD=/path/to/work AIDE_TIMEZONE=Asia/Shanghai npm start
 
 网页左侧选择会话，中间显示消息、流式回复和执行过程，右侧查看该会话的事项与安排。已结束的思考与工具过程可以展开，刷新后仍保留。默认会话为 `me`；`/?conversation=另一会话名` 可以进入指定会话。
 
-配置 `AIDE_FEISHU_APP_ID` 和 `AIDE_FEISHU_APP_SECRET` 后，可通过飞书机器人单聊收发消息，无需公网回调地址。创建机器人与权限配置见 [Feishu Channel](docs/channel/feishu.md)。
+配置 `AIDE_FEISHU_APP_ID` 和 `AIDE_FEISHU_APP_SECRET` 后，可通过飞书机器人单聊收发消息，无需公网回调地址。开启 CardKit 权限后，Chief 的思考、进展和回复可在同一张流式卡片中展示。创建机器人与权限配置见 [Feishu Channel](docs/channel/feishu.md)。
 
 查看版本：
 

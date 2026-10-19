@@ -5,7 +5,7 @@ Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、确定
 | Channel | 输入与会话划分 | 输出与交互 |
 | --- | --- | --- |
 | [Web](web.md) | URL 选择 conversationId，左侧列表切换已有会话 | 消息、流式进展、历史执行、事项与安排；回答问题和原生 Harness 请求 |
-| [Feishu](feishu.md) | 机器人应用 ID + 单聊 chat ID 确定会话 | 文字回复、Chief 问答、工作结果与安排通知 |
+| [Feishu](feishu.md) | 机器人应用 ID + 单聊 chat ID 确定会话 | 流式卡片展示 Chief 思考与回复、问答续轮、工作结果与安排通知 |
 
 ## 输入、会话与回复
 
@@ -21,7 +21,7 @@ Source 也能提交 Input，但属于外部观察入口。它可使用独立 Con
 
 正式回复与工作结果是持久 Message，Channel 按自己的投递记录发送。失败重试不应重新执行已经完成的业务。客户端断开也不取消服务端 Task / Routine。
 
-思考、工具调用和文字增量属于执行进展，来自 Harness 事件与 Ledger 投影。Web 展示这些内容；Feishu 当前仅投递业务消息，不逐 token 推送。进展不写成新的用户 Input，也不触发 Work。
+思考、工具调用和文字增量属于执行进展，来自 Harness 事件与 Ledger 投影。Web 使用 Markdown 展示；Feishu 使用原生流式卡片，合并更新思考与正文，最终收口到同一张卡片。进展不写成新的用户 Input，也不触发 Work。
 
 Chief 的问答可通过两个 Channel 回答。当前原生 Harness 授权和 Hook 信任通过 Web 处理；网页的 Interaction 收件区属于整个 Session，跨 Conversation 可见。
 

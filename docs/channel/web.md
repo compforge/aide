@@ -32,7 +32,7 @@ Pi Adapter 将 `text_delta` / `thinking_delta` 映射到现有 `agent_message_ch
 
 Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职责独立。每次连接的 seq 属于该次交付，不保存 UI patch 日志或按 Last-Event-ID 重放；执行事件仍由既有 Ledger 持久化。
 
-进度不写入 Channel 出站 Message，因此不会让飞书收到逐 token 消息。历史过程直接从既有 Session Ledger 重放形成的投影读取，没有另一份轨迹存储。执行时展开实时内容，结束后默认折叠；同页后续消息更新保留用户的展开选择。刷新或重启后仍可展开查看旧轮次，未正常结束的执行标为中断。
+进度不写入 Channel 出站 Message，与 Feishu 的卡片更新分别由各自 Channel 渲染。历史过程直接从既有 Session Ledger 重放形成的投影读取，没有另一份轨迹存储。执行时展开实时内容，结束后默认折叠；同页后续消息更新保留用户的展开选择。刷新或重启后仍可展开查看旧轮次，未正常结束的执行标为中断。
 
 `tests/pi-agent.test.ts` 使用真实 Pi SDK 和受控模型 SSE，验证完成前已有思考和正文增量、最终文本不重复。`tests/web-progress.test.ts` 使用真实 Host / Runner / HTTP 和模拟 Harness，下载 HTTP 提供的浏览器 bundle，用其真实 AgentUE reducer 消费 SSE，验证会话隔离、增量更新、重连恢复、断开不取消、最终答复与过程历史同时保留、后续轮次分组、重开 Aide 后的 Ledger 恢复、错误收口，以及进度不进入出站消息。
 

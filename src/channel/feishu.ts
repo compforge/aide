@@ -5,6 +5,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 import type { Aide } from "../../plugins/personal/aide.ts";
 import { IncomingSchema, MessageSchema, type Message } from "../../plugins/personal/model.ts";
+import { progressCard, cardContent, cardThought, type FeishuProgressReader, type FeishuProgress } from "./feishu-card.ts";
 import type { FeishuTransport } from "./feishu-client.ts";
 
 const EventSchema = z.object({
@@ -12,7 +13,11 @@ const EventSchema = z.object({
   message: z.object({ message_id: z.string().min(1), chat_id: z.string().min(1),
     chat_type: z.string(), message_type: z.string(), content: z.string() }),
 });
+const CardSchema = z.object({ cardId: z.string(), sent: z.boolean(), sequence: z.number().int(),
+  streaming: z.boolean(), think: z.string(), content: z.string(), signature: z.string() });
+type Card = z.infer<typeof CardSchema>;
 const StateSchema = z.object({
+  cards: z.record(z.string(), CardSchema).default({}),
   pending: z.array(IncomingSchema), received: z.array(z.string()),
   chats: z.array(z.string()), notices: z.array(MessageSchema), delivered: z.array(z.string()),
 });
@@ -32,13 +37,14 @@ export class FeishuChannel {
   private outbound?: Promise<void>;
   private stopped = false;
   private retryAt = 0;
+  private readonly cardRetry = new Map<string, number>();
 
   constructor(home: string, appId: string, private readonly aide: Pick<Aide, "receive" | "messages">,
-    private readonly transport: FeishuTransport, private readonly log: Logger) {
+    private readonly transport: FeishuTransport, private readonly log: Logger, private readonly progress?: FeishuProgressReader) {
     this.prefix = `feishu:${appId}:`;
     this.path = join(home, "channels", `feishu-${createHash("sha256").update(appId).digest("hex").slice(0, 16)}.json`);
     this.state = existsSync(this.path) ? StateSchema.parse(JSON.parse(readFileSync(this.path, "utf8")))
-      : { pending: [], received: [], chats: [], notices: [], delivered: [] };
+      : { cards: {}, pending: [], received: [], chats: [], notices: [], delivered: [] };
   }
 
   async start(): Promise<void> {
@@ -106,6 +112,20 @@ export class FeishuChannel {
   }
 
   private async drainOutbox(): Promise<void> {
+    if (this.transport.cards && this.progress) {
+      for (const chatId of this.state.chats) {
+        const conversationId = this.prefix + chatId;
+        for (const view of this.progress(conversationId)) {
+          if (this.stopped) return;
+          if (Date.now() < (this.cardRetry.get(view.id) ?? 0)) continue;
+          try { await this.updateCard(chatId, view); }
+          catch {
+            this.cardRetry.set(view.id, Date.now() + 10_000);
+            this.log.warn({ inputId: view.id, conversationId }, "Feishu progress update failed; final text delivery remains available. Check cardkit:card:write scope and network");
+          }
+        }
+      }
+    }
     const messages = [...this.aide.messages(), ...this.state.notices]
       .filter((message) => message.role === "aide" && message.conversationId.startsWith(this.prefix))
       .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
@@ -115,7 +135,7 @@ export class FeishuChannel {
       const parts = textParts(message.text);
       for (const [index, text] of parts.entries()) {
         if (this.stopped) return;
-        const id = createHash("sha256").update(`${this.prefix}${message.id}:${index}`).digest("hex").slice(0, 32);
+        const id = this.deliveryId(message.id, index);
         if (this.state.delivered.includes(id)) continue;
         try {
           await this.transport.send(chatId, text, id);
@@ -128,6 +148,70 @@ export class FeishuChannel {
         this.log.info({ messageId: message.id, part: index, conversationId: message.conversationId }, "Feishu message delivered");
       }
     }
+  }
+
+  /**
+   * @spec Card operations share a persisted increasing sequence; only a finalized card acknowledges business Message delivery.
+   * @link docs/channel/feishu.md
+   */
+  private async updateCard(chatId: string, view: FeishuProgress): Promise<void> {
+    const transport = this.transport.cards!;
+    const live = view.phase === "running" || view.phase === "queued";
+    let card = this.state.cards[view.id];
+    // Completed history without a live card uses the existing durable text outbox.
+    if (!card && !live && view.phase !== "waiting") return;
+    if (!card) {
+      const initial = { ...view, content: "", think: "", overflow: false };
+      card = { cardId: await transport.create(progressCard(initial, true)), sent: false, sequence: 0,
+        streaming: true, think: cardThought(initial), content: cardContent(initial), signature: "" };
+      this.saveCard(view.id, card);
+    }
+    if (!card.sent) {
+      await transport.send(chatId, card.cardId, this.deliveryId(`card:${view.id}`, 0));
+      card.sent = true; this.saveCard(view.id, card);
+      this.log.info({ inputId: view.id, conversationId: this.prefix + chatId }, "Feishu progress card delivered");
+    }
+    const signature = JSON.stringify(view);
+    if (card.signature === signature) return;
+    const operation = async (run: (sequence: number, id: string) => Promise<void>) => {
+      card.sequence++; this.saveCard(view.id, card);
+      await run(card.sequence, this.deliveryId(`card:${view.id}`, card.sequence));
+    };
+    if (live) {
+      if (!card.streaming) {
+        await operation((sequence, id) => transport.settings(card.cardId, true, sequence, id));
+        await operation((sequence, id) => transport.update(card.cardId, progressCard(view, true), sequence, id));
+        card.streaming = true; card.think = cardThought(view); card.content = cardContent(view);
+      } else {
+        if (card.think !== cardThought(view)) {
+          await operation((sequence, id) => transport.content(card.cardId, "think", cardThought(view), sequence, id));
+          card.think = cardThought(view); this.saveCard(view.id, card);
+        }
+        if (card.content !== cardContent(view)) {
+          await operation((sequence, id) => transport.content(card.cardId, "content", cardContent(view), sequence, id));
+          card.content = cardContent(view); this.saveCard(view.id, card);
+        }
+      }
+    } else {
+      if (card.streaming) {
+        await operation((sequence, id) => transport.settings(card.cardId, false, sequence, id));
+        card.streaming = false; this.saveCard(view.id, card);
+      }
+      await operation((sequence, id) => transport.update(card.cardId, progressCard(view, false), sequence, id));
+      if (!view.overflow) {
+        const receipts = view.messageIds.map((id) => this.deliveryId(id, 0));
+        this.save({ ...this.state, delivered: [...new Set([...this.state.delivered, ...receipts])] });
+      }
+      this.log.info({ inputId: view.id, phase: view.phase }, "Feishu progress card settled");
+    }
+    card.signature = signature; this.saveCard(view.id, card);
+  }
+
+  private saveCard(id: string, card: Card): void {
+    this.save({ ...this.state, cards: { ...this.state.cards, [id]: card } });
+  }
+  private deliveryId(messageId: string, part: number): string {
+    return createHash("sha256").update(`${this.prefix}${messageId}:${part}`).digest("hex").slice(0, 32);
   }
 
   async close(): Promise<void> {

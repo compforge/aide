@@ -13,7 +13,16 @@ export function feishuConfig(env: NodeJS.ProcessEnv): FeishuConfig | undefined {
   return parsed.data;
 }
 
+export interface FeishuCardTransport {
+  create(card: unknown): Promise<string>;
+  send(chatId: string, cardId: string, id: string): Promise<void>;
+  content(cardId: string, elementId: string, content: string, sequence: number, id: string): Promise<void>;
+  settings(cardId: string, streaming: boolean, sequence: number, id: string): Promise<void>;
+  update(cardId: string, card: unknown, sequence: number, id: string): Promise<void>;
+}
+
 export interface FeishuTransport {
+  cards?: FeishuCardTransport;
   start(receive: (event: unknown) => void): Promise<void>;
   send(chatId: string, text: string, id: string): Promise<void>;
   close(): void;
@@ -64,6 +73,33 @@ export function feishuTransport(config: FeishuConfig, log: Logger): FeishuTransp
         throw new Error(`Feishu message.create failed (code ${response.code ?? "missing"})`);
       }
     },
+    cards: {
+      async create(card) {
+        const response = await client.cardkit.v1.card.create({ data: { type: "card_json", data: JSON.stringify(card) } });
+        if (response.code !== 0 || !response.data?.card_id) throw new Error(`Feishu card.create failed (code ${response.code ?? "missing"})`);
+        return response.data.card_id;
+      },
+      async send(chatId, cardId, id) {
+        const response = await client.im.message.create({ params: { receive_id_type: "chat_id" },
+          data: { receive_id: chatId, msg_type: "interactive", content: JSON.stringify({ type: "card", data: { card_id: cardId } }), uuid: id } });
+        if (response.code !== 0 || !response.data?.message_id) throw new Error(`Feishu card.send failed (code ${response.code ?? "missing"})`);
+      },
+      async content(cardId, elementId, content, sequence, id) {
+        checkCard(await client.cardkit.v1.cardElement.content({ path: { card_id: cardId, element_id: elementId }, data: { content, sequence, uuid: id } }), "content");
+      },
+      async settings(cardId, streaming, sequence, id) {
+        checkCard(await client.cardkit.v1.card.settings({ path: { card_id: cardId },
+          data: { settings: JSON.stringify({ config: { streaming_mode: streaming } }), sequence, uuid: id } }), "settings");
+      },
+      async update(cardId, card, sequence, id) {
+        checkCard(await client.cardkit.v1.card.update({ path: { card_id: cardId },
+          data: { card: { type: "card_json", data: JSON.stringify(card) }, sequence, uuid: id } }), "update");
+      },
+    },
     close() { ws.close({ force: true }); },
   };
+}
+
+function checkCard(response: { code?: number }, operation: string): void {
+  if (response.code !== 0) throw new Error(`Feishu card.${operation} failed (code ${response.code ?? "missing"})`);
 }
