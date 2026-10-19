@@ -1,18 +1,12 @@
-import { z } from "zod";
-
-const text = z.string().trim().min(1);
-const EnvironmentWatchSchema = z.object({
-  id: text, environment: text, namespace: text.optional(),
-  sessionId: text.max(200).optional(), conversationId: text.max(200).optional(),
-  intervalMs: z.number().int().min(30_000).default(300_000),
-}).strict();
-export type EnvironmentWatch = Omit<z.infer<typeof EnvironmentWatchSchema>, "sessionId" | "conversationId"> & { sessionId: string; conversationId: string };
-
-export function parseEnvironmentWatches(config: Readonly<Record<string, unknown>> = {}): EnvironmentWatch[] {
-  const watches = z.array(EnvironmentWatchSchema).parse(config.environmentWatches ?? []).map((watch) => ({ ...watch,
-    sessionId: watch.sessionId ?? watch.conversationId ?? `environment:${watch.id}`,
-    conversationId: watch.conversationId ?? watch.sessionId ?? `environment:${watch.id}`,
-  }));
-  if (new Set(watches.map((item) => item.id)).size !== watches.length) throw new Error("Duplicate environment watch id");
-  return watches;
+import type { EnvironmentDefinition } from "@compforge/aide-plugin";
+export const ENVIRONMENT_SESSION = "source:environments";
+export interface EnvironmentSourceSpec { environment: string; namespace: string; intervalMs: number }
+/** Personal derives observation scopes from configured access; no user-authored destination/watch list. */
+export function environmentSources(environments: readonly EnvironmentDefinition[], skip: (name: string, reason: string) => void = () => {}): EnvironmentSourceSpec[] {
+  return environments.flatMap((e) => {
+    if (e.kind !== "kubernetes") { skip(e.name, "Not Kubernetes"); return []; }
+    if (e.host?.transport === "ssh") { skip(e.name, "SSH Kubernetes observation is unsupported"); return []; }
+    if (!("namespace" in e) || !e.namespace) { skip(e.name, "No configured namespace"); return []; }
+    return [{ environment: e.name, namespace: e.namespace, intervalMs: 300_000 }];
+  });
 }

@@ -404,7 +404,7 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview,
       if (!draft || draft.text !== text) {
         const conversations = await api('/conversations');
         const sessionId = conversations.find((item) => item.id === conversationId)?.sessionId || conversationId;
-        draft = { id: crypto.randomUUID(), sessionId, conversationId, text };
+        draft = { id: crypto.randomUUID(), sessionId, text };
       }
       await api('/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(draft) });
       draft = null; $('input').value = ''; $('notice').textContent = '已接收，后续进展会显示在这里。';

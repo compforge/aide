@@ -13,9 +13,9 @@ const EventSchema = IncomingSchema.omit({ text: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
 
-const HeartbeatSchema = IncomingSchema.pick({ sessionId: true, conversationId: true }).extend({ enabled: z.boolean() }).strict();
+const HeartbeatSchema = z.object({ sessionId: z.string().min(1), conversationId: z.string().min(1) }).extend({ enabled: z.boolean() }).strict();
 
-const DeleteWorkSchema = IncomingSchema.pick({ id: true, conversationId: true }).extend({
+const DeleteWorkSchema = z.object({ id: z.string().min(1), conversationId: z.string().min(1) }).extend({
   revision: z.number().int().positive(),
 }).strict();
 

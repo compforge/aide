@@ -109,7 +109,7 @@ export class FeishuChannel {
     // Group normalization yields; concurrent duplicate deliveries must still persist only once.
     if (this.stopped) throw new Error("Feishu channel is stopping");
     if (this.state.received.includes(id)) return;
-    const input = IncomingSchema.safeParse({ id, sessionId: conversationId, conversationId, text });
+    const input = IncomingSchema.safeParse({ id, sessionId: conversationId, text });
     this.save({ ...this.state,
       pending: input.success ? [...this.state.pending, input.data] : this.state.pending,
       notices: input.success ? this.state.notices : [...this.state.notices,
@@ -133,11 +133,11 @@ export class FeishuChannel {
       let failure: Message | undefined;
       try {
         await this.aide.receive(input);
-        this.log.info({ messageId: input.id, conversationId: input.conversationId }, "Feishu input routed");
+        this.log.info({ messageId: input.id, conversationId: input.sessionId }, "Feishu input routed");
       } catch {
         if (this.stopped) return;
-        failure = this.notice(input.id, input.conversationId, "这条请求处理失败。请查看网页中的事项状态，再发一条消息要求重试或继续。");
-        this.log.error({ messageId: input.id, conversationId: input.conversationId }, "Feishu input failed; explicit user retry required");
+        failure = this.notice(input.id, input.sessionId, "这条请求处理失败。请查看网页中的事项状态，再发一条消息要求重试或继续。");
+        this.log.error({ messageId: input.id, conversationId: input.sessionId }, "Feishu input failed; explicit user retry required");
       }
       this.save({ ...this.state, pending: this.state.pending.slice(1),
         notices: failure ? [...this.state.notices, failure] : this.state.notices });

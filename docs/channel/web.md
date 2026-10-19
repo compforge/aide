@@ -65,7 +65,7 @@ Web 页面与 HTTP 调用共用服务入口。提交消息后先返回持久化�
 ```sh
 curl -s http://127.0.0.1:7433/messages \
   -H 'content-type: application/json' \
-  -d '{"id":"msg-1","sessionId":"me","conversationId":"me","text":"读取当前项目 README，告诉我如何启动"}'
+  -d '{"id":"msg-1","sessionId":"me","text":"读取当前项目 README，告诉我如何启动"}'
 
 curl -s 'http://127.0.0.1:7433/conversations'
 curl -s 'http://127.0.0.1:7433/messages?conversationId=me&role=all'

@@ -2,11 +2,11 @@ import { resolve } from "node:path";
 import type { Logger } from "pino";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { Personal } from "../plugins/personal/aide.ts";
-import { parseEnvironmentWatches } from "../plugins/personal/environment-config.ts";
+import { environmentSources, ENVIRONMENT_SESSION } from "../plugins/personal/environment-config.ts";
+import { InputStore } from "./host/input/store.ts";
 import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
-import { observationNamespace } from "../connectors/environments/workloads.ts";
 import { parseWatches, validateWatchScopes } from "../plugins/personal/source-config.ts";
-import { chiefTarget } from "../plugins/personal/chief-model.ts";
+import { chiefTarget, chiefRouterTarget } from "../plugins/personal/chief-model.ts";
 import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
 import { Connectors } from "../connectors/index.ts";
 import type { AideConfig, DefaultHarness } from "./config.ts";
@@ -34,7 +34,8 @@ export class Aide {
   private readonly active = new Map<string, Personal>();
   private readonly listeners = new Set<() => void>();
   private readonly watches: ReturnType<typeof parseWatches>;
-  private readonly environmentWatches: ReturnType<typeof parseEnvironmentWatches>;
+  private readonly environmentSources: ReturnType<typeof environmentSources>;
+  private readonly inputs: InputStore;
   private readonly connectors: ConnectorClient;
   private starting?: Promise<void>;
   private closed = false;
@@ -45,19 +46,15 @@ export class Aide {
     const config = options.config;
     this.watches = parseWatches(config?.plugins.personal);
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
-    this.environmentWatches = parseEnvironmentWatches(config?.plugins.personal).map((watch) => {
-      const environment = environments.find((item) => item.name === watch.environment || item.aliases?.includes(watch.environment));
-      if (!environment) throw new Error(`Watch ${watch.id}: unknown environment ${watch.environment}`);
-      return { ...watch, environment: environment.name, namespace: observationNamespace(environment, watch.namespace) };
-    });
+    this.environmentSources = environmentSources(environments, (name, reason) => this.log.info({ environment: name, reason }, "Environment observation skipped"));
+    this.inputs = new InputStore(home);
     validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
     this.connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
     this.storage = new SessionStore(home);
     for (const meta of this.storage.listSessions()) this.session(meta.aideSessionId);
-    for (const watch of [...this.watches, ...this.environmentWatches]) {
-      const scope = this.session(watch.sessionId);
-      this.claimConversation(scope, watch.conversationId);
-    }
+    for (const watch of this.watches) this.session(watch.sessionId);
+    if (this.environmentSources.length) this.session(ENVIRONMENT_SESSION);
+
   }
 
   sessions(): readonly Personal[] { return [...this.active.values()]; }
@@ -82,12 +79,21 @@ export class Aide {
       instances.create({ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin" });
     }
     instances.replaceConfig("personal", { watches: this.watches.filter((watch) => watch.sessionId === id),
-      environmentWatches: this.environmentWatches.filter((watch) => watch.sessionId === id) });
+      environmentSources: id === ENVIRONMENT_SESSION ? this.environmentSources : [] });
     const packages = new Map([["aide.personal@0.1.0", new URL("../plugins/personal/plugin.ts", import.meta.url).href]]);
     let application: Personal;
     const core = new CoreSession({ session,
       controller: { mentionBudgetChars: 0, createAdapter: this.options.createAdapter, resolveTarget: (id) => targets.find((item) => item.id === id) },
-      plugins: { instances, connectors, harnessTargets: targets, selectedHarnessTargetId: () => targetId,
+      plugins: { instances, connectors, harnessTargets: targets, inputs: this.inputs,
+        resourceDirectory: { sessions: () => [...this.active.keys()], client: (sessionId, pluginId) => {
+          const scope = this.active.get(sessionId); if (!scope) throw new Error(`Unknown Session: ${sessionId}`);
+          return scope.plugins.resourceClient(pluginId);
+        } },
+        onResourceChange: (change) => application?.conversations.changed(change),
+        say: (context, text) => {
+          if (!context.conversationId) throw new Error("Personal say requires Conversation context");
+          return application.conversations.say(context.conversationId, context.inputId, text);
+        }, selectedHarnessTargetId: () => targetId,
         harnessInvocationGate: () => "auto_approve", pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => {
           const entryUrl = packages.get(`${pluginId}@${version}`);
@@ -124,7 +130,7 @@ export class Aide {
       this.log.info({ sessionId: id, previousCwd: previous?.cwd, cwd }, "Execution directory changed; cleared native Harness bindings");
     }
     application = new Personal({ timezone: this.options.timezone }, this.log.child({ sessionId: id }),
-      { core, session, connectors, targets, watches: [...this.watches, ...this.environmentWatches].filter((watch) => watch.sessionId === id) });
+      { core, session, connectors, targets, inputs: this.inputs, watches: this.watches.filter((watch) => watch.sessionId === id) });
     this.active.set(id, application);
     core.subscribe(() => this.notify());
     application.conversations.subscribe(() => this.notify());
@@ -133,35 +139,34 @@ export class Aide {
     return application;
   }
 
-  private claimConversation(scope: Personal, conversationId: string): void {
+  private async claimConversation(scope: Personal, conversationId: string): Promise<void> {
     const owner = this.findConversation(conversationId);
     if (owner && owner !== scope) throw new Error(`Conversation ${conversationId} belongs to Session ${owner.id}`);
-    if (!scope.conversations.get(conversationId)) scope.conversations.archive(conversationId, []);
+    if (!scope.conversations.get(conversationId)) await scope.conversations.ensure(conversationId);
   }
 
-  async receive(raw: Incoming) {
+  async receive(raw: unknown) {
     const input = IncomingSchema.parse(raw);
     const scope = this.session(input.sessionId);
-    this.claimConversation(scope, input.conversationId);
+    await this.claimConversation(scope, input.sessionId);
     await this.start();
     return scope.receive(input);
   }
 
-  async event(input: Incoming & { name: string }): Promise<number> {
+  async event(input: Incoming & { name: string; conversationId?: string }): Promise<number> {
     const scope = this.session(input.sessionId);
-    this.claimConversation(scope, input.conversationId);
+    await this.claimConversation(scope, input.sessionId);
     await this.start(); await scope.start();
-    return scope.event(input);
+    return scope.event({ ...input, conversationId: input.conversationId ?? input.sessionId });
   }
 
   work(conversationId: string) {
     const scope = this.findConversation(conversationId) ?? this.session(conversationId);
-    this.claimConversation(scope, conversationId);
     return scope.work(conversationId);
   }
 
   chiefSession(targetId: string, config: Parameters<Personal["chiefSession"]>[1]) {
-    const scope = this.sessions().find((item) => item.conversationIds().some((id) => chiefTarget(id) === targetId));
+    const scope = this.sessions().find((item) => chiefRouterTarget(item.id) === targetId || item.conversationIds().some((id) => chiefTarget(id) === targetId));
     if (!scope) throw new Error(`Unknown Chief target: ${targetId}`);
     return scope.chiefSession(targetId, config);
   }
@@ -185,8 +190,7 @@ export class Aide {
   private tick(): void {
     if (this.closed) return;
     for (const scope of this.sessions()) {
-      try { scope.heartbeat.tick(); }
-      catch (err) { this.log.error({ err, sessionId: scope.id }, "Session heartbeat failed"); }
+      void scope.heartbeat.tick().catch((err) => this.log.error({ err, sessionId: scope.id }, "Session heartbeat failed"));
     }
   }
 
@@ -198,7 +202,15 @@ export class Aide {
       this.heartbeatTimer.unref();
     });
   }
-  async settled(): Promise<void> { await this.start(); await Promise.all(this.sessions().map((scope) => scope.settled())); }
+  async settled(): Promise<void> {
+    await this.start();
+    for (;;) {
+      const before = JSON.stringify([this.inputs.list(), this.sessions().flatMap((s) => s.conversations.list())]);
+      await Promise.all(this.sessions().map((scope) => scope.settled()));
+      const after = JSON.stringify([this.inputs.list(), this.sessions().flatMap((s) => s.conversations.list())]);
+      if (before === after) break;
+    }
+  }
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;

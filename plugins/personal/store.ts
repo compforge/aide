@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
 import type { ResourceClient, ResourceNamespace } from "@compforge/aide-plugin";
 import { WorkSchema, validateTrigger, type Message, type Work } from "./model.ts";
-import { ConversationStore } from "../../src/host/conversation/store.ts";
+import { ConversationStore } from "./conversation-store.ts";
 
 import { WORK_TYPES, workType, toWork, type WorkResource, type WorkSpec, type WorkStatus, type Delivery } from "./resources.ts";
 const delivery = (): Delivery => ({ messages: [], inputs: [], events: [] });
@@ -63,7 +63,7 @@ export class Store {
   /** @spec Deleting work retains its channel outbox and accepted-input receipts. In-flight results cannot recreate it. */
   async delete(id: string): Promise<void> {
     const current = this.getResource(id);
-    this.conversations.archive(current.spec.conversationId, current.status.messages, current.status.inputs);
+    await this.conversations.archive(current.spec.conversationId, current.status.messages, current.status.inputs);
     // Archive first: a crash can duplicate retained messages, but cannot lose a receipt.
     await this.client.delete(current, id, current.metadata.namespace as ResourceNamespace);
   }
@@ -88,8 +88,8 @@ export class Store {
     else await this.client.create(type, { name: id, spec, status });
   }
 
-  reply(conversationId: string, messages: Message[], key: string): void {
-    this.conversations.archive(conversationId, messages, [{ key, responseId: messages.at(-1)!.id }]);
+  async reply(conversationId: string, messages: Message[], key: string): Promise<void> {
+    await this.conversations.archive(conversationId, messages, [{ key, responseId: messages.at(-1)!.id }]);
   }
 }
 

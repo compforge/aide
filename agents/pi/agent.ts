@@ -10,6 +10,7 @@ export interface PiAgentOptions {
   config: PiConfig;
   sessionFile?: string;
   tools?: ToolDefinition[];
+  nativeTools?: string[];
   /** Explicit bundled extensions; ambient extension discovery remains disabled. */
   extensionPaths?: string[];
   /** Host-bound scope prevents resuming a session with different application tools/context. */
@@ -48,7 +49,7 @@ export async function createPiAgent(options: PiAgentOptions): Promise<AgentSessi
   const tools = options.tools ?? [];
   const { session } = await createAgentSession({ cwd, agentDir, ...(manager ? { sessionManager: manager } : {}), modelRuntime,
     settingsManager: settings, resourceLoader: loader, model,
-    tools: ["read", "bash", "edit", "write", "grep", "find", "ls", ...tools.map((tool) => tool.name), ...extensionTools], customTools: tools });
+    tools: [...(options.nativeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls"]), ...tools.map((tool) => tool.name), ...extensionTools], customTools: tools });
   if (!session.model) { session.dispose(); throw new Error("Pi has no configured model; configure Pi auth/models or select a model"); }
   if (!manager) session.sessionManager.appendCustomEntry("aide.agent-scope", { scope: options.scope ?? "pi" });
   return session;

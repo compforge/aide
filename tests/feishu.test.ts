@@ -180,7 +180,7 @@ test("Feishu accepts nullable permission-restricted user IDs and still requires 
   const channel = new FeishuChannel(home, "cli_null_ids", {
     receive: async (input) => {
       received.push(input);
-      return { ...input, role: "user", at: new Date().toISOString(), workId: null };
+      return { ...input, conversationId: input.sessionId, role: "user", at: new Date().toISOString(), workId: null };
     }, messages: () => [],
   }, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });

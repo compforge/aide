@@ -75,6 +75,7 @@ export class WorkService {
 
   async create(definition: WorkDefinition): Promise<Work> {
     const work = newWork(this.conversationId, definition);
+    await this.store.conversations.ensure(this.conversationId);
     await this.store.save(work);
     this.log.info({ workId: work.id, conversationId: this.conversationId, kind: work.kind }, "Work tool created work");
     return work;

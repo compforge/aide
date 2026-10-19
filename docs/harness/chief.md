@@ -96,3 +96,9 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 `tests/pi-agent.test.ts` 使用真实 Pi SDK、Hermes 扩展、临时 Markdown/SQLite 存储和模拟模型，验证 Chief 工具与策略注入、跨全新原生会话写入和召回，以及通用 Pi 不自动获得记忆工具。Adapter 的扩展启动/退出与失败处理也有契约验证。测试关闭扩展的自动模型整理，避免影响脚本化模型请求。
 
 现有 Source → Chief → 用户决定 → Work 验证继续覆盖 Personal 装配。以上不能证明真实模型会正确选择值得保存的事实，或后台提炼、压缩后召回的实际质量；这些效果需要真实使用评估。真实 Channel 验收见 [E2E](../e2e.md)。
+
+## 输入路由
+
+Chief 在处理无明确去向的 Input 时使用单独的路由调用。Personal 提供候选会话的近期摘要及关联 Work 标题、状态；模型只返回目标会话和理由，不携带 Work、文件或 CLI 执行工具，也不加载会话长期记忆。每次路由使用独立 Lane，避免把多个群的摘要混入某个群的持续对话上下文。
+
+路由结果由 ReconcileInput 校验并持久化，再通过资源 Update 追加 Input。目标 Conversation 的 Chief 沿用原有 Harness 会话和记忆机制，独立判断通知、询问或推进工作。

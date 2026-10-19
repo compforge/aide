@@ -26,7 +26,7 @@ Personal 的“需求 Source”是一项业务能力：它用 RequirementSource 
 
 ## Verb 与 Harness
 
-Reconcile 通过 `ctx.verbs` 请求 say、ask、confirm、draft、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。say 在关联 Conversation 中保存普通 Message，不建立 Interaction 或等待用户；成功表示持久化，投递由 Channel 负责。ask/confirm 保存 Interaction，draft/harness 按交互结果发起 HarnessInvocation；Connector verb 直接执行。插件只需表达意图、期限和目标，不处理提供方原生协议。
+Reconcile 通过 `ctx.verbs` 请求 say、ask、confirm、draft、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。say 通过应用装配的持久消息出口保存普通 Message；Personal 将其保存在关联 Conversation 的 outbox，不建立 Interaction 或等待用户；成功表示持久化，投递由 Channel 负责。ask/confirm 保存 Interaction，draft/harness 按交互结果发起 HarnessInvocation；Connector verb 直接执行。插件只需表达意图、期限和目标，不处理提供方原生协议。
 
 等待 verb 时释放 Controller 和 Runner 容量，同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。拒绝确认是正常业务答案；取消、超时和失败需要插件自行决定业务结果。
 
@@ -40,7 +40,8 @@ Harness 返回执行结束不等于资源目标完成。结果校验、下一步
 
 | Controller | 观察对象 | 业务职责 |
 | --- | --- | --- |
-| Chief | Host 内置 Conversation 投影 | 串行消费 Input，调用 Chief Harness，回复、询问或操作 Work |
+| Chief 路由 | Host 内置 Input | 判断目标，更新 Conversation 资源 |
+| Chief 会话 | Personal Conversation | 串行消费 Input，调用 Chief Harness，回复、询问或操作 Work |
 | Requirement Source | RequirementSource | 按关注范围获取需求变化，提交 Input 并推进水位 |
 | Task | Task | 推进有限目标，达到目标后结束 |
 | Routine | Routine | 执行本轮，继续等待时间或事件 |

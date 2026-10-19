@@ -103,7 +103,7 @@ const decision = await execution.verbs.confirm({
 
 Controllers use `execution.verbs.connectors({ timeoutMs })` for connector actions. Other components may use `context.connectors` directly. Connector verbs do not create an Interaction; timeout ends the wait without promising cancellation of the underlying provider operation.
 
-`say({ text })` persists an ordinary Message in the execution's associated Conversation without opening an Interaction or waiting for delivery. With an inputId, it also associates the message with that Input. Use `execution.withContext({ conversationId, inputId })` to select the context.
+`say({ text })` persists an ordinary Message through the application message sink without opening an Interaction or waiting for delivery. Personal uses its Conversation outbox. With an inputId, it also associates the message with that Input. Use `execution.withContext({ conversationId, inputId })` to select the context.
 
 `ask` and `confirm` collect a decision. `draft` lets the user edit proposed input; `harness` requests execution. Draft and Harness requests pass through a durable Interaction gate, which host policy may approve automatically. Only an approved or submitted action creates a HarnessInvocation.
 

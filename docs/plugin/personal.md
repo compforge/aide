@@ -15,25 +15,30 @@ Source 和 Heartbeat 提供重新判断的机会。已有委托决定可以继�
 ## 主流程
 
 ```text
-Channel 用户消息 ──┐
-Heartbeat 定时回顾 ──┤
-                  ├→ Input → Conversation → Chief Controller → Chief Harness
-Source 外部观察 ──┘                              │                  │
-                                                 │ ask / confirm    ├→ 直接回复 / 忽略观察
-                                                 ↓                  └→ Work 工具
-                                            用户决定                    │
-                                                 └→ 继续判断      Task / Routine
-                                                                       │
-                                                              各自 Reconcile → Harness
+Channel / Source / Heartbeat → Input（可选 sessionId）
+                                ↓
+                        Chief ReconcileInput
+                                ↓ 资源 Update
+                    零个、一个或多个 Conversation
+                                ↓
+                    Chief ReconcileConversation
+                                ↓
+                直接回答 / say / ask / confirm / Work
+                                                 ↓
+                                  Task / Routine Reconcile
 ```
 
 Chief 是业务角色。Chief Controller 消费输入、组织上下文并续接问答；Chief Harness 执行 `agents/chief/` 中的 Agent，使用通用 Pi 能力以及 Personal 工具。Task / Routine 按根级 `defaultHarness` 选择执行实现，缺省为通用 Pi。Chief 的提示词、上下文和记忆优化方向见 [Chief Harness](../harness/chief.md)，插件机制见 [Plugin](README.md)。
 
 ## 输入与上下文
 
-入口先确定 Aide Session，Personal 在其中处理业务。Chief 观察 Host 内置 Conversation 的变化，按会话串行消费 Input，并复用该 Conversation 的固定 Lane 和 Chief Target。一个会话同时只有一个活跃输入；其它输入排队，避免争用同一份 Work 工具绑定。等待某个会话的用户或 Harness 时，其它会话可以继续。
+Input 由 Core 独立持久化，Conversation 是 Personal 的普通资源。Channel / Source 只需提供已知的 sessionId；没有目标的外部观察也能进入 Chief。Personal 为聊天 Session 建立默认 Conversation，按会话串行处理输入。
 
-Input 与 Work 有不同生命周期。普通提问可以处理完就回复，只有有限目标或持续职责才进入 Work。Channel 与 Source 决定输入所属会话，具体映射见 [Channel](../channel/README.md) 和 [Connector 与 Source](../connector/README.md)；内置对象的存储由 [Kernel](../kernel.md) 管理。
+Chief 有两个 Reconcile。ReconcileInput 负责路由：目标 Session 只有一个会话时直接关联；需要判断时，由 Chief 的路由调用读取会话摘要和关联 Work，选择零个、一个或多个已知会话。路由调用使用独立上下文和无执行工具的能力范围，不代替目标会话干活。没有相关会话时记录忽略原因。
+
+路由计划保存目标 Session 与资源 uid，再逐个 Update Conversation 的 inputIds。追加按 inputId 去重；中断后继续同一计划，不再次调用模型选择目标。ReconcileConversation 只处理本会话尚未消费的 Input，加载本会话历史，调用 Chief Harness 决定如何回复和推进工作。同一 Input 在不同会话的处理状态相互独立。
+
+普通提问不必成为 Work。Input 路由完成、会话处理完成、工作目标完成和消息送达各有自己的状态；等待某个会话的用户或 Harness 时，其它 Session 可以继续。
 
 每个会话绑定一个 Chief Target 和固定 Lane，普通消息、定时回顾及询问后的续答沿用原生 Harness 会话。Chief 获取近期消息，并通过工具查询已有工作和外部详情；记忆由 Chief Harness 组合上游能力，Personal 不感知其实现。
 
@@ -43,7 +48,7 @@ Input 与 Work 有不同生命周期。普通提问可以处理完就回复，�
 
 Session 的 `meta.json` 保存 `heartbeat: { enabled: false, intervalSeconds: 3600 }`。默认关闭，间隔为正整数秒；Web 只切换 enabled，不编辑间隔。修改文件中的间隔需要停止服务后编辑并重启，运行中开关通过 API 修改。
 
-一个 Host 调度器检查所有 Session 的持久截止时间。开启后等待一个周期，产生带 `sessionId`、`conversationId` 和 `origin: heartbeat` 的 Input；这不是用户 Message。首次开启选择当前 Conversation 作为该 Session 的回顾入口，多会话共用 Session 时开关同步，后续切换不隐式改变入口。重启沿用截止时间，停机错过的周期合并成一次回顾。Session 已有排队、运行或待回答 Input 时跳过本周期，不堆积回顾。
+一个 Host 调度器检查所有 Session 的持久截止时间。开启后等待一个周期，产生带 `sessionId` 和 `origin: heartbeat` 的 Input；这不是用户 Message。多会话共用 Session 时开关同步，回顾输入由 Chief 按该 Session 的会话组织决定去向。重启沿用截止时间，停机错过的周期合并成一次回顾。Session 已有排队、运行或待回答 Input 时跳过本周期，不堆积回顾。
 
 关闭只停止新定时 Input，已入队和执行中的 Input、Task、Routine、Source 都不受影响。Input 先持久化，再推进下一次时间；同一截止时间使用稳定 ID 去重。
 
@@ -77,7 +82,7 @@ Task 与 Routine 各自的 Controller 观察 ready 或已到期的 scheduled，�
 
 `task.ts` 与 `routine.ts` 分别拥有 Reconcile：Task 完成后进入 done，Routine 完成本轮后回到 scheduled，并按自己的触发规则计算下次时间。两者共享 personal 内部的 Harness 调用、结果校验、并发更新处理和 outbox 记录；这些辅助操作位于 `execution.ts`，不进入通用 Host / Runner。
 
-资源类型决定身份；Task 没有周期触发配置，Routine 必须有 cron 或事件触发。Work 工具与网页聚合这两类资源，对外仍返回 task / routine 分类。Chief 继续观察内置 Conversation。
+资源类型决定身份；Task 没有周期触发配置，Routine 必须有 cron 或事件触发。Work 工具与网页聚合这两类资源，对外仍返回 task / routine 分类。Chief 的会话处理观察 Personal 定义的 Conversation 资源。
 
 改变工作类型由 Chief 组合现有工具：读取原工作的目标与结果，创建目标类型的新工作，再按用户意图暂停或删除原工作。新工作使用独立 id 和执行 Lane，相关上下文写入指令；保留原工作可查看完整历史，删除则将已交付消息与输入回执归档到 Conversation。各步分别持久化，不承诺跨资源的原子转换；中断后应查询现状再继续。暂停和删除都不取消已经运行的外部动作。
 

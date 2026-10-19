@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import type { SessionHandle } from "./store/store.ts";
-import type { ConversationStore } from "./conversation/store.ts";
+interface ActivityView {
+  get(id: string): unknown;
+  list(): Array<{ id: string }>;
+  inputs(): Array<{ status: { phase?: string } }>;
+}
 
 export const HeartbeatConfigSchema = z.object({
   enabled: z.boolean().default(false),
@@ -16,8 +20,8 @@ export interface HeartbeatState { conversationId: string; nextAt: string }
  * @link docs/plugin/personal.md
  */
 export class SessionHeartbeat {
-  constructor(private readonly session: SessionHandle, private readonly conversations: ConversationStore,
-    private readonly submit: (inputId: string, conversationId: string) => void) {}
+  constructor(private readonly session: SessionHandle, private readonly conversations: ActivityView,
+    private readonly submit: (inputId: string, conversationId: string) => void | Promise<void>) {}
 
   get config(): HeartbeatConfig { return HeartbeatConfigSchema.parse(this.session.meta.heartbeat ?? {}); }
 
@@ -33,7 +37,7 @@ export class SessionHeartbeat {
     return heartbeat;
   }
 
-  tick(now = new Date()): void {
+  async tick(now = new Date()): Promise<void> {
     const config = this.config;
     if (!config.enabled) return;
     const state = this.session.meta.heartbeatState;
@@ -48,7 +52,7 @@ export class SessionHeartbeat {
     const busy = this.conversations.inputs().some((input) => !input.status.phase || input.status.phase === "running" || input.status.phase === "waiting");
     if (!busy) {
       const id = "heartbeat:" + createHash("sha256").update(JSON.stringify([this.session.id, state.nextAt])).digest("hex");
-      this.submit(id, state.conversationId);
+      await this.submit(id, state.conversationId);
     }
     // Commit the Input first. If the host exits here, its stable ID deduplicates the same deadline.
     this.session.updateMeta({ heartbeatState: { ...state, nextAt } });
