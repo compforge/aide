@@ -21,7 +21,7 @@ const adapter = createHarnessAdapter(
 
 需要绑定自定义配置或工具时提供 `piSession` 工厂。模型和凭证沿用 Pi 的 auth.json、models.json 与环境配置，默认目录为 `~/.pi/agent`；工厂可指定 agentDir 和模型。嵌入式 SDK 不支持每会话环境覆盖。配置格式见 [Pi 上游文档](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。
 
-原生会话由 Pi SDK 持久化，Adapter 保存文件位置与恢复状态。恢复时校验工作目录与调用方绑定的范围。尚未落盘的空会话可以重新建立，已有历史文件缺失或范围不符则报错。
+原生会话由 Pi SDK 按默认布局持久化在 `<agentDir>/sessions/<encoded-cwd>/`，通常为 `~/.pi/agent/sessions/` 下的目录；指定 agentDir 时也由 SDK 选择对应路径。Pi 自己按 cwd 组织文件，不意味着 Aide 恢复 Project 分组。通用 Pi 和 Chief 都沿用此机制，Aide 不再指定 pi-sessions / chief-sessions 目录。Adapter 保存文件位置与恢复状态。恢复时校验工作目录与调用方绑定的范围。尚未落盘的空会话可以重新建立，已有历史文件缺失或范围不符则报错。
 
 Agent 不自动加载扩展、提示词命令或交互主题，并禁用自动整轮重试。完整执行期限由 Harness 调用方管理。
 

@@ -2,14 +2,15 @@ import { z } from "zod";
 
 export const RepositorySchema = z.object({ forge: z.string().min(1), path: z.string().min(1) });
 export const WatchSchema = z.object({
-  id: z.string().min(1), source: z.string().min(1), conversationId: z.string().min(1).optional(),
+  id: z.string().min(1), source: z.string().min(1), conversationId: z.string().min(1).max(200).optional(), sessionId: z.string().min(1).max(200).optional(),
   intervalMs: z.number().int().min(30_000).default(300_000),
   repositories: z.array(RepositorySchema).default([]),
 });
-export type Watch = Omit<z.infer<typeof WatchSchema>, "conversationId"> & { conversationId: string };
+export type Watch = Omit<z.infer<typeof WatchSchema>, "conversationId" | "sessionId"> & { conversationId: string; sessionId: string };
 
 export function parseWatches(config: Readonly<Record<string, unknown>> = {}): Watch[] {
-  const watches: Watch[] = z.array(WatchSchema).parse(config.watches ?? []).map((watch) => ({ ...watch, conversationId: watch.conversationId ?? `source:${watch.id}` }));
+  const watches: Watch[] = z.array(WatchSchema).parse(config.watches ?? []).map((watch) => ({ ...watch, sessionId: watch.sessionId ?? watch.conversationId ?? `source:${watch.id}`,
+    conversationId: watch.conversationId ?? watch.sessionId ?? `source:${watch.id}` }));
   if (new Set(watches.map((item) => item.id)).size !== watches.length) throw new Error("Duplicate watch id");
   return watches;
 }

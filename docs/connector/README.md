@@ -86,7 +86,7 @@ quality-harness 的 ClientProvider / EnvironmentContext / ClientManager 解决�
 
 需求 Source 按负责人和项目范围读取近期摘要，比较实体身份与观察指纹。新观察先持久化为 Input，再推进水位；中断后的重试依靠输入身份去重。已完成或关闭的需求不会创建新的待处理输入。
 
-每个 watch 默认使用 `source:<watch-id>` 会话，也可配置已有 conversationId。Host 校验 watch 的负责人范围后，通过 Plugin instance config 下发；重启时以当前配置替换旧 watch 声明。Source 不直接调用模型或创建 Task，Chief 根据已有委托选择询问、CRUD Work 或静默忽略。路由到已有飞书会话的消息才会沿该 Channel 投递，独立 Source 会话可在 Web 查看。
+每个 watch 默认使用 `source:<watch-id>` 作为 sessionId 和 conversationId，也可分别指定。仅配置已有 conversationId 时，sessionId 默认沿用它，适合与同 ID 的飞书 Session 共享上下文；显式指定不同 ID 时，两者的归属保存在该 Session 内。watch 只装配到指定 Session，创建其它聊天不会重复轮询。Host 校验 watch 的负责人范围后，通过 Plugin instance config 下发；重启时以当前配置替换旧 watch 声明。Source 不直接调用模型或创建 Task，Chief 根据已有委托选择询问、CRUD Work 或静默忽略。路由到已有飞书会话的消息才会沿该 Channel 投递，独立 Source 会话可在 Web 查看。
 
 Meego 的“我名下”按指定负责人字段中的稳定 user key 匹配，不按参与人或显示名。默认字段是当前节点处理人；项目若用单独的需求负责人字段，必须配置 `assigneeField`。`userKeys` 对开启的 watch 必填，避免意外观察整个项目。Meegle 单命令超时 20 秒、输出上限 4 MiB。
 

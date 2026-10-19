@@ -27,44 +27,30 @@ function pluginDirectoryName(pluginId: string): string {
   return name;
 }
 
-function projectDirectory(sessionDir: string): {
-  readonly aideRoot: string;
-  readonly project: string;
-} {
+function aideRoot(sessionDir: string): string {
   const sessions = dirname(sessionDir);
   if (basename(sessions) !== "sessions") {
     throw new Error(
-      `Plugin data requires a AideSession under a sessions directory: ${sessionDir}`,
+      `Plugin data requires an AideSession under a sessions directory: ${sessionDir}`,
     );
   }
-  const project = dirname(sessions);
-  const projects = dirname(project);
-  if (basename(projects) !== "projects") {
-    throw new Error(
-      `Plugin data requires a AideSession under a Project directory: ${sessionDir}`,
-    );
-  }
-  return {
-    aideRoot: dirname(projects),
-    project,
-  };
+  return dirname(sessions);
 }
 
 /**
  * Creates the writable directories owned by one Plugin at each persistence
- * scope. Plugin identity owns global/Project/Session paths; the concrete
+ * scope. Plugin identity owns global/Session paths; the concrete
  * Plugin Binding owns the narrowest path.
  */
 export function preparePluginDataDirectories(
   session: PluginSessionContext & { readonly dir: string },
   instance: Pick<PluginInstance, "pluginId" | "pluginInstanceId">,
 ): PluginDataDirectories {
-  const layout = projectDirectory(session.dir);
+  const root = aideRoot(session.dir);
   const plugin = pluginDirectoryName(instance.pluginId);
   const sessionData = join(session.dir, "plugins", plugin);
   const directories = Object.freeze({
-    global: join(layout.aideRoot, "plugins", plugin),
-    project: join(layout.project, "plugins", plugin),
+    global: join(root, "plugins", plugin),
     session: sessionData,
     instance: join(sessionData, instance.pluginInstanceId),
   });

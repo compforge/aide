@@ -89,8 +89,8 @@ test("Work service writes wake the existing Worker and reconcile; deletion durin
   (await tools.delete(work.id, work.revision));
   release(); await aide.settled();
   assert.deepEqual(tools.list(), []);
-  assert.equal(aide.store.read().messages.length, 0);
-  assert.equal(aide.store.resources.find(TASK_TYPE, work.id), undefined);
+  assert.equal(aide.messages().length, 0);
+  assert.equal(aide.session("me").store.resources.find(TASK_TYPE, work.id), undefined);
 });
 
 

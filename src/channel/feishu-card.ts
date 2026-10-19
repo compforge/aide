@@ -19,7 +19,7 @@ const labels = { queued: "排队中", running: "正在处理", waiting: "等待�
  */
 export function feishuProgress(aide: ChannelService, conversationId: string): FeishuProgress[] {
   const view = conversationView(aide, conversationId);
-  const inputs = aide.conversations.inputs(conversationId);
+  const inputs = aide.findConversation(conversationId)?.conversations.inputs(conversationId) ?? [];
   return inputs.filter((input) => input.spec.origin === "channel" && !input.spec.replyTo).map((input) => {
     const turnIds = new Set(aide.invocations().filter((turn) => turn.inputId === input.metadata.name).map((turn) => `execution:${turn.turnId}`));
     const executions = view.blocks.filter((block) => block.type === "execution" &&

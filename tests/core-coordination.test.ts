@@ -50,7 +50,9 @@ test("Work tool -> Runner Watch -> Connector verb -> direct ask -> Harness uses 
     await manager.settled();
     const observer = { apiVersion: "tests.aide.dev/v1alpha1", kind: "WorkObserver" };
     expect(resources.get(observer, "observer", "v1/project/coordination").status).toMatchObject({ answer: "继续", count: 1 });
-    const projection: ChannelService = { core, conversations: manager.conversations!, messages: () => [], questions: () => [], invocations: () => manager.listHarnessInvocations(), conversationIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
+    const projection: ChannelService = { sessions: () => [{ id: session.id, core, conversations: manager.conversations! }],
+      findConversation: (id) => id === "group-a" ? { id: session.id, core, conversations: manager.conversations! } : undefined,
+      subscribe: (listener) => core.subscribe(listener), messages: () => [], questions: () => [], invocations: () => manager.listHarnessInvocations(), conversationIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
     expect(conversationView(projection, "group-a").blocks.some((block) => block.type === "execution")).toBe(true);
     expect(conversationView(projection, "group-b").blocks).toHaveLength(0);
     await work.update(task.id, { revision: 1, action: "pause" });

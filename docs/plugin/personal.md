@@ -20,7 +20,7 @@ Chief 是业务角色。Chief Controller 消费输入、组织上下文并续接
 
 ## 输入与上下文
 
-Chief 观察 Host 内置 Conversation 的变化，按会话串行消费 Input。一个会话同时只有一个活跃输入；其它输入排队，避免争用同一份 Work 工具绑定。等待某个会话的用户或 Harness 时，其它会话可以继续。
+入口先确定 Aide Session，Personal 在其中处理业务。Chief 观察 Host 内置 Conversation 的变化，按会话串行消费 Input，并复用该 Conversation 的固定 Lane 和 Chief Target。一个会话同时只有一个活跃输入；其它输入排队，避免争用同一份 Work 工具绑定。等待某个会话的用户或 Harness 时，其它会话可以继续。
 
 Input 与 Work 有不同生命周期。普通提问可以处理完就回复，只有有限目标或持续职责才进入 Work。Channel 与 Source 决定输入所属会话，具体映射见 [Channel](../channel/README.md) 和 [Connector 与 Source](../connector/README.md)；内置对象的存储由 [Kernel](../kernel.md) 管理。
 

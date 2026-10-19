@@ -9,11 +9,11 @@ Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、确定
 
 ## 输入、会话与回复
 
-Channel 提交用户消息时确定 conversationId 与消息去重身份。Host 持久化 Message 和引用它的 Input，先返回接收回执，再由 Chief 异步处理。接收成功不代表模型已经回答，更不代表目标已完成。
+Channel 提交用户消息时提供稳定 sessionId、conversationId 与消息去重身份；同一上下文沿用 sessionId，Core 按它创建或恢复执行作用域。新 Conversation 可以直接沿用 sessionId。Host 持久化 Message 和引用它的 Input，先返回接收回执，再由 Chief 异步处理。接收成功不代表模型已经回答，更不代表目标已完成。
 
 Channel 决定自己的原生会话如何映射为 Conversation，不决定创建 Task 还是 Routine。Chief 普通回答直接进入消息流，需要跟进时才操作 Work。同一会话后续消息可以回答问题或补充已有工作。
 
-Source 也能提交 Input，但属于外部观察入口。它可使用独立 Conversation，或明确路由到已有 Channel 会话。Conversation 不由某一个页面独占：Web 可以查看飞书或 Source 会话；回复是否送达飞书由 Feishu 的已有会话路由决定。
+Source 也能提交 Input，但属于外部观察入口。它可使用独立 Conversation，或明确路由到已有 Channel 会话。Conversation 不由某一个页面独占：Web 可以查看飞书或 Source 会话，并从会话列表读取其 sessionId，继续提交到原 Session；回复是否送达飞书由 Feishu 的已有会话路由决定。
 
 当前会话划分用于组织上下文与工作，所有 Channel 共用单用户执行身份和 CLI 能力，不提供多用户权限隔离。
 

@@ -51,17 +51,37 @@ Host 与 Runner 不相互导入实现。Host 通过入口启动 Runner；两端�
 
 ### 输入与交流记录
 
-Conversation 表达一组交流上下文，Input 表达一次待处理触发，Message 表达交流记录。Channel Input 引用用户 Message，Source Input 携带观察；外部观察不会自动成为一条聊天消息。
+Conversation 是 Host 提供的 builtin resource，表达一组交流上下文；convId 是它的标识。Input 表达一次待处理触发，Message 表达交流记录。Channel Input 引用用户 Message，Source Input 携带观察；外部观察不会自动成为一条聊天消息。
 
 三者由 Core 的 ConversationStore 管理，以普通记录持久化，并通过内置 Resource API 提供访问与调度投影。它们不进入插件的 Resource 文件存储。输入状态和对应消息一起提交，避免只写完成状态却遗漏答复。
 
-Conversation 的划分由输入方确定，消费顺序与处理策略由插件决定。Personal 的 Chief 按会话串行消费 Input；这是 [Personal](plugin/personal.md) 的业务约定。当前所有会话属于同一用户和同一执行身份，conversationId 不是权限边界。
+Channel / Source 提供稳定 sessionId，Core 按 ID 创建或恢复持久 Session，再在该作用域内保存 Input / Message。飞书用应用与聊天身份、Web 新会话用自己的会话身份，Source 用配置的观察范围确定 ID。Conversation 可以沿用 sessionId 作为自己的 ID，也可以使用独立 ID；当前入口查询要求一个 Conversation 仅属于一个 Session。Conversation 的划分由输入方确定，消费顺序与处理策略由插件决定。Personal 的 Chief 按会话串行消费 Input；这是 [Personal](plugin/personal.md) 的业务约定。各 Session 隔离执行历史与原生上下文，但仍使用同一服务用户和 CLI 能力；conversationId 不是权限边界。
 
 ### Harness 与执行事实
 
 HarnessAdapter 统一启动、提交、取消、恢复和事件流。Target 标识一份具体执行配置，`harness` 字段选择 Harness；同一 Harness 可以有多个 Target。具体契约与职责见 [Harness](harness/README.md)，实现分别见 [Pi](harness/pi.md) 与 [Chief](harness/chief.md)。
 
-Session 保存执行上下文和事件；Lane 组织一条执行支线；HarnessInvocation 表达执行请求；Turn 记录一轮执行事实。请求先持久化，再交给 Adapter。接受请求、执行结束和业务目标完成是不同事实，目标是否达成由调用方校验。
+Session 是宿主管理一组执行历史和恢复状态的持久作用域，不是进程，也不是 Harness 原生会话。它保留 Ledger、执行投影、Lane 和恢复绑定。CoreSession 装配进程期的 Controller、Adapter 和订阅；关闭运行组件会释放句柄与锁，持久 Session 仍可恢复。
+
+```text
+Session
+├── Ledger / 执行投影
+└── Lane：串行执行支线
+    ├── Turn：一次执行的事实归属
+    └── Harness Target → 原生 Session identity + resumeState
+```
+
+同一 Lane 串行推进，不同 Lane 可并行；Lane 可以在不同 Target 之间接力。同一 Target 在不同 Lane 上使用独立原生会话。绑定按 `Session × Lane × HarnessTarget` 定位；原生会话重建不改变 Lane 身份。fork 复制逻辑历史和 Lane 身份，但清空原生绑定，避免两个 Session 写入同一份 Harness 历史。
+
+Conversation 与其它资源一样，通过资源引用和可选的 conversationId / inputId 关联执行。资源标识不替代执行身份，也不强制对应一个 Lane 或原生会话。Chief 按 Conversation 组织上下文，为其复用固定 Lane 和 Target，是 Personal 的业务策略。每条新 Input 发起新 Turn，持续使用同一份原生恢复绑定。
+
+HarnessInvocation 表达执行请求，Turn 记录一段执行事实。请求先持久化，再交给 Adapter。接受请求、执行结束和业务目标完成是不同事实，目标是否达成由调用方校验。
+
+Session 归属于 Aide 状态目录，统一存放在 `sessions/<directory>/`，不按项目或 `cwd` 分组。安全的路径片段可直接作为目录名；包含冒号、空格等字符的逻辑 ID 编码为带前缀的 SHA-256 目录名，原始 ID 保存在 metadata 中。
+
+应用启动时装配所有已保存 Session 的 CoreSession / Personal，恢复待处理输入、工作和定时调度。配置的 Source watch 只进入它所属的 Session，避免每个聊天重复轮询；新的 Channel 输入按需创建 Session。当前每个 Session 的 Personal 实例使用自己的 Runner，Connector 客户端由应用共享。Web 汇总各 Session 的 Conversation，按所属 Session 读取进度、问题和工作。
+
+`cwd` 只表示执行工作目录。修改执行目录保留 Session 身份、业务状态和 Ledger，但清空各 Lane 的原生 Harness 绑定，让提供方在新目录建立上下文；目录不变时恢复原生会话。
 
 Adapter 保留提供方明确给出的消息阶段。`agentText` 用于整轮记录，`finalText` 仅包含明确标记的最终答复；未标阶段的文本不能靠位置猜成最终答案。流式内容先归一为执行事件，Channel 再投影为展示内容。
 
@@ -73,7 +93,7 @@ Adapter 保留提供方明确给出的消息阶段。`agentText` 用于整轮记
 
 一次处理沿着以下流程推进：
 
-1. **接收变化。** Channel 将人的输入写入 Message / Input，并归入 Conversation；Source 经 Core 调用 Connector 观察外部系统，把变化转为资源更新或 Input。
+1. **接收变化。** 输入方提供 sessionId，Core 创建或恢复对应 Session。Channel 将人的输入写入 Message / Input，并归入 Conversation；Source 经 Core 调用 Connector 观察外部系统，把变化转为资源更新或 Input。
 2. **唤醒资源。** 资源变化、Watch、Source 或定时调度将资源身份加入 Controller 队列。
 3. **读取当前事实。** Reconcile 读取主资源及相关对象，判断目标是否完成、是否需要更多信息，以及下一步应执行什么。
 4. **推进工作。** 明确的步骤由 Reconcile 向 Core 发起相应 verb；需要结合上下文选择动作时，经 Core 调用带工具的 Harness，由 Agent 判断并调用工具。Core 承接这些请求并管理动作生命周期。
@@ -109,6 +129,8 @@ Personal 的需求观察由 RequirementSource 资源及其 Controller 承担：�
 ### 等待、中断与恢复
 
 Interaction 保存问题、答复、取消和超时。插件通过 ask / confirm / draft / harness 等 verb 请求动作，Core 管理交互与执行生命周期。等待 verb 时释放调度容量，执行调用栈仍由当前 Runner 持有。
+
+Connector Verb 在调用前保存 `connector.started`，完成后保存 `connector.settled` 的结果状态；请求、执行身份和资源关联归入所属 Session 的 Ledger。超时或重启中断不代表外部操作已取消，未完成记录恢复为 interrupted，不自动重放。Harness 和用户交互继续使用各自已有的持久执行记录。
 
 Worker 或 Host 中断后不重放内存调用栈，未完成 verb 以 failure 收口。插件依据领域状态决定如何恢复；对于可能已经产生外部副作用的工作，Personal 保留待核对状态，规则见 [Personal](plugin/personal.md)。
 

@@ -1,9 +1,10 @@
-// 会话存储：~/.aide/projects/<project key>/sessions/<id>/。
-// Project 只负责按 cwd 组织 AideSession；session.jsonl 承载统一逻辑历史，
+// 会话存储：~/.aide/sessions/<id>/。
+// cwd 是执行环境，不参与 Session 的身份和存储定位；session.jsonl 承载统一逻辑历史，
 // session/plugins/ 承载以该 AideSession 为 owner 的 Plugin 数据。
 // HarnessSession 元数据只用于优先恢复 harness 私有状态，缺失时仍可从 AideSession 重建上下文。
 
 import { createHash } from "node:crypto";
+import { assertSessionId } from "./session-id.ts";
 import { turnUserText } from "./message-relations.ts";
 import {
   appendFileSync,
@@ -17,13 +18,12 @@ import {
   readdirSync,
   renameSync,
   rmSync,
-  rmdirSync,
   statSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import {
   type LogEntry,
@@ -175,17 +175,6 @@ export function sessionTargetBindingMeta(
     resourceVersion: 1,
     updatedAt: meta.createdAt,
   });
-}
-
-/** 可读 basename + cwd 摘要；避免旧版纯字符替换把不同 cwd 放进同一项目目录。 */
-export function projectDirName(cwd: string): string {
-  const canonical = resolve(cwd);
-  const readable = (basename(canonical).replace(/[^a-zA-Z0-9._-]/g, "-") || "project").slice(
-    0,
-    80,
-  );
-  const digest = createHash("sha256").update(canonical).digest("hex").slice(0, 12);
-  return `${readable}-${digest}`;
 }
 
 const SESSION_PREVIEW_MAX_CHARS = 100;
@@ -371,9 +360,12 @@ function withSessionPreview(dir: string, meta: SessionMeta): SessionMeta {
   return preview ? { ...meta, preview } : meta;
 }
 
+/**
+ * @spec Sessions persist execution history, Lanes and native bindings; cwd never partitions their identity or storage.
+ * @link component://docs/kernel.md
+ */
 export class SessionStore {
   readonly rootDir: string;
-  private legacyMigrated = false;
   private readonly loggerOptions: SessionLoggerOptions;
 
   constructor(
@@ -384,35 +376,12 @@ export class SessionStore {
     this.loggerOptions = loggerOptions;
   }
 
-  private projectsDir(): string {
-    return join(this.rootDir, "projects");
-  }
-
-  /**
-   * 旧布局（~/.aide/sessions/<id> 和 projects/<cwd escaped>/<id>）一次性迁移到
-   * projects/<project key>/sessions/<id>。
-   * meta 缺失或损坏的目录原地保留，不阻塞正常使用。
-   */
-  private migrateLegacySessions(): void {
-    if (this.legacyMigrated) return;
-    this.legacyMigrated = true;
-    const flatLegacy = join(this.rootDir, "sessions");
-    this.migrateSessionsFrom(flatLegacy);
-    this.removeIfEmpty(flatLegacy);
-
-    for (const projectDir of this.listProjectDirs()) {
-      this.migrateSessionsFrom(projectDir);
-      this.removeIfEmpty(projectDir);
-    }
-  }
-
-  createSession(opts: { cwd: string; title?: string }): SessionHandle {
-    this.migrateLegacySessions();
-    const id = newId("bs");
+  createSession(opts: { id?: string; cwd: string; title?: string }): SessionHandle {
+    const id = opts.id ?? newId("bs");
     const cwd = resolve(opts.cwd);
-    const dir = this.sessionDir(cwd, id);
-    this.ensureProject(cwd);
+    const dir = this.sessionDir(id);
     mkdirSync(dir, { recursive: true });
+    if (existsSync(join(dir, "meta.json"))) throw new Error(`aide session already exists: ${id}`);
     const meta: SessionMeta = {
       aideSessionId: id,
       title: opts.title,
@@ -667,59 +636,47 @@ export class SessionStore {
     return session.summarizeTurnEvent(turnId).seq;
   }
 
-  /** 会话 ID 全局唯一，打开时不要求提供 cwd，跨项目扫描定位（@ 引用可指向任意项目的会话）。 */
+  /** Session id locates its directory directly, independent of execution cwd. */
   openSession(id: string): SessionHandle {
-    this.migrateLegacySessions();
-    for (const projectDir of this.listProjectDirs()) {
-      const dir = join(projectDir, "sessions", id);
-      const metaPath = join(dir, "meta.json");
-      if (!existsSync(metaPath)) continue;
-      const parsed = JSON.parse(readFileSync(metaPath, "utf8")) as SessionMeta & {
-        mainLaneId?: unknown;
-      };
-      const meta = withSessionPreview(dir, normalizeSessionMeta(parsed));
-      if (
-        parsed.harnessSessions ||
-        !parsed.harnessTargets ||
-        !parsed.lanes ||
-        parsed.mainLaneId !== undefined
-      ) {
-        writeMetaAtomic(dir, meta);
-      }
-      return new SessionHandle(id, dir, meta, this.loggerOptions);
+    const dir = this.sessionDir(id);
+    const metaPath = join(dir, "meta.json");
+    if (!existsSync(metaPath)) throw new Error(`aide session not found: ${id}`);
+    const parsed = JSON.parse(readFileSync(metaPath, "utf8")) as SessionMeta & {
+      mainLaneId?: unknown;
+    };
+    const meta = withSessionPreview(dir, normalizeSessionMeta(parsed));
+    if (
+      parsed.harnessSessions ||
+      !parsed.harnessTargets ||
+      !parsed.lanes ||
+      parsed.mainLaneId !== undefined
+    ) {
+      writeMetaAtomic(dir, meta);
     }
-    throw new Error(`aide session not found: ${id}`);
+    return new SessionHandle(id, dir, meta, this.loggerOptions);
   }
 
-  listSessions(opts: { cwd?: string } = {}): SessionMeta[] {
-    return this.listStoredSessions(opts).map(({ meta }) => meta);
+  listSessions(): SessionMeta[] {
+    return this.listStoredSessions().map(({ meta }) => meta);
   }
 
-  private listStoredSessions(opts: { cwd?: string } = {}): StoredSession[] {
-    this.migrateLegacySessions();
-    const cwd = opts.cwd === undefined ? undefined : resolve(opts.cwd);
-    const projectDirs =
-      cwd !== undefined
-        ? [this.projectDir(cwd)]
-        : this.listProjectDirs();
+  private listStoredSessions(): StoredSession[] {
+    const sessionsDir = join(this.rootDir, "sessions");
+    if (!existsSync(sessionsDir)) return [];
     const out: StoredSession[] = [];
-    for (const projectDir of projectDirs) {
-      const sessionsDir = join(projectDir, "sessions");
-      if (!existsSync(sessionsDir)) continue;
-      for (const name of readdirSync(sessionsDir)) {
-        const sessionDir = join(sessionsDir, name);
-        const metaPath = join(sessionDir, "meta.json");
-        if (!existsSync(metaPath)) continue;
-        try {
-          const meta = withSessionPreview(
-            sessionDir,
-            normalizeSessionMeta(JSON.parse(readFileSync(metaPath, "utf8")) as SessionMeta),
-          );
-          if (cwd !== undefined && meta.cwd !== cwd) continue;
-          out.push({ dir: sessionDir, meta });
-        } catch {
-          // 损坏的 meta 不阻塞列表
-        }
+    for (const entry of readdirSync(sessionsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const sessionDir = join(sessionsDir, entry.name);
+      const metaPath = join(sessionDir, "meta.json");
+      if (!existsSync(metaPath)) continue;
+      try {
+        const meta = withSessionPreview(
+          sessionDir,
+          normalizeSessionMeta(JSON.parse(readFileSync(metaPath, "utf8")) as SessionMeta),
+        );
+        out.push({ dir: sessionDir, meta });
+      } catch {
+        // 损坏的 meta 不阻塞列表
       }
     }
     out.sort((a, b) =>
@@ -737,7 +694,7 @@ export class SessionStore {
    * directory. A live session is skipped, and metadata is read again after locking so a
    * session that became active during discovery cannot be removed from a stale snapshot.
    */
-  cleanSessions(opts: { before: Date; cwd?: string }): SessionCleanupResult {
+  cleanSessions(opts: { before: Date }): SessionCleanupResult {
     if (Number.isNaN(opts.before.getTime())) {
       throw new Error("session cleanup cutoff must be a valid Date");
     }
@@ -747,13 +704,13 @@ export class SessionStore {
       skippedActive: [],
       failures: [],
     };
-    const candidates = this.listStoredSessions(opts.cwd === undefined ? {} : { cwd: opts.cwd });
+    const candidates = this.listStoredSessions();
 
     for (const { dir, meta: candidate } of candidates) {
       const observedActivity = Date.parse(candidate.updatedAt ?? candidate.createdAt);
       if (!Number.isFinite(observedActivity) || observedActivity >= cutoff) continue;
 
-      if (basename(dir) !== candidate.aideSessionId) {
+      if (dir !== this.sessionDir(candidate.aideSessionId)) {
         result.failures.push({
           aideSessionId: candidate.aideSessionId,
           cwd: candidate.cwd,
@@ -778,10 +735,7 @@ export class SessionStore {
         const persisted = JSON.parse(
           readFileSync(join(dir, "meta.json"), "utf8"),
         ) as SessionMeta;
-        if (
-          persisted.aideSessionId !== candidate.aideSessionId ||
-          resolve(persisted.cwd) !== resolve(candidate.cwd)
-        ) {
+        if (persisted.aideSessionId !== candidate.aideSessionId) {
           throw new Error("session metadata identity changed during cleanup");
         }
         const latestActivity = Date.parse(persisted.updatedAt ?? persisted.createdAt);
@@ -812,8 +766,8 @@ export class SessionStore {
   }
 
   /** Read-only liveness observation for Session Resource projection. */
-  isSessionActive(meta: Pick<SessionMeta, "aideSessionId" | "cwd">): boolean {
-    const path = join(this.sessionDir(resolve(meta.cwd), meta.aideSessionId), "lock");
+  isSessionActive(meta: Pick<SessionMeta, "aideSessionId">): boolean {
+    const path = join(this.sessionDir(meta.aideSessionId), "lock");
     return sessionLockIsActive(path);
   }
 
@@ -867,8 +821,7 @@ export class SessionStore {
    * child 继承 HarnessTarget 偏好和逻辑 Lane 拓扑，但清空所有原生 session binding
    * （否则两个 AideSession 会写进同一份 Harness 历史）；child 首次使用某个
    * Lane × Target 时创建 fresh native session + 新 ContextEpoch，并从复制历史补课。
-   * opts.cwd 支持跨 project fork：历史跟源走，project 归属跟 fork 发起位置走；
-   * 缺省沿用源 cwd。
+   * opts.cwd 选择新会话的执行目录，缺省沿用源 cwd。
    */
   forkSession(
     sourceSessionId: string,
@@ -879,10 +832,8 @@ export class SessionStore {
       .read()
       .filter((ev) => opts.throughSeq === undefined || ev.seq <= opts.throughSeq);
     const id = newId("bs");
-    // 落盘目录与 meta.cwd 必须同源：listSessions({cwd}) 按目录扫描，两者不一致会漏掉该会话
     const cwd = resolve(opts.cwd ?? source.meta.cwd);
-    const dir = this.sessionDir(cwd, id);
-    this.ensureProject(cwd);
+    const dir = this.sessionDir(id);
     mkdirSync(dir, { recursive: true });
     if (events.length > 0) {
       const lines = events.map((ev) =>
@@ -928,20 +879,11 @@ export class SessionStore {
     return new SessionHandle(id, dir, meta, this.loggerOptions);
   }
 
-  private listProjectDirs(): string[] {
-    const dir = this.projectsDir();
-    if (!existsSync(dir)) return [];
-    return readdirSync(dir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => join(dir, entry.name));
-  }
-
-  private projectDir(cwd: string): string {
-    return join(this.projectsDir(), projectDirName(cwd));
-  }
-
-  private sessionDir(cwd: string, sessionId: string): string {
-    return join(this.projectDir(cwd), "sessions", sessionId);
+  private sessionDir(sessionId: string): string {
+    assertSessionId(sessionId);
+    const directory = /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(sessionId) ? sessionId
+      : `~${createHash("sha256").update(sessionId).digest("hex")}`;
+    return join(this.rootDir, "sessions", directory);
   }
 
   private acquireHarnessSessionAdoptionLock(): () => void {
@@ -977,52 +919,6 @@ export class SessionStore {
       rmSync(path, { force: true });
     }
     throw new Error("failed to acquire HarnessSession adoption lock");
-  }
-
-  private ensureProject(cwd: string): void {
-    const projectDir = this.projectDir(cwd);
-    const path = join(projectDir, "project.json");
-    mkdirSync(join(projectDir, "sessions"), { recursive: true });
-    if (existsSync(path)) {
-      const project = JSON.parse(readFileSync(path, "utf8")) as { cwd?: unknown };
-      if (project.cwd !== cwd) {
-        throw new Error(`project directory ${projectDir} belongs to another cwd`);
-      }
-      return;
-    }
-    const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
-    try {
-      writeFileSync(temporary, `${JSON.stringify({ cwd }, null, 2)}\n`);
-      renameSync(temporary, path);
-    } finally {
-      rmSync(temporary, { force: true });
-    }
-  }
-
-  private migrateSessionsFrom(sourceDir: string): void {
-    if (!existsSync(sourceDir)) return;
-    for (const name of readdirSync(sourceDir)) {
-      const source = join(sourceDir, name);
-      const metaPath = join(source, "meta.json");
-      if (!existsSync(metaPath)) continue;
-      try {
-        const meta = JSON.parse(readFileSync(metaPath, "utf8")) as SessionMeta;
-        const cwd = resolve(meta.cwd);
-        const destination = this.sessionDir(cwd, name);
-        this.ensureProject(cwd);
-        if (source !== destination) renameSync(source, destination);
-      } catch {
-        // 留在原目录，避免把无法解析或发生身份冲突的会话搬到错误项目。
-      }
-    }
-  }
-
-  private removeIfEmpty(dir: string): void {
-    try {
-      rmdirSync(dir);
-    } catch {
-      // 损坏会话或新布局内容仍在时保留。
-    }
   }
 }
 

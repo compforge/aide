@@ -315,8 +315,12 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyPreview } from '/agen
     if (!text || sending) return;
     sending = true; $('send').disabled = true; $('input').disabled = true;
     $('notice').className = ''; $('notice').textContent = '正在理解你的请求…';
-    if (!draft || draft.text !== text) draft = { id: crypto.randomUUID(), conversationId, text };
     try {
+      if (!draft || draft.text !== text) {
+        const conversations = await api('/conversations');
+        const sessionId = conversations.find((item) => item.id === conversationId)?.sessionId || conversationId;
+        draft = { id: crypto.randomUUID(), sessionId, conversationId, text };
+      }
       await api('/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(draft) });
       draft = null; $('input').value = ''; $('notice').textContent = '已接收，后续进展会显示在这里。';
       await poll(); $('messages').scrollTop = $('messages').scrollHeight;

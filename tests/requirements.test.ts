@@ -42,7 +42,7 @@ test("Requirement Source commits the inbox before its watermark and never create
   const store = new PluginResourceStore({ session, pluginInstanceId: "personal" });
   const conversations = new ConversationStore(session);
   const resources = createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, conversations }));
-  const watch: Watch = { id: "mine", source: "work", conversationId: "me", intervalMs: 300_000, repositories: [] };
+  const watch: Watch = { sessionId: "source:mine", id: "mine", source: "work", conversationId: "me", intervalMs: 300_000, repositories: [] };
   const resource = store.create({ type: SOURCE_TYPE, name: "mine", spec: watch, status: {} });
   let updatedAt = "1";
   let fail = false;

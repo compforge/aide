@@ -1,3 +1,4 @@
+import { assertSessionId } from "../store/session-id.ts";
 import { isDeepStrictEqual } from "node:util";
 import {
   existsSync,
@@ -119,7 +120,8 @@ export class PluginInstanceStore implements PluginInstanceRepository {
   private readonly now: () => Date;
 
   constructor(options: PluginInstanceStoreOptions) {
-    assertPathSegment("aideSessionId", options.session.id);
+    // SessionStore owns directory encoding; the logical ID may contain channel namespaces.
+    assertSessionId(options.session.id);
     this.session = Object.freeze({
       id: options.session.id,
       dir: options.session.dir,

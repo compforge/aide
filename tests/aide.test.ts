@@ -33,17 +33,17 @@ test("completed execution with invalid final output is distinct from interruptio
     const { aide, path } = await setup(t, agent);
     (await aide.work("me").create(task));
     await aide.settled();
-    const work = aide.store.read().works[0]!;
+    const work = aide.works()[0]!;
     assert.equal(work.status, "invalid_result");
     assert.match(work.history.at(-1)!.text, /Execution completed but result validation failed/);
-    assert.match(aide.store.read().messages.at(-1)!.text, /执行已结束，但最终结果解析失败/);
-    const invocations = aide.plugins.listHarnessInvocations();
+    assert.match(aide.messages().at(-1)!.text, /执行已结束，但最终结果解析失败/);
+    const invocations = aide.invocations();
     assert.ok(invocations.every((invocation) => invocation.phase === "completed"));
     await aide.close();
     const restarted = new Aide(path, fakeOptions(agent, path), log);
     t.after(() => restarted.close());
     await restarted.start(); await restarted.settled();
-    assert.equal(restarted.store.read().works[0]!.status, "invalid_result");
+    assert.equal(restarted.works()[0]!.status, "invalid_result");
     assert.equal(runs, 1);
   }
 });
@@ -61,18 +61,18 @@ test(`${definition.kind} asks, persists a question across restart, then records 
   };
   const { aide, path } = await setup(t, agent);
   id = (await aide.work("me").create(definition)).id;
-  if (definition.kind === "routine") (await aide.event({ id: "first", conversationId: "me", name: "start", text: "start" }));
+  if (definition.kind === "routine") (await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" }));
   await aide.settled();
-  assert.equal(aide.store.read().works[0]?.status, "waiting");
+  assert.equal(aide.works()[0]?.status, "waiting");
   await aide.close();
   const restarted = new Aide(path, fakeOptions(agent, path), log);
   t.after(() => restarted.close());
   restarted.start();
-  assert.equal(restarted.store.read().works[0]?.question, "使用哪个项目？");
+  assert.equal(restarted.works()[0]?.question, "使用哪个项目？");
   await restarted.start();
   (await restarted.work("me").update(id, { revision: restarted.work("me").read(id).revision, action: "answer", note: "项目 A" }));
   await restarted.settled();
-  assert.equal(restarted.store.read().works[0]?.status, definition.kind === "task" ? "done" : "scheduled");
+  assert.equal(restarted.works()[0]?.status, definition.kind === "task" ? "done" : "scheduled");
   assert.equal(runs, 2);
 });
 
@@ -92,8 +92,8 @@ test("Personal requires a designated final answer even when the transcript conta
   } }, log);
   t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
   await aide.start(); (await aide.work("me").create(task)); await aide.settled();
-  assert.equal(aide.store.read().works[0]!.status, "invalid_result");
-  assert.match(aide.store.read().works[0]!.history.at(-1)!.text, /without a designated final answer/);
+  assert.equal(aide.works()[0]!.status, "invalid_result");
+  assert.match(aide.works()[0]!.history.at(-1)!.text, /without a designated final answer/);
 });
 
 test("Routine can be triggered by event, deduplicates deliveries, and stays active", async (t) => {
@@ -104,13 +104,13 @@ test("Routine can be triggered by event, deduplicates deliveries, and stays acti
   (await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "docs.changed" } }));
   await aide.settled();
   assert.equal(runs, 0);
-  const event = { id: "event-1", conversationId: "me", name: "docs.changed", text: "new document" };
+  const event = { id: "event-1", sessionId: "me", conversationId: "me", name: "docs.changed", text: "new document" };
   assert.equal((await aide.event(event)), 1);
   assert.equal((await aide.event(event)), 0);
   await aide.settled();
   assert.equal(runs, 1);
-  assert.equal(aide.store.read().works[0]?.status, "scheduled");
-  assert.equal(aide.store.read().messages.filter((m) => m.role === "aide").length, 0);
+  assert.equal(aide.works()[0]?.status, "scheduled");
+  assert.equal(aide.messages().filter((m) => m.role === "aide").length, 0);
 });
 
 test("replacing a Task with a Routine uses distinct identities and retains the completed Task's messages", async (t) => {
@@ -127,7 +127,7 @@ test("replacing a Task with a Routine uses distinct identities and retains the c
   assert.notEqual(routine.id, original.id);
   assert.deepEqual(tools.list().map((work) => work.id), [routine.id]);
   assert.ok(aide.messages().some((item) => item.workId === original.id && item.text === done.notification));
-  assert.equal((await aide.event({ id: "next", conversationId: "me", name: "check.again", text: "检查更新" })), 1);
+  assert.equal((await aide.event({ id: "next", sessionId: "me", conversationId: "me", name: "check.again", text: "检查更新" })), 1);
   await aide.settled();
   assert.equal(tools.read(routine.id).status, "scheduled");
   assert.ok(aide.messages().some((item) => item.workId === routine.id && item.text === done.notification));
@@ -140,14 +140,14 @@ test("overdue work is woken after restart, without replaying missed occurrences"
   });
   (await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } }));
   await aide.close();
-  (await aide.store.save({ ...aide.store.read().works[0]!, nextAt: "2000-01-01T00:00:00Z" }));
+  (await aide.sessions().find((scope) => scope.id === "me")!.store.save({ ...aide.works()[0]!, nextAt: "2000-01-01T00:00:00Z" }));
   const restarted = new Aide(path, fakeOptions({ execute: async () => { runs++; return done; } }, path), log);
   t.after(() => restarted.close());
   restarted.start();
   await new Promise((resolve) => setTimeout(resolve, 25));
   await restarted.settled();
   assert.equal(runs, 1);
-  assert.ok(Date.parse(restarted.store.read().works[0]!.nextAt!) > Date.now());
+  assert.ok(Date.parse(restarted.works()[0]!.nextAt!) > Date.now());
 });
 
 test("interrupted and failed executions become uncertain and are not auto-replayed", async (t) => {
@@ -156,14 +156,14 @@ test("interrupted and failed executions become uncertain and are not auto-replay
   const { aide, path } = await setup(t, agent);
   (await aide.work("me").create(task));
   await aide.settled();
-  assert.equal(aide.store.read().works[0]?.status, "uncertain");
+  assert.equal(aide.works()[0]?.status, "uncertain");
   await aide.close();
-  (await aide.store.save({ ...aide.store.read().works[0]!, status: "running" }));
+  (await aide.sessions().find((scope) => scope.id === "me")!.store.save({ ...aide.works()[0]!, status: "running" }));
   const restarted = new Aide(path, fakeOptions(agent, path), log);
   t.after(() => restarted.close());
   restarted.start();
   await restarted.settled();
-  assert.equal(restarted.store.read().works[0]?.status, "uncertain");
+  assert.equal(restarted.works()[0]?.status, "uncertain");
   assert.equal(runs, 1);
 });
 
@@ -180,7 +180,7 @@ test("a pause arriving during execution survives its eventual result", async (t)
   (await aide.work("me").update(id, { revision: 1, action: "pause" }));
   finish(done);
   await aide.settled();
-  assert.equal(aide.store.read().works[0]?.status, "paused");
+  assert.equal(aide.works()[0]?.status, "paused");
 });
 
 test("an update during execution is reconciled using the latest instruction", async (t) => {
@@ -230,15 +230,15 @@ test("personal Worker crash cancels its invocation and preserves uncertain work 
   }
   assert.ok(pid && pid !== process.pid);
   process.kill(pid, "SIGKILL");
-  for (let attempt = 0; attempt < 200 && aide.plugins.isInstanceActive("personal"); attempt++) await Bun.sleep(10);
-  assert.equal(aide.plugins.isInstanceActive("personal"), false);
-  assert.equal(aide.store.read().works[0]?.status, "uncertain");
-  assert.ok(aide.plugins.listHarnessInvocations().some((invocation) => invocation.phase === "cancelled" || invocation.phase === "failed"));
+  for (let attempt = 0; attempt < 200 && aide.session("me").plugins.isInstanceActive("personal"); attempt++) await Bun.sleep(10);
+  assert.equal(aide.session("me").plugins.isInstanceActive("personal"), false);
+  assert.equal(aide.works()[0]?.status, "uncertain");
+  assert.ok(aide.invocations().some((invocation) => invocation.phase === "cancelled" || invocation.phase === "failed"));
   await aide.close();
   const restarted = new Aide(path, fakeOptions(agent, path), log);
   t.after(() => restarted.close());
   await restarted.start(); await restarted.settled();
-  assert.equal(restarted.store.read().works[0]?.status, "uncertain");
+  assert.equal(restarted.works()[0]?.status, "uncertain");
   assert.equal(runs, 1);
 });
 
@@ -249,7 +249,7 @@ test(`${definition.kind} requeues a dynamic wait and applies its own completion 
   const { aide } = await setup(t, { execute: async () => ++runs === 1
     ? { ...done, action: "wait", nextAt: new Date(Date.now() + 200).toISOString() } : done });
   const work = (await aide.work("me").create(definition));
-  if (definition.kind === "routine") (await aide.event({ id: "first", conversationId: "me", name: "start", text: "start" }));
+  if (definition.kind === "routine") (await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" }));
   const expected = definition.kind === "task" ? "done" : "scheduled";
   // Timer-triggered reconciles are owned by Manager, not Aide's explicit wake promises.
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -260,4 +260,42 @@ test(`${definition.kind} requeues a dynamic wait and applies its own completion 
   assert.equal(runs, 2);
   assert.equal(aide.work("me").read(work.id).status, definition.kind === "task" ? "done" : "scheduled");
   assert.equal(aide.work("me").read(work.id).nextAt, null);
+});
+
+// @case restart_new_cwd: changing execution cwd preserves personal work and conversation state.
+test("Aide resumes the same Session and personal state when execution cwd changes", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-cwd-restart-"));
+  const agent: Agent = { chief: async () => "记住了", execute: async () => { throw new Error("Unexpected execution"); } };
+  const first = new Aide(root, fakeOptions(agent, join(root, "code-a")), log);
+  let restarted: Aide | undefined;
+  t.after(async () => { await first.close(); await restarted?.close(); rmSync(root, { recursive: true, force: true }); });
+  await first.receive({ id: "hello", sessionId: "me", conversationId: "me", text: "你好" });
+  await first.settled();
+  const routine = await first.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "manual" } });
+  const originalId = new SessionStore(root).listSessions()[0]!.aideSessionId;
+  const messages = first.messages();
+  await first.close();
+
+  const executionCwds: string[] = [];
+  const options = fakeOptions(agent, join(root, "code-b"));
+  restarted = new Aide(root, { ...options, createAdapter: (target) => {
+    const adapter = options.createAdapter(target);
+    const open = adapter.open.bind(adapter);
+    adapter.open = (config, sink, binding) => {
+      executionCwds.push(config.cwd);
+      return open(config, sink, binding);
+    };
+    return adapter;
+  } }, log);
+  await restarted.start(); await restarted.settled();
+  const sessions = new SessionStore(root).listSessions();
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0]!.aideSessionId, originalId);
+  assert.equal(sessions[0]!.cwd, join(root, "code-b"));
+  assert.equal(restarted.work("me").read(routine.id).title, routine.title);
+  assert.deepEqual(restarted.messages(), messages);
+  await restarted.receive({ id: "again", sessionId: "me", conversationId: "me", text: "继续聊" });
+  await restarted.settled();
+  assert.ok(executionCwds.length > 0);
+  assert.ok(executionCwds.every((cwd) => cwd === join(root, "code-b")));
 });

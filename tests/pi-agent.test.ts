@@ -1,11 +1,13 @@
+import { Aide } from "../src/app.ts";
+import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
 import { ConversationStore } from "../src/host/conversation/store.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { createPiAgent } from "../agents/pi/agent.ts";
@@ -57,7 +59,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
   const store = new Store(resources, createResourceClient(resources), new ConversationStore(session));
   const work = new WorkService(store, "me", pino({ level: "silent" }));
-  const config = { cwd: root, agentDir, sessionDir: join(root, "pi-sessions"), model: { provider: "fixture", id: "test-model" } };
+  const config = { cwd: root, agentDir, model: { provider: "fixture", id: "test-model" } };
   const events: HarnessEvent[] = [];
   let binding: HarnessSessionBinding | undefined;
   let finished: (() => void) | undefined;
@@ -74,6 +76,13 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   let ref = await open();
   assert.equal(adapter.harness, harness);
   assert.equal(ref.harness, harness);
+  const sessionFile = (binding!.resumeState.data as { sessionFile: string }).sessionFile;
+  const nativeRoot = join(agentDir, "sessions");
+  assert.ok(relative(nativeRoot, sessionFile).length > 0);
+  assert.ok(!relative(nativeRoot, sessionFile).startsWith(".."));
+  assert.notEqual(dirname(sessionFile), session.dir);
+  assert.equal(existsSync(join(root, "pi-sessions")), false);
+  assert.equal(existsSync(join(root, "chief-sessions")), false);
   t.after(async () => {
     await adapter.close(ref);
     for (const response of held) response.destroy();
@@ -131,7 +140,7 @@ test("Pi answers directly without work and resumes its native history", { timeou
   assert.match(JSON.stringify(fixture.requests[1]!.messages), /你好/);
   const data = fixture.binding().resumeState.data as { sessionFile: string };
   await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile: data.sessionFile, work: fixture.work }), /does not belong/);
-  await assert.rejects(createPiAgent({ ...fixture.config, sessionFile: join(fixture.config.sessionDir, "missing.jsonl") }), /missing/);
+  await assert.rejects(createPiAgent({ ...fixture.config, sessionFile: join(fixture.config.agentDir, "sessions", "missing.jsonl") }), /missing/);
 });
 
 test("Chief loads declared skills and excludes ambient Pi skills and packages", { timeout: 20_000 }, async (t) => {
@@ -238,4 +247,51 @@ test("Pi can be constructed without Personal while Chief requires its bound fact
   assert.throws(() => createHarnessAdapter({ id: "chief", harness: "chief" }, {
     ...ports, targetConfig: { harness: "chief" },
   }), /Chief agent factory/);
+});
+
+// @case session_native_resume: isolated sessions survive restart and reuse Pi history; cwd changes reset only native bindings.
+test("Aide routes stable Sessions and resumes real Chief native context across inputs and restart", { timeout: 30_000 }, async (t) => {
+  const fixture = await setup(t, (_request, index) => ({ text: `native-response-${index}` }));
+  const home = join(fixture.config.cwd, "aide");
+  const log = pino({ level: "silent" });
+  let aide: Aide;
+  const open = (cwd = fixture.config.cwd) => new Aide(home, { cwd, timezone: "UTC", createAdapter: (target, ports) =>
+    createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
+      chiefSession: aide.chiefSession(target.id, { agentDir: fixture.config.agentDir, model: fixture.config.model, skillPaths: [] }) }) }, log);
+  const send = async (sessionId: string, conversationId: string, id: string) => {
+    await aide.receive({ sessionId, conversationId, id, text: `question-${id}` }); await aide.settled();
+    assert.equal(aide.findConversation(conversationId)!.conversations.inputs().at(-1)!.status.phase, "done");
+  };
+  const binding = (sessionId: string, conversationId: string) => {
+    const session = new SessionStore(home).openSession(sessionId);
+    const target = chiefTarget(conversationId);
+    return session.meta.lanes[target]!.harnessSessions[target]!;
+  };
+  aide = open();
+  try {
+    assert.equal(aide.sessions().length, 0);
+    await send("feishu:app:group-a", "conv-a", "a1");
+    const original = binding("feishu:app:group-a", "conv-a");
+    await send("feishu:app:group-a", "conv-a", "a2");
+    assert.equal(binding("feishu:app:group-a", "conv-a").harnessSessionId, original.harnessSessionId);
+    assert.match(JSON.stringify(fixture.requests[1]), /native-response-0/);
+    await send("feishu:app:group-b", "conv-b", "b1");
+    assert.notEqual(binding("feishu:app:group-b", "conv-b").harnessSessionId, original.harnessSessionId);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[2]), /question-a1|native-response-0/);
+    await aide.close();
+    aide = open(); await aide.start();
+    assert.equal(aide.sessions().length, 2);
+    await send("feishu:app:group-a", "conv-a", "a3");
+    assert.equal(binding("feishu:app:group-a", "conv-a").harnessSessionId, original.harnessSessionId);
+    assert.match(JSON.stringify(fixture.requests[3]), /native-response-1/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[3]), /question-b1/);
+    assert.equal(aide.messages().filter((message) => message.conversationId === "conv-a").length, 6);
+    await aide.close();
+    const cwd = join(fixture.config.cwd, "other-cwd"); mkdirSync(cwd);
+    aide = open(cwd); await aide.start();
+    assert.equal(binding("feishu:app:group-a", "conv-a"), undefined);
+    await send("feishu:app:group-a", "conv-a", "a4");
+    assert.notEqual(binding("feishu:app:group-a", "conv-a").harnessSessionId, original.harnessSessionId);
+    assert.equal(aide.messages().filter((message) => message.conversationId === "conv-a").length, 8);
+  } finally { await aide.close(); }
 });

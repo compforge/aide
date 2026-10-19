@@ -57,7 +57,7 @@ function key(
 function testSession(root: string): { id: string; dir: string } {
   return {
     id: "bs_test",
-    dir: join(root, "projects", "project", "sessions", "bs_test"),
+    dir: join(root, "sessions", "bs_test"),
   };
 }
 

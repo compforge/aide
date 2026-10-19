@@ -23,8 +23,10 @@ export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
  * @link docs/channel/web.md
  */
 export function conversationView(aide: ChannelService, conversationId: string): ConversationView {
-  const state = aide.core.projection;
-  const inputs = aide.conversations.inputs(conversationId);
+  const scope = aide.findConversation(conversationId);
+  if (!scope) return { version: PROTOCOL_VERSION, biz: "aide.conversation", blocks: [], meta: { conversation_id: conversationId, activity: null } };
+  const state = scope.core.projection;
+  const inputs = scope.conversations.inputs(conversationId);
   const active = inputs.find((input) => input.status.phase === "running" || input.status.phase === "waiting");
   const queued = inputs.filter((input) => !input.status.phase).length;
   const invocations = aide.invocations().filter((item) => item.conversationId === conversationId);
@@ -94,6 +96,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
 
 export interface ConversationSummary {
   id: string;
+  sessionId: string;
   title: string;
   preview: string;
   updatedAt: string;
@@ -108,13 +111,13 @@ export function conversationList(aide: ChannelService): ConversationSummary[] {
   const ensure = (id: string) => {
     let summary = summaries.get(id);
     if (!summary) {
-      summary = { id, title: id === "me" ? "默认对话" : id, preview: "", updatedAt: "" };
+      summary = { id, sessionId: aide.findConversation(id)!.id, title: id === "me" ? "默认对话" : id, preview: "", updatedAt: "" };
       summaries.set(id, summary);
     }
     return summary;
   };
-  for (const conversation of aide.conversations.list()) ensure(conversation.id).updatedAt = conversation.createdAt;
-  for (const input of aide.conversations.inputs()) {
+  for (const conversation of aide.sessions().flatMap((scope) => scope.conversations.list())) ensure(conversation.id).updatedAt = conversation.createdAt;
+  for (const input of aide.sessions().flatMap((scope) => scope.conversations.inputs())) {
     const summary = ensure(input.spec.conversationId);
     if (input.metadata.creationTimestamp > summary.updatedAt) summary.updatedAt = input.metadata.creationTimestamp;
   }

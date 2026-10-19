@@ -52,10 +52,11 @@ Do not add a routine acknowledgement. Never claim an external action without evi
 For programming work, preserve requirement identity (source/category/id), repository identity (forge/path), and any PR identities in the work instruction. Do not assume a checkout from a repository name.
 Current time: ${new Date().toISOString()}. Default timezone: ${original.spec.timezone ?? process.env.AIDE_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone}.
 Input: ${JSON.stringify(original.spec)}\nRecent conversation: ${JSON.stringify(history)}`;
-    let laneId: string | undefined;
+    // @spec Consecutive inputs reuse a stable Lane; each Chief Target retains its native context.
+    let laneId = chiefTarget(original.spec.conversationId);
     for (let round = 0; round < 8; round++) {
       const result = await execution.verbs.harness({ title: "Chief", harnessTargetId: chiefTarget(original.spec.conversationId),
-        laneId: laneId ?? "main", ...(!laneId ? { newLane: true } : {}), prompt, timeoutMs: 180_000 });
+        laneId, prompt, timeoutMs: 180_000 });
       if (result.state !== "success") throw new Error(`Chief Harness ${result.state}${result.state === "failure" ? `: ${result.error}` : ""}`);
       if (result.value.outcome !== "completed") throw new Error("Chief Harness invocation declined");
       laneId = result.value.laneId;

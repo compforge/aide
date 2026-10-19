@@ -94,20 +94,21 @@ export function httpChannel(aide: WebService, log: Logger) {
       }
       // Unscoped interactions remain in the local inbox; scoped questions follow their conversation.
       if (request.method === "GET" && url.pathname === "/interactions") {
-        json(response, 200, [...aide.core.projection.interactions.values()]
+        json(response, 200, aide.sessions().flatMap((scope) => [...scope.core.projection.interactions.values()])
           .filter((item) => !url.searchParams.has("conversationId") || !item.pluginContext?.conversationId || item.pluginContext.conversationId === url.searchParams.get("conversationId"))
           .map((item) => item.request).filter((item) => item.status === "pending"));
       } else if (request.method === "POST" && url.pathname === "/interactions") {
         const { messageId, result } = InteractionResponseSchema.parse(await body(request));
-        const pending = aide.core.projection.interactions.get(messageId)?.request;
-        if (!pending || pending.status !== "pending") {
+        const core = aide.sessions().find((scope) => scope.core.projection.interactions.has(messageId))?.core;
+        const pending = core?.projection.interactions.get(messageId)?.request;
+        if (!core || !pending || pending.status !== "pending") {
           json(response, 409, { error: "This interaction is no longer pending" }); return;
         }
         if (!validInputResult(pending.request, result)) {
           json(response, 400, { error: "Answer does not match the pending interaction" }); return;
         }
         // @spec Channel answers settle Aide's original Interaction; no separate approval state.
-        const receipt = await aide.core.resolveInteraction({ kind: "interaction_response", messageId }, async () => result);
+        const receipt = await core.resolveInteraction({ kind: "interaction_response", messageId }, async () => result);
         log.info({ messageId, kind: result.kind, completed: receipt.result }, "Channel interaction response");
         json(response, receipt.result ? 200 : 409, { completed: receipt.result });
       } else if (request.method === "POST" && url.pathname === "/messages") {

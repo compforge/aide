@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type { Logger } from "pino";
 import type { ResourceType } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/host/plugin/manager.ts";
@@ -32,7 +31,7 @@ export class Personal {
   private readonly chiefConversations = new Map<string, string>();
   private readonly targets: { id: string; harness: string }[];
 
-  constructor(private readonly home: string, private readonly options: { timezone: string; chiefModel?: ChiefAgentOptions["model"] }, private readonly log: Logger,
+  constructor(private readonly options: { timezone: string; chiefModel?: ChiefAgentOptions["model"] }, private readonly log: Logger,
     runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; watches: ReturnType<typeof parseWatches> }) {
     this.core = runtime.core;
     this.session = runtime.session;
@@ -51,6 +50,7 @@ export class Personal {
     const id = chiefTarget(conversationId);
     if (this.chiefConversations.has(id)) return;
     this.chiefConversations.set(id, conversationId);
+    if (!this.session.meta.lanes[id]) this.session.setLane(id, { laneId: id, createdFor: { type: "session" }, harnessSessions: {} });
     this.targets.push({ id, harness: "chief" });
     this.session.setHarnessTarget(id, { harnessTargetId: id, harness: "chief" });
   }
@@ -75,9 +75,10 @@ export class Personal {
     });
     return (options) => createChiefAgent({ ...options, ...settings,
       model: this.options.chiefModel ?? settings.model, work: this.work(conversationId),
-      sessionDir: join(this.home, "chief-sessions"), tools, beforeWorkMutation: () => { active(); } });
+      tools, beforeWorkMutation: () => { active(); } });
   }
 
+  get id() { return this.session.id; }
   get conversations() { return this.store.conversations; }
   invocations() { return this.plugins.listHarnessInvocations(); }
   conversationIds() { return [...new Set([...this.store.conversations.list().map((item) => item.id), ...this.works().map((item) => item.conversationId)])]; }

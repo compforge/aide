@@ -30,21 +30,21 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
     execute: async () => { throw new Error("Unexpected Work"); } }, root, prompts);
   let aide = new Aide(root, options, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  const input = { id: "one", conversationId: "me", text: "private-information" };
+  const input = { id: "one", sessionId: "me", conversationId: "me", text: "private-information" };
   const [first, duplicate] = await Promise.all([aide.receive(input), aide.receive(input)]);
   assert.equal(first.id, duplicate.id);
   await aide.settled();
   assert.equal(calls, 1);
-  assert.equal(aide.store.read().works.length, 0);
+  assert.equal(aide.works().length, 0);
   assert.deepEqual(aide.messages().map((m) => m.text), ["private-information", "直接回答"]);
-  await aide.receive({ ...input, conversationId: "other", text: "hello" }); await aide.settled();
+  await aide.receive({ ...input, sessionId: "other", conversationId: "other", text: "hello" }); await aide.settled();
   assert.doesNotMatch(prompts[1]!, /private-information/);
   await aide.receive({ ...input, id: "failed", text: "fail" }); await aide.settled();
   assert.match(aide.messages().at(-1)!.text, /本次处理未完成/);
   await aide.close(); aide = new Aide(root, options, log); await aide.start();
   await aide.receive({ ...input, id: "failed", text: "fail" }); await aide.settled();
   assert.equal(calls, 3);
-  assert.equal(aide.store.read().works.length, 0);
+  assert.equal(aide.works().length, 0);
 });
 
 test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durable discovery and released model turns", { timeout: 30_000 }, async (t) => {
@@ -128,7 +128,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   await aide.start();
   await until(() => aide.questions().some((q) => q.request.status === "pending")).catch((error) => {
     const sessions = new SessionStore(root); const session = sessions.openSession(sessions.listSessions()[0]!.aideSessionId);
-    console.error({ modelCalls, inputs: aide.store.conversations.inputs(), log: readFileSync(join(session.dir, "session.log"), "utf8") });
+    console.error({ modelCalls, inputs: aide.session(conversationId).store.conversations.inputs(), log: readFileSync(join(session.dir, "session.log"), "utf8") });
     throw error;
   });
   assert.match(JSON.stringify(prompts[2]), /~\/.kube\/dev/);
@@ -137,8 +137,8 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   assert.equal(pendingQuestion.type, "question"); assert.equal(pendingQuestion.status, "pending");
   assert.ok(pendingQuestion.group_id);
 
-  assert.equal(executions, 0); assert.equal(aide.store.read().works.length, 0);
-  assert.ok(aide.plugins.listHarnessInvocations().every((item) => item.phase === "completed"), "Pi must release its turn before waiting for the user");
+  assert.equal(executions, 0); assert.equal(aide.works().length, 0);
+  assert.ok(aide.invocations().every((item) => item.phase === "completed"), "Pi must release its turn before waiting for the user");
   receive("decline", "拒绝"); await bot.deliver();
   assert.match(sent[0]!, /新需求/); assert.equal(sent.length, 1, "Chief's intermediate final text must not become a duplicate question");
   await bot.dispatch();
@@ -151,7 +151,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   assert.equal(finalReply.content, "已保留需求信息，暂不开始实现。");
   assert.deepEqual(completedView.blocks.filter((block) => block.type === "message" && block.role === "aide" && block.group_id === finalReply.group_id).map((block) => block.content), [finalReply.content]);
 
-  assert.equal(aide.store.read().works.length, 0);
+  assert.equal(aide.works().length, 0);
   receive("decline", "拒绝"); await bot.dispatch();
   assert.equal(modelCalls, 8, "Duplicate answers cannot become fresh user commands");
   receive("start", "现在开始实现"); await bot.dispatch();
@@ -160,26 +160,26 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   assert.deepEqual(secondQuestion.map((block) => block.status), ["answered", "pending"]);
   assert.notEqual(secondQuestion[0]!.group_id, secondQuestion[1]!.group_id);
   receive("directory", root); await bot.dispatch();
-  await until(() => aide.store.read().works[0]?.status === "done"); await aide.settled();
+  await until(() => aide.works()[0]?.status === "done"); await aide.settled();
   await bot.deliver();
   assert.equal(executions, 1);
   assert.deepEqual(toolsSeen, ["list_environments", "read_environment", "read_requirement", "list_work", "confirm", "create_work", "ask", "create_work"]);
-  assert.equal(aide.store.read().works[0]!.conversationId, conversationId);
+  assert.equal(aide.works()[0]!.conversationId, conversationId);
   assert.ok(sent.includes("实现已完成"));
-  const discoveries = aide.store.conversations.inputs().filter((item) => item.spec.origin === "source");
+  const discoveries = aide.session(conversationId).store.conversations.inputs().filter((item) => item.spec.origin === "source");
   assert.equal(discoveries.length, 1);
   assert.equal(discoveries[0]!.status.phase, "done");
-  assert.equal(aide.store.conversations.input(digest([conversationId, "decline"]))!.spec.replyTo,
+  assert.equal(aide.session(conversationId).store.conversations.input(digest([conversationId, "decline"]))!.spec.replyTo,
     aide.questions()[0]!.request.messageId);
-  const source = aide.store.resources.list(SOURCE_TYPE)[0]!;
+  const source = aide.session(conversationId).store.resources.list(SOURCE_TYPE)[0]!;
   const sessions = new SessionStore(root);
-  const poll = () => aide.plugins.enqueue({ aideSessionId: sessions.listSessions()[0]!.aideSessionId, pluginInstanceId: "personal", namespace: "v1",
+  const poll = () => aide.session(conversationId).plugins.enqueue({ aideSessionId: sessions.listSessions()[0]!.aideSessionId, pluginInstanceId: "personal", namespace: "v1",
     resourceApiVersion: SOURCE_TYPE.apiVersion, resourceKind: SOURCE_TYPE.kind, resourceId: source.metadata.name });
   await poll();
   assert.equal(modelCalls, 12, "Unchanged observations must not call the model again");
   writeFileSync(join(bin, "meegle"), `#!/usr/bin/env node\nconsole.log(JSON.stringify({ data: [${JSON.stringify({ ...record, updated_at: "2026-10-19" })}] }));\n`, { mode: 0o755 });
   await poll();
-  await until(() => aide.store.conversations.inputs().some((item) => item.status.phase === "done" && !!item.status.quietReason));
+  await until(() => aide.session(conversationId).store.conversations.inputs().some((item) => item.status.phase === "done" && !!item.status.quietReason));
   await bot.deliver();
   assert.equal(executions, 1);
   assert.ok(!aide.messages().some((m) => m.text.includes("internal summary")));

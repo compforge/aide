@@ -46,7 +46,7 @@ test("Feishu inbox survives restart; duplicate events do not execute twice; ordi
   await channel.deliver();
   assert.equal(routes, 1);
   assert.deepEqual(sent.map((message) => message.text), ["怎么称呼你？"]);
-  assert.equal(aide.store.read().works.length, 0);
+  assert.equal(aide.works().length, 0);
   await channel.close();
   channel = new FeishuChannel(home, "cli_test", aide, transport, log);
   channel.receive(event("om_1", "写个问候"));
@@ -58,7 +58,7 @@ test("Feishu inbox survives restart; duplicate events do not execute twice; ordi
   await aide.settled();
   await channel.deliver();
   assert.equal(routes, 2);
-  assert.equal(aide.store.read().works.length, 0);
+  assert.equal(aide.works().length, 0);
   assert.equal(sent.at(-1)!.text, "你好，小明");
   assert.ok(sent.every((message) => message.chatId === "oc_chat"));
 });
@@ -170,7 +170,7 @@ test("Feishu accepts exact bot mentions, strips SDK placeholders, isolates chats
   assert.deepEqual(new Set(aide.messages().map((item) => item.conversationId)), new Set([
     "feishu:cli_group:oc_group", "feishu:cli_group:oc_other_group", "feishu:cli_group:oc_direct",
   ]));
-  assert.equal(aide.store.read().works.length, 0);
+  assert.equal(aide.works().length, 0);
 });
 
 test("Feishu accepts nullable permission-restricted user IDs and still requires the bot open ID", async (t) => {

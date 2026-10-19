@@ -35,7 +35,7 @@ function stores() {
   roots.push(root);
   const session = {
     id: "bs_runner",
-    dir: join(root, "projects", "project", "sessions", "bs_runner"),
+    dir: join(root, "sessions", "bs_runner"),
   };
   const sessionHandle = new SessionHandle(
     session.id,
@@ -457,17 +457,8 @@ describe("Plugin Runner process boundary", () => {
       kind: "message",
       text: JSON.stringify({
         global: join(root, "plugins", "tests%2Fprocess-plugin"),
-        project: join(
-          root,
-          "projects",
-          "project",
-          "plugins",
-          "tests%2Fprocess-plugin",
-        ),
         session: join(
           root,
-          "projects",
-          "project",
           "sessions",
           "bs_runner",
           "plugins",
@@ -475,8 +466,6 @@ describe("Plugin Runner process boundary", () => {
         ),
         instance: join(
           root,
-          "projects",
-          "project",
           "sessions",
           "bs_runner",
           "plugins",
