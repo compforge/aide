@@ -1,3 +1,5 @@
+import type { ConnectorClient } from "@compforge/aide-plugin";
+import { emptyConnectors } from "../../connector-client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
 import { CONVERSATION_TYPE } from "@compforge/aide-plugin";
 import { ConversationStore } from "../conversation/store.ts";
@@ -142,6 +144,7 @@ export interface PluginToast {
 }
 
 export interface ManagerOptions {
+  readonly connectors?: ConnectorClient;
   /** 所有 Controller 合计可占用的执行容量；默认 1。 */
   maxTotalConcurrency?: number;
   /** Manager 与所有 Plugin 数据共享的 AideSession owner。 */
@@ -280,6 +283,7 @@ export class Manager {
   private readonly hooks: HookRuntime;
   private readonly hookRegistry = new HookRegistry();
   private readonly instances: PluginInstanceRepository;
+  private readonly connectors: ConnectorClient;
   private readonly packageLoader: PackageLoader;
   private readonly pluginSupervisor?: PluginSupervisor;
   private readonly snapshot: () => ReconcileSnapshot;
@@ -313,6 +317,7 @@ export class Manager {
     this.capacity = new ReconcileCapacity(options.maxTotalConcurrency ?? 1);
     this.now = options.now ?? (() => new Date());
     this.instances = options.instances;
+    this.connectors = options.connectors ?? emptyConnectors;
     if (
       options.session &&
       (options.session.id !== this.instances.session.id ||
@@ -654,6 +659,7 @@ export class Manager {
         writeLog: (entry) => this.writePluginLog(instance, entry),
       },
       resources,
+      this.connectors,
     );
     let activation!: Promise<void>;
     activation = Promise.resolve()
@@ -672,6 +678,7 @@ export class Manager {
               dataDirs,
               {
                 resources,
+                connectors: binding.connectors,
                 invokeVerb: (context, request) => {
                   if (context.pluginInstanceId !== instance.pluginInstanceId) {
                     throw new Error(

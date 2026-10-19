@@ -6,7 +6,7 @@ Plugin 是业务扩展的组织与所有权单位。插件声明资源和回调�
 
 `PluginPackage` 通过 `activate(context)` 注册 Resource Controller、Source、Watch、Hook、Command 等能力。Package 描述插件代码，一份启用配置对应一个 PluginInstance；Host 为实例建立 Binding 并启动独立 Runner，加载插件后完成注册。
 
-Host 的 Supervisor 管理 Runner 和 IPC，Runner 只执行插件回调。资源存储、队列和执行事实留在 Host。PluginContext 将资源操作和 verb 转成跨进程请求，插件无需引用宿主 Store 或 Harness SDK。
+Host 的 Supervisor 管理 Runner 和 IPC，Runner 只执行插件回调。资源存储、队列、全局 Connector 与执行事实留在 Host。PluginContext 将资源操作、Connector 查询和 verb 转成跨进程请求，插件无需引用宿主 Store、提供方客户端或 Harness SDK。
 
 实例关闭或 Runner 失败时，Host 撤销注册并终止未完成调用。Runner 不自动重启；重新启动 Aide 会重新激活插件。回调中的内存状态与异步调用栈不会跨重启恢复。
 

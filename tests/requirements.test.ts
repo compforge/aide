@@ -1,13 +1,13 @@
 import { ConversationStore } from "../src/host/conversation/store.ts";
 import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Connectors } from "../connectors/index.ts";
-import { loadWatches, type Watch } from "../plugins/personal/source-config.ts";
-import { MeegleCliRequirementConnector } from "../connectors/requirements/meego.ts";
+import { parseWatches, validateWatchScopes, type Watch } from "../plugins/personal/source-config.ts";
+import { loadMeegoRequirementConfigs, MeegleCliRequirementConnector } from "../connectors/requirements/meego.ts";
 import { SessionStore } from "../src/host/store/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
@@ -71,25 +71,23 @@ test("Requirement Source commits the inbox before its watermark and never create
   assert.deepEqual(reopened.get(SOURCE_TYPE, "mine").status, before);
 });
 
-test("Discovery requires an explicit assignee scope and unique watch identity", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "aide-connectors-")); t.after(() => rmSync(root, { recursive: true, force: true }));
-  const path = join(root, "connectors.json");
+test("Discovery requires an explicit assignee scope and unique watch identity", () => {
   const watch = { id: "mine", source: "work", conversationId: "me" };
-  const config = { requirements: { work: { provider: "meego", projectKey: "project", userKeys: [] as string[] } }, watches: [watch] };
-  writeFileSync(path, JSON.stringify(config)); assert.throws(() => loadWatches(path), /non-empty/);
-  config.requirements.work.userKeys = ["me"]; writeFileSync(path, JSON.stringify(config));
-  assert.equal(loadWatches(path)[0]!.intervalMs, 300_000);
-  config.watches.push(watch); writeFileSync(path, JSON.stringify(config)); assert.throws(() => loadWatches(path), /Duplicate/);
+  const config = { requirements: { work: { provider: "meego", projectKey: "project", userKeys: [] as string[] } } };
+  assert.throws(() => loadMeegoRequirementConfigs(config), /non-empty/);
+  config.requirements.work.userKeys = ["me"];
+  const watches = parseWatches({ watches: [watch] });
+  assert.equal(watches[0]!.intervalMs, 300_000);
+  validateWatchScopes(watches, loadMeegoRequirementConfigs(config));
+  assert.throws(() => validateWatchScopes(watches, []), /explicit assignee/);
+  assert.throws(() => validateWatchScopes(watches, [{ source: "work" }]), /explicit assignee/);
+  assert.throws(() => parseWatches({ watches: [watch, watch] }), /Duplicate/);
 });
 
-test("Watches sharing a connector get separate conversations unless explicitly routed together", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "aide-watch-routing-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const path = join(root, "connectors.json");
-  writeFileSync(path, JSON.stringify({
-    requirements: { work: { provider: "meego", projectKey: "project", userKeys: ["me"] } },
+test("Watches sharing a connector get separate conversations unless explicitly routed together", () => {
+  const watches = parseWatches({
     watches: [{ id: "mine", source: "work" }, { id: "team", source: "work" },
       { id: "urgent", source: "work", conversationId: "feishu:bot:chat" }],
-  }));
-  assert.deepEqual(loadWatches(path).map((watch) => watch.conversationId), ["source:mine", "source:team", "feishu:bot:chat"]);
+  });
+  assert.deepEqual(watches.map((watch) => watch.conversationId), ["source:mine", "source:team", "feishu:bot:chat"]);
 });

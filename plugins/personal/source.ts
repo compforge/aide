@@ -1,14 +1,14 @@
 import type { PluginContext, Resource } from "@compforge/aide-plugin";
-import { Connectors } from "../../connectors/index.ts";
-import { loadWatches, type Watch } from "./source-config.ts";
+import type { ConnectorClient } from "@compforge/aide-plugin";
+import { parseWatches, type Watch } from "./source-config.ts";
 import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "./chief-model.ts";
 
 export const SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "RequirementSource" } as const;
 interface SourceStatus { seen?: Record<string, string>; lastObservedAt?: string; error?: string | null }
 
 /** Polls are scheduled by the runtime. Persist the inbox before advancing its discovery watermark. */
-export async function observeRequirements(context: Pick<PluginContext, "resources" | "logger">, resource: Resource<Watch, SourceStatus>, connectors: Connectors): Promise<void> {
-  const summaries = await connectors.requirement(resource.spec.source).list();
+export async function observeRequirements(context: Pick<PluginContext, "resources" | "logger">, resource: Resource<Watch, SourceStatus>, connectors: ConnectorClient): Promise<void> {
+  const summaries = await connectors.requirements.list(resource.spec.source);
   const seen = { ...resource.status.seen };
   let discovered = 0;
   for (const requirement of summaries) {
@@ -32,9 +32,9 @@ export async function observeRequirements(context: Pick<PluginContext, "resource
 }
 
 export function registerSources(context: PluginContext): void {
-  const watches = loadWatches();
+  const watches = parseWatches(context.instance.config);
   if (!watches.length) return;
-  const connectors = Connectors.load();
+  const connectors = context.connectors;
   context.controllers.register<Watch, SourceStatus>({ resourceType: SOURCE_TYPE,
     sources: [{ type: "resource", sourceId: "configured-requirements", async start(source) {
       for (const watch of watches) await source.emit({ name: digest(watch), spec: watch });

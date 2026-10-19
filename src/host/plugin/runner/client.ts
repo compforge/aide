@@ -1,3 +1,5 @@
+import type { ConnectorClient } from "@compforge/aide-plugin";
+import { dispatchConnector, emptyConnectors } from "../../../connector-client.ts";
 import { AsyncResource } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 
@@ -52,6 +54,7 @@ interface SourceCallbacks {
 }
 
 export interface PluginRunnerCallbacks {
+  readonly connectors?: ConnectorClient;
   readonly resources: ResourceClient;
   readonly invokeVerb: (
     context: ExecutionScope,
@@ -415,6 +418,9 @@ export class PluginRunnerClient {
 
   private async handleHostRequest(request: HostRequest): Promise<unknown> {
     switch (request.method) {
+      case "connector.read":
+        if (this.failed || this.closing) throw new Error("Plugin Runner is no longer active");
+        return dispatchConnector(this.callbacks.connectors ?? emptyConnectors, request.request);
       case "command.verb": {
         const context = this.commandContexts.get(request.executionId);
         if (!context || this.failed || this.closing) throw new Error("Command execution is no longer active");

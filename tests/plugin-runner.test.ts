@@ -88,6 +88,47 @@ afterEach(() => {
 });
 
 describe("Plugin Runner process boundary", () => {
+  test("two unrelated plugin instances share the host connector capabilities without personal config", async () => {
+    const { instances, session, entry } = stores();
+    cpSync(join(import.meta.dir, "fixtures", "environment-plugin.ts"), entry);
+    for (const id of ["first", "second"]) instances.create({
+      pluginInstanceId: id, pluginId: "tests/environment-plugin", packageVersion: "1.0.0", marketplace: "fixtures",
+    });
+    const requirement = { source: "work", category: "story", id: "1", title: "Shared", state: "open" as const };
+    const identity = { forge: "forge", path: "org/repo", number: 1 };
+    const pull = { identity, title: "Shared PR", url: "https://example.com/1", lifecycle: "open" as const,
+      reviewThreads: "none" as const, mergeability: "ready" as const, observedAt: "2026-10-19T00:00:00Z" };
+    let reads = 0;
+    const connectors = new Connectors([{
+      source: "work", provider: "fixture", async list() { reads++; return [requirement]; }, async get() { return requirement; },
+    }], [{
+      forge: "forge", provider: "github", async list() { return [identity]; }, async get() { return pull; }, async comments() { return []; },
+    }], new Environments({ dev: { kind: "host", aliases: ["开发"], host: { name: "vm", transport: "ssh", address: "not-contacted.invalid" } } }));
+    const failures: unknown[] = [];
+    const manager = new Manager({
+      instances, session, connectors, pluginSupervisor: new PluginSupervisor(),
+      onActivationError: ({ error }) => { failures.push(error); },
+      async loadPackageEntry(pluginId, version) { return { pluginId, version, entryUrl: pathToFileURL(entry).href }; },
+    });
+    try {
+      await manager.start();
+      expect(failures).toEqual([]);
+      for (const id of ["first", "second"]) {
+        expect(manager.isInstanceActive(id)).toBe(true);
+        const response = await executeCommand(manager, `environment-${id}`, { argument: "" });
+        if (response?.kind !== "message") throw new Error("Expected connector result");
+        expect(JSON.parse(response.text)).toMatchObject({
+          environment: { name: "dev", host: { address: "not-contacted.invalid" } },
+          catalog: { requirements: [{ source: "work", provider: "fixture" }], forges: [{ forge: "forge", provider: "github" }] },
+          requirements: [requirement], requirement, pulls: [identity], pull, comments: [],
+        });
+        await expect(executeCommand(manager, `environment-${id}`, { argument: "missing" })).rejects.toThrow("Unknown environment: missing");
+      }
+      expect(reads).toBe(2);
+      expect(instances.list().every((instance) => Object.keys(instance.config).length === 0)).toBe(true);
+    } finally { await manager.close(); }
+  });
+
   test("preserves nested error causes across IPC serialization", () => {
     const restored = restoredError(serializedError(
       new Error("Could not list Forge PullRequests", {
@@ -525,3 +566,5 @@ describe("Plugin Runner process boundary", () => {
     await manager.close();
   });
 });
+import { Connectors } from "../connectors/index.ts";
+import { Environments } from "../connectors/environments.ts";

@@ -28,7 +28,7 @@ Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 
 - Work 工具读取、创建、更新与删除绑定会话的 Task / Routine，具体契约见 [Personal](../plugin/personal.md)。
 - ask / confirm 提出问题意图，Controller 在模型 Turn 结束后通过 Core Interaction 等待答复。
-- Connector 工具查询需求、PR 与评论，帮助判断观察与已有工作的关系。
+- Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
 - dismiss_observation 保存忽略原因，让不值得通知的 Source 观察静默结束。
 
 提示词表达判断策略，工具边界保证持久化与会话范围。Work 写工具在提出问题后暂停接受修改，直到用户答复进入续轮；这项约束不能只依赖模型记住提示。

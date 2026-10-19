@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 
 import {
   jsonObject,
-  loadConnectorConfig,
 } from "../config.ts";
 import type {
   Requirement,
@@ -101,10 +100,8 @@ function commandIdentifier(name: string, value: string): string {
  * keychain-backed profile; Aide stores only connector routing fields.
  */
 export function loadMeegoRequirementConfigs(
-  paths: string,
+  config: Readonly<Record<string, unknown>>,
 ): readonly MeegoRequirementConfig[] {
-  const config = loadConnectorConfig(paths);
-  if (!config) return [];
   const requirements = config.requirements === undefined
     ? {}
     : object("Aide config requirements", config.requirements);
@@ -605,10 +602,10 @@ export class MeegleCliRequirementConnector
 }
 
 export function createMeegoRequirementConnectors(
-  paths: string,
+  config: Readonly<Record<string, unknown>>,
   run?: MeegleCliRunner,
 ): readonly RequirementConnector[] {
-  return loadMeegoRequirementConfigs(paths).map(
+  return loadMeegoRequirementConfigs(config).map(
     (config) => new MeegleCliRequirementConnector(config, run),
   );
 }

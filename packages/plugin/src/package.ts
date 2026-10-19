@@ -1,3 +1,4 @@
+import type { ConnectorClient } from "./connectors/index.ts";
 import type { Controller } from "./reconcile.ts";
 import type { ResourceClient } from "./resource.ts";
 import type { CommandDefinition } from "./command.ts";
@@ -99,6 +100,7 @@ export interface PluginLifecycle {
 }
 
 export interface PluginContext {
+  readonly connectors: ConnectorClient;
   readonly instance: PluginInstance;
   readonly session: PluginSessionContext;
   readonly dataDirs: PluginDataDirectories;
