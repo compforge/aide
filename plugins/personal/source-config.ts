@@ -1,6 +1,4 @@
 import { z } from "zod";
-import { connectorConfigPath, loadConnectorConfig } from "../../connectors/config.ts";
-import { loadMeegoRequirementConfigs } from "../../connectors/requirements/meego.ts";
 
 export const RepositorySchema = z.object({ forge: z.string().min(1), path: z.string().min(1) });
 export const WatchSchema = z.object({
@@ -10,15 +8,18 @@ export const WatchSchema = z.object({
 });
 export type Watch = Omit<z.infer<typeof WatchSchema>, "conversationId"> & { conversationId: string };
 
-export function loadWatches(path = connectorConfigPath()): Watch[] {
-  const watches: Watch[] = z.array(WatchSchema).parse(loadConnectorConfig(path)?.watches ?? []).map((watch) => ({ ...watch, conversationId: watch.conversationId ?? `source:${watch.id}` }));
+export function parseWatches(config: Readonly<Record<string, unknown>> = {}): Watch[] {
+  const watches: Watch[] = z.array(WatchSchema).parse(config.watches ?? []).map((watch) => ({ ...watch, conversationId: watch.conversationId ?? `source:${watch.id}` }));
   if (new Set(watches.map((item) => item.id)).size !== watches.length) throw new Error("Duplicate watch id");
-  const requirements = loadMeegoRequirementConfigs(path);
+  return watches;
+}
+
+/** Automatic polling requires an explicit personal scope, independently of connector access. */
+export function validateWatchScopes(watches: readonly Watch[], requirements: readonly { source: string; userKeys?: readonly string[] }[]): void {
   for (const watch of watches) {
     if (!requirements.find((item) => item.source === watch.source)?.userKeys?.length) {
       throw new Error(`Watch ${watch.id} requires a Meego connector with explicit assignee userKeys`);
     }
   }
-  return watches;
 }
 

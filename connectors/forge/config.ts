@@ -1,6 +1,5 @@
 import {
   jsonObject,
-  loadConnectorConfig,
 } from "../config.ts";
 import type { Fetch } from "./http.ts";
 import { GitHubForgeConnector } from "./github.ts";
@@ -76,11 +75,9 @@ function environmentToken(
 
 /** Parses the devloop-compatible host-keyed `forges` registry. */
 export function loadForgeConfigs(
-  paths: string,
+  config: Readonly<Record<string, unknown>>,
   environment: Environment = process.env,
 ): readonly ForgeConfig[] {
-  const config = loadConnectorConfig(paths);
-  if (!config) return [];
   const forges = config.forges === undefined
     ? {}
     : jsonObject("Aide config forges", config.forges);
@@ -118,19 +115,19 @@ export function loadForgeConfigs(
 }
 
 export function createForgeConnectors(
-  paths: string,
+  config: Readonly<Record<string, unknown>>,
   options: {
     readonly environment?: Environment;
     readonly fetch?: Fetch;
   } = {},
 ): readonly ForgeConnector[] {
   const connectors: ForgeConnector[] = [];
-  for (const config of loadForgeConfigs(paths, options.environment)) {
-    if (!config.token) continue;
+  for (const entry of loadForgeConfigs(config, options.environment)) {
+    if (!entry.token) continue;
     connectors.push(
-      config.provider === "github"
-        ? new GitHubForgeConnector(config, options)
-        : new GitLabForgeConnector(config, options),
+      entry.provider === "github"
+        ? new GitHubForgeConnector(entry, options)
+        : new GitLabForgeConnector(entry, options),
     );
   }
   return connectors;

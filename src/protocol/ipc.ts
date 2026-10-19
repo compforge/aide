@@ -1,3 +1,4 @@
+import type { ConnectorRequest } from "./connectors.ts";
 import type {
   CommandInputShape,
   CommandAlias,
@@ -132,6 +133,7 @@ export type RunnerRequest =
     };
 
 export type HostRequest =
+  | { readonly method: "connector.read"; readonly request: ConnectorRequest }
   | { readonly method: "command.verb"; readonly executionId: string; readonly verb: "submit"; readonly input: CommandSubmitInput }
   | { readonly method: "command.verb"; readonly executionId: string; readonly verb: "configureModel"; readonly input: { readonly model?: string; readonly effort?: string } }
   | {

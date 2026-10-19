@@ -1,3 +1,4 @@
+import { createConnectorClient } from "../connector-client.ts";
 import type {
   CommandDefinition,
   CommandContext,
@@ -386,6 +387,7 @@ async function activate(
     session,
     dataDirs: Object.freeze({ ...dataDirs }),
     resources,
+    connectors: createConnectorClient((request) => callHost({ method: "connector.read", request })),
     toast: Object.freeze({
       show(message: ToastMessage) {
         send({ kind: "toast", message });

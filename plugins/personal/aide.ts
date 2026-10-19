@@ -17,12 +17,16 @@ import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
 import { Connectors } from "../../connectors/index.ts";
-import { loadWatches } from "./source-config.ts";
+import { parseWatches, validateWatchScopes } from "./source-config.ts";
+import { loadMeegoRequirementConfigs } from "../../connectors/requirements/meego.ts";
+import type { ConnectorClient } from "@compforge/aide-plugin";
+import type { AideConfig } from "../../src/config.ts";
 
 /** Channels and Sources submit durable input; Chief decides whether Work is needed. */
 export class Aide {
   readonly store: Store;
   readonly plugins: Manager;
+  private readonly connectors: ConnectorClient;
   private intake: Promise<unknown> = Promise.resolve();
   private starting?: Promise<void>;
   private closed = false;
@@ -35,8 +39,15 @@ export class Aide {
 
   constructor(private readonly home: string, private readonly options: {
     cwd: string; timezone: string; model?: string;
+    config?: AideConfig;
+    connectors?: ConnectorClient;
     createAdapter: ChannelControllerOptions["createAdapter"];
   }, private readonly log: Logger) {
+    const config = options.config;
+    const watches = parseWatches(config?.plugins.personal);
+    validateWatchScopes(watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
+    this.connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
+    this.log.info({ environments: Object.keys(config?.connectors.environments ?? {}).length, watches: watches.length }, "Loaded host connector configuration");
     const sessions = new SessionStore(home);
     const previous = sessions.listSessions({ cwd: options.cwd })[0];
     this.session = previous ? sessions.openSession(previous.aideSessionId)
@@ -48,10 +59,11 @@ export class Aide {
     if (!instances.list().some((instance) => instance.pluginInstanceId === "personal")) {
       instances.create({ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin" });
     }
+    instances.replaceConfig("personal", { watches });
     this.channel = new Channel({ session: this.session,
       controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter,
         resolveTarget: (id) => this.targets.find((item) => item.id === id) },
-      plugins: { instances, harnessTargets: this.targets, selectedHarnessTargetId: () => target.id,
+      plugins: { instances, connectors: this.connectors, harnessTargets: this.targets, selectedHarnessTargetId: () => target.id,
         harnessInvocationGate: () => "auto_approve", pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => ({ pluginId, version,
           entryUrl: new URL("./plugin.ts", import.meta.url).href }),
@@ -63,7 +75,7 @@ export class Aide {
       ({ resource }) => this.wake(resource, resource.metadata.name), this.plugins.conversations!);
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
     this.store.conversations.subscribe((conversation) => this.registerConversation(conversation.id));
-    for (const watch of loadWatches()) this.registerConversation(watch.conversationId);
+    for (const watch of watches) this.registerConversation(watch.conversationId);
   }
 
   private registerConversation(conversationId: string): void {
@@ -84,7 +96,7 @@ export class Aide {
       if (inputs.length !== 1 || inputs[0]!.status.question || inputs[0]!.status.quietReason) throw new Error("Chief is not accepting further mutations in this turn");
       return inputs[0]!;
     };
-    const tools = chiefTools(Connectors.load(), (question) => {
+    const tools = chiefTools(this.connectors, (question) => {
       const input = active();
       this.store.conversations.update(input, { question });
     }, (quietReason) => {

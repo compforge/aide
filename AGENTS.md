@@ -37,7 +37,7 @@ plugins/personal/
 agents/
   pi/                      # 通用 Pi Agent：SDK、原生工具与会话
   chief/                   # Personal 提示词、Work / 问答 / Connector 工具
-connectors/                # Meego / GitHub / GitLab 访问与数据映射
+connectors/                # 全局环境目录、Meego / GitHub / GitLab 访问与数据映射
 packages/plugin/           # @compforge/aide-plugin 公共契约
 tests/                     # 内核、插件、Channel 与 Agent 验证
 scripts/install-service.sh # Linux 用户级 systemd 服务
@@ -46,7 +46,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 ## 关键约定
 
 - 根目录 `VERSION` 是产品版本。每次提交同步递增，默认 patch，同一提交只递增一次。
-- Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
+- Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
+- Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。环境发现只读配置，不代表连通性、健康或操作授权；Personal watch 策略归 `plugins.personal`。
 - Conversation / Input / Message 是 Host 内置对象。Channel / Source 决定 conversationId，Chief 按会话串行消费输入；会话分组不是权限边界。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。类型转换组合创建、暂停或删除，目标工作拥有新 id。
 - `pi` 提供通用 Agent，`chief` 加入 Personal 工具，两者复用 PiAdapter。通用 Pi 不依赖 Personal，Chief 的 WorkService 由宿主绑定范围；默认 Work 执行使用 Codex。

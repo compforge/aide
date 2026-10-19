@@ -1,3 +1,4 @@
+import { loadConfig } from "../src/config.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
@@ -49,14 +50,14 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   const root = process.env.AIDE_CHIEF_TEST_ROOT ?? mkdtempSync(join(tmpdir(), "aide-chief-pi-"));
   const agentDir = join(root, "pi"); mkdirSync(agentDir, { recursive: true });
   const bin = join(root, "bin"); mkdirSync(bin, { recursive: true });
-  const configPath = join(root, "connectors.json");
+  const configPath = join(root, "config.yaml");
   const conversationId = "feishu:cli_fixture:oc_me";
-  writeFileSync(configPath, JSON.stringify({ requirements: { work: { provider: "meego", projectKey: "project", categories: ["story"], userKeys: ["user-me"] } },
-    watches: [{ id: "mine", source: "work", conversationId, intervalMs: 30_000, repositories: [{ forge: "github.com", path: "compforge/aide" }] }] }));
+  writeFileSync(configPath, JSON.stringify({ connectors: { environments: { dev: { kind: "kubernetes", kubeconfig: "~/.kube/dev", namespace: "app", aliases: ["开发"] } }, requirements: { work: { provider: "meego", projectKey: "project", categories: ["story"], userKeys: ["user-me"] } } }, plugins: { personal: {
+    watches: [{ id: "mine", source: "work", conversationId, intervalMs: 30_000, repositories: [{ forge: "github.com", path: "compforge/aide" }] }] } } }));
   const record = { work_item_id: "123", name: "实现需求", work_item_status: "进行中", current_status_operator: [{ user_key: "user-me", name: "Me" }], updated_at: "2026-10-18", description: "给 aide 加一个功能" };
   writeFileSync(join(bin, "meegle"), `#!/usr/bin/env node\nconsole.log(JSON.stringify(process.argv.includes("config") ? "project.example.com" : { data: [${JSON.stringify(record)}] }));\n`, { mode: 0o755 });
-  const previous = { path: process.env.PATH, connectors: process.env.AIDE_CONNECTORS };
-  process.env.PATH = `${bin}:${previous.path}`; process.env.AIDE_CONNECTORS = configPath;
+  const previous = { path: process.env.PATH, connectors: process.env.AIDE_CONFIG };
+  process.env.PATH = `${bin}:${previous.path}`; process.env.AIDE_CONFIG = configPath;
   // Bun's default child environment is its startup snapshot. Exercise production startup with config already present.
   if (!process.env.AIDE_CHIEF_TEST_ROOT) {
     try {
@@ -67,7 +68,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
       assert.equal(code, 0, stdout + stderr);
     } finally {
       process.env.PATH = previous.path;
-      if (previous.connectors === undefined) delete process.env.AIDE_CONNECTORS; else process.env.AIDE_CONNECTORS = previous.connectors;
+      if (previous.connectors === undefined) delete process.env.AIDE_CONFIG; else process.env.AIDE_CONFIG = previous.connectors;
       rmSync(root, { recursive: true, force: true });
     }
     return;
@@ -81,17 +82,19 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
     let tool: { name: string; args: unknown } | undefined;
     let text = "";
     switch (modelCalls++) {
-      case 0: tool = { name: "read_requirement", args: { source: "work", category: "story", id: "123" } }; break;
-      case 1: tool = { name: "list_work", args: {} }; break;
-      case 2: tool = { name: "confirm", args: { title: "新需求", prompt: "发现你名下的新需求，需要我开始实现吗？" } }; break;
-      case 3: tool = { name: "create_work", args: { kind: "task", title: "未确认的工作", instruction: "This must be rejected while waiting for confirmation", trigger: null } }; break;
-      case 4: text = "等待你的确认"; break;
-      case 5: text = "已保留需求信息，暂不开始实现。"; break;
-      case 6: tool = { name: "ask", args: { title: "开发范围", prompt: "在哪个工作目录开发？" } }; break;
-      case 7: text = "等待目录"; break;
-      case 8: tool = { name: "create_work", args: { kind: "task", title: "实现需求", instruction: `在 ${root} 实现 requirement work/story/123; repository github.com/compforge/aide`, trigger: null } }; break;
-      case 10: tool = { name: "dismiss_observation", args: { reason: "已有工作完成，不需要再次打扰用户" } }; break;
-      case 11: text = "This internal summary must not be delivered"; break;
+      case 0: tool = { name: "list_environments", args: {} }; break;
+      case 1: tool = { name: "read_environment", args: { name: "开发" } }; break;
+      case 2: tool = { name: "read_requirement", args: { source: "work", category: "story", id: "123" } }; break;
+      case 3: tool = { name: "list_work", args: {} }; break;
+      case 4: tool = { name: "confirm", args: { title: "新需求", prompt: "发现你名下的新需求，需要我开始实现吗？" } }; break;
+      case 5: tool = { name: "create_work", args: { kind: "task", title: "未确认的工作", instruction: "This must be rejected while waiting for confirmation", trigger: null } }; break;
+      case 6: text = "等待你的确认"; break;
+      case 7: text = "已保留需求信息，暂不开始实现。"; break;
+      case 8: tool = { name: "ask", args: { title: "开发范围", prompt: "在哪个工作目录开发？" } }; break;
+      case 9: text = "等待目录"; break;
+      case 10: tool = { name: "create_work", args: { kind: "task", title: "实现需求", instruction: `在 ${root} 实现 requirement work/story/123; repository github.com/compforge/aide`, trigger: null } }; break;
+      case 12: tool = { name: "dismiss_observation", args: { reason: "已有工作完成，不需要再次打扰用户" } }; break;
+      case 13: text = "This internal summary must not be delivered"; break;
       default: text = "已交办实现，我会跟进结果。";
     }
     if (tool) toolsSeen.push(tool.name);
@@ -108,7 +111,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   let executions = 0;
   const coding = fakeOptions({ execute: async (work) => { executions++; assert.match(work.instruction, /work\/story\/123/);
     return { action: "done", summary: "Implemented and verified", notification: "实现已完成", question: null, nextAt: null }; } }, root);
-  const aide: Aide = new Aide(root, { ...coding, createAdapter: (target, ports) => target.harness === "chief"
+  const aide: Aide = new Aide(root, { ...coding, config: loadConfig(configPath), createAdapter: (target, ports) => target.harness === "chief"
     ? createHarnessAdapter(target, { ...ports, targetConfig: { harness: "chief" },
       chiefSession: aide.chiefSession(target.id, { agentDir, model: { provider: "fixture", id: "test-model" } }) })
     : coding.createAdapter(target) }, log);
@@ -117,7 +120,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   t.after(async () => {
     await bot.close(); await aide.close(); server.closeAllConnections(); server.close();
     process.env.PATH = previous.path;
-    if (previous.connectors === undefined) delete process.env.AIDE_CONNECTORS; else process.env.AIDE_CONNECTORS = previous.connectors;
+    if (previous.connectors === undefined) delete process.env.AIDE_CONFIG; else process.env.AIDE_CONFIG = previous.connectors;
     rmSync(root, { recursive: true, force: true });
   });
   const receive = (id: string, text: string) => bot.receive({ sender: { sender_type: "user" }, message: { message_id: id, chat_id: "oc_me", chat_type: "p2p", message_type: "text", content: JSON.stringify({ text }) } });
@@ -127,23 +130,24 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
     console.error({ modelCalls, inputs: aide.store.conversations.inputs(), log: readFileSync(join(session.dir, "session.log"), "utf8") });
     throw error;
   });
+  assert.match(JSON.stringify(prompts[2]), /~\/.kube\/dev/);
   assert.equal(executions, 0); assert.equal(aide.store.read().works.length, 0);
   assert.ok(aide.plugins.listHarnessInvocations().every((item) => item.phase === "completed"), "Pi must release its turn before waiting for the user");
   receive("decline", "拒绝"); await bot.deliver();
   assert.match(sent[0]!, /新需求/); assert.equal(sent.length, 1, "Chief's intermediate final text must not become a duplicate question");
   await bot.dispatch();
   await until(() => aide.messages().some((m) => m.text === "已保留需求信息，暂不开始实现。"));
-  assert.match(JSON.stringify(prompts[5]), /declined/);
+  assert.match(JSON.stringify(prompts[7]), /declined/);
   assert.equal(aide.store.read().works.length, 0);
   receive("decline", "拒绝"); await bot.dispatch();
-  assert.equal(modelCalls, 6, "Duplicate answers cannot become fresh user commands");
+  assert.equal(modelCalls, 8, "Duplicate answers cannot become fresh user commands");
   receive("start", "现在开始实现"); await bot.dispatch();
   await until(() => aide.questions().some((q) => q.request.status === "pending"));
   receive("directory", root); await bot.dispatch();
   await until(() => aide.store.read().works[0]?.status === "done"); await aide.settled();
   await bot.deliver();
   assert.equal(executions, 1);
-  assert.deepEqual(toolsSeen, ["read_requirement", "list_work", "confirm", "create_work", "ask", "create_work"]);
+  assert.deepEqual(toolsSeen, ["list_environments", "read_environment", "read_requirement", "list_work", "confirm", "create_work", "ask", "create_work"]);
   assert.equal(aide.store.read().works[0]!.conversationId, conversationId);
   assert.ok(sent.includes("实现已完成"));
   const discoveries = aide.store.conversations.inputs().filter((item) => item.spec.origin === "source");
@@ -156,7 +160,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Codex, with durab
   const poll = () => aide.plugins.enqueue({ aideSessionId: sessions.listSessions()[0]!.aideSessionId, pluginInstanceId: "personal", namespace: "v1",
     resourceApiVersion: SOURCE_TYPE.apiVersion, resourceKind: SOURCE_TYPE.kind, resourceId: source.metadata.name });
   await poll();
-  assert.equal(modelCalls, 10, "Unchanged observations must not call the model again");
+  assert.equal(modelCalls, 12, "Unchanged observations must not call the model again");
   writeFileSync(join(bin, "meegle"), `#!/usr/bin/env node\nconsole.log(JSON.stringify({ data: [${JSON.stringify({ ...record, updated_at: "2026-10-19" })}] }));\n`, { mode: 0o755 });
   await poll();
   await until(() => aide.store.conversations.inputs().some((item) => item.status.phase === "done" && !!item.status.quietReason));

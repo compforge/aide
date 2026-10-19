@@ -6,6 +6,7 @@ Aide 由 Channel、执行内核和 Plugin 协作。Channel 把外部消息带入
 Web / Feishu Channel ──→ Conversation / Input / Message
                                   │
 Aide Host                         │ 内置 Resource 投影
+├── 全局 Connector 目录与提供方客户端
 ├── Resource 存储、Controller 队列与 Watch
 ├── Session / Lane / HarnessInvocation / Turn
 ├── Interaction 与 Harness Adapter ──→ Agent / CLI
@@ -17,7 +18,7 @@ Plugin Runner
 
 ## 进程与所有权
 
-Host 是主进程，拥有存储、队列、Harness 调用、用户交互与 Runner 生命周期。Runner 是加载插件并执行回调的子进程，通过公共 Resource API 和 verb 请求宿主能力。每个启用的插件实例有自己的 Runner；Harness 也可能创建子进程。
+Host 是主进程，拥有存储、队列、Harness 调用、用户交互与 Runner 生命周期。Runner 是加载插件并执行回调的子进程，通过公共 Resource API、Connector API 和 verb 请求宿主能力。每个启用的插件实例有自己的 Runner；Harness 也可能创建子进程。
 
 Host 与 Runner 不相互导入实现。Host 通过入口启动 Runner；两端共用的 IPC 与 verb 契约放在 `src/protocol/`，上下文构造放在 `src/plugin-context.ts`。插件开发者依赖 `packages/plugin/`，无需处理 IPC。插件运行细节见 [Plugin](plugin/README.md)。
 

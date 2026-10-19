@@ -1,3 +1,6 @@
+import type { ConnectorClient } from "@compforge/aide-plugin";
+import type { ConnectorRequest } from "../../protocol/connectors.ts";
+import { createConnectorClient, dispatchConnector, emptyConnectors } from "../../connector-client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
 import type {
   BoardPresentation,
@@ -217,6 +220,7 @@ export class PluginBinding implements PluginContext {
   readonly session: PluginSessionContext;
   readonly dataDirs: PluginDataDirectories;
   readonly resources: ResourceClient;
+  readonly connectors: ConnectorClient;
   readonly toast: ToastSink;
   readonly logger: PluginLogger;
   readonly commands: PluginContext["commands"];
@@ -236,12 +240,17 @@ export class PluginBinding implements PluginContext {
     dataDirs: PluginDataDirectories,
     registrars: PluginRegistrars,
     resources: ResourceClient,
+    connectors: ConnectorClient = emptyConnectors,
   ) {
     this.instance = instance;
     this.session = Object.freeze({ ...session });
     this.dataDirs = Object.freeze({ ...dataDirs });
     this.registrars = registrars;
     this.resources = resources;
+    this.connectors = createConnectorClient(async <T>(request: ConnectorRequest): Promise<T> => {
+      if (this.closed) throw new Error("plugin Binding is closed");
+      return await dispatchConnector(connectors, request) as T;
+    });
     this.toast = Object.freeze({
       show: (message: ToastMessage) => {
         if (this.closed) throw new Error("plugin Binding is closed");

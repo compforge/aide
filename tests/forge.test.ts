@@ -1,30 +1,14 @@
 import {
-  afterEach,
   describe,
   expect,
   test,
 } from "bun:test";
-import {
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import { createForgeConnectors, loadForgeConfigs } from "../connectors/forge/config.ts";
 import { ForgeRateLimitError } from "../connectors/forge/protocol.ts";
 import { GitHubForgeConnector } from "../connectors/forge/github.ts";
 import { GitLabForgeConnector } from "../connectors/forge/gitlab.ts";
 import type { Fetch } from "../connectors/forge/http.ts";
-
-const roots: string[] = [];
-
-function testRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), "aide-forge-"));
-  roots.push(root);
-  return root;
-}
 
 function json(data: unknown, headers?: HeadersInit): Response {
   return new Response(JSON.stringify(data), {
@@ -36,16 +20,9 @@ function json(data: unknown, headers?: HeadersInit): Response {
   });
 }
 
-afterEach(() => {
-  for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 describe("Forge config", () => {
   test("separates Forge identity from endpoint host and uses devloop token precedence", () => {
-    const path = join(testRoot(), "config.json");
-    writeFileSync(path, JSON.stringify({
+    const config = {
       forges: {
         "github.com": {
           token: "configured-github",
@@ -58,9 +35,9 @@ describe("Forge config", () => {
           uids: ["42", "owner"],
         },
       },
-    }));
+    };
 
-    expect(loadForgeConfigs(path, {
+    expect(loadForgeConfigs(config, {
       GITHUB_TOKEN: "environment-github",
       GITLAB_TOKEN: "environment-gitlab",
     })).toEqual([
@@ -82,8 +59,7 @@ describe("Forge config", () => {
   });
 
   test("creates only authenticated Forge connectors", () => {
-    const path = join(testRoot(), "config.json");
-    writeFileSync(path, JSON.stringify({
+    const config = {
       forges: {
         "github.com": { type: "github" },
         "gitlab.example.com": {
@@ -91,9 +67,9 @@ describe("Forge config", () => {
           token: "configured",
         },
       },
-    }));
+    };
 
-    expect(createForgeConnectors(path, { environment: {} }).map(
+    expect(createForgeConnectors(config, { environment: {} }).map(
       (connector) => [connector.forge, connector.provider],
     )).toEqual([["gitlab.example.com", "gitlab"]]);
   });

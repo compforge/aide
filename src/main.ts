@@ -1,3 +1,4 @@
+import { loadConfig } from "./config.ts";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { once } from "node:events";
@@ -21,6 +22,7 @@ const feishu = feishuConfig(process.env);
 
 await withAsyncFileLock(path, async () => {
   const aide: Aide = new Aide(home, {
+    config: loadConfig(),
     cwd: resolve(process.env.AIDE_CWD ?? process.cwd()), timezone, model: process.env.AIDE_MODEL,
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
       targetConfig: { harness: target.harness,
