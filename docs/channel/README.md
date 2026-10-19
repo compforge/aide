@@ -5,7 +5,7 @@ Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、确定
 | Channel | 输入与会话划分 | 输出与交互 |
 | --- | --- | --- |
 | [Web](web.md) | URL 选择 conversationId，左侧列表切换已有会话 | 消息、流式进展、历史执行、事项与安排；回答问题和原生 Harness 请求 |
-| [Feishu](feishu.md) | 机器人应用 ID + 单聊 chat ID 确定会话 | 流式卡片展示 Chief 思考与回复、问答续轮、工作结果与安排通知 |
+| [Feishu](feishu.md) | 应用 ID + chat ID 确定会话；接收单聊与群内 @本机器人 | 流式卡片展示 Chief 思考与回复、问答续轮、工作结果与安排通知，送回原聊天 |
 
 ## 输入、会话与回复
 
