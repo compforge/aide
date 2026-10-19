@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="990" viewBox="0 0 1500 990" role="img" aria-labelledby="title desc">
-  <title id="title">Aide：由 Controller 的 Reconcile 驱动业务闭环</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="930" viewBox="0 0 1500 930" role="img" aria-labelledby="title desc">
+  <title id="title">Aide 组件图：职责与协作关系</title>
   <desc id="desc">Channel 将人的消息写入内置 Conversation、Input 和 Message。Source 经 Connector 感知外部变化，提交 Input 或建立业务资源。资源变化通过队列和 Watch 唤醒 Controller。Controller 直接调用用户交互或 Connector，也可经 Harness 由 Agent 选择工具。Chief 的 Work 工具操作 Task 和 Routine，再由对应 Controller 推进。Chief、Task、Routine 是 Personal Plugin 的 Controller 示例。此图展示逻辑协作关系，不表示进程布局。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#536b68"/></marker>
@@ -14,9 +14,9 @@
       .label { font-size: 18px; paint-order: stroke; stroke: #f8faf8; stroke-width: 7px; stroke-linejoin: round; }
     </style>
   </defs>
-  <rect width="1500" height="990" fill="#f8faf8"/>
-  <text x="40" y="52" class="title">Aide · Controller / Reconcile 协作模型</text>
-  <text x="40" y="84" class="small">变化唤醒业务，资源保存进展，Reconcile 决定下一步</text>
+  <rect width="1500" height="930" fill="#f8faf8"/>
+  <text x="40" y="52" class="title">Aide · 组件与协作关系</text>
+  <text x="40" y="84" class="small">Channel / Source · 资源与 Controller · Connector / Harness / Tools</text>
 
   <rect x="430" y="150" width="630" height="230" class="box" fill="#e6eee9"/>
   <text x="455" y="190" class="heading">Plugin · 业务 Controller</text>
@@ -27,7 +27,7 @@
   <rect x="845" y="210" width="190" height="65" class="box" fill="#fff"/>
   <text x="940" y="250" text-anchor="middle" class="body">其他 Controller</text>
   <text x="455" y="314" class="heading">Reconcile</text>
-  <text x="455" y="348" class="body">读取事实 → 判断 → 执行动作 → 保存进展</text>
+  <text x="455" y="348" class="body">业务判断与资源状态推进</text>
 
   <rect x="40" y="150" width="300" height="180" class="box" fill="#eef1e7"/>
   <text x="65" y="192" class="heading">Source · 发现变化</text>
@@ -90,7 +90,5 @@
   <path d="M1060 350 H1100 V670 H1160" class="flow"/>
   <text x="1114" y="595" class="label">verb</text>
 
-  <text x="40" y="896" class="body">业务闭环：接收变化 → 唤醒资源 → Reconcile 判断与执行 → 保存进展 → 等待下一次变化</text>
-  <text x="40" y="931" class="body">动作选择：明确流程由 Reconcile 直接调用；需要上下文判断时，经 Harness 由 Agent 选择并调用工具。</text>
-  <text x="40" y="966" class="small">逻辑视图：Plugin 回调运行于 Runner；持久化、调度、Connector、Harness 调用与交互由 Host 管理，二者通过 IPC 通信。</text>
+  <text x="40" y="905" class="small">逻辑视图：Plugin 回调运行于 Runner；持久化、调度、Connector、Harness 调用与交互由 Host 管理，二者通过 IPC 通信。</text>
 </svg>
