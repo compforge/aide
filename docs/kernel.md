@@ -41,7 +41,9 @@ Core 在这一入口上组织审计、授权、超时与执行记录，Connector
 
 Core 内部拆分 Host 与 Runner，主要为了隔离 Plugin、CRD 相关处理和 Controller 执行中的卡顿，避免干扰用户交互。这些插件回调由 Runner 执行，用户交互由 Host 承接，二者通过 IPC 协作。这个拆分属于技术实现，讨论组件职责与协作时统一称为 Core。
 
-Host 是主进程，拥有存储、队列、Harness 调用、用户交互与 Runner 生命周期。Runner 是加载插件并执行回调的子进程，通过公共资源与能力调用接口请求宿主能力。每个启用的插件实例有自己的 Runner；Harness 也可能创建子进程。
+Runner 的设计定位是一个相对单纯、参考 Kubernetes controller-runtime 的单进程运行环境：加载 Plugin，承载 CRD / Controller 注册以及 Source、Watch、Reconcile 回调。同一 Runner 内的这些工作共享一个进程，通过 Core 的资源与能力接口协作。这里借用的是 controller-runtime 的资源协调模型。
+
+当前实现中，Host 持有存储、队列与调度，管理 Harness 调用、用户交互及 Runner 生命周期；Runner 主要负责插件注册和回调执行，经 IPC 请求 Host 能力。因此 controller-runtime 的完整机制目前由 Core 两端共同实现。每个启用的插件实例有自己的 Runner；Harness 也可能创建子进程。
 
 Host 与 Runner 不相互导入实现。Host 通过入口启动 Runner；两端共用的 IPC 与 verb 契约放在 `src/protocol/`，上下文构造放在 `src/plugin-context.ts`。插件开发者依赖 `packages/plugin/`，无需处理 IPC。插件运行细节见 [Plugin](plugin/README.md)。
 
