@@ -76,7 +76,7 @@ class MessageObservation {
     }
     for (const entry of [...this.pending]) if (entry.delivery) await this.deliver(entry);
     const failures: string[] = [];
-    for (const kind of this.watch.kinds) {
+    for (const kind of ["direct", "mention"] as const) {
       try { await this.discover(kind); }
       catch (error) { failures.push(`${kind}: ${error instanceof Error ? error.message : String(error)}`); }
     }

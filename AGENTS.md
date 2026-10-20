@@ -39,7 +39,8 @@ plugins/personal/
   message-source.ts        # Lark 单聊、群内 @ 观察、水位和短期讨论跟进
   message-context.ts       # IM 有界上下文、话题根消息与缺口
   environment-source.ts    # Workload 观察、基线和变化 Input
-  environment-config.ts    # 从环境声明派生观察范围
+  config.ts                # Personal sources 配置、严格校验与默认值
+  environment-config.ts    # 环境观察目标与 namespace 策略
   resources.ts             # 独立 Task / Routine 契约与 Work 视图
   task.ts                  # 有限目标 Reconcile
   routine.ts               # 持续职责 Reconcile
@@ -60,7 +61,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 - 根目录 `VERSION` 是产品版本。每次提交同步递增，默认 patch，同一提交只递增一次。
 - Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
-- Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。环境发现只读配置，不代表连通性、健康或操作授权；需求 watch 策略归 `plugins.personal`；环境 Source 从已配置且可观察的 Environment 自动派生。
+- Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。Connector 声明访问能力，`plugins.<plugin>.sources` 声明观察策略；Personal 只启动显式配置的环境、Lark 与需求 Source。环境发现只读配置，不代表连通性、健康或操作授权。
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
 - Session 是持久执行作用域，保留 Ledger、Lane、Turn 与恢复绑定；CoreSession 负责进程期装配。Session 统一位于 `$AIDE_HOME/sessions/<id>/`，不按 project / cwd 分组。逻辑 ID 的目录编码由 SessionStore 负责。启动时恢复全部 Session 的工作和 Source；watch 仅装配到所属 Session。cwd 只是执行环境，改变时保留 Aide 历史并清空原生恢复绑定；插件私有数据仅有 global、session、instance 三个目录作用域。
 - Input 是 Core 内置资源，可带目标 sessionId；Conversation 是 Personal CRD，保存 Input 引用与各自消费状态。Channel / Source 不依赖 conversationId。Chief 先 Reconcile Input 路由，再 Reconcile Conversation 干活；路由计划持久化后以资源 Update 追加，不新增路由 Verb。跨 Session 写入经过目标 ResourceClient 与 Watch。

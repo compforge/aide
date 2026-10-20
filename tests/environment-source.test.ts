@@ -12,7 +12,7 @@ import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { ENVIRONMENT_SOURCE_TYPE, observeEnvironment, type EnvironmentSourceStatus } from "../plugins/personal/environment-source.ts";
-import { environmentSources, ENVIRONMENT_SESSION, type EnvironmentSourceSpec } from "../plugins/personal/environment-config.ts";
+import { environmentSources, EnvironmentWatchSchema, ENVIRONMENT_SESSION, type EnvironmentSourceSpec } from "../plugins/personal/environment-config.ts";
 import { Aide } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -63,16 +63,18 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   assert.equal(store.list({ apiVersion: "aide.dev/v1alpha1", kind: "Task" }).length, 0);
 });
 
-test("Environment scopes are derived from supported configured access without watch configuration", () => {
-  const skipped: string[] = [];
-  const scopes = environmentSources([
-    { name: "dev", kind: "kubernetes", kubeconfig: "test", namespace: "app" },
-    { name: "host", kind: "host" },
-    { name: "remote", kind: "kubernetes", kubeconfig: "test", namespace: "app", host: { name: "box", transport: "ssh", address: "box" } },
-    { name: "unscoped", kind: "kubernetes", kubeconfig: "test" },
-  ], (name) => skipped.push(name));
-  assert.deepEqual(scopes, [{ environment: "dev", namespace: "app", intervalMs: 300_000 }]);
-  assert.deepEqual(skipped, ["host", "remote", "unscoped"]);
+test("Environment policy selects namespaces independently of Connector defaults and resolves aliases", () => {
+  const environments = [{ name: "dev", kind: "kubernetes" as const, kubeconfig: "test", namespace: "default", aliases: ["开发"] }];
+  assert.deepEqual(environmentSources(undefined, environments), []);
+  const policy = EnvironmentWatchSchema.parse({ targets: [{ environment: "开发", namespaces: ["app", "other"] }] });
+  assert.deepEqual(environmentSources(policy, environments), [
+    { environment: "dev", namespace: "app", intervalMs: 300_000 },
+    { environment: "dev", namespace: "other", intervalMs: 300_000 },
+  ]);
+  assert.throws(() => environmentSources(policy, []), /unknown connector/);
+  assert.throws(() => environmentSources(policy, [{ ...environments[0]!, kind: "host" }]), /local Kubernetes/);
+  assert.throws(() => environmentSources(policy, [{ ...environments[0]!, host: { name: "box", transport: "ssh", address: "box" } }]), /local Kubernetes/);
+  assert.throws(() => environmentSources({ ...policy, targets: [...policy.targets, { environment: "dev", namespaces: ["app"] }] }, environments), /Duplicate/);
 });
 
 test("Real Runner observes through Connector Verb, routes to Chief once, and restores its baseline", { timeout: 15_000 }, async (t) => {
@@ -80,18 +82,19 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: { environments: {
     dev: { kind: "kubernetes", kubeconfig: "unused", namespace: "app", aliases: ["开发"] },
-  } } }));
+  } }, plugins: { personal: { sources: { environments: { targets: [{ environment: "dev", namespaces: ["app", "other"] }] } } } } }));
   let current = snapshot("A"); let reads = 0;
   const prompts: string[] = [];
   const config = loadConfig(configFile);
   const options = { ...fakeOptions({ chief: async (prompt) => prompt.includes("Candidates:") ? JSON.stringify({ conversationIds: ["other"], reason: "service interest" }) : "关注的服务有变化", async execute() { throw new Error("Unexpected work"); } }, root, prompts), config,
     connectors: { ...emptyConnectors, environments: { ...emptyConnectors.environments, async workloads(name: string, namespace?: string) {
-      assert.equal(name, "dev"); assert.equal(namespace, "app"); reads++; return current;
+      assert.equal(name, "dev"); assert.ok(["app", "other"].includes(namespace!)); reads++;
+      return namespace === "app" ? current : { ...snapshot("unchanged"), namespace: "other" };
     } } } };
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.start(); await aide.settled();
-  assert.ok(reads >= 1); assert.equal(prompts.length, 0);
+  assert.ok(reads >= 2); assert.equal(prompts.length, 0);
   const initialReads = reads;
   await aide.receive({ sessionId: "other", conversationId: "other", id: "hello", text: "hello" }); await aide.settled();
   assert.equal(reads, initialReads, "Opening another Session must not duplicate the observer");
@@ -99,8 +102,9 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   const poll = async () => {
     const scope = aide.session(ENVIRONMENT_SESSION);
     const resources = await scope.plugins.resourceClient("personal").list(ENVIRONMENT_SOURCE_TYPE);
-    await scope.plugins.enqueue({ aideSessionId: scope.id, pluginInstanceId: "personal", namespace: "v1",
-      resourceApiVersion: ENVIRONMENT_SOURCE_TYPE.apiVersion, resourceKind: ENVIRONMENT_SOURCE_TYPE.kind, resourceId: resources[0]!.metadata.name });
+    assert.equal(resources.length, 2);
+    for (const resource of resources) await scope.plugins.enqueue({ aideSessionId: scope.id, pluginInstanceId: "personal", namespace: "v1",
+      resourceApiVersion: ENVIRONMENT_SOURCE_TYPE.apiVersion, resourceKind: ENVIRONMENT_SOURCE_TYPE.kind, resourceId: resource.metadata.name });
     for (let attempt = 0; attempt < 500; attempt++) {
       if (scope.conversations.inputStore.list(scope.id).some((input) => input.status.routing?.phase === "done")) break;
       await Bun.sleep(10);

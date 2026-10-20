@@ -36,6 +36,8 @@ export interface Requirement extends RequirementSummary {
 export interface RequirementListQuery {
   readonly text?: string;
   readonly limit?: number;
+  /** Filter by stable assignee keys; absence keeps an on-demand query unfiltered. */
+  readonly assigneeUserKeys?: readonly string[];
 }
 
 /**

@@ -82,7 +82,7 @@ export function registerEnvironmentSources(context: PluginContext): void {
     } }],
     async reconcile(execution, resource) {
       if (resource.metadata.deletionTimestamp) return;
-      const configured = watches.find((watch) => watch.environment === resource.spec.environment);
+      const configured = watches.find((watch) => watch.environment === resource.spec.environment && watch.namespace === resource.spec.namespace);
       if (!configured || digest(configured) !== digest(resource.spec)) return;
       try { await observeEnvironment(context, resource, execution.verbs.connectors({ timeoutMs: 30_000 })); }
       catch (error) {

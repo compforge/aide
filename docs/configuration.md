@@ -19,13 +19,19 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 |---|---|
 | `connectors` | Host 装配全局环境目录、需求、Forge 与 Lark 消息读取能力 |
 | `harnesses` | Host 装配 Agent 的模型选择和扩展能力；支持 `pi`、`chief`、`codex`、`claude`、`dsh` |
-| `plugins` | 各 Plugin 校验和使用自己的业务配置；例如 Personal watches |
+| `plugins` | 各 Plugin 校验和使用自己的业务配置；持续观察策略位于 `plugins.<plugin>.sources` |
 
-没有声明的 Connector/watch/package 列表默认为空。Connector 和 Plugin 的具体字段由所属实现校验，
+没有声明的 Connector/Source/package 默认为空。Connector 和 Plugin 的具体字段由所属实现校验，
 不放宽顶层或 Harness 的字段检查。配置不是 Plugin 之间传递凭证的通道。
 
-Lark 用户消息的账号配置位于 `connectors.lark`，单聊与群内 @ 的观察策略位于
-`plugins.personal.messages`，字段与权限见 [Lark 消息观察](connector/lark-messages.md)。
+Connector 配置访问能力，声明它不会启动持续观察。Personal 的策略统一位于 `plugins.personal.sources`：
+
+- `environments` 显式选择环境与 namespace；`targets: []` 关闭环境观察。
+- `lark: {}` 启用默认观察策略，不按消息类型限制输入；Source 产出的消息均进入处理流程，当前采集能力覆盖单聊和群内 @。字段与权限见 [Lark 消息观察](connector/lark-messages.md)。
+- `requirements` 配置需求观察列表，包含 Connector 引用、负责人范围与间隔；空数组关闭需求观察。
+
+省略某类 Source 就关闭对应观察，Connector 仍可按需查询。Source 引用缺失的 Connector、环境不可用于本地 Kubernetes 采样，
+或策略字段不受支持时，启动报错。Personal 在恢复 Session 前校验这些策略，启动日志汇总生效的观察范围和间隔。
 
 ```yaml
 defaultHarness: pi
@@ -35,7 +41,6 @@ connectors:
     dev:
       kind: kubernetes
       kubeconfig: ~/.kube/dev
-      namespace: example
 
 harnesses:
   pi:
@@ -53,7 +58,13 @@ harnesses:
 
 plugins:
   personal:
-    watches: []
+    sources:
+      environments:
+        targets:
+          - environment: dev
+            namespaces: [example]
+        intervalMs: 300000
+      requirements: []
 ```
 
 ## 默认执行 Harness
@@ -155,5 +166,6 @@ aide harness sync chief
 
 顶层 `src/config.ts` 加载文件并组合各模块 schema。Harness 配置位于 `src/host/harness/<name>/config.ts`，
 Connector 配置由 `connectors/config.ts` 组合，Environment 和 Meego 分别声明自己的字段与校验。
+Personal 的 `config.ts` 组合各类 Source 策略，装配阶段解析后仅向所属 Runner 下发有效观察范围。
 配置输入允许缺省和引用；有效配置已补齐默认值、解析模型与路径，并在创建运行实例之前验证。
 Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。整体原则见 [Kernel](kernel.md#配置所有权与生命周期)。

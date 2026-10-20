@@ -13,16 +13,18 @@ Host 通过服务进程 PATH 中的 `lark-cli` 读取消息，使用服务用户
 ```yaml
 connectors:
   lark:
-    appId: cli_your_app
-    userId: ou_your_open_id
+    appId: cli_example
+    userId: ou_example
     timeoutMs: 20000
 plugins:
   personal:
-    messages:
-      kinds: [direct, mention]
+    sources:
+      lark: {}
 ```
 
-省略 `plugins.personal.messages` 或设置 `kinds: []` 不启动观察；只声明 Connector 时，Chief 仍可按需读取上下文。
+省略 `plugins.personal.sources.lark` 不启动观察；声明 `lark: {}` 使用默认策略，不按消息类型限制输入。
+Source 产出的消息均进入处理流程，当前主动采集单聊和群内 @。
+只声明 Connector 时，Chief 仍可按需读取上下文。
 已有 Lark Channel 的机器人交互不受此配置影响。初次启用默认观察最近五分钟，不导入全部历史。
 应先建立自己的 Aide Conversation，并按需要设为默认联系人；没有可承接的 Conversation 时，现有路由会记录 ignored。
 观察源位于独立执行 Session `source:lark-messages`，新聊天 Session 不会重复启动它；Input 不预设目标 Session 或 Conversation。
@@ -59,15 +61,15 @@ CLI compact 时间可能只有分钟精度，Connector 固定进程时区为 UTC
 向原群回复不是 Source 的行为，其他人的消息不自动成为用户的委托。
 
 “所在群有新消息”沿用相同 Connector、消息结构、Input 和 Chief 路径。扩展时需在 Personal 明确群范围及触发策略，
-增加独立水位；当前配置拒绝未实现的 `group` kind，避免误以为已开启完整群监听。
+增加独立水位。配置不提供 `kinds` 白名单；单聊与群内 @ 是当前 Source 的采集能力，
+扩展 Source 后，新增类型的 Input 沿用下游处理流程，无需调整消息类型配置。
 
 ## 配置参数
 
-以下字段属于 `plugins.personal.messages`：
+以下字段属于 `plugins.personal.sources.lark`：
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
-| `kinds` | `[direct, mention]` | 启用的输入场景；空数组关闭 |
 | `intervalMs` | 60000 | 轮询间隔，最小 30000 |
 | `overlapMs` | 300000 | 重叠扫描窗口，容纳索引延迟 |
 | `initialLookbackMs` | 300000 | 首次观察回看时长，最大一天 |
