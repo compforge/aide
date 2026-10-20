@@ -38,6 +38,37 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
   $('conversation-copy').replaceWith(conversationCopyButton(conversationId));
   let lastConversations = '';
   const triggerUpdates = new Set();
+  const deletingConversations = new Set();
+  function conversationDeleteButton(item) {
+    const button = element('button', undefined, 'conversation-delete');
+    const icon = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg>';
+    button.innerHTML = icon;
+    button.type = 'button'; button.title = '删除会话';
+    button.setAttribute('aria-label', '删除会话：' + item.name);
+    button.disabled = deletingConversations.has(item.id);
+    button.addEventListener('click', async () => {
+      if (deletingConversations.has(item.id) || !confirm('删除会话「' + item.name + '」及其聊天记录？\n有待处理内容或关联事项、安排时，需要先处理。')) return;
+      deletingConversations.add(item.id); button.disabled = true; button.title = '删除中…';
+      try {
+        await api('/conversations/delete', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ conversationId: item.id, revision: item.revision, uid: item.uid }) });
+        const remaining = await api('/conversations');
+        if (item.id === conversationId) {
+          const url = new URL(location.href);
+          url.searchParams.set('conversation', remaining[0]?.id || 'me');
+          location.replace(url.href); return;
+        }
+        lastConversations = ''; renderConversations(remaining);
+        $('conversation-notice').textContent = '已删除「' + item.name + '」。';
+      } catch (error) {
+        $('conversation-notice').textContent = '删除失败：' + error.message;
+        lastConversations = '';
+      } finally {
+        deletingConversations.delete(item.id); button.disabled = false; button.title = '删除会话';
+      }
+    });
+    return button;
+  }
   function renderConversations(conversations) {
     const items = [...conversations];
     for (const id of new Set([conversationId, 'me'])) {
@@ -59,7 +90,10 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
       if (item.preview) link.append(element('span', item.preview, 'muted'));
       const row = element('div', undefined, 'conversation-row');
       const entry = element('div', undefined, 'conversation-entry');
-      entry.append(link, conversationCopyButton(item.id, true)); row.append(entry);
+      const actions = element('div', undefined, 'conversation-actions');
+      actions.append(conversationCopyButton(item.id, true));
+      if (item.revision != null) actions.append(conversationDeleteButton(item));
+      entry.append(link, actions); row.append(entry);
       if (item.sessionId) {
         const label = element('label', undefined, 'trigger-switch');
         const toggle = element('input'); toggle.type = 'checkbox'; toggle.checked = item.trigger.enabled;
@@ -90,9 +124,9 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
   }
   async function refreshConversations() {
     try {
-      if (triggerUpdates.size) return;
+      if (triggerUpdates.size || deletingConversations.size) return;
       renderConversations(await api('/conversations'));
-      $('conversation-notice').textContent = '';
+      if ($('conversation-notice').textContent === '会话列表暂时无法更新，正在重试。') $('conversation-notice').textContent = '';
     } catch { $('conversation-notice').textContent = '会话列表暂时无法更新，正在重试。'; }
   }
   const regionChoices = new Map();

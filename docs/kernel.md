@@ -85,7 +85,7 @@ Session
 
 同一 Lane 串行推进，不同 Lane 可并行；Lane 可以在不同 Target 之间接力。同一 Target 在不同 Lane 上使用独立原生会话。绑定按 `Session × Lane × HarnessTarget` 定位；原生会话重建不改变 Lane 身份。fork 复制逻辑历史和 Lane 身份，但清空原生绑定，避免两个 Session 写入同一份 Harness 历史。
 
-Conversation 与其它资源一样，通过资源引用和可选的 conversationId / inputId 关联执行。资源标识不替代执行身份，也不强制对应一个 Lane 或原生会话。Chief 按 Conversation 组织上下文，为其复用固定 Lane 和 Target，是 Personal 的业务策略。每条新 Input 发起新 Turn，持续使用同一份原生恢复绑定。
+Conversation 与其它资源一样，通过资源引用和可选的 conversationId / inputId 关联执行。资源标识不替代执行身份，也不强制对应一个 Lane 或原生会话。Chief 按 Conversation 组织上下文，为其复用固定 Lane 和 Target，是 Personal 的业务策略。删除后重建的 Conversation 使用新 Lane；Lane 的 `historyAfterSeq` 限定自动补入历史的起点，原生会话重建也保留这一边界。每条新 Input 发起新 Turn，持续使用同一份原生恢复绑定。
 
 HarnessInvocation 表达执行请求，Turn 记录一段执行事实。请求先持久化，再交给 Adapter。接受请求、执行结束和业务目标完成是不同事实，目标是否达成由调用方校验。
 

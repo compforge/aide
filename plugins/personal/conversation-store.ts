@@ -19,15 +19,20 @@ export class ConversationStore {
     for (const listener of this.listeners) listener(c);
   }
   subscribe(listener: (conversation: Conversation) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  resource(id: string): ConversationResource | undefined { return this.resources.find(CONVERSATION_TYPE, conversationKey(id)); }
-  list(): Conversation[] { return this.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE).map((r) => this.project(r as ConversationResource)); }
+  resource(id: string): ConversationResource | undefined {
+    const resource = this.resources.find<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, conversationKey(id));
+    return resource?.metadata.deletionTimestamp ? undefined : resource;
+  }
+  list(): Conversation[] { return this.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE).filter((r) => !r.metadata.deletionTimestamp).map((r) => this.project(r as ConversationResource)); }
   get(id: string): Conversation | undefined { const r = this.resource(id); return r && this.project(r); }
   async ensure(id = this.sessionId): Promise<ConversationResource> {
-    const previous = this.resource(id); if (previous) return previous;
+    const previous = this.resources.find<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, conversationKey(id));
+    if (previous?.metadata.deletionTimestamp) throw new Error("Conversation is being deleted; retry after deletion completes");
+    if (previous) return previous;
     return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, sessionId: this.sessionId, inputIds: [], trigger: conversationTrigger() }, status: { processing: {}, messages: [], receipts: [] } });
   }
   inputs(conversationId?: string): ConversationInput[] {
-    return this.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE).filter((r) => !conversationId || (r.spec as { id: string }).id === conversationId).flatMap((raw) => {
+    return this.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE).filter((r) => !r.metadata.deletionTimestamp && (!conversationId || r.spec.id === conversationId)).flatMap((raw) => {
       const c = raw as ConversationResource;
       return c.spec.inputIds.map((id) => {
         const input = this.inputStore.get(id); if (!input) throw new Error(`Conversation references missing Input: ${id}`);

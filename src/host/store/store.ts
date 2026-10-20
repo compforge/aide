@@ -860,6 +860,7 @@ export class SessionStore {
           laneId,
           createdFor: lane.createdFor,
           parentLaneId: lane.parentLaneId,
+          historyAfterSeq: lane.historyAfterSeq,
         }),
       ]),
     );

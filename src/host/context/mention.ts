@@ -153,8 +153,9 @@ export function buildTargetCatchUpContext(
   },
 ): HarnessCatchUpContext | null {
   const summaries = turnSummaries(handle);
+  const historyAfterSeq = opts.laneId ? handle.meta.lanes[opts.laneId]?.historyAfterSeq ?? 0 : 0;
   const missed = summaries.filter((item) => {
-    if (item.seq <= opts.sinceSeq) return false;
+    if (item.seq <= Math.max(opts.sinceSeq, historyAfterSeq)) return false;
     if (opts.includeTargetTurns) return true;
     if (item.laneId) {
       return !(

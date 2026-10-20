@@ -19,6 +19,12 @@ export interface ConversationStatus {
   receipts: Array<{ key: string; responseId: string }>;
 }
 export type ConversationResource = Resource<ConversationSpec, ConversationStatus>;
+export type ConversationDeletion = { deleted: true } | { deleted: false; reason: "missing" | "changed" | "busy" | "work" };
+
+/** @spec Recreating a deleted Conversation starts a fresh native context; existing conversations retain their recorded Lane. */
+export function conversationLane(conversation: Readonly<ConversationResource>): string {
+  return Object.values(conversation.status.processing).find((run) => run.laneId)?.laneId ?? `chief:${conversation.metadata.uid}`;
+}
 export interface Conversation extends ConversationSpec {
   revision: number; createdAt: string; pendingInputIds: string[]; messages: Message[];
 }

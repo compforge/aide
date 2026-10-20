@@ -275,7 +275,8 @@ test("Aide routes stable Sessions and resumes real Chief native context across i
   const binding = (sessionId: string, conversationId: string) => {
     const session = new SessionStore(home).openSession(sessionId);
     const target = chiefTarget(conversationId);
-    return session.meta.lanes[target]!.harnessSessions[target]!;
+    const laneId = aide.findConversation(conversationId)!.conversations.runs(conversationId).find((run) => run.status.laneId)!.status.laneId!;
+    return session.meta.lanes[laneId]!.harnessSessions[target]!;
   };
   aide = open();
   try {
@@ -303,6 +304,18 @@ test("Aide routes stable Sessions and resumes real Chief native context across i
     await send("feishu:app:group-a", "feishu:app:group-a", "a4");
     assert.notEqual(binding("feishu:app:group-a", "feishu:app:group-a").harnessSessionId, original.harnessSessionId);
     assert.equal(aide.messages().filter((message) => message.conversationId === "feishu:app:group-a").length, 8);
+    const beforeDelete = binding("feishu:app:group-a", "feishu:app:group-a");
+    const conversation = aide.findConversation("feishu:app:group-a")!.conversations.get("feishu:app:group-a")!;
+    assert.deepEqual(await aide.deleteConversation(conversation.id, conversation.revision, aide.findConversation(conversation.id)!.conversations.resource(conversation.id)!.metadata.uid), { deleted: true });
+    await aide.settled();
+    await send("feishu:app:group-a", "feishu:app:group-a", "a5");
+    assert.notEqual(binding("feishu:app:group-a", "feishu:app:group-a").harnessSessionId, beforeDelete.harnessSessionId);
+    assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)), /question-a[1-4]|native-response-[0-4]/);
+    await aide.close();
+    aide = open(); await aide.start();
+    await send("feishu:app:group-a", "feishu:app:group-a", "a6");
+    assert.match(JSON.stringify(fixture.requests.at(-1)), /question-a5/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)), /question-a[1-4]|native-response-[0-4]/);
   } finally { await aide.close(); }
 });
 
