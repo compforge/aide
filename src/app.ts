@@ -39,6 +39,7 @@ export class Aide {
   private readonly connectors: ConnectorClient;
   private starting?: Promise<void>;
   private closed = false;
+  private defaultSelection: Promise<void> = Promise.resolve();
 
   constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
     this.defaultTarget = Object.freeze({ ...options.defaultTarget });
@@ -185,6 +186,31 @@ export class Aide {
     return result;
   }
 
+  /** @spec At most one default contact across Sessions. Clear before setting; interruption may leave none, never two.
+   * @link docs/plugin/personal.md
+   */
+  setDefaultConversation(conversationId: string, enabled: boolean): Promise<void> {
+    const change = this.defaultSelection.then(async () => {
+      const target = this.findConversation(conversationId);
+      const resource = target?.conversations.resource(conversationId);
+      if (!target || !resource || resource.metadata.deletionTimestamp) {
+        throw new Error("Conversation does not exist");
+      }
+      if (enabled) {
+        for (const scope of this.sessions()) {
+          for (const conversation of scope.conversations.list()) {
+            if (conversation.default && conversation.id !== conversationId && !scope.conversations.resource(conversation.id)?.metadata.deletionTimestamp) await scope.conversations.setDefault(conversation.id, false);
+          }
+        }
+      }
+      await target.conversations.setDefault(conversationId, enabled);
+      this.log.info({ conversationId, sessionId: target.id, enabled }, "Default conversation configured");
+      this.notify();
+    });
+    this.defaultSelection = change.catch((err) => { this.log.error({ err, conversationId }, "Default conversation selection failed"); });
+    return change;
+  }
+
   async setConversationTrigger(conversationId: string, enabled: boolean) {
     const scope = this.findConversation(conversationId);
     if (!scope) throw new Error("Conversation does not exist");
@@ -209,6 +235,7 @@ export class Aide {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    await this.defaultSelection;
     await Promise.all(this.sessions().map((scope) => scope.close()));
     this.listeners.clear();
   }

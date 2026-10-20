@@ -11,7 +11,7 @@ export interface ProcessingStatus {
   laneId?: string; question?: ChiefQuestion | null; error?: string; quietReason?: string;
   messages?: Message[];
 }
-export interface ConversationSpec { id: string; name?: string; sessionId: string; inputIds: string[]; trigger?: ConversationTrigger }
+export interface ConversationSpec { id: string; name?: string; default?: boolean; sessionId: string; inputIds: string[]; trigger?: ConversationTrigger }
 export interface ConversationStatus {
   nextTriggerAt?: string | null;
   processing: Record<string, ProcessingStatus>;

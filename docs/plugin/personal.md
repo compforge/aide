@@ -48,6 +48,14 @@ Chief 有两个 Reconcile。ReconcileInput 负责路由：有明确线索时按�
 
 编程领域使用 Repository = forge + path、Requirement = source + category + id、PR/MR = forge + path + number。Chief 在工作指令中保留实体身份与工作目录，不根据仓库名字猜测本地 checkout。
 
+## 默认联络处
+
+Conversation 的 `spec.default` 标记用户选择的默认联络处，缺省为 false。整个 Aide 实例跨 Session 最多有一个默认会话。用户通过 Web 设置或取消；切换由后端串行处理，先清除旧标记再设置新标记。中断可能留下无默认的状态，用户可以重新设置，不会留下两个默认。删除默认会话后不自动选择替代项。
+
+默认会话使用普通 Conversation 的上下文、Work 和 Chief Reconcile。明确的 Session 线索及相关话题优先；Chief 路由在没有更具体话题、且输入值得提醒或询问用户时，可以选择默认联络处。无关或不重要的观察仍忽略，不以默认会话兜底接收所有输入。需要用户处理的 Aide 服务问题也遵循同一规则：须先作为 Input 提交，不直接广播错误日志。
+
+默认标记不打开 trigger、不授予额外执行权限，也不合并其它会话的上下文。个人私聊适合作为默认联络处，工作群继续承载各自话题。
+
 ## Conversation 定时回顾
 
 Conversation 与 Routine 的 `trigger` 都是调度机制，只决定何时唤醒 Reconcile；业务判断由各自 Reconcile 负责。Conversation 的定时触发用于持续照看话题。每个 Conversation 独立控制开关与间隔，默认关闭、间隔一小时；Web 提供开关。收到新 Input 和 trigger 到期都会唤醒同一个 Conversation Reconcile，定时唤醒已有明确上下文，不生成外部 Input。
