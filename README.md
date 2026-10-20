@@ -2,9 +2,9 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Aide is a self-hosted personal agent that keeps following through on the work you entrust to it. Ask a question, delegate a goal, or set up an ongoing responsibility through the web app or Feishu. Aide keeps track of progress, asks when it needs your decision, and picks up the work as new information arrives.
+Aide is a self-hosted personal agent that follows through on the work you delegate. Ask a question, delegate a goal, or set up an ongoing responsibility through the web app or Feishu. Aide keeps track of progress, asks when it needs your decision, and picks up the work as new information arrives. You spend less time checking progress, repeating context, and reminding it what to do next.
 
-For example: “Follow this PR until it is merged. Handle review comments, ask me when a decision is needed, and tell me when it lands.” The same task can span multiple attempts and periods of waiting. With Aide running on your server, closing the chat or shutting down your laptop leaves it running.
+For example: “Follow this PR until it is merged. Handle review comments, ask me when a decision is needed, and tell me when it lands.” The same task can span multiple rounds of work and waiting. Aide continues working on your server when you close the chat or shut down your laptop.
 
 ## What you can ask
 
@@ -17,12 +17,12 @@ Aide relates new information to your conversations and existing work. Within an 
 
 ## Conversations, tasks, and routines
 
-A **conversation** keeps a topic's messages and related work together. Aide's assistant, **Chief**, answers ordinary questions directly and creates or finds work when something needs continued attention. Using a tool does not require creating a task.
+A **conversation** keeps a topic's messages and related work together. Aide's assistant, **Chief**, answers everyday questions directly and helps you manage ongoing work as tasks and routines.
 
 - A **task** has a finish line, such as getting a PR merged. It can last minutes or weeks and involve multiple rounds of work and waiting.
 - A **routine** is an ongoing responsibility, such as checking for project blockers every morning. Completing one round leaves it waiting for the next.
 
-Creating a task means Aide has accepted the goal; progress and results arrive asynchronously. You can ask about progress, add information, answer a question, or request a pause in the same conversation.
+Creating a task means Aide has accepted the goal. You can leave the conversation and return later to check progress and results. Use the same conversation to add information, answer a question, or request a pause.
 
 Each conversation also has an optional periodic review, disabled by default. Enable it in the web app to have Chief revisit that topic's progress and possible next steps, once an hour by default. Turning it off stops these reviews; existing tasks, routines, and external observations continue on their own schedules.
 
