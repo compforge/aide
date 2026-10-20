@@ -402,12 +402,12 @@ export class MeegleCliRequirementConnector
         );
         const records = collectRequirementRecords(response);
         const assigneeField = this.config.assigneeField ?? "current_status_operator";
-        if (this.config.userKeys?.length && records.length && records.every((item) => fieldValue(item, [assigneeField]) === undefined)) {
+        if (query.assigneeUserKeys?.length && records.length && records.every((item) => fieldValue(item, [assigneeField]) === undefined)) {
           throw new Error(`Meego results do not expose configured assignee field ${assigneeField}`);
         }
         return records
-          .filter((item) => !this.config.userKeys || userKeys(fieldValue(item, [assigneeField]))
-            .some((key) => this.config.userKeys!.includes(key)))
+          .filter((item) => !query.assigneeUserKeys || userKeys(fieldValue(item, [assigneeField]))
+            .some((key) => query.assigneeUserKeys!.includes(key)))
           .map((item) =>
           mapSummary(this.source, category, item)
         );

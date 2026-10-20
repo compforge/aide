@@ -32,7 +32,7 @@ test("config owns declarations and each host gets one snapshot, without opening 
       description: Generic target
 plugins:
   personal:
-    watches: []
+    sources: {}
 `);
   const connectors = Connectors.fromConfig(loadConfig(file).connectors);
   const environment = await connectors.environments.get("开发");

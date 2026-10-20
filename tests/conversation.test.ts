@@ -86,11 +86,11 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
 test("Source watches restore independently and are installed only in their assigned Session", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-source-routing-"));
   const path = join(root, "config.yaml");
-  writeFileSync(path, JSON.stringify({ connectors: { requirements: { work: { provider: "meego", projectKey: "p", userKeys: ["me"] } } },
-    plugins: { personal: { watches: [
-      { id: "one", source: "work", sessionId: "source:one", conversationId: "source:one" },
-      { id: "two", source: "work", sessionId: "source:two" },
-    ] } } }));
+  writeFileSync(path, JSON.stringify({ connectors: { requirements: { work: { provider: "meego", projectKey: "p" } } },
+    plugins: { personal: { sources: { requirements: [
+      { id: "one", source: "work", userKeys: ["me"], sessionId: "source:one" },
+      { id: "two", source: "work", userKeys: ["me"], sessionId: "source:two" },
+    ] } } } }));
   let polls = 0;
   const options = { ...fakeOptions({ execute: async () => { throw new Error("Unexpected execution"); } }, root), config: loadConfig(path),
     connectors: { ...emptyConnectors, requirements: { ...emptyConnectors.requirements, list: async () => { polls++; return []; } } } };

@@ -7,7 +7,6 @@ export interface MeegoRequirementConfig {
   readonly provider: "meego";
   readonly projectKey: string;
   readonly profile?: string;
-  readonly userKeys?: readonly string[];
   readonly categories: readonly string[];
   readonly assigneeField?: string;
 }
@@ -46,19 +45,6 @@ function categories(name: string, value: unknown): readonly string[] {
   );
 }
 
-function optionalStrings(
-  name: string,
-  value: unknown,
-): readonly string[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error(`${name} must be a non-empty string array`);
-  }
-  return Object.freeze(
-    value.map((item, index) => nonEmptyString(`${name}[${index}]`, item)),
-  );
-}
-
 export function commandIdentifier(name: string, value: string): string {
   if (!/^[A-Za-z0-9._-]+$/.test(value)) {
     throw new Error(
@@ -90,6 +76,9 @@ export function loadMeegoRequirementConfigs(
       rawRequirement,
     );
     if (requirement.provider !== "meego") continue;
+    if (Object.keys(requirement).some((key) => !["provider", "projectKey", "profile", "categories", "assigneeField"].includes(key))) {
+      throw new Error(`Invalid Meego connector fields: ${source}`);
+    }
     const projectKey = commandIdentifier(
       `Aide requirement source ${source} projectKey`,
       nonEmptyString(
@@ -113,10 +102,6 @@ export function loadMeegoRequirementConfigs(
       profile: optionalString(
         `Aide requirement source ${source} profile`,
         requirement.profile,
-      ),
-      userKeys: optionalStrings(
-        `Aide requirement source ${source} userKeys`,
-        requirement.userKeys,
       ),
       categories: Object.freeze(configuredCategories),
       assigneeField: commandIdentifier("assigneeField", optionalString("assigneeField", requirement.assigneeField) ?? "current_status_operator"),

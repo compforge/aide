@@ -55,8 +55,8 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
   const bin = join(root, "bin"); mkdirSync(bin, { recursive: true });
   const configPath = join(root, "config.yaml");
   const conversationId = "lark:cli_fixture:oc_me";
-  writeFileSync(configPath, JSON.stringify({ harnesses: { chief: { model: { provider: "fixture", id: "test-model" } } }, connectors: { environments: { dev: { kind: "kubernetes", kubeconfig: "~/.kube/dev", namespace: "app", aliases: ["开发"] } }, requirements: { work: { provider: "meego", projectKey: "project", categories: ["story"], userKeys: ["user-me"] } } }, plugins: { personal: {
-    watches: [{ id: "mine", source: "work", sessionId: conversationId, intervalMs: 30_000, repositories: [{ forge: "github.com", path: "compforge/aide" }] }] } } }));
+  writeFileSync(configPath, JSON.stringify({ harnesses: { chief: { model: { provider: "fixture", id: "test-model" } } }, connectors: { environments: { dev: { kind: "kubernetes", kubeconfig: "~/.kube/dev", namespace: "app", aliases: ["开发"] } }, requirements: { work: { provider: "meego", projectKey: "project", categories: ["story"] } } }, plugins: { personal: {
+    sources: { requirements: [{ id: "mine", userKeys: ["user-me"], source: "work", sessionId: conversationId, intervalMs: 30_000, repositories: [{ forge: "github.com", path: "compforge/aide" }] }] } } } }));
   const record = { work_item_id: "123", name: "实现需求", work_item_status: "进行中", current_status_operator: [{ user_key: "user-me", name: "Me" }], updated_at: "2026-10-18", description: "给 aide 加一个功能" };
   writeFileSync(join(bin, "meegle"), `#!/usr/bin/env node\nconsole.log(JSON.stringify(process.argv.includes("config") ? "project.example.com" : { data: [${JSON.stringify(record)}] }));\n`, { mode: 0o755 });
   const previous = { path: process.env.PATH, connectors: process.env.AIDE_CONFIG };

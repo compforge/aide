@@ -12,7 +12,7 @@ import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "../plugins/personal/message-source.ts";
-import { messageWatch, MESSAGE_SESSION, type MessageWatch } from "../plugins/personal/message-config.ts";
+import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageWatch } from "../plugins/personal/message-config.ts";
 import { readMessageContext } from "../plugins/personal/message-context.ts";
 import { Aide } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
@@ -26,9 +26,9 @@ const message = (id: string, patch: Partial<ChatMessage> = {}): ChatMessage => (
 });
 const page = (messages: ChatMessage[], extra: Partial<MessagePage> = {}): MessagePage =>
   ({ messages, hasMore: false, observedThrough: new Date(now).toISOString(), ...extra });
-const watch = (patch: Partial<MessageWatch> = {}) => ({ ...messageWatch({ messages: {} }, { appId: "cli_app", userId: "ou_me" })!, ...patch });
+const watch = (patch: Partial<MessageWatch> = {}) => ({ ...messageWatch(MessageWatchSchema.parse({}), { appId: "cli_app", userId: "ou_me" })!, ...patch });
 
-function fixture(t: TestContext, spec = watch()) {
+function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "mention") {
   const root = mkdtempSync(join(tmpdir(), "aide-message-source-"));
   const sessions = new SessionStore(root); const session = sessions.createSession({ id: MESSAGE_SESSION, cwd: root });
   const inputs = new InputStore(root);
@@ -43,7 +43,10 @@ function fixture(t: TestContext, spec = watch()) {
   const searches: MessageSearchQuery[] = [];
   const connectors = { ...emptyConnectors, messages: {
     async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
-    async search(query: MessageSearchQuery) { searches.push(query); return incoming(query); },
+    async search(query: MessageSearchQuery) {
+      if (discoveryKind && (query.chatType === "p2p" ? "direct" : "mention") !== discoveryKind) return page([]);
+      searches.push(query); return incoming(query);
+    },
     async history() { reads++; if (contextError) throw new Error("Permission denied"); return page(history); },
     async thread() { reads++; if (contextError) throw new Error("Permission denied"); return page(history); },
   } };
@@ -77,21 +80,21 @@ test("Direct and exact group mentions produce independent Inputs; self, bots, de
 });
 
 test("A failed context is durable, retries independently, and publishes the missing-context fact before advancing the scan", async (t) => {
-  const f = fixture(t, watch({ kinds: ["mention"] }));
+  const f = fixture(t, watch(), "mention");
   f.incoming(async () => page([message("om_at")]));
   f.failContext(true);
   await f.observe();
   assert.equal(f.inputs.list().length, 0);
   assert.equal(f.resource().status.pending![0]!.attempts, 1);
-  assert.equal(f.resource().status.scans![0]!.watermark, undefined);
+  assert.equal(f.resource().status.scans!.find((scan) => scan.kind === "mention")!.watermark, undefined);
   await f.restart(); await f.observe(now + 60_000);
   assert.equal(f.inputs.list().length, 1);
   assert.match(JSON.stringify(f.inputs.list()[0]!.spec.observation!.context), /Permission denied/);
-  assert.equal(f.resource().status.scans![0]!.watermark, new Date(now).toISOString());
+  assert.equal(f.resource().status.scans!.find((scan) => scan.kind === "mention")!.watermark, new Date(now).toISOString());
 });
 
 test("Crash after Input creation replays the saved delivery, not a changed live context", async (t) => {
-  const f = fixture(t, watch({ kinds: ["direct"] }));
+  const f = fixture(t, watch(), "direct");
   f.incoming(async () => page([message("om_dm", { mentions: [] })]));
   f.history([message("om_context", { content: "original context" })]);
   let crashed = false;
@@ -111,7 +114,7 @@ test("Crash after Input creation replays the saved delivery, not a changed live 
 });
 
 test("Search pages keep a fixed window across restart and never advance on provider failure", async (t) => {
-  const f = fixture(t, watch({ kinds: ["direct"] }));
+  const f = fixture(t, watch(), "direct");
   let fail = false;
   f.incoming(async (query) => {
     if (fail) throw new Error("Search unavailable");
@@ -130,7 +133,7 @@ test("Search pages keep a fixed window across restart and never advance on provi
 });
 
 test("Only associated replies trigger follow-up; duplicate polls stay silent and tracking expires", async (t) => {
-  const f = fixture(t, watch({ kinds: ["mention"], followupMs: 120_000 }));
+  const f = fixture(t, watch({ followupMs: 120_000 }), "mention");
   f.incoming(async () => page([message("om_at")]));
   await f.observe();
   f.history([message("om_unrelated", { mentions: [], createdAt: new Date(now).toISOString() }),
@@ -164,7 +167,7 @@ test("Failed direct search does not starve mentions, and an expired follow-up re
 });
 
 test("Follow-up pagination resumes across restart and a terminal delivery survives a crash without repeated Inputs", async (t) => {
-  const f = fixture(t, watch({ kinds: ["mention"], followupMs: 60_000 }));
+  const f = fixture(t, watch({ followupMs: 60_000 }), "mention");
   f.incoming(async () => page([message("om_at", { threadId: "omt_thread", threadPosition: "-1" })]));
   await f.observe();
   let calls = 0;
@@ -209,19 +212,17 @@ test("Thread root is loaded from nearby group history; unavailable roots remain 
   assert.equal(missing.missingRoot, true); assert.equal(missing.truncated, true);
 });
 
-test("Message observation is opt-in and rejects missing account, unsupported kinds and duplicate policy entries", () => {
-  assert.equal(messageWatch(), undefined);
-  assert.equal(messageWatch({ messages: { kinds: [] } }), undefined);
-  assert.throws(() => messageWatch({ messages: {} }), /connectors.lark/);
-  assert.throws(() => messageWatch({ messages: { kinds: ["group"] } }, { appId: "cli_app", userId: "ou_me" }));
-  assert.throws(() => messageWatch({ messages: { kinds: ["direct", "direct"] } }, { appId: "cli_app", userId: "ou_me" }));
+test("Message observation requires an account and has no configurable kinds", () => {
+  assert.equal(messageWatch(undefined), undefined);
+  assert.throws(() => messageWatch(MessageWatchSchema.parse({})), /connectors.lark/);
+  assert.throws(() => MessageWatchSchema.parse({ kinds: ["direct"] }));
 });
 
 test("Real Runner discovers IM through Connector IPC, routes an Input once, and restores without duplicating the observer", { timeout: 20_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me" } },
-    plugins: { personal: { messages: { kinds: ["direct"] } } } }));
+    plugins: { personal: { sources: { lark: {} } } } }));
   let searches = 0;
   const prompts: string[] = [];
   const options = { ...fakeOptions({ chief: async (prompt) => prompt.includes("Candidates:")
@@ -229,7 +230,7 @@ test("Real Runner discovers IM through Connector IPC, routes an Input once, and 
     async execute() { throw new Error("Unexpected work"); } }, root, prompts), config: loadConfig(configFile),
     connectors: { ...emptyConnectors, messages: {
       async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
-      async search() { searches++; return page([message("om_dm", { mentions: [] })]); },
+      async search(query: MessageSearchQuery) { searches++; return page(query.chatType === "p2p" ? [message("om_dm", { mentions: [] })] : []); },
       async history() { return page([]); }, async thread() { return page([]); },
     } } };
   let aide = new Aide(root, options, pino({ level: "silent" }));

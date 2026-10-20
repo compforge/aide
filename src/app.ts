@@ -5,7 +5,8 @@ import { Personal } from "../plugins/personal/aide.ts";
 import { environmentSources, ENVIRONMENT_SESSION } from "../plugins/personal/environment-config.ts";
 import { InputStore } from "./host/input/store.ts";
 import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
-import { parseWatches, validateWatchScopes } from "../plugins/personal/source-config.ts";
+import { requirementWatches, validateWatchScopes } from "../plugins/personal/source-config.ts";
+import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import { messageWatch, MESSAGE_SESSION } from "../plugins/personal/message-config.ts";
 import { chiefTarget, chiefRouterTarget } from "../plugins/personal/chief-model.ts";
 import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
@@ -34,7 +35,7 @@ export class Aide {
   private readonly defaultTarget: AideOptions["defaultTarget"];
   private readonly active = new Map<string, Personal>();
   private readonly listeners = new Set<() => void>();
-  private readonly watches: ReturnType<typeof parseWatches>;
+  private readonly watches: ReturnType<typeof requirementWatches>;
   private readonly environmentSources: ReturnType<typeof environmentSources>;
   private readonly messageSource: ReturnType<typeof messageWatch>;
   private readonly inputs: InputStore;
@@ -46,12 +47,18 @@ export class Aide {
   constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
     this.defaultTarget = Object.freeze({ ...options.defaultTarget });
     const config = options.config;
-    this.watches = parseWatches(config?.plugins.personal);
-    this.messageSource = messageWatch(config?.plugins.personal, config?.connectors.lark);
+    const { sources } = parsePersonalConfig(config?.plugins.personal);
+    this.watches = requirementWatches(sources.requirements);
+    this.messageSource = messageWatch(sources.lark, config?.connectors.lark);
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
-    this.environmentSources = environmentSources(environments, (name, reason) => this.log.info({ environment: name, reason }, "Environment observation skipped"));
+    this.environmentSources = environmentSources(sources.environments, environments);
     this.inputs = new InputStore(home);
     validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
+    this.log.info({
+      environments: this.environmentSources.map(({ environment, namespace, intervalMs }) => ({ environment, namespace, intervalMs })),
+      requirements: this.watches.map(({ id, source, intervalMs }) => ({ id, connector: source, intervalMs })),
+      lark: this.messageSource ? { intervalMs: this.messageSource.intervalMs, scenarios: ["direct", "mention"] } : null,
+    }, "Personal observation sources configured");
     this.connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
     this.storage = new SessionStore(home);
     for (const meta of this.storage.listSessions()) this.session(meta.aideSessionId);

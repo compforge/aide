@@ -1,6 +1,6 @@
 # Connector 与 Source
 
-Connector 是 Aide Host 提供的全局读取能力，所有 Plugin 和 Chief 都能使用。Host 加载配置、创建连接器并持有提供方客户端；Plugin Runner 通过现有 IPC 查询，不自行读取全局配置。Source 定义个人关注范围和观察策略，Chief 判断变化是否值得通知或推进。
+Connector 是 Aide Host 提供的全局读取能力，所有 Plugin 和 Chief 都能使用。Host 加载配置、创建连接器并持有提供方客户端；Plugin Runner 通过现有 IPC 查询，不自行读取全局配置。`connectors` 声明访问能力，`plugins.<plugin>.sources` 定义关注范围和观察策略，Chief 判断变化是否值得通知或推进。只声明 Connector 不启动观察。
 
 支持环境目录、Kubernetes Workload 采样、Meego 需求、GitHub / GitLab PR 和 Lark 消息。环境目录读取声明，Workload 采样读取运行态；Meego 通过已有 `meegle` CLI 访问，Forge 使用统一 HTTP 客户端。Lark 通过 `lark-cli` 用户身份读取，接入与观察策略见 [Lark 消息观察](lark-messages.md)。Connector 不创建 Work，也不代替用户决定下一步。
 
@@ -8,7 +8,7 @@ Connector 是 Aide Host 提供的全局读取能力，所有 Plugin 和 Chief �
 
 全局文件的选择、字段优先级和默认值规则见 [配置](../configuration.md)。Connector 声明由 Host 在启动时装配，修改后重启。
 
-环境直接声明在 `connectors.environments.<name>`，配置 key 就是环境身份。没有 `provider: static` 或另一个 registry 路径。Meego / Forge 连接信息也放在全局 `connectors`；Personal 的 watches 属于 `plugins.personal`：
+环境直接声明在 `connectors.environments.<name>`，配置 key 就是环境身份。Meego / Forge / Lark 连接信息也放在全局 `connectors`；Personal 的环境、Lark 与需求观察策略属于 `plugins.personal.sources`：
 
 ```yaml
 connectors:
@@ -19,7 +19,6 @@ connectors:
       aliases: [开发环境]
       kubeconfig: ~/.kube/dev
       context: dev
-      namespace: app
     devbox:
       kind: host
       description: Linux 开发机
@@ -34,7 +33,6 @@ connectors:
       profile: your-meegle-profile
       categories: [story]
       assigneeField: current_status_operator
-      userKeys: [your-user-key]
   forges:
     github.com:
       type: github
@@ -44,17 +42,22 @@ connectors:
       # 优先从服务环境的 GITLAB_TOKEN 读取
 plugins:
   personal:
-    watches:
-      - id: my-requirements
-        source: work
-        sessionId: me
+    sources:
+      environments:
+        targets:
+          - environment: dev
+            namespaces: [app]
         intervalMs: 300000
-        repositories:
-          - forge: github.com
-            path: org/repo
+      requirements:
+        - id: my-requirements
+          source: work
+          userKeys: [your-user-key]
+          sessionId: me
+          intervalMs: 300000
+          repositories:
+            - forge: github.com
+              path: org/repo
 ```
-
-旧的 `connectors.json` / `AIDE_CONNECTORS` 不再读取。已有配置需把 requirements / forges 移入 connectors，watches 移入 plugins.personal；不保留两份配置的覆盖规则。环境不会从 `~/.agentsphere/env-registry.yaml` 导入。
 
 ## Environment 的含义
 
@@ -86,11 +89,13 @@ Workload 采样复用 `@compforge/harness-toolbox` 的原生 Kubernetes Resource
 
 `connectors.environments.workloads(name, namespace?)` 返回规范环境名、namespace、采样时间与 Workload 快照。
 namespace 优先取参数，否则取环境声明；两者都缺失时拒绝采样。读取使用 Aide 所在机器的 kubeconfig，支持 `~/` 路径。
-SSH Host 不作为本地配置使用：自动观察会跳过该环境。每次采样总超时 25 秒，单请求 10 秒，并发 2，单个列表上限 8 MiB。
+SSH Host 不作为本地配置使用，Workload 采样要求本地 Kubernetes 访问。每次采样总超时 25 秒，单请求 10 秒，并发 2，单个列表上限 8 MiB。
 
-Personal 从已配置的 Environment 自动生成观察资源，无需额外 watch 清单或会话 ID。支持本地 Kubernetes 访问且声明了 namespace 的环境每五分钟采样一次；Host / generic 环境、SSH 访问和缺少 namespace 的声明会跳过并记录原因。
+Personal 按 `sources.environments.targets` 中的环境和 namespace 生成观察资源，默认每五分钟采样一次；每个环境可以观察多个 namespace。
+目标引用 Connector 的名称或别名，解析后以规范名称保存。namespace 来自 Source 策略，不从 Connector 的查询默认值推导。
+未声明环境 Source 或 `targets: []` 时不启动观察；显式引用不存在的环境、Host / generic 环境、SSH 访问或重复目标时启动报错。
 
-环境 Source 统一在 `source:environments` Session 中维护基线与调度，只观察一次，不随聊天 Session 数量重复采样。变化生成不带目标 sessionId 的 Input，Chief 根据已有会话近期关注与 Work 判断去向。关闭聊天 trigger 不关闭环境观察；修改环境配置后重启生效，观察范围改变会静默建立新的基线。
+环境 Source 统一在 `source:environments` Session 中维护基线与调度，只观察一次，不随聊天 Session 数量重复采样。变化生成不带目标 sessionId 的 Input，Chief 根据已有会话近期关注与 Work 判断去向。关闭聊天 trigger 不关闭环境观察；修改配置后重启生效，策略变化会静默建立新的基线，移除的策略停止观察。
 
 观察以 namespace 内的 Deployment、StatefulSet、DaemonSet 和无 Controller 的独立 Pod 为范围，ReplicaSet 用来追溯 Pod 到 Deployment 的归属。
 归属按 ownerReference 的 Controller UID 解析，不猜 Pod 名称前缀。Job/CronJob、独立 ReplicaSet 和自定义 Controller 的 Pod 不在此范围。
@@ -107,11 +112,11 @@ Pod 替换或镜像变化是事实，不能据此断言有人发布，更不能�
 
 ## 观察流程
 
-需求 Source 按负责人和项目范围读取近期摘要，比较实体身份与观察指纹。新观察先持久化为 Input，再推进水位；中断后的重试依靠输入身份去重。已完成或关闭的需求不会创建新的待处理输入。
+需求 Source 按 `sources.requirements` 中的 Connector 引用和负责人范围读取近期摘要，比较实体身份与观察指纹。项目与平台字段映射由 Connector 声明；负责人筛选由 Source 通过查询参数传入，同一 Connector 可供不同关注范围复用。新观察先持久化为 Input，再推进水位；中断后的重试依靠输入身份去重。已完成或关闭的需求不会创建新的待处理输入。
 
 需求 watch 默认使用 `source:<watch-id>` 作为 sessionId，也可指定已知聊天 Session。Source 只填写 sessionId，不填写 conversationId；Personal 管理该 Session 的 Conversation。watch 只装配到所属 Session，创建其它聊天不会重复轮询。Host 校验负责人范围后下发有效配置。Source 不直接调用模型或创建 Task，Chief 根据已有委托选择询问、CRUD Work 或静默忽略。
 
-Meego 的“我名下”按指定负责人字段中的稳定 user key 匹配，不按参与人或显示名。默认字段是当前节点处理人；项目若用单独的需求负责人字段，必须配置 `assigneeField`。`userKeys` 对开启的 watch 必填，避免意外观察整个项目。Meegle 单命令超时 20 秒、输出上限 4 MiB。
+Meego 的“我名下”按指定负责人字段中的稳定 user key 匹配，不按参与人或显示名。Connector 默认映射当前节点处理人；项目若用单独的需求负责人字段，配置 `assigneeField`。Source 的每个需求观察项必须声明非空 `userKeys`，避免意外观察整个项目。按需查询可用 `assigneeUserKeys` 筛选，不传时不继承 Source 的负责人策略。Meegle 单命令超时 20 秒、输出上限 4 MiB。
 
 Forge 的配置 key 是逻辑身份，`api_host` 可以覆盖 API 域名，`uids` 可选过滤 PR 作者。`GITHUB_TOKEN` / `GH_TOKEN`、`GITLAB_TOKEN` 优先于文件 token；没有凭证的 Forge 不启用。服务环境需能找到 `meegle` 并访问其登录态，不能只在交互 shell 中配置 PATH。
 
