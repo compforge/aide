@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const MESSAGE_SESSION = "source:feishu-messages";
+export const MESSAGE_SESSION = "source:lark-messages";
 /** Observation policy belongs to Personal; the Connector only exposes account-scoped IM reads. */
 export const MessageWatchSchema = z.object({
   kinds: z.array(z.enum(["direct", "mention"])).default(["direct", "mention"]),
@@ -21,6 +21,6 @@ export function messageWatch(config: Readonly<Record<string, unknown>> = {}, acc
   if (config.messages === undefined) return undefined;
   const watch = MessageWatchSchema.parse(config.messages);
   if (!watch.kinds.length) return undefined;
-  if (!account) throw new Error("Personal messages require connectors.feishu with explicit appId/userId");
+  if (!account) throw new Error("Personal messages require connectors.lark with explicit appId/userId");
   return { ...watch, accountId: account.appId, userId: account.userId };
 }

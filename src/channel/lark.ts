@@ -6,10 +6,10 @@ import { z } from "zod";
 import { normalize } from "@larksuiteoapi/node-sdk";
 import type { ChannelService } from "./service.ts";
 import { IncomingSchema, MessageSchema, type Message } from "./message.ts";
-import { progressCard, cardPreviews, cardContent, cardThought, type FeishuProgressReader, type FeishuProgress } from "./feishu-card.ts";
-import type { FeishuTransport } from "./feishu-client.ts";
+import { progressCard, cardPreviews, cardContent, cardThought, type LarkProgressReader, type LarkProgress } from "./lark-card.ts";
+import type { LarkTransport } from "./lark-client.ts";
 
-/** @why Feishu can return null for permission-restricted user_id; SDK normalization expects absent IDs as undefined. */
+/** @why Lark can return null for permission-restricted user_id; SDK normalization expects absent IDs as undefined. */
 const UserIdsSchema = z.object({ open_id: z.string().optional(),
   user_id: z.string().nullish().transform((value) => value ?? undefined), union_id: z.string().optional() });
 
@@ -33,11 +33,11 @@ const StateSchema = z.object({
 type State = z.infer<typeof StateSchema>;
 
 /**
- * @spec Persist inbound messages before acknowledging Feishu; acknowledge outbound delivery only after send succeeds.
+ * @spec Persist inbound messages before acknowledging Lark; acknowledge outbound delivery only after send succeeds.
  * @why Platform acknowledgement must not depend on business processing or model latency.
- * @see {@link ../../docs/channel/feishu.md}
+ * @see {@link ../../docs/channel/lark.md}
  */
-export class FeishuChannel {
+export class LarkChannel {
   private readonly path: string;
   private readonly prefix: string;
   private state: State;
@@ -49,48 +49,48 @@ export class FeishuChannel {
   private readonly cardRetry = new Map<string, number>();
 
   constructor(home: string, appId: string, private readonly aide: Pick<ChannelService, "receive" | "messages">,
-    private readonly transport: FeishuTransport, private readonly log: Logger, private readonly progress?: FeishuProgressReader) {
-    this.prefix = `feishu:${appId}:`;
-    this.path = join(home, "channels", `feishu-${createHash("sha256").update(appId).digest("hex").slice(0, 16)}.json`);
+    private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
+    this.prefix = `lark:${appId}:`;
+    this.path = join(home, "channels", `lark-${createHash("sha256").update(appId).digest("hex").slice(0, 16)}.json`);
     this.state = existsSync(this.path) ? StateSchema.parse(JSON.parse(readFileSync(this.path, "utf8")))
       : { cards: {}, pending: [], received: [], chats: [], notices: [], delivered: [] };
   }
 
   async start(): Promise<void> {
     this.timer = setInterval(() => {
-      void this.dispatch().catch(() => this.log.error("Feishu inbox processing failed"));
-      void this.deliver().catch(() => this.log.error("Feishu outbox persistence failed"));
+      void this.dispatch().catch(() => this.log.error("Lark inbox processing failed"));
+      void this.deliver().catch(() => this.log.error("Lark outbox persistence failed"));
     }, 1000);
     await this.transport.start((event) => this.receive(event));
-    this.log.info("Feishu channel started; connection state is reported separately");
+    this.log.info("Lark channel started; connection state is reported separately");
   }
 
   /**
    * @spec Group input requires an exact mention of the authenticated bot; group and direct chats retain separate conversation IDs.
-   * @link docs/channel/feishu.md
-   * @case tests/feishu.test.ts
+   * @link docs/channel/lark.md
+   * @case tests/lark.test.ts
    */
   async receive(raw: unknown): Promise<void> {
-    if (this.stopped) throw new Error("Feishu channel is stopping");
+    if (this.stopped) throw new Error("Lark channel is stopping");
     const parsed = EventSchema.safeParse(raw);
     if (!parsed.success) {
       this.log.warn({ issues: parsed.error.issues.map(({ path, code, message }) => ({ path, code, message })) },
-        "Ignoring malformed Feishu message event");
+        "Ignoring malformed Lark message event");
       return;
     }
     const { sender, message } = parsed.data;
     if (sender.sender_type !== "user") {
-      this.log.debug({ messageId: message.message_id, senderType: sender.sender_type }, "Ignoring Feishu non-user message");
+      this.log.debug({ messageId: message.message_id, senderType: sender.sender_type }, "Ignoring Lark non-user message");
       return;
     }
     if (message.chat_type !== "p2p" && message.chat_type !== "group") {
-      this.log.debug({ messageId: message.message_id, chatType: message.chat_type }, "Ignoring unsupported Feishu chat type");
+      this.log.debug({ messageId: message.message_id, chatType: message.chat_type }, "Ignoring unsupported Lark chat type");
       return;
     }
     const botIdentity = this.transport.botIdentity;
     if (message.chat_type === "group" && (!botIdentity || !message.mentions?.some((mention) => mention.id.open_id === botIdentity.openId))) {
       this.log.debug({ messageId: message.message_id, chatId: message.chat_id,
-        reason: botIdentity ? "bot_not_mentioned" : "bot_identity_unavailable" }, "Ignoring unaddressed Feishu group message");
+        reason: botIdentity ? "bot_not_mentioned" : "bot_identity_unavailable" }, "Ignoring unaddressed Lark group message");
       return;
     }
     const { message_id: id, chat_id: chatId } = message;
@@ -107,7 +107,7 @@ export class FeishuChannel {
       }
     }
     // Group normalization yields; concurrent duplicate deliveries must still persist only once.
-    if (this.stopped) throw new Error("Feishu channel is stopping");
+    if (this.stopped) throw new Error("Lark channel is stopping");
     if (this.state.received.includes(id)) return;
     const input = IncomingSchema.safeParse({ id, sessionId: conversationId, text });
     this.save({ ...this.state,
@@ -117,7 +117,7 @@ export class FeishuChannel {
       received: [...this.state.received, id],
       chats: this.state.chats.includes(chatId) ? this.state.chats : [...this.state.chats, chatId],
     });
-    this.log.info({ messageId: id, conversationId, chatType: message.chat_type, accepted: input.success }, "Feishu message received");
+    this.log.info({ messageId: id, conversationId, chatType: message.chat_type, accepted: input.success }, "Lark message received");
   }
 
   dispatch(): Promise<void> {
@@ -133,11 +133,11 @@ export class FeishuChannel {
       let failure: Message | undefined;
       try {
         await this.aide.receive(input);
-        this.log.info({ messageId: input.id, conversationId: input.sessionId }, "Feishu input routed");
+        this.log.info({ messageId: input.id, conversationId: input.sessionId }, "Lark input routed");
       } catch {
         if (this.stopped) return;
         failure = this.notice(input.id, input.sessionId, "这条请求处理失败。请查看网页中的事项状态，再发一条消息要求重试或继续。");
-        this.log.error({ messageId: input.id, conversationId: input.sessionId }, "Feishu input failed; explicit user retry required");
+        this.log.error({ messageId: input.id, conversationId: input.sessionId }, "Lark input failed; explicit user retry required");
       }
       this.save({ ...this.state, pending: this.state.pending.slice(1),
         notices: failure ? [...this.state.notices, failure] : this.state.notices });
@@ -161,7 +161,7 @@ export class FeishuChannel {
           try { await this.updateCard(chatId, view); }
           catch {
             this.cardRetry.set(view.id, Date.now() + 10_000);
-            this.log.warn({ inputId: view.id, conversationId }, "Feishu progress update failed; final text delivery remains available. Check cardkit:card:write scope and network");
+            this.log.warn({ inputId: view.id, conversationId }, "Lark progress update failed; final text delivery remains available. Check cardkit:card:write scope and network");
           }
         }
       }
@@ -181,20 +181,20 @@ export class FeishuChannel {
           await this.transport.send(chatId, text, id);
         } catch {
           this.retryAt = Date.now() + 10_000;
-          this.log.warn({ messageId: message.id, part: index, conversationId: message.conversationId }, "Feishu send failed; retrying in 10 seconds");
+          this.log.warn({ messageId: message.id, part: index, conversationId: message.conversationId }, "Lark send failed; retrying in 10 seconds");
           return;
         }
         this.save({ ...this.state, delivered: [...this.state.delivered, id] });
-        this.log.info({ messageId: message.id, part: index, conversationId: message.conversationId }, "Feishu message delivered");
+        this.log.info({ messageId: message.id, part: index, conversationId: message.conversationId }, "Lark message delivered");
       }
     }
   }
 
   /**
    * @spec Card operations share a persisted increasing sequence; only a finalized card acknowledges business Message delivery.
-   * @link docs/channel/feishu.md
+   * @link docs/channel/lark.md
    */
-  private async updateCard(chatId: string, view: FeishuProgress): Promise<void> {
+  private async updateCard(chatId: string, view: LarkProgress): Promise<void> {
     const transport = this.transport.cards!;
     const live = view.phase === "running" || view.phase === "queued";
     let card = this.state.cards[view.id];
@@ -209,7 +209,7 @@ export class FeishuChannel {
     if (!card.sent) {
       await transport.send(chatId, card.cardId, this.deliveryId(`card:${view.id}`, 0));
       card.sent = true; this.saveCard(view.id, card);
-      this.log.info({ inputId: view.id, conversationId: this.prefix + chatId }, "Feishu progress card delivered");
+      this.log.info({ inputId: view.id, conversationId: this.prefix + chatId }, "Lark progress card delivered");
     }
     const signature = JSON.stringify(view);
     if (card.signature === signature) return;
@@ -225,7 +225,7 @@ export class FeishuChannel {
       await operation((sequence, id) => transport.update(card.cardId, progressCard(view, live), sequence, id));
       card.layout = 1; card.think = cardThought(view); card.content = cardContent(view);
       card.previews = JSON.stringify(cardPreviews(view)); this.saveCard(view.id, card);
-      this.log.info({ inputId: view.id, cardId: card.cardId }, "Feishu card upgraded to stable reply panels");
+      this.log.info({ inputId: view.id, cardId: card.cardId }, "Lark card upgraded to stable reply panels");
     }
     const patches: Record<string, unknown> = {};
     for (const [field, elementId, text] of [["think", "think", cardThought(view)], ["content", "content", cardContent(view)]] as const) {
@@ -248,7 +248,7 @@ export class FeishuChannel {
         const receipts = view.messageIds.map((id) => this.deliveryId(id, 0));
         this.save({ ...this.state, delivered: [...new Set([...this.state.delivered, ...receipts])] });
       }
-      this.log.info({ inputId: view.id, phase: view.phase }, "Feishu progress card settled");
+      this.log.info({ inputId: view.id, phase: view.phase }, "Lark progress card settled");
     }
     card.signature = signature; this.saveCard(view.id, card);
   }
@@ -280,7 +280,7 @@ export class FeishuChannel {
   }
 }
 
-/** @why Keep encoded text well below Feishu's 150 KB limit, including JSON escaping. */
+/** @why Keep encoded text well below Lark's 150 KB limit, including JSON escaping. */
 function textParts(text: Message["text"]): string[] {
   const points = Array.from(text || "（空消息）");
   const result: string[] = [];

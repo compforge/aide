@@ -28,7 +28,7 @@
   <text x="90" y="839" text-anchor="middle" class="body">用户</text>
   <rect x="330" y="650" width="210" height="115" rx="16" class="box" fill="#eaf0f6"/>
   <text x="435" y="698" text-anchor="middle" class="body">Channel</text>
-  <text x="435" y="735" text-anchor="middle" class="small">Web / Feishu</text>
+  <text x="435" y="735" text-anchor="middle" class="small">Web / Lark</text>
   <path d="M170 685 H330" class="flow"/>
   <path d="M330 745 H170" class="flow"/>
 

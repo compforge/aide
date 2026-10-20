@@ -31,7 +31,7 @@ test("Default conversation selection is serialized across Sessions and persisted
   assert.equal((await fetch(base, { redirect: "manual" })).status, 200);
   assert.equal(aide.sessions().length, 0);
   assert.equal((await select("missing")).status, 404);
-  const a = "feishu:private & #1", b = "web:second";
+  const a = "lark:private & #1", b = "web:second";
   await aide.session(a).conversations.ensure();
   await aide.session(b).conversations.ensure();
   assert.equal((await select(a)).status, 200);

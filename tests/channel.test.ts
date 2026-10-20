@@ -145,7 +145,7 @@ test("conversation navigation lists persisted scopes without creating them and k
   assert.deepEqual(await list(), []);
   await fetch(url + "/?conversation=unsent");
   assert.equal(aide.sessions().flatMap((scope) => scope.conversations.list()).length, 0);
-  const group = "feishu:app:群 & #1";
+  const group = "lark:app:群 & #1";
   const base = Date.now() + 60_000;
   const at = (offset: number) => new Date(base + offset).toISOString();
   await aide.session("me").conversations.archive("me", [{ id: "m1", conversationId: "me", at: at(0), role: "user", text: "默认会话问题", workId: null }]);
@@ -184,7 +184,7 @@ test("Web deletes Tasks and Routines through WorkService and preserves other con
     await new Promise<void>((resolve) => server.close(() => resolve()));
     rmSync(dir, { recursive: true, force: true });
   });
-  const group = "feishu:app:群 & #1";
+  const group = "lark:app:群 & #1";
   const work = aide.work(group);
   const initialTask = await work.create({ kind: "task", title: "检查项目", instruction: "check", trigger: null });
   const task = await work.appendInput(initialTask.id, { action: "pause", text: "暂停" });

@@ -43,7 +43,7 @@ export function processPreview(phase: string, blocks: readonly { type: string; c
   };
 }
 
-/** @why Feishu clamps from the start, so live previews use a recent excerpt; full Markdown stays in the details. */
+/** @why Lark clamps from the start, so live previews use a recent excerpt; full Markdown stays in the details. */
 export function answerPreview(content: string, phase: string): string {
   if (!content.trim()) return phase === "failed" ? "本次处理已中断，请核对后重新交办。"
     : phase === "waiting" ? "等待你回答。" : phase === "done" ? "回复已完成" : "等待生成回答…";

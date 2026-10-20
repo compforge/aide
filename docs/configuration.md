@@ -17,15 +17,15 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 
 | 配置 | 所有者与用途 |
 |---|---|
-| `connectors` | Host 装配全局环境目录、需求、Forge 与飞书消息读取能力 |
+| `connectors` | Host 装配全局环境目录、需求、Forge 与 Lark 消息读取能力 |
 | `harnesses` | Host 装配 Agent 的模型选择和扩展能力；支持 `pi`、`chief`、`codex`、`claude`、`dsh` |
 | `plugins` | 各 Plugin 校验和使用自己的业务配置；例如 Personal watches |
 
 没有声明的 Connector/watch/package 列表默认为空。Connector 和 Plugin 的具体字段由所属实现校验，
 不放宽顶层或 Harness 的字段检查。配置不是 Plugin 之间传递凭证的通道。
 
-飞书用户消息的账号配置位于 `connectors.feishu`，单聊与群内 @ 的观察策略位于
-`plugins.personal.messages`，字段与权限见 [飞书消息观察](connector/feishu-messages.md)。
+Lark 用户消息的账号配置位于 `connectors.lark`，单聊与群内 @ 的观察策略位于
+`plugins.personal.messages`，字段与权限见 [Lark 消息观察](connector/lark-messages.md)。
 
 ```yaml
 defaultHarness: pi
@@ -129,7 +129,7 @@ Chief 和通用 Pi 各自解析配置；同一模型需分别声明或使用 YAM
 
 当 `defaultHarness: pi` 时，Task / Routine 使用的模型和能力包由 `harnesses.pi` 决定。
 外部 CLI Adapter 的原生配置由其自身接口管理。
-服务端口、工作目录、时区、飞书和代理仍使用[部署文档](deployment.md)中的环境变量；
+服务端口、工作目录、时区、Lark 和代理仍使用[部署文档](deployment.md)中的环境变量；
 它们与当前 YAML 字段没有重叠覆盖关系。
 
 ## 能力包同步

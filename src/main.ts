@@ -9,9 +9,9 @@ import { Connectors } from "../connectors/index.ts";
 import { Aide } from "./app.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
 import { httpChannel } from "./api/index.ts";
-import { feishuProgress } from "./channel/feishu-card.ts";
-import { FeishuChannel } from "./channel/feishu.ts";
-import { feishuConfig, feishuTransport } from "./channel/feishu-client.ts";
+import { larkProgress } from "./channel/lark-card.ts";
+import { LarkChannel } from "./channel/lark.ts";
+import { larkConfig, larkTransport } from "./channel/lark-client.ts";
 import { withAsyncFileLock } from "./host/file-lock.ts";
 
 const environment = Object.freeze({ ...process.env });
@@ -21,7 +21,7 @@ const path = resolve(home, "host");
 const port = z.coerce.number().int().min(1).max(65535).parse(environment.AIDE_PORT ?? "7433");
 const timezone = environment.AIDE_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 new Intl.DateTimeFormat("en", { timeZone: timezone });
-const feishu = feishuConfig(environment);
+const lark = larkConfig(environment);
 
 await withAsyncFileLock(path, async () => {
   const file = configPath(home);
@@ -41,8 +41,8 @@ await withAsyncFileLock(path, async () => {
   server.listen(port, "127.0.0.1");
   await once(server, "listening");
   await aide.start();
-  const bot = feishu ? new FeishuChannel(home, feishu.appId, aide, feishuTransport(feishu, log), log, (id) => feishuProgress(aide, id)) : undefined;
-  if (bot) void bot.start().catch(() => log.error("Feishu channel startup failed; check credentials and network"));
+  const bot = lark ? new LarkChannel(home, lark.appId, aide, larkTransport(lark, log), log, (id) => larkProgress(aide, id)) : undefined;
+  if (bot) void bot.start().catch(() => log.error("Lark channel startup failed; check credentials and network"));
   log.info({ port, path }, "Aide listening on localhost");
   await new Promise<void>((done) => {
     const stop = () => {

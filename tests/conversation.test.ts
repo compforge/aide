@@ -50,18 +50,18 @@ test("Chief serializes inputs within a conversation while another conversation c
     return `answer:${spec.text}`;
   }, async execute() { throw new Error("Unexpected work"); } }, root), pino({ level: "silent" }));
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ id: "1", sessionId: "feishu:bot:group-a", conversationId: "feishu:bot:group-a", text: "a-first" });
+  await aide.receive({ id: "1", sessionId: "lark:bot:group-a", conversationId: "lark:bot:group-a", text: "a-first" });
   await until(() => calls.length === 1);
-  await aide.receive({ id: "2", sessionId: "feishu:bot:group-a", conversationId: "feishu:bot:group-a", text: "a-second" });
-  await aide.receive({ id: "1", sessionId: "feishu:bot:group-b", conversationId: "feishu:bot:group-b", text: "b-first" });
+  await aide.receive({ id: "2", sessionId: "lark:bot:group-a", conversationId: "lark:bot:group-a", text: "a-second" });
+  await aide.receive({ id: "1", sessionId: "lark:bot:group-b", conversationId: "lark:bot:group-b", text: "b-first" });
   await until(() => calls.some((call) => call.text === "b-first"));
   assert.equal(calls.some((call) => call.text === "a-second"), false);
   assert.doesNotMatch(calls.find((call) => call.text === "b-first")!.prompt, /a-first|a-second/);
   release(); await aide.settled();
   assert.deepEqual(calls.filter((call) => call.conversationId.endsWith("group-a")).map((call) => call.text), ["a-first", "a-second"]);
   assert.equal(aide.conversationIds().length, 2);
-  assert.equal(aide.session("feishu:bot:group-a").store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "ChiefInput" }).length, 0);
-  assert.equal(aide.session("feishu:bot:group-a").store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Conversation" }).length, 1);
+  assert.equal(aide.session("lark:bot:group-a").store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "ChiefInput" }).length, 0);
+  assert.equal(aide.session("lark:bot:group-a").store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Conversation" }).length, 1);
 });
 
 test("Startup resumes queued inputs but fails interrupted input without replaying its actions", async (t) => {
@@ -121,7 +121,7 @@ test("Conversation name comes from its first Input, survives restart, and Source
   const options = fakeOptions({ chief: async () => "收到", execute: async () => { throw new Error("No Work expected"); } }, root);
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  const sessionId = "feishu:app:group";
+  const sessionId = "lark:app:group";
   await aide.receive({ id: "first", sessionId, text: "  关注 executor\n部署情况  " });
   await aide.receive({ id: "second", sessionId, text: "换个话题" });
   await aide.settled();

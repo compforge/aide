@@ -13,7 +13,7 @@ import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "../plugins/personal/chief-model.ts";
 import { createHarnessAdapter } from "../src/host/harness/registry.ts";
-import { FeishuChannel } from "../src/channel/feishu.ts";
+import { LarkChannel } from "../src/channel/lark.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { SessionStore } from "../src/host/store/store.ts";
 import { SOURCE_TYPE } from "../plugins/personal/source.ts";
@@ -49,12 +49,12 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
   assert.equal(aide.works().length, 0);
 });
 
-test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Pi, with durable discovery and released model turns", { timeout: 30_000 }, async (t) => {
+test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable discovery and released model turns", { timeout: 30_000 }, async (t) => {
   const root = process.env.AIDE_CHIEF_TEST_ROOT ?? mkdtempSync(join(tmpdir(), "aide-chief-pi-"));
   const agentDir = join(root, "pi"); mkdirSync(agentDir, { recursive: true });
   const bin = join(root, "bin"); mkdirSync(bin, { recursive: true });
   const configPath = join(root, "config.yaml");
-  const conversationId = "feishu:cli_fixture:oc_me";
+  const conversationId = "lark:cli_fixture:oc_me";
   writeFileSync(configPath, JSON.stringify({ harnesses: { chief: { model: { provider: "fixture", id: "test-model" } } }, connectors: { environments: { dev: { kind: "kubernetes", kubeconfig: "~/.kube/dev", namespace: "app", aliases: ["开发"] } }, requirements: { work: { provider: "meego", projectKey: "project", categories: ["story"], userKeys: ["user-me"] } } }, plugins: { personal: {
     watches: [{ id: "mine", source: "work", sessionId: conversationId, intervalMs: 30_000, repositories: [{ forge: "github.com", path: "compforge/aide" }] }] } } }));
   const record = { work_item_id: "123", name: "实现需求", work_item_status: "进行中", current_status_operator: [{ user_key: "user-me", name: "Me" }], updated_at: "2026-10-18", description: "给 aide 加一个功能" };
@@ -121,7 +121,7 @@ test("real Source -> Pi Chief -> Feishu confirm/ask -> Work -> Pi, with durable 
       chiefSession: aide.chiefSession(target.id, chiefConfig) })
     : coding.createAdapter(target) }, log);
   const sent: string[] = [];
-  const bot = new FeishuChannel(root, "cli_fixture", aide, { async start() {}, close() {}, async send(_chat, text) { sent.push(text); } }, log);
+  const bot = new LarkChannel(root, "cli_fixture", aide, { async start() {}, close() {}, async send(_chat, text) { sent.push(text); } }, log);
   t.after(async () => {
     await bot.close(); await aide.close(); server.closeAllConnections(); server.close();
     process.env.PATH = previous.path;

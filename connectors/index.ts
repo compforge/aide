@@ -3,8 +3,8 @@ import { createForgeConnectors } from "./forge/config.ts";
 import { createMeegoRequirementConnectors } from "./requirements/meego.ts";
 import { resolveEnvironmentConfig } from "./environments/config.ts";
 import { Environments } from "./environments.ts";
-import { FeishuMessages } from "./feishu/messages.ts";
-import { FeishuMessagesConfigSchema } from "./feishu/config.ts";
+import { LarkMessages } from "./lark/messages.ts";
+import { LarkMessagesConfigSchema } from "./lark/config.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 
 /** One host-owned set of provider clients; plugins receive only read capabilities. */
@@ -16,7 +16,7 @@ export class Connectors implements ConnectorClient {
     private readonly forgeProviders: readonly ForgeConnector[],
     readonly environments: EnvironmentDirectory = new Environments(),
     readonly messages: ConnectorClient["messages"] = emptyConnectors.messages,
-    private readonly messageAccount?: { provider: "feishu"; accountId: string; userId: string },
+    private readonly messageAccount?: { provider: "lark"; accountId: string; userId: string },
   ) {
     this.requirements = Object.freeze({
       list: (source, query) => this.requirement(source).list(query),
@@ -33,10 +33,10 @@ export class Connectors implements ConnectorClient {
     } satisfies ConnectorClient["forges"]);
   }
 
-  static fromConfig(config: { environments?: Record<string, unknown>; requirements?: Record<string, unknown>; forges?: Record<string, unknown>; feishu?: unknown }, environment: Readonly<Record<string, string | undefined>> = process.env): Connectors {
-    const feishu = config.feishu === undefined ? undefined : FeishuMessagesConfigSchema.parse(config.feishu);
+  static fromConfig(config: { environments?: Record<string, unknown>; requirements?: Record<string, unknown>; forges?: Record<string, unknown>; lark?: unknown }, environment: Readonly<Record<string, string | undefined>> = process.env): Connectors {
+    const lark = config.lark === undefined ? undefined : LarkMessagesConfigSchema.parse(config.lark);
     return new Connectors(createMeegoRequirementConnectors(config), createForgeConnectors(config, { environment }), new Environments(resolveEnvironmentConfig(config.environments)),
-      feishu ? new FeishuMessages(feishu) : undefined, feishu ? { provider: "feishu", accountId: feishu.appId, userId: feishu.userId } : undefined);
+      lark ? new LarkMessages(lark) : undefined, lark ? { provider: "lark", accountId: lark.appId, userId: lark.userId } : undefined);
   }
 
   async describe() {

@@ -10,7 +10,7 @@ Aide 由 Channel、Source、资源与 Controller、Connector、Harness 等组件
 
 | 概念 | 职责 |
 | --- | --- |
-| Channel | 接收用户消息，提交 Input / Message，并展示答复、问题与执行进展；Web 和 Feishu 是两个实现 |
+| Channel | 接收用户消息，提交 Input / Message，并展示答复、问题与执行进展；Web 和 Lark 是两个实现 |
 | Source | 定义观察范围，通过 Core 请求外部查询或订阅，把观察结果转为资源或 Input |
 | Core / Verb | Core 提供共享协作机制，Verb 是 Controller 的动作出口，表达外部查询、操作、AI 执行和用户交互 |
 | Connector | 适配外部系统与环境，由 Core 装配并调用，处理提供方协议与数据映射 |

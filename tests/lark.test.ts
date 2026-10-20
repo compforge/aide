@@ -7,8 +7,8 @@ import pino from "pino";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
 import type { Message } from "../plugins/personal/model.ts";
-import { FeishuChannel } from "../src/channel/feishu.ts";
-import { feishuConfig, feishuTransport, type FeishuTransport } from "../src/channel/feishu-client.ts";
+import { LarkChannel } from "../src/channel/lark.ts";
+import { larkConfig, larkTransport, type LarkTransport } from "../src/channel/lark-client.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });
@@ -16,9 +16,9 @@ const event = (id: string, text: string, chatId = "oc_chat") => ({
   sender: { sender_type: "user" },
   message: { message_id: id, chat_id: chatId, chat_type: "p2p", message_type: "text", content: JSON.stringify({ text }) },
 });
-function fakeTransport(botIdentity?: FeishuTransport["botIdentity"]) {
+function fakeTransport(botIdentity?: LarkTransport["botIdentity"]) {
   const sent: { chatId: string; text: string; id: string }[] = [];
-  const transport: FeishuTransport = {
+  const transport: LarkTransport = {
     botIdentity,
     async start() {}, close() {},
     async send(chatId, text, id) { sent.push({ chatId, text, id }); },
@@ -26,21 +26,21 @@ function fakeTransport(botIdentity?: FeishuTransport["botIdentity"]) {
   return { transport, sent };
 }
 
-test("Feishu inbox survives restart; duplicate events do not execute twice; ordinary conversation does not create Work", async (t) => {
-  const home = mkdtempSync(join(tmpdir(), "aide-feishu-"));
+test("Lark inbox survives restart; duplicate events do not execute twice; ordinary conversation does not create Work", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-"));
   let routes = 0;
   const aide = new Aide(home, fakeOptions({
     async chief(prompt) { routes++; return prompt.includes('小明') ? "你好，小明" : "怎么称呼你？"; },
     async execute() { throw new Error("No work expected"); },
   }, home), log);
   const { transport, sent } = fakeTransport();
-  let channel = new FeishuChannel(home, "cli_test", aide, transport, log);
+  let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
   channel.receive(event("om_1", "写个问候"));
   channel.receive(event("om_1", "写个问候"));
   assert.equal(routes, 0, "Event acknowledgement must not wait for Harness");
   await channel.close();
-  channel = new FeishuChannel(home, "cli_test", aide, transport, log);
+  channel = new LarkChannel(home, "cli_test", aide, transport, log);
   await channel.dispatch();
   await aide.settled();
   await channel.deliver();
@@ -48,7 +48,7 @@ test("Feishu inbox survives restart; duplicate events do not execute twice; ordi
   assert.deepEqual(sent.map((message) => message.text), ["怎么称呼你？"]);
   assert.equal(aide.works().length, 0);
   await channel.close();
-  channel = new FeishuChannel(home, "cli_test", aide, transport, log);
+  channel = new LarkChannel(home, "cli_test", aide, transport, log);
   channel.receive(event("om_1", "写个问候"));
   await channel.dispatch();
   await channel.deliver();
@@ -63,18 +63,18 @@ test("Feishu inbox survives restart; duplicate events do not execute twice; ordi
   assert.ok(sent.every((message) => message.chatId === "oc_chat"));
 });
 
-test("Feishu sends proactive output, retries the same part id after failure, and isolates apps/chats", async (t) => {
-  const home = mkdtempSync(join(tmpdir(), "aide-feishu-outbox-"));
+test("Lark sends proactive output, retries the same part id after failure, and isolates apps/chats", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-outbox-"));
   const messages: Message[] = [];
   const aide = { receive: async () => { throw new Error("unused"); }, messages: () => messages };
   const { transport, sent } = fakeTransport();
-  let channel = new FeishuChannel(home, "cli_test", aide, transport, log);
+  let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   channel.receive(event("om_1", "关注变化"));
   const message = (id: string, conversationId: string, text: string): Message => ({ id, conversationId, text, role: "aide", workId: "routine", at: new Date().toISOString() });
-  messages.push(message("web", "me", "不要发送"), message("other", "feishu:cli_other:oc_chat", "不要发送"),
-    message("unknown", "feishu:cli_test:oc_unknown", "不要发送"),
-    message("news", "feishu:cli_test:oc_chat", "有变化😀".repeat(2000)));
+  messages.push(message("web", "me", "不要发送"), message("other", "lark:cli_other:oc_chat", "不要发送"),
+    message("unknown", "lark:cli_test:oc_unknown", "不要发送"),
+    message("news", "lark:cli_test:oc_chat", "有变化😀".repeat(2000)));
   let calls = 0;
   transport.send = async (chatId, text, id) => {
     sent.push({ chatId, text, id });
@@ -83,9 +83,9 @@ test("Feishu sends proactive output, retries the same part id after failure, and
   await channel.deliver();
   assert.equal(sent.length, 2);
   await channel.close();
-  channel = new FeishuChannel(home, "cli_test", aide, transport, log);
+  channel = new LarkChannel(home, "cli_test", aide, transport, log);
   await channel.deliver();
-  assert.equal(sent[1]!.id, sent[2]!.id, "Ambiguous sends must reuse Feishu uuid");
+  assert.equal(sent[1]!.id, sent[2]!.id, "Ambiguous sends must reuse Lark uuid");
   assert.notEqual(sent[0]!.id, sent[2]!.id, "Confirmed parts must not be resent");
   assert.equal(sent[0]!.text + sent.slice(2).map((part) => part.text).join(""), messages[3]!.text);
   const count = sent.length;
@@ -93,12 +93,12 @@ test("Feishu sends proactive output, retries the same part id after failure, and
   assert.equal(sent.length, count);
 });
 
-test("Feishu ignores unaddressed group/bot events and reports unsupported input and intake failure without automatic reexecution", async (t) => {
-  const home = mkdtempSync(join(tmpdir(), "aide-feishu-errors-"));
+test("Lark ignores unaddressed group/bot events and reports unsupported input and intake failure without automatic reexecution", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-errors-"));
   let received = 0;
   const aide = { receive: async () => { received++; throw new Error("private data"); }, messages: () => [] };
   const { transport, sent } = fakeTransport();
-  const channel = new FeishuChannel(home, "cli_test", aide, transport, log);
+  const channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   const group = event("group", "ignore"); group.message.chat_type = "group";
   const bot = event("bot", "ignore"); bot.sender.sender_type = "app";
@@ -117,12 +117,12 @@ test("Feishu ignores unaddressed group/bot events and reports unsupported input 
   assert.ok(sent.every((message) => !message.text.includes("private data")));
 });
 
-test("Feishu malformed-event diagnostics identify invalid fields without logging message content", async (t) => {
-  const home = mkdtempSync(join(tmpdir(), "aide-feishu-invalid-"));
+test("Lark malformed-event diagnostics identify invalid fields without logging message content", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-invalid-"));
   const entries: string[] = [];
   const diagnosticLog = pino({ level: "warn" }, { write(line) { entries.push(line); } });
   const { transport } = fakeTransport();
-  const channel = new FeishuChannel(home, "cli_invalid", {
+  const channel = new LarkChannel(home, "cli_invalid", {
     receive: async () => { throw new Error("Invalid events must not execute"); }, messages: () => [],
   }, transport, diagnosticLog);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
@@ -134,15 +134,15 @@ test("Feishu malformed-event diagnostics identify invalid fields without logging
   assert.ok(!entries[0]!.includes("sensitive message body"));
 });
 
-test("Feishu accepts exact bot mentions, strips SDK placeholders, isolates chats and deduplicates concurrent group events", async (t) => {
-  const home = mkdtempSync(join(tmpdir(), "aide-feishu-group-"));
+test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats and deduplicates concurrent group events", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-group-"));
   const prompts: string[] = [];
   const aide = new Aide(home, fakeOptions({
     async chief(prompt) { prompts.push(prompt); return "已收到群内请求"; },
     async execute() { throw new Error("No Work expected"); },
   }, home), log);
   const { transport, sent } = fakeTransport({ openId: "ou_aide", name: "Aide" });
-  let channel = new FeishuChannel(home, "cli_group", aide, transport, log);
+  let channel = new LarkChannel(home, "cli_group", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const group = (id: string, text: string, chatId = "oc_group", mentions = [
     { key: "@_user_1", id: { open_id: "ou_aide" }, name: "Aide" },
@@ -159,7 +159,7 @@ test("Feishu accepts exact bot mentions, strips SDK placeholders, isolates chats
   await channel.receive(group("om_other_group", "@_user_1 检查另一个群", "oc_other_group"));
   await channel.receive(event("om_direct", "检查单聊", "oc_direct"));
   // Pending group input and its cleaned text survive restart before Chief executes it.
-  await channel.close(); channel = new FeishuChannel(home, "cli_group", aide, transport, log);
+  await channel.close(); channel = new LarkChannel(home, "cli_group", aide, transport, log);
   await channel.receive(addressed);
   await channel.dispatch(); await aide.settled(); await channel.deliver();
   assert.equal(prompts.length, 3);
@@ -168,23 +168,23 @@ test("Feishu accepts exact bot mentions, strips SDK placeholders, isolates chats
   assert.deepEqual(new Set(sent.map((item) => item.chatId)), new Set(["oc_group", "oc_other_group", "oc_direct"]));
   assert.equal(sent.length, 3);
   assert.deepEqual(new Set(aide.messages().map((item) => item.conversationId)), new Set([
-    "feishu:cli_group:oc_group", "feishu:cli_group:oc_other_group", "feishu:cli_group:oc_direct",
+    "lark:cli_group:oc_group", "lark:cli_group:oc_other_group", "lark:cli_group:oc_direct",
   ]));
   assert.equal(aide.works().length, 0);
 });
 
-test("Feishu accepts nullable permission-restricted user IDs and still requires the bot open ID", async (t) => {
-  const home = mkdtempSync(join(tmpdir(), "aide-feishu-null-ids-"));
+test("Lark accepts nullable permission-restricted user IDs and still requires the bot open ID", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-null-ids-"));
   const received: { id: string; text: string }[] = [];
   const { transport } = fakeTransport({ openId: "ou_aide", name: "Aide" });
-  const channel = new FeishuChannel(home, "cli_null_ids", {
+  const channel = new LarkChannel(home, "cli_null_ids", {
     receive: async (input) => {
       received.push(input);
       return { ...input, conversationId: input.sessionId, role: "user", at: new Date().toISOString(), workId: null };
     }, messages: () => [],
   }, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  // @case Live Feishu group events may expose open_id while withholding user_id as null.
+  // @case Live Lark group events may expose open_id while withholding user_id as null.
   const group = {
     sender: { sender_type: "user", sender_id: { open_id: "ou_sender", user_id: null } },
     message: { ...event("null-ids", "@_user_1 看下 @_user_2 的需求", "oc_group").message, chat_type: "group",
@@ -206,17 +206,17 @@ test("Feishu accepts nullable permission-restricted user IDs and still requires 
   ]);
 });
 
-test("Feishu leaves group mentions disabled without bot identity and handles empty or non-text mentions without executing Chief", async (t) => {
-  const home = mkdtempSync(join(tmpdir(), "aide-feishu-group-empty-"));
+test("Lark leaves group mentions disabled without bot identity and handles empty or non-text mentions without executing Chief", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-group-empty-"));
   const { transport, sent } = fakeTransport();
   const aide = { receive: async () => { throw new Error("No Chief execution expected"); }, messages: () => [] };
-  let channel = new FeishuChannel(home, "cli_group_empty", aide, transport, log);
+  let channel = new LarkChannel(home, "cli_group_empty", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   const group = { ...event("no-identity", "@_user_1"), message: { ...event("no-identity", "@_user_1").message,
     chat_type: "group", mentions: [{ key: "@_user_1", id: { open_id: "ou_aide" }, name: "Aide" }] } };
   await channel.receive(group); await channel.deliver(); assert.equal(sent.length, 0);
   await channel.close();
-  channel = new FeishuChannel(home, "cli_group_empty", aide,
+  channel = new LarkChannel(home, "cli_group_empty", aide,
     { ...transport, botIdentity: { openId: "ou_aide", name: "Aide" } }, log);
   await channel.receive(group);
   await channel.receive({ ...group, message: { ...group.message, message_id: "image", message_type: "image", content: "{}" } });
@@ -239,7 +239,7 @@ test("official SDK resolves bot identity before accepting events, and keeps priv
   };
   let dispatcher!: Lark.EventDispatcher;
   Lark.WSClient.prototype.start = async function (options) { dispatcher = options.eventDispatcher; };
-  const transport = feishuTransport({ appId: "cli_group_sdk", appSecret: "fixture" }, log);
+  const transport = larkTransport({ appId: "cli_group_sdk", appSecret: "fixture" }, log);
   t.after(() => transport.close());
   const received: unknown[] = [];
   await transport.start(async (input) => { received.push(input); });
@@ -247,7 +247,7 @@ test("official SDK resolves bot identity before accepting events, and keeps priv
   await dispatcher.invoke({ schema: "2.0", header: { event_type: "im.message.receive_v1" }, event: event("sdk-event", "hello") }, { needCheck: false });
   assert.equal(received.length, 1);
   rejectIdentity = true;
-  const fallback = feishuTransport({ appId: "cli_group_sdk_failure", appSecret: "fixture" }, log);
+  const fallback = larkTransport({ appId: "cli_group_sdk_failure", appSecret: "fixture" }, log);
   t.after(() => fallback.close());
   await fallback.start(async (input) => { received.push(input); });
   assert.equal(fallback.botIdentity, undefined);
@@ -255,10 +255,10 @@ test("official SDK resolves bot identity before accepting events, and keeps priv
   assert.equal(received.length, 2);
 });
 
-test("Feishu is optional and incomplete credentials fail without exposing secrets", () => {
-  assert.equal(feishuConfig({}), undefined);
-  assert.throws(() => feishuConfig({ AIDE_FEISHU_APP_SECRET: "secret" }), /^Error: Set both/);
-  assert.deepEqual(feishuConfig({ AIDE_FEISHU_APP_ID: "cli_test", AIDE_FEISHU_APP_SECRET: "secret" }), { appId: "cli_test", appSecret: "secret" });
+test("Lark is optional and incomplete credentials fail without exposing secrets", () => {
+  assert.equal(larkConfig({}), undefined);
+  assert.throws(() => larkConfig({ AIDE_LARK_APP_SECRET: "secret" }), /^Error: Set both/);
+  assert.deepEqual(larkConfig({ AIDE_LARK_APP_ID: "cli_test", AIDE_LARK_APP_SECRET: "secret" }), { appId: "cli_test", appSecret: "secret" });
 });
 
 test("official SDK sends bot text with a stable uuid and checks API-level failure", async (t) => {
@@ -280,7 +280,7 @@ test("official SDK sends bot text with a stable uuid and checks API-level failur
     }
     return { data, status: 200, statusText: "OK", headers: {}, config };
   };
-  const transport = feishuTransport({ appId: "cli_sdk_test", appSecret: "test-secret" }, log);
+  const transport = larkTransport({ appId: "cli_sdk_test", appSecret: "test-secret" }, log);
   t.after(() => transport.close());
   await transport.send("oc_test", "你好😀", "test-send-id");
   rejectSend = true;

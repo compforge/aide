@@ -1,4 +1,4 @@
-# 飞书消息观察
+# Lark 消息观察
 
 用户收到的单聊、群内明确 @ 用户的消息，以及所在群的新消息，都是可以交给 Personal 判断的外部输入场景。
 Source 保存观察事实，Chief 结合用户已有委托选择提醒、询问、关联工作或忽略。
@@ -12,7 +12,7 @@ Host 通过服务进程 PATH 中的 `lark-cli` 读取消息，使用服务用户
 
 ```yaml
 connectors:
-  feishu:
+  lark:
     appId: cli_your_app
     userId: ou_your_open_id
     timeoutMs: 20000
@@ -23,9 +23,9 @@ plugins:
 ```
 
 省略 `plugins.personal.messages` 或设置 `kinds: []` 不启动观察；只声明 Connector 时，Chief 仍可按需读取上下文。
-已有 Feishu Channel 的机器人交互不受此配置影响。初次启用默认观察最近五分钟，不导入全部历史。
+已有 Lark Channel 的机器人交互不受此配置影响。初次启用默认观察最近五分钟，不导入全部历史。
 应先建立自己的 Aide Conversation，并按需要设为默认联系人；没有可承接的 Conversation 时，现有路由会记录 ignored。
-观察源位于独立执行 Session `source:feishu-messages`，新聊天 Session 不会重复启动它；Input 不预设目标 Session 或 Conversation。
+观察源位于独立执行 Session `source:lark-messages`，新聊天 Session 不会重复启动它；Input 不预设目标 Session 或 Conversation。
 
 | 操作 | 权限 |
 |---|---|
@@ -93,7 +93,7 @@ Connector 每次只取一页，不隐藏续页；每个 CLI 子进程默认超�
 
 ## 验证
 
-`tests/feishu-messages.test.ts` 覆盖账号固定、CLI 映射、分页、错误脱敏、并发限制及 Connector/Chief 工具调用。
+`tests/lark-messages.test.ts` 覆盖账号固定、CLI 映射、分页、错误脱敏、并发限制及 Connector/Chief 工具调用。
 `tests/message-source.test.ts` 覆盖单聊与 @ 过滤、上下文缺口、分页水位、重启恢复、讨论跟进和真实 Runner 的 IPC 路径。
 运行 `npm run check` 验证类型与全量测试。
 

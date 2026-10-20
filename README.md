@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Aide is a self-hosted personal agent that follows through on the work you delegate. Ask a question, delegate a goal, or set up an ongoing responsibility through the web app or Feishu. Aide keeps track of progress, asks when it needs your decision, and picks up the work as new information arrives. You spend less time checking progress, repeating context, and reminding it what to do next.
+Aide is a self-hosted personal agent that follows through on the work you delegate. Ask a question, delegate a goal, or set up an ongoing responsibility through the web app or Lark. Aide keeps track of progress, asks when it needs your decision, and picks up the work as new information arrives. You spend less time checking progress, repeating context, and reminding it what to do next.
 
 For example: “Follow this PR until it is merged. Handle review comments, ask me when a decision is needed, and tell me when it lands.” The same task can span multiple rounds of work and waiting. Aide continues working on your server when you close the chat or shut down your laptop.
 
@@ -50,11 +50,11 @@ In the web app, select a conversation on the left, follow messages and execution
 
 For an always-on Linux setup, proxy settings, or access through an SSH tunnel, see [deployment and troubleshooting](docs/deployment.md).
 
-## Use Feishu
+## Use Lark
 
-Set `AIDE_FEISHU_APP_ID` and `AIDE_FEISHU_APP_SECRET` to connect your bot. Send it a direct message or @mention it in a group; no public callback endpoint is required. With CardKit permissions enabled, replies and progress appear in a streaming card.
+Set `AIDE_LARK_APP_ID` and `AIDE_LARK_APP_SECRET` to connect your bot. Send it a direct message or @mention it in a group; no public callback endpoint is required. With CardKit permissions enabled, replies and progress appear in a streaming card.
 
-See [Feishu setup](docs/channel/feishu.md) for bot creation and permissions. Text messages are supported in direct chats and group @mentions. Agent permission requests still need to be handled in the web app.
+See [Lark setup](docs/channel/lark.md) for bot creation and permissions. Text messages are supported in direct chats and group @mentions. Agent permission requests still need to be handled in the web app.
 
 ## Before you rely on it
 

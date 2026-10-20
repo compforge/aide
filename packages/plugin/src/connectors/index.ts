@@ -12,7 +12,7 @@ export interface ConnectorCatalog {
   readonly environments: readonly EnvironmentSummary[];
   readonly requirements: readonly { source: string; provider: string }[];
   readonly forges: readonly { forge: string; provider: string }[];
-  readonly messages?: { provider: "feishu"; accountId: string; userId: string };
+  readonly messages?: { provider: "lark"; accountId: string; userId: string };
 }
 
 /** Host-owned read capabilities, shared by all plugins. No credentials cross this boundary. */

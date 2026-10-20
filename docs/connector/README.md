@@ -2,7 +2,7 @@
 
 Connector 是 Aide Host 提供的全局读取能力，所有 Plugin 和 Chief 都能使用。Host 加载配置、创建连接器并持有提供方客户端；Plugin Runner 通过现有 IPC 查询，不自行读取全局配置。Source 定义个人关注范围和观察策略，Chief 判断变化是否值得通知或推进。
 
-支持环境目录、Kubernetes Workload 采样、Meego 需求、GitHub / GitLab PR 和飞书消息。环境目录读取声明，Workload 采样读取运行态；Meego 通过已有 `meegle` CLI 访问，Forge 使用统一 HTTP 客户端。飞书通过 `lark-cli` 用户身份读取，接入与观察策略见 [飞书消息观察](feishu-messages.md)。Connector 不创建 Work，也不代替用户决定下一步。
+支持环境目录、Kubernetes Workload 采样、Meego 需求、GitHub / GitLab PR 和 Lark 消息。环境目录读取声明，Workload 采样读取运行态；Meego 通过已有 `meegle` CLI 访问，Forge 使用统一 HTTP 客户端。Lark 通过 `lark-cli` 用户身份读取，接入与观察策略见 [Lark 消息观察](lark-messages.md)。Connector 不创建 Work，也不代替用户决定下一步。
 
 ## 配置与所有权
 
@@ -115,7 +115,7 @@ Meego 的“我名下”按指定负责人字段中的稳定 user key 匹配，�
 
 Forge 的配置 key 是逻辑身份，`api_host` 可以覆盖 API 域名，`uids` 可选过滤 PR 作者。`GITHUB_TOKEN` / `GH_TOKEN`、`GITLAB_TOKEN` 优先于文件 token；没有凭证的 Forge 不启用。服务环境需能找到 `meegle` 并访问其登录态，不能只在交互 shell 中配置 PATH。
 
-飞书目标为 `feishu:<app-id>:<chat-id>`，可从入站日志的 sessionId 获取。机器人需要已经收到过该单聊的消息，才会向其投递。Chief 与 Work 模型分别由 `harnesses.chief` 和 `harnesses.pi` 配置，缺省时沿用 Pi 原生配置。
+Lark 目标为 `lark:<app-id>:<chat-id>`，可从入站日志的 sessionId 获取。机器人需要已经收到过该单聊的消息，才会向其投递。Chief 与 Work 模型分别由 `harnesses.chief` 和 `harnesses.pi` 配置，缺省时沿用 Pi 原生配置。
 
 当前 Meego 每个类别读取最近更新的 50 条，再筛选负责人；不保证覆盖高流量项目的全量变更。首次连接会把这批范围内尚未结束的条目交给 Chief；配置范围改变也会建立新的观察范围。后续仅在指纹变化时再次提交。尚未接 webhook、全量分页或 Forge 定时 Source；Forge 当前供 Chief 查询 PR 状态与评论。
 
