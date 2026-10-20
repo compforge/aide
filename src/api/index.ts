@@ -13,6 +13,8 @@ const EventSchema = IncomingSchema.omit({ text: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
 
+const ConversationDefaultSchema = z.object({ conversationId: z.string().min(1), enabled: z.boolean() }).strict();
+
 const ConversationTriggerSchema = z.object({ conversationId: z.string().min(1) }).extend({ enabled: z.boolean() }).strict();
 
 const DeleteConversationSchema = z.object({ conversationId: z.string().min(1), uid: z.string().min(1), revision: z.number().int().positive() }).strict();
@@ -67,6 +69,14 @@ export function httpChannel(aide: WebService, log: Logger) {
       if (request.method === "POST" && request.headers["content-type"]?.split(";", 1)[0]?.trim() !== "application/json") {
         json(response, 415, { error: "Content-Type must be application/json" }); return;
       }
+      if (request.method === "GET" && url.pathname === "/" && !url.searchParams.get("conversation")) {
+        const selected = conversationList(aide).find((item) => item.default);
+        if (selected) {
+          url.searchParams.set("conversation", selected.id);
+          response.writeHead(302, { location: url.pathname + url.search, "cache-control": "no-store" });
+          response.end(); return;
+        }
+      }
       const asset = assets.get(url.pathname);
       if (request.method === "GET" && asset) {
         response.writeHead(200, {
@@ -118,6 +128,12 @@ export function httpChannel(aide: WebService, log: Logger) {
       } else if (request.method === "POST" && url.pathname === "/messages") {
         const input = IncomingSchema.parse(await body(request));
         json(response, 200, await aide.receive(input));
+      } else if (request.method === "POST" && url.pathname === "/conversations/default") {
+        const { conversationId, enabled } = ConversationDefaultSchema.parse(await body(request));
+        const resource = aide.findConversation(conversationId)?.conversations.resource(conversationId);
+        if (!resource || resource.metadata.deletionTimestamp) { json(response, 404, { error: "会话不存在。" }); return; }
+        await aide.setDefaultConversation(conversationId, enabled);
+        json(response, 200, { conversationId, default: enabled });
       } else if (request.method === "POST" && url.pathname === "/conversations/trigger") {
         const { conversationId, enabled } = ConversationTriggerSchema.parse(await body(request));
         if (!aide.findConversation(conversationId)) {

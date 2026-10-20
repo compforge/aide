@@ -14,18 +14,15 @@
   .conversation-link strong { font-size: 14px; margin-bottom: 6px; }
   .conversation-link span { margin-top: 4px; }
   .conversation-row { margin-bottom: 10px; }
-  .trigger-switch { display: flex; align-items: center; gap: 6px; margin: 0 10px; font-size: 12px; color: #68776c; cursor: pointer; }
-  .trigger-switch input { accent-color: #294f3a; }
   #conversation-notice { margin: 10px; color: #9b5b11; }
   #conversation-heading { font-size: 16px; margin: 0 0 6px; overflow-wrap: anywhere; }
   .conversation-header { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-  .conversation-entry { display: flex; align-items: start; gap: 4px; }
-  .conversation-entry .conversation-link { flex: 1; min-width: 0; }
+  .conversation-entry { position: relative; }
+  .conversation-entry .conversation-link { margin-bottom: 0; }
+  .conversation-entry .conversation-link strong { padding-right: 64px; }
   .conversation-copy { flex: none; padding: 5px 8px; background: transparent; color: #68776c; font-size: 12px; }
   .conversation-copy:hover { background: #e8eee3; }
-  .conversation-actions { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding-top: 12px; }
-  .conversation-delete { display: flex; align-items: center; justify-content: center; padding: 5px 8px; background: transparent; color: #8a3f35; font-size: 12px; }
-  .conversation-delete:hover { background: #f3e8e3; }
+  .conversation-actions { position: absolute; top: 10px; right: 6px; display: flex; align-items: center; gap: 2px; }
   #messages { flex: 1; overflow: auto; padding: 0 12px 24px 0; }
   .message { padding: 16px 18px; background: white; border: 1px solid #e1e6dc; border-radius: 12px; margin: 12px 0; }
   .message.user { background: #e8eee3; margin-left: 10%; }
@@ -110,3 +107,18 @@
   .reply-part[data-kind="answer"] .reply-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; }
   .reply-part[data-kind="answer"][data-state="live"] .reply-preview { display: block; max-height: 4.95em; overflow: hidden; }
   .reply-part[data-phase="waiting"] > summary .reply-part-title, .reply-part[data-phase="failed"] > summary .reply-part-title { color: #9b5b11; }
+
+  #composer[hidden] { display: none; }
+  .conversation-new { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 10px; background: transparent; color: inherit; border-radius: 10px; text-align: left; font-size: 14px; font-weight: 600; }
+  .conversation-new:hover { background: #edf1e8; }
+  .conversation-new svg { flex: none; }
+
+  .conversation-more { padding: 3px 7px; background: transparent; color: #68776c; font-size: 20px; line-height: 1; }
+  .conversation-more:hover, .conversation-more[aria-expanded="true"] { background: #e8eee3; }
+  .conversation-menu { position: fixed; inset: auto; margin: 0; padding: 5px; min-width: 148px; border: 1px solid #d8dfd5; border-radius: 10px; background: #fff; color: #20342b; box-shadow: 0 6px 24px #20342b24; }
+  .conversation-menu button { display: block; width: 100%; padding: 9px 12px; border-radius: 6px; background: transparent; color: inherit; text-align: left; font-size: 13px; }
+  .conversation-menu button:hover, .conversation-menu button:focus-visible { background: #edf1e8; }
+  .conversation-menu .conversation-delete { color: #8a3f35; border-top: 1px solid #e1e6dc; border-radius: 0 0 6px 6px; margin-top: 4px; }
+
+  .conversation-link .conversation-indicators { display: flex; gap: 8px; margin-top: 8px; color: #68776c; }
+  .conversation-indicators .conversation-status-icon { display: inline-flex; margin: 0; overflow: visible; }

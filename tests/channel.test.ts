@@ -159,7 +159,7 @@ test("conversation navigation lists persisted scopes without creating them and k
   const before = aide.sessions().flatMap((scope) => scope.conversations.list());
   const summaries = await list();
   assert.deepEqual(summaries.map((item) => item.id), [group, "me", "work-only", "source:requirements"]);
-  assert.deepEqual(summaries[0], { id: group, uid: aide.session(group).conversations.resource(group)!.metadata.uid, revision: aide.session(group).conversations.get(group)!.revision, sessionId: group, trigger: { enabled: false, intervalSeconds: 3600 }, name: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2) });
+  assert.deepEqual(summaries[0], { id: group, uid: aide.session(group).conversations.resource(group)!.metadata.uid, revision: aide.session(group).conversations.get(group)!.revision, sessionId: group, default: false, trigger: { enabled: false, intervalSeconds: 3600 }, name: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2) });
   assert.equal(summaries.find((item) => item.id === "source:requirements")?.preview, "");
   assert.equal(summaries.find((item) => item.id === "source:requirements")?.name, "private observation");
   assert.deepEqual(aide.sessions().flatMap((scope) => scope.conversations.list()), before);

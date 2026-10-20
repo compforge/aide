@@ -17,7 +17,7 @@ test("Unscoped Input fans out across Sessions once; session hints and ignored ob
     calls.push(prompt);
     if (prompt.includes("Candidates:")) {
       routing++;
-      return JSON.stringify({ conversationIds: prompt.includes("irrelevant") ? [] : ["group-a", "group-b", "group-a"], reason: "related service interest" });
+      return JSON.stringify({ conversationIds: JSON.parse(prompt.split("Input: ")[1]!.split("\nCandidates:")[0]!).text === "irrelevant" ? [] : ["group-a", "group-b", "group-a"], reason: "related service interest" });
     }
     return "观察已处理";
   }, async execute() { throw new Error("No delegated work expected"); } }, root), log);

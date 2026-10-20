@@ -1,9 +1,13 @@
 import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview, replyLabels, toolLabels } from '/agentue.js';
   const $ = (id) => document.getElementById(id);
-  const conversationId = new URL(location.href).searchParams.get('conversation') || 'me';
+  const conversationId = new URL(location.href).searchParams.get('conversation');
   const query = '?conversationId=' + encodeURIComponent(conversationId);
   const labels = { ready: '准备执行', running: '执行中', waiting: '等你回答', scheduled: '等待触发', paused: '已暂停', done: '已完成', uncertain: '需要核对结果', invalid_result: '结果解析失败' };
   let lastMessages = '', lastWork = '', lastInteractions = '', polling = false, sending = false, draft = null;
+  // getRandomValues also works when accessing a trusted devbox over plain HTTP.
+  function newId() {
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  }
   function element(tag, text, className) {
     const node = document.createElement(tag);
     if (text !== undefined) node.textContent = text;
@@ -35,48 +39,97 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
     });
     return button;
   }
-  $('conversation-copy').replaceWith(conversationCopyButton(conversationId));
-  let lastConversations = '';
-  const triggerUpdates = new Set();
-  const deletingConversations = new Set();
-  function conversationDeleteButton(item) {
-    const button = element('button', undefined, 'conversation-delete');
-    const icon = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg>';
-    button.innerHTML = icon;
-    button.type = 'button'; button.title = '删除会话';
-    button.setAttribute('aria-label', '删除会话：' + item.name);
-    button.disabled = deletingConversations.has(item.id);
-    button.addEventListener('click', async () => {
-      if (deletingConversations.has(item.id) || !confirm('删除会话「' + item.name + '」及其聊天记录？\n有待处理内容或关联事项、安排时，需要先处理。')) return;
-      deletingConversations.add(item.id); button.disabled = true; button.title = '删除中…';
-      try {
-        await api('/conversations/delete', { method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ conversationId: item.id, revision: item.revision, uid: item.uid }) });
-        const remaining = await api('/conversations');
-        if (item.id === conversationId) {
-          const url = new URL(location.href);
-          url.searchParams.set('conversation', remaining[0]?.id || 'me');
-          location.replace(url.href); return;
-        }
-        lastConversations = ''; renderConversations(remaining);
-        $('conversation-notice').textContent = '已删除「' + item.name + '」。';
-      } catch (error) {
-        $('conversation-notice').textContent = '删除失败：' + error.message;
-        lastConversations = '';
-      } finally {
-        deletingConversations.delete(item.id); button.disabled = false; button.title = '删除会话';
+  if (conversationId) $('conversation-copy').replaceWith(conversationCopyButton(conversationId));
+  let lastConversations = '', conversationUpdating = false;
+  let menuButton = null;
+  const conversationMenu = element('div', undefined, 'conversation-menu');
+  conversationMenu.id = 'conversation-menu'; conversationMenu.popover = 'auto';
+  conversationMenu.setAttribute('role', 'menu'); conversationMenu.setAttribute('aria-label', '会话操作');
+  document.body.append(conversationMenu);
+  conversationMenu.addEventListener('toggle', (event) => {
+    if (event.newState === 'closed') menuButton?.setAttribute('aria-expanded', 'false');
+  });
+  conversationMenu.addEventListener('keydown', (event) => {
+    const buttons = [...conversationMenu.querySelectorAll('button:not(:disabled)')];
+    const index = buttons.indexOf(document.activeElement);
+    if (event.key === 'Escape') {
+      conversationMenu.hidePopover(); menuButton?.focus(); return;
+    }
+    const next = event.key === 'ArrowDown' ? (index + 1) % buttons.length
+      : event.key === 'ArrowUp' ? (index - 1 + buttons.length) % buttons.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : null;
+    if (next !== null) { event.preventDefault(); buttons[next]?.focus(); }
+  });
+  // A top-layer popover avoids clipping at the bottom of the scrollable sidebar.
+  $('conversation-list').parentElement.addEventListener('scroll', () => conversationMenu.hidePopover());
+  window.addEventListener('resize', () => conversationMenu.hidePopover());
+  async function changeConversation(item, action) {
+    conversationMenu.hidePopover();
+    if (conversationUpdating) return;
+    if (action === 'delete' && !confirm('删除会话「' + item.name + '」及其聊天记录？\n有待处理内容或关联事项、安排时，需要先处理。')) return;
+    conversationUpdating = true;
+    document.querySelectorAll('.conversation-more').forEach((button) => { button.disabled = true; });
+    try {
+      const payload = action === 'delete' ? { conversationId: item.id, revision: item.revision, uid: item.uid }
+        : { conversationId: item.id, enabled: action === 'default' ? !item.default : !item.trigger.enabled };
+      await api('/conversations/' + action, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+      const remaining = await api('/conversations');
+      if (action === 'delete' && item.id === conversationId) {
+        const url = new URL(location.href);
+        const next = remaining.find((candidate) => candidate.default) || remaining[0];
+        if (next) url.searchParams.set('conversation', next.id); else url.searchParams.delete('conversation');
+        location.replace(url.href); return;
       }
+      lastConversations = ''; renderConversations(remaining);
+      $('conversation-notice').textContent = action === 'delete' ? '已删除「' + item.name + '」。' : '';
+    } catch (error) {
+      $('conversation-notice').textContent = '会话操作失败：' + error.message;
+      lastConversations = '';
+    } finally {
+      conversationUpdating = false;
+      document.querySelectorAll('.conversation-more').forEach((button) => { button.disabled = false; });
+      document.querySelector('.conversation-more[data-conversation-id="' + CSS.escape(item.id) + '"]')?.focus();
+    }
+  }
+  function conversationMenuButton(item) {
+    const button = element('button', '⋯', 'conversation-more');
+    button.type = 'button'; button.title = '会话操作'; button.dataset.conversationId = item.id;
+    button.setAttribute('aria-label', '会话操作：' + item.name);
+    button.setAttribute('aria-haspopup', 'menu'); button.setAttribute('aria-controls', conversationMenu.id);
+    button.setAttribute('aria-expanded', 'false'); button.disabled = conversationUpdating;
+    button.addEventListener('click', () => {
+      const wasOpen = conversationMenu.matches(':popover-open');
+      conversationMenu.hidePopover();
+      menuButton?.setAttribute('aria-expanded', 'false');
+      if (wasOpen && menuButton === button) return;
+      menuButton = button;
+      conversationMenu.replaceChildren();
+      for (const [action, label] of [['default', item.default ? '取消默认' : '设置默认'],
+        ['trigger', item.trigger.enabled ? '取消回顾' : '开启回顾'], ['delete', '删除会话']]) {
+        const option = element('button', label, action === 'delete' ? 'conversation-delete' : '');
+        option.type = 'button'; option.setAttribute('role', 'menuitem');
+        option.addEventListener('click', () => changeConversation(item, action));
+        conversationMenu.append(option);
+      }
+      conversationMenu.showPopover(); button.setAttribute('aria-expanded', 'true');
+      const rect = button.getBoundingClientRect();
+      conversationMenu.style.left = Math.max(8, Math.min(rect.right - conversationMenu.offsetWidth, innerWidth - conversationMenu.offsetWidth - 8)) + 'px';
+      conversationMenu.style.top = Math.max(8, Math.min(rect.bottom + 4, innerHeight - conversationMenu.offsetHeight - 8)) + 'px';
+      conversationMenu.querySelector('button')?.focus();
     });
     return button;
   }
+  function conversationStatusIcon(label, drawing) {
+    const icon = element('span', undefined, 'conversation-status-icon');
+    icon.title = label; icon.setAttribute('aria-label', label); icon.setAttribute('role', 'img');
+    icon.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + drawing + '</svg>';
+    return icon;
+  }
   function renderConversations(conversations) {
     const items = [...conversations];
-    for (const id of new Set([conversationId, 'me'])) {
-      if (!items.some((item) => item.id === id)) items.push({ id, name: id === 'me' ? '默认对话' : '新对话', preview: '' });
-    }
+    if (conversationId && !items.some((item) => item.id === conversationId)) items.push({ id: conversationId, name: '新对话', preview: '' });
     const current = items.find((item) => item.id === conversationId);
-    $('conversation-heading').textContent = current.name;
-    document.title = current.name + ' · Aide';
+    $('conversation-heading').textContent = current?.name || '选择一个会话';
     const signature = JSON.stringify(items);
     if (signature === lastConversations) return;
     lastConversations = signature;
@@ -88,43 +141,23 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
       link.title = item.name;
       link.append(element('strong', item.name));
       if (item.preview) link.append(element('span', item.preview, 'muted'));
+      const indicators = element('span', undefined, 'conversation-indicators');
+      if (item.default) indicators.append(conversationStatusIcon('默认联络处', '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>'));
+      if (item.trigger?.enabled) indicators.append(conversationStatusIcon('主动回顾已开启', '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M3 5l3-3m12 0 3 3M6 20l-2 2m14-2 2 2"/>'));
+      if (indicators.childElementCount) link.append(indicators);
       const row = element('div', undefined, 'conversation-row');
       const entry = element('div', undefined, 'conversation-entry');
       const actions = element('div', undefined, 'conversation-actions');
       actions.append(conversationCopyButton(item.id, true));
-      if (item.revision != null) actions.append(conversationDeleteButton(item));
+      if (item.revision != null) actions.append(conversationMenuButton(item));
       entry.append(link, actions); row.append(entry);
-      if (item.sessionId) {
-        const label = element('label', undefined, 'trigger-switch');
-        const toggle = element('input'); toggle.type = 'checkbox'; toggle.checked = item.trigger.enabled;
-        toggle.setAttribute('role', 'switch');
-        toggle.setAttribute('aria-label', item.name + '：主动回顾');
-        toggle.disabled = triggerUpdates.has(item.id);
-        label.title = '开启后定时回顾；关闭不影响已有事项与安排。';
-        toggle.addEventListener('change', async () => {
-          triggerUpdates.add(item.id);
-          for (const control of document.querySelectorAll('.trigger-switch input')) control.disabled = true;
-          try {
-            await api('/conversations/trigger', { method: 'POST', headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ conversationId: item.id, enabled: toggle.checked }) });
-            $('conversation-notice').textContent = '';
-          } catch (error) {
-            toggle.checked = item.trigger.enabled;
-            $('conversation-notice').textContent = '开关保存失败：' + error.message;
-          } finally {
-            triggerUpdates.delete(item.id); lastConversations = '';
-            try { renderConversations(await api('/conversations')); } catch { for (const control of document.querySelectorAll('.trigger-switch input')) control.disabled = false; }
-          }
-        });
-        label.append(toggle, element('span', '主动回顾')); row.append(label);
-      }
       return row;
     });
     $('conversation-list').replaceChildren(...links);
   }
   async function refreshConversations() {
     try {
-      if (triggerUpdates.size || deletingConversations.size) return;
+      if (conversationUpdating || conversationMenu.matches(':popover-open')) return;
       renderConversations(await api('/conversations'));
       if ($('conversation-notice').textContent === '会话列表暂时无法更新，正在重试。') $('conversation-notice').textContent = '';
     } catch { $('conversation-notice').textContent = '会话列表暂时无法更新，正在重试。'; }
@@ -434,6 +467,7 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
   }
   /** @spec 轮询故障和恢复仅更新轮询状态，不覆盖发送结果或实时连接状态。 */
   async function poll() {
+    if (!conversationId) { await refreshConversations(); return; }
     if (polling) return;
     polling = true;
     try {
@@ -446,14 +480,14 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
   $('composer').addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = $('input').value.trim();
-    if (!text || sending) return;
+    if (!conversationId || !text || sending) return;
     sending = true; $('send').disabled = true; $('input').disabled = true;
     $('notice').className = ''; $('notice').textContent = '正在理解你的请求…';
     try {
       if (!draft || draft.text !== text) {
         const conversations = await api('/conversations');
         const sessionId = conversations.find((item) => item.id === conversationId)?.sessionId || conversationId;
-        draft = { id: crypto.randomUUID(), sessionId, text };
+        draft = { id: newId(), sessionId, text };
       }
       await api('/messages', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(draft) });
       draft = null; $('input').value = ''; $('notice').textContent = '已接收，后续进展会显示在这里。';
@@ -464,27 +498,37 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
   $('input').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('composer').requestSubmit(); }
   });
-  const stream = new EventSource('/stream' + query);
-  let view = {};
-  stream.onmessage = (event) => {
-    try {
-      const patch = parsePatchEvent(event.data);
-      view = applyPatch(view, patch);
-      if (patch.op === 'ping' || patch.op === 'end') return;
-      renderMessages(view.blocks, view.meta.activity);
-      const liveIds = new Set(view.blocks.filter((block) => block.type === 'execution' &&
-        (block.status === 'running' || (view.meta.activity && block.group_id === view.meta.activity.id))).map((block) => block.id));
-      renderActivity(view.meta.activity && { ...view.meta.activity,
-        answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === view.meta.activity.id).map((block) => block.content),
-        questions: view.blocks.filter((block) => block.type === 'question' && block.group_id === view.meta.activity.id),
-        blocks: view.blocks.filter((block) => liveIds.has(block.parent_id))
-          .map((block) => ({ ...block, kind: block.type, text: block.content })) });
-      $('connection').textContent = view.meta.error ? view.meta.error.message : '实时连接';
-    } catch {
-      stream.close(); $('connection').textContent = '无法读取对话进展，请刷新页面重试';
-    }
-  };
-  stream.onopen = () => { $('connection').textContent = '实时连接'; };
-  stream.onerror = () => { $('connection').textContent = '连接断开 · 正在重连'; };
+  if (conversationId) {
+    const stream = new EventSource('/stream' + query);
+    let view = {};
+    stream.onmessage = (event) => {
+      try {
+        const patch = parsePatchEvent(event.data);
+        view = applyPatch(view, patch);
+        if (patch.op === 'ping' || patch.op === 'end') return;
+        renderMessages(view.blocks, view.meta.activity);
+        const liveIds = new Set(view.blocks.filter((block) => block.type === 'execution' &&
+          (block.status === 'running' || (view.meta.activity && block.group_id === view.meta.activity.id))).map((block) => block.id));
+        renderActivity(view.meta.activity && { ...view.meta.activity,
+          answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === view.meta.activity.id).map((block) => block.content),
+          questions: view.blocks.filter((block) => block.type === 'question' && block.group_id === view.meta.activity.id),
+          blocks: view.blocks.filter((block) => liveIds.has(block.parent_id))
+            .map((block) => ({ ...block, kind: block.type, text: block.content })) });
+        $('connection').textContent = view.meta.error ? view.meta.error.message : '实时连接';
+      } catch {
+        stream.close(); $('connection').textContent = '无法读取对话进展，请刷新页面重试';
+      }
+    };
+    stream.onopen = () => { $('connection').textContent = '实时连接'; };
+    stream.onerror = () => { $('connection').textContent = '连接断开 · 正在重连'; };
+  } else {
+    $('composer').hidden = true;
+    $('notice').textContent = '选择已有会话，或新建对话；可以将常用私聊设为默认联络处。';
+    $('connection').textContent = '';
+  }
+  $('new-conversation').addEventListener('click', () => {
+    const id = 'web:' + newId();
+    location.href = '/?conversation=' + encodeURIComponent(id);
+  });
   renderConversations([]);
   poll(); setInterval(poll, 1500);

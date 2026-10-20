@@ -61,6 +61,20 @@ export class ConversationStore {
       return runs;
     });
   }
+  /** Only the application-wide default selection operation calls this; keep concurrent controller updates intact. */
+  async setDefault(id: string, enabled: boolean): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      const c = this.resource(id);
+      if (!c || c.metadata.deletionTimestamp) throw new Error("Conversation does not exist");
+      if (Boolean(c.spec.default) === enabled) return;
+      try {
+        await this.client.replace(c, { ...c.spec, default: enabled }, c.status);
+        return;
+      } catch (error) {
+        if (attempt >= 4 || !/version|conflict/i.test(String(error))) throw error;
+      }
+    }
+  }
   async setTriggerEnabled(id: string, enabled: boolean): Promise<import("./conversation-trigger.ts").ConversationTrigger> {
     const c = this.resource(id); if (!c) throw new Error("Conversation does not exist");
     const trigger = conversationTrigger(c.spec.trigger);

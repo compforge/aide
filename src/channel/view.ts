@@ -114,6 +114,7 @@ export interface ConversationSummary {
   uid: string | null;
   sessionId: string;
   trigger: ConversationTrigger;
+  default: boolean;
   name: string;
   preview: string;
   updatedAt: string;
@@ -128,7 +129,12 @@ export function conversationList(aide: ChannelService): ConversationSummary[] {
   const ensure = (id: string) => {
     let summary = summaries.get(id);
     if (!summary) {
-      summary = { id, uid: aide.findConversation(id)!.conversations.resource(id)?.metadata.uid ?? null, revision: aide.findConversation(id)!.conversations.get(id)?.revision ?? null, sessionId: aide.findConversation(id)!.id, trigger: conversationTrigger(aide.findConversation(id)!.conversations.resource(id)?.spec.trigger), name: aide.findConversation(id)!.conversations.get(id)?.name || (id === "me" ? "默认对话" : "未命名会话"), preview: "", updatedAt: "" };
+      const scope = aide.findConversation(id)!;
+      const resource = scope.conversations.resource(id);
+      summary = { id, uid: resource?.metadata.uid ?? null, revision: scope.conversations.get(id)?.revision ?? null,
+        sessionId: scope.id, trigger: conversationTrigger(resource?.spec.trigger),
+        default: resource?.spec.default === true && !resource.metadata.deletionTimestamp,
+        name: scope.conversations.get(id)?.name || "未命名会话", preview: "", updatedAt: "" };
       summaries.set(id, summary);
     }
     return summary;
