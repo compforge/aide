@@ -86,7 +86,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   let current = snapshot("A"); let reads = 0;
   const prompts: string[] = [];
   const config = loadConfig(configFile);
-  const options = { ...fakeOptions({ chief: async (prompt) => prompt.includes("Candidates:") ? JSON.stringify({ conversationIds: ["other"], reason: "service interest" }) : "关注的服务有变化", async execute() { throw new Error("Unexpected work"); } }, root, prompts), config,
+  const options = { ...fakeOptions({ chief: async () => "关注的服务有变化", async execute() { throw new Error("Unexpected work"); } }, root, prompts), config,
     connectors: { ...emptyConnectors, environments: { ...emptyConnectors.environments, async workloads(name: string, namespace?: string) {
       assert.equal(name, "dev"); assert.ok(["app", "other"].includes(namespace!)); reads++;
       return namespace === "app" ? current : { ...snapshot("unchanged"), namespace: "other" };
@@ -98,6 +98,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   const initialReads = reads;
   await aide.receive({ sessionId: "other", conversationId: "other", id: "hello", text: "hello" }); await aide.settled();
   assert.equal(reads, initialReads, "Opening another Session must not duplicate the observer");
+  await aide.setDefaultConversation("other", true);
   current = snapshot("B");
   const poll = async () => {
     const scope = aide.session(ENVIRONMENT_SESSION);
@@ -124,5 +125,5 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();
   assert.equal(aide.session(ENVIRONMENT_SESSION).conversations.inputStore.list(ENVIRONMENT_SESSION).length, 1);
-  assert.equal(prompts.length, 3);
+  assert.equal(prompts.length, 2, "Only Channel and observation handling call the model; routing does not");
 });

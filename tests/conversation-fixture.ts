@@ -24,6 +24,6 @@ export async function seedInput(store: PersonalConversations, id: string, spec: 
     await resources.replace(c, { ...c.spec, name: c.spec.name || initialConversationName(input.text), inputIds: [...c.spec.inputIds, id] }, { ...c.status, processing: { ...c.status.processing, [id]: { ...status, messages } }, messages: [...c.status.messages, ...messages] });
   }
   const fact = store.inputStore.get(id)!;
-  if (!fact.status.routing) store.inputStore.update(fact, { routing: { phase: "done", targets: [{ sessionId: store.sessionId, name: c.metadata.name, uid: c.metadata.uid }], reason: "Fixture destination" } });
+  if (!fact.status.routing) store.inputStore.update(fact, { routing: { phase: "done", reason: "Fixture destination" } });
   return store.input(id, conversationId)!;
 }

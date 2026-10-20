@@ -103,7 +103,7 @@ test("Source watches restore independently and are installed only in their assig
   assert.equal(polls, initialPolls);
   assert.equal(aide.session("web:one").store.resources.list(SOURCE_TYPE).length, 0);
   for (const id of ["source:one", "source:two"]) assert.equal(aide.session(id).store.resources.list(SOURCE_TYPE).length, 1);
-  assert.equal(aide.findConversation("source:one")!.id, "source:one");
+  assert.equal(aide.findConversation("source:one"), undefined, "A Source with no Input must not create an empty topic");
   assert.equal(aide.findConversation("web:one")!.id, "web:one");
   const sourceIds = ["source:one", "source:two"].map((id) => aide.session(id).store.resources.list(SOURCE_TYPE)[0]!.metadata.uid);
   await aide.close();
@@ -112,13 +112,14 @@ test("Source watches restore independently and are installed only in their assig
   assert.equal(aide.sessions().length, 3);
   assert.deepEqual(["source:one", "source:two"].map((id) => aide.session(id).store.resources.list(SOURCE_TYPE)[0]!.metadata.uid), sourceIds);
   assert.equal(aide.session("web:one").store.resources.list(SOURCE_TYPE).length, 0);
-  assert.equal(aide.findConversation("source:one")!.id, "source:one");
+  assert.equal(aide.findConversation("source:one"), undefined);
 });
 
 
 test("Conversation name comes from its first Input, survives restart, and Source-created conversations are named too", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-conversation-name-"));
-  const options = fakeOptions({ chief: async () => "收到", execute: async () => { throw new Error("No Work expected"); } }, root);
+  const options = fakeOptions({ chief: async () => "收到",
+    execute: async () => { throw new Error("No Work expected"); } }, root);
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const sessionId = "lark:app:group";

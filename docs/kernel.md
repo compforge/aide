@@ -59,13 +59,13 @@ Aide 的根级 `defaultHarness` 选择默认工作执行实现，`harnesses.<nam
 
 ### 输入与交流记录
 
-Input 是独立的 Host 内置资源，记录输入内容、来源和可选的目标 sessionId。Channel 知道聊天对应的 Session，Source 也可以提交没有目标的外部观察。接收输入的执行 Session 与输入声明的目标 Session 分别记录；前者负责持久执行，后者表达来源已知的路由范围。输入事实统一保存在 `$AIDE_HOME/inputs.json`，供多个插件资源引用。
+Input 是独立的 Host 内置资源，记录输入内容、来源和可选的目标 sessionId。Channel 知道聊天对应的 Session，Source 也可以提交没有目标的外部观察。接收输入的执行 Session 与输入声明的目标 Session 分别记录；前者负责持久执行，后者表达来源已知的归属线索，也允许关联其它相关话题。输入事实统一保存在 `$AIDE_HOME/inputs.json`，供多个插件资源引用。
 
 Conversation 是 Personal 定义的资源：spec 保存所属 Session 和追加的 inputIds，status 保存各 Input 的消费进度与消息 outbox。它与 Task、Routine 一样使用通用 Resource CRUD、版本检查和 Watch。来源无需知道 Conversation，Personal 决定交流上下文的组织方式。一个 Input 可以被多个 Conversation 引用，各会话独立消费。
 
-Personal 的 Chief 先 Reconcile Input：已知 Session 的常见输入走确定路由，无目标的输入根据会话摘要和关联工作决定去向。目标计划先持久化，再通过资源 Update 向 Conversation 追加 inputId；多目标追加中断时恢复同一计划。Conversation 的 spec 变化触发另一个 Reconcile，加载本会话上下文并执行。这里不需要额外的路由 Verb。
+Personal 的 Chief 先 Reconcile Input：无会话时创建并追加后结束；已有会话时，依次追加到默认会话、规则创建的会话和规则关联的已有会话。确定归属就通过资源 Update 幂等追加 inputId，不调用语义路由、不保存完整目标计划。创建保存稳定身份与资源 uid，中断后重试规则和追加，不重放已消费的输入。Conversation 的 spec 变化触发另一个 Reconcile，加载本会话上下文并执行。这里不需要额外的路由 Verb。
 
-Core 的 ResourceClient 可显式读取和更新其它 Session 的插件资源。写入仍经目标 Session 的资源客户端，版本检查和 Watch 通知属于同一个提交路径；默认查询只访问当前 Session。各 Session 隔离执行历史与 Harness 原生上下文，Conversation 不是权限边界。
+Core 的 ResourceClient 可显式读取和更新其它 Session 的插件资源。创建资源时，应用按需装配目标 Session；读取未知 Session 不创建执行状态。写入仍经目标 Session 的资源客户端，版本检查和 Watch 通知属于同一个提交路径；默认查询只访问当前 Session。各 Session 隔离执行历史与 Harness 原生上下文，Conversation 不是权限边界。
 
 Message 表达交流记录。Core 定义执行消息、Interaction 与 say 契约，应用装配持久消息出口；Personal 把面向用户的消息与消费状态保存在 Conversation outbox。say 成功表示消息已记录，不表示 Channel 已投递。业务完成与消息投递分别记录，投递失败不重新执行已完成动作。
 

@@ -2,6 +2,7 @@ import type { Resource, ResourceClient, ResourceRef, ResourceType, ResourceListO
 export interface ResourceDirectory {
   sessions(): readonly string[];
   client(sessionId: string, pluginInstanceId: string): ResourceClient;
+  ensureSession?(sessionId: string): Promise<void>;
 }
 /** @spec Cross-session writes use the destination client's version guards and Watch dispatcher. */
 export function scopedResources(local: ResourceClient, sessionId: string, pluginInstanceId: string, directory?: ResourceDirectory): ResourceClient {
@@ -14,7 +15,11 @@ export function scopedResources(local: ResourceClient, sessionId: string, plugin
       if (options?.sessionId === "*") return (await Promise.all((directory?.sessions() ?? [sessionId]).map((id) => owner(id).list<S, T>(type, { ...options, sessionId: id }).then((items) => items.map((r) => ({ ...r, metadata: { ...r.metadata, sessionId: id } })))))).flat();
       return (await owner(options?.sessionId).list<S, T>(type, options)).map(stamp);
     },
-    async create(type, init) { return stamp(await owner(init.sessionId).create(type, init)); },
+    async create(type, init) {
+      // Reads remain side-effect free; only an explicit create can provision a destination.
+      if (init.sessionId && init.sessionId !== sessionId) await directory?.ensureSession?.(init.sessionId);
+      return stamp(await owner(init.sessionId).create(type, init));
+    },
     async replace(r, spec, status) { return stamp(await owner(r.metadata.sessionId).replace(r, spec, status)); },
     async patch(r, patch) { return stamp(await owner(r.metadata.sessionId).patch(r, patch)); },
     async patchStatus(r, patch) { return stamp(await owner(r.metadata.sessionId).patchStatus(r, patch)); },

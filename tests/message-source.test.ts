@@ -225,8 +225,7 @@ test("Real Runner discovers IM through Connector IPC, routes an Input once, and 
     plugins: { personal: { sources: { lark: {} } } } }));
   let searches = 0;
   const prompts: string[] = [];
-  const options = { ...fakeOptions({ chief: async (prompt) => prompt.includes("Candidates:")
-    ? JSON.stringify({ conversationIds: ["inbox"], reason: "new message" }) : "同事有新消息",
+  const options = { ...fakeOptions({ chief: async () => "同事有新消息",
     async execute() { throw new Error("Unexpected work"); } }, root, prompts), config: loadConfig(configFile),
     connectors: { ...emptyConnectors, messages: {
       async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
@@ -235,11 +234,15 @@ test("Real Runner discovers IM through Connector IPC, routes an Input once, and 
     } } };
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
+  await aide.session("inbox").conversations.ensure();
+  await aide.setDefaultConversation("inbox", true);
   await aide.receive({ sessionId: "inbox", conversationId: "inbox", id: "hello", text: "hello" });
   await aide.start(); await aide.settled();
   const inputs = aide.session(MESSAGE_SESSION).conversations.inputStore;
   assert.equal(inputs.list(MESSAGE_SESSION).length, 1);
-  assert.ok(inputs.list(MESSAGE_SESSION)[0]!.status.routing?.phase === "done");
+  const observed = inputs.list(MESSAGE_SESSION)[0]!;
+  assert.equal(observed.spec.observation!.originalInputId, observed.metadata.name, "Initial IM evidence references itself, not an earlier routing dependency");
+  assert.equal(observed.status.routing?.phase, "done");
   assert.ok(prompts.some((prompt) => prompt.includes("om_dm")));
   const previous = searches;
   aide.session("another"); await aide.settled();

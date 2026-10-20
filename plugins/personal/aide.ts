@@ -8,10 +8,9 @@ import { IncomingSchema, type Incoming, type Message } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { message, Store } from "./store.ts";
 import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
-import { CONVERSATION_TYPE, INPUT_TYPE, chiefTarget, chiefRouterTarget, digest } from "./chief-model.ts";
+import { CONVERSATION_TYPE, INPUT_TYPE, chiefTarget, digest } from "./chief-model.ts";
 import { inboundMessage, initialConversationName, conversationLane, type ConversationDeletion } from "./conversation-model.ts";
 import { ConversationStore, conversationKey } from "./conversation-store.ts";
-import { createPiAgent } from "../../agents/pi/agent.ts";
 import type { InputStore } from "../../src/host/input/store.ts";
 import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
@@ -31,11 +30,10 @@ export class Personal {
   private readonly session: SessionHandle;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly chiefConversations = new Map<string, string>();
-  private readonly hasSources: boolean;
   private readonly targets: { id: string; harness: string }[];
 
   constructor(private readonly options: { timezone: string }, private readonly log: Logger,
-    runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; inputs: InputStore; watches: readonly { sessionId: string }[] }) {
+    runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; inputs: InputStore }) {
     this.core = runtime.core;
     this.session = runtime.session;
     this.connectors = runtime.connectors;
@@ -44,14 +42,8 @@ export class Personal {
     const resources = new PluginResourceStore({ session: this.session, pluginInstanceId: "personal" });
     const client = this.plugins.resourceClient("personal");
     this.store = new Store(resources, client, new ConversationStore(this.id, resources, client, runtime.inputs));
-    const router = chiefRouterTarget(this.id);
-    this.targets.push({ id: router, harness: "chief" });
-    if (!this.session.meta.lanes[router]) this.session.setLane(router, { laneId: router, createdFor: { type: "session" }, harnessSessions: {} });
-    this.session.setHarnessTarget(router, { harnessTargetId: router, harness: "chief" });
-    const watches = runtime.watches;
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
     this.store.conversations.subscribe((conversation) => this.registerConversation(conversation.id));
-    this.hasSources = watches.length > 0;
   }
 
   private registerConversation(conversationId: string): void {
@@ -72,8 +64,6 @@ export class Personal {
 
   /** Personal binds a Chief session and its tools to one conversation; the adapter remains business-agnostic. */
   chiefSession(targetId: string, config: ChiefAgentOptions["config"]): PiSessionFactory {
-    if (targetId === chiefRouterTarget(this.id)) return (options) => createPiAgent({ ...options, config, scope: targetId,
-      nativeTools: [], systemPrompt: "You are Chief routing. Select relevant conversations from the supplied summaries. Return the requested JSON only. Do not execute actions." });
     const conversationId = this.chiefConversations.get(targetId);
     if (!conversationId) throw new Error("Unknown Chief target");
     const active = () => {
@@ -127,7 +117,6 @@ export class Personal {
   }
 
   private async startOnce(): Promise<void> {
-    if (this.hasSources) await this.conversations.ensure();
     await this.recoverInterrupted();
     await this.core.start();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin failed to start");
@@ -260,9 +249,6 @@ export class Personal {
         if (attempt >= 4 || !/version|conflict/i.test(String(error))) throw error;
       }
     }
-    const latest = this.conversations.inputStore.get(id)!;
-    const c = this.conversations.resource(this.id)!;
-    if (!latest.status.routing) this.conversations.inputStore.update(latest, { routing: { phase: "done", reason: "Channel Session", targets: [{ sessionId: this.id, name: c.metadata.name, uid: c.metadata.uid }] } });
     return this.conversations.input(fact.metadata.name, this.id)!;
   }
 
