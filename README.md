@@ -1,65 +1,65 @@
 # Aide
 
-Aide 是运行在自己服务器上的个人 Agent，帮助你持续跟进交付给它的事情。你可以随口提问、临时交办、定期安排，或让它关注外部工作变化。它结合用户消息、外部事件和定时回顾推进工作，在需要你判断时询问，并保留进度与结果。电脑关机、聊天窗口关闭后，已接下的委托仍由 Aide 继续跟进。
+English | [简体中文](README.zh-CN.md)
 
-一项委托可以跨越多次执行、等待与服务重启。例如“跟进这个 PR，收到评审意见就处理，需要我决策时再问我，合入后告诉我”。Aide 保留目标、已经发生的动作和等待条件，接着处理同一件事，减少你催进度、重复解释背景和核对结果的负担。
+Aide is a self-hosted personal agent that keeps following through on the work you entrust to it. Ask a question, delegate a goal, or set up an ongoing responsibility through the web app or Feishu. Aide keeps track of progress, asks when it needs your decision, and picks up the work as new information arrives.
 
-Chief 是负责接话与判断的入口 Agent：普通问题直接回答，需要跟进时才创建或关联工作，需要用户决定时发起提问。通过 Web 和 Feishu 两个 Channel 与用户沟通。
+For example: “Follow this PR until it is merged. Handle review comments, ask me when a decision is needed, and tell me when it lands.” The same task can span multiple attempts and periods of waiting. With Aide running on your server, closing the chat or shutting down your laptop leaves it running.
 
-## 聊天、事项与安排
+## What you can ask
 
-- **Conversation（会话）**由 Personal 组织消息和上下文；Channel / Source 提供已知的 Session，Chief 为外部观察选择相关会话。不同飞书单聊、群聊、网页会话和 Source 关注范围可以有各自的会话。
-- **Task（事项）**负责有完成条件的目标，可以跨多次执行和等待，例如“跟进这个 PR 直到合入”。
-- **Routine（安排）**负责持续职责，由时间或事件推动，例如“每天检查项目待办，有新阻塞时告诉我”。
-- **Work** 是 Task 与 Routine 的统称。Chief 可以读取、创建、更新或删除 Work，也可以把输入关联到已有工作。
+- **Get an answer or a small job done.** “Read this project's README and tell me how to run it.” Aide can inspect files and use the CLIs available in its environment.
+- **Delegate a goal.** “Follow this PR until it is merged.” Aide keeps the goal, progress, and waiting conditions together so you can return to the same task with new information or a decision.
+- **Set up an ongoing responsibility.** “Check project work every morning and tell me about new blockers.” Each round can involve investigation, action, and waiting before the next round begins.
+- **Keep track of external changes.** Aide can observe recent Meego requirements assigned to selected people and changes in configured Kubernetes workloads. It can also query GitHub and GitLab PR status and comments. See [connections and observation coverage](docs/connector/README.md) for setup and current limits.
 
-一次提问不必产生 Task。创建工作表示已接下目标，完成与结果通知会异步出现。改变 Task / Routine 类型时，Chief 创建新工作，再按意图暂停或删除原工作。
+Aide relates new information to your conversations and existing work. Within an existing delegation, it can continue working; when it finds a new opportunity, it can suggest a next step. It stays quiet when there is nothing useful to report.
 
-主动发现结合 Source 获取的外部变化与按话题开启的 trigger 定时回顾。Chief 结合已有委托判断是否推进、通知或询问，没有值得打扰的新情况时保持安静。当前可观察 Meego 中指定负责人名下的近期需求，查询 GitHub / GitLab 的 PR 状态与评论。配置与覆盖范围见 [Connector 与 Source](docs/connector/README.md)。
+## Conversations, tasks, and routines
 
-## 快速开始
+A **conversation** keeps a topic's messages and related work together. Aide's assistant, **Chief**, answers ordinary questions directly and creates or finds work when something needs continued attention. Using a tool does not require creating a task.
 
-需要 Node.js 22.19+ 安装依赖；服务使用依赖中的 Bun。先配置 Chief 和 Pi 的模型与认证，缺省时沿用 Pi 原生配置（默认 `~/.pi/agent`）。执行环境中的 CLI 和凭证直接供 Agent 使用。
-环境、Pi / Chief 模型与能力包、Personal 关注策略统一声明在 `~/.aide/config.yaml`，见 [配置与优先级](docs/configuration.md)。
+- A **task** has a finish line, such as getting a PR merged. It can last minutes or weeks and involve multiple rounds of work and waiting.
+- A **routine** is an ongoing responsibility, such as checking for project blockers every morning. Completing one round leaves it waiting for the next.
+
+Creating a task means Aide has accepted the goal; progress and results arrive asynchronously. You can ask about progress, add information, answer a question, or request a pause in the same conversation.
+
+Each conversation also has an optional periodic review, disabled by default. Enable it in the web app to have Chief revisit that topic's progress and possible next steps, once an hour by default. Turning it off stops these reviews; existing tasks, routines, and external observations continue on their own schedules.
+
+## Get started
+
+You need Node.js 22.19 or later to install dependencies. Bun, used to run the service, is included as a dependency.
 
 ```sh
+git clone https://github.com/compforge/aide.git
+cd aide
 npm ci
+```
+
+Configure model access for Chief and the default work agent, Pi, in `~/.aide/config.yaml`. If you already use Pi, Aide can use its existing model settings and authentication from `~/.pi/agent`. The [configuration guide](docs/configuration.md) covers model providers, credentials, skills, and connections to external systems. Restart Aide after changing the configuration.
+
+Choose the directory Aide should work in and start it:
+
+```sh
 AIDE_CWD=/path/to/work AIDE_TIMEZONE=Asia/Shanghai npm start
 ```
 
-打开 <http://127.0.0.1:7433>，例如输入“读取当前项目的 README，告诉我如何启动”。Chief 可以直接读取并回答；需要持续推进时再交办 Task 或 Routine。
+Open <http://127.0.0.1:7433> and try: “Read the README in the working directory and tell me how to run the project.” Make sure the service can access the files, CLIs, and credentials needed for your requests.
 
-网页左侧选择会话，中间显示消息、流式回复和执行过程，右侧查看该会话的事项与安排。已结束的思考与工具过程可以展开，刷新后仍保留。默认会话为 `me`；`/?conversation=另一会话名` 可以进入指定会话。
+In the web app, select a conversation on the left, follow messages and execution progress in the center, and view its tasks and routines on the right. Past execution details remain available after a refresh.
 
-配置 `AIDE_FEISHU_APP_ID` 和 `AIDE_FEISHU_APP_SECRET` 后，可通过飞书机器人单聊或群内 @机器人收发消息，无需公网回调地址。开启 CardKit 权限后，Chief 的思考、进展和回复可在同一张流式卡片中展示。创建机器人与权限配置见 [Feishu Channel](docs/channel/feishu.md)。
+For an always-on Linux setup, proxy settings, or access through an SSH tunnel, see [deployment and troubleshooting](docs/deployment.md).
 
-查看版本：
+## Use Feishu
 
-```sh
-npm exec -- aide version
-```
+Set `AIDE_FEISHU_APP_ID` and `AIDE_FEISHU_APP_SECRET` to connect your bot. Send it a direct message or @mention it in a group; no public callback endpoint is required. With CardKit permissions enabled, replies and progress appear in a streaming card.
 
-## 运行边界
+See [Feishu setup](docs/channel/feishu.md) for bot creation and permissions. Text messages are supported in direct chats and group @mentions. Agent permission requests still need to be handled in the web app.
 
-当前 Chief 使用 `chief` Harness，它基于 Pi 并带有 Work、问答和 Connector 工具；Task / Routine 按根级 `defaultHarness` 选择执行实现，缺省为通用 Pi。另有独立的通用 `pi` Harness，提供文件与 CLI 能力，不预装 Personal 工具。
+## Before you rely on it
 
-状态默认保存在 `~/.aide`，由一个 Aide 服务进程管理。当前面向单用户，本地 HTTP 入口没有认证，会话分组不提供账号或权限隔离。飞书接收单聊和群内 @本机器人的文字；原生 Harness 权限请求仍在网页处理。
+Aide currently serves one user through a single service instance. Its HTTP interface has no authentication, so keep it on a trusted local connection or access it through an SSH tunnel. Conversations group topics; they do not provide account or permission isolation, and long-term memory may be shared across conversations.
 
-模型判断可能出错。执行中断或结果无法校验时，Aide 保留记录并等待用户核对后明确继续；暂停或删除工作不能撤销已经发生的外部动作。Chief 组合 Hermes 的长期记忆能力，Pi 管理原生会话与上下文压缩；Aide 自己维护委托和执行事实，记忆由 Harness 管理。
+State is stored in `~/.aide` by default. The service must remain running to make progress. After a restart, Aide restores saved work and schedules; interrupted actions or results it cannot validate wait for your review before you explicitly continue. Check external effects before retrying. Pausing or deleting work does not undo actions already taken.
 
-环境变量、Linux 常驻服务、代理与 SSH 转发见 [部署与诊断](docs/deployment.md)。
-
-## 开发与深入阅读
-
-```sh
-npm run check
-```
-
-自动测试使用真实 Plugin Runner / Pi SDK 与模拟外部服务；不代表真实模型判断、飞书或业务 CLI 已验证。真实验收步骤见 [E2E](docs/e2e.md)。
-
-- [整体机制](docs/kernel.md)：Host / Runner、内置对象与 Harness。
-- [插件运行机制](docs/plugin/README.md)：Resource / Reconcile 与扩展边界，Personal 是一个内置插件。
-- [Personal 业务模型](docs/plugin/personal.md)：Chief、Task / Routine、主动发现与问答。
-- [Channel 总览](docs/channel/README.md)：Web 与 Feishu 如何组织输入、会话和回复。
-- [Harness](docs/harness/README.md)：通用执行边界；[Pi](docs/harness/pi.md) 与 [Chief](docs/harness/chief.md)。
-- 修改代码前阅读 [AGENTS.md](AGENTS.md)；插件接口见 [aide-plugin](packages/plugin/README.md)。
+Aide uses AI models, which can make mistakes. Review important results against the files, artifacts, or external systems involved.
