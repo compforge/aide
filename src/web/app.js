@@ -23,7 +23,7 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview,
     return data;
   }
   let lastConversations = '';
-  const heartbeatUpdates = new Set();
+  const triggerUpdates = new Set();
   function renderConversations(conversations) {
     const items = [...conversations];
     for (const id of new Set([conversationId, 'me'])) {
@@ -46,25 +46,25 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview,
       if (item.preview) link.append(element('span', item.preview, 'muted'));
       const row = element('div', undefined, 'conversation-row'); row.append(link);
       if (item.sessionId) {
-        const label = element('label', undefined, 'heartbeat-switch');
-        const toggle = element('input'); toggle.type = 'checkbox'; toggle.checked = item.heartbeat.enabled;
+        const label = element('label', undefined, 'trigger-switch');
+        const toggle = element('input'); toggle.type = 'checkbox'; toggle.checked = item.trigger.enabled;
         toggle.setAttribute('role', 'switch');
         toggle.setAttribute('aria-label', item.title + '：主动回顾');
-        toggle.disabled = heartbeatUpdates.has(item.sessionId);
+        toggle.disabled = triggerUpdates.has(item.id);
         label.title = '开启后定时回顾；关闭不影响已有事项与安排。';
         toggle.addEventListener('change', async () => {
-          heartbeatUpdates.add(item.sessionId);
-          for (const control of document.querySelectorAll('.heartbeat-switch input')) control.disabled = true;
+          triggerUpdates.add(item.id);
+          for (const control of document.querySelectorAll('.trigger-switch input')) control.disabled = true;
           try {
-            await api('/sessions/heartbeat', { method: 'POST', headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ sessionId: item.sessionId, conversationId: item.id, enabled: toggle.checked }) });
+            await api('/conversations/trigger', { method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ conversationId: item.id, enabled: toggle.checked }) });
             $('conversation-notice').textContent = '';
           } catch (error) {
-            toggle.checked = item.heartbeat.enabled;
+            toggle.checked = item.trigger.enabled;
             $('conversation-notice').textContent = '开关保存失败：' + error.message;
           } finally {
-            heartbeatUpdates.delete(item.sessionId); lastConversations = '';
-            try { renderConversations(await api('/conversations')); } catch { for (const control of document.querySelectorAll('.heartbeat-switch input')) control.disabled = false; }
+            triggerUpdates.delete(item.id); lastConversations = '';
+            try { renderConversations(await api('/conversations')); } catch { for (const control of document.querySelectorAll('.trigger-switch input')) control.disabled = false; }
           }
         });
         label.append(toggle, element('span', '主动回顾')); row.append(label);
@@ -75,7 +75,7 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview,
   }
   async function refreshConversations() {
     try {
-      if (heartbeatUpdates.size) return;
+      if (triggerUpdates.size) return;
       renderConversations(await api('/conversations'));
       $('conversation-notice').textContent = '';
     } catch { $('conversation-notice').textContent = '会话列表暂时无法更新，正在重试。'; }

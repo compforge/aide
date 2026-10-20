@@ -49,7 +49,7 @@ async function record(context: PluginContext, original: WorkResource, update: (w
     const work = toWork(current);
     const notification = update(work);
     const { id: _id, conversationId, kind: _kind, title: _title, instruction: _instruction,
-      trigger: _trigger, revision: _revision, ...observation } = work;
+      trigger: _trigger, revision: _revision, inputs: _inputs, ...observation } = work;
     const messages = [...current.status.messages];
     if (notification) messages.push({ id: randomUUID(), conversationId, text: notification, workId: work.id,
       at: new Date(Math.max(Date.now(), ...messages.map((item) => Date.parse(item.at) + 1))).toISOString(), role: "aide" });
@@ -122,7 +122,8 @@ export async function recordOutcome(context: PluginContext, resource: WorkResour
   const recorded = await record(context, resource, (current) => {
     current.history.push({ at: new Date().toISOString(), role: "aide", text: result.summary });
     if (current.revision !== work.revision) {
-      if (current.status !== "paused") current.status = "ready";
+      // The next Reconcile consumes new input before deciding whether another execution is needed.
+      if (current.status !== "paused") { current.status = "ready"; current.nextAt = null; }
     } else if (result.action === "ask") {
       current.status = "waiting"; current.question = result.question; current.nextAt = null;
     } else if (result.action === "wait") {

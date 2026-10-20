@@ -159,7 +159,7 @@ test("conversation navigation lists persisted scopes without creating them and k
   const before = aide.sessions().flatMap((scope) => scope.conversations.list());
   const summaries = await list();
   assert.deepEqual(summaries.map((item) => item.id), [group, "me", "work-only", "source:requirements"]);
-  assert.deepEqual(summaries[0], { id: group, sessionId: group, heartbeat: { enabled: false, intervalSeconds: 3600 }, title: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2) });
+  assert.deepEqual(summaries[0], { id: group, sessionId: group, trigger: { enabled: false, intervalSeconds: 3600 }, title: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2) });
   assert.equal(summaries.find((item) => item.id === "source:requirements")?.preview, "");
   assert.ok(!JSON.stringify(summaries).includes("private observation"));
   assert.deepEqual(aide.sessions().flatMap((scope) => scope.conversations.list()), before);
@@ -187,7 +187,7 @@ test("Web deletes Tasks and Routines through WorkService and preserves other con
   const group = "feishu:app:群 & #1";
   const work = aide.work(group);
   const initialTask = await work.create({ kind: "task", title: "检查项目", instruction: "check", trigger: null });
-  const task = await work.update(initialTask.id, { revision: initialTask.revision, action: "pause" });
+  const task = await work.appendInput(initialTask.id, { action: "pause", text: "暂停" });
   const routine = await work.create({ kind: "routine", title: "监控内存", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "memory.changed" } });
   const foreign = await aide.work("other").create({ kind: "routine", title: "其他会话", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "memory.changed" } });
   await aide.session(group).store.save(routine, [{ id: "retained-reply", conversationId: group, at: new Date().toISOString(), role: "aide", text: "已建立监控", workId: routine.id }]);

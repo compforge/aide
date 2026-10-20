@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
 import type { ResourceClient, ResourceNamespace } from "@compforge/aide-plugin";
-import { WorkSchema, validateTrigger, type Message, type Work } from "./model.ts";
+import { WorkSchema, validateTrigger, type Message, type Work, type WorkInput } from "./model.ts";
 import { ConversationStore } from "./conversation-store.ts";
 
 import { WORK_TYPES, workType, toWork, type WorkResource, type WorkSpec, type WorkStatus, type Delivery } from "./resources.ts";
@@ -71,9 +71,9 @@ export class Store {
   async save(work: Work, messages: Message[] = [], inputKey?: string, eventKey?: string): Promise<void> {
     WorkSchema.parse(work);
     validateTrigger(work.kind, work.trigger, new Date());
-    const { id, conversationId, kind, title, instruction, trigger, revision, ...observation } = work;
+    const { id, conversationId, kind, title, instruction, trigger, revision, inputs: workInputs, ...observation } = work;
     const type = workType(kind);
-    const spec: WorkSpec = { conversationId, title, instruction, revision,
+    const spec: WorkSpec = { conversationId, title, instruction, revision, inputs: workInputs,
       ...(kind === "routine" ? { trigger: trigger! } : {}) };
     const current = this.findResource(id);
     if (current && current.kind !== type.kind) throw new Error("Work kind is immutable; create the other type and pause or delete the original work");
@@ -86,6 +86,15 @@ export class Store {
     };
     if (current) await this.client.replace(current, spec, status);
     else await this.client.create(type, { name: id, spec, status });
+  }
+
+  /** @spec Appending an input changes only the Work inbox and revision, never its execution state. */
+  async appendInput(id: string, input: WorkInput): Promise<void> {
+    const current = this.getResource(id);
+    if (current.metadata.deletionTimestamp) throw new Error(`Work ${id} is being deleted`);
+    if (current.spec.inputs?.some((item) => item.id === input.id)) return;
+    await this.client.replace(current, { ...current.spec, revision: current.spec.revision + 1,
+      inputs: [...current.spec.inputs ?? [], input] }, current.status);
   }
 
   async reply(conversationId: string, messages: Message[], key: string): Promise<void> {

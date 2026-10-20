@@ -190,13 +190,13 @@ test("Chief executes all five Work tools through the SDK and keeps commentary ou
       case 0: return { tool: "create_work", args: { kind: "task", title: "检查仓库", instruction: "检查 aide", trigger: null } };
       case 1: return { tool: "list_work", args: {} };
       case 2: return { tool: "read_work", args: { id } };
-      case 3: return { tool: "update_work", args: { id, revision: 1, action: "pause" } };
-      case 4: assert.equal(work?.status, "paused"); return { tool: "create_work", args: {
+      case 3: return { tool: "append_input", args: { workId: id, text: "暂停", action: "pause" } };
+      case 4: assert.equal(work?.status, "ready"); assert.equal(work?.inputs[0]?.action, "pause"); return { tool: "create_work", args: {
         kind: "routine", title: "定期检查仓库", instruction: "检查 aide", trigger: { cron: "0 9 * * *", timezone: "UTC", event: null },
       } };
-      case 5: assert.notEqual(id, routineId); return { tool: "update_work", args: { id: routineId, revision: 1,
+      case 5: assert.notEqual(id, routineId); return { tool: "append_input", args: { workId: routineId, text: "修改名称",
         action: "update", changes: { title: "每天检查仓库" } } };
-      case 6: assert.equal(routine?.title, "每天检查仓库"); return { tool: "delete_work", args: { id, revision: 2 } };
+      case 6: assert.equal(routine?.inputs[0]?.changes?.title, "每天检查仓库"); assert.equal(routine?.title, "定期检查仓库"); return { tool: "delete_work", args: { id, revision: 2 } };
       case 7: return { tool: "delete_work", args: { id: routineId, revision: 2 } };
       default: return { text: "已完成创建、查询、更新和删除。" };
     }

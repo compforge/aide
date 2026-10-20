@@ -2,13 +2,13 @@
 
 Chief 是 Aide 面向用户的接话与分流入口，也能直接办事，职责类似 System 1：结合上下文快速判断，当轮能处理的问题直接回答或调用工具完成；需要独立推进、等待和跟踪的事情，优先关联已有 Work，再按需要创建 Task 或 Routine。分流依据是是否需要独立的工作生命周期，复杂度只是参考，调用工具不必先创建工作。
 
-用户消息、外部观察或 Heartbeat 都可以触发 Chief 判断；需要用户决定时询问，没有值得打扰的新情况时保持安静。Chief 的判断质量，尤其是提示词、上下文组织与记忆机制，是 Personal Agent 的持续优化重点。
+Chief 先把用户消息或外部观察归入合适的话题，再结合话题中的 Work 判断下一步；Conversation 自身的 trigger 也会触发回顾。输入分配到 Conversation、Task 或 Routine，本质是让一件事进入能解释它、承接它的上下文，具体模型见 [Personal 的主动性与上下文](../plugin/personal.md#主动性与上下文)。Chief 可直接处理、创建或删除工作，或通过 `append_input` 向已有 Work 交接输入；Work Reconcile 决定如何改变状态与推进。需要用户决定时询问，没有值得打扰的新情况时保持安静。Chief 的判断质量，尤其是提示词、上下文组织与记忆机制，是 Personal Agent 的持续优化重点。
 
 Chief 使用独立的 `chief` Harness 身份，Agent 位于 `agents/chief/`；它组合 [通用 Pi](pi.md)，复用 PiAdapter 的执行与事件机制。通用边界见 [Harness](README.md)，工作生命周期与问答编排见 [Personal](../plugin/personal.md)。
 
 ## Agent 与 Controller
 
-Chief Agent 拥有 Personal 提示词和工具，负责具体判断。Chief Controller 按 Conversation 消费 Input、准备本轮上下文、调用 Harness 并续接用户答复。Task / Routine 的持久状态与 Reconcile 属于 Personal，Agent 通过工具访问，不能直接宣告资源完成。
+Chief Agent 拥有 Personal 提示词和工具，负责具体判断。Chief 的 Input Reconcile 负责话题归位；Conversation Reconcile 响应新 Input 与定时回顾，准备上下文、调用 Harness 并续接用户答复。Task / Routine 的持久状态与 Reconcile 属于 Personal，Agent 通过工具访问，不能直接宣告资源完成。
 
 Personal 在所属 Session 内为每个 Conversation 绑定固定 Lane、Chief Target 和 WorkService，并提供问答与 Connector 工具。宿主装配使用 `chiefSession` 工厂；缺少绑定时创建 Chief Harness 会报错，不会降级为通用 Pi。
 
@@ -27,7 +27,7 @@ Chief 加载已同步的声明包中的 skills，以及内置 Hermes 扩展提�
 
 ## 主动判断与沟通
 
-Chief 持续关注用户已交付的目标，并发现与这些目标相关的新情况。每次输入到来时，先结合已有 Work、最新外部事实与相关记忆判断：是否属于已有委托，是否具备继续推进的条件，是否需要用户参与。Heartbeat 提供定时回顾的机会，Source 提供外部变化；触发本身不要求生成消息或新建工作。
+Chief 持续关注用户已交付的目标，并发现与这些目标相关的新情况。每次输入到来时，先结合已有 Work、最新外部事实与相关记忆判断：是否属于已有委托，是否具备继续推进的条件，是否需要用户参与。trigger 提供定时回顾的机会，Source 提供外部变化；触发本身不要求生成消息或新建工作。
 
 - **推进已有委托。** 在用户交付的目标和约定内继续处理，保持关联工作的身份与进度；发现条件变化时重新核对下一步。
 - **提出新机会。** 说明发现了什么、与用户有什么关系以及建议下一步做什么。记忆中的偏好和兴趣帮助判断相关性，不自动成为新的执行委托。

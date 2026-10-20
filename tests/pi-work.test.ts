@@ -1,3 +1,6 @@
+import type { PluginContext } from "@compforge/aide-plugin";
+import { consumeWorkInputs } from "../plugins/personal/work-input.ts";
+import type { WorkResource } from "../plugins/personal/resources.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
 import { ConversationStore, seedInput } from "./conversation-fixture.ts";
 import assert from "node:assert/strict";
@@ -8,7 +11,7 @@ import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { Store, message } from "../plugins/personal/store.ts";
-import { WorkService, WorkUpdateSchema, type WorkDefinition } from "../plugins/personal/work.ts";
+import { WorkService, AppendInputSchema, type WorkDefinition } from "../plugins/personal/work.ts";
 import { TASK_TYPE, ROUTINE_TYPE, workType } from "../plugins/personal/resources.ts";
 import { SessionStore } from "../src/host/store/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource.ts";
@@ -23,12 +26,17 @@ function setup(t: TestContext) {
   let writes = 0;
   const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
   const store = new Store(resources, createResourceClient(resources, () => writes++), new ConversationStore(session));
-  return { store, service: new WorkService(store, "me", log), writes: () => writes };
+  const consume = async (id: string) => {
+    const work = store.get(id);
+    return consumeWorkInputs({ resources: createResourceClient(resources), logger: { info() {}, warn() {} } } as unknown as PluginContext,
+      resources.get(workType(work.kind), id) as WorkResource);
+  };
+  return { store, consume, service: new WorkService(store, "me", log), writes: () => writes };
 }
 
 for (const definition of [task, { ...task, kind: "routine" as const, trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } }])
 test(`${definition.kind} CRUD preserves identity, enforces revisions and conversation scope, and archives delivery on deletion`, async (t) => {
-  const { store, service, writes } = setup(t);
+  const { store, service, writes, consume } = setup(t);
   const work = (await service.create(definition));
   const type = workType(definition.kind);
   const uid = store.resources.get(type, work.id).metadata.uid;
@@ -38,12 +46,18 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and convers
   const beforeRead = writes();
   assert.equal(service.read(work.id).kind, definition.kind);
   assert.equal(writes(), beforeRead);
-  const updated = (await service.update(work.id, { revision: 1, action: "update",
-    changes: { instruction: "检查更新后的 aide 仓库" } }));
+  const appended = await service.appendInput(work.id, { action: "update", text: "修改目标",
+    changes: { instruction: "检查更新后的 aide 仓库" } }, "request-1");
+  assert.equal(appended.instruction, definition.instruction);
+  assert.equal(appended.status, work.status);
+  await service.appendInput(work.id, { action: "update", text: "修改目标", changes: { instruction: "检查更新后的 aide 仓库" } }, "request-1");
+  assert.equal(service.read(work.id).inputs.length, 1);
+  await consume(work.id);
+  const updated = service.read(work.id);
   assert.equal(updated.kind, definition.kind);
   assert.equal(updated.instruction, "检查更新后的 aide 仓库");
+  assert.equal(updated.status, definition.kind === "routine" ? "scheduled" : "ready");
   assert.equal(store.resources.get(type, work.id).metadata.uid, uid);
-  await assert.rejects(async () => (await service.update(work.id, { revision: 1, action: "pause" })), /revision changed/);
   await assert.rejects(async () => (await service.delete(work.id, 1)), /revision changed/);
   const other = new WorkService(store, "other", log);
   assert.deepEqual(other.list(), []);
@@ -55,19 +69,30 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and convers
   assert.equal(store.read().messages.filter((item) => item.id === response.id).length, 1);
 });
 
-test("Work tools validate schedules and answers without corrupting existing work", async (t) => {
-  const { store, service } = setup(t);
-  await assert.rejects(async () => (await service.create({ ...task, kind: "routine" })), /Routine needs/);
-  const work = (await service.create(task));
-  assert.throws(() => WorkUpdateSchema.parse({ revision: 1, action: "update", changes: { kind: "routine" } }), /Unrecognized key/);
-  await assert.rejects(async () => (await service.update(work.id, { revision: 1, action: "update", changes: { trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } } })), /Task cannot/);
-  await assert.rejects(async () => (await service.update(work.id, { revision: 1, action: "answer", note: "aide" })), /waiting/);
-  assert.equal(service.read(work.id).revision, 1);
-  work.status = "waiting"; work.question = "哪个仓库？"; (await store.save(work));
-  const answered = (await service.update(work.id, { revision: 1, action: "answer", note: "aide" }));
-  assert.equal(answered.status, "ready");
-  assert.equal(answered.question, null);
-  assert.equal(answered.history.at(-1)?.text, "aide");
+test("Work Reconcile validates requests and only explicit control can resume paused work", async (t) => {
+  const { store, service, consume } = setup(t);
+  await assert.rejects(service.create({ ...task, kind: "routine" }), /Routine needs/);
+  const work = await service.create(task);
+  assert.throws(() => AppendInputSchema.parse({ action: "update", text: "change", changes: { kind: "routine" } }), /Unrecognized key/);
+  await service.appendInput(work.id, { action: "update", text: "change", changes: { trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } } });
+  await consume(work.id);
+  assert.equal(service.read(work.id).trigger, null);
+  assert.match(service.read(work.id).history.at(-1)!.text, /Task cannot/);
+  await service.appendInput(work.id, { action: "pause", text: "暂停" }); await consume(work.id);
+  assert.equal(service.read(work.id).status, "paused");
+  await seedInput(store.conversations, "pod", { conversationId: "me", origin: "source", text: "Pod replaced" });
+  await service.appendInput(work.id, { inputId: "pod", text: "相关服务变化" });
+  await service.appendInput(work.id, { inputId: "pod", text: "相关服务变化" });
+  await assert.rejects(service.appendInput(work.id, { inputId: "pod", action: "resume" }), /Source facts/);
+  await assert.rejects(service.appendInput(work.id, { inputId: "missing" }), /does not belong/);
+  await consume(work.id);
+  const paused = service.read(work.id);
+  assert.equal(paused.status, "paused");
+  assert.equal(paused.inputs.filter((i) => i.inputId === "pod").length, 1);
+  assert.match(paused.history.at(-1)!.text, /Pod replaced/);
+  await service.appendInput(work.id, { action: "resume", text: "继续" }); await consume(work.id);
+  assert.equal(service.read(work.id).status, "ready");
+  assert.equal(service.read(work.id).consumedInputIds.length, service.read(work.id).inputs.length);
 });
 
 test("Work service writes wake the existing Worker and reconcile; deletion during execution cannot recreate work", async (t) => {
@@ -113,4 +138,42 @@ test("Work view aggregates separate Task and Routine resources without persistin
   assert.equal(store.hasEvent(recurring.id, "event-1"), true);
   assert.equal(store.response("routine-input")?.id, reply.id);
   assert.equal(store.read().messages.length, 1);
+});
+
+/** @case A shared source fact is routed through Chief, then consumed independently by existing Task and Routine. */
+test("Chief appends the same original Input to two works without losing observation or resuming a paused task", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-work-input-handoff-"));
+  let aide: Aide, taskId = "", routineId = "", executions = 0;
+  const observation = { type: "workload.changed", environment: "test", changes: [{ service: "executor", image: "v2" }] };
+  aide = new Aide(root, fakeOptions({ chief: async (prompt) => {
+    const input = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
+    assert.equal(input.inputId, "changed");
+    for (const id of [taskId, routineId]) await aide.work("me").appendInput(id, { inputId: input.inputId, text: "核对 executor 变化" });
+    return "已交给相关工作核对。";
+  }, execute: async (work) => {
+    executions++;
+    assert.equal(work.id, routineId);
+    assert.deepEqual(work.inputs[0]!.observation, observation);
+    assert.equal(work.inputs[0]!.text, "executor workload changed");
+    assert.equal(work.inputs[0]!.note, "核对 executor 变化");
+    return { action: "done", summary: "verified", notification: null, question: null, nextAt: null };
+  } }, root), log);
+  t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
+  const taskWork = await aide.work("me").create(task); taskId = taskWork.id;
+  await aide.session("me").store.save({ ...taskWork, status: "paused" });
+  routineId = (await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "deployment" } })).id;
+  await aide.start(); await aide.settled();
+  const source = aide.session("source"); await source.start();
+  const fact = { origin: "source" as const, sessionId: "me", text: "executor workload changed", observation };
+  await source.conversations.submit("changed", fact); await aide.settled();
+  assert.equal(aide.work("me").read(taskId).status, "paused");
+  assert.equal(aide.work("me").read(routineId).status, "scheduled");
+  for (const id of [taskId, routineId]) {
+    const current = aide.work("me").read(id);
+    assert.equal(current.inputs.length, 1); assert.equal(current.consumedInputIds.length, 1);
+    assert.equal(current.inputs[0]!.inputId, "changed");
+  }
+  await source.conversations.submit("changed", fact); await aide.settled();
+  assert.equal(executions, 1);
+  assert.equal(aide.works().length, 2);
 });

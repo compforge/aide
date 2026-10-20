@@ -2,7 +2,7 @@ export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Input" } as 
 export interface InputSpec {
   /** Optional destination scope supplied by the producer, not the Input execution owner. */
   sessionId?: string;
-  origin: "channel" | "source" | "heartbeat";
+  origin: "channel" | "source";
   text: string;
   timezone?: string;
   replyTo?: string;

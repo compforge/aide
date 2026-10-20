@@ -14,8 +14,8 @@
   .conversation-link strong { font-size: 14px; margin-bottom: 6px; }
   .conversation-link span { margin-top: 4px; }
   .conversation-row { margin-bottom: 10px; }
-  .heartbeat-switch { display: flex; align-items: center; gap: 6px; margin: 0 10px; font-size: 12px; color: #68776c; cursor: pointer; }
-  .heartbeat-switch input { accent-color: #294f3a; }
+  .trigger-switch { display: flex; align-items: center; gap: 6px; margin: 0 10px; font-size: 12px; color: #68776c; cursor: pointer; }
+  .trigger-switch input { accent-color: #294f3a; }
   #conversation-notice { margin: 10px; color: #9b5b11; }
   #conversation-heading { font-size: 16px; margin: 0 0 6px; overflow-wrap: anywhere; }
   #conversation-id { overflow-wrap: anywhere; margin-bottom: 12px; }

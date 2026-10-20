@@ -1,5 +1,4 @@
 import type { Logger } from "pino";
-import { SessionHeartbeat } from "../../src/host/heartbeat.ts";
 import type { ResourceType } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/host/plugin/manager.ts";
 import { CoreSession } from "../../src/host/core/index.ts";
@@ -29,7 +28,6 @@ export class Personal {
   private closed = false;
 
   readonly core: CoreSession;
-  readonly heartbeat: SessionHeartbeat;
   private readonly session: SessionHandle;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly chiefConversations = new Map<string, string>();
@@ -50,13 +48,6 @@ export class Personal {
     this.targets.push({ id: router, harness: "chief" });
     if (!this.session.meta.lanes[router]) this.session.setLane(router, { laneId: router, createdFor: { type: "session" }, harnessSessions: {} });
     this.session.setHarnessTarget(router, { harnessTargetId: router, harness: "chief" });
-    this.heartbeat = new SessionHeartbeat(this.session, this.conversations, async (id, _conversationId) => {
-      if (this.closed || !this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable for heartbeat input");
-      await this.conversations.submit(id, { sessionId: this.id, origin: "heartbeat", timezone: this.options.timezone,
-        text: "例行回顾：检查已有关注范围和相关工作，按需核实最新事实，判断有没有值得推进的下一步。没有值得处理的事情就保持安静。" });
-      this.wake(INPUT_TYPE, id);
-      this.log.info({ inputId: id, sessionId: this.id }, "Accepted heartbeat input");
-    });
     const watches = runtime.watches;
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
     this.store.conversations.subscribe((conversation) => this.registerConversation(conversation.id));
@@ -79,18 +70,18 @@ export class Personal {
     const conversationId = this.chiefConversations.get(targetId);
     if (!conversationId) throw new Error("Unknown Chief target");
     const active = () => {
-      const inputs = this.store.conversations.inputs().filter((item) =>
+      const inputs = this.store.conversations.runs().filter((item) =>
         item.conversationId === conversationId && item.status.phase === "running");
       if (inputs.length !== 1 || inputs[0]!.status.question || inputs[0]!.status.quietReason) throw new Error("Chief is not accepting further mutations in this turn");
       return inputs[0]!;
     };
     const tools = chiefTools(this.connectors, async (question) => {
       const input = active();
-      await this.store.conversations.update(input, { question });
+      await this.store.conversations.updateRun(input, { question });
     }, async (quietReason) => {
       const input = active();
-      if (input.spec.origin === "channel") throw new Error("Channel input cannot be dismissed silently");
-      await this.store.conversations.update(input, { quietReason });
+      if (input.input?.spec.origin === "channel") throw new Error("Channel input cannot be dismissed silently");
+      await this.store.conversations.updateRun(input, { quietReason });
     });
     return (options) => createChiefAgent({ ...options, config, work: this.work(conversationId),
       tools, beforeWorkMutation: () => { active(); } });
@@ -114,18 +105,18 @@ export class Personal {
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin failed to start");
     for (const work of this.store.read().works) this.wake(workType(work.kind), work.id);
     for (const conversation of this.store.conversations.list()) {
-      if (conversation.pendingInputIds.length) this.wake(CONVERSATION_TYPE, conversationKey(conversation.id));
+      this.wake(CONVERSATION_TYPE, conversationKey(conversation.id));
     }
   }
 
   async recoverInterrupted(): Promise<void> {
-    for (const input of this.store.conversations.inputs()) {
+    for (const input of this.store.conversations.runs()) {
       if (input.status.phase !== "running" && input.status.phase !== "waiting") continue;
-      await this.store.conversations.update(input, {
+      await this.store.conversations.updateRun(input, {
         phase: "failed", question: null, messages: [...input.status.messages ?? [],
           message(input.conversationId, "上次处理已中断，可能已有部分操作生效。请核对后重新交办。")],
       });
-      this.log.warn({ inputId: input.metadata.name }, "Recovered interrupted Chief input without replay");
+      this.log.warn({ runId: input.id, conversationId: input.conversationId }, "Recovered interrupted Chief activation without replay");
     }
     for (const work of this.store.read().works) {
       if (work.status !== "running") continue;

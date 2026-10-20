@@ -12,7 +12,6 @@ Aide 是小型、自托管的 personal agent，围绕用户交付的目标跨执
 src/
   main.ts                  # 启动 Channel 与 Harness
   app.ts                   # 按入口 Session ID 装配 CoreSession / Personal，恢复与汇总各会话
-  host/heartbeat.ts           # Session 定时 Input 的开关、截止时间与去重
   web/                     # 浏览器页面、脚本、样式与 Markdown 渲染
   api/                     # HTTP handler、静态资源与 SSE，调用 Core / Personal 能力
   channel/                 # Feishu 适配、共享消息协议与执行投影
@@ -33,6 +32,7 @@ plugins/personal/
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
   input.ts                 # Chief Input 路由与可恢复的多会话追加
   conversation-model.ts    # Personal Conversation CRD
+  conversation-trigger.ts  # Conversation 定时触发配置
   conversation-store.ts    # 会话投影与消息 outbox
   chief.ts                 # 按 Conversation 消费 Input、续接问答
   source.ts                # 需求观察、水位和调度
@@ -42,7 +42,8 @@ plugins/personal/
   task.ts                  # 有限目标 Reconcile
   routine.ts               # 持续职责 Reconcile
   execution.ts             # Personal 共用执行、结果校验与记录
-  work.ts                  # 会话范围内 Work CRUD 与业务规则
+  work.ts                  # 会话范围内 Work 创建、追加输入与删除
+  work-input.ts            # Work Reconcile 消费输入与应用请求
   store.ts                 # 宿主端工作存取、消息与去重投影
 agents/
   pi/                      # 通用 Pi Agent：SDK、原生工具与会话
@@ -61,6 +62,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
 - Session 是持久执行作用域，保留 Ledger、Lane、Turn 与恢复绑定；CoreSession 负责进程期装配。Session 统一位于 `$AIDE_HOME/sessions/<id>/`，不按 project / cwd 分组。逻辑 ID 的目录编码由 SessionStore 负责。启动时恢复全部 Session 的工作和 Source；watch 仅装配到所属 Session。cwd 只是执行环境，改变时保留 Aide 历史并清空原生恢复绑定；插件私有数据仅有 global、session、instance 三个目录作用域。
 - Input 是 Core 内置资源，可带目标 sessionId；Conversation 是 Personal CRD，保存 Input 引用与各自消费状态。Channel / Source 不依赖 conversationId。Chief 先 Reconcile Input 路由，再 Reconcile Conversation 干活；路由计划持久化后以资源 Update 追加，不新增路由 Verb。跨 Session 写入经过目标 ResourceClient 与 Watch。
+- Chief 对已有 Work 使用 append_input 投递事实或请求，输入队列与消费进度由 Work 持久保存；Task / Routine Reconcile 决定目标与执行状态，Chief 保留创建和删除资源的能力。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。
 - Harness 原生 Session 由各 Harness 管理并使用其默认目录；Aide 按 Session × Lane × Target 保存原生身份和 Adapter 的 resumeState。
 - 业务进展以资源和执行事实为准，记忆辅助理解与判断。记忆由 Harness 组合开源实现；Chief 内置 pi-hermes-memory，Personal 不感知记忆能力，Core 不新增记忆存储或协议。扩展生命周期由 PiAdapter 驱动，原生配置与共享范围见 Chief 文档。
@@ -69,7 +71,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 保存执行事实。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
 - 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。
 - 执行上下文显式携带主资源和可选 Conversation/Input 关联；Channel 不通过 Chief Target 推导问题和进度归属。
-- Session heartbeat 开关只控制新定时 Input。持续委托与主动沟通策略归 Personal / Chief，Core 提供通用触发与执行机制；Chief 根据已有委托和新事实决定推进、say、ask / confirm 或静默。say 保存普通 Message，不创建 Interaction；记忆中的偏好不自动成为执行委托。
+- Personal 将新发生的事归入能承接它的上下文：Conversation 承载话题，Task 承载有限目标，Routine 承载持续职责与当前轮次。Chief 优先关联已有 Work，再按需要创建；各 Reconcile 根据历史与新事实推进、更新、沟通、等待或忽略。详见 `docs/plugin/personal.md`。
+- trigger 归属于 Conversation；新 Input 与定时回顾唤醒同一话题。Personal / Chief 决定回顾和主动沟通策略，Core 提供通用定时唤醒与恢复机制。say 保存普通 Message，不创建 Interaction；记忆中的偏好不自动成为执行委托。
 - Chief 问答复用 Core Interaction；Task / Routine 的 waiting 是业务持久状态。两者的跨重启行为见 Personal 文档。
 - Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Message，不另建轨迹存储。
 - `npm run check` 验证类型与测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或飞书已验证。

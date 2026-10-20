@@ -11,7 +11,7 @@ const identity = { forge: text, path: text, number: Type.Integer({ minimum: 1 })
 /** ask/confirm stage intent; the Controller opens the original Core Interaction after the Pi turn settles. */
 export function chiefTools(connectors: ConnectorClient, ask: (question: ChiefQuestion) => void | Promise<void>, dismiss: (reason: string) => void | Promise<void>): ToolDefinition[] {
   return [
-    tool({ name: "dismiss_observation", label: "Dismiss observation", description: "Record why a Source or heartbeat observation needs no user notification or follow-up. Only for Source or heartbeat input; then end this turn with a short internal summary.",
+    tool({ name: "dismiss_observation", label: "Dismiss observation", description: "Record why a Source observation or timer activation needs no user notification or follow-up. Only for Source input or a timer activation; then end this turn with a short internal summary.",
       parameters: Type.Object({ reason: text }), async execute(_id, args, signal) { signal?.throwIfAborted(); await dismiss(args.reason); return result({ notify: false }); } }),
     tool({ name: "ask", label: "Ask user", description: "Ask a durable question, then end this turn. Wait for the user's next answer before acting on it.",
       parameters: Type.Object({ title: text, prompt: text, choices: Type.Optional(Type.Array(Type.Object({ value: text, label: text }))) }),

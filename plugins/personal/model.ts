@@ -8,6 +8,16 @@ export const TriggerSchema = z.object({
 });
 export type Trigger = z.infer<typeof TriggerSchema>;
 
+export const WorkInputSchema = z.object({
+  id: z.string(), at: z.string(), inputId: z.string().optional(),
+  origin: z.enum(["channel", "source", "chief"]),
+  text: z.string(), note: z.string().optional(),
+  observation: z.record(z.string(), z.unknown()).optional(),
+  action: z.enum(["context", "update", "pause", "resume", "answer"]),
+  changes: z.object({ title: z.string().min(1).optional(), instruction: z.string().min(1).optional(), trigger: TriggerSchema.nullable().optional() }).strict().optional(),
+});
+export type WorkInput = z.infer<typeof WorkInputSchema>;
+
 export const WorkSchema = z.object({
   id: z.string(),
   conversationId: z.string(),
@@ -19,6 +29,8 @@ export const WorkSchema = z.object({
   revision: z.number().int(),
   nextAt: z.string().nullable(),
   question: z.string().nullable(),
+  inputs: z.array(WorkInputSchema).default([]),
+  consumedInputIds: z.array(z.string()).default([]),
   history: z.array(z.object({ at: z.string(), role: z.enum(["user", "aide", "event"]), text: z.string() })),
 });
 export type Work = z.infer<typeof WorkSchema>;

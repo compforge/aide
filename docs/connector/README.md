@@ -90,7 +90,7 @@ SSH Host 不作为本地配置使用：自动观察会跳过该环境。每次�
 
 Personal 从已配置的 Environment 自动生成观察资源，无需额外 watch 清单或会话 ID。支持本地 Kubernetes 访问且声明了 namespace 的环境每五分钟采样一次；Host / generic 环境、SSH 访问和缺少 namespace 的声明会跳过并记录原因。
 
-环境 Source 统一在 `source:environments` Session 中维护基线与调度，只观察一次，不随聊天 Session 数量重复采样。变化生成不带目标 sessionId 的 Input，Chief 根据已有会话近期关注与 Work 判断去向。关闭聊天 Heartbeat 不关闭环境观察；修改环境配置后重启生效，观察范围改变会静默建立新的基线。
+环境 Source 统一在 `source:environments` Session 中维护基线与调度，只观察一次，不随聊天 Session 数量重复采样。变化生成不带目标 sessionId 的 Input，Chief 根据已有会话近期关注与 Work 判断去向。关闭聊天 trigger 不关闭环境观察；修改环境配置后重启生效，观察范围改变会静默建立新的基线。
 
 观察以 namespace 内的 Deployment、StatefulSet、DaemonSet 和无 Controller 的独立 Pod 为范围，ReplicaSet 用来追溯 Pod 到 Deployment 的归属。
 归属按 ownerReference 的 Controller UID 解析，不猜 Pod 名称前缀。Job/CronJob、独立 ReplicaSet 和自定义 Controller 的 Pod 不在此范围。

@@ -15,7 +15,7 @@ Chief 是负责接话与判断的入口 Agent：普通问题直接回答，需�
 
 一次提问不必产生 Task。创建工作表示已接下目标，完成与结果通知会异步出现。改变 Task / Routine 类型时，Chief 创建新工作，再按意图暂停或删除原工作。
 
-主动发现结合 Source 获取的外部变化与按 Session 开启的 Heartbeat 定时回顾。Chief 结合已有委托判断是否推进、通知或询问，没有值得打扰的新情况时保持安静。当前可观察 Meego 中指定负责人名下的近期需求，查询 GitHub / GitLab 的 PR 状态与评论。配置与覆盖范围见 [Connector 与 Source](docs/connector/README.md)。
+主动发现结合 Source 获取的外部变化与按话题开启的 trigger 定时回顾。Chief 结合已有委托判断是否推进、通知或询问，没有值得打扰的新情况时保持安静。当前可观察 Meego 中指定负责人名下的近期需求，查询 GitHub / GitLab 的 PR 状态与评论。配置与覆盖范围见 [Connector 与 Source](docs/connector/README.md)。
 
 ## 快速开始
 

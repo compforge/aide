@@ -5,7 +5,7 @@ export const TASK_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Task" } as co
 export const ROUTINE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Routine" } as const;
 export const WORK_TYPES = [TASK_TYPE, ROUTINE_TYPE] as const;
 
-export type TaskSpec = Pick<Work, "conversationId" | "title" | "instruction" | "revision">;
+export type TaskSpec = Pick<Work, "conversationId" | "title" | "instruction" | "revision" | "inputs">;
 export type RoutineSpec = TaskSpec & { trigger: Trigger };
 export type WorkSpec = TaskSpec | RoutineSpec;
 type WorkObservation = Omit<Work, keyof TaskSpec | "id" | "kind" | "trigger">;
