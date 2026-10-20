@@ -14,6 +14,8 @@ Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队�
 
 Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。一个 Controller 拥有一种资源类型的 Reconcile：每次读取当前事实，推进目标，再持久化结果或安排下次唤醒。
 
+每种 CRD 在所属 plugin package 下有一个按资源命名的目录，集中保存模型、Reconcile 和专属辅助代码。例如 `plugins/personal/conversation/` 包含 Conversation 的模型、输入追加、存储、触发配置和 Reconcile。插件装配与跨资源流程留在插件层；目录内的 Runner 代码仍只经 ResourceClient 访问资源，不导入宿主存储实现。
+
 资源变化、Source、Watch、cron 和 `requeueAfterMs` 共用按资源身份去重的队列。同一资源串行处理；不同资源受 Controller 与所在 Runner 的容量约束。基础设施回调重试不保证外部操作只发生一次，插件须保存已进入执行的状态，避免把重试变成业务重放。
 
 资源写入统一经过 Core ResourceClient，包括 Agent 工具和 Reconcile，使用版本检查并通知所有相关 Watch。spec 与初始 status 可以原子提交。主资源的纯 status 更新不自动再入队；需要感知 status 的 Controller 显式声明 Watch。跨越 Harness 或用户等待后，应按 uid 重新读取资源，避免旧回调更新同名替代资源。删除先持久化 deletionTimestamp，Controller 完成终止处理后移除资源；结构性 owner 关系支持级联删除。
@@ -46,6 +48,6 @@ Harness 返回执行结束不等于资源目标完成。结果校验、下一步
 | Task | Task | 推进有限目标，达到目标后结束 |
 | Routine | Routine | 执行本轮，继续等待时间或事件 |
 
-Task 与 Routine 的公共执行辅助代码留在 Personal 内部。Work 是它们的业务视图，没有另一份 Work 资源。Chief Agent 与工具在 `agents/chief/`，Personal 服务负责绑定会话范围和业务工具，应用入口负责安装插件并装配 Core。
+Task 与 Routine 分别归入 `plugins/personal/task/` 和 `plugins/personal/routine/`，各自保存模型与 Reconcile；公共字段和状态位于插件层的 `model.ts`，资源聚合与 Work 投影位于 `resources.ts`，公共执行辅助代码也留在插件层。Work 是它们的业务视图，没有另一份 Work 资源。Chief Agent 与工具在 `agents/chief/`，Personal 服务负责绑定会话范围和业务工具，应用入口负责安装插件并装配 Core。
 
 添加新插件时复用 Resource / Reconcile / verb 机制，在插件内定义其领域模型。公共契约与示例见 [aide-plugin](../../packages/plugin/README.md)，Personal 的决策和生命周期见 [Personal](personal.md)。

@@ -1,4 +1,4 @@
-import { conversationTrigger, type ConversationTrigger } from "../../plugins/personal/conversation-trigger.ts";
+import { conversationTrigger, type ConversationTrigger } from "../../plugins/personal/conversation/trigger.ts";
 import type { ChannelService } from "./service.ts";
 import { PROTOCOL_VERSION, type BaseBlock, type ModelMeta, type UIModel } from "@compforge/agentue/ui";
 

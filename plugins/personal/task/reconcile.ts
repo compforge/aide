@@ -1,7 +1,8 @@
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
-import { TASK_TYPE, type TaskSpec, type TaskResource, type WorkStatus } from "./resources.ts";
-import { consumeWorkInputs } from "./work-input.ts";
-import { executeWork, recordOutcome, scheduledReconcile } from "./execution.ts";
+import { TASK_TYPE, type TaskSpec, type TaskResource } from "./model.ts";
+import type { WorkStatus } from "../model.ts";
+import { consumeWorkInputs } from "../work-input.ts";
+import { executeWork, recordOutcome, scheduledReconcile } from "../execution.ts";
 
 /** @spec Task completion ends the finite goal; wait may still schedule a continuation.
  * @link docs/plugin/personal.md

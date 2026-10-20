@@ -39,7 +39,7 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 
 ## 提示词与工具
 
-当前稳定角色规则在 `agents/chief/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/chief.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；收到用户答复后构造续轮提示。
+当前稳定角色规则在 `agents/chief/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/conversation/reconcile.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；收到用户答复后构造续轮提示。
 
 Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 

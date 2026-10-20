@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
 import type { ResourceClient, ResourceNamespace } from "@compforge/aide-plugin";
-import { WorkSchema, validateTrigger, type Message, type Work, type WorkInput } from "./model.ts";
-import { ConversationStore } from "./conversation-store.ts";
+import { WorkSchema, validateTrigger, type Message, type Work, type WorkInput, type WorkStatus, type Delivery } from "./model.ts";
+import { ConversationStore } from "./conversation/store.ts";
 
-import { WORK_TYPES, workType, toWork, type WorkResource, type WorkSpec, type WorkStatus, type Delivery } from "./resources.ts";
+import { WORK_TYPES, workType, toWork, type WorkResource, type WorkSpec } from "./resources.ts";
 const delivery = (): Delivery => ({ messages: [], inputs: [], events: [] });
 let lastMessageTime = 0;
 

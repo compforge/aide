@@ -1,4 +1,4 @@
-import type { ConversationStore } from "../../plugins/personal/conversation-store.ts";
+import type { ConversationStore } from "../../plugins/personal/conversation/store.ts";
 import type { CoreSession } from "../host/core/index.ts";
 import type { HarnessInvocationSnapshot } from "../host/plugin/harness-invocation.ts";
 import type { InputRequest } from "../host/message/types.ts";

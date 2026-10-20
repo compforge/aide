@@ -1,7 +1,7 @@
 import type { Resource } from "@compforge/aide-plugin";
-import type { Message } from "./model.ts";
+import type { Message } from "../model.ts";
 import type { InputSpec } from "@compforge/aide-plugin";
-import type { ConversationTrigger } from "./conversation-trigger.ts";
+import type { ConversationTrigger } from "./trigger.ts";
 export const CONVERSATION_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Conversation" } as const;
 export interface ChiefQuestion { kind: "ask" | "confirm"; title: string; prompt: string; choices?: Array<{ value: string; label: string }> }
 export interface ProcessingStatus {

@@ -1,6 +1,6 @@
 import type { InputSpec, InputStatus, Resource, ResourceClient } from "@compforge/aide-plugin";
-import { INPUT_TYPE } from "./chief-model.ts";
-import { CONVERSATION_TYPE, inboundMessage, initialConversationName, type ConversationSpec, type ConversationStatus } from "./conversation-model.ts";
+import { INPUT_TYPE } from "../chief-model.ts";
+import { CONVERSATION_TYPE, inboundMessage, initialConversationName, type ConversationSpec, type ConversationStatus } from "./model.ts";
 
 /**
  * @spec An Input already attached to this Conversation is a no-op, preserving its consumption and messages.

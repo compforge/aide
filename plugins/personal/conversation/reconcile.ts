@@ -1,15 +1,14 @@
 import type { PluginContext, ReconcileContext, Resource } from "@compforge/aide-plugin";
-import { INPUT_TYPE, CONVERSATION_TYPE, chiefTarget, type InputSpec, type InputStatus } from "./chief-model.ts";
-import { conversationLane, type ConversationResource, type ConversationSpec, type ConversationStatus, type ProcessingStatus } from "./conversation-model.ts";
-import { conversationTrigger, nextTriggerAt } from "./conversation-trigger.ts";
-import { registerInputRouting } from "./input.ts";
-import { WORK_TYPES, type Delivery } from "./resources.ts";
+import { INPUT_TYPE, CONVERSATION_TYPE, chiefTarget, type InputSpec, type InputStatus } from "../chief-model.ts";
+import { conversationLane, type ConversationResource, type ConversationSpec, type ConversationStatus, type ProcessingStatus } from "./model.ts";
+import { conversationTrigger, nextTriggerAt } from "./trigger.ts";
+import { WORK_TYPES } from "../resources.ts";
+import type { Delivery } from "../model.ts";
 
 /** @spec Inputs and timer activations share Chief processing. Admission is durable before actions; interrupted actions are not replayed.
  * @link docs/plugin/personal.md
  */
-export function registerChief(context: PluginContext): void {
-  registerInputRouting(context);
+export function registerConversations(context: PluginContext): void {
   context.controllers.register<ConversationSpec, ConversationStatus>({
     resourceType: CONVERSATION_TYPE, maxConcurrency: 1,
     reconcile: (execution, conversation) => reconcileConversation(context, execution, conversation),

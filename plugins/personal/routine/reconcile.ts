@@ -1,8 +1,8 @@
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
-import { ROUTINE_TYPE, type RoutineSpec, type RoutineResource, type WorkStatus } from "./resources.ts";
-import { consumeWorkInputs } from "./work-input.ts";
-import { executeWork, recordOutcome, scheduledReconcile } from "./execution.ts";
-import { nextOccurrence } from "./model.ts";
+import { ROUTINE_TYPE, type RoutineSpec, type RoutineResource } from "./model.ts";
+import { nextOccurrence, type WorkStatus } from "../model.ts";
+import { consumeWorkInputs } from "../work-input.ts";
+import { executeWork, recordOutcome, scheduledReconcile } from "../execution.ts";
 
 /** @spec Routine completion ends one occurrence and schedules the next; event-only routines remain subscribed.
  * @link docs/plugin/personal.md

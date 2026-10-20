@@ -1,7 +1,7 @@
 import type { PluginContext, InputSpec, InputStatus, Resource } from "@compforge/aide-plugin";
 import { INPUT_TYPE, digest } from "./chief-model.ts";
-import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type ConversationStatus, type ConversationResource } from "./conversation-model.ts";
-import { appendConversationInput } from "./conversation-input.ts";
+import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type ConversationStatus, type ConversationResource } from "./conversation/model.ts";
+import { appendConversationInput } from "./conversation/input.ts";
 
 type Input = Readonly<Resource<InputSpec, InputStatus>>;
 type Creation = NonNullable<NonNullable<InputStatus["routing"]>["creation"]>;

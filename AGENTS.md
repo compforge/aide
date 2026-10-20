@@ -31,20 +31,26 @@ plugins/personal/
   aide.ts                  # Personal 服务：Chief 会话绑定、输入与恢复
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
   input.ts                 # Chief Input 路由与可恢复的多会话追加
-  conversation-input.ts    # 按 Input ID 幂等追加，保留消费状态与并发更新
-  conversation-model.ts    # Personal Conversation CRD
-  conversation-trigger.ts  # Conversation 定时触发配置
-  conversation-store.ts    # 会话投影与消息 outbox
-  chief.ts                 # 按 Conversation 消费 Input、续接问答
+  conversation/            # Conversation CRD 的模型、操作与 Reconcile
+    model.ts               # 资源定义与会话类型
+    input.ts               # 按 Input ID 幂等追加，保留消费状态与并发更新
+    store.ts               # 宿主侧会话投影与消息 outbox
+    trigger.ts             # 定时触发配置
+    reconcile.ts           # Runner 侧消费 Input、续接问答与定时回顾
   source.ts                # 需求观察、水位和调度
   message-source.ts        # Lark 单聊、群内 @ 观察、水位和短期讨论跟进
   message-context.ts       # IM 有界上下文、话题根消息与缺口
   environment-source.ts    # Workload 观察、基线和变化 Input
   config.ts                # Personal sources 配置、严格校验与默认值
   environment-config.ts    # 环境观察目标与 namespace 策略
-  resources.ts             # 独立 Task / Routine 契约与 Work 视图
-  task.ts                  # 有限目标 Reconcile
-  routine.ts               # 持续职责 Reconcile
+  task/                    # Task CRD
+    model.ts               # 资源定义
+    reconcile.ts           # 有限目标 Reconcile
+  routine/                 # Routine CRD
+    model.ts               # 资源定义
+    reconcile.ts           # 持续职责 Reconcile
+  model.ts                 # 共用 Work 字段、状态、消息与触发契约
+  resources.ts             # Task / Routine 聚合与 Work 视图
   execution.ts             # Personal 共用执行、结果校验与记录
   work.ts                  # 会话范围内 Work 创建、追加输入与删除
   work-input.ts            # Work Reconcile 消费输入与应用请求
@@ -61,6 +67,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 ## 关键约定
 
 - 根目录 `VERSION` 是产品版本。每次提交同步递增，默认 patch，同一提交只递增一次。
+- 每种插件自定义资源（CRD）在所属 plugin package 下使用独立目录，按资源名命名；该资源的模型、Reconcile 和专属辅助代码归入目录。插件装配和跨资源协作留在插件层，共用机制不强行归入某一种 CRD。目录聚合不改变 Host / Runner 的依赖边界。
 - Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。Connector 声明访问能力，`plugins.<plugin>.sources` 声明观察策略；Personal 只启动显式配置的环境、Lark 与需求 Source。环境发现只读配置，不代表连通性、健康或操作授权。
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。

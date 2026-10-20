@@ -1,22 +1,9 @@
-import type { Resource } from "@compforge/aide-plugin";
-import { WorkSchema, validateTrigger, type Work, type Message, type Trigger } from "./model.ts";
+import { WorkSchema, validateTrigger, type Work } from "./model.ts";
+import { TASK_TYPE, type TaskSpec, type TaskResource } from "./task/model.ts";
+import { ROUTINE_TYPE, type RoutineSpec, type RoutineResource } from "./routine/model.ts";
 
-export const TASK_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Task" } as const;
-export const ROUTINE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Routine" } as const;
 export const WORK_TYPES = [TASK_TYPE, ROUTINE_TYPE] as const;
-
-export type TaskSpec = Pick<Work, "conversationId" | "title" | "instruction" | "revision" | "inputs">;
-export type RoutineSpec = TaskSpec & { trigger: Trigger };
 export type WorkSpec = TaskSpec | RoutineSpec;
-type WorkObservation = Omit<Work, keyof TaskSpec | "id" | "kind" | "trigger">;
-export interface Delivery {
-  messages: Message[];
-  inputs: Array<{ key: string; responseId: string }>;
-  events: string[];
-}
-export type WorkStatus = WorkObservation & Delivery & { laneId?: string };
-export type TaskResource = Resource<TaskSpec, WorkStatus>;
-export type RoutineResource = Resource<RoutineSpec, WorkStatus>;
 export type WorkResource = TaskResource | RoutineResource;
 
 export function workType(kind: Work["kind"]) {
