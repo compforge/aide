@@ -62,18 +62,11 @@ test("Default conversation selection is serialized across Sessions and persisted
   assert.equal(conversationList(aide).filter((c) => c.default).length, 0);
 });
 
-/** @case Default is an AI-selected contact, not an automatic sink for unmatched observations. */
-test("Routing offers the default contact but preserves specific destinations and silence", async (t) => {
+/** @case Default receives all Inputs; rule matches still receive the same fact and overlap is idempotent. */
+test("Default receives unscoped, hinted and Channel Inputs without semantic filtering", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-default-route-"));
-  let routes = 0;
   const aide = new Aide(root, fakeOptions({ async chief(prompt) {
-    if (!prompt.includes("Candidates:")) return "processed";
-    routes++;
-    const candidates = JSON.parse(prompt.split("Candidates: ")[1]!) as { id: string; default: boolean }[];
-    assert.deepEqual(candidates.filter((c) => c.default).map((c) => c.id), ["private"]);
-    assert.match(prompt, /Ignore irrelevant or unimportant observations/);
-    const input = JSON.parse(prompt.split("Input: ")[1]!.split("\nCandidates:")[0]!) as { text: string };
-    return JSON.stringify({ conversationIds: input.text === "irrelevant" ? [] : input.text === "specific" ? ["group"] : ["private"], reason: "fixture routing decision" });
+    assert.doesNotMatch(prompt, /Candidates:/); return "processed";
   }, async execute() { throw new Error("No work expected"); } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.session("private").conversations.ensure();
@@ -84,12 +77,17 @@ test("Routing offers the default contact but preserves specific destinations and
     await source.conversations.submit(text, { origin: "source", text });
     await aide.settled();
   }
-  assert.equal(routes, 3);
-  assert.deepEqual(aide.session("private").conversations.get("private")!.inputIds, ["needs-contact"]);
-  assert.deepEqual(aide.session("group").conversations.get("group")!.inputIds, ["specific"]);
-  assert.equal(source.conversations.inputStore.get("irrelevant")!.status.routing!.phase, "ignored");
+  assert.deepEqual(aide.session("private").conversations.get("private")!.inputIds, ["needs-contact", "specific", "irrelevant"]);
+  assert.deepEqual(aide.session("group").conversations.get("group")!.inputIds, []);
   await source.conversations.submit("hint", { origin: "source", sessionId: "group", text: "explicit destination" });
   await aide.settled();
-  assert.equal(routes, 3);
-  assert.ok(aide.session("group").conversations.get("group")!.inputIds.includes("hint"));
+  for (const id of ["private", "group"]) assert.ok(aide.session(id).conversations.get(id)!.inputIds.includes("hint"));
+  await aide.receive({ id: "channel", sessionId: "group", text: "channel input" });
+  await aide.settled();
+  const group = aide.session("group").conversations;
+  const channel = group.inputs("group").find((input) => input.spec.text === "channel input")!;
+  assert.equal(aide.session("private").conversations.input(channel.metadata.name)!.status.phase, "done");
+  const before = aide.messages().length;
+  await aide.receive({ id: "channel", sessionId: "group", text: "channel input" });
+  await aide.settled(); assert.equal(aide.messages().length, before);
 });

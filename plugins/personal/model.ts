@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CronExpressionParser } from "cron-parser";
+import type { Message } from "../../src/channel/message.ts";
 
 export const TriggerSchema = z.object({
   cron: z.string().nullable(),
@@ -34,6 +35,14 @@ export const WorkSchema = z.object({
   history: z.array(z.object({ at: z.string(), role: z.enum(["user", "aide", "event"]), text: z.string() })),
 });
 export type Work = z.infer<typeof WorkSchema>;
+
+export type WorkSpecFields = Pick<Work, "conversationId" | "title" | "instruction" | "revision" | "inputs">;
+export interface Delivery {
+  messages: Message[];
+  inputs: Array<{ key: string; responseId: string }>;
+  events: string[];
+}
+export type WorkStatus = Omit<Work, keyof WorkSpecFields | "id" | "kind" | "trigger"> & Delivery & { laneId?: string };
 
 export { IncomingSchema, MessageSchema, type Incoming, type Message } from "../../src/channel/message.ts";
 

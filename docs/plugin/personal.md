@@ -36,11 +36,19 @@ Chief 是业务角色。Chief Controller 消费输入、组织上下文并续接
 
 ## 输入与上下文
 
-Input 由 Core 独立持久化，Conversation 是 Personal 的普通资源。Channel / Source 可提供 sessionId 等已知归属线索，Chief 据此确定话题；没有明确目标时，结合候选上下文判断。Session 承载持久执行与恢复，Conversation 承载话题；一个 Session 默认建立一个 Conversation，也可以组织多个话题。
+Input 由 Core 独立持久化，Conversation 是 Personal 的普通资源。Channel / Source 可提供 sessionId 等已知归属线索，Chief 据此确定话题；默认会话接收所有输入，确定性规则补充具体归属。Session 承载持久执行与恢复，Conversation 承载话题；一个 Session 可以组织多个话题。Source 启动只建立观察资源，不预建空 Conversation；输入到来时再决定归属。
 
-Chief 有两个 Reconcile。ReconcileInput 负责路由：有明确线索时按规则直接关联，例如目标 Session 唯一的会话；无法确定归属时，由 Chief 的路由调用读取会话摘要和关联 Work，选择零个、一个或多个已知会话。路由调用使用独立上下文和无执行工具的能力范围，不代替目标会话干活。没有相关会话时记录忽略原因。
+Chief 有两个 Reconcile。ReconcileInput 负责归位，不调用模型。没有任何 Conversation 时，创建一个会话、追加当前 Input 后结束路由。已有 Conversation 时按顺序处理，确定一个会话就立即追加，不汇总完整目标计划：
 
-路由计划保存目标 Session 与资源 uid，再逐个 Update Conversation 的 inputIds。追加按 inputId 去重；中断后继续同一计划，不再次调用模型选择目标。ReconcileConversation 在收到新 Input 或自身 trigger 到期时，加载话题历史、相关 Work 和最新事实，调用 Chief Harness 判断。Chief 承担 System 1 的接话与分流职责：当轮能办完的事情直接处理；需要独立推进、等待和跟踪时，将相关事实与决定承接到已有或新建 Work，由对应 Reconcile 继续。同一 Input 在不同会话的处理状态相互独立。
+1. 默认会话存在时，先追加到默认会话；没有默认会话就跳过。
+2. Input 带有尚无会话承接的目标 `sessionId` 时，创建 Conversation 并追加。
+3. 追加到目标 `sessionId` 匹配的已有会话；讨论续报的 `originalInputId` 匹配已经持有原始 Input 的会话。创建不阻止继续关联已有话题。
+
+没有默认会话、没有规则关联、也不满足创建规则时，记录为忽略。新话题不自动成为默认联络处，也不自动向观察到的原群发送消息。Source 的执行 Session 与目标归属分开；首次无归属的输入使用稳定生成的新 Session，创建的普通 Conversation 可以在 Web 查看并继续回复。
+
+追加按 Conversation 与 inputId 幂等：已挂载时不写入、不重置消费进度，也不重复唤醒；并发版本冲突重读同一资源身份后重试。路由只保存执行状态、首次创建分支和待创建会话的稳定身份；创建成功后固定 uid，避免重试时重复创建或重新投递到已删除会话的替代资源。中断后重新检查默认会话和确定性规则，已完成追加通过幂等性跳过。后续创建或关联失败不撤销、不阻塞先前已追加会话的消费；讨论续报等待原始 Input 完成路由后继续关联。Channel 同步保存本会话消息后，也继续执行这一路由，不提前标记为完成。
+
+ReconcileConversation 在收到新 Input 或自身 trigger 到期时，加载话题历史、相关 Work 和最新事实，调用 Chief Harness 判断。Chief 承担 System 1 的接话与分流职责：当轮能办完的事情直接处理；需要独立推进、等待和跟踪时，将相关事实与决定承接到已有或新建 Work，由对应 Reconcile 继续。同一 Input 在不同会话的处理状态相互独立。
 
 普通提问不必成为 Work。Input 路由完成、会话处理完成、工作目标完成和消息送达各有自己的状态；等待某个会话的用户或 Harness 时，其它 Session 可以继续。
 
@@ -52,7 +60,7 @@ Chief 有两个 Reconcile。ReconcileInput 负责路由：有明确线索时按�
 
 Conversation 的 `spec.default` 标记用户选择的默认联络处，缺省为 false。整个 Aide 实例跨 Session 最多有一个默认会话。用户通过 Web 设置或取消；切换由后端串行处理，先清除旧标记再设置新标记。中断可能留下无默认的状态，用户可以重新设置，不会留下两个默认。删除默认会话后不自动选择替代项。
 
-默认会话使用普通 Conversation 的上下文、Work 和 Chief Reconcile。明确的 Session 线索及相关话题优先；Chief 路由在没有更具体话题、且输入值得提醒或询问用户时，可以选择默认联络处。无关或不重要的观察仍忽略，不以默认会话兜底接收所有输入。需要用户处理的 Aide 服务问题也遵循同一规则：须先作为 Input 提交，不直接广播错误日志。
+默认会话使用普通 Conversation 的上下文、Work 和 Chief Reconcile，接收每条 Input，包括已有明确目标的输入；具体话题仍按规则独立承接。是否值得回复、提醒、询问或推进工作，由各会话消费时判断，入口不再做语义筛选。需要用户处理的 Aide 服务问题也须先作为 Input 提交，不直接广播错误日志。
 
 默认标记不打开 trigger、不授予额外执行权限，也不合并其它会话的上下文。个人私聊适合作为默认联络处，工作群继续承载各自话题。
 
@@ -102,7 +110,7 @@ Task 与 Routine 各自的 Controller 观察 ready 或已到期的 scheduled，�
 
 执行返回 ask 时，工作保存为 waiting 并结束本次调用，用户回答后再唤醒；返回 wait 时保存动态唤醒时间。Routine 完成本轮后继续等待下一次触发，Task 完成后结束。事件触发更新匹配的 Routine，由其 Controller 推进。
 
-`task.ts` 与 `routine.ts` 分别拥有 Reconcile：Task 完成后进入 done，Routine 完成本轮后回到 scheduled，并按自己的触发规则计算下次时间。两者共享 personal 内部的 Harness 调用、结果校验、并发更新处理和 outbox 记录；这些辅助操作位于 `execution.ts`，不进入通用 Host / Runner。
+`task/` 与 `routine/` 各自保存 CRD 定义（`model.ts`）和 Reconcile（`reconcile.ts`）：Task 完成后进入 done，Routine 完成本轮后回到 scheduled，并按自己的触发规则计算下次时间。两者共享 personal 内部的 Harness 调用、结果校验、并发更新处理和 outbox 记录；这些辅助操作位于 `execution.ts`，不进入通用 Host / Runner。
 
 资源类型决定身份；Task 没有周期触发配置，Routine 必须有 cron 或事件触发。Work 工具与网页聚合这两类资源，对外仍返回 task / routine 分类。Chief 的会话处理观察 Personal 定义的 Conversation 资源。
 

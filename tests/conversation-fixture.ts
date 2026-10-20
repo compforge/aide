@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { InputStore } from "../src/host/input/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
-import { ConversationStore as PersonalConversations } from "../plugins/personal/conversation-store.ts";
+import { ConversationStore as PersonalConversations } from "../plugins/personal/conversation/store.ts";
 import type { InputSpec } from "@compforge/aide-plugin";
-import { initialConversationName } from "../plugins/personal/conversation-model.ts";
-import type { ProcessingStatus } from "../plugins/personal/conversation-model.ts";
+import { initialConversationName } from "../plugins/personal/conversation/model.ts";
+import type { ProcessingStatus } from "../plugins/personal/conversation/model.ts";
 export class ConversationStore extends PersonalConversations {
   constructor(session: { dir: string; id?: string }) {
     const scope = { ...session, id: session.id ?? "test" };
@@ -24,6 +24,6 @@ export async function seedInput(store: PersonalConversations, id: string, spec: 
     await resources.replace(c, { ...c.spec, name: c.spec.name || initialConversationName(input.text), inputIds: [...c.spec.inputIds, id] }, { ...c.status, processing: { ...c.status.processing, [id]: { ...status, messages } }, messages: [...c.status.messages, ...messages] });
   }
   const fact = store.inputStore.get(id)!;
-  if (!fact.status.routing) store.inputStore.update(fact, { routing: { phase: "done", targets: [{ sessionId: store.sessionId, name: c.metadata.name, uid: c.metadata.uid }], reason: "Fixture destination" } });
+  if (!fact.status.routing) store.inputStore.update(fact, { routing: { phase: "done", reason: "Fixture destination" } });
   return store.input(id, conversationId)!;
 }

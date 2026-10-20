@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { InputSpec, InputStatus, ResourceClient } from "@compforge/aide-plugin";
-import { InputStore } from "../../src/host/input/store.ts";
-import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
-import type { ResourceClientChange } from "../../src/host/plugin/resource-client.ts";
-import { CONVERSATION_TYPE, initialConversationName, type Conversation, type ConversationResource, type ConversationInput, type ConversationRun, type ProcessingStatus, type ConversationSpec, type ConversationStatus } from "./conversation-model.ts";
-import type { Message } from "./model.ts";
-import { digest } from "./chief-model.ts";
-import { conversationTrigger, nextTriggerAt } from "./conversation-trigger.ts";
+import { InputStore } from "../../../src/host/input/store.ts";
+import { PluginResourceStore } from "../../../src/host/plugin/resource.ts";
+import type { ResourceClientChange } from "../../../src/host/plugin/resource-client.ts";
+import { CONVERSATION_TYPE, initialConversationName, type Conversation, type ConversationResource, type ConversationInput, type ConversationRun, type ProcessingStatus, type ConversationSpec, type ConversationStatus } from "./model.ts";
+import type { Message } from "../model.ts";
+import { digest } from "../chief-model.ts";
+import { conversationTrigger, nextTriggerAt } from "./trigger.ts";
 export const conversationKey = digest;
 
 /** @spec Conversation is a Personal Resource. Input facts are shared; consumption and replies belong to each Conversation. */
@@ -75,7 +75,7 @@ export class ConversationStore {
       }
     }
   }
-  async setTriggerEnabled(id: string, enabled: boolean): Promise<import("./conversation-trigger.ts").ConversationTrigger> {
+  async setTriggerEnabled(id: string, enabled: boolean): Promise<import("./trigger.ts").ConversationTrigger> {
     const c = this.resource(id); if (!c) throw new Error("Conversation does not exist");
     const trigger = conversationTrigger(c.spec.trigger);
     if (trigger.enabled === enabled) return trigger;

@@ -8,7 +8,7 @@ import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
 import { requirementWatches, validateWatchScopes } from "../plugins/personal/source-config.ts";
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import { messageWatch, MESSAGE_SESSION } from "../plugins/personal/message-config.ts";
-import { chiefTarget, chiefRouterTarget } from "../plugins/personal/chief-model.ts";
+import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
 import { Connectors } from "../connectors/index.ts";
 import type { AideConfig, DefaultHarness } from "./config.ts";
@@ -100,7 +100,7 @@ export class Aide {
         resourceDirectory: { sessions: () => [...this.active.keys()], client: (sessionId, pluginId) => {
           const scope = this.active.get(sessionId); if (!scope) throw new Error(`Unknown Session: ${sessionId}`);
           return scope.plugins.resourceClient(pluginId);
-        } },
+        }, ensureSession: async (sessionId) => { await this.session(sessionId).start(); } },
         onResourceChange: (change) => application?.conversations.changed(change),
         say: (context, text) => {
           if (!context.conversationId) throw new Error("Personal say requires Conversation context");
@@ -142,7 +142,7 @@ export class Aide {
       this.log.info({ sessionId: id, previousCwd: previous?.cwd, cwd }, "Execution directory changed; cleared native Harness bindings");
     }
     application = new Personal({ timezone: this.options.timezone }, this.log.child({ sessionId: id }),
-      { core, session, connectors, targets, inputs: this.inputs, watches: this.watches.filter((watch) => watch.sessionId === id) });
+      { core, session, connectors, targets, inputs: this.inputs });
     this.active.set(id, application);
     core.subscribe(() => this.notify());
     application.conversations.subscribe(() => this.notify());
@@ -178,7 +178,7 @@ export class Aide {
   }
 
   chiefSession(targetId: string, config: Parameters<Personal["chiefSession"]>[1]) {
-    const scope = this.sessions().find((item) => chiefRouterTarget(item.id) === targetId || item.conversationIds().some((id) => chiefTarget(id) === targetId));
+    const scope = this.sessions().find((item) => item.conversationIds().some((id) => chiefTarget(id) === targetId));
     if (!scope) throw new Error(`Unknown Chief target: ${targetId}`);
     return scope.chiefSession(targetId, config);
   }
@@ -190,7 +190,7 @@ export class Aide {
   conversationIds() { return this.sessions().flatMap((scope) => scope.conversationIds()); }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(): void { for (const listener of this.listeners) listener(); }
-  async deleteConversation(conversationId: string, revision: number, uid: string): Promise<import("../plugins/personal/conversation-model.ts").ConversationDeletion> {
+  async deleteConversation(conversationId: string, revision: number, uid: string): Promise<import("../plugins/personal/conversation/model.ts").ConversationDeletion> {
     const scope = this.findConversation(conversationId);
     if (!scope) return { deleted: false, reason: "missing" };
     const result = await scope.deleteConversation(conversationId, revision, uid);

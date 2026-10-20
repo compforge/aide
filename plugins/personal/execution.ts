@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { OutcomeSchema, executionPrompt } from "./prompts.ts";
-import { type Work } from "./model.ts";
-import { toWork, type WorkResource, type WorkSpec, type WorkStatus } from "./resources.ts";
+import { type Work, type WorkStatus } from "./model.ts";
+import { toWork, type WorkResource, type WorkSpec } from "./resources.ts";
 
 /** @spec A completed execution with an invalid result is not an interrupted execution and must not be replayed automatically. */
 class InvalidResultError extends Error {

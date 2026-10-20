@@ -1,6 +1,6 @@
 import type { PluginContext } from "@compforge/aide-plugin";
-import { nextOccurrence, validateTrigger } from "./model.ts";
-import { toWork, type WorkResource, type WorkSpec, type WorkStatus } from "./resources.ts";
+import { nextOccurrence, validateTrigger, type WorkStatus } from "./model.ts";
+import { toWork, type WorkResource, type WorkSpec } from "./resources.ts";
 
 /**
  * @spec Only Work Reconcile applies inbox requests. Observations never resume paused, completed or uncertain work.

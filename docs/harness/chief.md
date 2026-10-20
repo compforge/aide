@@ -39,7 +39,7 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 
 ## 提示词与工具
 
-当前稳定角色规则在 `agents/chief/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/chief.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；收到用户答复后构造续轮提示。
+当前稳定角色规则在 `agents/chief/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/conversation/reconcile.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；收到用户答复后构造续轮提示。
 
 Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 
@@ -99,8 +99,6 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 
 ## 输入路由
 
-Chief 在处理无明确去向的 Input 时使用单独的路由调用。Personal 提供候选会话的近期摘要及关联 Work 标题、状态；模型只返回目标会话和理由，不携带 Work、文件或 CLI 执行工具，也不加载会话长期记忆。每次路由使用独立 Lane，避免把多个群的摘要混入某个群的持续对话上下文。
+ReconcileInput 不调用 Harness，也不注册单独的路由 Target 或 Lane。没有任何 Conversation 时创建并追加后结束；已有会话时，先追加到存在的默认联络处，再按确定性规则创建和关联具体会话。每个确定的会话立即接收 Input，追加幂等，无需等待完整路由计划。
 
-候选摘要包含默认联络处标记。没有具体相关话题但值得联系用户时，可以选择默认联络处；无关输入仍忽略，默认标记不构成执行授权。
-
-路由结果由 ReconcileInput 校验并持久化，再通过资源 Update 追加 Input。目标 Conversation 的 Chief 沿用原有 Harness 会话和记忆机制，独立判断通知、询问或推进工作。
+目标 Conversation 的 Chief 沿用原有 Harness 会话和记忆机制，独立判断静默、通知、询问或推进工作。默认联络处接收所有 Input，但默认标记不构成执行授权，也不合并其它会话的上下文。
