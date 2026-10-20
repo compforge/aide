@@ -4,6 +4,7 @@ import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
 import { ConversationStore as PersonalConversations } from "../plugins/personal/conversation-store.ts";
 import type { InputSpec } from "@compforge/aide-plugin";
+import { initialConversationName } from "../plugins/personal/conversation-model.ts";
 import type { ProcessingStatus } from "../plugins/personal/conversation-model.ts";
 export class ConversationStore extends PersonalConversations {
   constructor(session: { dir: string; id?: string }) {
@@ -20,7 +21,7 @@ export async function seedInput(store: PersonalConversations, id: string, spec: 
     const inbound = input.origin === "channel" ? { id: `inbound:${id}`, conversationId, at: new Date().toISOString(), role: "user" as const, text: input.text, workId: null } : undefined;
     const messages = status.messages ?? (inbound ? [inbound] : []);
     const resources = createResourceClient(store.resources, (change) => store.changed(change));
-    await resources.replace(c, { ...c.spec, inputIds: [...c.spec.inputIds, id] }, { ...c.status, processing: { ...c.status.processing, [id]: { ...status, messages } }, messages: [...c.status.messages, ...messages] });
+    await resources.replace(c, { ...c.spec, name: c.spec.name || initialConversationName(input.text), inputIds: [...c.spec.inputIds, id] }, { ...c.status, processing: { ...c.status.processing, [id]: { ...status, messages } }, messages: [...c.status.messages, ...messages] });
   }
   const fact = store.inputStore.get(id)!;
   if (!fact.status.routing) store.inputStore.update(fact, { routing: { phase: "done", targets: [{ sessionId: store.sessionId, name: c.metadata.name, uid: c.metadata.uid }], reason: "Fixture destination" } });

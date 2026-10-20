@@ -18,7 +18,12 @@
   .trigger-switch input { accent-color: #294f3a; }
   #conversation-notice { margin: 10px; color: #9b5b11; }
   #conversation-heading { font-size: 16px; margin: 0 0 6px; overflow-wrap: anywhere; }
-  #conversation-id { overflow-wrap: anywhere; margin-bottom: 12px; }
+  .conversation-header { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .conversation-entry { display: flex; align-items: start; gap: 4px; }
+  .conversation-entry .conversation-link { flex: 1; min-width: 0; }
+  .conversation-copy { flex: none; padding: 5px 8px; background: transparent; color: #68776c; font-size: 12px; }
+  .conversation-copy:hover { background: #e8eee3; }
+  .conversation-entry .conversation-copy { margin-top: 12px; }
   #messages { flex: 1; overflow: auto; padding: 0 12px 24px 0; }
   .message { padding: 16px 18px; background: white; border: 1px solid #e1e6dc; border-radius: 12px; margin: 12px 0; }
   .message.user { background: #e8eee3; margin-left: 10%; }

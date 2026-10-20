@@ -1,4 +1,4 @@
-import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview, replyLabels, toolLabels } from '/agentue.js';
+import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview, replyLabels, toolLabels } from '/agentue.js';
   const $ = (id) => document.getElementById(id);
   const conversationId = new URL(location.href).searchParams.get('conversation') || 'me';
   const query = '?conversationId=' + encodeURIComponent(conversationId);
@@ -22,17 +22,30 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview,
     if (!response.ok) throw new Error(data.error || '请求失败');
     return data;
   }
+  function conversationCopyButton(id, compact = false) {
+    const button = element('button', compact ? '⧉' : '复制 ID', 'conversation-copy');
+    button.type = 'button'; button.title = '复制会话 ID';
+    button.setAttribute('aria-label', '复制会话 ID');
+    button.addEventListener('click', async () => {
+      try {
+        await copyText(id); button.textContent = '已复制';
+        $('conversation-notice').textContent = '';
+      } catch { $('conversation-notice').textContent = '复制会话 ID 失败，请重试。'; return; }
+      setTimeout(() => { button.textContent = compact ? '⧉' : '复制 ID'; }, 1500);
+    });
+    return button;
+  }
+  $('conversation-copy').replaceWith(conversationCopyButton(conversationId));
   let lastConversations = '';
   const triggerUpdates = new Set();
   function renderConversations(conversations) {
     const items = [...conversations];
     for (const id of new Set([conversationId, 'me'])) {
-      if (!items.some((item) => item.id === id)) items.push({ id, title: id === 'me' ? '默认对话' : id, preview: '' });
+      if (!items.some((item) => item.id === id)) items.push({ id, name: id === 'me' ? '默认对话' : '新对话', preview: '' });
     }
     const current = items.find((item) => item.id === conversationId);
-    $('conversation-heading').textContent = current.title;
-    $('conversation-id').textContent = current.id;
-    document.title = current.title + ' · Aide';
+    $('conversation-heading').textContent = current.name;
+    document.title = current.name + ' · Aide';
     const signature = JSON.stringify(items);
     if (signature === lastConversations) return;
     lastConversations = signature;
@@ -41,15 +54,17 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview,
       const url = new URL(location.href); url.searchParams.set('conversation', item.id);
       link.href = url.href;
       if (item.id === conversationId) link.setAttribute('aria-current', 'page');
-      link.title = item.title + ' · ' + item.id;
-      link.append(element('strong', item.title), element('span', item.id, 'muted'));
+      link.title = item.name;
+      link.append(element('strong', item.name));
       if (item.preview) link.append(element('span', item.preview, 'muted'));
-      const row = element('div', undefined, 'conversation-row'); row.append(link);
+      const row = element('div', undefined, 'conversation-row');
+      const entry = element('div', undefined, 'conversation-entry');
+      entry.append(link, conversationCopyButton(item.id, true)); row.append(entry);
       if (item.sessionId) {
         const label = element('label', undefined, 'trigger-switch');
         const toggle = element('input'); toggle.type = 'checkbox'; toggle.checked = item.trigger.enabled;
         toggle.setAttribute('role', 'switch');
-        toggle.setAttribute('aria-label', item.title + '：主动回顾');
+        toggle.setAttribute('aria-label', item.name + '：主动回顾');
         toggle.disabled = triggerUpdates.has(item.id);
         label.title = '开启后定时回顾；关闭不影响已有事项与安排。';
         toggle.addEventListener('change', async () => {
@@ -274,7 +289,7 @@ import { applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview,
         copy.disabled = true;
         $('work-notice').className = 'muted'; $('work-notice').textContent = '';
         try {
-          await navigator.clipboard.writeText(work.id);
+          await copyText(work.id);
           copy.textContent = '已复制';
         } catch {
           copy.disabled = false;

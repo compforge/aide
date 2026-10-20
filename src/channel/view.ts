@@ -103,13 +103,13 @@ export interface ConversationSummary {
   id: string;
   sessionId: string;
   trigger: ConversationTrigger;
-  title: string;
+  name: string;
   preview: string;
   updatedAt: string;
 }
 
 /**
- * @spec Navigation includes Channel/Source conversations and work-only scopes; summaries never expose input prompts or execution details.
+ * @spec Navigation includes Channel/Source conversations and work-only scopes; summaries expose the Conversation name and delivered preview, without other input prompts or execution details.
  * @link docs/channel/web.md
  */
 export function conversationList(aide: ChannelService): ConversationSummary[] {
@@ -117,7 +117,7 @@ export function conversationList(aide: ChannelService): ConversationSummary[] {
   const ensure = (id: string) => {
     let summary = summaries.get(id);
     if (!summary) {
-      summary = { id, sessionId: aide.findConversation(id)!.id, trigger: conversationTrigger(aide.findConversation(id)!.conversations.resource(id)?.spec.trigger), title: id === "me" ? "默认对话" : id, preview: "", updatedAt: "" };
+      summary = { id, sessionId: aide.findConversation(id)!.id, trigger: conversationTrigger(aide.findConversation(id)!.conversations.resource(id)?.spec.trigger), name: aide.findConversation(id)!.conversations.get(id)?.name || (id === "me" ? "默认对话" : "未命名会话"), preview: "", updatedAt: "" };
       summaries.set(id, summary);
     }
     return summary;
@@ -128,13 +128,9 @@ export function conversationList(aide: ChannelService): ConversationSummary[] {
     if (input.metadata.creationTimestamp > summary.updatedAt) summary.updatedAt = input.metadata.creationTimestamp;
   }
   for (const id of aide.conversationIds()) ensure(id);
-  const titled = new Set<string>();
   for (const message of aide.messages()) {
     const summary = ensure(message.conversationId);
     const text = message.text.replace(/\s+/g, " ").trim();
-    if (message.role === "user" && text && !titled.has(summary.id)) {
-      summary.title = text.slice(0, 40); titled.add(summary.id);
-    }
     // Messages are chronological; preview remains the latest delivered message even after a quiet Source input.
     summary.preview = text.slice(0, 100);
     if (message.at > summary.updatedAt) summary.updatedAt = message.at;
