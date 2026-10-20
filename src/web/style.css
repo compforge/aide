@@ -23,7 +23,9 @@
   .conversation-entry .conversation-link { flex: 1; min-width: 0; }
   .conversation-copy { flex: none; padding: 5px 8px; background: transparent; color: #68776c; font-size: 12px; }
   .conversation-copy:hover { background: #e8eee3; }
-  .conversation-entry .conversation-copy { margin-top: 12px; }
+  .conversation-actions { display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding-top: 12px; }
+  .conversation-delete { display: flex; align-items: center; justify-content: center; padding: 5px 8px; background: transparent; color: #8a3f35; font-size: 12px; }
+  .conversation-delete:hover { background: #f3e8e3; }
   #messages { flex: 1; overflow: auto; padding: 0 12px 24px 0; }
   .message { padding: 16px 18px; background: white; border: 1px solid #e1e6dc; border-radius: 12px; margin: 12px 0; }
   .message.user { background: #e8eee3; margin-left: 10%; }

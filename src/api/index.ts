@@ -15,6 +15,8 @@ const EventSchema = IncomingSchema.omit({ text: true }).extend({
 
 const ConversationTriggerSchema = z.object({ conversationId: z.string().min(1) }).extend({ enabled: z.boolean() }).strict();
 
+const DeleteConversationSchema = z.object({ conversationId: z.string().min(1), uid: z.string().min(1), revision: z.number().int().positive() }).strict();
+
 const DeleteWorkSchema = z.object({ id: z.string().min(1), conversationId: z.string().min(1) }).extend({
   revision: z.number().int().positive(),
 }).strict();
@@ -122,6 +124,18 @@ export function httpChannel(aide: WebService, log: Logger) {
           json(response, 404, { error: "会话不存在。" }); return;
         }
         json(response, 200, await aide.setConversationTrigger(conversationId, enabled));
+      } else if (request.method === "POST" && url.pathname === "/conversations/delete") {
+        const { conversationId, revision, uid } = DeleteConversationSchema.parse(await body(request));
+        const result = await aide.deleteConversation(conversationId, revision, uid);
+        if (result.deleted) { json(response, 200, result); return; }
+        const errors = {
+          missing: "该会话已删除或不存在。",
+          changed: "会话已更新，请刷新后重新确认删除。",
+          busy: "会话还有待处理输入、执行或问题，请处理完成后再删除。",
+          work: "会话还有事项或安排，请先删除这些工作。",
+        };
+        log.info({ conversationId, revision, reason: result.reason }, "Conversation deletion rejected");
+        json(response, result.reason === "missing" ? 404 : 409, { error: errors[result.reason] });
       } else if (request.method === "POST" && url.pathname === "/work/delete") {
         const { id, conversationId, revision } = DeleteWorkSchema.parse(await body(request));
         const work = aide.works().find((item) => item.id === id && item.conversationId === conversationId);

@@ -50,6 +50,10 @@ Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职
 
 点击会话导航到 `/?conversation=...`，消息 SSE 与事项查询使用同一个 conversationId。发送消息读取列表中的 sessionId；尚未创建的会话使用 conversationId 作为新 sessionId。页面导航重新建立该会话的展示快照，刷新和前进后退保留 URL 选择；后台执行不受影响。列表更新失败保留已显示条目并独立提示，不覆盖发送状态。关联问题按 Conversation 展示；未关联会话的宿主 Interaction 保留在本地收件区。
 
+会话列表提供复制 ID 和删除小图标，悬停显示操作名称。确认后删除该 Conversation 的聊天记录与定时回顾；删除当前会话后切换到剩余会话，没有其它会话时回到空的默认对话。待处理输入、执行或问题尚未结束，或仍有关联事项、安排时，需先处理这些内容。空的占位会话不显示删除入口。
+
+`POST /conversations/delete` 接收 `{ conversationId, uid, revision }`。Personal 校验资源身份、版本与关联状态后，经 ResourceClient 删除会话；会话不存在返回 404，状态变化或仍有待处理内容返回 409。共享 Input 和 Session 执行记录保留；同一入口再次创建会话时使用新的上下文，旧聊天与执行过程不会重新出现在新会话中。
+
 ## 工作管理
 
 事项和安排卡片均提供“复制 ID”按钮，复制完整工作 ID 后短暂显示“已复制”；复制失败时展示可手动复制的 ID。

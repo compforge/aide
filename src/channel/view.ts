@@ -33,7 +33,16 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   const quietRuns = new Set(runs.filter((input) => input.status.quietReason).map((input) => input.id));
   const timerRuns = new Map(runs.filter((run) => run.status.timerAt).map((run) => [run.status.executionId, run.id]));
   const runId = (item: { inputId?: string; executionId: string }) => item.inputId ?? timerRuns.get(item.executionId);
-  const invocations = aide.invocations().filter((item) => item.conversationId === conversationId && !quietRuns.has(runId(item) ?? ""));
+  const resource = scope.conversations.resource(conversationId);
+  const turnInputs = new Map([...state.harnessInputs.values()].map((input) => [input.turnId, input]));
+  const invocations = aide.invocations().filter((item) => {
+    if (item.conversationId !== conversationId || !resource || quietRuns.has(runId(item) ?? "")) return false;
+    if (item.resourceRef?.kind === "Conversation") return item.resourceRef.uid === resource.metadata.uid;
+    // Deleted Work may retain progress in its original Conversation, never in a later incarnation.
+    const input = item.turnId && turnInputs.get(item.turnId);
+    const at = input && state.messages.get(input.messageId)?.createdAt;
+    return !at || at >= resource.metadata.creationTimestamp;
+  });
   const relatedTurns = new Set(invocations.map((item) => item.turnId));
   // Group presentation by persisted Chief activation, never by message order or similar text.
   const turnRuns = new Map(invocations.map((item) => [item.turnId, runId(item)]));
@@ -101,6 +110,8 @@ export function conversationView(aide: ChannelService, conversationId: string): 
 
 export interface ConversationSummary {
   id: string;
+  revision: number | null;
+  uid: string | null;
   sessionId: string;
   trigger: ConversationTrigger;
   name: string;
@@ -117,7 +128,7 @@ export function conversationList(aide: ChannelService): ConversationSummary[] {
   const ensure = (id: string) => {
     let summary = summaries.get(id);
     if (!summary) {
-      summary = { id, sessionId: aide.findConversation(id)!.id, trigger: conversationTrigger(aide.findConversation(id)!.conversations.resource(id)?.spec.trigger), name: aide.findConversation(id)!.conversations.get(id)?.name || (id === "me" ? "默认对话" : "未命名会话"), preview: "", updatedAt: "" };
+      summary = { id, uid: aide.findConversation(id)!.conversations.resource(id)?.metadata.uid ?? null, revision: aide.findConversation(id)!.conversations.get(id)?.revision ?? null, sessionId: aide.findConversation(id)!.id, trigger: conversationTrigger(aide.findConversation(id)!.conversations.resource(id)?.spec.trigger), name: aide.findConversation(id)!.conversations.get(id)?.name || (id === "me" ? "默认对话" : "未命名会话"), preview: "", updatedAt: "" };
       summaries.set(id, summary);
     }
     return summary;

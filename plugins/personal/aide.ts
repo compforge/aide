@@ -7,9 +7,9 @@ import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
 import { IncomingSchema, type Incoming, type Message } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { message, Store } from "./store.ts";
-import { workType } from "./resources.ts";
+import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
 import { CONVERSATION_TYPE, INPUT_TYPE, chiefTarget, chiefRouterTarget, digest } from "./chief-model.ts";
-import { inboundMessage, initialConversationName } from "./conversation-model.ts";
+import { inboundMessage, initialConversationName, conversationLane, type ConversationDeletion } from "./conversation-model.ts";
 import { ConversationStore, conversationKey } from "./conversation-store.ts";
 import { createPiAgent } from "../../agents/pi/agent.ts";
 import type { InputStore } from "../../src/host/input/store.ts";
@@ -55,10 +55,17 @@ export class Personal {
   }
 
   private registerConversation(conversationId: string): void {
+    const conversation = this.conversations.resource(conversationId);
+    if (!conversation) return;
+    const laneId = conversationLane(conversation);
     const id = chiefTarget(conversationId);
+    if (!this.session.meta.lanes[laneId]) {
+      // @why Reusing a deleted Conversation ID must not auto-restore its old Session history.
+      this.session.setLane(laneId, { laneId, createdFor: { type: "session" }, harnessSessions: {},
+        ...(this.session.meta.harnessTargets[id] ? { historyAfterSeq: this.core.projection.lastSeq } : {}) });
+    }
     if (this.chiefConversations.has(id)) return;
     this.chiefConversations.set(id, conversationId);
-    if (!this.session.meta.lanes[id]) this.session.setLane(id, { laneId: id, createdFor: { type: "session" }, harnessSessions: {} });
     this.targets.push({ id, harness: "chief" });
     this.session.setHarnessTarget(id, { harnessTargetId: id, harness: "chief" });
   }
@@ -97,6 +104,27 @@ export class Personal {
 
   /** Bind agent tools to this host's Task/Routine persistence and reconcilers. */
   work(conversationId: string): WorkService { return new WorkService(this.store, conversationId, this.log); }
+
+  /**
+   * @spec Conversation deletion is revision checked and requires no pending activity or associated Work.
+   * @why Shared Input facts and Session execution records outlive a Conversation; delete only its resource.
+   * @link docs/channel/web.md
+   */
+  async deleteConversation(conversationId: string, revision: number, uid: string): Promise<ConversationDeletion> {
+    const conversation = this.conversations.resource(conversationId);
+    if (!conversation) return { deleted: false, reason: "missing" };
+    if (conversation.metadata.uid !== uid || Number(conversation.metadata.resourceVersion) !== revision) return { deleted: false, reason: "changed" };
+    const unfinished = this.conversations.runs(conversationId).some((run) => !["done", "failed"].includes(run.status.phase ?? ""));
+    const executing = this.invocations().some((invocation) => invocation.conversationId === conversationId && ["queued", "running", "uncertain"].includes(invocation.phase));
+    const pendingQuestion = this.questions().some((item) => item.conversationId === conversationId && item.request.status === "pending");
+    if (unfinished || executing || pendingQuestion) return { deleted: false, reason: "busy" };
+    const hasWork = WORK_TYPES.some((type) => this.store.resources.list<WorkSpec, unknown>(type)
+      .some((work) => work.spec.conversationId === conversationId));
+    if (hasWork) return { deleted: false, reason: "work" };
+    await this.plugins.resourceClient("personal").delete(CONVERSATION_TYPE, conversation.metadata.name);
+    this.log.info({ conversationId, revision, resourceUid: conversation.metadata.uid }, "Deleted conversation");
+    return { deleted: true };
+  }
 
   private async startOnce(): Promise<void> {
     if (this.hasSources) await this.conversations.ensure();
@@ -154,7 +182,10 @@ export class Personal {
     return [...this.core.projection.interactions.values()].flatMap((item) => {
       if (item.request.request.kind !== "question" || !item.pluginContext) return [];
       const conversationId = item.pluginContext.conversationId;
-      return conversationId ? [{ conversationId, request: item.request }] : [];
+      const conversation = conversationId && this.conversations.resource(conversationId);
+      if (!conversation || item.request.createdAt < conversation.metadata.creationTimestamp || (item.pluginContext.resourceRef?.kind === CONVERSATION_TYPE.kind &&
+        item.pluginContext.resourceRef.uid !== conversation.metadata.uid)) return [];
+      return [{ conversationId: conversation.spec.id, request: item.request }];
     });
   }
 
@@ -168,10 +199,13 @@ export class Personal {
 
   private async submit(incoming: Incoming): Promise<Message> {
     const input = { ...incoming, conversationId: this.id };
-    await this.conversations.ensure();
     const id = digest([input.conversationId, input.id]);
-    const previous = this.store.conversations.input(id);
+    const previous = this.store.conversations.input(id, input.conversationId);
     if (previous) return previous.status.messages?.[0] ?? message(input.conversationId, "已接收该消息");
+    // @spec Deleting a Conversation never turns redelivery of an accepted Input into a new command.
+    const fact = this.conversations.inputStore.get(id);
+    if (fact && ["done", "ignored"].includes(fact.status.routing?.phase ?? "")) return message(input.conversationId, "已接收该消息");
+    await this.conversations.ensure();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
     this.registerConversation(input.conversationId);
     const pending = this.questions().filter((item) => item.conversationId === input.conversationId && item.request.status === "pending");

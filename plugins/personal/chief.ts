@@ -1,6 +1,6 @@
 import type { PluginContext, ReconcileContext, Resource } from "@compforge/aide-plugin";
 import { INPUT_TYPE, CONVERSATION_TYPE, chiefTarget, type InputSpec, type InputStatus } from "./chief-model.ts";
-import type { ConversationResource, ConversationSpec, ConversationStatus, ProcessingStatus } from "./conversation-model.ts";
+import { conversationLane, type ConversationResource, type ConversationSpec, type ConversationStatus, type ProcessingStatus } from "./conversation-model.ts";
 import { conversationTrigger, nextTriggerAt } from "./conversation-trigger.ts";
 import { registerInputRouting } from "./input.ts";
 import { WORK_TYPES, type Delivery } from "./resources.ts";
@@ -105,7 +105,7 @@ For programming work, preserve requirement identity (source/category/id), reposi
 Current time: ${new Date().toISOString()}. Default timezone: ${original?.spec.timezone ?? process.env.AIDE_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone}.
 Activation: ${JSON.stringify(original ? { kind: "input", inputId: original.metadata.name, ...original.spec, conversationId } : { kind: "timer", dueAt: conversation.status.processing[id]?.timerAt, conversationId })}\nRecent conversation: ${JSON.stringify(history)}`;
     // @spec Consecutive inputs reuse a stable Lane; each Chief Target retains its native context.
-    let laneId = chiefTarget(conversationId);
+    let laneId = conversationLane(conversation);
     for (let round = 0; round < 8; round++) {
       const result = await execution.verbs.harness({ title: "Chief", harnessTargetId: chiefTarget(conversationId),
         laneId, prompt, timeoutMs: 180_000 });

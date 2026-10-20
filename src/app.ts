@@ -177,6 +177,14 @@ export class Aide {
   conversationIds() { return this.sessions().flatMap((scope) => scope.conversationIds()); }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(): void { for (const listener of this.listeners) listener(); }
+  async deleteConversation(conversationId: string, revision: number, uid: string): Promise<import("../plugins/personal/conversation-model.ts").ConversationDeletion> {
+    const scope = this.findConversation(conversationId);
+    if (!scope) return { deleted: false, reason: "missing" };
+    const result = await scope.deleteConversation(conversationId, revision, uid);
+    if (result.deleted) this.notify();
+    return result;
+  }
+
   async setConversationTrigger(conversationId: string, enabled: boolean) {
     const scope = this.findConversation(conversationId);
     if (!scope) throw new Error("Conversation does not exist");

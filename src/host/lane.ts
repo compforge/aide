@@ -39,6 +39,8 @@ export interface LaneMeta {
   createdFor: LaneCreatedFor;
   /** Creation provenance for a side Lane; it does not constrain later use. */
   parentLaneId?: string;
+  /** @spec History at or before this Ledger sequence is excluded even when native context is rebuilt. */
+  historyAfterSeq?: number;
   /** harnessTargetId → native binding used by that Target within this Lane. */
   harnessSessions: Record<string, HarnessSessionMeta>;
 }
@@ -47,6 +49,7 @@ export function createLaneMeta(options: {
   laneId: string;
   createdFor: LaneCreatedFor;
   parentLaneId?: string;
+  historyAfterSeq?: number;
 }): LaneMeta {
   return {
     laneId: options.laneId,
@@ -54,6 +57,7 @@ export function createLaneMeta(options: {
     ...(options.parentLaneId === undefined
       ? {}
       : { parentLaneId: options.parentLaneId }),
+    ...(options.historyAfterSeq === undefined ? {} : { historyAfterSeq: options.historyAfterSeq }),
     harnessSessions: {},
   };
 }
