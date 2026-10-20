@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Logger } from "pino";
 import { TriggerSchema, nextOccurrence, validateTrigger, type Work } from "./model.ts";
+import { digest } from "./chief-model.ts";
 import type { Store } from "./store.ts";
 
 export const WorkDefinitionSchema = z.object({
@@ -9,51 +10,22 @@ export const WorkDefinitionSchema = z.object({
   instruction: z.string().trim().min(1), trigger: TriggerSchema.nullable(),
 }).strict();
 export type WorkDefinition = z.infer<typeof WorkDefinitionSchema>;
-export const WorkUpdateSchema = z.object({
-  revision: z.number().int().positive(),
-  action: z.enum(["update", "pause", "resume", "answer"]),
+export const AppendInputSchema = z.object({
+  inputId: z.string().min(1).optional(),
+  text: z.string().trim().min(1).optional(),
+  action: z.enum(["context", "update", "pause", "resume", "answer"]).default("context"),
   changes: WorkDefinitionSchema.omit({ kind: true }).partial().optional(),
-  note: z.string().trim().min(1).optional(),
-}).strict();
-export type WorkUpdate = z.infer<typeof WorkUpdateSchema>;
+}).strict().refine((v) => v.inputId || v.text, "append_input requires inputId or text")
+  .refine((v) => v.action === "update" ? v.changes && Object.keys(v.changes).length > 0 : !v.changes,
+    "Only an update request accepts and requires changes");
+export type AppendInput = z.input<typeof AppendInputSchema>;
 
 export function newWork(conversationId: string, definition: WorkDefinition, now = new Date()): Work {
   const desired = WorkDefinitionSchema.parse(definition);
   validateTrigger(desired.kind, desired.trigger, now);
   return { id: randomUUID(), conversationId, ...desired,
     status: desired.kind === "routine" ? "scheduled" : "ready", revision: 1,
-    nextAt: nextOccurrence(desired.trigger, now), question: null, history: [] };
-}
-
-/** @spec User changes preserve resource kind and identity; only the reconciler can declare execution complete. */
-export function changeWork(work: Work, update: WorkUpdate, now = new Date()): Work {
-  const request = WorkUpdateSchema.parse(update);
-  if (request.revision !== work.revision) throw new Error(`Work ${work.id} revision changed; read it again before updating`);
-  const next = structuredClone(work);
-  if (request.action === "update") {
-    if (!request.changes || !Object.keys(request.changes).length) throw new Error("update requires changes");
-    const { kind, title, instruction, trigger } = work;
-    const desired = WorkDefinitionSchema.parse({ kind, title, instruction, trigger, ...request.changes });
-    Object.assign(next, desired);
-    validateTrigger(next.kind, next.trigger, now);
-    if (next.status !== "running") {
-      next.status = next.kind === "routine" ? "scheduled" : "ready";
-      next.nextAt = nextOccurrence(next.trigger, now);
-    }
-  } else {
-    if (request.changes) throw new Error("Only update accepts changes");
-    if (request.action === "pause") { next.status = "paused"; next.nextAt = null; }
-    else {
-      if (request.action === "answer" && (next.status !== "waiting" || !request.note)) {
-        throw new Error("answer requires waiting work and a non-empty note");
-      }
-      if (next.status !== "running") next.status = "ready";
-      next.nextAt = null;
-    }
-  }
-  next.question = null; next.revision++;
-  if (request.note) next.history.push({ at: now.toISOString(), role: "user", text: request.note });
-  return next;
+    nextAt: nextOccurrence(desired.trigger, now), question: null, inputs: [], consumedInputIds: [], history: [] };
 }
 
 /**
@@ -81,11 +53,20 @@ export class WorkService {
     return work;
   }
 
-  async update(id: string, request: WorkUpdate): Promise<Work> {
-    const work = changeWork(this.read(id), request);
-    await this.store.save(work);
-    this.log.info({ workId: id, revision: work.revision, action: request.action }, "Work tool updated work");
-    return work;
+  async appendInput(id: string, request: AppendInput, key?: string): Promise<Work> {
+    const work = this.read(id);
+    const input = AppendInputSchema.parse(request);
+    const original = input.inputId ? this.store.conversations.input(input.inputId, this.conversationId) : undefined;
+    if (input.inputId && !original) throw new Error("Input does not belong to this conversation");
+    if (original?.spec.origin === "source" && input.action !== "context") throw new Error("Source facts cannot be control requests");
+    const identity = digest([id, input.inputId ?? key ?? randomUUID(), input.action]);
+    await this.store.appendInput(work.id, { id: identity, at: new Date().toISOString(),
+      ...(input.inputId ? { inputId: input.inputId } : {}), origin: original?.spec.origin ?? "chief",
+      ...(original?.spec.observation ? { observation: original.spec.observation } : {}),
+      text: original?.spec.text ?? input.text!, ...(original && input.text ? { note: input.text } : {}),
+      action: input.action, ...(input.changes ? { changes: input.changes } : {}) });
+    this.log.info({ workId: id, inputId: input.inputId, workInputId: identity, conversationId: this.conversationId }, "Appended work input");
+    return this.read(id);
   }
 
   async delete(id: string, revision: number): Promise<void> {

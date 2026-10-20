@@ -1,5 +1,6 @@
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { TASK_TYPE, type TaskSpec, type TaskResource, type WorkStatus } from "./resources.ts";
+import { consumeWorkInputs } from "./work-input.ts";
 import { executeWork, recordOutcome, scheduledReconcile } from "./execution.ts";
 
 /** @spec Task completion ends the finite goal; wait may still schedule a continuation.
@@ -7,8 +8,10 @@ import { executeWork, recordOutcome, scheduledReconcile } from "./execution.ts";
  */
 export async function reconcileTask(context: PluginContext, execution: ReconcileContext, resource: TaskResource) {
   if (resource.metadata.deletionTimestamp) return;
-  const completed = await executeWork(context, execution, resource);
-  if (completed) await recordOutcome(context, resource, completed, (current) => {
+  const current = await consumeWorkInputs(context, resource);
+  if (!current) return;
+  const completed = await executeWork(context, execution, current);
+  if (completed) await recordOutcome(context, current, completed, (current) => {
     current.status = "done"; current.nextAt = null;
   });
   return scheduledReconcile(context, resource);

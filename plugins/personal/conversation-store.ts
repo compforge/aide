@@ -3,9 +3,10 @@ import type { InputSpec, InputStatus, ResourceClient } from "@compforge/aide-plu
 import { InputStore } from "../../src/host/input/store.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
 import type { ResourceClientChange } from "../../src/host/plugin/resource-client.ts";
-import { CONVERSATION_TYPE, type Conversation, type ConversationResource, type ConversationInput, type ProcessingStatus, type ConversationSpec, type ConversationStatus } from "./conversation-model.ts";
+import { CONVERSATION_TYPE, type Conversation, type ConversationResource, type ConversationInput, type ConversationRun, type ProcessingStatus, type ConversationSpec, type ConversationStatus } from "./conversation-model.ts";
 import type { Message } from "./model.ts";
 import { digest } from "./chief-model.ts";
+import { conversationTrigger, nextTriggerAt } from "./conversation-trigger.ts";
 export const conversationKey = digest;
 
 /** @spec Conversation is a Personal Resource. Input facts are shared; consumption and replies belong to each Conversation. */
@@ -23,7 +24,7 @@ export class ConversationStore {
   get(id: string): Conversation | undefined { const r = this.resource(id); return r && this.project(r); }
   async ensure(id = this.sessionId): Promise<ConversationResource> {
     const previous = this.resource(id); if (previous) return previous;
-    return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, sessionId: this.sessionId, inputIds: [] }, status: { processing: {}, messages: [], receipts: [] } });
+    return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, sessionId: this.sessionId, inputIds: [], trigger: conversationTrigger() }, status: { processing: {}, messages: [], receipts: [] } });
   }
   inputs(conversationId?: string): ConversationInput[] {
     return this.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE).filter((r) => !conversationId || (r.spec as { id: string }).id === conversationId).flatMap((raw) => {
@@ -42,16 +43,41 @@ export class ConversationStore {
   async submit(id: string, spec: InputSpec): Promise<ReturnType<InputStore["submit"]>> {
     return this.inputStore.submit(this.sessionId, id, spec);
   }
+  runs(conversationId?: string): ConversationRun[] {
+    const inputs = this.inputs(conversationId);
+    return this.list().filter((c) => !conversationId || c.id === conversationId).flatMap((c) => {
+      const resource = this.resource(c.id)!;
+      const runs: ConversationRun[] = inputs.filter((i) => i.conversationId === c.id).map((input) => ({
+        id: input.metadata.name, conversationId: c.id, resourceVersion: resource.metadata.resourceVersion, input, status: input.status,
+      }));
+      for (const [id, status] of Object.entries(resource.status.processing)) {
+        if (status.timerAt) runs.push({ id, conversationId: c.id, resourceVersion: resource.metadata.resourceVersion, status });
+      }
+      return runs;
+    });
+  }
+  async setTriggerEnabled(id: string, enabled: boolean): Promise<import("./conversation-trigger.ts").ConversationTrigger> {
+    const c = this.resource(id); if (!c) throw new Error("Conversation does not exist");
+    const trigger = conversationTrigger(c.spec.trigger);
+    if (trigger.enabled === enabled) return trigger;
+    trigger.enabled = enabled;
+    await this.client.replace(c, { ...c.spec, trigger }, { ...c.status, nextTriggerAt: enabled ? nextTriggerAt(trigger) : null });
+    return trigger;
+  }
   async update(input: ConversationInput, patch: Partial<ProcessingStatus>): Promise<ConversationInput> {
-    const c = this.resource(input.conversationId);
-    if (!c || c.metadata.resourceVersion !== input.metadata.resourceVersion) throw new Error("Conversation resource version conflict; read it again");
-    const previous = c.status.processing[input.metadata.name] ?? {};
+    await this.updateRun({ id: input.metadata.name, conversationId: input.conversationId,
+      resourceVersion: input.metadata.resourceVersion, input, status: input.status }, patch);
+    return this.input(input.metadata.name, input.conversationId)!;
+  }
+  async updateRun(run: ConversationRun, patch: Partial<ProcessingStatus>): Promise<void> {
+    const c = this.resource(run.conversationId);
+    if (!c || c.metadata.resourceVersion !== run.resourceVersion) throw new Error("Conversation resource version conflict; read it again");
+    const previous = c.status.processing[run.id] ?? {};
     const next = { ...previous, ...patch };
     if (["done", "failed"].includes(previous.phase ?? "") && !["done", "failed"].includes(next.phase ?? "")) throw new Error("Completed input cannot be replayed");
-    if (next.phase === "running" && Object.entries(c.status.processing).some(([id, s]) => id !== input.metadata.name && ["running", "waiting"].includes(s.phase ?? ""))) throw new Error("Conversation already has an active input");
+    if (next.phase === "running" && Object.entries(c.status.processing).some(([id, s]) => id !== run.id && ["running", "waiting"].includes(s.phase ?? ""))) throw new Error("Conversation already has an active input");
     const messages = mergeMessages(c.spec.id, c.status.messages, patch.messages ?? []);
-    await this.client.patchStatus(c, { processing: { ...c.status.processing, [input.metadata.name]: next }, messages });
-    return this.input(input.metadata.name, c.spec.id)!;
+    await this.client.patchStatus(c, { processing: { ...c.status.processing, [run.id]: next }, messages });
   }
   async archive(id: string, messages: Message[], receipts: Array<{ key: string; responseId: string }> = []): Promise<void> {
     const c = await this.ensure(id);
@@ -64,12 +90,16 @@ export class ConversationStore {
       if (receipt) return c.status.messages.find((m) => m.id === receipt.responseId);
     }
   }
-  async say(conversationId: string, inputId: string | undefined, text: string): Promise<{ messageId: string }> {
+  async say(conversationId: string, inputId: string | undefined, text: string, executionId?: string): Promise<{ messageId: string }> {
     const message: Message = { id: randomUUID(), conversationId, role: "aide", text, workId: null, at: new Date().toISOString() };
     if (inputId) {
       const input = this.input(inputId, conversationId); if (!input) throw new Error("say Input is not attached to this Conversation");
       await this.update(input, { messages: [...input.status.messages ?? [], message] });
-    } else await this.archive(conversationId, [message]);
+    } else {
+      const run = executionId && this.runs(conversationId).find((r) => r.status.timerAt && r.status.executionId === executionId);
+      if (run) await this.updateRun(run, { messages: [...run.status.messages ?? [], message] });
+      else await this.archive(conversationId, [message]);
+    }
     return { messageId: message.id };
   }
   private project(r: ConversationResource): Conversation {

@@ -14,7 +14,7 @@ test("say persists an ordinary scoped Message without an Interaction and validat
   const root = mkdtempSync(join(tmpdir(), "aide-say-"));
   const session = new SessionStore(root).createSession({ id: "owner", cwd: root });
   const conversations = new ConversationStore(session);
-  await seedInput(conversations, "tick", { sessionId: session.id, conversationId: "private", origin: "heartbeat", text: "review" });
+  await seedInput(conversations, "tick", { sessionId: session.id, conversationId: "private", origin: "source", text: "review" });
   await conversations.archive("other", []);
   const verb = new Verb({ session, say: async (context, text) => { if (!context.conversationId) throw new Error("Missing conversation"); return conversations.say(context.conversationId, context.inputId, text); }, capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot(session.id) });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });

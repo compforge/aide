@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { INPUT_TYPE, type InputSpec, type InputStatus, type Resource } from "@compforge/aide-plugin";
-const Spec = z.object({ sessionId: z.string().min(1).max(200).optional(), origin: z.enum(["channel", "source", "heartbeat"]),
+const Spec = z.object({ sessionId: z.string().min(1).max(200).optional(), origin: z.enum(["channel", "source"]),
   text: z.string().min(1).max(32_000), timezone: z.string().optional(), replyTo: z.string().optional(),
   observation: z.record(z.string(), z.unknown()).optional() }).strict();
 const State = z.array(z.object({ id: z.string(), owner: z.string(), at: z.string(), revision: z.number(), spec: Spec,

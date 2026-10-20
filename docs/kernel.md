@@ -119,7 +119,7 @@ Adapter 保留提供方明确给出的消息阶段。`agentText` 用于整轮记
 
 一次处理沿着以下流程推进：
 
-1. **接收变化。** 输入方提供 sessionId，Core 创建或恢复对应 Session。Channel 将人的输入写入 Message / Input，并归入 Conversation；Source 经 Core 调用 Connector 观察外部系统，把变化转为资源更新或 Input。
+1. **接收变化。** Core 在 Session 执行作用域内接收变化，输入可以携带目标 sessionId 作为归属线索。Channel 提交人的 Input，Source 经 Core 调用 Connector 观察外部系统，把变化转为资源更新或 Input；业务插件决定将输入归入哪些上下文。
 2. **唤醒资源。** 资源变化、Watch、Source 或定时调度将资源身份加入 Controller 队列。
 3. **读取当前事实。** Reconcile 读取主资源及相关对象，判断目标是否完成、是否需要更多信息，以及下一步应执行什么。
 4. **推进工作。** 明确的步骤由 Reconcile 向 Core 发起相应 verb；需要结合上下文选择动作时，经 Core 调用带工具的 Harness，由 Agent 判断并调用工具。Core 承接这些请求并管理动作生命周期。
@@ -148,7 +148,7 @@ Plugin 的自定义资源用 spec 表达目标，用 status 保存领域进展�
 
 ### Personal 的具体流程
 
-Chief 通过 Input Reconcile 决定输入去向，再由 Conversation Reconcile 按会话串行消费，调用 Chief Harness 决定直接答复、询问用户或操作 Work。Task 和 Routine 各有独立 CRD 与 Reconcile，分别推进有限目标和持续职责；Work 是二者的业务统称。
+Personal 将新发生的事放入合适的上下文：Chief 通过 Input Reconcile 结合 sessionId 等线索分配到相关 Conversation；Conversation Reconcile 响应新输入或自身 trigger，结合话题历史直接处理，或将事实与决定交给已有或新建 Work。Task Reconcile 推进有限目标直至完成，Routine Reconcile 推进当前轮次直至完成；Work 是二者的业务统称。上下文归属与主动判断是 Personal 的业务策略，Core 提供资源、Watch、定时唤醒与执行机制。详见 [主动性与上下文](plugin/personal.md#主动性与上下文)。
 
 Personal 的需求观察由 RequirementSource 资源及其 Controller 承担：定时经 Core 调用 Connector，比较观察结果，先持久化 Input，再推进观察水位，交给 Chief 判断。框架 Source 则负责资源的初始发现与订阅；其他 Plugin 可以直接由 Source 建立自己的业务资源。两者的联系见 [Plugin 的 Source 与 Watch](plugin/README.md#source-与-watch)。
 

@@ -4,7 +4,6 @@
 // HarnessSession 元数据只用于优先恢复 harness 私有状态，缺失时仍可从 AideSession 重建上下文。
 
 import { createHash } from "node:crypto";
-import { HeartbeatConfigSchema, type HeartbeatConfig, type HeartbeatState } from "../heartbeat.ts";
 import { assertSessionId } from "./session-id.ts";
 import { turnUserText } from "./message-relations.ts";
 import {
@@ -126,8 +125,6 @@ export interface NativeSessionOrigin {
 }
 
 export interface SessionMeta {
-  heartbeat?: HeartbeatConfig;
-  heartbeatState?: HeartbeatState;
   aideSessionId: string;
   /** Session 名称：可由用户显式指定；fork 未命名时由第一条 queue 补齐。 */
   title?: string;
@@ -286,7 +283,6 @@ function normalizeSessionMeta(meta: SessionMeta): SessionMeta {
   );
   return {
     ...current,
-    heartbeat: HeartbeatConfigSchema.parse(current.heartbeat ?? {}),
     harnessTargets,
     lanes,
     harnessSessions,
@@ -388,7 +384,6 @@ export class SessionStore {
     if (existsSync(join(dir, "meta.json"))) throw new Error(`aide session already exists: ${id}`);
     const meta: SessionMeta = {
       aideSessionId: id,
-      heartbeat: HeartbeatConfigSchema.parse({}),
       title: opts.title,
       cwd,
       createdAt: new Date().toISOString(),
@@ -870,7 +865,6 @@ export class SessionStore {
     );
     const meta: SessionMeta = {
       aideSessionId: id,
-      heartbeat: HeartbeatConfigSchema.parse({}),
       title: opts.title,
       description: `fork: ${sourceQuestion}`,
       cwd,

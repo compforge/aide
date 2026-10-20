@@ -127,6 +127,8 @@ export interface ExecutionAssociation {
 }
 
 export interface ReconcileContext {
+  /** Core identity of this live execution, including its associated verb calls. */
+  readonly executionId: string;
   /** Associate subsequent actions with business input, independently of Harness selection. */
   withContext(context: Pick<ExecutionAssociation, "conversationId" | "inputId">): ReconcileContext;
   readonly snapshot: ReconcileSnapshot;

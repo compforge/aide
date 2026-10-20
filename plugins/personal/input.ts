@@ -7,7 +7,7 @@ const Decision = z.object({ conversationIds: z.array(z.string()), reason: z.stri
 
 /**
  * @spec Routing is planned durably before fan-out. Retry only appends missing references to the same pinned destinations.
- * @spec Known Session input selects its default Conversation without a model call; unsolicited observations may be ignored.
+ * @spec An unambiguous Session destination routes without a model call; unsolicited observations may be ignored.
  * @link docs/plugin/personal.md
  */
 export function registerInputRouting(context: PluginContext): void {

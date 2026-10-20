@@ -1,5 +1,6 @@
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { ROUTINE_TYPE, type RoutineSpec, type RoutineResource, type WorkStatus } from "./resources.ts";
+import { consumeWorkInputs } from "./work-input.ts";
 import { executeWork, recordOutcome, scheduledReconcile } from "./execution.ts";
 import { nextOccurrence } from "./model.ts";
 
@@ -8,8 +9,10 @@ import { nextOccurrence } from "./model.ts";
  */
 export async function reconcileRoutine(context: PluginContext, execution: ReconcileContext, resource: RoutineResource) {
   if (resource.metadata.deletionTimestamp) return;
-  const completed = await executeWork(context, execution, resource);
-  if (completed) await recordOutcome(context, resource, completed, (current) => {
+  const current = await consumeWorkInputs(context, resource);
+  if (!current) return;
+  const completed = await executeWork(context, execution, current);
+  if (completed) await recordOutcome(context, current, completed, (current) => {
     current.status = "scheduled"; current.nextAt = nextOccurrence(current.trigger, new Date());
   });
   return scheduledReconcile(context, resource);

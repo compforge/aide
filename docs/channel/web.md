@@ -30,7 +30,7 @@ Conversation / Input / Message → conversationView → AgentUE UIModel
 
 Pi Adapter 将 `text_delta` / `thinking_delta` 映射到现有 `agent_message_chunk` / `agent_thought_chunk`，消息结束时使用相同 ID 提交完整内容。工具循环的中间发言保持 commentary，只有成功收口的最后答复标为 final。展示进展不改变 Harness 的完成语义，也不触发 Work CRUD。
 
-`src/channel/view.ts` 从已有 Session Projection 选择显式关联当前 Conversation 的 HarnessInvocation 及其 Turn，不发送内部提示词或整个工具原始响应。它生成 `biz: aide.conversation` 的 AgentUE UIModel：`meta.conversation_id` 和 `meta.activity` 表示会话与当前执行状态，正式 `message` 和每个 Turn 对应的 `execution` 按时间排序；同一 Input 的 execution 与正式回复通过 AgentUE 原生 `group_id` 分组，关联来自持久 Input 和 HarnessInvocation，不靠相邻顺序猜测。`thought` / `text` / `tool` 通过 `parent_id` 归属到该 execution，内部保持 Ledger 时间线顺序。不同类别的 ID 有前缀，避免业务消息与执行事件的身份冲突。
+`src/channel/view.ts` 从已有 Session Projection 选择显式关联当前 Conversation 的 HarnessInvocation 及其 Turn，不发送内部提示词或整个工具原始响应。它生成 `biz: aide.conversation` 的 AgentUE UIModel：`meta.conversation_id` 和 `meta.activity` 表示会话与当前执行状态，正式 `message` 和每个 Turn 对应的 `execution` 按时间排序；同一次 Chief 处理的 execution 与正式回复通过 AgentUE 原生 `group_id` 分组；输入处理按 inputId 关联，定时处理按持久执行身份关联，来源是 Conversation 处理记录和 HarnessInvocation，不靠相邻顺序猜测。`thought` / `text` / `tool` 通过 `parent_id` 归属到该 execution，内部保持 Ledger 时间线顺序。不同类别的 ID 有前缀，避免业务消息与执行事件的身份冲突。
 
 `src/api/stream.ts` 使用 SDK 的 `PatchEmitter` 和 `encodeSse`，通过 `GET /stream?conversationId=...` 输出 AgentUE SSE。首次连接与重连发送 `start` 完整快照，之后新增或更正 block 用 `set`，正文增长用 `append`，执行状态变化用 `meta.activity` 的 `set`。完成只改变 execution 状态，不移除其内容；消息插入导致 block 顺序变化时发送新的 `start` 替换模型。
 
@@ -86,6 +86,6 @@ curl -s http://127.0.0.1:7433/events \
 
 ## 主动回顾开关
 
-会话列表的「主动回顾」开关修改对应 Session 的 heartbeat，默认关闭、间隔 3600 秒。多个 Conversation 共用 Session 时显示同一状态。尚未通过输入创建的空会话没有开关。页面不提供间隔编辑。
+会话列表的「主动回顾」开关修改对应 Conversation 的 trigger，默认关闭、间隔 3600 秒。同一个 Session 中的不同 Conversation 独立控制。尚未持久保存的空会话没有开关。页面不提供间隔编辑。
 
-`GET /conversations` 返回 `sessionId` 和 `heartbeat`；`POST /sessions/heartbeat` 接收 `{ sessionId, conversationId, enabled }`，校验会话归属后持久化，拒绝额外的间隔字段。关闭不会取消已有输入或委托。调度和判断见 [Personal](../plugin/personal.md#session-定时回顾)。
+`GET /conversations` 返回 `sessionId` 和 `trigger`；`POST /conversations/trigger` 接收 `{ conversationId, enabled }`，校验会话存在后持久化，拒绝额外的间隔字段。关闭不会取消已有输入或委托。调度和判断见 [Personal](../plugin/personal.md#conversation-定时回顾)。
