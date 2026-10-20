@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FeishuMessages, larkFailure } from "../connectors/feishu/messages.ts";
-import { FeishuMessagesConfigSchema } from "../connectors/feishu/config.ts";
+import { LarkMessages, larkFailure } from "../connectors/lark/messages.ts";
+import { LarkMessagesConfigSchema } from "../connectors/lark/config.ts";
 import { createConnectorClient, dispatchConnector, emptyConnectors } from "../src/connector-client.ts";
 import { chiefTools } from "../agents/chief/chief-tools.ts";
 
-const config = FeishuMessagesConfigSchema.parse({ appId: "cli_app", userId: "ou_me" });
+const config = LarkMessagesConfigSchema.parse({ appId: "cli_app", userId: "ou_me" });
 const identity = { appId: "cli_app", identities: { user: { available: true, openId: "ou_me" } } };
 const row = { message_id: "om_one", chat_id: "oc_chat", content: "hello", create_time: "2026-10-20 07:37",
   deleted: false, sender: { id: "ou_other", sender_type: "user", name: "Colleague" },
@@ -13,9 +13,9 @@ const row = { message_id: "om_one", chat_id: "oc_chat", content: "hello", create
 const query = { start: "2026-10-20T07:00:00Z", end: "2026-10-20T08:00:00Z" };
 const response = { ok: true, identity: "user", data: { messages: [row], has_more: true, page_token: "next" } };
 
-test("Feishu Connector pins user identity, maps UTC compact rows, and preserves single-page continuation over IPC", async () => {
+test("Lark Connector pins user identity, maps UTC compact rows, and preserves single-page continuation over IPC", async () => {
   const commands: string[][] = [];
-  const messages = new FeishuMessages(config, async (args) => {
+  const messages = new LarkMessages(config, async (args) => {
     commands.push([...args]); return args[0] === "auth" ? identity : response;
   });
   const host = { ...emptyConnectors, messages };
@@ -39,10 +39,10 @@ test("Feishu Connector pins user identity, maps UTC compact rows, and preserves 
   assert.ok(commands.some((args) => args.includes("+threads-messages-list")));
 });
 
-test("Feishu reads reject account switches, incomplete output, malformed pages and expose sanitized permission errors", async () => {
+test("Lark reads reject account switches, incomplete output, malformed pages and expose sanitized permission errors", async () => {
   let value: unknown = { ...identity, appId: "cli_other" };
   let reads = 0;
-  const connector = new FeishuMessages(config, async (args) => {
+  const connector = new LarkMessages(config, async (args) => {
     if (args[0] === "auth") return value;
     reads++; return response;
   });
@@ -54,7 +54,7 @@ test("Feishu reads reject account switches, incomplete output, malformed pages a
     { messages: [{ ...row, sender: undefined }], has_more: false },
     { messages: [row] },
   ]) {
-    const broken = new FeishuMessages(config, async (args) => args[0] === "auth" ? identity : { ok: true, identity: "user", data });
+    const broken = new LarkMessages(config, async (args) => args[0] === "auth" ? identity : { ok: true, identity: "user", data });
     await assert.rejects(broken.search(query));
   }
   const error = larkFailure({ error: { type: "authorization", subtype: "missing_scope", message: "secret token",
@@ -64,9 +64,9 @@ test("Feishu reads reject account switches, incomplete output, malformed pages a
   assert.throws(() => connector.history({ ...query, chatId: "--bad" }));
 });
 
-test("Feishu process concurrency is bounded and released after a failure", async () => {
+test("Lark process concurrency is bounded and released after a failure", async () => {
   const releases: Array<() => void> = [];
-  const connector = new FeishuMessages(config, async (args) => {
+  const connector = new LarkMessages(config, async (args) => {
     if (args[0] === "auth") return identity;
     await new Promise<void>((resolve) => releases.push(resolve)); return response;
   });

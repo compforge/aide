@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { z } from "zod";
 import type { ChatMessage, MessageConnector, MessagePage, MessageQuery, MessageSearchQuery } from "@compforge/aide-plugin";
-import type { FeishuMessagesConfig } from "./config.ts";
+import type { LarkMessagesConfig } from "./config.ts";
 
 export type LarkCliRunner = (args: readonly string[]) => Promise<unknown>;
 
@@ -9,9 +9,9 @@ export type LarkCliRunner = (args: readonly string[]) => Promise<unknown>;
 export function larkFailure(value: unknown): Error {
   const parsed = z.object({ error: z.object({ type: z.string().optional(), subtype: z.string().optional(),
     code: z.union([z.string(), z.number()]).optional(), missing_scopes: z.array(z.string()).optional() }) }).safeParse(value);
-  if (!parsed.success) return new Error("Feishu CLI failed; check user authorization and connectivity");
+  if (!parsed.success) return new Error("Lark CLI failed; check user authorization and connectivity");
   const error = parsed.data.error;
-  return new Error(`Feishu read failed (${[error.type, error.subtype, error.code].filter((x) => x !== undefined).join("/")})` +
+  return new Error(`Lark read failed (${[error.type, error.subtype, error.code].filter((x) => x !== undefined).join("/")})` +
     (error.missing_scopes?.length ? `; required scopes: ${error.missing_scopes.join(", ")}` : ""));
 }
 
@@ -21,12 +21,12 @@ export function larkCliRunner(timeoutMs: number): LarkCliRunner {
       env: { ...process.env, TZ: "UTC", LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1", LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1" } },
     (error, stdout, stderr) => {
       if (error) {
-        if (error.code === "ENOENT") return reject(new Error("Feishu reads require lark-cli on the service PATH"));
-        if (error.killed) return reject(new Error(`Feishu CLI exceeded ${timeoutMs}ms timeout`));
+        if (error.code === "ENOENT") return reject(new Error("Lark reads require lark-cli on the service PATH"));
+        if (error.killed) return reject(new Error(`Lark CLI exceeded ${timeoutMs}ms timeout`));
         try { reject(larkFailure(JSON.parse(stderr))); } catch { reject(larkFailure(null)); }
         return;
       }
-      try { resolve(JSON.parse(stdout)); } catch { reject(new Error("Feishu CLI returned invalid JSON")); }
+      try { resolve(JSON.parse(stdout)); } catch { reject(new Error("Lark CLI returned invalid JSON")); }
     });
   });
 }
@@ -46,14 +46,14 @@ function timestamp(value: string): string {
   const normalized = /^\d{4}-\d\d-\d\d \d\d:\d\d$/.test(value) ? `${value.replace(" ", "T")}:00Z` : value;
   const ms = /^\d{13}$/.test(value) ? Number(value) : Date.parse(normalized);
   if (!Number.isFinite(ms) || (!normalized.endsWith("Z") && !/[+-]\d\d:\d\d$/.test(normalized) && !/^\d{13}$/.test(value))) {
-    throw new Error("Feishu CLI returned an unsupported message timestamp");
+    throw new Error("Lark CLI returned an unsupported message timestamp");
   }
   return new Date(ms).toISOString();
 }
 
 function message(value: unknown): ChatMessage {
   const parsed = MessageSchema.safeParse(value);
-  if (!parsed.success) throw new Error("Feishu CLI returned an incomplete message; discovery watermark retained");
+  if (!parsed.success) throw new Error("Lark CLI returned an incomplete message; discovery watermark retained");
   const row = parsed.data;
   return { id: row.message_id, chatId: row.chat_id, content: row.content, createdAt: timestamp(row.create_time),
     ...(row.update_time ? { updatedAt: timestamp(row.update_time) } : {}),
@@ -75,21 +75,21 @@ const cliTime = (value: string) => new Date(value).toISOString().replace(/\.\d{3
 /**
  * @spec Reads only as the configured user; each request is one explicit page with bounded process output.
  * @why Search includes @all. Exact personal mention selection belongs to the Personal Source.
- * @case tests/feishu-messages.test.ts
- * @link docs/connector/feishu-messages.md
+ * @case tests/lark-messages.test.ts
+ * @link docs/connector/lark-messages.md
  */
-export class FeishuMessages implements MessageConnector {
+export class LarkMessages implements MessageConnector {
   private running = 0;
-  constructor(readonly config: FeishuMessagesConfig, private readonly run: LarkCliRunner = larkCliRunner(config.timeoutMs)) {}
+  constructor(readonly config: LarkMessagesConfig, private readonly run: LarkCliRunner = larkCliRunner(config.timeoutMs)) {}
 
   async identity() {
     const value = await this.run(["auth", "status", "--json"]);
     const parsed = z.object({ appId: z.string(), identities: z.object({ user: z.object({
       available: z.literal(true), openId: z.string(),
     }) }) }).safeParse(value);
-    if (!parsed.success) throw new Error("Feishu user login is unavailable; authorize lark-cli as the configured user");
+    if (!parsed.success) throw new Error("Lark user login is unavailable; authorize lark-cli as the configured user");
     if (parsed.data.appId !== this.config.appId || parsed.data.identities.user.openId !== this.config.userId) {
-      throw new Error("Feishu CLI login does not match configured appId/userId; reads stopped");
+      throw new Error("Lark CLI login does not match configured appId/userId; reads stopped");
     }
     return { accountId: this.config.appId, userId: this.config.userId };
   }
@@ -123,7 +123,7 @@ export class FeishuMessages implements MessageConnector {
   }
 
   private async read(args: string[], observedThrough: string): Promise<MessagePage> {
-    if (this.running >= 2) throw new Error("Feishu read concurrency limit reached; retry later");
+    if (this.running >= 2) throw new Error("Lark read concurrency limit reached; retry later");
     this.running++;
     try {
       await this.identity();
@@ -131,7 +131,7 @@ export class FeishuMessages implements MessageConnector {
       const parsed = PageSchema.safeParse(value);
       if (!parsed.success) throw larkFailure(value);
       const { messages, has_more, page_token } = parsed.data.data;
-      if (has_more && !page_token) throw new Error("Feishu CLI omitted a required continuation token");
+      if (has_more && !page_token) throw new Error("Lark CLI omitted a required continuation token");
       // Embedded thread previews are not complete pages. Follow explicit thread_id through thread().
       return { messages: messages.map(message), hasMore: has_more,
         ...(has_more ? { nextToken: page_token! } : {}), observedThrough };

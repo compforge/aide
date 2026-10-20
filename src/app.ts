@@ -47,7 +47,7 @@ export class Aide {
     this.defaultTarget = Object.freeze({ ...options.defaultTarget });
     const config = options.config;
     this.watches = parseWatches(config?.plugins.personal);
-    this.messageSource = messageWatch(config?.plugins.personal, config?.connectors.feishu);
+    this.messageSource = messageWatch(config?.plugins.personal, config?.connectors.lark);
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
     this.environmentSources = environmentSources(environments, (name, reason) => this.log.info({ environment: name, reason }, "Environment observation skipped"));
     this.inputs = new InputStore(home);

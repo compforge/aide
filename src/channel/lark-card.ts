@@ -2,7 +2,7 @@ import { answerPreview, processPreview, replyLabels } from "./reply-layout.ts";
 import type { ChannelService } from "./service.ts";
 import { conversationView } from "./view.ts";
 
-export interface FeishuProgress {
+export interface LarkProgress {
   id: string;
   phase: "queued" | "running" | "waiting" | "done" | "failed";
   think: string;
@@ -12,14 +12,14 @@ export interface FeishuProgress {
   messageIds: string[];
   overflow: boolean;
 }
-export type FeishuProgressReader = (conversationId: string) => FeishuProgress[];
+export type LarkProgressReader = (conversationId: string) => LarkProgress[];
 const labels = replyLabels;
 
 /**
- * @spec Feishu reads the same thought/text/tool projection as Web; progress is never persisted as a business Message.
- * @link docs/channel/feishu.md
+ * @spec Lark reads the same thought/text/tool projection as Web; progress is never persisted as a business Message.
+ * @link docs/channel/lark.md
  */
-export function feishuProgress(aide: ChannelService, conversationId: string): FeishuProgress[] {
+export function larkProgress(aide: ChannelService, conversationId: string): LarkProgress[] {
   const view = conversationView(aide, conversationId);
   const inputs = aide.findConversation(conversationId)?.conversations.inputs(conversationId) ?? [];
   return inputs.filter((input) => input.spec.origin === "channel" && !input.spec.replyTo).map((input) => {
@@ -39,7 +39,7 @@ export function feishuProgress(aide: ChannelService, conversationId: string): Fe
     const think = blocks.filter((block) => block.type === "thought" || block.type === "tool")
       .map((block) => block.type === "tool" ? `工具：${block.content} · ${block.status ?? "执行中"}` : block.content).join("\n\n");
     const points = Array.from(text), thought = Array.from(think);
-    const result: FeishuProgress = { id: input.metadata.name, phase, think: thought.length > 2000 ? "（仅展示最近过程，完整记录可在网页查看）\n" + thought.slice(-2000).join("") : think,
+    const result: LarkProgress = { id: input.metadata.name, phase, think: thought.length > 2000 ? "（仅展示最近过程，完整记录可在网页查看）\n" + thought.slice(-2000).join("") : think,
       content: points.slice(0, 4000).join(""), overflow: points.length > 4000,
       process: processPreview(phase, blocks),
       liveAnswer: phase === "running" || phase === "queued" ? answerPreview(text, phase) : undefined,
@@ -57,7 +57,7 @@ export function feishuProgress(aide: ChannelService, conversationId: string): Fe
  * @spec Stable panels retain reader-owned expansion while text previews change from live progress to completed summaries.
  * @link docs/channel/README.md#回复展示状态
  */
-export function progressCard(view: FeishuProgress, streaming: boolean) {
+export function progressCard(view: LarkProgress, streaming: boolean) {
   const fields = cardPreviews(view);
   return {
     schema: "2.0",
@@ -73,7 +73,7 @@ export function progressCard(view: FeishuProgress, streaming: boolean) {
   };
 }
 
-export function cardPreviews(view: FeishuProgress) {
+export function cardPreviews(view: LarkProgress) {
   const live = view.phase === "running" || view.phase === "queued";
   const process = view.process ?? processPreview(view.phase, view.think ? [{ type: "thought", content: view.think }] : []);
   return {
@@ -91,11 +91,11 @@ function cardPanel(title: string, elements: unknown[], expanded: boolean) {
     elements };
 }
 
-export function cardContent(view: FeishuProgress): string {
+export function cardContent(view: LarkProgress): string {
   return (view.content || (view.phase === "failed" ? "这次处理已中断，请核对后重新交办。" : view.phase === "waiting" ? "等待你回答。" : " "))
     + (view.overflow ? "\n\n（内容较长，完整回复见后续消息。）" : "");
 }
 
-export function cardThought(view: FeishuProgress): string {
+export function cardThought(view: LarkProgress): string {
   return view.think || labels[view.phase]!;
 }

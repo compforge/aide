@@ -7,14 +7,14 @@ import pino from "pino";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
 import type { Message } from "../plugins/personal/model.ts";
-import { FeishuChannel } from "../src/channel/feishu.ts";
-import { feishuProgress, progressCard, cardPreviews, type FeishuProgress } from "../src/channel/feishu-card.ts";
-import { feishuTransport, type FeishuTransport } from "../src/channel/feishu-client.ts";
+import { LarkChannel } from "../src/channel/lark.ts";
+import { larkProgress, progressCard, cardPreviews, type LarkProgress } from "../src/channel/lark-card.ts";
+import { larkTransport, type LarkTransport } from "../src/channel/lark-client.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });
-const conversationId = "feishu:cli_progress:oc_chat";
+const conversationId = "lark:cli_progress:oc_chat";
 const event = { sender: { sender_type: "user" }, message: { message_id: "om_input", chat_id: "oc_chat", chat_type: "p2p", message_type: "text", content: '{"text":"检查工作"}' } };
 const message = (id: string, text: string): Message => ({ id, text, conversationId, role: "aide", workId: null, at: new Date().toISOString() });
 
@@ -25,9 +25,9 @@ function cardRegions(card: ReturnType<typeof progressCard>) {
 }
 
 function setup(t: TestContext) {
-  const home = mkdtempSync(join(tmpdir(), "aide-feishu-progress-"));
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-progress-"));
   const messages: Message[] = [], calls: { kind: string; args: unknown[] }[] = [];
-  let view: FeishuProgress = { id: "input", phase: "queued", think: "", content: "", messageIds: [], overflow: false };
+  let view: LarkProgress = { id: "input", phase: "queued", think: "", content: "", messageIds: [], overflow: false };
   const record = (kind: string, args: unknown[]) => { calls.push({ kind, args }); };
   let card!: ReturnType<typeof progressCard>;
   const patchElement = (elements: unknown[], id: string, patch: unknown): void => {
@@ -37,7 +37,7 @@ function setup(t: TestContext) {
       if (element.elements) patchElement(element.elements, id, patch);
     }
   };
-  const transport: FeishuTransport = { async start() {}, close() {}, async send(...args) { record("text", args); },
+  const transport: LarkTransport = { async start() {}, close() {}, async send(...args) { record("text", args); },
     cards: { async create(...args) { record("create", args); card = structuredClone(args[0]) as typeof card; return "card-1"; }, async send(...args) { record("send", args); },
       async content(...args) { record("content", args); patchElement(card.body.elements, args[1], { content: args[2] }); },
       async patch(...args) { record("patch", args); for (const [id, value] of Object.entries(args[1])) patchElement(card.body.elements, id, value); },
@@ -45,14 +45,14 @@ function setup(t: TestContext) {
       async update(...args) { record("update", args); card = structuredClone(args[1]) as typeof card; } } };
   const aide = { receive: async () => { throw new Error("Delivery must not execute input"); }, messages: () => messages };
   const reader = (id: string) => { assert.equal(id, conversationId); return [view]; };
-  let channel = new FeishuChannel(home, "cli_progress", aide, transport, log, reader);
+  let channel = new LarkChannel(home, "cli_progress", aide, transport, log, reader);
   channel.receive(event);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  return { home, calls, messages, transport, get card() { return card; }, get channel() { return channel; }, view: (next: Partial<FeishuProgress>) => { view = { ...view, ...next }; },
-    async reopen() { await channel.close(); channel = new FeishuChannel(home, "cli_progress", aide, transport, log, reader); } };
+  return { home, calls, messages, transport, get card() { return card; }, get channel() { return channel; }, view: (next: Partial<LarkProgress>) => { view = { ...view, ...next }; },
+    async reopen() { await channel.close(); channel = new LarkChannel(home, "cli_progress", aide, transport, log, reader); } };
 }
 
-test("Feishu streams think/content in one card, closes on question, resumes and persists final delivery", async (t) => {
+test("Lark streams think/content in one card, closes on question, resumes and persists final delivery", async (t) => {
   const f = setup(t);
   await f.channel.deliver();
   f.view({ phase: "running" }); await f.channel.deliver();
@@ -83,7 +83,7 @@ test("Feishu streams think/content in one card, closes on question, resumes and 
   const after = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, after);
 });
 
-test("Feishu collapses completed long replies with a bounded preview and preserves the full delivered answer", async (t) => {
+test("Lark collapses completed long replies with a bounded preview and preserves the full delivered answer", async (t) => {
   const f = setup(t); await f.channel.deliver();
   const text = "**已建好监控，每 5 分钟检查一次。**\n\n| 项 | 值 |\n| --- | --- |\n" + "| 环境 | hf |\n".repeat(12);
   f.messages.push(message("long-table", text));
@@ -105,13 +105,13 @@ test("Feishu collapses completed long replies with a bounded preview and preserv
   const before = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, before);
 
   const unicode = cardPreviews({ id: "unicode", phase: "done", think: "", content: "😀".repeat(400), messageIds: [], overflow: false }).answer_preview;
-  assert.equal(unicode.text.content, "回答：" + "😀".repeat(400), "Feishu clamps visual lines without cutting Unicode");
+  assert.equal(unicode.text.content, "回答：" + "😀".repeat(400), "Lark clamps visual lines without cutting Unicode");
   assert.equal(unicode.text.lines, 3);
 
 });
 
-test("Feishu keeps stable panels with compact defaults and exposes questions and failures in the preview", () => {
-  const base: FeishuProgress = { id: "visible", phase: "done", think: "", content: "已完成。", messageIds: [], overflow: false };
+test("Lark keeps stable panels with compact defaults and exposes questions and failures in the preview", () => {
+  const base: LarkProgress = { id: "visible", phase: "done", think: "", content: "已完成。", messageIds: [], overflow: false };
   for (const [phase, streaming, content] of [
     ["done", false, base.content], ["waiting", false, "需要确认的项目\n".repeat(40)],
     ["failed", false, "处理中断\n".repeat(40)], ["running", true, "正在输出\n".repeat(40)],
@@ -127,7 +127,7 @@ test("Feishu keeps stable panels with compact defaults and exposes questions and
   }
 });
 
-test("Feishu previews answer text across paragraphs, lists and code without truncating at the first line", () => {
+test("Lark previews answer text across paragraphs, lists and code without truncating at the first line", () => {
   const text = "## hf 内存\n\n当前 **1.8 GiB**，容器 `server`。\n\n- request: 2 GiB\n- limit: 4 GiB\n\n```text\n无 OOM\n```";
   const card = progressCard({ id: "preview", phase: "done", think: "查询过程", content: text, messageIds: [], overflow: false }, false);
   const preview = cardPreviews({ id: "preview", phase: "done", think: "", content: text, messageIds: [], overflow: false }).answer_preview;
@@ -137,7 +137,7 @@ test("Feishu previews answer text across paragraphs, lists and code without trun
   assert.equal((answer.elements[0] as { content: string }).content, text, "Expanded answer keeps its original Markdown");
 });
 
-test("Feishu text updates preserve reader expansion across completion, reconnection and question resumption", async (t) => {
+test("Lark text updates preserve reader expansion across completion, reconnection and question resumption", async (t) => {
   const f = setup(t); await f.channel.deliver();
   const { envelope, thought, answer } = cardRegions(f.card);
   thought.expanded = true; answer.expanded = true; envelope.expanded = false;
@@ -156,7 +156,7 @@ test("Feishu text updates preserve reader expansion across completion, reconnect
   const count = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, count);
 });
 
-test("Feishu preserves card ID and send uuid after an ambiguous card send", async (t) => {
+test("Lark preserves card ID and send uuid after an ambiguous card send", async (t) => {
   const f = setup(t); const send = f.transport.cards!.send;
   let fail = true;
   f.transport.cards!.send = async (...args) => { await send(...args); if (fail) { fail = false; throw new Error("timeout after send"); } };
@@ -166,7 +166,7 @@ test("Feishu preserves card ID and send uuid after an ambiguous card send", asyn
   assert.deepEqual(sends[0]?.args, sends[1]?.args);
 });
 
-test("Feishu card failure falls back to final text without reexecuting work", async (t) => {
+test("Lark card failure falls back to final text without reexecuting work", async (t) => {
   const f = setup(t); await f.channel.deliver();
   f.transport.cards!.content = async () => { throw new Error("permission or network failure"); };
   f.view({ phase: "running", think: "思考内容" }); await f.channel.deliver();
@@ -178,7 +178,7 @@ test("Feishu card failure falls back to final text without reexecuting work", as
 });
 
 
-test("Feishu retries the live layout when resuming a question card fails", async (t) => {
+test("Lark retries the live layout when resuming a question card fails", async (t) => {
   const f = setup(t); await f.channel.deliver();
   f.view({ phase: "waiting", content: "哪个项目？" }); await f.channel.deliver();
   const update = f.transport.cards!.patch;
@@ -191,7 +191,7 @@ test("Feishu retries the live layout when resuming a question card fails", async
   assert.equal(card.body.elements[0]?.tag, "collapsible_panel");
 });
 
-test("Feishu long answers retain full text via the existing split outbox", async (t) => {
+test("Lark long answers retain full text via the existing split outbox", async (t) => {
   const f = setup(t); await f.channel.deliver();
   const text = "答案😀".repeat(2000);
   f.messages.push(message("long", text)); f.view({ phase: "done", content: Array.from(text).slice(0, 4000).join(""), overflow: true, messageIds: ["long"] });
@@ -200,8 +200,8 @@ test("Feishu long answers retain full text via the existing split outbox", async
   assert.equal(parts.join(""), text); assert.equal(parts.length, 2);
 });
 
-test("Feishu projects real Harness thought and text before final reply and isolates the conversation", { timeout: 20_000 }, async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "aide-feishu-live-"));
+test("Lark projects real Harness thought and text before final reply and isolates the conversation", { timeout: 20_000 }, async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-lark-live-"));
   let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
   let emitter: { sink: HarnessEventSink; turnId: string } | undefined;
   const options = fakeOptions({ chief: async () => { await gate; return "最终答案"; }, execute: async () => { throw new Error("No Work expected"); } }, root);
@@ -217,21 +217,21 @@ test("Feishu projects real Harness thought and text before final reply and isola
   assert.ok(emitter);
   emitter.sink({ kind: "agent_thought_chunk", turnId: emitter.turnId, payload: { messageId: "thought", content: { type: "text", text: "先读资料" } } });
   emitter.sink({ kind: "agent_message_chunk", turnId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "正在核对" } } });
-  const live = feishuProgress(aide, conversationId)[0]!;
+  const live = larkProgress(aide, conversationId)[0]!;
   assert.equal(live.phase, "running"); assert.equal(live.think, "先读资料"); assert.equal(live.content, "正在核对");
-  assert.deepEqual(feishuProgress(aide, "me"), []);
+  assert.deepEqual(larkProgress(aide, "me"), []);
   emitter.sink({ kind: "tool_call_update", turnId: emitter.turnId, payload: { toolCallId: "active", title: "采集内存", status: "in_progress" } });
   emitter.sink({ kind: "tool_call_update", turnId: emitter.turnId, payload: { toolCallId: "finished", title: "读取环境", status: "completed" } });
-  assert.equal(feishuProgress(aide, conversationId)[0]!.process?.tool, "采集内存 · 执行中");
+  assert.equal(larkProgress(aide, conversationId)[0]!.process?.tool, "采集内存 · 执行中");
   emitter.sink({ kind: "tool_call_update", turnId: emitter.turnId, payload: { toolCallId: "active", status: "failed" } });
-  assert.ok(feishuProgress(aide, conversationId)[0]!.think.includes("failed"), "Tool failure remains available in details");
+  assert.ok(larkProgress(aide, conversationId)[0]!.think.includes("failed"), "Tool failure remains available in details");
   emitter.sink({ kind: "agent_message_chunk", turnId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "\u0000".repeat(4000) + "最新结果已到达" } } });
-  const large = feishuProgress(aide, conversationId)[0]!;
+  const large = larkProgress(aide, conversationId)[0]!;
   assert.ok(large.overflow);
   assert.ok(cardPreviews(large).answer_preview.text.content.endsWith("最新结果已到达"));
   assert.ok(Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(large, false)) })) <= 28_000);
   release(); await aide.settled();
-  const done = feishuProgress(aide, conversationId)[0]!;
+  const done = larkProgress(aide, conversationId)[0]!;
   assert.equal(done.phase, "done"); assert.equal(done.content, "最终答案"); assert.equal(done.messageIds.length, 1);
 });
 
@@ -250,7 +250,7 @@ test("official SDK creates, sends, streams and finalizes CardKit cards through t
     }
     return { data, status: 200, statusText: "OK", headers: {}, config };
   };
-  const transport = feishuTransport({ appId: "cli_card_sdk", appSecret: "fixture" }, log); t.after(() => transport.close());
+  const transport = larkTransport({ appId: "cli_card_sdk", appSecret: "fixture" }, log); t.after(() => transport.close());
   const cards = transport.cards!;
   assert.equal(await cards.create({ schema: "2.0" }), "card-1");
   await cards.send("oc_chat", "card-1", "stable-send");
@@ -270,7 +270,7 @@ test("official SDK creates, sends, streams and finalizes CardKit cards through t
 });
 
 
-test("Feishu upgrades persisted legacy panels only once when execution continues", async (t) => {
+test("Lark upgrades persisted legacy panels only once when execution continues", async (t) => {
   const f = setup(t); await f.channel.deliver(); await f.channel.close();
   const path = join(f.home, "channels", readdirSync(join(f.home, "channels"))[0]!);
   const state = JSON.parse(readFileSync(path, "utf8"));

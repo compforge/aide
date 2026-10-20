@@ -27,7 +27,7 @@ export function boundContext(messages: ChatMessage[], observedThrough: string, t
 /**
  * @spec Context reads are bounded observations, not a claim that the complete conversation was retrieved.
  * @why Thread previews in group history are incomplete; explicit thread reads preserve that boundary.
- * @link docs/connector/feishu-messages.md
+ * @link docs/connector/lark-messages.md
  */
 export async function readMessageContext(connector: MessageConnector, anchor: ChatMessage, watch: MessageWatch, now: number): Promise<MessageContext> {
   const at = Date.parse(anchor.createdAt);

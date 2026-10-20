@@ -87,7 +87,7 @@ test("Session liveness and cleanup use the flat directory after cwd changes", as
 test("externally assigned Session IDs round-trip safely, preserve metadata and remain cleanable", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-named-session-"));
   const store = new SessionStore(root);
-  const id = "feishu:app:群 & #1";
+  const id = "lark:app:群 & #1";
   const session = store.createSession({ id, cwd: root });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   assert.equal(session.id, id);

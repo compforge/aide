@@ -212,7 +212,7 @@ test("Thread root is loaded from nearby group history; unavailable roots remain 
 test("Message observation is opt-in and rejects missing account, unsupported kinds and duplicate policy entries", () => {
   assert.equal(messageWatch(), undefined);
   assert.equal(messageWatch({ messages: { kinds: [] } }), undefined);
-  assert.throws(() => messageWatch({ messages: {} }), /connectors.feishu/);
+  assert.throws(() => messageWatch({ messages: {} }), /connectors.lark/);
   assert.throws(() => messageWatch({ messages: { kinds: ["group"] } }, { appId: "cli_app", userId: "ou_me" }));
   assert.throws(() => messageWatch({ messages: { kinds: ["direct", "direct"] } }, { appId: "cli_app", userId: "ou_me" }));
 });
@@ -220,7 +220,7 @@ test("Message observation is opt-in and rejects missing account, unsupported kin
 test("Real Runner discovers IM through Connector IPC, routes an Input once, and restores without duplicating the observer", { timeout: 20_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
-  writeFileSync(configFile, JSON.stringify({ connectors: { feishu: { appId: "cli_app", userId: "ou_me" } },
+  writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me" } },
     plugins: { personal: { messages: { kinds: ["direct"] } } } }));
   let searches = 0;
   const prompts: string[] = [];

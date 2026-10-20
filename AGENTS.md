@@ -2,7 +2,7 @@
 
 ## 项目定位与边界
 
-Aide 是小型、自托管的 personal agent，围绕用户交付的目标跨执行与等待持续跟进，减少用户催进度、重复背景与纠错的负担。Web / Feishu Channel 与 Source 提交输入，Personal 插件的 Chief 负责判断，普通问题直接回复，需要跟进时操作 Task / Routine。Host / Runner 提供可供其它插件使用的运行机制。
+Aide 是小型、自托管的 personal agent，围绕用户交付的目标跨执行与等待持续跟进，减少用户催进度、重复背景与纠错的负担。Web / Lark Channel 与 Source 提交输入，Personal 插件的 Chief 负责判断，普通问题直接回复，需要跟进时操作 Task / Routine。Host / Runner 提供可供其它插件使用的运行机制。
 
 按绿地视角开发，先走通个人助手场景，不建设账号权限中心、共享 SDK 或多实例平台。业务判断放在 Personal 与 Chief Agent；修改通用机制前先说明具体需求和现有能力缺口。
 
@@ -14,7 +14,7 @@ src/
   app.ts                   # 按入口 Session ID 装配 CoreSession / Personal，恢复与汇总各会话
   web/                     # 浏览器页面、脚本、样式与 Markdown 渲染
   api/                     # HTTP handler、静态资源与 SSE，调用 Core / Personal 能力
-  channel/                 # Feishu 适配、共享消息协议与执行投影
+  channel/                 # Lark 适配、共享消息协议与执行投影
   host/                    # 主进程：持久化、交互与执行事实
     input/                 # 独立 Input 事实与内置资源投影
     plugin/                # Resource / Controller / Source / Watch / verb
@@ -36,7 +36,7 @@ plugins/personal/
   conversation-store.ts    # 会话投影与消息 outbox
   chief.ts                 # 按 Conversation 消费 Input、续接问答
   source.ts                # 需求观察、水位和调度
-  message-source.ts        # 飞书单聊、群内 @ 观察、水位和短期讨论跟进
+  message-source.ts        # Lark 单聊、群内 @ 观察、水位和短期讨论跟进
   message-context.ts       # IM 有界上下文、话题根消息与缺口
   environment-source.ts    # Workload 观察、基线和变化 Input
   environment-config.ts    # 从环境声明派生观察范围
@@ -77,7 +77,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - trigger 归属于 Conversation；新 Input 与定时回顾唤醒同一话题。Personal / Chief 决定回顾和主动沟通策略，Core 提供通用定时唤醒与恢复机制。say 保存普通 Message，不创建 Interaction；记忆中的偏好不自动成为执行委托。
 - Chief 问答复用 Core Interaction；Task / Routine 的 waiting 是业务持久状态。两者的跨重启行为见 Personal 文档。
 - Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Message，不另建轨迹存储。
-- `npm run check` 验证类型与测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或飞书已验证。
+- `npm run check` 验证类型与测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或 Lark 已验证。
 
 ## References
 
@@ -85,6 +85,6 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - [Plugin](docs/plugin/README.md)：插件运行、资源生命周期与调度；[公共契约](packages/plugin/README.md)。
 - [Personal](docs/plugin/personal.md)：Chief、Task / Routine 和业务决策。
 - [Harness](docs/harness/README.md)：通用执行契约；[Pi](docs/harness/pi.md)、[Chief](docs/harness/chief.md)。Chief 文档承载提示词、上下文与记忆优化方向。
-- [Channel](docs/channel/README.md)：Web 与 Feishu；[Web](docs/channel/web.md)、[Feishu](docs/channel/feishu.md)。
+- [Channel](docs/channel/README.md)：Web 与 Lark；[Web](docs/channel/web.md)、[Lark](docs/channel/lark.md)。
 - [Connector 与 Source](docs/connector/README.md)：关注范围、连接器配置和覆盖限制。
 - [部署与诊断](docs/deployment.md)、[真实验收](docs/e2e.md)。

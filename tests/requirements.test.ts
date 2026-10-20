@@ -87,7 +87,7 @@ test("Discovery requires an explicit assignee scope and unique watch identity", 
 test("Watches sharing a connector get separate conversations unless explicitly routed together", () => {
   const watches = parseWatches({
     watches: [{ id: "mine", source: "work" }, { id: "team", source: "work" },
-      { id: "urgent", source: "work", sessionId: "feishu:bot:chat" }],
+      { id: "urgent", source: "work", sessionId: "lark:bot:chat" }],
   });
-  assert.deepEqual(watches.map((watch) => watch.sessionId), ["source:mine", "source:team", "feishu:bot:chat"]);
+  assert.deepEqual(watches.map((watch) => watch.sessionId), ["source:mine", "source:team", "lark:bot:chat"]);
 });

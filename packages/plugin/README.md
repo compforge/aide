@@ -128,8 +128,8 @@ Inline hooks fail open on failure or timeout. Deferred hooks use best-effort bou
 
 [Target and Session projections](src/resource.ts) expose host facts through the same resource API. Core registers its resource types before plugin activation. Model discovery belongs to Target; changing SessionTargetBinding is limited to supported fields and eligible Targets.
 
-[Mentions](src/mention.ts) supply searchable, read-only context for explicit user selection. Keep search side-effect free; resolve is for selected references. [Board presentations](src/board.ts), pickers, mentions and toast are optional presentation contracts. Actual rendering depends on the consuming Channel; the current Web / Feishu adapters do not expose every authoring capability.
+[Mentions](src/mention.ts) supply searchable, read-only context for explicit user selection. Keep search side-effect free; resolve is for selected references. [Board presentations](src/board.ts), pickers, mentions and toast are optional presentation contracts. Actual rendering depends on the consuming Channel; the current Web / Lark adapters do not expose every authoring capability.
 
 `context.toast` is non-durable feedback. Ongoing state belongs in resource status. `context.logger` writes host-owned structured diagnostics with plugin identity; log transitions and errors, avoid repeated polling noise and secrets, and do not use logs as business state.
 
-See [Channel](../../docs/channel/README.md) for the current Web / Feishu experience and [Kernel](../../docs/kernel.md) for execution ownership.
+See [Channel](../../docs/channel/README.md) for the current Web / Lark experience and [Kernel](../../docs/kernel.md) for execution ownership.
