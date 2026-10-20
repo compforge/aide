@@ -6,6 +6,7 @@ import { environmentSources, ENVIRONMENT_SESSION } from "../plugins/personal/env
 import { InputStore } from "./host/input/store.ts";
 import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
 import { parseWatches, validateWatchScopes } from "../plugins/personal/source-config.ts";
+import { messageWatch, MESSAGE_SESSION } from "../plugins/personal/message-config.ts";
 import { chiefTarget, chiefRouterTarget } from "../plugins/personal/chief-model.ts";
 import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
 import { Connectors } from "../connectors/index.ts";
@@ -35,6 +36,7 @@ export class Aide {
   private readonly listeners = new Set<() => void>();
   private readonly watches: ReturnType<typeof parseWatches>;
   private readonly environmentSources: ReturnType<typeof environmentSources>;
+  private readonly messageSource: ReturnType<typeof messageWatch>;
   private readonly inputs: InputStore;
   private readonly connectors: ConnectorClient;
   private starting?: Promise<void>;
@@ -45,6 +47,7 @@ export class Aide {
     this.defaultTarget = Object.freeze({ ...options.defaultTarget });
     const config = options.config;
     this.watches = parseWatches(config?.plugins.personal);
+    this.messageSource = messageWatch(config?.plugins.personal, config?.connectors.feishu);
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
     this.environmentSources = environmentSources(environments, (name, reason) => this.log.info({ environment: name, reason }, "Environment observation skipped"));
     this.inputs = new InputStore(home);
@@ -54,6 +57,7 @@ export class Aide {
     for (const meta of this.storage.listSessions()) this.session(meta.aideSessionId);
     for (const watch of this.watches) this.session(watch.sessionId);
     if (this.environmentSources.length) this.session(ENVIRONMENT_SESSION);
+    if (this.messageSource) this.session(MESSAGE_SESSION);
 
   }
 
@@ -79,7 +83,8 @@ export class Aide {
       instances.create({ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin" });
     }
     instances.replaceConfig("personal", { watches: this.watches.filter((watch) => watch.sessionId === id),
-      environmentSources: id === ENVIRONMENT_SESSION ? this.environmentSources : [] });
+      environmentSources: id === ENVIRONMENT_SESSION ? this.environmentSources : [],
+      ...(id === MESSAGE_SESSION && this.messageSource ? { messageSource: this.messageSource } : {}) });
     const packages = new Map([["aide.personal@0.1.0", new URL("../plugins/personal/plugin.ts", import.meta.url).href]]);
     let application: Personal;
     const core = new CoreSession({ session,

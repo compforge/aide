@@ -2,7 +2,7 @@
 
 Connector 是 Aide Host 提供的全局读取能力，所有 Plugin 和 Chief 都能使用。Host 加载配置、创建连接器并持有提供方客户端；Plugin Runner 通过现有 IPC 查询，不自行读取全局配置。Source 定义个人关注范围和观察策略，Chief 判断变化是否值得通知或推进。
 
-支持环境目录、Kubernetes Workload 采样、Meego 需求和 GitHub / GitLab PR。环境目录读取声明，Workload 采样读取运行态；Meego 通过已有 `meegle` CLI 访问，Forge 使用统一 HTTP 客户端。Connector 不创建 Work，也不代替用户决定下一步。
+支持环境目录、Kubernetes Workload 采样、Meego 需求、GitHub / GitLab PR 和飞书消息。环境目录读取声明，Workload 采样读取运行态；Meego 通过已有 `meegle` CLI 访问，Forge 使用统一 HTTP 客户端。飞书通过 `lark-cli` 用户身份读取，接入与观察策略见 [飞书消息观察](feishu-messages.md)。Connector 不创建 Work，也不代替用户决定下一步。
 
 ## 配置与所有权
 

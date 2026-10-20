@@ -17,12 +17,15 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 
 | 配置 | 所有者与用途 |
 |---|---|
-| `connectors` | Host 装配全局环境目录、需求与 Forge 访问能力 |
+| `connectors` | Host 装配全局环境目录、需求、Forge 与飞书消息读取能力 |
 | `harnesses` | Host 装配 Agent 的模型选择和扩展能力；支持 `pi`、`chief`、`codex`、`claude`、`dsh` |
 | `plugins` | 各 Plugin 校验和使用自己的业务配置；例如 Personal watches |
 
 没有声明的 Connector/watch/package 列表默认为空。Connector 和 Plugin 的具体字段由所属实现校验，
 不放宽顶层或 Harness 的字段检查。配置不是 Plugin 之间传递凭证的通道。
+
+飞书用户消息的账号配置位于 `connectors.feishu`，单聊与群内 @ 的观察策略位于
+`plugins.personal.messages`，字段与权限见 [飞书消息观察](connector/feishu-messages.md)。
 
 ```yaml
 defaultHarness: pi

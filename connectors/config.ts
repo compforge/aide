@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { FeishuMessagesConfigSchema } from "./feishu/config.ts";
 
 const record = z.record(z.string(), z.unknown());
 export const ConnectorsConfigSchema = z.object({
   environments: record.default({}), requirements: record.default({}), forges: record.default({}),
+  feishu: FeishuMessagesConfigSchema.optional(),
 }).strict();
 export type ConnectorsConfig = z.infer<typeof ConnectorsConfigSchema>;
 

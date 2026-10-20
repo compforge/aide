@@ -1,7 +1,11 @@
-import type { PullRequestIdentity, PullRequestListQuery, RequirementIdentity, RequirementListQuery } from "@compforge/aide-plugin";
+import type { MessageConnector, MessageSearchQuery, PullRequestIdentity, PullRequestListQuery, RequirementIdentity, RequirementListQuery } from "@compforge/aide-plugin";
 
 export type ConnectorRequest =
   | { readonly operation: "describe" }
+  | { readonly operation: "messages.identity" }
+  | { readonly operation: "messages.search"; readonly query: MessageSearchQuery }
+  | { readonly operation: "messages.history"; readonly query: Parameters<MessageConnector["history"]>[0] }
+  | { readonly operation: "messages.thread"; readonly query: Parameters<MessageConnector["thread"]>[0] }
   | { readonly operation: "environments.list" }
   | { readonly operation: "environments.workloads"; readonly name: string; readonly namespace?: string }
   | { readonly operation: "environments.get"; readonly name: string }
