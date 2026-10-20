@@ -1,20 +1,24 @@
 import type { EnvironmentDirectory, EnvironmentSummary } from "./environment.ts";
 import type { Requirement, RequirementIdentity, RequirementListQuery, RequirementSummary } from "./requirements.ts";
 import type { Comment, PullRequest, PullRequestIdentity, PullRequestListQuery } from "./forge.ts";
+import type { MessageConnector } from "./messages.ts";
 
 export type * from "./environment.ts";
 export type * from "./requirements.ts";
 export type * from "./forge.ts";
+export type * from "./messages.ts";
 
 export interface ConnectorCatalog {
   readonly environments: readonly EnvironmentSummary[];
   readonly requirements: readonly { source: string; provider: string }[];
   readonly forges: readonly { forge: string; provider: string }[];
+  readonly messages?: { provider: "feishu"; accountId: string; userId: string };
 }
 
 /** Host-owned read capabilities, shared by all plugins. No credentials cross this boundary. */
 export interface ConnectorClient {
   describe(): Promise<ConnectorCatalog>;
+  readonly messages: MessageConnector;
   readonly environments: EnvironmentDirectory;
   readonly requirements: {
     list(source: string, query?: RequirementListQuery): Promise<readonly RequirementSummary[]>;

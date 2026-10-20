@@ -5,6 +5,12 @@ import type { ConnectorRequest } from "./protocol/connectors.ts";
 export function createConnectorClient(invoke: <T>(request: ConnectorRequest) => Promise<T>): ConnectorClient {
   return Object.freeze({
     describe: () => invoke({ operation: "describe" }),
+    messages: Object.freeze({
+      identity: () => invoke({ operation: "messages.identity" }),
+      search: (query) => invoke({ operation: "messages.search", query }),
+      history: (query) => invoke({ operation: "messages.history", query }),
+      thread: (query) => invoke({ operation: "messages.thread", query }),
+    } satisfies ConnectorClient["messages"]),
     environments: Object.freeze({
       list: () => invoke({ operation: "environments.list" }),
       workloads: (name, namespace) => invoke({ operation: "environments.workloads", name, namespace }),
@@ -25,6 +31,10 @@ export function createConnectorClient(invoke: <T>(request: ConnectorRequest) => 
 export function dispatchConnector(client: ConnectorClient, request: ConnectorRequest): Promise<unknown> {
   switch (request.operation) {
     case "describe": return client.describe();
+    case "messages.identity": return client.messages.identity();
+    case "messages.search": return client.messages.search(request.query);
+    case "messages.history": return client.messages.history(request.query);
+    case "messages.thread": return client.messages.thread(request.query);
     case "environments.list": return client.environments.list();
     case "environments.workloads": return client.environments.workloads(request.name, request.namespace);
     case "environments.get": return client.environments.get(request.name);

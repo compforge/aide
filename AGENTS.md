@@ -36,6 +36,8 @@ plugins/personal/
   conversation-store.ts    # 会话投影与消息 outbox
   chief.ts                 # 按 Conversation 消费 Input、续接问答
   source.ts                # 需求观察、水位和调度
+  message-source.ts        # 飞书单聊、群内 @ 观察、水位和短期讨论跟进
+  message-context.ts       # IM 有界上下文、话题根消息与缺口
   environment-source.ts    # Workload 观察、基线和变化 Input
   environment-config.ts    # 从环境声明派生观察范围
   resources.ts             # 独立 Task / Routine 契约与 Work 视图
