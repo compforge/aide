@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1991" height="1207" viewBox="0 0 1991 1207" role="img" aria-labelledby="title desc">
+  <title id="title">Aide personal agent flow</title>
+  <desc id="desc">External systems and a user submit inputs through connector plus source and channel. Input and Conversation reconcile within system 1; Task and Routine reconcile within system 2. Reconcile calls verbs backed by harness and connector.</desc>
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f0f2f9"/>
+      <stop offset="1" stop-color="#e9edf7"/>
+    </linearGradient>
+    <linearGradient id="resource" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eee6ff"/>
+      <stop offset="1" stop-color="#e6e0f6"/>
+    </linearGradient>
+    <linearGradient id="external" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d9def1"/>
+      <stop offset="1" stop-color="#d2d5eb"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 16 24" refX="14" refY="12" markerWidth="16" markerHeight="24" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M 2 1 L 13 12 L 2 23" fill="none" stroke="#080808" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <style>
+      .shape { stroke: #080808; stroke-width: 3.8; stroke-linejoin: round; }
+      .line { fill: none; stroke: #080808; stroke-width: 3.8; stroke-linecap: round; stroke-linejoin: round; }
+      .label { font-family: "Arial", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 30px; fill: #292c32; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <rect width="1991" height="1207" fill="#fff"/>
+
+  <!-- System 1 boundary and shared capabilities. -->
+  <rect class="shape" x="830" y="110" width="690" height="486" rx="13" fill="url(#panel)"/>
+  <rect class="shape" x="812" y="747" width="1129" height="196" rx="13" fill="url(#panel)"/>
+
+  <!-- Input sources. -->
+  <path class="shape" d="M 64 147 H 272 Q 286 147 286 161 V 289 C 207 241 166 332 50 293 V 161 Q 50 147 64 147 Z" fill="url(#external)"/>
+  <path class="shape" d="M 408 147 H 658 L 725 225 L 658 303 H 408 Z" fill="url(#panel)"/>
+  <path class="shape" d="M 408 421 H 658 L 725 499 L 658 578 H 408 Z" fill="url(#panel)"/>
+  <circle class="line" cx="152" cy="401" r="45"/>
+  <path class="line" d="M 152 447 V 546 M 74 482 H 230 M 152 546 L 85 592 M 152 546 L 224 592"/>
+  <path class="line" d="M 296 225 H 398" marker-end="url(#arrow)"/>
+  <path class="line" d="M 264 499 H 398" marker-end="url(#arrow)"/>
+  <path class="line" d="M 735 225 H 846" marker-end="url(#arrow)"/>
+  <path class="line" d="M 735 499 H 770 Q 791 499 791 478 V 246 Q 791 225 812 225"/>
+
+  <!-- Resources and their reconcile functions. -->
+  <rect class="shape" x="856" y="147" width="238" height="156" rx="78" fill="url(#resource)"/>
+  <rect class="shape" x="1252" y="147" width="238" height="156" rx="78" fill="url(#resource)"/>
+  <rect class="shape" x="1648" y="147" width="238" height="156" rx="78" fill="url(#resource)"/>
+  <rect class="shape" x="856" y="405" width="238" height="156" rx="13" fill="url(#panel)"/>
+  <rect class="shape" x="1258" y="405" width="237" height="156" rx="13" fill="url(#panel)"/>
+  <rect class="shape" x="1648" y="405" width="238" height="156" rx="13" fill="url(#panel)"/>
+  <path class="line" d="M 975 313 V 395" marker-end="url(#arrow)"/>
+  <path class="line" d="M 1371 313 V 395" marker-end="url(#arrow)"/>
+
+  <!-- Resource updates; gaps leave room for the original labels. -->
+  <path class="line" d="M 1103 483 H 1153 Q 1173 483 1173 463 V 398"/>
+  <path class="line" d="M 1173 297 V 246 Q 1173 225 1194 225 H 1243" marker-end="url(#arrow)"/>
+  <path class="line" d="M 1505 483 H 1552 Q 1572 483 1572 463 V 410"/>
+  <path class="line" d="M 1572 269 V 246 Q 1572 225 1593 225 H 1639" marker-end="url(#arrow)"/>
+
+  <!-- Verb calls. -->
+  <path class="line" d="M 975 571 V 641 M 1377 571 V 629 M 1767 571 V 628"/>
+  <path class="line" d="M 975 700 V 737" marker-end="url(#arrow)"/>
+  <path class="line" d="M 1377 689 V 737" marker-end="url(#arrow)"/>
+  <path class="line" d="M 1767 688 V 737" marker-end="url(#arrow)"/>
+  <rect class="shape" x="1110" y="767" width="238" height="157" rx="13" fill="url(#panel)"/>
+  <rect class="shape" x="1406" y="767" width="238" height="157" rx="13" fill="url(#panel)"/>
+  <path class="line" d="M 1525 934 V 991" marker-end="url(#arrow)"/>
+  <path class="shape" d="M 1420 1002 H 1630 Q 1644 1002 1644 1016 V 1144 C 1564 1096 1524 1187 1406 1147 V 1016 Q 1406 1002 1420 1002 Z" fill="url(#external)"/>
+
+  <!-- Preserve the supplied image's wording and capitalization. -->
+  <g class="label">
+    <text x="1157" y="81">cheif/system 1</text>
+    <text x="1767" y="81">system 2</text>
+    <text x="168" y="229">外部系统</text>
+    <text x="539" y="217">connector +</text>
+    <text x="539" y="258">source</text>
+    <text x="539" y="512">channel</text>
+    <text x="152" y="639">角色</text>
+    <text x="975" y="238">Input</text>
+    <text x="1371" y="238">Conversation</text>
+    <text x="1767" y="238">Task/Routine</text>
+    <text x="975" y="495">Reconcile</text>
+    <text x="1377" y="495">Reconcile</text>
+    <text x="1767" y="495">Reconcile</text>
+    <text x="1173" y="341">create conv</text>
+    <text x="1173" y="382">append input</text>
+    <text x="1572" y="311">create work</text>
+    <text x="1572" y="352">delete work</text>
+    <text x="1572" y="393">append input</text>
+    <text x="975" y="683">verb</text>
+    <text x="1377" y="673">verb</text>
+    <text x="1767" y="672">verb</text>
+    <text x="1229" y="858">harness</text>
+    <text x="1525" y="858">connector</text>
+    <text x="1525" y="1082">外部系统</text>
+  </g>
+</svg>

@@ -28,19 +28,9 @@ Source 和 trigger 提供重新判断的机会。已有委托决定可以继续�
 
 ## 主流程
 
-```text
-Channel / Source → Input（可选 sessionId）
-                           ↓
-                   Chief ReconcileInput
-                           ↓ 资源 Update
-               零个、一个或多个 Conversation
-                           ↓ 新 Input 或自身 trigger 到期
-                 Chief ReconcileConversation
-                      ↙                  ↘
-          直接处理 / 回复 / 静默       创建 / 删除 / append_input
-                                          ↓
-                               Task / Routine Reconcile
-```
+![Personal 主流程：Input、Conversation 与 Work 的 Reconcile 及 Verb 调用](../assets/personal-flow.svg)
+
+Chief 可以直接处理、回复或保持安静；需要独立跟进的事情，再交给 Task / Routine。
 
 Chief 是业务角色。Chief Controller 消费输入、组织上下文并续接问答；Chief Harness 执行 `agents/chief/` 中的 Agent，使用通用 Pi 能力以及 Personal 工具。Task / Routine 按根级 `defaultHarness` 选择执行实现，缺省为通用 Pi。Chief 的提示词、上下文和记忆优化方向见 [Chief Harness](../harness/chief.md)，插件机制见 [Plugin](README.md)。
 
