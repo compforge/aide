@@ -114,3 +114,24 @@ test("Source watches restore independently and are installed only in their assig
   assert.equal(aide.session("web:one").store.resources.list(SOURCE_TYPE).length, 0);
   assert.equal(aide.findConversation("source:one")!.id, "source:one");
 });
+
+
+test("Conversation name comes from its first Input, survives restart, and Source-created conversations are named too", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-conversation-name-"));
+  const options = fakeOptions({ chief: async () => "收到", execute: async () => { throw new Error("No Work expected"); } }, root);
+  let aide = new Aide(root, options, pino({ level: "silent" }));
+  t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
+  const sessionId = "feishu:app:group";
+  await aide.receive({ id: "first", sessionId, text: "  关注 executor\n部署情况  " });
+  await aide.receive({ id: "second", sessionId, text: "换个话题" });
+  await aide.settled();
+  assert.equal(aide.findConversation(sessionId)!.conversations.resource(sessionId)!.spec.name, "关注 executor 部署情况");
+  const source = aide.session("source-name"); await source.start();
+  await source.conversations.submit("discovery", { origin: "source", sessionId: "source-name", text: "发现新的需求" });
+  await aide.settled();
+  assert.equal(source.conversations.resource("source-name")!.spec.name, "发现新的需求");
+  await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
+  await aide.start(); await aide.settled();
+  assert.equal(aide.findConversation(sessionId)!.conversations.get(sessionId)!.name, "关注 executor 部署情况");
+  assert.equal(aide.findConversation("source-name")!.conversations.get("source-name")!.name, "发现新的需求");
+});

@@ -11,7 +11,7 @@ export interface ProcessingStatus {
   laneId?: string; question?: ChiefQuestion | null; error?: string; quietReason?: string;
   messages?: Message[];
 }
-export interface ConversationSpec { id: string; sessionId: string; inputIds: string[]; trigger?: ConversationTrigger }
+export interface ConversationSpec { id: string; name?: string; sessionId: string; inputIds: string[]; trigger?: ConversationTrigger }
 export interface ConversationStatus {
   nextTriggerAt?: string | null;
   processing: Record<string, ProcessingStatus>;
@@ -27,6 +27,11 @@ export type ConversationInput = Resource<InputSpec, ProcessingStatus> & { conver
 export interface ConversationRun {
   id: string; conversationId: string; resourceVersion: string;
   input?: ConversationInput; status: ProcessingStatus;
+}
+
+/** @spec A Conversation keeps its initial name as later Inputs arrive. */
+export function initialConversationName(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, 80);
 }
 
 /** A Channel Input has one stable user-message identity in each receiving Conversation. */

@@ -9,7 +9,7 @@ import { WorkService } from "./work.ts";
 import { message, Store } from "./store.ts";
 import { workType } from "./resources.ts";
 import { CONVERSATION_TYPE, INPUT_TYPE, chiefTarget, chiefRouterTarget, digest } from "./chief-model.ts";
-import { inboundMessage } from "./conversation-model.ts";
+import { inboundMessage, initialConversationName } from "./conversation-model.ts";
 import { ConversationStore, conversationKey } from "./conversation-store.ts";
 import { createPiAgent } from "../../agents/pi/agent.ts";
 import type { InputStore } from "../../src/host/input/store.ts";
@@ -217,7 +217,7 @@ export class Personal {
       const attached = c.spec.inputIds.includes(id);
       if (attached && !extra.length) break;
       try {
-        await this.plugins.resourceClient("personal").replace(c, { ...c.spec, inputIds: [...new Set([...c.spec.inputIds, id])] }, {
+        await this.plugins.resourceClient("personal").replace(c, { ...c.spec, name: c.spec.name || initialConversationName(this.conversations.inputStore.get(c.spec.inputIds[0] ?? id)?.spec.text ?? input.text), inputIds: [...new Set([...c.spec.inputIds, id])] }, {
           ...c.status, processing: { ...c.status.processing, [id]: { ...c.status.processing[id], ...(phase ? { phase } : {}), messages: delivered } },
           messages: [...c.status.messages, ...extra],
         });

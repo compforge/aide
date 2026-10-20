@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { PluginContext, InputSpec, InputStatus, Resource } from "@compforge/aide-plugin";
 import { INPUT_TYPE, chiefRouterTarget, digest } from "./chief-model.ts";
-import { CONVERSATION_TYPE, inboundMessage, type ConversationSpec, type ConversationStatus } from "./conversation-model.ts";
+import { CONVERSATION_TYPE, inboundMessage, initialConversationName, type ConversationSpec, type ConversationStatus } from "./conversation-model.ts";
 import { WORK_TYPES, type WorkSpec, type WorkStatus } from "./resources.ts";
 const Decision = z.object({ conversationIds: z.array(z.string()), reason: z.string().min(1) }).strict();
 
@@ -61,7 +61,8 @@ Candidates: ${JSON.stringify(summaries)}` });
           processing: { ...c.status.processing, [input.metadata.name]: { ...(input.spec.replyTo ? { phase: "done" as const } : {}), messages: [inboundMessage(input, c.spec.id)] } },
           messages: [...c.status.messages, inboundMessage(input, c.spec.id)],
         } : c.status;
-        await context.resources.replace(c, { ...c.spec, inputIds: [...c.spec.inputIds, input.metadata.name] }, status);
+        const first = c.spec.inputIds[0] ? await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "aide-system", name: c.spec.inputIds[0] }) : input;
+        await context.resources.replace(c, { ...c.spec, name: c.spec.name || initialConversationName(first?.spec.text ?? input.spec.text), inputIds: [...c.spec.inputIds, input.metadata.name] }, status);
         context.logger.info("Chief input attached to conversation", { attributes: { inputId: input.metadata.name, conversationId: c.spec.id, sessionId: c.spec.sessionId } });
       }
       const latest = await context.resources.get<InputSpec, InputStatus>(ref);

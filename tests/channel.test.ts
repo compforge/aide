@@ -141,7 +141,7 @@ test("conversation navigation lists persisted scopes without creating them and k
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const url = `http://127.0.0.1:${address.port}`;
   const list = async () => await (await fetch(url + "/conversations")).json() as
-    { id: string; title: string; preview: string; updatedAt: string }[];
+    { id: string; name: string; preview: string; updatedAt: string }[];
   assert.deepEqual(await list(), []);
   await fetch(url + "/?conversation=unsent");
   assert.equal(aide.sessions().flatMap((scope) => scope.conversations.list()).length, 0);
@@ -149,19 +149,19 @@ test("conversation navigation lists persisted scopes without creating them and k
   const base = Date.now() + 60_000;
   const at = (offset: number) => new Date(base + offset).toISOString();
   await aide.session("me").conversations.archive("me", [{ id: "m1", conversationId: "me", at: at(0), role: "user", text: "默认会话问题", workId: null }]);
-  await aide.session(group).conversations.archive(group, [
+  await seedInput(aide.session(group).conversations, "group-first", { conversationId: group, origin: "channel", text: "检查 <项目>\n进展" }, { phase: "done", messages: [
     { id: "m2", conversationId: group, at: at(1), role: "user", text: "检查 <项目>\n进展", workId: null },
     { id: "m3", conversationId: group, at: at(2), role: "aide", text: "群会话的回复", workId: null },
-  ]);
+  ] });
   await seedInput(aide.session("source:requirements").conversations, "source-observation", { conversationId: "source:requirements", origin: "source", text: "private observation" }, { phase: "done" });
   (await aide.work("work-only").create({ kind: "routine", title: "定期检查", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "changed" } }));
   const task = (await aide.work(group).create({ kind: "task", title: "检查项目", instruction: "check", trigger: null }));
   const before = aide.sessions().flatMap((scope) => scope.conversations.list());
   const summaries = await list();
   assert.deepEqual(summaries.map((item) => item.id), [group, "me", "work-only", "source:requirements"]);
-  assert.deepEqual(summaries[0], { id: group, sessionId: group, trigger: { enabled: false, intervalSeconds: 3600 }, title: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2) });
+  assert.deepEqual(summaries[0], { id: group, sessionId: group, trigger: { enabled: false, intervalSeconds: 3600 }, name: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2) });
   assert.equal(summaries.find((item) => item.id === "source:requirements")?.preview, "");
-  assert.ok(!JSON.stringify(summaries).includes("private observation"));
+  assert.equal(summaries.find((item) => item.id === "source:requirements")?.name, "private observation");
   assert.deepEqual(aide.sessions().flatMap((scope) => scope.conversations.list()), before);
   const messages = await (await fetch(url + "/messages?role=all&conversationId=" + encodeURIComponent(group))).json() as { conversationId: string }[];
   assert.equal(messages.length, 2);

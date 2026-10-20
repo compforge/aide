@@ -3,7 +3,7 @@ import type { InputSpec, InputStatus, ResourceClient } from "@compforge/aide-plu
 import { InputStore } from "../../src/host/input/store.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
 import type { ResourceClientChange } from "../../src/host/plugin/resource-client.ts";
-import { CONVERSATION_TYPE, type Conversation, type ConversationResource, type ConversationInput, type ConversationRun, type ProcessingStatus, type ConversationSpec, type ConversationStatus } from "./conversation-model.ts";
+import { CONVERSATION_TYPE, initialConversationName, type Conversation, type ConversationResource, type ConversationInput, type ConversationRun, type ProcessingStatus, type ConversationSpec, type ConversationStatus } from "./conversation-model.ts";
 import type { Message } from "./model.ts";
 import { digest } from "./chief-model.ts";
 import { conversationTrigger, nextTriggerAt } from "./conversation-trigger.ts";
@@ -103,7 +103,7 @@ export class ConversationStore {
     return { messageId: message.id };
   }
   private project(r: ConversationResource): Conversation {
-    return { ...r.spec, revision: Number(r.metadata.resourceVersion), createdAt: r.metadata.creationTimestamp,
+    return { ...r.spec, name: r.spec.name || initialConversationName(this.inputStore.get(r.spec.inputIds[0] ?? "")?.spec.text ?? ""), revision: Number(r.metadata.resourceVersion), createdAt: r.metadata.creationTimestamp,
       pendingInputIds: r.spec.inputIds.filter((id) => !r.status.processing[id]?.phase), messages: r.status.messages };
   }
 }
