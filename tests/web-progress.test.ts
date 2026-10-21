@@ -209,8 +209,8 @@ test("Web associates failed replies with their Input so interruption warnings re
   const view = conversationView(aide, "failed");
   const reply = view.blocks.find((block) => block.role === "aide")!;
   assert.equal(reply.status, "failed");
-  assert.equal(reply.group_id, aide.session("failed").conversations.inputs("failed")[0]!.status.roundId);
-  assert.ok(aide.invocations().some((invocation) => `round:${invocation.executionId}` === reply.group_id));
+  assert.equal(reply.group_id, aide.session("failed").conversations.inputs("failed")[0]!.consumption.batchId);
+  assert.ok(aide.invocations().some((invocation) => invocation.executionId === reply.group_id));
   assert.match(reply.content, /未完成/);
 });
 
@@ -241,7 +241,7 @@ test("Source receipts expose original evidence before processing and remain visi
   assert.equal(environment.originId, SOURCES.environments.id);
   assert.equal(environment.icon, SOURCES.environments.icon);
   assert.equal(environment.label, SOURCES.environments.label);
-  assert.equal(environment.status, "quiet");
+  assert.equal(environment.status, "done", "Historical facts stay visible after their Batch is replaced");
   assert.match(environment.content, /Deployment sandbox-server/);
   assert.deepEqual(JSON.parse(environment.detail!.split("\n\nObservation:\n")[1]!), observation);
   const mention = receipts.find((block) => block.inputId === "mention")!;
@@ -295,7 +295,7 @@ test("Bound Channels preserve distinct input identities and rebuild user/source 
   await seedInput(store, "observation", { origin: "source", originId: SOURCES.environments.id, text: "部署镜像已变化" },
     { phase: "done", quietReason: "Not relevant" });
   assert.equal(store.resource("inbox")!.status.messages.length, 2, "Only the two replies are stored as Messages");
-  assert.equal(store.resource("inbox")!.spec.inputIds.length, 3);
+  assert.equal(store.inputs("inbox").length, 3);
   const before = conversationView(aide, "inbox");
   assert.equal(before.blocks.filter((block) => block.type === "input").length, 3);
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));

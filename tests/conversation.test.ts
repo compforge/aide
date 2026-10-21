@@ -1,3 +1,5 @@
+import { createResourceClient } from "../src/host/plugin/resource/client.ts";
+import { updateBatch } from "../plugins/personal/conversation/state.ts";
 import { loadConfig } from "../src/config.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { SOURCE_TYPE } from "../plugins/personal/source/requirement/observe.ts";
@@ -7,7 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import pino from "pino";
-import { ConversationStore, seedInput } from "./conversation-fixture.ts";
+import { ConversationStore, seedInput, fixtureBatch } from "./conversation-fixture.ts";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
@@ -25,17 +27,18 @@ test("Independent Input facts and Personal consumption survive reopening with ve
   await seedInput(store, "s1", { conversationId: "watch-a", origin: "source", originId: "personal.environments", text: "requirement changed", observation: { id: "req-1" } });
   assert.deepEqual(store.get("watch-a")!.messages, []);
   assert.equal(store.inputStore.list().length, 2);
-  const claimed = await store.update(first, { phase: "running" });
-  await assert.rejects(store.update(first, { phase: "done" }), /version conflict/);
-  const reply = { id: "reply", conversationId: "group-a", at: new Date().toISOString(), role: "aide" as const, text: "answer", workId: null };
-  await assert.rejects(store.update(claimed, { phase: "done", messages: [{ ...reply, conversationId: "watch-a" }] }), /another conversation/);
-  assert.equal(store.input("m1")!.status.phase, "running");
-  await store.update(claimed, { phase: "done", messages: [reply] });
+  const c = store.resource("group-a")!;
+  const client = createResourceClient(store.resources);
+  await client.patchStatus(c, { batch: fixtureBatch({ inputIds: ["m1"], phase: "running", executionId: "exec" }) });
+  await assert.rejects(client.patchStatus(c, { pendingInputIds: [] }), /version conflict/);
+  assert.equal(store.input("m1")!.metadata.resourceVersion, store.inputStore.get("m1")!.metadata.resourceVersion);
+  await updateBatch(client, c, "batch:fixture", () => ({ phase: "done", result: { summary: "answer", context: "answer" } }), "exec");
+  await assert.rejects(updateBatch(client, c, "wrong", () => ({ phase: "running" })), /superseded/);
+  await client.patchStatus(store.resource("group-a")!, { pendingInputIds: [] });
   const reopened = new ConversationStore({ dir });
-  assert.equal(reopened.input("m1")!.status.phase, "done");
-  assert.equal(reopened.get("group-a")!.messages.length, 1);
+  assert.equal(reopened.input("m1")!.consumption.phase, "done");
   assert.deepEqual(reopened.get("group-a")!.pendingInputIds, []);
-  await assert.rejects(reopened.update(reopened.input("m1")!, { phase: "running" }), /cannot be replayed/);
+
 });
 
 test("Chief serializes inputs within a conversation while another conversation can proceed", async (t) => {
@@ -56,7 +59,7 @@ test("Chief serializes inputs within a conversation while another conversation c
   await aide.receive({ channelId: "lark", id: "2", sessionId: "lark:bot:group-a", conversationId: "lark:bot:group-a", text: "a-second" });
   await aide.receive({ channelId: "lark", id: "1", sessionId: "lark:bot:group-b", conversationId: "lark:bot:group-b", text: "b-first" });
   await until(() => calls.some((call) => call.text === "b-first"));
-  assert.equal(calls.some((call) => call.text === "a-second"), false);
+  await until(() => calls.some((call) => call.text === "a-second"));
   assert.doesNotMatch(calls.find((call) => call.text === "b-first")!.prompt, /a-first|a-second/);
   release(); await aide.settled();
   assert.deepEqual(calls.filter((call) => call.conversationId.endsWith("group-a")).map((call) => call.text), ["a-first", "a-second"]);
@@ -72,10 +75,9 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
   let aide = new Aide(root, options, pino({ level: "silent" }));
   const active = await seedInput(aide.session("a").conversations, "active", { conversationId: "a", text: "do-not-replay", origin: "channel", originId: "web" });
   const interrupted = aide.session("a").conversations.resource("a")!;
-  await aide.session("a").plugins.resourceClient("personal").patchStatus(interrupted, { processing: {
-    [active.metadata.name]: { phase: "running", roundId: "round:interrupted" },
-    "round:interrupted": { phase: "running", batchInputIds: [active.metadata.name] },
-  } });
+  await aide.session("a").plugins.resourceClient("personal").patchStatus(interrupted, { batch: fixtureBatch({
+    id: "batch:interrupted", phase: "running", inputIds: [active.metadata.name], context: { prompt: "do-not-replay", history: "", responseRequired: true },
+  }) });
   await seedInput(aide.session("b").conversations, "queued", { conversationId: "b", text: "process-after-restart", origin: "channel", originId: "web" });
   await aide.close();
   aide = new Aide(root, options, pino({ level: "silent" }));
@@ -84,12 +86,12 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
   assert.equal(calls.length, 1);
   assert.match(calls[0]!, /process-after-restart/);
   assert.doesNotMatch(calls[0]!, /do-not-replay/);
-  assert.equal(aide.session("a").conversations.input("active")!.status.phase, "failed");
+  assert.equal(aide.session("a").conversations.input("active")!.consumption.phase, "interrupted");
   const notices = aide.messages().filter((m) => m.conversationId === "a");
   assert.equal(notices.length, 1); assert.match(notices[0]!.text, /上次处理已中断/);
   await aide.session("a").recoverInterrupted();
   assert.deepEqual(aide.messages().filter((m) => m.conversationId === "a"), notices);
-  assert.equal(aide.session("b").conversations.input("queued")!.status.phase, "done");
+  assert.equal(aide.session("b").conversations.input("queued")!.consumption.phase, "done");
 });
 
 test("Source watches restore independently and are installed only in their assigned Session", async (t) => {

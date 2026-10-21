@@ -67,7 +67,7 @@ Input 可保存相对于服务对象 Person 的 `relation: sent | received | obs
 Personal 拥有身份绑定和归因，Core 只校验并持久保存结果；原作者与上下文证据仍保留。
 Person CRD 统一承载人物身份和长期认识，Me 标记明确服务对象，见 [Personal](plugin/personal.md#person-与输入关系)。
 
-Conversation 是 Personal 定义的资源：spec 保存所属 Session 和追加的 inputIds，status 保存各 Input 的消费进度与消息 outbox。它与 Task、Routine 一样使用通用 Resource CRUD、版本检查和 Watch。来源无需知道 Conversation，Personal 决定交流上下文的组织方式。一个 Input 可以被多个 Conversation 引用，各会话独立消费。
+Conversation 是 Personal 定义的资源：spec 保存身份、所属 Session 与触发策略；status 保存 pendingInputIds、一个 Batch 和消息投影。Conversation Controller 组批并确认消费，Batch Controller 执行固定上下文；两者观察同一个 CRD，独立调度。来源无需知道 Conversation，一个 Input 可以被多个会话独立消费。
 
 Personal 的 Chief 先 Reconcile Input：无会话时创建并追加后结束；已有会话时，依次追加到默认会话、规则创建的会话和规则关联的已有会话。确定归属就通过资源 Update 幂等追加 inputId，不调用语义路由、不保存完整目标计划。创建保存稳定身份与资源 uid，中断后重试规则和追加，不重放已消费的输入。Conversation 的 spec 变化触发另一个 Reconcile，加载本会话上下文并执行。这里不需要额外的路由 Verb。
 
@@ -154,7 +154,7 @@ Plugin 的自定义资源用 spec 表达目标，用 status 保存领域进展�
 
 ### Personal 的具体流程
 
-Personal 将新发生的事放入合适的上下文：Chief 通过 Input Reconcile 结合 sessionId 等线索分配到相关 Conversation；Conversation Reconcile 响应新输入或自身 trigger，结合话题历史直接处理，或将事实与决定交给已有或新建 Work。Task Reconcile 推进有限目标直至完成，Routine Reconcile 推进当前轮次直至完成；Work 是二者的业务统称。上下文归属与主动判断是 Personal 的业务策略，Core 提供资源、Watch、定时唤醒与执行机制。详见 [主动性与上下文](plugin/personal.md#主动性与上下文)。
+Personal 将新发生的事放入合适的上下文：Chief 通过 Input Reconcile 结合 sessionId 等线索分配到相关 Conversation；Conversation Reconcile 响应新输入或 trigger，创建固定上下文的 Batch；Batch Reconcile 调用 Harness，工具直接请求交互 verb 或将输入交给 Work。Task Reconcile 推进有限目标直至完成，Routine Reconcile 推进当前轮次直至完成；Work 是二者的业务统称。上下文归属与主动判断是 Personal 的业务策略，Core 提供资源、Watch、定时唤醒与执行机制。详见 [主动性与上下文](plugin/personal.md#主动性与上下文)。
 
 Personal 的需求观察由 RequirementSource 资源及其 Controller 承担：定时经 Core 调用 Connector，比较观察结果，先持久化 Input，再推进观察水位，交给 Chief 判断。框架 Source 则负责资源的初始发现与订阅；其他 Plugin 可以直接由 Source 建立自己的业务资源。两者的联系见 [Plugin 的 Source 与 Watch](plugin/README.md#source-与-watch)。
 

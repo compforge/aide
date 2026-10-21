@@ -11,6 +11,7 @@ export type Incoming = z.infer<typeof IncomingSchema>;
 export const MessageSchema = z.object({
   id: z.string(), conversationId: z.string(), at: z.string(),
   deliveredAt: z.string().optional(),
+  executionId: z.string().optional(),
   role: z.literal("aide"), text: z.string(), workId: z.string().nullable(),
 });
 export type Message = z.infer<typeof MessageSchema>;

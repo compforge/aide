@@ -7,7 +7,7 @@ import { once } from "node:events";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-import { ConversationStore } from "./conversation-fixture.ts";
+import { ConversationStore, confirmInBatch, fixtureBatch } from "./conversation-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { conversationTrigger, ConversationTriggerSchema } from "../plugins/personal/conversation/trigger.ts";
 import { CONVERSATION_TYPE } from "../plugins/personal/conversation/model.ts";
@@ -86,10 +86,8 @@ test("Timer can ask and continue in its own activation without fabricating a use
   aide = new Aide(root, fakeOptions({ chief: async () => {
     turns++;
     if (turns === 1) {
-      const store = aide.findConversation("me")!.conversations;
-      const run = store.runs("me").find((r) => r.status.phase === "running")!;
-      await store.updateRun(run, { question: { kind: "confirm", title: "下一步", prompt: "现在验证吗？" } });
-      return "";
+      const answer = await confirmInBatch(aide.findConversation("me")!, "me", "现在验证吗？");
+      assert.deepEqual(answer, { state: "success", value: "declined" });
     }
     return "收到，暂不验证。";
   }, execute: async () => { throw new Error("No work"); } }, root), log);
@@ -112,7 +110,7 @@ test("Timer can ask and continue in its own activation without fabricating a use
     kind: "question", outcome: "answered", answers: { [request.questions[0]!.questionId]: ["decline"] },
   }));
   await aide.settled();
-  assert.equal(turns, 2);
+  assert.equal(turns, 1);
   assert.equal(scope.conversations.runs()[0]!.status.phase, "done");
   assert.match(aide.messages().at(-1)!.text, /暂不验证/);
 });
@@ -122,23 +120,21 @@ test("Restart coalesces due triggers, hides quiet results and does not replay in
   const session = new SessionStore(root).createSession({ id: "quiet", cwd: root });
   const conversations = new ConversationStore(session);
   const c = await configure(conversations, "quiet", 3600, Date.now() - 86_400_000);
-  await createResourceClient(conversations.resources).patchStatus(c, { processing: {
-    "timer:interrupted": { phase: "running", timerAt: new Date(0).toISOString(), executionId: "old" },
-  } });
+  await createResourceClient(conversations.resources).patchStatus(c, { batch: fixtureBatch({ id: "timer:interrupted", phase: "running", timerAt: new Date(0).toISOString(), executionId: "old" }) });
   let aide: Aide, calls = 0;
   const options = fakeOptions({ chief: async () => {
     calls++;
     const store = aide.findConversation("quiet")!.conversations;
     const run = store.runs().find((r) => r.status.phase === "running")!;
-    await store.updateRun(run, { quietReason: "Nothing new" });
+
     return "internal review";
   }, execute: async () => { throw new Error("No work"); } }, root);
   aide = new Aide(root, options, log);
   t.after(async () => { await aide.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   await aide.start(); await aide.settled();
   assert.equal(calls, 0);
-  assert.ok(aide.findConversation("quiet")!.conversations.resource("quiet")!.status.blocked);
-  assert.equal(aide.findConversation("quiet")!.conversations.runs().find((r) => r.id === "timer:interrupted")!.status.phase, "failed");
+  assert.equal(aide.findConversation("quiet")!.conversations.resource("quiet")!.status.batch!.phase, "interrupted");
+  assert.equal(aide.findConversation("quiet")!.conversations.runs().find((r) => r.id === "old")!.status.phase, "interrupted");
   assert.ok(!conversationView(aide, "quiet").blocks.some((b) => b.content.includes("internal review")));
   assert.equal(aide.sessions().flatMap((s) => s.conversations.inputs()).length, 0);
   await aide.close(); aide = new Aide(root, options, log);
@@ -166,5 +162,6 @@ test("Future trigger requeues without another input; ordinary messages preserve 
   await until(() => ticks === 2);
   await aide.setConversationTrigger("me", false); await aide.settled();
   assert.equal(scope.conversations.inputs().length, 2);
-  assert.equal(scope.conversations.runs().filter((r) => r.status.timerAt).length, 2);
+  assert.ok(scope.conversations.resource("me")!.status.batch?.timerAt);
+  assert.equal(aide.invocations().filter((i) => !i.inputIds?.length).length, 2);
 });

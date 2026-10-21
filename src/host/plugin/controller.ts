@@ -135,6 +135,7 @@ export class ReconcileRetry {
 }
 
 export interface ControllerOptions<TSpec, TStatus> {
+  name?: string;
   store: PluginResourceStore;
   resourceType: ResourceType;
   sources?: readonly ControllerSource<TSpec>[];
@@ -170,6 +171,7 @@ export interface ControllerOptions<TSpec, TStatus> {
 
 function ownedKey(key: ReconcileKey): ReconcileKey {
   const copy = {
+    controllerName: key.controllerName,
     aideSessionId: key.aideSessionId,
     pluginInstanceId: key.pluginInstanceId,
     namespace: key.namespace,
@@ -246,6 +248,7 @@ export class Controller<TSpec, TStatus> {
   private closed = false;
 
   constructor(options: ControllerOptions<TSpec, TStatus>) {
+    if (options.name !== undefined && !/^[a-z][a-z0-9-]{0,63}$/.test(options.name)) throw new Error("Invalid Controller name");
     validateResourceType(options.resourceType);
     validateWatches(options.watches);
     this.store = options.store;
@@ -266,6 +269,7 @@ export class Controller<TSpec, TStatus> {
       (async (_scope, _localLease, execute) => await execute());
     this.onWatchError = options.onWatchError;
     this.scope = Object.freeze({
+      controllerName: options.name,
       aideSessionId: options.store.aideSessionId,
       pluginInstanceId: options.store.pluginInstanceId,
       namespace: "v1",
@@ -285,6 +289,7 @@ export class Controller<TSpec, TStatus> {
           pluginInstanceId: key.pluginInstanceId,
           namespace: key.namespace as ResourceNamespace,
           executionId: newId("pex"),
+          controllerName: this.scope.controllerName,
         });
         return this.executeReconcile(executionScope, localLease, async () => {
           if (this.closed) throw new Error("plugin Controller is closed");
@@ -397,7 +402,7 @@ export class Controller<TSpec, TStatus> {
   }
 
   scheduledReconciles(): ScheduledReconcile[] {
-    return this.store.scheduledReconciles(this.resourceType).map((entry) =>
+    return this.store.scheduledReconciles(this.resourceType, this.scope.controllerName).map((entry) =>
       Object.freeze({
         key: ownedKey({
           ...this.scope,
@@ -456,7 +461,7 @@ export class Controller<TSpec, TStatus> {
       this.resourceType,
       reconcileKey.resourceId,
       next,
-      { namespace: reconcileKey.namespace as ResourceNamespace },
+      { namespace: reconcileKey.namespace as ResourceNamespace, controllerName: this.scope.controllerName },
     );
   }
 
@@ -534,6 +539,7 @@ export class Controller<TSpec, TStatus> {
           key.resourceId,
           nextReconcileAt,
           {
+            controllerName: this.scope.controllerName,
             expectedResourceVersion: latest.metadata.resourceVersion,
             namespace: key.namespace as ResourceNamespace,
           },
@@ -544,6 +550,7 @@ export class Controller<TSpec, TStatus> {
         };
       },
       key.namespace as ResourceNamespace,
+      this.scope.controllerName,
     );
   }
 
@@ -555,7 +562,7 @@ export class Controller<TSpec, TStatus> {
       this.scope.namespace === "aide-system" ||
       !namespaceContains(this.scope.namespace, key.namespace) ||
       key.resourceApiVersion !== this.scope.resourceApiVersion ||
-      key.resourceKind !== this.scope.resourceKind ||
+      key.resourceKind !== this.scope.resourceKind || (key.controllerName ?? "") !== (this.scope.controllerName ?? "") ||
       reconcileResourceOwner(key) !== reconcileResourceOwner(this.scope)
     ) {
       throw new Error(

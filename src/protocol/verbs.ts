@@ -13,6 +13,7 @@ import type {
 } from "@compforge/aide-plugin";
 
 export interface ExecutionScope extends ExecutionAssociation {
+  readonly controllerName?: string;
   readonly aideSessionId: string;
   readonly pluginInstanceId: string;
   /** Namespace of the Resource or session boundary that initiated the action. */

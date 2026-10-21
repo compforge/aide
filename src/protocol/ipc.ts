@@ -70,6 +70,7 @@ export interface PrinterRegistration {
 }
 
 export interface ControllerRegistration {
+  readonly controllerName?: string;
   readonly kind: "controller";
   readonly controllerId: string;
   readonly resourceType: ResourceType;

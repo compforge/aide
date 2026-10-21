@@ -398,8 +398,8 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
     const store = aide.session(sessionId).conversations;
     const expected = inputs.list(MESSAGE_SESSION).filter((input) => input.spec.sessionId === sessionId).map((input) => input.metadata.name).sort();
     assert.equal(store.list().length, 1, "Messages from the same observed chat reuse one Conversation");
-    assert.deepEqual([...store.get(sessionId)!.inputIds].sort(), expected);
-    for (const id of expected) assert.ok(aide.session("inbox").conversations.get("inbox")!.inputIds.includes(id));
+    assert.deepEqual([...store.inputs(sessionId).map((i) => i.metadata.name)].sort(), expected);
+    for (const id of expected) assert.ok(aide.session("inbox").conversations.inputs("inbox").map((i) => i.metadata.name).includes(id));
   }
   assert.equal(aide.session(MESSAGE_SESSION).conversations.list().length, 0);
   const sourceGroupId = "source:lark:cli_app:ou_me:oc_group";
@@ -409,12 +409,12 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }]);
   const store = aide.session(groupId).conversations;
   assert.equal(store.list().length, 1);
-  assert.equal(store.get(groupId)!.inputIds.length, 1);
-  assert.equal(aide.session(sourceGroupId).conversations.get(sourceGroupId)!.inputIds.length, 2);
+  assert.equal(store.inputs(groupId).map((i) => i.metadata.name).length, 1);
+  assert.equal(aide.session(sourceGroupId).conversations.inputs(sourceGroupId).map((i) => i.metadata.name).length, 2);
   const channelInput = store.inputs(groupId)[0]!;
   assert.equal(channelInput.spec.origin, "channel");
   assert.equal(channelInput.spec.sessionId, groupId);
-  assert.ok(aide.session("inbox").conversations.get("inbox")!.inputIds.includes(channelInput.metadata.name));
+  assert.ok(aide.session("inbox").conversations.inputs("inbox").map((i) => i.metadata.name).includes(channelInput.metadata.name));
   const channelPrompt = prompts.find((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).conversationId === groupId)!;
   assert.ok(channelPrompt);
   assert.doesNotMatch(channelPrompt, /om_at|source-private-reply/, "User observation history must not enter the group's bot prompt");
@@ -428,8 +428,8 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }], "Restart must neither leak historical Source replies nor duplicate delivered Channel replies");
   assert.equal(aide.session(MESSAGE_SESSION).conversations.inputStore.list(MESSAGE_SESSION).length, 3);
   assert.equal(aide.session(groupId).conversations.resource(groupId)!.metadata.uid, groupUid);
-  assert.equal(aide.session(groupId).conversations.get(groupId)!.inputIds.length, 1);
+  assert.equal(aide.session(groupId).conversations.inputs(groupId).map((i) => i.metadata.name).length, 1);
   assert.equal(aide.session(sourceGroupId).conversations.resource(sourceGroupId)!.metadata.uid, sourceGroupUid);
-  assert.equal(aide.session(sourceGroupId).conversations.get(sourceGroupId)!.inputIds.length, 2);
+  assert.equal(aide.session(sourceGroupId).conversations.inputs(sourceGroupId).map((i) => i.metadata.name).length, 2);
   assert.equal(aide.works().length, 0);
 });

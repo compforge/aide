@@ -24,13 +24,31 @@ test("say persists an ordinary scoped Message without an Interaction and validat
   const result = await verbs.say({ text: "可以继续了" });
   assert.equal(result.state, "success");
   assert.equal(conversations.get("private")!.messages.length, 1);
-  assert.equal(conversations.input("tick")!.status.messages![0]!.text, "可以继续了");
+  assert.equal(conversations.get("private")!.messages[0]!.text, "可以继续了");
   assert.equal(session.projection.interactions.size, 0);
-  assert.equal(conversations.input("tick")!.status.phase, undefined);
+  assert.equal(conversations.input("tick")!.consumption.phase, undefined);
   assert.equal((await verb.invoke({ ...context, conversationId: "other" }, { verb: "say", input: { text: "wrong scope" } })).state, "failure");
   assert.equal((await verb.invoke({ ...context, conversationId: undefined }, { verb: "say", input: { text: "no scope" } })).state, "failure");
   await assert.rejects(verbs.say({ text: " " }));
   assert.equal((await verb.invoke({ ...context, inputId: undefined }, { verb: "say", input: { text: "standalone message" } })).state, "success");
   assert.equal(new ConversationStore(session).get("private")!.messages.length, 2);
   verb.endRemote(context.executionId);
+});
+
+test("Interruption before Harness creation prevents later actions in that execution", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-interrupt-before-harness-"));
+  const session = new SessionStore(root).createSession({ id: "owner", cwd: root });
+  let dispatched = 0, messages = 0;
+  const verb = new Verb({ session, say: async () => { messages++; return { messageId: "unexpected" }; },
+    capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot(session.id),
+    enqueueHarnessInvocation: () => { dispatched++; } });
+  t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
+  const scope = { aideSessionId: session.id, pluginInstanceId: "test", namespace: "v1" as const, executionId: "cancel-before-start" };
+  await verb.beginRemote(scope);
+  verb.interruptExecution(scope.executionId);
+  const verbs = createPluginVerbs(scope, (scope, request) => verb.invoke(scope, request));
+  assert.deepEqual(await verbs.harness({ title: "late", laneId: "main", prompt: "Must not run", timeoutMs: 1000 }), { state: "dismissed" });
+  assert.deepEqual(await verbs.say({ text: "late message" }), { state: "dismissed" });
+  assert.equal(dispatched, 0); assert.equal(messages, 0); assert.equal(session.projection.interactions.size, 0);
+  verb.endRemote(scope.executionId);
 });

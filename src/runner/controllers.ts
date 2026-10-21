@@ -28,14 +28,15 @@ export class Controllers {
   constructor(private readonly session: PluginSessionContext, private readonly pluginInstanceId: string,
     private readonly resources: ResourceClient, private readonly callHost: <T>(request: HostRequest) => Promise<T>, private readonly log: PluginLogger) {}
 
-  private id(type: { resourceApiVersion: string; resourceKind: string }) { return `controller:${type.resourceApiVersion}:${type.resourceKind}`; }
+  private id(type: { resourceApiVersion: string; resourceKind: string; controllerName?: string }) { return `controller:${type.resourceApiVersion}:${type.resourceKind}${type.controllerName ? `:${type.controllerName}` : ""}`; }
   register(id: string, definition: Controller<unknown, unknown>): void {
+    if (definition.name !== undefined && !/^[a-z][a-z0-9-]{0,63}$/.test(definition.name)) throw new Error("Invalid Controller name");
     if (this.registrations.has(id)) throw new Error(`Duplicate Controller: ${id}`);
     validateSources(definition.sources, new Date());
     const builtin = definition.resourceType.apiVersion === "aide.dev/v1alpha1" && ["Input", "Turn"].includes(definition.resourceType.kind);
     if (builtin && definition.sources?.some((source) => source.type === "resource")) throw new Error("Resource Sources cannot materialize builtin resources");
     this.registrations.set(id, { definition, abort: new AbortController(), attempts: new Map(),
-      scope: { aideSessionId: this.session.aideSessionId, pluginInstanceId: this.pluginInstanceId, namespace: "v1",
+      scope: { controllerName: definition.name, aideSessionId: this.session.aideSessionId, pluginInstanceId: this.pluginInstanceId, namespace: "v1",
         resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, resourceOwner: builtin ? "aide" : "plugin" } });
   }
 

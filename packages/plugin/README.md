@@ -106,11 +106,11 @@ const decision = await execution.verbs.confirm({
 // Inspect the typed result before requesting any follow-up action.
 ```
 
-`execution.withContext({ conversationId, inputId })` associates actions with their conversation independently of Harness selection. Core also records the initiating resource.
+`execution.withContext({ conversationId, inputId, inputIds })` associates actions with their conversation independently of Harness selection. Core also records the initiating resource.
 
 Controllers use `execution.verbs.connectors({ timeoutMs })` for connector actions. Other components may use `context.connectors` directly. Connector verbs do not create an Interaction; timeout ends the wait without promising cancellation of the underlying provider operation.
 
-`say({ text })` persists an ordinary Message through the application message sink without opening an Interaction or waiting for delivery. Personal uses its Conversation outbox. With an inputId, it also associates the message with that Input. Use `execution.withContext({ conversationId, inputId })` to select the context.
+`say({ text })` persists an ordinary Message through the application message sink without opening an Interaction or waiting for delivery. Personal stores the delivered intent as an ordinary Conversation Message; Harness tools can call the same verb directly. With an inputId, it also associates the message with that Input. Use `execution.withContext({ conversationId, inputId, inputIds })` to select the context.
 
 `ask` and `confirm` collect a decision. `draft` lets the user edit proposed input; `harness` requests execution. Draft and Harness requests pass through a durable Interaction gate, which host policy may approve automatically. Only an approved or submitted action creates a HarnessInvocation.
 
@@ -166,3 +166,5 @@ Inline hooks fail open on failure or timeout. Deferred hooks use best-effort bou
 `context.toast` is non-durable feedback. Ongoing state belongs in resource status. `context.logger` writes host-owned structured diagnostics with plugin identity; log transitions and errors, avoid repeated polling noise and secrets, and do not use logs as business state.
 
 See [Channel](../../docs/channel/README.md) for the current Web / Lark experience and [Kernel](../../docs/kernel.md) for execution ownership.
+
+Controllers may set an optional `name` (lowercase letter followed by up to 63 lowercase letters, digits or hyphens) to observe the same resource kind with independent queues, locks and durable deadlines. Use explicit status Watches and resource-version checks to coordinate their separate responsibilities.

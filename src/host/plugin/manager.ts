@@ -1,3 +1,4 @@
+import { createPluginVerbs } from "../../plugin-context.ts";
 import { ResourceStorage, resourceHome } from "../resource/storage.ts";
 import { inputPrinter } from "../input/printer.ts";
 import { ResourcePrinters } from "./resource/printer.ts";
@@ -140,7 +141,7 @@ export interface ControllerDefinition<TSpec, TStatus>
 
 type AideResourceControllerDefinition<K extends AideResourceKind> = Pick<
   AideResourceControllerOptions<K>,
-  "pluginInstanceId" | "namespace" | "resourceKind" | "sources" | "watches" | "reconcile" | "maxConcurrency" | "now"
+  "name" | "pluginInstanceId" | "namespace" | "resourceKind" | "sources" | "watches" | "reconcile" | "maxConcurrency" | "now"
 >;
 
 export interface PluginToast {
@@ -621,6 +622,7 @@ export class Manager {
         scope.pluginInstanceId === key.pluginInstanceId &&
         scope.resourceApiVersion === key.resourceApiVersion &&
         scope.resourceKind === key.resourceKind &&
+        (scope.controllerName ?? "") === (key.controllerName ?? "") &&
         namespaceContains(
           scope.namespace as ResourceNamespace,
           key.namespace as ResourceNamespace,
@@ -1034,6 +1036,14 @@ export class Manager {
     return closing;
   }
 
+  /** Bind host-side Harness tools to an already admitted Plugin execution. */
+  executionVerbs(executionId: string, conversationId: string) {
+    const scope = { ...this.verb.executionScope(executionId), conversationId };
+    return createPluginVerbs(scope, (scope, request) => this.verb.invoke(scope, request));
+  }
+
+  interruptExecution(executionId: string): void { this.verb.interruptExecution(executionId); }
+
   listHarnessInvocations() {
     return this.verb.listHarnessInvocations();
   }
@@ -1131,7 +1141,7 @@ export class Manager {
     const builtin = [AIDE_TURN_RESOURCE_TYPE, INPUT_TYPE].some((type) => resourceTypeKey(type) === resourceTypeKey(definition.resourceType));
     const release = builtin ? () => {} : this.resourceRegistry.register(instance.pluginId, definition.resourceType);
     const store = new PluginResourceStore({ session: this.instances.session, pluginInstanceId: instance.pluginInstanceId });
-    const scope: ReconcileScope = { aideSessionId: instance.aideSessionId, pluginInstanceId: instance.pluginInstanceId, namespace: "v1",
+    const scope: ReconcileScope = { controllerName: definition.controllerName, aideSessionId: instance.aideSessionId, pluginInstanceId: instance.pluginInstanceId, namespace: "v1",
       resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, resourceOwner: builtin ? "aide" : "plugin" };
     const controller = new RunnerController({ scope, registration: definition, runner, store, resources, verb: this.verb,
       snapshot: (key, resource) => this.snapshotFor(key, resource), changed: (change) => this.handlePluginResourceChange(change),
@@ -1153,7 +1163,7 @@ export class Manager {
       aideSessionId: request.scope.aideSessionId, pluginInstanceId: request.scope.pluginInstanceId,
       namespace: ref?.namespace === "aide-system" ? "v1" : request.scope.namespace,
       resourceApiVersion: ref!.apiVersion, resourceKind: ref!.kind, resourceId: ref!.name,
-      resourceOwner: ref?.namespace === "aide-system" ? "aide" : "plugin",
+      resourceOwner: ref?.namespace === "aide-system" ? "aide" : "plugin", controllerName: request.scope.controllerName,
     };
     if (key.pluginInstanceId !== instance.pluginInstanceId || key.aideSessionId !== instance.aideSessionId) throw new Error("Runner Controller scope mismatch");
     const controller = this.controllerForKey(key);
@@ -1220,6 +1230,7 @@ export class Manager {
       namespace: "v1",
       resourceApiVersion: pluginController.resourceType.apiVersion,
       resourceKind: pluginController.resourceType.kind,
+      controllerName: pluginController.name,
     });
     let unregisterBoardSource: (() => void) | undefined;
     if (pluginController.present) {
@@ -1272,6 +1283,7 @@ export class Manager {
         pluginInstanceId,
         namespace,
         resourceKind,
+        name: pluginController.name,
         sources: cronSources,
         watches: pluginController.watches,
         maxConcurrency: pluginController.maxConcurrency,
@@ -1294,6 +1306,7 @@ export class Manager {
       resourceApiVersion: AIDE_TURN_RESOURCE_TYPE.apiVersion,
       resourceKind,
       resourceOwner: "aide",
+      controllerName: pluginController.name,
     });
     let unregisterBoardSource: (() => void) | undefined;
     if (pluginController.present) {

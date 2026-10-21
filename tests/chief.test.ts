@@ -42,6 +42,7 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
   assert.deepEqual(first, duplicate);
   await aide.settled();
   assert.equal(calls, 1);
+  assert.equal(aide.session("me").conversations.resource("me")!.status.batch?.phase, "done", JSON.stringify(aide.session("me").conversations.resource("me")!.status.batch));
   assert.equal(aide.works().length, 0);
   assert.deepEqual(aide.messages().map((m) => m.text), ["直接回答"]);
   await aide.receive({ ...input, sessionId: "other", conversationId: "other", text: "hello" }); await aide.settled();
@@ -54,7 +55,7 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
   assert.equal(aide.works().length, 0);
 });
 
-test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable discovery and released model turns", { timeout: 30_000 }, async (t) => {
+test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with direct tools and same-execution answers", { timeout: 30_000 }, async (t) => {
   const root = process.env.AIDE_CHIEF_TEST_ROOT ?? mkdtempSync(join(tmpdir(), "aide-chief-pi-"));
   const agentDir = join(root, "pi"); mkdirSync(agentDir, { recursive: true });
   const bin = join(root, "bin"); mkdirSync(bin, { recursive: true });
@@ -96,14 +97,11 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
       case 2: tool = { name: "read_requirement", args: { source: "work", category: "story", id: "123" } }; break;
       case 3: tool = { name: "list_work", args: {} }; break;
       case 4: tool = { name: "confirm", args: { title: "新需求", prompt: "发现你名下的新需求，需要我开始实现吗？" } }; break;
-      case 5: tool = { name: "create_work", args: { kind: "task", title: "未确认的工作", instruction: "This must be rejected while waiting for confirmation", trigger: null } }; break;
-      case 6: text = "等待你的确认"; break;
-      case 7: text = "已保留需求信息，暂不开始实现。"; break;
-      case 8: tool = { name: "ask", args: { title: "开发范围", prompt: "在哪个工作目录开发？" } }; break;
-      case 9: text = "等待目录"; break;
-      case 10: tool = { name: "create_work", args: { kind: "task", title: "实现需求", instruction: `在 ${root} 实现 requirement work/story/123; repository github.com/compforge/aide`, trigger: null } }; break;
-      case 12: tool = { name: "dismiss_observation", args: { reason: "已有工作完成，不需要再次打扰用户" } }; break;
-      case 13: text = "This internal summary must not be delivered"; break;
+      case 5: text = "已保留需求信息，暂不开始实现。"; break;
+      case 6: tool = { name: "ask", args: { title: "开发范围", prompt: "在哪个工作目录开发？" } }; break;
+      case 7: tool = { name: "create_work", args: { kind: "task", title: "实现需求", instruction: `在 ${root} 实现 requirement work/story/123; repository github.com/compforge/aide`, trigger: null } }; break;
+      case 9: tool = { name: "dismiss_observation", args: { reason: "已有工作完成，不需要再次打扰用户" } }; break;
+      case 10: text = "This internal summary must not be delivered"; break;
       default: text = "已交办实现，我会跟进结果。";
     }
     if (!tool && ["已保留需求信息，暂不开始实现。", "已交办实现，我会跟进结果。"].includes(text)) {
@@ -151,12 +149,12 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
   assert.ok(pendingQuestion.group_id);
 
   assert.equal(executions, 0); assert.equal(aide.works().length, 0);
-  assert.ok(aide.invocations().every((item) => item.phase === "completed"), "Pi must release its turn before waiting for the user");
+  assert.ok(aide.invocations().some((item) => item.phase === "running"), "ask waits inside the same Harness execution");
   receive("decline", "拒绝"); await bot.deliver();
   assert.match(sent[0]!, /新需求/); assert.equal(sent.length, 1, "Chief's intermediate final text must not become a duplicate question");
   await bot.dispatch();
   await until(() => aide.messages().some((m) => m.text === "已保留需求信息，暂不开始实现。"));
-  assert.match(JSON.stringify(prompts[7]), /declined/);
+  assert.match(JSON.stringify(prompts[5]), /declined/);
   const completedView = conversationView(aide, conversationId);
   const answeredQuestion = completedView.blocks.find((block) => block.id === questionId)!;
   assert.equal(answeredQuestion.type, "question"); assert.equal(answeredQuestion.status, "answered");
@@ -166,7 +164,7 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
 
   assert.equal(aide.works().length, 0);
   receive("decline", "拒绝"); await bot.dispatch();
-  assert.equal(modelCalls, 8, "Duplicate answers cannot become fresh user commands");
+  assert.equal(modelCalls, 6, "Duplicate answers cannot become fresh user commands");
   receive("start", "现在开始实现"); await bot.dispatch();
   await until(() => aide.questions().some((q) => q.request.status === "pending"));
   const secondQuestion = conversationView(aide, conversationId).blocks.filter((block) => block.type === "question");
@@ -176,12 +174,12 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
   await until(() => aide.works()[0]?.status === "done"); await aide.settled();
   await bot.deliver();
   assert.equal(executions, 1);
-  assert.deepEqual(toolsSeen, ["list_environments", "read_environment", "read_requirement", "list_work", "confirm", "create_work", "say", "ask", "create_work", "say"]);
+  assert.deepEqual(toolsSeen, ["list_environments", "read_environment", "read_requirement", "list_work", "confirm", "say", "ask", "create_work", "say"]);
   assert.equal(aide.works()[0]!.conversationId, conversationId);
   assert.ok(sent.includes("实现已完成"));
   const discoveries = aide.session(conversationId).store.conversations.inputs().filter((item) => item.spec.origin === "source");
   assert.equal(discoveries.length, 1);
-  assert.equal(discoveries[0]!.status.phase, "done");
+  assert.equal(discoveries[0]!.consumption.phase, "done");
   assert.equal(aide.session(conversationId).store.conversations.input(digest(["lark", conversationId, "decline"]))!.spec.replyTo,
     aide.questions()[0]!.request.messageId);
   const source = aide.session(conversationId).store.resources.list(SOURCE_TYPE)[0]!;
@@ -189,10 +187,10 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
   const poll = () => aide.session(conversationId).plugins.enqueue({ aideSessionId: sessions.listSessions()[0]!.aideSessionId, pluginInstanceId: "personal", namespace: "v1",
     resourceApiVersion: SOURCE_TYPE.apiVersion, resourceKind: SOURCE_TYPE.kind, resourceId: source.metadata.name });
   await poll();
-  assert.equal(modelCalls, 12, "Unchanged observations must not call the model again");
+  assert.equal(modelCalls, 9, "Unchanged observations must not call the model again");
   writeFileSync(join(bin, "meegle"), `#!/usr/bin/env node\nconsole.log(JSON.stringify({ data: [${JSON.stringify({ ...record, updated_at: "2026-10-19" })}] }));\n`, { mode: 0o755 });
   await poll();
-  await until(() => aide.session(conversationId).store.conversations.inputs().some((item) => item.status.phase === "done" && !!item.status.quietReason));
+  await until(() => aide.session(conversationId).store.conversations.inputs().some((item) => item.consumption.phase === "done" && !!item.consumption.quietReason));
   await bot.deliver();
   assert.equal(executions, 1);
   assert.ok(!aide.messages().some((m) => m.text.includes("internal summary")));

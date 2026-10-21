@@ -24,7 +24,7 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 Host 的 `ResourceStorage` 将 Input 与插件 Resource 存入共享 SQLite，以按需读取替代常驻完整快照集合。容量按 Group/Kind 汇总，配额覆盖不同 API 版本、Session 和插件实例；同时限制单条大小、每种数量/字节以及 Host 总字节。配置见 [Resource 容量](../configuration.md#resource-容量)。
 
-资源所有者通过纯 `ResourceLifecycle` 定义释放时间和引用的精确 uid，由宿主装配注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 在路由结束后可释放，但 Conversation 的近期/待处理引用与 Source 的待提交引用继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
+资源所有者通过纯 `ResourceLifecycle` 定义释放时间和引用的精确 uid，由宿主装配注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 在路由结束后可释放，但 Conversation 的待处理/当前 Batch 引用与 Source 的待提交引用继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
 
 每次写入在事务内同步记录、引用索引、回执和必要的回收。无法满足容量约束时整个事务回滚，变更通知只在提交后发出。因此过载会阻止接收更多工作，不会通过删除正在承担的工作来腾空间。完成并缩小记录的更新允许在超配额状态下提交。
 
@@ -46,13 +46,15 @@ InputPrinter 位于 `src/host/input/printer.ts`，由 Host 装配，不随插件
 
 Personal 的“需求 Source”是一项业务能力：它用 RequirementSource 资源表达关注范围，借助 Controller 和定时再入队调用 Connector、比较观察并提交 Input。这个业务 Source 与框架的 Source 注册接口有联系，但不是同一个层级的概念，具体流程见 [Connector 与 Source](../connector/README.md)。
 
+Controller 可声明 `name`，让同一插件对同种资源注册独立队列。状态变化需显式 Watch；不同 Controller 的定时记录、重试和资源锁按名称隔离，共享资源更新仍使用 CAS。
+
 ## Verb 与 Harness
 
-Reconcile 通过 `ctx.verbs` 请求 say、ask、confirm、draft、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。say 通过应用装配的持久消息出口保存普通 Message；Personal 将其保存在关联 Conversation 的 outbox，不建立 Interaction 或等待用户；成功表示持久化，投递由 Channel 负责。ask/confirm 保存 Interaction，draft/harness 按交互结果发起 HarnessInvocation；Connector verb 直接执行。插件只需表达意图、期限和目标，不处理提供方原生协议。
+Reconcile 通过 `ctx.verbs` 请求 say、ask、confirm、draft、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。say 通过应用装配的持久消息出口保存普通 Message；Personal 将其保存在关联 Conversation 的消息流，不建立 Interaction 或等待用户；成功表示持久化，投递由 Channel 负责。ask/confirm 保存 Interaction，draft/harness 按交互结果发起 HarnessInvocation；Connector verb 直接执行。插件只需表达意图、期限和目标，不处理提供方原生协议。
 
-等待 verb 时释放 Controller 和 Runner 容量，同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。拒绝确认是正常业务答案；取消、超时和失败需要插件自行决定业务结果。
+等待 verb 时释放 Controller 和 Runner 容量，同一 Controller 内同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。拒绝确认是正常业务答案；取消、超时和失败需要插件自行决定业务结果。
 
-`execution.withContext({ conversationId, inputId })` 将后续动作关联到业务会话和输入，主资源身份由 Core 提供。Channel 直接使用这些关联展示问题与执行进度，不通过 Chief 或 Harness Target 推导。其他组件按职责使用 Core 服务，不必经由 Verb。
+`execution.withContext({ conversationId, inputId, inputIds })` 将后续动作关联到业务会话和输入，主资源身份由 Core 提供。Channel 直接使用这些关联展示问题与执行进度，不通过 Chief 或 Harness Target 推导。其他组件按职责使用 Core 服务，不必经由 Verb。
 
 `harness({ freshContext: true })` 在空闲 Lane 上建立新的原生上下文，并持久化 Ledger 历史边界；后续 catch-up 不注入该边界之前的执行历史。调用方提供新的摘要和必要材料，Lane 与业务资源身份保持不变。
 
@@ -65,7 +67,8 @@ Harness 返回执行结束不等于资源目标完成。结果校验、下一步
 | Controller | 观察对象 | 业务职责 |
 | --- | --- | --- |
 | Chief 路由 | Host 内置 Input | 判断目标，更新 Conversation 资源 |
-| Chief 会话 | Personal Conversation | 串行消费 Input，调用 Chief Harness，回复、询问或操作 Work |
+| Conversation | Personal Conversation | 调度 Batch、确认消费和交接上下文 |
+| Batch（name: batch） | Personal Conversation | 执行固定 Batch，调用 Chief Harness，工具直接使用交互 verb |
 | Requirement Source | RequirementSource | 按关注范围获取需求变化，提交 Input 并推进水位 |
 | Task | Task | 推进有限目标，达到目标后结束 |
 | Routine | Routine | 执行本轮，继续等待时间或事件 |

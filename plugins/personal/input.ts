@@ -30,12 +30,13 @@ export async function reconcileInput(context: Pick<PluginContext, "resources" | 
   if (!input.status.routing) input = await context.resources.patchStatus(input, { routing: {
     phase: "running", bootstrap: !conversations.length, reason: conversations.length ? "Default and deterministic rules" : "First Conversation",
   } });
-  let attached = conversations.some((c) => c.spec.inputIds.includes(input.metadata.name));
+  let attached = conversations.some((c) => c.status.pendingInputIds.includes(input.metadata.name));
   const append = async (c: Readonly<ConversationResource>) => {
     if (await appendConversationInput(context.resources, { sessionId: c.spec.sessionId, name: c.metadata.name, uid: c.metadata.uid }, input, maxPending)) {
       context.logger.info("Chief input attached to conversation", { attributes: { inputId: input.metadata.name,
         conversationId: c.spec.id, sessionId: c.spec.sessionId } });
     }
+    input = (await context.resources.get<InputSpec, InputStatus>(ref))!;
     attached = true;
   };
   const create = async () => {
@@ -73,7 +74,7 @@ export async function reconcileInput(context: Pick<PluginContext, "resources" | 
       throw new Error(`Original Input routing is pending: ${originalInputId}`);
     }
     for (const c of conversations) {
-      if (c.spec.inputIds.includes(originalInputId) || preceding?.status.deliveries?.includes(c.metadata.uid)) await append(c);
+      if (c.status.pendingInputIds.includes(originalInputId) || preceding?.status.deliveries?.includes(c.metadata.uid)) await append(c);
     }
   }
   await finish();
@@ -90,8 +91,8 @@ async function createConversation(context: Pick<PluginContext, "resources" | "lo
   try {
     const c = await context.resources.create<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, {
       sessionId: planned.sessionId, name: planned.name,
-      spec: { id: planned.sessionId, sessionId: planned.sessionId, name: initialConversationName(input.spec.text), inputIds: [] },
-      status: { processing: {}, messages: [], receipts: [] },
+      spec: { id: planned.sessionId, sessionId: planned.sessionId, name: initialConversationName(input.spec.text) },
+      status: { pendingInputIds: [], messages: [], receipts: [] },
     });
     context.logger.info("Chief routing created conversation", { attributes: { inputId: input.metadata.name,
       conversationId: c.spec.id, sessionId: planned.sessionId } });

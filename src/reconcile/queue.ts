@@ -103,6 +103,7 @@ export function reconcileKeyId(key: ReconcileKey): string {
     key.resourceApiVersion,
     key.resourceKind,
     key.resourceId,
+    key.controllerName ?? "",
     reconcileResourceOwner(key),
   ]);
 }

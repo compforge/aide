@@ -2,6 +2,7 @@ import type { AnyResourceNamespace } from "@compforge/aide-plugin";
 export type ReconcileResourceOwner = "plugin" | "aide";
 
 export interface ReconcileScope {
+  readonly controllerName?: string;
   readonly aideSessionId: string;
   readonly pluginInstanceId: string;
   readonly namespace: AnyResourceNamespace;
