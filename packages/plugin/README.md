@@ -110,13 +110,32 @@ const decision = await execution.verbs.confirm({
 
 Controllers use `execution.verbs.connectors({ timeoutMs })` for connector actions. Other components may use `context.connectors` directly. Connector verbs do not create an Interaction; timeout ends the wait without promising cancellation of the underlying provider operation.
 
-`say({ text })` persists an ordinary Message through the application message sink without opening an Interaction or waiting for delivery. Personal stores the delivered intent as an ordinary Conversation Message; Harness tools can call the same verb directly. With an inputId, it also associates the message with that Input. Use `execution.withContext({ conversationId, inputId, inputIds })` to select the context.
+`say({ text, inputIds?, respondToInputId?, target?, receivers?, idempotencyKey? })` persists an independent Output and returns `outputId`, without opening an Interaction or waiting for delivery. Input associations are optional and many-to-many; an omitted inputIds uses the execution inputId when present. A repeated idempotencyKey within the same Conversation incarnation and execution resolves to the same immutable Output. Use `execution.withContext({ conversationId, inputId, inputIds })` to select the context.
+
+`resources.commit(writes)` atomically creates/replaces/patches local plugin resources together with Core Output creation. All writes share one Session and storage transaction; validation, quota or version failures roll everything back. Notifications follow commit. Other Core mutations and external side effects cannot join this transaction. Output is readable through ResourceClient and has a Host Printer; only Host delivery updates its status. See [Output](../../docs/output.md).
 
 `ask` and `confirm` collect a decision. `draft` lets the user edit proposed input; `harness` requests execution. Draft and Harness requests pass through a durable Interaction gate, which host policy may approve automatically. Only an approved or submitted action creates a HarnessInvocation.
 
 For execution, `laneId` selects a Lane and `newLane: true` creates a side Lane. An explicit harnessTargetId pins the Target. A direct Harness request resolves an omitted Target immediately; a draft resolves it when submitted. The returned Turn records execution, not domain acceptance.
 
 Every verb requires timeoutMs covering its entire gate, queue and execution wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
+
+## Communication addresses
+
+```ts
+interface Address { readonly kind: string }
+interface ChannelAddress extends Address {
+  readonly kind: "channel";
+  readonly channelId: string;
+  readonly endpoint: string;
+}
+```
+
+`InputSpec.sender` and `OutputSpec.receivers` reference Persons using ResourceRef; receivers is an optional array with at most 100 references, each pinned by uid. They describe who spoke and who the output is intended for, independently of its contributing Inputs and delivery location. Explicit receivers override the sender inferred by respondToInputId; [] selects no named receivers. Input associations alone do not infer receivers. Receivers do not produce additional sends or automatic platform mentions.
+
+`InputSpec.source?: Address` describes a communication location, independently of sender Person, producer and sessionId. `OutputSpec.target: Address` is the selected immutable destination. Address is the parent interface; ChannelAddress is its current implementation. Host admission currently supports Web and Lark channel addresses and rejects unsupported kinds. Web endpoints use the selected conversation ID; Lark endpoints join separately URI-encoded appId and chatId with `/`. Only the Channel interprets this encoding.
+
+Personal initializes `ConversationSpec.address` only when a Channel Input creates the Conversation. Subsequent Inputs, Source observations and default routing never replace or fill it. `say.respondToInputId` selects an attached Input address; `say.target` selects an explicit address. They are mutually exclusive. With neither, immediate Input addresses must agree; without immediate Inputs, say uses the Conversation address. Missing or ambiguous destinations reject before publishing an Output.
 
 ## Resource Printers
 

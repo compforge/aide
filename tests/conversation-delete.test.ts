@@ -1,3 +1,4 @@
+import { fixtureAddress, fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -30,7 +31,7 @@ test("Web deletes a revision-checked Conversation and preserves shared Input and
   const scope = aide.session("shared");
   await seedInput(scope.conversations, "shared-input", { conversationId: "a", origin: "source", originId: "personal.environments", text: "共同观察" }, { phase: "done" });
   await seedInput(scope.conversations, "shared-input", { conversationId: "b", origin: "source", originId: "personal.environments", text: "共同观察" }, { phase: "done" });
-  await scope.conversations.archive("a", [{ id: "old", conversationId: "a", text: "只属于 a", role: "aide", workId: null, at: new Date().toISOString() }]);
+  await scope.conversations.archive("a", [{ id: "old", conversationId: "a", text: "只属于 a", workId: null, target: fixtureAddress("a") }]);
   await aide.start(); await aide.settled();
   const { server, base, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
@@ -51,7 +52,7 @@ test("Web deletes a revision-checked Conversation and preserves shared Input and
   await aide.settled(); await aide.close();
   aide = new Aide(dir, options, log); await aide.start(); await aide.settled();
   assert.deepEqual(aide.conversationIds(), ["b"]);
-  assert.equal(aide.messages().some((m) => m.id === "old"), false);
+  assert.equal(aide.outputs().some((m) => m.id === "old"), true);
 });
 
 test("Conversation deletion rejects queued, running, waiting and associated Work without changing them", async (t) => {
@@ -90,21 +91,22 @@ test("Recreated Conversation has fresh execution context and no old questions or
   }, execute: async () => ({ action: "done", summary: "旧工作完成", notification: "旧工作回复", question: null, nextAt: null }) }, dir), log);
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
-  await aide.receive({ channelId: "web", id: "old", sessionId: "me", text: "旧请求" });
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "old", sessionId: "me", text: "旧请求" }));
   for (let i = 0; i < 200 && !aide.questions().some((q) => q.request.status === "pending"); i++) await Bun.sleep(10);
   assert.ok(aide.questions().some((q) => q.request.status === "pending"));
-  await aide.receive({ channelId: "web", id: "answer", sessionId: "me", text: "确认" }); await aide.settled();
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "answer", sessionId: "me", text: "确认" })); await aide.settled();
   const work = await aide.work("me").create({ kind: "task", title: "旧工作", instruction: "执行一次", trigger: null });
   await aide.settled();
   await aide.work("me").delete(work.id, aide.works().find((item) => item.id === work.id)!.revision);
   await aide.settled();
-  assert.ok(aide.messages().some((m) => m.text === "旧工作回复"));
+  assert.ok(aide.outputs().some((m) => m.text === "旧工作回复"));
   const oldResource = aide.session("me").conversations.resource("me")!;
   const oldLanes = aide.invocations().map((i) => i.laneId);
   assert.equal((await remove("me", Number(oldResource.metadata.resourceVersion))).status, 200);
-  assert.deepEqual(aide.messages(), []);
+  assert.ok(aide.outputs().some((o) => o.conversationUid === oldResource.metadata.uid));
+  assert.deepEqual(conversationView(aide, "me").blocks, []);
   await aide.settled();
-  await aide.receive({ channelId: "web", id: "new", sessionId: "me", text: "新请求" }); await aide.settled();
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "new", sessionId: "me", text: "新请求" })); await aide.settled();
   const current = aide.session("me").conversations.resource("me")!;
   assert.notEqual(current.metadata.uid, oldResource.metadata.uid);
   assert.equal((await remove("me", Number(current.metadata.resourceVersion), { uid: oldResource.metadata.uid })).status, 409);
@@ -115,7 +117,7 @@ test("Recreated Conversation has fresh execution context and no old questions or
   assert.equal(view.blocks.some((b) => /旧答案|旧请求|旧工作|继续吗/.test(b.content)), false);
   assert.equal(view.blocks.filter((b) => b.type === "execution").length, 1);
   assert.deepEqual(aide.questions(), []);
-  await aide.receive({ channelId: "web", id: "old", sessionId: "me", text: "旧请求" }); await aide.settled();
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "old", sessionId: "me", text: "旧请求" })); await aide.settled();
   assert.equal(calls, 2);
-  assert.equal(aide.messages().some((m) => m.text === "旧请求"), false);
+  assert.equal(aide.outputs().some((m) => m.text === "旧请求"), false);
 });

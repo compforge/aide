@@ -1,8 +1,10 @@
 # Aide 的执行内核
 
+Input 记录 sender 从 source 带来的内容或事件；Aide 结合已有委托与处理进展作判断，必要时产生面向 receivers、投递到 target 的 Output。sender / receivers 引用 Person，source / target 使用 Address；人物、通信位置、输入来源与话题身份彼此独立。
+
 Aide 由 Channel、Source、资源与 Controller、Connector、Harness 等组件协作。Plugin 组织业务资源及其 Reconcile，Core 提供持久化、调度、交互与执行能力。本篇先说明组件的职责与关系，再说明一次业务处理如何在这些组件之间推进。
 
-Channel / Source 的 Definition 声明输入来源分类，绑定入口在提交时补齐身份。Input 保存请求或观察事实；Source 的资源引用用于追溯观察实例，目标 Session 用于路由。Conversation 引用 Input 并维护消费状态，用户输入不另存为 Message。Channel Message 只承载 Aide 的输出；展示与 Chief 的近期上下文均由输入事实和输出记录投影，来源特有的正文由生产方生成。
+Channel / Source 的 Definition 声明输入来源分类，绑定入口在提交时补齐身份。Input 保存请求或观察事实；Source 的资源引用用于追溯观察实例，目标 Session 用于路由。Conversation 引用 Input 并维护消费状态，Output 独立保存 Aide 面向用户的回复与通知；展示与 Chief 的近期上下文均由输入事实和输出记录投影，来源特有的正文由生产方生成。
 
 ## 第一部分：组件与协作关系
 
@@ -12,7 +14,7 @@ Channel / Source 的 Definition 声明输入来源分类，绑定入口在提交
 
 | 概念 | 职责 |
 | --- | --- |
-| Channel | 接收用户消息并提交 Input，投递 Message，并展示问题与执行进展；Web 和 Lark 是两个实现 |
+| Channel | 接收用户消息并提交 Input，投递 Output，并展示问题与执行进展；Web 和 Lark 是两个实现 |
 | Source | 定义观察范围，通过 Core 请求外部查询或订阅，把观察结果转为资源或 Input |
 | Core / Verb | Core 提供共享协作机制，Verb 是 Controller 的动作出口，表达外部查询、操作、AI 执行和用户交互 |
 | Connector | 适配外部系统与环境，由 Core 装配并调用，处理提供方协议与数据映射 |
@@ -73,7 +75,7 @@ Personal 的 Chief 先 Reconcile Input：无会话时创建并追加后结束；
 
 Core 的 ResourceClient 可显式读取和更新其它 Session 的插件资源。创建资源时，应用按需装配目标 Session；读取未知 Session 不创建执行状态。写入仍经目标 Session 的资源客户端，版本检查和 Watch 通知属于同一个提交路径；默认查询只访问当前 Session。各 Session 隔离执行历史与 Harness 原生上下文，Conversation 不是权限边界。
 
-Message 表达交流记录。Core 定义执行消息、Interaction 与 say 契约，应用装配持久消息出口；Personal 把面向用户的消息与消费状态保存在 Conversation outbox。say 成功表示消息已记录，不表示 Channel 已投递。业务完成与消息投递分别记录，投递失败不重新执行已完成动作。
+Output 表达已决定向外表达的内容，是独立持久资源；Input 与 Output 可选择关联，没有一对一要求。Personal 将业务状态和 Output 创建原子提交，Conversation / Batch 只保留必要的关联。say 成功表示 Output 已保存，Channel 按其 target 投递并更新回执；投递失败不重新执行业务动作。Core 执行消息与 Interaction 继续承担执行事实和人机问答。详见 [Output](output.md)。
 
 ### Harness 与执行事实
 
@@ -113,7 +115,7 @@ Adapter 保留提供方明确给出的消息阶段。`agentText` 用于整轮记
 | Aide Session 与执行记录 | 输入、动作、执行结果与恢复关联，支持追溯和重新装配执行 |
 | Harness 原生 Session | Agent 的执行上下文，由对应 Harness 管理与恢复 |
 | Harness 记忆 | 跨任务复用的背景、偏好与经验，由 Harness 组合记忆实现 |
-| Message 与投递记录 | 已记录的交流内容及 Channel 交付情况，支持展示与投递恢复 |
+| Output 与投递记录 | 已记录的交流内容及 Channel 交付情况，支持展示与投递恢复 |
 
 恢复原生上下文后，Controller 仍需依据业务资源和最新外部事实判断如何继续。执行记录用于核对已发起的动作及其结果；结果不确定时，由业务决定调查、等待或请求人工判断。Core 提供记录和协调机制，各 Plugin 定义领域的完成条件与验证方法。
 

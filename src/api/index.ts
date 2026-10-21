@@ -1,3 +1,5 @@
+import { visibleOutput } from "../channel/output.ts";
+import { webAddress } from "../channel/address.ts";
 import { PersonSchema } from "../../plugins/personal/person/model.ts";
 import { CHANNELS, bindChannelInput } from "../channel/definition.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -11,7 +13,7 @@ import { IncomingSchema } from "../channel/message.ts";
 import { conversationList } from "../channel/view.ts";
 import { streamConversation } from "./stream.ts";
 
-const EventSchema = IncomingSchema.omit({ text: true, channelId: true }).extend({
+const EventSchema = IncomingSchema.omit({ text: true, channelId: true, source: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
 
@@ -151,8 +153,8 @@ export function httpChannel(aide: WebService, log: Logger) {
         log.info({ messageId, kind: result.kind, completed: receipt.result }, "Channel interaction response");
         json(response, receipt.result ? 200 : 409, { completed: receipt.result });
       } else if (request.method === "POST" && url.pathname === "/messages") {
-        const input = IncomingSchema.omit({ channelId: true, observation: true }).parse(await body(request));
-        json(response, 200, await receive(input));
+        const input = IncomingSchema.omit({ channelId: true, observation: true, source: true }).parse(await body(request));
+        json(response, 200, await receive({ ...input, source: webAddress(input.sessionId) }));
       } else if (request.method === "POST" && url.pathname === "/conversations/default") {
         const { conversationId, enabled } = ConversationDefaultSchema.parse(await body(request));
         const resource = aide.findConversation(conversationId)?.conversations.resource(conversationId);
@@ -195,7 +197,8 @@ export function httpChannel(aide: WebService, log: Logger) {
         if (url.pathname === "/work") {
           json(response, 200, aide.works().filter((work) => work.conversationId === conversationId));
         } else {
-          const messages = aide.messages().filter((item) => item.conversationId === conversationId);
+          const conversation = aide.findConversation(conversationId)?.conversations.resource(conversationId);
+          const messages = aide.outputs().filter((item) => conversation && visibleOutput(item, conversation));
           const after = url.searchParams.get("after");
           const index = after ? messages.findIndex((item) => item.id === after) : -1;
           if (after && index < 0) { json(response, 400, { error: "Unknown message cursor" }); return; }

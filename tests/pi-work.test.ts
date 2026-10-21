@@ -1,3 +1,5 @@
+import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
+import { OutputStore } from "../src/host/output/store.ts";
 import type { PluginContext } from "@compforge/aide-plugin";
 import { consumeWorkInputs } from "../plugins/personal/work-input.ts";
 import type { WorkResource } from "../plugins/personal/resources.ts";
@@ -10,7 +12,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
-import { Store, message } from "../plugins/personal/store.ts";
+import { Store, output } from "../plugins/personal/store.ts";
 import { WorkService, AppendInputSchema, type WorkDefinition } from "../plugins/personal/work.ts";
 import { workType } from "../plugins/personal/resources.ts";
 import { TASK_TYPE } from "../plugins/personal/task/model.ts";
@@ -27,7 +29,7 @@ function setup(t: TestContext) {
   const session = new SessionStore(root).createSession({ cwd: root });
   let writes = 0;
   const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
-  const store = new Store(resources, createResourceClient(resources, () => writes++), new ConversationStore(session));
+  const store = new Store(resources, createResourceClient(resources, () => writes++, undefined, new AideResourceProvider({ session, outputs: new OutputStore(root) })), new ConversationStore(session));
   const consume = async (id: string) => {
     const work = store.get(id);
     return consumeWorkInputs({ resources: createResourceClient(resources), logger: { info() {}, warn() {} } } as unknown as PluginContext,
@@ -42,7 +44,7 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and convers
   const work = (await service.create(definition));
   const type = workType(definition.kind);
   const uid = store.resources.get(type, work.id).metadata.uid;
-  const response = message("me", "已接下", work.id);
+  const response = output("me", "已接下", work.id);
   (await store.save(work, [response], "accepted-input"));
   assert.equal(service.list().length, 1);
   const beforeRead = writes();
@@ -68,7 +70,7 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and convers
   (await service.delete(work.id, updated.revision));
   assert.deepEqual(service.list(), []);
   assert.equal(store.response("accepted-input")?.id, response.id);
-  assert.equal(store.read().messages.filter((item) => item.id === response.id).length, 1);
+  assert.equal(store.read().outputs.filter((item) => item.id === response.id).length, 1);
 });
 
 test("Work Reconcile validates requests and only explicit control can resume paused work", async (t) => {
@@ -116,7 +118,7 @@ test("Work service writes wake the existing Worker and reconcile; deletion durin
   (await tools.delete(work.id, work.revision));
   release(); await aide.settled();
   assert.deepEqual(tools.list(), []);
-  assert.equal(aide.messages().length, 0);
+  assert.equal(aide.outputs().length, 0);
   assert.equal(aide.session("me").store.resources.find(TASK_TYPE, work.id), undefined);
 });
 
@@ -135,11 +137,11 @@ test("Work view aggregates separate Task and Routine resources without persistin
   assert.equal((routineResource.spec.trigger as { event: string }).event, "changed");
   assert.deepEqual(service.list().map((work) => work.kind).sort(), ["routine", "task"]);
   assert.equal(store.resources.list({ apiVersion: TASK_TYPE.apiVersion, kind: "Work" }).length, 0);
-  const reply = message("me", "routine result", recurring.id);
+  const reply = output("me", "routine result", recurring.id);
   (await store.save(recurring, [reply], "routine-input", "event-1"));
   assert.equal(store.hasEvent(recurring.id, "event-1"), true);
   assert.equal(store.response("routine-input")?.id, reply.id);
-  assert.equal(store.read().messages.length, 1);
+  assert.equal(store.read().outputs.length, 1);
 });
 
 /** @case A shared source fact is routed through Chief, then consumed independently by existing Task and Routine. */

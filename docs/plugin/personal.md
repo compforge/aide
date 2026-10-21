@@ -12,7 +12,7 @@ Me 是身份标记配置，通过匹配 Person 的外部身份确定 Personal.me
 
 Person 目录跨 Conversation 和 Session 共享。Personal 使用保留的 personal:persons 资源作用域与现有跨 Session Resource API；目录不启动 Harness 或 Reconcile。人物资源受容量保护，写入通过 ResourceClient 做版本和身份唯一性校验。
 
-Channel、Source 和按需 Connector 消息读取持续贡献人物事实。发送者及上下文中的作者拥有可识别用户身份时解析为 Person；缺少主体类型的提及 ID 保留为证据，避免把机器人建成人物；系统事件不需要人物。Input.sender 是可选的 Person 引用，多作者讨论没有单一发送者时留空，逐条作者保留在 observation 中。
+Channel、Source 和按需 Connector 消息读取持续贡献人物事实。发送者及上下文中的作者拥有可识别用户身份时解析为 Person；缺少主体类型的提及 ID 保留为证据，避免把机器人建成人物；系统事件不需要人物。Input.sender 是可选的 Person 引用，多作者讨论没有单一发送者时留空，逐条作者保留在 observation 中。Output.receivers 同样引用 Person，可以为空或包含多人；Input.source 与 Output.target 使用 Address。Aide 结合输入性质、已有委托与处理进展，决定是否沟通、对谁表达、送到哪里；这些决定不要求与单条 Input 一一对应。
 
 Input.relation 描述输入相对于 Me 的关系：
 
@@ -71,11 +71,11 @@ ReconcileInput 负责归位，不调用模型。没有任何 Conversation 时，
 2. Input 带有尚无会话承接的目标 `sessionId` 时，创建 Conversation 并追加。
 3. 追加到目标 `sessionId` 匹配的已有会话；讨论续报的 `originalInputId` 匹配已经持有原始 Input 的会话。创建不阻止继续关联已有话题。
 
-没有默认会话、没有规则关联、也不满足创建规则时，记录为忽略。新话题不自动成为默认联络处，也不自动向观察到的原群发送消息。Source 的执行 Session 与目标归属分开；首次无归属的输入使用稳定生成的新 Session，创建的普通 Conversation 可以在 Web 查看并继续回复。
+没有默认会话、没有规则关联、也不满足创建规则时，记录为忽略。新话题不自动成为默认联络处，也不自动向观察到的原群发送消息。Conversation.address 只在由 Channel Input 创建时取首个 Input.source；Source 创建及后续追加不会设定或覆盖默认地址。Immediate 输入的直接回复使用该 Input.source，default 会话也遵循此规则；其它通知明确选择 target 或使用 Conversation.address。多个 immediate 地址不同时，say 必须指定 respondToInputId 或 target。Source 的执行 Session 与目标归属分开；首次无归属的输入使用稳定生成的新 Session，创建的普通 Conversation 可以在 Web 查看并继续回复。
 
 追加按 Conversation 与 inputId 幂等：已挂载时不写入、不重置消费进度，也不重复唤醒；并发版本冲突重读同一资源身份后重试。路由只保存执行状态、首次创建分支和待创建会话的稳定身份；创建成功后固定 uid，避免重试时重复创建或重新投递到已删除会话的替代资源。中断后重新检查默认会话和确定性规则，已完成追加通过幂等性跳过。后续创建或关联失败不撤销、不阻塞先前已追加会话的消费；讨论续报等待原始 Input 完成路由后继续关联。Channel 同步保存本会话消息后，也继续执行这一路由，不提前标记为完成。
 
-Conversation 的 spec 保存身份、所属 Session 与触发策略；status 保存 `pendingInputIds`、下次触发时间和一个 `batch`。Batch 是 Conversation 内部的处理单元，定义在 `conversation/batch.ts`，没有独立 CRD。没有第二份 recentInputIds 或持续增长的 processing 表。
+Conversation 的 spec 保存身份、所属 Session、可选 address 与触发策略；status 保存 `pendingInputIds`、下次触发时间和一个 `batch`。Batch 是 Conversation 内部的处理单元，定义在 `conversation/batch.ts`，没有独立 CRD。没有第二份 recentInputIds 或持续增长的 processing 表。
 
 两个 Controller 观察同一个 Conversation：默认 Controller 执行 `reconcileConversation`，具名 `batch` Controller 执行 `reconcileBatch`。它们拥有独立队列，通过明确的 status Watch 协作，避免等待 Harness 时挡住新输入调度。
 
@@ -91,7 +91,7 @@ Conversation 的 spec 保存身份、所属 Session 与触发策略；status 保
 
 上下文交接包含完整 Input 原文、内部总结和已发送消息；超出预算时，Batch 用关闭业务工具和记忆扩展的 Harness 分段压缩。每段成功后持久化 offset 与摘要，整份交接完成后才标记 done。失败保留原文引用和检查点，新的立即请求可恢复纯压缩阶段，不重新执行业务动作。进程中断时，queued Batch 可以启动、compacting Batch 可以从检查点恢复；running / waiting Batch 标记 interrupted，当前运行时不恢复 JavaScript 调用栈或重放工具动作。
 
-幂等接收凭据保存在 Input 上，随 Input 生命周期清理，不依赖 pending 队列是否仍含该 ID。队列和当前 Batch 的引用保护 Input；批次替换后不再引用的 Input 由 Host 按资源容量策略回收。Web 从现存 Input 和接收凭据展示原始事实，从 Ledger 展示执行轨迹；不把批次状态或版本覆盖进 Input 资源。Conversation 的普通消息投影保留最近 100 条，Lark 未送达消息继续保留并受 Host 总容量限制。
+幂等接收凭据保存在 Input 上，随 Input 生命周期清理，不依赖 pending 队列是否仍含该 ID。队列和当前 Batch 的引用保护 Input；批次替换后不再引用的 Input 由 Host 按资源容量策略回收。Web 从现存 Input 和接收凭据展示原始事实，从 Ledger 展示执行轨迹；不把批次状态或版本覆盖进 Input 资源。Output 独立受 Host 按 kind 的容量策略管理，未送达或仍被 Batch 引用的输出受保护；Conversation 不再维护第二份消息正文或固定条数的副本。
 
 Input 路由完成、批次消费完成、工作目标完成与消息送达分别记录。错误不会对后续每条观察各发一条通知；失败 Batch 保留 pending 引用，后台执行暂停，用户可以用新请求核对并接手。
 
@@ -113,7 +113,7 @@ Personal 决定回顾策略，Core 提供通用定时唤醒与恢复能力。Run
 
 Conv 的回顾关注话题中的遗漏、进展、阻塞和可采取的下一步，Routine 的定时触发则承担明确的本轮职责。回顾可以静默结束；需要执行时依据已有委托，需要补充信息或用户决定时再询问。记忆中的意向不自动成为执行委托，也不重复提出没有新依据或用户回应的建议。
 
-Chief 可以推进已有委托、用普通消息提出建议、请求 ask/confirm，或静默结束。`say` 保存普通 Message，由 Channel 独立投递；用户回复 say 是新的 Channel Input。定时回顾仅在有实际消息或问题时通知用户，静默回顾的内部总结不渲染为回复。
+Chief 可以推进已有委托、用普通消息提出建议、请求 ask/confirm，或静默结束。`say` 保存独立 Output，由 Channel 独立投递；用户回复 say 是新的 Channel Input。定时回顾仅在有实际消息或问题时通知用户，静默回顾的内部总结不渲染为回复。
 
 ## 环境观察
 
@@ -129,7 +129,7 @@ Chief 拥有原生文件/CLI 工具、五个 Work 工具，以及 `read_requirem
 
 Source 观察没有用户指令的地位。Chief 应读取详情、查询已有 Work；在已有委托内可以推进工作，缺少目标或授权时询问。不值得打扰的观察可调用 `dismiss_observation`，保存原因但不向 Channel 发消息。
 
-普通回复由 Chief 的工具调用 `say` 保存到 Conversation 的 Message 流，Conversation 的处理记录保留消息引用，Core 问题按原 messageId 投影到同一 Channel 消息流。POST `/messages` 返回入站持久回执，业务结果异步出现；没有每次固定发出的“已创建事项”回复。模型进度不会重复投递为最终回复。
+普通回复由 Chief 的工具调用 `say` 创建独立 Output，Batch 保留本批 Output ID 至上下文交接完成；界面按 Conversation UID 查询历史输出。Input 与 Output 的关联可选且多对多。Core 问题按原 messageId 投影到 Channel 交流流，不伪造 Output 资源。POST `/messages` 返回入站持久回执，业务结果异步出现；没有每次固定发出的“已创建事项”回复。模型进度不会重复投递为最终回复。
 
 Chief 可能调用有副作用的工具，因此运行中断、失败或重启均不自动重放。状态和失败提示保留，用户核对后用新消息重新交办。同一输入 id 的传输重投永远不作为业务重试。等待中的调用栈不跨重启恢复，Core 问题会收口，Conversation 中的 Batch 标记 interrupted；Work 的结果处理见下文。
 
@@ -151,11 +151,11 @@ Task 与 Routine 各自的 Controller 观察 ready 或已到期的 scheduled，�
 
 执行返回 ask 时，工作保存为 waiting 并结束本次调用，用户回答后再唤醒；返回 wait 时保存动态唤醒时间。Routine 完成本轮后继续等待下一次触发，Task 完成后结束。事件触发更新匹配的 Routine，由其 Controller 推进。
 
-`task/` 与 `routine/` 各自保存 CRD 定义（`model.ts`）和 Reconcile（`reconcile.ts`）：Task 完成后进入 done，Routine 完成本轮后回到 scheduled，并按自己的触发规则计算下次时间。两者共享 personal 内部的 Harness 调用、结果校验、并发更新处理和 outbox 记录；这些辅助操作位于 `execution.ts`，不进入通用 Host / Runner。
+`task/` 与 `routine/` 各自保存 CRD 定义（`model.ts`）和 Reconcile（`reconcile.ts`）：Task 完成后进入 done，Routine 完成本轮后回到 scheduled，并按自己的触发规则计算下次时间。两者共享 personal 内部的 Harness 调用、结果校验、并发更新处理和 Output 原子提交；这些辅助操作位于 `execution.ts`，不进入通用 Host / Runner。
 
 资源类型决定身份；Task 没有周期触发配置，Routine 必须有 cron 或事件触发。Work 工具与网页聚合这两类资源，对外仍返回 task / routine 分类。Chief 的会话处理观察 Personal 定义的 Conversation 资源。
 
-改变工作类型由 Chief 组合现有工具：读取原工作的目标与结果，创建目标类型的新工作，再按用户意图暂停或删除原工作。新工作使用独立 id 和执行 Lane，相关上下文写入指令；保留原工作可查看完整历史，删除则将已交付消息与输入回执归档到 Conversation。各步分别持久化，不承诺跨资源的原子转换；中断后应查询现状再继续。暂停和删除都不取消已经运行的外部动作。
+改变工作类型由 Chief 组合现有工具：读取原工作的目标与结果，创建目标类型的新工作，再按用户意图暂停或删除原工作。新工作使用独立 id 和执行 Lane，相关上下文写入指令；保留原工作可查看完整历史，删除则将输入回执保留到 Conversation，独立 Output 继续投递和展示。各步分别持久化，不承诺跨资源的原子转换；中断后应查询现状再继续。暂停和删除都不取消已经运行的外部动作。
 
 ## 完成依据与交付
 

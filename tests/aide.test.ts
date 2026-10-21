@@ -1,3 +1,5 @@
+import { fixtureAddress } from "./address-fixture.ts";
+import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,6 +22,7 @@ async function setup(t: TestContext, agent: Agent) {
   const path = dir;
   const aide = new Aide(path, fakeOptions(agent, path), log);
   t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
+  await aide.session("me").conversations.ensure("me", fixtureAddress("me"));
   await aide.start();
   return { aide, path };
 }
@@ -36,7 +39,7 @@ test("completed execution with invalid final output is distinct from interruptio
     const work = aide.works()[0]!;
     assert.equal(work.status, "invalid_result");
     assert.match(work.history.at(-1)!.text, /Execution completed but result validation failed/);
-    assert.match(aide.messages().at(-1)!.text, /执行已结束，但最终结果解析失败/);
+    assert.match(aide.outputs().at(-1)!.text, /执行已结束，但最终结果解析失败/);
     const invocations = aide.invocations();
     assert.ok(invocations.every((invocation) => invocation.phase === "completed"));
     await aide.close();
@@ -91,6 +94,7 @@ test("Personal requires a designated final answer even when the transcript conta
     return adapter;
   } }, log);
   t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
+  await aide.session("me").conversations.ensure("me", fixtureAddress("me"));
   await aide.start(); (await aide.work("me").create(task)); await aide.settled();
   assert.equal(aide.works()[0]!.status, "invalid_result");
   assert.match(aide.works()[0]!.history.at(-1)!.text, /without a designated final answer/);
@@ -110,7 +114,7 @@ test("Routine can be triggered by event, deduplicates deliveries, and stays acti
   await aide.settled();
   assert.equal(runs, 1);
   assert.equal(aide.works()[0]?.status, "scheduled");
-  assert.equal(aide.messages().filter((m) => m.role === "aide").length, 0);
+  assert.equal(aide.outputs().filter((m) => m.role === "aide").length, 0);
 });
 
 test("replacing a Task with a Routine uses distinct identities and retains the completed Task's messages", async (t) => {
@@ -126,11 +130,11 @@ test("replacing a Task with a Routine uses distinct identities and retains the c
   await aide.settled();
   assert.notEqual(routine.id, original.id);
   assert.deepEqual(tools.list().map((work) => work.id), [routine.id]);
-  assert.ok(aide.messages().some((item) => item.workId === original.id && item.text === done.notification));
+  assert.ok(aide.outputs().some((item) => item.workId === original.id && item.text === done.notification));
   assert.equal((await aide.event({ id: "next", sessionId: "me", conversationId: "me", name: "check.again", text: "检查更新" })), 1);
   await aide.settled();
   assert.equal(tools.read(routine.id).status, "scheduled");
-  assert.ok(aide.messages().some((item) => item.workId === routine.id && item.text === done.notification));
+  assert.ok(aide.outputs().some((item) => item.workId === routine.id && item.text === done.notification));
 });
 
 test("overdue work is woken after restart, without replaying missed occurrences", async (t) => {
@@ -269,11 +273,11 @@ test("Aide resumes the same Session and personal state when execution cwd change
   const first = new Aide(root, fakeOptions(agent, join(root, "code-a"), [], root), log);
   let restarted: Aide | undefined;
   t.after(async () => { await first.close(); await restarted?.close(); rmSync(root, { recursive: true, force: true }); });
-  await first.receive({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "你好" });
+  await first.receive(fixtureIncoming({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "你好" }));
   await first.settled();
   const routine = await first.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "manual" } });
   const originalId = new SessionStore(root).listSessions()[0]!.aideSessionId;
-  const messages = first.messages();
+  const messages = first.outputs();
   await first.close();
 
   const executionCwds: string[] = [];
@@ -293,8 +297,8 @@ test("Aide resumes the same Session and personal state when execution cwd change
   assert.equal(sessions[0]!.aideSessionId, originalId);
   assert.equal(sessions[0]!.cwd, join(root, "code-b"));
   assert.equal(restarted.work("me").read(routine.id).title, routine.title);
-  assert.deepEqual(restarted.messages(), messages);
-  await restarted.receive({ channelId: "web", id: "again", sessionId: "me", conversationId: "me", text: "继续聊" });
+  assert.deepEqual(restarted.outputs(), messages);
+  await restarted.receive(fixtureIncoming({ channelId: "web", id: "again", sessionId: "me", conversationId: "me", text: "继续聊" }));
   await restarted.settled();
   assert.ok(executionCwds.length > 0);
   assert.ok(executionCwds.every((cwd) => cwd === join(root, "code-b")));
@@ -321,6 +325,7 @@ test("default Work target uses Pi and discards stale Codex native bindings while
   assert.equal(restored.meta.harnessTargets.default!.model, undefined);
   assert.equal(restored.meta.lanes.main!.harnessSessions.default?.resumeState, undefined);
   assert.equal(restored.meta.lanes.main!.harnessSessions.default?.harnessSessionId, undefined);
+  await aide.session("me").conversations.ensure("me", fixtureAddress("me"));
   await aide.start();
   await aide.work("me").create(task); await aide.settled();
   assert.equal(aide.works()[0]!.status, "done");
@@ -340,7 +345,7 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   aide.session("me");
   assert.equal(new SessionStore(root).openSession("me").meta.harnessTargets.chosen!.model, "configured-model");
-  await aide.receive({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "hello" });
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "hello" }));
   await aide.settled();
   // Mutating the caller's object cannot change future Sessions' startup target.
   defaultTarget.model = "changed-after-startup";

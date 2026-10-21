@@ -1,3 +1,5 @@
+import { fixtureAddress } from "./address-fixture.ts";
+import { fixtureIncoming } from "./address-fixture.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -369,7 +371,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   }, pino({ level: "silent" }));
   let channel = channelFor();
   t.after(async () => { await channel.close(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.session("inbox").conversations.ensure();
+  await aide.session("inbox").conversations.ensure("inbox", fixtureAddress("inbox"));
   await aide.setDefaultConversation("inbox", true);
   // Persist a registered bot chat before observing user messages, but defer processing its request.
   await channel.receive({ sender: { sender_type: "user" }, message: {
@@ -377,11 +379,11 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
     content: JSON.stringify({ text: "@_user_1 channel request" }),
     mentions: [{ key: "@_user_1", id: { open_id: "ou_bot" } }],
   } });
-  await aide.receive({ channelId: "web", sessionId: "inbox", conversationId: "inbox", id: "hello", text: "hello" });
+  await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "inbox", conversationId: "inbox", id: "hello", text: "hello" }));
   await aide.start(); await aide.settled();
   const inputs = aide.session(MESSAGE_SESSION).conversations.inputStore;
   assert.equal(inputs.list(MESSAGE_SESSION).length, 3);
-  assert.ok(aide.messages().some((reply) => reply.text === "source-private-reply"), "The Source must produce a reply to exercise delivery exclusion");
+  assert.ok(aide.outputs().some((reply) => reply.text === "source-private-reply"), "The Source must produce a reply to exercise delivery exclusion");
   await channel.deliver();
   assert.deepEqual(sent, [], "Observing a user mention must not send Source replies to the registered bot chat");
   const observed = inputs.list(MESSAGE_SESSION)[0]!;
@@ -406,7 +408,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   const sourceGroupUid = aide.session(sourceGroupId).conversations.resource(sourceGroupId)!.metadata.uid;
   const groupId = "lark:cli_app:oc_group";
   await channel.dispatch(); await aide.settled(); await channel.deliver();
-  assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }]);
+  assert.deepEqual(sent, Array.from({ length: 2 }, () => ({ chatId: "oc_group", text: "channel-reply" })));
   const store = aide.session(groupId).conversations;
   assert.equal(store.list().length, 1);
   assert.equal(store.inputs(groupId).map((i) => i.metadata.name).length, 1);
@@ -425,7 +427,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   await channel.close(); await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   channel = channelFor();
   await aide.start(); await aide.settled(); await channel.dispatch(); await channel.deliver();
-  assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }], "Restart must neither leak historical Source replies nor duplicate delivered Channel replies");
+  assert.deepEqual(sent, Array.from({ length: 2 }, () => ({ chatId: "oc_group", text: "channel-reply" })), "Restart must neither leak historical Source replies nor duplicate delivered Channel replies");
   assert.equal(aide.session(MESSAGE_SESSION).conversations.inputStore.list(MESSAGE_SESSION).length, 3);
   assert.equal(aide.session(groupId).conversations.resource(groupId)!.metadata.uid, groupUid);
   assert.equal(aide.session(groupId).conversations.inputs(groupId).map((i) => i.metadata.name).length, 1);

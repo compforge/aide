@@ -9,15 +9,15 @@ Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、确定
 
 ## 输入、会话与回复
 
-Channel 提交用户消息时提供稳定 sessionId 与消息去重身份，不需要理解 Personal 的 Conversation。Lark 使用应用与聊天身份，Web 使用选中会话所属的 Session。Channel 通过绑定 Definition 的入口提交消息，Core 保存 Input 并返回持久化回执；Personal 为该 Session 组织交流上下文。输入直接投影为输入卡片，Message 只承载回复与通知；接收成功不代表模型已经回答或目标已经完成。
+Channel 提交用户消息时提供 source 地址、稳定 sessionId 与消息去重身份，不需要理解 Personal 的 Conversation。Lark 使用应用与聊天身份，Web 使用选中会话所属的 Session。Channel 通过绑定 Definition 的入口提交消息，Core 保存 Input 并返回持久化回执；Personal 为该 Session 组织交流上下文。输入直接投影为输入卡片，Output 独立承载回复与通知；接收成功不代表模型已经回答或目标已经完成。
 
 Personal 决定输入进入哪个 Conversation、是否创建 Work。普通回答直接进入消息流，需要持续跟进时才操作 Task / Routine。同一 Session 的后续消息可以回答问题或补充已有工作。Web 的 Conversation 列表是 Personal 的业务视图，可以查看 Lark 或 Source 会话。
 
-Source 是外部观察入口，可以提交带目标 sessionId 或完全没有目标的 Input。Chief 路由后，在目标会话决定如何沟通；Lark 投递使用已建立的聊天路由。
+Source 是外部观察入口，可以提交带话题 sessionId 或没有话题线索的 Input，也可以携带观察所在的 source 地址。Chief 路由后决定是否及向哪里沟通；Lark 投递读取 Output.target，不从话题身份推导聊天目标。地址与收件处选择见 [Output](../output.md)。
 
 ## 投递与进度
 
-正式回复与工作结果是持久 Message，Channel 按自己的投递记录发送。失败重试不应重新执行已经完成的业务。客户端断开也不取消服务端 Task / Routine。
+正式回复与工作结果是持久 Output，Channel 按保存的 target 与投递记录发送。失败重试不应重新执行已经完成的业务。客户端断开也不取消服务端 Task / Routine。
 
 思考、工具调用和文字增量属于执行进展，来自 Harness 事件与 Ledger 投影。Web 使用 Markdown 展示；Lark 使用原生流式卡片，合并更新思考与正文，最终收口到同一张卡片。进展不写成新的用户 Input，也不触发 Work。
 

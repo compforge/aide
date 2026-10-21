@@ -1,3 +1,4 @@
+export type { Address, ChannelAddress } from "./address.ts";
 export type {
   BoardPresentation,
   BoardItemTone,
@@ -176,6 +177,9 @@ export type {
   TurnSummaryToolCall,
 } from "./snapshot.ts";
 export { INPUT_TYPE } from "./input.ts";
+export { OUTPUT_TYPE } from "./output.ts";
+export type { Output, OutputSpec, OutputStatus } from "./output.ts";
+export type { ResourceCommit } from "./resource.ts";
 export type { InputSpec, InputStatus, InputReceipt, InputRelation } from "./input.ts";
 export type * from "./connectors/index.ts";
 

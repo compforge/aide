@@ -10,7 +10,7 @@ import { ReconcileCapacity } from "../src/reconcile/queue.ts";
 import { emptyReconcileSnapshot } from "../src/host/plugin/reconcile-snapshot.ts";
 import { createPluginVerbs } from "../src/plugin-context.ts";
 
-test("say persists an ordinary scoped Message without an Interaction and validates Input ownership", async (t) => {
+test("say persists an independent scoped Output without an Interaction and validates Input ownership", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-say-"));
   const session = new SessionStore(root).createSession({ id: "owner", cwd: root });
   const conversations = new ConversationStore(session);
@@ -23,15 +23,15 @@ test("say persists an ordinary scoped Message without an Interaction and validat
   const verbs = createPluginVerbs(context, (scope, request) => verb.invoke(scope, request));
   const result = await verbs.say({ text: "可以继续了" });
   assert.equal(result.state, "success");
-  assert.equal(conversations.get("private")!.messages.length, 1);
-  assert.equal(conversations.get("private")!.messages[0]!.text, "可以继续了");
+  assert.equal(conversations.get("private")!.outputs.length, 1);
+  assert.equal(conversations.get("private")!.outputs[0]!.text, "可以继续了");
   assert.equal(session.projection.interactions.size, 0);
   assert.equal(conversations.input("tick")!.consumption.phase, undefined);
   assert.equal((await verb.invoke({ ...context, conversationId: "other" }, { verb: "say", input: { text: "wrong scope" } })).state, "failure");
   assert.equal((await verb.invoke({ ...context, conversationId: undefined }, { verb: "say", input: { text: "no scope" } })).state, "failure");
   await assert.rejects(verbs.say({ text: " " }));
   assert.equal((await verb.invoke({ ...context, inputId: undefined }, { verb: "say", input: { text: "standalone message" } })).state, "success");
-  assert.equal(new ConversationStore(session).get("private")!.messages.length, 2);
+  assert.equal(new ConversationStore(session).get("private")!.outputs.length, 2);
   verb.endRemote(context.executionId);
 });
 
@@ -39,7 +39,7 @@ test("Interruption before Harness creation prevents later actions in that execut
   const root = mkdtempSync(join(tmpdir(), "aide-interrupt-before-harness-"));
   const session = new SessionStore(root).createSession({ id: "owner", cwd: root });
   let dispatched = 0, messages = 0;
-  const verb = new Verb({ session, say: async () => { messages++; return { messageId: "unexpected" }; },
+  const verb = new Verb({ session, say: async () => { messages++; return { outputId: "unexpected" }; },
     capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot(session.id),
     enqueueHarnessInvocation: () => { dispatched++; } });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });

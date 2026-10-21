@@ -1,3 +1,6 @@
+import { fixtureAddress, fixtureIncoming } from "./address-fixture.ts";
+import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
+import { OutputStore } from "../src/host/output/store.ts";
 import { conversationLane } from "../plugins/personal/conversation/model.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import { LOCAL_ME } from "../plugins/personal/person/model.ts";
@@ -68,7 +71,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   await persons.initialize();
   const session = sessions.createSession({ cwd: root });
   const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
-  const store = new Store(resources, createResourceClient(resources), new ConversationStore(session));
+  const store = new Store(resources, createResourceClient(resources, undefined, undefined, new AideResourceProvider({ session, outputs: new OutputStore(root) })), new ConversationStore(session));
   const work = new WorkService(store, "me", pino({ level: "silent" }));
   const inputs = { cwd: root, agentDir, model };
   const config = { ...inputs, config: await resolvePiConfig({ ...inputs, ...(harness === "chief" ? { skillPaths: [] } : {}) }) };
@@ -278,7 +281,7 @@ test("Aide keeps stable Sessions and transfers explicit Batch context across fre
     createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
       chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }, log);
   const send = async (sessionId: string, conversationId: string, id: string) => {
-    await aide.receive({ channelId: "web", sessionId, conversationId, id, text: `question-${id}` }); await aide.settled();
+    await aide.receive(fixtureIncoming({ channelId: "web", sessionId, conversationId, id, text: `question-${id}` })); await aide.settled();
     assert.equal(aide.findConversation(conversationId)!.conversations.inputs().at(-1)!.consumption.phase, "done");
   };
   const binding = (sessionId: string, conversationId: string) => {
@@ -305,7 +308,7 @@ test("Aide keeps stable Sessions and transfers explicit Batch context across fre
     assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
     assert.match(JSON.stringify(fixture.requests[6]), /native-response-1/);
     assert.doesNotMatch(JSON.stringify(fixture.requests[6]), /question-b1/);
-    assert.equal(aide.messages().filter((message) => message.conversationId === "lark:app:group-a").length, 3);
+    assert.equal(aide.outputs().filter((message) => message.conversationId === "lark:app:group-a").length, 3);
     await aide.close();
     const cwd = join(fixture.config.cwd, "other-cwd"); mkdirSync(cwd);
     aide = open(cwd); await aide.start();
@@ -313,7 +316,7 @@ test("Aide keeps stable Sessions and transfers explicit Batch context across fre
     assert.ok((binding("lark:app:group-a", "lark:app:group-a").contextAfterSeq ?? 0) >= (original.contextAfterSeq ?? 0));
     await send("lark:app:group-a", "lark:app:group-a", "a4");
     assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
-    assert.equal(aide.messages().filter((message) => message.conversationId === "lark:app:group-a").length, 4);
+    assert.equal(aide.outputs().filter((message) => message.conversationId === "lark:app:group-a").length, 4);
     const beforeDelete = binding("lark:app:group-a", "lark:app:group-a");
     const conversation = aide.findConversation("lark:app:group-a")!.conversations.get("lark:app:group-a")!;
     assert.deepEqual(await aide.deleteConversation(conversation.id, conversation.revision, aide.findConversation(conversation.id)!.conversations.resource(conversation.id)!.metadata.uid), { deleted: true });
@@ -530,7 +533,7 @@ test("Chief summary rebuild fences forgotten history from native resume and Ledg
   aide = open();
   try {
     for (const id of ["forgotten-marker", "retained-marker"]) {
-      await aide.receive({ channelId: "web", sessionId: "me", id, text: id + "x".repeat(2000) }); await aide.settled();
+      await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "me", id, text: id + "x".repeat(2000) })); await aide.settled();
     }
     const c = aide.findConversation("me")!.conversations.resource("me")!;
     assert.equal(c.status.pendingInputIds.length, 0, JSON.stringify(c.status));
@@ -540,7 +543,7 @@ test("Chief summary rebuild fences forgotten history from native resume and Ledg
     assert.ok(!(summaryRequest.tools as unknown[] | undefined)?.length, "Summary execution has no action tools");
     await aide.close(); aide = open(); await aide.start();
     const before = fixture.requests.length;
-    await aide.receive({ channelId: "web", sessionId: "me", id: "new", text: "new-marker" }); await aide.settled();
+    await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "me", id: "new", text: "new-marker" })); await aide.settled();
     const rebuilt = JSON.stringify(fixture.requests[before]!.messages);
     assert.match(rebuilt, /Earlier facts|retained-marker/);
     assert.doesNotMatch(rebuilt, /forgotten-marker|aide-sync/);
@@ -559,20 +562,20 @@ test("Immediate input cancels a live Chief ask and starts a fresh Batch without 
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
       chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }, pino({ level: "silent" }));
   t.after(() => aide.close());
-  await aide.receive({ channelId: "web", sessionId: "me", id: "old", text: "Original request" });
+  await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "me", id: "old", text: "Original request" }));
   for (let i = 0; i < 200 && !aide.questions().some((q) => q.request.status === "pending"); i++) await Bun.sleep(10);
   const question = aide.questions().find((q) => q.request.status === "pending")!;
   assert.ok(question);
   const scope = aide.session("me"), old = scope.conversations.resource("me")!.status.batch!;
   assert.equal(old.phase, "waiting");
-  await scope.conversations.submit("urgent", { origin: "source", originId: "personal.environments", sessionId: "me", attention: "immediate", text: "Urgent new evidence" });
+  await scope.conversations.submit("urgent", { origin: "source", originId: "personal.environments", sessionId: "me", attention: "immediate", source: fixtureAddress("me"), text: "Urgent new evidence" });
   await aide.settled();
   const current = scope.conversations.resource("me")!;
   assert.equal(current.status.batch!.phase, "done", JSON.stringify(current.status.batch!.result));
   assert.notEqual(current.status.batch!.id, old.id);
   assert.deepEqual(current.status.pendingInputIds, []);
   assert.equal(aide.questions().find((q) => q.request.messageId === question.request.messageId)!.request.status, "cancelled");
-  assert.equal(aide.messages().filter((m) => m.text === "Handled urgent request").length, 1);
+  assert.equal(aide.outputs().filter((m) => m.text === "Handled urgent request").length, 1);
   assert.equal(scope.core.projection.activeTurns.size, 0);
   const before = fixture.requests.length;
   if (question.request.request.kind !== "question") throw new Error("Missing question");

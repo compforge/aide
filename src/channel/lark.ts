@@ -1,3 +1,6 @@
+import { larkAddress, larkEndpoint } from "./address.ts";
+import { channelOutputs } from "./output.ts";
+import type { OutputView } from "../output.ts";
 import { CHANNELS, bindChannelInput } from "./definition.ts";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -6,7 +9,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 import { normalize } from "@larksuiteoapi/node-sdk";
 import type { ChannelService } from "./service.ts";
-import { IncomingSchema, MessageSchema, type Message } from "./message.ts";
+import { IncomingSchema } from "./message.ts";
 import { progressCard, cardPreviews, cardContent, cardThought, type LarkProgressReader, type LarkProgress } from "./lark-card.ts";
 import type { LarkTransport } from "./lark-client.ts";
 
@@ -26,10 +29,12 @@ const CardSchema = z.object({ cardId: z.string(), sent: z.boolean(), sequence: z
   layout: z.number().default(0), previews: z.string().default(""),
   streaming: z.boolean(), think: z.string(), content: z.string(), signature: z.string() });
 type Card = z.infer<typeof CardSchema>;
+const NoticeSchema = z.object({ id: z.string(), conversationId: z.string(), at: z.string(), role: z.literal("aide"), text: z.string(), workId: z.null() });
+type Notice = z.infer<typeof NoticeSchema>;
 const StateSchema = z.object({
   cards: z.record(z.string(), CardSchema).default({}),
   pending: z.array(IncomingSchema.omit({ channelId: true })), received: z.array(z.string()),
-  chats: z.array(z.string()), notices: z.array(MessageSchema), delivered: z.array(z.string()),
+  chats: z.array(z.string()), notices: z.array(NoticeSchema), delivered: z.array(z.string()),
 });
 type State = z.infer<typeof StateSchema>;
 
@@ -53,7 +58,7 @@ export class LarkChannel {
   private readonly cardRetry = new Map<string, number>();
   private readonly receiptRetry = new Map<string, number>();
 
-  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "messages" | "messageDelivered">,
+  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "outputs" | "outputDelivered" | "outputSending" | "outputRetry"> & Partial<Pick<ChannelService, "questions" | "findConversation">>,
     private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
     this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
@@ -115,7 +120,7 @@ export class LarkChannel {
     // Group normalization yields; concurrent duplicate deliveries must still persist only once.
     if (this.stopped) throw new Error("Lark channel is stopping");
     if (this.state.received.includes(id)) return;
-    const input = IncomingSchema.omit({ channelId: true }).safeParse({ id, sessionId: conversationId, text,
+    const input = IncomingSchema.omit({ channelId: true }).safeParse({ id, sessionId: conversationId, text, source: larkAddress(this.appId, chatId),
       observation: { provider: "lark", accountId: this.appId, chatId, chatType: message.chat_type,
         sender: { type: sender.sender_type, ...(sender.sender_id?.open_id ? { id: sender.sender_id.open_id } : {}) },
         mentions: (message.mentions ?? []).flatMap((mention) => mention.id.open_id ? [mention.id.open_id] : []) } });
@@ -139,7 +144,7 @@ export class LarkChannel {
   private async drainInbox(): Promise<void> {
     while (!this.stopped && this.state.pending.length) {
       const input = this.state.pending[0]!;
-      let failure: Message | undefined;
+      let failure: Notice | undefined;
       try {
         await this.acceptInput(input);
         this.log.info({ messageId: input.id, conversationId: input.sessionId }, "Lark input routed");
@@ -175,12 +180,17 @@ export class LarkChannel {
         }
       }
     }
-    const messages = [...this.aide.messages(), ...this.state.notices]
-      .filter((message) => message.role === "aide" && message.conversationId.startsWith(this.prefix))
+    const notices: OutputView[] = this.state.notices.map((n) => ({ ...n, conversationUid: "", target: larkAddress(this.appId, n.conversationId.slice(this.prefix.length)), status: { phase: "pending", attempts: 0 } }));
+    const outputs = [...channelOutputs(this.aide), ...notices]
+      .filter((o) => larkEndpoint(o.target)?.appId === this.appId)
       .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
-    for (const message of messages) {
-      const chatId = message.conversationId.slice(this.prefix.length);
-      if (!this.state.chats.includes(chatId)) continue;
+    for (const message of outputs) {
+      if (message.status.phase === "delivered" || message.status.phase === "failed" || message.status.phase === "uncertain") continue;
+      if (message.status.nextAttemptAt && Date.now() < Date.parse(message.status.nextAttemptAt)) continue;
+      const endpoint = larkEndpoint(message.target);
+      if (!endpoint) continue;
+      const { chatId } = endpoint;
+      await this.aide.outputSending?.(message.id);
       const parts = textParts(message.text);
       for (const [index, text] of parts.entries()) {
         if (this.stopped) return;
@@ -190,6 +200,7 @@ export class LarkChannel {
           await this.transport.send(chatId, text, id);
         } catch {
           this.retryAt = Date.now() + 10_000;
+          await this.aide.outputRetry?.(message.id, "Lark send failed", new Date(this.retryAt).toISOString());
           this.log.warn({ messageId: message.id, part: index, conversationId: message.conversationId }, "Lark send failed; retrying in 10 seconds");
           return;
         }
@@ -204,7 +215,7 @@ export class LarkChannel {
   private async acknowledge(conversationId: string, messageId: string): Promise<void> {
     if (Date.now() < (this.receiptRetry.get(messageId) ?? 0)) return;
     try {
-      await this.aide.messageDelivered?.(conversationId, messageId);
+      await this.aide.outputDelivered?.(messageId);
       this.receiptRetry.delete(messageId);
     } catch (err) {
       this.receiptRetry.set(messageId, Date.now() + 10_000);
@@ -290,7 +301,7 @@ export class LarkChannel {
     await Promise.allSettled([this.inbound, this.outbound]);
   }
 
-  private notice(id: string, conversationId: string, text: string): Message {
+  private notice(id: string, conversationId: string, text: string): Notice {
     return { id: `notice:${id}`, conversationId, text, role: "aide", workId: null, at: new Date().toISOString() };
   }
 
@@ -304,7 +315,7 @@ export class LarkChannel {
 }
 
 /** @why Keep encoded text well below Lark's 150 KB limit, including JSON escaping. */
-function textParts(text: Message["text"]): string[] {
+function textParts(text: string): string[] {
   const points = Array.from(text || "（空消息）");
   const result: string[] = [];
   for (let offset = 0; offset < points.length; offset += 4000) result.push(points.slice(offset, offset + 4000).join(""));

@@ -38,7 +38,7 @@ Session、Turn 等从 Ledger/运行态生成的只读 Resource 投影不另存�
 
 Core 内置 Printer 按精确的 `apiVersion + kind` 选择，其它 Printer 按插件实例与 GVK 选择，同一实例重复注册同一类型会失败。类型归属复用 ResourceRegistry，不能覆盖 Core 或其它插件的资源类型；注册失败整体回滚，实例关闭或 Runner 失效后撤销注册。没有专用 Printer 时，详情默认使用缩进 JSON，概览默认使用 `kind/name`。已注册 Printer 的执行失败记录资源身份和方法名，并向调用方返回错误。
 
-InputPrinter 位于 `src/host/input/printer.ts`，由 Host 装配，不随插件实例关闭而撤销。`describe` 保留完整正文、来源、接收时间、可选话题、回复关联和原样 observation；不查询历史，也不解释各 Source 的业务字段。`summarize` 折叠空白并生成最多 120 个 Unicode 码点的单行预览。Web 输入详情与 Chief 当前输入使用同一份描述，Web 正文保留完整 `spec.text`；路由和消费状态仍属于各自的资源与会话投影。输出是普通文本，调用方不能把它当作可信 HTML 或指令。插件声明示例见 [Resource Printers](../../packages/plugin/README.md#resource-printers)。
+OutputPrinter 位于 `src/host/output/printer.ts`，提供正文、目标与投递信息的完整描述和有界预览。InputPrinter 位于 `src/host/input/printer.ts`，由 Host 装配，不随插件实例关闭而撤销。`describe` 保留完整正文、来源、接收时间、可选话题、回复关联和原样 observation；不查询历史，也不解释各 Source 的业务字段。`summarize` 折叠空白并生成最多 120 个 Unicode 码点的单行预览。Web 输入详情与 Chief 当前输入使用同一份描述，Web 正文保留完整 `spec.text`；路由和消费状态仍属于各自的资源与会话投影。输出是普通文本，调用方不能把它当作可信 HTML 或指令。插件声明示例见 [Resource Printers](../../packages/plugin/README.md#resource-printers)。
 
 ## Source 与 Watch
 
@@ -50,7 +50,7 @@ Controller 可声明 `name`，让同一插件对同种资源注册独立队列�
 
 ## Verb 与 Harness
 
-Reconcile 通过 `ctx.verbs` 请求 say、ask、confirm、draft、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。say 通过应用装配的持久消息出口保存普通 Message；Personal 将其保存在关联 Conversation 的消息流，不建立 Interaction 或等待用户；成功表示持久化，投递由 Channel 负责。ask/confirm 保存 Interaction，draft/harness 按交互结果发起 HarnessInvocation；Connector verb 直接执行。插件只需表达意图、期限和目标，不处理提供方原生协议。
+Reconcile 通过 `ctx.verbs` 请求 say、ask、confirm、draft、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。say 通过应用装配的出口创建独立 Output，返回 outputId，不建立 Interaction 或等待用户；成功表示持久化，Channel 按 Output.target 投递。业务状态与 Output 可通过 ResourceClient.commit 原子保存，详见 [Output](../output.md)。ask/confirm 保存 Interaction，draft/harness 按交互结果发起 HarnessInvocation；Connector verb 直接执行。插件只需表达意图、期限和目标，不处理提供方原生协议。
 
 等待 verb 时释放 Controller 和 Runner 容量，同一 Controller 内同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。拒绝确认是正常业务答案；取消、超时和失败需要插件自行决定业务结果。
 

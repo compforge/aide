@@ -1,3 +1,4 @@
+import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -47,7 +48,7 @@ test("Default conversation selection is serialized across Sessions and persisted
   assert.ok(counts.length > 0 && counts.every((count) => count <= 1));
   assert.deepEqual(conversationList(aide).filter((c) => c.default).map((c) => c.id), [b]);
   assert.equal(aide.session(b).conversations.get(b)!.trigger!.enabled, false);
-  assert.equal(aide.messages().length, 0);
+  assert.equal(aide.outputs().length, 0);
   await assert.rejects(aide.setDefaultConversation("missing", true), /does not exist/);
   assert.equal(conversationList(aide).find((c) => c.default)!.id, b);
   // A failed request must not poison the selector's queue.
@@ -82,12 +83,12 @@ test("Default receives unscoped, hinted and Channel Inputs without semantic filt
   await source.conversations.submit("hint", { origin: "source", originId: "personal.environments", sessionId: "group", text: "explicit destination" });
   await aide.settled();
   for (const id of ["private", "group"]) assert.ok(aide.session(id).conversations.inputs(id).map((i) => i.metadata.name).includes("hint"));
-  await aide.receive({ channelId: "web", id: "channel", sessionId: "group", text: "channel input" });
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "channel", sessionId: "group", text: "channel input" }));
   await aide.settled();
   const group = aide.session("group").conversations;
   const channel = group.inputs("group").find((input) => input.spec.text === "channel input")!;
   assert.equal(aide.session("private").conversations.input(channel.metadata.name)!.consumption.phase, "done");
-  const before = aide.messages().length;
-  await aide.receive({ channelId: "web", id: "channel", sessionId: "group", text: "channel input" });
-  await aide.settled(); assert.equal(aide.messages().length, before);
+  const before = aide.outputs().length;
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "channel", sessionId: "group", text: "channel input" }));
+  await aide.settled(); assert.equal(aide.outputs().length, before);
 });

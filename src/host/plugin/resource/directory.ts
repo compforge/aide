@@ -10,6 +10,11 @@ export function scopedResources(local: ResourceClient, sessionId: string, plugin
   const stamp = <S, T>(r: Readonly<Resource<S, T>>) => ({ ...r, metadata: { ...r.metadata, sessionId: r.metadata.sessionId ?? sessionId } });
   return {
     ...local,
+    async commit(writes) {
+      const sessions = [...new Set(writes.flatMap((w) => w.operation === "create" ? [] : [w.resource.metadata.sessionId ?? sessionId]))];
+      if (sessions.length > 1) throw new Error("Resource commit cannot cross Sessions");
+      return (await owner(sessions[0]).commit(writes)).map(stamp);
+    },
     async get<S, T>(ref: ResourceRef) { const r = await owner(ref.sessionId).get<S, T>(ref); return r && stamp(r); },
     async list<S, T>(type: ResourceType, options?: ResourceListOptions) {
       if (options?.sessionId === "*") return (await Promise.all((directory?.sessions() ?? [sessionId]).map((id) => owner(id).list<S, T>(type, { ...options, sessionId: id }).then((items) => items.map((r) => ({ ...r, metadata: { ...r.metadata, sessionId: id } })))))).flat();

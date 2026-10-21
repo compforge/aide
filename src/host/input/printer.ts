@@ -14,6 +14,7 @@ export const inputPrinter: ResourcePrinter<InputSpec> = {
       `Origin: ${spec.origin}/${spec.originId}`,
       `Received: ${metadata.creationTimestamp}`,
     ];
+    if (spec.source) lines.push(`Source address: ${JSON.stringify(spec.source)}`);
     if (spec.sessionId !== undefined) lines.push(`Session: ${spec.sessionId}`);
     if (spec.relation !== undefined) lines.push(`Relation to Person: ${spec.relation}`);
     if (spec.sender) lines.push(`Sender Person: ${JSON.stringify(spec.sender)}`);

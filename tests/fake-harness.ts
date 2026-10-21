@@ -1,3 +1,8 @@
+import type { InputSpec } from "@compforge/aide-plugin";
+import { sameAddress } from "../src/address.ts";
+import { OutputStore } from "../src/host/output/store.ts";
+import { outputSpec } from "../plugins/personal/output.ts";
+import type { ConversationResource } from "../plugins/personal/conversation/model.ts";
 import { ConfigSchema } from "../src/config.ts";
 import { ResourceStorage, type StoredResource } from "../src/host/resource/storage.ts";
 import type { ConversationStatus } from "../plugins/personal/conversation/model.ts";
@@ -45,11 +50,20 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
               const stored = JSON.parse(row.data as string) as StoredResource;
               const status = stored.object.status as ConversationStatus;
               const run = status.batch;
-              if (run?.phase === "running" && !run.quietReason) {
+              const immediate = (run?.inputIds ?? []).map((id) => storage.read(`input:${id}`)?.object.spec as InputSpec | undefined)
+                .filter((i) => i && (i.attention ?? (i.origin === "channel" ? "immediate" : "deferred")) === "immediate");
+              const first = immediate[0]?.source;
+              const address = immediate.length ? (first && immediate.every((i) => i?.source && sameAddress(first, i.source)) ? first : undefined)
+                : (stored.object as ConversationResource).spec.address;
+              if (run?.phase === "running" && !run.quietReason && address) {
                 const message = { id: randomUUID(), conversationId, at: new Date().toISOString(), role: "aide" as const, workId: null, text: result, executionId: run.executionId };
-                run.communicated = true; run.messages.push(message); status.messages.push(message);
+                run.communicated = true; run.outputIds.push(message.id);
                 stored.object = { ...stored.object, metadata: { ...stored.object.metadata, resourceVersion: String(Number(stored.object.metadata.resourceVersion) + 1) } };
-                storage.write(row.key as string, row.scope as string, stored);
+                storage.transaction(() => {
+                  storage.write(row.key as string, row.scope as string, stored);
+                  new OutputStore(home).create((stored.object as ConversationResource).spec.sessionId, message.id,
+                    outputSpec(stored.object as ConversationResource, message, { executionId: run.executionId, target: address }));
+                });
               }
             }
           }

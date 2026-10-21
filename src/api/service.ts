@@ -9,6 +9,6 @@ export interface WebService extends ChannelService {
   setDefaultConversation(conversationId: string, enabled: boolean): Promise<void>;
   setConversationTrigger(conversationId: string, enabled: boolean): Promise<import("../../plugins/personal/conversation/trigger.ts").ConversationTrigger>;
   works(): readonly { id: string; conversationId: string; revision: number }[];
-  event(input: Omit<Incoming, "channelId"> & { name: string }): Promise<number>;
+  event(input: Omit<Incoming, "channelId" | "source"> & { name: string }): Promise<number>;
   work(conversationId: string): { delete(id: string, revision: number): Promise<void> };
 }

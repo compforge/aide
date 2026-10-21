@@ -1,3 +1,5 @@
+import { larkAddress } from "../src/channel/address.ts";
+import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,7 +8,8 @@ import { test, type TestContext } from "node:test";
 import pino from "pino";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
-import type { Message } from "../plugins/personal/model.ts";
+import type { OutputView } from "../src/output.ts";
+import { fixtureOutput } from "./output-fixture.ts";
 import { LarkChannel } from "../src/channel/lark.ts";
 import { larkProgress, progressCard, cardPreviews, type LarkProgress } from "../src/channel/lark-card.ts";
 import { larkTransport, type LarkTransport } from "../src/channel/lark-client.ts";
@@ -16,7 +19,7 @@ import { fakeOptions } from "./fake-harness.ts";
 const log = pino({ level: "silent" });
 const conversationId = "lark:cli_progress:oc_chat";
 const event = { sender: { sender_type: "user" }, message: { message_id: "om_input", chat_id: "oc_chat", chat_type: "p2p", message_type: "text", content: '{"text":"检查工作"}' } };
-const message = (id: string, text: string): Message => ({ id, text, conversationId, role: "aide", workId: null, at: new Date().toISOString() });
+const message = (id: string, text: string): OutputView => fixtureOutput({ id, text, conversationId, role: "aide", workId: null, at: new Date().toISOString() });
 
 function cardRegions(card: ReturnType<typeof progressCard>) {
   const envelope = card.body.elements.find((element) => "elements" in element)!;
@@ -26,7 +29,7 @@ function cardRegions(card: ReturnType<typeof progressCard>) {
 
 function setup(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-progress-"));
-  const messages: Message[] = [], calls: { kind: string; args: unknown[] }[] = [];
+  const messages: OutputView[] = [], calls: { kind: string; args: unknown[] }[] = [];
   let view: LarkProgress = { id: "input", phase: "queued", think: "", content: "", messageIds: [], overflow: false };
   const record = (kind: string, args: unknown[]) => { calls.push({ kind, args }); };
   let card!: ReturnType<typeof progressCard>;
@@ -43,7 +46,7 @@ function setup(t: TestContext) {
       async patch(...args) { record("patch", args); for (const [id, value] of Object.entries(args[1])) patchElement(card.body.elements, id, value); },
       async settings(...args) { record("settings", args); card.config.streaming_mode = args[1]; },
       async update(...args) { record("update", args); card = structuredClone(args[1]) as typeof card; } } };
-  const aide = { receive: async () => { throw new Error("Delivery must not execute input"); }, messages: () => messages };
+  const aide = { receive: async () => { throw new Error("Delivery must not execute input"); }, outputs: () => messages };
   const reader = (id: string) => { assert.equal(id, conversationId); return [view]; };
   let channel = new LarkChannel(home, "cli_progress", aide, transport, log, reader);
   channel.receive(event);
@@ -212,7 +215,7 @@ test("Lark projects Harness progress but only explicit messages become replies",
     adapter.sendTurn = async (ref, input) => { emitter = { sink, turnId: input.turnId }; return send(ref, input); }; return adapter;
   } }, log);
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ channelId: "lark", id: "om_live", sessionId: conversationId, conversationId, text: "查看工作" });
+  await aide.receive(fixtureIncoming({ channelId: "lark", id: "om_live", sessionId: conversationId, conversationId, text: "查看工作" }));
   for (let i = 0; i < 200 && !emitter; i++) await Bun.sleep(10);
   assert.ok(emitter);
   emitter.sink({ kind: "agent_thought_chunk", turnId: emitter.turnId, payload: { messageId: "thought", content: { type: "text", text: "先读资料" } } });
@@ -233,6 +236,12 @@ test("Lark projects Harness progress but only explicit messages become replies",
   release(); await aide.settled();
   const done = larkProgress(aide, conversationId)[0]!;
   assert.equal(done.phase, "done"); assert.equal(done.content, "最终答案"); assert.equal(done.messageIds.length, 1);
+  const original = aide.outputStore.get(done.messageIds[0]!)!;
+  aide.outputStore.create(original.metadata.sessionId!, "another-destination", { ...original.spec,
+    text: "另一群的专属内容", target: larkAddress("cli_progress", "another-chat") });
+  const addressed = larkProgress(aide, conversationId)[0]!;
+  assert.equal(addressed.content, "最终答案");
+  assert.deepEqual(addressed.messageIds, done.messageIds, "A card cannot deliver or acknowledge another destination's Output");
 });
 
 test("official SDK creates, sends, streams and finalizes CardKit cards through the shared client", async (t) => {

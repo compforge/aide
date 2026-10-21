@@ -1,6 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { outputWrite } from "./output.ts";
+import { CONVERSATION_TYPE, type ConversationSpec, type ConversationStatus } from "./conversation/model.ts";
+import { digest } from "./chief-model.ts";
 import { z } from "zod";
-import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
+import type { PluginContext, ReconcileContext, ResourceCommit } from "@compforge/aide-plugin";
 import { OutcomeSchema, executionPrompt } from "./prompts.ts";
 import { type Work, type WorkStatus } from "./model.ts";
 import { toWork, type WorkResource, type WorkSpec } from "./resources.ts";
@@ -50,11 +52,20 @@ async function record(context: PluginContext, original: WorkResource, update: (w
     const notification = update(work);
     const { id: _id, conversationId, kind: _kind, title: _title, instruction: _instruction,
       trigger: _trigger, revision: _revision, inputs: _inputs, ...observation } = work;
-    const messages = [...current.status.messages];
-    if (notification) messages.push({ id: randomUUID(), conversationId, text: notification, workId: work.id,
-      at: new Date(Math.max(Date.now(), ...messages.map((item) => Date.parse(item.at) + 1))).toISOString(), role: "aide" });
+    const writes: ResourceCommit[] = [];
+    if (notification) {
+      const conversation = await context.resources.get<ConversationSpec, ConversationStatus>({ ...CONVERSATION_TYPE, namespace: "v1", name: digest(conversationId) });
+      if (!conversation) throw new Error(`Work ${work.id} Output Conversation missing: ${conversationId}`);
+      if (conversation.spec.address) {
+        writes.push(outputWrite(conversation, { id: `work:${current.metadata.uid}:${current.metadata.resourceVersion}`, conversationId, text: notification, workId: work.id },
+          { producer: { ...reference(current), sessionId: conversation.spec.sessionId } }));
+      } else {
+        work.history.push({ at: new Date().toISOString(), role: "aide", text: `No communication address; retained result: ${notification}` });
+        context.logger.info("Work result retained without Output: Conversation has no address", { attributes: { workId: work.id, conversationId } });
+      }
+    }
     try {
-      await context.resources.patchStatus(current, { ...observation, messages, ...(laneId ? { laneId } : {}) });
+      await context.resources.commit([{ operation: "patchStatus", resource: current, patch: { ...observation, ...(laneId ? { laneId } : {}) } }, ...writes]);
       return work;
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes("resource version conflict")) throw error;

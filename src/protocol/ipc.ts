@@ -117,6 +117,7 @@ export type HostRequest =
   | { readonly method: "controller.finish"; readonly scope: ExecutionScope; readonly resource: Resource<unknown, unknown>; readonly requeueAfterMs?: number; readonly failed?: string }
   | { readonly method: "controller.schedule"; readonly key: ReconcileKey; readonly nextAt: string }
 
+  | { readonly method: "resource.commit"; readonly writes: readonly import("@compforge/aide-plugin").ResourceCommit[] }
   | { readonly method: "resource.replace"; readonly resource: Resource<unknown, unknown>; readonly spec: unknown; readonly status: unknown }
   | { readonly method: "connector.read"; readonly request: ConnectorRequest }
   | { readonly method: "command.verb"; readonly executionId: string; readonly verb: "submit"; readonly input: CommandSubmitInput }

@@ -101,7 +101,7 @@ export type {
 } from "@compforge/aide-plugin";
 
 export const AIDE_SYSTEM_NAMESPACE = "aide-system" as const;
-import { INPUT_TYPE } from "@compforge/aide-plugin";
+import { INPUT_TYPE, OUTPUT_TYPE } from "@compforge/aide-plugin";
 export { INPUT_TYPE };
 export const AIDE_TURN_RESOURCE_TYPE = Object.freeze({
   apiVersion: "aide.dev/v1alpha1",
@@ -121,7 +121,7 @@ export const AIDE_SESSION_TARGET_BINDING_RESOURCE_TYPE = Object.freeze({
 } as const satisfies ResourceType);
 
 export const AIDE_RESOURCE_TYPES = Object.freeze([
-  INPUT_TYPE,
+  INPUT_TYPE, OUTPUT_TYPE,
   AIDE_TURN_RESOURCE_TYPE,
   AIDE_SESSION_RESOURCE_TYPE,
   AIDE_TARGET_RESOURCE_TYPE,

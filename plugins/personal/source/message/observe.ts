@@ -1,3 +1,4 @@
+import { larkAddress } from "../../../../src/channel/address.ts";
 import { Persons } from "../../person/service.ts";
 import { LOCAL_ME } from "../../person/model.ts";
 import { observePeople } from "../../person/messages.ts";
@@ -233,6 +234,7 @@ class MessageObservation {
     const kind = entry.sequence ? "讨论进展" : entry.kind === "direct" ? "私聊" : "群内 @";
     const content = entry.sequence ? (context?.messages ?? []).map((item) => item.content).join("\n\n") : message.content;
     const spec: Delivery["spec"] = {
+      source: larkAddress(this.watch.accountId, message.chatId),
       ...(relation ? { relation } : {}),
       ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
       sessionId: `source:lark:${this.watch.accountId}:${this.watch.userId}:${message.chatId}`,

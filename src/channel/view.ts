@@ -1,3 +1,5 @@
+import { isChannelAddress } from "./address.ts";
+import { channelOutputs, visibleOutput } from "./output.ts";
 import { inputPrinter } from "../host/input/printer.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { harnessIdentityFor } from "../host/harness/ids.ts";
@@ -17,6 +19,9 @@ export interface ConversationBlock extends BaseBlock {
   originId?: string;
   relation?: import("@compforge/aide-plugin").InputRelation;
   sender?: import("@compforge/aide-plugin").ResourceRef;
+  receivers?: import("@compforge/aide-plugin").ResourceRef[];
+  source?: import("@compforge/aide-plugin").Address;
+  target?: import("@compforge/aide-plugin").Address;
   label?: string;
   icon?: string;
   harness?: string;
@@ -61,9 +66,9 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   // Group presentation by persisted Chief activation, never by message order or similar text.
   const turnRuns = new Map(invocations.map((item) => [item.turnId, runId(item)]));
   const runPhases = new Map(runs.map((input) => [input.id, input.status.phase]));
-  const messageRuns = new Map(runs.flatMap((input) => (input.status.messages ?? [])
+  const messageRuns = new Map(runs.flatMap((input) => (input.status.outputs ?? [])
     .filter((message) => message.role === "aide").map((message) => [message.id, input.id] as const)));
-  for (const message of aide.messages()) if (message.executionId) messageRuns.set(message.id, message.executionId);
+  for (const message of channelOutputs(aide)) if (message.executionId) messageRuns.set(message.id, message.executionId);
   const inputExecutions = new Map(invocations.flatMap((i) => (i.inputIds ?? []).map((id) => [id, i.executionId] as const)));
   const questionStatuses = new Map<string, "pending" | "answered" | "cancelled">();
   for (const interaction of state.interactions.values()) {
@@ -76,8 +81,8 @@ export function conversationView(aide: ChannelService, conversationId: string): 
     .map((input) => [input.turnId, input]));
   const summaries = new Map(state.turnSummaries.filter((turn) => relatedTurns.has(turn.turnId)).map((turn) => [turn.turnId, turn]));
   const executions = new Map<string, { header: ConversationBlock; blocks: ConversationBlock[] }>();
-  const roots: ConversationBlock[] = aide.messages().filter((message) => message.conversationId === conversationId)
-    .map((message) => ({ id: `message:${message.id}`, type: questionStatuses.has(message.id) ? "question" : "message", role: message.role, at: message.at, content: message.text,
+  const roots: ConversationBlock[] = channelOutputs(aide).filter((message) => resource && visibleOutput(message, resource))
+    .map((message) => ({ id: `message:${message.id}`, type: questionStatuses.has(message.id) ? "question" : "message", role: message.role, at: message.at, content: message.text, receivers: message.receivers, target: message.target,
       ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
       ...(questionStatuses.has(message.id) ? { status: questionStatuses.get(message.id) } : {}) }));
   if (resource?.status.batch?.result?.context) roots.push({ id: "conversation-summary", type: "summary", label: "历史摘要", icon: "📝",
@@ -85,7 +90,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   for (const run of runs) {
     if (!run.input) continue;
     const input = run.input, definition = aide.inputDefinition(input.spec);
-    roots.push({ id: `input:${input.metadata.name}`, type: "input", relation: input.spec.relation, sender: input.spec.sender, origin: input.spec.origin, originId: definition.id,
+    roots.push({ id: `input:${input.metadata.name}`, type: "input", relation: input.spec.relation, sender: input.spec.sender, source: input.spec.source, origin: input.spec.origin, originId: definition.id,
       inputId: input.metadata.name, group_id: inputExecutions.get(input.metadata.name) ?? input.consumption.batchId ?? input.metadata.name, label: definition.label, icon: definition.icon,
       ...(input.spec.origin === "channel" ? { role: "user" as const } : {}),
       at: input.metadata.creationTimestamp, content: input.spec.text,
@@ -176,12 +181,18 @@ export function conversationList(aide: ChannelService): ConversationSummary[] {
     if (input.metadata.creationTimestamp > summary.updatedAt) summary.updatedAt = input.metadata.creationTimestamp;
   }
   for (const id of aide.conversationIds()) ensure(id);
-  for (const message of aide.messages()) {
-    const summary = ensure(message.conversationId);
-    const text = message.text.replace(/\s+/g, " ").trim();
-    // Messages are chronological; preview remains the latest delivered message even after a quiet Source input.
-    summary.preview = text.slice(0, 100);
-    if (message.at > summary.updatedAt) summary.updatedAt = message.at;
+  for (const message of channelOutputs(aide)) {
+    const destinations = new Set([message.conversationId]);
+    if (isChannelAddress(message.target) && message.target.channelId === "web") destinations.add(message.target.endpoint);
+    for (const id of destinations) {
+      const current = aide.findConversation(id)?.conversations.resource(id);
+      if (!current || !visibleOutput(message, current)) continue;
+      const summary = ensure(id);
+      const text = message.text.replace(/\s+/g, " ").trim();
+      // Messages are chronological; quiet Source inputs do not erase the latest reply preview.
+      summary.preview = text.slice(0, 100);
+      if (message.at > summary.updatedAt) summary.updatedAt = message.at;
+    }
   }
   return [...summaries.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
 }

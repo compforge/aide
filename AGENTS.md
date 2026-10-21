@@ -14,10 +14,13 @@ src/
   app.ts                   # 按入口 Session ID 装配 CoreSession / Personal，恢复与汇总各会话
   web/                     # 浏览器页面、脚本、样式与 Markdown 渲染
   api/                     # HTTP handler、静态资源与 SSE，调用 Core / Personal 能力
+  address.ts               # Address 入站校验与比较
   channel/                 # Lark 适配、共享消息协议与执行投影
+    address.ts             # ChannelAddress 编码与平台 endpoint 解析
   host/                    # 主进程：持久化、交互与执行事实
     resource/              # Host 持久资源数据库、容量、引用与释放策略
     input/                 # 独立 Input 事实、内置资源投影与文本 Printer
+    output/                # 独立 Output、投递状态、容量策略与 Printer
     plugin/                # Resource / Printer / Controller / Source / Watch / verb
       resource/            # 资源存储、访问、类型注册与文本展示
         store.ts           # PluginResourceStore 与持久化校验
@@ -97,7 +100,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。Connector 声明访问能力，`plugins.<plugin>.sources` 声明观察策略；Personal 只启动显式配置的环境、Lark 与需求 Source。环境发现只读配置，不代表连通性、健康或操作授权。
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
 - Session 是持久执行作用域，保留 Ledger、Lane、Turn 与恢复绑定；CoreSession 负责进程期装配。Session 统一位于 `$AIDE_HOME/sessions/<id>/`，不按 project / cwd 分组。逻辑 ID 的目录编码由 SessionStore 负责。启动时恢复全部 Session 的工作和 Source；watch 仅装配到所属 Session。cwd 只是执行环境，改变时保留 Aide 历史并清空原生恢复绑定；插件私有数据仅有 global、session、instance 三个目录作用域。
-- ChannelDefinition / SourceDefinition 声明来源身份；绑定的提交入口补齐来源，Source 同时记录资源实例引用。Input.text 保存收到的事实或请求，不保存 Chief 的处理指令。Channel / Source 输入统一从 Input 投影，Channel Message 仅承载输出；展示通过应用装配的定义目录读取名称和图标，不解释 Source 的业务数据。
+- ChannelDefinition / SourceDefinition 声明来源身份；绑定的提交入口补齐来源，Source 同时记录资源实例引用。Input.text 保存收到的事实或请求，不保存 Chief 的处理指令。Channel / Source 输入统一从 Input 投影，Output 独立承载回复与通知；展示通过应用装配的定义目录读取名称和图标，不解释 Source 的业务数据。
 - Input 是 Core 内置资源，可带上游话题线索 sessionId，稳定标识与粒度由 Channel / Source 决定；Conversation 是 Personal CRD，保存 Input 引用与各自消费状态。Channel / Source 不依赖 conversationId。Chief 先 Reconcile Input：无会话时创建并追加；已有会话时依次追加到默认会话、规则创建和规则关联的会话。确定归属即追加，不调用语义路由或汇总完整计划；创建使用稳定身份，追加按 Input ID 幂等，不新增路由 Verb。跨 Session 写入经过目标 ResourceClient 与 Watch，创建时按需装配目标 Session。
 - Chief 对已有 Work 使用 append_input 投递事实或请求，输入队列与消费进度由 Work 持久保存；Task / Routine Reconcile 决定目标与执行状态，Chief 保留创建和删除资源的能力。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。
@@ -107,17 +110,18 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Chief 通过 profile_person 修订 Person.profile，每轮刷新 Me、按需读取他人。用户修正独立保存，Chief 不能覆盖；更新校验 uid/resourceVersion。Person 不持有 Input ID，不阻碍输入回收。Web Persons 与 Chief 共享资源更新路径；Hermes 提供其它通用记忆与检索，业务进展仍以 Task / Routine 为准。
 - `pi` 提供通用 Agent，`chief` 加入 Personal 工具，两者复用 PiAdapter。通用 Pi 不依赖 Personal，Chief 的 WorkService 由宿主绑定范围；默认 Work 执行由根级 `defaultHarness` 选择，缺省为通用 Pi。
 - Lark 用户消息 Source 按账号、用户和聊天生成独立观察话题，与机器人 Channel 会话分离，避免观察内容进入原群上下文和自动外发。
-- Source 先提交持久 Input 再推进观察水位。Input 独立保存，Conversation 内的消费状态、业务回复与去重记录原子提交，不能用投递失败重新触发业务执行。
+- Address 是通信位置父接口，ChannelAddress 是当前子接口；Input.source、Conversation.spec.address 与 Output.target 复用它。Conversation 只在由 Channel Input 创建时初始化默认地址，后续追加与 default 转发不能覆盖或补值。Immediate 直接回复指向 Input.source；其它沟通明确选 target 或使用 Conversation 默认地址，禁止从话题或 Conversation ID 推导投递地址。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；人物、位置与来源分类独立，收件人不自动改变投递目标或产生额外发送。
+- Source 先提交持久 Input 再推进观察水位。Input 与 Output 独立保存，业务状态、Output 创建与必要的去重记录原子提交，不能用投递失败重新触发业务执行。
 - 持久 Resource 共用 Host 容量管理；资源所有者声明释放与引用规则，未知类型默认保护。按 kind 的 LRU 等排序只作用于可释放且无人引用的记录，不能淘汰正在承担的工作。详见 docs/plugin/README.md。
 - Conversation.status.pendingInputIds 是唯一待消费队列，status.batch 固定一次处理材料。Conversation Reconcile 组批、确认消费和替换 Batch；具名 Batch Controller 执行 Harness，tool 直接调用 say / ask / confirm。完成批次保留有界上下文直到下一批继承；每批 freshContext 并持久化历史边界，失败不自动重放副作用。
 - Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 保存执行事实。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
-- ResourcePrinter 通过插件激活注册，describe / summarize 同步将资源快照转为详情 / 概览，不执行 I/O、模型调用或资源修改。调用方通过 describe / summarize 获取文本，Core 内置 InputPrinter；其它 Printer 按插件实例与 GVK 选择；默认展示为 JSON / kind/name，注册回滚与撤销跟随 Binding 生命周期。具体契约见 docs/plugin/README.md。
+- ResourcePrinter 通过插件激活注册，describe / summarize 同步将资源快照转为详情 / 概览，不执行 I/O、模型调用或资源修改。调用方通过 describe / summarize 获取文本，Core 内置 InputPrinter / OutputPrinter；其它 Printer 按插件实例与 GVK 选择；默认展示为 JSON / kind/name，注册回滚与撤销跟随 Binding 生命周期。具体契约见 docs/plugin/README.md。
 - 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。
 - 执行上下文显式携带主资源和可选 Conversation/Input 关联；Channel 不通过 Chief Target 推导问题和进度归属。
 - Personal 将新发生的事归入能承接它的上下文：Conversation 承载话题，Task 承载有限目标，Routine 承载持续职责与当前轮次。Chief 优先关联已有 Work，再按需要创建；各 Reconcile 根据历史与新事实推进、更新、沟通、等待或忽略。详见 `docs/plugin/personal.md`。
-- trigger 归属于 Conversation；新 Input 与定时回顾唤醒同一话题。Personal / Chief 决定回顾和主动沟通策略，Core 提供通用定时唤醒与恢复机制。say 保存普通 Message，不创建 Interaction；记忆中的偏好不自动成为执行委托。
+- trigger 归属于 Conversation；新 Input 与定时回顾唤醒同一话题。Personal / Chief 决定回顾和主动沟通策略，Core 提供通用定时唤醒与恢复机制。say 保存独立 Output，不创建 Interaction；记忆中的偏好不自动成为执行委托。
 - Chief 问答复用 Core Interaction；Task / Routine 的 waiting 是业务持久状态。两者的跨重启行为见 Personal 文档。
-- Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Message，不另建轨迹存储。
+- Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Output，不另建轨迹存储。
 - `npm run check` 验证类型与测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或 Lark 已验证。
 
 ## References
@@ -126,6 +130,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - [Plugin](docs/plugin/README.md)：插件运行、资源生命周期与调度；[公共契约](packages/plugin/README.md)。
 - [Personal](docs/plugin/personal.md)：Chief、Task / Routine 和业务决策。
 - [Harness](docs/harness/README.md)：通用执行契约；[Pi](docs/harness/pi.md)、[Chief](docs/harness/chief.md)。Chief 文档承载提示词、上下文与记忆优化方向。
+- [Output](docs/output.md)：独立输出、原子提交、投递恢复与容量回收。
 - [Channel](docs/channel/README.md)：Web 与 Lark；[Web](docs/channel/web.md)、[Lark](docs/channel/lark.md)。
 - [Connector 与 Source](docs/connector/README.md)：关注范围、连接器配置和覆盖限制。
 - [部署与诊断](docs/deployment.md)、[真实验收](docs/e2e.md)。

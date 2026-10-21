@@ -1,3 +1,4 @@
+import { fixtureAddress } from "./address-fixture.ts";
 import { seedInput } from "./conversation-fixture.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -52,9 +53,9 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   });
   assert.equal(failed.status, 200);
   await aide.settled();
-  assert.match(aide.messages().at(-1)!.text, /本次处理未完成/);
+  assert.match(aide.outputs().at(-1)!.text, /本次处理未完成/);
   assert.equal(aide.works().length, 0);
-  const cursor = aide.messages().at(-1)!.id;
+  const cursor = aide.outputs().at(-1)!.id;
   const response = await fetch(`${url}/messages`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "msg-2", sessionId: "me", conversationId: "me", text: "总结今日工作" }),
@@ -151,8 +152,8 @@ test("conversation navigation lists persisted scopes without creating them and k
   const base = Date.now() + 60_000;
   const at = (offset: number) => new Date(base + offset).toISOString();
   await seedInput(aide.session("me").conversations, "m1", { origin: "channel", originId: "web", text: "默认会话问题" }, { phase: "done" });
-  await seedInput(aide.session(group).conversations, "group-first", { conversationId: group, origin: "channel", originId: "web", text: "检查 <项目>\n进展" }, { phase: "done", messages: [
-    { id: "m3", conversationId: group, at: at(2), role: "aide", text: "群会话的回复", workId: null },
+  await seedInput(aide.session(group).conversations, "group-first", { conversationId: group, origin: "channel", originId: "web", text: "检查 <项目>\n进展" }, { phase: "done", outputs: [
+    { id: "m3", conversationId: group, at: at(2), text: "群会话的回复", workId: null },
   ] });
   await seedInput(aide.session("source:requirements").conversations, "source-observation", { conversationId: "source:requirements", origin: "source", originId: "personal.environments", text: "private observation" }, { phase: "done" });
   (await aide.work("work-only").create({ kind: "routine", title: "定期检查", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "changed" } }));
@@ -186,12 +187,13 @@ test("Web deletes Tasks and Routines through WorkService and preserves other con
     rmSync(dir, { recursive: true, force: true });
   });
   const group = "lark:app:群 & #1";
+  await aide.session(group).conversations.ensure(group, fixtureAddress(group));
   const work = aide.work(group);
   const initialTask = await work.create({ kind: "task", title: "检查项目", instruction: "check", trigger: null });
   const task = await work.appendInput(initialTask.id, { action: "pause", text: "暂停" });
   const routine = await work.create({ kind: "routine", title: "监控内存", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "memory.changed" } });
   const foreign = await aide.work("other").create({ kind: "routine", title: "其他会话", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "memory.changed" } });
-  await aide.session(group).store.save(routine, [{ id: "retained-reply", conversationId: group, at: new Date().toISOString(), role: "aide", text: "已建立监控", workId: routine.id }]);
+  await aide.session(group).store.save(routine, [{ id: "retained-reply", conversationId: group, text: "已建立监控", workId: routine.id }]);
   await aide.start(); await aide.settled();
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address !== "string");
@@ -220,7 +222,7 @@ test("Web deletes Tasks and Routines through WorkService and preserves other con
   await aide.settled();
   assert.deepEqual(await (await fetch(base + "/work?conversationId=" + encodeURIComponent(group))).json(), []);
   assert.deepEqual(aide.work("other").list().map((item) => item.id), [foreign.id]);
-  assert.equal(aide.messages().find((item) => item.id === "retained-reply")?.text, "已建立监控");
+  assert.equal(aide.outputs().find((item) => item.id === "retained-reply")?.text, "已建立监控");
   assert.equal(await aide.event({ id: "after-delete", sessionId: group, conversationId: group, name: "memory.changed", text: "changed" }), 0);
   await aide.settled();
   assert.equal(requests.length, 0);
