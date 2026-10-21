@@ -110,8 +110,8 @@ Channel 与 Source 都从 Conversation 关联的 Input 生成输入卡片，不�
 
 ## 人物导航与编辑
 
-主导航提供 Conversations 与 Persons 两个同级页面。Conversations 保留会话列表、消息和工作；Persons 展示跨会话共享的人物列表，以“我”标记服务对象，可按姓名搜索并进入详情。消息带 sender 时提供人物详情链接。
+主导航提供 Conversations 与 Persons 两个同级页面，切换时保持位置一致，滚动内容时页头仍留在视口顶部。Conversations 保留会话列表、消息和工作；Persons 展示跨会话共享的人物列表，以“我”标记服务对象，可按姓名搜索并进入详情。消息带 sender 时提供人物详情链接。
 
-人物详情可编辑称呼、外部身份、当前认识与用户修正。用户修正优先于 Chief 的推断，Chief 工具无法覆盖该字段。编辑提交 uid 和 resourceVersion；并发冲突保留表单内容，提示重新加载并合并。外部身份重复或 Me 绑定冲突会拒绝保存，本地单人身份不可移除。
+人物详情默认以只读正文展示当前认识，标题后的编辑图标进入编辑状态。编辑框右下角提供取消与确认：取消恢复原文，确认直接保存当前认识，不提交姓名或身份中尚未保存的修改。称呼与外部身份沿用资料保存操作。编辑提交 uid 和 resourceVersion；并发冲突保留编辑状态和草稿，提示重新加载并合并。外部身份重复或 Me 绑定冲突会拒绝保存，本地单人身份不可移除。
 
 GET /persons 列表，GET /persons?id=... 详情，POST /persons/edit 更新；这些接口调用同一 Personal 人物服务和 ResourceClient。打开页面不创建 Conversation。
