@@ -1,5 +1,5 @@
 import type { Logger } from "pino";
-import type { ResourceType } from "@compforge/aide-plugin";
+import type { ResourceType, InputReceipt } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/host/plugin/manager.ts";
 import { CoreSession } from "../../src/host/core/index.ts";
 import { type SessionHandle } from "../../src/host/store/store.ts";
@@ -9,7 +9,7 @@ import { WorkService } from "./work.ts";
 import { message, Store } from "./store.ts";
 import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
 import { CONVERSATION_TYPE, INPUT_TYPE, chiefTarget, digest } from "./chief-model.ts";
-import { inboundMessage, initialConversationName, conversationLane, type ConversationDeletion } from "./conversation/model.ts";
+import { initialConversationName, conversationLane, type ConversationDeletion } from "./conversation/model.ts";
 import { ConversationStore, conversationKey } from "./conversation/store.ts";
 import type { InputStore } from "../../src/host/input/store.ts";
 import { chiefTools } from "../../agents/chief/chief-tools.ts";
@@ -158,7 +158,7 @@ export class Personal {
     this.pending.add(pending);
   }
 
-  receive(raw: Incoming): Promise<Message> {
+  receive(raw: Incoming): Promise<InputReceipt> {
     if (this.closed) return Promise.reject(new Error("Aide is shutting down"));
     const input = IncomingSchema.parse(raw);
     const result = this.intake.then(async () => { await this.start(); return this.submit(input); });
@@ -186,14 +186,14 @@ export class Personal {
     }))].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
   }
 
-  private async submit(incoming: Incoming): Promise<Message> {
+  private async submit(incoming: Incoming): Promise<InputReceipt> {
     const input = { ...incoming, conversationId: this.id };
-    const id = digest([input.conversationId, input.id]);
+    const id = digest([input.channelId, input.conversationId, input.id]);
     const previous = this.store.conversations.input(id, input.conversationId);
-    if (previous) return previous.status.messages?.[0] ?? message(input.conversationId, "已接收该消息");
+    if (previous) return { inputId: previous.metadata.name, at: previous.metadata.creationTimestamp };
     // @spec Deleting a Conversation never turns redelivery of an accepted Input into a new command.
     const fact = this.conversations.inputStore.get(id);
-    if (fact && ["done", "ignored"].includes(fact.status.routing?.phase ?? "")) return message(input.conversationId, "已接收该消息");
+    if (fact && ["done", "ignored"].includes(fact.status.routing?.phase ?? "")) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
     await this.conversations.ensure();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
     this.registerConversation(input.conversationId);
@@ -211,37 +211,35 @@ export class Personal {
       if (value) {
         // Persist the reply identity before settling the Core Interaction. A redelivery cannot become a new command.
         const resource = await this.acceptChannel(id, input, [], "done", request.messageId);
-        const inbound = resource.status.messages![0]!;
         const receipt = await this.core.resolveInteraction({ kind: "interaction_response", messageId: request.messageId },
           async () => ({ kind: "question", outcome: "answered", answers: { [question.questionId]: [value!] } }));
         if (!receipt.result) {
           await this.store.conversations.update(this.conversations.input(id, this.id)!, { phase: "failed",
-            messages: [inbound, message(input.conversationId, "这个问题已失效，答复没有继续执行。请重新交办。")] });
+            messages: [message(input.conversationId, "这个问题已失效，答复没有继续执行。请重新交办。")] });
         }
-        return inbound;
+        return { inputId: resource.metadata.name, at: resource.metadata.creationTimestamp };
       }
       const notice = message(input.conversationId, "请先明确回复当前问题的选项（确认 / 拒绝），也可以从网页取消这次等待。");
       const accepted = await this.acceptChannel(id, input, [notice], "done", request.messageId);
-      return accepted.status.messages![0]!;
+      return { inputId: accepted.metadata.name, at: accepted.metadata.creationTimestamp };
     }
     const accepted = await this.acceptChannel(id, input, []);
     this.wake(CONVERSATION_TYPE, conversationKey(input.conversationId));
-    this.log.info({ conversationId: input.conversationId, inputId: id }, "Accepted Chief input");
-    return accepted.status.messages![0]!;
+    this.log.info({ conversationId: input.conversationId, inputId: id, channelId: input.channelId }, "Accepted Chief input");
+    return { inputId: accepted.metadata.name, at: accepted.metadata.creationTimestamp };
   }
 
   private async acceptChannel(id: string, input: Incoming, messages: Message[], phase?: "done", replyTo?: string) {
-    const fact = await this.conversations.submit(id, { sessionId: this.id, text: input.text, timezone: this.options.timezone, origin: "channel", ...(replyTo ? { replyTo } : {}) });
-    const delivered = [inboundMessage(fact, this.id), ...messages.filter((message) => message.role !== "user")];
+    const fact = await this.conversations.submit(id, { sessionId: this.id, text: input.text, timezone: this.options.timezone, origin: "channel", originId: input.channelId, ...(replyTo ? { replyTo } : {}) });
     for (let attempt = 0; ; attempt++) {
       const c = await this.conversations.ensure();
       const ids = new Set(c.status.messages.map((m) => m.id));
-      const extra = delivered.filter((m) => !ids.has(m.id));
+      const extra = messages.filter((m) => !ids.has(m.id));
       const attached = c.spec.inputIds.includes(id);
       if (attached && !extra.length) break;
       try {
         await this.plugins.resourceClient("personal").replace(c, { ...c.spec, name: c.spec.name || initialConversationName(this.conversations.inputStore.get(c.spec.inputIds[0] ?? id)?.spec.text ?? input.text), inputIds: [...new Set([...c.spec.inputIds, id])] }, {
-          ...c.status, processing: { ...c.status.processing, [id]: { ...c.status.processing[id], ...(phase ? { phase } : {}), messages: delivered } },
+          ...c.status, processing: { ...c.status.processing, [id]: { ...c.status.processing[id], ...(phase ? { phase } : {}), messages } },
           messages: [...c.status.messages, ...extra],
         });
         break;

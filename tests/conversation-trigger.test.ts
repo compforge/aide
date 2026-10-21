@@ -72,7 +72,7 @@ test("Runner wakes Conversation without an Input; a long timer coalesces and dis
   release(); await aide.settled(); await Bun.sleep(1100);
   assert.equal(ticks, 1);
   assert.equal(aide.works().length, 0);
-  assert.equal(aide.messages().filter((m) => m.role === "user").length, 0);
+  assert.equal(aide.findConversation("timer")!.conversations.inputs().length, 0);
   const run = aide.findConversation("timer")!.conversations.runs()[0]!;
   assert.equal(run.status.phase, "done");
   const blocks = conversationView(aide, "timer").blocks;
@@ -153,11 +153,11 @@ test("Future trigger requeues without another input; ordinary messages preserve 
     return "收到";
   }, execute: async () => { throw new Error("No work"); } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ id: "first", sessionId: "me", text: "你好" }); await aide.settled();
+  await aide.receive({ channelId: "web", id: "first", sessionId: "me", text: "你好" }); await aide.settled();
   await aide.setConversationTrigger("me", true);
   const scope = aide.findConversation("me")!;
   const due = scope.conversations.resource("me")!.status.nextTriggerAt;
-  await aide.receive({ id: "second", sessionId: "me", text: "继续聊聊" }); await aide.settled();
+  await aide.receive({ channelId: "web", id: "second", sessionId: "me", text: "继续聊聊" }); await aide.settled();
   assert.equal(scope.conversations.resource("me")!.status.nextTriggerAt, due);
   const c = scope.conversations.resource("me")!;
   await scope.plugins.resourceClient("personal").replace(c, { ...c.spec, trigger: { enabled: true, intervalSeconds: 1 } },

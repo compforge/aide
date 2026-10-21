@@ -1,3 +1,4 @@
+import { CHANNELS, bindChannelInput } from "./definition.ts";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -27,7 +28,7 @@ const CardSchema = z.object({ cardId: z.string(), sent: z.boolean(), sequence: z
 type Card = z.infer<typeof CardSchema>;
 const StateSchema = z.object({
   cards: z.record(z.string(), CardSchema).default({}),
-  pending: z.array(IncomingSchema), received: z.array(z.string()),
+  pending: z.array(IncomingSchema.omit({ channelId: true })), received: z.array(z.string()),
   chats: z.array(z.string()), notices: z.array(MessageSchema), delivered: z.array(z.string()),
 });
 type State = z.infer<typeof StateSchema>;
@@ -38,6 +39,7 @@ type State = z.infer<typeof StateSchema>;
  * @see {@link ../../docs/channel/lark.md}
  */
 export class LarkChannel {
+  private readonly acceptInput: ReturnType<typeof bindChannelInput>;
   private readonly path: string;
   private readonly prefix: string;
   private state: State;
@@ -50,6 +52,7 @@ export class LarkChannel {
 
   constructor(home: string, appId: string, private readonly aide: Pick<ChannelService, "receive" | "messages">,
     private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
+    this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
     this.path = join(home, "channels", `lark-${createHash("sha256").update(appId).digest("hex").slice(0, 16)}.json`);
     this.state = existsSync(this.path) ? StateSchema.parse(JSON.parse(readFileSync(this.path, "utf8")))
@@ -109,7 +112,7 @@ export class LarkChannel {
     // Group normalization yields; concurrent duplicate deliveries must still persist only once.
     if (this.stopped) throw new Error("Lark channel is stopping");
     if (this.state.received.includes(id)) return;
-    const input = IncomingSchema.safeParse({ id, sessionId: conversationId, text });
+    const input = IncomingSchema.omit({ channelId: true }).safeParse({ id, sessionId: conversationId, text });
     this.save({ ...this.state,
       pending: input.success ? [...this.state.pending, input.data] : this.state.pending,
       notices: input.success ? this.state.notices : [...this.state.notices,
@@ -132,7 +135,7 @@ export class LarkChannel {
       const input = this.state.pending[0]!;
       let failure: Message | undefined;
       try {
-        await this.aide.receive(input);
+        await this.acceptInput(input);
         this.log.info({ messageId: input.id, conversationId: input.sessionId }, "Lark input routed");
       } catch {
         if (this.stopped) return;

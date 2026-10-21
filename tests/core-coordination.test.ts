@@ -52,7 +52,7 @@ test("Work tool -> Runner Watch -> Connector verb -> direct ask -> Harness uses 
     await manager.settled();
     const observer = { apiVersion: "tests.aide.dev/v1alpha1", kind: "WorkObserver" };
     expect(resources.get(observer, "observer", "v1/project/coordination").status).toMatchObject({ answer: "继续", count: 1 });
-    const projection: ChannelService = { sessions: () => [{ id: session.id, core, conversations: conversations }],
+    const projection: ChannelService = { inputDefinition: () => { throw new Error("No Input expected"); }, sessions: () => [{ id: session.id, core, conversations: conversations }],
       findConversation: (id) => id === "group-a" ? { id: session.id, core, conversations: conversations } : undefined,
       subscribe: (listener) => core.subscribe(listener), messages: () => [], questions: () => [], invocations: () => manager.listHarnessInvocations(), conversationIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
     expect(conversationView(projection, "group-a").blocks.some((block) => block.type === "execution")).toBe(true);

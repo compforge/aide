@@ -74,20 +74,20 @@ test("Default receives unscoped, hinted and Channel Inputs without semantic filt
   await aide.setDefaultConversation("private", true);
   const source = aide.session("source"); await aide.start();
   for (const text of ["needs-contact", "specific", "irrelevant"]) {
-    await source.conversations.submit(text, { origin: "source", text });
+    await source.conversations.submit(text, { origin: "source", originId: "personal.environments", text });
     await aide.settled();
   }
   assert.deepEqual(aide.session("private").conversations.get("private")!.inputIds, ["needs-contact", "specific", "irrelevant"]);
   assert.deepEqual(aide.session("group").conversations.get("group")!.inputIds, []);
-  await source.conversations.submit("hint", { origin: "source", sessionId: "group", text: "explicit destination" });
+  await source.conversations.submit("hint", { origin: "source", originId: "personal.environments", sessionId: "group", text: "explicit destination" });
   await aide.settled();
   for (const id of ["private", "group"]) assert.ok(aide.session(id).conversations.get(id)!.inputIds.includes("hint"));
-  await aide.receive({ id: "channel", sessionId: "group", text: "channel input" });
+  await aide.receive({ channelId: "web", id: "channel", sessionId: "group", text: "channel input" });
   await aide.settled();
   const group = aide.session("group").conversations;
   const channel = group.inputs("group").find((input) => input.spec.text === "channel input")!;
   assert.equal(aide.session("private").conversations.input(channel.metadata.name)!.status.phase, "done");
   const before = aide.messages().length;
-  await aide.receive({ id: "channel", sessionId: "group", text: "channel input" });
+  await aide.receive({ channelId: "web", id: "channel", sessionId: "group", text: "channel input" });
   await aide.settled(); assert.equal(aide.messages().length, before);
 });

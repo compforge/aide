@@ -82,7 +82,7 @@ test("Work Reconcile validates requests and only explicit control can resume pau
   assert.match(service.read(work.id).history.at(-1)!.text, /Task cannot/);
   await service.appendInput(work.id, { action: "pause", text: "暂停" }); await consume(work.id);
   assert.equal(service.read(work.id).status, "paused");
-  await seedInput(store.conversations, "pod", { conversationId: "me", origin: "source", text: "Pod replaced" });
+  await seedInput(store.conversations, "pod", { conversationId: "me", origin: "source", originId: "personal.environments", text: "Pod replaced" });
   await service.appendInput(work.id, { inputId: "pod", text: "相关服务变化" });
   await service.appendInput(work.id, { inputId: "pod", text: "相关服务变化" });
   await assert.rejects(service.appendInput(work.id, { inputId: "pod", action: "resume" }), /Source facts/);
@@ -166,7 +166,7 @@ test("Chief appends the same original Input to two works without losing observat
   routineId = (await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "deployment" } })).id;
   await aide.start(); await aide.settled();
   const source = aide.session("source"); await source.start();
-  const fact = { origin: "source" as const, sessionId: "me", text: "executor workload changed", observation };
+  const fact = { origin: "source" as const, originId: "personal.environments", sessionId: "me", text: "executor workload changed", observation };
   await source.conversations.submit("changed", fact); await aide.settled();
   assert.equal(aide.work("me").read(taskId).status, "paused");
   assert.equal(aide.work("me").read(routineId).status, "scheduled");

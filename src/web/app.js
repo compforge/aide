@@ -14,6 +14,37 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
     if (className) node.className = className;
     return node;
   }
+  function identityBadge(drawing, label) {
+    const badge = element('span', undefined, 'identity-badge'); badge.title = label;
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.classList.add('identity-icon'); icon.setAttribute('aria-hidden', 'true');
+    for (const [name, value] of Object.entries({ viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) icon.setAttribute(name, value);
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', drawing); icon.append(path);
+    badge.append(icon, element('span', label)); return badge;
+  }
+  function replyHeading(node, title, executions) {
+    const heading = node.querySelector('summary'); heading.replaceChildren(element('span', title));
+    const harnesses = new Map(executions.filter((block) => block.harness).map((block) => [block.harness, block]));
+    for (const block of harnesses.values()) heading.append(identityBadge(block.icon, block.label));
+  }
+  function receivedInput(block) {
+    const source = block.origin === 'source';
+    const node = element('article', undefined, 'message received-input ' + (source ? 'source' : 'user'));
+    if (block.inputId) node.dataset.inputId = block.inputId;
+    const header = element('div', undefined, 'input-heading');
+    header.append(identityBadge(block.icon, (source ? 'Source' : 'Channel') + (block.label ? ' · ' + block.label : '') + (source ? '' : ' · 你')));
+    header.append(element('time', new Date(block.at).toLocaleString(), 'input-time'));
+    if (source) header.append(element('span', ({ queued: '待处理', running: '处理中', waiting: '等待答复', done: '已处理', quiet: '已查看 · 保持安静', failed: '处理失败' })[block.status] || block.status, 'input-status'));
+    const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, block.content);
+    node.append(header, body);
+    if (block.detail) {
+      const details = replyRegion('input:' + block.inputId + ':evidence', '观察详情', false);
+      details.className = 'input-evidence reply-region';
+      if (block.detail) details.append(element('pre', block.detail));
+      node.append(details);
+    }
+    return node;
+  }
   const markdownSources = new WeakMap();
   function updateMarkdown(node, source) {
     if (markdownSources.get(node) === source) return;
@@ -236,11 +267,8 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
     const rendered = new Set();
     const roots = history.filter((block) => !block.parent_id);
     for (const block of roots) {
-      if (block.type === 'message' && block.role === 'user') {
-        const node = element('article', undefined, 'message user');
-        const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, block.content);
-        node.append(element('div', '你 · ' + new Date(block.at).toLocaleTimeString(), 'muted'), body);
-        $('history').append(node); continue;
+      if (block.type === 'input') {
+        $('history').append(receivedInput(block)); continue;
       }
       const groupId = block.group_id || block.id;
       if (rendered.has(groupId)) continue;
@@ -260,6 +288,7 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
       const title = 'Aide · ' + replyLabels[phase];
       const node = replyRegion('input:' + groupId + ':whole', title, true);
       node.className = 'message aide assistant-reply reply-envelope'; node.dataset.inputId = groupId;
+      replyHeading(node, title, group.filter((item) => item.type === 'execution'));
       if (executions.size || block.group_id || process.length) {
         const thought = replyPart('input:' + groupId + ':think', '过程', phase, 'process');
         updateProcess(thought, phase, process);
@@ -313,7 +342,7 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
     const label = activity.phase === 'waiting' ? '等待你回答' : activity.phase === 'queued' ? '正在排队'
       : last?.kind === 'tool' && last.status === 'in_progress' ? '正在调用工具'
       : last?.kind === 'thought' ? '正在思考' : last?.kind === 'text' ? '正在回复' : '正在处理';
-    $('activity-heading').textContent = 'Aide · ' + label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : '');
+    replyHeading(area.querySelector('.reply-envelope'), 'Aide · ' + label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : ''), activity.harnesses);
     const lastText = activity.blocks.filter((block) => block.kind === 'text').at(-1);
     const pending = activity.questions.filter((block) => block.status === 'pending');
     const answer = pending.map((block) => block.content).join('\n\n') || activity.answers.join('\n\n') || lastText?.text || '';
@@ -510,6 +539,7 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
         const liveIds = new Set(view.blocks.filter((block) => block.type === 'execution' &&
           (block.status === 'running' || (view.meta.activity && block.group_id === view.meta.activity.id))).map((block) => block.id));
         renderActivity(view.meta.activity && { ...view.meta.activity,
+          harnesses: view.blocks.filter((block) => block.type === 'execution' && liveIds.has(block.id)),
           answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === view.meta.activity.id).map((block) => block.content),
           questions: view.blocks.filter((block) => block.type === 'question' && block.group_id === view.meta.activity.id),
           blocks: view.blocks.filter((block) => liveIds.has(block.parent_id))

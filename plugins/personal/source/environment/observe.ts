@@ -1,6 +1,8 @@
+import { bindSourceInput } from "@compforge/aide-plugin";
+import { SOURCES } from "../definition.ts";
 import type { ConnectorClient, EnvironmentSnapshot, PluginContext, Resource, WorkloadSnapshot } from "@compforge/aide-plugin";
-import { type EnvironmentSourceSpec } from "./environment-config.ts";
-import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "./chief-model.ts";
+import { type EnvironmentSourceSpec } from "./config.ts";
+import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "../../chief-model.ts";
 
 export const ENVIRONMENT_SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "EnvironmentSource" } as const;
 export interface EnvironmentSourceStatus {
@@ -18,6 +20,24 @@ interface WorkloadEvent {
   previousObservedAt: string;
   changes: WorkloadChange[];
 }
+/** The producer describes observed facts; Chief owns decisions about their significance. */
+function describeWorkloadChanges(event: WorkloadEvent): string {
+  const lines = event.changes.slice(0, 20).map(({ before, after }) => {
+    const workload = after ?? before!;
+    const identity = `${workload.kind} ${workload.name}`;
+    if (!before) return `- ${identity}：新增`;
+    if (!after) return `- ${identity}：移除`;
+    const fields = [
+      before.generation !== after.generation ? `generation ${before.generation} → ${after.generation}` : "",
+      JSON.stringify(before.images) !== JSON.stringify(after.images) ? `镜像 ${before.images.map((i) => i.image).join(", ")} → ${after.images.map((i) => i.image).join(", ")}` : "",
+      before.ready !== after.ready || before.desired !== after.desired ? `就绪副本 ${before.ready}/${before.desired} → ${after.ready}/${after.desired}` : "",
+    ].filter(Boolean);
+    return `- ${identity}：${fields.length ? fields.join("；") : "Pod 或运行状态变化"}`;
+  });
+  if (event.changes.length > lines.length) lines.push(`其余 ${event.changes.length - lines.length} 项变化见完整观察数据。`);
+  return `${event.environment} / ${event.namespace}：${event.changes.length} 项 Workload 变化。\n\n${lines.join("\n")}`.slice(0, 32_000);
+}
+
 const identity = (workload: WorkloadSnapshot) => `${workload.kind}/${workload.name}`;
 
 export function workloadChanges(before: EnvironmentSnapshot, after: EnvironmentSnapshot): WorkloadChange[] {
@@ -59,11 +79,8 @@ export async function observeEnvironment(context: Pick<PluginContext, "resources
   if (changes.length) {
     const event: WorkloadEvent = { type: "workload.changed", environment: snapshot.environment, namespace: snapshot.namespace,
       observedAt: snapshot.observedAt, previousObservedAt: baseline!.observedAt, changes };
-    await context.resources.create<InputSpec, InputStatus>(INPUT_TYPE, { name, spec: {
-      origin: "source",
-      text: "环境中的 Workload 发生变化。结合近期关注和已有委托判断是否值得主动告知、询问或推进；无关变化保持安静。Pod 替换、镜像变化或重启不证明有人发布；操作者与原因需另行取证。",
-      observation: { ...event },
-    } });
+    const submit = bindSourceInput(SOURCES.environments, resource, context.resources);
+    await submit(name, { text: describeWorkloadChanges(event), observation: { ...event } });
   }
   await context.resources.patchStatus(resource, { baseline: snapshot, sequence: changes.length ? sequence : resource.status.sequence ?? 0,
     lastObservedAt: snapshot.observedAt, error: null });

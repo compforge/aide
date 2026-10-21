@@ -16,7 +16,7 @@ import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 import { LarkChannel } from "../src/channel/lark.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-import { SOURCE_TYPE } from "../plugins/personal/source.ts";
+import { SOURCE_TYPE } from "../plugins/personal/source/requirement/observe.ts";
 
 const log = pino({ level: "silent" });
 async function until(check: () => boolean) {
@@ -32,13 +32,13 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
     execute: async () => { throw new Error("Unexpected Work"); } }, root, prompts);
   let aide = new Aide(root, options, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  const input = { id: "one", sessionId: "me", conversationId: "me", text: "private-information" };
+  const input = { channelId: "web", id: "one", sessionId: "me", conversationId: "me", text: "private-information" };
   const [first, duplicate] = await Promise.all([aide.receive(input), aide.receive(input)]);
-  assert.equal(first.id, duplicate.id);
+  assert.deepEqual(first, duplicate);
   await aide.settled();
   assert.equal(calls, 1);
   assert.equal(aide.works().length, 0);
-  assert.deepEqual(aide.messages().map((m) => m.text), ["private-information", "直接回答"]);
+  assert.deepEqual(aide.messages().map((m) => m.text), ["直接回答"]);
   await aide.receive({ ...input, sessionId: "other", conversationId: "other", text: "hello" }); await aide.settled();
   assert.doesNotMatch(prompts[1]!, /private-information/);
   await aide.receive({ ...input, id: "failed", text: "fail" }); await aide.settled();
@@ -173,7 +173,7 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
   const discoveries = aide.session(conversationId).store.conversations.inputs().filter((item) => item.spec.origin === "source");
   assert.equal(discoveries.length, 1);
   assert.equal(discoveries[0]!.status.phase, "done");
-  assert.equal(aide.session(conversationId).store.conversations.input(digest([conversationId, "decline"]))!.spec.replyTo,
+  assert.equal(aide.session(conversationId).store.conversations.input(digest(["lark", conversationId, "decline"]))!.spec.replyTo,
     aide.questions()[0]!.request.messageId);
   const source = aide.session(conversationId).store.resources.list(SOURCE_TYPE)[0]!;
   const sessions = new SessionStore(root);

@@ -22,7 +22,7 @@ import {
 } from "../config/config.ts";
 import { FileHookTrustStore } from "../config/hook.ts";
 import type { LogSink } from "../logging.ts";
-import { HARNESS_IDENTITIES, HARNESSES, parseHarness, type HarnessName } from "./ids.ts";
+import { HARNESS_IDENTITIES, HARNESSES, parseHarness, type HarnessName, type HarnessIdentity } from "./ids.ts";
 import type { HarnessSessionInspector } from "./native-session.ts";
 import type { HarnessTarget, HarnessTargetProbeResult } from "./target.ts";
 
@@ -45,19 +45,7 @@ export interface HarnessAdapterOptions {
   rootDir?: string;
 }
 
-export interface HarnessDefinition<Id extends string = string> {
-  /** canonical id：用户侧词汇（slash command、Target 的 harness 字段） */
-  id: Id;
-  /** 用户侧简写；输入时归一到 id，不进入事件或持久化 */
-  aliases: readonly string[];
-  /** picker / 帮助文案里的展示长名 */
-  label: string;
-  /**
-   * wire key：事件 harness 字段与 HarnessSessionMeta.harness。
-   * **冻结值，永不变更**——session.jsonl 用它；HarnessSessionMeta 则按 harnessTargetId
-   * 索引，使同一种 Harness 的多个 target 不会共享原生 session。
-   */
-  sessionKey: string;
+export interface HarnessDefinition<Id extends string = string> extends HarnessIdentity<Id> {
   /** 时间线 author 短名，同时是着色 key（agentColorFor 的输入） */
   shortName: string;
   /** 固定认色：用户会形成"橙=claude"的肌肉记忆，颜色不随池子调整漂移 */
@@ -83,7 +71,7 @@ export interface HarnessProbeOptions {
 export const HARNESS_REGISTRY = [
   {
     ...HARNESS_IDENTITIES.pi,
-    label: "Pi", sessionKey: "pi", shortName: "pi", color: "#a6da95",
+    shortName: "pi", color: "#a6da95",
     create: ({ piSession, piConfig, target, log, nativeEvent, env }) => {
       if (env && Object.keys(env).length) throw new Error("Embedded Pi targets do not support environment overrides; configure Pi's agentDir instead");
       if (!piSession && !piConfig) throw new Error("Pi target requires startup-resolved configuration");
@@ -93,7 +81,7 @@ export const HARNESS_REGISTRY = [
   },
   {
     ...HARNESS_IDENTITIES.chief,
-    label: "Chief", sessionKey: "chief", shortName: "chief", color: "#a6da95",
+    shortName: "chief", color: "#a6da95",
     create: ({ chiefSession, log, nativeEvent, env }) => {
       if (!chiefSession) throw new Error("Chief target requires a host-bound Chief agent factory");
       if (env && Object.keys(env).length) throw new Error("Embedded Chief targets do not support environment overrides; configure Pi's agentDir instead");
@@ -102,8 +90,6 @@ export const HARNESS_REGISTRY = [
   },
   {
     ...HARNESS_IDENTITIES.codex,
-    label: "Codex",
-    sessionKey: "codex",
     shortName: "codex",
     color: "#73daca", // 青
     sessionInspector: codexSessionInspector,
@@ -125,8 +111,6 @@ export const HARNESS_REGISTRY = [
   },
   {
     ...HARNESS_IDENTITIES.claude,
-    label: "Claude Code",
-    sessionKey: "claude-code",
     shortName: "claude",
     color: "#ff9e64", // 橙
     sessionInspector: claudeSessionInspector,
@@ -152,8 +136,6 @@ export const HARNESS_REGISTRY = [
   },
   {
     ...HARNESS_IDENTITIES.dsh,
-    label: "DeepSeek Harness",
-    sessionKey: "deepseek-harness",
     shortName: "dsh",
     color: "#4d6bfe", // DeepSeek 蓝
     create: ({ log, nativeEvent, targetConfig, env }) => {

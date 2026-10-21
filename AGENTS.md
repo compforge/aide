@@ -37,12 +37,19 @@ plugins/personal/
     store.ts               # 宿主侧会话投影与消息 outbox
     trigger.ts             # 定时触发配置
     reconcile.ts           # Runner 侧消费 Input、续接问答与定时回顾
-  source.ts                # 需求观察、水位和调度
-  message-source.ts        # Lark 单聊、群内 @ 观察、水位和短期讨论跟进
-  message-context.ts       # IM 有界上下文、话题根消息与缺口
-  environment-source.ts    # Workload 观察、基线和变化 Input
+  source/                  # Source 分类定义与三类观察资源
+    definition.ts          # 来源身份、名称与稳定图标
+    environment/           # EnvironmentSource
+      config.ts            # 环境观察目标与 namespace 策略
+      observe.ts           # Workload 观察、基线和变化 Input
+    message/               # MessageSource
+      config.ts            # Lark 消息观察与跟进策略
+      observe.ts           # 单聊、群内 @ 观察、水位和短期讨论跟进
+      context.ts           # IM 有界上下文、话题根消息与缺口
+    requirement/           # RequirementSource
+      config.ts            # 需求观察范围与配置校验
+      observe.ts           # 需求观察、水位和调度
   config.ts                # Personal sources 配置、严格校验与默认值
-  environment-config.ts    # 环境观察目标与 namespace 策略
   task/                    # Task CRD
     model.ts               # 资源定义
     reconcile.ts           # 有限目标 Reconcile
@@ -72,6 +79,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。Connector 声明访问能力，`plugins.<plugin>.sources` 声明观察策略；Personal 只启动显式配置的环境、Lark 与需求 Source。环境发现只读配置，不代表连通性、健康或操作授权。
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
 - Session 是持久执行作用域，保留 Ledger、Lane、Turn 与恢复绑定；CoreSession 负责进程期装配。Session 统一位于 `$AIDE_HOME/sessions/<id>/`，不按 project / cwd 分组。逻辑 ID 的目录编码由 SessionStore 负责。启动时恢复全部 Session 的工作和 Source；watch 仅装配到所属 Session。cwd 只是执行环境，改变时保留 Aide 历史并清空原生恢复绑定；插件私有数据仅有 global、session、instance 三个目录作用域。
+- ChannelDefinition / SourceDefinition 声明来源身份；绑定的提交入口补齐来源，Source 同时记录资源实例引用。Input.text 保存收到的事实或请求，不保存 Chief 的处理指令。Channel / Source 输入统一从 Input 投影，Channel Message 仅承载输出；展示通过应用装配的定义目录读取名称和图标，不解释 Source 的业务数据。
 - Input 是 Core 内置资源，可带目标 sessionId；Conversation 是 Personal CRD，保存 Input 引用与各自消费状态。Channel / Source 不依赖 conversationId。Chief 先 Reconcile Input：无会话时创建并追加；已有会话时依次追加到默认会话、规则创建和规则关联的会话。确定归属即追加，不调用语义路由或汇总完整计划；创建使用稳定身份，追加按 Input ID 幂等，不新增路由 Verb。跨 Session 写入经过目标 ResourceClient 与 Watch，创建时按需装配目标 Session。
 - Chief 对已有 Work 使用 append_input 投递事实或请求，输入队列与消费进度由 Work 持久保存；Task / Routine Reconcile 决定目标与执行状态，Chief 保留创建和删除资源的能力。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。

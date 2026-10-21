@@ -2,6 +2,8 @@
 
 Aide 由 Channel、Source、资源与 Controller、Connector、Harness 等组件协作。Plugin 组织业务资源及其 Reconcile，Core 提供持久化、调度、交互与执行能力。本篇先说明组件的职责与关系，再说明一次业务处理如何在这些组件之间推进。
 
+Channel / Source 的 Definition 声明输入来源分类，绑定入口在提交时补齐身份。Input 保存请求或观察事实；Source 的资源引用用于追溯观察实例，目标 Session 用于路由。Conversation 引用 Input 并维护消费状态，用户输入不另存为 Message。Channel Message 只承载 Aide 的输出；展示与 Chief 的近期上下文均由输入事实和输出记录投影，来源特有的正文由生产方生成。
+
 ## 第一部分：组件与协作关系
 
 ![Aide 组件图：Channel、Source、资源、Controller、Connector、Harness 与 Agent Tools 的职责和协作关系](assets/kernel.svg)
@@ -10,7 +12,7 @@ Aide 由 Channel、Source、资源与 Controller、Connector、Harness 等组件
 
 | 概念 | 职责 |
 | --- | --- |
-| Channel | 接收用户消息，提交 Input / Message，并展示答复、问题与执行进展；Web 和 Lark 是两个实现 |
+| Channel | 接收用户消息并提交 Input，投递 Message，并展示问题与执行进展；Web 和 Lark 是两个实现 |
 | Source | 定义观察范围，通过 Core 请求外部查询或订阅，把观察结果转为资源或 Input |
 | Core / Verb | Core 提供共享协作机制，Verb 是 Controller 的动作出口，表达外部查询、操作、AI 执行和用户交互 |
 | Connector | 适配外部系统与环境，由 Core 装配并调用，处理提供方协议与数据映射 |

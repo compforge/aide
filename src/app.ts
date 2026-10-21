@@ -1,13 +1,16 @@
+import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
+import { SOURCES } from "../plugins/personal/source/definition.ts";
+import type { InputSpec, SourceDefinition } from "@compforge/aide-plugin";
 import { resolve } from "node:path";
 import type { Logger } from "pino";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { Personal } from "../plugins/personal/aide.ts";
-import { environmentSources, ENVIRONMENT_SESSION } from "../plugins/personal/environment-config.ts";
+import { environmentSources, ENVIRONMENT_SESSION } from "../plugins/personal/source/environment/config.ts";
 import { InputStore } from "./host/input/store.ts";
 import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
-import { requirementWatches, validateWatchScopes } from "../plugins/personal/source-config.ts";
+import { requirementWatches, validateWatchScopes } from "../plugins/personal/source/requirement/config.ts";
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
-import { messageWatch, MESSAGE_SESSION } from "../plugins/personal/message-config.ts";
+import { messageWatch, MESSAGE_SESSION } from "../plugins/personal/source/message/config.ts";
 import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
 import { Connectors } from "../connectors/index.ts";
@@ -31,6 +34,16 @@ export interface AideOptions {
  * @link docs/kernel.md
  */
 export class Aide {
+  private readonly inputDefinitions = new Map<string, ChannelDefinition | SourceDefinition>([
+    ...Object.values(CHANNELS).map((definition) => [`channel:${definition.id}`, definition] as const),
+    ...Object.values(SOURCES).map((definition) => [`source:${definition.id}`, definition] as const),
+  ]);
+  inputDefinition(origin: Pick<InputSpec, "origin" | "originId">) {
+    const definition = this.inputDefinitions.get(`${origin.origin}:${origin.originId}`);
+    if (!definition) throw new Error(`Unknown input definition: ${origin.origin}:${origin.originId}`);
+    return definition;
+  }
+
   private readonly storage: SessionStore;
   private readonly defaultTarget: AideOptions["defaultTarget"];
   private readonly active = new Map<string, Personal>();
@@ -159,13 +172,14 @@ export class Aide {
 
   async receive(raw: unknown) {
     const input = IncomingSchema.parse(raw);
+    this.inputDefinition({ origin: "channel", originId: input.channelId });
     const scope = this.session(input.sessionId);
     await this.claimConversation(scope, input.sessionId);
     await this.start();
     return scope.receive(input);
   }
 
-  async event(input: Incoming & { name: string; conversationId?: string }): Promise<number> {
+  async event(input: Omit<Incoming, "channelId"> & { name: string; conversationId?: string }): Promise<number> {
     const scope = this.session(input.sessionId);
     await this.claimConversation(scope, input.sessionId);
     await this.start(); await scope.start();

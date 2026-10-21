@@ -6,13 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Connectors } from "../connectors/index.ts";
-import { requirementWatches, validateWatchScopes, type Watch } from "../plugins/personal/source-config.ts";
+import { requirementWatches, validateWatchScopes, type Watch } from "../plugins/personal/source/requirement/config.ts";
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import { loadMeegoRequirementConfigs, MeegleCliRequirementConnector } from "../connectors/requirements/meego.ts";
 import { SessionStore } from "../src/host/store/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
-import { observeRequirements, SOURCE_TYPE } from "../plugins/personal/source.ts";
+import { observeRequirements, SOURCE_TYPE } from "../plugins/personal/source/requirement/observe.ts";
 import { INPUT_TYPE } from "../plugins/personal/chief-model.ts";
 
 test("Meego selects assigned user keys, not participants or display names, and preserves unfinished states", async () => {

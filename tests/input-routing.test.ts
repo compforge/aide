@@ -20,13 +20,13 @@ test("Default receives every Input and deterministic matches append once without
     assert.doesNotMatch(prompt, /Candidates:/); calls.push(prompt); return "观察已处理";
   }, async execute() { throw new Error("No delegated work expected"); } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ id: "a", sessionId: "group-a", text: "a-private-interest" });
-  await aide.receive({ id: "b", sessionId: "group-b", text: "b-private-interest" });
-  await aide.receive({ id: "c", sessionId: "group-c", text: "unrelated service" });
+  await aide.receive({ channelId: "web", id: "a", sessionId: "group-a", text: "a-private-interest" });
+  await aide.receive({ channelId: "web", id: "b", sessionId: "group-b", text: "b-private-interest" });
+  await aide.receive({ channelId: "web", id: "c", sessionId: "group-c", text: "unrelated service" });
   await aide.settled();
   await aide.setDefaultConversation("group-a", true);
   const source = aide.session("source:events"); await source.start();
-  await source.conversations.submit("shared", { origin: "source", sessionId: "group-b", text: "service changed" });
+  await source.conversations.submit("shared", { origin: "source", originId: "personal.environments", sessionId: "group-b", text: "service changed" });
   await aide.settled();
   for (const id of ["group-a", "group-b"]) {
     const c = aide.findConversation(id)!.conversations;
@@ -39,16 +39,16 @@ test("Default receives every Input and deterministic matches append once without
   assert.doesNotMatch(handling.find((p) => p.includes('"conversationId":"group-a"'))!, /b-private-interest/);
   assert.doesNotMatch(handling.find((p) => p.includes('"conversationId":"group-b"'))!, /a-private-interest/);
   const before = calls.length;
-  await source.conversations.submit("shared", { origin: "source", sessionId: "group-b", text: "service changed" });
+  await source.conversations.submit("shared", { origin: "source", originId: "personal.environments", sessionId: "group-b", text: "service changed" });
   await aide.settled(); assert.equal(calls.length, before);
-  await source.conversations.submit("overlap", { origin: "source", sessionId: "group-a", text: "default is also rule-related" });
+  await source.conversations.submit("overlap", { origin: "source", originId: "personal.environments", sessionId: "group-a", text: "default is also rule-related" });
   await aide.settled(); assert.equal(calls.length, before + 1);
   assert.equal(aide.session("group-a").conversations.get("group-a")!.inputIds.filter((id) => id === "overlap").length, 1);
-  await source.conversations.submit("unmatched", { origin: "source", text: "unmatched observation" });
+  await source.conversations.submit("unmatched", { origin: "source", originId: "personal.environments", text: "unmatched observation" });
   await aide.settled(); assert.equal(calls.length, before + 2);
   assert.equal(source.conversations.inputStore.get("unmatched")!.status.routing!.phase, "done");
   await aide.setDefaultConversation("group-a", false);
-  await source.conversations.submit("ignored", { origin: "source", text: "no default or rule" });
+  await source.conversations.submit("ignored", { origin: "source", originId: "personal.environments", text: "no default or rule" });
   await aide.settled(); assert.equal(calls.length, before + 2);
   assert.equal(source.conversations.inputStore.get("ignored")!.status.routing!.phase, "ignored");
   assert.equal(aide.conversationIds().length, 3);
@@ -68,7 +68,7 @@ test("The first unscoped Source Input creates a replyable Conversation without s
   const client = source.plugins.resourceClient("personal");
   await assert.rejects(client.get({ ...CONVERSATION_TYPE, sessionId: "unknown", namespace: "v1", name: "missing" }), /Unknown Session/);
   assert.equal(aide.sessions().length, 1, "Reading an unknown Session must not create one");
-  const spec = { origin: "source" as const, text: "同事希望确认发布窗口", observation: { kind: "mention" } };
+  const spec = { origin: "source" as const, originId: "personal.environments", text: "同事希望确认发布窗口", observation: { kind: "mention" } };
   await source.conversations.submit("first", spec);
   await aide.settled();
   assert.equal(routes, 0); assert.equal(handled.length, 1);
@@ -79,7 +79,7 @@ test("The first unscoped Source Input creates a replyable Conversation without s
   assert.equal(scope.conversations.get(id)!.name, spec.text);
   assert.deepEqual(scope.conversations.get(id)!.inputIds, ["first"]);
   const uid = scope.conversations.resource(id)!.metadata.uid;
-  await aide.receive({ id: "reply", sessionId: scope.id, text: "请帮我整理需要确认的问题" });
+  await aide.receive({ channelId: "web", id: "reply", sessionId: scope.id, text: "请帮我整理需要确认的问题" });
   await aide.settled();
   assert.equal(handled.length, 2); assert.equal(routes, 0);
   assert.match(handled[1]!, /Recent conversation:.*已接收观察/);
@@ -91,7 +91,7 @@ test("The first unscoped Source Input creates a replyable Conversation without s
   await aide.settled();
   assert.equal(handled.length, 2); assert.equal(routes, 0);
   assert.equal(aide.findConversation(id)!.conversations.resource(id)!.metadata.uid, uid);
-  await aide.session("source:events").conversations.submit("unmatched", { origin: "source", text: "不相关的新观察" });
+  await aide.session("source:events").conversations.submit("unmatched", { origin: "source", originId: "personal.environments", text: "不相关的新观察" });
   await aide.settled();
   assert.equal(routes, 0); assert.equal(aide.conversationIds().length, 1);
   assert.equal(aide.session("source:events").conversations.inputStore.get("unmatched")!.status.routing!.phase, "ignored");
@@ -105,15 +105,15 @@ test("Rule creation and association both run, including original discussion dest
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.session("existing").conversations.ensure();
   const source = aide.session("source");
-  await source.conversations.submit("original", { origin: "source", sessionId: "existing", text: "prior evidence" });
+  await source.conversations.submit("original", { origin: "source", originId: "personal.environments", sessionId: "existing", text: "prior evidence" });
   await aide.settled();
-  await source.conversations.submit("new-topic", { origin: "source", sessionId: "new-target", text: "new service evidence", observation: { originalInputId: "original" } });
+  await source.conversations.submit("new-topic", { origin: "source", originId: "personal.environments", sessionId: "new-target", text: "new service evidence", observation: { originalInputId: "original" } });
   await aide.settled();
   for (const id of ["existing", "new-target"]) {
     assert.equal(aide.findConversation(id)!.conversations.input("new-topic")!.status.phase, "done");
   }
   assert.equal(aide.conversationIds().length, 2);
-  await source.conversations.submit("discussion", { origin: "source", text: "follow-up evidence", observation: { originalInputId: "new-topic" } });
+  await source.conversations.submit("discussion", { origin: "source", originId: "personal.environments", text: "follow-up evidence", observation: { originalInputId: "new-topic" } });
   await aide.settled();
   for (const id of ["existing", "new-target"]) assert.equal(aide.findConversation(id)!.conversations.input("discussion")!.status.phase, "done");
   assert.equal(aide.conversationIds().length, 2);
@@ -130,10 +130,10 @@ test("Default and rule creation are appended before a later association fails; r
   await existing.conversations.ensure();
   const c = await other.conversations.ensure();
   await aide.setDefaultConversation("existing", true);
-  const preceding = await source.conversations.submit("original", { origin: "source", text: "previous evidence" });
+  const preceding = await source.conversations.submit("original", { origin: "source", originId: "personal.environments", text: "previous evidence" });
   source.conversations.inputStore.update(preceding, { routing: { phase: "running", reason: "previous delivery incomplete" } });
   await other.plugins.resourceClient("personal").replace(c, { ...c.spec, inputIds: ["original"] }, { ...c.status, processing: { original: { phase: "done" } } });
-  const pending = await source.conversations.submit("pending", { origin: "source", sessionId: "new-target", text: "new evidence", observation: { originalInputId: "original" } });
+  const pending = await source.conversations.submit("pending", { origin: "source", originId: "personal.environments", sessionId: "new-target", text: "new evidence", observation: { originalInputId: "original" } });
   const resources = source.plugins.resourceClient("personal");
   const logger = { debug() {}, info() {}, warn() {}, error() {} };
   await assert.rejects(reconcileInput({ resources, logger }, pending), /Original Input routing is pending/);
@@ -168,7 +168,7 @@ for (const createdBeforeCrash of [false, true]) {
     await a.conversations.ensure();
     await aide.setDefaultConversation("existing", true);
     const ca = a.conversations.resource(a.id)!;
-    const fact = await source.conversations.submit("recover", { origin: "source", sessionId: "created", text: "persisted creation" });
+    const fact = await source.conversations.submit("recover", { origin: "source", originId: "personal.environments", sessionId: "created", text: "persisted creation" });
     source.conversations.inputStore.update(fact, { routing: { phase: "running", reason: "interrupted creation",
       creation: { sessionId: "created", name: digest("created") } } });
     await a.plugins.resourceClient("personal").replace(ca, { ...ca.spec, inputIds: ["recover"] }, { ...ca.status, processing: { recover: { phase: "done" } } });
@@ -196,7 +196,7 @@ for (const pinnedBeforeCrash of [false, true]) {
     let aide = new Aide(root, options, log);
     t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
     const source = aide.session("source");
-    const fact = await source.conversations.submit("first", { origin: "source", text: "bootstrap evidence" });
+    const fact = await source.conversations.submit("first", { origin: "source", originId: "personal.environments", text: "bootstrap evidence" });
     const id = `conversation:${digest(["input", "first"])}`;
     const created = await aide.session(id).conversations.ensure();
     source.conversations.inputStore.update(fact, { routing: { phase: "running", bootstrap: true, reason: "First Conversation",
@@ -220,7 +220,7 @@ test("Default append survives creation failure, and a pinned deleted creation is
   const inbox = aide.session("inbox"), source = aide.session("source");
   await inbox.conversations.ensure();
   await aide.setDefaultConversation("inbox", true);
-  const fact = await source.conversations.submit("pending", { origin: "source", sessionId: "new", text: "new topic" });
+  const fact = await source.conversations.submit("pending", { origin: "source", originId: "personal.environments", sessionId: "new", text: "new topic" });
   const resources = source.plugins.resourceClient("personal");
   const logger = { debug() {}, info() {}, warn() {}, error() {} };
   await assert.rejects(reconcileInput({ logger, resources: { ...resources, async create() {
@@ -247,8 +247,8 @@ test("Concurrent appends preserve both Inputs and consumption state; repeats do 
   const aide = new Aide(root, fakeOptions({ async execute() { throw new Error("No Work"); } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const scope = aide.session("target"); const c = await scope.conversations.ensure();
-  const first = await scope.conversations.submit("first", { origin: "source", text: "first" });
-  const second = await scope.conversations.submit("second", { origin: "source", text: "second" });
+  const first = await scope.conversations.submit("first", { origin: "source", originId: "personal.environments", text: "first" });
+  const second = await scope.conversations.submit("second", { origin: "source", originId: "personal.environments", text: "second" });
   const client = scope.plugins.resourceClient("personal");
   const target = { sessionId: scope.id, name: c.metadata.name, uid: c.metadata.uid };
   await Promise.all([appendConversationInput(client, target, first), appendConversationInput(client, target, second), appendConversationInput(client, target, first)]);
@@ -281,7 +281,7 @@ test("Restart retries rules without replaying completed conversation work", asyn
   const cb = await b.conversations.ensure();
   await aide.setDefaultConversation("a", true);
   const ca = a.conversations.resource(a.id)!;
-  const fact = await source.conversations.submit("event", { origin: "source", sessionId: "b", text: "recover fanout" });
+  const fact = await source.conversations.submit("event", { origin: "source", originId: "personal.environments", sessionId: "b", text: "recover fanout" });
   source.conversations.inputStore.update(fact, { routing: { phase: "running", reason: "interrupted after default append" } });
   await a.plugins.resourceClient("personal").replace(ca, { ...ca.spec, inputIds: ["event"] }, { ...ca.status, processing: { event: { phase: "done" } } });
   await aide.close();
@@ -299,19 +299,19 @@ test("Restart retries rules without replaying completed conversation work", asyn
 });
 
 
-test("A committed Channel Input restores its user message and creates the Personal Conversation in the hinted Session", async (t) => {
+test("A committed Channel Input remains visible without a user Message and creates the Personal Conversation in the hinted Session", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-channel-recovery-"));
   let calls = 0;
   const options = fakeOptions({ async chief(prompt) { assert.doesNotMatch(prompt, /Candidates:/); calls++; return "recovered"; }, async execute() { throw new Error("No Work"); } }, root);
   let aide = new Aide(root, options, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   aide.session("target");
-  await aide.session("source").conversations.submit("accepted", { origin: "channel", sessionId: "target", text: "question persisted before attachment" });
+  await aide.session("source").conversations.submit("accepted", { origin: "channel", originId: "web", sessionId: "target", text: "question persisted before attachment" });
   await aide.close();
   aide = new Aide(root, options, log); await aide.start(); await aide.settled();
   assert.equal(calls, 1);
-  assert.equal(aide.messages().filter((m) => m.role === "user" && m.text === "question persisted before attachment").length, 1);
+  assert.equal(aide.session("target").conversations.inputs().filter((input) => input.spec.text === "question persisted before attachment").length, 1);
   assert.equal(aide.session("target").conversations.input("accepted")!.status.phase, "done");
   await aide.close(); aide = new Aide(root, options, log); await aide.start(); await aide.settled();
-  assert.equal(calls, 1); assert.equal(aide.messages().length, 2);
+  assert.equal(calls, 1); assert.equal(aide.messages().length, 1);
 });

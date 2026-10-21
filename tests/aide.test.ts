@@ -269,7 +269,7 @@ test("Aide resumes the same Session and personal state when execution cwd change
   const first = new Aide(root, fakeOptions(agent, join(root, "code-a")), log);
   let restarted: Aide | undefined;
   t.after(async () => { await first.close(); await restarted?.close(); rmSync(root, { recursive: true, force: true }); });
-  await first.receive({ id: "hello", sessionId: "me", conversationId: "me", text: "你好" });
+  await first.receive({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "你好" });
   await first.settled();
   const routine = await first.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "manual" } });
   const originalId = new SessionStore(root).listSessions()[0]!.aideSessionId;
@@ -294,7 +294,7 @@ test("Aide resumes the same Session and personal state when execution cwd change
   assert.equal(sessions[0]!.cwd, join(root, "code-b"));
   assert.equal(restarted.work("me").read(routine.id).title, routine.title);
   assert.deepEqual(restarted.messages(), messages);
-  await restarted.receive({ id: "again", sessionId: "me", conversationId: "me", text: "继续聊" });
+  await restarted.receive({ channelId: "web", id: "again", sessionId: "me", conversationId: "me", text: "继续聊" });
   await restarted.settled();
   assert.ok(executionCwds.length > 0);
   assert.ok(executionCwds.every((cwd) => cwd === join(root, "code-b")));
@@ -340,7 +340,7 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   aide.session("me");
   assert.equal(new SessionStore(root).openSession("me").meta.harnessTargets.chosen!.model, "configured-model");
-  await aide.receive({ id: "hello", sessionId: "me", conversationId: "me", text: "hello" });
+  await aide.receive({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "hello" });
   await aide.settled();
   // Mutating the caller's object cannot change future Sessions' startup target.
   defaultTarget.model = "changed-after-startup";

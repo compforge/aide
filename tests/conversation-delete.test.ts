@@ -28,8 +28,8 @@ test("Web deletes a revision-checked Conversation and preserves shared Input and
   const options = fakeOptions({ execute: async () => { throw new Error("No work expected"); } }, dir);
   let aide = new Aide(dir, options, log);
   const scope = aide.session("shared");
-  await seedInput(scope.conversations, "shared-input", { conversationId: "a", origin: "source", text: "共同观察" }, { phase: "done" });
-  await seedInput(scope.conversations, "shared-input", { conversationId: "b", origin: "source", text: "共同观察" }, { phase: "done" });
+  await seedInput(scope.conversations, "shared-input", { conversationId: "a", origin: "source", originId: "personal.environments", text: "共同观察" }, { phase: "done" });
+  await seedInput(scope.conversations, "shared-input", { conversationId: "b", origin: "source", originId: "personal.environments", text: "共同观察" }, { phase: "done" });
   await scope.conversations.archive("a", [{ id: "old", conversationId: "a", text: "只属于 a", role: "aide", workId: null, at: new Date().toISOString() }]);
   await aide.start(); await aide.settled();
   const { server, base, remove } = await listen(aide);
@@ -60,7 +60,7 @@ test("Conversation deletion rejects queued, running, waiting and associated Work
   const scope = aide.session("shared");
   for (const phase of [undefined, "running", "waiting"] as const) {
     const id = phase ?? "queued";
-    await seedInput(scope.conversations, id, { conversationId: id, origin: "channel", text: id }, phase ? { phase } : {});
+    await seedInput(scope.conversations, id, { conversationId: id, origin: "channel", originId: "web", text: id }, phase ? { phase } : {});
   }
   const task = await aide.work("task-owner").create({ kind: "task", title: "保留事项", instruction: "check", trigger: null });
   const routine = await aide.work("routine-owner").create({ kind: "routine", title: "保留安排", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "changed" } });
@@ -92,10 +92,10 @@ test("Recreated Conversation has fresh execution context and no old questions or
   }, execute: async () => ({ action: "done", summary: "旧工作完成", notification: "旧工作回复", question: null, nextAt: null }) }, dir), log);
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
-  await aide.receive({ id: "old", sessionId: "me", text: "旧请求" });
+  await aide.receive({ channelId: "web", id: "old", sessionId: "me", text: "旧请求" });
   for (let i = 0; i < 200 && !aide.questions().some((q) => q.request.status === "pending"); i++) await Bun.sleep(10);
   assert.ok(aide.questions().some((q) => q.request.status === "pending"));
-  await aide.receive({ id: "answer", sessionId: "me", text: "确认" }); await aide.settled();
+  await aide.receive({ channelId: "web", id: "answer", sessionId: "me", text: "确认" }); await aide.settled();
   const work = await aide.work("me").create({ kind: "task", title: "旧工作", instruction: "执行一次", trigger: null });
   await aide.settled();
   await aide.work("me").delete(work.id, aide.works().find((item) => item.id === work.id)!.revision);
@@ -106,7 +106,7 @@ test("Recreated Conversation has fresh execution context and no old questions or
   assert.equal((await remove("me", Number(oldResource.metadata.resourceVersion))).status, 200);
   assert.deepEqual(aide.messages(), []);
   await aide.settled();
-  await aide.receive({ id: "new", sessionId: "me", text: "新请求" }); await aide.settled();
+  await aide.receive({ channelId: "web", id: "new", sessionId: "me", text: "新请求" }); await aide.settled();
   const current = aide.session("me").conversations.resource("me")!;
   assert.notEqual(current.metadata.uid, oldResource.metadata.uid);
   assert.equal((await remove("me", Number(current.metadata.resourceVersion), { uid: oldResource.metadata.uid })).status, 409);
@@ -117,7 +117,7 @@ test("Recreated Conversation has fresh execution context and no old questions or
   assert.equal(view.blocks.some((b) => /旧答案|旧请求|旧工作|继续吗/.test(b.content)), false);
   assert.equal(view.blocks.filter((b) => b.type === "execution").length, 1);
   assert.deepEqual(aide.questions(), []);
-  await aide.receive({ id: "old", sessionId: "me", text: "旧请求" }); await aide.settled();
+  await aide.receive({ channelId: "web", id: "old", sessionId: "me", text: "旧请求" }); await aide.settled();
   assert.equal(calls, 3);
   assert.equal(aide.messages().some((m) => m.text === "旧请求"), false);
 });

@@ -269,7 +269,7 @@ test("Aide routes stable Sessions and resumes real Chief native context across i
     createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
       chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }, log);
   const send = async (sessionId: string, conversationId: string, id: string) => {
-    await aide.receive({ sessionId, conversationId, id, text: `question-${id}` }); await aide.settled();
+    await aide.receive({ channelId: "web", sessionId, conversationId, id, text: `question-${id}` }); await aide.settled();
     assert.equal(aide.findConversation(conversationId)!.conversations.inputs().at(-1)!.status.phase, "done");
   };
   const binding = (sessionId: string, conversationId: string) => {
@@ -296,14 +296,14 @@ test("Aide routes stable Sessions and resumes real Chief native context across i
     assert.equal(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
     assert.match(JSON.stringify(fixture.requests[3]), /native-response-1/);
     assert.doesNotMatch(JSON.stringify(fixture.requests[3]), /question-b1/);
-    assert.equal(aide.messages().filter((message) => message.conversationId === "lark:app:group-a").length, 6);
+    assert.equal(aide.messages().filter((message) => message.conversationId === "lark:app:group-a").length, 3);
     await aide.close();
     const cwd = join(fixture.config.cwd, "other-cwd"); mkdirSync(cwd);
     aide = open(cwd); await aide.start();
     assert.equal(binding("lark:app:group-a", "lark:app:group-a"), undefined);
     await send("lark:app:group-a", "lark:app:group-a", "a4");
     assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
-    assert.equal(aide.messages().filter((message) => message.conversationId === "lark:app:group-a").length, 8);
+    assert.equal(aide.messages().filter((message) => message.conversationId === "lark:app:group-a").length, 4);
     const beforeDelete = binding("lark:app:group-a", "lark:app:group-a");
     const conversation = aide.findConversation("lark:app:group-a")!.conversations.get("lark:app:group-a")!;
     assert.deepEqual(await aide.deleteConversation(conversation.id, conversation.revision, aide.findConversation(conversation.id)!.conversations.resource(conversation.id)!.metadata.uid), { deleted: true });
