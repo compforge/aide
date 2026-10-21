@@ -14,7 +14,7 @@ interface Scan {
 }
 interface Delivery {
   name: string;
-  spec: SourceInput;
+  spec: SourceInput & { sessionId: string };
   known: string[];
   related: string[];
 }
@@ -23,14 +23,12 @@ interface PendingMessage {
   kind: MessageKind;
   discoveredAt: string;
   followUntil: string;
-  attempts: number;
   sequence: number;
   known: string[];
   related: string[];
   finished?: boolean;
   delivery?: Delivery | null;
   follow?: { end: string; token?: string } | null;
-  error?: string | null;
 }
 export interface MessageSourceStatus {
   scans?: Scan[];
@@ -48,6 +46,10 @@ const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "aide-system" as
 /**
  * @spec Persist discovery and delivery plans before side effects. Advance a scan only after its Inputs exist.
  * @spec A restarted delivery reuses its exact Input and next observation state, never a fresh live snapshot.
+ * @spec An observed original message is sufficient: absent context never delays its Input.
+ * @spec Only retrieved context accompanies an Input; read failures stay in logs and never create discussion Inputs.
+ * @spec Initial and discussion Inputs share source:lark:<appId>:<userId>:<chatId> affinity, separate from bot Channel conversations.
+ * @why User observations must not enter the bot chat history or its automatic outbound delivery.
  * @why IM context is evidence from other people, not a delegation from the account owner.
  * @case tests/message-source.test.ts
  * @link docs/connector/lark-messages.md
@@ -116,7 +118,7 @@ class MessageObservation {
       if (pending.some((item) => item.message.id === message.id) ||
           await this.context.resources.get(inputRef(inputName(this.watch, message.id, 0)))) continue;
       pending.push({ message, kind, discoveredAt: iso(this.now), followUntil: iso(this.now + this.watch.followupMs),
-        attempts: 0, sequence: 0, known: [], related: [message.id] });
+        sequence: 0, known: [], related: [message.id] });
     }
     scan = { ...scan, window: { ...window, page: { ids, hasMore: page.hasMore, ...(page.nextToken ? { nextToken: page.nextToken } : {}) } } };
     await this.save({ pending, scans: this.scans.map((item) => item.kind === kind ? scan : item) });
@@ -138,19 +140,16 @@ class MessageObservation {
   }
 
   private async initialize(entry: PendingMessage) {
-    let context: MessageContext;
-    try { context = await readMessageContext(this.connectors.messages, entry.message, this.watch, this.now); }
+    let context: MessageContext | undefined;
+    try { context = await readMessageContext(this.connectors.messages, entry.message, this.watch, this.now, this.context.logger); }
     catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      entry = { ...entry, attempts: entry.attempts + 1, error: detail };
-      await this.update(entry);
-      this.context.logger.warn("Lark message context unavailable", { attributes: { messageId: entry.message.id,
-        chatId: entry.message.chatId, attempt: entry.attempts, error: detail } });
-      if (entry.attempts < this.watch.contextAttempts) return;
-      context = { messages: [], observedThrough: iso(this.now), truncated: false, error: detail };
+      this.context.logger.warn("Lark message context unavailable; submitting original message", {
+        attributes: { messageId: entry.message.id, chatId: entry.message.chatId,
+          error: error instanceof Error ? error.message : String(error) } });
     }
-    const known = [entry.message.id, ...context.messages.map((message) => message.id)];
-    await this.plan(entry, context, known, this.related(entry, context.messages));
+    const messages = context?.messages ?? [];
+    const known = [entry.message.id, ...messages.map((message) => message.id)];
+    await this.plan(entry, context, known, this.related(entry, messages));
   }
 
   private related(entry: PendingMessage, messages: ChatMessage[]): string[] {
@@ -180,12 +179,9 @@ class MessageObservation {
       if (page.hasMore && (!page.nextToken || page.nextToken === follow.token)) throw new Error("Lark follow-up pagination did not advance");
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      await this.update({ ...entry, error: detail });
-      this.context.logger.warn("Lark discussion follow-up failed", { attributes: { messageId: entry.message.id, error: detail } });
-      if (this.now >= Date.parse(entry.followUntil)) {
-        // The terminal gap is durable in the last Input as well as the log.
-        await this.plan({ ...entry, finished: true }, { messages: [], observedThrough: follow.end, truncated: false, error: detail }, entry.known, entry.related);
-      }
+      this.context.logger.warn("Lark discussion follow-up failed", { attributes: {
+        messageId: entry.message.id, chatId: entry.message.chatId, error: detail } });
+      if (this.now >= Date.parse(entry.followUntil)) await this.remove(entry);
       return;
     }
     // Thread API cannot filter time. Ascending pages past the fixed cutoff finish this scan.
@@ -197,7 +193,7 @@ class MessageObservation {
       && !(message.sender.id !== this.watch.userId && message.mentions.includes(this.watch.userId)));
     const known = [...new Set([...entry.known, ...eligible.filter((message) => related.includes(message.id)).map((message) => message.id)])];
     const finished = !hasMore && Date.parse(follow.end) >= Date.parse(entry.followUntil);
-    const next = { ...entry, related, finished, follow: hasMore ? { ...follow, token: page.nextToken! } : null, error: null };
+    const next = { ...entry, related, finished, follow: hasMore ? { ...follow, token: page.nextToken! } : null };
     if (fresh.length) {
       await this.plan(next, boundContext(fresh, follow.end, hasMore, this.watch.maxContextChars), known, related);
     } else await this.update({ ...next, known });
@@ -206,16 +202,17 @@ class MessageObservation {
     }
   }
 
-  private async plan(entry: PendingMessage, context: MessageContext, known: string[], related: string[]) {
+  private async plan(entry: PendingMessage, context: MessageContext | undefined, known: string[], related: string[]) {
     const name = inputName(this.watch, entry.message.id, entry.sequence);
     const message = { ...entry.message, content: entry.message.content.slice(0, this.watch.maxContextChars) };
     const kind = entry.sequence ? "讨论进展" : entry.kind === "direct" ? "私聊" : "群内 @";
-    const content = entry.sequence ? context.messages.map((item) => item.content).join("\n\n") : message.content;
-    const spec: SourceInput = {
+    const content = entry.sequence ? (context?.messages ?? []).map((item) => item.content).join("\n\n") : message.content;
+    const spec: Delivery["spec"] = {
+      sessionId: `source:lark:${this.watch.accountId}:${this.watch.userId}:${message.chatId}`,
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,
         kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,
-        originalInputId: inputName(this.watch, message.id, 0), context,
+        originalInputId: inputName(this.watch, message.id, 0), ...(context?.messages.length ? { context } : {}),
         messageTruncated: message.content.length !== entry.message.content.length } };
     const planned = { ...entry, delivery: { name, spec, known, related } };
     await this.update(planned);
@@ -230,7 +227,8 @@ class MessageObservation {
     await this.update({ ...entry, sequence: entry.sequence + 1, known: delivery.known,
       related: delivery.related, delivery: null });
     this.context.logger.info("Lark observation Input committed", { attributes: {
-      messageId: entry.message.id, inputId: delivery.name, kind: String(delivery.spec.observation!.kind) } });
+      messageId: entry.message.id, inputId: delivery.name, sessionId: delivery.spec.sessionId,
+      kind: String(delivery.spec.observation!.kind) } });
     if (entry.kind === "direct" || entry.finished) await this.remove(entry);
   }
 

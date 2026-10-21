@@ -61,7 +61,7 @@ Aide 的根级 `defaultHarness` 选择默认工作执行实现，`harnesses.<nam
 
 ### 输入与交流记录
 
-Input 是独立的 Host 内置资源，记录输入内容、来源和可选的目标 sessionId。Channel 知道聊天对应的 Session，Source 也可以提交没有目标的外部观察。接收输入的执行 Session 与输入声明的目标 Session 分别记录；前者负责持久执行，后者表达来源已知的归属线索，也允许关联其它相关话题。输入事实统一保存在 `$AIDE_HOME/inputs.json`，供多个插件资源引用。
+Input 是独立的 Host 内置资源，记录输入内容、来源和可选的 sessionId 话题线索。Channel / Source 按自身特质决定标识的稳定性和粒度；同一标识表达输入有共同上下文，不同标识不意味着毫无关联。Source 也可以提交没有话题线索的外部观察。接收输入的执行 Session 与输入声明的目标 Session 分别记录；前者负责持久执行，后者表达来源已知的归属线索，也允许关联其它相关话题。输入事实统一保存在 `$AIDE_HOME/inputs.json`，供多个插件资源引用。
 
 Conversation 是 Personal 定义的资源：spec 保存所属 Session 和追加的 inputIds，status 保存各 Input 的消费进度与消息 outbox。它与 Task、Routine 一样使用通用 Resource CRUD、版本检查和 Watch。来源无需知道 Conversation，Personal 决定交流上下文的组织方式。一个 Input 可以被多个 Conversation 引用，各会话独立消费。
 

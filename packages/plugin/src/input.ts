@@ -4,7 +4,11 @@ export interface InputReceipt { inputId: string; at: string }
 
 export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Input" } as const;
 export interface InputSpec {
-  /** Known destination supplied by the producer; other related conversations may also consume this Input. */
+  /**
+   * @spec Optional topic affinity supplied by the Channel or Source, which owns its stable identity and granularity.
+   * Inputs sharing this ID have common context; different IDs do not imply unrelated topics or exclusive routing.
+   * @link docs/kernel.md
+   */
   sessionId?: string;
   origin: "channel" | "source";
   /** ChannelDefinition or SourceDefinition ID, selected by origin. */
