@@ -116,7 +116,7 @@ test("Empty context is omitted; retrieved messages are included without read err
   await f.observe(now + 60_000);
   const input = f.inputs.list().find((input) => input.spec.observation!.originalMessageId === "om_with_context")!;
   assert.deepEqual(input.spec.observation!.context, {
-    messages: [{ ...message("om_before", { content: "earlier discussion" }), relation: "received" }],
+    messages: [{ ...message("om_before", { content: "earlier discussion" }), relation: "received", person: input.spec.sender }],
     observedThrough: new Date(now + 60_000).toISOString(), truncated: false,
   });
   assert.equal(f.warnings.length, 0);
@@ -133,7 +133,7 @@ test("An unavailable thread root is logged without discarding retrieved replies 
   assert.equal(f.inputs.list().length, 1);
   const context = f.inputs.list()[0]!.spec.observation!.context;
   assert.deepEqual(context, {
-    messages: [{ ...reply, relation: "received" }], observedThrough: new Date(now).toISOString(), truncated: true, missingRoot: true,
+    messages: [{ ...reply, relation: "received", person: f.inputs.list()[0]!.spec.sender }], observedThrough: new Date(now).toISOString(), truncated: true, missingRoot: true,
   });
   assert.doesNotMatch(JSON.stringify(context), /Permission denied/);
   assert.match(JSON.stringify(f.warnings), /Permission denied/);
@@ -144,8 +144,9 @@ test("Missing context never advances the watermark before its original Input is 
   const f = fixture(t, watch(), "direct");
   f.incoming(async () => page([message("om_dm", { mentions: [] })]));
   f.failContext(true);
-  await assert.rejects(observeMessages({ logger, resources: { ...f.resources, async create() {
-    throw new Error("Input write failed");
+  await assert.rejects(observeMessages({ logger, resources: { ...f.resources, async create(type, init) {
+    if (type.kind === "Input") throw new Error("Input write failed");
+    return f.resources.create(type, init);
   } } }, f.resource(), f.connectors, now), /Input write failed/);
   assert.equal(f.inputs.list().length, 0);
   assert.equal(f.resource().status.scans!.find((scan) => scan.kind === "direct")!.watermark, undefined);
@@ -284,9 +285,9 @@ test("Thread root is loaded from nearby group history; unavailable roots remain 
 test("Message observation requires an account and has no configurable kinds", () => {
   assert.equal(messageWatch(undefined), undefined);
   assert.throws(() => messageWatch(MessageWatchSchema.parse({})), /connectors.lark/);
-  assert.throws(() => messageWatch(MessageWatchSchema.parse({}), { appId: "cli_app", userId: "ou_me" }), /person.identities/);
-  assert.throws(() => messageWatch(MessageWatchSchema.parse({}), { appId: "cli_other", userId: "ou_me" }, person), /person.identities/);
-  assert.throws(() => messageWatch(MessageWatchSchema.parse({}), { appId: "cli_app", userId: "ou_other" }, person), /person.identities/);
+  assert.deepEqual(messageWatch(MessageWatchSchema.parse({}), { appId: "cli_app", userId: "ou_me" })!.personIds, []);
+  assert.deepEqual(messageWatch(MessageWatchSchema.parse({}), { appId: "cli_other", userId: "ou_me" }, person)!.personIds, []);
+  assert.deepEqual(messageWatch(MessageWatchSchema.parse({}), { appId: "cli_app", userId: "ou_other" }, person)!.personIds, ["ou_me"]);
   assert.throws(() => MessageWatchSchema.parse({ kinds: ["direct"] }));
   assert.throws(() => MessageWatchSchema.parse({ contextAttempts: 2 }));
 });
@@ -317,8 +318,8 @@ test("Discussion batches retain each person's relation; replies to my own messag
 test("Real Runner keeps observed chat topics private while Channel delivery survives restart", { timeout: 20_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
-  writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me" } },
-    plugins: { personal: { person, conversation: { batchSize: 1 }, sources: { lark: {} } } } }));
+  writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me", me: [{ appId: "cli_app", openId: "ou_me" }] } },
+    plugins: { personal: { conversation: { batchSize: 1 }, sources: { lark: {} } } } }));
   let searches = 0;
   const prompts: string[] = [];
   const options = { ...fakeOptions({ chief: async (prompt) => {
@@ -358,6 +359,11 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   await channel.deliver();
   assert.deepEqual(sent, [], "Observing a user mention must not send Source replies to the registered bot chat");
   const observed = inputs.list(MESSAGE_SESSION)[0]!;
+  assert.ok(observed.spec.sender);
+  const sender = await aide.persons.read(observed.spec.sender.name);
+  assert.equal(sender.metadata.uid, observed.spec.sender.uid);
+  assert.equal(sender.spec.identities[0]!.id, "ou_other");
+  assert.equal(sender.isMe, false);
   assert.equal(observed.spec.observation!.originalInputId, observed.metadata.name);
   assert.equal(observed.status.routing?.phase, "done");
   assert.ok(prompts.some((prompt) => prompt.includes("om_dm")));

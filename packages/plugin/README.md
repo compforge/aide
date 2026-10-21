@@ -57,6 +57,8 @@ Requirements and forges expose typed list / get operations, with forge comments 
 
 ## Resources and scheduling
 
+Core `InputSpec.sender` optionally references the sender resource; system events and mixed-author observations may omit it. A Person profile holds no Input references.
+
 Core `InputSpec.relation` optionally records `sent`, `received` or `observed` relative to the served Person.
 Omit it when identity evidence is insufficient. Receiving or observing content does not imply endorsement,
 delegation or that the person read it. Producers retain original authorship and per-message evidence alongside the classification.

@@ -5,7 +5,7 @@ import { LarkMessagesConfigSchema } from "../connectors/lark/config.ts";
 import { createConnectorClient, dispatchConnector, emptyConnectors } from "../src/connector-client.ts";
 import { chiefTools } from "../agents/chief/chief-tools.ts";
 
-const config = LarkMessagesConfigSchema.parse({ appId: "cli_app", userId: "ou_me" });
+const config = { ...LarkMessagesConfigSchema.parse({ appId: "cli_app", userId: "ou_me" }), appId: "cli_app", userId: "ou_me" };
 const identity = { appId: "cli_app", identities: { user: { available: true, openId: "ou_me" } } };
 const row = { message_id: "om_one", chat_id: "oc_chat", content: "hello", create_time: "2026-10-20 07:37",
   deleted: false, sender: { id: "ou_other", sender_type: "user", name: "Colleague" },

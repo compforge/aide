@@ -1,8 +1,10 @@
+import { personMessages } from "../plugins/personal/person/messages.ts";
 import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import type { InputSpec, SourceDefinition } from "@compforge/aide-plugin";
 import { resolve } from "node:path";
-import type { Person } from "../plugins/personal/person.ts";
+import { PERSON_SESSION, LOCAL_ME, type Me } from "../plugins/personal/person/model.ts";
+import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import type { Logger } from "pino";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { Personal } from "../plugins/personal/aide.ts";
@@ -55,18 +57,20 @@ export class Aide {
   private readonly inputs: InputStore;
   private readonly unsubscribeResources: () => void;
   private readonly connectors: ConnectorClient;
-  private readonly person: Person;
+  private readonly meMarks: Me;
+  readonly catalog: ReturnType<typeof openPersonCatalog>;
+  get persons() { return this.catalog.persons; }
   private starting?: Promise<void>;
   private closed = false;
   private defaultSelection: Promise<void> = Promise.resolve();
 
-  constructor(private readonly home: string, private readonly options: AideOptions, private readonly log: Logger) {
+  constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
     this.defaultTarget = Object.freeze({ ...options.defaultTarget });
     const config = options.config;
-    const { sources, person } = parsePersonalConfig(config?.plugins.personal);
-    this.person = person;
+    const { sources } = parsePersonalConfig(config?.plugins.personal);
+    this.meMarks = { identities: [LOCAL_ME, ...(config?.connectors.lark?.me ?? []).map((i) => ({ provider: "lark", scope: i.appId, id: i.openId }))] };
     this.watches = requirementWatches(sources.requirements);
-    this.messageSource = messageWatch(sources.lark, config?.connectors.lark, person);
+    this.messageSource = messageWatch(sources.lark, config?.connectors.lark, this.meMarks);
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
     this.environmentSources = environmentSources(sources.environments, environments);
     this.inputs = new InputStore(home);
@@ -74,14 +78,18 @@ export class Aide {
     this.unsubscribeResources = this.inputs.storage.subscribe((scope, resource) => { this.log.info({ scope, kind: resource.kind, uid: resource.metadata.uid }, "Resource reclaimed"); });
     validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
     this.log.info({
-      personIdentities: person.identities.length,
+      meIdentities: this.meMarks.identities.length,
       environments: this.environmentSources.map(({ environment, namespace, intervalMs }) => ({ environment, namespace, intervalMs })),
       requirements: this.watches.map(({ id, source, intervalMs }) => ({ id, connector: source, intervalMs })),
       lark: this.messageSource ? { intervalMs: this.messageSource.intervalMs, scenarios: ["direct", "mention"] } : null,
     }, "Personal observation sources configured");
-    this.connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
+    const connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
     this.storage = new SessionStore(home);
-    for (const meta of this.storage.listSessions()) this.session(meta.aideSessionId);
+    this.catalog = openPersonCatalog(home, this.meMarks, log, () => this.notify());
+    this.connectors = config?.connectors.lark?.appId ? { requirements: connectors.requirements, forges: connectors.forges,
+      environments: connectors.environments, describe: () => connectors.describe(),
+      messages: personMessages(connectors.messages, this.persons, config.connectors.lark.appId) } : connectors;
+    for (const meta of this.storage.listSessions()) if (meta.aideSessionId !== PERSON_SESSION) this.session(meta.aideSessionId);
     for (const watch of this.watches) this.session(watch.sessionId);
     if (this.environmentSources.length) this.session(ENVIRONMENT_SESSION);
     if (this.messageSource) this.session(MESSAGE_SESSION);
@@ -96,6 +104,7 @@ export class Aide {
   }
 
   session(id: string): Personal {
+    if (id === PERSON_SESSION) throw new Error("Person catalog is not an execution session");
     if (this.closed) throw new Error("Aide is shutting down");
     const existing = this.active.get(id);
     if (existing) return existing;
@@ -117,10 +126,11 @@ export class Aide {
     const core = new CoreSession({ session,
       controller: { mentionBudgetChars: 0, createAdapter: this.options.createAdapter, resolveTarget: (id) => targets.find((item) => item.id === id) },
       plugins: { instances, connectors, harnessTargets: targets, inputs: this.inputs,
-        resourceDirectory: { sessions: () => [...this.active.keys()], client: (sessionId, pluginId) => {
+        resourceDirectory: { sessions: () => [PERSON_SESSION, ...this.active.keys()], client: (sessionId, pluginId) => {
+          if (sessionId === PERSON_SESSION && pluginId === "personal") return this.catalog.client;
           const scope = this.active.get(sessionId); if (!scope) throw new Error(`Unknown Session: ${sessionId}`);
           return scope.plugins.resourceClient(pluginId);
-        }, ensureSession: async (sessionId) => { await this.session(sessionId).start(); } },
+        }, ensureSession: async (sessionId) => { if (sessionId !== PERSON_SESSION) await this.session(sessionId).start(); } },
         onResourceChange: (change) => application?.conversations.changed(change),
         say: (context, text) => {
           if (!context.conversationId) throw new Error("Personal say requires Conversation context");
@@ -163,7 +173,7 @@ export class Aide {
           .map(([target, binding]) => [target, { harness: binding.harness, contextAfterSeq: binding.contextAfterSeq }])) }])) });
       this.log.info({ sessionId: id, previousCwd: previous?.cwd, cwd }, "Execution directory changed; cleared native Harness bindings");
     }
-    application = new Personal({ timezone: this.options.timezone, person: this.person, personFile: resolve(this.home, "PERSON.md"),
+    application = new Personal({ timezone: this.options.timezone, persons: this.persons, me: this.meMarks,
       conversation: parsePersonalConfig(this.options.config?.plugins.personal).conversation }, this.log.child({ sessionId: id }),
       { core, session, connectors, targets, inputs: this.inputs });
     this.active.set(id, application);
@@ -258,7 +268,7 @@ export class Aide {
   }
 
   start(): Promise<void> {
-    return this.starting ??= Promise.all(this.sessions().map((scope) => scope.start())).then(() => {});
+    return this.starting ??= this.persons.initialize().then(() => Promise.all(this.sessions().map((scope) => scope.start()))).then(() => {});
   }
   async settled(): Promise<void> {
     await this.start();

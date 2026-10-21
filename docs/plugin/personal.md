@@ -4,35 +4,30 @@ Personal 是 Aide 的内置个人助手插件：Chief 接收输入并判断是�
 
 ## Person 与输入关系
 
-Person 是 Aide 服务和持续理解的那个人。`plugins/personal/person.ts` 用 interface 表达其结构化身份，
-当前一个 Aide 实例服务一个 Person，不按 Conversation 创建不同的人，也不建设账号中心。
+Chief 持续理解人，并围绕人的目标推进事。Person 是人物 CRD，包含“我”和其他人；Work 是需要持续推进的 Task / Routine。
 
-`plugins.personal.person.identities` 注册外部身份，每项由 `provider`、`scope`、`id` 组成。
-Lark 的 scope 是 appId，id 是该应用下的 open_id；同一人通过不同应用接入时分别绑定，不能跨应用比较裸 ID。
-允许同一 Person 绑定多个账号。其它 provider 可声明身份，但只有实现了相应入口适配的系统才能据此分类。
+Person 保存姓名、外部身份和 profile。身份由 provider / scope / id 唯一确定，姓名只用于展示；同一人可绑定多个账号，跨应用的裸 ID 不作比较。外部资料同步只补全尚未识别的名字，不覆盖用户资料或认知。
 
-Connector 负责登录账号和外部协议，Channel 保留发送者与提及对象，Source 保留观察账号和逐条消息证据；
-Personal 以统一绑定解释这些事实。Connector 的凭证账号不自动成为 Person，机器人身份也不是 Person。
-Lark 用户 Source 启动前要求登录账号对应已注册的 Person 身份，轮询时再核对实际登录态。
-Source 无需重复声明“我”；其观察范围与身份绑定分别配置。
+Me 是身份标记配置，通过匹配 Person 的外部身份确定 Personal.me。Lark 的 Me 标记与 CLI 执行身份分别声明；执行账号可能属于另一个人，不能从登录凭证推导本人。本地单人 Web 有固定身份 web / local / me。配置标记在启动时绑定到同一个 Person，冲突会报错。
 
-`Input.relation` 描述输入相对于 Person 的关系：
+Person 目录跨 Conversation 和 Session 共享。Personal 使用保留的 personal:persons 资源作用域与现有跨 Session Resource API；目录不启动 Harness 或 Reconcile。人物资源受容量保护，写入通过 ResourceClient 做版本和身份唯一性校验。
+
+Channel、Source 和按需 Connector 消息读取持续贡献人物事实。发送者及上下文中的作者拥有可识别用户身份时解析为 Person；缺少主体类型的提及 ID 保留为证据，避免把机器人建成人物；系统事件不需要人物。Input.sender 是可选的 Person 引用，多作者讨论没有单一发送者时留空，逐条作者保留在 observation 中。
+
+Input.relation 描述输入相对于 Me 的关系：
 
 | 值 | 含义 |
 |---|---|
-| `sent` | 我发出：本人账号发送，仍需识别引用与代发内容 |
-| `received` | 我收到：明确发给本人，如私信、@、可确认是回复本人的消息 |
-| `observed` | 我看见：来自本人的观察范围，不证明实际已读 |
+| sent | 我发出；仍需识别引用与代发内容 |
+| received | 明确发给我，如 @、回复本人，或执行账号确属本人时的私信 |
+| observed | 来自本人的观察范围，不证明实际已读 |
 | 缺省 | 身份或关系依据不足 |
 
-本人发送优先于收到。Web 是单人本地入口，输入为 `sent`；Lark Channel 依据发送者和明确提及分类，
-别人私信机器人或仅 @ 机器人不能据此认定为 `received` 或 `observed`。环境与需求监控属于配置的观察范围，标记 `observed`。
-Lark Source 对每条原消息和上下文消息分别分类；混合关系的讨论续报整体标记 `observed`，各条消息的 relation 和作者保留。
-分类随 Input 持久保存，不因后续更改 Person 配置而重新归因。它用于理解和积累认知，不授予执行权限。
+Web 输入为 sent。别人私信机器人或仅 @ 机器人不能据此认定为我收到；Lark Source 对各条消息分别分类，混合讨论仅在本人的观察范围内归为 observed。环境与需求监控属于配置的观察范围。关系随 Input 持久保存，不因后续身份编辑而改写历史。
 
-对 Person 的偏好、观点、关注和背景的持续认识保存在 `$AIDE_HOME/PERSON.md`。
-Chief 通过原生文件工具维护这份可人工编辑的 Markdown，并在每轮刷新；外部身份仍以配置为准。
-具体维护、共享范围和验证边界见 [Chief 的 PERSON.md](../harness/chief.md#personmd)。
+profile 保存理解本身与必要背景、日期，区分明确表达和推断，不引用 Input ID。Chief 的 profile_person 工具更新 understanding；用户在 Web Persons 编辑资料、身份、当前认识和 corrections。明确修正独立保存，Chief 无法通过工具修改该字段；推断不得覆盖修正。并发更新必须重读后合并，不能盲目覆盖。
+
+人物工具沿用 Work 的接入方式：模型工具调用 Personal 服务，再经 ResourceClient 更新 CRD，无需新增 Core verb 或人物输入队列。读取、补充、合并、纠错在正常 Chief 轮次内发生，Conversation 摘要仍只维护话题窗口。详见 [Chief](../harness/chief.md#人物认知)。
 
 ## 主动性与上下文
 

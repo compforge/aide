@@ -178,7 +178,7 @@ async function historyEntry(context: PluginContext, c: Readonly<ConversationReso
   const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "aide-system", name: id });
   if (!input) throw new Error(`History Input missing: ${id}`);
   const run = c.status.processing[c.status.processing[id]?.roundId ?? id];
-  return JSON.stringify({ inputId: id, role: input.spec.origin, originId: input.spec.originId, relation: input.spec.relation ?? "unknown", text: input.spec.text, result: run?.summary, phase: run?.phase,
+  return JSON.stringify({ inputId: id, role: input.spec.origin, originId: input.spec.originId, relation: input.spec.relation ?? "unknown", sender: input.spec.sender, text: input.spec.text, result: run?.summary, phase: run?.phase,
     messages: run?.messages?.map((m) => m.text), error: run?.error });
 }
 async function historyText(context: PluginContext, c: Readonly<ConversationResource>, ids: string[], budget: number): Promise<string> {

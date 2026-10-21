@@ -1,3 +1,6 @@
+import { Persons } from "../../person/service.ts";
+import { LOCAL_ME } from "../../person/model.ts";
+import { observePeople } from "../../person/messages.ts";
 import { bindSourceInput, type SourceInput } from "@compforge/aide-plugin";
 import { SOURCES } from "../definition.ts";
 import type { ChatMessage, ConnectorClient, MessagePage, PluginContext, Resource } from "@compforge/aide-plugin";
@@ -60,14 +63,15 @@ class MessageObservation {
   constructor(private readonly context: Context, private resource: Source, private readonly connectors: ConnectorClient, private readonly now: number) {
     this.submitInput = bindSourceInput(SOURCES.lark, resource, context.resources);
   }
-  private get watch() { return this.resource.spec; }
+  private personIds?: string[];
+  private get watch() { return { ...this.resource.spec, personIds: this.personIds ?? this.resource.spec.personIds }; }
   private get pending() { return this.resource.status.pending ?? []; }
   private get scans() { return this.resource.status.scans ?? []; }
 
   private async save(patch: Partial<MessageSourceStatus>) {
     // A connector verb can yield. Pin the incarnation before committing its result.
     const latest = await this.context.resources.get<MessageWatch, MessageSourceStatus>({ ...MESSAGE_SOURCE_TYPE, ...this.resource.metadata });
-    if (!latest || latest.metadata.deletionTimestamp || digest(latest.spec) !== digest(this.watch)) {
+    if (!latest || latest.metadata.deletionTimestamp || digest(latest.spec) !== digest(this.resource.spec)) {
       throw new Error("Message Source changed during observation");
     }
     this.resource = await this.context.resources.patchStatus(latest, patch);
@@ -78,6 +82,9 @@ class MessageObservation {
   }
 
   async run() {
+    const people = new Persons(this.context.resources, { identities: [LOCAL_ME] });
+    const me = await people.me();
+    if (me) this.personIds = me.spec.identities.filter((i) => i.provider === "lark" && i.scope === this.resource.spec.accountId).map((i) => i.id);
     const account = await this.connectors.messages.identity();
     if (account.accountId !== this.watch.accountId || account.userId !== this.watch.userId) {
       throw new Error("Message Source account differs from the connected user");
@@ -110,11 +117,11 @@ class MessageObservation {
     const window = scan.window!;
     const page = await this.connectors.messages.search({ start: window.start, end: window.end,
       ...(window.token ? { pageToken: window.token } : {}), limit: 10,
-      chatType: kind === "direct" ? "p2p" : "group", ...(kind === "mention" ? { atMe: true } : {}) });
+      chatType: kind === "direct" ? "p2p" : "group", ...(kind === "mention" && this.watch.personIds.length === 1 && this.watch.personIds.includes(this.watch.userId) ? { atMe: true } : {}) });
     const pending = [...this.pending]; const ids: string[] = [];
     for (const message of page.messages) {
       if (message.deleted || message.sender.type !== "user" ||
-          (kind === "mention" && !message.mentions.includes(this.watch.userId))) continue;
+          (kind === "mention" && !message.mentions.some((id) => (this.watch.personIds.length ? this.watch.personIds : [this.watch.userId]).includes(id)))) continue;
       ids.push(message.id);
       if (pending.some((item) => item.message.id === message.id) ||
           await this.context.resources.get(inputRef(inputName(this.watch, message.id, 0)))) continue;
@@ -206,17 +213,20 @@ class MessageObservation {
   private async plan(entry: PendingMessage, context: MessageContext | undefined, known: string[], related: string[]) {
     const name = inputName(this.watch, entry.message.id, entry.sequence);
     const evidence = [entry.message, ...(context?.messages ?? [])];
-    const annotate = (message: ChatMessage) => ({ ...message,
+    const persons = new Persons(this.context.resources, { identities: this.watch.personIds.map((id) => ({ provider: "lark", scope: this.watch.accountId, id })) });
+    const senders = await observePeople(persons, this.watch.accountId, evidence);
+    const annotate = (message: ChatMessage) => ({ ...message, ...(senders.has(message.id) ? { person: senders.get(message.id) } : {}),
       relation: messageRelation(this.watch, message, entry.kind === "direct", evidence) });
     const message = { ...annotate(entry.message), content: entry.message.content.slice(0, this.watch.maxContextChars) };
     const annotatedContext = context && { ...context, messages: context.messages.map(annotate) };
     // A batch can mix my speech and other people's reactions. Its per-message relations remain authoritative.
     const relations = new Set(annotatedContext?.messages.map((item) => item.relation));
-    const relation = entry.sequence ? (relations.size === 1 ? annotatedContext!.messages[0]!.relation : "observed") : message.relation;
+    const relation = entry.sequence ? (relations.size === 1 ? annotatedContext!.messages[0]!.relation : this.watch.personIds.includes(this.watch.userId) ? "observed" : undefined) : message.relation;
     const kind = entry.sequence ? "讨论进展" : entry.kind === "direct" ? "私聊" : "群内 @";
     const content = entry.sequence ? (context?.messages ?? []).map((item) => item.content).join("\n\n") : message.content;
     const spec: Delivery["spec"] = {
-      relation,
+      ...(relation ? { relation } : {}),
+      ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
       sessionId: `source:lark:${this.watch.accountId}:${this.watch.userId}:${message.chatId}`,
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,

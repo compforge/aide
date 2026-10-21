@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { PersonSchema, channelRelation, relationToPerson } from "../plugins/personal/person.ts";
+import { PersonSchema } from "../plugins/personal/person/model.ts";
+import { channelRelation, relationToPerson } from "../plugins/personal/person/relation.ts";
 import { InputStore } from "../src/host/input/store.ts";
 import { inputPrinter } from "../src/host/input/printer.ts";
 import { Aide } from "../src/app.ts";
@@ -23,10 +24,10 @@ test("Person identity matches the provider, scope and subject; incomplete eviden
     assert.equal(relationToPerson(person, { author: other, recipients: [other], observer: other }), undefined);
   }
   assert.equal(relationToPerson(person, {}), undefined);
-  assert.throws(() => PersonSchema.parse({ identities: [me, me] }));
-  assert.throws(() => PersonSchema.parse({ identities: [{ ...me, scope: "tenant-id" }] }));
-  assert.throws(() => PersonSchema.parse({ identities: [{ ...me, id: "display name" }] }));
-  assert.throws(() => PersonSchema.parse({ identities: [me], preferences: [] }));
+  assert.throws(() => PersonSchema.parse({ name: "张三", identities: [me, me] }));
+  assert.throws(() => PersonSchema.parse({ name: "张三", identities: [{ ...me, scope: "tenant-id" }] }));
+  assert.throws(() => PersonSchema.parse({ name: "张三", identities: [{ ...me, id: "display name" }] }));
+  assert.throws(() => PersonSchema.parse({ name: "张三", identities: [me], preferences: [] }));
 });
 
 test("Channel intake distinguishes the Person from the bot and never equates bot receipt with personal receipt", () => {
@@ -63,7 +64,7 @@ test("Input relation is validated, survives restart and reaches Chief's descript
 test("Lark sender evidence survives its durable inbox and Personal classifies it using shared bindings", { timeout: 20_000 }, async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-person-channel-"));
   const configFile = join(home, "config.yaml");
-  writeFileSync(configFile, JSON.stringify({ plugins: { personal: { person } } }));
+  writeFileSync(configFile, JSON.stringify({ connectors: { lark: { me: [{ appId: "cli_app", openId: "ou_me" }] } } }));
   const prompts: string[] = [];
   const log = pino({ level: "silent" });
   const aide = new Aide(home, { ...fakeOptions({ async chief() { return "ok"; }, async execute() { throw new Error("No work expected"); } }, home, prompts), config: loadConfig(configFile) }, log);
@@ -79,6 +80,10 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   const inputs = aide.session("lark:cli_app:oc_chat").conversations.inputStore.list();
   assert.equal(inputs.find((input) => input.spec.text === "mine")!.spec.relation, "sent");
   assert.equal(inputs.find((input) => input.spec.text === "other")!.spec.relation, undefined);
+  const self = (await aide.persons.me())!;
+  assert.equal(inputs.find((input) => input.spec.text === "mine")!.spec.sender!.uid, self.metadata.uid);
+  const other = inputs.find((input) => input.spec.text === "other")!.spec.sender!;
+  assert.equal((await aide.persons.read(other.name)).isMe, false);
   assert.deepEqual(inputs.find((input) => input.spec.text === "mine")!.spec.observation!.sender, { id: "ou_me", type: "user" });
   assert.ok(prompts.some((prompt) => prompt.includes("Relation to Person: sent")));
   // Rebuilding a fresh native context must retain attribution in its bounded history.

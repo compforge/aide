@@ -16,6 +16,7 @@ export const inputPrinter: ResourcePrinter<InputSpec> = {
     ];
     if (spec.sessionId !== undefined) lines.push(`Session: ${spec.sessionId}`);
     if (spec.relation !== undefined) lines.push(`Relation to Person: ${spec.relation}`);
+    if (spec.sender) lines.push(`Sender Person: ${JSON.stringify(spec.sender)}`);
     if (spec.timezone !== undefined) lines.push(`Timezone: ${spec.timezone}`);
     if (spec.replyTo !== undefined) lines.push(`Reply to: ${spec.replyTo}`);
     if (spec.originRef !== undefined) lines.push(`Source resource: ${JSON.stringify(spec.originRef)}`);

@@ -23,7 +23,9 @@ import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
-import { channelRelation, type Person } from "./person.ts";
+import { channelRelation } from "./person/relation.ts";
+import { personRef, type Me } from "./person/model.ts";
+import type { Persons } from "./person/service.ts";
 
 /** Channels and Sources submit durable input; Chief decides whether Work is needed. */
 export class Personal {
@@ -40,7 +42,7 @@ export class Personal {
   private readonly chiefConversations = new Map<string, string>();
   private readonly targets: { id: string; harness: string }[];
 
-  constructor(private readonly options: { timezone: string; person: Person; personFile: string; conversation?: unknown }, private readonly log: Logger,
+  constructor(private readonly options: { timezone: string; persons: Persons; me: Me; conversation?: unknown }, private readonly log: Logger,
     runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; inputs: InputStore }) {
     this.core = runtime.core;
     this.session = runtime.session;
@@ -106,9 +108,11 @@ export class Personal {
       const summary = this.conversations.runs(conversationId).some((r) => r.status.phase === "running" && r.status.compacting);
       if (summary) return createPiAgent({ ...options, config, scope: `chief:${conversationId}`, nativeTools: [], tools: [],
         systemPrompt: "Summarize supplied conversation facts. Return only the requested summary; do not perform actions.", extensionPaths: [] });
-      return createChiefAgent({ ...options, config, work: this.work(conversationId), personFile: this.options.personFile, tools, beforeWorkMutation: () => { active(); } });
+      return createChiefAgent({ ...options, config, work: this.work(conversationId), persons: this.options.persons, tools, beforeWorkMutation: () => { active(); } });
     };
   }
+
+  get me() { return this.options.persons.me(); }
 
   get id() { return this.session.id; }
   get conversations() { return this.store.conversations; }
@@ -270,9 +274,20 @@ export class Personal {
   private async acceptChannel(id: string, input: Incoming, messages: Message[], phase?: "done", replyTo?: string) {
     const current = await this.conversations.ensure();
     if (!current.spec.inputIds.includes(id)) assertInputCapacity(current, { origin: "channel", originId: input.channelId, text: input.text, replyTo }, conversationPolicy(this.options.conversation).maxPending);
-    const relation = channelRelation(this.options.person, input);
+    const me = await this.me;
+    const relation = channelRelation(me?.spec ?? this.options.me, input);
+    let sender;
+    if (input.channelId === "web") { const me = await this.me; if (me) sender = personRef(me); }
+    else if (input.channelId === "lark") {
+      const observation = input.observation as { provider?: string; accountId?: string; sender?: { id?: string; type?: string; name?: string }; mentions?: string[] } | undefined;
+      if (observation?.provider === "lark" && observation.accountId) {
+        const identity = (id: string) => ({ provider: "lark", scope: observation.accountId!, id });
+        if (observation.sender?.type === "user" && observation.sender.id) sender = personRef(await this.options.persons.observe(identity(observation.sender.id), observation.sender.name));
+        // A mention has no subject type; it may identify the bot rather than a person.
+      }
+    }
     const fact = await this.conversations.submit(id, { attention: "immediate", sessionId: this.id, text: input.text, timezone: this.options.timezone,
-      origin: "channel", originId: input.channelId, ...(relation ? { relation } : {}),
+      origin: "channel", originId: input.channelId, ...(sender ? { sender } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}), ...(replyTo ? { replyTo } : {}) });
     for (let attempt = 0; ; attempt++) {
       const c = await this.conversations.ensure();

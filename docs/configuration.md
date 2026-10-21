@@ -31,32 +31,29 @@ Connector 配置访问能力，声明它不会启动持续观察。Personal 的�
 - `lark: {}` 启用默认观察策略，不按消息类型限制输入；Source 产出的消息均进入处理流程，当前采集能力覆盖单聊和群内 @。字段与权限见 [Lark 消息观察](connector/lark-messages.md)。
 - `requirements` 配置需求观察列表，包含 Connector 引用、负责人范围与间隔；空数组关闭需求观察。
 
-`plugins.personal.person` 定义服务对象的外部身份。身份绑定和 Connector 登录固定分别表达“谁是我”和“用哪个账号访问”，
-两者必须明确匹配，不能仅因拥有凭证就推断账号属于本人。例如：
+`connectors.lark.me` 标记代表本人的外部身份，与 CLI 执行的 `appId/userId` 独立：
 
 ```yaml
 connectors:
   lark:
-    appId: cli_example
-    userId: ou_example
+    appId: cli_execution
+    userId: ou_operator
+    me:
+      - appId: cli_execution
+        openId: ou_human
+      - appId: cli_bot
+        openId: ou_human_in_bot_app
 plugins:
   personal:
-    person:
-      identities:
-        - provider: lark
-          scope: cli_example
-          id: ou_example
     sources:
       lark: {}
 ```
 
-只使用 Lark 机器人 Channel 时也可配置上述 Person 身份，无需启用用户消息 Connector 或 Source。
-机器人应用与 CLI 应用不同则分别登记其应用下的 open_id。`person` 缺省时 identities 为空；
-Web 仍归于本人，外部消息关系不足时留空。启用 Lark 用户 Source 必须补齐对应身份，否则启动报错。
-修改绑定后重启；已经生成的 Input 保留原来的关系。
-
-`$AIDE_HOME/PERSON.md` 是 Chief 持续维护的个人认知文件，每轮重新读取，人工编辑后无需重启。
-它不属于 YAML 配置快照，也不影响外部账号匹配。详见 [Person](plugin/personal.md#person-与输入关系)。
+Me 中的 appId 是 openId 的身份作用域，不指定 CLI 登录应用。多个标记归属同一个 Person。
+只使用机器人 Channel 时可仅配置 me，不配置 CLI appId/userId；启用消息 Source 则必须成对配置 CLI 账号。
+当前 CLI 读取实现使用用户授权，Me 标记不会扩大其访问范围或把用户授权切换为机器人授权。
+CLI 账号不必是本人；观察到执行账号的私信或 @ 不会自动归为本人收到。
+修改 Me 配置后重启，既有 Input 保留原关系；人物资料和认知在 Web Persons 编辑后立即生效。
 
 省略某类 Source 就关闭对应观察，Connector 仍可按需查询。Source 引用缺失的 Connector、环境不可用于本地 Kubernetes 采样，
 或策略字段不受支持时，启动报错。Personal 在恢复 Session 前校验这些策略，启动日志汇总生效的观察范围和间隔。

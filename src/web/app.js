@@ -33,7 +33,10 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
     const node = element('article', undefined, 'message received-input ' + (source || summary ? 'source' : 'user'));
     if (block.inputId) node.dataset.inputId = block.inputId;
     const header = element('div', undefined, 'input-heading');
-    header.append(identityBadge(block.icon, summary ? block.label : (source ? 'Source' : 'Channel') + (block.label ? ' · ' + block.label : '') + (source ? '' : ' · 你')));
+    header.append(identityBadge(block.icon, summary ? block.label : (source ? 'Source' : 'Channel') + (block.label ? ' · ' + block.label : '') + (block.relation === 'sent' ? ' · 你' : '')));
+    if (block.sender?.name) {
+      const sender = element('a', '人物资料'); sender.href = '/people?person=' + encodeURIComponent(block.sender.name); header.append(sender);
+    }
     if (!summary) header.append(element('time', new Date(block.at).toLocaleString(), 'input-time'));
     if (source) header.append(element('span', ({ queued: '待处理', running: '处理中', waiting: '等待答复', done: '已处理', quiet: '已查看 · 保持安静', failed: '处理失败' })[block.status] || block.status, 'input-status'));
     const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, block.content);
