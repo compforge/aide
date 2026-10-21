@@ -18,12 +18,6 @@ export function installRegistration(
   runner: PluginRunnerClient,
   registration: PluginRegistration,
 ): void {
-  if (registration.kind === "printer") {
-    binding.installPrinter({ resourceType: registration.resourceType,
-      describe: (resource) => runner.invoke<string>(registration.describeHandlerId, resource),
-      summarize: (resource) => runner.invoke<string>(registration.summarizeHandlerId, resource) });
-    return;
-  }
   if (registration.kind === "command") {
     installCommand(binding, runner, registration);
     return;

@@ -6,7 +6,8 @@ import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import type { InputSpec, SourceDefinition } from "@compforge/aide-plugin";
 import { resolve } from "node:path";
-import { PERSON_SESSION, LOCAL_ME, type Me } from "../plugins/personal/person/model.ts";
+import { LOCAL_ME, type Me } from "../plugins/personal/person/model.ts";
+import personalDefinitions from "../plugins/personal/definitions.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import type { Logger } from "pino";
 import type { ConnectorClient } from "@compforge/aide-plugin";
@@ -82,6 +83,8 @@ export class Aide {
     this.outputStore = new OutputStore(home);
     this.unsubscribeOutputs = this.outputStore.subscribe(() => this.notify());
     this.inputs.storage.configure(config?.resources);
+    this.inputs.storage.register("personal", personalDefinitions);
+    this.inputs.storage.onRetentionError = (resource, error) => this.log.error({ err: error, kind: resource.kind, uid: resource.metadata.uid }, "Resource retention decision failed; preserved resource");
     this.unsubscribeResources = this.inputs.storage.subscribe((scope, resource) => { this.log.info({ scope, kind: resource.kind, uid: resource.metadata.uid }, "Resource reclaimed"); });
     validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
     this.log.info({
@@ -96,7 +99,7 @@ export class Aide {
     this.connectors = config?.connectors.lark?.appId ? { requirements: connectors.requirements, forges: connectors.forges,
       environments: connectors.environments, describe: () => connectors.describe(),
       messages: personMessages(connectors.messages, this.persons, config.connectors.lark.appId) } : connectors;
-    for (const meta of this.storage.listSessions()) if (meta.aideSessionId !== PERSON_SESSION) this.session(meta.aideSessionId);
+    for (const meta of this.storage.listSessions()) this.session(meta.aideSessionId);
     for (const watch of this.watches) this.session(watch.sessionId);
     if (this.environmentSources.length) this.session(ENVIRONMENT_SESSION);
     if (this.messageSource) this.session(MESSAGE_SESSION);
@@ -111,7 +114,6 @@ export class Aide {
   }
 
   session(id: string): Personal {
-    if (id === PERSON_SESSION) throw new Error("Person catalog is not an execution session");
     if (this.closed) throw new Error("Aide is shutting down");
     const existing = this.active.get(id);
     if (existing) return existing;
@@ -133,11 +135,13 @@ export class Aide {
     const core = new CoreSession({ session,
       controller: { mentionBudgetChars: 0, createAdapter: this.options.createAdapter, resolveTarget: (id) => targets.find((item) => item.id === id) },
       plugins: { instances, connectors, harnessTargets: targets, inputs: this.inputs, outputs: this.outputStore,
-        resourceDirectory: { sessions: () => [PERSON_SESSION, ...this.active.keys()], client: (sessionId, pluginId) => {
-          if (sessionId === PERSON_SESSION && pluginId === "personal") return this.catalog.client;
+        resourceDirectory: { sessions: () => [...this.active.keys()], shared: (pluginId) => {
+          if (pluginId !== "personal") throw new Error(`Unknown shared plugin: ${pluginId}`);
+          return this.catalog.client;
+        }, client: (sessionId, pluginId) => {
           const scope = this.active.get(sessionId); if (!scope) throw new Error(`Unknown Session: ${sessionId}`);
           return scope.plugins.resourceClient(pluginId);
-        }, ensureSession: async (sessionId) => { if (sessionId !== PERSON_SESSION) await this.session(sessionId).start(); } },
+        }, ensureSession: async (sessionId) => { await this.session(sessionId).start(); } },
         onResourceChange: (change) => application?.conversations.changed(change),
         say: (context, text, options) => {
           if (!context.conversationId) throw new Error("Personal say requires Conversation context");
@@ -147,7 +151,7 @@ export class Aide {
         loadPackageEntry: async (pluginId, version) => {
           const entryUrl = packages.get(`${pluginId}@${version}`);
           if (!entryUrl) throw new Error(`Plugin package is not installed: ${pluginId}@${version}`);
-          return { pluginId, version, entryUrl };
+          return { pluginId, version, entryUrl, resourcesUrl: new URL("../plugins/personal/definitions.ts", import.meta.url).href };
         },
         onRunnerFailure: ({ error }) => {
           this.log.error({ err: error, sessionId: id }, "Plugin Runner stopped");

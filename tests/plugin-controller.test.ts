@@ -12,7 +12,8 @@ import {
   type ControllerOptions,
   type ReconcileKey,
 } from "../src/host/plugin/controller.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { PluginResourceStore as BaseResourceStore, type PluginResourceStoreOptions } from "../src/host/plugin/resource/store.ts";
+import { definition } from "./fixtures/resource-definition.ts";
 
 interface Spec {
   requirement: string;
@@ -738,3 +739,8 @@ describe("plugin Controller", () => {
     ).toThrow("maxConcurrency must be a positive integer");
   });
 });
+
+const testDefinitions = [definition({ apiVersion: "reqloop.aide.dev/v1alpha1", kind: "Requirement" }), definition({ apiVersion: "reqloop.aide.dev/v1alpha1", kind: "Workspace" })];
+class PluginResourceStore extends BaseResourceStore {
+  constructor(options: PluginResourceStoreOptions) { super(options); this.storage.register(options.pluginInstanceId, testDefinitions); }
+}

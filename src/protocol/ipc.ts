@@ -34,6 +34,8 @@ export interface PluginPackageEntry {
   readonly pluginId: string;
   readonly version: string;
   readonly entryUrl: string;
+  /** Pure resource declarations loaded in Host separately from the Runner activation entry. */
+  readonly resourcesUrl?: string;
 }
 
 export interface CommandRegistration {
@@ -62,12 +64,6 @@ export interface HookRegistration {
   readonly handlerId: string;
 }
 
-export interface PrinterRegistration {
-  readonly kind: "printer";
-  readonly resourceType: ResourceType;
-  readonly describeHandlerId: string;
-  readonly summarizeHandlerId: string;
-}
 
 export interface ControllerRegistration {
   readonly controllerName?: string;
@@ -81,7 +77,6 @@ export type PluginRegistration =
   | CommandRegistration
   | MentionRegistration
   | HookRegistration
-  | PrinterRegistration
   | ControllerRegistration;
 
 export interface ActivationResult {

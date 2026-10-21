@@ -30,7 +30,8 @@ test("Work tool -> Runner Watch -> Connector verb -> direct ask -> Harness uses 
   const options = fakeOptions({ execute: async () => ({ action: "done", summary: "checked", notification: "ok", question: null, nextAt: null }) }, root);
   const core = new CoreSession({ session, controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter, resolveTarget: () => ({ id: "default", harness: "codex" }) },
     plugins: { instances, pluginSupervisor: new PluginSupervisor(), harnessTargets: [{ id: "default", harness: "codex" }], selectedHarnessTargetId: () => "default", harnessInvocationGate: () => "auto_approve",
-      loadPackageEntry: async (pluginId, version) => ({ pluginId, version, entryUrl: new URL("./fixtures/coordination-plugin.ts", import.meta.url).href }) },
+      loadPackageEntry: async (pluginId, version) => ({ pluginId, version, entryUrl: new URL("./fixtures/coordination-plugin.ts", import.meta.url).href,
+        resourcesUrl: new URL("./fixtures/coordination-definitions.ts", import.meta.url).href }) },
   });
   const manager = core.pluginManager!;
   const resources = new PluginResourceStore({ session, pluginInstanceId: "fixture" });

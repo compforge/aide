@@ -65,7 +65,7 @@ test("Chief serializes inputs within a conversation while another conversation c
   release(); await aide.settled();
   assert.deepEqual(calls.filter((call) => call.conversationId.endsWith("group-a")).map((call) => call.text), ["a-first", "a-second"]);
   assert.equal(aide.conversationIds().length, 2);
-  assert.equal(aide.session("lark:bot:group-a").store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "ChiefInput" }).length, 0);
+  assert.throws(() => aide.session("lark:bot:group-a").store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "ChiefInput" }), /Unknown resource definition/);
   assert.equal(aide.session("lark:bot:group-a").store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Conversation" }).length, 1);
 });
 

@@ -1,90 +1,21 @@
 import type { ResourceType } from "@compforge/aide-plugin";
-
 import { resourceTypeKey } from "./type.ts";
 
-interface AideRegistration {
-  readonly owner: "aide";
-}
-
-interface PluginRegistration {
-  readonly owner: "plugin";
-  readonly pluginId: string;
-  references: number;
-  materialized: boolean;
-}
-
-type ResourceTypeRegistration = AideRegistration | PluginRegistration;
-
-/**
- * Resource GVK registration is first-register-wins; a later Plugin registration
- * never replaces Core or another Plugin.
- */
+/** Definition ownership outlives Controllers and Runner activation. */
 export class ResourceRegistry {
-  private readonly registrations = new Map<string, ResourceTypeRegistration>();
-
+  private readonly owners = new Map<string, string>();
   constructor(aideTypes: readonly ResourceType[]) {
-    for (const type of aideTypes) this.registerAide(type);
+    for (const type of aideTypes) this.owners.set(resourceTypeKey(type), "Aide");
   }
-
-  isAide(type: ResourceType): boolean {
-    return this.registrations.get(resourceTypeKey(type))?.owner === "aide";
-  }
-
-  register(pluginId: string, type: ResourceType): () => void {
-    const registration = this.pluginRegistration(pluginId, type);
-    registration.references += 1;
-    let active = true;
-    return () => {
-      if (!active) return;
-      active = false;
-      const current = this.registrations.get(resourceTypeKey(type));
-      if (
-        current?.owner !== "plugin" ||
-        current.pluginId !== pluginId
-      ) {
-        return;
-      }
-      current.references -= 1;
-      if (current.references === 0 && !current.materialized) {
-        this.registrations.delete(resourceTypeKey(type));
-      }
-    };
-  }
-
-  registerMaterialized(pluginId: string, type: ResourceType): void {
-    this.pluginRegistration(pluginId, type).materialized = true;
-  }
-
-  private registerAide(type: ResourceType): void {
-    const key = resourceTypeKey(type);
-    if (this.registrations.has(key)) {
-      throw new Error(`Resource type is already registered: ${key}`);
+  isAide(type: ResourceType): boolean { return this.owners.get(resourceTypeKey(type)) === "Aide"; }
+  check(pluginId: string, types: readonly ResourceType[]): void {
+    for (const type of types) {
+      const key = resourceTypeKey(type), owner = this.owners.get(key);
+      if (owner !== undefined && (owner === "Aide" || owner !== pluginId)) throw new Error(`Resource type ${key} is already registered by ${owner}`);
     }
-    this.registrations.set(key, { owner: "aide" });
   }
-
-  private pluginRegistration(
-    pluginId: string,
-    type: ResourceType,
-  ): PluginRegistration {
-    const key = resourceTypeKey(type);
-    const current = this.registrations.get(key);
-    if (current?.owner === "aide") {
-      throw new Error(`Resource type is already registered by Aide: ${key}`);
-    }
-    if (current?.owner === "plugin" && current.pluginId !== pluginId) {
-      throw new Error(
-        `Resource type ${key} is already registered by ${current.pluginId}`,
-      );
-    }
-    if (current?.owner === "plugin") return current;
-    const registration: PluginRegistration = {
-      owner: "plugin",
-      pluginId,
-      references: 0,
-      materialized: false,
-    };
-    this.registrations.set(key, registration);
-    return registration;
+  declare(pluginId: string, types: readonly ResourceType[]): void {
+    this.check(pluginId, types);
+    for (const type of types) this.owners.set(resourceTypeKey(type), pluginId);
   }
 }

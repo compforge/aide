@@ -73,6 +73,9 @@ export function createResourceClient(
   assertCanCreateType?: (type: ResourceType) => void,
   aideResources?: AideResourceAccess,
 ): ResourceClient {
+  const assertSession = (id?: string) => {
+    if (id && id !== store.aideSessionId) throw new Error(`Resource scope does not belong to Session ${id}`);
+  };
   const changed = (
     kind: "created" | "status-updated" | "metadata-updated" | "deleted",
     resource: Readonly<Resource<unknown, unknown>>,
@@ -100,6 +103,7 @@ export function createResourceClient(
   const assertOwned = (
     resource: Readonly<Resource<unknown, unknown>>,
   ): void => {
+    assertSession(resource.metadata.sessionId);
     if (resource.metadata.namespace === "aide-system") {
       throw new Error(
         `plugin ResourceClient cannot mutate Aide-owned ${resource.kind}/${resource.metadata.name}`,
@@ -113,6 +117,7 @@ export function createResourceClient(
     if (aideResources?.handles(ref)) {
       return aideResources.get<TSpec, TStatus>(ref);
     }
+    assertSession(ref.sessionId);
     if (ref.namespace === "aide-system") {
       throw new Error(
         `plugin ResourceClient cannot access Aide-owned ${ref.kind}/${ref.name}`,
@@ -135,6 +140,7 @@ export function createResourceClient(
   function create<TSpec, TStatus>(
     type: ResourceType,
     init: {
+      sessionId?: string;
       name: string;
       namespace?: ResourceNamespace;
       labels?: Readonly<Record<string, string>>;
@@ -149,6 +155,7 @@ export function createResourceClient(
       return aideResources.create<TSpec, TStatus>(type, init.name, init.spec);
     }
     assertCanCreateType?.(type);
+    assertSession(init.sessionId);
     const created = deepFreeze(
       store.create<TSpec, TStatus>({
         type,
@@ -231,6 +238,7 @@ export function createResourceClient(
       if (aideResources?.handles(type)) {
         return aideResources.list<TSpec, TStatus>(type, options);
       }
+      if (options?.sessionId !== "*") assertSession(options?.sessionId);
       return store
         .list<TSpec, TStatus>(type, options)
         .map((resource) => deepFreeze(resource));

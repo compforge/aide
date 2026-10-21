@@ -1,11 +1,13 @@
 import { bindSourceInput } from "@compforge/aide-plugin";
+import { isDeepStrictEqual } from "node:util";
 import { SOURCES } from "../definition.ts";
 import type { PluginContext, Resource } from "@compforge/aide-plugin";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { type Watch } from "./config.ts";
 import { INPUT_TYPE, digest } from "../../chief-model.ts";
 
-export const SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "RequirementSource" } as const;
+import { SOURCE_TYPE } from "./definition.ts";
+export { SOURCE_TYPE } from "./definition.ts";
 interface SourceStatus { pendingInputIds?: string[]; seen?: Record<string, string>; lastObservedAt?: string; error?: string | null }
 
 /** Polls are scheduled by the runtime. Persist the inbox before advancing its discovery watermark. */
@@ -35,7 +37,6 @@ export async function observeRequirements(context: Pick<PluginContext, "resource
   await context.resources.patchStatus(resource, { seen, pendingInputIds: [], lastObservedAt: new Date().toISOString(), error: null });
   context.logger.info("Requirement discovery completed", { attributes: { watchId: resource.spec.id, observed: summaries.length, discovered } });
 }
-
 export function registerSources(context: PluginContext): void {
   const watches = (context.instance.config.watches ?? []) as Watch[];
   if (!watches.length) return;
@@ -47,7 +48,7 @@ export function registerSources(context: PluginContext): void {
       if (resource.metadata.deletionTimestamp) return;
       const configured = watches.find((item) => item.id === resource.spec.id);
       // Config changes create a fresh observation scope; obsolete resources stop polling.
-      if (!configured || digest(configured) !== digest(resource.spec)) return;
+      if (!configured || !isDeepStrictEqual(configured, resource.spec)) return;
       try { await observeRequirements(context, resource, execution.verbs.connectors({ timeoutMs: 30_000 })); }
       catch (error) {
         context.logger.error("Requirement discovery failed; watermark retained", { error, attributes: { watchId: resource.spec.id } });
@@ -58,8 +59,3 @@ export function registerSources(context: PluginContext): void {
     },
   });
 }
-
-export const requirementLifecycle: import("@compforge/aide-plugin").ResourceLifecycle = {
-  resourceType: SOURCE_TYPE, releasedAt: () => undefined,
-  references: (resource) => (resource.status as SourceStatus).pendingInputIds?.map((id) => `input:${id}`) ?? [],
-};

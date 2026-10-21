@@ -61,3 +61,8 @@ export function validateTrigger(kind: Work["kind"], trigger: Trigger | null, now
     nextOccurrence(trigger, now);
   }
 }
+
+export const WorkSpecSchema = WorkSchema.pick({ conversationId: true, title: true, instruction: true, revision: true, inputs: true }).strict();
+export const WorkStatusSchema = WorkSchema.pick({ status: true, nextAt: true, question: true, consumedInputIds: true, history: true }).extend({
+  inputs: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()), events: z.array(z.string()), laneId: z.string().optional(),
+}).strict();

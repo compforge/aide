@@ -1,4 +1,5 @@
 import { fixtureAddress } from "./address-fixture.ts";
+import personalDefinitions from "../plugins/personal/definitions.ts";
 import type { Address } from "@compforge/aide-plugin";
 import { resourceHome } from "../src/host/resource/storage.ts";
 import { randomUUID } from "node:crypto";
@@ -18,6 +19,7 @@ export class ConversationStore extends PersonalConversations {
   constructor(session: { dir: string; id?: string }) {
     const scope = { ...session, id: session.id ?? "test" };
     const resources = new PluginResourceStore({ session: scope, pluginInstanceId: "personal" });
+    resources.storage.register("personal", personalDefinitions);
     const outputStore = new OutputStore(resourceHome(session.dir));
     const provider = { handles: (type: { kind: string }) => type.kind === "Output", create: <S, T>(_type: unknown, name: string, spec: S) => outputStore.create(scope.id, name, spec as import("@compforge/aide-plugin").OutputSpec) as unknown as import("@compforge/aide-plugin").Resource<S, T>,
       get: <S, T>(ref: { name: string }) => outputStore.get(ref.name) as unknown as import("@compforge/aide-plugin").Resource<S, T> | undefined,

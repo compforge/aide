@@ -11,7 +11,8 @@ import type {
 import { emptyReconcileSnapshot } from "../src/host/plugin/reconcile-snapshot.ts";
 import { Manager } from "../src/host/plugin/manager.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { PluginResourceStore as BaseResourceStore, type PluginResourceStoreOptions } from "../src/host/plugin/resource/store.ts";
+import { definition } from "./fixtures/resource-definition.ts";
 import type { ScheduledHarnessInvocation } from "../src/host/plugin/harness-invocation.ts";
 import { MAIN_LANE_ID } from "../src/host/lane.ts";
 import { SessionStore } from "../src/host/store/store.ts";
@@ -1361,3 +1362,8 @@ describe("plugin Manager", () => {
     expect(runs).toBe(1);
   });
 });
+
+const testDefinitions = [definition({ apiVersion: "tests.aide.dev/v1alpha1", kind: "Requirement" }), definition({ apiVersion: "tests.aide.dev/v1alpha1", kind: "Deployment" })];
+class PluginResourceStore extends BaseResourceStore {
+  constructor(options: PluginResourceStoreOptions) { super(options); this.storage.register(options.pluginInstanceId, testDefinitions); }
+}

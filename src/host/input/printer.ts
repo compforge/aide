@@ -1,4 +1,4 @@
-import { INPUT_TYPE, type InputSpec, type ResourcePrinter } from "@compforge/aide-plugin";
+import type { InputSpec, ResourcePrinter } from "@compforge/aide-plugin";
 
 /**
  * @spec Render the original Input facts without fetching context or interpreting provider-specific observations.
@@ -7,7 +7,6 @@ import { INPUT_TYPE, type InputSpec, type ResourcePrinter } from "@compforge/aid
  * @case tests/input-printer.test.ts
  */
 export const inputPrinter: ResourcePrinter<InputSpec> = {
-  resourceType: INPUT_TYPE,
   describe({ metadata, spec }) {
     const lines = [
       `Input: ${metadata.name}`,

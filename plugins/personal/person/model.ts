@@ -2,7 +2,6 @@ import { z } from "zod";
 import type { Resource, ResourceRef } from "@compforge/aide-plugin";
 
 export const PERSON_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Person" } as const;
-export const PERSON_SESSION = "personal:persons";
 export const IdentitySchema = z.object({ provider: z.string().trim().min(1), scope: z.string().trim().min(1), id: z.string().trim().min(1) }).strict()
   .superRefine((identity, ctx) => {
     if (identity.provider !== "lark") return;
@@ -21,6 +20,6 @@ export const PersonSchema = z.object({ name: z.string().trim().min(1).max(200), 
 export type Person = z.infer<typeof PersonSchema>;
 export interface PersonStatus { updatedAt: string; updatedBy: "user" | "chief" | "connector" }
 export type PersonResource = Resource<Person, PersonStatus>;
-export const personRef = (person: Readonly<PersonResource>): ResourceRef => ({ ...PERSON_TYPE, sessionId: PERSON_SESSION,
+export const personRef = (person: Readonly<PersonResource>): ResourceRef => ({ ...PERSON_TYPE,
   namespace: person.metadata.namespace, name: person.metadata.name, uid: person.metadata.uid });
 export const isMe = (person: Pick<Person, "identities">, me: Me) => person.identities.some((i) => me.identities.some((mark) => identityKey(i) === identityKey(mark)));

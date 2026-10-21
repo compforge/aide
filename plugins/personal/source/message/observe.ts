@@ -1,5 +1,6 @@
 import { larkAddress } from "../../../../src/channel/address.ts";
 import { Persons } from "../../person/service.ts";
+import { isDeepStrictEqual } from "node:util";
 import { LOCAL_ME } from "../../person/model.ts";
 import { observePeople } from "../../person/messages.ts";
 import { bindSourceInput, type SourceInput } from "@compforge/aide-plugin";
@@ -10,7 +11,8 @@ import { type MessageKind, type MessageWatch } from "./config.ts";
 import { boundContext, readMessageContext, type MessageContext } from "./context.ts";
 import { messageRelation } from "./relation.ts";
 
-export const MESSAGE_SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "MessageSource" } as const;
+import { MESSAGE_SOURCE_TYPE } from "./definition.ts";
+export { MESSAGE_SOURCE_TYPE } from "./definition.ts";
 interface Scan {
   kind: MessageKind;
   watermark?: string;
@@ -77,7 +79,7 @@ class MessageObservation {
   private async save(patch: Partial<MessageSourceStatus>) {
     // A connector verb can yield. Pin the incarnation before committing its result.
     const latest = await this.context.resources.get<MessageWatch, MessageSourceStatus>({ ...MESSAGE_SOURCE_TYPE, ...this.resource.metadata });
-    if (!latest || latest.metadata.deletionTimestamp || digest(latest.spec) !== digest(this.resource.spec)) {
+    if (!latest || latest.metadata.deletionTimestamp || !isDeepStrictEqual(latest.spec, this.resource.spec)) {
       throw new Error("Message Source changed during observation");
     }
     this.resource = await this.context.resources.patchStatus(latest, patch);
@@ -279,7 +281,7 @@ export function registerMessageSources(context: PluginContext): void {
       await source.emit({ name: digest(watch), spec: watch });
     } }],
     async reconcile(execution, resource) {
-      if (resource.metadata.deletionTimestamp || digest(resource.spec) !== digest(watch)) return;
+      if (resource.metadata.deletionTimestamp || !isDeepStrictEqual(resource.spec, watch)) return;
       try { await observeMessages(context, resource, execution.verbs.connectors({ timeoutMs: 55_000 })); }
       catch (error) {
         context.logger.error("Lark message observation failed; discovery progress retained", { error });
@@ -292,10 +294,3 @@ export function registerMessageSources(context: PluginContext): void {
 }
 
 /** A pending delivery and its discussion root cannot expire before the Source advances. */
-export const messageLifecycle: import("@compforge/aide-plugin").ResourceLifecycle = {
-  resourceType: MESSAGE_SOURCE_TYPE, releasedAt: () => undefined,
-  references: (resource) => (resource.status as MessageSourceStatus).pending?.flatMap((entry) => [
-    `input:${inputName(resource.spec as MessageWatch, entry.message.id, 0)}`,
-    ...(entry.delivery ? [`input:${entry.delivery.name}`] : []),
-  ]) ?? [],
-};

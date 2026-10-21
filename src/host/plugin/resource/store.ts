@@ -31,7 +31,8 @@ export type PluginResource<
 > = Resource<TSpec, TStatus>;
 
 export interface PluginResourceStoreOptions {
-  session: Pick<SessionHandle, "id" | "dir">;
+  session?: Pick<SessionHandle, "id" | "dir">;
+  home?: string;
   pluginInstanceId: string;
 }
 
@@ -255,14 +256,14 @@ export class PluginResourceStore {
   readonly pluginInstanceId: string;
 
   constructor(options: PluginResourceStoreOptions) {
-    // SessionStore owns directory encoding; the logical ID may contain channel namespaces.
-    assertSessionId(options.session.id);
+    if (!options.session && !options.home) throw new Error("Resource store needs a Session or shared home");
+    if (options.session) assertSessionId(options.session.id);
     assertPathSegment("pluginInstanceId", options.pluginInstanceId);
-    this.sessionDir = options.session.dir;
-    this.aideSessionId = options.session.id;
+    this.sessionDir = options.session?.dir ?? join(options.home!, "shared");
+    this.aideSessionId = options.session?.id ?? "";
     this.pluginInstanceId = options.pluginInstanceId;
-    this.scope = JSON.stringify([options.session.id, options.pluginInstanceId]);
-    this.storage = ResourceStorage.open(resourceHome(options.session.dir));
+    this.scope = JSON.stringify([options.session?.id ?? null, options.pluginInstanceId]);
+    this.storage = ResourceStorage.open(options.home ?? resourceHome(options.session!.dir));
     const root = this.namespacesDir();
     this.storage.migrate(root, function* () {
       function* files(path: string): Generator<string> {
@@ -273,7 +274,7 @@ export class PluginResourceStore {
           else if (item.name.endsWith(".json")) yield child;
         }
       }
-      for (const path of files(root)) yield [path, JSON.stringify([options.session.id, options.pluginInstanceId]), JSON.parse(readFileSync(path, "utf8")) as StoredResource];
+      for (const path of files(root)) yield [path, JSON.stringify([options.session?.id ?? null, options.pluginInstanceId]), JSON.parse(readFileSync(path, "utf8")) as StoredResource];
     });
   }
 
@@ -291,7 +292,7 @@ export class PluginResourceStore {
     assertPathSegment("resource name", name);
     const owner = this.ownerReference(input.owner, type, name, namespace);
     const path = this.resourcePath(type, name, namespace);
-    return withFileLock(path, () => {
+    return this.storage.transaction(() => withFileLock(path, () => {
       if (this.storage.has(path)) {
         throw new Error(`plugin resource already exists: ${type.kind}/${name}`);
       }
@@ -308,7 +309,7 @@ export class PluginResourceStore {
       });
       this.storage.write(path, this.scope, stored);
       return stored.object;
-    });
+    }));
   }
 
   /**
@@ -326,11 +327,11 @@ export class PluginResourceStore {
       "metadata.annotations",
       input.annotations,
     );
-    const spec = jsonObject("spec", input.spec);
+    const spec = jsonObject("spec", this.storage.definition(this.pluginInstanceId, type).schema.spec.parse(input.spec)) as TSpec;
     assertPathSegment("resource name", name);
     const owner = this.ownerReference(input.owner, type, name, namespace);
     const path = this.resourcePath(type, name, namespace);
-    return withFileLock(path, () => {
+    return this.storage.transaction(() => withFileLock(path, () => {
       if (!this.storage.has(path)) {
         this.assertOwnerActive(owner);
         const stored = this.initialStoredResource<TSpec, TStatus>({
@@ -362,7 +363,7 @@ export class PluginResourceStore {
         );
       }
       return { resource: current, created: false };
-    });
+    }));
   }
 
   get<TSpec = Record<string, unknown>, TStatus = Record<string, unknown>>(
@@ -549,58 +550,60 @@ export class PluginResourceStore {
     if (Number.isNaN(now.getTime())) {
       throw new Error("deletion time must be a valid Date");
     }
-    const target = this.get<unknown, unknown>(type, name, namespace);
-    const updates: ResourceDeletionUpdate[] = [];
-    const pending = [target];
-    const visited = new Set<string>();
-    while (pending.length > 0) {
-      const resource = pending.shift()!;
-      if (visited.has(resource.metadata.uid)) continue;
-      visited.add(resource.metadata.uid);
-      if (resource.metadata.deletionTimestamp === undefined) {
-        const next = this.mutate<unknown, unknown>(
-          resource,
-          resource.metadata.name,
-          { namespace: resource.metadata.namespace as ResourceNamespace },
-          (current) => {
-            if (current.object.metadata.deletionTimestamp !== undefined) {
-              return current;
-            }
-            return {
-              object: {
-                ...current.object,
-                metadata: {
-                  ...current.object.metadata,
-                  resourceVersion: nextResourceVersion(
-                    current.object.metadata.resourceVersion,
-                  ),
-                  deletionTimestamp: now.toISOString(),
+    return this.storage.transaction(() => {
+      const target = this.get<unknown, unknown>(type, name, namespace);
+      const updates: ResourceDeletionUpdate[] = [];
+      const pending = [target];
+      const visited = new Set<string>();
+      while (pending.length > 0) {
+        const resource = pending.shift()!;
+        if (visited.has(resource.metadata.uid)) continue;
+        visited.add(resource.metadata.uid);
+        if (resource.metadata.deletionTimestamp === undefined) {
+          const next = this.mutate<unknown, unknown>(
+            resource,
+            resource.metadata.name,
+            { namespace: resource.metadata.namespace as ResourceNamespace },
+            (current) => {
+              if (current.object.metadata.deletionTimestamp !== undefined) {
+                return current;
+              }
+              return {
+                object: {
+                  ...current.object,
+                  metadata: {
+                    ...current.object.metadata,
+                    resourceVersion: nextResourceVersion(
+                      current.object.metadata.resourceVersion,
+                    ),
+                    deletionTimestamp: now.toISOString(),
+                  },
                 },
-              },
-              control: {},
-            };
-          },
-        ).object;
-        if (
-          next.metadata.resourceVersion !==
-          resource.metadata.resourceVersion
-        ) {
-          updates.push(Object.freeze({
-            oldResource: resource,
-            resource: next,
-          }));
+                control: {},
+              };
+            },
+          ).object;
+          if (
+            next.metadata.resourceVersion !==
+            resource.metadata.resourceVersion
+          ) {
+            updates.push(Object.freeze({
+              oldResource: resource,
+              resource: next,
+            }));
+          }
         }
-      }
 
-      // Mark this node first so create() rejects new dependents before the
-      // scan. Repeating the scan also repairs partially propagated requests.
-      pending.push(
-        ...this.listAll().filter((candidate) => {
-          return candidate.metadata.owner?.uid === resource.metadata.uid;
-        }),
-      );
-    }
-    return Object.freeze(updates);
+        // Mark this node first so create() rejects new dependents before the
+        // scan. Repeating the scan also repairs partially propagated requests.
+        pending.push(
+          ...this.listAll().filter((candidate) => {
+            return candidate.metadata.owner?.uid === resource.metadata.uid;
+          }),
+        );
+      }
+      return Object.freeze(updates);
+    });
   }
 
   finalizeDeletion(
@@ -701,7 +704,7 @@ export class PluginResourceStore {
     assertPathSegment("resource name", name);
     const namespace = this.resourceNamespace(options.namespace ?? "v1");
     const path = this.resourcePath(type, name, namespace);
-    return withFileLock(path, () => {
+    return this.storage.transaction(() => withFileLock(path, () => {
       const current = this.readStored<TSpec, TStatus>(type, name, namespace);
       if (
         options.expectedResourceVersion !== undefined &&
@@ -715,7 +718,7 @@ export class PluginResourceStore {
       const next = update(current);
       if (!isDeepStrictEqual(current, next)) this.storage.write(path, this.scope, next);
       return next;
-    });
+    }));
   }
 
   private readStored<TSpec, TStatus>(
@@ -955,6 +958,8 @@ export class PluginResourceStore {
   }
 
   private kindDir(type: ResourceType, namespace: ResourceNamespace): string {
+    const definition = this.storage.definition(this.pluginInstanceId, type);
+    if ((definition.scope === "session") !== Boolean(this.aideSessionId)) throw new Error(`Wrong resource scope: ${type.kind} requires ${definition.scope}`);
     const [group, version] = type.apiVersion.split("/");
     if (!group || !version) {
       throw new Error(`invalid resource apiVersion: ${type.apiVersion}`);

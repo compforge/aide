@@ -1,3 +1,4 @@
+import { definition } from "./fixtures/resource-definition.ts";
 import { spyOn } from "bun:test";
 import * as fs from "node:fs";
 import assert from "node:assert/strict";
@@ -74,6 +75,7 @@ test("Session liveness and cleanup use the flat directory after cwd changes", as
   const type = { apiVersion: "tests.dev/v1", kind: "Record" };
   const activeResources = new PluginResourceStore({ session: active, pluginInstanceId: "test" });
   const idleResources = new PluginResourceStore({ session: idle, pluginInstanceId: "test" });
+  activeResources.storage.register("test", [definition(type)]);
   activeResources.create({ type, name: "active", spec: {} });
   idleResources.create({ type, name: "idle", spec: {} });
   active.updateMeta({ cwd: join(root, "code-c"), updatedAt: "2000-01-01T00:00:00.000Z" });
@@ -119,6 +121,7 @@ test("Failed Session directory removal retains business Resources and the reopen
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   const resources = new PluginResourceStore({ session, pluginInstanceId: "test" });
   const type = { apiVersion: "tests.dev/v1", kind: "Record" };
+  resources.storage.register("test", [definition(type)]);
   resources.create({ type, name: "retained", spec: { evidence: "must survive" } });
   session.updateMeta({ updatedAt: "2000-01-01T00:00:00.000Z" });
   const original = fs.rmSync;

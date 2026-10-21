@@ -16,8 +16,7 @@ export const conversationKey = digest;
 export class ConversationStore {
   private readonly listeners = new Set<(conversation: Conversation) => void>();
   constructor(readonly sessionId: string, readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly inputStore: InputStore, readonly outputStore = new OutputStore(resources.storage.home)) {
-    resources.storage.register(resources.scope, { resourceType: CONVERSATION_TYPE, releasedAt: () => undefined,
-      references: (r) => { const s = r.status as ConversationStatus; return [...new Set([...s.pendingInputIds, ...s.batch?.inputIds ?? []])].map((id) => `input:${id}`).concat((s.batch?.outputIds ?? []).map((id) => `output:${id}`)); } });
+
   }
   changed(change: ResourceClientChange): void {
     if (change.resource.kind !== CONVERSATION_TYPE.kind || change.kind === "deleted") return;

@@ -1,6 +1,6 @@
 import type { ConnectorClient } from "./connectors/index.ts";
 import type { Controller } from "./reconcile.ts";
-import type { Resource, ResourceClient, ResourcePrinter } from "./resource.ts";
+import type { Resource, ResourceClient, ResourceDefinition } from "./resource.ts";
 import type { CommandDefinition } from "./command.ts";
 import type { Hook, HookStage } from "./hook.ts";
 import type { Mention } from "./mention.ts";
@@ -90,7 +90,6 @@ export interface PluginPrinters {
   /** Render a supplied snapshot through its Core or instance Printer; no resource read is performed. */
   describe(resource: Readonly<Resource<unknown, unknown>>): Promise<string>;
   summarize(resource: Readonly<Resource<unknown, unknown>>): Promise<string>;
-  register<TSpec, TStatus>(printer: ResourcePrinter<TSpec, TStatus>): void;
 }
 
 export interface PluginHookRegistry {
@@ -122,10 +121,11 @@ export interface PluginContext {
 /**
  * One installable group of Resource schemas, Controllers, Sources, and Connectors.
  *
- * @spec A Plugin Package does not declare scope or namespace; one enabled PluginInstance activates one Worker, while each Resource carries its own namespace.
+ * @spec A Plugin Package declares resource scopes per definition; one enabled PluginInstance activates one Worker, while each Resource carries its own namespace.
  */
 export interface PluginPackage {
   readonly pluginId: string;
   readonly version: string;
+  readonly resources?: readonly ResourceDefinition[];
   activate(context: PluginContext): Promise<void>;
 }

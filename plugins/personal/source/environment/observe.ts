@@ -1,10 +1,12 @@
 import { bindSourceInput } from "@compforge/aide-plugin";
+import { isDeepStrictEqual } from "node:util";
 import { SOURCES } from "../definition.ts";
 import type { ConnectorClient, EnvironmentSnapshot, PluginContext, Resource, WorkloadSnapshot } from "@compforge/aide-plugin";
 import { type EnvironmentSourceSpec } from "./config.ts";
 import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "../../chief-model.ts";
 
-export const ENVIRONMENT_SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "EnvironmentSource" } as const;
+import { ENVIRONMENT_SOURCE_TYPE } from "./definition.ts";
+export { ENVIRONMENT_SOURCE_TYPE } from "./definition.ts";
 export interface EnvironmentSourceStatus {
   baseline?: EnvironmentSnapshot;
   sequence?: number;
@@ -100,7 +102,7 @@ export function registerEnvironmentSources(context: PluginContext): void {
     async reconcile(execution, resource) {
       if (resource.metadata.deletionTimestamp) return;
       const configured = watches.find((watch) => watch.environment === resource.spec.environment && watch.namespace === resource.spec.namespace);
-      if (!configured || digest(configured) !== digest(resource.spec)) return;
+      if (!configured || !isDeepStrictEqual(configured, resource.spec)) return;
       try { await observeEnvironment(context, resource, execution.verbs.connectors({ timeoutMs: 30_000 })); }
       catch (error) {
         context.logger.error("Environment observation failed; baseline retained", { error,
@@ -114,7 +116,3 @@ export function registerEnvironmentSources(context: PluginContext): void {
 }
 
 /** Pin a committed observation until its baseline transition has been persisted. */
-export const environmentLifecycle: import("@compforge/aide-plugin").ResourceLifecycle = {
-  resourceType: ENVIRONMENT_SOURCE_TYPE, releasedAt: () => undefined,
-  references: (resource) => [`input:${digest([resource.metadata.uid, ((resource.status as EnvironmentSourceStatus).sequence ?? 0) + 1])}`],
-};
