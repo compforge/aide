@@ -1,3 +1,4 @@
+import personalDefinitions from "../plugins/personal/definitions.ts";
 import { fixtureAddress, fixtureIncoming } from "./address-fixture.ts";
 import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
 import { OutputStore } from "../src/host/output/store.ts";
@@ -71,6 +72,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   await persons.initialize();
   const session = sessions.createSession({ cwd: root });
   const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
+  resources.storage.register("personal", personalDefinitions);
   const store = new Store(resources, createResourceClient(resources, undefined, undefined, new AideResourceProvider({ session, outputs: new OutputStore(root) })), new ConversationStore(session));
   const work = new WorkService(store, "me", pino({ level: "silent" }));
   const inputs = { cwd: root, agentDir, model };

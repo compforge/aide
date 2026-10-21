@@ -4,15 +4,21 @@ Plugin 是业务扩展的组织与所有权单位。插件声明资源和回调�
 
 ## Package、Instance 与 Runner
 
-`PluginPackage` 通过 `activate(context)` 注册 Resource Controller、Printer、Source、Watch、Hook、Command 等能力。Package 描述插件代码，一份启用配置对应一个 PluginInstance；Host 为实例建立 Binding 并启动独立 Runner，加载插件后完成注册。
+`PluginPackage.resources` 声明资源定义，`activate(context)` 注册 Controller、Source、Watch、Hook、Command 等运行能力。Package 描述插件代码，一份启用配置对应一个 PluginInstance；Host 为实例建立 Binding 并启动独立 Runner，加载插件后完成注册。
 
 Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队列、重试和 Reconcile；资源存储、全局 Connector 与执行事实由 Host 持有。PluginContext 将资源操作、Connector 查询和 verb 转成跨进程请求，插件无需引用宿主 Store、提供方客户端或 Harness SDK。
 
-实例关闭或 Runner 失败时，Host 撤销注册并终止未完成调用。Runner 不自动重启；重新启动 Aide 会重新激活插件。回调中的内存状态与异步调用栈不会跨重启恢复。
+实例关闭或 Runner 失败时，Host 撤销运行能力并终止未完成调用；资源定义随 Host 保留，校验、打印和容量规则不依赖 Runner 存活。Runner 不自动重启；重新启动 Aide 会重新激活插件。回调中的内存状态与异步调用栈不会跨重启恢复。
 
 ## Resource 与 Reconcile
 
-Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。一个 Controller 拥有一种资源类型的 Reconcile：每次读取当前事实，推进目标，再持久化结果或安排下次唤醒。
+Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。 `ResourceDefinition` 统一声明 type、scope、spec/status schema、可选 validator、printer 和 retention。Host 在恢复资源、启动 Controller 前加载声明；未知类型不能写入。进程内插件通过 resources 提供声明，独立 Runner 的 PackageEntry 通过 resourcesUrl 指向默认导出定义数组的纯模块，Host 直接加载它。声明模块不导入 Runner 或 Host 实现，不执行 I/O。
+
+`scope: "session"` 将实例放在执行 Session 中；`scope: "shared"` 在同一插件实例下跨 Session 共享，资源与引用不携带 sessionId。namespace 与存储作用域独立。Person 使用 shared，无需创建执行 Session 或注册 Controller。本次模型变更不自动迁移旧 personal:persons 作用域，已有数据需要在升级前迁移。每种资源可以没有 Controller，也可以由多个具名 Controller 观察。
+
+所有创建、更新和删除请求都在存储事务内经过 Schema 与 Validator，包括 Agent 工具、Source 与 commit。Schema 的规范化输出作为持久数据；Validator 可读取同一作用域内的事务快照，包含当前 commit 已完成的前序写入。它不能执行异步工作或外部副作用。校验、引用计算或配额失败会回滚整笔写入。
+
+一个 Controller 拥有一种资源类型的 Reconcile：每次读取当前事实，推进目标，再持久化结果或安排下次唤醒。
 
 每种 CRD 在所属 plugin package 下有一个按资源命名的目录，集中保存模型、Reconcile 和专属辅助代码。例如 `plugins/personal/conversation/` 包含 Conversation 的模型、输入追加、存储、触发配置和 Reconcile。Personal 的 Source 集中在 `plugins/personal/source/`：`definition.ts` 声明来源分类，`environment/`、`message/`、`requirement/` 分别保存对应 CRD 的配置与观察逻辑，消息上下文归入 `message/context.ts`。插件装配与跨资源流程留在插件层；目录内的 Runner 代码仍只经 ResourceClient 访问资源，不导入宿主存储实现。
 
@@ -24,7 +30,7 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 Host 的 `ResourceStorage` 将 Input 与插件 Resource 存入共享 SQLite，以按需读取替代常驻完整快照集合。容量按 Group/Kind 汇总，配额覆盖不同 API 版本、Session 和插件实例；同时限制单条大小、每种数量/字节以及 Host 总字节。配置见 [Resource 容量](../configuration.md#resource-容量)。
 
-资源所有者通过纯 `ResourceLifecycle` 定义释放时间和引用的精确 uid，由宿主装配注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 在路由结束后可释放，但 Conversation 的待处理/当前 Batch 引用与 Source 的待提交引用继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
+资源所有者通过 `ResourceDefinition.retention` 定义释放时间和引用的精确 uid，与类型一起注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 在路由结束后可释放，但 Conversation 的待处理/当前 Batch 引用与 Source 的待提交引用继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
 
 每次写入在事务内同步记录、引用索引、回执和必要的回收。无法满足容量约束时整个事务回滚，变更通知只在提交后发出。因此过载会阻止接收更多工作，不会通过删除正在承担的工作来腾空间。完成并缩小记录的更新允许在超配额状态下提交。
 
@@ -32,11 +38,11 @@ Session、Turn 等从 Ledger/运行态生成的只读 Resource 投影不另存�
 
 ## Resource Printer
 
-`ResourcePrinter<Spec, Status>` 按资源类型提供 `describe(resource): string` 和 `summarize(resource): string`，分别生成可读详情和简短概览。插件在激活阶段通过 `context.printers.register(...)` 注册；它与 Controller 独立，Resource 实例本身仍是可持久化的数据。
+`ResourcePrinter<Spec, Status>` 按资源类型提供 `describe(resource): string` 和 `summarize(resource): string`，分别生成可读详情和简短概览。它声明在 `ResourceDefinition.printer` 中，与 Controller 独立，Resource 实例本身仍是可持久化的数据。
 
-两个方法同步处理传入的资源快照，不修改资源、不查询外部系统、不调用模型。拿到 Resource 后，插件通过 `await context.printers.describe(resource)` / `summarize(resource)` 获取文本，无需知道具体 Printer。Host 使用 `Manager.describeResource(pluginInstanceId, resource)` / `summarizeResource(...)`，同样返回 `Promise<string>`；Runner 沿用既有 handler IPC 与请求超时机制，只传输资源快照和文本，不重新查询资源。进程内插件同样使用快照副本，避免修改调用方持有的数据。
+两个方法同步处理传入的资源快照，不修改资源、不查询外部系统、不调用模型。拿到 Resource 后，插件通过 `await context.printers.describe(resource)` / `summarize(resource)` 获取文本，无需知道具体 Printer。Host 使用 `Manager.describeResource(pluginInstanceId, resource)` / `summarizeResource(...)`，同样返回 `Promise<string>`；Runner 通过 IPC 请求 Host 打印，只传输资源快照和文本；Printer 在 Host 同步执行，始终收到快照副本，不重新查询资源。
 
-Core 内置 Printer 按精确的 `apiVersion + kind` 选择，其它 Printer 按插件实例与 GVK 选择，同一实例重复注册同一类型会失败。类型归属复用 ResourceRegistry，不能覆盖 Core 或其它插件的资源类型；注册失败整体回滚，实例关闭或 Runner 失效后撤销注册。没有专用 Printer 时，详情默认使用缩进 JSON，概览默认使用 `kind/name`。已注册 Printer 的执行失败记录资源身份和方法名，并向调用方返回错误。
+Core 内置 Printer 按精确的 `apiVersion + kind` 选择，其它 Printer 按插件实例与 GVK 选择，同一实例不能重复声明同一类型。类型归属由 ResourceRegistry 维护，不能覆盖 Core 或其它插件的资源类型；声明失败整体回滚，实例关闭或 Runner 失效不撤销定义。没有专用 Printer 时，详情默认使用缩进 JSON，概览默认使用 `kind/name`。已注册 Printer 的执行失败记录资源身份和方法名，并向调用方返回错误。
 
 OutputPrinter 位于 `src/host/output/printer.ts`，提供正文、目标与投递信息的完整描述和有界预览。InputPrinter 位于 `src/host/input/printer.ts`，由 Host 装配，不随插件实例关闭而撤销。`describe` 保留完整正文、来源、接收时间、可选话题、回复关联和原样 observation；不查询历史，也不解释各 Source 的业务字段。`summarize` 折叠空白并生成最多 120 个 Unicode 码点的单行预览。Web 输入详情与 Chief 当前输入使用同一份描述，Web 正文保留完整 `spec.text`；路由和消费状态仍属于各自的资源与会话投影。输出是普通文本，调用方不能把它当作可信 HTML 或指令。插件声明示例见 [Resource Printers](../../packages/plugin/README.md#resource-printers)。
 

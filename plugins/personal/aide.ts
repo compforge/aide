@@ -4,9 +4,6 @@ import type { OutputStore } from "../../src/host/output/store.ts";
 import { updateBatch } from "./conversation/state.ts";
 import { activeBatch } from "./conversation/batch.ts";
 import { appendConversationInput, assertInputCapacity } from "./conversation/input.ts";
-import { environmentLifecycle } from "./source/environment/observe.ts";
-import { messageLifecycle } from "./source/message/observe.ts";
-import { requirementLifecycle } from "./source/requirement/observe.ts";
 import { createPiAgent } from "../../agents/pi/agent.ts";
 import { inputPrinter } from "../../src/host/input/printer.ts";
 import { conversationPolicy } from "./conversation/config.ts";
@@ -56,7 +53,6 @@ export class Personal {
     this.targets = runtime.targets;
     this.plugins = this.core.pluginManager!;
     const resources = new PluginResourceStore({ session: this.session, pluginInstanceId: "personal" });
-    for (const policy of [environmentLifecycle, messageLifecycle, requirementLifecycle]) resources.storage.register(resources.scope, policy);
     const client = this.plugins.resourceClient("personal");
     this.store = new Store(resources, client, new ConversationStore(this.id, resources, client, runtime.inputs, runtime.outputs));
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);

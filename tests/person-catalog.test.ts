@@ -10,7 +10,7 @@ import { loadConfig } from "../src/config.ts";
 import { httpChannel } from "../src/api/index.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { personTools } from "../agents/chief/person-tools.ts";
-import { PERSON_TYPE, PERSON_SESSION, LOCAL_ME, personRef } from "../plugins/personal/person/model.ts";
+import { PERSON_TYPE, LOCAL_ME, personRef } from "../plugins/personal/person/model.ts";
 import { Persons } from "../plugins/personal/person/service.ts";
 import { messageRelation } from "../plugins/personal/source/message/relation.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
@@ -49,8 +49,8 @@ test("Person catalog resolves identities across sessions, preserves profiles acr
   await f.restart();
   assert.equal((await f.aide.persons.read(first.metadata.name)).metadata.uid, first.metadata.uid);
   assert.deepEqual((await f.aide.persons.read(first.metadata.name)).spec.profile, profiled.spec.profile);
-  assert.equal(f.aide.sessions().some((s) => s.id === PERSON_SESSION), false);
-  assert.equal(f.aide.conversationIds().includes(PERSON_SESSION), false);
+  assert.equal((await f.aide.persons.read(first.metadata.name)).metadata.sessionId, undefined);
+  assert.equal(f.aide.sessions().some((s) => s.id === "personal:persons"), false);
 });
 
 test("profile_person guards versions and preserves user corrections while Input retention remains independent", async (t) => {

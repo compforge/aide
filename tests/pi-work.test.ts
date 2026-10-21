@@ -1,3 +1,4 @@
+import personalDefinitions from "../plugins/personal/definitions.ts";
 import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
 import { OutputStore } from "../src/host/output/store.ts";
 import type { PluginContext } from "@compforge/aide-plugin";
@@ -29,6 +30,7 @@ function setup(t: TestContext) {
   const session = new SessionStore(root).createSession({ cwd: root });
   let writes = 0;
   const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
+  resources.storage.register("personal", personalDefinitions);
   const store = new Store(resources, createResourceClient(resources, () => writes++, undefined, new AideResourceProvider({ session, outputs: new OutputStore(root) })), new ConversationStore(session));
   const consume = async (id: string) => {
     const work = store.get(id);
@@ -136,7 +138,7 @@ test("Work view aggregates separate Task and Routine resources without persistin
   assert.equal("trigger" in taskResource.spec, false);
   assert.equal((routineResource.spec.trigger as { event: string }).event, "changed");
   assert.deepEqual(service.list().map((work) => work.kind).sort(), ["routine", "task"]);
-  assert.equal(store.resources.list({ apiVersion: TASK_TYPE.apiVersion, kind: "Work" }).length, 0);
+  assert.throws(() => store.resources.list({ apiVersion: TASK_TYPE.apiVersion, kind: "Work" }), /Unknown resource definition/);
   const reply = output("me", "routine result", recurring.id);
   (await store.save(recurring, [reply], "routine-input", "event-1"));
   assert.equal(store.hasEvent(recurring.id, "event-1"), true);

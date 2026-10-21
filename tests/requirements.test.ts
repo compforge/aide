@@ -1,3 +1,4 @@
+import personalDefinitions from "../plugins/personal/definitions.ts";
 import { InputStore } from "../src/host/input/store.ts";
 import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
 import assert from "node:assert/strict";
@@ -44,6 +45,7 @@ test("Requirement Source commits the inbox before its watermark and never create
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const sessions = new SessionStore(root); const session = sessions.createSession({ cwd: root });
   const store = new PluginResourceStore({ session, pluginInstanceId: "personal" });
+  store.storage.register("personal", personalDefinitions);
   const conversations = new InputStore(root);
   const resources = createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, inputs: conversations }));
   const watch: Watch = { sessionId: "source:mine", id: "mine", source: "work", intervalMs: 300_000, repositories: [], userKeys: ["me"] };

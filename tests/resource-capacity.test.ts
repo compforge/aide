@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ResourceStorage, ResourceStorageConfigSchema, ResourceCapacityError, type StoredResource } from "../src/host/resource/storage.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { definition } from "./fixtures/resource-definition.ts";
 
 function setup(t: { after(fn: () => void): void }) {
   const root = mkdtempSync(join(tmpdir(), "resource-capacity-"));
@@ -14,9 +15,9 @@ function setup(t: { after(fn: () => void): void }) {
   const record = (id: string, released = true, refs: string[] = []): StoredResource => ({ object: { ...type,
     metadata: { name: id, uid: id, namespace: "v1", resourceVersion: "1", generation: 1, creationTimestamp: new Date(0).toISOString() },
     spec: { refs }, status: { released } } });
-  for (const scope of ["one", "two"]) db.register(scope, { resourceType: type,
+  for (const scope of ["one", "two"]) db.register(scope, ["example.dev/v1", "example.dev/v2"].map((apiVersion) => ({ ...definition({ ...type, apiVersion }, "shared"), retention: {
     releasedAt: (r) => (r.status as { released: boolean }).released ? r.metadata.creationTimestamp : undefined,
-    references: (r) => (r.spec as { refs: string[] }).refs });
+    references: (r) => (r.spec as { refs: string[] }).refs ?? [] } })));
   db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 3 }, lowWatermark: 0.9 }));
   return { root, db, record, type };
 }
@@ -46,7 +47,8 @@ test("LRU is explicit reads; listing does not refresh access, and unknown resour
   db.write("c", "one", record("c", false));
   assert.ok(db.has("a")); assert.ok(!db.has("b"));
   const unknown = record("x"); unknown.object = { ...unknown.object, kind: "Unknown" };
-  db.write("x", "one", unknown);
+  assert.throws(() => db.write("x", "one", unknown), /Unknown resource definition/);
+  db.migrate("unknown-fixture", function* () { yield ["x", "one", unknown]; });
   assert.equal(db.db.prepare("SELECT released FROM resources WHERE key='x'").get()!.released, null);
 });
 
@@ -70,6 +72,7 @@ test("Plugin resources reopen from SQLite with the same version and bounded indi
   const store = new PluginResourceStore(options);
   store.storage.configure(ResourceStorageConfigSchema.parse({ defaults: { maxResourceBytes: 1000 } }));
   const type = { apiVersion: "example.dev/v1", kind: "Document" };
+  store.storage.register("plugin", [definition(type)]);
   const r = store.create({ type, name: "a", spec: { text: "small" } });
   assert.deepEqual(new PluginResourceStore(options).get(type, "a"), r);
   assert.throws(() => store.replaceSpec(type, "a", { text: "x".repeat(1000) }), ResourceCapacityError);

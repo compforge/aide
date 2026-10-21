@@ -1,3 +1,4 @@
+import personalDefinitions from "../plugins/personal/definitions.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import assert from "node:assert/strict";
@@ -30,6 +31,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   const conversations = new InputStore(session.dir);
   let store = new PluginResourceStore({ session, pluginInstanceId: "personal" });
+  store.storage.register("personal", personalDefinitions);
   const resources = () => createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, inputs: conversations }));
   const watch: EnvironmentSourceSpec = { environment: "dev", namespace: "app", intervalMs: 300_000 };
   store.create({ type: ENVIRONMENT_SOURCE_TYPE, name: "changes", spec: watch, status: {} });

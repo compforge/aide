@@ -69,7 +69,6 @@ export interface Resource<
  * @case tests/resource-printer.test.ts
  */
 export interface ResourcePrinter<TSpec = unknown, TStatus = unknown> {
-  readonly resourceType: ResourceType;
   describe(resource: Readonly<Resource<TSpec, TStatus>>): string;
   summarize(resource: Readonly<Resource<TSpec, TStatus>>): string;
 }
@@ -77,10 +76,35 @@ export interface ResourcePrinter<TSpec = unknown, TStatus = unknown> {
 /** Pure resource-owner rules used by Host storage; absence of a release time protects the record.
  * References are exact Resource UIDs, including references to not-yet-created durable inputs.
  */
-export interface ResourceLifecycle {
-  readonly resourceType: ResourceType;
-  releasedAt(resource: Readonly<Resource<unknown, unknown>>): string | undefined;
-  references(resource: Readonly<Resource<unknown, unknown>>): readonly string[];
+export interface ResourceRetention<S = unknown, T = unknown> {
+  releasedAt(resource: Readonly<Resource<S, T>>): string | undefined;
+  references(resource: Readonly<Resource<S, T>>): readonly string[];
+}
+
+/** A synchronous parser; schema libraries are an implementation choice of the resource owner. */
+export interface ResourceSchema<T> { parse(value: unknown): T }
+
+export interface ResourceValidationContext {
+  /** Transaction-local snapshots in the same resource scope, including preceding writes in a commit. */
+  list<S, T>(type: ResourceType): readonly Readonly<Resource<S, T>>[];
+}
+export interface ResourceValidator<S, T> {
+  create?(resource: Readonly<Resource<S, T>>, context: ResourceValidationContext): void;
+  update?(previous: Readonly<Resource<S, T>>, resource: Readonly<Resource<S, T>>, context: ResourceValidationContext): void;
+  delete?(resource: Readonly<Resource<S, T>>, context: ResourceValidationContext): void;
+}
+/**
+ * @spec Definitions load in the Host before resource access and remain independent of Controller/Runner lifetime.
+ * @spec Callbacks are synchronous and pure. Validation observes the storage transaction, never a cached Client.
+ * @link docs/plugin/README.md
+ */
+export interface ResourceDefinition<S = any, T = any> {
+  readonly type: ResourceType;
+  readonly scope: "shared" | "session";
+  readonly schema: { readonly spec: ResourceSchema<S>; readonly status: ResourceSchema<T> };
+  readonly validator?: ResourceValidator<S, T>;
+  readonly printer?: ResourcePrinter<S, T>;
+  readonly retention?: ResourceRetention<S, T>;
 }
 
 /** Exact-match label selector. All entries must match the Resource. */
@@ -110,7 +134,7 @@ export interface ResourceMergePatch {
   readonly value: Readonly<Record<string, unknown>>;
 }
 
-/** A bounded atomic write set in one Session and Plugin scope. Core creates are limited to Output. */
+/** A bounded atomic write set in one concrete Plugin resource scope (session or shared). Core creates are limited to Output. */
 export type ResourceCommit =
   | { operation: "create"; type: ResourceType; name: string; spec: unknown; status?: unknown }
   | { operation: "replace"; resource: Resource<unknown, unknown>; spec: unknown; status: unknown }

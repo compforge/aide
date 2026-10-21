@@ -2,7 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync, existsSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import type { Resource, ResourceType, ResourceLifecycle } from "@compforge/aide-plugin";
+import type { Resource, ResourceType, ResourceDefinition } from "@compforge/aide-plugin";
+import { validateResourceType } from "../plugin/resource/type.ts";
 
 const limit = z.number().int().positive();
 const evictionOrder = z.enum(["created", "released", "lru"]);
@@ -35,7 +36,7 @@ const databases = new Map<string, ResourceStorage>();
 export class ResourceStorage {
   readonly db: DatabaseSync;
   private config = ResourceStorageConfigSchema.parse({});
-  private readonly policies = new Map<string, ResourceLifecycle>();
+  private readonly definitions = new Map<string, ResourceDefinition>();
   private readonly listeners = new Set<(scope: string, resource: Resource<unknown, unknown>) => void>();
   private inTransaction = false;
   private afterCommitCallbacks: Array<() => void> = [];
@@ -60,24 +61,86 @@ export class ResourceStorage {
       CREATE INDEX IF NOT EXISTS reference_target ON resource_refs(target);
       CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, expires INTEGER NOT NULL, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS migrations (key TEXT PRIMARY KEY);`);
+    this.db.exec("UPDATE resources SET released=NULL");
   }
   configure(config?: Partial<ResourceStorageConfig>): void { this.config = ResourceStorageConfigSchema.parse(config ?? {}); }
   subscribe(listener: (scope: string, resource: Resource<unknown, unknown>) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  register(scope: string, policy: ResourceLifecycle): void {
-    this.policies.set(`${scope}:${kindKey(policy.resourceType)}`, policy);
-    this.transaction(() => { for (const key of this.keys(scope)) {
-      const row = this.read(key); if (row && kindKey(row.object) === kindKey(policy.resourceType)) this.indexLifecycle(key, scope, row.object);
-    } });
+  /** Register immutable declarations once per owner, before opening resources or starting Controllers. */
+  register(owner: string, definitions: readonly ResourceDefinition[]): void {
+    const keys = new Set<string>();
+    for (const definition of definitions) {
+      validateResourceType(definition.type);
+      const key = this.definitionKey(owner, definition.type);
+      if (keys.has(key)) throw new Error(`Resource definition already registered: ${key}`);
+      keys.add(key);
+      const current = this.definitions.get(key);
+      if (current && current !== definition) throw new Error(`Resource definition already registered: ${key}`);
+      if (!["shared", "session"].includes(definition.scope) || typeof definition.schema?.spec.parse !== "function" || typeof definition.schema?.status.parse !== "function") {
+        throw new Error(`Invalid resource definition: ${key}`);
+      }
+      if (definition.printer && (typeof definition.printer.describe !== "function" || typeof definition.printer.summarize !== "function")) throw new Error(`Invalid resource Printer: ${key}`);
+      if (definition.retention && (typeof definition.retention.releasedAt !== "function" || typeof definition.retention.references !== "function")) throw new Error(`Invalid resource retention: ${key}`);
+    }
+    const added: string[] = [];
+    try {
+      for (const definition of definitions) {
+        const key = this.definitionKey(owner, definition.type);
+        if (!this.definitions.has(key)) { this.definitions.set(key, definition); added.push(key); }
+      }
+      if (!added.length) return;
+      this.transaction(() => {
+        for (const row of this.db.prepare("SELECT key,scope,data FROM resources").iterate()) {
+          if (this.scopeOwner(row.scope as string) !== owner) continue;
+          const resource = (JSON.parse(row.data as string) as StoredResource).object;
+          if (definitions.some((d) => this.definitionKey(owner, d.type) === this.definitionKey(owner, resource))) {
+            this.parse(row.scope as string, resource);
+            this.indexLifecycle(row.key as string, row.scope as string, resource);
+          }
+        }
+      });
+    } catch (error) { for (const key of added) this.definitions.delete(key); throw error; }
+  }
+  private scopeOwner(scope: string): string { return scope.startsWith("[") ? JSON.parse(scope)[1] : scope; }
+  private definitionKey(owner: string, type: ResourceType): string { return JSON.stringify([owner, type.apiVersion, type.kind]); }
+  findDefinition(owner: string, type: ResourceType): ResourceDefinition | undefined { return this.definitions.get(this.definitionKey(owner, type)); }
+  definition(owner: string, type: ResourceType): ResourceDefinition {
+    const result = this.definitions.get(this.definitionKey(owner, type));
+    if (!result) throw new Error(`Unknown resource definition: ${owner} ${type.apiVersion}/${type.kind}`);
+    return result;
+  }
+  private parse(scope: string, resource: Resource<unknown, unknown>): void {
+    const definition = this.definition(this.scopeOwner(scope), resource);
+    const session = scope.startsWith("[") ? JSON.parse(scope)[0] : null;
+    if ((definition.scope === "session") !== (session !== null)) throw new Error(`Wrong resource scope: ${resource.kind} requires ${definition.scope}`);
+    // Parsers may supply defaults or normalize fields; only their canonical output is persisted.
+    (resource as { spec: unknown }).spec = definition.schema.spec.parse(resource.spec);
+    (resource as { status: unknown }).status = definition.schema.status.parse(resource.status);
+  }
+  private validationContext(scope: string) {
+    return { list: <S, T>(type: ResourceType) => [...this.keys(scope)].map((key) => this.read(key)!.object)
+      .filter((r) => r.apiVersion === type.apiVersion && r.kind === type.kind).map((r) => structuredClone(r) as Resource<S, T>) };
   }
   private indexLifecycle(key: string, scope: string, resource: Resource<unknown, unknown>): void {
-    const policy = this.policies.get(`${scope}:${kindKey(resource)}`);
-    const released = resource.metadata.deletionTimestamp ? undefined : policy?.releasedAt(resource);
-    if (released && !Number.isFinite(Date.parse(released))) throw new Error("Invalid resource release time");
+    const definition = this.definitions.get(this.definitionKey(this.scopeOwner(scope), resource));
+    let released: string | undefined;
+    let refs: readonly string[] = [];
+    try {
+      const snapshot = structuredClone(resource);
+      released = resource.metadata.deletionTimestamp ? undefined : definition?.retention?.releasedAt(snapshot);
+      refs = definition?.retention?.references(snapshot) ?? [];
+      if (released && !Number.isFinite(Date.parse(released))) throw new Error("Invalid resource release time");
+    } catch (error) {
+      this.onRetentionError?.(resource, error);
+      // Roll back the write or declaration: an unknown edge could otherwise expose a live dependency to collection.
+      throw new Error(`Resource retention failed for ${resource.kind}/${resource.metadata.name}`, { cause: error });
+    }
     this.db.prepare("UPDATE resources SET released=? WHERE key=?").run(released ?? null, key);
     this.db.prepare("DELETE FROM resource_refs WHERE source=?").run(key);
-    const refs = new Set([...(policy?.references(resource) ?? []), ...(resource.metadata.owner ? [resource.metadata.owner.uid] : [])]);
-    for (const target of refs) this.db.prepare("INSERT INTO resource_refs VALUES (?,?)").run(key, target);
+    for (const target of new Set([...refs, ...(resource.metadata.owner ? [resource.metadata.owner.uid] : [])])) {
+      this.db.prepare("INSERT INTO resource_refs VALUES (?,?)").run(key, target);
+    }
   }
+  onRetentionError?: (resource: Resource<unknown, unknown>, error: unknown) => void;
   has(key: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM resources WHERE key=?").get(key)); }
   read<T extends StoredResource = StoredResource>(key: string, touch = false): T | undefined {
     const row = this.db.prepare("SELECT data FROM resources WHERE key=?").get(key);
@@ -90,6 +153,17 @@ export class ResourceStorage {
   }
   write(key: string, scope: string, stored: StoredResource, receipt?: { key: string; value: string }): void {
     this.transaction(() => {
+      this.parse(scope, stored.object);
+      const old = this.read(key)?.object;
+      const definition = this.definition(this.scopeOwner(scope), stored.object);
+      const context = this.validationContext(scope);
+      const current = structuredClone(stored.object);
+      const result: unknown = old
+        ? (!old.metadata.deletionTimestamp && current.metadata.deletionTimestamp
+          ? definition.validator?.delete?.(structuredClone(old), context)
+          : definition.validator?.update?.(structuredClone(old), current, context))
+        : definition.validator?.create?.(current, context);
+      if (result && typeof (result as { then?: unknown }).then === "function") throw new Error("Resource validation must be synchronous");
       const data = JSON.stringify(stored), bytes = Buffer.byteLength(data), resource = stored.object;
       const previous = this.db.prepare("SELECT bytes FROM resources WHERE key=?").get(key);
       const kind = kindKey(resource), limits = { ...this.config.defaults, ...this.config.kinds[kind] };

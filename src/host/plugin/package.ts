@@ -1,4 +1,3 @@
-import type { HostedResourcePrinter } from "./resource/printer.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorRequest } from "../../protocol/connectors.ts";
 import { createConnectorClient, dispatchConnector, emptyConnectors } from "../../connector-client.ts";
@@ -32,7 +31,6 @@ import type {
   PluginPackage,
   PluginSessionContext,
   Resource,
-  ResourcePrinter,
   ReconcileRequest,
   ResourceRef,
   Source,
@@ -82,7 +80,6 @@ export type {
   PluginPackage,
   PluginSessionContext,
   Resource,
-  ResourcePrinter,
   ReconcileRequest,
   ResourceRef,
   Source,
@@ -191,7 +188,6 @@ type HookRegistrar = (
 interface PluginRegistrars {
   describeResource(resource: Readonly<Resource<unknown, unknown>>): Promise<string>;
   summarizeResource(resource: Readonly<Resource<unknown, unknown>>): Promise<string>;
-  registerPrinter(printer: HostedResourcePrinter): () => void;
   registerCommand: CommandRegistrar;
   registerMention: MentionRegistrar;
   registerHook: HookRegistrar;
@@ -298,7 +294,6 @@ export class PluginBinding implements PluginContext {
     this.printers = Object.freeze({
       describe: (resource: Readonly<Resource<unknown, unknown>>) => this.registrars.describeResource(resource),
       summarize: (resource: Readonly<Resource<unknown, unknown>>) => this.registrars.summarizeResource(resource),
-      register: (printer: ResourcePrinter) => this.installPrinter(printer),
     });
     this.hooks = Object.freeze({
       register: (hook: Hook) => this.registerHook(hook),
@@ -307,13 +302,6 @@ export class PluginBinding implements PluginContext {
       onClose: (cleanup: () => Promise<void> | void) =>
         this.registerCleanup(cleanup),
     });
-  }
-
-  /** Host-only bridge also accepts async Runner proxies; authoring callbacks remain synchronous. */
-  installPrinter(printer: HostedResourcePrinter): void {
-    this.assertRegistering();
-    validateResourceType(printer.resourceType);
-    this.cleanups.push(this.registrars.registerPrinter(printer));
   }
 
   completeActivation(): void {

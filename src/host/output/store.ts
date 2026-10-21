@@ -1,23 +1,10 @@
-import { parseResourceNamespace } from "../plugin/namespace.ts";
-import { AddressSchema } from "../../address.ts";
+import { OutputDefinition, OutputSpecSchema, OutputStatusSchema } from "./definition.ts";
+export { OutputSpecSchema } from "./definition.ts";
 import { isChannelAddress } from "../../channel/address.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { z } from "zod";
 import { OUTPUT_TYPE, type Output, type OutputSpec, type OutputStatus, type ResourceListOptions } from "@compforge/aide-plugin";
 import { ResourceStorage } from "../resource/storage.ts";
-
-const ref = z.object({ apiVersion: z.string().min(1), kind: z.string().min(1), namespace: z.string().min(1), name: z.string().min(1),
-  uid: z.string().optional(), sessionId: z.string().optional() }).strict();
-export const OutputSpecSchema = z.object({
-  text: z.string().min(1).max(128_000),
-  target: AddressSchema,
-  receivers: z.array(ref.extend({ kind: z.literal("Person"), namespace: z.string().transform(parseResourceNamespace), uid: z.string().min(1) })).max(100).optional(),
-  conversation: ref.extend({ uid: z.string().min(1) }), conversationId: z.string().min(1),
-  executionId: z.string().optional(), producer: ref.optional(), inputIds: z.array(z.string().min(1)).max(1001).optional(),
-}).strict();
-const statusSchema = z.object({ phase: z.enum(["pending", "sending", "delivered", "failed", "uncertain"]), attempts: z.number().int().nonnegative(),
-  nextAttemptAt: z.iso.datetime().optional(), deliveredAt: z.iso.datetime().optional(), lastError: z.string().max(4000).optional() }).strict();
 
 /** @spec Output is independent of Input and Conversation lifetime. Associations are provenance, not retention edges.
  * @spec Content, receivers and target never change after admission. Only the Host transport updates delivery state.
@@ -28,10 +15,7 @@ export class OutputStore {
   private readonly listeners = new Set<(output: Output) => void>();
   constructor(home: string) {
     this.storage = ResourceStorage.open(home);
-    this.storage.register("core", { resourceType: OUTPUT_TYPE,
-      releasedAt: (r) => (r.status as OutputStatus).phase === "delivered" ? (r.status as OutputStatus).deliveredAt
-        : (r.status as OutputStatus).phase === "failed" ? new Date(Date.parse(r.metadata.creationTimestamp) + 7 * 86400_000).toISOString() : undefined,
-      references: () => [] });
+    this.storage.register("core", [OutputDefinition]);
     this.storage.db.exec(`CREATE INDEX IF NOT EXISTS output_conversation ON resources(json_extract(data,'$.object.spec.conversation.uid')) WHERE kind='aide.dev/Output';
       CREATE INDEX IF NOT EXISTS output_execution ON resources(json_extract(data,'$.object.spec.executionId')) WHERE kind='aide.dev/Output';`);
   }
@@ -82,7 +66,7 @@ export class OutputStore {
     this.storage.transaction(() => {
       const stored = this.storage.read(`output:${id}`); if (!stored) throw new Error(`Output missing: ${id}`);
       const output = stored.object as Output;
-      const status = statusSchema.parse(change(output.status));
+      const status = OutputStatusSchema.parse(change(output.status));
       if (isDeepStrictEqual(status, output.status)) return;
       const next: Output = { ...output, metadata: { ...output.metadata, resourceVersion: String(Number(output.metadata.resourceVersion) + 1) }, status };
       this.storage.write(`output:${id}`, "core", { ...stored, object: next }); this.notify(next);

@@ -1,8 +1,8 @@
 import { OutputStore } from "../output/store.ts";
-import { outputPrinter } from "../output/printer.ts";
+import { OutputDefinition } from "../output/definition.ts";
 import { createPluginVerbs } from "../../plugin-context.ts";
 import { ResourceStorage, resourceHome } from "../resource/storage.ts";
-import { inputPrinter } from "../input/printer.ts";
+import { InputDefinition } from "../input/definition.ts";
 import { ResourcePrinters } from "./resource/printer.ts";
 import { RunnerController } from "./runner/controller.ts";
 import type { PluginRunnerClient } from "./runner/client.ts";
@@ -59,6 +59,7 @@ import {
 import {
   PackageLoader,
   type PackageLoaderOptions,
+  type PackageSource,
 } from "./package-loader.ts";
 import {
   reconcileKeyId,
@@ -308,7 +309,11 @@ export class Manager {
   private readonly printers = new ResourcePrinters((detail, error) => this.log?.({
     level: "error", source: "aide", component: "plugin.printer", message: "Resource printing failed",
     pluginInstanceId: detail.pluginInstanceId, attributes: { ...detail }, error: logError(error),
-  }), [inputPrinter, outputPrinter]);
+  }), (pluginInstanceId, type) => {
+    if (resourceTypeKey(type) === resourceTypeKey(InputDefinition.type)) return InputDefinition;
+    if (resourceTypeKey(type) === resourceTypeKey(OutputDefinition.type)) return OutputDefinition;
+    return ResourceStorage.open(resourceHome(this.instances.session.dir)).findDefinition(pluginInstanceId, type);
+  });
   private readonly bindings = new Map<string, PluginBinding>();
   private readonly activations = new Map<string, Promise<void>>();
   private readonly capacity: ReconcileCapacity;
@@ -499,8 +504,12 @@ export class Manager {
     const instance = this.instances.get(pluginInstanceId);
     const local = createResourceClient(new PluginResourceStore({ session: this.instances.session, pluginInstanceId }),
       (change) => { this.handlePluginResourceChange(change); this.resourceChanged?.(change); },
-      (type) => this.resourceRegistry.registerMaterialized(instance.pluginId, type), this.aideResourceProvider);
-    return scopedResources(local, this.instances.session.id, pluginInstanceId, this.resourceDirectory);
+      (type) => { ResourceStorage.open(resourceHome(this.instances.session.dir)).definition(pluginInstanceId, type); }, this.aideResourceProvider);
+    const storage = ResourceStorage.open(resourceHome(this.instances.session.dir));
+    const shared = this.resourceDirectory?.shared?.(pluginInstanceId) ?? createResourceClient(new PluginResourceStore({ home: storage.home, pluginInstanceId }),
+      (change) => { this.handlePluginResourceChange(change); this.resourceChanged?.(change); });
+    return scopedResources(local, this.instances.session.id, pluginInstanceId, this.resourceDirectory,
+      (type) => !this.resourceRegistry.isAide(type) && storage.definition(pluginInstanceId, type).scope === "shared", shared);
   }
 
   registerController<TSpec, TStatus>(
@@ -668,6 +677,7 @@ export class Manager {
       throw new Error(`plugin Instance is disabled: ${pluginInstanceId}`);
     }
     const packageSource = await this.packageLoader.load(instance);
+    await this.prepareResourceDefinitions(instance, packageSource);
     const aideSession = this.snapshot().session;
     if (aideSession.aideSessionId !== this.instances.session.id) {
       throw new Error(
@@ -694,13 +704,6 @@ export class Manager {
       {
         describeResource: (resource) => this.describeResource(instance.pluginInstanceId, resource),
         summarizeResource: (resource) => this.summarizeResource(instance.pluginInstanceId, resource),
-        registerPrinter: (printer) => {
-          const release = this.resourceRegistry.register(instance.pluginId, printer.resourceType);
-          try {
-            const unregister = this.printers.register(instance.pluginInstanceId, printer);
-            return () => { unregister(); release(); };
-          } catch (error) { release(); throw error; }
-        },
         registerCommand: (command) =>
           this.commandRegistry.register(instance, command),
         registerMention: (mention) =>
@@ -1096,11 +1099,28 @@ export class Manager {
     return this.snapshot();
   }
 
+  /** @spec Load declarations before restoration and Controller activation; Runner loss cannot remove resource constraints. */
+  private async prepareResourceDefinitions(instance: PluginInstance, source: PackageSource): Promise<void> {
+    const definitions: readonly import("@compforge/aide-plugin").ResourceDefinition[] = source.kind === "in-process"
+      ? source.plugin.resources ?? []
+      : source.entry.resourcesUrl ? (await import(source.entry.resourcesUrl)).default : [];
+    if (!Array.isArray(definitions)) throw new Error(`Invalid resource definitions for ${instance.pluginId}: expected an array`);
+    this.resourceRegistry.check(instance.pluginId, definitions.map((d) => d.type));
+    ResourceStorage.open(resourceHome(this.instances.session.dir)).register(instance.pluginInstanceId, definitions);
+    this.resourceRegistry.declare(instance.pluginId, definitions.map((d) => d.type));
+  }
+
   private async startManager(): Promise<void> {
     const enabled = this.instances.list().filter((instance) => instance.enabled);
+    const declarationErrors = new Map<string, unknown>();
+    for (const instance of enabled) {
+      try { await this.prepareResourceDefinitions(instance, await this.packageLoader.load(instance)); }
+      catch (error) { declarationErrors.set(instance.pluginInstanceId, error); }
+    }
     const failures = await Promise.all(
       enabled.map(async (instance): Promise<PluginActivationFailure | undefined> => {
         try {
+          if (declarationErrors.has(instance.pluginInstanceId)) throw declarationErrors.get(instance.pluginInstanceId);
           await this.activateInstance(instance.pluginInstanceId);
           return undefined;
         } catch (error) {
@@ -1145,22 +1165,21 @@ export class Manager {
 
   private bindRunnerController(instance: PluginInstance, runner: PluginRunnerClient, definition: RemoteRegistration, resources: import("@compforge/aide-plugin").ResourceClient): () => void {
     const builtin = [AIDE_TURN_RESOURCE_TYPE, INPUT_TYPE].some((type) => resourceTypeKey(type) === resourceTypeKey(definition.resourceType));
-    const release = builtin ? () => {} : this.resourceRegistry.register(instance.pluginId, definition.resourceType);
+    if (!builtin) this.assertControllerResource(instance.pluginInstanceId, definition.resourceType);
     const store = new PluginResourceStore({ session: this.instances.session, pluginInstanceId: instance.pluginInstanceId });
     const scope: ReconcileScope = { controllerName: definition.controllerName, aideSessionId: instance.aideSessionId, pluginInstanceId: instance.pluginInstanceId, namespace: "v1",
       resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, resourceOwner: builtin ? "aide" : "plugin" };
     const controller = new RunnerController({ scope, registration: definition, runner, store, resources, verb: this.verb,
       snapshot: (key, resource) => this.snapshotFor(key, resource), changed: (change) => this.handlePluginResourceChange(change),
       maxTotalConcurrency: this.remoteConcurrency, retryBackoff: this.retryBackoff });
-    let registration: ControllerRegistration;
-    try { registration = this.installController(controller, true); } catch (error) { release(); throw error; }
+    const registration = this.installController(controller, true);
     const unregisterBoard = definition.presentHandlerId ? this.board.registerSource(reconcileScopeId(scope), {
       pluginInstanceId: instance.pluginInstanceId,
       present: () => presentBoardSource({ pluginId: instance.pluginId, pluginInstanceId: instance.pluginInstanceId, resourceType: definition.resourceType,
         list: () => builtin ? this.aideResources!.list(definition.resourceType.kind as AideResourceKind).map((item) => this.exposeAideResource(instance.pluginInstanceId, item)) : store.list(definition.resourceType),
         present: (resource) => runner.invoke(definition.presentHandlerId!, resource) }),
     }) : undefined;
-    return () => { unregisterBoard?.(); registration.close(); release(); };
+    return () => { unregisterBoard?.(); registration.close(); };
   }
 
   private async handleControllerRequest(instance: PluginInstance, request: Extract<HostRequest, { method: "controller.begin" | "controller.finish" | "controller.schedule" }>): Promise<unknown> {
@@ -1179,6 +1198,11 @@ export class Manager {
     return controller.finish(request.scope, request.resource, request.requeueAfterMs, request.failed);
   }
 
+  private assertControllerResource(pluginInstanceId: string, type: import("@compforge/aide-plugin").ResourceType): void {
+    const definition = ResourceStorage.open(resourceHome(this.instances.session.dir)).definition(pluginInstanceId, type);
+    if (definition.scope !== "session") throw new Error(`Session Controller cannot own shared resource: ${type.kind}`);
+  }
+
   private bindController<TSpec, TStatus>(
     instance: PluginInstance,
     pluginController: PluginResourceController<TSpec, TStatus>,
@@ -1192,26 +1216,8 @@ export class Manager {
         pluginController,
       );
     }
-    const releaseKind = this.resourceRegistry.register(
-      instance.pluginId,
-      pluginController.resourceType,
-    );
-    try {
-      const close = this.bindPluginResourceController(
-        instance.pluginInstanceId,
-        pluginController,
-      );
-      return () => {
-        try {
-          close();
-        } finally {
-          releaseKind();
-        }
-      };
-    } catch (error) {
-      releaseKind();
-      throw error;
-    }
+    this.assertControllerResource(instance.pluginInstanceId, pluginController.resourceType);
+    return this.bindPluginResourceController(instance.pluginInstanceId, pluginController);
   }
 
   private bindPluginResourceController<TSpec, TStatus>(

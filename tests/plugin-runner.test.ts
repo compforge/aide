@@ -109,7 +109,7 @@ describe("Plugin Runner process boundary", () => {
     const manager = new Manager({
       instances, session, connectors, pluginSupervisor: new PluginSupervisor(),
       onActivationError: ({ error }) => { failures.push(error); },
-      async loadPackageEntry(pluginId, version) { return { pluginId, version, entryUrl: pathToFileURL(entry).href }; },
+      async loadPackageEntry(pluginId, version) { return { pluginId, version, entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined }; },
     });
     try {
       await manager.start();
@@ -174,7 +174,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
         };
       },
     });
@@ -227,7 +227,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
         };
       },
     });
@@ -292,7 +292,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
         };
       },
     });
@@ -330,7 +330,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
         };
       },
     });
@@ -417,7 +417,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
         };
       },
       onActivationError(failure) {
@@ -525,7 +525,7 @@ describe("Plugin Runner process boundary", () => {
     const failures: PluginRunnerFailure[] = [];
     const manager = new Manager({ instances, session,
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
-      async loadPackageEntry(pluginId, version) { return { pluginId, version, namespace: "v1", entryUrl: pathToFileURL(entry).href }; },
+      async loadPackageEntry(pluginId, version) { return { pluginId, version, namespace: "v1", entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined }; },
       onRunnerFailure(failure) { failures.push(failure); },
     });
     try {
@@ -558,7 +558,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
         };
       },
       onRunnerFailure(failure) {

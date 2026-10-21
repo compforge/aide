@@ -3,7 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { PluginResourceStore as BaseResourceStore, type PluginResourceStoreOptions } from "../src/host/plugin/resource/store.ts";
+import { definition } from "./fixtures/resource-definition.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 
 const roots: string[] = [];
@@ -597,3 +598,8 @@ test("Named controllers retain independent durable deadlines for the same resour
   expect(store(root).scheduledReconciles(REQ_LOOP_RUN)).toEqual([]);
   expect(store(root).scheduledReconciles(REQ_LOOP_RUN, "batch")[0]!.nextReconcileAt).toEqual(secondary);
 });
+
+const testDefinitions = [definition({ apiVersion: "reqloop.aide.dev/v1alpha1", kind: "Requirement" }), definition({ apiVersion: "reqloop.aide.dev/v1alpha1", kind: "OtherKind" }), definition({ apiVersion: "reqloop.aide.dev/v1beta1", kind: "Requirement" })];
+class PluginResourceStore extends BaseResourceStore {
+  constructor(options: PluginResourceStoreOptions) { super(options); this.storage.register(options.pluginInstanceId, testDefinitions); }
+}

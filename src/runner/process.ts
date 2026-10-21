@@ -22,7 +22,6 @@ import type {
   PluginSessionContext,
   Resource,
   ResourceClient,
-  ResourcePrinter,
   ResourceListOptions,
   ResourceMergePatch,
   ResourceOwnerReference,
@@ -282,17 +281,6 @@ function hookRegistration(hook: Hook): PluginRegistration {
   };
 }
 
-function printerRegistration(printer: ResourcePrinter): PluginRegistration {
-  const print = (method: "describe" | "summarize") => handler(`printer:${method}`,
-    ((resource: Resource<unknown, unknown>) => {
-      const value = printer[method](resource);
-      if (typeof value !== "string") throw new Error(`Resource Printer ${method} must return a string synchronously`);
-      return value;
-    }) as (...args: never[]) => unknown);
-  return { kind: "printer", resourceType: printer.resourceType,
-    describeHandlerId: print("describe"), summarizeHandlerId: print("summarize") };
-}
-
 function controllerRegistration(controller: Controller<unknown, unknown>): ControllerRegistration {
   return {
     kind: "controller", controllerId: `controller:${controller.resourceType.apiVersion}:${controller.resourceType.kind}${controller.name ? `:${controller.name}` : ""}`,
@@ -361,10 +349,6 @@ async function activate(
     printers: Object.freeze({
       describe: (resource: Readonly<Resource<unknown, unknown>>) => callHost<string>({ method: "printer.describe", resource }),
       summarize: (resource: Readonly<Resource<unknown, unknown>>) => callHost<string>({ method: "printer.summarize", resource }),
-      register<TSpec, TStatus>(printer: ResourcePrinter<TSpec, TStatus>) {
-        assertRegistering();
-        registrations.push(printerRegistration(printer as ResourcePrinter));
-      },
     }),
     hooks: Object.freeze({
       register(hook: Hook) {

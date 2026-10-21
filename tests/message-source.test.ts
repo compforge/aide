@@ -1,3 +1,6 @@
+import personalDefinitions from "../plugins/personal/definitions.ts";
+import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
+import { scopedResources } from "../src/host/plugin/resource/directory.ts";
 import { fixtureAddress } from "./address-fixture.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
@@ -39,7 +42,12 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
   const sessions = new SessionStore(root); const session = sessions.createSession({ id: MESSAGE_SESSION, cwd: root });
   const inputs = new InputStore(root);
   let store = new PluginResourceStore({ session, pluginInstanceId: "personal" });
-  let resources = createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, inputs }));
+  store.storage.register("personal", personalDefinitions);
+  const catalog = openPersonCatalog(root, person, pino({ level: "silent" }), () => {});
+  const client = (session: import("../src/host/store/store.ts").SessionHandle) => scopedResources(
+    createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, inputs })), session.id, "personal", undefined,
+    (type) => type.kind === "Person", catalog.client);
+  let resources = client(session);
   store.create({ type: MESSAGE_SOURCE_TYPE, name: "messages", spec, status: {} });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   let incoming: (query: MessageSearchQuery) => Promise<MessagePage> = async () => page([]);
@@ -65,7 +73,7 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
     async restart() {
       const reopened = sessions.openSession(session.id); t.after(() => reopened.closeLogs());
       store = new PluginResourceStore({ session: reopened, pluginInstanceId: "personal" });
-      resources = createResourceClient(store, undefined, undefined, new AideResourceProvider({ session: reopened, inputs }));
+      resources = client(reopened);
     },
     observe(at = now) { return observeMessages({ logger: sourceLogger, resources }, resource(), connectors, at); },
   };

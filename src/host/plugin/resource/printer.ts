@@ -1,63 +1,24 @@
-import type { Resource, ResourcePrinter } from "@compforge/aide-plugin";
-import { resourceTypeKey, validateResourceType } from "./type.ts";
+import type { Resource, ResourceDefinition, ResourceType } from "@compforge/aide-plugin";
 
 type PrintMethod = "describe" | "summarize";
-export type HostedResourcePrinter = Pick<ResourcePrinter, "resourceType"> & {
-  [Method in PrintMethod]: (resource: Readonly<Resource<unknown, unknown>>) => string | Promise<string>;
-};
 type PrintFailure = { pluginInstanceId: string; apiVersion: string; kind: string; name: string; method: PrintMethod };
 
 /**
- * @spec Core Printers are Host-owned by exact GVK; other Printers are scoped to Plugin Instance and withdrawn with the Binding.
- * @spec Missing printers use generic text; printer errors remain visible failures, never successful fallback output.
- * @case tests/resource-printer.test.ts
+ * @spec Printers belong to resource definitions and remain available without a running Controller or Runner.
+ * @spec Supplied snapshots are isolated; missing Printers use generic text, while callback failures propagate.
  * @link docs/plugin/README.md
  */
 export class ResourcePrinters {
-  private readonly entries = new Map<string, HostedResourcePrinter>();
-  private readonly builtins = new Map<string, HostedResourcePrinter>();
-  constructor(
-    private readonly onFailure: (detail: PrintFailure, error: unknown) => void,
-    builtins: readonly ResourcePrinter[] = [],
-  ) {
-    for (const printer of builtins) {
-      const key = resourceTypeKey(printer.resourceType);
-      if (this.builtins.has(key)) throw new Error(`Core Resource Printer already registered: ${key}`);
-      this.builtins.set(key, printer);
-    }
-  }
-
-  register(pluginInstanceId: string, printer: HostedResourcePrinter): () => void {
-    validateResourceType(printer.resourceType);
-    if (typeof printer.describe !== "function" || typeof printer.summarize !== "function") {
-      throw new Error("Resource Printer must provide describe and summarize");
-    }
-    if (this.builtins.has(resourceTypeKey(printer.resourceType))) throw new Error("Cannot replace a Core Resource Printer");
-    const key = this.key(pluginInstanceId, printer.resourceType);
-    if (this.entries.has(key)) throw new Error(`Resource Printer already registered: ${key}`);
-    this.entries.set(key, printer);
-    return () => { if (this.entries.get(key) === printer) this.entries.delete(key); };
-  }
-
-  describe(pluginInstanceId: string, resource: Readonly<Resource<unknown, unknown>>): Promise<string> {
-    return this.print(pluginInstanceId, resource, "describe");
-  }
-
-  summarize(pluginInstanceId: string, resource: Readonly<Resource<unknown, unknown>>): Promise<string> {
-    return this.print(pluginInstanceId, resource, "summarize");
-  }
-
-  private key(pluginInstanceId: string, type: ResourcePrinter["resourceType"]): string {
-    return JSON.stringify([pluginInstanceId, resourceTypeKey(type)]);
-  }
-
+  constructor(private readonly onFailure: (detail: PrintFailure, error: unknown) => void,
+    private readonly resolve: (owner: string, type: ResourceType) => ResourceDefinition | undefined) {}
+  describe(owner: string, resource: Readonly<Resource<unknown, unknown>>): Promise<string> { return this.print(owner, resource, "describe"); }
+  summarize(owner: string, resource: Readonly<Resource<unknown, unknown>>): Promise<string> { return this.print(owner, resource, "summarize"); }
   private async print(pluginInstanceId: string, resource: Readonly<Resource<unknown, unknown>>, method: PrintMethod): Promise<string> {
-    const printer = this.builtins.get(resourceTypeKey(resource)) ?? this.entries.get(this.key(pluginInstanceId, resource));
+    const printer = this.resolve(pluginInstanceId, resource)?.printer;
     if (!printer) return method === "describe" ? JSON.stringify(resource, null, 2) : `${resource.kind}/${resource.metadata.name}`;
     try {
-      // Keep in-process plugins from mutating the caller's snapshot, matching the IPC copy boundary.
-      const result = await printer[method](structuredClone(resource));
-      if (typeof result !== "string") throw new Error("Resource Printer result must be a string");
+      const result = printer[method](structuredClone(resource));
+      if (typeof result !== "string") throw new Error("Resource Printer must synchronously return a string");
       return result;
     } catch (error) {
       this.onFailure({ pluginInstanceId, apiVersion: resource.apiVersion, kind: resource.kind, name: resource.metadata.name, method }, error);

@@ -187,4 +187,4 @@ export type { ExecutionAssociation } from "./reconcile-context.ts";
 export { iconFor } from "./icon.ts";
 export { bindSourceInput } from "./source.ts";
 
-export type { ResourceLifecycle } from "./resource.ts";
+export type { ResourceDefinition, ResourceRetention, ResourceSchema, ResourceValidator, ResourceValidationContext } from "./resource.ts";

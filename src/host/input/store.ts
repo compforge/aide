@@ -1,20 +1,12 @@
-import { AddressSchema } from "../../address.ts";
+import { InputDefinition, InputSpecSchema } from "./definition.ts";
 import { createHash } from "node:crypto";
 import { ResourceStorage } from "../resource/storage.ts";
-import { parseResourceNamespace } from "../plugin/namespace.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { INPUT_TYPE, type InputSpec, type InputStatus, type Resource } from "@compforge/aide-plugin";
-const Spec = z.object({ source: AddressSchema.optional(), sessionId: z.string().min(1).max(200).optional(), origin: z.enum(["channel", "source"]),
-  originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
-  sender: z.object({ apiVersion: z.string(), kind: z.literal("Person"), sessionId: z.string().optional(), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict().optional(),
-  attention: z.enum(["immediate", "deferred"]).optional(),
-  originRef: z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform((value) => value === "aide-system" ? value : parseResourceNamespace(value)), name: z.string(), uid: z.string(), sessionId: z.string().optional() }).strict().optional(),
-  text: z.string().min(1).max(32_000), timezone: z.string().optional(), replyTo: z.string().optional(),
-  observation: z.record(z.string(), z.unknown()).optional() }).strict();
-const State = z.array(z.object({ id: z.string(), owner: z.string(), at: z.string(), revision: z.number(), spec: Spec,
+const State = z.array(z.object({ id: z.string(), owner: z.string(), at: z.string(), revision: z.number(), spec: InputSpecSchema,
   status: z.record(z.string(), z.unknown()) }));
 /** @spec Input facts are immutable and read on demand; shared ResourceStorage owns quotas and collection. */
 export class InputStore {
@@ -22,10 +14,7 @@ export class InputStore {
   private readonly listeners = new Set<(owner: string, input: Resource<InputSpec, InputStatus>) => void>();
   constructor(private readonly dir: string) {
     this.storage = ResourceStorage.open(dir);
-    this.storage.register("core", { resourceType: INPUT_TYPE,
-      releasedAt: (r) => ["done", "ignored"].includes((r.status as InputStatus).routing?.phase ?? "") ? r.metadata.creationTimestamp : undefined,
-      references: () => [],
-    });
+    this.storage.register("core", [InputDefinition]);
     this.storage.migrate(join(dir, "inputs.json"), function* () {
       const path = join(dir, "inputs.json");
       if (!existsSync(path)) return;
@@ -53,7 +42,7 @@ export class InputStore {
   }
   get(id: string): Resource<InputSpec, InputStatus> | undefined { return this.storage.read(`input:${id}`, true)?.object as Resource<InputSpec, InputStatus> | undefined; }
   submit(owner: string, id: string, raw: InputSpec): Resource<InputSpec, InputStatus> {
-    const spec = Spec.parse(raw);
+    const spec = InputSpecSchema.parse(raw);
     const key = `input:${id}`, existing = this.storage.read(key);
     if (existing) {
       if (existing.owner !== owner || !isDeepStrictEqual(existing.object.spec, spec)) throw new Error("Input identity already exists with different content or owner");

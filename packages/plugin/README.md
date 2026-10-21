@@ -8,12 +8,21 @@ See [plugin runtime](../../docs/plugin/README.md) for the process model and [Per
 
 ```ts
 import type { PluginPackage } from "@compforge/aide-plugin";
+import { z } from "zod";
 
 const EXAMPLE = { apiVersion: "example.aide.dev/v1alpha1", kind: "Example" } as const;
 
 const plugin: PluginPackage = {
   pluginId: "example/plugin",
   version: "0.1.0",
+  resources: [{
+    type: EXAMPLE,
+    scope: "session",
+    schema: {
+      spec: z.object({ title: z.string() }).strict(),
+      status: z.object({ phase: z.string().optional() }).strict(),
+    },
+  }],
   async activate(context) {
     context.controllers.register<{ title: string }, { phase?: string }>({
       resourceType: EXAMPLE,
@@ -112,7 +121,7 @@ Controllers use `execution.verbs.connectors({ timeoutMs })` for connector action
 
 `say({ text, inputIds?, respondToInputId?, target?, receivers?, idempotencyKey? })` persists an independent Output and returns `outputId`, without opening an Interaction or waiting for delivery. Input associations are optional and many-to-many; an omitted inputIds uses the execution inputId when present. A repeated idempotencyKey within the same Conversation incarnation and execution resolves to the same immutable Output. Use `execution.withContext({ conversationId, inputId, inputIds })` to select the context.
 
-`resources.commit(writes)` atomically creates/replaces/patches local plugin resources together with Core Output creation. All writes share one Session and storage transaction; validation, quota or version failures roll everything back. Notifications follow commit. Other Core mutations and external side effects cannot join this transaction. Output is readable through ResourceClient and has a Host Printer; only Host delivery updates its status. See [Output](../../docs/output.md).
+`resources.commit(writes)` atomically creates/replaces/patches local plugin resources together with Core Output creation. Plugin writes share one concrete resource scope (one Session or the plugin shared scope) and storage transaction; validation, quota or version failures roll everything back. Notifications follow commit. Other Core mutations and external side effects cannot join this transaction. Output is readable through ResourceClient and has a Host Printer; only Host delivery updates its status. See [Output](../../docs/output.md).
 
 `ask` and `confirm` collect a decision. `draft` lets the user edit proposed input; `harness` requests execution. Draft and Harness requests pass through a durable Interaction gate, which host policy may approve automatically. Only an approved or submitted action creates a HarnessInvocation.
 
@@ -139,27 +148,34 @@ Personal initializes `ConversationSpec.address` only when a Channel Input create
 
 ## Resource Printers
 
-[ResourcePrinter](src/resource.ts) supplies readable details and a concise summary for a resource type. Register it during activation, independently of its Controller:
+[ResourceDefinition](src/resource.ts) is the declaration entrypoint for type, scope, schema, optional validators, Printer and retention. Declare resources before activation. For an isolated Runner, the Host package entry supplies `resourcesUrl`, a pure module whose default export is the definition array; in-process plugins use `PluginPackage.resources`. The Host loads definitions before restoration and Controllers, independently of the Runner lifetime.
 
 ```ts
-context.printers.register<{ title: string }, { phase?: string }>({
-  resourceType: EXAMPLE,
-  describe(resource) {
-    return `${resource.metadata.name}: ${resource.spec.title}\nPhase: ${resource.status.phase ?? "pending"}`;
+import type { ResourceDefinition } from "@compforge/aide-plugin";
+
+const definition: ResourceDefinition<{ title: string }, { phase?: string }> = {
+  type: EXAMPLE,
+  scope: "session",
+  schema: {
+    spec: z.object({ title: z.string() }).strict(),
+    status: z.object({ phase: z.string().optional() }).strict(),
   },
-  summarize(resource) {
-    return resource.spec.title;
+  printer: {
+    describe: r => `${r.metadata.name}: ${r.spec.title}\nPhase: ${r.status.phase ?? "pending"}`,
+    summarize: r => r.spec.title,
   },
-});
+};
 ```
 
-Both methods synchronously return strings computed from the supplied snapshot. They must not mutate resources, read external systems, call models or perform writes. Resource instances remain serializable data; Printer functions are not stored in resource spec/status. Printer output is text, not trusted markup.
+Schema parsers synchronously validate and return canonical spec/status values. Optional create/update/delete validators run inside the storage transaction; their context lists current resources in the same scope, including preceding writes in a commit. Failures roll back writes and notifications. Unknown resource types reject. A `shared` resource belongs to the plugin instance across Sessions and has no sessionId; a `session` resource belongs to one execution Session. Controllers are optional and registered separately.
 
-Host callers use `manager.describeResource(pluginInstanceId, resource)` and `manager.summarizeResource(pluginInstanceId, resource)`, both returning `Promise<string>`. Runner callbacks execute through the existing IPC handler and watchdog; they receive the supplied snapshot without re-fetching it. In-process callbacks also receive a copy of the snapshot. No new execution, Reconcile or Harness invocation is created.
+Printer methods synchronously return strings from a supplied snapshot. Definition callbacks are trusted Host code: they must not perform I/O, call models, mutate resources or return Promises. Resource instances remain serializable data; functions are never stored in spec/status. Printer output is text, not trusted markup.
 
-Use `await context.printers.describe(resource)` or `await context.printers.summarize(resource)` wherever you need text for a supplied Resource. The caller does not select an implementation or fetch the resource again.
+Use `await context.printers.describe(resource)` / `summarize(resource)` wherever text is needed. Host callers use `manager.describeResource(pluginInstanceId, resource)` / `summarizeResource(...)`. Runner sends the snapshot over IPC; Host executes the Printer on a copy without re-fetching it or starting a Reconcile. Definitions remain available after Runner failure or shutdown.
 
-Core Printers resolve by exact `apiVersion` / `kind`; other Printers additionally use Plugin Instance. Each instance may register one Printer per type. Resource type ownership follows the same rules as Controllers: a plugin cannot claim a Core type or another plugin's type. Activation failure rolls registrations back; closing or losing the Runner withdraws them. Without a registered Printer, details use indented JSON and summaries use `kind/name`. A registered Printer's error is logged and propagated rather than replaced by fallback output.
+Core definitions resolve by exact apiVersion/kind; other definitions additionally use Plugin Instance. A plugin cannot claim a Core type or another plugin's type. Without a Printer, details use indented JSON and summaries use kind/name. A Printer error is logged and propagated rather than replaced with fallback output.
+
+Retention rules belong to the same definition. `releasedAt` returns eligibility time, or undefined to protect the resource; `references` returns exact resource UIDs. Host applies quotas and eviction ordering only to released, unreferenced resources. Missing declarations protect restored records; new writes require declarations.
 
 The Host supplies an Input Printer that preserves original text and optional evidence in descriptions and produces a whitespace-normalized preview of at most 120 Unicode code points. It remains available without an active plugin. Web input details and Chief current-input prompts use this description; Web keeps the full original message as its main content. Existing Board presentation remains a separate structured UI contract.
 

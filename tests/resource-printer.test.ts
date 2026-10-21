@@ -4,16 +4,16 @@ import { cpSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { INPUT_TYPE, type InputSpec, type PluginPackage, type Resource, type ResourcePrinter } from "@compforge/aide-plugin";
+import { INPUT_TYPE, type InputSpec, type PluginPackage, type Resource } from "@compforge/aide-plugin";
 import { Manager, type ManagerOptions } from "../src/host/plugin/manager.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-
 import { inputPrinter } from "../src/host/input/printer.ts";
 import { executeCommand } from "./fixtures/command-context.ts";
+import { definition } from "./fixtures/resource-definition.ts";
+import definitions, { TYPE } from "./fixtures/printer-definitions.ts";
 
-const TYPE = { apiVersion: "tests.aide.dev/v1alpha1", kind: "Printable" };
 const snapshot = (value = "hello"): Resource<{ value: string }, { phase: string }> => ({
   ...TYPE, metadata: { name: "sample", namespace: "v1", uid: "snapshot", resourceVersion: "2", generation: 1,
     creationTimestamp: "2026-10-21T00:00:00Z" }, spec: { value }, status: { phase: "ready" },
@@ -23,8 +23,7 @@ function fixture(t: TestContext, options: Partial<ManagerOptions> = {}) {
   const session = new SessionStore(root).createSession({ id: "printer-session", cwd: root });
   const instances = new PluginInstanceStore({ session });
   const errors: unknown[] = [];
-  const manager = new Manager({ session, instances,
-    onActivationError: ({ error }) => { errors.push(error); }, ...options });
+  const manager = new Manager({ session, instances, onActivationError: ({ error }) => errors.push(error), ...options });
   t.after(async () => { await manager.close(); await session.closeLogs(); rmSync(root, { force: true, recursive: true }); });
   return { root, session, instances, manager, errors,
     add(id = "first", pluginId = "tests/printer", config = {}) {
@@ -32,107 +31,71 @@ function fixture(t: TestContext, options: Partial<ManagerOptions> = {}) {
     },
   };
 }
-function runnerFixture(t: TestContext, timeoutMs = 3000) {
-  let entry = "";
-  const f = fixture(t, { pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: timeoutMs }),
-    async loadPackageEntry(pluginId, version) { return { pluginId, version, entryUrl: pathToFileURL(entry).href }; } });
-  entry = join(f.root, "printer-plugin.ts");
-  cpSync(join(import.meta.dir, "fixtures/printer-plugin.ts"), entry);
+function runnerFixture(t: TestContext) {
+  let root = "";
+  const f = fixture(t, { pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 3000 }),
+    async loadPackageEntry(pluginId, version) { return { pluginId, version,
+      entryUrl: pathToFileURL(join(root, "printer-plugin.ts")).href,
+      resourcesUrl: pathToFileURL(join(root, "printer-definitions.ts")).href }; },
+  });
+  root = f.root;
+  for (const file of ["printer-plugin.ts", "printer-definitions.ts"]) cpSync(join(import.meta.dir, "fixtures", file), join(root, file));
   return f;
 }
 
-/** @case Generic output needs neither a Controller nor a running Plugin. */
-test("Resources without a Printer use JSON details and kind/name summaries", async (t) => {
+test("Missing Printer uses generic text without a Controller or running Plugin", async (t) => {
   const { manager } = fixture(t);
-  const resource = snapshot();
-  assert.deepEqual(JSON.parse(await manager.describeResource("absent", resource)), resource);
-  assert.equal(await manager.summarizeResource("absent", resource), "Printable/sample");
+  assert.deepEqual(JSON.parse(await manager.describeResource("absent", snapshot())), snapshot());
+  assert.equal(await manager.summarizeResource("absent", snapshot()), "Printable/sample");
 });
 
-test("In-process Printers isolate snapshots, match exact GVK and withdraw when their Binding closes", async (t) => {
-  const printer: ResourcePrinter<{ value: string }, { phase: string }> = {
-    resourceType: TYPE,
-    describe(resource) { resource.spec.value = "private copy"; return `${resource.metadata.name}: ${resource.spec.value}`; },
-    summarize(resource) { return resource.spec.value; },
-  };
-  const plugin: PluginPackage = { pluginId: "tests/printer", version: "1.0.0",
-    async activate(context) { context.printers.register(printer); } };
+test("Definition Printers isolate snapshots, match exact GVK and survive activation failure and close", async (t) => {
+  const declared = { ...definition(TYPE), printer: {
+    describe(r: Resource) { r.spec.value = "private copy"; return String(r.spec.value); }, summarize(r: Resource) { return String(r.spec.value); },
+  } };
+  const plugin: PluginPackage = { pluginId: "tests/printer", version: "1.0.0", resources: [declared],
+    async activate() { throw new Error("activation failed"); } };
   const f = fixture(t, { packages: [plugin] }); f.add();
-  await f.manager.start(); assert.deepEqual(f.errors, []);
-  const resource = snapshot();
-  assert.equal(await f.manager.describeResource("first", resource), "sample: private copy");
-  assert.equal(resource.spec.value, "hello");
-  assert.equal(await f.manager.summarizeResource("first", resource), "hello");
-  const otherVersion = { ...resource, apiVersion: "tests.aide.dev/v2" };
-  assert.deepEqual(JSON.parse(await f.manager.describeResource("first", otherVersion)), otherVersion);
-  await f.manager.deactivateInstance("first");
-  assert.equal(await f.manager.summarizeResource("first", resource), "Printable/sample");
-  await f.manager.activateInstance("first");
-  assert.equal(await f.manager.summarizeResource("first", resource), "hello");
+  await assert.rejects(f.manager.activateInstance("first"), /activation failed/);
+  const supplied = snapshot();
+  assert.equal(await f.manager.describeResource("first", supplied), "private copy");
+  assert.equal(supplied.spec.value, "hello");
+  assert.equal(await f.manager.summarizeResource("first", supplied), "hello");
+  const other = { ...supplied, apiVersion: "tests.aide.dev/v2" };
+  assert.deepEqual(JSON.parse(await f.manager.describeResource("first", other)), other);
+  await f.manager.close();
+  assert.equal(await f.manager.summarizeResource("first", supplied), "hello");
 });
 
-test("Runner Printers receive the supplied snapshot, isolate Instances, and propagate logged errors", async (t) => {
-  const f = runnerFixture(t); f.add("first"); f.add("second");
-  await f.manager.start(); assert.deepEqual(f.errors, []);
-  const resource = await f.manager.resourceClient("first").create<{ value: string }, { phase: string }>(TYPE, {
-    name: "sample", spec: { value: "stored" }, status: { phase: "stored" },
-  });
-  const supplied = { ...resource, spec: { value: "snapshot" }, status: { phase: "supplied" } };
-  const first = JSON.parse(await f.manager.describeResource("first", supplied));
-  assert.notEqual(first.pid, process.pid);
-  assert.deepEqual({ ...first, pid: 0 }, { pid: 0, instance: "first", name: "sample", value: "snapshot", phase: "supplied" });
-  assert.equal(await f.manager.summarizeResource("second", supplied), "second: snapshot");
-  for (const value of ["throw", "invalid", "async"]) {
-    await assert.rejects(f.manager.describeResource("first", snapshot(value)), /Resource Printer describe failed/);
-  }
+test("Runner calls Host Definition Printer with supplied snapshots; errors are logged and never hidden", async (t) => {
+  const f = runnerFixture(t); f.add(); await f.manager.start(); assert.deepEqual(f.errors, []);
+  const persisted = await f.manager.resourceClient("first").create(TYPE, { name: "sample", spec: { value: "stored" }, status: { phase: "stored" } });
+  const supplied = { ...persisted, spec: { value: "snapshot" } };
+  const result = await executeCommand(f.manager, "print-resource", { argument: JSON.stringify(supplied) });
+  assert.equal(result?.kind, "message");
+  if (result?.kind !== "message") throw new Error("Expected printed text");
+  assert.deepEqual(JSON.parse(JSON.parse(result.text).description), { pid: process.pid, name: "sample", value: "snapshot", phase: "stored" });
+  for (const value of ["throw", "invalid", "async"]) await assert.rejects(f.manager.describeResource("first", snapshot(value)), /Resource Printer describe failed/);
   await f.session.flushLogs();
-  const logs = readFileSync(join(f.session.dir, "session.log"), "utf8");
-  assert.match(logs, /plugin.printer/);
-  assert.match(logs, /Printer could not describe this value/);
-  assert.equal(await f.manager.summarizeResource("first", supplied), "first: snapshot", "A callback error does not stop the Runner");
+  assert.match(readFileSync(join(f.session.dir, "session.log"), "utf8"), /Printer could not describe this value/);
   await f.manager.deactivateInstance("first");
-  assert.equal(await f.manager.summarizeResource("first", supplied), "Printable/sample");
-  assert.equal(await f.manager.summarizeResource("second", supplied), "second: snapshot");
+  assert.equal(await f.manager.summarizeResource("first", snapshot()), "summary: hello");
+  assert.equal((await f.manager.resourceClient("first").get<{ value: string }, unknown>({ ...TYPE, namespace: "v1", name: "sample" }))?.spec.value, "stored");
 });
 
-test("Duplicate Printer registration fails activation and rolls back host registrations", async (t) => {
-  const f = runnerFixture(t); f.add("broken", "tests/printer", { duplicate: true }); f.add("healthy");
-  await f.manager.start();
-  assert.equal(f.errors.length, 1); assert.match(String(f.errors[0]), /already registered/);
-  assert.equal(f.manager.isInstanceActive("broken"), false);
-  assert.equal(await f.manager.summarizeResource("broken", snapshot()), "Printable/sample");
-  assert.equal(await f.manager.summarizeResource("healthy", snapshot()), "healthy: hello");
-});
-
-test("Printer GVK ownership rejects Core and other plugins; failed activation releases its claim", async (t) => {
-  const plugin = (id: string, fail = false, resourceType = TYPE): PluginPackage => ({
-    pluginId: id, version: "1.0.0", async activate(context) {
-      context.printers.register({ resourceType, describe: () => id, summarize: () => id });
-      if (fail) throw new Error("activation stopped");
-    },
-  });
-  const f = fixture(t, { packages: [plugin("broken", true), plugin("owner"), plugin("intruder"),
-    plugin("core", false, { apiVersion: "aide.dev/v1alpha1", kind: "Input" })] });
-  f.add("broken", "broken"); f.add("owner", "owner"); f.add("intruder", "intruder"); f.add("core", "core");
-  // Explicit ordering makes ownership assertions independent of activation scheduling.
-  await assert.rejects(f.manager.activateInstance("broken"), /activation stopped/);
+test("Duplicate definitions fail before activation; ownership rejects Core and other plugins", async (t) => {
+  const printable = definitions[0]!;
+  const plugin = (id: string, resources = [printable]): PluginPackage => ({ pluginId: id, version: "1.0.0", resources, async activate() {} });
+  const f = fixture(t, { packages: [plugin("duplicate", [printable, printable]), plugin("owner"), plugin("intruder"), plugin("core", [definition(INPUT_TYPE)])] });
+  for (const id of ["duplicate", "owner", "intruder", "core"]) f.add(id, id);
+  await assert.rejects(f.manager.activateInstance("duplicate"), /already registered/);
   await f.manager.activateInstance("owner");
   await assert.rejects(f.manager.activateInstance("intruder"), /already registered by owner/);
   await assert.rejects(f.manager.activateInstance("core"), /already registered by Aide/);
-  assert.equal(await f.manager.summarizeResource("owner", snapshot()), "owner");
-  assert.equal(await f.manager.summarizeResource("broken", snapshot()), "Printable/sample");
+  assert.equal(await f.manager.summarizeResource("duplicate", snapshot()), "Printable/sample");
 });
 
-test("A blocked Printer is bounded by the Runner watchdog and its registrations are withdrawn", async (t) => {
-  const f = runnerFixture(t, 800); f.add();
-  await f.manager.start(); assert.deepEqual(f.errors, []);
-  await assert.rejects(f.manager.describeResource("first", snapshot("block")), /Resource Printer describe failed/);
-  await f.manager.deactivateInstance("first");
-  assert.equal(await f.manager.summarizeResource("first", snapshot()), "Printable/sample");
-});
-
-
-test("Core Input Printer works without a plugin and through Runner snapshot calls, and survives deactivation", async (t) => {
+test("Core Input Printer works without plugins and through Runner snapshot calls", async (t) => {
   const f = runnerFixture(t);
   const resource: Resource<InputSpec, {}> = { ...snapshot(), ...INPUT_TYPE,
     spec: { origin: "source", originId: "personal.lark", text: "原始 @ 消息", observation: { context: { messages: ["附近消息"] } } }, status: {} };
@@ -140,14 +103,8 @@ test("Core Input Printer works without a plugin and through Runner snapshot call
   assert.equal(await f.manager.describeResource("absent", resource), expected.description);
   f.add(); await f.manager.start(); assert.deepEqual(f.errors, []);
   const result = await executeCommand(f.manager, "print-resource", { argument: JSON.stringify(resource) });
-  assert.equal(result?.kind, "message");
   if (result?.kind !== "message") throw new Error("Expected printed text");
   assert.deepEqual(JSON.parse(result.text), expected);
-  const custom = await executeCommand(f.manager, "print-resource", { argument: JSON.stringify(snapshot()) });
-  assert.equal(custom?.kind, "message");
-  if (custom?.kind !== "message") throw new Error("Expected printed text");
-  assert.equal(JSON.parse(custom.text).summary, "first: hello");
   await f.manager.deactivateInstance("first");
   assert.equal(await f.manager.describeResource("first", resource), expected.description);
-  assert.equal(await f.manager.summarizeResource("first", resource), expected.summary);
 });

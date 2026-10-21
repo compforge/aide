@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
-import { IdentitySchema, PersonSchema, PERSON_TYPE, PERSON_SESSION, identityKey, isMe, type Me, type Person, type PersonIdentity, type PersonResource, type PersonStatus } from "./model.ts";
+import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, type Me, type Person, type PersonIdentity, type PersonResource, type PersonStatus } from "./model.ts";
 
 /**
  * @spec Every conversation resolves people in one catalog. Profiles contain no Input references.
@@ -10,11 +10,11 @@ import { IdentitySchema, PersonSchema, PERSON_TYPE, PERSON_SESSION, identityKey,
 export class Persons {
   constructor(private readonly resources: ResourceClient, readonly marks: Me) {}
   async list() {
-    return (await this.resources.list<Person, PersonStatus>(PERSON_TYPE, { sessionId: PERSON_SESSION }))
+    return (await this.resources.list<Person, PersonStatus>(PERSON_TYPE))
       .filter((p) => !p.metadata.deletionTimestamp).map((p) => ({ ...p, isMe: isMe(p.spec, this.marks) }));
   }
   async read(id: string) {
-    const person = await this.resources.get<Person, PersonStatus>({ ...PERSON_TYPE, sessionId: PERSON_SESSION, namespace: "v1", name: id });
+    const person = await this.resources.get<Person, PersonStatus>({ ...PERSON_TYPE, namespace: "v1", name: id });
     if (!person || person.metadata.deletionTimestamp) throw new Error(`Unknown Person: ${id}`);
     return { ...person, isMe: isMe(person.spec, this.marks) };
   }
@@ -25,7 +25,7 @@ export class Persons {
   }
   async initialize() {
     const current = await this.me();
-    if (!current) return this.resources.create(PERSON_TYPE, { sessionId: PERSON_SESSION, name: "me",
+    if (!current) return this.resources.create(PERSON_TYPE, { name: "me",
       spec: PersonSchema.parse({ name: "我", identities: this.marks.identities }), status: this.status("connector") });
     const identities = [...current.spec.identities];
     for (const identity of this.marks.identities) if (!identities.some((i) => identityKey(i) === identityKey(identity))) identities.push(identity);
@@ -44,7 +44,7 @@ export class Persons {
       return existing;
     }
     const id = createHash("sha256").update(identityKey(identity)).digest("hex").slice(0, 32);
-    try { return await this.resources.create(PERSON_TYPE, { sessionId: PERSON_SESSION, name: id,
+    try { return await this.resources.create(PERSON_TYPE, { name: id,
       spec: PersonSchema.parse({ name: name || identity.id, identities: [identity] }), status: this.status("connector") }); }
     catch (error) { if (!String(error).includes("already exists")) throw error; return this.read(id); }
   }
