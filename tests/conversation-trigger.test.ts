@@ -136,13 +136,14 @@ test("Restart coalesces due triggers, hides quiet results and does not replay in
   aide = new Aide(root, options, log);
   t.after(async () => { await aide.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   await aide.start(); await aide.settled();
-  assert.equal(calls, 1);
+  assert.equal(calls, 0);
+  assert.ok(aide.findConversation("quiet")!.conversations.resource("quiet")!.status.blocked);
   assert.equal(aide.findConversation("quiet")!.conversations.runs().find((r) => r.id === "timer:interrupted")!.status.phase, "failed");
   assert.ok(!conversationView(aide, "quiet").blocks.some((b) => b.content.includes("internal review")));
   assert.equal(aide.sessions().flatMap((s) => s.conversations.inputs()).length, 0);
   await aide.close(); aide = new Aide(root, options, log);
   await aide.start(); await aide.settled();
-  assert.equal(calls, 1);
+  assert.equal(calls, 0);
 });
 
 test("Future trigger requeues without another input; ordinary messages preserve its deadline", async (t) => {

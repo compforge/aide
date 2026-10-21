@@ -318,12 +318,12 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me" } },
-    plugins: { personal: { person, sources: { lark: {} } } } }));
+    plugins: { personal: { person, conversation: { batchSize: 1 }, sources: { lark: {} } } } }));
   let searches = 0;
   const prompts: string[] = [];
   const options = { ...fakeOptions({ chief: async (prompt) => {
     const activation = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
-    return activation.description.includes("Origin: source/") ? "source-private-reply" : "channel-reply";
+    return activation.inputs[0].description.includes("Origin: source/") ? "source-private-reply" : "channel-reply";
   }, async execute() { throw new Error("Unexpected work"); } }, root, prompts), config: loadConfig(configFile),
     connectors: { ...emptyConnectors, messages: {
       async identity() { return { accountId: "cli_app", userId: "ou_me" }; },

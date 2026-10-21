@@ -1,3 +1,4 @@
+import { ResourceStorage, resourceHome } from "../resource/storage.ts";
 import { inputPrinter } from "../input/printer.ts";
 import { ResourcePrinters } from "./resource/printer.ts";
 import { RunnerController } from "./runner/controller.ts";
@@ -283,6 +284,7 @@ function pluginName(pluginId: string): string {
 export class Manager {
   readonly inputs?: InputStore;
   private readonly resourceDirectory?: ResourceDirectory;
+  private readonly unsubscribeResourceGc: () => void;
   private readonly resourceChanged?: (change: ResourceClientChange) => void;
   /** Core installs its GVKs before any Plugin Binding can register. */
   private readonly resourceRegistry = new ResourceRegistry(AIDE_RESOURCE_TYPES);
@@ -434,8 +436,15 @@ export class Manager {
     });
     this.resourceDirectory = options.resourceDirectory;
     this.resourceChanged = options.onResourceChange;
+    this.unsubscribeResourceGc = ResourceStorage.open(resourceHome(this.instances.session.dir)).subscribe((scope, resource) => {
+      if (scope === "core") return;
+      const [sessionId, pluginInstanceId] = JSON.parse(scope) as [string, string];
+      if (sessionId !== this.instances.session.id) return;
+      const change: ResourceClientChange = { kind: "deleted", pluginInstanceId, resource };
+      this.handlePluginResourceChange(change); this.resourceChanged?.(change);
+    });
     if (options.session) {
-      this.inputs = options.inputs ?? new InputStore(options.session.dir);
+      this.inputs = options.inputs ?? new InputStore(resourceHome(options.session.dir));
       this.aideResources = new AideResourceIndex({
         session: options.session,
         inputs: this.inputs,
@@ -1352,6 +1361,7 @@ export class Manager {
     this.dueQueue.close();
     this.cronSourceQueue.close();
     this.unsubscribeAideResources?.();
+    this.unsubscribeResourceGc();
     this.aideResources?.close();
     this.verb.close();
     try {

@@ -13,10 +13,11 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 不因值为空而恢复默认。`null`、错误类型或不支持的字段报错，不通过默认值掩盖错误。
 数组整体取配置值，不与另一份文件中的数组拼接。错误指出字段路径和错误类别，不回显配置值。
 
-顶层 `defaultHarness` 是 Aide 的执行选择，模块配置分别位于以下三个命名空间：
+顶层 `defaultHarness` 是 Aide 的执行选择，模块配置分别位于以下命名空间：
 
 | 配置 | 所有者与用途 |
 |---|---|
+| `resources` | Host 的持久 Resource 容量、按 Group/Kind 的回收策略与去重窗口 |
 | `connectors` | Host 装配全局环境目录、需求、Forge 与 Lark 消息读取能力 |
 | `harnesses` | Host 装配 Agent 的模型选择和扩展能力；支持 `pi`、`chief`、`codex`、`claude`、`dsh` |
 | `plugins` | 各 Plugin 校验和使用自己的业务配置；持续观察策略位于 `plugins.<plugin>.sources` |
@@ -196,3 +197,52 @@ Connector 配置由 `connectors/config.ts` 组合，Environment 和 Meego 分别
 Personal 的 `config.ts` 组合各类 Source 策略，装配阶段解析后仅向所属 Runner 下发有效观察范围。
 配置输入允许缺省和引用；有效配置已补齐默认值、解析模型与路径，并在创建运行实例之前验证。
 Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。整体原则见 [Kernel](kernel.md#配置所有权与生命周期)。
+
+## Conversation 消费策略
+
+`plugins.personal.conversation` 控制 Input 的消费节奏和上下文窗口，独立于 Source 的采集频率：
+
+```yaml
+plugins:
+  personal:
+    conversation:
+      batchSize: 10
+      maxWaitSeconds: 60
+      maxPending: 100
+      recentInputs: 50
+      contextChars: 48000
+      summaryChars: 4000
+```
+
+- `immediate` Input 立即触发处理；Channel 默认 immediate，Source 默认 deferred。紧迫性不代表执行授权或必须外发消息。
+- deferred Input 满 `batchSize`，或最早待处理输入等待达到 `maxWaitSeconds`，即触发一轮。Conversation 自身 trigger 到期也触发，即使没有新 Input。
+- `maxPending` 限制每个会话未处理的输入数量，达到上限时追加失败、上游保留重试状态。失败的批次不会自动重放。
+- `recentInputs` 是消费后的近期窗口；达到窗口加一批或文本预算时先生成摘要，再释放被摘要覆盖的引用。待处理输入、未送达消息不因窗口淘汰。
+- `contextChars` 限制应用组装的输入/摘要材料，不是模型 token 窗口；单条大输入先给预览，Chief 可用 `read_input` 分页读取。`summaryChars` 限制持久摘要大小。
+
+## Resource 容量
+
+所有持久 Resource 共用 Host 存储，按 `API group/kind` 聚合不同版本、Session 与插件实例的用量。以下是默认值，字节限制计算序列化记录的 UTF-8 大小：
+
+```yaml
+resources:
+  maxBytes: 536870912
+  defaults:
+    maxCount: 10000
+    maxBytes: 134217728
+    maxResourceBytes: 1048576
+    order: released
+  kinds:
+    aide.dev/Input:
+      maxCount: 10000
+      order: created
+  lowWatermark: 0.8
+  dedupSeconds: 604800
+  maxReceipts: 100000
+```
+
+`kinds` 的字段覆盖 `defaults`。可选排序为 `released`、`created`、`lru`；LRU 由显式读取更新，列表扫描不刷新。排序只用于资源所有者允许释放且无人引用的记录；全局字节压力按释放时间回收。达到硬阈值时尝试回收到 lowWatermark；不足以满足硬阈值则回滚整个写入，返回容量错误。缩小已有记录仍可进行。
+
+去重回执独立限量并在窗口到期后清理。窗口内的重复 Input 只确认已接收，不重新创建或执行；窗口外不承诺永久去重。源水位与待提交引用共同保护 Source 的恢复过程。
+
+这些阈值约束持久 Resource 的逻辑载荷。SQLite 页、索引、WAL，以及 Session Ledger、日志、原生 Harness 历史和 Hermes 记忆有各自的存储生命周期；它们不计入此处的 Resource 字节数。

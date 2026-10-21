@@ -433,6 +433,7 @@ export interface HarnessInvocationRecorded extends ExecutionAssociation {
   /** Existing Lane used as the execution Lane or as the parent of a new Lane. */
   laneId: string;
   newLane: boolean;
+  freshContext?: boolean;
   harnessTargetId: string;
 }
 

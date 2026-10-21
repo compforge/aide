@@ -21,6 +21,8 @@ export interface HarnessSessionMeta {
   contextEpochId?: string;
   /** 该 ContextEpoch 已同步到的 AideSession 事件序号（Receipt 的缓存，不是真相源）。 */
   syncedSeq?: number;
+  /** Persisted cutoff for a deliberate bounded context replacement. */
+  contextAfterSeq?: number;
   parentSessionId?: string;
 }
 

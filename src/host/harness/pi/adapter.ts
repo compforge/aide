@@ -17,7 +17,7 @@ interface Turn {
 }
 interface Session {
   native: PiSession; sink: HarnessEventSink; unsubscribe: () => void; active?: Turn;
-  binding: HarnessSessionBindingSink; materialized: boolean;
+  binding: HarnessSessionBindingSink; materialized: boolean; contextFailure?: string;
 }
 
 /**
@@ -71,6 +71,7 @@ export class PiAdapter implements HarnessAdapter {
 
   async sendTurn(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
     const session = this.require(ref);
+    if (session.contextFailure) throw new Error(session.contextFailure);
     if (session.active) return { accepted: false, effective: "rejected", reason: "Pi session is busy; queue a follow-up" };
     const blocks = [...(input.syncBlocks ?? []), ...input.blocks];
     const unsupported = unsupportedPromptBlocks(blocks, this.capabilities);
@@ -121,6 +122,10 @@ export class PiAdapter implements HarnessAdapter {
   private observe(session: Session, event: AgentSessionEvent): void {
     this.options.nativeEvent?.({ direction: "in", name: event.type, payload: event });
     if (!session.materialized && session.native.sessionFile && existsSync(session.native.sessionFile)) this.publishBinding(session);
+    if (event.type === "compaction_end" && event.errorMessage) {
+      session.contextFailure = `Pi compaction failed: ${event.errorMessage}`;
+      void session.native.abort().catch(() => {});
+    }
     const turn = session.active;
     if (!turn) return;
     if (event.type === "message_start" && event.message.role === "assistant") {
@@ -154,7 +159,8 @@ export class PiAdapter implements HarnessAdapter {
       session.sink({ kind: "tool_call_update", turnId: turn.id, payload: { toolCallId: event.toolCallId,
         title: event.toolName, status: event.isError ? "failed" : "completed", rawOutput: event.result } });
     } else if (event.type === "agent_settled") {
-      if (turn.cancelled || event.aborted || turn.lastMessage?.stop === "aborted") turn.settled = { reason: "cancelled" };
+      if (session.contextFailure) turn.settled = { reason: "error", error: session.contextFailure };
+      else if (turn.cancelled || event.aborted || turn.lastMessage?.stop === "aborted") turn.settled = { reason: "cancelled" };
       else if (turn.lastMessage?.stop === "stop" && turn.lastMessage.text.trim()) turn.settled = { reason: "end_turn" };
       else turn.settled = { reason: "error", error: turn.lastMessage?.error ?? `Pi settled without a complete answer (${turn.lastMessage?.stop ?? "no assistant message"})` };
     }

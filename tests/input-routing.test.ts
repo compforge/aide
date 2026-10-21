@@ -52,7 +52,7 @@ test("Default receives every Input and deterministic matches append once without
   await aide.settled(); assert.equal(calls.length, before + 2);
   assert.equal(source.conversations.inputStore.get("ignored")!.status.routing!.phase, "ignored");
   assert.equal(aide.conversationIds().length, 3);
-  assert.equal(JSON.parse(readFileSync(join(root, "inputs.json"), "utf8")).filter((i: { id: string }) => i.id === "shared").length, 1);
+  assert.equal(source.conversations.inputStore.list().filter((i) => i.metadata.name === "shared").length, 1);
 });
 
 test("The first unscoped Source Input creates a replyable Conversation without semantic routing, and survives restart", async (t) => {
@@ -82,7 +82,7 @@ test("The first unscoped Source Input creates a replyable Conversation without s
   await aide.receive({ channelId: "web", id: "reply", sessionId: scope.id, text: "请帮我整理需要确认的问题" });
   await aide.settled();
   assert.equal(handled.length, 2); assert.equal(routes, 0);
-  assert.match(handled[1]!, /Recent conversation:.*已接收观察/);
+  assert.doesNotMatch(handled[1]!, /Recent conversation:/, "Warm context receives only new inputs");
   assert.ok(handled[1]!.includes(`"conversationId":"${id}"`));
   assert.equal(scope.conversations.get(id)!.inputIds.length, 2);
   await aide.close(); aide = new Aide(root, options, log);

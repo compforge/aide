@@ -52,7 +52,7 @@ export class LarkChannel {
   private retryAt = 0;
   private readonly cardRetry = new Map<string, number>();
 
-  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "messages">,
+  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "messages" | "messageDelivered">,
     private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
     this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
@@ -195,6 +195,7 @@ export class LarkChannel {
         this.save({ ...this.state, delivered: [...this.state.delivered, id] });
         this.log.info({ messageId: message.id, part: index, conversationId: message.conversationId }, "Lark message delivered");
       }
+      await this.aide.messageDelivered?.(message.conversationId, message.id);
     }
   }
 
@@ -255,6 +256,7 @@ export class LarkChannel {
       if (!view.overflow) {
         const receipts = view.messageIds.map((id) => this.deliveryId(id, 0));
         this.save({ ...this.state, delivered: [...new Set([...this.state.delivered, ...receipts])] });
+        for (const id of view.messageIds) await this.aide.messageDelivered?.(this.prefix + chatId, id);
       }
       this.log.info({ inputId: view.id, phase: view.phase }, "Lark progress card settled");
     }

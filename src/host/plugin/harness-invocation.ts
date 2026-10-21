@@ -29,6 +29,7 @@ export interface HarnessInvocationSnapshot extends ExecutionAssociation {
   readonly verb: "draft" | "harness";
   readonly phase: HarnessInvocationPhase;
   readonly newLane: boolean;
+  readonly freshContext?: boolean;
   readonly harnessTargetId: string;
   readonly laneId?: string;
   readonly turnId?: string;
@@ -46,6 +47,7 @@ export interface ReconcileHarnessInvocation {
     readonly blocks?: readonly PromptBlock[];
     readonly laneId: string;
     readonly newLane: boolean;
+  readonly freshContext?: boolean;
     readonly harnessTargetId: string;
   };
 }
@@ -61,6 +63,7 @@ export interface ScheduledHarnessInvocation {
   readonly harnessTargetId: string;
   readonly laneId: string;
   readonly newLane: boolean;
+  readonly freshContext?: boolean;
   readonly parentLaneId?: string;
   readonly source: "user" | "plugin";
   readonly messageId: string;
@@ -124,6 +127,7 @@ function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
     verb: recorded.verb,
     phase: phaseOf(state),
     newLane: recorded.newLane,
+    freshContext: recorded.freshContext,
     harnessTargetId: recorded.harnessTargetId,
     ...(state.scheduled === undefined
       ? {}
@@ -169,6 +173,7 @@ function scheduledOf(
     harnessTargetId: scheduled.harnessTargetId,
     laneId: scheduled.laneId,
     newLane: recorded.newLane,
+    freshContext: recorded.freshContext,
     ...(recorded.newLane ? { parentLaneId: recorded.laneId } : {}),
     source: recorded.verb === "draft" ? "user" : "plugin",
     messageId: scheduled.messageId,
@@ -232,6 +237,7 @@ export class HarnessInvocationStore {
           : { blocks: invocation.blocks.map((block) => ({ ...block })) }),
         laneId: invocation.laneId,
         newLane: invocation.newLane,
+        freshContext: invocation.freshContext,
         harnessTargetId: invocation.harnessTargetId,
       },
     });

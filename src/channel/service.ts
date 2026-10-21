@@ -18,6 +18,7 @@ export interface ChannelService {
   receive(input: Incoming): Promise<InputReceipt>;
   inputDefinition(origin: Pick<InputSpec, "origin" | "originId">): { id: string; label: string; icon: string };
   messages(): Message[];
+  messageDelivered?(conversationId: string, messageId: string): Promise<void>;
   questions(): { conversationId: string; request: InputRequest }[];
   invocations(): readonly HarnessInvocationSnapshot[];
   conversationIds(): string[];

@@ -29,11 +29,12 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
   }
   function receivedInput(block) {
     const source = block.origin === 'source';
-    const node = element('article', undefined, 'message received-input ' + (source ? 'source' : 'user'));
+    const summary = block.type === 'summary';
+    const node = element('article', undefined, 'message received-input ' + (source || summary ? 'source' : 'user'));
     if (block.inputId) node.dataset.inputId = block.inputId;
     const header = element('div', undefined, 'input-heading');
-    header.append(identityBadge(block.icon, (source ? 'Source' : 'Channel') + (block.label ? ' · ' + block.label : '') + (source ? '' : ' · 你')));
-    header.append(element('time', new Date(block.at).toLocaleString(), 'input-time'));
+    header.append(identityBadge(block.icon, summary ? block.label : (source ? 'Source' : 'Channel') + (block.label ? ' · ' + block.label : '') + (source ? '' : ' · 你')));
+    if (!summary) header.append(element('time', new Date(block.at).toLocaleString(), 'input-time'));
     if (source) header.append(element('span', ({ queued: '待处理', running: '处理中', waiting: '等待答复', done: '已处理', quiet: '已查看 · 保持安静', failed: '处理失败' })[block.status] || block.status, 'input-status'));
     const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, block.content);
     node.append(header, body);
@@ -267,7 +268,7 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
     const rendered = new Set();
     const roots = history.filter((block) => !block.parent_id);
     for (const block of roots) {
-      if (block.type === 'input') {
+      if (block.type === 'input' || block.type === 'summary') {
         $('history').append(receivedInput(block)); continue;
       }
       const groupId = block.group_id || block.id;
@@ -277,11 +278,10 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
       const executions = new Set(group.filter((item) => item.type === 'execution').map((item) => item.id));
       const children = history.filter((item) => executions.has(item.parent_id));
       const answers = group.filter((item) => item.type === 'message' && item.role === 'aide').map((item) => item.content);
-      const lastText = children.filter((item) => item.type === 'text').at(-1);
       const questions = group.filter((item) => item.type === 'question');
       const pending = questions.filter((item) => item.status === 'pending');
-      const answer = pending.map((item) => item.content).join('\n\n') || answers.join('\n\n') || lastText?.content || '';
-      const process = children.filter((item) => item.type !== 'text' || (answers.length ? item.phase !== 'final' && !answers.includes(item.content) : item !== lastText))
+      const answer = pending.map((item) => item.content).join('\n\n') || answers.join('\n\n') || '';
+      const process = children.filter((item) => item.type !== 'text' || !answers.includes(item.content))
         .concat(questions.filter((item) => item.status !== 'pending'));
       const failed = group.some((item) => item.status === 'failed' || item.status === 'interrupted');
       const phase = pending.length ? 'waiting' : failed ? 'failed' : 'done';
@@ -343,12 +343,11 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
       : last?.kind === 'tool' && last.status === 'in_progress' ? '正在调用工具'
       : last?.kind === 'thought' ? '正在思考' : last?.kind === 'text' ? '正在回复' : '正在处理';
     replyHeading(area.querySelector('.reply-envelope'), 'Aide · ' + label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : ''), activity.harnesses);
-    const lastText = activity.blocks.filter((block) => block.kind === 'text').at(-1);
     const pending = activity.questions.filter((block) => block.status === 'pending');
-    const answer = pending.map((block) => block.content).join('\n\n') || activity.answers.join('\n\n') || lastText?.text || '';
+    const answer = pending.map((block) => block.content).join('\n\n') || activity.answers.join('\n\n') || '';
     updateAnswer($('activity-answer').parentElement, activity.phase, answer);
     const process = activity.blocks.filter((block) => block.kind !== 'text' ||
-      (activity.answers.length ? block.phase !== 'final' && !activity.answers.includes(block.text) : block !== lastText))
+      !activity.answers.includes(block.text))
       .concat(activity.questions.filter((block) => block.status !== 'pending').map((block) => ({ ...block, kind: block.type, text: block.content })));
     updateProcess($('activity-thought'), activity.phase, process.map((block) => ({ type: block.kind, content: block.text, status: block.status })));
     const ids = new Set(process.map((block) => block.id));

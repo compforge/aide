@@ -44,7 +44,7 @@ test("Requirement Source commits the inbox before its watermark and never create
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const sessions = new SessionStore(root); const session = sessions.createSession({ cwd: root });
   const store = new PluginResourceStore({ session, pluginInstanceId: "personal" });
-  const conversations = new InputStore(session.dir);
+  const conversations = new InputStore(root);
   const resources = createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, inputs: conversations }));
   const watch: Watch = { sessionId: "source:mine", id: "mine", source: "work", intervalMs: 300_000, repositories: [], userKeys: ["me"] };
   const resource = store.create({ type: SOURCE_TYPE, name: "mine", spec: watch, status: {} });
@@ -56,14 +56,14 @@ test("Requirement Source commits the inbox before its watermark and never create
     return [{ source: "work", category: "story", id: "1", title: "Build", state: "open", updatedAt }];
   }, async get() { throw new Error("Source should fetch summaries only"); } }], []);
   const logger = { debug() {}, info() {}, warn() {}, error() {} };
-  await assert.rejects(observeRequirements({ logger, resources: { ...resources, async patchStatus() { throw new Error("Interrupted after emission"); } } }, resource, connectors), /Interrupted/);
+  await assert.rejects(observeRequirements({ logger, resources: { ...resources, async patchStatus(current, patch) { if ("seen" in patch) throw new Error("Interrupted after emission"); return resources.patchStatus(current, patch); } } }, resource, connectors), /Interrupted/);
   assert.equal(conversations.list().length, 1);
-  assert.deepEqual(store.get(SOURCE_TYPE, "mine").status, {});
-  await observeRequirements({ logger, resources }, resource, connectors);
+  assert.equal((store.get(SOURCE_TYPE, "mine").status.pendingInputIds as string[]).length, 1);
+  await observeRequirements({ logger, resources }, store.get(SOURCE_TYPE, "mine") as typeof resource, connectors);
   assert.equal(conversations.list().length, 1);
   // Reopen persisted state, as a restarted worker would.
   const reopened = new PluginResourceStore({ session: sessions.openSession(session.id), pluginInstanceId: "personal" });
-  const restoredConversations = new InputStore(session.dir);
+  const restoredConversations = new InputStore(root);
   const context = { logger, resources: createResourceClient(reopened, undefined, undefined, new AideResourceProvider({ session, inputs: restoredConversations })) };
   await observeRequirements(context, reopened.get(SOURCE_TYPE, "mine"), connectors);
   assert.equal(restoredConversations.list().length, 1);

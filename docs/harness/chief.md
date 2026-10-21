@@ -31,7 +31,7 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 
 - **推进已有委托。** 在用户交付的目标和约定内继续处理，保持关联工作的身份与进度；发现条件变化时重新核对下一步。
 - **提出新机会。** 说明发现了什么、与用户有什么关系以及建议下一步做什么。记忆中的偏好和兴趣帮助判断相关性，不自动成为新的执行委托。
-- **告知进展。** 有值得知道的结果、变化或阻塞时使用普通回复，由 Controller 经 say 投递。相关的低紧迫性信息可以合并说明。
+- **告知进展。** 有值得知道的结果、变化或阻塞时使用普通回复，显式调用 say 工具，由 Controller 经 say verb 投递。相关的低紧迫性信息可以合并说明。
 - **请求决定。** 缺少必要信息时 ask，明确动作需要用户决定时 confirm；带上已查明的事实、选择与影响，让用户能够直接作出决定。
 - **保持安静。** 没有新的依据或可推进事项时静默结束。不重复发送同一进展，也不反复提出尚无新依据或用户回应的建议。
 
@@ -44,6 +44,8 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 
 - Work 工具读取、创建、更新与删除绑定会话的 Task / Routine，具体契约见 [Personal](../plugin/personal.md)。
+- say 保存用户通知意图；模型 finalText 是内部处理总结。
+- read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。
 - ask / confirm 提出问题意图，Controller 在模型 Turn 结束后通过 Core Interaction 等待答复。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
 - dismiss_observation 保存忽略原因，让不值得通知的 Source 观察静默结束。
@@ -85,9 +87,9 @@ Chief 可以主动使用已有的 `read`、`edit`、`write` 工具维护文件�
 PERSON.md 是 Chief 的个人认知主文件，Hermes 继续提供通用记忆和会话检索。
 Hermes 自身仍有 USER.md 及后台整理机制；二者不做自动同步，历史记忆不能覆盖 PERSON.md 中用户明确更正的认识。
 
-连续输入复用 Conversation 对应的固定 Lane 和原生 Pi 会话；Pi 负责原生历史与压缩，Controller 仍补充当前输入、近期消息与工作回复。长期记忆独立于原生会话，由 Hermes 的工具和生命周期钩子维护，重建原生会话不会清空记忆。Task / Routine 仍是工作状态的权威来源。
+连续批次复用固定 Lane 和原生 Pi 会话；正常续轮仅补充新批次，避免反复注入近期历史。Conversation 定期保存有限历史的摘要，再重建原生上下文；新上下文只包含摘要、近期材料和本批输入，持久历史边界防止 catch-up 恢复已遗忘内容。摘要调用关闭业务工具与记忆扩展，不能产生外部动作。长期记忆独立于原生会话，由 Hermes 的工具和生命周期钩子维护，重建原生会话不会清空记忆。Task / Routine 仍是工作状态的权威来源。
 
-Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Aide 不另建摘要任务，也不通过 Personal 直接调用模型做记忆维护。
+Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Conversation 摘要用于控制话题窗口，与 Hermes 的长期记忆维护分别管理；Personal 不直接调用模型做记忆维护。
 
 ### 记忆如何参与判断
 

@@ -74,6 +74,15 @@ export interface ResourcePrinter<TSpec = unknown, TStatus = unknown> {
   summarize(resource: Readonly<Resource<TSpec, TStatus>>): string;
 }
 
+/** Pure resource-owner rules used by Host storage; absence of a release time protects the record.
+ * References are exact Resource UIDs, including references to not-yet-created durable inputs.
+ */
+export interface ResourceLifecycle {
+  readonly resourceType: ResourceType;
+  releasedAt(resource: Readonly<Resource<unknown, unknown>>): string | undefined;
+  references(resource: Readonly<Resource<unknown, unknown>>): readonly string[];
+}
+
 /** Exact-match label selector. All entries must match the Resource. */
 export interface ResourceListOptions {
   /** Explicit Session selection; "*" lists active host Sessions. Omitted means current Session. */

@@ -4,6 +4,7 @@
 // HarnessSession 元数据只用于优先恢复 harness 私有状态，缺失时仍可从 AideSession 重建上下文。
 
 import { createHash } from "node:crypto";
+import { ResourceStorage } from "../resource/storage.ts";
 import { assertSessionId } from "./session-id.ts";
 import { turnUserText } from "./message-relations.ts";
 import {
@@ -744,6 +745,7 @@ export class SessionStore {
         }
         if (latestActivity >= cutoff) continue;
 
+        if (existsSync(join(this.rootDir, "resources.sqlite"))) ResourceStorage.open(this.rootDir).removeSession(candidate.aideSessionId);
         rmSync(dir, { recursive: true });
         ownsLock = false;
         result.removed.push(normalizeSessionMeta(persisted));

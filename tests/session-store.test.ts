@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionStore } from "../src/host/store/store.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { preparePluginDataDirectories } from "../src/host/plugin/data.ts";
 
 test("Sessions from different execution directories share one home and reopen or fork by id", async (t) => {
@@ -68,6 +69,11 @@ test("Session liveness and cleanup use the flat directory after cwd changes", as
     await active.closeLogs(); await idle.closeLogs();
     rmSync(root, { recursive: true, force: true });
   });
+  const type = { apiVersion: "tests.dev/v1", kind: "Record" };
+  const activeResources = new PluginResourceStore({ session: active, pluginInstanceId: "test" });
+  const idleResources = new PluginResourceStore({ session: idle, pluginInstanceId: "test" });
+  activeResources.create({ type, name: "active", spec: {} });
+  idleResources.create({ type, name: "idle", spec: {} });
   active.updateMeta({ cwd: join(root, "code-c"), updatedAt: "2000-01-01T00:00:00.000Z" });
   idle.updateMeta({ updatedAt: "2000-01-01T00:00:00.000Z" });
   assert.equal(active.acquireLock(), true);
@@ -77,6 +83,8 @@ test("Session liveness and cleanup use the flat directory after cwd changes", as
   assert.deepEqual(result.skippedActive.map((s) => s.aideSessionId), [active.id]);
   assert.deepEqual(result.failures, []);
   assert.equal(existsSync(idle.dir), false);
+  assert.equal(idleResources.list(type).length, 0);
+  assert.equal(activeResources.list(type).length, 1);
   active.releaseLock();
   assert.equal(store.isSessionActive(active.meta), false);
   const reopened = store.openSession(active.id);

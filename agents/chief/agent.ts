@@ -11,7 +11,8 @@ export interface ChiefAgentOptions extends Omit<PiAgentOptions, "scope" | "syste
   beforeWorkMutation?: () => void;
 }
 
-const systemPrompt = `You are Chief, Aide's personal assistant. Converse naturally and answer simple questions directly.
+const systemPrompt = `You are Chief, Aide's personal assistant. Converse naturally and handle simple questions without creating work.
+When the say tool is available, use it for user-visible replies; final text is an internal processing summary.
 Use list_environments and read_environment to resolve configured deployment targets before reasoning about them.
 Environment declarations identify targets and access coordinates; they do not prove connectivity, health, or permission to act.
 Resolve aliases to the returned canonical name. If a target is absent, ask for clarification instead of choosing a default.

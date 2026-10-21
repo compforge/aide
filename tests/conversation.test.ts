@@ -24,7 +24,7 @@ test("Independent Input facts and Personal consumption survive reopening with ve
   assert.equal(store.inputStore.submit(store.sessionId, "m1", first.spec).metadata.uid, first.metadata.uid);
   await seedInput(store, "s1", { conversationId: "watch-a", origin: "source", originId: "personal.environments", text: "requirement changed", observation: { id: "req-1" } });
   assert.deepEqual(store.get("watch-a")!.messages, []);
-  assert.equal(JSON.parse(readFileSync(join(dir, "inputs.json"), "utf8")).length, 2);
+  assert.equal(store.inputStore.list().length, 2);
   const claimed = await store.update(first, { phase: "running" });
   await assert.rejects(store.update(first, { phase: "done" }), /version conflict/);
   const reply = { id: "reply", conversationId: "group-a", at: new Date().toISOString(), role: "aide" as const, text: "answer", workId: null };
@@ -45,7 +45,7 @@ test("Chief serializes inputs within a conversation while another conversation c
   const calls: Array<{ conversationId: string; text: string; prompt: string }> = [];
   const aide = new Aide(root, fakeOptions({ async chief(prompt) {
     const spec = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
-    spec.text = spec.description.split("\n\nText:\n")[1];
+    spec.text = spec.inputs[0].description.split("\n\nText:\n")[1];
     calls.push({ ...spec, prompt });
     if (spec.text === "a-first") await gate;
     return `answer:${spec.text}`;

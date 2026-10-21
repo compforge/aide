@@ -377,6 +377,7 @@ export class CoreSession implements CoreHookGateway {
           harnessTargetId: request.harnessTargetId,
           laneId: request.laneId,
           newLane: request.newLane,
+          freshContext: request.freshContext,
           ...(request.parentLaneId === undefined
             ? {}
             : { parentLaneId: request.parentLaneId }),

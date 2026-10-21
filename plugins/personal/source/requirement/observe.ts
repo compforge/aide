@@ -6,7 +6,7 @@ import { type Watch } from "./config.ts";
 import { INPUT_TYPE, digest } from "../../chief-model.ts";
 
 export const SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "RequirementSource" } as const;
-interface SourceStatus { seen?: Record<string, string>; lastObservedAt?: string; error?: string | null }
+interface SourceStatus { pendingInputIds?: string[]; seen?: Record<string, string>; lastObservedAt?: string; error?: string | null }
 
 /** Polls are scheduled by the runtime. Persist the inbox before advancing its discovery watermark. */
 export async function observeRequirements(context: Pick<PluginContext, "resources" | "logger">, resource: Resource<Watch, SourceStatus>, connectors: ConnectorClient): Promise<void> {
@@ -21,6 +21,7 @@ export async function observeRequirements(context: Pick<PluginContext, "resource
     if (requirement.state === "completed" || requirement.state === "closed") { seen[identity] = fingerprint; continue; }
     const name = digest([resource.metadata.uid, identity, fingerprint]);
     if (!await context.resources.get({ ...INPUT_TYPE, namespace: "aide-system", name })) {
+      resource = await context.resources.patchStatus(resource, { pendingInputIds: [...resource.status.pendingInputIds ?? [], name] });
       await submit(name, {
         sessionId: resource.spec.sessionId,
         relation: "observed",
@@ -31,7 +32,7 @@ export async function observeRequirements(context: Pick<PluginContext, "resource
     }
     seen[identity] = fingerprint;
   }
-  await context.resources.patchStatus(resource, { seen, lastObservedAt: new Date().toISOString(), error: null });
+  await context.resources.patchStatus(resource, { seen, pendingInputIds: [], lastObservedAt: new Date().toISOString(), error: null });
   context.logger.info("Requirement discovery completed", { attributes: { watchId: resource.spec.id, observed: summaries.length, discovered } });
 }
 
@@ -57,3 +58,8 @@ export function registerSources(context: PluginContext): void {
     },
   });
 }
+
+export const requirementLifecycle: import("@compforge/aide-plugin").ResourceLifecycle = {
+  resourceType: SOURCE_TYPE, releasedAt: () => undefined,
+  references: (resource) => (resource.status as SourceStatus).pendingInputIds?.map((id) => `input:${id}`) ?? [],
+};

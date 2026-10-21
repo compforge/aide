@@ -87,7 +87,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: { environments: {
     dev: { kind: "kubernetes", kubeconfig: "unused", namespace: "app", aliases: ["开发"] },
-  } }, plugins: { personal: { sources: { environments: { targets: [{ environment: "dev", namespaces: ["app", "other"] }] } } } } }));
+  } }, plugins: { personal: { conversation: { batchSize: 1 }, sources: { environments: { targets: [{ environment: "dev", namespaces: ["app", "other"] }] } } } } }));
   let current = snapshot("A"); let reads = 0;
   const prompts: string[] = [];
   const config = loadConfig(configFile);

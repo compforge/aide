@@ -12,6 +12,8 @@ export interface InputSpec {
    * @link docs/kernel.md
    */
   sessionId?: string;
+  /** Scheduling urgency, independent of authority or notification intent. */
+  attention?: "immediate" | "deferred";
   origin: "channel" | "source";
   /** ChannelDefinition or SourceDefinition ID, selected by origin. */
   originId: string;
@@ -30,6 +32,8 @@ export interface InputSpec {
 }
 /** Routing state belongs to the consuming plugin; the Core persists it without interpreting destinations. */
 export interface InputStatus {
+  /** Attached Conversation incarnation IDs; retained after a recent-history window forgets the Input. */
+  deliveries?: string[];
   routing?: {
     phase: "running" | "done" | "ignored";
     /** Preserve the first-Conversation shortcut across a partial creation and restart. */
