@@ -25,7 +25,7 @@ Input.relation 描述输入相对于 Me 的关系：
 
 Web 输入为 sent。别人私信机器人或仅 @ 机器人不能据此认定为我收到；Lark Source 对各条消息分别分类，混合讨论仅在本人的观察范围内归为 observed。环境与需求监控属于配置的观察范围。关系随 Input 持久保存，不因后续身份编辑而改写历史。
 
-profile 保存理解本身与必要背景、日期，区分明确表达和推断，不引用 Input ID。Chief 的 profile_person 工具更新 understanding；用户在 Web Persons 编辑资料、身份、当前认识和 corrections。明确修正独立保存，Chief 无法通过工具修改该字段；推断不得覆盖修正。并发更新必须重读后合并，不能盲目覆盖。
+profile 保存理解本身与必要背景、日期，区分明确表达和推断，不引用 Input ID。Chief 的 profile_person 工具更新 understanding；用户在 Web Persons 编辑资料、身份与当前认识。明确修正独立保存，Chief 无法通过工具修改该字段；推断不得覆盖修正。并发更新必须重读后合并，不能盲目覆盖。
 
 人物工具沿用 Work 的接入方式：模型工具调用 Personal 服务，再经 ResourceClient 更新 CRD，无需新增 Core verb 或人物输入队列。读取、补充、合并、纠错在正常 Chief 轮次内发生，Conversation 摘要仍只维护话题窗口。详见 [Chief](../harness/chief.md#人物认知)。
 
