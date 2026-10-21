@@ -45,6 +45,7 @@ test("Chief serializes inputs within a conversation while another conversation c
   const calls: Array<{ conversationId: string; text: string; prompt: string }> = [];
   const aide = new Aide(root, fakeOptions({ async chief(prompt) {
     const spec = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
+    spec.text = spec.description.split("\n\nText:\n")[1];
     calls.push({ ...spec, prompt });
     if (spec.text === "a-first") await gate;
     return `answer:${spec.text}`;

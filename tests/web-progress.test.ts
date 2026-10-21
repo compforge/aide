@@ -234,7 +234,7 @@ test("Source receipts expose original evidence before processing and remain visi
   assert.equal(environment.label, SOURCES.environments.label);
   assert.equal(environment.status, "quiet");
   assert.match(environment.content, /Deployment sandbox-server/);
-  assert.deepEqual(JSON.parse(environment.detail!).observation, observation);
+  assert.deepEqual(JSON.parse(environment.detail!.split("\n\nObservation:\n")[1]!), observation);
   const mention = receipts.find((block) => block.inputId === "mention")!;
   assert.equal(mention.status, "queued");
   assert.equal(mention.icon, SOURCES.lark.icon);
@@ -242,6 +242,7 @@ test("Source receipts expose original evidence before processing and remain visi
   assert.equal(mention.content, "Lark 群内 @：请确认发布窗口");
   assert.match(mention.detail!, /完整上下文/);
   assert.equal(receipts.find((block) => block.inputId === "failed")!.status, "failed");
+  assert.match(receipts.find((block) => block.inputId === "failed")!.detail!, /其它 Source 的原始输入/);
   assert.doesNotMatch(JSON.stringify(view), /另一会话/);
   assert.equal(aide.messages().length, 0, "Showing Input facts must not manufacture outbound messages");
   // Close without starting a Runner: queued and consumed receipts both reconstruct directly from persisted facts.

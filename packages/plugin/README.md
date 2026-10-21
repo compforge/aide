@@ -131,9 +131,11 @@ Both methods synchronously return strings computed from the supplied snapshot. T
 
 Host callers use `manager.describeResource(pluginInstanceId, resource)` and `manager.summarizeResource(pluginInstanceId, resource)`, both returning `Promise<string>`. Runner callbacks execute through the existing IPC handler and watchdog; they receive the supplied snapshot without re-fetching it. In-process callbacks also receive a copy of the snapshot. No new execution, Reconcile or Harness invocation is created.
 
-Selection uses Plugin Instance and exact `apiVersion` / `kind`. Each instance may register one Printer per type. Resource type ownership follows the same rules as Controllers: a plugin cannot claim a Core type or another plugin's type. Activation failure rolls registrations back; closing or losing the Runner withdraws them. Without a registered Printer, details use indented JSON and summaries use `kind/name`. A registered Printer's error is logged and propagated rather than replaced by fallback output.
+Use `await context.printers.describe(resource)` or `await context.printers.summarize(resource)` wherever you need text for a supplied Resource. The caller does not select an implementation or fetch the resource again.
 
-Printers provide a Resource-level capability; Channel, Source and Harness interfaces are unchanged. Web / Harness consumers opt into these Host methods explicitly. Existing Board presentation remains a separate structured UI contract.
+Core Printers resolve by exact `apiVersion` / `kind`; other Printers additionally use Plugin Instance. Each instance may register one Printer per type. Resource type ownership follows the same rules as Controllers: a plugin cannot claim a Core type or another plugin's type. Activation failure rolls registrations back; closing or losing the Runner withdraws them. Without a registered Printer, details use indented JSON and summaries use `kind/name`. A registered Printer's error is logged and propagated rather than replaced by fallback output.
+
+The Host supplies an Input Printer that preserves original text and optional evidence in descriptions and produces a whitespace-normalized preview of at most 120 Unicode code points. It remains available without an active plugin. Web input details and Chief current-input prompts use this description; Web keeps the full original message as its main content. Existing Board presentation remains a separate structured UI contract.
 
 ## Hooks, commands and presentation
 

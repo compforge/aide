@@ -16,7 +16,7 @@ src/
   api/                     # HTTP handler、静态资源与 SSE，调用 Core / Personal 能力
   channel/                 # Lark 适配、共享消息协议与执行投影
   host/                    # 主进程：持久化、交互与执行事实
-    input/                 # 独立 Input 事实与内置资源投影
+    input/                 # 独立 Input 事实、内置资源投影与文本 Printer
     plugin/                # Resource / Printer / Controller / Source / Watch / verb
       resource/            # 资源存储、访问、类型注册与文本展示
         store.ts           # PluginResourceStore 与持久化校验
@@ -95,7 +95,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - `pi` 提供通用 Agent，`chief` 加入 Personal 工具，两者复用 PiAdapter。通用 Pi 不依赖 Personal，Chief 的 WorkService 由宿主绑定范围；默认 Work 执行由根级 `defaultHarness` 选择，缺省为通用 Pi。
 - Source 先提交持久 Input 再推进观察水位。Input 独立保存，Conversation 内的消费状态、业务回复与去重记录原子提交，不能用投递失败重新触发业务执行。
 - Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 保存执行事实。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
-- ResourcePrinter 通过插件激活注册，describe / summarize 同步将资源快照转为详情 / 概览，不执行 I/O、模型调用或资源修改。Host 经 Runner IPC 异步调用，按插件实例与 GVK 选择；默认展示为 JSON / kind/name，注册回滚与撤销跟随 Binding 生命周期。具体契约见 docs/plugin/README.md。
+- ResourcePrinter 通过插件激活注册，describe / summarize 同步将资源快照转为详情 / 概览，不执行 I/O、模型调用或资源修改。调用方通过 describe / summarize 获取文本，Core 内置 InputPrinter；其它 Printer 按插件实例与 GVK 选择；默认展示为 JSON / kind/name，注册回滚与撤销跟随 Binding 生命周期。具体契约见 docs/plugin/README.md。
 - 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。
 - 执行上下文显式携带主资源和可选 Conversation/Input 关联；Channel 不通过 Chief Target 推导问题和进度归属。
 - Personal 将新发生的事归入能承接它的上下文：Conversation 承载话题，Task 承载有限目标，Routine 承载持续职责与当前轮次。Chief 优先关联已有 Work，再按需要创建；各 Reconcile 根据历史与新事实推进、更新、沟通、等待或忽略。详见 `docs/plugin/personal.md`。

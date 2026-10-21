@@ -28,7 +28,12 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
   const root = mkdtempSync(join(tmpdir(), "aide-chief-"));
   const prompts: string[] = [];
   let calls = 0;
-  const options = fakeOptions({ chief: async (prompt) => { calls++; if (prompt.includes('"text":"fail"')) throw new Error("Disconnected"); return "直接回答"; },
+  const options = fakeOptions({ chief: async (prompt) => {
+    calls++;
+    const activation = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
+    if (activation.description.endsWith("\n\nText:\nfail")) throw new Error("Disconnected");
+    return "直接回答";
+  },
     execute: async () => { throw new Error("Unexpected Work"); } }, root, prompts);
   let aide = new Aide(root, options, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });

@@ -1,4 +1,4 @@
-import type { PluginPackage, ResourcePrinter } from "@compforge/aide-plugin";
+import type { PluginPackage, Resource, ResourcePrinter } from "@compforge/aide-plugin";
 
 const TYPE = { apiVersion: "tests.aide.dev/v1alpha1", kind: "Printable" };
 const plugin: PluginPackage = {
@@ -20,6 +20,16 @@ const plugin: PluginPackage = {
       summarize(resource) { return `${context.instance.pluginInstanceId}: ${resource.spec.value}`; },
     };
     context.printers.register(printer);
+    context.commands.register({
+      name: "print-resource", description: "Render a supplied resource through the Plugin context",
+      async execute(input) {
+        const resource = JSON.parse(input.argument) as Resource;
+        return { kind: "message", text: JSON.stringify({
+          description: await context.printers.describe(resource),
+          summary: await context.printers.summarize(resource),
+        }) };
+      },
+    });
     if (context.instance.config.duplicate) context.printers.register(printer);
     if (context.instance.config.failActivation) throw new Error("Printer activation failed");
   },

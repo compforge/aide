@@ -189,6 +189,8 @@ type HookRegistrar = (
 ) => () => void;
 
 interface PluginRegistrars {
+  describeResource(resource: Readonly<Resource<unknown, unknown>>): Promise<string>;
+  summarizeResource(resource: Readonly<Resource<unknown, unknown>>): Promise<string>;
   registerPrinter(printer: HostedResourcePrinter): () => void;
   registerCommand: CommandRegistrar;
   registerMention: MentionRegistrar;
@@ -294,6 +296,8 @@ export class PluginBinding implements PluginContext {
         this.registerController(controller),
     });
     this.printers = Object.freeze({
+      describe: (resource: Readonly<Resource<unknown, unknown>>) => this.registrars.describeResource(resource),
+      summarize: (resource: Readonly<Resource<unknown, unknown>>) => this.registrars.summarizeResource(resource),
       register: (printer: ResourcePrinter) => this.installPrinter(printer),
     });
     this.hooks = Object.freeze({

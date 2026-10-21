@@ -1,3 +1,4 @@
+import { inputPrinter } from "../host/input/printer.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { harnessIdentityFor } from "../host/harness/ids.ts";
 import { conversationTrigger, type ConversationTrigger } from "../../plugins/personal/conversation/trigger.ts";
@@ -83,7 +84,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
       ...(input.spec.origin === "channel" ? { role: "user" as const } : {}),
       at: input.metadata.creationTimestamp, content: input.spec.text,
       status: run.status.quietReason ? "quiet" : run.status.phase ?? "queued",
-      ...(input.spec.observation ? { detail: JSON.stringify({ originRef: input.spec.originRef, observation: input.spec.observation }, null, 2) } : {}) });
+      detail: inputPrinter.describe(input) });
   }
   const append = (turnId: string, block: ConversationBlock) => {
     const input = turns.get(turnId);
