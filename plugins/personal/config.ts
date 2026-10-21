@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { EnvironmentWatchSchema } from "./environment-config.ts";
-import { MessageWatchSchema } from "./message-config.ts";
-import { WatchSchema } from "./source-config.ts";
+import { EnvironmentWatchSchema } from "./source/environment/config.ts";
+import { MessageWatchSchema } from "./source/message/config.ts";
+import { WatchSchema } from "./source/requirement/config.ts";
 
 /**
  * @spec Sources own observation policy. A missing Source is disabled even when its Connector is available.

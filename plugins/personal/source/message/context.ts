@@ -1,5 +1,5 @@
 import type { ChatMessage, MessageConnector } from "@compforge/aide-plugin";
-import type { MessageWatch } from "./message-config.ts";
+import type { MessageWatch } from "./config.ts";
 
 export interface MessageContext {
   messages: ChatMessage[];

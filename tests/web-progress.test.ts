@@ -1,6 +1,6 @@
 import { iconFor, type InputSpec } from "@compforge/aide-plugin";
 import { CHANNELS, bindChannelInput } from "../src/channel/definition.ts";
-import { SOURCES } from "../plugins/personal/source-definition.ts";
+import { SOURCES } from "../plugins/personal/source/definition.ts";
 import { HARNESS_IDENTITIES, harnessIdentityFor } from "../src/host/harness/ids.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";

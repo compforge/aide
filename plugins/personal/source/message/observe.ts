@@ -1,9 +1,9 @@
 import { bindSourceInput, type SourceInput } from "@compforge/aide-plugin";
-import { SOURCES } from "./source-definition.ts";
+import { SOURCES } from "../definition.ts";
 import type { ChatMessage, ConnectorClient, MessagePage, PluginContext, Resource } from "@compforge/aide-plugin";
-import { INPUT_TYPE, digest } from "./chief-model.ts";
-import { type MessageKind, type MessageWatch } from "./message-config.ts";
-import { boundContext, readMessageContext, type MessageContext } from "./message-context.ts";
+import { INPUT_TYPE, digest } from "../../chief-model.ts";
+import { type MessageKind, type MessageWatch } from "./config.ts";
+import { boundContext, readMessageContext, type MessageContext } from "./context.ts";
 
 export const MESSAGE_SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "MessageSource" } as const;
 interface Scan {

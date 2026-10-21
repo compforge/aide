@@ -1,9 +1,9 @@
 import type { PluginPackage } from "@compforge/aide-plugin";
 import { registerConversations } from "./conversation/reconcile.ts";
 import { registerInputRouting } from "./input.ts";
-import { registerEnvironmentSources } from "./environment-source.ts";
-import { registerSources } from "./source.ts";
-import { registerMessageSources } from "./message-source.ts";
+import { registerEnvironmentSources } from "./source/environment/observe.ts";
+import { registerSources } from "./source/requirement/observe.ts";
+import { registerMessageSources } from "./source/message/observe.ts";
 import { registerTasks } from "./task/reconcile.ts";
 import { registerRoutines } from "./routine/reconcile.ts";
 

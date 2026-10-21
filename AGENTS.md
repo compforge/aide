@@ -37,12 +37,19 @@ plugins/personal/
     store.ts               # 宿主侧会话投影与消息 outbox
     trigger.ts             # 定时触发配置
     reconcile.ts           # Runner 侧消费 Input、续接问答与定时回顾
-  source.ts                # 需求观察、水位和调度
-  message-source.ts        # Lark 单聊、群内 @ 观察、水位和短期讨论跟进
-  message-context.ts       # IM 有界上下文、话题根消息与缺口
-  environment-source.ts    # Workload 观察、基线和变化 Input
+  source/                  # Source 分类定义与三类观察资源
+    definition.ts          # 来源身份、名称与稳定图标
+    environment/           # EnvironmentSource
+      config.ts            # 环境观察目标与 namespace 策略
+      observe.ts           # Workload 观察、基线和变化 Input
+    message/               # MessageSource
+      config.ts            # Lark 消息观察与跟进策略
+      observe.ts           # 单聊、群内 @ 观察、水位和短期讨论跟进
+      context.ts           # IM 有界上下文、话题根消息与缺口
+    requirement/           # RequirementSource
+      config.ts            # 需求观察范围与配置校验
+      observe.ts           # 需求观察、水位和调度
   config.ts                # Personal sources 配置、严格校验与默认值
-  environment-config.ts    # 环境观察目标与 namespace 策略
   task/                    # Task CRD
     model.ts               # 资源定义
     reconcile.ts           # 有限目标 Reconcile

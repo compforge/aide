@@ -14,7 +14,7 @@ Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队�
 
 Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。一个 Controller 拥有一种资源类型的 Reconcile：每次读取当前事实，推进目标，再持久化结果或安排下次唤醒。
 
-每种 CRD 在所属 plugin package 下有一个按资源命名的目录，集中保存模型、Reconcile 和专属辅助代码。例如 `plugins/personal/conversation/` 包含 Conversation 的模型、输入追加、存储、触发配置和 Reconcile。插件装配与跨资源流程留在插件层；目录内的 Runner 代码仍只经 ResourceClient 访问资源，不导入宿主存储实现。
+每种 CRD 在所属 plugin package 下有一个按资源命名的目录，集中保存模型、Reconcile 和专属辅助代码。例如 `plugins/personal/conversation/` 包含 Conversation 的模型、输入追加、存储、触发配置和 Reconcile。Personal 的 Source 集中在 `plugins/personal/source/`：`definition.ts` 声明来源分类，`environment/`、`message/`、`requirement/` 分别保存对应 CRD 的配置与观察逻辑，消息上下文归入 `message/context.ts`。插件装配与跨资源流程留在插件层；目录内的 Runner 代码仍只经 ResourceClient 访问资源，不导入宿主存储实现。
 
 资源变化、Source、Watch、cron 和 `requeueAfterMs` 共用按资源身份去重的队列。同一资源串行处理；不同资源受 Controller 与所在 Runner 的容量约束。基础设施回调重试不保证外部操作只发生一次，插件须保存已进入执行的状态，避免把重试变成业务重放。
 

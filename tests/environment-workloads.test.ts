@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Environments } from "../connectors/environments.ts";
 import { collectWorkloads, observationNamespace } from "../connectors/environments/workloads.ts";
-import { workloadChanges } from "../plugins/personal/environment-source.ts";
+import { workloadChanges } from "../plugins/personal/source/environment/observe.ts";
 
 const meta = (name: string, uid: string, owner?: { kind: string; uid: string }) => ({ name, uid, namespace: "app", generation: 1,
   resourceVersion: "ignored", ownerReferences: owner ? [{ ...owner, controller: true }] : [] });

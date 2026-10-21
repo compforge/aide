@@ -16,7 +16,7 @@ import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 import { LarkChannel } from "../src/channel/lark.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-import { SOURCE_TYPE } from "../plugins/personal/source.ts";
+import { SOURCE_TYPE } from "../plugins/personal/source/requirement/observe.ts";
 
 const log = pino({ level: "silent" });
 async function until(check: () => boolean) {

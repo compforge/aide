@@ -1,8 +1,8 @@
 import { bindSourceInput } from "@compforge/aide-plugin";
-import { SOURCES } from "./source-definition.ts";
+import { SOURCES } from "../definition.ts";
 import type { ConnectorClient, EnvironmentSnapshot, PluginContext, Resource, WorkloadSnapshot } from "@compforge/aide-plugin";
-import { type EnvironmentSourceSpec } from "./environment-config.ts";
-import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "./chief-model.ts";
+import { type EnvironmentSourceSpec } from "./config.ts";
+import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "../../chief-model.ts";
 
 export const ENVIRONMENT_SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "EnvironmentSource" } as const;
 export interface EnvironmentSourceStatus {

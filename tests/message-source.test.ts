@@ -1,4 +1,4 @@
-import { SOURCES } from "../plugins/personal/source-definition.ts";
+import { SOURCES } from "../plugins/personal/source/definition.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -12,9 +12,9 @@ import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource.ts";
 import { createResourceClient } from "../src/host/plugin/resource-client.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
-import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "../plugins/personal/message-source.ts";
-import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageWatch } from "../plugins/personal/message-config.ts";
-import { readMessageContext } from "../plugins/personal/message-context.ts";
+import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "../plugins/personal/source/message/observe.ts";
+import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageWatch } from "../plugins/personal/source/message/config.ts";
+import { readMessageContext } from "../plugins/personal/source/message/context.ts";
 import { Aide } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { fakeOptions } from "./fake-harness.ts";

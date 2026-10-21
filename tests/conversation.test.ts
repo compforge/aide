@@ -1,6 +1,6 @@
 import { loadConfig } from "../src/config.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
-import { SOURCE_TYPE } from "../plugins/personal/source.ts";
+import { SOURCE_TYPE } from "../plugins/personal/source/requirement/observe.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";

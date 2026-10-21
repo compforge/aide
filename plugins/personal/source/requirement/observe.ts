@@ -1,9 +1,9 @@
 import { bindSourceInput } from "@compforge/aide-plugin";
-import { SOURCES } from "./source-definition.ts";
+import { SOURCES } from "../definition.ts";
 import type { PluginContext, Resource } from "@compforge/aide-plugin";
 import type { ConnectorClient } from "@compforge/aide-plugin";
-import { type Watch } from "./source-config.ts";
-import { INPUT_TYPE, digest } from "./chief-model.ts";
+import { type Watch } from "./config.ts";
+import { INPUT_TYPE, digest } from "../../chief-model.ts";
 
 export const SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "RequirementSource" } as const;
 interface SourceStatus { seen?: Record<string, string>; lastObservedAt?: string; error?: string | null }
