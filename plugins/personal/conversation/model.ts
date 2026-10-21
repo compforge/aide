@@ -22,6 +22,8 @@ export interface ConversationSpec { id: string; name?: string; default?: boolean
 export interface ConversationStatus {
   nextTriggerAt?: string | null;
   summary?: { text: string; through: string; at: string };
+  /** Partial summary keeps its original entry referenced until every character has been consumed. */
+  compaction?: { entryId: string; offset: number; text: string } | null;
   contextReady?: boolean;
   blocked?: { at: string; reason: string } | null;
   processing: Record<string, ProcessingStatus>;

@@ -24,7 +24,7 @@ export const PersonalConfigSchema = z.object({
 export function parsePersonalConfig(config: Readonly<Record<string, unknown>> = {}) {
   const parsed = PersonalConfigSchema.safeParse(config);
   if (!parsed.success) {
-    const fields = parsed.error.issues.map((issue) => `plugins.personal.${issue.path.join(".")} (${issue.code})`).join(", ");
+    const fields = parsed.error.issues.map((issue) => `plugins.personal.${issue.path.join(".")} (${issue.code}: ${issue.message})`).join(", ");
     throw new Error(`Invalid Personal config: ${fields}`);
   }
   return parsed.data;

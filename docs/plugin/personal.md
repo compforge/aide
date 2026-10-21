@@ -178,6 +178,13 @@ Task / Routine 校验 Harness 的 finalText。执行失败或中断标为 uncert
 
 Chief 的问答使用 Core Interaction 与当前回调续接，调用栈不跨重启恢复；不能把它与 Task / Routine 的 waiting 状态混同。上下文结合近期消息、工作记录及连接器查询，Chief Harness 按需提供相关记忆；工作状态以 Task / Routine 为准。
 
+### 中断与有界消费
+
+待处理队列在 `maxPending` 之外预留一个 immediate 名额，用户可在观察消息占满队列时恢复会话。
+直接请求的中断通知与轮次失败状态原子保存，恢复进程不会重发同一轮的通知；Source 和定时轮次保持静默。
+历史记录超过单次摘要预算时，Conversation 保存分段偏移与中间摘要，每次摘要调用只处理有界片段。
+原始 Input 引用保留到整条记录已被摘要覆盖；失败后保留进度，恢复时从已提交偏移继续。
+
 ## 验证
 
 `tests/chief.test.ts` 验证真实 Runner、Pi SDK、需求观察、确认拒绝、自由回答和创建工作的链路；模型、平台与 Work 执行使用替身。会话、独立 Task / Routine 生命周期和中断处理另有契约测试。真实环境验收见 [E2E](../e2e.md)。

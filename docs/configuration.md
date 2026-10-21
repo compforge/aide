@@ -216,9 +216,13 @@ plugins:
 
 - `immediate` Input 立即触发处理；Channel 默认 immediate，Source 默认 deferred。紧迫性不代表执行授权或必须外发消息。
 - deferred Input 满 `batchSize`，或最早待处理输入等待达到 `maxWaitSeconds`，即触发一轮。Conversation 自身 trigger 到期也触发，即使没有新 Input。
-- `maxPending` 限制每个会话未处理的输入数量，达到上限时追加失败、上游保留重试状态。失败的批次不会自动重放。
+- `maxPending` 限制普通待处理队列；另预留 1 个 immediate 名额，避免 deferred 输入占满后用户无法恢复会话。总待处理数最多为 `maxPending + 1`。超限追加失败、上游保留重试状态；问答响应直接消费，不占待处理名额。失败的批次不会自动重放。
 - `recentInputs` 是消费后的近期窗口；达到窗口加一批或文本预算时先生成摘要，再释放被摘要覆盖的引用。待处理输入、未送达消息不因窗口淘汰。
 - `contextChars` 限制应用组装的输入/摘要材料，不是模型 token 窗口；单条大输入先给预览，Chief 可用 `read_input` 分页读取。`summaryChars` 限制持久摘要大小。
+
+字段补齐默认值后还需满足 `batchSize <= maxPending`、`summaryChars < contextChars / 2`。
+例如将 `maxPending` 改为 5 时也需将 `batchSize` 调到 5 或更小；将 `contextChars` 改为 4096 时可配 `summaryChars: 1000`。
+超长历史记录分段生成摘要并持久保存进度；整条记录总结完成后才释放原 Input 引用，不直接截断后遗忘。
 
 ## Resource 容量
 

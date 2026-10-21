@@ -287,3 +287,24 @@ test("official SDK sends bot text with a stable uuid and checks API-level failur
   await assert.rejects(transport.send("oc_test", "你好😀", "test-send-id"), /code 99991672/);
   assert.equal(sends, 2);
 });
+
+test("Lark receipt failures do not block later replies; restart retries receipts without resending", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-receipt-"));
+  const messages: Message[] = ["first", "second"].map((id) => ({ id, conversationId: "lark:cli_test:oc_chat", text: id,
+    role: "aide", workId: null, at: id }));
+  const receipts: string[] = []; let failing = true;
+  const aide = { receive: async () => ({ inputId: "in", at: new Date().toISOString() }), messages: () => messages,
+    async messageDelivered(_conversation: string, id: string) { if (id === "first" && failing) throw new Error("receipt storage failed"); receipts.push(id); } };
+  const { transport, sent } = fakeTransport();
+  let channel = new LarkChannel(home, "cli_test", aide, transport, log);
+  t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
+  channel.receive(event("in", "hello"));
+  await channel.deliver();
+  assert.deepEqual(sent.map((m) => m.text), ["first", "second"]);
+  assert.deepEqual(receipts, ["second"]);
+  await channel.deliver(); assert.equal(sent.length, 2);
+  await channel.close(); failing = false;
+  channel = new LarkChannel(home, "cli_test", aide, transport, log);
+  await channel.deliver();
+  assert.ok(receipts.includes("first")); assert.equal(sent.length, 2);
+});

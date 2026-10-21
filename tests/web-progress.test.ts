@@ -94,6 +94,15 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(accepted.status, 200);
   await aide.receive({ channelId: "web", id: "b1", sessionId: "b", conversationId: "b", text: "另一会话的私有内容" });
   await until(() => emitters.has(chiefTarget("a")) && emitters.has(chiefTarget("b")));
+  const runningView = conversationView(aide, "a");
+  const runningInput = runningView.blocks.find((block) => block.type === "input")!;
+  assert.ok(runningView.meta.activity);
+  assert.equal(runningInput.group_id, runningView.meta.activity!.id);
+  for (const phase of ["running", "waiting"]) {
+    const history = browserSdk.historyBlocks(runningView.blocks.map((block) => block.type === "input" ? { ...block, status: phase } : block), runningView.meta.activity!);
+    assert.ok(history.some((block) => block.id === runningInput.id), "Input remains visible during execution and questions");
+    assert.ok(!history.some((block) => block.type === "execution" && block.group_id === runningView.meta.activity!.id));
+  }
   const { sink, turnId } = emitters.get(chiefTarget("a"))!;
   const other = emitters.get(chiefTarget("b"))!;
   other.sink({ kind: "agent_thought_chunk", turnId: other.turnId, payload: { messageId: "thought-b", content: { type: "text", text: "另一会话的思考" } } });

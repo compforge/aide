@@ -745,9 +745,10 @@ export class SessionStore {
         }
         if (latestActivity >= cutoff) continue;
 
-        if (existsSync(join(this.rootDir, "resources.sqlite"))) ResourceStorage.open(this.rootDir).removeSession(candidate.aideSessionId);
+        // Remove the reopenable Session before its business state; a filesystem failure must retain Resources.
         rmSync(dir, { recursive: true });
         ownsLock = false;
+        if (existsSync(join(this.rootDir, "resources.sqlite"))) ResourceStorage.open(this.rootDir).removeSession(candidate.aideSessionId);
         result.removed.push(normalizeSessionMeta(persisted));
       } catch (error) {
         if (error instanceof SessionInUseError) {

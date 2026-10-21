@@ -1,7 +1,7 @@
 import { conversationPolicy } from "./config.ts";
 import type { InputSpec, InputStatus, Resource, ResourceClient } from "@compforge/aide-plugin";
 import { INPUT_TYPE } from "../chief-model.ts";
-import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type ConversationStatus } from "./model.ts";
+import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type ConversationStatus, type ConversationResource } from "./model.ts";
 
 /**
  * @spec An Input already attached to this Conversation is a no-op, preserving its consumption and messages.
@@ -16,7 +16,7 @@ export async function appendConversationInput(resources: ResourceClient,
     const fact = await resources.get<InputSpec, InputStatus>({ ...input, ...input.metadata });
     if (!fact) throw new Error("Input expired before append");
     if (c.spec.inputIds.includes(input.metadata.name) || fact.status.deliveries?.includes(c.metadata.uid)) return false;
-    if (c.spec.inputIds.filter((id) => !c.status.processing[id]?.phase).length >= maxPending) throw new Error("Conversation pending input capacity exhausted");
+    assertInputCapacity(c, input.spec, maxPending);
     const status = input.spec.replyTo ? { ...c.status,
       processing: { ...c.status.processing, [input.metadata.name]: { phase: "done" as const } },
     } : c.status;
@@ -29,4 +29,12 @@ export async function appendConversationInput(resources: ResourceClient,
       if (attempt >= 4 || !(error instanceof Error) || !error.message.includes("version conflict")) throw error;
     }
   }
+}
+
+/** @spec One reserved immediate slot keeps a full deferred queue recoverable; total pending stays <= maxPending + 1. */
+export function assertInputCapacity(c: Readonly<ConversationResource>, input: InputSpec, maxPending: number): void {
+  const immediate = (input.attention ?? (input.origin === "channel" ? "immediate" : "deferred")) === "immediate";
+  const limit = maxPending + (immediate ? 1 : 0);
+  const pending = c.spec.inputIds.filter((id) => !c.status.processing[id]?.phase).length;
+  if (!input.replyTo && pending >= limit) throw new Error(`Conversation pending input capacity exhausted: ${c.spec.id} (${pending}/${limit})`);
 }

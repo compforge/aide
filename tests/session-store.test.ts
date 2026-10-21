@@ -1,3 +1,5 @@
+import { spyOn } from "bun:test";
+import * as fs from "node:fs";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -108,4 +110,28 @@ test("externally assigned Session IDs round-trip safely, preserve metadata and r
   const clean = store.cleanSessions({ before: new Date("2001-01-01") });
   assert.deepEqual(clean.removed.map((item) => item.aideSessionId), [id]);
   assert.deepEqual(clean.failures, []);
+});
+
+test("Failed Session directory removal retains business Resources and the reopenable Session", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-cleanup-failure-"));
+  const store = new SessionStore(root);
+  const session = store.createSession({ cwd: root });
+  t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
+  const resources = new PluginResourceStore({ session, pluginInstanceId: "test" });
+  const type = { apiVersion: "tests.dev/v1", kind: "Record" };
+  resources.create({ type, name: "retained", spec: { evidence: "must survive" } });
+  session.updateMeta({ updatedAt: "2000-01-01T00:00:00.000Z" });
+  const original = fs.rmSync;
+  const failure = spyOn(fs, "rmSync").mockImplementation((path, options) => {
+    if (path === session.dir) throw new Error("Injected directory removal failure");
+    return original(path, options);
+  });
+  try {
+    const result = store.cleanSessions({ before: new Date("2001-01-01") });
+    assert.equal(result.removed.length, 0); assert.match(result.failures[0]!.error, /Injected/);
+    assert.equal(resources.list(type).length, 1);
+    const reopened = store.openSession(session.id); await reopened.closeLogs();
+  } finally { failure.mockRestore(); }
+  assert.equal(store.cleanSessions({ before: new Date("2001-01-01") }).removed.length, 1);
+  assert.equal(resources.list(type).length, 0);
 });

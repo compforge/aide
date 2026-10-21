@@ -1,4 +1,4 @@
-import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview, replyLabels, toolLabels } from '/agentue.js';
+import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview, replyLabels, toolLabels } from '/agentue.js';
   const $ = (id) => document.getElementById(id);
   const conversationId = new URL(location.href).searchParams.get('conversation');
   const query = '?conversationId=' + encodeURIComponent(conversationId);
@@ -250,10 +250,7 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
   }
   /** @spec Each Input renders one collapsible reply with independently collapsible process and answer regions; final text appears once. */
   function renderMessages(blocks, activity) {
-    const liveIds = new Set(blocks.filter((block) => block.type === 'execution' &&
-      (block.status === 'running' || (activity && block.group_id === activity.id))).map((block) => block.id));
-    const history = blocks.filter((block) => !liveIds.has(block.id) && !liveIds.has(block.parent_id) &&
-      (!activity || block.group_id !== activity.id));
+    const history = historyBlocks(blocks, activity);
     const signature = JSON.stringify(history);
     if (signature === lastMessages) return;
     lastMessages = signature;

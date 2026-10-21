@@ -1,3 +1,4 @@
+import { assertInputCapacity } from "./conversation/input.ts";
 import { environmentLifecycle } from "./source/environment/observe.ts";
 import { messageLifecycle } from "./source/message/observe.ts";
 import { requirementLifecycle } from "./source/requirement/observe.ts";
@@ -151,16 +152,21 @@ export class Personal {
     }
   }
 
+  /** @spec Interruption never replays actions; direct requests receive one notice committed with their failed round. */
   async recoverInterrupted(): Promise<void> {
     for (const input of this.store.conversations.runs()) {
       if (input.status.roundId || (input.status.phase !== "running" && input.status.phase !== "waiting")) continue;
-      await this.store.conversations.updateRun(input, {
-        phase: "failed", question: null, error: "Execution interrupted; verify existing actions before resuming",
-      });
       const c = this.conversations.resource(input.conversationId)!;
-      const processing = { ...c.status.processing };
+      const processing = { ...c.status.processing, [input.id]: { ...input.status,
+        phase: "failed" as const, question: null, error: "Execution interrupted; verify existing actions before resuming" } };
       for (const id of input.status.batchInputIds ?? []) processing[id] = { ...processing[id], phase: "failed" };
-      await this.plugins.resourceClient("personal").patchStatus(c, { processing, contextReady: false,
+      const direct = !input.status.compacting && (input.input?.spec.origin === "channel" ||
+        input.status.batchInputIds?.some((id) => this.conversations.inputStore.get(id)?.spec.origin === "channel"));
+      const notices = direct ? [message(input.conversationId,
+        "上次处理已中断，可能已有部分操作生效。已暂停自动执行，请核对后重新交办。", null)] : [];
+      processing[input.id] = { ...processing[input.id]!, messages: [...processing[input.id]!.messages ?? [], ...notices] };
+      // Recovery disposition and its notice commit together: another restart cannot repeat the notification.
+      await this.plugins.resourceClient("personal").patchStatus(c, { processing, messages: [...c.status.messages, ...notices], contextReady: false,
         blocked: { at: new Date().toISOString(), reason: "Execution interrupted; no automatic replay" } });
       this.log.warn({ runId: input.id, conversationId: input.conversationId }, "Recovered interrupted Chief activation without replay");
     }
@@ -263,7 +269,7 @@ export class Personal {
 
   private async acceptChannel(id: string, input: Incoming, messages: Message[], phase?: "done", replyTo?: string) {
     const current = await this.conversations.ensure();
-    if (!current.spec.inputIds.includes(id) && current.spec.inputIds.filter((key) => !current.status.processing[key]?.phase).length >= conversationPolicy(this.options.conversation).maxPending) throw new Error("Conversation pending input capacity exhausted");
+    if (!current.spec.inputIds.includes(id)) assertInputCapacity(current, { origin: "channel", originId: input.channelId, text: input.text, replyTo }, conversationPolicy(this.options.conversation).maxPending);
     const relation = channelRelation(this.options.person, input);
     const fact = await this.conversations.submit(id, { attention: "immediate", sessionId: this.id, text: input.text, timezone: this.options.timezone,
       origin: "channel", originId: input.channelId, ...(relation ? { relation } : {}),
@@ -273,6 +279,7 @@ export class Personal {
       const ids = new Set(c.status.messages.map((m) => m.id));
       const extra = messages.filter((m) => !ids.has(m.id));
       const attached = c.spec.inputIds.includes(id);
+      if (!attached) assertInputCapacity(c, fact.spec, conversationPolicy(this.options.conversation).maxPending);
       if (attached && !extra.length) break;
       try {
         await this.plugins.resourceClient("personal").replace(c, { ...c.spec, name: c.spec.name || initialConversationName(this.conversations.inputStore.get(c.spec.inputIds[0] ?? id)?.spec.text ?? input.text), inputIds: [...new Set([...c.spec.inputIds, id])] }, {
