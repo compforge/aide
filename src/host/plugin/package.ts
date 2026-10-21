@@ -1,3 +1,4 @@
+import type { HostedResourcePrinter } from "./resource-printer.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorRequest } from "../../protocol/connectors.ts";
 import { createConnectorClient, dispatchConnector, emptyConnectors } from "../../connector-client.ts";
@@ -31,6 +32,7 @@ import type {
   PluginPackage,
   PluginSessionContext,
   Resource,
+  ResourcePrinter,
   ReconcileRequest,
   ResourceRef,
   Source,
@@ -80,6 +82,7 @@ export type {
   PluginPackage,
   PluginSessionContext,
   Resource,
+  ResourcePrinter,
   ReconcileRequest,
   ResourceRef,
   Source,
@@ -186,6 +189,7 @@ type HookRegistrar = (
 ) => () => void;
 
 interface PluginRegistrars {
+  registerPrinter(printer: HostedResourcePrinter): () => void;
   registerCommand: CommandRegistrar;
   registerMention: MentionRegistrar;
   registerHook: HookRegistrar;
@@ -225,6 +229,7 @@ export class PluginBinding implements PluginContext {
   readonly commands: PluginContext["commands"];
   readonly mentions: PluginContext["mentions"];
   readonly controllers: PluginContext["controllers"];
+  readonly printers: PluginContext["printers"];
   readonly hooks: PluginContext["hooks"];
   readonly lifecycle: PluginContext["lifecycle"];
   private readonly registrars: PluginRegistrars;
@@ -288,6 +293,9 @@ export class PluginBinding implements PluginContext {
       register: <TSpec, TStatus>(controller: Controller<TSpec, TStatus>) =>
         this.registerController(controller),
     });
+    this.printers = Object.freeze({
+      register: (printer: ResourcePrinter) => this.installPrinter(printer),
+    });
     this.hooks = Object.freeze({
       register: (hook: Hook) => this.registerHook(hook),
     });
@@ -295,6 +303,13 @@ export class PluginBinding implements PluginContext {
       onClose: (cleanup: () => Promise<void> | void) =>
         this.registerCleanup(cleanup),
     });
+  }
+
+  /** Host-only bridge also accepts async Runner proxies; authoring callbacks remain synchronous. */
+  installPrinter(printer: HostedResourcePrinter): void {
+    this.assertRegistering();
+    validateResourceType(printer.resourceType);
+    this.cleanups.push(this.registrars.registerPrinter(printer));
   }
 
   completeActivation(): void {

@@ -111,6 +111,30 @@ For execution, `laneId` selects a Lane and `newLane: true` creates a side Lane. 
 
 Every verb requires timeoutMs covering its entire gate, queue and execution wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
+## Resource Printers
+
+[ResourcePrinter](src/resource.ts) supplies readable details and a concise summary for a resource type. Register it during activation, independently of its Controller:
+
+```ts
+context.printers.register<{ title: string }, { phase?: string }>({
+  resourceType: EXAMPLE,
+  describe(resource) {
+    return `${resource.metadata.name}: ${resource.spec.title}\nPhase: ${resource.status.phase ?? "pending"}`;
+  },
+  summarize(resource) {
+    return resource.spec.title;
+  },
+});
+```
+
+Both methods synchronously return strings computed from the supplied snapshot. They must not mutate resources, read external systems, call models or perform writes. Resource instances remain serializable data; Printer functions are not stored in resource spec/status. Printer output is text, not trusted markup.
+
+Host callers use `manager.describeResource(pluginInstanceId, resource)` and `manager.summarizeResource(pluginInstanceId, resource)`, both returning `Promise<string>`. Runner callbacks execute through the existing IPC handler and watchdog; they receive the supplied snapshot without re-fetching it. In-process callbacks also receive a copy of the snapshot. No new execution, Reconcile or Harness invocation is created.
+
+Selection uses Plugin Instance and exact `apiVersion` / `kind`. Each instance may register one Printer per type. Resource type ownership follows the same rules as Controllers: a plugin cannot claim a Core type or another plugin's type. Activation failure rolls registrations back; closing or losing the Runner withdraws them. Without a registered Printer, details use indented JSON and summaries use `kind/name`. A registered Printer's error is logged and propagated rather than replaced by fallback output.
+
+Printers provide a Resource-level capability; Channel, Source and Harness interfaces are unchanged. Web / Harness consumers opt into these Host methods explicitly. Existing Board presentation remains a separate structured UI contract.
+
 ## Hooks, commands and presentation
 
 [Hooks](src/hook.ts) observe four coordination boundaries:

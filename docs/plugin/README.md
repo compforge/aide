@@ -4,7 +4,7 @@ Plugin 是业务扩展的组织与所有权单位。插件声明资源和回调�
 
 ## Package、Instance 与 Runner
 
-`PluginPackage` 通过 `activate(context)` 注册 Resource Controller、Source、Watch、Hook、Command 等能力。Package 描述插件代码，一份启用配置对应一个 PluginInstance；Host 为实例建立 Binding 并启动独立 Runner，加载插件后完成注册。
+`PluginPackage` 通过 `activate(context)` 注册 Resource Controller、Printer、Source、Watch、Hook、Command 等能力。Package 描述插件代码，一份启用配置对应一个 PluginInstance；Host 为实例建立 Binding 并启动独立 Runner，加载插件后完成注册。
 
 Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队列、重试和 Reconcile；资源存储、全局 Connector 与执行事实由 Host 持有。PluginContext 将资源操作、Connector 查询和 verb 转成跨进程请求，插件无需引用宿主 Store、提供方客户端或 Harness SDK。
 
@@ -19,6 +19,16 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 资源变化、Source、Watch、cron 和 `requeueAfterMs` 共用按资源身份去重的队列。同一资源串行处理；不同资源受 Controller 与所在 Runner 的容量约束。基础设施回调重试不保证外部操作只发生一次，插件须保存已进入执行的状态，避免把重试变成业务重放。
 
 资源写入统一经过 Core ResourceClient，包括 Agent 工具和 Reconcile，使用版本检查并通知所有相关 Watch。spec 与初始 status 可以原子提交。主资源的纯 status 更新不自动再入队；需要感知 status 的 Controller 显式声明 Watch。跨越 Harness 或用户等待后，应按 uid 重新读取资源，避免旧回调更新同名替代资源。删除先持久化 deletionTimestamp，Controller 完成终止处理后移除资源；结构性 owner 关系支持级联删除。
+
+## Resource Printer
+
+`ResourcePrinter<Spec, Status>` 按资源类型提供 `describe(resource): string` 和 `summarize(resource): string`，分别生成可读详情和简短概览。插件在激活阶段通过 `context.printers.register(...)` 注册；它与 Controller 独立，Resource 实例本身仍是可持久化的数据。
+
+两个方法同步处理传入的资源快照，不修改资源、不查询外部系统、不调用模型。Host 通过 `Manager.describeResource(pluginInstanceId, resource)` / `summarizeResource(...)` 获取结果，返回 `Promise<string>`；Runner 沿用既有 handler IPC 与请求超时机制，只传输资源快照和文本，不重新查询资源。进程内插件同样使用快照副本，避免修改调用方持有的数据。
+
+Printer 按插件实例和精确的 `apiVersion + kind` 选择，同一实例重复注册同一类型会失败。类型归属复用 ResourceRegistry，不能覆盖 Core 或其它插件的资源类型；注册失败整体回滚，实例关闭或 Runner 失效后撤销注册。没有专用 Printer 时，详情默认使用缩进 JSON，概览默认使用 `kind/name`。已注册 Printer 的执行失败记录资源身份和方法名，并向调用方返回错误。
+
+这是 Resource 层的展示能力，不调整 Channel / Source / Harness 的接口，也不自动改变现有 Web 或 Harness 的展示。插件声明示例见 [Resource Printers](../../packages/plugin/README.md#resource-printers)。
 
 ## Source 与 Watch
 

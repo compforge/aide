@@ -22,6 +22,7 @@ import type {
   PluginSessionContext,
   Resource,
   ResourceClient,
+  ResourcePrinter,
   ResourceListOptions,
   ResourceMergePatch,
   ResourceOwnerReference,
@@ -278,6 +279,17 @@ function hookRegistration(hook: Hook): PluginRegistration {
   };
 }
 
+function printerRegistration(printer: ResourcePrinter): PluginRegistration {
+  const print = (method: "describe" | "summarize") => handler(`printer:${method}`,
+    ((resource: Resource<unknown, unknown>) => {
+      const value = printer[method](resource);
+      if (typeof value !== "string") throw new Error(`Resource Printer ${method} must return a string synchronously`);
+      return value;
+    }) as (...args: never[]) => unknown);
+  return { kind: "printer", resourceType: printer.resourceType,
+    describeHandlerId: print("describe"), summarizeHandlerId: print("summarize") };
+}
+
 function controllerRegistration(controller: Controller<unknown, unknown>): ControllerRegistration {
   return {
     kind: "controller", controllerId: `controller:${controller.resourceType.apiVersion}:${controller.resourceType.kind}`,
@@ -340,6 +352,12 @@ async function activate(
         const registration = controllerRegistration(controller as Controller<unknown, unknown>);
         controllers!.register((registration as ControllerRegistration).controllerId, controller as Controller<unknown, unknown>);
         registrations.push(registration);
+      },
+    }),
+    printers: Object.freeze({
+      register<TSpec, TStatus>(printer: ResourcePrinter<TSpec, TStatus>) {
+        assertRegistering();
+        registrations.push(printerRegistration(printer as ResourcePrinter));
       },
     }),
     hooks: Object.freeze({
