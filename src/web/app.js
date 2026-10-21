@@ -38,7 +38,7 @@ import { copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, proce
     const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, block.content);
     node.append(header, body);
     if (block.detail) {
-      const details = replyRegion('input:' + block.inputId + ':evidence', '观察详情', false);
+      const details = replyRegion('input:' + block.inputId + ':evidence', '输入详情', false);
       details.className = 'input-evidence reply-region';
       if (block.detail) details.append(element('pre', block.detail));
       node.append(details);

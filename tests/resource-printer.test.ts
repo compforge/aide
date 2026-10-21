@@ -4,11 +4,14 @@ import { cpSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { PluginPackage, Resource, ResourcePrinter } from "@compforge/aide-plugin";
+import { INPUT_TYPE, type InputSpec, type PluginPackage, type Resource, type ResourcePrinter } from "@compforge/aide-plugin";
 import { Manager, type ManagerOptions } from "../src/host/plugin/manager.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
 import { SessionStore } from "../src/host/store/store.ts";
+
+import { inputPrinter } from "../src/host/input/printer.ts";
+import { executeCommand } from "./fixtures/command-context.ts";
 
 const TYPE = { apiVersion: "tests.aide.dev/v1alpha1", kind: "Printable" };
 const snapshot = (value = "hello"): Resource<{ value: string }, { phase: string }> => ({
@@ -126,4 +129,25 @@ test("A blocked Printer is bounded by the Runner watchdog and its registrations 
   await assert.rejects(f.manager.describeResource("first", snapshot("block")), /Resource Printer describe failed/);
   await f.manager.deactivateInstance("first");
   assert.equal(await f.manager.summarizeResource("first", snapshot()), "Printable/sample");
+});
+
+
+test("Core Input Printer works without a plugin and through Runner snapshot calls, and survives deactivation", async (t) => {
+  const f = runnerFixture(t);
+  const resource: Resource<InputSpec, {}> = { ...snapshot(), ...INPUT_TYPE,
+    spec: { origin: "source", originId: "personal.lark", text: "原始 @ 消息", observation: { context: { messages: ["附近消息"] } } }, status: {} };
+  const expected = { description: inputPrinter.describe(resource), summary: "原始 @ 消息" };
+  assert.equal(await f.manager.describeResource("absent", resource), expected.description);
+  f.add(); await f.manager.start(); assert.deepEqual(f.errors, []);
+  const result = await executeCommand(f.manager, "print-resource", { argument: JSON.stringify(resource) });
+  assert.equal(result?.kind, "message");
+  if (result?.kind !== "message") throw new Error("Expected printed text");
+  assert.deepEqual(JSON.parse(result.text), expected);
+  const custom = await executeCommand(f.manager, "print-resource", { argument: JSON.stringify(snapshot()) });
+  assert.equal(custom?.kind, "message");
+  if (custom?.kind !== "message") throw new Error("Expected printed text");
+  assert.equal(JSON.parse(custom.text).summary, "first: hello");
+  await f.manager.deactivateInstance("first");
+  assert.equal(await f.manager.describeResource("first", resource), expected.description);
+  assert.equal(await f.manager.summarizeResource("first", resource), expected.summary);
 });

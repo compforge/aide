@@ -80,7 +80,7 @@ export {
 export type {
   PluginContext,
   PluginControllerRegistry,
-  PluginPrinterRegistry,
+  PluginPrinters,
   PluginHookRegistry,
   PluginConfig,
   PluginDataDirectories,

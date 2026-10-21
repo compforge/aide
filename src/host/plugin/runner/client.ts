@@ -51,6 +51,7 @@ export interface PluginRunnerCallbacks {
   readonly controllerRequest?: (request: Extract<HostRequest, { method: "controller.begin" | "controller.finish" | "controller.schedule" }>) => Promise<unknown>;
   readonly connectors?: ConnectorClient;
   readonly resources: ResourceClient;
+  readonly printers: Pick<import("@compforge/aide-plugin").PluginPrinters, "describe" | "summarize">;
   readonly invokeVerb: (
     context: ExecutionScope,
     request: VerbRequest,
@@ -408,6 +409,10 @@ export class PluginRunnerClient {
           request.context,
           request.request,
         );
+      case "printer.describe":
+        return await this.callbacks.printers.describe(request.resource);
+      case "printer.summarize":
+        return await this.callbacks.printers.summarize(request.resource);
       case "resource.replace":
         return await this.callbacks.resources.replace(request.resource, request.spec, request.status);
       case "resource.get":

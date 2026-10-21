@@ -355,6 +355,8 @@ async function activate(
       },
     }),
     printers: Object.freeze({
+      describe: (resource: Readonly<Resource<unknown, unknown>>) => callHost<string>({ method: "printer.describe", resource }),
+      summarize: (resource: Readonly<Resource<unknown, unknown>>) => callHost<string>({ method: "printer.summarize", resource }),
       register<TSpec, TStatus>(printer: ResourcePrinter<TSpec, TStatus>) {
         assertRegistering();
         registrations.push(printerRegistration(printer as ResourcePrinter));

@@ -150,6 +150,9 @@ test("Chief appends the same original Input to two works without losing observat
   aide = new Aide(root, fakeOptions({ chief: async (prompt) => {
     const input = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
     assert.equal(input.inputId, "changed");
+    assert.match(input.description, /Origin: source\/personal.environments/);
+    assert.match(input.description, /executor workload changed/);
+    assert.deepEqual(JSON.parse(input.description.split("\n\nObservation:\n")[1]!), observation);
     for (const id of [taskId, routineId]) await aide.work("me").appendInput(id, { inputId: input.inputId, text: "核对 executor 变化" });
     return "已交给相关工作核对。";
   }, execute: async (work) => {

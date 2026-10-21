@@ -24,11 +24,11 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 `ResourcePrinter<Spec, Status>` 按资源类型提供 `describe(resource): string` 和 `summarize(resource): string`，分别生成可读详情和简短概览。插件在激活阶段通过 `context.printers.register(...)` 注册；它与 Controller 独立，Resource 实例本身仍是可持久化的数据。
 
-两个方法同步处理传入的资源快照，不修改资源、不查询外部系统、不调用模型。Host 通过 `Manager.describeResource(pluginInstanceId, resource)` / `summarizeResource(...)` 获取结果，返回 `Promise<string>`；Runner 沿用既有 handler IPC 与请求超时机制，只传输资源快照和文本，不重新查询资源。进程内插件同样使用快照副本，避免修改调用方持有的数据。
+两个方法同步处理传入的资源快照，不修改资源、不查询外部系统、不调用模型。拿到 Resource 后，插件通过 `await context.printers.describe(resource)` / `summarize(resource)` 获取文本，无需知道具体 Printer。Host 使用 `Manager.describeResource(pluginInstanceId, resource)` / `summarizeResource(...)`，同样返回 `Promise<string>`；Runner 沿用既有 handler IPC 与请求超时机制，只传输资源快照和文本，不重新查询资源。进程内插件同样使用快照副本，避免修改调用方持有的数据。
 
-Printer 按插件实例和精确的 `apiVersion + kind` 选择，同一实例重复注册同一类型会失败。类型归属复用 ResourceRegistry，不能覆盖 Core 或其它插件的资源类型；注册失败整体回滚，实例关闭或 Runner 失效后撤销注册。没有专用 Printer 时，详情默认使用缩进 JSON，概览默认使用 `kind/name`。已注册 Printer 的执行失败记录资源身份和方法名，并向调用方返回错误。
+Core 内置 Printer 按精确的 `apiVersion + kind` 选择，其它 Printer 按插件实例与 GVK 选择，同一实例重复注册同一类型会失败。类型归属复用 ResourceRegistry，不能覆盖 Core 或其它插件的资源类型；注册失败整体回滚，实例关闭或 Runner 失效后撤销注册。没有专用 Printer 时，详情默认使用缩进 JSON，概览默认使用 `kind/name`。已注册 Printer 的执行失败记录资源身份和方法名，并向调用方返回错误。
 
-这是 Resource 层的展示能力，不调整 Channel / Source / Harness 的接口，也不自动改变现有 Web 或 Harness 的展示。插件声明示例见 [Resource Printers](../../packages/plugin/README.md#resource-printers)。
+InputPrinter 位于 `src/host/input/printer.ts`，由 Host 装配，不随插件实例关闭而撤销。`describe` 保留完整正文、来源、接收时间、可选话题、回复关联和原样 observation；不查询历史，也不解释各 Source 的业务字段。`summarize` 折叠空白并生成最多 120 个 Unicode 码点的单行预览。Web 输入详情与 Chief 当前输入使用同一份描述，Web 正文保留完整 `spec.text`；路由和消费状态仍属于各自的资源与会话投影。输出是普通文本，调用方不能把它当作可信 HTML 或指令。插件声明示例见 [Resource Printers](../../packages/plugin/README.md#resource-printers)。
 
 ## Source 与 Watch
 

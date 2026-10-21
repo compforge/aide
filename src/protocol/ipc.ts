@@ -111,6 +111,7 @@ export type RunnerRequest =
     };
 
 export type HostRequest =
+  | { readonly method: "printer.describe" | "printer.summarize"; readonly resource: Readonly<Resource<unknown, unknown>> }
   | { readonly method: "controller.begin"; readonly key: ReconcileKey }
   | { readonly method: "controller.finish"; readonly scope: ExecutionScope; readonly resource: Resource<unknown, unknown>; readonly requeueAfterMs?: number; readonly failed?: string }
   | { readonly method: "controller.schedule"; readonly key: ReconcileKey; readonly nextAt: string }

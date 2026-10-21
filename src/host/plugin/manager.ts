@@ -1,3 +1,4 @@
+import { inputPrinter } from "../input/printer.ts";
 import { ResourcePrinters } from "./resource/printer.ts";
 import { RunnerController } from "./runner/controller.ts";
 import type { PluginRunnerClient } from "./runner/client.ts";
@@ -300,7 +301,7 @@ export class Manager {
   private readonly printers = new ResourcePrinters((detail, error) => this.log?.({
     level: "error", source: "aide", component: "plugin.printer", message: "Resource printing failed",
     pluginInstanceId: detail.pluginInstanceId, attributes: { ...detail }, error: logError(error),
-  }));
+  }), [inputPrinter]);
   private readonly bindings = new Map<string, PluginBinding>();
   private readonly activations = new Map<string, Promise<void>>();
   private readonly capacity: ReconcileCapacity;
@@ -674,6 +675,8 @@ export class Manager {
       },
       dataDirs,
       {
+        describeResource: (resource) => this.describeResource(instance.pluginInstanceId, resource),
+        summarizeResource: (resource) => this.summarizeResource(instance.pluginInstanceId, resource),
         registerPrinter: (printer) => {
           const release = this.resourceRegistry.register(instance.pluginId, printer.resourceType);
           try {
@@ -724,6 +727,7 @@ export class Manager {
               dataDirs,
               {
                 resources,
+                printers: binding.printers,
                 controllerRequest: (request) => this.handleControllerRequest(instance, request),
                 connectors: binding.connectors,
                 invokeVerb: (context, request) => {
