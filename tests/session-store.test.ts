@@ -1,9 +1,12 @@
+import { spyOn } from "bun:test";
+import * as fs from "node:fs";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionStore } from "../src/host/store/store.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { preparePluginDataDirectories } from "../src/host/plugin/data.ts";
 
 test("Sessions from different execution directories share one home and reopen or fork by id", async (t) => {
@@ -68,6 +71,11 @@ test("Session liveness and cleanup use the flat directory after cwd changes", as
     await active.closeLogs(); await idle.closeLogs();
     rmSync(root, { recursive: true, force: true });
   });
+  const type = { apiVersion: "tests.dev/v1", kind: "Record" };
+  const activeResources = new PluginResourceStore({ session: active, pluginInstanceId: "test" });
+  const idleResources = new PluginResourceStore({ session: idle, pluginInstanceId: "test" });
+  activeResources.create({ type, name: "active", spec: {} });
+  idleResources.create({ type, name: "idle", spec: {} });
   active.updateMeta({ cwd: join(root, "code-c"), updatedAt: "2000-01-01T00:00:00.000Z" });
   idle.updateMeta({ updatedAt: "2000-01-01T00:00:00.000Z" });
   assert.equal(active.acquireLock(), true);
@@ -77,6 +85,8 @@ test("Session liveness and cleanup use the flat directory after cwd changes", as
   assert.deepEqual(result.skippedActive.map((s) => s.aideSessionId), [active.id]);
   assert.deepEqual(result.failures, []);
   assert.equal(existsSync(idle.dir), false);
+  assert.equal(idleResources.list(type).length, 0);
+  assert.equal(activeResources.list(type).length, 1);
   active.releaseLock();
   assert.equal(store.isSessionActive(active.meta), false);
   const reopened = store.openSession(active.id);
@@ -100,4 +110,28 @@ test("externally assigned Session IDs round-trip safely, preserve metadata and r
   const clean = store.cleanSessions({ before: new Date("2001-01-01") });
   assert.deepEqual(clean.removed.map((item) => item.aideSessionId), [id]);
   assert.deepEqual(clean.failures, []);
+});
+
+test("Failed Session directory removal retains business Resources and the reopenable Session", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-cleanup-failure-"));
+  const store = new SessionStore(root);
+  const session = store.createSession({ cwd: root });
+  t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
+  const resources = new PluginResourceStore({ session, pluginInstanceId: "test" });
+  const type = { apiVersion: "tests.dev/v1", kind: "Record" };
+  resources.create({ type, name: "retained", spec: { evidence: "must survive" } });
+  session.updateMeta({ updatedAt: "2000-01-01T00:00:00.000Z" });
+  const original = fs.rmSync;
+  const failure = spyOn(fs, "rmSync").mockImplementation((path, options) => {
+    if (path === session.dir) throw new Error("Injected directory removal failure");
+    return original(path, options);
+  });
+  try {
+    const result = store.cleanSessions({ before: new Date("2001-01-01") });
+    assert.equal(result.removed.length, 0); assert.match(result.failures[0]!.error, /Injected/);
+    assert.equal(resources.list(type).length, 1);
+    const reopened = store.openSession(session.id); await reopened.closeLogs();
+  } finally { failure.mockRestore(); }
+  assert.equal(store.cleanSessions({ before: new Date("2001-01-01") }).removed.length, 1);
+  assert.equal(resources.list(type).length, 0);
 });

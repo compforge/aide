@@ -22,8 +22,8 @@ const labels = replyLabels;
 export function larkProgress(aide: ChannelService, conversationId: string): LarkProgress[] {
   const view = conversationView(aide, conversationId);
   const inputs = aide.findConversation(conversationId)?.conversations.inputs(conversationId) ?? [];
-  return inputs.filter((input) => input.spec.origin === "channel" && !input.spec.replyTo).map((input) => {
-    const turnIds = new Set(aide.invocations().filter((turn) => turn.inputId === input.metadata.name).map((turn) => `execution:${turn.turnId}`));
+  return inputs.filter((input) => input.spec.origin === "channel" && !input.spec.replyTo && (!input.status.batchInputIds?.length || input.status.batchInputIds[0] === input.metadata.name)).map((input) => {
+    const turnIds = new Set(aide.invocations().filter((turn) => turn.inputId === input.metadata.name || (!!input.status.executionId && turn.executionId === input.status.executionId)).map((turn) => `execution:${turn.turnId}`));
     const executions = view.blocks.filter((block) => block.type === "execution" &&
       (turnIds.has(block.id) || (!input.status.laneId && view.meta.activity?.id === input.metadata.name && block.status === "running")));
     const parents = new Set(executions.map((block) => block.id));
@@ -35,7 +35,7 @@ export function larkProgress(aide: ChannelService, conversationId: string): Lark
       const message = question && aide.messages().find((item) => item.id === question.request.messageId);
       if (message) responses.push(message);
     }
-    const text = responses.map((message) => message.text).join("\n\n") || blocks.filter((block) => block.type === "text").at(-1)?.content || "";
+    const text = responses.map((message) => message.text).join("\n\n");
     const think = blocks.filter((block) => block.type === "thought" || block.type === "tool")
       .map((block) => block.type === "tool" ? `工具：${block.content} · ${block.status ?? "执行中"}` : block.content).join("\n\n");
     const points = Array.from(text), thought = Array.from(think);

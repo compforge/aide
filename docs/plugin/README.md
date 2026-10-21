@@ -20,6 +20,16 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 资源写入统一经过 Core ResourceClient，包括 Agent 工具和 Reconcile，使用版本检查并通知所有相关 Watch。spec 与初始 status 可以原子提交。主资源的纯 status 更新不自动再入队；需要感知 status 的 Controller 显式声明 Watch。跨越 Harness 或用户等待后，应按 uid 重新读取资源，避免旧回调更新同名替代资源。删除先持久化 deletionTimestamp，Controller 完成终止处理后移除资源；结构性 owner 关系支持级联删除。
 
+## Resource 容量与释放
+
+Host 的 `ResourceStorage` 将 Input 与插件 Resource 存入共享 SQLite，以按需读取替代常驻完整快照集合。容量按 Group/Kind 汇总，配额覆盖不同 API 版本、Session 和插件实例；同时限制单条大小、每种数量/字节以及 Host 总字节。配置见 [Resource 容量](../configuration.md#resource-容量)。
+
+资源所有者通过纯 `ResourceLifecycle` 定义释放时间和引用的精确 uid，由宿主装配注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 在路由结束后可释放，但 Conversation 的近期/待处理引用与 Source 的待提交引用继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
+
+每次写入在事务内同步记录、引用索引、回执和必要的回收。无法满足容量约束时整个事务回滚，变更通知只在提交后发出。因此过载会阻止接收更多工作，不会通过删除正在承担的工作来腾空间。完成并缩小记录的更新允许在超配额状态下提交。
+
+Session、Turn 等从 Ledger/运行态生成的只读 Resource 投影不另存数据库，其源数据生命周期仍由对应 owner 管理。Resource 配额不等于进程 RSS 或全部磁盘文件的硬上限。
+
 ## Resource Printer
 
 `ResourcePrinter<Spec, Status>` 按资源类型提供 `describe(resource): string` 和 `summarize(resource): string`，分别生成可读详情和简短概览。插件在激活阶段通过 `context.printers.register(...)` 注册；它与 Controller 独立，Resource 实例本身仍是可持久化的数据。
@@ -43,6 +53,8 @@ Reconcile 通过 `ctx.verbs` 请求 say、ask、confirm、draft、harness，或�
 等待 verb 时释放 Controller 和 Runner 容量，同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。拒绝确认是正常业务答案；取消、超时和失败需要插件自行决定业务结果。
 
 `execution.withContext({ conversationId, inputId })` 将后续动作关联到业务会话和输入，主资源身份由 Core 提供。Channel 直接使用这些关联展示问题与执行进度，不通过 Chief 或 Harness Target 推导。其他组件按职责使用 Core 服务，不必经由 Verb。
+
+`harness({ freshContext: true })` 在空闲 Lane 上建立新的原生上下文，并持久化 Ledger 历史边界；后续 catch-up 不注入该边界之前的执行历史。调用方提供新的摘要和必要材料，Lane 与业务资源身份保持不变。
 
 Harness 返回执行结束不等于资源目标完成。结果校验、下一步安排、等待用户和业务终态都属于插件。
 

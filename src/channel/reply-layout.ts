@@ -1,3 +1,4 @@
+import type { ConversationBlock } from "./view.ts";
 import MarkdownIt from "markdown-it";
 
 const markdown = new MarkdownIt({ html: false });
@@ -50,4 +51,12 @@ export function answerPreview(content: string, phase: string): string {
   const text = replyText(content);
   const points = Array.from(text);
   return (phase === "running" || phase === "queued") && points.length > 120 ? "…" + points.slice(-120).join("") : text;
+}
+
+/** @spec Inputs stay in the transcript while their execution and replies move into the live activity panel. */
+export function historyBlocks(blocks: readonly ConversationBlock[], activity: { id: string } | null): ConversationBlock[] {
+  const liveIds = new Set(blocks.filter((block) => block.type === "execution" &&
+    (block.status === "running" || (activity && block.group_id === activity.id))).map((block) => block.id));
+  return blocks.filter((block) => block.type === "input" ||
+    (!liveIds.has(block.id) && !liveIds.has(block.parent_id!) && (!activity || block.group_id !== activity.id)));
 }

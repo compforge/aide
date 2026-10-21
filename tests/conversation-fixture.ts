@@ -1,3 +1,4 @@
+import { resourceHome } from "../src/host/resource/storage.ts";
 import { randomUUID } from "node:crypto";
 import { InputStore } from "../src/host/input/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
@@ -10,7 +11,7 @@ export class ConversationStore extends PersonalConversations {
   constructor(session: { dir: string; id?: string }) {
     const scope = { ...session, id: session.id ?? "test" };
     const resources = new PluginResourceStore({ session: scope, pluginInstanceId: "personal" });
-    super(scope.id, resources, createResourceClient(resources, (change) => this.changed(change)), new InputStore(session.dir));
+    super(scope.id, resources, createResourceClient(resources, (change) => this.changed(change)), new InputStore(resourceHome(session.dir)));
   }
 }
 export async function seedInput(store: PersonalConversations, id: string, spec: InputSpec & { conversationId?: string }, status: ProcessingStatus = {}) {

@@ -81,9 +81,13 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   assert.equal(inputs.find((input) => input.spec.text === "other")!.spec.relation, undefined);
   assert.deepEqual(inputs.find((input) => input.spec.text === "mine")!.spec.observation!.sender, { id: "ou_me", type: "user" });
   assert.ok(prompts.some((prompt) => prompt.includes("Relation to Person: sent")));
+  // Rebuilding a fresh native context must retain attribution in its bounded history.
+  const scope = aide.session("lark:cli_app:oc_chat");
+  const conversation = scope.conversations.resource(scope.id)!;
+  await scope.plugins.resourceClient("personal").patchStatus(conversation, { contextReady: false });
   await channel.receive(event("followup", "ou_me"));
   await channel.dispatch(); await aide.settled();
-  const history = JSON.parse(prompts.at(-1)!.split("Recent conversation: ")[1]!) as Array<{ text: string; role: string; relation?: string }>;
+  const history = prompts.at(-1)!.split("Recent conversation: ")[1]!.trim().split("\n").map((line) => JSON.parse(line)) as Array<{ text: string; role: string; relation?: string }>;
   assert.equal(history.find((item) => item.text === "mine")!.relation, "sent");
   assert.equal(history.find((item) => item.text === "other")!.relation, "unknown");
   assert.equal(history.find((item) => item.text === "other")!.role, "channel");

@@ -12,7 +12,10 @@ export const conversationKey = digest;
 /** @spec Conversation is a Personal Resource. Input facts are shared; consumption and replies belong to each Conversation. */
 export class ConversationStore {
   private readonly listeners = new Set<(conversation: Conversation) => void>();
-  constructor(readonly sessionId: string, readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly inputStore: InputStore) {}
+  constructor(readonly sessionId: string, readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly inputStore: InputStore) {
+    resources.storage.register(resources.scope, { resourceType: CONVERSATION_TYPE, releasedAt: () => undefined,
+      references: (r) => (r.spec as ConversationSpec).inputIds.map((id) => `input:${id}`) });
+  }
   changed(change: ResourceClientChange): void {
     if (change.resource.kind !== CONVERSATION_TYPE.kind || change.kind === "deleted") return;
     const c = this.project(change.resource as ConversationResource);
@@ -36,7 +39,7 @@ export class ConversationStore {
       const c = raw as ConversationResource;
       return c.spec.inputIds.map((id) => {
         const input = this.inputStore.get(id); if (!input) throw new Error(`Conversation references missing Input: ${id}`);
-        return { ...input, conversationId: c.spec.id, metadata: { ...input.metadata, resourceVersion: c.metadata.resourceVersion }, status: c.status.processing[id] ?? {} };
+        return { ...input, conversationId: c.spec.id, metadata: { ...input.metadata, resourceVersion: c.metadata.resourceVersion }, status: c.status.processing[id]?.roundId ? { ...c.status.processing[c.status.processing[id]!.roundId!], ...c.status.processing[id] } : c.status.processing[id] ?? {} };
       });
     });
   }
@@ -56,7 +59,7 @@ export class ConversationStore {
         id: input.metadata.name, conversationId: c.id, resourceVersion: resource.metadata.resourceVersion, input, status: input.status,
       }));
       for (const [id, status] of Object.entries(resource.status.processing)) {
-        if (status.timerAt) runs.push({ id, conversationId: c.id, resourceVersion: resource.metadata.resourceVersion, status });
+        if (status.timerAt || status.batchInputIds) runs.push({ id, conversationId: c.id, resourceVersion: resource.metadata.resourceVersion, status });
       }
       return runs;
     });
@@ -94,7 +97,7 @@ export class ConversationStore {
     const previous = c.status.processing[run.id] ?? {};
     const next = { ...previous, ...patch };
     if (["done", "failed"].includes(previous.phase ?? "") && !["done", "failed"].includes(next.phase ?? "")) throw new Error("Completed input cannot be replayed");
-    if (next.phase === "running" && Object.entries(c.status.processing).some(([id, s]) => id !== run.id && ["running", "waiting"].includes(s.phase ?? ""))) throw new Error("Conversation already has an active input");
+    if (next.phase === "running" && Object.entries(c.status.processing).some(([id, s]) => id !== run.id && !s.roundId && ["running", "waiting"].includes(s.phase ?? ""))) throw new Error("Conversation already has an active input");
     const messages = mergeMessages(c.spec.id, c.status.messages, patch.messages ?? []);
     await this.client.patchStatus(c, { processing: { ...c.status.processing, [run.id]: next }, messages });
   }
@@ -102,6 +105,16 @@ export class ConversationStore {
     const c = await this.ensure(id);
     await this.client.patchStatus(c, { messages: mergeMessages(id, c.status.messages, messages),
       receipts: [...new Map([...c.status.receipts, ...receipts].map((r) => [r.key, r])).values()] });
+  }
+  async delivered(conversationId: string, messageId: string): Promise<void> {
+    for (let attempt = 0; ; attempt++) {
+      const c = this.resource(conversationId);
+      if (!c || !c.status.messages.some((m) => m.id === messageId && !m.deliveredAt)) return;
+      try {
+        await this.client.patchStatus(c, { messages: c.status.messages.map((m) => m.id === messageId ? { ...m, deliveredAt: new Date().toISOString() } : m) });
+        return;
+      } catch (error) { if (attempt >= 4 || !/version conflict/.test(String(error))) throw error; }
+    }
   }
   response(key: string): Message | undefined {
     for (const raw of this.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE)) {
@@ -115,7 +128,7 @@ export class ConversationStore {
       const input = this.input(inputId, conversationId); if (!input) throw new Error("say Input is not attached to this Conversation");
       await this.update(input, { messages: [...input.status.messages ?? [], message] });
     } else {
-      const run = executionId && this.runs(conversationId).find((r) => r.status.timerAt && r.status.executionId === executionId);
+      const run = executionId && this.runs(conversationId).find((r) => r.status.executionId === executionId && !r.status.roundId);
       if (run) await this.updateRun(run, { messages: [...run.status.messages ?? [], message] });
       else await this.archive(conversationId, [message]);
     }
@@ -131,7 +144,7 @@ function mergeMessages(id: string, previous: Message[], incoming: Message[]): Me
   for (const message of incoming) {
     if (message.conversationId !== id) throw new Error("Message belongs to another conversation");
     const existing = messages.find((m) => m.id === message.id);
-    if (existing && JSON.stringify(existing) !== JSON.stringify(message)) throw new Error("Message identity conflict");
+    if (existing && JSON.stringify({ ...existing, deliveredAt: undefined }) !== JSON.stringify({ ...message, deliveredAt: undefined })) throw new Error("Message identity conflict");
     if (!existing) messages.push(message);
   }
   return messages;

@@ -266,7 +266,7 @@ test(`${definition.kind} requeues a dynamic wait and applies its own completion 
 test("Aide resumes the same Session and personal state when execution cwd changes", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-cwd-restart-"));
   const agent: Agent = { chief: async () => "记住了", execute: async () => { throw new Error("Unexpected execution"); } };
-  const first = new Aide(root, fakeOptions(agent, join(root, "code-a")), log);
+  const first = new Aide(root, fakeOptions(agent, join(root, "code-a"), [], root), log);
   let restarted: Aide | undefined;
   t.after(async () => { await first.close(); await restarted?.close(); rmSync(root, { recursive: true, force: true }); });
   await first.receive({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "你好" });
@@ -277,7 +277,7 @@ test("Aide resumes the same Session and personal state when execution cwd change
   await first.close();
 
   const executionCwds: string[] = [];
-  const options = fakeOptions(agent, join(root, "code-b"));
+  const options = fakeOptions(agent, join(root, "code-b"), [], root);
   restarted = new Aide(root, { ...options, createAdapter: (target) => {
     const adapter = options.createAdapter(target);
     const open = adapter.open.bind(adapter);

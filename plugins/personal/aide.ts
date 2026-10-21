@@ -1,3 +1,10 @@
+import { assertInputCapacity } from "./conversation/input.ts";
+import { environmentLifecycle } from "./source/environment/observe.ts";
+import { messageLifecycle } from "./source/message/observe.ts";
+import { requirementLifecycle } from "./source/requirement/observe.ts";
+import { createPiAgent } from "../../agents/pi/agent.ts";
+import { inputPrinter } from "../../src/host/input/printer.ts";
+import { conversationPolicy } from "./conversation/config.ts";
 import type { Logger } from "pino";
 import type { ResourceType, InputReceipt } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/host/plugin/manager.ts";
@@ -33,7 +40,7 @@ export class Personal {
   private readonly chiefConversations = new Map<string, string>();
   private readonly targets: { id: string; harness: string }[];
 
-  constructor(private readonly options: { timezone: string; person: Person; personFile: string }, private readonly log: Logger,
+  constructor(private readonly options: { timezone: string; person: Person; personFile: string; conversation?: unknown }, private readonly log: Logger,
     runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; inputs: InputStore }) {
     this.core = runtime.core;
     this.session = runtime.session;
@@ -41,6 +48,7 @@ export class Personal {
     this.targets = runtime.targets;
     this.plugins = this.core.pluginManager!;
     const resources = new PluginResourceStore({ session: this.session, pluginInstanceId: "personal" });
+    for (const policy of [environmentLifecycle, messageLifecycle, requirementLifecycle]) resources.storage.register(resources.scope, policy);
     const client = this.plugins.resourceClient("personal");
     this.store = new Store(resources, client, new ConversationStore(this.id, resources, client, runtime.inputs));
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
@@ -69,8 +77,8 @@ export class Personal {
     if (!conversationId) throw new Error("Unknown Chief target");
     const active = () => {
       const inputs = this.store.conversations.runs().filter((item) =>
-        item.conversationId === conversationId && item.status.phase === "running");
-      if (inputs.length !== 1 || inputs[0]!.status.question || inputs[0]!.status.quietReason) throw new Error("Chief is not accepting further mutations in this turn");
+        item.conversationId === conversationId && item.status.phase === "running" && !item.status.roundId);
+      if (inputs.length !== 1 || inputs[0]!.status.question || inputs[0]!.status.quietReason || inputs[0]!.status.compacting) throw new Error("Chief is not accepting further mutations in this turn");
       return inputs[0]!;
     };
     const tools = chiefTools(this.connectors, async (question) => {
@@ -78,11 +86,28 @@ export class Personal {
       await this.store.conversations.updateRun(input, { question });
     }, async (quietReason) => {
       const input = active();
-      if (input.input?.spec.origin === "channel") throw new Error("Channel input cannot be dismissed silently");
+      if (input.input?.spec.origin === "channel" || input.status.batchInputIds?.some((id) => this.conversations.inputStore.get(id)?.spec.origin === "channel")) throw new Error("Channel input cannot be dismissed silently");
       await this.store.conversations.updateRun(input, { quietReason });
+    }, async (id, text) => {
+      const run = active();
+      if ((run.status.notifications ?? []).some((n) => n.id === id)) return;
+      await this.store.conversations.updateRun(run, { notifications: [...run.status.notifications ?? [], { id, text }] });
+    }, (id, offset) => {
+      const conversation = this.conversations.resource(conversationId);
+      const input = this.conversations.inputStore.get(id);
+      if (!conversation || !input || (!conversation.spec.inputIds.includes(id) && !input.status.deliveries?.includes(conversation.metadata.uid))) {
+        throw new Error("Input is not attached to this Conversation");
+      }
+      const description = inputPrinter.describe(input);
+      return { inputId: id, text: description.slice(offset, offset + 8000),
+        nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
     });
-    return (options) => createChiefAgent({ ...options, config, work: this.work(conversationId), personFile: this.options.personFile,
-      tools, beforeWorkMutation: () => { active(); } });
+    return (options) => {
+      const summary = this.conversations.runs(conversationId).some((r) => r.status.phase === "running" && r.status.compacting);
+      if (summary) return createPiAgent({ ...options, config, scope: `chief:${conversationId}`, nativeTools: [], tools: [],
+        systemPrompt: "Summarize supplied conversation facts. Return only the requested summary; do not perform actions.", extensionPaths: [] });
+      return createChiefAgent({ ...options, config, work: this.work(conversationId), personFile: this.options.personFile, tools, beforeWorkMutation: () => { active(); } });
+    };
   }
 
   get id() { return this.session.id; }
@@ -127,13 +152,22 @@ export class Personal {
     }
   }
 
+  /** @spec Interruption never replays actions; direct requests receive one notice committed with their failed round. */
   async recoverInterrupted(): Promise<void> {
     for (const input of this.store.conversations.runs()) {
-      if (input.status.phase !== "running" && input.status.phase !== "waiting") continue;
-      await this.store.conversations.updateRun(input, {
-        phase: "failed", question: null, messages: [...input.status.messages ?? [],
-          message(input.conversationId, "上次处理已中断，可能已有部分操作生效。请核对后重新交办。")],
-      });
+      if (input.status.roundId || (input.status.phase !== "running" && input.status.phase !== "waiting")) continue;
+      const c = this.conversations.resource(input.conversationId)!;
+      const processing = { ...c.status.processing, [input.id]: { ...input.status,
+        phase: "failed" as const, question: null, error: "Execution interrupted; verify existing actions before resuming" } };
+      for (const id of input.status.batchInputIds ?? []) processing[id] = { ...processing[id], phase: "failed" };
+      const direct = !input.status.compacting && (input.input?.spec.origin === "channel" ||
+        input.status.batchInputIds?.some((id) => this.conversations.inputStore.get(id)?.spec.origin === "channel"));
+      const notices = direct ? [message(input.conversationId,
+        "上次处理已中断，可能已有部分操作生效。已暂停自动执行，请核对后重新交办。", null)] : [];
+      processing[input.id] = { ...processing[input.id]!, messages: [...processing[input.id]!.messages ?? [], ...notices] };
+      // Recovery disposition and its notice commit together: another restart cannot repeat the notification.
+      await this.plugins.resourceClient("personal").patchStatus(c, { processing, messages: [...c.status.messages, ...notices], contextReady: false,
+        blocked: { at: new Date().toISOString(), reason: "Execution interrupted; no automatic replay" } });
       this.log.warn({ runId: input.id, conversationId: input.conversationId }, "Recovered interrupted Chief activation without replay");
     }
     for (const work of this.store.read().works) {
@@ -194,7 +228,10 @@ export class Personal {
     if (previous) return { inputId: previous.metadata.name, at: previous.metadata.creationTimestamp };
     // @spec Deleting a Conversation never turns redelivery of an accepted Input into a new command.
     const fact = this.conversations.inputStore.get(id);
+    if (fact?.status.deliveries?.includes(this.conversations.resource(input.conversationId)?.metadata.uid ?? "")) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
     if (fact && ["done", "ignored"].includes(fact.status.routing?.phase ?? "")) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
+    const receipt = this.conversations.inputStore.receipt(id);
+    if (!fact && receipt) return { inputId: id, at: receipt.at };
     await this.conversations.ensure();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
     this.registerConversation(input.conversationId);
@@ -231,8 +268,10 @@ export class Personal {
   }
 
   private async acceptChannel(id: string, input: Incoming, messages: Message[], phase?: "done", replyTo?: string) {
+    const current = await this.conversations.ensure();
+    if (!current.spec.inputIds.includes(id)) assertInputCapacity(current, { origin: "channel", originId: input.channelId, text: input.text, replyTo }, conversationPolicy(this.options.conversation).maxPending);
     const relation = channelRelation(this.options.person, input);
-    const fact = await this.conversations.submit(id, { sessionId: this.id, text: input.text, timezone: this.options.timezone,
+    const fact = await this.conversations.submit(id, { attention: "immediate", sessionId: this.id, text: input.text, timezone: this.options.timezone,
       origin: "channel", originId: input.channelId, ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}), ...(replyTo ? { replyTo } : {}) });
     for (let attempt = 0; ; attempt++) {
@@ -240,6 +279,7 @@ export class Personal {
       const ids = new Set(c.status.messages.map((m) => m.id));
       const extra = messages.filter((m) => !ids.has(m.id));
       const attached = c.spec.inputIds.includes(id);
+      if (!attached) assertInputCapacity(c, fact.spec, conversationPolicy(this.options.conversation).maxPending);
       if (attached && !extra.length) break;
       try {
         await this.plugins.resourceClient("personal").replace(c, { ...c.spec, name: c.spec.name || initialConversationName(this.conversations.inputStore.get(c.spec.inputIds[0] ?? id)?.spec.text ?? input.text), inputIds: [...new Set([...c.spec.inputIds, id])] }, {

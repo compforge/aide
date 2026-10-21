@@ -112,3 +112,9 @@ export function registerEnvironmentSources(context: PluginContext): void {
     },
   });
 }
+
+/** Pin a committed observation until its baseline transition has been persisted. */
+export const environmentLifecycle: import("@compforge/aide-plugin").ResourceLifecycle = {
+  resourceType: ENVIRONMENT_SOURCE_TYPE, releasedAt: () => undefined,
+  references: (resource) => [`input:${digest([resource.metadata.uid, ((resource.status as EnvironmentSourceStatus).sequence ?? 0) + 1])}`],
+};

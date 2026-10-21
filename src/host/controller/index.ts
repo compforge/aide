@@ -84,6 +84,7 @@ export interface HarnessInvocationInput {
   readonly harnessTargetId: string;
   readonly laneId: string;
   readonly newLane: boolean;
+  readonly freshContext?: boolean;
   readonly parentLaneId?: string;
   readonly source: HarnessInputSource;
   readonly messageId: string;
@@ -599,6 +600,16 @@ export class Controller {
         parentLaneId,
       ).laneId
       : this.options.session.requireLane(input.laneId).laneId;
+    if (input.freshContext) {
+      if (this.processing.has(laneId) || this.harnessInputs.some((item) => item.laneId === laneId)) throw new Error("Cannot replace an active context");
+      const key = this.bindingKey(laneId, target.id);
+      const binding = this.bindings.get(key);
+      if (binding) await binding.close();
+      this.bindings.delete(key);
+      this.options.session.setLaneHarnessSession(laneId, target.id, {
+        harness: target.harness, contextAfterSeq: this.options.session.projection.lastSeq,
+      });
+    }
     const queue = this.queueForLane(laneId);
     const submission = queue.enqueue(target, input.blocks, {
       source: input.source,
@@ -1409,7 +1420,7 @@ export class Controller {
       }
       // Receipt 是事实来源；syncedSeq 只给尚未产生新事件的旧会话做迁移兜底。
       const sinceSeq =
-        this.contextDeliveries.epoch(contextEpochId)?.throughSeq ?? meta?.syncedSeq ?? 0;
+        Math.max(this.contextDeliveries.epoch(contextEpochId)?.throughSeq ?? meta?.syncedSeq ?? 0, meta?.contextAfterSeq ?? 0);
       const catchUp = buildTargetCatchUpContext(session, {
         target: binding.target,
         laneId: binding.laneId,

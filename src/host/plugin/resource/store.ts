@@ -1,16 +1,13 @@
+import { ResourceStorage, resourceHome, type StoredResource } from "../../resource/storage.ts";
 import { assertPathSegment, validateResourceType } from "./type.ts";
 import { assertSessionId } from "../../store/session-id.ts";
 import { isDeepStrictEqual } from "node:util";
 import {
   existsSync,
-  mkdirSync,
   readFileSync,
   readdirSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, join } from "node:path";
 
 import type {
   Resource,
@@ -79,6 +76,7 @@ interface ResourceControl {
 }
 
 interface StoredPluginResource<TSpec, TStatus> {
+  [key: string]: unknown;
   object: PluginResource<TSpec, TStatus>;
   control: ResourceControl;
 }
@@ -246,19 +244,11 @@ function isoTimestamp(name: string, value: unknown): asserts value is string {
   }
 }
 
-function writeJsonAtomic(path: string, value: unknown): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${Date.now()}.${Math.random()}.tmp`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-    renameSync(temporary, path);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
-}
 
 export class PluginResourceStore {
   private readonly sessionDir: string;
+  readonly storage: ResourceStorage;
+  readonly scope: string;
   readonly aideSessionId: string;
   readonly pluginInstanceId: string;
 
@@ -269,6 +259,20 @@ export class PluginResourceStore {
     this.sessionDir = options.session.dir;
     this.aideSessionId = options.session.id;
     this.pluginInstanceId = options.pluginInstanceId;
+    this.scope = JSON.stringify([options.session.id, options.pluginInstanceId]);
+    this.storage = ResourceStorage.open(resourceHome(options.session.dir));
+    const root = this.namespacesDir();
+    this.storage.migrate(root, function* () {
+      function* files(path: string): Generator<string> {
+        if (!existsSync(path)) return;
+        for (const item of readdirSync(path, { withFileTypes: true })) {
+          const child = join(path, item.name);
+          if (item.isDirectory()) yield* files(child);
+          else if (item.name.endsWith(".json")) yield child;
+        }
+      }
+      for (const path of files(root)) yield [path, JSON.stringify([options.session.id, options.pluginInstanceId]), JSON.parse(readFileSync(path, "utf8")) as StoredResource];
+    });
   }
 
   create<TSpec, TStatus = Record<string, unknown>>(
@@ -286,7 +290,7 @@ export class PluginResourceStore {
     const owner = this.ownerReference(input.owner, type, name, namespace);
     const path = this.resourcePath(type, name, namespace);
     return withFileLock(path, () => {
-      if (existsSync(path)) {
+      if (this.storage.has(path)) {
         throw new Error(`plugin resource already exists: ${type.kind}/${name}`);
       }
       this.assertOwnerActive(owner);
@@ -300,7 +304,7 @@ export class PluginResourceStore {
         spec: input.spec,
         status: input.status ?? ({} as TStatus),
       });
-      writeJsonAtomic(path, stored);
+      this.storage.write(path, this.scope, stored);
       return stored.object;
     });
   }
@@ -325,7 +329,7 @@ export class PluginResourceStore {
     const owner = this.ownerReference(input.owner, type, name, namespace);
     const path = this.resourcePath(type, name, namespace);
     return withFileLock(path, () => {
-      if (!existsSync(path)) {
+      if (!this.storage.has(path)) {
         this.assertOwnerActive(owner);
         const stored = this.initialStoredResource<TSpec, TStatus>({
           type,
@@ -337,7 +341,7 @@ export class PluginResourceStore {
           spec,
           status: {} as TStatus,
         });
-        writeJsonAtomic(path, stored);
+        this.storage.write(path, this.scope, stored);
         return { resource: stored.object, created: true };
       }
       const current = this.readCurrentStored<TSpec, TStatus>(
@@ -364,6 +368,7 @@ export class PluginResourceStore {
     name: string,
     namespace: ResourceNamespace = "v1",
   ): PluginResource<TSpec, TStatus> {
+    this.storage.read(this.resourcePath(type, name, namespace), true);
     return this.readStored<TSpec, TStatus>(type, name, namespace).object;
   }
 
@@ -375,7 +380,7 @@ export class PluginResourceStore {
     validateResourceType(type);
     assertPathSegment("resource name", name);
     const canonical = this.resourceNamespace(namespace);
-    if (!existsSync(this.resourcePath(type, name, canonical))) return;
+    if (!this.storage.read(this.resourcePath(type, name, canonical), true)) return;
     return this.readCurrentStored<TSpec, TStatus>(type, name, canonical).object;
   }
 
@@ -397,19 +402,8 @@ export class PluginResourceStore {
           namespaceContains(namespace, candidate)
         )
       : [namespace];
-    return namespaces.flatMap((candidate) => {
-      const kindDir = this.kindDir(type, candidate);
-      if (!existsSync(kindDir)) return [];
-      return readdirSync(kindDir, { withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-        .map((entry) =>
-          this.readStored<TSpec, TStatus>(
-            type,
-            basename(entry.name, ".json"),
-            candidate,
-          ).object
-        );
-    })
+    return namespaces.flatMap((candidate) => [...this.storage.keys(this.scope, `${this.kindDir(type, candidate)}/`)]
+      .map((path) => this.readStored<TSpec,TStatus>(type, basename(path, ".json"), candidate).object))
       .filter((resource) =>
         containsStringMap(resource.metadata.labels, matchLabels)
       )
@@ -707,7 +701,7 @@ export class PluginResourceStore {
         );
       }
       const next = update(current);
-      if (!isDeepStrictEqual(current, next)) writeJsonAtomic(path, next);
+      if (!isDeepStrictEqual(current, next)) this.storage.write(path, this.scope, next);
       return next;
     });
   }
@@ -731,7 +725,8 @@ export class PluginResourceStore {
     const path = this.resourcePath(type, name, canonical);
     let parsed: unknown;
     try {
-      parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      parsed = this.storage.read(path);
+      if (!parsed) throw Object.assign(new Error("Missing resource"), { code: "ENOENT" });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         throw new Error(`plugin resource not found: ${type.kind}/${name}`);
@@ -910,28 +905,7 @@ export class PluginResourceStore {
   }
 
   private listAll(): PluginResource<unknown, unknown>[] {
-    const resources: PluginResource<unknown, unknown>[] = [];
-    for (const namespace of this.managedNamespaces()) {
-      const root = this.resourcesDir(namespace);
-      if (!existsSync(root)) continue;
-      for (const group of readdirSync(root, { withFileTypes: true })) {
-        if (!group.isDirectory()) continue;
-        const groupDir = join(root, group.name);
-        for (const version of readdirSync(groupDir, { withFileTypes: true })) {
-          if (!version.isDirectory()) continue;
-          const versionDir = join(groupDir, version.name);
-          for (const kind of readdirSync(versionDir, { withFileTypes: true })) {
-            if (!kind.isDirectory()) continue;
-            const type = {
-              apiVersion: `${group.name}/${version.name}`,
-              kind: kind.name,
-            };
-            resources.push(...this.list(type, { namespace }));
-          }
-        }
-      }
-    }
-    return resources;
+    return [...this.storage.keys(this.scope)].map((key) => this.storage.read(key)!.object);
   }
 
   private remove(
@@ -943,10 +917,10 @@ export class PluginResourceStore {
     assertPathSegment("resource name", name);
     const path = this.resourcePath(type, name, namespace);
     withFileLock(path, () => {
-      if (!existsSync(path)) {
+      if (!this.storage.has(path)) {
         throw new Error(`plugin resource not found: ${type.kind}/${name}`);
       }
-      rmSync(path, { force: true });
+      this.storage.remove(path);
     });
   }
 
@@ -991,18 +965,6 @@ export class PluginResourceStore {
   }
 
   private managedNamespaces(): ResourceNamespace[] {
-    const root = this.namespacesDir();
-    if (!existsSync(root)) return ["v1"];
-    const namespaces = readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
-      if (!entry.isDirectory()) return [];
-      try {
-        return [parseResourceNamespace(decodeURIComponent(entry.name))];
-      } catch {
-        return [];
-      }
-    });
-    if (!namespaces.includes("v1")) namespaces.push("v1");
-    return namespaces.sort();
+    return [...new Set<ResourceNamespace>(["v1", ...this.listAll().map((r) => r.metadata.namespace as ResourceNamespace)])].sort();
   }
-
 }

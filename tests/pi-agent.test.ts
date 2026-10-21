@@ -263,7 +263,7 @@ test("Pi requires startup configuration and Chief requires its bound factory", a
 
 // @case session_native_resume: isolated sessions survive restart and reuse Pi history; cwd changes reset only native bindings.
 test("Aide routes stable Sessions and resumes real Chief native context across inputs and restart", { timeout: 30_000 }, async (t) => {
-  const fixture = await setup(t, (_request, index) => ({ text: `native-response-${index}` }));
+  const fixture = await setup(t, (_request, index) => index % 2 === 0 ? { tool: "say", args: { text: `native-response-${index / 2}` } } : { text: `Internal summary ${Math.floor(index / 2)}` });
   const home = join(fixture.config.cwd, "aide");
   const log = pino({ level: "silent" });
   let aide: Aide;
@@ -287,22 +287,23 @@ test("Aide routes stable Sessions and resumes real Chief native context across i
     const original = binding("lark:app:group-a", "lark:app:group-a");
     await send("lark:app:group-a", "lark:app:group-a", "a2");
     assert.equal(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
-    assert.match(JSON.stringify(fixture.requests[1]), /native-response-0/);
+    assert.match(JSON.stringify(fixture.requests[2]), /native-response-0/);
     await send("lark:app:group-b", "lark:app:group-b", "b1");
     assert.notEqual(binding("lark:app:group-b", "lark:app:group-b").harnessSessionId, original.harnessSessionId);
-    assert.doesNotMatch(JSON.stringify(fixture.requests[2]), /question-a1|native-response-0/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[4]), /question-a1|native-response-0/);
     await aide.close();
     aide = open(); await aide.start();
     assert.equal(aide.sessions().length, 2);
     await send("lark:app:group-a", "lark:app:group-a", "a3");
     assert.equal(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
-    assert.match(JSON.stringify(fixture.requests[3]), /native-response-1/);
-    assert.doesNotMatch(JSON.stringify(fixture.requests[3]), /question-b1/);
+    assert.match(JSON.stringify(fixture.requests[6]), /native-response-1/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[6]), /question-b1/);
     assert.equal(aide.messages().filter((message) => message.conversationId === "lark:app:group-a").length, 3);
     await aide.close();
     const cwd = join(fixture.config.cwd, "other-cwd"); mkdirSync(cwd);
     aide = open(cwd); await aide.start();
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a"), undefined);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a").resumeState, undefined);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a").contextAfterSeq, original.contextAfterSeq);
     await send("lark:app:group-a", "lark:app:group-a", "a4");
     assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
     assert.equal(aide.messages().filter((message) => message.conversationId === "lark:app:group-a").length, 4);
@@ -505,4 +506,49 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
   const session = new SessionStore(home).openSession("me");
   assert.equal(session.meta.harnessTargets.default!.harness, "pi");
   assert.ok(Object.values(session.meta.lanes).some((lane) => lane.harnessSessions.default?.harness === "pi"));
+});
+
+/** @case A checkpoint rebuild opens a tool-free summary context, then excludes forgotten Ledger history even after restart. */
+test("Chief summary rebuild fences forgotten history from native resume and Ledger catch-up", { timeout: 30_000 }, async (t) => {
+  let answer = false;
+  const fixture = await setup(t, (request, index) => {
+    if (index === 0) {
+      const message = (request.messages as { role: string; content: string | { type: string; text?: string }[] }[])
+        .filter((m) => m.role === "user").map((m) => typeof m.content === "string" ? m.content : m.content.map((p) => p.text ?? "").join("\n"))
+        .find((text) => text.includes("Activation:"))!;
+      const id = JSON.parse(message.split("Activation: ")[1]!.split("\n")[0]!).inputs[0].inputId;
+      return { tool: "read_input", args: { inputId: id } };
+    }
+    if (index === 1) assert.match(JSON.stringify(request.messages), /nextOffset/);
+    const tools = request.tools as { function: { name: string } }[] | undefined;
+    if (!tools?.some((tool) => tool.function.name === "say")) return { text: "Earlier facts reviewed; no unresolved work." };
+    answer = !answer;
+    return answer ? { tool: "say", args: { text: "Acknowledged" } } : { text: "Processed" };
+  });
+  const { ConfigSchema } = await import("../src/config.ts");
+  const home = join(fixture.config.cwd, "checkpoint-home");
+  let aide: Aide;
+  const open = () => new Aide(home, { cwd: fixture.config.cwd, config: ConfigSchema.parse({ plugins: { personal: { conversation: { batchSize: 1, recentInputs: 1 } } } }),
+    timezone: "UTC", defaultTarget: { id: "default", harness: "pi" }, createAdapter: (target, ports) => createHarnessAdapter(target, {
+      ...ports, targetConfig: { harness: target.harness }, chiefSession: aide.chiefSession(target.id, fixture.config.config),
+    }) }, pino({ level: "silent" }));
+  aide = open();
+  try {
+    for (const id of ["forgotten-marker", "retained-marker"]) {
+      await aide.receive({ channelId: "web", sessionId: "me", id, text: id }); await aide.settled();
+    }
+    const c = aide.findConversation("me")!.conversations.resource("me")!;
+    assert.equal(c.spec.inputIds.length, 1, JSON.stringify(c.status));
+    assert.equal(c.status.contextReady, false);
+    assert.match(c.status.summary!.text, /Earlier facts/);
+    const summaryRequest = fixture.requests.at(-1)!;
+    assert.ok(!(summaryRequest.tools as unknown[] | undefined)?.length, "Summary execution has no action tools");
+    await aide.close(); aide = open(); await aide.start();
+    const before = fixture.requests.length;
+    await aide.receive({ channelId: "web", sessionId: "me", id: "new", text: "new-marker" }); await aide.settled();
+    const rebuilt = JSON.stringify(fixture.requests[before]!.messages);
+    assert.match(rebuilt, /Earlier facts|retained-marker/);
+    assert.doesNotMatch(rebuilt, /forgotten-marker|aide-sync/);
+    assert.equal(aide.findConversation("me")!.conversations.resource("me")!.status.blocked, undefined);
+  } finally { await aide.close(); }
 });

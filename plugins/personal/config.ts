@@ -1,3 +1,4 @@
+import { ConversationPolicySchema } from "./conversation/config.ts";
 import { z } from "zod";
 import { EnvironmentWatchSchema } from "./source/environment/config.ts";
 import { MessageWatchSchema } from "./source/message/config.ts";
@@ -12,6 +13,7 @@ import { PersonSchema } from "./person.ts";
  */
 export const PersonalConfigSchema = z.object({
   person: PersonSchema.prefault({}),
+  conversation: ConversationPolicySchema.optional(),
   sources: z.object({
     environments: EnvironmentWatchSchema.optional(),
     lark: MessageWatchSchema.optional(),
@@ -22,7 +24,7 @@ export const PersonalConfigSchema = z.object({
 export function parsePersonalConfig(config: Readonly<Record<string, unknown>> = {}) {
   const parsed = PersonalConfigSchema.safeParse(config);
   if (!parsed.success) {
-    const fields = parsed.error.issues.map((issue) => `plugins.personal.${issue.path.join(".")} (${issue.code})`).join(", ");
+    const fields = parsed.error.issues.map((issue) => `plugins.personal.${issue.path.join(".")} (${issue.code}: ${issue.message})`).join(", ");
     throw new Error(`Invalid Personal config: ${fields}`);
   }
   return parsed.data;

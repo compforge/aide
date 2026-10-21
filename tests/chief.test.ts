@@ -31,7 +31,7 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
   const options = fakeOptions({ chief: async (prompt) => {
     calls++;
     const activation = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
-    if (activation.description.endsWith("\n\nText:\nfail")) throw new Error("Disconnected");
+    if (activation.inputs[0].description.endsWith("\n\nText:\nfail")) throw new Error("Disconnected");
     return "直接回答";
   },
     execute: async () => { throw new Error("Unexpected Work"); } }, root, prompts);
@@ -60,7 +60,7 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
   const bin = join(root, "bin"); mkdirSync(bin, { recursive: true });
   const configPath = join(root, "config.yaml");
   const conversationId = "lark:cli_fixture:oc_me";
-  writeFileSync(configPath, JSON.stringify({ harnesses: { chief: { model: { provider: "fixture", id: "test-model" } } }, connectors: { environments: { dev: { kind: "kubernetes", kubeconfig: "~/.kube/dev", namespace: "app", aliases: ["开发"] } }, requirements: { work: { provider: "meego", projectKey: "project", categories: ["story"] } } }, plugins: { personal: {
+  writeFileSync(configPath, JSON.stringify({ harnesses: { chief: { model: { provider: "fixture", id: "test-model" } } }, connectors: { environments: { dev: { kind: "kubernetes", kubeconfig: "~/.kube/dev", namespace: "app", aliases: ["开发"] } }, requirements: { work: { provider: "meego", projectKey: "project", categories: ["story"] } } }, plugins: { personal: { conversation: { batchSize: 1 },
     sources: { requirements: [{ id: "mine", userKeys: ["user-me"], source: "work", sessionId: conversationId, intervalMs: 30_000, repositories: [{ forge: "github.com", path: "compforge/aide" }] }] } } } }));
   const record = { work_item_id: "123", name: "实现需求", work_item_status: "进行中", current_status_operator: [{ user_key: "user-me", name: "Me" }], updated_at: "2026-10-18", description: "给 aide 加一个功能" };
   writeFileSync(join(bin, "meegle"), `#!/usr/bin/env node\nconsole.log(JSON.stringify(process.argv.includes("config") ? "project.example.com" : { data: [${JSON.stringify(record)}] }));\n`, { mode: 0o755 });
@@ -81,7 +81,7 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
     }
     return;
   }
-  let modelCalls = 0;
+  let modelCalls = 0; let sayCompleted = false;
   const toolsSeen: string[] = [];
   const prompts: unknown[] = [];
   const server = createServer(async (req, res) => {
@@ -89,7 +89,8 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
     const request = JSON.parse(body); prompts.push(request.messages);
     let tool: { name: string; args: unknown } | undefined;
     let text = "";
-    switch (modelCalls++) {
+    if (sayCompleted) { text = "Internal: notification delivered."; sayCompleted = false; }
+    else switch (modelCalls++) {
       case 0: tool = { name: "list_environments", args: {} }; break;
       case 1: tool = { name: "read_environment", args: { name: "开发" } }; break;
       case 2: tool = { name: "read_requirement", args: { source: "work", category: "story", id: "123" } }; break;
@@ -104,6 +105,9 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
       case 12: tool = { name: "dismiss_observation", args: { reason: "已有工作完成，不需要再次打扰用户" } }; break;
       case 13: text = "This internal summary must not be delivered"; break;
       default: text = "已交办实现，我会跟进结果。";
+    }
+    if (!tool && ["已保留需求信息，暂不开始实现。", "已交办实现，我会跟进结果。"].includes(text)) {
+      tool = { name: "say", args: { text } }; text = ""; sayCompleted = true;
     }
     if (tool) toolsSeen.push(tool.name);
     res.writeHead(200, { "content-type": "text/event-stream" });
@@ -172,7 +176,7 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with durable di
   await until(() => aide.works()[0]?.status === "done"); await aide.settled();
   await bot.deliver();
   assert.equal(executions, 1);
-  assert.deepEqual(toolsSeen, ["list_environments", "read_environment", "read_requirement", "list_work", "confirm", "create_work", "ask", "create_work"]);
+  assert.deepEqual(toolsSeen, ["list_environments", "read_environment", "read_requirement", "list_work", "confirm", "create_work", "say", "ask", "create_work", "say"]);
   assert.equal(aide.works()[0]!.conversationId, conversationId);
   assert.ok(sent.includes("实现已完成"));
   const discoveries = aide.session(conversationId).store.conversations.inputs().filter((item) => item.spec.origin === "source");

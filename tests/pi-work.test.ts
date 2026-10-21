@@ -148,7 +148,7 @@ test("Chief appends the same original Input to two works without losing observat
   let aide: Aide, taskId = "", routineId = "", executions = 0;
   const observation = { type: "workload.changed", environment: "test", changes: [{ service: "executor", image: "v2" }] };
   aide = new Aide(root, fakeOptions({ chief: async (prompt) => {
-    const input = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
+    const input = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).inputs[0];
     assert.equal(input.inputId, "changed");
     assert.match(input.description, /Origin: source\/personal.environments/);
     assert.match(input.description, /executor workload changed/);

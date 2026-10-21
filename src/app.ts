@@ -53,6 +53,7 @@ export class Aide {
   private readonly environmentSources: ReturnType<typeof environmentSources>;
   private readonly messageSource: ReturnType<typeof messageWatch>;
   private readonly inputs: InputStore;
+  private readonly unsubscribeResources: () => void;
   private readonly connectors: ConnectorClient;
   private readonly person: Person;
   private starting?: Promise<void>;
@@ -69,6 +70,8 @@ export class Aide {
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
     this.environmentSources = environmentSources(sources.environments, environments);
     this.inputs = new InputStore(home);
+    this.inputs.storage.configure(config?.resources);
+    this.unsubscribeResources = this.inputs.storage.subscribe((scope, resource) => { this.log.info({ scope, kind: resource.kind, uid: resource.metadata.uid }, "Resource reclaimed"); });
     validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
     this.log.info({
       personIdentities: person.identities.length,
@@ -106,7 +109,7 @@ export class Aide {
     if (!instances.list().some((item) => item.pluginInstanceId === "personal")) {
       instances.create({ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin" });
     }
-    instances.replaceConfig("personal", { watches: this.watches.filter((watch) => watch.sessionId === id),
+    instances.replaceConfig("personal", { ...((parsePersonalConfig(this.options.config?.plugins.personal).conversation) ? { conversation: parsePersonalConfig(this.options.config?.plugins.personal).conversation } : {}), watches: this.watches.filter((watch) => watch.sessionId === id),
       environmentSources: id === ENVIRONMENT_SESSION ? this.environmentSources : [],
       ...(id === MESSAGE_SESSION && this.messageSource ? { messageSource: this.messageSource } : {}) });
     const packages = new Map([["aide.personal@0.1.0", new URL("../plugins/personal/plugin.ts", import.meta.url).href]]);
@@ -155,10 +158,13 @@ export class Aide {
     if (session.meta.cwd !== cwd) {
       // Native providers can bind history to cwd. Keep Aide facts, but start fresh provider contexts.
       session.updateMeta({ cwd, lanes: Object.fromEntries(Object.entries(session.meta.lanes)
-        .map(([key, lane]) => [key, { ...lane, harnessSessions: {} }])) });
+        .map(([key, lane]) => [key, { ...lane, harnessSessions: Object.fromEntries(Object.entries(lane.harnessSessions)
+          .filter(([, binding]) => binding.contextAfterSeq !== undefined)
+          .map(([target, binding]) => [target, { harness: binding.harness, contextAfterSeq: binding.contextAfterSeq }])) }])) });
       this.log.info({ sessionId: id, previousCwd: previous?.cwd, cwd }, "Execution directory changed; cleared native Harness bindings");
     }
-    application = new Personal({ timezone: this.options.timezone, person: this.person, personFile: resolve(this.home, "PERSON.md") }, this.log.child({ sessionId: id }),
+    application = new Personal({ timezone: this.options.timezone, person: this.person, personFile: resolve(this.home, "PERSON.md"),
+      conversation: parsePersonalConfig(this.options.config?.plugins.personal).conversation }, this.log.child({ sessionId: id }),
       { core, session, connectors, targets, inputs: this.inputs });
     this.active.set(id, application);
     core.subscribe(() => this.notify());
@@ -201,6 +207,7 @@ export class Aide {
     return scope.chiefSession(targetId, config);
   }
 
+  async messageDelivered(conversationId: string, messageId: string) { await this.findConversation(conversationId)?.conversations.delivered(conversationId, messageId); }
   messages() { return this.sessions().flatMap((scope) => scope.messages()).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
   works() { return this.sessions().flatMap((scope) => scope.works()); }
   questions() { return this.sessions().flatMap((scope) => scope.questions()); }
@@ -268,5 +275,6 @@ export class Aide {
     await this.defaultSelection;
     await Promise.all(this.sessions().map((scope) => scope.close()));
     this.listeners.clear();
+    this.unsubscribeResources();
   }
 }

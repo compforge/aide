@@ -270,3 +270,12 @@ export function registerMessageSources(context: PluginContext): void {
     },
   });
 }
+
+/** A pending delivery and its discussion root cannot expire before the Source advances. */
+export const messageLifecycle: import("@compforge/aide-plugin").ResourceLifecycle = {
+  resourceType: MESSAGE_SOURCE_TYPE, releasedAt: () => undefined,
+  references: (resource) => (resource.status as MessageSourceStatus).pending?.flatMap((entry) => [
+    `input:${inputName(resource.spec as MessageWatch, entry.message.id, 0)}`,
+    ...(entry.delivery ? [`input:${entry.delivery.name}`] : []),
+  ]) ?? [],
+};

@@ -94,6 +94,15 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(accepted.status, 200);
   await aide.receive({ channelId: "web", id: "b1", sessionId: "b", conversationId: "b", text: "另一会话的私有内容" });
   await until(() => emitters.has(chiefTarget("a")) && emitters.has(chiefTarget("b")));
+  const runningView = conversationView(aide, "a");
+  const runningInput = runningView.blocks.find((block) => block.type === "input")!;
+  assert.ok(runningView.meta.activity);
+  assert.equal(runningInput.group_id, runningView.meta.activity!.id);
+  for (const phase of ["running", "waiting"]) {
+    const history = browserSdk.historyBlocks(runningView.blocks.map((block) => block.type === "input" ? { ...block, status: phase } : block), runningView.meta.activity!);
+    assert.ok(history.some((block) => block.id === runningInput.id), "Input remains visible during execution and questions");
+    assert.ok(!history.some((block) => block.type === "execution" && block.group_id === runningView.meta.activity!.id));
+  }
   const { sink, turnId } = emitters.get(chiefTarget("a"))!;
   const other = emitters.get(chiefTarget("b"))!;
   other.sink({ kind: "agent_thought_chunk", turnId: other.turnId, payload: { messageId: "thought-b", content: { type: "text", text: "另一会话的思考" } } });
@@ -132,9 +141,9 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.ok(groupId, "Execution grouping must use durable Input ownership");
   assert.equal(completed.blocks.find((block) => block.role === "aide")!.group_id, groupId);
   assert.equal(completed.blocks.filter((block) => block.type === "input").length, 1);
-  assert.equal(completed.blocks.find((block) => block.role === "user")!.group_id, undefined);
+  assert.equal(completed.blocks.find((block) => block.role === "user")!.group_id, groupId);
   assert.equal(completed.blocks.find((block) => block.role === "user")!.origin, "channel");
-  assert.equal(completed.blocks.find((block) => block.role === "user")!.inputId, groupId);
+  assert.equal(completed.blocks.find((block) => block.role === "user")!.inputId, aide.findConversation("a")!.conversations.inputs("a")[0]!.metadata.name);
   assert.equal(completed.blocks.find((block) => block.type === "execution")!.harness, "chief");
   assert.equal(completed.blocks.find((block) => block.type === "thought")!.content, "先检查资料");
   assert.equal(completed.blocks.find((block) => block.type === "tool")!.detail, "/tmp/README");
@@ -200,8 +209,8 @@ test("Web associates failed replies with their Input so interruption warnings re
   const view = conversationView(aide, "failed");
   const reply = view.blocks.find((block) => block.role === "aide")!;
   assert.equal(reply.status, "failed");
-  assert.equal(reply.group_id, aide.session("failed").conversations.inputs("failed")[0]!.metadata.name);
-  assert.ok(aide.invocations().some((invocation) => invocation.inputId === reply.group_id));
+  assert.equal(reply.group_id, aide.session("failed").conversations.inputs("failed")[0]!.status.roundId);
+  assert.ok(aide.invocations().some((invocation) => `round:${invocation.executionId}` === reply.group_id));
   assert.match(reply.content, /未完成/);
 });
 
@@ -292,9 +301,10 @@ test("Bound Channels preserve distinct input identities and rebuild user/source 
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   assert.deepEqual(conversationView(aide, "inbox"), before);
   await web({ id: "next", sessionId: "inbox", text: "继续处理" }); await aide.settled();
-  const history = JSON.parse(prompts.at(-1)!.split("\nRecent conversation: ")[1]!) as Array<{ role: string; text: string }>;
+  const history = aide.session("inbox").conversations.inputs("inbox").map((i) => ({ role: i.spec.origin === "channel" ? "user" : "source", text: i.spec.text }));
+  assert.doesNotMatch(prompts.at(-1)!, /Recent conversation:/, "Warm native history is not injected again");
   assert.ok(history.some((item) => item.role === "user" && item.text === "Web 用户交代"));
   assert.ok(history.some((item) => item.role === "user" && item.text === "Lark 用户补充"));
   assert.ok(history.some((item) => item.role === "source" && item.text === "部署镜像已变化"));
-  assert.ok(history.some((item) => item.role === "aide" && item.text === "处理完成"));
+  assert.ok(aide.messages().some((item) => item.text === "处理完成"));
 });

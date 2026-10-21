@@ -347,6 +347,7 @@ export class Verb {
           ? false
           : (request.input.newLane ?? false),
         harnessTargetId,
+        freshContext: request.verb === "harness" ? request.input.freshContext : undefined,
       },
     });
     const scheduled = this.harnessInvocations.scheduled(snapshot.invocationId);

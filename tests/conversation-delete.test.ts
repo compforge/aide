@@ -84,7 +84,7 @@ test("Recreated Conversation has fresh execution context and no old questions or
   aide = new Aide(dir, fakeOptions({ chief: async () => {
     if (++calls === 1) {
       const store = aide.session("me").conversations;
-      const run = store.runs("me").find((r) => r.status.phase === "running")!;
+      const run = store.runs("me").find((r) => r.status.phase === "running" && !r.status.roundId)!;
       await store.updateRun(run, { question: { kind: "confirm", title: "旧问题", prompt: "继续吗？" } });
       return "";
     }

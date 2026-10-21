@@ -51,8 +51,9 @@ export class LarkChannel {
   private stopped = false;
   private retryAt = 0;
   private readonly cardRetry = new Map<string, number>();
+  private readonly receiptRetry = new Map<string, number>();
 
-  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "messages">,
+  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "messages" | "messageDelivered">,
     private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
     this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
@@ -195,6 +196,19 @@ export class LarkChannel {
         this.save({ ...this.state, delivered: [...this.state.delivered, id] });
         this.log.info({ messageId: message.id, part: index, conversationId: message.conversationId }, "Lark message delivered");
       }
+      await this.acknowledge(message.conversationId, message.id);
+    }
+  }
+
+  /** @spec Receipt failures retain retryable messages without blocking unrelated outbound delivery. */
+  private async acknowledge(conversationId: string, messageId: string): Promise<void> {
+    if (Date.now() < (this.receiptRetry.get(messageId) ?? 0)) return;
+    try {
+      await this.aide.messageDelivered?.(conversationId, messageId);
+      this.receiptRetry.delete(messageId);
+    } catch (err) {
+      this.receiptRetry.set(messageId, Date.now() + 10_000);
+      this.log.warn({ err, conversationId, messageId }, "Lark delivery receipt failed; retrying independently in 10 seconds");
     }
   }
 
@@ -255,6 +269,7 @@ export class LarkChannel {
       if (!view.overflow) {
         const receipts = view.messageIds.map((id) => this.deliveryId(id, 0));
         this.save({ ...this.state, delivered: [...new Set([...this.state.delivered, ...receipts])] });
+        for (const id of view.messageIds) await this.acknowledge(this.prefix + chatId, id);
       }
       this.log.info({ inputId: view.id, phase: view.phase }, "Lark progress card settled");
     }

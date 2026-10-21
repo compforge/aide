@@ -80,11 +80,17 @@ Chief 有两个 Reconcile。ReconcileInput 负责归位，不调用模型。没�
 
 追加按 Conversation 与 inputId 幂等：已挂载时不写入、不重置消费进度，也不重复唤醒；并发版本冲突重读同一资源身份后重试。路由只保存执行状态、首次创建分支和待创建会话的稳定身份；创建成功后固定 uid，避免重试时重复创建或重新投递到已删除会话的替代资源。中断后重新检查默认会话和确定性规则，已完成追加通过幂等性跳过。后续创建或关联失败不撤销、不阻塞先前已追加会话的消费；讨论续报等待原始 Input 完成路由后继续关联。Channel 同步保存本会话消息后，也继续执行这一路由，不提前标记为完成。
 
-ReconcileConversation 在收到新 Input 或自身 trigger 到期时，加载话题历史、相关 Work 和最新事实，调用 Chief Harness 判断。Chief 承担 System 1 的接话与分流职责：当轮能办完的事情直接处理；需要独立推进、等待和跟踪时，将相关事实与决定承接到已有或新建 Work，由对应 Reconcile 继续。同一 Input 在不同会话的处理状态相互独立。
+ReconcileConversation 把处理组织成有限批次。立即输入、待处理数量阈值、等待期限和 Conversation trigger 任一满足即开始；即使没有输入，trigger 仍能触发回顾。开始调用 Harness 前持久化本批 inputIds 和执行身份，新到的输入留给下一批。Harness 决定直接处理、沟通、询问或向 Work 交接；Reconcile 负责消费进度、恢复和下一次调度。
 
-普通提问不必成为 Work。Input 路由完成、会话处理完成、工作目标完成和消息送达各有自己的状态；等待某个会话的用户或 Harness 时，其它 Session 可以继续。
+Chief 的 `say` 工具保存通知意图，Reconcile 在模型 Turn 结束后调用既有 say verb，消息进入持久 outbox。最终模型文本保存为本轮内部总结。ask / confirm 同样交给现有 Interaction，模型 Turn 先结束，用户回答后续接；普通用户问题必须通过这些沟通动作得到回应。Source 和定时回顾可静默消费。同一 Input 在不同 Conversation 的消费相互独立。
 
-每个会话绑定一个 Chief Target 和固定 Lane，普通消息、定时回顾及询问后的续答沿用原生 Harness 会话。Chief 获取近期消息，并通过工具查询已有工作和外部详情；记忆由 Chief Harness 组合上游能力，Personal 不感知其实现。
+执行失败或服务重启中断会终止本批，保留错误并暂停会话的后台执行；后续观察不会各自生成一条失败通知。新到的立即输入可启动新的处理，但不会把先前批次重放。用户须先核对已经发生的动作。Source 水位只在 Input 持久提交后推进，容量不足时保留重试状态。
+
+每个会话绑定固定 Lane 和 Chief Target。正常续轮只注入新批次，原生 Harness 保留当前上下文。已处理输入超过近期窗口或文本预算时，Reconcile 用独立、无工具和记忆扩展的 Harness 调用压缩历史；成功保存摘要后，才移除被覆盖的 Input 引用及消费记录。并发追加的输入保留，摘要失败则保留原文并暂停，避免静默丢失上下文。
+
+摘要完成后下一轮重建原生上下文，以摘要和有限近期历史开场，并设置持久历史边界，阻止 Ledger catch-up 把已经遗忘的消息重新注入。长期记忆仍由 Chief Harness 的上游扩展负责。Input 原始资源在所有引用释放后由 Host 容量策略回收；有限去重回执防止历史清理后的近期重复投递变成新命令。
+
+普通提问不必成为 Work。Input 路由完成、会话消费完成、工作目标完成与消息送达分别记录；等待 Harness 或用户时释放运行容量，话题本身仍串行。
 
 编程领域使用 Repository = forge + path、Requirement = source + category + id、PR/MR = forge + path + number。Chief 在工作指令中保留实体身份与工作目录，不根据仓库名字猜测本地 checkout。
 
@@ -171,6 +177,13 @@ WorkService 绑定宿主确定的 conversationId，模型不能传入其它会�
 Task / Routine 校验 Harness 的 finalText。执行失败或中断标为 uncertain，执行已结束但结果无法解析或校验则标为 invalid_result；两者均等待用户核对后明确继续，不自动重放。业务等待用户则保存为 waiting，收到回答后由 Reconcile 继续，能够跨服务重启恢复。
 
 Chief 的问答使用 Core Interaction 与当前回调续接，调用栈不跨重启恢复；不能把它与 Task / Routine 的 waiting 状态混同。上下文结合近期消息、工作记录及连接器查询，Chief Harness 按需提供相关记忆；工作状态以 Task / Routine 为准。
+
+### 中断与有界消费
+
+待处理队列在 `maxPending` 之外预留一个 immediate 名额，用户可在观察消息占满队列时恢复会话。
+直接请求的中断通知与轮次失败状态原子保存，恢复进程不会重发同一轮的通知；Source 和定时轮次保持静默。
+历史记录超过单次摘要预算时，Conversation 保存分段偏移与中间摘要，每次摘要调用只处理有界片段。
+原始 Input 引用保留到整条记录已被摘要覆盖；失败后保留进度，恢复时从已提交偏移继续。
 
 ## 验证
 

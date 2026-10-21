@@ -182,3 +182,5 @@ export type * from "./connectors/index.ts";
 export type { ExecutionAssociation } from "./reconcile-context.ts";
 export { iconFor } from "./icon.ts";
 export { bindSourceInput } from "./source.ts";
+
+export type { ResourceLifecycle } from "./resource.ts";

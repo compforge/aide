@@ -147,7 +147,7 @@ function aideResourceRef(resource: AideResourceObservation): ResourceRef {
 
 /** Host-owned object projections. Ledger and InputStore remain authoritative; this index only schedules observations. */
 export class AideResourceIndex {
-  private readonly inputs = new Map<string, AideResourceObservation<"Input">>();
+  private readonly inputs?: InputStore;
   private readonly unsubscribeInputs?: () => void;
   readonly aideSessionId: string;
   readonly session: Readonly<Pick<SessionHandle, "id" | "dir">>;
@@ -166,7 +166,7 @@ export class AideResourceIndex {
       dir: options.session.dir,
     });
     for (const event of options.session.ledger.read()) this.project(event, false);
-    for (const input of options.inputs?.list(this.aideSessionId) ?? []) this.projectInput(input, false);
+    this.inputs = options.inputs;
     this.unsubscribeInputs = options.inputs?.subscribe((owner, input) => { if (owner === this.aideSessionId) this.projectInput(input, true); });
     this.unsubscribeSession = options.session.subscribe((event) => {
       this.project(event, true);
@@ -178,7 +178,8 @@ export class AideResourceIndex {
     resourceId: string,
   ): AideResourceObservation<K> {
     this.assertKind(kind);
-    const resource = kind === INPUT_TYPE.kind ? this.inputs.get(resourceId) : this.turns.get(resourceId);
+    const input = kind === INPUT_TYPE.kind ? this.inputs?.get(resourceId) : undefined;
+    const resource = kind === INPUT_TYPE.kind ? input && this.projectInput(input, false) : this.turns.get(resourceId);
     if (!resource) {
       throw new Error(`Aide resource not found: ${kind}/${resourceId}`);
     }
@@ -187,7 +188,7 @@ export class AideResourceIndex {
 
   list<K extends AideResourceKind>(kind: K): AideResourceObservation<K>[] {
     this.assertKind(kind);
-    return [...(kind === INPUT_TYPE.kind ? this.inputs.values() : this.turns.values())]
+    return [...(kind === INPUT_TYPE.kind ? (this.inputs?.list(this.aideSessionId) ?? []).map((i) => this.projectInput(i, false)) : this.turns.values())]
       .sort((left, right) => left.metadata.revision - right.metadata.revision)
       .map((resource) => resource as AideResourceObservation<K>);
   }
@@ -222,12 +223,12 @@ export class AideResourceIndex {
     }
   }
 
-  private projectInput(input: Resource<InputSpec, InputStatus>, notify: boolean): void {
+  private projectInput(input: Resource<InputSpec, InputStatus>, notify: boolean): AideResourceObservation<"Input"> {
     const resource: AideResourceObservation<"Input"> = deepFreeze({ kind: "Input",
       metadata: { aideSessionId: this.aideSessionId, resourceId: input.metadata.name, revision: Number(input.metadata.resourceVersion),
         sourceEventId: input.metadata.uid, observedAt: input.metadata.creationTimestamp }, data: input });
-    this.inputs.set(input.metadata.name, resource);
     if (notify && !this.closed) for (const listener of this.listeners) listener(resource);
+    return resource;
   }
 
 }

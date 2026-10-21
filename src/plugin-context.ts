@@ -79,6 +79,7 @@ function validateHarness(input: HarnessInvocationInput): void {
   nonEmpty("harness title", input.title);
   nonEmpty("harness prompt", input.prompt);
   nonEmpty("harness laneId", input.laneId);
+  if (input.freshContext !== undefined && typeof input.freshContext !== "boolean") throw new Error("Invalid freshContext");
   if (input.newLane !== undefined && typeof input.newLane !== "boolean") {
     throw new Error(`harness newLane is invalid: ${String(input.newLane)}`);
   }

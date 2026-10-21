@@ -79,6 +79,8 @@ export interface HarnessInvocationInput extends VerbInput {
   readonly laneId: string;
   /** Create a new side Lane from laneId instead of continuing it. Defaults to false. */
   readonly newLane?: boolean;
+  /** Replace this target native context with the supplied bounded prompt; never replay old turns. */
+  readonly freshContext?: boolean;
   /** Omit to use the host's selected HarnessTarget when scheduling. */
   readonly harnessTargetId?: string;
 }

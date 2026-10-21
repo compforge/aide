@@ -61,7 +61,7 @@ Aide 的根级 `defaultHarness` 选择默认工作执行实现，`harnesses.<nam
 
 ### 输入与交流记录
 
-Input 是独立的 Host 内置资源，记录输入内容、来源和可选的 sessionId 话题线索。Channel / Source 按自身特质决定标识的稳定性和粒度；同一标识表达输入有共同上下文，不同标识不意味着毫无关联。Source 也可以提交没有话题线索的外部观察。接收输入的执行 Session 与输入声明的目标 Session 分别记录；前者负责持久执行，后者表达来源已知的归属线索，也允许关联其它相关话题。输入事实统一保存在 `$AIDE_HOME/inputs.json`，供多个插件资源引用。
+Input 是独立的 Host 内置资源，记录输入内容、来源和可选的 sessionId 话题线索。Channel / Source 按自身特质决定标识的稳定性和粒度；同一标识表达输入有共同上下文，不同标识不意味着毫无关联。Source 也可以提交没有话题线索的外部观察。接收输入的执行 Session 与输入声明的目标 Session 分别记录；前者负责持久执行，后者表达来源已知的归属线索，也允许关联其它相关话题。输入事实统一保存在 `$AIDE_HOME/resources.sqlite`，供多个插件资源引用。
 
 Input 可保存相对于服务对象 Person 的 `relation: sent | received | observed`，未知时留空。
 Personal 拥有身份绑定和归因，Core 只校验并持久保存结果；原作者与上下文证据仍保留。

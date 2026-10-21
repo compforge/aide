@@ -200,7 +200,7 @@ test("Lark long answers retain full text via the existing split outbox", async (
   assert.equal(parts.join(""), text); assert.equal(parts.length, 2);
 });
 
-test("Lark projects real Harness thought and text before final reply and isolates the conversation", { timeout: 20_000 }, async (t) => {
+test("Lark projects Harness progress but only explicit messages become replies", { timeout: 20_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-lark-live-"));
   let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
   let emitter: { sink: HarnessEventSink; turnId: string } | undefined;
@@ -218,7 +218,7 @@ test("Lark projects real Harness thought and text before final reply and isolate
   emitter.sink({ kind: "agent_thought_chunk", turnId: emitter.turnId, payload: { messageId: "thought", content: { type: "text", text: "先读资料" } } });
   emitter.sink({ kind: "agent_message_chunk", turnId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "正在核对" } } });
   const live = larkProgress(aide, conversationId)[0]!;
-  assert.equal(live.phase, "running"); assert.equal(live.think, "先读资料"); assert.equal(live.content, "正在核对");
+  assert.equal(live.phase, "running"); assert.equal(live.think, "先读资料"); assert.equal(live.content, "");
   assert.deepEqual(larkProgress(aide, "me"), []);
   emitter.sink({ kind: "tool_call_update", turnId: emitter.turnId, payload: { toolCallId: "active", title: "采集内存", status: "in_progress" } });
   emitter.sink({ kind: "tool_call_update", turnId: emitter.turnId, payload: { toolCallId: "finished", title: "读取环境", status: "completed" } });
@@ -227,8 +227,8 @@ test("Lark projects real Harness thought and text before final reply and isolate
   assert.ok(larkProgress(aide, conversationId)[0]!.think.includes("failed"), "Tool failure remains available in details");
   emitter.sink({ kind: "agent_message_chunk", turnId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "\u0000".repeat(4000) + "最新结果已到达" } } });
   const large = larkProgress(aide, conversationId)[0]!;
-  assert.ok(large.overflow);
-  assert.ok(cardPreviews(large).answer_preview.text.content.endsWith("最新结果已到达"));
+  assert.equal(large.content, "", "Raw model text is internal, even while streaming");
+  assert.equal(large.overflow, false);
   assert.ok(Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(large, false)) })) <= 28_000);
   release(); await aide.settled();
   const done = larkProgress(aide, conversationId)[0]!;

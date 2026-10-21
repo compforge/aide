@@ -142,7 +142,7 @@ describe("PluginResourceStore", () => {
       "Requirement",
       `${created.metadata.name}.json`,
     );
-    expect(existsSync(path)).toBe(true);
+    expect(resources.storage.has(path)).toBe(true);
   });
 
   test("spec changes generation while status and schedule changes do not", () => {
