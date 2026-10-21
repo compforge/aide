@@ -22,14 +22,21 @@ const labels = replyLabels;
 export function larkProgress(aide: ChannelService, conversationId: string): LarkProgress[] {
   const view = conversationView(aide, conversationId);
   const inputs = aide.findConversation(conversationId)?.conversations.inputs(conversationId) ?? [];
-  return inputs.filter((input) => input.spec.origin === "channel" && !input.spec.replyTo && (!input.status.batchInputIds?.length || input.status.batchInputIds[0] === input.metadata.name)).map((input) => {
-    const turnIds = new Set(aide.invocations().filter((turn) => turn.inputId === input.metadata.name || (!!input.status.executionId && turn.executionId === input.status.executionId)).map((turn) => `execution:${turn.turnId}`));
-    const executions = view.blocks.filter((block) => block.type === "execution" &&
-      (turnIds.has(block.id) || (!input.status.laneId && view.meta.activity?.id === input.metadata.name && block.status === "running")));
+  const seen = new Set<string>();
+  return inputs.filter((input) => {
+    if (input.spec.origin !== "channel" || input.spec.replyTo) return false;
+    const group = view.blocks.find((b) => b.inputId === input.metadata.name)?.group_id ?? input.metadata.name;
+    if (seen.has(group)) return false;
+    seen.add(group); return true;
+  }).map((input) => {
+    const group = view.blocks.find((b) => b.inputId === input.metadata.name)?.group_id ?? input.metadata.name;
+    const executions = view.blocks.filter((block) => block.type === "execution" && block.group_id === group);
     const parents = new Set(executions.map((block) => block.id));
     const blocks = view.blocks.filter((block) => block.parent_id && parents.has(block.parent_id));
-    const phase = input.status.phase ?? "queued";
-    const responses = (input.status.messages ?? []).filter((message) => message.role === "aide");
+    const rawPhase = input.consumption.phase;
+    const phase = rawPhase === "compacting" ? "running" : rawPhase === "interrupted" ? "failed" : rawPhase ?? "queued";
+    const ids = new Set(view.blocks.filter((b) => b.type === "message" && b.group_id === group).map((b) => b.id.replace(/^message:/, "")));
+    const responses = aide.messages().filter((m) => ids.has(m.id));
     if (phase === "waiting") {
       const question = aide.questions().find((item) => item.conversationId === conversationId && item.request.status === "pending");
       const message = question && aide.messages().find((item) => item.id === question.request.messageId);

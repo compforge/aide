@@ -126,13 +126,14 @@ export interface ExecutionAssociation {
   readonly resourceRef?: ResourceRef;
   readonly conversationId?: string;
   readonly inputId?: string;
+  readonly inputIds?: readonly string[];
 }
 
 export interface ReconcileContext {
   /** Core identity of this live execution, including its associated verb calls. */
   readonly executionId: string;
   /** Associate subsequent actions with business input, independently of Harness selection. */
-  withContext(context: Pick<ExecutionAssociation, "conversationId" | "inputId">): ReconcileContext;
+  withContext(context: Pick<ExecutionAssociation, "conversationId" | "inputId" | "inputIds">): ReconcileContext;
   readonly snapshot: ReconcileSnapshot;
   readonly verbs: PluginVerbs;
 }

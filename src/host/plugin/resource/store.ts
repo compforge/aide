@@ -36,6 +36,7 @@ export interface PluginResourceStoreOptions {
 }
 
 interface MutationOptions {
+  controllerName?: string;
   expectedResourceVersion?: string;
   namespace?: ResourceNamespace;
 }
@@ -73,6 +74,7 @@ export interface ResourceDeletionUpdate {
 
 interface ResourceControl {
   nextReconcileAt?: string;
+  controllerDue?: Record<string, string>;
 }
 
 interface StoredPluginResource<TSpec, TStatus> {
@@ -627,6 +629,14 @@ export class PluginResourceStore {
     }
     const nextReconcileAt = next?.toISOString();
     this.mutate<TSpec, TStatus>(type, name, options, (current) => {
+      if (options.controllerName) {
+        const previous = current.control.controllerDue ?? {};
+        if (previous[options.controllerName] === nextReconcileAt) return current;
+        const controllerDue = { ...previous };
+        if (nextReconcileAt) controllerDue[options.controllerName] = nextReconcileAt;
+        else delete controllerDue[options.controllerName];
+        return { ...current, control: { ...current.control, controllerDue } };
+      }
       if (current.control.nextReconcileAt === nextReconcileAt) return current;
       const control = { ...current.control };
       if (nextReconcileAt === undefined) delete control.nextReconcileAt;
@@ -636,7 +646,7 @@ export class PluginResourceStore {
   }
 
   scheduledReconciles(
-    type: ResourceType,
+    type: ResourceType, controllerName?: string,
   ): readonly {
     resource: PluginResource<unknown, unknown>;
     nextReconcileAt: Date;
@@ -651,10 +661,11 @@ export class PluginResourceStore {
         resource.metadata.name,
         resource.metadata.namespace as ResourceNamespace,
       );
-      if (stored.control.nextReconcileAt === undefined) return [];
+      const due = controllerName ? stored.control.controllerDue?.[controllerName] : stored.control.nextReconcileAt;
+      if (due === undefined) return [];
       return [{
         resource: stored.object,
-        nextReconcileAt: new Date(stored.control.nextReconcileAt),
+        nextReconcileAt: new Date(due),
       }];
     });
   }
@@ -668,11 +679,12 @@ export class PluginResourceStore {
     name: string,
     reconcile: () => Promise<T>,
     namespace: ResourceNamespace = "v1",
+    controllerName?: string,
   ): Promise<T> {
     validateResourceType(type);
     assertPathSegment("resource name", name);
     return withAsyncFileLock(
-      `${this.resourcePath(type, name, namespace)}.reconcile`,
+      `${this.resourcePath(type, name, namespace)}.reconcile${controllerName ? `.${encodeURIComponent(controllerName)}` : ""}`,
       reconcile,
     );
   }
@@ -821,6 +833,7 @@ export class PluginResourceStore {
     if (control.nextReconcileAt !== undefined) {
       isoTimestamp("control.nextReconcileAt", control.nextReconcileAt);
     }
+    for (const due of Object.values(control.controllerDue ?? {})) isoTimestamp("control.controllerDue", due);
     return control;
   }
 

@@ -234,6 +234,7 @@ export class AideResourceIndex {
 }
 
 export interface AideResourceControllerOptions<K extends AideResourceKind> {
+  name?: string;
   resources: AideResourceIndex;
   pluginInstanceId: string;
   namespace: ResourceNamespace;
@@ -317,7 +318,9 @@ export class AideResourceController<K extends AideResourceKind> {
     this.invokeVerb = options.invokeVerb ?? (async () => {
       throw new Error("Aide Resource Controller has no reconcile capability host");
     });
+    if (options.name !== undefined && !/^[a-z][a-z0-9-]{0,63}$/.test(options.name)) throw new Error("Invalid Controller name");
     this.scope = Object.freeze({
+      controllerName: options.name,
       aideSessionId: options.resources.aideSessionId,
       pluginInstanceId: options.pluginInstanceId,
       namespace: options.namespace,
@@ -340,6 +343,7 @@ export class AideResourceController<K extends AideResourceKind> {
     this.queue = new ReconcileQueue({
       execute: (key, localLease) => {
         const executionScope = Object.freeze({
+          controllerName: key.controllerName,
           aideSessionId: key.aideSessionId,
           pluginInstanceId: key.pluginInstanceId,
           namespace: this.scope.namespace as ResourceNamespace,
@@ -466,6 +470,7 @@ export class AideResourceController<K extends AideResourceKind> {
     if (
       key.aideSessionId !== this.scope.aideSessionId ||
       key.pluginInstanceId !== this.scope.pluginInstanceId ||
+      (key.controllerName ?? "") !== (this.scope.controllerName ?? "") ||
       key.namespace !== this.scope.namespace ||
       key.resourceApiVersion !== this.scope.resourceApiVersion ||
       key.resourceKind !== this.scope.resourceKind ||

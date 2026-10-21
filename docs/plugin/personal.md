@@ -59,13 +59,13 @@ Source 和 trigger 提供重新判断的机会。已有委托决定可以继续�
 
 Chief 可以直接处理、回复或保持安静；需要独立跟进的事情，再交给 Task / Routine。
 
-Chief 是业务角色。Chief Controller 消费输入、组织上下文并续接问答；Chief Harness 执行 `agents/chief/` 中的 Agent，使用通用 Pi 能力以及 Personal 工具。Task / Routine 按根级 `defaultHarness` 选择执行实现，缺省为通用 Pi。Chief 的提示词、上下文和记忆优化方向见 [Chief Harness](../harness/chief.md)，插件机制见 [Plugin](README.md)。
+Chief 是业务角色。Conversation Controller 调度批次，Batch Controller 执行固定上下文中的工作；Chief Harness 执行 `agents/chief/` 中的 Agent，使用通用 Pi 能力以及 Personal 工具。Task / Routine 按根级 `defaultHarness` 选择执行实现，缺省为通用 Pi。Chief 的提示词、上下文和记忆优化方向见 [Chief Harness](../harness/chief.md)，插件机制见 [Plugin](README.md)。
 
 ## 输入与上下文
 
 Input 由 Core 独立持久化，Conversation 是 Personal 的普通资源。Channel / Source 可提供 sessionId 等已知归属线索，Chief 据此确定话题；默认会话接收所有输入，确定性规则补充具体归属。Session 承载持久执行与恢复，Conversation 承载话题；一个 Session 可以组织多个话题。Source 启动只建立观察资源，不预建空 Conversation；输入到来时再决定归属。
 
-Chief 有两个 Reconcile。ReconcileInput 负责归位，不调用模型。没有任何 Conversation 时，创建一个会话、追加当前 Input 后结束路由。已有 Conversation 时按顺序处理，确定一个会话就立即追加，不汇总完整目标计划：
+ReconcileInput 负责归位，不调用模型。没有任何 Conversation 时，创建一个会话、追加当前 Input 后结束路由。已有 Conversation 时按顺序处理，确定一个会话就立即追加，不汇总完整目标计划：
 
 1. 默认会话存在时，先追加到默认会话；没有默认会话就跳过。
 2. Input 带有尚无会话承接的目标 `sessionId` 时，创建 Conversation 并追加。
@@ -75,17 +75,25 @@ Chief 有两个 Reconcile。ReconcileInput 负责归位，不调用模型。没�
 
 追加按 Conversation 与 inputId 幂等：已挂载时不写入、不重置消费进度，也不重复唤醒；并发版本冲突重读同一资源身份后重试。路由只保存执行状态、首次创建分支和待创建会话的稳定身份；创建成功后固定 uid，避免重试时重复创建或重新投递到已删除会话的替代资源。中断后重新检查默认会话和确定性规则，已完成追加通过幂等性跳过。后续创建或关联失败不撤销、不阻塞先前已追加会话的消费；讨论续报等待原始 Input 完成路由后继续关联。Channel 同步保存本会话消息后，也继续执行这一路由，不提前标记为完成。
 
-ReconcileConversation 把处理组织成有限批次。立即输入、待处理数量阈值、等待期限和 Conversation trigger 任一满足即开始；即使没有输入，trigger 仍能触发回顾。开始调用 Harness 前持久化本批 inputIds 和执行身份，新到的输入留给下一批。Harness 决定直接处理、沟通、询问或向 Work 交接；Reconcile 负责消费进度、恢复和下一次调度。
+Conversation 的 spec 保存身份、所属 Session 与触发策略；status 保存 `pendingInputIds`、下次触发时间和一个 `batch`。Batch 是 Conversation 内部的处理单元，定义在 `conversation/batch.ts`，没有独立 CRD。没有第二份 recentInputIds 或持续增长的 processing 表。
 
-Chief 的 `say` 工具保存通知意图，Reconcile 在模型 Turn 结束后调用既有 say verb，消息进入持久 outbox。最终模型文本保存为本轮内部总结。ask / confirm 同样交给现有 Interaction，模型 Turn 先结束，用户回答后续接；普通用户问题必须通过这些沟通动作得到回应。Source 和定时回顾可静默消费。同一 Input 在不同 Conversation 的消费相互独立。
+两个 Controller 观察同一个 Conversation：默认 Controller 执行 `reconcileConversation`，具名 `batch` Controller 执行 `reconcileBatch`。它们拥有独立队列，通过明确的 status Watch 协作，避免等待 Harness 时挡住新输入调度。
 
-执行失败或服务重启中断会终止本批，保留错误并暂停会话的后台执行；后续观察不会各自生成一条失败通知。新到的立即输入可启动新的处理，但不会把先前批次重放。用户须先核对已经发生的动作。Source 水位只在 Input 持久提交后推进，容量不足时保留重试状态。
+- Conversation 按立即输入、数量阈值、最早输入等待期限或 trigger 到期组批。空批次可以执行定时回顾。先持久化 Batch 的 inputIds 和 context，再交给执行 Controller。
+- Batch 固定 prompt、继承历史和本批输入，绑定 executionId 后调用 Harness。运行中到来的普通 Input 继续排队，不修改该快照。
+- Harness 的 say / ask / confirm 工具直接调用当前 execution 的 verb。say 成功表示消息持久化，Channel 负责投递；ask / confirm 在同一次执行内等待并返回回答、拒绝、取消、超时或失败。没有暂存意图后再 flush 的 Conversation Outbox，也不手工构造第二个回答 prompt。
+- Batch 的最终文本是内部总结。普通用户请求必须通过工具沟通，Source 与定时回顾可以保持安静。一次执行的总期限为两天，单次问题最多等待一天，并受本次执行剩余时间约束。
+- Batch 完成后，Conversation 幂等确认消费，只从 pendingInputIds 移除该批成员。完成的 Batch 保留，下一次组批继承其结果上下文后原子替换，不串联历史 Batch。
 
-每个会话绑定固定 Lane 和 Chief Target。正常续轮只注入新批次，原生 Harness 保留当前上下文。已处理输入超过近期窗口或文本预算时，Reconcile 用独立、无工具和记忆扩展的 Harness 调用压缩历史；成功保存摘要后，才移除被覆盖的 Input 引用及消费记录。并发追加的输入保留，摘要失败则保留原文并暂停，避免静默丢失上下文。
+立即 Input 到来时，Conversation 请求中断正在执行或等待用户的 Batch；Host 取消相关 Interaction 和 HarnessInvocation，并等待正在运行的 Turn 实际停止。新 Batch 优先处理立即 Input，同时承接旧批成员及不确定结果，明确要求核对已发生的动作，不能盲目重放。纯上下文压缩先完成交接，再处理新请求。当前问题的回答走 Interaction 控制路径，不受普通队列容量限制。
 
-摘要完成后下一轮重建原生上下文，以摘要和有限近期历史开场，并设置持久历史边界，阻止 Ledger catch-up 把已经遗忘的消息重新注入。长期记忆仍由 Chief Harness 的上游扩展负责。Input 原始资源在所有引用释放后由 Host 容量策略回收；有限去重回执防止历史清理后的近期重复投递变成新命令。
+每批使用固定 Lane 和新的原生 Harness 上下文。`freshContext` 同时保存 Ledger 历史边界，阻止 catch-up 重新注入已遗忘内容。下一批的近期材料和 summary 都来自上一批有界的结果上下文，长期 Memory 仍由 Chief 的上游扩展管理。
 
-普通提问不必成为 Work。Input 路由完成、会话消费完成、工作目标完成与消息送达分别记录；等待 Harness 或用户时释放运行容量，话题本身仍串行。
+上下文交接包含完整 Input 原文、内部总结和已发送消息；超出预算时，Batch 用关闭业务工具和记忆扩展的 Harness 分段压缩。每段成功后持久化 offset 与摘要，整份交接完成后才标记 done。失败保留原文引用和检查点，新的立即请求可恢复纯压缩阶段，不重新执行业务动作。进程中断时，queued Batch 可以启动、compacting Batch 可以从检查点恢复；running / waiting Batch 标记 interrupted，当前运行时不恢复 JavaScript 调用栈或重放工具动作。
+
+幂等接收凭据保存在 Input 上，随 Input 生命周期清理，不依赖 pending 队列是否仍含该 ID。队列和当前 Batch 的引用保护 Input；批次替换后不再引用的 Input 由 Host 按资源容量策略回收。Web 从现存 Input 和接收凭据展示原始事实，从 Ledger 展示执行轨迹；不把批次状态或版本覆盖进 Input 资源。Conversation 的普通消息投影保留最近 100 条，Lark 未送达消息继续保留并受 Host 总容量限制。
+
+Input 路由完成、批次消费完成、工作目标完成与消息送达分别记录。错误不会对后续每条观察各发一条通知；失败 Batch 保留 pending 引用，后台执行暂停，用户可以用新请求核对并接手。
 
 编程领域使用 Repository = forge + path、Requirement = source + category + id、PR/MR = forge + path + number。Chief 在工作指令中保留实体身份与工作目录，不根据仓库名字猜测本地 checkout。
 
@@ -115,19 +123,19 @@ Personal 的 EnvironmentSource 经 Connector Verb 周期采样 Workload；首次
 
 Chief 拥有原生文件/CLI 工具、五个 Work 工具，以及 `read_requirement`、`list_pull_requests`、`read_pull_request`、`read_pull_request_comments`、`list_connectors`。
 
-`ask` 和 `confirm` 工具提出问题意图，Pi 结束当前 Turn 后，Chief Controller 调用已有 Core verb。等待用户不占模型执行位。Core Interaction 持有问题、答复、取消和超时；没有增加第二套审批状态。提出问题之后，当前轮的 Work 写工具拒绝继续修改，收到答复后才重新开放。拒绝是正常业务答案，Chief 收到 `declined`，不能当作执行授权。
+`ask` 和 `confirm` 工具直接等待 Core verb 返回，Harness 的同一次执行保持打开，Controller 的调度容量在等待期间释放。Core Interaction 持有问题、答复、取消和超时；没有第二套审批状态。等待期间其它业务写工具拒绝修改，收到答复后恢复。拒绝返回成功结果中的 `declined`，不能当作执行授权。
 
 网页可直接回答 Interaction；Lark 同一会话下一条文字回答当前问题。确认问题接受选项值、标签和明确的“确认／拒绝”等表达；不明确的确认回答会提示选择，不继续执行。自由问答允许文字答案。其它会话的消息不能回答这个问题。当前一次只处理一个问题，不支持 Lark 引用特定历史问题作答；Hooks 信任和 Harness 权限请求仍在网页处理。
 
 Source 观察没有用户指令的地位。Chief 应读取详情、查询已有 Work；在已有委托内可以推进工作，缺少目标或授权时询问。不值得打扰的观察可调用 `dismiss_observation`，保存原因但不向 Channel 发消息。
 
-普通回复由 Chief Controller 调用 `say` 保存到 Conversation 的 Message 流，Conversation 的处理记录保留消息引用，Core 问题按原 messageId 投影到同一 Channel 消息流。POST `/messages` 返回入站持久回执，业务结果异步出现；没有每次固定发出的“已创建事项”回复。模型进度不会重复投递为最终回复。
+普通回复由 Chief 的工具调用 `say` 保存到 Conversation 的 Message 流，Conversation 的处理记录保留消息引用，Core 问题按原 messageId 投影到同一 Channel 消息流。POST `/messages` 返回入站持久回执，业务结果异步出现；没有每次固定发出的“已创建事项”回复。模型进度不会重复投递为最终回复。
 
-Chief 可能调用有副作用的工具，因此运行中断、失败或重启均不自动重放。状态和失败提示保留，用户核对后用新消息重新交办。同一输入 id 的传输重投永远不作为业务重试。等待中的调用栈不跨重启恢复，Core 问题会收口，Conversation 中的处理记录标记 failed；Work 的结果处理见下文。
+Chief 可能调用有副作用的工具，因此运行中断、失败或重启均不自动重放。状态和失败提示保留，用户核对后用新消息重新交办。同一输入 id 的传输重投永远不作为业务重试。等待中的调用栈不跨重启恢复，Core 问题会收口，Conversation 中的 Batch 标记 interrupted；Work 的结果处理见下文。
 
 ## 分配与追加输入
 
-ReconcileConversation 可以直接处理、创建或删除工作，也可以用 `append_input` 把原始 Input 交给已有 Task / Routine。创建确立新的目标，删除结束资源生命周期；对已有工作的补充通过输入承接。Chief 不直接修改已有 Work 的执行状态、下次调度时间和执行历史。
+Batch 中的 Chief 可以直接处理、创建或删除工作，也可以用 `append_input` 把原始 Input 交给已有 Task / Routine。创建确立新的目标，删除结束资源生命周期；对已有工作的补充通过输入承接。Chief 不直接修改已有 Work 的执行状态、下次调度时间和执行历史。
 
 共享事实与拆分工作有不同语义：多个 Work 可以引用同一原始 Input，独立消费；当一件大事需要拆分时，派生输入各自说明交付范围，并关联原始 Input。Chief 的交接说明与原始事实分别保留。直接处理、追加和创建可以组合使用，一份 Input 不要求只对应一份 Work。
 

@@ -21,6 +21,7 @@ export function reconcileScopeId(scope: ReconcileScope): string {
     reconcileResourceOwner(scope),
     scope.resourceApiVersion,
     scope.resourceKind,
+    scope.controllerName ?? "",
   ]);
 }
 
@@ -42,6 +43,7 @@ export function sameReconcileScope(
     left.namespace === right.namespace &&
     left.resourceApiVersion === right.resourceApiVersion &&
     left.resourceKind === right.resourceKind &&
+    (left.controllerName ?? "") === (right.controllerName ?? "") &&
     reconcileResourceOwner(left) === reconcileResourceOwner(right)
   );
 }

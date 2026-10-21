@@ -35,6 +35,7 @@ type VerbSession = Pick<
 >;
 
 interface ActiveExecution {
+  interrupted?: boolean;
   readonly scope: ExecutionScope;
   suspend<T>(wait: Promise<T>): Promise<T>;
 }
@@ -105,6 +106,22 @@ export class Verb {
         harnessInvocationGate: options.harnessInvocationGate,
       });
       this.harnessInvocations = new HarnessInvocationStore(options.session);
+    }
+  }
+
+  executionScope(executionId: string): ExecutionScope {
+    const execution = this.executions.get(executionId);
+    if (!execution) throw new Error(`Plugin execution is not active: ${executionId}`);
+    return execution.scope;
+  }
+
+  interruptExecution(executionId: string): void {
+    const execution = this.executions.get(executionId);
+    if (!execution) return;
+    execution.interrupted = true;
+    this.interactions?.failExecution(executionId, "Execution interrupted");
+    for (const invocation of this.listHarnessInvocations()) {
+      if (invocation.executionId === executionId) this.cancelHarnessInvocation(invocation.invocationId);
     }
   }
 
@@ -242,6 +259,7 @@ export class Verb {
     context: ExecutionScope,
     request: VerbRequest,
   ): Promise<VerbResponse> {
+    if (this.executions.get(context.executionId)?.interrupted) return { state: "dismissed" };
     if (request.verb === "say") {
       if (!this.say) throw new Error("No Channel message sink is installed");
       if (typeof request.input.text !== "string" || !request.input.text.trim()) throw new Error("say text must not be empty");
@@ -335,6 +353,7 @@ export class Verb {
         `${request.verb}() references unknown HarnessTarget: ${harnessTargetId}`,
       );
     }
+    if (this.executions.get(context.executionId)?.interrupted) return { state: "dismissed" };
     const snapshot = this.harnessInvocations.record({
       scope: context,
       invocation: {
@@ -350,6 +369,7 @@ export class Verb {
         freshContext: request.verb === "harness" ? request.input.freshContext : undefined,
       },
     });
+    if (this.executions.get(context.executionId)?.interrupted) this.cancelHarnessInvocation(snapshot.invocationId);
     const scheduled = this.harnessInvocations.scheduled(snapshot.invocationId);
     if (scheduled) this.dispatchHarnessInvocation(scheduled);
     const terminal = await this.waitForHarnessInvocation(
@@ -429,7 +449,15 @@ export class Verb {
     }, remaining);
     timer.unref?.();
     try {
-      return await this.harnessInvocations.wait(invocationId);
+      const terminal = await this.harnessInvocations.wait(invocationId);
+      if (terminal.phase === "cancelled" && terminal.turnId && this.session?.projection.activeTurns.has(terminal.turnId)) {
+        await new Promise<void>((resolve) => {
+          const done = () => { if (!this.session!.projection.activeTurns.has(terminal.turnId!)) { unsubscribe(); resolve(); } };
+          const unsubscribe = this.session!.subscribe(done);
+          done();
+        });
+      }
+      return terminal;
     } finally {
       clearTimeout(timer);
     }

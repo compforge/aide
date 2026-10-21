@@ -123,6 +123,7 @@ function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
     executionId: recorded.executionId,
     ...(recorded.conversationId ? { conversationId: recorded.conversationId } : {}),
     ...(recorded.inputId ? { inputId: recorded.inputId } : {}),
+    ...(recorded.inputIds ? { inputIds: recorded.inputIds } : {}),
     ...(recorded.resourceRef ? { resourceRef: recorded.resourceRef } : {}),
     verb: recorded.verb,
     phase: phaseOf(state),
@@ -228,6 +229,7 @@ export class HarnessInvocationStore {
       payload: {
         invocationId,
         executionId: draft.scope.executionId,
+        inputIds: draft.scope.inputIds,
         conversationId: draft.scope.conversationId, inputId: draft.scope.inputId, resourceRef: draft.scope.resourceRef,
         verb: invocation.verb,
         title: invocation.title,

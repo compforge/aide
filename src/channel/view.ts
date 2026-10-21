@@ -42,16 +42,16 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   if (!scope) return { version: PROTOCOL_VERSION, biz: "aide.conversation", blocks: [], meta: { conversation_id: conversationId, activity: null } };
   const state = scope.core.projection;
   const runs = scope.conversations.runs(conversationId);
-  const active = runs.find((input) => !input.status.roundId && (input.status.phase === "running" || input.status.phase === "waiting"));
+  const active = runs.find((input) => !input.input && (input.status.phase === "running" || input.status.phase === "waiting"));
   const queued = runs.filter((input) => !input.status.phase).length;
   const quietRuns = new Set(runs.filter((input) => input.status.quietReason).map((input) => input.id));
-  const timerRuns = new Map(runs.filter((run) => run.status.timerAt || run.status.batchInputIds).map((run) => [run.status.executionId, run.id]));
-  const runId = (item: { inputId?: string; executionId: string }) => timerRuns.get(item.executionId) ?? item.inputId;
+  const timerRuns = new Map(runs.filter((run) => !run.input).map((run) => [run.status.executionId, run.id]));
+  const runId = (item: { inputId?: string; executionId: string }) => item.executionId;
   const resource = scope.conversations.resource(conversationId);
   const turnInputs = new Map([...state.harnessInputs.values()].map((input) => [input.turnId, input]));
   const invocations = aide.invocations().filter((item) => {
     if (item.conversationId !== conversationId || !resource || quietRuns.has(runId(item) ?? "")) return false;
-    if (item.resourceRef?.kind === "Conversation") return item.resourceRef.uid === resource.metadata.uid && runs.some((r) => r.id === runId(item));
+    if (item.resourceRef?.kind === "Conversation") return item.resourceRef.uid === resource.metadata.uid;
     // Deleted Work may retain progress in its original Conversation, never in a later incarnation.
     const input = item.turnId && turnInputs.get(item.turnId);
     const at = input && state.messages.get(input.messageId)?.createdAt;
@@ -63,6 +63,8 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   const runPhases = new Map(runs.map((input) => [input.id, input.status.phase]));
   const messageRuns = new Map(runs.flatMap((input) => (input.status.messages ?? [])
     .filter((message) => message.role === "aide").map((message) => [message.id, input.id] as const)));
+  for (const message of aide.messages()) if (message.executionId) messageRuns.set(message.id, message.executionId);
+  const inputExecutions = new Map(invocations.flatMap((i) => (i.inputIds ?? []).map((id) => [id, i.executionId] as const)));
   const questionStatuses = new Map<string, "pending" | "answered" | "cancelled">();
   for (const interaction of state.interactions.values()) {
     if (interaction.request.request.kind !== "question" || interaction.pluginContext?.conversationId !== conversationId) continue;
@@ -78,13 +80,13 @@ export function conversationView(aide: ChannelService, conversationId: string): 
     .map((message) => ({ id: `message:${message.id}`, type: questionStatuses.has(message.id) ? "question" : "message", role: message.role, at: message.at, content: message.text,
       ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
       ...(questionStatuses.has(message.id) ? { status: questionStatuses.get(message.id) } : {}) }));
-  if (resource?.status.summary) roots.push({ id: "conversation-summary", type: "summary", label: "历史摘要", icon: "📝",
-    content: resource.status.summary.text, at: resource.metadata.creationTimestamp });
+  if (resource?.status.batch?.result?.context) roots.push({ id: "conversation-summary", type: "summary", label: "历史摘要", icon: "📝",
+    content: resource.status.batch!.result!.context!, at: resource.metadata.creationTimestamp });
   for (const run of runs) {
     if (!run.input) continue;
     const input = run.input, definition = aide.inputDefinition(input.spec);
     roots.push({ id: `input:${input.metadata.name}`, type: "input", relation: input.spec.relation, sender: input.spec.sender, origin: input.spec.origin, originId: definition.id,
-      inputId: input.metadata.name, group_id: input.status.roundId ?? input.metadata.name, label: definition.label, icon: definition.icon,
+      inputId: input.metadata.name, group_id: inputExecutions.get(input.metadata.name) ?? input.consumption.batchId ?? input.metadata.name, label: definition.label, icon: definition.icon,
       ...(input.spec.origin === "channel" ? { role: "user" as const } : {}),
       at: input.metadata.creationTimestamp, content: input.spec.text,
       status: run.status.quietReason ? "quiet" : run.status.phase ?? "queued",

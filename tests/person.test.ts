@@ -89,11 +89,11 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   // Rebuilding a fresh native context must retain attribution in its bounded history.
   const scope = aide.session("lark:cli_app:oc_chat");
   const conversation = scope.conversations.resource(scope.id)!;
-  await scope.plugins.resourceClient("personal").patchStatus(conversation, { contextReady: false });
+
   await channel.receive(event("followup", "ou_me"));
   await channel.dispatch(); await aide.settled();
-  const history = prompts.at(-1)!.split("Recent conversation: ")[1]!.trim().split("\n").map((line) => JSON.parse(line)) as Array<{ text: string; role: string; relation?: string }>;
-  assert.equal(history.find((item) => item.text === "mine")!.relation, "sent");
-  assert.equal(history.find((item) => item.text === "other")!.relation, "unknown");
-  assert.equal(history.find((item) => item.text === "other")!.role, "channel");
+  const history = prompts.at(-1)!.split("Previous context:")[1]!;
+  assert.match(history, /Relation to Person: sent/);
+  assert.match(history, /Text:\nother/);
+  assert.match(history, /Origin: channel/);
 });

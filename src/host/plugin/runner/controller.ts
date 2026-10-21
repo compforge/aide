@@ -51,7 +51,7 @@ export class RunnerController {
     const resource = await this.options.resources.get<unknown, unknown>(ref);
     if (!resource) return;
     const resourceRef = { ...ref, uid: resource.metadata.uid };
-    const scope: ExecutionScope = { aideSessionId: key.aideSessionId, pluginInstanceId: key.pluginInstanceId, namespace: key.namespace as ResourceNamespace,
+    const scope: ExecutionScope = { controllerName: key.controllerName, aideSessionId: key.aideSessionId, pluginInstanceId: key.pluginInstanceId, namespace: key.namespace as ResourceNamespace,
       executionId: `pex_${randomUUID()}`, resourceRef };
     await this.options.verb.beginRemote(scope);
     if (this.closed) { this.options.verb.endRemote(scope.executionId); throw new Error("Controller closed during admission"); }
@@ -76,7 +76,7 @@ export class RunnerController {
           this.options.changed({ kind: "deleted", pluginInstanceId: this.scope.pluginInstanceId, resource: deleted });
           return { deleted: true };
         }
-        this.options.store.setNextReconcileAt(original, original.metadata.name, next, { namespace, expectedResourceVersion: latest.metadata.resourceVersion });
+        this.options.store.setNextReconcileAt(original, original.metadata.name, next, { namespace, controllerName: this.scope.controllerName, expectedResourceVersion: latest.metadata.resourceVersion });
       }
       return { deleted: false, ...(next ? { nextAt: next.toISOString() } : {}) };
     } finally { this.options.verb.endRemote(scope.executionId); }
@@ -84,6 +84,6 @@ export class RunnerController {
   schedule(key: ReconcileKey, nextAt: string): void {
     if (this.closed || this.scope.resourceOwner === "aide") return;
     const resource = this.options.store.find({ apiVersion: key.resourceApiVersion, kind: key.resourceKind }, key.resourceId, key.namespace as ResourceNamespace);
-    if (resource) this.options.store.setNextReconcileAt(resource, key.resourceId, new Date(nextAt), { namespace: resource.metadata.namespace as ResourceNamespace });
+    if (resource) this.options.store.setNextReconcileAt(resource, key.resourceId, new Date(nextAt), { namespace: resource.metadata.namespace as ResourceNamespace, controllerName: this.scope.controllerName });
   }
 }

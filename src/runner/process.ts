@@ -292,7 +292,8 @@ function printerRegistration(printer: ResourcePrinter): PluginRegistration {
 
 function controllerRegistration(controller: Controller<unknown, unknown>): ControllerRegistration {
   return {
-    kind: "controller", controllerId: `controller:${controller.resourceType.apiVersion}:${controller.resourceType.kind}`,
+    kind: "controller", controllerId: `controller:${controller.resourceType.apiVersion}:${controller.resourceType.kind}${controller.name ? `:${controller.name}` : ""}`,
+    ...(controller.name ? { controllerName: controller.name } : {}),
     resourceType: controller.resourceType,
     ...(controller.present ? { presentHandlerId: handler("controller:present", controller.present.bind(controller) as (...args: never[]) => unknown) } : {}),
   };

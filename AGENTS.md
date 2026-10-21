@@ -48,10 +48,13 @@ plugins/personal/
   conversation/            # Conversation CRD 的模型、操作与 Reconcile
     model.ts               # 资源定义与会话类型
     input.ts               # 按 Input ID 幂等追加，保留消费状态与并发更新
-    store.ts               # 宿主侧会话投影与消息 outbox
-    config.ts              # 批次、待处理上限和上下文窗口
+    store.ts               # 宿主侧会话、Input 消费投影与消息流
+    config.ts              # 组批、待处理上限和上下文预算
     trigger.ts             # 定时触发配置
-    reconcile.ts           # Runner 侧消费 Input、续接问答与定时回顾
+    reconcile.ts           # Runner 调度 Batch、消费确认与定时回顾
+    batch.ts               # Conversation 内部 Batch 模型
+    reconcile-batch.ts     # 固定上下文执行与交接压缩
+    state.ts               # Conversation / Batch 身份检查和 CAS 更新
   source/                  # Source 分类定义与三类观察资源
     definition.ts          # 来源身份、名称与稳定图标
     environment/           # EnvironmentSource
@@ -106,7 +109,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Lark 用户消息 Source 按账号、用户和聊天生成独立观察话题，与机器人 Channel 会话分离，避免观察内容进入原群上下文和自动外发。
 - Source 先提交持久 Input 再推进观察水位。Input 独立保存，Conversation 内的消费状态、业务回复与去重记录原子提交，不能用投递失败重新触发业务执行。
 - 持久 Resource 共用 Host 容量管理；资源所有者声明释放与引用规则，未知类型默认保护。按 kind 的 LRU 等排序只作用于可释放且无人引用的记录，不能淘汰正在承担的工作。详见 docs/plugin/README.md。
-- Conversation 按紧迫性、数量与时间消费有限批次；显式 say / ask / confirm 产生沟通，Harness finalText 保存内部总结。先提交摘要再遗忘已消费引用，重建原生上下文同时持久化历史边界；失败暂停，不自动重放副作用。
+- Conversation.status.pendingInputIds 是唯一待消费队列，status.batch 固定一次处理材料。Conversation Reconcile 组批、确认消费和替换 Batch；具名 Batch Controller 执行 Harness，tool 直接调用 say / ask / confirm。完成批次保留有界上下文直到下一批继承；每批 freshContext 并持久化历史边界，失败不自动重放副作用。
 - Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 保存执行事实。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
 - ResourcePrinter 通过插件激活注册，describe / summarize 同步将资源快照转为详情 / 概览，不执行 I/O、模型调用或资源修改。调用方通过 describe / summarize 获取文本，Core 内置 InputPrinter；其它 Printer 按插件实例与 GVK 选择；默认展示为 JSON / kind/name，注册回滚与撤销跟随 Binding 生命周期。具体契约见 docs/plugin/README.md。
 - 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。

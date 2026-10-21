@@ -157,7 +157,7 @@ export function createReconcileContext(
 ): ReconcileContext {
   const context: ReconcileContext = Object.freeze({
     executionId: scope.executionId,
-    withContext: (association: Pick<import("@compforge/aide-plugin").ExecutionAssociation, "conversationId" | "inputId">) => createReconcileContext(snapshot, { ...scope, ...association }, invoke),
+    withContext: (association: Pick<import("@compforge/aide-plugin").ExecutionAssociation, "conversationId" | "inputId" | "inputIds">) => createReconcileContext(snapshot, { ...scope, ...association }, invoke),
     snapshot,
     verbs: createPluginVerbs(scope, invoke),
   });

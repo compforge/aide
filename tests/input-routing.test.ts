@@ -30,8 +30,8 @@ test("Default receives every Input and deterministic matches append once without
   await aide.settled();
   for (const id of ["group-a", "group-b"]) {
     const c = aide.findConversation(id)!.conversations;
-    assert.equal(c.get(id)!.inputIds.filter((i) => i === "shared").length, 1);
-    assert.equal(c.input("shared", id)!.status.phase, "done");
+    assert.equal(c.inputs(id).map((i) => i.metadata.name).filter((i) => i === "shared").length, 1);
+    assert.equal(c.input("shared", id)!.consumption.phase, "done");
   }
   assert.equal(aide.findConversation("group-c")!.conversations.input("shared"), undefined);
   const handling = calls.filter((p) => p.includes("service changed"));
@@ -43,7 +43,7 @@ test("Default receives every Input and deterministic matches append once without
   await aide.settled(); assert.equal(calls.length, before);
   await source.conversations.submit("overlap", { origin: "source", originId: "personal.environments", sessionId: "group-a", text: "default is also rule-related" });
   await aide.settled(); assert.equal(calls.length, before + 1);
-  assert.equal(aide.session("group-a").conversations.get("group-a")!.inputIds.filter((id) => id === "overlap").length, 1);
+  assert.equal(aide.session("group-a").conversations.inputs("group-a").map((i) => i.metadata.name).filter((id) => id === "overlap").length, 1);
   await source.conversations.submit("unmatched", { origin: "source", originId: "personal.environments", text: "unmatched observation" });
   await aide.settled(); assert.equal(calls.length, before + 2);
   assert.equal(source.conversations.inputStore.get("unmatched")!.status.routing!.phase, "done");
@@ -77,14 +77,14 @@ test("The first unscoped Source Input creates a replyable Conversation without s
   const scope = aide.findConversation(id)!;
   assert.equal(scope.id, id);
   assert.equal(scope.conversations.get(id)!.name, spec.text);
-  assert.deepEqual(scope.conversations.get(id)!.inputIds, ["first"]);
+  assert.deepEqual(scope.conversations.inputs(id).map((i) => i.metadata.name), ["first"]);
   const uid = scope.conversations.resource(id)!.metadata.uid;
   await aide.receive({ channelId: "web", id: "reply", sessionId: scope.id, text: "请帮我整理需要确认的问题" });
   await aide.settled();
   assert.equal(handled.length, 2); assert.equal(routes, 0);
   assert.doesNotMatch(handled[1]!, /Recent conversation:/, "Warm context receives only new inputs");
   assert.ok(handled[1]!.includes(`"conversationId":"${id}"`));
-  assert.equal(scope.conversations.get(id)!.inputIds.length, 2);
+  assert.equal(scope.conversations.inputs(id).map((i) => i.metadata.name).length, 2);
   await aide.close(); aide = new Aide(root, options, log);
   await aide.start(); await aide.settled();
   await aide.session("source:events").conversations.submit("first", spec);
@@ -110,12 +110,12 @@ test("Rule creation and association both run, including original discussion dest
   await source.conversations.submit("new-topic", { origin: "source", originId: "personal.environments", sessionId: "new-target", text: "new service evidence", observation: { originalInputId: "original" } });
   await aide.settled();
   for (const id of ["existing", "new-target"]) {
-    assert.equal(aide.findConversation(id)!.conversations.input("new-topic")!.status.phase, "done");
+    assert.equal(aide.findConversation(id)!.conversations.input("new-topic")!.consumption.phase, "done");
   }
   assert.equal(aide.conversationIds().length, 2);
   await source.conversations.submit("discussion", { origin: "source", originId: "personal.environments", text: "follow-up evidence", observation: { originalInputId: "new-topic" } });
   await aide.settled();
-  for (const id of ["existing", "new-target"]) assert.equal(aide.findConversation(id)!.conversations.input("discussion")!.status.phase, "done");
+  for (const id of ["existing", "new-target"]) assert.equal(aide.findConversation(id)!.conversations.input("discussion")!.consumption.phase, "done");
   assert.equal(aide.conversationIds().length, 2);
 });
 
@@ -132,7 +132,7 @@ test("Default and rule creation are appended before a later association fails; r
   await aide.setDefaultConversation("existing", true);
   const preceding = await source.conversations.submit("original", { origin: "source", originId: "personal.environments", text: "previous evidence" });
   source.conversations.inputStore.update(preceding, { routing: { phase: "running", reason: "previous delivery incomplete" } });
-  await other.plugins.resourceClient("personal").replace(c, { ...c.spec, inputIds: ["original"] }, { ...c.status, processing: { original: { phase: "done" } } });
+  source.conversations.inputStore.update(source.conversations.inputStore.get("original")!, { deliveries: [c.metadata.uid] });
   const pending = await source.conversations.submit("pending", { origin: "source", originId: "personal.environments", sessionId: "new-target", text: "new evidence", observation: { originalInputId: "original" } });
   const resources = source.plugins.resourceClient("personal");
   const logger = { debug() {}, info() {}, warn() {}, error() {} };
@@ -140,8 +140,8 @@ test("Default and rule creation are appended before a later association fails; r
   for (const id of ["existing", "new-target"]) {
     const scope = aide.findConversation(id)!;
     const c = scope.conversations.resource(id)!;
-    assert.ok(c.spec.inputIds.includes("pending"));
-    await scope.plugins.resourceClient("personal").patchStatus(c, { processing: { ...c.status.processing, pending: { phase: "done" } } });
+    assert.ok(c.status.pendingInputIds.includes("pending"));
+    await scope.plugins.resourceClient("personal").patchStatus(c, { pendingInputIds: [] });
   }
   assert.equal(source.conversations.inputStore.get("pending")!.status.routing!.phase, "running");
   assert.equal(other.conversations.input("pending"), undefined);
@@ -151,7 +151,7 @@ test("Default and rule creation are appended before a later association fails; r
   await aide.close(); aide = new Aide(root, options, log);
   await aide.start(); await aide.settled();
   assert.equal(calls.length, before + 1);
-  assert.equal(aide.session("other").conversations.input("pending")!.status.phase, "done");
+  assert.equal(aide.session("other").conversations.input("pending")!.consumption.phase, "done");
   assert.equal(aide.session("source").conversations.inputStore.get("pending")!.status.routing!.phase, "done");
 });
 
@@ -171,14 +171,15 @@ for (const createdBeforeCrash of [false, true]) {
     const fact = await source.conversations.submit("recover", { origin: "source", originId: "personal.environments", sessionId: "created", text: "persisted creation" });
     source.conversations.inputStore.update(fact, { routing: { phase: "running", reason: "interrupted creation",
       creation: { sessionId: "created", name: digest("created") } } });
-    await a.plugins.resourceClient("personal").replace(ca, { ...ca.spec, inputIds: ["recover"] }, { ...ca.status, processing: { recover: { phase: "done" } } });
+    source.conversations.inputStore.update(source.conversations.inputStore.get("recover")!, { deliveries: [ca.metadata.uid] });
     const created = createdBeforeCrash ? await aide.session("created").conversations.ensure() : undefined;
     await aide.close(); aide = new Aide(root, options, log);
     await aide.start(); await aide.settled();
     const c = aide.findConversation("created")!.conversations.resource("created")!;
     assert.equal(handled, 1);
     if (created) assert.equal(c.metadata.uid, created.metadata.uid);
-    assert.deepEqual(c.spec.inputIds, ["recover"]);
+    assert.deepEqual(c.status.pendingInputIds, []);
+    assert.ok(c.status.batch?.inputIds.includes("recover"));
     const routing = aide.session("source").conversations.inputStore.get("recover")!.status.routing!;
     assert.equal(routing.phase, "done"); assert.equal(routing.creation!.uid, c.metadata.uid);
     await aide.close(); aide = new Aide(root, options, log);
@@ -206,8 +207,8 @@ for (const pinnedBeforeCrash of [false, true]) {
     await aide.close(); aide = new Aide(root, options, log);
     await aide.start(); await aide.settled();
     assert.equal(aide.session(id).conversations.resource(id)!.metadata.uid, created.metadata.uid);
-    assert.deepEqual(aide.session(id).conversations.get(id)!.inputIds, ["first"]);
-    assert.deepEqual(aide.session("later-default").conversations.get("later-default")!.inputIds, []);
+    assert.deepEqual(aide.session(id).conversations.inputs(id).map((i) => i.metadata.name), ["first"]);
+    assert.deepEqual(aide.session("later-default").conversations.inputs("later-default").map((i) => i.metadata.name), []);
     assert.equal(handled, 1);
     assert.equal(aide.session("source").conversations.inputStore.get("first")!.status.routing!.phase, "done");
   });
@@ -224,7 +225,7 @@ test("Default append survives creation failure, and a pinned deleted creation is
   const resources = source.plugins.resourceClient("personal");
   const logger = { debug() {}, info() {}, warn() {}, error() {} };
   await assert.rejects(reconcileInput({ logger, resources: { ...resources, async create() {
-    assert.deepEqual(inbox.conversations.get("inbox")!.inputIds, ["pending"], "Default must receive the Input before attempting creation");
+    assert.deepEqual(inbox.conversations.inputs("inbox").map((i) => i.metadata.name), ["pending"], "Default must receive the Input before attempting creation");
     throw new Error("Creation unavailable");
   } } }, fact), /Creation unavailable/);
   assert.equal(source.conversations.inputStore.get("pending")!.status.routing!.phase, "running");
@@ -238,8 +239,8 @@ test("Default append survives creation failure, and a pinned deleted creation is
   const replacement = await scope.conversations.ensure();
   await assert.rejects(reconcileInput({ logger, resources }, fact), /Created Conversation no longer exists/);
   assert.notEqual(replacement.metadata.uid, created.metadata.uid);
-  assert.deepEqual(scope.conversations.get("new")!.inputIds, []);
-  assert.deepEqual(inbox.conversations.get("inbox")!.inputIds, ["pending"]);
+  assert.deepEqual(scope.conversations.inputs("new").map((i) => i.metadata.name), []);
+  assert.deepEqual(inbox.conversations.inputs("inbox").map((i) => i.metadata.name), ["pending"]);
 });
 
 test("Concurrent appends preserve both Inputs and consumption state; repeats do not write or wake a Conversation", async (t) => {
@@ -253,8 +254,8 @@ test("Concurrent appends preserve both Inputs and consumption state; repeats do 
   const target = { sessionId: scope.id, name: c.metadata.name, uid: c.metadata.uid };
   await Promise.all([appendConversationInput(client, target, first), appendConversationInput(client, target, second), appendConversationInput(client, target, first)]);
   const current = scope.conversations.resource("target")!;
-  assert.deepEqual([...current.spec.inputIds].sort(), ["first", "second"]);
-  await client.patchStatus(current, { processing: { first: { phase: "done", quietReason: "already handled" } } });
+  assert.deepEqual([...current.status.pendingInputIds].sort(), ["first", "second"]);
+  await client.patchStatus(current, { pendingInputIds: ["second"] });
   const before = scope.conversations.resource("target")!;
   let writes = 0;
   const resources = { ...client, replace: (async (...args: Parameters<typeof client.replace>) => { writes++; return client.replace(...args); }) as typeof client.replace };
@@ -267,7 +268,7 @@ test("Concurrent appends preserve both Inputs and consumption state; repeats do 
   const recreated = await scope.conversations.ensure();
   assert.notEqual(recreated.metadata.uid, target.uid);
   await assert.rejects(appendConversationInput(client, target, first), /no longer exists/);
-  assert.deepEqual(scope.conversations.get("target")!.inputIds, []);
+  assert.deepEqual(scope.conversations.inputs("target").map((i) => i.metadata.name), []);
 });
 
 test("Restart retries rules without replaying completed conversation work", async (t) => {
@@ -283,12 +284,12 @@ test("Restart retries rules without replaying completed conversation work", asyn
   const ca = a.conversations.resource(a.id)!;
   const fact = await source.conversations.submit("event", { origin: "source", originId: "personal.environments", sessionId: "b", text: "recover fanout" });
   source.conversations.inputStore.update(fact, { routing: { phase: "running", reason: "interrupted after default append" } });
-  await a.plugins.resourceClient("personal").replace(ca, { ...ca.spec, inputIds: ["event"] }, { ...ca.status, processing: { event: { phase: "done" } } });
+  source.conversations.inputStore.update(source.conversations.inputStore.get("event")!, { deliveries: [ca.metadata.uid] });
   await aide.close();
   aide = new Aide(root, options, log); await aide.start(); await aide.settled();
   assert.equal(calls, 1);
-  assert.equal(aide.session("a").conversations.get("a")!.inputIds.length, 1);
-  assert.equal(aide.session("b").conversations.input("event")!.status.phase, "done");
+  assert.equal(aide.session("a").conversations.inputs("a").map((i) => i.metadata.name).length, 1);
+  assert.equal(aide.session("b").conversations.input("event")!.consumption.phase, "done");
   assert.equal(aide.session("source").conversations.inputStore.get("event")!.status.routing!.phase, "done");
   const client = aide.session("source").plugins.resourceClient("personal");
   const stale = await client.get<ConversationSpec, ConversationStatus>({ ...CONVERSATION_TYPE, namespace: "v1", name: cb.metadata.name, uid: cb.metadata.uid, sessionId: "b" });
@@ -311,7 +312,7 @@ test("A committed Channel Input remains visible without a user Message and creat
   aide = new Aide(root, options, log); await aide.start(); await aide.settled();
   assert.equal(calls, 1);
   assert.equal(aide.session("target").conversations.inputs().filter((input) => input.spec.text === "question persisted before attachment").length, 1);
-  assert.equal(aide.session("target").conversations.input("accepted")!.status.phase, "done");
+  assert.equal(aide.session("target").conversations.input("accepted")!.consumption.phase, "done");
   await aide.close(); aide = new Aide(root, options, log); await aide.start(); await aide.settled();
   assert.equal(calls, 1); assert.equal(aide.messages().length, 1);
 });

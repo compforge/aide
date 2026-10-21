@@ -581,3 +581,19 @@ describe("PluginResourceStore", () => {
     });
   });
 });
+
+test("Named controllers retain independent durable deadlines for the same resource", async () => {
+  const root = testRoot();
+  const resources = store(root);
+  const resource = await createResourceClient(resources).create(REQ_LOOP_RUN, { name: "shared-timer", spec: {} });
+  const primary = new Date("2026-10-21T00:00:00Z"), secondary = new Date("2026-10-21T01:00:00Z");
+  resources.setNextReconcileAt(REQ_LOOP_RUN, resource.metadata.name, primary);
+  resources.setNextReconcileAt(REQ_LOOP_RUN, resource.metadata.name, secondary, { controllerName: "batch" });
+  resources.setNextReconcileAt(REQ_LOOP_RUN, resource.metadata.name, null, { controllerName: "batch" });
+  expect(store(root).scheduledReconciles(REQ_LOOP_RUN)[0]!.nextReconcileAt).toEqual(primary);
+  expect(store(root).scheduledReconciles(REQ_LOOP_RUN, "batch")).toEqual([]);
+  resources.setNextReconcileAt(REQ_LOOP_RUN, resource.metadata.name, secondary, { controllerName: "batch" });
+  resources.setNextReconcileAt(REQ_LOOP_RUN, resource.metadata.name, null);
+  expect(store(root).scheduledReconciles(REQ_LOOP_RUN)).toEqual([]);
+  expect(store(root).scheduledReconciles(REQ_LOOP_RUN, "batch")[0]!.nextReconcileAt).toEqual(secondary);
+});

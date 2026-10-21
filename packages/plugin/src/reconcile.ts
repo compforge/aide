@@ -17,6 +17,8 @@ export interface ReconcileResult {
 }
 
 export interface Controller<TSpec, TStatus> {
+  /** Independent queue for a second controller observing the same resource kind. */
+  readonly name?: string;
   readonly resourceType: ResourceType;
   readonly sources?: readonly ControllerSource<TSpec>[];
   readonly watches?: readonly Watch[];
