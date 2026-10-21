@@ -1,3 +1,5 @@
+import { fixtureAddress } from "./address-fixture.ts";
+import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -92,7 +94,7 @@ test("Timer can ask and continue in its own activation without fabricating a use
     return "收到，暂不验证。";
   }, execute: async () => { throw new Error("No work"); } }, root), log);
   const scope = aide.session("me");
-  const c = await scope.conversations.ensure();
+  const c = await scope.conversations.ensure("me", fixtureAddress("me"));
   await scope.plugins.resourceClient("personal").replace(c, { ...c.spec, trigger: { enabled: true, intervalSeconds: 3600 } },
     { ...c.status, nextTriggerAt: new Date(0).toISOString() });
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
@@ -112,7 +114,7 @@ test("Timer can ask and continue in its own activation without fabricating a use
   await aide.settled();
   assert.equal(turns, 1);
   assert.equal(scope.conversations.runs()[0]!.status.phase, "done");
-  assert.match(aide.messages().at(-1)!.text, /暂不验证/);
+  assert.match(aide.outputs().at(-1)!.text, /暂不验证/);
 });
 
 test("Restart coalesces due triggers, hides quiet results and does not replay interrupted activations", async (t) => {
@@ -150,11 +152,11 @@ test("Future trigger requeues without another input; ordinary messages preserve 
     return "收到";
   }, execute: async () => { throw new Error("No work"); } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ channelId: "web", id: "first", sessionId: "me", text: "你好" }); await aide.settled();
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "first", sessionId: "me", text: "你好" })); await aide.settled();
   await aide.setConversationTrigger("me", true);
   const scope = aide.findConversation("me")!;
   const due = scope.conversations.resource("me")!.status.nextTriggerAt;
-  await aide.receive({ channelId: "web", id: "second", sessionId: "me", text: "继续聊聊" }); await aide.settled();
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "second", sessionId: "me", text: "继续聊聊" })); await aide.settled();
   assert.equal(scope.conversations.resource("me")!.status.nextTriggerAt, due);
   const c = scope.conversations.resource("me")!;
   await scope.plugins.resourceClient("personal").replace(c, { ...c.spec, trigger: { enabled: true, intervalSeconds: 1 } },

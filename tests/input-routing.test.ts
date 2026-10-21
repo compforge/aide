@@ -1,3 +1,5 @@
+import { fixtureAddress } from "./address-fixture.ts";
+import { fixtureIncoming } from "./address-fixture.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -20,9 +22,9 @@ test("Default receives every Input and deterministic matches append once without
     assert.doesNotMatch(prompt, /Candidates:/); calls.push(prompt); return "观察已处理";
   }, async execute() { throw new Error("No delegated work expected"); } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ channelId: "web", id: "a", sessionId: "group-a", text: "a-private-interest" });
-  await aide.receive({ channelId: "web", id: "b", sessionId: "group-b", text: "b-private-interest" });
-  await aide.receive({ channelId: "web", id: "c", sessionId: "group-c", text: "unrelated service" });
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "a", sessionId: "group-a", text: "a-private-interest" }));
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "b", sessionId: "group-b", text: "b-private-interest" }));
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "c", sessionId: "group-c", text: "unrelated service" }));
   await aide.settled();
   await aide.setDefaultConversation("group-a", true);
   const source = aide.session("source:events"); await source.start();
@@ -79,7 +81,7 @@ test("The first unscoped Source Input creates a replyable Conversation without s
   assert.equal(scope.conversations.get(id)!.name, spec.text);
   assert.deepEqual(scope.conversations.inputs(id).map((i) => i.metadata.name), ["first"]);
   const uid = scope.conversations.resource(id)!.metadata.uid;
-  await aide.receive({ channelId: "web", id: "reply", sessionId: scope.id, text: "请帮我整理需要确认的问题" });
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "reply", sessionId: scope.id, text: "请帮我整理需要确认的问题" }));
   await aide.settled();
   assert.equal(handled.length, 2); assert.equal(routes, 0);
   assert.doesNotMatch(handled[1]!, /Recent conversation:/, "Warm context receives only new inputs");
@@ -307,12 +309,12 @@ test("A committed Channel Input remains visible without a user Message and creat
   let aide = new Aide(root, options, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   aide.session("target");
-  await aide.session("source").conversations.submit("accepted", { origin: "channel", originId: "web", sessionId: "target", text: "question persisted before attachment" });
+  await aide.session("source").conversations.submit("accepted", { origin: "channel", originId: "web", source: fixtureAddress("target"), sessionId: "target", text: "question persisted before attachment" });
   await aide.close();
   aide = new Aide(root, options, log); await aide.start(); await aide.settled();
   assert.equal(calls, 1);
   assert.equal(aide.session("target").conversations.inputs().filter((input) => input.spec.text === "question persisted before attachment").length, 1);
   assert.equal(aide.session("target").conversations.input("accepted")!.consumption.phase, "done");
   await aide.close(); aide = new Aide(root, options, log); await aide.start(); await aide.settled();
-  assert.equal(calls, 1); assert.equal(aide.messages().length, 1);
+  assert.equal(calls, 1); assert.equal(aide.outputs().length, 1);
 });

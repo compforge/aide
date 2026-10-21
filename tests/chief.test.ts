@@ -1,3 +1,4 @@
+import { fixtureAddress, fixtureIncoming } from "./address-fixture.ts";
 import "./pi-memory-fixture.ts";
 import { resolveChiefConfig } from "../src/host/harness/chief/config.ts";
 import { conversationView } from "../src/channel/view.ts";
@@ -38,19 +39,19 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
   let aide = new Aide(root, options, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const input = { channelId: "web", id: "one", sessionId: "me", conversationId: "me", text: "private-information" };
-  const [first, duplicate] = await Promise.all([aide.receive(input), aide.receive(input)]);
+  const [first, duplicate] = await Promise.all([aide.receive(fixtureIncoming(input)), aide.receive(fixtureIncoming(input))]);
   assert.deepEqual(first, duplicate);
   await aide.settled();
   assert.equal(calls, 1);
   assert.equal(aide.session("me").conversations.resource("me")!.status.batch?.phase, "done", JSON.stringify(aide.session("me").conversations.resource("me")!.status.batch));
   assert.equal(aide.works().length, 0);
-  assert.deepEqual(aide.messages().map((m) => m.text), ["直接回答"]);
-  await aide.receive({ ...input, sessionId: "other", conversationId: "other", text: "hello" }); await aide.settled();
+  assert.deepEqual(aide.outputs().map((m) => m.text), ["直接回答"]);
+  await aide.receive(fixtureIncoming({ ...input, sessionId: "other", conversationId: "other", text: "hello" })); await aide.settled();
   assert.doesNotMatch(prompts[1]!, /private-information/);
-  await aide.receive({ ...input, id: "failed", text: "fail" }); await aide.settled();
-  assert.match(aide.messages().at(-1)!.text, /本次处理未完成/);
+  await aide.receive(fixtureIncoming({ ...input, id: "failed", text: "fail" })); await aide.settled();
+  assert.match(aide.outputs().at(-1)!.text, /本次处理未完成/);
   await aide.close(); aide = new Aide(root, options, log); await aide.start();
-  await aide.receive({ ...input, id: "failed", text: "fail" }); await aide.settled();
+  await aide.receive(fixtureIncoming({ ...input, id: "failed", text: "fail" })); await aide.settled();
   assert.equal(calls, 3);
   assert.equal(aide.works().length, 0);
 });
@@ -135,6 +136,7 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with direct too
     if (previous.connectors === undefined) delete process.env.AIDE_CONFIG; else process.env.AIDE_CONFIG = previous.connectors;
     rmSync(root, { recursive: true, force: true });
   });
+  await aide.session(conversationId).conversations.ensure(conversationId, fixtureAddress(conversationId));
   const receive = (id: string, text: string) => bot.receive({ sender: { sender_type: "user" }, message: { message_id: id, chat_id: "oc_me", chat_type: "p2p", message_type: "text", content: JSON.stringify({ text }) } });
   await aide.start();
   await until(() => aide.questions().some((q) => q.request.status === "pending")).catch((error) => {
@@ -153,7 +155,7 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with direct too
   receive("decline", "拒绝"); await bot.deliver();
   assert.match(sent[0]!, /新需求/); assert.equal(sent.length, 1, "Chief's intermediate final text must not become a duplicate question");
   await bot.dispatch();
-  await until(() => aide.messages().some((m) => m.text === "已保留需求信息，暂不开始实现。"));
+  await until(() => aide.outputs().some((m) => m.text === "已保留需求信息，暂不开始实现。"));
   assert.match(JSON.stringify(prompts[5]), /declined/);
   const completedView = conversationView(aide, conversationId);
   const answeredQuestion = completedView.blocks.find((block) => block.id === questionId)!;
@@ -193,6 +195,6 @@ test("real Source -> Pi Chief -> Lark confirm/ask -> Work -> Pi, with direct too
   await until(() => aide.session(conversationId).store.conversations.inputs().some((item) => item.consumption.phase === "done" && !!item.consumption.quietReason));
   await bot.deliver();
   assert.equal(executions, 1);
-  assert.ok(!aide.messages().some((m) => m.text.includes("internal summary")));
+  assert.ok(!aide.outputs().some((m) => m.text.includes("internal summary")));
   assert.ok(!sent.some((text) => text.includes("internal summary")));
 });

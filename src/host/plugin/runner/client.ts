@@ -413,6 +413,8 @@ export class PluginRunnerClient {
         return await this.callbacks.printers.describe(request.resource);
       case "printer.summarize":
         return await this.callbacks.printers.summarize(request.resource);
+      case "resource.commit":
+        return await this.callbacks.resources.commit(request.writes);
       case "resource.replace":
         return await this.callbacks.resources.replace(request.resource, request.spec, request.status);
       case "resource.get":

@@ -41,7 +41,7 @@ interface ActiveExecution {
 }
 
 export interface VerbOptions {
-  say?: (context: ExecutionScope, text: string) => Promise<{ messageId: string }>;
+  say?: (context: ExecutionScope, text: string, options?: import("@compforge/aide-plugin").SayInput) => Promise<{ outputId: string }>;
   session?: VerbSession;
   capacity: ReconcileCapacity;
   connectors?: ConnectorClient;
@@ -261,11 +261,11 @@ export class Verb {
   ): Promise<VerbResponse> {
     if (this.executions.get(context.executionId)?.interrupted) return { state: "dismissed" };
     if (request.verb === "say") {
-      if (!this.say) throw new Error("No Channel message sink is installed");
+      if (!this.say) throw new Error("No Output sink is installed");
       if (typeof request.input.text !== "string" || !request.input.text.trim()) throw new Error("say text must not be empty");
-      const value = await this.say(context, request.input.text);
+      const value = await this.say(context, request.input.text, request.input);
       this.log?.({ level: "info", source: "plugin", component: "verb.say", pluginInstanceId: context.pluginInstanceId,
-        message: "Message persisted for Channel delivery", attributes: { messageId: value.messageId, executionId: context.executionId } });
+        message: "Output persisted for Channel delivery", attributes: { outputId: value.outputId, executionId: context.executionId } });
       return { state: "success", value };
     }
 

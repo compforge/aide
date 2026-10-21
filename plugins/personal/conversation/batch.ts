@@ -1,5 +1,3 @@
-import type { Message } from "../model.ts";
-
 /** @spec A Batch fixes its inputs and prompt before execution. Only execution state and its result may change.
  * @spec One Conversation holds at most one Batch; completed context is transferred before replacement.
  * @link docs/plugin/personal.md
@@ -17,8 +15,8 @@ export interface Batch {
   failureStage?: "execution" | "compaction";
   communicated?: boolean;
   quietReason?: string;
-  messages: Message[];
-  result?: { summary: string; messages?: string[]; context?: string; error?: string };
+  outputIds: string[];
+  result?: { summary: string; outputs?: string[]; context?: string; error?: string };
   /** Pure summarization can resume at this boundary; action executions are never blindly replayed. */
   compaction?: { offset: number; text: string };
 }

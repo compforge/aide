@@ -1,3 +1,4 @@
+import type { Address } from "./address.ts";
 import type { ResourceRef } from "./resource.ts";
 
 export interface InputReceipt { inputId: string; at: string }
@@ -6,6 +7,8 @@ export type InputRelation = "sent" | "received" | "observed";
 
 export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Input" } as const;
 export interface InputSpec {
+  /** Where the input was received; independent of its producer, sender and topic. */
+  source?: Address;
   /**
    * @spec Optional topic affinity supplied by the Channel or Source, which owns its stable identity and granularity.
    * Inputs sharing this ID have common context; different IDs do not imply unrelated topics or exclusive routing.

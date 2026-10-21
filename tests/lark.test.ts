@@ -6,7 +6,8 @@ import { test } from "node:test";
 import pino from "pino";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
-import type { Message } from "../plugins/personal/model.ts";
+import type { OutputView } from "../src/output.ts";
+import { fixtureOutput } from "./output-fixture.ts";
 import { LarkChannel } from "../src/channel/lark.ts";
 import { larkConfig, larkTransport, type LarkTransport } from "../src/channel/lark-client.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -65,15 +66,14 @@ test("Lark inbox survives restart; duplicate events do not execute twice; ordina
 
 test("Lark sends proactive output, retries the same part id after failure, and isolates apps/chats", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-outbox-"));
-  const messages: Message[] = [];
-  const aide = { receive: async () => { throw new Error("unused"); }, messages: () => messages };
+  const messages: OutputView[] = [];
+  const aide = { receive: async () => { throw new Error("unused"); }, outputs: () => messages };
   const { transport, sent } = fakeTransport();
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   channel.receive(event("om_1", "关注变化"));
-  const message = (id: string, conversationId: string, text: string): Message => ({ id, conversationId, text, role: "aide", workId: "routine", at: new Date().toISOString() });
+  const message = (id: string, conversationId: string, text: string): OutputView => fixtureOutput({ id, conversationId, text, role: "aide", workId: "routine", at: new Date().toISOString() });
   messages.push(message("web", "me", "不要发送"), message("other", "lark:cli_other:oc_chat", "不要发送"),
-    message("unknown", "lark:cli_test:oc_unknown", "不要发送"),
     message("news", "lark:cli_test:oc_chat", "有变化😀".repeat(2000)));
   let calls = 0;
   transport.send = async (chatId, text, id) => {
@@ -87,7 +87,7 @@ test("Lark sends proactive output, retries the same part id after failure, and i
   await channel.deliver();
   assert.equal(sent[1]!.id, sent[2]!.id, "Ambiguous sends must reuse Lark uuid");
   assert.notEqual(sent[0]!.id, sent[2]!.id, "Confirmed parts must not be resent");
-  assert.equal(sent[0]!.text + sent.slice(2).map((part) => part.text).join(""), messages[3]!.text);
+  assert.equal(sent[0]!.text + sent.slice(2).map((part) => part.text).join(""), messages[2]!.text);
   const count = sent.length;
   await channel.deliver();
   assert.equal(sent.length, count);
@@ -96,7 +96,7 @@ test("Lark sends proactive output, retries the same part id after failure, and i
 test("Lark ignores unaddressed group/bot events and reports unsupported input and intake failure without automatic reexecution", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-errors-"));
   let received = 0;
-  const aide = { receive: async () => { received++; throw new Error("private data"); }, messages: () => [] };
+  const aide = { receive: async () => { received++; throw new Error("private data"); }, outputs: () => [] };
   const { transport, sent } = fakeTransport();
   const channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
@@ -123,7 +123,7 @@ test("Lark malformed-event diagnostics identify invalid fields without logging m
   const diagnosticLog = pino({ level: "warn" }, { write(line) { entries.push(line); } });
   const { transport } = fakeTransport();
   const channel = new LarkChannel(home, "cli_invalid", {
-    receive: async () => { throw new Error("Invalid events must not execute"); }, messages: () => [],
+    receive: async () => { throw new Error("Invalid events must not execute"); }, outputs: () => [],
   }, transport, diagnosticLog);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   await channel.receive({ ...event("invalid", "sensitive message body"), sender: { sender_type: null } });
@@ -167,7 +167,7 @@ test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats a
   assert.ok(prompts.every((prompt) => !prompt.includes("@_user_")));
   assert.deepEqual(new Set(sent.map((item) => item.chatId)), new Set(["oc_group", "oc_other_group", "oc_direct"]));
   assert.equal(sent.length, 3);
-  assert.deepEqual(new Set(aide.messages().map((item) => item.conversationId)), new Set([
+  assert.deepEqual(new Set(aide.outputs().map((item) => item.conversationId)), new Set([
     "lark:cli_group:oc_group", "lark:cli_group:oc_other_group", "lark:cli_group:oc_direct",
   ]));
   assert.equal(aide.works().length, 0);
@@ -181,7 +181,7 @@ test("Lark accepts nullable permission-restricted user IDs and still requires th
     receive: async (input) => {
       received.push(input);
       return { inputId: input.id, at: new Date().toISOString() };
-    }, messages: () => [],
+    }, outputs: () => [],
   }, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   // @case Live Lark group events may expose open_id while withholding user_id as null.
@@ -209,7 +209,7 @@ test("Lark accepts nullable permission-restricted user IDs and still requires th
 test("Lark leaves group mentions disabled without bot identity and handles empty or non-text mentions without executing Chief", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-group-empty-"));
   const { transport, sent } = fakeTransport();
-  const aide = { receive: async () => { throw new Error("No Chief execution expected"); }, messages: () => [] };
+  const aide = { receive: async () => { throw new Error("No Chief execution expected"); }, outputs: () => [] };
   let channel = new LarkChannel(home, "cli_group_empty", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   const group = { ...event("no-identity", "@_user_1"), message: { ...event("no-identity", "@_user_1").message,
@@ -290,11 +290,11 @@ test("official SDK sends bot text with a stable uuid and checks API-level failur
 
 test("Lark receipt failures do not block later replies; restart retries receipts without resending", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-receipt-"));
-  const messages: Message[] = ["first", "second"].map((id) => ({ id, conversationId: "lark:cli_test:oc_chat", text: id,
+  const messages: OutputView[] = ["first", "second"].map((id) => fixtureOutput({ id, conversationId: "lark:cli_test:oc_chat", text: id,
     role: "aide", workId: null, at: id }));
   const receipts: string[] = []; let failing = true;
-  const aide = { receive: async () => ({ inputId: "in", at: new Date().toISOString() }), messages: () => messages,
-    async messageDelivered(_conversation: string, id: string) { if (id === "first" && failing) throw new Error("receipt storage failed"); receipts.push(id); } };
+  const aide = { receive: async () => ({ inputId: "in", at: new Date().toISOString() }), outputs: () => messages,
+    async outputDelivered(id: string) { if (id === "first" && failing) throw new Error("receipt storage failed"); receipts.push(id); } };
   const { transport, sent } = fakeTransport();
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });

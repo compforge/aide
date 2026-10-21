@@ -91,8 +91,8 @@ async function createConversation(context: Pick<PluginContext, "resources" | "lo
   try {
     const c = await context.resources.create<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, {
       sessionId: planned.sessionId, name: planned.name,
-      spec: { id: planned.sessionId, sessionId: planned.sessionId, name: initialConversationName(input.spec.text) },
-      status: { pendingInputIds: [], messages: [], receipts: [] },
+      spec: { id: planned.sessionId, sessionId: planned.sessionId, ...(input.spec.origin === "channel" && input.spec.source ? { address: input.spec.source } : {}), name: initialConversationName(input.spec.text) },
+      status: { pendingInputIds: [], receipts: [] },
     });
     context.logger.info("Chief routing created conversation", { attributes: { inputId: input.metadata.name,
       conversationId: c.spec.id, sessionId: planned.sessionId } });

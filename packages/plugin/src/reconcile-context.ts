@@ -1,3 +1,4 @@
+import type { Address } from "./address.ts";
 import type { ConnectorClient } from "./connectors/index.ts";
 import type { ResourceRef } from "./resource.ts";
 import type { ReconcileSnapshot, TurnSummary } from "./snapshot.ts";
@@ -21,8 +22,16 @@ interface VerbInput {
 }
 
 /** Persists a message for Channel delivery; success does not mean the recipient has read it. */
-export interface SayInput { readonly text: string }
-export type SayResult = VerbResult<{ readonly messageId: string }>;
+export interface SayInput {
+  readonly text: string;
+  readonly inputIds?: readonly string[];
+  readonly idempotencyKey?: string;
+  readonly respondToInputId?: string;
+  readonly target?: Address;
+  /** Person references; explicit [] suppresses inference from respondToInputId's sender. */
+  readonly receivers?: readonly ResourceRef[];
+}
+export type SayResult = VerbResult<{ readonly outputId: string }>;
 
 export interface AskChoice<TValue extends string = string> {
   /** Stable domain value returned when the user selects this choice. */

@@ -1,3 +1,4 @@
+import { fixtureIncoming } from "./address-fixture.ts";
 import { assertInputCapacity } from "../plugins/personal/conversation/input.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -47,7 +48,7 @@ test("Count and urgency create stable Batches; only acknowledged members leave t
   assert.notEqual(next.status.batch!.id, first.status.batch!.id);
   assert.match(next.status.batch!.context.history, /fact 1/);
   assert.deepEqual(next.status.pendingInputIds, []);
-  assert.equal(aide.messages().length, 0);
+  assert.equal(aide.outputs().length, 0);
   assert.equal(await appendConversationInput(scope.plugins.resourceClient("personal"),
     { sessionId: "me", name: next.metadata.name, uid: next.metadata.uid }, scope.conversations.inputStore.get("1")!), false);
   assert.deepEqual(scope.conversations.resource("me")!.status.pendingInputIds, []);
@@ -135,7 +136,7 @@ test("Failed Batch retains pending inputs, does not replay, and a full queue res
   assert.throws(() => assertInputCapacity({ ...c, status: { ...c.status, pendingInputIds: [...c.status.pendingInputIds, "reserved"] } }, immediate, 2), /capacity exhausted/);
   assert.throws(() => assertInputCapacity(c, { ...immediate, attention: "deferred" }, 2), /capacity exhausted/);
   fail = false;
-  await aide.receive({ id: "recover", channelId: "web", sessionId: "me", text: "Verify and continue" });
+  await aide.receive(fixtureIncoming({ id: "recover", channelId: "web", sessionId: "me", text: "Verify and continue" }));
   await aide.settled();
   assert.equal(scope.conversations.resource("me")!.status.batch!.phase, "done");
   assert.deepEqual(scope.conversations.resource("me")!.status.pendingInputIds, []);

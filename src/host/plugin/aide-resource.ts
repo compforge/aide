@@ -1,3 +1,5 @@
+import { OUTPUT_TYPE, type OutputSpec } from "@compforge/aide-plugin";
+import { OutputStore } from "../output/store.ts";
 import type {
   AideSessionResource,
   AideSessionTargetBindingResource,
@@ -41,6 +43,7 @@ type WritableBindingSession = Pick<
 
 export interface AideResourceProviderOptions {
   readonly inputs?: InputStore;
+  readonly outputs?: OutputStore;
   readonly session: WritableBindingSession;
   readonly turns?: AideResourceIndex;
   readonly sessions?: () => readonly AideSessionObservation[];
@@ -79,6 +82,7 @@ function jsonObject(name: string, value: unknown): Record<string, unknown> {
  */
 export class AideResourceProvider {
   private readonly inputs?: InputStore;
+  private readonly outputs?: OutputStore;
   private readonly session: WritableBindingSession;
   private readonly turns?: AideResourceIndex;
   private readonly sessions?: AideResourceProviderOptions["sessions"];
@@ -89,6 +93,7 @@ export class AideResourceProvider {
 
   constructor(options: AideResourceProviderOptions) {
     this.inputs = options.inputs;
+    this.outputs = options.outputs;
     this.session = options.session;
     this.turns = options.turns;
     this.sessions = options.sessions;
@@ -104,7 +109,7 @@ export class AideResourceProvider {
 
   handles(type: ResourceType): boolean {
     return [
-      INPUT_TYPE,
+      INPUT_TYPE, OUTPUT_TYPE,
       AIDE_TURN_RESOURCE_TYPE,
       AIDE_SESSION_RESOURCE_TYPE,
       AIDE_TARGET_RESOURCE_TYPE,
@@ -116,6 +121,10 @@ export class AideResourceProvider {
     ref: ResourceRef,
   ): Promise<Readonly<Resource<TSpec, TStatus>> | undefined> {
     if (ref.namespace !== AIDE_SYSTEM_NAMESPACE || !this.handles(ref)) return undefined;
+    if (typeMatches(ref, OUTPUT_TYPE)) {
+      const output = this.outputs?.get(ref.name);
+      return output && (!ref.uid || output.metadata.uid === ref.uid) ? output as unknown as Resource<TSpec, TStatus> : undefined;
+    }
     if (typeMatches(ref, INPUT_TYPE)) {
       const input = this.inputs?.get(ref.name);
       return input && (!ref.uid || input.metadata.uid === ref.uid) ? input as unknown as Resource<TSpec, TStatus> : undefined;
@@ -140,12 +149,14 @@ export class AideResourceProvider {
   ): readonly Readonly<Resource<TSpec, TStatus>>[] {
     if (
       (options?.namespace !== undefined && options.namespace !== AIDE_SYSTEM_NAMESPACE) ||
-      (type.kind !== INPUT_TYPE.kind && Object.keys(options?.matchLabels ?? {}).length > 0)
+      (type.kind !== INPUT_TYPE.kind && type.kind !== OUTPUT_TYPE.kind && Object.keys(options?.matchLabels ?? {}).length > 0)
     ) {
       return [];
     }
     let resources: readonly Resource<unknown, unknown>[];
-    if (typeMatches(type, INPUT_TYPE)) {
+    if (typeMatches(type, OUTPUT_TYPE)) {
+      resources = this.outputs?.list({ owner: this.session.id, matchLabels: options?.matchLabels }) ?? [];
+    } else if (typeMatches(type, INPUT_TYPE)) {
       resources = this.inputs?.list(this.session.id) ?? [];
     } else if (typeMatches(type, AIDE_SESSION_RESOURCE_TYPE)) {
       resources = this.sessionObservations().map((session) => this.sessionResource(session));
@@ -198,6 +209,11 @@ export class AideResourceProvider {
   }
 
   create<S, T>(type: ResourceType, name: string, spec: S): Readonly<Resource<S, T>> {
+    if (typeMatches(type, OUTPUT_TYPE) && this.outputs) {
+      const output = spec as OutputSpec;
+      if (output.conversation.sessionId !== this.session.id) throw new Error("Output belongs to another Session");
+      return this.outputs.create(this.session.id, name, output) as unknown as Resource<S, T>;
+    }
     if (!typeMatches(type, INPUT_TYPE) || !this.inputs) throw new Error(`Cannot create builtin ${type.kind}`);
     return this.inputs.submit(this.session.id, name, spec as InputSpec) as unknown as Resource<S, T>;
   }

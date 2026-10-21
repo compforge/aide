@@ -1,3 +1,5 @@
+import { sameAddress } from "../address.ts";
+import { channelOutputs } from "./output.ts";
 import { answerPreview, processPreview, replyLabels } from "./reply-layout.ts";
 import type { ChannelService } from "./service.ts";
 import { conversationView } from "./view.ts";
@@ -36,10 +38,13 @@ export function larkProgress(aide: ChannelService, conversationId: string): Lark
     const rawPhase = input.consumption.phase;
     const phase = rawPhase === "compacting" ? "running" : rawPhase === "interrupted" ? "failed" : rawPhase ?? "queued";
     const ids = new Set(view.blocks.filter((b) => b.type === "message" && b.group_id === group).map((b) => b.id.replace(/^message:/, "")));
-    const responses = aide.messages().filter((m) => ids.has(m.id));
+    // A Conversation may produce Outputs for another destination; a progress card cannot deliver those.
+    const address = aide.findConversation(conversationId)?.conversations.resource(conversationId)?.spec.address;
+    const addressed = channelOutputs(aide).filter((o) => address && sameAddress(o.target, address));
+    const responses = addressed.filter((m) => ids.has(m.id));
     if (phase === "waiting") {
       const question = aide.questions().find((item) => item.conversationId === conversationId && item.request.status === "pending");
-      const message = question && aide.messages().find((item) => item.id === question.request.messageId);
+      const message = question && addressed.find((item) => item.id === question.request.messageId);
       if (message) responses.push(message);
     }
     const text = responses.map((message) => message.text).join("\n\n");

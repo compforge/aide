@@ -1,3 +1,4 @@
+import { fixtureIncoming } from "./address-fixture.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -101,7 +102,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await aide.start(); await aide.settled();
   assert.ok(reads >= 2); assert.equal(prompts.length, 0);
   const initialReads = reads;
-  await aide.receive({ channelId: "web", sessionId: "other", conversationId: "other", id: "hello", text: "hello" }); await aide.settled();
+  await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "other", conversationId: "other", id: "hello", text: "hello" })); await aide.settled();
   assert.equal(reads, initialReads, "Opening another Session must not duplicate the observer");
   await aide.setDefaultConversation("other", true);
   current = snapshot("B");
@@ -121,7 +122,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await poll();
   assert.equal(aide.session(ENVIRONMENT_SESSION).conversations.inputStore.list(ENVIRONMENT_SESSION).length, 1);
   assert.match(prompts.at(-1)!, /workload.changed/);
-  assert.ok(aide.messages().filter((message) => message.conversationId === "other").some((message) => message.text === "关注的服务有变化"));
+  assert.ok(aide.outputs().filter((message) => message.conversationId === "other").some((message) => message.text === "关注的服务有变化"));
   assert.equal(aide.works().length, 0);
   const sessions = new SessionStore(root); const persisted = sessions.openSession(ENVIRONMENT_SESSION);
   const events = persisted.ledger.read().filter((event) => event.kind === "connector.started");

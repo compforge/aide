@@ -37,6 +37,11 @@ export class ResourceStorage {
   private config = ResourceStorageConfigSchema.parse({});
   private readonly policies = new Map<string, ResourceLifecycle>();
   private readonly listeners = new Set<(scope: string, resource: Resource<unknown, unknown>) => void>();
+  private inTransaction = false;
+  private afterCommitCallbacks: Array<() => void> = [];
+  private rollbackError: unknown;
+  private rollbackOnly = false;
+  private readonly writtenKeys = new Set<string>();
   private evicted: Array<{ scope: string; resource: Resource<unknown, unknown> }> = [];
   static open(home: string): ResourceStorage {
     const path = resolve(home); let storage = databases.get(path);
@@ -92,6 +97,7 @@ export class ResourceStorage {
       if (bytes > limits.maxResourceBytes && bytes > Number(previous?.bytes ?? 0)) throw new ResourceCapacityError(kind, `record bytes ${bytes}/${limits.maxResourceBytes}`);
       this.db.prepare(`INSERT INTO resources VALUES (?,?,?,?,?,?,?,?,NULL) ON CONFLICT(key) DO UPDATE SET
         data=excluded.data, bytes=excluded.bytes, accessed=excluded.accessed`).run(key, scope, kind, resource.metadata.uid, data, bytes, resource.metadata.creationTimestamp, Date.now());
+      this.writtenKeys.add(key);
       this.indexLifecycle(key, scope, resource);
       if (receipt) this.addReceipt(receipt.key, receipt.value);
       if (!previous || bytes > Number(previous.bytes)) this.collect(kind, key);
@@ -139,6 +145,7 @@ export class ResourceStorage {
         AND (?=0 OR kind=?) AND NOT EXISTS(SELECT 1 FROM resource_refs WHERE target=r.uid) ORDER BY ${order},key`);
       for (const row of candidates.iterate(new Date().toISOString(), protectedKey, onlyKind ? 1 : 0, kind)) {
         if (enough()) break;
+        if (this.writtenKeys.has(row.key as string)) continue;
         this.remove(row.key as string);
         this.evicted.push({ scope: row.scope as string, resource: (JSON.parse(row.data as string) as StoredResource).object });
       }
@@ -157,10 +164,36 @@ export class ResourceStorage {
       throw new ResourceCapacityError(kind, `count ${after.n}/${limits.maxCount}, kind bytes ${after.bytes}/${limits.maxBytes}, host bytes ${total()}/${this.config.maxBytes}`);
     }
   }
-  private transaction<T>(fn: () => T): T {
+  afterCommit(callback: () => void): void {
+    if (this.inTransaction) this.afterCommitCallbacks.push(callback);
+    else callback();
+  }
+
+  /** @spec Synchronous writes commit together; no observer sees a partially committed business result and Output. */
+  transaction<T>(fn: () => T): T {
+    if (this.inTransaction) {
+      try {
+        const result = fn();
+        if (result && typeof (result as { then?: unknown }).then === "function") throw new Error("Resource transaction must be synchronous");
+        return result;
+      } catch (error) { this.rollbackOnly = true; this.rollbackError = error; throw error; }
+    }
     this.db.exec("BEGIN IMMEDIATE");
+    this.inTransaction = true;
+    this.rollbackError = undefined;
+    this.rollbackOnly = false;
+    this.writtenKeys.clear();
     let result: T;
-    try { result = fn(); this.db.exec("COMMIT"); } catch (error) { this.db.exec("ROLLBACK"); this.evicted = []; throw error; }
+    try {
+      result = fn();
+      if (result && typeof (result as { then?: unknown }).then === "function") throw new Error("Resource transaction must be synchronous");
+      if (this.rollbackOnly) throw this.rollbackError;
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK"); this.evicted = []; this.afterCommitCallbacks = []; throw error;
+    } finally { this.inTransaction = false; this.writtenKeys.clear(); }
+    const callbacks = this.afterCommitCallbacks; this.afterCommitCallbacks = [];
+    for (const callback of callbacks) { try { callback(); } catch { /* already committed */ } }
     const removed = this.evicted; this.evicted = [];
     for (const item of removed) for (const listener of this.listeners) { try { listener(item.scope, item.resource); } catch { /* committed; a subscriber cannot roll back deletion */ } }
     return result;

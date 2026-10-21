@@ -110,7 +110,14 @@ export interface ResourceMergePatch {
   readonly value: Readonly<Record<string, unknown>>;
 }
 
+/** A bounded atomic write set in one Session and Plugin scope. Core creates are limited to Output. */
+export type ResourceCommit =
+  | { operation: "create"; type: ResourceType; name: string; spec: unknown; status?: unknown }
+  | { operation: "replace"; resource: Resource<unknown, unknown>; spec: unknown; status: unknown }
+  | { operation: "patchStatus"; resource: Resource<unknown, unknown>; patch: Record<string, unknown> };
+
 export interface ResourceWriter {
+  commit(writes: readonly ResourceCommit[]): Promise<readonly Readonly<Resource<unknown, unknown>>[]>;
   create<TSpec, TStatus>(
     type: ResourceType,
     init: {

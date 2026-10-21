@@ -1,3 +1,4 @@
+import { fixtureIncoming } from "./address-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { updateBatch } from "../plugins/personal/conversation/state.ts";
 import { loadConfig } from "../src/config.ts";
@@ -25,7 +26,7 @@ test("Independent Input facts and Personal consumption survive reopening with ve
   const first = await seedInput(store, "m1", { conversationId: "group-a", origin: "channel", originId: "web", text: "one-body-only" });
   assert.equal(store.inputStore.submit(store.sessionId, "m1", first.spec).metadata.uid, first.metadata.uid);
   await seedInput(store, "s1", { conversationId: "watch-a", origin: "source", originId: "personal.environments", text: "requirement changed", observation: { id: "req-1" } });
-  assert.deepEqual(store.get("watch-a")!.messages, []);
+  assert.deepEqual(store.get("watch-a")!.outputs, []);
   assert.equal(store.inputStore.list().length, 2);
   const c = store.resource("group-a")!;
   const client = createResourceClient(store.resources);
@@ -54,10 +55,10 @@ test("Chief serializes inputs within a conversation while another conversation c
     return `answer:${spec.text}`;
   }, async execute() { throw new Error("Unexpected work"); } }, root), pino({ level: "silent" }));
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ channelId: "lark", id: "1", sessionId: "lark:bot:group-a", conversationId: "lark:bot:group-a", text: "a-first" });
+  await aide.receive(fixtureIncoming({ channelId: "lark", id: "1", sessionId: "lark:bot:group-a", conversationId: "lark:bot:group-a", text: "a-first" }));
   await until(() => calls.length === 1);
-  await aide.receive({ channelId: "lark", id: "2", sessionId: "lark:bot:group-a", conversationId: "lark:bot:group-a", text: "a-second" });
-  await aide.receive({ channelId: "lark", id: "1", sessionId: "lark:bot:group-b", conversationId: "lark:bot:group-b", text: "b-first" });
+  await aide.receive(fixtureIncoming({ channelId: "lark", id: "2", sessionId: "lark:bot:group-a", conversationId: "lark:bot:group-a", text: "a-second" }));
+  await aide.receive(fixtureIncoming({ channelId: "lark", id: "1", sessionId: "lark:bot:group-b", conversationId: "lark:bot:group-b", text: "b-first" }));
   await until(() => calls.some((call) => call.text === "b-first"));
   await until(() => calls.some((call) => call.text === "a-second"));
   assert.doesNotMatch(calls.find((call) => call.text === "b-first")!.prompt, /a-first|a-second/);
@@ -87,10 +88,10 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
   assert.match(calls[0]!, /process-after-restart/);
   assert.doesNotMatch(calls[0]!, /do-not-replay/);
   assert.equal(aide.session("a").conversations.input("active")!.consumption.phase, "interrupted");
-  const notices = aide.messages().filter((m) => m.conversationId === "a");
+  const notices = aide.outputs().filter((m) => m.conversationId === "a");
   assert.equal(notices.length, 1); assert.match(notices[0]!.text, /上次处理已中断/);
   await aide.session("a").recoverInterrupted();
-  assert.deepEqual(aide.messages().filter((m) => m.conversationId === "a"), notices);
+  assert.deepEqual(aide.outputs().filter((m) => m.conversationId === "a"), notices);
   assert.equal(aide.session("b").conversations.input("queued")!.consumption.phase, "done");
 });
 
@@ -110,7 +111,7 @@ test("Source watches restore independently and are installed only in their assig
   await aide.start(); await aide.settled();
   assert.ok(polls >= 2);
   const initialPolls = polls;
-  await aide.receive({ channelId: "web", sessionId: "web:one", conversationId: "web-conv", id: "hello", text: "hello" }); await aide.settled();
+  await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "web:one", conversationId: "web-conv", id: "hello", text: "hello" })); await aide.settled();
   assert.equal(polls, initialPolls);
   assert.equal(aide.session("web:one").store.resources.list(SOURCE_TYPE).length, 0);
   for (const id of ["source:one", "source:two"]) assert.equal(aide.session(id).store.resources.list(SOURCE_TYPE).length, 1);
@@ -134,8 +135,8 @@ test("Conversation name comes from its first Input, survives restart, and Source
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const sessionId = "lark:app:group";
-  await aide.receive({ channelId: "web", id: "first", sessionId, text: "  关注 executor\n部署情况  " });
-  await aide.receive({ channelId: "web", id: "second", sessionId, text: "换个话题" });
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "first", sessionId, text: "  关注 executor\n部署情况  " }));
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "second", sessionId, text: "换个话题" }));
   await aide.settled();
   assert.equal(aide.findConversation(sessionId)!.conversations.resource(sessionId)!.spec.name, "关注 executor 部署情况");
   const source = aide.session("source-name"); await source.start();

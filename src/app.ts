@@ -1,3 +1,6 @@
+import type { Address } from "@compforge/aide-plugin";
+import { OutputStore } from "./host/output/store.ts";
+import { outputView } from "./output.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
 import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
@@ -55,6 +58,8 @@ export class Aide {
   private readonly environmentSources: ReturnType<typeof environmentSources>;
   private readonly messageSource: ReturnType<typeof messageWatch>;
   private readonly inputs: InputStore;
+  readonly outputStore: OutputStore;
+  private readonly unsubscribeOutputs: () => void;
   private readonly unsubscribeResources: () => void;
   private readonly connectors: ConnectorClient;
   private readonly meMarks: Me;
@@ -74,6 +79,8 @@ export class Aide {
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
     this.environmentSources = environmentSources(sources.environments, environments);
     this.inputs = new InputStore(home);
+    this.outputStore = new OutputStore(home);
+    this.unsubscribeOutputs = this.outputStore.subscribe(() => this.notify());
     this.inputs.storage.configure(config?.resources);
     this.unsubscribeResources = this.inputs.storage.subscribe((scope, resource) => { this.log.info({ scope, kind: resource.kind, uid: resource.metadata.uid }, "Resource reclaimed"); });
     validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
@@ -125,16 +132,16 @@ export class Aide {
     let application: Personal;
     const core = new CoreSession({ session,
       controller: { mentionBudgetChars: 0, createAdapter: this.options.createAdapter, resolveTarget: (id) => targets.find((item) => item.id === id) },
-      plugins: { instances, connectors, harnessTargets: targets, inputs: this.inputs,
+      plugins: { instances, connectors, harnessTargets: targets, inputs: this.inputs, outputs: this.outputStore,
         resourceDirectory: { sessions: () => [PERSON_SESSION, ...this.active.keys()], client: (sessionId, pluginId) => {
           if (sessionId === PERSON_SESSION && pluginId === "personal") return this.catalog.client;
           const scope = this.active.get(sessionId); if (!scope) throw new Error(`Unknown Session: ${sessionId}`);
           return scope.plugins.resourceClient(pluginId);
         }, ensureSession: async (sessionId) => { if (sessionId !== PERSON_SESSION) await this.session(sessionId).start(); } },
         onResourceChange: (change) => application?.conversations.changed(change),
-        say: (context, text) => {
+        say: (context, text, options) => {
           if (!context.conversationId) throw new Error("Personal say requires Conversation context");
-          return application.conversations.say(context.conversationId, context.inputId, text, context.executionId);
+          return application.conversations.say(context.conversationId, context.inputId, text, context.executionId, options);
         }, selectedHarnessTargetId: () => targetId,
         harnessInvocationGate: () => "auto_approve", pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => {
@@ -175,7 +182,7 @@ export class Aide {
     }
     application = new Personal({ timezone: this.options.timezone, persons: this.persons, me: this.meMarks,
       conversation: parsePersonalConfig(this.options.config?.plugins.personal).conversation }, this.log.child({ sessionId: id }),
-      { core, session, connectors, targets, inputs: this.inputs });
+      { core, session, connectors, targets, inputs: this.inputs, outputs: this.outputStore });
     this.active.set(id, application);
     core.subscribe(() => this.notify());
     application.conversations.subscribe(() => this.notify());
@@ -184,22 +191,23 @@ export class Aide {
     return application;
   }
 
-  private async claimConversation(scope: Personal, conversationId: string): Promise<void> {
+  private async claimConversation(scope: Personal, conversationId: string, address?: Address): Promise<void> {
     const owner = this.findConversation(conversationId);
     if (owner && owner !== scope) throw new Error(`Conversation ${conversationId} belongs to Session ${owner.id}`);
-    if (!scope.conversations.get(conversationId)) await scope.conversations.ensure(conversationId);
+    if (!scope.conversations.get(conversationId)) await scope.conversations.ensure(conversationId, address);
   }
 
   async receive(raw: unknown) {
     const input = IncomingSchema.parse(raw);
     this.inputDefinition({ origin: "channel", originId: input.channelId });
+    if (input.source.channelId !== input.channelId) throw new Error("Channel input address belongs to a different Channel");
     const scope = this.session(input.sessionId);
-    await this.claimConversation(scope, input.sessionId);
+    await this.claimConversation(scope, input.sessionId, input.source);
     await this.start();
     return scope.receive(input);
   }
 
-  async event(input: Omit<Incoming, "channelId"> & { name: string; conversationId?: string }): Promise<number> {
+  async event(input: Omit<Incoming, "channelId" | "source"> & { name: string; conversationId?: string }): Promise<number> {
     const scope = this.session(input.sessionId);
     await this.claimConversation(scope, input.sessionId);
     await this.start(); await scope.start();
@@ -217,8 +225,11 @@ export class Aide {
     return scope.chiefSession(targetId, config);
   }
 
-  async messageDelivered(conversationId: string, messageId: string) { await this.findConversation(conversationId)?.conversations.delivered(conversationId, messageId); }
-  messages() { return this.sessions().flatMap((scope) => scope.messages()).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
+  async outputDelivered(outputId: string) { if (this.outputStore.get(outputId)) this.outputStore.delivered(outputId); }
+  async outputSending(outputId: string) { if (this.outputStore.get(outputId)) this.outputStore.begin(outputId); }
+  async outputRetry(outputId: string, error: string, nextAttemptAt: string) { if (this.outputStore.get(outputId)) this.outputStore.retry(outputId, error, nextAttemptAt); }
+  outputs() { return this.outputStore.list().map(outputView).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
+
   works() { return this.sessions().flatMap((scope) => scope.works()); }
   questions() { return this.sessions().flatMap((scope) => scope.questions()); }
   invocations() { return this.sessions().flatMap((scope) => scope.invocations()); }
@@ -286,5 +297,6 @@ export class Aide {
     await Promise.all(this.sessions().map((scope) => scope.close()));
     this.listeners.clear();
     this.unsubscribeResources();
+    this.unsubscribeOutputs();
   }
 }

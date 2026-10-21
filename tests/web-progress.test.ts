@@ -1,3 +1,5 @@
+import { larkAddress, webAddress } from "../src/channel/address.ts";
+import { fixtureIncoming } from "./address-fixture.ts";
 import { iconFor, type InputSpec } from "@compforge/aide-plugin";
 import { CHANNELS, bindChannelInput } from "../src/channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
@@ -92,7 +94,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const accepted = await fetch(base + "/messages", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "a1", sessionId: "a", text: "查看资料", channelId: "forged-channel" }) });
   assert.equal(accepted.status, 200);
-  await aide.receive({ channelId: "web", id: "b1", sessionId: "b", conversationId: "b", text: "另一会话的私有内容" });
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "b1", sessionId: "b", conversationId: "b", text: "另一会话的私有内容" }));
   await until(() => emitters.has(chiefTarget("a")) && emitters.has(chiefTarget("b")));
   const runningView = conversationView(aide, "a");
   const runningInput = runningView.blocks.find((block) => block.type === "input")!;
@@ -121,7 +123,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(channel.icon, CHANNELS.web.icon);
   assert.equal(progress.blocks.find((block) => block.type === "tool")!.detail, "/tmp/README");
   assert.doesNotMatch(JSON.stringify(progress), /另一会话/);
-  assert.equal(aide.messages().filter((message) => message.role === "aide").length, 0);
+  assert.equal(aide.outputs().filter((message) => message.role === "aide").length, 0);
   sink({ kind: "agent_message_chunk", turnId, payload: { messageId: "text-a", content: { type: "text", text: "重点" } } });
   await until(() => first.events.some((event) => event.op === "append"));
   assert.equal(first.views.at(-1)!.blocks.at(-1)!.content, "正在整理重点");
@@ -132,7 +134,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(second.events[0]!.op, "start");
   assert.equal(second.views[0]!.blocks.at(-1)!.content, "正在整理重点，请稍候");
   release(); await aide.settled();
-  await until(() => second.views.at(-1)?.meta.activity === null && second.views.at(-1)!.blocks.filter((block) => block.type === "message").length === 1);
+  await until(() => second.views.at(-1)?.meta.activity === null && second.views.at(-1)!.blocks.find((block) => block.type === "input")?.status === "done" && second.views.at(-1)!.blocks.filter((block) => block.type === "message").length === 1);
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.role === "aide").length, 1);
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content, "最终答复");
   const completed = second.views.at(-1)!;
@@ -153,16 +155,16 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.deepEqual(refreshed.views[0], completed);
   await refreshed.close();
   assert.equal(aide.works().length, 0);
-  const messages = aide.messages.bind(aide);
-  aide.messages = () => { throw new Error("projection unavailable"); };
+  const messages = aide.outputs.bind(aide);
+  aide.outputs = () => { throw new Error("projection unavailable"); };
   try {
     await until(() => second.events.at(-1)?.op === "end");
     assert.deepEqual(second.events.slice(-2).map((event) => event.op), ["error", "end"]);
     assert.equal(second.views.at(-1)!.meta.error!.code, "view_failed");
     assert.equal((await fetch(base + "/stream?conversationId=a")).status, 500);
-  } finally { aide.messages = messages; }
+  } finally { aide.outputs = messages; }
   await second.close();
-  await aide.receive({ channelId: "web", id: "a2", sessionId: "a", conversationId: "a", text: "再聊一个问题" });
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "a2", sessionId: "a", conversationId: "a", text: "再聊一个问题" }));
   await aide.settled();
   const later = conversationView(aide, "a");
   assert.equal(later.blocks.filter((block) => block.type === "execution").length, 2);
@@ -204,7 +206,7 @@ test("Web associates failed replies with their Input so interruption warnings re
     execute: async () => { throw new Error("No Work expected"); },
   }, root), pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive({ channelId: "web", id: "failed-reply", sessionId: "failed", conversationId: "failed", text: "检查展示故障" });
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "failed-reply", sessionId: "failed", conversationId: "failed", text: "检查展示故障" }));
   await aide.settled();
   const view = conversationView(aide, "failed");
   const reply = view.blocks.find((block) => block.role === "aide")!;
@@ -253,7 +255,7 @@ test("Source receipts expose original evidence before processing and remain visi
   assert.equal(receipts.find((block) => block.inputId === "failed")!.status, "failed");
   assert.match(receipts.find((block) => block.inputId === "failed")!.detail!, /其它 Source 的原始输入/);
   assert.doesNotMatch(JSON.stringify(view), /另一会话/);
-  assert.equal(aide.messages().length, 0, "Showing Input facts must not manufacture outbound messages");
+  assert.equal(aide.outputs().length, 0, "Showing Input facts must not manufacture outbound messages");
   // Close without starting a Runner: queued and consumed receipts both reconstruct directly from persisted facts.
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   assert.deepEqual(conversationView(aide, "inbox"), view);
@@ -286,25 +288,25 @@ test("Bound Channels preserve distinct input identities and rebuild user/source 
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const web = bindChannelInput(CHANNELS.web, (input) => aide.receive(input));
   const lark = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
-  const input = { id: "same-external-id", sessionId: "inbox", text: "Web 用户交代" };
+  const input = { id: "same-external-id", sessionId: "inbox", source: webAddress("inbox"), text: "Web 用户交代" };
   const receipt = await web(input); await aide.settled();
   assert.deepEqual(await web(input), receipt);
-  const other = await lark({ ...input, text: "Lark 用户补充" }); await aide.settled();
+  const other = await lark({ ...input, source: larkAddress("bot", "chat"), text: "Lark 用户补充" }); await aide.settled();
   assert.notEqual(other.inputId, receipt.inputId);
   const store = aide.session("inbox").conversations;
   await seedInput(store, "observation", { origin: "source", originId: SOURCES.environments.id, text: "部署镜像已变化" },
     { phase: "done", quietReason: "Not relevant" });
-  assert.equal(store.resource("inbox")!.status.messages.length, 2, "Only the two replies are stored as Messages");
+  assert.equal(store.outputs("inbox").length, 2, "Only the two replies are stored as Messages");
   assert.equal(store.inputs("inbox").length, 3);
   const before = conversationView(aide, "inbox");
   assert.equal(before.blocks.filter((block) => block.type === "input").length, 3);
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   assert.deepEqual(conversationView(aide, "inbox"), before);
-  await web({ id: "next", sessionId: "inbox", text: "继续处理" }); await aide.settled();
+  await web({ id: "next", sessionId: "inbox", source: webAddress("inbox"), text: "继续处理" }); await aide.settled();
   const history = aide.session("inbox").conversations.inputs("inbox").map((i) => ({ role: i.spec.origin === "channel" ? "user" : "source", text: i.spec.text }));
   assert.doesNotMatch(prompts.at(-1)!, /Recent conversation:/, "Warm native history is not injected again");
   assert.ok(history.some((item) => item.role === "user" && item.text === "Web 用户交代"));
   assert.ok(history.some((item) => item.role === "user" && item.text === "Lark 用户补充"));
   assert.ok(history.some((item) => item.role === "source" && item.text === "部署镜像已变化"));
-  assert.ok(aide.messages().some((item) => item.text === "处理完成"));
+  assert.ok(aide.outputs().some((item) => item.text === "处理完成"));
 });

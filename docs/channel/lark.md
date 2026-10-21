@@ -38,7 +38,7 @@ journalctl --user -u aide -f
 
 入站事件先保存到 `AIDE_HOME/channels/` 再确认接收，后台依次交给 Aide，避免模型响应超过平台回调时限。Lark 消息 ID 用于去重；未处理的收件在重启后继续。消息提交后异步处理，Chief 失败会保留提示，等待用户核对后新发消息明确重试。已进入业务执行的中断仍遵循 `uncertain` 规则，不自动重放。
 
-出站包括 Chief 回复、业务追问、Task 结果和 Routine 通知，每秒检查持久消息。发送串行，失败后间隔 10 秒重试；长文本分段发送，每段单独记录送达。只有已接收过输入的聊天会收到推送，网页和其他应用的消息不会被转发。群回复沿用同一流式卡片和持久 outbox，发送回原群。
+出站包括 Chief 回复、业务追问、Task 结果和 Routine 通知，每秒检查持久消息。发送串行，失败后间隔 10 秒重试；长文本分段发送，每段单独记录送达。Output 的 target 明确指定 appId 与 chatId，无需该聊天先发来消息；网页和其他应用的 Output 不会被转发。群回复沿用同一流式卡片和持久 outbox，发送回原群。
 
 投递记录按消息 ID 保存，不依赖时间游标，避免遗漏稍后写入的消息。发送失败或进程在发送后落盘前退出时，重试沿用相同的 Lark `uuid`。平台的去重窗口有限，超过窗口后仍可能重复送达，不能保证端到端 exactly-once。收发历史暂不自动清理，适用于单用户原型。
 
@@ -50,7 +50,7 @@ Lark Channel 使用 CardKit JSON 2.0 卡片，遵循 [Channel 的三态展示约
 
 每秒合并当前内容，所有更新串行复用官方 SDK 客户端、凭证和超时。同一张卡片共享持久化递增 sequence，卡片 ID、发送 uuid 与已更新组件内容保存到 Channel 状态；重启或重试继续更新同一卡片。仅在旧布局卡片恢复时做一次布局替换，之后使用组件局部更新。
 
-结束或等待用户时关闭 streaming_mode，更新最终正文与预览后才确认业务 Message 已投递。用户回答 Chief 问题后，继续更新原卡片。过程反馈不写入业务 Message，不改变工作状态。卡片失败时保留最终文本投递；超长答复沿用分段文本完整发送，卡片过程受平台体积预算限制，完整执行记录可在 Web 查看。Task / Routine 的异步通知继续走文本 outbox。
+结束或等待用户时关闭 streaming_mode，更新最终正文与预览后才确认业务 Output 已投递。用户回答 Chief 问题后，继续更新原卡片。过程反馈不写入业务 Output，不改变工作状态。卡片失败时保留最终文本投递；超长答复沿用分段文本完整发送，卡片过程受平台体积预算限制，完整执行记录可在 Web 查看。Task / Routine 的异步通知继续走文本 outbox。
 
 需要额外开通 `cardkit:card:write` 并发布应用，客户端需支持 Card JSON 2.0。协议依据：[创建卡片实体](https://open.feishu.cn/document/cardkit-v1/card/create)、[流式更新文本](https://open.feishu.cn/document/cardkit-v1/card-element/content)、[更新卡片配置](https://open.feishu.cn/document/cardkit-v1/card/settings)、[批量局部更新](https://open.feishu.cn/document/cardkit-v1/card/batch_update)、[全量更新](https://open.feishu.cn/document/cardkit-v1/card/update)。
 

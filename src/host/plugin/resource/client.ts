@@ -1,5 +1,6 @@
 import type {
   Resource,
+  ResourceCommit,
   ResourceClient as PublicResourceClient,
   ResourceListOptions,
   ResourceMergePatch,
@@ -77,7 +78,7 @@ export function createResourceClient(
     resource: Readonly<Resource<unknown, unknown>>,
     oldResource?: Readonly<Resource<unknown, unknown>>,
   ): void => {
-    try {
+    store.storage.afterCommit(() => { try {
       onChange?.(
         kind === "status-updated" || kind === "metadata-updated"
           ? Object.freeze({
@@ -94,7 +95,7 @@ export function createResourceClient(
       );
     } catch {
       // Resource mutation has committed; host reactions must not turn it into failure.
-    }
+    } });
   };
   const assertOwned = (
     resource: Readonly<Resource<unknown, unknown>>,
@@ -131,8 +132,98 @@ export function createResourceClient(
     return deepFreeze(current);
   }
 
+  function create<TSpec, TStatus>(
+    type: ResourceType,
+    init: {
+      name: string;
+      namespace?: ResourceNamespace;
+      labels?: Readonly<Record<string, string>>;
+      annotations?: Readonly<Record<string, string>>;
+      owner?: ResourceOwnerReference;
+      spec: TSpec;
+      status?: TStatus;
+    }
+  ) {
+    if (aideResources?.handles(type)) {
+      if (!aideResources.create) throw new Error(`Cannot create builtin ${type.kind}`);
+      return aideResources.create<TSpec, TStatus>(type, init.name, init.spec);
+    }
+    assertCanCreateType?.(type);
+    const created = deepFreeze(
+      store.create<TSpec, TStatus>({
+        type,
+        name: init.name,
+        ...(init.namespace === undefined
+          ? {}
+          : { namespace: init.namespace }),
+        ...(init.labels === undefined ? {} : { labels: init.labels }),
+        ...(init.annotations === undefined
+          ? {}
+          : { annotations: init.annotations }),
+        ...(init.owner === undefined ? {} : { owner: init.owner }),
+        spec: init.spec,
+        status: init.status,
+      }),
+    );
+    changed("created", created);
+    return created;
+  }
+  function replace<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, spec: TSpec, status: TStatus) {
+    assertOwned(resource);
+    if (store.get(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace).metadata.uid !== resource.metadata.uid) throw new Error("Resource incarnation changed before replacement");
+    const updated = deepFreeze(store.replace(resource, resource.metadata.name, spec, status, {
+      expectedResourceVersion: resource.metadata.resourceVersion, namespace: resource.metadata.namespace as ResourceNamespace,
+    }));
+    if (updated.metadata.resourceVersion !== resource.metadata.resourceVersion) changed("status-updated", updated, resource);
+    return updated;
+  }
+  function patchStatus<TSpec, TStatus>(
+    resource: Readonly<Resource<TSpec, TStatus>>,
+    patch: Partial<TStatus>,
+  ) {
+    if (aideResources?.handles(resource)) {
+      if (!aideResources.patchStatus) throw new Error(`Cannot update builtin ${resource.kind}`);
+      return aideResources.patchStatus(resource, patch);
+    }
+    assertOwned(resource);
+    if (store.get(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace).metadata.uid !== resource.metadata.uid) throw new Error("Resource incarnation changed before status update");
+    const patched = deepFreeze(
+      store.patchStatus<TSpec, TStatus>(
+        resource,
+        resource.metadata.name,
+        patch,
+        {
+          expectedResourceVersion: resource.metadata.resourceVersion,
+          namespace: resource.metadata.namespace as ResourceNamespace,
+        },
+      ),
+    );
+    if (
+      patched.metadata.resourceVersion !==
+      resource.metadata.resourceVersion
+    ) {
+      changed("status-updated", patched, resource);
+    }
+    return patched;
+  }
+  async function commit(writes: readonly ResourceCommit[]) {
+    if (!writes.length || writes.length > 100) throw new Error("Resource commit requires 1..100 writes");
+    // Core projections backed by external state cannot participate in this SQLite transaction.
+    for (const w of writes) {
+      const type = w.operation === "create" ? w.type : w.resource;
+      if (aideResources?.handles(type) && !(w.operation === "create" && type.apiVersion === "aide.dev/v1alpha1" && type.kind === "Output")) {
+        throw new Error("Atomic Core writes support only Output creation");
+      }
+      if (w.operation !== "create" && w.resource.metadata.sessionId && w.resource.metadata.sessionId !== store.aideSessionId) throw new Error("Resource commit cannot cross Sessions");
+    }
+    return store.storage.transaction(() => writes.map((w) => w.operation === "create"
+      ? create(w.type, { name: w.name, spec: w.spec, status: w.status })
+      : w.operation === "replace" ? replace(w.resource, w.spec, w.status) : patchStatus(w.resource, w.patch))) as Resource<unknown, unknown>[];
+  }
+
   return Object.freeze({
     get,
+    commit,
     async list<TSpec, TStatus>(
       type: ResourceType,
       options?: ResourceListOptions,
@@ -144,51 +235,8 @@ export function createResourceClient(
         .list<TSpec, TStatus>(type, options)
         .map((resource) => deepFreeze(resource));
     },
-    async create<TSpec, TStatus>(
-      type: ResourceType,
-      init: {
-        name: string;
-        namespace?: ResourceNamespace;
-        labels?: Readonly<Record<string, string>>;
-        annotations?: Readonly<Record<string, string>>;
-        owner?: ResourceOwnerReference;
-        spec: TSpec;
-        status?: TStatus;
-      },
-    ) {
-      if (aideResources?.handles(type)) {
-        if (!aideResources.create) throw new Error(`Cannot create builtin ${type.kind}`);
-        return aideResources.create<TSpec, TStatus>(type, init.name, init.spec);
-      }
-      assertCanCreateType?.(type);
-      const created = deepFreeze(
-        store.create<TSpec, TStatus>({
-          type,
-          name: init.name,
-          ...(init.namespace === undefined
-            ? {}
-            : { namespace: init.namespace }),
-          ...(init.labels === undefined ? {} : { labels: init.labels }),
-          ...(init.annotations === undefined
-            ? {}
-            : { annotations: init.annotations }),
-          ...(init.owner === undefined ? {} : { owner: init.owner }),
-          spec: init.spec,
-          status: init.status,
-        }),
-      );
-      changed("created", created);
-      return created;
-    },
-    async replace<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, spec: TSpec, status: TStatus) {
-      assertOwned(resource);
-      if (store.get(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace).metadata.uid !== resource.metadata.uid) throw new Error("Resource incarnation changed before replacement");
-      const updated = deepFreeze(store.replace(resource, resource.metadata.name, spec, status, {
-        expectedResourceVersion: resource.metadata.resourceVersion, namespace: resource.metadata.namespace as ResourceNamespace,
-      }));
-      if (updated.metadata.resourceVersion !== resource.metadata.resourceVersion) changed("status-updated", updated, resource);
-      return updated;
-    },
+    create: async <S, T>(type: ResourceType, init: Parameters<typeof create<S, T>>[1]) => create<S, T>(type, init),
+    replace: async <S, T>(resource: Readonly<Resource<S, T>>, spec: S, status: T) => replace(resource, spec, status),
     async delete(
       type: ResourceType,
       name: string,
@@ -252,33 +300,6 @@ export function createResourceClient(
       }
       return patched;
     },
-    async patchStatus<TSpec, TStatus>(
-      resource: Readonly<Resource<TSpec, TStatus>>,
-      patch: Partial<TStatus>,
-    ) {
-      if (aideResources?.handles(resource)) {
-        if (!aideResources.patchStatus) throw new Error(`Cannot update builtin ${resource.kind}`);
-        return aideResources.patchStatus(resource, patch);
-      }
-      assertOwned(resource);
-      const patched = deepFreeze(
-        store.patchStatus<TSpec, TStatus>(
-          resource,
-          resource.metadata.name,
-          patch,
-          {
-            expectedResourceVersion: resource.metadata.resourceVersion,
-            namespace: resource.metadata.namespace as ResourceNamespace,
-          },
-        ),
-      );
-      if (
-        patched.metadata.resourceVersion !==
-        resource.metadata.resourceVersion
-      ) {
-        changed("status-updated", patched, resource);
-      }
-      return patched;
-    },
+    patchStatus: async <S, T>(resource: Readonly<Resource<S, T>>, patch: Partial<T>) => patchStatus(resource, patch),
   });
 }

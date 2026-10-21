@@ -1,3 +1,5 @@
+import { OutputStore } from "../output/store.ts";
+import { outputPrinter } from "../output/printer.ts";
 import { createPluginVerbs } from "../../plugin-context.ts";
 import { ResourceStorage, resourceHome } from "../resource/storage.ts";
 import { inputPrinter } from "../input/printer.ts";
@@ -152,6 +154,7 @@ export interface PluginToast {
 export interface ManagerOptions {
   readonly connectors?: ConnectorClient;
   readonly inputs?: InputStore;
+  readonly outputs?: OutputStore;
   readonly resourceDirectory?: ResourceDirectory;
   readonly say?: VerbOptions["say"];
   readonly onResourceChange?: (change: ResourceClientChange) => void;
@@ -284,6 +287,7 @@ function pluginName(pluginId: string): string {
  */
 export class Manager {
   readonly inputs?: InputStore;
+  readonly outputs?: OutputStore;
   private readonly resourceDirectory?: ResourceDirectory;
   private readonly unsubscribeResourceGc: () => void;
   private readonly resourceChanged?: (change: ResourceClientChange) => void;
@@ -304,7 +308,7 @@ export class Manager {
   private readonly printers = new ResourcePrinters((detail, error) => this.log?.({
     level: "error", source: "aide", component: "plugin.printer", message: "Resource printing failed",
     pluginInstanceId: detail.pluginInstanceId, attributes: { ...detail }, error: logError(error),
-  }), [inputPrinter]);
+  }), [inputPrinter, outputPrinter]);
   private readonly bindings = new Map<string, PluginBinding>();
   private readonly activations = new Map<string, Promise<void>>();
   private readonly capacity: ReconcileCapacity;
@@ -446,6 +450,7 @@ export class Manager {
     });
     if (options.session) {
       this.inputs = options.inputs ?? new InputStore(resourceHome(options.session.dir));
+      this.outputs = options.outputs ?? new OutputStore(resourceHome(options.session.dir));
       this.aideResources = new AideResourceIndex({
         session: options.session,
         inputs: this.inputs,
@@ -453,6 +458,7 @@ export class Manager {
       this.aideResourceProvider = new AideResourceProvider({
         session: options.session,
         turns: this.aideResources,
+        outputs: this.outputs,
         inputs: this.inputs,
         ...(options.sessions === undefined ? {} : { sessions: options.sessions }),
         targets: () => options.harnessTargets ?? [],

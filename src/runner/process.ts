@@ -148,6 +148,9 @@ const resources: ResourceClient = Object.freeze({
       init,
     });
   },
+  async commit(writes: readonly import("@compforge/aide-plugin").ResourceCommit[]) {
+    return callHost<Readonly<Resource<unknown, unknown>>[]>({ method: "resource.commit", writes });
+  },
   async replace<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, spec: TSpec, status: TStatus) {
     return await callHost<Readonly<Resource<TSpec, TStatus>>>({ method: "resource.replace", resource, spec, status });
   },
