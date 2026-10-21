@@ -218,6 +218,32 @@ test("Only associated replies trigger follow-up; duplicate polls stay silent and
   assert.equal(f.inputs.list().length, 2);
 });
 
+test("Mention discovery and follow-up share Me identities independently of the execution account", async (t) => {
+  for (const personIds of [["ou_human"], ["ou_human", "ou_second"], []]) {
+    await t.test(`Me identities: ${personIds.join(",") || "execution fallback"}`, async (t) => {
+      const target = personIds.at(-1) ?? "ou_me";
+      const f = fixture(t, watch({ personIds }), "mention");
+      const anchor = message("om_anchor", { mentions: [target] });
+      f.incoming(async () => page([anchor]));
+      await f.observe();
+      const reply = message("om_again", { mentions: [target], parentId: anchor.id });
+      const self = message("om_executor", { sender: { type: "user", id: "ou_me" }, mentions: [target], parentId: anchor.id });
+      const bot = message("om_bot_reply", { sender: { type: "app", id: "bot" }, mentions: [target], parentId: anchor.id });
+      f.incoming(async () => page([anchor, reply, self, bot]));
+      f.history([reply, self, bot]);
+      await f.observe(now + 60_000);
+      const mentions = f.inputs.list().filter((input) => input.spec.observation!.kind === "mention");
+      assert.deepEqual(mentions.map((input) => input.spec.observation!.originalMessageId).sort(), [anchor.id, reply.id, self.id].sort());
+      const discussions = f.inputs.list().filter((input) => input.spec.observation!.kind === "discussion");
+      assert.equal(discussions.length, 1);
+      const context = discussions[0]!.spec.observation!.context as { messages: ChatMessage[] };
+      assert.deepEqual(context.messages.map((message) => message.id), [bot.id], "Only messages without their own discovery Input enter follow-up");
+      if (!personIds.length) assert.ok(f.inputs.list().every((input) => !Object.hasOwn(input.spec, "relation")), "Execution fallback leaves unknown relations absent");
+      assert.equal(f.searches.some((query) => query.atMe), false, "Multiple, different or unconfigured Me identities cannot use the execution-user search filter");
+    });
+  }
+});
+
 test("Failed direct search does not starve mentions, and an expired follow-up logs failure without another Input", async (t) => {
   const f = fixture(t, watch({ followupMs: 60_000 }));
   f.incoming(async (query) => {

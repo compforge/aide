@@ -65,6 +65,11 @@ class MessageObservation {
   }
   private personIds?: string[];
   private get watch() { return { ...this.resource.spec, personIds: this.personIds ?? this.resource.spec.personIds }; }
+  /** @spec Discovery and follow-up must agree on which mentions receive an independent Input. */
+  private discoversMention(message: ChatMessage) {
+    const ids = this.watch.personIds.length ? this.watch.personIds : [this.watch.userId];
+    return !message.deleted && message.sender.type === "user" && message.mentions.some((id) => ids.includes(id));
+  }
   private get pending() { return this.resource.status.pending ?? []; }
   private get scans() { return this.resource.status.scans ?? []; }
 
@@ -121,7 +126,7 @@ class MessageObservation {
     const pending = [...this.pending]; const ids: string[] = [];
     for (const message of page.messages) {
       if (message.deleted || message.sender.type !== "user" ||
-          (kind === "mention" && !message.mentions.some((id) => (this.watch.personIds.length ? this.watch.personIds : [this.watch.userId]).includes(id)))) continue;
+          (kind === "mention" && !this.discoversMention(message))) continue;
       ids.push(message.id);
       if (pending.some((item) => item.message.id === message.id) ||
           await this.context.resources.get(inputRef(inputName(this.watch, message.id, 0)))) continue;
@@ -198,7 +203,7 @@ class MessageObservation {
     const related = this.related(entry, eligible);
     const fresh = eligible.filter((message) => related.includes(message.id) && !entry.known.includes(message.id)
       // Another explicit mention has its own discovered Input.
-      && !(message.sender.id !== this.watch.userId && message.mentions.includes(this.watch.userId)));
+      && !this.discoversMention(message));
     const known = [...new Set([...entry.known, ...eligible.filter((message) => related.includes(message.id)).map((message) => message.id)])];
     const finished = !hasMore && Date.parse(follow.end) >= Date.parse(entry.followUntil);
     const next = { ...entry, related, finished, follow: hasMore ? { ...follow, token: page.nextToken! } : null };
@@ -215,8 +220,11 @@ class MessageObservation {
     const evidence = [entry.message, ...(context?.messages ?? [])];
     const persons = new Persons(this.context.resources, { identities: this.watch.personIds.map((id) => ({ provider: "lark", scope: this.watch.accountId, id })) });
     const senders = await observePeople(persons, this.watch.accountId, evidence);
-    const annotate = (message: ChatMessage) => ({ ...message, ...(senders.has(message.id) ? { person: senders.get(message.id) } : {}),
-      relation: messageRelation(this.watch, message, entry.kind === "direct", evidence) });
+    const annotate = (message: ChatMessage) => {
+      const relation = messageRelation(this.watch, message, entry.kind === "direct", evidence);
+      return { ...message, ...(senders.has(message.id) ? { person: senders.get(message.id) } : {}),
+        ...(relation ? { relation } : {}) };
+    };
     const message = { ...annotate(entry.message), content: entry.message.content.slice(0, this.watch.maxContextChars) };
     const annotatedContext = context && { ...context, messages: context.messages.map(annotate) };
     // A batch can mix my speech and other people's reactions. Its per-message relations remain authoritative.
