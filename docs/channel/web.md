@@ -107,3 +107,11 @@ Channel 与输入 Source 分别用 `ChannelDefinition`、`SourceDefinition` 声�
 Channel 与 Source 都从 Conversation 关联的 Input 生成输入卡片，不创建或反查用户 Message 副本。Source 在提交时生成可读的事实正文，原始证据留在 observation；重要性判断、授权与处理策略属于 Chief。View 只消费事实正文、状态和应用装配的定义目录，不解析各 Source 的业务数据。
 
 接入时通过绑定入口确定 Definition：Channel 的入口补齐来源分类；Source 的入口同时记录产生观察的资源引用 `originRef`。定义分类决定稳定图标，资源实例保存观察范围、水位与错误；目标 sessionId 仅用于路由。Chief 的近期上下文由已处理的 Input 与输出 Message 合并投影，不依赖用户消息副本。
+
+## 人物导航与编辑
+
+主导航提供 Conversations 与 Persons 两个同级页面。Conversations 保留会话列表、消息和工作；Persons 展示跨会话共享的人物列表，以“我”标记服务对象，可按姓名搜索并进入详情。消息带 sender 时提供人物详情链接。
+
+人物详情可编辑称呼、外部身份、当前认识与用户修正。用户修正优先于 Chief 的推断，Chief 工具无法覆盖该字段。编辑提交 uid 和 resourceVersion；并发冲突保留表单内容，提示重新加载并合并。外部身份重复或 Me 绑定冲突会拒绝保存，本地单人身份不可移除。
+
+GET /persons 列表，GET /persons?id=... 详情，POST /persons/edit 更新；这些接口调用同一 Personal 人物服务和 ResourceClient。打开页面不创建 Conversation。

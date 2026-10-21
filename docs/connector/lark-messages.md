@@ -2,7 +2,7 @@
 
 用户收到的单聊、群内明确 @ 用户的消息，以及所在群的新消息，都是可以交给 Personal 判断的外部输入场景。
 Source 保存观察事实，Chief 结合用户已有委托选择提醒、询问、关联工作或忽略。
-当前实现支持 `direct`（本人的单聊收发）和 `mention`（群内明确 @ 本人），并保留短期讨论中的本人发言，没有启用全群新消息或全部群内本人发言的独立扫描。
+当前实现支持 `direct`（执行账号可读取的单聊收发）和 `mention`（可访问群内明确 @ Me；未配置 Me 时观察执行账号的 @），并保留短期讨论中的本人发言，没有启用全群新消息或全部群内本人发言的独立扫描。
 
 ## 接入与权限
 
@@ -16,19 +16,17 @@ connectors:
     appId: cli_example
     userId: ou_example
     timeoutMs: 20000
+    me:
+      - appId: cli_example
+        openId: ou_human
 plugins:
   personal:
-    person:
-      identities:
-        - provider: lark
-          scope: cli_example
-          id: ou_example
     sources:
       lark: {}
 ```
 
 省略 `plugins.personal.sources.lark` 不启动观察；声明 `lark: {}` 使用默认策略，不按消息类型限制输入。
-启用观察必须在 `person.identities` 中显式绑定 Connector 的 appId/open_id；绑定缺失或不匹配时启动报错。
+执行账号与 Me 标记独立，登录态仅用于验证访问身份。两者不同时，不把执行账号的私信或 @ 当成本人收到；群内搜索在可访问结果中匹配 Me 的作用域 ID。仅当 Me 与执行用户唯一匹配时使用 CLI 的 is-at-me 过滤。
 Source 产出的消息均进入处理流程，当前主动采集单聊和群内 @。
 只声明 Connector 时，Chief 仍可按需读取上下文。
 已有 Lark Channel 的机器人交互不受此配置影响。初次启用默认观察最近五分钟，不导入全部历史。

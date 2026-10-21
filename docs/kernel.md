@@ -65,7 +65,7 @@ Input 是独立的 Host 内置资源，记录输入内容、来源和可选的 s
 
 Input 可保存相对于服务对象 Person 的 `relation: sent | received | observed`，未知时留空。
 Personal 拥有身份绑定和归因，Core 只校验并持久保存结果；原作者与上下文证据仍保留。
-Person 身份与可写的 PERSON.md 认知文件分别承载账号事实和长期认识，见 [Personal](plugin/personal.md#person-与输入关系)。
+Person CRD 统一承载人物身份和长期认识，Me 标记明确服务对象，见 [Personal](plugin/personal.md#person-与输入关系)。
 
 Conversation 是 Personal 定义的资源：spec 保存所属 Session 和追加的 inputIds，status 保存各 Input 的消费进度与消息 outbox。它与 Task、Routine 一样使用通用 Resource CRUD、版本检查和 Watch。来源无需知道 Conversation，Personal 决定交流上下文的组织方式。一个 Input 可以被多个 Conversation 引用，各会话独立消费。
 

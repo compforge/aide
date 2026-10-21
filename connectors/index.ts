@@ -36,7 +36,7 @@ export class Connectors implements ConnectorClient {
   static fromConfig(config: { environments?: Record<string, unknown>; requirements?: Record<string, unknown>; forges?: Record<string, unknown>; lark?: unknown }, environment: Readonly<Record<string, string | undefined>> = process.env): Connectors {
     const lark = config.lark === undefined ? undefined : LarkMessagesConfigSchema.parse(config.lark);
     return new Connectors(createMeegoRequirementConnectors(config), createForgeConnectors(config, { environment }), new Environments(resolveEnvironmentConfig(config.environments)),
-      lark ? new LarkMessages(lark) : undefined, lark ? { provider: "lark", accountId: lark.appId, userId: lark.userId } : undefined);
+      lark?.appId && lark.userId ? new LarkMessages({ appId: lark.appId, userId: lark.userId, timeoutMs: lark.timeoutMs }) : undefined, lark?.appId && lark.userId ? { provider: "lark", accountId: lark.appId, userId: lark.userId } : undefined);
   }
 
   async describe() {

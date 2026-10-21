@@ -8,6 +8,7 @@ import { z } from "zod";
 import { INPUT_TYPE, type InputSpec, type InputStatus, type Resource } from "@compforge/aide-plugin";
 const Spec = z.object({ sessionId: z.string().min(1).max(200).optional(), origin: z.enum(["channel", "source"]),
   originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
+  sender: z.object({ apiVersion: z.string(), kind: z.string(), sessionId: z.string().optional(), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict().optional(),
   attention: z.enum(["immediate", "deferred"]).optional(),
   originRef: z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform((value) => value === "aide-system" ? value : parseResourceNamespace(value)), name: z.string(), uid: z.string(), sessionId: z.string().optional() }).strict().optional(),
   text: z.string().min(1).max(32_000), timezone: z.string().optional(), replyTo: z.string().optional(),

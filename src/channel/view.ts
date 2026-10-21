@@ -15,6 +15,8 @@ export interface ConversationBlock extends BaseBlock {
   inputId?: string;
   origin?: "channel" | "source";
   originId?: string;
+  relation?: import("@compforge/aide-plugin").InputRelation;
+  sender?: import("@compforge/aide-plugin").ResourceRef;
   label?: string;
   icon?: string;
   harness?: string;
@@ -81,7 +83,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   for (const run of runs) {
     if (!run.input) continue;
     const input = run.input, definition = aide.inputDefinition(input.spec);
-    roots.push({ id: `input:${input.metadata.name}`, type: "input", origin: input.spec.origin, originId: definition.id,
+    roots.push({ id: `input:${input.metadata.name}`, type: "input", relation: input.spec.relation, sender: input.spec.sender, origin: input.spec.origin, originId: definition.id,
       inputId: input.metadata.name, group_id: input.status.roundId ?? input.metadata.name, label: definition.label, icon: definition.icon,
       ...(input.spec.origin === "channel" ? { role: "user" as const } : {}),
       at: input.metadata.creationTimestamp, content: input.spec.text,

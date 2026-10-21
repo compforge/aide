@@ -1,3 +1,6 @@
+import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
+import { LOCAL_ME } from "../plugins/personal/person/model.ts";
+import type { Persons } from "../plugins/personal/person/service.ts";
 import { memoryAgentDir } from "./pi-memory-fixture.ts";
 import { Aide } from "../src/app.ts";
 import { chiefTarget } from "../plugins/personal/chief-model.ts";
@@ -24,9 +27,9 @@ import type { HarnessEvent, HarnessSessionBinding } from "../src/host/harness/ad
 type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown } | { error: true } | { hold: true };
 
 /** Real Pi SDK and HTTP protocol; only the remote model is scripted. No external credentials or network. */
-async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" = "pi", model: PiModelConfigInput = { provider: "fixture", id: "test-model" }, sharedPersonFile?: string) {
+async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" = "pi", model: PiModelConfigInput = { provider: "fixture", id: "test-model" }, sharedPersons?: Persons) {
   const root = mkdtempSync(join(tmpdir(), "aide-pi-sdk-"));
-  const personFile = sharedPersonFile ?? join(root, "PERSON.md");
+  const personFile = join(root, "PERSON.md");
   const requests: Record<string, unknown>[] = [];
   const requestHeaders: IncomingHttpHeaders[] = [];
   const held = new Set<ServerResponse>();
@@ -59,6 +62,9 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
     models: [{ id: "test-model", headers: { "x-model": "snapshot" }, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096 }],
   } } }));
   const sessions = new SessionStore(root);
+  const catalog = openPersonCatalog(root, { identities: [LOCAL_ME] }, pino({ level: "silent" }), () => {});
+  const persons = sharedPersons ?? catalog.persons;
+  await persons.initialize();
   const session = sessions.createSession({ cwd: root });
   const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
   const store = new Store(resources, createResourceClient(resources), new ConversationStore(session));
@@ -71,7 +77,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const adapter = createHarnessAdapter({ id: "assistant", harness }, {
     targetConfig: { harness }, openInteraction: async () => { throw new Error("Unexpected interaction"); },
     piSession: (input) => createPiAgent({ ...config, ...input }),
-    chiefSession: (input) => createChiefAgent({ ...config, ...input, work, personFile }),
+    chiefSession: (input) => createChiefAgent({ ...config, ...input, work, persons }),
   });
   const open = () => adapter.open({ cwd: root, ...(binding ? { resumeState: binding.resumeState } : {}) }, (event) => {
     events.push(event);
@@ -101,7 +107,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
     await terminal;
     return session.summarizeTurn(turnId);
   }
-  return { work, config, session, adapter, events, requests, requestHeaders, run, personFile, ref: () => ref, binding: () => binding!,
+  return { work, config, session, adapter, events, requests, requestHeaders, run, personFile, persons, ref: () => ref, binding: () => binding!,
     reopen: async () => { await adapter.close(ref); ref = await open(); return ref; } };
 }
 
@@ -382,42 +388,30 @@ test("an entirely Aide-defined provider performs a real SDK request with explici
   assert.equal(fixture.requestHeaders.at(-1)!.authorization, "Bearer explicit-test-key");
 });
 
-/** @case PERSON.md can be edited through real Pi tools, refreshed in the same session and shared with a new Chief. */
-test("Chief maintains PERSON.md with native tools and refreshes corrections across turns and sessions", { timeout: 30_000 }, async (t) => {
+test("Chief profiles people through tools and refreshes shared user corrections every turn", { timeout: 30_000 }, async (t) => {
   const writer = await setup(t, (_request, index) => index === 0
-    ? { tool: "edit", args: { path: writer.personFile, oldText: "prefers long answers", newText: "prefers concise Chinese answers (2026-10-21, explicit correction in input-42)" } }
+    ? { tool: "read_person", args: { id: "me" } }
+    : index === 1 ? { tool: "profile_person", args: { id: "me", uid: me.metadata.uid, version: me.metadata.resourceVersion, understanding: "Prefers concise Chinese answers; explicit statement, 2026-10-21." } }
     : { text: "已更新" }, "chief");
-  assert.ok(existsSync(writer.personFile));
-  writeFileSync(writer.personFile, "# Person\n\n- prefers long answers\n- User-written note: robotics\n");
-  const updated = await writer.run("我更喜欢简洁中文，记一下。", "person-write");
-  assert.equal(updated.stopReason, "end_turn");
-  const content = readFileSync(writer.personFile, "utf8");
-  assert.match(content, /concise Chinese/);
-  assert.match(content, /User-written note: robotics/);
-  assert.doesNotMatch(content, /long answers/);
-  const system = (request: Record<string, unknown>) => JSON.stringify((request.messages as Array<{ role: string }>).filter((message) => ["system", "developer"].includes(message.role)));
-  assert.match(system(writer.requests[0]!), /prefers long answers/);
-  const next = writer.requests.length;
-  await writer.run("现在我的偏好是什么？", "person-refresh");
-  assert.match(system(writer.requests[next]!), /concise Chinese/);
-  assert.doesNotMatch(system(writer.requests[next]!), /prefers long answers/);
-  await writer.reopen();
-  assert.equal(readFileSync(writer.personFile, "utf8"), content, "Initialization preserves an existing profile");
-
-  const reader = await setup(t, () => ({ text: "简洁中文" }), "chief", undefined, writer.personFile);
-  await reader.run("新的话题", "person-shared");
-  assert.notEqual(reader.binding().identity.id, writer.binding().identity.id);
-  assert.match(system(reader.requests[0]!), /concise Chinese/);
-  assert.doesNotMatch(system(reader.requests[0]!), /prefers long answers/);
-  writeFileSync(writer.personFile, "# Person\n\n- A manually corrected preference\n");
-  await reader.run("查看我的最新偏好", "person-manual");
-  assert.match(system(reader.requests.at(-1)!), /manually corrected/);
-  assert.doesNotMatch(system(reader.requests.at(-1)!), /concise Chinese/);
-  rmSync(writer.personFile);
-  await reader.run("文件已经删除", "person-missing");
-  assert.match(system(reader.requests.at(-1)!), /PERSON.md is absent/);
-  assert.doesNotMatch(system(reader.requests.at(-1)!), /manually corrected/);
+  const me = (await writer.persons.me())!;
+  const turn = await writer.run("我更喜欢简洁中文，记一下。", "person-write");
+  assert.equal(turn.stopReason, "end_turn");
+  assert.match((await writer.persons.me())!.spec.profile.understanding, /concise Chinese/);
   assert.equal(existsSync(writer.personFile), false);
+  const system = (request: Record<string, unknown>) => JSON.stringify((request.messages as Array<{ role: string }>).filter((m) => ["system", "developer"].includes(m.role)));
+  await writer.run("现在呢", "person-refresh");
+  assert.match(system(writer.requests.at(-1)!), /concise Chinese/);
+  const reader = await setup(t, () => ({ text: "明白" }), "chief", undefined, writer.persons);
+  await reader.run("新话题", "shared");
+  assert.match(system(reader.requests.at(-1)!), /concise Chinese/);
+  const latest = (await writer.persons.me())!;
+  await writer.persons.edit(latest.metadata.name, latest.metadata.uid, latest.metadata.resourceVersion,
+    { ...latest.spec, profile: { understanding: "", corrections: "Prefer detailed explanations for architecture." } });
+  await reader.run("最新偏好", "corrected");
+  assert.match(system(reader.requests.at(-1)!), /detailed explanations/);
+  assert.doesNotMatch(system(reader.requests.at(-1)!), /concise Chinese/);
+  await reader.reopen();
+  assert.equal(existsSync(reader.personFile), false);
 });
 
 /** @case Hermes tools and policy run inside Chief; native dialogue and persistent memory have independent lifetimes. */

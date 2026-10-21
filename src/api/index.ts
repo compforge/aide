@@ -1,3 +1,4 @@
+import { PersonSchema } from "../../plugins/personal/person/model.ts";
 import { CHANNELS, bindChannelInput } from "../channel/definition.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
@@ -55,6 +56,8 @@ export function httpChannel(aide: WebService, log: Logger) {
   const receive = bindChannelInput(CHANNELS.web, (input) => aide.receive(input));
   const files = [
     ["/", "index.html", "text/html"],
+    ["/people", "persons.html", "text/html"],
+    ["/persons.js", "persons.js", "text/javascript"],
     ["/app.js", "app.js", "text/javascript"],
     ["/style.css", "style.css", "text/css"],
   ] as const;
@@ -107,6 +110,26 @@ export function httpChannel(aide: WebService, log: Logger) {
       }
       if (request.method === "GET" && url.pathname === "/conversations") {
         json(response, 200, conversationList(aide)); return;
+      }
+      if (request.method === "GET" && url.pathname === "/persons") {
+        await aide.start();
+        const id = url.searchParams.get("id");
+        if (id) {
+          try { json(response, 200, await aide.persons.read(id)); }
+          catch (error) { if (!String(error).includes("Unknown Person")) throw error; json(response, 404, { error: "人物不存在。" }); }
+        } else json(response, 200, await aide.persons.list());
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/persons/edit") {
+        const input = z.object({ id: z.string().min(1), uid: z.string().min(1), version: z.string().min(1), spec: PersonSchema }).strict().parse(await body(request));
+        await aide.start();
+        try { json(response, 200, await aide.persons.edit(input.id, input.uid, input.version, input.spec)); }
+        catch (error) {
+          if (String(error).includes("version conflict")) { json(response, 409, { error: "人物资料已更新。请重新加载并合并修改；当前编辑内容已保留。" }); return; }
+          if (String(error).includes("identity") || String(error).includes("identities")) { json(response, 409, { error: "身份已绑定其他人物，或与 Me 标记冲突。请检查身份配置。" }); return; }
+          throw error;
+        }
+        return;
       }
       // Unscoped interactions remain in the local inbox; scoped questions follow their conversation.
       if (request.method === "GET" && url.pathname === "/interactions") {
