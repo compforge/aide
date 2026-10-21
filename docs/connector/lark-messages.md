@@ -28,7 +28,10 @@ Source 产出的消息均进入处理流程，当前主动采集单聊和群内 
 已有 Lark Channel 的机器人交互不受此配置影响。初次启用默认观察最近五分钟，不导入全部历史。
 没有任何 Aide Conversation 时，首条 Input 会创建普通话题并进入处理；已有会话时，先追加到默认会话（若存在），再按规则创建和关联具体会话。
 讨论续报关联持有原始 Input 的会话。默认联系人接收所有 Input，消费时再判断是否需要处理；无默认联系人、没有规则关联且不满足创建规则时记录 ignored。
-观察源位于独立执行 Session `source:lark-messages`，新聊天 Session 不会重复启动它；Input 不预设目标 Session 或 Conversation。
+观察源位于独立执行 Session `source:lark-messages`，新聊天 Session 不会重复启动它。
+Source 为 Input 设置 `sessionId = lark:<appId>:<chatId>`，与 Lark Channel 使用相同约定；同应用、同聊天共享话题归属。
+单聊、群内 @ 和讨论续报均按聊天聚合：新聊天创建会话，已有聊天复用对应会话，默认会话仍会收到同一 Input。
+`sessionId` 是上游提供的话题线索，不是排他的投递目标；Source 不指定 Conversation。
 
 | 操作 | 权限 |
 |---|---|
@@ -49,7 +52,9 @@ Connector 提供消息搜索、群历史和话题回复的分页读取，查询�
 `--is-at-me` 也可能命中 `@所有人`，Source 必须检查结构化 mentions 中的用户 ID。
 两个场景均排除用户自己发送的、机器人发送的和已撤回的消息。
 
-初次观察读取有限的前后文；话题优先取话题回复，并从附近群历史寻找根消息。
+收到原始单聊或 @ 消息即满足提交条件。初次观察尝试读取有限的前后文；话题优先取话题回复，并从附近群历史寻找根消息。
+上下文读取失败时，当轮仍提交原消息，在上下文中记录缺口与错误，不等待下一轮重试。
+这不改变原消息的可见性：如果搜索未返回原消息，就没有可提交的 Input；搜索无结果与上下文失败分别记录。
 上下文字段 `observedThrough` 表示查询截至时间，`truncated` 表示不完整，`error` 表示读取失败，
 `missingRoot` 标记话题根消息缺失。Chief 使用 `read_chat_messages` / `read_thread_messages` 按需继续读取。
 CLI compact 时间可能只有分钟精度，Connector 固定进程时区为 UTC 后归一；上下文边界保留一分钟余量，
@@ -79,7 +84,6 @@ CLI compact 时间可能只有分钟精度，Connector 固定进程时区为 UTC
 | `afterMessages` | 10 | 后文/话题最近页数量 |
 | `maxContextChars` | 16000 | 上下文正文总长度上限；原消息也受此长度上限约束 |
 | `followupMs` | 300000 | 群内 @ 的短期跟进时长；0 关闭 |
-| `contextAttempts` | 2 | 初始上下文失败尝试次数，达到后提交带缺口的原消息 |
 
 每种场景每轮取一页搜索结果，每页最多十条，分页期间固定搜索窗口。
 Connector 每次只取一页，不隐藏续页；每个 CLI 子进程默认超时二十秒、最大输出 4 MiB，同时最多两个消息读取请求。
@@ -87,7 +91,7 @@ Connector 每次只取一页，不隐藏续页；每个 CLI 子进程默认超�
 
 ## 持久化与恢复
 
-`MessageSource` status 保存分场景扫描窗口、水位、待处理消息、上下文重试和短期跟进进度。
+`MessageSource` status 保存分场景扫描窗口、水位、待处理消息、投递计划和短期跟进进度。
 发现页先持久化；该页匹配消息的 Input 均提交后才推进分页位置或水位。单聊查询失败不阻止已有群内观察继续处理。
 每次投递先保存完整计划，再创建 Input，再保存消费位置。初始 Input 的身份由应用、用户、原消息 ID 确定；
 讨论更新额外包含递增序号。进程在 Input 创建后中断时，恢复原计划，不重新采样并生成不同内容。
@@ -97,7 +101,7 @@ Connector 每次只取一页，不隐藏续页；每个 CLI 子进程默认超�
 ## 验证
 
 `tests/lark-messages.test.ts` 覆盖账号固定、CLI 映射、分页、错误脱敏、并发限制及 Connector/Chief 工具调用。
-`tests/message-source.test.ts` 覆盖单聊与 @ 过滤、上下文缺口、分页水位、重启恢复、讨论跟进和真实 Runner 的 IPC 路径。
+`tests/message-source.test.ts` 覆盖单聊与 @ 过滤、上下文失败当轮提交、分页水位、重启恢复、讨论跟进、聊天话题归属和真实 Runner 的 IPC 路径。
 运行 `npm run check` 验证类型与全量测试。
 
 上线前用服务账号验证单聊搜索、群内 @ 搜索、群历史和话题读取，特别检查机器人未入群的场景。

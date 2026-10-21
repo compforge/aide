@@ -14,7 +14,7 @@ interface Scan {
 }
 interface Delivery {
   name: string;
-  spec: SourceInput;
+  spec: SourceInput & { sessionId: string };
   known: string[];
   related: string[];
 }
@@ -23,7 +23,6 @@ interface PendingMessage {
   kind: MessageKind;
   discoveredAt: string;
   followUntil: string;
-  attempts: number;
   sequence: number;
   known: string[];
   related: string[];
@@ -48,6 +47,8 @@ const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "aide-system" as
 /**
  * @spec Persist discovery and delivery plans before side effects. Advance a scan only after its Inputs exist.
  * @spec A restarted delivery reuses its exact Input and next observation state, never a fresh live snapshot.
+ * @spec An observed original message is sufficient: initial context failure submits a gap in the same poll.
+ * @spec Initial and discussion Inputs use lark:<appId>:<chatId> topic affinity, shared with the Lark Channel.
  * @why IM context is evidence from other people, not a delegation from the account owner.
  * @case tests/message-source.test.ts
  * @link docs/connector/lark-messages.md
@@ -116,7 +117,7 @@ class MessageObservation {
       if (pending.some((item) => item.message.id === message.id) ||
           await this.context.resources.get(inputRef(inputName(this.watch, message.id, 0)))) continue;
       pending.push({ message, kind, discoveredAt: iso(this.now), followUntil: iso(this.now + this.watch.followupMs),
-        attempts: 0, sequence: 0, known: [], related: [message.id] });
+        sequence: 0, known: [], related: [message.id] });
     }
     scan = { ...scan, window: { ...window, page: { ids, hasMore: page.hasMore, ...(page.nextToken ? { nextToken: page.nextToken } : {}) } } };
     await this.save({ pending, scans: this.scans.map((item) => item.kind === kind ? scan : item) });
@@ -142,13 +143,10 @@ class MessageObservation {
     try { context = await readMessageContext(this.connectors.messages, entry.message, this.watch, this.now); }
     catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
-      entry = { ...entry, attempts: entry.attempts + 1, error: detail };
-      await this.update(entry);
-      this.context.logger.warn("Lark message context unavailable", { attributes: { messageId: entry.message.id,
-        chatId: entry.message.chatId, attempt: entry.attempts, error: detail } });
-      if (entry.attempts < this.watch.contextAttempts) return;
-      context = { messages: [], observedThrough: iso(this.now), truncated: false, error: detail };
+      context = { messages: [], observedThrough: iso(this.now), truncated: true, error: detail };
     }
+    if (context.error) this.context.logger.warn("Lark message context unavailable; submitting original message", {
+      attributes: { messageId: entry.message.id, chatId: entry.message.chatId, error: context.error } });
     const known = [entry.message.id, ...context.messages.map((message) => message.id)];
     await this.plan(entry, context, known, this.related(entry, context.messages));
   }
@@ -211,7 +209,8 @@ class MessageObservation {
     const message = { ...entry.message, content: entry.message.content.slice(0, this.watch.maxContextChars) };
     const kind = entry.sequence ? "讨论进展" : entry.kind === "direct" ? "私聊" : "群内 @";
     const content = entry.sequence ? context.messages.map((item) => item.content).join("\n\n") : message.content;
-    const spec: SourceInput = {
+    const spec: Delivery["spec"] = {
+      sessionId: `lark:${this.watch.accountId}:${message.chatId}`,
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,
         kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,
@@ -230,7 +229,8 @@ class MessageObservation {
     await this.update({ ...entry, sequence: entry.sequence + 1, known: delivery.known,
       related: delivery.related, delivery: null });
     this.context.logger.info("Lark observation Input committed", { attributes: {
-      messageId: entry.message.id, inputId: delivery.name, kind: String(delivery.spec.observation!.kind) } });
+      messageId: entry.message.id, inputId: delivery.name, sessionId: delivery.spec.sessionId,
+      kind: String(delivery.spec.observation!.kind) } });
     if (entry.kind === "direct" || entry.finished) await this.remove(entry);
   }
 
