@@ -2,6 +2,7 @@ import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import type { InputSpec, SourceDefinition } from "@compforge/aide-plugin";
 import { resolve } from "node:path";
+import type { Person } from "../plugins/personal/person.ts";
 import type { Logger } from "pino";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { Personal } from "../plugins/personal/aide.ts";
@@ -53,21 +54,24 @@ export class Aide {
   private readonly messageSource: ReturnType<typeof messageWatch>;
   private readonly inputs: InputStore;
   private readonly connectors: ConnectorClient;
+  private readonly person: Person;
   private starting?: Promise<void>;
   private closed = false;
   private defaultSelection: Promise<void> = Promise.resolve();
 
-  constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
+  constructor(private readonly home: string, private readonly options: AideOptions, private readonly log: Logger) {
     this.defaultTarget = Object.freeze({ ...options.defaultTarget });
     const config = options.config;
-    const { sources } = parsePersonalConfig(config?.plugins.personal);
+    const { sources, person } = parsePersonalConfig(config?.plugins.personal);
+    this.person = person;
     this.watches = requirementWatches(sources.requirements);
-    this.messageSource = messageWatch(sources.lark, config?.connectors.lark);
+    this.messageSource = messageWatch(sources.lark, config?.connectors.lark, person);
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
     this.environmentSources = environmentSources(sources.environments, environments);
     this.inputs = new InputStore(home);
     validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
     this.log.info({
+      personIdentities: person.identities.length,
       environments: this.environmentSources.map(({ environment, namespace, intervalMs }) => ({ environment, namespace, intervalMs })),
       requirements: this.watches.map(({ id, source, intervalMs }) => ({ id, connector: source, intervalMs })),
       lark: this.messageSource ? { intervalMs: this.messageSource.intervalMs, scenarios: ["direct", "mention"] } : null,
@@ -154,7 +158,7 @@ export class Aide {
         .map(([key, lane]) => [key, { ...lane, harnessSessions: {} }])) });
       this.log.info({ sessionId: id, previousCwd: previous?.cwd, cwd }, "Execution directory changed; cleared native Harness bindings");
     }
-    application = new Personal({ timezone: this.options.timezone }, this.log.child({ sessionId: id }),
+    application = new Personal({ timezone: this.options.timezone, person: this.person, personFile: resolve(this.home, "PERSON.md") }, this.log.child({ sessionId: id }),
       { core, session, connectors, targets, inputs: this.inputs });
     this.active.set(id, application);
     core.subscribe(() => this.notify());

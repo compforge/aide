@@ -19,6 +19,7 @@ import { Aide } from "../src/app.ts";
 import { LarkChannel } from "../src/channel/lark.ts";
 import { loadConfig } from "../src/config.ts";
 import { fakeOptions } from "./fake-harness.ts";
+import { messageRelation } from "../plugins/personal/source/message/relation.ts";
 
 const logger = { debug() {}, info() {}, warn() {}, error() {} };
 const now = Date.parse("2026-10-20T08:00:00Z");
@@ -28,7 +29,8 @@ const message = (id: string, patch: Partial<ChatMessage> = {}): ChatMessage => (
 });
 const page = (messages: ChatMessage[], extra: Partial<MessagePage> = {}): MessagePage =>
   ({ messages, hasMore: false, observedThrough: new Date(now).toISOString(), ...extra });
-const watch = (patch: Partial<MessageWatch> = {}) => ({ ...messageWatch(MessageWatchSchema.parse({}), { appId: "cli_app", userId: "ou_me" })!, ...patch });
+const person = { identities: [{ provider: "lark", scope: "cli_app", id: "ou_me" }] };
+const watch = (patch: Partial<MessageWatch> = {}) => ({ ...messageWatch(MessageWatchSchema.parse({}), { appId: "cli_app", userId: "ou_me" }, person)!, ...patch });
 
 function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "mention") {
   const root = mkdtempSync(join(tmpdir(), "aide-message-source-"));
@@ -67,21 +69,22 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
   };
 }
 
-test("Direct and exact group mentions produce independent Inputs; self, bots, deleted and @all are excluded", async (t) => {
+test("Direct messages include my speech; exact group mentions exclude bots, deleted messages and @all", async (t) => {
   const f = fixture(t);
   f.incoming(async (query) => page(query.chatType === "p2p"
     ? [message("om_dm", { mentions: [] }), message("om_self", { sender: { id: "ou_me", type: "user" } })]
     : [message("om_at"), message("om_all", { mentions: ["all"] }), message("om_deleted", { deleted: true }),
       message("om_bot", { sender: { id: "bot", type: "app" } })]));
   await f.observe();
-  assert.equal(f.inputs.list().length, 2);
-  assert.deepEqual(f.inputs.list().map((input) => input.spec.observation!.kind).sort(), ["direct", "mention"]);
+  assert.equal(f.inputs.list().length, 3);
+  assert.deepEqual(f.inputs.list().map((input) => input.spec.observation!.kind).sort(), ["direct", "direct", "mention"]);
+  assert.deepEqual(f.inputs.list().map((input) => input.spec.relation).sort(), ["received", "received", "sent"]);
   assert.ok(f.inputs.list().every((input) => input.spec.originRef?.uid === f.resource().metadata.uid));
   assert.ok(f.inputs.list().every((input) => input.spec.text.includes(String((input.spec.observation!.message as { content: string }).content))));
   assert.ok(f.inputs.list().every((input) => input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id && input.spec.sessionId === "source:lark:cli_app:ou_me:oc_chat"));
   assert.ok(f.resource().status.scans!.every((scan) => scan.watermark === new Date(now).toISOString()));
   await f.observe(now + 60_000);
-  assert.equal(f.inputs.list().length, 2, "Overlapping discovery and unchanged context remain silent");
+  assert.equal(f.inputs.list().length, 3, "Overlapping discovery and unchanged context remain silent");
   assert.equal(f.resource().status.pending!.length, 1, "Direct messages do not create duplicate follow-up Inputs");
 });
 
@@ -113,7 +116,7 @@ test("Empty context is omitted; retrieved messages are included without read err
   await f.observe(now + 60_000);
   const input = f.inputs.list().find((input) => input.spec.observation!.originalMessageId === "om_with_context")!;
   assert.deepEqual(input.spec.observation!.context, {
-    messages: [message("om_before", { content: "earlier discussion" })],
+    messages: [{ ...message("om_before", { content: "earlier discussion" }), relation: "received" }],
     observedThrough: new Date(now + 60_000).toISOString(), truncated: false,
   });
   assert.equal(f.warnings.length, 0);
@@ -130,7 +133,7 @@ test("An unavailable thread root is logged without discarding retrieved replies 
   assert.equal(f.inputs.list().length, 1);
   const context = f.inputs.list()[0]!.spec.observation!.context;
   assert.deepEqual(context, {
-    messages: [reply], observedThrough: new Date(now).toISOString(), truncated: true, missingRoot: true,
+    messages: [{ ...reply, relation: "received" }], observedThrough: new Date(now).toISOString(), truncated: true, missingRoot: true,
   });
   assert.doesNotMatch(JSON.stringify(context), /Permission denied/);
   assert.match(JSON.stringify(f.warnings), /Permission denied/);
@@ -205,6 +208,7 @@ test("Only associated replies trigger follow-up; duplicate polls stay silent and
   assert.equal(f.inputs.list().length, 2);
   const update = f.inputs.list().find((input) => input.spec.observation!.kind === "discussion")!;
   assert.equal(update.spec.observation!.originalMessageId, "om_at");
+  assert.equal(update.spec.relation, "observed");
   assert.ok(f.inputs.list().every((input) => input.spec.sessionId === "source:lark:cli_app:ou_me:oc_chat"));
   assert.doesNotMatch(JSON.stringify(update.spec.observation!.context), /om_unrelated/);
   await f.observe(now + 120_000);
@@ -280,8 +284,33 @@ test("Thread root is loaded from nearby group history; unavailable roots remain 
 test("Message observation requires an account and has no configurable kinds", () => {
   assert.equal(messageWatch(undefined), undefined);
   assert.throws(() => messageWatch(MessageWatchSchema.parse({})), /connectors.lark/);
+  assert.throws(() => messageWatch(MessageWatchSchema.parse({}), { appId: "cli_app", userId: "ou_me" }), /person.identities/);
+  assert.throws(() => messageWatch(MessageWatchSchema.parse({}), { appId: "cli_other", userId: "ou_me" }, person), /person.identities/);
+  assert.throws(() => messageWatch(MessageWatchSchema.parse({}), { appId: "cli_app", userId: "ou_other" }, person), /person.identities/);
   assert.throws(() => MessageWatchSchema.parse({ kinds: ["direct"] }));
   assert.throws(() => MessageWatchSchema.parse({ contextAttempts: 2 }));
+});
+
+test("Discussion batches retain each person's relation; replies to my own messages are received", async (t) => {
+  const f = fixture(t, watch(), "mention");
+  const mine = message("om_mine", { sender: { id: "ou_me", type: "user" }, mentions: [], parentId: "om_at" });
+  const reply = message("om_reply_to_me", { mentions: [], parentId: mine.id });
+  const ambient = message("om_ambient", { mentions: [], parentId: "om_at" });
+  assert.equal(messageRelation(watch(), mine, false), "sent");
+  const alternate = message("om_alternate", { sender: { id: "ou_second", type: "user" }, mentions: [] });
+  assert.equal(messageRelation(watch({ personIds: ["ou_me", "ou_second"] }), alternate, true), "sent");
+  assert.equal(messageRelation(watch(), alternate, true), "received");
+  assert.equal(messageRelation(watch(), reply, false, [mine]), "received");
+  f.incoming(async () => page([message("om_at")]));
+  await f.observe();
+  f.history([mine, reply, ambient]);
+  await f.observe(now + 60_000);
+  const update = f.inputs.list().find((input) => input.spec.observation!.kind === "discussion")!;
+  assert.equal(update.spec.relation, "observed");
+  const context = update.spec.observation!.context as { messages: Array<{ id: string; relation: string }> };
+  assert.deepEqual(context.messages.map(({ id, relation }) => [id, relation]), [
+    [mine.id, "sent"], [reply.id, "received"], [ambient.id, "observed"],
+  ]);
 });
 
 /** @case Registering a bot chat never makes user-observed Inputs eligible for its durable outbox. */
@@ -289,7 +318,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me" } },
-    plugins: { personal: { sources: { lark: {} } } } }));
+    plugins: { personal: { person, sources: { lark: {} } } } }));
   let searches = 0;
   const prompts: string[] = [];
   const options = { ...fakeOptions({ chief: async (prompt) => {

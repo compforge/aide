@@ -4,6 +4,7 @@ import type { ChatMessage, ConnectorClient, MessagePage, PluginContext, Resource
 import { INPUT_TYPE, digest } from "../../chief-model.ts";
 import { type MessageKind, type MessageWatch } from "./config.ts";
 import { boundContext, readMessageContext, type MessageContext } from "./context.ts";
+import { messageRelation } from "./relation.ts";
 
 export const MESSAGE_SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "MessageSource" } as const;
 interface Scan {
@@ -112,7 +113,7 @@ class MessageObservation {
       chatType: kind === "direct" ? "p2p" : "group", ...(kind === "mention" ? { atMe: true } : {}) });
     const pending = [...this.pending]; const ids: string[] = [];
     for (const message of page.messages) {
-      if (message.deleted || message.sender.type !== "user" || message.sender.id === this.watch.userId ||
+      if (message.deleted || message.sender.type !== "user" ||
           (kind === "mention" && !message.mentions.includes(this.watch.userId))) continue;
       ids.push(message.id);
       if (pending.some((item) => item.message.id === message.id) ||
@@ -204,15 +205,23 @@ class MessageObservation {
 
   private async plan(entry: PendingMessage, context: MessageContext | undefined, known: string[], related: string[]) {
     const name = inputName(this.watch, entry.message.id, entry.sequence);
-    const message = { ...entry.message, content: entry.message.content.slice(0, this.watch.maxContextChars) };
+    const evidence = [entry.message, ...(context?.messages ?? [])];
+    const annotate = (message: ChatMessage) => ({ ...message,
+      relation: messageRelation(this.watch, message, entry.kind === "direct", evidence) });
+    const message = { ...annotate(entry.message), content: entry.message.content.slice(0, this.watch.maxContextChars) };
+    const annotatedContext = context && { ...context, messages: context.messages.map(annotate) };
+    // A batch can mix my speech and other people's reactions. Its per-message relations remain authoritative.
+    const relations = new Set(annotatedContext?.messages.map((item) => item.relation));
+    const relation = entry.sequence ? (relations.size === 1 ? annotatedContext!.messages[0]!.relation : "observed") : message.relation;
     const kind = entry.sequence ? "讨论进展" : entry.kind === "direct" ? "私聊" : "群内 @";
     const content = entry.sequence ? (context?.messages ?? []).map((item) => item.content).join("\n\n") : message.content;
     const spec: Delivery["spec"] = {
+      relation,
       sessionId: `source:lark:${this.watch.accountId}:${this.watch.userId}:${message.chatId}`,
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,
         kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,
-        originalInputId: inputName(this.watch, message.id, 0), ...(context?.messages.length ? { context } : {}),
+        originalInputId: inputName(this.watch, message.id, 0), ...(annotatedContext?.messages.length ? { context: annotatedContext } : {}),
         messageTruncated: message.content.length !== entry.message.content.length } };
     const planned = { ...entry, delivery: { name, spec, known, related } };
     await this.update(planned);
@@ -228,7 +237,7 @@ class MessageObservation {
       related: delivery.related, delivery: null });
     this.context.logger.info("Lark observation Input committed", { attributes: {
       messageId: entry.message.id, inputId: delivery.name, sessionId: delivery.spec.sessionId,
-      kind: String(delivery.spec.observation!.kind) } });
+      kind: String(delivery.spec.observation!.kind), relation: delivery.spec.relation ?? "unknown" } });
     if (entry.kind === "direct" || entry.finished) await this.remove(entry);
   }
 

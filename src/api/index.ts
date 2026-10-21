@@ -128,7 +128,7 @@ export function httpChannel(aide: WebService, log: Logger) {
         log.info({ messageId, kind: result.kind, completed: receipt.result }, "Channel interaction response");
         json(response, receipt.result ? 200 : 409, { completed: receipt.result });
       } else if (request.method === "POST" && url.pathname === "/messages") {
-        const input = IncomingSchema.omit({ channelId: true }).parse(await body(request));
+        const input = IncomingSchema.omit({ channelId: true, observation: true }).parse(await body(request));
         json(response, 200, await receive(input));
       } else if (request.method === "POST" && url.pathname === "/conversations/default") {
         const { conversationId, enabled } = ConversationDefaultSchema.parse(await body(request));

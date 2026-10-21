@@ -30,6 +30,33 @@ Connector 配置访问能力，声明它不会启动持续观察。Personal 的�
 - `lark: {}` 启用默认观察策略，不按消息类型限制输入；Source 产出的消息均进入处理流程，当前采集能力覆盖单聊和群内 @。字段与权限见 [Lark 消息观察](connector/lark-messages.md)。
 - `requirements` 配置需求观察列表，包含 Connector 引用、负责人范围与间隔；空数组关闭需求观察。
 
+`plugins.personal.person` 定义服务对象的外部身份。身份绑定和 Connector 登录固定分别表达“谁是我”和“用哪个账号访问”，
+两者必须明确匹配，不能仅因拥有凭证就推断账号属于本人。例如：
+
+```yaml
+connectors:
+  lark:
+    appId: cli_example
+    userId: ou_example
+plugins:
+  personal:
+    person:
+      identities:
+        - provider: lark
+          scope: cli_example
+          id: ou_example
+    sources:
+      lark: {}
+```
+
+只使用 Lark 机器人 Channel 时也可配置上述 Person 身份，无需启用用户消息 Connector 或 Source。
+机器人应用与 CLI 应用不同则分别登记其应用下的 open_id。`person` 缺省时 identities 为空；
+Web 仍归于本人，外部消息关系不足时留空。启用 Lark 用户 Source 必须补齐对应身份，否则启动报错。
+修改绑定后重启；已经生成的 Input 保留原来的关系。
+
+`$AIDE_HOME/PERSON.md` 是 Chief 持续维护的个人认知文件，每轮重新读取，人工编辑后无需重启。
+它不属于 YAML 配置快照，也不影响外部账号匹配。详见 [Person](plugin/personal.md#person-与输入关系)。
+
 省略某类 Source 就关闭对应观察，Connector 仍可按需查询。Source 引用缺失的 Connector、环境不可用于本地 Kubernetes 采样，
 或策略字段不受支持时，启动报错。Personal 在恢复 Session 前校验这些策略，启动日志汇总生效的观察范围和间隔。
 

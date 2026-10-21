@@ -2,7 +2,7 @@
 
 用户收到的单聊、群内明确 @ 用户的消息，以及所在群的新消息，都是可以交给 Personal 判断的外部输入场景。
 Source 保存观察事实，Chief 结合用户已有委托选择提醒、询问、关联工作或忽略。
-当前实现支持 `direct`（别人发给用户的单聊）和 `mention`（群内明确 @ 用户），没有启用全群新消息观察。
+当前实现支持 `direct`（本人的单聊收发）和 `mention`（群内明确 @ 本人），并保留短期讨论中的本人发言，没有启用全群新消息或全部群内本人发言的独立扫描。
 
 ## 接入与权限
 
@@ -18,11 +18,17 @@ connectors:
     timeoutMs: 20000
 plugins:
   personal:
+    person:
+      identities:
+        - provider: lark
+          scope: cli_example
+          id: ou_example
     sources:
       lark: {}
 ```
 
 省略 `plugins.personal.sources.lark` 不启动观察；声明 `lark: {}` 使用默认策略，不按消息类型限制输入。
+启用观察必须在 `person.identities` 中显式绑定 Connector 的 appId/open_id；绑定缺失或不匹配时启动报错。
 Source 产出的消息均进入处理流程，当前主动采集单聊和群内 @。
 只声明 Connector 时，Chief 仍可按需读取上下文。
 已有 Lark Channel 的机器人交互不受此配置影响。初次启用默认观察最近五分钟，不导入全部历史。
@@ -50,7 +56,9 @@ Source 为 Input 设置 `sessionId = source:lark:<appId>:<userId>:<chatId>`；�
 Connector 提供消息搜索、群历史和话题回复的分页读取，查询条件与 Personal 触发策略分离。
 消息保留发送人、群、原消息 ID、时间、mentions、可用的回复与话题关联及原消息链接。
 `--is-at-me` 也可能命中 `@所有人`，Source 必须检查结构化 mentions 中的用户 ID。
-两个场景均排除用户自己发送的、机器人发送的和已撤回的消息。
+两个场景均排除机器人发送的和已撤回的消息。单聊中的本人发言保留为 `relation: sent`；
+发给本人的消息为 `received`。上下文逐条保留 relation，普通讨论为 `observed`，可确认回复本人发言的消息为 `received`。
+混合关系的讨论批次整体为 `observed`，Chief 必须依据各条消息的作者和 relation 积累认知，不能把整个讨论算成本人的观点。
 
 收到原始单聊或 @ 消息即满足提交条件。初次观察尝试读取有限的前后文；话题优先取话题回复，并从附近群历史寻找根消息。
 只有查到消息时才附带 `observation.context.messages`；没有结果、无权限或读取失败时省略 `observation.context`。

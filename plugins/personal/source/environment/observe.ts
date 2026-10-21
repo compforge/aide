@@ -80,7 +80,7 @@ export async function observeEnvironment(context: Pick<PluginContext, "resources
     const event: WorkloadEvent = { type: "workload.changed", environment: snapshot.environment, namespace: snapshot.namespace,
       observedAt: snapshot.observedAt, previousObservedAt: baseline!.observedAt, changes };
     const submit = bindSourceInput(SOURCES.environments, resource, context.resources);
-    await submit(name, { text: describeWorkloadChanges(event), observation: { ...event } });
+    await submit(name, { relation: "observed", text: describeWorkloadChanges(event), observation: { ...event } });
   }
   await context.resources.patchStatus(resource, { baseline: snapshot, sequence: changes.length ? sequence : resource.status.sequence ?? 0,
     lastObservedAt: snapshot.observedAt, error: null });

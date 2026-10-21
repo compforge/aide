@@ -35,6 +35,7 @@ src/
   protocol/                # Host / Runner 共用 IPC 与 verb 契约
   plugin-context.ts        # 共用上下文构造与 verb 参数校验
 plugins/personal/
+  person.ts                # Person 外部身份绑定、校验与输入关系
   aide.ts                  # Personal 服务：Chief 会话绑定、输入与恢复
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
   input.ts                 # Chief Input 路由与可恢复的多会话追加
@@ -56,7 +57,7 @@ plugins/personal/
     requirement/           # RequirementSource
       config.ts            # 需求观察范围与配置校验
       observe.ts           # 需求观察、水位和调度
-  config.ts                # Personal sources 配置、严格校验与默认值
+  config.ts                # Person / Source 配置、严格校验与默认值
   task/                    # Task CRD
     model.ts               # 资源定义
     reconcile.ts           # 有限目标 Reconcile
@@ -71,7 +72,7 @@ plugins/personal/
   store.ts                 # 宿主端工作存取、消息与去重投影
 agents/
   pi/                      # 通用 Pi Agent：SDK、原生工具与会话
-  chief/                   # Personal 提示词、Work / 问答 / Connector 工具
+  chief/                   # Personal 提示词、PERSON.md、Work / 问答 / Connector 工具
 connectors/                # 全局环境目录、Meego / GitHub / GitLab 访问与数据映射
 packages/plugin/           # @compforge/aide-plugin 公共契约
 tests/                     # 内核、插件、Channel 与 Agent 验证
@@ -91,7 +92,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Chief 对已有 Work 使用 append_input 投递事实或请求，输入队列与消费进度由 Work 持久保存；Task / Routine Reconcile 决定目标与执行状态，Chief 保留创建和删除资源的能力。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。
 - Harness 原生 Session 由各 Harness 管理并使用其默认目录；Aide 按 Session × Lane × Target 保存原生身份和 Adapter 的 resumeState。
-- 业务进展以资源和执行事实为准，记忆辅助理解与判断。记忆由 Harness 组合开源实现；Chief 内置 pi-hermes-memory，Personal 不感知记忆能力，Core 不新增记忆存储或协议。扩展生命周期由 PiAdapter 驱动，原生配置与共享范围见 Chief 文档。
+- Person 是 Personal 服务和理解的唯一对象；plugins.personal.person.identities 按 provider / scope / id 显式绑定外部身份，Connector 登录账号和机器人身份不自动等于 Person。Channel 保留身份事实，Personal 统一解释；Source 复用绑定并验证登录态。Input.relation 为 sent / received / observed，缺省表示未知；混合上下文保留逐条关系，分类不构成执行授权。
+- 业务进展以资源和执行事实为准，记忆辅助理解与判断。Chief 每轮刷新 $AIDE_HOME/PERSON.md，通过 Pi 原生文件工具持续维护个人认知；Personal 只绑定路径与身份，不直接提取或整理记忆。通用记忆与检索由 pi-hermes-memory 提供，Core 不新增记忆存储或协议。扩展生命周期、画像共享范围和人工编辑规则见 Chief 文档。
 - `pi` 提供通用 Agent，`chief` 加入 Personal 工具，两者复用 PiAdapter。通用 Pi 不依赖 Personal，Chief 的 WorkService 由宿主绑定范围；默认 Work 执行由根级 `defaultHarness` 选择，缺省为通用 Pi。
 - Lark 用户消息 Source 按账号、用户和聊天生成独立观察话题，与机器人 Channel 会话分离，避免观察内容进入原群上下文和自动外发。
 - Source 先提交持久 Input 再推进观察水位。Input 独立保存，Conversation 内的消费状态、业务回复与去重记录原子提交，不能用投递失败重新触发业务执行。

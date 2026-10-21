@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
-  type AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+  type AgentSession, type ToolDefinition, type ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
 import type { PiConfig } from "../../src/host/harness/pi/config.ts";
 
@@ -13,6 +13,7 @@ export interface PiAgentOptions {
   nativeTools?: string[];
   /** Explicit bundled extensions; ambient extension discovery remains disabled. */
   extensionPaths?: string[];
+  extensionFactories?: ExtensionFactory[];
   /** Host-bound scope prevents resuming a session with different application tools/context. */
   scope?: string;
   systemPrompt?: string;
@@ -36,7 +37,8 @@ export async function createPiAgent(options: PiAgentOptions): Promise<AgentSessi
   const settings = SettingsManager.inMemory(structuredClone(options.config.settings));
   const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings,
     ...(skillPaths === undefined ? {} : { noSkills: true, additionalSkillPaths: [...skillPaths] }),
-    noExtensions: true, additionalExtensionPaths: options.extensionPaths, noPromptTemplates: true, noThemes: true, ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}) });
+    noExtensions: true, additionalExtensionPaths: options.extensionPaths, extensionFactories: options.extensionFactories,
+    noPromptTemplates: true, noThemes: true, ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}) });
   await loader.reload();
   if (skillPaths !== undefined && loader.getSkills().diagnostics.length) {
     throw new Error(`Invalid configured Pi skills: ${loader.getSkills().diagnostics.map((item) => `${item.path}: ${item.message}`).join("; ")}`);
