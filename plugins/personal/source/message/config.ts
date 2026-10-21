@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isPerson, type Person } from "../../person.ts";
 
 export const MESSAGE_SESSION = "source:lark-messages";
 /** Observation policy belongs to Personal; the Connector only exposes account-scoped IM reads. */
@@ -13,10 +14,14 @@ export const MessageWatchSchema = z.object({
   followupMs: z.number().int().min(0).max(3_600_000).default(300_000),
 }).strict();
 export type MessageKind = "direct" | "mention";
-export type MessageWatch = z.infer<typeof MessageWatchSchema> & { accountId: string; userId: string };
+export type MessageWatch = z.infer<typeof MessageWatchSchema> & { accountId: string; userId: string; personIds: string[] };
 
-export function messageWatch(watch: z.infer<typeof MessageWatchSchema> | undefined, account?: { appId: string; userId: string }): MessageWatch | undefined {
+export function messageWatch(watch: z.infer<typeof MessageWatchSchema> | undefined, account?: { appId: string; userId: string }, person: Person = { identities: [] }): MessageWatch | undefined {
   if (!watch) return undefined;
   if (!account) throw new Error("Personal messages require connectors.lark with explicit appId/userId");
-  return { ...watch, accountId: account.appId, userId: account.userId };
+  if (!isPerson(person, { provider: "lark", scope: account.appId, id: account.userId })) {
+    throw new Error("Personal messages require a matching Lark identity in plugins.personal.person.identities; connector login alone does not identify the Person");
+  }
+  return { ...watch, accountId: account.appId, userId: account.userId,
+    personIds: person.identities.filter((identity) => identity.provider === "lark" && identity.scope === account.appId).map((identity) => identity.id) };
 }

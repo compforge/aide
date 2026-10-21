@@ -57,6 +57,11 @@ Requirements and forges expose typed list / get operations, with forge comments 
 
 ## Resources and scheduling
 
+Core `InputSpec.relation` optionally records `sent`, `received` or `observed` relative to the served Person.
+Omit it when identity evidence is insufficient. Receiving or observing content does not imply endorsement,
+delegation or that the person read it. Producers retain original authorship and per-message evidence alongside the classification.
+Person bindings and classification policy belong to Personal; Core validates and persists the result.
+
 [ResourceClient](src/resource.ts) provides create, get, list, patch, status update and deletion. Namespace defaults to user-global `v1`; list can include descendants and match exact label values. Annotations are opaque metadata, while labels support selection.
 
 Read by a resource reference:

@@ -14,7 +14,7 @@ import { fakeOptions } from "./fake-harness.ts";
 const agent = { async execute(): Promise<never> { throw new Error("Unexpected work"); } };
 
 test("Personal sources use one strict namespace, explicit scopes and no Lark kinds", () => {
-  assert.deepEqual(parsePersonalConfig(), { sources: { requirements: [] } });
+  assert.deepEqual(parsePersonalConfig(), { person: { identities: [] }, sources: { requirements: [] } });
   const policy = parsePersonalConfig({ sources: { lark: {}, environments: { targets: [] }, requirements: [] } });
   assert.equal(policy.sources.lark!.intervalMs, 60_000);
   assert.deepEqual(policy.sources.environments!.targets, []);
@@ -53,6 +53,7 @@ test("Only configured sources poll; removing policies stops restored observers w
   const declarations = { environments: { dev: { kind: "kubernetes", kubeconfig: "unused" } },
     lark: { appId: "cli_app", userId: "ou_me" },
     requirements: { work: { provider: "meego", projectKey: "p" } } };
+  const person = { identities: [{ provider: "lark", scope: "cli_app", id: "ou_me" }] };
   const sources = { environments: { targets: [{ environment: "dev", namespaces: ["app"] }] }, lark: {},
     requirements: [{ id: "mine", source: "work", userKeys: ["me"] }, { id: "team", source: "work", userKeys: ["team"] }] };
   const seen = { environments: 0, messageKinds: [] as string[], assignees: [] as string[][] };
@@ -85,7 +86,7 @@ test("Only configured sources poll; removing policies stops restored observers w
   assert.equal(seen.assignees.length, 0);
   await aide.close();
 
-  writeFileSync(configFile, JSON.stringify({ connectors: declarations, plugins: { personal: { sources } } }));
+  writeFileSync(configFile, JSON.stringify({ connectors: declarations, plugins: { personal: { sources, person } } }));
   aide = create(); await aide.start(); await aide.settled();
   assert.ok(seen.environments > 0);
   assert.deepEqual([...new Set(seen.messageKinds)].sort(), ["group", "p2p"]);

@@ -176,7 +176,7 @@ export type {
   TurnSummaryToolCall,
 } from "./snapshot.ts";
 export { INPUT_TYPE } from "./input.ts";
-export type { InputSpec, InputStatus, InputReceipt } from "./input.ts";
+export type { InputSpec, InputStatus, InputReceipt, InputRelation } from "./input.ts";
 export type * from "./connectors/index.ts";
 
 export type { ExecutionAssociation } from "./reconcile-context.ts";

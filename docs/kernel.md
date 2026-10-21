@@ -63,6 +63,10 @@ Aide 的根级 `defaultHarness` 选择默认工作执行实现，`harnesses.<nam
 
 Input 是独立的 Host 内置资源，记录输入内容、来源和可选的 sessionId 话题线索。Channel / Source 按自身特质决定标识的稳定性和粒度；同一标识表达输入有共同上下文，不同标识不意味着毫无关联。Source 也可以提交没有话题线索的外部观察。接收输入的执行 Session 与输入声明的目标 Session 分别记录；前者负责持久执行，后者表达来源已知的归属线索，也允许关联其它相关话题。输入事实统一保存在 `$AIDE_HOME/inputs.json`，供多个插件资源引用。
 
+Input 可保存相对于服务对象 Person 的 `relation: sent | received | observed`，未知时留空。
+Personal 拥有身份绑定和归因，Core 只校验并持久保存结果；原作者与上下文证据仍保留。
+Person 身份与可写的 PERSON.md 认知文件分别承载账号事实和长期认识，见 [Personal](plugin/personal.md#person-与输入关系)。
+
 Conversation 是 Personal 定义的资源：spec 保存所属 Session 和追加的 inputIds，status 保存各 Input 的消费进度与消息 outbox。它与 Task、Routine 一样使用通用 Resource CRUD、版本检查和 Watch。来源无需知道 Conversation，Personal 决定交流上下文的组织方式。一个 Input 可以被多个 Conversation 引用，各会话独立消费。
 
 Personal 的 Chief 先 Reconcile Input：无会话时创建并追加后结束；已有会话时，依次追加到默认会话、规则创建的会话和规则关联的已有会话。确定归属就通过资源 Update 幂等追加 inputId，不调用语义路由、不保存完整目标计划。创建保存稳定身份与资源 uid，中断后重试规则和追加，不重放已消费的输入。Conversation 的 spec 变化触发另一个 Reconcile，加载本会话上下文并执行。这里不需要额外的路由 Verb。

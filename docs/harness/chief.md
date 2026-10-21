@@ -52,7 +52,38 @@ Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 
 ## 上下文与记忆
 
-Aide 组合开源产品的记忆能力，不自行实现记忆提取、存储、检索或整理。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。Personal 只调用 Chief Harness，不感知它是否具有记忆，也不提供 Memory Service、资源或工具。
+Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。
+关于服务对象的可编辑认知单独保存在 PERSON.md；Personal 提供其固定路径，Chief 通过 Pi 原生工具维护，不新增 Memory Service 或记忆资源。
+
+### PERSON.md
+
+`$AIDE_HOME/PERSON.md` 保存 Chief 对服务对象的背景、偏好、观点和关注的持续认识。第一次创建 Chief 时，
+仅在文件不存在时写入空白说明模板；已有内容不会被覆盖。文件跟随 Aide home，与 cwd、Conversation 和 Pi 原生会话目录无关。
+所有 Conversation 的 Chief 共用它；Conversation 不是个人认知的访问隔离边界。
+
+Chief 在每轮开始前读取当前内容并放入本轮系统上下文。人工修改、另一会话的更新和纠正会在下一轮可见；
+无需重启或重建原生会话。上下文最多包含前 12000 字符，超过时明确提示 Chief 读取完整文件，不能把截断内容当成完整资料。
+
+Chief 可以主动使用已有的 `read`、`edit`、`write` 工具维护文件，不必等待“记住这个”的指令。
+先读取最新文件，优先精确编辑，保留无关条目和人工内容；冲突时重读合并。
+这些是普通文件工具，没有独立的画像写事务；并行人工或多会话编辑仍应避免同时覆盖整份文件。
+维护由当前 Chief 判断并执行，不是每条 Input 后固定触发一轮额外模型调用。
+
+条目应包含日期、来源（Input ID、外部来源或用户明确陈述）、适用范围及必要的不确定性。例如：
+
+```markdown
+# Person
+
+- 2026-10-21：偏好简洁中文回复。依据：input-42 中明确说明；适用于日常交流。
+- 2026-10-21：近期关注机器人控制。依据：input-51、input-60；属于近期关注，不能推断为长期职业目标。
+```
+
+`sent` 提供本人表达的线索，但引用和代发仍需辨别；`received` 表示别人发给本人的内容，`observed` 表示信息环境中的内容，
+二者都不能直接作为本人认可或观点的证据。混合讨论逐条核对作者。相同认识合并，用户纠正时更新或删除旧说法，推测与确认事实分开。
+文件不保存凭证或决定外部身份，也不提供执行授权；外部身份由 `plugins.personal.person.identities` 确认。
+
+PERSON.md 是 Chief 的个人认知主文件，Hermes 继续提供通用记忆和会话检索。
+Hermes 自身仍有 USER.md 及后台整理机制；二者不做自动同步，历史记忆不能覆盖 PERSON.md 中用户明确更正的认识。
 
 连续输入复用 Conversation 对应的固定 Lane 和原生 Pi 会话；Pi 负责原生历史与压缩，Controller 仍补充当前输入、近期消息与工作回复。长期记忆独立于原生会话，由 Hermes 的工具和生命周期钩子维护，重建原生会话不会清空记忆。Task / Routine 仍是工作状态的权威来源。
 
@@ -94,6 +125,9 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 ## 验证
 
 `tests/pi-agent.test.ts` 使用真实 Pi SDK、Hermes 扩展、临时 Markdown/SQLite 存储和模拟模型，验证 Chief 工具与策略注入、跨全新原生会话写入和召回，以及通用 Pi 不自动获得记忆工具。Adapter 的扩展启动/退出与失败处理也有契约验证。测试关闭扩展的自动模型整理，避免影响脚本化模型请求。
+
+同一测试还验证 Chief 通过真实 Pi `edit` 工具改写 PERSON.md、保留人工条目，以及续轮、新会话、重建原生会话和人工修订后的刷新。
+`tests/person.test.ts` 与消息 Source 测试验证身份作用域、机器人与本人区分、关系持久化和混合上下文逐条归因。
 
 现有 Source → Chief → 用户决定 → Work 验证继续覆盖 Personal 装配。以上不能证明真实模型会正确选择值得保存的事实，或后台提炼、压缩后召回的实际质量；这些效果需要真实使用评估。真实 Channel 验收见 [E2E](../e2e.md)。
 

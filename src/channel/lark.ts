@@ -52,7 +52,7 @@ export class LarkChannel {
   private retryAt = 0;
   private readonly cardRetry = new Map<string, number>();
 
-  constructor(home: string, appId: string, private readonly aide: Pick<ChannelService, "receive" | "messages">,
+  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "messages">,
     private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
     this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
@@ -114,7 +114,10 @@ export class LarkChannel {
     // Group normalization yields; concurrent duplicate deliveries must still persist only once.
     if (this.stopped) throw new Error("Lark channel is stopping");
     if (this.state.received.includes(id)) return;
-    const input = IncomingSchema.omit({ channelId: true }).safeParse({ id, sessionId: conversationId, text });
+    const input = IncomingSchema.omit({ channelId: true }).safeParse({ id, sessionId: conversationId, text,
+      observation: { provider: "lark", accountId: this.appId, chatId, chatType: message.chat_type,
+        sender: { type: sender.sender_type, ...(sender.sender_id?.open_id ? { id: sender.sender_id.open_id } : {}) },
+        mentions: (message.mentions ?? []).flatMap((mention) => mention.id.open_id ? [mention.id.open_id] : []) } });
     this.save({ ...this.state,
       pending: input.success ? [...this.state.pending, input.data] : this.state.pending,
       notices: input.success ? this.state.notices : [...this.state.notices,

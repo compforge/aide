@@ -4,6 +4,7 @@ export const IncomingSchema = z.object({
   channelId: z.string().min(1),
   sessionId: z.string().min(1).max(200),
   text: z.string().min(1).max(32_000),
+  observation: z.record(z.string(), z.unknown()).optional(),
 });
 export type Incoming = z.infer<typeof IncomingSchema>;
 

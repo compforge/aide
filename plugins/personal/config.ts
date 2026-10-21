@@ -2,6 +2,7 @@ import { z } from "zod";
 import { EnvironmentWatchSchema } from "./source/environment/config.ts";
 import { MessageWatchSchema } from "./source/message/config.ts";
 import { WatchSchema } from "./source/requirement/config.ts";
+import { PersonSchema } from "./person.ts";
 
 /**
  * @spec Sources own observation policy. A missing Source is disabled even when its Connector is available.
@@ -10,6 +11,7 @@ import { WatchSchema } from "./source/requirement/config.ts";
  * @case tests/personal-config.test.ts
  */
 export const PersonalConfigSchema = z.object({
+  person: PersonSchema.prefault({}),
   sources: z.object({
     environments: EnvironmentWatchSchema.optional(),
     lark: MessageWatchSchema.optional(),

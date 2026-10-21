@@ -2,6 +2,38 @@
 
 Personal 是 Aide 的内置个人助手插件：Chief 接收输入并判断是否需要持续跟进，Task 负责有限目标，Routine 负责持续职责。用户可以自然聊天，外部系统也可以带来观察；只有值得承担和推进的工作才进入 Task / Routine。
 
+## Person 与输入关系
+
+Person 是 Aide 服务和持续理解的那个人。`plugins/personal/person.ts` 用 interface 表达其结构化身份，
+当前一个 Aide 实例服务一个 Person，不按 Conversation 创建不同的人，也不建设账号中心。
+
+`plugins.personal.person.identities` 注册外部身份，每项由 `provider`、`scope`、`id` 组成。
+Lark 的 scope 是 appId，id 是该应用下的 open_id；同一人通过不同应用接入时分别绑定，不能跨应用比较裸 ID。
+允许同一 Person 绑定多个账号。其它 provider 可声明身份，但只有实现了相应入口适配的系统才能据此分类。
+
+Connector 负责登录账号和外部协议，Channel 保留发送者与提及对象，Source 保留观察账号和逐条消息证据；
+Personal 以统一绑定解释这些事实。Connector 的凭证账号不自动成为 Person，机器人身份也不是 Person。
+Lark 用户 Source 启动前要求登录账号对应已注册的 Person 身份，轮询时再核对实际登录态。
+Source 无需重复声明“我”；其观察范围与身份绑定分别配置。
+
+`Input.relation` 描述输入相对于 Person 的关系：
+
+| 值 | 含义 |
+|---|---|
+| `sent` | 我发出：本人账号发送，仍需识别引用与代发内容 |
+| `received` | 我收到：明确发给本人，如私信、@、可确认是回复本人的消息 |
+| `observed` | 我看见：来自本人的观察范围，不证明实际已读 |
+| 缺省 | 身份或关系依据不足 |
+
+本人发送优先于收到。Web 是单人本地入口，输入为 `sent`；Lark Channel 依据发送者和明确提及分类，
+别人私信机器人或仅 @ 机器人不能据此认定为 `received` 或 `observed`。环境与需求监控属于配置的观察范围，标记 `observed`。
+Lark Source 对每条原消息和上下文消息分别分类；混合关系的讨论续报整体标记 `observed`，各条消息的 relation 和作者保留。
+分类随 Input 持久保存，不因后续更改 Person 配置而重新归因。它用于理解和积累认知，不授予执行权限。
+
+对 Person 的偏好、观点、关注和背景的持续认识保存在 `$AIDE_HOME/PERSON.md`。
+Chief 通过原生文件工具维护这份可人工编辑的 Markdown，并在每轮刷新；外部身份仍以配置为准。
+具体维护、共享范围和验证边界见 [Chief 的 PERSON.md](../harness/chief.md#personmd)。
+
 ## 主动性与上下文
 
 Aide 的主动性围绕一个动作展开：把发生的事放入合适的上下文（place it in context），结合那里已有的关注、委托、历史和进展，决定推进、更新、沟通、等待或忽略。归位让一次新变化接上此前的工作。

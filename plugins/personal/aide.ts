@@ -16,6 +16,7 @@ import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
+import { channelRelation, type Person } from "./person.ts";
 
 /** Channels and Sources submit durable input; Chief decides whether Work is needed. */
 export class Personal {
@@ -32,7 +33,7 @@ export class Personal {
   private readonly chiefConversations = new Map<string, string>();
   private readonly targets: { id: string; harness: string }[];
 
-  constructor(private readonly options: { timezone: string }, private readonly log: Logger,
+  constructor(private readonly options: { timezone: string; person: Person; personFile: string }, private readonly log: Logger,
     runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; inputs: InputStore }) {
     this.core = runtime.core;
     this.session = runtime.session;
@@ -80,7 +81,7 @@ export class Personal {
       if (input.input?.spec.origin === "channel") throw new Error("Channel input cannot be dismissed silently");
       await this.store.conversations.updateRun(input, { quietReason });
     });
-    return (options) => createChiefAgent({ ...options, config, work: this.work(conversationId),
+    return (options) => createChiefAgent({ ...options, config, work: this.work(conversationId), personFile: this.options.personFile,
       tools, beforeWorkMutation: () => { active(); } });
   }
 
@@ -225,12 +226,15 @@ export class Personal {
     }
     const accepted = await this.acceptChannel(id, input, []);
     this.wake(CONVERSATION_TYPE, conversationKey(input.conversationId));
-    this.log.info({ conversationId: input.conversationId, inputId: id, channelId: input.channelId }, "Accepted Chief input");
+    this.log.info({ conversationId: input.conversationId, inputId: id, channelId: input.channelId, relation: accepted.spec.relation ?? "unknown" }, "Accepted Chief input");
     return { inputId: accepted.metadata.name, at: accepted.metadata.creationTimestamp };
   }
 
   private async acceptChannel(id: string, input: Incoming, messages: Message[], phase?: "done", replyTo?: string) {
-    const fact = await this.conversations.submit(id, { sessionId: this.id, text: input.text, timezone: this.options.timezone, origin: "channel", originId: input.channelId, ...(replyTo ? { replyTo } : {}) });
+    const relation = channelRelation(this.options.person, input);
+    const fact = await this.conversations.submit(id, { sessionId: this.id, text: input.text, timezone: this.options.timezone,
+      origin: "channel", originId: input.channelId, ...(relation ? { relation } : {}),
+      ...(input.observation ? { observation: input.observation } : {}), ...(replyTo ? { replyTo } : {}) });
     for (let attempt = 0; ; attempt++) {
       const c = await this.conversations.ensure();
       const ids = new Set(c.status.messages.map((m) => m.id));

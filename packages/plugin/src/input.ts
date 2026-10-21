@@ -2,6 +2,8 @@ import type { ResourceRef } from "./resource.ts";
 
 export interface InputReceipt { inputId: string; at: string }
 
+export type InputRelation = "sent" | "received" | "observed";
+
 export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Input" } as const;
 export interface InputSpec {
   /**
@@ -15,6 +17,12 @@ export interface InputSpec {
   originId: string;
   /** Producing Source resource; provenance, never a routing destination. */
   originRef?: ResourceRef;
+  /**
+   * @spec Relation to the Person: authored by them, addressed to them, or visible in their information environment.
+   * Observed does not prove the Person read it; received does not imply endorsement or delegation.
+   * Absent means unknown. Context messages retain their own authorship and relation.
+   */
+  relation?: InputRelation;
   text: string;
   timezone?: string;
   replyTo?: string;

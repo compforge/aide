@@ -23,6 +23,7 @@ export async function observeRequirements(context: Pick<PluginContext, "resource
     if (!await context.resources.get({ ...INPUT_TYPE, namespace: "aide-system", name })) {
       await submit(name, {
         sessionId: resource.spec.sessionId,
+        relation: "observed",
         text: `需求 ${requirement.id}：${requirement.title}\n状态：${requirement.state}`,
         observation: { watch: resource.spec, requirement },
       });
