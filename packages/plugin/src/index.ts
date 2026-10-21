@@ -80,6 +80,7 @@ export {
 export type {
   PluginContext,
   PluginControllerRegistry,
+  PluginPrinterRegistry,
   PluginHookRegistry,
   PluginConfig,
   PluginDataDirectories,
@@ -138,6 +139,7 @@ export type {
   Resource,
   ResourceClient,
   ResourceReader,
+  ResourcePrinter,
   ResourceWriter,
   ResourceMergePatch,
   ResourceListOptions,

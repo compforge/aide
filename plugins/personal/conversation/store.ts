@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { InputSpec, InputStatus, ResourceClient } from "@compforge/aide-plugin";
 import { InputStore } from "../../../src/host/input/store.ts";
-import { PluginResourceStore } from "../../../src/host/plugin/resource.ts";
-import type { ResourceClientChange } from "../../../src/host/plugin/resource-client.ts";
+import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
+import type { ResourceClientChange } from "../../../src/host/plugin/resource/client.ts";
 import { CONVERSATION_TYPE, initialConversationName, type Conversation, type ConversationResource, type ConversationInput, type ConversationRun, type ProcessingStatus, type ConversationSpec, type ConversationStatus } from "./model.ts";
 import type { Message } from "../model.ts";
 import { digest } from "../chief-model.ts";

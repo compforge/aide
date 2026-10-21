@@ -27,7 +27,7 @@ import {
   AIDE_TARGET_RESOURCE_TYPE,
   AIDE_TURN_RESOURCE_TYPE,
 } from "./package.ts";
-import { resourceTypeKey } from "./resource.ts";
+import { resourceTypeKey } from "./resource/type.ts";
 
 export interface AideSessionObservation {
   readonly meta: SessionMeta;

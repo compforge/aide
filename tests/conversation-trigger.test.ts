@@ -8,7 +8,7 @@ import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { SessionStore } from "../src/host/store/store.ts";
 import { ConversationStore } from "./conversation-fixture.ts";
-import { createResourceClient } from "../src/host/plugin/resource-client.ts";
+import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { conversationTrigger, ConversationTriggerSchema } from "../plugins/personal/conversation/trigger.ts";
 import { CONVERSATION_TYPE } from "../plugins/personal/conversation/model.ts";
 import { httpChannel } from "../src/api/index.ts";

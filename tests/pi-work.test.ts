@@ -1,7 +1,7 @@
 import type { PluginContext } from "@compforge/aide-plugin";
 import { consumeWorkInputs } from "../plugins/personal/work-input.ts";
 import type { WorkResource } from "../plugins/personal/resources.ts";
-import { createResourceClient } from "../src/host/plugin/resource-client.ts";
+import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ConversationStore, seedInput } from "./conversation-fixture.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -16,7 +16,7 @@ import { workType } from "../plugins/personal/resources.ts";
 import { TASK_TYPE } from "../plugins/personal/task/model.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });

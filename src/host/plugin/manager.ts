@@ -1,3 +1,4 @@
+import { ResourcePrinters } from "./resource/printer.ts";
 import { RunnerController } from "./runner/controller.ts";
 import type { PluginRunnerClient } from "./runner/client.ts";
 import type { ControllerRegistration as RemoteRegistration, HostRequest } from "../../protocol/ipc.ts";
@@ -6,7 +7,7 @@ import { emptyConnectors } from "../../connector-client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
 import { INPUT_TYPE } from "@compforge/aide-plugin";
 import { InputStore } from "../input/store.ts";
-import { scopedResources, type ResourceDirectory } from "./resource-directory.ts";
+import { scopedResources, type ResourceDirectory } from "./resource/directory.ts";
 import type { CommandContext } from "@compforge/aide-plugin";
 import {
   Controller,
@@ -62,14 +63,12 @@ import {
 import {
   CronSourceQueue,
 } from "../../reconcile/cron-source.ts";
-import {
-  PluginResourceStore,
-  resourceTypeKey,
-} from "./resource.ts";
+import { PluginResourceStore } from "./resource/store.ts";
+import { resourceTypeKey } from "./resource/type.ts";
 import {
   createResourceClient,
   type ResourceClientChange,
-} from "./resource-client.ts";
+} from "./resource/client.ts";
 import {
   BoardProjection,
   type BoardItem,
@@ -111,7 +110,7 @@ import {
   AideResourceProvider,
   type AideSessionObservation,
 } from "./aide-resource.ts";
-import { ResourceRegistry } from "./resource-registry.ts";
+import { ResourceRegistry } from "./resource/registry.ts";
 import type { HarnessTarget } from "../harness/target.ts";
 
 const TOAST_TONES = new Set<ToastTone>([
@@ -298,6 +297,10 @@ export class Manager {
   private readonly pluginSupervisor?: PluginSupervisor;
   private readonly snapshot: () => ReconcileSnapshot;
   private readonly verb: Verb;
+  private readonly printers = new ResourcePrinters((detail, error) => this.log?.({
+    level: "error", source: "aide", component: "plugin.printer", message: "Resource printing failed",
+    pluginInstanceId: detail.pluginInstanceId, attributes: { ...detail }, error: logError(error),
+  }));
   private readonly bindings = new Map<string, PluginBinding>();
   private readonly activations = new Map<string, Promise<void>>();
   private readonly capacity: ReconcileCapacity;
@@ -465,6 +468,14 @@ export class Manager {
       await Promise.allSettled([...this.pendingReconciles]);
       await Promise.all([...this.controllers.values()].filter((item): item is RunnerController => item instanceof RunnerController).map((item) => item.settled()));
     } while (this.pendingReconciles.size);
+  }
+
+  describeResource(pluginInstanceId: string, resource: Readonly<Resource<unknown, unknown>>): Promise<string> {
+    return this.printers.describe(pluginInstanceId, resource);
+  }
+
+  summarizeResource(pluginInstanceId: string, resource: Readonly<Resource<unknown, unknown>>): Promise<string> {
+    return this.printers.summarize(pluginInstanceId, resource);
   }
 
   resourceClient(pluginInstanceId: string) {
@@ -663,6 +674,13 @@ export class Manager {
       },
       dataDirs,
       {
+        registerPrinter: (printer) => {
+          const release = this.resourceRegistry.register(instance.pluginId, printer.resourceType);
+          try {
+            const unregister = this.printers.register(instance.pluginInstanceId, printer);
+            return () => { unregister(); release(); };
+          } catch (error) { release(); throw error; }
+        },
         registerCommand: (command) =>
           this.commandRegistry.register(instance, command),
         registerMention: (mention) =>
@@ -1098,7 +1116,7 @@ export class Manager {
 
   private bindRunnerController(instance: PluginInstance, runner: PluginRunnerClient, definition: RemoteRegistration, resources: import("@compforge/aide-plugin").ResourceClient): () => void {
     const builtin = [AIDE_TURN_RESOURCE_TYPE, INPUT_TYPE].some((type) => resourceTypeKey(type) === resourceTypeKey(definition.resourceType));
-    const release = builtin ? () => {} : this.resourceRegistry.registerController(instance.pluginId, definition.resourceType);
+    const release = builtin ? () => {} : this.resourceRegistry.register(instance.pluginId, definition.resourceType);
     const store = new PluginResourceStore({ session: this.instances.session, pluginInstanceId: instance.pluginInstanceId });
     const scope: ReconcileScope = { aideSessionId: instance.aideSessionId, pluginInstanceId: instance.pluginInstanceId, namespace: "v1",
       resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, resourceOwner: builtin ? "aide" : "plugin" };
@@ -1145,7 +1163,7 @@ export class Manager {
         pluginController,
       );
     }
-    const releaseKind = this.resourceRegistry.registerController(
+    const releaseKind = this.resourceRegistry.register(
       instance.pluginId,
       pluginController.resourceType,
     );

@@ -62,6 +62,18 @@ export interface Resource<
   readonly status: TStatus;
 }
 
+/**
+ * @spec Describe and summarize a supplied snapshot synchronously, without I/O, model calls or mutations.
+ * @why Presentation is a Plugin capability; persisted Resources remain serializable facts.
+ * @link docs/plugin/README.md
+ * @case tests/resource-printer.test.ts
+ */
+export interface ResourcePrinter<TSpec = unknown, TStatus = unknown> {
+  readonly resourceType: ResourceType;
+  describe(resource: Readonly<Resource<TSpec, TStatus>>): string;
+  summarize(resource: Readonly<Resource<TSpec, TStatus>>): string;
+}
+
 /** Exact-match label selector. All entries must match the Resource. */
 export interface ResourceListOptions {
   /** Explicit Session selection; "*" lists active host Sessions. Omitted means current Session. */

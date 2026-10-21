@@ -1,6 +1,6 @@
 import type { ConnectorClient } from "./connectors/index.ts";
 import type { Controller } from "./reconcile.ts";
-import type { ResourceClient } from "./resource.ts";
+import type { ResourceClient, ResourcePrinter } from "./resource.ts";
 import type { CommandDefinition } from "./command.ts";
 import type { Hook, HookStage } from "./hook.ts";
 import type { Mention } from "./mention.ts";
@@ -86,6 +86,10 @@ export interface PluginControllerRegistry {
   register<TSpec, TStatus>(controller: Controller<TSpec, TStatus>): void;
 }
 
+export interface PluginPrinterRegistry {
+  register<TSpec, TStatus>(printer: ResourcePrinter<TSpec, TStatus>): void;
+}
+
 export interface PluginHookRegistry {
   register<S extends HookStage>(hook: Hook<S>): void;
 }
@@ -107,6 +111,7 @@ export interface PluginContext {
   readonly commands: PluginRegistry<CommandDefinition>;
   readonly mentions: PluginRegistry<Mention>;
   readonly controllers: PluginControllerRegistry;
+  readonly printers: PluginPrinterRegistry;
   readonly hooks: PluginHookRegistry;
   readonly lifecycle: PluginLifecycle;
 }

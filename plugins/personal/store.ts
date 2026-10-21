@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
+import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
 import type { ResourceClient, ResourceNamespace } from "@compforge/aide-plugin";
 import { WorkSchema, validateTrigger, type Message, type Work, type WorkInput, type WorkStatus, type Delivery } from "./model.ts";
 import { ConversationStore } from "./conversation/store.ts";

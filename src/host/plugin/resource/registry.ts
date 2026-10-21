@@ -1,6 +1,6 @@
 import type { ResourceType } from "@compforge/aide-plugin";
 
-import { resourceTypeKey } from "./resource.ts";
+import { resourceTypeKey } from "./type.ts";
 
 interface AideRegistration {
   readonly owner: "aide";
@@ -9,7 +9,7 @@ interface AideRegistration {
 interface PluginRegistration {
   readonly owner: "plugin";
   readonly pluginId: string;
-  controllers: number;
+  references: number;
   materialized: boolean;
 }
 
@@ -30,9 +30,9 @@ export class ResourceRegistry {
     return this.registrations.get(resourceTypeKey(type))?.owner === "aide";
   }
 
-  registerController(pluginId: string, type: ResourceType): () => void {
+  register(pluginId: string, type: ResourceType): () => void {
     const registration = this.pluginRegistration(pluginId, type);
-    registration.controllers += 1;
+    registration.references += 1;
     let active = true;
     return () => {
       if (!active) return;
@@ -44,8 +44,8 @@ export class ResourceRegistry {
       ) {
         return;
       }
-      current.controllers -= 1;
-      if (current.controllers === 0 && !current.materialized) {
+      current.references -= 1;
+      if (current.references === 0 && !current.materialized) {
         this.registrations.delete(resourceTypeKey(type));
       }
     };
@@ -81,7 +81,7 @@ export class ResourceRegistry {
     const registration: PluginRegistration = {
       owner: "plugin",
       pluginId,
-      controllers: 0,
+      references: 0,
       materialized: false,
     };
     this.registrations.set(key, registration);

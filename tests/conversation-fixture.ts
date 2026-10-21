@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { InputStore } from "../src/host/input/store.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource.ts";
-import { createResourceClient } from "../src/host/plugin/resource-client.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ConversationStore as PersonalConversations } from "../plugins/personal/conversation/store.ts";
 import type { InputSpec } from "@compforge/aide-plugin";
 import { initialConversationName } from "../plugins/personal/conversation/model.ts";

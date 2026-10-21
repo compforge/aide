@@ -12,7 +12,7 @@ import {
   type ControllerOptions,
   type ReconcileKey,
 } from "../src/host/plugin/controller.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 
 interface Spec {
   requirement: string;

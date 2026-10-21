@@ -4,8 +4,8 @@ import type { ControllerRegistration } from "../../../protocol/ipc.ts";
 import type { ReconcileKey, ReconcileScope } from "../../../protocol/reconcile.ts";
 import type { ExecutionScope } from "../../../protocol/verbs.ts";
 import type { PluginRunnerClient } from "./client.ts";
-import type { PluginResourceStore } from "../resource.ts";
-import type { ResourceClientChange } from "../resource-client.ts";
+import type { PluginResourceStore } from "../resource/store.ts";
+import type { ResourceClientChange } from "../resource/client.ts";
 import type { Verb } from "../verb.ts";
 
 interface Options {
