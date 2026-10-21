@@ -1,3 +1,4 @@
+import { SOURCES } from "../plugins/personal/source-definition.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -72,7 +73,9 @@ test("Direct and exact group mentions produce independent Inputs; self, bots, de
   await f.observe();
   assert.equal(f.inputs.list().length, 2);
   assert.deepEqual(f.inputs.list().map((input) => input.spec.observation!.kind).sort(), ["direct", "mention"]);
-  assert.ok(f.inputs.list().every((input) => input.spec.origin === "source" && !input.spec.sessionId));
+  assert.ok(f.inputs.list().every((input) => input.spec.originRef?.uid === f.resource().metadata.uid));
+  assert.ok(f.inputs.list().every((input) => input.spec.text.includes(String((input.spec.observation!.message as { content: string }).content))));
+  assert.ok(f.inputs.list().every((input) => input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id && !input.spec.sessionId));
   assert.ok(f.resource().status.scans!.every((scan) => scan.watermark === new Date(now).toISOString()));
   await f.observe(now + 60_000);
   assert.equal(f.inputs.list().length, 2, "Overlapping discovery and unchanged context remain silent");
@@ -236,7 +239,7 @@ test("Real Runner discovers IM through Connector IPC, routes an Input once, and 
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.session("inbox").conversations.ensure();
   await aide.setDefaultConversation("inbox", true);
-  await aide.receive({ sessionId: "inbox", conversationId: "inbox", id: "hello", text: "hello" });
+  await aide.receive({ channelId: "web", sessionId: "inbox", conversationId: "inbox", id: "hello", text: "hello" });
   await aide.start(); await aide.settled();
   const inputs = aide.session(MESSAGE_SESSION).conversations.inputStore;
   assert.equal(inputs.list(MESSAGE_SESSION).length, 1);

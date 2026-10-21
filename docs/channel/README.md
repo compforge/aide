@@ -9,7 +9,7 @@ Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、确定
 
 ## 输入、会话与回复
 
-Channel 提交用户消息时提供稳定 sessionId 与消息去重身份，不需要理解 Personal 的 Conversation。Lark 使用应用与聊天身份，Web 使用选中会话所属的 Session。Core 保存 Input，Personal 为该 Session 组织交流上下文；接收成功不代表模型已经回答或目标已经完成。
+Channel 提交用户消息时提供稳定 sessionId 与消息去重身份，不需要理解 Personal 的 Conversation。Lark 使用应用与聊天身份，Web 使用选中会话所属的 Session。Channel 通过绑定 Definition 的入口提交消息，Core 保存 Input 并返回持久化回执；Personal 为该 Session 组织交流上下文。输入直接投影为输入卡片，Message 只承载回复与通知；接收成功不代表模型已经回答或目标已经完成。
 
 Personal 决定输入进入哪个 Conversation、是否创建 Work。普通回答直接进入消息流，需要持续跟进时才操作 Task / Routine。同一 Session 的后续消息可以回答问题或补充已有工作。Web 的 Conversation 列表是 Personal 的业务视图，可以查看 Lark 或 Source 会话。
 

@@ -120,6 +120,8 @@ export type {
   ControllerSource,
   CronSource,
   Source,
+  SourceDefinition,
+  SourceInput,
   SourceContext,
   SourceSignal,
 } from "./source.ts";
@@ -172,7 +174,9 @@ export type {
   TurnSummaryToolCall,
 } from "./snapshot.ts";
 export { INPUT_TYPE } from "./input.ts";
-export type { InputSpec, InputStatus } from "./input.ts";
+export type { InputSpec, InputStatus, InputReceipt } from "./input.ts";
 export type * from "./connectors/index.ts";
 
 export type { ExecutionAssociation } from "./reconcile-context.ts";
+export { iconFor } from "./icon.ts";
+export { bindSourceInput } from "./source.ts";

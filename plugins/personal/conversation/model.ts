@@ -39,9 +39,3 @@ export interface ConversationRun {
 export function initialConversationName(text: string): string {
   return text.replace(/\s+/g, " ").trim().slice(0, 80);
 }
-
-/** A Channel Input has one stable user-message identity in each receiving Conversation. */
-export function inboundMessage(input: Resource<InputSpec, unknown>, conversationId: string): Message {
-  return { id: `user:${input.metadata.name}:${conversationId}`, conversationId, at: input.metadata.creationTimestamp,
-    role: "user", text: input.spec.text, workId: null };
-}

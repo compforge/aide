@@ -1,3 +1,4 @@
+import { parseResourceNamespace } from "../plugin/namespace.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -5,6 +6,8 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { INPUT_TYPE, type InputSpec, type InputStatus, type Resource } from "@compforge/aide-plugin";
 const Spec = z.object({ sessionId: z.string().min(1).max(200).optional(), origin: z.enum(["channel", "source"]),
+  originId: z.string().min(1),
+  originRef: z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform((value) => value === "aide-system" ? value : parseResourceNamespace(value)), name: z.string(), uid: z.string(), sessionId: z.string().optional() }).strict().optional(),
   text: z.string().min(1).max(32_000), timezone: z.string().optional(), replyTo: z.string().optional(),
   observation: z.record(z.string(), z.unknown()).optional() }).strict();
 const State = z.array(z.object({ id: z.string(), owner: z.string(), at: z.string(), revision: z.number(), spec: Spec,

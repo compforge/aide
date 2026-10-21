@@ -1,3 +1,6 @@
+import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
+import { SOURCES } from "../plugins/personal/source-definition.ts";
+import type { InputSpec, SourceDefinition } from "@compforge/aide-plugin";
 import { resolve } from "node:path";
 import type { Logger } from "pino";
 import type { ConnectorClient } from "@compforge/aide-plugin";
@@ -31,6 +34,16 @@ export interface AideOptions {
  * @link docs/kernel.md
  */
 export class Aide {
+  private readonly inputDefinitions = new Map<string, ChannelDefinition | SourceDefinition>([
+    ...Object.values(CHANNELS).map((definition) => [`channel:${definition.id}`, definition] as const),
+    ...Object.values(SOURCES).map((definition) => [`source:${definition.id}`, definition] as const),
+  ]);
+  inputDefinition(origin: Pick<InputSpec, "origin" | "originId">) {
+    const definition = this.inputDefinitions.get(`${origin.origin}:${origin.originId}`);
+    if (!definition) throw new Error(`Unknown input definition: ${origin.origin}:${origin.originId}`);
+    return definition;
+  }
+
   private readonly storage: SessionStore;
   private readonly defaultTarget: AideOptions["defaultTarget"];
   private readonly active = new Map<string, Personal>();
@@ -159,13 +172,14 @@ export class Aide {
 
   async receive(raw: unknown) {
     const input = IncomingSchema.parse(raw);
+    this.inputDefinition({ origin: "channel", originId: input.channelId });
     const scope = this.session(input.sessionId);
     await this.claimConversation(scope, input.sessionId);
     await this.start();
     return scope.receive(input);
   }
 
-  async event(input: Incoming & { name: string; conversationId?: string }): Promise<number> {
+  async event(input: Omit<Incoming, "channelId"> & { name: string; conversationId?: string }): Promise<number> {
     const scope = this.session(input.sessionId);
     await this.claimConversation(scope, input.sessionId);
     await this.start(); await scope.start();

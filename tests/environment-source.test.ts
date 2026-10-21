@@ -1,3 +1,4 @@
+import { SOURCES } from "../plugins/personal/source-definition.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -42,6 +43,9 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   current = snapshot("B");
   await assert.rejects(observeEnvironment({ logger, resources: { ...resources(), async patchStatus() { throw new Error("Crash"); } } }, resource(), connectors), /Crash/);
   assert.equal(conversations.list().length, 1);
+  assert.match(conversations.list()[0]!.spec.text, /dev \/ app.*Workload/);
+  assert.match(conversations.list()[0]!.spec.text, /Deployment api.*镜像 A → B/);
+  assert.equal(conversations.list()[0]!.spec.originRef!.uid, resource().metadata.uid);
   assert.equal(resource().status.baseline!.workloads[0]!.images[0]!.image, "A");
   const reopened = sessions.openSession(session.id);
   t.after(() => reopened.closeLogs());
@@ -57,6 +61,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   failure = true; const baseline = resource().status.baseline;
   await assert.rejects(observe(), /Forbidden/); assert.deepEqual(resource().status.baseline, baseline);
   failure = false; current = { ...snapshot("B"), workloads: [] }; await observe();
+  assert.ok(conversations.list().every((input) => input.spec.originId === SOURCES.environments.id));
   const event = conversations.list().at(-1)!.spec.observation!;
   assert.deepEqual((event.changes as { after?: unknown }[]).map((c) => c.after), [undefined]);
   assert.ok(conversations.list().every((input) => input.spec.sessionId === undefined));
@@ -96,7 +101,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await aide.start(); await aide.settled();
   assert.ok(reads >= 2); assert.equal(prompts.length, 0);
   const initialReads = reads;
-  await aide.receive({ sessionId: "other", conversationId: "other", id: "hello", text: "hello" }); await aide.settled();
+  await aide.receive({ channelId: "web", sessionId: "other", conversationId: "other", id: "hello", text: "hello" }); await aide.settled();
   assert.equal(reads, initialReads, "Opening another Session must not duplicate the observer");
   await aide.setDefaultConversation("other", true);
   current = snapshot("B");

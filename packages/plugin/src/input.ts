@@ -1,8 +1,16 @@
+import type { ResourceRef } from "./resource.ts";
+
+export interface InputReceipt { inputId: string; at: string }
+
 export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Input" } as const;
 export interface InputSpec {
   /** Known destination supplied by the producer; other related conversations may also consume this Input. */
   sessionId?: string;
   origin: "channel" | "source";
+  /** ChannelDefinition or SourceDefinition ID, selected by origin. */
+  originId: string;
+  /** Producing Source resource; provenance, never a routing destination. */
+  originRef?: ResourceRef;
   text: string;
   timezone?: string;
   replyTo?: string;

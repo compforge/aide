@@ -18,8 +18,7 @@ export async function seedInput(store: PersonalConversations, id: string, spec: 
   store.inputStore.submit(store.sessionId, id, input);
   const c = await store.ensure(conversationId);
   if (!c.spec.inputIds.includes(id)) {
-    const inbound = input.origin === "channel" ? { id: `inbound:${id}`, conversationId, at: new Date().toISOString(), role: "user" as const, text: input.text, workId: null } : undefined;
-    const messages = status.messages ?? (inbound ? [inbound] : []);
+    const messages = status.messages ?? [];
     const resources = createResourceClient(store.resources, (change) => store.changed(change));
     await resources.replace(c, { ...c.spec, name: c.spec.name || initialConversationName(input.text), inputIds: [...c.spec.inputIds, id] }, { ...c.status, processing: { ...c.status.processing, [id]: { ...status, messages } }, messages: [...c.status.messages, ...messages] });
   }

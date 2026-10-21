@@ -26,6 +26,17 @@
   #messages { flex: 1; overflow: auto; padding: 0 12px 24px 0; }
   .message { padding: 16px 18px; background: white; border: 1px solid #e1e6dc; border-radius: 12px; margin: 12px 0; }
   .message.user { background: #e8eee3; margin-left: 10%; }
+  .message.source { background: #f0f3f7; border-color: #d7dfe8; border-left: 3px solid #8194a9; }
+  .input-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; color: #5c6e80; font-size: 12px; }
+  .identity-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; vertical-align: middle; }
+  .identity-icon { display: block; width: 17px; height: 17px; flex: none; }
+  .input-heading .identity-badge { font-weight: 600; }
+  .input-time { color: #73808c; }
+  .input-status { margin-left: auto; font-size: 11px; color: #5b6e62; }
+  .input-evidence { margin-top: 12px; font-size: 12px; color: #5b6b78; }
+  .input-evidence > summary { cursor: pointer; }
+  .input-evidence pre { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: #e7ecf1; border-radius: 6px; }
+  .reply-envelope > summary .identity-badge { margin-left: 12px; color: #68776c; }
   .markdown { white-space: normal; overflow-wrap: anywhere; line-height: 1.65; }
   .message-body { margin-top: 8px; }
   .markdown > :first-child { margin-top: 0; } .markdown > :last-child { margin-bottom: 0; }

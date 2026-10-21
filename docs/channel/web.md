@@ -18,6 +18,10 @@ Web 是 Aide 的浏览器 Channel，提供会话导航、聊天、工作列表�
 
 展开选择按 Input 与区域保存在当前页面中；从进行区转入历史区、流式增量和重连都复用同一身份。默认缩略与用户展开分别控制，结束时不会打断正在阅读详情的用户。用户浏览历史时保留页面滚动位置。
 
+收到的 Input 与 Chief 的处理结果分别展示。Channel 与 Source 输入按来源分类显示稳定图标，并标注来源、接收时间与处理状态。环境变化优先展示环境、namespace 和 Workload 名称；Lark 展示私聊、群内 @ 或讨论进展及消息原文。Source 卡片可展开来源资源引用与完整 observation 数据；静默消费后仍保留输入卡片，标记“已查看 · 保持安静”。这些卡片直接投影已关联 Input，不保存为出站 Message。
+
+执行标题旁显示实际 Harness 的图标与名称（Chief、Pi、Codex、Claude Code、DSH）；标识读取 Ledger 的执行事实，刷新与历史重放保持一致。
+
 接收 Input 后显示排队或处理状态，完成后用正式 Message 替换正文增量。问题保留独立的 Core 身份与 pending / answered / cancelled 状态：待答问题默认完整显示在回答区，已回答或已取消的问题归入过程区，不拼入最终答案或预览。模型未提供思考内容时显示真实处理状态。当前覆盖 Chief 接话过程，Work 的后台执行通过事项卡片展示状态。
 
 ```text
@@ -76,11 +80,11 @@ curl -s http://127.0.0.1:7433/messages \
   -d '{"id":"msg-1","sessionId":"me","text":"读取当前项目 README，告诉我如何启动"}'
 
 curl -s 'http://127.0.0.1:7433/conversations'
-curl -s 'http://127.0.0.1:7433/messages?conversationId=me&role=all'
+curl -s 'http://127.0.0.1:7433/messages?conversationId=me'
 curl -s 'http://127.0.0.1:7433/work?conversationId=me'
 ```
 
-GET `/messages` 默认返回 Aide 消息；`role=all` 包含用户输入，`after=<message-id>` 可增量读取。重投同一入站消息使用相同 id；用户回答或核对后的业务重试使用新的 id。接收回执不表示执行完成。
+POST `/messages` 返回 `{ inputId, at }`，标识已持久化的输入。GET `/messages` 只返回 Aide 回复与通知，`after=<message-id>` 使用输出消息的 ID 增量读取；输入和处理状态通过会话 SSE 投影展示。重投同一入站消息使用相同 id；用户回答或核对后的业务重试使用新的 id。接收回执不表示执行完成。
 
 已配置事件触发 Routine 后，可提交对应事件：
 
@@ -97,3 +101,9 @@ curl -s http://127.0.0.1:7433/events \
 会话列表的「主动回顾」开关修改对应 Conversation 的 trigger，默认关闭、间隔 3600 秒。同一个 Session 中的不同 Conversation 独立控制。尚未持久保存的空会话没有开关。页面不提供间隔编辑。
 
 `GET /conversations` 返回 `sessionId` 和 `trigger`；`POST /conversations/trigger` 接收 `{ conversationId, enabled }`，校验会话存在后持久化，拒绝额外的间隔字段。关闭不会取消已有输入或委托。调度和判断见 [Personal](../plugin/personal.md#conversation-定时回顾)。
+
+Channel 与输入 Source 分别用 `ChannelDefinition`、`SourceDefinition` 声明身份、名称和图标；Input 保存 `origin` 与 `originId` 引用。SourceDefinition 表达输入来源，不承担框架资源发现 Source 的生命周期。Harness 的图标属于现有 HarnessDefinition。图标为 24 × 24 坐标内的 SVG path 数据，浏览器只设置 path 属性，不执行标记或请求远端图片。`originId` 为必填；来源缺失的输入直接拒绝，不迁移旧数据或猜测来源。图标由共享固定列表按 `channel:<id>`、`source:<id>`、`harness:<id>` 做稳定哈希，列表顺序、长度与哈希算法保持不变；名称用于区分可能的图标碰撞。
+
+Channel 与 Source 都从 Conversation 关联的 Input 生成输入卡片，不创建或反查用户 Message 副本。Source 在提交时生成可读的事实正文，原始证据留在 observation；重要性判断、授权与处理策略属于 Chief。View 只消费事实正文、状态和应用装配的定义目录，不解析各 Source 的业务数据。
+
+接入时通过绑定入口确定 Definition：Channel 的入口补齐来源分类；Source 的入口同时记录产生观察的资源引用 `originRef`。定义分类决定稳定图标，资源实例保存观察范围、水位与错误；目标 sessionId 仅用于路由。Chief 的近期上下文由已处理的 Input 与输出 Message 合并投影，不依赖用户消息副本。

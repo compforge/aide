@@ -1,7 +1,9 @@
+import { bindSourceInput } from "@compforge/aide-plugin";
+import { SOURCES } from "./source-definition.ts";
 import type { PluginContext, Resource } from "@compforge/aide-plugin";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { type Watch } from "./source-config.ts";
-import { INPUT_TYPE, digest, type InputSpec, type InputStatus } from "./chief-model.ts";
+import { INPUT_TYPE, digest } from "./chief-model.ts";
 
 export const SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "RequirementSource" } as const;
 interface SourceStatus { seen?: Record<string, string>; lastObservedAt?: string; error?: string | null }
@@ -9,6 +11,7 @@ interface SourceStatus { seen?: Record<string, string>; lastObservedAt?: string;
 /** Polls are scheduled by the runtime. Persist the inbox before advancing its discovery watermark. */
 export async function observeRequirements(context: Pick<PluginContext, "resources" | "logger">, resource: Resource<Watch, SourceStatus>, connectors: ConnectorClient): Promise<void> {
   const summaries = await connectors.requirements.list(resource.spec.source, { assigneeUserKeys: resource.spec.userKeys });
+  const submit = bindSourceInput(SOURCES.requirements, resource, context.resources);
   const seen = { ...resource.status.seen };
   let discovered = 0;
   for (const requirement of summaries) {
@@ -18,11 +21,11 @@ export async function observeRequirements(context: Pick<PluginContext, "resource
     if (requirement.state === "completed" || requirement.state === "closed") { seen[identity] = fingerprint; continue; }
     const name = digest([resource.metadata.uid, identity, fingerprint]);
     if (!await context.resources.get({ ...INPUT_TYPE, namespace: "aide-system", name })) {
-      await context.resources.create<InputSpec, InputStatus>(INPUT_TYPE, { name, spec: {
-        sessionId: resource.spec.sessionId, origin: "source",
-        text: "发现分配给用户的需求或其变化。读取详情与相关工作，判断是否需要通知、询问或推进已有委托。",
+      await submit(name, {
+        sessionId: resource.spec.sessionId,
+        text: `需求 ${requirement.id}：${requirement.title}\n状态：${requirement.state}`,
         observation: { watch: resource.spec, requirement },
-      } });
+      });
       discovered++;
     }
     seen[identity] = fingerprint;

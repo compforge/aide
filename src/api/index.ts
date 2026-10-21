@@ -1,3 +1,4 @@
+import { CHANNELS, bindChannelInput } from "../channel/definition.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -9,7 +10,7 @@ import { IncomingSchema } from "../channel/message.ts";
 import { conversationList } from "../channel/view.ts";
 import { streamConversation } from "./stream.ts";
 
-const EventSchema = IncomingSchema.omit({ text: true }).extend({
+const EventSchema = IncomingSchema.omit({ text: true, channelId: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
 
@@ -51,6 +52,7 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 
 /** Local channel bridge: accept messages/events and let adapters poll the durable outgoing log. */
 export function httpChannel(aide: WebService, log: Logger) {
+  const receive = bindChannelInput(CHANNELS.web, (input) => aide.receive(input));
   const files = [
     ["/", "index.html", "text/html"],
     ["/app.js", "app.js", "text/javascript"],
@@ -126,8 +128,8 @@ export function httpChannel(aide: WebService, log: Logger) {
         log.info({ messageId, kind: result.kind, completed: receipt.result }, "Channel interaction response");
         json(response, receipt.result ? 200 : 409, { completed: receipt.result });
       } else if (request.method === "POST" && url.pathname === "/messages") {
-        const input = IncomingSchema.parse(await body(request));
-        json(response, 200, await aide.receive(input));
+        const input = IncomingSchema.omit({ channelId: true }).parse(await body(request));
+        json(response, 200, await receive(input));
       } else if (request.method === "POST" && url.pathname === "/conversations/default") {
         const { conversationId, enabled } = ConversationDefaultSchema.parse(await body(request));
         const resource = aide.findConversation(conversationId)?.conversations.resource(conversationId);
@@ -170,8 +172,7 @@ export function httpChannel(aide: WebService, log: Logger) {
         if (url.pathname === "/work") {
           json(response, 200, aide.works().filter((work) => work.conversationId === conversationId));
         } else {
-          const messages = aide.messages().filter((item) => item.conversationId === conversationId
-            && (url.searchParams.get("role") === "all" || item.role === "aide"));
+          const messages = aide.messages().filter((item) => item.conversationId === conversationId);
           const after = url.searchParams.get("after");
           const index = after ? messages.findIndex((item) => item.id === after) : -1;
           if (after && index < 0) { json(response, 400, { error: "Unknown message cursor" }); return; }

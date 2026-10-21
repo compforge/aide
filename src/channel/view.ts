@@ -1,14 +1,22 @@
+import { iconFor } from "@compforge/aide-plugin";
+import { harnessIdentityFor } from "../host/harness/ids.ts";
 import { conversationTrigger, type ConversationTrigger } from "../../plugins/personal/conversation/trigger.ts";
 import type { ChannelService } from "./service.ts";
 import { PROTOCOL_VERSION, type BaseBlock, type ModelMeta, type UIModel } from "@compforge/agentue/ui";
 
 export interface ConversationBlock extends BaseBlock {
-  type: "message" | "question" | "execution" | "thought" | "text" | "tool";
+  type: "input" | "message" | "question" | "execution" | "thought" | "text" | "tool";
   content: string;
   role?: "user" | "aide";
   at?: string;
   status?: string;
   detail?: string;
+  inputId?: string;
+  origin?: "channel" | "source";
+  originId?: string;
+  label?: string;
+  icon?: string;
+  harness?: string;
 }
 interface ConversationMeta extends ModelMeta {
   conversation_id: string;
@@ -19,6 +27,9 @@ export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
 /**
  * @spec Live and historical progress share Ledger-backed Turn identity and use the explicit execution conversation association.
  * @spec AgentUE group_id binds executions and official replies to their persisted Chief activation.
+ * @spec Every Channel or Source Input attached to this Conversation stays visible, including queued and quietly consumed observations.
+ * @spec Input cards and Harness identity project persisted facts without creating outbound Messages.
+ * @case tests/web-progress.test.ts
  * @spec Questions retain their Core identity and state; they never become final-answer text.
  * @why Completion folds execution details; it never deletes them or creates extra delivered Messages.
  * @link docs/channel/web.md
@@ -62,9 +73,18 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   const executions = new Map<string, { header: ConversationBlock; blocks: ConversationBlock[] }>();
   const roots: ConversationBlock[] = aide.messages().filter((message) => message.conversationId === conversationId)
     .map((message) => ({ id: `message:${message.id}`, type: questionStatuses.has(message.id) ? "question" : "message", role: message.role, at: message.at, content: message.text,
-      ...(message.role === "aide" && messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id),
-        status: runPhases.get(messageRuns.get(message.id)!) } : {}),
+      ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
       ...(questionStatuses.has(message.id) ? { status: questionStatuses.get(message.id) } : {}) }));
+  for (const run of runs) {
+    if (!run.input) continue;
+    const input = run.input, definition = aide.inputDefinition(input.spec);
+    roots.push({ id: `input:${input.metadata.name}`, type: "input", origin: input.spec.origin, originId: definition.id,
+      inputId: input.metadata.name, label: definition.label, icon: definition.icon,
+      ...(input.spec.origin === "channel" ? { role: "user" as const } : {}),
+      at: input.metadata.creationTimestamp, content: input.spec.text,
+      status: run.status.quietReason ? "quiet" : run.status.phase ?? "queued",
+      ...(input.spec.observation ? { detail: JSON.stringify({ originRef: input.spec.originRef, observation: input.spec.observation }, null, 2) } : {}) });
+  }
   const append = (turnId: string, block: ConversationBlock) => {
     const input = turns.get(turnId);
     if (!input) return;
@@ -73,8 +93,12 @@ export function conversationView(aide: ChannelService, conversationId: string): 
       const summary = summaries.get(turnId);
       const live = state.activeTurns.has(turnId);
       const at = summary?.startedAt ?? state.messages.get(input.messageId)?.createdAt;
+      const harness = summary?.harness ?? input.harness;
+      if (!harness) throw new Error(`Turn ${turnId} is missing its Harness identity`);
+      const identity = harnessIdentityFor(harness);
       execution = { header: { id: `execution:${turnId}`, type: "execution", content: "过程", at, group_id: turnRuns.get(turnId),
-        status: live ? "running" : summary?.stopReason === "end_turn" ? "completed" : "interrupted" }, blocks: [] };
+        status: live ? "running" : summary?.stopReason === "end_turn" ? "completed" : "interrupted",
+        harness, label: identity?.label ?? harness, icon: identity?.icon ?? iconFor(`harness:${harness}`) }, blocks: [] };
       executions.set(turnId, execution); roots.push(execution.header);
     }
     execution.blocks.push({ ...block, parent_id: execution.header.id });

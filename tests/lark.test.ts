@@ -180,7 +180,7 @@ test("Lark accepts nullable permission-restricted user IDs and still requires th
   const channel = new LarkChannel(home, "cli_null_ids", {
     receive: async (input) => {
       received.push(input);
-      return { ...input, conversationId: input.sessionId, role: "user", at: new Date().toISOString(), workId: null };
+      return { inputId: input.id, at: new Date().toISOString() };
     }, messages: () => [],
   }, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
