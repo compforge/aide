@@ -140,7 +140,8 @@
 .persons-page { grid-template-columns: 260px minmax(0, 1fr); }
 .person-detail { padding: 24px 36px; overflow: auto; }
 .person-detail h2 { margin-top: 0; font-size: 20px; }
-#person-editor { max-width: 860px; }
+#person-editor { display: block; max-width: 860px; }
+#person-editor[hidden] { display: none; }
 #person-editor label { display: block; font-size: 14px; margin: 16px 0; }
 #person-editor input, #person-editor textarea, #person-search { width: 100%; padding: 10px; border: 1px solid #c9d5ca; border-radius: 8px; background: white; color: inherit; font: inherit; }
 #person-editor textarea { display: block; margin-top: 8px; resize: vertical; min-height: 100px; }
