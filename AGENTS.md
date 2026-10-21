@@ -93,6 +93,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Harness 原生 Session 由各 Harness 管理并使用其默认目录；Aide 按 Session × Lane × Target 保存原生身份和 Adapter 的 resumeState。
 - 业务进展以资源和执行事实为准，记忆辅助理解与判断。记忆由 Harness 组合开源实现；Chief 内置 pi-hermes-memory，Personal 不感知记忆能力，Core 不新增记忆存储或协议。扩展生命周期由 PiAdapter 驱动，原生配置与共享范围见 Chief 文档。
 - `pi` 提供通用 Agent，`chief` 加入 Personal 工具，两者复用 PiAdapter。通用 Pi 不依赖 Personal，Chief 的 WorkService 由宿主绑定范围；默认 Work 执行由根级 `defaultHarness` 选择，缺省为通用 Pi。
+- Lark 用户消息 Source 按账号、用户和聊天生成独立观察话题，与机器人 Channel 会话分离，避免观察内容进入原群上下文和自动外发。
 - Source 先提交持久 Input 再推进观察水位。Input 独立保存，Conversation 内的消费状态、业务回复与去重记录原子提交，不能用投递失败重新触发业务执行。
 - Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 保存执行事实。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
 - ResourcePrinter 通过插件激活注册，describe / summarize 同步将资源快照转为详情 / 概览，不执行 I/O、模型调用或资源修改。调用方通过 describe / summarize 获取文本，Core 内置 InputPrinter；其它 Printer 按插件实例与 GVK 选择；默认展示为 JSON / kind/name，注册回滚与撤销跟随 Binding 生命周期。具体契约见 docs/plugin/README.md。

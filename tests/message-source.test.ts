@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import type { ChatMessage, MessagePage, MessageSearchQuery } from "@compforge/aide-plugin";
+import type { ChatMessage, MessagePage, MessageSearchQuery, PluginLogger } from "@compforge/aide-plugin";
 import { SessionStore } from "../src/host/store/store.ts";
 import { InputStore } from "../src/host/input/store.ts";
 import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
@@ -43,6 +43,8 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
   let contextError = false;
   let reads = 0;
   const searches: MessageSearchQuery[] = [];
+  const warnings: unknown[] = [];
+  const sourceLogger: PluginLogger = { ...logger, warn(message, detail) { warnings.push({ message, ...detail }); } };
   const connectors = { ...emptyConnectors, messages: {
     async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
     async search(query: MessageSearchQuery) {
@@ -53,7 +55,7 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
     async thread() { reads++; if (contextError) throw new Error("Permission denied"); return page(history); },
   } };
   const resource = () => store.get<MessageWatch, MessageSourceStatus>(MESSAGE_SOURCE_TYPE, "messages");
-  return { root, inputs, connectors, resource, searches, get resources() { return resources; }, get reads() { return reads; },
+  return { root, inputs, connectors, resource, searches, warnings, get resources() { return resources; }, get reads() { return reads; },
     incoming(fn: typeof incoming) { incoming = fn; }, history(rows: ChatMessage[]) { history = rows; },
     failContext(value: boolean) { contextError = value; },
     async restart() {
@@ -61,7 +63,7 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
       store = new PluginResourceStore({ session: reopened, pluginInstanceId: "personal" });
       resources = createResourceClient(store, undefined, undefined, new AideResourceProvider({ session: reopened, inputs }));
     },
-    observe(at = now) { return observeMessages({ logger, resources }, resource(), connectors, at); },
+    observe(at = now) { return observeMessages({ logger: sourceLogger, resources }, resource(), connectors, at); },
   };
 }
 
@@ -76,7 +78,7 @@ test("Direct and exact group mentions produce independent Inputs; self, bots, de
   assert.deepEqual(f.inputs.list().map((input) => input.spec.observation!.kind).sort(), ["direct", "mention"]);
   assert.ok(f.inputs.list().every((input) => input.spec.originRef?.uid === f.resource().metadata.uid));
   assert.ok(f.inputs.list().every((input) => input.spec.text.includes(String((input.spec.observation!.message as { content: string }).content))));
-  assert.ok(f.inputs.list().every((input) => input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id && input.spec.sessionId === "lark:cli_app:oc_chat"));
+  assert.ok(f.inputs.list().every((input) => input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id && input.spec.sessionId === "source:lark:cli_app:ou_me:oc_chat"));
   assert.ok(f.resource().status.scans!.every((scan) => scan.watermark === new Date(now).toISOString()));
   await f.observe(now + 60_000);
   assert.equal(f.inputs.list().length, 2, "Overlapping discovery and unchanged context remain silent");
@@ -91,13 +93,48 @@ test("Missing context submits the original message in the first poll and remains
   assert.equal(f.inputs.list().length, 1);
   const input = f.inputs.list()[0]!;
   assert.equal(input.spec.text, "Lark 群内 @：om_at");
-  assert.equal(input.spec.sessionId, "lark:cli_app:oc_chat");
-  assert.deepEqual(input.spec.observation!.context, {
-    messages: [], observedThrough: new Date(now).toISOString(), truncated: true, error: "Permission denied",
-  });
+  assert.equal(input.spec.sessionId, "source:lark:cli_app:ou_me:oc_chat");
+  assert.equal(Object.hasOwn(input.spec.observation!, "context"), false);
+  assert.doesNotMatch(JSON.stringify(input.spec), /Permission denied/);
+  assert.match(JSON.stringify(f.warnings), /Permission denied/);
+  assert.match(JSON.stringify(f.warnings), /om_at/);
   assert.equal(f.resource().status.scans!.find((scan) => scan.kind === "mention")!.watermark, new Date(now).toISOString());
   await f.restart(); await f.observe(now + 60_000);
   assert.equal(f.inputs.list().length, 1);
+});
+
+test("Empty context is omitted; retrieved messages are included without read errors", async (t) => {
+  const f = fixture(t, watch(), "direct");
+  f.incoming(async () => page([message("om_empty", { mentions: [] })]));
+  await f.observe();
+  assert.equal(Object.hasOwn(f.inputs.list()[0]!.spec.observation!, "context"), false);
+  f.incoming(async () => page([message("om_with_context", { mentions: [] })]));
+  f.history([message("om_before", { content: "earlier discussion" })]);
+  await f.observe(now + 60_000);
+  const input = f.inputs.list().find((input) => input.spec.observation!.originalMessageId === "om_with_context")!;
+  assert.deepEqual(input.spec.observation!.context, {
+    messages: [message("om_before", { content: "earlier discussion" })],
+    observedThrough: new Date(now + 60_000).toISOString(), truncated: false,
+  });
+  assert.equal(f.warnings.length, 0);
+});
+
+test("An unavailable thread root is logged without discarding retrieved replies or embedding the error", async (t) => {
+  const f = fixture(t, watch(), "mention");
+  const anchor = message("om_at", { threadId: "omt_thread", threadPosition: "2" });
+  const reply = message("om_reply", { threadId: "omt_thread", threadPosition: "3" });
+  f.incoming(async () => page([anchor]));
+  f.failContext(true);
+  f.connectors.messages.thread = async () => page([anchor, reply]);
+  await f.observe();
+  assert.equal(f.inputs.list().length, 1);
+  const context = f.inputs.list()[0]!.spec.observation!.context;
+  assert.deepEqual(context, {
+    messages: [reply], observedThrough: new Date(now).toISOString(), truncated: true, missingRoot: true,
+  });
+  assert.doesNotMatch(JSON.stringify(context), /Permission denied/);
+  assert.match(JSON.stringify(f.warnings), /Permission denied/);
+  assert.match(JSON.stringify(f.warnings), /omt_thread/);
 });
 
 test("Missing context never advances the watermark before its original Input is durable", async (t) => {
@@ -115,7 +152,7 @@ test("Missing context never advances the watermark before its original Input is 
   await f.restart(); await f.observe(now + 60_000);
   assert.equal(f.inputs.list().length, 1);
   assert.equal(f.reads, reads, "Recovery submits the saved plan without reacquiring context");
-  assert.match(JSON.stringify(f.inputs.list()[0]!.spec.observation!.context), /Permission denied/);
+  assert.equal(Object.hasOwn(f.inputs.list()[0]!.spec.observation!, "context"), false);
   assert.equal(f.resource().status.scans!.find((scan) => scan.kind === "direct")!.watermark, new Date(now).toISOString());
 });
 
@@ -168,7 +205,7 @@ test("Only associated replies trigger follow-up; duplicate polls stay silent and
   assert.equal(f.inputs.list().length, 2);
   const update = f.inputs.list().find((input) => input.spec.observation!.kind === "discussion")!;
   assert.equal(update.spec.observation!.originalMessageId, "om_at");
-  assert.ok(f.inputs.list().every((input) => input.spec.sessionId === "lark:cli_app:oc_chat"));
+  assert.ok(f.inputs.list().every((input) => input.spec.sessionId === "source:lark:cli_app:ou_me:oc_chat"));
   assert.doesNotMatch(JSON.stringify(update.spec.observation!.context), /om_unrelated/);
   await f.observe(now + 120_000);
   assert.equal(f.inputs.list().length, 2); assert.equal(f.resource().status.pending!.length, 0);
@@ -176,7 +213,7 @@ test("Only associated replies trigger follow-up; duplicate polls stay silent and
   assert.equal(f.inputs.list().length, 2);
 });
 
-test("Failed direct search does not starve mentions, and an expired follow-up reports its permission gap once", async (t) => {
+test("Failed direct search does not starve mentions, and an expired follow-up logs failure without another Input", async (t) => {
   const f = fixture(t, watch({ followupMs: 60_000 }));
   f.incoming(async (query) => {
     if (query.chatType === "p2p") throw new Error("Direct search unavailable");
@@ -186,11 +223,12 @@ test("Failed direct search does not starve mentions, and an expired follow-up re
   assert.equal(f.inputs.list().length, 1);
   f.failContext(true);
   await assert.rejects(f.observe(now + 60_000), /Direct search unavailable/);
-  assert.equal(f.inputs.list().length, 2);
-  assert.match(JSON.stringify(f.inputs.list().at(-1)!.spec), /Permission denied/);
+  assert.equal(f.inputs.list().length, 1);
+  assert.doesNotMatch(JSON.stringify(f.inputs.list()), /Permission denied/);
+  assert.match(JSON.stringify(f.warnings), /Permission denied/);
   assert.equal(f.resource().status.pending!.length, 0);
   await assert.rejects(f.observe(now + 120_000), /Direct search unavailable/);
-  assert.equal(f.inputs.list().length, 2);
+  assert.equal(f.inputs.list().length, 1);
 });
 
 test("Follow-up pagination resumes across restart and a terminal delivery survives a crash without repeated Inputs", async (t) => {
@@ -223,7 +261,7 @@ test("Thread context uses explicit thread reads, bounds text and reports incompl
   let historyCalls = 0;
   const messages = { ...emptyConnectors.messages, async history() { historyCalls++; return page([]); },
     async thread() { return page([message("om_reply", { content: "x".repeat(2000), threadId: "omt_thread" })], { hasMore: true, nextToken: "next" }); } };
-  const context = await readMessageContext(messages, message("om_at", { threadId: "omt_thread", threadPosition: "-1" }), watch({ maxContextChars: 1000 }), now);
+  const context = await readMessageContext(messages, message("om_at", { threadId: "omt_thread", threadPosition: "-1" }), watch({ maxContextChars: 1000 }), now, logger);
   assert.equal(historyCalls, 0); assert.equal(context.messages.length, 1);
   assert.equal(context.messages[0]!.content.length, 1000); assert.equal(context.truncated, true);
 });
@@ -233,9 +271,9 @@ test("Thread root is loaded from nearby group history; unavailable roots remain 
   const root = message("om_root", { threadId: "omt_thread", threadPosition: "-1" });
   const connector = { ...emptyConnectors.messages, async thread() { return page([anchor]); },
     async history() { return page([root]); } };
-  const found = await readMessageContext(connector, anchor, watch(), now);
+  const found = await readMessageContext(connector, anchor, watch(), now, logger);
   assert.equal(found.missingRoot, false); assert.equal(found.messages[0]!.id, root.id);
-  const missing = await readMessageContext({ ...connector, async history() { return page([]); } }, anchor, watch(), now);
+  const missing = await readMessageContext({ ...connector, async history() { return page([]); } }, anchor, watch(), now, logger);
   assert.equal(missing.missingRoot, true); assert.equal(missing.truncated, true);
 });
 
@@ -246,15 +284,18 @@ test("Message observation requires an account and has no configurable kinds", ()
   assert.throws(() => MessageWatchSchema.parse({ contextAttempts: 2 }));
 });
 
-test("Real Runner shares Lark chat topics across Source and Channel, copies to default and restores without duplication", { timeout: 20_000 }, async (t) => {
+/** @case Registering a bot chat never makes user-observed Inputs eligible for its durable outbox. */
+test("Real Runner keeps observed chat topics private while Channel delivery survives restart", { timeout: 20_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me" } },
     plugins: { personal: { sources: { lark: {} } } } }));
   let searches = 0;
   const prompts: string[] = [];
-  const options = { ...fakeOptions({ chief: async () => "同事有新消息",
-    async execute() { throw new Error("Unexpected work"); } }, root, prompts), config: loadConfig(configFile),
+  const options = { ...fakeOptions({ chief: async (prompt) => {
+    const activation = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
+    return activation.description.includes("Origin: source/") ? "source-private-reply" : "channel-reply";
+  }, async execute() { throw new Error("Unexpected work"); } }, root, prompts), config: loadConfig(configFile),
     connectors: { ...emptyConnectors, messages: {
       async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
       async search(query: MessageSearchQuery) {
@@ -265,56 +306,69 @@ test("Real Runner shares Lark chat topics across Source and Channel, copies to d
       async history() { return page([]); }, async thread() { return page([]); },
     } } };
   let aide = new Aide(root, options, pino({ level: "silent" }));
-  t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
+  const sent: Array<{ chatId: string; text: string }> = [];
+  const channelFor = () => new LarkChannel(root, "cli_app", aide, {
+    botIdentity: { openId: "ou_bot", name: "Aide" },
+    async start() {}, close() {}, async send(chatId, text) { sent.push({ chatId, text }); },
+  }, pino({ level: "silent" }));
+  let channel = channelFor();
+  t.after(async () => { await channel.close(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.session("inbox").conversations.ensure();
   await aide.setDefaultConversation("inbox", true);
+  // Persist a registered bot chat before observing user messages, but defer processing its request.
+  await channel.receive({ sender: { sender_type: "user" }, message: {
+    message_id: "om_channel", chat_id: "oc_group", chat_type: "group", message_type: "text",
+    content: JSON.stringify({ text: "@_user_1 channel request" }),
+    mentions: [{ key: "@_user_1", id: { open_id: "ou_bot" } }],
+  } });
   await aide.receive({ channelId: "web", sessionId: "inbox", conversationId: "inbox", id: "hello", text: "hello" });
   await aide.start(); await aide.settled();
   const inputs = aide.session(MESSAGE_SESSION).conversations.inputStore;
   assert.equal(inputs.list(MESSAGE_SESSION).length, 3);
+  assert.ok(aide.messages().some((reply) => reply.text === "source-private-reply"), "The Source must produce a reply to exercise delivery exclusion");
+  await channel.deliver();
+  assert.deepEqual(sent, [], "Observing a user mention must not send Source replies to the registered bot chat");
   const observed = inputs.list(MESSAGE_SESSION)[0]!;
-  assert.equal(observed.spec.observation!.originalInputId, observed.metadata.name, "Initial IM evidence references itself, not an earlier routing dependency");
+  assert.equal(observed.spec.observation!.originalInputId, observed.metadata.name);
   assert.equal(observed.status.routing?.phase, "done");
   assert.ok(prompts.some((prompt) => prompt.includes("om_dm")));
   for (const chatId of ["oc_chat", "oc_group"]) {
-    const sessionId = `lark:cli_app:${chatId}`;
+    const sessionId = `source:lark:cli_app:ou_me:${chatId}`;
     const store = aide.session(sessionId).conversations;
     const expected = inputs.list(MESSAGE_SESSION).filter((input) => input.spec.sessionId === sessionId).map((input) => input.metadata.name).sort();
-    assert.equal(store.list().length, 1, "Messages from the same chat reuse one Conversation");
+    assert.equal(store.list().length, 1, "Messages from the same observed chat reuse one Conversation");
     assert.deepEqual([...store.get(sessionId)!.inputIds].sort(), expected);
     for (const id of expected) assert.ok(aide.session("inbox").conversations.get("inbox")!.inputIds.includes(id));
   }
-  assert.equal(aide.session(MESSAGE_SESSION).conversations.list().length, 0, "Observation scope does not become the chat topic");
+  assert.equal(aide.session(MESSAGE_SESSION).conversations.list().length, 0);
+  const sourceGroupId = "source:lark:cli_app:ou_me:oc_group";
+  const sourceGroupUid = aide.session(sourceGroupId).conversations.resource(sourceGroupId)!.metadata.uid;
   const groupId = "lark:cli_app:oc_group";
-  const groupUid = aide.session(groupId).conversations.resource(groupId)!.metadata.uid;
-  const channel = new LarkChannel(root, "cli_app", aide, {
-    botIdentity: { openId: "ou_bot", name: "Aide" },
-    async start() {}, close() {}, async send() { throw new Error("No outbound traffic expected"); },
-  }, pino({ level: "silent" }));
-  try {
-    await channel.receive({ sender: { sender_type: "user" }, message: {
-      message_id: "om_channel", chat_id: "oc_group", chat_type: "group", message_type: "text",
-      content: JSON.stringify({ text: "@_user_1 channel request" }),
-      mentions: [{ key: "@_user_1", id: { open_id: "ou_bot" } }],
-    } });
-    await channel.dispatch(); await aide.settled();
-    const store = aide.session(groupId).conversations;
-    assert.equal(store.list().length, 1);
-    assert.equal(store.resource(groupId)!.metadata.uid, groupUid);
-    assert.equal(store.get(groupId)!.inputIds.length, 3);
-    const channelInput = store.inputs(groupId).find((input) => input.spec.origin === "channel")!;
-    assert.ok(channelInput);
-    assert.equal(channelInput.spec.sessionId, groupId);
-    assert.ok(aide.session("inbox").conversations.get("inbox")!.inputIds.includes(channelInput.metadata.name));
-  } finally { await channel.close(); }
-
+  await channel.dispatch(); await aide.settled(); await channel.deliver();
+  assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }]);
+  const store = aide.session(groupId).conversations;
+  assert.equal(store.list().length, 1);
+  assert.equal(store.get(groupId)!.inputIds.length, 1);
+  assert.equal(aide.session(sourceGroupId).conversations.get(sourceGroupId)!.inputIds.length, 2);
+  const channelInput = store.inputs(groupId)[0]!;
+  assert.equal(channelInput.spec.origin, "channel");
+  assert.equal(channelInput.spec.sessionId, groupId);
+  assert.ok(aide.session("inbox").conversations.get("inbox")!.inputIds.includes(channelInput.metadata.name));
+  const channelPrompt = prompts.find((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).conversationId === groupId)!;
+  assert.ok(channelPrompt);
+  assert.doesNotMatch(channelPrompt, /om_at|source-private-reply/, "User observation history must not enter the group's bot prompt");
+  const groupUid = store.resource(groupId)!.metadata.uid;
   const previous = searches;
   aide.session("another"); await aide.settled();
   assert.equal(searches, previous);
-  await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
-  await aide.start(); await aide.settled();
+  await channel.close(); await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
+  channel = channelFor();
+  await aide.start(); await aide.settled(); await channel.dispatch(); await channel.deliver();
+  assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }], "Restart must neither leak historical Source replies nor duplicate delivered Channel replies");
   assert.equal(aide.session(MESSAGE_SESSION).conversations.inputStore.list(MESSAGE_SESSION).length, 3);
   assert.equal(aide.session(groupId).conversations.resource(groupId)!.metadata.uid, groupUid);
-  assert.equal(aide.session(groupId).conversations.get(groupId)!.inputIds.length, 3);
+  assert.equal(aide.session(groupId).conversations.get(groupId)!.inputIds.length, 1);
+  assert.equal(aide.session(sourceGroupId).conversations.resource(sourceGroupId)!.metadata.uid, sourceGroupUid);
+  assert.equal(aide.session(sourceGroupId).conversations.get(sourceGroupId)!.inputIds.length, 2);
   assert.equal(aide.works().length, 0);
 });

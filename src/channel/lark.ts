@@ -35,7 +35,7 @@ type State = z.infer<typeof StateSchema>;
 
 /**
  * @spec Persist inbound messages before acknowledging Lark; acknowledge outbound delivery only after send succeeds.
- * @spec Chat topic identity is lark:<appId>:<chatId>, shared with the Lark Source.
+ * @spec Bot chat identity is lark:<appId>:<chatId>; user-observation Sources use independent topics.
  * @case tests/message-source.test.ts
  * @why Platform acknowledgement must not depend on business processing or model latency.
  * @see {@link ../../docs/channel/lark.md}
