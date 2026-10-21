@@ -9,8 +9,8 @@ import type { ChatMessage, MessagePage, MessageSearchQuery } from "@compforge/ai
 import { SessionStore } from "../src/host/store/store.ts";
 import { InputStore } from "../src/host/input/store.ts";
 import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource.ts";
-import { createResourceClient } from "../src/host/plugin/resource-client.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "../plugins/personal/source/message/observe.ts";
 import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageWatch } from "../plugins/personal/source/message/config.ts";

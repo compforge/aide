@@ -1,5 +1,5 @@
 import type { Resource, ResourcePrinter } from "@compforge/aide-plugin";
-import { resourceTypeKey, validateResourceType } from "./resource.ts";
+import { resourceTypeKey, validateResourceType } from "./type.ts";
 
 type PrintMethod = "describe" | "summarize";
 export type HostedResourcePrinter = Pick<ResourcePrinter, "resourceType"> & {

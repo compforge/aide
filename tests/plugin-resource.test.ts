@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PluginResourceStore } from "../src/host/plugin/resource.ts";
-import { createResourceClient } from "../src/host/plugin/resource-client.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 
 const roots: string[] = [];
 const REQ_LOOP_RUN = {

@@ -1,4 +1,4 @@
-import type { HostedResourcePrinter } from "./resource-printer.ts";
+import type { HostedResourcePrinter } from "./resource/printer.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorRequest } from "../../protocol/connectors.ts";
 import { createConnectorClient, dispatchConnector, emptyConnectors } from "../../connector-client.ts";
@@ -50,8 +50,8 @@ import type {
   Watch,
 } from "@compforge/aide-plugin";
 import type { PluginInstance } from "./instance.ts";
-import type { ResourceClient } from "./resource-client.ts";
-import { validateResourceType } from "./resource.ts";
+import type { ResourceClient } from "./resource/client.ts";
+import { validateResourceType } from "./resource/type.ts";
 
 export type {
   BoardPresentation,

@@ -11,7 +11,7 @@ import type {
 import { emptyReconcileSnapshot } from "../src/host/plugin/reconcile-snapshot.ts";
 import { Manager } from "../src/host/plugin/manager.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import type { ScheduledHarnessInvocation } from "../src/host/plugin/harness-invocation.ts";
 import { MAIN_LANE_ID } from "../src/host/lane.ts";
 import { SessionStore } from "../src/host/store/store.ts";

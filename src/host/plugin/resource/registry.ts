@@ -1,6 +1,6 @@
 import type { ResourceType } from "@compforge/aide-plugin";
 
-import { resourceTypeKey } from "./resource.ts";
+import { resourceTypeKey } from "./type.ts";
 
 interface AideRegistration {
   readonly owner: "aide";

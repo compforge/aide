@@ -1,4 +1,4 @@
-import { ResourcePrinters } from "./resource-printer.ts";
+import { ResourcePrinters } from "./resource/printer.ts";
 import { RunnerController } from "./runner/controller.ts";
 import type { PluginRunnerClient } from "./runner/client.ts";
 import type { ControllerRegistration as RemoteRegistration, HostRequest } from "../../protocol/ipc.ts";
@@ -7,7 +7,7 @@ import { emptyConnectors } from "../../connector-client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
 import { INPUT_TYPE } from "@compforge/aide-plugin";
 import { InputStore } from "../input/store.ts";
-import { scopedResources, type ResourceDirectory } from "./resource-directory.ts";
+import { scopedResources, type ResourceDirectory } from "./resource/directory.ts";
 import type { CommandContext } from "@compforge/aide-plugin";
 import {
   Controller,
@@ -63,14 +63,12 @@ import {
 import {
   CronSourceQueue,
 } from "../../reconcile/cron-source.ts";
-import {
-  PluginResourceStore,
-  resourceTypeKey,
-} from "./resource.ts";
+import { PluginResourceStore } from "./resource/store.ts";
+import { resourceTypeKey } from "./resource/type.ts";
 import {
   createResourceClient,
   type ResourceClientChange,
-} from "./resource-client.ts";
+} from "./resource/client.ts";
 import {
   BoardProjection,
   type BoardItem,
@@ -112,7 +110,7 @@ import {
   AideResourceProvider,
   type AideSessionObservation,
 } from "./aide-resource.ts";
-import { ResourceRegistry } from "./resource-registry.ts";
+import { ResourceRegistry } from "./resource/registry.ts";
 import type { HarnessTarget } from "../harness/target.ts";
 
 const TOAST_TONES = new Set<ToastTone>([

@@ -10,8 +10,8 @@ import { requirementWatches, validateWatchScopes, type Watch } from "../plugins/
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import { loadMeegoRequirementConfigs, MeegleCliRequirementConnector } from "../connectors/requirements/meego.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource.ts";
-import { createResourceClient } from "../src/host/plugin/resource-client.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { observeRequirements, SOURCE_TYPE } from "../plugins/personal/source/requirement/observe.ts";
 import { INPUT_TYPE } from "../plugins/personal/chief-model.ts";
 

@@ -11,7 +11,7 @@ export { validateSources } from "../../reconcile/source.ts";
 import {
   PluginResourceStore,
   type PluginResource,
-} from "./resource.ts";
+} from "./resource/store.ts";
 
 interface ControllerSourcesOptions<TSpec, TStatus> {
   readonly sources?: readonly ControllerSource<TSpec>[];

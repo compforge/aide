@@ -1,7 +1,7 @@
 import { memoryAgentDir } from "./pi-memory-fixture.ts";
 import { Aide } from "../src/app.ts";
 import { chiefTarget } from "../plugins/personal/chief-model.ts";
-import { createResourceClient } from "../src/host/plugin/resource-client.ts";
+import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ConversationStore, seedInput } from "./conversation-fixture.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";
@@ -17,7 +17,7 @@ import { createChiefAgent } from "../agents/chief/agent.ts";
 import { WorkService } from "../plugins/personal/work.ts";
 import { Store } from "../plugins/personal/store.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 import type { HarnessEvent, HarnessSessionBinding } from "../src/host/harness/adapter.ts";
 

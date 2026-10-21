@@ -9,8 +9,8 @@ import type { EnvironmentSnapshot, WorkloadSnapshot } from "@compforge/aide-plug
 import { SessionStore } from "../src/host/store/store.ts";
 import { InputStore } from "../src/host/input/store.ts";
 import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource.ts";
-import { createResourceClient } from "../src/host/plugin/resource-client.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { ENVIRONMENT_SOURCE_TYPE, observeEnvironment, type EnvironmentSourceStatus } from "../plugins/personal/source/environment/observe.ts";
 import { environmentSources, EnvironmentWatchSchema, ENVIRONMENT_SESSION, type EnvironmentSourceSpec } from "../plugins/personal/source/environment/config.ts";

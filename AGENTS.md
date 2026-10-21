@@ -18,6 +18,13 @@ src/
   host/                    # 主进程：持久化、交互与执行事实
     input/                 # 独立 Input 事实与内置资源投影
     plugin/                # Resource / Printer / Controller / Source / Watch / verb
+      resource/            # 资源存储、访问、类型注册与文本展示
+        store.ts           # PluginResourceStore 与持久化校验
+        type.ts            # 资源类型校验与身份键
+        client.ts          # ResourceClient 与变更通知
+        registry.ts        # 资源类型归属注册
+        directory.ts       # 跨 Session 资源访问
+        printer.ts         # describe / summarize 调用与默认展示
       runner/              # 宿主侧 Supervisor / IPC Client / 注册代理
     core/                  # CoreSession 执行组件装配
     controller/            # HarnessInput / Queue / Turn 执行协调

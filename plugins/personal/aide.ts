@@ -3,7 +3,7 @@ import type { ResourceType, InputReceipt } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/host/plugin/manager.ts";
 import { CoreSession } from "../../src/host/core/index.ts";
 import { type SessionHandle } from "../../src/host/store/store.ts";
-import { PluginResourceStore } from "../../src/host/plugin/resource.ts";
+import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
 import { IncomingSchema, type Incoming, type Message } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { message, Store } from "./store.ts";

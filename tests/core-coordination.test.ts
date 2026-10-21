@@ -6,7 +6,7 @@ import pino from "pino";
 import { CoreSession } from "../src/host/core/index.ts";
 import { SessionStore } from "../src/host/store/store.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
-import { PluginResourceStore } from "../src/host/plugin/resource.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
 import { ConversationStore } from "./conversation-fixture.ts";
 import { Store } from "../plugins/personal/store.ts";

@@ -3,11 +3,8 @@ import type {
   Watch,
 } from "@compforge/aide-plugin";
 
-import type { ResourceClientChange } from "./resource-client.ts";
-import {
-  resourceTypeKey,
-  validateResourceType,
-} from "./resource.ts";
+import type { ResourceClientChange } from "./resource/client.ts";
+import { resourceTypeKey, validateResourceType } from "./resource/type.ts";
 import { parseResourceNamespace } from "./namespace.ts";
 
 export function validateWatches(

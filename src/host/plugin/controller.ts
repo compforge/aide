@@ -10,13 +10,11 @@ import type {
   Watch,
 } from "@compforge/aide-plugin";
 
-import type { PluginResource } from "./resource.ts";
-import type { ResourceClientChange } from "./resource-client.ts";
+import type { PluginResource } from "./resource/store.ts";
+import type { ResourceClientChange } from "./resource/client.ts";
 import { newId } from "../event/ids.ts";
-import {
-  PluginResourceStore,
-  validateResourceType,
-} from "./resource.ts";
+import { PluginResourceStore } from "./resource/store.ts";
+import { validateResourceType } from "./resource/type.ts";
 import { reconcileKeyId, ReconcileQueue } from "../../reconcile/queue.ts";
 import type { ReconcileCapacityLease } from "../../reconcile/queue.ts";
 import { reconcileResourceOwner } from "../../reconcile/reconcile-scope.ts";

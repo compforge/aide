@@ -21,7 +21,7 @@ import {
   type ReconcileScope,
   type ScheduledReconcile,
 } from "./controller.ts";
-import type { ResourceClientChange } from "./resource-client.ts";
+import type { ResourceClientChange } from "./resource/client.ts";
 import { ReconcileQueue, type ReconcileCapacityLease } from "../../reconcile/queue.ts";
 import { reconcileResourceOwner } from "../../reconcile/reconcile-scope.ts";
 import {

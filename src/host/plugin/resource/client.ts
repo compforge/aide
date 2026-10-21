@@ -9,7 +9,7 @@ import type {
   ResourceType,
 } from "@compforge/aide-plugin";
 
-import { PluginResourceStore } from "./resource.ts";
+import { PluginResourceStore } from "./store.ts";
 
 export type ResourceClient = PublicResourceClient;
 
