@@ -1,7 +1,8 @@
+import type { RuntimeScope } from "../protocol/runtime.ts";
 import { deepFreeze } from "../reconcile/snapshot.ts";
 import { validateSources } from "../reconcile/source.ts";
 import { isDeepStrictEqual } from "node:util";
-import type { Controller, PluginLogger, PluginSessionContext, Resource, ResourceClient, ResourceNamespace, ReconcileSnapshot } from "@compforge/aide-plugin";
+import type { Controller, PluginLogger, Resource, ResourceClient, ResourceNamespace, ReconcileSnapshot } from "@compforge/aide-plugin";
 import { createReconcileContext } from "../plugin-context.ts";
 import { reconcileKeyId, ReconcileCapacity, ReconcileDueQueue, ReconcileQueue, type ReconcileCapacityLease } from "../reconcile/queue.ts";
 import { CronSourceQueue } from "../reconcile/cron-source.ts";
@@ -25,7 +26,7 @@ export class Controllers {
   private capacity?: ReconcileCapacity;
   private readonly due = new ReconcileDueQueue({ onDue: (key) => this.background(this.enqueue(this.id(key), key)) });
   private readonly cron = new CronSourceQueue({ onDue: (scope) => this.background(this.enqueueAll(this.id(scope))) });
-  constructor(private readonly session: PluginSessionContext, private readonly pluginInstanceId: string,
+  constructor(private readonly session: RuntimeScope, private readonly pluginInstanceId: string,
     private readonly resources: ResourceClient, private readonly callHost: <T>(request: HostRequest) => Promise<T>, private readonly log: PluginLogger) {}
 
   private id(type: { resourceApiVersion: string; resourceKind: string; controllerName?: string }) { return `controller:${type.resourceApiVersion}:${type.resourceKind}${type.controllerName ? `:${type.controllerName}` : ""}`; }
@@ -33,11 +34,9 @@ export class Controllers {
     if (definition.name !== undefined && !/^[a-z][a-z0-9-]{0,63}$/.test(definition.name)) throw new Error("Invalid Controller name");
     if (this.registrations.has(id)) throw new Error(`Duplicate Controller: ${id}`);
     validateSources(definition.sources, new Date());
-    const builtin = definition.resourceType.apiVersion === "aide.dev/v1alpha1" && ["Input", "Turn"].includes(definition.resourceType.kind);
-    if (builtin && definition.sources?.some((source) => source.type === "resource")) throw new Error("Resource Sources cannot materialize builtin resources");
     this.registrations.set(id, { definition, abort: new AbortController(), attempts: new Map(),
       scope: { controllerName: definition.name, aideSessionId: this.session.aideSessionId, pluginInstanceId: this.pluginInstanceId, namespace: "v1",
-        resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, resourceOwner: builtin ? "aide" : "plugin" } });
+        resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, resourceOwner: "plugin" } });
   }
 
   async start(id: string, maxTotalConcurrency: number, backoff: { initialDelayMs: number; maxDelayMs: number }): Promise<void> {
@@ -85,9 +84,9 @@ export class Controllers {
 
   private async enqueueAll(id: string): Promise<void> {
     const entry = this.require(id);
-    const resources = await this.resources.list(entry.definition.resourceType, { namespace: entry.scope.resourceOwner === "aide" ? "aide-system" : "v1", includeDescendants: true });
+    const resources = await this.resources.list(entry.definition.resourceType, { namespace: "v1", includeDescendants: true });
     for (const resource of resources) this.background(this.enqueue(id, { ...entry.scope, resourceId: resource.metadata.name,
-      namespace: entry.scope.resourceOwner === "aide" ? "v1" : resource.metadata.namespace }));
+      namespace: resource.metadata.namespace }));
   }
   enqueue(id: string, key: ReconcileKey): Promise<void> {
     const entry = this.require(id);
@@ -101,7 +100,7 @@ export class Controllers {
     const keys = new Map<string, ReconcileKey>();
     const add = (name: string, namespace?: ResourceNamespace) => {
       if (!name?.trim()) throw new Error(`Watch ${id} returned an empty resource name`);
-      const key = { ...entry.scope, resourceId: name, namespace: namespace ?? (change.resource.metadata.namespace === "aide-system" ? "v1" : change.resource.metadata.namespace) };
+      const key = { ...entry.scope, resourceId: name, namespace: namespace ?? change.resource.metadata.namespace };
       keys.set(JSON.stringify([key.namespace, name]), key);
     };
     if (change.kind !== "deleted" && (change.kind !== "status-updated" || change.oldResource?.metadata.generation !== change.resource.metadata.generation) && entry.definition.resourceType.apiVersion === change.resource.apiVersion && entry.definition.resourceType.kind === change.resource.kind) add(change.resource.metadata.name);

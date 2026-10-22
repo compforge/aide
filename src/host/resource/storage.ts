@@ -38,6 +38,8 @@ export class ResourceStorage {
   private config = ResourceStorageConfigSchema.parse({});
   private readonly definitions = new Map<string, ResourceDefinition>();
   private readonly listeners = new Set<(scope: string, resource: Resource<unknown, unknown>) => void>();
+  private readonly writeListeners = new Set<(scope: string, resource: Resource<unknown, unknown>, previous?: Resource<unknown, unknown>) => void>();
+  subscribeWrites(listener: (scope: string, resource: Resource<unknown, unknown>, previous?: Resource<unknown, unknown>) => void): () => void { this.writeListeners.add(listener); return () => this.writeListeners.delete(listener); }
   private inTransaction = false;
   private afterCommitCallbacks: Array<() => void> = [];
   private rollbackError: unknown;
@@ -173,6 +175,12 @@ export class ResourceStorage {
         data=excluded.data, bytes=excluded.bytes, accessed=excluded.accessed`).run(key, scope, kind, resource.metadata.uid, data, bytes, resource.metadata.creationTimestamp, Date.now());
       this.writtenKeys.add(key);
       this.indexLifecycle(key, scope, resource);
+      if (!old || old.metadata.resourceVersion !== resource.metadata.resourceVersion) {
+        const snapshot = structuredClone(resource);
+        for (const listener of this.writeListeners) {
+          this.afterCommit(() => listener(scope, snapshot, old));
+        }
+      }
       if (receipt) this.addReceipt(receipt.key, receipt.value);
       if (!previous || bytes > Number(previous.bytes)) this.collect(kind, key);
     });
@@ -243,7 +251,7 @@ export class ResourceStorage {
     else callback();
   }
 
-  /** @spec Synchronous writes commit together; no observer sees a partially committed business result and Output. */
+  /** @spec Synchronous resource writes commit together; observers only see committed changes. */
   transaction<T>(fn: () => T): T {
     if (this.inTransaction) {
       try {

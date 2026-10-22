@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
-import { OUTPUT_TYPE, type OutputSpec, type OutputStatus, type ResourceDefinition } from "@compforge/aide-plugin";
-import { parseResourceNamespace } from "../plugin/namespace.ts";
-import { AddressSchema } from "../../address.ts";
+import { type ResourceDefinition } from "@compforge/aide-plugin";
+import { OUTPUT_TYPE, type OutputSpec, type OutputStatus } from "./model.ts";
+import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
+import { AddressSchema } from "../../../src/address.ts";
 import { outputPrinter } from "./printer.ts";
-const ref = z.object({ apiVersion: z.string().min(1), kind: z.string().min(1), namespace: z.string().transform((value) => value === "aide-system" ? value : parseResourceNamespace(value)), name: z.string().min(1),
+const ref = z.object({ apiVersion: z.string().min(1), kind: z.string().min(1), namespace: z.string().transform((value) => value === "v1" ? value : parseResourceNamespace(value)), name: z.string().min(1),
   uid: z.string().optional(), sessionId: z.string().optional() }).strict();
 export const OutputSpecSchema = z.object({
   text: z.string().min(1).max(128_000),

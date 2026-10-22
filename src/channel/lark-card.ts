@@ -23,7 +23,7 @@ const labels = replyLabels;
  */
 export function larkProgress(aide: ChannelService, conversationId: string): LarkProgress[] {
   const view = conversationView(aide, conversationId);
-  const inputs = aide.findConversation(conversationId)?.conversations.inputs(conversationId) ?? [];
+  const inputs = aide.conversations.inputs(conversationId) ?? [];
   const seen = new Set<string>();
   return inputs.filter((input) => {
     if (input.spec.origin !== "channel") return false;
@@ -39,7 +39,7 @@ export function larkProgress(aide: ChannelService, conversationId: string): Lark
     const phase = rawPhase === "compacting" ? "running" : rawPhase === "interrupted" ? "failed" : rawPhase ?? "queued";
     const ids = new Set(view.blocks.filter((b) => b.type === "message" && b.group_id === group).map((b) => b.id.replace(/^message:/, "")));
     // A Conversation may produce Outputs for another destination; a progress card cannot deliver those.
-    const address = aide.findConversation(conversationId)?.conversations.resource(conversationId)?.spec.address;
+    const address = aide.conversations.resource(conversationId)?.spec.address;
     const addressed = channelOutputs(aide).filter((o) => address && sameAddress(o.target, address));
     const responses = addressed.filter((m) => ids.has(m.id));
     const text = responses.map((message) => message.text).join("\n\n");

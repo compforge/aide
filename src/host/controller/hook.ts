@@ -1,9 +1,4 @@
-import type {
-  AideEventReference,
-  HarnessInputDispatch,
-  HookStage,
-  HookSubjectMap,
-} from "@compforge/aide-plugin";
+import type { AideEventReference, HarnessInputDispatch, HookStage, HookSubjectMap } from "@compforge/aide-plugin";
 
 import type {
   HarnessEvent,

@@ -1,5 +1,5 @@
 import { iconFor } from "@compforge/aide-plugin";
-import type { SourceDefinition } from "@compforge/aide-plugin";
+import type { SourceDefinition } from "./input.ts";
 
 /** @spec Input.originId references these definitions; presentation never changes routing or observation policy. */
 export const SOURCES = {

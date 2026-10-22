@@ -134,7 +134,7 @@ export interface ResourceMergePatch {
   readonly value: Readonly<Record<string, unknown>>;
 }
 
-/** A bounded atomic write set in one concrete Plugin resource scope (session or shared). Core creates are limited to Output. */
+/** A bounded atomic write set within one Plugin resource scope; external effects are not part of the transaction. */
 export type ResourceCommit =
   | { operation: "create"; type: ResourceType; name: string; spec: unknown; status?: unknown }
   | { operation: "replace"; resource: Resource<unknown, unknown>; spec: unknown; status: unknown }
@@ -188,10 +188,9 @@ export interface ResourceWriter {
 }
 
 /**
- * Host-owned Resource access. Core projections are provider-backed, while
- * Plugin-owned Resources remain isolated by PluginInstance.
+ * Host-persisted Resource access, isolated by PluginInstance.
  *
- * @spec One PluginInstance may own Resources in global, Project, and Session namespaces simultaneously; omitted mutation namespace defaults to `v1`.
+ * @spec Namespace organizes plugin resources independently of execution; omitted mutation namespace defaults to `v1`.
  */
 export interface ResourceClient extends ResourceReader, ResourceWriter {
   /**
@@ -201,27 +200,6 @@ export interface ResourceClient extends ResourceReader, ResourceWriter {
   get<TSpec, TStatus>(
     ref: ResourceRef,
   ): Promise<Readonly<Resource<TSpec, TStatus>> | undefined>;
-}
-
-export type AideTurnResourceApiVersion = "aide.dev/v1alpha1";
-export type AideTurnResourceKind = "Turn";
-
-export type AideSessionResourceKind = "Session";
-export type AideTargetResourceKind = "Target";
-export type AideSessionTargetBindingResourceKind = "SessionTargetBinding";
-
-export interface AideSessionResourceStatus {
-  readonly phase: "Active" | "Inactive";
-}
-
-export interface AideTargetResourceSpec {
-  readonly harness: string;
-}
-
-export interface AideTargetResourceStatus {
-  readonly phase: "Ready" | "Unavailable";
-  /** list returns the last observation; get refreshes missing/expired discovery without opening a HarnessSession. */
-  readonly modelCatalog?: AideTargetModelCatalog;
 }
 
 export interface AideTargetModel {
@@ -237,55 +215,3 @@ export type AideTargetModelCatalog =
   | { readonly phase: "Unavailable"; readonly observedAt: string }
   | { readonly phase: "Failed"; readonly observedAt: string; readonly message: string }
   | { readonly phase: "Ready"; readonly observedAt: string; readonly models: readonly AideTargetModel[] };
-
-export interface AideSessionTargetBindingResourceSpec {
-  readonly sessionRef: ResourceRef;
-  readonly eligibleTargetRefs: readonly ResourceRef[];
-  readonly targetRef?: ResourceRef;
-}
-
-export interface AideSessionTargetBindingResourceStatus {
-  readonly observedGeneration: number;
-  readonly effectiveTargetRef?: ResourceRef;
-  readonly phase: "Pending" | "Bound" | "Failed";
-}
-
-export type AideTurnResourceData = TurnSummary & {
-  readonly harness?: string;
-  readonly harnessTargetId?: string;
-  readonly laneId?: string;
-  readonly harnessSessionId?: string;
-};
-
-/** Read-only Resource shape exposed by Aide-owned Turn observations. */
-export type AideTurnResource = Resource<
-  Record<string, never>,
-  AideTurnResourceData
-> & {
-  readonly apiVersion: AideTurnResourceApiVersion;
-  readonly kind: AideTurnResourceKind;
-};
-
-export type AideSessionResource = Resource<
-  Record<string, never>,
-  AideSessionResourceStatus
-> & {
-  readonly apiVersion: AideTurnResourceApiVersion;
-  readonly kind: AideSessionResourceKind;
-};
-
-export type AideTargetResource = Resource<
-  AideTargetResourceSpec,
-  AideTargetResourceStatus
-> & {
-  readonly apiVersion: AideTurnResourceApiVersion;
-  readonly kind: AideTargetResourceKind;
-};
-
-export type AideSessionTargetBindingResource = Resource<
-  AideSessionTargetBindingResourceSpec,
-  AideSessionTargetBindingResourceStatus
-> & {
-  readonly apiVersion: AideTurnResourceApiVersion;
-  readonly kind: AideSessionTargetBindingResourceKind;
-};

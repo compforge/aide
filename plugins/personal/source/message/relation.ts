@@ -1,4 +1,5 @@
-import type { ChatMessage, InputRelation } from "@compforge/aide-plugin";
+import type { ChatMessage } from "@compforge/aide-plugin";
+import type { InputRelation } from "../../input/model.ts";
 import { relationToPerson } from "../../person/relation.ts";
 import type { MessageWatch } from "./config.ts";
 

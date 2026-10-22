@@ -15,7 +15,7 @@ import { Persons } from "../plugins/personal/person/service.ts";
 import { messageRelation } from "../plugins/personal/source/message/relation.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
-import { InputStore } from "../src/host/input/store.ts";
+import { InputStore } from "../plugins/personal/input/store.ts";
 
 const log = pino({ level: "silent" });
 async function setup(t: TestContext) {
@@ -38,7 +38,7 @@ test("Person catalog resolves identities across sessions, preserves profiles acr
   assert.equal(first.metadata.uid, again.metadata.uid);
   const sameName = await f.aide.persons.observe({ ...identity, scope: "cli_other" }, "张三");
   assert.notEqual(first.metadata.uid, sameName.metadata.uid);
-  const scope = f.aide.session("another-conversation"); await scope.start();
+  const scope = f.aide.personal; await scope.start();
   const across = new Persons(scope.plugins.resourceClient("personal"), { identities: [LOCAL_ME] });
   assert.equal((await across.read(first.metadata.name)).metadata.uid, first.metadata.uid);
   const profiled = await across.profile(first.metadata.name, first.metadata.uid, first.metadata.resourceVersion, "2026-10-21：关注可靠性；来自明确表达。");
@@ -50,7 +50,7 @@ test("Person catalog resolves identities across sessions, preserves profiles acr
   assert.equal((await f.aide.persons.read(first.metadata.name)).metadata.uid, first.metadata.uid);
   assert.deepEqual((await f.aide.persons.read(first.metadata.name)).spec.profile, profiled.spec.profile);
   assert.equal((await f.aide.persons.read(first.metadata.name)).metadata.sessionId, undefined);
-  assert.equal(f.aide.sessions().some((s) => s.id === "personal:persons"), false);
+  assert.equal(f.aide.conversationIds().includes("personal:persons"), false);
 });
 
 test("profile_person guards versions and preserves user corrections while Input retention remains independent", async (t) => {

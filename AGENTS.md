@@ -11,7 +11,7 @@ Aide 是小型、自托管的 personal agent，围绕用户交付的目标跨执
 ```text
 src/
   main.ts                  # 启动 Channel 与 Harness
-  app.ts                   # 按入口 Session ID 装配 CoreSession / Personal，恢复与汇总各会话
+  app.ts                   # 装配全局 ApplicationRuntime、Personal 与通信入口
   web/                     # 浏览器页面；每页的 HTML、TS 入口、样式与交互模块放在一起
     conversations/         # 导航、时间线、输入、工作与审批；main 管理轮询和 SSE
     persons/               # 人物导航、资料和认识编辑
@@ -24,18 +24,17 @@ src/
     address.ts             # ChannelAddress 编码与平台 endpoint 解析
   host/                    # 主进程：持久化、交互与执行事实
     resource/              # Host 持久资源数据库、容量、引用与释放策略
-    input/                 # 独立 Input 事实、内置资源投影与文本 Printer
-    output/                # 独立 Output、投递状态、容量策略与 Printer
+    runtime/               # 应用级插件装配与资源执行上下文
     plugin/                # Resource / Printer / Controller / Source / Watch / verb
       resource/            # 资源存储、访问、类型注册与文本展示
         store.ts           # PluginResourceStore 与持久化校验
         type.ts            # 资源类型校验与身份键
         client.ts          # ResourceClient 与变更通知
         registry.ts        # 资源类型归属注册
-        directory.ts       # 跨 Session 资源访问
+        directory.ts       # 私有执行后端的旧 scope 兼容访问
         printer.ts         # describe / summarize 调用与默认展示
       runner/              # 宿主侧 Supervisor / IPC Client / 注册代理
-    core/                  # CoreSession 执行组件装配
+    core/                  # 私有执行后端；Ledger / Adapter 生命周期
     controller/            # HarnessInput / Queue / Turn 执行协调
     harness/               # 模块配置契约与启动解析、Harness 注册、Adapter 与提供方协议
     store/                 # Session、Ledger 与执行投影
@@ -50,7 +49,9 @@ plugins/personal/
     service.ts             # 人物解析、用户编辑和 Chief 认知更新
     relation.ts            # 输入与 Me 的关系
     messages.ts            # Connector 消息贡献人物事实
-  aide.ts                  # Personal 服务：Chief 会话绑定、输入与恢复
+  input/                   # Input 定义、幂等接收、保留策略与 Printer
+  output/                  # Output 定义、投递状态、action 与 Printer
+  aide.ts                  # 全局 Personal 服务：Chief 上下文绑定、输入与恢复
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
   input.ts                 # Chief Input 路由与可恢复的多会话追加
   conversation/            # Conversation CRD 的模型、操作与 Reconcile
@@ -99,6 +100,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 ## 关键约定
 
+- 底座提供 TypeScript controller-runtime 机制，Personal 是业务插件。通用存储与调度不得导入 Personal Input / Output；应用装配负责安装定义、通信 action 和投递器。
+
 - Web 按页面组织，页面入口负责组合模块与轮询、SSE 生命周期；交互状态由对应模块持有。公共浏览器能力放在 `web/shared`，HTTP 投影通过 type-only import 使用，跨 Channel 的展示投影仍归 `channel`。
 
 - 根目录 `VERSION` 是产品版本。每次提交同步递增，默认 patch，同一提交只递增一次。
@@ -106,12 +109,12 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。Connector 声明访问能力，`plugins.<plugin>.sources` 声明观察策略；Personal 只启动显式配置的环境、Lark 与需求 Source。环境发现只读配置，不代表连通性、健康或操作授权。
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
-- Session 是持久执行作用域，保留 Ledger、Lane、Turn 与恢复绑定；CoreSession 负责进程期装配。Session 统一位于 `$AIDE_HOME/sessions/<id>/`，不按 project / cwd 分组。逻辑 ID 的目录编码由 SessionStore 负责。启动时恢复全部 Session 的工作和 Source；watch 仅装配到所属 Session。cwd 只是执行环境，改变时保留 Aide 历史并清空原生恢复绑定；插件私有数据仅有 global、session、instance 三个目录作用域。
+- ApplicationRuntime 按应用装配插件与调度，业务资源使用插件实例的 shared 作用域。执行后端暂时私有复用 CoreSession / Ledger；不能据此引入入口 Session、内置资源或业务 Lane。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
 - ChannelDefinition / SourceDefinition 声明来源身份；绑定的提交入口补齐来源，Source 同时记录资源实例引用。Input.text 保存收到的事实或请求，不保存 Chief 的处理指令。Channel / Source 输入统一从 Input 投影，Output 独立承载回复与通知；展示通过应用装配的定义目录读取名称和图标，不解释 Source 的业务数据。
-- Input 是 Core 内置资源，可带上游话题线索 sessionId，稳定标识与粒度由 Channel / Source 决定；Conversation 是 Personal CRD，保存 Input 引用与各自消费状态。Channel / Source 不依赖 conversationId。Chief 先 Reconcile Input：无会话时创建并追加；已有会话时依次追加到默认会话、规则创建和规则关联的会话。确定归属即追加，不调用语义路由或汇总完整计划；创建使用稳定身份，追加按 Input ID 幂等，不新增路由 Verb。跨 Session 写入经过目标 ResourceClient 与 Watch，创建时按需装配目标 Session。
+- Input / Output 由 Personal 定义；底座不预注册业务资源或 Session / Turn / Target 投影。Input.sessionId 仅是来源话题线索。当前 Personal Input Reconcile 按规则幂等追加到 Conversation，语义 Route 尚未实现；跨话题操作直接访问全局资源客户端。
 - Chief 对已有 Work 使用 append_input 投递事实或请求，输入队列与消费进度由 Work 持久保存；Task / Routine Reconcile 决定目标与执行状态，Chief 保留创建和删除资源的能力。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。
-- Harness 原生 Session 由各 Harness 管理并使用其默认目录；Aide 按 Session × Lane × Target 保存原生身份和 Adapter 的 resumeState。
+- Harness 原生 Session 由 Adapter 管理。应用按插件实例、资源 UID、Controller 和 Target 组织执行上下文；Target 是配置与发现信息，不要求成为 Resource。
 - Person 是 Personal 的人物 CRD，统一承载我与他人的身份和认知。PersonDefinition 声明 shared 作用域，资源和引用不带 sessionId，不启动执行会话；各 Conversation、Channel、Source 经 ResourceClient 访问同一目录。姓名不作身份键，provider / scope / id 唯一绑定人物。
 - Me 是显式身份标记，connectors.lark.me 与 CLI 执行 appId/userId 独立；需求平台的 me.userKey 与 CLI profile、Source 负责人范围独立，规范项目 scope 由 Connector 解析。匹配 Person 的外部身份得到 Personal.me；本地单人 Web 有固定 Me 标记。Input.sender 可选，relation 为 sent / received / observed，缺省未知；机器人收发不自动代表本人，分类不构成执行授权。
 - Chief 通过 profile_person 修订 Person.profile，每轮刷新 Me、按需读取他人。用户修正独立保存，Chief 不能覆盖；更新校验 uid/resourceVersion。Person 不持有 Input ID，不阻碍输入回收。Web Persons 与 Chief 共享资源更新路径；Hermes 提供其它通用记忆与检索，业务进展仍以 Task / Routine 为准。
@@ -123,7 +126,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 持久 Resource 共用 Host 容量管理；资源所有者在 ResourceDefinition.retention 声明释放与引用规则，未知类型默认保护。按 kind 的 LRU 等排序只作用于可释放且无人引用的记录，不能淘汰正在承担的工作。详见 docs/plugin/README.md。
 - Conversation.status.pendingInputIds 是唯一待消费队列，status.batch 固定一次处理材料。Conversation Reconcile 组批、确认消费和替换 Batch；具名 Batch Controller 执行 Harness，沟通 tool 只调用 say，用户答复是下一批的新 Input。完成批次保留有界上下文直到下一批继承；每批 freshContext 并持久化历史边界，失败不自动重放副作用。
 - Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 保存执行事实。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
-- ResourceDefinition 统一声明类型、shared/session 作用域、Schema、Validator、Printer 与 retention。Host 在恢复和 Controller 启动前加载纯定义模块；所有写入（含 commit）在存储事务内校验。Controller 可独立注册零个或多个。Printer 在 Host 同步处理快照，describe / summarize 提供详情 / 概览，不执行 I/O、模型调用或修改资源；定义不随 Runner 关闭撤销。具体契约见 docs/plugin/README.md。
+- ResourceDefinition 统一声明类型、资源作用域；应用使用 shared、Schema、Validator、Printer 与 retention。Host 在恢复和 Controller 启动前加载纯定义模块；所有写入（含 commit）在存储事务内校验。Controller 可独立注册零个或多个。Printer 在 Host 同步处理快照，describe / summarize 提供详情 / 概览，不执行 I/O、模型调用或修改资源；定义不随 Runner 关闭撤销。具体契约见 docs/plugin/README.md。
 - 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。
 - 执行上下文显式携带主资源和可选 Conversation/Input 关联；Channel 不通过 Chief Target 推导问题和进度归属。
 - Personal 将新发生的事归入能承接它的上下文：Conversation 承载话题，Task 承载有限目标，Routine 承载持续职责与当前轮次。Chief 优先关联已有 Work，再按需要创建；各 Reconcile 根据历史与新事实推进、更新、沟通、等待或忽略。详见 `docs/plugin/personal.md`。

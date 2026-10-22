@@ -14,7 +14,7 @@ Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队�
 
 Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。 `ResourceDefinition` 统一声明 type、scope、spec/status schema、可选 validator、printer 和 retention。Host 在恢复资源、启动 Controller 前加载声明；未知类型不能写入。进程内插件通过 resources 提供声明，独立 Runner 的 PackageEntry 通过 resourcesUrl 指向默认导出定义数组的纯模块，Host 直接加载它。声明模块不导入 Runner 或 Host 实现，不执行 I/O。
 
-`scope: "session"` 将实例放在执行 Session 中；`scope: "shared"` 在同一插件实例下跨 Session 共享，资源与引用不携带 sessionId。namespace 与存储作用域独立。Person 使用 shared，无需创建执行 Session 或注册 Controller。本次模型变更不自动迁移旧 personal:persons 作用域，已有数据需要在升级前迁移。每种资源可以没有 Controller，也可以由多个具名 Controller 观察。
+ApplicationRuntime 使用 `scope: "shared"`，资源属于插件实例，资源与引用不携带 sessionId。namespace 与存储作用域独立；底座不预注册任何业务资源。每种资源可以没有 Controller，也可以由多个具名 Controller 观察。旧执行后端仍保留 session scope 的兼容接口，应用插件不使用它。
 
 所有创建、更新和删除请求都在存储事务内经过 Schema 与 Validator，包括 Agent 工具、Source 与 commit。Schema 的规范化输出作为持久数据；Validator 可读取同一作用域内的事务快照，包含当前 commit 已完成的前序写入。它不能执行异步工作或外部副作用。校验、引用计算或配额失败会回滚整笔写入。
 
@@ -28,13 +28,13 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 ## Resource 容量与释放
 
-Host 的 `ResourceStorage` 将 Input 与插件 Resource 存入共享 SQLite，以按需读取替代常驻完整快照集合。容量按 Group/Kind 汇总，配额覆盖不同 API 版本、Session 和插件实例；同时限制单条大小、每种数量/字节以及 Host 总字节。配置见 [Resource 容量](../configuration.md#resource-容量)。
+Host 的 `ResourceStorage` 将所有插件 Resource 存入共享 SQLite，以按需读取替代常驻完整快照集合。容量按 Group/Kind 汇总，配额覆盖不同 API 版本、Session 和插件实例；同时限制单条大小、每种数量/字节以及 Host 总字节。配置见 [Resource 容量](../configuration.md#resource-容量)。
 
 资源所有者通过 `ResourceDefinition.retention` 定义释放时间和引用的精确 uid，与类型一起注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 在路由结束后可释放，但 Conversation 的待处理/当前 Batch 引用与 Source 的待提交引用继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
 
 每次写入在事务内同步记录、引用索引、回执和必要的回收。无法满足容量约束时整个事务回滚，变更通知只在提交后发出。因此过载会阻止接收更多工作，不会通过删除正在承担的工作来腾空间。完成并缩小记录的更新允许在超配额状态下提交。
 
-Session、Turn 等从 Ledger/运行态生成的只读 Resource 投影不另存数据库，其源数据生命周期仍由对应 owner 管理。Resource 配额不等于进程 RSS 或全部磁盘文件的硬上限。
+执行日志与 Adapter 恢复状态由执行后端管理，不作为 Resource 投影。Resource 配额不等于进程 RSS 或全部磁盘文件的硬上限。
 
 ## Resource Printer
 
@@ -42,9 +42,9 @@ Session、Turn 等从 Ledger/运行态生成的只读 Resource 投影不另存�
 
 两个方法同步处理传入的资源快照，不修改资源、不查询外部系统、不调用模型。拿到 Resource 后，插件通过 `await context.printers.describe(resource)` / `summarize(resource)` 获取文本，无需知道具体 Printer。Host 使用 `Manager.describeResource(pluginInstanceId, resource)` / `summarizeResource(...)`，同样返回 `Promise<string>`；Runner 通过 IPC 请求 Host 打印，只传输资源快照和文本；Printer 在 Host 同步执行，始终收到快照副本，不重新查询资源。
 
-Core 内置 Printer 按精确的 `apiVersion + kind` 选择，其它 Printer 按插件实例与 GVK 选择，同一实例不能重复声明同一类型。类型归属由 ResourceRegistry 维护，不能覆盖 Core 或其它插件的资源类型；声明失败整体回滚，实例关闭或 Runner 失效不撤销定义。没有专用 Printer 时，详情默认使用缩进 JSON，概览默认使用 `kind/name`。已注册 Printer 的执行失败记录资源身份和方法名，并向调用方返回错误。
+Printer 按插件实例与 GVK 选择，同一实例不能重复声明同一类型。类型归属由 ResourceRegistry 维护，不能覆盖其它插件的资源类型；声明失败整体回滚，实例关闭或 Runner 失效不撤销定义。没有专用 Printer 时，详情默认使用缩进 JSON，概览默认使用 `kind/name`。已注册 Printer 的执行失败记录资源身份和方法名，并向调用方返回错误。
 
-OutputPrinter 位于 `src/host/output/printer.ts`，提供正文、目标与投递信息的完整描述和有界预览。InputPrinter 位于 `src/host/input/printer.ts`，由 Host 装配，不随插件实例关闭而撤销。`describe` 保留完整正文、来源、接收时间、可选话题、回复关联和原样 observation；不查询历史，也不解释各 Source 的业务字段。`summarize` 折叠空白并生成最多 120 个 Unicode 码点的单行预览。Web 输入详情与 Chief 当前输入使用同一份描述，Web 正文保留完整 `spec.text`；路由和消费状态仍属于各自的资源与会话投影。输出是普通文本，调用方不能把它当作可信 HTML 或指令。插件声明示例见 [Resource Printers](../../packages/plugin/README.md#resource-printers)。
+OutputPrinter 位于 `plugins/personal/output/printer.ts`，提供正文、目标与投递信息的完整描述和有界预览。InputPrinter 位于 `plugins/personal/input/printer.ts`，由 Host 装配，不随插件实例关闭而撤销。`describe` 保留完整正文、来源、接收时间、可选话题、回复关联和原样 observation；不查询历史，也不解释各 Source 的业务字段。`summarize` 折叠空白并生成最多 120 个 Unicode 码点的单行预览。Web 输入详情与 Chief 当前输入使用同一份描述，Web 正文保留完整 `spec.text`；路由和消费状态仍属于各自的资源与会话投影。输出是普通文本，调用方不能把它当作可信 HTML 或指令。插件声明示例见 [Resource Printers](../../packages/plugin/README.md#resource-printers)。
 
 ## Source 与 Watch
 
@@ -56,13 +56,13 @@ Controller 可声明 `name`，让同一插件对同种资源注册独立队列�
 
 ## Verb 与 Harness
 
-Reconcile 通过 `ctx.verbs` 请求 say、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。say 创建独立 Output，返回 outputId，Channel 按 Output.target 投递；用户答复是后续的新 Input。业务状态与 Output 可通过 ResourceClient.commit 原子保存，详见 [Output](../output.md)。harness 直接创建 HarnessInvocation，保留期限、取消和恢复语义；原生工具权限与 Hook 信任仍由 Host Approval 管理。插件不处理提供方原生协议。
+Reconcile 通过 `ctx.verbs` 请求 harness、命名 action，或通过 `connectors({ timeoutMs })` 调用外部系统。Personal 的 say helper 调用应用注册的 action，创建独立 Output，返回 outputId，Channel 按 Output.target 投递；用户答复是后续的新 Input。业务状态与 Output 可通过 ResourceClient.commit 原子保存，详见 [Output](../output.md)。harness 直接创建 HarnessInvocation，保留期限、取消和恢复语义；原生工具权限与 Hook 信任仍由 Host Approval 管理。插件不处理提供方原生协议。
 
 等待 verb 时释放 Controller 和 Runner 容量，同一 Controller 内同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。拒绝确认是正常业务答案；取消、超时和失败需要插件自行决定业务结果。
 
 `execution.withContext({ conversationId, inputId, inputIds })` 将后续动作关联到业务会话和输入，主资源身份由 Core 提供。Channel 直接使用这些关联展示问题与执行进度，不通过 Chief 或 Harness Target 推导。其他组件按职责使用 Core 服务，不必经由 Verb。
 
-`harness({ freshContext: true })` 在空闲 Lane 上建立新的原生上下文，并持久化 Ledger 历史边界；后续 catch-up 不注入该边界之前的执行历史。调用方提供新的摘要和必要材料，Lane 与业务资源身份保持不变。
+Harness 上下文由主资源 UID 与 Controller 名称确定，不接受应用插件选择 Lane。`harness({ freshContext: true })` 用调用方提供的摘要和必要材料建立新原生上下文，并持久化历史边界，后续 catch-up 不注入该边界之前的执行历史。
 
 Harness 返回执行结束不等于资源目标完成。结果校验、下一步安排、等待用户和业务终态都属于插件。
 
@@ -72,7 +72,7 @@ Harness 返回执行结束不等于资源目标完成。结果校验、下一步
 
 | Controller | 观察对象 | 业务职责 |
 | --- | --- | --- |
-| Chief 路由 | Host 内置 Input | 判断目标，更新 Conversation 资源 |
+| Chief 路由 | Personal Input | 判断目标，更新 Conversation 资源 |
 | Conversation | Personal Conversation | 调度 Batch、确认消费和交接上下文 |
 | Batch（name: batch） | Personal Conversation | 执行固定 Batch，调用 Chief Harness，工具直接使用交互 verb |
 | Requirement Source | RequirementSource | 按关注范围获取需求变化，提交 Input 并推进水位 |

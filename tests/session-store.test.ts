@@ -56,8 +56,8 @@ test("Sessions from different execution directories share one home and reopen or
   const secondData = data(second);
   assert.equal(firstData.global, join(root, "plugins", "tests%2Fplugin"));
   assert.equal(firstData.global, secondData.global);
-  assert.notEqual(firstData.session, secondData.session);
-  assert.equal(firstData.instance, join(firstData.session, "default"));
+  assert.equal(firstData.instance, secondData.instance);
+  assert.equal(firstData.instance, join(firstData.global, "instances", "default"));
   assert.equal("project" in firstData, false);
   assert.equal(existsSync(join(root, "projects")), false);
 });

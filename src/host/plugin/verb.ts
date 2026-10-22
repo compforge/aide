@@ -1,3 +1,4 @@
+import { resourceExecutionKey } from "./execution-context.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { dispatchConnector, emptyConnectors } from "../../connector-client.ts";
 import { newId } from "../event/ids.ts";
@@ -24,7 +25,7 @@ import type {
 
 type VerbSession = Pick<
   SessionHandle,
-  "id" | "ledger" | "projection" | "appendEvent" | "subscribe" | "requireLane"
+  "id" | "meta" | "ledger" | "projection" | "appendEvent" | "subscribe" | "requireLane" | "setLane"
 >;
 
 interface ActiveExecution {
@@ -34,7 +35,8 @@ interface ActiveExecution {
 }
 
 export interface VerbOptions {
-  say?: (context: ExecutionScope, text: string, options?: import("@compforge/aide-plugin").SayInput) => Promise<{ outputId: string }>;
+  resourceContexts?: boolean;
+  actions?: Readonly<Record<string, (scope: ExecutionScope, input: unknown) => Promise<unknown>>>;
   session?: VerbSession;
   capacity: ReconcileCapacity;
   connectors?: ConnectorClient;
@@ -54,8 +56,9 @@ export interface VerbOptions {
 
 /** Plugin typed verbs and the live executions suspended while those verbs settle. */
 export class Verb {
+  private readonly resourceContexts: boolean;
   private readonly connectors: ConnectorClient;
-  private readonly say: VerbOptions["say"];
+  private readonly actions: VerbOptions["actions"];
   private readonly session?: VerbSession;
   private readonly connectorCalls = new Map<string, { pluginInstanceId: string }>();
   private readonly capacity: ReconcileCapacity;
@@ -75,7 +78,8 @@ export class Verb {
 
   constructor(options: VerbOptions) {
     this.session = options.session;
-    this.say = options.say;
+    this.resourceContexts = options.resourceContexts ?? false;
+    this.actions = options.actions;
     for (const event of options.session?.ledger.read() ?? []) {
       if (event.kind === "connector.started" && event.source.type === "plugin") {
         this.connectorCalls.set(event.payload.callId, { pluginInstanceId: event.source.pluginInstanceId });
@@ -234,12 +238,12 @@ export class Verb {
     request: VerbRequest,
   ): Promise<VerbResponse> {
     if (this.executions.get(context.executionId)?.interrupted) return { state: "dismissed" };
-    if (request.verb === "say") {
-      if (!this.say) throw new Error("No Output sink is installed");
-      if (typeof request.input.text !== "string" || !request.input.text.trim()) throw new Error("say text must not be empty");
-      const value = await this.say(context, request.input.text, request.input);
-      this.log?.({ level: "info", source: "plugin", component: "verb.say", pluginInstanceId: context.pluginInstanceId,
-        message: "Output persisted for Channel delivery", attributes: { outputId: value.outputId, executionId: context.executionId } });
+    if (request.verb === "action") {
+      const handler = this.actions?.[`${context.pluginInstanceId}/${request.name}`];
+      if (!handler) throw new Error(`Plugin action is not installed: ${context.pluginInstanceId}/${request.name}`);
+      const value = await handler(context, request.input);
+      this.log?.({ level: "info", source: "plugin", component: "verb.action", pluginInstanceId: context.pluginInstanceId,
+        message: "Plugin action completed", attributes: { action: request.name, executionId: context.executionId } });
       return { state: "success", value };
     }
 
@@ -283,14 +287,19 @@ export class Verb {
       );
     }
     if (this.executions.get(context.executionId)?.interrupted) return { state: "dismissed" };
+    if (this.resourceContexts) {
+      if (request.input.laneId !== undefined || request.input.newLane !== undefined) throw new Error("Application Harness context is owned by the resource");
+      const key = resourceExecutionKey(context);
+      if (!this.session?.meta.lanes[key]) this.session?.setLane(key, { laneId: key, createdFor: { type: "session" }, harnessSessions: {} });
+    }
     const snapshot = this.harnessInvocations.record({
       scope: context,
       invocation: {
         verb: request.verb,
         title: request.input.title,
         prompt: request.input.prompt,
-        laneId: request.input.laneId,
-        newLane: request.input.newLane ?? false,
+        laneId: this.resourceContexts ? resourceExecutionKey(context) : request.input.laneId ?? "main",
+        newLane: this.resourceContexts ? false : request.input.newLane ?? false,
         harnessTargetId,
         freshContext: request.input.freshContext,
       },

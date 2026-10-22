@@ -1,4 +1,3 @@
-import type { Address } from "./address.ts";
 import type { ConnectorClient } from "./connectors/index.ts";
 import type { ResourceRef } from "./resource.ts";
 import type { ReconcileSnapshot, TurnSummary } from "./snapshot.ts";
@@ -21,24 +20,12 @@ interface VerbInput {
   readonly timeoutMs: number;
 }
 
-/** Persists a message for Channel delivery; success does not mean the recipient has read it. */
-export interface SayInput {
-  readonly text: string;
-  readonly inputIds?: readonly string[];
-  readonly idempotencyKey?: string;
-  readonly respondToInputId?: string;
-  readonly target?: Address;
-  /** Person references; explicit [] suppresses inference from respondToInputId's sender. */
-  readonly receivers?: readonly ResourceRef[];
-}
-export type SayResult = VerbResult<{ readonly outputId: string }>;
-
 /** A Plugin request that creates a Core-owned HarnessInvocation. */
 export interface HarnessInvocationInput extends VerbInput {
   readonly title: string;
   readonly prompt: string;
   /** Existing Aide Lane to continue, including the reserved main Lane ID `main`. */
-  readonly laneId: string;
+  readonly laneId?: string;
   /** Create a new side Lane from laneId instead of continuing it. Defaults to false. */
   readonly newLane?: boolean;
   /** Replace this target native context with the supplied bounded prompt; never replay old turns. */
@@ -60,11 +47,11 @@ export type HarnessResult = VerbResult<HarnessValue>;
 /**
  * @spec Controller verbs suspend the same live Plugin execution until a terminal result; Aide never re-enqueues a Resource merely to deliver that result.
  * @rule Correlate verb continuation with the Core-issued execution identity, never with Resource identity or a caller-provided key; a crashed execution fails instead of replaying its call stack.
- * @rule Waiting verbs require one total timeout; say only persists a message without waiting for delivery; harness deadlines cover the HarnessInvocation through terminal Turn.
- * @see {@link docs/plugin.md}
+ * @rule Harness and Connector verbs require one total timeout; action completion follows the application capability contract.
+ * @see {@link docs/plugin/README.md}
  */
 export interface PluginVerbs {
-  say(input: SayInput): Promise<SayResult>;
+  action<T = unknown>(name: string, input: unknown): Promise<VerbResult<T>>;
   connectors(options: { timeoutMs: number }): ConnectorClient;
   harness(input: HarnessInvocationInput): Promise<HarnessResult>;
 }

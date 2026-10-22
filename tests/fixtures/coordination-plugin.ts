@@ -21,7 +21,7 @@ const plugin: PluginPackage = {
         if (!resource.status.answer && works.length) {
           const actions = execution.withContext({ conversationId: resource.spec.conversationId });
           await actions.verbs.connectors({ timeoutMs: 1000 }).describe();
-          await actions.verbs.harness({ title: "检查", prompt: "Work: {}", laneId: "main", newLane: true, timeoutMs: 10_000 });
+          await actions.verbs.harness({ title: "检查", prompt: "Work: {}", timeoutMs: 10_000 });
           await context.resources.patchStatus((await current())!, { answer: "observed" });
         }
         await context.resources.patchStatus((await current())!, { count: works.filter((work) => !work.metadata.deletionTimestamp).length, revision: works[0]?.metadata.generation ?? 0 });

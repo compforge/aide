@@ -4,11 +4,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { OutputStore } from "../src/host/output/store.ts";
-import { RequirementOutputDelivery, requirementOutputs } from "../src/host/output/requirements.ts";
+import { OutputStore } from "../plugins/personal/output/store.ts";
+import { RequirementOutputDelivery, requirementOutputs } from "../plugins/personal/output/requirements.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { parseAddress, sameAddress } from "../src/address.ts";
-import type { RequirementAddress, RequirementComment, OutputSpec } from "@compforge/aide-plugin";
+import type { RequirementAddress, RequirementComment } from "@compforge/aide-plugin";
+import type { OutputSpec } from "../plugins/personal/output/model.ts";
 const target: RequirementAddress = { kind: "requirement", source: "work", category: "issue", id: "1", scope: "https://meego.test/p" };
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-comment-output-")), store = new OutputStore(root);

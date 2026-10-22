@@ -1,6 +1,6 @@
 # @compforge/aide-plugin
 
-Public, host-independent contracts for Aide plugins. A plugin defines resources and business callbacks; Core owns persistence, scheduling, Outputs and Harness execution; Runner schedules Controllers and Host owns durable state and external capabilities. The package contains types and small shared values, not a host or Runner implementation.
+Public, host-independent contracts for Aide plugins. A plugin defines resources and business callbacks; Core owns persistence, scheduling and Harness execution; Runner schedules Controllers and Host owns durable state and external capabilities. The package contains types and small shared values, not a host or Runner implementation.
 
 See [plugin runtime](../../docs/plugin/README.md) for the process model and [Personal](../../docs/plugin/personal.md) for a built-in consumer. Start with the exported contracts in [src/index.ts](src/index.ts).
 
@@ -17,7 +17,7 @@ const plugin: PluginPackage = {
   version: "0.1.0",
   resources: [{
     type: EXAMPLE,
-    scope: "session",
+    scope: "shared",
     schema: {
       spec: z.object({ title: z.string() }).strict(),
       status: z.object({ phase: z.string().optional() }).strict(),
@@ -45,7 +45,7 @@ const plugin: PluginPackage = {
 export default plugin;
 ```
 
-`context.dataDirs` provides `global` (shared across Sessions), `session`, and `instance` directories for plugin-private files. Session storage is independent of execution cwd; there is no project directory scope.
+`context.runtime` exposes the execution environment. `context.dataDirs` provides `global` (package-wide) and `instance` directories for plugin-private files, independently of execution journals or cwd.
 
 An enabled instance has a host Binding and a Runner process. Register capabilities during activation and use `context.lifecycle.onClose` for cleanup. A plugin may manage resources in different namespaces; scope belongs to each resource, not to the package.
 
@@ -66,12 +66,7 @@ Requirements and forges expose typed list / get operations, with forge comments 
 
 ## Resources and scheduling
 
-Core `InputSpec.sender` optionally references the sender resource; system events and mixed-author observations may omit it. A Person profile holds no Input references.
-
-Core `InputSpec.relation` optionally records `sent`, `received` or `observed` relative to the served Person.
-Omit it when identity evidence is insufficient. Receiving or observing content does not imply endorsement,
-delegation or that the person read it. Producers retain original authorship and per-message evidence alongside the classification.
-Person bindings and classification policy belong to Personal; Core validates and persists the result.
+The runtime has no builtin resource types. Declare each domain resource in the plugin; Personal owns its Input, Output and Person models.
 
 [ResourceClient](src/resource.ts) provides create, get, list, patch, status update and deletion. Namespace defaults to user-global `v1`; list can include descendants and match exact label values. Annotations are opaque metadata, while labels support selection.
 
@@ -115,32 +110,17 @@ const result = await execution.verbs.say({ text: "Which environment should I use
 
 Controllers use `execution.verbs.connectors({ timeoutMs })` for connector actions. Other components may use `context.connectors` directly. Connector timeout ends the wait without promising cancellation of the underlying provider operation.
 
-`say({ text, inputIds?, respondToInputId?, target?, receivers?, idempotencyKey? })` persists an independent Output and returns `outputId`, without waiting for a reply or delivery. Input associations are optional and many-to-many; an omitted inputIds uses the execution inputId when present. A repeated idempotencyKey within the same Conversation incarnation and execution resolves to the same immutable Output. Use `execution.withContext({ conversationId, inputId, inputIds })` to select the context.
+`execution.verbs.action(name, input)` invokes an application-registered capability in the current execution scope. Action names are scoped to the plugin instance. Personal supplies its own typed `say` helper; communication policy is not a generic runtime verb.
 
-`resources.commit(writes)` atomically creates/replaces/patches local plugin resources together with Core Output creation. Plugin writes share one concrete resource scope (one Session or the plugin shared scope) and storage transaction; validation, quota or version failures roll everything back. Notifications follow commit. Other Core mutations and external side effects cannot join this transaction. Output is readable through ResourceClient and has a Host Printer; only Host delivery updates its status. See [Output](../../docs/output.md).
+`resources.commit(writes)` atomically creates/replaces/patches resources in one plugin scope. Validation, quota or version failures roll everything back; notifications follow commit. External side effects cannot join this transaction.
 
 `harness` creates a HarnessInvocation directly. Business ask, confirm, draft and Interaction contracts are removed. Native tool permissions and Hook trust remain explicit Host Approvals; requesting execution does not grant these permissions.
 
-For execution, `laneId` selects a Lane and `newLane: true` creates a side Lane. An explicit harnessTargetId pins the Target; otherwise the selected Target is resolved before dispatch. The returned Turn records execution, not domain acceptance.
+Application Harness context is derived from the main resource UID and Controller name. An explicit harnessTargetId selects a configured Target; otherwise the application default is used. `snapshot.harnessTargets` provides configuration discovery without Resource projections. `freshContext` replaces native context with the supplied bounded prompt and records a history cutoff.
 
-Harness and connector calls require timeoutMs covering their wait; say only waits for Output persistence. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
+Harness and connector calls require timeoutMs covering their wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
-## Communication addresses
-
-```ts
-interface Address { readonly kind: string }
-interface ChannelAddress extends Address {
-  readonly kind: "channel";
-  readonly channelId: string;
-  readonly endpoint: string;
-}
-```
-
-`InputSpec.sender` and `OutputSpec.receivers` reference Persons using ResourceRef; receivers is an optional array with at most 100 references, each pinned by uid. They describe who spoke and who the output is intended for, independently of its contributing Inputs and delivery location. Explicit receivers override the sender inferred by respondToInputId; [] selects no named receivers. Input associations alone do not infer receivers. Receivers do not produce additional sends or automatic platform mentions.
-
-`InputSpec.source?: Address` describes a communication location, independently of sender Person, producer and sessionId. `OutputSpec.target: Address` is the selected immutable destination. Address is the parent interface. Host admission supports Web and Lark ChannelAddress and RequirementAddress (source, category, id, canonical project scope). Requirement comments are delivered by the Host from Output; the Plugin ConnectorClient exposes paginated reads only. Web endpoints use the selected conversation ID; Lark endpoints join separately URI-encoded appId and chatId with `/`. Only the Channel interprets this encoding.
-
-Personal initializes `ConversationSpec.address` only when a Channel Input creates the Conversation. Subsequent Inputs, Source observations and default routing never replace or fill it. `say.respondToInputId` selects an attached Input address; `say.target` selects an explicit address. They are mutually exclusive. With neither, immediate Input addresses must agree; without immediate Inputs, say uses the Conversation address. Missing or ambiguous destinations reject before publishing an Output.
+The private execution backend still uses Turn/Lane representations in parts of the SDK and Adapter protocol. Application plugins must not select those legacy lanes or use execution Session IDs as resource ownership. See [execution boundary](../../docs/kernel.md#执行后端的边界).
 
 ## Resource Printers
 
@@ -151,7 +131,7 @@ import type { ResourceDefinition } from "@compforge/aide-plugin";
 
 const definition: ResourceDefinition<{ title: string }, { phase?: string }> = {
   type: EXAMPLE,
-  scope: "session",
+  scope: "shared",
   schema: {
     spec: z.object({ title: z.string() }).strict(),
     status: z.object({ phase: z.string().optional() }).strict(),
@@ -163,17 +143,16 @@ const definition: ResourceDefinition<{ title: string }, { phase?: string }> = {
 };
 ```
 
-Schema parsers synchronously validate and return canonical spec/status values. Optional create/update/delete validators run inside the storage transaction; their context lists current resources in the same scope, including preceding writes in a commit. Failures roll back writes and notifications. Unknown resource types reject. A `shared` resource belongs to the plugin instance across Sessions and has no sessionId; a `session` resource belongs to one execution Session. Controllers are optional and registered separately.
+Schema parsers synchronously validate and return canonical spec/status values. Optional create/update/delete validators run inside the storage transaction; their context lists current resources in the same scope, including preceding writes in a commit. Failures roll back writes and notifications. Unknown resource types reject. A `shared` resource belongs to the plugin instance and has no sessionId. ApplicationRuntime uses this scope. Controllers are optional and registered separately.
 
 Printer methods synchronously return strings from a supplied snapshot. Definition callbacks are trusted Host code: they must not perform I/O, call models, mutate resources or return Promises. Resource instances remain serializable data; functions are never stored in spec/status. Printer output is text, not trusted markup.
 
 Use `await context.printers.describe(resource)` / `summarize(resource)` wherever text is needed. Host callers use `manager.describeResource(pluginInstanceId, resource)` / `summarizeResource(...)`. Runner sends the snapshot over IPC; Host executes the Printer on a copy without re-fetching it or starting a Reconcile. Definitions remain available after Runner failure or shutdown.
 
-Core definitions resolve by exact apiVersion/kind; other definitions additionally use Plugin Instance. A plugin cannot claim a Core type or another plugin's type. Without a Printer, details use indented JSON and summaries use kind/name. A Printer error is logged and propagated rather than replaced with fallback output.
+Definitions resolve by Plugin Instance and apiVersion/kind. A plugin cannot claim another plugin's type. Without a Printer, details use indented JSON and summaries use kind/name. A Printer error is logged and propagated rather than replaced with fallback output.
 
 Retention rules belong to the same definition. `releasedAt` returns eligibility time, or undefined to protect the resource; `references` returns exact resource UIDs. Host applies quotas and eviction ordering only to released, unreferenced resources. Missing declarations protect restored records; new writes require declarations.
 
-The Host supplies an Input Printer that preserves original text and optional evidence in descriptions and produces a whitespace-normalized preview of at most 120 Unicode code points. It remains available without an active plugin. Web input details and Chief current-input prompts use this description; Web keeps the full original message as its main content. Existing Board presentation remains a separate structured UI contract.
 
 ## Hooks, commands and presentation
 
@@ -190,7 +169,7 @@ Inline hooks fail open on failure or timeout. Deferred hooks use best-effort bou
 
 [Commands](src/command.ts) receive invocation-scoped capabilities. Command verbs submit a turn or configure model defaults; capabilities expire with the invocation. Picker selections are new invocations, and remote search cannot retain a prior invocation's authority.
 
-[Target and Session projections](src/resource.ts) expose host facts through the same resource API. Core registers its resource types before plugin activation. Model discovery belongs to Target; changing SessionTargetBinding is limited to supported fields and eligible Targets.
+
 
 [Mentions](src/mention.ts) supply searchable, read-only context for explicit user selection. Keep search side-effect free; resolve is for selected references. [Board presentations](src/board.ts), pickers, mentions and toast are optional presentation contracts. Actual rendering depends on the consuming Channel; the current Web / Lark adapters do not expose every authoring capability.
 

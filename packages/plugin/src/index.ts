@@ -53,8 +53,6 @@ export type {
 } from "./hook.ts";
 
 export type {
-  SayInput,
-  SayResult,
   CompletedHarnessValue,
   HarnessInvocationInput,
   HarnessResult,
@@ -83,7 +81,7 @@ export type {
   PluginPackage,
   PluginLifecycle,
   PluginRegistry,
-  PluginSessionContext,
+  PluginRuntimeContext,
   ToastMessage,
   ToastSink,
   ToastTone,
@@ -111,8 +109,6 @@ export type {
   ControllerSource,
   CronSource,
   Source,
-  SourceDefinition,
-  SourceInput,
   SourceContext,
   SourceSignal,
 } from "./source.ts";
@@ -122,10 +118,6 @@ export type { Watch } from "./watch.ts";
 export type {
   ResourceRef,
   ResourceType,
-  AideTurnResourceData,
-  AideTurnResource,
-  AideTurnResourceApiVersion,
-  AideTurnResourceKind,
   Resource,
   ResourceClient,
   ResourceReader,
@@ -135,19 +127,8 @@ export type {
   ResourceListOptions,
   ResourceMetadata,
   ResourceOwnerReference,
-  AideSessionResource,
-  AideSessionResourceKind,
-  AideSessionResourceStatus,
-  AideTargetResource,
   AideTargetModel,
   AideTargetModelCatalog,
-  AideTargetResourceKind,
-  AideTargetResourceSpec,
-  AideTargetResourceStatus,
-  AideSessionTargetBindingResource,
-  AideSessionTargetBindingResourceKind,
-  AideSessionTargetBindingResourceSpec,
-  AideSessionTargetBindingResourceStatus,
 } from "./resource.ts";
 
 export type {
@@ -165,15 +146,10 @@ export type {
   TurnSummary,
   TurnSummaryToolCall,
 } from "./snapshot.ts";
-export { INPUT_TYPE } from "./input.ts";
-export { OUTPUT_TYPE } from "./output.ts";
-export type { Output, OutputSpec, OutputStatus } from "./output.ts";
 export type { ResourceCommit } from "./resource.ts";
-export type { InputSpec, InputStatus, InputReceipt, InputRelation } from "./input.ts";
 export type * from "./connectors/index.ts";
 
 export type { ExecutionAssociation } from "./reconcile-context.ts";
 export { iconFor } from "./icon.ts";
-export { bindSourceInput } from "./source.ts";
 
 export type { ResourceDefinition, ResourceRetention, ResourceSchema, ResourceValidator, ResourceValidationContext } from "./resource.ts";

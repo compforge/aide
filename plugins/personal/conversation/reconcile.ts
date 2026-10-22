@@ -1,6 +1,7 @@
 import { recordInputDelivery } from "./input.ts";
 import { batchOutputs } from "./outputs.ts";
-import type { PluginContext, ReconcileContext, Resource, InputSpec, InputStatus, Watch } from "@compforge/aide-plugin";
+import type { PluginContext, ReconcileContext, Resource, Watch } from "@compforge/aide-plugin";
+import type { InputSpec, InputStatus } from "../input/model.ts";
 import { INPUT_TYPE } from "../chief-model.ts";
 import { CONVERSATION_TYPE, type ConversationResource } from "./model.ts";
 import { activeBatch, type Batch } from "./batch.ts";
@@ -54,7 +55,7 @@ export async function reconcileConversation(context: PluginContext, execution: R
   }
   const pending: Input[] = [];
   for (const id of c.status.pendingInputIds) {
-    const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "aide-system", name: id });
+    const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: id });
     if (!input) throw new Error(`Pending Input missing: ${id}`);
     pending.push(input);
   }

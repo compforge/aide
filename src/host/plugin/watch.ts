@@ -1,7 +1,4 @@
-import type {
-  ReconcileRequest,
-  Watch,
-} from "@compforge/aide-plugin";
+import type { ReconcileRequest, Watch } from "@compforge/aide-plugin";
 
 import type { ResourceClientChange } from "./resource/client.ts";
 import { resourceTypeKey, validateResourceType } from "./resource/type.ts";

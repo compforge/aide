@@ -1,4 +1,5 @@
-import type { InputSpec, ResourcePrinter } from "@compforge/aide-plugin";
+import type { ResourcePrinter } from "@compforge/aide-plugin";
+import type { InputSpec } from "./model.ts";
 
 /**
  * @spec Render the original Input facts without fetching context or interpreting provider-specific observations.

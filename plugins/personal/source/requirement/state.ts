@@ -1,4 +1,5 @@
-import type { RequirementIdentity, RequirementSummary, RequirementComment, RequirementPage, SourceInput } from "@compforge/aide-plugin";
+import type { RequirementIdentity, RequirementSummary, RequirementComment, RequirementPage } from "@compforge/aide-plugin";
+import type { SourceInput } from "../input.ts";
 export interface CommentWindow { start: string; end: string; cursor?: string; page?: RequirementPage<RequirementComment> }
 export interface TrackedRequirement {
   identity: RequirementIdentity;

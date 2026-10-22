@@ -12,11 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type {
-  DeferredHookStage,
-  HookSubjectMap,
-  InlineHookStage,
-} from "@compforge/aide-plugin";
+import type { DeferredHookStage, HookSubjectMap, InlineHookStage } from "@compforge/aide-plugin";
 
 import { CoreSession } from "../src/host/core/index.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
@@ -167,7 +163,7 @@ describe("Plugin Runner process boundary", () => {
       packageVersion: "1.0.0",
     });
     const manager = new Manager({
-      say: async (_scope, text) => { outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; },
+      actions: { "process_default/notify": async (_scope, input) => { const text = (input as { text: string }).text; outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; } },
       instances,
       session,
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
@@ -182,8 +178,9 @@ describe("Plugin Runner process boundary", () => {
     });
 
     await manager.start();
+    await manager.resourceClient("process_default").create({ apiVersion: "tests.aide.dev/v1alpha1", kind: "Review" }, { name: "turn_crash", spec: {} });
     await waitFor(() => outputs.length === 1);
-    expect(outputs).toEqual(["Review turn_runner?"]);
+    expect(outputs).toEqual(["Review turn_crash?"]);
     await Bun.sleep(300);
     expect(manager.isInstanceActive("process_default")).toBe(true);
     await manager.settled();
@@ -201,7 +198,7 @@ describe("Plugin Runner process boundary", () => {
       packageVersion: "1.0.0",
     });
     const manager = new Manager({
-      say: async (_scope, text) => { outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; },
+      actions: { "process_default/notify": async (_scope, input) => { const text = (input as { text: string }).text; outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; } },
       instances,
       session,
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
@@ -240,7 +237,7 @@ describe("Plugin Runner process boundary", () => {
     await manager.close();
   });
 
-  test("routes Core Resource reads and patch across the process boundary", async () => {
+  test("exposes no builtin resources across the process boundary", async () => {
     const { instances, session, entry } = stores();
     instances.create({
       pluginInstanceId: "process_default",
@@ -267,18 +264,8 @@ describe("Plugin Runner process boundary", () => {
     });
     await manager.start();
 
-    await manager.inlineHook("view.input", {
-      inputId: "in_runner_resource",
-      eventId: "ev_runner_resource",
-      seq: 1,
-      input: {
-        kind: "prompt",
-        text: "route from hook",
-        harnessTargetId: "codex",
-      },
-    });
-
-    expect(manager.resolveHarnessTargetId("codex")).toBe("codex_secondary");
+    const result = await executeCommand(manager, "process-check", { argument: "no-builtins" });
+    expect(result).toEqual({ kind: "message", text: JSON.stringify(["Input", "Output", "Turn", "Session", "Target", "SessionTargetBinding"]) });
     await manager.close();
   });
 
@@ -292,7 +279,7 @@ describe("Plugin Runner process boundary", () => {
       packageVersion: "1.0.0",
     });
     const manager = new Manager({
-      say: async (_scope, text) => { outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; },
+      actions: { "process_default/notify": async (_scope, input) => { const text = (input as { text: string }).text; outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; } },
       instances,
       session,
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
@@ -370,7 +357,7 @@ describe("Plugin Runner process boundary", () => {
     const activationFailures: unknown[] = [];
     const failures: PluginRunnerFailure[] = [];
     const manager = new Manager({
-      say: async (_scope, text) => { outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; },
+      actions: { "process_default/notify": async (_scope, input) => { const text = (input as { text: string }).text; outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; } },
       instances,
       session,
       pluginSupervisor: new PluginSupervisor(),
@@ -391,6 +378,7 @@ describe("Plugin Runner process boundary", () => {
     });
 
     await manager.start();
+    await manager.resourceClient("process_default").create({ apiVersion: "tests.aide.dev/v1alpha1", kind: "Review" }, { name: "turn_crash", spec: {} });
     await waitFor(() => outputs.length === 1);
     await session.flushLogs();
     expect(activationFailures).toEqual([]);
@@ -420,21 +408,7 @@ describe("Plugin Runner process boundary", () => {
       kind: "message",
       text: JSON.stringify({
         global: join(root, "plugins", "tests%2Fprocess-plugin"),
-        session: join(
-          root,
-          "sessions",
-          "bs_runner",
-          "plugins",
-          "tests%2Fprocess-plugin",
-        ),
-        instance: join(
-          root,
-          "sessions",
-          "bs_runner",
-          "plugins",
-          "tests%2Fprocess-plugin",
-          "process_default",
-        ),
+        instance: join(root, "plugins", "tests%2Fprocess-plugin", "instances", "process_default"),
       }),
     });
     await expect(

@@ -1,14 +1,5 @@
 import { deepFreeze } from "../../reconcile/snapshot.ts";
-import type {
-  Controller as PluginController,
-  ControllerSource,
-  CronSource,
-  AnyResourceNamespace,
-  ResourceNamespace,
-  ResourceRef,
-  ResourceType,
-  Watch,
-} from "@compforge/aide-plugin";
+import type { Controller as PluginController, ControllerSource, CronSource, AnyResourceNamespace, ResourceNamespace, ResourceRef, ResourceType, Watch } from "@compforge/aide-plugin";
 
 import type { PluginResource } from "./resource/store.ts";
 import type { ResourceClientChange } from "./resource/client.ts";
@@ -137,6 +128,7 @@ export class ReconcileRetry {
 export interface ControllerOptions<TSpec, TStatus> {
   name?: string;
   store: PluginResourceStore;
+  runtimeId?: string;
   resourceType: ResourceType;
   sources?: readonly ControllerSource<TSpec>[];
   watches?: readonly Watch[];
@@ -270,7 +262,7 @@ export class Controller<TSpec, TStatus> {
     this.onWatchError = options.onWatchError;
     this.scope = Object.freeze({
       controllerName: options.name,
-      aideSessionId: options.store.aideSessionId,
+      aideSessionId: options.runtimeId ?? options.store.aideSessionId,
       pluginInstanceId: options.store.pluginInstanceId,
       namespace: "v1",
       resourceApiVersion: options.resourceType.apiVersion,
@@ -352,8 +344,6 @@ export class Controller<TSpec, TStatus> {
   ): Promise<readonly ReconcileKey[]> {
     if (
       change.pluginInstanceId !== this.scope.pluginInstanceId ||
-      this.scope.namespace === "aide-system" ||
-      change.resource.metadata.namespace === "aide-system" ||
       !namespaceContains(
         this.scope.namespace,
         change.resource.metadata.namespace,
@@ -419,8 +409,6 @@ export class Controller<TSpec, TStatus> {
     if (
       resource.apiVersion !== this.resourceType.apiVersion ||
       resource.kind !== this.resourceType.kind ||
-      resource.namespace === "aide-system" ||
-      this.scope.namespace === "aide-system" ||
       !namespaceContains(this.scope.namespace, resource.namespace)
     ) {
       return false;
@@ -558,8 +546,6 @@ export class Controller<TSpec, TStatus> {
     if (
       key.aideSessionId !== this.scope.aideSessionId ||
       key.pluginInstanceId !== this.scope.pluginInstanceId ||
-      key.namespace === "aide-system" ||
-      this.scope.namespace === "aide-system" ||
       !namespaceContains(this.scope.namespace, key.namespace) ||
       key.resourceApiVersion !== this.scope.resourceApiVersion ||
       key.resourceKind !== this.scope.resourceKind || (key.controllerName ?? "") !== (this.scope.controllerName ?? "") ||

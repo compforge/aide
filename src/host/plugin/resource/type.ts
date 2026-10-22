@@ -39,3 +39,8 @@ export function resourceTypeKey(type: ResourceType): string {
   validateResourceType(type);
   return JSON.stringify([type.apiVersion, type.kind]);
 }
+
+/** Persistent identities may contain a namespace separator, but never filesystem separators or dot segments. */
+export function assertResourceUid(value: string): void {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)) throw new Error("Resource uid must be a stable identifier without path separators");
+}

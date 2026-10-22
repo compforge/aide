@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { INPUT_TYPE, type InputSpec, type InputStatus, type Resource } from "@compforge/aide-plugin";
-import { inputPrinter } from "../src/host/input/printer.ts";
+import { type Resource } from "@compforge/aide-plugin";
+import { INPUT_TYPE, type InputSpec, type InputStatus } from "../plugins/personal/input/model.ts";
+import { inputPrinter } from "../plugins/personal/input/printer.ts";
 
 function input(spec: Partial<InputSpec> = {}): Resource<InputSpec, InputStatus> {
-  return { ...INPUT_TYPE, metadata: { name: "message-1", namespace: "aide-system", uid: "input:message-1",
+  return { ...INPUT_TYPE, metadata: { name: "message-1", namespace: "v1", uid: "input:message-1",
     resourceVersion: "1", generation: 1, creationTimestamp: "2026-10-21T00:00:00Z" },
     spec: { origin: "channel", originId: "web", text: "第一行\n  第二行 <script>alert(1)</script>", ...spec }, status: {} };
 }

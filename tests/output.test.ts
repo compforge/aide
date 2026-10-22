@@ -6,12 +6,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { OUTPUT_TYPE, type OutputSpec } from "@compforge/aide-plugin";
-import { OutputStore } from "../src/host/output/store.ts";
-import { outputPrinter } from "../src/host/output/printer.ts";
+import { OUTPUT_TYPE, type OutputSpec } from "../plugins/personal/output/model.ts";
+import { OutputStore } from "../plugins/personal/output/store.ts";
+import { outputPrinter } from "../plugins/personal/output/printer.ts";
 import { outputView } from "../src/output.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
+import { personalAdmission } from "../plugins/personal/admission.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ResourceCapacityError, ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
 import { ConversationStore, seedInput, fixtureBatch } from "./conversation-fixture.ts";
@@ -25,7 +25,7 @@ async function setup(t: TestContext) {
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   const conversations = new ConversationStore(session), outputs = conversations.outputStore;
   const conversation = await conversations.ensure("topic");
-  const provider = new AideResourceProvider({ session, outputs });
+  const provider = personalAdmission(conversations.inputStore, outputs);
   const changes: string[] = [];
   const client = createResourceClient(conversations.resources, (c) => changes.push(c.resource.metadata.name), undefined, provider);
   const spec = (text = "结果"): OutputSpec => outputSpec(conversation, { text, conversationId: "topic" });
@@ -47,15 +47,15 @@ test("Output persists independent many-to-many associations, immutable content a
   assert.match(outputPrinter.describe(first), /第一条\n完整详情/);
   assert.equal(outputPrinter.summarize(first), "第一条 完整详情");
   assert.equal((await f.client.list(OUTPUT_TYPE)).length, 3);
-  assert.equal((await f.client.get({ ...OUTPUT_TYPE, namespace: "aide-system", name: "one", uid: first.metadata.uid }))?.metadata.uid, first.metadata.uid);
-  await assert.rejects(f.client.patchStatus(first, { phase: "pending" }), /Cannot update builtin/);
+  assert.equal((await f.client.get({ ...OUTPUT_TYPE, namespace: "v1", name: "one", uid: first.metadata.uid }))?.metadata.uid, first.metadata.uid);
+  assert.equal((await f.client.patchStatus(first, { phase: "pending" })).status.phase, "pending");
 });
 
 /** @case Atomic publication includes resource CAS, Output admission, quota checks and observer visibility. */
 test("Resource commit rolls back result and Output together on validation, conflict or capacity failure", async (t) => {
   const f = await setup(t);
   const type = { apiVersion: "test.dev/v1", kind: "Work" };
-  f.conversations.resources.storage.register("personal", [definition(type)]);
+  f.conversations.resources.storage.register("personal", [definition(type, "shared")]);
   let work = await f.client.create(type, { name: "work", spec: {}, status: { done: false } });
   const write = (name: string, spec: OutputSpec = f.spec()) => ({ operation: "create" as const, type: OUTPUT_TYPE, name, spec });
   let notifications = 0;

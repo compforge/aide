@@ -1,5 +1,5 @@
-import type { Address } from "./address.ts";
-import type { ResourceRef } from "./resource.ts";
+import type { Address } from "@compforge/aide-plugin";
+import type { ResourceRef } from "@compforge/aide-plugin";
 
 export interface InputReceipt { inputId: string; at: string }
 

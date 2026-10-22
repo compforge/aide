@@ -20,6 +20,15 @@ const plugin: PluginPackage = {
       name: "process-check",
       description: "Exercise Plugin Runner process isolation",
       async execute(input, command) {
+        if (input.argument === "no-builtins") {
+          const rejected: string[] = [];
+          for (const kind of ["Input", "Output", "Turn", "Session", "Target", "SessionTargetBinding"]) {
+            try { await context.resources.list({ apiVersion: "aide.dev/v1alpha1", kind }); }
+            catch (error) { if (!String(error).includes("Unknown resource definition")) throw error; rejected.push(kind); }
+          }
+          return { kind: "message", text: JSON.stringify(rejected) };
+        }
+
         if (input.argument === "submit") {
           await command.verbs.configureModel({ model: "fast", effort: "medium" });
           const receipt = await command.verbs.submit({ prompt: "task" });
@@ -81,43 +90,9 @@ const plugin: PluginPackage = {
           component: "hook",
           attributes: { inputId: hook.subject.inputId },
         });
-        if (
-          hook.subject.input.kind === "prompt" &&
-          hook.subject.input.text === "route from hook"
-        ) {
-          const bindingType = {
-            apiVersion: "aide.dev/v1alpha1",
-            kind: "SessionTargetBinding",
-          } as const;
-          const targetType = {
-            apiVersion: "aide.dev/v1alpha1",
-            kind: "Target",
-          } as const;
-          const binding = (await context.resources.list(bindingType))[0];
-          const target = (await context.resources.list<
-            { harness: string },
-            { phase: string }
-          >(targetType)).find((candidate) =>
-            candidate.metadata.name === "codex_secondary"
-          );
-          if (!binding || !target) throw new Error("missing routing Resources");
-          await context.resources.patch(binding, {
-            type: "merge",
-            value: {
-              spec: {
-                targetRef: {
-                  ...targetType,
-                  namespace: target.metadata.namespace,
-                  name: target.metadata.name,
-                  uid: target.metadata.uid,
-                },
-              },
-            },
-          });
-          return;
-        }
+
         if (hook.subject.input.kind !== "prompt" || hook.subject.input.text !== "say from hook") return;
-        await hook.verbs.say({ text: "Continue from Hook?" });
+        await hook.verbs.action("notify", { text: "Continue from Hook?" });
       },
     });
     context.hooks.register({
@@ -125,7 +100,7 @@ const plugin: PluginPackage = {
       stage: "view.output",
       async run(hook) {
         if (hook.subject.kind !== "transcript") return;
-        await hook.verbs.say({ text: "Continue outbound publication?" });
+        await hook.verbs.action("notify", { text: "Continue outbound publication?" });
       },
     });
     context.controllers.register<{ blockMs?: number }, Record<string, never>>({
@@ -138,11 +113,11 @@ const plugin: PluginPackage = {
     });
     context.controllers.register({
       resourceType: {
-        apiVersion: "aide.dev/v1alpha1",
-        kind: "Turn",
+        apiVersion: "tests.aide.dev/v1alpha1",
+        kind: "Review",
       },
       async reconcile(ctx, turn) {
-        await ctx.verbs.say({ text: `Review ${turn.metadata.name}?` });
+        await ctx.verbs.action("notify", { text: `Review ${turn.metadata.name}?` });
       },
     });
   },

@@ -2,9 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  MAX_VERB_TIMEOUT_MS,
-} from "@compforge/aide-plugin";
+import { MAX_VERB_TIMEOUT_MS } from "@compforge/aide-plugin";
 
 import {
   Controller,
@@ -115,7 +113,7 @@ describe("plugin Controller", () => {
       }],
       async reconcile(_context, resource) {
         reconciled.push(resource.metadata.namespace);
-        await _context.verbs.say({ text: "Observed" });
+        await _context.verbs.action("notify", { text: "Observed" });
       },
       async invokeVerb(scope) {
         actionNamespaces.push(scope.namespace);

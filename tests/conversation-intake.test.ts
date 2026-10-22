@@ -16,9 +16,9 @@ test("Channel and Source Inputs share idempotent admission beyond the old pendin
   const home = mkdtempSync(join(tmpdir(), "aide-intake-"));
   const aide = new Aide(home, fakeOptions({ execute: async () => { throw new Error("No work"); } }, home), pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
-  const scope = aide.session("topic"), conversation = await scope.conversations.ensure();
+  const scope = aide.personal, conversation = await scope.conversations.ensure("topic");
   const client = scope.plugins.resourceClient("personal");
-  const target = { sessionId: scope.id, name: conversation.metadata.name, uid: conversation.metadata.uid };
+  const target = { name: conversation.metadata.name, uid: conversation.metadata.uid };
   for (let i = 0; i < 125; i++) {
     const input = await scope.conversations.submit(`input-${i}`, { origin: i % 2 ? "channel" : "source", originId: i % 2 ? "web" : "personal.environments", text: `fact ${i}` });
     assert.equal(await appendConversationInput(client, target, input), true);
@@ -38,14 +38,14 @@ test("A say request for information ends its Batch; the answer is a new Input an
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const first = fixtureIncoming({ channelId: "web", id: "first", sessionId: "me", text: "检查环境" });
   await aide.receive(first); await aide.settled();
-  const before = aide.session("me").conversations.resource("me")!.status.batch!;
+  const before = aide.personal.conversations.resource("me")!.status.batch!;
   assert.equal(before.phase, "done");
   assert.equal(aide.outputs().at(-1)!.text, "请提供目标环境。");
-  assert.equal(aide.session("me").core.projection.approvals.size, 0);
+  assert.equal(aide.personal.core.projection.approvals.size, 0);
   await aide.close();
   aide = new Aide(home, options, pino({ level: "silent" }));
   await aide.receive(fixtureIncoming({ channelId: "web", id: "answer", sessionId: "me", text: "test 环境" })); await aide.settled();
-  const after = aide.session("me").conversations.resource("me")!.status.batch!;
+  const after = aide.personal.conversations.resource("me")!.status.batch!;
   assert.notEqual(after.id, before.id);
   assert.equal(after.phase, "done");
   assert.match(prompts.at(-1)!, /请提供目标环境/);

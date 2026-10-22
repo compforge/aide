@@ -1,15 +1,5 @@
 import { createConnectorClient } from "./connector-client.ts";
-import {
-  MAX_VERB_TIMEOUT_MS,
-  type HarnessInvocationInput,
-  type HarnessResult,
-  type HookContext,
-  type HookStage,
-  type HookSubjectMap,
-  type PluginVerbs,
-  type ReconcileContext,
-  type ReconcileSnapshot,
-} from "@compforge/aide-plugin";
+import { MAX_VERB_TIMEOUT_MS, type HarnessInvocationInput, type HarnessResult, type HookContext, type HookStage, type HookSubjectMap, type PluginVerbs, type ReconcileContext, type ReconcileSnapshot } from "@compforge/aide-plugin";
 
 import type { ExecutionScope, InvokeVerb } from "./protocol/verbs.ts";
 
@@ -35,7 +25,7 @@ function validateHarness(input: HarnessInvocationInput): void {
   validateTimeout("harness", input.timeoutMs);
   nonEmpty("harness title", input.title);
   nonEmpty("harness prompt", input.prompt);
-  nonEmpty("harness laneId", input.laneId);
+  if (input.laneId !== undefined) nonEmpty("harness laneId", input.laneId);
   if (input.freshContext !== undefined && typeof input.freshContext !== "boolean") throw new Error("Invalid freshContext");
   if (input.newLane !== undefined && typeof input.newLane !== "boolean") {
     throw new Error(`harness newLane is invalid: ${String(input.newLane)}`);
@@ -55,9 +45,9 @@ export function createPluginVerbs(
   invoke: InvokeVerb,
 ): PluginVerbs {
   return Object.freeze({
-    async say(input: import("@compforge/aide-plugin").SayInput) {
-      nonEmpty("say text", input.text);
-      return await invoke(scope, { verb: "say", input }) as import("@compforge/aide-plugin").SayResult;
+    async action<T>(name: string, input: unknown) {
+      nonEmpty("action name", name);
+      return await invoke(scope, { verb: "action", name, input }) as import("@compforge/aide-plugin").VerbResult<T>;
     },
     connectors(options: { timeoutMs: number }) {
       validateTimeout("connector", options.timeoutMs);

@@ -1,8 +1,10 @@
+import { InputStore } from "../plugins/personal/input/store.ts";
+import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
-import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
-import { OutputStore } from "../src/host/output/store.ts";
-import { conversationLane } from "../plugins/personal/conversation/model.ts";
+import { personalAdmission } from "../plugins/personal/admission.ts";
+import { OutputStore } from "../plugins/personal/output/store.ts";
+import { resourceExecutionKey } from "../src/host/plugin/execution-context.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import { LOCAL_ME } from "../plugins/personal/person/model.ts";
 import type { Persons } from "../plugins/personal/person/service.ts";
@@ -71,9 +73,9 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const persons = sharedPersons ?? catalog.persons;
   await persons.initialize();
   const session = sessions.createSession({ cwd: root });
-  const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
+  const resources = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
   resources.storage.register("personal", personalDefinitions);
-  const store = new Store(resources, createResourceClient(resources, undefined, undefined, new AideResourceProvider({ session, outputs: new OutputStore(root) })), new ConversationStore(session));
+  const store = new Store(resources, createResourceClient(resources, undefined, undefined, personalAdmission(new InputStore(root), new OutputStore(root))), new ConversationStore(session));
   const work = new WorkService(store, "me", pino({ level: "silent" }));
   const inputs = { cwd: root, agentDir, model };
   const config = { ...inputs, config: await resolvePiConfig({ ...inputs, ...(harness === "chief" ? { skillPaths: [] } : {}) }) };
@@ -274,7 +276,7 @@ test("Pi requires startup configuration and Chief requires its bound factory", a
 });
 
 // @case session_native_resume: isolated sessions survive restart and reuse Pi history; cwd changes reset only native bindings.
-test("Aide keeps stable Sessions and transfers explicit Batch context across fresh native sessions and restart", { timeout: 30_000 }, async (t) => {
+test("Aide transfers resource-owned Batch context across fresh native sessions and restart", { timeout: 30_000 }, async (t) => {
   const fixture = await setup(t, (_request, index) => index % 2 === 0 ? { tool: "say", args: { text: `native-response-${index / 2}` } } : { text: `Internal summary ${Math.floor(index / 2)}` });
   const home = join(fixture.config.cwd, "aide");
   const log = pino({ level: "silent" });
@@ -284,17 +286,19 @@ test("Aide keeps stable Sessions and transfers explicit Batch context across fre
       chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }, log);
   const send = async (sessionId: string, conversationId: string, id: string) => {
     await aide.receive(fixtureIncoming({ channelId: "web", sessionId, conversationId, id, text: `question-${id}` })); await aide.settled();
-    assert.equal(aide.findConversation(conversationId)!.conversations.inputs().at(-1)!.consumption.phase, "done");
+    assert.equal(aide.personal.conversations.inputs().at(-1)!.consumption.phase, "done");
   };
   const binding = (sessionId: string, conversationId: string) => {
-    const session = new SessionStore(home).openSession(sessionId);
+    const session = new SessionStore(home).openSession(aide.runtime.id);
     const target = chiefTarget(conversationId);
-    const laneId = conversationLane(aide.findConversation(conversationId)!.conversations.resource(conversationId)!);
+    const r = aide.personal.conversations.resource(conversationId)!;
+    const laneId = resourceExecutionKey({ aideSessionId: aide.runtime.id, pluginInstanceId: "personal", namespace: "v1", executionId: "test", controllerName: "batch",
+      resourceRef: { apiVersion: r.apiVersion, kind: r.kind, namespace: r.metadata.namespace, name: r.metadata.name, uid: r.metadata.uid } });
     return session.meta.lanes[laneId]!.harnessSessions[target]!;
   };
   aide = open();
   try {
-    assert.equal(aide.sessions().length, 0);
+    assert.equal(aide.runtime.plugins.listInstances().length, 1);
     await send("lark:app:group-a", "lark:app:group-a", "a1");
     const original = binding("lark:app:group-a", "lark:app:group-a");
     await send("lark:app:group-a", "lark:app:group-a", "a2");
@@ -305,7 +309,7 @@ test("Aide keeps stable Sessions and transfers explicit Batch context across fre
     assert.doesNotMatch(JSON.stringify(fixture.requests[4]), /question-a1|native-response-0/);
     await aide.close();
     aide = open(); await aide.start();
-    assert.equal(aide.sessions().length, 2);
+    assert.equal(aide.runtime.plugins.listInstances().length, 1);
     await send("lark:app:group-a", "lark:app:group-a", "a3");
     assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
     assert.match(JSON.stringify(fixture.requests[6]), /native-response-1/);
@@ -314,14 +318,14 @@ test("Aide keeps stable Sessions and transfers explicit Batch context across fre
     await aide.close();
     const cwd = join(fixture.config.cwd, "other-cwd"); mkdirSync(cwd);
     aide = open(cwd); await aide.start();
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a").resumeState, undefined);
-    assert.ok((binding("lark:app:group-a", "lark:app:group-a").contextAfterSeq ?? 0) >= (original.contextAfterSeq ?? 0));
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a")?.resumeState, undefined);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a"), undefined, "cwd change clears the native binding; the persisted Batch retains explicit history");
     await send("lark:app:group-a", "lark:app:group-a", "a4");
     assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
     assert.equal(aide.outputs().filter((message) => message.conversationId === "lark:app:group-a").length, 4);
     const beforeDelete = binding("lark:app:group-a", "lark:app:group-a");
-    const conversation = aide.findConversation("lark:app:group-a")!.conversations.get("lark:app:group-a")!;
-    assert.deepEqual(await aide.deleteConversation(conversation.id, conversation.revision, aide.findConversation(conversation.id)!.conversations.resource(conversation.id)!.metadata.uid), { deleted: true });
+    const conversation = aide.personal.conversations.get("lark:app:group-a")!;
+    assert.deepEqual(await aide.deleteConversation(conversation.id, conversation.revision, aide.personal.conversations.resource(conversation.id)!.metadata.uid), { deleted: true });
     await aide.settled();
     await send("lark:app:group-a", "lark:app:group-a", "a5");
     assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, beforeDelete.harnessSessionId);
@@ -503,7 +507,7 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
     assert.match(JSON.stringify(request.messages), /fixture-as-ops/);
     assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|create_work/);
   }
-  const session = new SessionStore(home).openSession("me");
+  const session = new SessionStore(home).openSession(aide.runtime.id);
   assert.equal(session.meta.harnessTargets.default!.harness, "pi");
   assert.ok(Object.values(session.meta.lanes).some((lane) => lane.harnessSessions.default?.harness === "pi"));
 });
@@ -537,7 +541,7 @@ test("Chief summary rebuild fences forgotten history from native resume and Ledg
     for (const id of ["forgotten-marker", "retained-marker"]) {
       await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "me", id, text: id + "x".repeat(2000) })); await aide.settled();
     }
-    const c = aide.findConversation("me")!.conversations.resource("me")!;
+    const c = aide.personal.conversations.resource("me")!;
     assert.equal(c.status.pendingInputIds.length, 0, JSON.stringify(c.status));
     assert.equal(c.status.batch!.phase, "done");
     assert.match(c.status.batch!.result!.context!, /Earlier facts/);
@@ -549,6 +553,6 @@ test("Chief summary rebuild fences forgotten history from native resume and Ledg
     const rebuilt = JSON.stringify(fixture.requests[before]!.messages);
     assert.match(rebuilt, /Earlier facts|retained-marker/);
     assert.doesNotMatch(rebuilt, /forgotten-marker|aide-sync/);
-    assert.equal(aide.findConversation("me")!.conversations.resource("me")!.status.batch!.phase, "done");
+    assert.equal(aide.personal.conversations.resource("me")!.status.batch!.phase, "done");
   } finally { await aide.close(); }
 });

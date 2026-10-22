@@ -1,14 +1,15 @@
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
-import { INPUT_TYPE, type ResourceDefinition, type InputSpec, type InputStatus } from "@compforge/aide-plugin";
-import { AddressSchema } from "../../address.ts";
-import { parseResourceNamespace } from "../plugin/namespace.ts";
+import { type ResourceDefinition } from "@compforge/aide-plugin";
+import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
+import { AddressSchema } from "../../../src/address.ts";
+import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { inputPrinter } from "./printer.ts";
 export const InputSpecSchema = z.object({ source: AddressSchema.optional(), sessionId: z.string().min(1).max(200).optional(), origin: z.enum(["channel", "source"]),
   originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
   sender: z.object({ apiVersion: z.string(), kind: z.literal("Person"), sessionId: z.string().optional(), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict().optional(),
   attention: z.enum(["immediate", "deferred"]).optional(),
-  originRef: z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform((value) => value === "aide-system" ? value : parseResourceNamespace(value)), name: z.string(), uid: z.string(), sessionId: z.string().optional() }).strict().optional(),
+  originRef: z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform((value) => value === "v1" ? value : parseResourceNamespace(value)), name: z.string(), uid: z.string(), sessionId: z.string().optional() }).strict().optional(),
   text: z.string().min(1).max(32_000), timezone: z.string().optional(),
   observation: z.record(z.string(), z.unknown()).optional() }).strict();
 

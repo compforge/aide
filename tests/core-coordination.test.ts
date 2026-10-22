@@ -24,12 +24,12 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit conve
   instances.create({ pluginInstanceId: "fixture", pluginId: "tests/coordination", packageVersion: "1.0.0", marketplace: "builtin" });
   const options = fakeOptions({ execute: async () => ({ action: "done", summary: "checked", notification: "ok", question: null, nextAt: null }) }, root);
   const core = new CoreSession({ session, controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter, resolveTarget: () => ({ id: "default", harness: "codex" }) },
-    plugins: { instances, pluginSupervisor: new PluginSupervisor(), harnessTargets: [{ id: "default", harness: "codex" }], selectedHarnessTargetId: () => "default",
+    plugins: { resourceHome: root, instances, pluginSupervisor: new PluginSupervisor(), harnessTargets: [{ id: "default", harness: "codex" }], selectedHarnessTargetId: () => "default",
       loadPackageEntry: async (pluginId, version) => ({ pluginId, version, entryUrl: new URL("./fixtures/coordination-plugin.ts", import.meta.url).href,
         resourcesUrl: new URL("./fixtures/coordination-definitions.ts", import.meta.url).href }) },
   });
   const manager = core.pluginManager!;
-  const resources = new PluginResourceStore({ session, pluginInstanceId: "fixture" });
+  const resources = new PluginResourceStore({ home: root, pluginInstanceId: "fixture" });
   const conversations = new ConversationStore(session);
   const store = new Store(resources, manager.resourceClient("fixture"), conversations);
   const work = new WorkService(store, "group-a", pino({ level: "silent" }));
@@ -39,8 +39,7 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit conve
     await manager.settled();
     const observer = { apiVersion: "tests.aide.dev/v1alpha1", kind: "WorkObserver" };
     expect(resources.get(observer, "observer", "v1/project/coordination").status).toMatchObject({ answer: "observed", count: 1 });
-    const projection: ChannelService = { inputDefinition: () => { throw new Error("No Input expected"); }, sessions: () => [{ id: session.id, core, conversations: conversations }],
-      findConversation: (id) => id === "group-a" ? { id: session.id, core, conversations: conversations } : undefined,
+    const projection: ChannelService = { inputDefinition: () => { throw new Error("No Input expected"); }, runtime: core, conversations,
       subscribe: (listener) => core.subscribe(listener), outputs: () => [], invocations: () => manager.listHarnessInvocations(), conversationIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
     expect(conversationView(projection, "group-a").blocks.some((block) => block.type === "execution")).toBe(true);
     expect(conversationView(projection, "group-b").blocks).toHaveLength(0);

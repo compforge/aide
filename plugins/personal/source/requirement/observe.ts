@@ -1,4 +1,5 @@
-import { bindSourceInput, type ConnectorClient, type PluginContext, type RequirementAccount, type RequirementIdentity, type RequirementSummary, type Resource, type SourceInput } from "@compforge/aide-plugin";
+import { type ConnectorClient, type PluginContext, type RequirementAccount, type RequirementIdentity, type RequirementSummary, type Resource } from "@compforge/aide-plugin";
+import { bindSourceInput, type SourceInput } from "../input.ts";
 import { isDeepStrictEqual } from "node:util";
 import { requirementAddress } from "../../../../connectors/requirements/address.ts";
 import { Persons } from "../../person/service.ts";
@@ -46,7 +47,7 @@ class RequirementObservation {
   private async deliver() {
     const plan = this.resource.status.pending;
     if (!plan) return;
-    if (!await this.context.resources.get({ ...INPUT_TYPE, namespace: "aide-system", name: plan.name })) {
+    if (!await this.context.resources.get({ ...INPUT_TYPE, namespace: "v1", name: plan.name })) {
       await bindSourceInput(SOURCES.requirements, this.resource, this.context.resources)(plan.name, plan.spec);
     }
     await this.save({ tracked: { ...this.tracked, [plan.key]: plan.entry }, pending: null });

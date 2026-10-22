@@ -1,25 +1,26 @@
+import { say } from "./output/action.ts";
 import { sameAddress } from "../../src/address.ts";
 import { outputWrite } from "./output.ts";
-import type { OutputStore } from "../../src/host/output/store.ts";
+import type { OutputStore } from "./output/store.ts";
 import { updateBatch } from "./conversation/state.ts";
 import { activeBatch } from "./conversation/batch.ts";
 import { appendConversationInput } from "./conversation/input.ts";
 import { createPiAgent } from "../../agents/pi/agent.ts";
-import { inputPrinter } from "../../src/host/input/printer.ts";
+import { inputPrinter } from "./input/printer.ts";
 import type { Logger } from "pino";
-import type { ResourceType, InputReceipt } from "@compforge/aide-plugin";
+import type { ResourceType } from "@compforge/aide-plugin";
+import type { InputReceipt } from "./input/model.ts";
 import type { Manager } from "../../src/host/plugin/manager.ts";
-import { CoreSession } from "../../src/host/core/index.ts";
-import { type SessionHandle } from "../../src/host/store/store.ts";
+import { ApplicationRuntime } from "../../src/host/runtime/index.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
 import { IncomingSchema, type Incoming, type OutputView } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { output, Store } from "./store.ts";
 import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
 import { CONVERSATION_TYPE, INPUT_TYPE, chiefTarget, digest } from "./chief-model.ts";
-import { conversationLane, type ConversationDeletion } from "./conversation/model.ts";
+import { type ConversationDeletion } from "./conversation/model.ts";
 import { ConversationStore, conversationKey } from "./conversation/store.ts";
-import type { InputStore } from "../../src/host/input/store.ts";
+import type { InputStore } from "./input/store.ts";
 import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
@@ -37,21 +38,17 @@ export class Personal {
   private starting?: Promise<void>;
   private closed = false;
 
-  readonly core: CoreSession;
-  private readonly session: SessionHandle;
+  readonly core: ApplicationRuntime;
   private readonly pending = new Set<Promise<unknown>>();
   private readonly interruptedExecutions = new Set<string>();
   private readonly chiefConversations = new Map<string, string>();
-  private readonly targets: { id: string; harness: string }[];
 
   constructor(private readonly options: { timezone: string; persons: Persons; me: Me; conversation?: unknown }, private readonly log: Logger,
-    runtime: { core: CoreSession; session: SessionHandle; connectors: ConnectorClient; targets: { id: string; harness: string }[]; inputs: InputStore; outputs: OutputStore }) {
-    this.core = runtime.core;
-    this.session = runtime.session;
+    runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore }) {
+    this.core = runtime.runtime;
     this.connectors = runtime.connectors;
-    this.targets = runtime.targets;
-    this.plugins = this.core.pluginManager!;
-    const resources = new PluginResourceStore({ session: this.session, pluginInstanceId: "personal" });
+    this.plugins = this.core.plugins;
+    const resources = new PluginResourceStore({ home: runtime.inputs.storage.home, pluginInstanceId: "personal" });
     const client = this.plugins.resourceClient("personal");
     this.store = new Store(resources, client, new ConversationStore(this.id, resources, client, runtime.inputs, runtime.outputs));
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
@@ -69,17 +66,10 @@ export class Personal {
   private registerConversation(conversationId: string): void {
     const conversation = this.conversations.resource(conversationId);
     if (!conversation) return;
-    const laneId = conversationLane(conversation);
     const id = chiefTarget(conversationId);
-    if (!this.session.meta.lanes[laneId]) {
-      // @why Reusing a deleted Conversation ID must not auto-restore its old Session history.
-      this.session.setLane(laneId, { laneId, createdFor: { type: "session" }, harnessSessions: {},
-        ...(this.session.meta.harnessTargets[id] ? { historyAfterSeq: this.core.projection.lastSeq } : {}) });
-    }
     if (this.chiefConversations.has(id)) return;
     this.chiefConversations.set(id, conversationId);
-    this.targets.push({ id, harness: "chief" });
-    this.session.setHarnessTarget(id, { harnessTargetId: id, harness: "chief" });
+    this.core.registerTarget({ id, harness: "chief" });
   }
 
   /** Personal binds a Chief session and its tools to one conversation; the adapter remains business-agnostic. */
@@ -105,7 +95,7 @@ export class Personal {
         const b = active();
         if (b.context.responseRequired) throw new Error("Channel input cannot be dismissed silently");
         await updateBatch(this.plugins.resourceClient("personal"), initial, bound.id, () => ({ quietReason }), executionId);
-      }, async (id, input) => { active(); return verbs.say({ ...input, idempotencyKey: id }); }, (id, offset) => {
+      }, async (id, input) => { active(); return say(verbs, { ...input, idempotencyKey: id }); }, (id, offset) => {
         active();
         if (!id) return { inputIds: bound.inputIds.slice(offset, offset + 20), nextOffset: offset + 20 < bound.inputIds.length ? offset + 20 : null };
         const input = this.conversations.inputStore.get(id);
@@ -119,7 +109,7 @@ export class Personal {
 
   get me() { return this.options.persons.me(); }
 
-  get id() { return this.session.id; }
+  get id() { return this.core.id; }
   get conversations() { return this.store.conversations; }
   invocations() { return this.plugins.listHarnessInvocations(); }
   conversationIds() { return [...new Set([...this.store.conversations.list().map((item) => item.id), ...this.works().map((item) => item.conversationId)])]; }
@@ -197,9 +187,7 @@ export class Personal {
   }
 
   private enqueue(type: ResourceType, id: string): Promise<void> {
-    return this.plugins.enqueue({ aideSessionId: this.session.id, pluginInstanceId: "personal", namespace: "v1",
-      resourceApiVersion: type.apiVersion, resourceKind: type.kind, resourceId: id,
-      ...(type.kind === INPUT_TYPE.kind ? { resourceOwner: "aide" as const } : {}) });
+    return this.core.enqueue("personal", type, id);
   }
 
   private wake(type: ResourceType, id: string): void {
@@ -223,7 +211,7 @@ export class Personal {
   }
 
   private async submit(incoming: Incoming): Promise<InputReceipt> {
-    const input = { ...incoming, conversationId: this.id };
+    const input = { ...incoming, conversationId: incoming.sessionId };
     const id = digest([input.channelId, input.conversationId, input.id]);
     const previous = this.store.conversations.input(id, input.conversationId);
     if (previous) return { inputId: previous.metadata.name, at: previous.metadata.creationTimestamp };
@@ -233,7 +221,7 @@ export class Personal {
     if (fact && ["done", "ignored"].includes(fact.status.routing?.phase ?? "")) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
     const receipt = this.conversations.inputStore.receipt(id);
     if (!fact && receipt) return { inputId: id, at: receipt.at };
-    await this.conversations.ensure();
+    await this.conversations.ensure(input.sessionId);
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
     this.registerConversation(input.conversationId);
     const accepted = await this.acceptChannel(id, input);
@@ -242,7 +230,7 @@ export class Personal {
   }
 
   private async acceptChannel(id: string, input: Incoming) {
-    const current = await this.conversations.ensure();
+    const current = await this.conversations.ensure(input.sessionId);
     const me = await this.me;
     const relation = channelRelation(me?.spec ?? this.options.me, input);
     let sender;
@@ -255,12 +243,12 @@ export class Personal {
         // A mention has no subject type; it may identify the bot rather than a person.
       }
     }
-    const fact = await this.conversations.submit(id, { attention: "immediate", sessionId: this.id, text: input.text, timezone: this.options.timezone,
+    const fact = await this.conversations.submit(id, { attention: "immediate", sessionId: input.sessionId, text: input.text, timezone: this.options.timezone,
       origin: "channel", originId: input.channelId, source: input.source, ...(sender ? { sender } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });
-    await appendConversationInput(this.plugins.resourceClient("personal"), { sessionId: this.id, name: current.metadata.name, uid: current.metadata.uid }, fact);
+    await appendConversationInput(this.plugins.resourceClient("personal"), { name: current.metadata.name, uid: current.metadata.uid }, fact);
 
-    return this.conversations.input(fact.metadata.name, this.id)!;
+    return this.conversations.input(fact.metadata.name, input.sessionId)!;
   }
 
   async event(input: { id: string; conversationId: string; name: string; text: string }): Promise<number> {

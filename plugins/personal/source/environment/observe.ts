@@ -1,4 +1,4 @@
-import { bindSourceInput } from "@compforge/aide-plugin";
+import { bindSourceInput } from "../input.ts";
 import { isDeepStrictEqual } from "node:util";
 import { SOURCES } from "../definition.ts";
 import type { ConnectorClient, EnvironmentSnapshot, PluginContext, Resource, WorkloadSnapshot } from "@compforge/aide-plugin";
@@ -61,7 +61,7 @@ export async function observeEnvironment(context: Pick<PluginContext, "resources
   resource: Resource<EnvironmentSourceSpec, EnvironmentSourceStatus>, connectors: ConnectorClient): Promise<void> {
   const sequence = (resource.status.sequence ?? 0) + 1;
   const name = digest([resource.metadata.uid, sequence]);
-  const existing = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "aide-system", name });
+  const existing = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name });
   if (existing && resource.status.baseline) {
     // Resume the exact emitted transition before sampling again, even if the live environment has moved on.
     const event = existing.spec.observation as unknown as WorkloadEvent;

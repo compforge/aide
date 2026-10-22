@@ -1,8 +1,5 @@
-import { OutputStore } from "../output/store.ts";
-import { OutputDefinition } from "../output/definition.ts";
 import { createPluginVerbs } from "../../plugin-context.ts";
 import { ResourceStorage, resourceHome } from "../resource/storage.ts";
-import { InputDefinition } from "../input/definition.ts";
 import { ResourcePrinters } from "./resource/printer.ts";
 import { RunnerController } from "./runner/controller.ts";
 import type { PluginRunnerClient } from "./runner/client.ts";
@@ -10,8 +7,6 @@ import type { ControllerRegistration as RemoteRegistration, HostRequest } from "
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { emptyConnectors } from "../../connector-client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
-import { INPUT_TYPE } from "@compforge/aide-plugin";
-import { InputStore } from "../input/store.ts";
 import { scopedResources, type ResourceDirectory } from "./resource/directory.ts";
 import type { CommandContext } from "@compforge/aide-plugin";
 import {
@@ -25,13 +20,6 @@ import {
 } from "./controller.ts";
 
 export type { ReconcileFailure } from "./controller.ts";
-import {
-  AideResourceController,
-  type AideResourceObservation,
-  type AideResourceControllerOptions,
-  type AideResourceKind,
-  AideResourceIndex,
-} from "./aide-resource-controller.ts";
 import {
   type CreatePluginInstance,
   type PluginInstance,
@@ -50,9 +38,6 @@ import {
   type Resource,
   type ResourceRef,
   type ResourceType,
-  AIDE_SYSTEM_NAMESPACE,
-  AIDE_RESOURCE_TYPES,
-  AIDE_TURN_RESOURCE_TYPE,
   type ToastMessage,
   type ToastTone,
 } from "./package.ts";
@@ -110,10 +95,6 @@ import { namespaceContains } from "./namespace.ts";
 import type { ResourceNamespace } from "@compforge/aide-plugin";
 import { Verb, type VerbOptions } from "./verb.ts";
 import { HookRegistry, HookRuntime } from "./hook.ts";
-import {
-  AideResourceProvider,
-  type AideSessionObservation,
-} from "./aide-resource.ts";
 import { ResourceRegistry } from "./resource/registry.ts";
 import type { HarnessTarget } from "../harness/target.ts";
 
@@ -140,32 +121,24 @@ export interface ControllerDefinition<TSpec, TStatus>
   now?: () => Date;
 }
 
-type AideResourceControllerDefinition<K extends AideResourceKind> = Pick<
-  AideResourceControllerOptions<K>,
-  "name" | "pluginInstanceId" | "namespace" | "resourceKind" | "sources" | "watches" | "reconcile" | "maxConcurrency" | "now"
->;
-
 export interface PluginToast {
   readonly pluginInstanceId: string;
   readonly message: ToastMessage;
 }
 
 export interface ManagerOptions {
+  /** Application-owned resources and controllers; Session is only an execution backend. */
+  readonly resourceHome?: string;
+  readonly resourceAdmissions?: Readonly<Record<string, import("./resource/client.ts").ResourceAdmission>>;
   readonly connectors?: ConnectorClient;
-  readonly inputs?: InputStore;
-  readonly outputs?: OutputStore;
   readonly resourceDirectory?: ResourceDirectory;
-  readonly say?: VerbOptions["say"];
+  readonly actions?: VerbOptions["actions"];
   readonly onResourceChange?: (change: ResourceClientChange) => void;
   /** 所有 Controller 合计可占用的执行容量；默认 1。 */
   maxTotalConcurrency?: number;
   /** Manager 与所有 Plugin 数据共享的 AideSession owner。 */
   instances: PluginInstanceRepository;
-  /**
-   * 启用 Aide-owned Resource 与 ReconcileContext verbs 时传完整 SessionHandle。只持有
-   * PluginInstanceRepository 的调用方
-   * 仍可使用 Plugin Resource Controller，但不能观察 Aide-owned Resource。
-   */
+  /** Private execution backend for verbs and diagnostics. Resource ownership is independent. */
   session?: Pick<
     SessionHandle,
     | "id"
@@ -178,13 +151,12 @@ export interface ManagerOptions {
     | "log"
     | "ensureMainLane"
     | "requireLane"
+    | "setLane"
     | "setTargetBinding"
   >;
-  /** Configured HarnessTargets exposed as Aide Target Resources. */
+  /** Configured HarnessTargets available in execution snapshots. */
   harnessTargets?: readonly HarnessTarget[];
   probeTarget?: import("./target-catalog.ts").TargetProbe;
-  /** Known AideSessions exposed as limited Session/SessionTargetBinding projections. */
-  sessions?: () => readonly AideSessionObservation[];
   /** 当前进程可激活的可信、不可变 Package 版本。 */
   packages?: PackageLoaderOptions["packages"];
   /** reconcile 调用前读取并冻结的当前 AideSession 视图。 */
@@ -283,13 +255,11 @@ function pluginName(pluginId: string): string {
  * Plugin 域统一入口：注册和路由 Controller，并限制所有 Plugin 的进程总并发。
  */
 export class Manager {
-  readonly inputs?: InputStore;
-  readonly outputs?: OutputStore;
   private readonly resourceDirectory?: ResourceDirectory;
   private readonly unsubscribeResourceGc: () => void;
   private readonly resourceChanged?: (change: ResourceClientChange) => void;
-  /** Core installs its GVKs before any Plugin Binding can register. */
-  private readonly resourceRegistry = new ResourceRegistry(AIDE_RESOURCE_TYPES);
+  /** Plugin definitions remain registered independently of live bindings. */
+  private readonly resourceRegistry = new ResourceRegistry();
   private readonly controllers = new Map<string, ManagedController>();
   private readonly board: BoardProjection;
   private readonly commandRegistry: PluginCommandRegistry;
@@ -306,16 +276,11 @@ export class Manager {
     level: "error", source: "aide", component: "plugin.printer", message: "Resource printing failed",
     pluginInstanceId: detail.pluginInstanceId, attributes: { ...detail }, error: logError(error),
   }), (pluginInstanceId, type) => {
-    if (resourceTypeKey(type) === resourceTypeKey(InputDefinition.type)) return InputDefinition;
-    if (resourceTypeKey(type) === resourceTypeKey(OutputDefinition.type)) return OutputDefinition;
-    return ResourceStorage.open(resourceHome(this.instances.session.dir)).findDefinition(pluginInstanceId, type);
+    return ResourceStorage.open(this.resourceHome ?? resourceHome(this.instances.session.dir)).findDefinition(pluginInstanceId, type);
   });
   private readonly bindings = new Map<string, PluginBinding>();
   private readonly activations = new Map<string, Promise<void>>();
   private readonly capacity: ReconcileCapacity;
-  private readonly aideResources?: AideResourceIndex;
-  private readonly aideResourceProvider?: AideResourceProvider;
-  private readonly unsubscribeAideResources?: () => void;
   private readonly onToast: ManagerOptions["onToast"];
   private readonly onCommandsChanged: ManagerOptions["onCommandsChanged"];
   private readonly onActivationError: ManagerOptions["onActivationError"];
@@ -335,7 +300,12 @@ export class Manager {
   private closed = false;
   private closing?: Promise<void>;
 
+  private readonly resourceHome?: string;
+  private readonly resourceAdmissions?: ManagerOptions["resourceAdmissions"];
+  private readonly unsubscribeWrites?: () => void;
   constructor(options: ManagerOptions) {
+    this.resourceHome = options.resourceHome;
+    this.resourceAdmissions = options.resourceAdmissions;
     this.remoteConcurrency = options.maxTotalConcurrency ?? 1;
     this.capacity = new ReconcileCapacity(this.remoteConcurrency);
     this.now = options.now ?? (() => new Date());
@@ -381,17 +351,18 @@ export class Manager {
       options.snapshot ??
       (() => emptyReconcileSnapshot(this.instances.session.id));
     this.verb = new Verb({
-      say: options.say,
+      actions: options.actions,
       connectors: this.connectors,
       session: options.session,
       capacity: this.capacity,
+      resourceContexts: Boolean(this.resourceHome),
       snapshot: this.snapshot,
       selectedHarnessTargetId: options.selectedHarnessTargetId
         ? () => {
             const selected = options.selectedHarnessTargetId?.();
             return selected === undefined
               ? undefined
-              : this.aideResourceProvider?.resolveTarget(selected) ?? selected;
+              : selected;
           }
         : undefined,
       enqueueHarnessInvocation: options.enqueueHarnessInvocation,
@@ -441,39 +412,28 @@ export class Manager {
     });
     this.resourceDirectory = options.resourceDirectory;
     this.resourceChanged = options.onResourceChange;
-    this.unsubscribeResourceGc = ResourceStorage.open(resourceHome(this.instances.session.dir)).subscribe((scope, resource) => {
+    if (this.resourceHome) this.unsubscribeWrites = ResourceStorage.open(this.resourceHome).subscribeWrites((scope, resource, oldResource) => {
+      if (!scope.startsWith("[")) return;
+      const [sessionId, pluginInstanceId] = JSON.parse(scope);
+      if (sessionId !== null) return;
+      const kind = !oldResource ? "created"
+        : resource.metadata.deletionTimestamp && !oldResource.metadata.deletionTimestamp ? "deletion-requested"
+        : JSON.stringify(resource.metadata.labels) !== JSON.stringify(oldResource.metadata.labels)
+          || JSON.stringify(resource.metadata.annotations) !== JSON.stringify(oldResource.metadata.annotations) ? "metadata-updated"
+        : "status-updated";
+      const change: ResourceClientChange = oldResource
+        ? { kind: kind as "status-updated" | "metadata-updated" | "deletion-requested", pluginInstanceId, resource, oldResource }
+        : { kind: "created", pluginInstanceId, resource };
+      this.handlePluginResourceChange(change); this.resourceChanged?.(change);
+    });
+    this.unsubscribeResourceGc = ResourceStorage.open(this.resourceHome ?? resourceHome(this.instances.session.dir)).subscribe((scope, resource) => {
       if (scope === "core") return;
       const [sessionId, pluginInstanceId] = JSON.parse(scope) as [string, string];
-      if (sessionId !== this.instances.session.id) return;
+      if (sessionId !== (this.resourceHome ? null : this.instances.session.id)) return;
       const change: ResourceClientChange = { kind: "deleted", pluginInstanceId, resource };
       this.handlePluginResourceChange(change); this.resourceChanged?.(change);
     });
-    if (options.session) {
-      this.inputs = options.inputs ?? new InputStore(resourceHome(options.session.dir));
-      this.outputs = options.outputs ?? new OutputStore(resourceHome(options.session.dir));
-      this.aideResources = new AideResourceIndex({
-        session: options.session,
-        inputs: this.inputs,
-      });
-      this.aideResourceProvider = new AideResourceProvider({
-        session: options.session,
-        turns: this.aideResources,
-        outputs: this.outputs,
-        inputs: this.inputs,
-        ...(options.sessions === undefined ? {} : { sessions: options.sessions }),
-        targets: () => options.harnessTargets ?? [],
-        probeTarget: options.probeTarget,
-        onProbeError: (target, error) => this.log?.({
-          level: "warn", source: "aide", component: "target.catalog",
-          message: "Target model discovery failed", harnessTargetId: target.id, error: logError(error),
-        }),
-        now: this.now,
-      });
-      this.unsubscribeAideResources = this.aideResources.subscribe((resource) => {
-        this.board.invalidate();
-        this.enqueueAideResource(resource);
-      });
-    }
+
   }
 
   /** @spec All callers publish resource changes through the same Watch dispatcher. */
@@ -495,16 +455,21 @@ export class Manager {
     return this.printers.summarize(pluginInstanceId, resource);
   }
 
+  private resourceStore(pluginInstanceId: string) {
+    return new PluginResourceStore({ ...(this.resourceHome ? { home: this.resourceHome } : { session: this.instances.session }), pluginInstanceId });
+  }
+
   resourceClient(pluginInstanceId: string) {
     const instance = this.instances.get(pluginInstanceId);
-    const local = createResourceClient(new PluginResourceStore({ session: this.instances.session, pluginInstanceId }),
-      (change) => { this.handlePluginResourceChange(change); this.resourceChanged?.(change); },
-      (type) => { ResourceStorage.open(resourceHome(this.instances.session.dir)).definition(pluginInstanceId, type); }, this.aideResourceProvider);
+    const local = createResourceClient(this.resourceStore(pluginInstanceId),
+      (change) => { if (!this.resourceHome || change.kind === "deleted") { this.handlePluginResourceChange(change); this.resourceChanged?.(change); } },
+      (type) => { ResourceStorage.open(this.resourceHome ?? resourceHome(this.instances.session.dir)).definition(pluginInstanceId, type); }, this.resourceAdmissions?.[pluginInstanceId]);
+    if (this.resourceHome) return local;
     const storage = ResourceStorage.open(resourceHome(this.instances.session.dir));
     const shared = this.resourceDirectory?.shared?.(pluginInstanceId) ?? createResourceClient(new PluginResourceStore({ home: storage.home, pluginInstanceId }),
       (change) => { this.handlePluginResourceChange(change); this.resourceChanged?.(change); });
     return scopedResources(local, this.instances.session.id, pluginInstanceId, this.resourceDirectory,
-      (type) => !this.resourceRegistry.isAide(type) && storage.definition(pluginInstanceId, type).scope === "shared", shared);
+      (type) => storage.definition(pluginInstanceId, type).scope === "shared", shared);
   }
 
   registerController<TSpec, TStatus>(
@@ -518,13 +483,14 @@ export class Manager {
     suspended: boolean,
   ): ControllerRegistration {
     if (this.closed) throw new Error("plugin Manager is closed");
-    if (definition.store.aideSessionId !== this.instances.session.id) {
+    if (definition.store.aideSessionId !== (this.resourceHome ? "" : this.instances.session.id)) {
       throw new Error(
         `plugin Controller aideSessionId must be ${this.instances.session.id}, got ${definition.store.aideSessionId}`,
       );
     }
     const controller: Controller<TSpec, TStatus> = new Controller({
       ...definition,
+      runtimeId: this.instances.session.id,
       snapshot: (key, resource) => this.snapshotFor(key, resource),
       invokeVerb: (context, request) => this.verb.invoke(context, request),
       executeWithCapacity: (execute) =>
@@ -557,46 +523,7 @@ export class Manager {
     return this.installController(controller, suspended);
   }
 
-  private registerAideResourceController<K extends AideResourceKind>(
-    definition: AideResourceControllerDefinition<K>,
-  ): ControllerRegistration {
-    return this.registerAideResourceControllerInternal(definition, false);
-  }
 
-  private registerAideResourceControllerInternal<K extends AideResourceKind>(
-    definition: AideResourceControllerDefinition<K>,
-    suspended: boolean,
-  ): ControllerRegistration {
-    if (this.closed) throw new Error("plugin Manager is closed");
-    if (!this.aideResources) {
-      throw new Error(
-        "plugin Manager requires a SessionHandle to watch Aide-owned Resources",
-      );
-    }
-    const controller: AideResourceController<K> = new AideResourceController({
-      ...definition,
-      resources: this.aideResources,
-      snapshot: (key, resource) => this.snapshotFor(key, resource),
-      invokeVerb: (context, request) => this.verb.invoke(context, request),
-      executeReconcile: (scope, localLease, execute) =>
-        this.verb.execute(scope, localLease, execute),
-      retry: {
-        backoff: this.retryBackoff,
-        now: this.now,
-        schedule: (key, next) => {
-          if (this.controllerForKey(key) !== controller) return;
-          if (this.started) this.dueQueue.schedule(key, next);
-        },
-        report: (failure) => {
-          if (this.controllerForKey(failure.key) !== controller) return;
-          this.reportFailure(failure);
-        },
-      },
-      onWatchError: (change, error) =>
-        this.reportWatchFailure(controller.scope, change, error),
-    });
-    return this.installController(controller, suspended);
-  }
 
   enqueue(key: ReconcileKey): Promise<void> {
     if (this.closed) return Promise.reject(new Error("plugin Manager is closed"));
@@ -619,15 +546,13 @@ export class Manager {
     const exact = this.controllers.get(reconcileScopeId(key));
     if (exact) return exact;
     if (
-      reconcileResourceOwner(key) !== "plugin" ||
-      key.namespace === AIDE_SYSTEM_NAMESPACE
+      reconcileResourceOwner(key) !== "plugin"
     ) {
       return;
     }
     return [...this.controllers.values()].find((controller) => {
       const scope = controller.scope;
       return reconcileResourceOwner(scope) === "plugin" &&
-        scope.namespace !== AIDE_SYSTEM_NAMESPACE &&
         scope.aideSessionId === key.aideSessionId &&
         scope.pluginInstanceId === key.pluginInstanceId &&
         scope.resourceApiVersion === key.resourceApiVersion &&
@@ -738,7 +663,7 @@ export class Manager {
             const runner = await this.pluginSupervisor.activate(
               packageSource.entry,
               instance,
-              binding.session,
+              { aideSessionId: aideSession.aideSessionId, cwd: aideSession.cwd },
               dataDirs,
               {
                 resources,
@@ -879,12 +804,12 @@ export class Manager {
 
   /** Resolve the current Core-owned SessionTargetBinding after inline Hooks settle. */
   resolveHarnessTargetId(requestedTargetId: string): string {
-    return this.aideResourceProvider?.resolveTarget(requestedTargetId) ?? requestedTargetId;
+    return requestedTargetId;
   }
 
   /** Preserve `/target <id>` as an exact Human choice over Plugin routing. */
   selectExactHarnessTargetId(targetId: string): void {
-    this.aideResourceProvider?.selectExactTarget(targetId);
+
   }
 
   /**
@@ -1072,10 +997,6 @@ export class Manager {
     return this.verb.cancelHarnessInvocation(identifier);
   }
 
-  getAideResource<K extends AideResourceKind>(kind: K, resourceId: string): AideResourceObservation<K> {
-    if (!this.aideResources) throw new Error("Aide-owned resources are not available");
-    return this.aideResources.get(kind, resourceId);
-  }
 
   private snapshotFor(key: ReconcileKey, resource: ResourceRef): ReconcileSnapshot {
     return this.snapshot();
@@ -1088,7 +1009,7 @@ export class Manager {
       : source.entry.resourcesUrl ? (await import(source.entry.resourcesUrl)).default : [];
     if (!Array.isArray(definitions)) throw new Error(`Invalid resource definitions for ${instance.pluginId}: expected an array`);
     this.resourceRegistry.check(instance.pluginId, definitions.map((d) => d.type));
-    ResourceStorage.open(resourceHome(this.instances.session.dir)).register(instance.pluginInstanceId, definitions);
+    ResourceStorage.open(this.resourceHome ?? resourceHome(this.instances.session.dir)).register(instance.pluginInstanceId, definitions);
     this.resourceRegistry.declare(instance.pluginId, definitions.map((d) => d.type));
   }
 
@@ -1146,11 +1067,10 @@ export class Manager {
   }
 
   private bindRunnerController(instance: PluginInstance, runner: PluginRunnerClient, definition: RemoteRegistration, resources: import("@compforge/aide-plugin").ResourceClient): () => void {
-    const builtin = [AIDE_TURN_RESOURCE_TYPE, INPUT_TYPE].some((type) => resourceTypeKey(type) === resourceTypeKey(definition.resourceType));
-    if (!builtin) this.assertControllerResource(instance.pluginInstanceId, definition.resourceType);
-    const store = new PluginResourceStore({ session: this.instances.session, pluginInstanceId: instance.pluginInstanceId });
+    this.assertControllerResource(instance.pluginInstanceId, definition.resourceType);
+    const store = this.resourceStore(instance.pluginInstanceId);
     const scope: ReconcileScope = { controllerName: definition.controllerName, aideSessionId: instance.aideSessionId, pluginInstanceId: instance.pluginInstanceId, namespace: "v1",
-      resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, resourceOwner: builtin ? "aide" : "plugin" };
+      resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, resourceOwner: "plugin" };
     const controller = new RunnerController({ scope, registration: definition, runner, store, resources, verb: this.verb,
       snapshot: (key, resource) => this.snapshotFor(key, resource), changed: (change) => this.handlePluginResourceChange(change),
       maxTotalConcurrency: this.remoteConcurrency, retryBackoff: this.retryBackoff });
@@ -1158,7 +1078,7 @@ export class Manager {
     const unregisterBoard = definition.presentHandlerId ? this.board.registerSource(reconcileScopeId(scope), {
       pluginInstanceId: instance.pluginInstanceId,
       present: () => presentBoardSource({ pluginId: instance.pluginId, pluginInstanceId: instance.pluginInstanceId, resourceType: definition.resourceType,
-        list: () => builtin ? this.aideResources!.list(definition.resourceType.kind as AideResourceKind).map((item) => this.exposeAideResource(instance.pluginInstanceId, item)) : store.list(definition.resourceType),
+        list: () => store.list(definition.resourceType),
         present: (resource) => runner.invoke(definition.presentHandlerId!, resource) }),
     }) : undefined;
     return () => { unregisterBoard?.(); registration.close(); };
@@ -1168,9 +1088,9 @@ export class Manager {
     const ref = request.method === "controller.finish" ? request.scope.resourceRef : undefined;
     const key: ReconcileKey = request.method !== "controller.finish" ? request.key : {
       aideSessionId: request.scope.aideSessionId, pluginInstanceId: request.scope.pluginInstanceId,
-      namespace: ref?.namespace === "aide-system" ? "v1" : request.scope.namespace,
+      namespace: request.scope.namespace,
       resourceApiVersion: ref!.apiVersion, resourceKind: ref!.kind, resourceId: ref!.name,
-      resourceOwner: ref?.namespace === "aide-system" ? "aide" : "plugin", controllerName: request.scope.controllerName,
+      resourceOwner: "plugin", controllerName: request.scope.controllerName,
     };
     if (key.pluginInstanceId !== instance.pluginInstanceId || key.aideSessionId !== instance.aideSessionId) throw new Error("Runner Controller scope mismatch");
     const controller = this.controllerForKey(key);
@@ -1181,23 +1101,14 @@ export class Manager {
   }
 
   private assertControllerResource(pluginInstanceId: string, type: import("@compforge/aide-plugin").ResourceType): void {
-    const definition = ResourceStorage.open(resourceHome(this.instances.session.dir)).definition(pluginInstanceId, type);
-    if (definition.scope !== "session") throw new Error(`Session Controller cannot own shared resource: ${type.kind}`);
+    const definition = ResourceStorage.open(this.resourceHome ?? resourceHome(this.instances.session.dir)).definition(pluginInstanceId, type);
+    if (definition.scope !== (this.resourceHome ? "shared" : "session")) throw new Error(`Controller resource scope mismatch: ${type.kind}`);
   }
 
   private bindController<TSpec, TStatus>(
     instance: PluginInstance,
     pluginController: PluginResourceController<TSpec, TStatus>,
   ): () => void {
-    if (
-      [AIDE_TURN_RESOURCE_TYPE, INPUT_TYPE].some((type) =>
-        resourceTypeKey(pluginController.resourceType) === resourceTypeKey(type))
-    ) {
-      return this.bindAideResourceController(
-        instance.pluginInstanceId,
-        pluginController,
-      );
-    }
     this.assertControllerResource(instance.pluginInstanceId, pluginController.resourceType);
     return this.bindPluginResourceController(instance.pluginInstanceId, pluginController);
   }
@@ -1206,10 +1117,7 @@ export class Manager {
     pluginInstanceId: string,
     pluginController: PluginResourceController<TSpec, TStatus>,
   ): () => void {
-    const store = new PluginResourceStore({
-      session: this.instances.session,
-      pluginInstanceId,
-    });
+    const store = this.resourceStore(pluginInstanceId);
     const registration = this.registerControllerInternal(
       {
         ...pluginController,
@@ -1252,103 +1160,7 @@ export class Manager {
     };
   }
 
-  private bindAideResourceController<TSpec, TStatus>(
-    pluginInstanceId: string,
-    pluginController: PluginResourceController<TSpec, TStatus>,
-  ): () => void {
-    if (!this.aideResources) {
-      throw new Error(
-        `Resource type ${pluginController.resourceType.apiVersion}/${pluginController.resourceType.kind} requires a SessionHandle`,
-      );
-    }
-    const resourceKind = pluginController.resourceType.kind as AideResourceKind;
-    const namespace = "v1" as const;
-    const sources = pluginController.sources ?? [];
-    if (sources.some((source) => source.type === "resource")) {
-      throw new Error(
-        "Controller resource Sources cannot materialize Aide-owned Resources",
-      );
-    }
-    const cronSources = sources.filter(
-      (source): source is CronSource => source.type === "cron",
-    );
-    const registration = this.registerAideResourceControllerInternal(
-      {
-        pluginInstanceId,
-        namespace,
-        resourceKind,
-        name: pluginController.name,
-        sources: cronSources,
-        watches: pluginController.watches,
-        maxConcurrency: pluginController.maxConcurrency,
-        reconcile: async (context, resource) =>
-          await pluginController.reconcile(
-            context,
-            this.exposeAideResource<TSpec, TStatus>(
-              pluginInstanceId,
-              resource,
-            ),
-          ),
-        now: this.now,
-      },
-      true,
-    );
-    const sourceId = reconcileScopeId({
-      aideSessionId: this.instances.session.id,
-      pluginInstanceId,
-      namespace,
-      resourceApiVersion: AIDE_TURN_RESOURCE_TYPE.apiVersion,
-      resourceKind,
-      resourceOwner: "aide",
-      controllerName: pluginController.name,
-    });
-    let unregisterBoardSource: (() => void) | undefined;
-    if (pluginController.present) {
-      const pluginId = this.instances.get(pluginInstanceId).pluginId;
-      const present = pluginController.present;
-      unregisterBoardSource = this.board.registerSource(sourceId, {
-        pluginInstanceId,
-        present: () =>
-          presentBoardSource<TSpec, TStatus>({
-            pluginId,
-            pluginInstanceId,
-            resourceType: pluginController.resourceType,
-            list: () =>
-              this.aideResources!.list(resourceKind).map((resource) =>
-                this.exposeAideResource<TSpec, TStatus>(
-                  pluginInstanceId,
-                  resource,
-                ),
-              ),
-            present,
-          }),
-      });
-    }
-    return () => {
-      unregisterBoardSource?.();
-      registration.close();
-    };
-  }
 
-  private exposeAideResource<TSpec, TStatus>(
-    _pluginInstanceId: string,
-    resource: AideResourceObservation,
-  ): Readonly<Resource<TSpec, TStatus>> {
-    return Object.freeze({
-      apiVersion: AIDE_TURN_RESOURCE_TYPE.apiVersion,
-      kind: resource.kind,
-      metadata: Object.freeze({
-        name: resource.metadata.resourceId,
-        namespace: AIDE_SYSTEM_NAMESPACE,
-        uid: resource.metadata.sourceEventId,
-        generation: 1,
-        resourceVersion: String(resource.metadata.revision),
-        creationTimestamp: resource.metadata.observedAt,
-      }),
-      spec: (resource.kind === "Input" ? (resource.data as import("@compforge/aide-plugin").Resource<unknown, unknown>).spec : Object.freeze({})) as TSpec,
-      status: (resource.kind === "Input" ? (resource.data as import("@compforge/aide-plugin").Resource<unknown, unknown>).status : resource.data) as TStatus,
-    });
-  }
 
   private async closeManager(): Promise<void> {
     await Promise.allSettled(this.activations.values());
@@ -1367,9 +1179,8 @@ export class Manager {
     this.suspendedControllers.clear();
     this.dueQueue.close();
     this.cronSourceQueue.close();
-    this.unsubscribeAideResources?.();
     this.unsubscribeResourceGc();
-    this.aideResources?.close();
+    this.unsubscribeWrites?.();
     this.verb.close();
     try {
       await this.pluginSupervisor?.close();
@@ -1423,8 +1234,6 @@ export class Manager {
       if (
         reconcileResourceOwner(controller.scope) === "plugin" &&
         (
-          controller.scope.namespace === AIDE_SYSTEM_NAMESPACE ||
-          change.resource.metadata.namespace === AIDE_SYSTEM_NAMESPACE ||
           !namespaceContains(
             controller.scope.namespace,
             change.resource.metadata.namespace,
@@ -1687,24 +1496,6 @@ export class Manager {
     }
   }
 
-  private enqueueAideResource(resource: AideResourceObservation): void {
-    if (!this.started || this.closed) return;
-    for (const controller of this.controllers.values()) {
-      if (this.suspendedControllers.has(reconcileScopeId(controller.scope))) continue;
-      if (
-        reconcileResourceOwner(controller.scope) !== "aide" ||
-        controller.scope.resourceKind !== resource.kind
-      ) {
-        continue;
-      }
-      void this.enqueue({
-        ...controller.scope,
-        resourceId: resource.metadata.resourceId,
-      }).catch(() => {
-        // Queue callback has already scheduled retry and reported diagnostics.
-      });
-    }
-  }
 
   private async resumeControllers(pluginInstanceId: string): Promise<void> {
     for (const controller of this.controllers.values()) {

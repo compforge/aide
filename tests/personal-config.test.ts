@@ -80,7 +80,7 @@ test("Only configured sources poll; removing policies stops restored observers w
   let aide = create();
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.start(); await aide.settled();
-  assert.equal(aide.sessions().length, 0);
+  assert.equal(aide.runtime.plugins.listInstances().length, 1);
   assert.equal(seen.environments, 0);
   assert.equal(seen.messageKinds.length, 0);
   assert.equal(seen.assignees.length, 0);

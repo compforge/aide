@@ -1,4 +1,4 @@
-import type { InputReceipt } from "@compforge/aide-plugin";
+import type { InputReceipt } from "../../plugins/personal/input/model.ts";
 import type { Incoming } from "./message.ts";
 import { iconFor } from "@compforge/aide-plugin";
 /** Channel identity and presentation; transport lifecycle stays with each adapter. */

@@ -3,7 +3,7 @@ import type { Logger } from "pino";
 import type { ConnectorClient, RequirementAddress, RequirementComment, RequirementIdentity } from "@compforge/aide-plugin";
 import { isRequirementAddress, requirementAddress } from "../../../connectors/requirements/address.ts";
 import { OutputStore } from "./store.ts";
-import { sameAddress } from "../../address.ts";
+import { sameAddress } from "../../../src/address.ts";
 
 interface Writer {
   requirements: ConnectorClient["requirements"];

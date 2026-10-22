@@ -1,4 +1,5 @@
-import type { Output, Address, OutputStatus, ResourceRef } from "@compforge/aide-plugin";
+import type { Address, ResourceRef } from "@compforge/aide-plugin";
+import type { Output, OutputStatus } from "../plugins/personal/output/model.ts";
 export interface OutputDraft { id: string; conversationId: string; text: string; workId: string | null; target?: Address; receivers?: ResourceRef[] }
 export interface OutputView extends OutputDraft {
   at: string;

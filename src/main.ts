@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { once } from "node:events";
 import pino from "pino";
 import { z } from "zod";
-import { RequirementOutputDelivery } from "./host/output/requirements.ts";
+import { RequirementOutputDelivery } from "../plugins/personal/output/requirements.ts";
 import { Connectors } from "../connectors/index.ts";
 import { Aide } from "./app.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
