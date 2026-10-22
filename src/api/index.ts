@@ -110,7 +110,15 @@ export function httpChannel(aide: WebService, log: Logger) {
         streamConversation(response, aide, conversationId, log); return;
       }
       if (request.method === "GET" && url.pathname === "/conversations") {
-        json(response, 200, conversationList(aide)); return;
+        const counts = new Map<string, { taskCount: number; routineCount: number }>();
+        for (const work of aide.works()) {
+          const count = counts.get(work.conversationId) ?? { taskCount: 0, routineCount: 0 };
+          if (work.kind === "task") count.taskCount++; else count.routineCount++;
+          counts.set(work.conversationId, count);
+        }
+        json(response, 200, conversationList(aide).map((item) => ({ ...item,
+          ...(counts.get(item.id) ?? { taskCount: 0, routineCount: 0 }),
+        }))); return;
       }
       if (request.method === "GET" && url.pathname === "/persons") {
         await aide.start();

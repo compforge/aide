@@ -147,7 +147,7 @@ test("conversation navigation lists persisted scopes without creating them and k
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const url = `http://127.0.0.1:${address.port}`;
   const list = async () => await (await fetch(url + "/conversations")).json() as
-    { id: string; name: string; preview: string; updatedAt: string }[];
+    { id: string; name: string; preview: string; updatedAt: string; taskCount: number; routineCount: number }[];
   assert.deepEqual(await list(), []);
   await fetch(url + "/?conversation=unsent");
   assert.equal(aide.sessions().flatMap((scope) => scope.conversations.list()).length, 0);
@@ -164,7 +164,8 @@ test("conversation navigation lists persisted scopes without creating them and k
   const before = aide.sessions().flatMap((scope) => scope.conversations.list());
   const summaries = await list();
   assert.deepEqual(summaries.map((item) => item.id), [group, "work-only", "source:requirements", "me"]);
-  assert.deepEqual(summaries[0], { id: group, uid: aide.session(group).conversations.resource(group)!.metadata.uid, revision: aide.session(group).conversations.get(group)!.revision, sessionId: group, default: false, trigger: { enabled: false, intervalSeconds: 3600 }, name: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2) });
+  assert.deepEqual(summaries[0], { id: group, uid: aide.session(group).conversations.resource(group)!.metadata.uid, revision: aide.session(group).conversations.get(group)!.revision, sessionId: group, default: false, trigger: { enabled: false, intervalSeconds: 3600 }, name: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2), taskCount: 1, routineCount: 0 });
+  assert.deepEqual(summaries.map((item) => [item.taskCount, item.routineCount]), [[1, 0], [0, 1], [0, 0], [0, 0]]);
   assert.equal(summaries.find((item) => item.id === "source:requirements")?.preview, "");
   assert.equal(summaries.find((item) => item.id === "source:requirements")?.name, "private observation");
   assert.deepEqual(aide.sessions().flatMap((scope) => scope.conversations.list()), before);
@@ -175,6 +176,8 @@ test("conversation navigation lists persisted scopes without creating them and k
   assert.deepEqual(works.map((item) => item.id), [task.id]);
   assert.deepEqual(await (await fetch(url + "/work?conversationId=me")).json(), []);
   assert.equal((await fetch(url + "/conversations", { headers: { origin: "https://unrelated.example" } })).status, 403);
+  await aide.work(group).delete(task.id, task.revision);
+  assert.equal((await list()).find((item) => item.id === group)?.taskCount, 0);
 });
 
 /** @case Web deletion is scoped and revision checked, preserves messages and stops future Work dispatch. */
