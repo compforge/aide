@@ -6,7 +6,11 @@
 <link rel="stylesheet" href="/persons.css">
 <header><h1>Aide</h1><span class="muted">持续理解你和你身边的人。</span><nav class="main-tabs" aria-label="主导航"><a href="/">Conversations</a><a href="/people" aria-current="page">Persons</a></nav></header>
 <main class="persons-page">
-  <nav class="person-list" aria-label="人物列表"><h2>人物</h2><input id="person-search" type="search" placeholder="搜索人物" aria-label="搜索人物"><div id="person-list"></div><p id="person-list-notice" role="status" class="muted"></p></nav>
+  <nav class="person-list" aria-label="人物列表"><h2>人物</h2><input id="person-search" type="search" placeholder="搜索人物" aria-label="搜索人物"><div id="person-list"></div>
+    <div id="person-pagination" class="person-pagination" role="group" aria-label="人物分页" hidden>
+      <button id="person-previous" class="secondary" type="button">上一页</button><span id="person-page" class="muted" aria-live="polite"></span><button id="person-next" class="secondary" type="button">下一页</button>
+    </div>
+    <p id="person-list-notice" role="status" class="muted"></p></nav>
   <section class="person-detail" aria-label="人物详情">
     <h2 id="person-heading">选择一个人物</h2><p id="person-empty" class="muted">随着消息和观察积累，Aide 会在这里记录认识的人。</p>
     <form id="person-editor" hidden>

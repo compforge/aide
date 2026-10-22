@@ -1,5 +1,8 @@
 @import '../shared/style.css';
 .person-list { padding: 24px 12px; border-right: 1px solid #d8dfd5; overflow: auto; }
+.person-pagination { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 12px 0; background: #f5f5ef; border-top: 1px solid #d8dfd5; }
+.person-pagination[hidden] { display: none; }
+.person-pagination button { padding: 6px 8px; font-size: 12px; }
 .person-list h2 { font-size: 16px; margin: 0 10px 18px; }
 .persons-page { grid-template-columns: 260px minmax(0, 1fr); }
 .person-detail { padding: 24px 36px; overflow: auto; }

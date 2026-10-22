@@ -5,8 +5,11 @@ import { conversationPage } from './pagination.ts';
 import type { ConversationItem } from '../../api/types.ts';
 type NavigationItem = ConversationItem | { id: string; name: string; preview: string; default?: false; trigger?: undefined; taskCount?: 0; routineCount?: 0 };
 
-/** @spec Navigation owns page intent and menus; refresh never converts automatic following into a fixed page. */
-export function createNavigation(conversationId: string | null, signal: AbortSignal) {
+/**
+ * @spec Conversation selection keeps the current document and sidebar; Back/Forward restores the selected scope.
+ * @spec Navigation owns page intent and menus; refresh never converts automatic following into a fixed page.
+ */
+export function createNavigation(conversationId: string | null, signal: AbortSignal, onSelect: (id: string | null) => void) {
   function conversationCopyButton(id: string, compact = false) {
     const button = element('button', compact ? '⧉' : '复制 ID', 'conversation-copy');
     button.type = 'button'; button.title = '复制会话 ID';
@@ -20,12 +23,27 @@ export function createNavigation(conversationId: string | null, signal: AbortSig
     });
     return button;
   }
-  if (conversationId) $('conversation-copy').replaceWith(conversationCopyButton(conversationId));
+
   let lastConversations = '', conversationUpdating = false;
   let conversationItems: ConversationItem[] = [];
   const initialPage = Number(new URL(location.href).searchParams.get('page'));
   let requestedPage = Number.isSafeInteger(initialPage) && initialPage > 0 ? initialPage : null;
   let currentPage = 1;
+  function navigate(url: URL, replace = false) {
+    const next = url.searchParams.get('conversation');
+    const changed = next !== conversationId;
+    conversationMenu.hidePopover();
+    conversationId = next;
+    const page = Number(url.searchParams.get('page'));
+    requestedPage = Number.isSafeInteger(page) && page > 0 ? page : null;
+    history[replace ? 'replaceState' : 'pushState'](null, '', url.href);
+    renderConversations(conversationItems);
+    if (changed) onSelect(conversationId);
+  }
+  window.addEventListener('popstate', () => {
+    const next = new URL(location.href);
+    navigate(next, true);
+  }, { signal });
   for (const [id, offset] of [['conversation-previous', -1], ['conversation-next', 1]] as const) {
     $(id).addEventListener('click', () => {
       conversationMenu.hidePopover();
@@ -71,7 +89,7 @@ export function createNavigation(conversationId: string | null, signal: AbortSig
         const url = new URL(location.href);
         const next = remaining.find((candidate) => candidate.default) || remaining[0];
         if (next) url.searchParams.set('conversation', next.id); else url.searchParams.delete('conversation');
-        location.replace(url.href); return;
+        conversationItems = remaining; navigate(url, true); return;
       }
       lastConversations = ''; renderConversations(remaining);
       $('conversation-notice').textContent = action === 'delete' ? '已删除「' + item.name + '」。' : '';
@@ -124,6 +142,15 @@ export function createNavigation(conversationId: string | null, signal: AbortSig
     if (conversationId && !items.some((item) => item.id === conversationId)) items.push({ id: conversationId, name: '新对话', preview: '' });
     const current = items.find((item) => item.id === conversationId);
     $('conversation-heading').textContent = current?.name || '选择一个会话';
+    const copy = $('conversation-copy');
+    if (copy.dataset.conversationId !== (conversationId ?? '')) {
+      copy.dataset.conversationId = conversationId ?? '';
+      copy.replaceChildren(...(conversationId ? [conversationCopyButton(conversationId)] : []));
+    }
+    for (const link of $('conversation-list').querySelectorAll<HTMLAnchorElement>('.list-link')) {
+      if (link.dataset.conversationId === conversationId) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    }
     const paged = conversationPage(items, requestedPage, conversationId);
     currentPage = paged.page;
     requestedPage = paged.requestedPage;
@@ -135,7 +162,7 @@ export function createNavigation(conversationId: string | null, signal: AbortSig
     $('conversation-page').textContent = currentPage + ' / ' + paged.pages;
     $<HTMLButtonElement>('conversation-previous').disabled = currentPage === 1;
     $<HTMLButtonElement>('conversation-next').disabled = currentPage === paged.pages;
-    const signature = JSON.stringify(paged);
+    const signature = JSON.stringify({ page: paged.page, items: paged.items });
     if (signature === lastConversations) return;
     lastConversations = signature;
     const links = paged.items.map((item) => {
@@ -143,6 +170,12 @@ export function createNavigation(conversationId: string | null, signal: AbortSig
       const url = new URL(location.href); url.searchParams.set('conversation', item.id);
       url.searchParams.set('page', String(currentPage));
       link.href = url.href;
+      link.dataset.conversationId = item.id;
+      link.addEventListener('click', (event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.defaultPrevented) return;
+        event.preventDefault();
+        if (item.id !== conversationId) navigate(new URL(link.href));
+      });
       if (item.id === conversationId) link.setAttribute('aria-current', 'page');
       link.title = item.name;
       link.append(element('strong', item.name));
@@ -169,7 +202,7 @@ export function createNavigation(conversationId: string | null, signal: AbortSig
       if ($('conversation-notice').textContent === '会话列表暂时无法更新，正在重试。') $('conversation-notice').textContent = '';
     } catch { $('conversation-notice').textContent = '会话列表暂时无法更新，正在重试。'; }
   }
-  $('new-conversation').addEventListener('click', () => { location.href = '/?conversation=' + encodeURIComponent('web:' + newId()); });
+  $('new-conversation').addEventListener('click', () => { navigate(new URL('/?conversation=' + encodeURIComponent('web:' + newId()), location.href)); });
   signal.addEventListener('abort', () => conversationMenu.remove(), { once: true });
   return { refresh: refreshConversations };
 }

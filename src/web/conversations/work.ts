@@ -4,7 +4,7 @@ import { copyText } from '../shared/clipboard.ts';
 import type { Work } from '../../../plugins/personal/model.ts';
 const labels: Record<Work['status'], string> = { ready: '准备执行', running: '执行中', waiting: '等你回答', scheduled: '等待触发', paused: '已暂停', done: '已完成', uncertain: '需要核对结果', invalid_result: '结果解析失败' };
 
-export function createWorkPanel(conversationId: string, onChange: () => Promise<void>) {
+export function createWorkPanel(conversationId: string, onChange: () => Promise<void>, signal: AbortSignal) {
   let lastWork = '';
   const deletingWork = new Set<string>();
   function renderWork(works: Work[]) {
@@ -32,8 +32,10 @@ export function createWorkPanel(conversationId: string, onChange: () => Promise<
         $('work-notice').className = 'muted'; $('work-notice').textContent = '';
         try {
           await copyText(work.id);
+          if (signal.aborted) return;
           copy.textContent = '已复制';
         } catch {
+          if (signal.aborted) return;
           copy.disabled = false;
           $('work-notice').className = 'error';
           $('work-notice').textContent = '复制失败，请手动复制 ID：' + work.id;
@@ -50,14 +52,16 @@ export function createWorkPanel(conversationId: string, onChange: () => Promise<
         deletingWork.add(work.id); remove.disabled = true; remove.textContent = '删除中…';
         $('work-notice').className = 'muted'; $('work-notice').textContent = '';
         try {
-          await request('/work/delete', { method: 'POST', headers: { 'content-type': 'application/json' },
+          await request('/work/delete', { method: 'POST', signal, headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ id: work.id, conversationId, revision: work.revision }) });
+          if (signal.aborted) return;
           $('work-notice').textContent = '已删除「' + work.title + '」。';
         } catch (error) {
+          if (signal.aborted) return;
           $('work-notice').className = 'error'; $('work-notice').textContent = errorMessage(error);
         } finally {
           deletingWork.delete(work.id); remove.disabled = false; remove.textContent = '删除';
-          await onChange();
+          if (!signal.aborted) await onChange();
         }
       });
       actions.append(copy, remove);

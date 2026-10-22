@@ -3,7 +3,7 @@ import { request, errorMessage } from '../shared/http.ts';
 import type { Approval } from '../../api/types.ts';
 import type { ApprovalResult } from '../../host/approval/types.ts';
 
-export function createApprovals(onChange: () => Promise<void>) {
+export function createApprovals(onChange: () => Promise<void>, signal: AbortSignal) {
   let lastApprovals = '';
   function renderApprovals(approvals: Approval[]) {
     const signature = JSON.stringify(approvals);
@@ -21,11 +21,13 @@ export function createApprovals(onChange: () => Promise<void>) {
         button.addEventListener('click', async () => {
           actions.querySelectorAll('button').forEach((button) => button.disabled = true);
           try {
-            await request("/approvals", { method: 'POST', headers: { 'content-type': 'application/json' },
+            await request("/approvals", { method: 'POST', signal, headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ messageId: item.messageId, result: result }) });
+            if (signal.aborted) return;
             node.remove();
             await onChange();
           } catch (error) {
+            if (signal.aborted) return;
             status.textContent = errorMessage(error);
             actions.querySelectorAll('button').forEach((button) => button.disabled = false);
           }
