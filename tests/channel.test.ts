@@ -1,7 +1,7 @@
 import { fixtureAddress } from "./address-fixture.ts";
 import { seedInput } from "./conversation-fixture.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -212,6 +212,24 @@ test("Web deletes Tasks and Routines through WorkService and preserves other con
     assert.equal(response.status, 200);
     assert.ok(response.headers.get("content-type")!.includes(type!));
     assert.ok((await response.text()).length > 0);
+  }
+  // Image responses must preserve bytes; decoding these assets as UTF-8 corrupts the icon.
+  for (const [path, file, type] of [
+    ["/favicon.ico", "favicon.ico", "image/vnd.microsoft.icon"],
+    ["/icon.png", "aide.png", "image/png"],
+    ["/apple-touch-icon.png", "apple-touch-icon.png", "image/png"],
+  ] as const) {
+    const response = await fetch(base + path);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), type);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), readFileSync(new URL(`../src/web/assets/${file}`, import.meta.url)));
+  }
+  for (const path of ["/", "/people"]) {
+    const response = await fetch(base + path);
+    assert.match(response.headers.get("content-security-policy")!, /img-src 'self'/);
+    const html = await response.text();
+    assert.match(html, /rel="icon" href="\/favicon.ico"/);
+    assert.match(html, /rel="apple-touch-icon" href="\/apple-touch-icon.png"/);
   }
   assert.equal((await fetch(base + "/work/delete", { method: "POST", body: "{}" })).status, 415);
   assert.equal((await fetch(base + "/work/delete", { method: "POST", headers: { "content-type": "application/json", origin: "https://unrelated.example" }, body: JSON.stringify({ id: task.id, revision: task.revision, sessionId: group, conversationId: group }) })).status, 403);
