@@ -1,18 +1,10 @@
+import type { RuntimeScope } from "../../../protocol/runtime.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { dispatchConnector, emptyConnectors } from "../../../connector-client.ts";
 import { AsyncResource } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 
-import type {
-  CommandContext,
-  CommandInput,
-  CommandResult,
-  PluginDataDirectories,
-  PluginInstance,
-  PluginSessionContext,
-  ResourceClient,
-  ToastMessage,
-} from "@compforge/aide-plugin";
+import type { CommandContext, CommandInput, CommandResult, PluginDataDirectories, PluginInstance, ResourceClient, ToastMessage } from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../../../protocol/ipc.ts";
 import type {
   ExecutionScope,
@@ -199,13 +191,13 @@ export class PluginRunnerClient {
   async activate(
     entry: PluginPackageEntry,
     instance: PluginInstance,
-    session: PluginSessionContext,
+    session: RuntimeScope,
     dataDirs: PluginDataDirectories,
   ): Promise<ActivationResult> {
     return await this.call({
       method: "activate",
       entry,
-      instance,
+      instance: { pluginInstanceId: instance.pluginInstanceId, pluginId: instance.pluginId, marketplace: instance.marketplace, packageVersion: instance.packageVersion, enabled: instance.enabled, config: instance.config, createdAt: instance.createdAt, updatedAt: instance.updatedAt },
       session,
       dataDirs,
     }) as ActivationResult;

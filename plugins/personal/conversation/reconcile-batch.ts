@@ -1,7 +1,9 @@
+import { say } from "../output/action.ts";
 import { batchOutputs } from "./outputs.ts";
-import type { PluginContext, ReconcileContext, InputSpec, InputStatus } from "@compforge/aide-plugin";
+import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
+import type { InputSpec, InputStatus } from "../input/model.ts";
 import { INPUT_TYPE, chiefTarget } from "../chief-model.ts";
-import { conversationLane, CONVERSATION_TYPE, type ConversationResource, type ConversationSpec, type ConversationStatus } from "./model.ts";
+import { CONVERSATION_TYPE, type ConversationResource, type ConversationSpec, type ConversationStatus } from "./model.ts";
 import { updateBatch } from "./state.ts";
 import { conversationPolicy } from "./config.ts";
 
@@ -26,7 +28,7 @@ export async function reconcileBatch(context: PluginContext, execution: Reconcil
   try {
     if (batch.phase === "queued") {
       // The Harness invocation owns the full execution deadline.
-      const result = await execution.verbs.harness({ title: "Chief", harnessTargetId: chiefTarget(initial.spec.id), laneId: conversationLane(initial),
+      const result = await execution.verbs.harness({ title: "Chief", harnessTargetId: chiefTarget(initial.spec.id),
         prompt: batch.context.prompt, freshContext: true, timeoutMs: 172800_000 });
       const current = (await read()).status.batch!;
       if (current.cancelRequested) {
@@ -44,7 +46,7 @@ export async function reconcileBatch(context: PluginContext, execution: Reconcil
     // Full facts, not prompt previews, enter the handoff before their references can be released.
     const records = [current.context.history];
     for (const id of current.inputIds) {
-      const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "aide-system", name: id });
+      const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: id });
       if (!input) throw new Error(`Batch Input missing: ${id}`);
       records.push(await context.printers.describe(input));
     }
@@ -63,7 +65,7 @@ Previous summary: ${summary}
 History:
 [characters ${offset}..${end} of ${material.length}]
 ${material.slice(offset, end)}`;
-        const result = await execution.verbs.harness({ title: "Conversation summary", harnessTargetId: chiefTarget(initial.spec.id), laneId: conversationLane(initial),
+        const result = await execution.verbs.harness({ title: "Conversation summary", harnessTargetId: chiefTarget(initial.spec.id),
           prompt, freshContext: true, timeoutMs: 180_000 });
         if (result.state !== "success" || result.value.outcome !== "completed" || result.value.turn.stopReason !== "end_turn") throw new Error("Conversation summary failed");
         const text = result.value.turn.finalText?.trim();
@@ -82,6 +84,6 @@ ${material.slice(offset, end)}`;
     // Compaction is side-effect free and can resume, but requires an explicit retry rather than a hot failure loop.
     await patch((b) => ({ phase: "failed", failureStage: c.status.batch!.phase === "compacting" ? "compaction" : "execution", result: { ...b.result, summary: b.result?.summary ?? "", error: reason } }));
     context.logger.error("Conversation Batch failed; effects will not be replayed", { error, attributes: { conversationId: c.spec.id, batchId: batch.id } });
-    if (batch.context.responseRequired) await execution.verbs.say({ text: "本次处理未完成，已暂停后续执行。请查看会话错误和已执行动作后再继续。" });
+    if (batch.context.responseRequired) await say(execution.verbs, { text: "本次处理未完成，已暂停后续执行。请查看会话错误和已执行动作后再继续。" });
   }
 }

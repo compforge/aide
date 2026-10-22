@@ -5,4 +5,4 @@ export type ResourceNamespace =
   | `v1/project/${string}/session/${string}`;
 
 /** Resource namespaces reserved by Aide itself sit outside Plugin tenancy. */
-export type AnyResourceNamespace = ResourceNamespace | "aide-system";
+export type AnyResourceNamespace = ResourceNamespace;

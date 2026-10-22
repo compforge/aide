@@ -1,11 +1,4 @@
-import type {
-  ControllerSource,
-  CronSource,
-  ResourceNamespace,
-  ResourceType,
-  Source,
-  SourceContext,
-} from "@compforge/aide-plugin";
+import type { ControllerSource, CronSource, ResourceNamespace, ResourceType, Source, SourceContext } from "@compforge/aide-plugin";
 
 export { validateSources } from "../../reconcile/source.ts";
 import {

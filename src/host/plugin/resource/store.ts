@@ -1,5 +1,5 @@
 import { ResourceStorage, resourceHome, type StoredResource } from "../../resource/storage.ts";
-import { assertPathSegment, validateResourceType } from "./type.ts";
+import { assertPathSegment, assertResourceUid, validateResourceType } from "./type.ts";
 import { assertSessionId } from "../../store/session-id.ts";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -9,13 +9,7 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 
-import type {
-  Resource,
-  ResourceListOptions,
-  ResourceNamespace,
-  ResourceOwnerReference,
-  ResourceType,
-} from "@compforge/aide-plugin";
+import type { Resource, ResourceListOptions, ResourceNamespace, ResourceOwnerReference, ResourceType } from "@compforge/aide-plugin";
 
 import { newId } from "../../event/ids.ts";
 import { withAsyncFileLock, withFileLock } from "../../store/file-lock.ts";
@@ -289,7 +283,7 @@ export class PluginResourceStore {
       "metadata.annotations",
       input.annotations,
     );
-    assertPathSegment("resource name", name);
+    if (!name || name.length > 1024) throw new Error("Invalid resource name");
     const owner = this.ownerReference(input.owner, type, name, namespace);
     const path = this.resourcePath(type, name, namespace);
     return this.storage.transaction(() => withFileLock(path, () => {
@@ -328,7 +322,7 @@ export class PluginResourceStore {
       input.annotations,
     );
     const spec = jsonObject("spec", this.storage.definition(this.pluginInstanceId, type).schema.spec.parse(input.spec)) as TSpec;
-    assertPathSegment("resource name", name);
+    if (!name || name.length > 1024) throw new Error("Invalid resource name");
     const owner = this.ownerReference(input.owner, type, name, namespace);
     const path = this.resourcePath(type, name, namespace);
     return this.storage.transaction(() => withFileLock(path, () => {
@@ -381,7 +375,7 @@ export class PluginResourceStore {
     namespace: ResourceNamespace = "v1",
   ): PluginResource<TSpec, TStatus> | undefined {
     validateResourceType(type);
-    assertPathSegment("resource name", name);
+    if (!name || name.length > 1024) throw new Error("Invalid resource name");
     const canonical = this.resourceNamespace(namespace);
     if (!this.storage.read(this.resourcePath(type, name, canonical), true)) return;
     return this.readCurrentStored<TSpec, TStatus>(type, name, canonical).object;
@@ -392,9 +386,6 @@ export class PluginResourceStore {
     options: ResourceListOptions = {},
   ): PluginResource<TSpec, TStatus>[] {
     validateResourceType(type);
-    if (options.namespace === "aide-system") {
-      throw new Error("PluginResourceStore cannot list Aide-owned resources");
-    }
     const namespace = this.resourceNamespace(options.namespace ?? "v1");
     const matchLabels = labelMap(
       "resource list matchLabels",
@@ -406,7 +397,7 @@ export class PluginResourceStore {
         )
       : [namespace];
     return namespaces.flatMap((candidate) => [...this.storage.keys(this.scope, `${this.kindDir(type, candidate)}/`)]
-      .map((path) => this.readStored<TSpec,TStatus>(type, basename(path, ".json"), candidate).object))
+      .map((path) => this.readStored<TSpec,TStatus>(type, decodeURIComponent(basename(path, ".json")), candidate).object))
       .filter((resource) =>
         containsStringMap(resource.metadata.labels, matchLabels)
       )
@@ -685,7 +676,7 @@ export class PluginResourceStore {
     controllerName?: string,
   ): Promise<T> {
     validateResourceType(type);
-    assertPathSegment("resource name", name);
+    if (!name || name.length > 1024) throw new Error("Invalid resource name");
     return withAsyncFileLock(
       `${this.resourcePath(type, name, namespace)}.reconcile${controllerName ? `.${encodeURIComponent(controllerName)}` : ""}`,
       reconcile,
@@ -701,7 +692,7 @@ export class PluginResourceStore {
     ) => StoredPluginResource<TSpec, TStatus>,
   ): StoredPluginResource<TSpec, TStatus> {
     validateResourceType(type);
-    assertPathSegment("resource name", name);
+    if (!name || name.length > 1024) throw new Error("Invalid resource name");
     const namespace = this.resourceNamespace(options.namespace ?? "v1");
     const path = this.resourcePath(type, name, namespace);
     return this.storage.transaction(() => withFileLock(path, () => {
@@ -727,7 +718,7 @@ export class PluginResourceStore {
     namespace: ResourceNamespace = "v1",
   ): StoredPluginResource<TSpec, TStatus> {
     validateResourceType(type);
-    assertPathSegment("resource name", name);
+    if (!name || name.length > 1024) throw new Error("Invalid resource name");
     return this.readCurrentStored<TSpec, TStatus>(type, name, namespace);
   }
 
@@ -777,7 +768,7 @@ export class PluginResourceStore {
         stored.object,
       );
       const control = this.validateControl(stored.control);
-      return { object, control };
+      return { ...stored, object, control };
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(`invalid plugin resource ${path}: ${detail}`);
@@ -807,7 +798,7 @@ export class PluginResourceStore {
     if (metadata.namespace !== namespace) {
       throw new Error(`namespace must be ${namespace}`);
     }
-    assertPathSegment("metadata.uid", metadata.uid);
+    assertResourceUid(metadata.uid);
     positiveInteger("metadata.generation", metadata.generation);
     resourceVersion("metadata.resourceVersion", metadata.resourceVersion);
     isoTimestamp(
@@ -884,7 +875,7 @@ export class PluginResourceStore {
     const owner = jsonObject("metadata.owner", value);
     validateResourceType(owner);
     assertPathSegment("metadata.owner.name", owner.name);
-    assertPathSegment("metadata.owner.uid", owner.uid);
+    assertResourceUid(owner.uid);
     if (owner.namespace !== dependentNamespace) {
       throw new Error(
         `metadata.owner.namespace must be ${dependentNamespace}`,
@@ -930,7 +921,7 @@ export class PluginResourceStore {
     namespace: ResourceNamespace,
   ): void {
     validateResourceType(type);
-    assertPathSegment("resource name", name);
+    if (!name || name.length > 1024) throw new Error("Invalid resource name");
     const path = this.resourcePath(type, name, namespace);
     withFileLock(path, () => {
       if (!this.storage.has(path)) {
@@ -967,6 +958,8 @@ export class PluginResourceStore {
     return join(this.resourcesDir(namespace), group, version, type.kind);
   }
 
+  key(type: ResourceType, name: string, namespace: ResourceNamespace = "v1"): string { return this.resourcePath(type, name, namespace); }
+
   private resourcePath(
     type: ResourceType,
     name: string,
@@ -974,7 +967,7 @@ export class PluginResourceStore {
   ): string {
     return join(
       this.kindDir(type, this.resourceNamespace(namespace)),
-      `${name}.json`,
+      `${encodeURIComponent(name)}.json`,
     );
   }
 

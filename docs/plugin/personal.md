@@ -65,7 +65,7 @@ Chief 是业务角色。Conversation Controller 调度批次，Batch Controller 
 
 ## 输入与上下文
 
-Input 由 Core 独立持久化，Conversation 是 Personal 的普通资源。Channel / Source 可提供 sessionId 等已知归属线索，Chief 据此确定话题；默认会话接收所有输入，确定性规则补充具体归属。Session 承载持久执行与恢复，Conversation 承载话题；一个 Session 可以组织多个话题。Source 启动只建立观察资源，不预建空 Conversation；输入到来时再决定归属。
+Input、Output 与 Conversation 都是 Personal 的普通资源，使用全局持久化作用域。Channel / Source 可提供 sessionId 等已知归属线索，Chief 据此确定话题；默认会话接收所有输入，确定性规则补充具体归属。Conversation 承载话题，运行时根据资源 UID 组织执行上下文；入口不创建执行 Session。Source 启动只建立观察资源，不预建空 Conversation；输入到来时再决定归属。
 
 ReconcileInput 负责归位，不调用模型。没有任何 Conversation 时，创建一个会话、追加当前 Input 后结束路由。已有 Conversation 时按顺序处理，确定一个会话就立即追加，不汇总完整目标计划：
 
@@ -73,11 +73,11 @@ ReconcileInput 负责归位，不调用模型。没有任何 Conversation 时，
 2. Input 带有尚无会话承接的目标 `sessionId` 时，创建 Conversation 并追加。
 3. 追加到目标 `sessionId` 匹配的已有会话；讨论续报的 `originalInputId` 匹配已经持有原始 Input 的会话。创建不阻止继续关联已有话题。
 
-没有默认会话、没有规则关联、也不满足创建规则时，记录为忽略。新话题不自动成为默认联络处，也不自动向观察到的原群发送消息。Conversation.address 只在由 Channel Input 创建时取首个 Input.source；Source 创建及后续追加不会设定或覆盖默认地址。Immediate 输入的直接回复使用该 Input.source，default 会话也遵循此规则；其它通知明确选择 target 或使用 Conversation.address。多个 immediate 地址不同时，say 必须指定 respondToInputId 或 target。Source 的执行 Session 与目标归属分开；首次无归属的输入使用稳定生成的新 Session，创建的普通 Conversation 可以在 Web 查看并继续回复。
+没有默认会话、没有规则关联、也不满足创建规则时，记录为忽略。新话题不自动成为默认联络处，也不自动向观察到的原群发送消息。Conversation.address 只在由 Channel Input 创建时取首个 Input.source；Source 创建及后续追加不会设定或覆盖默认地址。Immediate 输入的直接回复使用该 Input.source，default 会话也遵循此规则；其它通知明确选择 target 或使用 Conversation.address。多个 immediate 地址不同时，say 必须指定 respondToInputId 或 target。Source 观察与目标归属分开；首次无归属的输入使用稳定生成的话题身份，创建的普通 Conversation 可以在 Web 查看并继续回复。
 
 追加按 Conversation 与 inputId 幂等：已挂载时不写入、不重置消费进度，也不重复唤醒；并发版本冲突重读同一资源身份后重试。路由只保存执行状态、首次创建分支和待创建会话的稳定身份；创建成功后固定 uid，避免重试时重复创建或重新投递到已删除会话的替代资源。中断后重新检查默认会话和确定性规则，已完成追加通过幂等性跳过。后续创建或关联失败不撤销、不阻塞先前已追加会话的消费；讨论续报等待原始 Input 完成路由后继续关联。Channel 形成 Input 后同步调用同一个 appendConversationInput，再继续默认会话与规则路由。两类入口共用队列、消费凭据和并发更新，不设 Conversation 待处理数量上限。
 
-Conversation 的 spec 保存身份、所属 Session、可选 address 与触发策略；status 保存 `pendingInputIds`、下次触发时间和一个 `batch`。Batch 是 Conversation 内部的处理单元，定义在 `conversation/batch.ts`，没有独立 CRD。没有第二份 recentInputIds 或持续增长的 processing 表。
+Conversation 的 spec 保存身份、可选 address 与触发策略；status 保存 `pendingInputIds`、下次触发时间和一个 `batch`。Batch 是 Conversation 内部的处理单元，定义在 `conversation/batch.ts`，没有独立 CRD。没有第二份 recentInputIds 或持续增长的 processing 表。
 
 两个 Controller 观察同一个 Conversation：默认 Controller 执行 `reconcileConversation`，具名 `batch` Controller 执行 `reconcileBatch`。它们拥有独立队列，通过明确的 status Watch 协作，避免等待 Harness 时挡住新输入调度。
 
@@ -89,7 +89,7 @@ Conversation 的 spec 保存身份、所属 Session、可选 address 与触发�
 
 立即 Input 到来时，Conversation 请求中断正在执行的 Batch；Host 取消 HarnessInvocation，并等待正在运行的 Turn 实际停止。新 Batch 优先处理立即 Input，同时承接旧批成员及不确定结果，明确要求核对已发生的动作，不能盲目重放。纯上下文压缩先完成交接，再处理新请求。用户答复也走这一普通输入路径。
 
-每批使用固定 Lane 和新的原生 Harness 上下文。`freshContext` 同时保存 Ledger 历史边界，阻止 catch-up 重新注入已遗忘内容。下一批的近期材料和 summary 都来自上一批有界的结果上下文，长期 Memory 仍由 Chief 的上游扩展管理。
+每批使用 Conversation 资源对应的执行上下文，并建立新的原生 Harness 上下文。`freshContext` 同时保存 Ledger 历史边界，阻止 catch-up 重新注入已遗忘内容。下一批的近期材料和 summary 都来自上一批有界的结果上下文，长期 Memory 仍由 Chief 的上游扩展管理。
 
 上下文交接包含完整 Input 原文、内部总结和已发送消息；超出预算时，Batch 用关闭业务工具和记忆扩展的 Harness 分段压缩。每段成功后持久化 offset 与摘要，整份交接完成后才标记 done。失败保留原文引用和检查点，新的立即请求可恢复纯压缩阶段，不重新执行业务动作。进程中断时，queued Batch 可以启动、compacting Batch 可以从检查点恢复；running Batch 标记 interrupted，当前运行时不恢复 JavaScript 调用栈或重放工具动作。
 
@@ -101,7 +101,7 @@ Input 路由完成、批次消费完成、工作目标完成与消息送达分�
 
 ## 默认联络处
 
-Conversation 的 `spec.default` 标记用户选择的默认联络处，缺省为 false。整个 Aide 实例跨 Session 最多有一个默认会话。用户通过 Web 设置或取消；切换由后端串行处理，先清除旧标记再设置新标记。中断可能留下无默认的状态，用户可以重新设置，不会留下两个默认。删除默认会话后不自动选择替代项。
+Conversation 的 `spec.default` 标记用户选择的默认联络处，缺省为 false。整个 Aide 实例最多有一个默认会话。用户通过 Web 设置或取消；切换由后端串行处理，先清除旧标记再设置新标记。中断可能留下无默认的状态，用户可以重新设置，不会留下两个默认。删除默认会话后不自动选择替代项。
 
 默认会话使用普通 Conversation 的上下文、Work 和 Chief Reconcile，接收每条 Input，包括已有明确目标的输入；具体话题仍按规则独立承接。是否值得回复、提醒、询问或推进工作，由各会话消费时判断，入口不再做语义筛选。需要用户处理的 Aide 服务问题也须先作为 Input 提交，不直接广播错误日志。
 
@@ -157,7 +157,7 @@ Task 与 Routine 各自的 Controller 观察 ready 或已到期的 scheduled，�
 
 资源类型决定身份；Task 没有周期触发配置，Routine 必须有 cron 或事件触发。Work 工具与网页聚合这两类资源，对外仍返回 task / routine 分类。Chief 的会话处理观察 Personal 定义的 Conversation 资源。
 
-改变工作类型由 Chief 组合现有工具：读取原工作的目标与结果，创建目标类型的新工作，再按用户意图暂停或删除原工作。新工作使用独立 id 和执行 Lane，相关上下文写入指令；保留原工作可查看完整历史，删除则将输入回执保留到 Conversation，独立 Output 继续投递和展示。各步分别持久化，不承诺跨资源的原子转换；中断后应查询现状再继续。暂停和删除都不取消已经运行的外部动作。
+改变工作类型由 Chief 组合现有工具：读取原工作的目标与结果，创建目标类型的新工作，再按用户意图暂停或删除原工作。新工作使用独立 id 和资源执行上下文，相关上下文写入指令；保留原工作可查看完整历史，删除则将输入回执保留到 Conversation，独立 Output 继续投递和展示。各步分别持久化，不承诺跨资源的原子转换；中断后应查询现状再继续。暂停和删除都不取消已经运行的外部动作。
 
 ## 完成依据与交付
 

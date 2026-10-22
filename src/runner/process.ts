@@ -1,38 +1,7 @@
+import type { RuntimeScope } from "../protocol/runtime.ts";
 import { Controllers } from "./controllers.ts";
 import { createConnectorClient } from "../connector-client.ts";
-import type {
-  CommandDefinition,
-  CommandContext,
-  CommandInput,
-  CommandSubmitInput,
-  CommandSubmitReceipt,
-  Controller,
-  EventHandler,
-  Hook,
-  HookStage,
-  HookSubjectMap,
-  Mention,
-  PluginContext,
-  PluginDataDirectories,
-  PluginInstance,
-  PluginLogContext,
-  PluginLogLevel,
-  PluginPackage,
-  ReconcileSnapshot,
-  PluginSessionContext,
-  Resource,
-  ResourceClient,
-  ResourceListOptions,
-  ResourceMergePatch,
-  ResourceOwnerReference,
-  ResourceRef,
-  ResourceNamespace,
-  ResourceType,
-  Source,
-  SourceContext,
-  ToastMessage,
-  Watch,
-} from "@compforge/aide-plugin";
+import type { CommandDefinition, CommandContext, CommandInput, CommandSubmitInput, CommandSubmitReceipt, Controller, EventHandler, Hook, HookStage, HookSubjectMap, Mention, PluginContext, PluginDataDirectories, PluginInstance, PluginLogContext, PluginLogLevel, PluginPackage, ReconcileSnapshot, Resource, ResourceClient, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType, Source, SourceContext, ToastMessage, Watch } from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../protocol/ipc.ts";
 import {
   createHookContext,
@@ -293,7 +262,7 @@ function controllerRegistration(controller: Controller<unknown, unknown>): Contr
 async function activate(
   entry: PluginPackageEntry,
   instance: PluginInstance,
-  session: PluginSessionContext,
+  session: RuntimeScope,
   dataDirs: PluginDataDirectories,
 ): Promise<ActivationResult> {
   if (active) throw new Error("Plugin Runner already has an active Binding");
@@ -316,7 +285,7 @@ async function activate(
   };
   const context: PluginContext = Object.freeze({
     instance,
-    session,
+    runtime: Object.freeze({ ...(session.cwd ? { cwd: session.cwd } : {}) }),
     dataDirs: Object.freeze({ ...dataDirs }),
     resources,
     connectors: createConnectorClient((request) => callHost({ method: "connector.read", request })),

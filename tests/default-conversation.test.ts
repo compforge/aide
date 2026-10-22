@@ -14,7 +14,7 @@ import { fakeOptions } from "./fake-harness.ts";
 const log = pino({ level: "silent" });
 
 /** @case Default contact is globally unique, survives restart, and never overrides an explicit Web destination. */
-test("Default conversation selection is serialized across Sessions and persisted", async (t) => {
+test("Default conversation selection is application-wide, serialized and persisted", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-default-"));
   const options = fakeOptions({ async execute() { throw new Error("No work expected"); } }, root);
   let aide = new Aide(root, options, log);
@@ -30,11 +30,11 @@ test("Default conversation selection is serialized across Sessions and persisted
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId, enabled }),
   });
   assert.equal((await fetch(base, { redirect: "manual" })).status, 200);
-  assert.equal(aide.sessions().length, 0);
+  assert.equal(aide.runtime.plugins.listInstances().length, 1);
   assert.equal((await select("missing")).status, 404);
   const a = "lark:private & #1", b = "web:second";
-  await aide.session(a).conversations.ensure();
-  await aide.session(b).conversations.ensure();
+  await aide.personal.conversations.ensure(a);
+  await aide.personal.conversations.ensure(b);
   assert.equal((await select(a)).status, 200);
   const home = await fetch(base, { redirect: "manual" });
   assert.equal(home.status, 302);
@@ -47,7 +47,7 @@ test("Default conversation selection is serialized across Sessions and persisted
   stop();
   assert.ok(counts.length > 0 && counts.every((count) => count <= 1));
   assert.deepEqual(conversationList(aide).filter((c) => c.default).map((c) => c.id), [b]);
-  assert.equal(aide.session(b).conversations.get(b)!.trigger!.enabled, false);
+  assert.equal(aide.personal.conversations.get(b)!.trigger!.enabled, false);
   assert.equal(aide.outputs().length, 0);
   await assert.rejects(aide.setDefaultConversation("missing", true), /does not exist/);
   assert.equal(conversationList(aide).find((c) => c.default)!.id, b);
@@ -58,8 +58,8 @@ test("Default conversation selection is serialized across Sessions and persisted
   assert.equal((await select(a)).status, 200);
   await aide.close(); aide = new Aide(root, options, log);
   assert.deepEqual(conversationList(aide).filter((c) => c.default).map((c) => c.id), [a]);
-  const c = aide.session(a).conversations.resource(a)!;
-  await aide.session(a).plugins.resourceClient("personal").delete(c, c.metadata.name);
+  const c = aide.personal.conversations.resource(a)!;
+  await aide.personal.plugins.resourceClient("personal").delete(c, c.metadata.name);
   assert.equal(conversationList(aide).filter((c) => c.default).length, 0);
 });
 
@@ -70,24 +70,24 @@ test("Default receives unscoped, hinted and Channel Inputs without semantic filt
     assert.doesNotMatch(prompt, /Candidates:/); return "processed";
   }, async execute() { throw new Error("No work expected"); } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.session("private").conversations.ensure();
-  await aide.session("group").conversations.ensure();
+  await aide.personal.conversations.ensure("private");
+  await aide.personal.conversations.ensure("group");
   await aide.setDefaultConversation("private", true);
-  const source = aide.session("source"); await aide.start();
+  const source = aide.personal; await aide.start();
   for (const text of ["needs-contact", "specific", "irrelevant"]) {
     await source.conversations.submit(text, { origin: "source", originId: "personal.environments", text });
     await aide.settled();
   }
-  assert.deepEqual(aide.session("private").conversations.inputs("private").map((i) => i.metadata.name), ["needs-contact", "specific", "irrelevant"]);
-  assert.deepEqual(aide.session("group").conversations.inputs("group").map((i) => i.metadata.name), []);
+  assert.deepEqual(aide.personal.conversations.inputs("private").map((i) => i.metadata.name), ["needs-contact", "specific", "irrelevant"]);
+  assert.deepEqual(aide.personal.conversations.inputs("group").map((i) => i.metadata.name), []);
   await source.conversations.submit("hint", { origin: "source", originId: "personal.environments", sessionId: "group", text: "explicit destination" });
   await aide.settled();
-  for (const id of ["private", "group"]) assert.ok(aide.session(id).conversations.inputs(id).map((i) => i.metadata.name).includes("hint"));
+  for (const id of ["private", "group"]) assert.ok(aide.personal.conversations.inputs(id).map((i) => i.metadata.name).includes("hint"));
   await aide.receive(fixtureIncoming({ channelId: "web", id: "channel", sessionId: "group", text: "channel input" }));
   await aide.settled();
-  const group = aide.session("group").conversations;
+  const group = aide.personal.conversations;
   const channel = group.inputs("group").find((input) => input.spec.text === "channel input")!;
-  assert.equal(aide.session("private").conversations.input(channel.metadata.name)!.consumption.phase, "done");
+  assert.equal(aide.personal.conversations.input(channel.metadata.name, "private")!.consumption.phase, "done", JSON.stringify(aide.personal.conversations.resource("private")!.status.batch));
   const before = aide.outputs().length;
   await aide.receive(fixtureIncoming({ channelId: "web", id: "channel", sessionId: "group", text: "channel input" }));
   await aide.settled(); assert.equal(aide.outputs().length, before);

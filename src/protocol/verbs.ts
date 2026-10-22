@@ -1,10 +1,6 @@
 import type { ConnectorRequest } from "./connectors.ts";
 import type { ExecutionAssociation } from "@compforge/aide-plugin";
-import type {
-  HarnessInvocationInput,
-  HarnessResult,
-  ResourceNamespace,
-} from "@compforge/aide-plugin";
+import type { HarnessInvocationInput, HarnessResult, ResourceNamespace } from "@compforge/aide-plugin";
 
 export interface ExecutionScope extends ExecutionAssociation {
   readonly controllerName?: string;
@@ -17,11 +13,11 @@ export interface ExecutionScope extends ExecutionAssociation {
 }
 
 /**
- * Controller action outlet. Say persists Output; Harness and connector calls
+ * Controller action outlet. Plugin actions, Harness and connector calls
  * retain their execution deadlines. Other Core callers need not use Verb.
  */
 export type VerbRequest =
-  | { readonly verb: "say"; readonly input: import("@compforge/aide-plugin").SayInput }
+  | { readonly verb: "action"; readonly name: string; readonly input: unknown }
   | { readonly verb: "connector"; readonly input: { readonly request: ConnectorRequest; readonly timeoutMs: number } }
   | {
       readonly verb: "harness";

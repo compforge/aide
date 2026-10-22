@@ -15,7 +15,7 @@ export function scopedResources(local: ResourceClient, sessionId: string, plugin
     }
     return !id || id === sessionId ? local : directory?.client(id, pluginInstanceId) ?? (() => { throw new Error(`Unknown Session: ${id}`); })();
   };
-  const stamp = <S, T>(r: Readonly<Resource<S, T>>) => isShared(r) || r.metadata.namespace === "aide-system" ? r : ({ ...r, metadata: { ...r.metadata, sessionId: r.metadata.sessionId ?? sessionId } });
+  const stamp = <S, T>(r: Readonly<Resource<S, T>>) => isShared(r) ? r : ({ ...r, metadata: { ...r.metadata, sessionId: r.metadata.sessionId ?? sessionId } });
   return {
     ...local,
     async commit(writes) {

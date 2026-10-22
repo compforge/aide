@@ -9,7 +9,6 @@ export type PluginConfig = Record<string, unknown>;
 
 export interface PluginInstance {
   readonly pluginInstanceId: string;
-  readonly aideSessionId: string;
   readonly pluginId: string;
   readonly marketplace?: string;
   readonly packageVersion: string;
@@ -19,8 +18,7 @@ export interface PluginInstance {
   readonly updatedAt: string;
 }
 
-export interface PluginSessionContext {
-  readonly aideSessionId: string;
+export interface PluginRuntimeContext {
   readonly cwd?: string;
 }
 
@@ -32,10 +30,8 @@ export interface PluginSessionContext {
  * their host-owned APIs.
  */
 export interface PluginDataDirectories {
-  /** Shared by this Plugin across all Aide Sessions. */
+  /** Shared by all instances of this Plugin package. */
   readonly global: string;
-  /** Private to this Plugin in the current AideSession. */
-  readonly session: string;
   /** Private to this concrete Plugin Binding. */
   readonly instance: string;
 }
@@ -103,7 +99,7 @@ export interface PluginLifecycle {
 export interface PluginContext {
   readonly connectors: ConnectorClient;
   readonly instance: PluginInstance;
-  readonly session: PluginSessionContext;
+  readonly runtime: PluginRuntimeContext;
   readonly dataDirs: PluginDataDirectories;
   readonly resources: ResourceClient;
   /** Session-scoped, non-durable user feedback. Reconcile state belongs in Resource status / Board. */

@@ -1,12 +1,14 @@
 import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
-import type { InputSpec, InputStatus, ResourceClient, Address, SayInput } from "@compforge/aide-plugin";
-import { InputStore } from "../../../src/host/input/store.ts";
+import type { ResourceClient, Address } from "@compforge/aide-plugin";
+import type { InputSpec, InputStatus } from "../input/model.ts";
+import type { SayInput } from "../output/model.ts";
+import { InputStore } from "../input/store.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import type { ResourceClientChange } from "../../../src/host/plugin/resource/client.ts";
 import { CONVERSATION_TYPE, initialConversationName, type Conversation, type ConversationResource, type ConversationInput, type ConversationRun, type ConversationSpec, type ConversationStatus } from "./model.ts";
 import { outputView, type OutputDraft, type OutputView } from "../../../src/output.ts";
-import { OutputStore } from "../../../src/host/output/store.ts";
+import { OutputStore } from "../output/store.ts";
 import { outputWrite } from "../output.ts";
 import { digest } from "../chief-model.ts";
 import { conversationTrigger, nextTriggerAt } from "./trigger.ts";
@@ -35,7 +37,7 @@ export class ConversationStore {
     const previous = this.resources.find<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, conversationKey(id));
     if (previous?.metadata.deletionTimestamp) throw new Error("Conversation is being deleted; retry after deletion completes");
     if (previous) return previous;
-    return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, ...(address ? { address: parseAddress(address) } : {}), sessionId: this.sessionId, trigger: conversationTrigger() }, status: { pendingInputIds: [], receipts: [] } });
+    return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, ...(address ? { address: parseAddress(address) } : {}), trigger: conversationTrigger() }, status: { pendingInputIds: [], receipts: [] } });
   }
   inputs(conversationId?: string): ConversationInput[] {
     return this.list().filter((c) => !conversationId || c.id === conversationId).flatMap((view) => {
@@ -55,7 +57,7 @@ export class ConversationStore {
     if (inputs.length > 1) throw new Error("Specify Conversation when reading shared Input processing");
     return inputs[0];
   }
-  async submit(id: string, spec: InputSpec): Promise<ReturnType<InputStore["submit"]>> { return this.inputStore.submit(this.sessionId, id, spec); }
+  async submit(id: string, spec: InputSpec): Promise<ReturnType<InputStore["submit"]>> { return this.inputStore.submit(spec.sessionId ?? "personal", id, spec); }
   runs(conversationId?: string): ConversationRun[] {
     const runs: ConversationRun[] = this.inputs(conversationId).map((input) => ({ id: input.metadata.name, conversationId: input.conversationId, input, status: input.consumption }));
     for (const c of this.list().filter((c) => !conversationId || c.id === conversationId)) {

@@ -6,8 +6,8 @@ import { join } from "node:path";
 import pino from "pino";
 import { PersonSchema } from "../plugins/personal/person/model.ts";
 import { channelRelation, relationToPerson } from "../plugins/personal/person/relation.ts";
-import { InputStore } from "../src/host/input/store.ts";
-import { inputPrinter } from "../src/host/input/printer.ts";
+import { InputStore } from "../plugins/personal/input/store.ts";
+import { inputPrinter } from "../plugins/personal/input/printer.ts";
 import { Aide } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { LarkChannel } from "../src/channel/lark.ts";
@@ -77,7 +77,7 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   await channel.receive(event("other", "ou_other"));
   await channel.close(); channel = new LarkChannel(home, "cli_app", aide, transport, log);
   await channel.dispatch(); await aide.settled();
-  const inputs = aide.session("lark:cli_app:oc_chat").conversations.inputStore.list();
+  const inputs = aide.personal.conversations.inputStore.list();
   assert.equal(inputs.find((input) => input.spec.text === "mine")!.spec.relation, "sent");
   assert.equal(inputs.find((input) => input.spec.text === "other")!.spec.relation, undefined);
   const self = (await aide.persons.me())!;
@@ -87,7 +87,7 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   assert.deepEqual(inputs.find((input) => input.spec.text === "mine")!.spec.observation!.sender, { id: "ou_me", type: "user" });
   assert.ok(prompts.some((prompt) => prompt.includes("Relation to Person: sent")));
   // Rebuilding a fresh native context must retain attribution in its bounded history.
-  const scope = aide.session("lark:cli_app:oc_chat");
+  const scope = aide.personal;
   const conversation = scope.conversations.resource(scope.id)!;
 
   await channel.receive(event("followup", "ou_me"));

@@ -1,8 +1,5 @@
-import type {
-  PluginDataDirectories,
-  PluginInstance,
-  PluginSessionContext,
-} from "@compforge/aide-plugin";
+import type { RuntimeScope } from "../../../protocol/runtime.ts";
+import type { PluginDataDirectories, PluginInstance } from "@compforge/aide-plugin";
 
 import {
   PluginRunnerClient,
@@ -36,7 +33,7 @@ export class PluginSupervisor {
   async activate(
     entry: PluginPackageEntry,
     instance: PluginInstance,
-    session: PluginSessionContext,
+    session: RuntimeScope,
     dataDirs: PluginDataDirectories,
     callbacks: PluginRunnerCallbacks,
   ): Promise<ActivePluginRunner> {

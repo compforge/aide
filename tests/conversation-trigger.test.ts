@@ -29,7 +29,7 @@ async function configure(store: ConversationStore, id: string, intervalSeconds: 
 test("Web switches one Conversation, persists its deadline and cannot change the interval", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-conv-trigger-web-"));
   const aide = new Aide(root, fakeOptions({ execute: async () => { throw new Error("No work"); } }, root), log);
-  const scope = aide.session("shared");
+  const scope = aide.personal;
   await scope.conversations.ensure("a"); await scope.conversations.ensure("b");
   const server = httpChannel(aide, log); server.listen(0, "127.0.0.1"); await once(server, "listening");
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
@@ -47,7 +47,7 @@ test("Web switches one Conversation, persists its deadline and cannot change the
   assert.deepEqual(rows.find((row) => row.id === "a")!.trigger, { enabled: true, intervalSeconds: 3600 });
   assert.equal(rows.find((row) => row.id === "b")!.trigger.enabled, false);
   await aide.close();
-  const session = new SessionStore(root).openSession("shared");
+  const session = new SessionStore(root).openSession(aide.runtime.id);
   const reopened = new ConversationStore(session);
   assert.equal(reopened.resource("a")!.status.nextTriggerAt, due);
   assert.equal("heartbeat" in session.meta, false);
@@ -65,15 +65,15 @@ test("Runner wakes Conversation without an Input; a long timer coalesces and dis
   const aide = new Aide(root, fakeOptions({ chief: async () => { ticks++; await gate; return "发现值得跟进的进展"; }, execute: async () => { throw new Error("No work"); } }, root), log);
   t.after(async () => { release(); await aide.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   await aide.start(); await until(() => ticks === 1);
-  assert.equal(aide.sessions().flatMap((s) => s.conversations.inputs()).length, 0);
+  assert.equal(aide.conversations.inputs().length, 0);
   assert.equal(conversationView(aide, "timer").meta.activity?.phase, "running");
   await Bun.sleep(1100);
   await aide.setConversationTrigger("timer", false);
   release(); await aide.settled(); await Bun.sleep(1100);
   assert.equal(ticks, 1);
   assert.equal(aide.works().length, 0);
-  assert.equal(aide.findConversation("timer")!.conversations.inputs().length, 0);
-  const run = aide.findConversation("timer")!.conversations.runs()[0]!;
+  assert.equal(aide.personal.conversations.inputs().length, 0);
+  const run = aide.personal.conversations.runs()[0]!;
   assert.equal(run.status.phase, "done");
   const blocks = conversationView(aide, "timer").blocks;
   assert.ok(blocks.some((b) => b.type === "execution" && b.group_id === run.id));
@@ -97,10 +97,10 @@ test("Restart coalesces due triggers, hides quiet results and does not replay in
   t.after(async () => { await aide.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   await aide.start(); await aide.settled();
   assert.equal(calls, 0);
-  assert.equal(aide.findConversation("quiet")!.conversations.resource("quiet")!.status.batch!.phase, "interrupted");
-  assert.equal(aide.findConversation("quiet")!.conversations.runs().find((r) => r.id === "old")!.status.phase, "interrupted");
+  assert.equal(aide.personal.conversations.resource("quiet")!.status.batch!.phase, "interrupted");
+  assert.equal(aide.personal.conversations.runs().find((r) => r.id === "old")!.status.phase, "interrupted");
   assert.ok(!conversationView(aide, "quiet").blocks.some((b) => b.content.includes("internal review")));
-  assert.equal(aide.sessions().flatMap((s) => s.conversations.inputs()).length, 0);
+  assert.equal(aide.conversations.inputs().length, 0);
   await aide.close(); aide = new Aide(root, options, log);
   await aide.start(); await aide.settled();
   assert.equal(calls, 0);
@@ -116,7 +116,7 @@ test("Future trigger requeues without another input; ordinary messages preserve 
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.receive(fixtureIncoming({ channelId: "web", id: "first", sessionId: "me", text: "你好" })); await aide.settled();
   await aide.setConversationTrigger("me", true);
-  const scope = aide.findConversation("me")!;
+  const scope = aide.personal;
   const due = scope.conversations.resource("me")!.status.nextTriggerAt;
   await aide.receive(fixtureIncoming({ channelId: "web", id: "second", sessionId: "me", text: "继续聊聊" })); await aide.settled();
   assert.equal(scope.conversations.resource("me")!.status.nextTriggerAt, due);

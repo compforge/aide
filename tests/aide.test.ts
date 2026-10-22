@@ -22,7 +22,7 @@ async function setup(t: TestContext, agent: Agent) {
   const path = dir;
   const aide = new Aide(path, fakeOptions(agent, path), log);
   t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
-  await aide.session("me").conversations.ensure("me", fixtureAddress("me"));
+  await aide.personal.conversations.ensure("me", fixtureAddress("me"));
   await aide.start();
   return { aide, path };
 }
@@ -94,7 +94,7 @@ test("Personal requires a designated final answer even when the transcript conta
     return adapter;
   } }, log);
   t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
-  await aide.session("me").conversations.ensure("me", fixtureAddress("me"));
+  await aide.personal.conversations.ensure("me", fixtureAddress("me"));
   await aide.start(); (await aide.work("me").create(task)); await aide.settled();
   assert.equal(aide.works()[0]!.status, "invalid_result");
   assert.match(aide.works()[0]!.history.at(-1)!.text, /without a designated final answer/);
@@ -144,7 +144,7 @@ test("overdue work is woken after restart, without replaying missed occurrences"
   });
   (await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } }));
   await aide.close();
-  (await aide.sessions().find((scope) => scope.id === "me")!.store.save({ ...aide.works()[0]!, nextAt: "2000-01-01T00:00:00Z" }));
+  (await aide.personal.store.save({ ...aide.works()[0]!, nextAt: "2000-01-01T00:00:00Z" }));
   const restarted = new Aide(path, fakeOptions({ execute: async () => { runs++; return done; } }, path), log);
   t.after(() => restarted.close());
   restarted.start();
@@ -162,7 +162,7 @@ test("interrupted and failed executions become uncertain and are not auto-replay
   await aide.settled();
   assert.equal(aide.works()[0]?.status, "uncertain");
   await aide.close();
-  (await aide.sessions().find((scope) => scope.id === "me")!.store.save({ ...aide.works()[0]!, status: "running" }));
+  (await aide.personal.store.save({ ...aide.works()[0]!, status: "running" }));
   const restarted = new Aide(path, fakeOptions(agent, path), log);
   t.after(() => restarted.close());
   restarted.start();
@@ -234,8 +234,8 @@ test("personal Worker crash cancels its invocation and preserves uncertain work 
   }
   assert.ok(pid && pid !== process.pid);
   process.kill(pid, "SIGKILL");
-  for (let attempt = 0; attempt < 200 && aide.session("me").plugins.isInstanceActive("personal"); attempt++) await Bun.sleep(10);
-  assert.equal(aide.session("me").plugins.isInstanceActive("personal"), false);
+  for (let attempt = 0; attempt < 200 && aide.personal.plugins.isInstanceActive("personal"); attempt++) await Bun.sleep(10);
+  assert.equal(aide.personal.plugins.isInstanceActive("personal"), false);
   assert.equal(aide.works()[0]?.status, "uncertain");
   assert.ok(aide.invocations().some((invocation) => invocation.phase === "cancelled" || invocation.phase === "failed"));
   await aide.close();
@@ -307,7 +307,7 @@ test("Aide resumes the same Session and personal state when execution cwd change
 
 test("default Work target uses Pi and discards stale Codex native bindings while preserving the Session", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-default-pi-"));
-  const session = new SessionStore(root).createSession({ id: "me", cwd: root });
+  const session = new SessionStore(root).createSession({ id: "aide:execution", cwd: root });
   session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex", model: "previous-model" });
   const lane = session.meta.lanes.main!;
   session.setLane("main", { ...lane, harnessSessions: { default: {
@@ -320,12 +320,12 @@ test("default Work target uses Pi and discards stale Codex native bindings while
     return options.createAdapter(target);
   } }, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  const restored = new SessionStore(root).openSession("me");
+  const restored = new SessionStore(root).openSession(aide.runtime.id);
   assert.equal(restored.meta.harnessTargets.default!.harness, "pi");
   assert.equal(restored.meta.harnessTargets.default!.model, undefined);
   assert.equal(restored.meta.lanes.main!.harnessSessions.default?.resumeState, undefined);
   assert.equal(restored.meta.lanes.main!.harnessSessions.default?.harnessSessionId, undefined);
-  await aide.session("me").conversations.ensure("me", fixtureAddress("me"));
+  await aide.personal.conversations.ensure("me", fixtureAddress("me"));
   await aide.start();
   await aide.work("me").create(task); await aide.settled();
   assert.equal(aide.works()[0]!.status, "done");
@@ -343,14 +343,14 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
     seen.push(`${target.id}:${target.harness}`); return options.createAdapter(target);
   } }, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  aide.session("me");
-  assert.equal(new SessionStore(root).openSession("me").meta.harnessTargets.chosen!.model, "configured-model");
+  aide.personal;
+  assert.equal(new SessionStore(root).openSession(aide.runtime.id).meta.harnessTargets.chosen!.model, "configured-model");
   await aide.receive(fixtureIncoming({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "hello" }));
   await aide.settled();
   // Mutating the caller's object cannot change future Sessions' startup target.
   defaultTarget.model = "changed-after-startup";
-  aide.session("later");
-  assert.equal(new SessionStore(root).openSession("later").meta.harnessTargets.chosen!.model, "configured-model");
+  aide.personal;
+  assert.equal(new SessionStore(root).openSession(aide.runtime.id).meta.harnessTargets.chosen!.model, "configured-model");
   await aide.work("me").create(task); await aide.settled();
   await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "sample" } });
   await aide.event({ id: "sample", sessionId: "me", conversationId: "me", name: "sample", text: "sample" });
@@ -359,23 +359,23 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   assert.equal(aide.works().find((work) => work.kind === "routine")!.status, "scheduled");
   assert.ok(seen.some((item) => item.endsWith(":chief")));
   assert.equal(seen.filter((item) => item === `chosen:${harness}`).length, 2);
-  const session = new SessionStore(root).openSession("me");
+  const session = new SessionStore(root).openSession(aide.runtime.id);
   assert.equal(session.meta.harnessTargets.chosen!.harness, harness);
 });
 
 test("restoring a Claude default keeps its claude-code native binding and clears it on a Harness switch", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-default-binding-"));
   const storage = new SessionStore(root);
-  const session = storage.createSession({ id: "me", cwd: root });
+  const session = storage.createSession({ id: "aide:execution", cwd: root });
   session.setHarnessTarget("default", { harnessTargetId: "default", harness: "claude" });
   session.setLaneHarnessSession("main", "default", { harness: "claude-code", harnessSessionId: "native-claude",
     resumeState: { version: 1, data: { id: "native-claude" } } });
   const options = fakeOptions({ execute: async () => done }, root);
   let aide = new Aide(root, { ...options, defaultTarget: { id: "default", harness: "claude" } }, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  assert.equal(storage.openSession("me").meta.lanes.main!.harnessSessions.default!.harnessSessionId, "native-claude");
+  assert.equal(storage.openSession(aide.runtime.id).meta.lanes.main!.harnessSessions.default!.harnessSessionId, "native-claude");
   await aide.close();
   aide = new Aide(root, { ...options, defaultTarget: { id: "default", harness: "codex" } }, log);
-  assert.equal(storage.openSession("me").meta.lanes.main!.harnessSessions.default?.harnessSessionId, undefined);
+  assert.equal(storage.openSession(aide.runtime.id).meta.lanes.main!.harnessSessions.default?.harnessSessionId, undefined);
   assert.equal(storage.listSessions().length, 1);
 });

@@ -18,7 +18,7 @@ async function listen(aide: Aide) {
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const remove = (conversationId: string, revision: number, extra = {}) => fetch(base + "/conversations/delete", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId, revision, uid: aide.findConversation(conversationId)?.conversations.resource(conversationId)?.metadata.uid ?? "missing", ...extra }),
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId, revision, uid: aide.conversations.resource(conversationId)?.metadata.uid ?? "missing", ...extra }),
   });
   return { server, base, remove };
 }
@@ -28,7 +28,7 @@ test("Web deletes a revision-checked Conversation and preserves shared Input and
   const dir = mkdtempSync(join(tmpdir(), "aide-delete-conversation-"));
   const options = fakeOptions({ execute: async () => { throw new Error("No work expected"); } }, dir);
   let aide = new Aide(dir, options, log);
-  const scope = aide.session("shared");
+  const scope = aide.personal;
   await seedInput(scope.conversations, "shared-input", { conversationId: "a", origin: "source", originId: "personal.environments", text: "共同观察" }, { phase: "done" });
   await seedInput(scope.conversations, "shared-input", { conversationId: "b", origin: "source", originId: "personal.environments", text: "共同观察" }, { phase: "done" });
   await scope.conversations.archive("a", [{ id: "old", conversationId: "a", text: "只属于 a", workId: null, target: fixtureAddress("a") }]);
@@ -58,7 +58,7 @@ test("Web deletes a revision-checked Conversation and preserves shared Input and
 test("Conversation deletion rejects queued and running and associated Work without changing them", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-delete-busy-"));
   const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("No execution expected"); } }, dir), log);
-  const scope = aide.session("shared");
+  const scope = aide.personal;
   for (const phase of [undefined, "running"] as const) {
     const id = phase ?? "queued";
     await seedInput(scope.conversations, id, { conversationId: id, origin: "channel", originId: "web", text: id }, phase ? { phase } : {});
@@ -68,11 +68,11 @@ test("Conversation deletion rejects queued and running and associated Work witho
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
   for (const id of ["queued", "running", "task-owner", "routine-owner"]) {
-    const before = aide.findConversation(id)!.conversations.get(id)!;
+    const before = aide.personal.conversations.get(id)!;
     const response = await remove(id, before.revision);
     assert.equal(response.status, 409);
     assert.match((await response.json() as { error: string }).error, id.endsWith("owner") ? /事项或安排/ : /待处理/);
-    assert.deepEqual(aide.findConversation(id)!.conversations.get(id), before);
+    assert.deepEqual(aide.personal.conversations.get(id), before);
   }
   assert.deepEqual(aide.works().map((w) => w.id).sort(), [task.id, routine.id].sort());
 });
@@ -94,14 +94,14 @@ test("Recreated Conversation has fresh execution context and no old outputs or p
   await aide.work("me").delete(work.id, aide.works().find((item) => item.id === work.id)!.revision);
   await aide.settled();
   assert.ok(aide.outputs().some((m) => m.text === "旧工作回复"));
-  const oldResource = aide.session("me").conversations.resource("me")!;
+  const oldResource = aide.personal.conversations.resource("me")!;
   const oldLanes = aide.invocations().map((i) => i.laneId);
   assert.equal((await remove("me", Number(oldResource.metadata.resourceVersion))).status, 200);
   assert.ok(aide.outputs().some((o) => o.conversationUid === oldResource.metadata.uid));
   assert.deepEqual(conversationView(aide, "me").blocks, []);
   await aide.settled();
   await aide.receive(fixtureIncoming({ channelId: "web", id: "new", sessionId: "me", text: "新请求" })); await aide.settled();
-  const current = aide.session("me").conversations.resource("me")!;
+  const current = aide.personal.conversations.resource("me")!;
   assert.notEqual(current.metadata.uid, oldResource.metadata.uid);
   assert.equal((await remove("me", Number(current.metadata.resourceVersion), { uid: oldResource.metadata.uid })).status, 409);
   const invocation = aide.invocations().at(-1)!;

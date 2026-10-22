@@ -1,10 +1,12 @@
+import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { OutputDefinition, OutputSpecSchema, OutputStatusSchema } from "./definition.ts";
 export { OutputSpecSchema } from "./definition.ts";
-import { isChannelAddress } from "../../channel/address.ts";
+import { isChannelAddress } from "../../../src/channel/address.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { OUTPUT_TYPE, type Output, type OutputSpec, type OutputStatus, type ResourceListOptions } from "@compforge/aide-plugin";
-import { ResourceStorage } from "../resource/storage.ts";
+import { type ResourceListOptions } from "@compforge/aide-plugin";
+import { OUTPUT_TYPE, type Output, type OutputSpec, type OutputStatus } from "./model.ts";
+import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 
 /** @spec Output is independent of Input and Conversation lifetime. Associations are provenance, not retention edges.
  * @spec Content, receivers and target never change after admission. Only the Host transport updates delivery state.
@@ -12,21 +14,24 @@ import { ResourceStorage } from "../resource/storage.ts";
  */
 export class OutputStore {
   readonly storage: ResourceStorage;
+  readonly resources: PluginResourceStore;
+  key(id: string): string { return this.resources.key(OUTPUT_TYPE, id); }
   private readonly listeners = new Set<(output: Output) => void>();
   constructor(home: string) {
     this.storage = ResourceStorage.open(home);
-    this.storage.register("core", [OutputDefinition]);
+    this.storage.register("personal", [OutputDefinition]);
+    this.resources = new PluginResourceStore({ home: this.storage.home, pluginInstanceId: "personal" });
     this.storage.db.exec(`CREATE INDEX IF NOT EXISTS output_conversation ON resources(json_extract(data,'$.object.spec.conversation.uid')) WHERE kind='aide.dev/Output';
       CREATE INDEX IF NOT EXISTS output_execution ON resources(json_extract(data,'$.object.spec.executionId')) WHERE kind='aide.dev/Output';`);
   }
-  get(id: string): Output | undefined { return this.storage.read(`output:${id}`, true)?.object as Output | undefined; }
+  get(id: string): Output | undefined { return this.storage.read(this.key(id), true)?.object as Output | undefined; }
   list(options: { owner?: string; conversationUid?: string; executionId?: string; after?: string; limit?: number; matchLabels?: ResourceListOptions["matchLabels"] } = {}): Output[] {
     const clauses = ["kind='aide.dev/Output'"];
     const args: string[] = [];
     for (const [path, value] of [["$.owner", options.owner], ["$.object.spec.conversation.uid", options.conversationUid], ["$.object.spec.executionId", options.executionId]] as const) {
       if (value !== undefined) { clauses.push(`json_extract(data,'${path}')=?`); args.push(value); }
     }
-    if (options.after) { clauses.push("key>?"); args.push(`output:${options.after}`); }
+    if (options.after) { clauses.push("key>?"); args.push(this.key(options.after)); }
     const rows = this.storage.db.prepare(`SELECT data FROM resources WHERE ${clauses.join(" AND ")} ORDER BY key`);
     const result: Output[] = [];
     for (const row of rows.iterate(...args)) {
@@ -38,15 +43,15 @@ export class OutputStore {
   }
   create(owner: string, id: string, raw: OutputSpec): Output {
     if (!id || id.length > 200) throw new Error("Invalid Output ID");
-    const spec = OutputSpecSchema.parse(raw) as OutputSpec;
-    const key = `output:${id}`, previous = this.storage.read(key);
+    const spec = OutputSpecSchema.parse(JSON.parse(JSON.stringify(raw))) as OutputSpec;
+    const key = this.key(id), previous = this.storage.read(key);
     if (previous) {
       if (previous.owner !== owner || !isDeepStrictEqual(previous.object.spec, spec)) throw new Error("Output identity already exists with different content or owner");
       return previous.object as Output;
     }
     const fingerprint = createHash("sha256").update(JSON.stringify({ owner, spec }, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
       ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value)).digest("hex");
-    const receipt = this.storage.receipt(key);
+    const receipt = this.storage.receipt(`output:${id}`);
     if (receipt) {
       const saved = JSON.parse(receipt);
       if (saved.fingerprint !== fingerprint) throw new Error("Output identity already exists with different content or owner");
@@ -55,21 +60,21 @@ export class OutputStore {
     // Preserve admission order even for same-ms outputs and after restart.
     const latest = this.storage.db.prepare("SELECT max(created) AS at FROM resources WHERE kind='aide.dev/Output'").get()?.at as string | null;
     const at = new Date(Math.max(Date.now(), latest ? Date.parse(latest) + 1 : 0)).toISOString();
-    const output: Output = { ...OUTPUT_TYPE, metadata: { name: id, uid: key, namespace: "aide-system", sessionId: owner,
+    const output: Output = { ...OUTPUT_TYPE, metadata: { name: id, uid: `output:${id}`, namespace: "v1",
       creationTimestamp: at, resourceVersion: "1", generation: 1,
       labels: { "aide.dev/conversation-uid": spec.conversation.uid, ...(spec.executionId ? { "aide.dev/execution-id": spec.executionId } : {}) } }, spec,
       status: isChannelAddress(spec.target) && spec.target.channelId === "web" ? { phase: "delivered", attempts: 0, deliveredAt: new Date().toISOString() } : { phase: "pending", attempts: 0 } };
-    this.storage.write(key, "core", { owner, object: output }, { key, value: JSON.stringify({ fingerprint }) });
+    this.storage.write(key, JSON.stringify([null, "personal"]), { owner, object: output, control: {} }, { key: `output:${id}`, value: JSON.stringify({ fingerprint }) });
     this.notify(output); return output;
   }
   update(id: string, change: (current: OutputStatus) => OutputStatus): void {
     this.storage.transaction(() => {
-      const stored = this.storage.read(`output:${id}`); if (!stored) throw new Error(`Output missing: ${id}`);
+      const stored = this.storage.read(this.key(id)); if (!stored) throw new Error(`Output missing: ${id}`);
       const output = stored.object as Output;
       const status = OutputStatusSchema.parse(change(output.status));
       if (isDeepStrictEqual(status, output.status)) return;
       const next: Output = { ...output, metadata: { ...output.metadata, resourceVersion: String(Number(output.metadata.resourceVersion) + 1) }, status };
-      this.storage.write(`output:${id}`, "core", { ...stored, object: next }); this.notify(next);
+      this.storage.write(this.key(id), JSON.stringify([null, "personal"]), { ...stored, object: next }); this.notify(next);
     });
   }
   begin(id: string): void { this.update(id, (s) => {

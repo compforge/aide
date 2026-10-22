@@ -1,11 +1,4 @@
-import type {
-  DeferredHookStage,
-  Hook,
-  HookStage,
-  HookSubjectMap,
-  InlineHookStage,
-  ResourceNamespace,
-} from "@compforge/aide-plugin";
+import type { DeferredHookStage, Hook, HookStage, HookSubjectMap, InlineHookStage, ResourceNamespace } from "@compforge/aide-plugin";
 
 import { newId } from "../event/ids.ts";
 import { type LogSink, logError } from "../logging.ts";

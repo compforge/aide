@@ -12,7 +12,7 @@ Input → Conversation / Batch → Harness / Task / Routine
                                Channel / Connector 投递与回执
 ```
 
-Output 是 Core 内置的 `aide.dev/v1alpha1 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Conversation 的精确资源引用（包括 UID、Session）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标单独保存为 `Address`：`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark endpoint 是分别 URI 编码的 appId / chatId。Personal 在产出时明确选择地址，Channel 发送时只读 target，不解析 Conversation ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
+Output 是 Personal 定义的 `aide.dev/v1alpha1 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Conversation 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标单独保存为 `Address`：`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark endpoint 是分别 URI 编码的 appId / chatId。Personal 在产出时明确选择地址，Channel 发送时只读 target，不解析 Conversation ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
 
 `say` 成功返回 `outputId`，表示内容已经持久化。Chief 用工具调用 ID 去重；同一调用的重试返回原 Output，不同调用可以为同一批输入创建多个 Output。Task / Routine 将结果状态与相应 Output 通过 `ResourceClient.commit` 一起提交，投递失败不会重新运行 Harness 或外部动作。
 
@@ -38,7 +38,7 @@ Output 的 `status` 由 Host 与 Channel 维护。Lark 持久记录 pending / se
 
 ## 原子提交与恢复
 
-`ResourceClient.commit` 在同一个 Session、Plugin 访问范围内，组合资源 create / replace / patchStatus 与 Core Output create。Host 用一个同步 SQLite 事务完成版本校验、容量检查和写入，提交后才发布变更通知。Core 的 Session、绑定等由其它存储维护的写入不能加入该事务；此 API 不包括远端发送。
+`ResourceClient.commit` 在同一个插件的全局资源范围内，组合业务状态更新与 Output 创建。Host 用一个同步 SQLite 事务完成版本校验、容量检查和写入，提交后才发布变更通知。执行日志和原生绑定等由其它存储维护的写入不能加入该事务；此 API 不包括远端发送。
 
 事务内写过的资源不能被后续写入的容量回收淘汰。内容非法、版本冲突或受保护资源超过容量都会整笔回滚。业务执行已经发生后的提交冲突只重试提交，不重新执行动作。Output 身份对应内容指纹，回收后在 Host 去重窗口内仍拒绝恢复同一 Output 的投递。
 
@@ -52,7 +52,7 @@ Conversation 不保存输出正文或无限增长的输出 ID 列表。界面按
 
 Output 进入 Host 统一资源容量管理，配置键为 `aide.dev/Output`。pending / sending / uncertain 保持受保护；delivered 且无人引用时可以按配置回收；failed 保留诊断窗口后可释放。Input、Conversation 与 producer 是追溯关系，不永久互相保活。Output 内容回收后，可读的长期上下文由 Conversation summary / memory 承接。
 
-Host 注册 OutputPrinter，`describe` 返回完整正文、目标和投递信息，`summarize` 返回有界文本预览。ResourceClient 可以获取和列出 Output；插件不能直接修改其投递状态。
+Personal 声明 OutputPrinter，由 Host 加载，`describe` 返回完整正文、目标和投递信息，`summarize` 返回有界文本预览。ResourceClient 可以获取和列出 Output；投递状态由应用装配的投递器通过相同资源契约维护。
 
 问题也是普通 Output；用户答复是新的 Input，由后续 Batch 理解。业务 ask / confirm / draft、Interaction 和 Input.replyTo 已移除。原生工具权限与 Hook 信任使用独立的 Approval，不经过业务消息关联。Input 路由、sessionId 与 Batch 调度策略沿用各自契约。
 

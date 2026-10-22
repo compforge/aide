@@ -1,5 +1,5 @@
-import type { Address } from "./address.ts";
-import type { Resource, ResourceRef } from "./resource.ts";
+import type { Address } from "@compforge/aide-plugin";
+import type { Resource, ResourceRef } from "@compforge/aide-plugin";
 
 export const OUTPUT_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Output" } as const;
 
@@ -24,3 +24,17 @@ export interface OutputStatus {
   receipt?: { id: string; scope: string };
 }
 export type Output = Resource<OutputSpec, OutputStatus>;
+
+import type { VerbResult } from "@compforge/aide-plugin";
+/** Persists a message for Channel delivery; success does not mean the recipient has read it. */
+export interface SayInput {
+  readonly text: string;
+  readonly inputIds?: readonly string[];
+  readonly idempotencyKey?: string;
+  readonly respondToInputId?: string;
+  readonly target?: Address;
+  /** Person references; explicit [] suppresses inference from respondToInputId's sender. */
+  readonly receivers?: readonly ResourceRef[];
+}
+export type SayResult = VerbResult<{ readonly outputId: string }>;
+

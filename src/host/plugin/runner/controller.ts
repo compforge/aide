@@ -37,7 +37,7 @@ export class RunnerController {
   scheduledReconciles() { return []; }
   ownsResource(ref: ResourceRef): boolean {
     return ref.apiVersion === this.scope.resourceApiVersion && ref.kind === this.scope.resourceKind
-      && (this.scope.resourceOwner === "aide" || this.options.store.find(ref, ref.name, ref.namespace as ResourceNamespace)?.metadata.uid === ref.uid);
+      && (this.options.store.find(ref, ref.name, ref.namespace as ResourceNamespace)?.metadata.uid === ref.uid);
   }
   close(): void {
     this.closed = true;
@@ -47,7 +47,7 @@ export class RunnerController {
   }
   async begin(key: ReconcileKey) {
     if (this.closed) throw new Error("Controller is closed");
-    const ref = { apiVersion: key.resourceApiVersion, kind: key.resourceKind, namespace: this.scope.resourceOwner === "aide" ? "aide-system" as const : key.namespace, name: key.resourceId };
+    const ref = { apiVersion: key.resourceApiVersion, kind: key.resourceKind, namespace: key.namespace, name: key.resourceId };
     const resource = await this.options.resources.get<unknown, unknown>(ref);
     if (!resource) return;
     const resourceRef = { ...ref, uid: resource.metadata.uid };
@@ -66,7 +66,7 @@ export class RunnerController {
       if (original.metadata.uid !== resource.metadata.uid) throw new Error("Controller resource identity changed");
       if (failed) return { deleted: false };
       const next = after === undefined ? null : new Date(Date.now() + after);
-      if (this.scope.resourceOwner !== "aide") {
+      {
         const namespace = original.metadata.namespace as ResourceNamespace;
         const latest = this.options.store.find(original, original.metadata.name, namespace);
         if (!latest || latest.metadata.uid !== original.metadata.uid) return { deleted: true };
@@ -82,7 +82,7 @@ export class RunnerController {
     } finally { this.options.verb.endRemote(scope.executionId); }
   }
   schedule(key: ReconcileKey, nextAt: string): void {
-    if (this.closed || this.scope.resourceOwner === "aide") return;
+    if (this.closed) return;
     const resource = this.options.store.find({ apiVersion: key.resourceApiVersion, kind: key.resourceKind }, key.resourceId, key.namespace as ResourceNamespace);
     if (resource) this.options.store.setNextReconcileAt(resource, key.resourceId, new Date(nextAt), { namespace: resource.metadata.namespace as ResourceNamespace, controllerName: this.scope.controllerName });
   }

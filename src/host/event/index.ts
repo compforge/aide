@@ -19,7 +19,7 @@ import type {
   PromptBlock,
   ResourceLinkBlock,
   TextBlock,
-} from "../input/blocks.ts";
+} from "../harness/prompt-blocks.ts";
 export type {
   AudioBlock,
   EmbeddedResourceBlock,
@@ -27,7 +27,7 @@ export type {
   PromptBlock,
   ResourceLinkBlock,
   TextBlock,
-} from "../input/blocks.ts";
+} from "../harness/prompt-blocks.ts";
 export const ENVELOPE_VERSION = 7 as const;
 
 /**

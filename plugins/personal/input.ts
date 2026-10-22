@@ -1,4 +1,5 @@
-import type { PluginContext, InputSpec, InputStatus, Resource } from "@compforge/aide-plugin";
+import type { PluginContext, Resource } from "@compforge/aide-plugin";
+import type { InputSpec, InputStatus } from "./input/model.ts";
 import { INPUT_TYPE, digest } from "./chief-model.ts";
 import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type ConversationStatus, type ConversationResource } from "./conversation/model.ts";
 import { appendConversationInput } from "./conversation/input.ts";
@@ -31,9 +32,9 @@ export async function reconcileInput(context: Pick<PluginContext, "resources" | 
   } });
   let attached = conversations.some((c) => c.status.pendingInputIds.includes(input.metadata.name));
   const append = async (c: Readonly<ConversationResource>) => {
-    if (await appendConversationInput(context.resources, { sessionId: c.spec.sessionId, name: c.metadata.name, uid: c.metadata.uid }, input)) {
+    if (await appendConversationInput(context.resources, { sessionId: c.metadata.sessionId, name: c.metadata.name, uid: c.metadata.uid }, input)) {
       context.logger.info("Chief input attached to conversation", { attributes: { inputId: input.metadata.name,
-        conversationId: c.spec.id, sessionId: c.spec.sessionId } });
+        conversationId: c.spec.id } });
     }
     input = (await context.resources.get<InputSpec, InputStatus>(ref))!;
     attached = true;
@@ -62,13 +63,13 @@ export async function reconcileInput(context: Pick<PluginContext, "resources" | 
   }
   const defaultConversation = conversations.find((c) => c.spec.default);
   if (defaultConversation) await append(defaultConversation);
-  if (input.status.routing!.creation || (input.spec.sessionId && !conversations.some((c) => c.spec.sessionId === input.spec.sessionId))) await create();
+  if (input.status.routing!.creation || (input.spec.sessionId && !conversations.some((c) => c.spec.id === input.spec.sessionId))) await create();
   for (const c of conversations) {
-    if (input.spec.sessionId && c.spec.sessionId === input.spec.sessionId) await append(c);
+    if (input.spec.sessionId && c.spec.id === input.spec.sessionId) await append(c);
   }
   const originalInputId = input.spec.observation?.originalInputId;
   if (typeof originalInputId === "string" && originalInputId !== input.metadata.name) {
-    const preceding = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "aide-system", name: originalInputId });
+    const preceding = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: originalInputId });
     if (preceding && !["done", "ignored"].includes(preceding.status.routing?.phase ?? "")) {
       throw new Error(`Original Input routing is pending: ${originalInputId}`);
     }
@@ -81,7 +82,7 @@ export async function reconcileInput(context: Pick<PluginContext, "resources" | 
 
 /** @spec Pin the created incarnation before append; retries never recreate a deleted, pinned Conversation. */
 async function createConversation(context: Pick<PluginContext, "resources" | "logger">, input: Input, planned: Creation): Promise<Readonly<ConversationResource>> {
-  const ref = { ...CONVERSATION_TYPE, ...planned, namespace: "v1" as const };
+  const ref = { ...CONVERSATION_TYPE, name: planned.name, uid: planned.uid, namespace: "v1" as const };
   if (planned.uid) {
     const c = await context.resources.get<ConversationSpec, ConversationStatus>(ref);
     if (!c || c.metadata.deletionTimestamp) throw new Error(`Created Conversation no longer exists: ${planned.sessionId}/${planned.name}`);
@@ -89,8 +90,8 @@ async function createConversation(context: Pick<PluginContext, "resources" | "lo
   }
   try {
     const c = await context.resources.create<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, {
-      sessionId: planned.sessionId, name: planned.name,
-      spec: { id: planned.sessionId, sessionId: planned.sessionId, ...(input.spec.origin === "channel" && input.spec.source ? { address: input.spec.source } : {}), name: initialConversationName(input.spec.text) },
+      name: planned.name,
+      spec: { id: planned.sessionId, ...(input.spec.origin === "channel" && input.spec.source ? { address: input.spec.source } : {}), name: initialConversationName(input.spec.text) },
       status: { pendingInputIds: [], receipts: [] },
     });
     context.logger.info("Chief routing created conversation", { attributes: { inputId: input.metadata.name,
@@ -99,7 +100,7 @@ async function createConversation(context: Pick<PluginContext, "resources" | "lo
   } catch (error) {
     if (!(error instanceof Error) || !error.message.includes("resource already exists")) throw error;
     const existing = await context.resources.get<ConversationSpec, ConversationStatus>(ref);
-    if (!existing || existing.metadata.deletionTimestamp || existing.spec.id !== planned.sessionId || existing.spec.sessionId !== planned.sessionId) {
+    if (!existing || existing.metadata.deletionTimestamp || existing.spec.id !== planned.sessionId) {
       throw new Error(`Created Conversation identity is unavailable: ${planned.sessionId}/${planned.name}`);
     }
     return existing;

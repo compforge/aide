@@ -1,3 +1,5 @@
+import { OutputStore } from "../plugins/personal/output/store.ts";
+import { resourceHome } from "../src/host/resource/storage.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -9,11 +11,11 @@ import personalDefinitions from "../plugins/personal/definitions.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import { LOCAL_ME } from "../plugins/personal/person/model.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-import { InputStore } from "../src/host/input/store.ts";
+import { InputStore } from "../plugins/personal/input/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { scopedResources } from "../src/host/plugin/resource/directory.ts";
-import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
+import { personalAdmission } from "../plugins/personal/admission.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { observeRequirements, SOURCE_TYPE, type RequirementSourceStatus } from "../plugins/personal/source/requirement/observe.ts";
 import type { Watch } from "../plugins/personal/source/requirement/config.ts";
@@ -25,11 +27,11 @@ function fixture(t: TestContext, me = true) {
   const root = mkdtempSync(join(tmpdir(), "aide-requirement-"));
   const sessions = new SessionStore(root), session = sessions.createSession({ id: "source:work", cwd: root });
   const inputs = new InputStore(root);
-  let store = new PluginResourceStore({ session, pluginInstanceId: "personal" });
+  let store = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
   store.storage.register("personal", personalDefinitions);
   const marks = { identities: [LOCAL_ME, ...(me ? [{ provider: "meego", scope: "https://meego.test/p", id: "me" }] : [])] };
   const catalog = openPersonCatalog(root, marks, pino({ level: "silent" }), () => {});
-  const client = () => scopedResources(createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, inputs })), session.id, "personal", undefined, (type) => type.kind === "Person", catalog.client);
+  const client = () => createResourceClient(store, undefined, undefined, personalAdmission(inputs, new OutputStore(resourceHome(session.dir))));
   let resources = client();
   const watch: Watch = { id: "work", source: "work", sessionId: session.id, intervalMs: 300000, repositories: [], userKeys: ["me"] };
   store.create({ type: SOURCE_TYPE, name: "watch", spec: watch, status: {} });
@@ -46,7 +48,7 @@ function fixture(t: TestContext, me = true) {
   return { root, catalog, inputs, connectors, resource, get resources() { return resources; },
     setItem(value: Requirement) { current = value; }, setList(fn: typeof list) { list = fn; }, setComments(fn: typeof comments) { comments = fn; },
     async observe(seconds = 0) { await catalog.persons.initialize(); await observeRequirements({ logger, resources }, resource(), connectors, at(seconds)); },
-    async restart() { const reopened = sessions.openSession(session.id); t.after(() => reopened.closeLogs()); store = new PluginResourceStore({ session: reopened, pluginInstanceId: "personal" }); resources = client(); },
+    async restart() { const reopened = sessions.openSession(session.id); t.after(() => reopened.closeLogs()); store = new PluginResourceStore({ home: resourceHome(reopened.dir), pluginInstanceId: "personal" }); resources = client(); },
   };
 }
 

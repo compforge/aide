@@ -1,3 +1,5 @@
+import { OutputStore } from "../plugins/personal/output/store.ts";
+import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
@@ -9,8 +11,8 @@ import { join } from "node:path";
 import pino from "pino";
 import type { EnvironmentSnapshot, WorkloadSnapshot } from "@compforge/aide-plugin";
 import { SessionStore } from "../src/host/store/store.ts";
-import { InputStore } from "../src/host/input/store.ts";
-import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
+import { InputStore } from "../plugins/personal/input/store.ts";
+import { personalAdmission } from "../plugins/personal/admission.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
@@ -30,9 +32,9 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   const sessions = new SessionStore(root); const session = sessions.createSession({ id: "owner", cwd: root });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   const conversations = new InputStore(session.dir);
-  let store = new PluginResourceStore({ session, pluginInstanceId: "personal" });
+  let store = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
   store.storage.register("personal", personalDefinitions);
-  const resources = () => createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, inputs: conversations }));
+  const resources = () => createResourceClient(store, undefined, undefined, personalAdmission(conversations, new OutputStore(resourceHome(session.dir))));
   const watch: EnvironmentSourceSpec = { environment: "dev", namespace: "app", intervalMs: 300_000 };
   store.create({ type: ENVIRONMENT_SOURCE_TYPE, name: "changes", spec: watch, status: {} });
   let current = snapshot("A"); let failure = false; let reads = 0;
@@ -52,7 +54,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   assert.equal(resource().status.baseline!.workloads[0]!.images[0]!.image, "A");
   const reopened = sessions.openSession(session.id);
   t.after(() => reopened.closeLogs());
-  store = new PluginResourceStore({ session: reopened, pluginInstanceId: "personal" });
+  store = new PluginResourceStore({ home: resourceHome(reopened.dir), pluginInstanceId: "personal" });
   current = snapshot("C"); const previousReads = reads;
   await observe(); assert.equal(reads, previousReads, "Recover the committed input before reading the new live value");
   assert.equal(resource().status.baseline!.workloads[0]!.images[0]!.image, "B");
@@ -109,29 +111,29 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await aide.setDefaultConversation("other", true);
   current = snapshot("B");
   const poll = async () => {
-    const scope = aide.session(ENVIRONMENT_SESSION);
+    const scope = aide.personal;
     const resources = await scope.plugins.resourceClient("personal").list(ENVIRONMENT_SOURCE_TYPE);
     assert.equal(resources.length, 2);
     for (const resource of resources) await scope.plugins.enqueue({ aideSessionId: scope.id, pluginInstanceId: "personal", namespace: "v1",
       resourceApiVersion: ENVIRONMENT_SOURCE_TYPE.apiVersion, resourceKind: ENVIRONMENT_SOURCE_TYPE.kind, resourceId: resource.metadata.name });
     for (let attempt = 0; attempt < 500; attempt++) {
-      if (scope.conversations.inputStore.list(scope.id).some((input) => input.status.routing?.phase === "done")) break;
+      if (scope.conversations.inputStore.list().some((input) => input.status.routing?.phase === "done")) break;
       await Bun.sleep(10);
     }
     await aide.settled();
-    assert.ok(scope.conversations.inputStore.list(scope.id).some((input) => input.status.routing?.phase === "done"));
+    assert.ok(scope.conversations.inputStore.list().some((input) => input.status.routing?.phase === "done"));
   };
   await poll();
-  assert.equal(aide.session(ENVIRONMENT_SESSION).conversations.inputStore.list(ENVIRONMENT_SESSION).length, 1);
+  assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
   assert.match(prompts.at(-1)!, /workload.changed/);
   assert.ok(aide.outputs().filter((message) => message.conversationId === "other").some((message) => message.text === "关注的服务有变化"));
   assert.equal(aide.works().length, 0);
-  const sessions = new SessionStore(root); const persisted = sessions.openSession(ENVIRONMENT_SESSION);
+  const sessions = new SessionStore(root); const persisted = sessions.openSession(aide.runtime.id);
   const events = persisted.ledger.read().filter((event) => event.kind === "connector.started");
   assert.ok(events.some((event) => JSON.stringify(event.payload).includes("environments.workloads")));
   await persisted.closeLogs();
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();
-  assert.equal(aide.session(ENVIRONMENT_SESSION).conversations.inputStore.list(ENVIRONMENT_SESSION).length, 1);
+  assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
   assert.equal(prompts.length, 2, "Only Channel and observation handling call the model; routing does not");
 });

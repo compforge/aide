@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { InputRelation } from "@compforge/aide-plugin";
+import type { InputRelation } from "../input/model.ts";
 import type { Me, PersonIdentity } from "./model.ts";
 
 export function isPerson(person: Me, identity: PersonIdentity): boolean {

@@ -1,6 +1,8 @@
+import { InputStore } from "../plugins/personal/input/store.ts";
+import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
-import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
-import { OutputStore } from "../src/host/output/store.ts";
+import { personalAdmission } from "../plugins/personal/admission.ts";
+import { OutputStore } from "../plugins/personal/output/store.ts";
 import type { PluginContext } from "@compforge/aide-plugin";
 import { consumeWorkInputs } from "../plugins/personal/work-input.ts";
 import type { WorkResource } from "../plugins/personal/resources.ts";
@@ -29,9 +31,9 @@ function setup(t: TestContext) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const session = new SessionStore(root).createSession({ cwd: root });
   let writes = 0;
-  const resources = new PluginResourceStore({ session, pluginInstanceId: "personal" });
+  const resources = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
   resources.storage.register("personal", personalDefinitions);
-  const store = new Store(resources, createResourceClient(resources, () => writes++, undefined, new AideResourceProvider({ session, outputs: new OutputStore(root) })), new ConversationStore(session));
+  const store = new Store(resources, createResourceClient(resources, () => writes++, undefined, personalAdmission(new InputStore(root), new OutputStore(root))), new ConversationStore(session));
   const consume = async (id: string) => {
     const work = store.get(id);
     return consumeWorkInputs({ resources: createResourceClient(resources), logger: { info() {}, warn() {} } } as unknown as PluginContext,
@@ -121,7 +123,7 @@ test("Work service writes wake the existing Worker and reconcile; deletion durin
   release(); await aide.settled();
   assert.deepEqual(tools.list(), []);
   assert.equal(aide.outputs().length, 0);
-  assert.equal(aide.session("me").store.resources.find(TASK_TYPE, work.id), undefined);
+  assert.equal(aide.personal.store.resources.find(TASK_TYPE, work.id), undefined);
 });
 
 
@@ -169,10 +171,10 @@ test("Chief appends the same original Input to two works without losing observat
   } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const taskWork = await aide.work("me").create(task); taskId = taskWork.id;
-  await aide.session("me").store.save({ ...taskWork, status: "paused" });
+  await aide.personal.store.save({ ...taskWork, status: "paused" });
   routineId = (await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "deployment" } })).id;
   await aide.start(); await aide.settled();
-  const source = aide.session("source"); await source.start();
+  const source = aide.personal; await source.start();
   const fact = { origin: "source" as const, originId: "personal.environments", sessionId: "me", text: "executor workload changed", observation };
   await source.conversations.submit("changed", fact); await aide.settled();
   assert.equal(aide.work("me").read(taskId).status, "paused");

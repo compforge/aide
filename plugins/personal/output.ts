@@ -1,4 +1,5 @@
-import { OUTPUT_TYPE, type Address, type OutputSpec, type ResourceCommit, type ResourceRef } from "@compforge/aide-plugin";
+import { type Address, type ResourceCommit, type ResourceRef } from "@compforge/aide-plugin";
+import { OUTPUT_TYPE, type OutputSpec } from "./output/model.ts";
 import type { OutputDraft } from "../../src/output.ts";
 import type { ConversationResource } from "./conversation/model.ts";
 
@@ -9,7 +10,7 @@ export function outputSpec(c: Readonly<ConversationResource>, draft: Pick<Output
   const { target = draft.target ?? c.spec.address, receivers = draft.receivers, ...provenance } = association;
   if (!target) throw new Error(`Output target required for Conversation: ${c.spec.id}`);
   return { text: draft.text, conversationId: c.spec.id,
-    conversation: { apiVersion: c.apiVersion, kind: c.kind, namespace: c.metadata.namespace, name: c.metadata.name, uid: c.metadata.uid, sessionId: c.spec.sessionId },
+    conversation: { apiVersion: c.apiVersion, kind: c.kind, namespace: c.metadata.namespace, name: c.metadata.name, uid: c.metadata.uid },
     target, ...(receivers !== undefined ? { receivers } : {}), ...provenance };
 }
 export function outputWrite(c: Readonly<ConversationResource>, draft: OutputDraft,

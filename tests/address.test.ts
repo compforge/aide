@@ -47,9 +47,9 @@ test("Channel creation captures its first address; default replies use Input add
   await aide.settled(); await aide.setDefaultConversation("inbox", true);
   await aide.receive({ id: "first", channelId: "lark", sessionId: "opaque-topic", text: "first", source: group });
   await aide.settled();
-  const topic = aide.findConversation("opaque-topic")!.conversations;
+  const topic = aide.personal.conversations;
   assert.deepEqual(topic.resource("opaque-topic")!.spec.address, group);
-  assert.deepEqual(aide.findConversation("inbox")!.conversations.resource("inbox")!.spec.address, inbox);
+  assert.deepEqual(aide.personal.conversations.resource("inbox")!.spec.address, inbox);
   const replies = aide.outputs().filter((o) => o.target.kind === "channel" && (o.target as ChannelAddress).endpoint === group.endpoint);
   assert.equal(replies.length, 2, "Both producers reply to the original group, including the default Conversation");
   await aide.receive({ id: "second", channelId: "lark", sessionId: "opaque-topic", text: "second", source: elsewhere });
@@ -57,16 +57,16 @@ test("Channel creation captures its first address; default replies use Input add
   assert.deepEqual(topic.resource("opaque-topic")!.spec.address, group);
   assert.ok(aide.outputs().some((o) => o.conversationId === "opaque-topic" && (o.target as ChannelAddress).endpoint === elsewhere.endpoint));
   await assert.rejects(aide.receive({ id: "wrong", channelId: "web", sessionId: "must-not-exist", text: "wrong", source: group }), /different Channel/);
-  assert.equal(aide.findConversation("must-not-exist"), undefined);
+  assert.equal(aide.conversations.get("must-not-exist"), undefined);
 });
 
 /** @case An observation knows where it happened without establishing a standing contact address. */
 test("Source-created Conversation remains addressless after Channel append; replies still reach that Input", async (t) => {
   const { aide, root, options } = setup(t);
   const address = larkAddress("app", "group");
-  await aide.session("observer").conversations.submit("observed", { origin: "source", originId: "personal.lark", sessionId: "topic", source: address, text: "observed fact" });
+  await aide.personal.conversations.submit("observed", { origin: "source", originId: "personal.lark", sessionId: "topic", source: address, text: "observed fact" });
   await aide.settled();
-  const c = aide.findConversation("topic")!.conversations;
+  const c = aide.personal.conversations;
   assert.equal(c.resource("topic")!.spec.address, undefined);
   assert.equal(aide.outputs().length, 0);
   await aide.receive({ id: "request", channelId: "lark", sessionId: "topic", text: "reply here", source: address });
@@ -77,7 +77,7 @@ test("Source-created Conversation remains addressless after Channel append; repl
   const reopened = new Aide(root, options, pino({ level: "silent" }));
   try {
     await reopened.start(); await reopened.settled();
-    assert.equal(reopened.findConversation("topic")!.conversations.resource("topic")!.spec.address, undefined);
+    assert.equal(reopened.personal.conversations.resource("topic")!.spec.address, undefined);
     assert.deepEqual(reopened.outputs()[0]!.target, address);
   } finally { await reopened.close(); }
 });
@@ -85,7 +85,7 @@ test("Source-created Conversation remains addressless after Channel append; repl
 /** @case Ambiguous batches require deliberate recipient selection; associated Inputs need not map one-to-one to Outputs. */
 test("say resolves direct, aggregate and proactive targets without guessing from IDs or consuming Inputs", async (t) => {
   const { aide } = setup(t);
-  const scope = aide.session("owner"), store = scope.conversations;
+  const scope = aide.personal, store = scope.conversations;
   const a = larkAddress("app", "a"), b = larkAddress("app", "b");
   await seedInput(store, "a", { origin: "channel", originId: "lark", source: a, conversationId: "mixed", text: "a" });
   await seedInput(store, "b", { origin: "channel", originId: "lark", source: b, conversationId: "mixed", text: "b" });
@@ -129,14 +129,14 @@ test("Work without a communication address records completion and retains notifi
 /** @case Web publication uses its target too, while the producer keeps an inspectable record. */
 test("Web displays explicitly addressed Output in the receiving endpoint and excludes earlier destination history", async (t) => {
   const { aide } = setup(t);
-  const store = aide.session("producer").conversations;
-  await aide.session("recipient").conversations.ensure("recipient", webAddress("recipient"));
+  const store = aide.personal.conversations;
+  await aide.personal.conversations.ensure("recipient", webAddress("recipient"));
   const result = await store.say("producer", undefined, "delivered to recipient", undefined, { target: webAddress("recipient") });
   for (const id of ["producer", "recipient"]) {
     assert.ok(conversationView(aide, id).blocks.some((b) => b.content === "delivered to recipient"));
     assert.equal(conversationList(aide).find((c) => c.id === id)!.preview, "delivered to recipient");
   }
-  const recipient = aide.findConversation("recipient")!.conversations.resource("recipient")!;
+  const recipient = aide.personal.conversations.resource("recipient")!;
   const output = aide.outputs().find((o) => o.id === result.outputId)!;
   assert.equal(visibleOutput({ ...output, at: "2000-01-01T00:00:00.000Z" }, recipient), false);
   const producer = store.resource("producer")!;
@@ -152,7 +152,7 @@ test("Web displays explicitly addressed Output in the receiving endpoint and exc
 
 test("Recovery selects the immediate Input address, and retains interruption when the destination is ambiguous", async (t) => {
   const { aide } = setup(t);
-  const scope = aide.session("owner"), store = scope.conversations;
+  const scope = aide.personal, store = scope.conversations;
   const a = larkAddress("app", "a"), b = larkAddress("app", "b");
   for (const id of ["replyable", "ambiguous"]) {
     await seedInput(store, id + "-deferred", { origin: "channel", originId: "lark", attention: "deferred", source: a, conversationId: id, text: "older" });
@@ -174,14 +174,14 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
   const { personRef } = await import("../plugins/personal/person/model.ts");
   const { chiefTools } = await import("../agents/chief/chief-tools.ts");
   const { emptyConnectors } = await import("../src/connector-client.ts");
-  const { outputPrinter } = await import("../src/host/output/printer.ts");
-  const { inputPrinter } = await import("../src/host/input/printer.ts");
-  const { OutputStore } = await import("../src/host/output/store.ts");
+  const { outputPrinter } = await import("../plugins/personal/output/printer.ts");
+  const { inputPrinter } = await import("../plugins/personal/input/printer.ts");
+  const { OutputStore } = await import("../plugins/personal/output/store.ts");
   const sender = personRef(await aide.persons.observe({ provider: "lark", scope: "cli_app", id: "ou_sender" }, "张三"));
   const manager = personRef(await aide.persons.observe({ provider: "lark", scope: "cli_app", id: "ou_manager" }, "李四"));
-  const scope = aide.session("topic"), store = scope.conversations;
+  const scope = aide.personal, store = scope.conversations;
   const source = larkAddress("cli_app", "group"), target = larkAddress("cli_app", "reporting-group");
-  await seedInput(store, "question", { origin: "channel", originId: "lark", sender, source, text: "请帮我确认进展" });
+  await seedInput(store, "question", { conversationId: "topic", origin: "channel", originId: "lark", sender, source, text: "请帮我确认进展" });
   const say = chiefTools(emptyConnectors, () => {}, (id, input) => store.say("topic", undefined, input.text, undefined, { ...input, idempotencyKey: id })).find((tool) => tool.name === "say")!;
   const reply = await say.execute("reply", { text: "确认了", respondToInputId: "question" }, undefined, undefined, {} as never);
   const direct = aide.outputs().find((output) => output.text === "确认了")!;
@@ -210,11 +210,11 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
 test("Invalid receivers cannot publish an Output or mutate its Batch; receiver identity is immutable on retry", async (t) => {
   const { aide } = setup(t);
   const { personRef } = await import("../plugins/personal/person/model.ts");
-  const { OUTPUT_TYPE } = await import("@compforge/aide-plugin");
+  const { OUTPUT_TYPE } = await import("../plugins/personal/output/model.ts");
   const sender = personRef(await aide.persons.observe({ provider: "web", scope: "local", id: "person" }, "Person"));
-  const scope = aide.session("topic"), store = scope.conversations;
+  const scope = aide.personal, store = scope.conversations;
   const source = webAddress("topic");
-  await seedInput(store, "input", { origin: "channel", originId: "web", sender, source, text: "request" });
+  await seedInput(store, "input", { conversationId: "topic", origin: "channel", originId: "web", sender, source, text: "request" });
   await scope.plugins.resourceClient("personal").patchStatus(store.resource("topic")!, { batch: fixtureBatch({ inputIds: ["input"], executionId: "run", phase: "running" }) });
   for (const bad of [{ ...sender, kind: "Task" }, { ...sender, uid: undefined }]) {
     await assert.rejects(store.say("topic", undefined, "invalid", "run", { target: source, receivers: [bad] }));
@@ -224,7 +224,7 @@ test("Invalid receivers cannot publish an Output or mutate its Batch; receiver i
   const options = { respondToInputId: "input", idempotencyKey: "one" };
   const sent = await store.say("topic", undefined, "reply", "run", options);
   await assert.rejects(store.say("topic", undefined, "reply", "run", { ...options, receivers: [] }), /different content/);
-  const persisted = await scope.plugins.resourceClient("personal").get({ ...OUTPUT_TYPE, namespace: "aide-system", name: sent.outputId });
+  const persisted = await scope.plugins.resourceClient("personal").get({ ...OUTPUT_TYPE, namespace: "v1", name: sent.outputId });
   assert.deepEqual((persisted!.spec as { receivers: unknown }).receivers, [sender]);
   assert.deepEqual(store.resource("topic")!.status.batch!.outputIds, [sent.outputId]);
 });

@@ -3,7 +3,7 @@ import { Persons } from "../../person/service.ts";
 import { isDeepStrictEqual } from "node:util";
 import { LOCAL_ME } from "../../person/model.ts";
 import { observePeople } from "../../person/messages.ts";
-import { bindSourceInput, type SourceInput } from "@compforge/aide-plugin";
+import { bindSourceInput, type SourceInput } from "../input.ts";
 import { SOURCES } from "../definition.ts";
 import type { ChatMessage, ConnectorClient, MessagePage, PluginContext, Resource } from "@compforge/aide-plugin";
 import { INPUT_TYPE, digest } from "../../chief-model.ts";
@@ -48,7 +48,7 @@ type Source = Resource<MessageWatch, MessageSourceStatus>;
 const iso = (ms: number) => new Date(ms).toISOString();
 const inputName = (watch: MessageWatch, id: string, sequence: number) =>
   digest(["lark", watch.accountId, watch.userId, id, sequence]);
-const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "aide-system" as const, name });
+const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, name });
 
 /**
  * @spec Persist discovery and delivery plans before side effects. Advance a scan only after its Inputs exist.

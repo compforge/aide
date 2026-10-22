@@ -1,11 +1,12 @@
-import { INPUT_TYPE, type InputSpec, type InputStatus, type Resource, type ResourceClient } from "@compforge/aide-plugin";
+import { type Resource, type ResourceClient } from "@compforge/aide-plugin";
+import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type ConversationStatus } from "./model.ts";
 
 /** @spec CAS append preserves concurrent changes. Input-owned delivery receipts outlive dequeue and Batch replacement.
  * @case tests/input-routing.test.ts
  */
 export async function appendConversationInput(resources: ResourceClient,
-  target: { sessionId: string; name: string; uid: string }, input: Readonly<Resource<InputSpec, InputStatus>>): Promise<boolean> {
+  target: { sessionId?: string; name: string; uid: string }, input: Readonly<Resource<InputSpec, InputStatus>>): Promise<boolean> {
   let appended = false;
   for (let attempt = 0; ; attempt++) {
     const c = await resources.get<ConversationSpec, ConversationStatus>({ ...CONVERSATION_TYPE, ...target, namespace: "v1" });
@@ -31,7 +32,7 @@ export async function appendConversationInput(resources: ResourceClient,
 /** @spec Receipt persistence precedes dequeue. Both intake and recovery use the same idempotent operation. */
 export async function recordInputDelivery(resources: ResourceClient, conversationUid: string, inputId: string): Promise<void> {
   for (let attempt = 0; ; attempt++) {
-    const input = await resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "aide-system", name: inputId });
+    const input = await resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: inputId });
     if (!input) throw new Error(`Input missing before delivery acknowledgement: ${inputId}`);
     if (input.status.deliveries?.includes(conversationUid)) return;
     try {

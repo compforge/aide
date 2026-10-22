@@ -81,7 +81,7 @@ test("Plugin resources reopen from SQLite with the same version and bounded indi
 
 /** @case A collected Input remains acknowledged within the dedup window, without restoring content or replaying a consumer. */
 test("Collected Input redelivery is acknowledged without recreating the resource", async (t) => {
-  const { InputStore } = await import("../src/host/input/store.ts");
+  const { InputStore } = await import("../plugins/personal/input/store.ts");
   const root = mkdtempSync(join(tmpdir(), "input-receipt-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const store = new InputStore(root);

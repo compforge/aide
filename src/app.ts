@@ -1,12 +1,15 @@
-import type { Address } from "@compforge/aide-plugin";
-import { OutputStore } from "./host/output/store.ts";
+import { ResourceStorage } from "./host/resource/storage.ts";
+import { SayInputSchema } from "../plugins/personal/output/action.ts";
+import { personalAdmission } from "../plugins/personal/admission.ts";
+import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputView } from "./output.ts";
 import { personRequirements } from "../plugins/personal/person/requirements.ts";
-import { requirementOutputs } from "./host/output/requirements.ts";
+import { requirementOutputs } from "../plugins/personal/output/requirements.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
 import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
-import type { InputSpec, SourceDefinition } from "@compforge/aide-plugin";
+import type { SourceDefinition } from "../plugins/personal/source/input.ts";
+import type { InputSpec } from "../plugins/personal/input/model.ts";
 import { resolve } from "node:path";
 import { LOCAL_ME, type Me, type PersonIdentity } from "../plugins/personal/person/model.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
@@ -14,20 +17,18 @@ import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import type { Logger } from "pino";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { Personal } from "../plugins/personal/aide.ts";
-import { environmentSources, ENVIRONMENT_SESSION } from "../plugins/personal/source/environment/config.ts";
-import { InputStore } from "./host/input/store.ts";
+import { environmentSources } from "../plugins/personal/source/environment/config.ts";
+import { InputStore } from "../plugins/personal/input/store.ts";
 import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
 import { requirementWatches, validateWatchScopes } from "../plugins/personal/source/requirement/config.ts";
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
-import { messageWatch, MESSAGE_SESSION } from "../plugins/personal/source/message/config.ts";
-import { chiefTarget } from "../plugins/personal/chief-model.ts";
+import { messageWatch } from "../plugins/personal/source/message/config.ts";
 import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
 import { Connectors } from "../connectors/index.ts";
 import type { AideConfig, DefaultHarness } from "./config.ts";
-import { harnessSessionKey } from "./host/harness/registry.ts";
-import { CoreSession, type CoreControllerOptions } from "./host/core/index.ts";
-import { SessionStore } from "./host/store/store.ts";
-import { PluginInstanceStore } from "./host/plugin/instance.ts";
+import { type CoreControllerOptions } from "./host/core/index.ts";
+import { ApplicationRuntime } from "./host/runtime/index.ts";
+import { migratePersonalResources } from "../plugins/personal/migrate.ts";
 import { PluginSupervisor } from "./host/plugin/runner/index.ts";
 import { IncomingSchema, type Incoming } from "./channel/message.ts";
 
@@ -38,8 +39,8 @@ export interface AideOptions {
 }
 
 /**
- * @spec Channel/Source owns stable Session identity; Core owns its persisted execution and lease.
- * @why Restore every Session at startup so autonomous work does not depend on another user message.
+ * @spec The application composes one generic runtime with the Personal domain plugin.
+ * @why Transport topics select business context, never a separate scheduler or resource store.
  * @link docs/kernel.md
  */
 export class Aide {
@@ -53,9 +54,9 @@ export class Aide {
     return definition;
   }
 
-  private readonly storage: SessionStore;
+  readonly runtime: ApplicationRuntime;
+  readonly personal: Personal;
   private readonly defaultTarget: AideOptions["defaultTarget"];
-  private readonly active = new Map<string, Personal>();
   private readonly listeners = new Set<() => void>();
   private readonly watches: ReturnType<typeof requirementWatches>;
   private readonly environmentSources: ReturnType<typeof environmentSources>;
@@ -81,11 +82,16 @@ export class Aide {
     this.messageSource = messageWatch(sources.lark, config?.connectors.lark, this.meMarks);
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
     this.environmentSources = environmentSources(sources.environments, environments);
+    const storage = ResourceStorage.open(home);
+    storage.configure(config?.resources);
+    storage.transaction(() => {
+      const moved = migratePersonalResources(storage);
+      storage.register("personal", personalDefinitions);
+      if (moved) this.log.info({ resources: moved }, "Migrated Personal resources to application scope");
+    });
     this.inputs = new InputStore(home);
     this.outputStore = new OutputStore(home);
     this.unsubscribeOutputs = this.outputStore.subscribe(() => this.notify());
-    this.inputs.storage.configure(config?.resources);
-    this.inputs.storage.register("personal", personalDefinitions);
     this.inputs.storage.onRetentionError = (resource, error) => this.log.error({ err: error, kind: resource.kind, uid: resource.metadata.uid }, "Resource retention decision failed; preserved resource");
     this.unsubscribeResources = this.inputs.storage.subscribe((scope, resource) => { this.log.info({ scope, kind: resource.kind, uid: resource.metadata.uid }, "Resource reclaimed"); });
     validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
@@ -96,139 +102,65 @@ export class Aide {
       lark: this.messageSource ? { intervalMs: this.messageSource.intervalMs, scenarios: ["direct", "mention"] } : null,
     }, "Personal observation sources configured");
     const connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
-    this.storage = new SessionStore(home);
     this.catalog = openPersonCatalog(home, this.meMarks, log, () => this.notify());
     this.connectors = { requirements: requirementOutputs(personRequirements(connectors.requirements, this.persons), this.outputStore), forges: connectors.forges,
       environments: connectors.environments, describe: () => connectors.describe(),
       messages: config?.connectors.lark?.appId ? personMessages(connectors.messages, this.persons, config.connectors.lark.appId) : connectors.messages };
-    for (const meta of this.storage.listSessions()) this.session(meta.aideSessionId);
-    for (const watch of this.watches) this.session(watch.sessionId);
-    if (this.environmentSources.length) this.session(ENVIRONMENT_SESSION);
-    if (this.messageSource) this.session(MESSAGE_SESSION);
-
-  }
-
-  sessions(): readonly Personal[] { return [...this.active.values()]; }
-
-  /** Opening a page never creates a Session; only an input or explicit work request does. */
-  findConversation(conversationId: string): Personal | undefined {
-    return this.sessions().find((scope) => scope.conversationIds().includes(conversationId));
-  }
-
-  session(id: string): Personal {
-    if (this.closed) throw new Error("Aide is shutting down");
-    const existing = this.active.get(id);
-    if (existing) return existing;
-    const previous = this.storage.listSessions().find((meta) => meta.aideSessionId === id);
-    const session = previous ? this.storage.openSession(id) : this.storage.createSession({ id, cwd: this.options.cwd, title: id });
-    const connectors = this.connectors;
-    const { id: targetId, harness, model } = this.defaultTarget;
-    const targets = [{ id: targetId, harness }];
-    session.setHarnessTarget(targetId, { harnessTargetId: targetId, harness, ...(model ? { model } : {}) });
-    const instances = new PluginInstanceStore({ session });
-    if (!instances.list().some((item) => item.pluginInstanceId === "personal")) {
-      instances.create({ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin" });
-    }
-    instances.replaceConfig("personal", { ...((parsePersonalConfig(this.options.config?.plugins.personal).conversation) ? { conversation: parsePersonalConfig(this.options.config?.plugins.personal).conversation } : {}), watches: this.watches.filter((watch) => watch.sessionId === id),
-      environmentSources: id === ENVIRONMENT_SESSION ? this.environmentSources : [],
-      ...(id === MESSAGE_SESSION && this.messageSource ? { messageSource: this.messageSource } : {}) });
-    const packages = new Map([["aide.personal@0.1.0", new URL("../plugins/personal/plugin.ts", import.meta.url).href]]);
-    let application: Personal;
-    const core = new CoreSession({ session,
-      controller: { mentionBudgetChars: 0, createAdapter: this.options.createAdapter, resolveTarget: (id) => targets.find((item) => item.id === id) },
-      plugins: { instances, connectors, harnessTargets: targets, inputs: this.inputs, outputs: this.outputStore,
-        resourceDirectory: { sessions: () => [...this.active.keys()], shared: (pluginId) => {
-          if (pluginId !== "personal") throw new Error(`Unknown shared plugin: ${pluginId}`);
-          return this.catalog.client;
-        }, client: (sessionId, pluginId) => {
-          const scope = this.active.get(sessionId); if (!scope) throw new Error(`Unknown Session: ${sessionId}`);
-          return scope.plugins.resourceClient(pluginId);
-        }, ensureSession: async (sessionId) => { await this.session(sessionId).start(); } },
-        onResourceChange: (change) => application?.conversations.changed(change),
-        say: (context, text, options) => {
+    let personal: Personal | undefined;
+    this.runtime = new ApplicationRuntime(home, {
+      cwd: options.cwd, targets: [{ ...this.defaultTarget }],
+      instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ conversation: parsePersonalConfig(config?.plugins.personal).conversation, watches: this.watches,
+        environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
+      controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter },
+      plugins: { connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
+        onResourceChange: (change) => { personal?.conversations.changed(change); this.notify(); },
+        actions: { "personal/say": (context, raw) => {
+          const input = SayInputSchema.parse(raw);
+          const text = input.text;
           if (!context.conversationId) throw new Error("Personal say requires Conversation context");
-          return application.conversations.say(context.conversationId, context.inputId, text, context.executionId, options);
-        }, selectedHarnessTargetId: () => targetId,
+          return this.personal.conversations.say(context.conversationId, context.inputId, text, context.executionId, input);
+        } }, selectedHarnessTargetId: () => this.defaultTarget.id,
         pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => {
-          const entryUrl = packages.get(`${pluginId}@${version}`);
-          if (!entryUrl) throw new Error(`Plugin package is not installed: ${pluginId}@${version}`);
-          return { pluginId, version, entryUrl, resourcesUrl: new URL("../plugins/personal/definitions.ts", import.meta.url).href };
-        },
-        onRunnerFailure: ({ error }) => {
-          this.log.error({ err: error, sessionId: id }, "Plugin Runner stopped");
-          void application.recoverInterrupted().catch((err) => this.log.error({ err, sessionId: id }, "Recovery failed"));
+          if (pluginId !== "aide.personal" || version !== "0.1.0") throw new Error(`Plugin package is not installed: ${pluginId}@${version}`);
+          return { pluginId, version, entryUrl: new URL("../plugins/personal/plugin.ts", import.meta.url).href,
+            resourcesUrl: new URL("../plugins/personal/definitions.ts", import.meta.url).href };
+        }, onRunnerFailure: ({ error }) => {
+          this.log.error({ err: error }, "Personal Runner stopped");
+          void personal?.recoverInterrupted().catch((err) => this.log.error({ err }, "Recovery failed"));
         },
       },
     });
-    // CoreSession has acquired the lease before changing execution metadata.
-    // @spec A default Harness change preserves Aide history but cannot reuse another provider's native binding.
-    const sessionKey = harnessSessionKey(harness);
-    const incompatible = Object.values(session.meta.lanes).filter((lane) =>
-      lane.harnessSessions[targetId] && lane.harnessSessions[targetId].harness !== sessionKey);
-    if (incompatible.length) {
-      const lanes = { ...session.meta.lanes };
-      for (const lane of incompatible) {
-        const { [targetId]: _previous, ...harnessSessions } = lane.harnessSessions;
-        lanes[lane.laneId] = { ...lane, harnessSessions };
-      }
-      // Clear the compatibility projection too; normalization otherwise restores the removed main-Lane binding.
-      session.updateMeta({ lanes, harnessSessions: {} });
-      this.log.info({ sessionId: id, harness, harnessTargetId: targetId, lanes: incompatible.length },
-        "Default Harness changed; cleared incompatible native bindings");
-    }
-    const cwd = resolve(this.options.cwd);
-    if (session.meta.cwd !== cwd) {
-      // Native providers can bind history to cwd. Keep Aide facts, but start fresh provider contexts.
-      session.updateMeta({ cwd, lanes: Object.fromEntries(Object.entries(session.meta.lanes)
-        .map(([key, lane]) => [key, { ...lane, harnessSessions: Object.fromEntries(Object.entries(lane.harnessSessions)
-          .filter(([, binding]) => binding.contextAfterSeq !== undefined)
-          .map(([target, binding]) => [target, { harness: binding.harness, contextAfterSeq: binding.contextAfterSeq }])) }])) });
-      this.log.info({ sessionId: id, previousCwd: previous?.cwd, cwd }, "Execution directory changed; cleared native Harness bindings");
-    }
-    application = new Personal({ timezone: this.options.timezone, persons: this.persons, me: this.meMarks,
-      conversation: parsePersonalConfig(this.options.config?.plugins.personal).conversation }, this.log.child({ sessionId: id }),
-      { core, session, connectors, targets, inputs: this.inputs, outputs: this.outputStore });
-    this.active.set(id, application);
-    core.subscribe(() => this.notify());
-    application.conversations.subscribe(() => this.notify());
-    this.log.info({ sessionId: id, resumed: Boolean(previous) }, "Opened Aide session");
-    if (this.starting) void application.start().catch((err) => this.log.error({ err, sessionId: id }, "Session startup failed"));
-    return application;
+    this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, me: this.meMarks,
+      conversation: parsePersonalConfig(config?.plugins.personal).conversation }, log,
+      { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore });
+    this.runtime.subscribe(() => this.notify());
+    this.personal.conversations.subscribe(() => this.notify());
   }
 
-  private async claimConversation(scope: Personal, conversationId: string, address?: Address): Promise<void> {
-    const owner = this.findConversation(conversationId);
-    if (owner && owner !== scope) throw new Error(`Conversation ${conversationId} belongs to Session ${owner.id}`);
-    if (!scope.conversations.get(conversationId)) await scope.conversations.ensure(conversationId, address);
-  }
+  get conversations() { return this.personal.conversations; }
 
   async receive(raw: unknown) {
     const input = IncomingSchema.parse(raw);
     this.inputDefinition({ origin: "channel", originId: input.channelId });
     if (input.source.channelId !== input.channelId) throw new Error("Channel input address belongs to a different Channel");
-    const scope = this.session(input.sessionId);
-    await this.claimConversation(scope, input.sessionId, input.source);
+    const scope = this.personal;
+    await this.conversations.ensure(input.sessionId, input.source);
     await this.start();
     return scope.receive(input);
   }
 
   async event(input: Omit<Incoming, "channelId" | "source"> & { name: string; conversationId?: string }): Promise<number> {
-    const scope = this.session(input.sessionId);
-    await this.claimConversation(scope, input.sessionId);
+    const scope = this.personal;
+    await this.conversations.ensure(input.sessionId);
     await this.start(); await scope.start();
     return scope.event({ ...input, conversationId: input.conversationId ?? input.sessionId });
   }
 
-  work(conversationId: string) {
-    const scope = this.findConversation(conversationId) ?? this.session(conversationId);
-    return scope.work(conversationId);
-  }
+  work(conversationId: string) { return this.personal.work(conversationId); }
 
   chiefSession(targetId: string, config: Parameters<Personal["chiefSession"]>[1]) {
-    const scope = this.sessions().find((item) => item.conversationIds().some((id) => chiefTarget(id) === targetId));
-    if (!scope) throw new Error(`Unknown Chief target: ${targetId}`);
-    return scope.chiefSession(targetId, config);
+    return this.personal.chiefSession(targetId, config);
   }
 
   async outputDelivered(outputId: string) { if (this.outputStore.get(outputId)) this.outputStore.delivered(outputId); }
@@ -236,38 +168,36 @@ export class Aide {
   async outputRetry(outputId: string, error: string, nextAttemptAt: string) { if (this.outputStore.get(outputId)) this.outputStore.retry(outputId, error, nextAttemptAt); }
   outputs() { return this.outputStore.list().map(outputView).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
 
-  works() { return this.sessions().flatMap((scope) => scope.works()); }
-  invocations() { return this.sessions().flatMap((scope) => scope.invocations()); }
-  conversationIds() { return this.sessions().flatMap((scope) => scope.conversationIds()); }
+  works() { return this.personal.works(); }
+  invocations() { return this.personal.invocations(); }
+  conversationIds() { return this.personal.conversationIds(); }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(): void { for (const listener of this.listeners) listener(); }
   async deleteConversation(conversationId: string, revision: number, uid: string): Promise<import("../plugins/personal/conversation/model.ts").ConversationDeletion> {
-    const scope = this.findConversation(conversationId);
-    if (!scope) return { deleted: false, reason: "missing" };
+    const scope = this.personal;
     const result = await scope.deleteConversation(conversationId, revision, uid);
     if (result.deleted) this.notify();
     return result;
   }
 
-  /** @spec At most one default contact across Sessions. Clear before setting; interruption may leave none, never two.
+  /** @spec At most one default Conversation in the application. Clear before setting; interruption may leave none, never two.
    * @link docs/plugin/personal.md
    */
   setDefaultConversation(conversationId: string, enabled: boolean): Promise<void> {
     const change = this.defaultSelection.then(async () => {
-      const target = this.findConversation(conversationId);
-      const resource = target?.conversations.resource(conversationId);
-      if (!target || !resource || resource.metadata.deletionTimestamp) {
+      const resource = this.conversations.resource(conversationId);
+      if (!resource || resource.metadata.deletionTimestamp) {
         throw new Error("Conversation does not exist");
       }
       if (enabled) {
-        for (const scope of this.sessions()) {
-          for (const conversation of scope.conversations.list()) {
-            if (conversation.default && conversation.id !== conversationId && !scope.conversations.resource(conversation.id)?.metadata.deletionTimestamp) await scope.conversations.setDefault(conversation.id, false);
+        for (const conversation of this.conversations.list()) {
+          if (conversation.default && conversation.id !== conversationId) {
+            await this.conversations.setDefault(conversation.id, false);
           }
         }
       }
-      await target.conversations.setDefault(conversationId, enabled);
-      this.log.info({ conversationId, sessionId: target.id, enabled }, "Default conversation configured");
+      await this.conversations.setDefault(conversationId, enabled);
+      this.log.info({ conversationId, enabled }, "Default conversation configured");
       this.notify();
     });
     this.defaultSelection = change.catch((err) => { this.log.error({ err, conversationId }, "Default conversation selection failed"); });
@@ -275,10 +205,10 @@ export class Aide {
   }
 
   async setConversationTrigger(conversationId: string, enabled: boolean) {
-    const scope = this.findConversation(conversationId);
-    if (!scope) throw new Error("Conversation does not exist");
+    const scope = this.personal;
+    if (!this.conversations.get(conversationId)) throw new Error("Conversation does not exist");
     const trigger = await scope.conversations.setTriggerEnabled(conversationId, enabled);
-    this.log.info({ sessionId: scope.id, conversationId, ...trigger }, "Conversation trigger configured");
+    this.log.info({ runtimeId: this.runtime.id, conversationId, ...trigger }, "Conversation trigger configured");
     this.notify();
     return trigger;
   }
@@ -292,14 +222,14 @@ export class Aide {
     await this.persons.initialize();
   }
   start(): Promise<void> {
-    return this.starting ??= this.initializePeople().then(() => Promise.all(this.sessions().map((scope) => scope.start()))).then(() => {});
+    return this.starting ??= this.initializePeople().then(() => this.personal.start());
   }
   async settled(): Promise<void> {
     await this.start();
     for (;;) {
-      const before = JSON.stringify([this.inputs.list(), this.sessions().flatMap((s) => s.conversations.list())]);
-      await Promise.all(this.sessions().map((scope) => scope.settled()));
-      const after = JSON.stringify([this.inputs.list(), this.sessions().flatMap((s) => s.conversations.list())]);
+      const before = JSON.stringify([this.inputs.list(), this.conversations.list()]);
+      await this.personal.settled();
+      const after = JSON.stringify([this.inputs.list(), this.conversations.list()]);
       if (before === after) break;
     }
   }
@@ -307,7 +237,7 @@ export class Aide {
     if (this.closed) return;
     this.closed = true;
     await this.defaultSelection;
-    await Promise.all(this.sessions().map((scope) => scope.close()));
+    await this.personal.close();
     this.listeners.clear();
     this.unsubscribeResources();
     this.unsubscribeOutputs();

@@ -1,6 +1,6 @@
 import { isChannelAddress } from "./address.ts";
 import { channelOutputs, visibleOutput } from "./output.ts";
-import { inputPrinter } from "../host/input/printer.ts";
+import { inputPrinter } from "../../plugins/personal/input/printer.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { harnessIdentityFor } from "../host/harness/ids.ts";
 import { conversationTrigger, type ConversationTrigger } from "../../plugins/personal/conversation/trigger.ts";
@@ -17,7 +17,7 @@ export interface ConversationBlock extends BaseBlock {
   inputId?: string;
   origin?: "channel" | "source";
   originId?: string;
-  relation?: import("@compforge/aide-plugin").InputRelation;
+  relation?: import("../../plugins/personal/input/model.ts").InputRelation;
   sender?: import("@compforge/aide-plugin").ResourceRef;
   receivers?: import("@compforge/aide-plugin").ResourceRef[];
   source?: import("@compforge/aide-plugin").Address;
@@ -43,15 +43,14 @@ export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
  * @link docs/channel/web.md
  */
 export function conversationView(aide: ChannelService, conversationId: string): ConversationView {
-  const scope = aide.findConversation(conversationId);
-  if (!scope) return { version: PROTOCOL_VERSION, biz: "aide.conversation", blocks: [], meta: { conversation_id: conversationId, activity: null } };
-  const state = scope.core.projection;
-  const runs = scope.conversations.runs(conversationId);
+  if (!aide.conversations.get(conversationId)) return { version: PROTOCOL_VERSION, biz: "aide.conversation", blocks: [], meta: { conversation_id: conversationId, activity: null } };
+  const state = aide.runtime.projection;
+  const runs = aide.conversations.runs(conversationId);
   const active = runs.find((input) => !input.input && input.status.phase === "running");
   const queued = runs.filter((input) => !input.status.phase).length;
   const quietRuns = new Set(runs.filter((input) => input.status.quietReason).map((input) => input.id));
   const runId = (item: { inputId?: string; executionId: string }) => item.executionId;
-  const resource = scope.conversations.resource(conversationId);
+  const resource = aide.conversations.resource(conversationId);
   const turnInputs = new Map([...state.harnessInputs.values()].map((input) => [input.turnId, input]));
   const invocations = aide.invocations().filter((item) => {
     if (item.conversationId !== conversationId || !resource || quietRuns.has(runId(item) ?? "")) return false;
@@ -157,18 +156,17 @@ export function conversationList(aide: ChannelService): ConversationSummary[] {
   const ensure = (id: string) => {
     let summary = summaries.get(id);
     if (!summary) {
-      const scope = aide.findConversation(id)!;
-      const resource = scope.conversations.resource(id);
-      summary = { id, uid: resource?.metadata.uid ?? null, revision: scope.conversations.get(id)?.revision ?? null,
-        sessionId: scope.id, trigger: conversationTrigger(resource?.spec.trigger),
+      const resource = aide.conversations.resource(id);
+      summary = { id, uid: resource?.metadata.uid ?? null, revision: aide.conversations.get(id)?.revision ?? null,
+        sessionId: id, trigger: conversationTrigger(resource?.spec.trigger),
         default: resource?.spec.default === true && !resource.metadata.deletionTimestamp,
-        name: scope.conversations.get(id)?.name || "未命名会话", preview: "", updatedAt: "" };
+        name: aide.conversations.get(id)?.name || "未命名会话", preview: "", updatedAt: "" };
       summaries.set(id, summary);
     }
     return summary;
   };
-  for (const conversation of aide.sessions().flatMap((scope) => scope.conversations.list())) ensure(conversation.id).updatedAt = conversation.createdAt;
-  for (const input of aide.sessions().flatMap((scope) => scope.conversations.inputs())) {
+  for (const conversation of aide.conversations.list()) ensure(conversation.id).updatedAt = conversation.createdAt;
+  for (const input of aide.conversations.inputs()) {
     const summary = ensure(input.conversationId);
     if (input.metadata.creationTimestamp > summary.updatedAt) summary.updatedAt = input.metadata.creationTimestamp;
   }
@@ -177,7 +175,7 @@ export function conversationList(aide: ChannelService): ConversationSummary[] {
     const destinations = new Set([message.conversationId]);
     if (isChannelAddress(message.target) && message.target.channelId === "web") destinations.add(message.target.endpoint);
     for (const id of destinations) {
-      const current = aide.findConversation(id)?.conversations.resource(id);
+      const current = aide.conversations.resource(id);
       if (!current || !visibleOutput(message, current)) continue;
       const summary = ensure(id);
       const text = message.text.replace(/\s+/g, " ").trim();

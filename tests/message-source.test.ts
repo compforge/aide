@@ -1,3 +1,5 @@
+import { OutputStore } from "../plugins/personal/output/store.ts";
+import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import { scopedResources } from "../src/host/plugin/resource/directory.ts";
@@ -12,8 +14,8 @@ import { join } from "node:path";
 import pino from "pino";
 import type { ChatMessage, MessagePage, MessageSearchQuery, PluginLogger } from "@compforge/aide-plugin";
 import { SessionStore } from "../src/host/store/store.ts";
-import { InputStore } from "../src/host/input/store.ts";
-import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
+import { InputStore } from "../plugins/personal/input/store.ts";
+import { personalAdmission } from "../plugins/personal/admission.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
@@ -41,12 +43,10 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
   const root = mkdtempSync(join(tmpdir(), "aide-message-source-"));
   const sessions = new SessionStore(root); const session = sessions.createSession({ id: MESSAGE_SESSION, cwd: root });
   const inputs = new InputStore(root);
-  let store = new PluginResourceStore({ session, pluginInstanceId: "personal" });
+  let store = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
   store.storage.register("personal", personalDefinitions);
   const catalog = openPersonCatalog(root, person, pino({ level: "silent" }), () => {});
-  const client = (session: import("../src/host/store/store.ts").SessionHandle) => scopedResources(
-    createResourceClient(store, undefined, undefined, new AideResourceProvider({ session, inputs })), session.id, "personal", undefined,
-    (type) => type.kind === "Person", catalog.client);
+  const client = (session: import("../src/host/store/store.ts").SessionHandle) => createResourceClient(store, undefined, undefined, personalAdmission(inputs, new OutputStore(resourceHome(session.dir))));
   let resources = client(session);
   store.create({ type: MESSAGE_SOURCE_TYPE, name: "messages", spec, status: {} });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
@@ -72,7 +72,7 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
     failContext(value: boolean) { contextError = value; },
     async restart() {
       const reopened = sessions.openSession(session.id); t.after(() => reopened.closeLogs());
-      store = new PluginResourceStore({ session: reopened, pluginInstanceId: "personal" });
+      store = new PluginResourceStore({ home: resourceHome(reopened.dir), pluginInstanceId: "personal" });
       resources = client(reopened);
     },
     observe(at = now) { return observeMessages({ logger: sourceLogger, resources }, resource(), connectors, at); },
@@ -379,7 +379,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   }, pino({ level: "silent" }));
   let channel = channelFor();
   t.after(async () => { await channel.close(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.session("inbox").conversations.ensure("inbox", fixtureAddress("inbox"));
+  await aide.personal.conversations.ensure("inbox", fixtureAddress("inbox"));
   await aide.setDefaultConversation("inbox", true);
   // Persist a registered bot chat before observing user messages, but defer processing its request.
   await channel.receive({ sender: { sender_type: "user" }, message: {
@@ -389,12 +389,12 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   } });
   await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "inbox", conversationId: "inbox", id: "hello", text: "hello" }));
   await aide.start(); await aide.settled();
-  const inputs = aide.session(MESSAGE_SESSION).conversations.inputStore;
-  assert.equal(inputs.list(MESSAGE_SESSION).length, 3);
+  const inputs = aide.personal.conversations.inputStore;
+  assert.equal(inputs.list().filter((input) => input.spec.originId === "personal.lark").length, 3);
   assert.ok(aide.outputs().some((reply) => reply.text === "source-private-reply"), "The Source must produce a reply to exercise delivery exclusion");
   await channel.deliver();
   assert.deepEqual(sent, [], "Observing a user mention must not send Source replies to the registered bot chat");
-  const observed = inputs.list(MESSAGE_SESSION)[0]!;
+  const observed = inputs.list().filter((input) => input.spec.originId === "personal.lark")[0]!;
   assert.ok(observed.spec.sender);
   const sender = await aide.persons.read(observed.spec.sender.name);
   assert.equal(sender.metadata.uid, observed.spec.sender.uid);
@@ -405,41 +405,41 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   assert.ok(prompts.some((prompt) => prompt.includes("om_dm")));
   for (const chatId of ["oc_chat", "oc_group"]) {
     const sessionId = `source:lark:cli_app:ou_me:${chatId}`;
-    const store = aide.session(sessionId).conversations;
-    const expected = inputs.list(MESSAGE_SESSION).filter((input) => input.spec.sessionId === sessionId).map((input) => input.metadata.name).sort();
-    assert.equal(store.list().length, 1, "Messages from the same observed chat reuse one Conversation");
+    const store = aide.personal.conversations;
+    const expected = inputs.list().filter((input) => input.spec.originId === "personal.lark").filter((input) => input.spec.sessionId === sessionId).map((input) => input.metadata.name).sort();
+    assert.equal(store.list().filter((c) => c.id === sessionId).length, 1, "Messages from the same observed chat reuse one Conversation");
     assert.deepEqual([...store.inputs(sessionId).map((i) => i.metadata.name)].sort(), expected);
-    for (const id of expected) assert.ok(aide.session("inbox").conversations.inputs("inbox").map((i) => i.metadata.name).includes(id));
+    for (const id of expected) assert.ok(aide.personal.conversations.inputs("inbox").map((i) => i.metadata.name).includes(id));
   }
-  assert.equal(aide.session(MESSAGE_SESSION).conversations.list().length, 0);
+  assert.equal(aide.personal.conversations.list().filter((c) => c.id === MESSAGE_SESSION).length, 0);
   const sourceGroupId = "source:lark:cli_app:ou_me:oc_group";
-  const sourceGroupUid = aide.session(sourceGroupId).conversations.resource(sourceGroupId)!.metadata.uid;
+  const sourceGroupUid = aide.personal.conversations.resource(sourceGroupId)!.metadata.uid;
   const groupId = "lark:cli_app:oc_group";
   await channel.dispatch(); await aide.settled(); await channel.deliver();
   assert.deepEqual(sent, Array.from({ length: 2 }, () => ({ chatId: "oc_group", text: "channel-reply" })));
-  const store = aide.session(groupId).conversations;
-  assert.equal(store.list().length, 1);
+  const store = aide.personal.conversations;
+  assert.equal(store.list().filter((c) => c.id === groupId).length, 1);
   assert.equal(store.inputs(groupId).map((i) => i.metadata.name).length, 1);
-  assert.equal(aide.session(sourceGroupId).conversations.inputs(sourceGroupId).map((i) => i.metadata.name).length, 2);
+  assert.equal(aide.personal.conversations.inputs(sourceGroupId).map((i) => i.metadata.name).length, 2);
   const channelInput = store.inputs(groupId)[0]!;
   assert.equal(channelInput.spec.origin, "channel");
   assert.equal(channelInput.spec.sessionId, groupId);
-  assert.ok(aide.session("inbox").conversations.inputs("inbox").map((i) => i.metadata.name).includes(channelInput.metadata.name));
+  assert.ok(aide.personal.conversations.inputs("inbox").map((i) => i.metadata.name).includes(channelInput.metadata.name));
   const channelPrompt = prompts.find((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).conversationId === groupId)!;
   assert.ok(channelPrompt);
   assert.doesNotMatch(channelPrompt, /om_at|source-private-reply/, "User observation history must not enter the group's bot prompt");
   const groupUid = store.resource(groupId)!.metadata.uid;
   const previous = searches;
-  aide.session("another"); await aide.settled();
+  aide.conversations.get("another"); await aide.settled();
   assert.equal(searches, previous);
   await channel.close(); await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   channel = channelFor();
   await aide.start(); await aide.settled(); await channel.dispatch(); await channel.deliver();
   assert.deepEqual(sent, Array.from({ length: 2 }, () => ({ chatId: "oc_group", text: "channel-reply" })), "Restart must neither leak historical Source replies nor duplicate delivered Channel replies");
-  assert.equal(aide.session(MESSAGE_SESSION).conversations.inputStore.list(MESSAGE_SESSION).length, 3);
-  assert.equal(aide.session(groupId).conversations.resource(groupId)!.metadata.uid, groupUid);
-  assert.equal(aide.session(groupId).conversations.inputs(groupId).map((i) => i.metadata.name).length, 1);
-  assert.equal(aide.session(sourceGroupId).conversations.resource(sourceGroupId)!.metadata.uid, sourceGroupUid);
-  assert.equal(aide.session(sourceGroupId).conversations.inputs(sourceGroupId).map((i) => i.metadata.name).length, 2);
+  assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.lark").length, 3);
+  assert.equal(aide.personal.conversations.resource(groupId)!.metadata.uid, groupUid);
+  assert.equal(aide.personal.conversations.inputs(groupId).map((i) => i.metadata.name).length, 1);
+  assert.equal(aide.personal.conversations.resource(sourceGroupId)!.metadata.uid, sourceGroupUid);
+  assert.equal(aide.personal.conversations.inputs(sourceGroupId).map((i) => i.metadata.name).length, 2);
   assert.equal(aide.works().length, 0);
 });

@@ -14,7 +14,7 @@ async function setup(t: { after(fn: () => Promise<void>): void }, chief: NonNull
   const root = mkdtempSync(join(tmpdir(), "aide-batches-"));
   const aide = new Aide(root, { ...fakeOptions({ chief, notify, execute: async () => { throw new Error("No work"); } }, root),
     config: ConfigSchema.parse({ plugins: { personal: { conversation: { batchSize: 3, maxWaitSeconds: 30, ...policy } } } }) }, pino({ level: "silent" }));
-  const scope = aide.session("me"); await scope.conversations.ensure();
+  const scope = aide.personal; await scope.conversations.ensure("me");
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const submit = (id: string, attention: "immediate" | "deferred" = "deferred") => scope.conversations.submit(id,
     { sessionId: "me", origin: "source", originId: "personal.environments", text: `fact ${id}`, attention });
@@ -49,7 +49,7 @@ test("Count and urgency create stable Batches; only acknowledged members leave t
   assert.deepEqual(next.status.pendingInputIds, []);
   assert.equal(aide.outputs().length, 0);
   assert.equal(await appendConversationInput(scope.plugins.resourceClient("personal"),
-    { sessionId: "me", name: next.metadata.name, uid: next.metadata.uid }, scope.conversations.inputStore.get("1")!), false);
+    { name: next.metadata.name, uid: next.metadata.uid }, scope.conversations.inputStore.get("1")!), false);
   assert.deepEqual(scope.conversations.resource("me")!.status.pendingInputIds, []);
 });
 
@@ -152,13 +152,13 @@ test("A failed pure compaction resumes its checkpoint after restart without repe
     config: ConfigSchema.parse({ plugins: { personal: { conversation: { batchSize: 1, contextChars: 4096, summaryChars: 1000 } } } }) };
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  let scope = aide.session("me"); await scope.conversations.ensure();
+  let scope = aide.personal; await scope.conversations.ensure("me");
   await scope.conversations.submit("large", { sessionId: "me", origin: "source", originId: "personal.environments", text: "x".repeat(7000) });
   await aide.settled();
   const offset = scope.conversations.resource("me")!.status.batch!.compaction!.offset;
   assert.ok(offset > 0); assert.equal(actionCalls, 1);
   await aide.close(); fail = false;
-  aide = new Aide(root, options, pino({ level: "silent" })); await aide.start(); scope = aide.session("me");
+  aide = new Aide(root, options, pino({ level: "silent" })); await aide.start(); scope = aide.personal;
   await scope.conversations.submit("resume", { sessionId: "me", origin: "source", originId: "personal.environments", text: "resume", attention: "immediate" });
   await aide.settled();
   assert.match(fragments[1]!, new RegExp(`characters ${offset}\\.\\.`));

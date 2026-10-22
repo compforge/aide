@@ -68,7 +68,7 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   assert.equal(outgoing[0]?.text, "今天完成了三件事");
   const history = await (await fetch(`${url}/messages?conversationId=me&role=all`)).json() as { role: string; text: string }[];
   assert.equal(history.length, 2);
-  assert.ok(aide.session("me").conversations.inputStore.get(ack.inputId));
+  assert.ok(aide.personal.conversations.inputStore.get(ack.inputId));
   assert.ok(history.every((message) => message.role === "aide"));
   const works = await (await fetch(`${url}/work?conversationId=me`)).json() as { status: string; id: string }[];
   assert.deepEqual(works, []);
@@ -128,7 +128,7 @@ test("web answers the original Harness approval and rejects stale or mismatched 
   assert.equal((await post("/approvals", answer)).status, 409);
   assert.equal((await receiving).status, 200);
   assert.deepEqual(await (await fetch(url + "/approvals")).json(), []);
-  const resolved = aide.session("me").core.projection.approvals.get(pending.messageId)?.request;
+  const resolved = aide.personal.core.projection.approvals.get(pending.messageId)?.request;
   assert.equal(resolved?.status, "answered");
   assert.ok(resolved?.responseMessageId);
 });
@@ -150,25 +150,25 @@ test("conversation navigation lists persisted scopes without creating them and k
     { id: string; name: string; preview: string; updatedAt: string; taskCount: number; routineCount: number }[];
   assert.deepEqual(await list(), []);
   await fetch(url + "/?conversation=unsent");
-  assert.equal(aide.sessions().flatMap((scope) => scope.conversations.list()).length, 0);
+  assert.equal(aide.conversations.list().length, 0);
   const group = "lark:app:群 & #1";
   const base = Date.now() + 60_000;
   const at = (offset: number) => new Date(base + offset).toISOString();
-  await seedInput(aide.session("me").conversations, "m1", { origin: "channel", originId: "web", text: "默认会话问题" }, { phase: "done" });
-  await seedInput(aide.session(group).conversations, "group-first", { conversationId: group, origin: "channel", originId: "web", text: "检查 <项目>\n进展" }, { phase: "done", outputs: [
+  await seedInput(aide.personal.conversations, "m1", { conversationId: "me", origin: "channel", originId: "web", text: "默认会话问题" }, { phase: "done" });
+  await seedInput(aide.personal.conversations, "group-first", { conversationId: group, origin: "channel", originId: "web", text: "检查 <项目>\n进展" }, { phase: "done", outputs: [
     { id: "m3", conversationId: group, at: at(2), text: "群会话的回复", workId: null },
   ] });
-  await seedInput(aide.session("source:requirements").conversations, "source-observation", { conversationId: "source:requirements", origin: "source", originId: "personal.environments", text: "private observation" }, { phase: "done" });
+  await seedInput(aide.personal.conversations, "source-observation", { conversationId: "source:requirements", origin: "source", originId: "personal.environments", text: "private observation" }, { phase: "done" });
   (await aide.work("work-only").create({ kind: "routine", title: "定期检查", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "changed" } }));
   const task = (await aide.work(group).create({ kind: "task", title: "检查项目", instruction: "check", trigger: null }));
-  const before = aide.sessions().flatMap((scope) => scope.conversations.list());
+  const before = aide.conversations.list();
   const summaries = await list();
   assert.deepEqual(summaries.map((item) => item.id), [group, "work-only", "source:requirements", "me"]);
-  assert.deepEqual(summaries[0], { id: group, uid: aide.session(group).conversations.resource(group)!.metadata.uid, revision: aide.session(group).conversations.get(group)!.revision, sessionId: group, default: false, trigger: { enabled: false, intervalSeconds: 3600 }, name: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2), taskCount: 1, routineCount: 0 });
+  assert.deepEqual(summaries[0], { id: group, uid: aide.personal.conversations.resource(group)!.metadata.uid, revision: aide.personal.conversations.get(group)!.revision, sessionId: group, default: false, trigger: { enabled: false, intervalSeconds: 3600 }, name: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2), taskCount: 1, routineCount: 0 });
   assert.deepEqual(summaries.map((item) => [item.taskCount, item.routineCount]), [[1, 0], [0, 1], [0, 0], [0, 0]]);
   assert.equal(summaries.find((item) => item.id === "source:requirements")?.preview, "");
   assert.equal(summaries.find((item) => item.id === "source:requirements")?.name, "private observation");
-  assert.deepEqual(aide.sessions().flatMap((scope) => scope.conversations.list()), before);
+  assert.deepEqual(aide.conversations.list(), before);
   const messages = await (await fetch(url + "/messages?role=all&conversationId=" + encodeURIComponent(group))).json() as { conversationId: string }[];
   assert.equal(messages.length, 1);
   assert.ok(messages.every((message) => message.conversationId === group));
@@ -193,13 +193,13 @@ test("Web deletes Tasks and Routines through WorkService and preserves other con
     rmSync(dir, { recursive: true, force: true });
   });
   const group = "lark:app:群 & #1";
-  await aide.session(group).conversations.ensure(group, fixtureAddress(group));
+  await aide.personal.conversations.ensure(group, fixtureAddress(group));
   const work = aide.work(group);
   const initialTask = await work.create({ kind: "task", title: "检查项目", instruction: "check", trigger: null });
   const task = await work.appendInput(initialTask.id, { action: "pause", text: "暂停" });
   const routine = await work.create({ kind: "routine", title: "监控内存", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "memory.changed" } });
   const foreign = await aide.work("other").create({ kind: "routine", title: "其他会话", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "memory.changed" } });
-  await aide.session(group).store.save(routine, [{ id: "retained-reply", conversationId: group, text: "已建立监控", workId: routine.id }]);
+  await aide.personal.store.save(routine, [{ id: "retained-reply", conversationId: group, text: "已建立监控", workId: routine.id }]);
   await aide.start(); await aide.settled();
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address !== "string");

@@ -77,15 +77,14 @@ export class Store {
     if (current && current.kind !== type.kind) throw new Error("Work kind is immutable; create the other type and pause or delete the original work");
     const previous = current?.status ?? delivery();
     const status: WorkStatus = { ...observation,
-      ...(current?.status.laneId ? { laneId: current.status.laneId } : {}),
       inputs: [...previous.inputs, ...(inputKey ? [{ key: inputKey, responseId: outputs.at(-1)!.id }] : [])],
       events: [...previous.events, ...(eventKey ? [eventKey] : [])],
     };
     const c = await this.conversations.ensure(conversationId);
     await this.client.commit([
       current ? { operation: "replace", resource: current, spec, status } : { operation: "create", type, name: id, spec, status },
-      ...outputs.map((o) => outputWrite(c, o, { producer: current ? { ...type, name: id, namespace: current.metadata.namespace, uid: current.metadata.uid, sessionId: c.spec.sessionId }
-        : { ...type, name: id, namespace: "v1", sessionId: c.spec.sessionId } })),
+      ...outputs.map((o) => outputWrite(c, o, { producer: current ? { ...type, name: id, namespace: current.metadata.namespace, uid: current.metadata.uid }
+        : { ...type, name: id, namespace: "v1" } })),
     ]);
   }
 

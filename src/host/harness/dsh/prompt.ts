@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { SdkPromptContentBlock } from "@deepseek-ai/dsh-sdk-client";
-import type { PromptBlock } from "../../input/blocks.ts";
+import type { PromptBlock } from "../prompt-blocks.ts";
 
 /** Convert Aide attachments to the SDK's durable inline-image admission format. */
 export async function dshPromptInput(blocks: PromptBlock[]): Promise<SdkPromptContentBlock[]> {

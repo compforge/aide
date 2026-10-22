@@ -1,14 +1,4 @@
-import type {
-  Resource,
-  ResourceCommit,
-  ResourceClient as PublicResourceClient,
-  ResourceListOptions,
-  ResourceMergePatch,
-  ResourceOwnerReference,
-  ResourceRef,
-  ResourceNamespace,
-  ResourceType,
-} from "@compforge/aide-plugin";
+import type { Resource, ResourceCommit, ResourceClient as PublicResourceClient, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 
 import { PluginResourceStore } from "./store.ts";
 
@@ -42,22 +32,8 @@ export type ResourceClientChange = {
     }
 );
 
-export interface AideResourceAccess {
-  create?<S, T>(type: ResourceType, name: string, spec: S): Readonly<Resource<S, T>>;
-  patchStatus?<S, T>(resource: Readonly<Resource<S, T>>, patch: Partial<T>): Readonly<Resource<S, T>>;
-  handles(type: ResourceType): boolean;
-  get<TSpec, TStatus>(
-    ref: ResourceRef,
-  ): Readonly<Resource<TSpec, TStatus>> | undefined | Promise<Readonly<Resource<TSpec, TStatus>> | undefined>;
-  list<TSpec, TStatus>(
-    type: ResourceType,
-    options?: ResourceListOptions,
-  ): readonly Readonly<Resource<TSpec, TStatus>>[];
-  patch<TSpec, TStatus>(
-    resource: Readonly<Resource<TSpec, TStatus>>,
-    patch: ResourceMergePatch,
-  ): Readonly<Resource<TSpec, TStatus>>;
-}
+/** Optional plugin admission for immutable facts and idempotency receipts, in the same storage transaction. */
+export type ResourceAdmission = (type: ResourceType, init: { name: string; spec: unknown; status?: unknown; namespace?: ResourceNamespace }) => Resource<unknown, unknown> | undefined;
 
 function deepFreeze<T>(value: T): T {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -66,12 +42,12 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-/** Routes Core projections and isolates Plugin-owned state by PluginInstance. */
+/** Isolates Plugin-owned state by PluginInstance. */
 export function createResourceClient(
   store: PluginResourceStore,
   onChange?: (change: ResourceClientChange) => void,
   assertCanCreateType?: (type: ResourceType) => void,
-  aideResources?: AideResourceAccess,
+  admit?: ResourceAdmission,
 ): ResourceClient {
   const assertSession = (id?: string) => {
     if (id && id !== store.aideSessionId) throw new Error(`Resource scope does not belong to Session ${id}`);
@@ -104,25 +80,12 @@ export function createResourceClient(
     resource: Readonly<Resource<unknown, unknown>>,
   ): void => {
     assertSession(resource.metadata.sessionId);
-    if (resource.metadata.namespace === "aide-system") {
-      throw new Error(
-        `plugin ResourceClient cannot mutate Aide-owned ${resource.kind}/${resource.metadata.name}`,
-      );
-    }
   };
 
   async function get<TSpec, TStatus>(
     ref: ResourceRef,
   ): Promise<Readonly<Resource<TSpec, TStatus>> | undefined> {
-    if (aideResources?.handles(ref)) {
-      return aideResources.get<TSpec, TStatus>(ref);
-    }
     assertSession(ref.sessionId);
-    if (ref.namespace === "aide-system") {
-      throw new Error(
-        `plugin ResourceClient cannot access Aide-owned ${ref.kind}/${ref.name}`,
-      );
-    }
     const current = store.find<TSpec, TStatus>(
       ref,
       ref.name,
@@ -150,12 +113,10 @@ export function createResourceClient(
       status?: TStatus;
     }
   ) {
-    if (aideResources?.handles(type)) {
-      if (!aideResources.create) throw new Error(`Cannot create builtin ${type.kind}`);
-      return aideResources.create<TSpec, TStatus>(type, init.name, init.spec);
-    }
     assertCanCreateType?.(type);
     assertSession(init.sessionId);
+    const admitted = store.storage.transaction(() => admit?.(type, init));
+    if (admitted) { changed("created", admitted); return deepFreeze(admitted) as Resource<TSpec, TStatus>; }
     const created = deepFreeze(
       store.create<TSpec, TStatus>({
         type,
@@ -188,10 +149,6 @@ export function createResourceClient(
     resource: Readonly<Resource<TSpec, TStatus>>,
     patch: Partial<TStatus>,
   ) {
-    if (aideResources?.handles(resource)) {
-      if (!aideResources.patchStatus) throw new Error(`Cannot update builtin ${resource.kind}`);
-      return aideResources.patchStatus(resource, patch);
-    }
     assertOwned(resource);
     if (store.get(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace).metadata.uid !== resource.metadata.uid) throw new Error("Resource incarnation changed before status update");
     const patched = deepFreeze(
@@ -215,12 +172,8 @@ export function createResourceClient(
   }
   async function commit(writes: readonly ResourceCommit[]) {
     if (!writes.length || writes.length > 100) throw new Error("Resource commit requires 1..100 writes");
-    // Core projections backed by external state cannot participate in this SQLite transaction.
+    // All writes use the same storage transaction and publish Watch events only after commit.
     for (const w of writes) {
-      const type = w.operation === "create" ? w.type : w.resource;
-      if (aideResources?.handles(type) && !(w.operation === "create" && type.apiVersion === "aide.dev/v1alpha1" && type.kind === "Output")) {
-        throw new Error("Atomic Core writes support only Output creation");
-      }
       if (w.operation !== "create" && w.resource.metadata.sessionId && w.resource.metadata.sessionId !== store.aideSessionId) throw new Error("Resource commit cannot cross Sessions");
     }
     return store.storage.transaction(() => writes.map((w) => w.operation === "create"
@@ -235,9 +188,6 @@ export function createResourceClient(
       type: ResourceType,
       options?: ResourceListOptions,
     ) {
-      if (aideResources?.handles(type)) {
-        return aideResources.list<TSpec, TStatus>(type, options);
-      }
       if (options?.sessionId !== "*") assertSession(options?.sessionId);
       return store
         .list<TSpec, TStatus>(type, options)
@@ -274,9 +224,6 @@ export function createResourceClient(
       resource: Readonly<Resource<TSpec, TStatus>>,
       patch: ResourceMergePatch,
     ) {
-      if (aideResources?.handles(resource)) {
-        return aideResources.patch(resource, patch);
-      }
       throw new Error(
         `Resource ${resource.apiVersion}/${resource.kind} does not support generic patch`,
       );

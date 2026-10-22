@@ -1,24 +1,7 @@
+import type { RuntimeScope } from "./runtime.ts";
 import type { ReconcileKey } from "./reconcile.ts";
 import type { ConnectorRequest } from "./connectors.ts";
-import type {
-  CommandInputShape,
-  CommandAlias,
-  CommandSubmitInput,
-  PluginDataDirectories,
-  PluginInstance,
-  PluginLogLevel,
-  PluginLogContext,
-  PluginSessionContext,
-  HookStage,
-  Resource,
-  ResourceListOptions,
-  ResourceMergePatch,
-  ResourceOwnerReference,
-  ResourceRef,
-  ResourceNamespace,
-  ResourceType,
-  ToastMessage,
-} from "@compforge/aide-plugin";
+import type { CommandInputShape, CommandAlias, CommandSubmitInput, PluginDataDirectories, PluginInstance, PluginLogLevel, PluginLogContext, HookStage, Resource, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType, ToastMessage } from "@compforge/aide-plugin";
 import type {
   ExecutionScope,
   VerbRequest,
@@ -94,7 +77,7 @@ export type RunnerRequest =
       readonly method: "activate";
       readonly entry: PluginPackageEntry;
       readonly instance: PluginInstance;
-      readonly session: PluginSessionContext;
+      readonly session: RuntimeScope;
       readonly dataDirs: PluginDataDirectories;
     }
   | {

@@ -123,11 +123,11 @@ export function httpChannel(aide: WebService, log: Logger) {
       }
       // Native permissions and Hook trust are independent of conversation messages.
       if (request.method === "GET" && url.pathname === "/approvals") {
-        json(response, 200, aide.sessions().flatMap((scope) => [...scope.core.projection.approvals.values()])
+        json(response, 200, [...aide.runtime.projection.approvals.values()]
           .map((item) => item.request).filter((item) => item.status === "pending"));
       } else if (request.method === "POST" && url.pathname === "/approvals") {
         const { messageId, result } = ApprovalResponseSchema.parse(await body(request));
-        const core = aide.sessions().find((scope) => scope.core.projection.approvals.has(messageId))?.core;
+        const core = aide.runtime;
         const pending = core?.projection.approvals.get(messageId)?.request;
         if (!core || !pending || pending.status !== "pending") {
           json(response, 409, { error: "This approval is no longer pending" }); return;
@@ -144,13 +144,13 @@ export function httpChannel(aide: WebService, log: Logger) {
         json(response, 200, await receive({ ...input, source: webAddress(input.sessionId) }));
       } else if (request.method === "POST" && url.pathname === "/conversations/default") {
         const { conversationId, enabled } = ConversationDefaultSchema.parse(await body(request));
-        const resource = aide.findConversation(conversationId)?.conversations.resource(conversationId);
+        const resource = aide.conversations.resource(conversationId);
         if (!resource || resource.metadata.deletionTimestamp) { json(response, 404, { error: "会话不存在。" }); return; }
         await aide.setDefaultConversation(conversationId, enabled);
         json(response, 200, { conversationId, default: enabled });
       } else if (request.method === "POST" && url.pathname === "/conversations/trigger") {
         const { conversationId, enabled } = ConversationTriggerSchema.parse(await body(request));
-        if (!aide.findConversation(conversationId)) {
+        if (!aide.conversations.get(conversationId)) {
           json(response, 404, { error: "会话不存在。" }); return;
         }
         json(response, 200, await aide.setConversationTrigger(conversationId, enabled));
@@ -184,7 +184,7 @@ export function httpChannel(aide: WebService, log: Logger) {
         if (url.pathname === "/work") {
           json(response, 200, aide.works().filter((work) => work.conversationId === conversationId));
         } else {
-          const conversation = aide.findConversation(conversationId)?.conversations.resource(conversationId);
+          const conversation = aide.conversations.resource(conversationId);
           const messages = aide.outputs().filter((item) => conversation && visibleOutput(item, conversation));
           const after = url.searchParams.get("after");
           const index = after ? messages.findIndex((item) => item.id === after) : -1;

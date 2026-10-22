@@ -1,129 +1,14 @@
+import type { RuntimeScope } from "../../protocol/runtime.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorRequest } from "../../protocol/connectors.ts";
 import { createConnectorClient, dispatchConnector, emptyConnectors } from "../../connector-client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
-import type {
-  BoardPresentation,
-  BoardItemTone,
-  CommandDefinition,
-  DeferredHookStage,
-  Hook,
-  HookStage,
-  HookSubjectMap,
-  InlineHookStage,
-  Mention,
-  Controller,
-  ControllerSource,
-  CronSource,
-  CreateEvent,
-  DeleteEvent,
-  EventHandler,
-  EventResource,
-  MapFunc,
-  CommandInput,
-  CommandPickerSearch,
-  CommandResult,
-  PluginContext,
-  PluginDataDirectories,
-  PluginLogContext,
-  PluginLogger,
-  PluginLogLevel,
-  PluginPackage,
-  PluginSessionContext,
-  Resource,
-  ReconcileRequest,
-  ResourceRef,
-  Source,
-  SourceContext,
-  SourceSignal,
-  ResourceType,
-  ResourceMergePatch,
-  ToastMessage,
-  ToastSink,
-  ToastTone,
-  UpdateEvent,
-  ViewInput,
-  ViewInputRecord,
-  ViewOutput,
-  Watch,
-} from "@compforge/aide-plugin";
+import type { BoardPresentation, BoardItemTone, CommandDefinition, DeferredHookStage, Hook, HookStage, HookSubjectMap, InlineHookStage, Mention, Controller, ControllerSource, CronSource, CreateEvent, DeleteEvent, EventHandler, EventResource, MapFunc, CommandInput, CommandPickerSearch, CommandResult, PluginContext, PluginDataDirectories, PluginLogContext, PluginLogger, PluginLogLevel, PluginPackage, Resource, ReconcileRequest, ResourceRef, Source, SourceContext, SourceSignal, ResourceType, ResourceMergePatch, ToastMessage, ToastSink, ToastTone, UpdateEvent, ViewInput, ViewInputRecord, ViewOutput, Watch } from "@compforge/aide-plugin";
 import type { PluginInstance } from "./instance.ts";
 import type { ResourceClient } from "./resource/client.ts";
 import { validateResourceType } from "./resource/type.ts";
 
-export type {
-  BoardPresentation,
-  BoardItemTone,
-  CommandDefinition,
-  DeferredHookStage,
-  Hook,
-  HookStage,
-  HookSubjectMap,
-  InlineHookStage,
-  Mention,
-  Controller,
-  ControllerSource,
-  CronSource,
-  CreateEvent,
-  DeleteEvent,
-  EventHandler,
-  EventResource,
-  MapFunc,
-  CommandInput,
-  CommandPickerSearch,
-  CommandResult,
-  PluginContext,
-  PluginDataDirectories,
-  PluginLogContext,
-  PluginLogger,
-  PluginLogLevel,
-  PluginPackage,
-  PluginSessionContext,
-  Resource,
-  ReconcileRequest,
-  ResourceRef,
-  Source,
-  SourceContext,
-  SourceSignal,
-  ResourceType,
-  ResourceMergePatch,
-  ToastMessage,
-  ToastSink,
-  ToastTone,
-  UpdateEvent,
-  ViewInput,
-  ViewInputRecord,
-  ViewOutput,
-  Watch,
-} from "@compforge/aide-plugin";
-
-export const AIDE_SYSTEM_NAMESPACE = "aide-system" as const;
-import { INPUT_TYPE, OUTPUT_TYPE } from "@compforge/aide-plugin";
-export { INPUT_TYPE };
-export const AIDE_TURN_RESOURCE_TYPE = Object.freeze({
-  apiVersion: "aide.dev/v1alpha1",
-  kind: "Turn",
-} as const satisfies ResourceType);
-export const AIDE_SESSION_RESOURCE_TYPE = Object.freeze({
-  apiVersion: "aide.dev/v1alpha1",
-  kind: "Session",
-} as const satisfies ResourceType);
-export const AIDE_TARGET_RESOURCE_TYPE = Object.freeze({
-  apiVersion: "aide.dev/v1alpha1",
-  kind: "Target",
-} as const satisfies ResourceType);
-export const AIDE_SESSION_TARGET_BINDING_RESOURCE_TYPE = Object.freeze({
-  apiVersion: "aide.dev/v1alpha1",
-  kind: "SessionTargetBinding",
-} as const satisfies ResourceType);
-
-export const AIDE_RESOURCE_TYPES = Object.freeze([
-  INPUT_TYPE, OUTPUT_TYPE,
-  AIDE_TURN_RESOURCE_TYPE,
-  AIDE_SESSION_RESOURCE_TYPE,
-  AIDE_TARGET_RESOURCE_TYPE,
-  AIDE_SESSION_TARGET_BINDING_RESOURCE_TYPE,
-] as const);
+export type { BoardPresentation, BoardItemTone, CommandDefinition, DeferredHookStage, Hook, HookStage, HookSubjectMap, InlineHookStage, Mention, Controller, ControllerSource, CronSource, CreateEvent, DeleteEvent, EventHandler, EventResource, MapFunc, CommandInput, CommandPickerSearch, CommandResult, PluginContext, PluginDataDirectories, PluginLogContext, PluginLogger, PluginLogLevel, PluginPackage, Resource, ReconcileRequest, ResourceRef, Source, SourceContext, SourceSignal, ResourceType, ResourceMergePatch, ToastMessage, ToastSink, ToastTone, UpdateEvent, ViewInput, ViewInputRecord, ViewOutput, Watch } from "@compforge/aide-plugin";
 
 function uniqueRequests(
   requests: readonly ReconcileRequest[],
@@ -217,8 +102,8 @@ export function validatePluginPackage(plugin: PluginPackage): void {
  * PluginInstance 在当前进程中的一次临时绑定。所有注册按逆序关闭，支持激活失败整体回滚。
  */
 export class PluginBinding implements PluginContext {
-  readonly instance: PluginInstance;
-  readonly session: PluginSessionContext;
+  readonly instance: import("@compforge/aide-plugin").PluginInstance;
+  readonly runtime: import("@compforge/aide-plugin").PluginRuntimeContext;
   readonly dataDirs: PluginDataDirectories;
   readonly resources: ResourceClient;
   readonly connectors: ConnectorClient;
@@ -238,14 +123,15 @@ export class PluginBinding implements PluginContext {
 
   constructor(
     instance: PluginInstance,
-    session: PluginSessionContext,
+    session: RuntimeScope,
     dataDirs: PluginDataDirectories,
     registrars: PluginRegistrars,
     resources: ResourceClient,
     connectors: ConnectorClient = emptyConnectors,
   ) {
-    this.instance = instance;
-    this.session = Object.freeze({ ...session });
+    const { aideSessionId: _backend, ...publicInstance } = instance;
+    this.instance = Object.freeze(publicInstance);
+    this.runtime = Object.freeze({ ...(session.cwd ? { cwd: session.cwd } : {}) });
     this.dataDirs = Object.freeze({ ...dataDirs });
     this.registrars = registrars;
     this.resources = resources;

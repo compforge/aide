@@ -1,14 +1,4 @@
-import type {
-  Command,
-  CommandInput,
-  DeferredHookStage,
-  HookStage,
-  HookSubjectMap,
-  InlineHookStage,
-  ViewInput,
-  ViewInputRecord,
-  ViewOutput,
-} from "@compforge/aide-plugin";
+import type { Command, CommandInput, DeferredHookStage, HookStage, HookSubjectMap, InlineHookStage, ViewInput, ViewInputRecord, ViewOutput } from "@compforge/aide-plugin";
 
 import {
   Controller,

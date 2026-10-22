@@ -4,12 +4,13 @@ import { cpSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { INPUT_TYPE, type InputSpec, type PluginPackage, type Resource } from "@compforge/aide-plugin";
+import { type PluginPackage, type Resource } from "@compforge/aide-plugin";
+import { INPUT_TYPE, type InputSpec } from "../plugins/personal/input/model.ts";
 import { Manager, type ManagerOptions } from "../src/host/plugin/manager.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-import { inputPrinter } from "../src/host/input/printer.ts";
+import { inputPrinter } from "../plugins/personal/input/printer.ts";
 import { executeCommand } from "./fixtures/command-context.ts";
 import { definition } from "./fixtures/resource-definition.ts";
 import definitions, { TYPE } from "./fixtures/printer-definitions.ts";
@@ -83,7 +84,7 @@ test("Runner calls Host Definition Printer with supplied snapshots; errors are l
   assert.equal((await f.manager.resourceClient("first").get<{ value: string }, unknown>({ ...TYPE, namespace: "v1", name: "sample" }))?.spec.value, "stored");
 });
 
-test("Duplicate definitions fail before activation; ownership rejects Core and other plugins", async (t) => {
+test("Duplicate definitions fail before activation; only plugin ownership reserves a type", async (t) => {
   const printable = definitions[0]!;
   const plugin = (id: string, resources = [printable]): PluginPackage => ({ pluginId: id, version: "1.0.0", resources, async activate() {} });
   const f = fixture(t, { packages: [plugin("duplicate", [printable, printable]), plugin("owner"), plugin("intruder"), plugin("core", [definition(INPUT_TYPE)])] });
@@ -91,20 +92,17 @@ test("Duplicate definitions fail before activation; ownership rejects Core and o
   await assert.rejects(f.manager.activateInstance("duplicate"), /already registered/);
   await f.manager.activateInstance("owner");
   await assert.rejects(f.manager.activateInstance("intruder"), /already registered by owner/);
-  await assert.rejects(f.manager.activateInstance("core"), /already registered by Aide/);
+  await f.manager.activateInstance("core");
   assert.equal(await f.manager.summarizeResource("duplicate", snapshot()), "Printable/sample");
 });
 
-test("Core Input Printer works without plugins and through Runner snapshot calls", async (t) => {
-  const f = runnerFixture(t);
+test("Personal Input Printer requires its plugin definition", async (t) => {
+  const f = fixture(t);
   const resource: Resource<InputSpec, {}> = { ...snapshot(), ...INPUT_TYPE,
-    spec: { origin: "source", originId: "personal.lark", text: "原始 @ 消息", observation: { context: { messages: ["附近消息"] } } }, status: {} };
-  const expected = { description: inputPrinter.describe(resource), summary: "原始 @ 消息" };
-  assert.equal(await f.manager.describeResource("absent", resource), expected.description);
-  f.add(); await f.manager.start(); assert.deepEqual(f.errors, []);
-  const result = await executeCommand(f.manager, "print-resource", { argument: JSON.stringify(resource) });
-  if (result?.kind !== "message") throw new Error("Expected printed text");
-  assert.deepEqual(JSON.parse(result.text), expected);
-  await f.manager.deactivateInstance("first");
-  assert.equal(await f.manager.describeResource("first", resource), expected.description);
+    spec: { origin: "source", originId: "personal.lark", text: "原始消息" }, status: {} };
+  assert.equal(await f.manager.describeResource("absent", resource), JSON.stringify(resource, null, 2));
+  const { InputDefinition } = await import("../plugins/personal/input/definition.ts");
+  const { ResourceStorage } = await import("../src/host/resource/storage.ts");
+  ResourceStorage.open(f.root).register("personal", [InputDefinition]);
+  assert.equal(await f.manager.describeResource("personal", resource), inputPrinter.describe(resource));
 });
