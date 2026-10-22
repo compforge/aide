@@ -1,3 +1,4 @@
+import { readExecutionContexts } from "./legacy.ts";
 // 会话存储：~/.aide/sessions/<id>/。
 // cwd 是执行环境，不参与 Session 的身份和存储定位；session.jsonl 承载统一逻辑历史，
 // session/plugins/ 承载以该 AideSession 为 owner 的 Plugin 数据。
@@ -6,7 +7,7 @@
 import { createHash } from "node:crypto";
 import { ResourceStorage } from "../resource/storage.ts";
 import { assertSessionId } from "./session-id.ts";
-import { turnUserText } from "./message-relations.ts";
+import { invocationUserText } from "./message-relations.ts";
 import {
   appendFileSync,
   chmodSync,
@@ -39,30 +40,25 @@ import {
   textOf,
   type AnyEventDraft,
   type AnyEventEnvelope,
-  type AnyNewEvent,
   type ContentBlock,
   type EventEnvelope,
   type EventKind,
   type NewEvent,
   type EventSource,
   type StopReason,
-  type TurnSummary,
-  type TurnSummaryToolCall,
+  type InvocationSummary,
+  type InvocationSummaryToolCall,
   type UsageUpdate,
 } from "../event/index.ts";
 import { EventLedger } from "../event/ledger.ts";
 import type { HarnessSessionIdentity } from "../harness/adapter.ts";
-import { sessionIdResumeState, type HarnessResumeState } from "../harness/resume.ts";
 import {
-  createLaneMeta,
-  createMainLaneMeta,
-  MAIN_LANE_ID,
   type HarnessSessionMeta,
-  type LaneMeta,
-} from "../lane.ts";
+  type ExecutionContextMeta,
+} from "../execution-context.ts";
 import { applyEvent, reduceEvents, type SessionState } from "./reduce.ts";
 
-/** HarnessTarget-scoped preferences are shared across Lanes, not by native sessions. */
+/** HarnessTarget-scoped preferences are shared across contexts, not by native sessions. */
 export interface HarnessTargetMeta {
   harnessTargetId: string;
   harness: string;
@@ -71,7 +67,7 @@ export interface HarnessTargetMeta {
   mode?: string;
 }
 
-/** Session-level desired routing target. HarnessSession bindings remain Lane × Target owned. */
+/** Session-level desired routing target. HarnessSession bindings remain context × Target owned. */
 export interface SessionTargetBindingMeta {
   readonly targetId?: string;
   readonly generation: number;
@@ -140,8 +136,8 @@ export interface SessionMeta {
   harnessTargets: Record<string, HarnessTargetMeta>;
   /** Core-owned desired route exposed as SessionTargetBinding. */
   targetBinding?: SessionTargetBindingMeta;
-  /** Aide-native task lines. A Lane may traverse multiple HarnessTargets. */
-  lanes: Record<string, LaneMeta>;
+  /** Aide-native task lines. A context may traverse multiple HarnessTargets. */
+  contexts: Record<string, ExecutionContextMeta>;
   /** @deprecated in-memory compatibility projection; omitted from new meta.json writes. */
   harnessSessions: Record<string, LegacyHarnessSessionMeta>;
   forkedFrom?: SessionForkOrigin;
@@ -222,72 +218,8 @@ export function sessionDisplayTitle(meta: SessionMeta): string {
 }
 
 function normalizeSessionMeta(meta: SessionMeta): SessionMeta {
-  const harnessTargets = { ...(meta.harnessTargets ?? {}) };
-  const lanes = { ...(meta.lanes ?? {}) };
-  const mainLane = lanes[MAIN_LANE_ID] ?? createMainLaneMeta();
-  lanes[MAIN_LANE_ID] = mainLane;
-
-  for (const [harnessTargetId, legacy] of Object.entries(meta.harnessSessions ?? {})) {
-    harnessTargets[harnessTargetId] ??= {
-      harnessTargetId,
-      harness: legacy.harness,
-      ...(legacy.model === undefined ? {} : { model: legacy.model }),
-      ...(legacy.effort === undefined ? {} : { effort: legacy.effort }),
-      ...(legacy.mode === undefined ? {} : { mode: legacy.mode }),
-    };
-    mainLane.harnessSessions[harnessTargetId] ??= {
-        harness: legacy.harness,
-        ...(legacy.launchSnapshot === undefined
-          ? {}
-          : { launchSnapshot: legacy.launchSnapshot }),
-        ...(legacy.harnessSessionId === undefined
-          ? {}
-          : { harnessSessionId: legacy.harnessSessionId }),
-        ...(legacy.resumeState === undefined ? {} : { resumeState: legacy.resumeState }),
-        ...(legacy.resumeCursor === undefined ? {} : { resumeCursor: legacy.resumeCursor }),
-        ...(legacy.contextEpochId === undefined
-          ? {}
-          : { contextEpochId: legacy.contextEpochId }),
-        ...(legacy.syncedSeq === undefined ? {} : { syncedSeq: legacy.syncedSeq }),
-        ...(legacy.parentSessionId === undefined
-          ? {}
-          : { parentSessionId: legacy.parentSessionId }),
-    };
-  }
-
-  const {
-    harnessSessions: _legacy,
-    mainLaneId: _legacyMainLaneId,
-    harnessLanes: _obsoleteHarnessLanes,
-    interactiveLaneByTarget: _obsoleteInteractiveLanes,
-    ...current
-  } = meta as SessionMeta & {
-    mainLaneId?: unknown;
-    harnessLanes?: unknown;
-    interactiveLaneByTarget?: unknown;
-  };
-  const harnessSessions = Object.fromEntries(
-    Object.entries(harnessTargets).map(([harnessTargetId, target]) => {
-      const session = mainLane.harnessSessions[harnessTargetId];
-      return [
-        harnessTargetId,
-        {
-          ...session,
-          harnessTargetId,
-          harness: session?.harness ?? target.harness,
-          ...(target.model === undefined ? {} : { model: target.model }),
-          ...(target.effort === undefined ? {} : { effort: target.effort }),
-          ...(target.mode === undefined ? {} : { mode: target.mode }),
-        } satisfies LegacyHarnessSessionMeta,
-      ];
-    }),
-  );
-  return {
-    ...current,
-    harnessTargets,
-    lanes,
-    harnessSessions,
-  };
+  const { lanes: _legacyLanes, ...current } = meta as SessionMeta & { lanes?: unknown };
+  return { ...current, harnessTargets: meta.harnessTargets ?? {}, contexts: readExecutionContexts(meta), harnessSessions: {} };
 }
 
 export interface NativeSessionMaterialization {
@@ -362,7 +294,7 @@ function withSessionPreview(dir: string, meta: SessionMeta): SessionMeta {
 }
 
 /**
- * @spec Sessions persist execution history, Lanes and native bindings; cwd never partitions their identity or storage.
+ * @spec Sessions persist execution history, contexts and native bindings; cwd never partitions their identity or storage.
  * @link component://docs/kernel.md
  */
 function journalDirectory(home: string, id: string): string {
@@ -381,7 +313,7 @@ export function openExecutionJournal(home: string, cwd: string): SessionHandle {
   const path = join(dir, "meta.json");
   const meta: SessionMeta = existsSync(path)
     ? normalizeSessionMeta(JSON.parse(readFileSync(path, "utf8")))
-    : { aideSessionId: id, cwd: resolve(cwd), createdAt: new Date().toISOString(), harnessTargets: {}, lanes: {}, harnessSessions: {} };
+    : { aideSessionId: id, cwd: resolve(cwd), createdAt: new Date().toISOString(), harnessTargets: {}, contexts: {}, harnessSessions: {} };
   if (!existsSync(path)) writeMetaAtomic(dir, meta);
   return new SessionHandle(id, dir, meta);
 }
@@ -411,251 +343,11 @@ export class SessionStore {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       harnessTargets: {},
-      lanes: {
-        [MAIN_LANE_ID]: createMainLaneMeta(),
-      },
+      contexts: {},
       harnessSessions: {},
     };
     writeMetaAtomic(dir, meta);
     return new SessionHandle(id, dir, meta, this.loggerOptions);
-  }
-
-  /** 把只读 HarnessHistorySnapshot 接入唯一 AideSession owner。 */
-  adoptHarnessSession(
-    source: HarnessSessionAdoptionSource,
-  ): { session: SessionHandle; reused: boolean } {
-    assertObservedBoundary(source);
-    const release = this.acquireHarnessSessionAdoptionLock();
-    try {
-      const existing = this.findByHarnessSession(source.session);
-      if (existing) {
-        const session = this.openSession(existing.aideSessionId);
-        const ownsLock = session.acquireLock();
-        try {
-          this.reconcileHarnessSession(session, source);
-        } finally {
-          if (ownsLock) session.releaseLock();
-        }
-        return { session, reused: true };
-      }
-      return { session: this.createFromHarnessSession(source), reused: false };
-    } finally {
-      release();
-    }
-  }
-
-  /** @deprecated 0.2.14 Provider 兼容入口；新调用方传 HarnessHistorySnapshot。 */
-  materializeNativeSession(
-    source: NativeSessionMaterialization,
-  ): { session: SessionHandle; reused: boolean } {
-    return this.adoptHarnessSession({
-      session: {
-        harnessTargetId: source.harnessTargetId,
-        harness: source.harness,
-        identity: { id: source.nativeSessionId },
-      },
-      cwd: source.cwd,
-      title: source.title,
-      turns: source.turns,
-      observedThrough: harnessHistoryBoundary(source.turns),
-    });
-  }
-
-  private createFromHarnessSession(source: HarnessSessionAdoptionSource): SessionHandle {
-    const session = this.createSession({ cwd: source.cwd, title: source.title });
-    const { harnessTargetId, harness, identity } = source.session;
-    const laneId = session.ensureMainLane().laneId;
-    const label = source.title?.trim() || identity.id;
-    let syncedSeq = 0;
-    for (const turn of source.turns) {
-      syncedSeq = this.appendMaterializedTurn(session, source, turn);
-    }
-    // 不可变来源、已导入边界与当前 binding 必须原子出现，避免崩溃留下半个 owner。
-    session.updateMeta({
-      description: `import: ${harness} ${label}`,
-      adoptedFrom: {
-        session: source.session,
-        importedThrough: source.observedThrough,
-      },
-      harnessTargets: {
-        [harnessTargetId]: { harnessTargetId, harness },
-      },
-      lanes: {
-        [laneId]: {
-          ...session.meta.lanes[laneId]!,
-          harnessSessions: {
-            [harnessTargetId]: {
-            harness,
-            harnessSessionId: identity.id,
-            resumeState: sessionIdResumeState(identity.id),
-            contextEpochId: newId("ctxe"),
-            // HarnessSession 已亲历这些历史 turn；同 Lane resume 时不能再注入一遍。
-            syncedSeq,
-            },
-          },
-        },
-      },
-    });
-    return session;
-  }
-
-  /**
-   * 再次 adoption 时先对账完整语义前缀，再只追加 Harness 新增尾部。当前 execution binding
-   * 可以重建或切换，但 adoptedFrom 始终指向第一次接入的 HarnessSession。
-   */
-  private reconcileHarnessSession(
-    session: SessionHandle,
-    source: HarnessSessionAdoptionSource,
-  ): void {
-    const { harnessTargetId, harness, identity } = source.session;
-    const summaries = session.ledger
-      .read()
-      .filter(
-        (event): event is EventEnvelope<"_aide_turn_summary"> =>
-          event.kind === "_aide_turn_summary" &&
-          event.harnessTargetId === harnessTargetId,
-      );
-    if (summaries.length > source.turns.length) {
-      throw new Error(
-        `HarnessSession history is behind its Aide owner for ${harnessTargetId}/${identity.id}`,
-      );
-    }
-
-    const existingTurns = materializedHistoryTurns(session, summaries);
-    for (let count = 1; count <= summaries.length; count++) {
-      const existing = existingTurns[count - 1]!;
-      const incoming = source.turns[count - 1]!;
-      const diverged = incoming.events
-        ? harnessHistoryTurnDigest(existing) !== harnessHistoryTurnDigest(incoming)
-        : comparableTurnText(existing.userText) !== comparableTurnText(incoming.userText) ||
-          comparableTurnText(existing.agentText) !== comparableTurnText(incoming.agentText);
-      if (diverged) {
-        throw new Error(
-          `HarnessSession history diverged at turn ${count} for ${harnessTargetId}/${identity.id}`,
-        );
-      }
-    }
-
-    const importedThrough = adoptionFor(session.meta)?.importedThrough;
-    if (importedThrough) {
-      const incomingImported = harnessHistoryBoundary(
-        source.turns,
-        importedThrough.turnCount,
-      );
-      if (
-        incomingImported.version !== importedThrough.version ||
-        incomingImported.turnCount !== importedThrough.turnCount ||
-        incomingImported.turnId !== importedThrough.turnId ||
-        incomingImported.prefixDigest !== importedThrough.prefixDigest
-      ) {
-        throw new Error(
-          `HarnessSession imported history boundary diverged for ${harnessTargetId}/${identity.id}`,
-        );
-      }
-    }
-
-    let syncedSeq = summaries.at(-1)?.seq ?? 0;
-    for (const turn of source.turns.slice(summaries.length)) {
-      syncedSeq = this.appendMaterializedTurn(session, source, turn);
-    }
-
-    const laneId = session.ensureMainLane().laneId;
-    const lane = session.meta.lanes[laneId]!;
-    const existing = lane.harnessSessions[harnessTargetId];
-    session.updateMeta({
-      adoptedFrom: {
-        session: source.session,
-        importedThrough: source.observedThrough,
-      },
-      harnessTargets: {
-        ...session.meta.harnessTargets,
-        [harnessTargetId]: {
-          ...session.meta.harnessTargets[harnessTargetId],
-          harnessTargetId,
-          harness,
-        },
-      },
-      lanes: {
-        ...session.meta.lanes,
-        [laneId]: {
-          ...lane,
-          harnessSessions: {
-            ...lane.harnessSessions,
-            [harnessTargetId]: {
-              ...existing,
-              harness,
-              harnessSessionId: identity.id,
-              resumeState: sessionIdResumeState(identity.id),
-              contextEpochId: existing?.contextEpochId ?? newId("ctxe"),
-              syncedSeq,
-            },
-          },
-        },
-      },
-    });
-  }
-
-  private appendMaterializedTurn(
-    session: SessionHandle,
-    source: Pick<HarnessSessionAdoptionSource, "session">,
-    turn: HarnessHistoryTurn,
-  ): number {
-    const { harnessTargetId, harness } = source.session;
-    const laneId = session.ensureMainLane().laneId;
-    const turnId = newId("t");
-    if (turn.userText) session.setPreviewIfEmpty(turn.userText);
-
-    if (turn.events) {
-      for (const imported of turn.events) {
-        session.appendEvent({
-          ...imported.event,
-          source: materializedEventSource(imported.source, harnessTargetId),
-          harness,
-          harnessTargetId,
-          laneId,
-          turnId,
-        } as AnyNewEvent);
-      }
-    } else {
-      if (turn.userText) {
-        session.appendEvent({
-          kind: "user_message",
-          source: { type: "user" },
-          harness,
-          harnessTargetId,
-          laneId,
-          turnId,
-          payload: {
-            messageId: newId("m"),
-            content: [{ type: "text", text: turn.userText }],
-          },
-        });
-      }
-      if (turn.agentText) {
-        session.appendEvent({
-          kind: "agent_message",
-          source: { type: "harness", harnessTargetId },
-          harness,
-          harnessTargetId,
-          laneId,
-          turnId,
-          payload: {
-            messageId: newId("m"),
-            content: [{ type: "text", text: turn.agentText }],
-          },
-        });
-      }
-      session.appendEvent({
-        kind: "state_update",
-        source: { type: "harness", harnessTargetId },
-        harness,
-        harnessTargetId,
-        laneId,
-        turnId,
-        payload: { state: "idle", stopReason: "end_turn" },
-      });
-    }
-    return session.summarizeTurnEvent(turnId).seq;
   }
 
   /** Session id locates its directory directly, independent of execution cwd. */
@@ -670,7 +362,7 @@ export class SessionStore {
     if (
       parsed.harnessSessions ||
       !parsed.harnessTargets ||
-      !parsed.lanes ||
+      !parsed.contexts ||
       parsed.mainLaneId !== undefined
     ) {
       writeMetaAtomic(dir, meta);
@@ -795,152 +487,8 @@ export class SessionStore {
     return sessionLockIsActive(path);
   }
 
-  /** adoptedFrom 是 owner 索引；当前 mutable binding 只为尚未 adoption 的 Aide 会话兜底。 */
-  findByHarnessSession(source: AdoptedHarnessSession): SessionMeta | undefined {
-    const { harnessTargetId, harness, identity } = source;
-    const matches = this.listSessions().filter((meta) => {
-      const adoption = adoptionFor(meta);
-      if (adoption) {
-        return (
-          adoption.session.harnessTargetId === harnessTargetId &&
-          adoption.session.harness === harness &&
-          adoption.session.identity.id === identity.id
-        );
-      }
-      return Object.values(meta.lanes).some(
-        (lane) => {
-          const session = lane.harnessSessions[harnessTargetId];
-          return session?.harness === harness && session.harnessSessionId === identity.id;
-        },
-      );
-    });
-    if (matches.length > 1) {
-      const owners = matches.map((meta) => meta.aideSessionId).join(", ");
-      throw new Error(
-        `HarnessSession ${harnessTargetId}/${identity.id} is owned by multiple AideSessions: ${owners}`,
-      );
-    }
-    return matches[0];
-  }
-
-  /** @deprecated 使用 findByHarnessSession。 */
-  findByNativeSession(harnessTargetId: string, nativeSessionId: string): SessionMeta | undefined {
-    const harness = this.listSessions()
-      .map((meta) => meta.harnessTargets[harnessTargetId]?.harness)
-      .find(Boolean);
-    if (!harness) return undefined;
-    return this.findByHarnessSession({
-      harnessTargetId,
-      harness,
-      identity: { id: nativeSessionId },
-    });
-  }
-
-  /**
-   * Fork 一个 AideSession：把 throughSeq（默认 head）之前的事件历史复制进新会话。
-   * 复制的前缀与源是同一段逻辑历史（git-branch 语义）：seq 与 turn/message/toolCall/
-   * approval 等领域对象 ID 原样保留，只换 session scope。Event 是 ledger append 的身份，
-   * 换 scope 时重新签发 eventId，保证一个 eventId 只属于一个权威 ledger。
-   * 谱系由 meta.forkedFrom 表达。
-   * child 继承 HarnessTarget 偏好和逻辑 Lane 拓扑，但清空所有原生 session binding
-   * （否则两个 AideSession 会写进同一份 Harness 历史）；child 首次使用某个
-   * Lane × Target 时创建 fresh native session + 新 ContextEpoch，并从复制历史补课。
-   * opts.cwd 选择新会话的执行目录，缺省沿用源 cwd。
-   */
-  forkSession(
-    sourceSessionId: string,
-    opts: { title?: string; throughSeq?: number; cwd?: string } = {},
-  ): SessionHandle {
-    const source = this.openSession(sourceSessionId);
-    const events = source.ledger
-      .read()
-      .filter((ev) => opts.throughSeq === undefined || ev.seq <= opts.throughSeq);
-    const id = newId("bs");
-    const cwd = resolve(opts.cwd ?? source.meta.cwd);
-    const dir = this.sessionDir(id);
-    mkdirSync(dir, { recursive: true });
-    if (events.length > 0) {
-      const lines = events.map((ev) =>
-        JSON.stringify({
-          ...ev,
-          eventId: newId("ev"),
-          scope: { type: "session", aideSessionId: id },
-        }),
-      );
-      writeFileSync(join(dir, "session.jsonl"), `${lines.join("\n")}\n`);
-    }
-    const harnessTargets = Object.fromEntries(
-      Object.entries(source.meta.harnessTargets).map(([key, target]) => [
-        key,
-        { ...target },
-      ]),
-    );
-    const now = new Date().toISOString();
-    const sourceQuestion = source.meta.preview?.trim() ?? sessionDisplayTitle(source.meta);
-    const lanes = Object.fromEntries(
-      Object.entries(source.meta.lanes).map(([laneId, lane]) => [
-        laneId,
-        createLaneMeta({
-          laneId,
-          createdFor: lane.createdFor,
-          parentLaneId: lane.parentLaneId,
-          historyAfterSeq: lane.historyAfterSeq,
-        }),
-      ]),
-    );
-    const meta: SessionMeta = {
-      aideSessionId: id,
-      title: opts.title,
-      description: `fork: ${sourceQuestion}`,
-      cwd,
-      createdAt: now,
-      updatedAt: now,
-      harnessTargets,
-      lanes,
-      harnessSessions: {},
-      forkedFrom: { aideSessionId: sourceSessionId, throughSeq: events.at(-1)?.seq ?? 0 },
-    };
-    writeMetaAtomic(dir, meta);
-    return new SessionHandle(id, dir, meta, this.loggerOptions);
-  }
-
   private sessionDir(sessionId: string): string {
     return journalDirectory(this.rootDir, sessionId);
-  }
-
-  private acquireHarnessSessionAdoptionLock(): () => void {
-    mkdirSync(this.rootDir, { recursive: true });
-    // 沿用 0.2.14 锁文件名，保证滚动升级时新旧进程仍竞争同一把 owner 创建锁。
-    const path = join(this.rootDir, "native-session.lock");
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const fd = openSync(path, "wx");
-        writeSync(fd, String(process.pid));
-        closeSync(fd);
-        return () => {
-          try {
-            if (readFileSync(path, "utf8").trim() === String(process.pid)) {
-              rmSync(path);
-            }
-          } catch {
-            // 锁已被清理时无需额外动作。
-          }
-        };
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
-      let holder: number;
-      try {
-        holder = Number(readFileSync(path, "utf8").trim());
-      } catch {
-        continue;
-      }
-      if (Number.isFinite(holder) && holder > 0 && pidAlive(holder)) {
-        throw new Error(`another aide process is adopting a HarnessSession (pid ${holder})`);
-      }
-      rmSync(path, { force: true });
-    }
-    throw new Error("failed to acquire HarnessSession adoption lock");
   }
 }
 
@@ -1062,14 +610,14 @@ export class SessionHandle {
     harnessTargetId: string,
     harness: string,
     event: { direction: "in"; name?: string; payload: unknown },
-    laneId?: string,
+    contextId?: string,
   ): void {
     try {
       const safeTarget = harnessTargetId.replace(/[^a-zA-Z0-9._-]/g, "-");
-      const safeLane = laneId?.replace(/[^a-zA-Z0-9._-]/g, "-");
+      const safeContext = contextId?.replace(/[^a-zA-Z0-9._-]/g, "-");
       const path = join(
         this.dir,
-        `native-${safeTarget}${safeLane ? `-${safeLane}` : ""}.jsonl`,
+        `native-${safeTarget}${safeContext ? `-${safeContext}` : ""}.jsonl`,
       );
       if (existsSync(path) && statSync(path).size >= 10 * 1024 * 1024) {
         renameSync(path, `${path}.1`);
@@ -1081,7 +629,7 @@ export class SessionHandle {
           ts: new Date().toISOString(),
           aideSessionId: this.id,
           harnessTargetId,
-          ...(laneId ? { laneId } : {}),
+          ...(contextId ? { contextId } : {}),
           harness,
           ...event,
         })}\n`,
@@ -1124,34 +672,6 @@ export class SessionHandle {
     writeMetaAtomic(this.dir, this.meta);
   }
 
-  setTargetBinding(
-    targetId: string | undefined,
-    expectedResourceVersion: string,
-    now = new Date(),
-  ): SessionTargetBindingMeta {
-    const current = sessionTargetBindingMeta(this.meta);
-    if (String(current.resourceVersion) !== expectedResourceVersion) {
-      throw new Error(
-        `SessionTargetBinding resource version conflict: expected ${expectedResourceVersion}, current ${current.resourceVersion}`,
-      );
-    }
-    if (current.targetId === targetId) return current;
-    if (targetId !== undefined && !targetId.trim()) {
-      throw new Error("SessionTargetBinding targetId must not be empty");
-    }
-    if (Number.isNaN(now.getTime())) {
-      throw new Error("SessionTargetBinding now must be a valid Date");
-    }
-    const next = Object.freeze({
-      ...(targetId === undefined ? {} : { targetId }),
-      generation: current.generation + 1,
-      resourceVersion: current.resourceVersion + 1,
-      updatedAt: now.toISOString(),
-    });
-    this.updateMeta({ targetBinding: next });
-    return next;
-  }
-
   setPreviewIfEmpty(text: string): void {
     if (this.meta.preview?.trim()) return;
     const preview = sessionPreview(text);
@@ -1178,145 +698,71 @@ export class SessionHandle {
     writeMetaAtomic(this.dir, this.meta);
   }
 
-  setLane(laneId: string, lane: LaneMeta): void {
-    if (lane.laneId !== laneId) {
+  setExecutionContext(contextId: string, context: ExecutionContextMeta): void {
+    if (context.contextId !== contextId) {
       throw new Error(
-        `lane key mismatch: key=${laneId}, meta=${lane.laneId}`,
+        `context key mismatch: key=${contextId}, meta=${context.contextId}`,
       );
     }
-    this.meta.lanes = { ...this.meta.lanes, [laneId]: lane };
+    this.meta.contexts = { ...this.meta.contexts, [contextId]: context };
     this.meta = normalizeSessionMeta(this.meta);
     writeMetaAtomic(this.dir, this.meta);
   }
 
-  setLaneHarnessSession(
-    laneId: string,
+  setContextHarnessSession(
+    contextId: string,
     harnessTargetId: string,
     harnessSession: HarnessSessionMeta,
   ): void {
-    const lane = this.meta.lanes[laneId];
-    if (!lane) throw new Error(`Lane not found: ${laneId}`);
-    this.setLane(laneId, {
-      ...lane,
+    const context = this.meta.contexts[contextId];
+    if (!context) throw new Error(`Execution context not found: ${contextId}`);
+    this.setExecutionContext(contextId, {
+      ...context,
       harnessSessions: {
-        ...lane.harnessSessions,
+        ...context.harnessSessions,
         [harnessTargetId]: harnessSession,
       },
     });
   }
 
-  harnessSessionForTarget(harnessTargetId: string): HarnessSessionMeta | undefined {
-    return this.meta.lanes[MAIN_LANE_ID]?.harnessSessions[harnessTargetId];
-  }
-
-  /** @deprecated Use Lane APIs; retained for embedders migrating old SessionMeta setup. */
-  setHarnessSession(harnessTargetId: string, legacy: LegacyHarnessSessionMeta): void {
-    if (legacy.harnessTargetId !== harnessTargetId) {
-      throw new Error(
-        `harness target key mismatch: key=${harnessTargetId}, meta=${legacy.harnessTargetId}`,
-      );
-    }
-    const laneId = this.ensureMainLane().laneId;
-    this.meta.harnessTargets = {
-      ...this.meta.harnessTargets,
-      [harnessTargetId]: {
-        harnessTargetId,
-        harness: legacy.harness,
-        ...(legacy.model === undefined ? {} : { model: legacy.model }),
-        ...(legacy.effort === undefined ? {} : { effort: legacy.effort }),
-        ...(legacy.mode === undefined ? {} : { mode: legacy.mode }),
-      },
-    };
-    this.setLaneHarnessSession(laneId, harnessTargetId, {
-      harness: legacy.harness,
-      ...(legacy.launchSnapshot === undefined
-        ? {}
-        : { launchSnapshot: legacy.launchSnapshot }),
-      ...(legacy.harnessSessionId === undefined
-        ? {}
-        : { harnessSessionId: legacy.harnessSessionId }),
-      ...(legacy.resumeState === undefined ? {} : { resumeState: legacy.resumeState }),
-      ...(legacy.resumeCursor === undefined ? {} : { resumeCursor: legacy.resumeCursor }),
-      ...(legacy.contextEpochId === undefined
-        ? {}
-        : { contextEpochId: legacy.contextEpochId }),
-      ...(legacy.syncedSeq === undefined ? {} : { syncedSeq: legacy.syncedSeq }),
-      ...(legacy.parentSessionId === undefined
-        ? {}
-        : { parentSessionId: legacy.parentSessionId }),
-    });
-  }
-
-  ensureMainLane(): LaneMeta {
-    const lane = this.meta.lanes[MAIN_LANE_ID];
-    if (!lane) throw new Error(`main Lane not found: ${MAIN_LANE_ID}`);
-    return lane;
-  }
-
-  requireLane(laneId: string): LaneMeta {
-    const lane = this.meta.lanes[laneId];
-    if (!lane) throw new Error(`Lane not found: ${laneId}`);
-    return lane;
-  }
-
-  ensureHarnessInvocationLane(
-    laneId: string,
-    invocationId: string,
-    parentLaneId: string,
-  ): LaneMeta {
-    this.requireLane(parentLaneId);
-    const existing = this.meta.lanes[laneId];
-    if (existing) {
-      if (
-        existing.createdFor.type !== "harness_invocation" ||
-        existing.createdFor.invocationId !== invocationId ||
-        existing.parentLaneId !== parentLaneId
-      ) {
-        throw new Error(`Lane identity conflict: ${laneId}`);
-      }
-      return existing;
-    }
-    const lane = createLaneMeta({
-      laneId,
-      createdFor: { type: "harness_invocation", invocationId },
-      parentLaneId,
-    });
-    this.setLane(laneId, lane);
-    return lane;
+  requireExecutionContext(contextId: string): ExecutionContextMeta {
+    const context = this.meta.contexts[contextId];
+    if (!context) throw new Error(`Execution context not found: ${contextId}`);
+    return context;
   }
 
   /**
-   * 汇总一个 turn 并落盘 _aide_turn_summary 事件。
-   * 幂等：同一 turnId 已有 summary 时直接返回已有的，不重复追加。
+   * 汇总一次调用并落盘 _aide_invocation_summary 事件。
+   * 幂等：同一 invocationId 已有 summary 时直接返回已有的，不重复追加。
    */
-  summarizeTurn(turnId: string): TurnSummary {
-    return this.summarizeTurnEvent(turnId).payload;
+  summarizeInvocation(invocationId: string): InvocationSummary {
+    return this.summarizeInvocationEvent(invocationId).payload;
   }
 
-  /** 与 summarizeTurn 相同，但返回 envelope，供 live reducer 消费实际落盘事件。 */
-  summarizeTurnEvent(turnId: string): EventEnvelope<"_aide_turn_summary"> {
+  /** 与 summarizeInvocation 相同，但返回 envelope，供 live reducer 消费实际落盘事件。 */
+  summarizeInvocationEvent(invocationId: string): EventEnvelope<"_aide_invocation_summary"> {
     const events = this.ledger.read();
     const existing = events.find(
-      (e): e is EventEnvelope<"_aide_turn_summary"> =>
-        e.kind === "_aide_turn_summary" && e.payload.turnId === turnId,
+      (e): e is EventEnvelope<"_aide_invocation_summary"> =>
+        e.kind === "_aide_invocation_summary" && e.payload.invocationId === invocationId,
     );
     if (existing) return existing;
 
-    const turnEvents = events.filter((e) => e.turnId === turnId);
-    if (turnEvents.length === 0) {
-      throw new Error(`no events for turn ${turnId} in session ${this.id}`);
+    const invocationEvents = events.filter((e) => e.invocationId === invocationId);
+    if (invocationEvents.length === 0) {
+      throw new Error(`no events for invocation ${invocationId} in session ${this.id}`);
     }
-    const state = reduceEvents(turnEvents);
+    const state = reduceEvents(invocationEvents);
 
     // 自动注入块保留在原始事件里供审计，但不能进入摘要后再次被下一棒递归放大。
     // A native queue can consume a body recorded in an earlier Turn. Resolve
     // messages from the Session projection, then select their actual ownership;
     // filtering the ledger first would discard the body or its consumption fact.
     const messages = this.loadState();
-    const userText = turnUserText(messages, turnId);
-    const agentText = turnAgentText(messages, turnId);
-    const finalText = turnAgentText(messages, turnId, "final");
-    const toolCalls: TurnSummaryToolCall[] = [...state.toolCalls.values()].map((tc) => ({
+    const userText = invocationUserText(messages, invocationId);
+    const agentText = invocationAgentText(messages, invocationId);
+    const finalText = invocationAgentText(messages, invocationId, "final");
+    const toolCalls: InvocationSummaryToolCall[] = [...state.toolCalls.values()].map((tc) => ({
       toolCallId: tc.toolCallId,
       title: tc.title,
       kind: tc.kind,
@@ -1334,38 +780,38 @@ export class SessionHandle {
           }
         : undefined;
 
-    const summary: TurnSummary = {
-      turnId,
+    const summary: InvocationSummary = {
+      invocationId: invocationId,
       // per-turn 取值：输入虽已按 turnId 过滤，但显式按 turn 取让它对"过滤集混入
       // 他人终态"的任何未来变化免疫（无 turnId 的迟到终态只会进 lastStopReason）
-      stopReason: (state.stopReasons.get(turnId) ?? state.lastStopReason) as StopReason | undefined,
+      stopReason: (state.stopReasons.get(invocationId) ?? state.lastStopReason) as StopReason | undefined,
       userText: userText || undefined,
       agentText: agentText || undefined,
       finalText: finalText || undefined,
       toolCalls,
       usage,
-      startedAt: turnEvents[0]?.ts,
-      endedAt: turnEvents[turnEvents.length - 1]?.ts,
+      startedAt: invocationEvents[0]?.ts,
+      endedAt: invocationEvents[invocationEvents.length - 1]?.ts,
     };
-    const harness = turnEvents[0]?.harness ?? "aide";
-    const harnessTargetId = turnEvents.find((event) => event.harnessTargetId)?.harnessTargetId;
-    const laneId = turnEvents.find((event) => event.laneId)?.laneId;
+    const harness = invocationEvents[0]?.harness ?? "aide";
+    const harnessTargetId = invocationEvents.find((event) => event.harnessTargetId)?.harnessTargetId;
+    const contextId = invocationEvents.find((event) => event.contextId)?.contextId;
     const event = this.appendEvent({
-      kind: "_aide_turn_summary",
+      kind: "_aide_invocation_summary",
       source: { type: "aide" },
       payload: summary,
       harness,
       ...(harnessTargetId ? { harnessTargetId } : {}),
-      ...(laneId ? { laneId } : {}),
-      turnId,
-    }) as EventEnvelope<"_aide_turn_summary">;
+      ...(contextId ? { contextId } : {}),
+      invocationId: invocationId,
+    }) as EventEnvelope<"_aide_invocation_summary">;
     this.updateMeta({ updatedAt: summary.endedAt ?? new Date().toISOString() });
     return event;
   }
 }
 
 const HISTORY_OPERATIONAL_KINDS = new Set<EventKind>([
-  "_aide_turn_summary",
+  "_aide_invocation_summary",
   "_aide_delivery_attempt_update",
   "_aide_context_snapshot",
   "_aide_context_delivery_receipt",
@@ -1454,7 +900,7 @@ function adoptionFor(meta: SessionMeta): HarnessSessionAdoption | undefined {
 
 function materializedHistoryTurns(
   session: SessionHandle,
-  summaries: readonly EventEnvelope<"_aide_turn_summary">[],
+  summaries: readonly EventEnvelope<"_aide_invocation_summary">[],
 ): HarnessHistoryTurn[] {
   const events = session.ledger.read();
   // 新事件流里 steer 的投递事实在 input_delivery_update；未证应用的 steer 内容不进历史。
@@ -1465,12 +911,12 @@ function materializedHistoryTurns(
     }
   }
   return summaries.map((summary) => ({
-    turnId: summary.turnId,
+    turnId: summary.invocationId,
     userText: summary.payload.userText,
     agentText: summary.payload.agentText,
     events: events.flatMap((event): HarnessHistoryEvent[] => {
       if (
-        event.turnId !== summary.turnId ||
+        event.invocationId !== summary.invocationId ||
         event.seq >= summary.seq ||
         HISTORY_OPERATIONAL_KINDS.has(event.kind) ||
         (event.kind === "user_message" &&
@@ -1565,12 +1011,12 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-function turnAgentText(state: SessionState, turnId: string, phase?: "final"): string {
+function invocationAgentText(state: SessionState, invocationId: string, phase?: "final"): string {
   const parts: string[] = [];
   for (const item of state.timeline) {
     if (item.type !== "message") continue;
     const msg = state.messages.get(item.id);
-    if (msg && msg.role === "agent" && msg.turnId === turnId) {
+    if (msg && msg.role === "agent" && msg.invocationId === invocationId) {
       if (phase && msg.phase !== phase) continue;
       const text = textOf(msg.content);
       if (text) parts.push(text);

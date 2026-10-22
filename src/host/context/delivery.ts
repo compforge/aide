@@ -144,7 +144,7 @@ export class ContextDeliveries<TContext> {
   prepare(
     context: TContext,
     opts: {
-      turnId: string;
+      invocationId: string;
       harnessSessionId?: string;
       source: ContextSource;
       afterSeq: number;
@@ -155,7 +155,7 @@ export class ContextDeliveries<TContext> {
     const event = this.append(context, {
       kind: "_aide_context_snapshot",
       harnessSessionId: opts.harnessSessionId,
-      turnId: opts.turnId,
+      invocationId: opts.invocationId,
       payload: {
         snapshotId: newId("ctx"),
         source: opts.source,
@@ -181,7 +181,7 @@ export class ContextDeliveries<TContext> {
       kind: "_aide_context_delivery_receipt",
       parentEventId: snapshot.eventId,
       harnessSessionId: opts.harnessSessionId,
-      turnId: snapshot.turnId,
+      invocationId: snapshot.invocationId,
       payload: {
         snapshotId: snapshot.payload.snapshotId,
         contextEpochId: opts.contextEpochId,

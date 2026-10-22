@@ -43,10 +43,10 @@ export interface HarnessDeliveryAttemptState {
   attemptId: string;
   inputId: string;
   launchSnapshot: HarnessLaunchSnapshot;
-  turnId: string;
+  invocationId: string;
   harness?: string;
   harnessTargetId: string;
-  laneId?: string;
+  contextId?: string;
   harnessSessionId?: string;
   phase: DeliveryAttemptPhase;
   /** 曾收到 admission Receipt；进入 uncertain 不抹掉这条已经发生的事实。 */
@@ -73,7 +73,7 @@ export function deliveryOutcomeFromStopReason(
  */
 export class DeliveryAttemptLedger {
   private readonly attempts = new Map<string, HarnessDeliveryAttemptState>();
-  private readonly latestByTurn = new Map<string, string>();
+  private readonly latestByInvocation = new Map<string, string>();
 
   constructor(events: Iterable<AnyEventEnvelope> = []) {
     for (const event of events) this.apply(event);
@@ -87,8 +87,8 @@ export class DeliveryAttemptLedger {
     return this.attempts.get(attemptId);
   }
 
-  forTurn(turnId: string): HarnessDeliveryAttemptState | undefined {
-    const attemptId = this.latestByTurn.get(turnId);
+  forInvocation(invocationId: string): HarnessDeliveryAttemptState | undefined {
+    const attemptId = this.latestByInvocation.get(invocationId);
     return attemptId ? this.attempts.get(attemptId) : undefined;
   }
 
@@ -99,19 +99,19 @@ export class DeliveryAttemptLedger {
 
     if (update.phase === "prepared") {
       if (existing) return existing;
-      if (!event.turnId || !event.harnessTargetId) {
+      if (!event.invocationId || !event.harnessTargetId) {
         throw new Error(
-          `delivery attempt ${update.attemptId} prepared without turnId or harnessTargetId`,
+          `delivery attempt ${update.attemptId} prepared without invocationId or harnessTargetId`,
         );
       }
       const state: HarnessDeliveryAttemptState = {
         attemptId: update.attemptId,
         inputId: update.inputId,
         launchSnapshot: update.launchSnapshot,
-        turnId: event.turnId,
+        invocationId: event.invocationId,
         harness: event.harness,
         harnessTargetId: event.harnessTargetId,
-        laneId: event.laneId,
+        contextId: event.contextId,
         harnessSessionId: event.harnessSessionId,
         phase: "prepared",
         accepted: false,
@@ -120,7 +120,7 @@ export class DeliveryAttemptLedger {
         lastSeq: event.seq,
       };
       this.attempts.set(state.attemptId, state);
-      this.latestByTurn.set(state.turnId, state.attemptId);
+      this.latestByInvocation.set(state.invocationId, state.attemptId);
       return state;
     }
 
@@ -175,7 +175,7 @@ type AttemptDraft = EventDraft<"_aide_delivery_attempt_update"> & {
   /** recovery 没有 live HarnessBinding，需沿用 prepared 时已持久化的执行归属。 */
   harness?: string;
   harnessTargetId?: string;
-  laneId?: string;
+  contextId?: string;
 };
 type AttemptEnvelope = EventEnvelope<"_aide_delivery_attempt_update">;
 
@@ -206,14 +206,14 @@ export class DeliveryAttempts<TContext> {
     return this.ledger.get(attemptId);
   }
 
-  forTurn(turnId: string): HarnessDeliveryAttemptState | undefined {
-    return this.ledger.forTurn(turnId);
+  forInvocation(invocationId: string): HarnessDeliveryAttemptState | undefined {
+    return this.ledger.forInvocation(invocationId);
   }
 
   prepare(
     context: TContext,
     opts: {
-      turnId: string;
+      invocationId: string;
       inputEventId?: string;
       inputId: string;
       launchSnapshot: HarnessLaunchSnapshot;
@@ -225,7 +225,7 @@ export class DeliveryAttempts<TContext> {
       kind: "_aide_delivery_attempt_update",
       parentEventId: opts.inputEventId,
       harnessSessionId: opts.harnessSessionId,
-      turnId: opts.turnId,
+      invocationId: opts.invocationId,
       payload: {
         attemptId,
         phase: "prepared",
@@ -292,16 +292,16 @@ export class DeliveryAttempts<TContext> {
   }
 
   /**
-   * Harness idle 是执行 owner 的终态 Receipt；Aide 合成 idle 只能结束本地 Turn，
+   * Harness idle 是执行 owner 的终态 Receipt；Aide 合成 idle 只能结束本地 Invocation，
    * 不能冒充远端已停止，已 dispatch 的 Attempt 因此转 uncertain 等待对账。
    */
   observeTerminal(
     context: TContext,
     terminal: EventEnvelope<"state_update">,
   ): void {
-    const turnId = terminal.turnId;
-    if (!turnId) return;
-    const attempt = this.ledger.forTurn(turnId);
+    const invocationId = terminal.invocationId;
+    if (!invocationId) return;
+    const attempt = this.ledger.forInvocation(invocationId);
     if (!attempt || attempt.phase === "finalized") return;
 
     if (terminal.source.type !== "harness") {
@@ -357,9 +357,9 @@ export class DeliveryAttempts<TContext> {
       parentEventId,
       harness: attempt.harness,
       harnessTargetId: attempt.harnessTargetId,
-      laneId: attempt.laneId,
+      contextId: attempt.contextId,
       harnessSessionId,
-      turnId: attempt.turnId,
+      invocationId: attempt.invocationId,
       payload: update,
     });
   }

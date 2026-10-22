@@ -34,7 +34,7 @@ src/
         registry.ts        # 资源类型归属注册
         printer.ts         # describe / summarize 调用与默认展示
       runner/              # 宿主侧 Supervisor / IPC Client / 注册代理
-    controller/            # HarnessInput / Queue / Turn 执行协调
+    controller/            # HarnessInvocation 执行、上下文互斥与审批
     harness/               # 模块配置契约与启动解析、Harness 注册、Adapter 与提供方协议
     store/                 # Session、Ledger 与执行投影
   runner/                  # Plugin 注册、Watch、队列、重试、Source 与 Reconcile
@@ -109,7 +109,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。Connector 声明访问能力，`plugins.<plugin>.sources` 声明观察策略；Personal 只启动显式配置的环境、Lark 与需求 Source。环境发现只读配置，不代表连通性、健康或操作授权。
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
-- ApplicationRuntime 组合插件 Manager 与 ExecutionService。资源、调度键和实例配置不依附 Session；CoreSession 已移除。执行日志和 Adapter 的旧格式只服务历史与原生恢复，不能据此引入入口 Session、内置资源或业务 Lane。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
+- ApplicationRuntime 组合插件 Manager 与 ExecutionService。资源、调度键和实例配置不依附 Session；CoreSession 已移除。底座没有 Lane / Turn；一次执行统一使用 HarnessInvocation，资源上下文保存原生绑定。旧日志只在读取边界转换，提供方原生标识留在 Adapter。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
 - ChannelDefinition / SourceDefinition 声明来源身份；绑定的提交入口补齐来源，Source 同时记录资源实例引用。Input.text 保存收到的事实或请求，不保存 Chief 的处理指令。Channel / Source 输入统一从 Input 投影，Output 独立承载回复与通知；展示通过应用装配的定义目录读取名称和图标，不解释 Source 的业务数据。
 - Input / Output 由 Personal 定义；底座不预注册业务资源或 Session / Turn / Target 投影。Input.sessionId 仅是来源话题线索。Personal Route 监听 Input，规则命中立即追加，未命中由独立 Route Batch Controller 调专用 Agent 分类；跨话题操作直接访问全局资源客户端。
 - Chief 对已有 Work 使用 append_input 投递事实或请求，输入队列与消费进度由 Work 持久保存；Task / Routine Reconcile 决定目标与执行状态，Chief 保留创建和删除资源的能力。
@@ -134,7 +134,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Chief 用 say 提出问题并结束本批；用户后续消息作为普通 Input。业务 ask / confirm / draft 与 Interaction 已移除；Harness 原生工具权限与 Hook 信任使用独立的 Approval，仍需明确决定；拒绝权限只拒绝本次请求，取消执行会中断该审批关联的运行。Task / Routine 的 waiting 是业务持久状态。
 - Channel / Source 提交 Input 后由 Route 统一分发，使用 appendConversationInput 保留消费凭据。Conversation 不设 pending 数量上限；Input 接收凭据在消费出队前持久化，重投不会重新处理。存储总量由 Host Resource 容量策略管理，batchSize 只决定调度粒度。
 - Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Output，不另建轨迹存储。
-- `npm run check` 验证类型与测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或 Lark 已验证。
+- `make lint` 执行 TypeScript 类型检查，`make test` 执行完整测试；`npm run check` 仍组合两项校验。`packages/plugin` 的 `make lint` 检查其公开契约，`make test` 委托根目录集成测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或 Lark 已验证。
 
 - Route/global 属于 Personal；普通资源身份承担调度与模型上下文，不创建内部 Session。默认 Controller 收队列和组批，具名 batch Controller 分类并投递。计划先持久化，目标固定 Conversation UID，完成后才出队；Default 只承接无合适目标的输入。模型没有业务工具，失败可退避重试；已投递事实依靠 Input 凭据避免重复消费。
 

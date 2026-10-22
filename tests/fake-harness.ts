@@ -1,5 +1,4 @@
 import { InputStore } from "../plugins/personal/input/store.ts";
-import type { InputSpec } from "../plugins/personal/input/model.ts";
 import { sameAddress } from "../src/address.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputSpec } from "../plugins/personal/output.ts";
@@ -26,9 +25,9 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
     let active: PromptInput | undefined;
     let conversationId: string | undefined;
     const finish = (turnId: string, stopReason: string) => {
-      if (active?.turnId !== turnId) return;
+      if (active?.invocationId !== turnId) return;
       active = undefined;
-      sink({ kind: "state_update", turnId, payload: { state: "idle", stopReason } });
+      sink({ kind: "state_update", invocationId: turnId, payload: { state: "idle", stopReason } });
     };
     return {
       harness: target.harness, capabilities: { prompt: {}, sync: { supported: true } },
@@ -45,7 +44,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
           : target.harness === "chief"
           ? agent.chief?.(prompt) ?? "你好"
           : agent.execute(data("Work: "))).then((result) => {
-          if (active?.turnId !== input.turnId) return;
+          if (active?.invocationId !== input.invocationId) return;
           // Simulate an explicit say tool call, not automatic delivery of finalText. Tests may disable it.
           if (target.harness === "chief" && agent.notify !== false && conversationId && typeof result === "string" && result) {
             const storage = ResourceStorage.open(home);
@@ -71,16 +70,16 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
               }
             }
           }
-          sink({ kind: "agent_message", turnId: input.turnId,
+          sink({ kind: "agent_message", invocationId: input.invocationId,
             payload: { messageId: randomUUID(), phase: "commentary", content: [{ type: "text", text: "我先检查当前工作。" }] } });
-          sink({ kind: "agent_message", turnId: input.turnId,
+          sink({ kind: "agent_message", invocationId: input.invocationId,
             payload: { messageId: randomUUID(), phase: "final", content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result) }] } });
-          finish(input.turnId, "end_turn");
-        }, () => finish(input.turnId, "error"));
+          finish(input.invocationId, "end_turn");
+        }, () => finish(input.invocationId, "error"));
         return { accepted: true, effective: "new_turn" };
       },
-      async cancel() { if (active) finish(active.turnId, "cancelled"); },
-      async close() { if (active) finish(active.turnId, "cancelled"); },
+      async cancel() { if (active) finish(active.invocationId, "cancelled"); },
+      async close() { if (active) finish(active.invocationId, "cancelled"); },
     };
   } };
 }

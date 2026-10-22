@@ -21,33 +21,9 @@ export interface CommandAlias {
   readonly input?: CommandInputShape;
 }
 
-export interface CommandSubmitInput {
-  readonly prompt: string;
-}
-
-/** A durable Queue admission, not evidence that the Harness completed the turn. */
-export interface CommandSubmitReceipt {
-  readonly messageId: string;
-  readonly queued: boolean;
-}
-
-/**
- * Host capabilities scoped to one live Command invocation. Like PluginVerbs,
- * this is a collection of typed actions, not a model-configuration abstraction.
- */
-export interface CommandVerbs {
-  /** @spec Submit a new turn on the invoking Target, queueing instead of steering while busy. */
-  submit(input: CommandSubmitInput): Promise<CommandSubmitReceipt>;
-  /** Change the invoking Target's defaults for subsequent turns. */
-  configureModel(input: { readonly model?: string; readonly effort?: string }): Promise<void>;
-}
-
 export interface CommandContext {
   readonly executionId: string;
   readonly command: CommandRef;
-  readonly target?: { readonly id: string; readonly harness: string };
-  readonly laneId?: string;
-  readonly verbs: CommandVerbs;
 }
 
 export interface CommandOption {
@@ -62,7 +38,7 @@ export interface CommandPickerSearch {
   readonly placeholder?: string;
 }
 
-/** Presentation only. Host effects must be awaited through CommandContext.verbs. */
+/** Presentation only. Commands do not own a Harness execution context. */
 export type CommandResult =
   | { readonly kind: "message"; readonly text: string }
   | {

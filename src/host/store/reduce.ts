@@ -25,7 +25,7 @@ import type {
   StopReason,
   ToolCallStatus,
   ToolEffect,
-  TurnSummary,
+  InvocationSummary,
   UsageUpdate,
 } from "../event/index.ts";
 import {
@@ -50,7 +50,7 @@ export interface ToolCallState {
   harness?: string;
   /** 产生该工具活动的具体配置目标。 */
   harnessTargetId?: string;
-  laneId?: string;
+  contextId?: string;
   title?: string;
   kind?: string;
   /** 只读/副作用声明，由 adapter 上报；缺省 = 未知，消费方保守处理。 */
@@ -60,7 +60,7 @@ export interface ToolCallState {
   locations: string[];
   rawInput?: unknown;
   rawOutput?: unknown;
-  turnId?: string;
+  invocationId?: string;
 }
 
 export interface PlanState extends PlanUpdate {
@@ -68,14 +68,14 @@ export interface PlanState extends PlanUpdate {
   harness?: string;
   /** 产生该计划的具体配置目标。 */
   harnessTargetId?: string;
-  laneId?: string;
+  contextId?: string;
 }
 
 export interface ProposedPlanState extends ProposedPlan {
   harness?: string;
   harnessTargetId?: string;
-  laneId?: string;
-  turnId?: string;
+  contextId?: string;
+  invocationId?: string;
   implementationTurnId?: string;
   implementationStartedAt?: string;
 }
@@ -86,8 +86,8 @@ export interface HarnessTaskState extends HarnessTaskUpdate {
   harness?: string;
   harnessTargetId?: string;
   harnessSessionId?: string;
-  laneId?: string;
-  turnId?: string;
+  contextId?: string;
+  invocationId?: string;
   /** First observed lifecycle edge; projection-only elapsed time survives replay. */
   startedAt?: number;
 }
@@ -112,7 +112,7 @@ export interface HarnessTargetState {
   configOptions: SessionConfigOption[];
 }
 
-export type LaneTargetState = HarnessTargetState;
+export type ContextTargetState = HarnessTargetState;
 
 /** Transcript read-model order: outputs on first observation, pending inputs only at consumption. */
 export interface TimelineItem {
@@ -120,12 +120,12 @@ export interface TimelineItem {
   id: string;
 }
 
-export interface TurnSummaryState extends TurnSummary {
+export interface InvocationSummaryState extends InvocationSummary {
   /** A late consumption fact can enrich the read model without rewriting the summary Event. */
   updatedSeq?: number;
   harness?: string;
   harnessTargetId?: string;
-  laneId?: string;
+  contextId?: string;
 }
 
 export interface HarnessInvocationState {
@@ -141,13 +141,10 @@ export interface HarnessInvocationState {
     | "cancelled"
     | "failed";
   harnessTargetId?: string;
-  requestedLaneId: string;
-  newLane: boolean;
-  laneId?: string;
+  contextId: string;
   messageId?: string;
-  turnId?: string;
   attemptId?: string;
-  result?: TurnSummaryState;
+  result?: InvocationSummaryState;
   cancellation?: HarnessInvocationCancelled;
   failure?: HarnessInvocationFailed;
 }
@@ -162,11 +159,11 @@ export interface UsageTotal {
 }
 
 /** 一个仍在运行的 turn 的投影状态（running 开界、本 turn idle 收界） */
-export interface ActiveTurnState {
-  turnId: string;
+export interface ActiveInvocationState {
+  invocationId: string;
   harness?: string;
   harnessTargetId?: string;
-  laneId?: string;
+  contextId?: string;
   /** 本 turn 当前非 idle 态（running / requires_action）：保真透传，不折叠成 running */
   state: Exclude<SessionRunState, "idle">;
   startedAt?: number;
@@ -182,9 +179,9 @@ export interface ApprovalState {
 
 export interface HarnessInputState {
   messageId: string;
-  turnId: string;
+  invocationId: string;
   harnessTargetId: string;
-  laneId: string;
+  contextId: string;
   harness?: string;
   status: HarnessInputStatus;
   delivery: "prompt" | "steer";
@@ -202,7 +199,7 @@ export interface SessionState {
    * running 且尚未收到本 turn idle 的 turns。并发 Turn 各占一席，
    * 任何一个收口只清自己——busy/流式/运行行等呈现一律从这里聚合派生。
    */
-  activeTurns: Map<string, ActiveTurnState>;
+  activeInvocations: Map<string, ActiveInvocationState>;
   /** per-turn 终态 stopReason：并发 turn 交错收口时按 turn 取值，不共享单槽 */
   stopReasons: Map<string, StopReason>;
   timeline: TimelineItem[];
@@ -227,33 +224,33 @@ export interface SessionState {
    * timeline 的一等公民（首见即入 timeline），无 target 也留痕、同一操作多次决策各自成条。
    */
   approvalReviews: Map<string, ApprovalReviewUpdate>;
-  /** Compact cards for non-user Turn initiation; raw events remain available by Lane. */
+  /** Compact cards for non-user Turn initiation; raw events retain their resource context. */
   harnessInvocations: Map<string, HarnessInvocationState>;
   usage: UsageTotal;
   /** Target-scoped 状态统一入口；Harness 类型不是状态实例的查询键。 */
   perTarget: Map<string, HarnessTargetState>;
-  /** Lane × Target 原生 binding 状态；同一 Lane 可以跨多个 Target 接力。 */
-  perLaneTarget: Map<string, LaneTargetState>;
+  /** Context × Target 原生 binding 状态。 */
+  perContextTarget: Map<string, ContextTargetState>;
   /** 最近一次结构化错误；willRetry 时 runState 仍应为 running（由事件源保证） */
-  lastError?: ErrorUpdate & { seq: number; laneId?: string };
+  lastError?: ErrorUpdate & { seq: number; contextId?: string };
   /**
    * 错误历史（append-only），同时进 timeline（id 为 `err_<seq>`）：
    * 启动失败、admission 错误、quota 耗尽等属于会话流的一部分，要按发生位置内联展示。
    */
-  errors: Map<string, ErrorUpdate & { seq: number; laneId?: string }>;
+  errors: Map<string, ErrorUpdate & { seq: number; contextId?: string }>;
   /**
    * 提示历史（append-only），同时进 timeline（id 为 `n_<seq>`）：打断标记、
    * harness warning 等属于会话流的一部分，要按发生位置内联展示。
    */
-  notices: Array<Notice & { seq: number; laneId?: string }>;
-  turnSummaries: TurnSummaryState[];
+  notices: Array<Notice & { seq: number; contextId?: string }>;
+  invocationSummaries: InvocationSummaryState[];
   lastSeq: number;
 }
 
 export function emptySessionState(): SessionState {
   return {
     runState: "idle",
-    activeTurns: new Map(),
+    activeInvocations: new Map(),
     stopReasons: new Map(),
     timeline: [],
     messages: new Map(),
@@ -275,10 +272,10 @@ export function emptySessionState(): SessionState {
       hasEstimated: false,
     },
     perTarget: new Map(),
-    perLaneTarget: new Map(),
+    perContextTarget: new Map(),
     errors: new Map(),
     notices: [],
-    turnSummaries: [],
+    invocationSummaries: [],
     lastSeq: 0,
   };
 }
@@ -297,7 +294,7 @@ function getOrCreateMessage(
   turnId?: string,
   harness?: string,
   harnessTargetId?: string,
-  laneId?: string,
+  contextId?: string,
   source?: EventSource,
   place = true,
 ): MessageState | undefined {
@@ -317,17 +314,17 @@ function getOrCreateMessage(
         };
     msg = {
       ...content,
-      turnId,
+      invocationId: turnId,
       harness,
       harnessTargetId,
-      laneId,
+      contextId,
     };
     state.messages.set(id, msg);
     if (place) placeMessage(state, id);
   } else {
     if (!msg.harness) msg.harness = harness;
     if (!msg.harnessTargetId) msg.harnessTargetId = harnessTargetId;
-    if (!msg.laneId) msg.laneId = laneId;
+    if (!msg.contextId) msg.contextId = contextId;
   }
   return msg;
 }
@@ -338,7 +335,7 @@ function getOrCreateToolCall(
   turnId?: string,
   harness?: string,
   harnessTargetId?: string,
-  laneId?: string,
+  contextId?: string,
 ): ToolCallState {
   let tc = state.toolCalls.get(id);
   if (!tc) {
@@ -346,11 +343,11 @@ function getOrCreateToolCall(
       toolCallId: id,
       harness,
       harnessTargetId,
-      laneId,
+      contextId,
       status: "pending",
       content: [],
       locations: [],
-      turnId,
+      invocationId: turnId,
     };
     state.toolCalls.set(id, tc);
     state.timeline.push({ type: "tool_call", id });
@@ -358,7 +355,7 @@ function getOrCreateToolCall(
     tc.harness = harness;
   }
   if (!tc.harnessTargetId) tc.harnessTargetId = harnessTargetId;
-  if (!tc.laneId) tc.laneId = laneId;
+  if (!tc.contextId) tc.contextId = contextId;
   return tc;
 }
 
@@ -381,10 +378,10 @@ function applyMessageUpsert(
     p.messageId,
     role,
     ev.ts,
-    pendingSteer ? undefined : ev.turnId,
+    pendingSteer ? undefined : ev.invocationId,
     ev.harness,
     eventTargetId(ev),
-    ev.laneId,
+    ev.contextId,
     ev.source,
     !pendingSteer,
   );
@@ -404,7 +401,7 @@ function applyMessageUpsert(
   // EventEnvelope<union> 不随 kind 自动收窄（非判别联合入参），手动断言 user_message
   if (ev.kind === "user_message" && msg.kind === "input") {
     const userMessage = (ev as EventEnvelope<"user_message">).payload;
-    if (!pendingSteer && msg.turnId === undefined) msg.turnId = ev.turnId;
+    if (!pendingSteer && msg.invocationId === undefined) msg.invocationId = ev.invocationId;
     const delivery = userMessage.delivery ?? input?.delivery;
     if (delivery !== undefined) msg.delivery = delivery;
     if (userMessage.deliveryState !== undefined) {
@@ -418,14 +415,14 @@ function applyMessageUpsert(
         });
       }
     }
-    if (delivery === "follow_up" && msg.turnId !== ev.turnId) {
+    if (delivery === "follow_up" && msg.invocationId !== ev.invocationId) {
       // Esc may reclaim an unapplied native steer without changing messageId.
       // Its eventual prompt belongs to the new Turn and should appear after the
       // interrupted Turn, not at the hidden pending steer's original position.
-      msg.turnId = ev.turnId;
+      msg.invocationId = ev.invocationId;
       msg.harness = ev.harness;
       msg.harnessTargetId = eventTargetId(ev);
-      msg.laneId = ev.laneId;
+      msg.contextId = ev.contextId;
       const timelineIndex = state.timeline.findIndex(
         (item) => item.type === "message" && item.id === msg.messageId,
       );
@@ -435,7 +432,7 @@ function applyMessageUpsert(
       }
     }
     if (!pendingSteer) placeMessage(state, msg.messageId);
-    if (msg.consumedAt !== undefined) refreshConsumedSummary(state, msg.turnId, ev.seq);
+    if (msg.consumedAt !== undefined) refreshConsumedSummary(state, msg.invocationId, ev.seq);
   }
   if (msg.kind === "output") msg.streamStatus = "completed";
 }
@@ -453,10 +450,10 @@ function applyMessageChunk(
     p.messageId,
     role,
     ev.ts,
-    pendingSteer ? undefined : ev.turnId,
+    pendingSteer ? undefined : ev.invocationId,
     ev.harness,
     eventTargetId(ev),
-    ev.laneId,
+    ev.contextId,
     ev.source,
     !pendingSteer,
   );
@@ -467,10 +464,10 @@ function applyMessageChunk(
   if (msg.kind === "output") msg.streamStatus = "in_progress";
   else {
     if (!pendingSteer) {
-      msg.turnId ??= ev.turnId;
+      msg.invocationId ??= ev.invocationId;
       placeMessage(state, msg.messageId);
     }
-    if (msg.consumedAt !== undefined) refreshConsumedSummary(state, msg.turnId, ev.seq);
+    if (msg.consumedAt !== undefined) refreshConsumedSummary(state, msg.invocationId, ev.seq);
   }
 }
 
@@ -485,14 +482,14 @@ function applyHarnessInputUpdate(
   // Transcript position or an executed Turn. Later receipts only add facts.
   const known = getMessage(state, p.messageId);
   const message = getOrCreateMessage(state, p.messageId, "user", ev.ts, undefined, ev.harness,
-    p.harnessTargetId, p.laneId, p.source, false);
+    p.harnessTargetId, p.contextId, p.source, false);
   if (!message) return;
   // Queue transitions update execution state, never rewrite an existing Message.
   if (!known) message.content = [...p.blocks];
   const existing = state.harnessInputs.get(p.messageId);
   if (existing) {
     existing.status = status;
-    existing.turnId = p.turnId;
+    existing.invocationId = p.invocationId;
     existing.delivery = p.delivery;
     if (p.blocks.length > 0) existing.blocks = [...p.blocks];
     return;
@@ -500,9 +497,9 @@ function applyHarnessInputUpdate(
   const deliveryState = message.kind === "input" ? message.deliveryState : undefined;
   state.harnessInputs.set(p.messageId, {
     messageId: p.messageId,
-    turnId: p.turnId,
+    invocationId: p.invocationId,
     harnessTargetId: p.harnessTargetId,
-    laneId: p.laneId,
+    contextId: p.contextId,
     ...(ev.harness === undefined ? {} : { harness: ev.harness }),
     status,
     delivery: p.delivery,
@@ -522,10 +519,10 @@ function applyToolCallUpdate(state: SessionState, ev: EventEnvelope<"tool_call_u
   const tc = getOrCreateToolCall(
     state,
     p.toolCallId,
-    ev.turnId,
+    ev.invocationId,
     ev.harness,
     eventTargetId(ev),
-    ev.laneId,
+    ev.contextId,
   );
   if (p.title !== undefined) tc.title = p.title === null ? undefined : p.title;
   if (p.kind !== undefined) tc.kind = p.kind === null ? undefined : p.kind;
@@ -540,7 +537,7 @@ function applyToolCallUpdate(state: SessionState, ev: EventEnvelope<"tool_call_u
 /** 该 turn 是否还有未决 Approval——per-turn requires_action 的派生依据。 */
 function hasPendingBlocking(state: SessionState, turnId: string): boolean {
   for (const approval of state.approvals.values()) {
-    if (approval.request.turnId === turnId && approval.request.status === "pending") return true;
+    if (approval.request.invocationId === turnId && approval.request.status === "pending") return true;
   }
   return false;
 }
@@ -552,8 +549,8 @@ function hasPendingBlocking(state: SessionState, turnId: string): boolean {
  */
 function deriveRunState(state: SessionState): SessionRunState {
   if ([...state.approvals.values()].some((approval) => approval.request.status === "pending")) return "requires_action";
-  if (state.activeTurns.size === 0) return "idle";
-  return [...state.activeTurns.values()].some((turn) => turn.state === "requires_action")
+  if (state.activeInvocations.size === 0) return "idle";
+  return [...state.activeInvocations.values()].some((turn) => turn.state === "requires_action")
     ? "requires_action"
     : "running";
 }
@@ -564,7 +561,7 @@ function removePlan(state: SessionState, planId: string): void {
     const entry = state.timeline[index];
     if (entry?.type === "plan" && entry.id === planId) state.timeline.splice(index, 1);
   }
-  for (const scope of [...state.perTarget.values(), ...state.perLaneTarget.values()]) {
+  for (const scope of [...state.perTarget.values(), ...state.perContextTarget.values()]) {
     if (scope.lastPlanId === planId) scope.lastPlanId = undefined;
   }
 }
@@ -576,34 +573,34 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       const p = ev.payload;
       if (p.stopReason !== undefined) {
         state.lastStopReason = p.stopReason;
-        if (ev.turnId) state.stopReasons.set(ev.turnId, p.stopReason);
+        if (ev.invocationId) state.stopReasons.set(ev.invocationId, p.stopReason);
       }
       if (p.state === "idle") {
-        if (ev.turnId) {
+        if (ev.invocationId) {
           // 只收本 turn 的口：并发 Turn 互不误清
-          state.activeTurns.delete(ev.turnId);
+          state.activeInvocations.delete(ev.invocationId);
         } else {
           // 向后兼容：旧 jsonl / 旧版 crash recovery 的无 turnId idle 是全局收口语义
-          state.activeTurns.clear();
+          state.activeInvocations.clear();
         }
-      } else if (ev.turnId) {
+      } else if (ev.invocationId) {
         // 非 idle 态（running / requires_action）：turn 在场。startedAt
         // 以首个 running 为准，重复 running（reconnect 重放）不重置起点；
         // state 保真透传（requires_action ↔ running 可来回迁移），但 pending blocking
         // request 在场时钉在 requires_action——重放的 running 不得掩盖未决审批卡片。
-        const existing = state.activeTurns.get(ev.turnId);
+        const existing = state.activeInvocations.get(ev.invocationId);
         if (!existing) {
           // 新 turn 首见即作废旧 plan 的 pin：未完成条目永存是常态（任务中断/未逐条
           // TaskUpdate），不清会让上一段工作的 plan 在每个后续 turn 里借尸还魂；
           // 本 turn 若真的更新 plan，plan_update 会重新 pin。
           for (const scope of executionScopes(state, ev)) scope.lastPlanId = undefined;
         }
-        state.activeTurns.set(ev.turnId, {
-          turnId: ev.turnId,
+        state.activeInvocations.set(ev.invocationId, {
+          invocationId: ev.invocationId,
           harness: ev.harness ?? existing?.harness,
           harnessTargetId: eventTargetId(ev) ?? existing?.harnessTargetId,
-          laneId: ev.laneId ?? existing?.laneId,
-          state: hasPendingBlocking(state, ev.turnId) ? "requires_action" : p.state,
+          contextId: ev.contextId ?? existing?.contextId,
+          state: hasPendingBlocking(state, ev.invocationId) ? "requires_action" : p.state,
           startedAt: existing?.startedAt ?? (ev.ts ? Date.parse(ev.ts) || undefined : undefined),
           phase: existing?.phase,
         });
@@ -645,10 +642,10 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       const tc = getOrCreateToolCall(
         state,
         p.toolCallId,
-        ev.turnId,
+        ev.invocationId,
         ev.harness,
         eventTargetId(ev),
-        ev.laneId,
+        ev.contextId,
       );
       tc.content.push(p.content);
       break;
@@ -663,7 +660,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
         entries: [...p.entries],
         harness,
         harnessTargetId: eventTargetId(ev) ?? existing?.harnessTargetId,
-        laneId: ev.laneId ?? existing?.laneId,
+        contextId: ev.contextId ?? existing?.contextId,
       });
       for (const scope of executionScopes(state, ev)) scope.lastPlanId = p.planId;
       break;
@@ -680,8 +677,8 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
         ...p,
         harness: ev.harness,
         harnessTargetId: eventTargetId(ev),
-        laneId: ev.laneId,
-        turnId: ev.turnId,
+        contextId: ev.contextId,
+        invocationId: ev.invocationId,
       });
       break;
     }
@@ -697,7 +694,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       const harnessTargetId = eventTargetId(ev);
       const taskKey = harnessTaskKey({
         taskId: p.taskId,
-        laneId: ev.laneId,
+        contextId: ev.contextId,
         harnessTargetId,
         harnessSessionId: ev.harnessSessionId,
       });
@@ -721,8 +718,8 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       next.harness = ev.harness ?? existing?.harness;
       next.harnessTargetId = harnessTargetId ?? existing?.harnessTargetId;
       next.harnessSessionId = ev.harnessSessionId ?? existing?.harnessSessionId;
-      next.laneId = ev.laneId ?? existing?.laneId;
-      next.turnId = ev.turnId ?? existing?.turnId;
+      next.contextId = ev.contextId ?? existing?.contextId;
+      next.invocationId = ev.invocationId ?? existing?.invocationId;
       state.tasks.set(taskKey, next);
       break;
     }
@@ -740,7 +737,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
         requestedEventId: ev.eventId,
       });
       placeMessage(state, request.messageId);
-      flagRequiresAction(state, ev.turnId);
+      flagRequiresAction(state, ev.invocationId);
       break;
     }
     case "approval.answered": {
@@ -756,7 +753,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       existing.request.responseMessageId = response.messageId;
       state.inputResponses.set(response.messageId, response);
       placeMessage(state, response.messageId);
-      unflagRequiresAction(state, existing.request.turnId);
+      unflagRequiresAction(state, existing.request.invocationId);
       break;
     }
     case "approval.cancelled": {
@@ -767,7 +764,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
         reason: ev.payload.reason,
         ...(ev.payload.detail === undefined ? {} : { detail: ev.payload.detail }),
       };
-      unflagRequiresAction(state, existing.request.turnId);
+      unflagRequiresAction(state, existing.request.invocationId);
       break;
     }
     case "approval_review_update": {
@@ -835,8 +832,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
         pluginInstanceId:
           ev.source.type === "plugin" ? ev.source.pluginInstanceId : undefined,
         phase: "queued",
-        requestedLaneId: ev.payload.laneId,
-        newLane: ev.payload.newLane,
+        contextId: ev.payload.contextId,
         harnessTargetId: ev.payload.harnessTargetId,
       });
       state.timeline.push({
@@ -850,9 +846,9 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       if (!request) break;
       request.phase = "queued";
       request.harnessTargetId = ev.payload.harnessTargetId;
-      request.laneId = ev.payload.laneId;
+      request.contextId = ev.payload.contextId;
       request.messageId = ev.payload.messageId;
-      request.turnId = ev.payload.turnId;
+      request.invocationId = ev.payload.invocationId;
       break;
     }
     case "_aide_harness_invocation_cancelled": {
@@ -879,7 +875,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       const errorEntry = {
         ...ev.payload,
         seq: ev.seq,
-        ...(ev.laneId ? { laneId: ev.laneId } : {}),
+        ...(ev.contextId ? { contextId: ev.contextId } : {}),
       };
       state.lastError = errorEntry;
       // 将错误加入 timeline 和 errors map
@@ -892,7 +888,7 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       const p = ev.payload;
       // per-turn 运行阶段；无 turnId 或未命中活跃 turn 时丢弃——phase 是短寿命
       // 短寿命装饰信息；turn 已收口后的迟到 phase 没有呈现意义。
-      const turn = ev.turnId ? state.activeTurns.get(ev.turnId) : undefined;
+      const turn = ev.invocationId ? state.activeInvocations.get(ev.invocationId) : undefined;
       if (turn) turn.phase = p.phase === null ? undefined : { phase: p.phase, title: p.title };
       break;
     }
@@ -900,20 +896,20 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       state.notices.push({
         ...ev.payload,
         seq: ev.seq,
-        ...(ev.laneId ? { laneId: ev.laneId } : {}),
+        ...(ev.contextId ? { contextId: ev.contextId } : {}),
       });
       state.timeline.push({ type: "notice", id: `n_${ev.seq}` });
       break;
-    case "_aide_turn_summary": {
-      const summary: TurnSummaryState = {
+    case "_aide_invocation_summary": {
+      const summary: InvocationSummaryState = {
         ...ev.payload,
         harness: ev.harness,
         harnessTargetId: ev.harnessTargetId,
-        laneId: ev.laneId,
+        contextId: ev.contextId,
       };
-      state.turnSummaries.push(summary);
+      state.invocationSummaries.push(summary);
       const request = [...state.harnessInvocations.values()].find(
-        (candidate) => candidate.turnId === ev.payload.turnId,
+        (candidate) => candidate.invocationId === ev.payload.invocationId,
       );
       if (
         request && request.phase !== "cancelled" && request.phase !== "failed"
@@ -960,26 +956,26 @@ function targetScoped(
   return scoped;
 }
 
-export function laneTargetStateKey(laneId: string, harnessTargetId: string): string {
-  return `${laneId}\0${harnessTargetId}`;
+export function contextTargetStateKey(contextId: string, harnessTargetId: string): string {
+  return `${contextId}\0${harnessTargetId}`;
 }
 
 function laneTargetScoped(
   state: SessionState,
-  ev: Pick<AnyEventEnvelope, "harnessTargetId" | "laneId" | "harness">,
-): LaneTargetState | undefined {
-  const laneId = ev.laneId;
+  ev: Pick<AnyEventEnvelope, "harnessTargetId" | "contextId" | "harness">,
+): ContextTargetState | undefined {
+  const contextId = ev.contextId;
   const targetId = ev.harnessTargetId;
-  if (!laneId || !targetId) return undefined;
-  const key = laneTargetStateKey(laneId, targetId);
-  let scoped = state.perLaneTarget.get(key);
+  if (!contextId || !targetId) return undefined;
+  const key = contextTargetStateKey(contextId, targetId);
+  let scoped = state.perContextTarget.get(key);
   if (!scoped) {
     scoped = {
       harness: ev.harness,
       availableCommands: [],
       configOptions: [],
     };
-    state.perLaneTarget.set(key, scoped);
+    state.perContextTarget.set(key, scoped);
   } else if (!scoped.harness && ev.harness) {
     scoped.harness = ev.harness;
   }
@@ -988,16 +984,16 @@ function laneTargetScoped(
 
 function executionScopes(
   state: SessionState,
-  ev: Pick<AnyEventEnvelope, "harnessTargetId" | "laneId" | "harness">,
-): Array<HarnessTargetState | LaneTargetState> {
+  ev: Pick<AnyEventEnvelope, "harnessTargetId" | "contextId" | "harness">,
+): Array<HarnessTargetState | ContextTargetState> {
   return [targetScoped(state, ev), laneTargetScoped(state, ev)].filter(
-    (scope): scope is HarnessTargetState | LaneTargetState => scope !== undefined,
+    (scope): scope is HarnessTargetState | ContextTargetState => scope !== undefined,
   );
 }
 
 /** request 到场：所属 turn 派生为 requires_action（blocking request 挂起该 turn） */
 function flagRequiresAction(state: SessionState, turnId: string | undefined): void {
-  const turn = turnId ? state.activeTurns.get(turnId) : undefined;
+  const turn = turnId ? state.activeInvocations.get(turnId) : undefined;
   if (turn) turn.state = "requires_action";
 }
 
@@ -1006,7 +1002,7 @@ function flagRequiresAction(state: SessionState, turnId: string | undefined): vo
  * 同 turn 并发多个审批时，应答一个不能提前撤掉 requires_action。
  */
 function unflagRequiresAction(state: SessionState, turnId: string | undefined): void {
-  const turn = turnId ? state.activeTurns.get(turnId) : undefined;
+  const turn = turnId ? state.activeInvocations.get(turnId) : undefined;
   if (turn && turn.state === "requires_action" && !hasPendingBlocking(state, turnId!)) {
     turn.state = "running";
   }
@@ -1032,7 +1028,7 @@ export function reduceEvents(events: Iterable<AnyEventEnvelope>): SessionState {
  * 并发 turn 下"别人 idle"不能把自己的流式状态打断。turnId 缺失（旧数据 /
  * 非 turn 事件）时回退"会话存在任一运行 turn"。
  */
-export function isTurnRunning(state: SessionState, turnId: string | undefined): boolean {
-  if (turnId === undefined) return state.activeTurns.size > 0;
-  return state.activeTurns.has(turnId);
+export function isInvocationRunning(state: SessionState, turnId: string | undefined): boolean {
+  if (turnId === undefined) return state.activeInvocations.size > 0;
+  return state.activeInvocations.has(turnId);
 }

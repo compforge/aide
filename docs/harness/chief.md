@@ -10,7 +10,7 @@ Chief 使用独立的 `chief` Harness 身份，Agent 位于 `agents/chief/`；�
 
 Chief Agent 拥有 Personal 提示词和工具，负责具体判断。Chief 的 Input Reconcile 负责话题归位；Conversation Reconcile 响应新 Input 与定时回顾，固定 Batch 上下文；Batch Reconcile 调用 Harness，say 保存沟通内容，用户答复进入后续 Batch。Task / Routine 的持久状态与 Reconcile 属于 Personal，Agent 通过工具访问，不能直接宣告资源完成。
 
-Personal 在所属 Session 内为每个 Conversation 绑定固定 Lane、Chief Target 和 WorkService，并提供问答与 Connector 工具。宿主装配使用 `chiefSession` 工厂；缺少绑定时创建 Chief Harness 会报错，不会降级为通用 Pi。
+Personal 按 Conversation UID 与 Controller 为执行上下文绑定 Chief Target 和 WorkService，并提供问答与 Connector 工具。宿主装配使用 `chiefSession` 工厂；缺少绑定时创建 Chief Harness 会报错，不会降级为通用 Pi。
 
 ```ts
 const adapter = createHarnessAdapter(
@@ -23,7 +23,7 @@ const adapter = createHarnessAdapter(
 Chief 的模型选择与能力包配置位于 `harnesses.chief`，完整来源、优先级和同步流程见 [配置](../configuration.md)。
 启动装配解析模型定义、认证来源和能力包，并将有效配置注入 `chiefSession`；Personal 只绑定业务工具。显式 model 覆盖 Pi 定义，缺省规则见配置文档。Task / Routine 按 `defaultHarness` 选择执行实现，使用对应的 Harness 配置。
 Chief 加载已同步的声明包中的 skills，以及内置 Hermes 扩展提供的记忆工具与自维护 skills；不继承用户或项目的自动扩展、skill 包发现。角色规则与 Work 工具仍由代码绑定。
-原生会话由 Pi SDK 存放在自己的默认目录，与通用 Pi 一样；Chief 角色通过 scope 区分，不靠另建 chief-sessions 目录区分。每个 Batch 在固定 Lane × Target 上创建新的原生上下文，显式注入上一批交接材料与本批输入；需要用户信息时通过 say 提问并结束执行，后续 Input 进入新 Batch。原生恢复范围绑定 conversationId，不能把另一会话或通用 Pi 的会话文件当成当前上下文。
+原生会话由 Pi SDK 存放在自己的默认目录，与通用 Pi 一样；Chief 角色通过 scope 区分，不靠另建 chief-sessions 目录区分。每个 Batch 在资源执行上下文与 Target 上创建新的原生上下文，显式注入上一批交接材料与本批输入；需要用户信息时通过 say 提问并结束执行，后续 Input 进入新 Batch。原生恢复范围绑定 conversationId，不能把另一会话或通用 Pi 的会话文件当成当前上下文。
 
 ## 主动判断与沟通
 
@@ -68,7 +68,7 @@ sent 提供本人表达的线索，仍需辨别引用与代发；received 和 ob
 
 人物资料的唯一存储来源是 Person CRD，Web Persons 提供编辑入口。人物维护使用专用工具，普通文件工具和 Hermes 不承担这份资料的维护。
 
-每个 Batch 使用固定 Lane 和新的原生 Pi 会话，输入材料在执行前固定。完成后保留有界交接上下文，下一批继承后替换旧 Batch；文本超预算时分段压缩并保存检查点。每次 freshContext 都持久化历史边界，防止 catch-up 恢复已遗忘内容。摘要调用关闭业务工具与记忆扩展，不能产生外部动作。长期记忆由 Hermes 维护，重建原生会话不会清空记忆。Task / Routine 仍是工作状态的权威来源。
+每个 Batch 使用固定资源执行上下文和新的原生 Pi 会话，输入材料在执行前固定。完成后保留有界交接上下文，下一批继承后替换旧 Batch；文本超预算时分段压缩并保存检查点。每次 freshContext 都持久化历史边界，防止 catch-up 恢复已遗忘内容。摘要调用关闭业务工具与记忆扩展，不能产生外部动作。长期记忆由 Hermes 维护，重建原生会话不会清空记忆。Task / Routine 仍是工作状态的权威来源。
 
 Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Conversation 摘要用于控制话题窗口，与 Hermes 的长期记忆维护分别管理；Personal 不直接调用模型做记忆维护。
 
@@ -101,9 +101,9 @@ Chief 使用上游记忆工具维护有长期价值的信息，保留足以理�
 
 ### 扩展生命周期
 
-PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_start`；Pi 在执行中驱动提示词、工具和压缩钩子；close 先取消正在执行的 Turn，再等待 `session_shutdown`，最后 dispose 原生会话。这样 Hermes 能完成整理与数据库清理。扩展加载或启动失败会阻止本次 Harness open，并记录错误；运行期钩子错误通过 `pi.extension` 日志报告。
+PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_start`；Pi 在执行中驱动提示词、工具和压缩钩子；close 先取消正在执行的调用，再等待 `session_shutdown`，最后 dispose 原生会话。这样 Hermes 能完成整理与数据库清理。扩展加载或启动失败会阻止本次 Harness open，并记录错误；运行期钩子错误通过 `pi.extension` 日志报告。
 
-自动学习和压缩/退出整理可能产生额外模型调用与等待，遵循 Hermes 自己的策略、期限和失败处理。这些内部维护调用不作为 Personal Work 或独立 Aide Turn 展示。
+自动学习和压缩/退出整理可能产生额外模型调用与等待，遵循 Hermes 自己的策略、期限和失败处理。这些内部维护调用不作为 Personal Work 或独立 Aide HarnessInvocation 展示。
 
 ## 验证
 
@@ -116,6 +116,6 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 
 ## 输入路由
 
-ReconcileInput 不调用 Harness，也不注册单独的路由 Target 或 Lane。没有任何 Conversation 时创建并追加后结束；已有会话时，先追加到存在的默认联络处，再按确定性规则创建和关联具体会话。每个确定的会话立即接收 Input，追加幂等，无需等待完整路由计划。
+Personal 的全局 Route 收集 Input，规则命中立即追加到对应 Conversation；未命中时组批，由专用 Route Agent 根据会话摘要分类。分发计划先持久化，再按目标 UID 幂等投递；一个 Input 可以关联多个 Conversation，没有合适目标时才回落到 Default。Chief 只处理所属 Conversation 的批次，不承担全局分发。
 
 目标 Conversation 的 Chief 沿用 Batch 上下文交接和记忆机制，独立判断静默、通知、询问或推进工作。Route 将无法归入已有话题的 Input 交给默认联络处；默认标记不构成执行授权，也不合并其它会话的上下文。

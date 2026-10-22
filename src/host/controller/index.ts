@@ -1,16 +1,10 @@
 import {
   isContextSynchronizable,
-  isContextCompactable,
-  type AdapterCapabilities,
   type HarnessAdapter,
-  type ApprovalRoute,
-  type EffortOption,
   type ApprovalContext,
   type OpenApproval,
-  type ModelOption,
   type NativeEventSink,
   type PromptInput,
-  type SendTurnReceipt,
 } from "../harness/adapter.ts";
 import { buildTargetCatchUpContext } from "../context/mention.ts";
 import {
@@ -21,46 +15,36 @@ import {
 } from "../context/delivery.ts";
 import type { LogSink } from "../logging.ts";
 import { logError } from "../logging.ts";
-import { newId } from "../event/ids.ts";
 import {
   type AnyEventDraft,
   type AnyEventEnvelope,
   type AnyNewEvent,
   type EventEnvelope,
   type EventSource,
-  type ConfigValue,
   type PromptBlock,
-  type SessionConfigOption,
   type StopReason,
 } from "../event/index.ts";
 import { HarnessBinding } from "../harness/binding.ts";
-import type { HarnessTarget, HarnessTargetProbeResult } from "../harness/target.ts";
-import type { TextgenCandidate } from "../harness/textgen.ts";
-import { maybeGenerateSessionTitle } from "../session/title.ts";
+import type { HarnessTarget } from "../harness/target.ts";
 import type {
   ApprovalDraft,
   ApprovalResult,
 } from "../approval/types.ts";
-import { MAIN_LANE_ID } from "../lane.ts";
 import type { SessionHandle } from "../store/store.ts";
 import { DeliveryAttempts } from "./attempt.ts";
 import {
   harnessInputUpdate,
   harnessInputSnapshot,
-  normalizeHarnessInputStatus,
   type HarnessInputSource,
   type HarnessInputSnapshot,
 } from "../harness/input.ts";
 import {
-  Queue,
-  type QueueSubmission,
+  InvocationQueue,
   type QueueItem,
   type QueueRun,
-  type QueueSnapshot,
   type QueueOutcome,
 } from "../queue.ts";
 import { HarnessApprovalContinuations } from "../approval/harness.ts";
-import { TurnRegistry, type TurnRecord } from "../turn.ts";
 import {
   HarnessHookCoordinator,
   type HarnessHookGateway,
@@ -79,16 +63,13 @@ export type {
 } from "../queue.ts";
 
 export interface HarnessInvocationInput {
-  readonly harnessInvocationId: string;
   readonly pluginInstanceId: string;
   readonly harnessTargetId: string;
-  readonly laneId: string;
-  readonly newLane: boolean;
+  readonly contextId: string;
   readonly freshContext?: boolean;
-  readonly parentLaneId?: string;
   readonly source: HarnessInputSource;
   readonly messageId: string;
-  readonly turnId: string;
+  readonly invocationId: string;
   readonly blocks: PromptBlock[];
 }
 
@@ -103,42 +84,6 @@ function eventSourceOf(source: HarnessInputSource): EventSource {
       };
 }
 
-/**
- * Control：与 Input / Approval result 并列的第三种用户信号
- * 不携带内容、不到达 model——是对 turn **生命周期**的命令，必须 out-of-band 够到正在跑的
- * turn（不进 queue，否则会排在它要打断的 turn 后面而死锁）。当前唯一 kind 是 `interrupt`
- * （Esc）；pause / abort-bash / shutdown 等作为新 kind 加入时按 kernel 演进规则处理。
- */
-export type Control = { kind: "interrupt" };
-
-/**
- * 用户 sendTurn 的调度结果（workflow：requested 与 effective 分开呈现）：
- * - `steer`：Adapter 已承担向当前 turn 投递的责任；原生队列是否已应用
- *   由 HarnessInput 的 deliveryOutcome（input_delivery_update 回执）继续报告；
- * - `new_turn`：已进入主 Lane Queue；`queued` 说明它是否在等待当前
- *   turn。outcome 在该 turn 完成/被撤回时 resolve。
- */
-export type SendTurnOutcome =
-  | { effective: "steer" }
-  | {
-      effective: "new_turn";
-      queued: boolean;
-      outcome: Promise<QueueOutcome>;
-      reason?: string;
-    };
-
-export interface SendTurnOptions {
-  /** Configuration-following input must not steer a turn using the previous settings. */
-  readonly followUp?: boolean;
-  readonly sourceProposedPlanId?: string;
-  /** Host-prepared intake identity used to correlate human Hook stages with the Input. */
-  readonly identity?: { readonly messageId: string; readonly turnId: string };
-  /** Durable ViewInput or Plugin fact that caused this Turn. */
-  readonly parentEventId?: string;
-  /** Called synchronously after the Input is visible in the Core queue. */
-  readonly onEnqueued?: () => void;
-}
-
 /** Controller 注入给 Adapter 的 Core ports；原生 Harness verb 只能经这些边界 lowering。 */
 export interface HarnessAdapterPorts {
   openApproval: OpenApproval;
@@ -146,7 +91,7 @@ export interface HarnessAdapterPorts {
   nativeEvent: NativeEventSink;
 }
 
-export interface ControllerOptions {
+export interface InvocationExecutorOptions {
   session: SessionHandle;
   mentionBudgetChars: number;
   /** 新 session 未选过 model 时使用的 HarnessTarget 级持久偏好。 */
@@ -159,20 +104,6 @@ export interface ControllerOptions {
   hooks?: HarnessHookGateway;
   /** HarnessTarget identity 的唯一 owner；未知 id 必须返回 undefined，不能反推 Harness。 */
   resolveTarget(harnessTargetId: string): HarnessTarget | undefined;
-  /** 不创建 HarnessSession 的 Target 级只读发现；缺省时兼容回落到 live binding。 */
-  probeTarget?: (target: HarnessTarget, cwd: string) => Promise<HarnessTargetProbeResult>;
-  /**
-   * textgen 旁路生成（session 标题）的降级链候选 Target。当前 turn 的 target 自动前置
-   * （优先沿用用户刚才选择的 provider），未声明 textgen capability 的由路由器跳过。
-   * 缺省 = 只用当前 target，不跨 harness 降级。
-   */
-  textgenTargets?: readonly HarnessTarget[];
-  /** 首选 textgen harness（canonical id 或 target id）；缺省 = 当前 turn 的 harness 优先。 */
-  textgenPrefer?: string;
-  /** 按 canonical harness id 覆盖 textgen 模型（ID 方言由各 adapter 收口）。 */
-  textgenModels?: Record<string, string>;
-  /** Session 标题异步生成并落盘后的通知；终端等宿主投影可据此同步标题。 */
-  onSessionTitleChange?: () => void;
   onChange?: () => void;
   /**
    * cancel 后等待 harness 确认终态的宽限期。到期仍无终态则合成 terminal error 并
@@ -180,36 +111,25 @@ export interface ControllerOptions {
    * 合法的长任务不应被误杀）。
    */
   cancelGraceMs?: number;
-  /** Maximum concurrently running side Lanes. */
-  sideLaneConcurrency?: number;
+  /** Maximum concurrently running resource contexts. */
+  maxConcurrency?: number;
 }
 
 const DEFAULT_CANCEL_GRACE_MS = 10_000;
-const DEFAULT_SIDE_LANE_CONCURRENCY = 4;
+const DEFAULT_EXECUTION_CONCURRENCY = 4;
 
 /** 打断标记文案：cancelled 终态时落一条 notice，TUI 时间线醒目提示（对齐 Codex 的体验） */
 export const INTERRUPTED_NOTICE_TITLE = "Conversation interrupted — tell the agent what to do differently";
 
-/**
- * 一个 AideSession 的唯一 turn 编排入口：统一负责 harness 恢复、上下文追平与 Lane 调度。
- * UI 只提交输入和消费 AideSession Projection，不能分别维护
- * 各 harness 的并发状态。
- *
- * Lane 与 Turn 都只是归属边界：Lane 表达长期并发通道，Turn 表达一次 Harness loop
- * 的 start/end。Queue 负责调度，Harness 负责执行，Controller 负责协调；Turn 本身不干活。
- *
- * 生命周期由 state event 驱动（workflow）：adapter.sendTurn 只确认接收，turn 的
- * 完成以 `state_update(idle)` 为准，经 finalize 按 aide turn id 幂等收口——
- * 重复/迟到的物理终态（reconnect、transport race）不会二次终结，也不会关闭更新的 turn。
- *
- * Event Ledger 只保留可回放的事实历史；TurnRegistry 只是按 turnId 建立的运行期 scope 索引。
+/** @spec Execute admitted Harness invocations, serial per resource context and concurrent across contexts.
+ * @why Resource controllers own business scheduling; this executor only protects native bindings and records execution facts.
+ * @link docs/kernel.md
  */
-export class Controller {
-  /** Lane × HarnessTarget → live binding. */
+export class InvocationExecutor {
+  /** Resource context × HarnessTarget → live binding. */
   private readonly bindings = new Map<string, HarnessBinding>();
-  /** Every Queue is permanently bound to one Lane. */
-  private readonly queues = new Map<string, Queue<HarnessBinding>>();
-  private readonly turns = new TurnRegistry<HarnessBinding>();
+  /** Every Queue is permanently bound to one resource context. */
+  private readonly queues = new Map<string, InvocationQueue<HarnessBinding>>();
   private readonly deliveryAttempts: DeliveryAttempts<HarnessBinding>;
   private readonly contextDeliveries: ContextDeliveries<HarnessBinding>;
   private readonly harnessApprovals: HarnessApprovalContinuations<HarnessBinding>;
@@ -217,20 +137,18 @@ export class Controller {
   private readonly harnessHooks: HarnessHookCoordinator;
   private lifecycleState: "open" | "closing" | "closed" = "open";
   private closePromise?: Promise<void>;
-  private drainingMain = false;
-  private mainDrainPromise?: Promise<void>;
-  private activeSideRuns = 0;
-  private readonly sideRunPromises = new Set<Promise<void>>();
+  private activeCount = 0;
+  private readonly running = new Set<Promise<void>>();
   /** 已开始处理的 Queue item 从 Harness setup 起即对 UI 可见。 */
   private readonly processing = new Map<
     string,
     { target: HarnessTarget; startedAt: number }
   >();
 
-  constructor(private readonly options: ControllerOptions) {
-    const concurrency = options.sideLaneConcurrency ?? DEFAULT_SIDE_LANE_CONCURRENCY;
+  constructor(private readonly options: InvocationExecutorOptions) {
+    const concurrency = options.maxConcurrency ?? DEFAULT_EXECUTION_CONCURRENCY;
     if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
-      throw new Error("sideLaneConcurrency must be a positive integer");
+      throw new Error("maxConcurrency must be a positive integer");
     }
     this.deliveryAttempts = new DeliveryAttempts(
       (binding, event) =>
@@ -262,100 +180,14 @@ export class Controller {
         }),
       log: (entry) => options.session.log(entry),
     });
-    this.restoreQueuedHarnessInputs();
-    queueMicrotask(() => {
-      if (this.queueForLane(MAIN_LANE_ID).length > 0) void this.drainMain();
-      if (this.nextRunnableSideQueue()) this.drainSideLanes();
-    });
-  }
 
-  /** Rebuilds safely queued Human work from the Event Ledger WAL. */
-  private restoreQueuedHarnessInputs(): void {
-    const latest = new Map<
-      string,
-      Extract<AnyEventEnvelope, { kind: "harness_input.updated" }>
-    >();
-    const enqueueSeq = new Map<string, number>();
-    const queueOrder = new Map<string, string[]>();
-    for (const event of this.options.session.ledger.read()) {
-      if (event.kind === "harness_input.updated") {
-        if (event.payload.status === "queued" && !enqueueSeq.has(event.payload.messageId)) {
-          enqueueSeq.set(event.payload.messageId, event.seq);
-        }
-        latest.set(event.payload.messageId, event);
-      } else if (event.kind === "_aide_queue_reordered") {
-        queueOrder.set(event.payload.laneId, [...event.payload.orderedMessageIds]);
-      }
-    }
-    // steering 中的 Input 已被 Harness 接受但投递结果未知（crash 前无回执）；
-    // 与 queued 一样恢复重放，重新 admit 时按回收 steer 语义落成可见 follow-up。
-    const queued = [...latest.values()]
-      .filter((event) => {
-        const status = normalizeHarnessInputStatus(event.payload.status);
-        const outcome = this.options.session.loadState().harnessInputs.get(event.payload.messageId)?.deliveryOutcome;
-        // Confirmed or ambiguous native delivery must never become an automatic duplicate on resume.
-        return status === "queued" || (status === "steering" && outcome !== "applied" && outcome !== "uncertain");
-      })
-      .sort((left, right) => {
-        if (left.payload.laneId !== right.payload.laneId) {
-          return left.payload.laneId.localeCompare(right.payload.laneId);
-        }
-        const order = queueOrder.get(left.payload.laneId);
-        const leftRank = order?.indexOf(left.payload.messageId) ?? -1;
-        const rightRank = order?.indexOf(right.payload.messageId) ?? -1;
-        if (leftRank >= 0 || rightRank >= 0) {
-          if (leftRank < 0) return 1;
-          if (rightRank < 0) return -1;
-          return leftRank - rightRank;
-        }
-        return (
-          (enqueueSeq.get(left.payload.messageId) ?? left.seq) -
-          (enqueueSeq.get(right.payload.messageId) ?? right.seq)
-        );
-      });
-    for (const event of queued) {
-      const input = event.payload;
-      // Plugin executions have their own recovery/failure contract; only the
-      // Human queue is resumed automatically by this intake path.
-      if (input.harnessInvocationId) continue;
-      const target = this.options.resolveTarget(input.harnessTargetId);
-      if (!target || !this.options.session.meta.lanes[input.laneId]) {
-        this.options.session.log({
-          level: "warn",
-          source: "aide",
-          component: "controller.input-recovery",
-          message: "queued Harness Input could not be restored",
-          attributes: {
-            messageId: input.messageId,
-            harnessTargetId: input.harnessTargetId,
-            laneId: input.laneId,
-          },
-        });
-        continue;
-      }
-      const queue = this.queueForLane(input.laneId);
-      queue.enqueue(target, [...input.blocks], {
-        source: input.source,
-        identity: { messageId: input.messageId, turnId: input.turnId },
-        enqueueSeq: enqueueSeq.get(input.messageId) ?? event.seq,
-        restore: true,
-        requeuedFromSteer:
-          normalizeHarnessInputStatus(input.status) === "steering",
-        ...(input.causeEventId === undefined
-          ? {}
-          : { parentEventId: input.causeEventId }),
-        ...(input.sourceProposedPlanId === undefined
-          ? {}
-          : { sourceProposedPlanId: input.sourceProposedPlanId }),
-      });
-    }
   }
 
   /** Event Ledger WAL entry written before the in-memory queue transition. */
   private recordHarnessInputTransition(
     input: QueueItem,
     status: QueueItem["status"],
-    update?: { turnId?: string; delivery?: QueueItem["delivery"] },
+    update?: { invocationId?: string; delivery?: QueueItem["delivery"] },
   ): number {
     const payload = harnessInputUpdate(input, status, update);
     return this.options.session.appendEvent({
@@ -364,8 +196,8 @@ export class Controller {
       ...(input.parentEventId === undefined ? {} : { parentEventId: input.parentEventId }),
       harness: input.target.harness,
       harnessTargetId: input.target.id,
-      laneId: input.laneId,
-      turnId: payload.turnId,
+      contextId: input.contextId,
+      invocationId: payload.invocationId,
       payload,
     }).seq;
   }
@@ -377,13 +209,13 @@ export class Controller {
    * @link tests/execution-approval.test.ts
    */
   completeApproval(approvalId: string, result: ApprovalResult): boolean {
-    const turnId = this.harnessApprovals.turnId(approvalId);
+    const invocationId = this.harnessApprovals.invocationId(approvalId);
     if (!this.harnessApprovals.complete(approvalId, result)) return false;
-    const run = turnId ? this.runForTurn(turnId) : undefined;
+    const run = invocationId ? this.runForInvocation(invocationId) : undefined;
     if (result.kind === "cancelled" && run?.status === "active") {
       this.options.session.log({
         level: "info", source: "aide", component: "controller.approval",
-        harnessTargetId: run.binding.target.id, turnId,
+        harnessTargetId: run.binding.target.id, invocationId: invocationId,
         message: "approval cancelled; interrupting associated execution",
       });
       void this.interruptRecord(run);
@@ -392,138 +224,50 @@ export class Controller {
   }
 
   private openHarnessApproval(
-    laneId: string,
+    contextId: string,
     harnessTargetId: string,
     draft: ApprovalDraft,
     context?: ApprovalContext,
   ): Promise<ApprovalResult> {
-    const binding = this.bindings.get(this.bindingKey(laneId, harnessTargetId));
-    if (!binding) return Promise.reject(new Error(`unknown Lane binding for approval: ${laneId} × ${harnessTargetId}`));
-    const active = this.queueForLane(laneId).activeRun;
-    const turnId =
-      context?.turnId ?? active?.turnId ?? binding.setupTurnId;
-    return this.harnessApprovals.open(binding, draft, turnId, context);
+    const binding = this.bindings.get(this.bindingKey(contextId, harnessTargetId));
+    if (!binding) return Promise.reject(new Error(`unknown context binding for approval: ${contextId} × ${harnessTargetId}`));
+    const active = this.queueForContext(contextId).activeRun;
+    const invocationId =
+      context?.invocationId ?? active?.invocationId ?? binding.setupInvocationId;
+    return this.harnessApprovals.open(binding, draft, invocationId, context);
   }
 
-  private mainLaneId(): string {
-    return MAIN_LANE_ID;
-  }
-
-  private queueForLane(laneId: string): Queue<HarnessBinding> {
-    this.options.session.requireLane(laneId);
-    let queue = this.queues.get(laneId);
+  private queueForContext(contextId: string): InvocationQueue<HarnessBinding> {
+    this.options.session.requireExecutionContext(contextId);
+    let queue = this.queues.get(contextId);
     if (!queue) {
-      queue = new Queue<HarnessBinding>(
-        laneId,
+      queue = new InvocationQueue<HarnessBinding>(
+        contextId,
         (input, status, update) =>
           this.recordHarnessInputTransition(input, status, update),
-        (orderedMessageIds) => {
-          this.options.session.appendEvent({
-            kind: "_aide_queue_reordered",
-            source: { type: "aide" },
-            laneId,
-            payload: { laneId, orderedMessageIds: [...orderedMessageIds] },
-          });
-        },
       );
-      this.queues.set(laneId, queue);
+      this.queues.set(contextId, queue);
     }
     return queue;
   }
 
-  private activeMainRun(): QueueRun<HarnessBinding> | undefined {
-    return this.queueForLane(MAIN_LANE_ID).activeRun;
-  }
-
-  private runForTurn(turnId: string): QueueRun<HarnessBinding> | undefined {
+  private runForInvocation(invocationId: string): QueueRun<HarnessBinding> | undefined {
     for (const queue of this.queues.values()) {
-      const run = queue.run(turnId);
+      const run = queue.run(invocationId);
       if (run) return run;
     }
     return undefined;
   }
 
-  private nextRunnableSideQueue(): Queue<HarnessBinding> | undefined {
+  private nextRunnableQueue(): InvocationQueue<HarnessBinding> | undefined {
     return [...this.queues.values()]
       .filter(
         (queue) =>
-          queue.laneId !== MAIN_LANE_ID &&
           queue.head !== undefined &&
           !queue.activeRun &&
-          !this.processing.has(queue.laneId),
+          !this.processing.has(queue.contextId),
       )
       .sort((left, right) => left.head!.enqueueSeq - right.head!.enqueueSeq)[0];
-  }
-
-  /** 主 Queue 当前 run 的具体配置目标；Harness 类型只用于选择 Adapter。 */
-  get activeHarnessTargetId(): string | undefined {
-    const active = this.activeMainRun();
-    const processing = active
-      ? this.processing.get(active.laneId)
-      : [...this.processing.entries()].find(
-          ([laneId]) => laneId === MAIN_LANE_ID,
-        )?.[1];
-    return processing?.target.id ?? active?.binding.target.id;
-  }
-
-  /** 主 Queue 当前 run 对应的 Turn ID；TUI 据此做 per-turn 投影。 */
-  get activeTurnId(): string | undefined {
-    return this.activeMainRun()?.turnId;
-  }
-
-  /** 当前 turn 的起跑时刻（epoch ms）；elapsed 跳秒由 TUI 组件自理，这里只给起点 */
-  get activeStartedAt(): number | undefined {
-    const active = this.activeMainRun();
-    return (
-      (active ? this.processing.get(active.laneId)?.startedAt : undefined) ??
-      (active ? this.turns.get(active.turnId)?.startedAt : undefined)
-    );
-  }
-
-  /** 给 UI 做提交前提示；最终准入仍以 Adapter.sendTurn 为准。 */
-  promptCapabilities(harnessTargetId: string): AdapterCapabilities["prompt"] {
-    return this.bindingFor(this.mainLaneId(), harnessTargetId).adapter.capabilities.prompt;
-  }
-
-  get harnessQueueLength(): number {
-    return [...this.queues.values()].reduce((total, queue) => total + queue.length, 0);
-  }
-
-  get queuedHarnessInputs(): QueueSnapshot[] {
-    return [...this.queues.values()]
-      .flatMap((queue) => queue.snapshots)
-      .sort((left, right) => left.enqueueSeq - right.enqueueSeq);
-  }
-
-  /** Whether an inactive Turn's pending steer can still be owned by the native Harness queue. */
-  preservesPendingSteers(harnessTargetId: string): boolean {
-    const target = this.options.resolveTarget(harnessTargetId);
-    if (!target) return false;
-    return (
-      this.bindingFor(MAIN_LANE_ID, target.id).adapter.steering
-        ?.cancelOwnership !== "unreachable"
-    );
-  }
-
-  /** Pending steer facts that still belong in the shared Queue surface. */
-  hasPendingSteeringInputs(): boolean {
-    const state = this.options.session.projection;
-    return [...state.harnessInputs.values()].some((input) => {
-      if (
-        input.laneId !== MAIN_LANE_ID ||
-        input.delivery !== "steer" ||
-        (input.status !== "dispatching" && input.status !== "steering") ||
-        input.deliveryOutcome !== undefined
-      ) {
-        return false;
-      }
-      return state.activeTurns.has(input.turnId) ||
-        this.preservesPendingSteers(input.harnessTargetId);
-    });
-  }
-
-  get sideRunCount(): number {
-    return this.activeSideRuns;
   }
 
   /**
@@ -535,106 +279,49 @@ export class Controller {
     const out: HarnessInputSnapshot[] = [];
     for (const queue of this.queues.values()) {
       for (const input of queue.queued) out.push(harnessInputSnapshot(input));
-      for (const input of queue.claimed) out.push(harnessInputSnapshot(input));
       for (const run of queue.runs()) {
         if (run.status !== "active") continue;
         if (run.input) out.push(harnessInputSnapshot(run.input));
-        for (const steer of run.steers) out.push(harnessInputSnapshot(steer));
       }
     }
     return out;
   }
 
-  get isBusy(): boolean {
-    return this.drainingMain;
-  }
-
-  submit(
-    harnessTargetId: string,
-    blocks: PromptBlock[],
-    options?: { sourceProposedPlanId?: string },
-  ): Promise<QueueOutcome> {
-    this.assertOpen();
-    const submission = this.enqueueMainInput(harnessTargetId, blocks, options);
-    this.changed();
-    void this.drainMain();
-    return submission.outcome;
-  }
-
-  private enqueueMainInput(
-    harnessTargetId: string,
-    blocks: PromptBlock[],
-    options?: SendTurnOptions,
-  ): QueueSubmission {
-    const target = this.targetFor(harnessTargetId);
-    const laneId = this.mainLaneId();
-    if (options?.sourceProposedPlanId) {
-      if (
-        this.harnessInputs.some(
-          (input) => input.sourceProposedPlanId === options.sourceProposedPlanId,
-        )
-      ) {
-        throw new Error(`Proposed plan already has a pending implementation turn: ${options.sourceProposedPlanId}`);
-      }
-      const proposal = this.options.session
-        .loadState()
-        .proposedPlans.get(options.sourceProposedPlanId);
-      if (!proposal) {
-        throw new Error(`Proposed plan not found: ${options.sourceProposedPlanId}`);
-      }
-      if (proposal.implementationTurnId) {
-        throw new Error(`Proposed plan already has an implementation turn: ${options.sourceProposedPlanId}`);
-      }
-    }
-    return this.queueForLane(laneId).enqueue(target, blocks, options);
-  }
-
-  /** Materializes a scheduled HarnessInvocation without inferring Lane from source. */
+  /** Materializes a scheduled HarnessInvocation in its explicit resource context. */
   async enqueueHarnessInvocation(input: HarnessInvocationInput): Promise<QueueOutcome> {
     this.assertOpen();
     if (
       this.harnessInputs.some(
-        (candidate) => candidate.harnessInvocationId === input.harnessInvocationId,
+        (candidate) => candidate.harnessInvocationId === input.invocationId,
       )
     ) {
       return Promise.reject(
-        new Error(`HarnessInvocation already has a live Input: ${input.harnessInvocationId}`),
+        new Error(`HarnessInvocation already has a live Input: ${input.invocationId}`),
       );
     }
     const target = this.targetFor(input.harnessTargetId);
-    const parentLaneId = input.parentLaneId;
-    if (input.newLane && !parentLaneId) {
-      throw new Error(`HarnessInvocation ${input.harnessInvocationId} is missing parentLaneId`);
-    }
-    const laneId = input.newLane && parentLaneId
-      ? this.options.session.ensureHarnessInvocationLane(
-        input.laneId,
-        input.harnessInvocationId,
-        parentLaneId,
-      ).laneId
-      : this.options.session.requireLane(input.laneId).laneId;
+    const contextId = this.options.session.requireExecutionContext(input.contextId).contextId;
     if (input.freshContext) {
-      if (this.processing.has(laneId) || this.harnessInputs.some((item) => item.laneId === laneId)) throw new Error("Cannot replace an active context");
-      const key = this.bindingKey(laneId, target.id);
+      if (this.processing.has(contextId) || this.harnessInputs.some((item) => item.contextId === contextId)) throw new Error("Cannot replace an active context");
+      const key = this.bindingKey(contextId, target.id);
       const binding = this.bindings.get(key);
       if (binding) await binding.close();
       this.bindings.delete(key);
-      this.options.session.setLaneHarnessSession(laneId, target.id, {
+      this.options.session.setContextHarnessSession(contextId, target.id, {
         harness: target.harness, contextAfterSeq: this.options.session.projection.lastSeq,
       });
     }
-    const queue = this.queueForLane(laneId);
+    const queue = this.queueForContext(contextId);
     const submission = queue.enqueue(target, input.blocks, {
       source: input.source,
-      harnessInvocationId: input.harnessInvocationId,
+      harnessInvocationId: input.invocationId,
       identity: {
         messageId: input.messageId,
-        turnId: input.turnId,
+        invocationId: input.invocationId,
       },
     });
     this.changed();
-    if (laneId === this.mainLaneId()) void this.drainMain();
-    else this.drainSideLanes();
+    this.drain();
     return submission.outcome;
   }
 
@@ -658,485 +345,6 @@ export class Controller {
     return undefined;
   }
 
-  /**
-   * 用户输入的统一入口。Input 先获得稳定 messageId 并进入主 Lane Queue；没有更早 follow-up、
-   * 目标与当前 Queue run 一致且 HarnessSession 已就绪时，Controller 原子 claim 队头，
-   * 再交给 Adapter 依据原生运行态决定 same-turn send。Adapter 拒绝时同一 Input 回到队头。
-   * 没有对应 Queue run 的 Turn 不接受 steer——Aide 不拥有其投递生命周期。
-   *
-   * @spec 每次用户提交只创建一个 Input/messageId；steer rejection 降级 follow-up 时保持身份不变。
-   */
-  async sendTurn(
-    harnessTargetId: string,
-    blocks: PromptBlock[],
-    options?: SendTurnOptions,
-  ): Promise<SendTurnOutcome> {
-    this.assertOpen();
-    const laneId = this.mainLaneId();
-    const queue = this.queueForLane(laneId);
-    const active = queue.activeRun;
-    const queued =
-      Boolean(this.activeMainRun()) ||
-      this.drainingMain ||
-      queue.length > 0;
-    const submission = this.enqueueMainInput(harnessTargetId, blocks, options);
-    const input = submission.input;
-    this.changed();
-    options?.onEnqueued?.();
-    const steer = options?.followUp ? undefined : await this.trySteerQueued(queue, active, submission);
-    if (steer) return steer;
-    void this.drainMain();
-    return {
-      effective: "new_turn",
-      queued,
-      outcome: submission.outcome,
-    };
-  }
-
-  /** Same-turn admission shared by fresh submissions and explicit dispatch-now. */
-  private async trySteerQueued(
-    queue: Queue<HarnessBinding>,
-    active: QueueRun<HarnessBinding> | undefined,
-    submission: QueueSubmission,
-  ): Promise<SendTurnOutcome | undefined> {
-    const input = submission.input;
-    if (
-      input.sourceProposedPlanId ||
-      !active?.input ||
-      active.input.target.id !== input.target.id ||
-      !active.binding.ref ||
-      !queue.claimFirstForSteer(input)
-    ) {
-      return undefined;
-    }
-    this.changed();
-    let receipt: SendTurnReceipt;
-    const attemptId = newId("att");
-    try {
-      receipt = await this.harnessHooks.send(
-        active.binding,
-        active.binding.ref,
-        {
-          turnId: active.turnId,
-          messageId: input.messageId,
-          blocks: input.blocks,
-        },
-        attemptId,
-        "steer",
-      );
-    } catch (error) {
-      receipt = {
-        accepted: false,
-        effective: "rejected",
-        reason: error instanceof Error ? error.message : String(error),
-      };
-    }
-    if (receipt.effective === "steer") {
-      if (
-        active.status === "finalized" &&
-        active.stopReason === "cancelled" &&
-        active.binding.adapter.steering?.cancelOwnership === "unreachable" &&
-        this.options.session.loadState().harnessInputs.get(input.messageId)
-          ?.deliveryOutcome !== "applied"
-      ) {
-        // The admission receipt lost the race with Esc. This Adapter cannot
-        // carry native pending input across cancel, so the still-unapplied
-        // claimed Input returns to Aide's queue instead of being attached
-        // to an already retired Turn. Adapter 已接受并落过 steer 正文，
-        // 重放按回收 steer 语义落成可见 follow-up。
-        queue.requeueClaimed(input, { fromAcceptedSteer: true });
-        this.changed();
-        void this.drainMain();
-        return {
-          effective: "new_turn",
-          queued: true,
-          outcome: submission.outcome,
-        };
-      }
-      queue.acceptClaimedSteer(input, active.turnId);
-      if (active.binding.adapter.steering?.deliveryTracking !== "explicit") {
-        // ack-only：sendTurn 接受即应用，没有后续回执，Core 直接合成投递事实。
-        this.appendEvent(
-          active.binding,
-          {
-            kind: "input_delivery_update",
-            turnId: active.turnId,
-            payload: { messageId: input.messageId, state: "applied" },
-          },
-          { type: "aide" },
-        );
-      }
-      if (active.status === "active") {
-        // 已接受的 same-turn send 挂到当前 turn，cancel 时统一迁移 interrupted。
-        active.steers.push(input);
-      } else {
-        // Adapter receipt 可能晚于 Esc/终态。输入已经被 Harness 接受，不能重新入队；
-        // 直接继承它所绑定 Turn 的终态，避免把 Input 挂回已退休的台账记录。
-        const terminal = active.stopReason === "cancelled" ? "interrupted" : "finalized";
-        this.recordHarnessInputTransition(input, terminal);
-        input.status = terminal;
-        input.resolve?.("completed");
-      }
-      this.changed();
-      return { effective: "steer" };
-    }
-    if (receipt.effective === "new_turn") {
-      const error = new Error(
-        `adapter ${active.binding.adapter.harness} opened a new turn while Aide turn ${active.turnId} is active`,
-      );
-      queue.abandonClaimed(input);
-      this.changed();
-      throw error;
-    }
-    queue.requeueClaimed(input);
-    this.changed();
-    void this.drainMain();
-    return {
-      effective: "new_turn",
-      queued: true,
-      outcome: submission.outcome,
-      ...(receipt.effective === "rejected" && receipt.reason
-        ? { reason: receipt.reason }
-        : {}),
-    };
-  }
-
-  /** 只允许撤回尚未开始执行的最新 turn；已被 drain 取走的 active turn 不在此列。 */
-  recallLatestQueued(): QueueSnapshot | undefined {
-    const turn = this.queueForLane(MAIN_LANE_ID).recallLatestUser();
-    if (!turn) return undefined;
-    this.changed();
-    return turn;
-  }
-
-  /** 主 Lane Queue 中仍在排队的输入快照，供队列管理浮层列举。 */
-  listQueued(): QueueSnapshot[] {
-    return [...this.queueForLane(MAIN_LANE_ID).snapshots];
-  }
-
-  /** 按 messageId 撤回一条排队输入；与 recallLatestQueued 同语义。 */
-  recallQueuedById(messageId: string): QueueSnapshot | undefined {
-    const turn = this.queueForLane(MAIN_LANE_ID).recallUserById(messageId);
-    if (!turn) return undefined;
-    this.changed();
-    return turn;
-  }
-
-  /** Delete is a withdraw without returning content to the composer. */
-  discardQueuedById(messageId: string): QueueSnapshot | undefined {
-    return this.recallQueuedById(messageId);
-  }
-
-  /** Whether a user-owned pending steer is still attached to a cancellable live binding. */
-  canCancelInput(messageId: string): boolean {
-    const input = this.options.session.projection.harnessInputs.get(messageId);
-    if (
-      input?.laneId !== MAIN_LANE_ID ||
-      input.delivery !== "steer" ||
-      input.status !== "steering" ||
-      input.deliveryOutcome !== undefined ||
-      input.source.type !== "user" ||
-      input.harnessInvocationId !== undefined
-    ) {
-      return false;
-    }
-    return this.bindings
-      .get(this.bindingKey(input.laneId, input.harnessTargetId))
-      ?.canCancelInput() ?? false;
-  }
-
-  /**
-   * Cancel one accepted-but-unapplied steer through its exact live Lane x HarnessTarget binding.
-   * true only acknowledges native queue removal; input_delivery_update owns the durable terminal fact.
-   */
-  async cancelInput(messageId: string): Promise<boolean> {
-    this.assertOpen();
-    const input = this.options.session.projection.harnessInputs.get(messageId);
-    if (!input) throw new Error(`Pending input not found: ${messageId}`);
-    if (
-      input.laneId !== MAIN_LANE_ID ||
-      input.delivery !== "steer" ||
-      input.status !== "steering" ||
-      input.deliveryOutcome !== undefined ||
-      input.source.type !== "user" ||
-      input.harnessInvocationId !== undefined
-    ) {
-      throw new Error(`Input is no longer cancellable: ${messageId}`);
-    }
-    const binding = this.bindings.get(
-      this.bindingKey(input.laneId, input.harnessTargetId),
-    );
-    if (!binding?.canCancelInput()) {
-      throw new Error(`${input.harnessTargetId} does not support cancelling individual inputs`);
-    }
-    return binding.cancelInput(messageId);
-  }
-
-  /** Reorder one user-owned item without crossing Plugin-owned queued work. */
-  moveQueuedById(
-    messageId: string,
-    direction: "up" | "down",
-  ): QueueSnapshot[] | undefined {
-    const snapshots = this.queueForLane(MAIN_LANE_ID).moveUserById(
-      messageId,
-      direction,
-    );
-    if (!snapshots) return undefined;
-    this.changed();
-    return snapshots;
-  }
-
-  /**
-   * Promote a selected user input, then reuse the normal same-turn admission
-   * path. If steer is unavailable, the same Input remains queue head.
-   */
-  async dispatchQueuedNow(
-    messageId: string,
-  ): Promise<SendTurnOutcome | undefined> {
-    this.assertOpen();
-    const queue = this.queueForLane(MAIN_LANE_ID);
-    const promoted = queue.promoteUserById(messageId);
-    if (!promoted || queue.head?.messageId !== messageId) return undefined;
-    this.changed();
-    const input = queue.head;
-    const steer = await this.trySteerQueued(queue, queue.activeRun, {
-      input,
-      outcome: input.outcome,
-    });
-    if (steer) return steer;
-    const queued = Boolean(queue.activeRun || this.drainingMain);
-    void this.drainMain();
-    return {
-      effective: "new_turn",
-      queued,
-      outcome: input.outcome,
-    };
-  }
-
-  async listModels(harnessTargetId: string): Promise<ModelOption[]> {
-    const target = this.targetFor(harnessTargetId);
-    const probed = await this.options.probeTarget?.(target, this.options.session.meta.cwd);
-    if (probed?.models) return probed.models;
-    return (await this.ensureHarness(this.mainLaneId(), harnessTargetId)).listModels();
-  }
-
-  async setModel(harnessTargetId: string, modelId: string | null): Promise<void> {
-    await (
-      await this.ensureHarness(this.mainLaneId(), harnessTargetId)
-    ).setModel(modelId);
-    this.changed();
-  }
-
-  async setModelConfiguration(harnessTargetId: string, configuration: import("../harness/adapter.ts").ModelConfiguration): Promise<void> {
-    await (await this.ensureHarness(this.mainLaneId(), harnessTargetId)).setModelConfiguration(configuration);
-    this.changed();
-  }
-
-  currentModel(harnessTargetId: string): string | null {
-    const binding = this.bindings.get(this.bindingKey(this.mainLaneId(), harnessTargetId));
-    if (binding) return binding.currentModel();
-    this.targetFor(harnessTargetId);
-    return (
-      this.options.session.meta.harnessTargets[harnessTargetId]?.model ??
-      this.options.modelPreferences?.[harnessTargetId] ??
-      null
-    );
-  }
-
-  async listEfforts(harnessTargetId: string): Promise<EffortOption[]> {
-    const target = this.targetFor(harnessTargetId);
-    const probed = await this.options.probeTarget?.(target, this.options.session.meta.cwd);
-    if (probed?.efforts) return probed.efforts;
-    return (await this.ensureHarness(this.mainLaneId(), harnessTargetId)).listEfforts();
-  }
-
-  async setEffort(harnessTargetId: string, effortId: string | null): Promise<void> {
-    await (
-      await this.ensureHarness(this.mainLaneId(), harnessTargetId)
-    ).setEffort(effortId);
-    this.changed();
-  }
-
-  currentEffort(harnessTargetId: string): string | null {
-    const binding = this.bindings.get(this.bindingKey(this.mainLaneId(), harnessTargetId));
-    if (binding) return binding.currentEffort();
-    this.targetFor(harnessTargetId);
-    return (
-      this.options.session.meta.harnessTargets[harnessTargetId]?.effort ??
-      this.options.effortPreferences?.[harnessTargetId] ??
-      null
-    );
-  }
-
-  currentMode(harnessTargetId: string): string {
-    return this.options.session.meta.harnessTargets[harnessTargetId]?.mode ?? "default";
-  }
-
-  async getConfig(harnessTargetId: string): Promise<SessionConfigOption[]> {
-    return (await this.ensureHarness(this.mainLaneId(), harnessTargetId)).getConfig();
-  }
-
-  async setConfig(
-    harnessTargetId: string,
-    configId: string,
-    value: ConfigValue,
-  ): Promise<SessionConfigOption[]> {
-    const snapshot = await (
-      await this.ensureHarness(this.mainLaneId(), harnessTargetId)
-    ).setConfig(configId, value);
-    this.changed();
-    return snapshot;
-  }
-
-  /**
-   * 用 harness 原生机制压缩当前上下文。它会打开一个没有 user_message 的 control Turn：
-   * 仍走统一 running → harness events → idle 流水线，因此 TUI、持久化与崩溃恢复不会旁路。
-   */
-  async compactContext(harnessTargetId: string): Promise<void> {
-    this.assertOpen();
-    const queue = this.queueForLane(MAIN_LANE_ID);
-    if (this.drainingMain || queue.length > 0) {
-      throw new Error("/compact requires an idle session");
-    }
-    this.drainingMain = true;
-    try {
-      await this.runContextCompaction(harnessTargetId);
-    } finally {
-      this.drainingMain = false;
-      this.changed();
-      if (queue.length > 0) void this.drainMain();
-    }
-  }
-
-  private async runContextCompaction(harnessTargetId: string): Promise<void> {
-    const target = this.targetFor(harnessTargetId);
-    const laneId = this.mainLaneId();
-    this.processing.set(laneId, { target, startedAt: Date.now() });
-    let run: QueueRun<HarnessBinding> | undefined;
-    try {
-      const binding = await this.ensureHarness(laneId, harnessTargetId);
-      if (
-        !binding.ref ||
-        !binding.adapter.capabilities.compact?.supported ||
-        !isContextCompactable(binding.adapter)
-      ) {
-        throw new Error(`${harnessTargetId} does not support /compact`);
-      }
-
-      const turnId = newId("t");
-      const started = this.startTurn(binding, {
-        turnId,
-        harnessSessionId: binding.sessionIdentity()?.id,
-      });
-      run = started.run;
-      await binding.adapter.compactContext(binding.ref, turnId);
-      await started.settled;
-    } catch (error) {
-      this.options.session.log({
-        level: "error",
-        source: "aide",
-        component: "controller.compact",
-        harness: target.harness,
-        harnessTargetId,
-        turnId: run?.turnId,
-        message: "harness context compaction failed",
-        error: logError(error),
-      });
-      if (run && run.status !== "finalized") {
-        this.synthesizeTerminal(run, {
-          message: error instanceof Error ? error.message : String(error),
-          stopReason: "error",
-        });
-      }
-      throw error;
-    } finally {
-      this.processing.delete(laneId);
-    }
-  }
-
-  /**
-   * 该 harness 当前生效的审批路由；不支持该能力、或 harness 没报出来 → null，
-   * 投影据此静默。不读 config：config 是意图，只有 harness 自己报的才是事实。
-   */
-  approvalRoute(harnessTargetId: string): ApprovalRoute | null {
-    return this.bindings
-      .get(this.bindingKey(this.mainLaneId(), harnessTargetId))
-      ?.approvalRoute() ?? null;
-  }
-
-  /** Whether the live task's owning Lane x HarnessTarget binding can stop it individually. */
-  canStopTask(taskKey: string): boolean {
-    const task = this.options.session.projection.tasks.get(taskKey);
-    if (
-      task?.status !== "in_progress" ||
-      task.backgrounded === false ||
-      !task.laneId ||
-      !task.harnessTargetId
-    ) {
-      return false;
-    }
-    const binding = this.bindings.get(this.bindingKey(task.laneId, task.harnessTargetId));
-    if (
-      task.harnessSessionId &&
-      binding?.sessionIdentity()?.id !== task.harnessSessionId
-    ) {
-      return false;
-    }
-    return binding?.canStopTask() ?? false;
-  }
-
-  /**
-   * Stop one background task through the exact live binding that emitted it.
-   * Resolve only acknowledges the request; the Harness still owns the terminal task_update.
-   */
-  async stopTask(taskKey: string): Promise<void> {
-    this.assertOpen();
-    const task = this.options.session.projection.tasks.get(taskKey);
-    if (!task) throw new Error(`Background task not found: ${taskKey}`);
-    if (task.status !== "in_progress" || task.backgrounded === false) {
-      throw new Error(`Background task is no longer running: ${task.taskId}`);
-    }
-    if (!task.laneId || !task.harnessTargetId) {
-      throw new Error(`Background task has no live Harness binding: ${task.taskId}`);
-    }
-    const binding = this.bindings.get(
-      this.bindingKey(task.laneId, task.harnessTargetId),
-    );
-    if (
-      task.harnessSessionId &&
-      binding?.sessionIdentity()?.id !== task.harnessSessionId
-    ) {
-      throw new Error(`Background task is no longer attached to its HarnessSession: ${task.taskId}`);
-    }
-    if (!binding?.canStopTask()) {
-      throw new Error(`${task.harnessTargetId} does not support stopping individual tasks`);
-    }
-    await binding.stopTask(task.taskId);
-  }
-
-  /**
-   * 施加一个 Control 信号（Input / Approval result 之外的第三种用户信号，见
-   * `Control`）。当前唯一
-   * kind 是 `interrupt`（Esc）——打断主 Lane 当前 Queue run。新增 kind 时在此按 kind 分派。
-   */
-  async control(signal: Control): Promise<void> {
-    switch (signal.kind) {
-      case "interrupt":
-        return this.interrupt();
-    }
-  }
-
-  /**
-   * Control:interrupt 的实现——中断主 Lane 当前 Queue run。确认以 harness 的 idle/cancelled 终态
-   * 为准；宽限期内没等到则合成 terminal error，保证队列永远能推进（不能因 harness 失联而死锁）。
-   * preparing（harness 冷启动中）无需确认：尚未向 harness 提交任何内容，立即合成取消。
-   */
-  private async interrupt(): Promise<void> {
-    const active = this.activeMainRun();
-    if (!active) return;
-    return this.interruptRecord(active);
-  }
-
   private async interruptRecord(active: QueueRun<HarnessBinding>): Promise<void> {
     if (!active.binding.ref) {
       // preparing：Esc 立即生效，不被冷启动绑住。启动流程继续完成——成功则 binding
@@ -1151,7 +359,6 @@ export class Controller {
       });
     }, this.options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS);
     try {
-      this.reclaimPendingSteers(active);
       await active.binding.adapter.cancel(active.binding.ref);
     } catch (error) {
       this.options.session.log({
@@ -1160,7 +367,7 @@ export class Controller {
         component: "controller.cancel",
         harness: active.binding.adapter.harness,
         harnessTargetId: active.binding.target.id,
-        turnId: active.turnId,
+        invocationId: active.invocationId,
         message: "harness cancel request failed",
         error: logError(error),
       });
@@ -1170,45 +377,6 @@ export class Controller {
         stopReason: "cancelled",
       });
     }
-  }
-
-  /**
-   * Some Harnesses bind pending steer input to the active native Turn. Once
-   * that Turn is interrupted the input is provably unapplied and unreachable;
-   * reclaim it into Aide's Queue before cancel can synchronously emit idle.
-   */
-  private reclaimPendingSteers(active: QueueRun<HarnessBinding>): void {
-    if (active.binding.adapter.steering?.cancelOwnership !== "unreachable") return;
-    const harnessInputs = this.options.session.loadState().harnessInputs;
-    const pendingIds = new Set(
-      active.steers
-        .filter(
-          (input) =>
-            harnessInputs.get(input.messageId)?.deliveryOutcome === undefined,
-        )
-        .map((input) => input.messageId),
-    );
-    if (pendingIds.size === 0) return;
-    // 先落 failed 回执（这次 steer 投递已证伪），再重排——requeueSteers 的
-    // harness_input.updated(queued) 是后写的事实，投影里 status 回到 queued。
-    for (const input of active.steers) {
-      if (!pendingIds.has(input.messageId)) continue;
-      this.appendEvent(
-        active.binding,
-        {
-          kind: "input_delivery_update",
-          turnId: active.turnId,
-          payload: {
-            messageId: input.messageId,
-            state: "failed",
-            detail: "steer became unreachable after cancel; reclaimed into the queue",
-          },
-        },
-        { type: "aide" },
-      );
-    }
-    this.queueForLane(active.laneId).requeueSteers(active, pendingIds);
-    this.changed();
   }
 
   close(): Promise<void> {
@@ -1237,67 +405,39 @@ export class Controller {
     }
     await Promise.all(closing);
     // Adapter.close owns native resource teardown, while Controller owns the
-    // accepted-Turn invariant. A buggy/failed Adapter close must not leave a
+    // accepted-invocation invariant. A buggy/failed Adapter close must not leave a
     // Queue run or native approval continuation hanging during host shutdown.
-    for (const turn of this.turns.values()) {
+    for (const turn of [...this.queues.values()].flatMap(queue => [...queue.runs()])) {
       if (turn.status === "active") {
         this.synthesizeTerminal(turn, { stopReason: "cancelled" });
       }
     }
     await Promise.allSettled([
-      ...(this.mainDrainPromise ? [this.mainDrainPromise] : []),
-      ...this.sideRunPromises,
+      ...this.running,
     ]);
     await this.harnessHooks.close();
     this.unsubscribeApprovals();
     this.lifecycleState = "closed";
   }
 
-  private drainMain(): Promise<void> {
-    if (this.mainDrainPromise) return this.mainDrainPromise;
-    const queue = this.queueForLane(MAIN_LANE_ID);
-    if (this.lifecycleState !== "open" || queue.length === 0) return Promise.resolve();
-    this.drainingMain = true;
-    const draining = (async () => {
-      try {
-        while (this.lifecycleState === "open" && queue.length > 0) {
-          const input = queue.dequeue() as QueueItem;
-          this.changed();
-          try {
-            await this.runQueueItem(input);
-            input.resolve?.("completed");
-          } catch (error) {
-            input.reject?.(error);
-          }
-        }
-      } finally {
-        this.drainingMain = false;
-        this.mainDrainPromise = undefined;
-        this.changed();
-      }
-    })();
-    this.mainDrainPromise = draining;
-    return draining;
-  }
-
-  private drainSideLanes(): void {
+  private drain(): void {
     if (this.lifecycleState !== "open") return;
-    const concurrency = this.options.sideLaneConcurrency ?? DEFAULT_SIDE_LANE_CONCURRENCY;
-    while (this.lifecycleState === "open" && this.activeSideRuns < concurrency) {
-      const queue = this.nextRunnableSideQueue();
+    const concurrency = this.options.maxConcurrency ?? DEFAULT_EXECUTION_CONCURRENCY;
+    while (this.lifecycleState === "open" && this.activeCount < concurrency) {
+      const queue = this.nextRunnableQueue();
       const input = queue?.dequeue();
       if (!input) return;
-      this.activeSideRuns++;
+      this.activeCount++;
       this.changed();
       const running = this.runQueueItem(input)
         .then(() => input.resolve?.("completed"), (error) => input.reject?.(error))
         .finally(() => {
-          this.sideRunPromises.delete(running);
-          this.activeSideRuns--;
+          this.running.delete(running);
+          this.activeCount--;
           this.changed();
-          this.drainSideLanes();
+          this.drain();
         });
-      this.sideRunPromises.add(running);
+      this.running.add(running);
       void running;
     }
   }
@@ -1308,14 +448,11 @@ export class Controller {
     }
   }
 
-  /**
-   * Queue 驱动 Turn 开界的唯一入口：先把 user_message 与 running 事实写入 Event Ledger，
-   * 再建立运行期 Queue run。/compact 这类 control Turn 不带 input，因此跳过 user_message。
-   */
-  private startTurn(
+  /** Record the prompt and running fact before opening the native binding. */
+  private startInvocation(
     binding: HarnessBinding,
-    opts: { turnId: string; input?: QueueItem; harnessSessionId?: string },
-  ): { record: TurnRecord<HarnessBinding>; run: QueueRun<HarnessBinding>; settled: Promise<void> } {
+    opts: { invocationId: string; input?: QueueItem; harnessSessionId?: string },
+  ): { record: QueueRun<HarnessBinding>; run: QueueRun<HarnessBinding>; settled: Promise<void> } {
     let inputEventId: string | undefined;
     if (opts.input) {
       const inputEvent = this.appendEvent(
@@ -1326,13 +463,10 @@ export class Controller {
             ? {}
             : { parentEventId: opts.input.parentEventId }),
           harnessSessionId: opts.harnessSessionId,
-          turnId: opts.turnId,
+          invocationId: opts.invocationId,
           payload: {
             messageId: opts.input.messageId,
             content: opts.input.blocks,
-            ...(opts.input.requeuedFromSteer
-              ? { delivery: "follow_up" }
-              : {}),
           },
         },
         eventSourceOf(opts.input.source),
@@ -1344,21 +478,19 @@ export class Controller {
       {
         kind: "state_update",
         harnessSessionId: opts.harnessSessionId,
-        turnId: opts.turnId,
+        invocationId: opts.invocationId,
         payload: { state: "running" },
       },
       { type: "aide" },
     );
-    const record = this.turns.get(opts.turnId);
-    if (!record) throw new Error(`Turn ${opts.turnId} did not open`);
-    const queue = this.queueForLane(binding.laneId);
-    const { run, settled } = queue.startRun(binding, opts.turnId, opts.input);
+    const queue = this.queueForContext(binding.contextId);
+    const { run, settled } = queue.startRun(binding, opts.invocationId, opts.input);
     run.inputEventId = inputEventId;
-    return { record, run, settled };
+    return { record: run, run, settled };
   }
 
   private async runQueueItem(input: QueueItem): Promise<void> {
-    this.processing.set(input.laneId, {
+    this.processing.set(input.contextId, {
       target: input.target,
       startedAt: Date.now(),
     });
@@ -1368,20 +500,20 @@ export class Controller {
     // 可达数秒，期间 Transcript 必须已能看到这条输入）。落盘的是**原始输入** input.blocks：
     // <aide-sync> 注入只进 harness transport（syncContext / prepend），不进正典历史。
     let binding: HarnessBinding;
-    let record: TurnRecord<HarnessBinding>;
+    let record: QueueRun<HarnessBinding>;
     let run: QueueRun<HarnessBinding>;
     let settled: Promise<void>;
     try {
-      binding = this.bindingFor(input.laneId, input.target.id, input.turnId);
-      const lane = this.options.session.meta.lanes[input.laneId];
-      if (!lane) throw new Error(`Lane not found: ${input.laneId}`);
-      ({ record, run, settled } = this.startTurn(binding, {
-        turnId: input.turnId,
+      binding = this.bindingFor(input.contextId, input.target.id, input.invocationId);
+      const context = this.options.session.meta.contexts[input.contextId];
+      if (!context) throw new Error(`Execution context not found: ${input.contextId}`);
+      ({ record, run, settled } = this.startInvocation(binding, {
+        invocationId: input.invocationId,
         input,
-        harnessSessionId: lane.harnessSessions[input.target.id]?.harnessSessionId,
+        harnessSessionId: context.harnessSessions[input.target.id]?.harnessSessionId,
       }));
     } catch (error) {
-      this.processing.delete(input.laneId);
+      this.processing.delete(input.contextId);
       this.changed();
       throw error;
     }
@@ -1394,7 +526,7 @@ export class Controller {
         binding,
         {
           kind: "_aide_run_status",
-          turnId: input.turnId,
+          invocationId: input.invocationId,
           payload: { phase: "starting", title: `Starting ${input.target.harness}…` },
         },
         { type: "aide" },
@@ -1402,9 +534,9 @@ export class Controller {
     }
 
     try {
-      await this.ensureHarness(input.laneId, input.target.id);
+      await this.ensureHarness(input.contextId, input.target.id);
       // A cold open can finish after close() has frozen scheduling. The Binding
-      // has already released that late handle; close the accepted Aide Turn as
+      // has already released that late handle; close the accepted Aide invocation as
       // cancelled and leave later queued Inputs durable for the next resume.
       if (this.lifecycleState !== "open") {
         this.synthesizeTerminal(record, { stopReason: "cancelled" });
@@ -1418,7 +550,7 @@ export class Controller {
           binding,
           {
             kind: "_aide_run_status",
-            turnId: input.turnId,
+            invocationId: input.invocationId,
             payload: { phase: null },
           },
           { type: "aide" },
@@ -1426,7 +558,7 @@ export class Controller {
       }
 
       const session = this.options.session;
-      const meta = session.meta.lanes[input.laneId]?.harnessSessions[input.target.id];
+      const meta = session.meta.contexts[input.contextId]?.harnessSessions[input.target.id];
       const contextEpochId = binding.contextEpochId;
       if (!contextEpochId) {
         throw new Error(`${targetKey} opened without a ContextEpoch`);
@@ -1436,9 +568,9 @@ export class Controller {
         Math.max(this.contextDeliveries.epoch(contextEpochId)?.throughSeq ?? meta?.syncedSeq ?? 0, meta?.contextAfterSeq ?? 0);
       const catchUp = buildTargetCatchUpContext(session, {
         target: binding.target,
-        laneId: binding.laneId,
+        contextId: binding.contextId,
         sinceSeq,
-        includeTargetTurns: binding.freshHarnessSession,
+        restoreHistory: binding.freshHarnessSession,
         budgetChars: this.options.mentionBudgetChars,
       });
       let blocks = input.blocks;
@@ -1454,7 +586,7 @@ export class Controller {
         | undefined;
       if (catchUp) {
         const snapshot = this.contextDeliveries.prepare(binding, {
-          turnId: input.turnId,
+          invocationId: input.invocationId,
           harnessSessionId: binding.sessionIdentity()?.id,
           source: sessionHistoryContextSource(session.id),
           afterSeq: sinceSeq,
@@ -1483,18 +615,18 @@ export class Controller {
 
       if (!meta?.launchSnapshot) {
         throw new Error(
-          `cannot prepare harness delivery for turn ${record.turnId}: missing HarnessLaunchSnapshot`,
+          `cannot prepare harness delivery for invocation ${record.invocationId}: missing HarnessLaunchSnapshot`,
         );
       }
       const attempt = this.deliveryAttempts.prepare(binding, {
-        turnId: record.turnId,
+        invocationId: record.invocationId,
         inputEventId: run.inputEventId,
         inputId: input.messageId,
         launchSnapshot: meta.launchSnapshot,
         harnessSessionId: meta.harnessSessionId ?? binding.sessionIdentity()?.id,
       });
       const promptInput: PromptInput = {
-        turnId: input.turnId,
+        invocationId: input.invocationId,
         messageId: input.messageId,
         blocks,
         ...(syncBlocks ? { syncBlocks } : {}),
@@ -1528,7 +660,7 @@ export class Controller {
               ? `: ${receipt.reason}`
               : "";
           throw new Error(
-            `adapter ${binding.adapter.harness} rejected new Aide turn ${input.turnId}${reason}`,
+            `adapter ${binding.adapter.harness} rejected Aide invocation ${input.invocationId}${reason}`,
           );
         }
       } catch (error) {
@@ -1538,21 +670,6 @@ export class Controller {
         throw error;
       }
       this.deliveryAttempts.markAccepted(binding, attempt);
-      if (input.sourceProposedPlanId) {
-        // 只在 Adapter 已接受投递责任后建立因果边；启动/admission 失败不能把提案误标为执行中。
-        this.appendEvent(
-          binding,
-          {
-            kind: "proposed_plan_implementation_started",
-            turnId: input.turnId,
-            payload: {
-              planId: input.sourceProposedPlanId,
-              implementationTurnId: input.turnId,
-            },
-          },
-          { type: "aide" },
-        );
-      }
       if (submitContext) {
         // admission 通过 ⇒ 随 sendTurn 送达的 sync 块（syncBlocks 或 prepend）已进入 harness
         // 输入：视为同步到 throughSeq。
@@ -1575,7 +692,7 @@ export class Controller {
         component: "controller.turn",
         harness: input.target.harness,
         harnessTargetId: targetKey,
-        turnId: input.turnId,
+        invocationId: input.invocationId,
         message: "harness startup or prompt admission failed",
         error: logError(error),
       });
@@ -1586,7 +703,7 @@ export class Controller {
         cause: error,
       });
     } finally {
-      this.processing.delete(input.laneId);
+      this.processing.delete(input.contextId);
       this.changed();
     }
   }
@@ -1611,9 +728,9 @@ export class Controller {
       transport,
     });
     const session = this.options.session;
-    const laneId = binding.laneId;
-    const existing = session.meta.lanes[laneId]?.harnessSessions[binding.target.id];
-    session.setLaneHarnessSession(laneId, binding.target.id, {
+    const contextId = binding.contextId;
+    const existing = session.meta.contexts[contextId]?.harnessSessions[binding.target.id];
+    session.setContextHarnessSession(contextId, binding.target.id, {
       ...existing,
       harness: binding.adapter.harness,
       harnessSessionId:
@@ -1626,7 +743,7 @@ export class Controller {
 
   /**
    * HarnessEvent 与 Controller 自有 Event draft 的统一提交入口。AideSession 先完成
-   * WAL record，再直接 reduce 当前 Projection；Controller 随后只处理 Turn
+   * WAL record，再直接 reduce 当前 Projection；Controller 随后只处理 Invocation
    * scope 等协调逻辑。Ledger 不在这条实时链路上广播 Event。
    */
   private appendEvent(
@@ -1639,20 +756,17 @@ export class Controller {
       source,
       harness: binding.adapter.harness,
       harnessTargetId: binding.target.id,
-      laneId: binding.laneId,
+      contextId: binding.contextId,
     } as AnyNewEvent) as AnyEventEnvelope;
     if (envelope.kind === "state_update") {
       const p = envelope.payload;
-      if (p.state === "running" && envelope.turnId) {
-        // Event 已先落盘，再建立 Turn scope 的运行期索引。
-        this.turns.open(binding, envelope.turnId);
-      } else if (p.state === "idle") {
-        // 终态一律按 aide turn id 查表路由（不看 binding）。无 turnId 的终态：
-        // 已持久化留痕，但无法归属任何 turn，不驱动生命周期（adapter 契约要求
-        // 终态必带 turnId，由契约测试钉住）。
-        if (envelope.turnId) {
-          // Attempt 对账先于 Turn 幂等收口：cancel grace 后迟到的 Harness idle 虽然不能
-          // 二次 finalize Turn，却仍是把 uncertain Attempt 收敛到终态的权威 Receipt。
+      if (p.state === "idle") {
+        // 终态一律按 invocationId 查表路由（不看 binding）。缺少 ID 的终态：
+        // 已持久化留痕，但无法归属任何调用，不驱动生命周期（adapter 契约要求
+        // 终态必带 invocationId，由契约测试钉住）。
+        if (envelope.invocationId) {
+          // Attempt 对账先于 Invocation 幂等收口：cancel grace 后迟到的 Harness idle 虽然不能
+          // 二次 finalize Invocation，却仍是把 uncertain Attempt 收敛到终态的权威 Receipt。
           this.deliveryAttempts.observeTerminal(binding, envelope);
           this.finalize(envelope);
         }
@@ -1664,157 +778,46 @@ export class Controller {
   }
 
   /**
-   * 所有 Turn 的统一有序收界路径：终态已持久化 → interrupted notice → summary →
-   * 同步元数据 → 若有关联 Queue run，则释放它并推进队列。Harness 自行打开的 Turn
-   * 同样会被汇总，让后台产出进入 @ 引用与跨 Harness catch-up 的正典历史。
-   * 按 aide turn id 幂等：迟到/重复/未知终态一律 inert，不会关闭更新的 turn。
+   * @spec A durable terminal closes only its admitted invocation: approvals, summary, then queue release.
+   * @why Duplicate or late native terminals cannot close a newer invocation reusing the same context.
+   * @link tests/execution-approval.test.ts
    */
   private finalize(terminal: EventEnvelope<"state_update">): void {
-    const turnId = terminal.turnId;
-    if (!turnId) return;
+    const invocationId = terminal.invocationId;
+    if (!invocationId) return;
     const stopReason = terminal.payload.stopReason;
-    const record = this.turns.beginFinalization(turnId, stopReason);
-    if (!record) return;
-    const run = this.runForTurn(turnId);
+    const run = this.runForInvocation(invocationId);
+    if (!run || run.status === "finalized") return;
+    const record = run;
 
     // cancel-cascade：本 turn 仍挂起的 Approval 随收口一并了结，绝不留悬挂 continuation。
     // Controller 先持久化 approval.cancelled，再唤醒 Adapter；参考 codex
     // clear_pending_waiters→Abort、opencode interrupt 的 ensuring(pending.delete)。
     // 顺序天然对：finalize 发生在 adapter.cancel 之后（先中断 turn，再收 pending），不会让取消以
     // model 可见的 tool rejection 抢在 turn 中断之前冒出来。
-    this.harnessApprovals.cancelForTurn(turnId);
+    this.harnessApprovals.cancelForInvocation(invocationId);
 
     const session = this.options.session;
 
     // 用户打断的 turn 在时间线留下醒目标记；排队的后续输入会自然跟在标记后面
-    if (run && stopReason === "cancelled") {
+    if (stopReason === "cancelled") {
       session.appendEvent({
         kind: "_aide_notice",
         source: { type: "aide" },
-        harness: record.harness,
-        harnessTargetId: record.harnessTargetId,
-        laneId: record.laneId,
-        turnId,
+        harness: record.binding.adapter.harness,
+        harnessTargetId: record.binding.target.id,
+        contextId: record.contextId,
+        invocationId: invocationId,
         payload: { level: "warning", title: INTERRUPTED_NOTICE_TITLE },
       });
     }
 
-    session.summarizeTurnEvent(turnId);
-    if (run) record.binding.freshHarnessSession = false;
+    session.summarizeInvocationEvent(invocationId);
+    record.binding.freshHarnessSession = false;
 
-    // 终态迁移（input 与已投递 steer）由 finishRun 内经 beforeTransition 落 WAL；
-    // 未投递的 steer 保持 steering，等迟到的 Harness 回执只补 deliveryOutcome。
-    if (run) {
-      this.queueForLane(run.laneId).finishRun(run, stopReason, (messageId) =>
-        session.loadState().harnessInputs.get(messageId)?.deliveryOutcome,
-      );
-    }
-    if (run && record.laneId === MAIN_LANE_ID) {
-      this.maybeGenerateTitle(record.harnessTargetId);
-    }
+    this.queueForContext(run.contextId).finishRun(run, stopReason);
+
     this.changed();
-  }
-
-  /**
-   * session 标题的 LLM 生成（fire-and-forget 旁路）：主 Queue Turn 收口后触发，
-   * 得到有效标题后护栏会让后续调用立即返回；低信息结果或失败则允许下一 Turn 重试。
-   * 失败/降级全部在 textgen 路由器内收口，主流程无感。护栏（用户命名不覆盖）在
-   * maybeGenerateSessionTitle 内，含落盘前复查。
-   */
-  private titleGenInFlight = false;
-  private pendingTitleGenTargetId: string | undefined;
-
-  private maybeGenerateTitle(currentTargetId: string): void {
-    if (this.titleGenInFlight) {
-      this.pendingTitleGenTargetId = currentTargetId;
-      return;
-    }
-    const session = this.options.session;
-    const candidates = this.textgenCandidates(currentTargetId);
-    if (candidates.length === 0) return;
-    this.titleGenInFlight = true;
-    void maybeGenerateSessionTitle({
-      session,
-      candidates,
-      ...(this.options.textgenModels ? { models: this.options.textgenModels } : {}),
-      log: (entry) => session.log(entry),
-    })
-      .then((updated) => {
-        // Session metadata 不走 Event reduce；标题落盘后显式刷新当前展示。
-        if (updated) {
-          this.options.onSessionTitleChange?.();
-          this.changed();
-        }
-      })
-      .catch((error) => {
-        session.log({
-          level: "warn",
-          source: "aide",
-          component: "textgen",
-          message: "session title generation failed",
-          attributes: { error: error instanceof Error ? error.message : String(error) },
-        });
-      })
-      .finally(() => {
-        this.titleGenInFlight = false;
-        const pendingTargetId = this.pendingTitleGenTargetId;
-        this.pendingTitleGenTargetId = undefined;
-        if (pendingTargetId) this.maybeGenerateTitle(pendingTargetId);
-      });
-  }
-
-  /**
-   * 降级链排序：显式 prefer → 当前 turn 的 target → 其余候选。
-   * 已有 live binding 的复用其 adapter（省一次构造），其余经工厂新建——textgen 是
-   * 一次性调用，不需要 open()。
-   */
-  private textgenCandidates(currentTargetId: string): TextgenCandidate[] {
-    const ordered: HarnessTarget[] = [];
-    const seen = new Set<string>();
-    const push = (target: HarnessTarget | undefined) => {
-      if (target && !seen.has(target.id)) {
-        seen.add(target.id);
-        ordered.push(target);
-      }
-    };
-    const prefer = this.options.textgenPrefer;
-    if (prefer) {
-      push((this.options.textgenTargets ?? []).find((t) => t.id === prefer || t.harness === prefer));
-    }
-    push(this.options.resolveTarget(currentTargetId));
-    for (const target of this.options.textgenTargets ?? []) push(target);
-
-    const candidates: TextgenCandidate[] = [];
-    for (const target of ordered) {
-      try {
-        candidates.push({
-          harness: target.harness,
-          adapter:
-            this.bindings.get(
-              this.bindingKey(this.mainLaneId(), target.id),
-            )?.adapter ??
-            this.options.createAdapter(target, {
-              openApproval: () =>
-                Promise.reject(new Error("textgen cannot open Harness approvals")),
-              log: (entry) => this.options.session.log({ ...entry, harnessTargetId: target.id }),
-              // textgen adapter 不开 session、不上报原生事件；sink 就位但不产生流量。
-              nativeEvent: () => {},
-            }),
-        });
-      } catch (error) {
-        // 候选构造也是降级链的一部分；某个 provider 配置损坏不能阻断其他家。
-        this.options.session.log({
-          level: "warn",
-          source: "aide",
-          component: "textgen",
-          harness: target.harness,
-          harnessTargetId: target.id,
-          message: "textgen candidate initialization failed, falling back",
-          attributes: { error: error instanceof Error ? error.message : String(error) },
-        });
-      }
-    }
-    return candidates;
   }
 
   /**
@@ -1823,7 +826,7 @@ export class Controller {
    * 启动与投递失败（stopReason:"error"）。
    */
   private synthesizeTerminal(
-    record: Pick<TurnRecord<HarnessBinding>, "binding" | "turnId" | "status">,
+    record: Pick<QueueRun<HarnessBinding>, "binding" | "invocationId" | "status">,
     opts: { message?: string; stopReason: StopReason },
   ): void {
     if (record.status === "finalized") return;
@@ -1832,7 +835,7 @@ export class Controller {
         record.binding,
         {
           kind: "_aide_error_update",
-          turnId: record.turnId,
+          invocationId: record.invocationId,
           payload: { message: opts.message, retryable: false },
         },
         { type: "aide" },
@@ -1842,7 +845,7 @@ export class Controller {
       record.binding,
       {
         kind: "state_update",
-        turnId: record.turnId,
+        invocationId: record.invocationId,
         payload: { state: "idle", stopReason: opts.stopReason },
       },
       { type: "aide" },
@@ -1850,27 +853,27 @@ export class Controller {
   }
 
   /**
-   * 同步获取（创建即启动）HarnessBinding：Adapter 构造和可信 Event sink 在这里绑定，
+   * 同步获取 HarnessBinding，调用入账后才启动：Adapter 构造和可信 Event sink 在这里绑定，
    * runQueueItem 因此能在 open() 完成之前落 user_message。实际启动生命周期由 binding 拥有。
    */
-  private bindingKey(laneId: string, harnessTargetId: string): string {
-    return `${laneId}\0${harnessTargetId}`;
+  private bindingKey(contextId: string, harnessTargetId: string): string {
+    return `${contextId}\0${harnessTargetId}`;
   }
 
   private bindingFor(
-    laneId: string,
+    contextId: string,
     harnessTargetId: string,
-    setupTurnId?: string,
+    setupInvocationId?: string,
   ): HarnessBinding {
-    const key = this.bindingKey(laneId, harnessTargetId);
+    const key = this.bindingKey(contextId, harnessTargetId);
     let binding = this.bindings.get(key);
     if (!binding) {
-      const lane = this.options.session.meta.lanes[laneId];
-      if (!lane) throw new Error(`Lane not found: ${laneId}`);
+      const context = this.options.session.meta.contexts[contextId];
+      if (!context) throw new Error(`Execution context not found: ${contextId}`);
       const target = this.targetFor(harnessTargetId);
       const adapter = this.options.createAdapter(target, {
         openApproval: (approval, context) =>
-          this.openHarnessApproval(laneId, target.id, approval, context),
+          this.openHarnessApproval(contextId, target.id, approval, context),
         log: (entry) =>
           this.options.session.log({ ...entry, harnessTargetId: target.id }),
         nativeEvent: (event) =>
@@ -1878,31 +881,31 @@ export class Controller {
             target.id,
             target.harness,
             event,
-            laneId,
+            contextId,
           ),
       });
       let created!: HarnessBinding;
       created = new HarnessBinding({
-        laneId,
+        contextId,
         target,
         cwd: this.options.session.meta.cwd,
         adapter,
         session: this.options.session,
-        setupTurnId,
+        setupInvocationId: setupInvocationId,
         modelPreference: this.options.modelPreferences?.[target.id],
         effortPreference: this.options.effortPreferences?.[target.id],
         eventSink: (event) => this.harnessHooks.acceptHarnessEvent(created, event),
       });
       binding = created;
       this.bindings.set(key, created);
-      created.start();
     }
     return binding;
   }
 
-  private async ensureHarness(laneId: string, harnessTargetId: string): Promise<HarnessBinding> {
-    const key = this.bindingKey(laneId, harnessTargetId);
-    const binding = this.bindingFor(laneId, harnessTargetId);
+  private async ensureHarness(contextId: string, harnessTargetId: string): Promise<HarnessBinding> {
+    const key = this.bindingKey(contextId, harnessTargetId);
+    const binding = this.bindingFor(contextId, harnessTargetId);
+    binding.start();
     if (binding.isStarting) {
       try {
         await binding.ensure();

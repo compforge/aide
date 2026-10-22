@@ -381,7 +381,7 @@ export class CodexEventHandler {
               source: "harness",
               component: "codex.notification",
               harness: "codex",
-              turnId: rt.activeTurn?.turnId,
+              invocationId: rt.activeTurn?.turnId,
               message: `unmapped codex notification: ${method}`,
               attributes: { method, count },
             });
@@ -417,7 +417,7 @@ export class CodexEventHandler {
         };
         if (rt.activeTurn) rt.activeTurn.sawOutput = true;
         const result = await this.options.openApproval(approval, {
-          ...(rt.activeTurn?.turnId ? { turnId: rt.activeTurn.turnId } : {}),
+          ...(rt.activeTurn?.turnId ? { invocationId: rt.activeTurn.turnId } : {}),
           raw: params,
         });
         if (result.kind === "cancelled") {

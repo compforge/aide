@@ -14,7 +14,6 @@ import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { PluginResourceStore as BaseResourceStore, type PluginResourceStoreOptions } from "../src/host/plugin/resource/store.ts";
 import { definition } from "./fixtures/resource-definition.ts";
 import type { ScheduledHarnessInvocation } from "../src/host/plugin/harness-invocation.ts";
-import { MAIN_LANE_ID } from "../src/host/lane.ts";
 import { SessionStore } from "../src/host/store/store.ts";
 
 interface Spec {
@@ -170,9 +169,8 @@ describe("plugin Manager", () => {
       harnessTargetId: "claude",
       blocks: [{ type: "text", text: "Implement run_1." }],
       source: "plugin",
-      newLane: false,
     });
-    expect(scheduled[0]?.laneId).not.toBe(MAIN_LANE_ID);
+    expect(scheduled[0]?.contextId).toMatch(/^resource:/);
     expect(session.projection.approvals.size).toBe(0);
     expect(session.ledger.read().filter((event) =>
       event.kind === "approval.requested" ||
@@ -195,20 +193,20 @@ describe("plugin Manager", () => {
       },
       harness: "claude",
       harnessTargetId: input.harnessTargetId,
-      turnId: input.turnId,
+      invocationId: input.invocationId,
       payload: {
         messageId: input.messageId,
         content: [...input.blocks],
       },
     });
     session.appendEvent({
-      kind: "_aide_turn_summary",
+      kind: "_aide_invocation_summary",
       source: { type: "aide" },
       harness: "claude",
       harnessTargetId: input.harnessTargetId,
-      turnId: input.turnId,
+      invocationId: input.invocationId,
       payload: {
-        turnId: input.turnId,
+        invocationId: input.invocationId,
         stopReason: "end_turn",
         agentText: "Implemented.",
         toolCalls: [],

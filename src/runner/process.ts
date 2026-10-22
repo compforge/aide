@@ -1,11 +1,10 @@
 import type { RuntimeScope } from "../protocol/runtime.ts";
 import { Controllers } from "./controllers.ts";
 import { createConnectorClient } from "../connector-client.ts";
-import type { CommandDefinition, CommandContext, CommandInput, CommandSubmitInput, CommandSubmitReceipt, Controller, EventHandler, Hook, HookStage, HookSubjectMap, Mention, PluginContext, PluginDataDirectories, PluginInstance, PluginLogContext, PluginLogLevel, PluginPackage, ReconcileSnapshot, Resource, ResourceClient, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType, Source, SourceContext, ToastMessage, Watch } from "@compforge/aide-plugin";
+import type { CommandDefinition, CommandContext, CommandInput, Controller, Hook, HookStage, HookSubjectMap, Mention, PluginContext, PluginDataDirectories, PluginInstance, PluginLogContext, PluginLogLevel, PluginPackage, ReconcileSnapshot, Resource, ResourceClient, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType, ToastMessage } from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../protocol/ipc.ts";
 import {
-  createHookContext,
-  createReconcileContext,
+  createHookContext
 } from "../plugin-context.ts";
 import {
   type ExecutionScope,
@@ -178,24 +177,8 @@ function commandRegistration(command: CommandDefinition): PluginRegistration {
     kind: "command",
     handlerId: handler(
       `command:${command.name}`,
-      (async (input: CommandInput, snapshot: Omit<CommandContext, "verbs">) => {
-        let active = true;
-        const invoke = (request: HostRequest) => {
-          if (!active) throw new Error("Command execution is no longer active");
-          return callHost(request);
-        };
-        try {
-          return await command.execute(input, Object.freeze({
-            ...snapshot,
-            verbs: Object.freeze({
-              submit: async (input: CommandSubmitInput) =>
-                await invoke({ method: "command.verb", executionId: snapshot.executionId, verb: "submit", input }) as CommandSubmitReceipt,
-              configureModel: async (input: { model?: string; effort?: string }) => {
-                await invoke({ method: "command.verb", executionId: snapshot.executionId, verb: "configureModel", input });
-              },
-            }),
-          }));
-        } finally { active = false; }
+      (async (input: CommandInput, commandContext: CommandContext) => {
+        return await command.execute(input, Object.freeze(commandContext));
       }) as (...args: never[]) => unknown,
     ),
     name: command.name,

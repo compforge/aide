@@ -55,7 +55,7 @@ export class ApplicationRuntime {
       }
       const cwd = resolve(options.cwd);
       if (this.execution.meta.cwd !== cwd) {
-        this.execution.updateMeta({ cwd, lanes: Object.fromEntries(Object.entries(this.execution.meta.lanes).map(([key, lane]) =>
+        this.execution.updateMeta({ cwd, contexts: Object.fromEntries(Object.entries(this.execution.meta.contexts).map(([key, lane]) =>
           [key, { ...lane, harnessSessions: {} }])), harnessSessions: {} });
       }
       for (const target of this.targets) this.registerTarget(target);
@@ -74,7 +74,7 @@ export class ApplicationRuntime {
   registerTarget(target: { id: string; harness: string; model?: string; effort?: string }) {
     const previous = this.execution.meta.harnessTargets[target.id];
     if (previous && previous.harness !== target.harness) {
-      this.execution.updateMeta({ lanes: Object.fromEntries(Object.entries(this.execution.meta.lanes).map(([key, lane]) => {
+      this.execution.updateMeta({ contexts: Object.fromEntries(Object.entries(this.execution.meta.contexts).map(([key, lane]) => {
         const { [target.id]: _old, ...harnessSessions } = lane.harnessSessions;
         return [key, { ...lane, harnessSessions }];
       })), harnessSessions: {} });

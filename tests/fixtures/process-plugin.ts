@@ -29,10 +29,8 @@ const plugin: PluginPackage = {
           return { kind: "message", text: JSON.stringify(rejected) };
         }
 
-        if (input.argument === "submit") {
-          await command.verbs.configureModel({ model: "fast", effort: "medium" });
-          const receipt = await command.verbs.submit({ prompt: "task" });
-          return { kind: "message", text: JSON.stringify({ command: command.command, target: command.target, receipt }) };
+        if (input.argument === "command-context") {
+          return { kind: "message", text: JSON.stringify(Object.keys(command).sort()) };
         }
         if (input.argument === "data-dirs") {
           return {
@@ -84,22 +82,22 @@ const plugin: PluginPackage = {
     });
     context.hooks.register({
       hookId: "process-input",
-      stage: "view.input",
+      stage: "harness.input",
       async run(hook) {
         context.logger.info("Process Hook observed input", {
           component: "hook",
-          attributes: { inputId: hook.subject.inputId },
+          attributes: { inputId: hook.subject.invocationId },
         });
 
-        if (hook.subject.input.kind !== "prompt" || hook.subject.input.text !== "say from hook") return;
+        if (hook.subject.invocationId !== "say-from-hook") return;
         await hook.verbs.action("notify", { text: "Continue from Hook?" });
       },
     });
     context.hooks.register({
       hookId: "process-output",
-      stage: "view.output",
+      stage: "harness.output",
       async run(hook) {
-        if (hook.subject.kind !== "transcript") return;
+        if (hook.subject.kind !== "agent_message") return;
         await hook.verbs.action("notify", { text: "Continue outbound publication?" });
       },
     });

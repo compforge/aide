@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import type { HarnessAdapter, HarnessEventSink, HarnessSessionBindingSink, HarnessSessionHandle,
-  NativeEventSink, OpenOptions, PromptInput, SendTurnReceipt } from "../adapter.ts";
+import type {
+  HarnessAdapter, HarnessEventSink, HarnessSessionBindingSink, HarnessSessionHandle,
+  NativeEventSink, OpenOptions, PromptInput, SendTurnReceipt
+} from "../adapter.ts";
 import { unsupportedPromptBlocks } from "../adapter.ts";
 import type { LogSink } from "../../logging.ts";
 
@@ -77,7 +79,7 @@ export class PiAdapter implements HarnessAdapter {
     const unsupported = unsupportedPromptBlocks(blocks, this.capabilities);
     if (unsupported.length) throw new Error(`Pi does not support prompt blocks: ${unsupported.join(", ")}`);
     const text = blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
-    const turn: Turn = { id: input.turnId, cancelled: false };
+    const turn: Turn = { id: input.invocationId, cancelled: false };
     session.active = turn;
     this.log("Pi turn accepted", turn.id);
     // Admission precedes execution; subsequent failures must reach the event stream.
@@ -130,33 +132,33 @@ export class PiAdapter implements HarnessAdapter {
     if (!turn) return;
     if (event.type === "message_start" && event.message.role === "assistant") {
       const previous = turn.lastMessage;
-      if (previous?.text) session.sink({ kind: "agent_message", turnId: turn.id,
+      if (previous?.text) session.sink({ kind: "agent_message", invocationId: turn.id,
         payload: { messageId: previous.id, phase: "commentary", content: [{ type: "text", text: previous.text }] } });
       turn.streaming = { messageId: randomUUID(), thoughtId: randomUUID() };
     } else if (event.type === "message_update" && event.message.role === "assistant") {
       const delta = event.assistantMessageEvent;
       if (delta.type !== "text_delta" && delta.type !== "thinking_delta") return;
       const ids = turn.streaming ??= { messageId: randomUUID(), thoughtId: randomUUID() };
-      session.sink({ kind: delta.type === "text_delta" ? "agent_message_chunk" : "agent_thought_chunk", turnId: turn.id,
+      session.sink({ kind: delta.type === "text_delta" ? "agent_message_chunk" : "agent_thought_chunk", invocationId: turn.id,
         payload: { messageId: delta.type === "text_delta" ? ids.messageId : ids.thoughtId, content: { type: "text", text: delta.delta } } });
     } else if (event.type === "message_end" && event.message.role === "assistant") {
       const message = event.message;
       const ids = turn.streaming ?? { messageId: randomUUID(), thoughtId: randomUUID() };
       turn.streaming = undefined;
       const thought = message.content.filter((part) => part.type === "thinking").map((part) => part.thinking).join("\n");
-      if (thought) session.sink({ kind: "agent_thought", turnId: turn.id,
+      if (thought) session.sink({ kind: "agent_thought", invocationId: turn.id,
         payload: { messageId: ids.thoughtId, content: [{ type: "text", text: thought }] } });
       turn.lastMessage = { id: ids.messageId, text: message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n"),
         stop: message.stopReason, error: message.errorMessage };
-      if (turn.lastMessage.text) session.sink({ kind: "agent_message", turnId: turn.id,
+      if (turn.lastMessage.text) session.sink({ kind: "agent_message", invocationId: turn.id,
         payload: { messageId: turn.lastMessage.id, content: [{ type: "text", text: turn.lastMessage.text }] } });
-      session.sink({ kind: "usage_update", turnId: turn.id, payload: { inputTokens: message.usage.input,
+      session.sink({ kind: "usage_update", invocationId: turn.id, payload: { inputTokens: message.usage.input,
         outputTokens: message.usage.output, cacheReadTokens: message.usage.cacheRead, cacheWriteTokens: message.usage.cacheWrite } });
     } else if (event.type === "tool_execution_start") {
-      session.sink({ kind: "tool_call_update", turnId: turn.id, payload: { toolCallId: event.toolCallId,
+      session.sink({ kind: "tool_call_update", invocationId: turn.id, payload: { toolCallId: event.toolCallId,
         title: event.toolName, status: "in_progress", rawInput: event.args } });
     } else if (event.type === "tool_execution_end") {
-      session.sink({ kind: "tool_call_update", turnId: turn.id, payload: { toolCallId: event.toolCallId,
+      session.sink({ kind: "tool_call_update", invocationId: turn.id, payload: { toolCallId: event.toolCallId,
         title: event.toolName, status: event.isError ? "failed" : "completed", rawOutput: event.result } });
     } else if (event.type === "agent_settled") {
       if (session.contextFailure) turn.settled = { reason: "error", error: session.contextFailure };
@@ -176,16 +178,16 @@ export class PiAdapter implements HarnessAdapter {
     const turn = session.active;
     if (!turn) return;
     session.active = undefined;
-    if (reason === "end_turn" && turn.lastMessage) session.sink({ kind: "agent_message", turnId: turn.id,
+    if (reason === "end_turn" && turn.lastMessage) session.sink({ kind: "agent_message", invocationId: turn.id,
       payload: { messageId: turn.lastMessage.id, phase: "final", content: [{ type: "text", text: turn.lastMessage.text }] } });
-    if (reason === "error") session.sink({ kind: "_aide_error_update", turnId: turn.id,
+    if (reason === "error") session.sink({ kind: "_aide_error_update", invocationId: turn.id,
       payload: { code: "pi_execution_failed", message: error ?? "Pi execution failed", retryable: false, willRetry: false } });
     this.log("Pi turn settled", turn.id, reason);
-    session.sink({ kind: "state_update", turnId: turn.id, payload: { state: "idle", stopReason: reason } });
+    session.sink({ kind: "state_update", invocationId: turn.id, payload: { state: "idle", stopReason: reason } });
   }
 
   private log(message: string, turnId: string, reason?: string): void {
     this.options.log?.({ level: reason === "error" ? "error" : "info", source: "harness", component: "pi.adapter",
-      harness: this.harness, message, turnId, ...(reason ? { attributes: { reason } } : {}) });
+      harness: this.harness, message, invocationId: turnId, ...(reason ? { attributes: { reason } } : {}) });
   }
 }

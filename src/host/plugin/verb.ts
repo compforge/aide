@@ -25,7 +25,7 @@ import type {
 
 type VerbSession = Pick<
   SessionHandle,
-  "id" | "meta" | "ledger" | "projection" | "appendEvent" | "subscribe" | "requireLane" | "setLane"
+  "id" | "meta" | "ledger" | "projection" | "appendEvent" | "subscribe" | "requireExecutionContext" | "setExecutionContext"
 >;
 
 interface ActiveExecution {
@@ -284,15 +284,14 @@ export class Verb {
     }
     if (this.executions.get(context.executionId)?.interrupted) return { state: "dismissed" };
     const key = resourceExecutionKey(context);
-    if (!this.session?.meta.lanes[key]) this.session?.setLane(key, { laneId: key, createdFor: { type: "session" }, harnessSessions: {} });
+    if (!this.session?.meta.contexts[key]) this.session?.setExecutionContext(key, { contextId: key, harnessSessions: {} });
     const snapshot = this.harnessInvocations.record({
       scope: context,
       invocation: {
         verb: request.verb,
         title: request.input.title,
         prompt: request.input.prompt,
-        laneId: key,
-        newLane: false,
+        contextId: key,
         harnessTargetId,
         freshContext: request.input.freshContext,
       },
@@ -304,13 +303,13 @@ export class Verb {
       snapshot.invocationId,
       deadline,
     );
-    if (terminal.phase === "completed" && terminal.result && terminal.laneId) {
+    if (terminal.phase === "completed" && terminal.result && terminal.contextId) {
       return Object.freeze({
         state: "success",
         value: {
           outcome: "completed" as const,
           invocationId: terminal.invocationId,
-          result: (({ turnId, ...result }) => result)(terminal.result),
+          result: (({ invocationId, ...result }) => result)(terminal.result),
         },
       });
     }
@@ -378,9 +377,9 @@ export class Verb {
     timer.unref?.();
     try {
       const terminal = await this.harnessInvocations.wait(invocationId);
-      if (terminal.phase === "cancelled" && terminal.turnId && this.session?.projection.activeTurns.has(terminal.turnId)) {
+      if (terminal.phase === "cancelled" && terminal.invocationId && this.session?.projection.activeInvocations.has(terminal.invocationId)) {
         await new Promise<void>((resolve) => {
-          const done = () => { if (!this.session!.projection.activeTurns.has(terminal.turnId!)) { unsubscribe(); resolve(); } };
+          const done = () => { if (!this.session!.projection.activeInvocations.has(terminal.invocationId!)) { unsubscribe(); resolve(); } };
           const unsubscribe = this.session!.subscribe(done);
           done();
         });
@@ -430,7 +429,7 @@ export class Verb {
           component: "plugin.harness-invocation",
           message: "HarnessInvocation dispatch failed",
           pluginInstanceId: request.pluginInstanceId,
-          turnId: request.turnId,
+          invocationId: request.invocationId,
           harnessTargetId: request.harnessTargetId,
           error: logError(error),
           attributes: { harnessInvocationId: request.invocationId },

@@ -85,11 +85,12 @@ export function createHookContext<S extends HookStage>(
   scope: ExecutionScope,
   invoke: InvokeVerb,
 ): HookContext<S> {
+  const { harness: _harness, ...verbs } = createPluginVerbs(scope, invoke);
   const context = Object.freeze({
     stage,
     subject,
     snapshot,
-    verbs: createPluginVerbs(scope, invoke),
+    verbs: Object.freeze(verbs),
   });
   hookScopes.set(context, scope);
   return context;

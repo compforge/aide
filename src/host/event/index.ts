@@ -13,12 +13,8 @@ import type {
   ContextSnapshot,
 } from "../context/delivery.ts";
 import type {
-  AudioBlock,
-  EmbeddedResourceBlock,
   ImageBlock,
-  PromptBlock,
-  ResourceLinkBlock,
-  TextBlock,
+  PromptBlock, TextBlock
 } from "../harness/prompt-blocks.ts";
 export type {
   AudioBlock,
@@ -28,7 +24,7 @@ export type {
   ResourceLinkBlock,
   TextBlock,
 } from "../harness/prompt-blocks.ts";
-export const ENVELOPE_VERSION = 7 as const;
+export const ENVELOPE_VERSION = 8 as const;
 
 /**
  * 事实来源：回答“谁对这条 Event 负责”，不是 payload 中行为主体的角色，也不承载执行坐标。
@@ -398,7 +394,7 @@ export interface UsageUpdate {
   isEstimated?: boolean;
 }
 
-export interface TurnSummaryToolCall {
+export interface InvocationSummaryToolCall {
   toolCallId: string;
   title?: string;
   kind?: string;
@@ -409,14 +405,14 @@ export interface TurnSummaryToolCall {
  * turn 结束时落盘的汇总事件：人可 grep、@ 引用的紧凑投影数据源、reduce 的 checkpoint。
  * 见 docs/workflow.md“append、reduce 与 Projection”。
  */
-export interface TurnSummary {
-  turnId: string;
+export interface InvocationSummary {
+  invocationId: string;
   stopReason?: StopReason;
   userText?: string;
   agentText?: string;
   /** Only messages explicitly designated as final by the Harness. */
   finalText?: string;
-  toolCalls: TurnSummaryToolCall[];
+  toolCalls: InvocationSummaryToolCall[];
   usage?: UsageUpdate;
   startedAt?: string;
   endedAt?: string;
@@ -428,9 +424,8 @@ export interface HarnessInvocationRecorded extends ExecutionAssociation {
   verb: "harness";
   title: string;
   prompt: string;
-  /** Existing Lane used as the execution Lane or as the parent of a new Lane. */
-  laneId: string;
-  newLane: boolean;
+  /** Explicit resource execution context; freshContext resets its native binding history. */
+  contextId: string;
   freshContext?: boolean;
   harnessTargetId: string;
 }
@@ -438,10 +433,9 @@ export interface HarnessInvocationRecorded extends ExecutionAssociation {
 export interface HarnessInvocationScheduled {
   invocationId: string;
   messageId: string;
-  turnId: string;
   harnessTargetId: string;
   /** Aide-owned task line reserved for this invocation. */
-  laneId: string;
+  contextId: string;
 }
 
 export interface HarnessInvocationCancelled {
@@ -469,9 +463,9 @@ export interface ViewInputSettled {
   detail?: string;
 }
 
-/** Full durable order for one Lane's still-queued HarnessInputs. */
+/** Legacy replay only: persisted order of queued Harness inputs. */
 export interface QueueReordered {
-  laneId: string;
+  contextId: string;
   orderedMessageIds: string[];
 }
 
@@ -513,7 +507,7 @@ export type EventPayloadMap = {
   _aide_context_snapshot: ContextSnapshot;
   _aide_context_delivery_receipt: ContextDeliveryReceipt;
   _aide_delivery_attempt_update: HarnessDeliveryAttemptUpdate;
-  _aide_turn_summary: TurnSummary;
+  _aide_invocation_summary: InvocationSummary;
   _aide_harness_invocation_recorded: HarnessInvocationRecorded;
   _aide_harness_invocation_scheduled: HarnessInvocationScheduled;
   _aide_harness_invocation_cancelled: HarnessInvocationCancelled;
@@ -542,9 +536,9 @@ export interface EventEnvelope<K extends EventKind = EventKind> {
   /** 实际投递/产出事件的配置目标；Aide 自身事件或未进入 controller 的外部事实可缺省。 */
   harnessTargetId?: string;
   /** Aide-native task line; new Harness execution facts must carry it. */
-  laneId?: string;
+  contextId?: string;
   harnessSessionId?: string;
-  turnId?: string;
+  invocationId?: string;
   kind: K;
   payload: EventPayloadMap[K];
   raw?: unknown;
@@ -572,7 +566,7 @@ export type NewEvent<K extends EventKind = EventKind> = Omit<
  */
 export type EventDraft<K extends EventKind = EventKind> = Omit<
   NewEvent<K>,
-  "source" | "harness" | "harnessTargetId" | "laneId"
+  "source" | "harness" | "harnessTargetId" | "contextId"
 >;
 
 /** EventDraft 的判别联合版本，供 adapter sink 按 kind 正确收窄 payload。 */

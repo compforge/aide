@@ -74,20 +74,8 @@ export interface PluginRunnerClientOptions extends PluginRunnerCallbacks {
  */
 export class PluginRunnerClient {
   private readonly controllerTimers = new Map<string, { timer?: ReturnType<typeof setTimeout>; blockers: number }>();
-  private readonly commandContexts = new Map<string, CommandContext>();
-
-  async invokeCommand(
-    handlerId: string,
-    input: CommandInput,
-    context: CommandContext,
-  ): Promise<CommandResult | void> {
-    this.commandContexts.set(context.executionId, context);
-    const { verbs: _verbs, ...snapshot } = context;
-    try {
-      return await this.invoke(handlerId, input, snapshot);
-    } finally {
-      this.commandContexts.delete(context.executionId);
-    }
+  async invokeCommand(handlerId: string, input: CommandInput, context: CommandContext): Promise<CommandResult | void> {
+    return await this.invoke(handlerId, input, context);
   }
 
   private readonly child: Bun.Subprocess<"ignore", "pipe", "pipe">;
@@ -389,13 +377,6 @@ export class PluginRunnerClient {
       case "connector.read":
         if (this.failed || this.closing) throw new Error("Plugin Runner is no longer active");
         return dispatchConnector(this.callbacks.connectors ?? emptyConnectors, request.request);
-      case "command.verb": {
-        const context = this.commandContexts.get(request.executionId);
-        if (!context || this.failed || this.closing) throw new Error("Command execution is no longer active");
-        if (request.verb === "submit") return await context.verbs.submit(request.input);
-        if (request.verb === "configureModel") return await context.verbs.configureModel(request.input);
-        throw new Error("Unsupported Command verb");
-      }
       case "verb.invoke":
         return await this.callbacks.invokeVerb(
           request.context,

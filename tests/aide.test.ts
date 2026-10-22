@@ -309,8 +309,7 @@ test("default Work target uses Pi and discards stale Codex native bindings while
   const root = mkdtempSync(join(tmpdir(), "aide-default-pi-"));
   const session = new SessionStore(root).createSession({ id: "aide:execution", cwd: root });
   session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex", model: "previous-model" });
-  const lane = session.meta.lanes.main!;
-  session.setLane("main", { ...lane, harnessSessions: { default: {
+  session.setExecutionContext("work-context", { contextId: "work-context", harnessSessions: { default: {
     harness: "codex", harnessSessionId: "old-native-id", resumeState: { version: 1, data: { id: "old-native-id" } },
   } } });
   const seen: string[] = [];
@@ -323,8 +322,8 @@ test("default Work target uses Pi and discards stale Codex native bindings while
   const restored = new SessionStore(root).openSession("aide:execution");
   assert.equal(restored.meta.harnessTargets.default!.harness, "pi");
   assert.equal(restored.meta.harnessTargets.default!.model, undefined);
-  assert.equal(restored.meta.lanes.main!.harnessSessions.default?.resumeState, undefined);
-  assert.equal(restored.meta.lanes.main!.harnessSessions.default?.harnessSessionId, undefined);
+  assert.equal(restored.meta.contexts["work-context"]!.harnessSessions.default?.resumeState, undefined);
+  assert.equal(restored.meta.contexts["work-context"]!.harnessSessions.default?.harnessSessionId, undefined);
   await aide.personal.conversations.ensure("me", fixtureAddress("me"));
   await aide.start();
   await aide.work("me").create(task); await aide.settled();
@@ -368,14 +367,15 @@ test("restoring a Claude default keeps its claude-code native binding and clears
   const storage = new SessionStore(root);
   const session = storage.createSession({ id: "aide:execution", cwd: root });
   session.setHarnessTarget("default", { harnessTargetId: "default", harness: "claude" });
-  session.setLaneHarnessSession("main", "default", { harness: "claude-code", harnessSessionId: "native-claude",
+  session.setExecutionContext("work-context", { contextId: "work-context", harnessSessions: {} });
+  session.setContextHarnessSession("work-context", "default", { harness: "claude-code", harnessSessionId: "native-claude",
     resumeState: { version: 1, data: { id: "native-claude" } } });
   const options = fakeOptions({ execute: async () => done }, root);
   let aide = new Aide(root, { ...options, defaultTarget: { id: "default", harness: "claude" } }, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  assert.equal(storage.openSession("aide:execution").meta.lanes.main!.harnessSessions.default!.harnessSessionId, "native-claude");
+  assert.equal(storage.openSession("aide:execution").meta.contexts["work-context"]!.harnessSessions.default!.harnessSessionId, "native-claude");
   await aide.close();
   aide = new Aide(root, { ...options, defaultTarget: { id: "default", harness: "codex" } }, log);
-  assert.equal(storage.openSession("aide:execution").meta.lanes.main!.harnessSessions.default?.harnessSessionId, undefined);
+  assert.equal(storage.openSession("aide:execution").meta.contexts["work-context"]!.harnessSessions.default?.harnessSessionId, undefined);
   assert.equal(storage.listSessions().length, 1);
 });

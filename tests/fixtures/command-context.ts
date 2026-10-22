@@ -5,10 +5,7 @@ import { newId } from "../../src/host/event/ids.ts";
 export function commandContext(namespace: string, name: string): CommandContext {
   return {
     executionId: newId("cex"), command: { namespace, name },
-    verbs: {
-      async submit() { throw new Error("No command execution surface in this fixture"); },
-      async configureModel() { throw new Error("No command execution surface in this fixture"); },
-    },
+
   };
 }
 
