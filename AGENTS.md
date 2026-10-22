@@ -12,8 +12,13 @@ Aide 是小型、自托管的 personal agent，围绕用户交付的目标跨执
 src/
   main.ts                  # 启动 Channel 与 Harness
   app.ts                   # 按入口 Session ID 装配 CoreSession / Personal，恢复与汇总各会话
-  web/                     # 浏览器页面、脚本、样式与 Markdown 渲染
-  api/                     # HTTP handler、静态资源与 SSE，调用 Core / Personal 能力
+  web/                     # 浏览器页面；每页的 HTML、TS 入口、样式与交互模块放在一起
+    conversations/         # 导航、时间线、输入、工作与审批；main 管理轮询和 SSE
+    persons/               # 人物导航、资料和认识编辑
+    shared/                # DOM、HTTP、剪贴板、Markdown 与公共样式
+  api/                     # HTTP handler 与 SSE，调用 Core / Personal 能力
+    assets.ts              # 固定页面路由、浏览器入口打包和静态资源缓存
+    types.ts               # HTTP 展示投影的类型契约
   address.ts               # Address 入站校验与比较
   channel/                 # Lark 适配、共享消息协议与执行投影
     address.ts             # ChannelAddress 编码与平台 endpoint 解析
@@ -93,6 +98,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 ```
 
 ## 关键约定
+
+- Web 按页面组织，页面入口负责组合模块与轮询、SSE 生命周期；交互状态由对应模块持有。公共浏览器能力放在 `web/shared`，HTTP 投影通过 type-only import 使用，跨 Channel 的展示投影仍归 `channel`。
 
 - 根目录 `VERSION` 是产品版本。每次提交同步递增，默认 patch，同一提交只递增一次。
 - 每种插件自定义资源（CRD）在所属 plugin package 下使用独立目录，按资源名命名；该资源的模型、Reconcile 和专属辅助代码归入目录。插件装配和跨资源协作留在插件层，共用机制不强行归入某一种 CRD。目录聚合不改变 Host / Runner 的依赖边界。

@@ -207,7 +207,7 @@ test("Web deletes Tasks and Routines through WorkService and preserves other con
   const remove = (id: string, revision: number, conversationId = group) => fetch(base + "/work/delete", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, revision, conversationId }),
   });
-  for (const [path, type] of [["/app.js", "javascript"], ["/style.css", "text/css"]]) {
+  for (const [path, type] of [["/app.js", "javascript"], ["/app.css", "text/css"], ["/persons.js", "javascript"], ["/persons.css", "text/css"]]) {
     const response = await fetch(base + path);
     assert.equal(response.status, 200);
     assert.ok(response.headers.get("content-type")!.includes(type!));
