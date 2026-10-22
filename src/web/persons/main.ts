@@ -1,4 +1,5 @@
 import './style.css';
+import { personPage } from './pagination.ts';
 import { renderMarkdown } from '../shared/markdown.ts';
 import { byId as $, element as node, find } from '../shared/dom.ts';
 import { request, errorMessage } from '../shared/http.ts';
@@ -7,6 +8,7 @@ import type { Person, PersonIdentity } from '../../../plugins/personal/person/mo
 
 let people: PersonView[] = [], selected: PersonView;
 let dirty = false, editingUnderstanding = false, saving = false;
+let requestedPage: number | null = null, currentPage = 1;
 const initialId = new URL(location.href).searchParams.get('person');
 function hasUnsavedChanges() {
   return dirty || saving || (editingUnderstanding && $<HTMLTextAreaElement>('person-understanding').value !== selected.spec.profile.understanding);
@@ -14,10 +16,13 @@ function hasUnsavedChanges() {
 function renderList() {
   $('person-list').replaceChildren();
   const query = $<HTMLInputElement>('person-search').value.trim().toLowerCase();
-  for (const person of people.filter((p) => p.spec.name.toLowerCase().includes(query))) {
+  const result = personPage(people, query, requestedPage, selected?.metadata.name ?? initialId);
+  currentPage = result.page;
+  if (requestedPage !== null) requestedPage = currentPage;
+  for (const person of result.items) {
     const link = node('a', undefined, 'list-link'); link.href = '/people?person=' + encodeURIComponent(person.metadata.name);
     if (selected?.metadata.name === person.metadata.name) link.setAttribute('aria-current', 'page');
-    link.append(node('strong', person.spec.name + (person.isMe ? ' · 我' : '')), node('span', person.spec.profile.understanding.slice(0, 80) || '尚未积累认识', 'muted'));
+    link.append(node('strong', person.spec.name + (person.isMe ? ' · 我' : '')), node('span', person.spec.profile.understanding.trim().slice(0, 80) || '尚未积累认识', 'muted'));
     if (person.status.updatedAt) link.append(node('span', new Date(person.status.updatedAt).toLocaleString(), 'muted'));
     link.onclick = async (event) => {
       event.preventDefault();
@@ -26,7 +31,11 @@ function renderList() {
     };
     $('person-list').append(link);
   }
-  $('person-list-notice').textContent = people.length ? `${people.length} 位人物` : '还没有人物。';
+  $('person-pagination').hidden = result.pages <= 1;
+  $('person-page').textContent = `${result.page} / ${result.pages}`;
+  $<HTMLButtonElement>('person-previous').disabled = result.page <= 1;
+  $<HTMLButtonElement>('person-next').disabled = result.page >= result.pages;
+  $('person-list-notice').textContent = !people.length ? '还没有人物。' : result.total ? `${result.total} 位人物` : '没有匹配的人物。';
 }
 function identityRow(identity: PersonIdentity = { provider: '', scope: '', id: '' }) {
   const row = node('div', undefined, 'person-identity');
@@ -78,7 +87,9 @@ function savePerson(spec: Person) {
   return request<PersonView>('/persons/edit', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id: selected.metadata.name, uid: selected.metadata.uid, version: selected.metadata.resourceVersion, spec }) });
 }
-$<HTMLInputElement>('person-search').oninput = renderList;
+$<HTMLInputElement>('person-search').oninput = () => { requestedPage = 1; renderList(); };
+$('person-previous').onclick = () => { requestedPage = currentPage - 1; renderList(); };
+$('person-next').onclick = () => { requestedPage = currentPage + 1; renderList(); };
 $('person-editor').oninput = (event) => { if (event.target !== $<HTMLTextAreaElement>('person-understanding')) dirty = true; };
 $('identity-add').onclick = () => { identityRow(); dirty = true; };
 $<HTMLButtonElement>('person-reload').onclick = () => { if (!saving && (!hasUnsavedChanges() || confirm('重新加载将放弃尚未保存的修改，继续？'))) void select(selected.metadata.name); };
