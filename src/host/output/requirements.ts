@@ -45,7 +45,7 @@ export function requirementOutputs(requirements: ConnectorClient["requirements"]
  * @spec A non-idempotent comment is attempted once. Interrupted sending becomes uncertain, never an automatic resend.
  * @spec Preflight failures can retry; a saved Output and provider scope fix the destination before any write.
  * @spec Correlation receipts survive Output reclamation within the Host's configured dedup window.
- * @link docs/connector/meego.md
+ * @link docs/connector/requirements.md
  */
 export class RequirementOutputDelivery {
   private timer?: ReturnType<typeof setInterval>;

@@ -44,7 +44,7 @@ Output 的 `status` 由 Host 与 Channel 维护。Lark 持久记录 pending / se
 
 Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Conversation 删除后仍可完成投递。进展卡片只展示和确认发往该聊天的 Output。
 
-Meego 评论发送使用独立的 Host 投递器。没有已确认的提供方幂等键时，发送中断或超时进入 uncertain；匹配目标、正文及持久投递记录的回读可以确认成功，自动重发停止。详情见 [Meego](connector/meego.md)。
+需求平台评论发送使用独立的 Host 投递器。没有已确认的提供方幂等键时，发送中断或超时进入 uncertain；匹配目标、正文及持久投递记录的回读可以确认成功，自动重发停止。详情见 [需求平台](connector/requirements.md)。
 
 ## 关联、上下文与容量
 

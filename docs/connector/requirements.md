@@ -1,22 +1,25 @@
-# Meego：需求、评论与人物
+# 需求平台：需求、评论与人物
 
 Aide 持续观察指定负责人名下的工作项和讨论，把变化交给 Chief；Chief 可以忽略、直接答复，或交给 Task / Routine 跟进。答复使用独立 Output，Host 把它投递为指定工作项的评论。观察事实、理解人物和实际发送分别有自己的记录。
 
 ## 配置
 
-服务用户需要能执行 `meegle`，并已完成该 CLI 的登录。Aide 复用 CLI profile，不保存 OAuth 凭证。每条 CLI 命令有 20 秒超时和 4 MiB 输出上限。
+服务用户需要能执行提供方 CLI，并已完成该 CLI 的登录。Aide 复用 CLI profile，不保存 OAuth 凭证。每条 CLI 命令有 20 秒超时和 4 MiB 输出上限。
+
+Connector 声明位于 `connectors.requirements.<name>`，包含以下字段：
+
+| 字段 | 含义 |
+|---|---|
+| `provider` | 对应 Connector 实现的提供方标识 |
+| `projectKey` | 目标项目标识 |
+| `profile` | 提供方 CLI 的执行账号配置，可省略 |
+| `categories` | 工作项类别，例如 `story`、`issue` |
+| `assigneeField` | 负责人字段，缺省为 `current_status_operator` |
+| `me.userKey` | 被服务的人的稳定用户键，可省略 |
+
+配置好名为 `work` 的 Connector 后，Personal 的观察策略如下：
 
 ```yaml
-connectors:
-  requirements:
-    work:
-      provider: meego
-      projectKey: your-project-key
-      profile: your-meegle-profile
-      categories: [story, issue]
-      assigneeField: current_status_operator
-      me:
-        userKey: your-human-user-key
 plugins:
   personal:
     sources:
@@ -33,7 +36,7 @@ plugins:
 - `me.userKey` 标记被服务的人。启动时解析规范 host / project key，再把稳定 user key 加入 Personal.me 的外部身份。
 - `userKeys` 选择观察哪些负责人的工作；可以包含他人，不会把这些人标记成 Me。
 
-`me` 可省略。没有匹配的 Me 身份时，Input.relation 保持未知。Person 身份使用 `provider=meego`、规范 host/project scope 和 user key；显示名不参与身份匹配，也不凭同名把 Meego 与 Lark 人物合并。Connector 读取会贡献人物身份和姓名，Chief 通过 `profile_person` 积累认识。
+`me` 可省略。没有匹配的 Me 身份时，Input.relation 保持未知。Person 身份使用提供方标识、规范 host/project scope 和 user key；显示名不参与身份匹配，也不凭同名把不同平台的人物合并。Connector 读取会贡献人物身份和姓名，Chief 通过 `profile_person` 积累认识。
 
 ## 观察与恢复
 
@@ -43,7 +46,7 @@ plugins:
 
 Source 在发送 Input 前持久化页数据和输入计划，Input 写入成功后才更新对应检查点。单调观察序号让 A→B→A→B 中的两次 A→B 都得到保留；中断重试复用已冻结的 Input 身份和正文。读取失败保留检查点并记录错误。长评论的 Input.text 是有界预览，完整评论保留在 observation 中。
 
-评论有明确作者时设置可选 sender：作者是 Me 为 `sent`，结构化收件人中有 Me 为 `received`，Me 属于该观察范围为 `observed`。只接受提供方返回的稳定用户键，不把 Markdown 提及中的 Lark ID 当成 Meego user key。系统状态变化没有猜测的 sender。relation 表达信息与我的关系，不授予执行或发信权限。
+评论有明确作者时设置可选 sender：作者是 Me 为 `sent`，结构化收件人中有 Me 为 `received`，Me 属于该观察范围为 `observed`。只接受提供方返回的稳定用户键，不把 Markdown 提及中的 Lark ID 当成需求平台的 user key。系统状态变化没有猜测的 sender。relation 表达信息与我的关系，不授予执行或发信权限。
 
 这是一种周期观察：无法还原两次采样间已消失的状态，也不保证捕获窗口外对旧评论的编辑。工作项权限消失时保留错误，不推断为完成。没有接入 webhook。
 
@@ -52,7 +55,7 @@ Source 在发送 Input 前持久化页数据和输入计划，Input 写入成功
 Input.source 携带 `RequirementAddress`：
 
 ```ts
-{ kind: "requirement", source: "work", category: "story", id: "123", scope: "https://meego.example.com/canonical-project-key" }
+{ kind: "requirement", source: "work", category: "story", id: "123", scope: "https://requirements.example.com/canonical-project-key" }
 ```
 
 Chief 通过 `say({respondToInputId, text})` 回复该工作项，或显式指定已知 target。Source 会话没有自动默认地址。Output.receivers 记录话说给谁，不会隐式添加 @ 或通知名单。读取评论可用 `read_requirement_comments`，并沿 nextCursor 获取下一页。
