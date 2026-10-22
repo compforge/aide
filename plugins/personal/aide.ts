@@ -3,17 +3,16 @@ import { outputWrite } from "./output.ts";
 import type { OutputStore } from "../../src/host/output/store.ts";
 import { updateBatch } from "./conversation/state.ts";
 import { activeBatch } from "./conversation/batch.ts";
-import { appendConversationInput, assertInputCapacity } from "./conversation/input.ts";
+import { appendConversationInput } from "./conversation/input.ts";
 import { createPiAgent } from "../../agents/pi/agent.ts";
 import { inputPrinter } from "../../src/host/input/printer.ts";
-import { conversationPolicy } from "./conversation/config.ts";
 import type { Logger } from "pino";
 import type { ResourceType, InputReceipt } from "@compforge/aide-plugin";
 import type { Manager } from "../../src/host/plugin/manager.ts";
 import { CoreSession } from "../../src/host/core/index.ts";
 import { type SessionHandle } from "../../src/host/store/store.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
-import { IncomingSchema, type Incoming, type OutputDraft, type OutputView } from "./model.ts";
+import { IncomingSchema, type Incoming, type OutputView } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { output, Store } from "./store.ts";
 import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
@@ -59,7 +58,7 @@ export class Personal {
     this.store.conversations.subscribe((conversation) => {
       this.registerConversation(conversation.id);
       const batch = this.conversations.resource(conversation.id)?.status.batch;
-      if (batch?.cancelRequested && batch.executionId && ["running", "waiting"].includes(batch.phase) && !this.interruptedExecutions.has(batch.executionId)) {
+      if (batch?.cancelRequested && batch.executionId && batch.phase === "running" && !this.interruptedExecutions.has(batch.executionId)) {
         this.interruptedExecutions.add(batch.executionId);
         this.plugins.interruptExecution(batch.executionId);
       }
@@ -102,22 +101,7 @@ export class Personal {
         return b;
       };
       const verbs = this.plugins.executionVerbs(executionId, conversationId);
-      const tools = chiefTools(this.connectors, async (question, signal) => {
-        active(); signal?.throwIfAborted();
-        await updateBatch(this.plugins.resourceClient("personal"), initial, bound.id, () => ({ phase: "waiting", communicated: true }), executionId);
-        // Abort ends the Core wait as well; otherwise SDK cancellation would wait on its own tool forever.
-        const abort = () => this.plugins.interruptExecution(executionId);
-        signal?.addEventListener("abort", abort, { once: true });
-        try {
-          if (signal?.aborted) { abort(); signal.throwIfAborted(); }
-          const common = { title: question.title, prompt: question.prompt, timeoutMs: Math.max(1, Math.min(86400_000, Date.parse(bound.deadline!) - Date.now() - 1000)) };
-          return question.kind === "confirm" ? await verbs.confirm({ ...common, confirmLabel: "确认", declineLabel: "拒绝" })
-            : await verbs.ask({ ...common, allowOther: true, ...(question.choices ? { choices: question.choices } : {}) });
-        } finally {
-          signal?.removeEventListener("abort", abort);
-          await updateBatch(this.plugins.resourceClient("personal"), initial, bound.id, (b) => b.phase === "waiting" ? { phase: "running" } : {}, executionId);
-        }
-      }, async (quietReason) => {
+      const tools = chiefTools(this.connectors, async (quietReason) => {
         const b = active();
         if (b.context.responseRequired) throw new Error("Channel input cannot be dismissed silently");
         await updateBatch(this.plugins.resourceClient("personal"), initial, bound.id, () => ({ quietReason }), executionId);
@@ -157,8 +141,7 @@ export class Personal {
     if (conversation.metadata.uid !== uid || Number(conversation.metadata.resourceVersion) !== revision) return { deleted: false, reason: "changed" };
     const unfinished = conversation.status.pendingInputIds.length > 0 || activeBatch(conversation.status.batch);
     const executing = this.invocations().some((invocation) => invocation.conversationId === conversationId && ["queued", "running", "uncertain"].includes(invocation.phase));
-    const pendingQuestion = this.questions().some((item) => item.conversationId === conversationId && item.request.status === "pending");
-    if (unfinished || executing || pendingQuestion) return { deleted: false, reason: "busy" };
+    if (unfinished || executing) return { deleted: false, reason: "busy" };
     const hasWork = WORK_TYPES.some((type) => this.store.resources.list<WorkSpec, unknown>(type)
       .some((work) => work.spec.conversationId === conversationId));
     if (hasWork) return { deleted: false, reason: "work" };
@@ -182,7 +165,7 @@ export class Personal {
     for (const view of this.conversations.list()) {
       const c = this.conversations.resource(view.id)!;
       const batch = c.status.batch;
-      if (!batch || !["running", "waiting", "compacting"].includes(batch.phase)) continue;
+      if (!batch || !["running", "compacting"].includes(batch.phase)) continue;
       if (batch.phase === "compacting") {
         await updateBatch(this.plugins.resourceClient("personal"), c, batch.id, () => ({ executionId: undefined }));
         continue;
@@ -235,18 +218,6 @@ export class Personal {
     return result;
   }
 
-  /** Project original Core questions into the same channel outbox; delivery has its own dedup receipts. */
-  questions() {
-    return [...this.core.projection.interactions.values()].flatMap((item) => {
-      if (item.request.request.kind !== "question" || !item.pluginContext) return [];
-      const conversationId = item.pluginContext.conversationId;
-      const conversation = conversationId && this.conversations.resource(conversationId);
-      if (!conversation || item.request.createdAt < conversation.metadata.creationTimestamp || (item.pluginContext.resourceRef?.kind === CONVERSATION_TYPE.kind &&
-        item.pluginContext.resourceRef.uid !== conversation.metadata.uid)) return [];
-      return [{ conversationId: conversation.spec.id, request: item.request }];
-    });
-  }
-
   outputs(): OutputView[] {
     return this.store.read().outputs;
   }
@@ -265,40 +236,13 @@ export class Personal {
     await this.conversations.ensure();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
     this.registerConversation(input.conversationId);
-    const pending = this.questions().filter((item) => item.conversationId === input.conversationId && item.request.status === "pending");
-    const request = pending.length === 1 ? pending[0]!.request : undefined;
-    if (request?.request.kind === "question" && request.request.questions.length === 1) {
-      const question = request.request.questions[0]!;
-      const raw = input.text.trim();
-      let value = question.choices?.find((choice) => choice.value === raw || choice.label === raw)?.value;
-      if (!value && question.choices?.some((choice) => choice.value === "accept")) {
-        if (/^(同意|确认|可以|好的|是|yes|y)$/i.test(raw)) value = "accept";
-        if (/^(拒绝|不同意|不|否|不要|no|n)$/i.test(raw)) value = "decline";
-      }
-      if (!value && (!question.choices?.length || question.allowOther)) value = raw;
-      if (value) {
-        // Persist the reply identity before settling the Core Interaction. A redelivery cannot become a new command.
-        const resource = await this.acceptChannel(id, input, [], request.messageId);
-        const receipt = await this.core.resolveInteraction({ kind: "interaction_response", messageId: request.messageId },
-          async () => ({ kind: "question", outcome: "answered", answers: { [question.questionId]: [value!] } }));
-        if (!receipt.result) {
-          await this.conversations.archive(input.conversationId, [output(input.conversationId, "这个问题已失效，答复没有继续执行。请重新交办。", null, input.source)]);
-        }
-        return { inputId: resource.metadata.name, at: resource.metadata.creationTimestamp };
-      }
-      const notice = output(input.conversationId, "请先明确回复当前问题的选项（确认 / 拒绝），也可以从网页取消这次等待。", null, input.source);
-      const accepted = await this.acceptChannel(id, input, [notice], request.messageId);
-      return { inputId: accepted.metadata.name, at: accepted.metadata.creationTimestamp };
-    }
-    const accepted = await this.acceptChannel(id, input, []);
-    this.wake(CONVERSATION_TYPE, conversationKey(input.conversationId));
+    const accepted = await this.acceptChannel(id, input);
     this.log.info({ conversationId: input.conversationId, inputId: id, channelId: input.channelId, relation: accepted.spec.relation ?? "unknown" }, "Accepted Chief input");
     return { inputId: accepted.metadata.name, at: accepted.metadata.creationTimestamp };
   }
 
-  private async acceptChannel(id: string, input: Incoming, outputs: OutputDraft[], replyTo?: string) {
+  private async acceptChannel(id: string, input: Incoming) {
     const current = await this.conversations.ensure();
-    if (!current.status.pendingInputIds.includes(id)) assertInputCapacity(current, { origin: "channel", originId: input.channelId, text: input.text, replyTo }, conversationPolicy(this.options.conversation).maxPending);
     const me = await this.me;
     const relation = channelRelation(me?.spec ?? this.options.me, input);
     let sender;
@@ -313,10 +257,8 @@ export class Personal {
     }
     const fact = await this.conversations.submit(id, { attention: "immediate", sessionId: this.id, text: input.text, timezone: this.options.timezone,
       origin: "channel", originId: input.channelId, source: input.source, ...(sender ? { sender } : {}), ...(relation ? { relation } : {}),
-      ...(input.observation ? { observation: input.observation } : {}), ...(replyTo ? { replyTo } : {}) });
-    await appendConversationInput(this.plugins.resourceClient("personal"), { sessionId: this.id, name: current.metadata.name, uid: current.metadata.uid }, fact,
-      conversationPolicy(this.options.conversation).maxPending);
-    if (outputs.length) await this.conversations.archive(this.id, outputs);
+      ...(input.observation ? { observation: input.observation } : {}) });
+    await appendConversationInput(this.plugins.resourceClient("personal"), { sessionId: this.id, name: current.metadata.name, uid: current.metadata.uid }, fact);
 
     return this.conversations.input(fact.metadata.name, this.id)!;
   }

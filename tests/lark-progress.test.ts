@@ -41,7 +41,7 @@ function setup(t: TestContext) {
     }
   };
   const transport: LarkTransport = { async start() {}, close() {}, async send(...args) { record("text", args); },
-    cards: { async create(...args) { record("create", args); card = structuredClone(args[0]) as typeof card; return "card-1"; }, async send(...args) { record("send", args); },
+    cards: { async create(...args) { record("create", args); card = structuredClone(args[0]) as typeof card; return `card-${calls.filter((call) => call.kind === "create").length}`; }, async send(...args) { record("send", args); },
       async content(...args) { record("content", args); patchElement(card.body.elements, args[1], { content: args[2] }); },
       async patch(...args) { record("patch", args); for (const [id, value] of Object.entries(args[1])) patchElement(card.body.elements, id, value); },
       async settings(...args) { record("settings", args); card.config.streaming_mode = args[1]; },
@@ -55,7 +55,7 @@ function setup(t: TestContext) {
     async reopen() { await channel.close(); channel = new LarkChannel(home, "cli_progress", aide, transport, log, reader); } };
 }
 
-test("Lark streams think/content in one card, closes on question, resumes and persists final delivery", async (t) => {
+test("Lark finalizes a say question and uses a new card for the next Input", async (t) => {
   const f = setup(t);
   await f.channel.deliver();
   f.view({ phase: "running" }); await f.channel.deliver();
@@ -67,22 +67,24 @@ test("Lark streams think/content in one card, closes on question, resumes and pe
   assert.ok(contents.some((call) => call.args[1] === "think" && call.args[2] === "检查 **工作**"));
   assert.equal(contents.at(-1)?.args[2], "第一段回复", "Updates send accumulated text, not a token delta");
   f.messages.push(message("question", "确认继续吗？"));
-  f.view({ phase: "waiting", content: "确认继续吗？", messageIds: ["question"] });
+  f.view({ phase: "done", content: "确认继续吗？", messageIds: ["question"] });
   await f.channel.deliver();
   assert.ok(f.calls.find((call) => call.kind === "settings" && call.args[1] === false));
   const card = f.card;
   assert.equal(cardRegions(card).thought.expanded, false); assert.equal(cardRegions(card).envelope.expanded, true);
   assert.equal(f.calls.filter((call) => call.kind === "text").length, 0);
   const before = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, before);
-  f.view({ phase: "running", content: "继续检查", messageIds: [] }); await f.channel.deliver();
+  f.view({ id: "next-input", phase: "running", content: "继续检查", messageIds: [] }); await f.channel.deliver();
   f.messages.push(message("final", "检查完成")); f.view({ phase: "done", content: "检查完成", messageIds: ["final"] });
   await f.channel.deliver();
-  assert.equal(f.calls.filter((call) => call.kind === "create").length, 1);
-  assert.equal(f.calls.filter((call) => call.kind === "send").length, 1);
+  assert.equal(f.calls.filter((call) => call.kind === "create").length, 2);
+  assert.equal(f.calls.filter((call) => call.kind === "send").length, 2);
   assert.equal(f.calls.filter((call) => call.kind === "text").length, 0, "A finalized card replaces normal delivery of the same Message");
   const updates = f.calls.filter((call) => ["content", "settings", "update", "patch"].includes(call.kind));
-  const sequences = updates.map((call) => call.args[call.kind === "content" ? 3 : 2] as number);
-  assert.ok(sequences.every((value, index) => index === 0 || value > sequences[index - 1]!));
+  for (const cardId of ["card-1", "card-2"]) {
+    const sequences = updates.filter((call) => call.args[0] === cardId).map((call) => call.args[call.kind === "content" ? 3 : 2] as number);
+    assert.ok(sequences.every((value, index) => index === 0 || value > sequences[index - 1]!));
+  }
   const after = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, after);
 });
 
@@ -116,7 +118,7 @@ test("Lark collapses completed long replies with a bounded preview and preserves
 test("Lark keeps stable panels with compact defaults and exposes questions and failures in the preview", () => {
   const base: LarkProgress = { id: "visible", phase: "done", think: "", content: "已完成。", messageIds: [], overflow: false };
   for (const [phase, streaming, content] of [
-    ["done", false, base.content], ["waiting", false, "需要确认的项目\n".repeat(40)],
+    ["done", false, base.content], ["done", false, "需要确认的项目\n".repeat(40)],
     ["failed", false, "处理中断\n".repeat(40)], ["running", true, "正在输出\n".repeat(40)],
   ] as const) {
     const card = progressCard({ ...base, phase, content }, streaming);
@@ -124,7 +126,7 @@ test("Lark keeps stable panels with compact defaults and exposes questions and f
     const { envelope, thought, answer } = cardRegions(card);
     assert.equal(envelope.expanded, true);
     assert.equal(thought.expanded, false); assert.equal(answer.expanded, false);
-    assert.equal(cardPreviews({ ...base, phase, content }).answer_preview.text.lines, phase === "waiting" || phase === "failed" ? 1000 : 3);
+    assert.equal(cardPreviews({ ...base, phase, content }).answer_preview.text.lines, phase === "failed" ? 1000 : 3);
     const reply = answer.elements[0] as { element_id: string; content: string };
     assert.equal(reply.element_id, "content"); assert.equal(reply.content, content);
   }
@@ -140,12 +142,12 @@ test("Lark previews answer text across paragraphs, lists and code without trunca
   assert.equal((answer.elements[0] as { content: string }).content, text, "Expanded answer keeps its original Markdown");
 });
 
-test("Lark text updates preserve reader expansion across completion, reconnection and question resumption", async (t) => {
+test("Lark text updates preserve reader expansion across streaming, reconnection and completion", async (t) => {
   const f = setup(t); await f.channel.deliver();
   const { envelope, thought, answer } = cardRegions(f.card);
   thought.expanded = true; answer.expanded = true; envelope.expanded = false;
   f.view({ phase: "running", think: "当前思考", content: "正在回答" }); await f.channel.deliver();
-  f.view({ phase: "waiting", content: "请确认" }); await f.channel.deliver();
+  f.view({ content: "正在核对" }); await f.channel.deliver();
   await f.reopen();
   f.view({ phase: "running", content: "继续执行" }); await f.channel.deliver();
   f.messages.push(message("done", "最终回答"));
@@ -181,13 +183,12 @@ test("Lark card failure falls back to final text without reexecuting work", asyn
 });
 
 
-test("Lark retries the live layout when resuming a question card fails", async (t) => {
+test("Lark retries a failed live layout update after reconnecting", async (t) => {
   const f = setup(t); await f.channel.deliver();
-  f.view({ phase: "waiting", content: "哪个项目？" }); await f.channel.deliver();
   const update = f.transport.cards!.patch;
   let fail = true;
   f.transport.cards!.patch = async (...args) => { if (fail) { fail = false; throw new Error("layout update failed"); } await update(...args); };
-  f.view({ phase: "running", think: "读取答复", content: "继续" }); await f.channel.deliver();
+  f.view({ phase: "running", think: "读取资料", content: "继续" }); await f.channel.deliver();
   await f.reopen(); await f.channel.deliver();
   const card = f.card;
   assert.equal(card.config.streaming_mode, true);

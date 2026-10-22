@@ -1,6 +1,6 @@
 # @compforge/aide-plugin
 
-Public, host-independent contracts for Aide plugins. A plugin defines resources and business callbacks; Core owns persistence, scheduling, interactions and Harness execution; Runner schedules Controllers and Host owns durable state and external capabilities. The package contains types and small shared values, not a host or Runner implementation.
+Public, host-independent contracts for Aide plugins. A plugin defines resources and business callbacks; Core owns persistence, scheduling, Outputs and Harness execution; Runner schedules Controllers and Host owns durable state and external capabilities. The package contains types and small shared values, not a host or Runner implementation.
 
 See [plugin runtime](../../docs/plugin/README.md) for the process model and [Personal](../../docs/plugin/personal.md) for a built-in consumer. Start with the exported contracts in [src/index.ts](src/index.ts).
 
@@ -102,32 +102,28 @@ A resource may have one structural owner in the same concrete namespace. Ownersh
 
 Status belongs to the plugin. [ConditionedStatus](src/condition.ts) optionally represents current conditions, with one entry per type and transition time changing only when the condition status changes. The host does not interpret domain completion.
 
-## Verbs and interactions
+## Verbs and execution
 
-A [ReconcileContext](src/reconcile-context.ts) supplies snapshots and typed Core verbs. Interaction and Harness verbs return a closed outcome: success, dismissed, timeout or failure. The typed connector facade returns provider values and throws on failure or timeout. A negative confirmation is a successful business value, not an execution error.
+A [ReconcileContext](src/reconcile-context.ts) supplies snapshots and typed Core verbs. Say and Harness verbs return a closed outcome: success, dismissed, timeout or failure. The typed connector facade returns provider values and throws on failure or timeout.
 
 ```ts
-const decision = await execution.verbs.confirm({
-  title: "Continue work",
-  prompt: "Proceed with the proposed change?",
-  timeoutMs: 60_000,
-});
-// Inspect the typed result before requesting any follow-up action.
+const result = await execution.verbs.say({ text: "Which environment should I use?" });
+// The user can answer with a new Input; this execution does not wait for a reply.
 ```
 
 `execution.withContext({ conversationId, inputId, inputIds })` associates actions with their conversation independently of Harness selection. Core also records the initiating resource.
 
-Controllers use `execution.verbs.connectors({ timeoutMs })` for connector actions. Other components may use `context.connectors` directly. Connector verbs do not create an Interaction; timeout ends the wait without promising cancellation of the underlying provider operation.
+Controllers use `execution.verbs.connectors({ timeoutMs })` for connector actions. Other components may use `context.connectors` directly. Connector timeout ends the wait without promising cancellation of the underlying provider operation.
 
-`say({ text, inputIds?, respondToInputId?, target?, receivers?, idempotencyKey? })` persists an independent Output and returns `outputId`, without opening an Interaction or waiting for delivery. Input associations are optional and many-to-many; an omitted inputIds uses the execution inputId when present. A repeated idempotencyKey within the same Conversation incarnation and execution resolves to the same immutable Output. Use `execution.withContext({ conversationId, inputId, inputIds })` to select the context.
+`say({ text, inputIds?, respondToInputId?, target?, receivers?, idempotencyKey? })` persists an independent Output and returns `outputId`, without waiting for a reply or delivery. Input associations are optional and many-to-many; an omitted inputIds uses the execution inputId when present. A repeated idempotencyKey within the same Conversation incarnation and execution resolves to the same immutable Output. Use `execution.withContext({ conversationId, inputId, inputIds })` to select the context.
 
 `resources.commit(writes)` atomically creates/replaces/patches local plugin resources together with Core Output creation. Plugin writes share one concrete resource scope (one Session or the plugin shared scope) and storage transaction; validation, quota or version failures roll everything back. Notifications follow commit. Other Core mutations and external side effects cannot join this transaction. Output is readable through ResourceClient and has a Host Printer; only Host delivery updates its status. See [Output](../../docs/output.md).
 
-`ask` and `confirm` collect a decision. `draft` lets the user edit proposed input; `harness` requests execution. Draft and Harness requests pass through a durable Interaction gate, which host policy may approve automatically. Only an approved or submitted action creates a HarnessInvocation.
+`harness` creates a HarnessInvocation directly. Business ask, confirm, draft and Interaction contracts are removed. Native tool permissions and Hook trust remain explicit Host Approvals; requesting execution does not grant these permissions.
 
-For execution, `laneId` selects a Lane and `newLane: true` creates a side Lane. An explicit harnessTargetId pins the Target. A direct Harness request resolves an omitted Target immediately; a draft resolves it when submitted. The returned Turn records execution, not domain acceptance.
+For execution, `laneId` selects a Lane and `newLane: true` creates a side Lane. An explicit harnessTargetId pins the Target; otherwise the selected Target is resolved before dispatch. The returned Turn records execution, not domain acceptance.
 
-Every verb requires timeoutMs covering its entire gate, queue and execution wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
+Harness and connector calls require timeoutMs covering their wait; say only waits for Output persistence. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
 ## Communication addresses
 

@@ -97,24 +97,12 @@ describe("HarnessInvocationStore", () => {
     store.close();
   });
 
-  test("requires submitted Interaction blocks for a draft invocation", () => {
+  test("dispatches the supplied prompt directly without a human gate", () => {
     const handle = session();
     const store = new HarnessInvocationStore(handle);
-    expect(() => store.record(invocation(handle.id, {
-      verb: "draft",
-    }))).toThrow(
-      "draft HarnessInvocation requires blocks from a submitted Interaction",
-    );
-
-    const pending = store.record(invocation(handle.id, {
-      verb: "draft",
-      harnessTargetId: "claude",
-      blocks: [{ type: "text", text: "Implement only the focused fix." }],
-    }));
-    expect(store.scheduled(pending.invocationId)).toMatchObject({
-      source: "user",
-      blocks: [{ type: "text", text: "Implement only the focused fix." }],
-    });
+    const pending = store.record(invocation(handle.id, { prompt: "Implement the focused fix." }));
+    expect(store.scheduled(pending.invocationId)).toMatchObject({ source: "plugin", blocks: [{ type: "text", text: "Implement the focused fix." }] });
+    expect(handle.projection.approvals.size).toBe(0);
     store.close();
   });
 

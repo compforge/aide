@@ -4,7 +4,7 @@
 
 import type { PiConfig } from "./pi/config.ts";
 import { createPiAgent } from "../../../agents/pi/agent.ts";
-import type { HarnessAdapter, OpenInteraction, NativeEventSink } from "./adapter.ts";
+import type { HarnessAdapter, OpenApproval, NativeEventSink } from "./adapter.ts";
 import { ClaudeAdapter, probeClaudeTarget } from "./claude/adapter.ts";
 import { resolveClaudeTargetConfig } from "./claude/config.ts";
 import { claudeSessionInspector } from "./claude/native-session.ts";
@@ -36,7 +36,7 @@ export interface HarnessAdapterOptions {
   chiefSession?: PiSessionFactory;
   /** Adapter 工厂的实例坐标；工厂负责把 Target 配置 lowering 成具体 Adapter 依赖。 */
   target: HarnessTarget;
-  openInteraction: OpenInteraction;
+  openApproval: OpenApproval;
   log?: LogSink;
   nativeEvent?: NativeEventSink;
   targetConfig: HarnessTargetConfig;
@@ -96,10 +96,10 @@ export const HARNESS_REGISTRY = [
     probe: ({ cwd, env, targetConfig }) => probeCodexTarget({
       cwd, env, command: resolveCodexTargetConfig(targetConfig).command,
     }),
-    create: ({ target, openInteraction, log, nativeEvent, targetConfig, env, rootDir }) => {
+    create: ({ target, openApproval, log, nativeEvent, targetConfig, env, rootDir }) => {
       const config = resolveCodexTargetConfig(targetConfig);
       return new CodexAdapter({
-        openInteraction,
+        openApproval,
         log,
         nativeEvent,
         env,
@@ -114,10 +114,10 @@ export const HARNESS_REGISTRY = [
     shortName: "claude",
     color: "#ff9e64", // 橙
     sessionInspector: claudeSessionInspector,
-    create: ({ openInteraction, log, nativeEvent, targetConfig, env }) => {
+    create: ({ openApproval, log, nativeEvent, targetConfig, env }) => {
       const config = resolveClaudeTargetConfig(targetConfig);
       return new ClaudeAdapter({
-        openInteraction,
+        openApproval,
         log,
         nativeEvent,
         env,

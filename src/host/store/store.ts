@@ -818,7 +818,7 @@ export class SessionStore {
   /**
    * Fork 一个 AideSession：把 throughSeq（默认 head）之前的事件历史复制进新会话。
    * 复制的前缀与源是同一段逻辑历史（git-branch 语义）：seq 与 turn/message/toolCall/
-   * interaction 等领域对象 ID 原样保留，只换 session scope。Event 是 ledger append 的身份，
+   * approval 等领域对象 ID 原样保留，只换 session scope。Event 是 ledger append 的身份，
    * 换 scope 时重新签发 eventId，保证一个 eventId 只属于一个权威 ledger。
    * 谱系由 meta.forkedFrom 表达。
    * child 继承 HarnessTarget 偏好和逻辑 Lane 拓扑，但清空所有原生 session binding

@@ -25,7 +25,7 @@ export async function reconcileBatch(context: PluginContext, execution: Reconcil
   });
   try {
     if (batch.phase === "queued") {
-      // Human waits fit inside the total invocation deadline; no 180s wrapper around a day-long ask.
+      // The Harness invocation owns the full execution deadline.
       const result = await execution.verbs.harness({ title: "Chief", harnessTargetId: chiefTarget(initial.spec.id), laneId: conversationLane(initial),
         prompt: batch.context.prompt, freshContext: true, timeoutMs: 172800_000 });
       const current = (await read()).status.batch!;

@@ -7,7 +7,7 @@ import type {
   ToolEffect,
 } from "../../event/index.ts";
 import { codexCommandActionsAreReadOnly } from "./command-effect.ts";
-import type { PermissionOption } from "../../interaction/types.ts";
+import type { PermissionOption } from "../../approval/types.ts";
 
 export const FALLBACK_APPROVAL_OPTIONS: PermissionOption[] = [
   { optionId: "accept", name: "Allow once", polarity: "allow", lifetime: "once" },

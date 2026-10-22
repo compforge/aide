@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   MAX_VERB_TIMEOUT_MS,
-  type AskInput,
 } from "@compforge/aide-plugin";
 
 import {
@@ -116,11 +115,7 @@ describe("plugin Controller", () => {
       }],
       async reconcile(_context, resource) {
         reconciled.push(resource.metadata.namespace);
-        await _context.verbs.confirm({
-          timeoutMs: 1_000,
-          title: "Confirm",
-          prompt: "Continue?",
-        });
+        await _context.verbs.say({ text: "Observed" });
       },
       async invokeVerb(scope) {
         actionNamespaces.push(scope.namespace);
@@ -688,45 +683,31 @@ describe("plugin Controller", () => {
       store: resources,
       resourceType: REQ_LOOP_RUN,
       async reconcile(ctx) {
-        await ctx.verbs.ask({
+        await ctx.verbs.harness({
           timeoutMs: 0,
           title: "Review",
           prompt: "Continue?",
-          allowOther: true,
+          laneId: "main",
         });
       },
     });
     await expect(invalidDeadline.enqueue(key())).rejects.toThrow(
-      "ask timeoutMs must be a positive integer",
+      "harness timeoutMs must be a positive integer",
     );
     const excessiveDeadline = new Controller<Spec, Status>({
       store: resources,
       resourceType: REQ_LOOP_RUN,
       async reconcile(ctx) {
-        await ctx.verbs.ask({
+        await ctx.verbs.harness({
           timeoutMs: MAX_VERB_TIMEOUT_MS + 1,
           title: "Review",
           prompt: "Continue?",
-          allowOther: true,
+          laneId: "main",
         });
       },
     });
     await expect(excessiveDeadline.enqueue(key())).rejects.toThrow(
-      `ask timeoutMs must not exceed ${MAX_VERB_TIMEOUT_MS}`,
-    );
-    const ambiguousAsk = new Controller<Spec, Status>({
-      store: resources,
-      resourceType: REQ_LOOP_RUN,
-      async reconcile(ctx) {
-        await ctx.verbs.ask({
-          timeoutMs: 1_000,
-          title: "Review",
-          prompt: "Continue?",
-        } as AskInput);
-      },
-    });
-    await expect(ambiguousAsk.enqueue(key())).rejects.toThrow(
-      "ask without choices must set allowOther to true",
+      `harness timeoutMs must not exceed ${MAX_VERB_TIMEOUT_MS}`,
     );
     expect(
       () =>

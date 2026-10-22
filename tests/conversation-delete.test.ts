@@ -9,7 +9,7 @@ import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { httpChannel } from "../src/api/index.ts";
 import { conversationView } from "../src/channel/view.ts";
-import { seedInput, confirmInBatch } from "./conversation-fixture.ts";
+import { seedInput } from "./conversation-fixture.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });
@@ -55,11 +55,11 @@ test("Web deletes a revision-checked Conversation and preserves shared Input and
   assert.equal(aide.outputs().some((m) => m.id === "old"), true);
 });
 
-test("Conversation deletion rejects queued, running, waiting and associated Work without changing them", async (t) => {
+test("Conversation deletion rejects queued and running and associated Work without changing them", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-delete-busy-"));
   const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("No execution expected"); } }, dir), log);
   const scope = aide.session("shared");
-  for (const phase of [undefined, "running", "waiting"] as const) {
+  for (const phase of [undefined, "running"] as const) {
     const id = phase ?? "queued";
     await seedInput(scope.conversations, id, { conversationId: id, origin: "channel", originId: "web", text: id }, phase ? { phase } : {});
   }
@@ -67,7 +67,7 @@ test("Conversation deletion rejects queued, running, waiting and associated Work
   const routine = await aide.work("routine-owner").create({ kind: "routine", title: "保留安排", instruction: "check", trigger: { cron: null, timezone: "UTC", event: "changed" } });
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
-  for (const id of ["queued", "running", "waiting", "task-owner", "routine-owner"]) {
+  for (const id of ["queued", "running", "task-owner", "routine-owner"]) {
     const before = aide.findConversation(id)!.conversations.get(id)!;
     const response = await remove(id, before.revision);
     assert.equal(response.status, 409);
@@ -78,23 +78,17 @@ test("Conversation deletion rejects queued, running, waiting and associated Work
 });
 
 /** @case Reusing a Channel after deletion creates fresh native context and cannot replay old accepted messages. */
-test("Recreated Conversation has fresh execution context and no old questions or progress", async (t) => {
+test("Recreated Conversation has fresh execution context and no old outputs or progress", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-recreate-conversation-"));
   let aide: Aide;
   let calls = 0;
   aide = new Aide(dir, fakeOptions({ chief: async () => {
-    if (++calls === 1) {
-      await confirmInBatch(aide.session("me"), "me", "旧问题：继续吗？");
-      return "旧答案";
-    }
-    return "新答案";
+    return ++calls === 1 ? "旧答案" : "新答案";
   }, execute: async () => ({ action: "done", summary: "旧工作完成", notification: "旧工作回复", question: null, nextAt: null }) }, dir), log);
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
   await aide.receive(fixtureIncoming({ channelId: "web", id: "old", sessionId: "me", text: "旧请求" }));
-  for (let i = 0; i < 200 && !aide.questions().some((q) => q.request.status === "pending"); i++) await Bun.sleep(10);
-  assert.ok(aide.questions().some((q) => q.request.status === "pending"));
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "answer", sessionId: "me", text: "确认" })); await aide.settled();
+  await aide.settled();
   const work = await aide.work("me").create({ kind: "task", title: "旧工作", instruction: "执行一次", trigger: null });
   await aide.settled();
   await aide.work("me").delete(work.id, aide.works().find((item) => item.id === work.id)!.revision);
@@ -116,7 +110,6 @@ test("Recreated Conversation has fresh execution context and no old questions or
   assert.ok(view.blocks.some((b) => b.content.includes("新答案")));
   assert.equal(view.blocks.some((b) => /旧答案|旧请求|旧工作|继续吗/.test(b.content)), false);
   assert.equal(view.blocks.filter((b) => b.type === "execution").length, 1);
-  assert.deepEqual(aide.questions(), []);
   await aide.receive(fixtureIncoming({ channelId: "web", id: "old", sessionId: "me", text: "旧请求" })); await aide.settled();
   assert.equal(calls, 2);
   assert.equal(aide.outputs().some((m) => m.text === "旧请求"), false);

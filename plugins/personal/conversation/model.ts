@@ -3,7 +3,6 @@ import type { OutputView } from "../../../src/output.ts";
 import type { Batch } from "./batch.ts";
 import type { ConversationTrigger } from "./trigger.ts";
 export const CONVERSATION_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Conversation" } as const;
-export interface ChiefQuestion { kind: "ask" | "confirm"; title: string; prompt: string; choices?: Array<{ value: string; label: string }> }
 export interface ConversationSpec { address?: Address; id: string; name?: string; default?: boolean; sessionId: string; trigger?: ConversationTrigger }
 export interface ConversationStatus {
   pendingInputIds: string[];

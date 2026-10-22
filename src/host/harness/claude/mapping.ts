@@ -1,7 +1,7 @@
 import { newId } from "../../event/ids.ts";
 import type { AnyEventDraft, ContentBlock, DiffBlock, PlanEntry, ToolEffect } from "../../event/index.ts";
 import { planEntriesWithIds } from "../../event/plan.ts";
-import type { PermissionOption } from "../../interaction/types.ts";
+import type { PermissionOption } from "../../approval/types.ts";
 import { planSnapshotDraft } from "../plan.ts";
 
 const ALLOW_ONCE: PermissionOption = {

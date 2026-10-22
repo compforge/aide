@@ -24,7 +24,7 @@ import type {
   ViewInputOutcome,
 } from "../event/index.ts";
 import type { HarnessTarget } from "../harness/target.ts";
-import type { InteractionResult } from "../interaction/types.ts";
+import type { ApprovalResult } from "../approval/types.ts";
 import { logError } from "../logging.ts";
 import { Manager, type ManagerOptions } from "../plugin/manager.ts";
 import { createReconcileSnapshot } from "../plugin/reconcile-snapshot.ts";
@@ -92,9 +92,9 @@ const activeCoreSessions = new Set<string>();
 /**
  * One AideSession lease 的活跃协调边界与 composition root。
  *
- * CoreSession 装配 Controller、Plugin Manager、Hook gateway 和 Interaction 路由，
+ * CoreSession 装配 Controller、Plugin Manager、Hook gateway 和原生审批路由，
  * 并为 ViewInput 提供固定的 typed path。它只拥有进程期生命周期和组件引用；
- * Session、Queue、Turn、Interaction、Resource 的可恢复状态和状态机仍归原 owner。
+ * Session、Queue、Turn、Approval、Resource 的可恢复状态和状态机仍归原 owner。
  */
 export class CoreSession implements CoreHookGateway {
   readonly controller: Controller;
@@ -230,27 +230,22 @@ export class CoreSession implements CoreHookGateway {
     return this.dispatch(input, apply);
   }
 
-  /** Route an Interaction answer to the requester that owns its continuation. */
-  resolveInteraction(
-    input: Extract<ViewInput, { kind: "interaction_response" }>,
-    prepare: (record: ViewInputRecord) => Promise<InteractionResult | undefined>,
+  /** Route an explicit native approval response to its waiting Harness. */
+  resolveApproval(
+    input: Extract<ViewInput, { kind: "approval_response" }>,
+    prepare: (record: ViewInputRecord) => Promise<ApprovalResult | undefined>,
   ): Promise<DispatchReceipt<boolean>> {
     return this.dispatch(input, async (record) => {
-      const interaction = this.options.session.projection.interactions.get(
+      const approval = this.options.session.projection.approvals.get(
         input.messageId,
       )?.request;
       const result = await prepare(record);
-      if (!interaction || !result) return false;
-      const completed = interaction.source.kind === "plugin"
-        ? await this.pluginManager?.completeInteraction(
-          input.messageId,
-          result,
-        ) ?? false
-        : this.controller.completeInteraction(input.messageId, result);
+      if (!approval || !result) return false;
+      const completed = this.controller.completeApproval(input.messageId, result);
       if (
         completed &&
         result.kind === "cancelled" &&
-        interaction.source.kind === "harness"
+        approval.source.kind === "harness"
       ) {
         await this.controller.control({ kind: "interrupt" });
       }

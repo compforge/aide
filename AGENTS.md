@@ -52,7 +52,7 @@ plugins/personal/
     model.ts               # 资源定义与会话类型
     input.ts               # 按 Input ID 幂等追加，保留消费状态与并发更新
     store.ts               # 宿主侧会话、Input 消费投影与消息流
-    config.ts              # 组批、待处理上限和上下文预算
+    config.ts              # 组批、等待期限和上下文预算
     trigger.ts             # 定时触发配置
     reconcile.ts           # Runner 调度 Batch、消费确认与定时回顾
     batch.ts               # Conversation 内部 Batch 模型
@@ -113,14 +113,15 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Address 是通信位置父接口，ChannelAddress 是当前子接口；Input.source、Conversation.spec.address 与 Output.target 复用它。Conversation 只在由 Channel Input 创建时初始化默认地址，后续追加与 default 转发不能覆盖或补值。Immediate 直接回复指向 Input.source；其它沟通明确选 target 或使用 Conversation 默认地址，禁止从话题或 Conversation ID 推导投递地址。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；人物、位置与来源分类独立，收件人不自动改变投递目标或产生额外发送。
 - Source 先提交持久 Input 再推进观察水位。Input 与 Output 独立保存，业务状态、Output 创建与必要的去重记录原子提交，不能用投递失败重新触发业务执行。
 - 持久 Resource 共用 Host 容量管理；资源所有者在 ResourceDefinition.retention 声明释放与引用规则，未知类型默认保护。按 kind 的 LRU 等排序只作用于可释放且无人引用的记录，不能淘汰正在承担的工作。详见 docs/plugin/README.md。
-- Conversation.status.pendingInputIds 是唯一待消费队列，status.batch 固定一次处理材料。Conversation Reconcile 组批、确认消费和替换 Batch；具名 Batch Controller 执行 Harness，tool 直接调用 say / ask / confirm。完成批次保留有界上下文直到下一批继承；每批 freshContext 并持久化历史边界，失败不自动重放副作用。
+- Conversation.status.pendingInputIds 是唯一待消费队列，status.batch 固定一次处理材料。Conversation Reconcile 组批、确认消费和替换 Batch；具名 Batch Controller 执行 Harness，沟通 tool 只调用 say，用户答复是下一批的新 Input。完成批次保留有界上下文直到下一批继承；每批 freshContext 并持久化历史边界，失败不自动重放副作用。
 - Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 保存执行事实。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
 - ResourceDefinition 统一声明类型、shared/session 作用域、Schema、Validator、Printer 与 retention。Host 在恢复和 Controller 启动前加载纯定义模块；所有写入（含 commit）在存储事务内校验。Controller 可独立注册零个或多个。Printer 在 Host 同步处理快照，describe / summarize 提供详情 / 概览，不执行 I/O、模型调用或修改资源；定义不随 Runner 关闭撤销。具体契约见 docs/plugin/README.md。
 - 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。
 - 执行上下文显式携带主资源和可选 Conversation/Input 关联；Channel 不通过 Chief Target 推导问题和进度归属。
 - Personal 将新发生的事归入能承接它的上下文：Conversation 承载话题，Task 承载有限目标，Routine 承载持续职责与当前轮次。Chief 优先关联已有 Work，再按需要创建；各 Reconcile 根据历史与新事实推进、更新、沟通、等待或忽略。详见 `docs/plugin/personal.md`。
-- trigger 归属于 Conversation；新 Input 与定时回顾唤醒同一话题。Personal / Chief 决定回顾和主动沟通策略，Core 提供通用定时唤醒与恢复机制。say 保存独立 Output，不创建 Interaction；记忆中的偏好不自动成为执行委托。
-- Chief 问答复用 Core Interaction；Task / Routine 的 waiting 是业务持久状态。两者的跨重启行为见 Personal 文档。
+- trigger 归属于 Conversation；新 Input 与定时回顾唤醒同一话题。Personal / Chief 决定回顾和主动沟通策略，Core 提供通用定时唤醒与恢复机制。say 保存独立 Output；记忆中的偏好不自动成为执行委托。
+- Chief 用 say 提出问题并结束本批；用户后续消息作为普通 Input。业务 ask / confirm / draft 与 Interaction 已移除；Harness 原生工具权限与 Hook 信任使用独立的 Approval，仍需明确决定，取消按拒绝处理。Task / Routine 的 waiting 是业务持久状态。
+- Channel / Source 确定归属后统一调用 appendConversationInput。Conversation 不设 pending 数量上限；Input 接收凭据在消费出队前持久化，重投不会重新处理。存储总量由 Host Resource 容量策略管理，batchSize 只决定调度粒度。
 - Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Output，不另建轨迹存储。
 - `npm run check` 验证类型与测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或 Lark 已验证。
 

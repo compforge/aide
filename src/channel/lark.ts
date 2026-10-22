@@ -58,7 +58,7 @@ export class LarkChannel {
   private readonly cardRetry = new Map<string, number>();
   private readonly receiptRetry = new Map<string, number>();
 
-  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "outputs" | "outputDelivered" | "outputSending" | "outputRetry"> & Partial<Pick<ChannelService, "questions" | "findConversation">>,
+  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "outputs" | "outputDelivered" | "outputSending" | "outputRetry">,
     private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
     this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
@@ -232,7 +232,7 @@ export class LarkChannel {
     const live = view.phase === "running" || view.phase === "queued";
     let card = this.state.cards[view.id];
     // Completed history without a live card uses the existing durable text outbox.
-    if (!card && !live && view.phase !== "waiting") return;
+    if (!card && !live) return;
     if (!card) {
       card = { cardId: await transport.create(progressCard(view, live)), sent: false, sequence: 0,
         layout: 1, previews: JSON.stringify(cardPreviews(view)),

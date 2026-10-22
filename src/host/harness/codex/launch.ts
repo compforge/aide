@@ -1,4 +1,4 @@
-import type { HookTrustCandidate } from "../../interaction/types.ts";
+import type { HookTrustCandidate } from "../../approval/types.ts";
 
 /**
  * 审批路由**不由 aide 定默认**：`thread/start` 原生收 `approvalsReviewer`，缺省

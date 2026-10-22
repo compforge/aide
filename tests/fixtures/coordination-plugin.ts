@@ -21,10 +21,8 @@ const plugin: PluginPackage = {
         if (!resource.status.answer && works.length) {
           const actions = execution.withContext({ conversationId: resource.spec.conversationId });
           await actions.verbs.connectors({ timeoutMs: 1000 }).describe();
-          const answer = await actions.verbs.ask({ title: "继续处理", prompt: "是否继续？", allowOther: true, timeoutMs: 10_000 });
-          if (answer.state !== "success") throw new Error(`Question ${answer.state}`);
           await actions.verbs.harness({ title: "检查", prompt: "Work: {}", laneId: "main", newLane: true, timeoutMs: 10_000 });
-          await context.resources.patchStatus((await current())!, { answer: answer.value });
+          await context.resources.patchStatus((await current())!, { answer: "observed" });
         }
         await context.resources.patchStatus((await current())!, { count: works.filter((work) => !work.metadata.deletionTimestamp).length, revision: works[0]?.metadata.generation ?? 0 });
       },

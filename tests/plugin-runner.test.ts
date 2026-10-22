@@ -1,5 +1,4 @@
 import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
-import { requestResult } from "../src/host/interaction/resolution.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { commandContext, executeCommand } from "./fixtures/command-context.ts";
 import {
@@ -145,6 +144,7 @@ describe("Plugin Runner process boundary", () => {
   });
 
   test("routes reconcile capabilities across the process boundary", async () => {
+    const outputs: string[] = [];
     const { instances, session, entry } = stores();
     session.appendEvent({
       kind: "_aide_turn_summary",
@@ -166,6 +166,7 @@ describe("Plugin Runner process boundary", () => {
       packageVersion: "1.0.0",
     });
     const manager = new Manager({
+      say: async (_scope, text) => { outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; },
       instances,
       session,
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
@@ -180,37 +181,17 @@ describe("Plugin Runner process boundary", () => {
     });
 
     await manager.start();
-    await waitFor(() => session.loadState().interactions.size === 1, 1_000);
-    expect([...session.loadState().interactions.values()][0]).toMatchObject({
-      request: {
-        source: {
-          kind: "plugin",
-          key: "process_default",
-        },
-        request: { questions: [{
-          header: "Runner question",
-          question: "Review turn_runner?",
-        }] },
-      },
-    });
+    await waitFor(() => outputs.length === 1);
+    expect(outputs).toEqual(["Review turn_runner?"]);
     await Bun.sleep(300);
     expect(manager.isInstanceActive("process_default")).toBe(true);
-    const interaction = [...session.loadState().interactions.values()][0]!
-      .request;
-    expect(await manager.completeInteraction(interaction.messageId, {
-      kind: "question",
-      outcome: "answered",
-      answers: { decision: ["continue"] },
-    })).toBe(true);
-    await waitFor(() =>
-      requestResult(session.loadState(), interaction.messageId) !==
-        undefined
-    );
-
+    await manager.settled();
+    expect(session.projection.approvals.size).toBe(0);
     await manager.close();
   });
 
   test("routes Hook notifications and verbs across the process boundary", async () => {
+    const outputs: string[] = [];
     const { instances, session, entry } = stores();
     instances.create({
       pluginInstanceId: "process_default",
@@ -219,6 +200,7 @@ describe("Plugin Runner process boundary", () => {
       packageVersion: "1.0.0",
     });
     const manager = new Manager({
+      say: async (_scope, text) => { outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; },
       instances,
       session,
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
@@ -237,24 +219,10 @@ describe("Plugin Runner process boundary", () => {
       inputId: "in_runner_hook",
       eventId: "ev_runner_hook",
       seq: 1,
-      input: { kind: "prompt", text: "ask from hook", harnessTargetId: "codex" },
+      input: { kind: "prompt", text: "say from hook", harnessTargetId: "codex" },
     });
-    await waitFor(() => session.loadState().interactions.size === 1);
-    await Bun.sleep(300);
-    expect(manager.isInstanceActive("process_default")).toBe(true);
-    const interaction = [...session.loadState().interactions.values()][0]!
-      .request;
-    expect(interaction.request.kind).toBe("question");
-    if (interaction.request.kind !== "question") throw new Error("expected a question");
-    expect(interaction.request.questions[0]).toMatchObject({
-      header: "Hook question",
-      question: "Continue from Hook?",
-    });
-    expect(await manager.completeInteraction(interaction.messageId, {
-      kind: "question",
-      outcome: "answered",
-      answers: { decision: ["continue"] },
-    })).toBe(true);
+    await waitFor(() => outputs.length === 1);
+    expect(outputs).toEqual(["Continue from Hook?"]);
     await expect(notification).resolves.toBeUndefined();
 
     await session.flushLogs();
@@ -314,6 +282,7 @@ describe("Plugin Runner process boundary", () => {
   });
 
   test("routes deferred ViewOutput Hook verbs without blocking publication", async () => {
+    const outputs: string[] = [];
     const { instances, session, entry } = stores();
     instances.create({
       pluginInstanceId: "process_default",
@@ -322,6 +291,7 @@ describe("Plugin Runner process boundary", () => {
       packageVersion: "1.0.0",
     });
     const manager = new Manager({
+      say: async (_scope, text) => { outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; },
       instances,
       session,
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
@@ -365,27 +335,17 @@ describe("Plugin Runner process boundary", () => {
         },
       },
     });
-    const unsubscribe = session.subscribe((event) => {
-      if (event.kind !== "interaction.requested") return;
-      void channel.publishViewOutput("interaction", () => true);
-    });
-
     await expect(channel.publishViewOutput("transcript", () => true)).resolves.toBe(true);
-    await waitFor(() => session.loadState().interactions.size === 1, 1_000);
-    const interaction = [...session.loadState().interactions.values()][0]!
-      .request;
-    expect(await manager.completeInteraction(interaction.messageId, {
-      kind: "question",
-      outcome: "answered",
-      answers: { decision: ["continue"] },
-    })).toBe(true);
-    unsubscribe();
+    await waitFor(() => outputs.length === 1);
+    await manager.settled();
+    expect(outputs).toEqual(["Continue outbound publication?"]);
     await manager.close();
     await channel.close();
-    expect(outputKinds).toEqual(["transcript", "interaction"]);
+    expect(outputKinds).toEqual(["transcript"]);
   });
 
-  test("withdraws registrations and settles a waiting verb after a crash", async () => {
+  test("withdraws registrations after a Runner crash", async () => {
+    const outputs: string[] = [];
     const { root, instances, session, entry } = stores();
     session.appendEvent({
       kind: "_aide_turn_summary",
@@ -409,6 +369,7 @@ describe("Plugin Runner process boundary", () => {
     const activationFailures: unknown[] = [];
     const failures: PluginRunnerFailure[] = [];
     const manager = new Manager({
+      say: async (_scope, text) => { outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; },
       instances,
       session,
       pluginSupervisor: new PluginSupervisor(),
@@ -429,7 +390,7 @@ describe("Plugin Runner process boundary", () => {
     });
 
     await manager.start();
-    await waitFor(() => session.loadState().interactions.size === 1);
+    await waitFor(() => outputs.length === 1);
     await session.flushLogs();
     expect(activationFailures).toEqual([]);
     expect(manager.isInstanceActive("process_default")).toBe(true);
@@ -511,10 +472,7 @@ describe("Plugin Runner process boundary", () => {
     await waitFor(() => !manager.isInstanceActive("process_default"));
     expect(manager.listCommands()).toEqual([]);
     expect(failures).toHaveLength(1);
-    expect(requestResult(session.projection, [...session.projection.interactions.keys()][0]!)).toMatchObject({
-      kind: "cancelled",
-      reason: "recovery",
-    });
+    expect(session.projection.approvals.size).toBe(0);
 
     await manager.close();
   });

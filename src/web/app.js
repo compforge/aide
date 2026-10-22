@@ -3,7 +3,7 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
   const conversationId = new URL(location.href).searchParams.get('conversation');
   const query = '?conversationId=' + encodeURIComponent(conversationId);
   const labels = { ready: '准备执行', running: '执行中', waiting: '等你回答', scheduled: '等待触发', paused: '已暂停', done: '已完成', uncertain: '需要核对结果', invalid_result: '结果解析失败' };
-  let lastMessages = '', lastWork = '', lastInteractions = '', polling = false, sending = false, draft = null;
+  let lastMessages = '', lastWork = '', lastApprovals = '', polling = false, sending = false, draft = null;
   // getRandomValues also works when accessing a trusted devbox over plain HTTP.
   function newId() {
     return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -38,7 +38,7 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
       const sender = element('a', '人物资料'); sender.href = '/people?person=' + encodeURIComponent(block.sender.name); header.append(sender);
     }
     if (!summary) header.append(element('time', new Date(block.at).toLocaleString(), 'input-time'));
-    if (source) header.append(element('span', ({ queued: '待处理', running: '处理中', waiting: '等待答复', done: '已处理', quiet: '已查看 · 保持安静', failed: '处理失败' })[block.status] || block.status, 'input-status'));
+    if (source) header.append(element('span', ({ queued: '待处理', running: '处理中', done: '已处理', quiet: '已查看 · 保持安静', failed: '处理失败' })[block.status] || block.status, 'input-status'));
     const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, block.content);
     node.append(header, body);
     if (block.detail) {
@@ -214,7 +214,7 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
   const isLive = (phase) => phase === 'running' || phase === 'queued';
   /** @spec Execution phase and reader expansion are independent; streaming and completion preserve explicit choices. */
   function replyPart(id, title, phase, kind) {
-    const node = replyRegion(id, '', kind === 'answer' && (phase === 'waiting' || phase === 'failed'));
+    const node = replyRegion(id, '', kind === 'answer' && phase === 'failed');
     node.dataset.kind = kind; node.dataset.title = title;
     const summary = node.querySelector('summary');
     summary.append(element('span', title, 'reply-part-title'), element('span', '', 'reply-toggle'), element('div', '', 'reply-preview'));
@@ -235,9 +235,9 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
     if (isLive(phase) && node.dataset.kind === 'answer') preview.scrollTop = preview.scrollHeight;
   }
   function updateAnswer(node, phase, answer) {
-    if (!regionChoices.has(node.dataset.blockId)) node.open = phase === 'waiting' || phase === 'failed';
-    updatePart(node, phase, [answer.trim() ? replyText(answer) : phase === 'failed' ? '本次处理已中断，请核对后重新交办。' : phase === 'waiting' ? '等待你回答。' : phase === 'done' ? '回复已完成' : '等待生成回答…']);
-    updateMarkdown(node.querySelector('.message-body'), answer || (phase === 'failed' ? '本次处理已中断，请核对后重新交办。' : phase === 'waiting' ? '等待你回答。' : '等待生成回答…'));
+    if (!regionChoices.has(node.dataset.blockId)) node.open = phase === 'failed';
+    updatePart(node, phase, [answer.trim() ? replyText(answer) : phase === 'failed' ? '本次处理已中断，请核对后重新交办。' : phase === 'done' ? '回复已完成' : '等待生成回答…']);
+    updateMarkdown(node.querySelector('.message-body'), answer || (phase === 'failed' ? '本次处理已中断，请核对后重新交办。' : '等待生成回答…'));
   }
   function updateProcess(node, phase, blocks) {
     const preview = processPreview(phase, blocks);
@@ -246,7 +246,7 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
   function appendProgress(parent, blocks, expanded) {
     for (const block of blocks) {
       const node = progressNode(block.type); node.dataset.blockId = block.id;
-      if (block.type !== 'text') node.open = expanded.get(block.id) ?? block.type !== 'question';
+      if (block.type !== 'text') node.open = expanded.get(block.id) ?? true;
       updateProgress(node, block.type, block.content, block.status, block.detail);
       parent.append(node);
     }
@@ -278,13 +278,10 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
       const executions = new Set(group.filter((item) => item.type === 'execution').map((item) => item.id));
       const children = history.filter((item) => executions.has(item.parent_id));
       const answers = group.filter((item) => item.type === 'message' && item.role === 'aide').map((item) => item.content);
-      const questions = group.filter((item) => item.type === 'question');
-      const pending = questions.filter((item) => item.status === 'pending');
-      const answer = pending.map((item) => item.content).join('\n\n') || answers.join('\n\n') || '';
-      const process = children.filter((item) => item.type !== 'text' || !answers.includes(item.content))
-        .concat(questions.filter((item) => item.status !== 'pending'));
+      const answer = answers.join('\n\n');
+      const process = children.filter((item) => item.type !== 'text' || !answers.includes(item.content));
       const failed = group.some((item) => item.status === 'failed' || item.status === 'interrupted');
-      const phase = pending.length ? 'waiting' : failed ? 'failed' : 'done';
+      const phase = failed ? 'failed' : 'done';
       const title = 'Aide · ' + replyLabels[phase];
       const node = replyRegion('input:' + groupId + ':whole', title, true);
       node.className = 'message aide assistant-reply reply-envelope'; node.dataset.inputId = groupId;
@@ -314,7 +311,6 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
   }
   function updateProgress(node, kind, text, status, detail) {
     if (kind === 'thought') node.querySelector('summary').textContent = '思考过程';
-    if (kind === 'question') node.querySelector('summary').textContent = '问题 · ' + (status === 'answered' ? '已回答' : status === 'cancelled' ? '已取消' : '等待回答');
     if (kind === 'tool') node.querySelector('summary').textContent = text + ' · ' + (toolLabels[status] || status || '状态未知');
     const content = node.querySelector('.activity-content');
     const value = kind === 'tool' ? detail || '' : text;
@@ -339,16 +335,14 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
       envelope.append(thought, reply); area.append(envelope);
     }
     const last = activity.blocks.at(-1);
-    const label = activity.phase === 'waiting' ? '等待你回答' : activity.phase === 'queued' ? '正在排队'
+    const label = activity.phase === 'queued' ? '正在排队'
       : last?.kind === 'tool' && last.status === 'in_progress' ? '正在调用工具'
       : last?.kind === 'thought' ? '正在思考' : last?.kind === 'text' ? '正在回复' : '正在处理';
     replyHeading(area.querySelector('.reply-envelope'), 'Aide · ' + label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : ''), activity.harnesses);
-    const pending = activity.questions.filter((block) => block.status === 'pending');
-    const answer = pending.map((block) => block.content).join('\n\n') || activity.answers.join('\n\n') || '';
+    const answer = activity.answers.join('\n\n');
     updateAnswer($('activity-answer').parentElement, activity.phase, answer);
     const process = activity.blocks.filter((block) => block.kind !== 'text' ||
-      !activity.answers.includes(block.text))
-      .concat(activity.questions.filter((block) => block.status !== 'pending').map((block) => ({ ...block, kind: block.type, text: block.content })));
+      !activity.answers.includes(block.text));
     updateProcess($('activity-thought'), activity.phase, process.map((block) => ({ type: block.kind, content: block.text, status: block.status })));
     const ids = new Set(process.map((block) => block.id));
     for (const [id, node] of activityNodes) if (!ids.has(id)) { node.remove(); activityNodes.delete(id); }
@@ -427,14 +421,14 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
       node.append(detail); list.append(node);
     }
   }
-  function renderInteractions(interactions) {
-    const signature = JSON.stringify(interactions);
-    if (signature === lastInteractions) return;
-    lastInteractions = signature;
-    $('interactions').replaceChildren();
-    for (const item of interactions) {
+  function renderApprovals(approvals) {
+    const signature = JSON.stringify(approvals);
+    if (signature === lastApprovals) return;
+    lastApprovals = signature;
+    $("approvals").replaceChildren();
+    for (const item of approvals) {
       const request = item.request;
-      const node = element('article', undefined, 'interaction');
+      const node = element('article', undefined, "approval");
       const actions = element('div', undefined, 'actions');
       const status = element('p', '', 'muted');
       function action(label, result) {
@@ -443,7 +437,7 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
         button.addEventListener('click', async () => {
           actions.querySelectorAll('button').forEach((button) => button.disabled = true);
           try {
-            await api('/interactions', { method: 'POST', headers: { 'content-type': 'application/json' },
+            await api("/approvals", { method: 'POST', headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ messageId: item.messageId, result: typeof result === 'function' ? result() : result }) });
             node.remove();
             await poll();
@@ -469,28 +463,13 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
         node.append(element('strong', request.title));
         if (request.description) node.append(element('p', request.description));
         for (const option of request.options) action(option.name, { kind: 'permission', outcome: 'selected', optionId: option.optionId });
-      } else if (request.kind === 'question') {
-        const fields = [];
-        for (const question of request.questions) {
-          node.append(element('strong', question.header), element('p', question.question));
-          if (request.questions.length === 1) {
-            for (const choice of question.choices || []) action(choice.label,
-              { kind: 'question', outcome: 'answered', answers: { [question.questionId]: [choice.value] } });
-          }
-          if (question.allowOther || !question.choices?.length) {
-            const field = element('input'); field.placeholder = '输入答复'; node.append(field);
-            fields.push({ id: question.questionId, field });
-          }
-        }
-        if (fields.length === request.questions.length) action('提交答复', () => ({ kind: 'question', outcome: 'answered',
-          answers: Object.fromEntries(fields.map(({ id, field }) => [id, [field.value]])) }));
       } else {
         node.append(element('strong', '执行正在等待用户回应'),
           element('p', '网页暂不支持此类回应，可以取消本次执行。'), element('pre', JSON.stringify(request, null, 2)));
       }
       action('取消执行', { kind: 'cancelled', reason: 'user' });
       node.append(actions, status);
-      $('interactions').append(node);
+      $("approvals").append(node);
     }
   }
   /** @spec 轮询故障和恢复仅更新轮询状态，不覆盖发送结果或实时连接状态。 */
@@ -499,10 +478,10 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
     if (polling) return;
     polling = true;
     try {
-      const [works, interactions] = await Promise.all([api('/work' + query), api('/interactions' + query), refreshConversations()]);
-      renderWork(works); renderInteractions(interactions);
+      const [works, approvals] = await Promise.all([api('/work' + query), api("/approvals" + query), refreshConversations()]);
+      renderWork(works); renderApprovals(approvals);
       $('poll-notice').textContent = '';
-    } catch { $('poll-notice').textContent = '事项或交互暂时无法更新，正在重试。'; }
+    } catch { $('poll-notice').textContent = '事项或审批暂时无法更新，正在重试。'; }
     finally { polling = false; }
   }
   $('composer').addEventListener('submit', async (event) => {
@@ -540,7 +519,6 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
         renderActivity(view.meta.activity && { ...view.meta.activity,
           harnesses: view.blocks.filter((block) => block.type === 'execution' && liveIds.has(block.id)),
           answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === view.meta.activity.id).map((block) => block.content),
-          questions: view.blocks.filter((block) => block.type === 'question' && block.group_id === view.meta.activity.id),
           blocks: view.blocks.filter((block) => liveIds.has(block.parent_id))
             .map((block) => ({ ...block, kind: block.type, text: block.content })) });
         $('connection').textContent = view.meta.error ? view.meta.error.message : '实时连接';

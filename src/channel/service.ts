@@ -2,7 +2,6 @@ import type { OutputView } from "../output.ts";
 import type { ConversationStore } from "../../plugins/personal/conversation/store.ts";
 import type { CoreSession } from "../host/core/index.ts";
 import type { HarnessInvocationSnapshot } from "../host/plugin/harness-invocation.ts";
-import type { InputRequest } from "../host/message/types.ts";
 import type { InputReceipt, InputSpec } from "@compforge/aide-plugin";
 import type { Incoming } from "./message.ts";
 
@@ -22,7 +21,6 @@ export interface ChannelService {
   outputDelivered?(outputId: string): Promise<void>;
   outputSending?(outputId: string): Promise<void>;
   outputRetry?(outputId: string, error: string, nextAttemptAt: string): Promise<void>;
-  questions(): { conversationId: string; request: InputRequest }[];
   invocations(): readonly HarnessInvocationSnapshot[];
   conversationIds(): string[];
 }

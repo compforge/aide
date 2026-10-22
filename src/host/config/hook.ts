@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-import type { HookTrustCandidate } from "../interaction/types.ts";
+import type { HookTrustCandidate } from "../approval/types.ts";
 import { withFileLock } from "../store/file-lock.ts";
 import { aideRoot } from "./config.ts";
 

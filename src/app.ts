@@ -147,7 +147,7 @@ export class Aide {
           if (!context.conversationId) throw new Error("Personal say requires Conversation context");
           return application.conversations.say(context.conversationId, context.inputId, text, context.executionId, options);
         }, selectedHarnessTargetId: () => targetId,
-        harnessInvocationGate: () => "auto_approve", pluginSupervisor: new PluginSupervisor(),
+        pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => {
           const entryUrl = packages.get(`${pluginId}@${version}`);
           if (!entryUrl) throw new Error(`Plugin package is not installed: ${pluginId}@${version}`);
@@ -235,7 +235,6 @@ export class Aide {
   outputs() { return this.outputStore.list().map(outputView).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
 
   works() { return this.sessions().flatMap((scope) => scope.works()); }
-  questions() { return this.sessions().flatMap((scope) => scope.questions()); }
   invocations() { return this.sessions().flatMap((scope) => scope.invocations()); }
   conversationIds() { return this.sessions().flatMap((scope) => scope.conversationIds()); }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }

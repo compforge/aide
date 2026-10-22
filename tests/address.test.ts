@@ -182,7 +182,7 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
   const scope = aide.session("topic"), store = scope.conversations;
   const source = larkAddress("cli_app", "group"), target = larkAddress("cli_app", "reporting-group");
   await seedInput(store, "question", { origin: "channel", originId: "lark", sender, source, text: "请帮我确认进展" });
-  const say = chiefTools(emptyConnectors, async () => {}, () => {}, (id, input) => store.say("topic", undefined, input.text, undefined, { ...input, idempotencyKey: id })).find((tool) => tool.name === "say")!;
+  const say = chiefTools(emptyConnectors, () => {}, (id, input) => store.say("topic", undefined, input.text, undefined, { ...input, idempotencyKey: id })).find((tool) => tool.name === "say")!;
   const reply = await say.execute("reply", { text: "确认了", respondToInputId: "question" }, undefined, undefined, {} as never);
   const direct = aide.outputs().find((output) => output.text === "确认了")!;
   assert.deepEqual(direct.receivers, [sender]); assert.deepEqual(direct.target, source);

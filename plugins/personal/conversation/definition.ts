@@ -5,7 +5,7 @@ import { AddressSchema } from "../../../src/address.ts";
 import { CONVERSATION_TYPE, type ConversationStatus, type ConversationSpec } from "./model.ts";
 const BatchSchema = z.object({ id: z.string(), inputIds: z.array(z.string()),
   context: z.object({ prompt: z.string(), history: z.string(), responseRequired: z.boolean() }).strict(),
-  createdAt: z.string(), timerAt: z.string().optional(), phase: z.enum(["queued", "running", "waiting", "compacting", "done", "failed", "interrupted"]),
+  createdAt: z.string(), timerAt: z.string().optional(), phase: z.enum(["queued", "running", "compacting", "done", "failed", "interrupted"]),
   executionId: z.string().optional(), deadline: z.string().optional(), cancelRequested: z.boolean().optional(),
   failureStage: z.enum(["execution", "compaction"]).optional(), communicated: z.boolean().optional(), quietReason: z.string().optional(),
   outputIds: z.array(z.string()), result: z.object({ summary: z.string(), outputs: z.array(z.string()).optional(), context: z.string().optional(), error: z.string().optional() }).strict().optional(),

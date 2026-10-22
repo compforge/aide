@@ -33,7 +33,7 @@ import type {
   PromptReceipt,
   SendTurnReceipt,
   HarnessSessionHandle,
-  OpenInteraction,
+  OpenApproval,
   TextgenRequest,
 } from "../adapter.ts";
 import { unsupportedPromptBlocks } from "../adapter.ts";
@@ -82,7 +82,7 @@ import {
 export { claudeUserMessage, probeClaudeTarget, startsHarnessTurn } from "./runtime.ts";
 
 export interface ClaudeAdapterOptions {
-  openInteraction: OpenInteraction;
+  openApproval: OpenApproval;
   log?: LogSink;
   nativeEvent?: NativeEventSink;
   /** HarnessTarget 固定环境；同名项覆盖每次 open 传入的动态环境。 */
@@ -124,7 +124,7 @@ export class ClaudeAdapter implements HarnessAdapter {
 
   constructor(private options: ClaudeAdapterOptions) {
     this.events = new ClaudeEventHandler({
-      openInteraction: options.openInteraction,
+      openApproval: options.openApproval,
       ...(options.log ? { log: options.log } : {}),
       publishSessionBinding: (runtime, sessionId) => this.publishSessionBinding(runtime, sessionId),
       finishTurn: (runtime, emit, turn, stopReason, raw) =>

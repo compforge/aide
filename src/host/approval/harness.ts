@@ -1,15 +1,15 @@
-import type { InteractionContext } from "../harness/adapter.ts";
+import type { ApprovalContext } from "../harness/adapter.ts";
 import { resolutionEvent, requestResult } from "./resolution.ts";
 import { createInputRequest } from "../message/project.ts";
 import { actorOf } from "../message/actor.ts";
 import type { SessionState } from "../store/reduce.ts";
 import type { AnyEventDraft, EventSource } from "../event/index.ts";
 import type {
-  InteractionDraft,
-  InteractionResult,
+  ApprovalDraft,
+  ApprovalResult,
 } from "./types.ts";
 
-interface HarnessInteractionBinding {
+interface HarnessApprovalBinding {
   target: { id: string };
   laneId: string;
 }
@@ -21,18 +21,18 @@ type AppendEvent<TBinding> = (
 ) => void;
 
 /**
- * Harness 请求的进程内 continuation。Core 仍先持久化 Interaction 生命周期，
+ * Harness 审批请求的进程内 continuation。Core 先持久化 Approval 生命周期，
  * 这里才把终态交还给正在等待的 Adapter。
  */
-export class HarnessInteractionContinuations<
-  TBinding extends HarnessInteractionBinding,
+export class HarnessApprovalContinuations<
+  TBinding extends HarnessApprovalBinding,
 > {
   private readonly pending = new Map<
     string,
     {
       binding: TBinding;
       turnId?: string;
-      resolve: (result: InteractionResult) => void;
+      resolve: (result: ApprovalResult) => void;
     }
   >();
 
@@ -44,10 +44,10 @@ export class HarnessInteractionContinuations<
 
   open(
     binding: TBinding,
-    draft: InteractionDraft,
+    draft: ApprovalDraft,
     turnId: string | undefined,
-    context?: InteractionContext,
-  ): Promise<InteractionResult> {
+    context?: ApprovalContext,
+  ): Promise<ApprovalResult> {
     const harnessTargetId = binding.target.id;
     const request = createInputRequest(draft, { kind: "harness", key: harnessTargetId });
 
@@ -61,7 +61,7 @@ export class HarnessInteractionContinuations<
         this.appendEvent(
           binding,
           {
-            kind: "interaction.requested",
+            kind: "approval.requested",
             ...(turnId ? { turnId } : {}),
             payload: request,
             ...(context?.raw !== undefined ? { raw: context.raw } : {}),
@@ -77,7 +77,7 @@ export class HarnessInteractionContinuations<
     });
   }
 
-  complete(messageId: string, result: InteractionResult): boolean {
+  complete(messageId: string, result: ApprovalResult): boolean {
     const entry = this.pending.get(messageId);
     if (!entry) return false;
     return this.settle(messageId, result, { type: "user" });
@@ -96,12 +96,12 @@ export class HarnessInteractionContinuations<
 
   private settle(
     messageId: string,
-    result: InteractionResult,
+    result: ApprovalResult,
     source: EventSource,
   ): boolean {
     const entry = this.pending.get(messageId);
     if (!entry) return false;
-    const request = this.projection().interactions.get(messageId)?.request;
+    const request = this.projection().approvals.get(messageId)?.request;
     const event = request && resolutionEvent(request, result, actorOf(source));
     if (!event) {
       this.observe();

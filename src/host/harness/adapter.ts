@@ -8,9 +8,9 @@ import type {
   SessionConfigOption,
 } from "../event/index.ts";
 import type {
-  InteractionDraft,
-  InteractionResult,
-} from "../interaction/types.ts";
+  ApprovalDraft,
+  ApprovalResult,
+} from "../approval/types.ts";
 import type { HarnessResumeState } from "./resume.ts";
 import type { HarnessEventSink } from "./event.ts";
 import type { HarnessInput } from "./input.ts";
@@ -114,7 +114,7 @@ export interface CapabilityMarker {
  * 可展示的能力 descriptor（见 docs/harness/README.md）：声明"这个 adapter 支持哪些可选能力"，
  * 供 controller/UI 决策（如不支持 image 时 admission 报错）。
  * 行为仍由可选接口承载（ModelConfigurable、EffortConfigurable、CommandDiscoverable/
- * SessionConfigurable/interaction handler）；契约测试保证"声明支持就必须实现对应接口"。
+ * SessionConfigurable/approval handler）；契约测试保证"声明支持就必须实现对应接口"。
  */
 export interface AdapterCapabilities {
   prompt: {
@@ -152,10 +152,8 @@ export interface AdapterCapabilities {
     /** 声明后必须实现 InputCancellable：按 Aide messageId 取消单条 Harness 原生待处理输入。 */
     cancel?: CapabilityMarker;
   };
-  interactions?: {
+  approvals?: {
     permission?: CapabilityMarker;
-    question?: CapabilityMarker;
-    elicitation?: { supported: true; form?: CapabilityMarker; url?: CapabilityMarker };
   };
 }
 
@@ -446,20 +444,20 @@ export function isInputCancellable(
 }
 
 /**
- * Adapter 报告 Interaction 时附带的执行坐标与原始协议消息。它们进入 Event 信封，
- * 不混入 Interaction 的稳定内容。
+ * Adapter 报告 Approval 时附带的执行坐标与原始协议消息。它们进入 Event 信封，
+ * 不混入 Approval 的稳定内容。
  */
-export interface InteractionContext {
+export interface ApprovalContext {
   turnId?: string;
   raw?: unknown;
 }
 
 /**
  * Harness 的原生 verb 由 Adapter lowering 成 kind-specific draft，再通过这个 Core port
- * 打开 Interaction。Core 负责铸造 identity/requester、先持久化 requested，最后把持久化后的
+ * 打开原生审批。Core 负责铸造 identity/requester、先持久化 requested，最后把持久化后的
  * result 送回 Adapter；Adapter 不能把原生 DTO 当成 Core 消息转发。
  */
-export type OpenInteraction = (
-  draft: InteractionDraft,
-  context?: InteractionContext,
-) => Promise<InteractionResult>;
+export type OpenApproval = (
+  draft: ApprovalDraft,
+  context?: ApprovalContext,
+) => Promise<ApprovalResult>;

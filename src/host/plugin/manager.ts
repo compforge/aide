@@ -85,8 +85,6 @@ import {
   PluginSupervisor,
 } from "./runner/index.ts";
 import type { SessionHandle } from "../store/store.ts";
-import type { InteractionResult } from "../interaction/types.ts";
-import type { ReconcileInteractionStoreOptions } from "../interaction/reconcile.ts";
 import {
   emptyReconcileSnapshot,
   type ReconcileSnapshot,
@@ -193,8 +191,6 @@ export interface ManagerOptions {
   snapshot?: () => ReconcileSnapshot;
   /** Current host selection used by an implicit harness() or a submitted draft(). */
   selectedHarnessTargetId?: () => string | undefined;
-  /** Policy decision for the mandatory Interaction before a Plugin Harness invocation. */
-  harnessInvocationGate?: ReconcileInteractionStoreOptions["harnessInvocationGate"];
   /** 按需加载已安装 Package；fresh 用于开发期 `/reload-plugins` 绕过模块缓存。 */
   loadPackage?: PackageLoaderOptions["loadPackage"];
   /**
@@ -398,7 +394,6 @@ export class Manager {
               : this.aideResourceProvider?.resolveTarget(selected) ?? selected;
           }
         : undefined,
-      harnessInvocationGate: options.harnessInvocationGate,
       enqueueHarnessInvocation: options.enqueueHarnessInvocation,
       cancelHarnessInvocation: options.cancelHarnessInvocation,
       now: this.now,
@@ -1073,25 +1068,12 @@ export class Manager {
     return await this.commandRegistry.execute(name, input, context);
   }
 
-  /** Persist the Interaction result before resuming its live Plugin execution. */
-  async completeInteraction(
-    interactionId: string,
-    result: InteractionResult,
-  ): Promise<boolean> {
-    return this.verb.completeInteraction(interactionId, result);
-  }
-
   async cancelHarnessInvocation(identifier?: string): Promise<boolean> {
     return this.verb.cancelHarnessInvocation(identifier);
   }
 
-  getAideResource<K extends AideResourceKind>(
-    kind: K,
-    resourceId: string,
-  ): AideResourceObservation<K> {
-    if (!this.aideResources) {
-      throw new Error("Aide-owned resources are not available");
-    }
+  getAideResource<K extends AideResourceKind>(kind: K, resourceId: string): AideResourceObservation<K> {
+    if (!this.aideResources) throw new Error("Aide-owned resources are not available");
     return this.aideResources.get(kind, resourceId);
   }
 
