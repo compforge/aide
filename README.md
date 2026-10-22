@@ -11,7 +11,7 @@ For example: “Follow this PR until it is merged. Handle review comments, ask m
 - **Get an answer or a small job done.** “Read this project's README and tell me how to run it.” Aide can inspect files and use the CLIs available in its environment.
 - **Delegate a goal.** “Follow this PR until it is merged.” Aide keeps the goal, progress, and waiting conditions together so you can return to the same task with new information or a decision.
 - **Set up an ongoing responsibility.** “Check project work every morning and tell me about new blockers.” Each round can involve investigation, action, and waiting before the next round begins.
-- **Keep track of external changes.** Aide can observe Meego requirements and comments for selected assignees, reply on a work item, and track changes in configured Kubernetes workloads. It can also query GitHub and GitLab PR status and comments. See [connections and observation coverage](docs/connector/README.md) for setup and current limits.
+- **Keep track of external changes.** Aide can observe requirements and comments for selected assignees, reply on a work item, and track changes in configured Kubernetes workloads. It can also query GitHub and GitLab PR status and comments. See [connections and observation coverage](docs/connector/README.md) for setup and current limits.
 
 Aide relates new information to your conversations and existing work. Within an existing delegation, it can continue working; when it finds a new opportunity, it can suggest a next step. It stays quiet when there is nothing useful to report.
 

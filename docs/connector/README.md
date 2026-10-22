@@ -2,13 +2,13 @@
 
 Connector 是 Aide Host 提供的外部系统访问能力；所有 Plugin 和 Chief 共用读取接口，评论发送由 Host 消费 Output。Host 加载配置、创建连接器并持有提供方客户端；Plugin Runner 通过现有 IPC 查询，不自行读取全局配置。`connectors` 声明访问能力，`plugins.<plugin>.sources` 定义关注范围和观察策略，Chief 判断变化是否值得通知或推进。只声明 Connector 不启动观察。
 
-支持环境目录、Kubernetes Workload 采样、Meego 需求、GitHub / GitLab PR 和 Lark 消息。环境目录读取声明，Workload 采样读取运行态；Meego 通过已有 `meegle` CLI 读取需求与评论，按 Output 投递答复，详见 [Meego 接入](meego.md)；Forge 使用统一 HTTP 客户端。Lark 通过 `lark-cli` 用户身份读取，接入与观察策略见 [Lark 消息观察](lark-messages.md)。Connector 不创建 Work，也不代替用户决定下一步。
+支持环境目录、Kubernetes Workload 采样、需求平台、GitHub / GitLab PR 和 Lark 消息。环境目录读取声明，Workload 采样读取运行态；需求平台通过提供方 CLI 读取需求与评论，按 Output 投递答复，详见 [需求平台接入](requirements.md)；Forge 使用统一 HTTP 客户端。Lark 通过 `lark-cli` 用户身份读取，接入与观察策略见 [Lark 消息观察](lark-messages.md)。Connector 不创建 Work，也不代替用户决定下一步。
 
 ## 配置与所有权
 
 全局文件的选择、字段优先级和默认值规则见 [配置](../configuration.md)。Connector 声明由 Host 在启动时装配，修改后重启。
 
-环境直接声明在 `connectors.environments.<name>`，配置 key 就是环境身份。Meego / Forge / Lark 连接信息也放在全局 `connectors`；Personal 的环境、Lark 与需求观察策略属于 `plugins.personal.sources`：
+环境直接声明在 `connectors.environments.<name>`，配置 key 就是环境身份。需求平台 / Forge / Lark 连接信息也放在全局 `connectors`；Personal 的环境、Lark 与需求观察策略属于 `plugins.personal.sources`：
 
 ```yaml
 connectors:
@@ -26,15 +26,6 @@ connectors:
         name: devbox
         transport: ssh
         address: devbox
-  requirements:
-    work:
-      provider: meego
-      projectKey: your-project-key
-      profile: your-meegle-profile
-      categories: [story]
-      assigneeField: current_status_operator
-      me:
-        userKey: your-human-user-key
   forges:
     github.com:
       type: github
@@ -50,16 +41,9 @@ plugins:
           - environment: dev
             namespaces: [app]
         intervalMs: 300000
-      requirements:
-        - id: my-requirements
-          source: work
-          userKeys: [your-user-key]
-          sessionId: me
-          intervalMs: 300000
-          repositories:
-            - forge: github.com
-              path: org/repo
 ```
+
+需求 Connector 的字段与观察配置见 [需求平台](requirements.md)。
 
 ## Environment 的含义
 
@@ -80,6 +64,7 @@ Chief 的 `list_environments` 返回 name、kind、description、aliases 摘要�
 const environments = await context.connectors.environments.list();
 const dev = await context.connectors.environments.get("开发环境");
 // dev.name === "dev"
+// 已配置名为 work 的需求 Connector 时，可按页查询：
 const requirements = await context.connectors.requirements.list("work");
 ```
 
@@ -118,13 +103,13 @@ Pod 替换或镜像变化是事实，不能据此断言有人发布，更不能�
 
 需求 watch 默认使用 `source:<watch-id>` 作为 sessionId，也可指定已知聊天 Session。Source 只填写 sessionId，不填写 conversationId；Personal 管理该 Session 的 Conversation。watch 只装配到所属 Session，创建其它聊天不会重复轮询。Host 校验负责人范围后下发有效配置。Source 不直接调用模型或创建 Task，Chief 根据已有委托选择询问、CRUD Work 或静默忽略。
 
-Meego 的“我名下”按指定负责人字段中的稳定 user key 匹配，不按参与人或显示名。Connector 默认映射当前节点处理人；项目若用单独的需求负责人字段，配置 `assigneeField`。Source 的每个需求观察项必须声明非空 `userKeys`，避免意外观察整个项目。按需查询可用 `assigneeUserKeys` 筛选，不传时不继承 Source 的负责人策略。Meegle 单命令超时 20 秒、输出上限 4 MiB。
+需求平台的“我名下”按指定负责人字段中的稳定 user key 匹配，不按参与人或显示名。Connector 默认映射当前节点处理人；项目若用单独的需求负责人字段，配置 `assigneeField`。Source 的每个需求观察项必须声明非空 `userKeys`，避免意外观察整个项目。按需查询可用 `assigneeUserKeys` 筛选，不传时不继承 Source 的负责人策略。提供方 CLI 单命令超时 20 秒、输出上限 4 MiB。
 
-Forge 的配置 key 是逻辑身份，`api_host` 可以覆盖 API 域名，`uids` 可选过滤 PR 作者。`GITHUB_TOKEN` / `GH_TOKEN`、`GITLAB_TOKEN` 优先于文件 token；没有凭证的 Forge 不启用。服务环境需能找到 `meegle` 并访问其登录态，不能只在交互 shell 中配置 PATH。
+Forge 的配置 key 是逻辑身份，`api_host` 可以覆盖 API 域名，`uids` 可选过滤 PR 作者。`GITHUB_TOKEN` / `GH_TOKEN`、`GITLAB_TOKEN` 优先于文件 token；没有凭证的 Forge 不启用。服务环境需能找到提供方 CLI 并访问其登录态，不能只在交互 shell 中配置 PATH。
 
 Lark 目标为 `lark:<app-id>:<chat-id>`，可从入站日志的 sessionId 获取。机器人需要已经收到过该单聊的消息，才会向其投递。Chief 与 Work 模型分别由 `harnesses.chief` 和 `harnesses.pi` 配置，缺省时沿用 Pi 原生配置。
 
-Meego 按固定时间窗口分页观察需求和评论，检查点与待提交 Input 可跨重启恢复；身份、投递和覆盖边界见 [Meego](meego.md)。Forge 当前供 Chief 查询 PR 状态与评论，没有定时 Source。
+需求平台按固定时间窗口分页观察需求和评论，检查点与待提交 Input 可跨重启恢复；身份、投递和覆盖边界见 [需求平台](requirements.md)。Forge 当前供 Chief 查询 PR 状态与评论，没有定时 Source。
 
 框架的调度见 [Plugin](../plugin/README.md)；决策策略见 [Personal](../plugin/personal.md)。
 

@@ -23,7 +23,7 @@ const iso = (n: number) => new Date(n).toISOString();
  * @spec Freeze each page and Input plan before publishing. Only persisted Inputs advance observation state.
  * @spec A monotonic observation sequence preserves repeated A-B-A-B transitions; retries reuse the frozen plan.
  * @spec Comments have their own bounded time windows; work-item updated_at is not a comment watermark.
- * @link docs/connector/meego.md
+ * @link docs/connector/requirements.md
  */
 class RequirementObservation {
   private readonly persons: Persons;

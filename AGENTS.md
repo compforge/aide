@@ -91,7 +91,7 @@ plugins/personal/
 agents/
   pi/                      # 通用 Pi Agent：SDK、原生工具与会话
   chief/                   # Personal 提示词、Person / Work / 问答 / Connector 工具
-connectors/                # 全局环境目录、Meego / GitHub / GitLab 访问与数据映射
+connectors/                # 全局环境目录、需求平台 / GitHub / GitLab 访问与数据映射
 packages/plugin/           # @compforge/aide-plugin 公共契约
 tests/                     # 内核、插件、Channel 与 Agent 验证
 scripts/install-service.sh # Linux 用户级 systemd 服务
@@ -113,12 +113,12 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。
 - Harness 原生 Session 由各 Harness 管理并使用其默认目录；Aide 按 Session × Lane × Target 保存原生身份和 Adapter 的 resumeState。
 - Person 是 Personal 的人物 CRD，统一承载我与他人的身份和认知。PersonDefinition 声明 shared 作用域，资源和引用不带 sessionId，不启动执行会话；各 Conversation、Channel、Source 经 ResourceClient 访问同一目录。姓名不作身份键，provider / scope / id 唯一绑定人物。
-- Me 是显式身份标记，connectors.lark.me 与 CLI 执行 appId/userId 独立；Meego 的 me.userKey 与 CLI profile、Source 负责人范围独立，规范项目 scope 由 Connector 解析。匹配 Person 的外部身份得到 Personal.me；本地单人 Web 有固定 Me 标记。Input.sender 可选，relation 为 sent / received / observed，缺省未知；机器人收发不自动代表本人，分类不构成执行授权。
+- Me 是显式身份标记，connectors.lark.me 与 CLI 执行 appId/userId 独立；需求平台的 me.userKey 与 CLI profile、Source 负责人范围独立，规范项目 scope 由 Connector 解析。匹配 Person 的外部身份得到 Personal.me；本地单人 Web 有固定 Me 标记。Input.sender 可选，relation 为 sent / received / observed，缺省未知；机器人收发不自动代表本人，分类不构成执行授权。
 - Chief 通过 profile_person 修订 Person.profile，每轮刷新 Me、按需读取他人。用户修正独立保存，Chief 不能覆盖；更新校验 uid/resourceVersion。Person 不持有 Input ID，不阻碍输入回收。Web Persons 与 Chief 共享资源更新路径；Hermes 提供其它通用记忆与检索，业务进展仍以 Task / Routine 为准。
 - `pi` 提供通用 Agent，`chief` 加入 Personal 工具，两者复用 PiAdapter。通用 Pi 不依赖 Personal，Chief 的 WorkService 由宿主绑定范围；默认 Work 执行由根级 `defaultHarness` 选择，缺省为通用 Pi。
 - Lark 用户消息 Source 按账号、用户和聊天生成独立观察话题，与机器人 Channel 会话分离，避免观察内容进入原群上下文和自动外发。
 - Address 是通信位置父接口，ChannelAddress 和 RequirementAddress 分别表达聊天位置与带规范项目 scope 的工作项位置；Input.source、Conversation.spec.address 与 Output.target 复用它。Conversation 只在由 Channel Input 创建时初始化默认地址，后续追加与 default 转发不能覆盖或补值。Immediate 直接回复指向 Input.source；其它沟通明确选 target 或使用 Conversation 默认地址，禁止从话题或 Conversation ID 推导投递地址。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；人物、位置与来源分类独立，收件人不自动改变投递目标或产生额外发送。
-- Meego 评论经 Output 由 Host 投递；发送结果不确定时停止自动重试，仅由匹配目标、正文及投递记录的回读确认。自己的评论按回执识别，不按执行账号过滤。见 `docs/connector/meego.md`。
+- 需求平台评论经 Output 由 Host 投递；发送结果不确定时停止自动重试，仅由匹配目标、正文及投递记录的回读确认。自己的评论按回执识别，不按执行账号过滤。见 `docs/connector/requirements.md`。
 - Source 先提交持久 Input 再推进观察水位。Input 与 Output 独立保存，业务状态、Output 创建与必要的去重记录原子提交，不能用投递失败重新触发业务执行。
 - 持久 Resource 共用 Host 容量管理；资源所有者在 ResourceDefinition.retention 声明释放与引用规则，未知类型默认保护。按 kind 的 LRU 等排序只作用于可释放且无人引用的记录，不能淘汰正在承担的工作。详见 docs/plugin/README.md。
 - Conversation.status.pendingInputIds 是唯一待消费队列，status.batch 固定一次处理材料。Conversation Reconcile 组批、确认消费和替换 Batch；具名 Batch Controller 执行 Harness，沟通 tool 只调用 say，用户答复是下一批的新 Input。完成批次保留有界上下文直到下一批继承；每批 freshContext 并持久化历史边界，失败不自动重放副作用。
