@@ -3,3 +3,4 @@ export { applyPatch, parsePatchEvent } from "@compforge/agentue/ui";
 export { renderMarkdown } from "./markdown.ts";
 export { historyBlocks, replyPreview, replyText, processPreview, replyLabels, toolLabels } from "../channel/reply-layout.ts";
 export { copyText } from "./clipboard.ts";
+export { conversationPage } from "./conversation-list.ts";

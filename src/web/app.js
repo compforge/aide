@@ -1,4 +1,4 @@
-import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview, replyLabels, toolLabels } from '/agentue.js';
+import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, replyText, processPreview, replyLabels, toolLabels, conversationPage } from '/agentue.js';
   const $ = (id) => document.getElementById(id);
   const conversationId = new URL(location.href).searchParams.get('conversation');
   const query = '?conversationId=' + encodeURIComponent(conversationId);
@@ -76,6 +76,17 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
   }
   if (conversationId) $('conversation-copy').replaceWith(conversationCopyButton(conversationId));
   let lastConversations = '', conversationUpdating = false;
+  let conversationItems = [];
+  const initialPage = Number(new URL(location.href).searchParams.get('page'));
+  let currentPage = Number.isSafeInteger(initialPage) && initialPage > 0 ? initialPage : null;
+  for (const [id, offset] of [['conversation-previous', -1], ['conversation-next', 1]]) {
+    $(id).addEventListener('click', () => {
+      conversationMenu.hidePopover();
+      currentPage += offset;
+      renderConversations(conversationItems);
+      $('conversation-list').parentElement.scrollTop = 0;
+    });
+  }
   let menuButton = null;
   const conversationMenu = element('div', undefined, 'conversation-menu');
   conversationMenu.id = 'conversation-menu'; conversationMenu.popover = 'auto';
@@ -161,14 +172,23 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
     return icon;
   }
   function renderConversations(conversations) {
+    conversationItems = conversations;
     const items = [...conversations];
     if (conversationId && !items.some((item) => item.id === conversationId)) items.push({ id: conversationId, name: '新对话', preview: '' });
     const current = items.find((item) => item.id === conversationId);
     $('conversation-heading').textContent = current?.name || '选择一个会话';
-    const signature = JSON.stringify(items);
+    const paged = conversationPage(items, currentPage, conversationId);
+    currentPage = paged.page;
+    const pageUrl = new URL(location.href); pageUrl.searchParams.set('page', currentPage);
+    history.replaceState(null, '', pageUrl.href);
+    $('conversation-pagination').hidden = paged.pages === 1;
+    $('conversation-page').textContent = currentPage + ' / ' + paged.pages;
+    $('conversation-previous').disabled = currentPage === 1;
+    $('conversation-next').disabled = currentPage === paged.pages;
+    const signature = JSON.stringify(paged);
     if (signature === lastConversations) return;
     lastConversations = signature;
-    const links = items.map((item) => {
+    const links = paged.items.map((item) => {
       const link = element('a', undefined, 'conversation-link');
       const url = new URL(location.href); url.searchParams.set('conversation', item.id);
       link.href = url.href;
@@ -176,6 +196,7 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
       link.title = item.name;
       link.append(element('strong', item.name));
       if (item.preview) link.append(element('span', item.preview, 'muted'));
+      link.append(element('span', '事项 ' + (item.taskCount ?? 0) + ' · 安排 ' + (item.routineCount ?? 0), 'muted conversation-counts'));
       const indicators = element('span', undefined, 'conversation-indicators');
       if (item.default) indicators.append(conversationStatusIcon('默认联络处', '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>'));
       if (item.trigger?.enabled) indicators.append(conversationStatusIcon('主动回顾已开启', '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M3 5l3-3m12 0 3 3M6 20l-2 2m14-2 2 2"/>'));
@@ -537,5 +558,4 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
     const id = 'web:' + newId();
     location.href = '/?conversation=' + encodeURIComponent(id);
   });
-  renderConversations([]);
   poll(); setInterval(poll, 1500);

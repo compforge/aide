@@ -8,7 +8,9 @@ Chief 持续理解人，并围绕人的目标推进事。Person 是人物 CRD，
 
 Person 保存姓名、外部身份和 profile。身份由 provider / scope / id 唯一确定，姓名只用于展示；同一人可绑定多个账号，跨应用的裸 ID 不作比较。外部资料同步只补全尚未识别的名字，不覆盖用户资料或认知。
 
-Me 是身份标记配置，通过匹配 Person 的外部身份确定 Personal.me。Lark 的 Me 标记与 CLI 执行身份分别声明；执行账号可能属于另一个人，不能从登录凭证推导本人。本地单人 Web 有固定身份 web / local / me。配置标记在启动时绑定到同一个 Person，冲突会报错。
+Person 是人物身份与认知的基础，Me 是附加的可选身份标记：它告诉 Aide，已经识别的人物中哪一个是“我”。Connector 与 Channel 带来的可识别人类身份都按 Person 组织；未配置该入口的 Me 时，仍正常接收和处理 Input、识别人并积累人物认知。配置 Me 后，Aide 才能将该入口中的身份认作本人，并结合其他已绑定身份形成跨入口的本人认知。
+
+访问授权与本人标记分别声明：Connector 的执行身份决定能访问哪些数据，Me 通过匹配 Person 的外部身份确定 Personal.me。以 Lark 为例，外层 appId / userId 校验 CLI 使用的应用与已授权用户，实际凭证由 CLI 管理；me 中的 appId / openId 标记该应用下哪个人是本人，不授予访问权限。执行账号可能属于另一个人，不能从登录凭证推导本人。本地单人 Web 有固定身份 web / local / me。配置标记在启动时绑定到同一个 Person，冲突会报错。
 
 Person 目录跨 Conversation 和 Session 共享。PersonDefinition 声明 shared 作用域；资源与引用不携带 sessionId，目录不启动 Harness 或 Reconcile。人物资源受容量保护，ResourceClient 写入在同一存储事务内做版本、Schema、身份唯一性与 Me 约束校验，包括批量 commit。
 

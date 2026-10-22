@@ -8,7 +8,7 @@ export interface WebService extends ChannelService {
   deleteConversation(conversationId: string, revision: number, uid: string): Promise<import("../../plugins/personal/conversation/model.ts").ConversationDeletion>;
   setDefaultConversation(conversationId: string, enabled: boolean): Promise<void>;
   setConversationTrigger(conversationId: string, enabled: boolean): Promise<import("../../plugins/personal/conversation/trigger.ts").ConversationTrigger>;
-  works(): readonly { id: string; conversationId: string; revision: number }[];
+  works(): readonly { id: string; conversationId: string; revision: number; kind: "task" | "routine" }[];
   event(input: Omit<Incoming, "channelId" | "source"> & { name: string }): Promise<number>;
   work(conversationId: string): { delete(id: string, revision: number): Promise<void> };
 }

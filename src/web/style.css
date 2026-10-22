@@ -14,6 +14,10 @@
   .conversation-link strong { font-size: 14px; margin-bottom: 6px; }
   .conversation-link span { margin-top: 4px; }
   .conversation-row { margin-bottom: 10px; }
+  .conversation-pagination { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 12px 0; background: #f5f5ef; border-top: 1px solid #d8dfd5; }
+  .conversation-pagination[hidden] { display: none; }
+  .conversation-pagination button { padding: 6px 8px; font-size: 12px; }
+  .conversation-link .conversation-counts { font-size: 12px; }
   #conversation-notice { margin: 10px; color: #9b5b11; }
   #conversation-heading { font-size: 16px; margin: 0 0 6px; overflow-wrap: anywhere; }
   .conversation-header { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
