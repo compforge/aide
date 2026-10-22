@@ -1,3 +1,5 @@
+import { initialConversationName } from "../plugins/personal/conversation/model.ts";
+import { ROUTE_TARGET } from "../plugins/personal/route/model.ts";
 import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { ResourceStorage } from "./host/resource/storage.ts";
 import { SayInputSchema } from "../plugins/personal/output/action.ts";
@@ -109,8 +111,8 @@ export class Aide {
       messages: config?.connectors.lark?.appId ? personMessages(connectors.messages, this.persons, config.connectors.lark.appId) : connectors.messages };
     let personal: Personal | undefined;
     this.runtime = new ApplicationRuntime(home, {
-      cwd: options.cwd, targets: [{ ...this.defaultTarget }],
-      instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ conversation: parsePersonalConfig(config?.plugins.personal).conversation, watches: this.watches,
+      cwd: options.cwd, targets: [{ ...this.defaultTarget }, { id: ROUTE_TARGET, harness: "route" }],
+      instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ route: parsePersonalConfig(config?.plugins.personal).route, conversation: parsePersonalConfig(config?.plugins.personal).conversation, watches: this.watches,
         environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
       controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter },
       plugins: { connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
@@ -147,7 +149,7 @@ export class Aide {
     this.inputDefinition({ origin: "channel", originId: input.channelId });
     if (input.source.channelId !== input.channelId) throw new Error("Channel input address belongs to a different Channel");
     const scope = this.personal;
-    await this.conversations.ensure(input.sessionId, input.source);
+    await this.conversations.ensure(input.sessionId, input.source, initialConversationName(input.text));
     await this.start();
     return scope.receive(input);
   }
@@ -182,23 +184,26 @@ export class Aide {
     return result;
   }
 
-  /** @spec At most one default Conversation in the application. Clear before setting; interruption may leave none, never two.
+  /** @spec Default selection is atomic and storage enforces uniqueness against concurrent Route fallback creation.
    * @link docs/plugin/personal.md
    */
   setDefaultConversation(conversationId: string, enabled: boolean): Promise<void> {
     const change = this.defaultSelection.then(async () => {
-      const resource = this.conversations.resource(conversationId);
-      if (!resource || resource.metadata.deletionTimestamp) {
-        throw new Error("Conversation does not exist");
-      }
-      if (enabled) {
-        for (const conversation of this.conversations.list()) {
-          if (conversation.default && conversation.id !== conversationId) {
-            await this.conversations.setDefault(conversation.id, false);
-          }
+      for (let attempt = 0; ; attempt++) {
+        const resource = this.conversations.resource(conversationId);
+        if (!resource || resource.metadata.deletionTimestamp) throw new Error("Conversation does not exist");
+        const previous = enabled ? this.conversations.list().filter(c => c.default && c.id !== conversationId)
+          .map(c => this.conversations.resource(c.id)!) : [];
+        try {
+          await this.runtime.plugins.resourceClient("personal").commit([
+            ...previous.map(c => ({ operation: "replace" as const, resource: c, spec: { ...c.spec, default: false }, status: c.status })),
+            { operation: "replace", resource, spec: { ...resource.spec, default: enabled }, status: resource.status },
+          ]);
+          break;
+        } catch (error) {
+          if (attempt >= 8 || !/version conflict|Default Conversation already exists/.test(String(error))) throw error;
         }
       }
-      await this.conversations.setDefault(conversationId, enabled);
       this.log.info({ conversationId, enabled }, "Default conversation configured");
       this.notify();
     });

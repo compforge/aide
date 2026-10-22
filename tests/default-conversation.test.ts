@@ -63,8 +63,8 @@ test("Default conversation selection is application-wide, serialized and persist
   assert.equal(conversationList(aide).filter((c) => c.default).length, 0);
 });
 
-/** @case Default receives all Inputs; rule matches still receive the same fact and overlap is idempotent. */
-test("Default receives unscoped, hinted and Channel Inputs without semantic filtering", async (t) => {
+/** @case Default receives unmatched Inputs; explicit topic rules bypass it and redelivery remains idempotent. */
+test("Default receives unmatched Inputs while hinted and Channel Inputs go directly to their topic", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-default-route-"));
   const aide = new Aide(root, fakeOptions({ async chief(prompt) {
     assert.doesNotMatch(prompt, /Candidates:/); return "processed";
@@ -82,12 +82,13 @@ test("Default receives unscoped, hinted and Channel Inputs without semantic filt
   assert.deepEqual(aide.personal.conversations.inputs("group").map((i) => i.metadata.name), []);
   await source.conversations.submit("hint", { origin: "source", originId: "personal.environments", sessionId: "group", text: "explicit destination" });
   await aide.settled();
-  for (const id of ["private", "group"]) assert.ok(aide.personal.conversations.inputs(id).map((i) => i.metadata.name).includes("hint"));
+  assert.ok(aide.personal.conversations.input("hint", "group"));
+  assert.equal(aide.personal.conversations.input("hint", "private"), undefined);
   await aide.receive(fixtureIncoming({ channelId: "web", id: "channel", sessionId: "group", text: "channel input" }));
   await aide.settled();
   const group = aide.personal.conversations;
   const channel = group.inputs("group").find((input) => input.spec.text === "channel input")!;
-  assert.equal(aide.personal.conversations.input(channel.metadata.name, "private")!.consumption.phase, "done", JSON.stringify(aide.personal.conversations.resource("private")!.status.batch));
+  assert.equal(aide.personal.conversations.input(channel.metadata.name, "private"), undefined);
   const before = aide.outputs().length;
   await aide.receive(fixtureIncoming({ channelId: "web", id: "channel", sessionId: "group", text: "channel input" }));
   await aide.settled(); assert.equal(aide.outputs().length, before);

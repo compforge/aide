@@ -92,7 +92,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: { environments: {
     dev: { kind: "kubernetes", kubeconfig: "unused", namespace: "app", aliases: ["开发"] },
-  } }, plugins: { personal: { conversation: { batchSize: 1 }, sources: { environments: { targets: [{ environment: "dev", namespaces: ["app", "other"] }] } } } } }));
+  } }, plugins: { personal: { route: { batchSize: 1 }, conversation: { batchSize: 1 }, sources: { environments: { targets: [{ environment: "dev", namespaces: ["app", "other"] }] } } } } }));
   let current = snapshot("A"); let reads = 0;
   const prompts: string[] = [];
   const config = loadConfig(configFile);
@@ -135,5 +135,5 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();
   assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
-  assert.equal(prompts.length, 2, "Only Channel and observation handling call the model; routing does not");
+  assert.equal(prompts.length, 3, "Channel, semantic routing and observation handling each call their Agent once");
 });

@@ -128,7 +128,7 @@ test("Source watches restore once globally, independently of Channel topics", as
 });
 
 
-test("Conversation name comes from its first Input, survives restart, and Source-created conversations are named too", async (t) => {
+test("Conversation names come from the first attached Input and survive restart for Channel and Source topics", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-conversation-name-"));
   const options = fakeOptions({ chief: async () => "收到",
     execute: async () => { throw new Error("No Work expected"); } }, root);
@@ -140,6 +140,7 @@ test("Conversation name comes from its first Input, survives restart, and Source
   await aide.settled();
   assert.equal(aide.personal.conversations.resource(sessionId)!.spec.name, "关注 executor 部署情况");
   const source = aide.personal; await source.start();
+  await source.conversations.ensure("source-name");
   await source.conversations.submit("discovery", { origin: "source", originId: "personal.environments", sessionId: "source-name", text: "发现新的需求" });
   await aide.settled();
   assert.equal(source.conversations.resource("source-name")!.spec.name, "发现新的需求");

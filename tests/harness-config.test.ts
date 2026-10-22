@@ -181,6 +181,12 @@ test("startup resolves independent Pi and Chief models with explicit package ski
     const resolved = await resolveHarnessConfigs(config, { home, cwd: home, file, environment: { TEST_MODEL_KEY: "fixture-key" }, log });
     expect(resolved.pi!.model.id).toBe("work-model");
     expect(resolved.chief.model.id).toBe("chief-model");
+    expect(resolved.route.model.id).toBe("chief-model");
+    expect(resolved.route.skillPaths).toEqual([]);
+    const routing = await resolveHarnessConfigs({ ...config, harnesses: { ...config.harnesses, route: { model: { ...definition, id: "route-model" } } } },
+      { home, cwd: home, file, environment: { TEST_MODEL_KEY: "fixture-key" }, log });
+    expect(routing.route.model.id).toBe("route-model");
+    expect(routing.chief.model.id).toBe("chief-model");
     expect(resolved.pi!.modelRuntime).not.toBe(resolved.chief.modelRuntime);
     expect(resolved.pi!.skillPaths).toEqual([]);
     expect(resolved.chief.skillPaths).toEqual([]);
@@ -199,7 +205,7 @@ test("defaultHarness is an Aide root setting with a Pi default and strict regist
       writeFileSync(file, JSON.stringify({ defaultHarness: harness }));
       expect(loadConfig(file).defaultHarness).toBe(harness);
     }
-    for (const value of [null, "", "chief", "unknown", "cx", 42]) {
+    for (const value of [null, "", "chief", "route", "unknown", "cx", 42]) {
       writeFileSync(file, JSON.stringify({ defaultHarness: value }));
       expect(() => loadConfig(file)).toThrow("defaultHarness");
     }
@@ -234,6 +240,8 @@ test(`${harness} selection resolves native settings without loading inactive Pi 
     expect(resolved.defaultTarget).toEqual({ id: "default", harness, model: "native-model" });
     expect(resolved.defaultTargetConfig).toMatchObject({ harness, ...native[harness] });
     expect(resolved.chief.model.id).toBe("chief-model");
+    expect(resolved.route.model.id).toBe("chief-model");
+    expect(resolved.route.skillPaths).toEqual([]);
     expect(resolved.pi).toBeUndefined();
     config.defaultHarness = "pi";
     if (harness === "codex") config.harnesses.codex.command![0] = "changed-command";

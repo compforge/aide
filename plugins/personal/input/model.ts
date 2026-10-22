@@ -44,6 +44,7 @@ export interface InputStatus {
     bootstrap?: boolean;
     /** Stable identity for the one rule-created Conversation; uid pins its incarnation before append. */
     creation?: { sessionId: string; name: string; uid?: string };
+    destinations?: Array<{ name: string; uid: string }>;
     reason: string;
   };
 }

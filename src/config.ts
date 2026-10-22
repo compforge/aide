@@ -14,7 +14,7 @@ const record = z.record(z.string(), z.unknown());
 /** @spec Aide owns default execution selection; Chief remains a separately bound role.
  * @link docs/kernel.md
  */
-export const DefaultHarnessSchema = z.enum(HARNESSES).exclude(["chief"]).default("pi");
+export const DefaultHarnessSchema = z.enum(HARNESSES).exclude(["chief", "route"]).default("pi");
 export type DefaultHarness = z.infer<typeof DefaultHarnessSchema>;
 /** @spec Explicit values win; defaults apply only to absent fields, never to empty lists or invalid values. */
 export const ConfigSchema = z.object({

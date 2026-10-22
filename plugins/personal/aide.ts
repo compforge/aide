@@ -5,7 +5,6 @@ import { outputWrite } from "./output.ts";
 import type { OutputStore } from "./output/store.ts";
 import { updateBatch } from "./conversation/state.ts";
 import { activeBatch } from "./conversation/batch.ts";
-import { appendConversationInput } from "./conversation/input.ts";
 import { createPiAgent } from "../../agents/pi/agent.ts";
 import { inputPrinter } from "./input/printer.ts";
 import type { Logger } from "pino";
@@ -230,7 +229,6 @@ export class Personal {
   }
 
   private async acceptChannel(id: string, input: Incoming) {
-    const current = await this.conversations.ensure(input.sessionId);
     const me = await this.me;
     const relation = channelRelation(me?.spec ?? this.options.me, input);
     let sender;
@@ -246,9 +244,7 @@ export class Personal {
     const fact = await this.conversations.submit(id, { attention: "immediate", sessionId: input.sessionId, text: input.text, timezone: this.options.timezone,
       origin: "channel", originId: input.channelId, source: input.source, ...(sender ? { sender } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });
-    await appendConversationInput(this.plugins.resourceClient("personal"), { name: current.metadata.name, uid: current.metadata.uid }, fact);
-
-    return this.conversations.input(fact.metadata.name, input.sessionId)!;
+    return fact;
   }
 
   async event(input: { id: string; conversationId: string; name: string; text: string }): Promise<number> {

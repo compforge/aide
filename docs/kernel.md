@@ -68,8 +68,8 @@ Host 与 Runner 不相互导入实现。双方通过 `src/protocol/` 协作，�
 
 ## Personal 的应用方式
 
-Personal 将 Channel / Source 的内容保存为 Input，通过自身的规则协调到 Conversation。Conversation 组织固定 Batch，Task / Routine 分别承载有限目标与持续职责，Person 保存身份与长期认识。业务状态与 Output 可以一起提交；投递器独立处理发送和回执，发送失败不重跑业务。
+Personal 将 Channel / Source 的内容保存为 Input，通过全局 Route 的规则直达或语义组批分发到 Conversation。Conversation 组织固定 Batch，Task / Routine 分别承载有限目标与持续职责，Person 保存身份与长期认识。业务状态与 Output 可以一起提交；投递器独立处理发送和回执，发送失败不重跑业务。
 
-当前 Input 路由仍是 Personal 的规则 Reconcile。全局语义 Route 与专用 Route Agent 的设计不属于底座接口，也尚未在此实现。
+Route 与具名 Batch Controller 观察同一个 Personal Route 资源。前者管理队列和规则匹配，后者调用专用 Route Agent、保存分发计划并幂等投递；两者复用底座普通的资源、Watch、并发更新与 Harness 能力。
 
 详见 [Plugin](plugin/README.md)、[Personal](plugin/personal.md)、[Harness](harness/README.md) 与 [Output](output.md)。`npm run check` 验证资源、调度、IPC、执行与恢复；真实提供方验收见 [E2E](e2e.md)。

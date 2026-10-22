@@ -118,4 +118,4 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 
 ReconcileInput 不调用 Harness，也不注册单独的路由 Target 或 Lane。没有任何 Conversation 时创建并追加后结束；已有会话时，先追加到存在的默认联络处，再按确定性规则创建和关联具体会话。每个确定的会话立即接收 Input，追加幂等，无需等待完整路由计划。
 
-目标 Conversation 的 Chief 沿用 Batch 上下文交接和记忆机制，独立判断静默、通知、询问或推进工作。默认联络处接收所有 Input，但默认标记不构成执行授权，也不合并其它会话的上下文。
+目标 Conversation 的 Chief 沿用 Batch 上下文交接和记忆机制，独立判断静默、通知、询问或推进工作。Route 将无法归入已有话题的 Input 交给默认联络处；默认标记不构成执行授权，也不合并其它会话的上下文。
