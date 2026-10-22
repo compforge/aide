@@ -50,7 +50,7 @@ test("Web switches one Conversation, persists its deadline and cannot change the
   const session = { dir: root };
   const reopened = new ConversationStore(session);
   assert.equal(reopened.resource("a")!.status.nextTriggerAt, due);
-  assert.equal(existsSync(join(root, "sessions")), false);
+  assert.equal(existsSync(join(root, "harness")), false);
 });
 
 test("Runner wakes Conversation without an Input; a long timer coalesces and disabling keeps its result", async (t) => {

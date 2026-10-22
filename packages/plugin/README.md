@@ -121,7 +121,7 @@ Application Harness context is derived from the main resource UID and Controller
 
 Harness and connector calls require timeoutMs covering their wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
-Harness returns an invocation ID and execution result. Reconcile snapshots contain only cwd and configured Harness targets, never global execution history. ApplicationRuntime composes plugin scheduling and ExecutionService independently. Resource contexts retain native bindings and history cutoffs. Every Harness call has one invocation ID for events, results, cancellation and approvals; no Lane or Turn object is created. Legacy journals are translated only when read. See [execution boundary](../../docs/kernel.md#执行后端的边界).
+Harness returns an invocation ID and execution result. Reconcile snapshots contain only cwd and configured Harness targets, never global execution history. ApplicationRuntime always provides resource scheduling; an optional `harness` configuration enables ExecutionService. Resource-only plugins need no adapter or target configuration. Resource contexts retain native bindings and history cutoffs. Every Harness call has one invocation ID for events, results, cancellation and approvals; no Lane or Turn object is created. Storage uses the current format without legacy journal conversion. See [execution boundary](../../docs/kernel.md#执行后端的边界).
 
 ## Resource Printers
 
@@ -154,7 +154,7 @@ Definitions resolve by Plugin Instance and apiVersion/kind. A plugin cannot clai
 Retention rules belong to the same definition. `releasedAt` returns eligibility time, or undefined to protect the resource; `references` returns exact resource UIDs. Host applies quotas and eviction ordering only to released, unreferenced resources. Missing declarations protect restored records; new writes require declarations.
 
 
-## Hooks, commands and presentation
+## Execution hooks and diagnostics
 
 [Hooks](src/hook.ts) observe two execution boundaries:
 
@@ -165,13 +165,7 @@ Retention rules belong to the same definition. `releasedAt` returns eligibility 
 
 Inline hooks fail open on failure or timeout. Deferred hooks use best-effort bounded delivery. Hooks correlate observations by invocationId and return no replacement or allow/deny value. Their verbs expose actions and connectors; Harness execution belongs to resource Controllers. Publishing an output does not prove a person saw it.
 
-[Commands](src/command.ts) receive command identity and a callback execution ID. They do not carry a Lane, Target, or Harness submission/configuration capability. The registration and callback API remains available to embedders; the application has no built-in command dispatch UI.
-
-
-
-[Mentions](src/mention.ts) supply searchable, read-only context for explicit user selection. Keep search side-effect free; resolve is for selected references. [Board presentations](src/board.ts), pickers, mentions and toast are optional presentation contracts. Actual rendering depends on the consuming Channel; the current Web / Lark adapters do not expose every authoring capability.
-
-`context.toast` is non-durable feedback. Ongoing state belongs in resource status. `context.logger` writes host-owned structured diagnostics with plugin identity; log transitions and errors, avoid repeated polling noise and secrets, and do not use logs as business state.
+`context.logger` writes host-owned structured diagnostics with plugin identity; log transitions and errors, avoid repeated polling noise and secrets, and do not use logs as business state.
 
 See [Channel](../../docs/channel/README.md) for the current Web / Lark experience and [Kernel](../../docs/kernel.md) for execution ownership.
 

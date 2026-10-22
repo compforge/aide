@@ -1,11 +1,11 @@
 import { iconFor } from "@compforge/aide-plugin";
-// canonical harness id 的叶子真相源：registry / config / commands 都从这里取。
+// canonical harness id 的叶子真相源：registry / config / adapters 都从这里取。
 // 单列成无依赖文件的原因：config 校验只需要 id 集合，而 harness/registry.ts
 // 携带 adapter 的完整依赖图（SDK、子进程封装）——"读配置"不应连带加载它，
 // 反向 import（config → registry）还会成环。
 
 export interface HarnessIdentity<Id extends string = string> {
-  /** Canonical user-facing ID used by commands and Target configuration. */
+  /** Canonical user-facing ID used by Target configuration. */
   readonly id: Id;
   /** Input aliases normalize to id; they never enter persisted events. */
   readonly aliases: readonly string[];
@@ -16,7 +16,7 @@ export interface HarnessIdentity<Id extends string = string> {
   readonly icon: string;
 }
 
-/** 轻量 harness 身份目录；config / commands 可以安全依赖，不会带入 adapter SDK。 */
+/** 轻量 harness 身份目录；config / adapters 可以安全依赖，不会带入 adapter SDK。 */
 export const HARNESS_IDENTITIES = {
   codex: { id: "codex", aliases: ["cx"], label: "Codex", sessionKey: "codex", icon: iconFor("harness:codex") },
   claude: { id: "claude", aliases: ["cc"], label: "Claude Code", sessionKey: "claude-code", icon: iconFor("harness:claude") },
@@ -30,7 +30,7 @@ export type HarnessName = keyof typeof HARNESS_IDENTITIES;
 export type HarnessAlias = (typeof HARNESS_IDENTITIES)[HarnessName]["aliases"][number];
 export const HARNESSES = Object.keys(HARNESS_IDENTITIES) as HarnessName[];
 
-/** 用户输入（slash command、Target 的 harness 字段）归一为 canonical id；未知返回 null */
+/** 用户输入（Target 的 harness 字段）归一为 canonical id；未知返回 null */
 export function parseHarness(value: string): HarnessName | null {
   const normalized = value.trim().toLowerCase();
   const identity = Object.values(HARNESS_IDENTITIES).find(

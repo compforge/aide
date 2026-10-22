@@ -1,5 +1,4 @@
 import { InputStore } from "../plugins/personal/input/store.ts";
-import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
@@ -31,7 +30,7 @@ function setup(t: TestContext) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const session = new HarnessFixtures(root).create({ cwd: root });
   let writes = 0;
-  const resources = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
+  const resources = new PluginResourceStore({ home: session.home, pluginInstanceId: "personal" });
   resources.storage.register("personal", personalDefinitions);
   const store = new Store(resources, createResourceClient(resources, () => writes++, undefined, personalAdmission(new InputStore(root), new OutputStore(root))), new ConversationStore(session));
   const consume = async (id: string) => {

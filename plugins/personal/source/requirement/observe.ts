@@ -149,7 +149,7 @@ class RequirementObservation {
     this.account = await this.connectors.requirements.identity(this.resource.spec.source);
     const person = await this.persons.me();
     this.me = { identities: person?.spec.identities ?? [] };
-    if (this.resource.status.scope !== this.account.scope) await this.save({ scope: this.account.scope, tracked: {}, scan: null, scannedThrough: null, pendingInputIds: [], seen: {} });
+    if (this.resource.status.scope !== this.account.scope) await this.save({ scope: this.account.scope, tracked: {}, scan: null, scannedThrough: null });
     // Existing work remains observable after completion or reassignment removes it from discovery queries.
     const existing = Object.keys(this.tracked);
     const failures: string[] = [];

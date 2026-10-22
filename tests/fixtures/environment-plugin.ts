@@ -4,12 +4,13 @@ const plugin: PluginPackage = {
   pluginId: "tests/environment-plugin",
   version: "1.0.0",
   async activate(context) {
-    context.commands.register({
-      name: `environment-${context.instance.pluginInstanceId}`,
-      description: "Discover host-owned connectors from an unrelated plugin",
-      async execute(input) {
-        if (input.argument === "missing") await context.connectors.environments.get("missing");
-        return { kind: "message", text: JSON.stringify({
+    context.controllers.register<{ operation: string }, { done?: boolean; result?: unknown; error?: string }>({
+      resourceType: { apiVersion: "tests.aide.dev/v1alpha1", kind: "EnvironmentCheck" },
+      async reconcile(_execution, resource) {
+        if (resource.status.done) return;
+        try {
+        if (resource.spec.operation === "missing") await context.connectors.environments.get("missing");
+        const result = {
           catalog: await context.connectors.describe(),
           environments: await context.connectors.environments.list(),
           environment: await context.connectors.environments.get("开发"),
@@ -20,7 +21,9 @@ const plugin: PluginPackage = {
           pulls: await context.connectors.forges.list("forge", "org/repo", { state: "open", limit: 10 }),
           pull: await context.connectors.forges.get({ forge: "forge", path: "org/repo", number: 1 }),
           comments: await context.connectors.forges.comments({ forge: "forge", path: "org/repo", number: 1 }),
-        }) };
+        };
+        await context.resources.patchStatus(resource, { done: true, result });
+        } catch (error) { await context.resources.patchStatus(resource, { done: true, error: String(error) }); }
       },
     });
   },

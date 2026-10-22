@@ -39,7 +39,7 @@ test("Group/Kind quota spans versions and scopes; protected references survive e
 });
 
 test("LRU is explicit reads; listing does not refresh access, and unknown resource kinds are protected", (t) => {
-  const { db, record } = setup(t);
+  const { root, db, record } = setup(t);
   db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 2, order: "lru" }, lowWatermark: 0.95 }));
   db.write("a", "one", record("a")); db.write("b", "one", record("b"));
   db.db.prepare("UPDATE resources SET accessed=0 WHERE key='b'").run();
@@ -48,8 +48,13 @@ test("LRU is explicit reads; listing does not refresh access, and unknown resour
   assert.ok(db.has("a")); assert.ok(!db.has("b"));
   const unknown = record("x"); unknown.object = { ...unknown.object, kind: "Unknown" };
   assert.throws(() => db.write("x", "one", unknown), /Unknown resource definition/);
-  db.migrate("unknown-fixture", function* () { yield ["x", "one", unknown]; });
-  assert.equal(db.db.prepare("SELECT released FROM resources WHERE key='x'").get()!.released, null);
+  db.register("one", [definition({ apiVersion: "example.dev/v1", kind: "Unknown" })]);
+  db.write("x", "one", unknown);
+  const reopened = new ResourceStorage(root);
+  try {
+    assert.equal(reopened.findDefinition("one", unknown.object), undefined);
+    assert.equal(reopened.db.prepare("SELECT released FROM resources WHERE key='x'").get()!.released, null);
+  } finally { reopened.db.close(); }
 });
 
 test("Failed writes roll back receipts and collection; immutable history can shrink while over quota", (t) => {

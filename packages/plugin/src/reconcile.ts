@@ -1,7 +1,7 @@
 import type { ResourceNamespace } from "./namespace.ts";
 import type { Resource, ResourceType } from "./resource.ts";
 import type { ReconcileContext } from "./reconcile-context.ts";
-import type { BoardPresentation } from "./board.ts";
+
 import type { ControllerSource } from "./source.ts";
 import type { Watch } from "./watch.ts";
 
@@ -27,7 +27,4 @@ export interface Controller<TSpec, TStatus> {
     context: ReconcileContext,
     resource: Readonly<Resource<TSpec, TStatus>>,
   ): Promise<ReconcileResult | void>;
-  present?(
-    resource: Readonly<Resource<TSpec, TStatus>>,
-  ): Promise<BoardPresentation | undefined>;
 }

@@ -8,7 +8,6 @@ export interface HarnessSessionMeta {
   resumeState?: HarnessResumeState;
   resumeCursor?: string;
   contextEpochId?: string;
-  syncedSeq?: number;
   /** Deliberate context replacement excludes earlier journal entries on native reconstruction. */
   contextAfterSeq?: number;
   parentSessionId?: string;

@@ -1,5 +1,4 @@
 import { personalExecution } from "../plugins/personal/execution-context.ts";
-import { resourceHome } from "../src/host/resource/storage.ts";
 import { test, expect } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,10 +22,10 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit conve
   const session = new HarnessFixtures(root).create({ cwd: root });
   session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex" });
   const options = fakeOptions({ execute: async () => ({ action: "done", summary: "checked", notification: "ok", question: null, nextAt: null }) }, root);
-  const core = new ApplicationRuntime(root, { cwd: root, targets: [{ id: "default", harness: "codex" }],
+  const core = new ApplicationRuntime(root, { cwd: root,
     instances: [{ pluginInstanceId: "fixture", pluginId: "tests/coordination", packageVersion: "1.0.0", marketplace: "builtin", config: {} }],
-    controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter },
-    plugins: { pluginSupervisor: new PluginSupervisor(), selectedHarnessTargetId: () => "default",
+    harness: { targets: [{ id: "default", harness: "codex" }], defaultTargetId: "default", historyBudgetChars: 0, createAdapter: options.createAdapter },
+    plugins: { pluginSupervisor: new PluginSupervisor(),
       loadPackageEntry: async (pluginId, version) => ({ pluginId, version, entryUrl: new URL("./fixtures/coordination-plugin.ts", import.meta.url).href,
         resourcesUrl: new URL("./fixtures/coordination-definitions.ts", import.meta.url).href }) },
   });

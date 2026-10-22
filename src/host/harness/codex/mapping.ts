@@ -211,7 +211,7 @@ export function unifiedFilePatch(change: Record<string, unknown>): string {
   return `--- ${path}\n+++ ${path}\n${source}`;
 }
 
-/** Codex fileChange → 每个文件一个 OpenTUI 可解析的 unified diff。 */
+/** Codex fileChange → 每个文件一个 标准 unified diff。 */
 export function fileChangeDiffs(item: Record<string, unknown>): DiffBlock[] {
   const changes = (Array.isArray(item.changes) ? item.changes : []) as Array<Record<string, unknown>>;
   return changes.map((change) => ({
@@ -252,7 +252,7 @@ export function codexToolTerminalStatus(rawStatus: unknown): ToolCallStatus {
 
 /**
  * Codex ThreadItem 的持久语义归一。live notification 与只读 full Turn 导入共同走这里，
- * 避免中途接管时得到一套“只有首尾文本”的缩水 AideSession。
+ * 避免中途接管时得到一套“只有首尾文本”的缩水 HarnessStore。
  */
 export function codexItemLifecycleDrafts(
   lifecycle: "started" | "completed",

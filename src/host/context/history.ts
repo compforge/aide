@@ -1,7 +1,7 @@
 import type { InvocationSummary } from "../event/index.ts";
 import type { HarnessTarget } from "../harness/target.ts";
 import type { HarnessStore } from "../harness/store.ts";
-export const DEFAULT_MENTION_BUDGET_CHARS = 4096;
+export const DEFAULT_HISTORY_BUDGET_CHARS = 4096;
 interface InvocationSummaryRecord {
   harnessTargetId: string;
   contextId?: string;
@@ -77,7 +77,7 @@ export function buildTargetCatchUpContext(
   if (missed.length === 0) return null;
 
   const header = "# Execution context history (auto-restored by aide)";
-  const budgetChars = opts.budgetChars ?? DEFAULT_MENTION_BUDGET_CHARS;
+  const budgetChars = opts.budgetChars ?? DEFAULT_HISTORY_BUDGET_CHARS;
   const picked: string[] = [];
   let used = header.length;
   let dropped = 0;

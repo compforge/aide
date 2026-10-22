@@ -131,7 +131,6 @@ export interface ControllerOptions<TSpec, TStatus> {
   sources?: readonly ControllerSource<TSpec>[];
   watches?: readonly Watch[];
   reconcile: PluginController<TSpec, TStatus>["reconcile"];
-  present?: PluginController<TSpec, TStatus>["present"];
   maxConcurrency?: number;
   now?: () => Date;
   /** 每次执行前读取运行环境与 Harness 配置快照。 */
@@ -150,8 +149,6 @@ export interface ControllerOptions<TSpec, TStatus> {
   /** 仅报告实际执行失败，不包含 enqueue 参数校验错误。 */
   onReconcileError?(key: ReconcileKey, error: unknown): void;
   retry?: ControllerRetryOptions;
-  /** Source 首次 materialize Resource 后失效 Board 等派生投影。 */
-  onSourceResource?(resource: Readonly<PluginResource<TSpec, TStatus>>): void;
   /** Terminating Resource reconcile 成功后，向 Manager 发布最终删除事实。 */
   onResourceDeleted?(
     resource: Readonly<PluginResource<unknown, unknown>>,
@@ -204,7 +201,6 @@ export class Controller<TSpec, TStatus> {
   readonly scope: ReconcileScope;
   readonly sources: readonly ControllerSource<TSpec>[];
   readonly watches: readonly Watch[];
-  readonly present?: PluginController<TSpec, TStatus>["present"];
   private readonly store: PluginResourceStore;
   private readonly resourceType: ResourceType;
   private readonly reconcileResource: PluginController<TSpec, TStatus>["reconcile"];
@@ -233,7 +229,6 @@ export class Controller<TSpec, TStatus> {
     this.resourceType = Object.freeze({ ...options.resourceType });
     this.watches = Object.freeze([...(options.watches ?? [])]);
     this.reconcileResource = options.reconcile;
-    this.present = options.present;
     this.now = options.now ?? (() => new Date());
     validateSources(options.sources, this.now());
     this.snapshot =
@@ -288,7 +283,6 @@ export class Controller<TSpec, TStatus> {
       store: this.store,
       resourceType: this.resourceType,
       executeWithCapacity: this.executeWithCapacity,
-      onResource: options.onSourceResource,
       enqueue: (resource) => {
         void this.enqueue({
           ...this.scope,

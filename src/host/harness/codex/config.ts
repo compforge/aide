@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { HarnessTargetConfig } from "../../config/types.ts";
+import type { HarnessTargetConfig } from "../target.ts";
 
 export const CodexConfigSchema = z.object({
   command: z.array(z.string().trim().min(1)).min(1).optional(),

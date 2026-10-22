@@ -3,12 +3,12 @@ import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorRequest } from "../../protocol/connectors.ts";
 import { createConnectorClient, dispatchConnector, emptyConnectors } from "../../connector-client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
-import type { BoardPresentation, BoardItemTone, CommandDefinition, DeferredHookStage, Hook, HookStage, HookSubjectMap, InlineHookStage, Mention, Controller, ControllerSource, CronSource, CreateEvent, DeleteEvent, EventHandler, EventResource, MapFunc, CommandInput, CommandPickerSearch, CommandResult, PluginContext, PluginDataDirectories, PluginLogContext, PluginLogger, PluginLogLevel, PluginPackage, Resource, ReconcileRequest, ResourceRef, Source, SourceContext, SourceSignal, ResourceType, ResourceMergePatch, ToastMessage, ToastSink, ToastTone, UpdateEvent, ViewInput, ViewInputRecord, ViewOutput, Watch } from "@compforge/aide-plugin";
+import type { DeferredHookStage, Hook, HookStage, HookSubjectMap, InlineHookStage, Controller, ControllerSource, CronSource, CreateEvent, DeleteEvent, EventHandler, EventResource, MapFunc, PluginContext, PluginDataDirectories, PluginLogContext, PluginLogger, PluginLogLevel, PluginPackage, Resource, ReconcileRequest, ResourceRef, Source, SourceContext, SourceSignal, ResourceType, ResourceMergePatch, UpdateEvent, Watch } from "@compforge/aide-plugin";
 import type { PluginInstance } from "./instance.ts";
 import type { ResourceClient } from "./resource/client.ts";
 import { validateResourceType } from "./resource/type.ts";
 
-export type { BoardPresentation, BoardItemTone, CommandDefinition, DeferredHookStage, Hook, HookStage, HookSubjectMap, InlineHookStage, Mention, Controller, ControllerSource, CronSource, CreateEvent, DeleteEvent, EventHandler, EventResource, MapFunc, CommandInput, CommandPickerSearch, CommandResult, PluginContext, PluginDataDirectories, PluginLogContext, PluginLogger, PluginLogLevel, PluginPackage, Resource, ReconcileRequest, ResourceRef, Source, SourceContext, SourceSignal, ResourceType, ResourceMergePatch, ToastMessage, ToastSink, ToastTone, UpdateEvent, ViewInput, ViewInputRecord, ViewOutput, Watch } from "@compforge/aide-plugin";
+export type { DeferredHookStage, Hook, HookStage, HookSubjectMap, InlineHookStage, Controller, ControllerSource, CronSource, CreateEvent, DeleteEvent, EventHandler, EventResource, MapFunc, PluginContext, PluginDataDirectories, PluginLogContext, PluginLogger, PluginLogLevel, PluginPackage, Resource, ReconcileRequest, ResourceRef, Source, SourceContext, SourceSignal, ResourceType, ResourceMergePatch, UpdateEvent, Watch } from "@compforge/aide-plugin";
 
 function uniqueRequests(
   requests: readonly ReconcileRequest[],
@@ -58,14 +58,6 @@ type ResourceRegistrar = <TSpec, TStatus>(
   controller: Controller<TSpec, TStatus>,
 ) => () => void;
 
-type CommandRegistrar = (
-  command: CommandDefinition,
-) => () => void;
-
-type MentionRegistrar = (
-  mention: Mention,
-) => () => void;
-
 type HookRegistrar = (
   hook: Hook,
 ) => () => void;
@@ -73,11 +65,8 @@ type HookRegistrar = (
 interface PluginRegistrars {
   describeResource(resource: Readonly<Resource<unknown, unknown>>): Promise<string>;
   summarizeResource(resource: Readonly<Resource<unknown, unknown>>): Promise<string>;
-  registerCommand: CommandRegistrar;
-  registerMention: MentionRegistrar;
   registerHook: HookRegistrar;
   registerController: ResourceRegistrar;
-  showToast(message: ToastMessage): void;
   writeLog(record: PluginLogRecord): void;
 }
 
@@ -107,10 +96,7 @@ export class PluginBinding implements PluginContext {
   readonly dataDirs: PluginDataDirectories;
   readonly resources: ResourceClient;
   readonly connectors: ConnectorClient;
-  readonly toast: ToastSink;
   readonly logger: PluginLogger;
-  readonly commands: PluginContext["commands"];
-  readonly mentions: PluginContext["mentions"];
   readonly controllers: PluginContext["controllers"];
   readonly printers: PluginContext["printers"];
   readonly hooks: PluginContext["hooks"];
@@ -123,7 +109,7 @@ export class PluginBinding implements PluginContext {
 
   constructor(
     instance: PluginInstance,
-    session: RuntimeScope,
+    runtime: RuntimeScope,
     dataDirs: PluginDataDirectories,
     registrars: PluginRegistrars,
     resources: ResourceClient,
@@ -131,19 +117,13 @@ export class PluginBinding implements PluginContext {
   ) {
     const publicInstance = instance;
     this.instance = Object.freeze(publicInstance);
-    this.runtime = Object.freeze({ ...(session.cwd ? { cwd: session.cwd } : {}) });
+    this.runtime = Object.freeze({ ...(runtime.cwd ? { cwd: runtime.cwd } : {}) });
     this.dataDirs = Object.freeze({ ...dataDirs });
     this.registrars = registrars;
     this.resources = resources;
     this.connectors = createConnectorClient(async <T>(request: ConnectorRequest): Promise<T> => {
       if (this.closed) throw new Error("plugin Binding is closed");
       return await dispatchConnector(connectors, request) as T;
-    });
-    this.toast = Object.freeze({
-      show: (message: ToastMessage) => {
-        if (this.closed) throw new Error("plugin Binding is closed");
-        this.registrars.showToast(message);
-      },
     });
     const write = (
       level: PluginLogLevel,
@@ -166,12 +146,6 @@ export class PluginBinding implements PluginContext {
         write("warn", message, context),
       error: (message: string, context?: PluginLogContext) =>
         write("error", message, context),
-    });
-    this.commands = Object.freeze({
-      register: (command: CommandDefinition) => this.registerCommand(command),
-    });
-    this.mentions = Object.freeze({
-      register: (mention: Mention) => this.registerMention(mention),
     });
     this.controllers = Object.freeze({
       register: <TSpec, TStatus>(controller: Controller<TSpec, TStatus>) =>
@@ -213,16 +187,6 @@ export class PluginBinding implements PluginContext {
     this.assertRegistering();
     validateResourceType(controller.resourceType);
     this.cleanups.push(this.registrars.registerController(controller));
-  }
-
-  private registerCommand(command: CommandDefinition): void {
-    this.assertRegistering();
-    this.cleanups.push(this.registrars.registerCommand(command));
-  }
-
-  private registerMention(mention: Mention): void {
-    this.assertRegistering();
-    this.cleanups.push(this.registrars.registerMention(mention));
   }
 
   private registerHook(hook: Hook): void {

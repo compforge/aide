@@ -1,21 +1,7 @@
 export type { Address, ChannelAddress, RequirementAddress } from "./address.ts";
-export type {
-  BoardPresentation,
-  BoardItemTone,
-} from "./board.ts";
 
-export type {
-  Command,
-  CommandDefinition,
-  CommandContext,
-  CommandRef,
-  CommandInputShape,
-  CommandAlias,
-  CommandInput,
-  CommandOption,
-  CommandPickerSearch,
-  CommandResult,
-} from "./command.ts";
+
+
 
 export type {
   ConditionedStatus,
@@ -23,7 +9,7 @@ export type {
   ResourceCondition,
 } from "./condition.ts";
 
-export type { Mention } from "./mention.ts";
+
 
 
 export type {
@@ -31,11 +17,7 @@ export type {
   ResourceNamespace,
 } from "./namespace.ts";
 
-export type {
-  ViewInput,
-  ViewInputRecord,
-  ViewOutput,
-} from "./view.ts";
+
 
 export type {
   AideEventReference,
@@ -76,12 +58,7 @@ export type {
   PluginLogValue,
   PluginPackage,
   PluginLifecycle,
-  PluginRegistry,
-  PluginRuntimeContext,
-  ToastMessage,
-  ToastSink,
-  ToastTone,
-} from "./package.ts";
+  PluginRuntimeContext } from "./package.ts";
 
 export type {
   Controller,

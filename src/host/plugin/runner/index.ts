@@ -12,9 +12,6 @@ export { installRegistration } from "./registration.ts";
 
 export type {
   ActivationResult,
-  CommandRegistration,
   HookRegistration,
-  MentionRegistration,
   ControllerRegistration,
-  PluginRegistration,
-} from "../../../protocol/ipc.ts";
+  PluginRegistration } from "../../../protocol/ipc.ts";

@@ -71,7 +71,7 @@ export class CodexEventHandler {
     );
   }
 
-  /** 错误路径终态：先留结构化 error，再合成 idle（见 docs/workflow.md） */
+  /** 错误路径终态：先留结构化 error，再合成 idle（见 docs/kernel.md） */
   failTurn(rt: ThreadRuntime, turn: CodexTurn | undefined, message: string): void {
     if (!turn || turn.finalized) return;
     this.options.emit(rt, { kind: "_aide_error_update", payload: { message } }, undefined, turn);

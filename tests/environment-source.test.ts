@@ -1,6 +1,5 @@
 import { EventLedger } from "../src/host/event/ledger.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
-import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
@@ -32,10 +31,10 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   const root = mkdtempSync(join(tmpdir(), "aide-env-source-"));
   const sessions = new HarnessFixtures(root); const session = sessions.create({ id: "owner", cwd: root });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
-  const conversations = new InputStore(session.dir);
-  let store = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
+  const conversations = new InputStore(session.home);
+  let store = new PluginResourceStore({ home: session.home, pluginInstanceId: "personal" });
   store.storage.register("personal", personalDefinitions);
-  const resources = () => createResourceClient(store, undefined, undefined, personalAdmission(conversations, new OutputStore(resourceHome(session.dir))));
+  const resources = () => createResourceClient(store, undefined, undefined, personalAdmission(conversations, new OutputStore(session.home)));
   const watch: EnvironmentSourceSpec = { environment: "dev", namespace: "app", intervalMs: 300_000 };
   store.create({ type: ENVIRONMENT_SOURCE_TYPE, name: "changes", spec: watch, status: {} });
   let current = snapshot("A"); let failure = false; let reads = 0;
@@ -55,7 +54,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   assert.equal(resource().status.baseline!.workloads[0]!.images[0]!.image, "A");
   const reopened = sessions.open(session.id);
   t.after(() => reopened.closeLogs());
-  store = new PluginResourceStore({ home: resourceHome(reopened.dir), pluginInstanceId: "personal" });
+  store = new PluginResourceStore({ home: reopened.home, pluginInstanceId: "personal" });
   current = snapshot("C"); const previousReads = reads;
   await observe(); assert.equal(reads, previousReads, "Recover the committed input before reading the new live value");
   assert.equal(resource().status.baseline!.workloads[0]!.images[0]!.image, "B");

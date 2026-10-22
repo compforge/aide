@@ -1,4 +1,3 @@
-import { resourceHome } from "../src/host/resource/storage.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { cpSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -12,7 +11,7 @@ import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
 import { inputPrinter } from "../plugins/personal/input/printer.ts";
-import { executeCommand } from "./fixtures/command-context.ts";
+import { runProbe } from "./fixtures/resource-probe.ts";
 import { definition } from "./fixtures/resource-definition.ts";
 import definitions, { TYPE } from "./fixtures/printer-definitions.ts";
 
@@ -23,7 +22,7 @@ const snapshot = (value = "hello"): Resource<{ value: string }, { phase: string 
 function fixture(t: TestContext, options: Partial<ManagerOptions> = {}) {
   const root = mkdtempSync(join(tmpdir(), "aide-printer-"));
   const session = new HarnessFixtures(root).create({ id: "printer-session", cwd: root });
-  const instances = new PluginInstanceStore({ home: resourceHome(session.dir) });
+  const instances = new PluginInstanceStore({ home: session.home });
   const errors: unknown[] = [];
   const manager = new Manager({ log: entry => session.log(entry), instances, onActivationError: ({ error }) => errors.push(error), ...options });
   t.after(async () => { await manager.close(); await session.closeLogs(); rmSync(root, { force: true, recursive: true }); });
@@ -73,13 +72,11 @@ test("Runner calls Host Definition Printer with supplied snapshots; errors are l
   const f = runnerFixture(t); f.add(); await f.manager.start(); assert.deepEqual(f.errors, []);
   const persisted = await f.manager.resourceClient("first").create(TYPE, { name: "sample", spec: { value: "stored" }, status: { phase: "stored" } });
   const supplied = { ...persisted, spec: { value: "snapshot" } };
-  const result = await executeCommand(f.manager, "print-resource", { argument: JSON.stringify(supplied) });
-  assert.equal(result?.kind, "message");
-  if (result?.kind !== "message") throw new Error("Expected printed text");
-  assert.deepEqual(JSON.parse(JSON.parse(result.text).description), { pid: process.pid, name: "sample", value: "snapshot", phase: "stored" });
+  const result = await runProbe<{ description: string }>(f.manager, "first", TYPE, "print", supplied);
+  assert.deepEqual(JSON.parse(result.description), { pid: process.pid, name: "sample", value: "snapshot", phase: "stored" });
   for (const value of ["throw", "invalid", "async"]) await assert.rejects(f.manager.describeResource("first", snapshot(value)), /Resource Printer describe failed/);
   await f.session.flushLogs();
-  assert.match(readFileSync(join(f.session.dir, "session.log"), "utf8"), /Printer could not describe this value/);
+  assert.match(readFileSync(join(f.session.dir, "runtime.log"), "utf8"), /Printer could not describe this value/);
   await f.manager.deactivateInstance("first");
   assert.equal(await f.manager.summarizeResource("first", snapshot()), "summary: hello");
   assert.equal((await f.manager.resourceClient("first").get<{ value: string }, unknown>({ ...TYPE, namespace: "v1", name: "sample" }))?.spec.value, "stored");

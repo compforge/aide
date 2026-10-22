@@ -42,7 +42,7 @@ export class PiAdapter implements HarnessAdapter {
       if (options.resumeState.version !== 1 || typeof data?.sessionFile !== "string" || !data.sessionFile) throw new Error("Unsupported Pi resume state");
       // Pi allocates a filename before it persists any conversation. Only a known-empty missing file may start anew.
       if (!data.empty || existsSync(data.sessionFile)) sessionFile = data.sessionFile;
-    } else if (options.resumeSessionId) throw new Error("Pi resume requires its native session file");
+    }
     const native = await this.options.createSession({ cwd: options.cwd, ...(sessionFile ? { sessionFile } : {}) });
     const handleId = randomUUID();
     const session: Session = { native, sink, binding, materialized: false, unsubscribe: () => {} };

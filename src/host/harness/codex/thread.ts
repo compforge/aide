@@ -74,7 +74,7 @@ export function serviceTierFrom(response: unknown): string | null {
 }
 
 /**
- * 恢复优先；原生 thread 已丢失时新建，AideSession 会在宿主层补齐历史。
+ * 恢复优先；原生 thread 已丢失时新建，HarnessStore 会在宿主层补齐历史。
  *
  * `approvalsReviewer` 只在用户显式配置时下发；resume 时同样如此——codex 会把 reviewer
  * 随 thread 持久化，不传就沿用该 thread 原有的选择（thread_resume_preserves_persisted_
@@ -85,7 +85,6 @@ export async function openCodexThread(
   opts: {
     cwd: string;
     resumeState?: HarnessResumeState;
-    resumeSessionId?: string;
     approvalReviewer?: "user" | "auto_review";
   },
 ): Promise<{
@@ -99,7 +98,7 @@ export async function openCodexThread(
   const config = { config: CODEX_FAST_CONFIG };
   const resumeSessionId = opts.resumeState
     ? sessionIdFromResumeState(opts.resumeState)
-    : opts.resumeSessionId;
+    : undefined;
   if (resumeSessionId) {
     try {
       const response = await peer.request(

@@ -20,7 +20,7 @@ import {
 import { newId } from "../event/ids.ts";
 import type { ConfigValue, SessionConfigOption } from "../event/index.ts";
 import type { HarnessStore } from "../harness/store.ts";
-import { sessionIdResumeState, type HarnessResumeState } from "./resume.ts";
+import { type HarnessResumeState } from "./resume.ts";
 import { createHarnessLaunchSnapshot, type HarnessTarget } from "./target.ts";
 
 export interface HarnessBindingOptions {
@@ -354,13 +354,7 @@ export class HarnessBinding {
       this.ref = await this.adapter.open(
         {
           cwd: this.cwd,
-          resumeState:
-            existing?.resumeState ??
-            (existing?.harnessSessionId
-              ? sessionIdResumeState(existing.harnessSessionId)
-              : undefined),
-          // 兼容尚未迁到版本化 checkpoint 的第三方 adapter。
-          resumeSessionId: existing?.harnessSessionId,
+          resumeState: existing?.resumeState,
         },
         this.eventSink,
         (binding) => this.acceptSessionBinding(binding),
@@ -403,7 +397,6 @@ export class HarnessBinding {
         harnessSessionId: this.sessionIdentity()?.id,
         resumeState: this.resumeState(),
         contextEpochId: this.contextEpochId,
-        syncedSeq: this.ref.resumed ? existing?.syncedSeq : 0,
       });
     } finally {
       this.setupInvocationId = undefined;

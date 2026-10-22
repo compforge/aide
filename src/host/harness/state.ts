@@ -7,7 +7,6 @@ import type {
   AvailableCommand,
   ContentBlock,
   ContextWindowUpdate,
-  ContextUsageUpdate,
   ErrorUpdate,
   EventEnvelope,
   EventSource,
@@ -101,7 +100,6 @@ export interface HarnessTargetState {
   /** 该 Target 使用的 Harness 协议类型；仅供展示和能力解释。 */
   harness?: string;
   /** 最近 context 占用快照（整体替换）。带 model 标签：切 model 后旧快照按标签判失效 */
-  contextUsage?: ContextUsageUpdate;
   /** 最近一次严格配对的 model route context window 快照。 */
   contextWindow?: ContextWindowUpdate;
   /** 该 Target 最近一次 plan 的 id（plan 本体在 plans）。 */
@@ -371,8 +369,7 @@ function applyMessageUpsert(
   // determines whether consumption has occurred; a body is not a receipt.
   const pendingSteer = inputPatch !== undefined &&
     (inputPatch.delivery ?? input?.delivery) === "steer" &&
-    (input !== undefined || inputPatch.deliveryState !== undefined) &&
-    input?.deliveryOutcome !== "applied" && inputPatch.deliveryState !== "applied";
+    input !== undefined && input.deliveryOutcome !== "applied";
   const msg = getOrCreateMessage(
     state,
     p.messageId,
@@ -404,17 +401,6 @@ function applyMessageUpsert(
     if (!pendingSteer && msg.invocationId === undefined) msg.invocationId = ev.invocationId;
     const delivery = userMessage.delivery ?? input?.delivery;
     if (delivery !== undefined) msg.delivery = delivery;
-    if (userMessage.deliveryState !== undefined) {
-      msg.deliveryState = userMessage.deliveryState;
-      // Legacy message patches carry the same consumption fact; use the common
-      // projector so body-first and receipt-first replay agree on ownership too.
-      if (userMessage.deliveryState !== "pending") {
-        applyInputDelivery(state, {
-          ...ev, kind: "input_delivery_update",
-          payload: { messageId: msg.messageId, state: userMessage.deliveryState },
-        });
-      }
-    }
     if (delivery === "follow_up" && msg.invocationId !== ev.invocationId) {
       // Esc may reclaim an unapplied native steer without changing messageId.
       // Its eventual prompt belongs to the new Turn and should appear after the
@@ -579,9 +565,6 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
         if (ev.invocationId) {
           // 只收本 turn 的口：并发 Turn 互不误清
           state.activeInvocations.delete(ev.invocationId);
-        } else {
-          // 向后兼容：旧 jsonl / 旧版 crash recovery 的无 turnId idle 是全局收口语义
-          state.activeInvocations.clear();
         }
       } else if (ev.invocationId) {
         // 非 idle 态（running / requires_action）：turn 在场。startedAt
@@ -629,10 +612,6 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       break;
     case "harness_input.updated":
       applyHarnessInputUpdate(state, ev);
-      break;
-    case "_aide_queue_reordered":
-      // Queue order is execution state restored by Controller; the View reads
-      // the Controller's ordered snapshots rather than duplicating that index.
       break;
     case "input_delivery_update":
       applyInputDelivery(state, ev);
@@ -789,13 +768,6 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
     case "config_option_update": {
       for (const scope of executionScopes(state, ev)) {
         scope.configOptions = [...ev.payload.options];
-      }
-      break;
-    }
-    case "context_usage_update": {
-      // 旧 session replay：已落盘语义不可改变。新 Adapter 使用 context_window_update。
-      for (const scope of executionScopes(state, ev)) {
-        scope.contextUsage = { ...ev.payload };
       }
       break;
     }
@@ -1021,14 +993,4 @@ export function reduceEvents(events: Iterable<AnyEventEnvelope>): HarnessState {
   const state = emptyHarnessState();
   for (const ev of events) applyEvent(state, ev);
   return state;
-}
-
-/**
- * 该 turn 是否仍在运行。消息级流式/思考态按所属 turn 判定，不看全局——
- * 并发 turn 下"别人 idle"不能把自己的流式状态打断。turnId 缺失（旧数据 /
- * 非 turn 事件）时回退"会话存在任一运行 turn"。
- */
-export function isInvocationRunning(state: HarnessState, turnId: string | undefined): boolean {
-  if (turnId === undefined) return state.activeInvocations.size > 0;
-  return state.activeInvocations.has(turnId);
 }

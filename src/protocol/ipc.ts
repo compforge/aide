@@ -1,7 +1,7 @@
 import type { RuntimeScope } from "./runtime.ts";
 import type { ReconcileKey } from "./reconcile.ts";
 import type { ConnectorRequest } from "./connectors.ts";
-import type { CommandInputShape, CommandAlias, PluginDataDirectories, PluginInstance, PluginLogLevel, PluginLogContext, HookStage, Resource, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType, ToastMessage } from "@compforge/aide-plugin";
+import type { PluginDataDirectories, PluginInstance, PluginLogLevel, PluginLogContext, HookStage, Resource, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 import type {
   ExecutionScope,
   VerbRequest,
@@ -21,24 +21,6 @@ export interface PluginPackageEntry {
   readonly resourcesUrl?: string;
 }
 
-export interface CommandRegistration {
-  readonly input?: CommandInputShape;
-  readonly aliases?: readonly CommandAlias[];
-  readonly runPolicy?: "always" | "idle";
-  readonly scope?: "aide" | "harness";
-  readonly kind: "command";
-  readonly handlerId: string;
-  readonly name: string;
-  readonly description: string;
-}
-
-export interface MentionRegistration {
-  readonly kind: "mention";
-  readonly namespace: string;
-  readonly searchHandlerId: string;
-  readonly resolveHandlerId: string;
-}
-
 export interface HookRegistration {
   readonly kind: "hook";
   readonly hookId: string;
@@ -53,12 +35,9 @@ export interface ControllerRegistration {
   readonly kind: "controller";
   readonly controllerId: string;
   readonly resourceType: ResourceType;
-  readonly presentHandlerId?: string;
 }
 
 export type PluginRegistration =
-  | CommandRegistration
-  | MentionRegistration
   | HookRegistration
   | ControllerRegistration;
 
@@ -77,7 +56,7 @@ export type RunnerRequest =
       readonly method: "activate";
       readonly entry: PluginPackageEntry;
       readonly instance: PluginInstance;
-      readonly session: RuntimeScope;
+      readonly runtime: RuntimeScope;
       readonly dataDirs: PluginDataDirectories;
     }
   | {
@@ -150,15 +129,10 @@ export type HostRequest =
       readonly patch: Readonly<Record<string, unknown>>;
     };
 
-export type RunnerSignal =
-  | {
-      readonly kind: "toast";
-      readonly message: ToastMessage;
-    }
-  | {
-      readonly kind: "log";
-      readonly record: PluginLogRecord;
-    };
+export interface RunnerSignal {
+  readonly kind: "log";
+  readonly record: PluginLogRecord;
+}
 
 export interface SerializedError {
   readonly name: string;

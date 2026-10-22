@@ -112,14 +112,10 @@ function frozenSummary(summary: InvocationSummary): InvocationSummary {
 
 function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
   const recorded = state.recorded.payload;
-  // Older journals stored application metadata alongside runtime fields. Preserve
-  // unrecognized fields opaquely; only the owning application interprets them.
-  const { invocationId, executionId, verb, title, prompt, contextId,
-    freshContext, harnessTargetId, resourceRef, attributes, ...extensions } = recorded;
   return Object.freeze({
     invocationId: recorded.invocationId,
     executionId: recorded.executionId,
-    attributes: attributes ?? extensions,
+    attributes: recorded.attributes,
     ...(recorded.resourceRef ? { resourceRef: recorded.resourceRef } : {}),
     verb: recorded.verb,
     phase: phaseOf(state),

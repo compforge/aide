@@ -28,11 +28,8 @@ import type {
   SendTurnReceipt,
   HarnessSessionHandle,
   ApprovalRoute,
-  ReconcileVerdict,
-  TextgenRequest,
-} from "../adapter.ts";
+  ReconcileVerdict } from "../adapter.ts";
 import { unsupportedPromptBlocks } from "../adapter.ts";
-import { generateCodexStructured } from "./textgen.ts";
 import { JsonRpcPeer } from "./jsonrpc.ts";
 import { readCodexModelData } from "./catalog.ts";
 import { CodexEventHandler } from "./events.ts";
@@ -126,7 +123,6 @@ export class CodexAdapter implements HarnessAdapter {
     config: { supported: true },
     reconcile: { supported: true },
     approvalRouting: { supported: true },
-    textgen: { supported: true },
   };
   private threads = new Map<string, ThreadRuntime>();
   private readonly hookTrustStore: HookTrustStore;
@@ -143,14 +139,6 @@ export class CodexAdapter implements HarnessAdapter {
       publishConfigSnapshot: (runtime, config, raw) =>
         this.publishConfigSnapshot(runtime, config, raw),
       flushPendingCancel: (runtime) => this.flushPendingCancel(runtime),
-    });
-  }
-
-  /** TextGeneratable：一次性 `codex exec`，与 thread 生命周期完全无关（见 textgen.ts）。 */
-  async generateStructured(request: TextgenRequest): Promise<unknown> {
-    return generateCodexStructured(request, {
-      command: codexLaunchCommand(this.options.command),
-      env: this.options.env,
     });
   }
 
@@ -644,7 +632,7 @@ export class CodexAdapter implements HarnessAdapter {
     const turn: CodexTurn = { turnId: input.invocationId, finalized: false, replies: new MessageReplies([input.messageId]) };
     rt.turnId = input.invocationId;
     rt.activeTurn = turn;
-    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 AideSession
+    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 HarnessStore
     // 的事实，且入参 blocks 可能含 <aide-sync> prepend，不能进正典历史）；adapter 只在
     // steer 成功时补 delivery:"steer" 的用户消息。
 

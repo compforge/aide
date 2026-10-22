@@ -23,13 +23,6 @@ function testRoot(): string {
   return root;
 }
 
-function testSession(root: string): { id: string; dir: string } {
-  return {
-    id: "bs_test",
-    dir: join(root, "sessions", "bs_test"),
-  };
-}
-
 function store(root: string): PluginResourceStore {
   return new PluginResourceStore({
     home: root,
@@ -129,20 +122,12 @@ describe("PluginResourceStore", () => {
     expect(resources.list(REQ_LOOP_RUN)).toEqual([created]);
     expect(resources.list(OTHER)).toEqual([]);
 
-    const path = join(
-      root,
-      "shared",
-      "plugins",
-      "reqloop_default",
-      "namespaces",
-      "v1",
-      "resources",
-      "reqloop.aide.dev",
-      "v1alpha1",
-      "Requirement",
-      `${created.metadata.name}.json`,
-    );
-    expect(resources.storage.has(path)).toBe(true);
+    const key = resources.key(REQ_LOOP_RUN, created.metadata.name);
+    expect(resources.storage.has(key)).toBe(true);
+    expect(resources.scope).toBe("reqloop_default");
+    expect(key.includes(root)).toBe(false);
+    const anotherRoot = store(testRoot());
+    expect(anotherRoot.key(REQ_LOOP_RUN, created.metadata.name)).toBe(key);
   });
 
   test("spec changes generation while status and schedule changes do not", () => {
@@ -399,44 +384,16 @@ describe("PluginResourceStore", () => {
 
   test("reports corrupt or wrongly scoped persisted resources", () => {
     const root = testRoot();
-    const path = join(
-      root,
-      "shared",
-      "plugins",
-      "reqloop_default",
-      "namespaces",
-      "v1",
-      "resources",
-      "reqloop.aide.dev",
-      "v1alpha1",
-      "Requirement",
-      "run_1.json",
-    );
-    mkdirSync(join(path, ".."), { recursive: true });
-    writeFileSync(
-      path,
-      JSON.stringify({
-        object: {
-          ...REQ_LOOP_RUN,
-          metadata: {
-            name: "run_1",
-            namespace: "v1/project/another-project",
-            uid: "pr_test",
-            generation: 1,
-            resourceVersion: "1",
-            creationTimestamp: new Date().toISOString(),
-          },
-          spec: {},
-          status: {},
-        },
-        control: {},
-      }),
-    );
-
-    expect(() => store(root).get(REQ_LOOP_RUN, "run_1")).toThrow(
-      `invalid plugin resource ${path}: namespace must be v1`,
-    );
-    expect(readFileSync(path, "utf8")).toContain("another-project");
+    const resources = store(root);
+    const created = resources.create({ type: REQ_LOOP_RUN, name: "run_1", spec: {} });
+    const key = resources.key(REQ_LOOP_RUN, "run_1");
+    const stored = resources.storage.read(key)!;
+    const corrupt = { ...stored, object: { ...created, metadata: { ...created.metadata, namespace: "v1/project/another-project" } } };
+    // Bypass admission to model corrupt on-disk content, not a valid API write.
+    resources.storage.db.prepare("UPDATE resources SET data=? WHERE key=?").run(JSON.stringify(corrupt), key);
+    expect(() => resources.get(REQ_LOOP_RUN, "run_1")).toThrow(`invalid plugin resource ${key}: namespace must be v1`);
+    expect(() => resources.list(REQ_LOOP_RUN)).toThrow(`invalid plugin resource ${key}: namespace must be v1`);
+    expect(resources.storage.read(key)!.object.metadata.namespace).toBe("v1/project/another-project");
   });
 
   test("assigns a new uid when the same name is recreated", () => {

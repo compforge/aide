@@ -1,5 +1,4 @@
 import { OutputStore } from "../plugins/personal/output/store.ts";
-import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import { fixtureAddress } from "./address-fixture.ts";
@@ -42,10 +41,10 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
   const root = mkdtempSync(join(tmpdir(), "aide-message-source-"));
   const sessions = new HarnessFixtures(root); const session = sessions.create({ id: MESSAGE_SESSION, cwd: root });
   const inputs = new InputStore(root);
-  let store = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
+  let store = new PluginResourceStore({ home: session.home, pluginInstanceId: "personal" });
   store.storage.register("personal", personalDefinitions);
   const catalog = openPersonCatalog(root, person, pino({ level: "silent" }), () => {});
-  const client = (session: import("./harness-fixture.ts").HarnessFixture) => createResourceClient(store, undefined, undefined, personalAdmission(inputs, new OutputStore(resourceHome(session.dir))));
+  const client = (session: import("./harness-fixture.ts").HarnessFixture) => createResourceClient(store, undefined, undefined, personalAdmission(inputs, new OutputStore(session.home)));
   let resources = client(session);
   store.create({ type: MESSAGE_SOURCE_TYPE, name: "messages", spec, status: {} });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
@@ -71,7 +70,7 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
     failContext(value: boolean) { contextError = value; },
     async restart() {
       const reopened = sessions.open(session.id); t.after(() => reopened.closeLogs());
-      store = new PluginResourceStore({ home: resourceHome(reopened.dir), pluginInstanceId: "personal" });
+      store = new PluginResourceStore({ home: reopened.home, pluginInstanceId: "personal" });
       resources = client(reopened);
     },
     observe(at = now) { return observeMessages({ logger: sourceLogger, resources }, resource(), connectors, at); },

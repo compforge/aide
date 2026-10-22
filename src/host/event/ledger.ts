@@ -1,4 +1,3 @@
-import { readExecutionEvents } from "./legacy.ts";
 import {
   appendFileSync,
   existsSync,
@@ -6,9 +5,10 @@ import {
   truncateSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import {
+  ENVELOPE_VERSION,
   type AnyEventEnvelope,
   type EventEnvelope,
   type EventKind,
@@ -71,7 +71,14 @@ export class EventLedger {
         );
       }
     }
-    return readExecutionEvents(events);
+    for (const event of events) {
+      if (!event || typeof event !== "object" || typeof event.kind !== "string" ||
+          !event.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) {
+        throw new Error(`Invalid execution event in ${this.options.path}`);
+      }
+      if (event.v !== ENVELOPE_VERSION) throw new Error(`Unsupported execution event version ${event.v} in ${this.options.path}`);
+    }
+    return events;
   }
 
   /** 首次追加前丢弃 crash 遗留的半行，并保留 sidecar 供诊断。 */
@@ -92,7 +99,7 @@ export class EventLedger {
       // with the next append. Preserve it in a diagnostic sidecar below.
     }
     writeFileSync(
-      join(dirname(this.options.path), `session.jsonl.partial-${Date.now()}`),
+      join(dirname(this.options.path), `${basename(this.options.path)}.partial-${Date.now()}`),
       tail,
     );
     truncateSync(this.options.path, cut);

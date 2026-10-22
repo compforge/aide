@@ -7,7 +7,7 @@ export interface HarnessTaskIdentity {
 }
 
 /**
- * Aide-stable key for a Harness task inside one AideSession.
+ * Aide-stable key for a Harness task inside one HarnessStore.
  * Different context, HarnessTarget, or HarnessSession owners must remain distinct even when their
  * native taskId matches; Controller actions later use this key to recover the exact owner.
  */

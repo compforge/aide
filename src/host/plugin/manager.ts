@@ -7,7 +7,7 @@ import type { ControllerRegistration as RemoteRegistration, HostRequest } from "
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { emptyConnectors } from "../../connector-client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
-import type { CommandContext } from "@compforge/aide-plugin";
+
 import {
   Controller,
   type ReconcileFailure,
@@ -26,16 +26,12 @@ import {
   PluginBinding,
   type Controller as PluginResourceController,
   type CronSource,
-  type CommandInput,
-  type CommandResult,
   type DeferredHookStage,
   type HookStage,
   type HookSubjectMap,
   type InlineHookStage,
   type Resource,
-  type ResourceRef, type ToastMessage,
-  type ToastTone
-} from "./package.ts";
+  type ResourceRef } from "./package.ts";
 import {
   PackageLoader,
   type PackageLoaderOptions,
@@ -54,11 +50,7 @@ import {
   createResourceClient,
   type ResourceClientChange,
 } from "./resource/client.ts";
-import {
-  BoardProjection,
-  type BoardItem,
-  presentBoardSource,
-} from "./board.ts";
+
 import {
   installRegistration,
   PluginSupervisor,
@@ -73,11 +65,8 @@ import {
   reconcileScopeLabel,
   sameReconcileScope,
 } from "../../reconcile/reconcile-scope.ts";
-import {
-  type AvailablePluginCommand,
-  PluginCommandRegistry,
-} from "./command/registry.ts";
-import { MentionRegistry } from "../context/registry.ts";
+
+
 import {
   type LogSink,
   logError,
@@ -92,12 +81,6 @@ import type { HarnessTarget } from "../harness/target.ts";
 
 export type { ReconcileFailure } from "./controller.ts";
 
-const TOAST_TONES = new Set<ToastTone>([
-  "info",
-  "success",
-  "warning",
-  "error",
-]);
 const PLUGIN_LOG_LEVELS = new Set([
   "debug",
   "info",
@@ -113,11 +96,6 @@ export interface ControllerDefinition<TSpec, TStatus>
   extends PluginResourceController<TSpec, TStatus> {
   store: PluginResourceStore;
   now?: () => Date;
-}
-
-export interface PluginToast {
-  readonly pluginInstanceId: string;
-  readonly message: ToastMessage;
 }
 
 export interface ManagerOptions {
@@ -140,9 +118,7 @@ export interface ManagerOptions {
   packages?: PackageLoaderOptions["packages"];
   /** Reconcile 的运行环境与 Harness 配置快照。 */
   snapshot?: () => ReconcileSnapshot;
-  /** Current host selection used by an implicit harness() or a submitted draft(). */
-  selectedHarnessTargetId?: () => string | undefined;
-  /** 按需加载已安装 Package；fresh 用于开发期 `/reload-plugins` 绕过模块缓存。 */
+  /** 按需加载已安装 Package；fresh 用于开发期 `development reload` 绕过模块缓存。 */
   loadPackage?: PackageLoaderOptions["loadPackage"];
   /**
    * Resolve an immutable entry without importing it into Aide. When supplied
@@ -151,18 +127,8 @@ export interface ManagerOptions {
    */
   loadPackageEntry?: PackageLoaderOptions["loadPackageEntry"];
   pluginSupervisor?: PluginSupervisor;
-  /** Daemon-owned Human Inbox path for a namespace-scoped Worker. */
+  /** Application-supplied capability dispatch. */
   performVerb?: VerbOptions["performVerb"];
-  /** Board 展示内容变化；宿主据此重建展示快照。 */
-  onBoardChanged?(): void;
-  /** Plugin 发出的瞬时提示；不进入 Event Ledger。 */
-  onToast?(toast: PluginToast): void;
-  /** Plugin command 注册或 Binding 生命周期变化；宿主据此刷新命令补全。 */
-  onCommandsChanged?(): void;
-  /** Aide core 已占用的 slash command 名称，Plugin 不得覆盖。 */
-  reservedCommandNames?: readonly string[];
-  /** Aide-owned and Plugin-provided explicit mentions share one registry. */
-  mentions?: MentionRegistry;
   /** Default timeout for one Hook handler. */
   hookTimeoutMs?: number;
   /** Maximum number of best-effort deferred Hook deliveries awaiting completion. */
@@ -216,12 +182,6 @@ interface ManagedController {
   initialReconciles?(): ReconcileKey[];
 }
 
-function pluginName(pluginId: string): string {
-  const name = pluginId.split("/").at(-1);
-  if (!name) throw new Error(`pluginId has no name: ${pluginId}`);
-  return name;
-}
-
 /**
  * Plugin 域统一入口：注册和路由 Controller，并限制所有 Plugin 的进程总并发。
  */
@@ -231,9 +191,6 @@ export class Manager {
   /** Plugin definitions remain registered independently of live bindings. */
   private readonly resourceRegistry = new ResourceRegistry();
   private readonly controllers = new Map<string, ManagedController>();
-  private readonly board: BoardProjection;
-  private readonly commandRegistry: PluginCommandRegistry;
-  private readonly mentions: MentionRegistry;
   private readonly hooks: HookRuntime;
   private readonly hookRegistry = new HookRegistry();
   private readonly instances: PluginInstanceRepository;
@@ -251,8 +208,6 @@ export class Manager {
   private readonly bindings = new Map<string, PluginBinding>();
   private readonly activations = new Map<string, Promise<void>>();
   private readonly capacity: ReconcileCapacity;
-  private readonly onToast: ManagerOptions["onToast"];
-  private readonly onCommandsChanged: ManagerOptions["onCommandsChanged"];
   private readonly onActivationError: ManagerOptions["onActivationError"];
   private readonly onRunnerFailure: ManagerOptions["onRunnerFailure"];
   private readonly onReconcileError: ManagerOptions["onReconcileError"];
@@ -282,22 +237,6 @@ export class Manager {
     this.instances = options.instances;
     this.connectors = options.connectors ?? emptyConnectors;
     this.log = options.log;
-    this.board = new BoardProjection({
-      isInstanceActive: (pluginInstanceId) =>
-        this.bindings.has(pluginInstanceId),
-      ...(options.onBoardChanged
-        ? { onChanged: options.onBoardChanged }
-        : {}),
-      onRefreshError: (error) => {
-        this.log?.({
-          level: "error",
-          source: "aide",
-          component: "plugin.board",
-          message: "Could not refresh Plugin Board projection",
-          error: logError(error),
-        });
-      },
-    });
     this.pluginSupervisor = options.pluginSupervisor;
     this.packageLoader = new PackageLoader({
       ...(options.packages ? { packages: options.packages } : {}),
@@ -330,15 +269,6 @@ export class Manager {
         ? {}
         : { deferredQueueLimit: options.deferredHookQueueLimit }),
     });
-    this.onToast = options.onToast;
-    this.onCommandsChanged = options.onCommandsChanged;
-    this.mentions = options.mentions ?? new MentionRegistry();
-    this.commandRegistry = new PluginCommandRegistry({
-      reservedNames: options.reservedCommandNames,
-      isInstanceActive: (pluginInstanceId) =>
-        this.bindings.has(pluginInstanceId),
-      onChanged: () => this.notifyCommandsChanged(),
-    });
     this.onActivationError = options.onActivationError;
     this.onRunnerFailure = options.onRunnerFailure;
     this.onReconcileError = options.onReconcileError;
@@ -359,9 +289,7 @@ export class Manager {
     });
     this.resourceChanged = options.onResourceChange;
     this.unsubscribeWrites = ResourceStorage.open(this.resourceHome).subscribeWrites((scope, resource, oldResource) => {
-      if (!scope.startsWith("[")) return;
-      const [sessionId, pluginInstanceId] = JSON.parse(scope);
-      if (sessionId !== null) return;
+      const pluginInstanceId = scope;
       const kind = !oldResource ? "created"
         : resource.metadata.deletionTimestamp && !oldResource.metadata.deletionTimestamp ? "deletion-requested"
         : JSON.stringify(resource.metadata.labels) !== JSON.stringify(oldResource.metadata.labels)
@@ -373,9 +301,7 @@ export class Manager {
       this.handlePluginResourceChange(change); this.resourceChanged?.(change);
     });
     this.unsubscribeResourceGc = ResourceStorage.open(this.resourceHome).subscribe((scope, resource) => {
-      if (scope === "core") return;
-      const [sessionId, pluginInstanceId] = JSON.parse(scope) as [string, string];
-      if (sessionId !== null) return;
+      const pluginInstanceId = scope;
       const change: ResourceClientChange = { kind: "deleted", pluginInstanceId, resource };
       this.handlePluginResourceChange(change); this.resourceChanged?.(change);
     });
@@ -444,7 +370,6 @@ export class Manager {
           this.reportFailure(failure);
         },
       },
-      onSourceResource: () => this.board.invalidate(),
       onResourceDeleted: (resource) => {
         this.handlePluginResourceChange(Object.freeze({
           kind: "deleted",
@@ -537,13 +462,6 @@ export class Manager {
       {
         describeResource: (resource) => this.describeResource(instance.pluginInstanceId, resource),
         summarizeResource: (resource) => this.summarizeResource(instance.pluginInstanceId, resource),
-        registerCommand: (command) =>
-          this.commandRegistry.register(instance, command),
-        registerMention: (mention) =>
-          this.mentions.registerMention(
-            mention,
-            pluginName(instance.pluginId),
-          ),
         registerHook: (hook) =>
           this.hookRegistry.register(
             {
@@ -556,8 +474,6 @@ export class Manager {
           ),
         registerController: (controller) =>
           this.bindController(instance, controller),
-        showToast: (message) =>
-          this.notifyToast(instance.pluginInstanceId, message),
         writeLog: (entry) => this.writePluginLog(instance, entry),
       },
       resources,
@@ -591,8 +507,6 @@ export class Manager {
                   }
                   return this.verb.invoke(context, request);
                 },
-                onToast: (message) =>
-                  this.notifyToast(instance.pluginInstanceId, message),
                 onLog: (entry) => this.writePluginLog(instance, entry),
                 onOutput: (stream, output) =>
                   this.writePluginLog(instance, {
@@ -631,9 +545,7 @@ export class Manager {
             pluginInstanceId: instance.pluginInstanceId,
             packageVersion: instance.packageVersion,
           });
-          this.notifyCommandsChanged();
           await this.resumeControllers(pluginInstanceId);
-          this.board.invalidate();
         } catch (error) {
           try {
             await binding.close();
@@ -665,11 +577,7 @@ export class Manager {
       pluginInstanceId,
       "Plugin instance was deactivated",
     );
-    try {
-      await binding.close();
-    } finally {
-      this.board.invalidate();
-    }
+    await binding.close();
   }
 
   isInstanceActive(pluginInstanceId: string): boolean {
@@ -678,23 +586,6 @@ export class Manager {
 
   listInstances(): PluginInstance[] {
     return this.instances.list();
-  }
-
-  async listMentionCandidates(prefix: string): ReturnType<
-    MentionRegistry["candidates"]
-  > {
-    return await this.mentions.candidates(prefix);
-  }
-
-  hasMentionReference(input: string): boolean {
-    return this.mentions.hasReference(input);
-  }
-
-  resolveMentions(
-    input: string,
-    maxChars: number,
-  ): Promise<readonly string[]> {
-    return this.mentions.resolve(input, maxChars);
   }
 
   inlineHook<S extends InlineHookStage>(
@@ -713,16 +604,6 @@ export class Manager {
 
   hasHook(stage: HookStage): boolean {
     return this.hookRegistry.has(stage);
-  }
-
-  /** Resolve the current Core-owned SessionTargetBinding after inline Hooks settle. */
-  resolveHarnessTargetId(requestedTargetId: string): string {
-    return requestedTargetId;
-  }
-
-  /** Preserve `/target <id>` as an exact Human choice over Plugin routing. */
-  selectExactHarnessTargetId(targetId: string): void {
-
   }
 
   /**
@@ -809,7 +690,7 @@ export class Manager {
   }
 
   /**
-   * 重载当前 AideSession 的全部 enabled Instance。Package 每个版本只 fresh load 一次；
+   * 重载应用的全部 enabled Instance。Package 每个版本只 fresh load 一次；
    * 单个 Package 或 Instance 失败不阻断其它插件，也不改变用户的 enabled 配置。
    */
   async reload(): Promise<PluginReloadResult> {
@@ -872,7 +753,6 @@ export class Manager {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
-    this.board.close();
     const closing = this.closeManager();
     this.closing = closing;
     return closing;
@@ -888,22 +768,6 @@ export class Manager {
 
   listHarnessInvocations() {
     return this.verb.listHarnessInvocations();
-  }
-
-  listBoardItems(): readonly BoardItem[] {
-    return this.board.list();
-  }
-
-  listCommands(): readonly AvailablePluginCommand[] {
-    return this.commandRegistry.list();
-  }
-
-  async executeCommand(
-    name: string,
-    input: CommandInput,
-    context: CommandContext,
-  ): Promise<CommandResult | void> {
-    return await this.commandRegistry.execute(name, input, context);
   }
 
   async cancelHarnessInvocation(identifier?: string): Promise<boolean> {
@@ -988,13 +852,7 @@ export class Manager {
       snapshot: (key, resource) => this.snapshotFor(key, resource), changed: (change) => this.handlePluginResourceChange(change),
       maxTotalConcurrency: this.remoteConcurrency, retryBackoff: this.retryBackoff });
     const registration = this.installController(controller, true);
-    const unregisterBoard = definition.presentHandlerId ? this.board.registerSource(reconcileScopeId(scope), {
-      pluginInstanceId: instance.pluginInstanceId,
-      present: () => presentBoardSource({ pluginId: instance.pluginId, pluginInstanceId: instance.pluginInstanceId, resourceType: definition.resourceType,
-        list: () => store.list(definition.resourceType),
-        present: (resource) => runner.invoke(definition.presentHandlerId!, resource) }),
-    }) : undefined;
-    return () => { unregisterBoard?.(); registration.close(); };
+    return () => registration.close();
   }
 
   private async handleControllerRequest(instance: PluginInstance, request: Extract<HostRequest, { method: "controller.begin" | "controller.finish" | "controller.schedule" }>): Promise<unknown> {
@@ -1038,38 +896,7 @@ export class Manager {
       },
       true,
     );
-    const sourceId = reconcileScopeId({
-
-      pluginInstanceId,
-      namespace: "v1",
-      resourceApiVersion: pluginController.resourceType.apiVersion,
-      resourceKind: pluginController.resourceType.kind,
-      controllerName: pluginController.name,
-    });
-    let unregisterBoardSource: (() => void) | undefined;
-    if (pluginController.present) {
-      const pluginId = this.instances.get(pluginInstanceId).pluginId;
-      const present = pluginController.present;
-      unregisterBoardSource = this.board.registerSource(sourceId, {
-        pluginInstanceId,
-        present: () =>
-          presentBoardSource<TSpec, TStatus>({
-            pluginId,
-            pluginInstanceId,
-            resourceType: pluginController.resourceType,
-            list: () =>
-              store.list<TSpec, TStatus>(pluginController.resourceType, {
-                namespace: "v1",
-                includeDescendants: true,
-              }),
-            present,
-          }),
-      });
-    }
-    return () => {
-      unregisterBoardSource?.();
-      registration.close();
-    };
+    return () => registration.close();
   }
 
 
@@ -1120,7 +947,6 @@ export class Manager {
   }
 
   private handlePluginResourceChange(change: ResourceClientChange): void {
-    this.board.invalidate();
     const pending = this.routePluginResourceChange(change);
     this.pendingReconciles.add(pending);
     void pending.finally(() => this.pendingReconciles.delete(pending)).catch(() => {});
@@ -1189,27 +1015,6 @@ export class Manager {
     });
   }
 
-  private notifyToast(
-    pluginInstanceId: string,
-    message: ToastMessage,
-  ): void {
-    const text = message.text.trim();
-    if (!text) throw new Error("toast text must not be empty");
-    if (!TOAST_TONES.has(message.tone)) {
-      throw new Error(`unsupported toast tone: ${message.tone}`);
-    }
-    try {
-      this.onToast?.(
-        Object.freeze({
-          pluginInstanceId,
-          message: Object.freeze({ text, tone: message.tone }),
-        }),
-      );
-    } catch {
-      // UI feedback must not affect Plugin-owned state.
-    }
-  }
-
   private writePluginLog(
     instance: PluginInstance,
     record: PluginLogRecord,
@@ -1251,15 +1056,6 @@ export class Manager {
       });
     } catch {
       // Diagnostics must never affect Plugin activation or reconciliation.
-    }
-  }
-
-  private notifyCommandsChanged(): void {
-    if (this.closed) return;
-    try {
-      this.onCommandsChanged?.();
-    } catch {
-      // Completion is a derived view; invalidation must not affect Plugin-owned state.
     }
   }
 

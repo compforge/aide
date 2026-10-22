@@ -64,7 +64,7 @@ export class OutputStore {
       creationTimestamp: at, resourceVersion: "1", generation: 1,
       labels: { "aide.dev/conversation-uid": spec.conversation.uid, ...(spec.executionId ? { "aide.dev/execution-id": spec.executionId } : {}) } }, spec,
       status: isChannelAddress(spec.target) && spec.target.channelId === "web" ? { phase: "delivered", attempts: 0, deliveredAt: new Date().toISOString() } : { phase: "pending", attempts: 0 } };
-    this.storage.write(key, JSON.stringify([null, "personal"]), { owner, object: output, control: {} }, { key: `output:${id}`, value: JSON.stringify({ fingerprint }) });
+    this.storage.write(key, "personal", { owner, object: output, control: {} }, { key: `output:${id}`, value: JSON.stringify({ fingerprint }) });
     this.notify(output); return output;
   }
   update(id: string, change: (current: OutputStatus) => OutputStatus): void {
@@ -74,7 +74,7 @@ export class OutputStore {
       const status = OutputStatusSchema.parse(change(output.status));
       if (isDeepStrictEqual(status, output.status)) return;
       const next: Output = { ...output, metadata: { ...output.metadata, resourceVersion: String(Number(output.metadata.resourceVersion) + 1) }, status };
-      this.storage.write(this.key(id), JSON.stringify([null, "personal"]), { ...stored, object: next }); this.notify(next);
+      this.storage.write(this.key(id), "personal", { ...stored, object: next }); this.notify(next);
     });
   }
   begin(id: string): void { this.update(id, (s) => {

@@ -20,7 +20,7 @@ export interface CodexAdapterOptions {
   nativeEvent?: NativeEventSink;
   /** HarnessTarget 固定环境；同名项覆盖每次 open 传入的动态环境。 */
   env?: Readonly<Record<string, string>>;
-  /** 缺省由 auto-review 审批；显式 user 时请求进入 Aide TUI。 */
+  /** 缺省由 auto-review 审批；显式 user 时请求进入应用审批入口。 */
   approvalReviewer?: "user" | "auto_review";
   /** 覆盖二进制，测试用 */
   command?: string[];

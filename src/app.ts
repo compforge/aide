@@ -31,7 +31,6 @@ import { Connectors } from "../connectors/index.ts";
 import type { AideConfig, DefaultHarness } from "./config.ts";
 import { type ExecutionOptions } from "./host/runtime/execution.ts";
 import { ApplicationRuntime } from "./host/runtime/index.ts";
-import { migratePersonalResources } from "../plugins/personal/migrate.ts";
 import { PluginSupervisor } from "./host/plugin/runner/index.ts";
 import { IncomingSchema, type Incoming } from "./channel/message.ts";
 
@@ -87,11 +86,7 @@ export class Aide {
     this.environmentSources = environmentSources(sources.environments, environments);
     const storage = ResourceStorage.open(home);
     storage.configure(config?.resources);
-    storage.transaction(() => {
-      const moved = migratePersonalResources(storage);
-      storage.register("personal", personalDefinitions);
-      if (moved) this.log.info({ resources: moved }, "Migrated Personal resources to application scope");
-    });
+    storage.register("personal", personalDefinitions);
     this.inputs = new InputStore(home);
     this.outputStore = new OutputStore(home);
     this.unsubscribeOutputs = this.outputStore.subscribe(() => this.notify());
@@ -111,10 +106,11 @@ export class Aide {
       messages: config?.connectors.lark?.appId ? personMessages(connectors.messages, this.persons, config.connectors.lark.appId) : connectors.messages };
     let personal: Personal | undefined;
     this.runtime = new ApplicationRuntime(home, {
-      cwd: options.cwd, targets: [{ ...this.defaultTarget }, { id: ROUTE_TARGET, harness: "route" }],
+      cwd: options.cwd,
       instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ route: parsePersonalConfig(config?.plugins.personal).route, conversation: parsePersonalConfig(config?.plugins.personal).conversation, watches: this.watches,
         environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
-      controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter },
+      harness: { targets: [{ ...this.defaultTarget }, { id: ROUTE_TARGET, harness: "route" }],
+        defaultTargetId: this.defaultTarget.id, historyBudgetChars: 0, createAdapter: options.createAdapter },
       plugins: { connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.conversations.changed(change); this.notify(); },
         actions: { "personal/say": (context, raw) => {
@@ -123,7 +119,7 @@ export class Aide {
           const association = personalExecution(context);
           if (!association.conversationId) throw new Error("Personal say requires Conversation context");
           return this.personal.conversations.say(association.conversationId, association.inputId, text, context.executionId, input);
-        } }, selectedHarnessTargetId: () => this.defaultTarget.id,
+        } },
         pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => {
           if (pluginId !== "aide.personal" || version !== "0.1.0") throw new Error(`Plugin package is not installed: ${pluginId}@${version}`);

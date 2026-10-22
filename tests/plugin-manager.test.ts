@@ -1,5 +1,4 @@
 import { HarnessCalls } from "../src/host/harness/calls.ts";
-import { resourceHome } from "../src/host/resource/storage.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -55,13 +54,6 @@ function key(
   };
 }
 
-function testSession(root: string): { id: string; dir: string } {
-  return {
-    id: "bs_test",
-    dir: join(root, "sessions", "bs_test"),
-  };
-}
-
 function store(root: string, pluginInstanceId: string): PluginResourceStore {
   return new PluginResourceStore({
     home: root,
@@ -112,7 +104,7 @@ describe("plugin Manager", () => {
     const root = testRoot();
     const session = new HarnessFixtures(root).create({ cwd: "/repo" });
     const resources = new PluginResourceStore({
-      home: resourceHome(session.dir),
+      home: session.home,
       pluginInstanceId: "reqloop_default",
     });
     resources.create<Spec>({
@@ -122,9 +114,9 @@ describe("plugin Manager", () => {
     });
     const states: string[] = [];
     const scheduled: ScheduledHarnessInvocation[] = [];
-    let selectedHarnessTargetId = "claude";
+    let defaultHarnessTargetId = "claude";
     const manager = new Manager({
-      instances: new PluginInstanceStore({ home: resourceHome(session.dir) }),
+      instances: new PluginInstanceStore({ home: session.home }),
       snapshot() {
         return {
           ...emptyReconcileSnapshot(),
@@ -135,7 +127,7 @@ describe("plugin Manager", () => {
         };
       },
       harness: new HarnessCalls({ records: session, targets: () => [{ id: "codex" }, { id: "claude" }],
-        selectedHarnessTargetId: () => selectedHarnessTargetId,
+        get defaultTargetId() { return defaultHarnessTargetId; },
         enqueueHarnessInvocation(request) { scheduled.push(request); },
       }),
     });
@@ -182,7 +174,7 @@ describe("plugin Manager", () => {
       "_aide_harness_invocation_scheduled",
     ]);
     expect(states).toEqual([]);
-    selectedHarnessTargetId = "codex";
+    defaultHarnessTargetId = "codex";
 
     const input = scheduled[0]!;
     session.appendEvent({
@@ -226,7 +218,7 @@ describe("plugin Manager", () => {
     const root = testRoot();
     const session = new HarnessFixtures(root).create({ cwd: "/repo" });
     const resources = new PluginResourceStore({
-      home: resourceHome(session.dir),
+      home: session.home,
       pluginInstanceId: "reqloop_default",
     });
     resources.create<Spec>({
@@ -236,13 +228,13 @@ describe("plugin Manager", () => {
     });
     const states: string[] = [];
     const manager = new Manager({
-      instances: new PluginInstanceStore({ home: resourceHome(session.dir) }),
+      instances: new PluginInstanceStore({ home: session.home }),
       snapshot: () => ({
         ...emptyReconcileSnapshot(),
         harnessTargets: [{ id: "codex", harness: "codex" }],
       }),
       harness: new HarnessCalls({ records: session, targets: () => [{ id: "codex" }],
-        selectedHarnessTargetId: () => "codex", enqueueHarnessInvocation() {},
+        defaultTargetId: "codex", enqueueHarnessInvocation() {},
       }),
     });
     manager.registerController<Spec, Record<string, never>>({

@@ -15,7 +15,7 @@ export interface HarnessExecution {
 export interface HarnessCallsOptions {
   records: HarnessStore;
   targets(): readonly { id: string }[];
-  selectedHarnessTargetId?(): string | undefined;
+  defaultTargetId?: string;
   enqueueHarnessInvocation(request: ScheduledHarnessInvocation): Promise<unknown> | void;
   cancelHarnessInvocation?(id: string): "queued" | "running" | undefined;
   now?(): Date;
@@ -60,7 +60,7 @@ export class HarnessCalls implements HarnessExecution {
 
   async invoke(context: ExecutionScope, request: HarnessRequest): Promise<VerbResponse> {
     const deadline = this.timestamp() + request.input.timeoutMs;
-    const harnessTargetId = request.input.harnessTargetId ?? this.options.selectedHarnessTargetId?.();
+    const harnessTargetId = request.input.harnessTargetId ?? this.options.defaultTargetId;
     if (!harnessTargetId) throw new Error("harness() requires a HarnessTarget selection");
     if (
       !this.options.targets().some(

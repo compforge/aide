@@ -1,12 +1,8 @@
-import { ResourceStorage, type StoredResource } from "../../resource/storage.ts";
+import { ResourceStorage } from "../../resource/storage.ts";
 import { assertPathSegment, assertResourceUid, validateResourceType } from "./type.ts";
 import { isDeepStrictEqual } from "node:util";
-import {
-  existsSync,
-  readFileSync,
-  readdirSync,
-} from "node:fs";
-import { basename, join } from "node:path";
+import { createHash } from "node:crypto";
+import { join } from "node:path";
 
 import type { Resource, ResourceListOptions, ResourceNamespace, ResourceOwnerReference, ResourceType } from "@compforge/aide-plugin";
 
@@ -240,29 +236,17 @@ function isoTimestamp(name: string, value: unknown): asserts value is string {
 
 
 export class PluginResourceStore {
-  private readonly resourceDir: string;
+  private readonly lockDir: string;
   readonly storage: ResourceStorage;
   readonly scope: string;
   readonly pluginInstanceId: string;
 
   constructor(options: PluginResourceStoreOptions) {
     assertPathSegment("pluginInstanceId", options.pluginInstanceId);
-    this.resourceDir = join(options.home, "shared");
+    this.lockDir = join(options.home, "locks", "resources");
     this.pluginInstanceId = options.pluginInstanceId;
-    this.scope = JSON.stringify([null, options.pluginInstanceId]);
+    this.scope = options.pluginInstanceId;
     this.storage = ResourceStorage.open(options.home);
-    const root = this.namespacesDir();
-    this.storage.migrate(root, function* () {
-      function* files(path: string): Generator<string> {
-        if (!existsSync(path)) return;
-        for (const item of readdirSync(path, { withFileTypes: true })) {
-          const child = join(path, item.name);
-          if (item.isDirectory()) yield* files(child);
-          else if (item.name.endsWith(".json")) yield child;
-        }
-      }
-      for (const path of files(root)) yield [path, JSON.stringify([null, options.pluginInstanceId]), JSON.parse(readFileSync(path, "utf8")) as StoredResource];
-    });
   }
 
   create<TSpec, TStatus = Record<string, unknown>>(
@@ -278,8 +262,8 @@ export class PluginResourceStore {
     );
     if (!name || name.length > 1024) throw new Error("Invalid resource name");
     const owner = this.ownerReference(input.owner, type, name, namespace);
-    const path = this.resourcePath(type, name, namespace);
-    return this.storage.transaction(() => withFileLock(path, () => {
+    const path = this.resourceKey(type, name, namespace);
+    return this.storage.transaction(() => withFileLock(this.lockPath(path), () => {
       if (this.storage.has(path)) {
         throw new Error(`plugin resource already exists: ${type.kind}/${name}`);
       }
@@ -317,8 +301,8 @@ export class PluginResourceStore {
     const spec = jsonObject("spec", this.storage.definition(this.pluginInstanceId, type).schema.spec.parse(input.spec)) as TSpec;
     if (!name || name.length > 1024) throw new Error("Invalid resource name");
     const owner = this.ownerReference(input.owner, type, name, namespace);
-    const path = this.resourcePath(type, name, namespace);
-    return this.storage.transaction(() => withFileLock(path, () => {
+    const path = this.resourceKey(type, name, namespace);
+    return this.storage.transaction(() => withFileLock(this.lockPath(path), () => {
       if (!this.storage.has(path)) {
         this.assertOwnerActive(owner);
         const stored = this.initialStoredResource<TSpec, TStatus>({
@@ -358,7 +342,7 @@ export class PluginResourceStore {
     name: string,
     namespace: ResourceNamespace = "v1",
   ): PluginResource<TSpec, TStatus> {
-    this.storage.read(this.resourcePath(type, name, namespace), true);
+    this.storage.read(this.resourceKey(type, name, namespace), true);
     return this.readStored<TSpec, TStatus>(type, name, namespace).object;
   }
 
@@ -370,7 +354,7 @@ export class PluginResourceStore {
     validateResourceType(type);
     if (!name || name.length > 1024) throw new Error("Invalid resource name");
     const canonical = this.resourceNamespace(namespace);
-    if (!this.storage.read(this.resourcePath(type, name, canonical), true)) return;
+    if (!this.storage.read(this.resourceKey(type, name, canonical), true)) return;
     return this.readCurrentStored<TSpec, TStatus>(type, name, canonical).object;
   }
 
@@ -389,8 +373,8 @@ export class PluginResourceStore {
           namespaceContains(namespace, candidate)
         )
       : [namespace];
-    return namespaces.flatMap((candidate) => [...this.storage.keys(this.scope, `${this.kindDir(type, candidate)}/`)]
-      .map((path) => this.readStored<TSpec,TStatus>(type, decodeURIComponent(basename(path, ".json")), candidate).object))
+    return namespaces.flatMap((candidate) => [...this.storage.keys(this.scope, this.kindPrefix(type, candidate))]
+      .map((key) => this.readStored<TSpec, TStatus>(type, decodeURIComponent(key.slice(key.lastIndexOf("/") + 1)), candidate).object))
       .filter((resource) =>
         containsStringMap(resource.metadata.labels, matchLabels)
       )
@@ -671,7 +655,7 @@ export class PluginResourceStore {
     validateResourceType(type);
     if (!name || name.length > 1024) throw new Error("Invalid resource name");
     return withAsyncFileLock(
-      `${this.resourcePath(type, name, namespace)}.reconcile${controllerName ? `.${encodeURIComponent(controllerName)}` : ""}`,
+      this.lockPath(JSON.stringify([this.resourceKey(type, name, namespace), "reconcile", controllerName ?? ""])),
       reconcile,
     );
   }
@@ -687,8 +671,8 @@ export class PluginResourceStore {
     validateResourceType(type);
     if (!name || name.length > 1024) throw new Error("Invalid resource name");
     const namespace = this.resourceNamespace(options.namespace ?? "v1");
-    const path = this.resourcePath(type, name, namespace);
-    return this.storage.transaction(() => withFileLock(path, () => {
+    const path = this.resourceKey(type, name, namespace);
+    return this.storage.transaction(() => withFileLock(this.lockPath(path), () => {
       const current = this.readStored<TSpec, TStatus>(type, name, namespace);
       if (
         options.expectedResourceVersion !== undefined &&
@@ -721,7 +705,7 @@ export class PluginResourceStore {
     namespace: ResourceNamespace = "v1",
   ): StoredPluginResource<TSpec, TStatus> {
     const canonical = this.resourceNamespace(namespace);
-    const path = this.resourcePath(type, name, canonical);
+    const path = this.resourceKey(type, name, canonical);
     let parsed: unknown;
     try {
       parsed = this.storage.read(path);
@@ -915,8 +899,8 @@ export class PluginResourceStore {
   ): void {
     validateResourceType(type);
     if (!name || name.length > 1024) throw new Error("Invalid resource name");
-    const path = this.resourcePath(type, name, namespace);
-    withFileLock(path, () => {
+    const path = this.resourceKey(type, name, namespace);
+    withFileLock(this.lockPath(path), () => {
       if (!this.storage.has(path)) {
         throw new Error(`plugin resource not found: ${type.kind}/${name}`);
       }
@@ -924,43 +908,26 @@ export class PluginResourceStore {
     });
   }
 
-  private namespacesDir(): string {
-    return join(
-      this.resourceDir,
-      "plugins",
-      this.pluginInstanceId,
-      "namespaces",
-    );
-  }
-
-  private resourcesDir(namespace: ResourceNamespace): string {
-    return join(
-      this.namespacesDir(),
-      encodeURIComponent(namespace),
-      "resources",
-    );
-  }
-
-  private kindDir(type: ResourceType, namespace: ResourceNamespace): string {
+  private kindPrefix(type: ResourceType, namespace: ResourceNamespace): string {
     this.storage.definition(this.pluginInstanceId, type);
-    const [group, version] = type.apiVersion.split("/");
-    if (!group || !version) {
-      throw new Error(`invalid resource apiVersion: ${type.apiVersion}`);
-    }
-    return join(this.resourcesDir(namespace), group, version, type.kind);
+    validateResourceType(type);
+    return [this.pluginInstanceId, this.resourceNamespace(namespace), type.apiVersion, type.kind]
+      .map(encodeURIComponent).join("/") + "/";
   }
 
-  key(type: ResourceType, name: string, namespace: ResourceNamespace = "v1"): string { return this.resourcePath(type, name, namespace); }
+  key(type: ResourceType, name: string, namespace: ResourceNamespace = "v1"): string {
+    return this.resourceKey(type, name, namespace);
+  }
 
-  private resourcePath(
-    type: ResourceType,
-    name: string,
-    namespace: ResourceNamespace,
-  ): string {
-    return join(
-      this.kindDir(type, this.resourceNamespace(namespace)),
-      `${encodeURIComponent(name)}.json`,
-    );
+  /** @spec Database identity is independent of the host directory and physical lock files.
+   * @case tests/plugin-resource.test.ts
+   */
+  private resourceKey(type: ResourceType, name: string, namespace: ResourceNamespace): string {
+    return this.kindPrefix(type, namespace) + encodeURIComponent(name);
+  }
+
+  private lockPath(key: string): string {
+    return join(this.lockDir, createHash("sha256").update(key).digest("hex"));
   }
 
   private resourceNamespace(namespace: ResourceNamespace): ResourceNamespace {

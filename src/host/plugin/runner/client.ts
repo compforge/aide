@@ -4,7 +4,7 @@ import { dispatchConnector, emptyConnectors } from "../../../connector-client.ts
 import { AsyncResource } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 
-import type { CommandContext, CommandInput, CommandResult, PluginDataDirectories, PluginInstance, ResourceClient, ToastMessage } from "@compforge/aide-plugin";
+import type { PluginDataDirectories, PluginInstance, ResourceClient } from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../../../protocol/ipc.ts";
 import type {
   ExecutionScope,
@@ -48,7 +48,6 @@ export interface PluginRunnerCallbacks {
     context: ExecutionScope,
     request: VerbRequest,
   ) => Promise<VerbResponse>;
-  readonly onToast: (message: ToastMessage) => void;
   readonly onLog: (record: PluginLogRecord) => void;
   readonly onOutput?: (
     stream: "stdout" | "stderr",
@@ -74,9 +73,6 @@ export interface PluginRunnerClientOptions extends PluginRunnerCallbacks {
  */
 export class PluginRunnerClient {
   private readonly controllerTimers = new Map<string, { timer?: ReturnType<typeof setTimeout>; blockers: number }>();
-  async invokeCommand(handlerId: string, input: CommandInput, context: CommandContext): Promise<CommandResult | void> {
-    return await this.invoke(handlerId, input, context);
-  }
 
   private readonly child: Bun.Subprocess<"ignore", "pipe", "pipe">;
   private readonly callbacks: PluginRunnerCallbacks;
@@ -179,14 +175,14 @@ export class PluginRunnerClient {
   async activate(
     entry: PluginPackageEntry,
     instance: PluginInstance,
-    session: RuntimeScope,
+    runtime: RuntimeScope,
     dataDirs: PluginDataDirectories,
   ): Promise<ActivationResult> {
     return await this.call({
       method: "activate",
       entry,
       instance: { pluginInstanceId: instance.pluginInstanceId, pluginId: instance.pluginId, marketplace: instance.marketplace, packageVersion: instance.packageVersion, enabled: instance.enabled, config: instance.config, createdAt: instance.createdAt, updatedAt: instance.updatedAt },
-      session,
+      runtime,
       dataDirs,
     }) as ActivationResult;
   }
@@ -280,10 +276,6 @@ export class PluginRunnerClient {
     }
     if (childMessage.kind === "child-call") {
       void this.handleChildCall(childMessage);
-      return;
-    }
-    if (childMessage.kind === "toast") {
-      this.callbacks.onToast(childMessage.message);
       return;
     }
     if (childMessage.kind === "log") {

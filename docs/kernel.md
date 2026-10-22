@@ -1,6 +1,6 @@
 # Aide 的 Controller Runtime
 
-Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controller 根据变化读取当前状态，通过能力接口执行动作，再保存结果与下一次唤醒条件。Personal 是其上的个人助手插件，Input、Output、Person、Conversation、Task 和 Routine 都由 Personal 定义。
+Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controller 根据变化读取当前状态，通过能力接口执行动作，再保存结果与下一次唤醒条件。单机是便于安装和使用的交付方式，资源协调模型不依附单机场景。未来服务端部署可由 Kubernetes CRD 承载资源；当前实现仍使用本地持久化。Personal 是其上的个人助手插件，Input、Output、Person、Conversation、Task 和 Routine 都由 Personal 定义。
 
 ## 概念与所有权
 
@@ -34,7 +34,7 @@ Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controll
 
 Operator 通过 `verbs.harness` 请求执行。运行时使用插件实例、资源类型、namespace、UID 与 Controller 名称定位上下文；同名资源删除后重建会获得新上下文。传输入口、Conversation 名字和一次 Reconcile 的执行 ID 都不能替代资源 UID。
 
-HarnessTarget 表达具体执行配置，包含 ID、Harness 实现及模型等选项。Operator 可以从冻结快照的 `harnessTargets` 发现已配置目标，通过 harnessTargetId 选择；省略时使用应用默认目标。Target 是配置与能力发现信息，不要求注册为 Resource。原生 Session 仍由 Adapter 管理，恢复身份和 resumeState 由提供方协议决定。
+HarnessTarget 表达具体执行配置，包含 ID、Harness 实现及模型等选项。Operator 可以从冻结快照的 `harnessTargets` 发现已配置目标，通过 harnessTargetId 选择；省略时使用应用默认目标。默认 Target 由应用配置提供，不依赖交互式选择。Target 是配置与能力发现信息，不要求注册为 Resource。原生 Session 仍由 Adapter 管理，恢复身份和 resumeState 由提供方协议决定。
 
 业务可以用 `freshContext` 请求用当前提示材料建立新上下文。宿主同时记录历史边界，防止原生上下文重建时重新补入已被压缩或舍弃的材料。执行工作目录变化保留资源与执行记录，并清空原生恢复绑定。
 
@@ -42,7 +42,7 @@ HarnessTarget 表达具体执行配置，包含 ID、Harness 实现及模型等�
 
 ### 执行后端的边界
 
-ApplicationRuntime 直接组合插件 Manager 与 ExecutionService。前者管理插件、资源与调度，只通过 HarnessExecution 能力接口请求或取消调用；后者管理 Harness 执行、原生审批、存储租约与关闭。Manager 不读取执行历史，也不维护原生绑定。底座不再有 SessionStore / SessionHandle 或统一 ExecutionJournal 入口。
+ApplicationRuntime 装配插件 Manager；配置 `harness` 时再装配 ExecutionService。纯资源插件无需 Adapter、Target 或占位执行配置。前者管理插件、资源与调度，只通过 HarnessExecution 能力接口请求或取消调用；后者管理 Harness 执行、原生审批、存储租约与关闭。Manager 不读取执行历史，也不维护原生绑定。底座不再有 SessionStore / SessionHandle 或统一 ExecutionJournal 入口。
 
 没有历史记录时，Harness 存储在首次调用时才创建；仅配置 Target、查询执行视图或运行资源 Controller 都不会创建执行存储。已有记录由 Harness 模块在启动时恢复。HarnessStore 保存调用事件、状态投影与原生绑定，EventLedger 是内部追加存储机制，不是插件运行的前置对象。
 
@@ -50,13 +50,13 @@ Reconcile 的冻结快照只有 cwd 与 HarnessTarget 配置，不复制全局�
 
 底座不再维护 Lane 或 Turn。资源执行上下文保存原生绑定与历史边界；HarnessInvocation 是一次调用的唯一执行身份，队列、事件、结果、取消与审批都关联 invocationId。同一资源上下文串行使用，不同上下文受并发上限约束，没有主通道或旁路通道。
 
-Harness 记录继续沿用现有磁盘位置，旧路径名只属于存储兼容层。插件与调度的诊断日志写入应用根目录的 `runtime.log`。新事件使用 application scope，资源上下文与 invocationId 表达执行归属。读取兼容层将旧 Lane 坐标转换为 contextId，依据旧调用调度记录把 Turn ID 对应到 invocationId；新日志只写调用身份。转换保留事件序号、时间、原生 raw 数据和恢复水位，不修改提供方的原生会话文件。原生上下文重建仅补入当前资源上下文与 Target 的历史，跨资源知识由插件显式提供。
+Harness 使用独立的 `harness/` 目录：`meta.json` 保存配置与原生绑定，`events.jsonl` 保存执行事实，`runtime.log` 保存执行诊断。插件与调度的诊断日志写入应用根目录的 `runtime.log`。资源数据库使用插件实例作为 scope，资源键由实例、namespace、类型和名称组成，不包含磁盘目录。事件使用 application scope，以 contextId 与 invocationId 表达归属，原生 raw 数据原样保存。当前格式不兼容旧 Session / Lane / Turn 存储，不提供迁移或双读。原生上下文重建仅补入当前资源上下文与 Target 的历史，跨资源知识由插件显式提供。
 
 ## 能力与事务
 
 Reconcile 使用 Harness、Connector 和命名 action 请求能力。运行时管理调用身份、期限、取消和结果；具体 action 由应用装配，Personal 的 say 就是其中一个。底座不解释消息正文、收件人或输入消费。
 
-`ResourceClient.commit` 用同一 SQLite 事务组合资源写入。校验、版本、引用或配额失败会全部回滚；Watch 只在提交后收到变化。插件可注入同步 admission 处理不可变事实和幂等回执，它仍处在同一事务中。外部请求不能加入资源事务，业务应区分“动作已发生”和“结果尚未提交”。Connector 调用在独立的 `connectors/calls.jsonl` 中保存发送意图与结果；重启将未完成调用记为 interrupted，不重放外部请求。旧执行文件中的未完成 Connector 调用会幂等迁移，原文件保留。
+`ResourceClient.commit` 用同一 SQLite 事务组合资源写入。校验、版本、引用或配额失败会全部回滚；Watch 只在提交后收到变化。插件可注入同步 admission 处理不可变事实和幂等回执，它仍处在同一事务中。外部请求不能加入资源事务，业务应区分“动作已发生”和“结果尚未提交”。Connector 调用在独立的 `connectors/calls.jsonl` 中保存发送意图与结果；重启将未完成调用记为 interrupted，不重放外部请求。
 
 Host 容量管理按 Group/Kind 汇总。保留策略由资源所有者声明，只有已释放且无人引用的记录可以回收；没有规则的资源保持保护。配额压力不允许删除仍在承担工作的对象。
 
@@ -68,7 +68,7 @@ Host 持有资源存储、Connector、Harness Adapter 和原生权限审批；Ru
 
 Host 与 Runner 不相互导入实现。双方通过 `src/protocol/` 协作，公共插件契约位于 `packages/plugin/`。PluginContext 只暴露运行环境、实例配置和能力入口；插件私有目录分为 package global 与 instance，不依附执行日志。
 
-应用装配位于 `src/app.ts`。它安装 Personal、绑定 Channel 与 Connector、恢复业务资源，再启动 runtime。Personal 升级迁移在事务内保留 UID、版本、default 标记、待处理队列、定时记录与引用；执行日志的物理布局不决定这些业务事实的生命周期。
+应用装配位于 `src/app.ts`。它安装 Personal、绑定 Channel 与 Connector、恢复业务资源，再启动 runtime。当前格式的资源在重启后保留 UID、版本、default 标记、待处理队列、定时记录与引用；执行日志的物理布局不决定这些业务事实的生命周期。
 
 ## Personal 的应用方式
 
