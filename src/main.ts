@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { once } from "node:events";
 import pino from "pino";
 import { z } from "zod";
+import { RequirementOutputDelivery } from "./host/output/requirements.ts";
 import { Connectors } from "../connectors/index.ts";
 import { Aide } from "./app.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
@@ -28,8 +29,9 @@ await withAsyncFileLock(path, async () => {
   const config = loadConfig();
   const cwd = resolve(environment.AIDE_CWD ?? process.cwd());
   const harnesses = await resolveHarnessConfigs(config, { home, cwd, file, environment, log });
+  const connectors = Connectors.fromConfig(config.connectors, environment);
   const aide: Aide = new Aide(home, {
-    config, connectors: Connectors.fromConfig(config.connectors, environment),
+    config, connectors,
     cwd, timezone, defaultTarget: harnesses.defaultTarget,
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
       targetConfig: target.harness === "chief" ? { harness: "chief" } : harnesses.defaultTargetConfig,
@@ -41,6 +43,8 @@ await withAsyncFileLock(path, async () => {
   server.listen(port, "127.0.0.1");
   await once(server, "listening");
   await aide.start();
+  const requirementDelivery = new RequirementOutputDelivery(aide.outputStore, connectors, log);
+  requirementDelivery.start();
   const bot = lark ? new LarkChannel(home, lark.appId, aide, larkTransport(lark, log), log, (id) => larkProgress(aide, id)) : undefined;
   if (bot) void bot.start().catch(() => log.error("Lark channel startup failed; check credentials and network"));
   log.info({ port, path }, "Aide listening on localhost");
@@ -56,6 +60,7 @@ await withAsyncFileLock(path, async () => {
   server.close();
   server.closeAllConnections(); // Close long-lived web streams and release their subscriptions on shutdown.
   const closingBot = bot?.close();
+  await requirementDelivery.close();
   await aide.close();
   await closingBot;
   log.info("Aide stopped");

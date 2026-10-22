@@ -105,7 +105,7 @@ test("Source watches restore independently and are installed only in their assig
     ] } } } }));
   let polls = 0;
   const options = { ...fakeOptions({ execute: async () => { throw new Error("Unexpected execution"); } }, root), config: loadConfig(path),
-    connectors: { ...emptyConnectors, requirements: { ...emptyConnectors.requirements, list: async () => { polls++; return []; } } } };
+    connectors: { ...emptyConnectors, requirements: { ...emptyConnectors.requirements, identity: async () => ({ provider: "meego", scope: "fixture/p" }), list: async () => { polls++; return { items: [] }; } } } };
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.start(); await aide.settled();

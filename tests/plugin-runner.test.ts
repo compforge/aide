@@ -100,7 +100,7 @@ describe("Plugin Runner process boundary", () => {
       reviewThreads: "none" as const, mergeability: "ready" as const, observedAt: "2026-10-19T00:00:00Z" };
     let reads = 0;
     const connectors = new Connectors([{
-      source: "work", provider: "fixture", async list() { reads++; return [requirement]; }, async get() { return requirement; },
+      source: "work", provider: "fixture", async identity() { return { provider: "fixture", scope: "p" }; }, async comments() { return { items: [] }; }, async list() { reads++; return { items: [requirement] }; }, async get() { return requirement; },
     }], [{
       forge: "forge", provider: "github", async list() { return [identity]; }, async get() { return pull; }, async comments() { return []; },
     }], new Environments(resolveEnvironmentConfig({ dev: { kind: "host", aliases: ["开发"], host: { name: "vm", transport: "ssh", address: "not-contacted.invalid" } } })));
@@ -120,7 +120,8 @@ describe("Plugin Runner process boundary", () => {
         expect(JSON.parse(response.text)).toMatchObject({
           environment: { name: "dev", host: { address: "not-contacted.invalid" } },
           catalog: { requirements: [{ source: "work", provider: "fixture" }], forges: [{ forge: "forge", provider: "github" }] },
-          requirements: [requirement], requirement, pulls: [identity], pull, comments: [],
+          requirementAccount: { provider: "fixture", scope: "p" }, requirementComments: { items: [] },
+          requirements: { items: [requirement] }, requirement, pulls: [identity], pull, comments: [],
         });
         await expect(executeCommand(manager, `environment-${id}`, { argument: "missing" })).rejects.toThrow("Unknown environment: missing");
       }

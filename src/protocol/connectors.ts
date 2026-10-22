@@ -1,4 +1,4 @@
-import type { MessageConnector, MessageSearchQuery, PullRequestIdentity, PullRequestListQuery, RequirementIdentity, RequirementListQuery } from "@compforge/aide-plugin";
+import type { MessageConnector, MessageSearchQuery, PullRequestIdentity, PullRequestListQuery, RequirementIdentity, RequirementListQuery, RequirementCommentQuery } from "@compforge/aide-plugin";
 
 export type ConnectorRequest =
   | { readonly operation: "describe" }
@@ -11,6 +11,8 @@ export type ConnectorRequest =
   | { readonly operation: "environments.get"; readonly name: string }
   | { readonly operation: "requirements.list"; readonly source: string; readonly query?: RequirementListQuery }
   | { readonly operation: "requirements.get"; readonly identity: RequirementIdentity }
+  | { readonly operation: "requirements.identity"; readonly source: string }
+  | { readonly operation: "requirements.comments"; readonly identity: RequirementIdentity; readonly query?: RequirementCommentQuery }
   | { readonly operation: "forges.list"; readonly forge: string; readonly path: string; readonly query: PullRequestListQuery }
   | { readonly operation: "forges.get"; readonly identity: PullRequestIdentity }
   | { readonly operation: "forges.comments"; readonly identity: PullRequestIdentity };

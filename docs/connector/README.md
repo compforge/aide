@@ -1,8 +1,8 @@
 # Connector 与 Source
 
-Connector 是 Aide Host 提供的全局读取能力，所有 Plugin 和 Chief 都能使用。Host 加载配置、创建连接器并持有提供方客户端；Plugin Runner 通过现有 IPC 查询，不自行读取全局配置。`connectors` 声明访问能力，`plugins.<plugin>.sources` 定义关注范围和观察策略，Chief 判断变化是否值得通知或推进。只声明 Connector 不启动观察。
+Connector 是 Aide Host 提供的外部系统访问能力；所有 Plugin 和 Chief 共用读取接口，评论发送由 Host 消费 Output。Host 加载配置、创建连接器并持有提供方客户端；Plugin Runner 通过现有 IPC 查询，不自行读取全局配置。`connectors` 声明访问能力，`plugins.<plugin>.sources` 定义关注范围和观察策略，Chief 判断变化是否值得通知或推进。只声明 Connector 不启动观察。
 
-支持环境目录、Kubernetes Workload 采样、Meego 需求、GitHub / GitLab PR 和 Lark 消息。环境目录读取声明，Workload 采样读取运行态；Meego 通过已有 `meegle` CLI 访问，Forge 使用统一 HTTP 客户端。Lark 通过 `lark-cli` 用户身份读取，接入与观察策略见 [Lark 消息观察](lark-messages.md)。Connector 不创建 Work，也不代替用户决定下一步。
+支持环境目录、Kubernetes Workload 采样、Meego 需求、GitHub / GitLab PR 和 Lark 消息。环境目录读取声明，Workload 采样读取运行态；Meego 通过已有 `meegle` CLI 读取需求与评论，按 Output 投递答复，详见 [Meego 接入](meego.md)；Forge 使用统一 HTTP 客户端。Lark 通过 `lark-cli` 用户身份读取，接入与观察策略见 [Lark 消息观察](lark-messages.md)。Connector 不创建 Work，也不代替用户决定下一步。
 
 ## 配置与所有权
 
@@ -33,6 +33,8 @@ connectors:
       profile: your-meegle-profile
       categories: [story]
       assigneeField: current_status_operator
+      me:
+        userKey: your-human-user-key
   forges:
     github.com:
       type: github
@@ -112,7 +114,7 @@ Pod 替换或镜像变化是事实，不能据此断言有人发布，更不能�
 
 ## 观察流程
 
-需求 Source 按 `sources.requirements` 中的 Connector 引用和负责人范围读取近期摘要，比较实体身份与观察指纹。项目与平台字段映射由 Connector 声明；负责人筛选由 Source 通过查询参数传入，同一 Connector 可供不同关注范围复用。新观察先持久化为 Input，再推进水位；中断后的重试依靠输入身份去重。已完成或关闭的需求不会创建新的待处理输入。
+需求 Source 按 `sources.requirements` 中的 Connector 引用和负责人范围读取近期摘要，比较实体身份与观察指纹。项目与平台字段映射由 Connector 声明；负责人筛选由 Source 通过查询参数传入，同一 Connector 可供不同关注范围复用。新观察先持久化为 Input，再推进水位；中断后的重试依靠输入身份去重。首次发现已完成或关闭的需求不生成输入；已跟踪需求结束或转交时仍生成最后一次变化，并读完当前评论窗口。
 
 需求 watch 默认使用 `source:<watch-id>` 作为 sessionId，也可指定已知聊天 Session。Source 只填写 sessionId，不填写 conversationId；Personal 管理该 Session 的 Conversation。watch 只装配到所属 Session，创建其它聊天不会重复轮询。Host 校验负责人范围后下发有效配置。Source 不直接调用模型或创建 Task，Chief 根据已有委托选择询问、CRUD Work 或静默忽略。
 
@@ -122,7 +124,7 @@ Forge 的配置 key 是逻辑身份，`api_host` 可以覆盖 API 域名，`uids
 
 Lark 目标为 `lark:<app-id>:<chat-id>`，可从入站日志的 sessionId 获取。机器人需要已经收到过该单聊的消息，才会向其投递。Chief 与 Work 模型分别由 `harnesses.chief` 和 `harnesses.pi` 配置，缺省时沿用 Pi 原生配置。
 
-当前 Meego 每个类别读取最近更新的 50 条，再筛选负责人；不保证覆盖高流量项目的全量变更。首次连接会把这批范围内尚未结束的条目交给 Chief；配置范围改变也会建立新的观察范围。后续仅在指纹变化时再次提交。尚未接 webhook、全量分页或 Forge 定时 Source；Forge 当前供 Chief 查询 PR 状态与评论。
+Meego 按固定时间窗口分页观察需求和评论，检查点与待提交 Input 可跨重启恢复；身份、投递和覆盖边界见 [Meego](meego.md)。Forge 当前供 Chief 查询 PR 状态与评论，没有定时 Source。
 
 框架的调度见 [Plugin](../plugin/README.md)；决策策略见 [Personal](../plugin/personal.md)。
 

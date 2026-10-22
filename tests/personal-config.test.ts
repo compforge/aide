@@ -69,8 +69,8 @@ test("Only configured sources poll; removing policies stops restored observers w
         return { messages: [], hasMore: false, observedThrough: new Date().toISOString() };
       },
     },
-    requirements: { ...emptyConnectors.requirements, async list(_source: string, query?: { assigneeUserKeys?: readonly string[] }) {
-      seen.assignees.push([...query?.assigneeUserKeys ?? []]); return [];
+    requirements: { ...emptyConnectors.requirements, async identity() { return { provider: "meego", scope: "fixture/p" }; }, async list(_source: string, query?: { assigneeUserKeys?: readonly string[] }) {
+      seen.assignees.push([...query?.assigneeUserKeys ?? []]); return { items: [] };
     } },
   };
   const logs: Record<string, unknown>[] = [];
@@ -110,4 +110,23 @@ test("Conversation configuration limits Batch size and context, not pending Inpu
   assert.throws(() => parsePersonalConfig({ conversation: { maxPending: 5 } }), /maxPending/);
   assert.throws(() => parsePersonalConfig({ conversation: { contextChars: 4096 } }), /conversation.summaryChars.*summaryChars must be < contextChars \/ 2/);
   assert.equal(parsePersonalConfig({ conversation: { batchSize: 5, contextChars: 4096, summaryChars: 1000 } }).conversation!.batchSize, 5);
+});
+
+
+test("Meego Me resolves canonical identity without equating profile or watched people with Me", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-meego-me-"));
+  const configFile = join(root, "config.yaml");
+  writeFileSync(configFile, JSON.stringify({ connectors: { requirements: { work: {
+    provider: "meego", projectKey: "alias", profile: "robot", me: { userKey: "human" },
+  } } } }));
+  const connectors = { ...emptyConnectors, requirements: { ...emptyConnectors.requirements,
+    async identity() { return { provider: "meego", scope: "https://meego.test/canonical" }; },
+    async list() { return { items: [] }; },
+  } };
+  const aide = new Aide(root, { ...fakeOptions(agent, root), connectors, config: loadConfig(configFile) }, pino({ level: "silent" }));
+  t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
+  await aide.start();
+  const me = await aide.persons.me();
+  assert.ok(me?.spec.identities.some((identity) => identity.provider === "meego" && identity.scope === "https://meego.test/canonical" && identity.id === "human"));
+  assert.ok(!me?.spec.identities.some((identity) => identity.id === "robot"));
 });

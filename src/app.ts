@@ -1,12 +1,14 @@
 import type { Address } from "@compforge/aide-plugin";
 import { OutputStore } from "./host/output/store.ts";
 import { outputView } from "./output.ts";
+import { personRequirements } from "../plugins/personal/person/requirements.ts";
+import { requirementOutputs } from "./host/output/requirements.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
 import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import type { InputSpec, SourceDefinition } from "@compforge/aide-plugin";
 import { resolve } from "node:path";
-import { LOCAL_ME, type Me } from "../plugins/personal/person/model.ts";
+import { LOCAL_ME, type Me, type PersonIdentity } from "../plugins/personal/person/model.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import type { Logger } from "pino";
@@ -63,7 +65,7 @@ export class Aide {
   private readonly unsubscribeOutputs: () => void;
   private readonly unsubscribeResources: () => void;
   private readonly connectors: ConnectorClient;
-  private readonly meMarks: Me;
+  private readonly meMarks: Me & { identities: PersonIdentity[] };
   readonly catalog: ReturnType<typeof openPersonCatalog>;
   get persons() { return this.catalog.persons; }
   private starting?: Promise<void>;
@@ -96,9 +98,9 @@ export class Aide {
     const connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
     this.storage = new SessionStore(home);
     this.catalog = openPersonCatalog(home, this.meMarks, log, () => this.notify());
-    this.connectors = config?.connectors.lark?.appId ? { requirements: connectors.requirements, forges: connectors.forges,
+    this.connectors = { requirements: requirementOutputs(personRequirements(connectors.requirements, this.persons), this.outputStore), forges: connectors.forges,
       environments: connectors.environments, describe: () => connectors.describe(),
-      messages: personMessages(connectors.messages, this.persons, config.connectors.lark.appId) } : connectors;
+      messages: config?.connectors.lark?.appId ? personMessages(connectors.messages, this.persons, config.connectors.lark.appId) : connectors.messages };
     for (const meta of this.storage.listSessions()) this.session(meta.aideSessionId);
     for (const watch of this.watches) this.session(watch.sessionId);
     if (this.environmentSources.length) this.session(ENVIRONMENT_SESSION);
@@ -281,8 +283,16 @@ export class Aide {
     return trigger;
   }
 
+  private async initializePeople() {
+    for (const config of loadMeegoRequirementConfigs(this.options.config?.connectors ?? {})) {
+      if (!config.me) continue;
+      const account = await this.connectors.requirements.identity(config.source);
+      this.meMarks.identities.push({ provider: account.provider, scope: account.scope, id: config.me.userKey });
+    }
+    await this.persons.initialize();
+  }
   start(): Promise<void> {
-    return this.starting ??= this.persons.initialize().then(() => Promise.all(this.sessions().map((scope) => scope.start()))).then(() => {});
+    return this.starting ??= this.initializePeople().then(() => Promise.all(this.sessions().map((scope) => scope.start()))).then(() => {});
   }
   async settled(): Promise<void> {
     await this.start();

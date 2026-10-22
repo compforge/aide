@@ -9,10 +9,10 @@ Input → Conversation / Batch → Harness / Task / Routine
                                       ↓ say 或业务结果
                                Output 持久资源
                                       ↓
-                               Channel 投递与回执
+                               Channel / Connector 投递与回执
 ```
 
-Output 是 Core 内置的 `aide.dev/v1alpha1 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Conversation 的精确资源引用（包括 UID、Session）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标单独保存为 `Address`：当前的子接口 `ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark endpoint 是分别 URI 编码的 appId / chatId。Personal 在产出时明确选择地址，Channel 发送时只读 target，不解析 Conversation ID 或 sessionId。更改正文、收件人或目标需要产生新的 Output。
+Output 是 Core 内置的 `aide.dev/v1alpha1 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Conversation 的精确资源引用（包括 UID、Session）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标单独保存为 `Address`：`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark endpoint 是分别 URI 编码的 appId / chatId。Personal 在产出时明确选择地址，Channel 发送时只读 target，不解析 Conversation ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
 
 `say` 成功返回 `outputId`，表示内容已经持久化。Chief 用工具调用 ID 去重；同一调用的重试返回原 Output，不同调用可以为同一批输入创建多个 Output。Task / Routine 将结果状态与相应 Output 通过 `ResourceClient.commit` 一起提交，投递失败不会重新运行 Harness 或外部动作。
 
@@ -43,6 +43,8 @@ Output 的 `status` 由 Host 与 Channel 维护。Lark 持久记录 pending / se
 事务内写过的资源不能被后续写入的容量回收淘汰。内容非法、版本冲突或受保护资源超过容量都会整笔回滚。业务执行已经发生后的提交冲突只重试提交，不重新执行动作。Output 身份对应内容指纹，回收后在 Host 去重窗口内仍拒绝恢复同一 Output 的投递。
 
 Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Conversation 删除后仍可完成投递。进展卡片只展示和确认发往该聊天的 Output。
+
+Meego 评论发送使用独立的 Host 投递器。没有已确认的提供方幂等键时，发送中断或超时进入 uncertain；匹配目标、正文及持久投递记录的回读可以确认成功，自动重发停止。详情见 [Meego](connector/meego.md)。
 
 ## 关联、上下文与容量
 

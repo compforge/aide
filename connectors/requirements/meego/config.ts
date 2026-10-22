@@ -9,6 +9,7 @@ export interface MeegoRequirementConfig {
   readonly profile?: string;
   readonly categories: readonly string[];
   readonly assigneeField?: string;
+  readonly me?: { readonly userKey: string };
 }
 
 function object(
@@ -76,7 +77,7 @@ export function loadMeegoRequirementConfigs(
       rawRequirement,
     );
     if (requirement.provider !== "meego") continue;
-    if (Object.keys(requirement).some((key) => !["provider", "projectKey", "profile", "categories", "assigneeField"].includes(key))) {
+    if (Object.keys(requirement).some((key) => !["provider", "projectKey", "profile", "categories", "assigneeField", "me"].includes(key))) {
       throw new Error(`Invalid Meego connector fields: ${source}`);
     }
     const projectKey = commandIdentifier(
@@ -95,7 +96,10 @@ export function loadMeegoRequirementConfigs(
         category,
       )
     );
+    const me = requirement.me === undefined ? undefined : object("Meego me", requirement.me);
+    if (me && Object.keys(me).some((key) => key !== "userKey")) throw new Error("Invalid Meego me fields");
     result.push(Object.freeze({
+      ...(me ? { me: { userKey: commandIdentifier("Meego me.userKey", nonEmptyString("Meego me.userKey", me.userKey)) } } : {}),
       source,
       provider: "meego",
       projectKey,
