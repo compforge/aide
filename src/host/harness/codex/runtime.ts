@@ -9,13 +9,13 @@ import type {
   HarnessEventSink,
   ModelOption,
   NativeEventSink,
-  OpenInteraction,
+  OpenApproval,
 } from "../adapter.ts";
 import type { JsonRpcPeer } from "./jsonrpc.ts";
 import type { MessageReplies } from "../message-replies.ts";
 
 export interface CodexAdapterOptions {
-  openInteraction: OpenInteraction;
+  openApproval: OpenApproval;
   log?: LogSink;
   nativeEvent?: NativeEventSink;
   /** HarnessTarget 固定环境；同名项覆盖每次 open 传入的动态环境。 */

@@ -8,7 +8,7 @@ export const MAX_VERB_TIMEOUT_MS = 2_147_483_647 as const;
 
 /**
  * @spec Every Plugin verb has exactly four terminal outcomes: success with a business value, explicit user dismissal, deadline timeout, or execution failure.
- * @rule Treat deliberate negative answers as successful business values; reserve dismissed for Esc/close and failure for infrastructure or execution errors.
+ * @rule Cancellation is dismissed; a deadline is timeout. Neither proves that external effects were undone.
  */
 export type VerbResult<T> =
   | { readonly state: "success"; readonly value: T }
@@ -33,54 +33,7 @@ export interface SayInput {
 }
 export type SayResult = VerbResult<{ readonly outputId: string }>;
 
-export interface AskChoice<TValue extends string = string> {
-  /** Stable domain value returned when the user selects this choice. */
-  readonly value: TValue;
-  readonly label: string;
-  readonly description?: string;
-}
-
-interface AskBaseInput extends VerbInput {
-  readonly title: string;
-  readonly prompt: string;
-}
-
-export interface ChoiceAskInput<TValue extends string = string>
-  extends AskBaseInput {
-  readonly choices: readonly AskChoice<TValue>[];
-  readonly allowOther?: false;
-}
-
-export interface FreeTextAskInput extends AskBaseInput {
-  /** Optional suggested values; the user may still answer with other non-empty text. */
-  readonly choices?: readonly AskChoice[];
-  readonly allowOther: true;
-}
-
-/**
- * @spec Closed-choice asks preserve their choice value union, while any ask that permits free text returns string because the answer may be outside those choices.
- * @rule Keep allowOther as the type discriminant; allowOther:true must never expose a choice-only result type.
- */
-export type AskInput<TValue extends string = string> =
-  | ChoiceAskInput<TValue>
-  | FreeTextAskInput;
-
-export type AskValue<TInput extends AskInput> =
-  TInput extends ChoiceAskInput<infer TValue> ? TValue : string;
-
-export type AskResult<TValue extends string = string> = VerbResult<TValue>;
-
-export interface ConfirmInput extends VerbInput {
-  readonly title: string;
-  readonly prompt: string;
-  readonly confirmLabel?: string;
-  readonly declineLabel?: string;
-}
-
-export type ConfirmValue = "accepted" | "declined";
-export type ConfirmResult = VerbResult<ConfirmValue>;
-
-/** A Plugin request that gates and creates a Core-owned HarnessInvocation. */
+/** A Plugin request that creates a Core-owned HarnessInvocation. */
 export interface HarnessInvocationInput extends VerbInput {
   readonly title: string;
   readonly prompt: string;
@@ -94,40 +47,25 @@ export interface HarnessInvocationInput extends VerbInput {
   readonly harnessTargetId?: string;
 }
 
-export interface DraftInput extends VerbInput {
-  readonly title: string;
-  readonly prompt: string;
-  /** Omit to use the host's selected HarnessTarget on submission. */
-  readonly harnessTargetId?: string;
-}
-
 export interface CompletedHarnessValue {
   readonly outcome: "completed";
   readonly laneId: string;
   readonly turn: TurnSummary;
 }
 
-export type HarnessValue =
-  | { readonly outcome: "declined" }
-  | CompletedHarnessValue;
+export type HarnessValue = CompletedHarnessValue;
 
 export type HarnessResult = VerbResult<HarnessValue>;
-export type DraftResult = VerbResult<CompletedHarnessValue>;
 
 /**
- * @spec Controller verbs suspend the same live Plugin execution until a terminal result; ask/confirm persist a Core-owned Interaction; Aide never re-enqueues a Resource merely to deliver that result.
+ * @spec Controller verbs suspend the same live Plugin execution until a terminal result; Aide never re-enqueues a Resource merely to deliver that result.
  * @rule Correlate verb continuation with the Core-issued execution identity, never with Resource identity or a caller-provided key; a crashed execution fails instead of replaying its call stack.
- * @rule Waiting verbs require one total timeout; say only persists a message without waiting for delivery; draft and harness deadlines cover their Interaction gate and the resulting HarnessInvocation through terminal Turn.
+ * @rule Waiting verbs require one total timeout; say only persists a message without waiting for delivery; harness deadlines cover the HarnessInvocation through terminal Turn.
  * @see {@link docs/plugin.md}
  */
 export interface PluginVerbs {
   say(input: SayInput): Promise<SayResult>;
   connectors(options: { timeoutMs: number }): ConnectorClient;
-  ask<const TInput extends AskInput>(
-    input: TInput,
-  ): Promise<AskResult<AskValue<TInput>>>;
-  confirm(input: ConfirmInput): Promise<ConfirmResult>;
-  draft(input: DraftInput): Promise<DraftResult>;
   harness(input: HarnessInvocationInput): Promise<HarnessResult>;
 }
 

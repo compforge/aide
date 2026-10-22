@@ -6,7 +6,7 @@ import { conversationView } from "./view.ts";
 
 export interface LarkProgress {
   id: string;
-  phase: "queued" | "running" | "waiting" | "done" | "failed";
+  phase: "queued" | "running" | "done" | "failed";
   think: string;
   content: string;
   process?: ReturnType<typeof processPreview>;
@@ -26,7 +26,7 @@ export function larkProgress(aide: ChannelService, conversationId: string): Lark
   const inputs = aide.findConversation(conversationId)?.conversations.inputs(conversationId) ?? [];
   const seen = new Set<string>();
   return inputs.filter((input) => {
-    if (input.spec.origin !== "channel" || input.spec.replyTo) return false;
+    if (input.spec.origin !== "channel") return false;
     const group = view.blocks.find((b) => b.inputId === input.metadata.name)?.group_id ?? input.metadata.name;
     if (seen.has(group)) return false;
     seen.add(group); return true;
@@ -42,11 +42,6 @@ export function larkProgress(aide: ChannelService, conversationId: string): Lark
     const address = aide.findConversation(conversationId)?.conversations.resource(conversationId)?.spec.address;
     const addressed = channelOutputs(aide).filter((o) => address && sameAddress(o.target, address));
     const responses = addressed.filter((m) => ids.has(m.id));
-    if (phase === "waiting") {
-      const question = aide.questions().find((item) => item.conversationId === conversationId && item.request.status === "pending");
-      const message = question && addressed.find((item) => item.id === question.request.messageId);
-      if (message) responses.push(message);
-    }
     const text = responses.map((message) => message.text).join("\n\n");
     const think = blocks.filter((block) => block.type === "thought" || block.type === "tool")
       .map((block) => block.type === "tool" ? `工具：${block.content} · ${block.status ?? "执行中"}` : block.content).join("\n\n");
@@ -92,7 +87,7 @@ export function cardPreviews(view: LarkProgress) {
     thought_preview: { text: { tag: "plain_text", content: live ? `思考：${process.thought}` : `过程：${process.summary}`, lines: 1 } },
     tool_preview: { text: { tag: "plain_text", content: live ? `工具：${process.tool}` : "", lines: 1 } },
     answer_preview: { text: { tag: "plain_text", content: `回答：${view.liveAnswer ?? answerPreview(cardContent(view).trim(), view.phase)}`,
-      lines: view.phase === "waiting" || view.phase === "failed" ? 1000 : 3 } },
+      lines: view.phase === "failed" ? 1000 : 3 } },
   };
 }
 
@@ -104,7 +99,7 @@ function cardPanel(title: string, elements: unknown[], expanded: boolean) {
 }
 
 export function cardContent(view: LarkProgress): string {
-  return (view.content || (view.phase === "failed" ? "这次处理已中断，请核对后重新交办。" : view.phase === "waiting" ? "等待你回答。" : " "))
+  return (view.content || (view.phase === "failed" ? "这次处理已中断，请核对后重新交办。" : " "))
     + (view.overflow ? "\n\n（内容较长，完整回复见后续消息。）" : "");
 }
 

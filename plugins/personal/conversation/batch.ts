@@ -8,7 +8,7 @@ export interface Batch {
   context: { prompt: string; history: string; responseRequired: boolean };
   createdAt: string;
   timerAt?: string;
-  phase: "queued" | "running" | "waiting" | "compacting" | "done" | "failed" | "interrupted";
+  phase: "queued" | "running" | "compacting" | "done" | "failed" | "interrupted";
   executionId?: string;
   deadline?: string;
   cancelRequested?: boolean;
@@ -20,4 +20,4 @@ export interface Batch {
   /** Pure summarization can resume at this boundary; action executions are never blindly replayed. */
   compaction?: { offset: number; text: string };
 }
-export const activeBatch = (batch?: Batch | null) => !!batch && ["queued", "running", "waiting", "compacting"].includes(batch.phase);
+export const activeBatch = (batch?: Batch | null) => !!batch && ["queued", "running", "compacting"].includes(batch.phase);

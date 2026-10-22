@@ -32,7 +32,7 @@ test("Lark Connector pins user identity, maps UTC compact rows, and preserves si
   await client.messages.search({ ...query, chatType: "p2p" });
   assert.ok(!commands[3]!.includes("--is-at-me"));
   assert.ok(commands[3]!.includes("p2p"));
-  const tools = chiefTools(client, async () => {}, () => {});
+  const tools = chiefTools(client, () => {});
   await tools.find((tool) => tool.name === "read_chat_messages")!.execute("read", { ...query, chatId: "oc_chat" }, undefined, undefined, {} as never);
   await tools.find((tool) => tool.name === "read_thread_messages")!.execute("read", { threadId: "omt_thread" }, undefined, undefined, {} as never);
   assert.ok(commands.some((args) => args.includes("+chat-messages-list")));

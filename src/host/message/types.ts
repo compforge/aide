@@ -1,5 +1,5 @@
 import type { AgentMessagePhase, ContentBlock } from "../event/index.ts";
-import type { InteractionAnswer, InteractionCancellationReason, InteractionDraft } from "../interaction/types.ts";
+import type { ApprovalAnswer, ApprovalCancellationReason, ApprovalDraft } from "../approval/types.ts";
 
 import type { ActorRef } from "@compforge/aide-plugin";
 export type { ActorKind, ActorRef } from "@compforge/aide-plugin";
@@ -36,11 +36,11 @@ export interface Output extends ContentMessage {
 export interface InputRequest extends MessageBase {
   kind: "input_request";
   target: ActorRef;
-  request: InteractionDraft;
+  request: ApprovalDraft;
   status: "pending" | "answered" | "cancelled";
   expiresAt?: string;
   responseMessageId?: string;
-  cancellation?: { reason: InteractionCancellationReason; detail?: string };
+  cancellation?: { reason: ApprovalCancellationReason; detail?: string };
 }
 
 export interface InputResponse extends MessageBase {
@@ -48,9 +48,9 @@ export interface InputResponse extends MessageBase {
   target: ActorRef;
   /** Exactly one request; a generic reply cannot authorize or settle it. */
   replyToMessageIds: readonly [string];
-  answer: InteractionAnswer;
+  answer: ApprovalAnswer;
 }
 
-/** Interaction is a family of messages, not a third durable identity. */
-export type Interaction = InputRequest | InputResponse;
-export type Message = Input | Output | Interaction;
+/** Native approvals reuse request/response Message identity. */
+export type Approval = InputRequest | InputResponse;
+export type Message = Input | Output | Approval;

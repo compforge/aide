@@ -205,19 +205,17 @@ plugins:
     conversation:
       batchSize: 10
       maxWaitSeconds: 60
-      maxPending: 100
       contextChars: 48000
       summaryChars: 4000
 ```
 
 - `immediate` Input 优先处理；当前批次运行时请求中断，确认停止后带上未完成事项创建新 Batch。Channel 默认 immediate，Source 默认 deferred。紧迫性不代表执行授权或必须外发消息。
 - deferred Input 满 `batchSize`，或最早待处理输入等待达到 `maxWaitSeconds`，即触发一轮。Conversation 自身 trigger 到期也触发，即使没有新 Input。
-- `maxPending` 限制普通待处理队列；另预留 1 个 immediate 名额，避免 deferred 输入占满后用户无法恢复会话。总待处理数最多为 `maxPending + 1`。超限追加失败、上游保留重试状态；问答响应直接消费，不占待处理名额。失败的批次不会自动重放。
+- Conversation 不设待处理 ID 数量上限，也不预留 immediate 名额。Channel / Source 共用幂等接收入口；Host Resource 容量仍限制存储总量，受引用保护的 Input 不会被淘汰。失败的批次不会自动重放。
 - 近期材料由已完成 Batch 的有界结果上下文承接，没有额外的近期 Input ID 窗口。下一批继承后替换旧 Batch；压缩失败保留原文和进度，不确认消费。
 - `contextChars` 限制应用组装的输入/摘要材料，不是模型 token 窗口；单条大输入先给预览，Chief 可用 `read_input` 分页读取。`summaryChars` 限制持久摘要大小。
 
-字段补齐默认值后还需满足 `batchSize <= maxPending`、`summaryChars < contextChars / 2`。
-例如将 `maxPending` 改为 5 时也需将 `batchSize` 调到 5 或更小；将 `contextChars` 改为 4096 时可配 `summaryChars: 1000`。
+字段补齐默认值后还需满足 `summaryChars < contextChars / 2`。例如将 `contextChars` 改为 4096 时可配 `summaryChars: 1000`。
 超长历史记录分段生成摘要并持久保存进度；整条记录总结完成后才释放原 Input 引用，不直接截断后遗忘。
 
 ## Resource 容量

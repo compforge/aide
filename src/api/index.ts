@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { Logger } from "pino";
 import type { WebService } from "./service.ts";
-import { validInputResult } from "../host/interaction/answer.ts";
+import { validInputResult } from "../host/approval/answer.ts";
 import { IncomingSchema } from "../channel/message.ts";
 import { conversationList } from "../channel/view.ts";
 import { streamConversation } from "./stream.ts";
@@ -27,13 +27,12 @@ const DeleteWorkSchema = z.object({ id: z.string().min(1), conversationId: z.str
   revision: z.number().int().positive(),
 }).strict();
 
-const InteractionResponseSchema = z.object({
+const ApprovalResponseSchema = z.object({
   messageId: z.string().min(1),
   result: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("hook_trust"), outcome: z.enum(["trusted", "skipped"]) }),
     z.object({ kind: z.literal("permission"), outcome: z.literal("selected"), optionId: z.string() }),
     z.object({ kind: z.literal("cancelled"), reason: z.literal("user") }),
-    z.object({ kind: z.literal("question"), outcome: z.literal("answered"), answers: z.record(z.string(), z.array(z.string().min(1))) }),
   ]),
 });
 
@@ -133,24 +132,23 @@ export function httpChannel(aide: WebService, log: Logger) {
         }
         return;
       }
-      // Unscoped interactions remain in the local inbox; scoped questions follow their conversation.
-      if (request.method === "GET" && url.pathname === "/interactions") {
-        json(response, 200, aide.sessions().flatMap((scope) => [...scope.core.projection.interactions.values()])
-          .filter((item) => !url.searchParams.has("conversationId") || !item.pluginContext?.conversationId || item.pluginContext.conversationId === url.searchParams.get("conversationId"))
+      // Native permissions and Hook trust are independent of conversation messages.
+      if (request.method === "GET" && url.pathname === "/approvals") {
+        json(response, 200, aide.sessions().flatMap((scope) => [...scope.core.projection.approvals.values()])
           .map((item) => item.request).filter((item) => item.status === "pending"));
-      } else if (request.method === "POST" && url.pathname === "/interactions") {
-        const { messageId, result } = InteractionResponseSchema.parse(await body(request));
-        const core = aide.sessions().find((scope) => scope.core.projection.interactions.has(messageId))?.core;
-        const pending = core?.projection.interactions.get(messageId)?.request;
+      } else if (request.method === "POST" && url.pathname === "/approvals") {
+        const { messageId, result } = ApprovalResponseSchema.parse(await body(request));
+        const core = aide.sessions().find((scope) => scope.core.projection.approvals.has(messageId))?.core;
+        const pending = core?.projection.approvals.get(messageId)?.request;
         if (!core || !pending || pending.status !== "pending") {
-          json(response, 409, { error: "This interaction is no longer pending" }); return;
+          json(response, 409, { error: "This approval is no longer pending" }); return;
         }
         if (!validInputResult(pending.request, result)) {
-          json(response, 400, { error: "Answer does not match the pending interaction" }); return;
+          json(response, 400, { error: "Answer does not match the pending approval" }); return;
         }
-        // @spec Channel answers settle Aide's original Interaction; no separate approval state.
-        const receipt = await core.resolveInteraction({ kind: "interaction_response", messageId }, async () => result);
-        log.info({ messageId, kind: result.kind, completed: receipt.result }, "Channel interaction response");
+        // @spec Only an explicit, validated native approval response settles its pending request.
+        const receipt = await core.resolveApproval({ kind: "approval_response", messageId }, async () => result);
+        log.info({ messageId, kind: result.kind, completed: receipt.result }, "Native approval response");
         json(response, receipt.result ? 200 : 409, { completed: receipt.result });
       } else if (request.method === "POST" && url.pathname === "/messages") {
         const input = IncomingSchema.omit({ channelId: true, observation: true, source: true }).parse(await body(request));

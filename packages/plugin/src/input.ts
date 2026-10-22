@@ -32,7 +32,6 @@ export interface InputSpec {
   sender?: ResourceRef;
   text: string;
   timezone?: string;
-  replyTo?: string;
   observation?: Record<string, unknown>;
 }
 /** Routing state belongs to the consuming plugin; the Core persists it without interpreting destinations. */

@@ -8,7 +8,7 @@ import type { ChannelService } from "./service.ts";
 import { PROTOCOL_VERSION, type BaseBlock, type ModelMeta, type UIModel } from "@compforge/agentue/ui";
 
 export interface ConversationBlock extends BaseBlock {
-  type: "summary" | "input" | "message" | "question" | "execution" | "thought" | "text" | "tool";
+  type: "summary" | "input" | "message" | "execution" | "thought" | "text" | "tool";
   content: string;
   role?: "user" | "aide";
   at?: string;
@@ -47,10 +47,9 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   if (!scope) return { version: PROTOCOL_VERSION, biz: "aide.conversation", blocks: [], meta: { conversation_id: conversationId, activity: null } };
   const state = scope.core.projection;
   const runs = scope.conversations.runs(conversationId);
-  const active = runs.find((input) => !input.input && (input.status.phase === "running" || input.status.phase === "waiting"));
+  const active = runs.find((input) => !input.input && input.status.phase === "running");
   const queued = runs.filter((input) => !input.status.phase).length;
   const quietRuns = new Set(runs.filter((input) => input.status.quietReason).map((input) => input.id));
-  const timerRuns = new Map(runs.filter((run) => !run.input).map((run) => [run.status.executionId, run.id]));
   const runId = (item: { inputId?: string; executionId: string }) => item.executionId;
   const resource = scope.conversations.resource(conversationId);
   const turnInputs = new Map([...state.harnessInputs.values()].map((input) => [input.turnId, input]));
@@ -70,21 +69,14 @@ export function conversationView(aide: ChannelService, conversationId: string): 
     .filter((message) => message.role === "aide").map((message) => [message.id, input.id] as const)));
   for (const message of channelOutputs(aide)) if (message.executionId) messageRuns.set(message.id, message.executionId);
   const inputExecutions = new Map(invocations.flatMap((i) => (i.inputIds ?? []).map((id) => [id, i.executionId] as const)));
-  const questionStatuses = new Map<string, "pending" | "answered" | "cancelled">();
-  for (const interaction of state.interactions.values()) {
-    if (interaction.request.request.kind !== "question" || interaction.pluginContext?.conversationId !== conversationId) continue;
-    questionStatuses.set(interaction.request.messageId, interaction.request.status);
-    const id = runId(interaction.pluginContext);
-    if (id) messageRuns.set(interaction.request.messageId, id);
-  }
   const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.turnId))
     .map((input) => [input.turnId, input]));
   const summaries = new Map(state.turnSummaries.filter((turn) => relatedTurns.has(turn.turnId)).map((turn) => [turn.turnId, turn]));
   const executions = new Map<string, { header: ConversationBlock; blocks: ConversationBlock[] }>();
   const roots: ConversationBlock[] = channelOutputs(aide).filter((message) => resource && visibleOutput(message, resource))
-    .map((message) => ({ id: `message:${message.id}`, type: questionStatuses.has(message.id) ? "question" : "message", role: message.role, at: message.at, content: message.text, receivers: message.receivers, target: message.target,
+    .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, receivers: message.receivers, target: message.target,
       ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
-      ...(questionStatuses.has(message.id) ? { status: questionStatuses.get(message.id) } : {}) }));
+    }));
   if (resource?.status.batch?.result?.context) roots.push({ id: "conversation-summary", type: "summary", label: "历史摘要", icon: "📝",
     content: resource.status.batch!.result!.context!, at: resource.metadata.creationTimestamp });
   for (const run of runs) {

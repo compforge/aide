@@ -3,8 +3,8 @@ import type { CanUseTool, PermissionResult } from "@anthropic-ai/claude-agent-sd
 import { newId } from "../../event/ids.ts";
 import { MessageReplies } from "../message-replies.ts";
 import type { LogSink } from "../../logging.ts";
-import type { InteractionDraft, QuestionPrompt } from "../../interaction/types.ts";
-import type { HarnessEventSink, OpenInteraction } from "../adapter.ts";
+import type { ApprovalDraft } from "../../approval/types.ts";
+import type { HarnessEventSink, OpenApproval } from "../adapter.ts";
 import {
   claudeApprovalOptions,
   claudeDurableMessageDrafts,
@@ -27,7 +27,7 @@ import {
 } from "./runtime.ts";
 
 interface ClaudeEventHandlerOptions {
-  openInteraction: OpenInteraction;
+  openApproval: OpenApproval;
   log?: LogSink;
   publishSessionBinding(runtime: ClaudeRuntime, sessionId: string): void;
   finishTurn(
@@ -60,7 +60,7 @@ export class ClaudeEventHandler {
     input: Record<string, unknown>,
     meta: ClaudePermissionMeta,
   ): Promise<PermissionResult> {
-    if (toolName === "AskUserQuestion") return this.handleQuestion(turnId, input, meta.toolUseID);
+    if (toolName === "AskUserQuestion") return { behavior: "deny", message: "Interactive questions are unavailable. State the missing information in your result and end this turn." };
     if (toolName === "ExitPlanMode") {
       this.captureProposedPlan(rt, emit, turnId(), input, meta.toolUseID, { toolName, input, meta });
       return {
@@ -70,7 +70,7 @@ export class ClaudeEventHandler {
       };
     }
     const suggestions = meta.suggestions ?? [];
-    const interaction: InteractionDraft = {
+    const approval: ApprovalDraft = {
       kind: "permission",
       title: meta.title ?? claudeToolTitle(toolName, input),
       ...(meta.description ? { description: meta.description } : {}),
@@ -81,14 +81,14 @@ export class ClaudeEventHandler {
         suppressAlwaysAllowRule: meta.suppressAlwaysAllowRule,
       }),
     };
-    const result = await this.options.openInteraction(interaction, {
+    const result = await this.options.openApproval(approval, {
       turnId: turnId(),
       raw: { toolName, input, meta },
     });
     if (result.kind === "cancelled") {
       return { behavior: "deny", message: "turn interrupted before approval" };
     }
-    // result 按 interactionId 路由回来，kind 必配对 permission；意外不配一律保守拒绝。
+    // result 按请求 messageId 路由回来，kind 必配对 permission；意外不配一律保守拒绝。
     const optionId = result.kind === "permission" ? result.optionId : "";
     if (optionId === "allow") return { behavior: "allow", updatedInput: input };
     if (optionId === "allowAlways") {
@@ -97,54 +97,6 @@ export class ClaudeEventHandler {
       return { behavior: "allow", updatedInput: input, updatedPermissions: suggestions };
     }
     return { behavior: "deny", message: "denied by aide user" };
-  }
-
-  private async handleQuestion(
-    turnId: () => string,
-    input: Record<string, unknown>,
-    toolCallId?: string,
-  ): Promise<PermissionResult> {
-    const source = Array.isArray(input.questions) ? input.questions : [];
-    const questions: QuestionPrompt[] = source.map((value, index) => {
-      const question = (value ?? {}) as Record<string, unknown>;
-      return {
-        questionId: `q${index}`,
-        header: String(question.header ?? `Question ${index + 1}`),
-        question: String(question.question ?? ""),
-        choices: Array.isArray(question.options)
-          ? question.options.map((option) => {
-              const item = (option ?? {}) as Record<string, unknown>;
-              const label = String(item.label ?? "");
-              return {
-                value: label,
-                label,
-                description: String(item.description ?? ""),
-                ...(typeof item.preview === "string" ? { preview: item.preview } : {}),
-              };
-            })
-          : undefined,
-        multiSelect: question.multiSelect === true,
-        // Claude Code adds Other automatically for AskUserQuestion.
-        allowOther: true,
-      };
-    });
-    const interaction: InteractionDraft = {
-      kind: "question",
-      ...(toolCallId ? { toolCallId } : {}),
-      questions,
-    };
-    const result = await this.options.openInteraction(interaction, {
-      turnId: turnId(),
-      raw: input,
-    });
-    if (result.kind === "cancelled") {
-      return { behavior: "deny", message: "turn interrupted before answer" };
-    }
-    const decisionAnswers = result.kind === "question" ? result.answers : {};
-    const answers = Object.fromEntries(
-      questions.map((question) => [question.question, (decisionAnswers[question.questionId] ?? []).join(", ")]),
-    );
-    return { behavior: "allow", updatedInput: { ...input, answers } };
   }
 
   private captureProposedPlan(

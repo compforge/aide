@@ -8,7 +8,7 @@ Chief 使用独立的 `chief` Harness 身份，Agent 位于 `agents/chief/`；�
 
 ## Agent 与 Controller
 
-Chief Agent 拥有 Personal 提示词和工具，负责具体判断。Chief 的 Input Reconcile 负责话题归位；Conversation Reconcile 响应新 Input 与定时回顾，固定 Batch 上下文；Batch Reconcile 调用 Harness，交互工具直接等待用户答复。Task / Routine 的持久状态与 Reconcile 属于 Personal，Agent 通过工具访问，不能直接宣告资源完成。
+Chief Agent 拥有 Personal 提示词和工具，负责具体判断。Chief 的 Input Reconcile 负责话题归位；Conversation Reconcile 响应新 Input 与定时回顾，固定 Batch 上下文；Batch Reconcile 调用 Harness，say 保存沟通内容，用户答复进入后续 Batch。Task / Routine 的持久状态与 Reconcile 属于 Personal，Agent 通过工具访问，不能直接宣告资源完成。
 
 Personal 在所属 Session 内为每个 Conversation 绑定固定 Lane、Chief Target 和 WorkService，并提供问答与 Connector 工具。宿主装配使用 `chiefSession` 工厂；缺少绑定时创建 Chief Harness 会报错，不会降级为通用 Pi。
 
@@ -23,7 +23,7 @@ const adapter = createHarnessAdapter(
 Chief 的模型选择与能力包配置位于 `harnesses.chief`，完整来源、优先级和同步流程见 [配置](../configuration.md)。
 启动装配解析模型定义、认证来源和能力包，并将有效配置注入 `chiefSession`；Personal 只绑定业务工具。显式 model 覆盖 Pi 定义，缺省规则见配置文档。Task / Routine 按 `defaultHarness` 选择执行实现，使用对应的 Harness 配置。
 Chief 加载已同步的声明包中的 skills，以及内置 Hermes 扩展提供的记忆工具与自维护 skills；不继承用户或项目的自动扩展、skill 包发现。角色规则与 Work 工具仍由代码绑定。
-原生会话由 Pi SDK 存放在自己的默认目录，与通用 Pi 一样；Chief 角色通过 scope 区分，不靠另建 chief-sessions 目录区分。每个 Batch 在固定 Lane × Target 上创建新的原生上下文，显式注入上一批交接材料与本批输入；同批的 ask / confirm 返回后继续当前执行。原生恢复范围绑定 conversationId，不能把另一会话或通用 Pi 的会话文件当成当前上下文。
+原生会话由 Pi SDK 存放在自己的默认目录，与通用 Pi 一样；Chief 角色通过 scope 区分，不靠另建 chief-sessions 目录区分。每个 Batch 在固定 Lane × Target 上创建新的原生上下文，显式注入上一批交接材料与本批输入；需要用户信息时通过 say 提问并结束执行，后续 Input 进入新 Batch。原生恢复范围绑定 conversationId，不能把另一会话或通用 Pi 的会话文件当成当前上下文。
 
 ## 主动判断与沟通
 
@@ -32,7 +32,7 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 - **推进已有委托。** 在用户交付的目标和约定内继续处理，保持关联工作的身份与进度；发现条件变化时重新核对下一步。
 - **提出新机会。** 说明发现了什么、与用户有什么关系以及建议下一步做什么。记忆中的偏好和兴趣帮助判断相关性，不自动成为新的执行委托。
 - **告知进展。** 有值得知道的结果、变化或阻塞时使用普通回复，显式调用 say 工具，由 Controller 经 say verb 投递。相关的低紧迫性信息可以合并说明。
-- **请求决定。** 缺少必要信息时 ask，明确动作需要用户决定时 confirm；带上已查明的事实、选择与影响，让用户能够直接作出决定。
+- **请求决定。** 缺少必要信息或用户决定时用 say 提问并结束本批；带上已查明的事实、选择与影响，让用户能够直接作出决定。
 - **保持安静。** 没有新的依据或可推进事项时静默结束。不重复发送同一进展，也不反复提出尚无新依据或用户回应的建议。
 
 沟通应帮助用户了解结果或作出决定。可自行调查的信息先调查，已经明确交付的工作持续跟进，提问聚焦真正缺少的判断。质量以用户是否少催进度、少重复背景、少纠正操作衡量，具体场景见 [持续委托验收](../e2e.md#持续委托与主动沟通)。
@@ -46,7 +46,7 @@ Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 - Work 工具读取、创建、更新与删除绑定会话的 Task / Routine，具体契约见 [Personal](../plugin/personal.md)。
 - say 保存用户通知意图；模型 finalText 是内部处理总结。
 - read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。
-- ask / confirm 提出问题意图，Controller 在模型 Turn 结束后通过 Core Interaction 等待答复。
+- say 产生独立 Output；答复是新的 Input，不挂起 Harness 等待。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
 - dismiss_observation 保存忽略原因，让不值得通知的 Source 观察静默结束。
 

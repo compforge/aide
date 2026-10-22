@@ -49,7 +49,7 @@ export class HarnessBinding {
   readonly adapter: HarnessAdapter;
   ref?: HarnessSessionHandle;
   /**
-   * setup 阶段由哪个 Queue-driven Turn 触发。无显式 turnId 的 setup Interaction 由
+   * setup 阶段由哪个 Queue-driven Turn 触发。无显式 turnId 的 setup Approval 由
    * Controller 使用它归属到触发冷启动的 turn。
    */
   setupTurnId?: string;
@@ -84,7 +84,7 @@ export class HarnessBinding {
 
   /**
    * 必须在 Controller 把 binding 放入索引后调用：Adapter.open 期间可能同步打开
-   * Interaction，届时 Controller 需要先能按 HarnessTarget 找回本 binding。
+   * Approval，届时 Controller 需要先能按 HarnessTarget 找回本 binding。
    */
   start(): void {
     if (this.closing || this.starting || this.ref) return;

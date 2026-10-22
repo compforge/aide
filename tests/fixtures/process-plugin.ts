@@ -116,13 +116,8 @@ const plugin: PluginPackage = {
           });
           return;
         }
-        if (hook.subject.input.kind !== "prompt" || hook.subject.input.text !== "ask from hook") return;
-        await hook.verbs.ask({
-          timeoutMs: 1_000,
-          title: "Hook question",
-          prompt: "Continue from Hook?",
-          allowOther: true,
-        });
+        if (hook.subject.input.kind !== "prompt" || hook.subject.input.text !== "say from hook") return;
+        await hook.verbs.say({ text: "Continue from Hook?" });
       },
     });
     context.hooks.register({
@@ -130,12 +125,7 @@ const plugin: PluginPackage = {
       stage: "view.output",
       async run(hook) {
         if (hook.subject.kind !== "transcript") return;
-        await hook.verbs.ask({
-          timeoutMs: 1_000,
-          title: "Outbound Hook question",
-          prompt: "Continue outbound publication?",
-          allowOther: true,
-        });
+        await hook.verbs.say({ text: "Continue outbound publication?" });
       },
     });
     context.controllers.register<{ blockMs?: number }, Record<string, never>>({
@@ -152,12 +142,7 @@ const plugin: PluginPackage = {
         kind: "Turn",
       },
       async reconcile(ctx, turn) {
-        await ctx.verbs.ask({
-          timeoutMs: 1_000,
-          title: "Runner question",
-          prompt: `Review ${turn.metadata.name}?`,
-          allowOther: true,
-        });
+        await ctx.verbs.say({ text: `Review ${turn.metadata.name}?` });
       },
     });
   },

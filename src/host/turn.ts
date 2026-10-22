@@ -7,7 +7,7 @@ interface TurnBinding {
 }
 
 /**
- * Turn 是一次 Harness loop 的临时归属边界。Event、Attempt、Interaction 等对象
+ * Turn 是一次 Harness loop 的临时归属边界。Event、Attempt、Approval 等对象
  * 通过 turnId 归入同一轮；Turn 本身不执行、排队或投递工作。
  */
 export interface TurnRecord<TBinding extends TurnBinding> {

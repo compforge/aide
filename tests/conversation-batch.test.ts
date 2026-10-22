@@ -1,5 +1,4 @@
 import { fixtureIncoming } from "./address-fixture.ts";
-import { assertInputCapacity } from "../plugins/personal/conversation/input.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -123,18 +122,14 @@ test("Oversized facts are compacted in complete bounded fragments before consump
   assert.match(joined, /x{8000}TAIL_EVIDENCE/);
 });
 
-test("Failed Batch retains pending inputs, does not replay, and a full queue reserves one immediate recovery slot", async (t) => {
+test("Failed Batch retains pending inputs, does not replay, and an immediate Input resumes processing", async (t) => {
   let fail = true; let calls = 0;
-  const { aide, scope, submit } = await setup(t, async () => { calls++; if (fail) throw new Error("Unavailable"); return "Reviewed"; }, { batchSize: 1, maxPending: 2 }, true);
+  const { aide, scope, submit } = await setup(t, async () => { calls++; if (fail) throw new Error("Unavailable"); return "Reviewed"; }, { batchSize: 1 }, true);
   await submit("failed"); await aide.settled();
   await submit("deferred"); await aide.settled();
   assert.equal(calls, 1);
   const c = scope.conversations.resource("me")!;
   assert.equal(c.status.batch!.phase, "failed"); assert.deepEqual(c.status.pendingInputIds, ["failed", "deferred"]);
-  const immediate = { origin: "channel" as const, originId: "web", text: "recover" };
-  assertInputCapacity(c, immediate, 2);
-  assert.throws(() => assertInputCapacity({ ...c, status: { ...c.status, pendingInputIds: [...c.status.pendingInputIds, "reserved"] } }, immediate, 2), /capacity exhausted/);
-  assert.throws(() => assertInputCapacity(c, { ...immediate, attention: "deferred" }, 2), /capacity exhausted/);
   fail = false;
   await aide.receive(fixtureIncoming({ id: "recover", channelId: "web", sessionId: "me", text: "Verify and continue" }));
   await aide.settled();

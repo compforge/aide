@@ -4,4 +4,3 @@ export const chiefTarget = (conversationId: string) => `chief:${digest(conversat
 export { INPUT_TYPE } from "@compforge/aide-plugin";
 export type { InputSpec, InputStatus } from "@compforge/aide-plugin";
 export { CONVERSATION_TYPE } from "./conversation/model.ts";
-export type { ChiefQuestion } from "./conversation/model.ts";

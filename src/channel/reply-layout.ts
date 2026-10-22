@@ -23,7 +23,7 @@ export function replyText(content: string): string {
 }
 
 export const replyLabels: Record<string, string> = {
-  queued: "排队中", running: "正在处理", waiting: "等待你回答", done: "已完成", failed: "处理已中断",
+  queued: "排队中", running: "正在处理", done: "已完成", failed: "处理已中断",
 };
 export const toolLabels: Record<string, string> = {
   in_progress: "执行中", pending: "等待执行", completed: "已完成", failed: "失败", declined: "已拒绝",
@@ -47,7 +47,7 @@ export function processPreview(phase: string, blocks: readonly { type: string; c
 /** @why Lark clamps from the start, so live previews use a recent excerpt; full Markdown stays in the details. */
 export function answerPreview(content: string, phase: string): string {
   if (!content.trim()) return phase === "failed" ? "本次处理已中断，请核对后重新交办。"
-    : phase === "waiting" ? "等待你回答。" : phase === "done" ? "回复已完成" : "等待生成回答…";
+    : phase === "done" ? "回复已完成" : "等待生成回答…";
   const text = replyText(content);
   const points = Array.from(text);
   return (phase === "running" || phase === "queued") && points.length > 120 ? "…" + points.slice(-120).join("") : text;

@@ -52,6 +52,6 @@ Output 进入 Host 统一资源容量管理，配置键为 `aide.dev/Output`。p
 
 Host 注册 OutputPrinter，`describe` 返回完整正文、目标和投递信息，`summarize` 返回有界文本预览。ResourceClient 可以获取和列出 Output；插件不能直接修改其投递状态。
 
-Interaction 仍承载 ask / confirm 的问题与回答。Channel 可以把问题投影为交流条目，但该投影不伪造持久 Output。Input 路由、sessionId 与 Batch 调度策略沿用各自契约。
+问题也是普通 Output；用户答复是新的 Input，由后续 Batch 理解。业务 ask / confirm / draft、Interaction 和 Input.replyTo 已移除。原生工具权限与 Hook 信任使用独立的 Approval，不经过业务消息关联。Input 路由、sessionId 与 Batch 调度策略沿用各自契约。
 
 验证场景见 `tests/address.test.ts`、`tests/output.test.ts`、`tests/conversation-delete.test.ts` 与 Lark / Web 的投递、进展测试。

@@ -3,7 +3,7 @@ import type { ExecutionAssociation } from "@compforge/aide-plugin";
 // tool_call_update upsert），wire 协议不必是 ACP——adapter 负责把各家原生协议归一到这里。
 // aide 自有扩展事件用 _aide_ 前缀；公共归一契约见 docs/harness/README.md。
 
-import type { InputRequestCreated, InputRequestCancelled } from "./interaction.ts";
+import type { InputRequestCreated, InputRequestCancelled } from "./approval.ts";
 import type { InputResponse } from "../message/types.ts";
 import type { HarnessDeliveryAttemptUpdate } from "../controller/attempt.ts";
 import type { HarnessInputUpdate } from "../harness/input.ts";
@@ -264,7 +264,7 @@ export interface HarnessTaskUpdate {
 
 /**
  * 自动审批（auto-review）回执：reviewer 替用户对某操作作出的决策，供诚实留痕（见
- * docs/approval-lifecycle.md §3）。与 Interaction 的交互待决流正交——
+ * docs/approval-lifecycle.md §3）。与原生 Approval 的待决流正交——
  * auto-review 开启时审批卡不触发，aide 只观测这条回执。归一自 codex
  * `item/autoApprovalReview/*`（**UNSTABLE**）：字段全部按可选容忍，原始形状保留在 envelope.raw。
  *
@@ -425,11 +425,9 @@ export interface TurnSummary {
 export interface HarnessInvocationRecorded extends ExecutionAssociation {
   invocationId: string;
   executionId: string;
-  verb: "draft" | "harness";
+  verb: "harness";
   title: string;
   prompt: string;
-  /** User-edited Input captured by a preceding suggested-input Interaction. */
-  blocks?: PromptBlock[];
   /** Existing Lane used as the execution Lane or as the parent of a new Lane. */
   laneId: string;
   newLane: boolean;
@@ -499,9 +497,9 @@ export type EventPayloadMap = {
   proposed_plan: ProposedPlan;
   proposed_plan_implementation_started: ProposedPlanImplementationStarted;
   task_update: HarnessTaskUpdate;
-  "interaction.requested": InputRequestCreated;
-  "interaction.answered": InputResponse;
-  "interaction.cancelled": InputRequestCancelled;
+  "approval.requested": InputRequestCreated;
+  "approval.answered": InputResponse;
+  "approval.cancelled": InputRequestCancelled;
   approval_review_update: ApprovalReviewUpdate;
   usage_update: UsageUpdate;
   available_commands_update: AvailableCommandsUpdate;

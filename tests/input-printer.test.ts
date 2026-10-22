@@ -19,11 +19,11 @@ test("Input descriptions preserve original text and optional opaque evidence wit
   assert.doesNotMatch(described, /Observation:|Session:|Timezone:|Reply to:|Source resource:/);
   const evidence = { provider: "new-provider", message: { content: "@me 原文" }, context: { messages: ["之前的消息"] } };
   const source = input({ origin: "source", originId: "unknown.source", sessionId: "topic-1", timezone: "Asia/Shanghai",
-    replyTo: "previous", originRef: { apiVersion: "example.dev/v1", kind: "Source", name: "mine", namespace: "v1" }, observation: evidence });
+    originRef: { apiVersion: "example.dev/v1", kind: "Source", name: "mine", namespace: "v1" }, observation: evidence });
   const before = structuredClone(source);
   const description = inputPrinter.describe(source);
   assert.match(description, /Origin: source\/unknown.source/);
-  assert.match(description, /Session: topic-1\nTimezone: Asia\/Shanghai\nReply to: previous/);
+  assert.match(description, /Session: topic-1\nTimezone: Asia\/Shanghai/);
   assert.ok(description.includes(JSON.stringify(source.spec.originRef)));
   assert.deepEqual(JSON.parse(description.split("\n\nObservation:\n")[1]!), evidence);
   assert.deepEqual(source, before);

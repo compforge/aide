@@ -1,13 +1,6 @@
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { dispatchConnector, emptyConnectors } from "../../connector-client.ts";
 import { newId } from "../event/ids.ts";
-import { MAIN_LANE_ID } from "@compforge/aide-plugin";
-import type { PromptBlock } from "../event/index.ts";
-import type { InteractionResult } from "../interaction/types.ts";
-import {
-  ReconcileInteractionStore,
-  type ReconcileInteractionStoreOptions,
-} from "../interaction/reconcile.ts";
 import {
   type LogSink,
   logError,
@@ -47,8 +40,6 @@ export interface VerbOptions {
   connectors?: ConnectorClient;
   snapshot: () => ReconcileSnapshot;
   selectedHarnessTargetId?: () => string | undefined;
-  harnessInvocationGate?:
-    ReconcileInteractionStoreOptions["harnessInvocationGate"];
   enqueueHarnessInvocation?(
     request: ScheduledHarnessInvocation,
   ): Promise<unknown> | void;
@@ -57,7 +48,7 @@ export interface VerbOptions {
   ): "queued" | "running" | undefined;
   now?: () => Date;
   log?: LogSink;
-  /** Daemon-owned Human Inbox path used by namespace-scoped Plugin Workers. */
+  /** Optional Host executor for Harness calls from namespace-scoped Plugin Workers. */
   performVerb?(context: ExecutionScope, request: VerbRequest): Promise<VerbResponse>;
 }
 
@@ -70,7 +61,6 @@ export class Verb {
   private readonly capacity: ReconcileCapacity;
   private readonly snapshot: () => ReconcileSnapshot;
   private readonly selectedHarnessTargetId?: () => string | undefined;
-  private readonly interactions?: ReconcileInteractionStore;
   private readonly harnessInvocations?: HarnessInvocationStore;
   private readonly enqueueHarnessInvocation:
     VerbOptions["enqueueHarnessInvocation"];
@@ -101,10 +91,6 @@ export class Verb {
     this.log = options.log;
     this.performVerb = options.performVerb;
     if (options.session) {
-      this.interactions = new ReconcileInteractionStore(options.session, {
-        now: this.now,
-        harnessInvocationGate: options.harnessInvocationGate,
-      });
       this.harnessInvocations = new HarnessInvocationStore(options.session);
     }
   }
@@ -119,7 +105,6 @@ export class Verb {
     const execution = this.executions.get(executionId);
     if (!execution) return;
     execution.interrupted = true;
-    this.interactions?.failExecution(executionId, "Execution interrupted");
     for (const invocation of this.listHarnessInvocations()) {
       if (invocation.executionId === executionId) this.cancelHarnessInvocation(invocation.invocationId);
     }
@@ -127,13 +112,6 @@ export class Verb {
 
   listHarnessInvocations() {
     return this.harnessInvocations?.list() ?? [];
-  }
-
-  completeInteraction(
-    interactionId: string,
-    result: InteractionResult,
-  ): boolean {
-    return this.interactions?.complete(interactionId, result) ?? false;
   }
 
   cancelHarnessInvocation(identifier?: string): boolean {
@@ -234,16 +212,12 @@ export class Verb {
 
   failOrphans(): void {
     for (const id of this.connectorCalls.keys()) this.settleConnector(id, "interrupted", "Core restarted; external outcome is unknown");
-    this.interactions?.failOrphans(
-      "Plugin execution was interrupted by Core restart",
-    );
     this.harnessInvocations?.failOrphans(
       "Plugin execution was interrupted by Core restart",
     );
   }
 
   close(): void {
-    this.interactions?.close();
     this.harnessInvocations?.close();
   }
 
@@ -290,17 +264,6 @@ export class Verb {
       } finally { if (timer) clearTimeout(timer); }
     }
     if (this.performVerb) return await this.performVerb(context, request);
-    if (!this.interactions) {
-      throw new Error(
-        `Plugin verb ${request.verb}() requires a SessionHandle`,
-      );
-    }
-    if (request.verb === "ask") {
-      return await this.interactions.ask(context, request.input);
-    }
-    if (request.verb === "confirm") {
-      return await this.interactions.confirm(context, request.input);
-    }
     if (!this.harnessInvocations || !this.enqueueHarnessInvocation) {
       throw new Error(
         `Plugin verb ${request.verb}() requires HarnessInvocation support`,
@@ -308,42 +271,8 @@ export class Verb {
     }
 
     const deadline = this.timestamp() + request.input.timeoutMs;
-    let harnessTargetId: string;
-    let draftBlocks: readonly PromptBlock[] | undefined;
-    if (request.verb === "draft") {
-      const interaction = await this.interactions.draft(
-        context,
-        request.input,
-      );
-      if (interaction.state !== "success") return interaction;
-      draftBlocks = interaction.value.blocks;
-      const target = request.input.harnessTargetId ??
-        this.selectedHarnessTargetId?.();
-      if (!target) {
-        throw new Error(
-          "draft() requires a HarnessTarget selection on submission",
-        );
-      }
-      harnessTargetId = target;
-    } else {
-      const target = request.input.harnessTargetId ??
-        this.selectedHarnessTargetId?.();
-      if (!target) {
-        throw new Error("harness() requires a HarnessTarget selection");
-      }
-      harnessTargetId = target;
-      const interaction = await this.interactions.harness(
-        context,
-        { ...request.input, harnessTargetId },
-      );
-      if (interaction.state !== "success") return interaction;
-      if (interaction.value === "declined") {
-        return Object.freeze({
-          state: "success",
-          value: { outcome: "declined" as const },
-        });
-      }
-    }
+    const harnessTargetId = request.input.harnessTargetId ?? this.selectedHarnessTargetId?.();
+    if (!harnessTargetId) throw new Error("harness() requires a HarnessTarget selection");
     if (
       !this.snapshot().harnessTargets.some(
         (target) => target.id === harnessTargetId,
@@ -360,13 +289,10 @@ export class Verb {
         verb: request.verb,
         title: request.input.title,
         prompt: request.input.prompt,
-        ...(draftBlocks === undefined ? {} : { blocks: draftBlocks }),
-        laneId: request.verb === "draft" ? MAIN_LANE_ID : request.input.laneId,
-        newLane: request.verb === "draft"
-          ? false
-          : (request.input.newLane ?? false),
+        laneId: request.input.laneId,
+        newLane: request.input.newLane ?? false,
         harnessTargetId,
-        freshContext: request.verb === "harness" ? request.input.freshContext : undefined,
+        freshContext: request.input.freshContext,
       },
     });
     if (this.executions.get(context.executionId)?.interrupted) this.cancelHarnessInvocation(snapshot.invocationId);
@@ -472,7 +398,6 @@ export class Verb {
   }
 
   private failExecution(executionId: string, error: string): void {
-    this.interactions?.failExecution(executionId, error);
     for (
       const invocationId of
         this.harnessInvocations?.failExecution(executionId, error) ?? []

@@ -2,7 +2,6 @@ import { fixtureAddress } from "./address-fixture.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import type { Address } from "@compforge/aide-plugin";
 import { resourceHome } from "../src/host/resource/storage.ts";
-import { randomUUID } from "node:crypto";
 import { InputStore } from "../src/host/input/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
@@ -50,14 +49,4 @@ export async function seedInput(store: PersonalConversations, id: string, spec: 
   const fact = store.inputStore.get(id)!;
   store.inputStore.update(fact, { deliveries: [...new Set([...fact.status.deliveries ?? [], c.metadata.uid])], routing: fact.status.routing ?? { phase: "done", reason: "Fixture destination" } });
   return store.input(id, conversationId)!;
-}
-
-export async function confirmInBatch(scope: import("../plugins/personal/aide.ts").Personal, conversationId: string, prompt: string) {
-  const c = scope.conversations.resource(conversationId)!;
-  const batch = c.status.batch!;
-  const { updateBatch } = await import("../plugins/personal/conversation/state.ts");
-  await updateBatch(scope.plugins.resourceClient("personal"), c, batch.id, () => ({ phase: "waiting", communicated: true }));
-  const result = await scope.plugins.executionVerbs(batch.executionId!, conversationId).confirm({ title: prompt, prompt, timeoutMs: 10000 });
-  await updateBatch(scope.plugins.resourceClient("personal"), c, batch.id, () => ({ phase: "running" }));
-  return result;
 }

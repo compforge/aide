@@ -28,7 +28,6 @@ import type {
   TurnSummary,
   UsageUpdate,
 } from "../event/index.ts";
-import type { ReconcileInteractionContext } from "../interaction/types.ts";
 import {
   normalizeHarnessInputStatus,
   type HarnessInputSource,
@@ -40,7 +39,7 @@ import type { InputState, OutputState, InputRequestState, InputResponseState } f
 import { actorOf, HUMAN_ACTOR } from "../message/actor.ts";
 import { inputMessage, inputRequestMessage, inputResponseMessage } from "../message/project.ts";
 import { getMessage } from "../message/query.ts";
-import { canResolveRequest } from "../interaction/resolution.ts";
+import { canResolveRequest } from "../approval/resolution.ts";
 
 /** Content-specific index; getMessage also resolves requests and responses. */
 export type MessageState = InputState | OutputState;
@@ -175,10 +174,9 @@ export interface ActiveTurnState {
   phase?: { phase: string; title?: string };
 }
 
-export interface InteractionState {
+export interface ApprovalState {
   request: InputRequestState;
   /** Execution/recovery correlation, deliberately outside the public Message. */
-  pluginContext?: ReconcileInteractionContext;
   requestedEventId: string;
 }
 
@@ -197,7 +195,7 @@ export interface HarnessInputState {
 }
 
 export interface SessionState {
-  /** 派生值：pending Interaction 或任一 turn requires_action ⇒ requires_action；activeTurns 空 ⇒ idle；否则 running。 */
+  /** 派生值：pending Approval 或任一 turn requires_action ⇒ requires_action；activeTurns 空 ⇒ idle；否则 running。 */
   runState: SessionRunState;
   lastStopReason?: StopReason;
   /**
@@ -221,10 +219,10 @@ export interface SessionState {
   /** Harness 已启动的异步任务 / subagent，按 provider task id upsert。 */
   tasks: Map<string, HarnessTaskState>;
   /** Pending-request index and its terminal result; request identity is a Message identity. */
-  interactions: Map<string, InteractionState>;
+  approvals: Map<string, ApprovalState>;
   inputResponses: Map<string, InputResponseState>;
   /**
-   * auto-review 回执，按回执自身的 `reviewId` 归档（见 docs/approval-lifecycle.md）。与 Interaction
+   * auto-review 回执，按回执自身的 `reviewId` 归档（见 docs/approval-lifecycle.md）。与原生审批
    * 正交：这是“已被 reviewer 决策”的留痕，不是待决，不派生 requires_action。每条回执是
    * timeline 的一等公民（首见即入 timeline），无 target 也留痕、同一操作多次决策各自成条。
    */
@@ -264,7 +262,7 @@ export function emptySessionState(): SessionState {
     plans: new Map(),
     proposedPlans: new Map(),
     tasks: new Map(),
-    interactions: new Map(),
+    approvals: new Map(),
     inputResponses: new Map(),
     approvalReviews: new Map(),
     harnessInvocations: new Map(),
@@ -539,21 +537,21 @@ function applyToolCallUpdate(state: SessionState, ev: EventEnvelope<"tool_call_u
   if (p.rawOutput !== undefined) tc.rawOutput = p.rawOutput;
 }
 
-/** 该 turn 是否还有未决 Interaction——per-turn requires_action 的派生依据。 */
+/** 该 turn 是否还有未决 Approval——per-turn requires_action 的派生依据。 */
 function hasPendingBlocking(state: SessionState, turnId: string): boolean {
-  for (const interaction of state.interactions.values()) {
-    if (interaction.request.turnId === turnId && interaction.request.status === "pending") return true;
+  for (const approval of state.approvals.values()) {
+    if (approval.request.turnId === turnId && approval.request.status === "pending") return true;
   }
   return false;
 }
 
 /**
- * 会话级 runState 派生（workflow：存在 pending Interaction 时
+ * 会话级 runState 派生（workflow：存在 pending Approval 时
  * projection 必须产出 requires_action）。requires_action 比 running 优先上浮——它意味着
- * "没有用户动作会话无法完整推进"；未归属 turn 的 setup Interaction 也不能漏。
+ * "没有用户动作会话无法完整推进"；未归属 turn 的 setup Approval 也不能漏。
  */
 function deriveRunState(state: SessionState): SessionRunState {
-  if ([...state.interactions.values()].some((interaction) => interaction.request.status === "pending")) return "requires_action";
+  if ([...state.approvals.values()].some((approval) => approval.request.status === "pending")) return "requires_action";
   if (state.activeTurns.size === 0) return "idle";
   return [...state.activeTurns.values()].some((turn) => turn.state === "requires_action")
     ? "requires_action"
@@ -728,26 +726,25 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       state.tasks.set(taskKey, next);
       break;
     }
-    // Interaction requested/answered/cancelled 驱动 per-turn requires_action ↔ running：不变量收在 reducer，
+    // Approval requested/answered/cancelled 驱动 per-turn requires_action ↔ running：不变量收在 reducer，
     // 不要求 adapter 自觉配对 state_update（事件流是唯一真相源；见 docs/kernel.md）。
     // 原生 state_update(requires_action) 仍然有效——覆盖登录、设备确认等没有结构化
-    // Interaction 的场景（workflow：反向不强制成立）。
-    case "interaction.requested": {
+    // Approval 的场景（workflow：反向不强制成立）。
+    case "approval.requested": {
       const request = inputRequestMessage(ev);
       const existing = getMessage(state, request.messageId);
       // lifecycle 事实只认第一次：重复 request 不能重写 requester/payload，更不能复活已终结对象。
       if (existing) break;
-      state.interactions.set(request.messageId, {
+      state.approvals.set(request.messageId, {
         request,
         requestedEventId: ev.eventId,
-        ...(ev.payload.pluginContext === undefined ? {} : { pluginContext: ev.payload.pluginContext }),
       });
       placeMessage(state, request.messageId);
       flagRequiresAction(state, ev.turnId);
       break;
     }
-    case "interaction.answered": {
-      const existing = state.interactions.get(ev.payload.replyToMessageIds[0]);
+    case "approval.answered": {
+      const existing = state.approvals.get(ev.payload.replyToMessageIds[0]);
       // terminal 只收一次；迟到/重复 answer 不得改写已经交付给 requester 的结果。
       if (!existing || existing.request.status !== "pending") break;
       if (!canResolveRequest(existing.request, ev.payload.answer, ev.payload.source)) break;
@@ -762,8 +759,8 @@ export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionSt
       unflagRequiresAction(state, existing.request.turnId);
       break;
     }
-    case "interaction.cancelled": {
-      const existing = state.interactions.get(ev.payload.messageId);
+    case "approval.cancelled": {
+      const existing = state.approvals.get(ev.payload.messageId);
       if (!existing || !canResolveRequest(existing.request, { kind: "cancelled", reason: ev.payload.reason }, actorOf(ev.source))) break;
       existing.request.status = "cancelled";
       existing.request.cancellation = {

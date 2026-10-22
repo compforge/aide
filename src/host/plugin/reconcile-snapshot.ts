@@ -2,8 +2,8 @@ import type { HarnessInputSnapshot as ControllerInputSnapshot } from "../harness
 import type { TurnSummary } from "../event/index.ts";
 import type { HarnessTarget } from "../harness/target.ts";
 import type {
-  InteractionDraft,
-} from "../interaction/types.ts";
+  ApprovalDraft,
+} from "../approval/types.ts";
 import type { ActorRef } from "../message/types.ts";
 import type { SessionState } from "../store/reduce.ts";
 
@@ -53,9 +53,9 @@ export interface HarnessTargetSnapshot {
   readonly label?: string;
 }
 
-export interface PendingInteractionSnapshot {
+export interface PendingApprovalSnapshot {
   readonly messageId: string;
-  readonly kind: InteractionDraft["kind"];
+  readonly kind: ApprovalDraft["kind"];
   readonly source: ActorRef;
   readonly target: ActorRef;
   readonly turnId?: string;
@@ -72,7 +72,7 @@ export interface ReconcileSnapshot {
   readonly activeTurns: readonly ActiveTurnSnapshot[];
   readonly harnessInputs: readonly HarnessInputSnapshot[];
   readonly harnessTargets: readonly HarnessTargetSnapshot[];
-  readonly pendingInteractions: readonly PendingInteractionSnapshot[];
+  readonly pendingApprovals: readonly PendingApprovalSnapshot[];
   readonly latestTurn?: SnapshotReadonly<TurnSummary>;
   readonly turns: readonly SnapshotReadonly<TurnSummary>[];
 }
@@ -82,7 +82,7 @@ interface CreateReconcileSnapshotOptions {
   readonly cwd?: string;
   readonly state: Pick<
     SessionState,
-    "runState" | "lastSeq" | "activeTurns" | "interactions" | "turnSummaries"
+    "runState" | "lastSeq" | "activeTurns" | "approvals" | "turnSummaries"
   >;
   readonly harnessInputs?: readonly ControllerInputSnapshot[];
   readonly harnessTargets?: readonly (HarnessTarget & { readonly label?: string })[];
@@ -123,7 +123,7 @@ export function createReconcileSnapshot(options: CreateReconcileSnapshotOptions)
       harness: target.harness,
       ...(target.label === undefined ? {} : { label: target.label }),
     })),
-    pendingInteractions: [...options.state.interactions.values()]
+    pendingApprovals: [...options.state.approvals.values()]
       .filter((entry) => entry.request.status === "pending")
       .map((entry) => ({
         messageId: entry.request.messageId,
@@ -159,7 +159,7 @@ export function emptyReconcileSnapshot(aideSessionId: string): ReconcileSnapshot
     activeTurns: [],
     harnessInputs: [],
     harnessTargets: [],
-    pendingInteractions: [],
+    pendingApprovals: [],
     turns: [],
   });
 }

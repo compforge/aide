@@ -27,13 +27,13 @@ Channel / Source 的 Definition 声明输入来源分类，绑定入口在提交
 
 ### Core 与 Controller 的动作出口
 
-Core 是系统共享的协作引擎，组件层面统一承接资源、调度、交互与执行职责。Verb 表达 Controller 向 Core 发起的动作，涵盖 Connector 查询与操作、Harness 执行以及 say / ask / confirm 等用户交互。Reconcile 读取资源、决定动作，再通过 Verb 请求执行；资源进展经 ResourceClient 保存。
+Core 是系统共享的协作引擎，组件层面统一承接资源、调度、交互与执行职责。Verb 表达 Controller 向 Core 发起的动作，涵盖 Connector 查询与操作、Harness 执行以及 say 等沟通动作。Reconcile 读取资源、决定动作，再通过 Verb 请求执行；资源进展经 ResourceClient 保存。
 
 Source 决定关注什么、如何解释观察结果，Core 承接查询或订阅请求，再通过 Connector 访问外部系统。Reconcile 决定下一步业务动作，通过 Core 发起执行。Agent 工具、Channel 和框架 Source 可以按职责直接调用 Core 服务，不要求经过 Verb。例如 Chief 的 Work 工具调用 Core ResourceClient，Connector 工具调用 Core ConnectorClient。
 
 Core 在资源和能力边界上组织审计、授权、超时与执行记录，Connector 专注外部协议，Controller 专注业务判断。组件图按这个完整职责模型展示审计与授权。
 
-Controller 使用 `ctx.verbs.connectors({ timeoutMs })` 调用 Connector，普通组件使用 ConnectorClient；两者访问同一份 Host 客户端。Connector verb 直接执行，不创建用户 Interaction。超时表示等待结束，不保证提供方操作已取消。图中的审计与授权表达 Core 的职责，当前未建设完整的授权策略或通用审计流水。
+Controller 使用 `ctx.verbs.connectors({ timeoutMs })` 调用 Connector，普通组件使用 ConnectorClient；两者访问同一份 Host 客户端。Connector verb 直接执行，不等待用户答复。超时表示等待结束，不保证提供方操作已取消。图中的审计与授权表达 Core 的职责，当前未建设完整的授权策略或通用审计流水。
 
 ### Controller 与资源协作
 
@@ -75,7 +75,7 @@ Personal 的 Chief 先 Reconcile Input：无会话时创建并追加后结束；
 
 Core 的 ResourceClient 可显式读取和更新其它 Session 的插件资源。创建资源时，应用按需装配目标 Session；读取未知 Session 不创建执行状态。写入仍经目标 Session 的资源客户端，版本检查和 Watch 通知属于同一个提交路径；默认查询只访问当前 Session。各 Session 隔离执行历史与 Harness 原生上下文，Conversation 不是权限边界。
 
-Output 表达已决定向外表达的内容，是独立持久资源；Input 与 Output 可选择关联，没有一对一要求。Personal 将业务状态和 Output 创建原子提交，Conversation / Batch 只保留必要的关联。say 成功表示 Output 已保存，Channel 按其 target 投递并更新回执；投递失败不重新执行业务动作。Core 执行消息与 Interaction 继续承担执行事实和人机问答。详见 [Output](output.md)。
+Output 表达已决定向外表达的内容，是独立持久资源；Input 与 Output 可选择关联，没有一对一要求。Personal 将业务状态和 Output 创建原子提交，Conversation / Batch 只保留必要的关联。say 成功表示 Output 已保存，Channel 按其 target 投递并更新回执；投递失败不重新执行业务动作。Core 执行消息记录执行事实，Approval 只承担原生工具权限与 Hook 信任。详见 [Output](output.md)。
 
 ### Harness 与执行事实
 
@@ -162,13 +162,13 @@ Personal 的需求观察由 RequirementSource 资源及其 Controller 承担：�
 
 ### 等待、中断与恢复
 
-Interaction 保存问题、答复、取消和超时。插件通过 ask / confirm / draft / harness 等 verb 请求动作，Core 管理交互与执行生命周期。等待 verb 时释放调度容量，执行调用栈仍由当前 Runner 持有。
+业务问题由 say 保存为 Output，用户答复作为新的 Input 处理。harness 直接创建 HarnessInvocation；等待执行时释放调度容量，调用栈仍由当前 Runner 持有。原生工具权限与 Hook 信任使用 Approval 持久化明确选择或取消，普通聊天不会自动授予权限。
 
 Connector Verb 在调用前保存 `connector.started`，完成后保存 `connector.settled` 的结果状态；请求、执行身份和资源关联归入所属 Session 的 Ledger。超时或重启中断不代表外部操作已取消，未完成记录恢复为 interrupted，不自动重放。Harness 和用户交互继续使用各自已有的持久执行记录。
 
 Worker 或 Host 中断后不重放内存调用栈，未完成 verb 以 failure 收口。插件依据领域状态决定如何恢复；对于可能已经产生外部副作用的工作，Personal 保留待核对状态，规则见 [Personal](plugin/personal.md)。
 
-Channel 从持久消息与执行投影恢复展示。浏览器断开不会取消服务端工作；消息投递失败也不能让已完成工作重新执行。执行上下文显式关联主资源以及可选的 conversationId / inputId，Interaction 和 HarnessInvocation 持久化这些关联。Channel 据此归属问题和执行进度，Harness Target 只选择执行配置。网页按 Conversation 筛选关联问题，未关联会话的宿主交互仍显示在本地收件区。Channel 接入与展示边界见 [Channel](channel/README.md)。
+Channel 从持久 Input、Output 与执行投影恢复展示。浏览器断开不会取消服务端工作；消息投递失败也不能让已完成工作重新执行。HarnessInvocation 持久化主资源以及可选 conversationId / inputId，Channel 据此归属执行进度，Harness Target 只选择执行配置。原生权限 Approval 位于网页独立审批区，通过 `/approvals` 提交明确决定。Channel 接入与展示边界见 [Channel](channel/README.md)。
 
 ### 验证
 

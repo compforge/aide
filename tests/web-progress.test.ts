@@ -100,9 +100,9 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const runningInput = runningView.blocks.find((block) => block.type === "input")!;
   assert.ok(runningView.meta.activity);
   assert.equal(runningInput.group_id, runningView.meta.activity!.id);
-  for (const phase of ["running", "waiting"]) {
+  for (const phase of ["queued", "running"]) {
     const history = browserSdk.historyBlocks(runningView.blocks.map((block) => block.type === "input" ? { ...block, status: phase } : block), runningView.meta.activity!);
-    assert.ok(history.some((block) => block.id === runningInput.id), "Input remains visible during execution and questions");
+    assert.ok(history.some((block) => block.id === runningInput.id), "Input remains visible while queued and running");
     assert.ok(!history.some((block) => block.type === "execution" && block.group_id === runningView.meta.activity!.id));
   }
   const { sink, turnId } = emitters.get(chiefTarget("a"))!;

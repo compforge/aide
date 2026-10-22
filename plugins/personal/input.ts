@@ -1,4 +1,3 @@
-import { conversationPolicy } from "./conversation/config.ts";
 import type { PluginContext, InputSpec, InputStatus, Resource } from "@compforge/aide-plugin";
 import { INPUT_TYPE, digest } from "./chief-model.ts";
 import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type ConversationStatus, type ConversationResource } from "./conversation/model.ts";
@@ -9,7 +8,7 @@ type Creation = NonNullable<NonNullable<InputStatus["routing"]>["creation"]>;
 
 export function registerInputRouting(context: PluginContext): void {
   context.controllers.register<InputSpec, InputStatus>({ resourceType: INPUT_TYPE, maxConcurrency: 1,
-    reconcile: (_execution, input) => reconcileInput(context, input, conversationPolicy(context.instance.config.conversation).maxPending),
+    reconcile: (_execution, input) => reconcileInput(context, input),
   });
 }
 
@@ -20,7 +19,7 @@ export function registerInputRouting(context: PluginContext): void {
  * @case tests/input-routing.test.ts
  * @link docs/plugin/personal.md
  */
-export async function reconcileInput(context: Pick<PluginContext, "resources" | "logger">, original: Input, maxPending = conversationPolicy().maxPending): Promise<void> {
+export async function reconcileInput(context: Pick<PluginContext, "resources" | "logger">, original: Input): Promise<void> {
   const ref = { ...INPUT_TYPE, ...original.metadata };
   const current = await context.resources.get<InputSpec, InputStatus>(ref);
   if (!current || ["done", "ignored"].includes(current.status.routing?.phase ?? "")) return;
@@ -32,7 +31,7 @@ export async function reconcileInput(context: Pick<PluginContext, "resources" | 
   } });
   let attached = conversations.some((c) => c.status.pendingInputIds.includes(input.metadata.name));
   const append = async (c: Readonly<ConversationResource>) => {
-    if (await appendConversationInput(context.resources, { sessionId: c.spec.sessionId, name: c.metadata.name, uid: c.metadata.uid }, input, maxPending)) {
+    if (await appendConversationInput(context.resources, { sessionId: c.spec.sessionId, name: c.metadata.name, uid: c.metadata.uid }, input)) {
       context.logger.info("Chief input attached to conversation", { attributes: { inputId: input.metadata.name,
         conversationId: c.spec.id, sessionId: c.spec.sessionId } });
     }

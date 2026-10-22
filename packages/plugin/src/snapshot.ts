@@ -88,13 +88,10 @@ export interface HarnessTargetSnapshot {
   readonly label?: string;
 }
 
-export interface PendingInteractionSnapshot {
+export interface PendingApprovalSnapshot {
   readonly messageId: string;
   readonly kind:
     | "permission"
-    | "question"
-    | "suggested_input"
-    | "harness_invocation"
     | "hook_trust";
   readonly source: ActorRef;
   readonly target: ActorRef;
@@ -106,7 +103,7 @@ export interface ReconcileSnapshot {
   readonly activeTurns: readonly ActiveTurnSnapshot[];
   readonly harnessInputs: readonly HarnessInputSnapshot[];
   readonly harnessTargets: readonly HarnessTargetSnapshot[];
-  readonly pendingInteractions: readonly PendingInteractionSnapshot[];
+  readonly pendingApprovals: readonly PendingApprovalSnapshot[];
   readonly latestTurn?: TurnSummary;
   readonly turns: readonly TurnSummary[];
 }

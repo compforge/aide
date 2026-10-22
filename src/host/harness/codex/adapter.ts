@@ -13,7 +13,7 @@ import type {
   StopReason,
 } from "../../event/index.ts";
 import { textOf } from "../../event/index.ts";
-import type { InteractionDraft } from "../../interaction/types.ts";
+import type { ApprovalDraft } from "../../approval/types.ts";
 import type {
   AdapterCapabilities,
   HarnessAdapter,
@@ -135,7 +135,7 @@ export class CodexAdapter implements HarnessAdapter {
   constructor(private options: CodexAdapterOptions) {
     this.hookTrustStore = options.hookTrustStore ?? new FileHookTrustStore("codex");
     this.events = new CodexEventHandler({
-      openInteraction: options.openInteraction,
+      openApproval: options.openApproval,
       ...(options.nativeEvent ? { nativeEvent: options.nativeEvent } : {}),
       ...(options.log ? { log: options.log } : {}),
       emit: (runtime, event, raw, turn) => this.emit(runtime, event, raw, turn),
@@ -271,12 +271,12 @@ export class CodexAdapter implements HarnessAdapter {
           });
         }
         if (hooksNeedingUserTrust.length > 0) {
-          const interaction: InteractionDraft = {
+          const approval: ApprovalDraft = {
             kind: "hook_trust",
             harnessName: "Codex",
             hooks: hooksNeedingUserTrust,
           };
-          const result = await this.options.openInteraction(interaction, { raw: hooksResult });
+          const result = await this.options.openApproval(approval, { raw: hooksResult });
           if (result.kind === "cancelled") {
             throw new Error("Codex hook trust request was cancelled");
           }

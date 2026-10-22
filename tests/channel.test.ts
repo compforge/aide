@@ -11,7 +11,7 @@ import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { httpChannel } from "../src/api/index.ts";
 import type { InputRequest } from "../src/host/message/types.ts";
-import type { InteractionResult } from "../src/host/interaction/types.ts";
+import type { ApprovalResult } from "../src/host/approval/types.ts";
 
 test("HTTP accepts Chief input durably and exposes asynchronous failure without replay", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-channel-"));
@@ -76,10 +76,10 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   assert.deepEqual(await (await fetch(`${url}/work?conversationId=other`)).json(), []);
 });
 
-test("web answers the original Harness interaction and rejects stale or mismatched responses", async (t) => {
+test("web answers the original Harness approval and rejects stale or mismatched responses", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-interaction-"));
   const log = pino({ level: "silent" });
-  let decision: InteractionResult | undefined;
+  let decision: ApprovalResult | undefined;
   const options = fakeOptions({
     chief: async () => "已继续",
     execute: async () => { throw new Error("No work expected"); },
@@ -88,7 +88,7 @@ test("web answers the original Harness interaction and rejects stale or mismatch
     const adapter = options.createAdapter(_target);
     const open = adapter.open.bind(adapter);
     adapter.open = async (...args) => {
-      decision = await ports.openInteraction({ kind: "hook_trust", harnessName: "Test Harness", hooks: [
+      decision = await ports.openApproval({ kind: "hook_trust", harnessName: "Test Harness", hooks: [
         { key: "session_start", source: "test", sourcePath: "/test/hooks.json", trustStatus: "modified", command: "test-hook" },
       ] });
       return open(...args);
@@ -112,20 +112,23 @@ test("web answers the original Harness interaction and rejects stale or mismatch
   const receiving = post("/messages", { id: "interaction-input", sessionId: "me", conversationId: "me", text: "继续" });
   let pending: InputRequest | undefined;
   for (let attempt = 0; attempt < 100 && !pending; attempt++) {
-    [pending] = await (await fetch(url + "/interactions")).json() as InputRequest[];
+    [pending] = await (await fetch(url + "/approvals")).json() as InputRequest[];
     if (!pending) await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.ok(pending, "Adapter startup should publish a pending request");
   assert.equal(decision, undefined);
-  assert.equal((await post("/interactions", { messageId: pending.messageId,
+  assert.equal((await post("/approvals", { messageId: pending.messageId,
+    result: { kind: "question", outcome: "answered", text: "yes" } })).status, 400);
+  assert.equal((await post("/interactions", { messageId: pending.messageId })).status, 404);
+  assert.equal((await post("/approvals", { messageId: pending.messageId,
     result: { kind: "permission", outcome: "selected", optionId: "allow" } })).status, 400);
   const answer = { messageId: pending.messageId, result: { kind: "hook_trust", outcome: "trusted" } };
-  assert.equal((await post("/interactions", answer)).status, 200);
+  assert.equal((await post("/approvals", answer)).status, 200);
   assert.deepEqual(decision, answer.result);
-  assert.equal((await post("/interactions", answer)).status, 409);
+  assert.equal((await post("/approvals", answer)).status, 409);
   assert.equal((await receiving).status, 200);
-  assert.deepEqual(await (await fetch(url + "/interactions")).json(), []);
-  const resolved = aide.session("me").core.projection.interactions.get(pending.messageId)?.request;
+  assert.deepEqual(await (await fetch(url + "/approvals")).json(), []);
+  const resolved = aide.session("me").core.projection.approvals.get(pending.messageId)?.request;
   assert.equal(resolved?.status, "answered");
   assert.ok(resolved?.responseMessageId);
 });

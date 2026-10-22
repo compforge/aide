@@ -5,8 +5,8 @@ import {
   type HarnessAdapter,
   type ApprovalRoute,
   type EffortOption,
-  type InteractionContext,
-  type OpenInteraction,
+  type ApprovalContext,
+  type OpenApproval,
   type ModelOption,
   type NativeEventSink,
   type PromptInput,
@@ -38,9 +38,9 @@ import type { HarnessTarget, HarnessTargetProbeResult } from "../harness/target.
 import type { TextgenCandidate } from "../harness/textgen.ts";
 import { maybeGenerateSessionTitle } from "../session/title.ts";
 import type {
-  InteractionDraft,
-  InteractionResult,
-} from "../interaction/types.ts";
+  ApprovalDraft,
+  ApprovalResult,
+} from "../approval/types.ts";
 import { MAIN_LANE_ID } from "../lane.ts";
 import type { SessionHandle } from "../store/store.ts";
 import { DeliveryAttempts } from "./attempt.ts";
@@ -59,7 +59,7 @@ import {
   type QueueSnapshot,
   type QueueOutcome,
 } from "../queue.ts";
-import { HarnessInteractionContinuations } from "../interaction/harness.ts";
+import { HarnessApprovalContinuations } from "../approval/harness.ts";
 import { TurnRegistry, type TurnRecord } from "../turn.ts";
 import {
   HarnessHookCoordinator,
@@ -104,7 +104,7 @@ function eventSourceOf(source: HarnessInputSource): EventSource {
 }
 
 /**
- * Control：与 Input / Interaction result 并列的第三种用户信号
+ * Control：与 Input / Approval result 并列的第三种用户信号
  * 不携带内容、不到达 model——是对 turn **生命周期**的命令，必须 out-of-band 够到正在跑的
  * turn（不进 queue，否则会排在它要打断的 turn 后面而死锁）。当前唯一 kind 是 `interrupt`
  * （Esc）；pause / abort-bash / shutdown 等作为新 kind 加入时按 kernel 演进规则处理。
@@ -141,7 +141,7 @@ export interface SendTurnOptions {
 
 /** Controller 注入给 Adapter 的 Core ports；原生 Harness verb 只能经这些边界 lowering。 */
 export interface HarnessAdapterPorts {
-  openInteraction: OpenInteraction;
+  openApproval: OpenApproval;
   log: LogSink;
   nativeEvent: NativeEventSink;
 }
@@ -212,8 +212,8 @@ export class Controller {
   private readonly turns = new TurnRegistry<HarnessBinding>();
   private readonly deliveryAttempts: DeliveryAttempts<HarnessBinding>;
   private readonly contextDeliveries: ContextDeliveries<HarnessBinding>;
-  private readonly harnessInteractions: HarnessInteractionContinuations<HarnessBinding>;
-  private readonly unsubscribeInteractions: () => void;
+  private readonly harnessApprovals: HarnessApprovalContinuations<HarnessBinding>;
+  private readonly unsubscribeApprovals: () => void;
   private readonly harnessHooks: HarnessHookCoordinator;
   private lifecycleState: "open" | "closing" | "closed" = "open";
   private closePromise?: Promise<void>;
@@ -243,14 +243,14 @@ export class Controller {
       (binding, event) => this.appendEvent(binding, event, { type: "aide" }),
       options.session.ledger.read(),
     );
-    this.harnessInteractions = new HarnessInteractionContinuations(
+    this.harnessApprovals = new HarnessApprovalContinuations(
       (binding, event, source) => this.appendEvent(binding, event, source),
       () => this.changed(),
       () => options.session.projection,
     );
-    this.unsubscribeInteractions = options.session.subscribe((event) => {
-      if (event.kind === "interaction.answered" || event.kind === "interaction.cancelled") {
-        this.harnessInteractions.observe();
+    this.unsubscribeApprovals = options.session.subscribe((event) => {
+      if (event.kind === "approval.answered" || event.kind === "approval.cancelled") {
+        this.harnessApprovals.observe();
       }
     });
     this.harnessHooks = new HarnessHookCoordinator({
@@ -371,25 +371,25 @@ export class Controller {
   }
 
   /**
-   * 用户完成一个未决 Interaction。先把用户事实持久化，再唤醒 Harness；没有活跃 continuation
+   * 用户完成一个未决 Approval。先把用户事实持久化，再唤醒 Harness；没有活跃 continuation
    * 时返回 false，UI 据此提示 stale，而不是把响应写进一个无人消费的内存通道。
    */
-  completeInteraction(interactionId: string, result: InteractionResult): boolean {
-    return this.harnessInteractions.complete(interactionId, result);
+  completeApproval(approvalId: string, result: ApprovalResult): boolean {
+    return this.harnessApprovals.complete(approvalId, result);
   }
 
-  private openHarnessInteraction(
+  private openHarnessApproval(
     laneId: string,
     harnessTargetId: string,
-    draft: InteractionDraft,
-    context?: InteractionContext,
-  ): Promise<InteractionResult> {
+    draft: ApprovalDraft,
+    context?: ApprovalContext,
+  ): Promise<ApprovalResult> {
     const binding = this.bindings.get(this.bindingKey(laneId, harnessTargetId));
-    if (!binding) return Promise.reject(new Error(`unknown Lane binding for interaction: ${laneId} × ${harnessTargetId}`));
+    if (!binding) return Promise.reject(new Error(`unknown Lane binding for approval: ${laneId} × ${harnessTargetId}`));
     const active = this.queueForLane(laneId).activeRun;
     const turnId =
       context?.turnId ?? active?.turnId ?? binding.setupTurnId;
-    return this.harnessInteractions.open(binding, draft, turnId, context);
+    return this.harnessApprovals.open(binding, draft, turnId, context);
   }
 
   private mainLaneId(): string {
@@ -1102,7 +1102,7 @@ export class Controller {
   }
 
   /**
-   * 施加一个 Control 信号（Input / Interaction result 之外的第三种用户信号，见
+   * 施加一个 Control 信号（Input / Approval result 之外的第三种用户信号，见
    * `Control`）。当前唯一
    * kind 是 `interrupt`（Esc）——打断主 Lane 当前 Queue run。新增 kind 时在此按 kind 分派。
    */
@@ -1225,7 +1225,7 @@ export class Controller {
     await Promise.all(closing);
     // Adapter.close owns native resource teardown, while Controller owns the
     // accepted-Turn invariant. A buggy/failed Adapter close must not leave a
-    // Queue run or Interaction continuation hanging during host shutdown.
+    // Queue run or native approval continuation hanging during host shutdown.
     for (const turn of this.turns.values()) {
       if (turn.status === "active") {
         this.synthesizeTerminal(turn, { stopReason: "cancelled" });
@@ -1236,7 +1236,7 @@ export class Controller {
       ...this.sideRunPromises,
     ]);
     await this.harnessHooks.close();
-    this.unsubscribeInteractions();
+    this.unsubscribeApprovals();
     this.lifecycleState = "closed";
   }
 
@@ -1664,12 +1664,12 @@ export class Controller {
     if (!record) return;
     const run = this.runForTurn(turnId);
 
-    // cancel-cascade：本 turn 仍挂起的 Interaction 随收口一并了结，绝不留悬挂 continuation。
-    // Controller 先持久化 interaction.cancelled，再唤醒 Adapter；参考 codex
+    // cancel-cascade：本 turn 仍挂起的 Approval 随收口一并了结，绝不留悬挂 continuation。
+    // Controller 先持久化 approval.cancelled，再唤醒 Adapter；参考 codex
     // clear_pending_waiters→Abort、opencode interrupt 的 ensuring(pending.delete)。
     // 顺序天然对：finalize 发生在 adapter.cancel 之后（先中断 turn，再收 pending），不会让取消以
     // model 可见的 tool rejection 抢在 turn 中断之前冒出来。
-    this.harnessInteractions.cancelForTurn(turnId);
+    this.harnessApprovals.cancelForTurn(turnId);
 
     const session = this.options.session;
 
@@ -1781,8 +1781,8 @@ export class Controller {
               this.bindingKey(this.mainLaneId(), target.id),
             )?.adapter ??
             this.options.createAdapter(target, {
-              openInteraction: () =>
-                Promise.reject(new Error("textgen cannot open Harness interactions")),
+              openApproval: () =>
+                Promise.reject(new Error("textgen cannot open Harness approvals")),
               log: (entry) => this.options.session.log({ ...entry, harnessTargetId: target.id }),
               // textgen adapter 不开 session、不上报原生事件；sink 就位但不产生流量。
               nativeEvent: () => {},
@@ -1856,8 +1856,8 @@ export class Controller {
       if (!lane) throw new Error(`Lane not found: ${laneId}`);
       const target = this.targetFor(harnessTargetId);
       const adapter = this.options.createAdapter(target, {
-        openInteraction: (interaction, context) =>
-          this.openHarnessInteraction(laneId, target.id, interaction, context),
+        openApproval: (approval, context) =>
+          this.openHarnessApproval(laneId, target.id, approval, context),
         log: (entry) =>
           this.options.session.log({ ...entry, harnessTargetId: target.id }),
         nativeEvent: (event) =>

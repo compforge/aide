@@ -56,7 +56,7 @@ Controller 可声明 `name`，让同一插件对同种资源注册独立队列�
 
 ## Verb 与 Harness
 
-Reconcile 通过 `ctx.verbs` 请求 say、ask、confirm、draft、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。say 通过应用装配的出口创建独立 Output，返回 outputId，不建立 Interaction 或等待用户；成功表示持久化，Channel 按 Output.target 投递。业务状态与 Output 可通过 ResourceClient.commit 原子保存，详见 [Output](../output.md)。ask/confirm 保存 Interaction，draft/harness 按交互结果发起 HarnessInvocation；Connector verb 直接执行。插件只需表达意图、期限和目标，不处理提供方原生协议。
+Reconcile 通过 `ctx.verbs` 请求 say、harness，或通过 `connectors({ timeoutMs })` 调用外部系统。say 创建独立 Output，返回 outputId，Channel 按 Output.target 投递；用户答复是后续的新 Input。业务状态与 Output 可通过 ResourceClient.commit 原子保存，详见 [Output](../output.md)。harness 直接创建 HarnessInvocation，保留期限、取消和恢复语义；原生工具权限与 Hook 信任仍由 Host Approval 管理。插件不处理提供方原生协议。
 
 等待 verb 时释放 Controller 和 Runner 容量，同一 Controller 内同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。拒绝确认是正常业务答案；取消、超时和失败需要插件自行决定业务结果。
 

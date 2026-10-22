@@ -4,8 +4,8 @@ import type { SessionConfigOption } from "../../event/index.ts";
 import { closedTerminal } from "../normalize.ts";
 import { planSnapshotDraft } from "../plan.ts";
 import type { LogSink } from "../../logging.ts";
-import type { InteractionDraft, QuestionPrompt } from "../../interaction/types.ts";
-import type { HarnessEventSink, NativeEventSink, OpenInteraction } from "../adapter.ts";
+import type { ApprovalDraft } from "../../approval/types.ts";
+import type { HarnessEventSink, NativeEventSink, OpenApproval } from "../adapter.ts";
 import {
   asRecord,
   codexApprovalChoices,
@@ -22,7 +22,7 @@ const CODEX_REVIEW_DECISION: Record<string, "approved" | "denied" | "aborted"> =
 };
 
 interface CodexEventHandlerOptions {
-  openInteraction: OpenInteraction;
+  openApproval: OpenApproval;
   nativeEvent?: NativeEventSink;
   log?: LogSink;
   emit(runtime: ThreadRuntime, event: Parameters<HarnessEventSink>[0], raw?: unknown, turn?: CodexTurn | null): void;
@@ -409,21 +409,21 @@ export class CodexEventHandler {
         const presentation = approvalPresentationOf(method, p);
         const { choices, unmapped, fellBack } = codexApprovalChoices(p);
         this.noticeUnmappedDecisions(rt, unmapped, fellBack, params);
-        const interaction: InteractionDraft = {
+        const approval: ApprovalDraft = {
           kind: "permission",
           ...presentation,
           toolCallId: p.itemId !== undefined ? String(p.itemId) : undefined,
           options: choices.map((choice) => choice.option),
         };
         if (rt.activeTurn) rt.activeTurn.sawOutput = true;
-        const result = await this.options.openInteraction(interaction, {
+        const result = await this.options.openApproval(approval, {
           ...(rt.activeTurn?.turnId ? { turnId: rt.activeTurn.turnId } : {}),
           raw: params,
         });
         if (result.kind === "cancelled") {
           return { decision: "cancel" };
         }
-        // result 按 interactionId 路由回来，kind 必配对 permission；意外不配保守拒绝。
+        // result 按请求 messageId 路由回来，kind 必配对 permission；意外不配保守拒绝。
         const optionId = result.kind === "permission" ? result.optionId : "";
         // 选不中就回 decline，不把 optionId 原样透传：结构化候选的 optionId 是 aide 铸的
         // 合成 id（acceptWithExecpolicyAmendment:1），不是 codex wire 值；空串更不是"拒绝"，
@@ -432,48 +432,8 @@ export class CodexEventHandler {
           decision: choices.find((choice) => choice.option.optionId === optionId)?.decision ?? "decline",
         };
       }
-      case "item/tool/requestUserInput": {
-        const source = Array.isArray(p.questions) ? p.questions : [];
-        const questions: QuestionPrompt[] = source.map((value, index) => {
-          const question = (value ?? {}) as Record<string, unknown>;
-          return {
-            questionId: String(question.id ?? `q${index}`),
-            header: String(question.header ?? `Question ${index + 1}`),
-            question: String(question.question ?? ""),
-            choices: Array.isArray(question.options)
-              ? question.options.map((option) => {
-                  const item = (option ?? {}) as Record<string, unknown>;
-                  const label = String(item.label ?? "");
-                  return {
-                    value: label,
-                    label,
-                    description: String(item.description ?? ""),
-                  };
-                })
-              : undefined,
-            allowOther: question.isOther === true,
-            secret: question.isSecret === true,
-          };
-        });
-        const interaction: InteractionDraft = {
-          kind: "question",
-          questions,
-        };
-        if (rt.activeTurn) rt.activeTurn.sawOutput = true;
-        const result = await this.options.openInteraction(interaction, {
-          ...(rt.activeTurn?.turnId ? { turnId: rt.activeTurn.turnId } : {}),
-          raw: params,
-        });
-        if (result.kind === "cancelled") {
-          return { answers: {} };
-        }
-        const decisionAnswers = result.kind === "question" ? result.answers : {};
-        return {
-          answers: Object.fromEntries(
-            Object.entries(decisionAnswers).map(([questionId, answers]) => [questionId, { answers }]),
-          ),
-        };
-      }
+      case "item/tool/requestUserInput":
+        return { answers: {} };
       default:
         throw new Error(`unsupported server request: ${method}`);
     }

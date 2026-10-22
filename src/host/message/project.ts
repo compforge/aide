@@ -4,9 +4,9 @@ import { actorOf, HUMAN_ACTOR } from "./actor.ts";
 import type { ActorRef, Input, InputRequest } from "./types.ts";
 import type { InputRequestState, InputResponseState } from "../store/message-state.ts";
 import { newId } from "../event/ids.ts";
-import type { InteractionDraft } from "../interaction/types.ts";
+import type { ApprovalDraft } from "../approval/types.ts";
 
-export function createInputRequest(request: InteractionDraft, source: ActorRef, expiresAt?: string): InputRequest & { status: "pending" } {
+export function createInputRequest(request: ApprovalDraft, source: ActorRef, expiresAt?: string): InputRequest & { status: "pending" } {
   return {
     kind: "input_request", messageId: newId("m"), source, target: { ...HUMAN_ACTOR },
     createdAt: new Date().toISOString(), request, status: "pending",
@@ -34,8 +34,8 @@ export function inputMessage(
 }
 
 /** Facts carry Message identity and actors; only execution coordinates come from the envelope. */
-export function inputRequestMessage(event: EventEnvelope<"interaction.requested">): InputRequestState {
-  const { pluginContext, ...request } = event.payload;
+export function inputRequestMessage(event: EventEnvelope<"approval.requested">): InputRequestState {
+  const request = event.payload;
   return {
     ...request,
     turnId: event.turnId,
@@ -44,7 +44,7 @@ export function inputRequestMessage(event: EventEnvelope<"interaction.requested"
 }
 
 export function inputResponseMessage(
-  event: EventEnvelope<"interaction.answered">,
+  event: EventEnvelope<"approval.answered">,
 ): InputResponseState {
   return {
     ...event.payload,

@@ -9,7 +9,7 @@ export interface HarnessTargetConfig {
 }
 
 export interface NotificationConfig {
-  /** turn 完成 / 待决 Interaction 时发终端桌面通知（OSC 9 白名单终端）。 */
+  /** turn 完成 / 待决 Approval 时发终端桌面通知（OSC 9 白名单终端）。 */
   enabled: boolean;
   /** OSC 9 不可用时是否退回 BEL 响铃；默认 false，不打扰。 */
   bell: boolean;

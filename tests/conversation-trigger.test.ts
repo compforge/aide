@@ -1,4 +1,3 @@
-import { fixtureAddress } from "./address-fixture.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -9,10 +8,9 @@ import { once } from "node:events";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { SessionStore } from "../src/host/store/store.ts";
-import { ConversationStore, confirmInBatch, fixtureBatch } from "./conversation-fixture.ts";
+import { ConversationStore, fixtureBatch } from "./conversation-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { conversationTrigger, ConversationTriggerSchema } from "../plugins/personal/conversation/trigger.ts";
-import { CONVERSATION_TYPE } from "../plugins/personal/conversation/model.ts";
 import { httpChannel } from "../src/api/index.ts";
 import { conversationView } from "../src/channel/view.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -82,40 +80,7 @@ test("Runner wakes Conversation without an Input; a long timer coalesces and dis
   assert.ok(blocks.some((b) => b.type === "message" && b.group_id === run.id && b.content.includes("值得跟进")));
 });
 
-test("Timer can ask and continue in its own activation without fabricating a user Input", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "aide-conv-trigger-ask-"));
-  let aide: Aide, turns = 0;
-  aide = new Aide(root, fakeOptions({ chief: async () => {
-    turns++;
-    if (turns === 1) {
-      const answer = await confirmInBatch(aide.findConversation("me")!, "me", "现在验证吗？");
-      assert.deepEqual(answer, { state: "success", value: "declined" });
-    }
-    return "收到，暂不验证。";
-  }, execute: async () => { throw new Error("No work"); } }, root), log);
-  const scope = aide.session("me");
-  const c = await scope.conversations.ensure("me", fixtureAddress("me"));
-  await scope.plugins.resourceClient("personal").replace(c, { ...c.spec, trigger: { enabled: true, intervalSeconds: 3600 } },
-    { ...c.status, nextTriggerAt: new Date(0).toISOString() });
-  t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.start(); await until(() => aide.questions().some((q) => q.request.status === "pending"));
-  const q = aide.questions().find((q) => q.request.status === "pending")!;
-  const view = conversationView(aide, "me");
-  const run = scope.conversations.runs()[0]!;
-  assert.equal(view.meta.activity?.phase, "waiting");
-  assert.ok(view.blocks.some((b) => b.type === "question" && b.group_id === run.id));
-  assert.equal(aide.sessions().flatMap((s) => s.conversations.inputs()).length, 0);
-  const request = q.request.request;
-  assert.equal(request.kind, "question");
-  if (request.kind !== "question") throw new Error("Missing question");
-  await scope.core.resolveInteraction({ kind: "interaction_response", messageId: q.request.messageId }, async () => ({
-    kind: "question", outcome: "answered", answers: { [request.questions[0]!.questionId]: ["decline"] },
-  }));
-  await aide.settled();
-  assert.equal(turns, 1);
-  assert.equal(scope.conversations.runs()[0]!.status.phase, "done");
-  assert.match(aide.outputs().at(-1)!.text, /暂不验证/);
-});
+
 
 test("Restart coalesces due triggers, hides quiet results and does not replay interrupted activations", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-conv-trigger-recovery-"));
@@ -126,9 +91,6 @@ test("Restart coalesces due triggers, hides quiet results and does not replay in
   let aide: Aide, calls = 0;
   const options = fakeOptions({ chief: async () => {
     calls++;
-    const store = aide.findConversation("quiet")!.conversations;
-    const run = store.runs().find((r) => r.status.phase === "running")!;
-
     return "internal review";
   }, execute: async () => { throw new Error("No work"); } }, root);
   aide = new Aide(root, options, log);

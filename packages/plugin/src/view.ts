@@ -27,7 +27,7 @@ export type ViewInput =
       readonly value: string | null;
     }
   | {
-      readonly kind: "interaction_response";
+      readonly kind: "approval_response";
       /** The InputRequest.messageId being answered or cancelled, not a response ID. */
       readonly messageId: string;
     }
@@ -59,7 +59,7 @@ export interface ViewOutput {
   readonly kind:
     | "transcript"
     | "queue"
-    | "interaction"
+    | "approval"
     | "status"
     | "toast"
     | "board"

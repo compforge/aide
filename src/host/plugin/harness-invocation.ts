@@ -26,7 +26,7 @@ export type HarnessInvocationPhase =
 export interface HarnessInvocationSnapshot extends ExecutionAssociation {
   readonly invocationId: string;
   readonly executionId: string;
-  readonly verb: "draft" | "harness";
+  readonly verb: "harness";
   readonly phase: HarnessInvocationPhase;
   readonly newLane: boolean;
   readonly freshContext?: boolean;
@@ -41,13 +41,12 @@ export interface HarnessInvocationSnapshot extends ExecutionAssociation {
 export interface ReconcileHarnessInvocation {
   readonly scope: ExecutionScope;
   readonly invocation: {
-    readonly verb: "draft" | "harness";
+    readonly verb: "harness";
     readonly title: string;
     readonly prompt: string;
-    readonly blocks?: readonly PromptBlock[];
     readonly laneId: string;
     readonly newLane: boolean;
-  readonly freshContext?: boolean;
+    readonly freshContext?: boolean;
     readonly harnessTargetId: string;
   };
 }
@@ -150,15 +149,7 @@ function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
 
 function invocationBlocks(state: InvocationState): readonly PromptBlock[] {
   const recorded = state.recorded.payload;
-  if (recorded.verb !== "draft") {
-    return [{ type: "text", text: recorded.prompt } satisfies PromptBlock];
-  }
-  if (!recorded.blocks?.length) {
-    throw new Error(
-      `draft HarnessInvocation ${recorded.invocationId} has no submitted Interaction blocks`,
-    );
-  }
-  return recorded.blocks;
+  return [{ type: "text", text: recorded.prompt }];
 }
 
 function scheduledOf(
@@ -176,7 +167,7 @@ function scheduledOf(
     newLane: recorded.newLane,
     freshContext: recorded.freshContext,
     ...(recorded.newLane ? { parentLaneId: recorded.laneId } : {}),
-    source: recorded.verb === "draft" ? "user" : "plugin",
+    source: "plugin",
     messageId: scheduled.messageId,
     turnId: scheduled.turnId,
     blocks: invocationBlocks(state),
@@ -209,14 +200,6 @@ export class HarnessInvocationStore {
         `HarnessInvocation aideSessionId must be ${this.session.id}, got ${draft.scope.aideSessionId}`,
       );
     }
-    if (
-      draft.invocation.verb === "draft" &&
-      (draft.invocation.blocks === undefined || draft.invocation.blocks.length === 0)
-    ) {
-      throw new Error(
-        "draft HarnessInvocation requires blocks from a submitted Interaction",
-      );
-    }
     this.session.requireLane(draft.invocation.laneId);
     const invocationId = newId("hinv");
     const invocation = draft.invocation;
@@ -234,9 +217,6 @@ export class HarnessInvocationStore {
         verb: invocation.verb,
         title: invocation.title,
         prompt: invocation.prompt,
-        ...(invocation.blocks === undefined
-          ? {}
-          : { blocks: invocation.blocks.map((block) => ({ ...block })) }),
         laneId: invocation.laneId,
         newLane: invocation.newLane,
         freshContext: invocation.freshContext,

@@ -1,5 +1,5 @@
 import personalDefinitions from "../plugins/personal/definitions.ts";
-import { fixtureAddress, fixtureIncoming } from "./address-fixture.ts";
+import { fixtureIncoming } from "./address-fixture.ts";
 import { AideResourceProvider } from "../src/host/plugin/aide-resource.ts";
 import { OutputStore } from "../src/host/output/store.ts";
 import { conversationLane } from "../plugins/personal/conversation/model.ts";
@@ -10,7 +10,7 @@ import { memoryAgentDir } from "./pi-memory-fixture.ts";
 import { Aide } from "../src/app.ts";
 import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
-import { ConversationStore, seedInput } from "./conversation-fixture.ts";
+import { ConversationStore } from "./conversation-fixture.ts";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
@@ -81,7 +81,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   let binding: HarnessSessionBinding | undefined;
   let finished: (() => void) | undefined;
   const adapter = createHarnessAdapter({ id: "assistant", harness }, {
-    targetConfig: { harness }, openInteraction: async () => { throw new Error("Unexpected interaction"); },
+    targetConfig: { harness }, openApproval: async () => { throw new Error("Unexpected interaction"); },
     piSession: (input) => createPiAgent({ ...config, ...input }),
     chiefSession: (input) => createChiefAgent({ ...config, ...input, work, persons }),
   });
@@ -265,7 +265,7 @@ test("Pi refuses unsupported input before admission and does not promote truncat
 
 test("Pi requires startup configuration and Chief requires its bound factory", async (t) => {
   const fixture = await setup(t, () => ({ text: "ready" }));
-  const ports = { openInteraction: async () => { throw new Error("Unexpected interaction"); } };
+  const ports = { openApproval: async () => { throw new Error("Unexpected interaction"); } };
   assert.equal(createHarnessAdapter({ id: "plain", harness: "pi" }, { ...ports, targetConfig: { harness: "pi" }, piConfig: fixture.config.config }).harness, "pi");
   assert.throws(() => createHarnessAdapter({ id: "plain", harness: "pi" }, { ...ports, targetConfig: { harness: "pi" } }), /startup-resolved/);
   assert.throws(() => createHarnessAdapter({ id: "chief", harness: "chief" }, {
@@ -459,7 +459,7 @@ export default function (pi) {
 }`);
     const errors: string[] = [];
     const adapter = createHarnessAdapter({ id: "extensions", harness: "pi" }, {
-      targetConfig: { harness: "pi" }, openInteraction: async () => { throw new Error("Unexpected interaction"); },
+      targetConfig: { harness: "pi" }, openApproval: async () => { throw new Error("Unexpected interaction"); },
       piSession: (input) => createPiAgent({ ...fixture.config, ...input, extensionPaths: [extension] }),
       log: (entry) => { if (entry.level === "error") errors.push(entry.error?.message ?? entry.message); },
     });
@@ -551,38 +551,4 @@ test("Chief summary rebuild fences forgotten history from native resume and Ledg
     assert.doesNotMatch(rebuilt, /forgotten-marker|aide-sync/);
     assert.equal(aide.findConversation("me")!.conversations.resource("me")!.status.batch!.phase, "done");
   } finally { await aide.close(); }
-});
-
-/** @case An immediate observation must release an SDK tool waiting on a Core Interaction before replacing its Batch. */
-test("Immediate input cancels a live Chief ask and starts a fresh Batch without a late answer resuming it", { timeout: 15000 }, async (t) => {
-  const fixture = await setup(t, (_request, index) => index === 0
-    ? { tool: "confirm", args: { title: "Original question", prompt: "Proceed with the old request?" } }
-    : index === 1 ? { tool: "say", args: { text: "Handled urgent request" } } : { text: "Old effects verified; urgent request handled" });
-  const home = join(fixture.config.cwd, "interrupt-home");
-  let aide: Aide;
-  aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },
-    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
-      chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }, pino({ level: "silent" }));
-  t.after(() => aide.close());
-  await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "me", id: "old", text: "Original request" }));
-  for (let i = 0; i < 200 && !aide.questions().some((q) => q.request.status === "pending"); i++) await Bun.sleep(10);
-  const question = aide.questions().find((q) => q.request.status === "pending")!;
-  assert.ok(question);
-  const scope = aide.session("me"), old = scope.conversations.resource("me")!.status.batch!;
-  assert.equal(old.phase, "waiting");
-  await scope.conversations.submit("urgent", { origin: "source", originId: "personal.environments", sessionId: "me", attention: "immediate", source: fixtureAddress("me"), text: "Urgent new evidence" });
-  await aide.settled();
-  const current = scope.conversations.resource("me")!;
-  assert.equal(current.status.batch!.phase, "done", JSON.stringify(current.status.batch!.result));
-  assert.notEqual(current.status.batch!.id, old.id);
-  assert.deepEqual(current.status.pendingInputIds, []);
-  assert.equal(aide.questions().find((q) => q.request.messageId === question.request.messageId)!.request.status, "cancelled");
-  assert.equal(aide.outputs().filter((m) => m.text === "Handled urgent request").length, 1);
-  assert.equal(scope.core.projection.activeTurns.size, 0);
-  const before = fixture.requests.length;
-  if (question.request.request.kind !== "question") throw new Error("Missing question");
-  const questionId = question.request.request.questions[0]!.questionId;
-  const late = await scope.core.resolveInteraction({ kind: "interaction_response", messageId: question.request.messageId },
-    async () => ({ kind: "question", outcome: "answered", answers: { [questionId]: ["accept"] } }));
-  assert.ok(!late.result); assert.equal(fixture.requests.length, before);
 });
