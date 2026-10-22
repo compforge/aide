@@ -1,30 +1,32 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { Verb } from "../src/host/plugin/verb.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import { ConnectorCalls } from "../src/host/connector/calls.ts";
+import { EventLedger } from "../src/host/event/ledger.ts";
+import { ENVELOPE_VERSION } from "../src/host/event/index.ts";
 import { ReconcileCapacity } from "../src/reconcile/queue.ts";
 import { emptyReconcileSnapshot } from "../src/host/plugin/reconcile-snapshot.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 
 test("Connector Verb persists dispatch and outcome; orphan recovery records uncertainty without replay", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-connector-verb-"));
-  const storage = new SessionStore(root);
-  const session = storage.createSession({ id: "source:work", cwd: root });
+  const connectorCalls = new ConnectorCalls(root);
+  const ledger = new EventLedger({ path: join(root, "connectors", "calls.jsonl") });
   let calls = 0;
   let release!: () => void;
   const connectors = { ...emptyConnectors, environments: { ...emptyConnectors.environments, list: async () => {
     calls++;
-    assert.equal(session.ledger.read().at(-1)!.kind, "connector.started");
+    assert.equal(ledger.read().at(-1)!.kind, "connector.started");
     if (calls === 2) throw new Error("provider unavailable");
     if (calls === 3) await new Promise<void>((resolve) => { release = resolve; });
     return [];
   } } };
-  const options = { session, connectors, capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot() };
+  const options = { connectorCalls, connectors, capacity: new ReconcileCapacity(1) };
   const verb = new Verb(options);
-  t.after(async () => { release?.(); verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
+  t.after(async () => { release?.(); verb.close(); rmSync(root, { recursive: true, force: true }); });
   const context = { pluginInstanceId: "personal", namespace: "v1" as const, executionId: "exec-1", conversationId: "conv" };
   await verb.beginRemote(context);
   const invoke = (timeoutMs: number) => verb.invoke(context, { verb: "connector", input: { request: { operation: "environments.list" }, timeoutMs } });
@@ -33,17 +35,42 @@ test("Connector Verb persists dispatch and outcome; orphan recovery records unce
   assert.equal((await invoke(10)).state, "timeout");
   release();
   verb.endRemote(context.executionId);
-  const settled = session.ledger.read().filter((event) => event.kind === "connector.settled");
+  const settled = ledger.read().filter((event) => event.kind === "connector.settled");
   assert.deepEqual(settled.map((event) => event.payload.outcome), ["success", "failure", "timeout"]);
-  session.appendEvent({ kind: "connector.started", source: { type: "plugin", pluginInstanceId: "personal" },
+  ledger.record({ v: ENVELOPE_VERSION, seq: 100, eventId: "orphan", ts: new Date().toISOString(), scope: { type: "application" }, kind: "connector.started", source: { type: "plugin", pluginInstanceId: "personal" },
     payload: { callId: "orphan", executionId: "exec-crashed", attributes: { conversationId: "conv" }, request: { operation: "environments.list" } } });
-  const reopened = storage.openSession(session.id);
-  const restarted = new Verb({ ...options, session: reopened });
+  verb.close();
+  const restarted = new Verb({ ...options, connectorCalls: new ConnectorCalls(root) });
   restarted.failOrphans(); restarted.failOrphans(); restarted.close();
-  await reopened.closeLogs();
   assert.equal(calls, 3);
-  const records = reopened.ledger.read().filter((event) => event.kind === "connector.settled").filter((event) => event.payload.callId === "orphan");
+  assert.equal(existsSync(join(root, "sessions")), false);
+  const records = ledger.read().filter((event) => event.kind === "connector.settled").filter((event) => event.payload.callId === "orphan");
   assert.equal(records.length, 1);
   assert.equal(records[0]!.payload.outcome, "interrupted");
-  assert.ok(reopened.ledger.read().every((event) => event.scope.aideSessionId === session.id));
+  assert.ok(ledger.read().every((event) => event.scope.type === "application"));
+});
+
+/** @case Existing external dispatches remain uncertain across migration and repeated restarts. */
+test("Connector recovery migrates old orphan facts once and rejects a competing writer", async (t) => {
+  const { HarnessFixtures } = await import("./harness-fixture.ts");
+  const { existsSync, readFileSync } = await import("node:fs");
+  const root = mkdtempSync(join(tmpdir(), "aide-connector-migration-"));
+  const old = new HarnessFixtures(root).create({ id: "aide:execution", cwd: root });
+  old.appendEvent({ kind: "connector.started", source: { type: "plugin", pluginInstanceId: "test" },
+    payload: { callId: "old-dispatch", executionId: "old-execution", request: { operation: "environments.list" } } });
+  const original = readFileSync(join(old.dir, "session.jsonl"), "utf8");
+  const first = new ConnectorCalls(root), competitor = new ConnectorCalls(root);
+  let reopened: ConnectorCalls | undefined;
+  t.after(async () => { first.close(); competitor.close(); reopened?.close(); await old.closeLogs(); rmSync(root, { recursive: true, force: true }); });
+  first.failOrphans();
+  assert.throws(() => competitor.failOrphans(), /already active/);
+  first.close();
+  reopened = new ConnectorCalls(root); reopened.failOrphans(); reopened.close();
+  const events = new EventLedger({ path: join(root, "connectors", "calls.jsonl") }).read();
+  assert.equal(events.length, 2);
+  assert.equal(events[0]!.kind, "connector.started");
+  assert.equal(events[1]!.kind, "connector.settled");
+  assert.deepEqual(events[1]!.payload, { callId: "old-dispatch", outcome: "interrupted", error: "Core restarted; external outcome is unknown" });
+  assert.equal(readFileSync(join(old.dir, "session.jsonl"), "utf8"), original);
+  assert.equal(existsSync(join(root, "connectors", "lock")), false);
 });

@@ -24,7 +24,7 @@ export type {
   ResourceLinkBlock,
   TextBlock,
 } from "../harness/prompt-blocks.ts";
-export const ENVELOPE_VERSION = 8 as const;
+export const ENVELOPE_VERSION = 9 as const;
 
 /**
  * 事实来源：回答“谁对这条 Event 负责”，不是 payload 中行为主体的角色，也不承载执行坐标。
@@ -41,7 +41,7 @@ export type EventSource =
   | { type: "schedule"; scheduleId: string };
 
 /** Event 只属于一个 AideSession ledger；scope 是归属与查询键，不是 payload 的授权范围。 */
-export type EventScope = { type: "session"; aideSessionId: string };
+export type EventScope = { type: "application" };
 
 export type SessionRunState = "running" | "idle" | "requires_action";
 

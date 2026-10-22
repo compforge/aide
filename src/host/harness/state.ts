@@ -1,4 +1,4 @@
-// 把事件流 reduce 成会话状态：TUI 渲染的唯一来源，崩溃恢复 = 重放 session.jsonl。
+// Harness execution projection reconstructed from persisted events.
 // upsert 语义保证重放幂等。见 docs/workflow.md“Adapter 归一”。
 
 import type {
@@ -34,8 +34,8 @@ import {
   type HarnessInputStatus,
 } from "../harness/input.ts";
 import { harnessTaskKey } from "../harness/task.ts";
-import { applyInputDelivery, applyMessageReplies, placeMessage, refreshConsumedSummary } from "./message-relations.ts";
-import type { InputState, OutputState, InputRequestState, InputResponseState } from "./message-state.ts";
+import { applyInputDelivery, applyMessageReplies, placeMessage, refreshConsumedSummary } from "../store/message-relations.ts";
+import type { InputState, OutputState, InputRequestState, InputResponseState } from "../store/message-state.ts";
 import { actorOf, HUMAN_ACTOR } from "../message/actor.ts";
 import { inputMessage, inputRequestMessage, inputResponseMessage } from "../message/project.ts";
 import { getMessage } from "../message/query.ts";
@@ -191,7 +191,7 @@ export interface HarnessInputState {
   harnessInvocationId?: string;
 }
 
-export interface SessionState {
+export interface HarnessState {
   /** 派生值：pending Approval 或任一 turn requires_action ⇒ requires_action；activeTurns 空 ⇒ idle；否则 running。 */
   runState: SessionRunState;
   lastStopReason?: StopReason;
@@ -247,7 +247,7 @@ export interface SessionState {
   lastSeq: number;
 }
 
-export function emptySessionState(): SessionState {
+export function emptyHarnessState(): HarnessState {
   return {
     runState: "idle",
     activeInvocations: new Map(),
@@ -287,7 +287,7 @@ function roleOfKind(kind: string): MessageRole {
 }
 
 function getOrCreateMessage(
-  state: SessionState,
+  state: HarnessState,
   id: string,
   role: MessageRole,
   createdAt: string,
@@ -330,7 +330,7 @@ function getOrCreateMessage(
 }
 
 function getOrCreateToolCall(
-  state: SessionState,
+  state: HarnessState,
   id: string,
   turnId?: string,
   harness?: string,
@@ -360,7 +360,7 @@ function getOrCreateToolCall(
 }
 
 function applyMessageUpsert(
-  state: SessionState,
+  state: HarnessState,
   ev: EventEnvelope<"user_message" | "agent_message" | "agent_thought">,
   role: MessageRole,
 ): void {
@@ -438,7 +438,7 @@ function applyMessageUpsert(
 }
 
 function applyMessageChunk(
-  state: SessionState,
+  state: HarnessState,
   ev: EventEnvelope<"user_message_chunk" | "agent_message_chunk" | "agent_thought_chunk">,
   role: MessageRole,
 ): void {
@@ -473,7 +473,7 @@ function applyMessageChunk(
 
 /** @spec Queue admission seeds Input content once; lifecycle snapshots never overwrite an existing Message. */
 function applyHarnessInputUpdate(
-  state: SessionState,
+  state: HarnessState,
   ev: EventEnvelope<"harness_input.updated">,
 ): void {
   const p = ev.payload;
@@ -514,7 +514,7 @@ function applyHarnessInputUpdate(
   });
 }
 
-function applyToolCallUpdate(state: SessionState, ev: EventEnvelope<"tool_call_update">): void {
+function applyToolCallUpdate(state: HarnessState, ev: EventEnvelope<"tool_call_update">): void {
   const p = ev.payload;
   const tc = getOrCreateToolCall(
     state,
@@ -535,7 +535,7 @@ function applyToolCallUpdate(state: SessionState, ev: EventEnvelope<"tool_call_u
 }
 
 /** 该 turn 是否还有未决 Approval——per-turn requires_action 的派生依据。 */
-function hasPendingBlocking(state: SessionState, turnId: string): boolean {
+function hasPendingBlocking(state: HarnessState, turnId: string): boolean {
   for (const approval of state.approvals.values()) {
     if (approval.request.invocationId === turnId && approval.request.status === "pending") return true;
   }
@@ -547,7 +547,7 @@ function hasPendingBlocking(state: SessionState, turnId: string): boolean {
  * projection 必须产出 requires_action）。requires_action 比 running 优先上浮——它意味着
  * "没有用户动作会话无法完整推进"；未归属 turn 的 setup Approval 也不能漏。
  */
-function deriveRunState(state: SessionState): SessionRunState {
+function deriveRunState(state: HarnessState): SessionRunState {
   if ([...state.approvals.values()].some((approval) => approval.request.status === "pending")) return "requires_action";
   if (state.activeInvocations.size === 0) return "idle";
   return [...state.activeInvocations.values()].some((turn) => turn.state === "requires_action")
@@ -555,7 +555,7 @@ function deriveRunState(state: SessionState): SessionRunState {
     : "running";
 }
 
-function removePlan(state: SessionState, planId: string): void {
+function removePlan(state: HarnessState, planId: string): void {
   state.plans.delete(planId);
   for (let index = state.timeline.length - 1; index >= 0; index--) {
     const entry = state.timeline[index];
@@ -566,7 +566,7 @@ function removePlan(state: SessionState, planId: string): void {
   }
 }
 
-export function applyEvent(state: SessionState, ev: AnyEventEnvelope): SessionState {
+export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessState {
   state.lastSeq = ev.seq;
   switch (ev.kind) {
     case "state_update": {
@@ -937,7 +937,7 @@ function eventTargetId(ev: Pick<AnyEventEnvelope, "harnessTargetId">): string | 
 
 /** 取或建 Target 状态槽；所有 Target-scoped 快照只经过这一处归属。 */
 function targetScoped(
-  state: SessionState,
+  state: HarnessState,
   ev: Pick<AnyEventEnvelope, "harnessTargetId" | "harness">,
 ): HarnessTargetState | undefined {
   const targetId = eventTargetId(ev);
@@ -961,7 +961,7 @@ export function contextTargetStateKey(contextId: string, harnessTargetId: string
 }
 
 function laneTargetScoped(
-  state: SessionState,
+  state: HarnessState,
   ev: Pick<AnyEventEnvelope, "harnessTargetId" | "contextId" | "harness">,
 ): ContextTargetState | undefined {
   const contextId = ev.contextId;
@@ -983,7 +983,7 @@ function laneTargetScoped(
 }
 
 function executionScopes(
-  state: SessionState,
+  state: HarnessState,
   ev: Pick<AnyEventEnvelope, "harnessTargetId" | "contextId" | "harness">,
 ): Array<HarnessTargetState | ContextTargetState> {
   return [targetScoped(state, ev), laneTargetScoped(state, ev)].filter(
@@ -992,7 +992,7 @@ function executionScopes(
 }
 
 /** request 到场：所属 turn 派生为 requires_action（blocking request 挂起该 turn） */
-function flagRequiresAction(state: SessionState, turnId: string | undefined): void {
+function flagRequiresAction(state: HarnessState, turnId: string | undefined): void {
   const turn = turnId ? state.activeInvocations.get(turnId) : undefined;
   if (turn) turn.state = "requires_action";
 }
@@ -1001,7 +1001,7 @@ function flagRequiresAction(state: SessionState, turnId: string | undefined): vo
  * request 收口：仅当该 turn 已无其他 pending blocking request 时恢复 running——
  * 同 turn 并发多个审批时，应答一个不能提前撤掉 requires_action。
  */
-function unflagRequiresAction(state: SessionState, turnId: string | undefined): void {
+function unflagRequiresAction(state: HarnessState, turnId: string | undefined): void {
   const turn = turnId ? state.activeInvocations.get(turnId) : undefined;
   if (turn && turn.state === "requires_action" && !hasPendingBlocking(state, turnId!)) {
     turn.state = "running";
@@ -1017,8 +1017,8 @@ function accumulateUsage(total: UsageTotal, u: UsageUpdate): void {
   if (u.isEstimated) total.hasEstimated = true;
 }
 
-export function reduceEvents(events: Iterable<AnyEventEnvelope>): SessionState {
-  const state = emptySessionState();
+export function reduceEvents(events: Iterable<AnyEventEnvelope>): HarnessState {
+  const state = emptyHarnessState();
   for (const ev of events) applyEvent(state, ev);
   return state;
 }
@@ -1028,7 +1028,7 @@ export function reduceEvents(events: Iterable<AnyEventEnvelope>): SessionState {
  * 并发 turn 下"别人 idle"不能把自己的流式状态打断。turnId 缺失（旧数据 /
  * 非 turn 事件）时回退"会话存在任一运行 turn"。
  */
-export function isInvocationRunning(state: SessionState, turnId: string | undefined): boolean {
+export function isInvocationRunning(state: HarnessState, turnId: string | undefined): boolean {
   if (turnId === undefined) return state.activeInvocations.size > 0;
   return state.activeInvocations.has(turnId);
 }

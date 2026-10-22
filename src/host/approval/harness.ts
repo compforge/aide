@@ -2,7 +2,7 @@ import type { ApprovalContext } from "../harness/adapter.ts";
 import { resolutionEvent, requestResult } from "./resolution.ts";
 import { createInputRequest } from "../message/project.ts";
 import { actorOf } from "../message/actor.ts";
-import type { SessionState } from "../store/reduce.ts";
+import type { HarnessState } from "../harness/state.ts";
 import type { AnyEventDraft, EventSource } from "../event/index.ts";
 import type {
   ApprovalDraft,
@@ -39,7 +39,7 @@ export class HarnessApprovalContinuations<
   constructor(
     private readonly appendEvent: AppendEvent<TBinding>,
     private readonly changed: () => void,
-    private readonly projection: () => SessionState,
+    private readonly projection: () => HarnessState,
   ) {}
 
   open(

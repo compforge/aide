@@ -10,7 +10,7 @@ import { INPUT_TYPE, type InputSpec } from "../plugins/personal/input/model.ts";
 import { Manager, type ManagerOptions } from "../src/host/plugin/manager.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { inputPrinter } from "../plugins/personal/input/printer.ts";
 import { executeCommand } from "./fixtures/command-context.ts";
 import { definition } from "./fixtures/resource-definition.ts";
@@ -22,10 +22,10 @@ const snapshot = (value = "hello"): Resource<{ value: string }, { phase: string 
 });
 function fixture(t: TestContext, options: Partial<ManagerOptions> = {}) {
   const root = mkdtempSync(join(tmpdir(), "aide-printer-"));
-  const session = new SessionStore(root).createSession({ id: "printer-session", cwd: root });
+  const session = new HarnessFixtures(root).create({ id: "printer-session", cwd: root });
   const instances = new PluginInstanceStore({ home: resourceHome(session.dir) });
   const errors: unknown[] = [];
-  const manager = new Manager({ session, instances, onActivationError: ({ error }) => errors.push(error), ...options });
+  const manager = new Manager({ log: entry => session.log(entry), instances, onActivationError: ({ error }) => errors.push(error), ...options });
   t.after(async () => { await manager.close(); await session.closeLogs(); rmSync(root, { force: true, recursive: true }); });
   return { root, session, instances, manager, errors,
     add(id = "first", pluginId = "tests/printer", config = {}) {

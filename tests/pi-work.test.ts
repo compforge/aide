@@ -20,7 +20,7 @@ import { WorkService, AppendInputSchema, type WorkDefinition } from "../plugins/
 import { workType } from "../plugins/personal/resources.ts";
 import { TASK_TYPE } from "../plugins/personal/task/model.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
@@ -29,7 +29,7 @@ const task: WorkDefinition = { kind: "task", title: "检查仓库", instruction:
 function setup(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-work-tools-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const session = new SessionStore(root).createSession({ cwd: root });
+  const session = new HarnessFixtures(root).create({ cwd: root });
   let writes = 0;
   const resources = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
   resources.storage.register("personal", personalDefinitions);

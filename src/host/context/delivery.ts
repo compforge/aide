@@ -5,23 +5,14 @@ import type {
   EventEnvelope,
 } from "../event/index.ts";
 
-/**
- * ContextSource 先只承载已经被两种内置 Harness 共同使用的 AideSession 历史。
- * 后续 Board / Plugin / Resource 各自增加 kind，不为第一种来源预造 registry。
- */
+/** History belongs to one resource/controller context; Target is carried by the envelope. */
 export type ContextSource = {
-  kind: "session_history";
-  /** owner 内稳定；同一 AideSession 的正典历史始终使用这个 key。 */
+  kind: "context_history";
   key: "history";
-  owner: { type: "aide_session"; aideSessionId: string };
+  owner: { type: "execution_context"; contextId: string };
 };
-
-export function sessionHistoryContextSource(aideSessionId: string): ContextSource {
-  return {
-    kind: "session_history",
-    key: "history",
-    owner: { type: "aide_session", aideSessionId },
-  };
+export function executionHistorySource(contextId: string): ContextSource {
+  return { kind: "context_history", key: "history", owner: { type: "execution_context", contextId } };
 }
 
 /** 一次实际组装出的 source 内容；范围是 `(afterSeq, throughSeq]`。 */

@@ -40,7 +40,13 @@ export function readExecutionEvents(records: readonly unknown[]): AnyEventEnvelo
       const { laneId: previousContext, newLane: _newLane, ...current } = payload;
       payload = { ...current, ...(current.contextId !== undefined || previousContext === undefined ? {} : { contextId: previousContext }) };
     }
-    return { ...envelope, v: ENVELOPE_VERSION,
+    if (event.kind === "_aide_context_snapshot" && contextId) {
+      const source = payload.source as { kind?: string } | undefined;
+      if (source?.kind === "session_history") payload = { ...payload, source: {
+        kind: "context_history", key: "history", owner: { type: "execution_context", contextId },
+      } };
+    }
+    return { ...envelope, v: ENVELOPE_VERSION, scope: { type: "application" },
       kind: event.kind === "_aide_turn_summary" ? "_aide_invocation_summary" : event.kind,
       ...(invocationId === undefined ? {} : { invocationId }),
       ...(contextId === undefined ? {} : { contextId }), payload,

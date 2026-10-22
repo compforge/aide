@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventLedger } from "../src/host/event/ledger.ts";
 import { ENVELOPE_VERSION } from "../src/host/event/index.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { buildTargetCatchUpContext } from "../src/host/context/mention.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -11,7 +11,7 @@ import { readExecutionEvents } from "../src/host/event/legacy.ts";
 import { readExecutionContexts } from "../src/host/store/legacy.ts";
 
 const record = (seq: number, kind: string, payload: object, extra: object = {}) => ({
-  v: 7, eventId: `event-${seq}`, seq, ts: "2026-10-22T00:00:00.000Z", scope: { type: "session", aideSessionId: "aide:execution" },
+  v: 7, eventId: `event-${seq}`, seq, ts: "2026-10-22T00:00:00.000Z", scope: { type: "application" },
   source: { type: "aide" }, kind, payload, ...extra,
 });
 
@@ -55,7 +55,7 @@ test("standalone historic execution IDs remain distinct and malformed envelopes 
 });
 
 // @case Legacy files remain readable without rewriting provider evidence or old bytes.
-test("journal reopens v7 records and appends v8 invocations without a second execution identity", async (t) => {
+test("journal reopens v7 records and appends current invocations without a second execution identity", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-legacy-journal-"));
   const path = join(root, "session.jsonl");
   const old = [
@@ -67,7 +67,7 @@ test("journal reopens v7 records and appends v8 invocations without a second exe
   const ledger = new EventLedger({ path });
   assert.equal(ledger.read()[1]!.invocationId, "call");
   ledger.record({ ...record(3, "state_update", { state: "idle", stopReason: "end_turn" }),
-    v: ENVELOPE_VERSION, source: { type: "aide" }, scope: { type: "session", aideSessionId: "aide:execution" },
+    v: ENVELOPE_VERSION, source: { type: "aide" }, scope: { type: "application" },
     kind: "state_update", payload: { state: "idle", stopReason: "end_turn" }, invocationId: "next-call", contextId: "resource" });
   const written = readFileSync(path, "utf8");
   assert.ok(written.startsWith(old));
@@ -81,7 +81,7 @@ test("journal reopens v7 records and appends v8 invocations without a second exe
 // @case Native context restoration never imports another resource or bypasses a reset boundary.
 test("catch-up isolates resource and target history, honors cutoffs and keeps the latest budgeted history", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-isolated-history-"));
-  const session = new SessionStore(root).createSession({ cwd: root });
+  const session = new HarnessFixtures(root).create({ cwd: root });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   session.setExecutionContext("own", { contextId: "own", harnessSessions: {} });
   const summary = (contextId: string, target: string, text: string) => session.appendEvent({

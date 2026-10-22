@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import type { ChatMessage, MessagePage, MessageSearchQuery, PluginLogger } from "@compforge/aide-plugin";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
@@ -40,12 +40,12 @@ const watch = (patch: Partial<MessageWatch> = {}) => ({ ...messageWatch(MessageW
 
 function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "mention") {
   const root = mkdtempSync(join(tmpdir(), "aide-message-source-"));
-  const sessions = new SessionStore(root); const session = sessions.createSession({ id: MESSAGE_SESSION, cwd: root });
+  const sessions = new HarnessFixtures(root); const session = sessions.create({ id: MESSAGE_SESSION, cwd: root });
   const inputs = new InputStore(root);
   let store = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
   store.storage.register("personal", personalDefinitions);
   const catalog = openPersonCatalog(root, person, pino({ level: "silent" }), () => {});
-  const client = (session: import("../src/host/store/store.ts").SessionHandle) => createResourceClient(store, undefined, undefined, personalAdmission(inputs, new OutputStore(resourceHome(session.dir))));
+  const client = (session: import("./harness-fixture.ts").HarnessFixture) => createResourceClient(store, undefined, undefined, personalAdmission(inputs, new OutputStore(resourceHome(session.dir))));
   let resources = client(session);
   store.create({ type: MESSAGE_SOURCE_TYPE, name: "messages", spec, status: {} });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
@@ -70,7 +70,7 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
     incoming(fn: typeof incoming) { incoming = fn; }, history(rows: ChatMessage[]) { history = rows; },
     failContext(value: boolean) { contextError = value; },
     async restart() {
-      const reopened = sessions.openSession(session.id); t.after(() => reopened.closeLogs());
+      const reopened = sessions.open(session.id); t.after(() => reopened.closeLogs());
       store = new PluginResourceStore({ home: resourceHome(reopened.dir), pluginInstanceId: "personal" });
       resources = client(reopened);
     },

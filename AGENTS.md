@@ -35,8 +35,12 @@ src/
         printer.ts         # describe / summarize 调用与默认展示
       runner/              # 宿主侧 Supervisor / IPC Client / 注册代理
     controller/            # HarnessInvocation 执行、上下文互斥与审批
-    harness/               # 模块配置契约与启动解析、Harness 注册、Adapter 与提供方协议
-    store/                 # Session、Ledger 与执行投影
+    harness/               # Harness 注册、执行记录、Adapter 与提供方协议
+      calls.ts             # 资源调用的持久事实、等待与取消；Manager 只依赖能力接口
+      store.ts             # HarnessStore：执行事件与资源上下文绑定
+      state.ts             # 执行事件的状态投影
+    connector/             # Connector 调用事实、未知结果恢复与独立写入租约
+    store/                 # 历史格式兼容、文件租约与消息投影辅助
   runner/                  # Plugin 注册、Watch、队列、重试、Source 与 Reconcile
   reconcile/               # 共用的去重队列、容量与定时机制
   protocol/                # Host / Runner 共用 IPC 与 verb 契约
@@ -109,7 +113,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。Connector 声明访问能力，`plugins.<plugin>.sources` 声明观察策略；Personal 只启动显式配置的环境、Lark 与需求 Source。环境发现只读配置，不代表连通性、健康或操作授权。
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
-- ApplicationRuntime 组合插件 Manager 与 ExecutionService。资源、调度键和实例配置不依附 Session；CoreSession 已移除。底座没有 Lane / Turn；一次执行统一使用 HarnessInvocation，资源上下文保存原生绑定。旧日志只在读取边界转换，提供方原生标识留在 Adapter。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
+- ApplicationRuntime 组合插件 Manager 与 ExecutionService。Manager 只接收 HarnessExecution 能力与独立 LogSink，不读取执行存储。Harness 按需打开 HarnessStore；Connector 自持调用记录。资源、调度键和实例配置不依附 Session；CoreSession、SessionStore 和 SessionHandle 已移除。底座没有 Lane / Turn；一次执行统一使用 HarnessInvocation，资源上下文保存原生绑定。旧日志只在读取边界转换，提供方原生标识留在 Adapter。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
 - ChannelDefinition / SourceDefinition 声明来源身份；绑定的提交入口补齐来源，Source 同时记录资源实例引用。Input.text 保存收到的事实或请求，不保存 Chief 的处理指令。Channel / Source 输入统一从 Input 投影，Output 独立承载回复与通知；展示通过应用装配的定义目录读取名称和图标，不解释 Source 的业务数据。
 - Input / Output 由 Personal 定义；底座不预注册业务资源或 Session / Turn / Target 投影。Input.sessionId 仅是来源话题线索。Personal Route 监听 Input，规则命中立即追加，未命中由独立 Route Batch Controller 调专用 Agent 分类；跨话题操作直接访问全局资源客户端。
 - Chief 对已有 Work 使用 append_input 投递事实或请求，输入队列与消费进度由 Work 持久保存；Task / Routine Reconcile 决定目标与执行状态，Chief 保留创建和删除资源的能力。
@@ -148,3 +152,9 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - [Channel](docs/channel/README.md)：Web 与 Lark；[Web](docs/channel/web.md)、[Lark](docs/channel/lark.md)。
 - [Connector 与 Source](docs/connector/README.md)：关注范围、连接器配置和覆盖限制。
 - [部署与诊断](docs/deployment.md)、[真实验收](docs/e2e.md)。
+
+## 定向验证
+
+根目录 `make test` 接收空格分隔的 `TEST_FILES`，路径相对于仓库根目录；未传或空值执行全套测试。devloop 先选择受影响的 Component，再自动传入文件列表，通常不手动指定。Bun 接收明确文件路径，避免 `npm test -- ...` 在原有 `tests` 参数之外追加筛选条件导致仍执行全量。
+
+`make lint` 接收 `LINT_FILES`，但当前静态检查只有 TypeScript typecheck，会保留 tsconfig 并扩展到整个 Component 的类型依赖图。`packages/plugin` 使用自己的 tsconfig；没有包内测试，`make test` 清空文件选择后委托根目录的集成测试。未配置 formatter，因此不添加空操作的 `make fix`。

@@ -10,7 +10,7 @@ import { OUTPUT_TYPE, type OutputSpec } from "../plugins/personal/output/model.t
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputPrinter } from "../plugins/personal/output/printer.ts";
 import { outputView } from "../src/output.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ResourceCapacityError, ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
@@ -21,7 +21,7 @@ import type { LarkTransport } from "../src/channel/lark-client.ts";
 
 async function setup(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-output-"));
-  const session = new SessionStore(root).createSession({ id: "owner", cwd: root });
+  const session = new HarnessFixtures(root).create({ id: "owner", cwd: root });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   const conversations = new ConversationStore(session), outputs = conversations.outputStore;
   const conversation = await conversations.ensure("topic");

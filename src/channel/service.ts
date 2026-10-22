@@ -1,7 +1,7 @@
 import type { OutputView } from "../output.ts";
 import type { ConversationStore } from "../../plugins/personal/conversation/store.ts";
 import type { ApplicationRuntime } from "../host/runtime/index.ts";
-import type { HarnessInvocationSnapshot } from "../host/plugin/harness-invocation.ts";
+import type { HarnessInvocationSnapshot } from "../host/harness/invocation.ts";
 import type { InputReceipt, InputSpec } from "../../plugins/personal/input/model.ts";
 import type { Incoming } from "./message.ts";
 

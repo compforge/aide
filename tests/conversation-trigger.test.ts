@@ -1,13 +1,13 @@
 import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { ConversationStore, fixtureBatch } from "./conversation-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { conversationTrigger, ConversationTriggerSchema } from "../plugins/personal/conversation/trigger.ts";
@@ -47,16 +47,15 @@ test("Web switches one Conversation, persists its deadline and cannot change the
   assert.deepEqual(rows.find((row) => row.id === "a")!.trigger, { enabled: true, intervalSeconds: 3600 });
   assert.equal(rows.find((row) => row.id === "b")!.trigger.enabled, false);
   await aide.close();
-  const session = new SessionStore(root).openSession("aide:execution");
+  const session = { dir: root };
   const reopened = new ConversationStore(session);
   assert.equal(reopened.resource("a")!.status.nextTriggerAt, due);
-  assert.equal("heartbeat" in session.meta, false);
-  await session.closeLogs();
+  assert.equal(existsSync(join(root, "sessions")), false);
 });
 
 test("Runner wakes Conversation without an Input; a long timer coalesces and disabling keeps its result", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-conv-trigger-runner-"));
-  const session = new SessionStore(root).createSession({ id: "timer", cwd: root });
+  const session = new HarnessFixtures(root).create({ id: "timer", cwd: root });
   const conversations = new ConversationStore(session);
   await configure(conversations, "timer", 1, Date.now() - 20_000);
   let ticks = 0;
@@ -84,7 +83,7 @@ test("Runner wakes Conversation without an Input; a long timer coalesces and dis
 
 test("Restart coalesces due triggers, hides quiet results and does not replay interrupted activations", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-conv-trigger-recovery-"));
-  const session = new SessionStore(root).createSession({ id: "quiet", cwd: root });
+  const session = new HarnessFixtures(root).create({ id: "quiet", cwd: root });
   const conversations = new ConversationStore(session);
   const c = await configure(conversations, "quiet", 3600, Date.now() - 86_400_000);
   await createResourceClient(conversations.resources).patchStatus(c, { batch: fixtureBatch({ id: "timer:interrupted", phase: "running", timerAt: new Date(0).toISOString(), executionId: "old" }) });

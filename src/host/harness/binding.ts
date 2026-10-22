@@ -19,7 +19,7 @@ import {
 } from "./adapter.ts";
 import { newId } from "../event/ids.ts";
 import type { ConfigValue, SessionConfigOption } from "../event/index.ts";
-import type { SessionHandle } from "../store/store.ts";
+import type { HarnessStore } from "../harness/store.ts";
 import { sessionIdResumeState, type HarnessResumeState } from "./resume.ts";
 import { createHarnessLaunchSnapshot, type HarnessTarget } from "./target.ts";
 
@@ -28,20 +28,14 @@ export interface HarnessBindingOptions {
   target: HarnessTarget;
   cwd: string;
   adapter: HarnessAdapter;
-  session: SessionHandle;
+  records: HarnessStore;
   eventSink: HarnessEventSink;
   setupInvocationId?: string;
   modelPreference?: string;
   effortPreference?: string;
 }
 
-/**
- * 一个 Lane × HarnessTarget 在当前 AideSession 中的 live 绑定：
- * Lane 可跨 Target 接力；每个 Target 在该 Lane 内拥有自己的 Adapter 与 HarnessSession。
- *
- * 绑定拥有启动、resume、配置恢复与关闭；Turn 调度、上下文注入和 Event 持久化仍由
- * Controller 负责。
- */
+/** Owns a live resource-context × Target binding: native startup, resume, configuration and close. */
 export class HarnessBinding {
   readonly contextId: string;
   readonly target: HarnessTarget;
@@ -60,7 +54,7 @@ export class HarnessBinding {
   private starting?: Promise<void>;
   private closePromise?: Promise<void>;
   private closing = false;
-  private readonly session: SessionHandle;
+  private readonly records: HarnessStore;
   private readonly eventSink: HarnessEventSink;
   private readonly modelPreference?: string;
   private readonly effortPreference?: string;
@@ -71,7 +65,7 @@ export class HarnessBinding {
     this.target = options.target;
     this.cwd = options.cwd;
     this.adapter = options.adapter;
-    this.session = options.session;
+    this.records = options.records;
     this.eventSink = options.eventSink;
     this.setupInvocationId = options.setupInvocationId;
     this.modelPreference = options.modelPreference;
@@ -132,11 +126,11 @@ export class HarnessBinding {
     } else {
       throw new Error(`${this.target.id} does not support /model`);
     }
-    const targetMeta = this.session.meta.harnessTargets[this.target.id] ?? {
+    const targetMeta = this.records.meta.harnessTargets[this.target.id] ?? {
       harnessTargetId: this.target.id,
       harness: this.target.harness,
     };
-    this.session.setHarnessTarget(this.target.id, {
+    this.records.setHarnessTarget(this.target.id, {
       ...targetMeta,
       harnessTargetId: this.target.id,
       harness: this.target.harness,
@@ -149,8 +143,8 @@ export class HarnessBinding {
       throw new Error(`${this.target.id} does not support combined model/effort configuration`);
     }
     await this.adapter.setModelConfiguration(this.ref, configuration);
-    this.session.setHarnessTarget(this.target.id, {
-      ...this.session.meta.harnessTargets[this.target.id],
+    this.records.setHarnessTarget(this.target.id, {
+      ...this.records.meta.harnessTargets[this.target.id],
       harnessTargetId: this.target.id,
       harness: this.target.harness,
       model: configuration.model === "default" ? undefined : configuration.model,
@@ -195,11 +189,11 @@ export class HarnessBinding {
     } else {
       throw new Error(`${this.target.id} does not support /effort`);
     }
-    const targetMeta = this.session.meta.harnessTargets[this.target.id] ?? {
+    const targetMeta = this.records.meta.harnessTargets[this.target.id] ?? {
       harnessTargetId: this.target.id,
       harness: this.target.harness,
     };
-    this.session.setHarnessTarget(this.target.id, {
+    this.records.setHarnessTarget(this.target.id, {
       ...targetMeta,
       harnessTargetId: this.target.id,
       harness: this.adapter.harness,
@@ -269,7 +263,7 @@ export class HarnessBinding {
       throw new Error(`${this.target.id} does not support session config`);
     }
     const snapshot = await this.adapter.setConfig(this.ref, configId, value);
-    const targetMeta = this.session.meta.harnessTargets[this.target.id] ?? {
+    const targetMeta = this.records.meta.harnessTargets[this.target.id] ?? {
       harnessTargetId: this.target.id,
       harness: this.adapter.harness,
     };
@@ -280,7 +274,7 @@ export class HarnessBinding {
       if (!option || option.type !== "select" || option.value === "default") return undefined;
       return option.value;
     };
-    this.session.setHarnessTarget(this.target.id, {
+    this.records.setHarnessTarget(this.target.id, {
       ...targetMeta,
       harnessTargetId: this.target.id,
       harness: this.adapter.harness,
@@ -317,27 +311,27 @@ export class HarnessBinding {
   }
 
   private preferredModel(): string | undefined {
-    return this.session.meta.harnessTargets[this.target.id]?.model ?? this.modelPreference;
+    return this.records.meta.harnessTargets[this.target.id]?.model ?? this.modelPreference;
   }
 
   private preferredEffort(): string | undefined {
-    return this.session.meta.harnessTargets[this.target.id]?.effort ?? this.effortPreference;
+    return this.records.meta.harnessTargets[this.target.id]?.effort ?? this.effortPreference;
   }
 
   private preferredMode(): string | undefined {
-    return this.session.meta.harnessTargets[this.target.id]?.mode;
+    return this.records.meta.harnessTargets[this.target.id]?.mode;
   }
 
   private async open(): Promise<void> {
     try {
-      const existing = this.session.meta.contexts[this.contextId]?.harnessSessions[this.target.id];
+      const existing = this.records.meta.contexts[this.contextId]?.harnessSessions[this.target.id];
       const configAdapter = isSessionConfigurable(this.adapter) ? this.adapter : undefined;
       const modelAdapter = isModelConfigurable(this.adapter) ? this.adapter : undefined;
       const effortAdapter = isEffortConfigurable(this.adapter) ? this.adapter : undefined;
       let model = configAdapter || modelAdapter ? this.preferredModel() : undefined;
       const effort = configAdapter || effortAdapter ? this.preferredEffort() : undefined;
       const mode = configAdapter ? this.preferredMode() : undefined;
-      this.session.setHarnessTarget(this.target.id, {
+      this.records.setHarnessTarget(this.target.id, {
         harnessTargetId: this.target.id,
         harness: this.target.harness,
         ...(model === undefined ? {} : { model }),
@@ -352,7 +346,7 @@ export class HarnessBinding {
         effort,
       });
       // open 前落下实际配置：即使进程在 spawn/initialize 期间崩溃，也能解释这次启动。
-      this.session.setContextHarnessSession(this.contextId, this.target.id, {
+      this.records.setContextHarnessSession(this.contextId, this.target.id, {
         ...existing,
         harness: this.adapter.harness,
         launchSnapshot,
@@ -382,7 +376,7 @@ export class HarnessBinding {
       }
       if (isModelReadable(this.adapter)) {
         model = this.adapter.currentModel(this.ref) ?? undefined;
-        this.session.setHarnessTarget(this.target.id, {
+        this.records.setHarnessTarget(this.target.id, {
           harnessTargetId: this.target.id,
           harness: this.target.harness,
           ...(model === undefined ? {} : { model }),
@@ -402,8 +396,8 @@ export class HarnessBinding {
         else await effortAdapter?.setEffort(this.ref, effort);
       }
       if (mode) await configAdapter?.setConfig(this.ref, "mode", mode);
-      this.session.setContextHarnessSession(this.contextId, this.target.id, {
-        ...this.session.meta.contexts[this.contextId]?.harnessSessions[this.target.id],
+      this.records.setContextHarnessSession(this.contextId, this.target.id, {
+        ...this.records.meta.contexts[this.contextId]?.harnessSessions[this.target.id],
         harness: this.adapter.harness,
         launchSnapshot,
         harnessSessionId: this.sessionIdentity()?.id,
@@ -427,8 +421,8 @@ export class HarnessBinding {
       );
     }
     this.publishedBinding = binding;
-    const existing = this.session.meta.contexts[this.contextId]?.harnessSessions[this.target.id];
-    this.session.setContextHarnessSession(this.contextId, this.target.id, {
+    const existing = this.records.meta.contexts[this.contextId]?.harnessSessions[this.target.id];
+    this.records.setContextHarnessSession(this.contextId, this.target.id, {
       ...existing,
       harness: this.adapter.harness,
       harnessSessionId: binding.identity.id,

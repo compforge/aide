@@ -3,16 +3,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ReconcileHarnessInvocation } from "../src/host/plugin/harness-invocation.ts";
-import { HarnessInvocationStore } from "../src/host/plugin/harness-invocation.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import type { ReconcileHarnessInvocation } from "../src/host/harness/invocation.ts";
+import { HarnessInvocationStore } from "../src/host/harness/invocation.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 
 const roots: string[] = [];
 
 function session() {
   const root = mkdtempSync(join(tmpdir(), "aide-harness-invocation-"));
   roots.push(root);
-  const journal = new SessionStore(root).createSession({ cwd: "/repo" });
+  const journal = new HarnessFixtures(root).create({ cwd: "/repo" });
   journal.setExecutionContext("resource-context", { contextId: "resource-context", harnessSessions: {} });
   return journal;
 }

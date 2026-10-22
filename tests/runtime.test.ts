@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -57,6 +57,7 @@ test("Application runtime reconciles generic shared resources and metadata witho
   t.after(async () => { await runtime.close(); });
   await runtime.start();
   assert.deepEqual(failures, []);
+  assert.equal(existsSync(join(root, "sessions")), false);
   assert.equal(runtime.plugins.isInstanceActive("example"), true);
   const client = runtime.plugins.resourceClient("example");
   for (const kind of ["Input", "Output", "Turn", "Session", "Target"]) {
@@ -76,6 +77,7 @@ test("Application runtime reconciles generic shared resources and metadata witho
   const restored = await runtime.plugins.resourceClient("example").get(ref);
   assert.equal(restored?.metadata.uid, created.metadata.uid);
   assert.equal(restored?.metadata.labels?.phase, "changed");
+  assert.equal(existsSync(join(root, "sessions")), false);
 });
 
 test("Resource commits publish no writes on rollback and isolate observer failures", async (t) => {
@@ -111,12 +113,12 @@ test("Execution context follows resource incarnation and controller, independent
 test("Reconcile snapshots contain configuration only and execution views require explicit IDs", async (t) => {
   const { createReconcileSnapshot } = await import("../src/host/plugin/reconcile-snapshot.ts");
   const { ExecutionService } = await import("../src/host/runtime/execution.ts");
-  const { SessionStore } = await import("../src/host/store/store.ts");
+  const { HarnessFixtures } = await import("./harness-fixture.ts");
   const root = home(t);
-  const journal = new SessionStore(root).createSession({ cwd: root });
+  const journal = new HarnessFixtures(root).create({ id: "aide:execution", cwd: root });
   for (const turnId of ["mine", "unrelated"]) journal.appendEvent({ kind: "_aide_invocation_summary", source: { type: "aide" },
     payload: { invocationId: turnId, finalText: turnId, toolCalls: [] } });
-  const executions = new ExecutionService(journal, { resolveTarget: () => undefined, mentionBudgetChars: 0, createAdapter: () => { throw new Error("No execution requested"); } });
+  const executions = new ExecutionService(root, { cwd: root, resolveTarget: () => undefined, mentionBudgetChars: 0, createAdapter: () => { throw new Error("No execution requested"); } });
   t.after(() => executions.close());
   const snapshot = createReconcileSnapshot({ cwd: root, harnessTargets: [{ id: "configured", harness: "test" }] });
   assert.deepEqual(Object.keys(snapshot).sort(), ["cwd", "harnessTargets"]);
@@ -127,13 +129,15 @@ test("Reconcile snapshots contain configuration only and execution views require
   selected.invocationSummaries[0]!.finalText = "caller mutation";
   assert.equal(executions.view(["mine"]).invocationSummaries[0]!.finalText, "mine");
   await executions.close();
-  const reopened = new ExecutionService(new SessionStore(root).openSession(journal.id), { resolveTarget: () => undefined, mentionBudgetChars: 0, createAdapter: () => { throw new Error("No replay expected"); } });
+  const reopened = new ExecutionService(root, { cwd: root, resolveTarget: () => undefined, mentionBudgetChars: 0, createAdapter: () => { throw new Error("No replay expected"); } });
   assert.equal(reopened.view(["mine"]).invocationSummaries[0]!.finalText, "mine");
   await reopened.close();
 });
 
 test("Failed application initialization releases its execution lease", async (t) => {
   const root = home(t);
+  const { openHarnessStore } = await import("../src/host/harness/store.ts");
+  await openHarnessStore(root, root).closeLogs();
   const options = {
     cwd: root, targets: [], instances: [],
     controller: { mentionBudgetChars: 0, createAdapter: () => { throw new Error("No Harness expected"); } },
@@ -149,4 +153,41 @@ test("Failed application initialization releases its execution lease", async (t)
     }
   });
   await runtime!.close();
+});
+
+/** @case Read-only inspection and configured targets cannot force an unused Harness backend into existence. */
+test("Unused Harness capabilities have no storage lifecycle", async (t) => {
+  const { ExecutionService } = await import("../src/host/runtime/execution.ts");
+  const root = home(t);
+  const target = { id: "available", harness: "test" };
+  const executions = new ExecutionService(root, { cwd: root, targets: [target], resolveTarget: () => target,
+    mentionBudgetChars: 0, createAdapter: () => { throw new Error("Unused Harness must not start"); } });
+  executions.registerTarget({ ...target, model: "configured" });
+  const unsubscribe = executions.subscribe(() => {});
+  assert.deepEqual(executions.listHarnessInvocations(), []);
+  assert.deepEqual(executions.approvals(), []);
+  assert.equal(executions.view([]).messages.size, 0);
+  executions.failOrphans(); unsubscribe(); await executions.close();
+  assert.equal(existsSync(join(root, "sessions")), false);
+});
+
+test("Harness acquires its lease before reading or changing existing metadata and releases it after failed recovery", async (t) => {
+  const { ExecutionService } = await import("../src/host/runtime/execution.ts");
+  const { openHarnessStore } = await import("../src/host/harness/store.ts");
+  const { readFileSync, writeFileSync } = await import("node:fs");
+  const root = home(t);
+  const records = openHarnessStore(root, root);
+  await records.closeLogs();
+  const options = { cwd: root, mentionBudgetChars: 0, resolveTarget: () => undefined,
+    createAdapter: () => { throw new Error("No dispatch expected"); } };
+  const active = new ExecutionService(root, options);
+  const before = readFileSync(join(records.dir, "meta.json"), "utf8");
+  assert.throws(() => new ExecutionService(root, { ...options, cwd: "/changed" }), /already active/);
+  assert.equal(readFileSync(join(records.dir, "meta.json"), "utf8"), before);
+  await active.close();
+  writeFileSync(join(records.dir, "session.jsonl"), "not-json\n{}\n");
+  assert.throws(() => new ExecutionService(root, options), /corrupt Event Ledger/);
+  assert.equal(existsSync(join(records.dir, "lock")), false);
+  writeFileSync(join(records.dir, "session.jsonl"), "");
+  await new ExecutionService(root, options).close();
 });
