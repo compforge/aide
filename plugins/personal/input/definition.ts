@@ -17,7 +17,7 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   type: INPUT_TYPE,
   schema: { spec: InputSpecSchema, status: z.object({ deliveries: z.array(z.string()).optional(), routing: z.object({
     phase: z.enum(["running", "done", "ignored"]), bootstrap: z.boolean().optional(),
-    creation: z.object({ sessionId: z.string(), name: z.string(), uid: z.string().optional() }).strict().optional(), reason: z.string(),
+    creation: z.object({ sessionId: z.string(), name: z.string(), uid: z.string().optional() }).strict().optional(), destinations: z.array(z.object({ name: z.string(), uid: z.string() }).strict()).optional(), reason: z.string(),
   }).strict().optional() }).strict() },
   validator: { update(previous, current) { if (!isDeepStrictEqual(previous.spec, current.spec)) throw new Error("Input content is immutable"); } },
   printer: inputPrinter,

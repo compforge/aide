@@ -2,7 +2,9 @@
 
 Harness 向 Aide 提供 Agent 执行能力。宿主通过统一接口提交输入、观察执行、取消或恢复会话；具体模型、原生协议和工具执行由 Harness 实现提供。插件通过 verb 请求执行，业务目标与结果判断仍由插件拥有。
 
-[Pi](pi.md) 与 [Chief](chief.md) 是两个独立的 Harness 身份，当前复用 Pi Adapter；Codex、Claude 和 DSH 则通过各自的原生协议接入。Harness 身份既可以区分提供方，也可以区分有明确职责和工具集合的 Agent。
+[Pi](pi.md)、[Chief](chief.md) 与 Route 是独立的 Harness 身份，复用 Pi Adapter；Codex、Claude 和 DSH 则通过各自的原生协议接入。Harness 身份既可以区分提供方，也可以区分有明确职责和工具集合的 Agent。
+
+Route 使用专用分类提示词，不加载执行工具、技能或记忆扩展。它只返回输入与已有 Conversation 的关联，宿主校验并投递；组批与恢复见 [Personal](../plugin/personal.md#输入与上下文)。
 
 ## 身份与职责
 

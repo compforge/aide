@@ -354,7 +354,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me", me: [{ appId: "cli_app", openId: "ou_me" }] } },
-    plugins: { personal: { conversation: { batchSize: 1 }, sources: { lark: {} } } } }));
+    plugins: { personal: { route: { batchSize: 1 }, conversation: { batchSize: 1 }, sources: { lark: {} } } } }));
   let searches = 0;
   const prompts: string[] = [];
   const options = { ...fakeOptions({ chief: async (prompt) => {
@@ -380,6 +380,8 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   t.after(async () => { await channel.close(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.personal.conversations.ensure("inbox", fixtureAddress("inbox"));
   await aide.setDefaultConversation("inbox", true);
+  // Existing private topics can be matched by Source hints without opening bot chat contexts.
+  for (const chatId of ["oc_chat", "oc_group"]) await aide.conversations.ensure(`source:lark:cli_app:ou_me:${chatId}`, fixtureAddress("inbox"));
   // Persist a registered bot chat before observing user messages, but defer processing its request.
   await channel.receive({ sender: { sender_type: "user" }, message: {
     message_id: "om_channel", chat_id: "oc_group", chat_type: "group", message_type: "text",
@@ -408,14 +410,14 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
     const expected = inputs.list().filter((input) => input.spec.originId === "personal.lark").filter((input) => input.spec.sessionId === sessionId).map((input) => input.metadata.name).sort();
     assert.equal(store.list().filter((c) => c.id === sessionId).length, 1, "Messages from the same observed chat reuse one Conversation");
     assert.deepEqual([...store.inputs(sessionId).map((i) => i.metadata.name)].sort(), expected);
-    for (const id of expected) assert.ok(aide.personal.conversations.inputs("inbox").map((i) => i.metadata.name).includes(id));
+    for (const id of expected) assert.equal(aide.personal.conversations.input(id, "inbox"), undefined);
   }
   assert.equal(aide.personal.conversations.list().filter((c) => c.id === MESSAGE_SESSION).length, 0);
   const sourceGroupId = "source:lark:cli_app:ou_me:oc_group";
   const sourceGroupUid = aide.personal.conversations.resource(sourceGroupId)!.metadata.uid;
   const groupId = "lark:cli_app:oc_group";
   await channel.dispatch(); await aide.settled(); await channel.deliver();
-  assert.deepEqual(sent, Array.from({ length: 2 }, () => ({ chatId: "oc_group", text: "channel-reply" })));
+  assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }]);
   const store = aide.personal.conversations;
   assert.equal(store.list().filter((c) => c.id === groupId).length, 1);
   assert.equal(store.inputs(groupId).map((i) => i.metadata.name).length, 1);
@@ -423,7 +425,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   const channelInput = store.inputs(groupId)[0]!;
   assert.equal(channelInput.spec.origin, "channel");
   assert.equal(channelInput.spec.sessionId, groupId);
-  assert.ok(aide.personal.conversations.inputs("inbox").map((i) => i.metadata.name).includes(channelInput.metadata.name));
+  assert.equal(aide.personal.conversations.input(channelInput.metadata.name, "inbox"), undefined);
   const channelPrompt = prompts.find((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).conversationId === groupId)!;
   assert.ok(channelPrompt);
   assert.doesNotMatch(channelPrompt, /om_at|source-private-reply/, "User observation history must not enter the group's bot prompt");
@@ -434,7 +436,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   await channel.close(); await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   channel = channelFor();
   await aide.start(); await aide.settled(); await channel.dispatch(); await channel.deliver();
-  assert.deepEqual(sent, Array.from({ length: 2 }, () => ({ chatId: "oc_group", text: "channel-reply" })), "Restart must neither leak historical Source replies nor duplicate delivered Channel replies");
+  assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }], "Restart must neither leak historical Source replies nor duplicate delivered Channel replies");
   assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.lark").length, 3);
   assert.equal(aide.personal.conversations.resource(groupId)!.metadata.uid, groupUid);
   assert.equal(aide.personal.conversations.inputs(groupId).map((i) => i.metadata.name).length, 1);

@@ -25,10 +25,10 @@ interface Session {
  * @link docs/harness/pi.md
  */
 export class PiAdapter implements HarnessAdapter {
-  readonly harness: "pi" | "chief";
+  readonly harness: "pi" | "chief" | "route";
   readonly capabilities = { prompt: {} };
   private readonly sessions = new Map<string, Session>();
-  constructor(private readonly options: { harness?: "pi" | "chief"; createSession: PiSessionFactory; log?: LogSink; nativeEvent?: NativeEventSink }) {
+  constructor(private readonly options: { harness?: "pi" | "chief" | "route"; createSession: PiSessionFactory; log?: LogSink; nativeEvent?: NativeEventSink }) {
     this.harness = options.harness ?? "pi";
   }
 

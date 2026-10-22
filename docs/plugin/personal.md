@@ -65,17 +65,19 @@ Chief 是业务角色。Conversation Controller 调度批次，Batch Controller 
 
 ## 输入与上下文
 
-Input、Output 与 Conversation 都是 Personal 的普通资源，使用全局持久化作用域。Channel / Source 可提供 sessionId 等已知归属线索，Chief 据此确定话题；默认会话接收所有输入，确定性规则补充具体归属。Conversation 承载话题，运行时根据资源 UID 组织执行上下文；入口不创建执行 Session。Source 启动只建立观察资源，不预建空 Conversation；输入到来时再决定归属。
+Input、Output、Route 与 Conversation 都是 Personal 的普通资源。Channel / Source 提交持久 Input，单例 `Route/global` 决定把它归入哪些 Conversation。底座按资源 UID 组织执行上下文，不需要为 Route 创建内部 Session。
 
-ReconcileInput 负责归位，不调用模型。没有任何 Conversation 时，创建一个会话、追加当前 Input 后结束路由。已有 Conversation 时按顺序处理，确定一个会话就立即追加，不汇总完整目标计划：
+Route 默认 Controller 监听 Input 与自身的变化。每次协调补扫未完成路由的 Input，幂等纳入 `status.pendingInputIds`，因此提交成功但事件丢失、或进程在入队前退出，都能在重启后恢复。规则匹配已有话题 `sessionId`，或沿 `originalInputId` 的投递凭据找到已有 Conversation；命中后立即追加，不再给 Default 额外复制一份。Channel 的明确话题可以建立 Conversation；Source 的陌生话题线索本身不触发创建。
 
-1. 默认会话存在时，先追加到默认会话；没有默认会话就跳过。
-2. Input 带有尚无会话承接的目标 `sessionId` 时，创建 Conversation 并追加。
-3. 追加到目标 `sessionId` 匹配的已有会话；讨论续报的 `originalInputId` 匹配已经持有原始 Input 的会话。创建不阻止继续关联已有话题。
+未命中规则的输入按数量或最早等待期限组批；立即输入无需等满一批。Route 保存固定的 Input、所有现有 Conversation 的身份与有界摘要，再由具名 `batch` Controller 调用专用 Route Agent。两个 Controller 的队列独立，模型等待不妨碍新输入的规则分发。Route Agent 使用 Pi 执行协议，但拥有独立身份、提示词与可选模型配置，不加载执行工具、Work/Person 工具、记忆扩展或技能，也不负责回复。
 
-没有默认会话、没有规则关联、也不满足创建规则时，记录为忽略。新话题不自动成为默认联络处，也不自动向观察到的原群发送消息。Conversation.address 只在由 Channel Input 创建时取首个 Input.source；Source 创建及后续追加不会设定或覆盖默认地址。Immediate 输入的直接回复使用该 Input.source，default 会话也遵循此规则；其它通知明确选择 target 或使用 Conversation.address。多个 immediate 地址不同时，say 必须指定 respondToInputId 或 target。Source 观察与目标归属分开；首次无归属的输入使用稳定生成的话题身份，创建的普通 Conversation 可以在 Web 查看并继续回复。
+模型为每条 Input 返回零个或多个已有 Conversation UID。宿主检查输入覆盖完整、无重复、目标属于候选快照；空目标使用用户选择的 Default。没有 Default 时建立无通信地址的默认会话；没有任何 Conversation 时直接使用该兜底，不调用模型。Source 的位置只说明事情在哪里发生，不自动成为回复地址。
 
-追加按 Conversation 与 inputId 幂等：已挂载时不写入、不重置消费进度，也不重复唤醒；并发版本冲突重读同一资源身份后重试。路由只保存执行状态、首次创建分支和待创建会话的稳定身份；创建成功后固定 uid，避免重试时重复创建或重新投递到已删除会话的替代资源。中断后重新检查默认会话和确定性规则，已完成追加通过幂等性跳过。后续创建或关联失败不撤销、不阻塞先前已追加会话的消费；讨论续报等待原始 Input 完成路由后继续关联。Channel 形成 Input 后同步调用同一个 appendConversationInput，再继续默认会话与规则路由。两类入口共用队列、消费凭据和并发更新，不设 Conversation 待处理数量上限。
+完整分发计划先持久化，再逐项调用 `appendConversationInput`。投递按 Input ID 与 Conversation UID 幂等，允许一个 Input 进入多个 Conv；全部投递完成才从 Route 队列移除，并清空该批快照。并发新到输入保留在队列中，不随旧批完成而丢失。进程退出后，已落盘计划继续投递；未落盘的纯分类可重试，不能因此重放 Chief 已经执行的业务动作。候选会话删除后不会投递到同名替代实例，失败保留计划与引用并记录错误。
+
+讨论续报等待原始 Input 路由完成后再沿其凭据关联。旧版本已经完成的 Input 不重新路由；未完成的固定创建记录继续按原身份恢复。Input 路由状态保存计划与凭据，Route 的队列与当前批次保护尚未完成的事实免于回收。
+
+Conversation.address 只在由 Channel Input 创建时取首个 Input.source，后续追加不覆盖。Immediate 输入的直接回复使用该 Input.source；其它通知明确选择 target 或使用 Conversation.address。多个 immediate 地址不同时，say 必须指定 respondToInputId 或 target。路由去向、通信位置和执行授权分别判断。
 
 Conversation 的 spec 保存身份、可选 address 与触发策略；status 保存 `pendingInputIds`、下次触发时间和一个 `batch`。Batch 是 Conversation 内部的处理单元，定义在 `conversation/batch.ts`，没有独立 CRD。没有第二份 recentInputIds 或持续增长的 processing 表。
 
@@ -101,9 +103,9 @@ Input 路由完成、批次消费完成、工作目标完成与消息送达分�
 
 ## 默认联络处
 
-Conversation 的 `spec.default` 标记用户选择的默认联络处，缺省为 false。整个 Aide 实例最多有一个默认会话。用户通过 Web 设置或取消；切换由后端串行处理，先清除旧标记再设置新标记。中断可能留下无默认的状态，用户可以重新设置，不会留下两个默认。删除默认会话后不自动选择替代项。
+Conversation 的 `spec.default` 标记用户选择的默认联络处，缺省为 false。整个 Aide 实例最多有一个默认会话。用户通过 Web 设置或取消；切换通过资源事务清除旧标记并设置新标记，存储校验保证最多一个默认。删除或取消默认后，下一次需要兜底时 Route 会建立默认会话。
 
-默认会话使用普通 Conversation 的上下文、Work 和 Chief Reconcile，接收每条 Input，包括已有明确目标的输入；具体话题仍按规则独立承接。是否值得回复、提醒、询问或推进工作，由各会话消费时判断，入口不再做语义筛选。需要用户处理的 Aide 服务问题也须先作为 Input 提交，不直接广播错误日志。
+默认会话使用普通 Conversation 的上下文、Work 和 Chief Reconcile，承接没有合适话题的输入。已有明确目标的输入直接交给对应话题；是否值得回复、提醒、询问或推进工作，由承接的会话判断。需要用户处理的 Aide 服务问题也须先作为 Input 提交，不直接广播错误日志。
 
 默认标记不打开 trigger、不授予额外执行权限，也不合并其它会话的上下文。个人私聊适合作为默认联络处，工作群继续承载各自话题。
 

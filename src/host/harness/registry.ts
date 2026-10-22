@@ -34,6 +34,7 @@ export interface HarnessAdapterOptions {
   piConfig?: PiConfig;
   /** Personal composition supplies the Chief agent and conversation-scoped capabilities. */
   chiefSession?: PiSessionFactory;
+  routeSession?: PiSessionFactory;
   /** Adapter 工厂的实例坐标；工厂负责把 Target 配置 lowering 成具体 Adapter 依赖。 */
   target: HarnessTarget;
   openApproval: OpenApproval;
@@ -69,6 +70,14 @@ export interface HarnessProbeOptions {
  * @link docs/harness/README.md
  */
 export const HARNESS_REGISTRY = [
+  {
+    ...HARNESS_IDENTITIES.route, shortName: "route", color: "#a6da95",
+    create: ({ routeSession, log, nativeEvent, env }) => {
+      if (!routeSession) throw new Error("Route target requires a Route agent factory");
+      if (env && Object.keys(env).length) throw new Error("Embedded Route does not support environment overrides");
+      return new PiAdapter({ harness: "route", createSession: routeSession, log, nativeEvent });
+    },
+  },
   {
     ...HARNESS_IDENTITIES.pi,
     shortName: "pi", color: "#a6da95",

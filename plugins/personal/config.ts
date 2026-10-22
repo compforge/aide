@@ -1,3 +1,4 @@
+import { RoutePolicySchema } from "./route/config.ts";
 import { ConversationPolicySchema } from "./conversation/config.ts";
 import { z } from "zod";
 import { EnvironmentWatchSchema } from "./source/environment/config.ts";
@@ -12,6 +13,7 @@ import { WatchSchema } from "./source/requirement/config.ts";
  */
 export const PersonalConfigSchema = z.object({
   conversation: ConversationPolicySchema.optional(),
+  route: RoutePolicySchema.optional(),
   sources: z.object({
     environments: EnvironmentWatchSchema.optional(),
     lark: MessageWatchSchema.optional(),

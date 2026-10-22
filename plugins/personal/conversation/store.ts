@@ -32,12 +32,12 @@ export class ConversationStore {
   }
   list(): Conversation[] { return this.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE).filter((r) => !r.metadata.deletionTimestamp).map((r) => this.project(r as ConversationResource)); }
   get(id: string): Conversation | undefined { const r = this.resource(id); return r && this.project(r); }
-  /** @spec The creating Channel supplies the initial address; later attachment never fills or replaces it. */
-  async ensure(id: string, address?: Address): Promise<ConversationResource> {
+  /** @spec The creating Channel supplies its address and first-input name before asynchronous routing; later attachment cannot replace either. */
+  async ensure(id: string, address?: Address, name?: string): Promise<ConversationResource> {
     const previous = this.resources.find<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, conversationKey(id));
     if (previous?.metadata.deletionTimestamp) throw new Error("Conversation is being deleted; retry after deletion completes");
     if (previous) return previous;
-    return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, ...(address ? { address: parseAddress(address) } : {}), trigger: conversationTrigger() }, status: { pendingInputIds: [], receipts: [] } });
+    return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), trigger: conversationTrigger() }, status: { pendingInputIds: [], receipts: [] } });
   }
   inputs(conversationId?: string): ConversationInput[] {
     return this.list().filter((c) => !conversationId || c.id === conversationId).flatMap((view) => {
@@ -65,20 +65,6 @@ export class ConversationStore {
       if (batch) runs.push({ id: batch.executionId ?? batch.id, conversationId: c.id, status: { phase: batch.phase, executionId: batch.executionId, quietReason: batch.quietReason, outputs: this.outputs(c.id).filter((o) => batch.outputIds.includes(o.id)) } });
     }
     return runs;
-  }
-  /** Only the application-wide default selection operation calls this; keep concurrent controller updates intact. */
-  async setDefault(id: string, enabled: boolean): Promise<void> {
-    for (let attempt = 0; ; attempt++) {
-      const c = this.resource(id);
-      if (!c || c.metadata.deletionTimestamp) throw new Error("Conversation does not exist");
-      if (Boolean(c.spec.default) === enabled) return;
-      try {
-        await this.client.replace(c, { ...c.spec, default: enabled }, c.status);
-        return;
-      } catch (error) {
-        if (attempt >= 4 || !/version|conflict/i.test(String(error))) throw error;
-      }
-    }
   }
   async setTriggerEnabled(id: string, enabled: boolean): Promise<import("./trigger.ts").ConversationTrigger> {
     const c = this.resource(id); if (!c) throw new Error("Conversation does not exist");

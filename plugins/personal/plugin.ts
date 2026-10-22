@@ -1,6 +1,6 @@
 import type { PluginPackage } from "@compforge/aide-plugin";
 import { registerConversations } from "./conversation/reconcile.ts";
-import { registerInputRouting } from "./input.ts";
+import { registerRoute } from "./route/reconcile.ts";
 import { registerEnvironmentSources } from "./source/environment/observe.ts";
 import { registerSources } from "./source/requirement/observe.ts";
 import { registerMessageSources } from "./source/message/observe.ts";
@@ -11,7 +11,7 @@ const plugin: PluginPackage = {
   pluginId: "aide.personal", version: "0.1.0",
   async activate(context) {
     context.logger.info("Personal Plugin worker activated", { attributes: { pid: process.pid } });
-    registerInputRouting(context);
+    registerRoute(context);
     registerConversations(context);
     registerSources(context);
     registerMessageSources(context);

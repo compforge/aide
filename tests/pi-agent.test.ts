@@ -1,3 +1,4 @@
+import { createRouteAgent } from "../agents/route/agent.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
@@ -34,7 +35,7 @@ import type { HarnessEvent, HarnessSessionBinding } from "../src/host/harness/ad
 type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown } | { error: true } | { hold: true };
 
 /** Real Pi SDK and HTTP protocol; only the remote model is scripted. No external credentials or network. */
-async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" = "pi", model: PiModelConfigInput = { provider: "fixture", id: "test-model" }, sharedPersons?: Persons) {
+async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" | "route" = "pi", model: PiModelConfigInput = { provider: "fixture", id: "test-model" }, sharedPersons?: Persons) {
   const root = mkdtempSync(join(tmpdir(), "aide-pi-sdk-"));
   const personFile = join(root, "PERSON.md");
   const requests: Record<string, unknown>[] = [];
@@ -85,6 +86,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const adapter = createHarnessAdapter({ id: "assistant", harness }, {
     targetConfig: { harness }, openApproval: async () => { throw new Error("Unexpected interaction"); },
     piSession: (input) => createPiAgent({ ...config, ...input }),
+    routeSession: (input) => createRouteAgent({ ...config, ...input }),
     chiefSession: (input) => createChiefAgent({ ...config, ...input, work, persons }),
   });
   const open = () => adapter.open({ cwd: root, ...(binding ? { resumeState: binding.resumeState } : {}) }, (event) => {
@@ -555,4 +557,18 @@ test("Chief summary rebuild fences forgotten history from native resume and Ledg
     assert.doesNotMatch(rebuilt, /forgotten-marker|aide-sync/);
     assert.equal(aide.personal.conversations.resource("me")!.status.batch!.phase, "done");
   } finally { await aide.close(); }
+});
+
+/** @case The real SDK sends Route policy and zero execution tools, independently of Chief. */
+test("Route uses its dedicated prompt and has no native, Work, Person or memory tools", async t => {
+  const answer = JSON.stringify({ decisions: [{ inputId: "one", conversationUids: [], reason: "unmatched" }] });
+  const fixture = await setup(t, request => {
+    assert.match(JSON.stringify(request.messages), /You are Route/);
+    assert.equal((request.tools as unknown[] | undefined)?.length ?? 0, 0);
+    return { text: answer };
+  }, "route");
+  const result = await fixture.run(JSON.stringify({ inputs: [{ id: "one", text: "event" }], conversations: [] }), "route-one");
+  assert.equal(result.finalText, answer);
+  assert.equal(fixture.adapter.harness, "route");
+  assert.equal(fixture.work.list().length, 0);
 });

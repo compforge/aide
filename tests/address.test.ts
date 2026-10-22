@@ -40,7 +40,7 @@ test("ChannelAddress extends Address and owns canonical endpoint encoding and ad
 });
 
 /** @case Topic identity and communication destination vary independently; default forwarding cannot change either Conversation's address. */
-test("Channel creation captures its first address; default replies use Input address and subsequent Inputs cannot rebind it", async (t) => {
+test("Channel creation captures its first address, bypasses Default and subsequent Inputs cannot rebind it", async (t) => {
   const { aide } = setup(t);
   const inbox = webAddress("inbox"), group = larkAddress("app", "group"), elsewhere = larkAddress("app", "elsewhere");
   await aide.receive({ id: "hello", channelId: "web", sessionId: "inbox", text: "hello", source: inbox });
@@ -51,7 +51,7 @@ test("Channel creation captures its first address; default replies use Input add
   assert.deepEqual(topic.resource("opaque-topic")!.spec.address, group);
   assert.deepEqual(aide.personal.conversations.resource("inbox")!.spec.address, inbox);
   const replies = aide.outputs().filter((o) => o.target.kind === "channel" && (o.target as ChannelAddress).endpoint === group.endpoint);
-  assert.equal(replies.length, 2, "Both producers reply to the original group, including the default Conversation");
+  assert.equal(replies.length, 1, "Only the explicit topic replies; Default receives no copy");
   await aide.receive({ id: "second", channelId: "lark", sessionId: "opaque-topic", text: "second", source: elsewhere });
   await aide.settled();
   assert.deepEqual(topic.resource("opaque-topic")!.spec.address, group);
@@ -61,9 +61,10 @@ test("Channel creation captures its first address; default replies use Input add
 });
 
 /** @case An observation knows where it happened without establishing a standing contact address. */
-test("Source-created Conversation remains addressless after Channel append; replies still reach that Input", async (t) => {
+test("An addressless Conversation stays addressless after Source and Channel append; direct replies use the Input", async (t) => {
   const { aide, root, options } = setup(t);
   const address = larkAddress("app", "group");
+  await aide.conversations.ensure("topic");
   await aide.personal.conversations.submit("observed", { origin: "source", originId: "personal.lark", sessionId: "topic", source: address, text: "observed fact" });
   await aide.settled();
   const c = aide.personal.conversations;

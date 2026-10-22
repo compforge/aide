@@ -19,7 +19,7 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 |---|---|
 | `resources` | Host 的持久 Resource 容量、按 Group/Kind 的回收策略与去重窗口 |
 | `connectors` | Host 装配全局环境目录、需求、Forge 与 Lark 消息读取能力 |
-| `harnesses` | Host 装配 Agent 的模型选择和扩展能力；支持 `pi`、`chief`、`codex`、`claude`、`dsh` |
+| `harnesses` | Host 装配 Agent 的模型选择和扩展能力；支持 `pi`、`chief`、`route`、`codex`、`claude`、`dsh` |
 | `plugins` | 各 Plugin 校验和使用自己的业务配置；持续观察策略位于 `plugins.<plugin>.sources` |
 
 没有声明的 Connector/Source/package 默认为空。Connector 和 Plugin 的具体字段由所属实现校验，
@@ -116,6 +116,7 @@ harnesses:
 | Harness 配置 | 字段 |
 |---|---|
 | `harnesses.pi` / `harnesses.chief` | `model` 对象、`packages` 列表，见下文 |
+| `harnesses.route` | 可选 `model` 对象；省略时复用 Chief 的已解析模型，不加载 packages 或技能 |
 | `harnesses.codex` | `command` 非空参数数组、`approvalReviewer`（`user` / `auto_review`）、`model` 字符串 |
 | `harnesses.claude` | `executable`、`model` 字符串；显式 executable 优先于启动环境的 `AIDE_CLAUDE_BIN` |
 | `harnesses.dsh` | `dshBin`、`profile`、`dshHome`、`provider`、`model`、`reasoningEffort`、`patches`、`maxTokens` |
@@ -244,3 +245,19 @@ resources:
 去重回执独立限量并在窗口到期后清理。窗口内的重复 Input 只确认已接收，不重新创建或执行；窗口外不承诺永久去重。源水位与待提交引用共同保护 Source 的恢复过程。
 
 这些阈值约束持久 Resource 的逻辑载荷。SQLite 页、索引、WAL，以及 Session Ledger、日志、原生 Harness 历史和 Hermes 记忆有各自的存储生命周期；它们不计入此处的 Resource 字节数。
+
+## Route 组批与模型
+
+```yaml
+plugins:
+  personal:
+    route:
+      batchSize: 16
+      maxWaitSeconds: 5
+      summaryChars: 2000
+      contextChars: 64000
+```
+
+规则命中立即投递；以上参数只控制未命中输入的语义分类。满批、最早等待期限或立即输入触发 Route Batch，模型等待不会阻塞规则路径。所有现有 Conversation 都进入候选列表，每个摘要最多 `summaryChars` 个字符。`contextChars` 限制整体 prompt；超预算时缩短摘要、减少本批输入数量。Input 描述提供有截断标记的预览，原始全文仍留在 Input 中并完整交给目标 Conv。身份目录本身超预算时显式报错并保留队列，不能静默遗漏候选；后续到达的输入留待下一批。
+
+`harnesses.route.model` 可以独立选择模型，字段同 Pi 的 `model`；未声明时复用 Chief 的启动配置。Route 是固定的 Personal 分类角色，不可设为 `defaultHarness`。它不加载工具、技能或记忆扩展。模型失败、非法结果和目标实例失效都保留待分发状态，按 Controller 退避重试；不会把失败当作“没有关联”并静默丢弃输入。

@@ -14,13 +14,14 @@ import type { Outcome } from "../plugins/personal/prompts.ts";
 
 export interface Agent {
   notify?: boolean;
+  route?(prompt: string): Promise<string>;
   chief?(prompt: string): Promise<string>;
   execute(work: Work): Promise<Outcome | string>;
 }
 
 /** Exercise the real Runner/verb/Turn path; replace only the external Harness protocol. */
 export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], home = cwd) {
-  return { config: ConfigSchema.parse({ plugins: { personal: { conversation: { batchSize: 1 } } } }), cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): HarnessAdapter => {
+  return { config: ConfigSchema.parse({ plugins: { personal: { conversation: { batchSize: 1 }, route: { batchSize: 1 } } } }), cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): HarnessAdapter => {
     let sink: HarnessEventSink;
     let active: PromptInput | undefined;
     let conversationId: string | undefined;
@@ -39,7 +40,9 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
         const activation = prompt.split("Activation: ")[1]?.split("\n")[0];
         if (activation) conversationId = JSON.parse(activation).conversationId;
         const data = (label: string) => JSON.parse(prompt.split(label)[1]!.split("\n")[0]!);
-        void Promise.resolve().then<Outcome | string>(() => target.harness === "chief"
+        void Promise.resolve().then<Outcome | string>(() => target.harness === "route"
+          ? agent.route?.(prompt) ?? JSON.stringify({ decisions: (JSON.parse(prompt).inputs as Array<{ id: string }>).map(i => ({ inputId: i.id, conversationUids: [], reason: "No match" })) })
+          : target.harness === "chief"
           ? agent.chief?.(prompt) ?? "你好"
           : agent.execute(data("Work: "))).then((result) => {
           if (active?.turnId !== input.turnId) return;
