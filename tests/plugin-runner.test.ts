@@ -21,7 +21,7 @@ import {
   restoredError,
   serializedError,
 } from "../src/protocol/ipc.ts";
-import { SessionHandle } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { Connectors } from "../connectors/index.ts";
 import { Environments } from "../connectors/environments.ts";
 
@@ -34,23 +34,8 @@ function stores() {
     id: "bs_runner",
     dir: join(root, "sessions", "bs_runner"),
   };
-  const sessionHandle = new SessionHandle(
-    session.id,
-    session.dir,
-    {
-      aideSessionId: session.id,
-      cwd: root,
-      createdAt: new Date().toISOString(),
-      harnessTargets: {},
-      contexts: {
-        main: {
-          contextId: "main",
-          harnessSessions: {},
-        },
-      },
-      harnessSessions: {},
-    },
-  );
+  const sessionHandle = new HarnessFixtures(root).create({ id: session.id, cwd: root });
+  sessionHandle.setExecutionContext("main", { contextId: "main", harnessSessions: {} });
   mkdirSync(session.dir, { recursive: true });
   const packageDir = join(root, "installed-package");
   const entry = join(packageDir, "index.ts");
@@ -102,7 +87,7 @@ describe("Plugin Runner process boundary", () => {
     }], new Environments(resolveEnvironmentConfig({ dev: { kind: "host", aliases: ["开发"], host: { name: "vm", transport: "ssh", address: "not-contacted.invalid" } } })));
     const failures: unknown[] = [];
     const manager = new Manager({
-      instances, session, connectors, pluginSupervisor: new PluginSupervisor(),
+      instances, log: entry => session.log(entry), connectors, pluginSupervisor: new PluginSupervisor(),
       onActivationError: ({ error }) => { failures.push(error); },
       async loadPackageEntry(pluginId, version) { return { pluginId, version, entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined }; },
     });
@@ -165,7 +150,7 @@ describe("Plugin Runner process boundary", () => {
     const manager = new Manager({
       actions: { "process_default/notify": async (_scope, input) => { const text = (input as { text: string }).text; outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; } },
       instances,
-      session,
+      log: entry => session.log(entry),
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
       async loadPackageEntry(pluginId, version) {
         return {
@@ -200,7 +185,7 @@ describe("Plugin Runner process boundary", () => {
     const manager = new Manager({
       actions: { "process_default/notify": async (_scope, input) => { const text = (input as { text: string }).text; outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; } },
       instances,
-      session,
+      log: entry => session.log(entry),
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
       async loadPackageEntry(pluginId, version) {
         return {
@@ -245,7 +230,7 @@ describe("Plugin Runner process boundary", () => {
     });
     const manager = new Manager({
       instances,
-      session,
+      log: entry => session.log(entry),
       harnessTargets: [
         { id: "codex", harness: "codex" },
         { id: "codex_secondary", harness: "codex" },
@@ -279,7 +264,7 @@ describe("Plugin Runner process boundary", () => {
     const manager = new Manager({
       actions: { "process_default/notify": async (_scope, input) => { const text = (input as { text: string }).text; outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; } },
       instances,
-      session,
+      log: entry => session.log(entry),
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
       async loadPackageEntry(pluginId, version) {
         return {
@@ -327,7 +312,7 @@ describe("Plugin Runner process boundary", () => {
     const manager = new Manager({
       actions: { "process_default/notify": async (_scope, input) => { const text = (input as { text: string }).text; outputs.push(text); await Bun.sleep(350); return { outputId: `out-${outputs.length}` }; } },
       instances,
-      session,
+      log: entry => session.log(entry),
       pluginSupervisor: new PluginSupervisor(),
       async loadPackageEntry(pluginId, version) {
         return {
@@ -411,7 +396,7 @@ describe("Plugin Runner process boundary", () => {
     const { instances, session, entry } = stores();
     instances.create({ pluginInstanceId: "controller_timeout", pluginId: "tests/process-plugin", marketplace: "fixtures", packageVersion: "1.0.0" });
     const failures: PluginRunnerFailure[] = [];
-    const manager = new Manager({ instances, session,
+    const manager = new Manager({ instances, log: entry => session.log(entry),
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
       async loadPackageEntry(pluginId, version) { return { pluginId, version, namespace: "v1", entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined }; },
       onRunnerFailure(failure) { failures.push(failure); },
@@ -439,7 +424,7 @@ describe("Plugin Runner process boundary", () => {
     const failures: PluginRunnerFailure[] = [];
     const manager = new Manager({
       instances,
-      session,
+      log: entry => session.log(entry),
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
       async loadPackageEntry(pluginId, version) {
         return {

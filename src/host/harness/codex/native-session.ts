@@ -6,7 +6,7 @@ import type {
   HarnessSessionInspector,
   HarnessTranscriptEntry,
 } from "../native-session.ts";
-import { harnessHistoryBoundary } from "../../store/store.ts";
+import { harnessHistoryBoundary } from "../history.ts";
 import {
   codexItemLifecycleDrafts,
 } from "./adapter.ts";

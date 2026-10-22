@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ExecutionService } from "../src/host/runtime/execution.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import type { ApprovalDraft, ApprovalResult } from "../src/host/approval/types.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
 
@@ -21,10 +21,10 @@ async function waitFor(predicate: () => boolean) {
 }
 function fixture(t: { after(fn: () => Promise<void>): void }, startup = false) {
   const root = mkdtempSync(join(tmpdir(), "aide-execution-approval-"));
-  const journal = new SessionStore(root).createSession({ cwd: root });
+  const journal = new HarnessFixtures(root).create({ id: "aide:execution", cwd: root });
   const adapters: Array<{ turnId?: string; sink: HarnessEventSink; cancels: number; sends: number; decision?: ApprovalResult }> = [];
   const target = { id: "shared", harness: "test" };
-  const executions = new ExecutionService(journal, {
+  const executions = new ExecutionService(root, { cwd: root,
     mentionBudgetChars: 0, resolveTarget: () => target, maxConcurrency: 2,
     createAdapter(_target, ports) {
       const state = { cancels: 0, sends: 0 } as (typeof adapters)[number];
@@ -128,4 +128,19 @@ test("same-context invocations serialize while other contexts run, and a late te
   assert.equal(executions.view(["three"]).activeInvocations.size, 1);
   assert.equal(executions.cancel("three"), "running");
   await Promise.all([second, other]);
+});
+
+/** @case A failing observer cannot hide approval notifications from another subscriber. */
+test("execution subscribers isolate failures and unsubscribe independently", async (t) => {
+  const { executions, enqueue, pending } = fixture(t);
+  const stopFailing = executions.subscribe(() => { throw new Error("observer failure"); });
+  let approvalsSeen = 0;
+  const stopObserving = executions.subscribe(() => { approvalsSeen = pending().length; });
+  enqueue("observed");
+  await waitFor(() => approvalsSeen === 1);
+  stopObserving();
+  stopFailing();
+  executions.resolveApproval(pending()[0]!, cancelled);
+  await waitFor(() => pending().length === 0);
+  assert.equal(approvalsSeen, 1);
 });

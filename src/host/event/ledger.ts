@@ -21,10 +21,10 @@ export interface EventLedgerOptions {
 }
 
 /**
- * AideSession 的 append-only 事实记录。
+ * Capability-owned append-only execution facts.
  *
  * Ledger 是 WAL 和历史回放边界，不负责 reduce、调度或通知消费者。
- * 实时状态由 AideSession 直接将同一 Event reduce 为 Projection。
+ * The owning capability projects committed events into its current state.
  */
 export class EventLedger {
   private ready = false;

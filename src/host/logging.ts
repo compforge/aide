@@ -43,7 +43,7 @@ export interface LogEntry {
 /** Components submit structured records; persistence, filtering and failure isolation stay host-owned. */
 export type LogSink = (entry: LogEntry) => void;
 
-export interface SessionLoggerOptions {
+export interface RuntimeLoggerOptions {
   readonly level?: LogLevel;
   readonly maxBytes?: number;
   readonly maxEntryBytes?: number;
@@ -64,13 +64,13 @@ const MAX_COLLECTION_ITEMS = 100;
 const MAX_VALUE_DEPTH = 5;
 
 /**
- * Session-owned structured NDJSON writer.
+ * Host-owned structured NDJSON writer.
  *
  * Writes are serialized off the caller's stack, memory is bounded under bursts,
  * files are private to the current user, and one previous generation is kept.
  * Logging is best-effort by design and never changes control-flow outcomes.
  */
-export class SessionLogger {
+export class RuntimeLogger {
   private readonly minimumPriority: number;
   private readonly maxBytes: number;
   private readonly maxEntryBytes: number;
@@ -83,8 +83,8 @@ export class SessionLogger {
 
   constructor(
     private readonly path: string,
-    private readonly aideSessionId: string,
-    options: SessionLoggerOptions = {},
+    private readonly componentId: string,
+    options: RuntimeLoggerOptions = {},
   ) {
     this.minimumPriority = LEVEL_PRIORITY[options.level ?? "info"];
     this.maxBytes = positiveInteger(options.maxBytes, DEFAULT_MAX_BYTES);
@@ -137,7 +137,7 @@ export class SessionLogger {
     this.draining = Promise.resolve()
       .then(() => this.drain())
       .catch(() => {
-        // A diagnostic writer failure must not affect the session it observes.
+        // A diagnostic writer failure must not affect the runtime it observes.
       })
       .finally(() => {
         this.draining = undefined;
@@ -187,14 +187,14 @@ export class SessionLogger {
   private serialize(entry: LogEntry): string {
     const base = {
       timestamp: new Date().toISOString(),
-      aideSessionId: this.aideSessionId,
+      componentId: this.componentId,
       ...normalizeLogEntry(entry),
     };
     let line = `${JSON.stringify(base)}\n`;
     if (Buffer.byteLength(line) <= this.maxEntryBytes) return line;
     line = `${JSON.stringify({
       timestamp: base.timestamp,
-      aideSessionId: this.aideSessionId,
+      componentId: this.componentId,
       level: entry.level,
       source: entry.source,
       component: boundedString(entry.component),

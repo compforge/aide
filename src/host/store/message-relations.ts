@@ -1,11 +1,11 @@
 import { textOf, type EventEnvelope } from "../event/index.ts";
-import type { MessageState, SessionState } from "./reduce.ts";
+import type { MessageState, HarnessState } from "../harness/state.ts";
 import { getMessage } from "../message/query.ts";
 import { inputMessage } from "../message/project.ts";
 
 /** @spec Reply references preserve unknown versus empty, are unique, and never infer consumption or reorder history. */
 export function applyMessageReplies(
-  state: SessionState,
+  state: HarnessState,
   message: MessageState,
   ids: readonly string[] | undefined,
 ): void {
@@ -17,7 +17,7 @@ export function applyMessageReplies(
   message.replyToMessageIds = unique;
 }
 
-export function placeMessage(state: SessionState, id: string, beforeMessageId?: string): void {
+export function placeMessage(state: HarnessState, id: string, beforeMessageId?: string): void {
   if (state.timeline.some((item) => item.type === "message" && item.id === id)) return;
   const anchor = beforeMessageId === undefined ? -1 : state.timeline.findIndex(
     (item) => item.type === "message" && item.id === beforeMessageId,
@@ -30,7 +30,7 @@ export function placeMessage(state: SessionState, id: string, beforeMessageId?: 
  * actual execution ownership and position, even before the body or after Turn finalization.
  * Duplicate receipts cannot move it again or turn an applied input into a failed one.
  */
-export function applyInputDelivery(state: SessionState, ev: EventEnvelope<"input_delivery_update">): void {
+export function applyInputDelivery(state: HarnessState, ev: EventEnvelope<"input_delivery_update">): void {
   const { messageId, state: outcome, beforeMessageId } = ev.payload;
   const known = getMessage(state, messageId);
   if (known && known.kind !== "input") return;
@@ -62,7 +62,7 @@ export function applyInputDelivery(state: SessionState, ev: EventEnvelope<"input
 }
 
 /** Shared by summary creation and late-consumption replay; pending inputs never enter Context. */
-export function invocationUserText(state: SessionState, invocationId: string): string {
+export function invocationUserText(state: HarnessState, invocationId: string): string {
   const parts: string[] = [];
   for (const item of state.timeline) {
     if (item.type !== "message") continue;
@@ -78,7 +78,7 @@ export function invocationUserText(state: SessionState, invocationId: string): s
   return parts.join("\n").replace(/<aide-(context|sync)>[\s\S]*?<\/aide-\1>\s*/g, "").trim();
 }
 
-export function refreshConsumedSummary(state: SessionState, invocationId: string | undefined, seq: number): void {
+export function refreshConsumedSummary(state: HarnessState, invocationId: string | undefined, seq: number): void {
   if (!invocationId) return;
   const summary = state.invocationSummaries.find((candidate) => candidate.invocationId === invocationId);
   if (!summary) return;

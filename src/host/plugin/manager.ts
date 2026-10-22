@@ -63,7 +63,7 @@ import {
   installRegistration,
   PluginSupervisor,
 } from "./runner/index.ts";
-import type { SessionHandle } from "../store/store.ts";
+import { ConnectorCalls } from "../connector/calls.ts";
 import {
   emptyReconcileSnapshot,
   type ReconcileSnapshot,
@@ -83,7 +83,6 @@ import {
   logError,
 } from "../logging.ts";
 import { preparePluginDataDirectories } from "./data.ts";
-import type { ScheduledHarnessInvocation } from "./harness-invocation.ts";
 import { namespaceContains } from "./namespace.ts";
 import type { ResourceNamespace } from "@compforge/aide-plugin";
 import { Verb, type VerbOptions } from "./verb.ts";
@@ -122,7 +121,7 @@ export interface PluginToast {
 }
 
 export interface ManagerOptions {
-  /** Application-owned resources and controllers; Session is only an execution backend. */
+  /** Application-owned resources and controllers, independent of execution capabilities. */
   readonly resourceHome?: string;
   readonly resourceAdmissions?: Readonly<Record<string, import("./resource/client.ts").ResourceAdmission>>;
   readonly connectors?: ConnectorClient;
@@ -132,20 +131,9 @@ export interface ManagerOptions {
   maxTotalConcurrency?: number;
   /** Application-owned plugin configuration repository. */
   instances: PluginInstanceRepository;
-  /** Private execution backend for verbs and diagnostics. Resource ownership is independent. */
-  session?: Pick<
-    SessionHandle,
-    | "id"
-    | "dir"
-    | "meta"
-    | "ledger"
-    | "projection"
-    | "appendEvent"
-    | "subscribe"
-    | "log"
-    | "requireExecutionContext"
-    | "setExecutionContext"
-  >;
+  /** Optional execution capability. Resource-only plugins need no Harness storage. */
+  harness?: VerbOptions["harness"];
+  log?: LogSink;
   /** Configured HarnessTargets available in execution snapshots. */
   harnessTargets?: readonly HarnessTarget[];
   /** 当前进程可激活的可信、不可变 Package 版本。 */
@@ -163,14 +151,6 @@ export interface ManagerOptions {
    */
   loadPackageEntry?: PackageLoaderOptions["loadPackageEntry"];
   pluginSupervisor?: PluginSupervisor;
-  /** Host-owned bridge that materializes the request's explicit resource context. */
-  enqueueHarnessInvocation?(
-    request: ScheduledHarnessInvocation,
-  ): Promise<unknown> | void;
-  /** Cancels a queued Request or interrupts its active Queue run. */
-  cancelHarnessInvocation?(
-    harnessInvocationId: string,
-  ): "queued" | "running" | undefined;
   /** Daemon-owned Human Inbox path for a namespace-scoped Worker. */
   performVerb?: VerbOptions["performVerb"];
   /** Board 展示内容变化；宿主据此重建展示快照。 */
@@ -301,9 +281,7 @@ export class Manager {
     this.now = options.now ?? (() => new Date());
     this.instances = options.instances;
     this.connectors = options.connectors ?? emptyConnectors;
-    this.log = options.session
-      ? (entry) => options.session!.log(entry)
-      : undefined;
+    this.log = options.log;
     this.board = new BoardProjection({
       isInstanceActive: (pluginInstanceId) =>
         this.bindings.has(pluginInstanceId),
@@ -334,20 +312,9 @@ export class Manager {
     this.verb = new Verb({
       actions: options.actions,
       connectors: this.connectors,
-      session: options.session,
+      harness: options.harness,
+      connectorCalls: new ConnectorCalls(this.resourceHome),
       capacity: this.capacity,
-      snapshot: this.snapshot,
-      selectedHarnessTargetId: options.selectedHarnessTargetId
-        ? () => {
-            const selected = options.selectedHarnessTargetId?.();
-            return selected === undefined
-              ? undefined
-              : selected;
-          }
-        : undefined,
-      enqueueHarnessInvocation: options.enqueueHarnessInvocation,
-      cancelHarnessInvocation: options.cancelHarnessInvocation,
-      now: this.now,
       log: this.log,
       performVerb: options.performVerb,
     });

@@ -42,19 +42,21 @@ HarnessTarget 表达具体执行配置，包含 ID、Harness 实现及模型等�
 
 ### 执行后端的边界
 
-ApplicationRuntime 直接组合插件 Manager 与 ExecutionService。前者管理插件、资源与调度，后者管理 Harness 执行、原生审批、日志租约与关闭，不接收业务 Input，也不创建插件实例。CoreSession 与其 TUI 输入、命令派发入口已移除。
+ApplicationRuntime 直接组合插件 Manager 与 ExecutionService。前者管理插件、资源与调度，只通过 HarnessExecution 能力接口请求或取消调用；后者管理 Harness 执行、原生审批、存储租约与关闭。Manager 不读取执行历史，也不维护原生绑定。底座不再有 SessionStore / SessionHandle 或统一 ExecutionJournal 入口。
+
+没有历史记录时，Harness 存储在首次调用时才创建；仅配置 Target、查询执行视图或运行资源 Controller 都不会创建执行存储。已有记录由 Harness 模块在启动时恢复。HarnessStore 保存调用事件、状态投影与原生绑定，EventLedger 是内部追加存储机制，不是插件运行的前置对象。
 
 Reconcile 的冻结快照只有 cwd 与 HarnessTarget 配置，不复制全局执行历史。Harness 返回 invocationId 与执行结果；应用展示通过明确选择执行 ID 查询日志投影，取得副本。Personal 自己解释 Conversation/Input 关联，底座只保存不透明 attributes。
 
 底座不再维护 Lane 或 Turn。资源执行上下文保存原生绑定与历史边界；HarnessInvocation 是一次调用的唯一执行身份，队列、事件、结果、取消与审批都关联 invocationId。同一资源上下文串行使用，不同上下文受并发上限约束，没有主通道或旁路通道。
 
-日志继续沿用现有磁盘位置。读取兼容层将旧 Lane 坐标转换为 contextId，依据旧调用调度记录把 Turn ID 对应到 invocationId；新日志只写调用身份。转换保留事件序号、时间、原生 raw 数据和恢复水位，不修改提供方的原生会话文件。原生上下文重建仅补入当前资源上下文与 Target 的历史，跨资源知识由插件显式提供。
+Harness 记录继续沿用现有磁盘位置，旧路径名只属于存储兼容层。插件与调度的诊断日志写入应用根目录的 `runtime.log`。新事件使用 application scope，资源上下文与 invocationId 表达执行归属。读取兼容层将旧 Lane 坐标转换为 contextId，依据旧调用调度记录把 Turn ID 对应到 invocationId；新日志只写调用身份。转换保留事件序号、时间、原生 raw 数据和恢复水位，不修改提供方的原生会话文件。原生上下文重建仅补入当前资源上下文与 Target 的历史，跨资源知识由插件显式提供。
 
 ## 能力与事务
 
 Reconcile 使用 Harness、Connector 和命名 action 请求能力。运行时管理调用身份、期限、取消和结果；具体 action 由应用装配，Personal 的 say 就是其中一个。底座不解释消息正文、收件人或输入消费。
 
-`ResourceClient.commit` 用同一 SQLite 事务组合资源写入。校验、版本、引用或配额失败会全部回滚；Watch 只在提交后收到变化。插件可注入同步 admission 处理不可变事实和幂等回执，它仍处在同一事务中。外部请求不能加入资源事务，业务应区分“动作已发生”和“结果尚未提交”。
+`ResourceClient.commit` 用同一 SQLite 事务组合资源写入。校验、版本、引用或配额失败会全部回滚；Watch 只在提交后收到变化。插件可注入同步 admission 处理不可变事实和幂等回执，它仍处在同一事务中。外部请求不能加入资源事务，业务应区分“动作已发生”和“结果尚未提交”。Connector 调用在独立的 `connectors/calls.jsonl` 中保存发送意图与结果；重启将未完成调用记为 interrupted，不重放外部请求。旧执行文件中的未完成 Connector 调用会幂等迁移，原文件保留。
 
 Host 容量管理按 Group/Kind 汇总。保留策略由资源所有者声明，只有已释放且无人引用的记录可以回收；没有规则的资源保持保护。配额压力不允许删除仍在承担工作的对象。
 
@@ -62,7 +64,7 @@ Host 容量管理按 Group/Kind 汇总。保留策略由资源所有者声明，
 
 ## Host 与 Runner
 
-Host 持有资源存储、执行日志、Connector、Harness Adapter 和原生权限审批；Runner 运行插件回调、Source、Watch、队列、重试与定时唤醒。每个启用的插件实例有自己的 Runner，数量不随 Conversation 增加。进程内插件复用同一份资源与调度契约。
+Host 持有资源存储、Connector、Harness Adapter 和原生权限审批；Runner 运行插件回调、Source、Watch、队列、重试与定时唤醒。每个启用的插件实例有自己的 Runner，数量不随 Conversation 增加。进程内插件复用同一份资源与调度契约。
 
 Host 与 Runner 不相互导入实现。双方通过 `src/protocol/` 协作，公共插件契约位于 `packages/plugin/`。PluginContext 只暴露运行环境、实例配置和能力入口；插件私有目录分为 package global 与 instance，不依附执行日志。
 

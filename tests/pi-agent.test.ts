@@ -27,7 +27,7 @@ import { createPiAgent } from "../agents/pi/agent.ts";
 import { createChiefAgent } from "../agents/chief/agent.ts";
 import { WorkService } from "../plugins/personal/work.ts";
 import { Store } from "../plugins/personal/store.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 import type { HarnessEvent, HarnessSessionBinding } from "../src/host/harness/adapter.ts";
@@ -69,11 +69,11 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
     baseUrl: `http://127.0.0.1:${port}/v1`, api: "openai-completions", apiKey: "fixture-only", headers: { "x-provider": "snapshot" },
     models: [{ id: "test-model", headers: { "x-model": "snapshot" }, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 4096 }],
   } } }));
-  const sessions = new SessionStore(root);
+  const sessions = new HarnessFixtures(root);
   const catalog = openPersonCatalog(root, { identities: [LOCAL_ME] }, pino({ level: "silent" }), () => {});
   const persons = sharedPersons ?? catalog.persons;
   await persons.initialize();
-  const session = sessions.createSession({ cwd: root });
+  const session = sessions.create({ cwd: root });
   const resources = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
   resources.storage.register("personal", personalDefinitions);
   const store = new Store(resources, createResourceClient(resources, undefined, undefined, personalAdmission(new InputStore(root), new OutputStore(root))), new ConversationStore(session));
@@ -291,7 +291,7 @@ test("Aide transfers resource-owned Batch context across fresh native sessions a
     assert.equal(aide.personal.conversations.inputs().at(-1)!.consumption.phase, "done");
   };
   const binding = (sessionId: string, conversationId: string) => {
-    const session = new SessionStore(home).openSession("aide:execution");
+    const session = new HarnessFixtures(home).open("aide:execution");
     const target = chiefTarget(conversationId);
     const r = aide.personal.conversations.resource(conversationId)!;
     const contextId = resourceExecutionKey({ pluginInstanceId: "personal", namespace: "v1", executionId: "test", controllerName: "batch",
@@ -509,7 +509,7 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
     assert.match(JSON.stringify(request.messages), /fixture-as-ops/);
     assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|create_work/);
   }
-  const session = new SessionStore(home).openSession("aide:execution");
+  const session = new HarnessFixtures(home).open("aide:execution");
   assert.equal(session.meta.harnessTargets.default!.harness, "pi");
   assert.ok(Object.values(session.meta.contexts).some((lane) => lane.harnessSessions.default?.harness === "pi"));
 });

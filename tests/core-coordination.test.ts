@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import { ApplicationRuntime } from "../src/host/runtime/index.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
@@ -20,7 +20,7 @@ import { fakeOptions } from "./fake-harness.ts";
 /** @case Work tools notify secondary Watches; a non-Chief controller streams in its own conversation. */
 test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit conversation", async () => {
   const root = mkdtempSync(join(tmpdir(), "aide-core-coordination-"));
-  const session = new SessionStore(root).createSession({ cwd: root });
+  const session = new HarnessFixtures(root).create({ cwd: root });
   session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex" });
   const options = fakeOptions({ execute: async () => ({ action: "done", summary: "checked", notification: "ok", question: null, nextAt: null }) }, root);
   const core = new ApplicationRuntime(root, { cwd: root, targets: [{ id: "default", harness: "codex" }],

@@ -2,7 +2,9 @@ import { resolve } from "node:path";
 import { ExecutionService, type ExecutionOptions } from "./execution.ts";
 import { Manager, type ManagerOptions } from "../plugin/manager.ts";
 import { createReconcileSnapshot } from "../plugin/reconcile-snapshot.ts";
-import { openExecutionJournal } from "../store/store.ts";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { RuntimeLogger } from "../logging.ts";
 import type { ResourceType } from "@compforge/aide-plugin";
 import { PluginInstanceStore } from "../plugin/instance.ts";
 
@@ -12,7 +14,7 @@ import { PluginInstanceStore } from "../plugin/instance.ts";
  * @link docs/kernel.md
  */
 export class ApplicationRuntime {
-  private readonly execution;
+  private readonly logger: RuntimeLogger;
   readonly executions: ExecutionService;
   readonly plugins: Manager;
   private closing?: Promise<void>;
@@ -28,12 +30,14 @@ export class ApplicationRuntime {
       config: Record<string, unknown>;
     }[];
     controller: Omit<ExecutionOptions, "resolveTarget" | "hooks">;
-    plugins: Omit<ManagerOptions, "instances" | "resourceHome" | "session" | "snapshot" | "harnessTargets" | "enqueueHarnessInvocation" | "cancelHarnessInvocation">;
+    plugins: Omit<ManagerOptions, "instances" | "resourceHome" | "harness" | "snapshot" | "harnessTargets">;
   }) {
-    this.execution = openExecutionJournal(home, options.cwd);
+    mkdirSync(home, { recursive: true });
+    this.logger = new RuntimeLogger(join(home, "runtime.log"), "runtime");
     this.targets = options.targets.map((target) => ({ ...target }));
     try {
-      this.executions = new ExecutionService(this.execution, { ...options.controller,
+      this.executions = new ExecutionService(home, { ...options.controller, cwd: options.cwd, targets: options.targets,
+        selectedHarnessTargetId: options.plugins.selectedHarnessTargetId,
         resolveTarget: id => this.targets.find(target => target.id === id),
         hooks: {
           has: stage => this.plugins?.hasHook(stage) ?? false,
@@ -42,7 +46,7 @@ export class ApplicationRuntime {
         },
       });
     } catch (error) {
-      void this.execution.closeLogs().catch(() => {});
+      void this.logger.close().catch(() => {});
       throw error;
     }
     try {
@@ -54,35 +58,22 @@ export class ApplicationRuntime {
         instances.replaceConfig(declaration.pluginInstanceId, declaration.config);
       }
       const cwd = resolve(options.cwd);
-      if (this.execution.meta.cwd !== cwd) {
-        this.execution.updateMeta({ cwd, contexts: Object.fromEntries(Object.entries(this.execution.meta.contexts).map(([key, lane]) =>
-          [key, { ...lane, harnessSessions: {} }])), harnessSessions: {} });
-      }
-      for (const target of this.targets) this.registerTarget(target);
-      this.plugins = new Manager({ ...options.plugins, instances, resourceHome: home, session: this.execution,
-        snapshot: () => createReconcileSnapshot({ cwd: this.execution.meta.cwd, harnessTargets: this.targets }),
-        enqueueHarnessInvocation: request => this.executions.enqueue(request),
-        cancelHarnessInvocation: id => this.executions.cancel(id),
+      this.plugins = new Manager({ ...options.plugins, instances, resourceHome: home, harness: this.executions,
+        log: options.plugins.log ?? (entry => this.logger.log(entry)),
+        snapshot: () => createReconcileSnapshot({ cwd, harnessTargets: this.targets }),
       });
     } catch (error) {
       // Startup has no admitted plugin work. Cleanup must release the journal
       // even when Manager validation fails, without hiding the original error.
-      void this.executions.close().catch(() => {});
+      void this.executions.close().finally(() => this.logger.close()).catch(() => {});
       throw error;
     }
   }
   registerTarget(target: { id: string; harness: string; model?: string; effort?: string }) {
-    const previous = this.execution.meta.harnessTargets[target.id];
-    if (previous && previous.harness !== target.harness) {
-      this.execution.updateMeta({ contexts: Object.fromEntries(Object.entries(this.execution.meta.contexts).map(([key, lane]) => {
-        const { [target.id]: _old, ...harnessSessions } = lane.harnessSessions;
-        return [key, { ...lane, harnessSessions }];
-      })), harnessSessions: {} });
-    }
     const index = this.targets.findIndex(t => t.id === target.id);
     if (index < 0) this.targets.push({ ...target });
     else this.targets[index] = { ...target };
-    this.execution.setHarnessTarget(target.id, { ...target, harnessTargetId: target.id });
+    this.executions.registerTarget(target);
   }
   enqueue(pluginInstanceId: string, type: ResourceType, name: string): Promise<void> {
     return this.plugins.enqueue({ pluginInstanceId, namespace: "v1",
@@ -93,7 +84,11 @@ export class ApplicationRuntime {
   start() { return this.plugins.start(); }
   close(): Promise<void> {
     return this.closing ??= (async () => {
-      const results = await Promise.allSettled([this.plugins.close(), this.executions.close()]);
+      const results = [];
+      // Stop resource owners before closing the capability they may still be awaiting.
+      for (const close of [() => this.plugins.close(), () => this.executions.close(), () => this.logger.close()]) {
+        try { await close(); } catch (reason) { results.push({ status: "rejected" as const, reason }); }
+      }
       const errors = results.flatMap(result => result.status === "rejected" ? [result.reason] : []);
       if (errors.length) throw new AggregateError(errors, "Could not close application runtime");
     })();

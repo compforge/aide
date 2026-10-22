@@ -1,3 +1,4 @@
+import { HarnessCalls } from "../src/host/harness/calls.ts";
 import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { say, SayInputSchema } from "../plugins/personal/output/action.ts";
 import assert from "node:assert/strict";
@@ -6,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Verb } from "../src/host/plugin/verb.ts";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { ConversationStore, seedInput } from "./conversation-fixture.ts";
 import { ReconcileCapacity } from "../src/reconcile/queue.ts";
 import { emptyReconcileSnapshot } from "../src/host/plugin/reconcile-snapshot.ts";
@@ -14,11 +15,11 @@ import { createPluginVerbs } from "../src/plugin-context.ts";
 
 test("say persists an independent scoped Output and validates Input ownership", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-say-"));
-  const session = new SessionStore(root).createSession({ id: "owner", cwd: root });
+  const session = new HarnessFixtures(root).create({ id: "owner", cwd: root });
   const conversations = new ConversationStore(session);
   await seedInput(conversations, "tick", { sessionId: session.id, conversationId: "private", origin: "source", originId: "personal.environments", text: "review" });
   await conversations.archive("other", []);
-  const verb = new Verb({ session, actions: { "test/say": async (context, input) => { const { text } = SayInputSchema.parse(input); const association = personalExecution(context); if (!association.conversationId) throw new Error("Missing conversation"); return conversations.say(association.conversationId, association.inputId, text); } }, capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot() });
+  const verb = new Verb({ actions: { "test/say": async (context, input) => { const { text } = SayInputSchema.parse(input); const association = personalExecution(context); if (!association.conversationId) throw new Error("Missing conversation"); return conversations.say(association.conversationId, association.inputId, text); } }, capacity: new ReconcileCapacity(1) });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   const context = { pluginInstanceId: "test", namespace: "v1" as const, executionId: "exec", attributes: { conversationId: "private", inputId: "tick" } };
   await verb.beginRemote(context);
@@ -40,13 +41,12 @@ test("say persists an independent scoped Output and validates Input ownership", 
 /** @case Direct Harness dispatch retains deadlines and shutdown cancellation without a business approval gate. */
 test("Harness timeout and Host shutdown settle the caller and cancel execution without replay", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-harness-deadline-"));
-  const storage = new SessionStore(root), session = storage.createSession({ id: "owner", cwd: root });
+  const storage = new HarnessFixtures(root), session = storage.create({ id: "owner", cwd: root });
   const dispatched: string[] = [], cancelled: string[] = [];
-  const verb = new Verb({ session, capacity: new ReconcileCapacity(1),
-    snapshot: () => ({ ...emptyReconcileSnapshot(), harnessTargets: [{ id: "codex", harness: "codex" }] }),
-    selectedHarnessTargetId: () => "codex",
+  const verb = new Verb({ capacity: new ReconcileCapacity(1),
+    harness: new HarnessCalls({ records: session, targets: () => [{ id: "codex" }], selectedHarnessTargetId: () => "codex",
     enqueueHarnessInvocation: (request) => { dispatched.push(request.invocationId); },
-    cancelHarnessInvocation: (id) => { cancelled.push(id); return "queued"; } });
+    cancelHarnessInvocation: (id) => { cancelled.push(id); return "queued"; } }) });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   const scope = { pluginInstanceId: "test", namespace: "v1" as const, executionId: "timeout", resourceRef: { apiVersion: "test.dev/v1", kind: "Work", namespace: "v1" as const, name: "one", uid: "one" } };
   await verb.beginRemote(scope);
@@ -77,11 +77,11 @@ test("Harness timeout and Host shutdown settle the caller and cancel execution w
 
 test("Interruption before Harness creation prevents later actions in that execution", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-interrupt-before-harness-"));
-  const session = new SessionStore(root).createSession({ id: "owner", cwd: root });
+  const session = new HarnessFixtures(root).create({ id: "owner", cwd: root });
   let dispatched = 0, messages = 0;
-  const verb = new Verb({ session, actions: { "test/say": async () => { messages++; return { outputId: "unexpected" }; } },
-    capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot(),
-    enqueueHarnessInvocation: () => { dispatched++; } });
+  const verb = new Verb({ actions: { "test/say": async () => { messages++; return { outputId: "unexpected" }; } },
+    capacity: new ReconcileCapacity(1),
+    harness: new HarnessCalls({ records: session, targets: () => [], enqueueHarnessInvocation: () => { dispatched++; } }) });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   const scope = { pluginInstanceId: "test", namespace: "v1" as const, executionId: "cancel-before-start" };
   await verb.beginRemote(scope);

@@ -4,8 +4,8 @@ import type { HarnessTarget } from "./target.ts";
 import type {
   HarnessHistoryBoundary,
   HarnessHistoryTurn as StoredHarnessHistoryTurn
-} from "../store/store.ts";
-import { harnessHistoryBoundary } from "../store/store.ts";
+} from "../harness/history.ts";
+import { harnessHistoryBoundary } from "../harness/history.ts";
 import type { HarnessSessionIdentity } from "./adapter.ts";
 
 export interface HarnessTranscriptEntry {

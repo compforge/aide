@@ -11,7 +11,7 @@ import type {
   HarnessInvocationScheduled,
   PromptBlock,
 } from "../event/index.ts";
-import type { SessionHandle } from "../store/store.ts";
+import type { HarnessStore } from "./store.ts";
 import type {
   ExecutionScope,
 } from "../../protocol/verbs.ts";
@@ -49,9 +49,9 @@ export interface ReconcileHarnessInvocation {
   };
 }
 
-type HarnessInvocationSession = Pick<
-  SessionHandle,
-  "id" | "ledger" | "appendEvent" | "subscribe" | "requireExecutionContext"
+type HarnessInvocationRecords = Pick<
+  HarnessStore,
+  "ledger" | "appendEvent" | "subscribe" | "requireExecutionContext"
 >;
 
 export interface ScheduledHarnessInvocation {
@@ -178,18 +178,18 @@ export class HarnessInvocationStore {
   private readonly unsubscribe: () => void;
 
   constructor(
-    private readonly session: HarnessInvocationSession,
+    private readonly records: HarnessInvocationRecords,
     private readonly options: HarnessInvocationStoreOptions = {},
   ) {
-    for (const event of session.ledger.read()) this.apply(event, false);
-    this.unsubscribe = session.subscribe((event) => this.apply(event, true));
+    for (const event of records.ledger.read()) this.apply(event, false);
+    this.unsubscribe = records.subscribe((event) => this.apply(event, true));
   }
 
   record(draft: ReconcileHarnessInvocation): HarnessInvocationSnapshot {
-    this.session.requireExecutionContext(draft.invocation.contextId);
+    this.records.requireExecutionContext(draft.invocation.contextId);
     const invocationId = newId("hinv");
     const invocation = draft.invocation;
-    this.session.appendEvent({
+    this.records.appendEvent({
       kind: "_aide_harness_invocation_recorded",
       source: {
         type: "plugin",
@@ -274,7 +274,7 @@ export class HarnessInvocationStore {
   ): boolean {
     const state = this.states.get(invocationId);
     if (!state || state.result || state.cancelled || state.failed) return false;
-    this.session.appendEvent({
+    this.records.appendEvent({
       kind: "_aide_harness_invocation_cancelled",
       source: reason === "user" ? { type: "user" } : { type: "aide" },
       parentEventId: state.scheduled?.eventId ?? state.recorded.eventId,
@@ -294,7 +294,7 @@ export class HarnessInvocationStore {
   ): boolean {
     const state = this.states.get(invocationId);
     if (!state || state.result || state.cancelled || state.failed) return false;
-    this.session.appendEvent({
+    this.records.appendEvent({
       kind: "_aide_harness_invocation_failed",
       source: { type: "aide" },
       parentEventId: state.scheduled?.eventId ?? state.recorded.eventId,
@@ -334,14 +334,14 @@ export class HarnessInvocationStore {
     if (state.cancelled || state.failed || state.result) return;
     const recorded = state.recorded.payload;
     invocationBlocks(state);
-    this.session.requireExecutionContext(recorded.contextId);
+    this.records.requireExecutionContext(recorded.contextId);
     const scheduled: HarnessInvocationScheduled = {
       invocationId: recorded.invocationId,
       messageId: newId("m"),
       harnessTargetId: recorded.harnessTargetId,
       contextId: recorded.contextId,
     };
-    this.session.appendEvent({
+    this.records.appendEvent({
       kind: "_aide_harness_invocation_scheduled",
       source: { type: "aide" },
       parentEventId: state.recorded.eventId,

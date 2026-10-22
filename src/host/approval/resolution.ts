@@ -1,7 +1,7 @@
 import type { ActorRef, InputRequest, InputResponse } from "../message/types.ts";
 import type { EventDraft } from "../event/index.ts";
 import { newId } from "../event/ids.ts";
-import type { SessionState } from "../store/reduce.ts";
+import type { HarnessState } from "../harness/state.ts";
 import type { ApprovalResult } from "./types.ts";
 import { validInputResult } from "./answer.ts";
 
@@ -30,7 +30,7 @@ export function resolutionEvent(request: InputRequest, result: ApprovalResult, a
 }
 
 /** Continuations read the committed decision; they never reduce terminal facts themselves. */
-export function requestResult(state: SessionState, messageId: string): ApprovalResult | undefined {
+export function requestResult(state: HarnessState, messageId: string): ApprovalResult | undefined {
   const request = state.approvals.get(messageId)?.request;
   if (request?.status === "cancelled" && request.cancellation) {
     return { kind: "cancelled", ...request.cancellation };

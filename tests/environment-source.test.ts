@@ -1,3 +1,4 @@
+import { EventLedger } from "../src/host/event/ledger.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
@@ -10,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
 import type { EnvironmentSnapshot, WorkloadSnapshot } from "@compforge/aide-plugin";
-import { SessionStore } from "../src/host/store/store.ts";
+import { HarnessFixtures } from "./harness-fixture.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
@@ -29,7 +30,7 @@ const snapshot = (version: string): EnvironmentSnapshot => ({ environment: "dev"
 
 test("Environment baseline, interrupted input commit, restart, and repeated A-B transitions", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-env-source-"));
-  const sessions = new SessionStore(root); const session = sessions.createSession({ id: "owner", cwd: root });
+  const sessions = new HarnessFixtures(root); const session = sessions.create({ id: "owner", cwd: root });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   const conversations = new InputStore(session.dir);
   let store = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
@@ -52,7 +53,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   assert.match(conversations.list()[0]!.spec.text, /Deployment api.*镜像 A → B/);
   assert.equal(conversations.list()[0]!.spec.originRef!.uid, resource().metadata.uid);
   assert.equal(resource().status.baseline!.workloads[0]!.images[0]!.image, "A");
-  const reopened = sessions.openSession(session.id);
+  const reopened = sessions.open(session.id);
   t.after(() => reopened.closeLogs());
   store = new PluginResourceStore({ home: resourceHome(reopened.dir), pluginInstanceId: "personal" });
   current = snapshot("C"); const previousReads = reads;
@@ -128,8 +129,8 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   assert.match(prompts.at(-1)!, /workload.changed/);
   assert.ok(aide.outputs().filter((message) => message.conversationId === "other").some((message) => message.text === "关注的服务有变化"));
   assert.equal(aide.works().length, 0);
-  const sessions = new SessionStore(root); const persisted = sessions.openSession("aide:execution");
-  const events = persisted.ledger.read().filter((event) => event.kind === "connector.started");
+  const sessions = new HarnessFixtures(root); const persisted = sessions.open("aide:execution");
+  const events = new EventLedger({ path: join(root, "connectors", "calls.jsonl") }).read().filter((event) => event.kind === "connector.started");
   assert.ok(events.some((event) => JSON.stringify(event.payload).includes("environments.workloads")));
   await persisted.closeLogs();
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
