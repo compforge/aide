@@ -16,7 +16,7 @@ test("Conversation pages keep the default first without skipping or repeating or
 });
 
 test("Conversation pages handle deletion, an empty list and changing the default", () => {
-  assert.deepEqual(conversationPage([], 8, null), { page: 1, pages: 1, items: [] });
+  assert.deepEqual(conversationPage([], 8, null), { page: 1, pages: 1, requestedPage: 1, items: [] });
   const items = Array.from({ length: 11 }, (_, index) => ({ id: String(index), default: false }));
   assert.equal(conversationPage(items, 2, null).items[0]?.id, "10");
   assert.equal(conversationPage(items.slice(0, 10), 2, null).page, 1);
@@ -26,4 +26,22 @@ test("Conversation pages handle deletion, an empty list and changing the default
   assert.equal(page.items[0]?.id, "10");
   assert.equal(new Set(page.items.map((item) => item.id)).size, 11);
   assert.equal(conversationPage(items, 2, null).items[0]?.id, "10", "unsetting default returns it to ordinary pagination");
+});
+
+test("A new conversation stays visible after persistence reorders it, while manual browsing stays on its page", () => {
+  const existing = Array.from({ length: 21 }, (_, index) => ({ id: String(index) }));
+  const selected = { id: "new-chat" };
+  const draft = conversationPage([...existing, selected], null, selected.id);
+  assert.equal(draft.page, 3);
+  assert.equal(draft.requestedPage, null, "automatic page selection must not become an explicit request");
+  const saved = conversationPage([selected, ...existing], draft.requestedPage, selected.id);
+  assert.equal(saved.page, 1);
+  assert.ok(saved.items.includes(selected));
+  assert.equal(saved.requestedPage, null);
+
+  const browsing = conversationPage([...existing, selected], 2, selected.id);
+  const refreshed = conversationPage([selected, ...existing], browsing.requestedPage, selected.id);
+  assert.equal(refreshed.page, 2);
+  assert.equal(refreshed.requestedPage, 2);
+  assert.equal(refreshed.items.includes(selected), false, "explicit browsing should not jump back to the active conversation");
 });

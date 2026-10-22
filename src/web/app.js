@@ -78,11 +78,12 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
   let lastConversations = '', conversationUpdating = false;
   let conversationItems = [];
   const initialPage = Number(new URL(location.href).searchParams.get('page'));
-  let currentPage = Number.isSafeInteger(initialPage) && initialPage > 0 ? initialPage : null;
+  let requestedPage = Number.isSafeInteger(initialPage) && initialPage > 0 ? initialPage : null;
+  let currentPage = 1;
   for (const [id, offset] of [['conversation-previous', -1], ['conversation-next', 1]]) {
     $(id).addEventListener('click', () => {
       conversationMenu.hidePopover();
-      currentPage += offset;
+      requestedPage = currentPage + offset;
       renderConversations(conversationItems);
       $('conversation-list').parentElement.scrollTop = 0;
     });
@@ -177,9 +178,12 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
     if (conversationId && !items.some((item) => item.id === conversationId)) items.push({ id: conversationId, name: '新对话', preview: '' });
     const current = items.find((item) => item.id === conversationId);
     $('conversation-heading').textContent = current?.name || '选择一个会话';
-    const paged = conversationPage(items, currentPage, conversationId);
+    const paged = conversationPage(items, requestedPage, conversationId);
     currentPage = paged.page;
-    const pageUrl = new URL(location.href); pageUrl.searchParams.set('page', currentPage);
+    requestedPage = paged.requestedPage;
+    const pageUrl = new URL(location.href);
+    if (requestedPage === null) pageUrl.searchParams.delete('page');
+    else pageUrl.searchParams.set('page', requestedPage);
     history.replaceState(null, '', pageUrl.href);
     $('conversation-pagination').hidden = paged.pages === 1;
     $('conversation-page').textContent = currentPage + ' / ' + paged.pages;
@@ -191,6 +195,7 @@ import { historyBlocks, copyText, applyPatch, parsePatchEvent, renderMarkdown, r
     const links = paged.items.map((item) => {
       const link = element('a', undefined, 'conversation-link');
       const url = new URL(location.href); url.searchParams.set('conversation', item.id);
+      url.searchParams.set('page', currentPage);
       link.href = url.href;
       if (item.id === conversationId) link.setAttribute('aria-current', 'page');
       link.title = item.name;
