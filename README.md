@@ -1,3 +1,5 @@
+<img src="src/web/assets/aide.png" width="80" height="80" alt="Aide icon">
+
 # Aide
 
 English | [简体中文](README.zh-CN.md)

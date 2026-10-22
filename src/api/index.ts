@@ -77,8 +77,8 @@ export function httpChannel(aide: WebService, log: Logger) {
       const asset = request.method === "GET" ? await assets(url.pathname) : undefined;
       if (request.method === "GET" && asset) {
         response.writeHead(200, {
-          "content-type": `${asset.type}; charset=utf-8`, "cache-control": "no-store",
-          "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+          "content-type": typeof asset.content === "string" ? `${asset.type}; charset=utf-8` : asset.type, "cache-control": "no-store",
+          "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         });
         response.end(asset.content); return;
       }

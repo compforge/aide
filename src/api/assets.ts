@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-interface Asset { type: string; content: string }
+interface Asset { type: string; content: string | Buffer }
 
 /** Fixed routes only: request paths never become filesystem paths. */
 export function createWebAssets() {
@@ -10,6 +10,13 @@ export function createWebAssets() {
     { route: "/people", directory: "persons", bundle: "/persons" },
   ];
   const files = new Map<string, Asset>();
+  for (const [route, file, type] of [
+    ["/icon.png", "aide.png", "image/png"],
+    ["/favicon.ico", "favicon.ico", "image/vnd.microsoft.icon"],
+    ["/apple-touch-icon.png", "apple-touch-icon.png", "image/png"],
+  ] as const) files.set(route, {
+    type, content: readFileSync(new URL(`../web/assets/${file}`, import.meta.url)),
+  });
   const builds = new Map<string, Promise<void>>();
   for (const page of pages) files.set(page.route, {
     type: "text/html", content: readFileSync(new URL(`../web/${page.directory}/index.html`, import.meta.url), "utf8"),
