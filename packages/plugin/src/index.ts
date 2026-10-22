@@ -28,7 +28,6 @@ export type {
 
 export type { Mention } from "./mention.ts";
 
-export { MAIN_LANE_ID } from "./lane.ts";
 
 export type {
   AnyResourceNamespace,
@@ -127,25 +126,9 @@ export type {
   ResourceListOptions,
   ResourceMetadata,
   ResourceOwnerReference,
-  AideTargetModel,
-  AideTargetModelCatalog,
 } from "./resource.ts";
 
-export type {
-  ActiveTurnSnapshot,
-  HarnessTargetSnapshot,
-  HarnessInputSnapshot,
-  PendingApprovalSnapshot,
-  SessionSnapshot,
-  ReconcileSnapshot,
-  HarnessInputSource,
-  HarnessInputStatus,
-  ActorKind,
-  ActorRef,
-  SessionRunState,
-  TurnSummary,
-  TurnSummaryToolCall,
-} from "./snapshot.ts";
+export type { HarnessTargetSnapshot, ReconcileSnapshot, HarnessExecutionResult, HarnessToolCall } from "./snapshot.ts";
 export type { ResourceCommit } from "./resource.ts";
 export type * from "./connectors/index.ts";
 

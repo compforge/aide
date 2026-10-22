@@ -16,7 +16,6 @@ export const DEFAULT_HOOK_TIMEOUT_MS = 10_000;
 export const DEFAULT_DEFERRED_HOOK_QUEUE_LIMIT = 256;
 
 export interface HookRegistrationOwner {
-  readonly aideSessionId: string;
   readonly pluginInstanceId: string;
   readonly pluginId: string;
   readonly namespace: ResourceNamespace;
@@ -141,7 +140,6 @@ export class HookRuntime {
     subject: Readonly<HookSubjectMap[S]>,
   ): Promise<void> {
     const scope: ExecutionScope = Object.freeze({
-      aideSessionId: registration.owner.aideSessionId,
       pluginInstanceId: registration.owner.pluginInstanceId,
       namespace: registration.owner.namespace,
       executionId: newId("pex"),

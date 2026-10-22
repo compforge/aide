@@ -47,7 +47,7 @@ test("Web switches one Conversation, persists its deadline and cannot change the
   assert.deepEqual(rows.find((row) => row.id === "a")!.trigger, { enabled: true, intervalSeconds: 3600 });
   assert.equal(rows.find((row) => row.id === "b")!.trigger.enabled, false);
   await aide.close();
-  const session = new SessionStore(root).openSession(aide.runtime.id);
+  const session = new SessionStore(root).openSession("aide:execution");
   const reopened = new ConversationStore(session);
   assert.equal(reopened.resource("a")!.status.nextTriggerAt, due);
   assert.equal("heartbeat" in session.meta, false);

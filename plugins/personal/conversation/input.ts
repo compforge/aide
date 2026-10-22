@@ -6,11 +6,11 @@ import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type
  * @case tests/input-routing.test.ts
  */
 export async function appendConversationInput(resources: ResourceClient,
-  target: { sessionId?: string; name: string; uid: string }, input: Readonly<Resource<InputSpec, InputStatus>>): Promise<boolean> {
+  target: { name: string; uid: string }, input: Readonly<Resource<InputSpec, InputStatus>>): Promise<boolean> {
   let appended = false;
   for (let attempt = 0; ; attempt++) {
     const c = await resources.get<ConversationSpec, ConversationStatus>({ ...CONVERSATION_TYPE, ...target, namespace: "v1" });
-    if (!c || c.metadata.deletionTimestamp) throw new Error(`Routing destination no longer exists: ${target.sessionId}/${target.name}`);
+    if (!c || c.metadata.deletionTimestamp) throw new Error(`Routing destination no longer exists: ${target.name}`);
     const fact = await resources.get<InputSpec, InputStatus>({ ...input, ...input.metadata });
     if (!fact) throw new Error("Input expired before append");
     if (fact.status.deliveries?.includes(c.metadata.uid)) return appended;

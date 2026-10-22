@@ -35,7 +35,6 @@ interface ActiveExecution {
 }
 
 export interface VerbOptions {
-  resourceContexts?: boolean;
   actions?: Readonly<Record<string, (scope: ExecutionScope, input: unknown) => Promise<unknown>>>;
   session?: VerbSession;
   capacity: ReconcileCapacity;
@@ -56,7 +55,6 @@ export interface VerbOptions {
 
 /** Plugin typed verbs and the live executions suspended while those verbs settle. */
 export class Verb {
-  private readonly resourceContexts: boolean;
   private readonly connectors: ConnectorClient;
   private readonly actions: VerbOptions["actions"];
   private readonly session?: VerbSession;
@@ -78,7 +76,6 @@ export class Verb {
 
   constructor(options: VerbOptions) {
     this.session = options.session;
-    this.resourceContexts = options.resourceContexts ?? false;
     this.actions = options.actions;
     for (const event of options.session?.ledger.read() ?? []) {
       if (event.kind === "connector.started" && event.source.type === "plugin") {
@@ -140,7 +137,6 @@ export class Verb {
     if (
       !execution ||
       execution.scope.pluginInstanceId !== context.pluginInstanceId ||
-      execution.scope.aideSessionId !== context.aideSessionId ||
       execution.scope.namespace !== context.namespace
     ) {
       throw new Error(`Plugin execution is not active: ${context.executionId}`);
@@ -252,7 +248,7 @@ export class Verb {
       // @spec Persist intent before dispatch; restart records an unknown outcome instead of replaying external effects.
       this.session?.appendEvent({ kind: "connector.started", source: { type: "plugin", pluginInstanceId: context.pluginInstanceId },
         payload: { callId, executionId: context.executionId, request: request.input.request,
-          resourceRef: context.resourceRef, conversationId: context.conversationId, inputId: context.inputId } });
+          resourceRef: context.resourceRef, attributes: context.attributes } });
       this.connectorCalls.set(callId, { pluginInstanceId: context.pluginInstanceId });
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -287,19 +283,16 @@ export class Verb {
       );
     }
     if (this.executions.get(context.executionId)?.interrupted) return { state: "dismissed" };
-    if (this.resourceContexts) {
-      if (request.input.laneId !== undefined || request.input.newLane !== undefined) throw new Error("Application Harness context is owned by the resource");
-      const key = resourceExecutionKey(context);
-      if (!this.session?.meta.lanes[key]) this.session?.setLane(key, { laneId: key, createdFor: { type: "session" }, harnessSessions: {} });
-    }
+    const key = resourceExecutionKey(context);
+    if (!this.session?.meta.lanes[key]) this.session?.setLane(key, { laneId: key, createdFor: { type: "session" }, harnessSessions: {} });
     const snapshot = this.harnessInvocations.record({
       scope: context,
       invocation: {
         verb: request.verb,
         title: request.input.title,
         prompt: request.input.prompt,
-        laneId: this.resourceContexts ? resourceExecutionKey(context) : request.input.laneId ?? "main",
-        newLane: this.resourceContexts ? false : request.input.newLane ?? false,
+        laneId: key,
+        newLane: false,
         harnessTargetId,
         freshContext: request.input.freshContext,
       },
@@ -316,8 +309,8 @@ export class Verb {
         state: "success",
         value: {
           outcome: "completed" as const,
-          laneId: terminal.laneId,
-          turn: terminal.result,
+          invocationId: terminal.invocationId,
+          result: (({ turnId, ...result }) => result)(terminal.result),
         },
       });
     }

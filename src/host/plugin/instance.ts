@@ -1,4 +1,3 @@
-import { assertSessionId } from "../store/session-id.ts";
 import { isDeepStrictEqual } from "node:util";
 import {
   existsSync,
@@ -13,13 +12,11 @@ import { dirname, join } from "node:path";
 
 import { newId } from "../event/ids.ts";
 import { withFileLock } from "../store/file-lock.ts";
-import type { SessionHandle } from "../store/store.ts";
 
 export type PluginConfig = Record<string, unknown>;
 
 export interface PluginInstance {
   readonly pluginInstanceId: string;
-  readonly aideSessionId: string;
   readonly pluginId: string;
   readonly marketplace?: string;
   readonly packageVersion: string;
@@ -39,8 +36,7 @@ export interface CreatePluginInstance {
 }
 
 export interface PluginInstanceRepository {
-  readonly aideSessionId: string;
-  readonly session: Readonly<Pick<SessionHandle, "id" | "dir">>;
+  readonly home: string;
   create(input: CreatePluginInstance): PluginInstance;
   get(pluginInstanceId: string): PluginInstance;
   list(): PluginInstance[];
@@ -51,7 +47,7 @@ export interface PluginInstanceRepository {
 }
 
 export interface PluginInstanceStoreOptions {
-  session: Pick<SessionHandle, "id" | "dir">;
+  home: string;
   now?: () => Date;
 }
 
@@ -112,21 +108,14 @@ function writeJsonAtomic(path: string, value: unknown): void {
 }
 
 /**
- * AideSession 内 Plugin 配置身份的事实来源。Resource 与执行事实仍由各自 owner 管理。
+ * Application-owned plugin configuration. Resources and execution records have independent lifecycles.
  */
 export class PluginInstanceStore implements PluginInstanceRepository {
-  readonly aideSessionId: string;
-  readonly session: Readonly<Pick<SessionHandle, "id" | "dir">>;
+  readonly home: string;
   private readonly now: () => Date;
 
   constructor(options: PluginInstanceStoreOptions) {
-    // SessionStore owns directory encoding; the logical ID may contain channel namespaces.
-    assertSessionId(options.session.id);
-    this.session = Object.freeze({
-      id: options.session.id,
-      dir: options.session.dir,
-    });
-    this.aideSessionId = options.session.id;
+    this.home = options.home;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -150,7 +139,6 @@ export class PluginInstanceStore implements PluginInstanceRepository {
       const timestamp = this.timestamp();
       const instance: PluginInstance = {
         pluginInstanceId,
-        aideSessionId: this.aideSessionId,
         pluginId: input.pluginId,
         ...(input.marketplace === undefined
           ? {}
@@ -259,9 +247,6 @@ export class PluginInstanceStore implements PluginInstanceRepository {
       if (instance.pluginInstanceId !== expectedId) {
         throw new Error(`pluginInstanceId must be ${expectedId}`);
       }
-      if (instance.aideSessionId !== this.aideSessionId) {
-        throw new Error(`aideSessionId must be ${this.aideSessionId}`);
-      }
       nonEmptyString("pluginId", instance.pluginId);
       if (instance.marketplace !== undefined) {
         nonEmptyString("marketplace", instance.marketplace);
@@ -275,7 +260,6 @@ export class PluginInstanceStore implements PluginInstanceRepository {
       isoTimestamp("updatedAt", instance.updatedAt);
       return deepFreeze({
         pluginInstanceId: instance.pluginInstanceId,
-        aideSessionId: instance.aideSessionId,
         pluginId: instance.pluginId,
         ...(instance.marketplace === undefined
           ? {}
@@ -301,7 +285,7 @@ export class PluginInstanceStore implements PluginInstanceRepository {
   }
 
   private pluginsDir(): string {
-    return join(this.session.dir, "plugins");
+    return join(this.home, "plugins", "instances");
   }
 
   private instancePath(pluginInstanceId: string): string {

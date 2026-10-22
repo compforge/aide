@@ -238,7 +238,7 @@ test("Lark projects Harness progress but only explicit messages become replies",
   const done = larkProgress(aide, conversationId)[0]!;
   assert.equal(done.phase, "done"); assert.equal(done.content, "最终答案"); assert.equal(done.messageIds.length, 1);
   const original = aide.outputStore.get(done.messageIds[0]!)!;
-  aide.outputStore.create(original.metadata.sessionId!, "another-destination", { ...original.spec,
+  aide.outputStore.create(("sessionId" in original.metadata ? "unexpected" : undefined)!, "another-destination", { ...original.spec,
     text: "另一群的专属内容", target: larkAddress("cli_progress", "another-chat") });
   const addressed = larkProgress(aide, conversationId)[0]!;
   assert.equal(addressed.content, "最终答案");

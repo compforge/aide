@@ -1,9 +1,11 @@
+import { personalExecution } from "../plugins/personal/execution-context.ts";
+import { resourceHome } from "../src/host/resource/storage.ts";
 import { test, expect } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { CoreSession } from "../src/host/core/index.ts";
+import { ApplicationRuntime } from "../src/host/runtime/index.ts";
 import { SessionStore } from "../src/host/store/store.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
@@ -20,15 +22,15 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit conve
   const root = mkdtempSync(join(tmpdir(), "aide-core-coordination-"));
   const session = new SessionStore(root).createSession({ cwd: root });
   session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex" });
-  const instances = new PluginInstanceStore({ session });
-  instances.create({ pluginInstanceId: "fixture", pluginId: "tests/coordination", packageVersion: "1.0.0", marketplace: "builtin" });
   const options = fakeOptions({ execute: async () => ({ action: "done", summary: "checked", notification: "ok", question: null, nextAt: null }) }, root);
-  const core = new CoreSession({ session, controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter, resolveTarget: () => ({ id: "default", harness: "codex" }) },
-    plugins: { resourceHome: root, instances, pluginSupervisor: new PluginSupervisor(), harnessTargets: [{ id: "default", harness: "codex" }], selectedHarnessTargetId: () => "default",
+  const core = new ApplicationRuntime(root, { cwd: root, targets: [{ id: "default", harness: "codex" }],
+    instances: [{ pluginInstanceId: "fixture", pluginId: "tests/coordination", packageVersion: "1.0.0", marketplace: "builtin", config: {} }],
+    controller: { mentionBudgetChars: 0, createAdapter: options.createAdapter },
+    plugins: { pluginSupervisor: new PluginSupervisor(), selectedHarnessTargetId: () => "default",
       loadPackageEntry: async (pluginId, version) => ({ pluginId, version, entryUrl: new URL("./fixtures/coordination-plugin.ts", import.meta.url).href,
         resourcesUrl: new URL("./fixtures/coordination-definitions.ts", import.meta.url).href }) },
   });
-  const manager = core.pluginManager!;
+  const manager = core.plugins;
   const resources = new PluginResourceStore({ home: root, pluginInstanceId: "fixture" });
   const conversations = new ConversationStore(session);
   const store = new Store(resources, manager.resourceClient("fixture"), conversations);
@@ -40,7 +42,7 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit conve
     const observer = { apiVersion: "tests.aide.dev/v1alpha1", kind: "WorkObserver" };
     expect(resources.get(observer, "observer", "v1/project/coordination").status).toMatchObject({ answer: "observed", count: 1 });
     const projection: ChannelService = { inputDefinition: () => { throw new Error("No Input expected"); }, runtime: core, conversations,
-      subscribe: (listener) => core.subscribe(listener), outputs: () => [], invocations: () => manager.listHarnessInvocations(), conversationIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
+      subscribe: (listener) => core.subscribe(listener), outputs: () => [], invocations: () => manager.listHarnessInvocations().map(invocation => ({ ...invocation, ...personalExecution(invocation) })), conversationIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
     expect(conversationView(projection, "group-a").blocks.some((block) => block.type === "execution")).toBe(true);
     expect(conversationView(projection, "group-b").blocks).toHaveLength(0);
     await work.appendInput(task.id, { action: "pause", text: "暂停" });
@@ -49,5 +51,5 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit conve
     await work.delete(task.id, 2);
     await manager.settled();
     expect(resources.get(observer, "observer", "v1/project/coordination").status).toMatchObject({ count: 0 });
-  } finally { await core.close(); rmSync(root, { recursive: true, force: true }); }
+  } finally { await core.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); }
 }, 15_000);

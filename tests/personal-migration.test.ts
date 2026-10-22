@@ -34,7 +34,7 @@ test("Personal migration preserves resource identity, default, pending inputs, t
   assert.equal(row.scope, JSON.stringify([null, "personal"]));
   assert.equal(value.object.metadata.uid, "conversation-uid");
   assert.equal(value.object.metadata.resourceVersion, "7");
-  assert.equal(value.object.metadata.sessionId, undefined);
+  assert.equal(("sessionId" in value.object.metadata ? "unexpected" : undefined), undefined);
   assert.equal(value.object.spec.sessionId, undefined);
   assert.equal(value.object.spec.default, true);
   assert.deepEqual(value.object.status.pendingInputIds, ["pending"]);

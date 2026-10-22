@@ -289,10 +289,10 @@ test("Aide transfers resource-owned Batch context across fresh native sessions a
     assert.equal(aide.personal.conversations.inputs().at(-1)!.consumption.phase, "done");
   };
   const binding = (sessionId: string, conversationId: string) => {
-    const session = new SessionStore(home).openSession(aide.runtime.id);
+    const session = new SessionStore(home).openSession("aide:execution");
     const target = chiefTarget(conversationId);
     const r = aide.personal.conversations.resource(conversationId)!;
-    const laneId = resourceExecutionKey({ aideSessionId: aide.runtime.id, pluginInstanceId: "personal", namespace: "v1", executionId: "test", controllerName: "batch",
+    const laneId = resourceExecutionKey({ pluginInstanceId: "personal", namespace: "v1", executionId: "test", controllerName: "batch",
       resourceRef: { apiVersion: r.apiVersion, kind: r.kind, namespace: r.metadata.namespace, name: r.metadata.name, uid: r.metadata.uid } });
     return session.meta.lanes[laneId]!.harnessSessions[target]!;
   };
@@ -507,7 +507,7 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
     assert.match(JSON.stringify(request.messages), /fixture-as-ops/);
     assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|create_work/);
   }
-  const session = new SessionStore(home).openSession(aide.runtime.id);
+  const session = new SessionStore(home).openSession("aide:execution");
   assert.equal(session.meta.harnessTargets.default!.harness, "pi");
   assert.ok(Object.values(session.meta.lanes).some((lane) => lane.harnessSessions.default?.harness === "pi"));
 });

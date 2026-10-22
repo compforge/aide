@@ -44,7 +44,8 @@ export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
  */
 export function conversationView(aide: ChannelService, conversationId: string): ConversationView {
   if (!aide.conversations.get(conversationId)) return { version: PROTOCOL_VERSION, biz: "aide.conversation", blocks: [], meta: { conversation_id: conversationId, activity: null } };
-  const state = aide.runtime.projection;
+  const history = aide.invocations().filter(item => item.conversationId === conversationId);
+  const state = aide.runtime.executions.view(history.flatMap(item => item.turnId ? [item.turnId] : []));
   const runs = aide.conversations.runs(conversationId);
   const active = runs.find((input) => !input.input && input.status.phase === "running");
   const queued = runs.filter((input) => !input.status.phase).length;
@@ -52,7 +53,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   const runId = (item: { inputId?: string; executionId: string }) => item.executionId;
   const resource = aide.conversations.resource(conversationId);
   const turnInputs = new Map([...state.harnessInputs.values()].map((input) => [input.turnId, input]));
-  const invocations = aide.invocations().filter((item) => {
+  const invocations = history.filter((item) => {
     if (item.conversationId !== conversationId || !resource || quietRuns.has(runId(item) ?? "")) return false;
     if (item.resourceRef?.kind === "Conversation") return item.resourceRef.uid === resource.metadata.uid;
     // Deleted Work may retain progress in its original Conversation, never in a later incarnation.

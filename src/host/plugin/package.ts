@@ -129,7 +129,7 @@ export class PluginBinding implements PluginContext {
     resources: ResourceClient,
     connectors: ConnectorClient = emptyConnectors,
   ) {
-    const { aideSessionId: _backend, ...publicInstance } = instance;
+    const publicInstance = instance;
     this.instance = Object.freeze(publicInstance);
     this.runtime = Object.freeze({ ...(session.cwd ? { cwd: session.cwd } : {}) });
     this.dataDirs = Object.freeze({ ...dataDirs });

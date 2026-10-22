@@ -17,7 +17,7 @@ export const conversationKey = digest;
 /** @spec Conversation is a Personal Resource. Input facts are shared; consumption and replies belong to each Conversation. */
 export class ConversationStore {
   private readonly listeners = new Set<(conversation: Conversation) => void>();
-  constructor(readonly sessionId: string, readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly inputStore: InputStore, readonly outputStore = new OutputStore(resources.storage.home)) {
+  constructor(readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly inputStore: InputStore, readonly outputStore = new OutputStore(resources.storage.home)) {
 
   }
   changed(change: ResourceClientChange): void {
@@ -33,7 +33,7 @@ export class ConversationStore {
   list(): Conversation[] { return this.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE).filter((r) => !r.metadata.deletionTimestamp).map((r) => this.project(r as ConversationResource)); }
   get(id: string): Conversation | undefined { const r = this.resource(id); return r && this.project(r); }
   /** @spec The creating Channel supplies the initial address; later attachment never fills or replaces it. */
-  async ensure(id = this.sessionId, address?: Address): Promise<ConversationResource> {
+  async ensure(id: string, address?: Address): Promise<ConversationResource> {
     const previous = this.resources.find<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, conversationKey(id));
     if (previous?.metadata.deletionTimestamp) throw new Error("Conversation is being deleted; retry after deletion completes");
     if (previous) return previous;

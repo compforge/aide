@@ -320,7 +320,7 @@ test("default Work target uses Pi and discards stale Codex native bindings while
     return options.createAdapter(target);
   } }, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  const restored = new SessionStore(root).openSession(aide.runtime.id);
+  const restored = new SessionStore(root).openSession("aide:execution");
   assert.equal(restored.meta.harnessTargets.default!.harness, "pi");
   assert.equal(restored.meta.harnessTargets.default!.model, undefined);
   assert.equal(restored.meta.lanes.main!.harnessSessions.default?.resumeState, undefined);
@@ -344,13 +344,13 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   } }, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   aide.personal;
-  assert.equal(new SessionStore(root).openSession(aide.runtime.id).meta.harnessTargets.chosen!.model, "configured-model");
+  assert.equal(new SessionStore(root).openSession("aide:execution").meta.harnessTargets.chosen!.model, "configured-model");
   await aide.receive(fixtureIncoming({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "hello" }));
   await aide.settled();
   // Mutating the caller's object cannot change future Sessions' startup target.
   defaultTarget.model = "changed-after-startup";
   aide.personal;
-  assert.equal(new SessionStore(root).openSession(aide.runtime.id).meta.harnessTargets.chosen!.model, "configured-model");
+  assert.equal(new SessionStore(root).openSession("aide:execution").meta.harnessTargets.chosen!.model, "configured-model");
   await aide.work("me").create(task); await aide.settled();
   await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "sample" } });
   await aide.event({ id: "sample", sessionId: "me", conversationId: "me", name: "sample", text: "sample" });
@@ -359,7 +359,7 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   assert.equal(aide.works().find((work) => work.kind === "routine")!.status, "scheduled");
   assert.ok(seen.some((item) => item.endsWith(":chief")));
   assert.equal(seen.filter((item) => item === `chosen:${harness}`).length, 2);
-  const session = new SessionStore(root).openSession(aide.runtime.id);
+  const session = new SessionStore(root).openSession("aide:execution");
   assert.equal(session.meta.harnessTargets.chosen!.harness, harness);
 });
 
@@ -373,9 +373,9 @@ test("restoring a Claude default keeps its claude-code native binding and clears
   const options = fakeOptions({ execute: async () => done }, root);
   let aide = new Aide(root, { ...options, defaultTarget: { id: "default", harness: "claude" } }, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  assert.equal(storage.openSession(aide.runtime.id).meta.lanes.main!.harnessSessions.default!.harnessSessionId, "native-claude");
+  assert.equal(storage.openSession("aide:execution").meta.lanes.main!.harnessSessions.default!.harnessSessionId, "native-claude");
   await aide.close();
   aide = new Aide(root, { ...options, defaultTarget: { id: "default", harness: "codex" } }, log);
-  assert.equal(storage.openSession(aide.runtime.id).meta.lanes.main!.harnessSessions.default?.harnessSessionId, undefined);
+  assert.equal(storage.openSession("aide:execution").meta.lanes.main!.harnessSessions.default?.harnessSessionId, undefined);
   assert.equal(storage.listSessions().length, 1);
 });

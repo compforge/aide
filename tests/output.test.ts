@@ -55,7 +55,7 @@ test("Output persists independent many-to-many associations, immutable content a
 test("Resource commit rolls back result and Output together on validation, conflict or capacity failure", async (t) => {
   const f = await setup(t);
   const type = { apiVersion: "test.dev/v1", kind: "Work" };
-  f.conversations.resources.storage.register("personal", [definition(type, "shared")]);
+  f.conversations.resources.storage.register("personal", [definition(type)]);
   let work = await f.client.create(type, { name: "work", spec: {}, status: { done: false } });
   const write = (name: string, spec: OutputSpec = f.spec()) => ({ operation: "create" as const, type: OUTPUT_TYPE, name, spec });
   let notifications = 0;

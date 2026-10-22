@@ -25,14 +25,14 @@ export async function reconcileInput(context: Pick<PluginContext, "resources" | 
   const current = await context.resources.get<InputSpec, InputStatus>(ref);
   if (!current || ["done", "ignored"].includes(current.status.routing?.phase ?? "")) return;
   let input: Input = current;
-  const conversations = (await context.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, { sessionId: "*" }))
+  const conversations = (await context.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE))
     .filter((c) => !c.metadata.deletionTimestamp);
   if (!input.status.routing) input = await context.resources.patchStatus(input, { routing: {
     phase: "running", bootstrap: !conversations.length, reason: conversations.length ? "Default and deterministic rules" : "First Conversation",
   } });
   let attached = conversations.some((c) => c.status.pendingInputIds.includes(input.metadata.name));
   const append = async (c: Readonly<ConversationResource>) => {
-    if (await appendConversationInput(context.resources, { sessionId: c.metadata.sessionId, name: c.metadata.name, uid: c.metadata.uid }, input)) {
+    if (await appendConversationInput(context.resources, { name: c.metadata.name, uid: c.metadata.uid }, input)) {
       context.logger.info("Chief input attached to conversation", { attributes: { inputId: input.metadata.name,
         conversationId: c.spec.id } });
     }

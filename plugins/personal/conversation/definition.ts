@@ -12,8 +12,8 @@ const BatchSchema = z.object({ id: z.string(), inputIds: z.array(z.string()),
   compaction: z.object({ offset: z.number().int().nonnegative(), text: z.string() }).strict().optional(),
 }).strict();
 export const ConversationDefinition: ResourceDefinition<ConversationSpec, ConversationStatus> = {
-  type: CONVERSATION_TYPE, scope: "shared",
-  schema: { spec: z.object({ id: z.string(), sessionId: z.string().optional(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
+  type: CONVERSATION_TYPE,
+  schema: { spec: z.object({ id: z.string(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     trigger: ConversationTriggerSchema.optional() }).strict(),
     status: z.object({ pendingInputIds: z.array(z.string()).default([]), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       nextTriggerAt: z.string().nullable().optional(), batch: BatchSchema.nullable().optional() }).strict() },

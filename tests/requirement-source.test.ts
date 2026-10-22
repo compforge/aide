@@ -14,7 +14,6 @@ import { SessionStore } from "../src/host/store/store.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
-import { scopedResources } from "../src/host/plugin/resource/directory.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { observeRequirements, SOURCE_TYPE, type RequirementSourceStatus } from "../plugins/personal/source/requirement/observe.ts";

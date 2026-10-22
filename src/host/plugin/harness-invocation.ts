@@ -1,5 +1,6 @@
 import type { ExecutionAssociation } from "@compforge/aide-plugin";
-import type { TurnSummary } from "@compforge/aide-plugin";
+import type { HarnessExecutionResult } from "@compforge/aide-plugin";
+type TurnSummary = HarnessExecutionResult & { readonly turnId: string };
 
 import { newId } from "../event/ids.ts";
 import type {
@@ -117,12 +118,14 @@ function frozenSummary(summary: TurnSummary): TurnSummary {
 
 function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
   const recorded = state.recorded.payload;
+  // Older journals stored application metadata alongside runtime fields. Preserve
+  // unrecognized fields opaquely; only the owning application interprets them.
+  const { invocationId, executionId, verb, title, prompt, laneId, newLane,
+    freshContext, harnessTargetId, resourceRef, attributes, ...extensions } = recorded;
   return Object.freeze({
     invocationId: recorded.invocationId,
     executionId: recorded.executionId,
-    ...(recorded.conversationId ? { conversationId: recorded.conversationId } : {}),
-    ...(recorded.inputId ? { inputId: recorded.inputId } : {}),
-    ...(recorded.inputIds ? { inputIds: recorded.inputIds } : {}),
+    attributes: attributes ?? extensions,
     ...(recorded.resourceRef ? { resourceRef: recorded.resourceRef } : {}),
     verb: recorded.verb,
     phase: phaseOf(state),
@@ -195,11 +198,6 @@ export class HarnessInvocationStore {
   }
 
   record(draft: ReconcileHarnessInvocation): HarnessInvocationSnapshot {
-    if (draft.scope.aideSessionId !== this.session.id) {
-      throw new Error(
-        `HarnessInvocation aideSessionId must be ${this.session.id}, got ${draft.scope.aideSessionId}`,
-      );
-    }
     this.session.requireLane(draft.invocation.laneId);
     const invocationId = newId("hinv");
     const invocation = draft.invocation;
@@ -212,8 +210,7 @@ export class HarnessInvocationStore {
       payload: {
         invocationId,
         executionId: draft.scope.executionId,
-        inputIds: draft.scope.inputIds,
-        conversationId: draft.scope.conversationId, inputId: draft.scope.inputId, resourceRef: draft.scope.resourceRef,
+        attributes: draft.scope.attributes, resourceRef: draft.scope.resourceRef,
         verb: invocation.verb,
         title: invocation.title,
         prompt: invocation.prompt,

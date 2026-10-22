@@ -15,20 +15,22 @@ import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputWrite } from "../plugins/personal/output.ts";
 export function fixtureBatch(patch: Partial<Batch> = {}): Batch { return { id: "batch:fixture", inputIds: [], createdAt: new Date().toISOString(), context: { prompt: "fixture", history: "", responseRequired: false }, phase: "queued", outputIds: [], ...patch }; }
 export class ConversationStore extends PersonalConversations {
-  override ensure(id = this.sessionId, address: Address = fixtureAddress(id)) { return super.ensure(id, address); }
+  readonly defaultConversationId: string;
+  override ensure(id = this.defaultConversationId, address: Address = fixtureAddress(id)) { return super.ensure(id, address); }
   constructor(session: { dir: string; id?: string }) {
     const scope = { ...session, id: session.id ?? "test" };
     const resources = new PluginResourceStore({ home: resourceHome(scope.dir), pluginInstanceId: "personal" });
     resources.storage.register("personal", personalDefinitions);
     const outputStore = new OutputStore(resourceHome(session.dir));
     const provider = personalAdmission(new InputStore(resourceHome(session.dir)), outputStore);
-    super(scope.id, resources, createResourceClient(resources, (change) => this.changed(change), undefined, provider), new InputStore(resourceHome(session.dir)), outputStore);
+    super(resources, createResourceClient(resources, (change) => this.changed(change), undefined, provider), new InputStore(resourceHome(session.dir)), outputStore);
+    this.defaultConversationId = scope.id;
   }
 }
 export async function seedInput(store: PersonalConversations, id: string, spec: InputSpec & { conversationId?: string }, status: Partial<Batch> & { outputs?: Array<OutputDraft & { at: string }> } = {}) {
-  const { conversationId = spec.sessionId ?? store.sessionId, ...input } = spec;
+  const { conversationId = spec.sessionId ?? "test", ...input } = spec;
   if (input.origin === "channel" && !input.source) input.source = fixtureAddress(conversationId);
-  store.inputStore.submit(store.sessionId, id, input);
+  store.inputStore.submit(spec.sessionId ?? "personal", id, input);
   const c = await store.ensure(conversationId, input.origin === "channel" ? input.source : undefined);
   const resources = createResourceClient(store.resources, (change) => store.changed(change));
   const outputs = status.outputs ?? [];
@@ -36,7 +38,7 @@ export async function seedInput(store: PersonalConversations, id: string, spec: 
   for (const o of outputs) {
     const write = outputWrite(c, o);
     if (write.operation !== "create") continue;
-    const resource = store.outputStore.create(store.sessionId, write.name, write.spec as import("../plugins/personal/output/model.ts").OutputSpec);
+    const resource = store.outputStore.create(conversationId, write.name, write.spec as import("../plugins/personal/output/model.ts").OutputSpec);
     const key = store.outputStore.key(o.id);
     const stored = store.outputStore.storage.read(key)!;
     store.outputStore.storage.write(key, JSON.stringify([null, "personal"]), { ...stored, object: { ...resource, metadata: { ...resource.metadata, creationTimestamp: o.at } } });

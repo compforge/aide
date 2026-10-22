@@ -1,6 +1,5 @@
-import { ResourceStorage, resourceHome, type StoredResource } from "../../resource/storage.ts";
+import { ResourceStorage, type StoredResource } from "../../resource/storage.ts";
 import { assertPathSegment, assertResourceUid, validateResourceType } from "./type.ts";
-import { assertSessionId } from "../../store/session-id.ts";
 import { isDeepStrictEqual } from "node:util";
 import {
   existsSync,
@@ -13,7 +12,6 @@ import type { Resource, ResourceListOptions, ResourceNamespace, ResourceOwnerRef
 
 import { newId } from "../../event/ids.ts";
 import { withAsyncFileLock, withFileLock } from "../../store/file-lock.ts";
-import type { SessionHandle } from "../../store/store.ts";
 import {
   namespaceContains,
   parseResourceNamespace,
@@ -25,8 +23,7 @@ export type PluginResource<
 > = Resource<TSpec, TStatus>;
 
 export interface PluginResourceStoreOptions {
-  session?: Pick<SessionHandle, "id" | "dir">;
-  home?: string;
+  home: string;
   pluginInstanceId: string;
 }
 
@@ -243,21 +240,17 @@ function isoTimestamp(name: string, value: unknown): asserts value is string {
 
 
 export class PluginResourceStore {
-  private readonly sessionDir: string;
+  private readonly resourceDir: string;
   readonly storage: ResourceStorage;
   readonly scope: string;
-  readonly aideSessionId: string;
   readonly pluginInstanceId: string;
 
   constructor(options: PluginResourceStoreOptions) {
-    if (!options.session && !options.home) throw new Error("Resource store needs a Session or shared home");
-    if (options.session) assertSessionId(options.session.id);
     assertPathSegment("pluginInstanceId", options.pluginInstanceId);
-    this.sessionDir = options.session?.dir ?? join(options.home!, "shared");
-    this.aideSessionId = options.session?.id ?? "";
+    this.resourceDir = join(options.home, "shared");
     this.pluginInstanceId = options.pluginInstanceId;
-    this.scope = JSON.stringify([options.session?.id ?? null, options.pluginInstanceId]);
-    this.storage = ResourceStorage.open(options.home ?? resourceHome(options.session!.dir));
+    this.scope = JSON.stringify([null, options.pluginInstanceId]);
+    this.storage = ResourceStorage.open(options.home);
     const root = this.namespacesDir();
     this.storage.migrate(root, function* () {
       function* files(path: string): Generator<string> {
@@ -268,7 +261,7 @@ export class PluginResourceStore {
           else if (item.name.endsWith(".json")) yield child;
         }
       }
-      for (const path of files(root)) yield [path, JSON.stringify([options.session?.id ?? null, options.pluginInstanceId]), JSON.parse(readFileSync(path, "utf8")) as StoredResource];
+      for (const path of files(root)) yield [path, JSON.stringify([null, options.pluginInstanceId]), JSON.parse(readFileSync(path, "utf8")) as StoredResource];
     });
   }
 
@@ -933,7 +926,7 @@ export class PluginResourceStore {
 
   private namespacesDir(): string {
     return join(
-      this.sessionDir,
+      this.resourceDir,
       "plugins",
       this.pluginInstanceId,
       "namespaces",
@@ -949,8 +942,7 @@ export class PluginResourceStore {
   }
 
   private kindDir(type: ResourceType, namespace: ResourceNamespace): string {
-    const definition = this.storage.definition(this.pluginInstanceId, type);
-    if ((definition.scope === "session") !== Boolean(this.aideSessionId)) throw new Error(`Wrong resource scope: ${type.kind} requires ${definition.scope}`);
+    this.storage.definition(this.pluginInstanceId, type);
     const [group, version] = type.apiVersion.split("/");
     if (!group || !version) {
       throw new Error(`invalid resource apiVersion: ${type.apiVersion}`);

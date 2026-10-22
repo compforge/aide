@@ -1,8 +1,8 @@
+export type ActorKind = "user" | "harness" | "plugin" | "aide" | (string & {});
+export interface ActorRef { readonly kind: ActorKind; readonly key: string; }
 import type { AgentMessagePhase, ContentBlock } from "../event/index.ts";
 import type { ApprovalAnswer, ApprovalCancellationReason, ApprovalDraft } from "../approval/types.ts";
 
-import type { ActorRef } from "@compforge/aide-plugin";
-export type { ActorKind, ActorRef } from "@compforge/aide-plugin";
 
 /**
  * @spec Message identity and authorship survive content updates, delivery receipts and replay.

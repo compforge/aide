@@ -13,7 +13,7 @@ import { assertResourceUid } from "../src/host/plugin/resource/type.ts";
 
 const TYPE = { apiVersion: "example.dev/v1", kind: "Document" };
 const definition: ResourceDefinition = {
-  type: TYPE, scope: "shared", schema: {
+  type: TYPE, schema: {
     spec: z.object({ text: z.string() }).strict(),
     status: z.object({ reconciled: z.boolean().default(false) }).strict(),
   },
@@ -96,13 +96,57 @@ test("Resource commits publish no writes on rollback and isolate observer failur
 });
 
 test("Execution context follows resource incarnation and controller, independent of the journal", () => {
-  const scope = { namespace: "v1" as const, executionId: "run-one", aideSessionId: "private-one", pluginInstanceId: "example",
+  const scope = { namespace: "v1" as const, executionId: "run-one", pluginInstanceId: "example",
     resourceRef: { ...TYPE, namespace: "v1" as const, name: "one", uid: "uid-one" } };
   const key = resourceExecutionKey(scope);
-  assert.equal(resourceExecutionKey({ ...scope, executionId: "run-two", aideSessionId: "private-two" }), key);
+  assert.equal(resourceExecutionKey({ ...scope, executionId: "run-two" }), key);
   assert.notEqual(resourceExecutionKey({ ...scope, resourceRef: { ...scope.resourceRef, uid: "uid-two" } }), key);
   assert.notEqual(resourceExecutionKey({ ...scope, controllerName: "batch" }), key);
   assert.throws(() => resourceExecutionKey({ ...scope, resourceRef: { ...scope.resourceRef, uid: undefined } }), /UID-pinned/);
   assert.doesNotThrow(() => assertResourceUid("input:stable-id"));
   for (const uid of ["../other", "a/b", "a\\b", "", ".", ".."]) assert.throws(() => assertResourceUid(uid));
+});
+
+/** @case Journal growth cannot enlarge a reconciliation snapshot or expose unrelated executions. */
+test("Reconcile snapshots contain configuration only and execution views require explicit IDs", async (t) => {
+  const { createReconcileSnapshot } = await import("../src/host/plugin/reconcile-snapshot.ts");
+  const { ExecutionService } = await import("../src/host/runtime/execution.ts");
+  const { SessionStore } = await import("../src/host/store/store.ts");
+  const root = home(t);
+  const journal = new SessionStore(root).createSession({ cwd: root });
+  for (const turnId of ["mine", "unrelated"]) journal.appendEvent({ kind: "_aide_turn_summary", source: { type: "aide" },
+    payload: { turnId, finalText: turnId, toolCalls: [] } });
+  const executions = new ExecutionService(journal, { resolveTarget: () => undefined, mentionBudgetChars: 0, createAdapter: () => { throw new Error("No execution requested"); } });
+  t.after(() => executions.close());
+  const snapshot = createReconcileSnapshot({ cwd: root, harnessTargets: [{ id: "configured", harness: "test" }] });
+  assert.deepEqual(Object.keys(snapshot).sort(), ["cwd", "harnessTargets"]);
+  assert.ok(Object.isFrozen(snapshot.harnessTargets[0]));
+  assert.deepEqual(executions.view([]).turnSummaries, []);
+  const selected = executions.view(["mine"]);
+  assert.deepEqual(selected.turnSummaries.map(turn => turn.turnId), ["mine"]);
+  selected.turnSummaries[0]!.finalText = "caller mutation";
+  assert.equal(executions.view(["mine"]).turnSummaries[0]!.finalText, "mine");
+  await executions.close();
+  const reopened = new ExecutionService(new SessionStore(root).openSession(journal.id), { resolveTarget: () => undefined, mentionBudgetChars: 0, createAdapter: () => { throw new Error("No replay expected"); } });
+  assert.equal(reopened.view(["mine"]).turnSummaries[0]!.finalText, "mine");
+  await reopened.close();
+});
+
+test("Failed application initialization releases its execution lease", async (t) => {
+  const root = home(t);
+  const options = {
+    cwd: root, targets: [], instances: [],
+    controller: { mentionBudgetChars: 0, createAdapter: () => { throw new Error("No Harness expected"); } },
+    plugins: { maxTotalConcurrency: 0 },
+  };
+  assert.throws(() => new ApplicationRuntime(root, options), /maxTotalConcurrency/);
+  let runtime: ApplicationRuntime | undefined;
+  await waitFor(() => {
+    try { runtime = new ApplicationRuntime(root, { ...options, plugins: {} }); return true; }
+    catch (error) {
+      if (error instanceof Error && error.message.includes("already active")) return false;
+      throw error;
+    }
+  });
+  await runtime!.close();
 });

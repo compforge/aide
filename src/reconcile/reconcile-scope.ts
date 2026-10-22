@@ -1,49 +1,10 @@
-import type {
-  ReconcileResourceOwner,
-  ReconcileScope,
-} from "../protocol/reconcile.ts";
-
-export function reconcileResourceOwner(
-  scope: ReconcileScope,
-): ReconcileResourceOwner {
-  const owner = scope.resourceOwner ?? "plugin";
-  if (owner !== "plugin" && owner !== "aide") {
-    throw new Error(`reconcile resourceOwner is invalid: ${String(owner)}`);
-  }
-  return owner;
-}
-
+import type { ReconcileScope } from "../protocol/reconcile.ts";
 export function reconcileScopeId(scope: ReconcileScope): string {
-  return JSON.stringify([
-    scope.aideSessionId,
-    scope.pluginInstanceId,
-    scope.namespace,
-    reconcileResourceOwner(scope),
-    scope.resourceApiVersion,
-    scope.resourceKind,
-    scope.controllerName ?? "",
-  ]);
+  return JSON.stringify([scope.pluginInstanceId, scope.namespace, scope.resourceApiVersion, scope.resourceKind, scope.controllerName ?? ""]);
 }
-
 export function reconcileScopeLabel(scope: ReconcileScope): string {
-  const kind =
-    reconcileResourceOwner(scope) === "plugin"
-      ? scope.resourceKind
-      : `aide:${scope.resourceKind}`;
-  return `${scope.aideSessionId}/${scope.pluginInstanceId}/${scope.namespace}/${scope.resourceApiVersion}/${kind}`;
+  return `${scope.pluginInstanceId}/${scope.namespace}/${scope.resourceApiVersion}/${scope.resourceKind}`;
 }
-
-export function sameReconcileScope(
-  left: ReconcileScope,
-  right: ReconcileScope,
-): boolean {
-  return (
-    left.aideSessionId === right.aideSessionId &&
-    left.pluginInstanceId === right.pluginInstanceId &&
-    left.namespace === right.namespace &&
-    left.resourceApiVersion === right.resourceApiVersion &&
-    left.resourceKind === right.resourceKind &&
-    (left.controllerName ?? "") === (right.controllerName ?? "") &&
-    reconcileResourceOwner(left) === reconcileResourceOwner(right)
-  );
+export function sameReconcileScope(left: ReconcileScope, right: ReconcileScope): boolean {
+  return reconcileScopeId(left) === reconcileScopeId(right);
 }

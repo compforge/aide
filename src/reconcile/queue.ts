@@ -3,7 +3,6 @@ import type {
   ReconcileScope,
 } from "../protocol/reconcile.ts";
 import {
-  reconcileResourceOwner,
   sameReconcileScope,
 } from "./reconcile-scope.ts";
 
@@ -97,14 +96,12 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export function reconcileKeyId(key: ReconcileKey): string {
   return JSON.stringify([
-    key.aideSessionId,
     key.pluginInstanceId,
     key.namespace,
     key.resourceApiVersion,
     key.resourceKind,
     key.resourceId,
     key.controllerName ?? "",
-    reconcileResourceOwner(key),
   ]);
 }
 

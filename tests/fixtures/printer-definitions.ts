@@ -1,7 +1,7 @@
 import type { ResourceDefinition } from "@compforge/aide-plugin";
 export const TYPE = { apiVersion: "tests.aide.dev/v1alpha1", kind: "Printable" };
 const object = { parse(value: unknown) { if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Expected object"); return value; } };
-const definitions: ResourceDefinition[] = [{ type: TYPE, scope: "session", schema: { spec: object, status: object },
+const definitions: ResourceDefinition[] = [{ type: TYPE, schema: { spec: object, status: object },
   printer: {
     describe(resource) {
       if (resource.spec.value === "throw") throw new Error("Printer could not describe this value");

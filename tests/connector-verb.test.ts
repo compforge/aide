@@ -22,10 +22,10 @@ test("Connector Verb persists dispatch and outcome; orphan recovery records unce
     if (calls === 3) await new Promise<void>((resolve) => { release = resolve; });
     return [];
   } } };
-  const options = { session, connectors, capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot(session.id) };
+  const options = { session, connectors, capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot() };
   const verb = new Verb(options);
   t.after(async () => { release?.(); verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
-  const context = { aideSessionId: session.id, pluginInstanceId: "personal", namespace: "v1" as const, executionId: "exec-1", conversationId: "conv" };
+  const context = { pluginInstanceId: "personal", namespace: "v1" as const, executionId: "exec-1", conversationId: "conv" };
   await verb.beginRemote(context);
   const invoke = (timeoutMs: number) => verb.invoke(context, { verb: "connector", input: { request: { operation: "environments.list" }, timeoutMs } });
   assert.equal((await invoke(1000)).state, "success");
@@ -36,7 +36,7 @@ test("Connector Verb persists dispatch and outcome; orphan recovery records unce
   const settled = session.ledger.read().filter((event) => event.kind === "connector.settled");
   assert.deepEqual(settled.map((event) => event.payload.outcome), ["success", "failure", "timeout"]);
   session.appendEvent({ kind: "connector.started", source: { type: "plugin", pluginInstanceId: "personal" },
-    payload: { callId: "orphan", executionId: "exec-crashed", conversationId: "conv", request: { operation: "environments.list" } } });
+    payload: { callId: "orphan", executionId: "exec-crashed", attributes: { conversationId: "conv" }, request: { operation: "environments.list" } } });
   const reopened = storage.openSession(session.id);
   const restarted = new Verb({ ...options, session: reopened });
   restarted.failOrphans(); restarted.failOrphans(); restarted.close();

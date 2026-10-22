@@ -1,40 +1,22 @@
 import { describe, expect, test } from "bun:test";
-
-import {
-  namespaceContains,
-  parseResourceNamespace,
-  projectResourceNamespace,
-  resourceNamespaceScope,
-  sessionResourceNamespace,
-} from "../src/host/plugin/namespace.ts";
+import { namespaceContains, parseResourceNamespace } from "../src/host/plugin/namespace.ts";
 
 describe("Resource namespace", () => {
-  test("constructs canonical project and Session namespaces", () => {
-    expect(projectResourceNamespace("project-a"))
-      .toBe("v1/project/project-a");
-    expect(sessionResourceNamespace("project-a", "bs_1"))
-      .toBe("v1/project/project-a/session/bs_1");
+  test("accepts opaque plugin paths, including existing persisted paths", () => {
+    for (const path of ["v1", "v1/team-a", "v1/project/project-a", "v1/project/project-a/session/old-id"] as const) {
+      expect(parseResourceNamespace(path)).toBe(path);
+    }
   });
-
-  test("rejects unresolved and malformed namespaces", () => {
-    expect(() => parseResourceNamespace("v1/project"))
-      .toThrow("canonical");
-    expect(() => parseResourceNamespace("v1/project/a/session/../b"))
-      .toThrow("canonical");
-    expect(() => projectResourceNamespace("../a")).toThrow("projectId");
-    expect(() => sessionResourceNamespace("a", "../b")).toThrow("sessionId");
+  test("rejects noncanonical and unsafe segments", () => {
+    for (const path of ["v2", "v1/", "v1//a", "v1/../a", "v1/a/./b", "v1/a\\b", " v1"]) {
+      expect(() => parseResourceNamespace(path)).toThrow("canonical");
+    }
   });
-
-  test("derives Resource scope and descendant relationships", () => {
-    const project = parseResourceNamespace("v1/project/project-a");
-    const session = parseResourceNamespace(
-      "v1/project/project-a/session/bs_1",
-    );
-    expect(resourceNamespaceScope("v1")).toBe("global");
-    expect(resourceNamespaceScope(project)).toBe("project");
-    expect(resourceNamespaceScope(session)).toBe("session");
-    expect(namespaceContains(project, session)).toBe(true);
-    expect(namespaceContains(session, project)).toBe(false);
-    expect(namespaceContains(project, "v1/project/project-b")).toBe(false);
+  test("compares descendant paths at segment boundaries", () => {
+    const parent = parseResourceNamespace("v1/team-a");
+    const child = parseResourceNamespace("v1/team-a/research");
+    expect(namespaceContains(parent, child)).toBe(true);
+    expect(namespaceContains(child, parent)).toBe(false);
+    expect(namespaceContains(parent, "v1/team-ab")).toBe(false);
   });
 });

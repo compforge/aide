@@ -49,7 +49,7 @@ test("Person catalog resolves identities across sessions, preserves profiles acr
   await f.restart();
   assert.equal((await f.aide.persons.read(first.metadata.name)).metadata.uid, first.metadata.uid);
   assert.deepEqual((await f.aide.persons.read(first.metadata.name)).spec.profile, profiled.spec.profile);
-  assert.equal((await f.aide.persons.read(first.metadata.name)).metadata.sessionId, undefined);
+  assert.equal("sessionId" in (await f.aide.persons.read(first.metadata.name)).metadata, false);
   assert.equal(f.aide.conversationIds().includes("personal:persons"), false);
 });
 

@@ -1,4 +1,3 @@
-import type { TurnSummary } from "./snapshot.ts";
 import type {
   AnyResourceNamespace,
   ResourceNamespace,
@@ -19,7 +18,6 @@ export interface ResourceType {
  * name-based lookup that may resolve to a replacement Resource.
  */
 export interface ResourceRef extends ResourceType {
-  readonly sessionId?: string;
   readonly namespace: AnyResourceNamespace;
   readonly name: string;
   readonly uid?: string;
@@ -31,10 +29,9 @@ export interface ResourceOwnerReference extends ResourceRef {
 }
 
 export interface ResourceMetadata {
-  readonly sessionId?: string;
   /** Stable name within one namespace and Resource type. */
   readonly name: string;
-  /** Concrete Resource scope. Aide-owned Resources use a Aide-reserved namespace. */
+  /** Namespace within the owning plugin instance. */
   readonly namespace: AnyResourceNamespace;
   /** Aide-assigned identity for this concrete incarnation. */
   readonly uid: string;
@@ -100,7 +97,6 @@ export interface ResourceValidator<S, T> {
  */
 export interface ResourceDefinition<S = any, T = any> {
   readonly type: ResourceType;
-  readonly scope: "shared" | "session";
   readonly schema: { readonly spec: ResourceSchema<S>; readonly status: ResourceSchema<T> };
   readonly validator?: ResourceValidator<S, T>;
   readonly printer?: ResourcePrinter<S, T>;
@@ -109,8 +105,6 @@ export interface ResourceDefinition<S = any, T = any> {
 
 /** Exact-match label selector. All entries must match the Resource. */
 export interface ResourceListOptions {
-  /** Explicit Session selection; "*" lists active host Sessions. Omitted means current Session. */
-  readonly sessionId?: string;
   /** Exact namespace to query. Plugin-owned Resources default to user-global `v1`. */
   readonly namespace?: AnyResourceNamespace;
   /** Include every descendant namespace below `namespace`. */
@@ -145,7 +139,7 @@ export interface ResourceWriter {
   create<TSpec, TStatus>(
     type: ResourceType,
     init: {
-      sessionId?: string;
+
       name: string;
       /** Concrete Resource namespace. Defaults to the user-global `v1`. */
       namespace?: ResourceNamespace;
@@ -201,17 +195,3 @@ export interface ResourceClient extends ResourceReader, ResourceWriter {
     ref: ResourceRef,
   ): Promise<Readonly<Resource<TSpec, TStatus>> | undefined>;
 }
-
-export interface AideTargetModel {
-  readonly id: string;
-  readonly label: string;
-  readonly description?: string;
-  readonly efforts: readonly { readonly id: string; readonly label: string }[];
-}
-
-/** Discovery state is independent of whether a Target is configured/eligible for routing. */
-export type AideTargetModelCatalog =
-  | { readonly phase: "Pending" }
-  | { readonly phase: "Unavailable"; readonly observedAt: string }
-  | { readonly phase: "Failed"; readonly observedAt: string; readonly message: string }
-  | { readonly phase: "Ready"; readonly observedAt: string; readonly models: readonly AideTargetModel[] };

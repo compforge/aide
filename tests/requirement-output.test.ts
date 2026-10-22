@@ -14,7 +14,7 @@ const target: RequirementAddress = { kind: "requirement", source: "work", catego
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-comment-output-")), store = new OutputStore(root);
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const spec: OutputSpec = { text: "收到", target, conversationId: "topic", conversation: { apiVersion: "personal.aide.dev/v1", kind: "Conversation", namespace: "v1", name: "topic", uid: "topic-uid", sessionId: "s" } };
+  const spec: OutputSpec = { text: "收到", target, conversationId: "topic", conversation: { apiVersion: "personal.aide.dev/v1", kind: "Conversation", namespace: "v1", name: "topic", uid: "topic-uid" } };
   const requirements = { ...emptyConnectors.requirements, async identity() { return { provider: "meego", scope: target.scope }; } };
   return { root, store, spec, requirements };
 }

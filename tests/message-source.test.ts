@@ -2,7 +2,6 @@ import { OutputStore } from "../plugins/personal/output/store.ts";
 import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
-import { scopedResources } from "../src/host/plugin/resource/directory.ts";
 import { fixtureAddress } from "./address-fixture.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";

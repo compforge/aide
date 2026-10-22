@@ -1,3 +1,4 @@
+import { resourceHome } from "../src/host/resource/storage.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -35,7 +36,7 @@ function testRoot(): string {
 
 function scope(pluginInstanceId: string, resourceKind: string = "Requirement"): ReconcileScope {
   return {
-    aideSessionId: "bs_test",
+
     pluginInstanceId,
     namespace: "v1",
     resourceApiVersion: API_VERSION,
@@ -63,14 +64,14 @@ function testSession(root: string): { id: string; dir: string } {
 
 function store(root: string, pluginInstanceId: string): PluginResourceStore {
   return new PluginResourceStore({
-    session: testSession(root),
+    home: root,
     pluginInstanceId,
   });
 }
 
 function instanceStore(root: string): PluginInstanceStore {
   return new PluginInstanceStore({
-    session: testSession(root),
+    home: root,
   });
 }
 
@@ -107,11 +108,11 @@ afterEach(() => {
 });
 
 describe("plugin Manager", () => {
-  test("awaits ctx.harness on a new lane and returns its Turn", async () => {
+  test("awaits resource-owned Harness execution and returns its result", async () => {
     const root = testRoot();
     const session = new SessionStore(root).createSession({ cwd: "/repo" });
     const resources = new PluginResourceStore({
-      session,
+      home: resourceHome(session.dir),
       pluginInstanceId: "reqloop_default",
     });
     resources.create<Spec>({
@@ -124,10 +125,10 @@ describe("plugin Manager", () => {
     let selectedHarnessTargetId = "claude";
     const manager = new Manager({
       session,
-      instances: new PluginInstanceStore({ session }),
+      instances: new PluginInstanceStore({ home: resourceHome(session.dir) }),
       snapshot() {
         return {
-          ...emptyReconcileSnapshot(session.id),
+          ...emptyReconcileSnapshot(),
           harnessTargets: [
             { id: "codex", harness: "codex" },
             { id: "claude", harness: "claude" },
@@ -147,8 +148,6 @@ describe("plugin Manager", () => {
           title: "Implement",
           prompt: "Implement run_1.",
           timeoutMs: 1_000,
-          laneId: "main",
-          newLane: true,
         });
         states.push(
           result.state === "success"
@@ -158,7 +157,6 @@ describe("plugin Manager", () => {
       },
     });
     const reconcileKey = {
-      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,
@@ -172,8 +170,7 @@ describe("plugin Manager", () => {
       harnessTargetId: "claude",
       blocks: [{ type: "text", text: "Implement run_1." }],
       source: "plugin",
-      newLane: true,
-      parentLaneId: "main",
+      newLane: false,
     });
     expect(scheduled[0]?.laneId).not.toBe(MAIN_LANE_ID);
     expect(session.projection.approvals.size).toBe(0);
@@ -231,7 +228,7 @@ describe("plugin Manager", () => {
     const root = testRoot();
     const session = new SessionStore(root).createSession({ cwd: "/repo" });
     const resources = new PluginResourceStore({
-      session,
+      home: resourceHome(session.dir),
       pluginInstanceId: "reqloop_default",
     });
     resources.create<Spec>({
@@ -242,9 +239,9 @@ describe("plugin Manager", () => {
     const states: string[] = [];
     const manager = new Manager({
       session,
-      instances: new PluginInstanceStore({ session }),
+      instances: new PluginInstanceStore({ home: resourceHome(session.dir) }),
       snapshot: () => ({
-        ...emptyReconcileSnapshot(session.id),
+        ...emptyReconcileSnapshot(),
         harnessTargets: [{ id: "codex", harness: "codex" }],
       }),
       selectedHarnessTargetId: () => "codex",
@@ -258,14 +255,12 @@ describe("plugin Manager", () => {
           title: "Implement",
           prompt: "Implement run_1.",
           timeoutMs: 1_000,
-          laneId: "main",
         });
         states.push(result.state);
       },
     });
 
     const reconcileKey = {
-      aideSessionId: session.id,
       pluginInstanceId: "reqloop_default",
       namespace: "v1" as const,
       resourceApiVersion: API_VERSION,
@@ -336,10 +331,10 @@ describe("plugin Manager", () => {
     manager.registerController(definition);
 
     expect(() => manager.registerController(definition)).toThrow(
-      `plugin Controller already registered for bs_test/reqloop_default/v1/${API_VERSION}/Requirement`,
+      `plugin Controller already registered for reqloop_default/v1/${API_VERSION}/Requirement`,
     );
     await expect(manager.enqueue(key("missing", "run_1"))).rejects.toThrow(
-      `no plugin Controller registered for bs_test/missing/v1/${API_VERSION}/Requirement`,
+      `no plugin Controller registered for missing/v1/${API_VERSION}/Requirement`,
     );
   });
 
@@ -385,7 +380,7 @@ describe("plugin Manager", () => {
     registration.close();
     registration.close();
     await expect(manager.enqueue(key("reqloop_default", "run_1"))).rejects.toThrow(
-      `no plugin Controller registered for bs_test/reqloop_default/v1/${API_VERSION}/Requirement`,
+      `no plugin Controller registered for reqloop_default/v1/${API_VERSION}/Requirement`,
     );
   });
 

@@ -18,13 +18,13 @@ function home(t: { after(fn: () => void): void }) {
 }
 const TYPE = { apiVersion: "tests.aide.dev/v1", kind: "Document" };
 const document: ResourceDefinition = {
-  type: TYPE, scope: "shared", schema: {
+  type: TYPE, schema: {
     spec: z.object({ text: z.string().min(1), label: z.string().default("document") }).strict(),
     status: z.object({ count: z.number().int().nonnegative().default(0) }).strict(),
   },
 };
 
-test("Definitions admit canonical data, reject unknown types and enforce shared/session scope", async (t) => {
+test("Definitions admit canonical data, reject unknown types and preserve application resource identity", async (t) => {
   const dir = home(t);
   const store = new PluginResourceStore({ home: dir, pluginInstanceId: "example" });
   store.storage.register("example", [document]);
@@ -32,10 +32,10 @@ test("Definitions admit canonical data, reject unknown types and enforce shared/
   const resource = await client.create(TYPE, { name: "one", spec: { text: "hello" } });
   assert.deepEqual(resource.spec, { text: "hello", label: "document" });
   assert.deepEqual(resource.status, { count: 0 });
-  assert.equal(resource.metadata.sessionId, undefined);
+  assert.equal(("sessionId" in resource.metadata ? "unexpected" : undefined), undefined);
   await assert.rejects(client.create({ ...TYPE, kind: "Unknown" }, { name: "one", spec: {} }), /Unknown resource definition/);
-  const sessionStore = new PluginResourceStore({ session: { id: "session", dir: join(dir, "sessions", "session") }, pluginInstanceId: "example" });
-  assert.throws(() => sessionStore.get(TYPE, "one"), /Wrong resource scope/);
+  const reopened = new PluginResourceStore({ home: dir, pluginInstanceId: "example" });
+  assert.equal(reopened.get(TYPE, "one").metadata.uid, resource.metadata.uid);
   await assert.rejects(client.patchStatus(resource, { count: -1 }), /Too small/);
   await assert.rejects(client.replace(resource, { text: "" }, { count: 0 }), /Too small/);
   assert.equal(store.get(TYPE, "one").metadata.resourceVersion, "1");
@@ -58,7 +58,7 @@ test("Person commit validates preceding writes and rolls back data plus notifica
   assert.equal(changes, 0);
   const [created] = await client.commit([{ operation: "create", type: PERSON_TYPE, name: "one", spec: { name: "Alice", identities: [identity] }, status }]);
   assert.equal(changes, 1);
-  assert.equal(created!.metadata.sessionId, undefined);
+  assert.equal(("sessionId" in created!.metadata ? "unexpected" : undefined), undefined);
   const me = (await persons.me())!;
   await assert.rejects(client.commit([{ operation: "replace", resource: me, spec: { ...me.spec, identities: [] }, status }]), /cannot be removed/);
   await assert.rejects(client.patchStatus(me, { updatedBy: "unknown" } as unknown as PersonStatus));
@@ -85,14 +85,14 @@ test("Duplicate definition sets fail before adding any declaration", (t) => {
 });
 
 /** @case Repeated Source observations compare canonical spec, including defaults supplied by the schema. */
-test("Source ensure is stable after schema defaults and validates explicit Session selection", async (t) => {
+test("Source ensure is stable after schema defaults without execution scope", async (t) => {
   const store = new PluginResourceStore({ home: home(t), pluginInstanceId: "example" });
   store.storage.register("example", [document]);
   assert.equal(store.ensure({ type: TYPE, name: "one", spec: { text: "hello" } }).created, true);
   assert.equal(store.ensure({ type: TYPE, name: "one", spec: { text: "hello" } }).created, false);
   const client = createResourceClient(store);
-  await assert.rejects(client.create(TYPE, { name: "two", sessionId: "session", spec: { text: "hello" } }), /Session/);
-  await assert.rejects(client.list(TYPE, { sessionId: "session" }), /Session/);
+  await client.create(TYPE, { name: "two", spec: { text: "hello" } });
+  assert.equal((await client.list(TYPE)).length, 2);
 });
 
 /** @case Failed retention computation must preserve the old reference graph and committed resource. */

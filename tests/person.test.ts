@@ -87,8 +87,6 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   assert.deepEqual(inputs.find((input) => input.spec.text === "mine")!.spec.observation!.sender, { id: "ou_me", type: "user" });
   assert.ok(prompts.some((prompt) => prompt.includes("Relation to Person: sent")));
   // Rebuilding a fresh native context must retain attribution in its bounded history.
-  const scope = aide.personal;
-  const conversation = scope.conversations.resource(scope.id)!;
 
   await channel.receive(event("followup", "ou_me"));
   await channel.dispatch(); await aide.settled();

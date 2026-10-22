@@ -277,7 +277,7 @@ async function activate(
       `loaded Package identity ${plugin.pluginId}@${plugin.version} does not match ${entry.pluginId}@${entry.version}`,
     );
   }
-  controllers = new Controllers(session, instance.pluginInstanceId, resources, callHost, pluginLogger());
+  controllers = new Controllers(instance.pluginInstanceId, resources, callHost, pluginLogger());
   const registrations: PluginRegistration[] = [];
   let sealed = false;
   const assertRegistering = (): void => {
