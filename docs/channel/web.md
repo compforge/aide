@@ -4,7 +4,13 @@ Web 是 Aide 的浏览器 Channel，提供会话导航、聊天、工作列表�
 
 ## 前后端分工
 
-`src/web/` 放浏览器页面、脚本、样式与 Markdown 渲染。`src/api/` 提供 HTTP 路由、输入校验、响应与 SSE，handler 通过应用提供的接口调用 Core / Personal 能力；Work 生命周期规则由 WorkService 负责。共享的消息和执行展示投影仍在 `src/channel/`，供 Web 与 Lark 使用。
+`src/web/` 按页面组织：`conversations/` 与 `persons/` 各自放置 HTML、TypeScript 入口和样式；`shared/` 仅提供两页共用的 DOM、HTTP、剪贴板、Markdown 与基础样式。`src/api/` 提供 HTTP 路由、输入校验、响应与 SSE，handler 通过应用提供的接口调用 Core / Personal 能力；Work 生命周期规则由 WorkService 负责。共享的消息和执行展示投影仍在 `src/channel/`，供 Web 与 Lark 使用。
+
+Conversations 的 `main.ts` 组合导航、时间线、输入框、工作列表与原生审批模块，并管理轮询和 SSE 生命周期。导航持有自动跟随或手动分页意图及菜单状态；输入框持有发送状态和重试消息 ID；时间线持有展开选择与渲染缓存。模块通过显式回调请求刷新，不相互读取可变状态。离开页面关闭流和轮询；从浏览器往返缓存恢复时保留交互状态，并重新启动连接。
+
+Persons 的状态留在自己的页面入口，人物选择、资料草稿与认识编辑不依赖 Conversation。页面使用 `src/api/types.ts` 中的展示契约和现有领域类型，跨服务边界的引用均为 type-only import，宿主实现不进入浏览器 bundle。
+
+`src/api/assets.ts` 独立管理固定静态资源路由：`/` 与 `/people` 提供页面，`/app.js`、`/app.css` 和 `/persons.js`、`/persons.css` 分别提供页面资产。每页入口首次请求时由 Bun 打包并缓存；HTML、CSS 和依赖随页面归属组织，不另设浏览器 SDK 汇总入口。资源构建失败进入 HTTP 日志，后续请求可以重新构建。
 
 ## 消息与 Markdown
 
@@ -40,7 +46,7 @@ Pi Adapter 将 `text_delta` / `thinking_delta` 映射到现有 `agent_message_ch
 
 流式变更合并后发送，空闲连接发送 AgentUE `ping`，独立写入的 Work outbox 定期检查。发送阻塞时等待 drain，基于上次已写出的模型计算最新 patch。连接定期以 `end` 正常结束，由 EventSource 自动重连；投影失败发送 `error` 后 `end`。首次投影失败则直接返回 HTTP 500。断开连接清理订阅和计时器，不取消服务端执行；进程退出或网络中断属于传输中断，客户端从新快照恢复。
 
-使用已发布的 `@compforge/agentue` SDK，版本由 lockfile 固定。服务端与浏览器直接引用同一 SDK，不复制协议实现。`src/web/sdk.ts` 仅导出浏览器所需的 `applyPatch` / `parsePatchEvent`，由现有 Bun 在首次请求时打包并缓存，经同源 `/agentue.js` 提供。浏览器按 SDK reducer 更新展示模型，Aide 负责将 block 渲染到页面并保留展开状态、输入焦点和用户浏览历史时的滚动位置。
+使用已发布的 `@compforge/agentue` SDK，版本由 lockfile 固定。服务端与浏览器直接引用同一 SDK，不复制协议实现。Conversations 的入口直接导入 `applyPatch` / `parsePatchEvent`，与页面代码一起打包。浏览器按 SDK reducer 更新展示模型，Aide 负责将 block 渲染到页面并保留展开状态、输入焦点和用户浏览历史时的滚动位置。
 
 Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职责独立。每次连接的 seq 属于该次交付，不保存 UI patch 日志或按 Last-Event-ID 重放；执行事件仍由既有 Ledger 持久化。
 

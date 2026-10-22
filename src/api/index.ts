@@ -1,10 +1,10 @@
+import { createWebAssets } from "./assets.ts";
+import type { ConversationItem } from "./types.ts";
 import { visibleOutput } from "../channel/output.ts";
 import { webAddress } from "../channel/address.ts";
 import { PersonSchema } from "../../plugins/personal/person/model.ts";
 import { CHANNELS, bindChannelInput } from "../channel/definition.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import type { Logger } from "pino";
 import type { WebService } from "./service.ts";
@@ -55,16 +55,7 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 /** Local channel bridge: accept messages/events and let adapters poll the durable outgoing log. */
 export function httpChannel(aide: WebService, log: Logger) {
   const receive = bindChannelInput(CHANNELS.web, (input) => aide.receive(input));
-  const files = [
-    ["/", "index.html", "text/html"],
-    ["/people", "persons.html", "text/html"],
-    ["/persons.js", "persons.js", "text/javascript"],
-    ["/app.js", "app.js", "text/javascript"],
-    ["/style.css", "style.css", "text/css"],
-  ] as const;
-  const assets = new Map<string, { type: string; content: string }>(files.map(([path, file, type]) =>
-    [path, { type, content: readFileSync(new URL(`../web/${file}`, import.meta.url), "utf8") }]));
-  let webSdk: Promise<string> | undefined;
+  const assets = createWebAssets();
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
@@ -83,23 +74,13 @@ export function httpChannel(aide: WebService, log: Logger) {
           response.end(); return;
         }
       }
-      const asset = assets.get(url.pathname);
+      const asset = request.method === "GET" ? await assets(url.pathname) : undefined;
       if (request.method === "GET" && asset) {
         response.writeHead(200, {
           "content-type": `${asset.type}; charset=utf-8`, "cache-control": "no-store",
           "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         });
         response.end(asset.content); return;
-      }
-      if (request.method === "GET" && url.pathname === "/agentue.js") {
-        webSdk ??= Bun.build({ entrypoints: [fileURLToPath(new URL("../web/sdk.ts", import.meta.url))], target: "browser", format: "esm", minify: true })
-          .then(async (build) => {
-            if (!build.success) throw new AggregateError(build.logs, "AgentUE browser bundle failed");
-            return build.outputs[0]!.text();
-          });
-        const script = await webSdk;
-        response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" });
-        response.end(script); return;
       }
       if (request.method === "GET" && url.pathname === "/health") {
         json(response, 200, { status: "ok", revision: process.env.AIDE_REVISION ?? "development" }); return;
@@ -118,7 +99,7 @@ export function httpChannel(aide: WebService, log: Logger) {
         }
         json(response, 200, conversationList(aide).map((item) => ({ ...item,
           ...(counts.get(item.id) ?? { taskCount: 0, routineCount: 0 }),
-        }))); return;
+        })) satisfies ConversationItem[]); return;
       }
       if (request.method === "GET" && url.pathname === "/persons") {
         await aide.start();

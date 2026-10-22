@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { conversationPage } from "../src/web/conversation-list.ts";
+import { conversationPage } from "../src/web/conversations/pagination.ts";
 
 test("Conversation pages keep the default first without skipping or repeating ordinary conversations", () => {
   const ordinary = Array.from({ length: 21 }, (_, index) => ({ id: String(index), default: false }));

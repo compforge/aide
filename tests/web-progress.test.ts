@@ -1,3 +1,4 @@
+import { historyBlocks } from "../src/channel/reply-layout.ts";
 import { larkAddress, webAddress } from "../src/channel/address.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { iconFor, type InputSpec } from "@compforge/aide-plugin";
@@ -54,12 +55,6 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const page = await fetch(base);
   assert.match(page.headers.get("content-security-policy")!, /script-src 'self'/);
   assert.match(await page.text(), /src="\/app.js"/);
-  const bundle = await fetch(base + "/agentue.js");
-  assert.equal(bundle.status, 200);
-  assert.match(bundle.headers.get("content-type")!, /javascript/);
-  const browserSdk = await import(`data:text/javascript;base64,${Buffer.from(await bundle.text()).toString("base64")}`) as typeof import("../src/web/sdk.ts");
-  assert.match(browserSdk.renderMarkdown("## 网页回复\n\n- **已完成**"), /<h2>网页回复<\/h2>[\s\S]*<strong>已完成<\/strong>/);
-  assert.doesNotMatch(browserSdk.renderMarkdown('<script>alert(1)</script>'), /<script>/);
   async function connect(conversationId: string) {
     const controller = new AbortController(); connections.push(controller);
     const response = await fetch(`${base}/stream?conversationId=${conversationId}`, { signal: controller.signal });
@@ -78,7 +73,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
           const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2);
           const { event } = decodeSse(frame);
           events.push(event);
-          snapshot = browserSdk.applyPatch(snapshot, event);
+          snapshot = applyPatch(snapshot, event);
           views.push(structuredClone(snapshot) as ConversationView);
         }
       }
@@ -101,7 +96,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.ok(runningView.meta.activity);
   assert.equal(runningInput.group_id, runningView.meta.activity!.id);
   for (const phase of ["queued", "running"]) {
-    const history = browserSdk.historyBlocks(runningView.blocks.map((block) => block.type === "input" ? { ...block, status: phase } : block), runningView.meta.activity!);
+    const history = historyBlocks(runningView.blocks.map((block) => block.type === "input" ? { ...block, status: phase } : block), runningView.meta.activity!);
     assert.ok(history.some((block) => block.id === runningInput.id), "Input remains visible while queued and running");
     assert.ok(!history.some((block) => block.type === "execution" && block.group_id === runningView.meta.activity!.id));
   }

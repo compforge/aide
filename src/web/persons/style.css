@@ -1,0 +1,31 @@
+@import '../shared/style.css';
+.person-list { padding: 24px 12px; border-right: 1px solid #d8dfd5; overflow: auto; }
+.person-list h2 { font-size: 16px; margin: 0 10px 18px; }
+.persons-page { grid-template-columns: 260px minmax(0, 1fr); }
+.person-detail { padding: 24px 36px; overflow: auto; }
+.person-detail h2 { margin-top: 0; font-size: 20px; }
+#person-editor { display: block; max-width: 860px; }
+#person-editor[hidden] { display: none; }
+#person-editor label { display: block; font-size: 14px; margin: 16px 0; }
+#person-editor input, #person-editor textarea, #person-search { width: 100%; padding: 10px; border: 1px solid #c9d5ca; border-radius: 8px; background: white; color: inherit; font: inherit; }
+#person-editor textarea { display: block; margin-top: 8px; resize: vertical; min-height: 100px; }
+#person-editor fieldset { border: 1px solid #d8dfd5; border-radius: 10px; margin: 20px 0; }
+/* The read view and draft share one place; confirmation persists only the understanding. */
+.person-understanding { margin: 20px 0; }
+.person-understanding-heading { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.person-understanding-heading h3 { margin: 0; font-size: 14px; font-weight: 400; }
+.person-edit-icon { display: inline-flex; align-items: center; justify-content: center; padding: 6px; color: #42634c; background: transparent; }
+.person-edit-icon:hover { background: #e8eee3; }
+#person-understanding-read { min-height: 60px; }
+#person-understanding-editor { border: 1px solid #c9d5ca; border-radius: 10px; background: white; overflow: hidden; }
+#person-editor #person-understanding { margin: 0; border: 0; border-radius: 0; min-height: 180px; max-height: none; }
+.person-understanding-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px; }
+.person-understanding-actions button { padding: 8px 14px; }
+#person-understanding-read[hidden], #person-understanding-editor[hidden], #person-understanding-edit[hidden] { display: none; }
+#person-understanding-notice { color: #735722; font-size: 13px; }
+.person-identity { display: grid; grid-template-columns: 100px 1fr 1fr auto; gap: 8px; margin: 10px 0; }
+.person-actions { display: flex; gap: 10px; }
+button.secondary { background: #e8eee3; color: #20342b; }
+#person-search { margin-bottom: 12px; }
+#person-notice { color: #735722; }
+@media (max-width: 760px) { header { display: flex; flex-wrap: wrap; padding: 16px; } #connection { margin-left: auto; } .persons-page { display: block; height: auto; } .persons-page .person-list { max-height: 30vh; } .person-detail { padding: 20px; } .person-identity { grid-template-columns: 1fr; } }

@@ -15,3 +15,10 @@ markdown.renderer.rules.link_open = (tokens, index, options, _env, renderer) => 
 export function renderMarkdown(source: string): string {
   return markdown.render(source);
 }
+
+const sources = new WeakMap<HTMLElement, string>();
+export function updateMarkdown(node: HTMLElement, source: string): void {
+  if (sources.get(node) === source) return;
+  node.innerHTML = renderMarkdown(source);
+  sources.set(node, source);
+}
