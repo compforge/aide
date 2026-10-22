@@ -77,6 +77,10 @@ export class HarnessApprovalContinuations<
     });
   }
 
+  turnId(messageId: string): string | undefined {
+    return this.pending.get(messageId)?.turnId;
+  }
+
   complete(messageId: string, result: ApprovalResult): boolean {
     const entry = this.pending.get(messageId);
     if (!entry) return false;

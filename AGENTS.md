@@ -130,7 +130,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 执行上下文携带主资源与不透明 attributes；只有 Personal 解释其中的 Conversation/Input 关联。Reconcile 快照不含全局历史；Channel 根据 Personal 的关联显式查询执行记录，不通过 Chief Target 推导进度归属。
 - Personal 将新发生的事归入能承接它的上下文：Conversation 承载话题，Task 承载有限目标，Routine 承载持续职责与当前轮次。Chief 优先关联已有 Work，再按需要创建；各 Reconcile 根据历史与新事实推进、更新、沟通、等待或忽略。详见 `docs/plugin/personal.md`。
 - trigger 归属于 Conversation；新 Input 与定时回顾唤醒同一话题。Personal / Chief 决定回顾和主动沟通策略，Core 提供通用定时唤醒与恢复机制。say 保存独立 Output；记忆中的偏好不自动成为执行委托。
-- Chief 用 say 提出问题并结束本批；用户后续消息作为普通 Input。业务 ask / confirm / draft 与 Interaction 已移除；Harness 原生工具权限与 Hook 信任使用独立的 Approval，仍需明确决定，取消按拒绝处理。Task / Routine 的 waiting 是业务持久状态。
+- Chief 用 say 提出问题并结束本批；用户后续消息作为普通 Input。业务 ask / confirm / draft 与 Interaction 已移除；Harness 原生工具权限与 Hook 信任使用独立的 Approval，仍需明确决定；拒绝权限只拒绝本次请求，取消执行会中断该审批关联的运行。Task / Routine 的 waiting 是业务持久状态。
 - Channel / Source 确定归属后统一调用 appendConversationInput。Conversation 不设 pending 数量上限；Input 接收凭据在消费出队前持久化，重投不会重新处理。存储总量由 Host Resource 容量策略管理，batchSize 只决定调度粒度。
 - Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Output，不另建轨迹存储。
 - `npm run check` 验证类型与测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或 Lark 已验证。

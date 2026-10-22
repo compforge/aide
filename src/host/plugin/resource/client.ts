@@ -182,7 +182,6 @@ export function createResourceClient(
       name: string,
       namespace: ResourceNamespace = "v1",
     ) {
-      const resource = deepFreeze(store.get(type, name, namespace));
       for (const update of store.requestDeletion(
         type,
         name,

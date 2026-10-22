@@ -1,4 +1,3 @@
-import type { RuntimeScope } from "../protocol/runtime.ts";
 import { deepFreeze } from "../reconcile/snapshot.ts";
 import { validateSources } from "../reconcile/source.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -26,7 +25,7 @@ export class Controllers {
   private capacity?: ReconcileCapacity;
   private readonly due = new ReconcileDueQueue({ onDue: (key) => this.background(this.enqueue(this.id(key), key)) });
   private readonly cron = new CronSourceQueue({ onDue: (scope) => this.background(this.enqueueAll(this.id(scope))) });
-  constructor(private readonly session: RuntimeScope, private readonly pluginInstanceId: string,
+  constructor(private readonly pluginInstanceId: string,
     private readonly resources: ResourceClient, private readonly callHost: <T>(request: HostRequest) => Promise<T>, private readonly log: PluginLogger) {}
 
   private id(type: { resourceApiVersion: string; resourceKind: string; controllerName?: string }) { return `controller:${type.resourceApiVersion}:${type.resourceKind}${type.controllerName ? `:${type.controllerName}` : ""}`; }

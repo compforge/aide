@@ -373,9 +373,22 @@ export class Controller {
   /**
    * 用户完成一个未决 Approval。先把用户事实持久化，再唤醒 Harness；没有活跃 continuation
    * 时返回 false，UI 据此提示 stale，而不是把响应写进一个无人消费的内存通道。
+   * @spec 取消审批只中断该审批绑定的执行；拒绝单次权限不取消执行，过期响应无副作用。
+   * @link tests/execution-approval.test.ts
    */
   completeApproval(approvalId: string, result: ApprovalResult): boolean {
-    return this.harnessApprovals.complete(approvalId, result);
+    const turnId = this.harnessApprovals.turnId(approvalId);
+    if (!this.harnessApprovals.complete(approvalId, result)) return false;
+    const run = turnId ? this.runForTurn(turnId) : undefined;
+    if (result.kind === "cancelled" && run?.status === "active") {
+      this.options.session.log({
+        level: "info", source: "aide", component: "controller.approval",
+        harnessTargetId: run.binding.target.id, turnId,
+        message: "approval cancelled; interrupting associated execution",
+      });
+      void this.interruptRecord(run);
+    }
+    return true;
   }
 
   private openHarnessApproval(
