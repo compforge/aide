@@ -47,8 +47,7 @@ export class HarnessHookCoordinator {
     return Object.freeze({
       attemptId,
       harnessTargetId: binding.target.id,
-      laneId: binding.laneId,
-      turnId: input.turnId,
+      invocationId: input.invocationId,
       messageId: input.messageId,
       operation,
     });
@@ -81,8 +80,7 @@ export class HarnessHookCoordinator {
     const record: AideEventReference = Object.freeze({
       kind: event.kind,
       harnessTargetId: binding.target.id,
-      laneId: binding.laneId,
-      ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+      ...(event.invocationId === undefined ? {} : { invocationId: event.invocationId }),
       eventId: envelope.eventId,
       seq: envelope.seq,
     });

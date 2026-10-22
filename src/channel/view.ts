@@ -45,33 +45,33 @@ export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
 export function conversationView(aide: ChannelService, conversationId: string): ConversationView {
   if (!aide.conversations.get(conversationId)) return { version: PROTOCOL_VERSION, biz: "aide.conversation", blocks: [], meta: { conversation_id: conversationId, activity: null } };
   const history = aide.invocations().filter(item => item.conversationId === conversationId);
-  const state = aide.runtime.executions.view(history.flatMap(item => item.turnId ? [item.turnId] : []));
+  const state = aide.runtime.executions.view(history.flatMap(item => item.invocationId ? [item.invocationId] : []));
   const runs = aide.conversations.runs(conversationId);
   const active = runs.find((input) => !input.input && input.status.phase === "running");
   const queued = runs.filter((input) => !input.status.phase).length;
   const quietRuns = new Set(runs.filter((input) => input.status.quietReason).map((input) => input.id));
   const runId = (item: { inputId?: string; executionId: string }) => item.executionId;
   const resource = aide.conversations.resource(conversationId);
-  const turnInputs = new Map([...state.harnessInputs.values()].map((input) => [input.turnId, input]));
+  const turnInputs = new Map([...state.harnessInputs.values()].map((input) => [input.invocationId, input]));
   const invocations = history.filter((item) => {
     if (item.conversationId !== conversationId || !resource || quietRuns.has(runId(item) ?? "")) return false;
     if (item.resourceRef?.kind === "Conversation") return item.resourceRef.uid === resource.metadata.uid;
     // Deleted Work may retain progress in its original Conversation, never in a later incarnation.
-    const input = item.turnId && turnInputs.get(item.turnId);
+    const input = item.invocationId && turnInputs.get(item.invocationId);
     const at = input && state.messages.get(input.messageId)?.createdAt;
     return !at || at >= resource.metadata.creationTimestamp;
   });
-  const relatedTurns = new Set(invocations.map((item) => item.turnId));
+  const relatedTurns = new Set(invocations.map((item) => item.invocationId));
   // Group presentation by persisted Chief activation, never by message order or similar text.
-  const turnRuns = new Map(invocations.map((item) => [item.turnId, runId(item)]));
+  const turnRuns = new Map(invocations.map((item) => [item.invocationId, runId(item)]));
   const runPhases = new Map(runs.map((input) => [input.id, input.status.phase]));
   const messageRuns = new Map(runs.flatMap((input) => (input.status.outputs ?? [])
     .filter((message) => message.role === "aide").map((message) => [message.id, input.id] as const)));
   for (const message of channelOutputs(aide)) if (message.executionId) messageRuns.set(message.id, message.executionId);
   const inputExecutions = new Map(invocations.flatMap((i) => (i.inputIds ?? []).map((id) => [id, i.executionId] as const)));
-  const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.turnId))
-    .map((input) => [input.turnId, input]));
-  const summaries = new Map(state.turnSummaries.filter((turn) => relatedTurns.has(turn.turnId)).map((turn) => [turn.turnId, turn]));
+  const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.invocationId))
+    .map((input) => [input.invocationId, input]));
+  const summaries = new Map(state.invocationSummaries.filter((turn) => relatedTurns.has(turn.invocationId)).map((turn) => [turn.invocationId, turn]));
   const executions = new Map<string, { header: ConversationBlock; blocks: ConversationBlock[] }>();
   const roots: ConversationBlock[] = channelOutputs(aide).filter((message) => resource && visibleOutput(message, resource))
     .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, receivers: message.receivers, target: message.target,
@@ -95,7 +95,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
     let execution = executions.get(turnId);
     if (!execution) {
       const summary = summaries.get(turnId);
-      const live = state.activeTurns.has(turnId);
+      const live = state.activeInvocations.has(turnId);
       const at = summary?.startedAt ?? state.messages.get(input.messageId)?.createdAt;
       const harness = summary?.harness ?? input.harness;
       if (!harness) throw new Error(`Turn ${turnId} is missing its Harness identity`);
@@ -110,16 +110,16 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   for (const item of state.timeline) {
     if (item.type === "message") {
       const message = state.messages.get(item.id);
-      if (!message || message.kind !== "output" || !message.turnId || !turns.has(message.turnId)) continue;
+      if (!message || message.kind !== "output" || !message.invocationId || !turns.has(message.invocationId)) continue;
       const text = message.content.map((part) => part.type === "text" ? part.text : "").join("");
-      if (text) append(message.turnId, { id: `output:${message.messageId}`, type: message.role === "thought" ? "thought" : "text", content: text,
+      if (text) append(message.invocationId, { id: `output:${message.messageId}`, type: message.role === "thought" ? "thought" : "text", content: text,
         ...(message.phase ? { phase: message.phase } : {}) });
     } else if (item.type === "tool_call") {
       const tool = state.toolCalls.get(item.id);
-      if (!tool?.turnId || !turns.has(tool.turnId)) continue;
+      if (!tool?.invocationId || !turns.has(tool.invocationId)) continue;
       const args = tool.rawInput as Record<string, unknown> | undefined;
       const detail = args && [args.path, args.command, args.pattern].find((value) => typeof value === "string");
-      append(tool.turnId, { id: `tool:${tool.toolCallId}`, type: "tool", content: tool.title ?? "工具调用", status: tool.status,
+      append(tool.invocationId, { id: `tool:${tool.toolCallId}`, type: "tool", content: tool.title ?? "工具调用", status: tool.status,
         ...(typeof detail === "string" ? { detail: detail.slice(0, 2000) } : {}) });
     }
   }

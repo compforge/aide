@@ -40,7 +40,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
     const open = adapter.open.bind(adapter), send = adapter.sendTurn.bind(adapter);
     let sink: HarnessEventSink;
     adapter.open = async (...args) => { sink = args[1]; return open(...args); };
-    adapter.sendTurn = async (ref, input) => { emitters.set(target.id, { sink, turnId: input.turnId }); return send(ref, input); };
+    adapter.sendTurn = async (ref, input) => { emitters.set(target.id, { sink, turnId: input.invocationId }); return send(ref, input); };
     return adapter;
   } }, log);
   const server = httpChannel(aide, log);
@@ -103,10 +103,10 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   }
   const { sink, turnId } = emitters.get(chiefTarget("a"))!;
   const other = emitters.get(chiefTarget("b"))!;
-  other.sink({ kind: "agent_thought_chunk", turnId: other.turnId, payload: { messageId: "thought-b", content: { type: "text", text: "另一会话的思考" } } });
-  sink({ kind: "agent_thought_chunk", turnId, payload: { messageId: "thought-a", content: { type: "text", text: "先检查资料" } } });
-  sink({ kind: "tool_call_update", turnId, payload: { toolCallId: "read-a", title: "read", status: "in_progress", rawInput: { path: "/tmp/README" } } });
-  sink({ kind: "agent_message_chunk", turnId, payload: { messageId: "text-a", content: { type: "text", text: "正在整理" } } });
+  other.sink({ kind: "agent_thought_chunk", invocationId: other.turnId, payload: { messageId: "thought-b", content: { type: "text", text: "另一会话的思考" } } });
+  sink({ kind: "agent_thought_chunk", invocationId: turnId, payload: { messageId: "thought-a", content: { type: "text", text: "先检查资料" } } });
+  sink({ kind: "tool_call_update", invocationId: turnId, payload: { toolCallId: "read-a", title: "read", status: "in_progress", rawInput: { path: "/tmp/README" } } });
+  sink({ kind: "agent_message_chunk", invocationId: turnId, payload: { messageId: "text-a", content: { type: "text", text: "正在整理" } } });
   await until(() => first.views.some((view) => view.blocks.some((block) => block.content === "正在整理")));
   const progress = first.views.at(-1)!;
   assert.equal(progress.blocks.filter((block) => block.parent_id).length, 3);
@@ -120,11 +120,11 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(progress.blocks.find((block) => block.type === "tool")!.detail, "/tmp/README");
   assert.doesNotMatch(JSON.stringify(progress), /另一会话/);
   assert.equal(aide.outputs().filter((message) => message.role === "aide").length, 0);
-  sink({ kind: "agent_message_chunk", turnId, payload: { messageId: "text-a", content: { type: "text", text: "重点" } } });
+  sink({ kind: "agent_message_chunk", invocationId: turnId, payload: { messageId: "text-a", content: { type: "text", text: "重点" } } });
   await until(() => first.events.some((event) => event.op === "append"));
   assert.equal(first.views.at(-1)!.blocks.at(-1)!.content, "正在整理重点");
   await first.close();
-  sink({ kind: "agent_message_chunk", turnId, payload: { messageId: "text-a", content: { type: "text", text: "，请稍候" } } });
+  sink({ kind: "agent_message_chunk", invocationId: turnId, payload: { messageId: "text-a", content: { type: "text", text: "，请稍候" } } });
   const second = await connect("a");
   await until(() => second.views.length > 0);
   assert.equal(second.events[0]!.op, "start");

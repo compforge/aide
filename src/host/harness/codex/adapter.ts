@@ -581,7 +581,7 @@ export class CodexAdapter implements HarnessAdapter {
     if (activeTurn && !activeTurn.finalized) {
       // race 防线：Controller 看到的 turn 已过期，或 turn/start 响应尚未给出 native id，
       // 都无法安全定向；拒绝后由 Controller 把原输入排成 follow-up。
-      if (activeTurn.turnId !== input.turnId || !rt.codexTurnId) {
+      if (activeTurn.turnId !== input.invocationId || !rt.codexTurnId) {
         return { accepted: false, effective: "rejected" };
       }
       const pendingSteers = (rt.pendingSteerMessageIds ??= new Set<string>());
@@ -641,8 +641,8 @@ export class CodexAdapter implements HarnessAdapter {
       return settleAdmission({ accepted: true, effective: "steer" });
     }
 
-    const turn: CodexTurn = { turnId: input.turnId, finalized: false, replies: new MessageReplies([input.messageId]) };
-    rt.turnId = input.turnId;
+    const turn: CodexTurn = { turnId: input.invocationId, finalized: false, replies: new MessageReplies([input.messageId]) };
+    rt.turnId = input.invocationId;
     rt.activeTurn = turn;
     // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 AideSession
     // 的事实，且入参 blocks 可能含 <aide-sync> prepend，不能进正典历史）；adapter 只在
@@ -746,7 +746,7 @@ export class CodexAdapter implements HarnessAdapter {
     // 空回合判定的记账点：任何可见产出都经过这里，集中标记比在各通知分支手工标记可靠
     const owner = turn === null ? undefined : turn ?? rt.activeTurn;
     if (owner && !owner.finalized && OUTPUT_EVENT_KINDS.has(ev.kind)) owner.sawOutput = true;
-    rt.sink({ ...(owner?.replies?.apply(ev) ?? ev), harnessSessionId: rt.threadId, turnId: turn === null ? undefined : turn?.turnId ?? rt.turnId, raw });
+    rt.sink({ ...(owner?.replies?.apply(ev) ?? ev), harnessSessionId: rt.threadId, invocationId: turn === null ? undefined : turn?.turnId ?? rt.turnId, raw });
   }
 
   /**

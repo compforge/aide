@@ -24,13 +24,13 @@ import { sessionIdResumeState, type HarnessResumeState } from "./resume.ts";
 import { createHarnessLaunchSnapshot, type HarnessTarget } from "./target.ts";
 
 export interface HarnessBindingOptions {
-  laneId: string;
+  contextId: string;
   target: HarnessTarget;
   cwd: string;
   adapter: HarnessAdapter;
   session: SessionHandle;
   eventSink: HarnessEventSink;
-  setupTurnId?: string;
+  setupInvocationId?: string;
   modelPreference?: string;
   effortPreference?: string;
 }
@@ -43,16 +43,16 @@ export interface HarnessBindingOptions {
  * Controller 负责。
  */
 export class HarnessBinding {
-  readonly laneId: string;
+  readonly contextId: string;
   readonly target: HarnessTarget;
   readonly cwd: string;
   readonly adapter: HarnessAdapter;
   ref?: HarnessSessionHandle;
   /**
-   * setup 阶段由哪个 Queue-driven Turn 触发。无显式 turnId 的 setup Approval 由
+   * setup 阶段由哪个 admitted Invocation 触发。无显式 invocationId 的 setup Approval 由
    * Controller 使用它归属到触发冷启动的 turn。
    */
-  setupTurnId?: string;
+  setupInvocationId?: string;
   freshHarnessSession = true;
   /** 当前原生 HarnessSession 的上下文基线身份；resume 保留、fresh 重新签发。 */
   contextEpochId?: string;
@@ -67,13 +67,13 @@ export class HarnessBinding {
   private publishedBinding?: HarnessSessionBinding;
 
   constructor(options: HarnessBindingOptions) {
-    this.laneId = options.laneId;
+    this.contextId = options.contextId;
     this.target = options.target;
     this.cwd = options.cwd;
     this.adapter = options.adapter;
     this.session = options.session;
     this.eventSink = options.eventSink;
-    this.setupTurnId = options.setupTurnId;
+    this.setupInvocationId = options.setupInvocationId;
     this.modelPreference = options.modelPreference;
     this.effortPreference = options.effortPreference;
   }
@@ -330,7 +330,7 @@ export class HarnessBinding {
 
   private async open(): Promise<void> {
     try {
-      const existing = this.session.meta.lanes[this.laneId]?.harnessSessions[this.target.id];
+      const existing = this.session.meta.contexts[this.contextId]?.harnessSessions[this.target.id];
       const configAdapter = isSessionConfigurable(this.adapter) ? this.adapter : undefined;
       const modelAdapter = isModelConfigurable(this.adapter) ? this.adapter : undefined;
       const effortAdapter = isEffortConfigurable(this.adapter) ? this.adapter : undefined;
@@ -352,7 +352,7 @@ export class HarnessBinding {
         effort,
       });
       // open 前落下实际配置：即使进程在 spawn/initialize 期间崩溃，也能解释这次启动。
-      this.session.setLaneHarnessSession(this.laneId, this.target.id, {
+      this.session.setContextHarnessSession(this.contextId, this.target.id, {
         ...existing,
         harness: this.adapter.harness,
         launchSnapshot,
@@ -402,8 +402,8 @@ export class HarnessBinding {
         else await effortAdapter?.setEffort(this.ref, effort);
       }
       if (mode) await configAdapter?.setConfig(this.ref, "mode", mode);
-      this.session.setLaneHarnessSession(this.laneId, this.target.id, {
-        ...this.session.meta.lanes[this.laneId]?.harnessSessions[this.target.id],
+      this.session.setContextHarnessSession(this.contextId, this.target.id, {
+        ...this.session.meta.contexts[this.contextId]?.harnessSessions[this.target.id],
         harness: this.adapter.harness,
         launchSnapshot,
         harnessSessionId: this.sessionIdentity()?.id,
@@ -412,7 +412,7 @@ export class HarnessBinding {
         syncedSeq: this.ref.resumed ? existing?.syncedSeq : 0,
       });
     } finally {
-      this.setupTurnId = undefined;
+      this.setupInvocationId = undefined;
     }
   }
 
@@ -427,8 +427,8 @@ export class HarnessBinding {
       );
     }
     this.publishedBinding = binding;
-    const existing = this.session.meta.lanes[this.laneId]?.harnessSessions[this.target.id];
-    this.session.setLaneHarnessSession(this.laneId, this.target.id, {
+    const existing = this.session.meta.contexts[this.contextId]?.harnessSessions[this.target.id];
+    this.session.setContextHarnessSession(this.contextId, this.target.id, {
       ...existing,
       harness: this.adapter.harness,
       harnessSessionId: binding.identity.id,

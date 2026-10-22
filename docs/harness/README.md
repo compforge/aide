@@ -19,7 +19,7 @@ Route 使用专用分类提示词，不加载执行工具、技能或记忆扩�
 
 Target 的 id 与 harness 字段分开：前者定位具体配置，后者选择实现。进程内会话句柄只用于路由调用；持久恢复依赖 Adapter 发布的原生身份与版本化恢复状态，宿主不能从临时句柄猜测稳定身份。
 
-原生 Session 文件由 Harness 使用自己的默认目录保存，Aide 不托管或直接改写这些文件。Aide 的 Ledger 保存统一执行事实，不能由某一家原生历史替代。宿主根据资源 UID、Controller 与 Target 保存原生 identity 及 Adapter 的 `resumeState`；恢复时原样交回 Adapter，进程期 Handle 不作为恢复身份。Target 是可发现的配置，不是 Resource。ExecutionService 管理执行生命周期，私有日志与提供方协议仍用 Lane / Turn 表达部分记录，边界见 [Kernel](../kernel.md#执行后端的边界)。
+原生 Session 文件由 Harness 使用自己的默认目录保存，Aide 不托管或直接改写这些文件。Aide 的 Ledger 保存统一执行事实，不能由某一家原生历史替代。宿主根据资源 UID、Controller 与 Target 保存原生 identity 及 Adapter 的 `resumeState`；恢复时原样交回 Adapter，进程期 Handle 不作为恢复身份。Target 是可发现的配置，不是 Resource。ExecutionService 以 HarnessInvocation 管理执行生命周期，提供方原生标识只在 Adapter 内映射；旧日志由读取层转换，边界见 [Kernel](../kernel.md#执行后端的边界)。
 
 ## 执行契约
 
@@ -27,9 +27,9 @@ Target 的 id 与 harness 字段分开：前者定位具体配置，后者选择
 
 请求由宿主分配身份、排队并持久化，再交给 Adapter。sendTurn 的回执只表示是否接受投递责任；执行进展与结束通过事件流报告。未支持的输入应在接受前明确拒绝；接受后的失败必须在事件流收口，不能让宿主一直等待。
 
-每个被接受的新 Turn 都必须报告终态。取消请求发出后仍可能收到在途输出，最终结果以执行事件为准。原生审批中的“取消执行”只中断该审批关联的执行，不能影响共享 Target 的其它资源；拒绝单次权限则允许 Harness 继续处理。宿主用自己的 Turn 身份关联事件，提供方的原生标识留在 Adapter 映射与诊断中。
+每次被接受的 HarnessInvocation 都必须报告终态。取消请求发出后仍可能收到在途输出，最终结果以执行事件为准。原生审批中的“取消执行”只中断该审批关联的执行，不能影响共享 Target 的其它资源；拒绝单次权限则允许 Harness 继续处理。宿主用 invocationId 关联事件，提供方的原生标识留在 Adapter 映射与诊断中。
 
-Adapter 保留提供方明确给出的消息阶段。agentText 表达整轮记录，finalText 只包含明确的最终答复；不能按文本位置猜测结束。Turn 结束只说明本轮执行收口，目标是否达成由业务调用方校验。
+Adapter 保留提供方明确给出的消息阶段。agentText 表达整轮记录，finalText 只包含明确的最终答复；不能按文本位置猜测结束。调用结束只说明本次执行收口，目标是否达成由业务调用方校验。
 
 ## 工具、上下文与恢复边界
 

@@ -46,10 +46,10 @@ export function applyInputDelivery(state: SessionState, ev: EventEnvelope<"input
       message = { ...inputMessage(messageId, ev.ts, input?.source, ev.harnessTargetId), content: input ? [...input.blocks] : [], delivery: "steer" };
       state.messages.set(messageId, message);
     }
-    message.turnId = ev.turnId;
+    message.invocationId = ev.invocationId;
     message.harness = ev.harness;
     message.harnessTargetId = ev.harnessTargetId;
-    message.laneId = ev.laneId;
+    message.contextId = ev.contextId;
     message.consumedAt = ev.seq;
     // Older ledgers may already have a hidden admission-time slot. Remove that
     // slot only on this first consumption, never on a duplicate receipt.
@@ -58,16 +58,16 @@ export function applyInputDelivery(state: SessionState, ev: EventEnvelope<"input
     placeMessage(state, messageId, beforeMessageId);
   }
   if (message) message.deliveryState = outcome;
-  if (outcome === "applied") refreshConsumedSummary(state, message?.turnId, ev.seq);
+  if (outcome === "applied") refreshConsumedSummary(state, message?.invocationId, ev.seq);
 }
 
 /** Shared by summary creation and late-consumption replay; pending inputs never enter Context. */
-export function turnUserText(state: SessionState, turnId: string): string {
+export function invocationUserText(state: SessionState, invocationId: string): string {
   const parts: string[] = [];
   for (const item of state.timeline) {
     if (item.type !== "message") continue;
     const message = state.messages.get(item.id);
-    if (!message || message.role !== "user" || message.turnId !== turnId) continue;
+    if (!message || message.role !== "user" || message.invocationId !== invocationId) continue;
     if (message.delivery === "steer") {
       const input = state.harnessInputs.get(message.messageId);
       if (input ? input.deliveryOutcome !== "applied" : message.deliveryState !== undefined && message.deliveryState !== "applied") continue;
@@ -78,11 +78,11 @@ export function turnUserText(state: SessionState, turnId: string): string {
   return parts.join("\n").replace(/<aide-(context|sync)>[\s\S]*?<\/aide-\1>\s*/g, "").trim();
 }
 
-export function refreshConsumedSummary(state: SessionState, turnId: string | undefined, seq: number): void {
-  if (!turnId) return;
-  const summary = state.turnSummaries.find((candidate) => candidate.turnId === turnId);
+export function refreshConsumedSummary(state: SessionState, invocationId: string | undefined, seq: number): void {
+  if (!invocationId) return;
+  const summary = state.invocationSummaries.find((candidate) => candidate.invocationId === invocationId);
   if (!summary) return;
-  const userText = turnUserText(state, turnId) || undefined;
+  const userText = invocationUserText(state, invocationId) || undefined;
   if (summary.userText === userText) return;
   // Keep the historical summary Event immutable. The read model includes later
   // facts and advances its Context cursor so an already-synced reader sees them.

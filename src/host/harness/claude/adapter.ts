@@ -43,6 +43,23 @@ import {
   sessionIdResumeState,
 } from "../resume.ts";
 import { ClaudeEventHandler, type ClaudePermissionMeta } from "./events.ts";
+import {
+  CLAUDE_FALLBACK_MODELS,
+  CLAUDE_MODES,
+  CLAUDE_SETTING_SOURCES,
+  claudeCommandLifecycleMessage,
+  claudeEfforts,
+  claudeEffortsForModel,
+  claudeModels,
+  claudePromptChannel,
+  claudeUserMessage,
+  commandLifecycleKey,
+  startsHarnessTurn,
+  type ClaudePromptChannel,
+  type ClaudeRuntime,
+  type ClaudeStreamMessage,
+  type ClaudeTurn,
+} from "./runtime.ts";
 
 export {
   applyTaskOp,
@@ -62,23 +79,6 @@ export {
   type TaskEntry,
   type TaskToolOp,
 } from "./mapping.ts";
-import {
-  CLAUDE_FALLBACK_MODELS,
-  CLAUDE_MODES,
-  CLAUDE_SETTING_SOURCES,
-  claudeCommandLifecycleMessage,
-  claudeEfforts,
-  claudeEffortsForModel,
-  claudeModels,
-  claudePromptChannel,
-  claudeUserMessage,
-  commandLifecycleKey,
-  startsHarnessTurn,
-  type ClaudePromptChannel,
-  type ClaudeRuntime,
-  type ClaudeStreamMessage,
-  type ClaudeTurn,
-} from "./runtime.ts";
 export { claudeUserMessage, probeClaudeTarget, startsHarnessTurn } from "./runtime.ts";
 
 export interface ClaudeAdapterOptions {
@@ -348,7 +348,7 @@ export class ClaudeAdapter implements HarnessAdapter {
       throw new Error(`claude turn ${rt.activeTurn.turnId} still active; cannot compact`);
     }
     const receipt = await this.sendTurn(ref, {
-      turnId,
+      invocationId: turnId,
       messageId: newId("m"),
       blocks: [{ type: "text", text: "/compact" }],
     });
@@ -378,11 +378,11 @@ export class ClaudeAdapter implements HarnessAdapter {
 
     const active = rt.activeTurn && !rt.activeTurn.finalized ? rt.activeTurn : undefined;
     if (active) {
-      if (active.turnId !== input.turnId) {
+      if (active.turnId !== input.invocationId) {
         return {
           accepted: false,
           effective: "rejected",
-          reason: `active Claude turn is ${active.turnId}, not ${input.turnId}`,
+          reason: `active Claude turn is ${active.turnId}, not ${input.invocationId}`,
         };
       }
       const message = await claudeUserMessage(input.blocks);
@@ -429,7 +429,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     }
     if (rt.queryOptionsDirty) this.closeStreamingQuery(rt);
 
-    const turn: ClaudeTurn = { turnId: input.turnId, finalized: false, cancelRequested: false, replies: new MessageReplies([input.messageId]) };
+    const turn: ClaudeTurn = { turnId: input.invocationId, finalized: false, cancelRequested: false, replies: new MessageReplies([input.messageId]) };
     rt.activeTurn = turn;
     rt.currentTurn = turn;
     // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 AideSession
@@ -505,7 +505,7 @@ export class ClaudeAdapter implements HarnessAdapter {
           source: "harness",
           component: "claude.initialization",
           harness: this.harness,
-          turnId: rt.currentTurn?.turnId,
+          invocationId: rt.currentTurn?.turnId,
           message: "Claude SDK initialization result failed",
           error: logError(error),
         });
@@ -562,7 +562,7 @@ export class ClaudeAdapter implements HarnessAdapter {
         source: "harness",
         component: "claude.query",
         harness: this.harness,
-        turnId: current.turnId,
+        invocationId: current.turnId,
         message: current.cancelRequested ? "Claude SDK query stopped after cancellation" : "Claude SDK query failed",
         error: logError(error),
       });
@@ -664,7 +664,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     rt.sink({
       ...((turn ?? rt.activeTurn)?.replies?.apply(ev) ?? ev),
       harnessSessionId: rt.claudeSessionId,
-      turnId: (turn ?? rt.activeTurn)?.turnId,
+      invocationId: (turn ?? rt.activeTurn)?.turnId,
     });
   }
 
@@ -680,7 +680,7 @@ export class ClaudeAdapter implements HarnessAdapter {
         source: "harness",
         component: "claude.cancel",
         harness: this.harness,
-        turnId: turn.turnId,
+        invocationId: turn.turnId,
         message: "Claude SDK interrupt failed",
         error: logError(error),
       });
@@ -697,7 +697,7 @@ export class ClaudeAdapter implements HarnessAdapter {
         source: "harness",
         component: "claude.cancel",
         harness: this.harness,
-        turnId: turn.turnId,
+        invocationId: turn.turnId,
         message: `interrupt left steered message ${offer.messageId} (offered to turn ${offer.turnId}) queued CLI-side; it may still run as a new turn`,
       });
     }

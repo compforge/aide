@@ -46,7 +46,9 @@ ApplicationRuntime 直接组合插件 Manager 与 ExecutionService。前者管�
 
 Reconcile 的冻结快照只有 cwd 与 HarnessTarget 配置，不复制全局执行历史。Harness 返回 invocationId 与执行结果；应用展示通过明确选择执行 ID 查询日志投影，取得副本。Personal 自己解释 Conversation/Input 关联，底座只保存不透明 attributes。
 
-现有日志的磁盘路径、事件格式及底层 Adapter 仍保留 SessionHandle、Lane / Turn 等实现词汇，以保留原生恢复身份和历史边界。它们不再作为资源作用域、调度键或插件 Harness 参数，也没有 Resource 投影。日志编码与旧原生协议的进一步整理不改变当前插件契约。
+底座不再维护 Lane 或 Turn。资源执行上下文保存原生绑定与历史边界；HarnessInvocation 是一次调用的唯一执行身份，队列、事件、结果、取消与审批都关联 invocationId。同一资源上下文串行使用，不同上下文受并发上限约束，没有主通道或旁路通道。
+
+日志继续沿用现有磁盘位置。读取兼容层将旧 Lane 坐标转换为 contextId，依据旧调用调度记录把 Turn ID 对应到 invocationId；新日志只写调用身份。转换保留事件序号、时间、原生 raw 数据和恢复水位，不修改提供方的原生会话文件。原生上下文重建仅补入当前资源上下文与 Target 的历史，跨资源知识由插件显式提供。
 
 ## 能力与事务
 

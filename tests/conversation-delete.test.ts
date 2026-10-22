@@ -95,7 +95,7 @@ test("Recreated Conversation has fresh execution context and no old outputs or p
   await aide.settled();
   assert.ok(aide.outputs().some((m) => m.text === "旧工作回复"));
   const oldResource = aide.personal.conversations.resource("me")!;
-  const oldLanes = aide.invocations().map((i) => i.laneId);
+  const oldLanes = aide.invocations().map((i) => i.contextId);
   assert.equal((await remove("me", Number(oldResource.metadata.resourceVersion))).status, 200);
   assert.ok(aide.outputs().some((o) => o.conversationUid === oldResource.metadata.uid));
   assert.deepEqual(conversationView(aide, "me").blocks, []);
@@ -105,7 +105,7 @@ test("Recreated Conversation has fresh execution context and no old outputs or p
   assert.notEqual(current.metadata.uid, oldResource.metadata.uid);
   assert.equal((await remove("me", Number(current.metadata.resourceVersion), { uid: oldResource.metadata.uid })).status, 409);
   const invocation = aide.invocations().at(-1)!;
-  assert.equal(oldLanes.includes(invocation.laneId), false);
+  assert.equal(oldLanes.includes(invocation.contextId), false);
   const view = conversationView(aide, "me");
   assert.ok(view.blocks.some((b) => b.content.includes("新答案")));
   assert.equal(view.blocks.some((b) => /旧答案|旧请求|旧工作|继续吗/.test(b.content)), false);

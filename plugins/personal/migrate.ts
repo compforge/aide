@@ -29,7 +29,7 @@ export function migratePersonalResources(storage: ResourceStorage): number {
       delete resource.metadata.sessionId;
       if (resource.kind === "Conversation") delete resource.spec.sessionId;
       // Native bindings belonged to the old execution journal. Business history remains authoritative.
-      delete resource.status.laneId;
+      delete resource.status.contextId;
       const refs = storage.db.prepare("SELECT target FROM resource_refs WHERE source=?").all(row.key!);
       storage.db.prepare("DELETE FROM resources WHERE key=?").run(row.key!);
       const data = JSON.stringify(value);

@@ -40,10 +40,10 @@ export function normalizeHarnessInputStatus(status: string): HarnessInputStatus 
 export interface HarnessInput {
   messageId: string;
   /** Controller scheduling coordinate: reserved for a prompt or targeted by a steer. Not proof of actual consumption. */
-  turnId: string;
+  invocationId: string;
   target: HarnessTarget;
   /** Aide-owned logical execution channel selected before admission. */
-  laneId: string;
+  contextId: string;
   blocks: PromptBlock[];
   source: HarnessInputSource;
   /** Durable causal link; orthogonal to the actor recorded in source. */
@@ -65,9 +65,9 @@ export interface HarnessInput {
 /** Durable WAL fact emitted before one Harness Input state transition. */
 export interface HarnessInputUpdate {
   messageId: string;
-  turnId: string;
+  invocationId: string;
   harnessTargetId: string;
-  laneId: string;
+  contextId: string;
   blocks: PromptBlock[];
   source: HarnessInputSource;
   status: HarnessInputStatus;
@@ -80,9 +80,9 @@ export interface HarnessInputUpdate {
 /** Input 只读快照：投影 / 诊断消费 status，不触碰内部 resolve/reject。 */
 export interface HarnessInputSnapshot {
   messageId: string;
-  turnId: string;
+  invocationId: string;
   harnessTargetId: string;
-  laneId: string;
+  contextId: string;
   harness: string;
   status: HarnessInputStatus;
   delivery: "prompt" | "steer";
@@ -95,13 +95,13 @@ export interface HarnessInputSnapshot {
 export function harnessInputUpdate(
   input: HarnessInput,
   status: HarnessInputStatus,
-  update?: { turnId?: string; delivery?: HarnessInput["delivery"] },
+  update?: { invocationId?: string; delivery?: HarnessInput["delivery"] },
 ): HarnessInputUpdate {
   return {
     messageId: input.messageId,
-    turnId: update?.turnId ?? input.turnId,
+    invocationId: update?.invocationId ?? input.invocationId,
     harnessTargetId: input.target.id,
-    laneId: input.laneId,
+    contextId: input.contextId,
     blocks: [...input.blocks],
     source: { ...input.source },
     status,
@@ -121,9 +121,9 @@ export function harnessInputUpdate(
 export function harnessInputSnapshot(input: HarnessInput): HarnessInputSnapshot {
   return {
     messageId: input.messageId,
-    turnId: input.turnId,
+    invocationId: input.invocationId,
     harnessTargetId: input.target.id,
-    laneId: input.laneId,
+    contextId: input.contextId,
     harness: input.target.harness,
     status: input.status,
     delivery: input.delivery,

@@ -82,7 +82,7 @@ export class ClaudeEventHandler {
       }),
     };
     const result = await this.options.openApproval(approval, {
-      turnId: turnId(),
+      invocationId: turnId(),
       raw: { toolName, input, meta },
     });
     if (result.kind === "cancelled") {
@@ -489,7 +489,7 @@ export class ClaudeEventHandler {
       source: "harness",
       component: "claude.protocol",
       harness: "claude-code",
-      turnId: rt.currentTurn?.turnId,
+      invocationId: rt.currentTurn?.turnId,
       message: `unmapped Claude SDK message: ${key}`,
       attributes: { count: 1 },
     });

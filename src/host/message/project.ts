@@ -38,8 +38,8 @@ export function inputRequestMessage(event: EventEnvelope<"approval.requested">):
   const request = event.payload;
   return {
     ...request,
-    turnId: event.turnId,
-    laneId: event.laneId,
+    invocationId: event.invocationId,
+    contextId: event.contextId,
   };
 }
 
@@ -48,7 +48,7 @@ export function inputResponseMessage(
 ): InputResponseState {
   return {
     ...event.payload,
-    turnId: event.turnId,
-    laneId: event.laneId,
+    invocationId: event.invocationId,
+    contextId: event.contextId,
   };
 }

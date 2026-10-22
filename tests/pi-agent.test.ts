@@ -91,7 +91,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   });
   const open = () => adapter.open({ cwd: root, ...(binding ? { resumeState: binding.resumeState } : {}) }, (event) => {
     events.push(event);
-    session.appendEvent({ ...event, source: { type: "harness", harnessTargetId: "assistant" }, harness, harnessTargetId: "assistant", laneId: "main" });
+    session.appendEvent({ ...event, source: { type: "harness", harnessTargetId: "assistant" }, harness, harnessTargetId: "assistant", contextId: "main" });
     if (event.kind === "state_update" && event.payload.state === "idle") finished?.();
   }, (value) => { binding = value; });
   let ref = await open();
@@ -112,10 +112,10 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   });
   async function run(text: string, turnId: string) {
     const terminal = new Promise<void>((resolve) => { finished = resolve; });
-    const receipt = await adapter.sendTurn(ref, { turnId, messageId: `user-${turnId}`, blocks: [{ type: "text", text }] });
+    const receipt = await adapter.sendTurn(ref, { invocationId: turnId, messageId: `user-${turnId}`, blocks: [{ type: "text", text }] });
     assert.deepEqual(receipt, { accepted: true, effective: "new_turn" });
     await terminal;
-    return session.summarizeTurn(turnId);
+    return session.summarizeInvocation(turnId);
   }
   return { work, config, session, adapter, events, requests, requestHeaders, run, personFile, persons, ref: () => ref, binding: () => binding!,
     reopen: async () => { await adapter.close(ref); ref = await open(); return ref; } };
@@ -246,7 +246,7 @@ test("Pi model failure and cancellation settle once, without a successful final 
   assert.equal(failed.finalText, undefined);
   const running = fixture.run("取消测试", "cancelled");
   await pending;
-  const rejected = await fixture.adapter.sendTurn(fixture.ref(), { turnId: "other", messageId: "other", blocks: [{ type: "text", text: "busy" }] });
+  const rejected = await fixture.adapter.sendTurn(fixture.ref(), { invocationId: "other", messageId: "other", blocks: [{ type: "text", text: "busy" }] });
   assert.equal(rejected.effective, "rejected");
   await fixture.adapter.cancel(fixture.ref());
   const cancelled = await running;
@@ -257,7 +257,7 @@ test("Pi model failure and cancellation settle once, without a successful final 
 
 test("Pi refuses unsupported input before admission and does not promote truncated text to final", { timeout: 20_000 }, async (t) => {
   const fixture = await setup(t, () => ({ text: "未完成的回答", stop: "length" }));
-  await assert.rejects(fixture.adapter.sendTurn(fixture.ref(), { turnId: "image", messageId: "image",
+  await assert.rejects(fixture.adapter.sendTurn(fixture.ref(), { invocationId: "image", messageId: "image",
     blocks: [{ type: "image", data: "AA==", mimeType: "image/png" }] }), /does not support/);
   assert.equal(fixture.requests.length, 0);
   assert.equal(fixture.events.length, 0);
@@ -294,9 +294,9 @@ test("Aide transfers resource-owned Batch context across fresh native sessions a
     const session = new SessionStore(home).openSession("aide:execution");
     const target = chiefTarget(conversationId);
     const r = aide.personal.conversations.resource(conversationId)!;
-    const laneId = resourceExecutionKey({ pluginInstanceId: "personal", namespace: "v1", executionId: "test", controllerName: "batch",
+    const contextId = resourceExecutionKey({ pluginInstanceId: "personal", namespace: "v1", executionId: "test", controllerName: "batch",
       resourceRef: { apiVersion: r.apiVersion, kind: r.kind, namespace: r.metadata.namespace, name: r.metadata.name, uid: r.metadata.uid } });
-    return session.meta.lanes[laneId]!.harnessSessions[target]!;
+    return session.meta.contexts[contextId]!.harnessSessions[target]!;
   };
   aide = open();
   try {
@@ -511,7 +511,7 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
   }
   const session = new SessionStore(home).openSession("aide:execution");
   assert.equal(session.meta.harnessTargets.default!.harness, "pi");
-  assert.ok(Object.values(session.meta.lanes).some((lane) => lane.harnessSessions.default?.harness === "pi"));
+  assert.ok(Object.values(session.meta.contexts).some((lane) => lane.harnessSessions.default?.harness === "pi"));
 });
 
 /** @case A checkpoint rebuild opens a tool-free summary context, then excludes forgotten Ledger history even after restart. */

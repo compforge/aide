@@ -1,7 +1,7 @@
 import { resourceHome } from "../src/host/resource/storage.ts";
 import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
 import { afterEach, describe, expect, test } from "bun:test";
-import { commandContext, executeCommand } from "./fixtures/command-context.ts";
+import { executeCommand } from "./fixtures/command-context.ts";
 import {
   cpSync,
   mkdirSync,
@@ -13,7 +13,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import type { DeferredHookStage, HookSubjectMap, InlineHookStage } from "@compforge/aide-plugin";
 
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { Manager, type PluginRunnerFailure } from "../src/host/plugin/manager.ts";
@@ -23,6 +22,8 @@ import {
   serializedError,
 } from "../src/protocol/ipc.ts";
 import { SessionHandle } from "../src/host/store/store.ts";
+import { Connectors } from "../connectors/index.ts";
+import { Environments } from "../connectors/environments.ts";
 
 const roots: string[] = [];
 
@@ -41,10 +42,9 @@ function stores() {
       cwd: root,
       createdAt: new Date().toISOString(),
       harnessTargets: {},
-      lanes: {
+      contexts: {
         main: {
-          laneId: "main",
-          createdFor: { type: "session" },
+          contextId: "main",
           harnessSessions: {},
         },
       },
@@ -144,13 +144,13 @@ describe("Plugin Runner process boundary", () => {
     const outputs: string[] = [];
     const { instances, session, entry } = stores();
     session.appendEvent({
-      kind: "_aide_turn_summary",
+      kind: "_aide_invocation_summary",
       source: { type: "aide" },
       harness: "codex",
       harnessTargetId: "codex_default",
-      turnId: "turn_runner",
+      invocationId: "turn_runner",
       payload: {
-        turnId: "turn_runner",
+        invocationId: "turn_runner",
         userText: "test reconcile capabilities",
         agentText: "ready",
         toolCalls: [],
@@ -213,11 +213,9 @@ describe("Plugin Runner process boundary", () => {
     });
     await manager.start();
 
-    const notification = manager.inlineHook("view.input", {
-      inputId: "in_runner_hook",
-      eventId: "ev_runner_hook",
-      seq: 1,
-      input: { kind: "prompt", text: "say from hook", harnessTargetId: "codex" },
+    const notification = manager.inlineHook("harness.input", {
+      invocationId: "say-from-hook", attemptId: "attempt", harnessTargetId: "codex",
+      messageId: "message", operation: "new_turn",
     });
     await waitFor(() => outputs.length === 1);
     expect(outputs).toEqual(["Continue from Hook?"]);
@@ -232,7 +230,7 @@ describe("Plugin Runner process boundary", () => {
       source: "plugin",
       component: "plugin.tests/process-plugin.hook",
       message: "Process Hook observed input",
-      attributes: { inputId: "in_runner_hook" },
+      attributes: { inputId: "say-from-hook" },
     }));
     await manager.close();
   });
@@ -269,7 +267,7 @@ describe("Plugin Runner process boundary", () => {
     await manager.close();
   });
 
-  test("routes deferred ViewOutput Hook verbs without blocking publication", async () => {
+  test("routes deferred Harness output Hook verbs without blocking publication", async () => {
     const outputs: string[] = [];
     const { instances, session, entry } = stores();
     instances.create({
@@ -294,7 +292,7 @@ describe("Plugin Runner process boundary", () => {
     });
     await manager.start();
 
-    manager.deferHook("view.output", { outputId: "published", kind: "transcript", revision: 1 });
+    manager.deferHook("harness.output", { invocationId: "published", kind: "agent_message", harnessTargetId: "codex", eventId: "event", seq: 1 });
     await waitFor(() => outputs.length === 1);
     await manager.settled();
     expect(outputs).toEqual(["Continue outbound publication?"]);
@@ -306,13 +304,13 @@ describe("Plugin Runner process boundary", () => {
     const outputs: string[] = [];
     const { root, instances, session, entry } = stores();
     session.appendEvent({
-      kind: "_aide_turn_summary",
+      kind: "_aide_invocation_summary",
       source: { type: "aide" },
       harness: "codex",
       harnessTargetId: "codex_default",
-      turnId: "turn_crash",
+      invocationId: "turn_crash",
       payload: {
-        turnId: "turn_crash",
+        invocationId: "turn_crash",
         userText: "test crash while waiting",
         agentText: "ready",
         toolCalls: [],
@@ -389,21 +387,8 @@ describe("Plugin Runner process boundary", () => {
         /^\{"currentUid":"pr_[^"]+"\}$/,
       ),
     });
-    const submitted: unknown[] = [];
-    const configurations: unknown[] = [];
-    const command = commandContext("tests/process-plugin", "process-check");
-    const submitReceipt = { messageId: "m_command", turnId: "t_command", queued: true };
-    expect(await manager.executeCommand("process-check", { argument: "submit" }, {
-      ...command, target: { id: "codex2", harness: "codex" },
-      verbs: {
-        async submit(input) { submitted.push(input); return submitReceipt; },
-        async configureModel(input) { configurations.push(input); },
-      },
-    })).toEqual({ kind: "message", text: JSON.stringify({
-      command: command.command, target: { id: "codex2", harness: "codex" }, receipt: submitReceipt,
-    }) });
-    expect(submitted).toEqual([{ prompt: "task" }]);
-    expect(configurations).toEqual([{ model: "fast", effort: "medium" }]);
+    expect(await executeCommand(manager, "process-check", { argument: "command-context" }))
+      .toEqual({ kind: "message", text: JSON.stringify(["command", "executionId"]) });
     const heartbeat = Bun.sleep(25).then(() => "heartbeat");
     const invocation = executeCommand(manager, "process-check", {
       argument: "200",
@@ -480,5 +465,3 @@ describe("Plugin Runner process boundary", () => {
     await manager.close();
   });
 });
-import { Connectors } from "../connectors/index.ts";
-import { Environments } from "../connectors/environments.ts";

@@ -114,21 +114,21 @@ test("Reconcile snapshots contain configuration only and execution views require
   const { SessionStore } = await import("../src/host/store/store.ts");
   const root = home(t);
   const journal = new SessionStore(root).createSession({ cwd: root });
-  for (const turnId of ["mine", "unrelated"]) journal.appendEvent({ kind: "_aide_turn_summary", source: { type: "aide" },
-    payload: { turnId, finalText: turnId, toolCalls: [] } });
+  for (const turnId of ["mine", "unrelated"]) journal.appendEvent({ kind: "_aide_invocation_summary", source: { type: "aide" },
+    payload: { invocationId: turnId, finalText: turnId, toolCalls: [] } });
   const executions = new ExecutionService(journal, { resolveTarget: () => undefined, mentionBudgetChars: 0, createAdapter: () => { throw new Error("No execution requested"); } });
   t.after(() => executions.close());
   const snapshot = createReconcileSnapshot({ cwd: root, harnessTargets: [{ id: "configured", harness: "test" }] });
   assert.deepEqual(Object.keys(snapshot).sort(), ["cwd", "harnessTargets"]);
   assert.ok(Object.isFrozen(snapshot.harnessTargets[0]));
-  assert.deepEqual(executions.view([]).turnSummaries, []);
+  assert.deepEqual(executions.view([]).invocationSummaries, []);
   const selected = executions.view(["mine"]);
-  assert.deepEqual(selected.turnSummaries.map(turn => turn.turnId), ["mine"]);
-  selected.turnSummaries[0]!.finalText = "caller mutation";
-  assert.equal(executions.view(["mine"]).turnSummaries[0]!.finalText, "mine");
+  assert.deepEqual(selected.invocationSummaries.map(turn => turn.invocationId), ["mine"]);
+  selected.invocationSummaries[0]!.finalText = "caller mutation";
+  assert.equal(executions.view(["mine"]).invocationSummaries[0]!.finalText, "mine");
   await executions.close();
   const reopened = new ExecutionService(new SessionStore(root).openSession(journal.id), { resolveTarget: () => undefined, mentionBudgetChars: 0, createAdapter: () => { throw new Error("No replay expected"); } });
-  assert.equal(reopened.view(["mine"]).turnSummaries[0]!.finalText, "mine");
+  assert.equal(reopened.view(["mine"]).invocationSummaries[0]!.finalText, "mine");
   await reopened.close();
 });
 

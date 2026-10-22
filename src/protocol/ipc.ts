@@ -1,7 +1,7 @@
 import type { RuntimeScope } from "./runtime.ts";
 import type { ReconcileKey } from "./reconcile.ts";
 import type { ConnectorRequest } from "./connectors.ts";
-import type { CommandInputShape, CommandAlias, CommandSubmitInput, PluginDataDirectories, PluginInstance, PluginLogLevel, PluginLogContext, HookStage, Resource, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType, ToastMessage } from "@compforge/aide-plugin";
+import type { CommandInputShape, CommandAlias, PluginDataDirectories, PluginInstance, PluginLogLevel, PluginLogContext, HookStage, Resource, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType, ToastMessage } from "@compforge/aide-plugin";
 import type {
   ExecutionScope,
   VerbRequest,
@@ -98,8 +98,6 @@ export type HostRequest =
   | { readonly method: "resource.commit"; readonly writes: readonly import("@compforge/aide-plugin").ResourceCommit[] }
   | { readonly method: "resource.replace"; readonly resource: Resource<unknown, unknown>; readonly spec: unknown; readonly status: unknown }
   | { readonly method: "connector.read"; readonly request: ConnectorRequest }
-  | { readonly method: "command.verb"; readonly executionId: string; readonly verb: "submit"; readonly input: CommandSubmitInput }
-  | { readonly method: "command.verb"; readonly executionId: string; readonly verb: "configureModel"; readonly input: { readonly model?: string; readonly effort?: string } }
   | {
       readonly method: "verb.invoke";
       readonly context: ExecutionScope;

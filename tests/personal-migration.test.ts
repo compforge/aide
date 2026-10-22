@@ -18,7 +18,7 @@ function storage(t: { after(fn: () => void): void }) {
 function seed(store: ResourceStorage, key: string, uid: string, scope = JSON.stringify(["legacy", "personal"])) {
   const object = { ...CONVERSATION_TYPE, metadata: { name: "inbox", namespace: "v1", uid,
     sessionId: "legacy", resourceVersion: "7", generation: 3, creationTimestamp: "2026-10-21T00:00:00Z" },
-    spec: { id: "inbox", sessionId: "legacy", default: true }, status: { pendingInputIds: ["pending"], laneId: "old-lane",
+    spec: { id: "inbox", sessionId: "legacy", default: true }, status: { pendingInputIds: ["pending"], contextId: "old-lane",
       reference: { ...CONVERSATION_TYPE, name: "other", namespace: "v1", uid: "other-uid", sessionId: "legacy" } } };
   const data = JSON.stringify({ object, control: { nextReconcileAt: "2026-10-23T00:00:00Z" }, owner: "legacy" });
   store.db.prepare("INSERT INTO resources VALUES (?,?,?,?,?,?,?,?,?)").run(key, scope, "aide.dev/Conversation", uid, data, Buffer.byteLength(data), object.metadata.creationTimestamp, 123, null);
@@ -38,7 +38,7 @@ test("Personal migration preserves resource identity, default, pending inputs, t
   assert.equal(value.object.spec.sessionId, undefined);
   assert.equal(value.object.spec.default, true);
   assert.deepEqual(value.object.status.pendingInputIds, ["pending"]);
-  assert.equal(value.object.status.laneId, undefined);
+  assert.equal(value.object.status.contextId, undefined);
   assert.equal(value.object.status.reference.sessionId, undefined);
   assert.equal(value.control.nextReconcileAt, "2026-10-23T00:00:00Z");
   assert.equal(value.owner, "legacy");

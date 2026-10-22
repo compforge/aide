@@ -5,7 +5,6 @@ import { join } from "node:path";
 
 import type { ReconcileHarnessInvocation } from "../src/host/plugin/harness-invocation.ts";
 import { HarnessInvocationStore } from "../src/host/plugin/harness-invocation.ts";
-import { MAIN_LANE_ID } from "../src/host/lane.ts";
 import { SessionStore } from "../src/host/store/store.ts";
 
 const roots: string[] = [];
@@ -13,7 +12,9 @@ const roots: string[] = [];
 function session() {
   const root = mkdtempSync(join(tmpdir(), "aide-harness-invocation-"));
   roots.push(root);
-  return new SessionStore(root).createSession({ cwd: "/repo" });
+  const journal = new SessionStore(root).createSession({ cwd: "/repo" });
+  journal.setExecutionContext("resource-context", { contextId: "resource-context", harnessSessions: {} });
+  return journal;
 }
 
 function invocation(
@@ -31,8 +32,7 @@ function invocation(
       verb: "harness",
       title: "Implement requirement",
       prompt: "Implement REQ-1 and run its focused tests.",
-      laneId: "main",
-      newLane: false,
+      contextId: "resource-context",
       harnessTargetId: "codex",
       ...overrides,
     },
@@ -58,8 +58,7 @@ describe("HarnessInvocationStore", () => {
       executionId: "pex_1",
       verb: "harness",
       phase: "queued",
-      newLane: false,
-      laneId: MAIN_LANE_ID,
+      contextId: "resource-context",
     });
     const scheduled = store.scheduled(pending.invocationId)!;
     const result = store.wait(pending.invocationId);
@@ -68,22 +67,22 @@ describe("HarnessInvocationStore", () => {
       source: { type: "plugin", pluginInstanceId: scheduled.pluginInstanceId },
       harness: "codex",
       harnessTargetId: scheduled.harnessTargetId,
-      laneId: scheduled.laneId,
-      turnId: scheduled.turnId,
+      contextId: scheduled.contextId,
+      invocationId: scheduled.invocationId,
       payload: {
         messageId: scheduled.messageId,
         content: [...scheduled.blocks],
       },
     });
     handle.appendEvent({
-      kind: "_aide_turn_summary",
+      kind: "_aide_invocation_summary",
       source: { type: "aide" },
       harness: "codex",
       harnessTargetId: scheduled.harnessTargetId,
-      laneId: scheduled.laneId,
-      turnId: scheduled.turnId,
+      contextId: scheduled.contextId,
+      invocationId: scheduled.invocationId,
       payload: {
-        turnId: scheduled.turnId,
+        invocationId: scheduled.invocationId,
         stopReason: "end_turn",
         agentText: "Implemented.",
         toolCalls: [],
@@ -105,15 +104,14 @@ describe("HarnessInvocationStore", () => {
     store.close();
   });
 
-  test("allocates a side Lane from the requested parent", () => {
+  test("uses the supplied context and the invocation identity for execution", () => {
     const handle = session();
     const store = new HarnessInvocationStore(handle);
-    const pending = store.record(invocation(handle.id, { newLane: true }));
+    const pending = store.record(invocation(handle.id));
     const scheduled = store.scheduled(pending.invocationId)!;
-
-    expect(scheduled.newLane).toBe(true);
-    expect(scheduled.parentLaneId).toBe("main");
-    expect(scheduled.laneId).not.toBe(MAIN_LANE_ID);
+    expect(scheduled.contextId).toBe("resource-context");
+    expect(scheduled.invocationId).toBe(pending.invocationId);
+    expect("newLane" in scheduled).toBe(false);
     store.close();
   });
 

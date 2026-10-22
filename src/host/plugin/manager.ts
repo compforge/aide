@@ -17,8 +17,6 @@ import {
   type ScheduledReconcile,
   reconcileRetryBackoff,
 } from "./controller.ts";
-
-export type { ReconcileFailure } from "./controller.ts";
 import {
   type CreatePluginInstance,
   type PluginInstance,
@@ -35,10 +33,8 @@ import {
   type HookSubjectMap,
   type InlineHookStage,
   type Resource,
-  type ResourceRef,
-  type ResourceType,
-  type ToastMessage,
-  type ToastTone,
+  type ResourceRef, type ToastMessage,
+  type ToastTone
 } from "./package.ts";
 import {
   PackageLoader,
@@ -54,7 +50,6 @@ import {
   CronSourceQueue,
 } from "../../reconcile/cron-source.ts";
 import { PluginResourceStore } from "./resource/store.ts";
-import { resourceTypeKey } from "./resource/type.ts";
 import {
   createResourceClient,
   type ResourceClientChange,
@@ -95,6 +90,8 @@ import { Verb, type VerbOptions } from "./verb.ts";
 import { HookRegistry, HookRuntime } from "./hook.ts";
 import { ResourceRegistry } from "./resource/registry.ts";
 import type { HarnessTarget } from "../harness/target.ts";
+
+export type { ReconcileFailure } from "./controller.ts";
 
 const TOAST_TONES = new Set<ToastTone>([
   "info",
@@ -146,8 +143,8 @@ export interface ManagerOptions {
     | "appendEvent"
     | "subscribe"
     | "log"
-    | "requireLane"
-    | "setLane"
+    | "requireExecutionContext"
+    | "setExecutionContext"
   >;
   /** Configured HarnessTargets available in execution snapshots. */
   harnessTargets?: readonly HarnessTarget[];
@@ -166,7 +163,7 @@ export interface ManagerOptions {
    */
   loadPackageEntry?: PackageLoaderOptions["loadPackageEntry"];
   pluginSupervisor?: PluginSupervisor;
-  /** Host-owned bridge that materializes the request's explicit Lane policy. */
+  /** Host-owned bridge that materializes the request's explicit resource context. */
   enqueueHarnessInvocation?(
     request: ScheduledHarnessInvocation,
   ): Promise<unknown> | void;

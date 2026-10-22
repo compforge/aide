@@ -1,3 +1,4 @@
+import { readExecutionEvents } from "./legacy.ts";
 import {
   appendFileSync,
   existsSync,
@@ -70,7 +71,7 @@ export class EventLedger {
         );
       }
     }
-    return events;
+    return readExecutionEvents(events);
   }
 
   /** 首次追加前丢弃 crash 遗留的半行，并保留 sidecar 供诊断。 */

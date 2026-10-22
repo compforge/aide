@@ -3,9 +3,7 @@ import { configuredHarnessTargets, harnessDefinitionFor, parseHarness } from "./
 import type { HarnessTarget } from "./target.ts";
 import type {
   HarnessHistoryBoundary,
-  HarnessHistoryTurn as StoredHarnessHistoryTurn,
-  SessionHandle,
-  SessionStore,
+  HarnessHistoryTurn as StoredHarnessHistoryTurn
 } from "../store/store.ts";
 import { harnessHistoryBoundary } from "../store/store.ts";
 import type { HarnessSessionIdentity } from "./adapter.ts";
@@ -210,42 +208,6 @@ export function harnessHistoryTurns(
   return turns;
 }
 
-export interface AdoptedHarnessSessionResult {
-  session: SessionHandle;
-  match: ResolvedHarnessSession;
-  reused: boolean;
-}
-
-/** HarnessHistorySnapshot 先 adoption 为 AideSession；后续 resume/fork 只走统一语义。 */
-export function adoptHarnessSession(
-  store: SessionStore,
-  match: ResolvedHarnessSession,
-  options: { cwd: string },
-): AdoptedHarnessSessionResult {
-  const identity = match.snapshot.identity ?? (
-    match.snapshot.nativeSessionId ? { id: match.snapshot.nativeSessionId } : undefined
-  );
-  if (!identity) {
-    throw new Error(`${match.target.id} returned an unresolved HarnessHistorySnapshot`);
-  }
-  const turns = (match.snapshot.turns ?? harnessHistoryTurns(match.snapshot.transcript ?? [])).map(
-    (turn, index) => ({ ...turn, turnId: turn.turnId ?? `history-${index + 1}` }),
-  );
-  const observedThrough = match.snapshot.observedThrough ?? harnessHistoryBoundary(turns);
-  const materialized = store.adoptHarnessSession({
-    session: {
-      harnessTargetId: match.target.id,
-      harness: match.harness,
-      identity,
-    },
-    cwd: match.snapshot.cwd ?? options.cwd,
-    title: match.snapshot.title,
-    turns,
-    observedThrough,
-  });
-  return { ...materialized, match };
-}
-
 /** @deprecated 0.2.14 public API aliases. */
 export type NativeTranscriptEntry = HarnessTranscriptEntry;
 export type NativeSessionTurn = HarnessHistoryTurn;
@@ -255,7 +217,5 @@ export type NativeSessionProvider = HarnessSessionInspector;
 export type ResolvedNativeSession = ResolvedHarnessSession;
 export type NativeSessionSource = HarnessSessionSource;
 export type NativeSessionResolutionOptions = HarnessSessionResolutionOptions;
-export type MaterializedNativeSession = AdoptedHarnessSessionResult;
 export const resolveNativeSession = resolveHarnessSession;
 export const nativeSessionTurns = harnessHistoryTurns;
-export const materializeNativeSession = adoptHarnessSession;

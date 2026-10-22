@@ -121,7 +121,7 @@ Application Harness context is derived from the main resource UID and Controller
 
 Harness and connector calls require timeoutMs covering their wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
-Harness returns an invocation ID and execution result. Reconcile snapshots contain only cwd and configured Harness targets, never global execution history. ApplicationRuntime composes plugin scheduling and ExecutionService independently. The private journal and Adapter protocol retain legacy Turn/Lane spellings for persisted history and native recovery; these do not appear in resource ownership or Harness invocation arguments. See [execution boundary](../../docs/kernel.md#执行后端的边界).
+Harness returns an invocation ID and execution result. Reconcile snapshots contain only cwd and configured Harness targets, never global execution history. ApplicationRuntime composes plugin scheduling and ExecutionService independently. Resource contexts retain native bindings and history cutoffs. Every Harness call has one invocation ID for events, results, cancellation and approvals; no Lane or Turn object is created. Legacy journals are translated only when read. See [execution boundary](../../docs/kernel.md#执行后端的边界).
 
 ## Resource Printers
 
@@ -156,18 +156,16 @@ Retention rules belong to the same definition. `releasedAt` returns eligibility 
 
 ## Hooks, commands and presentation
 
-[Hooks](src/hook.ts) observe four coordination boundaries:
+[Hooks](src/hook.ts) observe two execution boundaries:
 
 | Stage | Delivery |
 | --- | --- |
-| `view.input` | Inline, before Core lowers the input |
 | `harness.input` | Inline, before Adapter dispatch |
-| `view.output` | Deferred, after publishing a view update |
 | `harness.output` | Deferred, after committing an execution event |
 
-Inline hooks fail open on failure or timeout. Deferred hooks use best-effort bounded delivery. Hooks return no replacement or allow/deny value; request effects through their typed verbs or writable resource fields. Publishing an output does not prove a person saw it.
+Inline hooks fail open on failure or timeout. Deferred hooks use best-effort bounded delivery. Hooks correlate observations by invocationId and return no replacement or allow/deny value. Their verbs expose actions and connectors; Harness execution belongs to resource Controllers. Publishing an output does not prove a person saw it.
 
-[Commands](src/command.ts) receive invocation-scoped capabilities. Command verbs submit a turn or configure model defaults; capabilities expire with the invocation. Picker selections are new invocations, and remote search cannot retain a prior invocation's authority.
+[Commands](src/command.ts) receive command identity and a callback execution ID. They do not carry a Lane, Target, or Harness submission/configuration capability. The registration and callback API remains available to embedders; the application has no built-in command dispatch UI.
 
 
 

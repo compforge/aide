@@ -62,8 +62,8 @@ export interface OpenOptions {
 
 /**
  * `sendTurn` 的调用参数，不是独立的 Harness IO 概念。ID 都由 controller 分配
- * （见 docs/harness/README.md）：新 turn 在入队时分配 turnId；
- * same-turn send 复用当前 turnId。harness 侧各自的 turn/message id 只进 raw 或 adapter
+ * （见 docs/harness/README.md）：调用使用已有的 HarnessInvocation ID；
+ * 原生追加输入复用当前 invocationId。harness 侧各自的 turn/message id 只进 raw 或 adapter
  * 内部映射，不进 controller 契约。
  *
  * 普通 prompt 的 `user_message` / `state_update(running)` 由 controller 在出队时落盘
@@ -71,7 +71,7 @@ export interface OpenOptions {
  * 含 <aide-sync> prepend，不能进正典历史）——adapter **不得**为 prompt 重复发这两个
  * 事件；messageId 仅供 same-turn send 成功路径发 delivery:"steer" 的 user_message upsert。
  */
-export type PromptInput = Pick<HarnessInput, "turnId" | "messageId" | "blocks"> & {
+export type PromptInput = Pick<HarnessInput, "invocationId" | "messageId" | "blocks"> & {
   /**
    * 跨 harness catch-up 注入（不属于用户输入正文，不进正典历史）。仅当 adapter 声明
    * `capabilities.sync` 时由 controller 传入，adapter 用原生 side-channel 随本次 sendTurn
@@ -91,7 +91,7 @@ export interface PromptReceipt {
  * `sendTurn` 的 admission 结果。Adapter 以自己的原生运行态决定实际投递：
  *
  * - `new_turn`：没有活跃 turn，已接受开启新 turn 的责任；
- * - `steer`：已接受向 `input.turnId` 对应的当前 turn 投递；若 Harness 内部
+ * - `steer`：已接受向 `input.invocationId` 对应的当前 turn 投递；若 Harness 内部
  *   还有原生队列，Adapter 按 `steering.deliveryTracking` 约定用
  *   `input_delivery_update` 报告 applied/failed/uncertain（ack-only 则接受即应用）；
  * - `rejected`：未接受输入，Controller 可安全降级为 queued follow-up。
@@ -165,7 +165,7 @@ export interface AdapterCapabilities {
  * 终态硬性约定：每个被 sendTurn 以 `new_turn` 接受的 turn，adapter 在**任何退出路径**（正常结束、
  * wire fatal error、子进程退出、transport close）都必须恰好报告或合成一次
  * `state_update(idle)`；错误路径先发 `_aide_error_update` 再发 idle。重复/迟到的
- * 物理终态允许存在，由 controller 按 aide turn id 幂等 finalize。
+ * 物理终态允许存在，由 controller 按 invocationId 幂等 finalize。
  */
 export interface HarnessAdapter {
   readonly harness: string;
@@ -194,7 +194,7 @@ export interface HarnessAdapter {
   /**
    * 发送输入。Adapter 根据自己的活跃 turn 决定开启新 turn、same-turn steer 或拒绝：
    * - 无活跃 turn 时，接受后必须返回 `new_turn`；
-   * - `input.turnId` 与活跃 Aide turn 一致时，可以返回 `steer`；
+   * - `input.invocationId` 与活跃调用 一致时，可以返回 `steer`；
    * - 活跃 turn 不匹配、不可 steer 或原生协议拒绝时返回 `rejected`，不得擅自并行开 turn。
    *
    * throw 只表示 Adapter 尚未接受投递责任；resolve 为 accepted 后的失败必须经事件流
@@ -399,7 +399,7 @@ export function isTextGeneratable(adapter: HarnessAdapter): adapter is HarnessAd
 /**
  * 可选能力：让 harness 用自己的原生机制压缩当前会话上下文。
  *
- * `turnId` 由 controller 分配；controller 已先发 running 开界，adapter 必须把压缩过程事件绑定
+ * `invocationId` 由宿主传入；controller 已先发 running 开界，adapter 必须把压缩过程事件绑定
  * 到该 turn，并在所有终结路径发一次 idle。方法 resolve 只表示请求已被接收，不表示压缩完成。
  */
 export interface ContextCompactable {
@@ -448,7 +448,7 @@ export function isInputCancellable(
  * 不混入 Approval 的稳定内容。
  */
 export interface ApprovalContext {
-  turnId?: string;
+  invocationId?: string;
   raw?: unknown;
 }
 

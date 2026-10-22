@@ -32,7 +32,7 @@ export interface LogEntry {
   readonly message: string;
   readonly harness?: string;
   readonly harnessTargetId?: string;
-  readonly turnId?: string;
+  readonly invocationId?: string;
   readonly pluginId?: string;
   readonly pluginInstanceId?: string;
   readonly packageVersion?: string;
@@ -203,7 +203,7 @@ export class SessionLogger {
       ...(entry.harnessTargetId
         ? { harnessTargetId: boundedString(entry.harnessTargetId) }
         : {}),
-      ...(entry.turnId ? { turnId: boundedString(entry.turnId) } : {}),
+      ...(entry.invocationId ? { invocationId: boundedString(entry.invocationId) } : {}),
       ...(entry.pluginId ? { pluginId: boundedString(entry.pluginId) } : {}),
       ...(entry.pluginInstanceId
         ? { pluginInstanceId: boundedString(entry.pluginInstanceId) }
@@ -251,7 +251,7 @@ function normalizeLogEntry(entry: LogEntry): LogEntry {
     ...(entry.harnessTargetId
       ? { harnessTargetId: boundedString(entry.harnessTargetId) }
       : {}),
-    ...(entry.turnId ? { turnId: boundedString(entry.turnId) } : {}),
+    ...(entry.invocationId ? { invocationId: boundedString(entry.invocationId) } : {}),
     ...(entry.pluginId ? { pluginId: boundedString(entry.pluginId) } : {}),
     ...(entry.pluginInstanceId
       ? { pluginInstanceId: boundedString(entry.pluginInstanceId) }

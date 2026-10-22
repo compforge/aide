@@ -27,12 +27,12 @@ test("Pi aborts failed compaction once and rejects later turns until context rep
   const ref = await adapter.open({ cwd: "/tmp" }, (event) => {
     events.push(event); if (event.kind === "state_update" && event.payload.state === "idle") settled();
   }, () => {});
-  const input = { turnId: "turn", messageId: "message", blocks: [{ type: "text" as const, text: "Review" }] };
+  const input = { invocationId: "turn", messageId: "message", blocks: [{ type: "text" as const, text: "Review" }] };
   try {
     await adapter.sendTurn(ref, input); await done;
     assert.equal(aborted, 1);
     assert.equal(events.filter((e) => e.kind === "state_update" && e.payload.stopReason === "error").length, 1);
-    await assert.rejects(adapter.sendTurn(ref, { ...input, turnId: "next" }), /compaction failed/);
+    await assert.rejects(adapter.sendTurn(ref, { ...input, invocationId: "next" }), /compaction failed/);
     assert.equal(prompts, 1);
   } finally { await adapter.close(ref); }
 });

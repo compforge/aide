@@ -3,8 +3,8 @@ import type { Input, Output, InputRequest, InputResponse } from "../message/type
 
 /** Execution associations belong to the Session projection, not Message identity. */
 export interface MessageExecution {
-  turnId?: string;
-  laneId?: string;
+  invocationId?: string;
+  contextId?: string;
   harness?: string;
   harnessTargetId?: string;
 }

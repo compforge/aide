@@ -45,5 +45,5 @@ export type ApprovalDraft = PermissionApproval | HookTrustApproval;
 export type ApprovalAnswer =
   | { kind: "permission"; outcome: "selected"; optionId: string }
   | { kind: "hook_trust"; outcome: "trusted" | "skipped" };
-export type ApprovalCancellationReason = "user" | "requester" | "turn" | "timeout" | "recovery";
+export type ApprovalCancellationReason = "user" | "requester" | "invocation" | "timeout" | "recovery";
 export type ApprovalResult = ApprovalAnswer | { kind: "cancelled"; reason: ApprovalCancellationReason; detail?: string };

@@ -179,11 +179,11 @@ export class DshAdapter implements HarnessAdapter {
     }
     // Core may release a cancelled turn after its grace period. A different turn
     // must wait for teardown rather than losing its queued input to a busy rejection.
-    if (runtime.closing && runtime.activeTurn?.turnId !== input.turnId) await runtime.closing;
+    if (runtime.closing && runtime.activeTurn?.turnId !== input.invocationId) await runtime.closing;
     const active = runtime.activeTurn;
     const blocks = await dshPromptInput(input.blocks);
     if (active) {
-      if (runtime.activeTurn !== active || active.finalized || active.cancelRequested || runtime.closing || active.turnId !== input.turnId) {
+      if (runtime.activeTurn !== active || active.finalized || active.cancelRequested || runtime.closing || active.turnId !== input.invocationId) {
         return { accepted: false, effective: "rejected", reason: "DSH turn is ending or does not match" };
       }
       runtime.activity!.submit(input.messageId, blocks, true);
@@ -207,7 +207,7 @@ export class DshAdapter implements HarnessAdapter {
     const session = await this.ensureSession(runtime);
     if (runtime.closed) throw new Error("DSH session was closed during admission");
     const turn: DshTurnState = {
-      turnId: input.turnId,
+      turnId: input.invocationId,
       replies: new MessageReplies([input.messageId]),
       finalized: false,
       cancelRequested: false,
@@ -332,7 +332,7 @@ export class DshAdapter implements HarnessAdapter {
       runtime.closing = undefined;
     }, (error: unknown) => {
       this.options.log?.({ level: "error", source: "harness", component: "dsh.runtime.close",
-        harness: this.harness, turnId: runtime.activeTurn?.turnId,
+        harness: this.harness, invocationId: runtime.activeTurn?.turnId,
         message: "DSH runtime cleanup failed; replacement runtime is blocked",
         error: { message: errorMessage(error) } });
       throw error;
@@ -693,7 +693,7 @@ export class DshAdapter implements HarnessAdapter {
     runtime.sink({
       ...turn.replies.apply(event),
       harnessSessionId: runtime.sessionId,
-      turnId: turn.turnId,
+      invocationId: turn.turnId,
       ...(raw === undefined ? {} : { raw }),
     });
   }

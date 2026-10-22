@@ -19,13 +19,13 @@ test("Codex live and imported messages retain finality across ledger replay and 
     const drafts = mode === "live" ? [progress, answer].flatMap((item) => codexItemLifecycleDrafts("completed", item))
       : codexHistoryTurns([{ id: "turn", status: "completed", itemsView: "full", items: [progress, answer] }])[0]!.events!.map((entry) => entry.event);
     for (const draft of drafts) session.appendEvent({ ...draft, source: { type: "harness", harnessTargetId: "codex" },
-      harness: "codex", harnessTargetId: "codex", laneId: "main", turnId: "turn" });
+      harness: "codex", harnessTargetId: "codex", contextId: "main", invocationId: "turn" });
     const reopened = sessions.openSession(session.id);
     assert.equal(reopened.loadState().messages.get("progress")?.kind, "output");
-    const summary = reopened.summarizeTurn("turn");
+    const summary = reopened.summarizeInvocation("turn");
     assert.equal(summary.agentText, progress.text + "\n" + answer.text);
     assert.equal(summary.finalText, answer.text);
-    assert.equal(sessions.openSession(session.id).summarizeTurn("turn").finalText, answer.text);
+    assert.equal(sessions.openSession(session.id).summarizeInvocation("turn").finalText, answer.text);
   }
 });
 
@@ -35,9 +35,9 @@ test("JSON-shaped commentary or unclassified messages are never promoted to a fi
   for (const phase of ["commentary", undefined, "unknown-future-phase"]) {
     const session = new SessionStore(root).createSession({ cwd: "/repo" });
     for (const draft of codexItemLifecycleDrafts("completed", { ...answer, phase })) {
-      session.appendEvent({ ...draft, source: { type: "harness", harnessTargetId: "codex" }, harness: "codex", turnId: "turn" });
+      session.appendEvent({ ...draft, source: { type: "harness", harnessTargetId: "codex" }, harness: "codex", invocationId: "turn" });
     }
-    const summary = session.summarizeTurn("turn");
+    const summary = session.summarizeInvocation("turn");
     assert.equal(summary.agentText, answer.text);
     assert.equal(summary.finalText, undefined);
   }

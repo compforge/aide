@@ -3,7 +3,7 @@ import { definition } from "./fixtures/resource-definition.ts";
 import { spyOn } from "bun:test";
 import * as fs from "node:fs";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -11,55 +11,37 @@ import { SessionStore } from "../src/host/store/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { preparePluginDataDirectories } from "../src/host/plugin/data.ts";
 
-test("Sessions from different execution directories share one home and reopen or fork by id", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "aide-sessions-"));
+test("Execution journals reopen independent resource contexts without creating a main context", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-contexts-"));
   const store = new SessionStore(root);
   const first = store.createSession({ cwd: join(root, "code-a") });
   const second = store.createSession({ cwd: join(root, "code-b") });
+  assert.deepEqual(first.meta.contexts, {});
   first.setHarnessTarget("coding", { harnessTargetId: "coding", harness: "codex" });
-  first.ensureHarnessInvocationLane("side", "invocation-side", "main");
-  const mainBinding = { harness: "codex", harnessSessionId: "native-main", resumeState: { version: 1, data: { id: "native-main" } } };
-  const sideBinding = { harness: "codex", harnessSessionId: "native-side", resumeState: { version: 1, data: { id: "native-side" } } };
-  first.setLaneHarnessSession("main", "coding", mainBinding);
-  first.setLaneHarnessSession("side", "coding", sideBinding);
-  const event = first.appendEvent({ kind: "user_message", source: { type: "user" }, laneId: "side", turnId: "turn-side",
-    payload: { messageId: "message-side", content: [{ type: "text", text: "保留执行历史" }] } });
-  const fork = store.forkSession(first.id, { cwd: join(root, "code-c") });
+  for (const contextId of ["resource-one", "resource-two"]) {
+    first.setExecutionContext(contextId, { contextId, historyAfterSeq: 7, harnessSessions: {} });
+    first.setContextHarnessSession(contextId, "coding", { harness: "codex", harnessSessionId: contextId,
+      resumeState: { version: 1, data: { id: contextId } }, contextAfterSeq: 9 });
+  }
+  const event = first.appendEvent({ kind: "user_message", source: { type: "user" }, contextId: "resource-two", invocationId: "invocation-two",
+    payload: { messageId: "message-two", content: [{ type: "text", text: "保留执行历史" }] } });
   const reopened = new SessionStore(root).openSession(first.id);
   t.after(async () => {
-    for (const session of [first, second, fork, reopened]) await session.closeLogs();
+    for (const journal of [first, second, reopened]) await journal.closeLogs();
     rmSync(root, { recursive: true, force: true });
   });
-  assert.equal(first.dir, join(root, "sessions", first.id));
-  assert.equal(second.dir, join(root, "sessions", second.id));
-  assert.equal(fork.dir, join(root, "sessions", fork.id));
-  assert.equal(fork.meta.forkedFrom?.aideSessionId, first.id);
-  assert.equal(fork.meta.cwd, join(root, "code-c"));
-  assert.equal(reopened.dir, first.dir);
-  assert.deepEqual(reopened.meta.lanes.main!.harnessSessions.coding, mainBinding);
-  assert.deepEqual(reopened.meta.lanes.side!.harnessSessions.coding, sideBinding);
+  assert.deepEqual(reopened.meta.contexts, first.meta.contexts);
+  assert.equal(reopened.meta.contexts["resource-one"]!.harnessSessions.coding!.harnessSessionId, "resource-one");
+  assert.equal(reopened.meta.contexts["resource-two"]!.historyAfterSeq, 7);
+  assert.equal(reopened.meta.contexts["resource-two"]!.harnessSessions.coding!.contextAfterSeq, 9);
   assert.equal(reopened.ledger.read()[0]!.eventId, event.eventId);
-  assert.equal(reopened.projection.messages.get("message-side")?.kind, "input");
-  assert.deepEqual(reopened.projection.messages.get("message-side"), first.projection.messages.get("message-side"));
-  assert.deepEqual(fork.meta.lanes.main!.harnessSessions, {});
-  assert.deepEqual(fork.meta.lanes.side!.harnessSessions, {});
-  assert.equal(fork.meta.lanes.side!.createdFor.type, "harness_invocation");
-  assert.notEqual(fork.ledger.read()[0]!.eventId, event.eventId);
-  assert.deepEqual(fork.ledger.read()[0]!.scope, { type: "session", aideSessionId: fork.id });
-  assert.deepEqual(fork.projection.messages.get("message-side"), first.projection.messages.get("message-side"));
-  assert.deepEqual(new Set(store.listSessions().map((s) => s.aideSessionId)), new Set([first.id, second.id, fork.id]));
-  assert.deepEqual(readdirSync(root), ["sessions"]);
+  assert.deepEqual(reopened.projection.messages.get("message-two"), first.projection.messages.get("message-two"));
+  assert.deepEqual(new Set(store.listSessions().map(s => s.aideSessionId)), new Set([first.id, second.id]));
   assert.throws(() => store.openSession("../outside"), /path separators/);
-
-  const instance = { pluginId: "tests/plugin", pluginInstanceId: "default" };
-  const data = (session: typeof first) => preparePluginDataDirectories(root, instance);
-  const firstData = data(first);
-  const secondData = data(second);
-  assert.equal(firstData.global, join(root, "plugins", "tests%2Fplugin"));
-  assert.equal(firstData.global, secondData.global);
-  assert.equal(firstData.instance, secondData.instance);
-  assert.equal(firstData.instance, join(firstData.global, "instances", "default"));
-  assert.equal("project" in firstData, false);
+  const data = preparePluginDataDirectories(root, { pluginId: "tests/plugin", pluginInstanceId: "default" });
+  assert.equal(data.global, join(root, "plugins", "tests%2Fplugin"));
+  assert.equal(data.instance, join(data.global, "instances", "default"));
+  assert.equal("session" in data, false);
   assert.equal(existsSync(join(root, "projects")), false);
 });
 

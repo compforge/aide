@@ -11,7 +11,7 @@ import type {
 
 interface HarnessApprovalBinding {
   target: { id: string };
-  laneId: string;
+  contextId: string;
 }
 
 type AppendEvent<TBinding> = (
@@ -31,7 +31,7 @@ export class HarnessApprovalContinuations<
     string,
     {
       binding: TBinding;
-      turnId?: string;
+      invocationId?: string;
       resolve: (result: ApprovalResult) => void;
     }
   >();
@@ -45,7 +45,7 @@ export class HarnessApprovalContinuations<
   open(
     binding: TBinding,
     draft: ApprovalDraft,
-    turnId: string | undefined,
+    invocationId: string | undefined,
     context?: ApprovalContext,
   ): Promise<ApprovalResult> {
     const harnessTargetId = binding.target.id;
@@ -54,7 +54,7 @@ export class HarnessApprovalContinuations<
     return new Promise((resolve, reject) => {
       this.pending.set(request.messageId, {
         binding,
-        turnId,
+        invocationId: invocationId,
         resolve,
       });
       try {
@@ -62,7 +62,7 @@ export class HarnessApprovalContinuations<
           binding,
           {
             kind: "approval.requested",
-            ...(turnId ? { turnId } : {}),
+            ...(invocationId ? { invocationId: invocationId } : {}),
             payload: request,
             ...(context?.raw !== undefined ? { raw: context.raw } : {}),
           },
@@ -77,8 +77,8 @@ export class HarnessApprovalContinuations<
     });
   }
 
-  turnId(messageId: string): string | undefined {
-    return this.pending.get(messageId)?.turnId;
+  invocationId(messageId: string): string | undefined {
+    return this.pending.get(messageId)?.invocationId;
   }
 
   complete(messageId: string, result: ApprovalResult): boolean {
@@ -87,12 +87,12 @@ export class HarnessApprovalContinuations<
     return this.settle(messageId, result, { type: "user" });
   }
 
-  cancelForTurn(turnId: string): void {
+  cancelForInvocation(invocationId: string): void {
     for (const [messageId, entry] of this.pending) {
-      if (entry.turnId !== turnId) continue;
+      if (entry.invocationId !== invocationId) continue;
       this.settle(
         messageId,
-        { kind: "cancelled", reason: "turn" },
+        { kind: "cancelled", reason: "invocation" },
         { type: "aide" },
       );
     }
@@ -111,7 +111,7 @@ export class HarnessApprovalContinuations<
       this.observe();
       return false;
     }
-    this.appendEvent(entry.binding, { ...event, ...(entry.turnId ? { turnId: entry.turnId } : {}) }, source);
+    this.appendEvent(entry.binding, { ...event, ...(entry.invocationId ? { invocationId: entry.invocationId } : {}) }, source);
     const committed = requestResult(this.projection(), messageId);
     this.observe();
     return committed !== undefined;

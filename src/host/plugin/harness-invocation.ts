@@ -1,6 +1,6 @@
 import type { ExecutionAssociation } from "@compforge/aide-plugin";
 import type { HarnessExecutionResult } from "@compforge/aide-plugin";
-type TurnSummary = HarnessExecutionResult & { readonly turnId: string };
+type InvocationSummary = HarnessExecutionResult & { readonly invocationId: string };
 
 import { newId } from "../event/ids.ts";
 import type {
@@ -29,12 +29,10 @@ export interface HarnessInvocationSnapshot extends ExecutionAssociation {
   readonly executionId: string;
   readonly verb: "harness";
   readonly phase: HarnessInvocationPhase;
-  readonly newLane: boolean;
   readonly freshContext?: boolean;
   readonly harnessTargetId: string;
-  readonly laneId?: string;
-  readonly turnId?: string;
-  readonly result?: TurnSummary;
+  readonly contextId?: string;
+  readonly result?: InvocationSummary;
   readonly cancellation?: Readonly<HarnessInvocationCancelled>;
   readonly failure?: Readonly<HarnessInvocationFailed>;
 }
@@ -45,8 +43,7 @@ export interface ReconcileHarnessInvocation {
     readonly verb: "harness";
     readonly title: string;
     readonly prompt: string;
-    readonly laneId: string;
-    readonly newLane: boolean;
+    readonly contextId: string;
     readonly freshContext?: boolean;
     readonly harnessTargetId: string;
   };
@@ -54,20 +51,17 @@ export interface ReconcileHarnessInvocation {
 
 type HarnessInvocationSession = Pick<
   SessionHandle,
-  "id" | "ledger" | "appendEvent" | "subscribe" | "requireLane"
+  "id" | "ledger" | "appendEvent" | "subscribe" | "requireExecutionContext"
 >;
 
 export interface ScheduledHarnessInvocation {
   readonly invocationId: string;
   readonly pluginInstanceId: string;
   readonly harnessTargetId: string;
-  readonly laneId: string;
-  readonly newLane: boolean;
+  readonly contextId: string;
   readonly freshContext?: boolean;
-  readonly parentLaneId?: string;
   readonly source: "user" | "plugin";
   readonly messageId: string;
-  readonly turnId: string;
   readonly blocks: readonly PromptBlock[];
 }
 
@@ -78,7 +72,7 @@ interface InvocationState {
   failed?: EventEnvelope<"_aide_harness_invocation_failed">;
   admitted: boolean;
   uncertain: boolean;
-  result?: TurnSummary;
+  result?: InvocationSummary;
 }
 
 export interface HarnessInvocationStoreOptions {
@@ -104,7 +98,7 @@ function phaseOf(state: InvocationState): HarnessInvocationPhase {
   return "queued";
 }
 
-function frozenSummary(summary: TurnSummary): TurnSummary {
+function frozenSummary(summary: InvocationSummary): InvocationSummary {
   return Object.freeze({
     ...summary,
     toolCalls: Object.freeze(
@@ -120,7 +114,7 @@ function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
   const recorded = state.recorded.payload;
   // Older journals stored application metadata alongside runtime fields. Preserve
   // unrecognized fields opaquely; only the owning application interprets them.
-  const { invocationId, executionId, verb, title, prompt, laneId, newLane,
+  const { invocationId, executionId, verb, title, prompt, contextId,
     freshContext, harnessTargetId, resourceRef, attributes, ...extensions } = recorded;
   return Object.freeze({
     invocationId: recorded.invocationId,
@@ -129,14 +123,12 @@ function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
     ...(recorded.resourceRef ? { resourceRef: recorded.resourceRef } : {}),
     verb: recorded.verb,
     phase: phaseOf(state),
-    newLane: recorded.newLane,
     freshContext: recorded.freshContext,
     harnessTargetId: recorded.harnessTargetId,
     ...(state.scheduled === undefined
       ? {}
       : {
-          laneId: state.scheduled.payload.laneId,
-          turnId: state.scheduled.payload.turnId,
+          contextId: state.scheduled.payload.contextId,
         }),
     ...(state.result === undefined
       ? {}
@@ -166,13 +158,10 @@ function scheduledOf(
     invocationId: scheduled.invocationId,
     pluginInstanceId: pluginInstanceIdOf(state),
     harnessTargetId: scheduled.harnessTargetId,
-    laneId: scheduled.laneId,
-    newLane: recorded.newLane,
+    contextId: scheduled.contextId,
     freshContext: recorded.freshContext,
-    ...(recorded.newLane ? { parentLaneId: recorded.laneId } : {}),
     source: "plugin",
     messageId: scheduled.messageId,
-    turnId: scheduled.turnId,
     blocks: invocationBlocks(state),
   });
 }
@@ -181,7 +170,6 @@ function scheduledOf(
 export class HarnessInvocationStore {
   private readonly states = new Map<string, InvocationState>();
   private readonly invocationIdByMessage = new Map<string, string>();
-  private readonly invocationIdByTurn = new Map<string, string>();
   private readonly invocationIdByAttempt = new Map<string, string>();
   private readonly waiters = new Map<
     string,
@@ -198,7 +186,7 @@ export class HarnessInvocationStore {
   }
 
   record(draft: ReconcileHarnessInvocation): HarnessInvocationSnapshot {
-    this.session.requireLane(draft.invocation.laneId);
+    this.session.requireExecutionContext(draft.invocation.contextId);
     const invocationId = newId("hinv");
     const invocation = draft.invocation;
     this.session.appendEvent({
@@ -214,8 +202,7 @@ export class HarnessInvocationStore {
         verb: invocation.verb,
         title: invocation.title,
         prompt: invocation.prompt,
-        laneId: invocation.laneId,
-        newLane: invocation.newLane,
+        contextId: invocation.contextId,
         freshContext: invocation.freshContext,
         harnessTargetId: invocation.harnessTargetId,
       },
@@ -347,13 +334,12 @@ export class HarnessInvocationStore {
     if (state.cancelled || state.failed || state.result) return;
     const recorded = state.recorded.payload;
     invocationBlocks(state);
-    this.session.requireLane(recorded.laneId);
+    this.session.requireExecutionContext(recorded.contextId);
     const scheduled: HarnessInvocationScheduled = {
       invocationId: recorded.invocationId,
       messageId: newId("m"),
-      turnId: newId("t"),
       harnessTargetId: recorded.harnessTargetId,
-      laneId: recorded.newLane ? newId("hl") : recorded.laneId,
+      contextId: recorded.contextId,
     };
     this.session.appendEvent({
       kind: "_aide_harness_invocation_scheduled",
@@ -384,10 +370,6 @@ export class HarnessInvocationStore {
           event.payload.messageId,
           event.payload.invocationId,
         );
-        this.invocationIdByTurn.set(
-          event.payload.turnId,
-          event.payload.invocationId,
-        );
         changed = state;
         break;
       }
@@ -414,9 +396,8 @@ export class HarnessInvocationStore {
         changed = state;
         break;
       }
-      case "_aide_turn_summary": {
-        const id = this.invocationIdByTurn.get(event.payload.turnId);
-        const state = id ? this.states.get(id) : undefined;
+      case "_aide_invocation_summary": {
+        const state = this.states.get(event.payload.invocationId);
         if (!state || state.result || state.cancelled || state.failed) return;
         state.result = event.payload;
         state.uncertain = false;
