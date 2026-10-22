@@ -86,12 +86,12 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   assert.equal((await aide.persons.read(other.name)).isMe, false);
   assert.deepEqual(inputs.find((input) => input.spec.text === "mine")!.spec.observation!.sender, { id: "ou_me", type: "user" });
   assert.ok(prompts.some((prompt) => prompt.includes("Relation to Person: sent")));
-  // Rebuilding a fresh native context must retain attribution in its bounded history.
+  // New arrivals retain attribution; the adapter owns previous native history.
 
   await channel.receive(event("followup", "ou_me"));
   await channel.dispatch(); await aide.settled();
-  const history = prompts.at(-1)!.split("Previous context:")[1]!;
+  const history = prompts.at(-1)!;
   assert.match(history, /Relation to Person: sent/);
-  assert.match(history, /Text:\nother/);
+  assert.doesNotMatch(history, /Text:\nother/);
   assert.match(history, /Origin: channel/);
 });

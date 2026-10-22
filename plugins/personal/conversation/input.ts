@@ -2,7 +2,7 @@ import { type Resource, type ResourceClient } from "@compforge/aide-plugin";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type ConversationStatus } from "./model.ts";
 
-/** @spec CAS append preserves concurrent changes. Input-owned delivery receipts outlive dequeue and Batch replacement.
+/** @spec CAS append preserves concurrent changes. Input-owned delivery receipts outlive dequeue and later invocations.
  * @case tests/input-routing.test.ts
  */
 export async function appendConversationInput(resources: ResourceClient,

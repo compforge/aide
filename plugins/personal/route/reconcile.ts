@@ -1,85 +1,81 @@
-import { routePrompt } from "./prompt.ts";
-import { randomUUID } from "node:crypto";
-import type { PluginContext, Watch } from "@compforge/aide-plugin";
+import type { PluginContext, ReconcileContext, Watch } from "@compforge/aide-plugin";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
-import { CONVERSATION_TYPE, type ConversationSpec, type ConversationStatus } from "../conversation/model.ts";
-import { ROUTE_NAME, ROUTE_TYPE, type RouteResource } from "./model.ts";
-import { routePolicy } from "./config.ts";
-import { routeByRules } from "./rules.ts";
-import { routed, type RoutingInput } from "./delivery.ts";
+import { ROUTE_NAME, ROUTE_TYPE, ROUTE_TARGET, type RouteResource } from "./model.ts";
+import { routeByRules, defaultDestination } from "./rules.ts";
+import { routed, deliver, type RoutingInput } from "./delivery.ts";
 import { updateRoute } from "./state.ts";
-import { reconcileRouteBatch } from "./batch.ts";
+import { nextInput, processing, runInput, steerPending } from "../loop.ts";
+import { inputPrinter } from "../input/printer.ts";
+import { routePolicy } from "./config.ts";
+import { CONVERSATION_TYPE } from "../conversation/model.ts";
 
 const request = () => [{ name: ROUTE_NAME, namespace: "v1" as const }];
-function routeWatch(changed: (a: Readonly<RouteResource>, b: Readonly<RouteResource>) => boolean): Watch {
+function routeWatch(): Watch {
   return { resourceType: ROUTE_TYPE, handler: { create: async () => [], delete: async () => [],
-    update: async ({ oldObject, newObject }) => changed(oldObject as RouteResource, newObject as RouteResource) ? request() : [] } };
+    update: async ({ oldObject, newObject }) => {
+      const a = oldObject as RouteResource, b = newObject as RouteResource;
+      return JSON.stringify(a.status.pendingInputIds) !== JSON.stringify(b.status.pendingInputIds) || a.status.execution?.id !== b.status.execution?.id ? request() : [];
+    } } };
 }
 export function registerRoute(context: PluginContext): void {
   context.controllers.register({ resourceType: ROUTE_TYPE, maxConcurrency: 1,
     sources: [{ type: "resource", sourceId: "global", async start(source) { await source.emit({ name: ROUTE_NAME, spec: {} }); } }],
-    watches: [
-      { resourceType: INPUT_TYPE, handler: { create: async () => request(), delete: async () => [],
-        update: async ({ oldObject, newObject }) => !routed(oldObject as RoutingInput) && routed(newObject as RoutingInput) ? request() : [] } },
-      routeWatch((a, b) => a.status.batch?.id !== b.status.batch?.id),
-    ],
-    reconcile: (_execution, route: Readonly<RouteResource>) => reconcileRoute(context, route),
+    watches: [{ resourceType: INPUT_TYPE, handler: { create: async () => request(), delete: async () => [],
+      update: async ({ oldObject, newObject }) => !routed(oldObject as RoutingInput) && routed(newObject as RoutingInput) ? request() : [] } }, routeWatch()],
+    reconcile: (execution, route: Readonly<RouteResource>) => reconcileRoute(context, route, execution),
   });
-  context.controllers.register({ resourceType: ROUTE_TYPE, name: "batch", maxConcurrency: 1,
-    watches: [routeWatch((a, b) => a.status.batch?.id !== b.status.batch?.id)],
-    reconcile: (execution, route: Readonly<RouteResource>) => reconcileRouteBatch(context, execution, route),
-  });
+  context.controllers.register({ resourceType: ROUTE_TYPE, name: "agent", maxConcurrency: 1, watches: [routeWatch()],
+    reconcile: (execution, route: Readonly<RouteResource>) => reconcileRouteAgent(context, execution, route) });
 }
 
-/** @spec Watches only wake Route. Durable Input discovery repairs a missed event or crash before enqueue.
- * @spec Model waits run on a separate controller so deterministic delivery remains independent.
- */
-export async function reconcileRoute(context: PluginContext, initial: Readonly<RouteResource>) {
+/** @spec Durable discovery repairs missed wakes; rule delivery and a saved plan do not wait for the model. */
+export async function reconcileRoute(context: PluginContext, initial: Readonly<RouteResource>, execution?: ReconcileContext) {
   if (initial.metadata.deletionTimestamp) return;
-  const policy = routePolicy(context.instance.config.route);
-  const inputs = (await context.resources.list<InputSpec, InputStatus>(INPUT_TYPE)).filter(i => !routed(i) && !i.metadata.deletionTimestamp)
-    .sort((a, b) => a.metadata.creationTimestamp.localeCompare(b.metadata.creationTimestamp) || a.metadata.name.localeCompare(b.metadata.name));
-  let route = await updateRoute(context.resources, initial, current => {
-    const ids = [...new Set([...current.status.pendingInputIds, ...inputs.map(i => i.metadata.name)])];
-    return ids.length === current.status.pendingInputIds.length ? {} : { pendingInputIds: ids };
-  });
-  const active = new Set(route.status.batch?.inputIds ?? []);
+  const inputs = (await context.resources.list<InputSpec, InputStatus>(INPUT_TYPE)).filter(i => !routed(i) && !i.metadata.deletionTimestamp);
+  let route = await updateRoute(context.resources, initial, current => ({ pendingInputIds: [...new Set([...current.status.pendingInputIds, ...inputs.map(i => i.metadata.name)])] }));
   const completed = new Set<string>();
-  let retry = false;
-  const blocked = new Set<string>();
+  let failed = false;
   for (const id of route.status.pendingInputIds) {
-    if (active.has(id)) continue;
     const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: id });
     if (!input) throw new Error(`Route pending Input missing: ${id}`);
+    if (routed(input)) {
+      if (input.status.processing?.[route.metadata.uid]) await processing(context.resources, id, route.metadata.uid, p => p && p.phase !== "done"
+        ? { executionId: p.executionId, phase: "done", at: new Date().toISOString(), summary: input.status.routing!.reason } : p);
+      completed.add(id); continue;
+    }
+    // Once offered to Route, its decision owns this input. Persisted decisions can always finish delivery.
+    if (!input.status.routing?.destinations && input.status.processing?.[route.metadata.uid]) continue;
     try { if (await routeByRules(context, input)) completed.add(id); }
     catch (error) {
-      retry = true; blocked.add(id);
-      context.logger.error("Route deterministic delivery failed; retained Input", { error, attributes: { inputId: id } });
+      failed = true;
+      context.logger.error("Route delivery retained for retry", { attributes: { inputId: id, error: String(error) } });
     }
   }
-  route = await updateRoute(context.resources, route, current => completed.size
-    ? { pendingInputIds: current.status.pendingInputIds.filter(id => !completed.has(id)) } : {});
-  if (route.status.batch) return retry ? { requeueAfterMs: 1000 } : undefined;
-  const pending = [];
-  for (const id of route.status.pendingInputIds) {
-    const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: id });
-    if (blocked.has(id) || !input || routed(input) || input.status.routing?.destinations) continue;
-    const originalId = input.spec.observation?.originalInputId;
-    if (typeof originalId === "string" && originalId !== id) {
-      const preceding = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: originalId });
-      if (preceding && !routed(preceding)) continue;
-    }
-    pending.push(input);
+  route = await updateRoute(context.resources, route, current => completed.size ? { pendingInputIds: current.status.pendingInputIds.filter(id => !completed.has(id)) } : {});
+  const steering = execution ? await steerPending(context, execution, route) : undefined;
+  return steering ?? (failed ? { requeueAfterMs: 30_000 } : undefined);
+}
+
+export async function reconcileRouteAgent(context: PluginContext, execution: ReconcileContext, route: Readonly<RouteResource>) {
+  if (route.metadata.deletionTimestamp || route.status.execution) return;
+  const input = await nextInput(context.resources, route);
+  if (!input) {
+    // Classification has no external effects. Saved fanout plans are resumed by the intake controller.
+    for (const id of route.status.pendingInputIds) await processing(context.resources, id, route.metadata.uid, p => p?.phase === "failed" ? undefined : p);
+    return route.status.pendingInputIds.length ? { requeueAfterMs: 30_000 } : undefined;
   }
-  if (!pending.length) return retry ? { requeueAfterMs: 1000 } : undefined;
-  const deadline = Date.parse(pending[0]!.metadata.creationTimestamp) + policy.maxWaitSeconds * 1000;
-  const immediate = pending.some(i => (i.spec.attention ?? (i.spec.origin === "channel" ? "immediate" : "deferred")) === "immediate");
-  if (!immediate && pending.length < policy.batchSize && Date.now() < deadline) return { requeueAfterMs: Math.min(retry ? 1000 : Infinity, Math.max(1, deadline - Date.now())) };
-  const conversations = await context.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE);
-  const snapshot = routePrompt(pending, conversations, policy);
-  route = await updateRoute(context.resources, route, current => current.status.batch ? {} : { batch: {
-    id: randomUUID(), ...snapshot, createdAt: new Date().toISOString(), phase: "queued",
-  } });
-  context.logger.info("Route Batch queued", { attributes: { batchId: route.status.batch!.id, inputCount: snapshot.inputIds.length, conversationCount: snapshot.candidates.length } });
-  return retry ? { requeueAfterMs: 1000 } : undefined;
+  if (routed(input)) return;
+  const originalId = input.spec.observation?.originalInputId;
+  if (typeof originalId === "string" && originalId !== input.metadata.name) {
+    const preceding = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: originalId });
+    if (preceding && !routed(preceding)) return { requeueAfterMs: 1000 };
+  }
+  if (await routeByRules(context, input)) return { requeueAfterMs: 1 };
+  if (!(await context.resources.list(CONVERSATION_TYPE)).some(c => !c.metadata.deletionTimestamp)) {
+    await deliver(context, input, [await defaultDestination(context)], "No existing Conversation");
+    return { requeueAfterMs: 1 };
+  }
+  const prompt = `Route this input. Read the current Conversation catalog with list_conversations; use route_input to commit its destinations. Earlier context may be stale.\n${JSON.stringify({ inputId: input.metadata.name })}\n${inputPrinter.describe(input).slice(0, routePolicy(context.instance.config.route).contextChars)}\nUse read_input for complete evidence.`;
+  await runInput(context, execution.withContext({ inputId: input.metadata.name }), route, ROUTE_TARGET, prompt, input.metadata.name);
+  return { requeueAfterMs: 1 };
 }

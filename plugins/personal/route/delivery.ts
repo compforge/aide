@@ -2,7 +2,7 @@ import type { PluginContext, Resource } from "@compforge/aide-plugin";
 import { appendConversationInput } from "../conversation/input.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import type { Destination } from "./model.ts";
-export type RoutingContext = Pick<PluginContext, "resources" | "logger">;
+export type RoutingContext = Pick<PluginContext, "resources"> & { logger: Pick<PluginContext["logger"], "info"> };
 export type RoutingInput = Readonly<Resource<InputSpec, InputStatus>>;
 export const routed = (input: RoutingInput) => ["done", "ignored"].includes(input.status.routing?.phase ?? "");
 /** @spec Persist the complete UID-pinned plan before delivery. Receipts make partial fanout safe to resume. */

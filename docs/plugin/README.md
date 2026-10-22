@@ -30,7 +30,7 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 Host 的 `ResourceStorage` 将所有插件 Resource 存入共享 SQLite，以按需读取替代常驻完整快照集合。容量按 Group/Kind 汇总，配额覆盖不同 API 版本、namespace 和插件实例；同时限制单条大小、每种数量/字节以及 Host 总字节。配置见 [Resource 容量](../configuration.md#resource-容量)。
 
-资源所有者通过 `ResourceDefinition.retention` 定义释放时间和引用的精确 uid，与类型一起注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 在路由结束后可释放，但 Route / Conversation 的待处理与当前 Batch 引用、Source 的待提交引用继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
+资源所有者通过 `ResourceDefinition.retention` 定义释放时间和引用的精确 uid，与类型一起注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 在路由结束后可释放，但 Route / Conversation 的待处理引用、Source 的待提交引用继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
 
 每次写入在事务内同步记录、引用索引、回执和必要的回收。无法满足容量约束时整个事务回滚，变更通知只在提交后发出。因此过载会阻止接收更多工作，不会通过删除正在承担的工作来腾空间。完成并缩小记录的更新允许在超配额状态下提交。
 
@@ -73,9 +73,9 @@ Reconcile 快照只包含运行目录和 HarnessTarget 配置，不携带全局�
 | Controller | 观察对象 | 业务职责 |
 | --- | --- | --- |
 | Route | Personal Route，Watch Input | 补扫入队、规则直达、语义组批 |
-| Route Batch（name: batch） | Personal Route | 调用 Route Agent，持久化分发计划并幂等投递 |
-| Conversation | Personal Conversation | 调度 Batch、确认消费和交接上下文 |
-| Batch（name: batch） | Personal Conversation | 执行固定 Batch，调用 Chief Harness，工具直接使用交互 verb |
+| Route agent（name: agent） | Personal Route | 调用 Route Agent，持久化分发计划并幂等投递 |
+| Conversation | Personal Conversation | 接纳输入、steer 与定时回顾 |
+| Chief agent（name: agent） | Personal Conversation | 复用 Chief 原生上下文，工具提交消费回执与 Output |
 | Requirement Source | RequirementSource | 按关注范围获取需求变化，提交 Input 并推进水位 |
 | Task | Task | 推进有限目标，达到目标后结束 |
 | Routine | Routine | 执行本轮，继续等待时间或事件 |

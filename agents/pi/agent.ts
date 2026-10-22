@@ -13,6 +13,7 @@ export interface PiAgentOptions {
   nativeTools?: string[];
   /** Explicit bundled extensions; ambient extension discovery remains disabled. */
   extensionPaths?: string[];
+  extensionToolNames?: string[];
   extensionFactories?: ExtensionFactory[];
   /** Host-bound scope prevents resuming a session with different application tools/context. */
   scope?: string;
@@ -47,7 +48,7 @@ export async function createPiAgent(options: PiAgentOptions): Promise<AgentSessi
   if (extensions.errors.length) {
     throw new Error(`Pi extension loading failed: ${extensions.errors.map((item) => `${item.path}: ${item.error}`).join("; ")}`);
   }
-  const extensionTools = extensions.extensions.flatMap((extension) => [...extension.tools.keys()]);
+  const extensionTools = extensions.extensions.flatMap((extension) => [...extension.tools.keys()]).filter(name => !options.extensionToolNames || options.extensionToolNames.includes(name));
   const tools = options.tools ?? [];
   const { session } = await createAgentSession({ cwd, agentDir, ...(manager ? { sessionManager: manager } : {}), modelRuntime,
     settingsManager: settings, resourceLoader: loader, model,

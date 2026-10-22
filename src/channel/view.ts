@@ -49,12 +49,11 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   const runs = aide.conversations.runs(conversationId);
   const active = runs.find((input) => !input.input && input.status.phase === "running");
   const queued = runs.filter((input) => !input.status.phase).length;
-  const quietRuns = new Set(runs.filter((input) => input.status.quietReason).map((input) => input.id));
   const runId = (item: { inputId?: string; executionId: string }) => item.executionId;
   const resource = aide.conversations.resource(conversationId);
   const turnInputs = new Map([...state.harnessInputs.values()].map((input) => [input.invocationId, input]));
   const invocations = history.filter((item) => {
-    if (item.conversationId !== conversationId || !resource || quietRuns.has(runId(item) ?? "")) return false;
+    if (item.conversationId !== conversationId || !resource) return false;
     if (item.resourceRef?.kind === "Conversation") return item.resourceRef.uid === resource.metadata.uid;
     // Deleted Work may retain progress in its original Conversation, never in a later incarnation.
     const input = item.invocationId && turnInputs.get(item.invocationId);
@@ -65,8 +64,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   // Group presentation by persisted Chief activation, never by message order or similar text.
   const turnRuns = new Map(invocations.map((item) => [item.invocationId, runId(item)]));
   const runPhases = new Map(runs.map((input) => [input.id, input.status.phase]));
-  const messageRuns = new Map(runs.flatMap((input) => (input.status.outputs ?? [])
-    .filter((message) => message.role === "aide").map((message) => [message.id, input.id] as const)));
+  const messageRuns = new Map<string, string>();
   for (const message of channelOutputs(aide)) if (message.executionId) messageRuns.set(message.id, message.executionId);
   const inputExecutions = new Map(invocations.flatMap((i) => (i.inputIds ?? []).map((id) => [id, i.executionId] as const)));
   const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.invocationId))
@@ -77,17 +75,17 @@ export function conversationView(aide: ChannelService, conversationId: string): 
     .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, receivers: message.receivers, target: message.target,
       ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
     }));
-  if (resource?.status.batch?.result?.context) roots.push({ id: "conversation-summary", type: "summary", label: "历史摘要", icon: "📝",
-    content: resource.status.batch!.result!.context!, at: resource.metadata.creationTimestamp });
+  if (resource?.status.summary) roots.push({ id: "conversation-summary", type: "summary", label: "历史摘要", icon: "📝",
+    content: resource.status.summary!, at: resource.metadata.creationTimestamp });
   for (const run of runs) {
     if (!run.input) continue;
     const input = run.input, definition = aide.inputDefinition(input.spec);
     roots.push({ id: `input:${input.metadata.name}`, type: "input", relation: input.spec.relation, sender: input.spec.sender, source: input.spec.source, origin: input.spec.origin, originId: definition.id,
-      inputId: input.metadata.name, group_id: inputExecutions.get(input.metadata.name) ?? input.consumption.batchId ?? input.metadata.name, label: definition.label, icon: definition.icon,
+      inputId: input.metadata.name, group_id: inputExecutions.get(input.metadata.name) ?? input.consumption.executionId ?? input.metadata.name, label: definition.label, icon: definition.icon,
       ...(input.spec.origin === "channel" ? { role: "user" as const } : {}),
       at: input.metadata.creationTimestamp, content: input.spec.text,
-      status: run.status.quietReason ? "quiet" : run.status.phase ?? "queued",
-      detail: inputPrinter.describe(input) });
+      status: run.status.phase ?? "queued",
+      detail: [inputPrinter.describe(input), run.status.summary, run.status.error].filter(Boolean).join("\n\n") });
   }
   const append = (turnId: string, block: ConversationBlock) => {
     const input = turns.get(turnId);

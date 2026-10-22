@@ -198,26 +198,24 @@ Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖�
 
 ## Conversation 消费策略
 
-`plugins.personal.conversation` 控制 Input 的消费节奏和上下文窗口，独立于 Source 的采集频率：
+`plugins.personal.conversation` 控制 Input 预览和近期处理摘要大小，独立于 Source 的采集频率：
 
 ```yaml
 plugins:
   personal:
     conversation:
-      batchSize: 10
-      maxWaitSeconds: 60
       contextChars: 48000
       summaryChars: 4000
 ```
 
-- `immediate` Input 优先处理；当前批次运行时请求中断，确认停止后带上未完成事项创建新 Batch。Channel 默认 immediate，Source 默认 deferred。紧迫性不代表执行授权或必须外发消息。
-- deferred Input 满 `batchSize`，或最早待处理输入等待达到 `maxWaitSeconds`，即触发一轮。Conversation 自身 trigger 到期也触发，即使没有新 Input。
-- Conversation 不设待处理 ID 数量上限，也不预留 immediate 名额。Channel / Source 共用幂等接收入口；Host Resource 容量仍限制存储总量，受引用保护的 Input 不会被淘汰。失败的批次不会自动重放。
-- 近期材料由已完成 Batch 的有界结果上下文承接，没有额外的近期 Input ID 窗口。下一批继承后替换旧 Batch；压缩失败保留原文和进度，不确认消费。
-- `contextChars` 限制应用组装的输入/摘要材料，不是模型 token 窗口；单条大输入先给预览，Chief 可用 `read_input` 分页读取。`summaryChars` 限制持久摘要大小。
+- Channel 默认 immediate，Source 默认 deferred；紧迫性不代表授权或必须外发。
+- 普通输入在当前调用结束后 followup，复用原生历史；immediate 通过 steer 进入当前调用。明确不支持或拒绝时留队等待 followup，不中断现有动作。
+- trigger 到期仍可在没有新 Input 时执行回顾。一次调用最多两天。
+- `contextChars` 限制新 Input 的描述预览，全文通过 `read_input` 分页读取；原生历史和压缩由 SDK 管理。
+- `summaryChars` 限制近期处理摘要，较旧条目会裁剪；长期认识使用共享记忆，委托进展保存在 Work。
+- `complete_inputs` 提交业务消费回执并精确出队。没有回执的已尝试输入保留失败证据，不自动重放。
 
-字段补齐默认值后还需满足 `summaryChars < contextChars / 2`。例如将 `contextChars` 改为 4096 时可配 `summaryChars: 1000`。
-超长历史记录分段生成摘要并持久保存进度；整条记录总结完成后才释放原 Input 引用，不直接截断后遗忘。
+不再提供 batchSize、maxWaitSeconds 或分批压缩配置。
 
 ## Resource 容量
 
@@ -246,18 +244,15 @@ resources:
 
 这些阈值约束持久 Resource 的逻辑载荷。SQLite 页、索引、WAL，以及 Session Ledger、日志、原生 Harness 历史和 Hermes 记忆有各自的存储生命周期；它们不计入此处的 Resource 字节数。
 
-## Route 组批与模型
+## Route 连续分类与模型
 
 ```yaml
 plugins:
   personal:
     route:
-      batchSize: 16
-      maxWaitSeconds: 5
-      summaryChars: 2000
-      contextChars: 64000
+      contextChars: 16000
 ```
 
-规则命中立即投递；以上参数只控制未命中输入的语义分类。满批、最早等待期限或立即输入触发 Route Batch，模型等待不会阻塞规则路径。所有现有 Conversation 都进入候选列表，每个摘要最多 `summaryChars` 个字符。`contextChars` 限制整体 prompt；超预算时缩短摘要、减少本批输入数量。Input 描述提供有截断标记的预览，原始全文仍留在 Input 中并完整交给目标 Conv。身份目录本身超预算时显式报错并保留队列，不能静默遗漏候选；后续到达的输入留待下一批。
+规则命中立即投递；未命中交给持续复用原生上下文的 Route loop。contextChars 限制新 Input 预览；read_input 提供全文，list_conversations 分页读取当前目录。route_input 明确提交一条输入的完整分派计划，计划持久化后幂等投递。
 
-`harnesses.route.model` 可以独立选择模型，字段同 Pi 的 `model`；未声明时复用 Chief 的启动配置。Route 是固定的 Personal 分类角色，不可设为 `defaultHarness`。它不加载工具、技能或记忆扩展。模型失败、非法结果和目标实例失效都保留待分发状态，按 Controller 退避重试；不会把失败当作“没有关联”并静默丢弃输入。
+`harnesses.route.model` 可以独立选择模型，字段同 Pi 的 model；未声明时复用 Chief 启动配置。Route 不可设为 defaultHarness，只拥有路由、目录和共享记忆检索工具，不加载业务执行工具或技能。纯分类失败退避重试，已有分派计划直接恢复投递。

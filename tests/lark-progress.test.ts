@@ -1,3 +1,5 @@
+import { seedInput } from "./conversation-fixture.ts";
+import { completeInputs } from "../plugins/personal/conversation/complete.ts";
 import { larkAddress } from "../src/channel/address.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
@@ -292,4 +294,22 @@ test("Lark upgrades persisted legacy panels only once when execution continues",
   f.view({ think: "新进展" }); await f.channel.deliver();
   assert.equal(f.calls.filter((call) => call.kind === "update").length, 1);
   assert.equal(f.calls.filter((call) => call.kind === "send").length, 1);
+});
+
+
+/** @case One native invocation can acknowledge inputs incrementally without closing its IM card early. */
+test("Lark keeps a shared invocation card running until steered input and execution settle", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-steer-card-"));
+  const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("No work"); } }, home), log);
+  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  const spec = { conversationId, origin: "channel" as const, originId: "lark", source: larkAddress("cli_progress", "oc_chat"), text: "request" };
+  await seedInput(aide.conversations, "first", spec, { phase: "done", executionId: "live" });
+  await seedInput(aide.conversations, "urgent", spec, { phase: "running", executionId: "live" });
+  assert.equal(larkProgress(aide, conversationId).length, 1);
+  assert.equal(larkProgress(aide, conversationId)[0]!.phase, "running");
+  const client = aide.runtime.plugins.resourceClient("personal");
+  await completeInputs(client, aide.conversations.resource(conversationId)!, "live", { inputIds: ["urgent"], summary: "Handled" });
+  assert.equal(larkProgress(aide, conversationId)[0]!.phase, "running");
+  await client.patchStatus(aide.conversations.resource(conversationId)!, { execution: null });
+  assert.equal(larkProgress(aide, conversationId)[0]!.phase, "done");
 });

@@ -5,7 +5,7 @@ Aide 会把多条观察合成一条通知，也会围绕同一个请求先报告
 ## 模型与流程
 
 ```text
-Input → Conversation / Batch → Harness / Task / Routine
+Input → Conversation / Chief → Harness / Task / Routine
                                       ↓ say 或业务结果
                                Output 持久资源
                                       ↓
@@ -48,12 +48,12 @@ Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sen
 
 ## 关联、上下文与容量
 
-Conversation 不保存输出正文或无限增长的输出 ID 列表。界面按 Conversation UID 展示产出记录，同时展示明确发往当前 Web endpoint 的 Output；跨会话投递只展示目标会话创建后的消息。同名会话删除后重建不会看见旧实例的产出记录。Batch 仅保存本批 `outputIds`，这些引用在上下文交接完成前保护 Output，上下文交接通过 OutputPrinter 保留正文、收件人和目标；压缩结果提交并替换 Batch 后释放。`say` 创建 Output 不改变 `pendingInputIds`，输入消费仍由 Conversation / Batch 完成。
+Conversation 不保存输出正文或无限增长的输出 ID 列表。界面按 Conversation UID 展示产出记录，同时展示明确发往当前 Web endpoint 的 Output；跨会话投递只展示目标会话创建后的消息。同名会话删除后重建不会看见旧实例的产出记录。`say` 创建 Output 不改变 pendingInputIds；Chief 通过 complete_inputs 独立确认输入消费。未送达 Output 受容量保护，送达后可按资源策略回收；连续 loop 不无限持有输出 ID。已发生的动作与沟通由原生历史、业务状态和消费摘要承接。
 
 Output 进入 Host 统一资源容量管理，配置键为 `aide.dev/Output`。pending / sending / uncertain 保持受保护；delivered 且无人引用时可以按配置回收；failed 保留诊断窗口后可释放。Input、Conversation 与 producer 是追溯关系，不永久互相保活。Output 内容回收后，可读的长期上下文由 Conversation summary / memory 承接。
 
 Personal 声明 OutputPrinter，由 Host 加载，`describe` 返回完整正文、目标和投递信息，`summarize` 返回有界文本预览。ResourceClient 可以获取和列出 Output；投递状态由应用装配的投递器通过相同资源契约维护。
 
-问题也是普通 Output；用户答复是新的 Input，由后续 Batch 理解。业务 ask / confirm / draft、Interaction 和 Input.replyTo 已移除。原生工具权限与 Hook 信任使用独立的 Approval，不经过业务消息关联。Input 路由、sessionId 与 Batch 调度策略沿用各自契约。
+问题也是普通 Output；用户答复是新的 Input，由 Chief 的后续调用理解。业务 ask / confirm / draft、Interaction 和 Input.replyTo 已移除。原生工具权限与 Hook 信任使用独立的 Approval，不经过业务消息关联。Input 路由、sessionId 与 连续调用策略沿用各自契约。
 
 验证场景见 `tests/address.test.ts`、`tests/output.test.ts`、`tests/conversation-delete.test.ts` 与 Lark / Web 的投递、进展测试。

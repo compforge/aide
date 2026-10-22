@@ -195,7 +195,7 @@ test("AgentUE reducer reconstructs growing, corrected and removed progress witho
 });
 
 
-test("Web associates failed replies with their Input so interruption warnings remain visible", async (t) => {
+test("Web exposes failed consumption on the Input without sending an automatic warning", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-web-failed-reply-"));
   const aide = new Aide(root, fakeOptions({
     chief: async () => { throw new Error("controlled model failure"); },
@@ -205,11 +205,12 @@ test("Web associates failed replies with their Input so interruption warnings re
   await aide.receive(fixtureIncoming({ channelId: "web", id: "failed-reply", sessionId: "failed", conversationId: "failed", text: "检查展示故障" }));
   await aide.settled();
   const view = conversationView(aide, "failed");
-  const reply = view.blocks.find((block) => block.role === "aide")!;
+  const reply = view.blocks.find((block) => block.type === "input")!;
   assert.equal(reply.status, "failed");
-  assert.equal(reply.group_id, aide.personal.conversations.inputs("failed")[0]!.consumption.batchId);
+  assert.equal(reply.group_id, aide.personal.conversations.inputs("failed")[0]!.consumption.executionId);
   assert.ok(aide.invocations().some((invocation) => invocation.executionId === reply.group_id));
-  assert.match(reply.content, /未完成/);
+  assert.match(reply.content, /检查展示故障/);
+  assert.ok(!view.blocks.some((block) => block.role === "aide"));
 });
 
 
@@ -224,7 +225,7 @@ test("Source receipts expose original evidence before processing and remain visi
   const observation = { type: "workload.changed", environment: "test", namespace: "vke-system", changes: [
     { before: { kind: "Deployment", name: "sandbox-server", generation: 1129 }, after: { kind: "Deployment", name: "sandbox-server", generation: 1130 } },
   ] };
-  await seedInput(store, "environment", { conversationId: "inbox", origin: "source", originId: SOURCES.environments.id, text: "test / vke-system：Deployment sandbox-server generation 1129 → 1130", observation }, { phase: "done", quietReason: "No delegated work" });
+  await seedInput(store, "environment", { conversationId: "inbox", origin: "source", originId: SOURCES.environments.id, text: "test / vke-system：Deployment sandbox-server generation 1129 → 1130", observation }, { phase: "done", result: { summary: "No delegated work" } });
   await seedInput(store, "mention", { conversationId: "inbox", origin: "source", originId: SOURCES.lark.id, text: "Lark 群内 @：请确认发布窗口", observation: {
     provider: "lark", kind: "mention", message: { id: "om_example", content: "请确认发布窗口" }, context: { messages: [{ content: "完整上下文" }] },
   } });
@@ -239,9 +240,9 @@ test("Source receipts expose original evidence before processing and remain visi
   assert.equal(environment.originId, SOURCES.environments.id);
   assert.equal(environment.icon, SOURCES.environments.icon);
   assert.equal(environment.label, SOURCES.environments.label);
-  assert.equal(environment.status, "done", "Historical facts stay visible after their Batch is replaced");
+  assert.equal(environment.status, "done", "Historical facts stay visible after their invocation completes");
   assert.match(environment.content, /Deployment sandbox-server/);
-  assert.deepEqual(JSON.parse(environment.detail!.split("\n\nObservation:\n")[1]!), observation);
+  assert.deepEqual(JSON.parse(environment.detail!.split("\n\nObservation:\n")[1]!.split("\n\n")[0]!), observation);
   const mention = receipts.find((block) => block.inputId === "mention")!;
   assert.equal(mention.status, "queued");
   assert.equal(mention.icon, SOURCES.lark.icon);
@@ -291,7 +292,7 @@ test("Bound Channels preserve distinct input identities and rebuild user/source 
   assert.notEqual(other.inputId, receipt.inputId);
   const store = aide.personal.conversations;
   await seedInput(store, "observation", { conversationId: "inbox", origin: "source", originId: SOURCES.environments.id, text: "部署镜像已变化" },
-    { phase: "done", quietReason: "Not relevant" });
+    { phase: "done", result: { summary: "Not relevant" } });
   assert.equal(store.outputs("inbox").length, 2, "Only the two replies are stored as Messages");
   assert.equal(store.inputs("inbox").length, 3);
   const before = conversationView(aide, "inbox");

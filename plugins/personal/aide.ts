@@ -1,11 +1,16 @@
 import { personalExecution } from "./execution-context.ts";
 import { say } from "./output/action.ts";
-import { sameAddress } from "../../src/address.ts";
-import { outputWrite } from "./output.ts";
 import type { OutputStore } from "./output/store.ts";
-import { updateBatch } from "./conversation/state.ts";
-import { activeBatch } from "./conversation/batch.ts";
-import { createPiAgent } from "../../agents/pi/agent.ts";
+import { createRouteAgent } from "../../agents/route/agent.ts";
+import { completeInputs } from "./conversation/complete.ts";
+import { conversationPolicy } from "./conversation/config.ts";
+import { immediate, processing, type LoopStatus } from "./loop.ts";
+import { ROUTE_TYPE, ROUTE_NAME, type RouteStatus } from "./route/model.ts";
+import { deliver, routed } from "./route/delivery.ts";
+import { defaultDestination } from "./route/rules.ts";
+import { z } from "zod";
+import type { ExecutionScope } from "../../src/protocol/verbs.ts";
+import type { ConversationSpec, ConversationStatus } from "./conversation/model.ts";
 import { inputPrinter } from "./input/printer.ts";
 import type { Logger } from "pino";
 import type { ResourceType } from "@compforge/aide-plugin";
@@ -17,7 +22,7 @@ import { IncomingSchema, type Incoming, type OutputView } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { output, Store } from "./store.ts";
 import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
-import { CONVERSATION_TYPE, INPUT_TYPE, chiefTarget, digest } from "./chief-model.ts";
+import { CONVERSATION_TYPE, chiefTarget, digest } from "./chief-model.ts";
 import { type ConversationDeletion } from "./conversation/model.ts";
 import { ConversationStore, conversationKey } from "./conversation/store.ts";
 import type { InputStore } from "./input/store.ts";
@@ -40,7 +45,6 @@ export class Personal {
 
   readonly core: ApplicationRuntime;
   private readonly pending = new Set<Promise<unknown>>();
-  private readonly interruptedExecutions = new Set<string>();
   private readonly chiefConversations = new Map<string, string>();
 
   constructor(private readonly options: { timezone: string; persons: Persons; me: Me; conversation?: unknown }, private readonly log: Logger,
@@ -52,15 +56,7 @@ export class Personal {
     const client = this.plugins.resourceClient("personal");
     this.store = new Store(resources, client, new ConversationStore(resources, client, runtime.inputs, runtime.outputs));
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
-    this.store.conversations.subscribe((conversation) => {
-      this.registerConversation(conversation.id);
-      const batch = this.conversations.resource(conversation.id)?.status.batch;
-      if (batch?.cancelRequested && batch.executionId && batch.phase === "running" && !this.interruptedExecutions.has(batch.executionId)) {
-        this.interruptedExecutions.add(batch.executionId);
-        this.plugins.interruptExecution(batch.executionId);
-      }
-      if (batch?.executionId && !activeBatch(batch)) this.interruptedExecutions.delete(batch.executionId);
-    });
+    this.store.conversations.subscribe((conversation) => this.registerConversation(conversation.id));
   }
 
   private registerConversation(conversationId: string): void {
@@ -72,39 +68,119 @@ export class Personal {
     this.core.registerTarget({ id, harness: "chief" });
   }
 
-  /** Personal binds a Chief session and its tools to one conversation; the adapter remains business-agnostic. */
+  /** @spec Persistent native tools resolve the live execution on each call, never capture a completed invocation's verbs. */
   chiefSession(targetId: string, config: ChiefAgentOptions["config"]): PiSessionFactory {
     const conversationId = this.chiefConversations.get(targetId);
     if (!conversationId) throw new Error("Unknown Chief target");
     return async (options) => {
       const initial = this.conversations.resource(conversationId)!;
-      const bound = initial.status.batch;
-      if (!bound?.executionId) throw new Error("Chief requires an executing Batch");
-      if (bound.phase === "compacting") return createPiAgent({ ...options, config, scope: `chief:${conversationId}`, nativeTools: [], tools: [],
-        systemPrompt: "Summarize supplied conversation facts. Return only the requested summary; do not perform actions.", extensionPaths: [] });
-      const executionId = bound.executionId;
       const active = () => {
         const c = this.conversations.resource(conversationId);
-        const b = c?.status.batch;
-        if (!c || c.metadata.uid !== initial.metadata.uid || !b || b.id !== bound.id || b.executionId !== executionId
-          || b.phase !== "running" || b.cancelRequested || b.quietReason) throw new Error("Chief Batch is not accepting further mutations");
-        return b;
+        if (!c || c.metadata.uid !== initial.metadata.uid || !c.status.execution) throw new Error("Chief execution is not active");
+        this.plugins.executionVerbs(c.status.execution.id, { conversationId });
+        return c;
       };
-      const verbs = this.plugins.executionVerbs(executionId, { conversationId });
-      const tools = chiefTools(this.connectors, async (quietReason) => {
-        const b = active();
-        if (b.context.responseRequired) throw new Error("Channel input cannot be dismissed silently");
-        await updateBatch(this.plugins.resourceClient("personal"), initial, bound.id, () => ({ quietReason }), executionId);
-      }, async (id, input) => { active(); return say(verbs, { ...input, idempotencyKey: id }); }, (id, offset) => {
-        active();
-        if (!id) return { inputIds: bound.inputIds.slice(offset, offset + 20), nextOffset: offset + 20 < bound.inputIds.length ? offset + 20 : null };
-        const input = this.conversations.inputStore.get(id);
-        if (!input || (!bound.inputIds.includes(id) && !input.status.deliveries?.includes(initial.metadata.uid))) throw new Error("Input is not attached to this Conversation");
-        const description = inputPrinter.describe(input);
-        return { inputId: id, text: description.slice(offset, offset + 8000), nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
-      });
+      const complete = async (input: { inputIds: string[]; summary: string }) => {
+        const c = active();
+        const result = await completeInputs(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input,
+          conversationPolicy(this.options.conversation).summaryChars);
+        this.log.info({ conversationId, inputIds: input.inputIds }, "Chief acknowledged inputs");
+        return result;
+      };
+      const tools = chiefTools(this.connectors, async (id, input) => {
+        const c = active();
+        return say(this.plugins.executionVerbs(c.status.execution!.id, { conversationId }), { ...input, idempotencyKey: id });
+      }, (id, offset) => {
+        const c = active();
+        return this.readLoopInput(c.metadata.uid, c.status.pendingInputIds, id, offset, true);
+      }, complete);
       return createChiefAgent({ ...options, config, work: this.work(conversationId), persons: this.options.persons, tools, beforeWorkMutation: () => { active(); } });
     };
+  }
+
+  routeSession(config: ChiefAgentOptions["config"]): PiSessionFactory {
+    return async options => {
+      const initial = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ROUTE_NAME);
+      const active = () => {
+        const route = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ROUTE_NAME);
+        if (route.metadata.uid !== initial.metadata.uid || !route.status.execution) throw new Error("Route execution is not active");
+        this.plugins.executionVerbs(route.status.execution.id, {});
+        return route;
+      };
+      return createRouteAgent({ ...options, config, scope: `route:${initial.metadata.uid}`, port: {
+        conversations: offset => {
+          active();
+          const all = this.conversations.list().map(view => {
+            const c = this.conversations.resource(view.id)!;
+            return { uid: c.metadata.uid, name: c.spec.name, default: !!c.spec.default, summary: (c.status.summary ?? "").slice(0, 2000) };
+          });
+          return { conversations: all.slice(offset, offset + 20), nextOffset: offset + 20 < all.length ? offset + 20 : null };
+        },
+        input: (id, offset) => { const r = active(); return this.readLoopInput(r.metadata.uid, r.status.pendingInputIds, id, offset); },
+        route: async raw => {
+          const args = z.object({ inputId: z.string(), conversationUids: z.array(z.string()).max(100), reason: z.string().min(1).max(4000) }).strict().parse(raw);
+          const r = active();
+          const input = this.conversations.inputStore.get(args.inputId);
+          if (!input || (!r.status.pendingInputIds.includes(args.inputId) && !routed(input))) throw new Error("Input is not owned by Route");
+          if (routed(input)) return { routed: args.inputId };
+          if (input.status.processing?.[r.metadata.uid]?.executionId !== r.status.execution!.id) throw new Error("Input has not been admitted to Route");
+          const resources = this.plugins.resourceClient("personal");
+          const context = { resources, logger: { info: (message: string, detail?: unknown) => this.log.info({ detail }, message) } };
+          const conversations = await resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE);
+          const destinations = [...new Set(args.conversationUids)].map(uid => {
+            const c = conversations.find(c => c.metadata.uid === uid && !c.metadata.deletionTimestamp);
+            if (!c) throw new Error(`Conversation no longer exists: ${uid}`);
+            return { name: c.metadata.name, uid };
+          });
+          if (!destinations.length) destinations.push(await defaultDestination(context));
+          await deliver(context, input, destinations, args.reason);
+          return { routed: args.inputId, conversationUids: destinations.map(c => c.uid) };
+        },
+      } });
+    };
+  }
+
+  private readLoopInput(uid: string, pending: string[], id: string | undefined, offset: number, history = false) {
+    if (!id) return { inputs: pending.slice(offset, offset + 20).map(id => ({ inputId: id, processing: this.conversations.inputStore.get(id)?.status.processing?.[uid] })),
+      nextOffset: offset + 20 < pending.length ? offset + 20 : null };
+    const input = this.conversations.inputStore.get(id);
+    if (!input || (!pending.includes(id) && !(history && input.status.deliveries?.includes(uid)))) throw new Error("Input is not attached to this resource");
+    const description = inputPrinter.describe(input);
+    return { inputId: id, processing: input.status.processing?.[uid], text: description.slice(offset, offset + 8000), nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
+  }
+
+  /** @spec Only the owning resource's intake controller may steer its live agent; admission is durable before dispatch. */
+  async steerInput(scope: ExecutionScope, raw: unknown) {
+    const { inputId } = z.object({ inputId: z.string().min(1) }).strict().parse(raw);
+    const ref = scope.resourceRef;
+    if (scope.pluginInstanceId !== "personal" || !ref?.uid || scope.controllerName || !["Route", "Conversation"].includes(ref.kind)) throw new Error("steer_input requires an owning intake controller");
+    const resources = this.plugins.resourceClient("personal");
+    const resource = await resources.get<unknown, LoopStatus>(ref);
+    const input = this.conversations.inputStore.get(inputId);
+    const id = resource?.status.execution?.id;
+    if (!id || !input || !resource!.status.pendingInputIds.includes(inputId) || !immediate(input.spec) || input.status.processing?.[ref.uid]) return { accepted: false };
+    const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === id && i.phase === "running");
+    if (!invocation) return { accepted: false, reason: "not_running" };
+    await resources.commit([
+      { operation: "patchStatus", resource: resource!, patch: { execution: { ...resource!.status.execution!, inputCount: (resource!.status.execution!.inputCount ?? 0) + 1 } } },
+      { operation: "patchStatus", resource: input, patch: { processing: { ...input.status.processing,
+        [ref.uid]: { executionId: id, phase: "submitted", at: new Date().toISOString() } } } },
+    ]);
+    const message = `Immediate Input: ${JSON.stringify({ inputId })}\n${inputPrinter.describe(input).slice(0, 12000)}\nUse read_input for full facts. Submit the business receipt when handled.`;
+    try {
+      const outcome = await this.core.executions.steer(invocation.invocationId, `input:${input.metadata.uid}:${ref.uid}`, message);
+      if (!outcome.accepted) {
+        await processing(resources, inputId, ref.uid, p => p?.executionId === id && p.phase !== "done" ? undefined : p);
+        // An explicit rejection has no effects. Wake followup even if the invocation ended during admission.
+        void this.plugins.enqueue({ pluginInstanceId: "personal", namespace: ref.namespace, resourceApiVersion: ref.apiVersion, resourceKind: ref.kind, resourceId: ref.name, controllerName: "agent" })
+          .catch(error => this.log.error({ err: error, inputId }, "Could not schedule rejected steer for followup"));
+      }
+      this.log.info({ inputId, consumerUid: ref.uid, invocationId: invocation.invocationId, ...outcome }, "Immediate Input steering admission");
+      return outcome;
+    } catch (error) {
+      await processing(resources, inputId, ref.uid, p => p?.executionId === id && p.phase === "submitted" ? { ...p, phase: "failed", error: String(error) } : p);
+      throw error;
+    }
   }
 
   get me() { return this.options.persons.me(); }
@@ -128,7 +204,7 @@ export class Personal {
     const conversation = this.conversations.resource(conversationId);
     if (!conversation) return { deleted: false, reason: "missing" };
     if (conversation.metadata.uid !== uid || Number(conversation.metadata.resourceVersion) !== revision) return { deleted: false, reason: "changed" };
-    const unfinished = conversation.status.pendingInputIds.length > 0 || activeBatch(conversation.status.batch);
+    const unfinished = conversation.status.pendingInputIds.length > 0 || !!conversation.status.execution;
     const executing = this.invocations().some((invocation) => invocation.conversationId === conversationId && ["queued", "running", "uncertain"].includes(invocation.phase));
     if (unfinished || executing) return { deleted: false, reason: "busy" };
     const hasWork = WORK_TYPES.some((type) => this.store.resources.list<WorkSpec, unknown>(type)
@@ -149,30 +225,19 @@ export class Personal {
     }
   }
 
-  /** @spec Interruption never replays actions; direct requests receive one notice committed with their interrupted Batch. */
+  /** @spec Recovery retains unacknowledged effects as failed evidence; it never silently resubmits Chief actions. */
   async recoverInterrupted(): Promise<void> {
-    for (const view of this.conversations.list()) {
-      const c = this.conversations.resource(view.id)!;
-      const batch = c.status.batch;
-      if (!batch || !["running", "compacting"].includes(batch.phase)) continue;
-      if (batch.phase === "compacting") {
-        await updateBatch(this.plugins.resourceClient("personal"), c, batch.id, () => ({ executionId: undefined }));
-        continue;
-      }
-      const immediate = batch.inputIds.map((id) => this.conversations.inputStore.get(id)?.spec)
-        .filter((input) => input && (input.attention ?? (input.origin === "channel" ? "immediate" : "deferred")) === "immediate");
-      const first = immediate[0]?.source;
-      const target = immediate.length ? (first && immediate.every((input) => input?.source && sameAddress(first, input.source)) ? first : undefined) : c.spec.address;
-      if (batch.context.responseRequired && !target) this.log.warn({ conversationId: c.spec.id, batchId: batch.id, inputCount: immediate.length }, "Interrupted Batch has no unambiguous communication address; retained interruption without sending notice");
-      const notices = batch.context.responseRequired && target ? [output(view.id,
-        "上次处理已中断，可能已有部分操作生效。已暂停自动执行，请核对后重新交办。", null, target)] : [];
-      await this.plugins.resourceClient("personal").commit([
-        { operation: "patchStatus", resource: c, patch: {
-          batch: { ...batch, phase: "interrupted", result: { summary: batch.result?.summary ?? "", error: "Execution interrupted; verify existing actions before resuming" }, outputIds: [...batch.outputIds, ...notices.map((o) => o.id)] },
-        } },
-        ...notices.map((o) => outputWrite(c, o, batch.executionId ? { executionId: batch.executionId } : {})),
-      ]);
-      this.log.warn({ batchId: batch.id, conversationId: view.id }, "Recovered interrupted Batch without replay");
+    const resources = this.plugins.resourceClient("personal");
+    for (const type of [CONVERSATION_TYPE, ROUTE_TYPE]) for (const c of await resources.list<unknown, LoopStatus>(type)) {
+      if (!c.status.execution) continue;
+      const id = c.status.execution.id;
+      for (const inputId of c.status.pendingInputIds) await processing(resources, inputId, c.metadata.uid, p => {
+        if (p?.executionId !== id || p.phase !== "submitted") return p;
+        return type.kind === "Route" ? undefined : { ...p, phase: "failed", error: "Execution interrupted; inspect existing effects before continuing" };
+      });
+      const current = await resources.get<unknown, LoopStatus>({ ...c, ...c.metadata });
+      if (current?.status.execution?.id === id) await resources.patchStatus(current, { execution: null });
+      this.log.warn({ resourceUid: c.metadata.uid, executionId: id }, "Recovered interrupted agent without replaying actions");
     }
     for (const work of this.store.read().works) {
       if (work.status !== "running") continue;

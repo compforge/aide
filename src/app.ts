@@ -113,7 +113,7 @@ export class Aide {
         defaultTargetId: this.defaultTarget.id, historyBudgetChars: 0, createAdapter: options.createAdapter },
       plugins: { connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.conversations.changed(change); this.notify(); },
-        actions: { "personal/say": (context, raw) => {
+        actions: { "personal/steer_input": (context, input) => this.personal.steerInput(context, input), "personal/say": (context, raw) => {
           const input = SayInputSchema.parse(raw);
           const text = input.text;
           const association = personalExecution(context);
@@ -158,6 +158,8 @@ export class Aide {
   }
 
   work(conversationId: string) { return this.personal.work(conversationId); }
+
+  routeSession(config: Parameters<Personal["routeSession"]>[0]) { return this.personal.routeSession(config); }
 
   chiefSession(targetId: string, config: Parameters<Personal["chiefSession"]>[1]) {
     return this.personal.chiefSession(targetId, config);

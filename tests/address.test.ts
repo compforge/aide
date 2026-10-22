@@ -13,7 +13,7 @@ import { Aide } from "../src/app.ts";
 import { parseAddress } from "../src/address.ts";
 import { larkAddress, larkEndpoint, webAddress } from "../src/channel/address.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { fixtureBatch, seedInput } from "./conversation-fixture.ts";
+import { seedInput } from "./conversation-fixture.ts";
 
 function setup(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-address-"));
@@ -83,17 +83,17 @@ test("An addressless Conversation stays addressless after Source and Channel app
   } finally { await reopened.close(); }
 });
 
-/** @case Ambiguous batches require deliberate recipient selection; associated Inputs need not map one-to-one to Outputs. */
+/** @case Ambiguous pending destinations require deliberate recipient selection; associated Inputs need not map one-to-one to Outputs. */
 test("say resolves direct, aggregate and proactive targets without guessing from IDs or consuming Inputs", async (t) => {
   const { aide } = setup(t);
   const scope = aide.personal, store = scope.conversations;
   const a = larkAddress("app", "a"), b = larkAddress("app", "b");
   await seedInput(store, "a", { origin: "channel", originId: "lark", source: a, conversationId: "mixed", text: "a" });
   await seedInput(store, "b", { origin: "channel", originId: "lark", source: b, conversationId: "mixed", text: "b" });
-  await scope.plugins.resourceClient("personal").patchStatus(store.resource("mixed")!, { batch: fixtureBatch({ inputIds: ["a", "b"], executionId: "run", phase: "running" }) });
+  await scope.plugins.resourceClient("personal").patchStatus(store.resource("mixed")!, { execution: { id: "run", startedAt: new Date().toISOString() } });
   await assert.rejects(store.say("mixed", undefined, "ambiguous", "run"), /different or missing addresses/);
   assert.equal(aide.outputs().length, 0);
-  assert.deepEqual(store.resource("mixed")!.status.batch!.outputIds, []);
+  assert.deepEqual(store.outputs("mixed"), []);
   const options = { respondToInputId: "b", idempotencyKey: "tool-1" };
   const first = await store.say("mixed", undefined, "reply to b", "run", options);
   assert.deepEqual(await store.say("mixed", undefined, "reply to b", "run", options), first);
@@ -151,23 +151,6 @@ test("Web displays explicitly addressed Output in the receiving endpoint and exc
   } finally { server.closeAllConnections(); server.close(); }
 });
 
-test("Recovery selects the immediate Input address, and retains interruption when the destination is ambiguous", async (t) => {
-  const { aide } = setup(t);
-  const scope = aide.personal, store = scope.conversations;
-  const a = larkAddress("app", "a"), b = larkAddress("app", "b");
-  for (const id of ["replyable", "ambiguous"]) {
-    await seedInput(store, id + "-deferred", { origin: "channel", originId: "lark", attention: "deferred", source: a, conversationId: id, text: "older" });
-    await seedInput(store, id + "-immediate", { origin: "source", originId: "personal.lark", attention: "immediate", ...(id === "replyable" ? { source: b } : {}), conversationId: id, text: "new urgent evidence" });
-    await scope.plugins.resourceClient("personal").patchStatus(store.resource(id)!, { batch: fixtureBatch({ inputIds: [id + "-deferred", id + "-immediate"], executionId: id, phase: "running", context: { prompt: "", history: "", responseRequired: true } }) });
-  }
-  await scope.recoverInterrupted();
-  assert.equal(store.resource("replyable")!.status.batch!.phase, "interrupted");
-  assert.equal(store.resource("ambiguous")!.status.batch!.phase, "interrupted");
-  assert.equal(aide.outputs().length, 1);
-  assert.deepEqual(aide.outputs()[0]!.target, b);
-  await scope.recoverInterrupted();
-  assert.equal(aide.outputs().length, 1);
-});
 
 /** @case Content authors, intended people and delivery addresses are independent, including explicit overrides and broadcasts. */
 test("say retains receiver Persons through the Chief tool, storage, projection and Printer", async (t) => {
@@ -183,7 +166,7 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
   const scope = aide.personal, store = scope.conversations;
   const source = larkAddress("cli_app", "group"), target = larkAddress("cli_app", "reporting-group");
   await seedInput(store, "question", { conversationId: "topic", origin: "channel", originId: "lark", sender, source, text: "请帮我确认进展" });
-  const say = chiefTools(emptyConnectors, () => {}, (id, input) => store.say("topic", undefined, input.text, undefined, { ...input, idempotencyKey: id })).find((tool) => tool.name === "say")!;
+  const say = chiefTools(emptyConnectors, (id, input) => store.say("topic", undefined, input.text, undefined, { ...input, idempotencyKey: id })).find((tool) => tool.name === "say")!;
   const reply = await say.execute("reply", { text: "确认了", respondToInputId: "question" }, undefined, undefined, {} as never);
   const direct = aide.outputs().find((output) => output.text === "确认了")!;
   assert.deepEqual(direct.receivers, [sender]); assert.deepEqual(direct.target, source);
@@ -208,7 +191,7 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
   assert.equal(aide.outputs().length, 4, "Two receivers describe one Output; they do not fan out delivery");
 });
 
-test("Invalid receivers cannot publish an Output or mutate its Batch; receiver identity is immutable on retry", async (t) => {
+test("Invalid receivers cannot publish an Output or mutate its Conversation; receiver identity is immutable on retry", async (t) => {
   const { aide } = setup(t);
   const { personRef } = await import("../plugins/personal/person/model.ts");
   const { OUTPUT_TYPE } = await import("../plugins/personal/output/model.ts");
@@ -216,10 +199,10 @@ test("Invalid receivers cannot publish an Output or mutate its Batch; receiver i
   const scope = aide.personal, store = scope.conversations;
   const source = webAddress("topic");
   await seedInput(store, "input", { conversationId: "topic", origin: "channel", originId: "web", sender, source, text: "request" });
-  await scope.plugins.resourceClient("personal").patchStatus(store.resource("topic")!, { batch: fixtureBatch({ inputIds: ["input"], executionId: "run", phase: "running" }) });
+  await scope.plugins.resourceClient("personal").patchStatus(store.resource("topic")!, { execution: { id: "run", startedAt: new Date().toISOString() } });
   for (const bad of [{ ...sender, kind: "Task" }, { ...sender, uid: undefined }]) {
     await assert.rejects(store.say("topic", undefined, "invalid", "run", { target: source, receivers: [bad] }));
-    assert.deepEqual(store.resource("topic")!.status.batch!.outputIds, []);
+    assert.deepEqual(store.outputs("topic"), []);
     assert.equal(aide.outputs().length, 0);
   }
   const options = { respondToInputId: "input", idempotencyKey: "one" };
@@ -227,5 +210,5 @@ test("Invalid receivers cannot publish an Output or mutate its Batch; receiver i
   await assert.rejects(store.say("topic", undefined, "reply", "run", { ...options, receivers: [] }), /different content/);
   const persisted = await scope.plugins.resourceClient("personal").get({ ...OUTPUT_TYPE, namespace: "v1", name: sent.outputId });
   assert.deepEqual((persisted!.spec as { receivers: unknown }).receivers, [sender]);
-  assert.deepEqual(store.resource("topic")!.status.batch!.outputIds, [sent.outputId]);
+  assert.deepEqual(store.outputs("topic").map(o => o.id), [sent.outputId]);
 });

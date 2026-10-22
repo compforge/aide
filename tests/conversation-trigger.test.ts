@@ -8,7 +8,7 @@ import { once } from "node:events";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
-import { ConversationStore, fixtureBatch } from "./conversation-fixture.ts";
+import { ConversationStore } from "./conversation-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { conversationTrigger, ConversationTriggerSchema } from "../plugins/personal/conversation/trigger.ts";
 import { httpChannel } from "../src/api/index.ts";
@@ -72,38 +72,14 @@ test("Runner wakes Conversation without an Input; a long timer coalesces and dis
   assert.equal(ticks, 1);
   assert.equal(aide.works().length, 0);
   assert.equal(aide.personal.conversations.inputs().length, 0);
-  const run = aide.personal.conversations.runs()[0]!;
-  assert.equal(run.status.phase, "done");
-  const blocks = conversationView(aide, "timer").blocks;
-  assert.ok(blocks.some((b) => b.type === "execution" && b.group_id === run.id));
-  assert.ok(blocks.some((b) => b.type === "message" && b.group_id === run.id && b.content.includes("值得跟进")));
+  const invocation = aide.invocations().find(i => i.conversationId === "timer")!;
+  assert.equal(invocation.phase, "completed");
+  assert.equal(aide.outputs().length, 1);
+  assert.equal(aide.outputs()[0]!.text, "发现值得跟进的进展");
+
 });
 
 
-
-test("Restart coalesces due triggers, hides quiet results and does not replay interrupted activations", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "aide-conv-trigger-recovery-"));
-  const session = new HarnessFixtures(root).create({ id: "quiet", cwd: root });
-  const conversations = new ConversationStore(session);
-  const c = await configure(conversations, "quiet", 3600, Date.now() - 86_400_000);
-  await createResourceClient(conversations.resources).patchStatus(c, { batch: fixtureBatch({ id: "timer:interrupted", phase: "running", timerAt: new Date(0).toISOString(), executionId: "old" }) });
-  let aide: Aide, calls = 0;
-  const options = fakeOptions({ chief: async () => {
-    calls++;
-    return "internal review";
-  }, execute: async () => { throw new Error("No work"); } }, root);
-  aide = new Aide(root, options, log);
-  t.after(async () => { await aide.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
-  await aide.start(); await aide.settled();
-  assert.equal(calls, 0);
-  assert.equal(aide.personal.conversations.resource("quiet")!.status.batch!.phase, "interrupted");
-  assert.equal(aide.personal.conversations.runs().find((r) => r.id === "old")!.status.phase, "interrupted");
-  assert.ok(!conversationView(aide, "quiet").blocks.some((b) => b.content.includes("internal review")));
-  assert.equal(aide.conversations.inputs().length, 0);
-  await aide.close(); aide = new Aide(root, options, log);
-  await aide.start(); await aide.settled();
-  assert.equal(calls, 0);
-});
 
 test("Future trigger requeues without another input; ordinary messages preserve its deadline", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-conv-trigger-future-"));
@@ -125,6 +101,6 @@ test("Future trigger requeues without another input; ordinary messages preserve 
   await until(() => ticks === 2);
   await aide.setConversationTrigger("me", false); await aide.settled();
   assert.equal(scope.conversations.inputs().length, 2);
-  assert.ok(scope.conversations.resource("me")!.status.batch?.timerAt);
+  assert.equal(scope.conversations.resource("me")!.spec.trigger!.enabled, false);
   assert.equal(aide.invocations().filter((i) => !i.inputIds?.length).length, 2);
 });

@@ -325,6 +325,41 @@ export class InvocationExecutor {
     return submission.outcome;
   }
 
+  /** @spec Steering targets an existing invocation; admission and application are distinct persisted facts. */
+  async steer(invocationId: string, messageId: string, text: string): Promise<{ accepted: boolean; reason?: string }> {
+    const run = this.runForInvocation(invocationId);
+    if (!run || run.status !== "active" || !run.binding.ref) return { accepted: false, reason: "not_running" };
+    const binding = run.binding;
+    if (!binding.adapter.steering) return { accepted: false, reason: "steer_unsupported; input remains queued for followup" };
+    const existing = this.options.session.projection.harnessInputs.get(messageId);
+    if (existing) return { accepted: existing.deliveryOutcome !== "failed", reason: "already_admitted" };
+    const input = { messageId, invocationId, contextId: binding.contextId, target: binding.target, blocks: [{ type: "text" as const, text }],
+      source: run.input?.source ?? { type: "user" as const }, status: "dispatching" as const, delivery: "steer" as const };
+    this.appendEvent(binding, { kind: "harness_input.updated", invocationId, payload: harnessInputUpdate(input, "dispatching") }, { type: "aide" });
+    const prompt = { invocationId, messageId, blocks: input.blocks };
+    try {
+      const before = this.harnessHooks.beforeInput(this.harnessHooks.dispatch(binding, prompt, messageId, "steer"));
+      if (before) await before;
+      if (run.status !== "active") {
+        this.appendEvent(binding, { kind: "input_delivery_update", invocationId, payload: { messageId, state: "failed" } }, { type: "aide" });
+        return { accepted: false, reason: "invocation_ended" };
+      }
+      const receipt = await binding.adapter.sendTurn(binding.ref!, prompt);
+      if (!receipt.accepted || receipt.effective !== "steer") {
+        this.appendEvent(binding, { kind: "input_delivery_update", invocationId, payload: { messageId, state: "failed" } }, { type: "aide" });
+        return { accepted: false, reason: "steer_rejected" };
+      }
+      this.appendEvent(binding, { kind: "harness_input.updated", invocationId, payload: harnessInputUpdate(input, "steering") }, { type: "aide" });
+      this.appendEvent(binding, { kind: "user_message", invocationId, payload: { messageId, content: input.blocks, delivery: "steer" } }, eventSourceOf(input.source));
+      if (binding.adapter.steering.deliveryTracking === "ack-only") this.appendEvent(binding, { kind: "input_delivery_update", invocationId,
+        payload: { messageId, state: "applied" } }, { type: "aide" });
+      return { accepted: true };
+    } catch (error) {
+      this.appendEvent(binding, { kind: "input_delivery_update", invocationId, payload: { messageId, state: "failed", detail: String(error) } }, { type: "aide" });
+      throw error;
+    }
+  }
+
   /** Cancels a queued Request, or interrupts its active Queue run. */
   cancelHarnessInvocation(harnessInvocationId: string): HarnessInvocationCancellation | undefined {
     for (const queue of this.queues.values()) {

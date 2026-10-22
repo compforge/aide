@@ -53,9 +53,9 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   });
   assert.equal(failed.status, 200);
   await aide.settled();
-  assert.match(aide.outputs().at(-1)!.text, /本次处理未完成/);
+  assert.equal(aide.outputs().length, 0);
+  assert.equal(aide.conversations.inputs("me")[0]!.consumption.phase, "failed");
   assert.equal(aide.works().length, 0);
-  const cursor = aide.outputs().at(-1)!.id;
   const response = await fetch(`${url}/messages`, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "msg-2", sessionId: "me", conversationId: "me", text: "总结今日工作" }),
@@ -63,11 +63,11 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   assert.equal(response.status, 200);
   const ack = await response.json() as { inputId: string; at: string };
   await aide.settled();
-  const outgoing = await (await fetch(`${url}/messages?conversationId=me&role=all&after=${cursor}`)).json() as { text: string }[];
+  const outgoing = await (await fetch(`${url}/messages?conversationId=me&role=all`)).json() as { text: string }[];
   assert.equal(outgoing.length, 1);
   assert.equal(outgoing[0]?.text, "今天完成了三件事");
   const history = await (await fetch(`${url}/messages?conversationId=me&role=all`)).json() as { role: string; text: string }[];
-  assert.equal(history.length, 2);
+  assert.equal(history.length, 1);
   assert.ok(aide.personal.conversations.inputStore.get(ack.inputId));
   assert.ok(history.every((message) => message.role === "aide"));
   const works = await (await fetch(`${url}/work?conversationId=me`)).json() as { status: string; id: string }[];

@@ -1,3 +1,4 @@
+import { PiAdapter } from "../src/host/harness/pi/adapter.ts";
 import { createRouteAgent } from "../agents/route/agent.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
@@ -31,7 +32,11 @@ import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createHarnessAdapter } from "../src/host/harness/registry.ts";
 import type { HarnessEvent, HarnessSessionBinding } from "../src/host/harness/adapter.ts";
 
-type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown } | { error: true } | { hold: true };
+type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown; pause?: Promise<void> } | { error: true } | { hold: true };
+
+function messageText(content: unknown): string {
+  return typeof content === "string" ? content : (content as Array<{ text?: string }>).map(p => p.text ?? "").join("\n");
+}
 
 /** Real Pi SDK and HTTP protocol; only the remote model is scripted. No external credentials or network. */
 async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" | "route" = "pi", model: PiModelConfigInput = { provider: "fixture", id: "test-model" }, sharedPersons?: Persons) {
@@ -85,7 +90,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const adapter = createHarnessAdapter({ id: "assistant", harness }, {
     targetConfig: { harness }, openApproval: async () => { throw new Error("Unexpected interaction"); },
     piSession: (input) => createPiAgent({ ...config, ...input }),
-    routeSession: (input) => createRouteAgent({ ...config, ...input }),
+    routeSession: (input) => createRouteAgent({ ...config, ...input, port: { async route(value) { return value; }, conversations() { return { conversations: [], nextOffset: null }; }, input() { return {}; } } }),
     chiefSession: (input) => createChiefAgent({ ...config, ...input, work, persons }),
   });
   const open = () => adapter.open({ cwd: root, ...(binding ? { resumeState: binding.resumeState } : {}) }, (event) => {
@@ -277,8 +282,15 @@ test("Pi requires startup configuration and Chief requires its bound factory", a
 });
 
 // @case session_native_resume: isolated sessions survive restart and reuse Pi history; cwd changes reset only native bindings.
-test("Aide transfers resource-owned Batch context across fresh native sessions and restart", { timeout: 30_000 }, async (t) => {
-  const fixture = await setup(t, (_request, index) => index % 2 === 0 ? { tool: "say", args: { text: `native-response-${index / 2}` } } : { text: `Internal summary ${Math.floor(index / 2)}` });
+test("Aide isolates continuous native contexts across conversations, restart and recreation", { timeout: 30_000 }, async (t) => {
+  const fixture = await setup(t, (request, index) => {
+    const messages = request.messages as Array<{role: string; content: unknown}>;
+    const activation = messageText(messages.findLast(m => m.role === "user")!.content).split("Activation: ").at(-1)!.split("\n")[0]!;
+    const inputId = JSON.parse(activation).inputId;
+    return index % 3 === 0 ? { tool: "say", args: { text: `native-response-${index / 3}` } }
+      : index % 3 === 1 ? { tool: "complete_inputs", args: { inputIds: [inputId], summary: "Handled request" } }
+      : { text: `Internal summary ${Math.floor(index / 3)}` };
+  });
   const home = join(fixture.config.cwd, "aide");
   const log = pino({ level: "silent" });
   let aide: Aide;
@@ -293,7 +305,7 @@ test("Aide transfers resource-owned Batch context across fresh native sessions a
     const session = new HarnessFixtures(home).open("aide:execution");
     const target = chiefTarget(conversationId);
     const r = aide.personal.conversations.resource(conversationId)!;
-    const contextId = resourceExecutionKey({ pluginInstanceId: "personal", namespace: "v1", executionId: "test", controllerName: "batch",
+    const contextId = resourceExecutionKey({ pluginInstanceId: "personal", namespace: "v1", executionId: "test", controllerName: "agent",
       resourceRef: { apiVersion: r.apiVersion, kind: r.kind, namespace: r.metadata.namespace, name: r.metadata.name, uid: r.metadata.uid } });
     return session.meta.contexts[contextId]!.harnessSessions[target]!;
   };
@@ -303,24 +315,24 @@ test("Aide transfers resource-owned Batch context across fresh native sessions a
     await send("lark:app:group-a", "lark:app:group-a", "a1");
     const original = binding("lark:app:group-a", "lark:app:group-a");
     await send("lark:app:group-a", "lark:app:group-a", "a2");
-    assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
-    assert.match(JSON.stringify(fixture.requests[2]), /native-response-0/);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
+    assert.match(JSON.stringify(fixture.requests[3]), /native-response-0/);
     await send("lark:app:group-b", "lark:app:group-b", "b1");
     assert.notEqual(binding("lark:app:group-b", "lark:app:group-b").harnessSessionId, original.harnessSessionId);
-    assert.doesNotMatch(JSON.stringify(fixture.requests[4]), /question-a1|native-response-0/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[6]), /question-a1|native-response-0/);
     await aide.close();
     aide = open(); await aide.start();
     assert.equal(aide.runtime.plugins.listInstances().length, 1);
     await send("lark:app:group-a", "lark:app:group-a", "a3");
-    assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
-    assert.match(JSON.stringify(fixture.requests[6]), /native-response-1/);
-    assert.doesNotMatch(JSON.stringify(fixture.requests[6]), /question-b1/);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
+    assert.match(JSON.stringify(fixture.requests[9]), /native-response-1/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[9]), /question-b1/);
     assert.equal(aide.outputs().filter((message) => message.conversationId === "lark:app:group-a").length, 3);
     await aide.close();
     const cwd = join(fixture.config.cwd, "other-cwd"); mkdirSync(cwd);
     aide = open(cwd); await aide.start();
     assert.equal(binding("lark:app:group-a", "lark:app:group-a")?.resumeState, undefined);
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a"), undefined, "cwd change clears the native binding; the persisted Batch retains explicit history");
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a"), undefined, "cwd change clears the native binding; a new native context uses the durable Conversation summary");
     await send("lark:app:group-a", "lark:app:group-a", "a4");
     assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
     assert.equal(aide.outputs().filter((message) => message.conversationId === "lark:app:group-a").length, 4);
@@ -449,6 +461,10 @@ test("Chief uses bundled Hermes memory across fresh native sessions while generi
   assert.match(JSON.stringify(result), new RegExp(marker));
   assert.match(JSON.stringify(result), /prefers concise Chinese answers/);
   assert.equal(reader.work.list().length, 0);
+  const router = await setup(t, (_request, index) => index === 0
+    ? { tool: "memory_search", args: { query: marker, target: "user" } } : { text: "Retrieved shared preference" }, "route");
+  await router.run("Retrieve the shared preference for routing", "route-memory");
+  assert.match(JSON.stringify(router.requests[1]!.messages), new RegExp(marker));
 });
 
 /** @case Explicit Pi extensions initialize on open and finish shutdown even when startup fails. */
@@ -513,61 +529,192 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
   assert.ok(Object.values(session.meta.contexts).some((lane) => lane.harnessSessions.default?.harness === "pi"));
 });
 
-/** @case A checkpoint rebuild opens a tool-free summary context, then excludes forgotten Ledger history even after restart. */
-test("Chief summary rebuild fences forgotten history from native resume and Ledger catch-up", { timeout: 30_000 }, async (t) => {
-  let answer = false;
-  const fixture = await setup(t, (request, index) => {
-    if (index === 0) {
-      const message = (request.messages as { role: string; content: string | { type: string; text?: string }[] }[])
-        .filter((m) => m.role === "user").map((m) => typeof m.content === "string" ? m.content : m.content.map((p) => p.text ?? "").join("\n"))
-        .find((text) => text.includes("Activation:"))!;
-      const id = JSON.parse(message.split("Activation: ")[1]!.split("\n")[0]!).inputs[0].inputId;
-      return { tool: "read_input", args: { inputId: id } };
-    }
-    if (index === 1) assert.match(JSON.stringify(request.messages), /nextOffset/);
-    const tools = request.tools as { function: { name: string } }[] | undefined;
-    if (!tools?.some((tool) => tool.function.name === "say")) return { text: "Earlier facts reviewed; no unresolved work." };
-    answer = !answer;
-    return answer ? { tool: "say", args: { text: "Acknowledged" } } : { text: "Processed" };
+/** @case Native Chief context survives separate invocations and restart; business consumption still requires its tool. */
+test("Chief retains native context across acknowledged Inputs and restart", { timeout: 30_000 }, async t => {
+  const fixture = await setup(t, request => {
+    const messages = request.messages as Array<{ role: string; content: unknown }>;
+    const last = messages.at(-1)!;
+    if (last.role === "tool") return { text: "Handled internally" };
+    const raw = messageText(last.content);
+    const activation = raw.split("Activation: ").at(-1)?.split("\n")[0];
+    if (!activation) throw new Error("No input activation");
+    const inputId = JSON.parse(activation).inputId;
+    return { tool: "complete_inputs", args: { inputIds: [inputId], summary: "Recorded the observation" } };
   });
-  const { ConfigSchema } = await import("../src/config.ts");
-  const home = join(fixture.config.cwd, "checkpoint-home");
+  const home = join(fixture.config.cwd, "continuous-home");
   let aide: Aide;
-  const open = () => new Aide(home, { cwd: fixture.config.cwd, config: ConfigSchema.parse({ plugins: { personal: { conversation: { batchSize: 1, contextChars: 4096, summaryChars: 1000 } } } }),
-    timezone: "UTC", defaultTarget: { id: "default", harness: "pi" }, createAdapter: (target, ports) => createHarnessAdapter(target, {
-      ...ports, targetConfig: { harness: target.harness }, chiefSession: aide.chiefSession(target.id, fixture.config.config),
-    }) }, pino({ level: "silent" }));
+  const open = () => new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
+      ...(target.harness === "chief" ? { chiefSession: aide.chiefSession(target.id, fixture.config.config) } : {}) }) }, pino({ level: "silent" }));
   aide = open();
   try {
-    for (const id of ["forgotten-marker", "retained-marker"]) {
-      await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "me", id, text: id + "x".repeat(2000) })); await aide.settled();
-    }
-    const c = aide.personal.conversations.resource("me")!;
-    assert.equal(c.status.pendingInputIds.length, 0, JSON.stringify(c.status));
-    assert.equal(c.status.batch!.phase, "done");
-    assert.match(c.status.batch!.result!.context!, /Earlier facts/);
-    const summaryRequest = fixture.requests.at(-1)!;
-    assert.ok(!(summaryRequest.tools as unknown[] | undefined)?.length, "Summary execution has no action tools");
+    await aide.conversations.ensure("me"); await aide.start();
+    await aide.conversations.submit("first", { sessionId: "me", origin: "source", originId: "fixture", text: "remember-unique-evidence" }); await aide.settled();
+    assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, [], JSON.stringify(fixture.requests.at(-1)));
     await aide.close(); aide = open(); await aide.start();
     const before = fixture.requests.length;
-    await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "me", id: "new", text: "new-marker" })); await aide.settled();
-    const rebuilt = JSON.stringify(fixture.requests[before]!.messages);
-    assert.match(rebuilt, /Earlier facts|retained-marker/);
-    assert.doesNotMatch(rebuilt, /forgotten-marker|aide-sync/);
-    assert.equal(aide.personal.conversations.resource("me")!.status.batch!.phase, "done");
+    await aide.conversations.submit("second", { sessionId: "me", origin: "source", originId: "fixture", text: "followup-evidence" }); await aide.settled();
+    assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, [], JSON.stringify(fixture.requests.at(-1)));
+    assert.match(JSON.stringify(fixture.requests[before]!.messages), /remember-unique-evidence/);
+    assert.match(JSON.stringify(fixture.requests[before]!.messages), /followup-evidence/);
+    assert.equal(aide.outputs().length, 0);
+    assert.ok(aide.invocations().every(i => !i.freshContext));
   } finally { await aide.close(); }
 });
 
+/** @case Steer reaches the next native model call without cancelling or opening another invocation. */
+test("Pi applies immediate steer at the next safe boundary", { timeout: 20_000 }, async t => {
+  let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  const fixture = await setup(t, (_request, index) => ({ text: index ? "Handled urgent input" : "First response", ...(index ? {} : { pause }) }));
+  const running = fixture.run("initial input", "continuous");
+  for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
+  const receipt = await fixture.adapter.sendTurn(fixture.ref(), { invocationId: "continuous", messageId: "urgent", blocks: [{ type: "text", text: "urgent-update" }] });
+  assert.deepEqual(receipt, { accepted: true, effective: "steer" });
+  release(); await running;
+  assert.equal(fixture.requests.length, 2);
+  assert.match(JSON.stringify(fixture.requests[1]!.messages), /urgent-update/);
+  assert.ok(fixture.events.some(e => e.kind === "input_delivery_update" && e.payload.messageId === "urgent" && e.payload.state === "applied"));
+  assert.equal(fixture.events.filter(e => e.kind === "state_update" && e.payload.state === "idle").length, 1);
+});
+
 /** @case The real SDK sends Route policy and zero execution tools, independently of Chief. */
-test("Route uses its dedicated prompt and has no native, Work, Person or memory tools", async t => {
+test("Route exposes only routing, catalog and shared-memory retrieval tools", async t => {
   const answer = JSON.stringify({ decisions: [{ inputId: "one", conversationUids: [], reason: "unmatched" }] });
   const fixture = await setup(t, request => {
     assert.match(JSON.stringify(request.messages), /You are Route/);
-    assert.equal((request.tools as unknown[] | undefined)?.length ?? 0, 0);
+    const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
+    for (const name of ["route_input", "list_conversations", "read_input", "memory_search"]) assert.ok(names.includes(name), name);
+    for (const name of ["say", "complete_inputs", "create_work", "bash", "profile_person", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
     return { text: answer };
   }, "route");
   const result = await fixture.run(JSON.stringify({ inputs: [{ id: "one", text: "event" }], conversations: [] }), "route-one");
   assert.equal(result.finalText, answer);
   assert.equal(fixture.adapter.harness, "route");
   assert.equal(fixture.work.list().length, 0);
+});
+
+
+/** @case Native steer admission and business completion stay in the same invocation through the real Runner and SDK. */
+test("Aide steers immediate Input and independently completes both inputs within one Chief invocation", { timeout: 20_000 }, async t => {
+  let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
+  const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting the first input", pause }
+    : index === 1 ? { tool: "complete_inputs", args: { inputIds: ["first", "urgent"], summary: "Both observations handled without notification" } }
+    : { text: "Handled internally" });
+  const home = join(fixture.config.cwd, "steer-home");
+  const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
+      chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }, pino({ level: "silent" }));
+  t.after(async () => { release(); await aide.close(); });
+  await aide.conversations.ensure("me"); await aide.start();
+  const submit = (id: string, attention: "deferred" | "immediate") => aide.conversations.submit(id, { sessionId: "me", origin: "source", originId: "fixture", attention, text: id });
+  await submit("first", "deferred");
+  for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
+  assert.equal(fixture.requests.length, 1);
+  await submit("urgent", "immediate");
+  const uid = aide.conversations.resource("me")!.metadata.uid;
+  for (let i = 0; i < 200 && !aide.conversations.inputStore.get("urgent")?.status.processing?.[uid]; i++) await Bun.sleep(10);
+  assert.equal(aide.conversations.inputStore.get("urgent")!.status.processing?.[uid]?.phase, "submitted");
+  release(); await aide.settled();
+  assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, []);
+  const first = aide.conversations.inputStore.get("first")!.status.processing![uid]!;
+  const urgent = aide.conversations.inputStore.get("urgent")!.status.processing![uid]!;
+  assert.equal(first.phase, "done"); assert.equal(urgent.phase, "done"); assert.equal(first.executionId, urgent.executionId);
+  assert.equal(aide.invocations().filter(i => i.conversationId === "me").length, 1);
+  const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
+  const admitted = [...state.harnessInputs.values()].find(i => i.delivery === "steer")!;
+  assert.equal(admitted.deliveryOutcome, "applied");
+  assert.equal(aide.outputs().length, 0);
+});
+
+/** @case Cancellation settles queued steer explicitly and never leaks it into a later invocation. */
+test("Pi cancellation clears unapplied steering before the next invocation", { timeout: 20_000 }, async t => {
+  let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  const fixture = await setup(t, (_request, index) => ({ text: "response", ...(index === 0 ? { pause } : {}) }));
+  const first = fixture.run("initial", "cancelled-steer");
+  for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
+  await fixture.adapter.sendTurn(fixture.ref(), { invocationId: "cancelled-steer", messageId: "queued-urgent", blocks: [{ type: "text", text: "never-applied-marker" }] });
+  await fixture.adapter.cancel(fixture.ref()); await first; release();
+  assert.ok(fixture.events.some(e => e.kind === "input_delivery_update" && e.payload.messageId === "queued-urgent" && e.payload.state === "failed"));
+  await fixture.run("new request", "next");
+  assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)!.messages), /never-applied-marker/);
+});
+
+/** @case Route validates ownership and current UIDs, then follows up using its own persistent context. */
+test("Aide Route commits tool decisions, rejects invented targets and reuses its context for later input", { timeout: 30_000 }, async t => {
+  let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
+  let targetUid = ""; let routeCalls = 0;
+  const routeRequests: Record<string, unknown>[] = [];
+  const fixture = await setup(t, request => {
+    const messages = request.messages as Array<{role: string; content: unknown}>;
+    const raw = messageText(messages.findLast(m => m.role === "user")!.content);
+    const isRoute = JSON.stringify(request.tools).includes('"route_input"');
+    if (isRoute) {
+      routeRequests.push(request); routeCalls++;
+      const inputId = JSON.parse(raw.split("\n").find(line => line.startsWith('{"inputId":'))!).inputId;
+      if (routeCalls === 1) return { tool: "route_input", args: { inputId: "not-admitted", conversationUids: [targetUid], reason: "invalid" } };
+      if (routeCalls === 2) return { tool: "route_input", args: { inputId, conversationUids: ["invented-uid"], reason: "invalid" } };
+      if (routeCalls === 3) return { tool: "route_input", args: { inputId, conversationUids: [targetUid], reason: "same subject" }, pause };
+      if (messages.at(-1)!.role === "tool") return { text: "Routed" };
+      return { tool: "route_input", args: { inputId, conversationUids: [targetUid], reason: "continuing subject" } };
+    }
+    if (messages.at(-1)!.role === "tool") return { text: "Handled" };
+    const inputId = JSON.parse(raw.split("Activation: ").at(-1)!.split("\n")[0]!).inputId;
+    return { tool: "complete_inputs", args: { inputIds: [inputId], summary: "Recorded fact" } };
+  });
+  const home = join(fixture.config.cwd, "route-home");
+  const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
+      ...(target.harness === "route" ? { routeSession: aide.routeSession(fixture.config.config) } : { chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }) }, pino({ level: "silent" }));
+  t.after(async () => { release(); await aide.close(); });
+  targetUid = (await aide.conversations.ensure("topic")).metadata.uid; await aide.start();
+  await aide.conversations.submit("route-first", { origin: "source", originId: "fixture", text: "subject-one" });
+  for (let i = 0; i < 300 && routeCalls < 3; i++) await Bun.sleep(10);
+  assert.equal(routeCalls, 3);
+  assert.equal(aide.conversations.inputStore.get("route-first")!.status.routing?.destinations, undefined);
+  await aide.conversations.submit("route-second", { origin: "source", originId: "fixture", text: "subject-two" });
+  release(); await aide.settled();
+  for (const id of ["route-first", "route-second"]) {
+    const input = aide.conversations.inputStore.get(id)!;
+    assert.equal(input.status.routing!.phase, "done");
+    assert.deepEqual(input.status.deliveries, [targetUid]);
+    assert.equal(input.status.processing![targetUid]!.phase, "done");
+  }
+  const followup = routeRequests.find(r => JSON.stringify(r.messages).includes("subject-two"))!;
+  assert.match(JSON.stringify(followup.messages), /subject-one/);
+  assert.equal(aide.conversations.list().length, 1);
+  assert.equal(aide.invocations().filter(i => i.harnessTargetId === "personal-route").length, 2);
+});
+
+
+/** @case Async native input hooks cannot enqueue into the next invocation after this one settles. */
+test("Pi waits for in-flight steer admission before releasing a settled binding", { timeout: 20_000 }, async t => {
+  let releaseResponse!: () => void, releaseAdmission!: () => void, admissionStarted!: () => void, settled!: () => void;
+  const responseGate = new Promise<void>(r => { releaseResponse = r; });
+  const admissionGate = new Promise<void>(r => { releaseAdmission = r; });
+  const started = new Promise<void>(r => { admissionStarted = r; });
+  const nativeSettled = new Promise<void>(r => { settled = r; });
+  const fixture = await setup(t, (_request, index) => ({ text: "Finished", ...(index === 0 ? { pause: responseGate } : {}) }));
+  const events: HarnessEvent[] = [];
+  const adapter = new PiAdapter({ createSession: async options => {
+    const native = await createPiAgent({ ...fixture.config, ...options });
+    const steer = native.steer.bind(native);
+    native.steer = async (...args) => { admissionStarted(); await admissionGate; return steer(...args); };
+    native.subscribe(event => { if (event.type === "agent_settled") settled(); });
+    return native;
+  } });
+  const handle = await adapter.open({ cwd: fixture.config.cwd }, e => events.push(e), () => {});
+  t.after(async () => { releaseResponse(); releaseAdmission(); await adapter.close(handle); });
+  await adapter.sendTurn(handle, { invocationId: "first", messageId: "initial", blocks: [{ type: "text", text: "initial" }] });
+  for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
+  const steering = adapter.sendTurn(handle, { invocationId: "first", messageId: "late", blocks: [{ type: "text", text: "late-admission-marker" }] });
+  await started; releaseResponse(); await nativeSettled; await Bun.sleep(10);
+  assert.ok(!events.some(e => e.kind === "state_update" && e.payload.state === "idle"));
+  releaseAdmission(); await steering;
+  for (let i = 0; i < 200 && !events.some(e => e.kind === "state_update"); i++) await Bun.sleep(10);
+  assert.ok(events.some(e => e.kind === "input_delivery_update" && e.payload.messageId === "late" && e.payload.state === "failed"));
+  await adapter.sendTurn(handle, { invocationId: "second", messageId: "next", blocks: [{ type: "text", text: "next" }] });
+  for (let i = 0; i < 200 && !events.some(e => e.kind === "state_update" && e.invocationId === "second"); i++) await Bun.sleep(10);
+  assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)!.messages), /late-admission-marker/);
 });

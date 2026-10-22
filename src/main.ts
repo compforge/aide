@@ -1,4 +1,3 @@
-import { createRouteAgent } from "../agents/route/agent.ts";
 import { configPath, loadConfig } from "./config.ts";
 import { resolveHarnessConfigs } from "./host/harness/config.ts";
 import { homedir } from "node:os";
@@ -36,7 +35,7 @@ await withAsyncFileLock(path, async () => {
     cwd, timezone, defaultTarget: harnesses.defaultTarget,
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
       targetConfig: target.harness === "route" ? { harness: "route" } : target.harness === "chief" ? { harness: "chief" } : harnesses.defaultTargetConfig,
-      ...(target.harness === "route" ? { routeSession: (options) => createRouteAgent({ ...options, config: harnesses.route }) } : {}),
+      ...(target.harness === "route" ? { routeSession: aide.routeSession(harnesses.route) } : {}),
       ...(target.harness === "pi" ? { piConfig: harnesses.pi } : {}),
       ...(target.harness === "chief" ? { chiefSession: aide.chiefSession(target.id, harnesses.chief) } : {}),
     }),
