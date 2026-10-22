@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2880" height="1150" viewBox="0 0 2880 1150" role="img" aria-labelledby="title desc">
   <title id="title">Aide：认识人，接住事，会回应</title>
-  <desc id="desc">沿用 personal-flow.svg 的图形与配色。外部系统经 connector 与 source、人与助手经 channel 贡献 Input。Chief 将输入归入 Conversation，可以直接回应，也可以将目标与新事实交给 Task 或 Routine 持续推进。处理过程借助通用 Agent 执行能力，所有对外表达统一生成 Output，再经 connector 或 channel 投递。Person 关联可选的输入发送者和输出对象，Chief 持续读取与更新对人的认识；Me 标记代表服务对象的身份。实线表示处理与投递，虚线表示人物关联与认识。</desc>
+  <desc id="desc">沿用 personal-flow.svg 的图形与配色。外部系统经 connector 与 source、人与助手经 channel 贡献 Input。Chief 将输入归入 Conversation，可以直接回应，也可以将目标与新事实交给 Task 或 Routine 持续推进。处理过程借助通用 Agent 执行能力，包括 harness、workspace、sandbox 与 memory；memory 支持读取、积累和修订可复用的背景与经验。所有对外表达统一生成 Output，再经 connector 或 channel 投递。Person 关联可选的输入发送者和输出对象，Chief 持续读取与更新对人的认识；Me 标记代表服务对象的身份。实线表示处理与投递，虚线表示人物关联与认识。</desc>
   <defs>
     <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#f0f2f9"/>
@@ -130,12 +130,15 @@
   <rect class="shape" x="650" y="900" width="1590" height="165" rx="13" fill="url(#panel)"/>
   <text x="930" y="969">通用 Agent 执行能力</text>
   <text class="small" x="930" y="1014">答复、提问、说明安排与进展</text>
-  <rect class="shape" x="1200" y="927" width="260" height="110" rx="13" fill="url(#panel)"/>
-  <rect class="shape" x="1510" y="927" width="260" height="110" rx="13" fill="url(#panel)" stroke-dasharray="10 9"/>
-  <rect class="shape" x="1820" y="927" width="260" height="110" rx="13" fill="url(#panel)" stroke-dasharray="3 9"/>
-  <text x="1330" y="994">harness</text>
-  <text x="1640" y="994">workspace</text>
-  <text x="1950" y="994">sandbox</text>
+  <rect class="shape" x="1190" y="927" width="220" height="110" rx="13" fill="url(#panel)"/>
+  <rect class="shape" x="1440" y="927" width="220" height="110" rx="13" fill="url(#panel)" stroke-dasharray="10 9"/>
+  <rect class="shape" x="1690" y="927" width="220" height="110" rx="13" fill="url(#panel)" stroke-dasharray="3 9"/>
+  <rect class="shape" x="1940" y="927" width="220" height="110" rx="13" fill="url(#panel)"/>
+  <text x="1300" y="994">harness</text>
+  <text x="1550" y="994">workspace</text>
+  <text x="1800" y="994">sandbox</text>
+  <text x="2050" y="974">memory</text>
+  <text class="small" x="2050" y="1010">读取 · 积累 · 修订</text>
   <path class="line" d="M 2105 887 V 468" marker-end="url(#arrow)"/>
   <text class="small" x="2205" y="665">生成 Output</text>
 
