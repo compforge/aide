@@ -123,12 +123,12 @@ export function httpChannel(aide: WebService, log: Logger) {
       }
       // Native permissions and Hook trust are independent of conversation messages.
       if (request.method === "GET" && url.pathname === "/approvals") {
-        json(response, 200, [...aide.runtime.projection.approvals.values()]
+        json(response, 200, aide.runtime.executions.approvals()
           .map((item) => item.request).filter((item) => item.status === "pending"));
       } else if (request.method === "POST" && url.pathname === "/approvals") {
         const { messageId, result } = ApprovalResponseSchema.parse(await body(request));
         const core = aide.runtime;
-        const pending = core?.projection.approvals.get(messageId)?.request;
+        const pending = core?.executions.approval(messageId);
         if (!core || !pending || pending.status !== "pending") {
           json(response, 409, { error: "This approval is no longer pending" }); return;
         }
@@ -136,9 +136,9 @@ export function httpChannel(aide: WebService, log: Logger) {
           json(response, 400, { error: "Answer does not match the pending approval" }); return;
         }
         // @spec Only an explicit, validated native approval response settles its pending request.
-        const receipt = await core.resolveApproval({ kind: "approval_response", messageId }, async () => result);
-        log.info({ messageId, kind: result.kind, completed: receipt.result }, "Native approval response");
-        json(response, receipt.result ? 200 : 409, { completed: receipt.result });
+        const completed = core.executions.resolveApproval(messageId, result);
+        log.info({ messageId, kind: result.kind, completed: completed }, "Native approval response");
+        json(response, completed ? 200 : 409, { completed: completed });
       } else if (request.method === "POST" && url.pathname === "/messages") {
         const input = IncomingSchema.omit({ channelId: true, observation: true, source: true }).parse(await body(request));
         json(response, 200, await receive({ ...input, source: webAddress(input.sessionId) }));

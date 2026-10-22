@@ -1,3 +1,4 @@
+import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { ResourceStorage } from "./host/resource/storage.ts";
 import { SayInputSchema } from "../plugins/personal/output/action.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
@@ -26,7 +27,7 @@ import { messageWatch } from "../plugins/personal/source/message/config.ts";
 import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
 import { Connectors } from "../connectors/index.ts";
 import type { AideConfig, DefaultHarness } from "./config.ts";
-import { type CoreControllerOptions } from "./host/core/index.ts";
+import { type ExecutionOptions } from "./host/runtime/execution.ts";
 import { ApplicationRuntime } from "./host/runtime/index.ts";
 import { migratePersonalResources } from "../plugins/personal/migrate.ts";
 import { PluginSupervisor } from "./host/plugin/runner/index.ts";
@@ -35,7 +36,7 @@ import { IncomingSchema, type Incoming } from "./channel/message.ts";
 export interface AideOptions {
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   defaultTarget: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
-  createAdapter: CoreControllerOptions["createAdapter"];
+  createAdapter: ExecutionOptions["createAdapter"];
 }
 
 /**
@@ -117,8 +118,9 @@ export class Aide {
         actions: { "personal/say": (context, raw) => {
           const input = SayInputSchema.parse(raw);
           const text = input.text;
-          if (!context.conversationId) throw new Error("Personal say requires Conversation context");
-          return this.personal.conversations.say(context.conversationId, context.inputId, text, context.executionId, input);
+          const association = personalExecution(context);
+          if (!association.conversationId) throw new Error("Personal say requires Conversation context");
+          return this.personal.conversations.say(association.conversationId, association.inputId, text, context.executionId, input);
         } }, selectedHarnessTargetId: () => this.defaultTarget.id,
         pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => {
@@ -208,7 +210,7 @@ export class Aide {
     const scope = this.personal;
     if (!this.conversations.get(conversationId)) throw new Error("Conversation does not exist");
     const trigger = await scope.conversations.setTriggerEnabled(conversationId, enabled);
-    this.log.info({ runtimeId: this.runtime.id, conversationId, ...trigger }, "Conversation trigger configured");
+    this.log.info({ conversationId, ...trigger }, "Conversation trigger configured");
     this.notify();
     return trigger;
   }

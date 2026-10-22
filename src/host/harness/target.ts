@@ -1,5 +1,4 @@
 import type { AvailableCommand } from "../event/index.ts";
-import type { AideTargetModel } from "@compforge/aide-plugin";
 import type { EffortOption, ModelOption } from "./adapter.ts";
 
 /**
@@ -16,7 +15,7 @@ export interface HarnessTarget {
  * model / command 等静态目录可在用户真正发 turn 前安全查询。
  */
 export interface HarnessTargetProbeResult {
-  modelCatalog?: readonly AideTargetModel[];
+  modelCatalog?: readonly HarnessModel[];
   models?: ModelOption[];
   efforts?: EffortOption[];
   commands?: AvailableCommand[];
@@ -53,4 +52,11 @@ export function createHarnessLaunchSnapshot(opts: {
     ...(opts.model ? { model: opts.model } : {}),
     ...(opts.effort ? { effort: opts.effort } : {}),
   });
+}
+
+export interface HarnessModel {
+  readonly id: string;
+  readonly label: string;
+  readonly description?: string;
+  readonly efforts: readonly { readonly id: string; readonly label: string }[];
 }

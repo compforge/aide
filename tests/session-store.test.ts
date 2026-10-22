@@ -1,3 +1,4 @@
+import { resourceHome } from "../src/host/resource/storage.ts";
 import { definition } from "./fixtures/resource-definition.ts";
 import { spyOn } from "bun:test";
 import * as fs from "node:fs";
@@ -51,7 +52,7 @@ test("Sessions from different execution directories share one home and reopen or
   assert.throws(() => store.openSession("../outside"), /path separators/);
 
   const instance = { pluginId: "tests/plugin", pluginInstanceId: "default" };
-  const data = (session: typeof first) => preparePluginDataDirectories({ aideSessionId: session.id, dir: session.dir }, instance);
+  const data = (session: typeof first) => preparePluginDataDirectories(root, instance);
   const firstData = data(first);
   const secondData = data(second);
   assert.equal(firstData.global, join(root, "plugins", "tests%2Fplugin"));
@@ -73,8 +74,8 @@ test("Session liveness and cleanup use the flat directory after cwd changes", as
     rmSync(root, { recursive: true, force: true });
   });
   const type = { apiVersion: "tests.dev/v1", kind: "Record" };
-  const activeResources = new PluginResourceStore({ session: active, pluginInstanceId: "test" });
-  const idleResources = new PluginResourceStore({ session: idle, pluginInstanceId: "test" });
+  const activeResources = new PluginResourceStore({ home: resourceHome(active.dir), pluginInstanceId: "test" });
+  const idleResources = new PluginResourceStore({ home: resourceHome(idle.dir), pluginInstanceId: "test" });
   activeResources.storage.register("test", [definition(type)]);
   activeResources.create({ type, name: "active", spec: {} });
   idleResources.create({ type, name: "idle", spec: {} });
@@ -87,8 +88,8 @@ test("Session liveness and cleanup use the flat directory after cwd changes", as
   assert.deepEqual(result.skippedActive.map((s) => s.aideSessionId), [active.id]);
   assert.deepEqual(result.failures, []);
   assert.equal(existsSync(idle.dir), false);
-  assert.equal(idleResources.list(type).length, 0);
-  assert.equal(activeResources.list(type).length, 1);
+  assert.equal(idleResources.list(type).length, 2);
+  assert.equal(activeResources.list(type).length, 2);
   active.releaseLock();
   assert.equal(store.isSessionActive(active.meta), false);
   const reopened = store.openSession(active.id);
@@ -119,7 +120,7 @@ test("Failed Session directory removal retains business Resources and the reopen
   const store = new SessionStore(root);
   const session = store.createSession({ cwd: root });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
-  const resources = new PluginResourceStore({ session, pluginInstanceId: "test" });
+  const resources = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "test" });
   const type = { apiVersion: "tests.dev/v1", kind: "Record" };
   resources.storage.register("test", [definition(type)]);
   resources.create({ type, name: "retained", spec: { evidence: "must survive" } });
@@ -136,5 +137,5 @@ test("Failed Session directory removal retains business Resources and the reopen
     const reopened = store.openSession(session.id); await reopened.closeLogs();
   } finally { failure.mockRestore(); }
   assert.equal(store.cleanSessions({ before: new Date("2001-01-01") }).removed.length, 1);
-  assert.equal(resources.list(type).length, 0);
+  assert.equal(resources.list(type).length, 1);
 });

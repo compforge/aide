@@ -1,8 +1,3 @@
-/** Canonical namespace of a Plugin-owned Resource. */
-export type ResourceNamespace =
-  | "v1"
-  | `v1/project/${string}`
-  | `v1/project/${string}/session/${string}`;
-
-/** Resource namespaces reserved by Aide itself sit outside Plugin tenancy. */
+/** Plugin-owned namespace path. Segments carry no built-in business or execution meaning. */
+export type ResourceNamespace = "v1" | `v1/${string}`;
 export type AnyResourceNamespace = ResourceNamespace;

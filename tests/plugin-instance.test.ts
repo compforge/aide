@@ -28,7 +28,7 @@ function testSession(root: string): { id: string; dir: string } {
 }
 
 function store(root: string, now?: () => Date): PluginInstanceStore {
-  return new PluginInstanceStore({ session: testSession(root), now });
+  return new PluginInstanceStore({ home: root, now });
 }
 
 afterEach(() => {
@@ -48,7 +48,7 @@ describe("PluginInstanceStore", () => {
 
     expect(created.pluginInstanceId).toMatch(/^pi_/);
     expect(created).toMatchObject({
-      aideSessionId: "bs_test",
+
       pluginId: "qiankun/reqloop",
       marketplace: "reqloop",
       packageVersion: "1.2.0",
@@ -59,8 +59,9 @@ describe("PluginInstanceStore", () => {
     expect(instances.list()).toEqual([created]);
 
     const path = join(
-      testSession(root).dir,
+      root,
       "plugins",
+      "instances",
       created.pluginInstanceId,
       "instance.json",
     );
@@ -147,14 +148,14 @@ describe("PluginInstanceStore", () => {
   test("ignores resource-only directories and reports corrupt instance identity", () => {
     const root = testRoot();
     const session = testSession(root);
-    mkdirSync(join(session.dir, "plugins", "legacy", "resources"), { recursive: true });
-    const path = join(session.dir, "plugins", "reqloop_default", "instance.json");
+    mkdirSync(join(root, "plugins", "instances", "legacy", "resources"), { recursive: true });
+    const path = join(root, "plugins", "instances", "reqloop_default", "instance.json");
     mkdirSync(join(path, ".."), { recursive: true });
     writeFileSync(
       path,
       JSON.stringify({
         pluginInstanceId: "another",
-        aideSessionId: "bs_test",
+
         pluginId: "qiankun/reqloop",
         packageVersion: "1.2.0",
         enabled: true,

@@ -8,7 +8,6 @@ import { PluginResourceStore } from "./resource/store.ts";
 import { validateResourceType } from "./resource/type.ts";
 import { reconcileKeyId, ReconcileQueue } from "../../reconcile/queue.ts";
 import type { ReconcileCapacityLease } from "../../reconcile/queue.ts";
-import { reconcileResourceOwner } from "../../reconcile/reconcile-scope.ts";
 import {
   emptyReconcileSnapshot,
   type ReconcileSnapshot,
@@ -24,8 +23,8 @@ import {
   type InvokeVerb,
 } from "../../protocol/verbs.ts";
 
-export type { ReconcileResourceOwner, ReconcileScope, ReconcileKey, ReconcileResult, ScheduledReconcile } from "../../protocol/reconcile.ts";
-import type { ReconcileResourceOwner, ReconcileScope, ReconcileKey, ReconcileResult, ScheduledReconcile } from "../../protocol/reconcile.ts";
+export type { ReconcileScope, ReconcileKey, ReconcileResult, ScheduledReconcile } from "../../protocol/reconcile.ts";
+import type { ReconcileScope, ReconcileKey, ReconcileResult, ScheduledReconcile } from "../../protocol/reconcile.ts";
 
 export interface ReconcileRetryBackoff {
   readonly initialDelayMs: number;
@@ -128,7 +127,6 @@ export class ReconcileRetry {
 export interface ControllerOptions<TSpec, TStatus> {
   name?: string;
   store: PluginResourceStore;
-  runtimeId?: string;
   resourceType: ResourceType;
   sources?: readonly ControllerSource<TSpec>[];
   watches?: readonly Watch[];
@@ -136,7 +134,7 @@ export interface ControllerOptions<TSpec, TStatus> {
   present?: PluginController<TSpec, TStatus>["present"];
   maxConcurrency?: number;
   now?: () => Date;
-  /** 每次执行前读取最新 AideSession 只读视图。 */
+  /** 每次执行前读取运行环境与 Harness 配置快照。 */
   snapshot?: (key: ReconcileKey, resource: ResourceRef) => ReconcileSnapshot;
   invokeVerb?: InvokeVerb;
   /** Manager 注入的进程总容量；缺省表示不额外限流。 */
@@ -164,18 +162,13 @@ export interface ControllerOptions<TSpec, TStatus> {
 function ownedKey(key: ReconcileKey): ReconcileKey {
   const copy = {
     controllerName: key.controllerName,
-    aideSessionId: key.aideSessionId,
     pluginInstanceId: key.pluginInstanceId,
     namespace: key.namespace,
     resourceApiVersion: key.resourceApiVersion,
     resourceKind: key.resourceKind,
     resourceId: key.resourceId,
-    ...(key.resourceOwner === undefined
-      ? {}
-      : { resourceOwner: key.resourceOwner }),
   };
   for (const [name, value] of Object.entries({
-    aideSessionId: copy.aideSessionId,
     pluginInstanceId: copy.pluginInstanceId,
     namespace: copy.namespace,
     resourceApiVersion: copy.resourceApiVersion,
@@ -183,13 +176,6 @@ function ownedKey(key: ReconcileKey): ReconcileKey {
     resourceId: copy.resourceId,
   })) {
     if (!value.trim()) throw new Error(`reconcile key ${name} must not be empty`);
-  }
-  if (
-    copy.resourceOwner !== undefined &&
-    copy.resourceOwner !== "plugin" &&
-    copy.resourceOwner !== "aide"
-  ) {
-    throw new Error(`reconcile key resourceOwner is invalid: ${String(copy.resourceOwner)}`);
   }
   return Object.freeze(copy);
 }
@@ -251,7 +237,7 @@ export class Controller<TSpec, TStatus> {
     this.now = options.now ?? (() => new Date());
     validateSources(options.sources, this.now());
     this.snapshot =
-      options.snapshot ?? (() => emptyReconcileSnapshot(options.store.aideSessionId));
+      options.snapshot ?? (() => emptyReconcileSnapshot());
     this.executeWithCapacity =
       options.executeWithCapacity ?? (async (execute) => await execute());
     this.invokeVerb = options.invokeVerb ?? (async () => {
@@ -262,7 +248,6 @@ export class Controller<TSpec, TStatus> {
     this.onWatchError = options.onWatchError;
     this.scope = Object.freeze({
       controllerName: options.name,
-      aideSessionId: options.runtimeId ?? options.store.aideSessionId,
       pluginInstanceId: options.store.pluginInstanceId,
       namespace: "v1",
       resourceApiVersion: options.resourceType.apiVersion,
@@ -277,7 +262,6 @@ export class Controller<TSpec, TStatus> {
     this.queue = new ReconcileQueue({
       execute: (key, localLease) => {
         const executionScope = Object.freeze({
-          aideSessionId: key.aideSessionId,
           pluginInstanceId: key.pluginInstanceId,
           namespace: key.namespace as ResourceNamespace,
           executionId: newId("pex"),
@@ -476,11 +460,7 @@ export class Controller<TSpec, TStatus> {
           uid: resource.metadata.uid,
         });
         const snapshot = deepFreeze(this.snapshot(key, resourceRef));
-        if (snapshot.session.aideSessionId !== this.scope.aideSessionId) {
-          throw new Error(
-            `ReconcileSnapshot aideSessionId must be ${this.scope.aideSessionId}, got ${snapshot.session.aideSessionId}`,
-          );
-        }
+
         const context = createReconcileContext(
           snapshot,
           { ...executionScope, resourceRef },
@@ -544,15 +524,13 @@ export class Controller<TSpec, TStatus> {
 
   private assertOwns(key: ReconcileKey): void {
     if (
-      key.aideSessionId !== this.scope.aideSessionId ||
       key.pluginInstanceId !== this.scope.pluginInstanceId ||
       !namespaceContains(this.scope.namespace, key.namespace) ||
       key.resourceApiVersion !== this.scope.resourceApiVersion ||
-      key.resourceKind !== this.scope.resourceKind || (key.controllerName ?? "") !== (this.scope.controllerName ?? "") ||
-      reconcileResourceOwner(key) !== reconcileResourceOwner(this.scope)
+      key.resourceKind !== this.scope.resourceKind || (key.controllerName ?? "") !== (this.scope.controllerName ?? "")
     ) {
       throw new Error(
-        `reconcile key is outside controller scope: ${key.aideSessionId}/${key.pluginInstanceId}/${key.resourceApiVersion}/${key.resourceKind}/${key.resourceId}`,
+        `reconcile key is outside controller scope: ${key.pluginInstanceId}/${key.resourceApiVersion}/${key.resourceKind}/${key.resourceId}`,
       );
     }
   }

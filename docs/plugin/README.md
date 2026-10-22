@@ -14,7 +14,7 @@ Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队�
 
 Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。 `ResourceDefinition` 统一声明 type、scope、spec/status schema、可选 validator、printer 和 retention。Host 在恢复资源、启动 Controller 前加载声明；未知类型不能写入。进程内插件通过 resources 提供声明，独立 Runner 的 PackageEntry 通过 resourcesUrl 指向默认导出定义数组的纯模块，Host 直接加载它。声明模块不导入 Runner 或 Host 实现，不执行 I/O。
 
-ApplicationRuntime 使用 `scope: "shared"`，资源属于插件实例，资源与引用不携带 sessionId。namespace 与存储作用域独立；底座不预注册任何业务资源。每种资源可以没有 Controller，也可以由多个具名 Controller 观察。旧执行后端仍保留 session scope 的兼容接口，应用插件不使用它。
+资源统一属于插件实例与 namespace，定义不区分 shared/session，资源和调度身份不携带 sessionId。底座不预注册任何业务资源。每种资源可以没有 Controller，也可以由多个具名 Controller 观察。
 
 所有创建、更新和删除请求都在存储事务内经过 Schema 与 Validator，包括 Agent 工具、Source 与 commit。Schema 的规范化输出作为持久数据；Validator 可读取同一作用域内的事务快照，包含当前 commit 已完成的前序写入。它不能执行异步工作或外部副作用。校验、引用计算或配额失败会回滚整笔写入。
 
@@ -60,11 +60,11 @@ Reconcile 通过 `ctx.verbs` 请求 harness、命名 action，或通过 `connect
 
 等待 verb 时释放 Controller 和 Runner 容量，同一 Controller 内同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。拒绝确认是正常业务答案；取消、超时和失败需要插件自行决定业务结果。
 
-`execution.withContext({ conversationId, inputId, inputIds })` 将后续动作关联到业务会话和输入，主资源身份由 Core 提供。Channel 直接使用这些关联展示问题与执行进度，不通过 Chief 或 Harness Target 推导。其他组件按职责使用 Core 服务，不必经由 Verb。
+`execution.withContext(attributes)` 为后续动作附加不透明的业务元数据，主资源身份由运行时提供。Personal 定义并解释 conversationId、inputId、inputIds，底座只持久保存 attributes。Channel 通过 Personal 解析关联，再显式查询对应执行的展示投影。其他组件按职责使用 Core 服务，不必经由 Verb。
 
 Harness 上下文由主资源 UID 与 Controller 名称确定，不接受应用插件选择 Lane。`harness({ freshContext: true })` 用调用方提供的摘要和必要材料建立新原生上下文，并持久化历史边界，后续 catch-up 不注入该边界之前的执行历史。
 
-Harness 返回执行结束不等于资源目标完成。结果校验、下一步安排、等待用户和业务终态都属于插件。
+Reconcile 快照只包含运行目录和 HarnessTarget 配置，不携带全局历史。Harness 返回 invocationId 与 result，不返回 Lane 或 Turn 对象。执行结束不等于资源目标完成。结果校验、下一步安排、等待用户和业务终态都属于插件。
 
 ## Personal 实例
 

@@ -1,15 +1,11 @@
 import type { AnyResourceNamespace } from "@compforge/aide-plugin";
-export type ReconcileResourceOwner = "plugin" | "aide";
 
 export interface ReconcileScope {
   readonly controllerName?: string;
-  readonly aideSessionId: string;
   readonly pluginInstanceId: string;
   readonly namespace: AnyResourceNamespace;
   readonly resourceApiVersion: string;
   readonly resourceKind: string;
-  /** 旧 key 缺省为 plugin；aide 表示只读 Aide-owned Resource。 */
-  readonly resourceOwner?: ReconcileResourceOwner;
 }
 
 export interface ReconcileKey extends ReconcileScope {

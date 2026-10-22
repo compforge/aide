@@ -32,13 +32,13 @@ export async function reconcileBatch(context: PluginContext, execution: Reconcil
         prompt: batch.context.prompt, freshContext: true, timeoutMs: 172800_000 });
       const current = (await read()).status.batch!;
       if (current.cancelRequested) {
-        await patch(() => ({ phase: "interrupted", result: { summary: result.state === "success" && result.value.outcome === "completed" ? result.value.turn.finalText ?? "" : "",
+        await patch(() => ({ phase: "interrupted", result: { summary: result.state === "success" && result.value.outcome === "completed" ? result.value.result.finalText ?? "" : "",
           error: "Interrupted by an immediate Input; previously executed actions may have taken effect." } }));
         return;
       }
-      if (result.state !== "success" || result.value.outcome !== "completed" || result.value.turn.stopReason !== "end_turn") throw new Error(`Chief Batch failed: ${result.state}`);
+      if (result.state !== "success" || result.value.outcome !== "completed" || result.value.result.stopReason !== "end_turn") throw new Error(`Chief Batch failed: ${result.state}`);
       if (batch.context.responseRequired && !current.communicated && !current.outputIds.length) throw new Error("Chief completed a direct request without communicating");
-      const summary = result.value.turn.finalText ?? "";
+      const summary = result.value.result.finalText ?? "";
       const outputs = await batchOutputs(context, current);
       await patch(() => ({ phase: "compacting", result: { summary, outputs } }));
     }
@@ -67,8 +67,8 @@ History:
 ${material.slice(offset, end)}`;
         const result = await execution.verbs.harness({ title: "Conversation summary", harnessTargetId: chiefTarget(initial.spec.id),
           prompt, freshContext: true, timeoutMs: 180_000 });
-        if (result.state !== "success" || result.value.outcome !== "completed" || result.value.turn.stopReason !== "end_turn") throw new Error("Conversation summary failed");
-        const text = result.value.turn.finalText?.trim();
+        if (result.state !== "success" || result.value.outcome !== "completed" || result.value.result.stopReason !== "end_turn") throw new Error("Conversation summary failed");
+        const text = result.value.result.finalText?.trim();
         if (!text || text.length > policy.summaryChars) throw new Error("Conversation summary is empty or exceeds its budget");
         summary = text; offset = end;
         await patch(() => ({ compaction: { offset, text } }));

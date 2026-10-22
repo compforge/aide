@@ -24,7 +24,7 @@ test("Independent Input facts and Personal consumption survive reopening with ve
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const store = new ConversationStore({ dir });
   const first = await seedInput(store, "m1", { conversationId: "group-a", origin: "channel", originId: "web", text: "one-body-only" });
-  assert.equal(store.inputStore.submit(store.sessionId, "m1", first.spec).metadata.uid, first.metadata.uid);
+  assert.equal(store.inputStore.submit("personal", "m1", first.spec).metadata.uid, first.metadata.uid);
   await seedInput(store, "s1", { conversationId: "watch-a", origin: "source", originId: "personal.environments", text: "requirement changed", observation: { id: "req-1" } });
   assert.deepEqual(store.get("watch-a")!.outputs, []);
   assert.equal(store.inputStore.list().length, 2);

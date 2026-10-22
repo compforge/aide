@@ -1,6 +1,6 @@
 import type { ConnectorClient } from "./connectors/index.ts";
 import type { ResourceRef } from "./resource.ts";
-import type { ReconcileSnapshot, TurnSummary } from "./snapshot.ts";
+import type { ReconcileSnapshot, HarnessExecutionResult } from "./snapshot.ts";
 
 /** Largest timeout supported by JavaScript timers. */
 export const MAX_VERB_TIMEOUT_MS = 2_147_483_647 as const;
@@ -24,10 +24,6 @@ interface VerbInput {
 export interface HarnessInvocationInput extends VerbInput {
   readonly title: string;
   readonly prompt: string;
-  /** Existing Aide Lane to continue, including the reserved main Lane ID `main`. */
-  readonly laneId?: string;
-  /** Create a new side Lane from laneId instead of continuing it. Defaults to false. */
-  readonly newLane?: boolean;
   /** Replace this target native context with the supplied bounded prompt; never replay old turns. */
   readonly freshContext?: boolean;
   /** Omit to use the host's selected HarnessTarget when scheduling. */
@@ -36,8 +32,8 @@ export interface HarnessInvocationInput extends VerbInput {
 
 export interface CompletedHarnessValue {
   readonly outcome: "completed";
-  readonly laneId: string;
-  readonly turn: TurnSummary;
+  readonly invocationId: string;
+  readonly result: HarnessExecutionResult;
 }
 
 export type HarnessValue = CompletedHarnessValue;
@@ -58,16 +54,15 @@ export interface PluginVerbs {
 
 export interface ExecutionAssociation {
   readonly resourceRef?: ResourceRef;
-  readonly conversationId?: string;
-  readonly inputId?: string;
-  readonly inputIds?: readonly string[];
+  /** Opaque application-owned correlation metadata; the runtime only persists it. */
+  readonly attributes?: Readonly<Record<string, unknown>>;
 }
 
 export interface ReconcileContext {
   /** Core identity of this live execution, including its associated verb calls. */
   readonly executionId: string;
-  /** Associate subsequent actions with business input, independently of Harness selection. */
-  withContext(context: Pick<ExecutionAssociation, "conversationId" | "inputId" | "inputIds">): ReconcileContext;
+  /** Attach application metadata to subsequent actions without changing resource ownership. */
+  withContext(attributes: Readonly<Record<string, unknown>>): ReconcileContext;
   readonly snapshot: ReconcileSnapshot;
   readonly verbs: PluginVerbs;
 }

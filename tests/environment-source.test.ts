@@ -114,7 +114,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
     const scope = aide.personal;
     const resources = await scope.plugins.resourceClient("personal").list(ENVIRONMENT_SOURCE_TYPE);
     assert.equal(resources.length, 2);
-    for (const resource of resources) await scope.plugins.enqueue({ aideSessionId: scope.id, pluginInstanceId: "personal", namespace: "v1",
+    for (const resource of resources) await scope.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1",
       resourceApiVersion: ENVIRONMENT_SOURCE_TYPE.apiVersion, resourceKind: ENVIRONMENT_SOURCE_TYPE.kind, resourceId: resource.metadata.name });
     for (let attempt = 0; attempt < 500; attempt++) {
       if (scope.conversations.inputStore.list().some((input) => input.status.routing?.phase === "done")) break;
@@ -128,7 +128,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   assert.match(prompts.at(-1)!, /workload.changed/);
   assert.ok(aide.outputs().filter((message) => message.conversationId === "other").some((message) => message.text === "关注的服务有变化"));
   assert.equal(aide.works().length, 0);
-  const sessions = new SessionStore(root); const persisted = sessions.openSession(aide.runtime.id);
+  const sessions = new SessionStore(root); const persisted = sessions.openSession("aide:execution");
   const events = persisted.ledger.read().filter((event) => event.kind === "connector.started");
   assert.ok(events.some((event) => JSON.stringify(event.payload).includes("environments.workloads")));
   await persisted.closeLogs();

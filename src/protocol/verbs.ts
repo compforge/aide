@@ -4,9 +4,8 @@ import type { HarnessInvocationInput, HarnessResult, ResourceNamespace } from "@
 
 export interface ExecutionScope extends ExecutionAssociation {
   readonly controllerName?: string;
-  readonly aideSessionId: string;
   readonly pluginInstanceId: string;
-  /** Namespace of the Resource or session boundary that initiated the action. */
+  /** Namespace of the resource that initiated the action. */
   readonly namespace: ResourceNamespace;
   /** Core-issued identity for one live Plugin execution. */
   readonly executionId: string;

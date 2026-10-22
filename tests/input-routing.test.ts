@@ -68,7 +68,7 @@ test("The first unscoped Source Input creates a replyable Conversation without s
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const source = aide.personal;
   const client = source.plugins.resourceClient("personal");
-  await assert.rejects(client.get({ ...CONVERSATION_TYPE, sessionId: "unknown", namespace: "v1", name: "missing" }), /Resource scope/);
+  assert.equal(await client.get({ ...CONVERSATION_TYPE, namespace: "v1", name: "missing" }), undefined);
   assert.equal(aide.runtime.plugins.listInstances().length, 1, "A resource read must not create another plugin instance");
   const spec = { origin: "source" as const, originId: "personal.environments", text: "同事希望确认发布窗口", observation: { kind: "mention" } };
   await source.conversations.submit("first", spec);

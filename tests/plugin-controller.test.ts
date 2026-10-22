@@ -46,14 +46,13 @@ function testSession(root: string): { id: string; dir: string } {
 
 function store(root: string): PluginResourceStore {
   return new PluginResourceStore({
-    session: testSession(root),
+    home: root,
     pluginInstanceId: "reqloop_default",
   });
 }
 
 function key(resourceId: string = "run_1"): ReconcileKey {
   return {
-    aideSessionId: "bs_test",
     pluginInstanceId: "reqloop_default",
     namespace: "v1",
     resourceApiVersion: REQ_LOOP_RUN.apiVersion,
@@ -685,7 +684,6 @@ describe("plugin Controller", () => {
           timeoutMs: 0,
           title: "Review",
           prompt: "Continue?",
-          laneId: "main",
         });
       },
     });
@@ -700,7 +698,6 @@ describe("plugin Controller", () => {
           timeoutMs: MAX_VERB_TIMEOUT_MS + 1,
           title: "Review",
           prompt: "Continue?",
-          laneId: "main",
         });
       },
     });

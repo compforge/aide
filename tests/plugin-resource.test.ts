@@ -32,7 +32,7 @@ function testSession(root: string): { id: string; dir: string } {
 
 function store(root: string): PluginResourceStore {
   return new PluginResourceStore({
-    session: testSession(root),
+    home: root,
     pluginInstanceId: "reqloop_default",
   });
 }
@@ -81,7 +81,7 @@ describe("PluginResourceStore", () => {
     expect(project.metadata.uid).not.toBe(session.metadata.uid);
 
     const samePluginResources = new PluginResourceStore({
-      session: testSession(root),
+      home: root,
       pluginInstanceId: "reqloop_default",
     });
     expect(samePluginResources.list(REQ_LOOP_RUN, {
@@ -131,8 +131,7 @@ describe("PluginResourceStore", () => {
 
     const path = join(
       root,
-      "sessions",
-      "bs_test",
+      "shared",
       "plugins",
       "reqloop_default",
       "namespaces",
@@ -377,10 +376,10 @@ describe("PluginResourceStore", () => {
     expect(
       () =>
         new PluginResourceStore({
-          session: { id: "../escape", dir: root },
-          pluginInstanceId: "reqloop_default",
+          home: root,
+          pluginInstanceId: "../escape",
         }),
-    ).toThrow("aideSessionId");
+    ).toThrow("pluginInstanceId");
 
     const resources = store(root);
     expect(() =>
@@ -402,8 +401,7 @@ describe("PluginResourceStore", () => {
     const root = testRoot();
     const path = join(
       root,
-      "sessions",
-      "bs_test",
+      "shared",
       "plugins",
       "reqloop_default",
       "namespaces",

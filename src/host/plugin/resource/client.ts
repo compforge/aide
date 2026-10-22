@@ -49,9 +49,6 @@ export function createResourceClient(
   assertCanCreateType?: (type: ResourceType) => void,
   admit?: ResourceAdmission,
 ): ResourceClient {
-  const assertSession = (id?: string) => {
-    if (id && id !== store.aideSessionId) throw new Error(`Resource scope does not belong to Session ${id}`);
-  };
   const changed = (
     kind: "created" | "status-updated" | "metadata-updated" | "deleted",
     resource: Readonly<Resource<unknown, unknown>>,
@@ -76,16 +73,9 @@ export function createResourceClient(
       // Resource mutation has committed; host reactions must not turn it into failure.
     } });
   };
-  const assertOwned = (
-    resource: Readonly<Resource<unknown, unknown>>,
-  ): void => {
-    assertSession(resource.metadata.sessionId);
-  };
-
   async function get<TSpec, TStatus>(
     ref: ResourceRef,
   ): Promise<Readonly<Resource<TSpec, TStatus>> | undefined> {
-    assertSession(ref.sessionId);
     const current = store.find<TSpec, TStatus>(
       ref,
       ref.name,
@@ -103,7 +93,6 @@ export function createResourceClient(
   function create<TSpec, TStatus>(
     type: ResourceType,
     init: {
-      sessionId?: string;
       name: string;
       namespace?: ResourceNamespace;
       labels?: Readonly<Record<string, string>>;
@@ -114,7 +103,6 @@ export function createResourceClient(
     }
   ) {
     assertCanCreateType?.(type);
-    assertSession(init.sessionId);
     const admitted = store.storage.transaction(() => admit?.(type, init));
     if (admitted) { changed("created", admitted); return deepFreeze(admitted) as Resource<TSpec, TStatus>; }
     const created = deepFreeze(
@@ -137,7 +125,6 @@ export function createResourceClient(
     return created;
   }
   function replace<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, spec: TSpec, status: TStatus) {
-    assertOwned(resource);
     if (store.get(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace).metadata.uid !== resource.metadata.uid) throw new Error("Resource incarnation changed before replacement");
     const updated = deepFreeze(store.replace(resource, resource.metadata.name, spec, status, {
       expectedResourceVersion: resource.metadata.resourceVersion, namespace: resource.metadata.namespace as ResourceNamespace,
@@ -149,7 +136,6 @@ export function createResourceClient(
     resource: Readonly<Resource<TSpec, TStatus>>,
     patch: Partial<TStatus>,
   ) {
-    assertOwned(resource);
     if (store.get(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace).metadata.uid !== resource.metadata.uid) throw new Error("Resource incarnation changed before status update");
     const patched = deepFreeze(
       store.patchStatus<TSpec, TStatus>(
@@ -173,9 +159,6 @@ export function createResourceClient(
   async function commit(writes: readonly ResourceCommit[]) {
     if (!writes.length || writes.length > 100) throw new Error("Resource commit requires 1..100 writes");
     // All writes use the same storage transaction and publish Watch events only after commit.
-    for (const w of writes) {
-      if (w.operation !== "create" && w.resource.metadata.sessionId && w.resource.metadata.sessionId !== store.aideSessionId) throw new Error("Resource commit cannot cross Sessions");
-    }
     return store.storage.transaction(() => writes.map((w) => w.operation === "create"
       ? create(w.type, { name: w.name, spec: w.spec, status: w.status })
       : w.operation === "replace" ? replace(w.resource, w.spec, w.status) : patchStatus(w.resource, w.patch))) as Resource<unknown, unknown>[];
@@ -188,7 +171,6 @@ export function createResourceClient(
       type: ResourceType,
       options?: ResourceListOptions,
     ) {
-      if (options?.sessionId !== "*") assertSession(options?.sessionId);
       return store
         .list<TSpec, TStatus>(type, options)
         .map((resource) => deepFreeze(resource));
@@ -201,7 +183,6 @@ export function createResourceClient(
       namespace: ResourceNamespace = "v1",
     ) {
       const resource = deepFreeze(store.get(type, name, namespace));
-      assertOwned(resource);
       for (const update of store.requestDeletion(
         type,
         name,
@@ -235,7 +216,6 @@ export function createResourceClient(
         readonly annotations?: Readonly<Record<string, string | null>>;
       },
     ) {
-      assertOwned(resource);
       const patched = deepFreeze(
         store.patchMetadata<TSpec, TStatus>(
           resource,

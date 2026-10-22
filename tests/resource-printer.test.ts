@@ -1,3 +1,4 @@
+import { resourceHome } from "../src/host/resource/storage.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { cpSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -22,7 +23,7 @@ const snapshot = (value = "hello"): Resource<{ value: string }, { phase: string 
 function fixture(t: TestContext, options: Partial<ManagerOptions> = {}) {
   const root = mkdtempSync(join(tmpdir(), "aide-printer-"));
   const session = new SessionStore(root).createSession({ id: "printer-session", cwd: root });
-  const instances = new PluginInstanceStore({ session });
+  const instances = new PluginInstanceStore({ home: resourceHome(session.dir) });
   const errors: unknown[] = [];
   const manager = new Manager({ session, instances, onActivationError: ({ error }) => errors.push(error), ...options });
   t.after(async () => { await manager.close(); await session.closeLogs(); rmSync(root, { force: true, recursive: true }); });

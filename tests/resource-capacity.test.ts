@@ -15,7 +15,7 @@ function setup(t: { after(fn: () => void): void }) {
   const record = (id: string, released = true, refs: string[] = []): StoredResource => ({ object: { ...type,
     metadata: { name: id, uid: id, namespace: "v1", resourceVersion: "1", generation: 1, creationTimestamp: new Date(0).toISOString() },
     spec: { refs }, status: { released } } });
-  for (const scope of ["one", "two"]) db.register(scope, ["example.dev/v1", "example.dev/v2"].map((apiVersion) => ({ ...definition({ ...type, apiVersion }, "shared"), retention: {
+  for (const scope of ["one", "two"]) db.register(scope, ["example.dev/v1", "example.dev/v2"].map((apiVersion) => ({ ...definition({ ...type, apiVersion }), retention: {
     releasedAt: (r) => (r.status as { released: boolean }).released ? r.metadata.creationTimestamp : undefined,
     references: (r) => (r.spec as { refs: string[] }).refs ?? [] } })));
   db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 3 }, lowWatermark: 0.9 }));
@@ -68,7 +68,7 @@ test("Failed writes roll back receipts and collection; immutable history can shr
 test("Plugin resources reopen from SQLite with the same version and bounded individual payloads", (t) => {
   const root = mkdtempSync(join(tmpdir(), "resource-sqlite-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const options = { session: { id: "s", dir: join(root, "sessions", "s") }, pluginInstanceId: "plugin" };
+  const options = { home: root, pluginInstanceId: "plugin" };
   const store = new PluginResourceStore(options);
   store.storage.configure(ResourceStorageConfigSchema.parse({ defaults: { maxResourceBytes: 1000 } }));
   const type = { apiVersion: "example.dev/v1", kind: "Document" };

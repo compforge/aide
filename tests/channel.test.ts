@@ -128,7 +128,7 @@ test("web answers the original Harness approval and rejects stale or mismatched 
   assert.equal((await post("/approvals", answer)).status, 409);
   assert.equal((await receiving).status, 200);
   assert.deepEqual(await (await fetch(url + "/approvals")).json(), []);
-  const resolved = aide.personal.core.projection.approvals.get(pending.messageId)?.request;
+  const resolved = aide.personal.core.executions.approval(pending.messageId);
   assert.equal(resolved?.status, "answered");
   assert.ok(resolved?.responseMessageId);
 });

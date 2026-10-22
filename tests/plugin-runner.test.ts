@@ -1,3 +1,4 @@
+import { resourceHome } from "../src/host/resource/storage.ts";
 import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { commandContext, executeCommand } from "./fixtures/command-context.ts";
@@ -14,7 +15,6 @@ import { pathToFileURL } from "node:url";
 
 import type { DeferredHookStage, HookSubjectMap, InlineHookStage } from "@compforge/aide-plugin";
 
-import { CoreSession } from "../src/host/core/index.ts";
 import { PluginInstanceStore } from "../src/host/plugin/instance.ts";
 import { Manager, type PluginRunnerFailure } from "../src/host/plugin/manager.ts";
 import { PluginSupervisor } from "../src/host/plugin/runner/index.ts";
@@ -60,7 +60,7 @@ function stores() {
   cpSync(join(import.meta.dir, "fixtures", "process-plugin.ts"), entry);
   return {
     root,
-    instances: new PluginInstanceStore({ session }),
+    instances: new PluginInstanceStore({ home: resourceHome(session.dir) }),
     session: sessionHandle,
     entry,
   };
@@ -294,42 +294,12 @@ describe("Plugin Runner process boundary", () => {
     });
     await manager.start();
 
-    const outputKinds: string[] = [];
-    const channel = new CoreSession({
-      session,
-      controller: {
-        mentionBudgetChars: 1_000,
-        createAdapter: () => {
-          throw new Error("unused test adapter");
-        },
-        resolveTarget: () => undefined,
-      },
-      hooks: {
-        has: (stage) => manager.hasHook(stage),
-        inline: async <S extends InlineHookStage>(
-          stage: S,
-          subject: Readonly<HookSubjectMap[S]>,
-        ) => await manager.inlineHook(stage, subject),
-        defer: <S extends DeferredHookStage>(
-          stage: S,
-          subject: Readonly<HookSubjectMap[S]>,
-        ) => {
-          if (stage === "view.output") {
-            outputKinds.push((
-              subject as unknown as HookSubjectMap["view.output"]
-            ).kind);
-          }
-          manager.deferHook(stage, subject);
-        },
-      },
-    });
-    await expect(channel.publishViewOutput("transcript", () => true)).resolves.toBe(true);
+    manager.deferHook("view.output", { outputId: "published", kind: "transcript", revision: 1 });
     await waitFor(() => outputs.length === 1);
     await manager.settled();
     expect(outputs).toEqual(["Continue outbound publication?"]);
     await manager.close();
-    await channel.close();
-    expect(outputKinds).toEqual(["transcript"]);
+    await session.closeLogs();
   });
 
   test("withdraws registrations after a Runner crash", async () => {

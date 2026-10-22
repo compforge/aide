@@ -17,7 +17,6 @@ const plugin: PluginPackage = {
   version: "0.1.0",
   resources: [{
     type: EXAMPLE,
-    scope: "shared",
     schema: {
       spec: z.object({ title: z.string() }).strict(),
       status: z.object({ phase: z.string().optional() }).strict(),
@@ -99,14 +98,16 @@ Status belongs to the plugin. [ConditionedStatus](src/condition.ts) optionally r
 
 ## Verbs and execution
 
-A [ReconcileContext](src/reconcile-context.ts) supplies snapshots and typed Core verbs. Say and Harness verbs return a closed outcome: success, dismissed, timeout or failure. The typed connector facade returns provider values and throws on failure or timeout.
+A [ReconcileContext](src/reconcile-context.ts) supplies snapshots and typed Core verbs. Action and Harness verbs return a closed outcome: success, dismissed, timeout or failure. The typed connector facade returns provider values and throws on failure or timeout.
 
 ```ts
-const result = await execution.verbs.say({ text: "Which environment should I use?" });
-// The user can answer with a new Input; this execution does not wait for a reply.
+const result = await execution.verbs.harness({ title: "Inspect", prompt: "Inspect this resource.", timeoutMs: 60_000 });
+if (result.state === "success") {
+  console.log(result.value.invocationId, result.value.result.finalText);
+}
 ```
 
-`execution.withContext({ conversationId, inputId, inputIds })` associates actions with their conversation independently of Harness selection. Core also records the initiating resource.
+`execution.withContext(attributes)` attaches opaque application metadata to subsequent actions. The runtime persists it without interpreting business fields; Personal owns its conversation and input associations. The initiating resource identity is supplied by the runtime and cannot be changed by this metadata.
 
 Controllers use `execution.verbs.connectors({ timeoutMs })` for connector actions. Other components may use `context.connectors` directly. Connector timeout ends the wait without promising cancellation of the underlying provider operation.
 
@@ -120,18 +121,17 @@ Application Harness context is derived from the main resource UID and Controller
 
 Harness and connector calls require timeoutMs covering their wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
-The private execution backend still uses Turn/Lane representations in parts of the SDK and Adapter protocol. Application plugins must not select those legacy lanes or use execution Session IDs as resource ownership. See [execution boundary](../../docs/kernel.md#执行后端的边界).
+Harness returns an invocation ID and execution result. Reconcile snapshots contain only cwd and configured Harness targets, never global execution history. ApplicationRuntime composes plugin scheduling and ExecutionService independently. The private journal and Adapter protocol retain legacy Turn/Lane spellings for persisted history and native recovery; these do not appear in resource ownership or Harness invocation arguments. See [execution boundary](../../docs/kernel.md#执行后端的边界).
 
 ## Resource Printers
 
-[ResourceDefinition](src/resource.ts) is the declaration entrypoint for type, scope, schema, optional validators, Printer and retention. Declare resources before activation. For an isolated Runner, the Host package entry supplies `resourcesUrl`, a pure module whose default export is the definition array; in-process plugins use `PluginPackage.resources`. The Host loads definitions before restoration and Controllers, independently of the Runner lifetime.
+[ResourceDefinition](src/resource.ts) is the declaration entrypoint for type, schema, optional validators, Printer and retention. Declare resources before activation. For an isolated Runner, the Host package entry supplies `resourcesUrl`, a pure module whose default export is the definition array; in-process plugins use `PluginPackage.resources`. The Host loads definitions before restoration and Controllers, independently of the Runner lifetime.
 
 ```ts
 import type { ResourceDefinition } from "@compforge/aide-plugin";
 
 const definition: ResourceDefinition<{ title: string }, { phase?: string }> = {
   type: EXAMPLE,
-  scope: "shared",
   schema: {
     spec: z.object({ title: z.string() }).strict(),
     status: z.object({ phase: z.string().optional() }).strict(),
@@ -143,7 +143,7 @@ const definition: ResourceDefinition<{ title: string }, { phase?: string }> = {
 };
 ```
 
-Schema parsers synchronously validate and return canonical spec/status values. Optional create/update/delete validators run inside the storage transaction; their context lists current resources in the same scope, including preceding writes in a commit. Failures roll back writes and notifications. Unknown resource types reject. A `shared` resource belongs to the plugin instance and has no sessionId. ApplicationRuntime uses this scope. Controllers are optional and registered separately.
+Schema parsers synchronously validate and return canonical spec/status values. Optional create/update/delete validators run inside the storage transaction; their context lists current resources in the same scope, including preceding writes in a commit. Failures roll back writes and notifications. Unknown resource types reject. Every resource belongs to the plugin instance and namespace; resource identities and selectors have no sessionId. Controllers are optional and registered separately.
 
 Printer methods synchronously return strings from a supplied snapshot. Definition callbacks are trusted Host code: they must not perform I/O, call models, mutate resources or return Promises. Resource instances remain serializable data; functions are never stored in spec/status. Printer output is text, not trusted markup.
 

@@ -1,9 +1,9 @@
-import { MAIN_LANE_ID } from "@compforge/aide-plugin";
 
 import type { HarnessResumeState } from "./harness/resume.ts";
 import type { HarnessLaunchSnapshot } from "./harness/target.ts";
 
-export { MAIN_LANE_ID };
+/** Private journal compatibility key; never a plugin execution selector. */
+export const MAIN_LANE_ID = "main" as const;
 
 export interface HarnessSessionMeta {
   harness: string;

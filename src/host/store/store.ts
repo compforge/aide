@@ -365,6 +365,27 @@ function withSessionPreview(dir: string, meta: SessionMeta): SessionMeta {
  * @spec Sessions persist execution history, Lanes and native bindings; cwd never partitions their identity or storage.
  * @link component://docs/kernel.md
  */
+function journalDirectory(home: string, id: string): string {
+  assertSessionId(id);
+  const directory = /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(id) ? id : `~${createHash("sha256").update(id).digest("hex")}`;
+  return join(home, "sessions", directory);
+}
+
+/** @spec Open the application execution journal without discovering or creating resource owners.
+ * @why Existing journal paths and envelopes remain readable across upgrades; their old Session spelling is private storage compatibility.
+ */
+export function openExecutionJournal(home: string, cwd: string): SessionHandle {
+  const id = "aide:execution";
+  const dir = journalDirectory(home, id);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "meta.json");
+  const meta: SessionMeta = existsSync(path)
+    ? normalizeSessionMeta(JSON.parse(readFileSync(path, "utf8")))
+    : { aideSessionId: id, cwd: resolve(cwd), createdAt: new Date().toISOString(), harnessTargets: {}, lanes: {}, harnessSessions: {} };
+  if (!existsSync(path)) writeMetaAtomic(dir, meta);
+  return new SessionHandle(id, dir, meta);
+}
+
 export class SessionStore {
   readonly rootDir: string;
   private readonly loggerOptions: SessionLoggerOptions;
@@ -884,10 +905,7 @@ export class SessionStore {
   }
 
   private sessionDir(sessionId: string): string {
-    assertSessionId(sessionId);
-    const directory = /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(sessionId) ? sessionId
-      : `~${createHash("sha256").update(sessionId).digest("hex")}`;
-    return join(this.rootDir, "sessions", directory);
+    return journalDirectory(this.rootDir, sessionId);
   }
 
   private acquireHarnessSessionAdoptionLock(): () => void {

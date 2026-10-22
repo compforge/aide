@@ -35,8 +35,8 @@ export class Controllers {
     if (this.registrations.has(id)) throw new Error(`Duplicate Controller: ${id}`);
     validateSources(definition.sources, new Date());
     this.registrations.set(id, { definition, abort: new AbortController(), attempts: new Map(),
-      scope: { controllerName: definition.name, aideSessionId: this.session.aideSessionId, pluginInstanceId: this.pluginInstanceId, namespace: "v1",
-        resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, resourceOwner: "plugin" } });
+      scope: { controllerName: definition.name, pluginInstanceId: this.pluginInstanceId, namespace: "v1",
+        resourceApiVersion: definition.resourceType.apiVersion, resourceKind: definition.resourceType.kind, } });
   }
 
   async start(id: string, maxTotalConcurrency: number, backoff: { initialDelayMs: number; maxDelayMs: number }): Promise<void> {

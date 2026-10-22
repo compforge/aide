@@ -51,7 +51,7 @@ export class RunnerController {
     const resource = await this.options.resources.get<unknown, unknown>(ref);
     if (!resource) return;
     const resourceRef = { ...ref, uid: resource.metadata.uid };
-    const scope: ExecutionScope = { controllerName: key.controllerName, aideSessionId: key.aideSessionId, pluginInstanceId: key.pluginInstanceId, namespace: key.namespace as ResourceNamespace,
+    const scope: ExecutionScope = { controllerName: key.controllerName, pluginInstanceId: key.pluginInstanceId, namespace: key.namespace as ResourceNamespace,
       executionId: `pex_${randomUUID()}`, resourceRef };
     await this.options.verb.beginRemote(scope);
     if (this.closed) { this.options.verb.endRemote(scope.executionId); throw new Error("Controller closed during admission"); }

@@ -41,7 +41,7 @@ test("A say request for information ends its Batch; the answer is a new Input an
   const before = aide.personal.conversations.resource("me")!.status.batch!;
   assert.equal(before.phase, "done");
   assert.equal(aide.outputs().at(-1)!.text, "请提供目标环境。");
-  assert.equal(aide.personal.core.projection.approvals.size, 0);
+  assert.equal(aide.personal.core.executions.approvals().length, 0);
   await aide.close();
   aide = new Aide(home, options, pino({ level: "silent" }));
   await aide.receive(fixtureIncoming({ channelId: "web", id: "answer", sessionId: "me", text: "test 环境" })); await aide.settled();

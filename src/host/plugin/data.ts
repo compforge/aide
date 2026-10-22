@@ -1,10 +1,5 @@
-import type { RuntimeScope } from "../../protocol/runtime.ts";
 import { mkdirSync } from "node:fs";
-import {
-  basename,
-  dirname,
-  join,
-} from "node:path";
+import { join } from "node:path";
 
 import type { PluginDataDirectories } from "@compforge/aide-plugin";
 
@@ -25,26 +20,15 @@ function pluginDirectoryName(pluginId: string): string {
   return name;
 }
 
-function aideRoot(sessionDir: string): string {
-  const sessions = dirname(sessionDir);
-  if (basename(sessions) !== "sessions") {
-    throw new Error(
-      `Plugin data requires an AideSession under a sessions directory: ${sessionDir}`,
-    );
-  }
-  return dirname(sessions);
-}
-
 /**
  * Creates the writable directories owned by one Plugin at each persistence
  * scope. Package identity owns global paths; the concrete
  * Plugin Binding owns the narrowest path.
  */
 export function preparePluginDataDirectories(
-  session: RuntimeScope & { readonly dir: string },
+  root: string,
   instance: Pick<PluginInstance, "pluginId" | "pluginInstanceId">,
 ): PluginDataDirectories {
-  const root = aideRoot(session.dir);
   const plugin = pluginDirectoryName(instance.pluginId);
   const directories = Object.freeze({
     global: join(root, "plugins", plugin),

@@ -4,7 +4,7 @@ import type { OutputView } from "../../../src/output.ts";
 import type { Batch } from "./batch.ts";
 import type { ConversationTrigger } from "./trigger.ts";
 export const CONVERSATION_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Conversation" } as const;
-export interface ConversationSpec { address?: Address; id: string; name?: string; default?: boolean; sessionId?: string; trigger?: ConversationTrigger }
+export interface ConversationSpec { address?: Address; id: string; name?: string; default?: boolean; trigger?: ConversationTrigger }
 export interface ConversationStatus {
   pendingInputIds: string[];
   nextTriggerAt?: string | null;

@@ -7,7 +7,7 @@ import type { Incoming } from "./message.ts";
 
 /** Channel-facing business state and application execution projection. */
 export interface ChannelService {
-  readonly runtime: Pick<ApplicationRuntime, "projection" | "resolveApproval">;
+  readonly runtime: Pick<ApplicationRuntime, "executions">;
   readonly conversations: ConversationStore;
   subscribe(listener: () => void): () => void;
   receive(input: Incoming): Promise<InputReceipt>;
@@ -16,6 +16,6 @@ export interface ChannelService {
   outputDelivered?(outputId: string): Promise<void>;
   outputSending?(outputId: string): Promise<void>;
   outputRetry?(outputId: string, error: string, nextAttemptAt: string): Promise<void>;
-  invocations(): readonly HarnessInvocationSnapshot[];
+  invocations(): readonly (HarnessInvocationSnapshot & { conversationId?: string; inputId?: string; inputIds?: readonly string[] })[];
   conversationIds(): string[];
 }

@@ -1,3 +1,4 @@
+import { personalExecution } from "./execution-context.ts";
 import { say } from "./output/action.ts";
 import { sameAddress } from "../../src/address.ts";
 import { outputWrite } from "./output.ts";
@@ -50,7 +51,7 @@ export class Personal {
     this.plugins = this.core.plugins;
     const resources = new PluginResourceStore({ home: runtime.inputs.storage.home, pluginInstanceId: "personal" });
     const client = this.plugins.resourceClient("personal");
-    this.store = new Store(resources, client, new ConversationStore(this.id, resources, client, runtime.inputs, runtime.outputs));
+    this.store = new Store(resources, client, new ConversationStore(resources, client, runtime.inputs, runtime.outputs));
     for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
     this.store.conversations.subscribe((conversation) => {
       this.registerConversation(conversation.id);
@@ -90,7 +91,7 @@ export class Personal {
           || b.phase !== "running" || b.cancelRequested || b.quietReason) throw new Error("Chief Batch is not accepting further mutations");
         return b;
       };
-      const verbs = this.plugins.executionVerbs(executionId, conversationId);
+      const verbs = this.plugins.executionVerbs(executionId, { conversationId });
       const tools = chiefTools(this.connectors, async (quietReason) => {
         const b = active();
         if (b.context.responseRequired) throw new Error("Channel input cannot be dismissed silently");
@@ -109,9 +110,8 @@ export class Personal {
 
   get me() { return this.options.persons.me(); }
 
-  get id() { return this.core.id; }
   get conversations() { return this.store.conversations; }
-  invocations() { return this.plugins.listHarnessInvocations(); }
+  invocations() { return this.plugins.listHarnessInvocations().map(invocation => ({ ...invocation, ...personalExecution(invocation) })); }
   conversationIds() { return [...new Set([...this.store.conversations.list().map((item) => item.id), ...this.works().map((item) => item.conversationId)])]; }
   works() { return this.store.read().works; }
 

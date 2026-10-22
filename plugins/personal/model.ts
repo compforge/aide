@@ -40,7 +40,7 @@ export interface Delivery {
   inputs: Array<{ key: string; responseId: string }>;
   events: string[];
 }
-export type WorkStatus = Omit<Work, keyof WorkSpecFields | "id" | "kind" | "trigger"> & Delivery & { laneId?: string };
+export type WorkStatus = Omit<Work, keyof WorkSpecFields | "id" | "kind" | "trigger"> & Delivery;
 
 export { IncomingSchema, type Incoming } from "../../src/channel/message.ts";
 export type { OutputDraft, OutputView } from "../../src/output.ts";
@@ -64,5 +64,5 @@ export function validateTrigger(kind: Work["kind"], trigger: Trigger | null, now
 
 export const WorkSpecSchema = WorkSchema.pick({ conversationId: true, title: true, instruction: true, revision: true, inputs: true }).strict();
 export const WorkStatusSchema = WorkSchema.pick({ status: true, nextAt: true, question: true, consumedInputIds: true, history: true }).extend({
-  inputs: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()), events: z.array(z.string()), laneId: z.string().optional(),
+  inputs: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()), events: z.array(z.string()),
 }).strict();

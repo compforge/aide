@@ -1,45 +1,17 @@
-export type SessionRunState = "running" | "idle" | "requires_action";
-
-export type HarnessInputStatus =
-  | "queued"
-  | "dispatching"
-  | "admitted"
-  | "steering"
-  | "failed"
-  | "finalized"
-  | "recalled"
-  | "interrupted";
-
-/** Identifies the actor that submitted a prompt Input to Aide. */
-export type HarnessInputSource =
-  | { readonly type: "user" }
-  | {
-      readonly type: "plugin";
-      readonly pluginInstanceId: string;
-    };
-
-export type ActorKind = "user" | "harness" | "plugin" | "aide" | (string & {});
-
-export interface ActorRef {
-  readonly kind: ActorKind;
-  readonly key: string;
-}
-
-export interface TurnSummaryToolCall {
+export interface HarnessToolCall {
   readonly toolCallId: string;
   readonly title?: string;
   readonly kind?: string;
   readonly status?: string;
 }
 
-export interface TurnSummary {
-  readonly turnId: string;
+export interface HarnessExecutionResult {
   readonly stopReason?: string;
   readonly userText?: string;
   readonly agentText?: string;
   /** Harness-designated final answer; absent when the Harness did not identify one. */
   readonly finalText?: string;
-  readonly toolCalls: readonly TurnSummaryToolCall[];
+  readonly toolCalls: readonly HarnessToolCall[];
   readonly usage?: Readonly<{
     inputTokens?: number;
     outputTokens?: number;
@@ -52,58 +24,14 @@ export interface TurnSummary {
   readonly endedAt?: string;
 }
 
-export interface SessionSnapshot {
-  readonly aideSessionId: string;
-  readonly cwd?: string;
-  readonly runState: SessionRunState;
-  readonly revision: number;
-}
-
-export interface ActiveTurnSnapshot {
-  readonly turnId: string;
-  readonly state: "running" | "requires_action";
-  readonly harness?: string;
-  readonly harnessTargetId?: string;
-  readonly laneId?: string;
-  readonly startedAt?: number;
-}
-
-export interface HarnessInputSnapshot {
-  readonly messageId: string;
-  readonly turnId: string;
-  readonly harnessTargetId: string;
-  readonly laneId: string;
-  readonly harness: string;
-  readonly status: HarnessInputStatus;
-  readonly delivery: "prompt" | "steer";
-  /** steer 的投递结果；undefined = 仍在等待 Harness 原生投递边界。 */
-  readonly deliveryOutcome?: "applied" | "failed";
-  readonly source: HarnessInputSource;
-  readonly harnessInvocationId?: string;
-}
-
 export interface HarnessTargetSnapshot {
   readonly id: string;
   readonly harness: string;
   readonly label?: string;
 }
 
-export interface PendingApprovalSnapshot {
-  readonly messageId: string;
-  readonly kind:
-    | "permission"
-    | "hook_trust";
-  readonly source: ActorRef;
-  readonly target: ActorRef;
-  readonly turnId?: string;
-}
-
+/** Configuration available to a reconciliation; execution history is never implicitly injected. */
 export interface ReconcileSnapshot {
-  readonly session: SessionSnapshot;
-  readonly activeTurns: readonly ActiveTurnSnapshot[];
-  readonly harnessInputs: readonly HarnessInputSnapshot[];
+  readonly cwd?: string;
   readonly harnessTargets: readonly HarnessTargetSnapshot[];
-  readonly pendingApprovals: readonly PendingApprovalSnapshot[];
-  readonly latestTurn?: TurnSummary;
-  readonly turns: readonly TurnSummary[];
 }

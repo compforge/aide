@@ -102,9 +102,9 @@ export interface PluginContext {
   readonly runtime: PluginRuntimeContext;
   readonly dataDirs: PluginDataDirectories;
   readonly resources: ResourceClient;
-  /** Session-scoped, non-durable user feedback. Reconcile state belongs in Resource status / Board. */
+  /** Plugin-scoped, non-durable user feedback. Reconcile state belongs in Resource status / Board. */
   readonly toast: ToastSink;
-  /** Session-scoped structured diagnostics. Never log secrets or use logs as domain state. */
+  /** Plugin-scoped structured diagnostics. Never log secrets or use logs as domain state. */
   readonly logger: PluginLogger;
   readonly commands: PluginRegistry<CommandDefinition>;
   readonly mentions: PluginRegistry<Mention>;

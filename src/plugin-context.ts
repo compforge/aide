@@ -25,11 +25,7 @@ function validateHarness(input: HarnessInvocationInput): void {
   validateTimeout("harness", input.timeoutMs);
   nonEmpty("harness title", input.title);
   nonEmpty("harness prompt", input.prompt);
-  if (input.laneId !== undefined) nonEmpty("harness laneId", input.laneId);
   if (input.freshContext !== undefined && typeof input.freshContext !== "boolean") throw new Error("Invalid freshContext");
-  if (input.newLane !== undefined && typeof input.newLane !== "boolean") {
-    throw new Error(`harness newLane is invalid: ${String(input.newLane)}`);
-  }
   if (input.harnessTargetId !== undefined) {
     nonEmpty("harness harnessTargetId", input.harnessTargetId);
   }
@@ -74,7 +70,7 @@ export function createReconcileContext(
 ): ReconcileContext {
   const context: ReconcileContext = Object.freeze({
     executionId: scope.executionId,
-    withContext: (association: Pick<import("@compforge/aide-plugin").ExecutionAssociation, "conversationId" | "inputId" | "inputIds">) => createReconcileContext(snapshot, { ...scope, ...association }, invoke),
+    withContext: (attributes: Readonly<Record<string, unknown>>) => createReconcileContext(snapshot, { ...scope, attributes: Object.freeze(structuredClone(attributes)) }, invoke),
     snapshot,
     verbs: createPluginVerbs(scope, invoke),
   });

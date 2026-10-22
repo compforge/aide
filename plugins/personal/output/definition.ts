@@ -6,7 +6,7 @@ import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { AddressSchema } from "../../../src/address.ts";
 import { outputPrinter } from "./printer.ts";
 const ref = z.object({ apiVersion: z.string().min(1), kind: z.string().min(1), namespace: z.string().transform((value) => value === "v1" ? value : parseResourceNamespace(value)), name: z.string().min(1),
-  uid: z.string().optional(), sessionId: z.string().optional() }).strict();
+  uid: z.string().optional() }).strict();
 export const OutputSpecSchema = z.object({
   text: z.string().min(1).max(128_000),
   target: AddressSchema,
@@ -19,7 +19,7 @@ export const OutputStatusSchema = z.object({ phase: z.enum(["pending", "sending"
 
 
 export const OutputDefinition: ResourceDefinition<OutputSpec, OutputStatus> = {
-  type: OUTPUT_TYPE, scope: "shared", schema: { spec: OutputSpecSchema, status: OutputStatusSchema }, printer: outputPrinter,
+  type: OUTPUT_TYPE, schema: { spec: OutputSpecSchema, status: OutputStatusSchema }, printer: outputPrinter,
   validator: { update(previous, current) { if (!isDeepStrictEqual(previous.spec, current.spec)) throw new Error("Output content is immutable"); } },
   retention: { releasedAt: (r) => (r.status as OutputStatus).phase === "delivered" ? (r.status as OutputStatus).deliveredAt
     : (r.status as OutputStatus).phase === "failed" ? new Date(Date.parse(r.metadata.creationTimestamp) + 7 * 86400_000).toISOString() : undefined, references: () => [] },

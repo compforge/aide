@@ -17,7 +17,7 @@ Harness 向 Aide 提供 Agent 执行能力。宿主通过统一接口提交输�
 
 Target 的 id 与 harness 字段分开：前者定位具体配置，后者选择实现。进程内会话句柄只用于路由调用；持久恢复依赖 Adapter 发布的原生身份与版本化恢复状态，宿主不能从临时句柄猜测稳定身份。
 
-原生 Session 文件由 Harness 使用自己的默认目录保存，Aide 不托管或直接改写这些文件。Aide 的 Ledger 保存统一执行事实，不能由某一家原生历史替代。宿主根据资源 UID、Controller 与 Target 保存原生 identity 及 Adapter 的 `resumeState`；恢复时原样交回 Adapter，进程期 Handle 不作为恢复身份。Target 是可发现的配置，不是 Resource。私有执行后端仍用 Lane / Turn 表达这些记录，边界见 [Kernel](../kernel.md#执行后端的边界)。
+原生 Session 文件由 Harness 使用自己的默认目录保存，Aide 不托管或直接改写这些文件。Aide 的 Ledger 保存统一执行事实，不能由某一家原生历史替代。宿主根据资源 UID、Controller 与 Target 保存原生 identity 及 Adapter 的 `resumeState`；恢复时原样交回 Adapter，进程期 Handle 不作为恢复身份。Target 是可发现的配置，不是 Resource。ExecutionService 管理执行生命周期，私有日志与提供方协议仍用 Lane / Turn 表达部分记录，边界见 [Kernel](../kernel.md#执行后端的边界)。
 
 ## 执行契约
 

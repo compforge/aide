@@ -77,7 +77,7 @@ export class ResourceStorage {
       keys.add(key);
       const current = this.definitions.get(key);
       if (current && current !== definition) throw new Error(`Resource definition already registered: ${key}`);
-      if (!["shared", "session"].includes(definition.scope) || typeof definition.schema?.spec.parse !== "function" || typeof definition.schema?.status.parse !== "function") {
+      if (typeof definition.schema?.spec.parse !== "function" || typeof definition.schema?.status.parse !== "function") {
         throw new Error(`Invalid resource definition: ${key}`);
       }
       if (definition.printer && (typeof definition.printer.describe !== "function" || typeof definition.printer.summarize !== "function")) throw new Error(`Invalid resource Printer: ${key}`);
@@ -112,8 +112,6 @@ export class ResourceStorage {
   }
   private parse(scope: string, resource: Resource<unknown, unknown>): void {
     const definition = this.definition(this.scopeOwner(scope), resource);
-    const session = scope.startsWith("[") ? JSON.parse(scope)[0] : null;
-    if ((definition.scope === "session") !== (session !== null)) throw new Error(`Wrong resource scope: ${resource.kind} requires ${definition.scope}`);
     // Parsers may supply defaults or normalize fields; only their canonical output is persisted.
     (resource as { spec: unknown }).spec = definition.schema.spec.parse(resource.spec);
     (resource as { status: unknown }).status = definition.schema.status.parse(resource.status);

@@ -1,3 +1,4 @@
+import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { say, SayInputSchema } from "../plugins/personal/output/action.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -17,9 +18,9 @@ test("say persists an independent scoped Output and validates Input ownership", 
   const conversations = new ConversationStore(session);
   await seedInput(conversations, "tick", { sessionId: session.id, conversationId: "private", origin: "source", originId: "personal.environments", text: "review" });
   await conversations.archive("other", []);
-  const verb = new Verb({ session, actions: { "test/say": async (context, input) => { const { text } = SayInputSchema.parse(input); if (!context.conversationId) throw new Error("Missing conversation"); return conversations.say(context.conversationId, context.inputId, text); } }, capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot(session.id) });
+  const verb = new Verb({ session, actions: { "test/say": async (context, input) => { const { text } = SayInputSchema.parse(input); const association = personalExecution(context); if (!association.conversationId) throw new Error("Missing conversation"); return conversations.say(association.conversationId, association.inputId, text); } }, capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot() });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
-  const context = { aideSessionId: session.id, pluginInstanceId: "test", namespace: "v1" as const, executionId: "exec", conversationId: "private", inputId: "tick" };
+  const context = { pluginInstanceId: "test", namespace: "v1" as const, executionId: "exec", attributes: { conversationId: "private", inputId: "tick" } };
   await verb.beginRemote(context);
   const verbs = createPluginVerbs(context, (scope, request) => verb.invoke(scope, request));
   const result = await say(verbs, { text: "可以继续了" });
@@ -28,10 +29,10 @@ test("say persists an independent scoped Output and validates Input ownership", 
   assert.equal(conversations.get("private")!.outputs[0]!.text, "可以继续了");
   assert.equal(session.projection.approvals.size, 0);
   assert.equal(conversations.input("tick")!.consumption.phase, undefined);
-  assert.equal((await verb.invoke({ ...context, conversationId: "other" }, { verb: "action", name: "say", input: { text: "wrong scope" } })).state, "failure");
-  assert.equal((await verb.invoke({ ...context, conversationId: undefined }, { verb: "action", name: "say", input: { text: "no scope" } })).state, "failure");
+  assert.equal((await verb.invoke({ ...context, attributes: { ...context.attributes, conversationId: "other" } }, { verb: "action", name: "say", input: { text: "wrong scope" } })).state, "failure");
+  assert.equal((await verb.invoke({ ...context, attributes: { inputId: "tick" } }, { verb: "action", name: "say", input: { text: "no scope" } })).state, "failure");
   await assert.rejects(say(verbs, { text: " " }));
-  assert.equal((await verb.invoke({ ...context, inputId: undefined }, { verb: "action", name: "say", input: { text: "standalone message" } })).state, "success");
+  assert.equal((await verb.invoke({ ...context, attributes: { conversationId: "private" } }, { verb: "action", name: "say", input: { text: "standalone message" } })).state, "success");
   assert.equal(new ConversationStore(session).get("private")!.outputs.length, 2);
   verb.endRemote(context.executionId);
 });
@@ -42,15 +43,15 @@ test("Harness timeout and Host shutdown settle the caller and cancel execution w
   const storage = new SessionStore(root), session = storage.createSession({ id: "owner", cwd: root });
   const dispatched: string[] = [], cancelled: string[] = [];
   const verb = new Verb({ session, capacity: new ReconcileCapacity(1),
-    snapshot: () => ({ ...emptyReconcileSnapshot(session.id), harnessTargets: [{ id: "codex", harness: "codex" }] }),
+    snapshot: () => ({ ...emptyReconcileSnapshot(), harnessTargets: [{ id: "codex", harness: "codex" }] }),
     selectedHarnessTargetId: () => "codex",
     enqueueHarnessInvocation: (request) => { dispatched.push(request.invocationId); },
     cancelHarnessInvocation: (id) => { cancelled.push(id); return "queued"; } });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
-  const scope = { aideSessionId: session.id, pluginInstanceId: "test", namespace: "v1" as const, executionId: "timeout" };
+  const scope = { pluginInstanceId: "test", namespace: "v1" as const, executionId: "timeout", resourceRef: { apiVersion: "test.dev/v1", kind: "Work", namespace: "v1" as const, name: "one", uid: "one" } };
   await verb.beginRemote(scope);
   assert.deepEqual(await verb.invoke(scope, { verb: "harness", input: {
-    title: "deadline", laneId: "main", prompt: "work", timeoutMs: 20,
+    title: "deadline", prompt: "work", timeoutMs: 20,
   } }), { state: "timeout" });
   assert.equal(dispatched.length, 1);
   assert.deepEqual(cancelled, dispatched);
@@ -59,7 +60,7 @@ test("Harness timeout and Host shutdown settle the caller and cancel execution w
   const shutdown = { ...scope, executionId: "shutdown" };
   await verb.beginRemote(shutdown);
   const pending = verb.invoke(shutdown, { verb: "harness", input: {
-    title: "shutdown", laneId: "main", prompt: "work", timeoutMs: 10_000,
+    title: "shutdown", prompt: "work", timeoutMs: 10_000,
   } });
   await Promise.resolve();
   verb.failAll("Host shutdown");
@@ -79,14 +80,14 @@ test("Interruption before Harness creation prevents later actions in that execut
   const session = new SessionStore(root).createSession({ id: "owner", cwd: root });
   let dispatched = 0, messages = 0;
   const verb = new Verb({ session, actions: { "test/say": async () => { messages++; return { outputId: "unexpected" }; } },
-    capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot(session.id),
+    capacity: new ReconcileCapacity(1), snapshot: () => emptyReconcileSnapshot(),
     enqueueHarnessInvocation: () => { dispatched++; } });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
-  const scope = { aideSessionId: session.id, pluginInstanceId: "test", namespace: "v1" as const, executionId: "cancel-before-start" };
+  const scope = { pluginInstanceId: "test", namespace: "v1" as const, executionId: "cancel-before-start" };
   await verb.beginRemote(scope);
   verb.interruptExecution(scope.executionId);
   const verbs = createPluginVerbs(scope, (scope, request) => verb.invoke(scope, request));
-  assert.deepEqual(await verbs.harness({ title: "late", laneId: "main", prompt: "Must not run", timeoutMs: 1000 }), { state: "dismissed" });
+  assert.deepEqual(await verbs.harness({ title: "late", prompt: "Must not run", timeoutMs: 1000 }), { state: "dismissed" });
   assert.deepEqual(await say(verbs, { text: "late message" }), { state: "dismissed" });
   assert.equal(dispatched, 0); assert.equal(messages, 0); assert.equal(session.projection.approvals.size, 0);
   verb.endRemote(scope.executionId);

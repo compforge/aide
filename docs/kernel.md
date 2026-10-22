@@ -16,7 +16,7 @@ Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controll
 
 底座没有内置 Resource 类型，也不要求一次处理从用户消息开始。一个插件可以只观察外部资源，另一个插件可以调用 Harness 作判断；不使用 Personal 时仍能运行相同的存储、Watch 与 Reconcile 机制。Channel 如何接收消息、Input 如何归入 Conversation、Output 向谁投递，属于应用与业务插件。
 
-资源按插件实例和 namespace 组织，业务身份不依附执行 Session。`ApplicationRuntime` 使用全局资源作用域；插件声明 `scope: "shared"`，资源与引用不携带 sessionId。类型归属、Schema 与保留策略在 Controller 启动前注册，Runner 关闭后仍然有效。
+资源按插件实例和 namespace 组织，业务身份不依附执行 Session。资源只有插件实例与 namespace 这一套作用域，ResourceDefinition 不再声明 shared/session，资源与引用不携带 sessionId。类型归属、Schema 与保留策略在 Controller 启动前注册，Runner 关闭后仍然有效。
 
 ## 一次协调如何推进
 
@@ -42,9 +42,11 @@ HarnessTarget 表达具体执行配置，包含 ID、Harness 实现及模型等�
 
 ### 执行后端的边界
 
-当前 ApplicationRuntime 私有复用 Ledger / CoreSession 执行后端，内部仍以 Lane / Turn 记录串行执行、流式事件、取消与恢复绑定。它只有一份内部执行日志，不按入口创建调度器或插件实例。Session / Turn 没有 Resource 投影，业务资源不归其所有。
+ApplicationRuntime 直接组合插件 Manager 与 ExecutionService。前者管理插件、资源与调度，后者管理 Harness 执行、原生审批、日志租约与关闭，不接收业务 Input，也不创建插件实例。CoreSession 与其 TUI 输入、命令派发入口已移除。
 
-这部分实现尚未完成独立执行日志的抽取：底层 Adapter 协议、部分 SDK 执行结果与兼容接口仍使用 Turn / Lane 词汇。新增业务应依据资源身份组织上下文，不使用这些内部结构设计业务资源或路由。
+Reconcile 的冻结快照只有 cwd 与 HarnessTarget 配置，不复制全局执行历史。Harness 返回 invocationId 与执行结果；应用展示通过明确选择执行 ID 查询日志投影，取得副本。Personal 自己解释 Conversation/Input 关联，底座只保存不透明 attributes。
+
+现有日志的磁盘路径、事件格式及底层 Adapter 仍保留 SessionHandle、Lane / Turn 等实现词汇，以保留原生恢复身份和历史边界。它们不再作为资源作用域、调度键或插件 Harness 参数，也没有 Resource 投影。日志编码与旧原生协议的进一步整理不改变当前插件契约。
 
 ## 能力与事务
 
