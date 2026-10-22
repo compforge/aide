@@ -37,13 +37,6 @@ function testRoot(): string {
   return root;
 }
 
-function testSession(root: string): { id: string; dir: string } {
-  return {
-    id: "bs_test",
-    dir: join(root, "sessions", "bs_test"),
-  };
-}
-
 function store(root: string): PluginResourceStore {
   return new PluginResourceStore({
     home: root,

@@ -1,9 +1,9 @@
 import type { ConnectorClient } from "./connectors/index.ts";
 import type { Controller } from "./reconcile.ts";
 import type { Resource, ResourceClient, ResourceDefinition } from "./resource.ts";
-import type { CommandDefinition } from "./command.ts";
+
 import type { Hook, HookStage } from "./hook.ts";
-import type { Mention } from "./mention.ts";
+
 
 export type PluginConfig = Record<string, unknown>;
 
@@ -36,16 +36,7 @@ export interface PluginDataDirectories {
   readonly instance: string;
 }
 
-export type ToastTone = "info" | "success" | "warning" | "error";
 
-export interface ToastMessage {
-  readonly text: string;
-  readonly tone: ToastTone;
-}
-
-export interface ToastSink {
-  show(message: ToastMessage): void;
-}
 
 export type PluginLogLevel = "debug" | "info" | "warn" | "error";
 
@@ -74,10 +65,6 @@ export interface PluginLogger {
   error(message: string, context?: PluginLogContext): void;
 }
 
-export interface PluginRegistry<T> {
-  register(value: T): void;
-}
-
 export interface PluginControllerRegistry {
   register<TSpec, TStatus>(controller: Controller<TSpec, TStatus>): void;
 }
@@ -102,12 +89,8 @@ export interface PluginContext {
   readonly runtime: PluginRuntimeContext;
   readonly dataDirs: PluginDataDirectories;
   readonly resources: ResourceClient;
-  /** Plugin-scoped, non-durable user feedback. Reconcile state belongs in Resource status / Board. */
-  readonly toast: ToastSink;
   /** Plugin-scoped structured diagnostics. Never log secrets or use logs as domain state. */
   readonly logger: PluginLogger;
-  readonly commands: PluginRegistry<CommandDefinition>;
-  readonly mentions: PluginRegistry<Mention>;
   readonly controllers: PluginControllerRegistry;
   readonly printers: PluginPrinters;
   readonly hooks: PluginHookRegistry;
@@ -117,7 +100,7 @@ export interface PluginContext {
 /**
  * One installable group of Resource schemas, Controllers, Sources, and Connectors.
  *
- * @spec A Plugin Package declares resource scopes per definition; one enabled PluginInstance activates one Worker, while each Resource carries its own namespace.
+ * @spec A Plugin Package declares resource types per definition; one enabled PluginInstance activates one Worker, while each Resource carries its own namespace.
  */
 export interface PluginPackage {
   readonly pluginId: string;

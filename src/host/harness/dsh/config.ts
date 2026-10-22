@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { HarnessTargetConfig } from "../../config/types.ts";
+import type { HarnessTargetConfig } from "../target.ts";
 
 const text = z.string().trim().min(1);
 export const DshConfigSchema = z.object({

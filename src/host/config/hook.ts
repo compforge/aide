@@ -13,7 +13,7 @@ import { dirname, join } from "node:path";
 
 import type { HookTrustCandidate } from "../approval/types.ts";
 import { withFileLock } from "../store/file-lock.ts";
-import { aideRoot } from "./config.ts";
+import { homedir } from "node:os";
 
 interface PersistedHookState extends Record<string, unknown> {
   trust?: unknown;
@@ -27,7 +27,7 @@ export interface HookTrustStore {
 }
 
 export function hookStatePath(rootDir?: string): string {
-  return join(aideRoot(rootDir), "state", "hook.json");
+  return join(rootDir ?? join(homedir(), ".aide"), "state", "hook.json");
 }
 
 /** currentHash 是 Codex 对完整 hook definition 的权威指纹；缺失时用同字段稳定降级。 */

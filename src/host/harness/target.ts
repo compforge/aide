@@ -60,3 +60,35 @@ export interface HarnessModel {
   readonly description?: string;
   readonly efforts: readonly { readonly id: string; readonly label: string }[];
 }
+
+/** 一份 HarnessTarget 的用户配置；`harness` 选择解析它的 HarnessDefinition。 */
+export interface HarnessTargetConfig {
+  readonly harness: string;
+  /** 该 Target 启动 Harness 时覆盖的环境变量；用于选择账号目录等进程级配置。 */
+  readonly env?: Readonly<Record<string, string>>;
+  readonly [key: string]: unknown;
+}
+
+
+const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** Adapter/probe 创建边界的严格校验：账号选择不能因坏配置静默回落到 Aide 进程环境。 */
+export function targetEnvironmentFor(
+  config: HarnessTargetConfig,
+  targetId: string,
+): Readonly<Record<string, string>> | undefined {
+  if (config.env === undefined) return undefined;
+  const supplied = config.env !== null && typeof config.env === "object" && !Array.isArray(config.env) ? config.env : undefined;
+  if (!supplied) throw new Error(`HarnessTarget ${targetId} env must be a string map`);
+
+  const environment: Record<string, string> = {};
+  for (const [name, value] of Object.entries(supplied)) {
+    if (!ENV_NAME_PATTERN.test(name)) {
+      throw new Error(`HarnessTarget ${targetId} env has invalid variable name: ${name}`);
+    }
+    if (typeof value !== "string") {
+      throw new Error(`HarnessTarget ${targetId} env ${name} must be a string`);
+    }
+    environment[name] = value;
+  }
+  return Object.keys(environment).length > 0 ? Object.freeze(environment) : undefined;
+}

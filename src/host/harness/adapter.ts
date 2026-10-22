@@ -24,7 +24,7 @@ export type { HarnessEvent, HarnessEventSink } from "./event.ts";
 export interface HarnessSessionHandle {
   harness: string;
   handleId: string;
-  /** 是否成功恢复了既有原生会话；false 表示新建，宿主需要从 AideSession 补历史。 */
+  /** 是否成功恢复了既有原生会话；false 表示新建，宿主需要从 HarnessStore 补历史。 */
   resumed?: boolean;
 }
 
@@ -44,7 +44,7 @@ export interface HarnessSessionBinding {
 
 export type HarnessSessionBindingSink = (binding: HarnessSessionBinding) => void;
 
-/** provider 原生入站消息的旁路 trace；不进入 session event ledger。 */
+/** provider 原生入站消息的旁路 trace；不进入 execution event ledger。 */
 export type NativeEventSink = (event: {
   direction: "in";
   name?: string;
@@ -56,8 +56,6 @@ export interface OpenOptions {
   env?: Record<string, string>;
   /** Adapter 上次返回的版本化恢复状态；adapter 应优先恢复，缺失时新建。 */
   resumeState?: HarnessResumeState;
-  /** @deprecated 旧 meta/第三方 adapter 的迁移兼容；新实现使用 resumeState。 */
-  resumeSessionId?: string;
 }
 
 /**
@@ -67,7 +65,7 @@ export interface OpenOptions {
  * 内部映射，不进 controller 契约。
  *
  * 普通 prompt 的 `user_message` / `state_update(running)` 由 controller 在出队时落盘
- * （用户输入是 AideSession 的事实，不等 harness 冷启动；且新 turn 的 blocks 可能
+ * （执行输入是 HarnessStore 的事实，不等 harness 冷启动；且新 turn 的 blocks 可能
  * 含 <aide-sync> prepend，不能进正典历史）——adapter **不得**为 prompt 重复发这两个
  * 事件；messageId 仅供 same-turn send 成功路径发 delivery:"steer" 的 user_message upsert。
  */
@@ -82,7 +80,7 @@ export type PromptInput = Pick<HarnessInput, "invocationId" | "messageId" | "blo
   syncBlocks?: PromptBlock[];
 };
 
-/** Turn submit 回执：只代表请求被接受，不代表 Turn 完成（见 docs/workflow.md）。 */
+/** Turn submit 回执：只代表请求被接受，不代表 Turn 完成（见 docs/kernel.md）。 */
 export interface PromptReceipt {
   accepted: true;
 }
@@ -138,12 +136,6 @@ export interface AdapterCapabilities {
   reconcile?: CapabilityMarker;
   /** 声明后必须实现 ApprovalRoutable：能报告审批请求当前路由给谁。 */
   approvalRouting?: CapabilityMarker;
-  /**
-   * 声明后必须实现 TextGeneratable：一次性结构化文本生成（不开 HarnessSession、
-   * 不产生 Turn、不进事件流）——session 标题这类旁路工具调用走这里，
-   * 由 core 的路由器跨 harness 降级（某家 quota/auth 不可用时换一家）。
-   */
-  textgen?: CapabilityMarker;
   tasks?: {
     /** 声明后必须实现 TaskStoppable：按 Harness 原生 task id 停止单个后台任务。 */
     stop?: CapabilityMarker;
@@ -351,7 +343,7 @@ export function isReconcilable(adapter: HarnessAdapter): adapter is HarnessAdapt
 }
 
 /**
- * 审批路由的归一值：`user` = 请求进 aide TUI；`delegated` = harness 侧 reviewer 代批
+ * 审批路由的归一值：`user` = 请求交给应用审批入口；`delegated` = harness 侧 reviewer 代批
  * （必须留下带 id 的回执，见 docs/approval-lifecycle.md）。harness 的方言词
  * （codex 的 `auto_review` / `guardian_subagent`）在 adapter 边界收口，不越界。
  */
@@ -373,29 +365,6 @@ export function isApprovalRoutable(adapter: HarnessAdapter): adapter is HarnessA
   return typeof (adapter as Partial<ApprovalRoutable>).approvalRoute === "function";
 }
 
-/** 一次性结构化生成请求。`jsonSchema` 约束返回值形状（如 `{title: string}`）。 */
-export interface TextgenRequest {
-  prompt: string;
-  jsonSchema: Record<string, unknown>;
-  /** 未给 → 由该 adapter 选择默认模型；各 harness 的模型 ID 方言由 adapter 自己收口。 */
-  model?: string;
-  cwd: string;
-  timeoutMs?: number;
-}
-
-/**
- * 可选能力：一次性结构化文本生成。刻意不经过 HarnessSession/Turn——标题生成这类
- * 工具调用不该创建原生会话、占用会话上下文或在事件流留痕；失败只影响调用方降级，
- * 对既有会话零副作用。实现应为无状态子进程/独立 query，可被并发调用。
- */
-export interface TextGeneratable {
-  generateStructured(request: TextgenRequest): Promise<unknown>;
-}
-
-export function isTextGeneratable(adapter: HarnessAdapter): adapter is HarnessAdapter & TextGeneratable {
-  return typeof (adapter as Partial<TextGeneratable>).generateStructured === "function";
-}
-
 /**
  * 可选能力：让 harness 用自己的原生机制压缩当前会话上下文。
  *
@@ -410,7 +379,7 @@ export function isContextCompactable(adapter: HarnessAdapter): adapter is Harnes
   return typeof (adapter as Partial<ContextCompactable>).compactContext === "function";
 }
 
-/** 可把 AideSession 的缺失历史追加到 harness 自己的 model-visible history。 */
+/** 可把 HarnessStore 的缺失历史追加到 harness 自己的 model-visible history。 */
 export interface ContextSynchronizable {
   syncContext(ref: HarnessSessionHandle, blocks: PromptBlock[]): Promise<void>;
 }

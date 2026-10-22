@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { HarnessTargetConfig } from "../../config/types.ts";
+import type { HarnessTargetConfig } from "../target.ts";
 
 export const ClaudeConfigSchema = z.object({
   executable: z.string().trim().min(1).optional(),

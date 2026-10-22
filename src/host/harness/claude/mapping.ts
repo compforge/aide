@@ -31,7 +31,7 @@ export interface ClaudeApprovalHints {
  * lifetime 取 `persistent` 而非 `session`：作用域实际由 SDK 定、aide 不确知，
  * 而在审批展示上低报持续性才是危险的一侧（用户以为一次性、实则长期）。悲观取强档，
  * 与 name 的 "don't ask again" 一致（不变量 #2）。SDK 要求 suppress 时删除该项；
- * defaultToNo 时把拒绝放首位，对齐 chat-tui 默认选中第一项的交互。
+ * defaultToNo 时把拒绝放首位，使未显式选择时采用拒绝选项。
  */
 export function claudeApprovalOptions(hints: ClaudeApprovalHints): PermissionOption[] {
   const allowOptions: PermissionOption[] = [ALLOW_ONCE];
@@ -218,7 +218,7 @@ interface StructuredHunk {
   lines: string[];
 }
 
-/** patch 收录的 hunk 行上限：大文件 Write 的全量内容会撑爆 session.jsonl 事件行，展示层也只看头部 */
+/** patch 收录的 hunk 行上限：大文件 Write 的全量内容会撑爆 events.jsonl 事件行，展示层也只看头部 */
 const MAX_PATCH_LINES = 400;
 
 /**

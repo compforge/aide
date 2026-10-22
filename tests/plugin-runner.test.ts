@@ -1,7 +1,8 @@
-import { resourceHome } from "../src/host/resource/storage.ts";
 import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
 import { afterEach, describe, expect, test } from "bun:test";
-import { executeCommand } from "./fixtures/command-context.ts";
+import { runProbe } from "./fixtures/resource-probe.ts";
+const PROCESS_TYPE = { apiVersion: "tests.aide.dev/v1alpha1", kind: "ProcessCheck" };
+const ENVIRONMENT_TYPE = { apiVersion: "tests.aide.dev/v1alpha1", kind: "EnvironmentCheck" };
 import {
   cpSync,
   mkdirSync,
@@ -30,13 +31,8 @@ const roots: string[] = [];
 function stores() {
   const root = mkdtempSync(join(tmpdir(), "aide-plugin-runner-"));
   roots.push(root);
-  const session = {
-    id: "bs_runner",
-    dir: join(root, "sessions", "bs_runner"),
-  };
-  const sessionHandle = new HarnessFixtures(root).create({ id: session.id, cwd: root });
+  const sessionHandle = new HarnessFixtures(root).create({ id: "runner", cwd: root });
   sessionHandle.setExecutionContext("main", { contextId: "main", harnessSessions: {} });
-  mkdirSync(session.dir, { recursive: true });
   const packageDir = join(root, "installed-package");
   const entry = join(packageDir, "index.ts");
   mkdirSync(packageDir, { recursive: true });
@@ -45,7 +41,7 @@ function stores() {
   cpSync(join(import.meta.dir, "fixtures", "process-plugin.ts"), entry);
   return {
     root,
-    instances: new PluginInstanceStore({ home: resourceHome(session.dir) }),
+    instances: new PluginInstanceStore({ home: root }),
     session: sessionHandle,
     entry,
   };
@@ -89,22 +85,21 @@ describe("Plugin Runner process boundary", () => {
     const manager = new Manager({
       instances, log: entry => session.log(entry), connectors, pluginSupervisor: new PluginSupervisor(),
       onActivationError: ({ error }) => { failures.push(error); },
-      async loadPackageEntry(pluginId, version) { return { pluginId, version, entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined }; },
+      async loadPackageEntry(pluginId, version) { return { pluginId, version, entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : new URL("./fixtures/environment-definitions.ts", import.meta.url).href }; },
     });
     try {
       await manager.start();
       expect(failures).toEqual([]);
       for (const id of ["first", "second"]) {
         expect(manager.isInstanceActive(id)).toBe(true);
-        const response = await executeCommand(manager, `environment-${id}`, { argument: "" });
-        if (response?.kind !== "message") throw new Error("Expected connector result");
-        expect(JSON.parse(response.text)).toMatchObject({
+        const response = await runProbe(manager, id, ENVIRONMENT_TYPE, "inspect");
+        expect(response).toMatchObject({
           environment: { name: "dev", host: { address: "not-contacted.invalid" } },
           catalog: { requirements: [{ source: "work", provider: "fixture" }], forges: [{ forge: "forge", provider: "github" }] },
           requirementAccount: { provider: "fixture", scope: "p" }, requirementComments: { items: [] },
           requirements: { items: [requirement] }, requirement, pulls: [identity], pull, comments: [],
         });
-        await expect(executeCommand(manager, `environment-${id}`, { argument: "missing" })).rejects.toThrow("Unknown environment: missing");
+        await expect(runProbe(manager, id, ENVIRONMENT_TYPE, "missing")).rejects.toThrow("Unknown environment: missing");
       }
       expect(reads).toBe(2);
       expect(instances.list().every((instance) => Object.keys(instance.config).length === 0)).toBe(true);
@@ -157,7 +152,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : new URL("./fixtures/environment-definitions.ts", import.meta.url).href,
         };
       },
     });
@@ -192,7 +187,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : new URL("./fixtures/environment-definitions.ts", import.meta.url).href,
         };
       },
     });
@@ -207,7 +202,7 @@ describe("Plugin Runner process boundary", () => {
     await expect(notification).resolves.toBeUndefined();
 
     await session.flushLogs();
-    const records = readFileSync(join(session.dir, "session.log"), "utf8")
+    const records = readFileSync(join(session.dir, "runtime.log"), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
@@ -241,14 +236,14 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : new URL("./fixtures/environment-definitions.ts", import.meta.url).href,
         };
       },
     });
     await manager.start();
 
-    const result = await executeCommand(manager, "process-check", { argument: "no-builtins" });
-    expect(result).toEqual({ kind: "message", text: JSON.stringify(["Input", "Output", "Turn", "Session", "Target", "SessionTargetBinding"]) });
+    const result = await runProbe(manager, "process_default", PROCESS_TYPE, "no-builtins");
+    expect(result).toEqual(["Input", "Output", "Turn", "Session", "Target", "SessionTargetBinding"]);
     await manager.close();
   });
 
@@ -271,7 +266,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : new URL("./fixtures/environment-definitions.ts", import.meta.url).href,
         };
       },
     });
@@ -319,7 +314,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : new URL("./fixtures/environment-definitions.ts", import.meta.url).href,
         };
       },
       onActivationError(failure) {
@@ -337,7 +332,7 @@ describe("Plugin Runner process boundary", () => {
     expect(activationFailures).toEqual([]);
     expect(manager.isInstanceActive("process_default")).toBe(true);
     const activationLog = readFileSync(
-      join(session.dir, "session.log"),
+      join(session.dir, "runtime.log"),
       "utf8",
     )
       .trim()
@@ -351,41 +346,27 @@ describe("Plugin Runner process boundary", () => {
       component: "plugin.tests/process-plugin.lifecycle",
       message: "Process Plugin activated",
       attributes: {
-        capabilities: ["commands"],
+        capabilities: ["controllers"],
         runtime: { isolated: true },
       },
     });
-    await expect(
-      executeCommand(manager, "process-check", { argument: "data-dirs" }),
-    ).resolves.toEqual({
-      kind: "message",
-      text: JSON.stringify({
-        global: join(root, "plugins", "tests%2Fprocess-plugin"),
-        instance: join(root, "plugins", "tests%2Fprocess-plugin", "instances", "process_default"),
-      }),
+    expect(await runProbe(manager, "process_default", PROCESS_TYPE, "data-dirs")).toEqual({
+      global: join(root, "plugins", "tests%2Fprocess-plugin"),
+      instance: join(root, "plugins", "tests%2Fprocess-plugin", "instances", "process_default"),
     });
-    await expect(
-      executeCommand(manager, "process-check", { argument: "resource-ref" }),
-    ).resolves.toEqual({
-      kind: "message",
-      text: expect.stringMatching(
-        /^\{"currentUid":"pr_[^"]+"\}$/,
-      ),
-    });
-    expect(await executeCommand(manager, "process-check", { argument: "command-context" }))
-      .toEqual({ kind: "message", text: JSON.stringify(["command", "executionId"]) });
+    expect(await runProbe(manager, "process_default", PROCESS_TYPE, "resource-ref"))
+      .toEqual({ currentUid: expect.stringMatching(/^pr_/) });
+    const keys = await runProbe<string[]>(manager, "process_default", PROCESS_TYPE, "execution-context");
+    expect(keys).toContain("executionId");
+    expect(keys).toContain("verbs");
+    expect(keys).not.toContain("session");
     const heartbeat = Bun.sleep(25).then(() => "heartbeat");
-    const invocation = executeCommand(manager, "process-check", {
-      argument: "200",
-    }).then(() => "invocation");
+    const invocation = runProbe(manager, "process_default", PROCESS_TYPE, "200").then(() => "invocation");
     expect(await Promise.race([heartbeat, invocation])).toBe("heartbeat");
     expect(await invocation).toBe("invocation");
-
-    await expect(
-      executeCommand(manager, "process-check", { argument: "crash" }),
-    ).rejects.toThrow(/Plugin Runner (IPC disconnected|exited unexpectedly)/);
+    await expect(runProbe(manager, "process_default", PROCESS_TYPE, "crash")).rejects.toThrow(/Plugin Runner stopped/);
     await waitFor(() => !manager.isInstanceActive("process_default"));
-    expect(manager.listCommands()).toEqual([]);
+    expect(String(failures[0]?.error)).toMatch(/Plugin Runner (IPC disconnected|exited unexpectedly)/);
     expect(failures).toHaveLength(1);
     expect(session.projection.approvals.size).toBe(0);
 
@@ -398,7 +379,7 @@ describe("Plugin Runner process boundary", () => {
     const failures: PluginRunnerFailure[] = [];
     const manager = new Manager({ instances, log: entry => session.log(entry),
       pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 250 }),
-      async loadPackageEntry(pluginId, version) { return { pluginId, version, namespace: "v1", entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined }; },
+      async loadPackageEntry(pluginId, version) { return { pluginId, version, namespace: "v1", entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : new URL("./fixtures/environment-definitions.ts", import.meta.url).href }; },
       onRunnerFailure(failure) { failures.push(failure); },
     });
     try {
@@ -431,7 +412,7 @@ describe("Plugin Runner process boundary", () => {
           pluginId,
           version,
           namespace: "v1",
-          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : undefined,
+          entryUrl: pathToFileURL(entry).href, resourcesUrl: pluginId === "tests/process-plugin" ? new URL("./fixtures/process-definitions.ts", import.meta.url).href : new URL("./fixtures/environment-definitions.ts", import.meta.url).href,
         };
       },
       onRunnerFailure(failure) {
@@ -439,14 +420,13 @@ describe("Plugin Runner process boundary", () => {
       },
     });
 
-    await manager.start();
-    await expect(
-      executeCommand(manager, "process-check", { argument: "2000" }),
-    ).rejects.toThrow(/Plugin Runner invoke timed out/);
-    await waitFor(() => !manager.isInstanceActive("process_timeout"));
-    expect(manager.listCommands()).toEqual([]);
-    expect(failures).toHaveLength(1);
-
-    await manager.close();
+    try {
+      await manager.start();
+      // Hook notifications fail open, but an unresponsive Runner must still be terminated.
+      await manager.inlineHook("harness.input", { attemptId: "blocked", harnessTargetId: "codex", invocationId: "blocked-hook", messageId: "message", operation: "new_turn" });
+      await waitFor(() => !manager.isInstanceActive("process_timeout"));
+      expect(failures).toHaveLength(1);
+      expect(String(failures[0]!.error)).toMatch(/Plugin Runner invoke timed out/);
+    } finally { await manager.close(); }
   });
 });

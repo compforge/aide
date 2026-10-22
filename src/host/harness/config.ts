@@ -6,7 +6,7 @@ import { PiConfigSchema, resolvePiConfig, type PiConfig } from "./pi/config.ts";
 import { CodexConfigSchema, resolveCodexTargetConfig } from "./codex/config.ts";
 import { ClaudeConfigSchema, resolveClaudeTargetConfig } from "./claude/config.ts";
 import { DshConfigSchema, resolveDshTargetConfig } from "./dsh/config.ts";
-import type { HarnessTargetConfig } from "../config/types.ts";
+import type { HarnessTargetConfig } from "./target.ts";
 import { loadHarnessSkills } from "./packages.ts";
 
 export const HarnessesConfigSchema = z.object({

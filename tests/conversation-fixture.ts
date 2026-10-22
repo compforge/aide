@@ -2,7 +2,6 @@ import { personalAdmission } from "../plugins/personal/admission.ts";
 import { fixtureAddress } from "./address-fixture.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import type { Address } from "@compforge/aide-plugin";
-import { resourceHome } from "../src/host/resource/storage.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
@@ -17,13 +16,13 @@ export function fixtureBatch(patch: Partial<Batch> = {}): Batch { return { id: "
 export class ConversationStore extends PersonalConversations {
   readonly defaultConversationId: string;
   override ensure(id = this.defaultConversationId, address: Address = fixtureAddress(id)) { return super.ensure(id, address); }
-  constructor(session: { dir: string; id?: string }) {
-    const scope = { ...session, id: session.id ?? "test" };
-    const resources = new PluginResourceStore({ home: resourceHome(scope.dir), pluginInstanceId: "personal" });
+  constructor(session: { dir: string; id?: string; home?: string }) {
+    const scope = { ...session, id: session.id ?? "test", home: session.home ?? session.dir };
+    const resources = new PluginResourceStore({ home: scope.home, pluginInstanceId: "personal" });
     resources.storage.register("personal", personalDefinitions);
-    const outputStore = new OutputStore(resourceHome(session.dir));
-    const provider = personalAdmission(new InputStore(resourceHome(session.dir)), outputStore);
-    super(resources, createResourceClient(resources, (change) => this.changed(change), undefined, provider), new InputStore(resourceHome(session.dir)), outputStore);
+    const outputStore = new OutputStore(scope.home);
+    const provider = personalAdmission(new InputStore(scope.home), outputStore);
+    super(resources, createResourceClient(resources, (change) => this.changed(change), undefined, provider), new InputStore(scope.home), outputStore);
     this.defaultConversationId = scope.id;
   }
 }
@@ -41,7 +40,7 @@ export async function seedInput(store: PersonalConversations, id: string, spec: 
     const resource = store.outputStore.create(conversationId, write.name, write.spec as import("../plugins/personal/output/model.ts").OutputSpec);
     const key = store.outputStore.key(o.id);
     const stored = store.outputStore.storage.read(key)!;
-    store.outputStore.storage.write(key, JSON.stringify([null, "personal"]), { ...stored, object: { ...resource, metadata: { ...resource.metadata, creationTimestamp: o.at } } });
+    store.outputStore.storage.write(key, "personal", { ...stored, object: { ...resource, metadata: { ...resource.metadata, creationTimestamp: o.at } } });
   }
   await resources.replace(c, { ...c.spec, name: c.spec.name || initialConversationName(input.text) }, { ...c.status,
     pendingInputIds: status.phase === "done" ? c.status.pendingInputIds : [...new Set([...c.status.pendingInputIds, id])],

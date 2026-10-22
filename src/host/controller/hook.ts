@@ -73,7 +73,7 @@ export class HarnessHookCoordinator {
   }
 
   acceptHarnessEvent(binding: HarnessBinding, event: HarnessEvent): void {
-    // AideSession records and reduces the Harness output before Plugin
+    // HarnessStore records and reduces the Harness output before Plugin
     // notification. Hooks can emit Verbs, so notifying them first would allow
     // durable effects whose triggering Harness fact was lost on crash.
     const envelope = this.options.append(binding, event);

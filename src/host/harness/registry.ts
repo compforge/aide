@@ -17,9 +17,8 @@ import { PiAdapter, type PiSessionFactory } from "./pi/adapter.ts";
 import { resolveDshTargetConfig } from "./dsh/config.ts";
 import {
   targetEnvironmentFor,
-  type AideConfig,
   type HarnessTargetConfig,
-} from "../config/config.ts";
+} from "./target.ts";
 import { FileHookTrustStore } from "../config/hook.ts";
 import type { LogSink } from "../logging.ts";
 import { HARNESS_IDENTITIES, HARNESSES, parseHarness, type HarnessName, type HarnessIdentity } from "./ids.ts";
@@ -167,41 +166,6 @@ export function harnessDefinitionFor(idOrSessionKey: string): HarnessDefinition 
   const canonicalId = parseHarness(idOrSessionKey);
   return HARNESS_REGISTRY.find(
     (candidate) => candidate.id === canonicalId || candidate.sessionKey === idOrSessionKey,
-  );
-}
-
-/** 配置中的 Target id 是唯一查找键；Harness 名只选择 Definition，不充当 Target identity。 */
-export function resolveHarnessTarget(
-  config: AideConfig,
-  harnessTargetId: string,
-): HarnessTarget | undefined {
-  const targetConfig = config.targets[harnessTargetId];
-  if (!targetConfig) return undefined;
-  const definition = harnessDefinitionFor(targetConfig.harness);
-  return definition
-    ? Object.freeze({ id: harnessTargetId, harness: definition.id })
-    : undefined;
-}
-
-export function configuredHarnessTargets(config: AideConfig): HarnessTarget[] {
-  return Object.keys(config.targets).flatMap((targetId) => {
-    const target = resolveHarnessTarget(config, targetId);
-    return target ? [target] : [];
-  });
-}
-
-/** CLI/TUI 选择：Target id 精确匹配优先，Harness id/alias 只选择该家的默认 Target。 */
-export function resolveHarnessTargetSelection(
-  config: AideConfig,
-  value: string,
-): HarnessTarget | undefined {
-  const exact = resolveHarnessTarget(config, value);
-  if (exact) return exact;
-  const harness = parseHarness(value);
-  if (!harness) return undefined;
-  const candidates = configuredHarnessTargets(config).filter((target) => target.harness === harness);
-  return candidates.find((target) => target.id === harness) ?? (
-    candidates.length === 1 ? candidates[0] : undefined
   );
 }
 

@@ -1,6 +1,6 @@
 # Harness
 
-Harness 向 Aide 提供 Agent 执行能力。宿主通过统一接口提交输入、观察执行、取消或恢复会话；具体模型、原生协议和工具执行由 Harness 实现提供。插件通过 verb 请求执行，业务目标与结果判断仍由插件拥有。
+Harness 向 Aide 提供 Agent 执行能力。宿主通过统一接口提交输入、观察执行、取消或恢复会话；具体模型、原生协议和工具执行由 Harness 实现提供。插件通过 verb 请求执行，业务目标与结果判断仍由插件拥有。Harness 由应用按需装配，默认 Target 来自配置；纯资源插件不启动执行后端。
 
 [Pi](pi.md)、[Chief](chief.md) 与 Route 是独立的 Harness 身份，复用 Pi Adapter；Codex、Claude 和 DSH 则通过各自的原生协议接入。Harness 身份既可以区分提供方，也可以区分有明确职责和工具集合的 Agent。
 
@@ -19,7 +19,7 @@ Route 使用专用分类提示词，不加载执行工具、技能或记忆扩�
 
 Target 的 id 与 harness 字段分开：前者定位具体配置，后者选择实现。进程内会话句柄只用于路由调用；持久恢复依赖 Adapter 发布的原生身份与版本化恢复状态，宿主不能从临时句柄猜测稳定身份。
 
-原生 Session 文件由 Harness 使用自己的默认目录保存，Aide 不托管或直接改写这些文件。HarnessStore 保存调用事实、状态投影和原生绑定，内部通过 EventLedger 追加事件；这些记录不能由某一家原生历史替代。宿主根据资源 UID、Controller 与 Target 保存原生 identity 及 Adapter 的 `resumeState`；恢复时原样交回 Adapter，进程期 Handle 不作为恢复身份。Target 是可发现的配置，不是 Resource。ExecutionService 以 HarnessInvocation 管理执行生命周期，提供方原生标识只在 Adapter 内映射；旧日志由读取层转换，边界见 [Kernel](../kernel.md#执行后端的边界)。
+原生 Session 文件由 Harness 使用自己的默认目录保存，Aide 不托管或直接改写这些文件。HarnessStore 保存调用事实、状态投影和原生绑定，内部通过 EventLedger 追加事件；这些记录不能由某一家原生历史替代。宿主根据资源 UID、Controller 与 Target 保存原生 identity 及 Adapter 的 `resumeState`；恢复时原样交回 Adapter，进程期 Handle 不作为恢复身份。Target 是可发现的配置，不是 Resource。ExecutionService 以 HarnessInvocation 管理执行生命周期，提供方原生标识只在 Adapter 内映射；仅支持当前存储格式，边界见 [Kernel](../kernel.md#执行后端的边界)。
 
 ## 执行契约
 

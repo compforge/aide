@@ -7,7 +7,7 @@ import type { InputRequestCreated, InputRequestCancelled } from "./approval.ts";
 import type { InputResponse } from "../message/types.ts";
 import type { HarnessDeliveryAttemptUpdate } from "../controller/attempt.ts";
 import type { HarnessInputUpdate } from "../harness/input.ts";
-import type { ViewInput } from "@compforge/aide-plugin";
+
 import type {
   ContextDeliveryReceipt,
   ContextSnapshot,
@@ -40,7 +40,7 @@ export type EventSource =
   | { type: "plugin"; pluginInstanceId: string }
   | { type: "schedule"; scheduleId: string };
 
-/** Event 只属于一个 AideSession ledger；scope 是归属与查询键，不是 payload 的授权范围。 */
+/** Event 只属于一个 HarnessStore ledger；scope 是归属与查询键，不是 payload 的授权范围。 */
 export type EventScope = { type: "application" };
 
 export type SessionRunState = "running" | "idle" | "requires_action";
@@ -107,20 +107,15 @@ export interface AgentMessageUpsert extends MessageUpsert {
 
 /**
  * 用户输入的实际（effective）投递方式：steer = 中途注入了当前 turn 的安全边界。
- * 开放联合 forward-compat；缺省视为 prompt（旧事件兼容）。requested delivery 不落盘——
- * steer 被拒降级成 follow-up 时，落盘的是降级后的事实（见 docs/workflow.md）。
+ * 开放联合；requested delivery 不落盘——
+ * steer 被拒降级成 follow-up 时，落盘的是降级后的事实（见 docs/kernel.md）。
  */
 export type SubmitDelivery = "prompt" | "steer" | "follow_up" | (string & {});
 
 /** user_message 专属 upsert：比通用 MessageUpsert 多 delivery 标记 */
 export interface UserMessageUpsert extends MessageUpsert {
   delivery?: SubmitDelivery;
-  /**
-   * Legacy replay only：老 ledger 里 steer 的投递进度寄生在消息补丁上。
-   * 新事件流用 `input_delivery_update` 一等事件表达（HarnessInput.deliveryOutcome），
-   * Adapter 不再写这个字段；reduce 仍会消费它还原老会话。
-   */
-  deliveryState?: "pending" | "applied" | "failed" | "uncertain";
+
 }
 
 /**
@@ -331,19 +326,6 @@ export interface ConfigOptionUpdate {
 }
 
 /**
- * Legacy context 占用/成本快照，对应 ACP v2 的 usage_update，仅用于历史 Ledger replay。
- * 与 aide 的 `usage_update`（token 增量）刻意分名：已落盘事件的语义不可静默翻转，
- * 旧 session.jsonl 的 delta replay 必须继续得到相同累计结果（见 docs/workflow.md）。
- */
-export interface ContextUsageUpdate {
-  /** 产生本快照时使用的 adapter model selection；用于避免切 model 后展示旧窗口。 */
-  model?: string;
-  contextUsed?: number;
-  contextSize?: number;
-  cost?: { amount: number; currency: string };
-}
-
-/**
  * 最近一次主/root 模型请求的 context window 快照。
  * usedTokens 只统计输入侧（含 cache read/write，不含 output）；capacityTokens 与
  * effectiveModel 必须来自同一次已解析路由。modelSelection 用于切换模型后判定旧快照失效。
@@ -357,7 +339,7 @@ export interface ContextWindowUpdate {
 
 /**
  * 结构化错误，不能只塞 stopReason。willRetry=true 表示 harness 仍在重试，
- * 此时 session 不得被切 idle（见 docs/workflow.md“Turn 收口”）。
+ * 此时 session 不得被切 idle（见 docs/kernel.md“执行上下文”）。
  */
 export interface ErrorUpdate {
   code?: string;
@@ -450,32 +432,10 @@ export interface HarnessInvocationFailed {
   detail: string;
 }
 
-export interface ViewInputReceived {
-  inputId: string;
-  input: ViewInput;
-}
-
-export type ViewInputOutcome = "succeeded" | "failed" | "cancelled";
-
-export interface ViewInputSettled {
-  inputId: string;
-  outcome: ViewInputOutcome;
-  detail?: string;
-}
-
-/** Legacy replay only: persisted order of queued Harness inputs. */
-export interface QueueReordered {
-  contextId: string;
-  orderedMessageIds: string[];
-}
-
 export type EventPayloadMap = {
   "connector.started": ExecutionAssociation & { callId: string; executionId: string; request: import("../../protocol/connectors.ts").ConnectorRequest };
   "connector.settled": { callId: string; outcome: "success" | "failure" | "timeout" | "interrupted"; error?: string };
-  "input.received": ViewInputReceived;
-  "input.settled": ViewInputSettled;
   "harness_input.updated": HarnessInputUpdate;
-  _aide_queue_reordered: QueueReordered;
   input_delivery_update: InputDeliveryUpdate;
   state_update: StateUpdate;
   user_message: UserMessageUpsert;
@@ -499,8 +459,6 @@ export type EventPayloadMap = {
   available_commands_update: AvailableCommandsUpdate;
   config_option_update: ConfigOptionUpdate;
   context_window_update: ContextWindowUpdate;
-  /** Legacy replay only. New adapters emit context_window_update. */
-  context_usage_update: ContextUsageUpdate;
   _aide_error_update: ErrorUpdate;
   _aide_notice: Notice;
   _aide_run_status: RunStatusUpdate;
@@ -516,7 +474,7 @@ export type EventPayloadMap = {
 
 export type EventKind = keyof EventPayloadMap;
 
-/** session.jsonl 每行一条。payload 供渲染/检索/摘要，raw 保真原始 wire 消息。 */
+/** events.jsonl 每行一条。payload 供渲染/检索/摘要，raw 保真原始 wire 消息。 */
 export interface EventEnvelope<K extends EventKind = EventKind> {
   v: typeof ENVELOPE_VERSION;
   /** Event 事实身份；定序与游标仍使用 ledger-local seq。 */
@@ -554,7 +512,7 @@ export type AnyEventEnvelope = { [K in EventKind]: EventEnvelope<K> }[EventKind]
 /** NewEvent 的判别联合版本，事件 sink 的入参类型 */
 export type AnyNewEvent = { [K in EventKind]: NewEvent<K> }[EventKind];
 
-/** 进入 AideSession 时补齐 v/eventId/ts/seq/scope。 */
+/** 进入 HarnessStore 时补齐 v/eventId/ts/seq/scope。 */
 export type NewEvent<K extends EventKind = EventKind> = Omit<
   EventEnvelope<K>,
   "v" | "eventId" | "ts" | "seq" | "scope"

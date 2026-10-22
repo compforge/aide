@@ -44,7 +44,7 @@ test("Harness timeout and Host shutdown settle the caller and cancel execution w
   const storage = new HarnessFixtures(root), session = storage.create({ id: "owner", cwd: root });
   const dispatched: string[] = [], cancelled: string[] = [];
   const verb = new Verb({ capacity: new ReconcileCapacity(1),
-    harness: new HarnessCalls({ records: session, targets: () => [{ id: "codex" }], selectedHarnessTargetId: () => "codex",
+    harness: new HarnessCalls({ records: session, targets: () => [{ id: "codex" }], defaultTargetId: "codex",
     enqueueHarnessInvocation: (request) => { dispatched.push(request.invocationId); },
     cancelHarnessInvocation: (id) => { cancelled.push(id); return "queued"; } }) });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });

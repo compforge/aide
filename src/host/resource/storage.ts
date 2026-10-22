@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync, existsSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { z } from "zod";
 import type { Resource, ResourceType, ResourceDefinition } from "@compforge/aide-plugin";
 import { validateResourceType } from "../plugin/resource/type.ts";
@@ -61,8 +61,7 @@ export class ResourceStorage {
       CREATE INDEX IF NOT EXISTS resource_scope ON resources(scope, key);
       CREATE TABLE IF NOT EXISTS resource_refs (source TEXT NOT NULL REFERENCES resources(key) ON DELETE CASCADE, target TEXT NOT NULL, PRIMARY KEY(source,target));
       CREATE INDEX IF NOT EXISTS reference_target ON resource_refs(target);
-      CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, expires INTEGER NOT NULL, value TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS migrations (key TEXT PRIMARY KEY);`);
+      CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, expires INTEGER NOT NULL, value TEXT NOT NULL);`);
     this.db.exec("UPDATE resources SET released=NULL");
   }
   configure(config?: Partial<ResourceStorageConfig>): void { this.config = ResourceStorageConfigSchema.parse(config ?? {}); }
@@ -92,7 +91,7 @@ export class ResourceStorage {
       if (!added.length) return;
       this.transaction(() => {
         for (const row of this.db.prepare("SELECT key,scope,data FROM resources").iterate()) {
-          if (this.scopeOwner(row.scope as string) !== owner) continue;
+          if (row.scope as string !== owner) continue;
           const resource = (JSON.parse(row.data as string) as StoredResource).object;
           if (definitions.some((d) => this.definitionKey(owner, d.type) === this.definitionKey(owner, resource))) {
             this.parse(row.scope as string, resource);
@@ -102,7 +101,6 @@ export class ResourceStorage {
       });
     } catch (error) { for (const key of added) this.definitions.delete(key); throw error; }
   }
-  private scopeOwner(scope: string): string { return scope.startsWith("[") ? JSON.parse(scope)[1] : scope; }
   private definitionKey(owner: string, type: ResourceType): string { return JSON.stringify([owner, type.apiVersion, type.kind]); }
   findDefinition(owner: string, type: ResourceType): ResourceDefinition | undefined { return this.definitions.get(this.definitionKey(owner, type)); }
   definition(owner: string, type: ResourceType): ResourceDefinition {
@@ -111,7 +109,7 @@ export class ResourceStorage {
     return result;
   }
   private parse(scope: string, resource: Resource<unknown, unknown>): void {
-    const definition = this.definition(this.scopeOwner(scope), resource);
+    const definition = this.definition(scope, resource);
     // Parsers may supply defaults or normalize fields; only their canonical output is persisted.
     (resource as { spec: unknown }).spec = definition.schema.spec.parse(resource.spec);
     (resource as { status: unknown }).status = definition.schema.status.parse(resource.status);
@@ -121,7 +119,7 @@ export class ResourceStorage {
       .filter((r) => r.apiVersion === type.apiVersion && r.kind === type.kind).map((r) => structuredClone(r) as Resource<S, T>) };
   }
   private indexLifecycle(key: string, scope: string, resource: Resource<unknown, unknown>): void {
-    const definition = this.definitions.get(this.definitionKey(this.scopeOwner(scope), resource));
+    const definition = this.definitions.get(this.definitionKey(scope, resource));
     let released: string | undefined;
     let refs: readonly string[] = [];
     try {
@@ -155,7 +153,7 @@ export class ResourceStorage {
     this.transaction(() => {
       this.parse(scope, stored.object);
       const old = this.read(key)?.object;
-      const definition = this.definition(this.scopeOwner(scope), stored.object);
+      const definition = this.definition(scope, stored.object);
       const context = this.validationContext(scope);
       const current = structuredClone(stored.object);
       const result: unknown = old
@@ -184,33 +182,12 @@ export class ResourceStorage {
     });
   }
   remove(key: string): void { this.db.prepare("DELETE FROM resources WHERE key=?").run(key); }
-  /** Session cleanup already holds its exclusive lease; shared Core facts remain independently owned. */
-  removeSession(sessionId: string): void {
-    this.transaction(() => {
-      const rows = this.db.prepare("SELECT key,scope,data FROM resources WHERE CASE WHEN json_valid(scope) THEN json_extract(scope,'$[0]') END=?");
-      for (const row of rows.iterate(sessionId)) {
-        this.remove(row.key as string);
-        this.evicted.push({ scope: row.scope as string, resource: (JSON.parse(row.data as string) as StoredResource).object });
-      }
-    });
-  }
   hasReceipt(key: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM receipts WHERE key=? AND expires>?").get(key, Date.now())); }
   receipt(key: string): string | undefined { return this.db.prepare("SELECT value FROM receipts WHERE key=? AND expires>?").get(key, Date.now())?.value as string | undefined; }
   addReceipt(key: string, value: string): void {
     this.db.prepare("DELETE FROM receipts WHERE expires<=?").run(Date.now());
     if (!this.hasReceipt(key) && Number(this.db.prepare("SELECT count(*) AS n FROM receipts").get()!.n) >= this.config.maxReceipts) throw new ResourceCapacityError("receipts", `count limit ${this.config.maxReceipts}`);
     this.db.prepare("INSERT OR IGNORE INTO receipts VALUES (?,?,?)").run(key, Date.now() + this.config.dedupSeconds * 1000, value);
-  }
-  migrate(id: string, load: () => Iterable<[string, string, StoredResource]>): void {
-    if (this.db.prepare("SELECT 1 FROM migrations WHERE key=?").get(id)) return;
-    this.transaction(() => {
-      for (const [key, scope, stored] of load()) {
-        const data = JSON.stringify(stored), r = stored.object;
-        this.db.prepare("INSERT OR IGNORE INTO resources VALUES (?,?,?,?,?,?,?,?,NULL)").run(key, scope, kindKey(r), r.metadata.uid, data, Buffer.byteLength(data), r.metadata.creationTimestamp, Date.now());
-        this.indexLifecycle(key, scope, r);
-      }
-      this.db.prepare("INSERT INTO migrations VALUES (?)").run(id);
-    });
   }
   private collect(kind: string, protectedKey: string): void {
     const limits = { ...this.config.defaults, ...this.config.kinds[kind] };
@@ -279,4 +256,3 @@ export class ResourceStorage {
     return result;
   }
 }
-export const resourceHome = (sessionDir: string): string => basename(dirname(sessionDir)) === "sessions" ? dirname(dirname(sessionDir)) : sessionDir;

@@ -20,7 +20,4 @@ export interface RequirementSourceStatus {
   pending?: { name: string; spec: SourceInput; key: string; entry: TrackedRequirement } | null;
   lastObservedAt?: string;
   error?: string | null;
-  // Legacy status is admitted until a successful scan replaces it.
-  pendingInputIds?: string[];
-  seen?: Record<string, string>;
 }

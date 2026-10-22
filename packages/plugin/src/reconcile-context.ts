@@ -26,7 +26,7 @@ export interface HarnessInvocationInput extends VerbInput {
   readonly prompt: string;
   /** Replace this target native context with the supplied bounded prompt; never replay old turns. */
   readonly freshContext?: boolean;
-  /** Omit to use the host's selected HarnessTarget when scheduling. */
+  /** Omit to use the application's configured default HarnessTarget. */
   readonly harnessTargetId?: string;
 }
 

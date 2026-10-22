@@ -1,7 +1,7 @@
 import type { SubmitDelivery } from "../event/index.ts";
 import type { Input, Output, InputRequest, InputResponse } from "../message/types.ts";
 
-/** Execution associations belong to the Session projection, not Message identity. */
+/** Execution associations belong to the Harness projection, not Message identity. */
 export interface MessageExecution {
   invocationId?: string;
   contextId?: string;

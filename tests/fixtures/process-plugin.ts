@@ -12,72 +12,74 @@ const plugin: PluginPackage = {
     context.logger.info("Process Plugin activated", {
       component: "lifecycle",
       attributes: {
-        capabilities: ["commands"],
+        capabilities: ["controllers"],
         runtime: { isolated: true },
       },
     });
-    context.commands.register({
-      name: "process-check",
-      description: "Exercise Plugin Runner process isolation",
-      async execute(input, command) {
-        if (input.argument === "no-builtins") {
-          const rejected: string[] = [];
-          for (const kind of ["Input", "Output", "Turn", "Session", "Target", "SessionTargetBinding"]) {
-            try { await context.resources.list({ apiVersion: "aide.dev/v1alpha1", kind }); }
-            catch (error) { if (!String(error).includes("Unknown resource definition")) throw error; rejected.push(kind); }
+    context.controllers.register<{ operation?: string; blockMs?: number }, { done?: boolean; result?: unknown; error?: string }>({
+      resourceType: PROCESS_RESOURCE_TYPE,
+      async reconcile(execution, resource) {
+        if (resource.status.done) return;
+        const operation = resource.spec.operation;
+        if (!operation) {
+          const deadline = Date.now() + Number(resource.spec.blockMs ?? 0);
+          while (Date.now() < deadline) { /* Deliberately block the Runner only. */ }
+          return;
+        }
+        const probe = async () => {
+          if (operation === "no-builtins") {
+            const rejected: string[] = [];
+            for (const kind of ["Input", "Output", "Turn", "Session", "Target", "SessionTargetBinding"]) {
+              try { await context.resources.list({ apiVersion: "aide.dev/v1alpha1", kind }); }
+              catch (error) { if (!String(error).includes("Unknown resource definition")) throw error; rejected.push(kind); }
+            }
+            return rejected;
           }
-          return { kind: "message", text: JSON.stringify(rejected) };
-        }
 
-        if (input.argument === "command-context") {
-          return { kind: "message", text: JSON.stringify(Object.keys(command).sort()) };
-        }
-        if (input.argument === "data-dirs") {
-          return {
-            kind: "message",
-            text: JSON.stringify(context.dataDirs),
-          };
-        }
-        if (input.argument === "crash") {
-          process.exit(17);
-        }
-        if (input.argument === "resource-ref") {
-          const created = await context.resources.create(
-            PROCESS_RESOURCE_TYPE,
-            {
-              name: "resource_ref",
-              spec: { value: "runner" },
-            },
-          );
-          const ref = {
-            ...PROCESS_RESOURCE_TYPE,
-            namespace: created.metadata.namespace,
-            name: created.metadata.name,
-            uid: created.metadata.uid,
+          if (operation === "execution-context") {
+            return Object.keys(execution).sort();
+          }
+          if (operation === "data-dirs") {
+            return context.dataDirs;
+          }
+          if (operation === "crash") {
+            process.exit(17);
+          }
+          if (operation === "resource-ref") {
+            const created = await context.resources.create(
+              PROCESS_RESOURCE_TYPE,
+              {
+                name: "resource_ref",
+                spec: { value: "runner" },
+              },
+            );
+            const ref = {
+              ...PROCESS_RESOURCE_TYPE,
+              namespace: created.metadata.namespace,
+              name: created.metadata.name,
+              uid: created.metadata.uid,
           };
           const current = await context.resources.get(ref);
           const replacement = await context.resources.get({
             ...ref,
             uid: "replacement_uid",
           });
-          return {
-            kind: "message",
-            text: JSON.stringify({
-              currentUid: current?.metadata.uid,
-              replacement,
-            }),
-          };
+          return { currentUid: current?.metadata.uid, ...(replacement ? { replacement } : {}) };
         }
-        const durationMs = Number.parseInt(input.argument, 10);
+        const durationMs = Number.parseInt(operation, 10);
         const deadline = Date.now() +
           (Number.isFinite(durationMs) ? durationMs : 200);
         while (Date.now() < deadline) {
           // Deliberately occupy the Runner event loop.
         }
-        return {
-          kind: "message",
-          text: "Runner completed blocking work",
+        return "Runner completed blocking work";
         };
+        try {
+          const result = await probe();
+          await context.resources.patchStatus(resource, { done: true, result });
+        } catch (error) {
+          await context.resources.patchStatus(resource, { done: true, error: String(error) });
+        }
       },
     });
     context.hooks.register({
@@ -89,6 +91,10 @@ const plugin: PluginPackage = {
           attributes: { inputId: hook.subject.invocationId },
         });
 
+        if (hook.subject.invocationId === "blocked-hook") {
+          const deadline = Date.now() + 2000;
+          while (Date.now() < deadline) { /* Exercise the generic Hook watchdog. */ }
+        }
         if (hook.subject.invocationId !== "say-from-hook") return;
         await hook.verbs.action("notify", { text: "Continue from Hook?" });
       },
@@ -101,21 +107,13 @@ const plugin: PluginPackage = {
         await hook.verbs.action("notify", { text: "Continue outbound publication?" });
       },
     });
-    context.controllers.register<{ blockMs?: number }, Record<string, never>>({
-      resourceType: PROCESS_RESOURCE_TYPE,
-      async reconcile(_execution, resource) {
-        const delay = Number(resource.spec.blockMs ?? 0);
-        const deadline = Date.now() + delay;
-        while (Date.now() < deadline) { /* Occupy only the Runner event loop. */ }
-      },
-    });
     context.controllers.register({
       resourceType: {
         apiVersion: "tests.aide.dev/v1alpha1",
         kind: "Review",
       },
-      async reconcile(ctx, turn) {
-        await ctx.verbs.action("notify", { text: `Review ${turn.metadata.name}?` });
+      async reconcile(ctx, resource) {
+        await ctx.verbs.action("notify", { text: `Review ${resource.metadata.name}?` });
       },
     });
   },

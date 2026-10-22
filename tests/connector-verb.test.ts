@@ -43,34 +43,28 @@ test("Connector Verb persists dispatch and outcome; orphan recovery records unce
   const restarted = new Verb({ ...options, connectorCalls: new ConnectorCalls(root) });
   restarted.failOrphans(); restarted.failOrphans(); restarted.close();
   assert.equal(calls, 3);
-  assert.equal(existsSync(join(root, "sessions")), false);
+  assert.equal(existsSync(join(root, "harness")), false);
   const records = ledger.read().filter((event) => event.kind === "connector.settled").filter((event) => event.payload.callId === "orphan");
   assert.equal(records.length, 1);
   assert.equal(records[0]!.payload.outcome, "interrupted");
   assert.ok(ledger.read().every((event) => event.scope.type === "application"));
 });
 
-/** @case Existing external dispatches remain uncertain across migration and repeated restarts. */
-test("Connector recovery migrates old orphan facts once and rejects a competing writer", async (t) => {
-  const { HarnessFixtures } = await import("./harness-fixture.ts");
-  const { existsSync, readFileSync } = await import("node:fs");
-  const root = mkdtempSync(join(tmpdir(), "aide-connector-migration-"));
-  const old = new HarnessFixtures(root).create({ id: "aide:execution", cwd: root });
-  old.appendEvent({ kind: "connector.started", source: { type: "plugin", pluginInstanceId: "test" },
-    payload: { callId: "old-dispatch", executionId: "old-execution", request: { operation: "environments.list" } } });
-  const original = readFileSync(join(old.dir, "session.jsonl"), "utf8");
+/** @case A competing writer cannot change dispatch facts; restart records uncertainty once. */
+test("Connector recovery is independent of Harness storage and rejects a competing writer", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-connector-recovery-"));
   const first = new ConnectorCalls(root), competitor = new ConnectorCalls(root);
   let reopened: ConnectorCalls | undefined;
-  t.after(async () => { first.close(); competitor.close(); reopened?.close(); await old.closeLogs(); rmSync(root, { recursive: true, force: true }); });
-  first.failOrphans();
+  t.after(() => { first.close(); competitor.close(); reopened?.close(); rmSync(root, { recursive: true, force: true }); });
+  const callId = first.start({ pluginInstanceId: "test", executionId: "execution", namespace: "v1" }, { operation: "environments.list" });
   assert.throws(() => competitor.failOrphans(), /already active/);
   first.close();
-  reopened = new ConnectorCalls(root); reopened.failOrphans(); reopened.close();
+  reopened = new ConnectorCalls(root); reopened.failOrphans(); reopened.failOrphans(); reopened.close();
   const events = new EventLedger({ path: join(root, "connectors", "calls.jsonl") }).read();
   assert.equal(events.length, 2);
   assert.equal(events[0]!.kind, "connector.started");
   assert.equal(events[1]!.kind, "connector.settled");
-  assert.deepEqual(events[1]!.payload, { callId: "old-dispatch", outcome: "interrupted", error: "Core restarted; external outcome is unknown" });
-  assert.equal(readFileSync(join(old.dir, "session.jsonl"), "utf8"), original);
+  assert.deepEqual(events[1]!.payload, { callId, outcome: "interrupted", error: "Core restarted; external outcome is unknown" });
   assert.equal(existsSync(join(root, "connectors", "lock")), false);
+  assert.equal(existsSync(join(root, "harness")), false);
 });

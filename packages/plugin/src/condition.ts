@@ -16,7 +16,7 @@ export interface ResourceCondition {
   readonly lastTransitionTime: string;
   /** Stable, machine-readable explanation for the current status. */
   readonly reason: string;
-  /** Human-readable details for operators and Board presentation. */
+  /** Human-readable details for operators and diagnostics. */
   readonly message: string;
 }
 

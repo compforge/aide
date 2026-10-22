@@ -1,7 +1,7 @@
 import type { RuntimeScope } from "../protocol/runtime.ts";
 import { Controllers } from "./controllers.ts";
 import { createConnectorClient } from "../connector-client.ts";
-import type { CommandDefinition, CommandContext, CommandInput, Controller, Hook, HookStage, HookSubjectMap, Mention, PluginContext, PluginDataDirectories, PluginInstance, PluginLogContext, PluginLogLevel, PluginPackage, ReconcileSnapshot, Resource, ResourceClient, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType, ToastMessage } from "@compforge/aide-plugin";
+import type { Controller, Hook, HookStage, HookSubjectMap, PluginContext, PluginDataDirectories, PluginInstance, PluginLogContext, PluginLogLevel, PluginPackage, ReconcileSnapshot, Resource, ResourceClient, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../protocol/ipc.ts";
 import {
   createHookContext
@@ -99,7 +99,6 @@ const resources: ResourceClient = Object.freeze({
   async create<TSpec, TStatus>(
     type: ResourceType,
     init: {
-      sessionId?: string;
       name: string;
       namespace?: ResourceNamespace;
       labels?: Readonly<Record<string, string>>;
@@ -168,39 +167,6 @@ const resources: ResourceClient = Object.freeze({
   },
 });
 
-function commandRegistration(command: CommandDefinition): PluginRegistration {
-  return {
-    input: command.input,
-    aliases: command.aliases,
-    runPolicy: command.runPolicy,
-    scope: command.scope,
-    kind: "command",
-    handlerId: handler(
-      `command:${command.name}`,
-      (async (input: CommandInput, commandContext: CommandContext) => {
-        return await command.execute(input, Object.freeze(commandContext));
-      }) as (...args: never[]) => unknown,
-    ),
-    name: command.name,
-    description: command.description,
-  };
-}
-
-function mentionRegistration(mention: Mention): PluginRegistration {
-  return {
-    kind: "mention",
-    namespace: mention.namespace,
-    searchHandlerId: handler(
-      `mention:${mention.namespace}:search`,
-      mention.search.bind(mention) as (...args: never[]) => unknown,
-    ),
-    resolveHandlerId: handler(
-      `mention:${mention.namespace}:resolve`,
-      mention.resolve.bind(mention) as (...args: never[]) => unknown,
-    ),
-  };
-}
-
 function hookRegistration(hook: Hook): PluginRegistration {
   return {
     kind: "hook",
@@ -238,14 +204,13 @@ function controllerRegistration(controller: Controller<unknown, unknown>): Contr
     kind: "controller", controllerId: `controller:${controller.resourceType.apiVersion}:${controller.resourceType.kind}${controller.name ? `:${controller.name}` : ""}`,
     ...(controller.name ? { controllerName: controller.name } : {}),
     resourceType: controller.resourceType,
-    ...(controller.present ? { presentHandlerId: handler("controller:present", controller.present.bind(controller) as (...args: never[]) => unknown) } : {}),
   };
 }
 
 async function activate(
   entry: PluginPackageEntry,
   instance: PluginInstance,
-  session: RuntimeScope,
+  runtime: RuntimeScope,
   dataDirs: PluginDataDirectories,
 ): Promise<ActivationResult> {
   if (active) throw new Error("Plugin Runner already has an active Binding");
@@ -268,28 +233,11 @@ async function activate(
   };
   const context: PluginContext = Object.freeze({
     instance,
-    runtime: Object.freeze({ ...(session.cwd ? { cwd: session.cwd } : {}) }),
+    runtime: Object.freeze({ ...(runtime.cwd ? { cwd: runtime.cwd } : {}) }),
     dataDirs: Object.freeze({ ...dataDirs }),
     resources,
     connectors: createConnectorClient((request) => callHost({ method: "connector.read", request })),
-    toast: Object.freeze({
-      show(message: ToastMessage) {
-        send({ kind: "toast", message });
-      },
-    }),
     logger: pluginLogger(),
-    commands: Object.freeze({
-      register(command: CommandDefinition) {
-        assertRegistering();
-        registrations.push(commandRegistration(command));
-      },
-    }),
-    mentions: Object.freeze({
-      register(mention: Mention) {
-        assertRegistering();
-        registrations.push(mentionRegistration(mention));
-      },
-    }),
     controllers: Object.freeze({
       register<TSpec, TStatus>(controller: Controller<TSpec, TStatus>) {
         assertRegistering();
@@ -398,7 +346,7 @@ async function dispatch(request: RunnerRequest): Promise<unknown> {
       return await activate(
         request.entry,
         request.instance,
-        request.session,
+        request.runtime,
         request.dataDirs,
       );
     case "invoke": {

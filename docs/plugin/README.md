@@ -4,7 +4,7 @@ Plugin 是业务扩展的组织与所有权单位。插件声明资源和回调�
 
 ## Package、Instance 与 Runner
 
-`PluginPackage.resources` 声明资源定义，`activate(context)` 注册 Controller、Source、Watch、Hook、Command 等运行能力。Package 描述插件代码，一份启用配置对应一个 PluginInstance；Host 为实例建立 Binding 并启动独立 Runner，加载插件后完成注册。
+`PluginPackage.resources` 声明资源定义，`activate(context)` 注册 Controller、Source、Watch、Hook 等运行能力。Package 描述插件代码，一份启用配置对应一个 PluginInstance；Host 为实例建立 Binding 并启动独立 Runner，加载插件后完成注册。
 
 Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队列、重试和 Reconcile；资源存储、全局 Connector 与执行事实由 Host 持有。PluginContext 将资源操作、Connector 查询和 verb 转成跨进程请求，插件无需引用宿主 Store、提供方客户端或 Harness SDK。
 
@@ -12,7 +12,7 @@ Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队�
 
 ## Resource 与 Reconcile
 
-Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。 `ResourceDefinition` 统一声明 type、scope、spec/status schema、可选 validator、printer 和 retention。Host 在恢复资源、启动 Controller 前加载声明；未知类型不能写入。进程内插件通过 resources 提供声明，独立 Runner 的 PackageEntry 通过 resourcesUrl 指向默认导出定义数组的纯模块，Host 直接加载它。声明模块不导入 Runner 或 Host 实现，不执行 I/O。
+Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。 `ResourceDefinition` 统一声明 type、spec/status schema、可选 validator、printer 和 retention。Host 在恢复资源、启动 Controller 前加载声明；未知类型不能写入。进程内插件通过 resources 提供声明，独立 Runner 的 PackageEntry 通过 resourcesUrl 指向默认导出定义数组的纯模块，Host 直接加载它。声明模块不导入 Runner 或 Host 实现，不执行 I/O。
 
 资源统一属于插件实例与 namespace，定义不区分 shared/session，资源和调度身份不携带 sessionId。底座不预注册任何业务资源。每种资源可以没有 Controller，也可以由多个具名 Controller 观察。
 
@@ -24,7 +24,7 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 资源变化、Source、Watch、cron 和 `requeueAfterMs` 共用按资源身份去重的队列。同一资源串行处理；不同资源受 Controller 与所在 Runner 的容量约束。基础设施回调重试不保证外部操作只发生一次，插件须保存已进入执行的状态，避免把重试变成业务重放。
 
-资源写入统一经过 Core ResourceClient，包括 Agent 工具和 Reconcile，使用版本检查并通知所有相关 Watch。spec 与初始 status 可以原子提交。主资源的纯 status 更新不自动再入队；需要感知 status 的 Controller 显式声明 Watch。跨越 Harness 或用户等待后，应按 uid 重新读取资源，避免旧回调更新同名替代资源。删除先持久化 deletionTimestamp，Controller 完成终止处理后移除资源；结构性 owner 关系支持级联删除。
+资源写入统一经过 Core ResourceClient，包括 Agent 工具和 Reconcile，使用版本检查并通知所有相关 Watch。spec 与初始 status 可以原子提交。主资源的纯 status 更新不自动再入队；需要感知 status 的 Controller 显式声明 Watch。跨越外部能力等待后，应按 uid 重新读取资源，避免旧回调更新同名替代资源。删除先持久化 deletionTimestamp，Controller 完成终止处理后移除资源；结构性 owner 关系支持级联删除。
 
 ## Resource 容量与释放
 
@@ -58,7 +58,7 @@ Controller 可声明 `name`，让同一插件对同种资源注册独立队列�
 
 Reconcile 通过 `ctx.verbs` 请求 harness、命名 action，或通过 `connectors({ timeoutMs })` 调用外部系统。Personal 的 say helper 调用应用注册的 action，创建独立 Output，返回 outputId，Channel 按 Output.target 投递；用户答复是后续的新 Input。业务状态与 Output 可通过 ResourceClient.commit 原子保存，详见 [Output](../output.md)。harness 直接创建 HarnessInvocation，保留期限、取消和恢复语义；原生工具权限与 Hook 信任仍由 Host Approval 管理。插件不处理提供方原生协议。
 
-等待 verb 时释放 Controller 和 Runner 容量，同一 Controller 内同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。拒绝确认是正常业务答案；取消、超时和失败需要插件自行决定业务结果。
+等待 verb 时释放 Controller 和 Runner 容量，同一 Controller 内同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。取消、超时和失败需要插件自行决定业务结果。
 
 `execution.withContext(attributes)` 为后续动作附加不透明的业务元数据，主资源身份由运行时提供。Personal 定义并解释 conversationId、inputId、inputIds，底座只持久保存 attributes。Channel 通过 Personal 解析关联，再显式查询对应执行的展示投影。其他组件按职责使用 Core 服务，不必经由 Verb。
 

@@ -163,7 +163,7 @@ test("invalid Chief model stops Aide before listening or restoring persisted Ses
     expect(result.stderr).toContain("harnesses.chief");
     expect(result.stderr).toContain("model.api");
     expect(result.stdout).not.toContain("Aide listening");
-    expect(existsSync(join(home, "sessions"))).toBe(false);
+    expect(existsSync(join(home, "harness"))).toBe(false);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

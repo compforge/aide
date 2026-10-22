@@ -83,8 +83,7 @@ export class ContextDeliveryLedger {
           `context snapshot ${snapshot.snapshotId} has invalid range ${snapshot.afterSeq}..${snapshot.throughSeq}`,
         );
       }
-      // fork 会把同一段历史事实复制到 child ledger，但 source owner 仍是当时实际组装
-      // snapshot 的 AideSession；不能用当前 event scope 覆写或拒绝这段 provenance。
+      // Historical snapshots retain their original owner; replay must not rewrite provenance.
       if (!this.snapshots.has(snapshot.snapshotId)) {
         this.snapshots.set(snapshot.snapshotId, event);
       }

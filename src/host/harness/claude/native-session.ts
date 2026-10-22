@@ -176,7 +176,3 @@ export const claudeSessionInspector: HarnessSessionInspector = {
     };
   },
 };
-
-/** @deprecated 使用 claudeHistoryTurns / claudeSessionInspector。 */
-export const claudeNativeTurns = claudeHistoryTurns;
-export const claudeNativeSessions = claudeSessionInspector;

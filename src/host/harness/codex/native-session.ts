@@ -235,7 +235,3 @@ export const codexSessionInspector: HarnessSessionInspector = {
     );
   },
 };
-
-/** @deprecated 使用 codexHistoryTurns / codexSessionInspector。 */
-export const codexNativeTurns = codexHistoryTurns;
-export const codexNativeSessions = codexSessionInspector;

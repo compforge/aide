@@ -148,11 +148,10 @@ describe("HarnessInvocationStore", () => {
   });
 });
 
-test("Restored application correlations remain opaque metadata across the SDK change", () => {
+test("Application correlations remain opaque metadata in restored invocations", () => {
   const handle = session();
-  // This is the old persisted envelope, not a new caller of the public SDK.
-  const payload = { ...invocation(handle.id).invocation, invocationId: "legacy", executionId: "old-run",
-    conversationId: "topic", inputIds: ["input-one"], customCorrelation: "opaque" };
+  const payload = { ...invocation(handle.id).invocation, invocationId: "restored", executionId: "previous-run",
+    attributes: { conversationId: "topic", inputIds: ["input-one"], customCorrelation: "opaque" } };
   handle.appendEvent({ kind: "_aide_harness_invocation_recorded", source: { type: "plugin", pluginInstanceId: "test" }, payload });
   const restored = new HarnessInvocationStore(handle);
   const result = restored.list()[0]!;

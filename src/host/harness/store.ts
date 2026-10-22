@@ -1,5 +1,4 @@
 import { acquireWriterLock, releaseWriterLock } from "../store/lease.ts";
-import { readExecutionContexts, legacyExecutionDirectory } from "../store/legacy.ts";
 import { invocationUserText } from "../store/message-relations.ts";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -28,11 +27,11 @@ export interface HarnessMetadata {
 }
 function normalizeMetadata(meta: HarnessMetadata): HarnessMetadata {
   return { cwd: meta.cwd, createdAt: meta.createdAt, updatedAt: meta.updatedAt,
-    harnessTargets: meta.harnessTargets ?? {}, contexts: readExecutionContexts(meta) };
+    harnessTargets: meta.harnessTargets, contexts: meta.contexts };
 }
-/** Existing deployments keep their physical path; this is not a host Session identity. */
+/** Harness owns its execution history independently of plugin resources. */
 export function harnessStorageDirectory(home: string): string {
-  return legacyExecutionDirectory(home);
+  return join(home, "harness");
 }
 export function openHarnessStore(home: string, cwd: string): HarnessStore {
   const dir = harnessStorageDirectory(home);
@@ -71,12 +70,12 @@ export class HarnessStore {
     mkdirSync(dir, { recursive: true });
     if (!existsSync(join(dir, "meta.json"))) writeMetaAtomic(dir, this.meta);
     this.logger = new RuntimeLogger(
-      join(this.dir, "session.log"),
+      join(this.dir, "runtime.log"),
       "harness",
       loggerOptions,
     );
     this.ledger = new EventLedger({
-      path: join(this.dir, "session.jsonl"),
+      path: join(this.dir, "events.jsonl"),
       log: (entry) => this.log(entry),
     });
     const history = this.ledger.read();
@@ -101,7 +100,7 @@ export class HarnessStore {
    */
   appendEvent<K extends EventKind>(event: NewEvent<K>): EventEnvelope<K> {
     // Harness-originated facts already carry the exact Target identity in their
-    // source. Preserve it as the execution coordinate when a direct/legacy
+    // source. Preserve it as the execution coordinate when a direct
     // producer omitted the top-level field; never infer a Target from a Harness
     // family name. An explicit coordinate remains authoritative.
     const harnessTargetId =
@@ -155,7 +154,7 @@ export class HarnessStore {
   }
 
   /**
-   * Provider 原生入站消息的旁路 NDJSON。与 session.log 分开，避免高频 wire trace
+   * Provider 原生入站消息的旁路 NDJSON。与 runtime.log 分开，避免高频 wire trace
    * 淹没错误诊断；单文件到 10 MiB 后保留一份上一代。失败不影响正典事件流。
    */
   nativeEvent(

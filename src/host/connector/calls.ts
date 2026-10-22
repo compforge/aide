@@ -6,7 +6,6 @@ import { EventLedger } from "../event/ledger.ts";
 import type { AnyEventEnvelope, EventEnvelope, EventPayloadMap } from "../event/index.ts";
 import type { ExecutionScope } from "../../protocol/verbs.ts";
 import { acquireWriterLock, releaseWriterLock } from "../store/lease.ts";
-import { legacyExecutionDirectory } from "../store/legacy.ts";
 
 type Started = EventEnvelope<"connector.started">;
 type Outcome = EventPayloadMap["connector.settled"]["outcome"];
@@ -38,15 +37,8 @@ export class ConnectorCalls {
       const path = join(dir, "calls.jsonl");
       const ledger = new EventLedger({ path });
       const records = ledger.read();
-      // Preserve old orphan intents here before recording their interrupted outcome.
-      // A crash during migration can safely repeat this scan without duplicating facts.
-      const old = new EventLedger({ path: join(legacyExecutionDirectory(this.home), "session.jsonl") });
-      for (const event of [...old.read(), ...records]) this.apply(event);
+      for (const event of records) this.apply(event);
       this.nextSeq = (records.at(-1)?.seq ?? 0) + 1;
-      const copied = new Set(records.flatMap(event => event.kind === "connector.started" || event.kind === "connector.settled" ? [event.payload.callId] : []));
-      for (const [id, event] of this.pending) {
-        if (!copied.has(id)) { ledger.record({ ...event, seq: this.nextSeq }); this.nextSeq++; }
-      }
       this.ledger = ledger;
     } catch (error) {
       writers.delete(dir); releaseWriterLock(join(dir, "lock")); this.ownsLock = false;
@@ -86,7 +78,7 @@ export class ConnectorCalls {
   }
   failAll(error: string): void { for (const id of this.pending.keys()) this.settle(id, "interrupted", error); }
   failOrphans(): void {
-    if (this.home && (existsSync(join(this.home, "connectors", "calls.jsonl")) || existsSync(join(legacyExecutionDirectory(this.home), "session.jsonl")))) this.open();
+    if (existsSync(join(this.home, "connectors", "calls.jsonl"))) this.open();
     this.failAll("Core restarted; external outcome is unknown");
   }
   close(): void {

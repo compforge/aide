@@ -6,6 +6,6 @@ const record = z.record(z.string(), z.unknown());
 export const RequirementSourceDefinition: ResourceDefinition = { type: SOURCE_TYPE,
   schema: { spec: WatchSchema.extend({ sessionId: z.string() }), status: z.object({ scope: z.string().optional(), sequence: z.number().int().nonnegative().optional(),
     tracked: z.record(z.string(), record).optional(), scan: record.nullable().optional(), scannedThrough: z.string().nullable().optional(), pending: record.nullable().optional(),
-    pendingInputIds: z.array(z.string()).optional(), seen: z.record(z.string(), z.string()).optional(), lastObservedAt: z.string().optional(), error: z.string().nullable().optional() }).strict() },
-  retention: { releasedAt: () => undefined, references: (r) => [...(r.status.pending ? [`input:${r.status.pending.name}`] : []), ...(r.status.pendingInputIds ?? []).map((id: string) => `input:${id}`)] },
+    lastObservedAt: z.string().optional(), error: z.string().nullable().optional() }).strict() },
+  retention: { releasedAt: () => undefined, references: (r) => r.status.pending ? [`input:${r.status.pending.name}`] : [] },
 };

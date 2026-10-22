@@ -25,7 +25,7 @@ export class ExecutionService implements HarnessExecution {
   private readonly listeners = new Set<() => void>();
   private readonly targets = new Map<string, Target>();
   constructor(private readonly home: string, private readonly options: ExecutionOptions & {
-    cwd: string; targets?: readonly Target[]; selectedHarnessTargetId?: () => string | undefined;
+    cwd: string; targets?: readonly Target[]; defaultTargetId?: string;
   }) {
     for (const target of options.targets ?? []) this.targets.set(target.id, { ...target });
     if (existsSync(join(harnessStorageDirectory(home), "meta.json"))) this.open();
@@ -48,7 +48,7 @@ export class ExecutionService implements HarnessExecution {
       const controller = new InvocationExecutor({ ...this.options, records });
       const calls = new HarnessCalls({ records,
         targets: () => [...this.targets.values()],
-        selectedHarnessTargetId: this.options.selectedHarnessTargetId,
+        defaultTargetId: this.options.defaultTargetId,
         enqueueHarnessInvocation: request => this.enqueue(request),
         cancelHarnessInvocation: id => this.cancel(id),
         log: entry => records!.log(entry),

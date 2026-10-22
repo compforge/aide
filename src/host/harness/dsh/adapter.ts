@@ -1,5 +1,5 @@
 // DeepSeek Harness Agent SDK adapter：DSH 原生 session/event 协议只在本目录出现，
-// controller / store / TUI 继续只消费 Aide Event。追加走 SDK 原生 inbox；
+// controller / store / Channel 继续只消费 Aide Event。追加走 SDK 原生 inbox；
 // 取消仍通过关闭 runtime 收口，后续 turn 用同一 session id 重连。
 
 import {
@@ -140,7 +140,7 @@ export class DshAdapter implements HarnessAdapter {
     const handleId = newId("hs");
     const requestedSessionId = opts.resumeState
       ? sessionIdFromResumeState(opts.resumeState)
-      : opts.resumeSessionId;
+      : undefined;
     const requestContext = requestContextFromResumeState(opts.resumeState);
     const runtime: DshRuntime = {
       cwd: opts.cwd,

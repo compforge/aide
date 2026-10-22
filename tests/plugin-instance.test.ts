@@ -20,13 +20,6 @@ function testRoot(): string {
   return root;
 }
 
-function testSession(root: string): { id: string; dir: string } {
-  return {
-    id: "bs_test",
-    dir: join(root, "sessions", "bs_test"),
-  };
-}
-
 function store(root: string, now?: () => Date): PluginInstanceStore {
   return new PluginInstanceStore({ home: root, now });
 }
@@ -36,7 +29,7 @@ afterEach(() => {
 });
 
 describe("PluginInstanceStore", () => {
-  test("persists a session-owned package configuration", () => {
+  test("persists an application-owned package configuration", () => {
     const root = testRoot();
     const instances = store(root);
     const created = instances.create({
@@ -147,7 +140,6 @@ describe("PluginInstanceStore", () => {
 
   test("ignores resource-only directories and reports corrupt instance identity", () => {
     const root = testRoot();
-    const session = testSession(root);
     mkdirSync(join(root, "plugins", "instances", "legacy", "resources"), { recursive: true });
     const path = join(root, "plugins", "instances", "reqloop_default", "instance.json");
     mkdirSync(join(path, ".."), { recursive: true });

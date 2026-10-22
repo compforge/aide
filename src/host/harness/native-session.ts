@@ -1,11 +1,8 @@
-import { targetConfigFor, type AideConfig, type HarnessTargetConfig } from "../config/config.ts";
-import { configuredHarnessTargets, harnessDefinitionFor, parseHarness } from "./registry.ts";
-import type { HarnessTarget } from "./target.ts";
+import type { HarnessTargetConfig } from "./target.ts";
 import type {
   HarnessHistoryBoundary,
   HarnessHistoryTurn as StoredHarnessHistoryTurn
 } from "../harness/history.ts";
-import { harnessHistoryBoundary } from "../harness/history.ts";
 import type { HarnessSessionIdentity } from "./adapter.ts";
 
 export interface HarnessTranscriptEntry {
@@ -18,15 +15,13 @@ export type HarnessHistoryTurn = StoredHarnessHistoryTurn;
 export interface HarnessHistorySnapshot {
   /** HarnessTarget 内稳定的 HarnessSession identity。 */
   identity?: HarnessSessionIdentity;
-  /** Inspector 观察到的完整前缀；resolve 后始终存在。 */
+  /** Inspector 观察到的完整前缀。 */
   observedThrough?: HarnessHistoryBoundary;
   cwd?: string;
   title?: string;
   /** 完整归一 Turn 优先；只提供文本历史的 Harness 可继续使用 transcript。 */
   turns?: HarnessHistoryTurn[];
   transcript?: HarnessTranscriptEntry[];
-  /** @deprecated 0.2.14 第三方 Inspector 迁移兼容。 */
-  nativeSessionId?: string;
 }
 
 export interface HarnessSessionInspectorOptions {
@@ -40,150 +35,6 @@ export interface HarnessSessionInspector {
     sessionId: string,
     options: HarnessSessionInspectorOptions,
   ): Promise<HarnessHistorySnapshot | null>;
-}
-
-export interface ResolvedHarnessSession {
-  target: HarnessTarget;
-  harness: string;
-  inspector: HarnessSessionInspector;
-  snapshot: HarnessHistorySnapshot;
-}
-
-export interface HarnessSessionSource {
-  target: HarnessTarget;
-  harness: string;
-  inspector: HarnessSessionInspector;
-}
-
-export interface HarnessSessionResolutionOptions {
-  config: AideConfig;
-  cwd: string;
-  choose?: (
-    matches: readonly ResolvedHarnessSession[],
-  ) => Promise<ResolvedHarnessSession>;
-  /** 测试/外部 registry 注入；生产缺省从 HARNESS_REGISTRY 收集。 */
-  sources?: readonly HarnessSessionSource[];
-}
-
-function qualifiedReference(
-  reference: string,
-): { harness: string; sessionId: string } | null {
-  const separator = reference.indexOf(":");
-  if (separator < 0) return null;
-  const harness = reference.slice(0, separator);
-  const sessionId = reference.slice(separator + 1);
-  if (!sessionId) throw new Error(`HarnessSession reference has no id: ${reference}`);
-  return { harness, sessionId };
-}
-
-function registeredHarnessSessionSources(config: AideConfig): HarnessSessionSource[] {
-  return configuredHarnessTargets(config).flatMap((target) => {
-    const definition = harnessDefinitionFor(target.harness);
-    if (!definition?.sessionInspector) return [];
-    return [{
-      target,
-      harness: definition.sessionKey,
-      inspector: definition.sessionInspector,
-    }];
-  });
-}
-
-async function inspectSource(
-  source: HarnessSessionSource,
-  sessionId: string,
-  options: HarnessSessionResolutionOptions,
-): Promise<ResolvedHarnessSession | null> {
-  const inspected = await source.inspector.inspect(sessionId, {
-    targetConfig: targetConfigFor(options.config, source.target.id),
-    cwd: options.cwd,
-  });
-  if (!inspected) return null;
-  const identity = inspected.identity ?? (
-    inspected.nativeSessionId ? { id: inspected.nativeSessionId } : undefined
-  );
-  if (!identity) {
-    throw new Error(`${source.target.id} inspector returned a snapshot without identity`);
-  }
-  const turns = (inspected.turns ?? harnessHistoryTurns(inspected.transcript ?? [])).map(
-    (turn, index) => ({ ...turn, turnId: turn.turnId ?? `history-${index + 1}` }),
-  );
-  const snapshot: HarnessHistorySnapshot = {
-    ...inspected,
-    identity,
-    turns,
-    observedThrough: inspected.observedThrough ?? harnessHistoryBoundary(turns),
-  };
-  return {
-    ...source,
-    snapshot,
-  };
-}
-
-/**
- * 裸 id 只靠只读 inspect 自动识别；显式 `cx:` / `cc:` 则固定 provider。
- * 探测失败与 not-found 分开保留，避免把“命令不可用”谎报成“会话不存在”。
- */
-export async function resolveHarnessSession(
-  reference: string,
-  options: HarnessSessionResolutionOptions,
-): Promise<ResolvedHarnessSession> {
-  const sources = options.sources ?? registeredHarnessSessionSources(options.config);
-  const qualified = qualifiedReference(reference);
-  if (qualified) {
-    const exactTarget = sources.find((candidate) => candidate.target.id === qualified.harness);
-    const harness = parseHarness(qualified.harness);
-    const candidates = harness
-      ? sources.filter((candidate) => candidate.target.harness === harness)
-      : [];
-    const source = exactTarget ?? candidates.find((candidate) => candidate.target.id === harness) ?? (
-      candidates.length === 1 ? candidates[0] : undefined
-    );
-    if (!source) {
-      if (!harness) throw new Error(`unknown HarnessSession target: ${qualified.harness}`);
-      if (candidates.length > 1) {
-        throw new Error(
-          `HarnessSession target is ambiguous for ${qualified.harness}: ${candidates.map((candidate) => candidate.target.id).join(", ")}`,
-        );
-      }
-      throw new Error(`${harness} does not support HarnessSession lookup`);
-    }
-    const match = await inspectSource(source, qualified.sessionId, options);
-    if (!match) {
-      throw new Error(`${source.target.id} HarnessSession not found: ${qualified.sessionId}`);
-    }
-    return match;
-  }
-
-  const inspected = await Promise.allSettled(
-    sources.map((source) =>
-      inspectSource(source, reference, options),
-    ),
-  );
-  const failures = inspected.flatMap((result) =>
-    result.status === "rejected"
-      ? [result.reason instanceof Error ? result.reason.message : String(result.reason)]
-      : []
-  );
-  const matches = inspected.flatMap((result) =>
-    result.status === "fulfilled" && result.value ? [result.value] : []
-  );
-  if (failures.length > 0 && matches.length > 0) {
-    throw new Error(
-      `HarnessSession lookup incomplete for ${reference}: ${failures.join("; ")}; use cx: or cc:`,
-    );
-  }
-  if (failures.length > 0) {
-    throw new Error(`HarnessSession lookup failed for ${reference}: ${failures.join("; ")}`);
-  }
-  if (matches.length === 1) return matches[0] as ResolvedHarnessSession;
-  if (matches.length > 1) {
-    if (options.choose) return options.choose(matches);
-    const names = matches.map((match) => match.target.harness).join(", ");
-    throw new Error(
-      `HarnessSession id is ambiguous (${names}): ${reference}; use cx: or cc:`,
-    );
-  }
-  throw new Error(`HarnessSession not found: ${reference}`);
 }
 
 /** 把 Harness 文本历史还原成 Aide 的逻辑 turn；连续 assistant 消息属于同一轮回复。 */
@@ -207,15 +58,3 @@ export function harnessHistoryTurns(
   }
   return turns;
 }
-
-/** @deprecated 0.2.14 public API aliases. */
-export type NativeTranscriptEntry = HarnessTranscriptEntry;
-export type NativeSessionTurn = HarnessHistoryTurn;
-export type NativeSessionInfo = HarnessHistorySnapshot;
-export type NativeSessionProviderOptions = HarnessSessionInspectorOptions;
-export type NativeSessionProvider = HarnessSessionInspector;
-export type ResolvedNativeSession = ResolvedHarnessSession;
-export type NativeSessionSource = HarnessSessionSource;
-export type NativeSessionResolutionOptions = HarnessSessionResolutionOptions;
-export const resolveNativeSession = resolveHarnessSession;
-export const nativeSessionTurns = harnessHistoryTurns;

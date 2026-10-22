@@ -33,11 +33,8 @@ import type {
   PromptReceipt,
   SendTurnReceipt,
   HarnessSessionHandle,
-  OpenApproval,
-  TextgenRequest,
-} from "../adapter.ts";
+  OpenApproval } from "../adapter.ts";
 import { unsupportedPromptBlocks } from "../adapter.ts";
-import { generateClaudeStructured } from "./textgen.ts";
 import {
   sessionIdFromResumeState,
   sessionIdResumeState,
@@ -109,7 +106,6 @@ export class ClaudeAdapter implements HarnessAdapter {
     prompt: { image: { supported: true } },
     compact: { supported: true },
     config: { supported: true },
-    textgen: { supported: true },
     tasks: { stop: { supported: true } },
     inputs: { cancel: { supported: true } },
   };
@@ -132,15 +128,6 @@ export class ClaudeAdapter implements HarnessAdapter {
     });
   }
 
-  /** TextGeneratable：一次性 SDK query，与 HarnessSession 生命周期完全无关（见 textgen.ts）。 */
-  async generateStructured(request: TextgenRequest): Promise<unknown> {
-    return generateClaudeStructured(request, {
-      executablePath: this.options.executablePath,
-      env: this.options.env,
-      ...(this.options.queryFactory ? { queryFactory: this.options.queryFactory } : {}),
-    });
-  }
-
   /** SDK 无独立"启动"步骤：streaming query 在首个 sendTurn 时创建，这里只登记运行时。 */
   async open(
     opts: OpenOptions,
@@ -150,12 +137,8 @@ export class ClaudeAdapter implements HarnessAdapter {
     const id = newId("hs");
     const requestedSessionId = opts.resumeState
       ? sessionIdFromResumeState(opts.resumeState)
-      : opts.resumeSessionId;
-    // 0.2.14 曾把进程内 hs_ handle 当稳定身份落盘。迁移知识留在 Claude Adapter
-    // 边界：core 不解析任何 Harness 的 ID 方言；新 init 随后会发布真实 binding。
-    const resumeSessionId = requestedSessionId?.startsWith("hs_")
-      ? undefined
-      : requestedSessionId;
+      : undefined;
+    const resumeSessionId = requestedSessionId;
 
     const env = opts.env || this.options.env
       ? { ...opts.env, ...this.options.env }
@@ -398,7 +381,6 @@ export class ClaudeAdapter implements HarnessAdapter {
       }
       // offer 只代表 Aide 把消息交给 SDK input stream；原生 queued/started
       // lifecycle 才决定它何时离开 Composer Queue。投递回执走 input_delivery_update，
-      // 不再寄生 user_message.deliveryState。
       const pendingOffers = (rt.pendingOfferUuids ??= new Map());
       (rt.inputMessageIdsByUuid ??= new Map()).set(message.uuid as string, input.messageId);
       pendingOffers.set(message.uuid as string, {
@@ -432,7 +414,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     const turn: ClaudeTurn = { turnId: input.invocationId, finalized: false, cancelRequested: false, replies: new MessageReplies([input.messageId]) };
     rt.activeTurn = turn;
     rt.currentTurn = turn;
-    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 AideSession
+    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 HarnessStore
     // 的事实，不等 harness 就绪）；adapter 只报告 harness 执行过程与终态。
 
     try {

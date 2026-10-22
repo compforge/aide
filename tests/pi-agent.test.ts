@@ -1,6 +1,5 @@
 import { createRouteAgent } from "../agents/route/agent.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
-import { resourceHome } from "../src/host/resource/storage.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
@@ -74,7 +73,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const persons = sharedPersons ?? catalog.persons;
   await persons.initialize();
   const session = sessions.create({ cwd: root });
-  const resources = new PluginResourceStore({ home: resourceHome(session.dir), pluginInstanceId: "personal" });
+  const resources = new PluginResourceStore({ home: session.home, pluginInstanceId: "personal" });
   resources.storage.register("personal", personalDefinitions);
   const store = new Store(resources, createResourceClient(resources, undefined, undefined, personalAdmission(new InputStore(root), new OutputStore(root))), new ConversationStore(session));
   const work = new WorkService(store, "me", pino({ level: "silent" }));

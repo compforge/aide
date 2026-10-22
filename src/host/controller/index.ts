@@ -6,7 +6,7 @@ import {
   type NativeEventSink,
   type PromptInput,
 } from "../harness/adapter.ts";
-import { buildTargetCatchUpContext } from "../context/mention.ts";
+import { buildTargetCatchUpContext } from "../context/history.ts";
 import {
   ContextDeliveries,
   executionHistorySource,
@@ -93,7 +93,7 @@ export interface HarnessAdapterPorts {
 
 export interface InvocationExecutorOptions {
   records: HarnessStore;
-  mentionBudgetChars: number;
+  historyBudgetChars: number;
   /** 目标尚未选择 model 时使用的 HarnessTarget 级持久偏好。 */
   modelPreferences?: Readonly<Record<string, string>>;
   /** 目标尚未选择 effort 时使用的 HarnessTarget 级持久偏好。 */
@@ -118,7 +118,7 @@ export interface InvocationExecutorOptions {
 const DEFAULT_CANCEL_GRACE_MS = 10_000;
 const DEFAULT_EXECUTION_CONCURRENCY = 4;
 
-/** 打断标记文案：cancelled 终态时落一条 notice，TUI 时间线醒目提示（对齐 Codex 的体验） */
+/** 打断标记文案：cancelled 终态时落一条 notice，执行时间线显示取消原因 */
 export const INTERRUPTED_NOTICE_TITLE = "Conversation interrupted — tell the agent what to do differently";
 
 /** @spec Execute admitted Harness invocations, serial per resource context and concurrent across contexts.
@@ -495,7 +495,7 @@ export class InvocationExecutor {
       startedAt: Date.now(),
     });
 
-    // 出队即入账、即落盘：用户输入是 AideSession 的事实，owner 是 controller——
+    // 出队即入账、即落盘：执行输入是 HarnessStore 的事实，owner 是 controller——
     // 不等 harness 冷启动（codex 首启要 spawn → initialize → thread resume/start，
     // 可达数秒，期间 Transcript 必须已能看到这条输入）。落盘的是**原始输入** input.blocks：
     // <aide-sync> 注入只进 harness transport（syncContext / prepend），不进正典历史。
@@ -563,19 +563,19 @@ export class InvocationExecutor {
       if (!contextEpochId) {
         throw new Error(`${targetKey} opened without a ContextEpoch`);
       }
-      // Receipt 是事实来源；syncedSeq 只给尚未产生新事件的旧会话做迁移兜底。
+      // A committed delivery receipt is the catch-up watermark for this context epoch.
       const sinceSeq =
-        Math.max(this.contextDeliveries.epoch(contextEpochId)?.throughSeq ?? meta?.syncedSeq ?? 0, meta?.contextAfterSeq ?? 0);
+        Math.max(this.contextDeliveries.epoch(contextEpochId)?.throughSeq ?? 0, meta?.contextAfterSeq ?? 0);
       const catchUp = buildTargetCatchUpContext(records, {
         target: binding.target,
         contextId: binding.contextId,
         sinceSeq,
         restoreHistory: binding.freshHarnessSession,
-        budgetChars: this.options.mentionBudgetChars,
+        budgetChars: this.options.historyBudgetChars,
       });
       let blocks = input.blocks;
       let syncBlocks: PromptBlock[] | undefined;
-      // 水位（syncedSeq）只在注入时前进到本批 throughSeq（并发正确性的关键：
+      // 投递水位只在注入时前进到本批 throughSeq（并发正确性的关键：
       // throughSeq 固定在注入时点，turn 运行期间其它 harness 落盘的事件 seq 必然
       // 大于它，下一次注入自然回补；finalize 推尾水位则会永久越过它们）。
       let submitContext:
@@ -736,13 +736,12 @@ export class InvocationExecutor {
       harnessSessionId:
         existing?.harnessSessionId ?? harnessSessionId,
       contextEpochId,
-      syncedSeq: snapshot.payload.throughSeq,
     });
     binding.freshHarnessSession = false;
   }
 
   /**
-   * HarnessEvent 与 Controller 自有 Event draft 的统一提交入口。AideSession 先完成
+   * HarnessEvent 与 Controller 自有 Event draft 的统一提交入口。HarnessStore 先完成
    * WAL record，再直接 reduce 当前 Projection；Controller 随后只处理 Invocation
    * scope 等协调逻辑。Ledger 不在这条实时链路上广播 Event。
    */
@@ -772,7 +771,7 @@ export class InvocationExecutor {
         }
       }
     }
-    // Projection 已在 AideSession 内同步 reduce；终态对 Controller 私有台账的
+    // Projection 已在 HarnessStore 内同步 reduce；终态对 Controller 私有台账的
     // 变更仍由 finalize 自己通知。
     return envelope;
   }

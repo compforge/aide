@@ -33,7 +33,7 @@ export class PluginSupervisor {
   async activate(
     entry: PluginPackageEntry,
     instance: PluginInstance,
-    session: RuntimeScope,
+    runtime: RuntimeScope,
     dataDirs: PluginDataDirectories,
     callbacks: PluginRunnerCallbacks,
   ): Promise<ActivePluginRunner> {
@@ -54,7 +54,7 @@ export class PluginSupervisor {
       const activation = await client.activate(
         entry,
         instance,
-        session,
+        runtime,
         dataDirs,
       );
       let active = true;
