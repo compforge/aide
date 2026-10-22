@@ -19,6 +19,8 @@ export function createConnectorClient(invoke: <T>(request: ConnectorRequest) => 
     requirements: Object.freeze({
       list: (source, query) => invoke({ operation: "requirements.list", source, ...(query ? { query } : {}) }),
       get: (identity) => invoke({ operation: "requirements.get", identity }),
+      identity: (source) => invoke({ operation: "requirements.identity", source }),
+      comments: (identity, query) => invoke({ operation: "requirements.comments", identity, ...(query ? { query } : {}) }),
     } satisfies ConnectorClient["requirements"]),
     forges: Object.freeze({
       list: (forge, path, query) => invoke({ operation: "forges.list", forge, path, query }),
@@ -40,6 +42,8 @@ export function dispatchConnector(client: ConnectorClient, request: ConnectorReq
     case "environments.get": return client.environments.get(request.name);
     case "requirements.list": return client.requirements.list(request.source, request.query);
     case "requirements.get": return client.requirements.get(request.identity);
+    case "requirements.identity": return client.requirements.identity(request.source);
+    case "requirements.comments": return client.requirements.comments(request.identity, request.query);
     case "forges.list": return client.forges.list(request.forge, request.path, request.query);
     case "forges.get": return client.forges.get(request.identity);
     case "forges.comments": return client.forges.comments(request.identity);

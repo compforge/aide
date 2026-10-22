@@ -25,6 +25,7 @@ export interface RequirementSummary extends RequirementIdentity {
   readonly state: RequirementState;
   readonly url?: string;
   readonly assignee?: string;
+  readonly assignees?: readonly RequirementUser[];
   readonly updatedAt?: string;
 }
 
@@ -35,7 +36,9 @@ export interface Requirement extends RequirementSummary {
 
 export interface RequirementListQuery {
   readonly text?: string;
-  readonly limit?: number;
+  readonly cursor?: string;
+  readonly updatedAfter?: string;
+  readonly updatedBefore?: string;
   /** Filter by stable assignee keys; absence keeps an on-demand query unfiltered. */
   readonly assigneeUserKeys?: readonly string[];
 }
@@ -51,6 +54,30 @@ export interface RequirementConnector {
   readonly provider: string;
   list(
     query?: RequirementListQuery,
-  ): Promise<readonly RequirementSummary[]>;
+  ): Promise<RequirementPage<RequirementSummary>>;
   get(identity: RequirementIdentity): Promise<Requirement>;
+  identity(): Promise<RequirementAccount>;
+  comments(identity: RequirementIdentity, query?: RequirementCommentQuery): Promise<RequirementPage<RequirementComment>>;
+  /** Host-only delivery capability; intentionally absent from Plugin ConnectorClient. */
+  addComment?(identity: RequirementIdentity, comment: { text: string; deliveryId: string }): Promise<{ id: string; scope: string }>;
+}
+
+export interface RequirementUser { readonly key: string; readonly name?: string }
+export interface RequirementAccount { readonly provider: string; readonly scope: string }
+export interface RequirementComment {
+  readonly id: string;
+  readonly text: string;
+  readonly createdAt: string;
+  readonly updatedAt?: string;
+  readonly author?: RequirementUser;
+  readonly mentions?: readonly RequirementUser[];
+  /** Correlation retained by the provider, not a Person or an authorization signal. */
+  readonly deliveryId?: string;
+  /** Filled by the Host only after matching a durable Output at this destination. */
+  readonly ownOutput?: boolean;
+}
+export interface RequirementCommentQuery { readonly start?: string; readonly end?: string; readonly cursor?: string }
+export interface RequirementPage<T> {
+  readonly items: readonly T[];
+  readonly nextCursor?: string;
 }

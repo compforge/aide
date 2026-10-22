@@ -1,4 +1,4 @@
-export type { Address, ChannelAddress } from "./address.ts";
+export type { Address, ChannelAddress, RequirementAddress } from "./address.ts";
 export type {
   BoardPresentation,
   BoardItemTone,

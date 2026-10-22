@@ -9,3 +9,13 @@ export interface ChannelAddress extends Address {
   readonly channelId: string;
   readonly endpoint: string;
 }
+
+/** A comment destination on an externally owned work item. */
+export interface RequirementAddress extends Address {
+  readonly kind: "requirement";
+  readonly source: string;
+  readonly category: string;
+  readonly id: string;
+  /** Canonical provider scope pins a saved destination across connector reconfiguration. */
+  readonly scope: string;
+}

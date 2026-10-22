@@ -14,7 +14,7 @@ export const OutputSpecSchema = z.object({
   executionId: z.string().optional(), producer: ref.optional(), inputIds: z.array(z.string().min(1)).max(1001).optional(),
 }).strict();
 export const OutputStatusSchema = z.object({ phase: z.enum(["pending", "sending", "delivered", "failed", "uncertain"]), attempts: z.number().int().nonnegative(),
-  nextAttemptAt: z.iso.datetime().optional(), deliveredAt: z.iso.datetime().optional(), lastError: z.string().max(4000).optional() }).strict();
+  nextAttemptAt: z.iso.datetime().optional(), deliveredAt: z.iso.datetime().optional(), lastError: z.string().max(4000).optional(), receipt: z.object({ id: z.string().min(1), scope: z.string().min(1) }).strict().optional() }).strict();
 
 
 export const OutputDefinition: ResourceDefinition<OutputSpec, OutputStatus> = {

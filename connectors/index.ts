@@ -21,6 +21,8 @@ export class Connectors implements ConnectorClient {
     this.requirements = Object.freeze({
       list: (source, query) => this.requirement(source).list(query),
       get: (identity) => this.requirement(identity.source).get(identity),
+      identity: (source) => this.requirement(source).identity(),
+      comments: (identity, query) => this.requirement(identity.source).comments(identity, query),
     } satisfies ConnectorClient["requirements"]);
     this.forges = Object.freeze({
       list: (forge, path, query) => this.forge(forge).list(path, query),
@@ -46,6 +48,13 @@ export class Connectors implements ConnectorClient {
       forges: this.forgeProviders.map(({ forge, provider }) => ({ forge, provider })),
       ...(this.messageAccount ? { messages: this.messageAccount } : {}),
     };
+  }
+
+  /** Output delivery is owned by the Host and is not exposed over the read-only Connector IPC. */
+  async addRequirementComment(identity: import("@compforge/aide-plugin").RequirementIdentity, comment: { text: string; deliveryId: string }) {
+    const provider = this.requirement(identity.source);
+    if (!provider.addComment) throw new Error("Requirement connector does not support comment delivery");
+    return provider.addComment(identity, comment);
   }
 
   private requirement(source: string): RequirementConnector {

@@ -1,5 +1,5 @@
 import type { EnvironmentDirectory, EnvironmentSummary } from "./environment.ts";
-import type { Requirement, RequirementIdentity, RequirementListQuery, RequirementSummary } from "./requirements.ts";
+import type { Requirement, RequirementIdentity, RequirementListQuery, RequirementSummary, RequirementPage, RequirementAccount, RequirementComment, RequirementCommentQuery } from "./requirements.ts";
 import type { Comment, PullRequest, PullRequestIdentity, PullRequestListQuery } from "./forge.ts";
 import type { MessageConnector } from "./messages.ts";
 
@@ -21,8 +21,10 @@ export interface ConnectorClient {
   readonly messages: MessageConnector;
   readonly environments: EnvironmentDirectory;
   readonly requirements: {
-    list(source: string, query?: RequirementListQuery): Promise<readonly RequirementSummary[]>;
+    list(source: string, query?: RequirementListQuery): Promise<RequirementPage<RequirementSummary>>;
     get(identity: RequirementIdentity): Promise<Requirement>;
+    identity(source: string): Promise<RequirementAccount>;
+    comments(identity: RequirementIdentity, query?: RequirementCommentQuery): Promise<RequirementPage<RequirementComment>>;
   };
   readonly forges: {
     list(forge: string, path: string, query: PullRequestListQuery): Promise<readonly PullRequestIdentity[]>;

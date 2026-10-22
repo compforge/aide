@@ -21,5 +21,6 @@ export interface OutputStatus {
   nextAttemptAt?: string;
   deliveredAt?: string;
   lastError?: string;
+  receipt?: { id: string; scope: string };
 }
 export type Output = Resource<OutputSpec, OutputStatus>;

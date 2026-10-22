@@ -190,7 +190,7 @@ aide harness sync chief
 ## 模块归属
 
 顶层 `src/config.ts` 加载文件并组合各模块 schema。Harness 配置位于 `src/host/harness/<name>/config.ts`，
-Connector 配置由 `connectors/config.ts` 组合，Environment 和 Meego 分别声明自己的字段与校验。
+Connector 配置由 `connectors/config.ts` 组合，Environment 和 Meego 分别声明自己的字段与校验。Meego 的 `me.userKey` 标记本人，`profile` 选择执行账号，Source 的 `userKeys` 选择观察负责人；三者独立，完整示例见 [Meego](connector/meego.md)。
 Personal 的 `config.ts` 组合各类 Source 策略，装配阶段解析后仅向所属 Runner 下发有效观察范围。
 配置输入允许缺省和引用；有效配置已补齐默认值、解析模型与路径，并在创建运行实例之前验证。
 Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。整体原则见 [Kernel](kernel.md#配置所有权与生命周期)。

@@ -2,7 +2,10 @@ import { z } from "zod";
 import type { ResourceDefinition } from "@compforge/aide-plugin";
 import { WatchSchema } from "./config.ts";
 export const SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "RequirementSource" } as const;
+const record = z.record(z.string(), z.unknown());
 export const RequirementSourceDefinition: ResourceDefinition = { type: SOURCE_TYPE, scope: "session",
-  schema: { spec: WatchSchema.extend({ sessionId: z.string() }), status: z.object({ pendingInputIds: z.array(z.string()).optional(), seen: z.record(z.string(), z.string()).optional(), lastObservedAt: z.string().optional(), error: z.string().nullable().optional() }).strict() },
-  retention: { releasedAt: () => undefined, references: (r) => r.status.pendingInputIds?.map((id: string) => `input:${id}`) ?? [] },
+  schema: { spec: WatchSchema.extend({ sessionId: z.string() }), status: z.object({ scope: z.string().optional(), sequence: z.number().int().nonnegative().optional(),
+    tracked: z.record(z.string(), record).optional(), scan: record.nullable().optional(), scannedThrough: z.string().nullable().optional(), pending: record.nullable().optional(),
+    pendingInputIds: z.array(z.string()).optional(), seen: z.record(z.string(), z.string()).optional(), lastObservedAt: z.string().optional(), error: z.string().nullable().optional() }).strict() },
+  retention: { releasedAt: () => undefined, references: (r) => [...(r.status.pending ? [`input:${r.status.pending.name}`] : []), ...(r.status.pendingInputIds ?? []).map((id: string) => `input:${id}`)] },
 };
