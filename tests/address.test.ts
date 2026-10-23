@@ -222,7 +222,8 @@ test("Aide rejects unowned targets and diagnoses pending delivery after the Chan
     { target: larkAddress("connector-app", "observed-chat") }), /No configured Channel/);
   assert.equal(aide.outputs().length, 0);
   const receipt = await c.say("default", undefined, "queued", undefined, { target: larkAddress("app", "bot-chat") });
-  assert.equal(receipt.status.phase, "pending");
+  assert.deepEqual(receipt, { outputId: receipt.outputId, accepted: true });
+  assert.equal(aide.outputStore.get(receipt.outputId)!.status.phase, "pending");
   await aide.close();
   const restarted = new Aide(root, { ...options, larkAppId: undefined }, pino({ level: "silent" }));
   try {

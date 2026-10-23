@@ -71,23 +71,6 @@ export class OutputStore {
     this.storage.write(key, "personal", { owner, object: output, control: {} }, { key: `output:${id}`, value: JSON.stringify({ fingerprint }) });
     this.notify(output); return output;
   }
-  acceptsTarget(target: Address): boolean {
-    try { this.validateTarget(target); return true; } catch { return false; }
-  }
-  /** @spec A removed transport cannot leave an Output pending forever; interrupted sends require inspection, never blind replay. */
-  reconcileTargets(): Output[] {
-    const rejected: Output[] = [];
-    for (const output of this.list()) {
-      if (!["pending", "sending"].includes(output.status.phase)) continue;
-      try { this.validateTarget(output.spec.target); }
-      catch (error) {
-        this.update(output.metadata.name, s => ({ ...s, phase: s.phase === "sending" || s.attempts > 0 ? "uncertain" : "failed",
-          nextAttemptAt: undefined, lastError: String(error).slice(0, 4000) }));
-        rejected.push(this.get(output.metadata.name)!);
-      }
-    }
-    return rejected;
-  }
   update(id: string, change: (current: OutputStatus) => OutputStatus): void {
     this.storage.transaction(() => {
       const stored = this.storage.read(this.key(id)); if (!stored) throw new Error(`Output missing: ${id}`);

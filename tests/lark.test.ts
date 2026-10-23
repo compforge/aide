@@ -9,7 +9,7 @@ import { Aide } from "../src/app.ts";
 import type { OutputView } from "../src/output.ts";
 import { fixtureOutput } from "./output-fixture.ts";
 import { LarkChannel } from "../src/channel/lark.ts";
-import { larkConfig, larkTransport, type LarkTransport } from "../src/channel/lark-client.ts";
+import { larkConfig, larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark-client.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });
@@ -284,7 +284,11 @@ test("official SDK sends bot text with a stable uuid and checks API-level failur
   t.after(() => transport.close());
   await transport.send("oc_test", "你好😀", "test-send-id");
   rejectSend = true;
-  await assert.rejects(transport.send("oc_test", "你好😀", "test-send-id"), /code 99991672/);
+  await assert.rejects(transport.send("oc_test", "你好😀", "test-send-id"), error => {
+    assert.match(String(error), /code 99991672/);
+    assert.equal(larkSendFailure(error).apiCode, 99991672);
+    return true;
+  });
   assert.equal(sends, 2);
 });
 

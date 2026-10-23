@@ -157,7 +157,7 @@ export class Personal {
       ? { name: "routePending", value: "pending" } : { name: "assessPending", value: owner.uid! } });
     const c = owner.kind === "Conversation" ? this.store.resources.get<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, owner.name) : undefined;
     if (!id) return { ...(c ? { context: { version: c.metadata.resourceVersion, summary: c.status.summary, recent: c.status.recent,
-      summaryChars: conversationPolicy(this.options.conversation).summaryChars, outputTargets: this.conversations.outputTargets(c.spec.id) } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, status: attemptOf(i, owner) })),
+      summaryChars: conversationPolicy(this.options.conversation).summaryChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, status: attemptOf(i, owner) })),
       nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
     const input = this.conversations.inputStore.get(id);
     if (!input || (!inputs.some(i => i.metadata.name === id) && !(history && input.status.assess?.[owner.uid!]))) throw new Error("Input is not attached to this resource");

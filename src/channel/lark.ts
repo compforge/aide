@@ -11,7 +11,7 @@ import { normalize } from "@larksuiteoapi/node-sdk";
 import type { ChannelService } from "./service.ts";
 import { IncomingSchema } from "./message.ts";
 import { progressCard, cardPreviews, cardContent, cardThought, type LarkProgressReader, type LarkProgress } from "./lark-card.ts";
-import type { LarkTransport } from "./lark-client.ts";
+import { larkSendFailure, type LarkTransport } from "./lark-client.ts";
 
 /** @why Lark can return null for permission-restricted user_id; SDK normalization expects absent IDs as undefined. */
 const UserIdsSchema = z.object({ open_id: z.string().optional(),
@@ -198,10 +198,12 @@ export class LarkChannel {
         if (this.state.delivered.includes(id)) continue;
         try {
           await this.transport.send(chatId, text, id);
-        } catch {
+        } catch (error) {
           this.retryAt = Date.now() + 10_000;
-          await this.aide.outputRetry?.(message.id, "Lark send failed", new Date(this.retryAt).toISOString());
-          this.log.warn({ messageId: message.id, part: index, conversationId: message.conversationId }, "Lark send failed; retrying in 10 seconds");
+          const nextAttemptAt = new Date(this.retryAt).toISOString(), failure = larkSendFailure(error);
+          this.log.warn({ outputId: message.id, target: message.target, part: index, conversationId: message.conversationId,
+            attempt: message.status.attempts + 1, retryable: true, nextAttemptAt, ...failure }, "Lark Output send failed; retry scheduled");
+          await this.aide.outputRetry?.(message.id, failure.error, nextAttemptAt);
           return;
         }
         this.save({ ...this.state, delivered: [...this.state.delivered, id] });

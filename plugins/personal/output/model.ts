@@ -36,6 +36,7 @@ export interface SayInput {
   /** Person references; explicit [] suppresses inference from respondToInputId's sender. */
   readonly receivers?: readonly ResourceRef[];
 }
-export interface SayReceipt { readonly outputId: string; readonly target: Address; readonly status: OutputStatus; }
+/** @spec Acceptance is durable and idempotent; it neither claims delivery nor requests Agent polling. */
+export interface SayReceipt { readonly outputId: string; readonly accepted: true; }
 export type SayResult = VerbResult<SayReceipt>;
 

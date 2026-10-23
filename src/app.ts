@@ -10,6 +10,7 @@ import { outputView } from "./output.ts";
 import { personRequirements } from "../plugins/personal/person/requirements.ts";
 import { requirementOutputs } from "../plugins/personal/output/requirements.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
+import { reconcileChannelOutputs } from "./channel/delivery.ts";
 import { assertChannelDelivery } from "./channel/address.ts";
 import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
@@ -239,8 +240,7 @@ export class Aide {
   }
   start(): Promise<void> {
     return this.starting ??= Promise.resolve().then(async () => {
-      for (const output of this.outputStore.reconcileTargets()) this.log.warn({ outputId: output.metadata.name,
-        target: output.spec.target, phase: output.status.phase, error: output.status.lastError }, "Output has no configured delivery Channel");
+      reconcileChannelOutputs(this.outputStore, this.options.larkAppId, this.log);
       await this.initializePeople();
       await this.personal.start();
     });

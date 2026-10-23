@@ -14,7 +14,7 @@ Input → Route → Conversation / Chief → Task / Routine
 
 Output 是 Personal 定义的 `aide.dev/v1alpha1 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Conversation 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标单独保存为 `Address`：`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark endpoint 是分别 URI 编码的 appId / chatId。Personal 在产出时明确选择地址，Channel 发送时只读 target，不解析 Conversation ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
 
-`say` 成功返回 `outputId`、`target` 与当前 `status`，表示内容已经持久化。只有 `status.phase = delivered` 才能记为已投递，pending / sending 不表示已送达。Agent 记录已创建输出即可，不负责查询送达或投递重试；Host / Channel 维护持久投递状态，界面与诊断按需查看。不因 pending 重建消息。Chief 用工具调用 ID 去重；同一调用的重试返回原 Output，不同调用可以为同一批输入创建多个 Output。Task / Routine 的 report 原子提交业务进展与 Input 办理回执，say 独立创建 Output；两个工具不是同一笔事务。投递失败不会重新运行 Harness 或外部动作，输出存在也不证明 report 已成功。
+`say` 成功返回 `{ outputId, accepted: true }`，只确认内容已持久化接纳，不表示已送达。Agent 记录已创建输出即可，不负责查询送达或投递重试；Host / Channel 维护持久投递状态，界面与诊断按需查看。不因 pending 重建消息。Chief 用工具调用 ID 去重；同一调用的重试返回原 Output，不同调用可以为同一批输入创建多个 Output。Task / Routine 的 report 原子提交业务进展与 Input 办理回执，say 独立创建 Output；两个工具不是同一笔事务。投递失败不会重新运行 Harness 或外部动作，输出存在也不证明 report 已成功。
 
 ## 地址与收件处
 
@@ -30,7 +30,7 @@ Conversation 的 `spec.address?: Address` 只在创建时从首个 Channel Input
 
 `Output.receivers` 是可选的 Person 资源引用列表，与 Input.sender 使用相同引用结构。它记录内容说给谁，target 记录送到哪里：可以在同一个群回复多人，也可以把多处信息整理后向另一个地址的负责人汇报。显式 receivers 覆盖直接回复的默认值，空列表表示不指定个人；仅关联 inputIds 不推导收件人。收件人不改变投递数量，不自动解析平台账号或添加群内 @。
 
-Channel 地址在 Output 持久化之前还要通过实际投递配置校验：未启用 Lark 或 appId 与机器人 Channel 不一致时拒绝创建，ResourceClient 的组合事务整笔回滚。Connector 观察身份不等于机器人发送身份，不能直接替换 appId 来猜一个可达地址。Chief 的 `read_input` 上下文、Work 的 `read_conv` 提供最多 20 个已知且有本地 Channel 接管的 outputTargets（包括当前会话 Web 地址）；它们来自本会话的 Channel 输入和会话地址，不承诺远端权限或用户已阅读。
+Channel 地址在 Output 持久化之前还要通过实际投递配置校验：未启用 Lark 或 appId 与机器人 Channel 不一致时拒绝创建，ResourceClient 的组合事务整笔回滚。Connector 观察身份不等于机器人发送身份，不能直接替换 appId 来猜一个可达地址。
 
 地址缺失或多个 immediate 地址冲突时，工具返回错误，要求明确选择；不会猜测会话名称或默认群。可以为多个 Input 合并生成一个 Output，也可以不关联 Input 而主动通知。Chief 提示词提供当前 Input 地址与 Conversation 默认地址。
 
@@ -44,7 +44,7 @@ Output 的 `status` 由 Host 与 Channel 维护。Lark 持久记录 pending / se
 
 事务内写过的资源不能被后续写入的容量回收淘汰。内容非法、版本冲突或受保护资源超过容量都会整笔回滚。业务执行已经发生后的提交冲突只重试提交，不重新执行动作。Output 身份对应内容指纹，回收后在 Host 去重窗口内仍拒绝恢复同一 Output 的投递。
 
-启动时重新核对未完成 Channel Output：没有已配置投递器接管且从未尝试发送的 pending 标为 failed，并记录目标和原因；sending 或已有发送尝试的 pending 标为 uncertain，保留可能已发生副作用的事实。不会自动改写目标或重发。
+投递层在启动时重新核对未完成 Channel Output，Store 只保存状态：没有已配置投递器接管且从未尝试发送的 pending 标为 failed，并记录目标和原因；sending 或已有发送尝试的 pending 标为 uncertain，保留可能已发生副作用的事实。不会自动改写目标或重发。无法接管时记录 error，包含 Output ID、目标、尝试次数和原因；实际发送失败按现有重试策略记录 warn，并带安全提取的平台错误码、HTTP 状态或网络错误码及下次重试时间。SDK 异常中的请求配置、凭证、消息正文和自由文本不写入日志或 Output.status。
 
 Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Conversation 删除后仍可完成投递。进展卡片只展示和确认发往该聊天的 Output。
 

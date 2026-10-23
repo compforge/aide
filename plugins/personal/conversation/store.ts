@@ -1,10 +1,9 @@
-import { webAddress } from "../../../src/channel/address.ts";
 import { resourceRef } from "../input/state.ts";
 import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient, Address } from "@compforge/aide-plugin";
 import type { InputSpec } from "../input/model.ts";
-import type { SayInput, SayReceipt, Output } from "../output/model.ts";
+import type { SayInput, SayReceipt } from "../output/model.ts";
 import { InputStore } from "../input/store.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import type { ResourceClientChange } from "../../../src/host/plugin/resource/client.ts";
@@ -73,19 +72,6 @@ export class ConversationStore {
     trigger.enabled = enabled;
     await this.client.replace(c, { ...c.spec, trigger }, { ...c.status, nextTriggerAt: enabled ? nextTriggerAt(trigger) : null });
     return trigger;
-  }
-  /** Known addresses are evidence, not permission to send; platform access is confirmed only by delivery. */
-  outputTargets(conversationId: string): Address[] {
-    const c = this.resource(conversationId);
-    if (!c) return [];
-    const candidates = [webAddress(conversationId), c.spec.address,
-      ...this.inputStore.query("assess", c.metadata.uid).filter(i => i.spec.origin === "channel").map(i => i.spec.source)];
-    const targets: Address[] = [];
-    for (const target of candidates) {
-      if (target && this.outputStore.acceptsTarget(target) && !targets.some(t => sameAddress(t, target))) targets.push(target);
-      if (targets.length === 20) break;
-    }
-    return targets;
   }
   outputs(conversationId?: string): OutputView[] {
     const resources = this.listResources(conversationId);
@@ -161,13 +147,12 @@ export class ConversationStore {
       const draft: OutputDraft = { id, conversationId, text, workId: null };
       const association = { ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds } : {}) };
       try {
-        const committed = await this.client.commit([
+        await this.client.commit([
           { operation: "patchStatus", resource: c, patch: {} },
           ...(owner ? [{ operation: "patchStatus" as const, resource: owner, patch: {} }] : []),
           outputWrite(c, draft, association),
         ]);
-        const output = committed.at(-1) as Output;
-        return { outputId: id, target: output.spec.target, status: output.status };
+        return { outputId: id, accepted: true };
       } catch (error) { if (attempt >= 8 || !/version conflict/.test(String(error))) throw error; }
     }
   }

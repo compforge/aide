@@ -29,7 +29,7 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
       tool({ name: "read_routine", label: "Read routine", description: "Read this Routine's objective, state and cumulative understanding.", parameters: Type.Object({}),
         async execute() { return result(current()); } }),
       tool({ name: "read_conv", label: "Read conversation", description: "Read the owning Conversation as context, not additional authority.", parameters: Type.Object({}),
-        async execute() { const c = store.conversations.resource(current().spec.conversationId); return result(c ? { ...c.spec, summary: c.status.summary, recent: c.status.recent, outputTargets: store.conversations.outputTargets(c.spec.id) } : null); } }),
+        async execute() { const c = store.conversations.resource(current().spec.conversationId); return result(c ? { ...c.spec, summary: c.status.summary, recent: c.status.recent } : null); } }),
       tool({ name: "read_input", label: "Read input", description: "List pending assigned inputs, or page through one assigned input. Failed attempts need effect inspection.",
         parameters: Type.Object({ inputId: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { inputId, offset = 0 }) {
@@ -40,7 +40,7 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
           const text = inputPrinter.describe(input);
           return result({ inputId, handling: input.status.handle[routine.metadata.uid], text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } }),
-      tool({ name: "say", label: "Say", description: "Create an Output through this Routine's Conversation. Success means persisted; only status.phase=delivered confirms delivery. Delivery and recovery are handled by the Host.",
+      tool({ name: "say", label: "Say", description: "Create an Output through this Routine's Conversation. Success means the Output was accepted, not delivered. Delivery and recovery are handled by the Host.",
         parameters: Type.Object({ text: Type.String({ minLength: 1 }), inputIds: Type.Optional(Type.Array(Type.String())) }),
         async execute(id, args) {
           const routine = current();
