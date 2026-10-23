@@ -39,7 +39,7 @@ Input.relation 描述输入相对于 Me 的关系：
 
 Web 输入为 sent。别人私信机器人或仅 @ 机器人不能据此认定为我收到；Lark Source 对各条消息分别分类，混合讨论仅在本人的观察范围内归为 observed。环境与需求监控属于配置的观察范围。关系随 Input 持久保存，不因后续身份编辑而改写历史。
 
-Person 的 status.summary 保存当前认识概览，status.recent 保存近期交往、观察和认识修正的依据；区分明确表达和推断，保留必要背景与日期，不引用 Input ID。Chief 的 profile_person 工具更新 summary 并追加 recent；用户在 Web Persons 直接编辑同一个 status.summary，修正后的文本就是当前认识，不另存 corrections 字段。recent 只记录发生过用户修订，不复制整篇 summary。Chief 必须读取最新版本并在继续维护时尊重用户明确修正，不能用旧上下文中的推断覆盖它。身份补全、仅编辑身份和启动更新均保留现有认识。并发更新必须重读后合并，不能盲目覆盖。
+Person 的 status.summary 保存当前认识概览，status.recent 保存近期交往、观察和认识修正的依据；区分明确表达和推断，保留必要背景与日期，不引用 Input ID。Chief 的 summary_person 工具更新 summary 并追加 recent；用户在 Web Persons 直接编辑同一个 status.summary，修正后的文本就是当前认识，不另存 corrections 字段。recent 只记录发生过用户修订，不复制整篇 summary。Chief 必须读取最新版本并在继续维护时尊重用户明确修正，不能用旧上下文中的推断覆盖它。身份补全、仅编辑身份和启动更新均保留现有认识。并发更新必须重读后合并，不能盲目覆盖。
 
 summary 和 recent 只是人物资料的一部分，不代表完整的长期 profile。职责、关系、经历等资料可以按其自身语义继续组织；近期窗口的裁剪不授权删除长期资料。当前将 understanding 收敛为 summary，不预建未来的资料分类。
 

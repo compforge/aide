@@ -51,7 +51,7 @@
   <path class="profile" d="M 1560 112 H 2100 V 300" marker-end="url(#profile-arrow)"/>
   <text class="profile-label" x="1820" y="92">回应对象</text>
   <path class="profile" d="M 1320 192 V 267" marker-start="url(#profile-arrow)" marker-end="url(#profile-arrow)"/>
-  <text class="profile-label" x="1500" y="217">读取 / profile_person</text>
+  <text class="profile-label" x="1500" y="217">读取 / summary_person</text>
 
   <!-- External facts and human messages converge on the same intake. -->
   <path class="shape" d="M 54 315 H 226 Q 240 315 240 329 V 440 C 174 401 134 477 40 444 V 329 Q 40 315 54 315 Z" fill="url(#external)"/>

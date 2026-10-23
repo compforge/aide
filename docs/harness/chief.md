@@ -59,7 +59,7 @@ Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-h
 
 Chief 每轮读取共享目录中的 Me，将姓名、用户明确修正和精简后的当前认识放入上下文。其它人物通过 list_persons / read_person 按需查询；工具读取完整资料和最新版本。
 
-profile_person 接受人物 ID、uid、resourceVersion 以及修订后的 summary 和本次 recent。Chief 根据输入持续补充、合并和纠正观点、偏好、关注及背景，保留必要日期、适用范围与不确定性，不保存 Input ID 或逐条对话。
+summary_person 接受人物 ID、uid、resourceVersion 以及修订后的 summary 和本次 recent。Chief 根据输入持续补充、合并和纠正观点、偏好、关注及背景，保留必要日期、适用范围与不确定性，不保存 Input ID 或逐条对话。
 工具只更新人物认识，无法改写外部身份或 Me 标记。用户修正直接保存到同一个 summary，Chief 继续维护时应保留其含义。发生版本冲突时重新读取并合并；Web 编辑与其它会话更新在下一轮可见。用户的明确修正优先于历史推断和 Hermes 记忆。
 
 sent 提供本人表达的线索，仍需辨别引用与代发；received 和 observed 不代表本人认可或授权。混合讨论逐条核对作者。人物认知用于理解和服务，不产生新的执行委托，也不向其它聊天参与者披露私密画像。
@@ -107,7 +107,7 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 
 `tests/pi-agent.test.ts` 使用真实 Pi SDK、Hermes 扩展、临时 Markdown/SQLite 存储和模拟模型，验证 Chief 工具与策略注入、跨全新原生会话写入和召回，以及通用 Pi 不自动获得记忆工具。Adapter 的扩展启动/退出与失败处理也有契约验证。测试关闭扩展的自动模型整理，避免影响脚本化模型请求。
 
-同一测试还验证 Chief 通过真实 Pi 工具调用 read_person / profile_person，以及续轮、跨会话和用户纠正后的刷新。人物目录与 Web API 的版本、身份和回收边界见 tests/person-catalog.test.ts。
+同一测试还验证 Chief 通过真实 Pi 工具调用 read_person / summary_person，以及续轮、跨会话和用户纠正后的刷新。人物目录与 Web API 的版本、身份和回收边界见 tests/person-catalog.test.ts。
 `tests/person.test.ts` 与消息 Source 测试验证身份作用域、机器人与本人区分、关系持久化和混合上下文逐条归因。
 
 现有 Source → Chief → 用户决定 → Work 验证继续覆盖 Personal 装配。以上不能证明真实模型会正确选择值得保存的事实，或后台提炼、压缩后召回的实际质量；这些效果需要真实使用评估。真实 Channel 验收见 [E2E](../e2e.md)。
