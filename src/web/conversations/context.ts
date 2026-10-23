@@ -8,7 +8,6 @@ export function createConversationContextPanel() {
     const signature = JSON.stringify(context);
     if (signature === previous) return;
     previous = signature;
-    byId("conversation-context").hidden = !context;
     const summary = byId("conversation-summary");
     const text = context?.summary.trim() ?? "";
     updateMarkdown(summary, text || "尚未形成话题摘要。");

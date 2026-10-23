@@ -11,6 +11,7 @@ import { createWorkPanel } from "./work.ts";
 import { createConversationContextPanel } from "./context.ts";
 import { createApprovals } from "./approvals.ts";
 import { mountComposer } from "./composer.ts";
+import { mountConversationTabs } from "./tabs.ts";
 
 const lifetime = new AbortController();
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -28,6 +29,10 @@ function mountConversation(conversationId: string | null) {
   const signal = controller.signal;
   const query = "?conversationId=" + encodeURIComponent(conversationId ?? "");
   const timeline = createTimeline();
+  let latestView: ConversationView | undefined;
+  const tabs = mountConversationTabs(!!conversationId, signal, () => {
+    if (latestView) timeline.render(latestView);
+  });
   const work = createWorkPanel(conversationId ?? "", poll, signal);
   const context = createConversationContextPanel();
   const approvals = createApprovals(poll, signal);
@@ -82,8 +87,9 @@ function mountConversation(conversationId: string | null) {
         view = applyPatch(view, patch);
         if (patch.op === "ping" || patch.op === "end") return;
         const snapshot = view as ConversationView;
+        latestView = snapshot;
         context.render(snapshot.meta.context);
-        timeline.render(snapshot);
+        if (tabs.isDialogue()) timeline.render(snapshot);
         byId("connection").textContent = snapshot.meta.error?.message ?? "实时连接";
       } catch (error) {
         console.error("Unable to render conversation progress", error);

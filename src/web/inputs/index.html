@@ -7,17 +7,19 @@
 <link rel="stylesheet" href="/inputs.css">
 <header><h1 class="brand"><img src="/icon.png" width="32" height="32" alt="">Aide</h1><span class="muted">查看收到的信息与处理进展。</span><nav class="main-tabs" aria-label="主导航"><a href="/">Conversations</a><a href="/people">Persons</a><a href="/inputs" aria-current="page">Inputs</a></nav></header>
 <main class="inputs-page">
-  <section class="inputs-catalog" aria-labelledby="inputs-heading">
-    <h2 id="inputs-heading">Inputs</h2>
-    <form id="input-filters" role="search" aria-label="筛选 Input">
-      <label class="input-search-label">搜索<input id="input-search" type="search" maxlength="200" placeholder="正文或 Input ID"></label>
-      <label>Connector<select id="input-connector"><option value="*">全部 Connector</option></select></label>
-      <label>来源类型<select id="input-origin"><option value="*">全部来源类型</option></select></label>
-      <label>具体观察源<select id="input-source"><option value="*">全部观察源</option></select></label>
-      <label>处理状态<select id="input-state"><option value="*">全部状态</option><option value="pending">尚未完成</option><option value="completed">处理完成</option></select></label>
+  <form id="input-filters" role="search" aria-label="筛选 Input">
+    <label class="input-search-label"><span class="filter-label">搜索</span><input id="input-search" type="search" maxlength="200" placeholder="正文或 Input ID"></label>
+    <label><span class="filter-label">Connector</span><select id="input-connector"><option value="*">全部 Connector</option></select></label>
+    <label><span class="filter-label">来源类型</span><select id="input-origin"><option value="*">全部来源类型</option></select></label>
+    <label><span class="filter-label">具体观察源</span><select id="input-source"><option value="*">全部观察源</option></select></label>
+    <label><span class="filter-label">处理状态</span><select id="input-state"><option value="*">全部状态</option><option value="pending">尚未完成</option><option value="completed">处理完成</option></select></label>
+    <div class="input-filter-actions">
       <label class="input-errors-label"><input id="input-errors" type="checkbox">有异常记录</label>
       <button type="submit">筛选</button><button id="input-reset" class="secondary" type="button">重置</button>
-    </form>
+    </div>
+  </form>
+  <section class="inputs-catalog" aria-labelledby="inputs-heading">
+    <h2 id="inputs-heading">Inputs</h2>
     <div class="inputs-toolbar"><span id="input-count" class="muted" role="status" aria-live="polite"></span><button id="input-refresh" type="button" class="secondary">刷新</button></div>
     <nav id="input-list" aria-label="Input 列表"></nav>
     <p id="input-list-notice" role="status" aria-live="polite"></p>

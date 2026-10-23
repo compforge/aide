@@ -24,41 +24,42 @@
     </div>
     <div id="conversation-notice" class="muted" role="status"></div>
   </nav>
-  <section class="conversation" aria-label="对话">
+  <section class="conversation" aria-label="会话详情">
     <div class="conversation-header">
       <h2 id="conversation-heading">选择一个会话</h2>
       <span id="conversation-copy"></span>
     </div>
-    <div id="messages" role="log" aria-label="消息记录"><div id="history"></div><section id="activity" aria-label="Aide 执行进展" hidden></section></div>
+    <div id="conversation-tabs" role="tablist" aria-label="会话内容" hidden>
+      <button id="tab-dialogue" type="button" role="tab" aria-controls="panel-dialogue" aria-selected="true">对话</button>
+      <button id="tab-summary" type="button" role="tab" aria-controls="panel-summary" aria-selected="false" tabindex="-1">摘要</button>
+      <button id="tab-recent" type="button" role="tab" aria-controls="panel-recent" aria-selected="false" tabindex="-1">近期记录</button>
+      <button id="tab-tasks" type="button" role="tab" aria-controls="panel-tasks" aria-selected="false" tabindex="-1">事项 <span id="task-count" class="tab-count">0</span></button>
+      <button id="tab-routines" type="button" role="tab" aria-controls="panel-routines" aria-selected="false" tabindex="-1">安排 <span id="routine-count" class="tab-count">0</span></button>
+    </div>
     <div id="poll-notice" role="status"></div>
     <div id="approvals" aria-label="等待你处理的执行请求" aria-live="polite"></div>
-    <form id="composer">
-      <textarea id="input" aria-label="交办事情或回答问题" placeholder="交办一件事，或者告诉我你想长期关注什么…" maxlength="32000" required></textarea>
-      <button id="send" type="submit">发送</button>
-    </form>
-    <div id="notice" role="status">Enter 发送 · Shift + Enter 换行</div>
-  </section>
-  <aside>
-    <div id="conversation-context" hidden>
-      <section class="context-group" aria-labelledby="summary-heading">
-        <h2 id="summary-heading">话题摘要</h2>
-        <div id="conversation-summary" class="markdown"></div>
-      </section>
-      <section class="context-group" aria-labelledby="recent-heading">
-        <h2 id="recent-heading">近期记录</h2>
-        <div id="conversation-recent"></div>
-      </section>
-    </div>
     <p id="work-notice" role="status" class="muted"></p>
-    <section class="work-group" aria-labelledby="tasks-heading">
-      <h2 id="tasks-heading">事项 <span id="task-count" class="muted">0</span></h2>
+    <div id="panel-dialogue" class="conversation-panel dialogue-panel" role="tabpanel" aria-labelledby="tab-dialogue">
+      <div id="messages" role="log" aria-label="消息记录"><div id="history"></div><section id="activity" aria-label="Aide 执行进展" hidden></section></div>
+      <form id="composer">
+        <textarea id="input" aria-label="交办事情或回答问题" placeholder="交办一件事，或者告诉我你想长期关注什么…" maxlength="32000" required></textarea>
+        <button id="send" type="submit">发送</button>
+      </form>
+      <div id="notice" role="status">Enter 发送 · Shift + Enter 换行</div>
+    </div>
+    <section id="panel-summary" class="conversation-panel" role="tabpanel" aria-labelledby="tab-summary" tabindex="0" hidden>
+      <div id="conversation-summary" class="markdown"></div>
+    </section>
+    <section id="panel-recent" class="conversation-panel" role="tabpanel" aria-labelledby="tab-recent" tabindex="0" hidden>
+      <div id="conversation-recent"></div>
+    </section>
+    <section id="panel-tasks" class="conversation-panel" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0" hidden>
       <div id="tasks"></div>
     </section>
-    <section class="work-group" aria-labelledby="routines-heading">
-      <h2 id="routines-heading">安排 <span id="routine-count" class="muted">0</span></h2>
+    <section id="panel-routines" class="conversation-panel" role="tabpanel" aria-labelledby="tab-routines" tabindex="0" hidden>
       <div id="routines"></div>
     </section>
-  </aside>
+  </section>
 </main>
 <script type="module" src="/app.js"></script>
 </html>

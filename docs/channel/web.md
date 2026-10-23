@@ -6,7 +6,7 @@ Web 是 Aide 的浏览器 Channel，提供会话导航、聊天、工作列表�
 
 `src/web/` 按页面组织：`conversations/`、`persons/` 与 `inputs/` 各自放置 HTML、TypeScript 入口和样式；`shared/` 提供共用的 DOM、HTTP、剪贴板、Markdown 与基础样式。`src/api/` 提供 HTTP 路由、输入校验、响应与 SSE，handler 通过应用提供的接口调用 Core / Personal 能力；Work 生命周期规则由 WorkService 负责。共享的消息和执行展示投影仍在 `src/channel/`，供 Web 与 Lark 使用。
 
-Conversations 的 `main.ts` 组合导航、时间线、输入框、工作列表与原生审批模块，并管理轮询和 SSE 生命周期。导航持有自动跟随或手动分页意图及菜单状态；输入框持有发送状态和重试消息 ID；时间线持有展开选择与渲染缓存。模块通过显式回调请求刷新，不相互读取可变状态。离开页面关闭流和轮询；从浏览器往返缓存恢复时保留交互状态，并重新启动连接。
+Conversations 的 `main.ts` 组合导航、会话 tab、时间线、输入框、工作列表与原生审批模块，并管理轮询和 SSE 生命周期。导航持有自动跟随或手动分页意图及菜单状态；tab 持有选中项和各面板的阅读位置；输入框持有发送状态和重试消息 ID；时间线持有展开选择与渲染缓存。模块通过显式回调请求刷新，不相互读取可变状态。离开页面关闭流和轮询；从浏览器往返缓存恢复时保留交互状态，并重新启动连接。
 
 Persons 的状态留在自己的页面入口，人物选择、资料草稿与认识编辑不依赖 Conversation。页面使用 `src/api/types.ts` 中的展示契约和现有领域类型，跨服务边界的引用均为 type-only import，宿主实现不进入浏览器 bundle。
 
@@ -47,19 +47,19 @@ conversationView → AgentUE UIModel → SSE → 浏览器 reducer 与渲染
 
 src/channel/view.ts 按明确的 Conversation UID 与 execution / invocation 关联选取进展，生成 biz=aide.conversation 的 AgentUE UIModel。输入卡片直接来自 Input，message 展示块来自 Output，execution 下有 thought / text / tool 子块。group_id 关联同一执行与正式回复，不按相邻位置猜测归属。内部提示词和完整工具原始响应不直接发给浏览器。
 
-src/api/stream.ts 使用 SDK 的 PatchEmitter / encodeSse。首次和重连发送 start 快照，内容更新使用 set / append，会话运行状态和侧栏认识分别更新 meta.activity / meta.context。顺序变化时用新快照替换。客户端通过同一 SDK 的 applyPatch 更新模型，Aide 负责页面渲染。
+src/api/stream.ts 使用 SDK 的 PatchEmitter / encodeSse。首次和重连发送 start 快照，内容更新使用 set / append，会话运行状态和摘要、近期记录分别更新 meta.activity / meta.context。顺序变化时用新快照替换。客户端通过同一 SDK 的 applyPatch 更新模型，Aide 负责页面渲染。
 
 空闲连接发送 ping，连接定期 end 后由 EventSource 重连；投影错误以 error / end 收口，首次失败返回 HTTP 500。背压时等待 drain，再根据最新模型生成 patch。断开清理订阅与定时器，不取消服务端执行；seq 属于当前连接，不通过 Last-Event-ID 回放历史补丁。
 
 当前进程保留活跃和有限近期执行细节，浏览器刷新从快照恢复；Aide 重启后只恢复持久业务 Input、Output 和处理记录，实时执行细节清空。原生历史由 Harness 管理，网页不维护第二份轨迹存储。
 
-tests/web-progress.test.ts 用真实 Host / Runner / HTTP、浏览器 reducer 和模拟 Harness 验证 SSE、隔离、重连、结束、侧栏上下文与重启边界；tests/pi-agent.test.ts 另用真实 Pi SDK 和模拟模型验证增量事件。这些测试不代表真实模型或平台验收。
+tests/web-progress.test.ts 用真实 Host / Runner / HTTP、浏览器 reducer 和模拟 Harness 验证 SSE、隔离、重连、结束、会话上下文与重启边界；tests/pi-agent.test.ts 另用真实 Pi SDK 和模拟模型验证增量事件。这些测试不代表真实模型或平台验收。
 
 ## 会话导航
 
 浏览器 Tab 标题固定为 `Aide`，会话名称只显示在页面内。
 
-左侧列表在 Web 侧分页，每页显示 10 个普通会话，默认会话独立置顶并保留在每一页。普通会话沿用最近活动排序。未指定页码时持续跟随当前会话所在页，包括新聊天首次保存后排序变化；自动定位不向 URL 写入固定页码。用户主动翻页或点击会话链接时携带页码，打开链接、刷新和前进后退保留所选页；删除导致页数减少时回到有效的最后一页。每个条目展示关联的事项（Task）数和安排（Routine）数，包含已完成但尚未删除的工作，与右侧工作列表的统计范围一致。
+左侧列表在 Web 侧分页，每页显示 10 个普通会话，默认会话独立置顶并保留在每一页。普通会话沿用最近活动排序。未指定页码时持续跟随当前会话所在页，包括新聊天首次保存后排序变化；自动定位不向 URL 写入固定页码。用户主动翻页或点击会话链接时携带页码，打开链接、刷新和前进后退保留所选页；删除导致页数减少时回到有效的最后一页。每个条目展示关联的事项（Task）数和安排（Routine）数，包含已完成但尚未删除的工作，与会话内事项、安排 tab 的统计范围一致。
 
 网页左栏通过 `GET /conversations` 列出 Personal 的 Conversation，列表携带所属 sessionId，展示 Conversation 的 name 与最近消息摘要；name 初始取首个 Input 文本，后续输入保留名称。列表和对话标题旁提供 ID 复制入口，页面不铺开展示 ID，按最近输入或消息时间排序。名称取首个 Input 的单行文本（最多 80 字符），摘要取已交付消息，不包含其它 Source 观察正文或 Harness 执行细节。当前 URL 指定的空会话仍可进入；浏览列表不创建会话。
 
@@ -73,7 +73,11 @@ tests/web-progress.test.ts 用真实 Host / Runner / HTTP、浏览器 reducer �
 
 ## 工作管理
 
-选中会话后，右侧显示当前话题摘要与近期记录，再列出事项和安排。摘要与记录读取 Conversation 的 summary / recent，并随 SSE 更新；近期记录按最新在前展示时间与正文，长内容在各自区域内滚动。切换会话时清空旧内容，空摘要和空记录分别显示占位提示。
+选中会话后，中间区域提供“对话、摘要、近期记录、事项、安排”五个 tab，默认显示对话，不再使用右侧栏。输入框仅在对话中展示；原生权限 Approval 和更新失败提示位于 tab 内容之外，在任何 tab 都可处理。事项与安排 tab 展示总数，需要用户回答或核对结果时显示提示圆点；卡片保留具体状态。
+
+同一会话切换 tab 保留输入草稿、展开选择与各面板滚动位置，不重连 SSE、不停止后台执行。隐藏对话继续接收最新快照，回到对话后再渲染，避免隐藏布局影响自动跟随判断。tab 支持左右方向键与 Home / End 切换，窄屏可横向滚动。切换到另一个会话时回到对话 tab，并清空旧会话内容。
+
+摘要与记录读取 Conversation 的 summary / recent，并随 SSE 更新；近期记录按最新在前展示时间与正文。每个 tab 使用完整内容区滚动，空摘要和空记录分别显示占位提示。
 
 事项和安排卡片均提供“复制 ID”按钮，复制完整工作 ID 后短暂显示“已复制”；复制失败时展示可手动复制的 ID。
 
@@ -117,7 +121,7 @@ curl -s http://127.0.0.1:7433/events \
 
 主导航提供 Conversations、Persons 和 Inputs 三个同级页面，切换时保持位置一致，滚动内容时页头仍留在视口顶部。Conversations 保留会话列表、消息和工作；Persons 展示跨会话共享的人物列表，以“我”标记服务对象，可按姓名搜索并进入详情。消息带 sender 时提供人物详情链接，Input 卡片提供处理 Timeline 链接。
 
-Inputs 提供全局输入目录，支持按 Connector、来源类型、具体观察源、处理状态、异常记录和正文或 ID 组合筛选。服务端先筛选再分页，默认每页 20 条，按接收时间倒序并以资源键稳定排序；列表不读取完整来源证据，也不刷新输入的容量访问时间。筛选和选中项保存在 URL 中，页面轮询刷新已保留的处理事实。
+Inputs 提供全局输入目录，支持按 Connector、来源类型、具体观察源、处理状态、异常记录和正文或 ID 组合筛选。筛选区位于主导航下方，横跨列表与详情；宽屏横向排列，窄屏自动换行，列表和详情在其下方展示。服务端先筛选再分页，默认每页 20 条，按接收时间倒序并以资源键稳定排序；列表不读取完整来源证据，也不刷新输入的容量访问时间。筛选和选中项保存在 URL 中，页面轮询刷新已保留的处理事实。
 
 详情展示原文、来源证据，以及接收、路由、各 Conversation 研判、各 Work 请求应用与办理回执；显式关联的 Output 独立展示创建与投递。已删除或被同名新资源替换的消费者仍保留旧处理记录，链接只指向 UID 匹配的当前实例。时间线依据和重试历史的范围见 [Input](../personal/input.md#web-检索与处理-timeline)。
 
