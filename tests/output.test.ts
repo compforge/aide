@@ -185,25 +185,17 @@ test("Reconfigured channels fail pending Outputs and preserve uncertain sends wi
   assert.deepEqual(reopened.get("pending")!.spec.target, larkAddress("app", "chat"));
 });
 
-test("say receipts and scoped read_output reflect real delivery without recreating messages", async t => {
+test("say receipts reflect delivery state without recreating messages", async t => {
   const f = await setup(t);
-  const { outputStatusTool } = await import("../plugins/personal/output/tools.ts");
   const target = larkAddress("app", "chat");
   const options = { target, idempotencyKey: "one" };
   const first = await f.conversations.say("topic", undefined, "reply", undefined, options);
   assert.deepEqual(first.status, { phase: "pending", attempts: 0 });
   assert.deepEqual(first.target, target);
-  const reader = outputStatusTool(f.outputs, () => ({ conversationUid: f.conversation.metadata.uid }));
-  const read = () => reader.execute("read", { outputId: first.outputId }, undefined, undefined, {} as never);
-  assert.match(JSON.stringify(await read()), /pending/);
   f.outputs.begin(first.outputId); f.outputs.delivered(first.outputId);
   const retry = await f.conversations.say("topic", undefined, "reply", undefined, options);
   assert.equal(retry.outputId, first.outputId); assert.equal(retry.status.phase, "delivered");
-  assert.match(JSON.stringify(await read()), /delivered/);
   assert.equal(f.outputs.list().length, 1);
-  for (const scope of [{ conversationUid: "other" }, { conversationUid: f.conversation.metadata.uid, producerUid: "another-work" }]) {
-    await assert.rejects(outputStatusTool(f.outputs, () => scope).execute("read", { outputId: first.outputId }, undefined, undefined, {} as never), /not in this scope/);
-  }
   const web = await f.conversations.say("topic", undefined, "published", undefined, { target: webAddress("topic") });
   assert.equal(web.status.phase, "delivered");
 });

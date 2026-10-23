@@ -14,7 +14,7 @@ Input → Route → Conversation / Chief → Task / Routine
 
 Output 是 Personal 定义的 `aide.dev/v1alpha1 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Conversation 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标单独保存为 `Address`：`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark endpoint 是分别 URI 编码的 appId / chatId。Personal 在产出时明确选择地址，Channel 发送时只读 target，不解析 Conversation ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
 
-`say` 成功返回 `outputId`、`target` 与当前 `status`，表示内容已经持久化。只有 `status.phase = delivered` 才能记为已投递，pending / sending 不表示已送达。Chief、Task、Routine 通过 `read_output(outputId)` 查询各自范围内的持久投递状态；不循环轮询、不因 pending 重建消息。Chief 用工具调用 ID 去重；同一调用的重试返回原 Output，不同调用可以为同一批输入创建多个 Output。Task / Routine 的 report 原子提交业务进展与 Input 办理回执，say 独立创建 Output；两个工具不是同一笔事务。投递失败不会重新运行 Harness 或外部动作，输出存在也不证明 report 已成功。
+`say` 成功返回 `outputId`、`target` 与当前 `status`，表示内容已经持久化。只有 `status.phase = delivered` 才能记为已投递，pending / sending 不表示已送达。Agent 记录已创建输出即可，不负责查询送达或投递重试；Host / Channel 维护持久投递状态，界面与诊断按需查看。不因 pending 重建消息。Chief 用工具调用 ID 去重；同一调用的重试返回原 Output，不同调用可以为同一批输入创建多个 Output。Task / Routine 的 report 原子提交业务进展与 Input 办理回执，say 独立创建 Output；两个工具不是同一笔事务。投递失败不会重新运行 Harness 或外部动作，输出存在也不证明 report 已成功。
 
 ## 地址与收件处
 

@@ -10,7 +10,6 @@ import { createRoutineAgent } from "../../../agents/routine/agent.ts";
 import { reportWork } from "../work-report.ts";
 import { ROUTINE_TYPE, type RoutineSpec, type RoutineStatus } from "./model.ts";
 import { inputPrinter } from "../input/printer.ts";
-import { outputStatusTool } from "../output/tools.ts";
 import { say } from "../output/action.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<T> => definition;
@@ -27,11 +26,6 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
     };
     const verbs = () => { const routine = current(); return plugins.executionVerbs(routine.status.execution!.id, { conversationId: routine.spec.conversationId, routineId: routine.metadata.name }); };
     const tools: ToolDefinition[] = [
-      outputStatusTool(store.conversations.outputStore, () => {
-        const work = current(), conversation = store.conversations.resource(work.spec.conversationId);
-        if (!conversation) throw new Error("Output Conversation is unavailable");
-        return { conversationUid: conversation.metadata.uid, producerUid: work.metadata.uid };
-      }),
       tool({ name: "read_routine", label: "Read routine", description: "Read this Routine's objective, state and cumulative understanding.", parameters: Type.Object({}),
         async execute() { return result(current()); } }),
       tool({ name: "read_conv", label: "Read conversation", description: "Read the owning Conversation as context, not additional authority.", parameters: Type.Object({}),
@@ -46,7 +40,7 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
           const text = inputPrinter.describe(input);
           return result({ inputId, handling: input.status.handle[routine.metadata.uid], text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } }),
-      tool({ name: "say", label: "Say", description: "Create an Output through this Routine's Conversation. Success means persisted; only status.phase=delivered confirms delivery. Use read_output to check later; do not poll.",
+      tool({ name: "say", label: "Say", description: "Create an Output through this Routine's Conversation. Success means persisted; only status.phase=delivered confirms delivery. Delivery and recovery are handled by the Host.",
         parameters: Type.Object({ text: Type.String({ minLength: 1 }), inputIds: Type.Optional(Type.Array(Type.String())) }),
         async execute(id, args) {
           const routine = current();

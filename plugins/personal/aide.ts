@@ -8,7 +8,6 @@ import type { OutputStore } from "./output/store.ts";
 import { createRouteAgent } from "../../agents/route/agent.ts";
 import { assessInput, type AssessInput } from "./conversation/assess.ts";
 import { attemptOf, attemptPatch, resourceRef, changeAttempt } from "./input/state.ts";
-import { outputStatusTool } from "./output/tools.ts";
 import { conversationPolicy } from "./conversation/config.ts";
 import { immediate, eligible, finalizeExecution, type LoopStatus } from "./loop.ts";
 import { ROUTE_TYPE, type RouteStatus } from "./route/model.ts";
@@ -96,7 +95,6 @@ export class Personal {
         this.log.info({ conversationId }, "Chief understanding updated");
         return result;
       });
-      tools.push(outputStatusTool(this.conversations.outputStore, () => ({ conversationUid: active().metadata.uid })));
       return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(conversationId), persons: this.options.persons, tools, beforeWorkMutation: () => { active(); } });
     };
   }
