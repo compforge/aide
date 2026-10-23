@@ -79,7 +79,7 @@ Route 专有工具 `route_input({ inputId, conversationUids, reason })` 提交�
 
 Conversation.address 只在由 Channel Input 创建时取首个 Input.source，后续追加不覆盖。Immediate 输入的直接回复使用该 Input.source；其它通知明确选择 target 或使用 Conversation.address。多个 immediate 地址不同时，say 必须指定 respondToInputId 或 target。路由去向、通信位置和执行授权分别判断。
 
-Conversation 的 spec 保存身份、可选 address 与 trigger；status 保存唯一的 `pendingInputIds`、下次触发时间、有界 summary，以及当前 execution 的身份、开始时间和接纳计数。没有 Batch 或 recentInputIds。
+Conversation 的 spec 保存身份、可选 address 与 trigger；status 保存唯一的 `pendingInputIds`、下次触发时间、有界 summary，以及当前 execution 的身份、开始时间和接纳版本。没有 Batch 或 recentInputIds。
 
 默认 Controller 负责运行期间的 immediate 接纳；具名 `agent` Controller 串行调用 Chief。不同 Conversation 拥有独立的原生上下文。普通新输入在当前 invocation 结束后 followup，不重建原生会话，不重复拼入历史 Input；没有新输入时，trigger 仍可触发回顾。
 
@@ -87,7 +87,7 @@ Conversation 的 spec 保存身份、可选 address 与 trigger；status 保存�
 - Chief 通过 `complete_inputs({ inputIds, summary })` 明确确认处理过的输入。工具在同一事务中写消费回执、更新 Conversation 的有界近期决策摘要并精确出队；并发新到输入不受影响。静默、直接处理和交给 Work 都可以完成消费，创建 Output 不是前提。
 - `say` 独立创建 Output，不隐式完成 Input。需要用户补充时发出问题，确认当前请求已处理，后续答复作为新 Input；用户不必回复。
 - immediate 通过 Pi 的原生 steer 在下一个安全边界进入当前 invocation，不取消正在执行的工具。接纳前持久化身份，原生 user message 事件确认 applied；明确拒绝时留队 followup，结果不确定时保留失败证据。
-- 模型结束不等于业务完成。未提交回执的已接纳 Input 标为 failed，保留 pending 引用；后续新请求可读取并核对已有副作用后处理。重启不自动重放 Chief 已尝试的动作。未接纳输入正常续跑。
+- 模型结束不等于业务完成。未提交回执的已接纳 Input 标为 failed，保留 pending 引用；后续新请求可读取并核对已有副作用后处理。重启不自动重放 Chief 已尝试的动作。未接纳输入正常续跑。 收尾事务失败后，同一资源的 agent Controller 会在下一次 Reconcile 只重试消费记录与 execution 释放，不重调 Harness。
 
 原生 SDK 管理连续历史与压缩，Host 保存恢复绑定，不改写原生文件。每次 HarnessInvocation 仍独立记录期限和终态，一次执行最多两天。Route 与 Chief 隔离原生上下文，共用 Hermes 长期记忆；Route 只检索，Chief 维护。Task / Routine 仍是工作状态的权威来源。
 

@@ -4,7 +4,7 @@ import { ROUTE_NAME, ROUTE_TYPE, ROUTE_TARGET, type RouteResource } from "./mode
 import { routeByRules, defaultDestination } from "./rules.ts";
 import { routed, deliver, type RoutingInput } from "./delivery.ts";
 import { updateRoute } from "./state.ts";
-import { nextInput, processing, runInput, steerPending } from "../loop.ts";
+import { finalizeExecution, nextInput, processing, runInput, steerPending } from "../loop.ts";
 import { inputPrinter } from "../input/printer.ts";
 import { routePolicy } from "./config.ts";
 import { CONVERSATION_TYPE } from "../conversation/model.ts";
@@ -57,7 +57,11 @@ export async function reconcileRoute(context: PluginContext, initial: Readonly<R
 }
 
 export async function reconcileRouteAgent(context: PluginContext, execution: ReconcileContext, route: Readonly<RouteResource>) {
-  if (route.metadata.deletionTimestamp || route.status.execution) return;
+  if (route.metadata.deletionTimestamp) return;
+  if (route.status.execution) {
+    await finalizeExecution(context, route, route.status.execution.id);
+    return { requeueAfterMs: 1 };
+  }
   const input = await nextInput(context.resources, route);
   if (!input) {
     // Classification has no external effects. Saved fanout plans are resumed by the intake controller.

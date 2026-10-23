@@ -3,7 +3,7 @@ import type { PluginContext, ReconcileContext, Resource, ResourceClient } from "
 import { INPUT_TYPE, type InputSpec, type InputStatus, type Processing } from "./input/model.ts";
 
 /** @spec A loop keeps its native context; each invocation and each input's business receipt has its own lifetime. */
-export const LoopExecutionSchema = z.object({ id: z.string(), startedAt: z.string(), inputCount: z.number().int().nonnegative().optional() }).strict();
+export const LoopExecutionSchema = z.object({ id: z.string(), startedAt: z.string(), admissionRevision: z.number().int().nonnegative().optional() }).strict();
 export type LoopExecution = z.infer<typeof LoopExecutionSchema>;
 export interface LoopStatus { pendingInputIds: string[]; execution?: LoopExecution | null }
 export type LoopResource = Resource<unknown, LoopStatus>;
@@ -36,7 +36,8 @@ export async function steerPending(context: PluginContext, execution: ReconcileC
     const input = await context.resources.get<InputSpec, InputStatus>(inputRef(id));
     if (input && immediate(input.spec) && !input.status.processing?.[resource.metadata.uid]) {
       const result = await execution.verbs.action<{ accepted: boolean; reason?: string }>("steer_input", { inputId: id });
-      if (result.state === "success" && !result.value.accepted && result.value.reason === "not_running") retry = true;
+      if (result.state === "failure") throw new Error(`Immediate Input admission failed: ${result.error ?? "unknown error"}`);
+      if (result.state === "success" && !result.value.accepted && ["not_running", "admission_conflict"].includes(result.value.reason ?? "")) retry = true;
     }
   }
   return retry ? { requeueAfterMs: 100 } : undefined;
@@ -52,7 +53,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   if (inputId && (!input || input.status.processing?.[current.metadata.uid] || !current.status.pendingInputIds.includes(inputId))) return;
   const startedAt = new Date().toISOString();
   await context.resources.commit([
-    { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, inputCount: input ? 1 : 0 } } },
+    { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, admissionRevision: 0 } } },
     ...(input ? [{ operation: "patchStatus" as const, resource: input, patch: { processing: { ...input.status.processing,
       [current.metadata.uid]: { executionId: execution.executionId, phase: "submitted", at: startedAt } } } }] : []),
   ]);
@@ -63,24 +64,33 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
       prompt, timeoutMs: 172800_000 });
     if (result.state !== "success" || result.value.result.stopReason !== "end_turn") error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
   } catch (cause) { error = String(cause); }
-  finally {
-    // Admission pins this same resource version. Finalization and late steer cannot pass each other unnoticed.
-    for (let attempt = 0; ; attempt++) {
-      const latest = await context.resources.get<unknown, LoopStatus>(ref);
-      if (!latest || latest.status.execution?.id !== execution.executionId) break;
-      const inputs = await Promise.all(latest.status.pendingInputIds.map(id => context.resources.get<InputSpec, InputStatus>(inputRef(id))));
-      const unfinished = inputs.filter(i => i?.status.processing?.[latest.metadata.uid]?.executionId === execution.executionId
-        && i.status.processing[latest.metadata.uid]!.phase === "submitted");
-      try {
-        await context.resources.commit([
-          ...unfinished.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: { processing: { ...input!.status.processing,
-            [latest.metadata.uid]: { ...input!.status.processing![latest.metadata.uid]!, phase: "failed", error } } } })),
-          { operation: "patchStatus", resource: latest, patch: { execution: null } },
-        ]);
-        if (unfinished.length) context.logger.warn("Agent ended with unacknowledged inputs", { attributes: {
-          resourceUid: latest.metadata.uid, executionId: execution.executionId, inputIds: unfinished.map(i => i!.metadata.name), error } });
-        break;
-      } catch (cause) { if (attempt >= 8 || !/version conflict/.test(String(cause))) throw cause; }
-    }
+  finally { await finalizeExecution(context, current, execution.executionId, error); }
+}
+
+/** @spec Agent controllers serialize each resource. A previous execution at reconcile entry needs finalization only, never another Harness call.
+ * @why Retry the atomic receipts-and-release transaction after transient failures; clearing the guard alone would strand submitted Inputs.
+ * @case tests/conversation-loop.test.ts
+ */
+export async function finalizeExecution(context: PluginContext, resource: Readonly<LoopResource>, executionId: string,
+  error = "Previous agent reconcile ended without finalizing; inspect existing effects before continuing") {
+  const ref = { ...resource, ...resource.metadata };
+
+  // Steer advances admissionRevision so late admission conflicts with this snapshot.
+  for (let attempt = 0; ; attempt++) {
+    const latest = await context.resources.get<unknown, LoopStatus>(ref);
+    if (!latest || latest.status.execution?.id !== executionId) break;
+    const inputs = await Promise.all(latest.status.pendingInputIds.map(id => context.resources.get<InputSpec, InputStatus>(inputRef(id))));
+    const unfinished = inputs.filter(i => i?.status.processing?.[latest.metadata.uid]?.executionId === executionId
+      && i.status.processing[latest.metadata.uid]!.phase === "submitted");
+    try {
+      await context.resources.commit([
+        ...unfinished.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: { processing: { ...input!.status.processing,
+          [latest.metadata.uid]: { ...input!.status.processing![latest.metadata.uid]!, phase: "failed", error } } } })),
+        { operation: "patchStatus", resource: latest, patch: { execution: null } },
+      ]);
+      if (unfinished.length) context.logger.warn("Agent ended with unacknowledged inputs", { attributes: {
+        resourceUid: latest.metadata.uid, executionId, inputIds: unfinished.map(i => i!.metadata.name), error } });
+      break;
+    } catch (cause) { if (attempt >= 8 || !/version conflict/.test(String(cause))) throw cause; }
   }
 }

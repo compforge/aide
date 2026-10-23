@@ -13,8 +13,8 @@ import type { ExecutionScope } from "../../src/protocol/verbs.ts";
 import type { ConversationSpec, ConversationStatus } from "./conversation/model.ts";
 import { inputPrinter } from "./input/printer.ts";
 import type { Logger } from "pino";
-import type { ResourceType } from "@compforge/aide-plugin";
-import type { InputReceipt } from "./input/model.ts";
+import type { Resource, ResourceType } from "@compforge/aide-plugin";
+import type { InputReceipt, InputSpec, InputStatus } from "./input/model.ts";
 import type { Manager } from "../../src/host/plugin/manager.ts";
 import { ApplicationRuntime } from "../../src/host/runtime/index.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
@@ -22,7 +22,7 @@ import { IncomingSchema, type Incoming, type OutputView } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { output, Store } from "./store.ts";
 import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
-import { CONVERSATION_TYPE, chiefTarget, digest } from "./chief-model.ts";
+import { CONVERSATION_TYPE, INPUT_TYPE, chiefTarget, digest } from "./chief-model.ts";
 import { type ConversationDeletion } from "./conversation/model.ts";
 import { ConversationStore, conversationKey } from "./conversation/store.ts";
 import type { InputStore } from "./input/store.ts";
@@ -155,27 +155,43 @@ export class Personal {
     const ref = scope.resourceRef;
     if (scope.pluginInstanceId !== "personal" || !ref?.uid || scope.controllerName || !["Route", "Conversation"].includes(ref.kind)) throw new Error("steer_input requires an owning intake controller");
     const resources = this.plugins.resourceClient("personal");
-    const resource = await resources.get<unknown, LoopStatus>(ref);
-    const input = this.conversations.inputStore.get(inputId);
-    const id = resource?.status.execution?.id;
-    if (!id || !input || !resource!.status.pendingInputIds.includes(inputId) || !immediate(input.spec) || input.status.processing?.[ref.uid]) return { accepted: false };
-    const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === id && i.phase === "running");
-    if (!invocation) return { accepted: false, reason: "not_running" };
-    await resources.commit([
-      { operation: "patchStatus", resource: resource!, patch: { execution: { ...resource!.status.execution!, inputCount: (resource!.status.execution!.inputCount ?? 0) + 1 } } },
-      { operation: "patchStatus", resource: input, patch: { processing: { ...input.status.processing,
-        [ref.uid]: { executionId: id, phase: "submitted", at: new Date().toISOString() } } } },
-    ]);
+    let admitted: { input: Readonly<Resource<InputSpec, InputStatus>>;
+      executionId: string; invocationId: string } | undefined;
+    for (let attempt = 0; ; attempt++) {
+      const resource = await resources.get<unknown, LoopStatus>(ref);
+      const input = await resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: inputId });
+      const id = resource?.status.execution?.id;
+      if (!id || !input || !resource!.status.pendingInputIds.includes(inputId) || !immediate(input.spec) || input.status.processing?.[ref.uid]) return { accepted: false };
+      const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === id && i.phase === "running");
+      if (!invocation) return { accepted: false, reason: "not_running" };
+      try {
+        await resources.commit([
+          // This is an admission revision, including rejected dispatches, not a count of consumed Inputs.
+          { operation: "patchStatus", resource: resource!, patch: { execution: { ...resource!.status.execution!, admissionRevision: (resource!.status.execution!.admissionRevision ?? 0) + 1 } } },
+          { operation: "patchStatus", resource: input, patch: { processing: { ...input.status.processing,
+            [ref.uid]: { executionId: id, phase: "submitted", at: new Date().toISOString() } } } },
+        ]);
+        admitted = { input, executionId: id, invocationId: invocation.invocationId };
+        break;
+      } catch (error) {
+        if (!/version conflict/.test(String(error))) throw error;
+        if (attempt >= 8) {
+          this.log.warn({ inputId, consumerUid: ref.uid, executionId: id }, "Steer admission conflicts exhausted; queued for retry");
+          return { accepted: false, reason: "admission_conflict" };
+        }
+      }
+    }
+    const { input, executionId: id, invocationId } = admitted;
     const message = `Immediate Input: ${JSON.stringify({ inputId })}\n${inputPrinter.describe(input).slice(0, 12000)}\nUse read_input for full facts. Submit the business receipt when handled.`;
     try {
-      const outcome = await this.core.executions.steer(invocation.invocationId, `input:${input.metadata.uid}:${ref.uid}`, message);
+      const outcome = await this.core.executions.steer(invocationId, `input:${input.metadata.uid}:${ref.uid}`, message);
       if (!outcome.accepted) {
         await processing(resources, inputId, ref.uid, p => p?.executionId === id && p.phase !== "done" ? undefined : p);
         // An explicit rejection has no effects. Wake followup even if the invocation ended during admission.
         void this.plugins.enqueue({ pluginInstanceId: "personal", namespace: ref.namespace, resourceApiVersion: ref.apiVersion, resourceKind: ref.kind, resourceId: ref.name, controllerName: "agent" })
           .catch(error => this.log.error({ err: error, inputId }, "Could not schedule rejected steer for followup"));
       }
-      this.log.info({ inputId, consumerUid: ref.uid, invocationId: invocation.invocationId, ...outcome }, "Immediate Input steering admission");
+      this.log.info({ inputId, consumerUid: ref.uid, invocationId, ...outcome }, "Immediate Input steering admission");
       return outcome;
     } catch (error) {
       await processing(resources, inputId, ref.uid, p => p?.executionId === id && p.phase === "submitted" ? { ...p, phase: "failed", error: String(error) } : p);

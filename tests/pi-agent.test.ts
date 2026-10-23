@@ -611,10 +611,26 @@ test("Aide steers immediate Input and independently completes both inputs within
   await submit("first", "deferred");
   for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
   assert.equal(fixture.requests.length, 1);
+  // Concurrent consumption/status writes invalidate ten admission snapshots: exhaust one local retry budget, then requeue.
+  const resourceClient = aide.runtime.plugins.resourceClient.bind(aide.runtime.plugins);
+  let conflicts = 10;
+  t.mock.method(aide.runtime.plugins, "resourceClient", (instance: string) => {
+    const client = resourceClient(instance);
+    return { ...client, async commit(writes: Parameters<typeof client.commit>[0]) {
+      const admission = writes.find(w => w.operation === "patchStatus"
+        && ((w.patch as { execution?: { admissionRevision?: number } }).execution?.admissionRevision ?? 0) > 0);
+      if (admission?.operation === "patchStatus" && conflicts > 0) {
+        await client.patchStatus(admission.resource, { summary: `Concurrent status ${conflicts--}` });
+      }
+      return client.commit(writes);
+    } };
+  });
   await submit("urgent", "immediate");
   const uid = aide.conversations.resource("me")!.metadata.uid;
   for (let i = 0; i < 200 && !aide.conversations.inputStore.get("urgent")?.status.processing?.[uid]; i++) await Bun.sleep(10);
   assert.equal(aide.conversations.inputStore.get("urgent")!.status.processing?.[uid]?.phase, "submitted");
+  assert.equal(conflicts, 0);
+  assert.equal(aide.conversations.resource("me")!.status.execution!.admissionRevision, 1);
   release(); await aide.settled();
   assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, []);
   const first = aide.conversations.inputStore.get("first")!.status.processing![uid]!;

@@ -2,7 +2,7 @@ import type { PluginContext, ReconcileContext, Watch } from "@compforge/aide-plu
 import { CONVERSATION_TYPE, type ConversationResource } from "./model.ts";
 import { chiefTarget } from "../chief-model.ts";
 import { inputPrinter } from "../input/printer.ts";
-import { nextInput, runInput, steerPending } from "../loop.ts";
+import { finalizeExecution, nextInput, runInput, steerPending } from "../loop.ts";
 import { conversationPolicy } from "./config.ts";
 import { conversationTrigger, nextTriggerAt } from "./trigger.ts";
 import { updateConversation } from "./state.ts";
@@ -38,7 +38,11 @@ export async function reconcileConversation(context: PluginContext, execution: R
 }
 
 export async function reconcileChief(context: PluginContext, execution: ReconcileContext, initial: Readonly<ConversationResource>) {
-  if (initial.metadata.deletionTimestamp || initial.status.execution) return;
+  if (initial.metadata.deletionTimestamp) return;
+  if (initial.status.execution) {
+    await finalizeExecution(context, initial, initial.status.execution.id);
+    return { requeueAfterMs: 1 };
+  }
   let c = initial;
   const trigger = conversationTrigger(c.spec.trigger);
   if (trigger.enabled && !c.status.nextTriggerAt) c = await updateConversation(context.resources, c, () => ({ nextTriggerAt: nextTriggerAt(trigger) }));

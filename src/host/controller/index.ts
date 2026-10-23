@@ -331,7 +331,7 @@ export class InvocationExecutor {
     if (!run || run.status !== "active" || !run.binding.ref) return { accepted: false, reason: "not_running" };
     const binding = run.binding;
     if (!binding.adapter.steering) return { accepted: false, reason: "steer_unsupported; input remains queued for followup" };
-    const existing = this.options.session.projection.harnessInputs.get(messageId);
+    const existing = this.options.records.projection.harnessInputs.get(messageId);
     if (existing) return { accepted: existing.deliveryOutcome !== "failed", reason: "already_admitted" };
     const input = { messageId, invocationId, contextId: binding.contextId, target: binding.target, blocks: [{ type: "text" as const, text }],
       source: run.input?.source ?? { type: "user" as const }, status: "dispatching" as const, delivery: "steer" as const };
