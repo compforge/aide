@@ -1,6 +1,6 @@
 @import '../shared/style.css';
 main { grid-template-columns: 230px minmax(0, 1fr); }
-.conversation { min-width: 0; padding: 24px; min-height: 0; display: flex; flex-direction: column; }
+.conversation { min-width: 0; padding: 24px; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 #conversation-tabs { display: flex; flex: none; gap: 8px; overflow-x: auto; border-bottom: 1px solid #d8dfd5; margin-bottom: 18px; padding-bottom: 8px; }
 #conversation-tabs[hidden], .conversation-panel[hidden] { display: none; }
 #conversation-tabs button { padding: 9px 12px; border-radius: 8px; background: transparent; color: #68776c; font-size: 14px; }
@@ -8,7 +8,9 @@ main { grid-template-columns: 230px minmax(0, 1fr); }
 .tab-count { font-size: 12px; margin-left: 3px; }
 #conversation-tabs .needs-attention::after { content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: #b87923; }
 .conversation-panel { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 16px 0; }
-.dialogue-panel { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+/* @spec Short viewports retain usable dialogue and approvals; overflow remains scrollable, including a resized composer.
+ * @link docs/channel/web.md */
+.dialogue-panel { display: flex; flex-direction: column; min-height: 12rem; overflow: auto; padding: 0; }
 .conversation-header, #poll-notice, #work-notice, #composer, #notice { flex: none; }
 #work-notice:empty { display: none; }
 .conversations { padding: 24px 12px; border-right: 1px solid #d8dfd5; overflow: auto; }
