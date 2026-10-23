@@ -28,10 +28,19 @@ export function workTools(work: WorkService): ToolDefinition[] {
       parameters: Type.Object({ id }, { additionalProperties: false }),
       async execute(_id, args, signal) { signal?.throwIfAborted(); return result(work.read(args.id)); },
     }),
+    tool({ name: "create_input", label: "Record independent decision",
+      description: "Record a new independent Chief decision within existing entrusted authority. For a received Input use its existing ID instead. Returns inputId for create_work.",
+      parameters: Type.Object({ text: Type.String({ minLength: 1, maxLength: 32000 }) }, { additionalProperties: false }),
+      async execute(callId, { text }, signal) { signal?.throwIfAborted(); return result(await work.createInput(text, callId)); },
+    }),
     tool({ name: "create_work", label: "Create work",
       description: "Entrust a finite goal (task) or ongoing responsibility (routine) to Aide. Ordinary questions and immediate CLI queries do not need work items. Task trigger must be null; routine needs cron or event.",
-      parameters: Type.Object(definition, { additionalProperties: false }),
-      async execute(_id, args, signal) { signal?.throwIfAborted(); return result(await work.create(args)); },
+      parameters: Type.Object({ ...definition, inputId: Type.Optional(id) }, { additionalProperties: false }),
+      async execute(callId, { inputId, ...args }, signal) {
+        signal?.throwIfAborted();
+        if (args.kind === "task" && !inputId) throw new Error("Task creation requires inputId; use the received Input or create an independent Chief request first");
+        return result(await work.create(args, inputId, callId));
+      },
     }),
     tool({ name: "request_work", label: "Request work", description: "Create a new independent Chief request for existing Work. For handoff of a received Input use assess_input instead. This creates a new Input with its own handling receipt; it does not replay a completed request. Read Work before resuming uncertain effects.",
       parameters: Type.Object({ workId: id, text: Type.String({ minLength: 1 }),

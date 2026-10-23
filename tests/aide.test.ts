@@ -15,6 +15,7 @@ import { HarnessFixtures } from "./harness-fixture.ts";
 
 const log = pino({ level: "silent" });
 const done: Outcome = { action: "done", summary: "Checked and finished", recent: "Checked and finished", notification: "完成了", question: null, nextAt: null };
+const routine = { kind: "routine" as const, title: "处理待办", instruction: "检查并处理待办", trigger: { cron: null, timezone: "UTC", event: "start" } };
 const task = { kind: "task" as const, title: "处理待办", instruction: "检查并处理待办", trigger: null };
 
 async function setup(t: TestContext, agent: Agent) {
@@ -28,13 +29,14 @@ async function setup(t: TestContext, agent: Agent) {
 }
 
 
-test("completed execution with invalid final output is distinct from interruption and never automatically replayed", async (t) => {
+test("Routine completed execution with invalid final output is distinct from interruption and never automatically replayed", async (t) => {
   for (const result of ["我已经做完了", { ...done, summary: "" }, { ...done, action: "ask" as const, question: null },
     { ...done, action: "wait" as const, nextAt: "2000-01-01T00:00:00Z" }]) {
     let runs = 0;
     const agent: Agent = { execute: async () => { runs++; return result; } };
     const { aide, path } = await setup(t, agent);
-    (await aide.work("me").create(task));
+    await aide.work("me").create(routine);
+    await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" });
     await aide.settled();
     const work = aide.works()[0]!;
     assert.equal(work.status, "invalid_result");
@@ -79,7 +81,7 @@ test(`${definition.kind} asks, persists a question across restart, then records 
   assert.equal(runs, 2);
 });
 
-test("Personal requires a designated final answer even when the transcript contains valid JSON", async (t) => {
+test("Routine requires a designated final answer even when the transcript contains valid JSON", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-missing-final-"));
   let executed = false;
   const options = fakeOptions({ execute: async () => { executed = true; return done; } }, dir);
@@ -95,7 +97,8 @@ test("Personal requires a designated final answer even when the transcript conta
   } }, log);
   t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
   await aide.personal.conversations.ensure("me", fixtureAddress("me"));
-  await aide.start(); (await aide.work("me").create(task)); await aide.settled();
+  await aide.start(); await aide.work("me").create(routine);
+  await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" }); await aide.settled();
   assert.equal(aide.works()[0]!.status, "invalid_result");
   assert.match(aide.works()[0]!.recent.at(-1)!.text, /without a designated final answer/);
 });
@@ -298,7 +301,7 @@ test("Aide resumes the same Session and personal state when execution cwd change
 });
 
 
-test("default Work target uses Pi without an Aide execution store", async (t) => {
+test("Task uses its dedicated agent without an Aide execution store", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-default-pi-"));
   const seen: string[] = [];
   const options = fakeOptions({ execute: async () => done }, root);
@@ -311,12 +314,12 @@ test("default Work target uses Pi without an Aide execution store", async (t) =>
   await aide.start();
   await aide.work("me").create(task); await aide.settled();
   assert.equal(aide.works()[0]!.status, "done");
-  assert.deepEqual(seen, ["pi"]);
+  assert.deepEqual(seen, ["task"]);
 });
 
 
 for (const harness of ["pi", "codex", "claude", "dsh"] as const)
-test(`Aide routes Task and Routine to the prepared ${harness} target while Chief remains separate`, async (t) => {
+test(`Aide routes Routine to ${harness} while Task and Chief remain dedicated agents`, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-execution-target-"));
   const seen: string[] = [];
   const options = fakeOptions({ chief: async () => "hello", execute: async () => done }, root);
@@ -340,7 +343,8 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   assert.equal(aide.works().find((work) => work.kind === "task")!.status, "done");
   assert.equal(aide.works().find((work) => work.kind === "routine")!.status, "scheduled");
   assert.ok(seen.some((item) => item.endsWith(":chief")));
-  assert.equal(seen.filter((item) => item === `chosen:${harness}`).length, 2);
+  assert.equal(seen.filter((item) => item === `chosen:${harness}`).length, 1);
+  assert.equal(seen.filter((item) => item === "task:task").length, 1);
   assert.equal(aide.runtime.harnesses.find(target => target.id === "chosen")!.harness, harness);
 });
 

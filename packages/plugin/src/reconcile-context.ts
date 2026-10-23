@@ -25,8 +25,8 @@ export interface HarnessInvocationInput extends VerbInput {
   readonly operation?: "prompt";
   readonly prompt: string;
   readonly title: string;
-  /** Native recovery parameters supplied by the caller; the verb never reads resource status. */
-  readonly session?: import("./harness.ts").AgentStatus["session"];
+  /** Native session identity supplied by the caller; the verb never reads resource status. */
+  readonly sessionId?: string;
   /** Omit to use the application's configured default HarnessConfiguration. */
   readonly harness?: string;
 }
@@ -45,16 +45,16 @@ export type HarnessResult = VerbResult<HarnessValue> & { readonly agent?: import
 export interface HarnessOperationValue {
   readonly outcome: "accepted" | "rejected";
   readonly reason?: string;
-  readonly session?: import("./harness.ts").AgentStatus["session"];
+  readonly sessionId?: string;
 }
 interface HarnessOperationOptions extends VerbInput {
   readonly harness?: string;
 }
 export type HarnessOperationInput = HarnessOperationOptions & (
   | { readonly operation: "create" }
-  | { readonly operation: "close"; readonly session: NonNullable<import("./harness.ts").AgentStatus["session"]> }
+  | { readonly operation: "close"; readonly sessionId: string }
   | { readonly operation: "abort"; readonly invocationId: string }
-  | { readonly operation: "resume"; readonly session: NonNullable<import("./harness.ts").AgentStatus["session"]> }
+  | { readonly operation: "resume"; readonly sessionId: string }
   | { readonly operation: "followUp" | "steer"; readonly invocationId: string; readonly messageId: string; readonly prompt: string }
 );
 export type HarnessVerbInput = HarnessInvocationInput | HarnessOperationInput;

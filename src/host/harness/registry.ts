@@ -33,6 +33,7 @@ export interface HarnessAdapterOptions {
   piConfig?: PiConfig;
   /** Personal composition supplies the Chief agent and conversation-scoped capabilities. */
   chiefSession?: PiSessionFactory;
+  taskSession?: PiSessionFactory;
   routeSession?: PiSessionFactory;
   /** Adapter 工厂的实例坐标；工厂负责把 Target 配置 lowering 成具体 Adapter 依赖。 */
   target: HarnessConfiguration;
@@ -69,6 +70,14 @@ export interface HarnessProbeOptions {
  * @link docs/harness/README.md
  */
 export const HARNESS_REGISTRY = [
+  {
+    ...HARNESS_IDENTITIES.task, shortName: "task", color: "#a6da95",
+    create: ({ taskSession, log, nativeEvent, env }) => {
+      if (!taskSession) throw new Error("Task requires a host-bound Task agent factory");
+      if (env && Object.keys(env).length) throw new Error("Embedded Task does not support environment overrides");
+      return new PiAdapter({ harness: "task", createSession: taskSession, log, nativeEvent });
+    },
+  },
   {
     ...HARNESS_IDENTITIES.route, shortName: "route", color: "#a6da95",
     create: ({ routeSession, log, nativeEvent, env }) => {

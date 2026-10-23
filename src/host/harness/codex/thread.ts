@@ -1,9 +1,5 @@
 import type { PromptBlock } from "../../event/index.ts";
 import type { ApprovalRoute, ReconcileState } from "../adapter.ts";
-import {
-  sessionIdFromResumeState,
-  type HarnessResumeState,
-} from "../resume.ts";
 import { CODEX_FAST_CONFIG } from "./runtime.ts";
 import { STARTUP_REQUEST_TIMEOUT_MS } from "./process.ts";
 
@@ -80,7 +76,6 @@ export async function openCodexThread(
   opts: {
     cwd: string;
     sessionId?: string;
-    resumeState?: HarnessResumeState;
     approvalReviewer?: "user" | "auto_review";
   },
 ): Promise<{
@@ -92,10 +87,7 @@ export async function openCodexThread(
   const reviewer = opts.approvalReviewer ? { approvalsReviewer: opts.approvalReviewer } : {};
   // 只开启 Fast 的可选能力；是否付费走 Fast 仍由 serviceTier 明确切换。
   const config = { config: CODEX_FAST_CONFIG };
-  const resumeSessionId = opts.resumeState
-    ? sessionIdFromResumeState(opts.resumeState)
-    : opts.sessionId;
-  if (opts.resumeState && !resumeSessionId) throw new Error("Unsupported Codex resume state");
+  const resumeSessionId = opts.sessionId;
   if (resumeSessionId) {
     const response = await peer.request(
       "thread/resume",

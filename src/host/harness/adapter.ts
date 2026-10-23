@@ -11,7 +11,6 @@ import type {
   ApprovalDraft,
   ApprovalResult,
 } from "../approval/types.ts";
-import type { HarnessResumeState } from "./resume.ts";
 import type { HarnessEventSink } from "./event.ts";
 import type { HarnessInput } from "./input.ts";
 
@@ -39,7 +38,6 @@ export interface HarnessSessionIdentity {
  */
 export interface HarnessSessionReference {
   identity: HarnessSessionIdentity;
-  resumeState?: HarnessResumeState;
 }
 
 export type SessionReferenceSink = (reference: HarnessSessionReference) => void;
@@ -56,8 +54,6 @@ export interface OpenOptions {
   env?: Record<string, string>;
   /** Stable native identity; a requested session must resume or fail explicitly. */
   sessionId?: string;
-  /** Adapter-owned recovery locator, when identity alone is insufficient. */
-  resumeState?: HarnessResumeState;
 }
 
 /**

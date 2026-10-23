@@ -40,10 +40,39 @@ export class WorkService {
     return work;
   }
 
-  async create(definition: WorkDefinition): Promise<Work> {
+  async createInput(text: string, key: string = randomUUID()): Promise<{ inputId: string }> {
+    const content = z.string().trim().min(1).max(32000).parse(text);
+    const conversation = await this.store.conversations.ensure(this.conversationId);
+    const inputId = digest([conversation.metadata.uid, "chief-input", key]);
+    const at = new Date().toISOString();
+    await this.store.client.create(INPUT_TYPE, { name: inputId,
+      spec: { origin: "chief", originId: "personal.chief", text: content, sessionId: this.conversationId }, status: {
+        route: { completedAt: at, result: { conversations: [resourceRef(conversation)], reason: "Independent Chief decision" } },
+        assess: { [conversation.metadata.uid]: { resource: resourceRef(conversation), assignedAt: at, completedAt: at, result: { summary: content } } },
+      } });
+    this.log.info({ inputId, conversationId: this.conversationId }, "Chief decision recorded");
+    return { inputId };
+  }
+
+  async create(definition: WorkDefinition, inputId?: string, key: string = randomUUID()): Promise<Work> {
     const work = newWork(this.conversationId, definition);
     await this.store.conversations.ensure(this.conversationId);
-    await this.store.save(work);
+    if (work.kind === "task") {
+      const conversation = this.store.conversations.resource(this.conversationId)!;
+      const initialInputId = inputId ?? digest([conversation.metadata.uid, "chief-task", key]);
+      work.id = digest([conversation.metadata.uid, initialInputId, key]);
+      const at = new Date().toISOString();
+      await this.store.client.commit([
+        ...(!inputId ? [{ operation: "create" as const, type: INPUT_TYPE, name: initialInputId,
+          spec: { origin: "chief", originId: "personal.chief", text: work.instruction, sessionId: this.conversationId }, status: {
+            route: { completedAt: at, result: { conversations: [resourceRef(conversation)], reason: "Independent Chief task" } },
+            assess: { [conversation.metadata.uid]: { resource: resourceRef(conversation), assignedAt: at, completedAt: at, result: { summary: work.instruction } } },
+          } }] : []),
+        { operation: "create", type: workType("task"), name: work.id,
+          spec: { conversationId: work.conversationId, title: work.title, instruction: work.instruction, revision: work.revision, initialInputId },
+          status: { status: "ready", nextAt: null, question: null, summary: "", recent: [] } },
+      ]);
+    } else await this.store.save(work);
     this.log.info({ workId: work.id, conversationId: this.conversationId, kind: work.kind }, "Work tool created work");
     return this.read(work.id);
   }
@@ -61,7 +90,7 @@ export class WorkService {
     const previous = this.store.conversations.inputStore.get(name);
     if (previous && !isDeepStrictEqual(previous.status.handle?.[target.metadata.uid]?.request, parsed)) throw new Error("Input already has a different Work request; use a new identity");
     await this.store.client.commit([
-      { operation: "patchStatus", resource: target, patch: {} },
+      { operation: "patchStatus", resource: target, patch: target.kind === "Task" ? { idleSince: null, agentStoppedAt: null } : {} },
       { operation: "create", type: INPUT_TYPE, name, spec: { origin: "chief", originId: "personal.chief", text, sessionId: c.spec.id, observation: { work: resourceRef(target), request: parsed } }, status: {
         route: { completedAt: at, result: { conversations: [resourceRef(c)], reason: "Independent Chief request" } },
         assess: { [c.metadata.uid]: { resource: resourceRef(c), assignedAt: at, completedAt: at, result: { summary: text } } },

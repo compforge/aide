@@ -5,7 +5,7 @@ import { nextOccurrence, validateTrigger, type WorkStatus } from "./model.ts";
 import { toWork, type WorkResource, type WorkSpec } from "./resources.ts";
 
 /**
- * @spec Only Work Reconcile applies inbox requests. Observations never resume paused, completed or uncertain work.
+ * @spec Only Work Reconcile applies inbox requests. Observations never resume paused or uncertain work; a retained Task can accept new facts after done.
  * @spec Request application and state commit together; contextual input remains pending until execution confirms it.
  * @link docs/plugin/personal.md
  */
@@ -16,11 +16,12 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
     if (!resource || resource.metadata.deletionTimestamp) return;
     const work = toWork(resource);
     // A running work must be recovered before consuming anything that could start it again.
-    if (work.status === "running") return resource;
+    if (work.status === "running" && resource.kind !== "Task") return resource;
     const pending = await context.resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "handlePending", value: resource.metadata.uid } });
     const unapplied = pending.filter(fact => !fact.status.handle![resource.metadata.uid]!.appliedAt);
     if (!unapplied.length) return resource;
     const receipts = [];
+    let changed = false;
     for (const fact of unapplied) {
       const receipt = fact.status.handle![resource.metadata.uid]!;
       const input = { ...fact.spec, ...receipt.request, id: fact.metadata.name, at: fact.metadata.creationTimestamp };
@@ -36,7 +37,7 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
             validateTrigger(desired.kind, desired.trigger, new Date());
             Object.assign(work, input.changes);
           }
-          if (["ready", "waiting", "scheduled"].includes(work.status) || (input.action === "update" && work.status === "done")) {
+          if (["ready", "waiting", "scheduled", ...(resource.kind === "Task" ? ["done"] : [])].includes(work.status) || (input.action === "update" && work.status === "done")) {
             const scheduled = input.action === "update" && work.kind === "routine";
             work.status = scheduled ? "scheduled" : "ready";
             work.nextAt = scheduled ? nextOccurrence(work.trigger, new Date()) : null;
@@ -49,6 +50,7 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
         work.recent.push({ at: new Date().toISOString(), text: `Input ${input.id} rejected: ${reason}` });
         context.logger.warn("Work input rejected", { attributes: { workId: work.id, inputId: input.id, reason } });
       }
+      if (!rejection && input.action !== "context") changed = true;
       const at = new Date().toISOString();
       const complete = !!rejection || input.action === "pause";
       if (!rejection && input.action !== "context") work.recent.push({ at, text: `Applied ${input.action}: ${input.text.slice(0, 2000)}` });
@@ -59,7 +61,7 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
     const { title, instruction, recent, status, nextAt, question } = work;
     try {
       await context.resources.commit([
-        { operation: "replace", resource, spec: { ...resource.spec, revision: resource.spec.revision + 1, title, instruction, ...(work.kind === "routine" ? { trigger: work.trigger! } : {}) },
+        { operation: "replace", resource, spec: { ...resource.spec, revision: resource.spec.revision + Number(changed), title, instruction, ...(work.kind === "routine" ? { trigger: work.trigger! } : {}) },
           status: { ...resource.status, recent, status, nextAt, question } },
         ...receipts,
       ]);

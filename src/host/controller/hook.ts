@@ -21,7 +21,7 @@ export interface LiveHarness {
   ref?: HarnessSessionHandle;
   setupInvocationId?: string;
   scope: ExecutionScope;
-  session?: AgentStatus["session"];
+  sessionId?: AgentStatus["sessionId"];
   launchSnapshot?: HarnessLaunchSnapshot;
 }
 import { logError, type LogSink } from "../logging.ts";

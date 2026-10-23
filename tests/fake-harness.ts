@@ -1,3 +1,6 @@
+import { TASK_TYPE, type TaskResource } from "../plugins/personal/task/model.ts";
+import { toWork } from "../plugins/personal/resources.ts";
+import { reportTask } from "../plugins/personal/task/report.ts";
 import { assessAll } from "./input-state-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
@@ -30,6 +33,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
     let sink: HarnessEventSink;
     let active: PromptInput | undefined;
     let conversationId: string | undefined;
+    let taskId: string | undefined;
     const finish = (turnId: string, stopReason: string) => {
       if (active?.invocationId !== turnId) return;
       active = undefined;
@@ -40,16 +44,16 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
       async resume(options, events, reference) { return this.create(options, events, reference); },
       async create(options, events, binding) {
         sink = events;
-        const id = (options.resumeState?.data as { sessionId?: string } | undefined)?.sessionId ?? randomUUID();
-        binding({ identity: { id }, resumeState: { version: 1, data: { sessionId: id } } });
-        return { harness: target.harness, handleId: id, resumed: !!options.resumeState };
+        const id = options.sessionId ?? randomUUID();
+        binding({ identity: { id } });
+        return { harness: target.harness, handleId: id, resumed: !!options.sessionId };
       },
       async prompt(_ref, input) {
         active = input;
         const prompt = input.blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
         requests.push(prompt);
         const activation = prompt.split("Activation: ")[1]?.split("\n")[0];
-        if (activation) conversationId = JSON.parse(activation).conversationId;
+        if (activation) { conversationId = JSON.parse(activation).conversationId; taskId = JSON.parse(activation).taskId; }
         const data = (label: string) => JSON.parse(prompt.split(label)[1]!.split("\n")[0]!);
         void Promise.resolve().then<Outcome | string>(() => target.harness === "route"
           ? (() => {
@@ -60,9 +64,25 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
           })()
           : target.harness === "chief"
           ? agent.chief?.(prompt) ?? "你好"
-          : agent.execute(data("Work: "))).then(async (result) => {
+          : target.harness === "task" ? (() => {
+            const store = new PluginResourceStore({ home, pluginInstanceId: "personal" });
+            const task = store.get(TASK_TYPE, taskId!) as TaskResource;
+            const inputs = new InputStore(home).query("handlePending", task.metadata.uid).filter(i => i.status.handle![task.metadata.uid]!.executionId === task.status.execution?.id)
+              .map(i => ({ inputId: i.metadata.name, ...i.spec, note: i.status.handle![task.metadata.uid]!.request.note }));
+            return agent.execute({ ...toWork(task), inputs });
+          })() : agent.execute(data("Work: "))).then(async (result) => {
           if (active?.invocationId !== input.invocationId) return;
           const resources = createResourceClient(new PluginResourceStore({ home, pluginInstanceId: "personal" }));
+          if (target.harness === "task" && taskId && agent.complete !== false) {
+            const task = (await resources.get({ ...TASK_TYPE, name: taskId, namespace: "v1" })) as TaskResource;
+            const outcome = typeof result === "string" ? JSON.parse(result) : result;
+            const inputs = new InputStore(home).query("handlePending", task.metadata.uid).filter(i => i.status.handle![task.metadata.uid]!.executionId === task.status.execution?.id);
+            await reportTask(resources, task, task.status.execution!.id, { inputIds: inputs.map(i => i.metadata.name), summary: outcome.summary,
+              recent: outcome.recent, action: outcome.action, question: outcome.question, nextAt: outcome.nextAt });
+            const c = (await resources.list<ConversationResource["spec"], ConversationStatus>(CONVERSATION_TYPE)).find(c => c.spec.id === task.spec.conversationId);
+            const text = outcome.action === "ask" ? outcome.question : outcome.notification;
+            if (c?.spec.address && text) new OutputStore(home).create(c.spec.id, randomUUID(), outputSpec(c, { conversationId: c.spec.id, text }, { producer: { ...TASK_TYPE, name: taskId, namespace: "v1", uid: task.metadata.uid } }));
+          }
           if (target.harness === "route") {
             for (const decision of JSON.parse(String(result)).decisions) {
               const context = { resources, logger: { info() {} } };

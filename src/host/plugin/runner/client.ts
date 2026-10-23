@@ -398,7 +398,7 @@ export class PluginRunnerClient {
         await this.callbacks.resources.delete(
           request.type,
           request.name,
-          request.namespace,
+          request.namespace, request.preconditions,
         );
         return undefined;
       case "resource.patch":

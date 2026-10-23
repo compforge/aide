@@ -3,18 +3,18 @@ import { INPUT_TYPE, type InputSpec, type InputStatus, type Attempt } from "./mo
 export type Input = Readonly<Resource<InputSpec, InputStatus>>;
 export const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, name });
 export const resourceRef = (r: Readonly<Resource<unknown, unknown>>) => ({ apiVersion: r.apiVersion, kind: r.kind, namespace: r.metadata.namespace, name: r.metadata.name, uid: r.metadata.uid });
-export const stage = (owner: ResourceRef) => owner.kind === "Route" ? "route" : "assess";
-export const attemptOf = (input: Input, owner: ResourceRef): Attempt | undefined => stage(owner) === "route" ? input.status.route : input.status.assess?.[owner.uid!];
+export const stage = (owner: ResourceRef) => owner.kind === "Route" ? "route" : owner.kind === "Task" ? "handle" : "assess";
+export const attemptOf = (input: Input, owner: ResourceRef): Attempt | undefined => stage(owner) === "route" ? input.status.route : input.status[stage(owner) as "assess" | "handle"]?.[owner.uid!];
 export function attemptPatch(input: Input, owner: ResourceRef, change: Partial<Attempt> & { nextAttemptAt?: string; attempts?: number }): Partial<InputStatus> {
   const merge = <T extends Attempt>(previous: T): T => Object.fromEntries(Object.entries({ ...previous, ...change }).filter(([, value]) => value !== undefined)) as T;
   if (stage(owner) === "route") return { route: merge(input.status.route ?? {}) };
-  const assigned = input.status.assess?.[owner.uid!];
+  const assigned = input.status[stage(owner) as "assess" | "handle"]?.[owner.uid!];
   if (!assigned) throw new Error("Input is not assigned to this Chief");
-  return { assess: { ...input.status.assess, [owner.uid!]: merge(assigned) } };
+  return { [stage(owner)]: { ...input.status[stage(owner) as "assess" | "handle"], [owner.uid!]: merge(assigned) } };
 }
 export async function pendingInputs(resources: ResourceClient, owner: ResourceRef) {
   return resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: stage(owner) === "route"
-    ? { name: "routePending", value: "pending" } : { name: "assessPending", value: owner.uid! } });
+    ? { name: "routePending", value: "pending" } : { name: `${stage(owner)}Pending`, value: owner.uid! } });
 }
 export async function changeAttempt(resources: ResourceClient, id: string, owner: ResourceRef, change: (p?: Attempt) => Partial<Attempt>) {
   for (let n = 0; ; n++) {

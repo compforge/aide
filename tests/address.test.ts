@@ -110,21 +110,22 @@ test("say resolves direct, aggregate and proactive targets without guessing from
   assert.equal(store.outputStore.get(proactive.outputId)!.spec.inputIds, undefined);
 });
 
-test("Work without a communication address records completion and retains notification without rerunning after restart", async (t) => {
+test("Routine without a communication address records completion and retains notification without rerunning after restart", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-addressless-work-"));
   let executions = 0;
   const options = fakeOptions({ async execute() { executions++; return { action: "done", summary: "verified", recent: "verified", notification: "retained notification", question: null, nextAt: null }; } }, root);
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.work("source-topic").create({ kind: "task", title: "Check", instruction: "Inspect", trigger: null });
+  await aide.work("source-topic").create({ kind: "routine", title: "Check", instruction: "Inspect", trigger: { cron: null, timezone: "UTC", event: "check" } });
+  await aide.event({ id: "check", sessionId: "source-topic", conversationId: "source-topic", name: "check", text: "check" });
   await aide.start(); await aide.settled();
-  assert.equal(aide.works()[0]!.status, "done");
+  assert.equal(aide.works()[0]!.status, "scheduled");
   assert.ok(aide.works()[0]!.recent.some((h) => h.text.includes("retained notification")));
   assert.equal(aide.outputs().length, 0);
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();
   assert.equal(executions, 1);
-  assert.equal(aide.works()[0]!.status, "done");
+  assert.equal(aide.works()[0]!.status, "scheduled");
 });
 
 /** @case Web publication uses its target too, while the producer keeps an inspectable record. */

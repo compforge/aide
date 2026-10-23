@@ -60,7 +60,7 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and convers
   assert.equal(appended.instruction, definition.instruction);
   assert.equal(appended.status, work.status);
   await service.requestInput(work.id, { action: "update", text: "修改目标", changes: { instruction: "检查更新后的 aide 仓库" } }, "request-1");
-  assert.equal(store.conversations.inputStore.list().filter(i => i.status.handle?.[uid]).length, 1);
+  assert.equal(store.conversations.inputStore.list().filter(i => i.status.handle?.[uid]).length, definition.kind === "task" ? 2 : 1);
   await assert.rejects(service.requestInput(work.id, { action: "pause", text: "修改目标" }, "request-1"), /different Work request/);
   await consume(work.id);
   const updated = service.read(work.id);

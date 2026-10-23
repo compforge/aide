@@ -33,7 +33,10 @@ export type ResourceClientChange = {
 );
 
 /** Optional plugin admission for immutable facts and idempotency receipts, in the same storage transaction. */
-export type ResourceAdmission = (type: ResourceType, init: { name: string; spec: unknown; status?: unknown; namespace?: ResourceNamespace }) => Resource<unknown, unknown> | undefined;
+export type ResourceAdmission = (type: ResourceType, init: { name: string; spec: unknown; status?: unknown; namespace?: ResourceNamespace }, writes: {
+  create(type: ResourceType, init: { name: string; spec: unknown; status?: unknown; namespace?: ResourceNamespace }): Resource<unknown, unknown>;
+  patchStatus<S, T>(resource: Readonly<Resource<S, T>>, patch: Partial<T>): Readonly<Resource<S, T>>;
+}) => Resource<unknown, unknown> | undefined;
 
 function deepFreeze<T>(value: T): T {
   if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
@@ -103,8 +106,16 @@ export function createResourceClient(
     }
   ) {
     assertCanCreateType?.(type);
-    const admitted = store.storage.transaction(() => admit?.(type, init));
-    if (admitted) { changed("created", admitted); return deepFreeze(admitted) as Resource<TSpec, TStatus>; }
+    return store.storage.transaction(() => {
+      const admitted = admit?.(type, init, { create: (type, init) => createStored(type, init, false), patchStatus });
+      if (admitted) { changed("created", admitted); return deepFreeze(admitted) as Resource<TSpec, TStatus>; }
+      return createStored(type, init);
+    });
+  }
+  function createStored<TSpec, TStatus>(type: ResourceType, init: {
+    name: string; namespace?: ResourceNamespace; labels?: Readonly<Record<string, string>>;
+    annotations?: Readonly<Record<string, string>>; owner?: ResourceOwnerReference; spec: TSpec; status?: TStatus;
+  }, notify = true) {
     const created = deepFreeze(
       store.create<TSpec, TStatus>({
         type,
@@ -121,7 +132,7 @@ export function createResourceClient(
         status: init.status,
       }),
     );
-    changed("created", created);
+    if (notify) changed("created", created);
     return created;
   }
   function replace<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, spec: TSpec, status: TStatus) {
@@ -181,12 +192,13 @@ export function createResourceClient(
       type: ResourceType,
       name: string,
       namespace: ResourceNamespace = "v1",
+      preconditions?: { uid: string; resourceVersion: string },
     ) {
       for (const update of store.requestDeletion(
         type,
         name,
         undefined,
-        namespace,
+        namespace, preconditions,
       )) {
         try {
           onChange?.(Object.freeze({

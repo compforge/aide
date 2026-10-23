@@ -109,6 +109,7 @@ export type HostRequest =
       readonly type: ResourceType;
       readonly name: string;
       readonly namespace?: ResourceNamespace;
+      readonly preconditions?: { readonly uid: string; readonly resourceVersion: string };
     }
   | {
       readonly method: "resource.patch";

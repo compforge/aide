@@ -1,7 +1,9 @@
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PiAdapter } from "../src/host/harness/pi/adapter.ts";
 import { createRouteAgent } from "../agents/route/agent.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
+import { fixtureAddress } from "./address-fixture.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
@@ -98,12 +100,12 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   };
   const reference: import("../src/host/harness/adapter.ts").SessionReferenceSink = value => { binding = value; };
   const open = () => binding
-    ? adapter.resume({ cwd: root, sessionId: binding.identity.id, resumeState: binding.resumeState }, eventsOf, reference)
+    ? adapter.resume({ cwd: root, sessionId: binding.identity.id }, eventsOf, reference)
     : adapter.create({ cwd: root }, eventsOf, reference);
   let ref = await open();
   assert.equal(adapter.harness, harness);
   assert.equal(ref.harness, harness);
-  const sessionFile = (binding!.resumeState!.data as { sessionFile: string }).sessionFile;
+  const sessionFile = (await SessionManager.listAll(join(agentDir, "sessions"))).find(s => s.id === binding!.identity.id)!.path;
   const nativeRoot = join(agentDir, "sessions");
   assert.ok(relative(nativeRoot, sessionFile).length > 0);
   assert.ok(!relative(nativeRoot, sessionFile).startsWith(".."));
@@ -148,10 +150,11 @@ test("Pi streams thought and answer before completion without duplicating the fi
 test("Pi answers directly without work and resumes its native history", { timeout: 20_000 }, async (t) => {
   const fixture = await setup(t, () => ({ text: "你好，有什么可以帮你？" }));
   assert.equal(existsSync(fixture.personFile), false, "Generic Pi does not create a person profile");
-  assert.equal((fixture.binding().resumeState!.data as { empty: boolean }).empty, true);
-  assert.equal((await fixture.reopen()).resumed, false);
+  const emptyId = fixture.binding().identity.id;
+  assert.equal((await fixture.reopen()).resumed, true);
+  assert.equal(fixture.binding().identity.id, emptyId);
   const summary = await fixture.run("你好", "greeting");
-  assert.equal((fixture.binding().resumeState!.data as { empty: boolean }).empty, false);
+
   assert.equal(summary.finalText, "你好，有什么可以帮你？");
   assert.equal(fixture.requestHeaders[0]!["x-provider"], "snapshot");
   assert.equal(fixture.requestHeaders[0]!["x-model"], "snapshot");
@@ -169,7 +172,7 @@ test("Pi answers directly without work and resumes its native history", { timeou
   await fixture.run("刚才说了什么？", "followup");
   assert.equal(fixture.binding().identity.id, identity);
   assert.match(JSON.stringify(fixture.requests[1]!.messages), /你好/);
-  const data = fixture.binding().resumeState!.data as { sessionFile: string };
+  const data = { sessionFile: (await SessionManager.listAll(join(fixture.config.agentDir, "sessions"))).find(s => s.id === fixture.binding().identity.id)!.path };
   await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile: data.sessionFile, work: fixture.work }), /does not belong/);
   await assert.rejects(createPiAgent({ ...fixture.config, sessionFile: join(fixture.config.agentDir, "sessions", "missing.jsonl") }), /missing/);
 });
@@ -202,16 +205,22 @@ test("Chief loads declared skills and excludes ambient Pi skills and packages", 
   finally { await empty.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); empty.dispose(); }
 });
 
-test("Chief executes all five Work tools through the SDK and keeps commentary out of finalText", { timeout: 30_000 }, async (t) => {
-  let id = "", routineId = "";
-  const fixture = await setup(t, (_request, index) => {
+test("Chief executes Work and independent Input tools through the SDK and keeps commentary out of finalText", { timeout: 30_000 }, async (t) => {
+  let id = "", routineId = "", inputId = "";
+  const fixture = await setup(t, (request, index) => {
+    if (index === 0) return { tool: "create_input", args: { text: "检查 aide" } };
+    if (index === 1) {
+      const messages = request.messages as Array<{ role: string; content: unknown }>;
+      inputId = JSON.parse(messageText(messages.at(-1)!.content)).inputId;
+      assert.ok(inputId);
+    }
     const works = fixture.work.list();
     const work = works.find((item) => item.kind === "task");
     const routine = works.find((item) => item.kind === "routine");
     if (work) id = work.id;
     if (routine) routineId = routine.id;
-    switch (index) {
-      case 0: return { tool: "create_work", args: { kind: "task", title: "检查仓库", instruction: "检查 aide", trigger: null } };
+    switch (index - 1) {
+      case 0: return { tool: "create_work", args: { kind: "task", title: "检查仓库", instruction: "检查 aide", trigger: null, inputId } };
       case 1: return { tool: "list_work", args: {} };
       case 2: return { tool: "read_work", args: { id } };
       case 3: return { tool: "request_work", args: { workId: id, text: "暂停", action: "pause" } };
@@ -229,12 +238,12 @@ test("Chief executes all five Work tools through the SDK and keeps commentary ou
   assert.equal(summary.stopReason, "end_turn");
   assert.equal(summary.finalText, "已完成创建、查询、更新和删除。");
   assert.match(summary.agentText!, /我来处理/);
-  assert.deepEqual(summary.toolCalls.map((tool) => tool.status), Array(8).fill("completed"));
+  assert.deepEqual(summary.toolCalls.map((tool) => tool.status), Array(9).fill("completed"));
   assert.deepEqual(fixture.work.list(), []);
   assert.equal(fixture.events.filter((event) => event.kind === "state_update").length, 1);
   assert.equal((await fixture.reopen()).resumed, true);
   assert.equal((await fixture.run("继续聊天", "chief-resumed")).stopReason, "end_turn");
-  const sessionFile = (fixture.binding().resumeState!.data as { sessionFile: string }).sessionFile;
+  const sessionFile = (await SessionManager.listAll(join(fixture.config.agentDir, "sessions"))).find(s => s.id === fixture.binding().identity.id)!.path;
   await assert.rejects(createPiAgent({ ...fixture.config, sessionFile }), /does not belong/);
   await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile,
     scope: "chief:another-resource", work: { ...fixture.work, conversationId: "another" } as WorkService }), /does not belong/);
@@ -303,7 +312,7 @@ test("Aide isolates continuous native contexts across conversations, restart and
     await aide.receive(fixtureIncoming({ channelId: "web", sessionId, conversationId, id, text: `question-${id}` })); await aide.settled();
     assert.equal(aide.personal.conversations.inputs().at(-1)!.consumption.phase, "done");
   };
-  const binding = (_sessionId: string, conversationId: string) => aide.personal.conversations.resource(conversationId)!.status.agent!.session!;
+  const binding = (_sessionId: string, conversationId: string) => aide.personal.conversations.resource(conversationId)!.status.agent!.sessionId!;
 
   aide = open();
   try {
@@ -311,16 +320,16 @@ test("Aide isolates continuous native contexts across conversations, restart and
     await send("lark:app:group-a", "lark:app:group-a", "a1");
     const original = binding("lark:app:group-a", "lark:app:group-a");
     await send("lark:app:group-a", "lark:app:group-a", "a2");
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a").id, original.id);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a"), original);
     assert.match(JSON.stringify(fixture.requests[3]), /native-response-0/);
     await send("lark:app:group-b", "lark:app:group-b", "b1");
-    assert.notEqual(binding("lark:app:group-b", "lark:app:group-b").id, original.id);
+    assert.notEqual(binding("lark:app:group-b", "lark:app:group-b"), original);
     assert.doesNotMatch(JSON.stringify(fixture.requests[6]), /question-a1|native-response-0/);
     await aide.close();
     aide = open(); await aide.start();
     assert.equal(aide.runtime.plugins.listInstances().length, 1);
     await send("lark:app:group-a", "lark:app:group-a", "a3");
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a").id, original.id);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a"), original);
     assert.match(JSON.stringify(fixture.requests[9]), /native-response-1/);
     assert.doesNotMatch(JSON.stringify(fixture.requests[9]), /question-b1/);
     assert.equal(aide.outputs().filter((message) => message.conversationId === "lark:app:group-a").length, 3);
@@ -332,7 +341,7 @@ test("Aide isolates continuous native contexts across conversations, restart and
     assert.deepEqual(await aide.deleteConversation(conversation.id, conversation.revision, aide.personal.conversations.resource(conversation.id)!.metadata.uid), { deleted: true });
     await aide.settled();
     await send("lark:app:group-a", "lark:app:group-a", "a5");
-    assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").id, beforeDelete.id);
+    assert.notEqual(binding("lark:app:group-a", "lark:app:group-a"), beforeDelete);
     assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)), /question-a[1-4]|native-response-[0-4]/);
     await aide.close();
     aide = open(); await aide.start();
@@ -492,7 +501,7 @@ export default function (pi) {
 });
 
 
-test("Task and Routine execute with the default Pi Harness and its configured package skill", { timeout: 30_000 }, async (t) => {
+test("Routine executes with the default Pi Harness and its configured package skill", { timeout: 30_000 }, async (t) => {
   const outcome = { action: "done", summary: "checked", recent: "checked", notification: "verified", question: null, nextAt: null };
   const fixture = await setup(t, () => ({ text: JSON.stringify(outcome) }));
   const home = join(fixture.config.cwd, "work-home");
@@ -504,15 +513,12 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
     createHarnessAdapter(target, { ...ports, piConfig, targetConfig: { harness: target.harness } }) }, pino({ level: "silent" }));
   t.after(() => aide.close());
   await aide.start();
-  await aide.work("me").create({ kind: "task", title: "inspect once", instruction: "Check evidence", trigger: null });
-  await aide.settled();
-  assert.equal(aide.works()[0]!.status, "done");
   await aide.work("me").create({ kind: "routine", title: "inspect on event", instruction: "Check evidence", trigger: { cron: null, timezone: "UTC", event: "sample" } });
   await aide.event({ id: "sample-1", sessionId: "me", conversationId: "me", name: "sample", text: "sample" });
   await aide.settled();
   assert.equal(aide.works().find((work) => work.kind === "routine")!.status, "scheduled");
   const requests = fixture.requests.filter((request) => request.model === "work-model");
-  assert.equal(requests.length, 2);
+  assert.equal(requests.length, 1);
   for (const request of requests) {
     assert.match(JSON.stringify(request.messages), /fixture-as-ops/);
     assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|create_work/);
@@ -728,4 +734,105 @@ test("Pi waits for in-flight steer admission before releasing a settled binding"
   await adapter.prompt(handle, { invocationId: "second", messageId: "next", blocks: [{ type: "text", text: "next" }] });
   for (let i = 0; i < 200 && !events.some(e => e.kind === "state_update" && e.invocationId === "second"); i++) await Bun.sleep(10);
   assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)!.messages), /late-admission-marker/);
+});
+
+/** @case A Task uses scoped tools, native context and exact handling receipts across Host restart. */
+test("Task native session resumes by ID and uses read_input, read_conv, say and report_task", { timeout: 30_000 }, async t => {
+  let inputId = "", phase = 0;
+  const fixture = await setup(t, (request, index) => {
+    const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
+    for (const tool of ["read_task", "read_input", "read_conv", "say", "report_task"]) assert.ok(names.includes(tool));
+    assert.equal(names.includes("create_work"), false);
+    switch (index % 6) {
+      case 0: return { tool: "read_task", args: {} };
+      case 1: return { tool: "read_input", args: { inputId } };
+      case 2: return { tool: "read_conv", args: {} };
+      case 3: return { tool: "say", args: { text: `Verified phase ${phase}`, inputIds: [inputId] } };
+      case 4: return { tool: "report_task", args: { inputIds: [inputId], summary: `Verified ${phase}`, recent: "Evidence inspected", action: "done" } };
+      default: return { text: "Task progress recorded" };
+    }
+  });
+  const home = join(fixture.config.cwd, "task-native-home");
+  let aide: Aide;
+  const open = () => new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
+      taskSession: aide.taskSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
+  aide = open();
+  try {
+    await aide.conversations.ensure("me", fixtureAddress("me"));
+    const work = await aide.work("me").create({ kind: "task", title: "Inspect evidence", instruction: "unique-task-evidence", trigger: null });
+    const { TASK_TYPE } = await import("../plugins/personal/task/model.ts");
+    const get = () => aide.personal.store.resources.get(TASK_TYPE, work.id) as import("../plugins/personal/task/model.ts").TaskResource;
+    inputId = get().spec.initialInputId;
+    await aide.start(); await aide.settled();
+    assert.equal(get().status.status, "done", JSON.stringify(get()));
+    const agent = get().status.agent!;
+    assert.deepEqual(Object.keys(agent).sort(), ["harness", "sessionId"]);
+    assert.equal(agent.harness, "task");
+    assert.ok(agent.sessionId);
+    assert.equal(aide.outputs().length, 1);
+    const output = aide.outputStore.list()[0]!;
+    assert.equal(output.spec.producer?.uid, work.uid);
+    await aide.close(); aide = open(); await aide.start();
+    const before = fixture.requests.length;
+    phase = 1;
+    await aide.work("me").requestInput(work.id, { text: "followup-task-evidence" }, "followup");
+    inputId = aide.conversations.inputStore.query("handlePending", work.uid!)[0]!.metadata.name;
+    await aide.settled();
+    assert.equal(get().status.status, "done", JSON.stringify(get()));
+    assert.deepEqual(get().status.agent, agent);
+    assert.match(JSON.stringify(fixture.requests[before]!.messages), /unique-task-evidence/);
+    assert.equal(aide.outputs().length, 2);
+    assert.ok(aide.conversations.inputStore.list().every(i => i.status.handle?.[work.uid!]?.completedAt));
+  } finally { await aide.close(); }
+});
+
+/** @case Later Task inputs use native followUp or steer within the admitted invocation, with separate durable receipts. */
+for (const attention of ["deferred", "immediate"] as const)
+test(`Task ${attention} Input joins the active native invocation`, { timeout: 20_000 }, async t => {
+  let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
+  let firstId = "", laterId = "";
+  const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting", pause }
+    : index === 1 ? { tool: "report_task", args: { inputIds: [firstId, laterId], action: "done", summary: "Both inspected", recent: "Verified both inputs" } }
+    : { text: "Recorded" });
+  const home = join(fixture.config.cwd, "task-active-home");
+  const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
+      taskSession: aide.taskSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
+  t.after(async () => { release(); await aide.close(); });
+  const work = await aide.work("me").create({ kind: "task", title: "Inspect", instruction: "Initial evidence", trigger: null });
+  firstId = aide.conversations.inputStore.query("handlePending", work.uid!)[0]!.metadata.name;
+  await aide.start();
+  for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
+  assert.equal(fixture.requests.length, 1);
+  const resources = aide.runtime.plugins.resourceClient("personal");
+  const { TASK_TYPE } = await import("../plugins/personal/task/model.ts");
+  const { INPUT_TYPE } = await import("../plugins/personal/input/model.ts");
+  const { resourceRef } = await import("../plugins/personal/input/state.ts");
+  laterId = "later";
+  const c = aide.conversations.resource("me")!;
+  const task = aide.personal.store.resources.get(TASK_TYPE, work.id);
+  const at = new Date().toISOString();
+  // Seed the result of Chief assessment; the real Task controllers own subsequent admission and execution.
+  await resources.commit([
+    { operation: "patchStatus", resource: task, patch: { idleSince: null, agentStoppedAt: null } },
+    { operation: "create", type: INPUT_TYPE, name: laterId,
+      spec: { origin: "source", originId: "fixture", attention, text: "later unique evidence" }, status: {
+        route: { completedAt: at, result: { conversations: [resourceRef(c)], reason: "same topic" } },
+        assess: { [c.metadata.uid]: { resource: resourceRef(c), assignedAt: at, completedAt: at, result: { summary: "Delegate" } } },
+        handle: { [work.uid!]: { resource: resourceRef(task), assignedAt: at, request: { action: "context" } } },
+      } },
+  ]);
+  for (let i = 0; i < 200 && !aide.conversations.inputStore.get(laterId)?.status.handle?.[work.uid!]?.executionId; i++) await Bun.sleep(10);
+  const later = aide.conversations.inputStore.get(laterId)!.status.handle![work.uid!]!;
+  assert.ok(later.executionId);
+  const first = aide.conversations.inputStore.get(firstId)!.status.handle![work.uid!]!;
+  assert.equal(later.executionId, first.executionId);
+  release(); await aide.settled();
+  assert.equal(aide.work("me").read(work.id).status, "done");
+  for (const id of [firstId, laterId]) assert.ok(aide.conversations.inputStore.get(id)!.status.handle![work.uid!]!.completedAt);
+  assert.match(JSON.stringify(fixture.requests[1]!.messages), /later unique evidence/);
+  const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
+  const admitted = [...state.harnessInputs.values()].find(i => i.delivery === (attention === "immediate" ? "steer" : "followUp"));
+  assert.equal(admitted?.deliveryOutcome, "applied");
 });

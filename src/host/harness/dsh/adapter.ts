@@ -33,9 +33,6 @@ import {
   unsupportedPromptBlocks,
 } from "../adapter.ts";
 import { planSnapshotDraft } from "../plan.ts";
-import {
-  sessionIdFromResumeState,
-} from "../resume.ts";
 
 const DSH_REQUEST_TIMEOUT_MS = 15_000;
 const DSH_SHUTDOWN_TIMEOUT_MS = 1_000;
@@ -100,7 +97,6 @@ import {
   contentText,
   contextUsed,
   dshFailure,
-  dshResumeState,
   dshStopReason,
   errorMessage,
   finiteNumber,
@@ -108,7 +104,6 @@ import {
   nativeStepKey,
   reasoningBlocks,
   record,
-  requestContextFromResumeState,
   text,
   textBlocks,
   toolEffect,
@@ -134,7 +129,7 @@ export class DshAdapter implements Harness {
 
 
   create(options: OpenOptions, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
-    if (options.sessionId || options.resumeState) throw new Error("Use resume to restore an existing session");
+    if (options.sessionId) throw new Error("Use resume to restore an existing session");
     return this.open(options, sink, reference);
   }
 
@@ -159,11 +154,7 @@ export class DshAdapter implements Harness {
     binding?: SessionReferenceSink,
   ): Promise<HarnessSessionHandle> {
     const handleId = newId("hs");
-    const requestedSessionId = opts.resumeState
-      ? sessionIdFromResumeState(opts.resumeState)
-      : opts.sessionId;
-    if (opts.resumeState && !requestedSessionId) throw new Error("Unsupported native session recovery state");
-    const requestContext = requestContextFromResumeState(opts.resumeState);
+    const requestedSessionId = opts.sessionId;
     const runtime: DshRuntime = {
       cwd: opts.cwd,
       ...(opts.env || this.options.env
@@ -172,7 +163,6 @@ export class DshAdapter implements Harness {
       sink,
       ...(binding ? { bindingSink: binding } : {}),
       ...(requestedSessionId ? { sessionId: requestedSessionId } : {}),
-      ...(requestContext ? { requestContext } : {}),
       closed: false,
     };
     this.sessions.set(handleId, runtime);
@@ -472,10 +462,7 @@ export class DshAdapter implements Harness {
         model,
         ...(contextWindow === undefined ? {} : { contextWindow }),
       };
-      // DSH only records request/context when the route changes. Persist the
-      // latest value with the native session checkpoint so a resumed Adapter
-      // can keep reporting the window even when DSH correctly deduplicates it.
-      this.publishBinding(runtime);
+      // Request context is live diagnostic metadata; native recovery remains ID-only.
       return;
     }
 
@@ -692,7 +679,6 @@ export class DshAdapter implements Harness {
     if (!runtime.sessionId) return;
     runtime.bindingSink?.({
       identity: { id: runtime.sessionId },
-      resumeState: dshResumeState(runtime.sessionId, runtime.requestContext),
     });
   }
 

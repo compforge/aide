@@ -1,10 +1,10 @@
-import { WorkSchema, validateTrigger, type Work } from "./model.ts";
+import { WorkSchema, validateTrigger, type Work, type WorkStatus } from "./model.ts";
 import { TASK_TYPE, type TaskSpec, type TaskResource } from "./task/model.ts";
 import { ROUTINE_TYPE, type RoutineSpec, type RoutineResource } from "./routine/model.ts";
 
 export const WORK_TYPES = [TASK_TYPE, ROUTINE_TYPE] as const;
 export type WorkSpec = TaskSpec | RoutineSpec;
-export type WorkResource = TaskResource | RoutineResource;
+export type WorkResource = import("@compforge/aide-plugin").Resource<WorkSpec, WorkStatus>;
 
 export function workType(kind: Work["kind"]) {
   return kind === "task" ? TASK_TYPE : ROUTINE_TYPE;

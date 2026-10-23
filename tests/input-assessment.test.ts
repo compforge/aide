@@ -56,6 +56,7 @@ test("Failed handoff rolls back assessment, Work assignments and summary; foreig
   await resources.patchStatus(aide.conversations.resource("me")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
   await admit(resources, "fact", c.metadata.uid, "live");
   const before = aide.conversations.inputStore.get("fact")!;
+  const handlesBefore = aide.conversations.inputStore.query("handlePending", w.uid!);
   const conversationBefore = aide.conversations.resource("me")!.status;
   await assert.rejects(assessInput(resources, c, "live", { inputId: "fact", conversationSummary: "bad", summary: "bad", workRequests: [{ workUid: foreign.uid!, request: {} }] }), /Work unavailable/);
   const failing = { ...resources, commit: (writes: Parameters<typeof resources.commit>[0]) => resources.commit([...writes,
@@ -63,7 +64,7 @@ test("Failed handoff rolls back assessment, Work assignments and summary; foreig
   await assert.rejects(assessInput(failing, c, "live", { inputId: "fact", conversationSummary: "handoff", summary: "handoff", workRequests: [{ workUid: w.uid!, request: {} }] }), /Unknown resource/);
   assert.deepEqual(aide.conversations.inputStore.get("fact"), before);
   assert.deepEqual(aide.conversations.resource("me")!.status, conversationBefore);
-  assert.deepEqual(aide.conversations.inputStore.query("handlePending", w.uid!), []);
+  assert.deepEqual(aide.conversations.inputStore.query("handlePending", w.uid!), handlesBefore);
 });
 
 test("Input protects every unfinished stage; deleting its Work ends handling and permits quota eviction", async t => {
@@ -71,6 +72,8 @@ test("Input protects every unfinished stage; deleting its Work ends handling and
   const c = await aide.conversations.ensure("me");
   const w = await aide.work("me").create(task);
   const store = aide.conversations.inputStore;
+  const initialTask = (await resources.list({ ...INPUT_TYPE, kind: "Task" }))[0]!;
+  await cancelAssignments(resources, resourceRef(initialTask), "handle");
   store.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Input": { maxCount: 1 } } }));
   const input = await aide.conversations.submit("one", { origin: "source", originId: "fixture", text: "fact" });
   await deliver(context, input, [c.metadata], "topic");

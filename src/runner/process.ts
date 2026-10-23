@@ -124,11 +124,12 @@ const resources: ResourceClient = Object.freeze({
     type: ResourceType,
     name: string,
     namespace?: ResourceNamespace,
+    preconditions?: { uid: string; resourceVersion: string },
   ) {
     await callHost<void>({
       method: "resource.delete",
       type,
-      name,
+      name, preconditions,
       ...(namespace === undefined ? {} : { namespace }),
     });
   },

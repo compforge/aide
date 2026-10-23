@@ -107,7 +107,7 @@ Pod 替换或镜像变化是事实，不能据此断言有人发布，更不能�
 
 Forge 的配置 key 是逻辑身份，`api_host` 可以覆盖 API 域名，`uids` 可选过滤 PR 作者。`GITHUB_TOKEN` / `GH_TOKEN`、`GITLAB_TOKEN` 优先于文件 token；没有凭证的 Forge 不启用。服务环境需能找到提供方 CLI 并访问其登录态，不能只在交互 shell 中配置 PATH。
 
-Lark 目标为 `lark:<app-id>:<chat-id>`，可从入站日志的 sessionId 获取。机器人需要已经收到过该单聊的消息，才会向其投递。Chief 与 Work 模型分别由 `harnesses.chief` 和 `harnesses.pi` 配置，缺省时沿用 Pi 原生配置。
+Lark 目标为 `lark:<app-id>:<chat-id>`，可从入站日志的 sessionId 获取。机器人需要已经收到过该单聊的消息，才会向其投递。Chief、Task 与默认 Pi Routine 的模型分别由 `harnesses.chief`、`harnesses.task` 和 `harnesses.pi` 配置，缺省时沿用 Pi 原生配置。
 
 需求平台按固定时间窗口分页观察需求和评论，检查点与待提交 Input 可跨重启恢复；身份、投递和覆盖边界见 [需求平台](requirements.md)。Forge 当前供 Chief 查询 PR 状态与评论，没有定时 Source。
 

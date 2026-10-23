@@ -55,7 +55,7 @@ function fixture(t: { after(fn: () => Promise<void>): void }, startup = false) {
   const idFor = (id: string) => executions.listHarnessInvocations().find(call => call.executionId === id)?.invocationId ?? id;
   const enqueue = (id: string, resourceId = id) => executions.invoke({ executionId: id, pluginInstanceId: "example", namespace: "v1",
     resourceRef: { apiVersion: "example/v1", kind: "Document", namespace: "v1", name: resourceId, uid: resourceId } },
-    { verb: "harness", input: { title: id, prompt: id, session: { id: resourceId }, timeoutMs: 10_000 } });
+    { verb: "harness", input: { title: id, prompt: id, sessionId: resourceId, timeoutMs: 10_000 } });
   const pending = () => executions.approvals().filter(item => item.request.status === "pending").map(item => item.request.messageId);
   return { executions: { view: (ids: string[]) => executions.view(ids.map(idFor)),
     cancel: (id: string) => executions.cancel(idFor(id)),

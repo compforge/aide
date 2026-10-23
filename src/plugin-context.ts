@@ -32,7 +32,7 @@ export function validateHarness(input: HarnessVerbInput): void {
   }
   if (input.harness !== undefined) nonEmpty("harness name", input.harness);
   if (!isHarnessInvocation(input)) {
-    if (input.operation === "resume" || input.operation === "close") nonEmpty("harness session id", input.session?.id ?? "");
+    if (input.operation === "resume" || input.operation === "close") nonEmpty("harness session id", input.sessionId ?? "");
     if (input.operation === "abort") nonEmpty("harness invocationId", input.invocationId);
     if (input.operation === "followUp" || input.operation === "steer") {
       nonEmpty("harness invocationId", input.invocationId);
@@ -43,7 +43,7 @@ export function validateHarness(input: HarnessVerbInput): void {
   }
   nonEmpty("harness title", input.title);
   nonEmpty("harness prompt", input.prompt);
-  if (input.session !== undefined) nonEmpty("harness session id", input.session?.id ?? "");
+  if (input.sessionId !== undefined) nonEmpty("harness session id", input.sessionId ?? "");
 }
 
 /**

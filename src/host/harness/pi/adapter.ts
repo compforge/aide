@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type {
   Harness, HarnessEventSink, SessionReferenceSink, HarnessSessionHandle,
@@ -10,7 +9,7 @@ import type { LogSink } from "../../logging.ts";
 
 /** The composition root binds tools; the adapter only speaks Pi's session API. */
 export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner"> & Partial<Pick<AgentSession, "steer" | "followUp" | "clearQueue">>;
-export type PiSessionFactory = (options: { cwd: string; sessionFile?: string }) => Promise<PiSession>;
+export type PiSessionFactory = (options: { cwd: string; sessionId?: string }) => Promise<PiSession>;
 interface Turn {
   steering: Map<string, string>;
   admissions: Set<Promise<unknown>>;
@@ -22,7 +21,7 @@ interface Turn {
 }
 interface Session {
   native: PiSession; sink: HarnessEventSink; unsubscribe: () => void; active?: Turn;
-  binding: SessionReferenceSink; materialized: boolean; contextFailure?: string;
+  binding: SessionReferenceSink; contextFailure?: string;
 }
 
 /**
@@ -30,17 +29,17 @@ interface Session {
  * @link docs/harness/pi.md
  */
 export class PiAdapter implements Harness {
-  readonly harness: "pi" | "chief" | "route";
+  readonly harness: "pi" | "chief" | "route" | "task";
   readonly capabilities = { prompt: {} };
   readonly steering = { deliveryTracking: "explicit", cancelOwnership: "survives" } as const;
   private readonly sessions = new Map<string, Session>();
-  constructor(private readonly options: { harness?: "pi" | "chief" | "route"; createSession: PiSessionFactory; log?: LogSink; nativeEvent?: NativeEventSink }) {
+  constructor(private readonly options: { harness?: "pi" | "chief" | "route" | "task"; createSession: PiSessionFactory; log?: LogSink; nativeEvent?: NativeEventSink }) {
     this.harness = options.harness ?? "pi";
   }
 
 
   create(options: OpenOptions, sink: HarnessEventSink, reference: SessionReferenceSink): Promise<HarnessSessionHandle> {
-    if (options.sessionId || options.resumeState) throw new Error("Use resume to restore an existing session");
+    if (options.sessionId) throw new Error("Use resume to restore an existing session");
     return this.open(options, sink, reference);
   }
 
@@ -61,20 +60,12 @@ export class PiAdapter implements Harness {
   }
   private async open(options: OpenOptions, sink: HarnessEventSink, binding: SessionReferenceSink): Promise<HarnessSessionHandle> {
     if (options.env && Object.keys(options.env).length) throw new Error("Embedded Pi does not support per-session environment overrides");
-    let sessionFile: string | undefined;
-    if (options.sessionId && !options.resumeState) throw new Error("Pi session recovery requires its native session file locator");
-    if (options.resumeState) {
-      const data = options.resumeState.data as { sessionFile?: unknown; empty?: boolean } | null;
-      if (options.resumeState.version !== 1 || typeof data?.sessionFile !== "string" || !data.sessionFile) throw new Error("Unsupported Pi resume state");
-      // Pi allocates a filename before it persists any conversation. Only a known-empty missing file may start anew.
-      if (!data.empty || existsSync(data.sessionFile)) sessionFile = data.sessionFile;
-    }
-    const native = await this.options.createSession({ cwd: options.cwd, ...(sessionFile ? { sessionFile } : {}) });
+    const native = await this.options.createSession({ cwd: options.cwd, ...(options.sessionId ? { sessionId: options.sessionId } : {}) });
     const handleId = randomUUID();
-    const session: Session = { native, sink, binding, materialized: false, unsubscribe: () => {} };
+    const session: Session = { native, sink, binding, unsubscribe: () => {} };
     try {
       if (!native.sessionFile) throw new Error("PiAdapter requires a persistent native session");
-      if (options.sessionId && sessionFile && native.sessionId !== options.sessionId) throw new Error("Pi session ID does not match its recovery locator");
+      if (options.sessionId && native.sessionId !== options.sessionId) throw new Error("Pi session ID does not match its recovery locator");
       session.unsubscribe = native.subscribe((event) => this.observe(session, event));
       const startupErrors: string[] = [];
       let starting = true;
@@ -95,7 +86,7 @@ export class PiAdapter implements Harness {
       finally { session.unsubscribe(); native.dispose(); }
       throw error;
     }
-    return { harness: this.harness, handleId, resumed: !!sessionFile };
+    return { harness: this.harness, handleId, resumed: !!options.sessionId };
   }
 
   private async sendTurn(ref: HarnessSessionHandle, input: PromptInput, operation: "prompt" | "steer" | "followUp" = "prompt"): Promise<SendTurnReceipt> {
@@ -166,7 +157,6 @@ export class PiAdapter implements Harness {
 
   private observe(session: Session, event: AgentSessionEvent): void {
     this.options.nativeEvent?.({ direction: "in", name: event.type, payload: event });
-    if (!session.materialized && session.native.sessionFile && existsSync(session.native.sessionFile)) this.publishBinding(session);
     if (event.type === "compaction_end" && event.errorMessage) {
       session.contextFailure = `Pi compaction failed: ${event.errorMessage}`;
       void session.native.abort().catch(() => {});
@@ -219,9 +209,7 @@ export class PiAdapter implements Harness {
   }
 
   private publishBinding(session: Session): void {
-    session.materialized = !!session.native.sessionFile && existsSync(session.native.sessionFile);
-    session.binding({ identity: { id: session.native.sessionId }, resumeState: { version: 1,
-      data: { sessionFile: session.native.sessionFile, empty: !session.materialized } } });
+    session.binding({ identity: { id: session.native.sessionId } });
   }
 
   private async finish(session: Session, reason: "end_turn" | "error" | "cancelled", error?: string): Promise<void> {

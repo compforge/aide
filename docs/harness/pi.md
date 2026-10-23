@@ -10,7 +10,7 @@ PiAdapter 实现 Harness 的 create、resume、prompt、followUp、steer、abort
 
 ## 装配与模型配置
 
-当根级 `defaultHarness` 选择 `pi`（缺省值）时，Task / Routine 使用通用 Pi。Aide 在启动时从 `harnesses.pi.model` 和 `harnesses.pi.packages` 准备模型与技能；能力包通过 `aide harness sync pi` 显式同步，与 Chief 分别存放。
+当根级 `defaultHarness` 选择 `pi`（缺省值）时，Routine 使用通用 Pi。Aide 在启动时从 `harnesses.pi.model` 和 `harnesses.pi.packages` 准备模型与技能；能力包通过 `aide harness sync pi` 显式同步，与 Chief 分别存放。
 
 通用 Pi 也可以直接通过注册表创建，不需要 Personal：
 
@@ -24,7 +24,7 @@ const adapter = createHarnessAdapter(
 
 启动装配调用 `resolvePiConfig` 读取 Pi settings/models 并应用显式覆盖，传入 `piConfig`。需要绑定自定义工具时提供消费该配置的 `piSession` 工厂。模型定义和 settings 保留在内存中，SDK refresh 不重新读取原文件；认证沿用 Pi auth.json 和 SDK 的刷新机制，默认目录为 `~/.pi/agent`。嵌入式 SDK 不支持每会话环境覆盖。配置格式见 [Pi 上游文档](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。
 
-原生会话由 Pi SDK 按默认布局持久化在 `<agentDir>/sessions/<encoded-cwd>/`，通常为 `~/.pi/agent/sessions/` 下的目录；指定 agentDir 时也由 SDK 选择对应路径。Pi 自己按 cwd 组织文件，不意味着 Aide 恢复 Project 分组。通用 Pi 和 Chief 都沿用此机制，Aide 不再指定 pi-sessions / chief-sessions 目录。Adapter 保存文件位置与恢复状态。恢复时校验工作目录与调用方绑定的范围。尚未落盘的空会话可以重新建立，已有历史文件缺失或范围不符则报错。
+原生会话使用 SDK 的 SessionManager 持久化在 `<agentDir>/sessions/`。创建时经 SDK 写入一条真实的初始化指令，要求等待后续工作、不要执行外部动作；不请求模型，也不伪造助手历史。这使 create 返回的 sessionId 在首次推理之前即可跨重启恢复。Harness 用 SDK 的 findById/open 按 ID 定位并恢复，校验工作目录和调用方绑定的 scope；历史缺失或范围不符明确报错。Aide 不直接编辑原生会话文件，Operator 只保留 harness 和 sessionId。通用 Pi、Chief、Route、Task 共用这条路径。
 
 Agent 不自动发现环境中的扩展、提示词命令或交互主题；装配方可通过 extensionPaths 显式提供扩展路径，工具和钩子由 Pi SDK 加载。Adapter 负责扩展启动与退出事件。通用 Pi 默认不携带记忆扩展，并禁用自动整轮重试。完整执行期限由 Harness 调用方管理。
 
