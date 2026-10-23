@@ -14,6 +14,7 @@ interface Turn {
   steering: Map<string, string>;
   admissions: Set<Promise<unknown>>;
   closing?: boolean;
+  compactionFailure?: string;
   id: string; done?: Promise<void>; cancelled: boolean;
   streaming?: { messageId: string; thoughtId: string };
   lastMessage?: { id: string; text: string; stop: string; error?: string };
@@ -21,7 +22,7 @@ interface Turn {
 }
 interface Session {
   native: PiSession; sink: HarnessEventSink; unsubscribe: () => void; active?: Turn;
-  binding: SessionReferenceSink; contextFailure?: string;
+  binding: SessionReferenceSink;
 }
 
 /**
@@ -91,14 +92,13 @@ export class PiAdapter implements Harness {
 
   private async sendTurn(ref: HarnessSessionHandle, input: PromptInput, operation: "prompt" | "steer" | "followUp" = "prompt"): Promise<SendTurnReceipt> {
     const session = this.require(ref);
-    if (session.contextFailure) throw new Error(session.contextFailure);
     const blocks = input.blocks;
     const unsupported = unsupportedPromptBlocks(blocks, this.capabilities);
     if (unsupported.length) throw new Error(`Pi does not support prompt blocks: ${unsupported.join(", ")}`);
     const text = blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
     if (session.active) {
       const turn = session.active;
-      if (operation === "prompt" || turn.id !== input.invocationId || turn.cancelled || turn.settled || turn.closing || !session.native[operation] || !session.native.clearQueue) {
+      if (operation === "prompt" || turn.id !== input.invocationId || turn.cancelled || turn.compactionFailure || turn.settled || turn.closing || !session.native[operation] || !session.native.clearQueue) {
         return { accepted: false, effective: "rejected", reason: "Pi cannot accept this operation in the current invocation" };
       }
       const marker = `[aide-input:${input.messageId}]`;
@@ -157,11 +157,22 @@ export class PiAdapter implements Harness {
 
   private observe(session: Session, event: AgentSessionEvent): void {
     this.options.nativeEvent?.({ direction: "in", name: event.type, payload: event });
-    if (event.type === "compaction_end" && event.errorMessage) {
-      session.contextFailure = `Pi compaction failed: ${event.errorMessage}`;
-      void session.native.abort().catch(() => {});
-    }
     const turn = session.active;
+    if (event.type === "compaction_end") {
+      this.options.log?.({ level: event.errorMessage ? "error" : event.aborted ? "warn" : "info",
+        source: "harness", component: "pi.adapter", harness: this.harness, invocationId: turn?.id,
+        message: event.errorMessage ? "Pi compaction failed" : event.aborted ? "Pi compaction aborted" : "Pi compaction completed",
+        ...(event.errorMessage ? { error: { message: event.errorMessage } } : {}),
+        attributes: { sessionId: session.native.sessionId, reason: event.reason, willRetry: event.willRetry,
+          ...(event.result ? { tokensBefore: event.result.tokensBefore, summaryChars: event.result.summary.length,
+            ...(event.result.estimatedTokensAfter === undefined ? {} : { tokensAfter: event.result.estimatedTokensAfter }) } : {}) } });
+      // @spec A failed compaction ends this invocation, not the native session. Pi owns subsequent recovery.
+      // @why Do not continue this failed turn or permanently reject independent future inputs.
+      if (event.errorMessage && turn && !turn.compactionFailure) {
+        turn.compactionFailure = `Pi compaction failed: ${event.errorMessage}`;
+        void session.native.abort().catch(() => {});
+      }
+    }
     if (!turn) return;
     if (event.type === "message_start" && event.message.role === "user") {
       const text = typeof event.message.content === "string" ? event.message.content : event.message.content.filter(p => p.type === "text").map(p => p.text).join("\n");
@@ -201,8 +212,7 @@ export class PiAdapter implements Harness {
       session.sink({ kind: "tool_call_update", invocationId: turn.id, payload: { toolCallId: event.toolCallId,
         title: event.toolName, status: event.isError ? "failed" : "completed", rawOutput: event.result } });
     } else if (event.type === "agent_settled") {
-      if (session.contextFailure) turn.settled = { reason: "error", error: session.contextFailure };
-      else if (turn.cancelled || event.aborted || turn.lastMessage?.stop === "aborted") turn.settled = { reason: "cancelled" };
+      if (turn.cancelled || event.aborted || turn.lastMessage?.stop === "aborted") turn.settled = { reason: "cancelled" };
       else if (turn.lastMessage?.stop === "stop" && turn.lastMessage.text.trim()) turn.settled = { reason: "end_turn" };
       else turn.settled = { reason: "error", error: turn.lastMessage?.error ?? `Pi settled without a complete answer (${turn.lastMessage?.stop ?? "no assistant message"})` };
     }
@@ -215,6 +225,7 @@ export class PiAdapter implements Harness {
   private async finish(session: Session, reason: "end_turn" | "error" | "cancelled", error?: string): Promise<void> {
     const turn = session.active;
     if (!turn) return;
+    if (turn.compactionFailure && !turn.cancelled) { reason = "error"; error = turn.compactionFailure; }
     // Native input hooks may still enqueue after prompt settlement. Fence them before releasing this binding.
     turn.closing = true;
     await Promise.allSettled([...turn.admissions]);
