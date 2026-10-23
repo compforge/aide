@@ -10,17 +10,17 @@ Chief 使用独立的 `chief` Harness 身份，Agent 位于 `agents/chief/`；�
 
 Chief Agent 负责判断，Personal Route 负责话题归位。Conversation 的接收 Controller 与 agent Controller 分别接纳新 Input 和调用 Chief；assess_input 确认消费，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
 
-Personal 按 Conversation UID 与 Controller 为执行上下文绑定 Chief Target 和 WorkService，并提供问答与 Connector 工具。宿主装配使用 `chiefSession` 工厂；缺少绑定时创建 Chief Harness 会报错，不会降级为通用 Pi。
+所有 Conversation 共用 Chief 配置。Personal 的 chiefSession 工厂根据调用 scope 的 ResourceRef 校验 Conversation UID，装配限定该会话范围的 WorkService 与工具。工具每次执行都重新确认当前 execution，不捕获过期 verbs。
 
 ```ts
 const adapter = createHarnessAdapter(
-  { id: chiefTargetId, harness: "chief" },
+  { id: "chief", harness: "chief" },
   { ...ports, targetConfig: { harness: "chief" },
-    chiefSession: aide.chiefSession(chiefTargetId) },
+    chiefSession: aide.chiefSession(ports.scope, chiefConfig) },
 );
 ```
 
-原生会话由 Pi SDK 保存在默认目录；Chief scope 区分角色与 Conversation。相同资源 UID、Controller 和 Target 连续复用原生上下文，Conversation 的 `status.agent` 保存原生会话引用，重启后交给 Harness 恢复；删除后重建 Conversation 会建立新上下文。用户通过 say 收到问题，后续答复以新的 Input 进入。空闲时 prompt，运行中普通输入 followUp、紧急输入 steer，均通过 harness verb；一个 invocation 可以处理多个 Input，assess_input 的业务回执分别确认完成。
+原生会话由 Pi SDK 保存在默认目录；Chief scope 使用 Conversation UID，防止同名重建后恢复旧会话。Operator 在 status.agent 保存配置名和 session，后续原样传给 Harness verb；底座不读写这个字段。用户通过 say 收到问题，后续答复以新的 Input 进入。空闲时 prompt，运行中普通输入 followUp、紧急输入 steer；一个 invocation 可以处理多个 Input，assess_input 的业务回执分别确认完成。
 
 ## 主动判断与沟通
 

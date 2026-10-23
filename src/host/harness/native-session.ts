@@ -1,4 +1,4 @@
-import type { HarnessTargetConfig } from "./target.ts";
+import type { HarnessOptions } from "./configuration.ts";
 import type {
   HarnessHistoryBoundary,
   HarnessHistoryTurn as StoredHarnessHistoryTurn
@@ -13,7 +13,7 @@ export interface HarnessTranscriptEntry {
 export type HarnessHistoryTurn = StoredHarnessHistoryTurn;
 
 export interface HarnessHistorySnapshot {
-  /** HarnessTarget 内稳定的 HarnessSession identity。 */
+  /** HarnessConfiguration 内稳定的 HarnessSession identity。 */
   identity?: HarnessSessionIdentity;
   /** Inspector 观察到的完整前缀。 */
   observedThrough?: HarnessHistoryBoundary;
@@ -25,7 +25,7 @@ export interface HarnessHistorySnapshot {
 }
 
 export interface HarnessSessionInspectorOptions {
-  targetConfig: HarnessTargetConfig;
+  targetConfig: HarnessOptions;
   cwd: string;
 }
 

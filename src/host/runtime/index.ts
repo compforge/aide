@@ -24,7 +24,7 @@ export class ApplicationRuntime {
   }
   readonly plugins: Manager;
   private closing?: Promise<void>;
-  readonly targets: { id: string; harness: string; model?: string; effort?: string }[];
+  readonly harnesses: { id: string; harness: string; model?: string; effort?: string }[];
   constructor(home: string, options: {
     cwd: string;
     instances: readonly {
@@ -35,20 +35,19 @@ export class ApplicationRuntime {
       config: Record<string, unknown>;
     }[];
     /** Optional capability; resource-only plugins need no adapter or execution storage. */
-    harness?: Omit<ExecutionOptions, "resolveTarget" | "hooks"> & {
-      targets: { id: string; harness: string; model?: string; effort?: string }[];
-      defaultTargetId?: string;
+    harness?: Omit<ExecutionOptions, "resolveHarness" | "hooks"> & {
+      harnesses: { id: string; harness: string; model?: string; effort?: string }[];
+      defaultHarness?: string;
     };
-    plugins: Omit<ManagerOptions, "instances" | "resourceHome" | "harness" | "snapshot" | "harnessTargets">;
+    plugins: Omit<ManagerOptions, "instances" | "resourceHome" | "harness" | "snapshot" | "harnesses">;
   }) {
     mkdirSync(home, { recursive: true });
     this.logger = new RuntimeLogger(join(home, "runtime.log"), "runtime");
-    this.targets = (options.harness?.targets ?? []).map((target) => ({ ...target }));
+    this.harnesses = (options.harness?.harnesses ?? []).map((target) => ({ ...target }));
     try {
       if (options.harness) this.executionService = new ExecutionService(home, { ...options.harness, cwd: options.cwd,
-        defaultTargetId: options.harness.defaultTargetId,
-        resources: id => this.plugins.resourceClient(id),
-        resolveTarget: id => this.targets.find(target => target.id === id),
+        defaultHarness: options.harness.defaultHarness,
+        resolveHarness: id => this.harnesses.find(target => target.id === id),
         hooks: {
           has: stage => this.plugins?.hasHook(stage) ?? false,
           inline: (stage, subject) => this.plugins?.inlineHook(stage, subject) ?? Promise.resolve(),
@@ -70,7 +69,7 @@ export class ApplicationRuntime {
       const cwd = resolve(options.cwd);
       this.plugins = new Manager({ ...options.plugins, instances, resourceHome: home, harness: this.executionService,
         log: options.plugins.log ?? (entry => this.logger.log(entry)),
-        snapshot: () => createReconcileSnapshot({ cwd, harnessTargets: this.targets }),
+        snapshot: () => createReconcileSnapshot({ cwd, harnesses: this.harnesses }),
       });
     } catch (error) {
       // Startup has no admitted plugin work. Cleanup must release the execution
@@ -78,13 +77,6 @@ export class ApplicationRuntime {
       void (this.executionService?.close() ?? Promise.resolve()).finally(() => this.logger.close()).catch(() => {});
       throw error;
     }
-  }
-  registerTarget(target: { id: string; harness: string; model?: string; effort?: string }) {
-    const executions = this.executions;
-    const index = this.targets.findIndex(t => t.id === target.id);
-    if (index < 0) this.targets.push({ ...target });
-    else this.targets[index] = { ...target };
-    executions.registerTarget(target);
   }
   enqueue(pluginInstanceId: string, type: ResourceType, name: string): Promise<void> {
     return this.plugins.enqueue({ pluginInstanceId, namespace: "v1",

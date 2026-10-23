@@ -32,7 +32,7 @@ export const ENVELOPE_VERSION = 9 as const;
 export type EventSource =
   | { type: "aide" }
   | { type: "user" }
-  | { type: "harness"; harnessTargetId: string }
+  | { type: "harness"; harnessName: string }
   | { type: "plugin"; pluginInstanceId: string }
   | { type: "schedule"; scheduleId: string };
 
@@ -289,7 +289,7 @@ export interface AvailableCommand {
   input?: { hint: string };
 }
 
-/** 完整快照：每次整体替换当前 HarnessTarget command 列表，不做增量合并（对齐 ACP） */
+/** 完整快照：每次整体替换当前 HarnessConfiguration command 列表，不做增量合并（对齐 ACP） */
 export interface AvailableCommandsUpdate {
   commands: AvailableCommand[];
 }
@@ -401,18 +401,17 @@ export interface HarnessInvocationRecorded extends ExecutionAssociation {
   verb: "harness";
   title: string;
   prompt: string;
-  /** Explicit resource execution context; freshContext resets its native binding history. */
-  contextId: string;
-  freshContext?: boolean;
-  harnessTargetId: string;
+  /** Ephemeral live call correlation; native identity is supplied by the caller. */
+  runtimeId: string;
+  harnessName: string;
 }
 
 export interface HarnessInvocationScheduled {
   invocationId: string;
   messageId: string;
-  harnessTargetId: string;
+  harnessName: string;
   /** Aide-owned task line reserved for this invocation. */
-  contextId: string;
+  runtimeId: string;
 }
 
 export interface HarnessInvocationCancelled {
@@ -485,9 +484,9 @@ export interface EventEnvelope<K extends EventKind = EventKind> {
   /** 事件关联的 harness 执行上下文；Aide / user / Plugin 事实可缺省。 */
   harness?: string;
   /** 实际投递/产出事件的配置目标；Aide 自身事件或未进入 controller 的外部事实可缺省。 */
-  harnessTargetId?: string;
+  harnessName?: string;
   /** Aide-native task line; new Harness execution facts must carry it. */
-  contextId?: string;
+  runtimeId?: string;
   harnessSessionId?: string;
   invocationId?: string;
   kind: K;
@@ -513,11 +512,11 @@ export type NewEvent<K extends EventKind = EventKind> = Omit<
 
 /**
  * 尚未由可信宿主入口归因的 Event 草稿。Harness Adapter 只能产出这种形状，
- * Controller / CLI 在接入边界补 source、Harness 与 HarnessTarget 后才允许写入 Store。
+ * Controller / CLI 在接入边界补 source、Harness 与 HarnessConfiguration 后才允许写入 Store。
  */
 export type EventDraft<K extends EventKind = EventKind> = Omit<
   NewEvent<K>,
-  "source" | "harness" | "harnessTargetId" | "contextId"
+  "source" | "harness" | "harnessName" | "runtimeId"
 >;
 
 /** EventDraft 的判别联合版本，供 adapter sink 按 kind 正确收窄 payload。 */

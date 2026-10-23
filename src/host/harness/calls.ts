@@ -1,4 +1,4 @@
-import { resourceExecutionKey } from "../plugin/execution-context.ts";
+import { randomUUID } from "node:crypto";
 import type { HarnessActivity } from "./activity.ts";
 import { HarnessInvocations, type ScheduledHarnessInvocation, type HarnessInvocationSnapshot } from "./invocation.ts";
 import type { ExecutionScope, VerbRequest, VerbResponse } from "../../protocol/verbs.ts";
@@ -14,8 +14,8 @@ export interface HarnessExecution {
 }
 export interface HarnessCallsOptions {
   records: HarnessActivity;
-  targets(): readonly { id: string }[];
-  defaultTargetId?: string;
+  harnesses(): readonly { id: string }[];
+  defaultHarness?: string;
   enqueueHarnessInvocation(request: ScheduledHarnessInvocation): Promise<unknown> | void;
   cancelHarnessInvocation?(id: string): "queued" | "running" | undefined;
   now?(): Date;
@@ -58,31 +58,28 @@ export class HarnessCalls implements HarnessExecution {
     return cancelled;
   }
 
-  async invoke(context: ExecutionScope, request: HarnessRequest): Promise<VerbResponse> {
+  async invoke(context: ExecutionScope, request: HarnessRequest, runtimeId: string = randomUUID()): Promise<import("@compforge/aide-plugin").HarnessResult> {
     if (!isHarnessInvocation(request.input)) throw new Error("Only prompt operations create a Harness invocation");
     const deadline = this.timestamp() + request.input.timeoutMs;
-    const harnessTargetId = request.input.harnessTargetId ?? this.options.defaultTargetId;
-    if (!harnessTargetId) throw new Error("harness() requires a HarnessTarget selection");
+    const harnessName = request.input.harness ?? this.options.defaultHarness;
+    if (!harnessName) throw new Error("harness() requires a HarnessConfiguration selection");
     if (
-      !this.options.targets().some(
-        (target) => target.id === harnessTargetId,
+      !this.options.harnesses().some(
+        (target) => target.id === harnessName,
       )
     ) {
       throw new Error(
-        `${request.verb}() references unknown HarnessTarget: ${harnessTargetId}`,
+        `${request.verb}() references unknown HarnessConfiguration: ${harnessName}`,
       );
     }
-    const key = resourceExecutionKey(context);
-    if (!this.records.meta.contexts[key]) this.records.setExecutionContext(key, { contextId: key, harnessSessions: {} });
     const snapshot = this.harnessInvocations.record({
       scope: context,
       invocation: {
         verb: request.verb,
         title: request.input.title,
         prompt: request.input.prompt,
-        contextId: key,
-        harnessTargetId,
-        freshContext: request.input.freshContext,
+        runtimeId: runtimeId,
+        harnessName,
       },
     });
     const scheduled = this.harnessInvocations.scheduled(snapshot.invocationId);
@@ -93,7 +90,7 @@ export class HarnessCalls implements HarnessExecution {
     );
     try { await this.dispatchedHarnessInvocations.get(snapshot.invocationId); }
     finally { this.dispatchedHarnessInvocations.delete(snapshot.invocationId); this.records.release(snapshot.invocationId); this.harnessInvocations.release(snapshot.invocationId); }
-    if (terminal.phase === "completed" && terminal.result && terminal.contextId) {
+    if (terminal.phase === "completed" && terminal.result && terminal.runtimeId) {
       return Object.freeze({
         state: "success",
         value: {
@@ -194,7 +191,7 @@ export class HarnessCalls implements HarnessExecution {
           message: "HarnessInvocation dispatch failed",
           pluginInstanceId: request.pluginInstanceId,
           invocationId: request.invocationId,
-          harnessTargetId: request.harnessTargetId,
+          harnessName: request.harnessName,
           error: logError(error),
           attributes: { harnessInvocationId: request.invocationId },
         });

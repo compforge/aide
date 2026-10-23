@@ -7,7 +7,7 @@ import { assessInput, type AssessInput } from "./conversation/assess.ts";
 import { attemptOf, attemptPatch, resourceRef, changeAttempt } from "./input/state.ts";
 import { conversationPolicy } from "./conversation/config.ts";
 import { immediate, eligible, finalizeExecution, type LoopStatus } from "./loop.ts";
-import { ROUTE_TYPE, ROUTE_NAME, type RouteStatus } from "./route/model.ts";
+import { ROUTE_TYPE, type RouteStatus } from "./route/model.ts";
 import { deliver, routed } from "./route/delivery.ts";
 import { defaultDestination } from "./route/rules.ts";
 import { z } from "zod";
@@ -24,7 +24,7 @@ import { IncomingSchema, type Incoming, type OutputView } from "./model.ts";
 import { WorkService } from "./work.ts";
 import { output, Store } from "./store.ts";
 import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
-import { CONVERSATION_TYPE, INPUT_TYPE, chiefTarget, digest } from "./chief-model.ts";
+import { CONVERSATION_TYPE, INPUT_TYPE, digest } from "./chief-model.ts";
 import { type ConversationDeletion } from "./conversation/model.ts";
 import { ConversationStore, conversationKey } from "./conversation/store.ts";
 import type { InputStore } from "./input/store.ts";
@@ -47,7 +47,6 @@ export class Personal {
 
   readonly core: ApplicationRuntime;
   private readonly pending = new Set<Promise<unknown>>();
-  private readonly chiefConversations = new Map<string, string>();
 
   constructor(private readonly options: { timezone: string; persons: Persons; me: Me; conversation?: unknown }, private readonly log: Logger,
     runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore }) {
@@ -57,25 +56,16 @@ export class Personal {
     const resources = new PluginResourceStore({ home: runtime.inputs.storage.home, pluginInstanceId: "personal" });
     const client = this.plugins.resourceClient("personal");
     this.store = new Store(resources, client, new ConversationStore(resources, client, runtime.inputs, runtime.outputs));
-    for (const conversation of this.store.conversations.list()) this.registerConversation(conversation.id);
-    this.store.conversations.subscribe((conversation) => this.registerConversation(conversation.id));
-  }
-
-  private registerConversation(conversationId: string): void {
-    const conversation = this.conversations.resource(conversationId);
-    if (!conversation) return;
-    const id = chiefTarget(conversationId);
-    if (this.chiefConversations.has(id)) return;
-    this.chiefConversations.set(id, conversationId);
-    this.core.registerTarget({ id, harness: "chief" });
   }
 
   /** @spec Persistent native tools resolve the live execution on each call, never capture a completed invocation's verbs. */
-  chiefSession(targetId: string, config: ChiefAgentOptions["config"]): PiSessionFactory {
-    const conversationId = this.chiefConversations.get(targetId);
-    if (!conversationId) throw new Error("Unknown Chief target");
+  chiefSession(scope: ExecutionScope, config: ChiefAgentOptions["config"]): PiSessionFactory {
+    const ref = scope.resourceRef;
+    if (scope.pluginInstanceId !== "personal" || ref?.kind !== CONVERSATION_TYPE.kind || ref.apiVersion !== CONVERSATION_TYPE.apiVersion || !ref.uid) throw new Error("Chief requires a Conversation resource scope");
     return async (options) => {
-      const initial = this.conversations.resource(conversationId)!;
+      const initial = this.store.resources.get<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, ref.name, ref.namespace);
+      if (initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Chief Conversation is missing or replaced");
+      const conversationId = initial.spec.id;
       const active = () => {
         const c = this.conversations.resource(conversationId);
         if (!c || c.metadata.uid !== initial.metadata.uid || !c.status.execution) throw new Error("Chief execution is not active");
@@ -102,15 +92,18 @@ export class Personal {
         this.log.info({ conversationId }, "Chief understanding updated");
         return result;
       });
-      return createChiefAgent({ ...options, config, work: this.work(conversationId), persons: this.options.persons, tools, beforeWorkMutation: () => { active(); } });
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(conversationId), persons: this.options.persons, tools, beforeWorkMutation: () => { active(); } });
     };
   }
 
-  routeSession(config: ChiefAgentOptions["config"]): PiSessionFactory {
+  routeSession(scope: ExecutionScope, config: ChiefAgentOptions["config"]): PiSessionFactory {
+    const ref = scope.resourceRef;
+    if (scope.pluginInstanceId !== "personal" || ref?.kind !== ROUTE_TYPE.kind || ref.apiVersion !== ROUTE_TYPE.apiVersion || !ref.uid) throw new Error("Route requires a Route resource scope");
     return async options => {
-      const initial = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ROUTE_NAME);
+      const initial = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ref.name, ref.namespace);
+      if (initial.metadata.uid !== ref.uid || initial.metadata.deletionTimestamp) throw new Error("Route resource is missing or replaced");
       const active = () => {
-        const route = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ROUTE_NAME);
+        const route = this.store.resources.get<Record<string, never>, RouteStatus>(ROUTE_TYPE, ref.name, ref.namespace);
         if (route.metadata.uid !== initial.metadata.uid || !route.status.execution) throw new Error("Route execution is not active");
         this.plugins.executionVerbs(route.status.execution.id, {});
         return route;
@@ -315,7 +308,6 @@ export class Personal {
     if (!fact && receipt) return { inputId: id, at: receipt.at };
     await this.conversations.ensure(input.sessionId);
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
-    this.registerConversation(input.conversationId);
     const accepted = await this.acceptChannel(id, input);
     this.log.info({ conversationId: input.conversationId, inputId: id, channelId: input.channelId, relation: accepted.spec.relation ?? "unknown" }, "Accepted Chief input");
     return { inputId: accepted.metadata.name, at: accepted.metadata.creationTimestamp };

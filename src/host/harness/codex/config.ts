@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { HarnessTargetConfig } from "../target.ts";
+import type { HarnessOptions } from "../configuration.ts";
 
 export const CodexConfigSchema = z.object({
   command: z.array(z.string().trim().min(1)).min(1).optional(),
@@ -12,12 +12,12 @@ export interface CodexTargetConfig {
   approvalReviewer?: "user" | "auto_review";
 }
 
-export const DEFAULT_CODEX_TARGET_CONFIG: HarnessTargetConfig = Object.freeze({
+export const DEFAULT_CODEX_TARGET_CONFIG: HarnessOptions = Object.freeze({
   harness: "codex",
   command: ["codex", "app-server"],
 });
 
-export function resolveCodexTargetConfig(config: HarnessTargetConfig): CodexTargetConfig {
+export function resolveCodexTargetConfig(config: HarnessOptions): CodexTargetConfig {
   const command =
     Array.isArray(config.command) &&
     config.command.length > 0 &&

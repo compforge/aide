@@ -8,15 +8,21 @@ import type {
 } from "../harness/adapter.ts";
 import type { AnyEventEnvelope } from "../event/index.ts";
 import type { Harness } from "../harness/adapter.ts";
-import type { HarnessTarget } from "../harness/target.ts";
+import type { HarnessConfiguration } from "../harness/configuration.ts";
+import type { ExecutionScope } from "../../protocol/verbs.ts";
+import type { AgentStatus } from "@compforge/aide-plugin";
+import type { HarnessLaunchSnapshot } from "../harness/configuration.ts";
 
 /** Correlation for one resource's calls; native runtime state belongs to Harness. */
-export interface HarnessContext {
-  contextId: string;
-  target: HarnessTarget;
+export interface LiveHarness {
+  runtimeId: string;
+  target: HarnessConfiguration;
   adapter: Harness;
   ref?: HarnessSessionHandle;
   setupInvocationId?: string;
+  scope: ExecutionScope;
+  session?: AgentStatus["session"];
+  launchSnapshot?: HarnessLaunchSnapshot;
 }
 import { logError, type LogSink } from "../logging.ts";
 
@@ -38,7 +44,7 @@ export interface HarnessHookGateway {
 interface HarnessHookCoordinatorOptions {
   readonly gateway?: HarnessHookGateway;
   readonly append: (
-    binding: HarnessContext,
+    binding: LiveHarness,
     event: HarnessEvent,
   ) => AnyEventEnvelope;
   readonly log: LogSink;
@@ -49,14 +55,14 @@ export class HarnessHookCoordinator {
   constructor(private readonly options: HarnessHookCoordinatorOptions) {}
 
   dispatch(
-    binding: HarnessContext,
+    binding: LiveHarness,
     input: PromptInput,
     attemptId: string,
     operation: HarnessInputDispatch["operation"],
   ): HarnessInputDispatch {
     return Object.freeze({
       attemptId,
-      harnessTargetId: binding.target.id,
+      harnessName: binding.target.id,
       invocationId: input.invocationId,
       messageId: input.messageId,
       operation,
@@ -69,7 +75,7 @@ export class HarnessHookCoordinator {
   }
 
   async send(
-    binding: HarnessContext,
+    binding: LiveHarness,
     ref: HarnessSessionHandle,
     input: PromptInput,
     attemptId: string,
@@ -82,14 +88,14 @@ export class HarnessHookCoordinator {
     return await binding.adapter.prompt(ref, input);
   }
 
-  acceptHarnessEvent(binding: HarnessContext, event: HarnessEvent): void {
+  acceptHarnessEvent(binding: LiveHarness, event: HarnessEvent): void {
     // live execution projection records and reduces the Harness output before Plugin
     // notification. Hooks can emit Verbs, so notifying them first would allow
     // durable effects whose triggering Harness fact was lost on crash.
     const envelope = this.options.append(binding, event);
     const record: AideEventReference = Object.freeze({
       kind: event.kind,
-      harnessTargetId: binding.target.id,
+      harnessName: binding.target.id,
       ...(event.invocationId === undefined ? {} : { invocationId: event.invocationId }),
       eventId: envelope.eventId,
       seq: envelope.seq,

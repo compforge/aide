@@ -44,7 +44,7 @@ test("Harness timeout and Host shutdown settle the caller and cancel execution w
   const storage = new HarnessFixtures(root), session = storage.create({ id: "owner", cwd: root });
   const dispatched: string[] = [], cancelled: string[] = [];
   const verb = new Verb({ capacity: new ReconcileCapacity(1),
-    harness: new HarnessCalls({ records: session, targets: () => [{ id: "codex" }], defaultTargetId: "codex",
+    harness: new HarnessCalls({ records: session, harnesses: () => [{ id: "codex" }], defaultHarness: "codex",
     enqueueHarnessInvocation: (request) => { dispatched.push(request.invocationId); },
     cancelHarnessInvocation: (id) => { cancelled.push(id); return "queued"; } }) });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
@@ -81,7 +81,7 @@ test("Interruption before Harness creation prevents later actions in that execut
   let dispatched = 0, messages = 0;
   const verb = new Verb({ actions: { "test/say": async () => { messages++; return { outputId: "unexpected" }; } },
     capacity: new ReconcileCapacity(1),
-    harness: new HarnessCalls({ records: session, targets: () => [], enqueueHarnessInvocation: () => { dispatched++; } }) });
+    harness: new HarnessCalls({ records: session, harnesses: () => [], enqueueHarnessInvocation: () => { dispatched++; } }) });
   t.after(async () => { verb.close(); await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   const scope = { pluginInstanceId: "test", namespace: "v1" as const, executionId: "cancel-before-start" };
   await verb.beginRemote(scope);

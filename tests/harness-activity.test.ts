@@ -12,9 +12,9 @@ test("execution activity is bounded, isolated by invocation, and never restored 
   for (let n = 0; n < 100; n++) {
     const id = `run-${n}`;
     activity.appendEvent({ kind: "state_update", source: { type: "aide" }, invocationId: id, payload: { state: "running" } });
-    activity.appendEvent({ kind: "agent_message", source: { type: "harness", harnessTargetId: "pi" }, invocationId: id,
+    activity.appendEvent({ kind: "agent_message", source: { type: "harness", harnessName: "pi" }, invocationId: id,
       payload: { messageId: id, phase: "final", content: [{ type: "text", text: id }] } });
-    activity.appendEvent({ kind: "usage_update", source: { type: "harness", harnessTargetId: "pi" }, invocationId: id, payload: { inputTokens: 10, outputTokens: 20 } });
+    activity.appendEvent({ kind: "usage_update", source: { type: "harness", harnessName: "pi" }, invocationId: id, payload: { inputTokens: 10, outputTokens: 20 } });
     activity.appendEvent({ kind: "_aide_notice", source: { type: "aide" }, invocationId: id, payload: { level: "info", title: id } });
     activity.appendEvent({ kind: "_aide_error_update", source: { type: "aide" }, invocationId: id, payload: { code: "fixture", message: id, retryable: false, willRetry: false } });
     activity.appendEvent({ kind: "plan_update", source: { type: "aide" }, invocationId: id, payload: { planId: id, entries: [] } });
@@ -33,6 +33,6 @@ test("execution activity is bounded, isolated by invocation, and never restored 
   assert.equal(existsSync(join(root, "meta.json")), false);
   const reopened = new HarnessActivity(root, root);
   assert.equal(reopened.projection.messages.size, 0);
-  assert.deepEqual(reopened.meta.contexts, {});
+  assert.equal("meta" in reopened, false, "progress does not own a session directory");
   await reopened.closeLogs();
 });

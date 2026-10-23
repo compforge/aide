@@ -6,7 +6,7 @@ import { PiConfigSchema, resolvePiConfig, type PiConfig } from "./pi/config.ts";
 import { CodexConfigSchema, resolveCodexTargetConfig } from "./codex/config.ts";
 import { ClaudeConfigSchema, resolveClaudeTargetConfig } from "./claude/config.ts";
 import { DshConfigSchema, resolveDshTargetConfig } from "./dsh/config.ts";
-import type { HarnessTargetConfig } from "./target.ts";
+import type { HarnessOptions } from "./configuration.ts";
 import { loadHarnessSkills } from "./packages.ts";
 
 export const HarnessesConfigSchema = z.object({
@@ -34,30 +34,30 @@ export async function resolveHarnessConfigs(config: AideConfig, sources: {
   try { route = config.harnesses.route.model ? await resolvePiConfig({ ...sources, model: config.harnesses.route.model, skillPaths: [] }) : { ...chief, skillPaths: [] }; }
   catch (error) { throw new Error(`${sources.file}: harnesses.route: ${error instanceof Error ? error.message : "configuration resolution failed"}`); }
   const harness = config.defaultHarness;
-  let defaultTargetConfig: HarnessTargetConfig;
+  let defaultHarnessOptions: HarnessOptions;
   switch (harness) {
     case "pi": {
       const skillPaths = await loadHarnessSkills(sources.home, "pi", config, sources.log, sources.file);
       try { pi = await resolvePiConfig({ ...sources, model: config.harnesses.pi.model, skillPaths }); }
       catch (error) { throw new Error(`${sources.file}: harnesses.pi: ${error instanceof Error ? error.message : "configuration resolution failed"}`); }
-      defaultTargetConfig = { harness }; break;
+      defaultHarnessOptions = { harness }; break;
     }
     case "codex": {
       const input = { harness, ...config.harnesses.codex };
-      defaultTargetConfig = { ...input, ...resolveCodexTargetConfig(input) }; break;
+      defaultHarnessOptions = { ...input, ...resolveCodexTargetConfig(input) }; break;
     }
     case "claude": {
       const input = { harness, ...config.harnesses.claude };
-      defaultTargetConfig = { ...input, ...resolveClaudeTargetConfig(input, sources.environment) }; break;
+      defaultHarnessOptions = { ...input, ...resolveClaudeTargetConfig(input, sources.environment) }; break;
     }
     case "dsh": {
       const input = { harness, ...config.harnesses.dsh };
-      defaultTargetConfig = { harness, ...resolveDshTargetConfig(input) }; break;
+      defaultHarnessOptions = { harness, ...resolveDshTargetConfig(input) }; break;
     }
   }
-  const defaultTarget = Object.freeze({ id: "default", harness,
-    ...(typeof defaultTargetConfig.model === "string" ? { model: defaultTargetConfig.model } : {}) });
-  sources.log.info({ harness, harnessTargetId: defaultTarget.id }, "Resolved default execution Harness");
+  const defaultHarnessConfig = Object.freeze({ id: "default", harness,
+    ...(typeof defaultHarnessOptions.model === "string" ? { model: defaultHarnessOptions.model } : {}) });
+  sources.log.info({ harness, harnessName: defaultHarnessConfig.id }, "Resolved default execution Harness");
   for (const [harness, resolved] of [["chief", chief], ["route", route], ["pi", pi]] as const) {
     if (!resolved) continue;
     sources.log.info({ harness, provider: resolved.model.provider, model: resolved.model.id,
@@ -65,5 +65,5 @@ export async function resolveHarnessConfigs(config: AideConfig, sources: {
       modelSource: config.harnesses[harness].model ? sources.file : harness === "route" ? "Chief model" : "Pi defaults", inheritedFrom: resolved.agentDir },
     "Resolved startup harness configuration");
   }
-  return Object.freeze({ chief, route, pi, defaultTarget, defaultTargetConfig: Object.freeze(structuredClone(defaultTargetConfig)) });
+  return Object.freeze({ chief, route, pi, defaultHarnessConfig, defaultHarnessOptions: Object.freeze(structuredClone(defaultHarnessOptions)) });
 }

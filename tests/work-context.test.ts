@@ -38,8 +38,8 @@ async function fixture(t: TestContext, kind: "task" | "routine" = "task") {
     } });
   const pending = () => resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "handlePending", value: original.metadata.uid } });
   const run = async (handle: (prompt: string) => Promise<void> = async () => {}) => {
-    const execution = { executionId: `work-test-${Date.now()}-${Math.random()}`, withContext() { return this; }, verbs: { async harness(args: { prompt: string; freshContext?: boolean }) {
-      assert.equal(args.freshContext, true, "Work uses the bounded snapshot instead of replaying native history");
+    const execution = { executionId: `work-test-${Date.now()}-${Math.random()}`, withContext() { return this; }, verbs: { async harness(args: { prompt: string; session?: unknown }) {
+      assert.equal(args.session, undefined, "Work uses the bounded snapshot instead of replaying native history");
       await handle(args.prompt);
       return { state: "success", value: { outcome: "completed", invocationId: "test-invocation", result: { stopReason: "end_turn",
         finalText: JSON.stringify({ action: "done", summary: "Current verified progress", recent: "Checked evidence", notification: null, question: null, nextAt: null }) } } };

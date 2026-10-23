@@ -38,7 +38,7 @@ src/
     harness/               # Harness 注册、执行记录、Adapter 与提供方协议
       calls.ts             # 实时调用、等待与取消；Manager 只依赖能力接口
       activity.ts          # 有界实时执行投影，不持久化或回放
-      session.ts           # 资源 status.agent 中的原生会话引用
+      configuration.ts     # Harness 配置选择与模型参数
       state.ts             # 执行事件的状态投影
     connector/             # Connector 调用事实、未知结果恢复与独立写入租约
     store/                 # 文件租约与消息投影辅助
@@ -112,13 +112,13 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。Connector 声明访问能力，`plugins.<plugin>.sources` 声明观察策略；Personal 只启动显式配置的环境、Lark 与需求 Source。环境发现只读配置，不代表连通性、健康或操作授权。
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
-- ApplicationRuntime 服务 Plugin Operator；仅在配置 harness 时装配 ExecutionService。纯资源插件不要求 Adapter 或 Target，默认执行目标由应用配置提供。Manager 只接收 HarnessExecution 能力与独立 LogSink，不读取执行存储。Harness 自持原生会话和恢复，Aide 仅在资源 status.agent 保存必要引用；Connector 自持调用记录。资源、调度键和实例配置不依附 Session；CoreSession、SessionStore 和 SessionHandle 已移除。底座没有 Lane / Turn；一次执行统一使用 HarnessInvocation，资源上下文保存原生绑定。不兼容旧 Session / Lane / Turn 存储，不增加迁移或双读；提供方原生标识留在 Adapter。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
+- ApplicationRuntime 服务 Plugin Operator；仅在配置 harness 时装配 ExecutionService。纯资源插件不要求 Harness，默认执行目标由应用配置提供。Manager 只接收 HarnessExecution 能力与独立 LogSink，不读取执行存储。Harness 自持原生会话和恢复，Aide 仅在资源 status.agent 保存必要引用；Connector 自持调用记录。资源、调度键和实例配置不依附 Session；CoreSession、SessionStore 和 SessionHandle 已移除。底座没有 Lane / Turn；一次执行统一使用 HarnessInvocation，Operator 按需保存恢复参数。不兼容旧 Session / Lane / Turn 存储，不增加迁移或双读；提供方原生标识留在 Adapter。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
 - ChannelDefinition / SourceDefinition 声明来源身份；绑定的提交入口补齐来源，Source 同时记录资源实例引用。Input.text 保存收到的事实或请求，不保存 Chief 的处理指令。Channel / Source 输入统一从 Input 投影，Output 独立承载回复与通知；展示通过应用装配的定义目录读取名称和图标，不解释 Source 的业务数据。
 - Input / Output 由 Personal 定义；底座不预注册业务资源或 Session / Turn / Target 投影。Input.sessionId 仅是来源话题线索。Personal Route 监听 Input，规则命中立即追加，未命中由独立 Route agent Controller 调专用 Agent 分类；跨话题操作直接访问全局资源客户端。
-- Conversation、Task、Routine、Person 用 status.summary 保存累计认识、recent 保存有界近期依据；所有写入通过共享 Schema 限制条数和总长度。Person 的长期 profile 不局限于这两个字段，用户修正直接写入同一个 summary，Chief 按最新版本继续维护；身份单独保存。Work 执行从目标、状态、summary/recent 和所选 Input 重建 freshContext；Input.handle 的请求应用与执行确认分开，执行结果和回执原子提交。Routine 事件经 Input 入站去重。
+- Conversation、Task、Routine、Person 用 status.summary 保存累计认识、recent 保存有界近期依据；所有写入通过共享 Schema 限制条数和总长度。Person 的长期 profile 不局限于这两个字段，用户修正直接写入同一个 summary，Chief 按最新版本继续维护；身份单独保存。Work 执行从目标、状态、summary/recent 和所选 Input 构造一次性 prompt；Input.handle 的请求应用与执行确认分开，执行结果和回执原子提交。Routine 事件经 Input 入站去重。
 - Chief 用 assess_input 完成当前 Input 的研判并原子建立 Work 办理记录；独立新请求用 request_work 创建 origin=chief 的新 Input。Task / Routine Reconcile 按 handle 消费，不在 Work 保存输入副本或 consumedInputIds。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。
-- Harness 原生 Session 由 Adapter 管理。应用按插件实例、资源 UID、Controller 和 Target 组织执行上下文；Target 是配置与发现信息，不要求成为 Resource。
+- Operator 按 Harness interface 经 verb 操作 agent loop；status.agent 只是 Personal 为服务重启保存调用参数的字段，不是底座契约。Harness verb 接收 harness / session 并返回已知恢复引用，不访问 ResourceClient。配置在启动时装配，Conversation 不注册专属 Target；没有独立 Context 会话目录。运行句柄与调用 ID 仅用于有界进程内协调。
 - Plugin / Operator 的非 CRD 操作统一经过 Verb，CRD 使用 ResourceClient。harness verb 封装一个 Harness interface，提供 create/resume、prompt、followUp/steer、abort/close；不引入 Binding 或 Agent interface。运行中的追加交给原生 Harness 队列，回执不等于业务完成。Verb 记录调用关联、耗时和结果，不保存原生执行历史；恢复不自动重放输入。
 - Person 是 Personal 的人物 CRD，统一承载我与他人的身份和认知。PersonDefinition 的资源属于 Personal 插件实例，资源和引用不带 sessionId，不启动执行会话；各 Conversation、Channel、Source 经 ResourceClient 访问同一目录。姓名不作身份键，provider / scope / id 唯一绑定人物。
 - Me 是显式身份标记，connectors.lark.me 与 CLI 执行 appId/userId 独立；需求平台的 me.userKey 与 CLI profile、Source 负责人范围独立，规范项目 scope 由 Connector 解析。匹配 Person 的外部身份得到 Personal.me；本地单人 Web 有固定 Me 标记。Input.sender 可选，relation 为 sent / received / observed，缺省未知；机器人收发不自动代表本人，分类不构成执行授权。

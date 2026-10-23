@@ -114,20 +114,20 @@ describe("plugin Manager", () => {
     });
     const states: string[] = [];
     const scheduled: ScheduledHarnessInvocation[] = [];
-    let defaultHarnessTargetId = "claude";
+    let defaultHarnessConfigurationId = "claude";
     const manager = new Manager({
       instances: new PluginInstanceStore({ home: session.home }),
       snapshot() {
         return {
           ...emptyReconcileSnapshot(),
-          harnessTargets: [
+          harnesses: [
             { id: "codex", harness: "codex" },
             { id: "claude", harness: "claude" },
           ],
         };
       },
-      harness: new HarnessCalls({ records: session, targets: () => [{ id: "codex" }, { id: "claude" }],
-        get defaultTargetId() { return defaultHarnessTargetId; },
+      harness: new HarnessCalls({ records: session, harnesses: () => [{ id: "codex" }, { id: "claude" }],
+        get defaultHarness() { return defaultHarnessConfigurationId; },
         enqueueHarnessInvocation(request) { scheduled.push(request); },
       }),
     });
@@ -158,11 +158,11 @@ describe("plugin Manager", () => {
     const reconcile = manager.enqueue(reconcileKey);
     await waitFor(() => scheduled.length === 1);
     expect(scheduled[0]).toMatchObject({
-      harnessTargetId: "claude",
+      harnessName: "claude",
       blocks: [{ type: "text", text: "Implement run_1." }],
       source: "plugin",
     });
-    expect(scheduled[0]?.contextId).toMatch(/^resource:/);
+    expect(scheduled[0]?.runtimeId).toBeTruthy();
     expect(session.projection.approvals.size).toBe(0);
     expect(session.events.filter((event) =>
       event.kind === "approval.requested" ||
@@ -174,7 +174,7 @@ describe("plugin Manager", () => {
       "_aide_harness_invocation_scheduled",
     ]);
     expect(states).toEqual([]);
-    defaultHarnessTargetId = "codex";
+    defaultHarnessConfigurationId = "codex";
 
     const input = scheduled[0]!;
     session.appendEvent({
@@ -184,7 +184,7 @@ describe("plugin Manager", () => {
         pluginInstanceId: "reqloop_default",
       },
       harness: "claude",
-      harnessTargetId: input.harnessTargetId,
+      harnessName: input.harnessName,
       invocationId: input.invocationId,
       payload: {
         messageId: input.messageId,
@@ -195,7 +195,7 @@ describe("plugin Manager", () => {
       kind: "_aide_invocation_summary",
       source: { type: "aide" },
       harness: "claude",
-      harnessTargetId: input.harnessTargetId,
+      harnessName: input.harnessName,
       invocationId: input.invocationId,
       payload: {
         invocationId: input.invocationId,
@@ -231,10 +231,10 @@ describe("plugin Manager", () => {
       instances: new PluginInstanceStore({ home: session.home }),
       snapshot: () => ({
         ...emptyReconcileSnapshot(),
-        harnessTargets: [{ id: "codex", harness: "codex" }],
+        harnesses: [{ id: "codex", harness: "codex" }],
       }),
-      harness: new HarnessCalls({ records: session, targets: () => [{ id: "codex" }],
-        defaultTargetId: "codex", enqueueHarnessInvocation() {},
+      harness: new HarnessCalls({ records: session, harnesses: () => [{ id: "codex" }],
+        defaultHarness: "codex", enqueueHarnessInvocation() {},
       }),
     });
     manager.registerController<Spec, Record<string, never>>({

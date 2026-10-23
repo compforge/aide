@@ -1,7 +1,6 @@
-/** Resource-owned provider selection and native recovery reference; never a live runtime object. */
+/** Parameters for calling a Harness again. Callers choose whether and where to persist them. */
 export interface AgentStatus {
   readonly harness: string;
-  readonly targetId: string;
   readonly session?: {
     readonly id: string;
     /** Adapter-owned locator only, never a transcript or checkpoint copy. */

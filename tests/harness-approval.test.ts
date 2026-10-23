@@ -16,10 +16,10 @@ test("Native permission validates explicit choices, records live rejection and c
   const home = mkdtempSync(join(tmpdir(), "aide-approval-"));
   const storage = new HarnessFixtures(home), session = storage.create({ id: "approval", cwd: home });
   t.after(async () => { await session.closeLogs(); rmSync(home, { recursive: true, force: true }); });
-  const pending = new HarnessApprovalContinuations<{ target: { id: string }; contextId: string }>(
-    (binding, event, source) => { session.appendEvent({ ...event, source, harnessTargetId: binding.target.id, contextId: binding.contextId }); },
+  const pending = new HarnessApprovalContinuations<{ target: { id: string }; runtimeId: string }>(
+    (binding, event, source) => { session.appendEvent({ ...event, source, harnessName: binding.target.id, runtimeId: binding.runtimeId }); },
     () => {}, () => session.projection);
-  const wait = pending.open({ target: { id: "codex" }, contextId: "main" }, permission, "turn");
+  const wait = pending.open({ target: { id: "codex" }, runtimeId: "main" }, permission, "turn");
   const id = [...session.projection.approvals.keys()][0]!;
   assert.equal(pending.complete(id, { kind: "permission", outcome: "selected", optionId: "invented" }), false);
   assert.equal(session.projection.approvals.get(id)!.request.status, "pending");
@@ -29,7 +29,7 @@ test("Native permission validates explicit choices, records live rejection and c
   const reopened = session;
   assert.deepEqual(requestResult(reopened.projection, id), { kind: "permission", outcome: "selected", optionId: "reject" });
   await reopened.closeLogs();
-  const hook = pending.open({ target: { id: "codex" }, contextId: "main" }, { kind: "hook_trust", harnessName: "codex", hooks: [] }, "next-turn");
+  const hook = pending.open({ target: { id: "codex" }, runtimeId: "main" }, { kind: "hook_trust", harnessName: "codex", hooks: [] }, "next-turn");
   pending.cancelForInvocation("next-turn");
   assert.deepEqual(await hook, { kind: "cancelled", reason: "invocation" });
 });

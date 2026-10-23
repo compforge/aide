@@ -120,14 +120,17 @@ Verb is the common outlet for non-CRD operations; ResourceClient owns CRD access
 `harness` wraps the Harness interface without a Binding or Agent interface. Default `prompt` creates a HarnessInvocation and waits for its execution result. Session operations (`create`, `resume`, `close`, `abort`) and native input operations (`followUp`, `steer`) return acceptance receipts. Unsupported optional operations are explicitly rejected. Business ask, confirm, draft and Interaction contracts are removed. Native tool permissions and Hook trust remain explicit Host Approvals.
 
 ```ts
-await execution.verbs.harness({ operation: "resume", agentKey: "agent", session: savedSession, timeoutMs: 30_000 });
-const receipt = await execution.verbs.harness({
+const agent = resource.status.agent; // Application-owned storage, not a Host convention.
+const result = await execution.verbs.harness({
+  ...agent, title: "Review new input", prompt: inputText, timeoutMs: 30_000,
+});
+// The Operator decides where to save result.agent, including references returned after failure.
+await execution.verbs.harness({
   operation: "followUp", invocationId, messageId: inputId, prompt: inputText, timeoutMs: 30_000,
 });
-// An accepted receipt is not business completion. Domain tools record that separately.
 ```
 
-Application Harness context is derived from the main resource UID and Controller name. An explicit harnessTargetId selects a configured Target; otherwise the application default is used. `snapshot.harnessTargets` provides configuration discovery without Resource projections. `freshContext` replaces native context with the supplied bounded prompt. Resume reopens a specific native session without executing or replaying inputs.
+The harness parameter selects startup configuration; snapshot.harnesses discovers available configurations. A prompt without session creates a new native session. With session it reuses or restores that native session. Resume alone does not execute or replay input. Runtime IDs and invocation IDs are ephemeral correlation only.
 
 Harness and connector calls require timeoutMs covering their wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
@@ -185,4 +188,4 @@ Resource definitions can declare pure multi-value `indexes`, queried with `resou
 
 ### Native agent recovery
 
-A resource that owns a continuous agent declares an optional `AgentStatus` field in its status schema and invokes `verbs.harness({ agentKey: "agent", ... })`. The Host saves `{ harness, targetId, session: { id, resume? } }` in that field with resource UID and version checks. Session identity and optional versioned locator data come from the Adapter. Aide keeps no transcript, execution journal, or recovery checkpoint. Native restore failures surface to the caller; business recovery remains the Controller's responsibility. Omit `agentKey` for calls that do not need durable native continuity. `freshContext` starts a new native context from the supplied bounded prompt.
+The Operator may persist AgentStatus = { harness, session?: { id, resume? } } anywhere its schema permits. Harness verbs accept these values as parameters and return known references in result.agent; the Host never reads or patches resource status. Personal Route / Chief call create and persist the returned reference before a long-running prompt. If persistence fails, they close the runtime without dispatching input. Providers that cannot publish a native identity during create reject that operation; a one-shot prompt can still return a reference learned during execution. Native history and checkpoints remain owned by the Harness.

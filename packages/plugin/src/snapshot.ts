@@ -24,7 +24,7 @@ export interface HarnessExecutionResult {
   readonly endedAt?: string;
 }
 
-export interface HarnessTargetSnapshot {
+export interface HarnessConfigurationSnapshot {
   readonly id: string;
   readonly harness: string;
   readonly label?: string;
@@ -33,5 +33,5 @@ export interface HarnessTargetSnapshot {
 /** Configuration available to a reconciliation; execution history is never implicitly injected. */
 export interface ReconcileSnapshot {
   readonly cwd?: string;
-  readonly harnessTargets: readonly HarnessTargetSnapshot[];
+  readonly harnesses: readonly HarnessConfigurationSnapshot[];
 }

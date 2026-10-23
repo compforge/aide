@@ -6,42 +6,37 @@ import { ENVELOPE_VERSION, textOf, type AnyEventEnvelope, type EventEnvelope, ty
   type NewEvent, type InvocationSummary, type UsageUpdate } from "../event/index.ts";
 import { applyEvent, emptyHarnessState } from "./state.ts";
 import { invocationUserText } from "../store/message-relations.ts";
-import type { HarnessSessionMeta, ExecutionContextMeta } from "../execution-context.ts";
 
 export const RECENT_INVOCATIONS = 40;
-export interface HarnessTargetMeta { harnessTargetId: string; harness: string; model?: string; effort?: string; mode?: string }
-interface InvocationActivity { startedAt: string; endedAt: string; harness?: string; harnessTargetId?: string; contextId?: string; usage?: UsageUpdate }
+interface InvocationActivity { startedAt: string; endedAt: string; harness?: string; harnessName?: string; runtimeId?: string; usage?: UsageUpdate }
 /**
  * @spec Live execution and UI state only. No event journal, replay, native history or recovery checkpoint.
- * @spec Native bindings persist through the resource owner; all other activity disappears on restart.
+ * @spec This observer holds no native session directory or recovery state.
  * @link docs/harness/README.md
  */
 export class HarnessActivity {
   readonly logger: RuntimeLogger;
-  readonly meta: { cwd: string; harnessTargets: Record<string, HarnessTargetMeta>; contexts: Record<string, ExecutionContextMeta> };
   readonly projection = emptyHarnessState();
   private readonly listeners = new Set<(event: AnyEventEnvelope) => void>();
   private readonly invocations = new Map<string, InvocationActivity>();
   private readonly summaries = new Map<string, EventEnvelope<"_aide_invocation_summary">>();
   private readonly recent: string[] = [];
   private nextSeq = 1;
-  constructor(readonly dir: string, cwd: string,
-    readonly saveSession?: (contextId: string, targetId: string, session: HarnessSessionMeta) => Promise<void>) {
-    this.meta = { cwd, harnessTargets: {}, contexts: {} };
+  constructor(readonly dir: string, readonly cwd: string) {
     mkdirSync(dir, { recursive: true });
     this.logger = new RuntimeLogger(join(dir, "harness-runtime.log"), "harness");
   }
   subscribe(listener: (event: AnyEventEnvelope) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   appendEvent<K extends EventKind>(event: NewEvent<K>): EventEnvelope<K> {
-    const harnessTargetId = event.harnessTargetId ?? (event.source.type === "harness" ? event.source.harnessTargetId : undefined);
+    const harnessName = event.harnessName ?? (event.source.type === "harness" ? event.source.harnessName : undefined);
     const envelope = { v: ENVELOPE_VERSION, eventId: newId("ev"), ts: new Date().toISOString(), seq: this.nextSeq++,
-      scope: { type: "application" }, ...event, ...(harnessTargetId ? { harnessTargetId } : {}) } as EventEnvelope<K>;
+      scope: { type: "application" }, ...event, ...(harnessName ? { harnessName } : {}) } as EventEnvelope<K>;
     if (envelope.invocationId) {
       const current = this.invocations.get(envelope.invocationId) ?? { startedAt: envelope.ts, endedAt: envelope.ts };
       current.endedAt = envelope.ts;
       current.harness ??= envelope.harness;
-      current.harnessTargetId ??= envelope.harnessTargetId;
-      current.contextId ??= envelope.contextId;
+      current.harnessName ??= envelope.harnessName;
+      current.runtimeId ??= envelope.runtimeId;
       if (envelope.kind === "usage_update") {
         const usage = (envelope as EventEnvelope<"usage_update">).payload;
         current.usage = { inputTokens: (current.usage?.inputTokens ?? 0) + (usage.inputTokens ?? 0),
@@ -64,16 +59,6 @@ export class HarnessActivity {
   log(entry: LogEntry) { this.logger.log(entry); }
   flushLogs() { return this.logger.flush(); }
   closeLogs() { return this.logger.close(); }
-  setHarnessTarget(id: string, target: HarnessTargetMeta) { this.meta.harnessTargets[id] = target; }
-  setExecutionContext(id: string, context: ExecutionContextMeta) { this.meta.contexts[id] = context; }
-  setContextHarnessSession(contextId: string, targetId: string, session: HarnessSessionMeta) {
-    this.requireExecutionContext(contextId).harnessSessions[targetId] = session;
-  }
-  requireExecutionContext(id: string) {
-    const context = this.meta.contexts[id];
-    if (!context) throw new Error(`Execution context not found: ${id}`);
-    return context;
-  }
   summarizeInvocation(id: string): InvocationSummary { return this.summarizeInvocationEvent(id).payload; }
   summarizeInvocationEvent(id: string): EventEnvelope<"_aide_invocation_summary"> {
     const previous = this.summaries.get(id);
@@ -90,7 +75,7 @@ export class HarnessActivity {
       toolCalls: [...state.toolCalls.values()].filter(t => t.invocationId === id).map(t => ({ toolCallId: t.toolCallId, title: t.title, kind: t.kind, status: t.status })),
       usage: invocation.usage, startedAt: invocation.startedAt, endedAt: invocation.endedAt };
     const event = this.appendEvent({ kind: "_aide_invocation_summary", source: { type: "aide" }, payload: summary,
-      invocationId: id, harness: invocation.harness, harnessTargetId: invocation.harnessTargetId, contextId: invocation.contextId });
+      invocationId: id, harness: invocation.harness, harnessName: invocation.harnessName, runtimeId: invocation.runtimeId });
     this.summaries.set(id, event);
     return event;
   }
@@ -119,10 +104,10 @@ export class HarnessActivity {
     state.timeline = state.timeline.filter(item => !removed.has(item.id) && !(item.type === "harness_invocation" && item.id === id));
   }
   nativeEvent(
-    harnessTargetId: string,
+    harnessName: string,
     harness: string,
     event: { direction: "in"; name?: string; payload: unknown },
-    contextId?: string,
+    runtimeId?: string,
   ): void {
     try {
       const path = join(this.dir, "harness-native.jsonl");
@@ -134,8 +119,8 @@ export class HarnessActivity {
         path,
         `${JSON.stringify({
           ts: new Date().toISOString(),
-          harnessTargetId,
-          ...(contextId ? { contextId } : {}),
+          harnessName,
+          ...(runtimeId ? { runtimeId } : {}),
           harness,
           ...event,
         })}\n`,

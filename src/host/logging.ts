@@ -31,7 +31,7 @@ export interface LogEntry {
   readonly component: string;
   readonly message: string;
   readonly harness?: string;
-  readonly harnessTargetId?: string;
+  readonly harnessName?: string;
   readonly invocationId?: string;
   readonly pluginId?: string;
   readonly pluginInstanceId?: string;
@@ -200,8 +200,8 @@ export class RuntimeLogger {
       component: boundedString(entry.component),
       message: boundedString(entry.message),
       ...(entry.harness ? { harness: boundedString(entry.harness) } : {}),
-      ...(entry.harnessTargetId
-        ? { harnessTargetId: boundedString(entry.harnessTargetId) }
+      ...(entry.harnessName
+        ? { harnessName: boundedString(entry.harnessName) }
         : {}),
       ...(entry.invocationId ? { invocationId: boundedString(entry.invocationId) } : {}),
       ...(entry.pluginId ? { pluginId: boundedString(entry.pluginId) } : {}),
@@ -248,8 +248,8 @@ function normalizeLogEntry(entry: LogEntry): LogEntry {
     component: boundedString(entry.component),
     message: boundedString(entry.message),
     ...(entry.harness ? { harness: boundedString(entry.harness) } : {}),
-    ...(entry.harnessTargetId
-      ? { harnessTargetId: boundedString(entry.harnessTargetId) }
+    ...(entry.harnessName
+      ? { harnessName: boundedString(entry.harnessName) }
       : {}),
     ...(entry.invocationId ? { invocationId: boundedString(entry.invocationId) } : {}),
     ...(entry.pluginId ? { pluginId: boundedString(entry.pluginId) } : {}),

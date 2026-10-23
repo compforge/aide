@@ -19,7 +19,7 @@ class InvalidResultError extends Error {
 
 /** Personal decisions consume a completed Harness invocation; the runtime owns execution and cancellation. */
 async function infer<T>(context: ReconcileContext, title: string, prompt: string, schema: z.ZodType<T>, timeoutMs: number): Promise<{ value: T; invocationId: string }> {
-  const result = await context.verbs.harness({ title, timeoutMs, freshContext: true,
+  const result = await context.verbs.harness({ title, timeoutMs,
     prompt: `${prompt}\nYour final answer must be only JSON matching this schema, without Markdown. Keep any progress commentary in separate messages, outside the final answer:\n${JSON.stringify(z.toJSONSchema(schema))}`,
   });
   if (result.state !== "success") throw new Error(`Harness ${result.state}${result.state === "failure" ? `: ${result.error}` : ""}`);

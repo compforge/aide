@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { HarnessTargetConfig } from "../target.ts";
+import type { HarnessOptions } from "../configuration.ts";
 
 const text = z.string().trim().min(1);
 export const DshConfigSchema = z.object({
@@ -19,12 +19,12 @@ export interface DshTargetConfig {
   maxTokens?: number;
 }
 
-export const DEFAULT_DSH_TARGET_CONFIG: HarnessTargetConfig = Object.freeze({
+export const DEFAULT_DSH_TARGET_CONFIG: HarnessOptions = Object.freeze({
   harness: "dsh",
   model: "deepseek-flash",
 });
 
-export function resolveDshTargetConfig(config: HarnessTargetConfig): DshTargetConfig {
+export function resolveDshTargetConfig(config: HarnessOptions): DshTargetConfig {
   if (config.command !== undefined) {
     throw new Error(
       "DSH targets no longer accept command. Remove it to use the bundled SDK runtime, or configure dshBin and patches for a custom dsh profile. See docs/harness/deepseek-harness.md.",

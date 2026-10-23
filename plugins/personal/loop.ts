@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { prepareAgent, saveAgent } from "./session.ts";
 import type { PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
 import type { InputSpec } from "./input/model.ts";
 import { inputRef, pendingInputs, resourceRef, attemptOf, attemptPatch, type Input } from "./input/state.ts";
@@ -54,7 +55,9 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", executionId: execution.executionId } });
   let error = "Agent ended without confirming input completion";
   try {
-    const result = await execution.verbs.harness({ title: current.kind === "Route" ? "Route" : "Chief", harnessTargetId: target, agentKey: "agent", prompt, timeoutMs: 172800_000 });
+    const agent = await prepareAgent(context.resources, execution, current, target);
+    const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : "Chief", prompt, timeoutMs: 172800_000 });
+    if (result.agent?.session) await saveAgent(context.resources, current, execution.executionId, result.agent);
     if (result.state !== "success" || result.value.result.stopReason !== "end_turn") error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
   } catch (cause) { error = String(cause); }
   finally { await finalizeExecution(context, current, execution.executionId, error); }

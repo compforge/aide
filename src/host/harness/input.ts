@@ -1,5 +1,5 @@
 import type { PromptBlock } from "../event/index.ts";
-import type { HarnessTarget } from "./target.ts";
+import type { HarnessConfiguration } from "./configuration.ts";
 
 /** The actor that caused a prompt Input to enter Aide. */
 export type HarnessInputSource =
@@ -34,9 +34,9 @@ export interface HarnessInput {
   messageId: string;
   /** Controller scheduling coordinate: reserved for a prompt or targeted by a steer. Not proof of actual consumption. */
   invocationId: string;
-  target: HarnessTarget;
+  target: HarnessConfiguration;
   /** Aide-owned logical execution channel selected before admission. */
-  contextId: string;
+  runtimeId: string;
   blocks: PromptBlock[];
   source: HarnessInputSource;
   /** Causal link; orthogonal to the actor recorded in source. */
@@ -59,8 +59,8 @@ export interface HarnessInput {
 export interface HarnessInputUpdate {
   messageId: string;
   invocationId: string;
-  harnessTargetId: string;
-  contextId: string;
+  harnessName: string;
+  runtimeId: string;
   blocks: PromptBlock[];
   source: HarnessInputSource;
   status: HarnessInputStatus;
@@ -74,8 +74,8 @@ export interface HarnessInputUpdate {
 export interface HarnessInputSnapshot {
   messageId: string;
   invocationId: string;
-  harnessTargetId: string;
-  contextId: string;
+  harnessName: string;
+  runtimeId: string;
   harness: string;
   status: HarnessInputStatus;
   delivery: "prompt" | "steer" | "followUp";
@@ -93,8 +93,8 @@ export function harnessInputUpdate(
   return {
     messageId: input.messageId,
     invocationId: update?.invocationId ?? input.invocationId,
-    harnessTargetId: input.target.id,
-    contextId: input.contextId,
+    harnessName: input.target.id,
+    runtimeId: input.runtimeId,
     blocks: [...input.blocks],
     source: { ...input.source },
     status,
@@ -115,8 +115,8 @@ export function harnessInputSnapshot(input: HarnessInput): HarnessInputSnapshot 
   return {
     messageId: input.messageId,
     invocationId: input.invocationId,
-    harnessTargetId: input.target.id,
-    contextId: input.contextId,
+    harnessName: input.target.id,
+    runtimeId: input.runtimeId,
     harness: input.target.harness,
     status: input.status,
     delivery: input.delivery,

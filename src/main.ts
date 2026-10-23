@@ -32,12 +32,12 @@ await withAsyncFileLock(path, async () => {
   const connectors = Connectors.fromConfig(config.connectors, environment);
   const aide: Aide = new Aide(home, {
     config, connectors,
-    cwd, timezone, defaultTarget: harnesses.defaultTarget,
+    cwd, timezone, defaultHarnessConfig: harnesses.defaultHarnessConfig,
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
-      targetConfig: target.harness === "route" ? { harness: "route" } : target.harness === "chief" ? { harness: "chief" } : harnesses.defaultTargetConfig,
-      ...(target.harness === "route" ? { routeSession: aide.routeSession(harnesses.route) } : {}),
+      targetConfig: target.harness === "route" ? { harness: "route" } : target.harness === "chief" ? { harness: "chief" } : harnesses.defaultHarnessOptions,
+      ...(target.harness === "route" ? { routeSession: aide.routeSession(ports.scope, harnesses.route) } : {}),
       ...(target.harness === "pi" ? { piConfig: harnesses.pi } : {}),
-      ...(target.harness === "chief" ? { chiefSession: aide.chiefSession(target.id, harnesses.chief) } : {}),
+      ...(target.harness === "chief" ? { chiefSession: aide.chiefSession(ports.scope, harnesses.chief) } : {}),
     }),
   }, log);
   const server = httpChannel(aide, log);

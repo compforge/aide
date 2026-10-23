@@ -77,7 +77,7 @@ import type { ResourceNamespace } from "@compforge/aide-plugin";
 import { Verb, type VerbOptions } from "./verb.ts";
 import { HookRegistry, HookRuntime } from "./hook.ts";
 import { ResourceRegistry } from "./resource/registry.ts";
-import type { HarnessTarget } from "../harness/target.ts";
+import type { HarnessConfiguration } from "../harness/configuration.ts";
 
 export type { ReconcileFailure } from "./controller.ts";
 
@@ -112,8 +112,8 @@ export interface ManagerOptions {
   /** Optional execution capability. Resource-only plugins need no Harness storage. */
   harness?: VerbOptions["harness"];
   log?: LogSink;
-  /** Configured HarnessTargets available in execution snapshots. */
-  harnessTargets?: readonly HarnessTarget[];
+  /** Configured HarnessConfigurations available in execution snapshots. */
+  harnesses?: readonly HarnessConfiguration[];
   /** 当前进程可激活的可信、不可变 Package 版本。 */
   packages?: PackageLoaderOptions["packages"];
   /** Reconcile 的运行环境与 Harness 配置快照。 */

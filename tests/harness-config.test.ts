@@ -237,16 +237,16 @@ test(`${harness} selection resolves native settings without loading inactive Pi 
     const config = loadConfig(file);
     const resolved = await resolveHarnessConfigs(config, { home, cwd: home, file,
       environment: { TEST_MODEL_KEY: "fixture-key", AIDE_CLAUDE_BIN: "/ambient/claude" }, log });
-    expect(resolved.defaultTarget).toEqual({ id: "default", harness, model: "native-model" });
-    expect(resolved.defaultTargetConfig).toMatchObject({ harness, ...native[harness] });
+    expect(resolved.defaultHarnessConfig).toEqual({ id: "default", harness, model: "native-model" });
+    expect(resolved.defaultHarnessOptions).toMatchObject({ harness, ...native[harness] });
     expect(resolved.chief.model.id).toBe("chief-model");
     expect(resolved.route.model.id).toBe("chief-model");
     expect(resolved.route.skillPaths).toEqual([]);
     expect(resolved.pi).toBeUndefined();
     config.defaultHarness = "pi";
     if (harness === "codex") config.harnesses.codex.command![0] = "changed-command";
-    expect(resolved.defaultTarget.harness).toBe(harness);
-    expect(resolved.defaultTargetConfig).toMatchObject({ harness, ...native[harness] });
+    expect(resolved.defaultHarnessConfig.harness).toBe(harness);
+    expect(resolved.defaultHarnessOptions).toMatchObject({ harness, ...native[harness] });
     expect(existsSync(join(home, "harnesses", "pi", "synced"))).toBe(false);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

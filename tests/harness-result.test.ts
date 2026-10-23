@@ -18,8 +18,8 @@ test("Codex live and imported messages retain finality in native history normali
     const session = sessions.create({ cwd: "/repo" });
     const drafts = mode === "live" ? [progress, answer].flatMap((item) => codexItemLifecycleDrafts("completed", item))
       : codexHistoryTurns([{ id: "turn", status: "completed", itemsView: "full", items: [progress, answer] }])[0]!.events!.map((entry) => entry.event);
-    for (const draft of drafts) session.appendEvent({ ...draft, source: { type: "harness", harnessTargetId: "codex" },
-      harness: "codex", harnessTargetId: "codex", contextId: "main", invocationId: "turn" });
+    for (const draft of drafts) session.appendEvent({ ...draft, source: { type: "harness", harnessName: "codex" },
+      harness: "codex", harnessName: "codex", runtimeId: "main", invocationId: "turn" });
     assert.equal(session.projection.messages.get("progress")?.kind, "output");
     const summary = session.summarizeInvocation("turn");
     assert.equal(summary.agentText, progress.text + "\n" + answer.text);
@@ -34,7 +34,7 @@ test("JSON-shaped commentary or unclassified messages are never promoted to a fi
   for (const phase of ["commentary", undefined, "unknown-future-phase"]) {
     const session = new HarnessFixtures(root).create({ cwd: "/repo" });
     for (const draft of codexItemLifecycleDrafts("completed", { ...answer, phase })) {
-      session.appendEvent({ ...draft, source: { type: "harness", harnessTargetId: "codex" }, harness: "codex", invocationId: "turn" });
+      session.appendEvent({ ...draft, source: { type: "harness", harnessName: "codex" }, harness: "codex", invocationId: "turn" });
     }
     const summary = session.summarizeInvocation("turn");
     assert.equal(summary.agentText, answer.text);
