@@ -7,6 +7,7 @@ const labels: Record<Work['status'], string> = { ready: '准备执行', running:
 export function createWorkPanel(conversationId: string, onChange: () => Promise<void>, signal: AbortSignal) {
   let lastWork = '';
   const deletingWork = new Set<string>();
+  const expanded = new Map<string, boolean>();
   function renderWork(works: Work[]) {
     const signature = JSON.stringify(works);
     if (signature === lastWork) return;
@@ -16,6 +17,11 @@ export function createWorkPanel(conversationId: string, onChange: () => Promise<
   }
   function renderWorkGroup(works: Work[], listId: string, countId: string, emptyText: string) {
     $(countId).textContent = String(works.length);
+    const attention = works.filter((work) => ['waiting', 'uncertain', 'invalid_result'].includes(work.status)).length;
+    const tab = $('tab-' + listId);
+    tab.classList.toggle('needs-attention', attention > 0);
+    tab.title = attention ? `${attention} 项需要你处理` : '';
+    tab.setAttribute('aria-label', `${listId === 'tasks' ? '事项' : '安排'} ${works.length}${attention ? `，${attention} 项需要你处理` : ''}`);
     const list = $(listId);
     list.replaceChildren();
     if (!works.length) list.append(element('p', emptyText, 'muted'));
@@ -72,6 +78,10 @@ export function createWorkPanel(conversationId: string, onChange: () => Promise<
       if (work.status === 'invalid_result') node.append(element('p', '执行已结束，但最终结果解析失败。请核对执行记录，再决定是否继续。'));
       if (work.nextAt) node.append(element('p', '下次：' + new Date(work.nextAt).toLocaleString(), 'muted'));
       const detail = element('details');
+      detail.open = expanded.get(work.id) ?? false;
+      detail.addEventListener('toggle', () => {
+        if (detail.isConnected && !signal.aborted) expanded.set(work.id, detail.open);
+      });
       detail.append(element('summary', '查看目标与进展'), element('p', work.instruction));
       const latest = work.recent.at(-1);
       if (latest) detail.append(element('p', latest.text));

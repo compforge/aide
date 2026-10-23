@@ -1,6 +1,18 @@
 @import '../shared/style.css';
-main { grid-template-columns: 230px minmax(0, 1fr) 290px; }
-.conversation { min-width: 0; padding: 24px; min-height: 0; display: flex; flex-direction: column; }
+main { grid-template-columns: 230px minmax(0, 1fr); }
+.conversation { min-width: 0; padding: 24px; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+#conversation-tabs { display: flex; flex: none; gap: 8px; overflow-x: auto; border-bottom: 1px solid #d8dfd5; margin-bottom: 18px; padding-bottom: 8px; }
+#conversation-tabs[hidden], .conversation-panel[hidden] { display: none; }
+#conversation-tabs button { padding: 9px 12px; border-radius: 8px; background: transparent; color: #68776c; font-size: 14px; }
+#conversation-tabs button[aria-selected="true"] { color: #294f3a; background: #dfeadd; font-weight: 600; }
+.tab-count { font-size: 12px; margin-left: 3px; }
+#conversation-tabs .needs-attention::after { content: ''; display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: #b87923; }
+.conversation-panel { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 16px 0; }
+/* @spec Short viewports retain usable dialogue and approvals; overflow remains scrollable, including a resized composer.
+ * @link docs/channel/web.md */
+.dialogue-panel { display: flex; flex-direction: column; min-height: 12rem; overflow: auto; padding: 0; }
+.conversation-header, #poll-notice, #work-notice, #composer, #notice { flex: none; }
+#work-notice:empty { display: none; }
 .conversations { padding: 24px 12px; border-right: 1px solid #d8dfd5; overflow: auto; }
 .conversations h2 { font-size: 16px; margin: 0 10px 18px; }
 .conversation-row { margin-bottom: 10px; }
@@ -17,7 +29,7 @@ main { grid-template-columns: 230px minmax(0, 1fr) 290px; }
 .conversation-copy { flex: none; padding: 5px 8px; background: transparent; color: #68776c; font-size: 12px; }
 .conversation-copy:hover { background: #e8eee3; }
 .conversation-actions { position: absolute; top: 10px; right: 6px; display: flex; align-items: center; gap: 2px; }
-#messages { flex: 1; overflow: auto; padding: 0 12px 24px 0; }
+#messages { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 24px 0; }
 .message { padding: 16px 18px; background: white; border: 1px solid #e1e6dc; border-radius: 12px; margin: 12px 0; }
 .message.user { background: #e8eee3; margin-left: 10%; }
 .message.source { background: #f0f3f7; border-color: #d7dfe8; border-left: 3px solid #8194a9; }
@@ -49,13 +61,9 @@ textarea { width: 100%; resize: vertical; min-height: 80px; max-height: 200px; b
 #notice { min-height: 22px; margin-top: 10px; }
 #notice, #work-notice { font-size: 13px; color: #68776c; }
 #notice.error, #work-notice.error { color: #a0362a; }
-aside { padding: 24px 20px; border-left: 1px solid #d8dfd5; overflow: auto; } aside h2 { font-size: 16px; margin: 0 0 18px; }
-#conversation-context[hidden] { display: none; }
-.context-group { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #d8dfd5; }
-#conversation-summary, #conversation-recent { max-height: 320px; overflow: auto; font-size: 13px; }
+#conversation-summary, #conversation-recent { font-size: 15px; }
 .context-entry + .context-entry { margin-top: 16px; padding-top: 16px; border-top: 1px solid #e1e6dc; }
 .context-entry time { display: block; margin-bottom: 6px; font-size: 12px; }
-.work-group + .work-group { margin-top: 28px; padding-top: 24px; border-top: 1px solid #d8dfd5; }
 .work { background: white; border-radius: 10px; border: 1px solid #e1e6dc; padding: 14px; margin-bottom: 12px; }
 .work-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .work-actions { display: flex; gap: 6px; }
@@ -69,11 +77,23 @@ aside { padding: 24px 20px; border-left: 1px solid #d8dfd5; overflow: auto; } as
 details { font-size: 12px; color: #68776c; margin-top: 8px; }
 #poll-notice { color: #9b5b11; font-size: 13px; }
 #poll-notice:not(:empty) { margin-bottom: 12px; }
-#approvals { max-height: 45vh; overflow: auto; }
+#approvals { flex: none; max-height: 35vh; overflow: auto; }
 .approval { border: 1px solid #cfac72; border-radius: 12px; padding: 14px; margin-bottom: 12px; background: #fff8e9; }
 .approval p, .approval pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-@media(max-width: 1000px) { header { padding: 16px; } main { display: block; height: auto; } .conversations { max-height: 220px; border-right: 0; border-bottom: 1px solid #d8dfd5; padding: 16px; } .conversation { height: 75dvh; padding: 16px; } aside { border-left: 0; border-top: 1px solid #d8dfd5; } }
+@media(max-width: 700px) {
+  header { padding: 12px 16px; grid-template-columns: auto 1fr; gap: 10px; }
+  header > .muted:not(#connection) { display: none; }
+  #connection { grid-column: 1 / -1; }
+  #connection:empty { display: none; }
+  header .main-tabs { justify-self: end; gap: 0; }
+  header .main-tabs a { padding: 8px; font-size: 13px; }
+  main { display: block; height: auto; }
+  .conversations { max-height: 220px; border-right: 0; border-bottom: 1px solid #d8dfd5; padding: 16px; }
+  .conversation { height: 80dvh; padding: 16px; }
+  #conversation-tabs { gap: 3px; }
+  #conversation-tabs button { padding: 9px 8px; }
+}
 
 .reply-region { margin-top: 12px; color: inherit; font-size: 14px; }
 .reply-region > summary { cursor: pointer; padding: 6px 0; color: #42634c; overflow-wrap: anywhere; }
