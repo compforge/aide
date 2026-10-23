@@ -110,7 +110,7 @@ test("say resolves direct, aggregate and proactive targets without guessing from
   assert.equal(store.outputStore.get(proactive.outputId)!.spec.inputIds, undefined);
 });
 
-test("Routine without a communication address records completion and retains notification without rerunning after restart", async (t) => {
+test("Routine without a communication address retains reported evidence without rerunning after restart", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-addressless-work-"));
   let executions = 0;
   const options = fakeOptions({ async execute() { executions++; return { action: "done", summary: "verified", recent: "verified", notification: "retained notification", question: null, nextAt: null }; } }, root);
@@ -120,7 +120,7 @@ test("Routine without a communication address records completion and retains not
   await aide.event({ id: "check", sessionId: "source-topic", conversationId: "source-topic", name: "check", text: "check" });
   await aide.start(); await aide.settled();
   assert.equal(aide.works()[0]!.status, "scheduled");
-  assert.ok(aide.works()[0]!.recent.some((h) => h.text.includes("retained notification")));
+  assert.ok(aide.works()[0]!.recent.some((h) => h.text === "verified"));
   assert.equal(aide.outputs().length, 0);
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();

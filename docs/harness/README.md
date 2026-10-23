@@ -2,7 +2,7 @@
 
 Harness 向 Aide 提供 Agent 执行能力。宿主通过统一接口提交输入、观察执行、取消或恢复会话；具体模型、原生协议和工具执行由 Harness 实现提供。插件通过 verb 请求执行，业务目标与结果判断仍由插件拥有。Harness 由应用按需装配，默认 Harness 来自启动配置；纯资源插件不启动执行后端。
 
-[Pi](pi.md)、[Chief](chief.md)、[Task](task.md) 与 [Route](route.md) 是独立的 Harness 身份，复用 Pi Adapter；Codex、Claude 和 DSH 则通过各自的原生协议接入。Harness 身份既可以区分提供方，也可以区分有明确职责和工具集合的 Agent。
+[Pi](pi.md)、[Chief](chief.md)、[Task](task.md)、[Routine](routine.md) 与 [Route](route.md) 是独立的 Harness 身份，复用 Pi Adapter；Codex、Claude 和 DSH 则通过各自的原生协议接入。Harness 身份既可以区分提供方，也可以区分有明确职责和工具集合的 Agent。
 
 Route 使用专用分类提示词，只有 route_input、目录读取和共享记忆检索工具。它提交 Input 与已有 Conversation 的关联，宿主保存计划并投递；角色、连续执行与恢复见 [Route](route.md)，业务协作见 [Personal](../plugin/personal.md#输入与上下文)。
 
@@ -23,7 +23,7 @@ harness 选择启动时配置的实现、模型和能力；sessionId 是原生�
 
 未传 sessionId 的 prompt 新建原生会话；传入 sessionId 则复用运行句柄，或在重启后恢复该原生会话。相同配置可服务多个独立会话。运行句柄、runtimeId 和 invocationId 只用于进程内协调、并发保护和观测，不能用于恢复。
 
-Route / Chief / Task 先调用 create，保存返回的恢复引用，然后提交长运行 prompt。保存失败时不提交业务输入，并关闭刚创建的运行句柄。不能在 create 阶段提供原生引用的 Harness 明确拒绝这个操作；一次性调用仍可直接 prompt，并在结束后返回已知引用。原生恢复失败明确返回，不自动另建会话。
+Route / Chief / Task / Routine 先调用 create，保存返回的恢复引用，然后提交长运行 prompt。保存失败时不提交业务输入，并关闭刚创建的运行句柄。不能在 create 阶段提供原生引用的 Harness 明确拒绝这个操作；一次性调用仍可直接 prompt，并在结束后返回已知引用。原生恢复失败明确返回，不自动另建会话。
 
 原生历史、压缩与 checkpoint 由 Harness 管理。Operator 只保存调用参数；输入是否完成、如何重试和如何确认已有副作用，仍由业务资源与工具回执决定。
 
@@ -61,6 +61,6 @@ Harness 执行工具，插件定义工具背后的领域规则。通用 Pi 不�
 
 ## 实现与验证
 
-[Pi](pi.md) 说明通用 SDK 会话和原生工具；[Chief](chief.md) 说明 Personal 能力、提示词与上下文。[Route](route.md) 说明输入分派、工具和恢复。[Task](task.md) 说明持续办理、工具回执和静默回收。四者共用执行适配代码，新增 Agent 职责不需要复制流式、取消或恢复逻辑。
+[Pi](pi.md) 说明通用 SDK 会话和原生工具；[Chief](chief.md) 说明 Personal 能力、提示词与上下文。[Route](route.md) 说明输入分派、工具和恢复。[Task](task.md) 说明持续办理、工具回执和静默回收。[Routine](routine.md) 说明长期职责的触发和会话释放。它们共用执行适配代码，新增 Agent 职责不需要复制流式、取消或恢复逻辑。
 
 新增 Harness 时从注册表和 HarnessAdapter 契约接入，验证接受/拒绝、事件终态、取消、恢复身份及声明的可选能力。协议测试与真实提供方连通应分别记录；完整应用链路见 [E2E](../e2e.md)。

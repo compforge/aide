@@ -32,7 +32,7 @@ test("Chief config validates model and package declarations without echoing valu
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-for (const harness of ["pi", "chief", "task"] as const)
+for (const harness of ["pi", "chief", "task", "routine"] as const)
 test(`${harness}: resolves nested package skills relative to config and rejects missing packages without installing`, async () => {
   const home = mkdtempSync(join(tmpdir(), "aide-harness-packages-"));
   const file = join(home, "config.yaml");
@@ -56,7 +56,7 @@ test(`${harness}: resolves nested package skills relative to config and rejects 
 });
 
 /** @case An interrupted sync leaves a dead holder; the next invocation recovers without a manual retry. */
-for (const harness of ["pi", "chief", "task"] as const)
+for (const harness of ["pi", "chief", "task", "routine"] as const)
 test(`${harness}: sync CLI recovers a stale service lock, excludes a live holder and accepts empty packages`, async () => {
   const home = mkdtempSync(join(tmpdir(), "aide-harness-cli-"));
   writeFileSync(join(home, "config.yaml"), JSON.stringify({ harnesses: { [harness]: { packages: [] } } }));
@@ -82,7 +82,7 @@ test(`${harness}: sync CLI recovers a stale service lock, excludes a live holder
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-for (const harness of ["pi", "chief", "task"] as const)
+for (const harness of ["pi", "chief", "task", "routine"] as const)
 test(`${harness}: Git packages install explicitly and a changed ref cannot silently load the cached checkout`, async () => {
   const home = mkdtempSync(join(tmpdir(), "aide-harness-git-"));
   const repo = join(home, "origin");
@@ -184,11 +184,14 @@ test("startup resolves independent Pi and Chief models with explicit package ski
     expect(resolved.route.model.id).toBe("chief-model");
     expect(resolved.task.model.id).toBe("chief-model");
     expect(resolved.task.skillPaths).toEqual([]);
+    expect(resolved.routine.model.id).toBe("chief-model");
+    expect(resolved.routine.skillPaths).toEqual([]);
     expect(resolved.route.skillPaths).toEqual([]);
-    const routing = await resolveHarnessConfigs({ ...config, harnesses: { ...config.harnesses, route: { model: { ...definition, id: "route-model" } }, task: { model: { ...definition, id: "task-model" }, packages: [] } } },
+    const routing = await resolveHarnessConfigs({ ...config, harnesses: { ...config.harnesses, route: { model: { ...definition, id: "route-model" } }, task: { model: { ...definition, id: "task-model" }, packages: [] }, routine: { model: { ...definition, id: "routine-model" }, packages: [] } } },
       { home, cwd: home, file, environment: { TEST_MODEL_KEY: "fixture-key" }, log });
     expect(routing.route.model.id).toBe("route-model");
     expect(routing.task.model.id).toBe("task-model");
+    expect(routing.routine.model.id).toBe("routine-model");
     expect(routing.chief.model.id).toBe("chief-model");
     expect(resolved.pi!.modelRuntime).not.toBe(resolved.chief.modelRuntime);
     expect(resolved.pi!.skillPaths).toEqual([]);
@@ -208,7 +211,7 @@ test("defaultHarness is an Aide root setting with a Pi default and strict regist
       writeFileSync(file, JSON.stringify({ defaultHarness: harness }));
       expect(loadConfig(file).defaultHarness).toBe(harness);
     }
-    for (const value of [null, "", "chief", "route", "unknown", "cx", 42]) {
+    for (const value of [null, "", "chief", "route", "task", "routine", "unknown", "cx", 42]) {
       writeFileSync(file, JSON.stringify({ defaultHarness: value }));
       expect(() => loadConfig(file)).toThrow("defaultHarness");
     }
@@ -246,6 +249,8 @@ test(`${harness} selection resolves native settings without loading inactive Pi 
     expect(resolved.route.model.id).toBe("chief-model");
     expect(resolved.task.model.id).toBe("chief-model");
     expect(resolved.task.skillPaths).toEqual([]);
+    expect(resolved.routine.model.id).toBe("chief-model");
+    expect(resolved.routine.skillPaths).toEqual([]);
     expect(resolved.route.skillPaths).toEqual([]);
     expect(resolved.pi).toBeUndefined();
     config.defaultHarness = "pi";

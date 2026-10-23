@@ -108,8 +108,9 @@ export class ConversationStore {
     if (options.respondToInputId && options.target) throw new Error("say must choose respondToInputId or target, not both");
     const inputIds = [...new Set([...(options.inputIds ?? (inputId ? [inputId] : [])), ...(options.respondToInputId ? [options.respondToInputId] : [])])];
     const attached = (id: string) => {
-      const input = this.input(id, conversationId);
-      if (!input) throw new Error(`say Input is not attached to this Conversation: ${id}`);
+      const input = this.inputStore.get(id);
+      const assigned = owner ? input?.status.handle?.[owner.metadata.uid] : input?.status.assess?.[initial.metadata.uid];
+      if (!input || !assigned) throw new Error(`say Input is not attached to this Conversation: ${id}`);
       return input;
     };
     for (const id of inputIds) attached(id);
@@ -123,7 +124,7 @@ export class ConversationStore {
       if (!target) throw new Error(`Reply Input has no address: ${options.respondToInputId}`);
     }
     if (!target) {
-      const candidates = (inputIds.length ? inputIds : this.pending(initial.metadata.uid).map(i => i.metadata.name)).map(attached)
+      const candidates = (inputIds.length ? inputIds : owner ? [] : this.pending(initial.metadata.uid).map(i => i.metadata.name)).map(attached)
         .filter((i) => (i.spec.attention ?? (i.spec.origin === "channel" ? "immediate" : "deferred")) === "immediate");
       if (candidates.length) {
         const first = candidates[0]!.spec.source;

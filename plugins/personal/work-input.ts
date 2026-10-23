@@ -15,8 +15,6 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
     const resource = await context.resources.get<WorkSpec, WorkStatus>(ref);
     if (!resource || resource.metadata.deletionTimestamp) return;
     const work = toWork(resource);
-    // A running work must be recovered before consuming anything that could start it again.
-    if (work.status === "running" && resource.kind !== "Task") return resource;
     const pending = await context.resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "handlePending", value: resource.metadata.uid } });
     const unapplied = pending.filter(fact => !fact.status.handle![resource.metadata.uid]!.appliedAt);
     if (!unapplied.length) return resource;
@@ -73,10 +71,4 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
     }
   }
   throw new Error(`Work ${original.metadata.name} changed continuously while consuming input`);
-}
-
-export function workCompletionWatch(type: import("@compforge/aide-plugin").ResourceType): import("@compforge/aide-plugin").Watch {
-  return { resourceType: type, handler: { create: async () => [], delete: async () => [], update: async ({ oldObject, newObject }) =>
-    (oldObject as WorkResource).status.status === "running" && (newObject as WorkResource).status.status !== "running"
-      ? [{ name: newObject.metadata.name, namespace: newObject.metadata.namespace }] : [] } };
 }

@@ -90,7 +90,7 @@ export class WorkService {
     const previous = this.store.conversations.inputStore.get(name);
     if (previous && !isDeepStrictEqual(previous.status.handle?.[target.metadata.uid]?.request, parsed)) throw new Error("Input already has a different Work request; use a new identity");
     await this.store.client.commit([
-      { operation: "patchStatus", resource: target, patch: target.kind === "Task" ? { idleSince: null, agentStoppedAt: null } : {} },
+      { operation: "patchStatus", resource: target, patch: { idleSince: null, agentStoppedAt: null } },
       { operation: "create", type: INPUT_TYPE, name, spec: { origin: "chief", originId: "personal.chief", text, sessionId: c.spec.id, observation: { work: resourceRef(target), request: parsed } }, status: {
         route: { completedAt: at, result: { conversations: [resourceRef(c)], reason: "Independent Chief request" } },
         assess: { [c.metadata.uid]: { resource: resourceRef(c), assignedAt: at, completedAt: at, result: { summary: text } } },

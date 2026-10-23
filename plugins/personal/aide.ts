@@ -1,3 +1,4 @@
+import { routineSession } from "./routine/agent.ts";
 import { taskSession } from "./task/agent.ts";
 import type { PiConfig } from "../../src/host/harness/pi/config.ts";
 import { summarizeConversation } from "./conversation/state.ts";
@@ -98,6 +99,10 @@ export class Personal {
     };
   }
 
+  routineSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
+    return routineSession(scope, config, this.store, this.plugins, this.log);
+  }
+
   taskSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
     return taskSession(scope, config, this.store, this.plugins, this.log);
   }
@@ -164,7 +169,7 @@ export class Personal {
   async submitInput(scope: ExecutionScope, raw: unknown) {
     const { inputId } = z.object({ inputId: z.string().min(1) }).strict().parse(raw);
     const ref = scope.resourceRef;
-    if (scope.pluginInstanceId !== "personal" || !ref?.uid || scope.controllerName || !["Route", "Conversation", "Task"].includes(ref.kind)) throw new Error("submit_input requires an owning intake controller");
+    if (scope.pluginInstanceId !== "personal" || !ref?.uid || scope.controllerName || !["Route", "Conversation", "Task", "Routine"].includes(ref.kind)) throw new Error("submit_input requires an owning intake controller");
     const resources = this.plugins.resourceClient("personal");
     let admitted: { input: Readonly<Resource<InputSpec, InputStatus>>;
       executionId: string; invocationId: string } | undefined;
@@ -352,7 +357,7 @@ export class Personal {
     const at = new Date().toISOString();
     const resources = targets.map(work => this.store.resources.get(workType(work.kind), work.id));
     await this.store.client.commit([
-      ...resources.map(resource => ({ operation: "patchStatus" as const, resource, patch: {} })),
+      ...resources.map(resource => ({ operation: "patchStatus" as const, resource, patch: { idleSince: null, agentStoppedAt: null } })),
       { operation: "create", type: INPUT_TYPE, name, spec, status: {
         route: { completedAt: at, result: { conversations: [resourceRef(c)], reason: "Routine event subscription" } },
         handle: Object.fromEntries(resources.map(resource => [resource.metadata.uid, { resource: resourceRef(resource), assignedAt: at, request: { action: "context" } }])),

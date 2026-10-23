@@ -501,30 +501,31 @@ export default function (pi) {
 });
 
 
-test("Routine executes with the default Pi Harness and its configured package skill", { timeout: 30_000 }, async (t) => {
-  const outcome = { action: "done", summary: "checked", recent: "checked", notification: "verified", question: null, nextAt: null };
-  const fixture = await setup(t, () => ({ text: JSON.stringify(outcome) }));
+test("Routine uses its dedicated Pi agent and independently configured package skills", { timeout: 30_000 }, async t => {
+  let inputId = "";
+  const fixture = await setup(t, (_request, index) => index === 0
+    ? { tool: "report_routine", args: { inputIds: [inputId], action: "done", summary: "checked", recent: "checked" } }
+    : { text: "Recorded" });
   const home = join(fixture.config.cwd, "work-home");
   const skill = join(fixture.config.cwd, "capabilities", "as-ops"); mkdirSync(skill, { recursive: true });
-  writeFileSync(join(skill, "SKILL.md"), "---\nname: fixture-as-ops\ndescription: Inspect AgentSphere environment evidence.\n---\nRead-only environment operations.\n");
-  const piConfig = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir,
+  writeFileSync(join(skill, "SKILL.md"), "---\nname: fixture-as-ops\ndescription: Inspect environment evidence.\n---\nRead-only environment operations.\n");
+  const routineConfig = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir,
     model: { provider: "fixture", id: "work-model" }, skillPaths: [join(skill, "SKILL.md")] });
-  const aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" }, createAdapter: (target, ports) =>
-    createHarnessAdapter(target, { ...ports, piConfig, targetConfig: { harness: target.harness } }) }, pino({ level: "silent" }));
+  const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" }, createAdapter: (target, ports) =>
+    createHarnessAdapter(target, { ...ports, routineSession: aide.routineSession(ports.scope, routineConfig), targetConfig: { harness: target.harness } }) }, pino({ level: "silent" }));
   t.after(() => aide.close());
-  await aide.start();
-  await aide.work("me").create({ kind: "routine", title: "inspect on event", instruction: "Check evidence", trigger: { cron: null, timezone: "UTC", event: "sample" } });
+  const work = await aide.work("me").create({ kind: "routine", title: "inspect on event", instruction: "Check evidence", trigger: { cron: null, timezone: "UTC", event: "sample" } });
   await aide.event({ id: "sample-1", sessionId: "me", conversationId: "me", name: "sample", text: "sample" });
-  await aide.settled();
-  assert.equal(aide.works().find((work) => work.kind === "routine")!.status, "scheduled");
-  const requests = fixture.requests.filter((request) => request.model === "work-model");
-  assert.equal(requests.length, 1);
+  inputId = aide.conversations.inputStore.query("handlePending", work.uid!)[0]!.metadata.name;
+  await aide.start(); await aide.settled();
+  assert.equal(aide.work("me").read(work.id).status, "scheduled");
+  const requests = fixture.requests.filter(request => request.model === "work-model");
+  assert.equal(requests.length, 2);
   for (const request of requests) {
     assert.match(JSON.stringify(request.messages), /fixture-as-ops/);
-    assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|create_work/);
+    assert.match(JSON.stringify(request.tools), /report_routine/);
+    assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|create_work|report_task/);
   }
-  assert.equal(existsSync(join(home, "harness", "events.jsonl")), false);
-  assert.equal(existsSync(join(home, "harness", "meta.json")), false);
 });
 
 /** @case Native Chief context survives separate invocations and restart; business consumption still requires its tool. */
@@ -736,19 +737,20 @@ test("Pi waits for in-flight steer admission before releasing a settled binding"
   assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)!.messages), /late-admission-marker/);
 });
 
-/** @case A Task uses scoped tools, native context and exact handling receipts across Host restart. */
-test("Task native session resumes by ID and uses read_input, read_conv, say and report_task", { timeout: 30_000 }, async t => {
+/** @case Task / Routine use scoped tools, native context and exact handling receipts across Host restart. */
+for (const kind of ["task", "routine"] as const)
+test(`${kind} native session resumes by ID with scoped reading, say and report tools`, { timeout: 30_000 }, async t => {
   let inputId = "", phase = 0;
   const fixture = await setup(t, (request, index) => {
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
-    for (const tool of ["read_task", "read_input", "read_conv", "say", "report_task"]) assert.ok(names.includes(tool));
+    for (const tool of [`read_${kind}`, "read_input", "read_conv", "say", `report_${kind}`]) assert.ok(names.includes(tool));
     assert.equal(names.includes("create_work"), false);
     switch (index % 6) {
-      case 0: return { tool: "read_task", args: {} };
+      case 0: return { tool: `read_${kind}`, args: {} };
       case 1: return { tool: "read_input", args: { inputId } };
       case 2: return { tool: "read_conv", args: {} };
       case 3: return { tool: "say", args: { text: `Verified phase ${phase}`, inputIds: [inputId] } };
-      case 4: return { tool: "report_task", args: { inputIds: [inputId], summary: `Verified ${phase}`, recent: "Evidence inspected", action: "done" } };
+      case 4: return { tool: `report_${kind}`, args: { inputIds: [inputId], summary: `Verified ${phase}`, recent: "Evidence inspected", action: "done" } };
       default: return { text: "Task progress recorded" };
     }
   });
@@ -756,64 +758,69 @@ test("Task native session resumes by ID and uses read_input, read_conv, say and 
   let aide: Aide;
   const open = () => new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
-      taskSession: aide.taskSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
+      [`${kind}Session`]: kind === "task" ? aide.taskSession(ports.scope, fixture.config.config) : aide.routineSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
   aide = open();
   try {
     await aide.conversations.ensure("me", fixtureAddress("me"));
-    const work = await aide.work("me").create({ kind: "task", title: "Inspect evidence", instruction: "unique-task-evidence", trigger: null });
-    const { TASK_TYPE } = await import("../plugins/personal/task/model.ts");
-    const get = () => aide.personal.store.resources.get(TASK_TYPE, work.id) as import("../plugins/personal/task/model.ts").TaskResource;
-    inputId = get().spec.initialInputId;
+    const work = await aide.work("me").create({ kind, title: "Inspect evidence", instruction: "unique-work-evidence", trigger: kind === "routine" ? { cron: null, timezone: "UTC", event: "sample" } : null });
+    const { workType } = await import("../plugins/personal/resources.ts");
+    const get = () => aide.personal.store.resources.get(workType(kind), work.id) as import("../plugins/personal/routine/model.ts").RoutineResource;
+    if (kind === "routine") await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "sample", text: "initial observation" });
+    inputId = aide.conversations.inputStore.query("handlePending", work.uid!)[0]!.metadata.name;
     await aide.start(); await aide.settled();
-    assert.equal(get().status.status, "done", JSON.stringify(get()));
+    assert.equal(get().status.status, kind === "task" ? "done" : "scheduled", JSON.stringify(get()));
     const agent = get().status.agent!;
     assert.deepEqual(Object.keys(agent).sort(), ["harness", "sessionId"]);
-    assert.equal(agent.harness, "task");
+    assert.equal(agent.harness, kind);
     assert.ok(agent.sessionId);
     assert.equal(aide.outputs().length, 1);
     const output = aide.outputStore.list()[0]!;
     assert.equal(output.spec.producer?.uid, work.uid);
+    assert.deepEqual(output.spec.inputIds, [inputId]);
+    if (kind === "routine") assert.equal(aide.conversations.inputStore.get(inputId)!.status.assess, undefined);
     await aide.close(); aide = open(); await aide.start();
     const before = fixture.requests.length;
     phase = 1;
     await aide.work("me").requestInput(work.id, { text: "followup-task-evidence" }, "followup");
     inputId = aide.conversations.inputStore.query("handlePending", work.uid!)[0]!.metadata.name;
     await aide.settled();
-    assert.equal(get().status.status, "done", JSON.stringify(get()));
+    assert.equal(get().status.status, kind === "task" ? "done" : "scheduled", JSON.stringify(get()));
     assert.deepEqual(get().status.agent, agent);
-    assert.match(JSON.stringify(fixture.requests[before]!.messages), /unique-task-evidence/);
+    assert.match(JSON.stringify(fixture.requests[before]!.messages), /unique-work-evidence/);
     assert.equal(aide.outputs().length, 2);
     assert.ok(aide.conversations.inputStore.list().every(i => i.status.handle?.[work.uid!]?.completedAt));
   } finally { await aide.close(); }
 });
 
-/** @case Later Task inputs use native followUp or steer within the admitted invocation, with separate durable receipts. */
+/** @case Later Work inputs use native followUp or steer within the admitted invocation, with separate durable receipts. */
+for (const kind of ["task", "routine"] as const)
 for (const attention of ["deferred", "immediate"] as const)
-test(`Task ${attention} Input joins the active native invocation`, { timeout: 20_000 }, async t => {
+test(`${kind} ${attention} Input joins the active native invocation`, { timeout: 20_000 }, async t => {
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   let firstId = "", laterId = "";
   const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting", pause }
-    : index === 1 ? { tool: "report_task", args: { inputIds: [firstId, laterId], action: "done", summary: "Both inspected", recent: "Verified both inputs" } }
+    : index === 1 ? { tool: `report_${kind}`, args: { inputIds: [firstId, laterId], action: "done", summary: "Both inspected", recent: "Verified both inputs" } }
     : { text: "Recorded" });
   const home = join(fixture.config.cwd, "task-active-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
-      taskSession: aide.taskSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
+      [`${kind}Session`]: kind === "task" ? aide.taskSession(ports.scope, fixture.config.config) : aide.routineSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
   t.after(async () => { release(); await aide.close(); });
-  const work = await aide.work("me").create({ kind: "task", title: "Inspect", instruction: "Initial evidence", trigger: null });
+  const work = await aide.work("me").create({ kind, title: "Inspect", instruction: "Initial evidence", trigger: kind === "routine" ? { cron: null, timezone: "UTC", event: "sample" } : null });
+  if (kind === "routine") await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "sample", text: "initial observation" });
   firstId = aide.conversations.inputStore.query("handlePending", work.uid!)[0]!.metadata.name;
   await aide.start();
   for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
   assert.equal(fixture.requests.length, 1);
   const resources = aide.runtime.plugins.resourceClient("personal");
-  const { TASK_TYPE } = await import("../plugins/personal/task/model.ts");
+  const { workType } = await import("../plugins/personal/resources.ts");
   const { INPUT_TYPE } = await import("../plugins/personal/input/model.ts");
   const { resourceRef } = await import("../plugins/personal/input/state.ts");
   laterId = "later";
   const c = aide.conversations.resource("me")!;
-  const task = aide.personal.store.resources.get(TASK_TYPE, work.id);
+  const task = aide.personal.store.resources.get(workType(kind), work.id);
   const at = new Date().toISOString();
-  // Seed the result of Chief assessment; the real Task controllers own subsequent admission and execution.
+  // Seed the result of Chief assessment; the real Work controllers own subsequent admission and execution.
   await resources.commit([
     { operation: "patchStatus", resource: task, patch: { idleSince: null, agentStoppedAt: null } },
     { operation: "create", type: INPUT_TYPE, name: laterId,
@@ -829,7 +836,7 @@ test(`Task ${attention} Input joins the active native invocation`, { timeout: 20
   const first = aide.conversations.inputStore.get(firstId)!.status.handle![work.uid!]!;
   assert.equal(later.executionId, first.executionId);
   release(); await aide.settled();
-  assert.equal(aide.work("me").read(work.id).status, "done");
+  assert.equal(aide.work("me").read(work.id).status, kind === "task" ? "done" : "scheduled");
   for (const id of [firstId, laterId]) assert.ok(aide.conversations.inputStore.get(id)!.status.handle![work.uid!]!.completedAt);
   assert.match(JSON.stringify(fixture.requests[1]!.messages), /later unique evidence/);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));

@@ -75,7 +75,7 @@ Source 和 trigger 提供重新判断的机会。已有委托决定可以继续�
 
 Chief 可以直接处理、回复或保持安静；需要独立跟进的事情，再交给 Task / Routine。
 
-Chief 是业务角色。Conversation 的接收 Controller 与 agent Controller 分别负责输入接纳和连续执行；Chief Harness 执行 `agents/chief/` 中的 Agent，使用通用 Pi 能力以及 Personal 工具。Task 使用独立的 [Task Agent](../harness/task.md)，与 Chief 一样复用 Pi；Routine 按根级 `defaultHarness` 选择执行实现，缺省为通用 Pi。Chief 的提示词、上下文和记忆优化方向见 [Chief Harness](../harness/chief.md)，插件机制见 [Plugin](README.md)。
+Chief 是业务角色。Conversation 的接收 Controller 与 agent Controller 分别负责输入接纳和连续执行；Chief Harness 执行 `agents/chief/` 中的 Agent，使用通用 Pi 能力以及 Personal 工具。Task / Routine 分别使用独立的 [Task Agent](../harness/task.md) / [Routine Agent](../harness/routine.md)，与 Chief 一样复用 Pi。Chief 的提示词、上下文和记忆优化方向见 [Chief Harness](../harness/chief.md)，插件机制见 [Plugin](README.md)。
 
 ## 输入与上下文
 
@@ -181,7 +181,7 @@ request 支持 context、update、pause、resume、answer；交接说明 note �
 
 `request_work({ workId, text, action?, changes? })` 用于 Chief 独立形成的新请求，创建 origin=chief 的新 Input，按工具调用身份去重，直接建立目标 handle。针对已收到 Input 的交接使用 assess_input，避免复制原始消息。
 
-Task / Routine Watch Input.handle 并按自身 UID 索引读取未完成记录。Reconcile 原子应用确定性请求并记录 appliedAt；暂停或拒绝请求可直接完成，其余材料必须由执行确认。Task 的后续输入可通过原生 followUp / steer 进入当前 invocation，并经 report_task 独立确认；Routine 在当前执行收尾后处理新材料。原始 Input 不复制到 spec。
+Task / Routine Watch Input.handle 并按自身 UID 索引读取未完成记录。Reconcile 原子应用确定性请求并记录 appliedAt；暂停或拒绝请求可直接完成，其余材料必须由执行确认。Task / Routine 的后续输入通过原生 followUp / steer 进入当前 invocation，分别经 report_task / report_routine 独立确认。原始 Input 不复制到 spec。
 
 暂停、结果未知的工作可吸收事实但不因此恢复。显式更新可为已完成目标提出新的要求；失败请求保存 rejected 原因而不阻塞后续输入。目标删除会把剩余 handle 标为 cancelled。
 
@@ -189,11 +189,11 @@ Task / Routine Watch Input.handle 并按自身 UID 索引读取未完成记录�
 
 Work 接住与自身目标相关的新事实、用户补充和决定，保留来源及有助于下一步判断的历史。每次 Reconcile 结合目标、已有进展和新事实，决定哪些动作现在可以执行、哪些需要等待、提醒或询问用户。Task 的收敛目标是整个有限目标完成；Routine 的收敛目标是当前轮次完成，一轮可以跨越多次执行和等待。Harness 返回或一次 Reconcile 结束，只表示本次处理结束，完成状态还需满足对应的业务条件。
 
-Task Controller 用持久会话持续办理初始与后续 Input，先保存 execution 与接纳回执，再唤醒 Task Agent。report_task 原子确认进展及明确列出的 Input；say 单独创建 Output。Routine Controller 观察 ready 或已到期的 scheduled，先保存 running，再请求 defaultHarness 执行并解析结果。两者跨执行等待后按 UID 重读资源，保留最新指令与暂停状态；版本冲突只重试提交，不重复执行外部工作。
+Task / Routine Controller 用持久会话持续办理 Input 或已到期的定时触发，先保存 execution 与接纳回执，再唤醒各自的专属 Agent。report_task / report_routine 原子确认进展及明确列出的 Input；say 单独创建 Output。两者跨执行等待后按 UID 重读资源，保留最新指令与暂停状态；版本冲突只重试提交，不重复执行外部工作。
 
-执行返回 ask 时，工作保存为 waiting 并结束本次调用，用户回答后再唤醒；返回 wait 时保存动态唤醒时间。Routine 完成本轮后继续等待下一次触发，Task 完成后仍可在回收前接收相关 Input。事件触发更新匹配的 Routine，由其 Controller 推进。
+工具报告 ask 时，工作保存为 waiting 并结束本次调用，用户回答后再唤醒；报告 wait 时保存动态唤醒时间。Routine 完成本轮后继续等待下一次触发，Task 完成后仍可在回收前接收相关 Input。事件触发更新匹配的 Routine，由其 Controller 推进。
 
-`task/` 与 `routine/` 各自保存 CRD 定义（`model.ts`）和 Reconcile（`reconcile.ts`）：Task 完成后进入 done，Routine 完成本轮后回到 scheduled，并按自己的触发规则计算下次时间。Task 复用 `loop.ts` 的持续执行、接纳和恢复机制；Routine 的有界执行与结果校验保留在 `execution.ts`。领域回执和目标状态均由 Personal 拥有。
+`task/` 与 `routine/` 各自保存 CRD 定义（`model.ts`）和 Reconcile（`reconcile.ts`）：Task 完成后进入 done，Routine 完成本轮后回到 scheduled，并按自己的触发规则计算下次时间。两者复用 `loop.ts` 的持续执行、接纳和恢复机制，以及 `work-report.ts` 的原子进展回执。领域回执和目标状态均由 Personal 拥有。
 
 资源类型决定身份；Task 没有周期触发配置，Routine 必须有 cron 或事件触发。Work 工具与网页聚合这两类资源，对外仍返回 task / routine 分类。Chief 的会话处理观察 Personal 定义的 Conversation 资源。
 
@@ -206,6 +206,12 @@ Task.status.agent 保存 `{ harness: "task", sessionId }`；原生持久化由 H
 执行结束且没有下一条可执行 Input 时开始 idleSince 计时；默认 5 分钟释放 agent 句柄，再从 agentStoppedAt 起保留 Task 24 小时。新 Input 分派原子清除计时并恢复同一会话。未处理 Input、明确等待或待核对状态阻止资源回收。两段时间由 plugins.personal.task 配置。
 
 回收通过带 UID / resourceVersion 前置条件的 delete 请求设置 deletionTimestamp。Chief 不列出或分派 deleting Task；分派与回收互相校验版本，进入删除流程后不可恢复。删除 Reconcile 完成清理后 finalize Task，独立 Input、Output 和 SDK 历史各自管理保留。完整机制见 [Task Agent](../harness/task.md)。
+
+## Routine 会话与静默释放
+
+Routine.status.agent 保存 `{ harness: "routine", sessionId }`，由原生 SDK 初始化、持久化和恢复。cron 到期或事件 / Chief 分派的 Input 唤醒 Routine Agent。done 只完成本轮并回到 scheduled；cron 重新计算下次触发时间，纯事件职责等待新事件。ask / wait 可以让同一轮跨越多次执行。
+
+执行结束、没有下一条可执行输入后开始静默计时；默认 5 分钟释放 agent 句柄。Routine 的职责资源继续保留，不设置静默回收期限。新触发清除计时，复用同一原生会话；显式删除才进入 deletionTimestamp / finalize。详见 [Routine Agent](../harness/routine.md)。
 
 ## 完成依据与交付
 
@@ -229,7 +235,7 @@ Personal 的 Controller 负责解释执行结果并推进工作状态，Core 保
 
 WorkService 绑定宿主确定的 conversationId，模型不能传入其它会话范围。读操作不唤醒执行，输入追加通知对应 Reconcile，删除需要最近读取的 revision。输入追加不直接改变业务状态。删除前归档消息和输入回执，已运行回调不能重建被删资源。
 
-Task 通过 report_task 明确确认进展与 Input，finalText 不代替业务回执；缺少确认或执行中断进入 uncertain。Routine 校验 Harness 的 finalText。执行失败或中断标为 uncertain，执行已结束但结果无法解析或校验则标为 invalid_result；两者均等待用户核对后明确继续，不自动重放。业务等待用户则保存为 waiting，收到回答后由 Reconcile 继续，能够跨服务重启恢复。
+Task / Routine 分别通过 report_task / report_routine 明确确认进展与 Input，finalText 不代替业务回执。执行中断或已接纳 Input 未确认时进入 uncertain；没有 Input 的定时执行也必须报告本轮结果。两者均等待核对后明确继续，不自动重放。业务等待用户则保存为 waiting，收到回答后由 Reconcile 继续，能够跨服务重启恢复。
 
 Chief 问题作为 Output 持久保存，用户可在重启后发送新 Input 继续；没有需要恢复的业务问答调用栈。Task / Routine 的 waiting 保留领域阻塞状态，由 Chief 根据新输入决定如何提交 assess_input。上下文结合近期消息、工作记录及连接器查询，工作状态以 Task / Routine 为准。
 
@@ -250,8 +256,8 @@ Conversation、Task、Routine、Person 共用 status.summary 和 status.recent �
 
 Personal 的共享上下文 Schema 在每次持久写入时执行预算：summary 最多 16000 字符（Conversation 可配置更低预算），recent 最多 40 条且正文总计最多 16000 字符。超出窗口时保留较新记录，边界条目标记省略；Host 负责执行 Schema 和整体资源容量，不替业务总结。需要长期保留的认识应由模型合并进 summary、结构化状态或长期记忆，不要求每条旧记录都变成 summary。
 
-Task 与 Route / Chief 通过保存的 sessionId 延续原生会话；Task 按需用 read_task、read_conv、read_input 读取工作与材料。Routine 的执行材料显式选择目标、触发条件、当前状态、summary、recent 和本次 Input，以有界材料调用 Harness prompt。Routine 每次接收最多 20 条、序列化材料合计最多 64000 字符的待处理 Input，保留完整主消息与 Chief note；可选 observation 预览最多 8000 字符，截断时显式标记。超过本轮预算的输入留待后续处理；单条无法容纳的输入报错并保留待处理状态，不静默完成。
+Task / Routine 与 Route / Chief 通过保存的 sessionId 延续原生会话。Work Agent 按需用 read_task / read_routine、read_conv、read_input 读取职责与材料；read_input 每页列出 20 条待处理记录，单条材料每页 8000 字符，并返回 nextOffset。材料分页不代表完成；只有明确的 report 才能确认输入。
 
-Work 的请求应用和上下文处理分开记录：Input.handle.appliedAt 表示确定性请求已应用，避免恢复时重复修改状态；暂停或拒绝请求可直接完成。需要执行的材料仍保持待处理，进入执行时将底座 executionId 写到所选 Input。Task 通过 report_task 将累计 summary、recent 与指定 Input 的完成痕迹原子提交，say 独立创建 Output；Routine 将合法执行结果、累计认识、所选 Input 回执和 Output 原子提交，执行期间新到的 Input 留待后续处理。失败或结果无效时保留未完成输入与错误，Work 进入待核对状态，不自动重放；显式恢复后才继续。暂停状态不会被普通观察自动恢复；Task 的 done 可承接新的相关 Input。
+Work 的请求应用和上下文处理分开记录：Input.handle.appliedAt 表示确定性请求已应用，避免恢复时重复修改状态；暂停或拒绝请求可直接完成。需要执行的材料仍保持待处理，进入执行时将底座 executionId 写到所选 Input。Task / Routine 通过 report_task / report_routine 将累计 summary、recent 与指定 Input 的完成痕迹原子提交，say 独立创建 Output。执行期间新到的 Input 独立接纳、独立确认；未报告的输入保留待处理。中断或未确认时保留输入与错误，Work 进入待核对状态，不自动重放；显式恢复后才继续。暂停状态不会被普通观察自动恢复；Task 的 done 可承接新的相关 Input。
 
 Routine 事件也形成 Input，依据订阅建立 handle；不再维护 Work 内部的事件历史或去重数组。入站去重复用 InputStore 的独立有界回执窗口，Input 被回收后，窗口内重投不会重建处理。Task / Routine 的目标和调度生命周期保持独立。

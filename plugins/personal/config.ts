@@ -1,3 +1,4 @@
+import { RoutinePolicySchema } from "./routine/config.ts";
 import { TaskPolicySchema } from "./task/config.ts";
 import { RoutePolicySchema } from "./route/config.ts";
 import { ConversationPolicySchema } from "./conversation/config.ts";
@@ -15,6 +16,7 @@ import { WatchSchema } from "./source/requirement/config.ts";
 export const PersonalConfigSchema = z.object({
   conversation: ConversationPolicySchema.optional(),
   task: TaskPolicySchema.optional(),
+  routine: RoutinePolicySchema.optional(),
   route: RoutePolicySchema.optional(),
   sources: z.object({
     environments: EnvironmentWatchSchema.optional(),
