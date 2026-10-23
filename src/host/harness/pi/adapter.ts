@@ -2,14 +2,14 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type {
-  HarnessAdapter, HarnessEventSink, HarnessSessionBindingSink, HarnessSessionHandle,
+  Harness, HarnessEventSink, SessionReferenceSink, HarnessSessionHandle,
   NativeEventSink, OpenOptions, PromptInput, SendTurnReceipt
 } from "../adapter.ts";
 import { unsupportedPromptBlocks } from "../adapter.ts";
 import type { LogSink } from "../../logging.ts";
 
 /** The composition root binds tools; the adapter only speaks Pi's session API. */
-export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner"> & Partial<Pick<AgentSession, "steer" | "clearQueue">>;
+export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner"> & Partial<Pick<AgentSession, "steer" | "followUp" | "clearQueue">>;
 export type PiSessionFactory = (options: { cwd: string; sessionFile?: string }) => Promise<PiSession>;
 interface Turn {
   steering: Map<string, string>;
@@ -22,14 +22,14 @@ interface Turn {
 }
 interface Session {
   native: PiSession; sink: HarnessEventSink; unsubscribe: () => void; active?: Turn;
-  binding: HarnessSessionBindingSink; materialized: boolean; contextFailure?: string;
+  binding: SessionReferenceSink; materialized: boolean; contextFailure?: string;
 }
 
 /**
  * @spec Every accepted turn terminates once, after Pi settles or rejects. Tool-loop messages never become finalText.
  * @link docs/harness/pi.md
  */
-export class PiAdapter implements HarnessAdapter {
+export class PiAdapter implements Harness {
   readonly harness: "pi" | "chief" | "route";
   readonly capabilities = { prompt: {} };
   readonly steering = { deliveryTracking: "explicit", cancelOwnership: "survives" } as const;
@@ -38,9 +38,31 @@ export class PiAdapter implements HarnessAdapter {
     this.harness = options.harness ?? "pi";
   }
 
-  async open(options: OpenOptions, sink: HarnessEventSink, binding: HarnessSessionBindingSink): Promise<HarnessSessionHandle> {
+
+  create(options: OpenOptions, sink: HarnessEventSink, reference: SessionReferenceSink): Promise<HarnessSessionHandle> {
+    if (options.sessionId || options.resumeState) throw new Error("Use resume to restore an existing session");
+    return this.open(options, sink, reference);
+  }
+
+  resume(options: OpenOptions & { sessionId: string }, sink: HarnessEventSink, reference: SessionReferenceSink): Promise<HarnessSessionHandle> {
+    return this.open(options, sink, reference);
+  }
+
+  prompt(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    return this.sendTurn(ref, input);
+  }
+
+  steer(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    return this.sendTurn(ref, input, "steer");
+  }
+
+  followUp(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    return this.sendTurn(ref, input, "followUp");
+  }
+  private async open(options: OpenOptions, sink: HarnessEventSink, binding: SessionReferenceSink): Promise<HarnessSessionHandle> {
     if (options.env && Object.keys(options.env).length) throw new Error("Embedded Pi does not support per-session environment overrides");
     let sessionFile: string | undefined;
+    if (options.sessionId && !options.resumeState) throw new Error("Pi session recovery requires its native session file locator");
     if (options.resumeState) {
       const data = options.resumeState.data as { sessionFile?: unknown; empty?: boolean } | null;
       if (options.resumeState.version !== 1 || typeof data?.sessionFile !== "string" || !data.sessionFile) throw new Error("Unsupported Pi resume state");
@@ -52,6 +74,7 @@ export class PiAdapter implements HarnessAdapter {
     const session: Session = { native, sink, binding, materialized: false, unsubscribe: () => {} };
     try {
       if (!native.sessionFile) throw new Error("PiAdapter requires a persistent native session");
+      if (options.sessionId && sessionFile && native.sessionId !== options.sessionId) throw new Error("Pi session ID does not match its recovery locator");
       session.unsubscribe = native.subscribe((event) => this.observe(session, event));
       const startupErrors: string[] = [];
       let starting = true;
@@ -75,29 +98,30 @@ export class PiAdapter implements HarnessAdapter {
     return { harness: this.harness, handleId, resumed: !!sessionFile };
   }
 
-  async sendTurn(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+  private async sendTurn(ref: HarnessSessionHandle, input: PromptInput, operation: "prompt" | "steer" | "followUp" = "prompt"): Promise<SendTurnReceipt> {
     const session = this.require(ref);
     if (session.contextFailure) throw new Error(session.contextFailure);
-    const blocks = [...(input.syncBlocks ?? []), ...input.blocks];
+    const blocks = input.blocks;
     const unsupported = unsupportedPromptBlocks(blocks, this.capabilities);
     if (unsupported.length) throw new Error(`Pi does not support prompt blocks: ${unsupported.join(", ")}`);
     const text = blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
     if (session.active) {
       const turn = session.active;
-      if (turn.id !== input.invocationId || turn.cancelled || turn.settled || turn.closing || !session.native.steer || !session.native.clearQueue) {
-        return { accepted: false, effective: "rejected", reason: "Pi cannot steer this invocation" };
+      if (operation === "prompt" || turn.id !== input.invocationId || turn.cancelled || turn.settled || turn.closing || !session.native[operation] || !session.native.clearQueue) {
+        return { accepted: false, effective: "rejected", reason: "Pi cannot accept this operation in the current invocation" };
       }
       const marker = `[aide-input:${input.messageId}]`;
       turn.steering.set(input.messageId, marker);
-      const admission = session.native.steer(`${marker}\n${text}`);
+      const admission = session.native[operation]!(`${marker}\n${text}`);
       turn.admissions.add(admission);
       try {
         const receipt = await admission;
         if (receipt !== "queued") { turn.steering.delete(input.messageId); return { accepted: false, effective: "rejected", reason: "Pi input handler did not queue the steer" }; }
-        return { accepted: true, effective: "steer" };
+        return { accepted: true, effective: operation };
       } catch (error) { turn.steering.delete(input.messageId); throw error; }
       finally { turn.admissions.delete(admission); }
     }
+    if (operation !== "prompt") return { accepted: false, effective: "rejected", reason: "not_running" };
     const turn: Turn = { id: input.invocationId, cancelled: false, steering: new Map(), admissions: new Set() };
     session.active = turn;
     this.log("Pi turn accepted", turn.id);
@@ -114,7 +138,7 @@ export class PiAdapter implements HarnessAdapter {
     return { accepted: true, effective: "new_turn" };
   }
 
-  async cancel(ref: HarnessSessionHandle): Promise<void> {
+  async abort(ref: HarnessSessionHandle): Promise<void> {
     const session = this.require(ref);
     const turn = session.active;
     if (!turn) return;
@@ -126,7 +150,7 @@ export class PiAdapter implements HarnessAdapter {
   async close(ref: HarnessSessionHandle): Promise<void> {
     const session = this.sessions.get(ref.handleId);
     if (!session) return;
-    try { await this.cancel(ref); }
+    try { await this.abort(ref); }
     finally {
       // @spec Extensions finish persistence and release resources before their native context is disposed.
       try { await session.native.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }); }

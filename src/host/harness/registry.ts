@@ -4,7 +4,7 @@
 
 import type { PiConfig } from "./pi/config.ts";
 import { createPiAgent } from "../../../agents/pi/agent.ts";
-import type { HarnessAdapter, OpenApproval, NativeEventSink } from "./adapter.ts";
+import type { Harness, OpenApproval, NativeEventSink } from "./adapter.ts";
 import { ClaudeAdapter, probeClaudeTarget } from "./claude/adapter.ts";
 import { resolveClaudeTargetConfig } from "./claude/config.ts";
 import { claudeSessionInspector } from "./claude/native-session.ts";
@@ -50,7 +50,7 @@ export interface HarnessDefinition<Id extends string = string> extends HarnessId
   shortName: string;
   /** 固定认色：用户会形成"橙=claude"的肌肉记忆，颜色不随池子调整漂移 */
   color: string;
-  create(options: HarnessAdapterOptions): HarnessAdapter;
+  create(options: HarnessAdapterOptions): Harness;
   probe?: (options: HarnessProbeOptions) => Promise<HarnessTargetProbeResult>;
   /** Aide 外部 HarnessSession 的只读历史观察；不得启动或修改会话。 */
   sessionInspector?: HarnessSessionInspector;
@@ -177,7 +177,7 @@ export function harnessShortName(idOrSessionKey: string): string {
 export function createHarnessAdapter(
   target: HarnessTarget,
   options: Omit<HarnessAdapterOptions, "target">,
-): HarnessAdapter {
+): Harness {
   const definition = HARNESS_REGISTRY.find((candidate) => candidate.id === target.harness);
   if (!definition) {
     throw new Error(`HarnessTarget ${target.id} references an unregistered Harness: ${target.harness}`);

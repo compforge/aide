@@ -218,7 +218,7 @@ interface StructuredHunk {
   lines: string[];
 }
 
-/** patch 收录的 hunk 行上限：大文件 Write 的全量内容会撑爆 events.jsonl 事件行，展示层也只看头部 */
+/** patch 收录的 hunk 行上限：大文件 Write 的全量内容会撑大实时执行投影，展示层也只看头部 */
 const MAX_PATCH_LINES = 400;
 
 /**

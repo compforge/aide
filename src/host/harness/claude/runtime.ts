@@ -19,7 +19,7 @@ import type { LogSink } from "../../logging.ts";
 import type {
   EffortOption,
   HarnessEventSink,
-  HarnessSessionBindingSink,
+  SessionReferenceSink,
   ModelOption,
 } from "../adapter.ts";
 import type { HarnessTargetProbeResult } from "../target.ts";
@@ -56,7 +56,7 @@ export interface ClaudeRuntime extends ClaudeDurableMappingState {
   /** open 时绑定的事件出口；session 生命周期内所有事件（含跨 turn）都走它 */
   sink: HarnessEventSink;
   /** 稳定 HarnessSession 身份一旦可知，立即发布给宿主持久化。 */
-  bindingSink?: HarnessSessionBindingSink;
+  bindingSink?: SessionReferenceSink;
   /** SDK 的 session_id，首个 turn 的 init 消息里拿到；resume 靠它 */
   claudeSessionId?: string;
   publishedSessionId?: string;

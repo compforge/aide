@@ -112,10 +112,10 @@ export class Aide {
       instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ route: parsePersonalConfig(config?.plugins.personal).route, conversation: parsePersonalConfig(config?.plugins.personal).conversation, watches: this.watches,
         environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
       harness: { targets: [{ ...this.defaultTarget }, { id: ROUTE_TARGET, harness: "route" }],
-        defaultTargetId: this.defaultTarget.id, historyBudgetChars: 0, createAdapter: options.createAdapter },
+        defaultTargetId: this.defaultTarget.id, createAdapter: options.createAdapter },
       plugins: { connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.conversations.changed(change); this.notify(); },
-        actions: { "personal/steer_input": (context, input) => this.personal.steerInput(context, input), "personal/say": (context, raw) => {
+        actions: { "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
           const input = SayInputSchema.parse(raw);
           const text = input.text;
           const association = personalExecution(context);

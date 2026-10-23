@@ -19,13 +19,44 @@ Route 使用专用分类提示词，只有 route_input、目录读取和共享�
 
 Target 的 id 与 harness 字段分开：前者定位具体配置，后者选择实现。进程内会话句柄只用于路由调用；持久恢复依赖 Adapter 发布的原生身份与版本化恢复状态，宿主不能从临时句柄猜测稳定身份。
 
-原生 Session 文件由 Harness 使用自己的默认目录保存，Aide 不托管或直接改写这些文件。HarnessStore 保存调用事实、状态投影和原生绑定，内部通过 EventLedger 追加事件；这些记录不能由某一家原生历史替代。宿主根据资源 UID、Controller 与 Target 保存原生 identity 及 Adapter 的 `resumeState`；恢复时原样交回 Adapter，进程期 Handle 不作为恢复身份。Target 是可发现的配置，不是 Resource。ExecutionService 以 HarnessInvocation 管理执行生命周期，提供方原生标识只在 Adapter 内映射；仅支持当前存储格式，边界见 [Kernel](../kernel.md#执行后端的边界)。
+原生 Session 文件由 Harness 自己保存，Aide 不托管或改写。需要持续 Agent 的资源通过 `status.agent` 保存实际执行绑定：
+
+```ts
+interface AgentStatus {
+  harness: string;
+  targetId: string;
+  session?: {
+    id: string;
+    resume?: { version: number; data: unknown };
+  };
+}
+```
+
+`harness` 选择实现，`targetId` 标识实际配置；`session.id` 是原生身份，不能使用进程期 handle 代替。`resume` 只保存 ID 以外必要的定位信息，例如 Pi 的 sessionFile；数据由 Adapter 生成并解释，Aide 原样保存和回传。工作目录来自执行配置，Harness 自行校验恢复约束。
+
+插件调用 `harness({ agentKey: "agent", ... })` 选择所属资源的 status 字段，资源 Schema 声明对应 AgentStatus。Host 通过 UID 和版本检查保存绑定，避免并发覆盖业务状态或挂到删除后重建的资源。已知的绑定在发送 prompt 前写入；延迟公布的绑定在调用返回前等待写入完成。写入失败不能报告调用成功。
+
+Aide 重启后读取资源引用，让 Harness 恢复原生会话，再提交新输入。原生历史、压缩与 checkpoint 由 Harness 管理；恢复失败明确报告。Aide 没有 HarnessStore 或执行日志重放，不构造历史补偿提示词。一次性 Work 调用可使用 freshContext，直接提供有界业务材料而不保存持续会话引用。
 
 ## 执行契约
 
-核心接口保持小而明确：open 建立或恢复会话并绑定事件出口，sendTurn 提交输入，cancel 请求中断，close 释放会话。媒体、同轮 steer、压缩和交互等能力通过可选声明扩展，调用方不能假设所有 Harness 都支持。
+Reconcile 经 `harness` verb 调用一个 `Harness` interface，不经过 Binding 或另一个 Agent interface。具体 Adapter 是 Harness 的实现，拥有原生 session、连接和进程。宿主只保留调用关联、返回的运行句柄和必要的资源恢复引用。
 
-请求由宿主分配身份、排队并持久化，再交给 Adapter。sendTurn 的回执只表示是否接受投递责任；执行进展与结束通过事件流报告。未支持的输入应在接受前明确拒绝；接受后的失败必须在事件流收口，不能让宿主一直等待。
+下表描述 Verb 层的操作与返回语义。Harness 的输入方法先返回接收回执，再通过事件报告执行；prompt 的 Verb 封装等待最终结果，followUp / steer 则只等待接收结果。
+
+| 操作 | 契约 |
+| --- | --- |
+| create | 建立新会话，订阅事件与恢复引用更新；不自动提交输入 |
+| resume | 按明确的原生 ID 和定位信息恢复；不自动执行或重放 |
+| prompt | 空闲时提交新输入；返回完成的 invocation 与结果 |
+| followUp | 运行中追加普通输入，交给原生队列，在当前工作结束后处理 |
+| steer | 在原生安全边界向正在运行的 invocation 追加紧急输入 |
+| abort | 请求取消当前执行，最终结果由事件确认 |
+| close | 释放运行资源，保留原生持久会话 |
+
+创建与恢复时传入事件出口，相当于订阅原生执行。`followUp`、`steer` 由可选方法声明能力；不支持时明确拒绝，不在 Host 模拟提供方队列。Pi 实现原生 followUp 和 steer；resume 后通过 prompt 发起执行。
+
+首次执行由宿主分配 invocation 身份并限制并发；待处理业务事实由资源保存。运行中的追加直接调用 Harness 的原生能力，不再等待一个新的宿主 invocation。接收回执不代表业务完成；执行进展与结束通过事件流报告。未支持的输入应在接受前明确拒绝；接受后的失败必须在事件流收口。追加操作只能指向调用资源拥有的 invocation。
 
 每次被接受的 HarnessInvocation 都必须报告终态。取消请求发出后仍可能收到在途输出，最终结果以执行事件为准。原生审批中的“取消执行”只中断该审批关联的执行，不能影响共享 Target 的其它资源；拒绝单次权限则允许 Harness 继续处理。宿主用 invocationId 关联事件，提供方的原生标识留在 Adapter 映射与诊断中。
 
@@ -37,7 +68,7 @@ Harness 执行工具，插件定义工具背后的领域规则。通用 Pi 不�
 
 原生会话恢复解决同一执行上下文如何继续；长期记忆解决哪些事实应被保留、修订和召回。Aide 通过具体 Harness 组合开源产品的通用记忆能力。Chief 通过 profile_person 维护共享 Person CRD，并内置 pi-hermes-memory 提供其它通用记忆和检索；Personal 管理身份与资源一致性，Chief 负责理解与修订。存储与生命周期见 [Chief](chief.md#上下文与记忆)。通用 Harness 契约不增加记忆接口。
 
-宿主拥有调度、期限、原生权限 Approval 与 Ledger，Adapter 拥有原生协议和会话清理，插件拥有业务恢复决策。可能已经发生外部副作用的中断不能仅凭通信重试自动重放。
+宿主拥有执行准入、期限、原生权限 Approval 与有界实时投影，Harness 拥有原生协议和运行资源清理，插件拥有业务调度与恢复决策。已取消的 invocation 与失效的运行句柄分别处理：取消不能跳过关闭；引用保存失败后释放句柄，下一次根据会话引用重新打开。原生会话无法恢复时保留引用并报告错误。可能已经发生外部副作用的中断不能仅凭通信重试自动重放。
 
 ## 实现与验证
 

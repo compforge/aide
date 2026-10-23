@@ -1,6 +1,6 @@
 import type { ConnectorRequest } from "./connectors.ts";
 import type { ExecutionAssociation } from "@compforge/aide-plugin";
-import type { HarnessInvocationInput, HarnessResult, ResourceNamespace } from "@compforge/aide-plugin";
+import type { HarnessVerbInput, HarnessResult, ResourceNamespace } from "@compforge/aide-plugin";
 
 export interface ExecutionScope extends ExecutionAssociation {
   readonly controllerName?: string;
@@ -12,15 +12,15 @@ export interface ExecutionScope extends ExecutionAssociation {
 }
 
 /**
- * Controller action outlet. Plugin actions, Harness and connector calls
- * retain their execution deadlines. Other Core callers need not use Verb.
+ * Unified non-CRD operation outlet for Plugin / Operator. ResourceClient owns CRD access.
+ * Harness and connector calls retain their execution deadlines and call correlation.
  */
 export type VerbRequest =
   | { readonly verb: "action"; readonly name: string; readonly input: unknown }
   | { readonly verb: "connector"; readonly input: { readonly request: ConnectorRequest; readonly timeoutMs: number } }
   | {
       readonly verb: "harness";
-      readonly input: HarnessInvocationInput;
+      readonly input: HarnessVerbInput;
     };
 
 export type VerbResponse =

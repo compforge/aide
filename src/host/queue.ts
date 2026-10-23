@@ -54,9 +54,8 @@ type BeforeInputTransition = (
 ) => number;
 
 /**
- * One resource context's in-memory execution index for Harness Inputs. Durable queue truth
- * lives in `harness_input.updated` Events; every mutation calls
- * `beforeTransition` first.
+ * One resource context's live execution queue. Business resources own pending work;
+ * every mutation publishes a live update through beforeTransition.
  */
 export class InvocationQueue<TBinding extends QueueBinding> {
   private readonly queue: QueueItem[] = [];

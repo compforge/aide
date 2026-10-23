@@ -1,3 +1,4 @@
+export type { AgentStatus } from "./harness.ts";
 export type { Address, ChannelAddress, RequirementAddress } from "./address.ts";
 
 
@@ -33,6 +34,10 @@ export type {
 export type {
   CompletedHarnessValue,
   HarnessInvocationInput,
+  HarnessVerbInput,
+  HarnessOperationInput,
+  HarnessOperationValue,
+  HarnessOperationResult,
   HarnessResult,
   HarnessValue,
   PluginVerbs,

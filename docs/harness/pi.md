@@ -6,7 +6,7 @@ Pi 是通用 Harness，使用 `agents/pi/` 中的 Pi Agent 和 `PiAdapter` 提�
 
 通用 Agent 创建 Pi SDK 会话，加载工作目录上下文与 Skills，启用文件和 CLI 原生工具。调用方可以注入提示词、工具与会话范围。默认使用 Pi 的提示词，不承担 Chief 的工作识别与主动发现策略。
 
-PiAdapter 处理 open、sendTurn、cancel、close、事件归一和恢复句柄，不解释工具背后的业务含义。每个原生会话一次承接一个 HarnessInvocation，忙时由宿主排队；支持文本输入、取消、恢复与同 invocation 原生 steer；原生 user message 事件确认输入已应用，结束时清理未应用队列并报告失败。不声明媒体能力。
+PiAdapter 实现 Harness 的 create、resume、prompt、followUp、steer、abort、close，负责事件归一和恢复引用，不解释工具背后的业务含义。一个 HarnessInvocation 可通过 Pi 原生 followUp 接收后续普通输入，通过 steer 接收紧急输入；宿主不复制 Pi 的追加队列。原生 user message 事件确认输入已应用，结束时清理未应用队列并报告失败。不声明媒体能力。
 
 ## 装配与模型配置
 

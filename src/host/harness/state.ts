@@ -1,5 +1,4 @@
-// Harness execution projection reconstructed from persisted events.
-// upsert 语义保证重放幂等。见 docs/workflow.md“Adapter 归一”。
+// Live Harness execution projection. Native histories are never replayed into it.
 
 import type {
   AnyEventEnvelope,
@@ -28,7 +27,6 @@ import type {
   UsageUpdate,
 } from "../event/index.ts";
 import {
-  normalizeHarnessInputStatus,
   type HarnessInputSource,
   type HarnessInputStatus,
 } from "../harness/input.ts";
@@ -63,6 +61,7 @@ export interface ToolCallState {
 }
 
 export interface PlanState extends PlanUpdate {
+  invocationId?: string;
   /** 产生该计划的 harness；pinned plan 只跟随当前输入目标。 */
   harness?: string;
   /** 产生该计划的具体配置目标。 */
@@ -87,7 +86,7 @@ export interface HarnessTaskState extends HarnessTaskUpdate {
   harnessSessionId?: string;
   contextId?: string;
   invocationId?: string;
-  /** First observed lifecycle edge; projection-only elapsed time survives replay. */
+  /** First observed lifecycle edge; used only to render live elapsed time. */
   startedAt?: number;
 }
 
@@ -182,7 +181,7 @@ export interface HarnessInputState {
   contextId: string;
   harness?: string;
   status: HarnessInputStatus;
-  delivery: "prompt" | "steer";
+  delivery: "prompt" | "steer" | "followUp";
   deliveryOutcome?: "applied" | "failed" | "uncertain";
   blocks: PromptBlock[];
   source: HarnessInputSource;
@@ -221,7 +220,7 @@ export interface HarnessState {
    * 正交：这是“已被 reviewer 决策”的留痕，不是待决，不派生 requires_action。每条回执是
    * timeline 的一等公民（首见即入 timeline），无 target 也留痕、同一操作多次决策各自成条。
    */
-  approvalReviews: Map<string, ApprovalReviewUpdate>;
+  approvalReviews: Map<string, ApprovalReviewUpdate & { invocationId?: string }>;
   /** Compact cards for non-user Turn initiation; raw events retain their resource context. */
   harnessInvocations: Map<string, HarnessInvocationState>;
   usage: UsageTotal;
@@ -230,17 +229,17 @@ export interface HarnessState {
   /** Context × Target 原生 binding 状态。 */
   perContextTarget: Map<string, ContextTargetState>;
   /** 最近一次结构化错误；willRetry 时 runState 仍应为 running（由事件源保证） */
-  lastError?: ErrorUpdate & { seq: number; contextId?: string };
+  lastError?: ErrorUpdate & { seq: number; contextId?: string; invocationId?: string };
   /**
    * 错误历史（append-only），同时进 timeline（id 为 `err_<seq>`）：
    * 启动失败、admission 错误、quota 耗尽等属于会话流的一部分，要按发生位置内联展示。
    */
-  errors: Map<string, ErrorUpdate & { seq: number; contextId?: string }>;
+  errors: Map<string, ErrorUpdate & { seq: number; contextId?: string; invocationId?: string }>;
   /**
    * 提示历史（append-only），同时进 timeline（id 为 `n_<seq>`）：打断标记、
    * harness warning 等属于会话流的一部分，要按发生位置内联展示。
    */
-  notices: Array<Notice & { seq: number; contextId?: string }>;
+  notices: Array<Notice & { seq: number; contextId?: string; invocationId?: string }>;
   invocationSummaries: InvocationSummaryState[];
   lastSeq: number;
 }
@@ -430,7 +429,7 @@ function applyMessageChunk(
 ): void {
   const p = ev.payload;
   const input = role === "user" ? state.harnessInputs.get(p.messageId) : undefined;
-  const pendingSteer = input?.delivery === "steer" && input.deliveryOutcome !== "applied";
+  const pendingSteer = input && input.delivery !== "prompt" && input.deliveryOutcome !== "applied";
   const msg = getOrCreateMessage(
     state,
     p.messageId,
@@ -463,7 +462,7 @@ function applyHarnessInputUpdate(
   ev: EventEnvelope<"harness_input.updated">,
 ): void {
   const p = ev.payload;
-  const status = normalizeHarnessInputStatus(p.status);
+  const status = p.status;
   // Queue admission creates the same addressable Input, without granting it a
   // Transcript position or an executed Turn. Later receipts only add facts.
   const known = getMessage(state, p.messageId);
@@ -637,6 +636,7 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       state.plans.set(p.planId, {
         planId: p.planId,
         entries: [...p.entries],
+        invocationId: ev.invocationId ?? existing?.invocationId,
         harness,
         harnessTargetId: eventTargetId(ev) ?? existing?.harnessTargetId,
         contextId: ev.contextId ?? existing?.contextId,
@@ -681,8 +681,7 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       if (!existing && !p.skipTranscript) {
         state.timeline.push({ type: "task", id: taskKey });
       }
-      // optional 字段只做 defined patch；否则 live 对象里的 undefined 会抹掉旧值，
-      // JSONL replay 时该字段又因 JSON.stringify 丢失，造成 live/resume 投影不一致。
+      // Only defined fields update a task; partial native events must preserve existing evidence.
       const next = { ...existing } as HarnessTaskState;
       for (const [key, value] of Object.entries(p)) {
         if (value !== undefined) {
@@ -753,7 +752,7 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       if (!state.approvalReviews.has(p.reviewId)) {
         state.timeline.push({ type: "approval_review", id: p.reviewId });
       }
-      state.approvalReviews.set(p.reviewId, p);
+      state.approvalReviews.set(p.reviewId, { ...p, invocationId: ev.invocationId });
       break;
     }
     case "usage_update":
@@ -847,6 +846,7 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       const errorEntry = {
         ...ev.payload,
         seq: ev.seq,
+        invocationId: ev.invocationId,
         ...(ev.contextId ? { contextId: ev.contextId } : {}),
       };
       state.lastError = errorEntry;
@@ -868,6 +868,7 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       state.notices.push({
         ...ev.payload,
         seq: ev.seq,
+        invocationId: ev.invocationId,
         ...(ev.contextId ? { contextId: ev.contextId } : {}),
       });
       state.timeline.push({ type: "notice", id: `n_${ev.seq}` });
@@ -892,7 +893,7 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       break;
     }
     default: {
-      // 未知事件保留在 jsonl 里但不参与 reduce（forward-compat：不因未知 kind 崩溃）
+      // Events without a presentation projection do not change live state.
       break;
     }
   }

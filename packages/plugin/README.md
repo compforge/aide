@@ -115,13 +115,23 @@ Controllers use `execution.verbs.connectors({ timeoutMs })` for connector action
 
 `resources.commit(writes)` atomically creates/replaces/patches resources in one plugin scope. Validation, quota or version failures roll everything back; notifications follow commit. External side effects cannot join this transaction.
 
-`harness` creates a HarnessInvocation directly. Business ask, confirm, draft and Interaction contracts are removed. Native tool permissions and Hook trust remain explicit Host Approvals; requesting execution does not grant these permissions.
+Verb is the common outlet for non-CRD operations; ResourceClient owns CRD access. Each call has correlated diagnostics (call ID, execution ID, resource UID, operation, duration and outcome). These records do not store or recover native agent history.
 
-Application Harness context is derived from the main resource UID and Controller name. An explicit harnessTargetId selects a configured Target; otherwise the application default is used. `snapshot.harnessTargets` provides configuration discovery without Resource projections. `freshContext` replaces native context with the supplied bounded prompt and records a history cutoff.
+`harness` wraps the Harness interface without a Binding or Agent interface. Default `prompt` creates a HarnessInvocation and waits for its execution result. Session operations (`create`, `resume`, `close`, `abort`) and native input operations (`followUp`, `steer`) return acceptance receipts. Unsupported optional operations are explicitly rejected. Business ask, confirm, draft and Interaction contracts are removed. Native tool permissions and Hook trust remain explicit Host Approvals.
+
+```ts
+await execution.verbs.harness({ operation: "resume", agentKey: "agent", session: savedSession, timeoutMs: 30_000 });
+const receipt = await execution.verbs.harness({
+  operation: "followUp", invocationId, messageId: inputId, prompt: inputText, timeoutMs: 30_000,
+});
+// An accepted receipt is not business completion. Domain tools record that separately.
+```
+
+Application Harness context is derived from the main resource UID and Controller name. An explicit harnessTargetId selects a configured Target; otherwise the application default is used. `snapshot.harnessTargets` provides configuration discovery without Resource projections. `freshContext` replaces native context with the supplied bounded prompt. Resume reopens a specific native session without executing or replaying inputs.
 
 Harness and connector calls require timeoutMs covering their wait. Waiting releases Controller and Runner capacity, but the async continuation remains in the Runner. Worker or host interruption fails the unfinished verb; the continuation is not replayed. Persist domain facts needed to decide what to do after restart.
 
-Harness returns an invocation ID and execution result. Reconcile snapshots contain only cwd and configured Harness targets, never global execution history. ApplicationRuntime always provides resource scheduling; an optional `harness` configuration enables ExecutionService. Resource-only plugins need no adapter or target configuration. Resource contexts retain native bindings and history cutoffs. Every Harness call has one invocation ID for events, results, cancellation and approvals; no Lane or Turn object is created. Storage uses the current format without legacy journal conversion. See [execution boundary](../../docs/kernel.md#执行后端的边界).
+Harness inference returns an invocation ID and execution result. Reconcile snapshots contain only cwd and configured Harness targets, never global execution history. ApplicationRuntime always provides resource scheduling; optional Harness configuration enables ExecutionService. Resource-only plugins need no adapter or target configuration. Native input operations refer to an invocation owned by the calling resource; they do not start a second host inference queue. Session operations do not fabricate invocations. See [execution boundary](../../docs/kernel.md#执行后端的边界).
 
 ## Resource Printers
 
@@ -172,3 +182,7 @@ See [Channel](../../docs/channel/README.md) for the current Web / Lark experienc
 Controllers may set an optional `name` (lowercase letter followed by up to 63 lowercase letters, digits or hyphens) to observe the same resource kind with independent queues, locks and durable deadlines. Use explicit status Watches and resource-version checks to coordinate their separate responsibilities.
 
 Resource definitions can declare pure multi-value `indexes`, queried with `resources.list(type, { matchIndex: { name, value } })`. The Host updates indexes transactionally, rebuilds them when loading definitions, and removes them with the resource. Queries remain scoped to the plugin, resource type and namespace; unknown indexes are errors.
+
+### Native agent recovery
+
+A resource that owns a continuous agent declares an optional `AgentStatus` field in its status schema and invokes `verbs.harness({ agentKey: "agent", ... })`. The Host saves `{ harness, targetId, session: { id, resume? } }` in that field with resource UID and version checks. Session identity and optional versioned locator data come from the Adapter. Aide keeps no transcript, execution journal, or recovery checkpoint. Native restore failures surface to the caller; business recovery remains the Controller's responsibility. Omit `agentKey` for calls that do not need durable native continuity. `freshContext` starts a new native context from the supplied bounded prompt.

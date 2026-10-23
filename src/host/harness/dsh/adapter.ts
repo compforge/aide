@@ -23,8 +23,8 @@ import type { LogSink } from "../../logging.ts";
 import {
   type AdapterCapabilities,
   type HarnessEventSink,
-  type HarnessAdapter,
-  type HarnessSessionBindingSink,
+  type Harness,
+  type SessionReferenceSink,
   type HarnessSessionHandle,
   type NativeEventSink,
   type OpenOptions,
@@ -85,7 +85,7 @@ interface DshRuntime {
   readonly cwd: string;
   readonly env?: Record<string, string>;
   readonly sink: HarnessEventSink;
-  readonly bindingSink?: HarnessSessionBindingSink;
+  readonly bindingSink?: SessionReferenceSink;
   sessionId?: string;
   client?: DshClientLike;
   session?: DshSessionLike;
@@ -118,7 +118,7 @@ import {
   type DshRequestContext,
 } from "./mapping.ts";
 
-export class DshAdapter implements HarnessAdapter {
+export class DshAdapter implements Harness {
   readonly harness = "deepseek-harness";
   readonly capabilities: AdapterCapabilities = { prompt: { image: { supported: true } } };
 
@@ -132,15 +132,37 @@ export class DshAdapter implements HarnessAdapter {
     return this.options.model ?? null;
   }
 
-  async open(
+
+  create(options: OpenOptions, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
+    if (options.sessionId || options.resumeState) throw new Error("Use resume to restore an existing session");
+    return this.open(options, sink, reference);
+  }
+
+  resume(options: OpenOptions & { sessionId: string }, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
+    return this.open(options, sink, reference);
+  }
+
+  prompt(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    const active = this.mustSession(ref).activeTurn;
+    if (active && !active.finalized) return Promise.resolve({ accepted: false, effective: "rejected", reason: "session_busy" });
+    return this.sendTurn(ref, input);
+  }
+
+  steer(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    const active = this.mustSession(ref).activeTurn;
+    if (!active || active.finalized) return Promise.resolve({ accepted: false, effective: "rejected", reason: "not_running" });
+    return this.sendTurn(ref, input);
+  }
+  private async open(
     opts: OpenOptions,
     sink: HarnessEventSink,
-    binding?: HarnessSessionBindingSink,
+    binding?: SessionReferenceSink,
   ): Promise<HarnessSessionHandle> {
     const handleId = newId("hs");
     const requestedSessionId = opts.resumeState
       ? sessionIdFromResumeState(opts.resumeState)
-      : undefined;
+      : opts.sessionId;
+    if (opts.resumeState && !requestedSessionId) throw new Error("Unsupported native session recovery state");
     const requestContext = requestContextFromResumeState(opts.resumeState);
     const runtime: DshRuntime = {
       cwd: opts.cwd,
@@ -168,7 +190,7 @@ export class DshAdapter implements HarnessAdapter {
     }
   }
 
-  async sendTurn(
+  private async sendTurn(
     ref: HarnessSessionHandle,
     input: PromptInput,
   ): Promise<SendTurnReceipt> {
@@ -241,7 +263,7 @@ export class DshAdapter implements HarnessAdapter {
     return { accepted: true, effective: "new_turn" };
   }
 
-  async cancel(ref: HarnessSessionHandle): Promise<void> {
+  async abort(ref: HarnessSessionHandle): Promise<void> {
     const runtime = this.mustSession(ref);
     const turn = runtime.activeTurn;
     if (!turn || turn.finalized) return;

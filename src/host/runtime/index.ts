@@ -12,7 +12,7 @@ import { PluginInstanceStore } from "../plugin/instance.ts";
  * @spec One application runtime owns plugin activation and resource scheduling, independent of conversations.
  * @spec Harness is an optional capability; resource-only startup never opens its execution history.
  * @case tests/runtime.test.ts
- * @why Resource ownership and scheduling must not depend on the execution journal layout.
+ * @why Resource ownership and scheduling must not depend on the native session storage layout.
  * @link docs/kernel.md
  */
 export class ApplicationRuntime {
@@ -47,6 +47,7 @@ export class ApplicationRuntime {
     try {
       if (options.harness) this.executionService = new ExecutionService(home, { ...options.harness, cwd: options.cwd,
         defaultTargetId: options.harness.defaultTargetId,
+        resources: id => this.plugins.resourceClient(id),
         resolveTarget: id => this.targets.find(target => target.id === id),
         hooks: {
           has: stage => this.plugins?.hasHook(stage) ?? false,
@@ -72,7 +73,7 @@ export class ApplicationRuntime {
         snapshot: () => createReconcileSnapshot({ cwd, harnessTargets: this.targets }),
       });
     } catch (error) {
-      // Startup has no admitted plugin work. Cleanup must release the journal
+      // Startup has no admitted plugin work. Cleanup must release the execution
       // even when Manager validation fails, without hiding the original error.
       void (this.executionService?.close() ?? Promise.resolve()).finally(() => this.logger.close()).catch(() => {});
       throw error;

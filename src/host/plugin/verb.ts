@@ -1,5 +1,6 @@
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { dispatchConnector, emptyConnectors } from "../../connector-client.ts";
+import { randomUUID } from "node:crypto";
 import {
   type LogSink,
 } from "../logging.ts";
@@ -85,12 +86,18 @@ export class Verb {
     ) {
       throw new Error(`Plugin execution is not active: ${context.executionId}`);
     }
-    const operation = this.perform(context, request).catch((error) =>
-      Object.freeze({
-        state: "failure" as const,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    );
+    const callId = randomUUID(), startedAt = Date.now();
+    const attributes = { callId, executionId: context.executionId, resourceUid: context.resourceRef?.uid ?? null, verb: request.verb,
+      operation: request.verb === "harness" ? request.input.operation ?? "prompt" : request.verb === "action" ? request.name : request.input.request.operation };
+    this.log?.({ level: "info", source: "plugin", component: "verb", pluginInstanceId: context.pluginInstanceId,
+      message: "Verb started", attributes });
+    const operation = this.perform(context, request).catch((error) => ({ state: "failure" as const,
+      error: error instanceof Error ? error.message : String(error) })).then(result => {
+      this.log?.({ level: result.state === "failure" ? "error" : "info", source: "plugin", component: "verb", pluginInstanceId: context.pluginInstanceId,
+        message: "Verb settled", attributes: { ...attributes, state: result.state, durationMs: Date.now() - startedAt,
+          ...(result.state === "failure" ? { error: result.error ?? "unknown" } : {}) } });
+      return result;
+    });
     return await execution.suspend(operation);
   }
 
@@ -156,7 +163,6 @@ export class Verb {
 
   failOrphans(): void {
     this.connectorCalls?.failOrphans();
-    this.harness?.failOrphans();
   }
   close(): void { this.connectorCalls?.close(); }
 
@@ -169,8 +175,6 @@ export class Verb {
       const handler = this.actions?.[`${context.pluginInstanceId}/${request.name}`];
       if (!handler) throw new Error(`Plugin action is not installed: ${context.pluginInstanceId}/${request.name}`);
       const value = await handler(context, request.input);
-      this.log?.({ level: "info", source: "plugin", component: "verb.action", pluginInstanceId: context.pluginInstanceId,
-        message: "Plugin action completed", attributes: { action: request.name, executionId: context.executionId } });
       return { state: "success", value };
     }
 

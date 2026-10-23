@@ -202,7 +202,7 @@ describe("Plugin Runner process boundary", () => {
     await expect(notification).resolves.toBeUndefined();
 
     await session.flushLogs();
-    const records = readFileSync(join(session.dir, "runtime.log"), "utf8")
+    const records = readFileSync(join(session.dir, "harness-runtime.log"), "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
@@ -332,7 +332,7 @@ describe("Plugin Runner process boundary", () => {
     expect(activationFailures).toEqual([]);
     expect(manager.isInstanceActive("process_default")).toBe(true);
     const activationLog = readFileSync(
-      join(session.dir, "runtime.log"),
+      join(session.dir, "harness-runtime.log"),
       "utf8",
     )
       .trim()

@@ -7,7 +7,17 @@ import type {
   SendTurnReceipt,
 } from "../harness/adapter.ts";
 import type { AnyEventEnvelope } from "../event/index.ts";
-import type { HarnessBinding } from "../harness/binding.ts";
+import type { Harness } from "../harness/adapter.ts";
+import type { HarnessTarget } from "../harness/target.ts";
+
+/** Correlation for one resource's calls; native runtime state belongs to Harness. */
+export interface HarnessContext {
+  contextId: string;
+  target: HarnessTarget;
+  adapter: Harness;
+  ref?: HarnessSessionHandle;
+  setupInvocationId?: string;
+}
 import { logError, type LogSink } from "../logging.ts";
 
 type HarnessHookStage = Extract<HookStage, `harness.${string}`>;
@@ -28,7 +38,7 @@ export interface HarnessHookGateway {
 interface HarnessHookCoordinatorOptions {
   readonly gateway?: HarnessHookGateway;
   readonly append: (
-    binding: HarnessBinding,
+    binding: HarnessContext,
     event: HarnessEvent,
   ) => AnyEventEnvelope;
   readonly log: LogSink;
@@ -39,7 +49,7 @@ export class HarnessHookCoordinator {
   constructor(private readonly options: HarnessHookCoordinatorOptions) {}
 
   dispatch(
-    binding: HarnessBinding,
+    binding: HarnessContext,
     input: PromptInput,
     attemptId: string,
     operation: HarnessInputDispatch["operation"],
@@ -59,7 +69,7 @@ export class HarnessHookCoordinator {
   }
 
   async send(
-    binding: HarnessBinding,
+    binding: HarnessContext,
     ref: HarnessSessionHandle,
     input: PromptInput,
     attemptId: string,
@@ -69,11 +79,11 @@ export class HarnessHookCoordinator {
     const dispatch = this.dispatch(binding, input, attemptId, operation);
     const before = notifyInput ? this.beforeInput(dispatch) : undefined;
     if (before) await before;
-    return await binding.adapter.sendTurn(ref, input);
+    return await binding.adapter.prompt(ref, input);
   }
 
-  acceptHarnessEvent(binding: HarnessBinding, event: HarnessEvent): void {
-    // HarnessStore records and reduces the Harness output before Plugin
+  acceptHarnessEvent(binding: HarnessContext, event: HarnessEvent): void {
+    // live execution projection records and reduces the Harness output before Plugin
     // notification. Hooks can emit Verbs, so notifying them first would allow
     // durable effects whose triggering Harness fact was lost on crash.
     const envelope = this.options.append(binding, event);

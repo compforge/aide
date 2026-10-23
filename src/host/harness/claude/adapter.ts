@@ -21,10 +21,10 @@ import type {
 } from "../../event/index.ts";
 import type {
   AdapterCapabilities,
-  HarnessAdapter,
+  Harness,
   EffortOption,
   HarnessEventSink,
-  HarnessSessionBindingSink,
+  SessionReferenceSink,
   ModelOption,
   ModelConfiguration,
   NativeEventSink,
@@ -98,7 +98,7 @@ type AsyncMessageCancellableQuery = Query & {
   cancelAsyncMessage(messageUuid: string): Promise<boolean>;
 };
 
-export class ClaudeAdapter implements HarnessAdapter {
+export class ClaudeAdapter implements Harness {
   readonly harness = "claude-code";
   // 可选能力接口落地并验证后才声明对应 marker——契约测试钉住
   // "声明支持就必须实现对应接口"。
@@ -129,15 +129,37 @@ export class ClaudeAdapter implements HarnessAdapter {
   }
 
   /** SDK 无独立"启动"步骤：streaming query 在首个 sendTurn 时创建，这里只登记运行时。 */
-  async open(
+
+  create(options: OpenOptions, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
+    if (options.sessionId || options.resumeState) throw new Error("Use resume to restore an existing session");
+    return this.open(options, sink, reference);
+  }
+
+  resume(options: OpenOptions & { sessionId: string }, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
+    return this.open(options, sink, reference);
+  }
+
+  prompt(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    const active = this.mustSession(ref).activeTurn;
+    if (active && !active.finalized) return Promise.resolve({ accepted: false, effective: "rejected", reason: "session_busy" });
+    return this.sendTurn(ref, input);
+  }
+
+  steer(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    const active = this.mustSession(ref).activeTurn;
+    if (!active || active.finalized) return Promise.resolve({ accepted: false, effective: "rejected", reason: "not_running" });
+    return this.sendTurn(ref, input);
+  }
+  private async open(
     opts: OpenOptions,
     sink: HarnessEventSink,
-    binding?: HarnessSessionBindingSink,
+    binding?: SessionReferenceSink,
   ): Promise<HarnessSessionHandle> {
     const id = newId("hs");
     const requestedSessionId = opts.resumeState
       ? sessionIdFromResumeState(opts.resumeState)
-      : undefined;
+      : opts.sessionId;
+    if (opts.resumeState && !requestedSessionId) throw new Error("Unsupported native session recovery state");
     const resumeSessionId = requestedSessionId;
 
     const env = opts.env || this.options.env
@@ -349,7 +371,7 @@ export class ClaudeAdapter implements HarnessAdapter {
    * - 运行中且 Aide turnId 匹配时，把消息投进同一 prompt stream，作为当前 turn 的 steer；
    * - turnId 不匹配时拒绝，由 Controller 排成 follow-up，绝不误注入别的回合。
    */
-  async sendTurn(
+  private async sendTurn(
     ref: HarnessSessionHandle,
     input: PromptInput,
   ): Promise<SendTurnReceipt> {
@@ -414,7 +436,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     const turn: ClaudeTurn = { turnId: input.invocationId, finalized: false, cancelRequested: false, replies: new MessageReplies([input.messageId]) };
     rt.activeTurn = turn;
     rt.currentTurn = turn;
-    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 HarnessStore
+    // user_message / state_update(running) 由 Controller 在出队时发布（用户输入是实时投影
     // 的事实，不等 harness 就绪）；adapter 只报告 harness 执行过程与终态。
 
     try {
@@ -650,7 +672,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     });
   }
 
-  async cancel(ref: HarnessSessionHandle): Promise<void> {
+  async abort(ref: HarnessSessionHandle): Promise<void> {
     const rt = this.sessions.get(ref.handleId);
     const turn = rt?.activeTurn;
     if (!rt?.activeQuery || !turn) return;

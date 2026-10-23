@@ -24,7 +24,7 @@ export type { HarnessEvent, HarnessEventSink } from "./event.ts";
 export interface HarnessSessionHandle {
   harness: string;
   handleId: string;
-  /** 是否成功恢复了既有原生会话；false 表示新建，宿主需要从 HarnessStore 补历史。 */
+  /** 是否成功恢复了既有原生会话；false 表示新建；宿主不得据此重建原生历史。 */
   resumed?: boolean;
 }
 
@@ -34,17 +34,17 @@ export interface HarnessSessionIdentity {
 }
 
 /**
- * 当前执行绑定可持久化的部分。Adapter 在身份首次可知以及 checkpoint 更新时主动发布；
+ * 原生会话的持久恢复引用。Harness 在身份首次可知以及恢复定位信息更新时主动发布；
  * 宿主不从进程内 handle 猜测稳定身份。
  */
-export interface HarnessSessionBinding {
+export interface HarnessSessionReference {
   identity: HarnessSessionIdentity;
-  resumeState: HarnessResumeState;
+  resumeState?: HarnessResumeState;
 }
 
-export type HarnessSessionBindingSink = (binding: HarnessSessionBinding) => void;
+export type SessionReferenceSink = (reference: HarnessSessionReference) => void;
 
-/** provider 原生入站消息的旁路 trace；不进入 execution event ledger。 */
+/** provider 原生入站消息的旁路 trace；只用于有界诊断日志。 */
 export type NativeEventSink = (event: {
   direction: "in";
   name?: string;
@@ -54,31 +54,22 @@ export type NativeEventSink = (event: {
 export interface OpenOptions {
   cwd: string;
   env?: Record<string, string>;
-  /** Adapter 上次返回的版本化恢复状态；adapter 应优先恢复，缺失时新建。 */
+  /** Stable native identity; a requested session must resume or fail explicitly. */
+  sessionId?: string;
+  /** Adapter-owned recovery locator, when identity alone is insufficient. */
   resumeState?: HarnessResumeState;
 }
 
 /**
- * `sendTurn` 的调用参数，不是独立的 Harness IO 概念。ID 都由 controller 分配
+ * Harness 输入操作的调用参数。ID 由调用边界分配
  * （见 docs/harness/README.md）：调用使用已有的 HarnessInvocation ID；
  * 原生追加输入复用当前 invocationId。harness 侧各自的 turn/message id 只进 raw 或 adapter
  * 内部映射，不进 controller 契约。
  *
- * 普通 prompt 的 `user_message` / `state_update(running)` 由 controller 在出队时落盘
- * （执行输入是 HarnessStore 的事实，不等 harness 冷启动；且新 turn 的 blocks 可能
- * 含 <aide-sync> prepend，不能进正典历史）——adapter **不得**为 prompt 重复发这两个
- * 事件；messageId 仅供 same-turn send 成功路径发 delivery:"steer" 的 user_message upsert。
+ * 普通 prompt 的 user_message 与 running 事件由 Controller 在出队时生成，
+ * 用于实时展示。Adapter 仅为原生追加的 steer 上报相应输入事件。
  */
-export type PromptInput = Pick<HarnessInput, "invocationId" | "messageId" | "blocks"> & {
-  /**
-   * 跨 harness catch-up 注入（不属于用户输入正文，不进正典历史）。仅当 adapter 声明
-   * `capabilities.sync` 时由 controller 传入，adapter 用原生 side-channel 随本次 sendTurn
-   * 送达（codex: `turn/start.additionalContext`）——独立注入 user message 会污染原生
-   * 历史，text prepend 则把注入混进用户消息并暴露给 UserPromptSubmit hook。
-   * 契约：与本 turn 一起送达；admission 失败视为未送达（controller 水位不动，下次重注入）。
-   */
-  syncBlocks?: PromptBlock[];
-};
+export type PromptInput = Pick<HarnessInput, "invocationId" | "messageId" | "blocks">;
 
 /** Turn submit 回执：只代表请求被接受，不代表 Turn 完成（见 docs/kernel.md）。 */
 export interface PromptReceipt {
@@ -86,18 +77,19 @@ export interface PromptReceipt {
 }
 
 /**
- * `sendTurn` 的 admission 结果。Adapter 以自己的原生运行态决定实际投递：
+ * Harness 的接收回执。具体操作不可静默切换为另一种操作：
  *
  * - `new_turn`：没有活跃 turn，已接受开启新 turn 的责任；
  * - `steer`：已接受向 `input.invocationId` 对应的当前 turn 投递；若 Harness 内部
  *   还有原生队列，Adapter 按 `steering.deliveryTracking` 约定用
  *   `input_delivery_update` 报告 applied/failed/uncertain（ack-only 则接受即应用）；
- * - `rejected`：未接受输入，Controller 可安全降级为 queued follow-up。
+ * - `followUp`：已接纳到原生后续输入队列，实际应用经 input_delivery_update 确认；
+ * - `rejected`：未接受输入，由业务 Reconcile 决定后续处理。
  *
  * `rejected` 路径不得发事件。throw 同样只允许发生在接受责任之前。
  */
 export type SendTurnReceipt =
-  | { accepted: true; effective: "new_turn" | "steer" }
+  | { accepted: true; effective: "new_turn" | "steer" | "followUp" }
   | { accepted: false; effective: "rejected"; reason?: string };
 
 /**
@@ -123,13 +115,6 @@ export interface AdapterCapabilities {
   };
   /** 声明后必须实现 ContextCompactable：可请求 harness 压缩当前原生会话。 */
   compact?: CapabilityMarker;
-  /**
-   * sendTurn 原生承载 `PromptInput.syncBlocks`（side-channel 注入）。与 ContextSynchronizable
-   * 互斥使用：syncContext 是"急切注入、resolve 即送达"（水位立即推进）；sync 是"随下一次
-   * sendTurn 送达"（水位在 admission 通过后推进，语义同 prepend 路径）。都未声明时 controller
-   * 回落为把 sync 块 prepend 进 prompt 文本。
-   */
-  sync?: CapabilityMarker;
   commands?: CapabilityMarker;
   config?: CapabilityMarker;
   /** 声明后必须实现 Reconcilable：可查询 harness 眼中的权威运行态。 */
@@ -150,52 +135,48 @@ export interface AdapterCapabilities {
 }
 
 /**
- * Adapter 生命周期（见 docs/harness/README.md）：open 时绑定事件出口，sendTurn 只确认接收，
+ * Harness 生命周期（见 docs/harness/README.md）：create/resume 时订阅事件，输入操作只确认接收，
  * turn 进展与终结全部经 sink 的事件报告；controller 以 state event 驱动 busy/idle，
  * 不以任何 Promise 生命周期推断。
  *
- * 终态硬性约定：每个被 sendTurn 以 `new_turn` 接受的 turn，adapter 在**任何退出路径**（正常结束、
+ * 终态硬性约定：每个被 prompt 接受的新调用，Harness 在任何退出路径（正常结束、
  * wire fatal error、子进程退出、transport close）都必须恰好报告或合成一次
  * `state_update(idle)`；错误路径先发 `_aide_error_update` 再发 idle。重复/迟到的
  * 物理终态允许存在，由 controller 按 invocationId 幂等 finalize。
  */
-export interface HarnessAdapter {
+export interface Harness {
   readonly harness: string;
   readonly capabilities: AdapterCapabilities;
   /**
-   * Steer 能力声明；缺省 = 不支持 same-turn steer（sendTurn 应回 rejected）。
+   * 原生 steer 的投递跟踪约定；是否支持由 steer 方法声明。
    * - `deliveryTracking`：explicit = 接受后必须经 `input_delivery_update` 报告
    *   applied/failed/uncertain；`ack-only` = 接受即应用，由 Core 合成 applied，无后续回执。
    * - `cancelOwnership`：cancel/interrupt 后原生队列里未应用的 steer 是否仍可达。
-   *   survives = Adapter 保留投递责任并报告结果（不能确认时为 uncertain）；unreachable = 不可达，Controller 会在
-   *   发 cancel 前把它们收回 Aide Queue。
+   *   survives = Harness 保留投递责任并报告结果；unreachable = 原生队列已不可达。
+   *   两者均不授权 Host 自动重放可能已产生副作用的输入。
    */
   readonly steering?: {
     readonly deliveryTracking: "ack-only" | "explicit";
     readonly cancelOwnership: "survives" | "unreachable";
   };
   /**
-   * 建立（或恢复）HarnessSession 并绑定事实出口。`binding` 是稳定身份的唯一发布通道；
-   * 即使身份要到首个原生事件才出现，Adapter 也必须在可知时立即发布。
+   * 建立新会话并订阅事件与恢复引用。身份可能在首个原生事件才出现，必须在可知时发布。
    */
-  open(
+  create(
     opts: OpenOptions,
     sink: HarnessEventSink,
-    binding: HarnessSessionBindingSink,
+    reference: SessionReferenceSink,
   ): Promise<HarnessSessionHandle>;
-  /**
-   * 发送输入。Adapter 根据自己的活跃 turn 决定开启新 turn、same-turn steer 或拒绝：
-   * - 无活跃 turn 时，接受后必须返回 `new_turn`；
-   * - `input.invocationId` 与活跃调用 一致时，可以返回 `steer`；
-   * - 活跃 turn 不匹配、不可 steer 或原生协议拒绝时返回 `rejected`，不得擅自并行开 turn。
-   *
-   * throw 只表示 Adapter 尚未接受投递责任；resolve 为 accepted 后的失败必须经事件流
-   * 给出终态。入参是闭合的 PromptBlock（非开放 ContentBlock）：不支持的 block 类型
-   * 必须在 admission 前报带类型的明确错误，禁止静默丢弃（见 docs/harness/README.md）。
-   */
-  sendTurn(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt>;
+  /** Restore the specified native session without submitting or replaying input. */
+  resume(opts: OpenOptions & { sessionId: string }, sink: HarnessEventSink, reference: SessionReferenceSink): Promise<HarnessSessionHandle>;
+  /** Start inference while idle; throw/rejected means not accepted, later failures arrive through events. */
+  prompt(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt>;
+  /** Queue ordinary input in an active native invocation; no host-side queue emulation. */
+  followUp?(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt>;
+  /** Add input at the native safe boundary of the addressed invocation. */
+  steer?(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt>;
   /** 请求中断当前 turn；确认以最终 `idle/cancelled` 事件为准，发出后仍接受在途 update */
-  cancel(ref: HarnessSessionHandle): Promise<void>;
+  abort(ref: HarnessSessionHandle): Promise<void>;
   close(ref: HarnessSessionHandle): Promise<void>;
 }
 
@@ -241,7 +222,7 @@ export interface ModelConfigurationWritable {
   setModelConfiguration(ref: HarnessSessionHandle, configuration: ModelConfiguration): Promise<void>;
 }
 
-export function isModelConfigurationWritable(adapter: HarnessAdapter): adapter is HarnessAdapter & ModelConfigurationWritable {
+export function isModelConfigurationWritable(adapter: Harness): adapter is Harness & ModelConfigurationWritable {
   return typeof (adapter as Partial<ModelConfigurationWritable>).setModelConfiguration === "function";
 }
 
@@ -250,7 +231,7 @@ export interface ModelReadable {
   currentModel(ref: HarnessSessionHandle): string | null;
 }
 
-export function isModelReadable(adapter: HarnessAdapter): adapter is HarnessAdapter & ModelReadable {
+export function isModelReadable(adapter: Harness): adapter is Harness & ModelReadable {
   return typeof (adapter as Partial<ModelReadable>).currentModel === "function";
 }
 
@@ -263,7 +244,7 @@ export interface ModelConfigurable extends ModelReadable {
   setModel(ref: HarnessSessionHandle, modelId: string | null): Promise<void>;
 }
 
-export function isModelConfigurable(adapter: HarnessAdapter): adapter is HarnessAdapter & ModelConfigurable {
+export function isModelConfigurable(adapter: Harness): adapter is Harness & ModelConfigurable {
   const candidate = adapter as Partial<ModelConfigurable>;
   return (
     typeof candidate.listModels === "function" &&
@@ -288,7 +269,7 @@ export interface EffortConfigurable {
   currentEffort(ref: HarnessSessionHandle): string | null;
 }
 
-export function isEffortConfigurable(adapter: HarnessAdapter): adapter is HarnessAdapter & EffortConfigurable {
+export function isEffortConfigurable(adapter: Harness): adapter is Harness & EffortConfigurable {
   const candidate = adapter as Partial<EffortConfigurable>;
   return (
     typeof candidate.listEfforts === "function" &&
@@ -311,8 +292,8 @@ export interface SessionConfigurable {
 }
 
 export function isSessionConfigurable(
-  adapter: HarnessAdapter,
-): adapter is HarnessAdapter & SessionConfigurable {
+  adapter: Harness,
+): adapter is Harness & SessionConfigurable {
   const candidate = adapter as Partial<SessionConfigurable>;
   return (
     typeof candidate.getConfig === "function" &&
@@ -338,7 +319,7 @@ export interface Reconcilable {
   reconcile(ref: HarnessSessionHandle, turnId: string): Promise<ReconcileVerdict>;
 }
 
-export function isReconcilable(adapter: HarnessAdapter): adapter is HarnessAdapter & Reconcilable {
+export function isReconcilable(adapter: Harness): adapter is Harness & Reconcilable {
   return typeof (adapter as Partial<Reconcilable>).reconcile === "function";
 }
 
@@ -361,7 +342,7 @@ export interface ApprovalRoutable {
   approvalRoute(ref: HarnessSessionHandle): ApprovalRoute | null;
 }
 
-export function isApprovalRoutable(adapter: HarnessAdapter): adapter is HarnessAdapter & ApprovalRoutable {
+export function isApprovalRoutable(adapter: Harness): adapter is Harness & ApprovalRoutable {
   return typeof (adapter as Partial<ApprovalRoutable>).approvalRoute === "function";
 }
 
@@ -375,19 +356,8 @@ export interface ContextCompactable {
   compactContext(ref: HarnessSessionHandle, turnId: string): Promise<PromptReceipt>;
 }
 
-export function isContextCompactable(adapter: HarnessAdapter): adapter is HarnessAdapter & ContextCompactable {
+export function isContextCompactable(adapter: Harness): adapter is Harness & ContextCompactable {
   return typeof (adapter as Partial<ContextCompactable>).compactContext === "function";
-}
-
-/** 可把 HarnessStore 的缺失历史追加到 harness 自己的 model-visible history。 */
-export interface ContextSynchronizable {
-  syncContext(ref: HarnessSessionHandle, blocks: PromptBlock[]): Promise<void>;
-}
-
-export function isContextSynchronizable(
-  adapter: HarnessAdapter,
-): adapter is HarnessAdapter & ContextSynchronizable {
-  return typeof (adapter as Partial<ContextSynchronizable>).syncContext === "function";
 }
 
 /** 可通过 Harness 原生控制面停止单个后台任务；完成事实仍由 task_update 报告。 */
@@ -396,8 +366,8 @@ export interface TaskStoppable {
 }
 
 export function isTaskStoppable(
-  adapter: HarnessAdapter,
-): adapter is HarnessAdapter & TaskStoppable {
+  adapter: Harness,
+): adapter is Harness & TaskStoppable {
   return typeof (adapter as Partial<TaskStoppable>).stopTask === "function";
 }
 
@@ -407,8 +377,8 @@ export interface InputCancellable {
 }
 
 export function isInputCancellable(
-  adapter: HarnessAdapter,
-): adapter is HarnessAdapter & InputCancellable {
+  adapter: Harness,
+): adapter is Harness & InputCancellable {
   return typeof (adapter as Partial<InputCancellable>).cancelInput === "function";
 }
 

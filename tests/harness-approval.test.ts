@@ -12,7 +12,7 @@ const permission: ApprovalDraft = { kind: "permission", title: "Run tool?", opti
   { optionId: "allow", name: "Allow once", polarity: "allow", lifetime: "once" },
   { optionId: "reject", name: "Reject", polarity: "reject", lifetime: "once" },
 ] };
-test("Native permission validates explicit choices, persists rejection and cannot be settled twice", async (t) => {
+test("Native permission validates explicit choices, records live rejection and cannot be settled twice", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-approval-"));
   const storage = new HarnessFixtures(home), session = storage.create({ id: "approval", cwd: home });
   t.after(async () => { await session.closeLogs(); rmSync(home, { recursive: true, force: true }); });
@@ -26,7 +26,7 @@ test("Native permission validates explicit choices, persists rejection and canno
   assert.equal(pending.complete(id, { kind: "permission", outcome: "selected", optionId: "reject" }), true);
   assert.deepEqual(await wait, { kind: "permission", outcome: "selected", optionId: "reject" });
   assert.equal(pending.complete(id, { kind: "permission", outcome: "selected", optionId: "allow" }), false);
-  const reopened = storage.open(session.id);
+  const reopened = session;
   assert.deepEqual(requestResult(reopened.projection, id), { kind: "permission", outcome: "selected", optionId: "reject" });
   await reopened.closeLogs();
   const hook = pending.open({ target: { id: "codex" }, contextId: "main" }, { kind: "hook_trust", harnessName: "codex", hooks: [] }, "next-turn");

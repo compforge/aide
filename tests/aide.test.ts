@@ -85,8 +85,8 @@ test("Personal requires a designated final answer even when the transcript conta
   const options = fakeOptions({ execute: async () => { executed = true; return done; } }, dir);
   const aide = new Aide(dir, { ...options, createAdapter: () => {
     const adapter = options.createAdapter();
-    const open = adapter.open.bind(adapter);
-    adapter.open = (config, sink, binding) => open(config, (event) => {
+    const open = adapter.create.bind(adapter);
+    adapter.create = (config, sink, binding) => open(config, (event) => {
       if (executed && event.kind === "agent_message") {
         sink({ ...event, payload: { ...event.payload, phase: undefined } });
       } else sink(event);
@@ -224,8 +224,6 @@ test("personal Worker crash cancels its invocation and preserves uncertain work 
   const { aide, path } = await setup(t, agent);
   (await aide.work("me").create(task));
   await running;
-  const sessions = new HarnessFixtures(path);
-  const session = sessions.open("aide:execution");
   let pid = 0;
   for (let attempt = 0; attempt < 100 && !pid; attempt++) {
     const lines = readFileSync(join(path, "runtime.log"), "utf8").trim().split("\n");
@@ -276,7 +274,6 @@ test("Aide resumes the same Session and personal state when execution cwd change
   await first.receive(fixtureIncoming({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "你好" }));
   await first.settled();
   const routine = await first.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "manual" } });
-  const originalDirectory = new HarnessFixtures(root).open("aide:execution").dir;
   const messages = first.outputs();
   await first.close();
 
@@ -284,17 +281,14 @@ test("Aide resumes the same Session and personal state when execution cwd change
   const options = fakeOptions(agent, join(root, "code-b"), [], root);
   restarted = new Aide(root, { ...options, createAdapter: (target) => {
     const adapter = options.createAdapter(target);
-    const open = adapter.open.bind(adapter);
-    adapter.open = (config, sink, binding) => {
+    const open = adapter.create.bind(adapter);
+    adapter.create = (config, sink, binding) => {
       executionCwds.push(config.cwd);
       return open(config, sink, binding);
     };
     return adapter;
   } }, log);
   await restarted.start(); await restarted.settled();
-  const persisted = new HarnessFixtures(root).open("aide:execution");
-  assert.equal(persisted.dir, originalDirectory);
-  assert.equal(persisted.meta.cwd, join(root, "code-b"));
   assert.equal(restarted.work("me").read(routine.id).title, routine.title);
   assert.deepEqual(restarted.outputs(), messages);
   await restarted.receive(fixtureIncoming({ channelId: "web", id: "again", sessionId: "me", conversationId: "me", text: "继续聊" }));
@@ -304,13 +298,8 @@ test("Aide resumes the same Session and personal state when execution cwd change
 });
 
 
-test("default Work target uses Pi and discards stale Codex native bindings while preserving the Session", async (t) => {
+test("default Work target uses Pi without an Aide execution store", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-default-pi-"));
-  const session = new HarnessFixtures(root).create({ id: "aide:execution", cwd: root });
-  session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex", model: "previous-model" });
-  session.setExecutionContext("work-context", { contextId: "work-context", harnessSessions: { default: {
-    harness: "codex", harnessSessionId: "old-native-id", resumeState: { version: 1, data: { id: "old-native-id" } },
-  } } });
   const seen: string[] = [];
   const options = fakeOptions({ execute: async () => done }, root);
   const aide = new Aide(root, { ...options, createAdapter: (target) => {
@@ -318,11 +307,6 @@ test("default Work target uses Pi and discards stale Codex native bindings while
     return options.createAdapter(target);
   } }, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  const restored = new HarnessFixtures(root).open("aide:execution");
-  assert.equal(restored.meta.harnessTargets.default!.harness, "pi");
-  assert.equal(restored.meta.harnessTargets.default!.model, undefined);
-  assert.equal(restored.meta.contexts["work-context"]!.harnessSessions.default?.resumeState, undefined);
-  assert.equal(restored.meta.contexts["work-context"]!.harnessSessions.default?.harnessSessionId, undefined);
   await aide.personal.conversations.ensure("me", fixtureAddress("me"));
   await aide.start();
   await aide.work("me").create(task); await aide.settled();
@@ -348,7 +332,7 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   // Mutating the caller's object cannot change future Sessions' startup target.
   defaultTarget.model = "changed-after-startup";
   aide.personal;
-  assert.equal(new HarnessFixtures(root).open("aide:execution").meta.harnessTargets.chosen!.model, "configured-model");
+  assert.equal(aide.runtime.targets.find(target => target.id === "chosen")!.model, "configured-model");
   await aide.work("me").create(task); await aide.settled();
   await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "sample" } });
   await aide.event({ id: "sample", sessionId: "me", conversationId: "me", name: "sample", text: "sample" });
@@ -357,26 +341,7 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   assert.equal(aide.works().find((work) => work.kind === "routine")!.status, "scheduled");
   assert.ok(seen.some((item) => item.endsWith(":chief")));
   assert.equal(seen.filter((item) => item === `chosen:${harness}`).length, 2);
-  const session = new HarnessFixtures(root).open("aide:execution");
-  assert.equal(session.meta.harnessTargets.chosen!.harness, harness);
-});
-
-test("restoring a Claude default keeps its claude-code native binding and clears it on a Harness switch", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "aide-default-binding-"));
-  const storage = new HarnessFixtures(root);
-  const session = storage.create({ id: "aide:execution", cwd: root });
-  session.setHarnessTarget("default", { harnessTargetId: "default", harness: "claude" });
-  session.setExecutionContext("work-context", { contextId: "work-context", harnessSessions: {} });
-  session.setContextHarnessSession("work-context", "default", { harness: "claude-code", harnessSessionId: "native-claude",
-    resumeState: { version: 1, data: { id: "native-claude" } } });
-  const options = fakeOptions({ execute: async () => done }, root);
-  let aide = new Aide(root, { ...options, defaultTarget: { id: "default", harness: "claude" } }, log);
-  t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  assert.equal(storage.open("aide:execution").meta.contexts["work-context"]!.harnessSessions.default!.harnessSessionId, "native-claude");
-  await aide.close();
-  aide = new Aide(root, { ...options, defaultTarget: { id: "default", harness: "codex" } }, log);
-  assert.equal(storage.open("aide:execution").meta.contexts["work-context"]!.harnessSessions.default?.harnessSessionId, undefined);
-  assert.equal(storage.open("aide:execution").dir, session.dir);
+  assert.equal(aide.runtime.targets.find(target => target.id === "chosen")!.harness, harness);
 });
 
 test("Routine event Input deduplication survives Input collection and restart", async t => {

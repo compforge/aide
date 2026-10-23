@@ -24,25 +24,25 @@ function fixture(t: { after(fn: () => Promise<void>): void }, startup = false) {
   const journal = new HarnessFixtures(root).create({ id: "aide:execution", cwd: root });
   const adapters: Array<{ turnId?: string; sink: HarnessEventSink; cancels: number; sends: number; decision?: ApprovalResult }> = [];
   const target = { id: "shared", harness: "test" };
-  const executions = new ExecutionService(root, { cwd: root,
-    historyBudgetChars: 0, resolveTarget: () => target, maxConcurrency: 2,
+  const executions = new ExecutionService(root, { cwd: root, resolveTarget: () => target, maxConcurrency: 2,
     createAdapter(_target, ports) {
       const state = { cancels: 0, sends: 0 } as (typeof adapters)[number];
       adapters.push(state);
       return {
         harness: "test", capabilities: { prompt: {} },
-        async open(_options, sink) {
+        async resume(options, events, reference) { return this.create(options, events, reference); },
+        async create(_options, sink) {
           state.sink = sink;
           if (startup) state.decision = await ports.openApproval({ kind: "hook_trust", harnessName: "test", hooks: [] });
           return { harness: "test", handleId: String(adapters.indexOf(state)) };
         },
-        async sendTurn(_ref, input) {
+        async prompt(_ref, input) {
           state.sends++;
           state.turnId = input.invocationId;
           void ports.openApproval(permission, { invocationId: input.invocationId }).then(result => { state.decision = result; });
           return { accepted: true, effective: "new_turn" };
         },
-        async cancel() {
+        async abort() {
           state.cancels++;
           state.sink({ kind: "state_update", invocationId: state.turnId, payload: { state: "idle", stopReason: "cancelled" } });
         },

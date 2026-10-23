@@ -7,6 +7,7 @@ import type { ConversationTrigger } from "./trigger.ts";
 export const CONVERSATION_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Conversation" } as const;
 export interface ConversationSpec { address?: Address; id: string; name?: string; default?: boolean; trigger?: ConversationTrigger }
 export interface ConversationStatus extends ResourceContext {
+  agent?: import("@compforge/aide-plugin").AgentStatus;
   nextTriggerAt?: string | null;
   execution?: LoopExecution | null;
   receipts: Array<{ key: string; responseId: string }>;

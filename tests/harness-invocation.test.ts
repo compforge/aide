@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ReconcileHarnessInvocation } from "../src/host/harness/invocation.ts";
-import { HarnessInvocationStore } from "../src/host/harness/invocation.ts";
+import { HarnessInvocations } from "../src/host/harness/invocation.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
 
 const roots: string[] = [];
@@ -45,10 +45,10 @@ afterEach(() => {
   }
 });
 
-describe("HarnessInvocationStore", () => {
+describe("HarnessInvocations", () => {
   test("creates a fresh invocation and resolves the waiting caller on completion", async () => {
     const handle = session();
-    const store = new HarnessInvocationStore(handle);
+    const store = new HarnessInvocations(handle);
     const draft = invocation(handle.id);
     const pending = store.record(draft);
     const second = store.record(draft);
@@ -97,7 +97,7 @@ describe("HarnessInvocationStore", () => {
 
   test("dispatches the supplied prompt directly without a human gate", () => {
     const handle = session();
-    const store = new HarnessInvocationStore(handle);
+    const store = new HarnessInvocations(handle);
     const pending = store.record(invocation(handle.id, { prompt: "Implement the focused fix." }));
     expect(store.scheduled(pending.invocationId)).toMatchObject({ source: "plugin", blocks: [{ type: "text", text: "Implement the focused fix." }] });
     expect(handle.projection.approvals.size).toBe(0);
@@ -106,7 +106,7 @@ describe("HarnessInvocationStore", () => {
 
   test("uses the supplied context and the invocation identity for execution", () => {
     const handle = session();
-    const store = new HarnessInvocationStore(handle);
+    const store = new HarnessInvocations(handle);
     const pending = store.record(invocation(handle.id));
     const scheduled = store.scheduled(pending.invocationId)!;
     expect(scheduled.contextId).toBe("resource-context");
@@ -115,9 +115,9 @@ describe("HarnessInvocationStore", () => {
     store.close();
   });
 
-  test("persists user cancellation, timeout, dispatch failure, and recovery", async () => {
+  test("coordinates live cancellation, timeout, dispatch failure, and runner interruption", async () => {
     const handle = session();
-    const store = new HarnessInvocationStore(handle);
+    const store = new HarnessInvocations(handle);
 
     const dismissed = store.record(invocation(handle.id, {}, "pex_dismiss"));
     const dismissedResult = store.wait(dismissed.invocationId);
@@ -148,14 +148,16 @@ describe("HarnessInvocationStore", () => {
   });
 });
 
-test("Application correlations remain opaque metadata in restored invocations", () => {
+test("Application correlations remain opaque and a new runtime does not recover invocations", () => {
   const handle = session();
-  const payload = { ...invocation(handle.id).invocation, invocationId: "restored", executionId: "previous-run",
-    attributes: { conversationId: "topic", inputIds: ["input-one"], customCorrelation: "opaque" } };
-  handle.appendEvent({ kind: "_aide_harness_invocation_recorded", source: { type: "plugin", pluginInstanceId: "test" }, payload });
-  const restored = new HarnessInvocationStore(handle);
-  const result = restored.list()[0]!;
+  const calls = new HarnessInvocations(handle);
+  const draft = invocation(handle.id);
+  const result = calls.record({ ...draft, scope: { ...draft.scope,
+    attributes: { conversationId: "topic", inputIds: ["input-one"], customCorrelation: "opaque" } } });
   expect(result.attributes).toEqual({ conversationId: "topic", inputIds: ["input-one"], customCorrelation: "opaque" });
   expect("conversationId" in result).toBe(false);
-  restored.close();
+  calls.close();
+  const next = new HarnessInvocations(handle);
+  expect(next.list()).toEqual([]);
+  next.close();
 });

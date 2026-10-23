@@ -164,7 +164,7 @@ describe("plugin Manager", () => {
     });
     expect(scheduled[0]?.contextId).toMatch(/^resource:/);
     expect(session.projection.approvals.size).toBe(0);
-    expect(session.ledger.read().filter((event) =>
+    expect(session.events.filter((event) =>
       event.kind === "approval.requested" ||
       event.kind === "approval.answered" ||
       event.kind === "_aide_harness_invocation_recorded" ||

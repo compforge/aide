@@ -82,8 +82,7 @@ test("Application runtime reconciles generic shared resources and metadata witho
 /** @case Resource-only startup ignores Harness storage and reports an unavailable verb without losing resource progress. */
 test("Resource-only runtime does not load Harness history or require an execution backend", async (t) => {
   const root = home(t);
-  const { harnessStorageDirectory } = await import("../src/host/harness/store.ts");
-  const history = harnessStorageDirectory(root);
+  const history = join(root, "harness");
   mkdirSync(history, { recursive: true });
   const metadata = join(history, "meta.json");
   writeFileSync(metadata, "invalid unused Harness metadata");
@@ -155,29 +154,23 @@ test("Reconcile snapshots contain configuration only and execution views require
   const journal = new HarnessFixtures(root).create({ id: "aide:execution", cwd: root });
   for (const turnId of ["mine", "unrelated"]) journal.appendEvent({ kind: "_aide_invocation_summary", source: { type: "aide" },
     payload: { invocationId: turnId, finalText: turnId, toolCalls: [] } });
-  const executions = new ExecutionService(root, { cwd: root, resolveTarget: () => undefined, historyBudgetChars: 0, createAdapter: () => { throw new Error("No execution requested"); } });
+  const executions = new ExecutionService(root, { cwd: root, resolveTarget: () => undefined, createAdapter: () => { throw new Error("No execution requested"); } });
   t.after(() => executions.close());
   const snapshot = createReconcileSnapshot({ cwd: root, harnessTargets: [{ id: "configured", harness: "test" }] });
   assert.deepEqual(Object.keys(snapshot).sort(), ["cwd", "harnessTargets"]);
   assert.ok(Object.isFrozen(snapshot.harnessTargets[0]));
   assert.deepEqual(executions.view([]).invocationSummaries, []);
-  const selected = executions.view(["mine"]);
-  assert.deepEqual(selected.invocationSummaries.map(turn => turn.invocationId), ["mine"]);
-  selected.invocationSummaries[0]!.finalText = "caller mutation";
-  assert.equal(executions.view(["mine"]).invocationSummaries[0]!.finalText, "mine");
+  assert.deepEqual(executions.view(["mine"]).invocationSummaries, [], "Execution history is never imported from another runtime");
   await executions.close();
-  const reopened = new ExecutionService(root, { cwd: root, resolveTarget: () => undefined, historyBudgetChars: 0, createAdapter: () => { throw new Error("No replay expected"); } });
-  assert.equal(reopened.view(["mine"]).invocationSummaries[0]!.finalText, "mine");
-  await reopened.close();
+  assert.equal(existsSync(join(root, "events.jsonl")), false);
+
 });
 
 test("Failed application initialization releases its execution lease", async (t) => {
   const root = home(t);
-  const { openHarnessStore } = await import("../src/host/harness/store.ts");
-  await openHarnessStore(root, root).closeLogs();
   const options = {
     cwd: root, instances: [],
-    harness: { targets: [], historyBudgetChars: 0, createAdapter: () => { throw new Error("No Harness expected"); } },
+    harness: { targets: [], createAdapter: () => { throw new Error("No Harness expected"); } },
     plugins: { maxTotalConcurrency: 0 },
   };
   assert.throws(() => new ApplicationRuntime(root, options), /maxTotalConcurrency/);
@@ -197,34 +190,12 @@ test("Unused Harness capabilities have no storage lifecycle", async (t) => {
   const { ExecutionService } = await import("../src/host/runtime/execution.ts");
   const root = home(t);
   const target = { id: "available", harness: "test" };
-  const executions = new ExecutionService(root, { cwd: root, targets: [target], resolveTarget: () => target,
-    historyBudgetChars: 0, createAdapter: () => { throw new Error("Unused Harness must not start"); } });
+  const executions = new ExecutionService(root, { cwd: root, targets: [target], resolveTarget: () => target, createAdapter: () => { throw new Error("Unused Harness must not start"); } });
   executions.registerTarget({ ...target, model: "configured" });
   const unsubscribe = executions.subscribe(() => {});
   assert.deepEqual(executions.listHarnessInvocations(), []);
   assert.deepEqual(executions.approvals(), []);
   assert.equal(executions.view([]).messages.size, 0);
-  executions.failOrphans(); unsubscribe(); await executions.close();
+  unsubscribe(); await executions.close();
   assert.equal(existsSync(join(root, "harness")), false);
-});
-
-test("Harness acquires its lease before reading or changing existing metadata and releases it after failed recovery", async (t) => {
-  const { ExecutionService } = await import("../src/host/runtime/execution.ts");
-  const { openHarnessStore } = await import("../src/host/harness/store.ts");
-  const { readFileSync, writeFileSync } = await import("node:fs");
-  const root = home(t);
-  const records = openHarnessStore(root, root);
-  await records.closeLogs();
-  const options = { cwd: root, historyBudgetChars: 0, resolveTarget: () => undefined,
-    createAdapter: () => { throw new Error("No dispatch expected"); } };
-  const active = new ExecutionService(root, options);
-  const before = readFileSync(join(records.dir, "meta.json"), "utf8");
-  assert.throws(() => new ExecutionService(root, { ...options, cwd: "/changed" }), /already active/);
-  assert.equal(readFileSync(join(records.dir, "meta.json"), "utf8"), before);
-  await active.close();
-  writeFileSync(join(records.dir, "events.jsonl"), "not-json\n{}\n");
-  assert.throws(() => new ExecutionService(root, options), /corrupt Event Ledger/);
-  assert.equal(existsSync(join(records.dir, "lock")), false);
-  writeFileSync(join(records.dir, "events.jsonl"), "");
-  await new ExecutionService(root, options).close();
 });

@@ -43,7 +43,7 @@ export function applyInputDelivery(state: HarnessState, ev: EventEnvelope<"input
   }
   if (outcome === "applied") {
     if (!message) {
-      message = { ...inputMessage(messageId, ev.ts, input?.source, ev.harnessTargetId), content: input ? [...input.blocks] : [], delivery: "steer" };
+      message = { ...inputMessage(messageId, ev.ts, input?.source, ev.harnessTargetId), content: input ? [...input.blocks] : [], delivery: input?.delivery ?? "steer" };
       state.messages.set(messageId, message);
     }
     message.invocationId = ev.invocationId;
@@ -54,7 +54,7 @@ export function applyInputDelivery(state: HarnessState, ev: EventEnvelope<"input
     // Older ledgers may already have a hidden admission-time slot. Remove that
     // slot only on this first consumption, never on a duplicate receipt.
     const previous = state.timeline.findIndex((item) => item.type === "message" && item.id === messageId);
-    if (previous >= 0 && message.delivery === "steer") state.timeline.splice(previous, 1);
+    if (previous >= 0 && (message.delivery === "steer" || message.delivery === "followUp")) state.timeline.splice(previous, 1);
     placeMessage(state, messageId, beforeMessageId);
   }
   if (message) message.deliveryState = outcome;
@@ -68,7 +68,7 @@ export function invocationUserText(state: HarnessState, invocationId: string): s
     if (item.type !== "message") continue;
     const message = state.messages.get(item.id);
     if (!message || message.role !== "user" || message.invocationId !== invocationId) continue;
-    if (message.delivery === "steer") {
+    if (message.delivery === "steer" || message.delivery === "followUp") {
       const input = state.harnessInputs.get(message.messageId);
       if (input ? input.deliveryOutcome !== "applied" : message.deliveryState !== undefined && message.deliveryState !== "applied") continue;
     }

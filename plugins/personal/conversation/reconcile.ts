@@ -3,7 +3,7 @@ import type { PluginContext, ReconcileContext, Watch } from "@compforge/aide-plu
 import { CONVERSATION_TYPE, type ConversationResource } from "./model.ts";
 import { chiefTarget } from "../chief-model.ts";
 import { inputPrinter } from "../input/printer.ts";
-import { finalizeExecution, nextInput, runInput, steerPending } from "../loop.ts";
+import { finalizeExecution, nextInput, runInput, submitPending } from "../loop.ts";
 import { conversationPolicy } from "./config.ts";
 import { conversationTrigger, nextTriggerAt } from "./trigger.ts";
 import { updateConversation } from "./state.ts";
@@ -36,7 +36,7 @@ export function registerConversations(context: PluginContext): void {
 /** @spec Intake can steer while the agent controller waits for inference. Timer activation remains independent of new input. */
 export async function reconcileConversation(context: PluginContext, execution: ReconcileContext, c: Readonly<ConversationResource>) {
   if (c.metadata.deletionTimestamp) { await cancelAssignments(context.resources, resourceRef(c), "assess"); return; }
-  return await steerPending(context, execution, c);
+  return await submitPending(context, execution, c);
 }
 
 export async function reconcileChief(context: PluginContext, execution: ReconcileContext, initial: Readonly<ConversationResource>) {

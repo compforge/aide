@@ -23,20 +23,13 @@ export type HarnessInputStatus =
   | "dispatching"
   | "admitted"
   | "steering"
+  | "following"
   | "failed"
   | "finalized"
   | "recalled"
   | "interrupted";
 
-/** 老 ledger 里 steer 接受态叫 accepted_steer；replay 归一到 steering。 */
-export function normalizeHarnessInputStatus(status: string): HarnessInputStatus {
-  return status === "accepted_steer" ? "steering" : (status as HarnessInputStatus);
-}
-
-/**
- * 一条输入的 controller 生命周期记录。身份即 `messageId`：durable 形态是事件流里的
- * `user_message`，live 形态就是这条记录，不另造平行身份。
- */
+/** Live controller input; identity is messageId, while business durability belongs to resources. */
 export interface HarnessInput {
   messageId: string;
   /** Controller scheduling coordinate: reserved for a prompt or targeted by a steer. Not proof of actual consumption. */
@@ -46,12 +39,12 @@ export interface HarnessInput {
   contextId: string;
   blocks: PromptBlock[];
   source: HarnessInputSource;
-  /** Durable causal link; orthogonal to the actor recorded in source. */
+  /** Causal link; orthogonal to the actor recorded in source. */
   harnessInvocationId?: string;
   /** Plugin fact that caused this queued invocation. */
   parentEventId?: string;
   status: HarnessInputStatus;
-  delivery: "prompt" | "steer";
+  delivery: "prompt" | "steer" | "followUp";
   /**
    * steer 的投递结果：applied = 已写入模型上下文，failed = Harness 明确丢弃；
    * uncertain = 无法确认消费结果，恢复时不得自动重投；undefined = 仍在等待原生投递边界。与 status 正交：Turn 收口不改变它，
@@ -62,7 +55,7 @@ export interface HarnessInput {
   sourceProposedPlanId?: string;
 }
 
-/** Durable WAL fact emitted before one Harness Input state transition. */
+/** Live update emitted before one Harness Input state transition. */
 export interface HarnessInputUpdate {
   messageId: string;
   invocationId: string;
@@ -71,7 +64,7 @@ export interface HarnessInputUpdate {
   blocks: PromptBlock[];
   source: HarnessInputSource;
   status: HarnessInputStatus;
-  delivery: "prompt" | "steer";
+  delivery: "prompt" | "steer" | "followUp";
   harnessInvocationId?: string;
   sourceProposedPlanId?: string;
   causeEventId?: string;
@@ -85,7 +78,7 @@ export interface HarnessInputSnapshot {
   contextId: string;
   harness: string;
   status: HarnessInputStatus;
-  delivery: "prompt" | "steer";
+  delivery: "prompt" | "steer" | "followUp";
   deliveryOutcome?: "applied" | "failed" | "uncertain";
   source: HarnessInputSource;
   harnessInvocationId?: string;

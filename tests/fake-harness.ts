@@ -12,7 +12,7 @@ import type { ConversationResource } from "../plugins/personal/conversation/mode
 import { ConfigSchema } from "../src/config.ts";
 import type { ConversationStatus } from "../plugins/personal/conversation/model.ts";
 import { randomUUID } from "node:crypto";
-import type { HarnessAdapter, HarnessEventSink, PromptInput } from "../src/host/harness/adapter.ts";
+import type { Harness, HarnessEventSink, PromptInput } from "../src/host/harness/adapter.ts";
 import type { Work } from "../plugins/personal/model.ts";
 import type { Outcome } from "../plugins/personal/prompts.ts";
 
@@ -26,7 +26,7 @@ export interface Agent {
 
 /** Exercise the real Runner/verb/Turn path; replace only the external Harness protocol. */
 export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], home = cwd) {
-  return { config: ConfigSchema.parse({}), cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): HarnessAdapter => {
+  return { config: ConfigSchema.parse({}), cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): Harness => {
     let sink: HarnessEventSink;
     let active: PromptInput | undefined;
     let conversationId: string | undefined;
@@ -36,9 +36,15 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
       sink({ kind: "state_update", invocationId: turnId, payload: { state: "idle", stopReason } });
     };
     return {
-      harness: target.harness, capabilities: { prompt: {}, sync: { supported: true } },
-      async open(_options, events) { sink = events; return { harness: target.harness, handleId: randomUUID() }; },
-      async sendTurn(_ref, input) {
+      harness: target.harness, capabilities: { prompt: {} },
+      async resume(options, events, reference) { return this.create(options, events, reference); },
+      async create(options, events, binding) {
+        sink = events;
+        const id = (options.resumeState?.data as { sessionId?: string } | undefined)?.sessionId ?? randomUUID();
+        binding({ identity: { id }, resumeState: { version: 1, data: { sessionId: id } } });
+        return { harness: target.harness, handleId: id, resumed: !!options.resumeState };
+      },
+      async prompt(_ref, input) {
         active = input;
         const prompt = input.blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
         requests.push(prompt);
@@ -89,7 +95,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
         }).catch(() => finish(input.invocationId, "error"));
         return { accepted: true, effective: "new_turn" };
       },
-      async cancel() { if (active) finish(active.invocationId, "cancelled"); },
+      async abort() { if (active) finish(active.invocationId, "cancelled"); },
       async close() { if (active) finish(active.invocationId, "cancelled"); },
     };
   } };

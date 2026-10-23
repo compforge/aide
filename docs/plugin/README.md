@@ -8,7 +8,7 @@ Plugin 是业务扩展的组织与所有权单位。插件声明资源和回调�
 
 Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队列、重试和 Reconcile；资源存储、全局 Connector 与执行事实由 Host 持有。PluginContext 将资源操作、Connector 查询和 verb 转成跨进程请求，插件无需引用宿主 Store、提供方客户端或 Harness SDK。
 
-实例关闭或 Runner 失败时，Host 撤销运行能力并终止未完成调用；资源定义随 Host 保留，校验、打印和容量规则不依赖 Runner 存活。Runner 不自动重启；重新启动 Aide 会重新激活插件。回调中的内存状态与异步调用栈不会跨重启恢复。Manager 接收可选的 HarnessExecution 能力，不持有 HarnessStore 或 EventLedger；不调用 Harness 的资源插件无需创建任何执行会话或记录目录。
+实例关闭或 Runner 失败时，Host 撤销运行能力并终止未完成调用；资源定义随 Host 保留，校验、打印和容量规则不依赖 Runner 存活。Runner 不自动重启；重新启动 Aide 会重新激活插件。回调中的内存状态与异步调用栈不会跨重启恢复。Manager 接收可选的 HarnessExecution 能力，不持有执行历史或原生会话文件；不调用 Harness 的资源插件无需创建任何执行会话或记录目录。
 
 ## Resource 与 Reconcile
 
@@ -34,7 +34,7 @@ Host 的 `ResourceStorage` 将所有插件 Resource 存入共享 SQLite，以按
 
 每次写入在事务内同步记录、引用索引、回执和必要的回收。无法满足容量约束时整个事务回滚，变更通知只在提交后发出。因此过载会阻止接收更多工作，不会通过删除正在承担的工作来腾空间。完成并缩小记录的更新允许在超配额状态下提交。
 
-执行日志与 Adapter 恢复状态由执行后端管理，不作为 Resource 投影。Resource 配额不等于进程 RSS 或全部磁盘文件的硬上限。
+原生历史与 checkpoint 由 Harness 管理；资源 status.agent 仅保存 Harness、Target 与必要的会话恢复引用，引用计入资源配额。Resource 配额不等于进程 RSS 或全部磁盘文件的硬上限。
 
 ## Resource Printer
 
@@ -56,13 +56,15 @@ Controller 可声明 `name`，让同一插件对同种资源注册独立队列�
 
 ## Verb 与 Harness
 
-Reconcile 通过 `ctx.verbs` 请求 harness、命名 action，或通过 `connectors({ timeoutMs })` 调用外部系统。Personal 的 say helper 调用应用注册的 action，创建独立 Output，返回 outputId，Channel 按 Output.target 投递；用户答复是后续的新 Input。业务状态与 Output 可通过 ResourceClient.commit 原子保存，详见 [Output](../output.md)。harness 直接创建 HarnessInvocation，保留期限、取消和恢复语义；原生工具权限与 Hook 信任仍由 Host Approval 管理。插件不处理提供方原生协议。
+Verb 是 Plugin / Operator 发起非 CRD 操作的统一入口；CRD 读写使用 ResourceClient。Reconcile 通过 `ctx.verbs` 请求 harness、命名 action，或通过 `connectors({ timeoutMs })` 调用外部系统。每次调用统一记录调用 ID、执行 ID、资源 UID、操作、耗时与结果，不记录完整敏感参数。Personal 的 say helper 调用应用注册的 action，创建独立 Output，返回 outputId，Channel 按 Output.target 投递；用户答复是后续的新 Input。业务状态与 Output 可通过 ResourceClient.commit 原子保存，详见 [Output](../output.md)。
+
+harness verb 封装 Harness interface：prompt 返回执行结果，其余操作返回接收回执。followUp / steer 指向所属资源的正在运行 invocation，由 Harness 原生队列接收；接收不等于完成 Input 的业务处理。create / resume / close 操作会话，abort 中断执行；resume 不自动重放。不支持的可选能力明确拒绝。原生工具权限与 Hook 信任仍由 Host Approval 管理。
 
 等待 verb 时释放 Controller 和 Runner 容量，同一 Controller 内同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。取消、超时和失败需要插件自行决定业务结果。
 
 `execution.withContext(attributes)` 为后续动作附加不透明的业务元数据，主资源身份由运行时提供。Personal 定义并解释 conversationId、inputId、inputIds，底座只持久保存 attributes。Channel 通过 Personal 解析关联，再显式查询对应执行的展示投影。其他组件按职责使用 Core 服务，不必经由 Verb。
 
-Harness 上下文由主资源 UID 与 Controller 名称确定，不接受应用插件选择 Lane。`harness({ freshContext: true })` 用调用方提供的摘要和必要材料建立新原生上下文，并持久化历史边界，后续 catch-up 不注入该边界之前的执行历史。
+Harness 上下文由主资源 UID 与 Controller 名称确定，不接受应用插件选择 Lane。`harness({ freshContext: true })` 用调用方提供的摘要和必要材料建立新原生上下文。宿主没有执行历史回放或 catch-up；持续上下文使用资源 status.agent 中的原生引用恢复。
 
 Reconcile 快照只包含运行目录和 HarnessTarget 配置，不携带全局历史。Harness 返回 invocationId 与 result，不返回 Lane 或 Turn 对象。执行结束不等于资源目标完成。结果校验、下一步安排、等待用户和业务终态都属于插件。
 

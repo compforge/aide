@@ -11,7 +11,7 @@ import type {
   HarnessInvocationScheduled,
   PromptBlock,
 } from "../event/index.ts";
-import type { HarnessStore } from "./store.ts";
+import { RECENT_INVOCATIONS, type HarnessActivity } from "./activity.ts";
 import type {
   ExecutionScope,
 } from "../../protocol/verbs.ts";
@@ -25,6 +25,7 @@ export type HarnessInvocationPhase =
   | "failed";
 
 export interface HarnessInvocationSnapshot extends ExecutionAssociation {
+  readonly pluginInstanceId: string;
   readonly invocationId: string;
   readonly executionId: string;
   readonly verb: "harness";
@@ -50,8 +51,8 @@ export interface ReconcileHarnessInvocation {
 }
 
 type HarnessInvocationRecords = Pick<
-  HarnessStore,
-  "ledger" | "appendEvent" | "subscribe" | "requireExecutionContext"
+  HarnessActivity,
+  "appendEvent" | "subscribe" | "requireExecutionContext"
 >;
 
 export interface ScheduledHarnessInvocation {
@@ -75,7 +76,7 @@ interface InvocationState {
   result?: InvocationSummary;
 }
 
-export interface HarnessInvocationStoreOptions {
+export interface HarnessInvocationsOptions {
   onChanged?(invocation: HarnessInvocationSnapshot): void;
 }
 
@@ -113,6 +114,7 @@ function frozenSummary(summary: InvocationSummary): InvocationSummary {
 function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
   const recorded = state.recorded.payload;
   return Object.freeze({
+    pluginInstanceId: pluginInstanceIdOf(state),
     invocationId: recorded.invocationId,
     executionId: recorded.executionId,
     attributes: recorded.attributes,
@@ -163,7 +165,7 @@ function scheduledOf(
 }
 
 /** Event-backed owner for a HarnessInvocation created by one live Plugin verb. */
-export class HarnessInvocationStore {
+export class HarnessInvocations {
   private readonly states = new Map<string, InvocationState>();
   private readonly invocationIdByMessage = new Map<string, string>();
   private readonly invocationIdByAttempt = new Map<string, string>();
@@ -175,9 +177,8 @@ export class HarnessInvocationStore {
 
   constructor(
     private readonly records: HarnessInvocationRecords,
-    private readonly options: HarnessInvocationStoreOptions = {},
+    private readonly options: HarnessInvocationsOptions = {},
   ) {
-    for (const event of records.ledger.read()) this.apply(event, false);
     this.unsubscribe = records.subscribe((event) => this.apply(event, true));
   }
 
@@ -309,13 +310,15 @@ export class HarnessInvocationStore {
     return failed;
   }
 
-  failOrphans(detail: string): void {
-    for (const state of this.states.values()) {
-      const phase = phaseOf(state);
-      if (phase === "completed" || phase === "cancelled" || phase === "failed") {
-        continue;
+  private readonly recent: string[] = [];
+  release(id: string): void {
+    this.recent.push(id);
+    while (this.recent.length > RECENT_INVOCATIONS) {
+      const old = this.recent.shift()!;
+      this.states.delete(old);
+      for (const index of [this.invocationIdByMessage, this.invocationIdByAttempt]) {
+        for (const [key, value] of index) if (value === old) index.delete(key);
       }
-      this.fail(state.recorded.payload.invocationId, "recovery", detail);
     }
   }
 

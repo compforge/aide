@@ -12,14 +12,13 @@ import type {
   SessionConfigOption,
   StopReason,
 } from "../../event/index.ts";
-import { textOf } from "../../event/index.ts";
 import type { ApprovalDraft } from "../../approval/types.ts";
 import type {
   AdapterCapabilities,
-  HarnessAdapter,
+  Harness,
   EffortOption,
   HarnessEventSink,
-  HarnessSessionBindingSink,
+  SessionReferenceSink,
   ModelOption,
   ModelConfiguration,
   OpenOptions,
@@ -101,7 +100,7 @@ import {
 } from "./thread.ts";
 export { codexPromptInput, mapThreadStatus, openCodexThread } from "./thread.ts";
 
-export class CodexAdapter implements HarnessAdapter {
+export class CodexAdapter implements Harness {
   readonly harness = "codex";
   // steer 经 userMessage completed 回执显式报告 applied；cancel 会把原生
   // pending_input 变成不可达（Controller 在发 cancel 前 reclaim），正常结束的
@@ -112,14 +111,9 @@ export class CodexAdapter implements HarnessAdapter {
   } as const;
   // 可选能力接口落地并验证后才声明对应 marker——契约测试钉住
   // "声明支持就必须实现对应接口"。
-  // sync：catch-up 走 turn/start.additionalContext（experimental API，initialize 已声明
-  // experimentalApi）。曾用 thread/inject_items 注入独立 user message，但那会污染 codex
-  // 原生历史（rollout 里出现无对应回合的悬空 user message）；additionalContext 由 codex
-  // 以 contextual fragment 形态随本 turn 入史，且不过 UserPromptSubmit hook。
   readonly capabilities: AdapterCapabilities = {
     prompt: { image: { supported: true } },
     compact: { supported: true },
-    sync: { supported: true },
     config: { supported: true },
     reconcile: { supported: true },
     approvalRouting: { supported: true },
@@ -225,10 +219,31 @@ export class CodexAdapter implements HarnessAdapter {
     rt.peer.notify("initialized", {});
   }
 
-  async open(
+
+  create(options: OpenOptions, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
+    if (options.sessionId || options.resumeState) throw new Error("Use resume to restore an existing session");
+    return this.open(options, sink, reference);
+  }
+
+  resume(options: OpenOptions & { sessionId: string }, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
+    return this.open(options, sink, reference);
+  }
+
+  prompt(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    const active = this.mustThread(ref).activeTurn;
+    if (active && !active.finalized) return Promise.resolve({ accepted: false, effective: "rejected", reason: "session_busy" });
+    return this.sendTurn(ref, input);
+  }
+
+  steer(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    const active = this.mustThread(ref).activeTurn;
+    if (!active || active.finalized) return Promise.resolve({ accepted: false, effective: "rejected", reason: "not_running" });
+    return this.sendTurn(ref, input);
+  }
+  private async open(
     opts: OpenOptions,
     sink: HarnessEventSink,
-    binding?: HarnessSessionBindingSink,
+    binding?: SessionReferenceSink,
   ): Promise<HarnessSessionHandle> {
     const command = codexLaunchCommand(this.options.command);
     let rt = this.launch(command, opts, sink);
@@ -555,7 +570,7 @@ export class CodexAdapter implements HarnessAdapter {
    * 统一输入入口：有匹配的活跃 Aide turn 时映射原生 `turn/steer`，否则发
    * `turn/start`。Adapter 以自身运行态做最终判断，Controller 不感知 Codex turn id。
    */
-  async sendTurn(
+  private async sendTurn(
     ref: HarnessSessionHandle,
     input: PromptInput,
   ): Promise<SendTurnReceipt> {
@@ -632,14 +647,7 @@ export class CodexAdapter implements HarnessAdapter {
     const turn: CodexTurn = { turnId: input.invocationId, finalized: false, replies: new MessageReplies([input.messageId]) };
     rt.turnId = input.invocationId;
     rt.activeTurn = turn;
-    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 HarnessStore
-    // 的事实，且入参 blocks 可能含 <aide-sync> prepend，不能进正典历史）；adapter 只在
-    // steer 成功时补 delivery:"steer" 的用户消息。
-
-    // 跨 harness catch-up 随本 turn 送达：additionalContext 按 key 的 contextual
-    // fragment（untrusted → user 语义）在 codex 侧与 prompt 同回合入史。admission 失败
-    // 即未送达，controller 水位不动、下次重注入（PromptInput.syncBlocks 契约）。
-    const syncText = input.syncBlocks?.length ? textOf(input.syncBlocks) : undefined;
+    // Controller owns the live input/running events; this adapter reports native progress.
     // fast-submit：turn/start 的响应立即返回 status=inProgress 的 Turn（旧版本才会阻塞到结束）。
     // 因此响应只用于拿 codex turn id 和捕获终态；正常结束以 turn/completed 通知为准。
     const collaborationMode = codexCollaborationMode(rt);
@@ -647,7 +655,6 @@ export class CodexAdapter implements HarnessAdapter {
       .request("turn/start", {
         threadId: rt.threadId,
         input: codexPromptInput(input.blocks),
-        ...(syncText ? { additionalContext: { "aide-sync": { value: syncText, kind: "untrusted" } } } : {}),
         ...(collaborationMode
           ? { collaborationMode }
           : {
@@ -677,7 +684,7 @@ export class CodexAdapter implements HarnessAdapter {
     return { accepted: true, effective: "new_turn" };
   }
 
-  async cancel(ref: HarnessSessionHandle): Promise<void> {
+  async abort(ref: HarnessSessionHandle): Promise<void> {
     const rt = this.mustThread(ref);
     const turn = rt.activeTurn;
     if (!turn || turn.finalized) return;

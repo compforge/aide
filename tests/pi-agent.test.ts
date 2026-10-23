@@ -30,7 +30,7 @@ import { Store } from "../plugins/personal/store.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createHarnessAdapter } from "../src/host/harness/registry.ts";
-import type { HarnessEvent, HarnessSessionBinding } from "../src/host/harness/adapter.ts";
+import type { HarnessEvent, HarnessSessionReference } from "../src/host/harness/adapter.ts";
 
 type Reply = { text: string; stop?: string; thought?: string; pause?: Promise<void> } | { tool: string; args: unknown; pause?: Promise<void> } | { error: true } | { hold: true };
 
@@ -85,7 +85,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const inputs = { cwd: root, agentDir, model };
   const config = { ...inputs, config: await resolvePiConfig({ ...inputs, ...(harness === "chief" ? { skillPaths: [] } : {}) }) };
   const events: HarnessEvent[] = [];
-  let binding: HarnessSessionBinding | undefined;
+  let binding: HarnessSessionReference | undefined;
   let finished: (() => void) | undefined;
   const adapter = createHarnessAdapter({ id: "assistant", harness }, {
     targetConfig: { harness }, openApproval: async () => { throw new Error("Unexpected interaction"); },
@@ -93,15 +93,19 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
     routeSession: (input) => createRouteAgent({ ...config, ...input, port: { async route(value) { return value; }, conversations() { return { conversations: [], nextOffset: null }; }, input() { return {}; } } }),
     chiefSession: (input) => createChiefAgent({ ...config, ...input, work, persons }),
   });
-  const open = () => adapter.open({ cwd: root, ...(binding ? { resumeState: binding.resumeState } : {}) }, (event) => {
+  const eventsOf: import("../src/host/harness/adapter.ts").HarnessEventSink = (event) => {
     events.push(event);
     session.appendEvent({ ...event, source: { type: "harness", harnessTargetId: "assistant" }, harness, harnessTargetId: "assistant", contextId: "main" });
     if (event.kind === "state_update" && event.payload.state === "idle") finished?.();
-  }, (value) => { binding = value; });
+  };
+  const reference: import("../src/host/harness/adapter.ts").SessionReferenceSink = value => { binding = value; };
+  const open = () => binding
+    ? adapter.resume({ cwd: root, sessionId: binding.identity.id, resumeState: binding.resumeState }, eventsOf, reference)
+    : adapter.create({ cwd: root }, eventsOf, reference);
   let ref = await open();
   assert.equal(adapter.harness, harness);
   assert.equal(ref.harness, harness);
-  const sessionFile = (binding!.resumeState.data as { sessionFile: string }).sessionFile;
+  const sessionFile = (binding!.resumeState!.data as { sessionFile: string }).sessionFile;
   const nativeRoot = join(agentDir, "sessions");
   assert.ok(relative(nativeRoot, sessionFile).length > 0);
   assert.ok(!relative(nativeRoot, sessionFile).startsWith(".."));
@@ -116,7 +120,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   });
   async function run(text: string, turnId: string) {
     const terminal = new Promise<void>((resolve) => { finished = resolve; });
-    const receipt = await adapter.sendTurn(ref, { invocationId: turnId, messageId: `user-${turnId}`, blocks: [{ type: "text", text }] });
+    const receipt = await adapter.prompt(ref, { invocationId: turnId, messageId: `user-${turnId}`, blocks: [{ type: "text", text }] });
     assert.deepEqual(receipt, { accepted: true, effective: "new_turn" });
     await terminal;
     return session.summarizeInvocation(turnId);
@@ -146,10 +150,10 @@ test("Pi streams thought and answer before completion without duplicating the fi
 test("Pi answers directly without work and resumes its native history", { timeout: 20_000 }, async (t) => {
   const fixture = await setup(t, () => ({ text: "你好，有什么可以帮你？" }));
   assert.equal(existsSync(fixture.personFile), false, "Generic Pi does not create a person profile");
-  assert.equal((fixture.binding().resumeState.data as { empty: boolean }).empty, true);
+  assert.equal((fixture.binding().resumeState!.data as { empty: boolean }).empty, true);
   assert.equal((await fixture.reopen()).resumed, false);
   const summary = await fixture.run("你好", "greeting");
-  assert.equal((fixture.binding().resumeState.data as { empty: boolean }).empty, false);
+  assert.equal((fixture.binding().resumeState!.data as { empty: boolean }).empty, false);
   assert.equal(summary.finalText, "你好，有什么可以帮你？");
   assert.equal(fixture.requestHeaders[0]!["x-provider"], "snapshot");
   assert.equal(fixture.requestHeaders[0]!["x-model"], "snapshot");
@@ -167,7 +171,7 @@ test("Pi answers directly without work and resumes its native history", { timeou
   await fixture.run("刚才说了什么？", "followup");
   assert.equal(fixture.binding().identity.id, identity);
   assert.match(JSON.stringify(fixture.requests[1]!.messages), /你好/);
-  const data = fixture.binding().resumeState.data as { sessionFile: string };
+  const data = fixture.binding().resumeState!.data as { sessionFile: string };
   await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile: data.sessionFile, work: fixture.work }), /does not belong/);
   await assert.rejects(createPiAgent({ ...fixture.config, sessionFile: join(fixture.config.agentDir, "sessions", "missing.jsonl") }), /missing/);
 });
@@ -232,7 +236,7 @@ test("Chief executes all five Work tools through the SDK and keeps commentary ou
   assert.equal(fixture.events.filter((event) => event.kind === "state_update").length, 1);
   assert.equal((await fixture.reopen()).resumed, true);
   assert.equal((await fixture.run("继续聊天", "chief-resumed")).stopReason, "end_turn");
-  const sessionFile = (fixture.binding().resumeState.data as { sessionFile: string }).sessionFile;
+  const sessionFile = (fixture.binding().resumeState!.data as { sessionFile: string }).sessionFile;
   await assert.rejects(createPiAgent({ ...fixture.config, sessionFile }), /does not belong/);
   await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile,
     work: { ...fixture.work, conversationId: "another" } as WorkService }), /does not belong/);
@@ -250,9 +254,9 @@ test("Pi model failure and cancellation settle once, without a successful final 
   assert.equal(failed.finalText, undefined);
   const running = fixture.run("取消测试", "cancelled");
   await pending;
-  const rejected = await fixture.adapter.sendTurn(fixture.ref(), { invocationId: "other", messageId: "other", blocks: [{ type: "text", text: "busy" }] });
+  const rejected = await fixture.adapter.prompt(fixture.ref(), { invocationId: "other", messageId: "other", blocks: [{ type: "text", text: "busy" }] });
   assert.equal(rejected.effective, "rejected");
-  await fixture.adapter.cancel(fixture.ref());
+  await fixture.adapter.abort(fixture.ref());
   const cancelled = await running;
   assert.equal(cancelled.stopReason, "cancelled");
   assert.equal(cancelled.finalText, undefined);
@@ -261,7 +265,7 @@ test("Pi model failure and cancellation settle once, without a successful final 
 
 test("Pi refuses unsupported input before admission and does not promote truncated text to final", { timeout: 20_000 }, async (t) => {
   const fixture = await setup(t, () => ({ text: "未完成的回答", stop: "length" }));
-  await assert.rejects(fixture.adapter.sendTurn(fixture.ref(), { invocationId: "image", messageId: "image",
+  await assert.rejects(fixture.adapter.prompt(fixture.ref(), { invocationId: "image", messageId: "image",
     blocks: [{ type: "image", data: "AA==", mimeType: "image/png" }] }), /does not support/);
   assert.equal(fixture.requests.length, 0);
   assert.equal(fixture.events.length, 0);
@@ -301,47 +305,36 @@ test("Aide isolates continuous native contexts across conversations, restart and
     await aide.receive(fixtureIncoming({ channelId: "web", sessionId, conversationId, id, text: `question-${id}` })); await aide.settled();
     assert.equal(aide.personal.conversations.inputs().at(-1)!.consumption.phase, "done");
   };
-  const binding = (sessionId: string, conversationId: string) => {
-    const session = new HarnessFixtures(home).open("aide:execution");
-    const target = chiefTarget(conversationId);
-    const r = aide.personal.conversations.resource(conversationId)!;
-    const contextId = resourceExecutionKey({ pluginInstanceId: "personal", namespace: "v1", executionId: "test", controllerName: "agent",
-      resourceRef: { apiVersion: r.apiVersion, kind: r.kind, namespace: r.metadata.namespace, name: r.metadata.name, uid: r.metadata.uid } });
-    return session.meta.contexts[contextId]!.harnessSessions[target]!;
-  };
+  const binding = (_sessionId: string, conversationId: string) => aide.personal.conversations.resource(conversationId)!.status.agent!.session!;
+
   aide = open();
   try {
     assert.equal(aide.runtime.plugins.listInstances().length, 1);
     await send("lark:app:group-a", "lark:app:group-a", "a1");
     const original = binding("lark:app:group-a", "lark:app:group-a");
     await send("lark:app:group-a", "lark:app:group-a", "a2");
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a").id, original.id);
     assert.match(JSON.stringify(fixture.requests[3]), /native-response-0/);
     await send("lark:app:group-b", "lark:app:group-b", "b1");
-    assert.notEqual(binding("lark:app:group-b", "lark:app:group-b").harnessSessionId, original.harnessSessionId);
+    assert.notEqual(binding("lark:app:group-b", "lark:app:group-b").id, original.id);
     assert.doesNotMatch(JSON.stringify(fixture.requests[6]), /question-a1|native-response-0/);
     await aide.close();
     aide = open(); await aide.start();
     assert.equal(aide.runtime.plugins.listInstances().length, 1);
     await send("lark:app:group-a", "lark:app:group-a", "a3");
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a").id, original.id);
     assert.match(JSON.stringify(fixture.requests[9]), /native-response-1/);
     assert.doesNotMatch(JSON.stringify(fixture.requests[9]), /question-b1/);
     assert.equal(aide.outputs().filter((message) => message.conversationId === "lark:app:group-a").length, 3);
     await aide.close();
-    const cwd = join(fixture.config.cwd, "other-cwd"); mkdirSync(cwd);
-    aide = open(cwd); await aide.start();
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a")?.resumeState, undefined);
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a"), undefined, "cwd change clears the native binding; a new native context uses the durable Conversation summary");
+    aide = open(); await aide.start();
     await send("lark:app:group-a", "lark:app:group-a", "a4");
-    assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
-    assert.equal(aide.outputs().filter((message) => message.conversationId === "lark:app:group-a").length, 4);
     const beforeDelete = binding("lark:app:group-a", "lark:app:group-a");
     const conversation = aide.personal.conversations.get("lark:app:group-a")!;
     assert.deepEqual(await aide.deleteConversation(conversation.id, conversation.revision, aide.personal.conversations.resource(conversation.id)!.metadata.uid), { deleted: true });
     await aide.settled();
     await send("lark:app:group-a", "lark:app:group-a", "a5");
-    assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, beforeDelete.harnessSessionId);
+    assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").id, beforeDelete.id);
     assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)), /question-a[1-4]|native-response-[0-4]/);
     await aide.close();
     aide = open(); await aide.start();
@@ -486,7 +479,7 @@ export default function (pi) {
       piSession: (input) => createPiAgent({ ...fixture.config, ...input, extensionPaths: [extension] }),
       log: (entry) => { if (entry.level === "error") errors.push(entry.error?.message ?? entry.message); },
     });
-    const open = () => adapter.open({ cwd: fixture.config.cwd }, () => {}, () => {});
+    const open = () => adapter.create({ cwd: fixture.config.cwd }, () => {}, () => {});
     if (fail) {
       await assert.rejects(open(), /Pi extension startup failed.*controlled extension startup failure/);
       assert.ok(errors.some((error) => error.includes("controlled extension startup failure")));
@@ -526,9 +519,8 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
     assert.match(JSON.stringify(request.messages), /fixture-as-ops/);
     assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|create_work/);
   }
-  const session = new HarnessFixtures(home).open("aide:execution");
-  assert.equal(session.meta.harnessTargets.default!.harness, "pi");
-  assert.ok(Object.values(session.meta.contexts).some((lane) => lane.harnessSessions.default?.harness === "pi"));
+  assert.equal(existsSync(join(home, "harness", "events.jsonl")), false);
+  assert.equal(existsSync(join(home, "harness", "meta.json")), false);
 });
 
 /** @case Native Chief context survives separate invocations and restart; business consumption still requires its tool. */
@@ -571,7 +563,7 @@ test("Pi applies immediate steer at the next safe boundary", { timeout: 20_000 }
   const fixture = await setup(t, (_request, index) => ({ text: index ? "Handled urgent input" : "First response", ...(index ? {} : { pause }) }));
   const running = fixture.run("initial input", "continuous");
   for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
-  const receipt = await fixture.adapter.sendTurn(fixture.ref(), { invocationId: "continuous", messageId: "urgent", blocks: [{ type: "text", text: "urgent-update" }] });
+  const receipt = await fixture.adapter.steer!(fixture.ref(), { invocationId: "continuous", messageId: "urgent", blocks: [{ type: "text", text: "urgent-update" }] });
   assert.deepEqual(receipt, { accepted: true, effective: "steer" });
   release(); await running;
   assert.equal(fixture.requests.length, 2);
@@ -652,8 +644,8 @@ test("Pi cancellation clears unapplied steering before the next invocation", { t
   const fixture = await setup(t, (_request, index) => ({ text: "response", ...(index === 0 ? { pause } : {}) }));
   const first = fixture.run("initial", "cancelled-steer");
   for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
-  await fixture.adapter.sendTurn(fixture.ref(), { invocationId: "cancelled-steer", messageId: "queued-urgent", blocks: [{ type: "text", text: "never-applied-marker" }] });
-  await fixture.adapter.cancel(fixture.ref()); await first; release();
+  await fixture.adapter.steer!(fixture.ref(), { invocationId: "cancelled-steer", messageId: "queued-urgent", blocks: [{ type: "text", text: "never-applied-marker" }] });
+  await fixture.adapter.abort(fixture.ref()); await first; release();
   assert.ok(fixture.events.some(e => e.kind === "input_delivery_update" && e.payload.messageId === "queued-urgent" && e.payload.state === "failed"));
   await fixture.run("new request", "next");
   assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)!.messages), /never-applied-marker/);
@@ -678,7 +670,9 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
       return { tool: "route_input", args: { inputId, conversationUids: [targetUid], reason: "continuing subject" } };
     }
     if (messages.at(-1)!.role === "tool") return { text: "Handled" };
-    const inputId = JSON.parse(raw.split("Activation: ").at(-1)!.split("\n")[0]!).inputId;
+    const inputId = raw.includes("New Input:")
+      ? JSON.parse(raw.split("\n").find(line => line.startsWith('{"inputId":'))!).inputId
+      : JSON.parse(raw.split("Activation: ").at(-1)!.split("\n")[0]!).inputId;
     return { tool: "assess_input", args: { inputId, conversationSummary: "Recorded fact", summary: "Recorded fact" } };
   });
   const home = join(fixture.config.cwd, "route-home");
@@ -692,6 +686,8 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
   assert.equal(routeCalls, 3);
   assert.equal(aide.conversations.inputStore.get("route-first")!.status.route?.result, undefined);
   await aide.conversations.submit("route-second", { origin: "source", originId: "fixture", text: "subject-two" });
+  for (let i = 0; i < 300 && !aide.conversations.inputStore.get("route-second")!.status.route?.executionId; i++) await Bun.sleep(10);
+  assert.ok(aide.conversations.inputStore.get("route-second")!.status.route?.executionId);
   release(); await aide.settled();
   for (const id of ["route-first", "route-second"]) {
     const input = aide.conversations.inputStore.get(id)!;
@@ -702,7 +698,7 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
   const followup = routeRequests.find(r => JSON.stringify(r.messages).includes("subject-two"))!;
   assert.match(JSON.stringify(followup.messages), /subject-one/);
   assert.equal(aide.conversations.list().length, 1);
-  assert.equal(aide.invocations().filter(i => i.harnessTargetId === "personal-route").length, 2);
+  assert.equal(aide.invocations().filter(i => i.harnessTargetId === "personal-route").length, 1);
 });
 
 
@@ -722,17 +718,17 @@ test("Pi waits for in-flight steer admission before releasing a settled binding"
     native.subscribe(event => { if (event.type === "agent_settled") settled(); });
     return native;
   } });
-  const handle = await adapter.open({ cwd: fixture.config.cwd }, e => events.push(e), () => {});
+  const handle = await adapter.create({ cwd: fixture.config.cwd }, e => events.push(e), () => {});
   t.after(async () => { releaseResponse(); releaseAdmission(); await adapter.close(handle); });
-  await adapter.sendTurn(handle, { invocationId: "first", messageId: "initial", blocks: [{ type: "text", text: "initial" }] });
+  await adapter.prompt(handle, { invocationId: "first", messageId: "initial", blocks: [{ type: "text", text: "initial" }] });
   for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
-  const steering = adapter.sendTurn(handle, { invocationId: "first", messageId: "late", blocks: [{ type: "text", text: "late-admission-marker" }] });
+  const steering = adapter.steer(handle, { invocationId: "first", messageId: "late", blocks: [{ type: "text", text: "late-admission-marker" }] });
   await started; releaseResponse(); await nativeSettled; await Bun.sleep(10);
   assert.ok(!events.some(e => e.kind === "state_update" && e.payload.state === "idle"));
   releaseAdmission(); await steering;
   for (let i = 0; i < 200 && !events.some(e => e.kind === "state_update"); i++) await Bun.sleep(10);
   assert.ok(events.some(e => e.kind === "input_delivery_update" && e.payload.messageId === "late" && e.payload.state === "failed"));
-  await adapter.sendTurn(handle, { invocationId: "second", messageId: "next", blocks: [{ type: "text", text: "next" }] });
+  await adapter.prompt(handle, { invocationId: "second", messageId: "next", blocks: [{ type: "text", text: "next" }] });
   for (let i = 0; i < 200 && !events.some(e => e.kind === "state_update" && e.invocationId === "second"); i++) await Bun.sleep(10);
   assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)!.messages), /late-admission-marker/);
 });

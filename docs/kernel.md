@@ -36,7 +36,7 @@ Operator 通过 `verbs.harness` 请求执行。运行时使用插件实例、资
 
 HarnessTarget 表达具体执行配置，包含 ID、Harness 实现及模型等选项。Operator 可以从冻结快照的 `harnessTargets` 发现已配置目标，通过 harnessTargetId 选择；省略时使用应用默认目标。默认 Target 由应用配置提供，不依赖交互式选择。Target 是配置与能力发现信息，不要求注册为 Resource。原生 Session 仍由 Adapter 管理，恢复身份和 resumeState 由提供方协议决定。
 
-业务可以用 `freshContext` 请求用当前提示材料建立新上下文。宿主同时记录历史边界，防止原生上下文重建时重新补入已被压缩或舍弃的材料。执行工作目录变化保留资源与执行记录，并清空原生恢复绑定。
+业务可以用 `freshContext` 请求用当前提示材料建立新上下文。原生历史由 Harness 自持，Host 不保存历史边界或补偿上下文。恢复时工作目录与原生会话是否匹配，由具体 Harness 校验。
 
 执行结束只说明 Harness 收口。目标是否达成、是否需要核验、是否应当通知人，都由业务 Controller 判断。取消和超时也不能证明外部副作用没有发生。
 
@@ -44,13 +44,17 @@ HarnessTarget 表达具体执行配置，包含 ID、Harness 实现及模型等�
 
 ApplicationRuntime 装配插件 Manager；配置 `harness` 时再装配 ExecutionService。纯资源插件无需 Adapter、Target 或占位执行配置。前者管理插件、资源与调度，只通过 HarnessExecution 能力接口请求或取消调用；后者管理 Harness 执行、原生审批、存储租约与关闭。Manager 不读取执行历史，也不维护原生绑定。底座不再有 SessionStore / SessionHandle 或统一 ExecutionJournal 入口。
 
-没有历史记录时，Harness 存储在首次调用时才创建；仅配置 Target、查询执行视图或运行资源 Controller 都不会创建执行存储。已有记录由 Harness 模块在启动时恢复。HarnessStore 保存调用事件、状态投影与原生绑定，EventLedger 是内部追加存储机制，不是插件运行的前置对象。
+Harness 自己保存原生会话、历史、压缩与 checkpoint，负责 durable 恢复。Aide 不保存执行事件日志、不在启动时回放调用、不从历史拼接恢复上下文。仅配置 Target、查询执行视图或运行纯资源 Controller 不会启动原生会话。
 
-Reconcile 的冻结快照只有 cwd 与 HarnessTarget 配置，不复制全局执行历史。Harness 返回 invocationId 与执行结果；应用展示通过明确选择执行 ID 查询日志投影，取得副本。Personal 自己解释 Conversation/Input 关联，底座只保存不透明 attributes。
+Plugin / Operator 通过 ResourceClient 操作 CRD，通过 Verb 发起非 CRD 操作。`harness` verb 将 create、resume、prompt、followUp、steer、abort、close 交给 Harness interface；没有 Binding 或额外 Agent interface。Host 记录调用关联、接收回执和结果，Harness 实现拥有运行句柄和原生协议。Verb 的统一诊断记录包含调用 ID、执行 ID、资源 UID、操作、耗时和结果，不复制模型上下文，也不承担恢复。
 
-底座不再维护 Lane 或 Turn。资源执行上下文保存原生绑定与历史边界；HarnessInvocation 是一次调用的唯一执行身份，队列、事件、结果、取消与审批都关联 invocationId。同一资源上下文串行使用，不同上下文受并发上限约束，没有主通道或旁路通道。
+需要持续上下文的资源通过 `status.agent` 保存实际使用的 `harness`、`targetId` 和 `session`。会话包括原生 `id`，以及可选的 Adapter 专属 `resume: { version, data }` 定位信息。Host 校验资源 UID、按版本更新绑定，保留其它业务状态；恢复时交还原生身份与定位信息。工作目录来自执行配置，其恢复约束由 Harness 校验，不复制到资源 status。引用不包含 transcript、context 或 checkpoint 副本。
 
-Harness 使用独立的 `harness/` 目录：`meta.json` 保存配置与原生绑定，`events.jsonl` 保存执行事实，`runtime.log` 保存执行诊断。插件与调度的诊断日志写入应用根目录的 `runtime.log`。资源数据库使用插件实例作为 scope，资源键由实例、namespace、类型和名称组成，不包含磁盘目录。事件使用 application scope，以 contextId 与 invocationId 表达归属，原生 raw 数据原样保存。当前格式不兼容旧 Session / Lane / Turn 存储，不提供迁移或双读。原生上下文重建仅补入当前资源上下文与 Target 的历史，跨资源知识由插件显式提供。
+Reconcile 的冻结快照只有 cwd 与 HarnessTarget 配置。Harness 返回 invocationId 与本次执行结果；应用按明确的执行 ID 查询实时投影副本。Personal 自己解释 Conversation/Input 关联，底座只传递不透明 attributes。同一资源上下文串行使用，不同上下文受并发上限约束。Followup 复用原生会话，steer 在原生能力支持时追加立即输入。
+
+`HarnessActivity` 只承载进程内的调用、审批与 Web 展示；保留活跃调用和最近 40 次已结束调用，空闲上下文缓存也保留最近 40 个。淘汰空闲句柄不删除 Harness 自己保存的会话。重启后实时执行细节消失，Input、Output 和处理进展仍由业务资源恢复。原生恢复失败明确报错，不静默创建新会话或重放可能产生副作用的操作。
+
+应用根目录的 `runtime.log` 保存插件与调度诊断，`harness-runtime.log` 和轮转的 `harness-native.jsonl` 保存执行及协议诊断，均不用于恢复。资源数据库以插件实例为 scope，键由实例、namespace、类型和名称组成。移除的执行存储没有迁移、兼容或双读路径。
 
 ## 能力与事务
 
