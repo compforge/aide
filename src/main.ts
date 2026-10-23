@@ -31,7 +31,7 @@ await withAsyncFileLock(path, async () => {
   const harnesses = await resolveHarnessConfigs(config, { home, cwd, file, environment, log });
   const connectors = Connectors.fromConfig(config.connectors, environment);
   const aide: Aide = new Aide(home, {
-    config, connectors,
+    config, connectors, larkAppId: lark?.appId,
     cwd, timezone, defaultHarnessConfig: harnesses.defaultHarnessConfig,
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
       targetConfig: target.harness === "routine" ? { harness: "routine" } : target.harness === "task" ? { harness: "task" } : target.harness === "route" ? { harness: "route" } : target.harness === "chief" ? { harness: "chief" } : harnesses.defaultHarnessOptions,

@@ -210,7 +210,7 @@ test("Lark projects Harness progress but only explicit messages become replies",
   const root = mkdtempSync(join(tmpdir(), "aide-lark-live-"));
   let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
   let emitter: { sink: HarnessEventSink; turnId: string } | undefined;
-  const options = fakeOptions({ chief: async () => { await gate; return "最终答案"; }, execute: async () => { throw new Error("No Work expected"); } }, root);
+  const options = fakeOptions({ chief: async () => { await gate; return "最终答案"; }, execute: async () => { throw new Error("No Work expected"); } }, root, [], root, "cli_progress");
   const aide = new Aide(root, { ...options, createAdapter(target) {
     const adapter = options.createAdapter(target), open = adapter.create.bind(adapter), send = adapter.prompt.bind(adapter);
     let sink: HarnessEventSink;

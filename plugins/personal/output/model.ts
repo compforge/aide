@@ -26,7 +26,7 @@ export interface OutputStatus {
 export type Output = Resource<OutputSpec, OutputStatus>;
 
 import type { VerbResult } from "@compforge/aide-plugin";
-/** Persists a message for Channel delivery; success does not mean the recipient has read it. */
+/** Persists an Output; success acknowledges creation, while status separately reports delivery (never reading). */
 export interface SayInput {
   readonly text: string;
   readonly inputIds?: readonly string[];
@@ -36,5 +36,6 @@ export interface SayInput {
   /** Person references; explicit [] suppresses inference from respondToInputId's sender. */
   readonly receivers?: readonly ResourceRef[];
 }
-export type SayResult = VerbResult<{ readonly outputId: string }>;
+export interface SayReceipt { readonly outputId: string; readonly target: Address; readonly status: OutputStatus; }
+export type SayResult = VerbResult<SayReceipt>;
 

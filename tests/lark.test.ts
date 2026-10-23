@@ -33,7 +33,7 @@ test("Lark inbox survives restart; duplicate events do not execute twice; ordina
   const aide = new Aide(home, fakeOptions({
     async chief(prompt) { routes++; return prompt.includes('小明') ? "你好，小明" : "怎么称呼你？"; },
     async execute() { throw new Error("No work expected"); },
-  }, home), log);
+  }, home, [], home, "cli_test"), log);
   const { transport, sent } = fakeTransport();
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
@@ -140,7 +140,7 @@ test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats a
   const aide = new Aide(home, fakeOptions({
     async chief(prompt) { prompts.push(prompt); return "已收到群内请求"; },
     async execute() { throw new Error("No Work expected"); },
-  }, home), log);
+  }, home, [], home, "cli_group"), log);
   const { transport, sent } = fakeTransport({ openId: "ou_aide", name: "Aide" });
   let channel = new LarkChannel(home, "cli_group", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });

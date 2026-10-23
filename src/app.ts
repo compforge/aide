@@ -10,6 +10,7 @@ import { outputView } from "./output.ts";
 import { personRequirements } from "../plugins/personal/person/requirements.ts";
 import { requirementOutputs } from "../plugins/personal/output/requirements.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
+import { assertChannelDelivery } from "./channel/address.ts";
 import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import type { SourceDefinition } from "../plugins/personal/source/input.ts";
@@ -38,6 +39,8 @@ import { IncomingSchema, type Incoming } from "./channel/message.ts";
 export interface AideOptions {
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   defaultHarnessConfig: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
+  /** The configured bot Channel app, independent of the Lark Connector account. */
+  larkAppId?: string;
   createAdapter: ExecutionOptions["createAdapter"];
 }
 
@@ -90,7 +93,7 @@ export class Aide {
     storage.configure(config?.resources);
     storage.register("personal", personalDefinitions);
     this.inputs = new InputStore(home);
-    this.outputStore = new OutputStore(home);
+    this.outputStore = new OutputStore(home, target => assertChannelDelivery(target, options.larkAppId));
     this.unsubscribeOutputs = this.outputStore.subscribe(() => this.notify());
     this.inputs.storage.onRetentionError = (resource, error) => this.log.error({ err: error, kind: resource.kind, uid: resource.metadata.uid }, "Resource retention decision failed; preserved resource");
     this.unsubscribeResources = this.inputs.storage.subscribe((scope, resource) => { this.log.info({ scope, kind: resource.kind, uid: resource.metadata.uid }, "Resource reclaimed"); });
@@ -235,7 +238,12 @@ export class Aide {
     await this.persons.initialize();
   }
   start(): Promise<void> {
-    return this.starting ??= this.initializePeople().then(() => this.personal.start());
+    return this.starting ??= Promise.resolve().then(async () => {
+      for (const output of this.outputStore.reconcileTargets()) this.log.warn({ outputId: output.metadata.name,
+        target: output.spec.target, phase: output.status.phase, error: output.status.lastError }, "Output has no configured delivery Channel");
+      await this.initializePeople();
+      await this.personal.start();
+    });
   }
   async settled(): Promise<void> {
     await this.start();

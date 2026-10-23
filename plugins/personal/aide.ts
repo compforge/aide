@@ -8,6 +8,7 @@ import type { OutputStore } from "./output/store.ts";
 import { createRouteAgent } from "../../agents/route/agent.ts";
 import { assessInput, type AssessInput } from "./conversation/assess.ts";
 import { attemptOf, attemptPatch, resourceRef, changeAttempt } from "./input/state.ts";
+import { outputStatusTool } from "./output/tools.ts";
 import { conversationPolicy } from "./conversation/config.ts";
 import { immediate, eligible, finalizeExecution, type LoopStatus } from "./loop.ts";
 import { ROUTE_TYPE, type RouteStatus } from "./route/model.ts";
@@ -95,6 +96,7 @@ export class Personal {
         this.log.info({ conversationId }, "Chief understanding updated");
         return result;
       });
+      tools.push(outputStatusTool(this.conversations.outputStore, () => ({ conversationUid: active().metadata.uid })));
       return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(conversationId), persons: this.options.persons, tools, beforeWorkMutation: () => { active(); } });
     };
   }
@@ -157,7 +159,7 @@ export class Personal {
       ? { name: "routePending", value: "pending" } : { name: "assessPending", value: owner.uid! } });
     const c = owner.kind === "Conversation" ? this.store.resources.get<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, owner.name) : undefined;
     if (!id) return { ...(c ? { context: { version: c.metadata.resourceVersion, summary: c.status.summary, recent: c.status.recent,
-      summaryChars: conversationPolicy(this.options.conversation).summaryChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, status: attemptOf(i, owner) })),
+      summaryChars: conversationPolicy(this.options.conversation).summaryChars, outputTargets: this.conversations.outputTargets(c.spec.id) } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, status: attemptOf(i, owner) })),
       nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
     const input = this.conversations.inputStore.get(id);
     if (!input || (!inputs.some(i => i.metadata.name === id) && !(history && input.status.assess?.[owner.uid!]))) throw new Error("Input is not attached to this resource");

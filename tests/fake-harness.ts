@@ -13,6 +13,7 @@ import { CONVERSATION_TYPE } from "../plugins/personal/conversation/model.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { defaultDestination } from "../plugins/personal/route/rules.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
+import { assertChannelDelivery } from "../src/channel/address.ts";
 import { sameAddress } from "../src/address.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputSpec } from "../plugins/personal/output.ts";
@@ -36,8 +37,8 @@ export interface Agent {
 }
 
 /** Exercise the real Runner/verb/Turn path; replace only the external Harness protocol. */
-export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], home = cwd) {
-  return { config: ConfigSchema.parse({}), cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): Harness => {
+export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], home = cwd, larkAppId?: string) {
+  return { config: ConfigSchema.parse({}), larkAppId, cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): Harness => {
     const workType = target.harness === "routine" ? ROUTINE_TYPE : TASK_TYPE;
     let sink: HarnessEventSink;
     let active: PromptInput | undefined;
@@ -90,7 +91,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
               recent: outcome.recent, action: outcome.action, question: outcome.question, nextAt: outcome.nextAt });
             const c = (await resources.list<ConversationResource["spec"], ConversationStatus>(CONVERSATION_TYPE)).find(c => c.spec.id === task.spec.conversationId);
             const text = outcome.action === "ask" ? outcome.question : outcome.notification;
-            if (c?.spec.address && text) new OutputStore(home).create(c.spec.id, randomUUID(), outputSpec(c, { conversationId: c.spec.id, text }, { producer: { ...workType, name: workId, namespace: "v1", uid: task.metadata.uid } }));
+            if (c?.spec.address && text) new OutputStore(home, target => assertChannelDelivery(target, larkAppId)).create(c.spec.id, randomUUID(), outputSpec(c, { conversationId: c.spec.id, text }, { producer: { ...workType, name: workId, namespace: "v1", uid: task.metadata.uid } }));
           }
           if (target.harness === "route") {
             for (const decision of JSON.parse(String(result)).decisions) {
@@ -112,7 +113,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const first = immediate[0]?.source;
             const address = immediate.length ? (first && immediate.every(i => i.source && sameAddress(first, i.source)) ? first : undefined) : c.spec.address;
             if (run && address && agent.notify !== false && typeof result === "string" && result) {
-              new OutputStore(home).create(conversationId, randomUUID(), outputSpec(c, { conversationId, text: result }, { executionId: run.id, target: address, inputIds: ids }));
+              new OutputStore(home, target => assertChannelDelivery(target, larkAppId)).create(conversationId, randomUUID(), outputSpec(c, { conversationId, text: result }, { executionId: run.id, target: address, inputIds: ids }));
             }
             if (run && ids.length && agent.complete !== false) await assessAll(resources, c, run.id, { inputIds: ids, summary: String(result) || "Handled silently" });
           }

@@ -1,10 +1,10 @@
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { OutputDefinition, OutputSpecSchema, OutputStatusSchema } from "./definition.ts";
 export { OutputSpecSchema } from "./definition.ts";
-import { isChannelAddress } from "../../../src/channel/address.ts";
+import { assertChannelDelivery, isChannelAddress } from "../../../src/channel/address.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { type ResourceListOptions } from "@compforge/aide-plugin";
+import { type Address, type ResourceListOptions } from "@compforge/aide-plugin";
 import { OUTPUT_TYPE, type Output, type OutputSpec, type OutputStatus } from "./model.ts";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 
@@ -17,7 +17,7 @@ export class OutputStore {
   readonly resources: PluginResourceStore;
   key(id: string): string { return this.resources.key(OUTPUT_TYPE, id); }
   private readonly listeners = new Set<(output: Output) => void>();
-  constructor(home: string) {
+  constructor(home: string, private readonly validateTarget: (target: Address) => void = assertChannelDelivery) {
     this.storage = ResourceStorage.open(home);
     this.storage.register("personal", [OutputDefinition]);
     this.resources = new PluginResourceStore({ home: this.storage.home, pluginInstanceId: "personal" });
@@ -60,6 +60,7 @@ export class OutputStore {
       if (saved.fingerprint !== fingerprint) throw new Error("Output identity already exists with different content or owner");
       throw new Error("Output was already created and reclaimed; do not recreate delivery");
     }
+    this.validateTarget(spec.target);
     // Preserve admission order even for same-ms outputs and after restart.
     const latest = this.storage.db.prepare("SELECT max(created) AS at FROM resources WHERE kind='aide.dev/Output'").get()?.at as string | null;
     const at = new Date(Math.max(Date.now(), latest ? Date.parse(latest) + 1 : 0)).toISOString();
@@ -69,6 +70,23 @@ export class OutputStore {
       status: isChannelAddress(spec.target) && spec.target.channelId === "web" ? { phase: "delivered", attempts: 0, deliveredAt: new Date().toISOString() } : { phase: "pending", attempts: 0 } };
     this.storage.write(key, "personal", { owner, object: output, control: {} }, { key: `output:${id}`, value: JSON.stringify({ fingerprint }) });
     this.notify(output); return output;
+  }
+  acceptsTarget(target: Address): boolean {
+    try { this.validateTarget(target); return true; } catch { return false; }
+  }
+  /** @spec A removed transport cannot leave an Output pending forever; interrupted sends require inspection, never blind replay. */
+  reconcileTargets(): Output[] {
+    const rejected: Output[] = [];
+    for (const output of this.list()) {
+      if (!["pending", "sending"].includes(output.status.phase)) continue;
+      try { this.validateTarget(output.spec.target); }
+      catch (error) {
+        this.update(output.metadata.name, s => ({ ...s, phase: s.phase === "sending" || s.attempts > 0 ? "uncertain" : "failed",
+          nextAttemptAt: undefined, lastError: String(error).slice(0, 4000) }));
+        rejected.push(this.get(output.metadata.name)!);
+      }
+    }
+    return rejected;
   }
   update(id: string, change: (current: OutputStatus) => OutputStatus): void {
     this.storage.transaction(() => {

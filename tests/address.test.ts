@@ -17,7 +17,7 @@ import { seedInput } from "./conversation-fixture.ts";
 
 function setup(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-address-"));
-  const options = fakeOptions({ async execute() { throw new Error("Unexpected Work"); } }, root);
+  const options = fakeOptions({ async execute() { throw new Error("Unexpected Work"); } }, root, [], root, "app");
   const aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   return { aide, root, options };
@@ -165,7 +165,7 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
   const sender = personRef(await aide.persons.observe({ provider: "lark", scope: "cli_app", id: "ou_sender" }, "张三"));
   const manager = personRef(await aide.persons.observe({ provider: "lark", scope: "cli_app", id: "ou_manager" }, "李四"));
   const scope = aide.personal, store = scope.conversations;
-  const source = larkAddress("cli_app", "group"), target = larkAddress("cli_app", "reporting-group");
+  const source = larkAddress("app", "group"), target = larkAddress("app", "reporting-group");
   await seedInput(store, "question", { conversationId: "topic", origin: "channel", originId: "lark", sender, source, text: "请帮我确认进展" });
   const say = chiefTools(emptyConnectors, (id, input) => store.say("topic", undefined, input.text, undefined, { ...input, idempotencyKey: id })).find((tool) => tool.name === "say")!;
   const reply = await say.execute("reply", { text: "确认了", respondToInputId: "question" }, undefined, undefined, {} as never);
@@ -212,4 +212,27 @@ test("Invalid receivers cannot publish an Output or mutate its Conversation; rec
   const persisted = await scope.plugins.resourceClient("personal").get({ ...OUTPUT_TYPE, namespace: "v1", name: sent.outputId });
   assert.deepEqual((persisted!.spec as { receivers: unknown }).receivers, [sender]);
   assert.deepEqual(store.outputs("topic").map(o => o.id), [sent.outputId]);
+});
+
+/** @case Application admission uses bot configuration, not the Connector's observation address; restart diagnoses stranded Outputs. */
+test("Aide rejects unowned targets and diagnoses pending delivery after the Channel is disabled", async t => {
+  const { aide, root, options } = setup(t);
+  const c = aide.conversations;
+  await assert.rejects(c.say("default", undefined, "do not queue", undefined,
+    { target: larkAddress("connector-app", "observed-chat") }), /No configured Channel/);
+  assert.equal(aide.outputs().length, 0);
+  const receipt = await c.say("default", undefined, "queued", undefined, { target: larkAddress("app", "bot-chat") });
+  assert.equal(receipt.status.phase, "pending");
+  await aide.close();
+  const restarted = new Aide(root, { ...options, larkAppId: undefined }, pino({ level: "silent" }));
+  try {
+    await restarted.start();
+    const output = restarted.outputStore.get(receipt.outputId)!;
+    assert.equal(output.status.phase, "failed");
+    assert.match(output.status.lastError!, /disabled/);
+    assert.equal(output.status.attempts, 0);
+    await assert.rejects(restarted.conversations.say("default", undefined, "still disabled", undefined,
+      { target: larkAddress("app", "bot-chat") }), /disabled/);
+    assert.equal(restarted.outputs().length, 1);
+  } finally { await restarted.close(); }
 });

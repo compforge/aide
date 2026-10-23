@@ -1,4 +1,4 @@
-import { larkAddress } from "../src/channel/address.ts";
+import { assertChannelDelivery, larkAddress, webAddress } from "../src/channel/address.ts";
 import { definition } from "./fixtures/resource-definition.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -147,4 +147,70 @@ test("Lark sends to explicit Output target after Conversation deletion and reuse
   assert.equal(f.outputs.get("delivery")!.status.phase, "delivered");
   assert.equal(f.outputs.get("delivery")!.status.attempts, 2);
   await channel.deliver(); assert.equal(sent.length, 2);
+});
+
+
+/** @case A Connector app cannot masquerade as a configured bot; rejected publication rolls back business changes too. */
+test("Output admission rejects disabled or mismatched Lark targets before persistence", async t => {
+  const f = await setup(t);
+  const bad = { ...f.spec(), target: larkAddress("connector-app", "chat") };
+  assert.throws(() => f.outputs.create("owner", "wrong-app", bad), /No configured Channel/);
+  assert.throws(() => new OutputStore(f.root).create("owner", "disabled", { ...f.spec(), target: larkAddress("app", "chat") }), /disabled/);
+  await assert.rejects(f.client.commit([
+    { operation: "patchStatus", resource: f.conversation, patch: { summary: "must roll back" } },
+    { operation: "create", type: OUTPUT_TYPE, name: "atomic", spec: bad },
+  ]), /No configured Channel/);
+  assert.equal(f.conversations.resource("topic")!.status.summary, "");
+  assert.equal(f.outputs.list().length, 0);
+  assert.equal(f.outputs.storage.hasReceipt("output:atomic"), false);
+  assert.ok(f.outputs.create("owner", "valid", { ...f.spec(), target: larkAddress("app", "chat") }));
+});
+
+test("Reconfigured channels fail pending Outputs and preserve uncertain sends without replay", async t => {
+  const f = await setup(t);
+  for (const id of ["pending", "sending", "retrying", "delivered"]) f.outputs.create("owner", id, { ...f.spec(), target: larkAddress("app", "chat") });
+  f.outputs.begin("sending"); f.outputs.delivered("delivered");
+  f.outputs.begin("retrying"); f.outputs.retry("retrying", "ambiguous send", new Date(0).toISOString());
+  const reopened = new OutputStore(f.root, target => assertChannelDelivery(target, "different-app"));
+  const rejected = reopened.reconcileTargets();
+  assert.deepEqual(new Set(rejected.map(o => o.metadata.name)), new Set(["pending", "sending", "retrying"]));
+  assert.equal(reopened.get("pending")!.status.phase, "failed");
+  assert.equal(reopened.get("pending")!.status.attempts, 0);
+  assert.equal(reopened.get("sending")!.status.phase, "uncertain");
+  assert.equal(reopened.get("sending")!.status.attempts, 1);
+  assert.equal(reopened.get("retrying")!.status.phase, "uncertain");
+  assert.equal(reopened.get("retrying")!.status.attempts, 1);
+  assert.equal(reopened.get("delivered")!.status.phase, "delivered");
+  assert.deepEqual(reopened.reconcileTargets(), []);
+  assert.deepEqual(reopened.get("pending")!.spec.target, larkAddress("app", "chat"));
+});
+
+test("say receipts and scoped read_output reflect real delivery without recreating messages", async t => {
+  const f = await setup(t);
+  const { outputStatusTool } = await import("../plugins/personal/output/tools.ts");
+  const target = larkAddress("app", "chat");
+  const options = { target, idempotencyKey: "one" };
+  const first = await f.conversations.say("topic", undefined, "reply", undefined, options);
+  assert.deepEqual(first.status, { phase: "pending", attempts: 0 });
+  assert.deepEqual(first.target, target);
+  const reader = outputStatusTool(f.outputs, () => ({ conversationUid: f.conversation.metadata.uid }));
+  const read = () => reader.execute("read", { outputId: first.outputId }, undefined, undefined, {} as never);
+  assert.match(JSON.stringify(await read()), /pending/);
+  f.outputs.begin(first.outputId); f.outputs.delivered(first.outputId);
+  const retry = await f.conversations.say("topic", undefined, "reply", undefined, options);
+  assert.equal(retry.outputId, first.outputId); assert.equal(retry.status.phase, "delivered");
+  assert.match(JSON.stringify(await read()), /delivered/);
+  assert.equal(f.outputs.list().length, 1);
+  for (const scope of [{ conversationUid: "other" }, { conversationUid: f.conversation.metadata.uid, producerUid: "another-work" }]) {
+    await assert.rejects(outputStatusTool(f.outputs, () => scope).execute("read", { outputId: first.outputId }, undefined, undefined, {} as never), /not in this scope/);
+  }
+  const web = await f.conversations.say("topic", undefined, "published", undefined, { target: webAddress("topic") });
+  assert.equal(web.status.phase, "delivered");
+});
+
+test("Known output targets keep bot addresses separate from Connector observations", async t => {
+  const f = await setup(t);
+  await seedInput(f.conversations, "bot", { conversationId: "topic", origin: "channel", originId: "lark", text: "question", source: larkAddress("app", "bot-chat") });
+  await seedInput(f.conversations, "observation", { conversationId: "topic", origin: "source", originId: "personal.lark", text: "observation", source: larkAddress("connector", "observed-chat") });
+  assert.deepEqual(f.conversations.outputTargets("topic"), [webAddress("topic"), larkAddress("app", "bot-chat")]);
 });

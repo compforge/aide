@@ -1,9 +1,10 @@
+import { webAddress } from "../../../src/channel/address.ts";
 import { resourceRef } from "../input/state.ts";
 import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient, Address } from "@compforge/aide-plugin";
 import type { InputSpec } from "../input/model.ts";
-import type { SayInput } from "../output/model.ts";
+import type { SayInput, SayReceipt, Output } from "../output/model.ts";
 import { InputStore } from "../input/store.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import type { ResourceClientChange } from "../../../src/host/plugin/resource/client.ts";
@@ -73,6 +74,19 @@ export class ConversationStore {
     await this.client.replace(c, { ...c.spec, trigger }, { ...c.status, nextTriggerAt: enabled ? nextTriggerAt(trigger) : null });
     return trigger;
   }
+  /** Known addresses are evidence, not permission to send; platform access is confirmed only by delivery. */
+  outputTargets(conversationId: string): Address[] {
+    const c = this.resource(conversationId);
+    if (!c) return [];
+    const candidates = [webAddress(conversationId), c.spec.address,
+      ...this.inputStore.query("assess", c.metadata.uid).filter(i => i.spec.origin === "channel").map(i => i.spec.source)];
+    const targets: Address[] = [];
+    for (const target of candidates) {
+      if (target && this.outputStore.acceptsTarget(target) && !targets.some(t => sameAddress(t, target))) targets.push(target);
+      if (targets.length === 20) break;
+    }
+    return targets;
+  }
   outputs(conversationId?: string): OutputView[] {
     const resources = this.listResources(conversationId);
     return resources.flatMap((c) => this.outputStore.list({ conversationUid: c.metadata.uid }).map(outputView))
@@ -102,7 +116,7 @@ export class ConversationStore {
     }
   }
   async say(conversationId: string, inputId: string | undefined, text: string, executionId?: string,
-    options: Omit<SayInput, "text"> = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { execution?: { id: string } | null }>): Promise<{ outputId: string }> {
+    options: Omit<SayInput, "text"> = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { execution?: { id: string } | null }>): Promise<SayReceipt> {
     const initial = await this.ensure(conversationId);
     const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
     if (options.respondToInputId && options.target) throw new Error("say must choose respondToInputId or target, not both");
@@ -147,12 +161,13 @@ export class ConversationStore {
       const draft: OutputDraft = { id, conversationId, text, workId: null };
       const association = { ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds } : {}) };
       try {
-        await this.client.commit([
+        const committed = await this.client.commit([
           { operation: "patchStatus", resource: c, patch: {} },
           ...(owner ? [{ operation: "patchStatus" as const, resource: owner, patch: {} }] : []),
           outputWrite(c, draft, association),
         ]);
-        return { outputId: id };
+        const output = committed.at(-1) as Output;
+        return { outputId: id, target: output.spec.target, status: output.status };
       } catch (error) { if (attempt >= 8 || !/version conflict/.test(String(error))) throw error; }
     }
   }
