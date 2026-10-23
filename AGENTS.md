@@ -23,6 +23,10 @@ src/
   address.ts               # Address 入站校验与比较
   channel/                 # Lark 适配、共享消息协议与执行投影
     address.ts             # ChannelAddress 编码与平台 endpoint 解析
+    lark/                  # Lark 机器人 Channel
+      index.ts             # 入站接纳、出站投递与持久回执
+      client.ts            # SDK、凭证配置与安全错误诊断
+      card.ts              # 执行进展投影与卡片内容
   host/                    # 主进程：资源持久化、外部能力与实时执行
     resource/              # Host 持久资源数据库、容量、引用与释放策略
     runtime/               # 应用级插件装配与资源执行上下文

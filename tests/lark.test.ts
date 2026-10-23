@@ -8,8 +8,8 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
 import type { OutputView } from "../src/output.ts";
 import { fixtureOutput } from "./output-fixture.ts";
-import { LarkChannel } from "../src/channel/lark.ts";
-import { larkConfig, larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark-client.ts";
+import { LarkChannel } from "../src/channel/lark/index.ts";
+import { larkConfig, larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark/client.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });

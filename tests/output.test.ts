@@ -1,5 +1,5 @@
 import { reconcileChannelOutputs } from "../src/channel/delivery.ts";
-import { larkSendFailure } from "../src/channel/lark-client.ts";
+import { larkSendFailure } from "../src/channel/lark/client.ts";
 import { assertChannelDelivery, larkAddress, webAddress } from "../src/channel/address.ts";
 import { definition } from "./fixtures/resource-definition.ts";
 import assert from "node:assert/strict";
@@ -18,8 +18,8 @@ import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ResourceCapacityError, ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
 import { ConversationStore, seedInput } from "./conversation-fixture.ts";
 import { outputSpec } from "../plugins/personal/output.ts";
-import { LarkChannel } from "../src/channel/lark.ts";
-import type { LarkTransport } from "../src/channel/lark-client.ts";
+import { LarkChannel } from "../src/channel/lark/index.ts";
+import type { LarkTransport } from "../src/channel/lark/client.ts";
 
 async function setup(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-output-"));

@@ -21,7 +21,7 @@ import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "
 import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageWatch } from "../plugins/personal/source/message/config.ts";
 import { readMessageContext } from "../plugins/personal/source/message/context.ts";
 import { Aide } from "../src/app.ts";
-import { LarkChannel } from "../src/channel/lark.ts";
+import { LarkChannel } from "../src/channel/lark/index.ts";
 import { loadConfig } from "../src/config.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { messageRelation } from "../plugins/personal/source/message/relation.ts";

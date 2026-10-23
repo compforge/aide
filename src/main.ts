@@ -10,9 +10,9 @@ import { Connectors } from "../connectors/index.ts";
 import { Aide } from "./app.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
 import { httpChannel } from "./api/index.ts";
-import { larkProgress } from "./channel/lark-card.ts";
-import { LarkChannel } from "./channel/lark.ts";
-import { larkConfig, larkTransport } from "./channel/lark-client.ts";
+import { larkProgress } from "./channel/lark/card.ts";
+import { LarkChannel } from "./channel/lark/index.ts";
+import { larkConfig, larkTransport } from "./channel/lark/client.ts";
 import { withAsyncFileLock } from "./host/file-lock.ts";
 
 const environment = Object.freeze({ ...process.env });

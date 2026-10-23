@@ -10,7 +10,7 @@ import { InputStore } from "../plugins/personal/input/store.ts";
 import { inputPrinter } from "../plugins/personal/input/printer.ts";
 import { Aide } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
-import { LarkChannel } from "../src/channel/lark.ts";
+import { LarkChannel } from "../src/channel/lark/index.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const me = { provider: "lark", scope: "cli_app", id: "ou_me" };

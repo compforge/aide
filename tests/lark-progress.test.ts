@@ -12,9 +12,9 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
 import type { OutputView } from "../src/output.ts";
 import { fixtureOutput } from "./output-fixture.ts";
-import { LarkChannel } from "../src/channel/lark.ts";
-import { larkProgress, progressCard, cardPreviews, type LarkProgress } from "../src/channel/lark-card.ts";
-import { larkTransport, type LarkTransport } from "../src/channel/lark-client.ts";
+import { LarkChannel } from "../src/channel/lark/index.ts";
+import { larkProgress, progressCard, cardPreviews, type LarkProgress } from "../src/channel/lark/card.ts";
+import { larkTransport, type LarkTransport } from "../src/channel/lark/client.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
