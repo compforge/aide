@@ -2,7 +2,7 @@
 
 Public, host-independent contracts for Aide plugins. A plugin defines resources and business callbacks; Core owns persistence, scheduling and Harness execution; Runner schedules Controllers and Host owns durable state and external capabilities. The package contains types and small shared values, not a host or Runner implementation.
 
-See [plugin runtime](../../docs/plugin/README.md) for the process model and [Personal](../../docs/plugin/personal.md) for a built-in consumer. Start with the exported contracts in [src/index.ts](src/index.ts).
+See [plugin runtime](../../docs/plugin/README.md) for the process model and [Personal](../../docs/personal/README.md) for a built-in consumer. Start with the exported contracts in [src/index.ts](src/index.ts).
 
 ## A small plugin
 

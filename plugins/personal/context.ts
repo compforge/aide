@@ -8,7 +8,7 @@ export type RecentEntry = z.infer<typeof RecentEntrySchema>;
 /**
  * @spec Summary is current understanding; recent is a bounded evidence window, never an inbox or audit log.
  * @spec All persisted writes enforce the same budget, including deterministic and failure paths.
- * @link docs/plugin/personal.md
+ * @link docs/personal/README.md#有界认识与近期依据
  */
 export function retainRecent(entries: readonly RecentEntry[]): RecentEntry[] {
   let remaining = RECENT_CHARS;

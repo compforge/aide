@@ -1,6 +1,6 @@
 # Channel
 
-Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、确定会话范围、提交输入并投递回复。当前有两个 Channel：Web 和 Lark。它们接入同一套 Personal 业务，Chief 负责理解与判断，Task / Routine 负责持续工作。
+Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、提供地址与话题线索、提交输入并投递回复。当前有两个 Channel：Web 和 Lark。它们接入同一套 Personal 业务，Chief 负责理解与判断，Task / Routine 负责持续工作。
 
 | Channel | 输入与会话划分 | 输出与交互 |
 | --- | --- | --- |
@@ -9,23 +9,23 @@ Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、确定
 
 ## 输入、会话与回复
 
-Channel 提交用户消息时提供 source 地址、稳定 sessionId 与消息去重身份，不需要理解 Personal 的 Conversation。Lark 使用应用与聊天身份，Web 使用选中会话所属的 Session。Channel 通过绑定 Definition 的入口提交消息，Core 保存 Input 并返回持久化回执；Personal 为该 Session 组织交流上下文。输入直接投影为输入卡片，Output 独立承载回复与通知；接收成功不代表模型已经回答或目标已经完成。
+Channel 提交用户消息时提供 source 地址、稳定 sessionId 与消息去重身份，不需要理解 Personal 的 Conversation。Lark 使用应用与聊天身份，Web 使用所选 Conversation 的话题标识。Channel 通过绑定 Definition 的入口提交消息，Core 保存 Input 并返回持久化回执；Personal 经 Route 决定归属。输入直接投影为输入卡片，Output 独立承载回复与通知；接收成功不代表模型已经回答或目标已经完成。
 
-Personal 决定输入进入哪个 Conversation、是否创建 Work。普通回答直接进入消息流，需要持续跟进时才操作 Task / Routine。同一 Session 的后续消息可以回答问题或补充已有工作。Web 的 Conversation 列表是 Personal 的业务视图，可以查看 Lark 或 Source 会话。
+Personal 决定输入进入哪个 Conversation、是否创建 Work。普通回答直接进入消息流，需要持续跟进时才操作 Task / Routine。同一话题的后续消息可以回答问题或补充已有工作。Web 的 Conversation 列表是 Personal 的业务视图，可以查看 Lark 或 Source 会话。
 
-Source 是外部观察入口，可以提交带话题 sessionId 或没有话题线索的 Input，也可以携带观察所在的 source 地址。Chief 路由后决定是否及向哪里沟通；Lark 投递读取 Output.target，不从话题身份推导聊天目标。地址与收件处选择见 [Output](../output.md)。
+Source 是外部观察入口，可以提交带话题 sessionId 或没有话题线索的 Input，也可以携带观察所在的 source 地址。Route 分派后，Chief决定是否及向哪里沟通；Lark 投递读取 Output.target，不从话题身份推导聊天目标。地址与收件处选择见 [Output](../personal/output.md)。
 
 ## 投递与进度
 
 正式回复与工作结果是持久 Output，Channel 按保存的 target 与投递记录发送。失败重试不应重新执行已经完成的业务。客户端断开也不取消服务端 Task / Routine。
 
-思考、工具调用和文字增量属于执行进展，来自 Harness 事件与 Ledger 投影。Web 使用 Markdown 展示；Lark 使用原生流式卡片，合并更新思考与正文，最终收口到同一张卡片。进展不写成新的用户 Input，也不触发 Work。
+思考、工具调用和文字增量属于执行进展，来自 Harness 事件的有界实时投影。Web 使用 Markdown 展示；Lark 使用原生流式卡片，合并更新思考与正文，最终收口到同一张卡片。进展不写成新的用户 Input，也不触发 Work。
 
 Chief 的问答可通过两个 Channel 回答。当前原生 Harness 授权和 Hook 信任通过 Web 处理；网页按 Conversation 筛选已关联的问题，未关联会话的宿主交互保留在本地收件区。
 
 ## 回复展示状态
 
-一条 Input 的回复包含「过程」和「回答」两个区域。「过程」容纳思考、工具调用、阶段性说明等中间内容；「回答」呈现交付给用户的正文。执行状态来自已有投影，展开状态属于用户的阅读选择；两个区域独立控制，外层默认展开，也可手动整体收起。
+一次执行的回复展示包含「过程」和「回答」两个区域。「过程」容纳思考、工具调用、阶段性说明等中间内容；「回答」呈现交付给用户的正文。执行状态来自已有投影，展开状态属于用户的阅读选择；两个区域独立控制，外层默认展开，也可手动整体收起。
 
 | 展示态 | 过程 | 回答 |
 | --- | --- | --- |
@@ -35,12 +35,12 @@ Chief 的问答可通过两个 Channel 回答。当前原生 Harness 授权和 H
 
 默认在执行中显示进行态，结束后显示缩略态。用户可随时展开详情；增量更新、结束及问答续轮不覆盖手动展开选择。收起详情后，依据当前执行状态恢复进行态或缩略态。等待用户回答、失败和中断使用明确状态，需处理的问题及提示默认可见。
 
-预览只节选已有内容，不另调模型生成摘要；工具状态保留执行中、完成、失败等原始含义，模型未输出思考时显示实际处理阶段。进展与正式回答保持同一条消息的身份，不重复投递。平台文本预算之外的完整内容沿用各 Channel 的历史查看或长文投递方式。
+预览只节选已有内容，不另调模型生成摘要；工具状态保留执行中、完成、失败等原始含义，模型未输出思考时显示实际处理阶段。进展与正式 Output 通过执行关联分组展示，进展本身不重复投递为业务回复。平台文本预算之外的完整内容沿用各 Channel 的历史查看或长文投递方式。
 
 ## 扩展边界
 
 新的 Channel 需要解决平台消息接收、会话映射、去重与回复投递，并复用已有输入与交互入口。业务判断留在插件，Agent 执行留在 Harness。当前使用具体适配器，尚未抽取通用 Channel SDK。
 
-内核对象与持久化见 [Kernel](../kernel.md)，Personal 判断流程见 [Personal](../plugin/personal.md)，部署见 [部署与诊断](../deployment.md)。
+内核对象与持久化见 [Kernel](../kernel.md)，Personal 判断流程见 [Personal](../personal/README.md)，部署见 [部署与诊断](../deployment.md)。
 
 Channel 通过 `src/channel/service.ts` 的输入与投影接口接入应用，不依赖 Personal 或 Chief 的实现。Web 的 HTTP handler 位于 `src/api/`，通过扩展接口 `src/api/service.ts` 使用应用提供的 Work 侧栏、删除与事件能力；浏览器代码位于 `src/web/`。

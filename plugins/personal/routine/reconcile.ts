@@ -28,7 +28,7 @@ export async function reconcileRoutineIntake(context: PluginContext, execution: 
 
 /**
  * @spec An idle Routine releases its agent while the resource and its future trigger remain durable.
- * @link docs/harness/routine.md
+ * @link docs/personal/routine.md
  * @case tests/routine-agent.test.ts
  */
 export async function reconcileRoutine(context: PluginContext, execution: ReconcileContext, initial: Readonly<RoutineResource>) {

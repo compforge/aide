@@ -5,7 +5,7 @@ import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, type Me, 
 /**
  * @spec Every conversation resolves people in one catalog. Profiles contain no Input references.
  * @spec Matching uses scoped identifiers, never names; profile edits cannot change identities or Me.
- * @link docs/plugin/personal.md
+ * @link docs/personal/person.md
  */
 export class Persons {
   constructor(private readonly resources: ResourceClient, readonly marks: Me) {}

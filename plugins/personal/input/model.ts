@@ -12,7 +12,7 @@ export interface InputSpec {
   /**
    * @spec Optional topic affinity supplied by the Channel or Source, which owns its stable identity and granularity.
    * Inputs sharing this ID have common context; different IDs do not imply unrelated topics or exclusive routing.
-   * @link docs/kernel.md
+   * @link docs/personal/input.md#内容身份与调度
    */
   sessionId?: string;
   /** Scheduling urgency, independent of authority or notification intent. */

@@ -1,24 +1,16 @@
-# Chief Harness
+# Chief：判断、工具与记忆
 
 Chief 是 Aide 面向用户的接话与分流入口，也能直接办事，职责类似 System 1：结合上下文快速判断，当轮能处理的问题直接回答或调用工具完成；需要独立推进、等待和跟踪的事情，优先关联已有 Work，再按需要创建 Task 或 Routine。分流依据是是否需要独立的工作生命周期，复杂度只是参考，调用工具不必先创建工作。
 
-Chief 先把用户消息或外部观察归入合适的话题，再结合话题中的 Work 判断下一步；Conversation 自身的 trigger 也会触发回顾。输入分配到 Conversation、Task 或 Routine，本质是让一件事进入能解释它、承接它的上下文，具体模型见 [Personal 的主动性与上下文](../plugin/personal.md#主动性与上下文)。Chief 可直接处理、创建或删除工作，或通过 `assess_input` 向已有 Work 交接输入；Work Reconcile 决定如何改变状态与推进。需要用户决定时询问，没有值得打扰的新情况时保持安静。Chief 的判断质量，尤其是提示词、上下文组织与记忆机制，是 Personal Agent 的持续优化重点。
+Route 将用户消息或外部观察归入话题后，Chief 结合话题中的 Work 判断下一步；Conversation 自身的 trigger 也会触发回顾。输入分配到 Conversation、Task 或 Routine，本质是让一件事进入能解释它、承接它的上下文，具体模型见 [Personal 的主动性与上下文](README.md#主动性与上下文)。Chief 可直接处理、创建或删除工作，或通过 `assess_input` 向已有 Work 交接输入；Work Reconcile 决定如何改变状态与推进。需要用户决定时询问，没有值得打扰的新情况时保持安静。Chief 的判断质量，尤其是提示词、上下文组织与记忆机制，是 Personal Agent 的持续优化重点。
 
-Chief 使用独立的 `chief` Harness 身份，Agent 位于 `agents/chief/`；它组合 [通用 Pi](pi.md)，复用 PiAdapter 的执行与事件机制。通用边界见 [Harness](README.md)，工作生命周期与问答编排见 [Personal](../plugin/personal.md)。
+Chief 使用独立的 `chief` Harness 身份，Agent 位于 `agents/chief/`；它组合 [通用 Pi](../harness/pi.md)，复用 PiAdapter 的执行与事件机制。通用边界见 [Harness](../harness/README.md)，工作生命周期与问答编排见 [Personal](README.md)。
 
 ## Agent 与 Controller
 
 Chief Agent 负责判断，Personal Route 负责话题归位。Conversation 的接收 Controller 与 agent Controller 分别接纳新 Input 和调用 Chief；assess_input 确认消费，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
 
 所有 Conversation 共用 Chief 配置。Personal 的 chiefSession 工厂根据调用 scope 的 ResourceRef 校验 Conversation UID，装配限定该会话范围的 WorkService 与工具。工具每次执行都重新确认当前 execution，不捕获过期 verbs。
-
-```ts
-const adapter = createHarnessAdapter(
-  { id: "chief", harness: "chief" },
-  { ...ports, targetConfig: { harness: "chief" },
-    chiefSession: aide.chiefSession(ports.scope, chiefConfig) },
-);
-```
 
 原生会话由 Pi SDK 管理持久化；Chief scope 使用 Conversation UID，防止同名重建后恢复旧会话。Operator 在 status.agent 保存配置名和 sessionId，后续原样传给 Harness verb；底座不读写这个字段。用户通过 say 收到问题，后续答复以新的 Input 进入。空闲时 prompt，运行中普通输入 followUp、紧急输入 steer；一个 invocation 可以处理多个 Input，assess_input 的业务回执分别确认完成。
 
@@ -28,7 +20,7 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 
 - **推进已有委托。** 在用户交付的目标和约定内继续处理，保持关联工作的身份与进度；发现条件变化时重新核对下一步。
 - **提出新机会。** 说明发现了什么、与用户有什么关系以及建议下一步做什么。记忆中的偏好和兴趣帮助判断相关性，不自动成为新的执行委托。
-- **告知进展。** 有值得知道的结果、变化或阻塞时使用普通回复，显式调用 say 工具，由 Controller 经 say verb 投递。相关的低紧迫性信息可以合并说明。
+- **告知进展。** 有值得知道的结果、变化或阻塞时使用普通回复，显式调用 say 工具，经应用的 say action 持久化为 Output，再由投递器发送。相关的低紧迫性信息可以合并说明。
 - **请求决定。** 缺少必要信息或用户决定时用 say 提问并结束当前调用；带上已查明的事实、选择与影响，让用户能够直接作出决定。
 - **保持安静。** 没有新的依据或可推进事项时静默结束。不重复发送同一进展，也不反复提出尚无新依据或用户回应的建议。
 
@@ -36,19 +28,18 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 
 ## 提示词与工具
 
-当前稳定角色规则在 `agents/chief/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/conversation/reconcile.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；收到用户答复后构造续轮提示。
+当前稳定角色规则在 `agents/chief/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/conversation/reconcile.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；后续回答同样作为普通 Input 接纳。
 
 Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 
-- Work 工具读取、创建、更新与删除绑定会话的 Task / Routine，具体契约见 [Personal](../plugin/personal.md)。
-- say 保存用户通知意图；模型 finalText 是内部处理总结。
+- Work 工具读取、创建、更新与删除绑定会话的 Task / Routine，具体契约见 [输入交接](input.md#研判与办理)、[Task](task.md) 与 [Routine](routine.md)。
 - read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。
 - say 产生独立 Output；答复是新的 Input，不挂起 Harness 等待。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
 - assess_input 原子保存单条研判结果、更新累计 conversationSummary，并建立 Work handle；不值得通知的观察可以静默完成。
 - summarize_conversation 用于无 Input 的回顾，按 read_input 返回的版本更新 summary / recent，不伪造输入消费。
 
-提示词表达判断策略，工具边界保证持久化与会话范围。Work 写工具在提出问题后暂停接受修改，直到用户答复进入续轮；这项约束不能只依赖模型记住提示。
+提示词表达判断策略，工具边界保证持久化与会话范围。say 提问只产生 Output；用户是否回答不阻塞其它输入，已有 Work 的 waiting 状态表达具体工作的等待。
 
 ## 上下文与记忆
 
@@ -112,10 +103,6 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 
 现有 Source → Chief → 用户决定 → Work 验证继续覆盖 Personal 装配。以上不能证明真实模型会正确选择值得保存的事实，或后台提炼、压缩后召回的实际质量；这些效果需要真实使用评估。真实 Channel 验收见 [E2E](../e2e.md)。
 
-## 输入路由
+## 与 Route 的协作
 
-分派角色与工具契约见 [Route Harness](route.md)。
-
-Personal Route 规则命中立即投递；未命中输入 followup 到专用 Route loop，用 route_input 提交完整分派。计划先持久化，再按 Conversation UID 幂等追加；多个目标允许，无匹配才使用 Default。Chief 只确认自己接纳的输入，不承担全局分发。
-
-Route 与 Chief 的原生上下文独立，共用 Hermes 长期记忆。Route 只有检索能力，Chief 可以维护记忆。默认会话的 Chief 独立判断静默、通知、询问或推进工作；Default 不构成执行授权。
+输入分派契约见 [Route](route.md)。Chief 只确认自己接纳的输入并按需交给 Work；Route 与 Chief 隔离原生上下文，共用 Hermes 长期记忆，Route 只检索、Chief 可以维护。Default 的 Chief 按普通话题规则判断，不因兜底身份获得额外授权。

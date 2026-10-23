@@ -10,7 +10,7 @@ import { WORK_TYPES, workType, toWork, type WorkResource, type WorkSpec } from "
 /**
  * @spec Task and Routine own business state; independent Outputs survive work deletion.
  * @why Channel retries must never replay business execution. InputStore owns bounded incoming receipts.
- * @link docs/plugin/personal.md
+ * @link docs/personal/README.md
  */
 export class Store {
   constructor(readonly resources: PluginResourceStore, readonly client: ResourceClient, readonly conversations: ConversationStore) {}

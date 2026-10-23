@@ -48,9 +48,9 @@ Lark Channel 使用 CardKit JSON 2.0 卡片，遵循 [Channel 的三态展示约
 
 原生折叠操作由 Lark 客户端控制。内容更新只修改有稳定 ID 的文本组件，并调整 streaming_mode，不重建折叠面板或重新写入 expanded；用户查看详情时，流式输出、结束及问答续轮都保留其选择。等待回答与中断提示取消预览行数限制，使需处理的信息可见。进行中的回答节选取最近文本，Lark 负责三行截断；完整文字同时积累在详情区域。
 
-每秒合并当前内容，所有更新串行复用官方 SDK 客户端、凭证和超时。同一张卡片共享持久化递增 sequence，卡片 ID、发送 uuid 与已更新组件内容保存到 Channel 状态；重启或重试继续更新同一卡片。仅在旧布局卡片恢复时做一次布局替换，之后使用组件局部更新。
+每秒合并当前内容，所有更新串行复用官方 SDK 客户端、凭证和超时。同一张卡片共享持久化递增 sequence，卡片 ID、发送 uuid 与已更新组件内容保存到 Channel 状态；重启或重试继续更新同一卡片。
 
-结束或等待用户时关闭 streaming_mode，更新最终正文与预览后才确认业务 Output 已投递。用户后续答复形成新的 Input 和执行，生成新的执行卡片。过程反馈不写入业务 Output，不改变工作状态。卡片失败时保留最终文本投递；超长答复沿用分段文本完整发送，卡片过程受平台体积预算限制，完整执行记录可在 Web 查看。Task / Routine 的异步通知继续走文本 outbox。
+结束或等待用户时关闭 streaming_mode，更新最终正文与预览后才确认业务 Output 已投递。用户后续答复形成新的 Input 和执行，生成新的执行卡片。过程反馈不写入业务 Output，不改变工作状态。卡片失败时保留最终文本投递；超长答复沿用分段文本完整发送，卡片过程受平台体积预算限制，当前进程保留的近期执行细节可在 Web 查看。Task / Routine 的异步通知继续走文本 outbox。
 
 需要额外开通 `cardkit:card:write` 并发布应用，客户端需支持 Card JSON 2.0。协议依据：[创建卡片实体](https://open.feishu.cn/document/cardkit-v1/card/create)、[流式更新文本](https://open.feishu.cn/document/cardkit-v1/card-element/content)、[更新卡片配置](https://open.feishu.cn/document/cardkit-v1/card/settings)、[批量局部更新](https://open.feishu.cn/document/cardkit-v1/card/batch_update)、[全量更新](https://open.feishu.cn/document/cardkit-v1/card/update)。
 
@@ -62,7 +62,7 @@ Lark Channel 使用 CardKit JSON 2.0 卡片，遵循 [Channel 的三态展示约
 
 当前接收用户单聊文字与群内 @本机器人的文字；已寻址的非文字消息或空文字会提示改发有效文字。Codex 的原生工具授权和 Hook 信任仍到网页处理；Lark 文字不会被当作这些授权的自动确认。图片与卡片入站、多账号和通用 Channel SDK 暂不提供。
 
-Chief 通过 say 提问，用户在原聊天回复形成新 Input，群内回复仍需 @Aide。消息不会自动转换为确认结果；Chief 根据上下文理解。Hooks 信任和工具权限仍通过网页 Approval 处理。详见 [Personal](../plugin/personal.md)。
+Chief 通过 say 提问，用户在原聊天回复形成新 Input，群内回复仍需 @Aide。消息不会自动转换为确认结果；Chief 根据上下文理解。Hooks 信任和工具权限仍通过网页 Approval 处理。详见 [Personal](../personal/README.md)。
 
 流式协议测试覆盖真实 SDK 请求、积累文本与递增序号、问答续轮、重启去重、更新失败回退、超长答复，以及真实 Harness 投影中的思考和正文增量；网络与模型使用替身。真实效果需在已授权机器人上验收：发起需多次工具调用的问题，观察处理状态、思考和正文变化，完成后检查过程折叠、最终答案不重复，再验证追问和中断。
 

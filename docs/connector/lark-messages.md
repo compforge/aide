@@ -30,12 +30,9 @@ plugins:
 Source 产出的消息均进入处理流程，当前主动采集单聊和群内 @。
 只声明 Connector 时，Chief 仍可按需读取上下文。
 已有 Lark Channel 的机器人交互不受此配置影响。初次启用默认观察最近五分钟，不导入全部历史。
-没有任何 Aide Conversation 时，首条 Input 会创建普通话题并进入处理；已有会话时，先追加到默认会话（若存在），再按规则创建和关联具体会话。
-讨论续报关联持有原始 Input 的会话。没有规则关联的输入由全局 Route 组批判断话题，找不到合适承接者才交给默认会话；观察到的群地址不自动成为输出目标。
-观察源位于独立执行 Session `source:lark-messages`，新聊天 Session 不会重复启动它。
-Source 为 Input 设置 `sessionId = source:lark:<appId>:<userId>:<chatId>`；同账号、同用户、同聊天的观察共享话题归属。机器人 Channel 使用独立的 `lark:<appId>:<chatId>`，用户观察及其处理回复不会因同群而进入机器人的群会话或自动发回原群。
-单聊、群内 @ 和讨论续报均按聊天聚合：新聊天创建会话，已有聊天复用对应会话，默认会话仍会收到同一 Input。
-`sessionId` 是上游提供的话题线索，不是排他的投递目标；Source 不指定 Conversation。
+Source 为 Input 设置 `sessionId = source:lark:<appId>:<userId>:<chatId>`，表达同账号、同用户、同聊天的话题共性；机器人 Channel 使用独立的 `lark:<appId>:<chatId>`。观察资源按配置建立，不随 Conversation 数量重复启动。
+
+话题归属统一由 [Route](../personal/route.md) 决定。已有明确匹配可以直接分派，陌生 Source 话题线索本身不自动创建 Conversation；无合适归属才使用 Default。观察到群地址不自动产生默认输出地址，也不要求向原群发送消息。
 
 | 操作 | 权限 |
 |---|---|
