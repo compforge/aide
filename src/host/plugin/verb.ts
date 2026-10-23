@@ -156,7 +156,6 @@ export class Verb {
 
   failOrphans(): void {
     this.connectorCalls?.failOrphans();
-    this.harness?.failOrphans();
   }
   close(): void { this.connectorCalls?.close(); }
 

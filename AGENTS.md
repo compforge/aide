@@ -36,8 +36,9 @@ src/
       runner/              # 宿主侧 Supervisor / IPC Client / 注册代理
     controller/            # HarnessInvocation 执行、上下文互斥与审批
     harness/               # Harness 注册、执行记录、Adapter 与提供方协议
-      calls.ts             # 资源调用的持久事实、等待与取消；Manager 只依赖能力接口
-      store.ts             # HarnessStore：执行事件与资源上下文绑定
+      calls.ts             # 实时调用、等待与取消；Manager 只依赖能力接口
+      activity.ts          # 有界实时执行投影，不持久化或回放
+      session.ts           # 资源 status.agent 中的原生会话引用
       state.ts             # 执行事件的状态投影
     connector/             # Connector 调用事实、未知结果恢复与独立写入租约
     store/                 # 文件租约与消息投影辅助
@@ -111,7 +112,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。Connector 声明访问能力，`plugins.<plugin>.sources` 声明观察策略；Personal 只启动显式配置的环境、Lark 与需求 Source。环境发现只读配置，不代表连通性、健康或操作授权。
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
-- ApplicationRuntime 服务 Plugin Operator；仅在配置 harness 时装配 ExecutionService。纯资源插件不要求 Adapter 或 Target，默认执行目标由应用配置提供。Manager 只接收 HarnessExecution 能力与独立 LogSink，不读取执行存储。Harness 按需打开 HarnessStore；Connector 自持调用记录。资源、调度键和实例配置不依附 Session；CoreSession、SessionStore 和 SessionHandle 已移除。底座没有 Lane / Turn；一次执行统一使用 HarnessInvocation，资源上下文保存原生绑定。不兼容旧 Session / Lane / Turn 存储，不增加迁移或双读；提供方原生标识留在 Adapter。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
+- ApplicationRuntime 服务 Plugin Operator；仅在配置 harness 时装配 ExecutionService。纯资源插件不要求 Adapter 或 Target，默认执行目标由应用配置提供。Manager 只接收 HarnessExecution 能力与独立 LogSink，不读取执行存储。Harness 自持原生会话和恢复，Aide 仅在资源 status.agent 保存必要引用；Connector 自持调用记录。资源、调度键和实例配置不依附 Session；CoreSession、SessionStore 和 SessionHandle 已移除。底座没有 Lane / Turn；一次执行统一使用 HarnessInvocation，资源上下文保存原生绑定。不兼容旧 Session / Lane / Turn 存储，不增加迁移或双读；提供方原生标识留在 Adapter。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
 - ChannelDefinition / SourceDefinition 声明来源身份；绑定的提交入口补齐来源，Source 同时记录资源实例引用。Input.text 保存收到的事实或请求，不保存 Chief 的处理指令。Channel / Source 输入统一从 Input 投影，Output 独立承载回复与通知；展示通过应用装配的定义目录读取名称和图标，不解释 Source 的业务数据。
 - Input / Output 由 Personal 定义；底座不预注册业务资源或 Session / Turn / Target 投影。Input.sessionId 仅是来源话题线索。Personal Route 监听 Input，规则命中立即追加，未命中由独立 Route agent Controller 调专用 Agent 分类；跨话题操作直接访问全局资源客户端。
 - Conversation、Task、Routine、Person 用 status.summary 保存累计认识、recent 保存有界近期依据；所有写入通过共享 Schema 限制条数和总长度。Person 的长期 profile 不局限于这两个字段，用户修正直接写入同一个 summary，Chief 按最新版本继续维护；身份单独保存。Work 执行从目标、状态、summary/recent 和所选 Input 重建 freshContext；Input.handle 的请求应用与执行确认分开，执行结果和回执原子提交。Routine 事件经 Input 入站去重。
@@ -128,7 +129,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Source 先提交持久 Input 再推进观察水位。Input 与 Output 独立保存，业务状态、Output 创建与必要的去重记录原子提交，不能用投递失败重新触发业务执行。
 - 持久 Resource 共用 Host 容量管理；资源所有者在 ResourceDefinition.retention 声明释放与引用规则，未知类型默认保护。按 kind 的 LRU 等排序只作用于可释放且无人引用的记录，不能淘汰正在承担的工作。详见 docs/plugin/README.md。
 - Input.status.route / assess / handle 分别保存路由、各 Conversation 研判、各 Work 办理痕迹。Route / Conversation 不存待办 ID 队列。Reconcile 负责确定性规则与协调，持续 Route / Chief Agent 接收 followup，immediate 可 steer；工具回执才确认完成。Route 按 Input 退避重试，Chief 未确认的副作用保持待核对。
-- Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 保存执行事实。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
+- Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 发布实时执行进度。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
 - ResourceDefinition 统一声明类型、Schema、Validator、Printer 与 retention；资源统一按插件实例与 namespace 组织。Host 在恢复和 Controller 启动前加载纯定义模块；所有写入（含 commit）在存储事务内校验。Controller 可独立注册零个或多个。Printer 在 Host 同步处理快照，describe / summarize 提供详情 / 概览，不执行 I/O、模型调用或修改资源；定义不随 Runner 关闭撤销。具体契约见 docs/plugin/README.md。
 - 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。
 - 执行上下文携带主资源与不透明 attributes；只有 Personal 解释其中的 Conversation/Input 关联。Reconcile 快照不含全局历史；Channel 根据 Personal 的关联显式查询执行记录，不通过 Chief Target 推导进度归属。
@@ -136,10 +137,10 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - trigger 归属于 Conversation；新 Input 与定时回顾唤醒同一话题。Personal / Chief 决定回顾和主动沟通策略，Core 提供通用定时唤醒与恢复机制。say 保存独立 Output；记忆中的偏好不自动成为执行委托。
 - Chief 用 say 提出问题并结束当前调用；用户后续消息作为普通 Input。业务 ask / confirm / draft 与 Interaction 已移除；Harness 原生工具权限与 Hook 信任使用独立的 Approval，仍需明确决定；拒绝权限只拒绝本次请求，取消执行会中断该审批关联的运行。Task / Routine 的 waiting 是业务持久状态。
 - Channel / Source 提交 Input 后由 Route 分派，route_input 原子写入路由结果和全部 assess。assess_input 原子完成研判、建立 handle。完成记录不重置，say 独立产生 Output；全部阶段完成后 Input 才能按 Host 容量策略回收，删除目标明确取消未完成阶段。
-- Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Output，不另建轨迹存储。
+- Channel 进展消费有界实时执行投影，Web 使用 AgentUE。进度不写入业务 Output，不另建轨迹存储。
 - `make lint` 执行 TypeScript 类型检查，`make test` 执行完整测试；`npm run check` 仍组合两项校验。`packages/plugin` 的 `make lint` 检查其公开契约，`make test` 委托根目录集成测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或 Lark 已验证。
 
-- Route/global 属于 Personal，仅保存当前 execution。默认 Controller 处理规则，具名 agent Controller 驱动持续 Route；route_input 只向 Route 暴露，无合适目标才用 Default。Route 与 Chief 共用 Hermes 记忆但隔离原生上下文，Route 仅检索、不执行业务动作。
+- Route/global 属于 Personal，保存当前 execution 与原生 agent 会话引用。默认 Controller 处理规则，具名 agent Controller 驱动持续 Route；route_input 只向 Route 暴露，无合适目标才用 Default。Route 与 Chief 共用 Hermes 记忆但隔离原生上下文，Route 仅检索、不执行业务动作。
 
 ## References
 

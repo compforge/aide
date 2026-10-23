@@ -172,3 +172,7 @@ See [Channel](../../docs/channel/README.md) for the current Web / Lark experienc
 Controllers may set an optional `name` (lowercase letter followed by up to 63 lowercase letters, digits or hyphens) to observe the same resource kind with independent queues, locks and durable deadlines. Use explicit status Watches and resource-version checks to coordinate their separate responsibilities.
 
 Resource definitions can declare pure multi-value `indexes`, queried with `resources.list(type, { matchIndex: { name, value } })`. The Host updates indexes transactionally, rebuilds them when loading definitions, and removes them with the resource. Queries remain scoped to the plugin, resource type and namespace; unknown indexes are errors.
+
+### Native agent recovery
+
+A resource that owns a continuous agent declares an optional `AgentStatus` field in its status schema and invokes `verbs.harness({ agentKey: "agent", ... })`. The Host saves `{ harness, targetId, session: { id, resume? } }` in that field with resource UID and version checks. Session identity and optional versioned locator data come from the Adapter. Aide keeps no transcript, execution journal, or recovery checkpoint. Native restore failures surface to the caller; business recovery remains the Controller's responsibility. Omit `agentKey` for calls that do not need durable native continuity. `freshContext` starts a new native context from the supplied bounded prompt.

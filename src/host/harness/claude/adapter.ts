@@ -137,7 +137,8 @@ export class ClaudeAdapter implements HarnessAdapter {
     const id = newId("hs");
     const requestedSessionId = opts.resumeState
       ? sessionIdFromResumeState(opts.resumeState)
-      : undefined;
+      : opts.sessionId;
+    if (opts.resumeState && !requestedSessionId) throw new Error("Unsupported native session recovery state");
     const resumeSessionId = requestedSessionId;
 
     const env = opts.env || this.options.env
@@ -414,7 +415,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     const turn: ClaudeTurn = { turnId: input.invocationId, finalized: false, cancelRequested: false, replies: new MessageReplies([input.messageId]) };
     rt.activeTurn = turn;
     rt.currentTurn = turn;
-    // user_message / state_update(running) 由 controller 在出队时落盘（用户输入是 HarnessStore
+    // user_message / state_update(running) 由 Controller 在出队时发布（用户输入是实时投影
     // 的事实，不等 harness 就绪）；adapter 只报告 harness 执行过程与终态。
 
     try {

@@ -2,7 +2,7 @@
  * Adapter 拥有的可持久化恢复状态。Aide 只负责按版本原样保存和回传，不解释 data。
  *
  * 内置 adapter 共享下面的 v1 session id codec，也可以在 data 中附带自己拥有的
- * cursor/checkpoint；Aide 无需理解这些字段或继续扩 OpenOptions。
+ * 恢复定位信息；Aide 无需理解这些字段或继续扩 OpenOptions。
  */
 export interface HarnessResumeState {
   version: number;

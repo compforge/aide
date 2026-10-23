@@ -242,7 +242,7 @@ resources:
 
 去重回执独立限量并在窗口到期后清理。窗口内的重复 Input 只确认已接收，不重新创建或执行；窗口外不承诺永久去重。源水位与待提交引用共同保护 Source 的恢复过程。
 
-这些阈值约束持久 Resource 的逻辑载荷。SQLite 页、索引、WAL，以及 Session Ledger、日志、原生 Harness 历史和 Hermes 记忆有各自的存储生命周期；它们不计入此处的 Resource 字节数。
+这些阈值约束持久 Resource 的逻辑载荷。SQLite 页、索引、WAL，以及 Connector 调用日志、诊断日志、原生 Harness 历史和 Hermes 记忆有各自的存储生命周期；它们不计入此处的 Resource 字节数。
 
 ## Route 连续分类与模型
 

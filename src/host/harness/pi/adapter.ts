@@ -41,6 +41,7 @@ export class PiAdapter implements HarnessAdapter {
   async open(options: OpenOptions, sink: HarnessEventSink, binding: HarnessSessionBindingSink): Promise<HarnessSessionHandle> {
     if (options.env && Object.keys(options.env).length) throw new Error("Embedded Pi does not support per-session environment overrides");
     let sessionFile: string | undefined;
+    if (options.sessionId && !options.resumeState) throw new Error("Pi session recovery requires its native session file locator");
     if (options.resumeState) {
       const data = options.resumeState.data as { sessionFile?: unknown; empty?: boolean } | null;
       if (options.resumeState.version !== 1 || typeof data?.sessionFile !== "string" || !data.sessionFile) throw new Error("Unsupported Pi resume state");
@@ -78,7 +79,7 @@ export class PiAdapter implements HarnessAdapter {
   async sendTurn(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
     const session = this.require(ref);
     if (session.contextFailure) throw new Error(session.contextFailure);
-    const blocks = [...(input.syncBlocks ?? []), ...input.blocks];
+    const blocks = input.blocks;
     const unsupported = unsupportedPromptBlocks(blocks, this.capabilities);
     if (unsupported.length) throw new Error(`Pi does not support prompt blocks: ${unsupported.join(", ")}`);
     const text = blocks.map((block) => block.type === "text" ? block.text : "").join("\n");

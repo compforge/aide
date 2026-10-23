@@ -9,10 +9,6 @@ import type { HarnessDeliveryAttemptUpdate } from "../controller/attempt.ts";
 import type { HarnessInputUpdate } from "../harness/input.ts";
 
 import type {
-  ContextDeliveryReceipt,
-  ContextSnapshot,
-} from "../context/delivery.ts";
-import type {
   ImageBlock,
   PromptBlock, TextBlock
 } from "../harness/prompt-blocks.ts";
@@ -40,7 +36,7 @@ export type EventSource =
   | { type: "plugin"; pluginInstanceId: string }
   | { type: "schedule"; scheduleId: string };
 
-/** Event 只属于一个 HarnessStore ledger；scope 是归属与查询键，不是 payload 的授权范围。 */
+/** Event 只属于当前执行事件流；scope 是归属与查询键，不是 payload 的授权范围。 */
 export type EventScope = { type: "application" };
 
 export type SessionRunState = "running" | "idle" | "requires_action";
@@ -107,8 +103,8 @@ export interface AgentMessageUpsert extends MessageUpsert {
 
 /**
  * 用户输入的实际（effective）投递方式：steer = 中途注入了当前 turn 的安全边界。
- * 开放联合；requested delivery 不落盘——
- * steer 被拒降级成 follow-up 时，落盘的是降级后的事实（见 docs/kernel.md）。
+ * 开放联合；requested delivery 不形成执行事实——
+ * steer 被拒降级成 follow-up 时，记录的是降级后的事实（见 docs/kernel.md）。
  */
 export type SubmitDelivery = "prompt" | "steer" | "follow_up" | (string & {});
 
@@ -208,7 +204,7 @@ export interface Plan {
 /** 每次 plan_update 整体替换该 planId 的 entries；首次出现即创建。 */
 export interface PlanUpdate extends Plan {}
 
-/** 显式撤下执行中的计划；Event Ledger 仍保留其历史事实。 */
+/** 显式撤下实时执行视图中的计划。 */
 export interface PlanRemove {
   planId: string;
 }
@@ -384,8 +380,7 @@ export interface InvocationSummaryToolCall {
 }
 
 /**
- * turn 结束时落盘的汇总事件：人可 grep、@ 引用的紧凑投影数据源、reduce 的 checkpoint。
- * 见 docs/workflow.md“append、reduce 与 Projection”。
+ * 一次调用结束时生成的实时结果；不是原生历史或恢复 checkpoint。
  */
 export interface InvocationSummary {
   invocationId: string;
@@ -462,8 +457,6 @@ export type EventPayloadMap = {
   _aide_error_update: ErrorUpdate;
   _aide_notice: Notice;
   _aide_run_status: RunStatusUpdate;
-  _aide_context_snapshot: ContextSnapshot;
-  _aide_context_delivery_receipt: ContextDeliveryReceipt;
   _aide_delivery_attempt_update: HarnessDeliveryAttemptUpdate;
   _aide_invocation_summary: InvocationSummary;
   _aide_harness_invocation_recorded: HarnessInvocationRecorded;
@@ -474,20 +467,20 @@ export type EventPayloadMap = {
 
 export type EventKind = keyof EventPayloadMap;
 
-/** events.jsonl 每行一条。payload 供渲染/检索/摘要，raw 保真原始 wire 消息。 */
+/** Capability event envelope. Harness events are transient; Connector owns its own durable log. */
 export interface EventEnvelope<K extends EventKind = EventKind> {
   v: typeof ENVELOPE_VERSION;
-  /** Event 事实身份；定序与游标仍使用 ledger-local seq。 */
+  /** Event 事实身份；定序与游标仍使用事件源内的 seq。 */
   eventId: string;
   /** ISO 8601 */
   ts: string;
-  /** ledger 内单调递增，reduce 定序靠它（不靠 ID、不靠 ts） */
+  /** 事件源内单调递增，reduce 定序靠它（不靠 ID、不靠 ts） */
   seq: number;
-  /** Event 的唯一权威 ledger。 */
+  /** Event 所属作用域。 */
   scope: EventScope;
   /** 事实来源；与执行坐标正交。 */
   source: EventSource;
-  /** 本 Event 的直接上游 Event；不表示 ledger 顺序或领域归属。 */
+  /** 本 Event 的直接上游 Event；不表示事件流顺序或领域归属。 */
   parentEventId?: string;
   /** 事件关联的 harness 执行上下文；Aide / user / Plugin 事实可缺省。 */
   harness?: string;
@@ -512,7 +505,7 @@ export type AnyEventEnvelope = { [K in EventKind]: EventEnvelope<K> }[EventKind]
 /** NewEvent 的判别联合版本，事件 sink 的入参类型 */
 export type AnyNewEvent = { [K in EventKind]: NewEvent<K> }[EventKind];
 
-/** 进入 HarnessStore 时补齐 v/eventId/ts/seq/scope。 */
+/** 进入实时事件流时补齐 v/eventId/ts/seq/scope。 */
 export type NewEvent<K extends EventKind = EventKind> = Omit<
   EventEnvelope<K>,
   "v" | "eventId" | "ts" | "seq" | "scope"

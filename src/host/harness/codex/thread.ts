@@ -56,11 +56,6 @@ export function threadIdFrom(response: unknown, method: string): string {
   return threadId;
 }
 
-export function missingThread(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /thread.*not found|no rollout found|session.*not found/i.test(message);
-}
-
 /** thread/start|resume 响应回吐的生效 reviewer（非可选字段）；缺失只降级为"不知道"。 */
 export function routeFrom(response: unknown): ApprovalRoute | null {
   const record = response && typeof response === "object" ? (response as Record<string, unknown>) : {};
@@ -74,7 +69,7 @@ export function serviceTierFrom(response: unknown): string | null {
 }
 
 /**
- * 恢复优先；原生 thread 已丢失时新建，HarnessStore 会在宿主层补齐历史。
+ * 原生 thread 恢复失败时明确报错；创建新会话由调用方显式决定。
  *
  * `approvalsReviewer` 只在用户显式配置时下发；resume 时同样如此——codex 会把 reviewer
  * 随 thread 持久化，不传就沿用该 thread 原有的选择（thread_resume_preserves_persisted_
@@ -84,6 +79,7 @@ export async function openCodexThread(
   peer: CodexThreadPeer,
   opts: {
     cwd: string;
+    sessionId?: string;
     resumeState?: HarnessResumeState;
     approvalReviewer?: "user" | "auto_review";
   },
@@ -98,23 +94,20 @@ export async function openCodexThread(
   const config = { config: CODEX_FAST_CONFIG };
   const resumeSessionId = opts.resumeState
     ? sessionIdFromResumeState(opts.resumeState)
-    : undefined;
+    : opts.sessionId;
+  if (opts.resumeState && !resumeSessionId) throw new Error("Unsupported Codex resume state");
   if (resumeSessionId) {
-    try {
-      const response = await peer.request(
-        "thread/resume",
-        { threadId: resumeSessionId, ...reviewer, ...config },
-        { timeoutMs: STARTUP_REQUEST_TIMEOUT_MS },
-      );
-      return {
-        threadId: threadIdFrom(response, "thread/resume"),
-        resumed: true,
-        route: routeFrom(response),
-        serviceTier: serviceTierFrom(response),
-      };
-    } catch (error) {
-      if (!missingThread(error)) throw error;
-    }
+    const response = await peer.request(
+      "thread/resume",
+      { threadId: resumeSessionId, ...reviewer, ...config },
+      { timeoutMs: STARTUP_REQUEST_TIMEOUT_MS },
+    );
+    return {
+      threadId: threadIdFrom(response, "thread/resume"),
+      resumed: true,
+      route: routeFrom(response),
+      serviceTier: serviceTierFrom(response),
+    };
   }
 
   const response = await peer.request(

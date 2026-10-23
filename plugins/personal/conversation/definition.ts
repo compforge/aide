@@ -1,3 +1,4 @@
+import { AgentStatusSchema } from "../session.ts";
 import { ContextFields } from "../context.ts";
 import { z } from "zod";
 import { ConversationTriggerSchema } from "./trigger.ts";
@@ -17,7 +18,7 @@ export const ConversationDefinition: ResourceDefinition<ConversationSpec, Conver
   schema: { spec: z.object({ id: z.string(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     trigger: ConversationTriggerSchema.optional() }).strict(),
     status: z.object({  receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
-      nextTriggerAt: z.string().nullable().optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
+      nextTriggerAt: z.string().nullable().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
   validator: { create: validateDefault, update: (_previous, current, context) => validateDefault(current, context) },
   retention: { releasedAt: () => undefined, references: () => {
     return [];

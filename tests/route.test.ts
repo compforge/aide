@@ -78,7 +78,8 @@ test("semantic routing fans out, fallback goes only to Default, and finished inp
   await aide.personal.conversations.submit("fallback", source("unmatched")); await aide.settled();
   assert.ok(aide.conversations.input("fallback", "inbox"));
   assert.equal(aide.conversations.input("fallback", "a"), undefined);
-  assert.deepEqual((await route(aide)).status, { execution: null });
+  assert.equal((await route(aide)).status.execution, null);
+  assert.equal((await route(aide)).status.agent?.harness, "route");
   await aide.personal.conversations.submit("shared", source("cross-topic event", "unknown-source-topic")); await aide.settled();
   assert.equal(calls, 2);
 });

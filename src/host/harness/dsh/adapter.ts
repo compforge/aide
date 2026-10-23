@@ -140,7 +140,8 @@ export class DshAdapter implements HarnessAdapter {
     const handleId = newId("hs");
     const requestedSessionId = opts.resumeState
       ? sessionIdFromResumeState(opts.resumeState)
-      : undefined;
+      : opts.sessionId;
+    if (opts.resumeState && !requestedSessionId) throw new Error("Unsupported native session recovery state");
     const requestContext = requestContextFromResumeState(opts.resumeState);
     const runtime: DshRuntime = {
       cwd: opts.cwd,

@@ -1,3 +1,4 @@
+import { RECENT_INVOCATIONS } from "../harness/activity.ts";
 import { newId } from "../event/ids.ts";
 import type {
   AnyEventEnvelope,
@@ -53,7 +54,7 @@ export interface HarnessDeliveryAttemptState {
   accepted: boolean;
   outcome?: DeliveryAttemptOutcome;
   detail?: string;
-  /** prepared Event 的固定序号；恢复查 Receipt 不能用随后不断前移的 lastSeq。 */
+  /** prepared Event 的固定序号。 */
   preparedSeq: number;
   lastEventId: string;
   lastSeq: number;
@@ -67,16 +68,14 @@ export function deliveryOutcomeFromStopReason(
   return "completed";
 }
 
-/**
- * Harness Delivery Attempt 的内存索引与重放器。事实先进入 session ledger，再 apply；
- * Controller 不能只改这份索引，否则 crash recovery 看不到相同状态。
- */
-export class DeliveryAttemptLedger {
+/** Live admission receipts for the current process. */
+class DeliveryAttemptIndex {
   private readonly attempts = new Map<string, HarnessDeliveryAttemptState>();
   private readonly latestByInvocation = new Map<string, string>();
 
-  constructor(events: Iterable<AnyEventEnvelope> = []) {
-    for (const event of events) this.apply(event);
+  forget(invocationId: string): void {
+    for (const [id, attempt] of this.attempts) if (attempt.invocationId === invocationId) this.attempts.delete(id);
+    this.latestByInvocation.delete(invocationId);
   }
 
   values(): IterableIterator<HarnessDeliveryAttemptState> {
@@ -147,12 +146,6 @@ export class DeliveryAttemptLedger {
   }
 }
 
-export function reduceDeliveryAttempts(
-  events: Iterable<AnyEventEnvelope>,
-): DeliveryAttemptLedger {
-  return new DeliveryAttemptLedger(events);
-}
-
 function canTransition(
   from: DeliveryAttemptPhase,
   to: Exclude<DeliveryAttemptPhase, "prepared">,
@@ -172,7 +165,7 @@ function canTransition(
 }
 
 type AttemptDraft = EventDraft<"_aide_delivery_attempt_update"> & {
-  /** recovery 没有 live HarnessBinding，需沿用 prepared 时已持久化的执行归属。 */
+  /** 保留当前调用的执行归属。 */
   harness?: string;
   harnessTargetId?: string;
   contextId?: string;
@@ -184,30 +177,28 @@ export type DeliveryAttemptAppender<TContext> = (
   draft: AttemptDraft,
 ) => AttemptEnvelope;
 
-/**
- * Controller 域内的 Harness submit Attempt owner。所有 live 与 recovery 迁移都经
- * 同一个入口，且总是先写 session ledger、再更新内存索引。
- */
+/** Owns live admission state, including late terminal receipts after cancellation. */
 export class DeliveryAttempts<TContext> {
-  private readonly ledger: DeliveryAttemptLedger;
+  private readonly index = new DeliveryAttemptIndex();
+  private readonly recent: string[] = [];
 
-  constructor(
-    private readonly append: DeliveryAttemptAppender<TContext>,
-    events: Iterable<AnyEventEnvelope> = [],
-  ) {
-    this.ledger = reduceDeliveryAttempts(events);
+  constructor(private readonly append: DeliveryAttemptAppender<TContext>) {}
+
+  release(invocationId: string): void {
+    if (!this.recent.includes(invocationId)) this.recent.push(invocationId);
+    while (this.recent.length > RECENT_INVOCATIONS) this.index.forget(this.recent.shift()!);
   }
 
   values(): IterableIterator<HarnessDeliveryAttemptState> {
-    return this.ledger.values();
+    return this.index.values();
   }
 
   get(attemptId: string): HarnessDeliveryAttemptState | undefined {
-    return this.ledger.get(attemptId);
+    return this.index.get(attemptId);
   }
 
   forInvocation(invocationId: string): HarnessDeliveryAttemptState | undefined {
-    return this.ledger.forInvocation(invocationId);
+    return this.index.forInvocation(invocationId);
   }
 
   prepare(
@@ -233,7 +224,7 @@ export class DeliveryAttempts<TContext> {
         launchSnapshot: opts.launchSnapshot,
       },
     });
-    return this.ledger.get(attemptId) as HarnessDeliveryAttemptState;
+    return this.index.get(attemptId) as HarnessDeliveryAttemptState;
   }
 
   markDispatching(context: TContext, attempt: HarnessDeliveryAttemptState): void {
@@ -301,7 +292,7 @@ export class DeliveryAttempts<TContext> {
   ): void {
     const invocationId = terminal.invocationId;
     if (!invocationId) return;
-    const attempt = this.ledger.forInvocation(invocationId);
+    const attempt = this.index.forInvocation(invocationId);
     if (!attempt || attempt.phase === "finalized") return;
 
     if (terminal.source.type !== "harness") {
@@ -365,6 +356,6 @@ export class DeliveryAttempts<TContext> {
   }
 
   private record(context: TContext, draft: AttemptDraft): void {
-    this.ledger.apply(this.append(context, draft));
+    this.index.apply(this.append(context, draft));
   }
 }

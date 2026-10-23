@@ -26,6 +26,9 @@ export interface HarnessInvocationInput extends VerbInput {
   readonly prompt: string;
   /** Replace this target native context with the supplied bounded prompt; never replay old turns. */
   readonly freshContext?: boolean;
+  /** Optional status property holding AgentStatus (usually "agent").
+   * The resource schema declares it; the Host persists native bindings there. */
+  readonly agentKey?: string;
   /** Omit to use the application's configured default HarnessTarget. */
   readonly harnessTargetId?: string;
 }

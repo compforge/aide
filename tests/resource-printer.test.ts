@@ -76,7 +76,7 @@ test("Runner calls Host Definition Printer with supplied snapshots; errors are l
   assert.deepEqual(JSON.parse(result.description), { pid: process.pid, name: "sample", value: "snapshot", phase: "stored" });
   for (const value of ["throw", "invalid", "async"]) await assert.rejects(f.manager.describeResource("first", snapshot(value)), /Resource Printer describe failed/);
   await f.session.flushLogs();
-  assert.match(readFileSync(join(f.session.dir, "runtime.log"), "utf8"), /Printer could not describe this value/);
+  assert.match(readFileSync(join(f.session.dir, "harness-runtime.log"), "utf8"), /Printer could not describe this value/);
   await f.manager.deactivateInstance("first");
   assert.equal(await f.manager.summarizeResource("first", snapshot()), "summary: hello");
   assert.equal((await f.manager.resourceClient("first").get<{ value: string }, unknown>({ ...TYPE, namespace: "v1", name: "sample" }))?.spec.value, "stored");

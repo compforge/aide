@@ -10,7 +10,7 @@ import { HarnessFixtures } from "./harness-fixture.ts";
 const progress = { type: "agentMessage", id: "progress", phase: "commentary", text: "我先检查当前可访问的代码仓。" };
 const answer = { type: "agentMessage", id: "answer", phase: "final_answer", text: '{"action":"done"}' };
 
-test("Codex live and imported messages retain finality across ledger replay and Turn summary", (t) => {
+test("Codex live and imported messages retain finality in native history normalization and live invocation results", (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-final-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const mode of ["live", "history"] as const) {
@@ -20,12 +20,11 @@ test("Codex live and imported messages retain finality across ledger replay and 
       : codexHistoryTurns([{ id: "turn", status: "completed", itemsView: "full", items: [progress, answer] }])[0]!.events!.map((entry) => entry.event);
     for (const draft of drafts) session.appendEvent({ ...draft, source: { type: "harness", harnessTargetId: "codex" },
       harness: "codex", harnessTargetId: "codex", contextId: "main", invocationId: "turn" });
-    const reopened = sessions.open(session.id);
-    assert.equal(reopened.loadState().messages.get("progress")?.kind, "output");
-    const summary = reopened.summarizeInvocation("turn");
+    assert.equal(session.projection.messages.get("progress")?.kind, "output");
+    const summary = session.summarizeInvocation("turn");
     assert.equal(summary.agentText, progress.text + "\n" + answer.text);
     assert.equal(summary.finalText, answer.text);
-    assert.equal(sessions.open(session.id).summarizeInvocation("turn").finalText, answer.text);
+    assert.equal(session.summarizeInvocation("turn").finalText, answer.text);
   }
 });
 

@@ -173,7 +173,9 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   await aide.close();
   const reopened = new Aide(root, options, log);
   try {
-    assert.deepEqual(conversationView(reopened, "a"), later);
+    const restored = conversationView(reopened, "a");
+    assert.deepEqual(restored.blocks.filter(b => b.type === "input" || b.type === "message"), later.blocks.filter(b => b.type === "input" || b.type === "message"));
+    assert.equal(restored.blocks.filter(b => b.type === "execution" || b.parent_id).length, 0, "Native execution history is not replayed by Aide");
     assert.doesNotMatch(JSON.stringify(conversationView(reopened, "a")), /另一会话/);
   } finally { await reopened.close(); }
 });
@@ -298,7 +300,8 @@ test("Bound Channels preserve distinct input identities and rebuild user/source 
   const before = conversationView(aide, "inbox");
   assert.equal(before.blocks.filter((block) => block.type === "input").length, 3);
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
-  assert.deepEqual(conversationView(aide, "inbox"), before);
+  assert.deepEqual(conversationView(aide, "inbox").blocks.filter(b => b.type === "input" || b.type === "message"),
+    before.blocks.filter(b => b.type === "input" || b.type === "message"));
   await web({ id: "next", sessionId: "inbox", source: webAddress("inbox"), text: "继续处理" }); await aide.settled();
   const history = aide.personal.conversations.inputs("inbox").map((i) => ({ role: i.spec.origin === "channel" ? "user" : "source", text: i.spec.text }));
   assert.doesNotMatch(prompts.at(-1)!, /Recent conversation:/, "Warm native history is not injected again");

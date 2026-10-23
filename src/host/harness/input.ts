@@ -28,15 +28,7 @@ export type HarnessInputStatus =
   | "recalled"
   | "interrupted";
 
-/** 老 ledger 里 steer 接受态叫 accepted_steer；replay 归一到 steering。 */
-export function normalizeHarnessInputStatus(status: string): HarnessInputStatus {
-  return status === "accepted_steer" ? "steering" : (status as HarnessInputStatus);
-}
-
-/**
- * 一条输入的 controller 生命周期记录。身份即 `messageId`：durable 形态是事件流里的
- * `user_message`，live 形态就是这条记录，不另造平行身份。
- */
+/** Live controller input; identity is messageId, while business durability belongs to resources. */
 export interface HarnessInput {
   messageId: string;
   /** Controller scheduling coordinate: reserved for a prompt or targeted by a steer. Not proof of actual consumption. */
@@ -46,7 +38,7 @@ export interface HarnessInput {
   contextId: string;
   blocks: PromptBlock[];
   source: HarnessInputSource;
-  /** Durable causal link; orthogonal to the actor recorded in source. */
+  /** Causal link; orthogonal to the actor recorded in source. */
   harnessInvocationId?: string;
   /** Plugin fact that caused this queued invocation. */
   parentEventId?: string;
@@ -62,7 +54,7 @@ export interface HarnessInput {
   sourceProposedPlanId?: string;
 }
 
-/** Durable WAL fact emitted before one Harness Input state transition. */
+/** Live update emitted before one Harness Input state transition. */
 export interface HarnessInputUpdate {
   messageId: string;
   invocationId: string;

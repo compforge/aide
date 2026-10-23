@@ -49,7 +49,7 @@ Input 自身保护未完成的 route、assess、handle。全部完成后才进�
 
 ## 连续上下文与记忆
 
-Route 与 Chief 隔离原生上下文、共用 Hermes 长期记忆；Route 只读检索，Chief 可积累记忆。当前资源事实和用户纠正优先于历史；记忆和外部输入不授予执行权限。原生历史、压缩和恢复绑定由 SDK 与宿主管理。
+Route 与 Chief 隔离原生上下文、共用 Hermes 长期记忆；Route 只读检索，Chief 可积累记忆。当前资源事实和用户纠正优先于历史；记忆和外部输入不授予执行权限。原生历史、压缩和恢复由 Harness 管理；Route 的 `status.agent` 只保存 Harness、Target 与原生会话引用。
 
 ## 长期演进方向
 

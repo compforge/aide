@@ -8,7 +8,7 @@ Plugin 是业务扩展的组织与所有权单位。插件声明资源和回调�
 
 Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队列、重试和 Reconcile；资源存储、全局 Connector 与执行事实由 Host 持有。PluginContext 将资源操作、Connector 查询和 verb 转成跨进程请求，插件无需引用宿主 Store、提供方客户端或 Harness SDK。
 
-实例关闭或 Runner 失败时，Host 撤销运行能力并终止未完成调用；资源定义随 Host 保留，校验、打印和容量规则不依赖 Runner 存活。Runner 不自动重启；重新启动 Aide 会重新激活插件。回调中的内存状态与异步调用栈不会跨重启恢复。Manager 接收可选的 HarnessExecution 能力，不持有 HarnessStore 或 EventLedger；不调用 Harness 的资源插件无需创建任何执行会话或记录目录。
+实例关闭或 Runner 失败时，Host 撤销运行能力并终止未完成调用；资源定义随 Host 保留，校验、打印和容量规则不依赖 Runner 存活。Runner 不自动重启；重新启动 Aide 会重新激活插件。回调中的内存状态与异步调用栈不会跨重启恢复。Manager 接收可选的 HarnessExecution 能力，不持有执行历史或原生会话文件；不调用 Harness 的资源插件无需创建任何执行会话或记录目录。
 
 ## Resource 与 Reconcile
 
@@ -34,7 +34,7 @@ Host 的 `ResourceStorage` 将所有插件 Resource 存入共享 SQLite，以按
 
 每次写入在事务内同步记录、引用索引、回执和必要的回收。无法满足容量约束时整个事务回滚，变更通知只在提交后发出。因此过载会阻止接收更多工作，不会通过删除正在承担的工作来腾空间。完成并缩小记录的更新允许在超配额状态下提交。
 
-执行日志与 Adapter 恢复状态由执行后端管理，不作为 Resource 投影。Resource 配额不等于进程 RSS 或全部磁盘文件的硬上限。
+原生历史与 checkpoint 由 Harness 管理；资源 status.agent 仅保存 Harness、Target 与必要的会话恢复引用，引用计入资源配额。Resource 配额不等于进程 RSS 或全部磁盘文件的硬上限。
 
 ## Resource Printer
 

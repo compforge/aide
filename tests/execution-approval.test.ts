@@ -24,8 +24,7 @@ function fixture(t: { after(fn: () => Promise<void>): void }, startup = false) {
   const journal = new HarnessFixtures(root).create({ id: "aide:execution", cwd: root });
   const adapters: Array<{ turnId?: string; sink: HarnessEventSink; cancels: number; sends: number; decision?: ApprovalResult }> = [];
   const target = { id: "shared", harness: "test" };
-  const executions = new ExecutionService(root, { cwd: root,
-    historyBudgetChars: 0, resolveTarget: () => target, maxConcurrency: 2,
+  const executions = new ExecutionService(root, { cwd: root, resolveTarget: () => target, maxConcurrency: 2,
     createAdapter(_target, ports) {
       const state = { cancels: 0, sends: 0 } as (typeof adapters)[number];
       adapters.push(state);

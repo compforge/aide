@@ -17,9 +17,8 @@ import {
   type ModelOption,
   isModelReadable,
 } from "./adapter.ts";
-import { newId } from "../event/ids.ts";
 import type { ConfigValue, SessionConfigOption } from "../event/index.ts";
-import type { HarnessStore } from "../harness/store.ts";
+import type { HarnessActivity } from "../harness/activity.ts";
 import { type HarnessResumeState } from "./resume.ts";
 import { createHarnessLaunchSnapshot, type HarnessTarget } from "./target.ts";
 
@@ -28,7 +27,7 @@ export interface HarnessBindingOptions {
   target: HarnessTarget;
   cwd: string;
   adapter: HarnessAdapter;
-  records: HarnessStore;
+  records: HarnessActivity;
   eventSink: HarnessEventSink;
   setupInvocationId?: string;
   modelPreference?: string;
@@ -47,14 +46,17 @@ export class HarnessBinding {
    * Controller 使用它归属到触发冷启动的 turn。
    */
   setupInvocationId?: string;
-  freshHarnessSession = true;
-  /** 当前原生 HarnessSession 的上下文基线身份；resume 保留、fresh 重新签发。 */
-  contextEpochId?: string;
+  private savingSession: Promise<void> = Promise.resolve();
+  async flushSession(): Promise<void> {
+    let pending: Promise<void>;
+    do { pending = this.savingSession; await pending; }
+    while (pending !== this.savingSession);
+  }
 
   private starting?: Promise<void>;
   private closePromise?: Promise<void>;
   private closing = false;
-  private readonly records: HarnessStore;
+  private readonly records: HarnessActivity;
   private readonly eventSink: HarnessEventSink;
   private readonly modelPreference?: string;
   private readonly effortPreference?: string;
@@ -308,6 +310,7 @@ export class HarnessBinding {
     const ref = this.ref;
     this.ref = undefined;
     if (ref) await this.adapter.close(ref);
+    await this.flushSession();
   }
 
   private preferredModel(): string | undefined {
@@ -345,7 +348,7 @@ export class HarnessBinding {
         model,
         effort,
       });
-      // open 前落下实际配置：即使进程在 spawn/initialize 期间崩溃，也能解释这次启动。
+      // Capture actual launch configuration for this live invocation and its diagnostic events.
       this.records.setContextHarnessSession(this.contextId, this.target.id, {
         ...existing,
         harness: this.adapter.harness,
@@ -354,16 +357,16 @@ export class HarnessBinding {
       this.ref = await this.adapter.open(
         {
           cwd: this.cwd,
+          sessionId: existing?.harnessSessionId,
           resumeState: existing?.resumeState,
         },
         this.eventSink,
         (binding) => this.acceptSessionBinding(binding),
       );
-      this.freshHarnessSession = !this.ref.resumed;
-      this.contextEpochId =
-        this.ref.resumed && existing?.contextEpochId
-          ? existing.contextEpochId
-          : newId("ctxe");
+      await this.flushSession();
+      this.records.log({ level: "info", source: "aide", component: "harness.binding", harness: this.target.harness,
+        harnessTargetId: this.target.id, message: "Native agent session opened",
+        attributes: { contextId: this.contextId, resumed: this.ref.resumed ?? false, sessionId: this.sessionIdentity()?.id ?? null } });
       if (model) {
         if (configAdapter) await configAdapter.setConfig(this.ref, "model", model);
         else await modelAdapter?.setModel(this.ref, model);
@@ -396,7 +399,6 @@ export class HarnessBinding {
         launchSnapshot,
         harnessSessionId: this.sessionIdentity()?.id,
         resumeState: this.resumeState(),
-        contextEpochId: this.contextEpochId,
       });
     } finally {
       this.setupInvocationId = undefined;
@@ -414,13 +416,16 @@ export class HarnessBinding {
       );
     }
     this.publishedBinding = binding;
+    const session = { harness: this.adapter.harness, harnessSessionId: binding.identity.id, resumeState: binding.resumeState };
+    this.savingSession = this.savingSession.then(() => this.records.saveSession?.(this.contextId, this.target.id, session));
+    // Late identity publication is awaited before releasing the invocation or closing the binding.
+    void this.savingSession.catch(() => {});
     const existing = this.records.meta.contexts[this.contextId]?.harnessSessions[this.target.id];
     this.records.setContextHarnessSession(this.contextId, this.target.id, {
       ...existing,
       harness: this.adapter.harness,
       harnessSessionId: binding.identity.id,
       resumeState: binding.resumeState,
-      ...(this.contextEpochId ? { contextEpochId: this.contextEpochId } : {}),
     });
   }
 }

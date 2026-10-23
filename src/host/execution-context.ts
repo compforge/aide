@@ -6,10 +6,6 @@ export interface HarnessSessionMeta {
   launchSnapshot?: HarnessLaunchSnapshot;
   harnessSessionId?: string;
   resumeState?: HarnessResumeState;
-  resumeCursor?: string;
-  contextEpochId?: string;
-  /** Deliberate context replacement excludes earlier journal entries on native reconstruction. */
-  contextAfterSeq?: number;
   parentSessionId?: string;
 }
 
@@ -18,6 +14,5 @@ export interface HarnessSessionMeta {
  */
 export interface ExecutionContextMeta {
   contextId: string;
-  historyAfterSeq?: number;
   harnessSessions: Record<string, HarnessSessionMeta>;
 }

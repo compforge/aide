@@ -22,7 +22,7 @@ HTTP 层按固定路由提供图片并保留二进制字节；页面 CSP 允许�
 
 用户消息、Aide 正式回复，以及执行过程中的思考与文字输出使用同一 Markdown 渲染器，支持标题、列表、引用、代码块、表格和链接。流式内容按当前完整文本重新解析，历史记录和重连快照使用相同规则。表格与代码块可横向滚动。
 
-浏览器 bundle 内置 markdown-it，关闭原始 HTML 并保留 URL 校验；链接在新页打开，禁用图片语法以避免展示内容主动加载外部资源。工具原始参数与结果保持纯文本。渲染只改变展示，消息和 Ledger 继续保存原文。
+浏览器 bundle 内置 markdown-it，关闭原始 HTML 并保留 URL 校验；链接在新页打开，禁用图片语法以避免展示内容主动加载外部资源。工具原始参数与结果保持纯文本。渲染只改变展示，业务消息保存原文，执行内容由实时投影展示。
 
 ## 实时进展与历史
 
@@ -32,7 +32,7 @@ HTTP 层按固定路由提供图片并保留二进制字节；页面 CSP 允许�
 
 收到的 Input 与 Chief 的处理结果分别展示。Channel 与 Source 输入按来源分类显示稳定图标，并标注来源、接收时间与处理状态。环境变化优先展示环境、namespace 和 Workload 名称；Lark 展示私聊、群内 @ 或讨论进展及消息原文。Source 卡片可展开来源资源引用与完整 observation 数据；静默消费后仍保留输入卡片，标记“已查看 · 保持安静”。这些卡片直接投影已关联 Input，不保存为出站 Message。
 
-执行标题旁显示实际 Harness 的图标与名称（Chief、Pi、Codex、Claude Code、DSH）；标识读取 Ledger 的执行事实，刷新与历史重放保持一致。
+执行标题旁显示实际 Harness 的图标与名称（Chief、Pi、Codex、Claude Code、DSH）；标识读取当前进程的执行事实，浏览器刷新时从实时快照恢复。
 
 接收 Input 后显示排队或处理状态，完成后用正式 Message 替换正文增量。问题保留独立的 Core 身份与 pending / answered / cancelled 状态：待答问题默认完整显示在回答区，已回答或已取消的问题归入过程区，不拼入最终答案或预览。模型未提供思考内容时显示真实处理状态。当前覆盖 Chief 接话过程，Work 的后台执行通过事项卡片展示状态。
 
@@ -46,7 +46,7 @@ Conversation / Input / Message → conversationView → AgentUE UIModel
 
 Pi Adapter 将 `text_delta` / `thinking_delta` 映射到现有 `agent_message_chunk` / `agent_thought_chunk`，消息结束时使用相同 ID 提交完整内容。工具循环的中间发言保持 commentary，只有成功收口的最后答复标为 final。展示进展不改变 Harness 的完成语义，也不触发 Work CRUD。
 
-`src/channel/view.ts` 从已有 Session Projection 选择显式关联当前 Conversation 的 HarnessInvocation 及其 Turn，不发送内部提示词或整个工具原始响应。它生成 `biz: aide.conversation` 的 AgentUE UIModel：`meta.conversation_id` 和 `meta.activity` 表示会话与当前执行状态，正式 `message` 和每个 Turn 对应的 `execution` 按时间排序；同一次 Chief 处理的 execution 与正式回复通过 AgentUE 原生 `group_id` 分组；输入处理按 inputId 关联，定时处理按持久执行身份关联，来源是 Conversation 处理记录和 HarnessInvocation，不靠相邻顺序猜测。`thought` / `text` / `tool` 通过 `parent_id` 归属到该 execution，内部保持 Ledger 时间线顺序。不同类别的 ID 有前缀，避免业务消息与执行事件的身份冲突。
+`src/channel/view.ts` 从当前进程的执行投影 选择显式关联当前 Conversation 的 HarnessInvocation 及其 Turn，不发送内部提示词或整个工具原始响应。它生成 `biz: aide.conversation` 的 AgentUE UIModel：`meta.conversation_id` 和 `meta.activity` 表示会话与当前执行状态，正式 `message` 和每个 Turn 对应的 `execution` 按时间排序；同一次 Chief 处理的 execution 与正式回复通过 AgentUE 原生 `group_id` 分组；输入处理按 inputId 关联，定时处理按持久执行身份关联，来源是 Conversation 处理记录和 HarnessInvocation，不靠相邻顺序猜测。`thought` / `text` / `tool` 通过 `parent_id` 归属到该 execution，内部保持 实时事件顺序。不同类别的 ID 有前缀，避免业务消息与执行事件的身份冲突。
 
 `src/api/stream.ts` 使用 SDK 的 `PatchEmitter` 和 `encodeSse`，通过 `GET /stream?conversationId=...` 输出 AgentUE SSE。首次连接与重连发送 `start` 完整快照，之后新增或更正 block 用 `set`，正文增长用 `append`，执行状态变化用 `meta.activity` 的 `set`。完成只改变 execution 状态，不移除其内容；消息插入导致 block 顺序变化时发送新的 `start` 替换模型。
 
@@ -54,11 +54,11 @@ Pi Adapter 将 `text_delta` / `thinking_delta` 映射到现有 `agent_message_ch
 
 使用已发布的 `@compforge/agentue` SDK，版本由 lockfile 固定。服务端与浏览器直接引用同一 SDK，不复制协议实现。Conversations 的入口直接导入 `applyPatch` / `parsePatchEvent`，与页面代码一起打包。浏览器按 SDK reducer 更新展示模型，Aide 负责将 block 渲染到页面并保留展开状态、输入焦点和用户浏览历史时的滚动位置。
 
-Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职责独立。每次连接的 seq 属于该次交付，不保存 UI patch 日志或按 Last-Event-ID 重放；执行事件仍由既有 Ledger 持久化。
+Core reducer 负责执行事实，AgentUE reducer 负责展示状态，二者职责独立。每次连接的 seq 属于该次交付，不保存 UI patch 日志或按 Last-Event-ID 重放；执行事件只进入有界实时投影。
 
-进度不写入 Channel 出站 Message，与 Lark 的卡片更新分别由各自 Channel 渲染。历史过程直接从既有 Session Ledger 重放形成的投影读取，没有另一份轨迹存储。外层回复块和内部两个区域各自保留同页中的手动展开选择，流式增量、重连及后续消息不会重置用户选择；未手动选择时遵循各区域的默认折叠规则。刷新或重启后仍可展开查看旧轮次，未正常结束的执行标为中断。
+进度不写入 Channel 出站 Message，与 Lark 的卡片更新分别由各自 Channel 渲染。当前进程保留活跃调用和最近 40 次已结束调用的过程，没有另一份轨迹存储。外层回复块和内部两个区域各自保留同页中的手动展开选择，流式增量、重连及后续消息不会重置用户选择；未手动选择时遵循各区域的默认折叠规则。浏览器刷新仍可查看当前进程保留的轮次；Aide 重启后只恢复业务 Input、Output 和处理记录，不恢复执行细节。原生历史若需展示，应通过 Harness 查询能力取得。
 
-`tests/pi-agent.test.ts` 使用真实 Pi SDK 和受控模型 SSE，验证完成前已有思考和正文增量、最终文本不重复。`tests/web-progress.test.ts` 使用真实 Host / Runner / HTTP 和模拟 Harness，下载 HTTP 提供的浏览器 bundle，用其真实 AgentUE reducer 消费 SSE，验证会话隔离、增量更新、重连恢复、断开不取消、最终答复与过程历史同时保留、后续轮次分组、重开 Aide 后的 Ledger 恢复、错误收口，以及进度不进入出站消息。
+`tests/pi-agent.test.ts` 使用真实 Pi SDK 和受控模型 SSE，验证完成前已有思考和正文增量、最终文本不重复。`tests/web-progress.test.ts` 使用真实 Host / Runner / HTTP 和模拟 Harness，下载 HTTP 提供的浏览器 bundle，用其真实 AgentUE reducer 消费 SSE，验证会话隔离、增量更新、重连恢复、断开不取消、最终答复与过程历史同时保留、后续轮次分组、重开 Aide 后业务记录保留且实时进度清空、错误收口，以及进度不进入出站消息。
 
 ## 会话导航
 

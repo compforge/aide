@@ -1,6 +1,6 @@
 import { resourceExecutionKey } from "../plugin/execution-context.ts";
-import type { HarnessStore } from "./store.ts";
-import { HarnessInvocationStore, type ScheduledHarnessInvocation, type HarnessInvocationSnapshot } from "./invocation.ts";
+import type { HarnessActivity } from "./activity.ts";
+import { HarnessInvocations, type ScheduledHarnessInvocation, type HarnessInvocationSnapshot } from "./invocation.ts";
 import type { ExecutionScope, VerbRequest, VerbResponse } from "../../protocol/verbs.ts";
 import { logError, type LogSink } from "../logging.ts";
 export type HarnessRequest = Extract<VerbRequest, { verb: "harness" }>;
@@ -10,10 +10,9 @@ export interface HarnessExecution {
   listHarnessInvocations(): readonly HarnessInvocationSnapshot[];
   cancelHarnessInvocation(id?: string): boolean;
   failExecution(executionId: string, error: string): void;
-  failOrphans(): void;
 }
 export interface HarnessCallsOptions {
-  records: HarnessStore;
+  records: HarnessActivity;
   targets(): readonly { id: string }[];
   defaultTargetId?: string;
   enqueueHarnessInvocation(request: ScheduledHarnessInvocation): Promise<unknown> | void;
@@ -21,20 +20,20 @@ export interface HarnessCallsOptions {
   now?(): Date;
   log?: LogSink;
 }
-/** @spec Owns invocation persistence, waiting and cancellation; resource scheduling only sees HarnessExecution.
+/** @spec Owns live invocations, waiting and cancellation; resource scheduling only sees HarnessExecution.
  * @link docs/kernel.md
  */
 export class HarnessCalls implements HarnessExecution {
-  private readonly records: HarnessStore;
-  private readonly harnessInvocations: HarnessInvocationStore;
-  private readonly dispatchedHarnessInvocations = new Set<string>();
+  private readonly records: HarnessActivity;
+  private readonly harnessInvocations: HarnessInvocations;
+  private readonly dispatchedHarnessInvocations = new Map<string, Promise<unknown>>();
   private readonly enqueueHarnessInvocation: HarnessCallsOptions["enqueueHarnessInvocation"];
   private readonly cancelHostHarnessInvocation: HarnessCallsOptions["cancelHarnessInvocation"];
   private readonly now: () => Date;
   private readonly log?: LogSink;
   constructor(private readonly options: HarnessCallsOptions) {
     this.records = options.records;
-    this.harnessInvocations = new HarnessInvocationStore(options.records);
+    this.harnessInvocations = new HarnessInvocations(options.records);
     this.enqueueHarnessInvocation = options.enqueueHarnessInvocation;
     this.cancelHostHarnessInvocation = options.cancelHarnessInvocation;
     this.now = options.now ?? (() => new Date());
@@ -90,6 +89,8 @@ export class HarnessCalls implements HarnessExecution {
       snapshot.invocationId,
       deadline,
     );
+    try { await this.dispatchedHarnessInvocations.get(snapshot.invocationId); }
+    finally { this.dispatchedHarnessInvocations.delete(snapshot.invocationId); this.records.release(snapshot.invocationId); this.harnessInvocations.release(snapshot.invocationId); }
     if (terminal.phase === "completed" && terminal.result && terminal.contextId) {
       return Object.freeze({
         state: "success",
@@ -176,8 +177,7 @@ export class HarnessCalls implements HarnessExecution {
     ) {
       return;
     }
-    this.dispatchedHarnessInvocations.add(request.invocationId);
-    void Promise.resolve()
+    const dispatched = Promise.resolve()
       .then(() => this.enqueueHarnessInvocation(request))
       .catch((error) => {
         this.harnessInvocations.fail(
@@ -196,8 +196,10 @@ export class HarnessCalls implements HarnessExecution {
           error: logError(error),
           attributes: { harnessInvocationId: request.invocationId },
         });
+        throw error;
       });
+    this.dispatchedHarnessInvocations.set(request.invocationId, dispatched);
+    void dispatched.catch(() => {});
   }
-  failOrphans(): void { this.harnessInvocations.failOrphans("Plugin execution was interrupted by Core restart"); }
   close(): void { this.harnessInvocations.close(); }
 }

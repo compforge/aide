@@ -24,7 +24,7 @@ export type { HarnessEvent, HarnessEventSink } from "./event.ts";
 export interface HarnessSessionHandle {
   harness: string;
   handleId: string;
-  /** 是否成功恢复了既有原生会话；false 表示新建，宿主需要从 HarnessStore 补历史。 */
+  /** 是否成功恢复了既有原生会话；false 表示新建；宿主不得据此重建原生历史。 */
   resumed?: boolean;
 }
 
@@ -34,17 +34,17 @@ export interface HarnessSessionIdentity {
 }
 
 /**
- * 当前执行绑定可持久化的部分。Adapter 在身份首次可知以及 checkpoint 更新时主动发布；
+ * 当前执行绑定可持久化的部分。Adapter 在身份首次可知以及恢复定位信息更新时主动发布；
  * 宿主不从进程内 handle 猜测稳定身份。
  */
 export interface HarnessSessionBinding {
   identity: HarnessSessionIdentity;
-  resumeState: HarnessResumeState;
+  resumeState?: HarnessResumeState;
 }
 
 export type HarnessSessionBindingSink = (binding: HarnessSessionBinding) => void;
 
-/** provider 原生入站消息的旁路 trace；不进入 execution event ledger。 */
+/** provider 原生入站消息的旁路 trace；只用于有界诊断日志。 */
 export type NativeEventSink = (event: {
   direction: "in";
   name?: string;
@@ -54,7 +54,9 @@ export type NativeEventSink = (event: {
 export interface OpenOptions {
   cwd: string;
   env?: Record<string, string>;
-  /** Adapter 上次返回的版本化恢复状态；adapter 应优先恢复，缺失时新建。 */
+  /** Stable native identity; a requested session must resume or fail explicitly. */
+  sessionId?: string;
+  /** Adapter-owned recovery locator, when identity alone is insufficient. */
   resumeState?: HarnessResumeState;
 }
 
@@ -64,21 +66,10 @@ export interface OpenOptions {
  * 原生追加输入复用当前 invocationId。harness 侧各自的 turn/message id 只进 raw 或 adapter
  * 内部映射，不进 controller 契约。
  *
- * 普通 prompt 的 `user_message` / `state_update(running)` 由 controller 在出队时落盘
- * （执行输入是 HarnessStore 的事实，不等 harness 冷启动；且新 turn 的 blocks 可能
- * 含 <aide-sync> prepend，不能进正典历史）——adapter **不得**为 prompt 重复发这两个
- * 事件；messageId 仅供 same-turn send 成功路径发 delivery:"steer" 的 user_message upsert。
+ * 普通 prompt 的 user_message 与 running 事件由 Controller 在出队时生成，
+ * 用于实时展示。Adapter 仅为原生追加的 steer 上报相应输入事件。
  */
-export type PromptInput = Pick<HarnessInput, "invocationId" | "messageId" | "blocks"> & {
-  /**
-   * 跨 harness catch-up 注入（不属于用户输入正文，不进正典历史）。仅当 adapter 声明
-   * `capabilities.sync` 时由 controller 传入，adapter 用原生 side-channel 随本次 sendTurn
-   * 送达（codex: `turn/start.additionalContext`）——独立注入 user message 会污染原生
-   * 历史，text prepend 则把注入混进用户消息并暴露给 UserPromptSubmit hook。
-   * 契约：与本 turn 一起送达；admission 失败视为未送达（controller 水位不动，下次重注入）。
-   */
-  syncBlocks?: PromptBlock[];
-};
+export type PromptInput = Pick<HarnessInput, "invocationId" | "messageId" | "blocks">;
 
 /** Turn submit 回执：只代表请求被接受，不代表 Turn 完成（见 docs/kernel.md）。 */
 export interface PromptReceipt {
@@ -123,13 +114,6 @@ export interface AdapterCapabilities {
   };
   /** 声明后必须实现 ContextCompactable：可请求 harness 压缩当前原生会话。 */
   compact?: CapabilityMarker;
-  /**
-   * sendTurn 原生承载 `PromptInput.syncBlocks`（side-channel 注入）。与 ContextSynchronizable
-   * 互斥使用：syncContext 是"急切注入、resolve 即送达"（水位立即推进）；sync 是"随下一次
-   * sendTurn 送达"（水位在 admission 通过后推进，语义同 prepend 路径）。都未声明时 controller
-   * 回落为把 sync 块 prepend 进 prompt 文本。
-   */
-  sync?: CapabilityMarker;
   commands?: CapabilityMarker;
   config?: CapabilityMarker;
   /** 声明后必须实现 Reconcilable：可查询 harness 眼中的权威运行态。 */
@@ -377,17 +361,6 @@ export interface ContextCompactable {
 
 export function isContextCompactable(adapter: HarnessAdapter): adapter is HarnessAdapter & ContextCompactable {
   return typeof (adapter as Partial<ContextCompactable>).compactContext === "function";
-}
-
-/** 可把 HarnessStore 的缺失历史追加到 harness 自己的 model-visible history。 */
-export interface ContextSynchronizable {
-  syncContext(ref: HarnessSessionHandle, blocks: PromptBlock[]): Promise<void>;
-}
-
-export function isContextSynchronizable(
-  adapter: HarnessAdapter,
-): adapter is HarnessAdapter & ContextSynchronizable {
-  return typeof (adapter as Partial<ContextSynchronizable>).syncContext === "function";
 }
 
 /** 可通过 Harness 原生控制面停止单个后台任务；完成事实仍由 task_update 报告。 */

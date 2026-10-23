@@ -6,7 +6,7 @@ export { inputRef } from "./input/state.ts";
 /** A persistent native session owns context; each invocation has a separate durable admission identity. */
 export const LoopExecutionSchema = z.object({ id: z.string(), startedAt: z.string(), admissionRevision: z.number().int().nonnegative().optional() }).strict();
 export type LoopExecution = z.infer<typeof LoopExecutionSchema>;
-export interface LoopStatus { execution?: LoopExecution | null }
+export interface LoopStatus { agent?: import("@compforge/aide-plugin").AgentStatus; execution?: LoopExecution | null }
 export type LoopResource = Resource<unknown, LoopStatus>;
 export const immediate = (input: InputSpec) => (input.attention ?? (input.origin === "channel" ? "immediate" : "deferred")) === "immediate";
 export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
@@ -54,7 +54,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", executionId: execution.executionId } });
   let error = "Agent ended without confirming input completion";
   try {
-    const result = await execution.verbs.harness({ title: current.kind === "Route" ? "Route" : "Chief", harnessTargetId: target, prompt, timeoutMs: 172800_000 });
+    const result = await execution.verbs.harness({ title: current.kind === "Route" ? "Route" : "Chief", harnessTargetId: target, agentKey: "agent", prompt, timeoutMs: 172800_000 });
     if (result.state !== "success" || result.value.result.stopReason !== "end_turn") error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
   } catch (cause) { error = String(cause); }
   finally { await finalizeExecution(context, current, execution.executionId, error); }

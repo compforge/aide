@@ -36,8 +36,13 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
       sink({ kind: "state_update", invocationId: turnId, payload: { state: "idle", stopReason } });
     };
     return {
-      harness: target.harness, capabilities: { prompt: {}, sync: { supported: true } },
-      async open(_options, events) { sink = events; return { harness: target.harness, handleId: randomUUID() }; },
+      harness: target.harness, capabilities: { prompt: {} },
+      async open(options, events, binding) {
+        sink = events;
+        const id = (options.resumeState?.data as { sessionId?: string } | undefined)?.sessionId ?? randomUUID();
+        binding({ identity: { id }, resumeState: { version: 1, data: { sessionId: id } } });
+        return { harness: target.harness, handleId: id, resumed: !!options.resumeState };
+      },
       async sendTurn(_ref, input) {
         active = input;
         const prompt = input.blocks.map((block) => block.type === "text" ? block.text : "").join("\n");

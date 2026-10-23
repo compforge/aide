@@ -101,7 +101,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   let ref = await open();
   assert.equal(adapter.harness, harness);
   assert.equal(ref.harness, harness);
-  const sessionFile = (binding!.resumeState.data as { sessionFile: string }).sessionFile;
+  const sessionFile = (binding!.resumeState!.data as { sessionFile: string }).sessionFile;
   const nativeRoot = join(agentDir, "sessions");
   assert.ok(relative(nativeRoot, sessionFile).length > 0);
   assert.ok(!relative(nativeRoot, sessionFile).startsWith(".."));
@@ -146,10 +146,10 @@ test("Pi streams thought and answer before completion without duplicating the fi
 test("Pi answers directly without work and resumes its native history", { timeout: 20_000 }, async (t) => {
   const fixture = await setup(t, () => ({ text: "你好，有什么可以帮你？" }));
   assert.equal(existsSync(fixture.personFile), false, "Generic Pi does not create a person profile");
-  assert.equal((fixture.binding().resumeState.data as { empty: boolean }).empty, true);
+  assert.equal((fixture.binding().resumeState!.data as { empty: boolean }).empty, true);
   assert.equal((await fixture.reopen()).resumed, false);
   const summary = await fixture.run("你好", "greeting");
-  assert.equal((fixture.binding().resumeState.data as { empty: boolean }).empty, false);
+  assert.equal((fixture.binding().resumeState!.data as { empty: boolean }).empty, false);
   assert.equal(summary.finalText, "你好，有什么可以帮你？");
   assert.equal(fixture.requestHeaders[0]!["x-provider"], "snapshot");
   assert.equal(fixture.requestHeaders[0]!["x-model"], "snapshot");
@@ -167,7 +167,7 @@ test("Pi answers directly without work and resumes its native history", { timeou
   await fixture.run("刚才说了什么？", "followup");
   assert.equal(fixture.binding().identity.id, identity);
   assert.match(JSON.stringify(fixture.requests[1]!.messages), /你好/);
-  const data = fixture.binding().resumeState.data as { sessionFile: string };
+  const data = fixture.binding().resumeState!.data as { sessionFile: string };
   await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile: data.sessionFile, work: fixture.work }), /does not belong/);
   await assert.rejects(createPiAgent({ ...fixture.config, sessionFile: join(fixture.config.agentDir, "sessions", "missing.jsonl") }), /missing/);
 });
@@ -232,7 +232,7 @@ test("Chief executes all five Work tools through the SDK and keeps commentary ou
   assert.equal(fixture.events.filter((event) => event.kind === "state_update").length, 1);
   assert.equal((await fixture.reopen()).resumed, true);
   assert.equal((await fixture.run("继续聊天", "chief-resumed")).stopReason, "end_turn");
-  const sessionFile = (fixture.binding().resumeState.data as { sessionFile: string }).sessionFile;
+  const sessionFile = (fixture.binding().resumeState!.data as { sessionFile: string }).sessionFile;
   await assert.rejects(createPiAgent({ ...fixture.config, sessionFile }), /does not belong/);
   await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile,
     work: { ...fixture.work, conversationId: "another" } as WorkService }), /does not belong/);
@@ -301,47 +301,36 @@ test("Aide isolates continuous native contexts across conversations, restart and
     await aide.receive(fixtureIncoming({ channelId: "web", sessionId, conversationId, id, text: `question-${id}` })); await aide.settled();
     assert.equal(aide.personal.conversations.inputs().at(-1)!.consumption.phase, "done");
   };
-  const binding = (sessionId: string, conversationId: string) => {
-    const session = new HarnessFixtures(home).open("aide:execution");
-    const target = chiefTarget(conversationId);
-    const r = aide.personal.conversations.resource(conversationId)!;
-    const contextId = resourceExecutionKey({ pluginInstanceId: "personal", namespace: "v1", executionId: "test", controllerName: "agent",
-      resourceRef: { apiVersion: r.apiVersion, kind: r.kind, namespace: r.metadata.namespace, name: r.metadata.name, uid: r.metadata.uid } });
-    return session.meta.contexts[contextId]!.harnessSessions[target]!;
-  };
+  const binding = (_sessionId: string, conversationId: string) => aide.personal.conversations.resource(conversationId)!.status.agent!.session!;
+
   aide = open();
   try {
     assert.equal(aide.runtime.plugins.listInstances().length, 1);
     await send("lark:app:group-a", "lark:app:group-a", "a1");
     const original = binding("lark:app:group-a", "lark:app:group-a");
     await send("lark:app:group-a", "lark:app:group-a", "a2");
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a").id, original.id);
     assert.match(JSON.stringify(fixture.requests[3]), /native-response-0/);
     await send("lark:app:group-b", "lark:app:group-b", "b1");
-    assert.notEqual(binding("lark:app:group-b", "lark:app:group-b").harnessSessionId, original.harnessSessionId);
+    assert.notEqual(binding("lark:app:group-b", "lark:app:group-b").id, original.id);
     assert.doesNotMatch(JSON.stringify(fixture.requests[6]), /question-a1|native-response-0/);
     await aide.close();
     aide = open(); await aide.start();
     assert.equal(aide.runtime.plugins.listInstances().length, 1);
     await send("lark:app:group-a", "lark:app:group-a", "a3");
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
+    assert.equal(binding("lark:app:group-a", "lark:app:group-a").id, original.id);
     assert.match(JSON.stringify(fixture.requests[9]), /native-response-1/);
     assert.doesNotMatch(JSON.stringify(fixture.requests[9]), /question-b1/);
     assert.equal(aide.outputs().filter((message) => message.conversationId === "lark:app:group-a").length, 3);
     await aide.close();
-    const cwd = join(fixture.config.cwd, "other-cwd"); mkdirSync(cwd);
-    aide = open(cwd); await aide.start();
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a")?.resumeState, undefined);
-    assert.equal(binding("lark:app:group-a", "lark:app:group-a"), undefined, "cwd change clears the native binding; a new native context uses the durable Conversation summary");
+    aide = open(); await aide.start();
     await send("lark:app:group-a", "lark:app:group-a", "a4");
-    assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, original.harnessSessionId);
-    assert.equal(aide.outputs().filter((message) => message.conversationId === "lark:app:group-a").length, 4);
     const beforeDelete = binding("lark:app:group-a", "lark:app:group-a");
     const conversation = aide.personal.conversations.get("lark:app:group-a")!;
     assert.deepEqual(await aide.deleteConversation(conversation.id, conversation.revision, aide.personal.conversations.resource(conversation.id)!.metadata.uid), { deleted: true });
     await aide.settled();
     await send("lark:app:group-a", "lark:app:group-a", "a5");
-    assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").harnessSessionId, beforeDelete.harnessSessionId);
+    assert.notEqual(binding("lark:app:group-a", "lark:app:group-a").id, beforeDelete.id);
     assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)), /question-a[1-4]|native-response-[0-4]/);
     await aide.close();
     aide = open(); await aide.start();
@@ -526,9 +515,8 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
     assert.match(JSON.stringify(request.messages), /fixture-as-ops/);
     assert.doesNotMatch(JSON.stringify(request.tools), /memory_add|create_work/);
   }
-  const session = new HarnessFixtures(home).open("aide:execution");
-  assert.equal(session.meta.harnessTargets.default!.harness, "pi");
-  assert.ok(Object.values(session.meta.contexts).some((lane) => lane.harnessSessions.default?.harness === "pi"));
+  assert.equal(existsSync(join(home, "harness", "events.jsonl")), false);
+  assert.equal(existsSync(join(home, "harness", "meta.json")), false);
 });
 
 /** @case Native Chief context survives separate invocations and restart; business consumption still requires its tool. */
