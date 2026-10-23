@@ -35,12 +35,12 @@ interface ConversationMeta extends ModelMeta {
 export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
 
 /**
- * @spec Live and historical progress share Ledger-backed Turn identity and use the explicit execution conversation association.
+ * @spec Retained live progress uses explicit invocation and Conversation associations; it does not survive service restart.
  * @spec AgentUE group_id binds executions and official replies to their persisted Chief activation.
  * @spec Every Channel or Source Input attached to this Conversation stays visible, including queued and quietly consumed observations.
  * @spec Input cards and Harness identity project persisted facts without creating outbound Messages.
  * @case tests/web-progress.test.ts
- * @spec Questions retain their Core identity and state; they never become final-answer text.
+ * @spec Questions are ordinary Outputs; native permissions use a separate Approval surface.
  * @why Completion folds execution details; it never deletes them or creates extra delivered Messages.
  * @link docs/channel/web.md
  */

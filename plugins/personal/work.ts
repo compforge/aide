@@ -25,7 +25,7 @@ export function newWork(conversationId: string, definition: WorkDefinition, now 
 
 /**
  * @spec Tools operate on the caller-bound conversation, never a model-supplied scope. Writes notify all matching resource watches.
- * @link docs/plugin/personal.md
+ * @link docs/personal/README.md
  */
 export class WorkService {
   constructor(private readonly store: Store, readonly conversationId: string, private readonly log: Logger) {

@@ -1,7 +1,7 @@
 # Aide 配置
 
 Host 在启动时加载一份配置快照，验证后按职责装配 Connector、Harness 和 Plugin。
-`config.yaml` 是 Aide 声明的事实来源。启动时完成模块校验后才恢复 Session 和启动 Channel；修改配置后重启服务。
+`config.yaml` 是 Aide 声明的事实来源。启动时完成模块校验后才恢复业务资源 和启动 Channel；修改配置后重启服务。
 新建、恢复和重建 Harness 都复用启动配置，运行期间修改 Aide 或 Pi 的 models/settings 文件不会改变它。
 
 ## 来源与优先级
@@ -56,7 +56,7 @@ CLI 账号不必是本人；观察到执行账号的私信或 @ 不会自动归�
 修改 Me 配置后重启，既有 Input 保留原关系；人物资料和认知在 Web Persons 编辑后立即生效。
 
 省略某类 Source 就关闭对应观察，Connector 仍可按需查询。Source 引用缺失的 Connector、环境不可用于本地 Kubernetes 采样，
-或策略字段不受支持时，启动报错。Personal 在恢复 Session 前校验这些策略，启动日志汇总生效的观察范围和间隔。
+或策略字段不受支持时，启动报错。Personal 在恢复业务资源 前校验这些策略，启动日志汇总生效的观察范围和间隔。
 
 ```yaml
 defaultHarness: pi
@@ -98,7 +98,7 @@ plugins:
 `harnesses.<name>` 只声明对应实现的配置。Personal 的 Chief、Task 和 Routine 使用专属 Agent，不受通用执行选择影响。
 未知值、空值和领域 Agent（`chief`、`route`、`task`、`routine`）均报错；代码不将无效选择静默降级为 Pi。
 
-启动时准备 Chief、Route、Task、Routine 与选中的执行 Harness，生成固定的默认 Target。只有 Pi 被选中时才解析执行 Pi 的模型、技能与同步收据；
+启动时准备 Chief、Route、Task、Routine 与选中的执行 Harness，装配固定的 Harness 配置。只有 Pi 被选中时才解析执行 Pi 的模型、技能与同步收据；
 未选中的模块配置仍需满足字段结构。CLI 的登录态、原生配置与可用性由相应提供方负责，启动解析不代表远端连通。
 修改选择后重启生效，影响后续通用 Harness 请求；Personal 专属 Agent 的选择保持不变，中断待核对的工作不会自动重试。
 
@@ -188,7 +188,7 @@ aide harness sync routine
 同步中断后须重新同步，不继续使用半更新状态。对话创建和模型调用不会触发安装或更新。
 同步包不会安装 ascli 等业务 CLI；它们及凭证由运行环境独立提供。
 
-环境配置见 [Connector](connector/README.md)，Chief 的角色、工具和会话行为见 [Chief](harness/chief.md)。
+环境配置见 [Connector](connector/README.md)，Chief 的角色、工具和会话行为见 [Chief](personal/chief.md)。
 
 ## Task 静默策略
 
@@ -200,7 +200,7 @@ plugins:
       idleRetentionMs: 86400000 # 释放后继续保留 Task 24 小时
 ```
 
-两项均为毫秒整数，范围 1000–2147483647。新分派清除两阶段计时；待处理 Input、等待用户、未来唤醒和待核对状态阻止 Task 回收。释放句柄保留 sessionId，回收 Task 通过 deletionTimestamp 与 finalize 完成，详见 [Task Agent](harness/task.md)。
+两项均为毫秒整数，范围 1000–2147483647。新分派清除两阶段计时；待处理 Input、等待用户、未来唤醒和待核对状态阻止 Task 回收。释放句柄保留 sessionId，回收 Task 通过 deletionTimestamp 与 finalize 完成，详见 [Task Agent](personal/task.md)。
 
 ## Routine 静默策略
 
@@ -214,7 +214,7 @@ plugins:
       agentIdleMs: 300000     # 执行结束、无下一条可执行输入后，静默 5 分钟释放句柄
 ```
 
-agentIdleMs 范围为 1000–2147483647 毫秒。Routine 保留 sessionId 和职责资源，之后由 cron、事件或 Chief Input 唤醒；没有静默回收阶段，显式删除才 finalize。见 [Routine Agent](harness/routine.md)。
+agentIdleMs 范围为 1000–2147483647 毫秒。Routine 保留 sessionId 和职责资源，之后由 cron、事件或 Chief Input 唤醒；没有静默回收阶段，显式删除才 finalize。见 [Routine Agent](personal/routine.md)。
 
 ## 模块归属
 
@@ -222,7 +222,7 @@ agentIdleMs 范围为 1000–2147483647 毫秒。Routine 保留 sessionId 和职
 Connector 配置由 `connectors/config.ts` 组合，Environment 和需求平台分别声明自己的字段与校验。需求平台的 `me.userKey` 标记本人，`profile` 选择执行账号，Source 的 `userKeys` 选择观察负责人；三者独立，完整示例见 [需求平台](connector/requirements.md)。
 Personal 的 `config.ts` 组合各类 Source 策略，装配阶段解析后仅向所属 Runner 下发有效观察范围。
 配置输入允许缺省和引用；有效配置已补齐默认值、解析模型与路径，并在创建运行实例之前验证。
-Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。整体原则见 [Kernel](kernel.md#配置所有权与生命周期)。
+Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。整体原则见 [Kernel](kernel.md)。
 
 ## Conversation 消费策略
 
@@ -243,11 +243,10 @@ plugins:
 - `summaryChars` 限制 Conversation 累计认识的长度，模型需合并后替换；近期处理记录使用 recent，统一限制条数和总字符数。长期认识使用共享记忆，委托进展保存在 Work。
 - `assess_input` 提交业务消费回执并原子建立 Work 办理记录。没有回执的已尝试输入保留失败证据，不自动重放。
 
-不再提供 batchSize、maxWaitSeconds 或分批压缩配置。
 
 ## Resource 容量
 
-所有持久 Resource 共用 Host 存储，按 `API group/kind` 聚合不同版本、Session 与插件实例的用量。以下是默认值，字节限制计算序列化记录的 UTF-8 大小：
+所有持久 Resource 共用 Host 存储，按 `API group/kind` 聚合不同版本、namespace 与插件实例的用量。以下是默认值，字节限制计算序列化记录的 UTF-8 大小：
 
 ```yaml
 resources:
@@ -281,6 +280,6 @@ plugins:
       contextChars: 16000
 ```
 
-规则命中立即投递；未命中交给持续复用原生上下文的 Route loop。contextChars 限制新 Input 预览；read_input 提供全文，list_conversations 分页读取当前目录。route_input 明确提交一条输入的完整分派计划，计划持久化后幂等投递。
+规则命中立即投递；未命中交给持续复用原生上下文的 Route loop。contextChars 限制新 Input 预览；read_input 提供全文，list_conversations 分页读取当前目录。route_input 在同一事务提交完整去向与全部 assess，具体契约见 [Route](personal/route.md)。
 
-`harnesses.route.model` 可以独立选择模型，字段同 Pi 的 model；未声明时复用 Chief 启动配置。Route 不可设为 defaultHarness，只拥有路由、目录和共享记忆检索工具，不加载业务执行工具或技能。纯分类失败退避重试，已有分派计划直接恢复投递。
+`harnesses.route.model` 可以独立选择模型，字段同 Pi 的 model；未声明时复用 Chief 启动配置。Route 不可设为 defaultHarness，只拥有路由、目录和共享记忆检索工具，不加载业务执行工具或技能。纯分类失败按输入退避重试，已经完成路由的输入不重复分派。

@@ -7,7 +7,7 @@ import { toWork, type WorkResource, type WorkSpec } from "./resources.ts";
 /**
  * @spec Only Work Reconcile applies inbox requests. Observations never resume paused or uncertain work; a retained Task can accept new facts after done.
  * @spec Request application and state commit together; contextual input remains pending until execution confirms it.
- * @link docs/plugin/personal.md
+ * @link docs/personal/input.md#研判与办理
  */
 export async function consumeWorkInputs(context: PluginContext, original: WorkResource): Promise<WorkResource | undefined> {
   const ref = { apiVersion: original.apiVersion, kind: original.kind, ...original.metadata };

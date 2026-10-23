@@ -1,4 +1,4 @@
-# Route Harness
+# Route：话题归属与连续分类
 
 Route 为 Input 寻找一个或多个相关 Conversation。明确规则由 Reconcile 执行，其余提交给持续运行的 Route Agent；找不到相关话题才使用 Default。Default 不接受额外的无条件副本，也不承担基础设施故障兜底。
 
@@ -20,11 +20,11 @@ Channel / Source → Input
 
 ## Agent 与 Controller
 
-`Route/global` 只保存当前 execution，不保存 Input ID 队列。默认 Controller 根据 Input 索引发现待路由事实，处理规则；具名 `agent` Controller 把其余输入交给持久 Route Agent。Reconcile 是确定性协调器，Agent 承担非确定性判断。两者不需要 Batch 或 Delivery 资源。
+`Route/global` 保存当前 execution 与原生 agent 会话引用，待路由事实由 Input 索引提供。默认 Controller 根据 Input 索引发现待路由事实，处理规则；具名 `agent` Controller 把其余输入交给持久 Route Agent。Reconcile 是确定性协调器，Agent 承担非确定性判断。
 
 “持续运行”指复用同一原生上下文，没有输入时可以空闲。空闲时通过 harness verb 的 prompt 启动；运行中，默认 Controller 先保存 Input 的 execution 接纳记录，再经同一个 verb 调用原生 followUp，immediate 则调用 steer。多条 Input 可以在同一 invocation 中分别通过 route_input 完成。明确拒绝才释放接纳记录，结果不确定时保留证据；当前大部分 immediate 带明确 sessionId，会先被规则直接分派。模型等待不阻塞默认 Controller 的规则处理。
 
-规则匹配 Input.sessionId 与 Conversation 话题；originalInputId 已有路由结果时可以沿其归属关联。前置 Input 尚未决定时，它只是证据，不构成硬等待依赖。Channel 的明确新话题可以创建 Conversation，Source 的陌生话题线索本身不创建。没有任何 Conversation 时直接建立 Default。
+规则匹配 Input.sessionId 与 Conversation 话题；originalInputId 已有路由结果时可以沿其归属关联。前置 Input 尚未决定时，它只是证据，不构成硬等待依赖。Channel 的明确新话题可以创建 Conversation，Source 的陌生话题线索本身不创建。规则仍未命中且没有任何 Conversation 时直接建立 Default。
 
 ## 工具与完成条件
 
@@ -35,7 +35,7 @@ Channel / Source → Input
 | `route_input({ inputId, conversationUids, reason })` | 原子提交完整路由决定；空目标数组表示 Default |
 | `memory_search`、`session_search` | 检索共享记忆与历史 |
 
-`route_input` 仅提供给 Route。工具验证本次 execution 确实接纳了 Input，目标必须是现存 Conversation UID。一次事务写入 `Input.status.route.result`、completedAt 和所有 `assess[uid]`；建立 assess 即完成交付，不再逐个修改 Conversation 队列。目标版本检查与写入处于同一事务，删除或替换目标不能导致误投。
+`route_input` 仅提供给 Route。工具验证本次 execution 确实接纳了 Input，目标必须是现存 Conversation UID。一次事务写入 `Input.status.route.result`、completedAt 和所有 `assess[uid]`；建立 assess 即完成交付。目标版本检查与写入处于同一事务，删除或替换目标不能导致误投。
 
 已完成的重复调用不改分派结果、不重置 assess。工具调用成功才表示路由完成；模型结束或说“已分派”不算确认。Chief 使用独立的 `assess_input`，`say` 另行产生 Output。
 

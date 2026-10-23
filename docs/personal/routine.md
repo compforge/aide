@@ -1,4 +1,4 @@
-# Routine Agent
+# Routine：持续职责与每轮办理
 
 Routine 是同一 Conversation 下持续存在的委托职责。`agents/routine/` 与 Chief、Task 平级，拥有独立提示词和领域工具，复用 Pi SDK 与 PiAdapter。它比较新旧观察、处理值得推进的变化，必要时通过 say 通知或询问用户。
 
@@ -20,7 +20,7 @@ Routine.spec.trigger 声明 cron 或事件订阅。cron 到期可以在没有 In
 
 工具绑定宿主确定的 Routine UID；每次调用检查当前 execution，模型不能选择其它资源范围。文件、CLI 和能力包使用 Pi 原生机制与现有凭证。
 
-report_routine 的 inputIds 必须是已接纳、已处理的输入；最多 99 条，与一次资源状态更新共同提交。未列出的 Input 不会被确认。summary 替换累计认识，recent 追加本次依据，均遵守 Personal 的有界保留约定。
+report_routine 的 inputIds 必须是已接纳、已处理的输入，与一次资源状态更新共同提交。未列出的 Input 不会被确认。summary 替换累计认识，recent 追加本次依据，均遵守 Personal 的有界保留约定。
 
 - done 完成本轮。尚有未确认 Input 时继续 ready，否则回到 scheduled；cron 重新计算下次时间，纯事件职责保持 nextAt=null 等待事件。
 - ask 保存问题并进入 waiting，问题通过 say 单独发送；回答经 Chief 分派为新 Input 后继续。
@@ -34,7 +34,7 @@ say 和 report_routine 分别持久化。Output 投递失败只重试投递，�
 
 `routine.status.agent = { harness: "routine", sessionId }`。Reconcile 通过 create 获取并持久保存原生 ID，再提交业务输入；恢复依赖 Pi SDK 的初始化、持久化及按 ID 查找，不复制会话文件或维护第二份历史。status.execution 与 lastExecutionId 记录当前及最近执行。
 
-执行结束、没有下一条可执行 Input 后写入 idleSince；正在推理和执行工具不算静默。默认 5 分钟后 close 运行句柄并记录 agentStoppedAt，保留 sessionId。新事件或 Chief 分派与清除计时在同一事务提交；cron 到期在启动时清除计时。
+执行结束、没有下一条可执行 Input 后写入 idleSince；正在推理和执行工具不算静默。静默达到配置时长后 close 运行句柄并记录 agentStoppedAt，保留 sessionId。新事件或 Chief 分派与清除计时在同一事务提交；cron 到期在启动时清除计时。
 
 Routine 没有静默资源回收阶段。职责、trigger 和累计认识持续保留，后续触发恢复同一原生会话。显式删除才设置 deletionTimestamp；分派和事件匹配拒绝 deleting 目标，删除 Reconcile 关闭句柄、取消遗留 handle 后由框架 finalize。
 

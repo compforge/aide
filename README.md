@@ -38,7 +38,7 @@ cd aide
 npm ci
 ```
 
-Configure model access for Chief and the default work agent, Pi, in `~/.aide/config.yaml`. If you already use Pi, Aide can use its existing model settings and authentication from `~/.pi/agent`. The [configuration guide](docs/configuration.md) covers model providers, credentials, skills, and connections to external systems. Restart Aide after changing the configuration.
+Configure model access for Chief and its Task / Routine agents, in `~/.aide/config.yaml`. If you already use Pi, Aide can use its existing model settings and authentication from `~/.pi/agent`. The [configuration guide](docs/configuration.md) covers model providers, credentials, skills, and connections to external systems. Restart Aide after changing the configuration.
 
 Choose the directory Aide should work in and start it:
 
@@ -48,7 +48,7 @@ AIDE_CWD=/path/to/work AIDE_TIMEZONE=Asia/Shanghai npm start
 
 Open <http://127.0.0.1:7433> and try: “Read the README in the working directory and tell me how to run the project.” Make sure the service can access the files, CLIs, and credentials needed for your requests.
 
-In the web app, select a conversation on the left, follow messages and execution progress in the center, and view its tasks and routines on the right. Past execution details remain available after a refresh.
+In the web app, select a conversation on the left, follow messages and execution progress in the center, and view its summary, recent context, tasks, and routines on the right. Refreshing restores the execution details retained by the running service.
 
 For an always-on Linux setup, proxy settings, or access through an SSH tunnel, see [deployment and troubleshooting](docs/deployment.md).
 
@@ -65,3 +65,5 @@ Aide currently serves one user through a single service instance. Its HTTP inter
 State is stored in `~/.aide` by default. The service must remain running to make progress. After a restart, Aide restores saved work and schedules; interrupted actions or results it cannot validate wait for your review before you explicitly continue. Check external effects before retrying. Pausing or deleting work does not undo actions already taken.
 
 Aide uses AI models, which can make mistakes. Review important results against the files, artifacts, or external systems involved.
+
+[Documentation guide](docs/README.md).

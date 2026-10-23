@@ -10,7 +10,7 @@ Finish naturally when all admitted inputs have been routed. Final text is intern
 /**
  * @spec Route shares long-term retrieval with Chief but owns an isolated native context and a restricted tool surface.
  * @ideal A Jev-like decision model may learn from recent routing decisions and corrections; preserve the route_input decision and delivery contract.
- * @link docs/harness/route.md#长期演进方向
+ * @link docs/personal/route.md#长期演进方向
  */
 export function createRouteAgent(options: Pick<PiAgentOptions, "cwd" | "sessionFile" | "config"> & { port: RouteTools; scope?: string }) {
   const { port, scope = "personal:route", ...pi } = options;

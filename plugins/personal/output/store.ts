@@ -10,7 +10,7 @@ import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 
 /** @spec Output is independent of Input and Conversation lifetime. Associations are provenance, not retention edges.
  * @spec Content, receivers and target never change after admission. Only the Host transport updates delivery state.
- * @link docs/output.md
+ * @link docs/personal/output.md
  */
 export class OutputStore {
   readonly storage: ResourceStorage;

@@ -19,15 +19,24 @@ Aide 以单个服务实例管理自己的状态目录。配置模型、CLI 和�
 
 ## 状态目录
 
-Session 统一存放在 `$AIDE_HOME/sessions/<directory>/`，包含执行历史、日志和插件私有数据；持久 Input 与插件 Resource 统一位于 `$AIDE_HOME/resources.sqlite`。带命名空间的逻辑 ID 使用编码目录，原始 sessionId 见 meta.json。`AIDE_CWD` 只选择执行目录，改变它保留 Aide 数据并清空原生 Harness 绑定。服务启动时恢复所有已有 Session 和配置的 Source；新的 Channel 上下文按输入的 sessionId 创建 Session。
+AIDE_HOME 是应用状态根目录，默认 ~/.aide。当前主要数据按所有者保存：
 
-资源数据库使用 WAL。备份时停止服务并保存数据库及其 WAL 文件，或使用 SQLite 的在线备份能力。启动会一次性导入现有 `inputs.json` 与 Session 下的资源 JSON；原文件保留为静态备份，导入后读写以 SQLite 为准。回退旧版本前须单独制定数据恢复方案，不能将这些静态备份当作最新状态。
+| 位置 | 内容与恢复责任 |
+| --- | --- |
+| resources.sqlite 及 WAL | 业务 Resource、索引、引用与去重回执，由 Host 管理 |
+| plugins/<pluginId>/ | 插件 package global 私有文件；其 instances/<instanceId>/ 为实例私有文件 |
+| plugins/instances/ | Host 的插件实例元数据 |
+| channels/ | Channel 收发与平台投递记录 |
+| connectors/calls.jsonl | 外部调用意图与结果，未完成调用不自动重放 |
+| harnesses/ | 按 Harness 显式同步的能力包缓存 |
+| runtime.log | 插件与调度诊断 |
+| harness-runtime.log、harness-native.jsonl | 有界执行及协议诊断，不参与会话恢复 |
 
-插件私有文件分为全局 `plugins/<pluginId>/`、Session 内的 `sessions/<id>/plugins/<pluginId>/` 和其下的实例目录，不提供 project 级目录。
+Harness 自己保存原生历史；Pi 及基于 Pi 的领域 Agent 默认使用 ~/.pi/agent/sessions/。Personal 在资源 status.agent 保存 harness / sessionId，恢复时经 Harness 重新打开原生会话。配置原生目录的方式见 [Pi](harness/pi.md) 与 [Chief 记忆](personal/chief.md#存储与配置)。
 
-Harness 原生会话沿用各自默认目录；Pi / Chief 通常位于 `~/.pi/agent/sessions/`。Aide Session 只保存恢复绑定与统一执行事实。已保存的 Pi 原生文件仍通过恢复句柄打开，不按新目录重新猜测身份。
+备份时先停止服务，再保存应用状态、配置和所需原生会话；也可用 SQLite 在线备份获取数据库一致快照。只备份资源数据库能保留业务状态，但不足以恢复 Harness 原生上下文。凭证由运行用户和相应 CLI 管理，按各自方式备份。
 
-开发阶段不自动迁移或读取旧的 `projects/` 布局，也不删除其中数据。升级后若只有旧布局，服务将从空 Session 开始。
+AIDE_CWD 选择执行目录，不移动或清空业务数据。原生会话恢复会核对目录与 scope，改变工作目录后应确认已有会话是否仍可恢复。需要清空数据时显式停服、备份并重建。
 
 ## Linux 常驻部署
 

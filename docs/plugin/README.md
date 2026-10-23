@@ -1,93 +1,35 @@
 # Plugin 运行机制
 
-Plugin 是业务扩展的组织与所有权单位。插件声明资源和回调，Core 提供持久化、调度、Harness 与交互能力。Personal 是 Aide 的一个内置 Plugin，负责个人助手的业务判断；通用运行机制可以承载其它插件。
+Plugin 是领域模型与业务判断的所有者。Package 声明纯资源定义，activate 注册 Controller、Source、Watch 与 Hook；一份启用配置形成一个 PluginInstance，由 Host 装配独立 Runner。
 
-## Package、Instance 与 Runner
+## Host 与 Runner
 
-`PluginPackage.resources` 声明资源定义，`activate(context)` 注册 Controller、Source、Watch、Hook 等运行能力。Package 描述插件代码，一份启用配置对应一个 PluginInstance；Host 为实例建立 Binding 并启动独立 Runner，加载插件后完成注册。
+Host 持有 Resource 存储、Connector 和可选 Harness 执行能力；Runner 运行插件回调、观察、队列、重试和 Reconcile。双方通过协议通信，不相互导入实现。PluginContext 将资源、Connector 和 verb 操作转为宿主请求。
 
-Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队列、重试和 Reconcile；资源存储、全局 Connector 与执行事实由 Host 持有。PluginContext 将资源操作、Connector 查询和 verb 转成跨进程请求，插件无需引用宿主 Store、提供方客户端或 Harness SDK。
+实例关闭或 Runner 失败时撤销运行能力并终止未完成调用；资源定义随 Host 保留。Runner 不自动重启，重启 Aide 会重新激活插件。内存状态与异步调用栈不跨进程恢复，插件依据持久业务进展决定下一步。
 
-实例关闭或 Runner 失败时，Host 撤销运行能力并终止未完成调用；资源定义随 Host 保留，校验、打印和容量规则不依赖 Runner 存活。Runner 不自动重启；重新启动 Aide 会重新激活插件。回调中的内存状态与异步调用栈不会跨重启恢复。Manager 接收可选的 HarnessExecution 能力，不持有执行历史或原生会话文件；不调用 Harness 的资源插件无需创建任何执行会话或记录目录。
+插件私有目录分为 package global 与 instance，见 [部署状态目录](../deployment.md#状态目录)。纯资源插件无需配置 Harness。
 
-## Resource 与 Reconcile
+## Resource 与协调
 
-Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。 `ResourceDefinition` 统一声明 type、spec/status schema、可选 validator、printer、indexes 和 retention。Host 在恢复资源、启动 Controller 前加载声明；未知类型不能写入。进程内插件通过 resources 提供声明，独立 Runner 的 PackageEntry 通过 resourcesUrl 指向默认导出定义数组的纯模块，Host 直接加载它。声明模块不导入 Runner 或 Host 实现，不执行 I/O。
+资源身份由插件实例、类型、namespace、name 与 UID 表达。spec 保存目标，status 保存进展；定义、事务、Printer、索引与容量见 [Resource](resource.md)。每种 CRD 在 plugin package 下有自己的目录，模型、Reconcile 和专属辅助代码就近组织；跨资源协作留在插件层。
 
-资源统一属于插件实例与 namespace，定义不区分 shared/session，资源和调度身份不携带 sessionId。底座不预注册任何业务资源。每种资源可以没有 Controller，也可以由多个具名 Controller 观察。
+资源变化、Source、Watch、cron 和 requeueAfterMs 共用去重队列。同一 Controller 对同一资源串行，不同资源受 Controller 与 Runner 容量约束；具名 Controller 有独立的队列、锁和定时记录，共享资源更新仍需版本检查。
 
-所有创建、更新和删除请求都在存储事务内经过 Schema 与 Validator，包括 Agent 工具、Source 与 commit。Schema 的规范化输出作为持久数据；Validator 可读取同一作用域内的事务快照，包含当前 commit 已完成的前序写入。它不能执行异步工作或外部副作用。校验、引用计算或配额失败会回滚整笔写入。
-
-一个 Controller 拥有一种资源类型的 Reconcile：每次读取当前事实，推进目标，再持久化结果或安排下次唤醒。
-
-每种 CRD 在所属 plugin package 下有一个按资源命名的目录，集中保存模型、Reconcile 和专属辅助代码。例如 `plugins/personal/conversation/` 包含 Conversation 的模型、输入追加、存储、触发配置和 Reconcile。Personal 的 Source 集中在 `plugins/personal/source/`：`definition.ts` 声明来源分类，`environment/`、`message/`、`requirement/` 分别保存对应 CRD 的配置与观察逻辑，消息上下文归入 `message/context.ts`。插件装配与跨资源流程留在插件层；目录内的 Runner 代码仍只经 ResourceClient 访问资源，不导入宿主存储实现。
-
-资源变化、Source、Watch、cron 和 `requeueAfterMs` 共用按资源身份去重的队列。同一资源串行处理；不同资源受 Controller 与所在 Runner 的容量约束。基础设施回调重试不保证外部操作只发生一次，插件须保存已进入执行的状态，避免把重试变成业务重放。
-
-资源写入统一经过 Core ResourceClient，包括 Agent 工具和 Reconcile，使用版本检查并通知所有相关 Watch。spec 与初始 status 可以原子提交。主资源的纯 status 更新不自动再入队；需要感知 status 的 Controller 显式声明 Watch。跨越外部能力等待后，应按 uid 重新读取资源，避免旧回调更新同名替代资源。删除先持久化 deletionTimestamp，Controller 完成终止处理后移除资源；结构性 owner 关系支持级联删除。
-
-## Resource 容量与释放
-
-Host 的 `ResourceStorage` 将所有插件 Resource 存入共享 SQLite，以按需读取替代常驻完整快照集合。容量按 Group/Kind 汇总，配额覆盖不同 API 版本、namespace 和插件实例；同时限制单条大小、每种数量/字节以及 Host 总字节。配置见 [Resource 容量](../configuration.md#resource-容量)。
-
-资源所有者通过 `ResourceDefinition.retention` 定义释放时间和引用的精确 uid，与类型一起注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 只有 route、assess、handle 全部完成后才可释放，Source 的待提交引用仍可继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
-
-每次写入在事务内同步记录、引用索引、回执和必要的回收。无法满足容量约束时整个事务回滚，变更通知只在提交后发出。因此过载会阻止接收更多工作，不会通过删除正在承担的工作来腾空间。完成并缩小记录的更新允许在超配额状态下提交。
-
-原生历史与 checkpoint 由 Harness 管理；Operator 可在资源 status.agent 保存下次调用所需的配置名和会话引用，引用计入资源配额。Harness verb 不读写这些字段。Resource 配额不等于进程 RSS 或全部磁盘文件的硬上限。
-
-## Resource Printer
-
-`ResourcePrinter<Spec, Status>` 按资源类型提供 `describe(resource): string` 和 `summarize(resource): string`，分别生成可读详情和简短概览。它声明在 `ResourceDefinition.printer` 中，与 Controller 独立，Resource 实例本身仍是可持久化的数据。
-
-两个方法同步处理传入的资源快照，不修改资源、不查询外部系统、不调用模型。拿到 Resource 后，插件通过 `await context.printers.describe(resource)` / `summarize(resource)` 获取文本，无需知道具体 Printer。Host 使用 `Manager.describeResource(pluginInstanceId, resource)` / `summarizeResource(...)`，同样返回 `Promise<string>`；Runner 通过 IPC 请求 Host 打印，只传输资源快照和文本；Printer 在 Host 同步执行，始终收到快照副本，不重新查询资源。
-
-Printer 按插件实例与 GVK 选择，同一实例不能重复声明同一类型。类型归属由 ResourceRegistry 维护，不能覆盖其它插件的资源类型；声明失败整体回滚，实例关闭或 Runner 失效不撤销定义。没有专用 Printer 时，详情默认使用缩进 JSON，概览默认使用 `kind/name`。已注册 Printer 的执行失败记录资源身份和方法名，并向调用方返回错误。
-
-OutputPrinter 位于 `plugins/personal/output/printer.ts`，提供正文、目标与投递信息的完整描述和有界预览。InputPrinter 位于 `plugins/personal/input/printer.ts`，由 Host 装配，不随插件实例关闭而撤销。`describe` 保留完整正文、来源、接收时间、可选话题、回复关联和原样 observation；不查询历史，也不解释各 Source 的业务字段。`summarize` 折叠空白并生成最多 120 个 Unicode 码点的单行预览。Web 输入详情与 Chief 当前输入使用同一份描述，Web 正文保留完整 `spec.text`；路由和消费状态仍属于各自的资源与会话投影。输出是普通文本，调用方不能把它当作可信 HTML 或指令。插件声明示例见 [Resource Printers](../../packages/plugin/README.md#resource-printers)。
+事件用于唤醒，Reconcile 每次读取当前事实决定是否行动。主资源的纯 status 更新不自动唤醒自身，需感知该变化的协作方显式声明 Watch。回调重试不保证外部副作用只发生一次，插件应保存接纳状态与完成凭据。
 
 ## Source 与 Watch
 
-运行机制中的 Source 负责初始发现和订阅，将观察到的资源交给 Host；CronSource 定期唤醒已有资源。Watch 将其它资源的变化映射为本 Controller 的 Reconcile 请求。它们负责触发，业务进展由 Reconcile 决定。
+框架 Source 负责发现和订阅资源，Watch 把其它资源变化映射为协调请求，CronSource 定期唤醒已有资源。这些机制提供触发，业务 Controller 决定如何推进。
 
-Personal 的“需求 Source”是一项业务能力：它用 RequirementSource 资源表达关注范围，借助 Controller 和定时再入队调用 Connector、比较观察并提交 Input。这个业务 Source 与框架的 Source 注册接口有联系，但不是同一个层级的概念，具体流程见 [Connector 与 Source](../connector/README.md)。
+Personal 的业务 Source 则用资源保存观察范围、水位和待提交计划，经 Connector 获取事实并形成 Input。两个层次的 Source 分别承担框架触发与领域观察，具体接入见 [Connector 与 Source](../connector/README.md)。
 
-Controller 可声明 `name`，让同一插件对同种资源注册独立队列。状态变化需显式 Watch；不同 Controller 的定时记录、重试和资源锁按名称隔离，共享资源更新仍使用 CAS。
+## Verb 与外部能力
 
-## Verb 与 Harness
+Plugin / Operator 通过 ResourceClient 操作 CRD，通过 Verb 发起非 CRD 操作。harness verb 封装 [Harness interface](../harness/README.md)，命名 action 由应用装配；Connector 提供类型化外部访问。verb 诊断记录关联身份、操作、耗时和结果，不复制敏感参数与原生历史。
 
-Verb 是 Plugin / Operator 发起非 CRD 操作的统一入口；CRD 读写使用 ResourceClient。Reconcile 通过 `ctx.verbs` 请求 harness、命名 action，或通过 `connectors({ timeoutMs })` 调用外部系统。每次调用统一记录调用 ID、执行 ID、资源 UID、操作、耗时与结果，不记录完整敏感参数。Personal 的 say helper 调用应用注册的 action，创建独立 Output，返回 outputId，Channel 按 Output.target 投递；用户答复是后续的新 Input。业务状态与 Output 可通过 ResourceClient.commit 原子保存，详见 [Output](../output.md)。
+等待 verb 时释放 Controller / Runner 执行容量，同一资源的当前 Reconcile 调用栈仍保持串行。期限覆盖等待与执行，取消和失败后的业务含义由插件决定。
 
-harness verb 封装 Harness interface：prompt 返回执行结果，其余操作返回接收回执。followUp / steer 指向所属资源的正在运行 invocation，由 Harness 原生队列接收；接收不等于完成 Input 的业务处理。create / resume / close 操作会话，abort 中断执行；resume 不自动重放。不支持的可选能力明确拒绝。原生工具权限与 Hook 信任仍由 Host Approval 管理。
+execution.withContext 为动作附加不透明 attributes；主资源身份由运行时提供，业务关联由插件解释。Harness verb 只接收配置和原生会话参数，不读写 CRD；调用者决定如何保存恢复引用。原生接收回执、工具业务回执和外部送达分别确认。
 
-等待 verb 时释放 Controller 和 Runner 容量，同一 Controller 内同一资源的 Reconcile 仍保持串行。verb 的期限覆盖交互和执行全过程。取消、超时和失败需要插件自行决定业务结果。
-
-`execution.withContext(attributes)` 为后续动作附加不透明的业务元数据，主资源身份由运行时提供。Personal 定义并解释 conversationId、inputId、inputIds，底座只持久保存 attributes。Channel 通过 Personal 解析关联，再显式查询对应执行的展示投影。其他组件按职责使用 Core 服务，不必经由 Verb。
-
-Harness verb 接收配置名和可选 session；未传 session 时创建新会话，传入时复用或恢复。Operator 决定如何保存返回的引用，底座不另建 Context 目录，也不从资源 UID、Controller 或配置名推导原生 session。
-
-Reconcile 快照只包含运行目录和 HarnessConfiguration 配置，不携带全局历史。Harness 返回 invocationId 与 result，不返回 Lane 或 Turn 对象。执行结束不等于资源目标完成。结果校验、下一步安排、等待用户和业务终态都属于插件。
-
-## Personal 实例
-
-`plugins/personal/plugin.ts` 注册以下 Controller：
-
-| Controller | 观察对象 | 业务职责 |
-| --- | --- | --- |
-| Route | Personal Route，Watch Input | 补扫入队、规则直达、语义组批 |
-| Route agent（name: agent） | Personal Route | 调用 Route Agent，持久化分发计划并幂等投递 |
-| Conversation | Personal Conversation | 接纳输入、steer 与定时回顾 |
-| Chief agent（name: agent） | Personal Conversation | 复用 Chief 原生上下文，工具提交消费回执与 Output |
-| Requirement Source | RequirementSource | 按关注范围获取需求变化，提交 Input 并推进水位 |
-| Task | Task | 推进有限目标，达到目标后结束 |
-| Routine | Routine | 执行本轮，继续等待时间或事件 |
-
-Task 与 Routine 分别归入 `plugins/personal/task/` 和 `plugins/personal/routine/`，各自保存模型与 Reconcile；公共字段和状态位于插件层的 `model.ts`，资源聚合与 Work 投影位于 `resources.ts`，公共执行辅助代码也留在插件层。Work 是它们的业务视图，没有另一份 Work 资源。Chief Agent 与工具在 `agents/chief/`，Personal 服务负责绑定会话范围和业务工具，应用入口负责安装插件并装配 Core。
-
-添加新插件时复用 Resource / Reconcile / verb 机制，在插件内定义其领域模型。公共契约与示例见 [aide-plugin](../../packages/plugin/README.md)，Personal 的决策和生命周期见 [Personal](personal.md)。
-
-## 资源索引
-
-Definition.indexes 声明纯函数 `(resource) => string[]`，可为一个字段产生多个索引值。`resources.list(type, { matchIndex: { name, value } })` 查询精确匹配，并保留插件实例、类型及 namespace 隔离。Host 将索引与资源写入同一事务，删除时级联移除，加载定义时重建；未知索引报错，不回退全表扫描。回调不得执行 I/O 或业务动作。
-
-Personal Input 用它查询 routePending、assess / assessPending 和 handle / handlePending，Core 不导入 Personal 的阶段或资源类型。
+完整公开契约与注册示例见 [aide-plugin](../../packages/plugin/README.md)。[Personal](../personal/README.md) 是这些机制的内置使用者。

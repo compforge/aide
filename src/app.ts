@@ -191,7 +191,7 @@ export class Aide {
   }
 
   /** @spec Default selection is atomic and storage enforces uniqueness against concurrent Route fallback creation.
-   * @link docs/plugin/personal.md
+   * @link docs/personal/conversation.md#删除与验证
    */
   setDefaultConversation(conversationId: string, enabled: boolean): Promise<void> {
     const change = this.defaultSelection.then(async () => {

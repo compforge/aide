@@ -1,146 +1,44 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2880" height="1150" viewBox="0 0 2880 1150" role="img" aria-labelledby="title desc">
-  <title id="title">Aide：认识人，接住事，会回应</title>
-  <desc id="desc">沿用 personal-flow.svg 的图形与配色。外部系统经 connector 与 source、人与助手经 channel 贡献 Input。Chief 将输入归入 Conversation，可以直接回应，也可以将目标与新事实交给 Task 或 Routine 持续推进。处理过程借助通用 Agent 执行能力，包括 harness、workspace、sandbox 与 memory；memory 支持读取、积累和修订可复用的背景与经验。所有对外表达统一生成 Output，再经 connector 或 channel 投递。Person 关联可选的输入发送者和输出对象，Chief 持续读取与更新对人的认识；Me 标记代表服务对象的身份。实线表示处理与投递，虚线表示人物关联与认识。</desc>
-  <defs>
-    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f0f2f9"/>
-      <stop offset="1" stop-color="#e9edf7"/>
-    </linearGradient>
-    <linearGradient id="resource" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#eee6ff"/>
-      <stop offset="1" stop-color="#e6e0f6"/>
-    </linearGradient>
-    <linearGradient id="external" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#d9def1"/>
-      <stop offset="1" stop-color="#d2d5eb"/>
-    </linearGradient>
-    <linearGradient id="person" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#fbe6e5"/>
-      <stop offset="1" stop-color="#f6dcdf"/>
-    </linearGradient>
-    <marker id="arrow" viewBox="0 0 16 24" refX="14" refY="12" markerWidth="16" markerHeight="24" markerUnits="userSpaceOnUse" orient="auto">
-      <path d="M 2 1 L 13 12 L 2 23" fill="none" stroke="#080808" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-    <marker id="profile-arrow" viewBox="0 0 16 24" refX="14" refY="12" markerWidth="14" markerHeight="20" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
-      <path d="M 2 1 L 13 12 L 2 23" fill="none" stroke="#9b6975" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    </marker>
-    <style>
-      .shape { stroke: #080808; stroke-width: 3.8; stroke-linejoin: round; }
-      .line { fill: none; stroke: #080808; stroke-width: 3.8; stroke-linecap: round; stroke-linejoin: round; }
-      .profile { fill: none; stroke: #9b6975; stroke-width: 3; stroke-dasharray: 9 9; stroke-linecap: round; stroke-linejoin: round; }
-      text { font-family: "Arial", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 30px; fill: #292c32; text-anchor: middle; }
-      .small { font-size: 23px; fill: #596171; }
-      .profile-label { font-size: 23px; fill: #94616f; }
-      .heading { font-size: 31px; }
-    </style>
-  </defs>
-
-  <rect width="2880" height="1150" fill="#fff"/>
-
-  <!-- Keep the original resource, reconcile, and shared execution vocabulary. -->
-  <rect class="shape" x="620" y="280" width="770" height="490" rx="13" fill="url(#panel)"/>
-  <text class="heading" x="1005" y="249">Chief / System 1</text>
-  <text class="heading" x="1670" y="249">System 2</text>
-
-  <!-- Person is shared context; a sender is optional and Me marks identity. -->
-  <rect class="shape" x="1110" y="45" width="440" height="135" rx="67" fill="url(#person)"/>
-  <text x="1330" y="100">Person</text>
-  <text class="small" x="1330" y="143">我与他人 · Me 身份标记</text>
-  <path class="profile" d="M 1100 112 H 770 V 300" marker-end="url(#profile-arrow)"/>
-  <text class="profile-label" x="920" y="92">sender（可选）</text>
-  <path class="profile" d="M 1560 112 H 2100 V 300" marker-end="url(#profile-arrow)"/>
-  <text class="profile-label" x="1820" y="92">回应对象</text>
-  <path class="profile" d="M 1320 192 V 267" marker-start="url(#profile-arrow)" marker-end="url(#profile-arrow)"/>
-  <text class="profile-label" x="1500" y="217">读取 / summary_person</text>
-
-  <!-- External facts and human messages converge on the same intake. -->
-  <path class="shape" d="M 54 315 H 226 Q 240 315 240 329 V 440 C 174 401 134 477 40 444 V 329 Q 40 315 54 315 Z" fill="url(#external)"/>
-  <text x="140" y="383">外部系统</text>
-  <path class="shape" d="M 325 315 H 500 L 560 385 L 500 455 H 325 Z" fill="url(#panel)"/>
-  <text x="426" y="371">connector +</text>
-  <text x="426" y="411">source</text>
-  <path class="line" d="M 250 385 H 313" marker-end="url(#arrow)"/>
-  <path class="line" d="M 570 385 H 638" marker-end="url(#arrow)"/>
-
-  <circle class="line" cx="140" cy="580" r="38"/>
-  <path class="line" d="M 140 618 V 711 M 73 655 H 207 M 140 711 L 83 753 M 140 711 L 197 753"/>
-  <text x="140" y="801">人</text>
-  <path class="shape" d="M 325 590 H 500 L 560 660 L 500 730 H 325 Z" fill="url(#panel)"/>
-  <text x="426" y="672">channel</text>
-  <path class="line" d="M 230 660 H 313" marker-end="url(#arrow)"/>
-  <path class="line" d="M 570 660 H 585 Q 600 660 600 645 V 407 Q 600 385 620 385"/>
-
-  <!-- Domain resources and their reconciliation. -->
-  <rect class="shape" x="650" y="315" width="240" height="140" rx="70" fill="url(#resource)"/>
-  <text x="770" y="371">Input</text>
-  <text class="small" x="770" y="412">事实 · 地址 · relation</text>
-  <rect class="shape" x="1080" y="315" width="270" height="140" rx="70" fill="url(#resource)"/>
-  <text x="1215" y="371">Conversation</text>
-  <text class="small" x="1215" y="412">话题与上下文</text>
-  <rect class="shape" x="1540" y="315" width="260" height="140" rx="70" fill="url(#resource)"/>
-  <text x="1670" y="371">Task / Routine</text>
-  <text class="small" x="1670" y="412">目标、进展与等待</text>
-
-  <rect class="shape" x="650" y="600" width="240" height="130" rx="13" fill="url(#panel)"/>
-  <rect class="shape" x="1080" y="600" width="270" height="130" rx="13" fill="url(#panel)"/>
-  <rect class="shape" x="1540" y="600" width="260" height="130" rx="13" fill="url(#panel)"/>
-  <text x="770" y="676">Reconcile</text>
-  <text x="1215" y="676">Reconcile</text>
-  <text x="1670" y="676">Reconcile</text>
-  <path class="line" d="M 770 468 V 587" marker-end="url(#arrow)"/>
-  <path class="line" d="M 1215 468 V 587" marker-end="url(#arrow)"/>
-  <path class="line" d="M 1670 468 V 587" marker-end="url(#arrow)"/>
-
-  <path class="line" d="M 902 665 H 965 Q 985 665 985 645 V 574"/>
-  <path class="line" d="M 985 481 V 405 Q 985 385 1005 385 H 1067" marker-end="url(#arrow)"/>
-  <text class="small" x="985" y="520">create conv</text>
-  <text class="small" x="985" y="554">append input</text>
-  <path class="line" d="M 1362 665 H 1425 Q 1445 665 1445 645 V 574"/>
-  <path class="line" d="M 1445 481 V 405 Q 1445 385 1465 385 H 1527" marker-end="url(#arrow)"/>
-  <text class="small" x="1460" y="520">委托 / 调整</text>
-  <text class="small" x="1460" y="554">补充新事实</text>
-
-  <!-- Every outward communication is represented by Output before delivery. -->
-  <rect class="shape" x="1970" y="315" width="270" height="140" rx="70" fill="url(#resource)"/>
-  <text x="2105" y="371">Output</text>
-  <text class="small" x="2105" y="412">给谁 · 在哪里 · 说什么</text>
-  <path class="shape" d="M 2360 315 H 2520 L 2580 385 L 2520 455 H 2360 Z" fill="url(#panel)"/>
-  <text x="2459" y="396">connector</text>
-  <path class="shape" d="M 2674 315 H 2826 Q 2840 315 2840 329 V 440 C 2779 401 2744 477 2660 444 V 329 Q 2660 315 2674 315 Z" fill="url(#external)"/>
-  <text x="2750" y="383">外部系统</text>
-  <path class="line" d="M 2252 385 H 2347" marker-end="url(#arrow)"/>
-  <path class="line" d="M 2592 385 H 2647" marker-end="url(#arrow)"/>
-  <text class="small" x="2460" y="499">评论、单据等平台回写</text>
-
-  <path class="shape" d="M 2360 590 H 2520 L 2580 660 L 2520 730 H 2360 Z" fill="url(#panel)"/>
-  <text x="2459" y="672">channel</text>
-  <path class="line" d="M 2290 385 V 640 Q 2290 660 2310 660 H 2347" marker-end="url(#arrow)"/>
-  <path class="line" d="M 2592 660 H 2647" marker-end="url(#arrow)"/>
-  <circle class="line" cx="2750" cy="580" r="38"/>
-  <path class="line" d="M 2750 618 V 711 M 2683 655 H 2817 M 2750 711 L 2693 753 M 2750 711 L 2807 753"/>
-  <text x="2750" y="801">人</text>
-
-  <!-- Shared execution supports immediate responses and ongoing work alike. -->
-  <path class="line" d="M 770 742 V 792 M 770 850 V 887" marker-end="url(#arrow)"/>
-  <path class="line" d="M 1215 742 V 792 M 1215 850 V 887" marker-end="url(#arrow)"/>
-  <path class="line" d="M 1670 742 V 792 M 1670 850 V 887" marker-end="url(#arrow)"/>
-  <text class="small" x="770" y="831">归类与答复</text>
-  <text class="small" x="1215" y="831">接话与安排</text>
-  <text class="small" x="1670" y="831">持续执行</text>
-  <rect class="shape" x="650" y="900" width="1590" height="165" rx="13" fill="url(#panel)"/>
-  <text x="930" y="969">通用 Agent 执行能力</text>
-  <text class="small" x="930" y="1014">答复、提问、说明安排与进展</text>
-  <rect class="shape" x="1190" y="927" width="220" height="110" rx="13" fill="url(#panel)"/>
-  <rect class="shape" x="1440" y="927" width="220" height="110" rx="13" fill="url(#panel)" stroke-dasharray="10 9"/>
-  <rect class="shape" x="1690" y="927" width="220" height="110" rx="13" fill="url(#panel)" stroke-dasharray="3 9"/>
-  <rect class="shape" x="1940" y="927" width="220" height="110" rx="13" fill="url(#panel)"/>
-  <text x="1300" y="994">harness</text>
-  <text x="1550" y="994">workspace</text>
-  <text x="1800" y="994">sandbox</text>
-  <text x="2050" y="974">memory</text>
-  <text class="small" x="2050" y="1010">读取 · 积累 · 修订</text>
-  <path class="line" d="M 2105 887 V 468" marker-end="url(#arrow)"/>
-  <text class="small" x="2205" y="665">生成 Output</text>
-
-  <text class="small" x="1440" y="1120">实线：处理与投递　·　粉色虚线：人物关联与认识　·　回应后的新消息再次成为 Input</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Personal：输入、路由、研判、办理与输出</title>
+<desc id="desc">Channel 与 Source 提交 Input。Route 规则或持续 Route Agent 写入路由与研判分派，Conversation 的 Chief 研判并按需交给 Task 或 Routine。Chief 和 Work Agent 经 say 创建独立 Output，由 Channel 或 Connector 投递。Person 提供人物身份与认识；Input 保存 route、assess、handle 处理痕迹，Harness 自持原生会话。</desc>
+<defs>
+ <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="none" stroke="#586779" stroke-width="1.5"/></marker>
+ <style>
+ text{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;fill:#293746;text-anchor:middle;font-size:24px}
+ .title{font-size:32px;font-weight:600}.small{font-size:19px;fill:#526579}.box{stroke:#8b9bae;stroke-width:2;rx:16}
+ .line{fill:none;stroke:#586779;stroke-width:2.5;marker-end:url(#arrow)}.hint{fill:none;stroke:#ae7e8c;stroke-width:2;stroke-dasharray:8 7}
+ </style>
+</defs>
+<rect width="1600" height="900" fill="#fafbf9"/>
+<text class="title" x="800" y="52">把大量输入转为判断、行动与值得关注的输出</text>
+<rect class="box" x="620" y="90" width="420" height="95" fill="#f5e9ed"/>
+<text x="830" y="127">Person · 人物身份与认识</text><text class="small" x="830" y="162">Me 是可选标记 · summary + recent</text>
+<path class="hint" d="M620 137 H150 V280 M830 185 V280 M1040 137 H1510 V575 H1000"/>
+<text class="small" x="336" y="126">Input.sender</text><text class="small" x="1300" y="126">Output.receivers</text>
+<text x="155" y="226">Channel / Source</text><path class="line" d="M155 238 V275"/>
+<rect class="box" x="40" y="285" width="230" height="150" fill="#e6eef8"/>
+<text x="155" y="328">Input</text><text class="small" x="155" y="368">内容 · 人物 · 地址</text><text class="small" x="155" y="402">话题线索 · 紧迫性</text>
+<path class="line" d="M270 355 H330"/>
+<rect class="box" x="340" y="285" width="270" height="150" fill="#eef1e2"/>
+<text x="475" y="328">Route</text><text class="small" x="475" y="368">确定性规则 / Route Agent</text><text class="small" x="475" y="402">无合适归属 → Default</text>
+<path class="line" d="M610 355 H670"/>
+<rect class="box" x="680" y="285" width="320" height="150" fill="#e5f0e7"/>
+<text x="840" y="328">Conversation / Chief</text><text class="small" x="840" y="368">话题 · 研判 · 直接处理</text><text class="small" x="840" y="402">summary + recent</text>
+<path class="line" d="M1000 355 H1090"/>
+<rect class="box" x="1100" y="285" width="360" height="150" fill="#e5f0e7"/>
+<text x="1280" y="328">Task / Routine</text><text class="small" x="1280" y="368">有限目标 / 持续职责</text><text class="small" x="1280" y="402">专属 Agent · 独立生命周期</text>
+<text class="small" x="475" y="476">route → assess 分派</text><text class="small" x="840" y="476">assess_input → handle 交接</text><text class="small" x="1280" y="476">report_task / report_routine</text>
+<rect class="box" x="40" y="520" width="570" height="145" fill="#e6eef8"/>
+<text x="325" y="560">Input.status：协作与追踪依据</text><text class="small" x="325" y="600">route → assess[Conversation UID] → handle[Work UID]</text><text class="small" x="325" y="636">各自确认 · 全部完成后才可回收</text>
+<path class="line" d="M840 485 V530"/><text class="small" x="880" y="519">say</text>
+<path class="line" d="M1280 490 V515 H1040 V600 H1008"/><text class="small" x="1170" y="507">say</text>
+<rect class="box" x="680" y="540" width="320" height="125" fill="#f5eddf"/>
+<text x="840" y="582">Output</text><text class="small" x="840" y="619">给谁 · 在哪里 · 说什么</text><text class="small" x="840" y="649">独立持久化与投递状态</text>
+<path class="line" d="M1000 640 H1090"/>
+<rect class="box" x="1100" y="555" width="360" height="110" fill="#f5eddf"/>
+<text x="1280" y="596">Channel / Connector</text><text class="small" x="1280" y="636">按 Address 投递 · 保存回执</text>
+<rect class="box" x="40" y="740" width="1420" height="105" fill="#eff0f4"/>
+<text x="750" y="780">Reconcile：确定性协调　·　Agent：持续判断与执行</text>
+<text class="small" x="750" y="817">Harness verb → 原生 create / resume / prompt / followUp / steer　｜　Harness 自持历史与恢复</text>
+<text class="small" x="800" y="881">report 确认业务进展，say 创建表达；输入处理完成、目标达成和消息送达分别记录</text>
 </svg>
