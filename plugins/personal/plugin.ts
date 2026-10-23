@@ -6,6 +6,7 @@ import { registerSources } from "./source/requirement/observe.ts";
 import { registerMessageSources } from "./source/message/observe.ts";
 import { registerTasks } from "./task/reconcile.ts";
 import { registerRoutines } from "./routine/reconcile.ts";
+import { registerPersons } from "./person/reconcile.ts";
 
 const plugin: PluginPackage = {
   pluginId: "aide.personal", version: "0.1.0",
@@ -18,6 +19,7 @@ const plugin: PluginPackage = {
     registerEnvironmentSources(context);
     registerTasks(context);
     registerRoutines(context);
+    registerPersons(context);
   },
 };
 export default plugin;

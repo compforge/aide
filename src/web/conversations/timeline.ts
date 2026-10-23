@@ -31,7 +31,9 @@ export function createTimeline() {
     const header = element('div', undefined, 'input-heading');
     header.append(identityBadge(block.icon, summary ? block.label : (source ? 'Source' : 'Channel') + (block.label ? ' · ' + block.label : '') + (block.relation === 'sent' ? ' · 你' : '')));
     if (block.sender?.name) {
-      const sender = element('a', '人物资料'); sender.href = '/people?person=' + encodeURIComponent(block.sender.name); header.append(sender);
+      const sender = element('a', '人物资料');
+      sender.href = '/people?' + new URLSearchParams({ person: block.sender.name, ...(block.sender.uid ? { uid: block.sender.uid } : {}) });
+      header.append(sender);
     }
     if (!summary) header.append(element('time', new Date(block.at!).toLocaleString(), 'input-time'));
     if (source) header.append(element('span', inputLabels[block.status ?? ''] || block.status, 'input-status'));

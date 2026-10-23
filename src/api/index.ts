@@ -28,6 +28,9 @@ const DeleteWorkSchema = z.object({ id: z.string().min(1), conversationId: z.str
   revision: z.number().int().positive(),
 }).strict();
 
+const PersonVersionSchema = z.object({ id: z.string().min(1), uid: z.string().min(1), version: z.string().min(1) }).strict();
+const MergePersonSchema = z.object({ source: PersonVersionSchema, target: PersonVersionSchema, summary: z.string().max(SUMMARY_CHARS) }).strict();
+
 const ApprovalResponseSchema = z.object({
   messageId: z.string().min(1),
   result: z.discriminatedUnion("kind", [
@@ -106,7 +109,7 @@ export function httpChannel(aide: WebService, log: Logger) {
         await aide.start();
         const id = url.searchParams.get("id");
         if (id) {
-          try { json(response, 200, await aide.persons.read(id)); }
+          try { json(response, 200, await aide.persons.read(id, url.searchParams.get("uid") ?? undefined)); }
           catch (error) { if (!String(error).includes("Unknown Person")) throw error; json(response, 404, { error: "人物不存在。" }); }
         } else json(response, 200, await aide.persons.list());
         return;
@@ -118,6 +121,30 @@ export function httpChannel(aide: WebService, log: Logger) {
         catch (error) {
           if (String(error).includes("version conflict")) { json(response, 409, { error: "人物资料已更新。请重新加载并合并修改；当前编辑内容已保留。" }); return; }
           if (String(error).includes("identity") || String(error).includes("identities")) { json(response, 409, { error: "身份已绑定其他人物，或与 Me 标记冲突。请检查身份配置。" }); return; }
+          throw error;
+        }
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/persons/merge") {
+        const input = MergePersonSchema.parse(await body(request));
+        await aide.start();
+        const attributes = { sourceId: input.source.id, sourceUid: input.source.uid, targetId: input.target.id, targetUid: input.target.uid };
+        try {
+          const merged = await aide.persons.merge(input.source, input.target, input.summary);
+          log.info(attributes, "Persons merged; source deletion requested");
+          json(response, 200, merged);
+        } catch (error) {
+          log.warn({ ...attributes, err: error }, "Person merge failed");
+          if (/version conflict|incarnation changed|Unknown Person|not found/.test(String(error))) {
+            json(response, 409, { error: "人物资料已更新或删除。请取消并重新加载，再核对合并内容。" }); return;
+          }
+          if (String(error).includes("Me cannot be deleted")) {
+            json(response, 409, { error: "请保留「我」，在「我」的详情中合并其他人物。" }); return;
+          }
+          if (String(error).includes("into itself")) { json(response, 400, { error: "不能将人物合并到自己。" }); return; }
+          if (/identity|identities/.test(String(error)) && !(error instanceof z.ZodError)) {
+            json(response, 409, { error: "人物身份已变化，请重新加载后核对。" }); return;
+          }
           throw error;
         }
         return;

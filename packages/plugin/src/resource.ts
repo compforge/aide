@@ -134,6 +134,8 @@ export interface ResourceMergePatch {
 /** A bounded atomic write set within one Plugin resource scope; external effects are not part of the transaction. */
 export type ResourceCommit =
   | { operation: "create"; type: ResourceType; name: string; spec: unknown; status?: unknown }
+  /** Requests deletion under the supplied UID/version; normal reconciliation performs final removal. */
+  | { operation: "delete"; resource: Resource<unknown, unknown> }
   | { operation: "replace"; resource: Resource<unknown, unknown>; spec: unknown; status: unknown }
   | { operation: "patchStatus"; resource: Resource<unknown, unknown>; patch: Record<string, unknown> };
 

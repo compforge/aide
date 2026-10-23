@@ -149,3 +149,37 @@ test("Person context is bounded and survives identity enrichment, user correctio
   assert.deepEqual(restored.status.recent, correctedRecent);
   assert.deepEqual(restored.spec, current.spec);
 });
+
+test("Web merge validates reviewed versions, finalizes the source and tolerates missing historical persons", async t => {
+  const f = await setup(t), server = httpChannel(f.aide, log);
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const source = await f.aide.persons.observe({ provider: "test", scope: "one", id: "source" }, "田斐");
+  const target = await f.aide.persons.observe({ provider: "test", scope: "two", id: "target" }, "田斐");
+  const version = (p: typeof source) => ({ id: p.metadata.name, uid: p.metadata.uid, version: p.metadata.resourceVersion });
+  // Let ordinary initial reconciles finish before taking the review snapshots.
+  await f.aide.settled();
+  const currentSource = await f.aide.persons.read(source.metadata.name), currentTarget = await f.aide.persons.read(target.metadata.name);
+  const body = { source: version(currentSource), target: version(currentTarget), summary: "已核对，是同一个人。" };
+  const merge = (value: unknown) => fetch(base + "/persons/merge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
+  assert.equal((await merge({ ...body, source: { ...body.source, uid: "stale" } })).status, 409);
+  assert.equal((await merge({ ...body, source: body.target })).status, 400);
+  assert.equal((await merge({ ...body, summary: "x".repeat(16001) })).status, 400);
+  assert.equal((await merge(body)).status, 200);
+  await f.aide.settled();
+  assert.equal(await f.aide.catalog.client.get(personRef(source)), undefined, "Standard lifecycle physically removes the merged Person");
+  assert.equal((await fetch(base + "/persons?id=" + source.metadata.name)).status, 404);
+  assert.equal((await merge(body)).status, 409, "A repeat cannot append the same data again");
+  assert.equal((await f.aide.persons.read(target.metadata.name)).status.summary, body.summary);
+  assert.equal((await f.aide.persons.observe(source.spec.identities[0]!)).metadata.uid, target.metadata.uid);
+  const read = personTools(f.aide.persons).find(tool => tool.name === "read_person")!;
+  const missing = await read.execute("deleted", { id: source.metadata.name, uid: source.metadata.uid }, undefined, undefined, {} as never);
+  assert.match(JSON.stringify(missing), /no longer exists/);
+  const html = await (await fetch(base + "/people")).text();
+  assert.match(html, /同名人物/); assert.match(html, /姓名相同不代表同一个人/); assert.match(html, /确认是同一人并合并/);
+  assert.equal((await fetch(base + "/persons.js")).status, 200);
+  await f.restart();
+  assert.equal(await f.aide.catalog.client.get(personRef(source)), undefined);
+  assert.equal((await f.aide.persons.observe(source.spec.identities[0]!)).metadata.uid, target.metadata.uid);
+});

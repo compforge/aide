@@ -7,7 +7,7 @@ export const OUTPUT_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Output" } a
 export interface OutputSpec {
   text: string;
   target: Address;
-  /** @spec Intended Person references; independent of the delivery address and contributing Inputs. */
+  /** @spec Intended Person references may dangle after deletion; independent of the delivery address and contributing Inputs. */
   receivers?: ResourceRef[];
   conversation: ResourceRef & { uid: string };
   conversationId: string;

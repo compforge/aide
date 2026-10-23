@@ -31,4 +31,17 @@
 button.secondary { background: #e8eee3; color: #20342b; }
 #person-search { margin-bottom: 12px; }
 #person-notice { color: #735722; }
+#person-same-names { max-width: 860px; margin-top: 28px; }
+.person-candidate { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 16px; border: 1px solid #d8dfd5; border-radius: 10px; padding: 16px; margin: 12px 0; }
+.person-candidate .person-merge-identities { margin: 0; }
+.person-candidate button { padding: 6px 12px; }
+.person-merge-identities { padding-left: 20px; overflow-wrap: anywhere; font-size: 13px; }
+#person-merge-dialog { width: min(760px, calc(100vw - 32px)); max-height: 85vh; box-sizing: border-box; border: 1px solid #c9d5ca; border-radius: 12px; padding: 24px; background: #f5f5ef; color: #20342b; }
+#person-merge-dialog::backdrop { background: #20342b66; }
+.person-merge-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.person-merge-comparison section { min-width: 0; }
+.person-merge-comparison p { white-space: pre-wrap; max-height: 160px; overflow: auto; }
+#person-merge-summary { display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 10px; border: 1px solid #c9d5ca; border-radius: 8px; font: inherit; resize: vertical; }
+#person-merge-notice { color: #735722; }
+@media (max-width: 600px) { .person-merge-comparison { grid-template-columns: 1fr; } #person-merge-dialog { padding: 16px; } }
 @media (max-width: 760px) { header { display: flex; flex-wrap: wrap; padding: 16px; } #connection { margin-left: auto; } .persons-page { display: block; height: auto; } .persons-page .person-list { max-height: 30vh; } .person-detail { padding: 20px; } .person-identity { grid-template-columns: 1fr; } }

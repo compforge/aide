@@ -31,7 +31,26 @@
       <p id="person-updated" class="muted"></p><div class="person-actions"><button id="person-save" type="submit">保存</button><button id="person-reload" class="secondary" type="button">重新加载</button></div>
     </form>
     <p id="person-notice" role="status" aria-live="polite"></p>
+    <section id="person-same-names" aria-labelledby="person-same-names-heading" hidden>
+      <h3 id="person-same-names-heading">同名人物</h3>
+      <p class="muted">姓名相同不代表同一个人，请核对外部身份后合并。</p>
+      <div id="person-same-name-list"></div>
+    </section>
   </section>
 </main>
+<dialog id="person-merge-dialog" aria-labelledby="person-merge-heading" aria-describedby="person-merge-warning">
+  <form id="person-merge-form">
+    <h2 id="person-merge-heading">确认合并人物</h2>
+    <p id="person-merge-warning">确认是同一个人后，将身份和依据追加到当前人物，并删除被合并人物。历史消息保持不变。</p>
+    <div class="person-merge-comparison">
+      <section><h3>被合并人物（将删除）</h3><div id="person-merge-source"></div></section>
+      <section><h3>当前人物（保留）</h3><div id="person-merge-target"></div></section>
+    </div>
+    <label for="person-merge-summary">合并后的当前认识（可编辑，最多 16000 字符）</label>
+    <textarea id="person-merge-summary" rows="8"></textarea>
+    <p id="person-merge-notice" role="status" aria-live="polite"></p>
+    <div class="person-summary-actions"><button id="person-merge-cancel" type="button" class="secondary" autofocus>取消</button><button id="person-merge-confirm" type="submit">确认是同一人并合并</button></div>
+  </form>
+</dialog>
 <script type="module" src="/persons.js"></script>
 </html>

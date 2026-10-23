@@ -12,7 +12,7 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 ## 事务与删除
 
-ResourceClient.commit 在同一插件实例的存储事务中组合写入。Schema、版本、引用、索引或配额失败会回滚，Watch 只在提交后收到通知。事务可提交资源与幂等回执，但不能包含外部请求；外部动作成功后的写入冲突不能靠重做动作解决。
+ResourceClient.commit 在同一插件实例的存储事务中组合 create、replace、patchStatus 和 delete。delete 携带资源快照，校验 UID 与 resourceVersion 后提交级联删除请求，最终移除仍走标准 Reconcile / finalize 生命周期。Schema、版本、引用、索引或配额失败会回滚，Watch 只在提交后收到通知。事务可提交资源与幂等回执，但不能包含外部请求；外部动作成功后的写入冲突不能靠重做动作解决。
 
 资源引用使用精确 UID；跨外部能力等待后应重新读取，避免更新同名替代资源。删除先写 deletionTimestamp，再由 Controller 完成终止处理和 finalize；结构性 owner 关系支持级联删除。
 
