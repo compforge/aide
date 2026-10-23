@@ -36,6 +36,9 @@ export function createTimeline() {
       header.append(sender);
     }
     if (!summary) header.append(element('time', new Date(block.at!).toLocaleString(), 'input-time'));
+    if (block.inputId) {
+      const processing = element('a', '处理 Timeline'); processing.href = '/inputs?' + new URLSearchParams({ input: block.inputId }); header.append(processing);
+    }
     if (source) header.append(element('span', inputLabels[block.status ?? ''] || block.status, 'input-status'));
     const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, block.content);
     node.append(header, body);

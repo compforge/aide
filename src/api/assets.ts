@@ -8,6 +8,7 @@ export function createWebAssets() {
   const pages = [
     { route: "/", directory: "conversations", bundle: "/app" },
     { route: "/people", directory: "persons", bundle: "/persons" },
+    { route: "/inputs", directory: "inputs", bundle: "/inputs" },
   ];
   const files = new Map<string, Asset>();
   for (const [route, file, type] of [

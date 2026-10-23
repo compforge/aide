@@ -49,6 +49,18 @@ Task / Routine Watch Input.handle 并按自身 UID 索引读取未完成记录�
 
 InputPrinter 同步处理资源快照，describe 保留正文、来源、人物关系与 observation，summarize 生成有界单行预览。Web 和 Agent 读取同一事实表达，打印不会查询外部上下文或调用模型。全文按需分页读取，预览预算不等于模型上下文窗口。
 
+## Web 检索与处理 Timeline
+
+Web 的 Inputs 页查询 Personal 全局 v1 目录中的保留输入，包括尚未路由和静默处理的输入。Connector 从已持久化的来源地址或观察事实识别，来源类型使用 origin / originId，具体观察源使用 originRef 的 UID；删除或停用 Source 不会抹去已有输入的来源选项。正文检索、状态条件与来源条件均在分页前应用。
+
+处理 Timeline 读取同一 Input 的 route / assess / handle。分派、最近记录的执行开始、请求应用、完成回执分别展示；目标实例不存在时保留记录但不链接同名新实例。处理完成要求 route 和所有已分派消费者都完成，不以 Output、原生执行结束或 Work 的当前状态代替。
+
+Output 只在其 inputIds 显式包含当前 Input 时关联，不按相邻顺序、相同 executionId 或相似正文推断。Output 的创建与投递是独立事实；没有关联 Output 也可以是正常的静默处理。
+
+现有 Input status 并非逐次追加的审计日志；重复执行可能只保留最近的 startedAt / executionId 和异常信息。界面展示路由尝试次数与计划重试时间，异常没有独立时间戳时明确显示时间未记录，不能伪装成完整历史。重启后仍可读取保留的回执与 Output，Input 被容量回收后详情返回不存在。
+
 ## 验证
 
 `tests/route.test.ts` 覆盖原子分派与重试；`tests/input-assessment.test.ts` 覆盖研判、办理交接和释放；`tests/work-context.test.ts` 覆盖精确确认与事务回滚；`tests/conversation-intake.test.ts` 覆盖接收与重投。
+
+`tests/input-browse.test.ts` 覆盖筛选后分页、来源选项、稳定排序、消费回执终态、独立消费者、已删除目标、明确 Output 关联及 HTTP 页面与查询。
