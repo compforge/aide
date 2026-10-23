@@ -1,6 +1,6 @@
 # Pi Harness
 
-Pi 是通用 Harness，使用 `agents/pi/` 中的 Pi Agent 和 `PiAdapter` 提供模型对话、文件与 CLI 操作。它不依赖 Personal，也不预装 Work、问答或 Connector 业务工具。共同执行契约见 [Harness](README.md)，Personal 版本见独立的 [Chief](chief.md)。
+Pi 是通用 Harness，使用 `agents/pi/` 中的 Pi Agent 和 `PiAdapter` 提供模型对话、文件与 CLI 操作。它不依赖 Personal，也不预装 Work、问答或 Connector 业务工具。共同执行契约见 [Harness](README.md)，Personal 的专属 Agent 见 [Chief](chief.md)、[Task](task.md) 和 [Routine](routine.md)。
 
 ## 会话与能力
 
@@ -10,7 +10,7 @@ PiAdapter 实现 Harness 的 create、resume、prompt、followUp、steer、abort
 
 ## 装配与模型配置
 
-当根级 `defaultHarness` 选择 `pi`（缺省值）时，Routine 使用通用 Pi。Aide 在启动时从 `harnesses.pi.model` 和 `harnesses.pi.packages` 准备模型与技能；能力包通过 `aide harness sync pi` 显式同步，与 Chief 分别存放。
+根级 `defaultHarness` 选择 `pi`（缺省值）时，通用执行请求使用 Pi；Personal 的 Task / Routine 始终使用各自的专属 Agent。Aide 在启动时从 `harnesses.pi.model` 和 `harnesses.pi.packages` 准备模型与技能；能力包通过 `aide harness sync pi` 显式同步，与 Chief 分别存放。
 
 通用 Pi 也可以直接通过注册表创建，不需要 Personal：
 
@@ -24,7 +24,7 @@ const adapter = createHarnessAdapter(
 
 启动装配调用 `resolvePiConfig` 读取 Pi settings/models 并应用显式覆盖，传入 `piConfig`。需要绑定自定义工具时提供消费该配置的 `piSession` 工厂。模型定义和 settings 保留在内存中，SDK refresh 不重新读取原文件；认证沿用 Pi auth.json 和 SDK 的刷新机制，默认目录为 `~/.pi/agent`。嵌入式 SDK 不支持每会话环境覆盖。配置格式见 [Pi 上游文档](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)。
 
-原生会话使用 SDK 的 SessionManager 持久化在 `<agentDir>/sessions/`。创建时经 SDK 写入一条真实的初始化指令，要求等待后续工作、不要执行外部动作；不请求模型，也不伪造助手历史。这使 create 返回的 sessionId 在首次推理之前即可跨重启恢复。Harness 用 SDK 的 findById/open 按 ID 定位并恢复，校验工作目录和调用方绑定的 scope；历史缺失或范围不符明确报错。Aide 不直接编辑原生会话文件，Operator 只保留 harness 和 sessionId。通用 Pi、Chief、Route、Task 共用这条路径。
+原生会话使用 SDK 的 SessionManager 持久化在 `<agentDir>/sessions/`。创建时经 SDK 写入一条真实的初始化指令，要求等待后续工作、不要执行外部动作；不请求模型，也不伪造助手历史。这使 create 返回的 sessionId 在首次推理之前即可跨重启恢复。Harness 用 SDK 的 findById/open 按 ID 定位并恢复，校验工作目录和调用方绑定的 scope；历史缺失或范围不符明确报错。Aide 不直接编辑原生会话文件，Operator 只保留 harness 和 sessionId。通用 Pi、Chief、Route、Task、Routine 共用这条路径。
 
 Agent 不自动发现环境中的扩展、提示词命令或交互主题；装配方可通过 extensionPaths 显式提供扩展路径，工具和钩子由 Pi SDK 加载。Adapter 负责扩展启动与退出事件。通用 Pi 默认不携带记忆扩展，并禁用自动整轮重试。完整执行期限由 Harness 调用方管理。
 

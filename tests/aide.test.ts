@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
-import type { Outcome } from "../plugins/personal/prompts.ts";
+import type { Outcome } from "./fake-harness.ts";
 import { nextOccurrence, type Work } from "../plugins/personal/model.ts";
 
 import { fakeOptions, type Agent } from "./fake-harness.ts";
@@ -29,28 +29,23 @@ async function setup(t: TestContext, agent: Agent) {
 }
 
 
-test("Routine completed execution with invalid final output is distinct from interruption and never automatically replayed", async (t) => {
-  for (const result of ["我已经做完了", { ...done, summary: "" }, { ...done, action: "ask" as const, question: null },
-    { ...done, action: "wait" as const, nextAt: "2000-01-01T00:00:00Z" }]) {
-    let runs = 0;
-    const agent: Agent = { execute: async () => { runs++; return result; } };
-    const { aide, path } = await setup(t, agent);
-    await aide.work("me").create(routine);
-    await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" });
-    await aide.settled();
-    const work = aide.works()[0]!;
-    assert.equal(work.status, "invalid_result");
-    assert.match(work.recent.at(-1)!.text, /Execution completed but result validation failed/);
-    assert.match(aide.outputs().at(-1)!.text, /执行已结束，但最终结果解析失败/);
-    const invocations = aide.invocations();
-    assert.ok(invocations.every((invocation) => invocation.phase === "completed"));
-    await aide.close();
-    const restarted = new Aide(path, fakeOptions(agent, path), log);
-    t.after(() => restarted.close());
-    await restarted.start(); await restarted.settled();
-    assert.equal(restarted.works()[0]!.status, "invalid_result");
-    assert.equal(runs, 1);
-  }
+test("Routine end_turn without a tool report stays uncertain across restart and never replays", async t => {
+  let runs = 0;
+  const agent: Agent = { complete: false, execute: async () => { runs++; return done; } };
+  const { aide, path } = await setup(t, agent);
+  const work = await aide.work("me").create(routine);
+  await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" });
+  await aide.settled();
+  assert.equal(aide.work("me").read(work.id).status, "uncertain");
+  const input = aide.conversations.inputStore.query("handlePending", work.uid!)[0]!;
+  assert.match(input.status.handle![work.uid!]!.lastError!, /without confirming/);
+  assert.equal(aide.outputs().length, 0);
+  await aide.close();
+  const restarted = new Aide(path, fakeOptions(agent, path), log);
+  t.after(() => restarted.close());
+  await restarted.start(); await restarted.settled();
+  assert.equal(restarted.work("me").read(work.id).status, "uncertain");
+  assert.equal(runs, 1);
 });
 
 for (const definition of [task, { ...task, kind: "routine" as const, trigger: { cron: null, timezone: "UTC", event: "start" } }])
@@ -81,12 +76,12 @@ test(`${definition.kind} asks, persists a question across restart, then records 
   assert.equal(runs, 2);
 });
 
-test("Routine requires a designated final answer even when the transcript contains valid JSON", async (t) => {
+test("Routine business completion depends on its tool report, independently of final text", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-missing-final-"));
   let executed = false;
   const options = fakeOptions({ execute: async () => { executed = true; return done; } }, dir);
-  const aide = new Aide(dir, { ...options, createAdapter: () => {
-    const adapter = options.createAdapter();
+  const aide = new Aide(dir, { ...options, createAdapter: (target) => {
+    const adapter = options.createAdapter(target);
     const open = adapter.create.bind(adapter);
     adapter.create = (config, sink, binding) => open(config, (event) => {
       if (executed && event.kind === "agent_message") {
@@ -99,8 +94,8 @@ test("Routine requires a designated final answer even when the transcript contai
   await aide.personal.conversations.ensure("me", fixtureAddress("me"));
   await aide.start(); await aide.work("me").create(routine);
   await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" }); await aide.settled();
-  assert.equal(aide.works()[0]!.status, "invalid_result");
-  assert.match(aide.works()[0]!.recent.at(-1)!.text, /without a designated final answer/);
+  assert.equal(aide.works()[0]!.status, "scheduled");
+  assert.equal(aide.works()[0]!.summary, done.summary);
 });
 
 test("Routine can be triggered by event, deduplicates deliveries, and stays active", async (t) => {
@@ -319,7 +314,7 @@ test("Task uses its dedicated agent without an Aide execution store", async (t) 
 
 
 for (const harness of ["pi", "codex", "claude", "dsh"] as const)
-test(`Aide routes Routine to ${harness} while Task and Chief remain dedicated agents`, async (t) => {
+test(`Task, Routine and Chief remain dedicated agents with default Harness ${harness}`, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-execution-target-"));
   const seen: string[] = [];
   const options = fakeOptions({ chief: async () => "hello", execute: async () => done }, root);
@@ -343,7 +338,8 @@ test(`Aide routes Routine to ${harness} while Task and Chief remain dedicated ag
   assert.equal(aide.works().find((work) => work.kind === "task")!.status, "done");
   assert.equal(aide.works().find((work) => work.kind === "routine")!.status, "scheduled");
   assert.ok(seen.some((item) => item.endsWith(":chief")));
-  assert.equal(seen.filter((item) => item === `chosen:${harness}`).length, 1);
+  assert.equal(seen.filter((item) => item === `chosen:${harness}`).length, 0);
+  assert.equal(seen.filter((item) => item === "routine:routine").length, 1);
   assert.equal(seen.filter((item) => item === "task:task").length, 1);
   assert.equal(aide.runtime.harnesses.find(target => target.id === "chosen")!.harness, harness);
 });

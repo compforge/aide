@@ -78,19 +78,21 @@ plugins/personal/
     requirement/           # RequirementSource
       config.ts            # 需求观察范围与配置校验
       observe.ts           # 需求观察、水位和调度
-  config.ts                # Conversation / Task / Source 配置、严格校验与默认值
+  config.ts                # Conversation / Task / Routine / Source 配置、严格校验与默认值
   task/                    # Task CRD
     model.ts               # 资源定义
     reconcile.ts           # 输入接收、持续执行与两阶段静默回收
     agent.ts               # Host 绑定 Task / Conversation 工具范围
-    report.ts              # 进展与明确 Input 办理回执原子提交
     config.ts              # agent 静默与 Task 保留时长
   routine/                 # Routine CRD
     model.ts               # 资源定义
-    reconcile.ts           # 持续职责 Reconcile
+    reconcile.ts           # 持续职责执行与静默释放 agent
+    agent.ts               # Host 绑定 Routine / Conversation 工具范围
+    config.ts              # agent 静默时长
   model.ts                 # 共用 Work 字段、状态、消息与触发契约
   resources.ts             # Task / Routine 聚合与 Work 视图
-  execution.ts             # Routine 有界执行、结果校验与记录
+  work-report.ts           # Task / Routine 原子进展与 Input 回执
+  work-status.ts           # Work Agent 状态契约
   work.ts                  # 会话范围内 Work 创建、追加输入与删除
   work-input.ts            # Work Reconcile 消费输入与应用请求
   store.ts                 # 宿主端工作存取、消息与去重投影
@@ -98,6 +100,7 @@ agents/
   pi/                      # 通用 Pi Agent：SDK、原生工具与会话
   route/                   # 专用路由 Agent，仅分类、目录和共享记忆检索
   task/                    # 稳定目标的持续办理 Agent，复用 Pi
+  routine/                 # 持续职责 Agent，复用 Pi
   chief/                   # Personal 提示词、Person / Work / 问答 / Connector 工具
 connectors/                # 全局环境目录、需求平台 / GitHub / GitLab 访问与数据映射
 packages/plugin/           # @compforge/aide-plugin 公共契约
@@ -115,11 +118,11 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 每种插件自定义资源（CRD）在所属 plugin package 下使用独立目录，按资源名命名；该资源的模型、Reconcile 和专属辅助代码归入目录。插件装配和跨资源协作留在插件层，共用机制不强行归入某一种 CRD。目录聚合不改变 Host / Runner 的依赖边界。
 - Host / Runner 不相互导入实现。共享模块按职责放在 `src/`，不依赖两端实现。Runner 经 Resource API、Connector API 与 verb 请求宿主能力，不持有宿主 Store 或 Harness SDK。
 - Connector 由 Host 从 `config.yaml` 装配，所有 Plugin 共用；环境声明直接位于 `connectors.environments.<name>`。Connector 声明访问能力，`plugins.<plugin>.sources` 声明观察策略；Personal 只启动显式配置的环境、Lark 与需求 Source。环境发现只读配置，不代表连通性、健康或操作授权。
-- 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi`、`harnesses.chief` 与 `harnesses.task` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
+- 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi`、`harnesses.chief`、`harnesses.task` 与 `harnesses.routine` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
 - ApplicationRuntime 服务 Plugin Operator；仅在配置 harness 时装配 ExecutionService。纯资源插件不要求 Harness，默认执行目标由应用配置提供。Manager 只接收 HarnessExecution 能力与独立 LogSink，不读取执行存储。Harness 自持原生会话和恢复，Aide 仅在资源 status.agent 保存必要引用；Connector 自持调用记录。资源、调度键和实例配置不依附 Session；CoreSession、SessionStore 和 SessionHandle 已移除。底座没有 Lane / Turn；一次执行统一使用 HarnessInvocation，Operator 按需保存恢复参数。不兼容旧 Session / Lane / Turn 存储，不增加迁移或双读；提供方原生标识留在 Adapter。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
 - ChannelDefinition / SourceDefinition 声明来源身份；绑定的提交入口补齐来源，Source 同时记录资源实例引用。Input.text 保存收到的事实或请求，不保存 Chief 的处理指令。Channel / Source 输入统一从 Input 投影，Output 独立承载回复与通知；展示通过应用装配的定义目录读取名称和图标，不解释 Source 的业务数据。
 - Input / Output 由 Personal 定义；底座不预注册业务资源或 Session / Turn / Target 投影。Input.sessionId 仅是来源话题线索。Personal Route 监听 Input，规则命中立即追加，未命中由独立 Route agent Controller 调专用 Agent 分类；跨话题操作直接访问全局资源客户端。
-- Conversation、Task、Routine、Person 用 status.summary 保存累计认识、recent 保存有界近期依据；所有写入通过共享 Schema 限制条数和总长度。Person 的长期 profile 不局限于这两个字段，用户修正直接写入同一个 summary，Chief 按最新版本继续维护；身份单独保存。Task 通过持久 Task Agent 和必要工具持续办理，status.agent 只保存 harness/sessionId；Routine 从目标、状态、summary/recent 和所选 Input 构造一次性 prompt；Input.handle 的请求应用与执行确认分开，执行结果和回执原子提交。Routine 事件经 Input 入站去重。
+- Conversation、Task、Routine、Person 用 status.summary 保存累计认识、recent 保存有界近期依据；所有写入通过共享 Schema 限制条数和总长度。Person 的长期 profile 不局限于这两个字段，用户修正直接写入同一个 summary，Chief 按最新版本继续维护；身份单独保存。Task / Routine 通过各自的持久 Agent 和必要工具持续办理，status.agent 只保存 harness/sessionId；Input.handle 的请求应用与执行确认分开，执行结果和回执原子提交。Routine 事件经 Input 入站去重。
 - Chief 用 assess_input 完成当前 Input 的研判并原子建立 Work 办理记录；独立新请求用 request_work 创建 origin=chief 的新 Input。Task / Routine Reconcile 按 handle 消费，不在 Work 保存输入副本或 consumedInputIds。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。
 - Operator 按 Harness interface 经 verb 操作 agent loop；status.agent 只是 Personal 为服务重启保存调用参数的字段，不是底座契约。Harness verb 接收 harness / sessionId 并返回已知恢复引用，不访问 ResourceClient。配置在启动时装配，Conversation 不注册专属 Target；没有独立 Context 会话目录。运行句柄与调用 ID 仅用于有界进程内协调。
@@ -127,7 +130,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Person 是 Personal 的人物 CRD，统一承载我与他人的身份和认知。PersonDefinition 的资源属于 Personal 插件实例，资源和引用不带 sessionId，不启动执行会话；各 Conversation、Channel、Source 经 ResourceClient 访问同一目录。姓名不作身份键，provider / scope / id 唯一绑定人物。
 - Me 是显式身份标记，connectors.lark.me 与 CLI 执行 appId/userId 独立；需求平台的 me.userKey 与 CLI profile、Source 负责人范围独立，规范项目 scope 由 Connector 解析。匹配 Person 的外部身份得到 Personal.me；本地单人 Web 有固定 Me 标记。Input.sender 可选，relation 为 sent / received / observed，缺省未知；机器人收发不自动代表本人，分类不构成执行授权。
 - Chief 通过 summary_person 修订 Person.status.summary 并追加 recent，每轮刷新 Me、按需读取他人。用户直接修订同一个 summary，Chief 读取最新版本并尊重明确修正；更新校验 uid/resourceVersion。Person 不持有 Input ID，不阻碍输入回收。Web Persons 与 Chief 共享资源更新路径；Hermes 提供其它通用记忆与检索，业务进展仍以 Task / Routine 为准。
-- `pi` 提供通用 Agent，`chief`、`task` 和 `route` 加入各自领域工具，共用 PiAdapter。通用 Pi 不依赖 Personal，领域工具由宿主绑定资源 UID；Task 使用独立 Agent，Routine 由根级 `defaultHarness` 选择执行实现。Task 初始 Input 与 handle 原子创建，后续分派禁止 deletionTimestamp 非空的目标；静默释放 agent 后保留资源，再以 UID/版本守卫请求删除并 finalize。
+- `pi` 提供通用 Agent，`chief`、`task`、`routine` 和 `route` 加入各自领域工具，共用 PiAdapter。通用 Pi 不依赖 Personal，领域工具由宿主绑定资源 UID；Task / Routine 使用独立 Agent，复用原生会话和原子工具回执。Routine 静默只释放 agent，职责资源保留到显式删除。Task 初始 Input 与 handle 原子创建，后续分派禁止 deletionTimestamp 非空的目标；静默释放 agent 后保留资源，再以 UID/版本守卫请求删除并 finalize。
 - Lark 用户消息 Source 按账号、用户和聊天生成独立观察话题，与机器人 Channel 会话分离，避免观察内容进入原群上下文和自动外发。
 - Address 是通信位置父接口，ChannelAddress 和 RequirementAddress 分别表达聊天位置与带规范项目 scope 的工作项位置；Input.source、Conversation.spec.address 与 Output.target 复用它。Conversation 只在由 Channel Input 创建时初始化默认地址，后续追加与 default 转发不能覆盖或补值。Immediate 直接回复指向 Input.source；其它沟通明确选 target 或使用 Conversation 默认地址，禁止从话题或 Conversation ID 推导投递地址。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；人物、位置与来源分类独立，收件人不自动改变投递目标或产生额外发送。
 - 需求平台评论经 Output 由 Host 投递；发送结果不确定时停止自动重试，仅由匹配目标、正文及投递记录的回读确认。自己的评论按回执识别，不按执行账号过滤。见 `docs/connector/requirements.md`。

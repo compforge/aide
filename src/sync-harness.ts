@@ -6,7 +6,7 @@ import { z } from "zod";
 import { syncHarnessPackages } from "./host/harness/packages.ts";
 import { withAsyncFileLock } from "./host/file-lock.ts";
 
-const harness = z.enum(["pi", "chief", "task"]).parse(process.argv[2]);
+const harness = z.enum(["pi", "chief", "task", "routine"]).parse(process.argv[2]);
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });
 const home = resolve(process.env.AIDE_HOME ?? join(homedir(), ".aide"));
 try {

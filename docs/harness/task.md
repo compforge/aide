@@ -1,6 +1,6 @@
 # Task Agent
 
-Task 是同一 Conversation 下、围绕稳定工作范围持续办理的载体。`agents/task/` 与 `agents/chief/` 平级，复用 `agents/pi/` 和 PiAdapter。Task 使用自己的系统提示词和必要的领域工具；Routine 仍沿用 defaultHarness 和有界执行结果协议，后续独立演进。
+Task 是同一 Conversation 下、围绕稳定工作范围持续办理的载体。`agents/task/` 与 `agents/chief/` 平级，复用 `agents/pi/` 和 PiAdapter。Task 使用自己的系统提示词和必要的领域工具；[Routine](routine.md) 使用独立 Agent，二者共享原生会话、输入接纳与回执机制，各自管理生命周期。
 
 ## 创建与输入
 

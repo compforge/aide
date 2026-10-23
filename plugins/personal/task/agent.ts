@@ -7,7 +7,7 @@ import type { ExecutionScope } from "../../../src/protocol/verbs.ts";
 import type { Manager } from "../../../src/host/plugin/manager.ts";
 import type { Store } from "../store.ts";
 import { createTaskAgent } from "../../../agents/task/agent.ts";
-import { reportTask } from "./report.ts";
+import { reportWork } from "../work-report.ts";
 import { TASK_TYPE, type TaskSpec, type TaskStatus } from "./model.ts";
 import { inputPrinter } from "../input/printer.ts";
 import { say } from "../output/action.ts";
@@ -52,7 +52,7 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
           action: Type.Union([Type.Literal("done"), Type.Literal("wait"), Type.Literal("ask")]), question: Type.Optional(Type.String()), nextAt: Type.Optional(Type.String()) }),
         async execute(_id, args) {
           const task = current();
-          const report = await reportTask(plugins.resourceClient("personal"), task, task.status.execution!.id, args);
+          const report = await reportWork(plugins.resourceClient("personal"), task, task.status.execution!.id, args);
           log.info({ taskId: task.metadata.name, taskUid: task.metadata.uid, executionId: task.status.execution!.id,
             inputIds: report.inputIds, status: report.status }, "Task progress reported");
           return result(report);

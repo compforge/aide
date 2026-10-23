@@ -38,7 +38,7 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Con
       const previous = handle[workUid];
       if (previous && !isDeepStrictEqual(previous.request, request)) throw new Error("Input already has a different Work request; submit a new Input");
       handle[workUid] ??= { resource: resourceRef(target), assignedAt: at, request };
-      guards.push({ operation: "patchStatus", resource: target, patch: target.kind === "Task" ? { idleSince: null, agentStoppedAt: null } : {} });
+      guards.push({ operation: "patchStatus", resource: target, patch: { idleSince: null, agentStoppedAt: null } });
     }
     try {
       await resources.commit([
