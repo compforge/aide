@@ -28,7 +28,7 @@ export interface InputSpec {
    * Absent means unknown. Context messages retain their own authorship and relation.
    */
   relation?: InputRelation;
-  /** Optional sender reference. System events and multi-author observations may have no sender. */
+  /** Optional sender reference; the Person may have been deleted. System events and multi-author observations may have no sender. */
   sender?: ResourceRef;
   text: string;
   timezone?: string;

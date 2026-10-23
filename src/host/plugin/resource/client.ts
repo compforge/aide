@@ -167,11 +167,26 @@ export function createResourceClient(
     }
     return patched;
   }
+  function requestDeletion(type: ResourceType, name: string, namespace: ResourceNamespace = "v1", preconditions?: { uid: string; resourceVersion: string }) {
+    const updates = store.requestDeletion(type, name, undefined, namespace, preconditions);
+    const resource = deepFreeze(store.get(type, name, namespace));
+    for (const update of updates) store.storage.afterCommit(() => {
+      try {
+        onChange?.(Object.freeze({ pluginInstanceId: store.pluginInstanceId, kind: "deletion-requested",
+          oldResource: deepFreeze(update.oldResource), resource: deepFreeze(update.resource) }));
+      } catch {
+        // Deletion is durable; host reactions must not turn it into failure.
+      }
+    });
+    return resource;
+  }
   async function commit(writes: readonly ResourceCommit[]) {
     if (!writes.length || writes.length > 100) throw new Error("Resource commit requires 1..100 writes");
     // All writes use the same storage transaction and publish Watch events only after commit.
     return store.storage.transaction(() => writes.map((w) => w.operation === "create"
       ? create(w.type, { name: w.name, spec: w.spec, status: w.status })
+      : w.operation === "delete" ? requestDeletion(w.resource, w.resource.metadata.name, w.resource.metadata.namespace as ResourceNamespace,
+        { uid: w.resource.metadata.uid, resourceVersion: w.resource.metadata.resourceVersion })
       : w.operation === "replace" ? replace(w.resource, w.spec, w.status) : patchStatus(w.resource, w.patch))) as Resource<unknown, unknown>[];
   }
 
@@ -194,23 +209,7 @@ export function createResourceClient(
       namespace: ResourceNamespace = "v1",
       preconditions?: { uid: string; resourceVersion: string },
     ) {
-      for (const update of store.requestDeletion(
-        type,
-        name,
-        undefined,
-        namespace, preconditions,
-      )) {
-        try {
-          onChange?.(Object.freeze({
-            pluginInstanceId: store.pluginInstanceId,
-            kind: "deletion-requested",
-            oldResource: deepFreeze(update.oldResource),
-            resource: deepFreeze(update.resource),
-          }));
-        } catch {
-          // Deletion is durable; host reactions must not turn it into failure.
-        }
-      }
+      requestDeletion(type, name, namespace, preconditions);
     },
     async patch<TSpec, TStatus>(
       resource: Readonly<Resource<TSpec, TStatus>>,

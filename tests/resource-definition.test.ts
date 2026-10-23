@@ -62,7 +62,7 @@ test("Person commit validates preceding writes and rolls back data plus notifica
   const me = (await persons.me())!;
   await assert.rejects(client.commit([{ operation: "replace", resource: me, spec: { ...me.spec, identities: [] }, status }]), /cannot be removed/);
   await assert.rejects(client.patchStatus(me, { updatedBy: "unknown" } as unknown as PersonStatus));
-  await assert.rejects(client.delete(PERSON_TYPE, "one"), /deletion is not supported/);
+  await assert.rejects(client.delete(PERSON_TYPE, "me"), /Me cannot be deleted/);
   assert.equal((await persons.read("one")).metadata.deletionTimestamp, undefined);
 });
 
@@ -131,6 +131,30 @@ test("Deleting a resource tree is atomic when a descendant validator rejects", a
   await assert.rejects(client.delete(TYPE, "parent"), /child is protected/);
   assert.deepEqual(await client.get({ ...TYPE, namespace: "v1", name: "parent" }), parent);
   assert.deepEqual(await client.get({ ...TYPE, namespace: "v1", name: "child" }), child);
+});
+
+test("Atomic commit includes guarded cascading deletion and publishes no rolled-back notifications", async t => {
+  const store = new PluginResourceStore({ home: home(t), pluginInstanceId: "example" });
+  store.storage.register("example", [document]);
+  const changes: string[] = [];
+  const client = createResourceClient(store, change => changes.push(`${change.kind}:${change.resource.metadata.name}`));
+  const parent = await client.create(TYPE, { name: "parent", spec: { text: "parent" } });
+  const child = await client.create(TYPE, { name: "child", spec: { text: "child" }, owner: {
+    ...TYPE, namespace: parent.metadata.namespace, name: parent.metadata.name, uid: parent.metadata.uid,
+  } });
+  changes.length = 0;
+  await assert.rejects(client.commit([
+    { operation: "delete", resource: parent },
+    { operation: "create", type: TYPE, name: "invalid", spec: { text: "" } },
+  ]));
+  assert.deepEqual(changes, []);
+  assert.deepEqual(store.get(TYPE, "parent"), parent);
+  assert.deepEqual(store.get(TYPE, "child"), child);
+  await assert.rejects(client.commit([{ operation: "delete", resource: { ...parent, metadata: { ...parent.metadata, uid: "stale" } } }]), /version conflict/);
+  const [marked] = await client.commit([{ operation: "delete", resource: parent }]);
+  assert.ok(marked!.metadata.deletionTimestamp);
+  assert.equal(store.get(TYPE, "child").metadata.deletionTimestamp, marked!.metadata.deletionTimestamp);
+  assert.deepEqual(changes, ["deletion-requested:parent", "deletion-requested:child"]);
 });
 
 /** @case A secondary index is derived transactionally and isolated by owner, type and namespace. */

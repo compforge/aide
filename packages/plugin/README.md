@@ -113,7 +113,7 @@ Controllers use `execution.verbs.connectors({ timeoutMs })` for connector action
 
 `execution.verbs.action(name, input)` invokes an application-registered capability in the current execution scope. Action names are scoped to the plugin instance. Personal supplies its own typed `say` helper; communication policy is not a generic runtime verb.
 
-`resources.commit(writes)` atomically creates/replaces/patches resources in one plugin scope. Validation, quota or version failures roll everything back; notifications follow commit. External side effects cannot join this transaction.
+`resources.commit(writes)` atomically creates/replaces/patches resources and requests deletion in one plugin scope. A `{ operation: "delete", resource }` write checks the snapshot's UID and resourceVersion, marks the resource and its descendants for deletion, and returns the marked resource; normal reconciliation performs final removal. Validation, quota or version failures roll everything back; notifications follow commit. External side effects cannot join this transaction.
 
 Verb is the common outlet for non-CRD operations; ResourceClient owns CRD access. Each call has correlated diagnostics (call ID, execution ID, resource UID, operation, duration and outcome). These records do not store or recover native agent history.
 

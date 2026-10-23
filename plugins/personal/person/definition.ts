@@ -23,7 +23,9 @@ export function personDefinition(marks: Me): ResourceDefinition<Person, PersonSt
   const definition: ResourceDefinition<Person, PersonStatus> = { type: PERSON_TYPE,
     schema: { spec: PersonSchema, status: z.object({ ...ContextFields, updatedAt: z.string(), updatedBy: z.enum(["user", "chief", "connector"]) }).strict() },
     validator: { create: validate, update: (_old, resource, context) => validate(resource, context),
-      delete() { throw new Error("Person deletion is not supported; edit its profile or identities"); } },
+      delete(resource) {
+        if (isMe(resource.spec, marks) || resource.metadata.name === "me") throw new Error("Me cannot be deleted; merge other Persons into Me");
+      } },
     printer: { describe: (r) => `${r.spec.name}\n${JSON.stringify({ ...r.spec, summary: r.status.summary, recent: r.status.recent }, null, 2)}`, summarize: (r) => r.spec.name },
   };
   definitions.set(key, definition);
