@@ -287,7 +287,7 @@ test("Bound Channels preserve distinct input identities and rebuild user/source 
   const root = mkdtempSync(join(tmpdir(), "aide-bound-inputs-"));
   const prompts: string[] = [];
   const options = fakeOptions({ async chief(prompt) { prompts.push(prompt); return "处理完成"; },
-    async execute() { throw new Error("No Work expected"); } }, root);
+    async execute() { throw new Error("No Work expected"); } }, root, [], root, "bot");
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const web = bindChannelInput(CHANNELS.web, (input) => aide.receive(input));

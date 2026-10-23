@@ -1,8 +1,8 @@
-import { sameAddress } from "../address.ts";
-import { channelOutputs } from "./output.ts";
-import { answerPreview, processPreview, replyLabels } from "./reply-layout.ts";
-import type { ChannelService } from "./service.ts";
-import { conversationView } from "./view.ts";
+import { sameAddress } from "../../address.ts";
+import { channelOutputs } from "../output.ts";
+import { answerPreview, processPreview, replyLabels } from "../reply-layout.ts";
+import type { ChannelService } from "../service.ts";
+import { conversationView } from "../view.ts";
 
 export interface LarkProgress {
   id: string;

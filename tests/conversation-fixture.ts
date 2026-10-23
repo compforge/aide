@@ -1,3 +1,4 @@
+import { assertChannelDelivery } from "../src/channel/address.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { fixtureAddress } from "./address-fixture.ts";
@@ -21,7 +22,7 @@ export class ConversationStore extends PersonalConversations {
     const scope = { ...session, id: session.id ?? "test", home: session.home ?? session.dir };
     const resources = new PluginResourceStore({ home: scope.home, pluginInstanceId: "personal" });
     resources.storage.register("personal", personalDefinitions);
-    const outputStore = new OutputStore(scope.home);
+    const outputStore = new OutputStore(scope.home, target => assertChannelDelivery(target, "app"));
     const provider = personalAdmission(new InputStore(scope.home), outputStore);
     super(resources, createResourceClient(resources, (change) => this.changed(change), undefined, provider), new InputStore(scope.home), outputStore);
     this.defaultConversationId = scope.id;

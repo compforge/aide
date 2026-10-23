@@ -21,7 +21,7 @@ import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "
 import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageWatch } from "../plugins/personal/source/message/config.ts";
 import { readMessageContext } from "../plugins/personal/source/message/context.ts";
 import { Aide } from "../src/app.ts";
-import { LarkChannel } from "../src/channel/lark.ts";
+import { LarkChannel } from "../src/channel/lark/index.ts";
 import { loadConfig } from "../src/config.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { messageRelation } from "../plugins/personal/source/message/relation.ts";
@@ -359,7 +359,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   const options = { ...fakeOptions({ chief: async (prompt) => {
     const activation = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
     return activation.inputs[0].description.includes("Origin: source/") ? "source-private-reply" : "channel-reply";
-  }, async execute() { throw new Error("Unexpected work"); } }, root, prompts), config: loadConfig(configFile),
+  }, async execute() { throw new Error("Unexpected work"); } }, root, prompts, root, "cli_app"), config: loadConfig(configFile),
     connectors: { ...emptyConnectors, messages: {
       async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
       async search(query: MessageSearchQuery) {

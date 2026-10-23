@@ -1,5 +1,7 @@
 # Lark Channel
 
+实现位于 `src/channel/lark/`：`index.ts` 负责 Channel 生命周期与收发，`client.ts` 封装 SDK，`card.ts` 负责进展卡片。
+
 Lark Channel 把机器人单聊和群内 @机器人的文字接到现有 Personal 请求入口，再把持久消息送回原聊天。它是当前两个 [Channel](README.md) 之一，负责平台协议、收发记录和重连；Chief 负责接话与判断，Task / Routine 由 Personal Plugin 推进。
 
 ## 配置机器人

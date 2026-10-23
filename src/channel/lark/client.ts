@@ -30,6 +30,26 @@ export interface LarkTransport {
   close(): void;
 }
 
+class LarkSendError extends Error {
+  constructor(readonly code: number | undefined) { super(`Lark message.create failed (code ${code ?? "missing"})`); }
+}
+const SendFailureSchema = z.object({
+  code: z.unknown().optional(),
+  response: z.object({ status: z.number().int().min(100).max(599).optional(),
+    data: z.object({ code: z.number().int().optional() }).optional() }).optional(),
+});
+const networkCodes = new Set(["ETIMEDOUT", "ECONNABORTED", "ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EPIPE", "ERR_CANCELED"]);
+/** @spec Only diagnostic codes cross the SDK error boundary; request config, headers, body and free-form messages never enter logs or Output status. */
+export function larkSendFailure(error: unknown) {
+  const parsed = SendFailureSchema.safeParse(error);
+  const value = parsed.success ? parsed.data : undefined;
+  const code = value?.response?.data?.code ?? (typeof value?.code === "number" && Number.isSafeInteger(value.code) ? value.code : undefined);
+  const transportCode = typeof value?.code === "string" && networkCodes.has(value.code) ? value.code : undefined;
+  const httpStatus = value?.response?.status;
+  const detail = { ...(code !== undefined ? { apiCode: code } : {}), ...(httpStatus ? { httpStatus } : {}), ...(transportCode ? { transportCode } : {}) };
+  return { ...detail, error: `Lark message.create failed${Object.keys(detail).length ? ` (${JSON.stringify(detail)})` : "; no diagnostic code available"}` };
+}
+
 /** @why SDK errors may contain credentials in HTTP config; only log known lifecycle signals. */
 export function larkTransport(config: LarkConfig, log: Logger): LarkTransport {
   const logger = {
@@ -84,7 +104,7 @@ export function larkTransport(config: LarkConfig, log: Logger): LarkTransport {
         data: { receive_id: chatId, msg_type: "text", content: JSON.stringify({ text }), uuid: id },
       });
       if (response.code !== 0 || !response.data?.message_id) {
-        throw new Error(`Lark message.create failed (code ${response.code ?? "missing"})`);
+        throw new LarkSendError(response.code);
       }
     },
     cards: {

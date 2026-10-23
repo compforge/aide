@@ -1,10 +1,10 @@
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { OutputDefinition, OutputSpecSchema, OutputStatusSchema } from "./definition.ts";
 export { OutputSpecSchema } from "./definition.ts";
-import { isChannelAddress } from "../../../src/channel/address.ts";
+import { assertChannelDelivery, isChannelAddress } from "../../../src/channel/address.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { type ResourceListOptions } from "@compforge/aide-plugin";
+import { type Address, type ResourceListOptions } from "@compforge/aide-plugin";
 import { OUTPUT_TYPE, type Output, type OutputSpec, type OutputStatus } from "./model.ts";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 
@@ -17,7 +17,7 @@ export class OutputStore {
   readonly resources: PluginResourceStore;
   key(id: string): string { return this.resources.key(OUTPUT_TYPE, id); }
   private readonly listeners = new Set<(output: Output) => void>();
-  constructor(home: string) {
+  constructor(home: string, private readonly validateTarget: (target: Address) => void = assertChannelDelivery) {
     this.storage = ResourceStorage.open(home);
     this.storage.register("personal", [OutputDefinition]);
     this.resources = new PluginResourceStore({ home: this.storage.home, pluginInstanceId: "personal" });
@@ -60,6 +60,7 @@ export class OutputStore {
       if (saved.fingerprint !== fingerprint) throw new Error("Output identity already exists with different content or owner");
       throw new Error("Output was already created and reclaimed; do not recreate delivery");
     }
+    this.validateTarget(spec.target);
     // Preserve admission order even for same-ms outputs and after restart.
     const latest = this.storage.db.prepare("SELECT max(created) AS at FROM resources WHERE kind='aide.dev/Output'").get()?.at as string | null;
     const at = new Date(Math.max(Date.now(), latest ? Date.parse(latest) + 1 : 0)).toISOString();

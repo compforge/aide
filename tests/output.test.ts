@@ -1,4 +1,6 @@
-import { larkAddress } from "../src/channel/address.ts";
+import { reconcileChannelOutputs } from "../src/channel/delivery.ts";
+import { larkSendFailure } from "../src/channel/lark/client.ts";
+import { assertChannelDelivery, larkAddress, webAddress } from "../src/channel/address.ts";
 import { definition } from "./fixtures/resource-definition.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -16,8 +18,8 @@ import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ResourceCapacityError, ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
 import { ConversationStore, seedInput } from "./conversation-fixture.ts";
 import { outputSpec } from "../plugins/personal/output.ts";
-import { LarkChannel } from "../src/channel/lark.ts";
-import type { LarkTransport } from "../src/channel/lark-client.ts";
+import { LarkChannel } from "../src/channel/lark/index.ts";
+import type { LarkTransport } from "../src/channel/lark/client.ts";
 
 async function setup(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-output-"));
@@ -147,4 +149,98 @@ test("Lark sends to explicit Output target after Conversation deletion and reuse
   assert.equal(f.outputs.get("delivery")!.status.phase, "delivered");
   assert.equal(f.outputs.get("delivery")!.status.attempts, 2);
   await channel.deliver(); assert.equal(sent.length, 2);
+});
+
+
+/** @case A Connector app cannot masquerade as a configured bot; rejected publication rolls back business changes too. */
+test("Output admission rejects disabled or mismatched Lark targets before persistence", async t => {
+  const f = await setup(t);
+  const bad = { ...f.spec(), target: larkAddress("connector-app", "chat") };
+  assert.throws(() => f.outputs.create("owner", "wrong-app", bad), /No configured Channel/);
+  assert.throws(() => new OutputStore(f.root).create("owner", "disabled", { ...f.spec(), target: larkAddress("app", "chat") }), /disabled/);
+  await assert.rejects(f.client.commit([
+    { operation: "patchStatus", resource: f.conversation, patch: { summary: "must roll back" } },
+    { operation: "create", type: OUTPUT_TYPE, name: "atomic", spec: bad },
+  ]), /No configured Channel/);
+  assert.equal(f.conversations.resource("topic")!.status.summary, "");
+  assert.equal(f.outputs.list().length, 0);
+  assert.equal(f.outputs.storage.hasReceipt("output:atomic"), false);
+  assert.ok(f.outputs.create("owner", "valid", { ...f.spec(), target: larkAddress("app", "chat") }));
+});
+
+test("Reconfigured channels fail pending Outputs and preserve uncertain sends without replay", async t => {
+  const f = await setup(t);
+  for (const id of ["pending", "sending", "retrying", "delivered"]) f.outputs.create("owner", id, { ...f.spec(), target: larkAddress("app", "chat") });
+  f.outputs.begin("sending"); f.outputs.delivered("delivered");
+  f.outputs.begin("retrying"); f.outputs.retry("retrying", "ambiguous send", new Date(0).toISOString());
+  const reopened = new OutputStore(f.root, target => assertChannelDelivery(target, "different-app"));
+  const logs: Record<string, unknown>[] = [];
+  const log = pino({}, { write(line) { logs.push(JSON.parse(line)); } });
+  reconcileChannelOutputs(reopened, "different-app", log);
+  assert.deepEqual(new Set(logs.map(record => record.outputId)), new Set(["pending", "sending", "retrying"]));
+  assert.ok(logs.every(record => record.level === 50 && record.retryable === false && record.target && record.error));
+  assert.equal(reopened.get("pending")!.status.phase, "failed");
+  assert.equal(reopened.get("pending")!.status.attempts, 0);
+  assert.equal(reopened.get("sending")!.status.phase, "uncertain");
+  assert.equal(reopened.get("sending")!.status.attempts, 1);
+  assert.equal(reopened.get("retrying")!.status.phase, "uncertain");
+  assert.equal(reopened.get("retrying")!.status.attempts, 1);
+  assert.equal(reopened.get("delivered")!.status.phase, "delivered");
+  reconcileChannelOutputs(reopened, "different-app", log);
+  assert.equal(logs.length, 3, "Terminal failures are not logged on every restart");
+  assert.deepEqual(reopened.get("pending")!.spec.target, larkAddress("app", "chat"));
+});
+
+test("say acknowledges acceptance independently of delivery without recreating messages", async t => {
+  const f = await setup(t);
+  const target = larkAddress("app", "chat");
+  const options = { target, idempotencyKey: "one" };
+  const first = await f.conversations.say("topic", undefined, "reply", undefined, options);
+  assert.deepEqual(first, { outputId: first.outputId, accepted: true });
+  assert.equal(f.outputs.get(first.outputId)!.status.phase, "pending");
+  f.outputs.begin(first.outputId); f.outputs.delivered(first.outputId);
+  const retry = await f.conversations.say("topic", undefined, "reply", undefined, options);
+  assert.deepEqual(retry, first);
+  assert.equal(f.outputs.get(first.outputId)!.status.phase, "delivered");
+  assert.equal(f.outputs.list().length, 1);
+  const web = await f.conversations.say("topic", undefined, "published", undefined, { target: webAddress("topic") });
+  assert.equal(web.accepted, true);
+  assert.equal(f.outputs.get(web.outputId)!.status.phase, "delivered");
+});
+
+/** @case The durable retry and operational log share safe diagnostics, without exposing SDK request data. */
+test("Lark delivery failures retain diagnostic codes and delivery context without leaking credentials or text", async t => {
+  const f = await setup(t);
+  const target = larkAddress("app", "chat");
+  f.outputs.create("owner", "send-failure", { ...f.spec("PRIVATE MESSAGE"), target });
+  const logs: Record<string, unknown>[] = [];
+  const log = pino({}, { write(line) { logs.push(JSON.parse(line)); } });
+  const error = Object.assign(new Error("PRIVATE SDK ERROR"), { code: "ERR_BAD_REQUEST",
+    config: { headers: { Authorization: "SECRET TOKEN" }, data: "PRIVATE MESSAGE" },
+    response: { status: 403, data: { code: 99991672, msg: "PRIVATE RESPONSE" } } });
+  const transport: LarkTransport = { async start() {}, close() {}, async send() { throw error; } };
+  const channel = new LarkChannel(f.root, "app", {
+    receive: async () => { throw new Error("unused"); }, outputs: () => f.outputs.list().map(outputView),
+    outputSending: async id => f.outputs.begin(id),
+    outputRetry: async (id, reason, at) => f.outputs.retry(id, reason, at),
+  }, transport, log);
+  t.after(() => channel.close());
+  await channel.deliver();
+  const output = f.outputs.get("send-failure")!, record = logs.find(record => record.outputId === "send-failure")!;
+  assert.equal(record.level, 40);
+  assert.deepEqual(record.target, target);
+  assert.equal(record.attempt, 1);
+  assert.equal(record.apiCode, 99991672);
+  assert.equal(record.httpStatus, 403);
+  assert.equal(record.retryable, true);
+  assert.equal(record.nextAttemptAt, output.status.nextAttemptAt);
+  assert.equal(record.error, output.status.lastError);
+  assert.equal(output.status.phase, "pending");
+  assert.equal(output.status.attempts, 1);
+  assert.doesNotMatch(JSON.stringify({ logs, status: output.status }), /SECRET|PRIVATE|Authorization|config/);
+  const timeout = larkSendFailure(Object.assign(new Error("SECRET TOKEN"), { code: "ETIMEDOUT" }));
+  assert.equal(timeout.transportCode, "ETIMEDOUT");
+  assert.match(timeout.error, /ETIMEDOUT/);
+  assert.doesNotMatch(JSON.stringify(timeout), /SECRET/);
+  assert.deepEqual(larkSendFailure(new Error("SECRET")), { error: "Lark message.create failed; no diagnostic code available" });
 });

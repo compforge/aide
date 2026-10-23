@@ -136,7 +136,7 @@ test("web answers the original Harness approval and rejects stale or mismatched 
 test("conversation navigation lists persisted scopes without creating them and keeps messages/work scoped", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-conversation-list-"));
   const log = pino({ level: "silent" });
-  const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("Browsing must not execute work"); } }, dir), log);
+  const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("Browsing must not execute work"); } }, dir, [], dir, "app"), log);
   const server = httpChannel(aide, log);
   t.after(async () => {
     await aide.close();
@@ -185,7 +185,7 @@ test("Web deletes Tasks and Routines through WorkService and preserves other con
   const dir = mkdtempSync(join(tmpdir(), "aide-web-delete-"));
   const requests: string[] = [];
   const log = pino({ level: "silent" });
-  const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("Deleted work must not execute"); } }, dir, requests), log);
+  const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("Deleted work must not execute"); } }, dir, requests, dir, "app"), log);
   const server = httpChannel(aide, log);
   t.after(async () => {
     await aide.close();

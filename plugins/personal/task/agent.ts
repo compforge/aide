@@ -40,7 +40,7 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
           const text = inputPrinter.describe(input);
           return result({ inputId, handling: input.status.handle[task.metadata.uid], text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } }),
-      tool({ name: "say", label: "Say", description: "Communicate a useful result or question through this Task's Conversation.",
+      tool({ name: "say", label: "Say", description: "Create an Output through this Task's Conversation. Success means the Output was accepted, not delivered. Delivery and recovery are handled by the Host.",
         parameters: Type.Object({ text: Type.String({ minLength: 1 }), inputIds: Type.Optional(Type.Array(Type.String())) }),
         async execute(id, args) {
           const task = current();

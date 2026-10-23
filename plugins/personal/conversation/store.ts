@@ -3,7 +3,7 @@ import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient, Address } from "@compforge/aide-plugin";
 import type { InputSpec } from "../input/model.ts";
-import type { SayInput } from "../output/model.ts";
+import type { SayInput, SayReceipt } from "../output/model.ts";
 import { InputStore } from "../input/store.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import type { ResourceClientChange } from "../../../src/host/plugin/resource/client.ts";
@@ -102,7 +102,7 @@ export class ConversationStore {
     }
   }
   async say(conversationId: string, inputId: string | undefined, text: string, executionId?: string,
-    options: Omit<SayInput, "text"> = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { execution?: { id: string } | null }>): Promise<{ outputId: string }> {
+    options: Omit<SayInput, "text"> = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { execution?: { id: string } | null }>): Promise<SayReceipt> {
     const initial = await this.ensure(conversationId);
     const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
     if (options.respondToInputId && options.target) throw new Error("say must choose respondToInputId or target, not both");
@@ -152,7 +152,7 @@ export class ConversationStore {
           ...(owner ? [{ operation: "patchStatus" as const, resource: owner, patch: {} }] : []),
           outputWrite(c, draft, association),
         ]);
-        return { outputId: id };
+        return { outputId: id, accepted: true };
       } catch (error) { if (attempt >= 8 || !/version conflict/.test(String(error))) throw error; }
     }
   }

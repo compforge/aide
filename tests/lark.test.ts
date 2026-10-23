@@ -8,8 +8,8 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
 import type { OutputView } from "../src/output.ts";
 import { fixtureOutput } from "./output-fixture.ts";
-import { LarkChannel } from "../src/channel/lark.ts";
-import { larkConfig, larkTransport, type LarkTransport } from "../src/channel/lark-client.ts";
+import { LarkChannel } from "../src/channel/lark/index.ts";
+import { larkConfig, larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark/client.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });
@@ -33,7 +33,7 @@ test("Lark inbox survives restart; duplicate events do not execute twice; ordina
   const aide = new Aide(home, fakeOptions({
     async chief(prompt) { routes++; return prompt.includes('小明') ? "你好，小明" : "怎么称呼你？"; },
     async execute() { throw new Error("No work expected"); },
-  }, home), log);
+  }, home, [], home, "cli_test"), log);
   const { transport, sent } = fakeTransport();
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
@@ -140,7 +140,7 @@ test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats a
   const aide = new Aide(home, fakeOptions({
     async chief(prompt) { prompts.push(prompt); return "已收到群内请求"; },
     async execute() { throw new Error("No Work expected"); },
-  }, home), log);
+  }, home, [], home, "cli_group"), log);
   const { transport, sent } = fakeTransport({ openId: "ou_aide", name: "Aide" });
   let channel = new LarkChannel(home, "cli_group", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
@@ -284,7 +284,11 @@ test("official SDK sends bot text with a stable uuid and checks API-level failur
   t.after(() => transport.close());
   await transport.send("oc_test", "你好😀", "test-send-id");
   rejectSend = true;
-  await assert.rejects(transport.send("oc_test", "你好😀", "test-send-id"), /code 99991672/);
+  await assert.rejects(transport.send("oc_test", "你好😀", "test-send-id"), error => {
+    assert.match(String(error), /code 99991672/);
+    assert.equal(larkSendFailure(error).apiCode, 99991672);
+    return true;
+  });
   assert.equal(sends, 2);
 });
 

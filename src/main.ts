@@ -10,9 +10,9 @@ import { Connectors } from "../connectors/index.ts";
 import { Aide } from "./app.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
 import { httpChannel } from "./api/index.ts";
-import { larkProgress } from "./channel/lark-card.ts";
-import { LarkChannel } from "./channel/lark.ts";
-import { larkConfig, larkTransport } from "./channel/lark-client.ts";
+import { larkProgress } from "./channel/lark/card.ts";
+import { LarkChannel } from "./channel/lark/index.ts";
+import { larkConfig, larkTransport } from "./channel/lark/client.ts";
 import { withAsyncFileLock } from "./host/file-lock.ts";
 
 const environment = Object.freeze({ ...process.env });
@@ -31,7 +31,7 @@ await withAsyncFileLock(path, async () => {
   const harnesses = await resolveHarnessConfigs(config, { home, cwd, file, environment, log });
   const connectors = Connectors.fromConfig(config.connectors, environment);
   const aide: Aide = new Aide(home, {
-    config, connectors,
+    config, connectors, larkAppId: lark?.appId,
     cwd, timezone, defaultHarnessConfig: harnesses.defaultHarnessConfig,
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
       targetConfig: target.harness === "routine" ? { harness: "routine" } : target.harness === "task" ? { harness: "task" } : target.harness === "route" ? { harness: "route" } : target.harness === "chief" ? { harness: "chief" } : harnesses.defaultHarnessOptions,

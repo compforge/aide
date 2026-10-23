@@ -1,17 +1,17 @@
-import { larkAddress, larkEndpoint } from "./address.ts";
-import { channelOutputs } from "./output.ts";
-import type { OutputView } from "../output.ts";
-import { CHANNELS, bindChannelInput } from "./definition.ts";
+import { larkAddress, larkEndpoint } from "../address.ts";
+import { channelOutputs } from "../output.ts";
+import type { OutputView } from "../../output.ts";
+import { CHANNELS, bindChannelInput } from "../definition.ts";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Logger } from "pino";
 import { z } from "zod";
 import { normalize } from "@larksuiteoapi/node-sdk";
-import type { ChannelService } from "./service.ts";
-import { IncomingSchema } from "./message.ts";
-import { progressCard, cardPreviews, cardContent, cardThought, type LarkProgressReader, type LarkProgress } from "./lark-card.ts";
-import type { LarkTransport } from "./lark-client.ts";
+import type { ChannelService } from "../service.ts";
+import { IncomingSchema } from "../message.ts";
+import { progressCard, cardPreviews, cardContent, cardThought, type LarkProgressReader, type LarkProgress } from "./card.ts";
+import { larkSendFailure, type LarkTransport } from "./client.ts";
 
 /** @why Lark can return null for permission-restricted user_id; SDK normalization expects absent IDs as undefined. */
 const UserIdsSchema = z.object({ open_id: z.string().optional(),
@@ -43,7 +43,7 @@ type State = z.infer<typeof StateSchema>;
  * @spec Bot chat identity is lark:<appId>:<chatId>; user-observation Sources use independent topics.
  * @case tests/message-source.test.ts
  * @why Platform acknowledgement must not depend on business processing or model latency.
- * @see {@link ../../docs/channel/lark.md}
+ * @see {@link ../../../docs/channel/lark.md}
  */
 export class LarkChannel {
   private readonly acceptInput: ReturnType<typeof bindChannelInput>;
@@ -198,10 +198,12 @@ export class LarkChannel {
         if (this.state.delivered.includes(id)) continue;
         try {
           await this.transport.send(chatId, text, id);
-        } catch {
+        } catch (error) {
           this.retryAt = Date.now() + 10_000;
-          await this.aide.outputRetry?.(message.id, "Lark send failed", new Date(this.retryAt).toISOString());
-          this.log.warn({ messageId: message.id, part: index, conversationId: message.conversationId }, "Lark send failed; retrying in 10 seconds");
+          const nextAttemptAt = new Date(this.retryAt).toISOString(), failure = larkSendFailure(error);
+          this.log.warn({ outputId: message.id, target: message.target, part: index, conversationId: message.conversationId,
+            attempt: message.status.attempts + 1, retryable: true, nextAttemptAt, ...failure }, "Lark Output send failed; retry scheduled");
+          await this.aide.outputRetry?.(message.id, failure.error, nextAttemptAt);
           return;
         }
         this.save({ ...this.state, delivered: [...this.state.delivered, id] });
