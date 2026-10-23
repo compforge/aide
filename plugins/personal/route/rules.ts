@@ -23,7 +23,7 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
     let c = await context.resources.get<ConversationSpec, ConversationStatus>({ ...CONVERSATION_TYPE, namespace: "v1", name });
     if (!c) {
       try { c = await context.resources.create<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, { name,
-        spec: { id: sessionId, name: initialConversationName(input.spec.text), ...(input.spec.source ? { address: input.spec.source } : {}) }, status: { receipts: [] } }); }
+        spec: { id: sessionId, name: initialConversationName(input.spec.text), ...(input.spec.source ? { address: input.spec.source } : {}) }, status: { receipts: [], summary: "", recent: [] } }); }
       catch (error) {
         if (!String(error).includes("resource already exists")) throw error;
         c = await context.resources.get<ConversationSpec, ConversationStatus>({ ...CONVERSATION_TYPE, namespace: "v1", name });
@@ -47,7 +47,7 @@ export async function defaultDestination(context: RoutingContext): Promise<Desti
   const existing = all.find(c => c.metadata.name === name);
   if (existing?.metadata.deletionTimestamp) throw new Error("Default Conversation is being deleted");
   const c = existing ? await context.resources.replace(existing, { ...existing.spec, default: true }, existing.status)
-    : await context.resources.create<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, { name, spec: { id, name: "Default", default: true }, status: { receipts: [] } });
+    : await context.resources.create<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, { name, spec: { id, name: "Default", default: true }, status: { receipts: [], summary: "", recent: [] } });
   context.logger.info("Route established Default Conversation", { attributes: { conversationId: c.spec.id, uid: c.metadata.uid } });
   return { name: c.metadata.name, uid: c.metadata.uid };
 }

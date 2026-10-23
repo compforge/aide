@@ -13,19 +13,19 @@
 #person-editor input, #person-editor textarea, #person-search { width: 100%; padding: 10px; border: 1px solid #c9d5ca; border-radius: 8px; background: white; color: inherit; font: inherit; }
 #person-editor textarea { display: block; margin-top: 8px; resize: vertical; min-height: 100px; }
 #person-editor fieldset { border: 1px solid #d8dfd5; border-radius: 10px; margin: 20px 0; }
-/* The read view and draft share one place; confirmation persists only the understanding. */
-.person-understanding { margin: 20px 0; }
-.person-understanding-heading { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
-.person-understanding-heading h3 { margin: 0; font-size: 14px; font-weight: 400; }
+/* The read view and draft share one place; confirmation persists the shared summary. */
+.person-summary { margin: 20px 0; }
+.person-summary-heading { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.person-summary-heading h3 { margin: 0; font-size: 14px; font-weight: 400; }
 .person-edit-icon { display: inline-flex; align-items: center; justify-content: center; padding: 6px; color: #42634c; background: transparent; }
 .person-edit-icon:hover { background: #e8eee3; }
-#person-understanding-read { min-height: 60px; }
-#person-understanding-editor { border: 1px solid #c9d5ca; border-radius: 10px; background: white; overflow: hidden; }
-#person-editor #person-understanding { margin: 0; border: 0; border-radius: 0; min-height: 180px; max-height: none; }
-.person-understanding-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px; }
-.person-understanding-actions button { padding: 8px 14px; }
-#person-understanding-read[hidden], #person-understanding-editor[hidden], #person-understanding-edit[hidden] { display: none; }
-#person-understanding-notice { color: #735722; font-size: 13px; }
+#person-summary-read { min-height: 60px; }
+#person-summary-editor { border: 1px solid #c9d5ca; border-radius: 10px; background: white; overflow: hidden; }
+#person-editor #person-summary { margin: 0; border: 0; border-radius: 0; min-height: 180px; max-height: none; }
+.person-summary-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px; }
+.person-summary-actions button { padding: 8px 14px; }
+#person-summary-read[hidden], #person-summary-editor[hidden], #person-summary-edit[hidden] { display: none; }
+#person-summary-notice { color: #735722; font-size: 13px; }
 .person-identity { display: grid; grid-template-columns: 100px 1fr 1fr auto; gap: 8px; margin: 10px 0; }
 .person-actions { display: flex; gap: 10px; }
 button.secondary { background: #e8eee3; color: #20342b; }

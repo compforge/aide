@@ -50,7 +50,7 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and convers
   const type = workType(definition.kind);
   const uid = store.resources.get(type, work.id).metadata.uid;
   const response = output("me", "已接下", work.id);
-  (await store.save(work, [response], "accepted-input"));
+  (await store.save(work, [response]));
   assert.equal(service.list().length, 1);
   const beforeRead = writes();
   assert.equal(service.read(work.id).kind, definition.kind);
@@ -75,7 +75,7 @@ test(`${definition.kind} CRUD preserves identity, enforces revisions and convers
   await assert.rejects(async () => (await other.delete(work.id, updated.revision)), /Unknown work/);
   (await service.delete(work.id, updated.revision));
   assert.deepEqual(service.list(), []);
-  assert.equal(store.response("accepted-input")?.id, response.id);
+  assert.equal(store.conversations.outputStore.get(response.id)?.metadata.name, response.id);
   assert.equal(store.read().outputs.filter((item) => item.id === response.id).length, 1);
 });
 
@@ -87,7 +87,7 @@ test("Work Reconcile validates requests and only explicit control can resume pau
   await service.requestInput(work.id, { action: "update", text: "change", changes: { trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } } });
   await consume(work.id);
   assert.equal(service.read(work.id).trigger, null);
-  assert.match(service.read(work.id).history.at(-1)!.text, /Task cannot/);
+  assert.match(service.read(work.id).recent.at(-1)!.text, /Task cannot/);
   await service.requestInput(work.id, { action: "pause", text: "暂停" }); await consume(work.id);
   assert.equal(service.read(work.id).status, "paused");
   await seedInput(store.conversations, "pod", { conversationId: "me", origin: "source", originId: "personal.environments", text: "Pod replaced" });
@@ -98,11 +98,11 @@ test("Work Reconcile validates requests and only explicit control can resume pau
   await consume(work.id);
   const paused = service.read(work.id);
   assert.equal(paused.status, "paused");
-  assert.ok(store.conversations.inputStore.get("pod")!.status.handle?.[work.uid!]?.completedAt);
-  assert.match(paused.history.at(-1)!.text, /Pod replaced/);
+  assert.equal(store.conversations.inputStore.get("pod")!.status.handle?.[work.uid!]?.completedAt, undefined);
+  assert.equal(store.conversations.inputStore.get("pod")!.spec.text, "Pod replaced");
   await service.requestInput(work.id, { action: "resume", text: "继续" }); await consume(work.id);
   assert.equal(service.read(work.id).status, "ready");
-  assert.ok(store.conversations.inputStore.list().filter(i => i.status.handle?.[work.uid!]).every(i => i.status.handle![work.uid!]!.completedAt));
+  assert.ok(store.conversations.inputStore.list().some(i => i.status.handle?.[work.uid!] && !i.status.handle[work.uid!]!.completedAt));
 });
 
 test("Work service writes wake the existing Worker and reconcile; deletion during execution cannot recreate work", async (t) => {
@@ -113,7 +113,7 @@ test("Work service writes wake the existing Worker and reconcile; deletion durin
   const running = new Promise<void>((resolve) => { started = resolve; });
   const aide = new Aide(root, fakeOptions({ chief: async () => { throw new Error("No conversation expected"); },
     execute: async () => { started(); await gate;
-      return { action: "done", summary: "checked", notification: "完成", question: null, nextAt: null }; },
+      return { action: "done", summary: "checked", recent: "checked", notification: "完成", question: null, nextAt: null }; },
   }, root), log);
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.start();
@@ -144,9 +144,8 @@ test("Work view aggregates separate Task and Routine resources without persistin
   assert.deepEqual(service.list().map((work) => work.kind).sort(), ["routine", "task"]);
   assert.throws(() => store.resources.list({ apiVersion: TASK_TYPE.apiVersion, kind: "Work" }), /Unknown resource definition/);
   const reply = output("me", "routine result", recurring.id);
-  (await store.save(recurring, [reply], "routine-input", "event-1"));
-  assert.equal(store.hasEvent(recurring.id, "event-1"), true);
-  assert.equal(store.response("routine-input")?.id, reply.id);
+  (await store.save(recurring, [reply]));
+  assert.equal(store.conversations.outputStore.get(reply.id)?.metadata.name, reply.id);
   assert.equal(store.read().outputs.length, 1);
 });
 
@@ -166,10 +165,10 @@ test("Chief appends the same original Input to two works without losing observat
   }, execute: async (work) => {
     executions++;
     assert.equal(work.id, routineId);
-    assert.match(work.history.at(-1)!.text, /executor workload changed/);
-    assert.match(work.history.at(-1)!.text, /核对 executor 变化/);
+    assert.match(work.inputs.at(-1)!.text, /executor workload changed/);
+    assert.match(work.inputs.at(-1)!.note!, /核对 executor 变化/);
     assert.deepEqual(aide.conversations.inputStore.get("changed")!.spec.observation, observation);
-    return { action: "done", summary: "verified", notification: null, question: null, nextAt: null };
+    return { action: "done", summary: "verified", recent: "verified", notification: null, question: null, nextAt: null };
   } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const taskWork = await aide.work("me").create(task); taskId = taskWork.id;
@@ -183,7 +182,7 @@ test("Chief appends the same original Input to two works without losing observat
   assert.equal(aide.work("me").read(routineId).status, "scheduled");
   for (const id of [taskId, routineId]) {
     const current = aide.work("me").read(id);
-    assert.ok(aide.conversations.inputStore.get("changed")!.status.handle?.[current.uid!]?.completedAt);
+    assert.equal(!!aide.conversations.inputStore.get("changed")!.status.handle?.[current.uid!]?.completedAt, id === routineId);
   }
   await source.conversations.submit("changed", fact); await aide.settled();
   assert.equal(executions, 1);

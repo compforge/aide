@@ -2,6 +2,7 @@ import { createWebAssets } from "./assets.ts";
 import type { ConversationItem } from "./types.ts";
 import { visibleOutput } from "../channel/output.ts";
 import { webAddress } from "../channel/address.ts";
+import { SUMMARY_CHARS } from "../../plugins/personal/context.ts";
 import { PersonSchema } from "../../plugins/personal/person/model.ts";
 import { CHANNELS, bindChannelInput } from "../channel/definition.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -111,9 +112,9 @@ export function httpChannel(aide: WebService, log: Logger) {
         return;
       }
       if (request.method === "POST" && url.pathname === "/persons/edit") {
-        const input = z.object({ id: z.string().min(1), uid: z.string().min(1), version: z.string().min(1), spec: PersonSchema }).strict().parse(await body(request));
+        const input = z.object({ id: z.string().min(1), uid: z.string().min(1), version: z.string().min(1), spec: PersonSchema, summary: z.string().max(SUMMARY_CHARS).optional() }).strict().parse(await body(request));
         await aide.start();
-        try { json(response, 200, await aide.persons.edit(input.id, input.uid, input.version, input.spec)); }
+        try { json(response, 200, await aide.persons.edit(input.id, input.uid, input.version, input.spec, input.summary)); }
         catch (error) {
           if (String(error).includes("version conflict")) { json(response, 409, { error: "人物资料已更新。请重新加载并合并修改；当前编辑内容已保留。" }); return; }
           if (String(error).includes("identity") || String(error).includes("identities")) { json(response, 409, { error: "身份已绑定其他人物，或与 Me 标记冲突。请检查身份配置。" }); return; }

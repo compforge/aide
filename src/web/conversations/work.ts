@@ -73,7 +73,7 @@ export function createWorkPanel(conversationId: string, onChange: () => Promise<
       if (work.nextAt) node.append(element('p', '下次：' + new Date(work.nextAt).toLocaleString(), 'muted'));
       const detail = element('details');
       detail.append(element('summary', '查看目标与进展'), element('p', work.instruction));
-      const latest = [...work.history].reverse().find((entry) => entry.role === 'aide');
+      const latest = work.recent.at(-1);
       if (latest) detail.append(element('p', latest.text));
       node.append(detail); list.append(node);
     }

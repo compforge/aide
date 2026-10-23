@@ -1,3 +1,4 @@
+import { ContextFields } from "../context.ts";
 import { z } from "zod";
 import type { ResourceDefinition, ResourceValidationContext, Resource } from "@compforge/aide-plugin";
 import { PersonSchema, PERSON_TYPE, identityKey, isMe, type Me, type Person, type PersonStatus } from "./model.ts";
@@ -20,10 +21,10 @@ export function personDefinition(marks: Me): ResourceDefinition<Person, PersonSt
     if (resource.metadata.name === "me" && marks.identities.some((i) => !keys.has(identityKey(i)))) throw new Error("A configured Me identity cannot be removed; change the Me configuration first");
   };
   const definition: ResourceDefinition<Person, PersonStatus> = { type: PERSON_TYPE,
-    schema: { spec: PersonSchema, status: z.object({ updatedAt: z.string(), updatedBy: z.enum(["user", "chief", "connector"]) }).strict() },
+    schema: { spec: PersonSchema, status: z.object({ ...ContextFields, updatedAt: z.string(), updatedBy: z.enum(["user", "chief", "connector"]) }).strict() },
     validator: { create: validate, update: (_old, resource, context) => validate(resource, context),
       delete() { throw new Error("Person deletion is not supported; edit its profile or identities"); } },
-    printer: { describe: (r) => `${r.spec.name}\n${JSON.stringify(r.spec, null, 2)}`, summarize: (r) => r.spec.name },
+    printer: { describe: (r) => `${r.spec.name}\n${JSON.stringify({ ...r.spec, summary: r.status.summary, recent: r.status.recent }, null, 2)}`, summarize: (r) => r.spec.name },
   };
   definitions.set(key, definition);
   return definition;

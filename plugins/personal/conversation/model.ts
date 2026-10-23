@@ -1,3 +1,4 @@
+import type { ResourceContext } from "../context.ts";
 import type { Resource, Address } from "@compforge/aide-plugin";
 import type { InputSpec, InputStatus } from "../input/model.ts";
 import type { OutputView } from "../../../src/output.ts";
@@ -5,10 +6,9 @@ import type { LoopExecution } from "../loop.ts";
 import type { ConversationTrigger } from "./trigger.ts";
 export const CONVERSATION_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Conversation" } as const;
 export interface ConversationSpec { address?: Address; id: string; name?: string; default?: boolean; trigger?: ConversationTrigger }
-export interface ConversationStatus {
+export interface ConversationStatus extends ResourceContext {
   nextTriggerAt?: string | null;
   execution?: LoopExecution | null;
-  summary?: string;
   receipts: Array<{ key: string; responseId: string }>;
 }
 export type ConversationResource = Resource<ConversationSpec, ConversationStatus>;

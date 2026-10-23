@@ -4,7 +4,7 @@ import type { ConversationResource } from "../plugins/personal/conversation/mode
 import { deliver, type RoutingInput } from "../plugins/personal/route/delivery.ts";
 import { changeAttempt, resourceRef } from "../plugins/personal/input/state.ts";
 export async function assessAll(resources: ResourceClient, c: ConversationResource, executionId: string, args: { inputIds: string[]; summary: string }) {
-  for (const inputId of args.inputIds) await assessInput(resources, c, executionId, { inputId, summary: args.summary });
+  for (const inputId of args.inputIds) await assessInput(resources, c, executionId, { inputId, conversationSummary: args.summary.slice(0, 4000), summary: args.summary });
 }
 export async function routeTo(resources: ResourceClient, target: { name: string; uid: string }, input: RoutingInput) {
   const before = await resources.get({ ...input, ...input.metadata });
@@ -21,5 +21,5 @@ export async function handoff(store: import("../plugins/personal/conversation/st
   const executionId = c.status.execution?.id ?? "fixture";
   if (!c.status.execution) await resources.patchStatus(c, { execution: { id: executionId, startedAt: new Date().toISOString() } });
   await admit(resources, inputId, c.metadata.uid, executionId);
-  return assessInput(resources, c, executionId, { inputId, summary, workRequests: requests });
+  return assessInput(resources, c, executionId, { inputId, summary, conversationSummary: summary.slice(0, 4000), workRequests: requests });
 }

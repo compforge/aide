@@ -1,3 +1,4 @@
+import { ContextFields } from "./context.ts";
 import { z } from "zod";
 import { CronExpressionParser } from "cron-parser";
 
@@ -28,16 +29,12 @@ export const WorkSchema = z.object({
   revision: z.number().int(),
   nextAt: z.string().nullable(),
   question: z.string().nullable(),
-  history: z.array(z.object({ at: z.string(), role: z.enum(["user", "aide", "event"]), text: z.string() })),
+  ...ContextFields,
 });
 export type Work = z.infer<typeof WorkSchema>;
 
 export type WorkSpecFields = Pick<Work, "conversationId" | "title" | "instruction" | "revision">;
-export interface Delivery {
-  inputs: Array<{ key: string; responseId: string }>;
-  events: string[];
-}
-export type WorkStatus = Omit<Work, keyof WorkSpecFields | "id" | "uid" | "kind" | "trigger"> & Delivery;
+export type WorkStatus = Omit<Work, keyof WorkSpecFields | "id" | "uid" | "kind" | "trigger">;
 
 export { IncomingSchema, type Incoming } from "../../src/channel/message.ts";
 export type { OutputDraft, OutputView } from "../../src/output.ts";
@@ -60,6 +57,4 @@ export function validateTrigger(kind: Work["kind"], trigger: Trigger | null, now
 }
 
 export const WorkSpecSchema = WorkSchema.pick({ conversationId: true, title: true, instruction: true, revision: true }).strict();
-export const WorkStatusSchema = WorkSchema.pick({ status: true, nextAt: true, question: true, history: true }).extend({
-  inputs: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()), events: z.array(z.string()),
-}).strict();
+export const WorkStatusSchema = WorkSchema.pick({ status: true, nextAt: true, question: true, summary: true, recent: true }).strict();

@@ -1,4 +1,3 @@
-import { inputPrinter } from "./input/printer.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "./input/model.ts";
 import { resourceRef } from "./input/state.ts";
 import type { PluginContext } from "@compforge/aide-plugin";
@@ -7,7 +6,7 @@ import { toWork, type WorkResource, type WorkSpec } from "./resources.ts";
 
 /**
  * @spec Only Work Reconcile applies inbox requests. Observations never resume paused, completed or uncertain work.
- * @spec Inbox consumption and the resulting state commit together; inputs arriving during execution remain pending.
+ * @spec Request application and state commit together; contextual input remains pending until execution confirms it.
  * @link docs/plugin/personal.md
  */
 export async function consumeWorkInputs(context: PluginContext, original: WorkResource): Promise<WorkResource | undefined> {
@@ -19,14 +18,13 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
     // A running work must be recovered before consuming anything that could start it again.
     if (work.status === "running") return resource;
     const pending = await context.resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "handlePending", value: resource.metadata.uid } });
-    if (!pending.length) return resource;
+    const unapplied = pending.filter(fact => !fact.status.handle![resource.metadata.uid]!.appliedAt);
+    if (!unapplied.length) return resource;
     const receipts = [];
-    for (const fact of pending) {
+    for (const fact of unapplied) {
       const receipt = fact.status.handle![resource.metadata.uid]!;
       const input = { ...fact.spec, ...receipt.request, id: fact.metadata.name, at: fact.metadata.creationTimestamp };
       let rejection: string | undefined;
-      work.history.push({ at: input.at, role: input.origin === "channel" ? "user" : "event",
-        text: `[${input.origin}; input=${input.id}; request=${input.action}] ${inputPrinter.describe(fact).slice(0, 8000)}${input.note ? `\nChief: ${input.note}` : ""}` });
       try {
         if (input.action === "pause") { work.status = "paused"; work.nextAt = null; work.question = null; }
         else if (input.action === "resume" || input.action === "answer") {
@@ -48,22 +46,25 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         rejection = reason;
-        work.history.push({ at: new Date().toISOString(), role: "aide", text: `Input ${input.id} rejected: ${reason}` });
+        work.recent.push({ at: new Date().toISOString(), text: `Input ${input.id} rejected: ${reason}` });
         context.logger.warn("Work input rejected", { attributes: { workId: work.id, inputId: input.id, reason } });
       }
+      const at = new Date().toISOString();
+      const complete = !!rejection || input.action === "pause";
+      if (!rejection && input.action !== "context") work.recent.push({ at, text: `Applied ${input.action}: ${input.text.slice(0, 2000)}` });
       receipts.push({ operation: "patchStatus" as const, resource: fact, patch: { handle: { ...fact.status.handle, [resource.metadata.uid]: {
-        ...receipt, startedAt: new Date().toISOString(), completedAt: new Date().toISOString(),
-        result: { summary: rejection ?? `Applied ${input.action} request`, disposition: rejection ? "rejected" : "completed" } } } } });
+        ...receipt, appliedAt: at, ...(complete ? { startedAt: at, completedAt: at,
+        result: { summary: rejection ?? `Applied ${input.action} request`, disposition: rejection ? "rejected" as const : "completed" as const } } : {}) } } } });
     }
-    const { title, instruction, history, status, nextAt, question } = work;
+    const { title, instruction, recent, status, nextAt, question } = work;
     try {
       await context.resources.commit([
         { operation: "replace", resource, spec: { ...resource.spec, revision: resource.spec.revision + 1, title, instruction, ...(work.kind === "routine" ? { trigger: work.trigger! } : {}) },
-          status: { ...resource.status, history: history.slice(-40), status, nextAt, question } },
+          status: { ...resource.status, recent, status, nextAt, question } },
         ...receipts,
       ]);
       const updated = await context.resources.get<WorkSpec, WorkStatus>(resourceRef(resource));
-      context.logger.info("Work inputs consumed", { attributes: { workId: work.id, count: pending.length, status } });
+      context.logger.info("Work requests applied", { attributes: { workId: work.id, count: unapplied.length, status } });
       return updated;
     } catch (error) {
       if (!(error instanceof Error) || !error.message.includes("resource version conflict")) throw error;

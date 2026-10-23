@@ -1,3 +1,4 @@
+import type { ResourceContext } from "../context.ts";
 import { z } from "zod";
 import type { Resource, ResourceRef } from "@compforge/aide-plugin";
 
@@ -14,11 +15,9 @@ export const IdentitiesSchema = z.array(IdentitySchema).max(100).refine((items) 
 /** Me marks are independent of execution credentials and never inferred from a profile. */
 export interface Me { readonly identities: readonly PersonIdentity[] }
 export const LOCAL_ME: PersonIdentity = { provider: "web", scope: "local", id: "me" };
-/** Explicit user corrections stay separate from Chief's synthesis, including removal of old beliefs. */
-export const ProfileSchema = z.object({ understanding: z.string().max(12000).default(""), corrections: z.string().max(12000).default("") }).strict();
-export const PersonSchema = z.object({ name: z.string().trim().min(1).max(200), identities: IdentitiesSchema.default([]), profile: ProfileSchema.prefault({}) }).strict();
+export const PersonSchema = z.object({ name: z.string().trim().min(1).max(200), identities: IdentitiesSchema.default([]) }).strict();
 export type Person = z.infer<typeof PersonSchema>;
-export interface PersonStatus { updatedAt: string; updatedBy: "user" | "chief" | "connector" }
+export interface PersonStatus extends ResourceContext { updatedAt: string; updatedBy: "user" | "chief" | "connector" }
 export type PersonResource = Resource<Person, PersonStatus>;
 export const personRef = (person: Readonly<PersonResource>): ResourceRef => ({ ...PERSON_TYPE,
   namespace: person.metadata.namespace, name: person.metadata.name, uid: person.metadata.uid });

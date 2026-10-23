@@ -113,13 +113,13 @@ test("say resolves direct, aggregate and proactive targets without guessing from
 test("Work without a communication address records completion and retains notification without rerunning after restart", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-addressless-work-"));
   let executions = 0;
-  const options = fakeOptions({ async execute() { executions++; return { action: "done", summary: "verified", notification: "retained notification", question: null, nextAt: null }; } }, root);
+  const options = fakeOptions({ async execute() { executions++; return { action: "done", summary: "verified", recent: "verified", notification: "retained notification", question: null, nextAt: null }; } }, root);
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.work("source-topic").create({ kind: "task", title: "Check", instruction: "Inspect", trigger: null });
   await aide.start(); await aide.settled();
   assert.equal(aide.works()[0]!.status, "done");
-  assert.ok(aide.works()[0]!.history.some((h) => h.text.includes("retained notification")));
+  assert.ok(aide.works()[0]!.recent.some((h) => h.text.includes("retained notification")));
   assert.equal(aide.outputs().length, 0);
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();

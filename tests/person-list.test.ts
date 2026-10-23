@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { personPage } from "../src/web/persons/pagination.ts";
 
 function person(id: string, understanding = "", name = id) {
-  return { metadata: { name: id }, spec: { name, profile: { understanding } } };
+  return { metadata: { name: id }, spec: { name }, status: { summary: understanding } };
 }
 
 test("Person pages put understanding first and preserve order within both groups without mutating the directory", () => {
@@ -12,7 +12,7 @@ test("Person pages put understanding first and preserve order within both groups
   const pages = [1, 2, 3].map((page) => personPage(items, "", page, null));
   assert.deepEqual(pages.map((page) => page.items.length), [10, 10, 3]);
   assert.ok(pages.every((page) => page.pages === 3 && page.total === 23));
-  assert.deepEqual(pages.flatMap((page) => page.items), [...items.filter((p) => p.spec.profile.understanding), ...items.filter((p) => !p.spec.profile.understanding)]);
+  assert.deepEqual(pages.flatMap((page) => page.items), [...items.filter((p) => p.status.summary), ...items.filter((p) => !p.status.summary)]);
   assert.deepEqual(items, original);
   assert.deepEqual(personPage([person("blank", " \n "), person("known", "Text")], "", 1, null).items.map((p) => p.metadata.name), ["known", "blank"]);
 });
@@ -46,7 +46,7 @@ test("Me stays first on every page outside the ordinary quota, even without unde
   assert.deepEqual(pages.map((page) => page.items.length), [11, 11, 2]);
   assert.ok(pages.every((page) => page.items[0] === me && page.pages === 3 && page.total === 22));
   assert.deepEqual(pages.flatMap((page) => page.items.slice(1)), [
-    ...ordinary.filter((p) => p.spec.profile.understanding), ...ordinary.filter((p) => !p.spec.profile.understanding),
+    ...ordinary.filter((p) => p.status.summary), ...ordinary.filter((p) => !p.status.summary),
   ]);
   assert.equal(personPage(items, "", null, me.metadata.name).page, 1);
   assert.equal(personPage(items, "", 2, me.metadata.name).page, 2);
