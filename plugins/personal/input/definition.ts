@@ -23,7 +23,7 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     route: attempt.extend({ nextAttemptAt: z.string().optional(), attempts: z.number().int().nonnegative().optional(),
       result: z.object({ conversations: z.array(ref), reason: z.string() }).strict().optional() }).optional(),
     assess: z.record(z.string(), assessment).optional(),
-    handle: z.record(z.string(), assessment.extend({ request: WorkInputRequestSchema })).optional(),
+    handle: z.record(z.string(), assessment.extend({ appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
   }).strict() },
   validator: { update(previous, current) { if (!isDeepStrictEqual(previous.spec, current.spec)) throw new Error("Input content is immutable"); } },
   printer: inputPrinter,

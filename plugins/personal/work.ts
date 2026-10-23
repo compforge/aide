@@ -20,7 +20,7 @@ export function newWork(conversationId: string, definition: WorkDefinition, now 
   validateTrigger(desired.kind, desired.trigger, now);
   return { id: randomUUID(), conversationId, ...desired,
     status: desired.kind === "routine" ? "scheduled" : "ready", revision: 1,
-    nextAt: nextOccurrence(desired.trigger, now), question: null, history: [] };
+    nextAt: nextOccurrence(desired.trigger, now), question: null, summary: "", recent: [] };
 }
 
 /**

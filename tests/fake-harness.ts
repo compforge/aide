@@ -21,7 +21,7 @@ export interface Agent {
   complete?: boolean;
   route?(prompt: string): Promise<string>;
   chief?(prompt: string): Promise<string>;
-  execute(work: Work): Promise<Outcome | string>;
+  execute(work: Work & { inputs: Array<{ inputId: string; text: string; note?: string }> }): Promise<Outcome | string>;
 }
 
 /** Exercise the real Runner/verb/Turn path; replace only the external Harness protocol. */

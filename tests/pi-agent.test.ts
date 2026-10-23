@@ -288,7 +288,7 @@ test("Aide isolates continuous native contexts across conversations, restart and
     const activation = messageText(messages.findLast(m => m.role === "user")!.content).split("Activation: ").at(-1)!.split("\n")[0]!;
     const inputId = JSON.parse(activation).inputId;
     return index % 3 === 0 ? { tool: "say", args: { text: `native-response-${index / 3}` } }
-      : index % 3 === 1 ? { tool: "assess_input", args: { inputId, summary: "Handled request" } }
+      : index % 3 === 1 ? { tool: "assess_input", args: { inputId, conversationSummary: "Handled request", summary: "Handled request" } }
       : { text: `Internal summary ${Math.floor(index / 3)}` };
   });
   const home = join(fixture.config.cwd, "aide");
@@ -414,12 +414,12 @@ test("an entirely Aide-defined provider performs a real SDK request with explici
 test("Chief profiles people through tools and refreshes shared user corrections every turn", { timeout: 30_000 }, async (t) => {
   const writer = await setup(t, (_request, index) => index === 0
     ? { tool: "read_person", args: { id: "me" } }
-    : index === 1 ? { tool: "profile_person", args: { id: "me", uid: me.metadata.uid, version: me.metadata.resourceVersion, understanding: "Prefers concise Chinese answers; explicit statement, 2026-10-21." } }
+    : index === 1 ? { tool: "profile_person", args: { id: "me", uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "Prefers concise Chinese answers; explicit statement, 2026-10-21.", recent: "Observed stated preference" } }
     : { text: "已更新" }, "chief");
   const me = (await writer.persons.me())!;
   const turn = await writer.run("我更喜欢简洁中文，记一下。", "person-write");
   assert.equal(turn.stopReason, "end_turn");
-  assert.match((await writer.persons.me())!.spec.profile.understanding, /concise Chinese/);
+  assert.match((await writer.persons.me())!.status.summary, /concise Chinese/);
   assert.equal(existsSync(writer.personFile), false);
   const system = (request: Record<string, unknown>) => JSON.stringify((request.messages as Array<{ role: string }>).filter((m) => ["system", "developer"].includes(m.role)));
   await writer.run("现在呢", "person-refresh");
@@ -429,9 +429,11 @@ test("Chief profiles people through tools and refreshes shared user corrections 
   assert.match(system(reader.requests.at(-1)!), /concise Chinese/);
   const latest = (await writer.persons.me())!;
   await writer.persons.edit(latest.metadata.name, latest.metadata.uid, latest.metadata.resourceVersion,
-    { ...latest.spec, profile: { understanding: "", corrections: "Prefer detailed explanations for architecture." } });
+    latest.spec, "Prefer detailed explanations for architecture.");
   await reader.run("最新偏好", "corrected");
   assert.match(system(reader.requests.at(-1)!), /detailed explanations/);
+  assert.match(system(reader.requests.at(-1)!), /Explicit corrections take priority/);
+  assert.equal((await writer.persons.me())!.status.summary, "Prefer detailed explanations for architecture.");
   assert.doesNotMatch(system(reader.requests.at(-1)!), /concise Chinese/);
   await reader.reopen();
   assert.equal(existsSync(reader.personFile), false);
@@ -500,7 +502,7 @@ export default function (pi) {
 
 
 test("Task and Routine execute with the default Pi Harness and its configured package skill", { timeout: 30_000 }, async (t) => {
-  const outcome = { action: "done", summary: "checked", notification: "verified", question: null, nextAt: null };
+  const outcome = { action: "done", summary: "checked", recent: "checked", notification: "verified", question: null, nextAt: null };
   const fixture = await setup(t, () => ({ text: JSON.stringify(outcome) }));
   const home = join(fixture.config.cwd, "work-home");
   const skill = join(fixture.config.cwd, "capabilities", "as-ops"); mkdirSync(skill, { recursive: true });
@@ -539,7 +541,7 @@ test("Chief retains native context across acknowledged Inputs and restart", { ti
     const activation = raw.split("Activation: ").at(-1)?.split("\n")[0];
     if (!activation) throw new Error("No input activation");
     const inputId = JSON.parse(activation).inputId;
-    return { tool: "assess_input", args: { inputId, summary: "Recorded the observation" } };
+    return { tool: "assess_input", args: { inputId, conversationSummary: "Recorded the observation", summary: "Recorded the observation" } };
   });
   const home = join(fixture.config.cwd, "continuous-home");
   let aide: Aide;
@@ -599,7 +601,7 @@ test("Route exposes only routing, catalog and shared-memory retrieval tools", as
 test("Aide steers immediate Input and independently completes both inputs within one Chief invocation", { timeout: 20_000 }, async t => {
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting the first input", pause }
-    : index === 1 || index === 2 ? { tool: "assess_input", args: { inputId: index === 1 ? "first" : "urgent", summary: "Observation handled without notification" } }
+    : index === 1 || index === 2 ? { tool: "assess_input", args: { inputId: index === 1 ? "first" : "urgent", conversationSummary: "Observation handled without notification", summary: "Observation handled without notification" } }
     : { text: "Handled internally" });
   const home = join(fixture.config.cwd, "steer-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },
@@ -677,7 +679,7 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
     }
     if (messages.at(-1)!.role === "tool") return { text: "Handled" };
     const inputId = JSON.parse(raw.split("Activation: ").at(-1)!.split("\n")[0]!).inputId;
-    return { tool: "assess_input", args: { inputId, summary: "Recorded fact" } };
+    return { tool: "assess_input", args: { inputId, conversationSummary: "Recorded fact", summary: "Recorded fact" } };
   });
   const home = join(fixture.config.cwd, "route-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },

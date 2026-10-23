@@ -45,7 +45,8 @@ Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 - read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。
 - say 产生独立 Output；答复是新的 Input，不挂起 Harness 等待。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
-- assess_input 保存处理摘要并确认消费；不值得通知的观察可以静默完成。
+- assess_input 原子保存单条研判结果、更新累计 conversationSummary，并建立 Work handle；不值得通知的观察可以静默完成。
+- summarize_conversation 用于无 Input 的回顾，按 read_input 返回的版本更新 summary / recent，不伪造输入消费。
 
 提示词表达判断策略，工具边界保证持久化与会话范围。Work 写工具在提出问题后暂停接受修改，直到用户答复进入续轮；这项约束不能只依赖模型记住提示。
 
@@ -58,8 +59,8 @@ Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-h
 
 Chief 每轮读取共享目录中的 Me，将姓名、用户明确修正和精简后的当前认识放入上下文。其它人物通过 list_persons / read_person 按需查询；工具读取完整资料和最新版本。
 
-profile_person 接受人物 ID、uid、resourceVersion 和修订后的 understanding。Chief 根据输入持续补充、合并和纠正观点、偏好、关注及背景，保留必要日期、适用范围与不确定性，不保存 Input ID 或逐条对话。
-工具只更新人物认识，无法改写外部身份、Me 标记或用户 corrections。发生版本冲突时重新读取并合并；Web 编辑与其它会话更新在下一轮可见。用户的明确修正优先于历史推断和 Hermes 记忆。
+profile_person 接受人物 ID、uid、resourceVersion 以及修订后的 summary 和本次 recent。Chief 根据输入持续补充、合并和纠正观点、偏好、关注及背景，保留必要日期、适用范围与不确定性，不保存 Input ID 或逐条对话。
+工具只更新人物认识，无法改写外部身份或 Me 标记。用户修正直接保存到同一个 summary，Chief 继续维护时应保留其含义。发生版本冲突时重新读取并合并；Web 编辑与其它会话更新在下一轮可见。用户的明确修正优先于历史推断和 Hermes 记忆。
 
 sent 提供本人表达的线索，仍需辨别引用与代发；received 和 observed 不代表本人认可或授权。混合讨论逐条核对作者。人物认知用于理解和服务，不产生新的执行委托，也不向其它聊天参与者披露私密画像。
 

@@ -14,7 +14,7 @@ import { fakeOptions, type Agent } from "./fake-harness.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
 
 const log = pino({ level: "silent" });
-const done: Outcome = { action: "done", summary: "Checked and finished", notification: "完成了", question: null, nextAt: null };
+const done: Outcome = { action: "done", summary: "Checked and finished", recent: "Checked and finished", notification: "完成了", question: null, nextAt: null };
 const task = { kind: "task" as const, title: "处理待办", instruction: "检查并处理待办", trigger: null };
 
 async function setup(t: TestContext, agent: Agent) {
@@ -38,7 +38,7 @@ test("completed execution with invalid final output is distinct from interruptio
     await aide.settled();
     const work = aide.works()[0]!;
     assert.equal(work.status, "invalid_result");
-    assert.match(work.history.at(-1)!.text, /Execution completed but result validation failed/);
+    assert.match(work.recent.at(-1)!.text, /Execution completed but result validation failed/);
     assert.match(aide.outputs().at(-1)!.text, /执行已结束，但最终结果解析失败/);
     const invocations = aide.invocations();
     assert.ok(invocations.every((invocation) => invocation.phase === "completed"));
@@ -58,7 +58,7 @@ test(`${definition.kind} asks, persists a question across restart, then records 
   const agent: Agent = {
     execute: async (work) => {
       if (++runs === 1) return { ...done, action: "ask", question: "使用哪个项目？" };
-      assert.ok(work.history.some((entry) => entry.text.includes("项目 A")));
+      assert.ok(work.recent.some((entry) => entry.text.includes("项目 A")));
       return done;
     },
   };
@@ -97,7 +97,7 @@ test("Personal requires a designated final answer even when the transcript conta
   await aide.personal.conversations.ensure("me", fixtureAddress("me"));
   await aide.start(); (await aide.work("me").create(task)); await aide.settled();
   assert.equal(aide.works()[0]!.status, "invalid_result");
-  assert.match(aide.works()[0]!.history.at(-1)!.text, /without a designated final answer/);
+  assert.match(aide.works()[0]!.recent.at(-1)!.text, /without a designated final answer/);
 });
 
 test("Routine can be triggered by event, deduplicates deliveries, and stays active", async (t) => {
@@ -124,7 +124,7 @@ test("replacing a Task with a Routine uses distinct identities and retains the c
   await aide.settled();
   const prior = tools.read(original.id);
   const routine = (await tools.create({ kind: "routine", title: prior.title,
-    instruction: `${prior.instruction}\nPrevious result: ${prior.history.at(-1)!.text}`,
+    instruction: `${prior.instruction}\nPrevious result: ${prior.recent.at(-1)!.text}`,
     trigger: { cron: null, timezone: "UTC", event: "check.again" } }));
   (await tools.delete(original.id, prior.revision));
   await aide.settled();
@@ -206,7 +206,7 @@ test("an update during execution is reconciled using the latest instruction", as
   await aide.settled();
   assert.equal(seen.length, 2);
   assert.equal(seen[1]?.instruction, "处理新目标");
-  assert.ok(seen[1]?.history.some((entry) => entry.text === done.summary));
+  assert.ok(seen[1]?.recent.some((entry) => entry.text === done.summary));
 });
 
 test("cron schedules use the specified timezone", () => {
@@ -258,7 +258,7 @@ test(`${definition.kind} requeues a dynamic wait and applies its own completion 
   // Timer-triggered reconciles are owned by Manager, not Aide's explicit wake promises.
   for (let attempt = 0; attempt < 200; attempt++) {
     const current = aide.work("me").read(work.id);
-    if (runs === 2 && current.status === expected && current.history.length === 2) break;
+    if (runs === 2 && current.status === expected && current.recent.length === 2) break;
     await Bun.sleep(10);
   }
   assert.equal(runs, 2);
@@ -377,4 +377,31 @@ test("restoring a Claude default keeps its claude-code native binding and clears
   aide = new Aide(root, { ...options, defaultTarget: { id: "default", harness: "codex" } }, log);
   assert.equal(storage.open("aide:execution").meta.contexts["work-context"]!.harnessSessions.default?.harnessSessionId, undefined);
   assert.equal(storage.open("aide:execution").dir, session.dir);
+});
+
+test("Routine event Input deduplication survives Input collection and restart", async t => {
+  const { aide, path } = await setup(t, { execute: async () => done });
+  await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "sample" } });
+  const event = { id: "same-event", sessionId: "me", conversationId: "me", name: "sample", text: "sample evidence" };
+  assert.equal(await aide.event(event), 1);
+  await aide.settled();
+  const store = aide.conversations.inputStore;
+  const fact = store.list().find(input => input.spec.originId === "personal.events")!;
+  assert.ok(Object.values(fact.status.handle!).every(receipt => receipt.completedAt));
+  store.storage.configure({ kinds: { "aide.dev/Input": { maxCount: 1 } } } as Parameters<typeof store.storage.configure>[0]);
+  store.submit("unrouted", "eviction-pressure", { origin: "source", originId: "test", text: "new fact" }, {
+    route: { completedAt: new Date().toISOString(), result: { conversations: [], reason: "test" } },
+  });
+  assert.equal(store.get(fact.metadata.name), undefined);
+  const invocations = aide.invocations().length;
+  assert.equal(await aide.event(event), 0);
+  await aide.settled();
+  assert.equal(aide.invocations().length, invocations);
+  await aide.close();
+  const restarted = new Aide(path, fakeOptions({ execute: async () => { throw new Error("Must not replay event"); } }, path), log);
+  t.after(() => restarted.close());
+  await restarted.start();
+  assert.equal(await restarted.event(event), 0);
+  await restarted.settled();
+  assert.equal(restarted.works()[0]!.status, "scheduled");
 });

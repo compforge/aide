@@ -212,7 +212,7 @@ plugins:
 - 普通输入在当前调用结束后 followup，复用原生历史；immediate 通过 steer 进入当前调用。明确不支持或拒绝时留队等待 followup，不中断现有动作。
 - trigger 到期仍可在没有新 Input 时执行回顾。一次调用最多两天。
 - `contextChars` 限制新 Input 的描述预览，全文通过 `read_input` 分页读取；原生历史和压缩由 SDK 管理。
-- `summaryChars` 限制近期处理摘要，较旧条目会裁剪；长期认识使用共享记忆，委托进展保存在 Work。
+- `summaryChars` 限制 Conversation 累计认识的长度，模型需合并后替换；近期处理记录使用 recent，统一限制条数和总字符数。长期认识使用共享记忆，委托进展保存在 Work。
 - `assess_input` 提交业务消费回执并原子建立 Work 办理记录。没有回执的已尝试输入保留失败证据，不自动重放。
 
 不再提供 batchSize、maxWaitSeconds 或分批压缩配置。

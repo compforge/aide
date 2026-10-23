@@ -21,7 +21,7 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit conve
   const root = mkdtempSync(join(tmpdir(), "aide-core-coordination-"));
   const session = new HarnessFixtures(root).create({ cwd: root });
   session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex" });
-  const options = fakeOptions({ execute: async () => ({ action: "done", summary: "checked", notification: "ok", question: null, nextAt: null }) }, root);
+  const options = fakeOptions({ execute: async () => ({ action: "done", summary: "checked", recent: "checked", notification: "ok", question: null, nextAt: null }) }, root);
   const core = new ApplicationRuntime(root, { cwd: root,
     instances: [{ pluginInstanceId: "fixture", pluginId: "tests/coordination", packageVersion: "1.0.0", marketplace: "builtin", config: {} }],
     harness: { targets: [{ id: "default", harness: "codex" }], defaultTargetId: "default", historyBudgetChars: 0, createAdapter: options.createAdapter },

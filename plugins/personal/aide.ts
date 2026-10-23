@@ -1,3 +1,4 @@
+import { summarizeConversation } from "./conversation/state.ts";
 import { personalExecution } from "./execution-context.ts";
 import { say } from "./output/action.ts";
 import type { OutputStore } from "./output/store.ts";
@@ -94,7 +95,13 @@ export class Personal {
       }, (id, offset) => {
         const c = active();
         return this.readLoopInput(resourceRef(c), id, offset, true);
-      }, assess);
+      }, assess, async input => {
+        const c = active();
+        const result = await summarizeConversation(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input,
+          conversationPolicy(this.options.conversation).summaryChars);
+        this.log.info({ conversationId }, "Chief understanding updated");
+        return result;
+      });
       return createChiefAgent({ ...options, config, work: this.work(conversationId), persons: this.options.persons, tools, beforeWorkMutation: () => { active(); } });
     };
   }
@@ -144,7 +151,9 @@ export class Personal {
   private readLoopInput(owner: import("@compforge/aide-plugin").ResourceRef, id: string | undefined, offset: number, history = false) {
     const inputs = this.store.resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: owner.kind === "Route"
       ? { name: "routePending", value: "pending" } : { name: "assessPending", value: owner.uid! } });
-    if (!id) return { inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, status: attemptOf(i, owner) })),
+    const c = owner.kind === "Conversation" ? this.store.resources.get<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, owner.name) : undefined;
+    if (!id) return { ...(c ? { context: { version: c.metadata.resourceVersion, summary: c.status.summary, recent: c.status.recent,
+      summaryChars: conversationPolicy(this.options.conversation).summaryChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, status: attemptOf(i, owner) })),
       nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
     const input = this.conversations.inputStore.get(id);
     if (!input || (!inputs.some(i => i.metadata.name === id) && !(history && input.status.assess?.[owner.uid!]))) throw new Error("Input is not attached to this resource");
@@ -256,7 +265,7 @@ export class Personal {
       if (work.status !== "running") continue;
       work.status = "uncertain"; work.nextAt = null;
       const text = `「${work.title}」执行被中断，结果未知。请核对外部结果后告诉我是否继续。`;
-      work.history.push({ at: new Date().toISOString(), role: "aide", text });
+      work.recent.push({ at: new Date().toISOString(), text });
       const target = this.conversations.resource(work.conversationId)?.spec.address;
       await this.store.save(work, target ? [output(work.conversationId, text, work.id, target)] : []);
       this.log.warn({ workId: work.id }, "Recovered interrupted work as uncertain");
@@ -327,18 +336,26 @@ export class Personal {
 
   async event(input: { id: string; conversationId: string; name: string; text: string }): Promise<number> {
     if (this.closed) throw new Error("Aide is shutting down");
-    const key = JSON.stringify([input.conversationId, input.id]);
-    let count = 0;
-    for (const work of this.store.read().works) {
-      if (work.kind !== "routine" || work.conversationId !== input.conversationId || work.trigger?.event !== input.name
-        || !["scheduled", "ready", "running"].includes(work.status) || this.store.hasEvent(work.id, key)) continue;
-      work.history.push({ at: new Date().toISOString(), role: "event", text: `${input.name}: ${input.text}` });
-      if (work.status !== "running") work.status = "ready";
-      work.revision++;
-      await this.store.save(work, [], undefined, key); count++;
-    }
-    this.log.info({ eventId: input.id, name: input.name, count }, "Accepted event");
-    return count;
+    const name = digest(["routine-event", input.conversationId, input.id]);
+    const store = this.conversations.inputStore;
+    const spec: InputSpec = { origin: "source", originId: "personal.events", sessionId: input.conversationId,
+      text: input.text, observation: { event: input.name } };
+    if (store.get(name) || store.receipt(name)) { store.submit(input.conversationId, name, spec); return 0; }
+    const targets = this.store.read().works.filter(work => work.kind === "routine" && work.conversationId === input.conversationId
+      && work.trigger?.event === input.name && ["scheduled", "ready", "running"].includes(work.status));
+    await this.conversations.ensure(input.conversationId);
+    const c = this.conversations.resource(input.conversationId)!;
+    const at = new Date().toISOString();
+    const resources = targets.map(work => this.store.resources.get(workType(work.kind), work.id));
+    await this.store.client.commit([
+      ...resources.map(resource => ({ operation: "patchStatus" as const, resource, patch: {} })),
+      { operation: "create", type: INPUT_TYPE, name, spec, status: {
+        route: { completedAt: at, result: { conversations: [resourceRef(c)], reason: "Routine event subscription" } },
+        handle: Object.fromEntries(resources.map(resource => [resource.metadata.uid, { resource: resourceRef(resource), assignedAt: at, request: { action: "context" } }])),
+      } },
+    ]);
+    this.log.info({ inputId: name, eventId: input.id, count: resources.length }, "Routine event assigned through Input");
+    return resources.length;
   }
 
   async settled(): Promise<void> {

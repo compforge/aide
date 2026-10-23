@@ -37,7 +37,7 @@ export class ConversationStore {
     const previous = this.resources.find<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, conversationKey(id));
     if (previous?.metadata.deletionTimestamp) throw new Error("Conversation is being deleted; retry after deletion completes");
     if (previous) return previous;
-    return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), trigger: conversationTrigger() }, status: { receipts: [] } });
+    return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), trigger: conversationTrigger() }, status: { receipts: [], summary: "", recent: [] } });
   }
   inputs(conversationId?: string): ConversationInput[] {
     return this.list().filter((c) => !conversationId || c.id === conversationId).flatMap((view) => {

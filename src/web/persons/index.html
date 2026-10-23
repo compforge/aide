@@ -17,15 +17,16 @@
     <h2 id="person-heading">选择一个人物</h2><p id="person-empty" class="muted">随着消息和观察积累，Aide 会在这里记录认识的人。</p>
     <form id="person-editor" hidden>
       <label>姓名或称呼<input id="person-name" required maxlength="200"></label>
-      <section class="person-understanding" aria-labelledby="person-understanding-heading">
-        <div class="person-understanding-heading"><h3 id="person-understanding-heading">当前认识</h3><button id="person-understanding-edit" class="person-edit-icon" type="button" title="编辑当前认识" aria-label="编辑当前认识" aria-controls="person-understanding-editor" aria-expanded="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7"/><path d="m16 3 5 5M10 14l-1 4 4-1 9-9a3.5 3.5 0 0 0-5-5z"/></svg></button></div>
-        <div id="person-understanding-read" class="markdown"></div>
-        <div id="person-understanding-editor" hidden>
-          <textarea id="person-understanding" aria-labelledby="person-understanding-heading" maxlength="12000" rows="8" placeholder="观点、偏好、关注、目标，以及与我的关系。"></textarea>
-          <div class="person-understanding-actions"><button id="person-understanding-cancel" type="button" class="secondary">取消</button><button id="person-understanding-confirm" type="button">确认</button></div>
+      <section class="person-summary" aria-labelledby="person-summary-heading">
+        <div class="person-summary-heading"><h3 id="person-summary-heading">当前认识</h3><button id="person-summary-edit" class="person-edit-icon" type="button" title="编辑当前认识" aria-label="编辑当前认识" aria-controls="person-summary-editor" aria-expanded="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7"/><path d="m16 3 5 5M10 14l-1 4 4-1 9-9a3.5 3.5 0 0 0-5-5z"/></svg></button></div>
+        <div id="person-summary-read" class="markdown"></div>
+        <div id="person-summary-editor" hidden>
+          <textarea id="person-summary" aria-labelledby="person-summary-heading" maxlength="16000" rows="8" placeholder="观点、偏好、关注、目标，以及与我的关系。"></textarea>
+          <div class="person-summary-actions"><button id="person-summary-cancel" type="button" class="secondary">取消</button><button id="person-summary-confirm" type="button">确认</button></div>
         </div>
-        <p id="person-understanding-notice" role="status" aria-live="polite"></p>
+        <p id="person-summary-notice" role="status" aria-live="polite"></p>
       </section>
+      <section><h3>近期依据</h3><div id="person-recent"></div></section>
       <fieldset><legend>外部身份</legend><p class="muted">同一个人可以有多个身份。Lark 使用 app ID 作为作用域、open ID 作为身份 ID；姓名不用于身份匹配。</p><div id="person-identities"></div><button id="identity-add" type="button" class="secondary">添加身份</button></fieldset>
       <p id="person-updated" class="muted"></p><div class="person-actions"><button id="person-save" type="submit">保存</button><button id="person-reload" class="secondary" type="button">重新加载</button></div>
     </form>

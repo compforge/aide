@@ -39,7 +39,9 @@ Input.relation 描述输入相对于 Me 的关系：
 
 Web 输入为 sent。别人私信机器人或仅 @ 机器人不能据此认定为我收到；Lark Source 对各条消息分别分类，混合讨论仅在本人的观察范围内归为 observed。环境与需求监控属于配置的观察范围。关系随 Input 持久保存，不因后续身份编辑而改写历史。
 
-profile 保存理解本身与必要背景、日期，区分明确表达和推断，不引用 Input ID。Chief 的 profile_person 工具更新 understanding；用户在 Web Persons 编辑资料、身份与当前认识。明确修正独立保存，Chief 无法通过工具修改该字段；推断不得覆盖修正。并发更新必须重读后合并，不能盲目覆盖。
+Person 的 status.summary 保存当前认识概览，status.recent 保存近期交往、观察和认识修正的依据；区分明确表达和推断，保留必要背景与日期，不引用 Input ID。Chief 的 profile_person 工具更新 summary 并追加 recent；用户在 Web Persons 直接编辑同一个 status.summary，修正后的文本就是当前认识，不另存 corrections 字段。recent 只记录发生过用户修订，不复制整篇 summary。Chief 必须读取最新版本并在继续维护时尊重用户明确修正，不能用旧上下文中的推断覆盖它。身份补全、仅编辑身份和启动更新均保留现有认识。并发更新必须重读后合并，不能盲目覆盖。
+
+summary 和 recent 只是人物资料的一部分，不代表完整的长期 profile。职责、关系、经历等资料可以按其自身语义继续组织；近期窗口的裁剪不授权删除长期资料。当前将 understanding 收敛为 summary，不预建未来的资料分类。
 
 人物工具沿用 Work 的接入方式：模型工具调用 Personal 服务，再经 ResourceClient 更新 CRD，无需新增 Core verb 或人物输入队列。读取、补充、合并、纠错在正常 Chief 轮次内发生，Conversation 摘要仍只维护话题窗口。详见 [Chief](../harness/chief.md#人物认知)。
 
@@ -116,18 +118,18 @@ interface Processing {
 
 Conversation.address 只在由 Channel Input 创建时取首个 Input.source，后续追加不覆盖。Immediate 输入的直接回复使用该 Input.source；其它通知明确选择 target 或使用 Conversation.address。多个 immediate 地址不同时，say 必须指定 respondToInputId 或 target。路由去向、通信位置和执行授权分别判断。
 
-Conversation.spec 保存身份、可选 address 与 trigger；status 保存下次触发时间、有界 summary 与当前 execution。没有 pendingInputIds、Batch 或 recentInputIds。Web 的 pendingInputIds 是通过 Input.assess 索引推导的展示字段。
+Conversation.spec 保存身份、可选 address 与 trigger；status 保存下次触发时间、有界 summary / recent 与当前 execution。没有 pendingInputIds、Batch 或 recentInputIds。Web 的 pendingInputIds 是通过 Input.assess 索引推导的展示字段。
 
 Conversation Reconcile 负责确定性协调，非确定性判断提交给持续 Chief Agent。普通输入在同一原生上下文 followup，immediate 可以 steer；timer 可在没有新输入时触发回顾。每次接纳先写 executionId，重复协调不重复提交已接纳材料。
 
-- `assess_input({ inputId, summary, workRequests? })` 完成当前 Chief 的研判，并在同一事务建立所需 handle。workRequests 按 Work UID 指定 request，含 note、action 和可选 changes；不需要 Work 时可以为空。有限 summary 同时更新到 Conversation。
+- `assess_input({ inputId, summary, conversationSummary, workRequests? })` 完成当前 Chief 的研判，并在同一事务建立所需 handle。workRequests 按 Work UID 指定 request，含 note、action 和可选 changes；不需要 Work 时可以为空。summary 是本次研判结果，进入 Input 处理痕迹和 Conversation.recent；conversationSummary 是合并旧认识后的整体概览，替换 Conversation.summary。
 - Chief 通过 read_input 读取待处理项及状态。已尝试但未确认的项保留 executionId、lastError，后续输入或定时回顾可以核对已有动作后明确确认。
 - say 只创建 Output，不完成 assess；需要补充时发出问题，确认本次研判，后续回答作为新 Input。
 - steer 接纳前保存身份；明确拒绝时清除本次接纳以便 followup，结果未知则保留待核对证据。模型或调用结束不等于业务确认。
 
 原生 SDK 管理连续历史与压缩，Host 保存恢复绑定，不改写原生文件。每次 HarnessInvocation 仍独立记录期限和终态，一次执行最多两天。Route 与 Chief 隔离原生上下文，共用 Hermes 长期记忆；Route 只检索，Chief 维护。Task / Routine 仍是工作状态的权威来源。
 
-`contextChars` 限制新 Input 预览，全文通过 read_input 分页读取；不限制整个模型 token 窗口。`summaryChars` 限制 Conversation 上保留的近期处理摘要，较旧的条目会裁剪；长期认识应写入记忆，持续工作应写入 Work，不能把这份近期摘要当作完整审计记录。
+`contextChars` 限制新 Input 预览，全文通过 read_input 分页读取；不限制整个模型 token 窗口。`summaryChars` 限制 Conversation 的累计认识，默认 4000 字符；模型应主动合并和压缩，超预算的更新会被拒绝，不通过截断生成残缺结论。定时回顾没有 Input 时，Chief 通过 summarize_conversation 更新 summary / recent；先用 read_input 获取当前上下文与版本，版本过期需重读后合并。
 
 Input 上未完成的 route、assess 或 handle 阶段保护原始事实，全部完成后由 Host 按资源容量回收；阶段处理记录随 Input 保留，入站去重回执在独立窗口内继续生效。Output 的待投递状态独立保护输出，已送达输出不因连续 loop 永久保留。Web 展示现存 Input 的原始事实、消费状态和错误，从 Ledger 展示执行轨迹。错误不会自动向用户反复发送失败通知。
 
@@ -231,3 +233,16 @@ Input.status 的未完成阶段就是待办事实，不在消费者资源里另�
 ## 验证
 
 `tests/chief.test.ts` 验证真实 Runner 的接收、隔离和失败不重放；Harness 与平台使用替身。`tests/pi-agent.test.ts` 另覆盖真实 Pi SDK 与 Chief 工具。`tests/conversation-intake.test.ts` 覆盖统一接收、超过旧上限、重投去重，以及 say 提问后跨重启用新 Input 继续。`tests/harness-approval.test.ts` 验证原生权限拒绝、校验和取消。真实环境验收见 [E2E](../e2e.md)。
+
+
+## 有界认识与近期依据
+
+Conversation、Task、Routine、Person 共用 status.summary 和 status.recent 的字段约定。summary 表达截至当前仍有价值的整体认识与进展；recent 是近期处理依据，条目包含 at 和 text，保存具体观察、判断、动作或结果。当前目标、委托、人物身份等结构化事实仍由各资源原有字段承担。两者均不承诺完整历史，原始 Input、Output 和执行轨迹分别保留。
+
+Personal 的共享上下文 Schema 在每次持久写入时执行预算：summary 最多 16000 字符（Conversation 可配置更低预算），recent 最多 40 条且正文总计最多 16000 字符。超出窗口时保留较新记录，边界条目标记省略；Host 负责执行 Schema 和整体资源容量，不替业务总结。需要长期保留的认识应由模型合并进 summary、结构化状态或长期记忆，不要求每条旧记录都变成 summary。
+
+Work 的执行材料显式选择目标、触发条件、当前状态、summary、recent 和本次 Input，使用 Harness 的 freshContext 重建有界上下文；Route / Chief 继续使用持续原生会话。Work 每次接收最多 20 条、序列化材料合计最多 64000 字符的待处理 Input，保留完整主消息与 Chief note；可选 observation 预览最多 8000 字符，截断时显式标记。超过本轮预算的输入留待后续处理；单条无法容纳的输入报错并保留待处理状态，不静默完成。
+
+Work 的请求应用和上下文处理分开记录：Input.handle.appliedAt 表示确定性请求已应用，避免恢复时重复修改状态；暂停或拒绝请求可直接完成。需要执行的材料仍保持待处理，进入执行时将底座 executionId 写到所选 Input。合法执行结果、累计 summary、recent、Input 完成痕迹和 Output 在同一事务提交；执行期间的新 Input 不属于该次确认。失败或结果无效时保留未完成输入与错误，Work 进入待核对状态，不自动重放；显式恢复后才继续。暂停和完成状态不会被普通观察自动恢复。
+
+Routine 事件也形成 Input，依据订阅建立 handle；不再维护 Work 内部的事件历史或去重数组。入站去重复用 InputStore 的独立有界回执窗口，Input 被回收后，窗口内重投不会重建处理。Task / Routine 的目标和调度生命周期保持独立。

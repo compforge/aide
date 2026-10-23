@@ -48,7 +48,9 @@ test("A say request for information finishes processing; the answer is a new Inp
   const after = aide.invocations().at(-1)!;
   assert.notEqual(after.invocationId, before.invocationId);
   assert.deepEqual(aide.personal.conversations.get("me")!.pendingInputIds, []);
-  assert.doesNotMatch(prompts.at(-1)!, /请提供目标环境/, "Native context owns history, not repeated prompts");
+  const material = JSON.parse(prompts.at(-1)!.split("Activation: ")[1]!.split("\n")[0]!);
+  assert.equal(material.summary, "请提供目标环境。");
+  assert.equal(material.inputs.length, 1, "Only the new Input is replayed; prior understanding is bounded context");
   assert.match(prompts.at(-1)!, /test 环境/);
   await aide.receive(first); await aide.settled();
   assert.equal(calls, 2);

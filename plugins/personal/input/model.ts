@@ -47,6 +47,8 @@ export interface Assessment extends Attempt {
   result?: { summary: string; disposition?: "completed" | "cancelled" | "rejected" };
 }
 export interface Handling extends Assessment {
+  /** Request applied; contextual handling still awaits execution confirmation. */
+  appliedAt?: string;
   request: import("../model.ts").WorkInputRequest;
 }
 export interface InputStatus {

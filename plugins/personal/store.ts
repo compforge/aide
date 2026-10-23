@@ -1,17 +1,15 @@
 import { outputWrite } from "./output.ts";
-import { outputView } from "../../src/output.ts";
 import { randomUUID } from "node:crypto";
 import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
 import type { ResourceClient, ResourceNamespace, Address } from "@compforge/aide-plugin";
-import { WorkSchema, validateTrigger, type OutputDraft, type OutputView, type Work, type WorkStatus, type Delivery } from "./model.ts";
+import { WorkSchema, validateTrigger, type OutputDraft, type OutputView, type Work, type WorkStatus } from "./model.ts";
 import { ConversationStore } from "./conversation/store.ts";
 
 import { WORK_TYPES, workType, toWork, type WorkResource, type WorkSpec } from "./resources.ts";
-const delivery = (): Delivery => ({ inputs: [], events: [] });
 
 /**
  * @spec Task and Routine own business state; their result and independent Outputs commit together.
- * @why Channel retries must never replay business execution. Conversation retains deleted work receipts.
+ * @why Channel retries must never replay business execution. InputStore owns bounded incoming receipts.
  * @link docs/plugin/personal.md
  */
 export class Store {
@@ -44,29 +42,13 @@ export class Store {
 
   get(id: string): Work { return toWork(this.getResource(id)); }
 
-  response(key: string): OutputView | undefined {
-    const archived = this.conversations.response(key);
-    if (archived) return archived;
-    for (const resource of this.listResources()) {
-      const receipt = resource.status.inputs?.find((input) => input.key === key);
-      if (receipt) { const output = this.conversations.outputStore.get(receipt.responseId); if (output) return outputView(output); }
-    }
-    return undefined;
-  }
-
-  hasEvent(id: string, key: string): boolean {
-    return this.getResource(id).status.events.includes(key);
-  }
-
-  /** @spec Deleting work retains independent Outputs and accepted-input receipts. In-flight results cannot recreate it. */
+  /** @spec Deleting work retains independent Outputs. In-flight results cannot recreate it. */
   async delete(id: string): Promise<void> {
     const current = this.getResource(id);
-    await this.conversations.archive(current.spec.conversationId, [], current.status.inputs);
-    // Preserve receipts before deletion; independently owned Outputs already survive it.
     await this.client.delete(current, id, current.metadata.namespace as ResourceNamespace);
   }
 
-  async save(work: Work, outputs: OutputDraft[] = [], inputKey?: string, eventKey?: string): Promise<void> {
+  async save(work: Work, outputs: OutputDraft[] = []): Promise<void> {
     WorkSchema.parse(work);
     validateTrigger(work.kind, work.trigger, new Date());
     const { id, conversationId, kind, title, instruction, trigger, revision, uid: _uid, ...observation } = work;
@@ -75,21 +57,13 @@ export class Store {
       ...(kind === "routine" ? { trigger: trigger! } : {}) };
     const current = this.findResource(id);
     if (current && current.kind !== type.kind) throw new Error("Work kind is immutable; create the other type and pause or delete the original work");
-    const previous = current?.status ?? delivery();
-    const status: WorkStatus = { ...observation,
-      inputs: [...previous.inputs, ...(inputKey ? [{ key: inputKey, responseId: outputs.at(-1)!.id }] : [])],
-      events: [...previous.events, ...(eventKey ? [eventKey] : [])],
-    };
+    const status: WorkStatus = observation;
     const c = await this.conversations.ensure(conversationId);
     await this.client.commit([
       current ? { operation: "replace", resource: current, spec, status } : { operation: "create", type, name: id, spec, status },
       ...outputs.map((o) => outputWrite(c, o, { producer: current ? { ...type, name: id, namespace: current.metadata.namespace, uid: current.metadata.uid }
         : { ...type, name: id, namespace: "v1" } })),
     ]);
-  }
-
-  async reply(conversationId: string, outputs: OutputDraft[], key: string): Promise<void> {
-    await this.conversations.archive(conversationId, outputs, [{ key, responseId: outputs.at(-1)!.id }]);
   }
 }
 
