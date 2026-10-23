@@ -28,6 +28,14 @@ const adapter = createHarnessAdapter(
 
 Agent 不自动发现环境中的扩展、提示词命令或交互主题；装配方可通过 extensionPaths 显式提供扩展路径，工具和钩子由 Pi SDK 加载。Adapter 负责扩展启动与退出事件。通用 Pi 默认不携带记忆扩展，并禁用自动整轮重试。完整执行期限由 Harness 调用方管理。
 
+## 压缩与失败恢复
+
+Pi 原生管理上下文压缩与 checkpoint。使用 Pi 1.4.0 的摘要预算：`reserveTokens` 决定压缩触发时机，摘要输出受模型能力与实际请求剩余空间约束，不再额外限制为 `0.8 × reserveTokens`。模型的 `contextWindow` 和 `maxTokens` 仍需按实际服务配置。
+
+压缩失败时，Adapter 终止当前调用并报告错误，未应用的 followUp / steer 按失败回执清理；不会把失败状态永久保存在 session 上。后续显式调用继续使用同一个原生 session，由 Pi 决定是否需要再次压缩。Aide 不自动重放失败输入、不替换会话，也不保存不完整摘要。Chief / Work 对可能已有副作用的输入仍要求核对。
+
+压缩日志记录 sessionId、invocationId、触发原因，以及成功时的压缩前后 token 估计和摘要字符数；失败时记录原生错误。日志不包含摘要正文。
+
 ## 输出与验证
 
 Adapter 将文字、思考、工具和用量转换为 Core 事件。多轮工具调用中的中间发言保留为进度，只有成功收口的最后答复进入 finalText；失败、取消、截断或空答复不作为成功结果。原生调用栈清理完毕后才释放执行位。

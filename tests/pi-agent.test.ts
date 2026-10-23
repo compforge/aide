@@ -1,4 +1,4 @@
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { PiAdapter } from "../src/host/harness/pi/adapter.ts";
 import { createRouteAgent } from "../agents/route/agent.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
@@ -87,9 +87,10 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const events: HarnessEvent[] = [];
   let binding: HarnessSessionReference | undefined;
   let finished: (() => void) | undefined;
+  let native: AgentSession | undefined;
   const adapter = createHarnessAdapter({ id: "assistant", harness }, {
     targetConfig: { harness }, openApproval: async () => { throw new Error("Unexpected interaction"); },
-    piSession: (input) => createPiAgent({ ...config, ...input }),
+    piSession: async (input) => (native = await createPiAgent({ ...config, ...input })),
     routeSession: (input) => createRouteAgent({ ...config, ...input, port: { async route(value) { return value; }, conversations() { return { conversations: [], nextOffset: null }; }, input() { return {}; } } }),
     chiefSession: (input) => createChiefAgent({ ...config, ...input, work, persons }),
   });
@@ -125,7 +126,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
     await terminal;
     return session.summarizeInvocation(turnId);
   }
-  return { work, config, session, adapter, events, requests, requestHeaders, run, personFile, persons, ref: () => ref, binding: () => binding!,
+  return { work, config, session, adapter, events, requests, requestHeaders, run, personFile, persons, native: () => native!, ref: () => ref, binding: () => binding!,
     reopen: async () => { await adapter.close(ref); ref = await open(); return ref; } };
 }
 
@@ -842,4 +843,35 @@ test(`${kind} ${attention} Input joins the active native invocation`, { timeout:
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
   const admitted = [...state.harnessInputs.values()].find(i => i.delivery === (attention === "immediate" ? "steer" : "followUp"));
   assert.equal(admitted?.deliveryOutcome, "applied");
+});
+
+/** @case Native compaction never persists a truncated checkpoint and can recover on the same session. */
+test("Pi native compaction uses model output budget and resumes a valid checkpoint", { timeout: 20_000 }, async t => {
+  let summaries = 0;
+  const fixture = await setup(t, request => {
+    const messages = request.messages as Array<{ role: string; content: unknown }>;
+    const isSummary = messages.some(m => messageText(m.content).includes("context summarization assistant"));
+    if (!isSummary) return { text: "Handled" };
+    summaries++;
+    assert.ok(Number(request.max_tokens ?? request.max_completion_tokens) > 800,
+      "Summary output must not be capped to 0.8 * reserveTokens");
+    return summaries === 1 ? { text: "Incomplete checkpoint", stop: "length" } : { text: "Valid checkpoint: review next input." };
+  });
+  const native = fixture.native();
+  native.settingsManager.applyOverrides({ compaction: { enabled: false, reserveTokens: 1000, keepRecentTokens: 0 } });
+  await fixture.run("Review this input", "first");
+  const sessionId = native.sessionId;
+  await assert.rejects(native.compact(), /generation hit the token cap/);
+  assert.equal(native.sessionManager.getEntries().filter(e => e.type === "compaction").length, 0);
+  const compacted = await native.compact();
+  assert.match(compacted.summary, /Valid checkpoint/);
+  assert.equal(native.sessionManager.getEntries().filter(e => e.type === "compaction").length, 1);
+  assert.equal(native.sessionId, sessionId);
+  const completedSummaries = summaries;
+  assert.ok(completedSummaries >= 2);
+  await fixture.reopen();
+  assert.equal(fixture.native().sessionId, sessionId);
+  assert.equal((await fixture.run("Review a new independent input", "next")).stopReason, "end_turn");
+  assert.ok(JSON.stringify(fixture.requests.at(-1)).includes("Valid checkpoint"));
+  assert.equal(summaries, completedSummaries, "Resume must reuse the checkpoint");
 });
