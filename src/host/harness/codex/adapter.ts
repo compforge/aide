@@ -12,7 +12,6 @@ import type {
   SessionConfigOption,
   StopReason,
 } from "../../event/index.ts";
-import { textOf } from "../../event/index.ts";
 import type { ApprovalDraft } from "../../approval/types.ts";
 import type {
   AdapterCapabilities,
