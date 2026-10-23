@@ -12,6 +12,9 @@ import { conversationView, type ConversationView } from "../channel/view.ts";
 export function conversationPatches(emitter: PatchEmitter, previous: ConversationView | undefined, next: ConversationView): PatchEvent[] {
   if (!previous || previous.blocks.some((block, index) => next.blocks[index]?.id !== block.id)) return [emitter.start(next)];
   const events: PatchEvent[] = [];
+  if (JSON.stringify(previous.meta.context) !== JSON.stringify(next.meta.context)) {
+    events.push(emitter.metaSet("meta.context", { context: next.meta.context }));
+  }
   if (JSON.stringify(previous.meta.activity) !== JSON.stringify(next.meta.activity)) {
     events.push(emitter.metaSet("meta.activity", { activity: next.meta.activity }));
   }

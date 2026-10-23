@@ -39,6 +39,16 @@
     <div id="notice" role="status">Enter 发送 · Shift + Enter 换行</div>
   </section>
   <aside>
+    <div id="conversation-context" hidden>
+      <section class="context-group" aria-labelledby="summary-heading">
+        <h2 id="summary-heading">话题摘要</h2>
+        <div id="conversation-summary" class="markdown"></div>
+      </section>
+      <section class="context-group" aria-labelledby="recent-heading">
+        <h2 id="recent-heading">近期记录</h2>
+        <div id="conversation-recent"></div>
+      </section>
+    </div>
     <p id="work-notice" role="status" class="muted"></p>
     <section class="work-group" aria-labelledby="tasks-heading">
       <h2 id="tasks-heading">事项 <span id="task-count" class="muted">0</span></h2>

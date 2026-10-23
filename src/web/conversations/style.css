@@ -50,6 +50,11 @@ textarea { width: 100%; resize: vertical; min-height: 80px; max-height: 200px; b
 #notice, #work-notice { font-size: 13px; color: #68776c; }
 #notice.error, #work-notice.error { color: #a0362a; }
 aside { padding: 24px 20px; border-left: 1px solid #d8dfd5; overflow: auto; } aside h2 { font-size: 16px; margin: 0 0 18px; }
+#conversation-context[hidden] { display: none; }
+.context-group { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #d8dfd5; }
+#conversation-summary, #conversation-recent { max-height: 320px; overflow: auto; font-size: 13px; }
+.context-entry + .context-entry { margin-top: 16px; padding-top: 16px; border-top: 1px solid #e1e6dc; }
+.context-entry time { display: block; margin-bottom: 6px; font-size: 12px; }
 .work-group + .work-group { margin-top: 28px; padding-top: 24px; border-top: 1px solid #d8dfd5; }
 .work { background: white; border-radius: 10px; border: 1px solid #e1e6dc; padding: 14px; margin-bottom: 12px; }
 .work-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
