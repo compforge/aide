@@ -23,6 +23,7 @@ export const HARNESS_IDENTITIES = {
   dsh: { id: "dsh", aliases: ["deepseek"], label: "DeepSeek Harness", sessionKey: "deepseek-harness", icon: iconFor("harness:dsh") },
   pi: { id: "pi", aliases: [], label: "Pi", sessionKey: "pi", icon: iconFor("harness:pi") },
   route: { id: "route", aliases: [], label: "Route", sessionKey: "route", icon: iconFor("harness:chief") },
+  task: { id: "task", aliases: [], label: "Task", sessionKey: "task", icon: iconFor("harness:chief") },
   chief: { id: "chief", aliases: [], label: "Chief", sessionKey: "chief", icon: iconFor("harness:chief") },
 } as const satisfies Record<string, HarnessIdentity>;
 

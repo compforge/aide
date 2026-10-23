@@ -48,7 +48,7 @@ Harness 自己保存原生会话、历史、压缩与 checkpoint，负责 durabl
 
 Plugin / Operator 通过 ResourceClient 操作 CRD，通过 Verb 发起非 CRD 操作。`harness` verb 将 create、resume、prompt、followUp、steer、abort、close 交给 Harness interface；没有 Binding 或额外 Agent interface。Host 记录调用关联、接收回执和结果，Harness 实现拥有运行句柄和原生协议。Verb 的统一诊断记录包含调用 ID、执行 ID、资源 UID、操作、耗时和结果，不复制模型上下文，也不承担恢复。
 
-Operator 为服务重启保存必要的调用参数，例如 Personal 的 status.agent = { harness, session?: { id, resume? } }。这些字段由 Operator 定义和读写；Harness verb 只接收参数、返回结果和已知恢复引用，不访问 ResourceClient，不约定 CRD 的 status 结构。持续 Route / Chief 在 create 返回后先保存引用，再提交 prompt；保存失败不会重复 Harness 调用。没有独立的 Target 注册或 Context 会话目录。
+Operator 为服务重启保存必要的调用参数，例如 Personal 的 status.agent = { harness, sessionId? }。这些字段由 Operator 定义和读写；Harness verb 只接收参数、返回结果和已知恢复引用，不访问 ResourceClient，不约定 CRD 的 status 结构。持续 Route / Chief / Task 在 create 返回后先保存引用，再提交 prompt；保存失败不会重复 Harness 调用。没有独立的 Target 注册或 Context 会话目录。
 
 Reconcile 的冻结快照只有 cwd 与 HarnessConfiguration 配置。Harness 返回 invocationId 与本次执行结果；应用按明确的执行 ID 查询实时投影副本。Personal 自己解释 Conversation/Input 关联，底座只传递不透明 attributes。同一资源上下文串行使用，不同上下文受并发上限约束。Followup 复用原生会话，steer 在原生能力支持时追加立即输入。
 

@@ -35,10 +35,6 @@ import type {
   HarnessSessionHandle,
   OpenApproval } from "../adapter.ts";
 import { unsupportedPromptBlocks } from "../adapter.ts";
-import {
-  sessionIdFromResumeState,
-  sessionIdResumeState,
-} from "../resume.ts";
 import { ClaudeEventHandler, type ClaudePermissionMeta } from "./events.ts";
 import {
   CLAUDE_FALLBACK_MODELS,
@@ -131,7 +127,7 @@ export class ClaudeAdapter implements Harness {
   /** SDK 无独立"启动"步骤：streaming query 在首个 sendTurn 时创建，这里只登记运行时。 */
 
   create(options: OpenOptions, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
-    if (options.sessionId || options.resumeState) throw new Error("Use resume to restore an existing session");
+    if (options.sessionId) throw new Error("Use resume to restore an existing session");
     return this.open(options, sink, reference);
   }
 
@@ -156,10 +152,7 @@ export class ClaudeAdapter implements Harness {
     binding?: SessionReferenceSink,
   ): Promise<HarnessSessionHandle> {
     const id = newId("hs");
-    const requestedSessionId = opts.resumeState
-      ? sessionIdFromResumeState(opts.resumeState)
-      : opts.sessionId;
-    if (opts.resumeState && !requestedSessionId) throw new Error("Unsupported native session recovery state");
+    const requestedSessionId = opts.sessionId;
     const resumeSessionId = requestedSessionId;
 
     const env = opts.env || this.options.env
@@ -753,7 +746,6 @@ export class ClaudeAdapter implements Harness {
     rt.publishedSessionId = sessionId;
     rt.bindingSink?.({
       identity: { id: sessionId },
-      resumeState: sessionIdResumeState(sessionId),
     });
   }
 

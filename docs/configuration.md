@@ -19,7 +19,7 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 |---|---|
 | `resources` | Host 的持久 Resource 容量、按 Group/Kind 的回收策略与去重窗口 |
 | `connectors` | Host 装配全局环境目录、需求、Forge 与 Lark 消息读取能力 |
-| `harnesses` | Host 装配 Agent 的模型选择和扩展能力；支持 `pi`、`chief`、`route`、`codex`、`claude`、`dsh` |
+| `harnesses` | Host 装配 Agent 的模型选择和扩展能力；支持 `pi`、`chief`、`route`、`task`、`codex`、`claude`、`dsh` |
 | `plugins` | 各 Plugin 校验和使用自己的业务配置；持续观察策略位于 `plugins.<plugin>.sources` |
 
 没有声明的 Connector/Source/package 默认为空。Connector 和 Plugin 的具体字段由所属实现校验，
@@ -96,13 +96,13 @@ plugins:
 
 根级 `defaultHarness` 缺省为 `pi`，可选 `pi`、`codex`、`claude`、`dsh`。这是 Aide 的装配选择，
 `harnesses.<name>` 只声明对应实现的配置。Chief 始终负责接话与调度，其角色不受默认工作执行选择影响。
-未知值、空值和 `chief` 均报错；代码不将无效选择静默降级为 Pi。
+未知值、空值和领域 Agent（`chief`、`route`、`task`）均报错；代码不将无效选择静默降级为 Pi。
 
-启动时准备 Chief 与选中的执行 Harness，生成固定的默认 Target。只有 Pi 被选中时才解析执行 Pi 的模型、技能与同步收据；
+启动时准备 Chief、Route、Task 与选中的执行 Harness，生成固定的默认 Target。只有 Pi 被选中时才解析执行 Pi 的模型、技能与同步收据；
 未选中的模块配置仍需满足字段结构。CLI 的登录态、原生配置与可用性由相应提供方负责，启动解析不代表远端连通。
-修改选择后重启生效；已有 Aide 工作和历史保留，不同 Harness 的原生恢复绑定会清除，中断待核对的工作不会自动重试。
+修改选择后重启生效，影响后续 Routine 执行；Task 的独立 Agent 会话保持不变，中断待核对的工作不会自动重试。
 
-例如，使用 Codex 执行 Task / Routine：
+例如，使用 Codex 执行 Routine：
 
 ```yaml
 defaultHarness: codex
@@ -115,7 +115,7 @@ harnesses:
 
 | Harness 配置 | 字段 |
 |---|---|
-| `harnesses.pi` / `harnesses.chief` | `model` 对象、`packages` 列表，见下文 |
+| `harnesses.pi` / `harnesses.chief` / `harnesses.task` | `model` 对象、`packages` 列表，见下文 |
 | `harnesses.route` | 可选 `model` 对象；省略时复用 Chief 的已解析模型，不加载 packages 或技能 |
 | `harnesses.codex` | `command` 非空参数数组、`approvalReviewer`（`user` / `auto_review`）、`model` 字符串 |
 | `harnesses.claude` | `executable`、`model` 字符串；显式 executable 优先于启动环境的 `AIDE_CLAUDE_BIN` |
@@ -123,9 +123,9 @@ harnesses:
 
 省略 CLI 的模型时沿用原生提供方配置；各模块保留已有命令默认值。
 
-## Pi / Chief 默认值与外部配置
+## Pi / Chief / Task 默认值与外部配置
 
-两种 Harness 分别按自己的 `model` 解析，模型的优先级是 **Aide 显式字段 > 同一模型的 Pi 定义 > SDK 默认值**。
+Pi 与 Chief 分别按自己的 `model` 解析；Task 未声明 model 时复用 Chief 的已解析模型，声明时独立解析。模型的优先级是 **Aide 显式字段 > 同一模型的 Pi 定义 > SDK 默认值**。
 模型配置由 `src/host/harness/chief/config.ts` 和 `pi/config.ts` 在启动阶段解析；Agent 只接收有效配置。
 
 - 已注册的模型可以只声明 `provider/id`；省略整个 `model` 时使用 Pi settings 的 `defaultProvider/defaultModel`，两者都未设置时使用 SDK 可用模型列表的首项。
@@ -159,12 +159,12 @@ Chief 和通用 Pi 各自解析配置；同一模型需分别声明或使用 YAM
 启动日志记录所选 provider/model、配置来源和 skills 数量，不输出密钥。校验确认配置可解析及认证已配置，
 不代表模型远端一定可用；部署验收仍需完成一次真实模型请求。
 
-`harnesses.pi.packages` 和 `harnesses.chief.packages` 均默认为 `[]`。内置装配只加载各自声明包中的 skills；
+`harnesses.pi.packages`、`harnesses.chief.packages` 和 `harnesses.task.packages` 均默认为 `[]`。内置装配只加载各自声明包中的 skills；
 空列表明确关闭包技能，不继承用户或项目的自动发现。直接使用通用 Pi 工厂的调用方仍可自行决定是否启用原生发现。
 包来源使用 Pi 的 Git/npm/本地目录格式；本地路径写成绝对路径、`~/...` 或 `./...` / `../...`，
 后两者相对所选配置文件目录解析，不随服务工作目录改变。
 
-当 `defaultHarness: pi` 时，Task / Routine 使用的模型和能力包由 `harnesses.pi` 决定。
+当 `defaultHarness: pi` 时，Routine 使用的模型和能力包由 `harnesses.pi` 决定。Task 始终使用独立 Agent，其模型和能力包由 `harnesses.task` 决定；packages 不继承 Chief。
 外部 CLI Adapter 的原生配置由其自身接口管理。
 服务端口、工作目录、时区、Lark 和代理仍使用[部署文档](deployment.md)中的环境变量；
 它们与当前 YAML 字段没有重叠覆盖关系。
@@ -176,10 +176,11 @@ Chief 和通用 Pi 各自解析配置；同一模型需分别声明或使用 YAM
 ```bash
 aide harness sync pi
 aide harness sync chief
+aide harness sync task
 ```
 
-源码 checkout 可使用 `node bin/aide.js harness sync pi` 或 `node bin/aide.js harness sync chief`。该命令调用 Pi 原生 package manager，
-缓存分别放在 `$AIDE_HOME/harnesses/pi/` 与 `$AIDE_HOME/harnesses/chief/`，不写 Pi 的个人 settings.json。未固定 ref 的 Git 包在显式同步时
+源码 checkout 可使用 `node bin/aide.js harness sync pi` 、`node bin/aide.js harness sync chief` 或 `node bin/aide.js harness sync task`。该命令调用 Pi 原生 package manager，
+缓存按名称放在 `$AIDE_HOME/harnesses/<pi|chief|task>/`，不写 Pi 的个人 settings.json。未固定 ref 的 Git 包在显式同步时
 更新；需要可复现的版本时固定 commit。同步与服务共用单实例锁，运行中不能更新正在读取的包。
 
 启动只读取同步成功的包；缺包、声明改变、无 skills 或 skill 元数据无效时报错。
@@ -187,6 +188,18 @@ aide harness sync chief
 同步包不会安装 ascli 等业务 CLI；它们及凭证由运行环境独立提供。
 
 环境配置见 [Connector](connector/README.md)，Chief 的角色、工具和会话行为见 [Chief](harness/chief.md)。
+
+## Task 静默策略
+
+```yaml
+plugins:
+  personal:
+    task:
+      agentIdleMs: 300000       # 执行结束、无下一条可执行输入后，静默 5 分钟释放运行句柄
+      idleRetentionMs: 86400000 # 释放后继续保留 Task 24 小时
+```
+
+两项均为毫秒整数，范围 1000–2147483647。新分派清除两阶段计时；待处理 Input、等待用户、未来唤醒和待核对状态阻止 Task 回收。释放句柄保留 sessionId，回收 Task 通过 deletionTimestamp 与 finalize 完成，详见 [Task Agent](harness/task.md)。
 
 ## 模块归属
 

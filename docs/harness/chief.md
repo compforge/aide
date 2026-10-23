@@ -20,7 +20,7 @@ const adapter = createHarnessAdapter(
 );
 ```
 
-原生会话由 Pi SDK 保存在默认目录；Chief scope 使用 Conversation UID，防止同名重建后恢复旧会话。Operator 在 status.agent 保存配置名和 session，后续原样传给 Harness verb；底座不读写这个字段。用户通过 say 收到问题，后续答复以新的 Input 进入。空闲时 prompt，运行中普通输入 followUp、紧急输入 steer；一个 invocation 可以处理多个 Input，assess_input 的业务回执分别确认完成。
+原生会话由 Pi SDK 管理持久化；Chief scope 使用 Conversation UID，防止同名重建后恢复旧会话。Operator 在 status.agent 保存配置名和 sessionId，后续原样传给 Harness verb；底座不读写这个字段。用户通过 say 收到问题，后续答复以新的 Input 进入。空闲时 prompt，运行中普通输入 followUp、紧急输入 steer；一个 invocation 可以处理多个 Input，assess_input 的业务回执分别确认完成。
 
 ## 主动判断与沟通
 

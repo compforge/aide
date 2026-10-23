@@ -8,10 +8,6 @@ import type {
 import { newId } from "../../event/ids.ts";
 import { READ_ONLY_COMMAND_RULES } from "../command-effect/rules.ts";
 import { shellCommandIsReadOnly } from "../command-effect/shell.ts";
-import {
-  type HarnessResumeState,
-  sessionIdResumeState,
-} from "../resume.ts";
 import { kindEffect } from "../tool-effect.ts";
 
 export interface DshRequestContext {
@@ -92,32 +88,6 @@ export function usagePayload(value: unknown): UsageUpdate | undefined {
 export function contextUsed(usage: UsageUpdate | undefined): number | undefined {
   if (usage?.inputTokens === undefined) return undefined;
   return usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0);
-}
-
-export function requestContextFromResumeState(
-  state: HarnessResumeState | undefined,
-): DshRequestContext | undefined {
-  if (state?.version !== 1) return undefined;
-  const data = record(state.data);
-  const requestContext = record(data?.requestContext);
-  const model = text(requestContext?.model);
-  if (!model) return undefined;
-  const contextWindow = finiteNumber(requestContext?.contextWindow);
-  return {
-    model,
-    ...(contextWindow === undefined ? {} : { contextWindow }),
-  };
-}
-
-export function dshResumeState(
-  sessionId: string,
-  requestContext?: DshRequestContext,
-): HarnessResumeState {
-  if (!requestContext) return sessionIdResumeState(sessionId);
-  return {
-    version: 1,
-    data: { sessionId, requestContext },
-  };
 }
 
 export function dshStopReason(reason: unknown): StopReason {

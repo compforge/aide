@@ -109,9 +109,9 @@ export class Aide {
     let personal: Personal | undefined;
     this.runtime = new ApplicationRuntime(home, {
       cwd: options.cwd,
-      instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ route: parsePersonalConfig(config?.plugins.personal).route, conversation: parsePersonalConfig(config?.plugins.personal).conversation, watches: this.watches,
+      instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ route: parsePersonalConfig(config?.plugins.personal).route, conversation: parsePersonalConfig(config?.plugins.personal).conversation, task: parsePersonalConfig(config?.plugins.personal).task, watches: this.watches,
         environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
-      harness: { harnesses: [{ ...this.defaultHarnessConfig }, { id: ROUTE_HARNESS, harness: "route" }, { id: "chief", harness: "chief" }],
+      harness: { harnesses: [{ ...this.defaultHarnessConfig }, { id: ROUTE_HARNESS, harness: "route" }, { id: "chief", harness: "chief" }, { id: "task", harness: "task" }],
         defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.conversations.changed(change); this.notify(); },
@@ -120,7 +120,9 @@ export class Aide {
           const text = input.text;
           const association = personalExecution(context);
           if (!association.conversationId) throw new Error("Personal say requires Conversation context");
-          return this.personal.conversations.say(association.conversationId, association.inputId, text, context.executionId, input);
+          const owner = context.resourceRef?.kind === "Task" ? this.personal.store.resources.get<unknown, { execution?: { id: string } | null }>(context.resourceRef, context.resourceRef.name, context.resourceRef.namespace) : undefined;
+          if (owner && (owner.metadata.deletionTimestamp || owner.metadata.uid !== context.resourceRef?.uid)) throw new Error("Task Output owner is no longer active");
+          return this.personal.conversations.say(association.conversationId, association.inputId, text, context.executionId, input, owner);
         } },
         pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => {
@@ -162,6 +164,8 @@ export class Aide {
   work(conversationId: string) { return this.personal.work(conversationId); }
 
   routeSession(scope: Parameters<Personal["routeSession"]>[0], config: Parameters<Personal["routeSession"]>[1]) { return this.personal.routeSession(scope, config); }
+
+  taskSession(scope: Parameters<Personal["taskSession"]>[0], config: Parameters<Personal["taskSession"]>[1]) { return this.personal.taskSession(scope, config); }
 
   chiefSession(scope: Parameters<Personal["chiefSession"]>[0], config: Parameters<Personal["chiefSession"]>[1]) {
     return this.personal.chiefSession(scope, config);

@@ -539,7 +539,7 @@ export class InvocationExecutor {
       ({ record, run, settled } = this.startInvocation(binding, {
         invocationId: input.invocationId,
         input,
-        harnessSessionId: binding.session?.id,
+        harnessSessionId: binding.sessionId,
       }));
     } catch (error) {
       this.processing.delete(input.runtimeId);
@@ -596,7 +596,7 @@ export class InvocationExecutor {
         inputEventId: run.inputEventId,
         inputId: input.messageId,
         launchSnapshot: binding.launchSnapshot,
-        harnessSessionId: binding.session?.id,
+        harnessSessionId: binding.sessionId,
       });
       const promptInput: PromptInput = {
         invocationId: input.invocationId,
@@ -798,8 +798,8 @@ export class InvocationExecutor {
   }
 
   /** Prepare an ephemeral runtime from explicit parameters. No resource fields are read or written. */
-  prepare(harnessName: string, scope: ExecutionScope, session?: AgentStatus["session"]): LiveHarness {
-    const previous = session ? this.findRuntime(harnessName, scope, session.id) : undefined;
+  prepare(harnessName: string, scope: ExecutionScope, sessionId?: AgentStatus["sessionId"]): LiveHarness {
+    const previous = sessionId ? this.findRuntime(harnessName, scope, sessionId) : undefined;
     if (previous) return previous;
     const runtimeId = randomUUID();
     const key = this.runtimeKey(runtimeId, harnessName);
@@ -818,13 +818,13 @@ export class InvocationExecutor {
             runtimeId,
           ),
       });
-    const runtime = { runtimeId, target, adapter, scope, session };
+    const runtime = { runtimeId, target, adapter, scope, sessionId };
     this.runtimes.set(key, runtime);
     return runtime;
   }
 
   findRuntime(harnessName: string, scope: ExecutionScope, sessionId: string): LiveHarness | undefined {
-    return [...this.runtimes.values()].find(runtime => runtime.target.id === harnessName && runtime.session?.id === sessionId
+    return [...this.runtimes.values()].find(runtime => runtime.target.id === harnessName && runtime.sessionId === sessionId
       && runtime.scope.pluginInstanceId === scope.pluginInstanceId && runtime.scope.resourceRef?.uid === scope.resourceRef?.uid);
   }
 
@@ -835,14 +835,14 @@ export class InvocationExecutor {
     if (existingOpen) { await existingOpen; return context; }
     if (context.ref) return context;
     const records = this.options.records;
-    const options = { cwd: records.cwd, sessionId: context.session?.id, resumeState: context.session?.resume };
+    const options = { cwd: records.cwd, sessionId: context.sessionId };
     const receive = (event: import("../harness/adapter.ts").HarnessEvent) => this.harnessHooks.acceptHarnessEvent(context, event);
     let publishedId: string | undefined;
     const reference = (value: import("../harness/adapter.ts").HarnessSessionReference) => {
       if (options.sessionId && value.identity.id !== options.sessionId) throw new Error("Harness resumed a different native session");
       if (publishedId && publishedId !== value.identity.id) throw new Error("Harness changed native session identity within a live runtime");
       publishedId = value.identity.id;
-      context.session = { id: value.identity.id, ...(value.resumeState ? { resume: value.resumeState } : {}) };
+      context.sessionId = value.identity.id;
     };
     const opening = (async () => {
       context.ref = options.sessionId
@@ -862,7 +862,7 @@ export class InvocationExecutor {
       if (isModelReadable(context.adapter)) model = context.adapter.currentModel(context.ref) ?? undefined;
       context.launchSnapshot = createHarnessLaunchSnapshot({ target: context.target, harnessSessionKey: context.adapter.harness, cwd: options.cwd, model, effort });
       records.log({ level: "info", source: "aide", component: "harness.session", harness: context.target.harness,
-        harnessName: targetId, message: "Native session opened", attributes: { runtimeId, resourceUid: context.scope.resourceRef?.uid ?? null, sessionId: context.session?.id ?? null, resumed: context.ref.resumed ?? false } });
+        harnessName: targetId, message: "Native session opened", attributes: { runtimeId, resourceUid: context.scope.resourceRef?.uid ?? null, sessionId: context.sessionId ?? null, resumed: context.ref.resumed ?? false } });
     })();
     this.opening.set(context, opening);
     try { await opening; return context; }
@@ -891,11 +891,11 @@ export class InvocationExecutor {
     const context = this.runtimeFor(runtimeId, targetId);
     try {
       await this.ensureHarness(runtimeId, targetId);
-      if (!context.session) {
+      if (!context.sessionId) {
         await this.closeHarness(context);
         return { outcome: "rejected", reason: "session_reference_unavailable" };
       }
-      return { outcome: "accepted", ...(context.session ? { session: context.session } : {}) };
+      return { outcome: "accepted", ...(context.sessionId ? { sessionId: context.sessionId } : {}) };
     } catch (error) {
       await this.closeHarness(context).catch(() => {});
       throw error;

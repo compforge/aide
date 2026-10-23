@@ -15,7 +15,7 @@ export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
   const receipt = attemptOf(input, resourceRef(owner));
   if (receipt?.completedAt) return false;
   if (owner.kind === "Route") return !receipt?.executionId || (!!input.status.route?.nextAttemptAt && Date.parse(input.status.route.nextAttemptAt) <= Date.now());
-  return !!receipt && !receipt.executionId;
+  return !!receipt && !receipt.executionId && (owner.kind !== "Task" || !!input.status.handle?.[owner.metadata.uid]?.appliedAt);
 }
 /** @spec Due retries compete by original arrival, independently of new input selection; a failed parent cannot starve. */
 export async function nextInput(resources: ResourceClient, owner: Readonly<LoopResource>) {
@@ -56,8 +56,8 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   let error = "Agent ended without confirming input completion";
   try {
     const agent = await prepareAgent(context.resources, execution, current, target);
-    const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : "Chief", prompt, timeoutMs: 172800_000 });
-    if (result.agent?.session) await saveAgent(context.resources, current, execution.executionId, result.agent);
+    const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Task" ? "Task" : "Chief", prompt, timeoutMs: 172800_000 });
+    if (result.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, result.agent);
     if (result.state !== "success" || result.value.result.stopReason !== "end_turn") error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
   } catch (cause) { error = String(cause); }
   finally { await finalizeExecution(context, current, execution.executionId, error); }
@@ -73,7 +73,11 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
       await context.resources.commit([
         ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: attemptPatch(i, resourceRef(latest), { lastError: error,
           ...(latest.kind === "Route" ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
-        { operation: "patchStatus", resource: latest, patch: { execution: null } },
+        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(latest.kind === "Task" ? {
+          lastExecutionId: executionId,
+          ...((unfinished.length || (latest.status as LoopStatus & { status?: string }).status === "running")
+            && (latest.status as LoopStatus & { status?: string }).status !== "paused" ? { status: "uncertain" } : {}),
+        } : {}) } },
       ]);
       if (unfinished.length) context.logger.warn("Agent inputs await recovery", { attributes: { resourceUid: latest.metadata.uid, executionId,
         inputIds: unfinished.map(i => i.metadata.name), recovery: latest.kind === "Route" ? "retry" : "inspect", error } });

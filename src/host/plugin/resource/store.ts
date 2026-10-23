@@ -514,12 +514,15 @@ export class PluginResourceStore {
     name: string,
     now: Date = new Date(),
     namespace: ResourceNamespace = "v1",
+    preconditions?: { uid: string; resourceVersion: string },
   ): readonly ResourceDeletionUpdate[] {
     if (Number.isNaN(now.getTime())) {
       throw new Error("deletion time must be a valid Date");
     }
     return this.storage.transaction(() => {
       const target = this.get<unknown, unknown>(type, name, namespace);
+      if (preconditions && (target.metadata.uid !== preconditions.uid || target.metadata.resourceVersion !== preconditions.resourceVersion))
+        throw new Error("Resource version conflict before deletion; read it again");
       const updates: ResourceDeletionUpdate[] = [];
       const pending = [target];
       const visited = new Set<string>();

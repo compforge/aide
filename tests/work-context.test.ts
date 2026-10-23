@@ -28,7 +28,7 @@ async function fixture(t: TestContext, kind: "task" | "routine" = "task") {
   await resources.create(CONVERSATION_TYPE, { name: digest("me"), spec: { id: "me" }, status: {} });
   const work = newWork("me", { kind, title: "Follow up", instruction: "Check evidence", trigger: kind === "routine" ? { cron: "* * * * *", timezone: "UTC", event: null } : null });
   const { id, conversationId, title, instruction, revision, kind: _kind, trigger: _trigger, ...status } = work;
-  const original = await resources.create<WorkSpec, WorkStatus>(workType(kind), { name: id, spec: { conversationId, title, instruction, revision, ...(kind === "routine" ? { trigger: work.trigger! } : {}) }, status });
+  const original = await resources.create<WorkSpec, WorkStatus>(workType(kind), { name: id, spec: { conversationId, title, instruction, revision, ...(kind === "routine" ? { trigger: work.trigger! } : { initialInputId: "fixture-initial" }) }, status });
   const context = { resources, logger: { info() {}, warn() {}, error() {} } } as unknown as PluginContext;
   const read = () => resources.get<WorkSpec, WorkStatus>(resourceRef(original)) as Promise<WorkResource>;
   const add = (name: string, text = name) => resources.create<InputSpec, InputStatus>(INPUT_TYPE, { name,

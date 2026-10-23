@@ -6,7 +6,7 @@ import { DefaultPackageManager, loadSkills, SettingsManager } from "@earendil-wo
 import type { Logger } from "pino";
 import { configPath, type AideConfig } from "../../config.ts";
 
-type PackageHarness = "pi" | "chief";
+type PackageHarness = "pi" | "chief" | "task";
 
 function harnessPackages(home: string, harness: PackageHarness, config: AideConfig, file: string) {
   const packages = config.harnesses[harness].packages.map((source) => {

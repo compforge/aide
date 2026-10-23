@@ -159,6 +159,7 @@ export interface ResourceWriter {
     type: ResourceType,
     name: string,
     namespace?: ResourceNamespace,
+    preconditions?: { readonly uid: string; readonly resourceVersion: string },
   ): Promise<void>;
   /** Applies one optimistic patch against the supplied Resource incarnation/version. */
   patch<TSpec, TStatus>(

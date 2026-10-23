@@ -6,10 +6,7 @@ import { resourceRef } from "./input/state.ts";
 /** Native binding only; history and checkpoints remain owned by the Harness. */
 export const AgentStatusSchema = z.object({
   harness: z.string().min(1),
-  session: z.object({
-    id: z.string().min(1),
-    resume: z.object({ version: z.number().int(), data: z.unknown() }).strict().optional(),
-  }).strict().optional(),
+  sessionId: z.string().min(1).optional(),
 }).strict();
 
 /** @spec Personal owns its status layout. Saving a recovery reference never repeats Harness effects. */
@@ -24,12 +21,12 @@ export async function saveAgent(resources: ResourceClient, owner: Readonly<LoopR
 
 /** Persist the native identity before admitting business effects in a long-running loop. */
 export async function prepareAgent(resources: ResourceClient, execution: ReconcileContext, owner: Readonly<LoopResource>, harness: string): Promise<AgentStatus> {
-  if (owner.status.agent?.harness === harness && owner.status.agent.session) return owner.status.agent;
+  if (owner.status.agent?.harness === harness && owner.status.agent.sessionId) return owner.status.agent;
   const created = await execution.verbs.harness({ operation: "create", harness, timeoutMs: 30_000 });
-  if (created.state !== "success" || created.value.outcome !== "accepted" || !created.agent?.session) throw new Error("Continuous agent requires a native recovery reference before prompt");
+  if (created.state !== "success" || created.value.outcome !== "accepted" || !created.agent?.sessionId) throw new Error("Continuous agent requires a native recovery reference before prompt");
   try { await saveAgent(resources, owner, execution.executionId, created.agent); }
   catch (error) {
-    await execution.verbs.harness({ operation: "close", harness, session: created.agent.session, timeoutMs: 30_000 });
+    await execution.verbs.harness({ operation: "close", harness, sessionId: created.agent.sessionId, timeoutMs: 30_000 });
     throw error;
   }
   return created.agent;

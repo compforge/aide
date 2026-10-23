@@ -1,3 +1,4 @@
+import { resourceRef } from "../input/state.ts";
 import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient, Address } from "@compforge/aide-plugin";
@@ -101,7 +102,7 @@ export class ConversationStore {
     }
   }
   async say(conversationId: string, inputId: string | undefined, text: string, executionId?: string,
-    options: Omit<SayInput, "text"> = {}): Promise<{ outputId: string }> {
+    options: Omit<SayInput, "text"> = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { execution?: { id: string } | null }>): Promise<{ outputId: string }> {
     const initial = await this.ensure(conversationId);
     const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
     if (options.respondToInputId && options.target) throw new Error("say must choose respondToInputId or target, not both");
@@ -136,12 +137,18 @@ export class ConversationStore {
     for (let attempt = 0; ; attempt++) {
       const c = this.resource(conversationId);
       if (!c || c.metadata.uid !== initial.metadata.uid) throw new Error("Output Conversation was replaced");
-      if (executionId && c.status.execution?.id !== executionId) throw new Error("Output execution is no longer active");
+      if (owner) {
+        const latest = await this.client.get<unknown, { execution?: { id: string } | null }>(resourceRef(owner));
+        if (!latest || latest.metadata.deletionTimestamp) throw new Error("Output owner is no longer active");
+        owner = latest;
+      }
+      if (executionId && (owner ? owner.status.execution?.id : c.status.execution?.id) !== executionId) throw new Error("Output execution is no longer active");
       const draft: OutputDraft = { id, conversationId, text, workId: null };
-      const association = { target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds } : {}) };
+      const association = { ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds } : {}) };
       try {
         await this.client.commit([
           { operation: "patchStatus", resource: c, patch: {} },
+          ...(owner ? [{ operation: "patchStatus" as const, resource: owner, patch: {} }] : []),
           outputWrite(c, draft, association),
         ]);
         return { outputId: id };

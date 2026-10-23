@@ -32,9 +32,6 @@ import { unsupportedPromptBlocks } from "../adapter.ts";
 import { JsonRpcPeer } from "./jsonrpc.ts";
 import { readCodexModelData } from "./catalog.ts";
 import { CodexEventHandler } from "./events.ts";
-import {
-  sessionIdResumeState,
-} from "../resume.ts";
 
 import {
   CODEX_FAST_SERVICE_TIER,
@@ -221,7 +218,7 @@ export class CodexAdapter implements Harness {
 
 
   create(options: OpenOptions, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
-    if (options.sessionId || options.resumeState) throw new Error("Use resume to restore an existing session");
+    if (options.sessionId) throw new Error("Use resume to restore an existing session");
     return this.open(options, sink, reference);
   }
 
@@ -314,7 +311,6 @@ export class CodexAdapter implements Harness {
       this.publishConfigSnapshot(rt, [fastConfigOption(rt.serviceTier)]);
       binding?.({
         identity: { id: threadId },
-        resumeState: sessionIdResumeState(threadId),
       });
       return { harness: this.harness, handleId: threadId, resumed: opened.resumed };
     } catch (error) {

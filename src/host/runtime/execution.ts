@@ -100,11 +100,11 @@ export class ExecutionService implements HarnessExecution {
     const configuration = name ? this.harnesses.get(name) : undefined;
     if (!configuration) throw new Error(`Unknown Harness configuration: ${name}`);
     const runtime = operation.operation === "close"
-      ? backend.controller.findRuntime(configuration.id, scope, operation.session.id)
-      : backend.controller.prepare(configuration.id, scope, "session" in operation ? operation.session : undefined);
+      ? backend.controller.findRuntime(configuration.id, scope, operation.sessionId)
+      : backend.controller.prepare(configuration.id, scope, "sessionId" in operation ? operation.sessionId : undefined);
     if (!runtime) return { state: "success" as const, value: { outcome: "accepted" as const } };
     const runtimeId = runtime.runtimeId;
-    const reference = () => ({ harness: configuration.id, ...(runtime.session ? { session: structuredClone(runtime.session) } : {}) });
+    const reference = () => ({ harness: configuration.id, ...(runtime.sessionId ? { sessionId: runtime.sessionId } : {}) });
     this.usingRuntimes.set(runtimeId, (this.usingRuntimes.get(runtimeId) ?? 0) + 1);
     this.idleRuntimes.delete(runtimeId);
     try {

@@ -8,7 +8,7 @@ import { ConversationStore } from "./conversation/store.ts";
 import { WORK_TYPES, workType, toWork, type WorkResource, type WorkSpec } from "./resources.ts";
 
 /**
- * @spec Task and Routine own business state; their result and independent Outputs commit together.
+ * @spec Task and Routine own business state; independent Outputs survive work deletion.
  * @why Channel retries must never replay business execution. InputStore owns bounded incoming receipts.
  * @link docs/plugin/personal.md
  */
@@ -53,14 +53,14 @@ export class Store {
     validateTrigger(work.kind, work.trigger, new Date());
     const { id, conversationId, kind, title, instruction, trigger, revision, uid: _uid, ...observation } = work;
     const type = workType(kind);
-    const spec: WorkSpec = { conversationId, title, instruction, revision,
+    const spec = { conversationId, title, instruction, revision,
       ...(kind === "routine" ? { trigger: trigger! } : {}) };
     const current = this.findResource(id);
     if (current && current.kind !== type.kind) throw new Error("Work kind is immutable; create the other type and pause or delete the original work");
-    const status: WorkStatus = observation;
+    const status: WorkStatus = { ...current?.status, ...observation };
     const c = await this.conversations.ensure(conversationId);
     await this.client.commit([
-      current ? { operation: "replace", resource: current, spec, status } : { operation: "create", type, name: id, spec, status },
+      current ? { operation: "replace", resource: current, spec: { ...current.spec, ...spec }, status } : { operation: "create", type, name: id, spec, status },
       ...outputs.map((o) => outputWrite(c, o, { producer: current ? { ...type, name: id, namespace: current.metadata.namespace, uid: current.metadata.uid }
         : { ...type, name: id, namespace: "v1" } })),
     ]);

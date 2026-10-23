@@ -1,3 +1,5 @@
+import { taskSession } from "./task/agent.ts";
+import type { PiConfig } from "../../src/host/harness/pi/config.ts";
 import { summarizeConversation } from "./conversation/state.ts";
 import { personalExecution } from "./execution-context.ts";
 import { say } from "./output/action.ts";
@@ -96,6 +98,10 @@ export class Personal {
     };
   }
 
+  taskSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
+    return taskSession(scope, config, this.store, this.plugins, this.log);
+  }
+
   routeSession(scope: ExecutionScope, config: ChiefAgentOptions["config"]): PiSessionFactory {
     const ref = scope.resourceRef;
     if (scope.pluginInstanceId !== "personal" || ref?.kind !== ROUTE_TYPE.kind || ref.apiVersion !== ROUTE_TYPE.apiVersion || !ref.uid) throw new Error("Route requires a Route resource scope");
@@ -158,7 +164,7 @@ export class Personal {
   async submitInput(scope: ExecutionScope, raw: unknown) {
     const { inputId } = z.object({ inputId: z.string().min(1) }).strict().parse(raw);
     const ref = scope.resourceRef;
-    if (scope.pluginInstanceId !== "personal" || !ref?.uid || scope.controllerName || !["Route", "Conversation"].includes(ref.kind)) throw new Error("submit_input requires an owning intake controller");
+    if (scope.pluginInstanceId !== "personal" || !ref?.uid || scope.controllerName || !["Route", "Conversation", "Task"].includes(ref.kind)) throw new Error("submit_input requires an owning intake controller");
     const resources = this.plugins.resourceClient("personal");
     let admitted: { input: Readonly<Resource<InputSpec, InputStatus>>;
       executionId: string; invocationId: string } | undefined;
