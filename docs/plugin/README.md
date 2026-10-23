@@ -12,7 +12,7 @@ Host 的 Supervisor 管理 Runner 和 IPC。Runner 运行 Source、Watch、队�
 
 ## Resource 与 Reconcile
 
-Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。 `ResourceDefinition` 统一声明 type、spec/status schema、可选 validator、printer 和 retention。Host 在恢复资源、启动 Controller 前加载声明；未知类型不能写入。进程内插件通过 resources 提供声明，独立 Runner 的 PackageEntry 通过 resourcesUrl 指向默认导出定义数组的纯模块，Host 直接加载它。声明模块不导入 Runner 或 Host 实现，不执行 I/O。
+Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。 `ResourceDefinition` 统一声明 type、spec/status schema、可选 validator、printer、indexes 和 retention。Host 在恢复资源、启动 Controller 前加载声明；未知类型不能写入。进程内插件通过 resources 提供声明，独立 Runner 的 PackageEntry 通过 resourcesUrl 指向默认导出定义数组的纯模块，Host 直接加载它。声明模块不导入 Runner 或 Host 实现，不执行 I/O。
 
 资源统一属于插件实例与 namespace，定义不区分 shared/session，资源和调度身份不携带 sessionId。底座不预注册任何业务资源。每种资源可以没有 Controller，也可以由多个具名 Controller 观察。
 
@@ -30,7 +30,7 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 Host 的 `ResourceStorage` 将所有插件 Resource 存入共享 SQLite，以按需读取替代常驻完整快照集合。容量按 Group/Kind 汇总，配额覆盖不同 API 版本、namespace 和插件实例；同时限制单条大小、每种数量/字节以及 Host 总字节。配置见 [Resource 容量](../configuration.md#resource-容量)。
 
-资源所有者通过 `ResourceDefinition.retention` 定义释放时间和引用的精确 uid，与类型一起注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 在路由结束后可释放，但 Route / Conversation 的待处理引用、Source 的待提交引用继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
+资源所有者通过 `ResourceDefinition.retention` 定义释放时间和引用的精确 uid，与类型一起注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。当前 Input 只有 route、assess、handle 全部完成后才可释放，Source 的待提交引用仍可继续保护它；Conversation、Task、Routine 和 Source 默认受保护。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
 
 每次写入在事务内同步记录、引用索引、回执和必要的回收。无法满足容量约束时整个事务回滚，变更通知只在提交后发出。因此过载会阻止接收更多工作，不会通过删除正在承担的工作来腾空间。完成并缩小记录的更新允许在超配额状态下提交。
 
@@ -83,3 +83,9 @@ Reconcile 快照只包含运行目录和 HarnessTarget 配置，不携带全局�
 Task 与 Routine 分别归入 `plugins/personal/task/` 和 `plugins/personal/routine/`，各自保存模型与 Reconcile；公共字段和状态位于插件层的 `model.ts`，资源聚合与 Work 投影位于 `resources.ts`，公共执行辅助代码也留在插件层。Work 是它们的业务视图，没有另一份 Work 资源。Chief Agent 与工具在 `agents/chief/`，Personal 服务负责绑定会话范围和业务工具，应用入口负责安装插件并装配 Core。
 
 添加新插件时复用 Resource / Reconcile / verb 机制，在插件内定义其领域模型。公共契约与示例见 [aide-plugin](../../packages/plugin/README.md)，Personal 的决策和生命周期见 [Personal](personal.md)。
+
+## 资源索引
+
+Definition.indexes 声明纯函数 `(resource) => string[]`，可为一个字段产生多个索引值。`resources.list(type, { matchIndex: { name, value } })` 查询精确匹配，并保留插件实例、类型及 namespace 隔离。Host 将索引与资源写入同一事务，删除时级联移除，加载定义时重建；未知索引报错，不回退全表扫描。回调不得执行 I/O 或业务动作。
+
+Personal Input 用它查询 routePending、assess / assessPending 和 handle / handlePending，Core 不导入 Personal 的阶段或资源类型。

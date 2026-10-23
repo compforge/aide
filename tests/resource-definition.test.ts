@@ -132,3 +132,27 @@ test("Deleting a resource tree is atomic when a descendant validator rejects", a
   assert.deepEqual(await client.get({ ...TYPE, namespace: "v1", name: "parent" }), parent);
   assert.deepEqual(await client.get({ ...TYPE, namespace: "v1", name: "child" }), child);
 });
+
+/** @case A secondary index is derived transactionally and isolated by owner, type and namespace. */
+test("Resource indexes follow commits, rollback and deletion without scanning unrelated objects", async t => {
+  const dir = home(t), store = new PluginResourceStore({ home: dir, pluginInstanceId: "example" });
+  const indexed: ResourceDefinition = { ...document, indexes: { label: r => [r.spec.label, r.spec.label] } };
+  store.storage.register("example", [indexed]);
+  const client = createResourceClient(store);
+  const a = await client.create(TYPE, { name: "a", spec: { text: "one", label: "pending" } });
+  await client.create(TYPE, { name: "b", namespace: "v1/project/other", spec: { text: "two", label: "pending" } });
+  const query = (value: string) => client.list(TYPE, { matchIndex: { name: "label", value } });
+  assert.deepEqual((await query("pending")).map(r => r.metadata.name), ["a"]);
+  await assert.rejects(client.commit([
+    { operation: "replace", resource: a, spec: { text: "one", label: "done" }, status: a.status },
+    { operation: "create", type: TYPE, name: "invalid", spec: { text: "" }, status: {} },
+  ]));
+  assert.equal((await query("pending")).length, 1);
+  assert.equal((await query("done")).length, 0);
+  await client.replace(a, { text: "one", label: "done" }, a.status);
+  assert.equal((await query("pending")).length, 0);
+  assert.equal((await query("done")).length, 1);
+  await assert.rejects(client.list(TYPE, { matchIndex: { name: "unknown", value: "done" } }), /Unknown resource index/);
+  await client.delete(TYPE, "a"); store.finalizeDeletion(TYPE, "a");
+  assert.equal((await query("done")).length, 0);
+});

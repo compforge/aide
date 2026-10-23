@@ -67,7 +67,7 @@ test("profile_person guards versions and preserves user corrections while Input 
   const inputs = new InputStore(f.home);
   inputs.storage.configure({ kinds: { "aide.dev/Input": { maxCount: 1 } } } as Parameters<typeof inputs.storage.configure>[0]);
   const input = inputs.submit("test", "old", { origin: "source", originId: "test", text: "evidence", sender: personRef(current) });
-  inputs.update(input, { routing: { phase: "done", reason: "test" } });
+  inputs.update(input, { route: { completedAt: new Date().toISOString(), result: { conversations: [], reason: "test" } } });
   inputs.submit("test", "new", { origin: "source", originId: "test", text: "no sender" });
   assert.equal(inputs.get("old"), undefined);
   assert.equal(inputs.get("new")!.spec.sender, undefined);

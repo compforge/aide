@@ -101,7 +101,7 @@ test("say resolves direct, aggregate and proactive targets without guessing from
   assert.deepEqual(store.outputStore.get(first.outputId)!.spec.inputIds, ["b"]);
   const aggregate = await store.say("mixed", undefined, "aggregate", "run", { target: a, inputIds: ["a", "b"] });
   assert.deepEqual(store.outputStore.get(aggregate.outputId)!.spec.inputIds, ["a", "b"]);
-  assert.deepEqual(store.resource("mixed")!.status.pendingInputIds, ["a", "b"]);
+  assert.deepEqual(store.get("mixed")!.pendingInputIds, ["a", "b"]);
   await assert.rejects(store.say("mixed", undefined, "conflict", "run", { target: a, respondToInputId: "b" }), /not both/);
   await store.ensure("addressless");
   await assert.rejects(store.say("addressless", undefined, "cannot infer"), /explicit target/);
@@ -187,7 +187,7 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
   const blocks = conversationView(aide, "topic").blocks;
   assert.deepEqual(blocks.find((block) => block.inputId === "question")!.source, source);
   assert.deepEqual(blocks.find((block) => block.id === `message:${report.id}`)!.receivers, [manager, sender]);
-  assert.deepEqual(store.resource("topic")!.status.pendingInputIds, ["question"]);
+  assert.deepEqual(store.get("topic")!.pendingInputIds, ["question"]);
   assert.equal(aide.outputs().length, 4, "Two receivers describe one Output; they do not fan out delivery");
 });
 

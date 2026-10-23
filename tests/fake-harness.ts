@@ -1,4 +1,4 @@
-import { completeInputs } from "../plugins/personal/conversation/complete.ts";
+import { assessAll } from "./input-state-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { CONVERSATION_TYPE } from "../plugins/personal/conversation/model.ts";
@@ -72,14 +72,14 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const all = await resources.list<ConversationResource["spec"], ConversationStatus>(CONVERSATION_TYPE);
             const c = all.find(c => c.spec.id === conversationId)!;
             const run = c.status.execution;
-            const ids = c.status.pendingInputIds.filter(id => new InputStore(home).get(id)?.status.processing?.[c.metadata.uid]?.executionId === run?.id);
+            const ids = new InputStore(home).list().filter(i => !i.status.assess?.[c.metadata.uid]?.completedAt && i.status.assess?.[c.metadata.uid]?.executionId === run?.id).map(i => i.metadata.name);
             const immediate = ids.map(id => new InputStore(home).get(id)!.spec).filter(i => (i.attention ?? (i.origin === "channel" ? "immediate" : "deferred")) === "immediate");
             const first = immediate[0]?.source;
             const address = immediate.length ? (first && immediate.every(i => i.source && sameAddress(first, i.source)) ? first : undefined) : c.spec.address;
             if (run && address && agent.notify !== false && typeof result === "string" && result) {
               new OutputStore(home).create(conversationId, randomUUID(), outputSpec(c, { conversationId, text: result }, { executionId: run.id, target: address, inputIds: ids }));
             }
-            if (run && ids.length && agent.complete !== false) await completeInputs(resources, c, run.id, { inputIds: ids, summary: String(result) || "Handled silently" });
+            if (run && ids.length && agent.complete !== false) await assessAll(resources, c, run.id, { inputIds: ids, summary: String(result) || "Handled silently" });
           }
           sink({ kind: "agent_message", invocationId: input.invocationId,
             payload: { messageId: randomUUID(), phase: "commentary", content: [{ type: "text", text: "我先检查当前工作。" }] } });

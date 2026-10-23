@@ -18,7 +18,7 @@ export function toWork(resource: WorkResource): Work {
   const { inputs: _inputs, events: _events, ...observation } = resource.status;
   const kind = resource.kind === TASK_TYPE.kind ? "task" : "routine";
   const trigger = "trigger" in resource.spec ? resource.spec.trigger : null;
-  const work = WorkSchema.parse({ id: resource.metadata.name, ...resource.spec, ...observation, kind, trigger });
+  const work = WorkSchema.parse({ id: resource.metadata.name, uid: resource.metadata.uid, ...resource.spec, ...observation, kind, trigger });
   validateTrigger(kind, work.trigger, new Date());
   return work;
 }

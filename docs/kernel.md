@@ -72,7 +72,7 @@ Host 与 Runner 不相互导入实现。双方通过 `src/protocol/` 协作，�
 
 ## Personal 的应用方式
 
-Personal 将 Channel / Source 的内容保存为 Input，通过全局 Route 的规则直达或连续语义分类分发到 Conversation。Conversation 保留待消费 Input，驱动持久上下文的 Chief loop，Task / Routine 分别承载有限目标与持续职责，Person 保存身份与长期认识。业务状态与 Output 可以一起提交；投递器独立处理发送和回执，发送失败不重跑业务。
+Personal 将 Channel / Source 的内容保存为 Input，通过全局 Route 的规则直达或连续语义分类分发到 Conversation。Input.status 记录 route / assess / handle；Conversation 通过索引读取自己的未完成研判，驱动持久上下文的 Chief loop，Task / Routine 分别承载有限目标与持续职责，Person 保存身份与长期认识。业务状态与 Output 可以一起提交；投递器独立处理发送和回执，发送失败不重跑业务。
 
 Route 与具名 agent Controller 观察同一个 Personal Route 资源。前者管理队列和规则匹配，后者调用专用 Route Agent、保存分发计划并幂等投递；两者复用底座普通的资源、Watch、并发更新与 Harness 能力。
 

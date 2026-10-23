@@ -48,7 +48,7 @@ Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sen
 
 ## 关联、上下文与容量
 
-Conversation 不保存输出正文或无限增长的输出 ID 列表。界面按 Conversation UID 展示产出记录，同时展示明确发往当前 Web endpoint 的 Output；跨会话投递只展示目标会话创建后的消息。同名会话删除后重建不会看见旧实例的产出记录。`say` 创建 Output 不改变 pendingInputIds；Chief 通过 complete_inputs 独立确认输入消费。未送达 Output 受容量保护，送达后可按资源策略回收；连续 loop 不无限持有输出 ID。已发生的动作与沟通由原生历史、业务状态和消费摘要承接。
+Conversation 不保存输出正文或无限增长的输出 ID 列表。界面按 Conversation UID 展示产出记录，同时展示明确发往当前 Web endpoint 的 Output；跨会话投递只展示目标会话创建后的消息。同名会话删除后重建不会看见旧实例的产出记录。`say` 创建 Output 不改变 Input.assess；Chief 通过 assess_input 独立确认输入消费。未送达 Output 受容量保护，送达后可按资源策略回收；连续 loop 不无限持有输出 ID。已发生的动作与沟通由原生历史、业务状态和消费摘要承接。
 
 Output 进入 Host 统一资源容量管理，配置键为 `aide.dev/Output`。pending / sending / uncertain 保持受保护；delivered 且无人引用时可以按配置回收；failed 保留诊断窗口后可释放。Input、Conversation 与 producer 是追溯关系，不永久互相保活。Output 内容回收后，可读的长期上下文由 Conversation summary / memory 承接。
 

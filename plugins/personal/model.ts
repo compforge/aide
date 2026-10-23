@@ -8,17 +8,16 @@ export const TriggerSchema = z.object({
 });
 export type Trigger = z.infer<typeof TriggerSchema>;
 
-export const WorkInputSchema = z.object({
-  id: z.string(), at: z.string(), inputId: z.string().optional(),
-  origin: z.enum(["channel", "source", "chief"]),
-  text: z.string(), note: z.string().optional(),
-  observation: z.record(z.string(), z.unknown()).optional(),
-  action: z.enum(["context", "update", "pause", "resume", "answer"]),
+export const WorkInputRequestSchema = z.object({
+  note: z.string().min(1).max(16000).optional(),
+  action: z.enum(["context", "update", "pause", "resume", "answer"]).default("context"),
   changes: z.object({ title: z.string().min(1).optional(), instruction: z.string().min(1).optional(), trigger: TriggerSchema.nullable().optional() }).strict().optional(),
-});
-export type WorkInput = z.infer<typeof WorkInputSchema>;
+}).strict().refine(v => v.action === "update" ? !!v.changes && Object.keys(v.changes).length > 0 : !v.changes,
+  "Only an update request accepts and requires changes");
+export type WorkInputRequest = z.infer<typeof WorkInputRequestSchema>;
 
 export const WorkSchema = z.object({
+  uid: z.string().optional(),
   id: z.string(),
   conversationId: z.string(),
   kind: z.enum(["task", "routine"]),
@@ -29,18 +28,16 @@ export const WorkSchema = z.object({
   revision: z.number().int(),
   nextAt: z.string().nullable(),
   question: z.string().nullable(),
-  inputs: z.array(WorkInputSchema).default([]),
-  consumedInputIds: z.array(z.string()).default([]),
   history: z.array(z.object({ at: z.string(), role: z.enum(["user", "aide", "event"]), text: z.string() })),
 });
 export type Work = z.infer<typeof WorkSchema>;
 
-export type WorkSpecFields = Pick<Work, "conversationId" | "title" | "instruction" | "revision" | "inputs">;
+export type WorkSpecFields = Pick<Work, "conversationId" | "title" | "instruction" | "revision">;
 export interface Delivery {
   inputs: Array<{ key: string; responseId: string }>;
   events: string[];
 }
-export type WorkStatus = Omit<Work, keyof WorkSpecFields | "id" | "kind" | "trigger"> & Delivery;
+export type WorkStatus = Omit<Work, keyof WorkSpecFields | "id" | "uid" | "kind" | "trigger"> & Delivery;
 
 export { IncomingSchema, type Incoming } from "../../src/channel/message.ts";
 export type { OutputDraft, OutputView } from "../../src/output.ts";
@@ -62,7 +59,7 @@ export function validateTrigger(kind: Work["kind"], trigger: Trigger | null, now
   }
 }
 
-export const WorkSpecSchema = WorkSchema.pick({ conversationId: true, title: true, instruction: true, revision: true, inputs: true }).strict();
-export const WorkStatusSchema = WorkSchema.pick({ status: true, nextAt: true, question: true, consumedInputIds: true, history: true }).extend({
+export const WorkSpecSchema = WorkSchema.pick({ conversationId: true, title: true, instruction: true, revision: true }).strict();
+export const WorkStatusSchema = WorkSchema.pick({ status: true, nextAt: true, question: true, history: true }).extend({
   inputs: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()), events: z.array(z.string()),
 }).strict();

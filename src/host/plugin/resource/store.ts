@@ -373,7 +373,7 @@ export class PluginResourceStore {
           namespaceContains(namespace, candidate)
         )
       : [namespace];
-    return namespaces.flatMap((candidate) => [...this.storage.keys(this.scope, this.kindPrefix(type, candidate))]
+    return namespaces.flatMap((candidate) => [...(options.matchIndex ? this.storage.indexedKeys(this.scope, type, this.kindPrefix(type, candidate), options.matchIndex.name, options.matchIndex.value) : this.storage.keys(this.scope, this.kindPrefix(type, candidate)))]
       .map((key) => this.readStored<TSpec, TStatus>(type, decodeURIComponent(key.slice(key.lastIndexOf("/") + 1)), candidate).object))
       .filter((resource) =>
         containsStringMap(resource.metadata.labels, matchLabels)

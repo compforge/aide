@@ -101,6 +101,8 @@ export interface ResourceDefinition<S = any, T = any> {
   readonly validator?: ResourceValidator<S, T>;
   readonly printer?: ResourcePrinter<S, T>;
   readonly retention?: ResourceRetention<S, T>;
+  /** Pure multi-value indexes, maintained atomically with the resource. */
+  readonly indexes?: Readonly<Record<string, (resource: Readonly<Resource<S, T>>) => readonly string[]>>;
 }
 
 /** Exact-match label selector. All entries must match the Resource. */
@@ -110,6 +112,7 @@ export interface ResourceListOptions {
   /** Include every descendant namespace below `namespace`. */
   readonly includeDescendants?: boolean;
   readonly matchLabels?: Readonly<Record<string, string>>;
+  readonly matchIndex?: { readonly name: string; readonly value: string };
 }
 
 export interface ResourceReader {

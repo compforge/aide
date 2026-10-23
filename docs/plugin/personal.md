@@ -69,25 +69,49 @@ Route 的角色、工具与连续执行机制见 [Route Harness](../harness/rout
 
 Input、Output、Route 与 Conversation 都是 Personal 的普通资源。Channel / Source 提交持久 Input，单例 `Route/global` 决定把它归入哪些 Conversation。底座按资源 UID 组织执行上下文，不需要为 Route 创建内部 Session。
 
-Route 默认 Controller 监听 Input 与自身的变化。每次协调补扫未完成路由的 Input，幂等纳入 `status.pendingInputIds`，因此提交成功但事件丢失、或进程在入队前退出，都能在重启后恢复。规则匹配已有话题 `sessionId`，或沿 `originalInputId` 的投递凭据找到已有 Conversation；命中后立即追加，不再给 Default 额外复制一份。Channel 的明确话题可以建立 Conversation；Source 的陌生话题线索本身不触发创建。
+Route Reconcile 通过索引选择未完成路由的 Input。匹配 sessionId 或已有 originalInputId 归属时直接分派；其余 followup 给持续 Route Agent。前置 Input 尚未路由不会阻塞后续消息。Channel 的明确新话题可创建 Conversation，Source 的陌生话题线索不自动创建。
 
-未命中规则的输入交给具名 `agent` Controller 驱动的 Route loop。普通输入逐条 followup，复用同一个原生上下文；运行期间到来的 immediate 输入通过 steer 注入。默认 Controller 继续处理确定性规则，模型等待不会阻塞规则路径。
+Route 专用 `route_input({ inputId, conversationUids, reason })` 一次事务写 route 结果及全部 assess 记录；空数组使用 Default，没有 Conversation 时直接建立 Default。重复确认不重置既有阶段。Route 不拥有 say、assess_input、Work 修改或文件执行工具。
 
-Route 专有工具 `route_input({ inputId, conversationUids, reason })` 提交一条 Input 的完整分派决定。可以选多个现存 Conversation UID；空数组表示 Default。没有任何 Conversation 时直接建立 Default，无需模型；Source 的位置不会自动成为默认回复地址。Route 可以分页读取会话目录、Input 和共享记忆，不拥有 say、complete_inputs、Work、Person 修改或文件执行工具。
+Input.status 是协调事实的唯一来源，各组件留下自己的痕迹：
 
-完整计划先保存到 Input.status.routing，再逐项幂等追加。全部投递完成才出 Route 队列；部分投递后的重启只续投已保存计划。目标固定 UID，删除后不改投同名新实例。未保存决定的纯分类可以退避重试，不能因此重放 Chief 的业务动作。讨论续报等待原始 Input 路由完成，再沿其投递凭据关联。
+```ts
+interface InputStatus {
+  route?: {
+    executionId?: string;
+    startedAt?: string;
+    attempts?: number;
+    nextAttemptAt?: string;
+    lastError?: string;
+    completedAt?: string;
+    result?: { conversations: ResourceRef[]; reason: string };
+  };
+  assess?: Record<ConversationUID, Processing>;
+  handle?: Record<WorkUID, Processing & { request: WorkInputRequest }>;
+}
+interface Processing {
+  resource: ResourceRef; // 固定 UID，不能改投同名新实例
+  assignedAt: string;
+  executionId?: string;
+  startedAt?: string;
+  lastError?: string;
+  completedAt?: string;
+  result?: { summary: string; disposition?: "completed" | "cancelled" | "rejected" };
+}
+```
+
+未完成可能是等待、运行或待核对，不能仅凭 completedAt 缺失称为失败。Route 分类失败按每条输入退避，已到重试时间的旧输入不会被持续新输入挤掉。Chief 可能已产生副作用，不自动重放。
 
 Conversation.address 只在由 Channel Input 创建时取首个 Input.source，后续追加不覆盖。Immediate 输入的直接回复使用该 Input.source；其它通知明确选择 target 或使用 Conversation.address。多个 immediate 地址不同时，say 必须指定 respondToInputId 或 target。路由去向、通信位置和执行授权分别判断。
 
-Conversation 的 spec 保存身份、可选 address 与 trigger；status 保存唯一的 `pendingInputIds`、下次触发时间、有界 summary，以及当前 execution 的身份、开始时间和接纳版本。没有 Batch 或 recentInputIds。
+Conversation.spec 保存身份、可选 address 与 trigger；status 保存下次触发时间、有界 summary 与当前 execution。没有 pendingInputIds、Batch 或 recentInputIds。Web 的 pendingInputIds 是通过 Input.assess 索引推导的展示字段。
 
-默认 Controller 负责运行期间的 immediate 接纳；具名 `agent` Controller 串行调用 Chief。不同 Conversation 拥有独立的原生上下文。普通新输入在当前 invocation 结束后 followup，不重建原生会话，不重复拼入历史 Input；没有新输入时，trigger 仍可触发回顾。
+Conversation Reconcile 负责确定性协调，非确定性判断提交给持续 Chief Agent。普通输入在同一原生上下文 followup，immediate 可以 steer；timer 可在没有新输入时触发回顾。每次接纳先写 executionId，重复协调不重复提交已接纳材料。
 
-- Host 在投递前保存 `Input.status.processing[consumerUid]`，记录 executionId、submitted / done / failed、时间和处理摘要或错误。路由完成以 routing 回执为准，业务消费以 Chief 回执为准。
-- Chief 通过 `complete_inputs({ inputIds, summary })` 明确确认处理过的输入。工具在同一事务中写消费回执、更新 Conversation 的有界近期决策摘要并精确出队；并发新到输入不受影响。静默、直接处理和交给 Work 都可以完成消费，创建 Output 不是前提。
-- `say` 独立创建 Output，不隐式完成 Input。需要用户补充时发出问题，确认当前请求已处理，后续答复作为新 Input；用户不必回复。
-- immediate 通过 Pi 的原生 steer 在下一个安全边界进入当前 invocation，不取消正在执行的工具。接纳前持久化身份，原生 user message 事件确认 applied；明确拒绝时留队 followup，结果不确定时保留失败证据。
-- 模型结束不等于业务完成。未提交回执的已接纳 Input 标为 failed，保留 pending 引用；后续新请求可读取并核对已有副作用后处理。重启不自动重放 Chief 已尝试的动作。未接纳输入正常续跑。 收尾事务失败后，同一资源的 agent Controller 会在下一次 Reconcile 只重试消费记录与 execution 释放，不重调 Harness。
+- `assess_input({ inputId, summary, workRequests? })` 完成当前 Chief 的研判，并在同一事务建立所需 handle。workRequests 按 Work UID 指定 request，含 note、action 和可选 changes；不需要 Work 时可以为空。有限 summary 同时更新到 Conversation。
+- Chief 通过 read_input 读取待处理项及状态。已尝试但未确认的项保留 executionId、lastError，后续输入或定时回顾可以核对已有动作后明确确认。
+- say 只创建 Output，不完成 assess；需要补充时发出问题，确认本次研判，后续回答作为新 Input。
+- steer 接纳前保存身份；明确拒绝时清除本次接纳以便 followup，结果未知则保留待核对证据。模型或调用结束不等于业务确认。
 
 原生 SDK 管理连续历史与压缩，Host 保存恢复绑定，不改写原生文件。每次 HarnessInvocation 仍独立记录期限和终态，一次执行最多两天。Route 与 Chief 隔离原生上下文，共用 Hermes 长期记忆；Route 只检索，Chief 维护。Task / Routine 仍是工作状态的权威来源。
 
@@ -129,21 +153,23 @@ Chief 只通过 say 沟通。问题也是普通 Output，不创建挂起的 Inte
 
 Web 与 Lark 使用相同的交流流程；群里用户后续回复仍需 @Aide。Hooks 信任和 Harness 工具权限通过网页独立的 Approval 区域处理，普通聊天不会授予这些权限。
 
-Source 观察没有用户指令的地位。Chief 应读取详情、查询已有 Work；在已有委托内可以推进工作，缺少目标或授权时询问。不值得打扰的观察可调用 `complete_inputs` 保存原因并确认消费，无需向 Channel 发消息。
+Source 观察没有用户指令的地位。Chief 应读取详情、查询已有 Work；在已有委托内可以推进工作，缺少目标或授权时询问。不值得打扰的观察可调用 `assess_input` 保存原因并确认消费，无需向 Channel 发消息。
 
 普通回复由 Chief 的工具调用 `say` 创建独立 Output，界面按 Conversation UID 查询历史输出。Input 与 Output 的关联可选且多对多。POST `/messages` 返回入站持久回执，业务结果异步出现；没有每次固定发出的“已创建事项”回复。模型进度不会重复投递为最终回复。
 
-Chief 可能调用有副作用的工具，因此运行中断、失败或重启均不自动重放。状态和失败提示保留，用户核对后用新消息重新交办。同一输入 id 的传输重投永远不作为业务重试。调用栈不跨重启恢复，已接纳但未确认消费的 Input 标记 failed；Work 的结果处理见下文。
+Chief 可能调用有副作用的工具，因此运行中断、失败或重启均不自动重放。状态和失败提示保留，用户核对后用新消息重新交办。同一输入 id 的传输重投永远不作为业务重试。调用栈不跨重启恢复，已接纳但未确认消费的 Input 保留 lastError；Work 的结果处理见下文。
 
-## 分配与追加输入
+## 研判与办理
 
-Conversation 中的 Chief 可以直接处理、创建或删除工作，也可以用 `append_input` 把原始 Input 交给已有 Task / Routine。创建确立新的目标，删除结束资源生命周期；对已有工作的补充通过输入承接。Chief 不直接修改已有 Work 的执行状态、下次调度时间和执行历史。
+Chief 可以直接处理、创建或删除工作。将现有 Input 交给已有 Work 时，通过 assess_input 同时完成研判和建立 handle，原始事实只保存一份。一个 Input 可以由多个 Chief 独立研判，也可以交给多个 Task / Routine 办理；每个资源按 UID 拥有自己的记录。
 
-共享事实与拆分工作有不同语义：多个 Work 可以引用同一原始 Input，独立消费；当一件大事需要拆分时，派生输入各自说明交付范围，并关联原始 Input。Chief 的交接说明与原始事实分别保留。直接处理、追加和创建可以组合使用，一份 Input 不要求只对应一份 Work。
+request 支持 context、update、pause、resume、answer；交接说明 note 与原文分开保存，update 的 changes 包含 title、instruction、trigger。Source 观察只能提供 context，不能作为控制授权。已有 handle 的请求不可替换；后来的独立请求必须有新 Input 身份。
 
-`append_input` 成功表示投递已持久保存。原始输入通过 `inputId` 关联并保留来源；新请求或交接说明使用 `text`。默认追加上下文；修改定义、暂停、恢复与回答问题使用明确请求，由目标 Work Reconcile 应用。外部观察只作为事实，不能冒充用户控制请求。原始输入按目标与请求去重，Chief 新请求按工具调用身份去重。
+`request_work({ workId, text, action?, changes? })` 用于 Chief 独立形成的新请求，创建 origin=chief 的新 Input，按工具调用身份去重，直接建立目标 handle。针对已收到 Input 的交接使用 assess_input，避免复制原始消息。
 
-Work 的输入队列属于 spec，消费进度与执行状态属于 status。Reconcile 将输入承接到历史并原子提交消费进度与处理结果；运行中新到的输入留待后续处理。暂停、已完成或结果待核对的工作仍可记录新事实，执行恢复需要明确请求。非法请求保留原因与消费记录，不阻塞后续输入。
+Task / Routine Watch Input.handle 并按自身 UID 索引读取未完成记录。Work Reconcile 在同一事务承接材料、应用请求并标记 handle 完成；成功只代表本条输入已被吸收，不表示 Task 目标或 Routine 职责完成。历史保留有界事实预览，原始 Input 不复制到 spec。执行期间到达的请求在当前执行收尾后继续处理。
+
+暂停、结果未知的工作可吸收事实但不因此恢复。显式更新可为已完成目标提出新的要求；失败请求保存 rejected 原因而不阻塞后续输入。目标删除会把剩余 handle 标为 cancelled。
 
 ## Task / Routine 与 Work
 
@@ -174,21 +200,21 @@ Personal 的 Controller 负责解释执行结果并推进工作状态，Core 保
 | `list_work` | 列出绑定会话的 Task / Routine |
 | `read_work` | 读取目标、状态、历史、revision 和待回答问题 |
 | `create_work` | 创建工作并唤醒对应 Reconcile |
-| `append_input` | 追加原始输入、交接说明或控制请求，由 Work Reconcile 消费 |
+| `assess_input` | 确认 Input 研判，原子建立 Work handle |
+| `request_work` | 为独立新请求创建 Input，由 Work Reconcile 消费 |
 | `delete_work` | 请求删除，停止后续调度并保留已交付消息 |
 
 WorkService 绑定宿主确定的 conversationId，模型不能传入其它会话范围。读操作不唤醒执行，输入追加通知对应 Reconcile，删除需要最近读取的 revision。输入追加不直接改变业务状态。删除前归档消息和输入回执，已运行回调不能重建被删资源。
 
 Task / Routine 校验 Harness 的 finalText。执行失败或中断标为 uncertain，执行已结束但结果无法解析或校验则标为 invalid_result；两者均等待用户核对后明确继续，不自动重放。业务等待用户则保存为 waiting，收到回答后由 Reconcile 继续，能够跨服务重启恢复。
 
-Chief 问题作为 Output 持久保存，用户可在重启后发送新 Input 继续；没有需要恢复的业务问答调用栈。Task / Routine 的 waiting 保留领域阻塞状态，由 Chief 根据新输入决定是否 append_input。上下文结合近期消息、工作记录及连接器查询，工作状态以 Task / Routine 为准。
+Chief 问题作为 Output 持久保存，用户可在重启后发送新 Input 继续；没有需要恢复的业务问答调用栈。Task / Routine 的 waiting 保留领域阻塞状态，由 Chief 根据新输入决定如何提交 assess_input。上下文结合近期消息、工作记录及连接器查询，工作状态以 Task / Routine 为准。
 
 ### 中断与有界消费
 
-pendingInputIds 不设数量上限。普通输入串行 followup，immediate 尝试 steer；Host 按 ResourceDefinition 的引用与释放规则管理总容量。消费前先保存 Input 的接收凭据，重投不会将已消费输入重新排队。
-直接请求的中断通知与轮次失败状态原子保存，恢复进程不会重发同一轮的通知；Source 和定时轮次保持静默。
-历史记录超过单次摘要预算时，Conversation 保存分段偏移与中间摘要，每次摘要调用只处理有界片段。
-原始 Input 引用保留到整条记录已被摘要覆盖；失败后保留进度，恢复时从已提交偏移继续。
+Input.status 的未完成阶段就是待办事实，不在消费者资源里另存 ID 队列。Host 通过 Definition.indexes 查询阶段与资源 UID，索引与资源在同一事务更新。全部 route、assess、handle 完成后 Input 才能回收；删除目标明确结束其遗留阶段。完成回执随 Input 过期，入站去重回执在独立窗口内保留。
+
+普通输入持续 followup，immediate 尝试 steer；原生历史由 SDK 压缩，Conversation 保留有界近期摘要，Work 保存有界已吸收材料。模型结束、研判完成、工作目标达成和 Output 送达是独立事实。
 
 ## 验证
 
