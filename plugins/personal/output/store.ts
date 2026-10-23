@@ -25,13 +25,16 @@ export class OutputStore {
       CREATE INDEX IF NOT EXISTS output_execution ON resources(json_extract(data,'$.object.spec.executionId')) WHERE kind='aide.dev/Output';`);
   }
   get(id: string): Output | undefined { return this.storage.read(this.key(id), true)?.object as Output | undefined; }
-  list(options: { owner?: string; conversationUid?: string; executionId?: string; after?: string; limit?: number; matchLabels?: ResourceListOptions["matchLabels"] } = {}): Output[] {
+  list(options: { owner?: string; conversationUid?: string; executionId?: string; inputId?: string; after?: string; limit?: number; matchLabels?: ResourceListOptions["matchLabels"] } = {}): Output[] {
     const clauses = ["kind='aide.dev/Output'"];
     const args: string[] = [];
     for (const [path, value] of [["$.owner", options.owner], ["$.object.spec.conversation.uid", options.conversationUid], ["$.object.spec.executionId", options.executionId]] as const) {
       if (value !== undefined) { clauses.push(`json_extract(data,'${path}')=?`); args.push(value); }
     }
     if (options.after) { clauses.push("key>?"); args.push(this.key(options.after)); }
+    if (options.inputId !== undefined) {
+      clauses.push("EXISTS (SELECT 1 FROM json_each(data, '$.object.spec.inputIds') WHERE value=?)"); args.push(options.inputId);
+    }
     const rows = this.storage.db.prepare(`SELECT data FROM resources WHERE ${clauses.join(" AND ")} ORDER BY key`);
     const result: Output[] = [];
     for (const row of rows.iterate(...args)) {

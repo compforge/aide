@@ -13,6 +13,7 @@ import { validInputResult } from "../host/approval/answer.ts";
 import { IncomingSchema } from "../channel/message.ts";
 import { conversationList } from "../channel/view.ts";
 import { streamConversation } from "./stream.ts";
+import { inputList, inputDetail } from "./inputs.ts";
 
 const EventSchema = IncomingSchema.omit({ text: true, channelId: true, source: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
@@ -30,6 +31,12 @@ const DeleteWorkSchema = z.object({ id: z.string().min(1), conversationId: z.str
 
 const PersonVersionSchema = z.object({ id: z.string().min(1), uid: z.string().min(1), version: z.string().min(1) }).strict();
 const MergePersonSchema = z.object({ source: PersonVersionSchema, target: PersonVersionSchema, summary: z.string().max(SUMMARY_CHARS) }).strict();
+const InputListSchema = z.object({
+  page: z.coerce.number().int().min(1).max(1_000_000).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  q: z.string().trim().max(200).optional(), origin: z.enum(["channel", "source", "chief"]).optional(),
+  originId: z.string().max(200).optional(), connector: z.string().max(200).optional(), sourceUid: z.string().max(200).optional(),
+  state: z.enum(["pending", "completed"]).optional(), errors: z.enum(["true", "false"]).transform(v => v === "true").optional(),
+}).strict();
 
 const ApprovalResponseSchema = z.object({
   messageId: z.string().min(1),
@@ -104,6 +111,16 @@ export function httpChannel(aide: WebService, log: Logger) {
         json(response, 200, conversationList(aide).map((item) => ({ ...item,
           ...(counts.get(item.id) ?? { taskCount: 0, routineCount: 0 }),
         })) satisfies ConversationItem[]); return;
+      }
+      if (request.method === "GET" && url.pathname === "/inputs/list") {
+        const query = InputListSchema.parse(Object.fromEntries(url.searchParams));
+        await aide.start(); json(response, 200, inputList(aide, query)); return;
+      }
+      if (request.method === "GET" && url.pathname === "/inputs/detail") {
+        const query = z.object({ id: z.string().min(1).max(200), uid: z.string().min(1).max(250).optional() }).strict().parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const detail = inputDetail(aide, query.id, query.uid);
+        json(response, detail ? 200 : 404, detail ?? { error: "Input 已回收或不存在。" }); return;
       }
       if (request.method === "GET" && url.pathname === "/persons") {
         await aide.start();

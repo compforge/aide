@@ -4,17 +4,17 @@ Web 是 Aide 的浏览器 Channel，提供会话导航、聊天、工作列表�
 
 ## 前后端分工
 
-`src/web/` 按页面组织：`conversations/` 与 `persons/` 各自放置 HTML、TypeScript 入口和样式；`shared/` 仅提供两页共用的 DOM、HTTP、剪贴板、Markdown 与基础样式。`src/api/` 提供 HTTP 路由、输入校验、响应与 SSE，handler 通过应用提供的接口调用 Core / Personal 能力；Work 生命周期规则由 WorkService 负责。共享的消息和执行展示投影仍在 `src/channel/`，供 Web 与 Lark 使用。
+`src/web/` 按页面组织：`conversations/`、`persons/` 与 `inputs/` 各自放置 HTML、TypeScript 入口和样式；`shared/` 提供共用的 DOM、HTTP、剪贴板、Markdown 与基础样式。`src/api/` 提供 HTTP 路由、输入校验、响应与 SSE，handler 通过应用提供的接口调用 Core / Personal 能力；Work 生命周期规则由 WorkService 负责。共享的消息和执行展示投影仍在 `src/channel/`，供 Web 与 Lark 使用。
 
 Conversations 的 `main.ts` 组合导航、时间线、输入框、工作列表与原生审批模块，并管理轮询和 SSE 生命周期。导航持有自动跟随或手动分页意图及菜单状态；输入框持有发送状态和重试消息 ID；时间线持有展开选择与渲染缓存。模块通过显式回调请求刷新，不相互读取可变状态。离开页面关闭流和轮询；从浏览器往返缓存恢复时保留交互状态，并重新启动连接。
 
 Persons 的状态留在自己的页面入口，人物选择、资料草稿与认识编辑不依赖 Conversation。页面使用 `src/api/types.ts` 中的展示契约和现有领域类型，跨服务边界的引用均为 type-only import，宿主实现不进入浏览器 bundle。
 
-`src/api/assets.ts` 独立管理固定静态资源路由：`/` 与 `/people` 提供页面，`/app.js`、`/app.css` 和 `/persons.js`、`/persons.css` 分别提供页面资产。每页入口首次请求时由 Bun 打包并缓存；HTML、CSS 和依赖随页面归属组织，不另设浏览器 SDK 汇总入口。资源构建失败进入 HTTP 日志，后续请求可以重新构建。
+`src/api/assets.ts` 独立管理固定静态资源路由：`/`、`/people` 与 `/inputs` 提供页面，分别使用 `/app`、`/persons` 与 `/inputs` 前缀的 JavaScript / CSS 资产。每页入口首次请求时由 Bun 打包并缓存；HTML、CSS 和依赖随页面归属组织，不另设浏览器 SDK 汇总入口。资源构建失败进入 HTTP 日志，后续请求可以重新构建。
 
 ## 产品图标
 
-`src/web/assets/aide.png` 是共用的 512 × 512 产品图标，用于 Web 页头、中英文 README，也可作为机器人头像素材。`favicon.ico`（32 × 32）用于两个页面的浏览器标签和书签，`apple-touch-icon.png`（180 × 180）用于手机主屏幕收藏。尺寸版本均由同一图稿缩放导出，保持图形一致。
+`src/web/assets/aide.png` 是共用的 512 × 512 产品图标，用于 Web 页头、中英文 README，也可作为机器人头像素材。`favicon.ico`（32 × 32）用于各页面的浏览器标签和书签，`apple-touch-icon.png`（180 × 180）用于手机主屏幕收藏。尺寸版本均由同一图稿缩放导出，保持图形一致。
 
 HTTP 层按固定路由提供图片并保留二进制字节；页面 CSP 允许同源图片。聊天内容仍由 Markdown 渲染器禁用图片语法。产品图标不替代区分 Channel、Source 与 Harness 的分类图标。
 
@@ -115,7 +115,11 @@ curl -s http://127.0.0.1:7433/events \
 
 ## 人物导航与编辑
 
-主导航提供 Conversations 与 Persons 两个同级页面，切换时保持位置一致，滚动内容时页头仍留在视口顶部。Conversations 保留会话列表、消息和工作；Persons 展示跨会话共享的人物列表，以“我”标记服务对象，可按姓名搜索并进入详情。消息带 sender 时提供人物详情链接。
+主导航提供 Conversations、Persons 和 Inputs 三个同级页面，切换时保持位置一致，滚动内容时页头仍留在视口顶部。Conversations 保留会话列表、消息和工作；Persons 展示跨会话共享的人物列表，以“我”标记服务对象，可按姓名搜索并进入详情。消息带 sender 时提供人物详情链接，Input 卡片提供处理 Timeline 链接。
+
+Inputs 提供全局输入目录，支持按 Connector、来源类型、具体观察源、处理状态、异常记录和正文或 ID 组合筛选。服务端先筛选再分页，默认每页 20 条，按接收时间倒序并以资源键稳定排序；列表不读取完整来源证据，也不刷新输入的容量访问时间。筛选和选中项保存在 URL 中，页面轮询刷新已保留的处理事实。
+
+详情展示原文、来源证据，以及接收、路由、各 Conversation 研判、各 Work 请求应用与办理回执；显式关联的 Output 独立展示创建与投递。已删除或被同名新资源替换的消费者仍保留旧处理记录，链接只指向 UID 匹配的当前实例。时间线依据和重试历史的范围见 [Input](../personal/input.md#web-检索与处理-timeline)。
 
 人物详情默认以只读正文展示当前认识，标题后的编辑图标进入编辑状态。编辑框右下角提供取消与确认：取消恢复原文，确认直接保存当前认识，不提交姓名或身份中尚未保存的修改。称呼与外部身份沿用资料保存操作。编辑提交 uid 和 resourceVersion；并发冲突保留编辑状态和草稿，提示重新加载并合并。外部身份重复或 Me 绑定冲突会拒绝保存，本地单人身份不可移除。
 

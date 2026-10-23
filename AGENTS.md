@@ -15,6 +15,7 @@ src/
   web/                     # 浏览器页面；每页的 HTML、TS 入口、样式与交互模块放在一起
     conversations/         # 导航、时间线、输入、工作与审批；main 管理轮询和 SSE
     persons/               # 人物导航、资料和认识编辑
+    inputs/                # 跨会话输入筛选、分页与处理 Timeline
     shared/                # DOM、HTTP、剪贴板、Markdown 与公共样式
   api/                     # HTTP handler 与 SSE，调用 Core / Personal 能力
     assets.ts              # 固定页面路由、浏览器入口打包和静态资源缓存
@@ -54,7 +55,7 @@ plugins/personal/
     reconcile.ts           # 无外部清理动作的标准删除生命周期
     relation.ts            # 输入与 Me 的关系
     messages.ts            # Connector 消息贡献人物事实
-  input/                   # Input 定义、幂等接收、保留策略与 Printer
+  input/                   # Input 定义、幂等接收、分页检索、保留策略与 Printer
   output/                  # Output 定义、投递状态、action 与 Printer
   aide.ts                  # 全局 Personal 服务：领域工具装配、输入与恢复
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine

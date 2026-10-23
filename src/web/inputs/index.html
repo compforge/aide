@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inputs · Aide</title>
+<link rel="icon" href="/favicon.ico" sizes="32x32" type="image/vnd.microsoft.icon">
+<link rel="stylesheet" href="/inputs.css">
+<header><h1 class="brand"><img src="/icon.png" width="32" height="32" alt="">Aide</h1><span class="muted">查看收到的信息与处理进展。</span><nav class="main-tabs" aria-label="主导航"><a href="/">Conversations</a><a href="/people">Persons</a><a href="/inputs" aria-current="page">Inputs</a></nav></header>
+<main class="inputs-page">
+  <section class="inputs-catalog" aria-labelledby="inputs-heading">
+    <h2 id="inputs-heading">Inputs</h2>
+    <form id="input-filters" role="search" aria-label="筛选 Input">
+      <label class="input-search-label">搜索<input id="input-search" type="search" maxlength="200" placeholder="正文或 Input ID"></label>
+      <label>Connector<select id="input-connector"><option value="*">全部 Connector</option></select></label>
+      <label>来源类型<select id="input-origin"><option value="*">全部来源类型</option></select></label>
+      <label>具体观察源<select id="input-source"><option value="*">全部观察源</option></select></label>
+      <label>处理状态<select id="input-state"><option value="*">全部状态</option><option value="pending">尚未完成</option><option value="completed">处理完成</option></select></label>
+      <label class="input-errors-label"><input id="input-errors" type="checkbox">有异常记录</label>
+      <button type="submit">筛选</button><button id="input-reset" class="secondary" type="button">重置</button>
+    </form>
+    <div class="inputs-toolbar"><span id="input-count" class="muted" role="status" aria-live="polite"></span><button id="input-refresh" type="button" class="secondary">刷新</button></div>
+    <nav id="input-list" aria-label="Input 列表"></nav>
+    <p id="input-list-notice" role="status" aria-live="polite"></p>
+    <div class="input-pagination" role="group" aria-label="Input 分页">
+      <button id="input-previous" type="button" class="secondary">上一页</button><span id="input-page" class="muted"></span><button id="input-next" type="button" class="secondary">下一页</button>
+    </div>
+  </section>
+  <section class="input-detail" aria-labelledby="input-heading">
+    <h2 id="input-heading">选择一个 Input</h2>
+    <p id="input-detail-notice" role="status" aria-live="polite">选择左侧记录，查看从接收到路由、研判和办理的处理痕迹。</p>
+    <div id="input-detail-content" hidden>
+      <dl id="input-facts"></dl>
+      <h3>原始内容</h3><div id="input-text" class="input-text"></div>
+      <details><summary>来源证据</summary><pre id="input-evidence"></pre></details>
+      <h3>处理 Timeline</h3>
+      <p class="muted">依据当前保留的处理记录展示；各阶段可能只保留最近一次执行，未记录的时间不会补全。处理完成不代表 Work 目标达成或已回复。</p>
+      <p id="input-attempts" class="muted"></p>
+      <ol id="input-timeline"></ol>
+      <p id="input-output-notice" class="muted"></p>
+      <details><summary>原始处理状态与投递记录</summary><pre id="input-status"></pre></details>
+    </div>
+  </section>
+</main>
+<script type="module" src="/inputs.js"></script>
+</html>
