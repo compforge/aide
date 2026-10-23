@@ -8,6 +8,7 @@ import { request } from "../shared/http.ts";
 import { createNavigation } from "./navigation.ts";
 import { createTimeline } from "./timeline.ts";
 import { createWorkPanel } from "./work.ts";
+import { createConversationContextPanel } from "./context.ts";
 import { createApprovals } from "./approvals.ts";
 import { mountComposer } from "./composer.ts";
 
@@ -28,6 +29,7 @@ function mountConversation(conversationId: string | null) {
   const query = "?conversationId=" + encodeURIComponent(conversationId ?? "");
   const timeline = createTimeline();
   const work = createWorkPanel(conversationId ?? "", poll, signal);
+  const context = createConversationContextPanel();
   const approvals = createApprovals(poll, signal);
   let polling = false;
   let stream: EventSource | undefined;
@@ -42,7 +44,7 @@ function mountConversation(conversationId: string | null) {
   byId<HTMLTextAreaElement>("input").disabled = false;
   byId<HTMLButtonElement>("send").disabled = false;
   byId("composer").hidden = !conversationId;
-  work.render([]); approvals.render([]);
+  context.render(null); work.render([]); approvals.render([]);
   if (conversationId) {
     byId("connection").textContent = "连接中";
     byId("notice").textContent = "Enter 发送 · Shift + Enter 换行";
@@ -80,6 +82,7 @@ function mountConversation(conversationId: string | null) {
         view = applyPatch(view, patch);
         if (patch.op === "ping" || patch.op === "end") return;
         const snapshot = view as ConversationView;
+        context.render(snapshot.meta.context);
         timeline.render(snapshot);
         byId("connection").textContent = snapshot.meta.error?.message ?? "实时连接";
       } catch (error) {

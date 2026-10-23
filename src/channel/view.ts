@@ -5,6 +5,7 @@ import { iconFor } from "@compforge/aide-plugin";
 import { harnessIdentityFor } from "../host/harness/ids.ts";
 import { conversationTrigger, type ConversationTrigger } from "../../plugins/personal/conversation/trigger.ts";
 import type { ChannelService } from "./service.ts";
+import type { ResourceContext } from "../../plugins/personal/context.ts";
 import { PROTOCOL_VERSION, type BaseBlock, type ModelMeta, type UIModel } from "@compforge/agentue/ui";
 
 export interface ConversationBlock extends BaseBlock {
@@ -28,6 +29,7 @@ export interface ConversationBlock extends BaseBlock {
 }
 interface ConversationMeta extends ModelMeta {
   conversation_id: string;
+  context: ResourceContext | null;
   activity: { id: string; phase: string; queued: number } | null;
 }
 export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
@@ -43,7 +45,7 @@ export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
  * @link docs/channel/web.md
  */
 export function conversationView(aide: ChannelService, conversationId: string): ConversationView {
-  if (!aide.conversations.get(conversationId)) return { version: PROTOCOL_VERSION, biz: "aide.conversation", blocks: [], meta: { conversation_id: conversationId, activity: null } };
+  if (!aide.conversations.get(conversationId)) return { version: PROTOCOL_VERSION, biz: "aide.conversation", blocks: [], meta: { conversation_id: conversationId, context: null, activity: null } };
   const history = aide.invocations().filter(item => item.conversationId === conversationId);
   const state = aide.runtime.executions.view(history.flatMap(item => item.invocationId ? [item.invocationId] : []));
   const runs = aide.conversations.runs(conversationId);
@@ -127,7 +129,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   const live = [...executions.values()].some((execution) => execution.header.status === "running");
   return {
     version: PROTOCOL_VERSION, biz: "aide.conversation", blocks,
-    meta: { conversation_id: conversationId, activity: active || queued || live ? {
+    meta: { conversation_id: conversationId, context: resource ? { summary: resource.status.summary, recent: resource.status.recent } : null, activity: active || queued || live ? {
       id: active?.id ?? `queued:${conversationId}`, phase: active?.status.phase ?? "queued", queued,
     } : null },
   };

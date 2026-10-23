@@ -85,7 +85,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const first = await connect("a");
   await until(() => first.views.length > 0);
   assert.equal(first.events[0]!.op, "start");
-  assert.deepEqual(first.views[0], { version: "1.0", biz: "aide.conversation", blocks: [], meta: { conversation_id: "a", activity: null } });
+  assert.deepEqual(first.views[0], { version: "1.0", biz: "aide.conversation", blocks: [], meta: { conversation_id: "a", context: null, activity: null } });
   const accepted = await fetch(base + "/messages", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "a1", sessionId: "a", text: "查看资料", channelId: "forged-channel" }) });
   assert.equal(accepted.status, 200);
@@ -135,6 +135,8 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.role === "aide").length, 1);
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content, "最终答复");
   const completed = second.views.at(-1)!;
+  const context = aide.conversations.resource("a")!.status;
+  assert.deepEqual(completed.meta.context, { summary: context.summary, recent: context.recent });
   assert.equal(completed.blocks.find((block) => block.type === "execution")!.status, "completed");
   const groupId = completed.blocks.find((block) => block.type === "execution")!.group_id;
   assert.ok(groupId, "Execution grouping must use durable Input ownership");
@@ -183,11 +185,13 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
 
 test("AgentUE reducer reconstructs growing, corrected and removed progress without duplicated text", () => {
   const emitter = new PatchEmitter();
-  const initial: ConversationView = { version: "1.0", biz: "aide.conversation", meta: { conversation_id: "a", activity: null },
+  const initial: ConversationView = { version: "1.0", biz: "aide.conversation", meta: { conversation_id: "a", context: null, activity: null },
     blocks: [{ id: "output:answer", type: "text", content: "整理" }] };
   let previous: ConversationView | undefined;
   let snapshot = {};
   for (const next of [initial,
+    { ...initial, meta: { ...initial.meta, context: { summary: "当前话题", recent: [{ at: "2026-10-23T08:00:00Z", text: "确认当前结论" }] } } },
+    { ...initial, meta: { ...initial.meta, context: { summary: "修订后的话题", recent: [{ at: "2026-10-23T09:00:00Z", text: "补充待办依据" }] } } },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "整理重点" }] },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "已完成" }] },
     { ...initial, blocks: [] }]) {
