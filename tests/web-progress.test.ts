@@ -37,10 +37,10 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const log = pino({ level: "silent" });
   const aide = new Aide(root, { ...options, createAdapter(target) {
     const adapter = options.createAdapter(target);
-    const open = adapter.open.bind(adapter), send = adapter.sendTurn.bind(adapter);
+    const open = adapter.create.bind(adapter), send = adapter.prompt.bind(adapter);
     let sink: HarnessEventSink;
-    adapter.open = async (...args) => { sink = args[1]; return open(...args); };
-    adapter.sendTurn = async (ref, input) => { emitters.set(target.id, { sink, turnId: input.invocationId }); return send(ref, input); };
+    adapter.create = async (...args) => { sink = args[1]; return open(...args); };
+    adapter.prompt = async (ref, input) => { emitters.set(target.id, { sink, turnId: input.invocationId }); return send(ref, input); };
     return adapter;
   } }, log);
   const server = httpChannel(aide, log);

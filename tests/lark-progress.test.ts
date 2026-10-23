@@ -212,10 +212,10 @@ test("Lark projects Harness progress but only explicit messages become replies",
   let emitter: { sink: HarnessEventSink; turnId: string } | undefined;
   const options = fakeOptions({ chief: async () => { await gate; return "最终答案"; }, execute: async () => { throw new Error("No Work expected"); } }, root);
   const aide = new Aide(root, { ...options, createAdapter(target) {
-    const adapter = options.createAdapter(target), open = adapter.open.bind(adapter), send = adapter.sendTurn.bind(adapter);
+    const adapter = options.createAdapter(target), open = adapter.create.bind(adapter), send = adapter.prompt.bind(adapter);
     let sink: HarnessEventSink;
-    adapter.open = async (...args) => { sink = args[1]; return open(...args); };
-    adapter.sendTurn = async (ref, input) => { emitter = { sink, turnId: input.invocationId }; return send(ref, input); }; return adapter;
+    adapter.create = async (...args) => { sink = args[1]; return open(...args); };
+    adapter.prompt = async (ref, input) => { emitter = { sink, turnId: input.invocationId }; return send(ref, input); }; return adapter;
   } }, log);
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.receive(fixtureIncoming({ channelId: "lark", id: "om_live", sessionId: conversationId, conversationId, text: "查看工作" }));

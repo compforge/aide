@@ -115,7 +115,7 @@ export class Aide {
         defaultTargetId: this.defaultTarget.id, createAdapter: options.createAdapter },
       plugins: { connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.conversations.changed(change); this.notify(); },
-        actions: { "personal/steer_input": (context, input) => this.personal.steerInput(context, input), "personal/say": (context, raw) => {
+        actions: { "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
           const input = SayInputSchema.parse(raw);
           const text = input.text;
           const association = personalExecution(context);

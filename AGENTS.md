@@ -119,6 +119,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Chief 用 assess_input 完成当前 Input 的研判并原子建立 Work 办理记录；独立新请求用 request_work 创建 origin=chief 的新 Input。Task / Routine Reconcile 按 handle 消费，不在 Work 保存输入副本或 consumedInputIds。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。
 - Harness 原生 Session 由 Adapter 管理。应用按插件实例、资源 UID、Controller 和 Target 组织执行上下文；Target 是配置与发现信息，不要求成为 Resource。
+- Plugin / Operator 的非 CRD 操作统一经过 Verb，CRD 使用 ResourceClient。harness verb 封装一个 Harness interface，提供 create/resume、prompt、followUp/steer、abort/close；不引入 Binding 或 Agent interface。运行中的追加交给原生 Harness 队列，回执不等于业务完成。Verb 记录调用关联、耗时和结果，不保存原生执行历史；恢复不自动重放输入。
 - Person 是 Personal 的人物 CRD，统一承载我与他人的身份和认知。PersonDefinition 的资源属于 Personal 插件实例，资源和引用不带 sessionId，不启动执行会话；各 Conversation、Channel、Source 经 ResourceClient 访问同一目录。姓名不作身份键，provider / scope / id 唯一绑定人物。
 - Me 是显式身份标记，connectors.lark.me 与 CLI 执行 appId/userId 独立；需求平台的 me.userKey 与 CLI profile、Source 负责人范围独立，规范项目 scope 由 Connector 解析。匹配 Person 的外部身份得到 Personal.me；本地单人 Web 有固定 Me 标记。Input.sender 可选，relation 为 sent / received / observed，缺省未知；机器人收发不自动代表本人，分类不构成执行授权。
 - Chief 通过 profile_person 修订 Person.status.summary 并追加 recent，每轮刷新 Me、按需读取他人。用户直接修订同一个 summary，Chief 读取最新版本并尊重明确修正；更新校验 uid/resourceVersion。Person 不持有 Input ID，不阻碍输入回收。Web Persons 与 Chief 共享资源更新路径；Hermes 提供其它通用记忆与检索，业务进展仍以 Task / Routine 为准。

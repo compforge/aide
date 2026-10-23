@@ -18,7 +18,7 @@ export interface HarnessInputDispatch {
   readonly harnessTargetId: string;
   readonly invocationId: string;
   readonly messageId: string;
-  readonly operation: "new_turn" | "steer";
+  readonly operation: "new_turn" | "steer" | "followUp";
 }
 
 /** Reference to a Harness-originated Aide Event after Core commits it. */

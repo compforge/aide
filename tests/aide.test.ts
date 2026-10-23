@@ -85,8 +85,8 @@ test("Personal requires a designated final answer even when the transcript conta
   const options = fakeOptions({ execute: async () => { executed = true; return done; } }, dir);
   const aide = new Aide(dir, { ...options, createAdapter: () => {
     const adapter = options.createAdapter();
-    const open = adapter.open.bind(adapter);
-    adapter.open = (config, sink, binding) => open(config, (event) => {
+    const open = adapter.create.bind(adapter);
+    adapter.create = (config, sink, binding) => open(config, (event) => {
       if (executed && event.kind === "agent_message") {
         sink({ ...event, payload: { ...event.payload, phase: undefined } });
       } else sink(event);
@@ -281,8 +281,8 @@ test("Aide resumes the same Session and personal state when execution cwd change
   const options = fakeOptions(agent, join(root, "code-b"), [], root);
   restarted = new Aide(root, { ...options, createAdapter: (target) => {
     const adapter = options.createAdapter(target);
-    const open = adapter.open.bind(adapter);
-    adapter.open = (config, sink, binding) => {
+    const open = adapter.create.bind(adapter);
+    adapter.create = (config, sink, binding) => {
       executionCwds.push(config.cwd);
       return open(config, sink, binding);
     };

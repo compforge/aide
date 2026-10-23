@@ -3,6 +3,7 @@ import type { HarnessActivity } from "./activity.ts";
 import { HarnessInvocations, type ScheduledHarnessInvocation, type HarnessInvocationSnapshot } from "./invocation.ts";
 import type { ExecutionScope, VerbRequest, VerbResponse } from "../../protocol/verbs.ts";
 import { logError, type LogSink } from "../logging.ts";
+import { isHarnessInvocation } from "../../plugin-context.ts";
 export type HarnessRequest = Extract<VerbRequest, { verb: "harness" }>;
 /** The scheduler can request/cancel execution without accessing persistence or native bindings. */
 export interface HarnessExecution {
@@ -58,6 +59,7 @@ export class HarnessCalls implements HarnessExecution {
   }
 
   async invoke(context: ExecutionScope, request: HarnessRequest): Promise<VerbResponse> {
+    if (!isHarnessInvocation(request.input)) throw new Error("Only prompt operations create a Harness invocation");
     const deadline = this.timestamp() + request.input.timeoutMs;
     const harnessTargetId = request.input.harnessTargetId ?? this.options.defaultTargetId;
     if (!harnessTargetId) throw new Error("harness() requires a HarnessTarget selection");

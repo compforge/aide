@@ -4,7 +4,7 @@ import { pendingInputs, resourceRef } from "../input/state.ts";
 import { ROUTE_NAME, ROUTE_TYPE, ROUTE_TARGET, type RouteResource } from "./model.ts";
 import { routeByRules, defaultDestination } from "./rules.ts";
 import { routed, deliver, type RoutingInput } from "./delivery.ts";
-import { finalizeExecution, nextInput, retryDelay, runInput, steerPending } from "../loop.ts";
+import { finalizeExecution, nextInput, retryDelay, runInput, submitPending } from "../loop.ts";
 import { inputPrinter } from "../input/printer.ts";
 import { routePolicy } from "./config.ts";
 import { CONVERSATION_TYPE } from "../conversation/model.ts";
@@ -31,7 +31,7 @@ export async function reconcileRoute(context: PluginContext, route: Readonly<Rou
     try { await routeByRules(context, input); }
     catch (error) { failed = true; context.logger.error("Rule routing failed; Input retained", { attributes: { inputId: input.metadata.name, error: String(error) } }); }
   }
-  return (execution ? await steerPending(context, execution, route) : undefined) ?? (failed ? { requeueAfterMs: 30_000 } : undefined);
+  return (execution ? await submitPending(context, execution, route) : undefined) ?? (failed ? { requeueAfterMs: 30_000 } : undefined);
 }
 export async function reconcileRouteAgent(context: PluginContext, execution: ReconcileContext, route: Readonly<RouteResource>) {
   if (route.metadata.deletionTimestamp) return;

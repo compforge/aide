@@ -25,6 +25,7 @@ export type HarnessInvocationPhase =
   | "failed";
 
 export interface HarnessInvocationSnapshot extends ExecutionAssociation {
+  readonly pluginInstanceId: string;
   readonly invocationId: string;
   readonly executionId: string;
   readonly verb: "harness";
@@ -113,6 +114,7 @@ function frozenSummary(summary: InvocationSummary): InvocationSummary {
 function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
   const recorded = state.recorded.payload;
   return Object.freeze({
+    pluginInstanceId: pluginInstanceIdOf(state),
     invocationId: recorded.invocationId,
     executionId: recorded.executionId,
     attributes: recorded.attributes,

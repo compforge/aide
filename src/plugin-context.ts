@@ -1,5 +1,5 @@
 import { createConnectorClient } from "./connector-client.ts";
-import { MAX_VERB_TIMEOUT_MS, type HarnessInvocationInput, type HarnessResult, type HookContext, type HookStage, type HookSubjectMap, type PluginVerbs, type ReconcileContext, type ReconcileSnapshot } from "@compforge/aide-plugin";
+import { MAX_VERB_TIMEOUT_MS, type HarnessVerbInput, type HookContext, type HookStage, type HookSubjectMap, type PluginVerbs, type ReconcileContext, type ReconcileSnapshot } from "@compforge/aide-plugin";
 
 import type { ExecutionScope, InvokeVerb } from "./protocol/verbs.ts";
 
@@ -7,7 +7,11 @@ const reconcileScopes = new WeakMap<ReconcileContext, ExecutionScope>();
 const hookScopes = new WeakMap<HookContext, ExecutionScope>();
 
 function nonEmpty(name: string, value: string): void {
-  if (!value.trim()) throw new Error(`${name} must not be empty`);
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must not be empty`);
+}
+
+export function isHarnessInvocation(input: HarnessVerbInput): input is import("@compforge/aide-plugin").HarnessInvocationInput {
+  return input.operation === undefined || input.operation === "prompt";
 }
 
 function validateTimeout(name: string, timeoutMs: number): void {
@@ -21,14 +25,25 @@ function validateTimeout(name: string, timeoutMs: number): void {
   }
 }
 
-function validateHarness(input: HarnessInvocationInput): void {
+export function validateHarness(input: HarnessVerbInput): void {
   validateTimeout("harness", input.timeoutMs);
+  if (input.operation !== undefined && !["prompt", "create", "resume", "followUp", "steer", "abort", "close"].includes(input.operation)) {
+    throw new Error(`Unknown Harness operation: ${input.operation}`);
+  }
+  if (input.harnessTargetId !== undefined) nonEmpty("harness harnessTargetId", input.harnessTargetId);
+  if (!isHarnessInvocation(input)) {
+    if (input.operation === "resume") nonEmpty("harness session id", input.session.id);
+    if (input.operation === "abort") nonEmpty("harness invocationId", input.invocationId);
+    if (input.operation === "followUp" || input.operation === "steer") {
+      nonEmpty("harness invocationId", input.invocationId);
+      nonEmpty("harness messageId", input.messageId);
+      nonEmpty("harness prompt", input.prompt);
+    }
+    return;
+  }
   nonEmpty("harness title", input.title);
   nonEmpty("harness prompt", input.prompt);
   if (input.freshContext !== undefined && typeof input.freshContext !== "boolean") throw new Error("Invalid freshContext");
-  if (input.harnessTargetId !== undefined) {
-    nonEmpty("harness harnessTargetId", input.harnessTargetId);
-  }
 }
 
 /**
@@ -53,13 +68,13 @@ export function createPluginVerbs(
         return result.value as T;
       });
     },
-    async harness(input: HarnessInvocationInput) {
+    harness: (async (input: HarnessVerbInput) => {
       validateHarness(input);
       return await invoke(scope, {
         verb: "harness",
         input,
-      }) as HarnessResult;
-    },
+      });
+    }) as PluginVerbs["harness"],
   });
 }
 

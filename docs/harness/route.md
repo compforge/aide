@@ -22,7 +22,7 @@ Channel / Source → Input
 
 `Route/global` 只保存当前 execution，不保存 Input ID 队列。默认 Controller 根据 Input 索引发现待路由事实，处理规则；具名 `agent` Controller 把其余输入交给持久 Route Agent。Reconcile 是确定性协调器，Agent 承担非确定性判断。两者不需要 Batch 或 Delivery 资源。
 
-“持续运行”指复用同一原生上下文，普通输入持续 followup；没有输入时可以空闲。运行中的 immediate 可以通过 steer 接纳。当前大部分 immediate 带明确 sessionId，会先被规则直接分派。模型等待不阻塞默认 Controller 的规则处理。
+“持续运行”指复用同一原生上下文，没有输入时可以空闲。空闲时通过 harness verb 的 prompt 启动；运行中，默认 Controller 先保存 Input 的 execution 接纳记录，再经同一个 verb 调用原生 followUp，immediate 则调用 steer。多条 Input 可以在同一 invocation 中分别通过 route_input 完成。明确拒绝才释放接纳记录，结果不确定时保留证据；当前大部分 immediate 带明确 sessionId，会先被规则直接分派。模型等待不阻塞默认 Controller 的规则处理。
 
 规则匹配 Input.sessionId 与 Conversation 话题；originalInputId 已有路由结果时可以沿其归属关联。前置 Input 尚未决定时，它只是证据，不构成硬等待依赖。Channel 的明确新话题可以创建 Conversation，Source 的陌生话题线索本身不创建。没有任何 Conversation 时直接建立 Default。
 

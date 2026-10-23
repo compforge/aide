@@ -36,7 +36,7 @@ Operator 通过 `verbs.harness` 请求执行。运行时使用插件实例、资
 
 HarnessTarget 表达具体执行配置，包含 ID、Harness 实现及模型等选项。Operator 可以从冻结快照的 `harnessTargets` 发现已配置目标，通过 harnessTargetId 选择；省略时使用应用默认目标。默认 Target 由应用配置提供，不依赖交互式选择。Target 是配置与能力发现信息，不要求注册为 Resource。原生 Session 仍由 Adapter 管理，恢复身份和 resumeState 由提供方协议决定。
 
-业务可以用 `freshContext` 请求用当前提示材料建立新上下文。宿主同时记录历史边界，防止原生上下文重建时重新补入已被压缩或舍弃的材料。执行工作目录变化保留资源与执行记录，并清空原生恢复绑定。
+业务可以用 `freshContext` 请求用当前提示材料建立新上下文。原生历史由 Harness 自持，Host 不保存历史边界或补偿上下文。恢复时工作目录与原生会话是否匹配，由具体 Harness 校验。
 
 执行结束只说明 Harness 收口。目标是否达成、是否需要核验、是否应当通知人，都由业务 Controller 判断。取消和超时也不能证明外部副作用没有发生。
 
@@ -45,6 +45,8 @@ HarnessTarget 表达具体执行配置，包含 ID、Harness 实现及模型等�
 ApplicationRuntime 装配插件 Manager；配置 `harness` 时再装配 ExecutionService。纯资源插件无需 Adapter、Target 或占位执行配置。前者管理插件、资源与调度，只通过 HarnessExecution 能力接口请求或取消调用；后者管理 Harness 执行、原生审批、存储租约与关闭。Manager 不读取执行历史，也不维护原生绑定。底座不再有 SessionStore / SessionHandle 或统一 ExecutionJournal 入口。
 
 Harness 自己保存原生会话、历史、压缩与 checkpoint，负责 durable 恢复。Aide 不保存执行事件日志、不在启动时回放调用、不从历史拼接恢复上下文。仅配置 Target、查询执行视图或运行纯资源 Controller 不会启动原生会话。
+
+Plugin / Operator 通过 ResourceClient 操作 CRD，通过 Verb 发起非 CRD 操作。`harness` verb 将 create、resume、prompt、followUp、steer、abort、close 交给 Harness interface；没有 Binding 或额外 Agent interface。Host 记录调用关联、接收回执和结果，Harness 实现拥有运行句柄和原生协议。Verb 的统一诊断记录包含调用 ID、执行 ID、资源 UID、操作、耗时和结果，不复制模型上下文，也不承担恢复。
 
 需要持续上下文的资源通过 `status.agent` 保存实际使用的 `harness`、`targetId` 和 `session`。会话包括原生 `id`，以及可选的 Adapter 专属 `resume: { version, data }` 定位信息。Host 校验资源 UID、按版本更新绑定，保留其它业务状态；恢复时交还原生身份与定位信息。工作目录来自执行配置，其恢复约束由 Harness 校验，不复制到资源 status。引用不包含 transcript、context 或 checkpoint 副本。
 

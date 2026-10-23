@@ -12,6 +12,7 @@ import { HarnessCalls, type HarnessExecution, type HarnessRequest } from "../har
 import type { ExecutionScope } from "../../protocol/verbs.ts";
 import { acquireWriterLock, releaseWriterLock } from "../store/lease.ts";
 import { logError } from "../logging.ts";
+import { validateHarness, isHarnessInvocation } from "../../plugin-context.ts";
 
 export type ExecutionOptions = Omit<InvocationExecutorOptions, "records"> & { resources?(pluginInstanceId: string): ResourceClient };
 type Target = { id: string; harness: string; model?: string; effort?: string };
@@ -85,7 +86,31 @@ export class ExecutionService implements HarnessExecution {
     if (this.backend) this.configureTarget(this.backend.records, target);
   }
   async invoke(scope: ExecutionScope, request: HarnessRequest) {
+    validateHarness(request.input);
+    const running = this.performInvocation(scope, request);
+    if (isHarnessInvocation(request.input)) return running;
+    // A timed-out operation may already have been accepted. Its eventual effects are not replayed.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([running, new Promise<{ state: "timeout" }>(resolve => {
+        timer = setTimeout(() => resolve({ state: "timeout" }), request.input.timeoutMs);
+      })]);
+    } finally { if (timer) clearTimeout(timer); }
+  }
+  private async performInvocation(scope: ExecutionScope, request: HarnessRequest) {
     const backend = this.open();
+    const operation = request.input;
+    if (operation.operation === "followUp" || operation.operation === "steer" || operation.operation === "abort") {
+      const invocation = backend.calls.listHarnessInvocations().find(i => i.invocationId === operation.invocationId);
+      if (!invocation || invocation.pluginInstanceId !== scope.pluginInstanceId || invocation.resourceRef?.uid !== scope.resourceRef?.uid || !scope.resourceRef?.uid || !invocation.contextId) {
+        throw new Error("Harness input must target an invocation owned by the calling resource");
+      }
+      if (operation.harnessTargetId && operation.harnessTargetId !== invocation.harnessTargetId) throw new Error("Harness operation target does not match its invocation");
+      if (operation.operation === "abort") {
+        return { state: "success" as const, value: { outcome: backend.calls.cancelHarnessInvocation(operation.invocationId) ? "accepted" as const : "rejected" as const } };
+      }
+      return { state: "success" as const, value: await backend.controller.operate(invocation.contextId, invocation.harnessTargetId, operation) };
+    }
     const contextId = resourceExecutionKey(scope);
     this.usingContexts.set(contextId, (this.usingContexts.get(contextId) ?? 0) + 1);
     this.idleContexts.delete(contextId);
@@ -102,6 +127,9 @@ export class ExecutionService implements HarnessExecution {
         const context = backend.records.requireExecutionContext(contextId);
         if (!context.harnessSessions[target.id] && session) context.harnessSessions[target.id] = session;
         this.sessions.set(`${contextId}\0${target.id}`, owner);
+      }
+      if (!isHarnessInvocation(operation)) {
+        return { state: "success" as const, value: await backend.controller.operate(contextId, target.id, operation) };
       }
       return await backend.calls.invoke(scope, request);
     } finally {
@@ -146,9 +174,6 @@ export class ExecutionService implements HarnessExecution {
       source: { type: "plugin", pluginInstanceId: request.pluginInstanceId },
       messageId: request.messageId, invocationId: request.invocationId, blocks: [...request.blocks],
     });
-  }
-  async steer(invocationId: string, messageId: string, text: string) {
-    return this.backend?.controller.steer(invocationId, messageId, text) ?? { accepted: false, reason: "not_running" };
   }
   cancel(id: string) { return this.backend?.controller.cancelHarnessInvocation(id); }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }

@@ -23,6 +23,7 @@ export type HarnessInputStatus =
   | "dispatching"
   | "admitted"
   | "steering"
+  | "following"
   | "failed"
   | "finalized"
   | "recalled"
@@ -43,7 +44,7 @@ export interface HarnessInput {
   /** Plugin fact that caused this queued invocation. */
   parentEventId?: string;
   status: HarnessInputStatus;
-  delivery: "prompt" | "steer";
+  delivery: "prompt" | "steer" | "followUp";
   /**
    * steer 的投递结果：applied = 已写入模型上下文，failed = Harness 明确丢弃；
    * uncertain = 无法确认消费结果，恢复时不得自动重投；undefined = 仍在等待原生投递边界。与 status 正交：Turn 收口不改变它，
@@ -63,7 +64,7 @@ export interface HarnessInputUpdate {
   blocks: PromptBlock[];
   source: HarnessInputSource;
   status: HarnessInputStatus;
-  delivery: "prompt" | "steer";
+  delivery: "prompt" | "steer" | "followUp";
   harnessInvocationId?: string;
   sourceProposedPlanId?: string;
   causeEventId?: string;
@@ -77,7 +78,7 @@ export interface HarnessInputSnapshot {
   contextId: string;
   harness: string;
   status: HarnessInputStatus;
-  delivery: "prompt" | "steer";
+  delivery: "prompt" | "steer" | "followUp";
   deliveryOutcome?: "applied" | "failed" | "uncertain";
   source: HarnessInputSource;
   harnessInvocationId?: string;

@@ -30,18 +30,19 @@ function fixture(t: { after(fn: () => Promise<void>): void }, startup = false) {
       adapters.push(state);
       return {
         harness: "test", capabilities: { prompt: {} },
-        async open(_options, sink) {
+        async resume(options, events, reference) { return this.create(options, events, reference); },
+        async create(_options, sink) {
           state.sink = sink;
           if (startup) state.decision = await ports.openApproval({ kind: "hook_trust", harnessName: "test", hooks: [] });
           return { harness: "test", handleId: String(adapters.indexOf(state)) };
         },
-        async sendTurn(_ref, input) {
+        async prompt(_ref, input) {
           state.sends++;
           state.turnId = input.invocationId;
           void ports.openApproval(permission, { invocationId: input.invocationId }).then(result => { state.decision = result; });
           return { accepted: true, effective: "new_turn" };
         },
-        async cancel() {
+        async abort() {
           state.cancels++;
           state.sink({ kind: "state_update", invocationId: state.turnId, payload: { state: "idle", stopReason: "cancelled" } });
         },

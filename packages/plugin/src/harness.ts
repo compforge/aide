@@ -1,4 +1,4 @@
-/** Actual execution binding. Native history and recovery belong to the Harness. */
+/** Resource-owned provider selection and native recovery reference; never a live runtime object. */
 export interface AgentStatus {
   readonly harness: string;
   readonly targetId: string;

@@ -27,13 +27,13 @@ export async function retryDelay(resources: ResourceClient, owner: Readonly<Loop
   const times = (await pendingInputs(resources, resourceRef(owner))).flatMap(i => i.status.route?.nextAttemptAt ? [Date.parse(i.status.route.nextAttemptAt)] : []);
   return times.length ? { requeueAfterMs: Math.max(1, Math.min(...times) - Date.now()) } : undefined;
 }
-export async function steerPending(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>) {
+export async function submitPending(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>) {
   if (!owner.status.execution) return;
   let retry = false;
   for (const input of await pendingInputs(context.resources, resourceRef(owner))) {
-    if (!immediate(input.spec) || !eligible(input, owner)) continue;
-    const result = await execution.verbs.action<{ accepted: boolean; reason?: string }>("steer_input", { inputId: input.metadata.name });
-    if (result.state === "failure") throw new Error(`Immediate Input admission failed: ${result.error ?? "unknown error"}`);
+    if (!eligible(input, owner)) continue;
+    const result = await execution.verbs.action<{ accepted: boolean; reason?: string }>("submit_input", { inputId: input.metadata.name });
+    if (result.state === "failure") throw new Error(`Agent Input admission failed: ${result.error ?? "unknown error"}`);
     if (result.state === "success" && !result.value.accepted && ["not_running", "admission_conflict"].includes(result.value.reason ?? "")) retry = true;
   }
   return retry ? { requeueAfterMs: 100 } : undefined;

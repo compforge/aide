@@ -181,7 +181,7 @@ export interface HarnessInputState {
   contextId: string;
   harness?: string;
   status: HarnessInputStatus;
-  delivery: "prompt" | "steer";
+  delivery: "prompt" | "steer" | "followUp";
   deliveryOutcome?: "applied" | "failed" | "uncertain";
   blocks: PromptBlock[];
   source: HarnessInputSource;
@@ -429,7 +429,7 @@ function applyMessageChunk(
 ): void {
   const p = ev.payload;
   const input = role === "user" ? state.harnessInputs.get(p.messageId) : undefined;
-  const pendingSteer = input?.delivery === "steer" && input.deliveryOutcome !== "applied";
+  const pendingSteer = input && input.delivery !== "prompt" && input.deliveryOutcome !== "applied";
   const msg = getOrCreateMessage(
     state,
     p.messageId,

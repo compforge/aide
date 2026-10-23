@@ -86,8 +86,8 @@ test("web answers the original Harness approval and rejects stale or mismatched 
   }, dir);
   const aide = new Aide(dir, { ...options, createAdapter: (_target, ports) => {
     const adapter = options.createAdapter(_target);
-    const open = adapter.open.bind(adapter);
-    adapter.open = async (...args) => {
+    const open = adapter.create.bind(adapter);
+    adapter.create = async (...args) => {
       decision = await ports.openApproval({ kind: "hook_trust", harnessName: "Test Harness", hooks: [
         { key: "session_start", source: "test", sourcePath: "/test/hooks.json", trustStatus: "modified", command: "test-hook" },
       ] });

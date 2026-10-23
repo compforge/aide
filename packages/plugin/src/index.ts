@@ -34,6 +34,10 @@ export type {
 export type {
   CompletedHarnessValue,
   HarnessInvocationInput,
+  HarnessVerbInput,
+  HarnessOperationInput,
+  HarnessOperationValue,
+  HarnessOperationResult,
   HarnessResult,
   HarnessValue,
   PluginVerbs,

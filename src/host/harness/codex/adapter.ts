@@ -15,10 +15,10 @@ import type {
 import type { ApprovalDraft } from "../../approval/types.ts";
 import type {
   AdapterCapabilities,
-  HarnessAdapter,
+  Harness,
   EffortOption,
   HarnessEventSink,
-  HarnessSessionBindingSink,
+  SessionReferenceSink,
   ModelOption,
   ModelConfiguration,
   OpenOptions,
@@ -100,7 +100,7 @@ import {
 } from "./thread.ts";
 export { codexPromptInput, mapThreadStatus, openCodexThread } from "./thread.ts";
 
-export class CodexAdapter implements HarnessAdapter {
+export class CodexAdapter implements Harness {
   readonly harness = "codex";
   // steer 经 userMessage completed 回执显式报告 applied；cancel 会把原生
   // pending_input 变成不可达（Controller 在发 cancel 前 reclaim），正常结束的
@@ -219,10 +219,31 @@ export class CodexAdapter implements HarnessAdapter {
     rt.peer.notify("initialized", {});
   }
 
-  async open(
+
+  create(options: OpenOptions, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
+    if (options.sessionId || options.resumeState) throw new Error("Use resume to restore an existing session");
+    return this.open(options, sink, reference);
+  }
+
+  resume(options: OpenOptions & { sessionId: string }, sink: HarnessEventSink, reference?: SessionReferenceSink): Promise<HarnessSessionHandle> {
+    return this.open(options, sink, reference);
+  }
+
+  prompt(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    const active = this.mustThread(ref).activeTurn;
+    if (active && !active.finalized) return Promise.resolve({ accepted: false, effective: "rejected", reason: "session_busy" });
+    return this.sendTurn(ref, input);
+  }
+
+  steer(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
+    const active = this.mustThread(ref).activeTurn;
+    if (!active || active.finalized) return Promise.resolve({ accepted: false, effective: "rejected", reason: "not_running" });
+    return this.sendTurn(ref, input);
+  }
+  private async open(
     opts: OpenOptions,
     sink: HarnessEventSink,
-    binding?: HarnessSessionBindingSink,
+    binding?: SessionReferenceSink,
   ): Promise<HarnessSessionHandle> {
     const command = codexLaunchCommand(this.options.command);
     let rt = this.launch(command, opts, sink);
@@ -549,7 +570,7 @@ export class CodexAdapter implements HarnessAdapter {
    * 统一输入入口：有匹配的活跃 Aide turn 时映射原生 `turn/steer`，否则发
    * `turn/start`。Adapter 以自身运行态做最终判断，Controller 不感知 Codex turn id。
    */
-  async sendTurn(
+  private async sendTurn(
     ref: HarnessSessionHandle,
     input: PromptInput,
   ): Promise<SendTurnReceipt> {
@@ -663,7 +684,7 @@ export class CodexAdapter implements HarnessAdapter {
     return { accepted: true, effective: "new_turn" };
   }
 
-  async cancel(ref: HarnessSessionHandle): Promise<void> {
+  async abort(ref: HarnessSessionHandle): Promise<void> {
     const rt = this.mustThread(ref);
     const turn = rt.activeTurn;
     if (!turn || turn.finalized) return;
