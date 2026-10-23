@@ -106,10 +106,9 @@ test("Only configured sources poll; removing policies stops restored observers w
   assert.deepEqual(seen.assignees.at(-1), []);
 });
 
-test("Conversation configuration limits Batch size and context, not pending Inputs", () => {
-  assert.throws(() => parsePersonalConfig({ conversation: { maxPending: 5 } }), /maxPending/);
-  assert.throws(() => parsePersonalConfig({ conversation: { contextChars: 4096 } }), /conversation.summaryChars.*summaryChars must be < contextChars \/ 2/);
-  assert.equal(parsePersonalConfig({ conversation: { batchSize: 5, contextChars: 4096, summaryChars: 1000 } }).conversation!.batchSize, 5);
+test("Conversation configuration budgets context and rejects obsolete batching controls", () => {
+  for (const key of ["maxPending", "batchSize", "maxWaitSeconds"]) assert.throws(() => parsePersonalConfig({ conversation: { [key]: 5 } }), /Invalid Personal config/);
+  assert.equal(parsePersonalConfig({ conversation: { contextChars: 4096, summaryChars: 1000 } }).conversation!.contextChars, 4096);
 });
 
 

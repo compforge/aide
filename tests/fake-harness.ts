@@ -1,10 +1,15 @@
+import { completeInputs } from "../plugins/personal/conversation/complete.ts";
+import { createResourceClient } from "../src/host/plugin/resource/client.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { CONVERSATION_TYPE } from "../plugins/personal/conversation/model.ts";
+import { deliver } from "../plugins/personal/route/delivery.ts";
+import { defaultDestination } from "../plugins/personal/route/rules.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import { sameAddress } from "../src/address.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputSpec } from "../plugins/personal/output.ts";
 import type { ConversationResource } from "../plugins/personal/conversation/model.ts";
 import { ConfigSchema } from "../src/config.ts";
-import { ResourceStorage, type StoredResource } from "../src/host/resource/storage.ts";
 import type { ConversationStatus } from "../plugins/personal/conversation/model.ts";
 import { randomUUID } from "node:crypto";
 import type { HarnessAdapter, HarnessEventSink, PromptInput } from "../src/host/harness/adapter.ts";
@@ -13,6 +18,7 @@ import type { Outcome } from "../plugins/personal/prompts.ts";
 
 export interface Agent {
   notify?: boolean;
+  complete?: boolean;
   route?(prompt: string): Promise<string>;
   chief?(prompt: string): Promise<string>;
   execute(work: Work): Promise<Outcome | string>;
@@ -20,7 +26,7 @@ export interface Agent {
 
 /** Exercise the real Runner/verb/Turn path; replace only the external Harness protocol. */
 export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], home = cwd) {
-  return { config: ConfigSchema.parse({ plugins: { personal: { conversation: { batchSize: 1 }, route: { batchSize: 1 } } } }), cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): HarnessAdapter => {
+  return { config: ConfigSchema.parse({}), cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): HarnessAdapter => {
     let sink: HarnessEventSink;
     let active: PromptInput | undefined;
     let conversationId: string | undefined;
@@ -40,42 +46,47 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
         if (activation) conversationId = JSON.parse(activation).conversationId;
         const data = (label: string) => JSON.parse(prompt.split(label)[1]!.split("\n")[0]!);
         void Promise.resolve().then<Outcome | string>(() => target.harness === "route"
-          ? agent.route?.(prompt) ?? JSON.stringify({ decisions: (JSON.parse(prompt).inputs as Array<{ id: string }>).map(i => ({ inputId: i.id, conversationUids: [], reason: "No match" })) })
+          ? (() => {
+            const resources = new PluginResourceStore({ home, pluginInstanceId: "personal" });
+            const inputId = JSON.parse(prompt.split("\n").find(line => line.startsWith('{"inputId":'))!).inputId;
+            const data = { inputs: [{ id: inputId }], conversations: resources.list(CONVERSATION_TYPE).map(c => ({ ...(c.spec as object), uid: c.metadata.uid })) };
+            return agent.route?.(JSON.stringify(data)) ?? JSON.stringify({ decisions: [{ inputId, conversationUids: [], reason: "No match" }] });
+          })()
           : target.harness === "chief"
           ? agent.chief?.(prompt) ?? "你好"
-          : agent.execute(data("Work: "))).then((result) => {
+          : agent.execute(data("Work: "))).then(async (result) => {
           if (active?.invocationId !== input.invocationId) return;
-          // Simulate an explicit say tool call, not automatic delivery of finalText. Tests may disable it.
-          if (target.harness === "chief" && agent.notify !== false && conversationId && typeof result === "string" && result) {
-            const storage = ResourceStorage.open(home);
-            const row = storage.db.prepare("SELECT key,scope,data FROM resources WHERE kind='aide.dev/Conversation' AND json_extract(data,'$.object.spec.id')=?").get(conversationId);
-            if (row) {
-              const stored = JSON.parse(row.data as string) as StoredResource;
-              const status = stored.object.status as ConversationStatus;
-              const run = status.batch;
-              const immediate = (run?.inputIds ?? []).map((id) => new InputStore(home).get(id)?.spec)
-                .filter((i) => i && (i.attention ?? (i.origin === "channel" ? "immediate" : "deferred")) === "immediate");
-              const first = immediate[0]?.source;
-              const address = immediate.length ? (first && immediate.every((i) => i?.source && sameAddress(first, i.source)) ? first : undefined)
-                : (stored.object as ConversationResource).spec.address;
-              if (run?.phase === "running" && !run.quietReason && address) {
-                const message = { id: randomUUID(), conversationId, at: new Date().toISOString(), role: "aide" as const, workId: null, text: result, executionId: run.executionId };
-                run.communicated = true; run.outputIds.push(message.id);
-                stored.object = { ...stored.object, metadata: { ...stored.object.metadata, resourceVersion: String(Number(stored.object.metadata.resourceVersion) + 1) } };
-                storage.transaction(() => {
-                  storage.write(row.key as string, row.scope as string, stored);
-                  new OutputStore(home).create((stored.object as ConversationResource).spec.id, message.id,
-                    outputSpec(stored.object as ConversationResource, message, { executionId: run.executionId, target: address }));
-                });
-              }
+          const resources = createResourceClient(new PluginResourceStore({ home, pluginInstanceId: "personal" }));
+          if (target.harness === "route") {
+            for (const decision of JSON.parse(String(result)).decisions) {
+              const context = { resources, logger: { info() {} } };
+              const all = await resources.list(CONVERSATION_TYPE);
+              const destinations = decision.conversationUids.map((uid: string) => {
+                const c = all.find(c => c.metadata.uid === uid); if (!c) throw new Error("Unknown routing target"); return { name: c.metadata.name, uid };
+              });
+              if (!destinations.length) destinations.push(await defaultDestination(context));
+              await deliver(context, new InputStore(home).get(decision.inputId)!, destinations, decision.reason);
             }
+          }
+          if (target.harness === "chief" && conversationId) {
+            const all = await resources.list<ConversationResource["spec"], ConversationStatus>(CONVERSATION_TYPE);
+            const c = all.find(c => c.spec.id === conversationId)!;
+            const run = c.status.execution;
+            const ids = c.status.pendingInputIds.filter(id => new InputStore(home).get(id)?.status.processing?.[c.metadata.uid]?.executionId === run?.id);
+            const immediate = ids.map(id => new InputStore(home).get(id)!.spec).filter(i => (i.attention ?? (i.origin === "channel" ? "immediate" : "deferred")) === "immediate");
+            const first = immediate[0]?.source;
+            const address = immediate.length ? (first && immediate.every(i => i.source && sameAddress(first, i.source)) ? first : undefined) : c.spec.address;
+            if (run && address && agent.notify !== false && typeof result === "string" && result) {
+              new OutputStore(home).create(conversationId, randomUUID(), outputSpec(c, { conversationId, text: result }, { executionId: run.id, target: address, inputIds: ids }));
+            }
+            if (run && ids.length && agent.complete !== false) await completeInputs(resources, c, run.id, { inputIds: ids, summary: String(result) || "Handled silently" });
           }
           sink({ kind: "agent_message", invocationId: input.invocationId,
             payload: { messageId: randomUUID(), phase: "commentary", content: [{ type: "text", text: "我先检查当前工作。" }] } });
           sink({ kind: "agent_message", invocationId: input.invocationId,
             payload: { messageId: randomUUID(), phase: "final", content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result) }] } });
           finish(input.invocationId, "end_turn");
-        }, () => finish(input.invocationId, "error"));
+        }).catch(() => finish(input.invocationId, "error"));
         return { accepted: true, effective: "new_turn" };
       },
       async cancel() { if (active) finish(active.invocationId, "cancelled"); },

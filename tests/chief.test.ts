@@ -28,13 +28,13 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
   assert.deepEqual(first, duplicate);
   await aide.settled();
   assert.equal(calls, 1);
-  assert.equal(aide.personal.conversations.resource("me")!.status.batch?.phase, "done", JSON.stringify(aide.personal.conversations.resource("me")!.status.batch));
+  assert.deepEqual(aide.personal.conversations.resource("me")!.status.pendingInputIds, []);
   assert.equal(aide.works().length, 0);
   assert.deepEqual(aide.outputs().map((m) => m.text), ["直接回答"]);
   await aide.receive(fixtureIncoming({ ...input, sessionId: "other", conversationId: "other", text: "hello" })); await aide.settled();
   assert.doesNotMatch(prompts[1]!, /private-information/);
   await aide.receive(fixtureIncoming({ ...input, id: "failed", text: "fail" })); await aide.settled();
-  assert.match(aide.outputs().at(-1)!.text, /本次处理未完成/);
+  assert.equal(aide.personal.conversations.inputs("me").find(i => i.spec.text === "fail")!.consumption.phase, "failed");
   await aide.close(); aide = new Aide(root, options, log); await aide.start();
   await aide.receive(fixtureIncoming({ ...input, id: "failed", text: "fail" })); await aide.settled();
   assert.equal(calls, 3);

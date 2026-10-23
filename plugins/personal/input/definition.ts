@@ -15,7 +15,7 @@ export const InputSpecSchema = z.object({ source: AddressSchema.optional(), sess
 
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   type: INPUT_TYPE,
-  schema: { spec: InputSpecSchema, status: z.object({ deliveries: z.array(z.string()).optional(), routing: z.object({
+  schema: { spec: InputSpecSchema, status: z.object({ processing: z.record(z.string(), z.object({ executionId: z.string(), phase: z.enum(["submitted", "done", "failed"]), at: z.string(), summary: z.string().optional(), error: z.string().optional() }).strict()).optional(), deliveries: z.array(z.string()).optional(), routing: z.object({
     phase: z.enum(["running", "done", "ignored"]), bootstrap: z.boolean().optional(),
     creation: z.object({ sessionId: z.string(), name: z.string(), uid: z.string().optional() }).strict().optional(), destinations: z.array(z.object({ name: z.string(), uid: z.string() }).strict()).optional(), reason: z.string(),
   }).strict().optional() }).strict() },

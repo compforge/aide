@@ -29,7 +29,7 @@ test("Channel and Source Inputs share idempotent admission beyond the old pendin
   assert.equal(scope.conversations.inputStore.get("input-124")!.status.deliveries?.includes(conversation.metadata.uid), true);
 });
 
-test("A say request for information ends its Batch; the answer is a new Input and new Batch", async (t) => {
+test("A say request for information finishes processing; the answer is a new Input in the same context", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-followup-"));
   const prompts: string[] = [];
   let calls = 0;
@@ -38,21 +38,21 @@ test("A say request for information ends its Batch; the answer is a new Input an
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const first = fixtureIncoming({ channelId: "web", id: "first", sessionId: "me", text: "检查环境" });
   await aide.receive(first); await aide.settled();
-  const before = aide.personal.conversations.resource("me")!.status.batch!;
-  assert.equal(before.phase, "done");
+  const before = aide.invocations().at(-1)!;
+  assert.deepEqual(aide.personal.conversations.resource("me")!.status.pendingInputIds, []);
   assert.equal(aide.outputs().at(-1)!.text, "请提供目标环境。");
   assert.equal(aide.personal.core.executions.approvals().length, 0);
   await aide.close();
   aide = new Aide(home, options, pino({ level: "silent" }));
   await aide.receive(fixtureIncoming({ channelId: "web", id: "answer", sessionId: "me", text: "test 环境" })); await aide.settled();
-  const after = aide.personal.conversations.resource("me")!.status.batch!;
-  assert.notEqual(after.id, before.id);
-  assert.equal(after.phase, "done");
-  assert.match(prompts.at(-1)!, /请提供目标环境/);
+  const after = aide.invocations().at(-1)!;
+  assert.notEqual(after.invocationId, before.invocationId);
+  assert.deepEqual(aide.personal.conversations.resource("me")!.status.pendingInputIds, []);
+  assert.doesNotMatch(prompts.at(-1)!, /请提供目标环境/, "Native context owns history, not repeated prompts");
   assert.match(prompts.at(-1)!, /test 环境/);
   await aide.receive(first); await aide.settled();
   assert.equal(calls, 2);
-  const names = chiefTools(emptyConnectors, () => {}).map((tool) => tool.name);
+  const names = chiefTools(emptyConnectors).map((tool) => tool.name);
   assert.ok(names.includes("say"));
   assert.equal(names.includes("ask"), false); assert.equal(names.includes("confirm"), false);
 });

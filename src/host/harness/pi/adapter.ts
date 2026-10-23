@@ -9,9 +9,12 @@ import { unsupportedPromptBlocks } from "../adapter.ts";
 import type { LogSink } from "../../logging.ts";
 
 /** The composition root binds tools; the adapter only speaks Pi's session API. */
-export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner">;
+export type PiSession = Pick<AgentSession, "sessionId" | "sessionFile" | "subscribe" | "prompt" | "abort" | "dispose" | "bindExtensions" | "extensionRunner"> & Partial<Pick<AgentSession, "steer" | "clearQueue">>;
 export type PiSessionFactory = (options: { cwd: string; sessionFile?: string }) => Promise<PiSession>;
 interface Turn {
+  steering: Map<string, string>;
+  admissions: Set<Promise<unknown>>;
+  closing?: boolean;
   id: string; done?: Promise<void>; cancelled: boolean;
   streaming?: { messageId: string; thoughtId: string };
   lastMessage?: { id: string; text: string; stop: string; error?: string };
@@ -29,6 +32,7 @@ interface Session {
 export class PiAdapter implements HarnessAdapter {
   readonly harness: "pi" | "chief" | "route";
   readonly capabilities = { prompt: {} };
+  readonly steering = { deliveryTracking: "explicit", cancelOwnership: "survives" } as const;
   private readonly sessions = new Map<string, Session>();
   constructor(private readonly options: { harness?: "pi" | "chief" | "route"; createSession: PiSessionFactory; log?: LogSink; nativeEvent?: NativeEventSink }) {
     this.harness = options.harness ?? "pi";
@@ -74,12 +78,27 @@ export class PiAdapter implements HarnessAdapter {
   async sendTurn(ref: HarnessSessionHandle, input: PromptInput): Promise<SendTurnReceipt> {
     const session = this.require(ref);
     if (session.contextFailure) throw new Error(session.contextFailure);
-    if (session.active) return { accepted: false, effective: "rejected", reason: "Pi session is busy; queue a follow-up" };
     const blocks = [...(input.syncBlocks ?? []), ...input.blocks];
     const unsupported = unsupportedPromptBlocks(blocks, this.capabilities);
     if (unsupported.length) throw new Error(`Pi does not support prompt blocks: ${unsupported.join(", ")}`);
     const text = blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
-    const turn: Turn = { id: input.invocationId, cancelled: false };
+    if (session.active) {
+      const turn = session.active;
+      if (turn.id !== input.invocationId || turn.cancelled || turn.settled || turn.closing || !session.native.steer || !session.native.clearQueue) {
+        return { accepted: false, effective: "rejected", reason: "Pi cannot steer this invocation" };
+      }
+      const marker = `[aide-input:${input.messageId}]`;
+      turn.steering.set(input.messageId, marker);
+      const admission = session.native.steer(`${marker}\n${text}`);
+      turn.admissions.add(admission);
+      try {
+        const receipt = await admission;
+        if (receipt !== "queued") { turn.steering.delete(input.messageId); return { accepted: false, effective: "rejected", reason: "Pi input handler did not queue the steer" }; }
+        return { accepted: true, effective: "steer" };
+      } catch (error) { turn.steering.delete(input.messageId); throw error; }
+      finally { turn.admissions.delete(admission); }
+    }
+    const turn: Turn = { id: input.invocationId, cancelled: false, steering: new Map(), admissions: new Set() };
     session.active = turn;
     this.log("Pi turn accepted", turn.id);
     // Admission precedes execution; subsequent failures must reach the event stream.
@@ -87,10 +106,10 @@ export class PiAdapter implements HarnessAdapter {
       if (!turn.cancelled) return session.native.prompt(text, { expandPromptTemplates: false });
     }).then(() => {
       // Pi emits agent_settled before unwinding its prompt stack. Release the binding only after both boundaries.
-      if (session.active === turn) this.finish(session, turn.cancelled ? "cancelled" : turn.settled?.reason ?? "error",
+      if (session.active === turn) return this.finish(session, turn.cancelled ? "cancelled" : turn.settled?.reason ?? "error",
         turn.settled?.error ?? "Pi ended without a settled answer");
     }, (error: unknown) => {
-      if (session.active === turn) this.finish(session, turn.cancelled ? "cancelled" : "error", error instanceof Error ? error.message : String(error));
+      if (session.active === turn) return this.finish(session, turn.cancelled ? "cancelled" : "error", error instanceof Error ? error.message : String(error));
     });
     return { accepted: true, effective: "new_turn" };
   }
@@ -130,6 +149,13 @@ export class PiAdapter implements HarnessAdapter {
     }
     const turn = session.active;
     if (!turn) return;
+    if (event.type === "message_start" && event.message.role === "user") {
+      const text = typeof event.message.content === "string" ? event.message.content : event.message.content.filter(p => p.type === "text").map(p => p.text).join("\n");
+      for (const [messageId, marker] of turn.steering) if (text.includes(marker)) {
+        turn.steering.delete(messageId);
+        session.sink({ kind: "input_delivery_update", invocationId: turn.id, payload: { messageId, state: "applied" } });
+      }
+    }
     if (event.type === "message_start" && event.message.role === "assistant") {
       const previous = turn.lastMessage;
       if (previous?.text) session.sink({ kind: "agent_message", invocationId: turn.id,
@@ -174,9 +200,16 @@ export class PiAdapter implements HarnessAdapter {
       data: { sessionFile: session.native.sessionFile, empty: !session.materialized } } });
   }
 
-  private finish(session: Session, reason: "end_turn" | "error" | "cancelled", error?: string): void {
+  private async finish(session: Session, reason: "end_turn" | "error" | "cancelled", error?: string): Promise<void> {
     const turn = session.active;
     if (!turn) return;
+    // Native input hooks may still enqueue after prompt settlement. Fence them before releasing this binding.
+    turn.closing = true;
+    await Promise.allSettled([...turn.admissions]);
+    session.native.clearQueue?.();
+    for (const messageId of turn.steering.keys()) session.sink({ kind: "input_delivery_update", invocationId: turn.id,
+      payload: { messageId, state: "failed", detail: "Invocation ended before queued steer was applied" } });
+    turn.steering.clear();
     session.active = undefined;
     if (reason === "end_turn" && turn.lastMessage) session.sink({ kind: "agent_message", invocationId: turn.id,
       payload: { messageId: turn.lastMessage.id, phase: "final", content: [{ type: "text", text: turn.lastMessage.text }] } });

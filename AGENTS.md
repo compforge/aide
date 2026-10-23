@@ -56,17 +56,16 @@ plugins/personal/
   output/                  # Output 定义、投递状态、action 与 Printer
   aide.ts                  # 全局 Personal 服务：Chief 上下文绑定、输入与恢复
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
-  route/                   # 全局 Route CRD：队列、规则分发、语义 Batch 与持久投递计划
+  route/                   # 全局 Route CRD：队列、规则分发、连续分类与持久投递计划
   conversation/            # Conversation CRD 的模型、操作与 Reconcile
     model.ts               # 资源定义与会话类型
     input.ts               # 按 Input ID 幂等追加，保留消费状态与并发更新
     store.ts               # 宿主侧会话、Input 消费投影与消息流
-    config.ts              # 组批、等待期限和上下文预算
+    config.ts              # 输入预览与近期摘要预算
     trigger.ts             # 定时触发配置
-    reconcile.ts           # Runner 调度 Batch、消费确认与定时回顾
-    batch.ts               # Conversation 内部 Batch 模型
-    reconcile-batch.ts     # 固定上下文执行与交接压缩
-    state.ts               # Conversation / Batch 身份检查和 CAS 更新
+    reconcile.ts           # 独立接收与 agent Controller、定时回顾
+    complete.ts            # 原子消费回执与精确出队
+    state.ts               # Conversation 身份检查和 CAS 更新
   source/                  # Source 分类定义与三类观察资源
     definition.ts          # 来源身份、名称与稳定图标
     environment/           # EnvironmentSource
@@ -94,7 +93,7 @@ plugins/personal/
   store.ts                 # 宿主端工作存取、消息与去重投影
 agents/
   pi/                      # 通用 Pi Agent：SDK、原生工具与会话
-  route/                   # 专用分类 Agent，无执行工具或记忆扩展
+  route/                   # 专用路由 Agent，仅分类、目录和共享记忆检索
   chief/                   # Personal 提示词、Person / Work / 问答 / Connector 工具
 connectors/                # 全局环境目录、需求平台 / GitHub / GitLab 访问与数据映射
 packages/plugin/           # @compforge/aide-plugin 公共契约
@@ -115,7 +114,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 各模块在自己的 config.ts 声明配置契约，启动装配解析一次，运行实例消费有效配置；进程期间不重读配置文件，修改后重启生效。配置遵循显式值大于默认值，空数组不回退；来源与字段归属见 `docs/configuration.md`。`harnesses.pi` 与 `harnesses.chief` 分别声明模型与能力包，包按 Harness 显式同步；内置装配只加载声明包中的 skills。
 - ApplicationRuntime 服务 Plugin Operator；仅在配置 harness 时装配 ExecutionService。纯资源插件不要求 Adapter 或 Target，默认执行目标由应用配置提供。Manager 只接收 HarnessExecution 能力与独立 LogSink，不读取执行存储。Harness 按需打开 HarnessStore；Connector 自持调用记录。资源、调度键和实例配置不依附 Session；CoreSession、SessionStore 和 SessionHandle 已移除。底座没有 Lane / Turn；一次执行统一使用 HarnessInvocation，资源上下文保存原生绑定。不兼容旧 Session / Lane / Turn 存储，不增加迁移或双读；提供方原生标识留在 Adapter。插件私有目录只有 global 与 instance，详见 docs/kernel.md。
 - ChannelDefinition / SourceDefinition 声明来源身份；绑定的提交入口补齐来源，Source 同时记录资源实例引用。Input.text 保存收到的事实或请求，不保存 Chief 的处理指令。Channel / Source 输入统一从 Input 投影，Output 独立承载回复与通知；展示通过应用装配的定义目录读取名称和图标，不解释 Source 的业务数据。
-- Input / Output 由 Personal 定义；底座不预注册业务资源或 Session / Turn / Target 投影。Input.sessionId 仅是来源话题线索。Personal Route 监听 Input，规则命中立即追加，未命中由独立 Route Batch Controller 调专用 Agent 分类；跨话题操作直接访问全局资源客户端。
+- Input / Output 由 Personal 定义；底座不预注册业务资源或 Session / Turn / Target 投影。Input.sessionId 仅是来源话题线索。Personal Route 监听 Input，规则命中立即追加，未命中由独立 Route agent Controller 调专用 Agent 分类；跨话题操作直接访问全局资源客户端。
 - Chief 对已有 Work 使用 append_input 投递事实或请求，输入队列与消费进度由 Work 持久保存；Task / Routine Reconcile 决定目标与执行状态，Chief 保留创建和删除资源的能力。
 - Task / Routine 各有独立资源身份与 Reconcile；Work 是业务统称。Task 有完成条件，Routine 承担持续职责，执行时长和次数不决定类型。类型转换组合创建、暂停或删除，目标工作拥有新 id。
 - Harness 原生 Session 由 Adapter 管理。应用按插件实例、资源 UID、Controller 和 Target 组织执行上下文；Target 是配置与发现信息，不要求成为 Resource。
@@ -128,26 +127,26 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 需求平台评论经 Output 由 Host 投递；发送结果不确定时停止自动重试，仅由匹配目标、正文及投递记录的回读确认。自己的评论按回执识别，不按执行账号过滤。见 `docs/connector/requirements.md`。
 - Source 先提交持久 Input 再推进观察水位。Input 与 Output 独立保存，业务状态、Output 创建与必要的去重记录原子提交，不能用投递失败重新触发业务执行。
 - 持久 Resource 共用 Host 容量管理；资源所有者在 ResourceDefinition.retention 声明释放与引用规则，未知类型默认保护。按 kind 的 LRU 等排序只作用于可释放且无人引用的记录，不能淘汰正在承担的工作。详见 docs/plugin/README.md。
-- Conversation.status.pendingInputIds 是唯一待消费队列，status.batch 固定一次处理材料。Conversation Reconcile 组批、确认消费和替换 Batch；具名 Batch Controller 执行 Harness，沟通 tool 只调用 say，用户答复是下一批的新 Input。完成批次保留有界上下文直到下一批继承；每批 freshContext 并持久化历史边界，失败不自动重放副作用。
+- Conversation.status.pendingInputIds 是唯一待消费队列，status.execution 只标识当前调用。默认 Controller 接纳 immediate，具名 agent Controller 用持久原生上下文串行 followup；immediate 走 steer。Chief 用 complete_inputs 原子写 Input 消费回执并精确出队；say 只创建 Output。模型结束不等于消费完成，已尝试但未确认的输入保留 failed，不自动重放。
 - Harness 执行结束、业务目标完成和消息送达分别记录。业务 Controller 结合完成条件与外部证据解释结果，Core 保存执行事实。中断可能已经产生外部副作用，保留待核对状态，不自动重放。
 - ResourceDefinition 统一声明类型、Schema、Validator、Printer 与 retention；资源统一按插件实例与 namespace 组织。Host 在恢复和 Controller 启动前加载纯定义模块；所有写入（含 commit）在存储事务内校验。Controller 可独立注册零个或多个。Printer 在 Host 同步处理快照，describe / summarize 提供详情 / 概览，不执行 I/O、模型调用或修改资源；定义不随 Runner 关闭撤销。具体契约见 docs/plugin/README.md。
 - 所有业务资源写入经过 Core ResourceClient，通知相关 Watch。主资源纯 status 更新不自动唤醒自身，需感知状态变化时声明 Watch。Verb 是 Controller 动作出口，其它组件可直接调用 Core 服务。
 - 执行上下文携带主资源与不透明 attributes；只有 Personal 解释其中的 Conversation/Input 关联。Reconcile 快照不含全局历史；Channel 根据 Personal 的关联显式查询执行记录，不通过 Chief Target 推导进度归属。
 - Personal 将新发生的事归入能承接它的上下文：Conversation 承载话题，Task 承载有限目标，Routine 承载持续职责与当前轮次。Chief 优先关联已有 Work，再按需要创建；各 Reconcile 根据历史与新事实推进、更新、沟通、等待或忽略。详见 `docs/plugin/personal.md`。
 - trigger 归属于 Conversation；新 Input 与定时回顾唤醒同一话题。Personal / Chief 决定回顾和主动沟通策略，Core 提供通用定时唤醒与恢复机制。say 保存独立 Output；记忆中的偏好不自动成为执行委托。
-- Chief 用 say 提出问题并结束本批；用户后续消息作为普通 Input。业务 ask / confirm / draft 与 Interaction 已移除；Harness 原生工具权限与 Hook 信任使用独立的 Approval，仍需明确决定；拒绝权限只拒绝本次请求，取消执行会中断该审批关联的运行。Task / Routine 的 waiting 是业务持久状态。
-- Channel / Source 提交 Input 后由 Route 统一分发，使用 appendConversationInput 保留消费凭据。Conversation 不设 pending 数量上限；Input 接收凭据在消费出队前持久化，重投不会重新处理。存储总量由 Host Resource 容量策略管理，batchSize 只决定调度粒度。
+- Chief 用 say 提出问题并结束当前调用；用户后续消息作为普通 Input。业务 ask / confirm / draft 与 Interaction 已移除；Harness 原生工具权限与 Hook 信任使用独立的 Approval，仍需明确决定；拒绝权限只拒绝本次请求，取消执行会中断该审批关联的运行。Task / Routine 的 waiting 是业务持久状态。
+- Channel / Source 提交 Input 后由 Route 统一分发，使用 appendConversationInput 保留消费凭据。Conversation 不设 pending 数量上限；Input 接收凭据在消费出队前持久化，重投不会重新处理。存储总量由 Host Resource 容量策略管理。
 - Channel 进展消费既有执行投影与 Ledger，Web 使用 AgentUE。进度不写入业务 Output，不另建轨迹存储。
 - `make lint` 执行 TypeScript 类型检查，`make test` 执行完整测试；`npm run check` 仍组合两项校验。`packages/plugin` 的 `make lint` 检查其公开契约，`make test` 委托根目录集成测试。真实 Runner / SDK 加模拟外部服务不等于真实模型、CLI 或 Lark 已验证。
 
-- Route/global 属于 Personal；普通资源身份承担调度与模型上下文，不创建内部 Session。默认 Controller 收队列和组批，具名 batch Controller 分类并投递。计划先持久化，目标固定 Conversation UID，完成后才出队；Default 只承接无合适目标的输入。模型没有业务工具，失败可退避重试；已投递事实依靠 Input 凭据避免重复消费。
+- Route/global 属于 Personal。默认 Controller 管理队列与规则，具名 agent Controller 驱动持续复用上下文的 Route。route_input 只向 Route 暴露，完整决定先持久化再按 UID 幂等投递；无目标才使用 Default。Route 与 Chief 共用 Hermes 记忆但隔离原生上下文，Route 仅检索、不执行业务动作。
 
 ## References
 
 - [Kernel](docs/kernel.md)：整体机制、输入对象、执行事实与恢复。
 - [Plugin](docs/plugin/README.md)：插件运行、资源生命周期与调度；[公共契约](packages/plugin/README.md)。
 - [Personal](docs/plugin/personal.md)：Chief、Task / Routine 和业务决策。
-- [Harness](docs/harness/README.md)：通用执行契约；[Pi](docs/harness/pi.md)、[Chief](docs/harness/chief.md)。Chief 文档承载提示词、上下文与记忆优化方向。
+- [Harness](docs/harness/README.md)：通用执行契约；[Pi](docs/harness/pi.md)、[Chief](docs/harness/chief.md)、[Route](docs/harness/route.md)。Chief 文档承载提示词、上下文与记忆优化方向。
 - [Output](docs/output.md)：独立输出、原子提交、投递恢复与容量回收。
 - [Channel](docs/channel/README.md)：Web 与 Lark；[Web](docs/channel/web.md)、[Lark](docs/channel/lark.md)。
 - [Connector 与 Source](docs/connector/README.md)：关注范围、连接器配置和覆盖限制。

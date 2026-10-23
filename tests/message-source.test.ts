@@ -353,7 +353,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me", me: [{ appId: "cli_app", openId: "ou_me" }] } },
-    plugins: { personal: { route: { batchSize: 1 }, conversation: { batchSize: 1 }, sources: { lark: {} } } } }));
+    plugins: { personal: { sources: { lark: {} } } } }));
   let searches = 0;
   const prompts: string[] = [];
   const options = { ...fakeOptions({ chief: async (prompt) => {

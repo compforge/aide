@@ -50,7 +50,7 @@ Lark Channel 使用 CardKit JSON 2.0 卡片，遵循 [Channel 的三态展示约
 
 每秒合并当前内容，所有更新串行复用官方 SDK 客户端、凭证和超时。同一张卡片共享持久化递增 sequence，卡片 ID、发送 uuid 与已更新组件内容保存到 Channel 状态；重启或重试继续更新同一卡片。仅在旧布局卡片恢复时做一次布局替换，之后使用组件局部更新。
 
-结束或等待用户时关闭 streaming_mode，更新最终正文与预览后才确认业务 Output 已投递。用户后续答复形成新的 Input 和 Batch，生成新的执行卡片。过程反馈不写入业务 Output，不改变工作状态。卡片失败时保留最终文本投递；超长答复沿用分段文本完整发送，卡片过程受平台体积预算限制，完整执行记录可在 Web 查看。Task / Routine 的异步通知继续走文本 outbox。
+结束或等待用户时关闭 streaming_mode，更新最终正文与预览后才确认业务 Output 已投递。用户后续答复形成新的 Input 和执行，生成新的执行卡片。过程反馈不写入业务 Output，不改变工作状态。卡片失败时保留最终文本投递；超长答复沿用分段文本完整发送，卡片过程受平台体积预算限制，完整执行记录可在 Web 查看。Task / Routine 的异步通知继续走文本 outbox。
 
 需要额外开通 `cardkit:card:write` 并发布应用，客户端需支持 Card JSON 2.0。协议依据：[创建卡片实体](https://open.feishu.cn/document/cardkit-v1/card/create)、[流式更新文本](https://open.feishu.cn/document/cardkit-v1/card-element/content)、[更新卡片配置](https://open.feishu.cn/document/cardkit-v1/card/settings)、[批量局部更新](https://open.feishu.cn/document/cardkit-v1/card/batch_update)、[全量更新](https://open.feishu.cn/document/cardkit-v1/card/update)。
 

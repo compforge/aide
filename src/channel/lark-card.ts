@@ -35,8 +35,11 @@ export function larkProgress(aide: ChannelService, conversationId: string): Lark
     const executions = view.blocks.filter((block) => block.type === "execution" && block.group_id === group);
     const parents = new Set(executions.map((block) => block.id));
     const blocks = view.blocks.filter((block) => block.parent_id && parents.has(block.parent_id));
-    const rawPhase = input.consumption.phase;
-    const phase = rawPhase === "compacting" ? "running" : rawPhase === "interrupted" ? "failed" : rawPhase ?? "queued";
+    const members = inputs.filter(i => (i.consumption.executionId ?? i.metadata.name) === group);
+    const live = view.meta.activity?.id === group || executions.some(e => e.status === "running");
+    const phase = live || members.some(i => i.consumption.phase === "running") ? "running"
+      : members.some(i => i.consumption.phase === "failed") ? "failed"
+      : members.every(i => i.consumption.phase === "done") ? "done" : "queued";
     const ids = new Set(view.blocks.filter((b) => b.type === "message" && b.group_id === group).map((b) => b.id.replace(/^message:/, "")));
     // A Conversation may produce Outputs for another destination; a progress card cannot deliver those.
     const address = aide.conversations.resource(conversationId)?.spec.address;

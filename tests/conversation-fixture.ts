@@ -8,11 +8,11 @@ import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ConversationStore as PersonalConversations } from "../plugins/personal/conversation/store.ts";
 import type { InputSpec } from "../plugins/personal/input/model.ts";
 import { initialConversationName } from "../plugins/personal/conversation/model.ts";
-import type { Batch } from "../plugins/personal/conversation/batch.ts";
+
 import type { OutputDraft } from "../src/output.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputWrite } from "../plugins/personal/output.ts";
-export function fixtureBatch(patch: Partial<Batch> = {}): Batch { return { id: "batch:fixture", inputIds: [], createdAt: new Date().toISOString(), context: { prompt: "fixture", history: "", responseRequired: false }, phase: "queued", outputIds: [], ...patch }; }
+export interface FixtureProcessing { phase?: "queued" | "running" | "done" | "failed" | "interrupted"; executionId?: string; result?: { summary: string; error?: string }; }
 export class ConversationStore extends PersonalConversations {
   readonly defaultConversationId: string;
   override ensure(id = this.defaultConversationId, address: Address = fixtureAddress(id)) { return super.ensure(id, address); }
@@ -26,14 +26,13 @@ export class ConversationStore extends PersonalConversations {
     this.defaultConversationId = scope.id;
   }
 }
-export async function seedInput(store: PersonalConversations, id: string, spec: InputSpec & { conversationId?: string }, status: Partial<Batch> & { outputs?: Array<OutputDraft & { at: string }> } = {}) {
+export async function seedInput(store: PersonalConversations, id: string, spec: InputSpec & { conversationId?: string }, status: FixtureProcessing & { outputs?: Array<OutputDraft & { at: string }> } = {}) {
   const { conversationId = spec.sessionId ?? "test", ...input } = spec;
   if (input.origin === "channel" && !input.source) input.source = fixtureAddress(conversationId);
   store.inputStore.submit(spec.sessionId ?? "personal", id, input);
   const c = await store.ensure(conversationId, input.origin === "channel" ? input.source : undefined);
   const resources = createResourceClient(store.resources, (change) => store.changed(change));
   const outputs = status.outputs ?? [];
-  const { outputs: _outputs, ...batch } = status;
   for (const o of outputs) {
     const write = outputWrite(c, o);
     if (write.operation !== "create") continue;
@@ -44,9 +43,13 @@ export async function seedInput(store: PersonalConversations, id: string, spec: 
   }
   await resources.replace(c, { ...c.spec, name: c.spec.name || initialConversationName(input.text) }, { ...c.status,
     pendingInputIds: status.phase === "done" ? c.status.pendingInputIds : [...new Set([...c.status.pendingInputIds, id])],
-    ...(status.phase ? { batch: fixtureBatch({ ...batch, outputIds: outputs.map((o) => o.id), inputIds: [id], context: { prompt: input.text, history: "", responseRequired: input.origin === "channel" } }) } : {}),
+    ...(status.phase === "running" ? { execution: { id: status.executionId ?? "fixture", startedAt: new Date().toISOString() } } : {}),
+
   });
   const fact = store.inputStore.get(id)!;
-  store.inputStore.update(fact, { deliveries: [...new Set([...fact.status.deliveries ?? [], c.metadata.uid])], routing: fact.status.routing ?? { phase: "done", reason: "Fixture destination" } });
+  store.inputStore.update(fact, { ...(status.phase && status.phase !== "queued" ? { processing: { [c.metadata.uid]: {
+    executionId: status.executionId ?? "fixture", phase: status.phase === "running" ? "submitted" : status.phase === "interrupted" ? "failed" : status.phase,
+    at: new Date().toISOString(), summary: status.result?.summary,
+  } } } : {}), deliveries: [...new Set([...fact.status.deliveries ?? [], c.metadata.uid])], routing: fact.status.routing ?? { phase: "done", reason: "Fixture destination" } });
   return store.input(id, conversationId)!;
 }

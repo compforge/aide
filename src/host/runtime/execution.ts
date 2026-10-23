@@ -100,6 +100,9 @@ export class ExecutionService implements HarnessExecution {
       messageId: request.messageId, invocationId: request.invocationId, blocks: [...request.blocks],
     });
   }
+  async steer(invocationId: string, messageId: string, text: string) {
+    return this.backend?.controller.steer(invocationId, messageId, text) ?? { accepted: false, reason: "not_running" };
+  }
   cancel(id: string) { return this.backend?.controller.cancelHarnessInvocation(id); }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   approvals() { return [...(this.backend?.records.projection.approvals.values() ?? [])]; }

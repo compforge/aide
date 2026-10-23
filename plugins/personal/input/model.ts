@@ -35,7 +35,10 @@ export interface InputSpec {
   observation?: Record<string, unknown>;
 }
 /** Routing state belongs to the consuming plugin; the Core persists it without interpreting destinations. */
+export interface Processing { executionId: string; phase: "submitted" | "done" | "failed"; at: string; summary?: string; error?: string }
 export interface InputStatus {
+  /** Per-consumer receipts expire with this Input; never an unbounded Conversation index. */
+  processing?: Record<string, Processing>;
   /** Attached Conversation incarnation IDs; retained after a recent-history window forgets the Input. */
   deliveries?: string[];
   routing?: {

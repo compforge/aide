@@ -14,7 +14,7 @@ import { HarnessFixtures } from "./harness-fixture.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ResourceCapacityError, ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
-import { ConversationStore, seedInput, fixtureBatch } from "./conversation-fixture.ts";
+import { ConversationStore, seedInput } from "./conversation-fixture.ts";
 import { outputSpec } from "../plugins/personal/output.ts";
 import { LarkChannel } from "../src/channel/lark.ts";
 import type { LarkTransport } from "../src/channel/lark-client.ts";
@@ -99,11 +99,11 @@ test("Pending Output survives quota pressure; delivered unreferenced history is 
   assert.throws(() => f.outputs.create(f.session.id, "pending", spec), /already created and reclaimed/);
 });
 
-test("say associates optional Inputs and pins Outputs only for the owning Batch, with tool-call idempotency", async (t) => {
+test("say associates optional Inputs and records Outputs for the owning execution, with tool-call idempotency", async (t) => {
   const f = await setup(t);
   for (const id of ["a", "b"]) await seedInput(f.conversations, id, { origin: "channel", originId: "web", text: id, conversationId: "topic" });
   let c = f.conversations.resource("topic")!;
-  await f.client.patchStatus(c, { batch: fixtureBatch({ id: "batch", executionId: "execution", phase: "running", inputIds: ["a", "b"] }) });
+  await f.client.patchStatus(c, { execution: { id: "execution", startedAt: new Date().toISOString() } });
   const say = (text: string, key: string, inputIds?: string[]) => f.conversations.say("topic", undefined, text, "execution", { idempotencyKey: key, inputIds });
   const first = await say("一起回答", "tool-1", ["a", "b"]);
   assert.deepEqual(await say("一起回答", "tool-1", ["a", "b"]), first);
@@ -112,11 +112,11 @@ test("say associates optional Inputs and pins Outputs only for the owning Batch,
   assert.equal(f.outputs.list().length, 3);
   await assert.rejects(say("不相关", "tool-4", ["foreign"]), /not attached/);
   c = f.conversations.resource("topic")!;
-  assert.equal(c.status.batch!.outputIds.length, 3);
+  assert.equal(f.outputs.list().length, 3);
   assert.deepEqual(c.status.pendingInputIds, ["a", "b"], "Saying something does not consume Inputs");
   f.outputs.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Output": { maxCount: 3 } } }));
-  assert.throws(() => f.outputs.create(f.session.id, "over-capacity", f.spec()), ResourceCapacityError);
-  await f.client.patchStatus(c, { batch: null });
+  f.outputs.create(f.session.id, "over-capacity", f.spec());
+  await f.client.patchStatus(c, { execution: null });
   f.outputs.create(f.session.id, "after-handoff", f.spec());
   assert.equal(f.outputs.list().length, 3);
 });

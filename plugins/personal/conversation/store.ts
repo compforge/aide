@@ -42,12 +42,12 @@ export class ConversationStore {
   inputs(conversationId?: string): ConversationInput[] {
     return this.list().filter((c) => !conversationId || c.id === conversationId).flatMap((view) => {
       const c = this.resource(view.id)!;
-      const ids = new Set([...c.status.pendingInputIds, ...c.status.batch?.inputIds ?? []]);
+      const ids = new Set(c.status.pendingInputIds);
       // Historical cards use resource-owned receipts; Conversation never accumulates an unbounded ID index.
       return this.inputStore.list().filter((i) => ids.has(i.metadata.name) || i.status.deliveries?.includes(c.metadata.uid)).map((input) => {
-        const batch = c.status.batch?.inputIds.includes(input.metadata.name) ? c.status.batch : undefined;
-        return { ...input, conversationId: c.spec.id, consumption: batch
-          ? { phase: batch.phase, batchId: batch.executionId ?? batch.id, executionId: batch.executionId, quietReason: batch.quietReason }
+        const receipt = input.status.processing?.[c.metadata.uid];
+        return { ...input, conversationId: c.spec.id, consumption: receipt
+          ? { phase: receipt.phase === "submitted" ? "running" as const : receipt.phase, executionId: receipt.executionId, summary: receipt.summary, error: receipt.error }
           : { phase: c.status.pendingInputIds.includes(input.metadata.name) ? undefined : "done" as const } };
       });
     });
@@ -61,8 +61,8 @@ export class ConversationStore {
   runs(conversationId?: string): ConversationRun[] {
     const runs: ConversationRun[] = this.inputs(conversationId).map((input) => ({ id: input.metadata.name, conversationId: input.conversationId, input, status: input.consumption }));
     for (const c of this.list().filter((c) => !conversationId || c.id === conversationId)) {
-      const batch = this.resource(c.id)!.status.batch;
-      if (batch) runs.push({ id: batch.executionId ?? batch.id, conversationId: c.id, status: { phase: batch.phase, executionId: batch.executionId, quietReason: batch.quietReason, outputs: this.outputs(c.id).filter((o) => batch.outputIds.includes(o.id)) } });
+      const execution = this.resource(c.id)!.status.execution;
+      if (execution) runs.push({ id: execution.id, conversationId: c.id, status: { phase: "running", executionId: execution.id } });
     }
     return runs;
   }
@@ -124,7 +124,7 @@ export class ConversationStore {
       if (!target) throw new Error(`Reply Input has no address: ${options.respondToInputId}`);
     }
     if (!target) {
-      const candidates = (inputIds.length ? inputIds : initial.status.batch?.inputIds ?? []).map(attached)
+      const candidates = (inputIds.length ? inputIds : initial.status.pendingInputIds).map(attached)
         .filter((i) => (i.spec.attention ?? (i.spec.origin === "channel" ? "immediate" : "deferred")) === "immediate");
       if (candidates.length) {
         const first = candidates[0]!.spec.source;
@@ -138,15 +138,12 @@ export class ConversationStore {
     for (let attempt = 0; ; attempt++) {
       const c = this.resource(conversationId);
       if (!c || c.metadata.uid !== initial.metadata.uid) throw new Error("Output Conversation was replaced");
-      const batch = c.status.batch;
-      if (executionId && batch && batch.executionId !== executionId) throw new Error("Output Batch was superseded");
+      if (executionId && c.status.execution?.id !== executionId) throw new Error("Output execution is no longer active");
       const draft: OutputDraft = { id, conversationId, text, workId: null };
       const association = { target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds } : {}) };
       try {
         await this.client.commit([
-          // Pin before inserting a delivered Web Output so collection cannot race Batch handoff.
-          ...(batch && executionId ? [{ operation: "patchStatus" as const, resource: c,
-            patch: { batch: { ...batch, communicated: true, outputIds: [...new Set([...batch.outputIds, id])] } } }] : []),
+          { operation: "patchStatus", resource: c, patch: {} },
           outputWrite(c, draft, association),
         ]);
         return { outputId: id };

@@ -2,9 +2,9 @@
 
 Harness 向 Aide 提供 Agent 执行能力。宿主通过统一接口提交输入、观察执行、取消或恢复会话；具体模型、原生协议和工具执行由 Harness 实现提供。插件通过 verb 请求执行，业务目标与结果判断仍由插件拥有。Harness 由应用按需装配，默认 Target 来自配置；纯资源插件不启动执行后端。
 
-[Pi](pi.md)、[Chief](chief.md) 与 Route 是独立的 Harness 身份，复用 Pi Adapter；Codex、Claude 和 DSH 则通过各自的原生协议接入。Harness 身份既可以区分提供方，也可以区分有明确职责和工具集合的 Agent。
+[Pi](pi.md)、[Chief](chief.md) 与 [Route](route.md) 是独立的 Harness 身份，复用 Pi Adapter；Codex、Claude 和 DSH 则通过各自的原生协议接入。Harness 身份既可以区分提供方，也可以区分有明确职责和工具集合的 Agent。
 
-Route 使用专用分类提示词，不加载执行工具、技能或记忆扩展。它只返回输入与已有 Conversation 的关联，宿主校验并投递；组批与恢复见 [Personal](../plugin/personal.md#输入与上下文)。
+Route 使用专用分类提示词，只有 route_input、目录读取和共享记忆检索工具。它提交 Input 与已有 Conversation 的关联，宿主保存计划并投递；角色、连续执行与恢复见 [Route](route.md)，业务协作见 [Personal](../plugin/personal.md#输入与上下文)。
 
 ## 身份与职责
 
@@ -41,6 +41,6 @@ Harness 执行工具，插件定义工具背后的领域规则。通用 Pi 不�
 
 ## 实现与验证
 
-[Pi](pi.md) 说明通用 SDK 会话和原生工具；[Chief](chief.md) 说明 Personal 能力、提示词与上下文。两者共用执行适配代码，新增 Agent 职责不需要复制流式、取消或恢复逻辑。
+[Pi](pi.md) 说明通用 SDK 会话和原生工具；[Chief](chief.md) 说明 Personal 能力、提示词与上下文。[Route](route.md) 说明输入分派、工具和恢复。三者共用执行适配代码，新增 Agent 职责不需要复制流式、取消或恢复逻辑。
 
 新增 Harness 时从注册表和 HarnessAdapter 契约接入，验证接受/拒绝、事件终态、取消、恢复身份及声明的可选能力。协议测试与真实提供方连通应分别记录；完整应用链路见 [E2E](../e2e.md)。
