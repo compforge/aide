@@ -2,9 +2,10 @@ import { personalExecution } from "./execution-context.ts";
 import { say } from "./output/action.ts";
 import type { OutputStore } from "./output/store.ts";
 import { createRouteAgent } from "../../agents/route/agent.ts";
-import { completeInputs } from "./conversation/complete.ts";
+import { assessInput, type AssessInput } from "./conversation/assess.ts";
+import { attemptOf, attemptPatch, resourceRef, changeAttempt } from "./input/state.ts";
 import { conversationPolicy } from "./conversation/config.ts";
-import { immediate, processing, type LoopStatus } from "./loop.ts";
+import { immediate, eligible, finalizeExecution, type LoopStatus } from "./loop.ts";
 import { ROUTE_TYPE, ROUTE_NAME, type RouteStatus } from "./route/model.ts";
 import { deliver, routed } from "./route/delivery.ts";
 import { defaultDestination } from "./route/rules.ts";
@@ -80,11 +81,11 @@ export class Personal {
         this.plugins.executionVerbs(c.status.execution.id, { conversationId });
         return c;
       };
-      const complete = async (input: { inputIds: string[]; summary: string }) => {
+      const assess = async (input: AssessInput) => {
         const c = active();
-        const result = await completeInputs(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input,
+        const result = await assessInput(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input,
           conversationPolicy(this.options.conversation).summaryChars);
-        this.log.info({ conversationId, inputIds: input.inputIds }, "Chief acknowledged inputs");
+        this.log.info({ conversationId, inputId: input.inputId, workUids: input.workRequests?.map(r => r.workUid) ?? [] }, "Chief assessment completed");
         return result;
       };
       const tools = chiefTools(this.connectors, async (id, input) => {
@@ -92,8 +93,8 @@ export class Personal {
         return say(this.plugins.executionVerbs(c.status.execution!.id, { conversationId }), { ...input, idempotencyKey: id });
       }, (id, offset) => {
         const c = active();
-        return this.readLoopInput(c.metadata.uid, c.status.pendingInputIds, id, offset, true);
-      }, complete);
+        return this.readLoopInput(resourceRef(c), id, offset, true);
+      }, assess);
       return createChiefAgent({ ...options, config, work: this.work(conversationId), persons: this.options.persons, tools, beforeWorkMutation: () => { active(); } });
     };
   }
@@ -116,14 +117,14 @@ export class Personal {
           });
           return { conversations: all.slice(offset, offset + 20), nextOffset: offset + 20 < all.length ? offset + 20 : null };
         },
-        input: (id, offset) => { const r = active(); return this.readLoopInput(r.metadata.uid, r.status.pendingInputIds, id, offset); },
+        input: (id, offset) => { const r = active(); return this.readLoopInput(resourceRef(r), id, offset); },
         route: async raw => {
           const args = z.object({ inputId: z.string(), conversationUids: z.array(z.string()).max(100), reason: z.string().min(1).max(4000) }).strict().parse(raw);
           const r = active();
           const input = this.conversations.inputStore.get(args.inputId);
-          if (!input || (!r.status.pendingInputIds.includes(args.inputId) && !routed(input))) throw new Error("Input is not owned by Route");
+          if (!input) throw new Error("Input is not owned by Route");
           if (routed(input)) return { routed: args.inputId };
-          if (input.status.processing?.[r.metadata.uid]?.executionId !== r.status.execution!.id) throw new Error("Input has not been admitted to Route");
+          if (input.status.route?.executionId !== r.status.execution!.id) throw new Error("Input has not been admitted to Route");
           const resources = this.plugins.resourceClient("personal");
           const context = { resources, logger: { info: (message: string, detail?: unknown) => this.log.info({ detail }, message) } };
           const conversations = await resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE);
@@ -140,13 +141,15 @@ export class Personal {
     };
   }
 
-  private readLoopInput(uid: string, pending: string[], id: string | undefined, offset: number, history = false) {
-    if (!id) return { inputs: pending.slice(offset, offset + 20).map(id => ({ inputId: id, processing: this.conversations.inputStore.get(id)?.status.processing?.[uid] })),
-      nextOffset: offset + 20 < pending.length ? offset + 20 : null };
+  private readLoopInput(owner: import("@compforge/aide-plugin").ResourceRef, id: string | undefined, offset: number, history = false) {
+    const inputs = this.store.resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: owner.kind === "Route"
+      ? { name: "routePending", value: "pending" } : { name: "assessPending", value: owner.uid! } });
+    if (!id) return { inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, status: attemptOf(i, owner) })),
+      nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
     const input = this.conversations.inputStore.get(id);
-    if (!input || (!pending.includes(id) && !(history && input.status.deliveries?.includes(uid)))) throw new Error("Input is not attached to this resource");
+    if (!input || (!inputs.some(i => i.metadata.name === id) && !(history && input.status.assess?.[owner.uid!]))) throw new Error("Input is not attached to this resource");
     const description = inputPrinter.describe(input);
-    return { inputId: id, processing: input.status.processing?.[uid], text: description.slice(offset, offset + 8000), nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
+    return { inputId: id, status: attemptOf(input, owner), text: description.slice(offset, offset + 8000), nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
   }
 
   /** @spec Only the owning resource's intake controller may steer its live agent; admission is durable before dispatch. */
@@ -161,15 +164,14 @@ export class Personal {
       const resource = await resources.get<unknown, LoopStatus>(ref);
       const input = await resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: inputId });
       const id = resource?.status.execution?.id;
-      if (!id || !input || !resource!.status.pendingInputIds.includes(inputId) || !immediate(input.spec) || input.status.processing?.[ref.uid]) return { accepted: false };
+      if (!id || !input || !resource || !immediate(input.spec) || !eligible(input, resource)) return { accepted: false };
       const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === id && i.phase === "running");
       if (!invocation) return { accepted: false, reason: "not_running" };
       try {
         await resources.commit([
           // This is an admission revision, including rejected dispatches, not a count of consumed Inputs.
           { operation: "patchStatus", resource: resource!, patch: { execution: { ...resource!.status.execution!, admissionRevision: (resource!.status.execution!.admissionRevision ?? 0) + 1 } } },
-          { operation: "patchStatus", resource: input, patch: { processing: { ...input.status.processing,
-            [ref.uid]: { executionId: id, phase: "submitted", at: new Date().toISOString() } } } },
+          { operation: "patchStatus", resource: input, patch: attemptPatch(input, ref, { executionId: id, startedAt: new Date().toISOString(), lastError: undefined, nextAttemptAt: undefined }) },
         ]);
         admitted = { input, executionId: id, invocationId: invocation.invocationId };
         break;
@@ -186,7 +188,7 @@ export class Personal {
     try {
       const outcome = await this.core.executions.steer(invocationId, `input:${input.metadata.uid}:${ref.uid}`, message);
       if (!outcome.accepted) {
-        await processing(resources, inputId, ref.uid, p => p?.executionId === id && p.phase !== "done" ? undefined : p);
+        await changeAttempt(resources, inputId, ref, p => p?.executionId === id && !p.completedAt ? { executionId: undefined, startedAt: undefined } : {});
         // An explicit rejection has no effects. Wake followup even if the invocation ended during admission.
         void this.plugins.enqueue({ pluginInstanceId: "personal", namespace: ref.namespace, resourceApiVersion: ref.apiVersion, resourceKind: ref.kind, resourceId: ref.name, controllerName: "agent" })
           .catch(error => this.log.error({ err: error, inputId }, "Could not schedule rejected steer for followup"));
@@ -194,7 +196,7 @@ export class Personal {
       this.log.info({ inputId, consumerUid: ref.uid, invocationId, ...outcome }, "Immediate Input steering admission");
       return outcome;
     } catch (error) {
-      await processing(resources, inputId, ref.uid, p => p?.executionId === id && p.phase === "submitted" ? { ...p, phase: "failed", error: String(error) } : p);
+      await changeAttempt(resources, inputId, ref, p => p?.executionId === id && !p.completedAt ? { lastError: String(error) } : {});
       throw error;
     }
   }
@@ -220,7 +222,7 @@ export class Personal {
     const conversation = this.conversations.resource(conversationId);
     if (!conversation) return { deleted: false, reason: "missing" };
     if (conversation.metadata.uid !== uid || Number(conversation.metadata.resourceVersion) !== revision) return { deleted: false, reason: "changed" };
-    const unfinished = conversation.status.pendingInputIds.length > 0 || !!conversation.status.execution;
+    const unfinished = this.conversations.pending(conversation.metadata.uid).length > 0 || !!conversation.status.execution;
     const executing = this.invocations().some((invocation) => invocation.conversationId === conversationId && ["queued", "running", "uncertain"].includes(invocation.phase));
     if (unfinished || executing) return { deleted: false, reason: "busy" };
     const hasWork = WORK_TYPES.some((type) => this.store.resources.list<WorkSpec, unknown>(type)
@@ -247,12 +249,7 @@ export class Personal {
     for (const type of [CONVERSATION_TYPE, ROUTE_TYPE]) for (const c of await resources.list<unknown, LoopStatus>(type)) {
       if (!c.status.execution) continue;
       const id = c.status.execution.id;
-      for (const inputId of c.status.pendingInputIds) await processing(resources, inputId, c.metadata.uid, p => {
-        if (p?.executionId !== id || p.phase !== "submitted") return p;
-        return type.kind === "Route" ? undefined : { ...p, phase: "failed", error: "Execution interrupted; inspect existing effects before continuing" };
-      });
-      const current = await resources.get<unknown, LoopStatus>({ ...c, ...c.metadata });
-      if (current?.status.execution?.id === id) await resources.patchStatus(current, { execution: null });
+      await finalizeExecution({ resources, logger: { debug: () => {}, info: () => {}, warn: (message: string, detail?: unknown) => this.log.warn({ detail }, message), error: () => {} } }, c, id);
       this.log.warn({ resourceUid: c.metadata.uid, executionId: id }, "Recovered interrupted agent without replaying actions");
     }
     for (const work of this.store.read().works) {
@@ -297,8 +294,8 @@ export class Personal {
     if (previous) return { inputId: previous.metadata.name, at: previous.metadata.creationTimestamp };
     // @spec Deleting a Conversation never turns redelivery of an accepted Input into a new command.
     const fact = this.conversations.inputStore.get(id);
-    if (fact?.status.deliveries?.includes(this.conversations.resource(input.conversationId)?.metadata.uid ?? "")) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
-    if (fact && ["done", "ignored"].includes(fact.status.routing?.phase ?? "")) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
+    if (fact?.status.assess?.[this.conversations.resource(input.conversationId)?.metadata.uid ?? ""]) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
+    if (fact && routed(fact)) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
     const receipt = this.conversations.inputStore.receipt(id);
     if (!fact && receipt) return { inputId: id, at: receipt.at };
     await this.conversations.ensure(input.sessionId);

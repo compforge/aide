@@ -49,7 +49,7 @@ async function record(context: PluginContext, original: WorkResource, update: (w
     const work = toWork(current);
     const notification = update(work);
     const { id: _id, conversationId, kind: _kind, title: _title, instruction: _instruction,
-      trigger: _trigger, revision: _revision, inputs: _inputs, ...observation } = work;
+      trigger: _trigger, revision: _revision, uid: _uid, ...observation } = work;
     const writes: ResourceCommit[] = [];
     if (notification) {
       const conversation = await context.resources.get<ConversationSpec, ConversationStatus>({ ...CONVERSATION_TYPE, namespace: "v1", name: digest(conversationId) });

@@ -1,3 +1,4 @@
+import { resourceRef } from "../plugins/personal/input/state.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { fixtureAddress } from "./address-fixture.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
@@ -42,14 +43,15 @@ export async function seedInput(store: PersonalConversations, id: string, spec: 
     store.outputStore.storage.write(key, "personal", { ...stored, object: { ...resource, metadata: { ...resource.metadata, creationTimestamp: o.at } } });
   }
   await resources.replace(c, { ...c.spec, name: c.spec.name || initialConversationName(input.text) }, { ...c.status,
-    pendingInputIds: status.phase === "done" ? c.status.pendingInputIds : [...new Set([...c.status.pendingInputIds, id])],
     ...(status.phase === "running" ? { execution: { id: status.executionId ?? "fixture", startedAt: new Date().toISOString() } } : {}),
 
   });
   const fact = store.inputStore.get(id)!;
-  store.inputStore.update(fact, { ...(status.phase && status.phase !== "queued" ? { processing: { [c.metadata.uid]: {
-    executionId: status.executionId ?? "fixture", phase: status.phase === "running" ? "submitted" : status.phase === "interrupted" ? "failed" : status.phase,
-    at: new Date().toISOString(), summary: status.result?.summary,
-  } } } : {}), deliveries: [...new Set([...fact.status.deliveries ?? [], c.metadata.uid])], routing: fact.status.routing ?? { phase: "done", reason: "Fixture destination" } });
+  store.inputStore.update(fact, { assess: { ...fact.status.assess, [c.metadata.uid]: {
+    resource: resourceRef(c), assignedAt: new Date().toISOString(),
+    ...(status.phase && status.phase !== "queued" ? { executionId: status.executionId ?? "fixture", startedAt: new Date().toISOString() } : {}),
+    ...(status.phase === "done" ? { completedAt: new Date().toISOString(), result: { summary: status.result?.summary ?? "Done" } } : {}),
+    ...(["failed", "interrupted"].includes(status.phase ?? "") ? { lastError: status.result?.error ?? "Interrupted" } : {}),
+  } }, route: fact.status.route ?? { completedAt: new Date().toISOString(), result: { conversations: [resourceRef(c)], reason: "Fixture destination" } } });
   return store.input(id, conversationId)!;
 }

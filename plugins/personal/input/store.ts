@@ -28,12 +28,16 @@ export class InputStore {
     }
     return results;
   }
+  query(name: string, value: string): Resource<InputSpec, InputStatus>[] {
+    return [...this.storage.indexedKeys("personal", INPUT_TYPE, this.key(""), name, value)]
+      .map(key => this.storage.read(key)!.object as Resource<InputSpec, InputStatus>);
+  }
   receipt(id: string): { at: string; fingerprint: string } | undefined {
     const value = this.storage.receipt(`input:${id}`);
     return value ? JSON.parse(value) : undefined;
   }
   get(id: string): Resource<InputSpec, InputStatus> | undefined { return this.storage.read(this.key(id), true)?.object as Resource<InputSpec, InputStatus> | undefined; }
-  submit(owner: string, id: string, raw: InputSpec): Resource<InputSpec, InputStatus> {
+  submit(owner: string, id: string, raw: InputSpec, status: InputStatus = {}): Resource<InputSpec, InputStatus> {
     const spec = InputSpecSchema.parse(raw);
     const key = this.key(id), existing = this.storage.read(key);
     if (existing) {
@@ -45,7 +49,7 @@ export class InputStore {
     const receipt = this.receipt(id);
     if (receipt && receipt.fingerprint !== fingerprint) throw new Error("Input identity already exists with different content or owner");
     const resource: Resource<InputSpec, InputStatus> = { ...INPUT_TYPE, metadata: { name: id, namespace: "v1", uid: `input:${id}`,
-      resourceVersion: "1", generation: 1, creationTimestamp: receipt?.at ?? new Date().toISOString() }, spec, status: receipt ? { routing: { phase: "ignored", reason: "Previously accepted Input has expired" } } : {} };
+      resourceVersion: "1", generation: 1, creationTimestamp: receipt?.at ?? new Date().toISOString() }, spec, status: receipt ? { route: { completedAt: receipt.at, result: { conversations: [], reason: "Previously accepted Input has expired" } } } : status };
     // A bounded receipt acknowledges redelivery without recreating a collected fact or waking consumers.
     if (receipt) return resource;
     this.storage.write(key, "personal", { owner, object: resource, control: {} }, { key: `input:${id}`, value: JSON.stringify({ at: resource.metadata.creationTimestamp, fingerprint }) });

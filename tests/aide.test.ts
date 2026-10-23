@@ -73,7 +73,7 @@ test(`${definition.kind} asks, persists a question across restart, then records 
   restarted.start();
   assert.equal(restarted.works()[0]?.question, "使用哪个项目？");
   await restarted.start();
-  (await restarted.work("me").appendInput(id, { action: "answer", text: "项目 A" }));
+  (await restarted.work("me").requestInput(id, { action: "answer", text: "项目 A" }));
   await restarted.settled();
   assert.equal(restarted.works()[0]?.status, definition.kind === "task" ? "done" : "scheduled");
   assert.equal(runs, 2);
@@ -181,7 +181,7 @@ test("a pause arriving during execution survives its eventual result", async (t)
   });
   id = (await aide.work("me").create(task)).id;
   await running;
-  (await aide.work("me").appendInput(id, { action: "pause", text: "暂停" }));
+  (await aide.work("me").requestInput(id, { action: "pause", text: "暂停" }));
   finish(done);
   await aide.settled();
   assert.equal(aide.works()[0]?.status, "paused");
@@ -201,7 +201,7 @@ test("an update during execution is reconciled using the latest instruction", as
   });
   id = (await aide.work("me").create(task)).id;
   await running;
-  (await aide.work("me").appendInput(id, { action: "update", text: "处理新目标", changes: { instruction: "处理新目标" } }));
+  (await aide.work("me").requestInput(id, { action: "update", text: "处理新目标", changes: { instruction: "处理新目标" } }));
   finish(done);
   await aide.settled();
   assert.equal(seen.length, 2);

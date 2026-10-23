@@ -1,7 +1,7 @@
 import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient, Address } from "@compforge/aide-plugin";
-import type { InputSpec, InputStatus } from "../input/model.ts";
+import type { InputSpec } from "../input/model.ts";
 import type { SayInput } from "../output/model.ts";
 import { InputStore } from "../input/store.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
@@ -37,18 +37,16 @@ export class ConversationStore {
     const previous = this.resources.find<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, conversationKey(id));
     if (previous?.metadata.deletionTimestamp) throw new Error("Conversation is being deleted; retry after deletion completes");
     if (previous) return previous;
-    return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), trigger: conversationTrigger() }, status: { pendingInputIds: [], receipts: [] } });
+    return this.client.create(CONVERSATION_TYPE, { name: conversationKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), trigger: conversationTrigger() }, status: { receipts: [] } });
   }
   inputs(conversationId?: string): ConversationInput[] {
     return this.list().filter((c) => !conversationId || c.id === conversationId).flatMap((view) => {
       const c = this.resource(view.id)!;
-      const ids = new Set(c.status.pendingInputIds);
-      // Historical cards use resource-owned receipts; Conversation never accumulates an unbounded ID index.
-      return this.inputStore.list().filter((i) => ids.has(i.metadata.name) || i.status.deliveries?.includes(c.metadata.uid)).map((input) => {
-        const receipt = input.status.processing?.[c.metadata.uid];
-        return { ...input, conversationId: c.spec.id, consumption: receipt
-          ? { phase: receipt.phase === "submitted" ? "running" as const : receipt.phase, executionId: receipt.executionId, summary: receipt.summary, error: receipt.error }
-          : { phase: c.status.pendingInputIds.includes(input.metadata.name) ? undefined : "done" as const } };
+      return this.inputStore.query("assess", c.metadata.uid).map((input) => {
+        const receipt = input.status.assess![c.metadata.uid]!;
+        return { ...input, conversationId: c.spec.id, consumption: {
+          phase: receipt.completedAt ? "done" as const : receipt.lastError ? "failed" as const : receipt.executionId ? "running" as const : undefined,
+          executionId: receipt.executionId, summary: receipt.result?.summary, error: receipt.completedAt ? undefined : receipt.lastError } };
       });
     });
   }
@@ -124,7 +122,7 @@ export class ConversationStore {
       if (!target) throw new Error(`Reply Input has no address: ${options.respondToInputId}`);
     }
     if (!target) {
-      const candidates = (inputIds.length ? inputIds : initial.status.pendingInputIds).map(attached)
+      const candidates = (inputIds.length ? inputIds : this.pending(initial.metadata.uid).map(i => i.metadata.name)).map(attached)
         .filter((i) => (i.spec.attention ?? (i.spec.origin === "channel" ? "immediate" : "deferred")) === "immediate");
       if (candidates.length) {
         const first = candidates[0]!.spec.source;
@@ -150,8 +148,10 @@ export class ConversationStore {
       } catch (error) { if (attempt >= 8 || !/version conflict/.test(String(error))) throw error; }
     }
   }
+  pending(uid: string) { return this.inputStore.query("assessPending", uid); }
   private project(r: ConversationResource): Conversation {
-    return { ...r.spec, name: r.spec.name || initialConversationName(this.inputStore.get(r.status.pendingInputIds[0] ?? "")?.spec.text ?? ""), revision: Number(r.metadata.resourceVersion), createdAt: r.metadata.creationTimestamp,
-      pendingInputIds: r.status.pendingInputIds, outputs: this.outputStore.list({ conversationUid: r.metadata.uid }).map(outputView) };
+    const pending = this.pending(r.metadata.uid);
+    return { ...r.spec, name: r.spec.name || initialConversationName(pending[0]?.spec.text ?? ""), revision: Number(r.metadata.resourceVersion), createdAt: r.metadata.creationTimestamp,
+      pendingInputIds: pending.map(i => i.metadata.name), outputs: this.outputStore.list({ conversationUid: r.metadata.uid }).map(outputView) };
   }
 }

@@ -44,7 +44,7 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit conve
       subscribe: (listener) => core.subscribe(listener), outputs: () => [], invocations: () => manager.listHarnessInvocations().map(invocation => ({ ...invocation, ...personalExecution(invocation) })), conversationIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
     expect(conversationView(projection, "group-a").blocks.some((block) => block.type === "execution")).toBe(true);
     expect(conversationView(projection, "group-b").blocks).toHaveLength(0);
-    await work.appendInput(task.id, { action: "pause", text: "暂停" });
+    await work.requestInput(task.id, { action: "pause", text: "暂停" });
     await manager.settled();
     expect(resources.get(observer, "observer", "v1/project/coordination").status).toMatchObject({ revision: 2 });
     await work.delete(task.id, 2);

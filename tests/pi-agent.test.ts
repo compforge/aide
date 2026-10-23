@@ -212,14 +212,14 @@ test("Chief executes all five Work tools through the SDK and keeps commentary ou
       case 0: return { tool: "create_work", args: { kind: "task", title: "检查仓库", instruction: "检查 aide", trigger: null } };
       case 1: return { tool: "list_work", args: {} };
       case 2: return { tool: "read_work", args: { id } };
-      case 3: return { tool: "append_input", args: { workId: id, text: "暂停", action: "pause" } };
-      case 4: assert.equal(work?.status, "ready"); assert.equal(work?.inputs[0]?.action, "pause"); return { tool: "create_work", args: {
+      case 3: return { tool: "request_work", args: { workId: id, text: "暂停", action: "pause" } };
+      case 4: assert.equal(work?.status, "ready"); return { tool: "create_work", args: {
         kind: "routine", title: "定期检查仓库", instruction: "检查 aide", trigger: { cron: "0 9 * * *", timezone: "UTC", event: null },
       } };
-      case 5: assert.notEqual(id, routineId); return { tool: "append_input", args: { workId: routineId, text: "修改名称",
+      case 5: assert.notEqual(id, routineId); return { tool: "request_work", args: { workId: routineId, text: "修改名称",
         action: "update", changes: { title: "每天检查仓库" } } };
-      case 6: assert.equal(routine?.inputs[0]?.changes?.title, "每天检查仓库"); assert.equal(routine?.title, "定期检查仓库"); return { tool: "delete_work", args: { id, revision: 2 } };
-      case 7: return { tool: "delete_work", args: { id: routineId, revision: 2 } };
+      case 6: assert.equal(routine?.title, "定期检查仓库"); return { tool: "delete_work", args: { id, revision: 1 } };
+      case 7: return { tool: "delete_work", args: { id: routineId, revision: 1 } };
       default: return { text: "已完成创建、查询、更新和删除。" };
     }
   }, "chief");
@@ -288,7 +288,7 @@ test("Aide isolates continuous native contexts across conversations, restart and
     const activation = messageText(messages.findLast(m => m.role === "user")!.content).split("Activation: ").at(-1)!.split("\n")[0]!;
     const inputId = JSON.parse(activation).inputId;
     return index % 3 === 0 ? { tool: "say", args: { text: `native-response-${index / 3}` } }
-      : index % 3 === 1 ? { tool: "complete_inputs", args: { inputIds: [inputId], summary: "Handled request" } }
+      : index % 3 === 1 ? { tool: "assess_input", args: { inputId, summary: "Handled request" } }
       : { text: `Internal summary ${Math.floor(index / 3)}` };
   });
   const home = join(fixture.config.cwd, "aide");
@@ -539,7 +539,7 @@ test("Chief retains native context across acknowledged Inputs and restart", { ti
     const activation = raw.split("Activation: ").at(-1)?.split("\n")[0];
     if (!activation) throw new Error("No input activation");
     const inputId = JSON.parse(activation).inputId;
-    return { tool: "complete_inputs", args: { inputIds: [inputId], summary: "Recorded the observation" } };
+    return { tool: "assess_input", args: { inputId, summary: "Recorded the observation" } };
   });
   const home = join(fixture.config.cwd, "continuous-home");
   let aide: Aide;
@@ -550,11 +550,11 @@ test("Chief retains native context across acknowledged Inputs and restart", { ti
   try {
     await aide.conversations.ensure("me"); await aide.start();
     await aide.conversations.submit("first", { sessionId: "me", origin: "source", originId: "fixture", text: "remember-unique-evidence" }); await aide.settled();
-    assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, [], JSON.stringify(fixture.requests.at(-1)));
+    assert.deepEqual(aide.conversations.get("me")!.pendingInputIds, [], JSON.stringify(fixture.requests.at(-1)));
     await aide.close(); aide = open(); await aide.start();
     const before = fixture.requests.length;
     await aide.conversations.submit("second", { sessionId: "me", origin: "source", originId: "fixture", text: "followup-evidence" }); await aide.settled();
-    assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, [], JSON.stringify(fixture.requests.at(-1)));
+    assert.deepEqual(aide.conversations.get("me")!.pendingInputIds, [], JSON.stringify(fixture.requests.at(-1)));
     assert.match(JSON.stringify(fixture.requests[before]!.messages), /remember-unique-evidence/);
     assert.match(JSON.stringify(fixture.requests[before]!.messages), /followup-evidence/);
     assert.equal(aide.outputs().length, 0);
@@ -585,7 +585,7 @@ test("Route exposes only routing, catalog and shared-memory retrieval tools", as
     assert.match(JSON.stringify(request.messages), /You are Route/);
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
     for (const name of ["route_input", "list_conversations", "read_input", "memory_search"]) assert.ok(names.includes(name), name);
-    for (const name of ["say", "complete_inputs", "create_work", "bash", "profile_person", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
+    for (const name of ["say", "assess_input", "create_work", "bash", "profile_person", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
     return { text: answer };
   }, "route");
   const result = await fixture.run(JSON.stringify({ inputs: [{ id: "one", text: "event" }], conversations: [] }), "route-one");
@@ -599,7 +599,7 @@ test("Route exposes only routing, catalog and shared-memory retrieval tools", as
 test("Aide steers immediate Input and independently completes both inputs within one Chief invocation", { timeout: 20_000 }, async t => {
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting the first input", pause }
-    : index === 1 ? { tool: "complete_inputs", args: { inputIds: ["first", "urgent"], summary: "Both observations handled without notification" } }
+    : index === 1 || index === 2 ? { tool: "assess_input", args: { inputId: index === 1 ? "first" : "urgent", summary: "Observation handled without notification" } }
     : { text: "Handled internally" });
   const home = join(fixture.config.cwd, "steer-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },
@@ -627,15 +627,15 @@ test("Aide steers immediate Input and independently completes both inputs within
   });
   await submit("urgent", "immediate");
   const uid = aide.conversations.resource("me")!.metadata.uid;
-  for (let i = 0; i < 200 && !aide.conversations.inputStore.get("urgent")?.status.processing?.[uid]; i++) await Bun.sleep(10);
-  assert.equal(aide.conversations.inputStore.get("urgent")!.status.processing?.[uid]?.phase, "submitted");
+  for (let i = 0; i < 200 && !aide.conversations.inputStore.get("urgent")?.status.assess?.[uid]?.executionId; i++) await Bun.sleep(10);
+  assert.equal(aide.conversations.inputStore.get("urgent")!.status.assess?.[uid]?.executionId !== undefined, true);
   assert.equal(conflicts, 0);
   assert.equal(aide.conversations.resource("me")!.status.execution!.admissionRevision, 1);
   release(); await aide.settled();
-  assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, []);
-  const first = aide.conversations.inputStore.get("first")!.status.processing![uid]!;
-  const urgent = aide.conversations.inputStore.get("urgent")!.status.processing![uid]!;
-  assert.equal(first.phase, "done"); assert.equal(urgent.phase, "done"); assert.equal(first.executionId, urgent.executionId);
+  assert.deepEqual(aide.conversations.get("me")!.pendingInputIds, []);
+  const first = aide.conversations.inputStore.get("first")!.status.assess![uid]!;
+  const urgent = aide.conversations.inputStore.get("urgent")!.status.assess![uid]!;
+  assert.ok(first.completedAt); assert.ok(urgent.completedAt); assert.equal(first.executionId, urgent.executionId);
   assert.equal(aide.invocations().filter(i => i.conversationId === "me").length, 1);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
   const admitted = [...state.harnessInputs.values()].find(i => i.delivery === "steer")!;
@@ -677,7 +677,7 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
     }
     if (messages.at(-1)!.role === "tool") return { text: "Handled" };
     const inputId = JSON.parse(raw.split("Activation: ").at(-1)!.split("\n")[0]!).inputId;
-    return { tool: "complete_inputs", args: { inputIds: [inputId], summary: "Recorded fact" } };
+    return { tool: "assess_input", args: { inputId, summary: "Recorded fact" } };
   });
   const home = join(fixture.config.cwd, "route-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },
@@ -688,14 +688,14 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
   await aide.conversations.submit("route-first", { origin: "source", originId: "fixture", text: "subject-one" });
   for (let i = 0; i < 300 && routeCalls < 3; i++) await Bun.sleep(10);
   assert.equal(routeCalls, 3);
-  assert.equal(aide.conversations.inputStore.get("route-first")!.status.routing?.destinations, undefined);
+  assert.equal(aide.conversations.inputStore.get("route-first")!.status.route?.result, undefined);
   await aide.conversations.submit("route-second", { origin: "source", originId: "fixture", text: "subject-two" });
   release(); await aide.settled();
   for (const id of ["route-first", "route-second"]) {
     const input = aide.conversations.inputStore.get(id)!;
-    assert.equal(input.status.routing!.phase, "done");
-    assert.deepEqual(input.status.deliveries, [targetUid]);
-    assert.equal(input.status.processing![targetUid]!.phase, "done");
+    assert.ok(input.status.route?.completedAt);
+    assert.deepEqual(Object.keys(input.status.assess!), [targetUid]);
+    assert.ok(input.status.assess![targetUid]!.completedAt);
   }
   const followup = routeRequests.find(r => JSON.stringify(r.messages).includes("subject-two"))!;
   assert.match(JSON.stringify(followup.messages), /subject-one/);

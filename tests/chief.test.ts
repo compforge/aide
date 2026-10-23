@@ -28,7 +28,7 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
   assert.deepEqual(first, duplicate);
   await aide.settled();
   assert.equal(calls, 1);
-  assert.deepEqual(aide.personal.conversations.resource("me")!.status.pendingInputIds, []);
+  assert.deepEqual(aide.personal.conversations.get("me")!.pendingInputIds, []);
   assert.equal(aide.works().length, 0);
   assert.deepEqual(aide.outputs().map((m) => m.text), ["直接回答"]);
   await aide.receive(fixtureIncoming({ ...input, sessionId: "other", conversationId: "other", text: "hello" })); await aide.settled();

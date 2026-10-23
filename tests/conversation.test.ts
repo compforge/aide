@@ -1,7 +1,7 @@
 import { fixtureIncoming } from "./address-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
-import { completeInputs } from "../plugins/personal/conversation/complete.ts";
-import { processing } from "../plugins/personal/loop.ts";
+import { assessAll } from "./input-state-fixture.ts";
+import { admit } from "./input-state-fixture.ts";
 import { loadConfig } from "../src/config.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { SOURCE_TYPE } from "../plugins/personal/source/requirement/observe.ts";
@@ -32,11 +32,11 @@ test("Independent Input facts and Personal consumption survive reopening with ve
   const c = store.resource("group-a")!;
   const client = createResourceClient(store.resources);
   await client.patchStatus(c, { execution: { id: "exec", startedAt: new Date().toISOString() } });
-  await assert.rejects(client.patchStatus(c, { pendingInputIds: [] }), /version conflict/);
+  await assert.rejects(client.patchStatus(c, { summary: "stale" }), /version conflict/);
   assert.equal(store.input("m1")!.metadata.resourceVersion, store.inputStore.get("m1")!.metadata.resourceVersion);
-  await processing(client, "m1", c.metadata.uid, () => ({ executionId: "exec", phase: "submitted", at: new Date().toISOString() }));
-  await completeInputs(client, c, "exec", { inputIds: ["m1"], summary: "answer" });
-  await assert.rejects(completeInputs(client, c, "wrong", { inputIds: ["m1"], summary: "answer" }), /no longer active/);
+  await admit(client, "m1", c.metadata.uid, "exec");
+  await assessAll(client, c, "exec", { inputIds: ["m1"], summary: "answer" });
+  await assert.rejects(assessAll(client, c, "wrong", { inputIds: ["m1"], summary: "answer" }), /no longer active/);
   const reopened = new ConversationStore({ dir });
   assert.equal(reopened.input("m1")!.consumption.phase, "done");
   assert.deepEqual(reopened.get("group-a")!.pendingInputIds, []);
@@ -79,7 +79,7 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
   const interrupted = aide.personal.conversations.resource("a")!;
   const client = aide.personal.plugins.resourceClient("personal");
   await client.patchStatus(interrupted, { execution: { id: "interrupted", startedAt: new Date().toISOString() } });
-  await processing(client, active.metadata.name, interrupted.metadata.uid, () => ({ executionId: "interrupted", phase: "submitted", at: new Date().toISOString() }));
+  await admit(client, active.metadata.name, interrupted.metadata.uid, "interrupted");
   await seedInput(aide.personal.conversations, "queued", { conversationId: "b", text: "process-after-restart", origin: "channel", originId: "web" });
   await aide.close();
   aide = new Aide(root, options, pino({ level: "silent" }));

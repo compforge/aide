@@ -3,7 +3,7 @@ import { outputView } from "../../src/output.ts";
 import { randomUUID } from "node:crypto";
 import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
 import type { ResourceClient, ResourceNamespace, Address } from "@compforge/aide-plugin";
-import { WorkSchema, validateTrigger, type OutputDraft, type OutputView, type Work, type WorkInput, type WorkStatus, type Delivery } from "./model.ts";
+import { WorkSchema, validateTrigger, type OutputDraft, type OutputView, type Work, type WorkStatus, type Delivery } from "./model.ts";
 import { ConversationStore } from "./conversation/store.ts";
 
 import { WORK_TYPES, workType, toWork, type WorkResource, type WorkSpec } from "./resources.ts";
@@ -15,7 +15,7 @@ const delivery = (): Delivery => ({ inputs: [], events: [] });
  * @link docs/plugin/personal.md
  */
 export class Store {
-  constructor(readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly conversations: ConversationStore) {}
+  constructor(readonly resources: PluginResourceStore, readonly client: ResourceClient, readonly conversations: ConversationStore) {}
 
   read(): { works: Work[]; outputs: OutputView[] } {
     const works = this.listResources();
@@ -69,9 +69,9 @@ export class Store {
   async save(work: Work, outputs: OutputDraft[] = [], inputKey?: string, eventKey?: string): Promise<void> {
     WorkSchema.parse(work);
     validateTrigger(work.kind, work.trigger, new Date());
-    const { id, conversationId, kind, title, instruction, trigger, revision, inputs: workInputs, ...observation } = work;
+    const { id, conversationId, kind, title, instruction, trigger, revision, uid: _uid, ...observation } = work;
     const type = workType(kind);
-    const spec: WorkSpec = { conversationId, title, instruction, revision, inputs: workInputs,
+    const spec: WorkSpec = { conversationId, title, instruction, revision,
       ...(kind === "routine" ? { trigger: trigger! } : {}) };
     const current = this.findResource(id);
     if (current && current.kind !== type.kind) throw new Error("Work kind is immutable; create the other type and pause or delete the original work");
@@ -86,15 +86,6 @@ export class Store {
       ...outputs.map((o) => outputWrite(c, o, { producer: current ? { ...type, name: id, namespace: current.metadata.namespace, uid: current.metadata.uid }
         : { ...type, name: id, namespace: "v1" } })),
     ]);
-  }
-
-  /** @spec Appending an input changes only the Work inbox and revision, never its execution state. */
-  async appendInput(id: string, input: WorkInput): Promise<void> {
-    const current = this.getResource(id);
-    if (current.metadata.deletionTimestamp) throw new Error(`Work ${id} is being deleted`);
-    if (current.spec.inputs?.some((item) => item.id === input.id)) return;
-    await this.client.replace(current, { ...current.spec, revision: current.spec.revision + 1,
-      inputs: [...current.spec.inputs ?? [], input] }, current.status);
   }
 
   async reply(conversationId: string, outputs: OutputDraft[], key: string): Promise<void> {

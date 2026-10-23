@@ -125,7 +125,7 @@ Harness returns an invocation ID and execution result. Reconcile snapshots conta
 
 ## Resource Printers
 
-[ResourceDefinition](src/resource.ts) is the declaration entrypoint for type, schema, optional validators, Printer and retention. Declare resources before activation. For an isolated Runner, the Host package entry supplies `resourcesUrl`, a pure module whose default export is the definition array; in-process plugins use `PluginPackage.resources`. The Host loads definitions before restoration and Controllers, independently of the Runner lifetime.
+[ResourceDefinition](src/resource.ts) is the declaration entrypoint for type, schema, optional validators, Printer, indexes and retention. Declare resources before activation. For an isolated Runner, the Host package entry supplies `resourcesUrl`, a pure module whose default export is the definition array; in-process plugins use `PluginPackage.resources`. The Host loads definitions before restoration and Controllers, independently of the Runner lifetime.
 
 ```ts
 import type { ResourceDefinition } from "@compforge/aide-plugin";
@@ -170,3 +170,5 @@ Inline hooks fail open on failure or timeout. Deferred hooks use best-effort bou
 See [Channel](../../docs/channel/README.md) for the current Web / Lark experience and [Kernel](../../docs/kernel.md) for execution ownership.
 
 Controllers may set an optional `name` (lowercase letter followed by up to 63 lowercase letters, digits or hyphens) to observe the same resource kind with independent queues, locks and durable deadlines. Use explicit status Watches and resource-version checks to coordinate their separate responsibilities.
+
+Resource definitions can declare pure multi-value `indexes`, queried with `resources.list(type, { matchIndex: { name, value } })`. The Host updates indexes transactionally, rebuilds them when loading definitions, and removes them with the resource. Queries remain scoped to the plugin, resource type and namespace; unknown indexes are errors.

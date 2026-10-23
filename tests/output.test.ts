@@ -113,7 +113,7 @@ test("say associates optional Inputs and records Outputs for the owning executio
   await assert.rejects(say("不相关", "tool-4", ["foreign"]), /not attached/);
   c = f.conversations.resource("topic")!;
   assert.equal(f.outputs.list().length, 3);
-  assert.deepEqual(c.status.pendingInputIds, ["a", "b"], "Saying something does not consume Inputs");
+  assert.deepEqual(f.conversations.get("topic")!.pendingInputIds, ["a", "b"], "Saying something does not consume Inputs");
   f.outputs.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Output": { maxCount: 3 } } }));
   f.outputs.create(f.session.id, "over-capacity", f.spec());
   await f.client.patchStatus(c, { execution: null });

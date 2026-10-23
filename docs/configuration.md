@@ -213,7 +213,7 @@ plugins:
 - trigger 到期仍可在没有新 Input 时执行回顾。一次调用最多两天。
 - `contextChars` 限制新 Input 的描述预览，全文通过 `read_input` 分页读取；原生历史和压缩由 SDK 管理。
 - `summaryChars` 限制近期处理摘要，较旧条目会裁剪；长期认识使用共享记忆，委托进展保存在 Work。
-- `complete_inputs` 提交业务消费回执并精确出队。没有回执的已尝试输入保留失败证据，不自动重放。
+- `assess_input` 提交业务消费回执并原子建立 Work 办理记录。没有回执的已尝试输入保留失败证据，不自动重放。
 
 不再提供 batchSize、maxWaitSeconds 或分批压缩配置。
 

@@ -1,87 +1,66 @@
 # Route Harness
 
-Route 为新 Input 寻找合适的 Conversation。确定性规则处理明确归属，Route Agent 判断其余输入与已有话题的关系，再通过 `route_input` 提交分派决定。一个 Input 可以进入多个 Conversation，各 Conversation 的 Chief 独立处理和确认消费。
+Route 为 Input 寻找一个或多个相关 Conversation。明确规则由 Reconcile 执行，其余提交给持续运行的 Route Agent；找不到相关话题才使用 Default。Default 不接受额外的无条件副本，也不承担基础设施故障兜底。
 
 ```text
-Channel / Source → 持久 Input → 确定性规则
-                                ├─ 命中 → 幂等追加到 Conversation
-                                └─ 未命中 → Route loop → route_input
-                                                          ↓
-                                              保存计划 → 幂等追加
-                                                          ↓
-                                              Chief → complete_inputs
+Channel / Source → Input
+                   ↓
+          Route Reconcile：确定性规则
+                   ├─ 命中 ─────────────┐
+                   └─ followup → Route Agent → route_input
+                                         ↓
+                Input.status.route + assess[Conversation UID]
+                                         ↓
+                    Conversation Reconcile → Chief Agent
+                                         ↓ assess_input
+                         assess 完成 + handle[Work UID]
+                                         ↓
+                            Task / Routine Reconcile
 ```
-
-没有任何 Conversation 时，直接建立 Default 承接输入，无需调用模型。整体业务流程见 [Personal](../plugin/personal.md#输入与上下文)，通用执行契约见 [Harness](README.md)。
 
 ## Agent 与 Controller
 
-`Route/global` 是 Personal 的单例资源，保存待分派的 `pendingInputIds` 和当前 execution。两个 Controller 观察同一资源，拥有独立队列：
+`Route/global` 只保存当前 execution，不保存 Input ID 队列。默认 Controller 根据 Input 索引发现待路由事实，处理规则；具名 `agent` Controller 把其余输入交给持久 Route Agent。Reconcile 是确定性协调器，Agent 承担非确定性判断。两者不需要 Batch 或 Delivery 资源。
 
-| 组件 | 职责 |
-| --- | --- |
-| 默认 Controller | 发现未完成路由的 Input、尝试确定性规则、续投已保存计划、清理已完成队列项、接纳 immediate |
-| 具名 `agent` Controller | 将待判断的输入交给 Route Agent，复用原生上下文并安排后续调用 |
-| Route Agent | 读取当前会话目录、输入和相关记忆，决定完整的目标集合 |
-| 宿主绑定的工具 | 校验输入和目标身份，持久化决定并执行幂等投递 |
+“持续运行”指复用同一原生上下文，普通输入持续 followup；没有输入时可以空闲。运行中的 immediate 可以通过 steer 接纳。当前大部分 immediate 带明确 sessionId，会先被规则直接分派。模型等待不阻塞默认 Controller 的规则处理。
 
-因此，Route 等待模型时，确定性归属的消息仍能进入 Conversation。资源和 Controller 定位执行上下文，`personal-route` 是该角色的 Harness Target；不另建内部 Session 充当业务资源。
-
-确定性规则包括匹配 `Input.sessionId` 与 Conversation 话题，以及沿 `observation.originalInputId` 的投递凭据关联已有会话。讨论续报会等待原始输入路由完成。Channel 的明确新话题可以创建 Conversation；Source 的陌生话题线索本身不触发创建。
+规则匹配 Input.sessionId 与 Conversation 话题；originalInputId 已有路由结果时可以沿其归属关联。前置 Input 尚未决定时，它只是证据，不构成硬等待依赖。Channel 的明确新话题可以创建 Conversation，Source 的陌生话题线索本身不创建。没有任何 Conversation 时直接建立 Default。
 
 ## 工具与完成条件
 
-Route 使用以下工具，不加载文件、CLI 或 Work 执行能力，也不直接回复用户。
-
 | 工具 | 用途 |
 | --- | --- |
-| `list_conversations({ offset? })` | 分页读取当前 Conversation 的 UID、名称、Default 标记和摘要 |
-| `read_input({ inputId?, offset? })` | 读取待分派 Input 的描述；省略 inputId 时列出待处理 ID 与处理状态 |
-| `route_input({ inputId, conversationUids, reason })` | 提交一条已接纳 Input 的完整分派决定 |
-| `memory_search`、`session_search` | 检索与判断相关的共享记忆和历史 |
+| `list_conversations({ offset? })` | 当前会话 UID、名称、Default 标记与摘要 |
+| `read_input({ inputId?, offset? })` | 分页查看事实或待路由项及尝试记录 |
+| `route_input({ inputId, conversationUids, reason })` | 原子提交完整路由决定；空目标数组表示 Default |
+| `memory_search`、`session_search` | 检索共享记忆与历史 |
 
-读取结果的 `nextOffset` 为 null 时表示该次分页结束。目录可能变化，Agent 应在判断前读取当前目录，不能只凭原生历史中的旧名称或 UID。
+`route_input` 仅提供给 Route。工具验证本次 execution 确实接纳了 Input，目标必须是现存 Conversation UID。一次事务写入 `Input.status.route.result`、completedAt 和所有 `assess[uid]`；建立 assess 即完成交付，不再逐个修改 Conversation 队列。目标版本检查与写入处于同一事务，删除或替换目标不能导致误投。
 
-`route_input` 的三个字段分别是输入 ID、目标 Conversation UID 数组和判断理由。多个目标允许，空数组表示交给 Default。例如：
+已完成的重复调用不改分派结果、不重置 assess。工具调用成功才表示路由完成；模型结束或说“已分派”不算确认。Chief 使用独立的 `assess_input`，`say` 另行产生 Output。
 
-```json
-{
-  "inputId": "input-example",
-  "conversationUids": ["conversation-uid-from-catalog"],
-  "reason": "这条发布进展属于已有的故障跟进话题"
-}
-```
+## 恢复、重试与保留
 
-目标必须来自当前资源目录，不能编造。工具提交的是完整集合，不能先提交一个目标，再以第二次调用补充另一个目标。已有持久计划优先，已完成输入的重复提交不会重新分派。
+每条 Input.route 保存 executionId、startedAt、attempts、lastError、nextAttemptAt 和最终结果。未完成不等于失败：可能尚未接纳、正在处理、等待退避，或需要核对。纯分类失败可以重试：按每条 Input 的 nextAttemptAt 判断是否就绪，和新输入一起按原始到达顺序选择，避免持续新输入饿死旧失败项。
 
-宿主先把计划保存到 `Input.status.routing`，再按目标 UID 调用幂等追加；全部投递完成后标记路由完成，随后从 Route 队列移除。没有合适目标时使用用户选择的 Default；没有 Default 时建立无通信地址的默认会话。规则或语义命中其它目标时，不额外复制给 Default。
+完成分派的 Input 永远不因 Route 重试而重分派。Chief 已尝试但未确认时可能有外部副作用，保留证据供后续核对，不采用 Route 的自动重试策略。收尾事务失败时，下次 Reconcile 先提交遗留状态和释放 execution，不重复调用 Harness。
 
-`route_input` 成功只表示分派完成。`complete_inputs` 仅向 Chief 暴露，确认的是某个 Conversation 对 Input 的业务消费；`say` 独立产生 Output。模型输出一段“已分派”的文本，或 HarnessInvocation 正常结束，都不能替代工具回执。
+Input 自身保护未完成的 route、assess、handle。全部完成后才进入 Host 容量回收候选；目标删除会把未完成的对应阶段标为 cancelled，不转给同名新实例。处理凭据随 Input 回收，入站去重回执在配置的窗口内继续防止重投复活。
 
 ## 连续上下文与记忆
 
-Route 对普通输入逐条 followup：当前调用结束后，以同一个原生上下文处理下一条。运行期间到来的 immediate 输入通过 Pi 原生 steer，在安全边界进入当前调用。接纳版本冲突会重新读取；本次重试耗尽时重新排队。明确拒绝或不支持 steer 时，输入留队等待 followup；投递结果不确定时保留证据。
+Route 与 Chief 隔离原生上下文、共用 Hermes 长期记忆；Route 只读检索，Chief 可积累记忆。当前资源事实和用户纠正优先于历史；记忆和外部输入不授予执行权限。原生历史、压缩和恢复绑定由 SDK 与宿主管理。
 
-这里的“持续”指上下文持续复用，并不要求模型始终处于生成状态。没有待处理输入时可以空闲；每次 HarnessInvocation 仍独立记录生命周期。Route 不保留 Batch 快照，原生历史、压缩和恢复绑定由 Pi SDK 与宿主管理。
+## 长期演进方向
 
-Route 与各 Conversation 的 Chief 隔离原生上下文，共用 Hermes 长期记忆。Chief 可以维护记忆，Route 只获得检索工具。偏好和话题关系能辅助路由，但当前资源事实与用户明确纠正优先；输入、会话摘要和检索内容都作为证据，不授予执行权限。
+长期可以借鉴 Jev 的决策模型思路，为 Route 引入专门的 decision model：结合近期 Input、当前 Conversation 状态、已确认的分派决定与用户纠正反馈，学习话题归属。历史分派是可修正的决策记录，不自动作为正确标签；模型效果应根据后续反馈验证。
 
-## 恢复与幂等
-
-启动后补扫持久 Input，可以恢复提交成功但未入 Route 队列的输入。未保存决定的分类可以退避重试；已有计划则只续投剩余目标，不重新询问模型改变归属。执行结束后的收尾事务若失败，下一次 agent Reconcile 先重试该事务，再继续新输入，不把未清理的 execution 当作仍在运行而永久跳过。
-
-追加以 Input ID 和 Conversation UID 去重。部分目标投递成功后发生中断，恢复不会让它们重复消费；新到输入也不会随旧输入完成而被移除。目标被删除时保留失败计划，不改投同名的新实例。
-
-Route 待处理队列保护尚未分派完的 Input。投递后，目标 Conversation 的 pending 引用继续保护事实；各消费者释放后，Host 才能按资源容量策略回收。分类重试与 Chief 的动作恢复有不同边界：分派可以重试，已经尝试的外部动作不能因此自动重放。
+当前由持续复用上下文的 Route Agent 接收 followup，并通过 `route_input` 提交一个或多个相关 Conversation；判断没有合适归属时由 Default 承接。未来 decision model 可以辅助候选选择，或在判断足够明确时承接分派决策，沿用 `route_input` 的目标校验、原子分派和幂等确认契约。模型不能明确判断时仍交给 Route Agent；Default 表达没有合适归属的业务决定。此处记录演进方向，当前不引入训练、反馈采集或新的模型后端。
 
 ## 配置、实现与验证
 
-`harnesses.route.model` 可单独选择模型，缺省复用 Chief 的启动模型配置。Route 是固定的 Personal 角色，不能设为 `defaultHarness`。`plugins.personal.route.contextChars` 限制新输入预览，默认 16000 个字符；全文通过 `read_input` 分页读取。完整配置见 [Route 连续分类与模型](../configuration.md#route-连续分类与模型)。
+`harnesses.route.model` 可单独选择模型，缺省复用 Chief 配置。`plugins.personal.route.contextChars` 限制新输入预览，全文用 read_input 分页读取。见 [配置](../configuration.md#route-连续分类与模型)。
 
-实现入口：
+实现入口：[Route Agent](../../agents/route/agent.ts)、[Reconcile](../../plugins/personal/route/reconcile.ts)、[规则](../../plugins/personal/route/rules.ts)、[原子分派](../../plugins/personal/route/delivery.ts)、[持续调用与恢复](../../plugins/personal/loop.ts)。
 
-- [Agent 与策略](../../agents/route/agent.ts)、[工具定义](../../agents/route/tools.ts)。
-- [资源与 Controller](../../plugins/personal/route/reconcile.ts)、[确定性规则](../../plugins/personal/route/rules.ts)、[持久计划与投递](../../plugins/personal/route/delivery.ts)。
-- [宿主工具绑定](../../plugins/personal/aide.ts)、[共享连续调用机制](../../plugins/personal/loop.ts)。
-
-[路由测试](../../tests/route.test.ts)覆盖规则直达、多目标投递、Default、并发到达与部分投递恢复；[Pi SDK 测试](../../tests/pi-agent.test.ts)覆盖真实工具调用、非法目标拒绝、连续上下文、共享记忆与 steer。测试使用模拟模型响应，不能证明真实模型的语义路由准确率。
+[路由测试](../../tests/route.test.ts)覆盖规则、Default、并发、原子 fanout 和重试公平性；[研判测试](../../tests/input-assessment.test.ts)覆盖 Work 交接与释放；[SDK 测试](../../tests/pi-agent.test.ts)覆盖工具权限、持久上下文和 steer。模拟模型测试不证明真实语义路由准确率。

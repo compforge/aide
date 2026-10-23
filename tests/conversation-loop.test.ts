@@ -1,3 +1,4 @@
+import { attemptOf, resourceRef } from "../plugins/personal/input/state.ts";
 import type { PluginContext, ReconcileContext, ResourceCommit } from "@compforge/aide-plugin";
 import { reconcileChief } from "../plugins/personal/conversation/reconcile.ts";
 import { reconcileRouteAgent } from "../plugins/personal/route/reconcile.ts";
@@ -11,9 +12,10 @@ import { join } from "node:path";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions, type Agent } from "./fake-harness.ts";
-import { completeInputs } from "../plugins/personal/conversation/complete.ts";
-import { appendConversationInput } from "../plugins/personal/conversation/input.ts";
-import { processing, type LoopStatus } from "../plugins/personal/loop.ts";
+import { assessAll } from "./input-state-fixture.ts";
+import { routeTo } from "./input-state-fixture.ts";
+import { admit } from "./input-state-fixture.ts";
+import type { LoopStatus } from "../plugins/personal/loop.ts";
 
 function setup(t: { after(fn: () => Promise<void>): void }, agent: Partial<Agent> = {}) {
   const root = mkdtempSync(join(tmpdir(), "aide-continuous-"));
@@ -33,18 +35,18 @@ test("Completion atomically acknowledges only admitted inputs; redelivery and re
   const { aide, submit } = setup(t);
   const c = await aide.conversations.ensure("me");
   const client = aide.runtime.plugins.resourceClient("personal");
-  for (const id of ["one", "later"]) await appendConversationInput(client, c.metadata, await submit(id));
+  for (const id of ["one", "later"]) await routeTo(client, c.metadata, await submit(id));
   await client.patchStatus(aide.conversations.resource("me")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
-  await processing(client, "one", c.metadata.uid, () => ({ executionId: "live", phase: "submitted", at: new Date().toISOString() }));
-  await assert.rejects(completeInputs(client, c, "live", { inputIds: ["one", "later"], summary: "invalid" }), /not been admitted/);
-  assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, ["one", "later"]);
-  await completeInputs(client, c, "live", { inputIds: ["one"], summary: "Nothing needs action" });
-  await completeInputs(client, c, "live", { inputIds: ["one"], summary: "Nothing needs action" });
-  assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, ["later"]);
-  assert.equal(await appendConversationInput(client, c.metadata, aide.conversations.inputStore.get("one")!), false);
+  await admit(client, "one", c.metadata.uid, "live");
+  await assert.rejects(assessAll(client, c, "live", { inputIds: ["later"], summary: "invalid" }), /not been admitted/);
+  assert.deepEqual(aide.conversations.get("me")!.pendingInputIds, ["one", "later"]);
+  await assessAll(client, c, "live", { inputIds: ["one"], summary: "Nothing needs action" });
+  await assessAll(client, c, "live", { inputIds: ["one"], summary: "Nothing needs action" });
+  assert.deepEqual(aide.conversations.get("me")!.pendingInputIds, ["later"]);
+  assert.equal(await routeTo(client, c.metadata, aide.conversations.inputStore.get("one")!), false);
   assert.equal(aide.outputs().length, 0);
   assert.equal(aide.conversations.resource("me")!.status.summary, "Nothing needs action");
-  await assert.rejects(completeInputs(client, c, "old", { inputIds: ["one"], summary: "stale" }), /no longer active/);
+  await assert.rejects(assessAll(client, c, "old", { inputIds: ["one"], summary: "stale" }), /no longer active/);
 });
 
 test("Deferred arrivals follow up without repeating old prompt material or deleting concurrent arrivals", async t => {
@@ -54,15 +56,15 @@ test("Deferred arrivals follow up without repeating old prompt material or delet
   t.after(() => release());
   await aide.conversations.ensure("me"); await aide.start();
   await submit("first"); await until(() => calls.length === 1);
-  await submit("later"); await until(() => aide.conversations.resource("me")!.status.pendingInputIds.includes("later"));
+  await submit("later"); await until(() => aide.conversations.get("me")!.pendingInputIds.includes("later"));
   assert.equal(calls.length, 1);
   release(); await aide.settled();
   assert.equal(calls.length, 2); assert.doesNotMatch(calls[1]!, /fact first/);
-  assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, []);
+  assert.deepEqual(aide.conversations.get("me")!.pendingInputIds, []);
   assert.equal(aide.invocations().filter(i => i.conversationId === "me").every(i => !i.freshContext), true);
 });
 
-test("Model end_turn without complete_inputs retains an explicit failure and never silently retries effects", async t => {
+test("Model end_turn without assess_input retains an explicit failure and never silently retries effects", async t => {
   let calls = 0;
   const { aide, submit, root, options } = setup(t, { complete: false, async chief() { calls++; return "I handled it"; } });
   await aide.conversations.ensure("me"); await aide.start(); await submit("unacknowledged"); await aide.settled();
@@ -79,9 +81,9 @@ test("An unsupported steer leaves the urgent input queued for explicit followup 
   const { aide, submit } = setup(t, { async chief() { calls++; if (calls === 1) await gate; return "Handled"; } });
   t.after(() => release());
   await aide.conversations.ensure("me"); await aide.start(); await submit("first"); await until(() => calls === 1);
-  await submit("urgent", "immediate"); await until(() => aide.conversations.resource("me")!.status.pendingInputIds.includes("urgent"));
+  await submit("urgent", "immediate"); await until(() => aide.conversations.get("me")!.pendingInputIds.includes("urgent"));
   assert.equal(calls, 1); release(); await aide.settled(); assert.equal(calls, 2);
-  assert.deepEqual(aide.conversations.resource("me")!.status.pendingInputIds, []);
+  assert.deepEqual(aide.conversations.get("me")!.pendingInputIds, []);
 });
 
 
@@ -94,8 +96,8 @@ for (const kind of ["Conversation", "Route"] as const) for (const failure of ["w
     const first = kind === "Conversation" ? await submit("first")
       : await aide.conversations.submit("first", { origin: "source", originId: "fixture", text: "unmatched fact" });
     let resource: ConversationResource | RouteResource;
-    if (kind === "Conversation") { await appendConversationInput(client, c.metadata, first); resource = aide.conversations.resource("me")!; }
-    else resource = await client.create(ROUTE_TYPE, { name: ROUTE_NAME, spec: {}, status: { pendingInputIds: ["first"] } });
+    if (kind === "Conversation") { await routeTo(client, c.metadata, first); resource = aide.conversations.resource("me")!; }
+    else resource = await client.create(ROUTE_TYPE, { name: ROUTE_NAME, spec: {}, status: {} });
     let failures = failure === "write failure" ? 1 : 9;
     let calls = 0;
     const context = { resources: { ...client, async commit(writes: readonly ResourceCommit[]) {
@@ -112,16 +114,16 @@ for (const kind of ["Conversation", "Route"] as const) for (const failure of ["w
       : reconcileRouteAgent(context, execution(id), await read() as RouteResource);
     await assert.rejects(reconcile("attempted"), new RegExp(failure));
     assert.equal((await read()).status.execution?.id, "attempted");
-    assert.equal(aide.conversations.inputStore.get("first")!.status.processing![resource.metadata.uid]!.phase, "submitted");
+    assert.equal(!!attemptOf(aide.conversations.inputStore.get("first")!, resourceRef(resource))?.executionId, true);
     await reconcile("finalization-retry");
     assert.equal((await read()).status.execution, null);
-    assert.equal(aide.conversations.inputStore.get("first")!.status.processing![resource.metadata.uid]!.phase, "failed");
+    assert.equal(!!attemptOf(aide.conversations.inputStore.get("first")!, resourceRef(resource))?.lastError, true);
     assert.equal(calls, 1);
     const next = await aide.conversations.submit("next", { origin: "source", originId: "fixture", text: "new fact" });
-    if (kind === "Conversation") await appendConversationInput(client, c.metadata, next);
-    else { const r = await read(); await client.patchStatus(r, { pendingInputIds: ["first", "next"] }); }
+    if (kind === "Conversation") await routeTo(client, c.metadata, next);
+
     await reconcile("next-call");
     assert.equal(calls, 2);
-    assert.equal(aide.conversations.inputStore.get("first")!.status.processing![resource.metadata.uid]!.executionId, "attempted");
+    assert.equal(attemptOf(aide.conversations.inputStore.get("first")!, resourceRef(resource))?.executionId, "attempted");
   });
 }

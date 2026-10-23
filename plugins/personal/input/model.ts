@@ -17,7 +17,7 @@ export interface InputSpec {
   sessionId?: string;
   /** Scheduling urgency, independent of authority or notification intent. */
   attention?: "immediate" | "deferred";
-  origin: "channel" | "source";
+  origin: "channel" | "source" | "chief";
   /** ChannelDefinition or SourceDefinition ID, selected by origin. */
   originId: string;
   /** Producing Source resource; provenance, never a routing destination. */
@@ -34,20 +34,27 @@ export interface InputSpec {
   timezone?: string;
   observation?: Record<string, unknown>;
 }
-/** Routing state belongs to the consuming plugin; the Core persists it without interpreting destinations. */
-export interface Processing { executionId: string; phase: "submitted" | "done" | "failed"; at: string; summary?: string; error?: string }
+/** Each coordinator owns its own status. A model turn ending is not business completion. */
+export interface Attempt {
+  executionId?: string;
+  startedAt?: string;
+  completedAt?: string;
+  lastError?: string;
+}
+export interface Assessment extends Attempt {
+  resource: ResourceRef & { uid: string };
+  assignedAt: string;
+  result?: { summary: string; disposition?: "completed" | "cancelled" | "rejected" };
+}
+export interface Handling extends Assessment {
+  request: import("../model.ts").WorkInputRequest;
+}
 export interface InputStatus {
-  /** Per-consumer receipts expire with this Input; never an unbounded Conversation index. */
-  processing?: Record<string, Processing>;
-  /** Attached Conversation incarnation IDs; retained after a recent-history window forgets the Input. */
-  deliveries?: string[];
-  routing?: {
-    phase: "running" | "done" | "ignored";
-    /** Preserve the first-Conversation shortcut across a partial creation and restart. */
-    bootstrap?: boolean;
-    /** Stable identity for the one rule-created Conversation; uid pins its incarnation before append. */
-    creation?: { sessionId: string; name: string; uid?: string };
-    destinations?: Array<{ name: string; uid: string }>;
-    reason: string;
+  route?: Attempt & {
+    nextAttemptAt?: string;
+    attempts?: number;
+    result?: { conversations: Array<ResourceRef & { uid: string }>; reason: string };
   };
+  assess?: Record<string, Assessment>;
+  handle?: Record<string, Handling>;
 }

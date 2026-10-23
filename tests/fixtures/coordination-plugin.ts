@@ -1,3 +1,6 @@
+import { assignmentWatch } from "../../plugins/personal/input/state.ts";
+import { consumeWorkInputs } from "../../plugins/personal/work-input.ts";
+import type { WorkResource } from "../../plugins/personal/resources.ts";
 import type { PluginPackage } from "@compforge/aide-plugin";
 const task = { apiVersion: "aide.dev/v1alpha1", kind: "Task" };
 const observation = { apiVersion: "tests.aide.dev/v1alpha1", kind: "WorkObserver" };
@@ -5,7 +8,7 @@ const namespace = "v1/project/coordination";
 const plugin: PluginPackage = {
   pluginId: "tests/coordination", version: "1.0.0",
   async activate(context) {
-    context.controllers.register({ resourceType: task, async reconcile() {} });
+    context.controllers.register({ resourceType: task, watches: [assignmentWatch("handle", "Task")], async reconcile(_execution, resource) { await consumeWorkInputs(context, resource as WorkResource); } });
     context.controllers.register<{ conversationId: string }, { answer?: string; count?: number; revision?: number }>({
       resourceType: observation,
       sources: [{ type: "resource", sourceId: "unavailable", async start() { throw new Error("Fixture Source is unavailable"); } }, { type: "resource", sourceId: "observer", async start(source) { const resource = { name: "observer", namespace, spec: { conversationId: "group-a" } } as const; await source.emit(resource); await source.emit(resource); } }],

@@ -1,8 +1,13 @@
+import { isDeepStrictEqual } from "node:util";
+import { INPUT_TYPE } from "./input/model.ts";
+import { resourceRef } from "./input/state.ts";
+import { WorkInputRequestSchema } from "./model.ts";
+import { workType } from "./resources.ts";
+import { digest } from "./chief-model.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Logger } from "pino";
 import { TriggerSchema, nextOccurrence, validateTrigger, type Work } from "./model.ts";
-import { digest } from "./chief-model.ts";
 import type { Store } from "./store.ts";
 
 export const WorkDefinitionSchema = z.object({
@@ -10,22 +15,12 @@ export const WorkDefinitionSchema = z.object({
   instruction: z.string().trim().min(1), trigger: TriggerSchema.nullable(),
 }).strict();
 export type WorkDefinition = z.infer<typeof WorkDefinitionSchema>;
-export const AppendInputSchema = z.object({
-  inputId: z.string().min(1).optional(),
-  text: z.string().trim().min(1).optional(),
-  action: z.enum(["context", "update", "pause", "resume", "answer"]).default("context"),
-  changes: WorkDefinitionSchema.omit({ kind: true }).partial().optional(),
-}).strict().refine((v) => v.inputId || v.text, "append_input requires inputId or text")
-  .refine((v) => v.action === "update" ? v.changes && Object.keys(v.changes).length > 0 : !v.changes,
-    "Only an update request accepts and requires changes");
-export type AppendInput = z.input<typeof AppendInputSchema>;
-
 export function newWork(conversationId: string, definition: WorkDefinition, now = new Date()): Work {
   const desired = WorkDefinitionSchema.parse(definition);
   validateTrigger(desired.kind, desired.trigger, now);
   return { id: randomUUID(), conversationId, ...desired,
     status: desired.kind === "routine" ? "scheduled" : "ready", revision: 1,
-    nextAt: nextOccurrence(desired.trigger, now), question: null, inputs: [], consumedInputIds: [], history: [] };
+    nextAt: nextOccurrence(desired.trigger, now), question: null, history: [] };
 }
 
 /**
@@ -50,22 +45,30 @@ export class WorkService {
     await this.store.conversations.ensure(this.conversationId);
     await this.store.save(work);
     this.log.info({ workId: work.id, conversationId: this.conversationId, kind: work.kind }, "Work tool created work");
-    return work;
+    return this.read(work.id);
   }
 
-  async appendInput(id: string, request: AppendInput, key?: string): Promise<Work> {
+  /** @spec An independent Chief request gets a new Input identity; it cannot reopen a previous handle receipt. */
+  async requestInput(id: string, raw: { text: string; action?: "context" | "update" | "pause" | "resume" | "answer"; changes?: import("./model.ts").WorkInputRequest["changes"] }, key: string = randomUUID()) {
     const work = this.read(id);
-    const input = AppendInputSchema.parse(request);
-    const original = input.inputId ? this.store.conversations.input(input.inputId, this.conversationId) : undefined;
-    if (input.inputId && !original) throw new Error("Input does not belong to this conversation");
-    if (original?.spec.origin === "source" && input.action !== "context") throw new Error("Source facts cannot be control requests");
-    const identity = digest([id, input.inputId ?? key ?? randomUUID(), input.action]);
-    await this.store.appendInput(work.id, { id: identity, at: new Date().toISOString(),
-      ...(input.inputId ? { inputId: input.inputId } : {}), origin: original?.spec.origin ?? "chief",
-      ...(original?.spec.observation ? { observation: original.spec.observation } : {}),
-      text: original?.spec.text ?? input.text!, ...(original && input.text ? { note: input.text } : {}),
-      action: input.action, ...(input.changes ? { changes: input.changes } : {}) });
-    this.log.info({ workId: id, inputId: input.inputId, workInputId: identity, conversationId: this.conversationId }, "Appended work input");
+    const { text, ...request } = z.object({ text: z.string().min(1).max(32000) }).passthrough().parse(raw);
+    const parsed = WorkInputRequestSchema.parse(request);
+    const target = this.store.resources.get(workType(work.kind), id);
+    if (target.metadata.deletionTimestamp) throw new Error("Work is being deleted");
+    const c = this.store.conversations.resource(this.conversationId)!;
+    const at = new Date().toISOString();
+    const name = digest([target.metadata.uid, key]);
+    const previous = this.store.conversations.inputStore.get(name);
+    if (previous && !isDeepStrictEqual(previous.status.handle?.[target.metadata.uid]?.request, parsed)) throw new Error("Input already has a different Work request; use a new identity");
+    await this.store.client.commit([
+      { operation: "patchStatus", resource: target, patch: {} },
+      { operation: "create", type: INPUT_TYPE, name, spec: { origin: "chief", originId: "personal.chief", text, sessionId: c.spec.id, observation: { work: resourceRef(target), request: parsed } }, status: {
+        route: { completedAt: at, result: { conversations: [resourceRef(c)], reason: "Independent Chief request" } },
+        assess: { [c.metadata.uid]: { resource: resourceRef(c), assignedAt: at, completedAt: at, result: { summary: text } } },
+        handle: { [target.metadata.uid]: { resource: resourceRef(target), assignedAt: at, request: parsed } },
+      } },
+    ]);
+    this.log.info({ inputId: name, workId: id, workUid: target.metadata.uid, conversationId: this.conversationId, action: parsed.action }, "Chief request assigned to Work");
     return this.read(id);
   }
 

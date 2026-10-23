@@ -7,7 +7,7 @@ import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
-import { appendConversationInput } from "../plugins/personal/conversation/input.ts";
+import { routeTo } from "./input-state-fixture.ts";
 import { chiefTools } from "../agents/chief/chief-tools.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 
@@ -21,12 +21,12 @@ test("Channel and Source Inputs share idempotent admission beyond the old pendin
   const target = { name: conversation.metadata.name, uid: conversation.metadata.uid };
   for (let i = 0; i < 125; i++) {
     const input = await scope.conversations.submit(`input-${i}`, { origin: i % 2 ? "channel" : "source", originId: i % 2 ? "web" : "personal.environments", text: `fact ${i}` });
-    assert.equal(await appendConversationInput(client, target, input), true);
-    assert.equal(await appendConversationInput(client, target, input), false);
+    assert.equal(await routeTo(client, target, input), true);
+    assert.equal(await routeTo(client, target, input), false);
   }
-  assert.equal(scope.conversations.resource("topic")!.status.pendingInputIds.length, 125);
-  assert.equal(new Set(scope.conversations.resource("topic")!.status.pendingInputIds).size, 125);
-  assert.equal(scope.conversations.inputStore.get("input-124")!.status.deliveries?.includes(conversation.metadata.uid), true);
+  assert.equal(scope.conversations.get("topic")!.pendingInputIds.length, 125);
+  assert.equal(new Set(scope.conversations.get("topic")!.pendingInputIds).size, 125);
+  assert.equal(!!scope.conversations.inputStore.get("input-124")!.status.assess?.[conversation.metadata.uid], true);
 });
 
 test("A say request for information finishes processing; the answer is a new Input in the same context", async (t) => {
@@ -39,7 +39,7 @@ test("A say request for information finishes processing; the answer is a new Inp
   const first = fixtureIncoming({ channelId: "web", id: "first", sessionId: "me", text: "检查环境" });
   await aide.receive(first); await aide.settled();
   const before = aide.invocations().at(-1)!;
-  assert.deepEqual(aide.personal.conversations.resource("me")!.status.pendingInputIds, []);
+  assert.deepEqual(aide.personal.conversations.get("me")!.pendingInputIds, []);
   assert.equal(aide.outputs().at(-1)!.text, "请提供目标环境。");
   assert.equal(aide.personal.core.executions.approvals().length, 0);
   await aide.close();
@@ -47,7 +47,7 @@ test("A say request for information finishes processing; the answer is a new Inp
   await aide.receive(fixtureIncoming({ channelId: "web", id: "answer", sessionId: "me", text: "test 环境" })); await aide.settled();
   const after = aide.invocations().at(-1)!;
   assert.notEqual(after.invocationId, before.invocationId);
-  assert.deepEqual(aide.personal.conversations.resource("me")!.status.pendingInputIds, []);
+  assert.deepEqual(aide.personal.conversations.get("me")!.pendingInputIds, []);
   assert.doesNotMatch(prompts.at(-1)!, /请提供目标环境/, "Native context owns history, not repeated prompts");
   assert.match(prompts.at(-1)!, /test 环境/);
   await aide.receive(first); await aide.settled();

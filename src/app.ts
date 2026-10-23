@@ -1,3 +1,4 @@
+import { iconFor } from "@compforge/aide-plugin";
 import { initialConversationName } from "../plugins/personal/conversation/model.ts";
 import { ROUTE_TARGET } from "../plugins/personal/route/model.ts";
 import { personalExecution } from "../plugins/personal/execution-context.ts";
@@ -51,6 +52,7 @@ export class Aide {
     ...Object.values(SOURCES).map((definition) => [`source:${definition.id}`, definition] as const),
   ]);
   inputDefinition(origin: Pick<InputSpec, "origin" | "originId">) {
+    if (origin.origin === "chief" && origin.originId === "personal.chief") return { id: origin.originId, label: "Chief 请求", icon: iconFor("harness:chief") };
     const definition = this.inputDefinitions.get(`${origin.origin}:${origin.originId}`);
     if (!definition) throw new Error(`Unknown input definition: ${origin.origin}:${origin.originId}`);
     return definition;

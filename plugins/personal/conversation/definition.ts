@@ -15,11 +15,10 @@ export const ConversationDefinition: ResourceDefinition<ConversationSpec, Conver
   type: CONVERSATION_TYPE,
   schema: { spec: z.object({ id: z.string(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     trigger: ConversationTriggerSchema.optional() }).strict(),
-    status: z.object({ pendingInputIds: z.array(z.string()).default([]), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
+    status: z.object({  receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       nextTriggerAt: z.string().nullable().optional(), execution: LoopExecutionSchema.nullable().optional(), summary: z.string().max(16000).optional() }).strict() },
   validator: { create: validateDefault, update: (_previous, current, context) => validateDefault(current, context) },
-  retention: { releasedAt: () => undefined, references: (r) => {
-    const s = r.status as ConversationStatus;
-    return s.pendingInputIds.map((id) => `input:${id}`);
+  retention: { releasedAt: () => undefined, references: () => {
+    return [];
   } },
 };

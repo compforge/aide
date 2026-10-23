@@ -117,11 +117,11 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
     for (const resource of resources) await scope.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1",
       resourceApiVersion: ENVIRONMENT_SOURCE_TYPE.apiVersion, resourceKind: ENVIRONMENT_SOURCE_TYPE.kind, resourceId: resource.metadata.name });
     for (let attempt = 0; attempt < 500; attempt++) {
-      if (scope.conversations.inputStore.list().some((input) => input.status.routing?.phase === "done")) break;
+      if (scope.conversations.inputStore.list().some((input) => !!input.status.route?.completedAt)) break;
       await Bun.sleep(10);
     }
     await aide.settled();
-    assert.ok(scope.conversations.inputStore.list().some((input) => input.status.routing?.phase === "done"));
+    assert.ok(scope.conversations.inputStore.list().some((input) => !!input.status.route?.completedAt));
   };
   await poll();
   assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);

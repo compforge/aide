@@ -93,13 +93,13 @@ test("Collected Input redelivery is acknowledged without recreating the resource
   store.storage.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 1 } }));
   const spec = { origin: "source" as const, originId: "fixture", text: "fact" };
   const first = store.submit("owner", "one", spec);
-  store.update(first, { routing: { phase: "done", reason: "ignored" } });
+  store.update(first, { route: { completedAt: new Date().toISOString(), result: { conversations: [], reason: "ignored" } } });
   store.submit("owner", "two", spec);
   assert.equal(store.get("one"), undefined);
   let notifications = 0; store.subscribe(() => notifications++);
   const duplicate = store.submit("owner", "one", spec);
   assert.equal(duplicate.metadata.creationTimestamp, first.metadata.creationTimestamp);
-  assert.equal(duplicate.status.routing?.phase, "ignored");
+  assert.ok(duplicate.status.route?.completedAt);
   assert.equal(store.get("one"), undefined);
   assert.equal(notifications, 0);
   assert.throws(() => store.submit("other-owner", "one", spec), /different content or owner/);

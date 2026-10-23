@@ -1,5 +1,5 @@
 import { seedInput } from "./conversation-fixture.ts";
-import { completeInputs } from "../plugins/personal/conversation/complete.ts";
+import { assessAll } from "./input-state-fixture.ts";
 import { larkAddress } from "../src/channel/address.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
@@ -308,7 +308,7 @@ test("Lark keeps a shared invocation card running until steered input and execut
   assert.equal(larkProgress(aide, conversationId).length, 1);
   assert.equal(larkProgress(aide, conversationId)[0]!.phase, "running");
   const client = aide.runtime.plugins.resourceClient("personal");
-  await completeInputs(client, aide.conversations.resource(conversationId)!, "live", { inputIds: ["urgent"], summary: "Handled" });
+  await assessAll(client, aide.conversations.resource(conversationId)!, "live", { inputIds: ["urgent"], summary: "Handled" });
   assert.equal(larkProgress(aide, conversationId)[0]!.phase, "running");
   await client.patchStatus(aide.conversations.resource(conversationId)!, { execution: null });
   assert.equal(larkProgress(aide, conversationId)[0]!.phase, "done");

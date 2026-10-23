@@ -15,7 +15,7 @@ export interface ConversationBlock extends BaseBlock {
   status?: string;
   detail?: string;
   inputId?: string;
-  origin?: "channel" | "source";
+  origin?: "channel" | "source" | "chief";
   originId?: string;
   relation?: import("../../plugins/personal/input/model.ts").InputRelation;
   sender?: import("@compforge/aide-plugin").ResourceRef;

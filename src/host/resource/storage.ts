@@ -61,6 +61,8 @@ export class ResourceStorage {
       CREATE INDEX IF NOT EXISTS resource_scope ON resources(scope, key);
       CREATE TABLE IF NOT EXISTS resource_refs (source TEXT NOT NULL REFERENCES resources(key) ON DELETE CASCADE, target TEXT NOT NULL, PRIMARY KEY(source,target));
       CREATE INDEX IF NOT EXISTS reference_target ON resource_refs(target);
+      CREATE TABLE IF NOT EXISTS resource_indexes (source TEXT NOT NULL REFERENCES resources(key) ON DELETE CASCADE, name TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(source,name,value));
+      CREATE INDEX IF NOT EXISTS resource_index_lookup ON resource_indexes(name,value,source);
       CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, expires INTEGER NOT NULL, value TEXT NOT NULL);`);
     this.db.exec("UPDATE resources SET released=NULL");
   }
@@ -120,6 +122,13 @@ export class ResourceStorage {
   }
   private indexLifecycle(key: string, scope: string, resource: Resource<unknown, unknown>): void {
     const definition = this.definitions.get(this.definitionKey(scope, resource));
+    this.db.prepare("DELETE FROM resource_indexes WHERE source=?").run(key);
+    for (const [name, values] of Object.entries(definition?.indexes ?? {})) {
+      for (const value of new Set(values(structuredClone(resource)))) {
+        if (typeof value !== "string") throw new Error(`Invalid index value: ${name}`);
+        this.db.prepare("INSERT INTO resource_indexes VALUES (?,?,?)").run(key, name, value);
+      }
+    }
     let released: string | undefined;
     let refs: readonly string[] = [];
     try {
@@ -148,6 +157,10 @@ export class ResourceStorage {
   }
   *keys(scope: string, prefix = "", chronological = false): Iterable<string> {
     for (const row of this.db.prepare(`SELECT key FROM resources WHERE scope=? AND substr(key,1,?)=? ORDER BY ${chronological ? "created,rowid" : "key"}`).iterate(scope, prefix.length, prefix)) yield row.key as string;
+  }
+  *indexedKeys(scope: string, type: ResourceType, prefix: string, name: string, value: string): Iterable<string> {
+    if (!this.definition(scope, type).indexes?.[name]) throw new Error(`Unknown resource index: ${name}`);
+    for (const row of this.db.prepare("SELECT r.key FROM resource_indexes i JOIN resources r ON r.key=i.source WHERE r.scope=? AND substr(r.key,1,?)=? AND i.name=? AND i.value=? ORDER BY r.created,r.rowid").iterate(scope, prefix.length, prefix, name, value)) yield row.key as string;
   }
   write(key: string, scope: string, stored: StoredResource, receipt?: { key: string; value: string }): void {
     this.transaction(() => {

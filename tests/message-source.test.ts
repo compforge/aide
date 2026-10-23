@@ -401,7 +401,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   assert.equal(sender.spec.identities[0]!.id, "ou_other");
   assert.equal(sender.isMe, false);
   assert.equal(observed.spec.observation!.originalInputId, observed.metadata.name);
-  assert.equal(observed.status.routing?.phase, "done");
+  assert.ok(observed.status.route?.completedAt);
   assert.ok(prompts.some((prompt) => prompt.includes("om_dm")));
   for (const chatId of ["oc_chat", "oc_group"]) {
     const sessionId = `source:lark:cli_app:ou_me:${chatId}`;
