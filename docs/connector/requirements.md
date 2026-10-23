@@ -36,7 +36,7 @@ plugins:
 - `me.userKey` 标记被服务的人。启动时解析规范 host / project key，再把稳定 user key 加入 Personal.me 的外部身份。
 - `userKeys` 选择观察哪些负责人的工作；可以包含他人，不会把这些人标记成 Me。
 
-`me` 可省略。没有匹配的 Me 身份时，Input.relation 保持未知。Person 身份使用提供方标识、规范 host/project scope 和 user key；显示名不参与身份匹配，也不凭同名把不同平台的人物合并。Connector 读取会贡献人物身份和姓名，Chief 通过 `profile_person` 积累认识。
+`me` 可省略。没有匹配的 Me 身份时，Input.relation 保持未知。Person 身份使用提供方标识、规范 host/project scope 和 user key；显示名不参与身份匹配，也不凭同名把不同平台的人物合并。Connector 读取会贡献人物身份和姓名，Chief 通过 `summary_person` 积累认识。
 
 ## 观察与恢复
 

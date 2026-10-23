@@ -405,7 +405,7 @@ test("an entirely Aide-defined provider performs a real SDK request with explici
 test("Chief profiles people through tools and refreshes shared user corrections every turn", { timeout: 30_000 }, async (t) => {
   const writer = await setup(t, (_request, index) => index === 0
     ? { tool: "read_person", args: { id: "me" } }
-    : index === 1 ? { tool: "profile_person", args: { id: "me", uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "Prefers concise Chinese answers; explicit statement, 2026-10-21.", recent: "Observed stated preference" } }
+    : index === 1 ? { tool: "summary_person", args: { id: "me", uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "Prefers concise Chinese answers; explicit statement, 2026-10-21.", recent: "Observed stated preference" } }
     : { text: "已更新" }, "chief");
   const me = (await writer.persons.me())!;
   const turn = await writer.run("我更喜欢简洁中文，记一下。", "person-write");
@@ -576,7 +576,7 @@ test("Route exposes only routing, catalog and shared-memory retrieval tools", as
     assert.match(JSON.stringify(request.messages), /You are Route/);
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
     for (const name of ["route_input", "list_conversations", "read_input", "memory_search"]) assert.ok(names.includes(name), name);
-    for (const name of ["say", "assess_input", "create_work", "bash", "profile_person", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
+    for (const name of ["say", "assess_input", "create_work", "bash", "summary_person", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
     return { text: answer };
   }, "route");
   const result = await fixture.run(JSON.stringify({ inputs: [{ id: "one", text: "event" }], conversations: [] }), "route-one");

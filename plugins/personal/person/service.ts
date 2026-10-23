@@ -58,7 +58,7 @@ export class Persons {
     }
     return this.resources.replace(current, PersonSchema.parse(spec), status);
   }
-  async profile(id: string, uid: string, version: string, summary: string, recent: string) {
+  async summarize(id: string, uid: string, version: string, summary: string, recent: string) {
     const current = await this.version(id, uid, version);
     return this.resources.replace(current, current.spec, { ...current.status, ...this.status("chief"), summary,
       recent: [...current.status.recent, { at: new Date().toISOString(), text: recent }] });

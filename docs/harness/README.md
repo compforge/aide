@@ -58,7 +58,7 @@ Adapter 保留提供方明确给出的消息阶段。agentText 表达整轮记�
 
 Harness 执行工具，插件定义工具背后的领域规则。通用 Pi 不认识 Work；Chief 的 WorkService 由 Personal 根据调用 scope 中的 ResourceRef 装配；工具每次调用重新核对资源 UID 和当前 execution，不能捕获已结束执行的 verbs。工具调用归一为执行事件，Channel 负责展示，不能用界面状态驱动业务完成。
 
-原生会话恢复解决同一执行上下文如何继续；长期记忆解决哪些事实应被保留、修订和召回。Aide 通过具体 Harness 组合开源产品的通用记忆能力。Chief 通过 profile_person 维护共享 Person CRD，并内置 pi-hermes-memory 提供其它通用记忆和检索；Personal 管理身份与资源一致性，Chief 负责理解与修订。存储与生命周期见 [Chief](chief.md#上下文与记忆)。通用 Harness 契约不增加记忆接口。
+原生会话恢复解决同一执行上下文如何继续；长期记忆解决哪些事实应被保留、修订和召回。Aide 通过具体 Harness 组合开源产品的通用记忆能力。Chief 通过 summary_person 维护共享 Person CRD，并内置 pi-hermes-memory 提供其它通用记忆和检索；Personal 管理身份与资源一致性，Chief 负责理解与修订。存储与生命周期见 [Chief](chief.md#上下文与记忆)。通用 Harness 契约不增加记忆接口。
 
 宿主拥有执行准入、期限、原生权限 Approval 与有界实时投影，Harness 拥有原生协议和运行资源清理，插件拥有业务调度与恢复决策。已取消的 invocation 与失效的运行句柄分别处理：取消不能跳过关闭；引用保存失败后释放句柄，下一次根据会话引用重新打开。原生会话无法恢复时保留引用并报告错误。可能已经发生外部副作用的中断不能仅凭通信重试自动重放。
 
