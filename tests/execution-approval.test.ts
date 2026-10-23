@@ -24,15 +24,16 @@ function fixture(t: { after(fn: () => Promise<void>): void }, startup = false) {
   const journal = new HarnessFixtures(root).create({ id: "aide:execution", cwd: root });
   const adapters: Array<{ turnId?: string; sink: HarnessEventSink; cancels: number; sends: number; decision?: ApprovalResult }> = [];
   const target = { id: "shared", harness: "test" };
-  const executions = new ExecutionService(root, { cwd: root, resolveTarget: () => target, maxConcurrency: 2,
+  const executions = new ExecutionService(root, { cwd: root, harnesses: [target], defaultHarness: target.id, resolveHarness: () => target, maxConcurrency: 2,
     createAdapter(_target, ports) {
       const state = { cancels: 0, sends: 0 } as (typeof adapters)[number];
       adapters.push(state);
       return {
         harness: "test", capabilities: { prompt: {} },
         async resume(options, events, reference) { return this.create(options, events, reference); },
-        async create(_options, sink) {
-          state.sink = sink;
+        async create(options, sink, reference) {
+          reference({ identity: { id: options.sessionId! } });
+          state.sink = event => sink({ ...event, invocationId: event.invocationId ? idFor(event.invocationId) : undefined });
           if (startup) state.decision = await ports.openApproval({ kind: "hook_trust", harnessName: "test", hooks: [] });
           return { harness: "test", handleId: String(adapters.indexOf(state)) };
         },
@@ -51,13 +52,14 @@ function fixture(t: { after(fn: () => Promise<void>): void }, startup = false) {
     },
   });
   t.after(async () => { await executions.close(); rmSync(root, { recursive: true, force: true }); });
-  const enqueue = (id: string, contextId = id) => {
-    if (!journal.meta.contexts[contextId]) journal.setExecutionContext(contextId, { contextId, harnessSessions: {} });
-    return executions.enqueue({ invocationId: id, pluginInstanceId: "example", harnessTargetId: target.id,
-      contextId, source: "plugin", messageId: `message-${id}`, blocks: [{ type: "text", text: id }] });
-  };
+  const idFor = (id: string) => executions.listHarnessInvocations().find(call => call.executionId === id)?.invocationId ?? id;
+  const enqueue = (id: string, resourceId = id) => executions.invoke({ executionId: id, pluginInstanceId: "example", namespace: "v1",
+    resourceRef: { apiVersion: "example/v1", kind: "Document", namespace: "v1", name: resourceId, uid: resourceId } },
+    { verb: "harness", input: { title: id, prompt: id, session: { id: resourceId }, timeoutMs: 10_000 } });
   const pending = () => executions.approvals().filter(item => item.request.status === "pending").map(item => item.request.messageId);
-  return { executions, journal, adapters, enqueue, pending };
+  return { executions: { view: (ids: string[]) => executions.view(ids.map(idFor)),
+    cancel: (id: string) => executions.cancel(idFor(id)),
+    resolveApproval: executions.resolveApproval.bind(executions), subscribe: executions.subscribe.bind(executions) }, journal, adapters, enqueue, pending };
 }
 
 /** @case Cancelling one approval interrupts only its execution, even when concurrent resources share a Harness target. */

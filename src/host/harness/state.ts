@@ -46,8 +46,8 @@ export interface ToolCallState {
   /** 产生该工具活动的 harness；多 harness 时间线展示归属时使用。 */
   harness?: string;
   /** 产生该工具活动的具体配置目标。 */
-  harnessTargetId?: string;
-  contextId?: string;
+  harnessName?: string;
+  runtimeId?: string;
   title?: string;
   kind?: string;
   /** 只读/副作用声明，由 adapter 上报；缺省 = 未知，消费方保守处理。 */
@@ -65,14 +65,14 @@ export interface PlanState extends PlanUpdate {
   /** 产生该计划的 harness；pinned plan 只跟随当前输入目标。 */
   harness?: string;
   /** 产生该计划的具体配置目标。 */
-  harnessTargetId?: string;
-  contextId?: string;
+  harnessName?: string;
+  runtimeId?: string;
 }
 
 export interface ProposedPlanState extends ProposedPlan {
   harness?: string;
-  harnessTargetId?: string;
-  contextId?: string;
+  harnessName?: string;
+  runtimeId?: string;
   invocationId?: string;
   implementationTurnId?: string;
   implementationStartedAt?: string;
@@ -82,20 +82,20 @@ export interface HarnessTaskState extends HarnessTaskUpdate {
   /** Aide identity; taskId remains the Harness-native identity. */
   taskKey: string;
   harness?: string;
-  harnessTargetId?: string;
+  harnessName?: string;
   harnessSessionId?: string;
-  contextId?: string;
+  runtimeId?: string;
   invocationId?: string;
   /** First observed lifecycle edge; used only to render live elapsed time. */
   startedAt?: number;
 }
 
 /**
- * HarnessTarget-scoped 会话状态的统一槽位，键 = 事件信封 `harnessTargetId`。
+ * HarnessConfiguration-scoped 会话状态的统一槽位，键 = 事件信封 `harnessName`。
  * `harness` 只描述协议/Adapter 类型，不能作为状态实例的查询键：同一种 Harness
  * 可以有多个 Target。新增“每个 Target 各有一份”的状态时统一加在这里。
  */
-export interface HarnessTargetState {
+export interface HarnessConfigurationState {
   /** 该 Target 使用的 Harness 协议类型；仅供展示和能力解释。 */
   harness?: string;
   /** 最近 context 占用快照（整体替换）。带 model 标签：切 model 后旧快照按标签判失效 */
@@ -109,7 +109,7 @@ export interface HarnessTargetState {
   configOptions: SessionConfigOption[];
 }
 
-export type ContextTargetState = HarnessTargetState;
+export type ContextTargetState = HarnessConfigurationState;
 
 /** Transcript read-model order: outputs on first observation, pending inputs only at consumption. */
 export interface TimelineItem {
@@ -121,8 +121,8 @@ export interface InvocationSummaryState extends InvocationSummary {
   /** A late consumption fact can enrich the read model without rewriting the summary Event. */
   updatedSeq?: number;
   harness?: string;
-  harnessTargetId?: string;
-  contextId?: string;
+  harnessName?: string;
+  runtimeId?: string;
 }
 
 export interface HarnessInvocationState {
@@ -137,8 +137,8 @@ export interface HarnessInvocationState {
     | "completed"
     | "cancelled"
     | "failed";
-  harnessTargetId?: string;
-  contextId: string;
+  harnessName?: string;
+  runtimeId: string;
   messageId?: string;
   attemptId?: string;
   result?: InvocationSummaryState;
@@ -159,8 +159,8 @@ export interface UsageTotal {
 export interface ActiveInvocationState {
   invocationId: string;
   harness?: string;
-  harnessTargetId?: string;
-  contextId?: string;
+  harnessName?: string;
+  runtimeId?: string;
   /** 本 turn 当前非 idle 态（running / requires_action）：保真透传，不折叠成 running */
   state: Exclude<SessionRunState, "idle">;
   startedAt?: number;
@@ -177,8 +177,8 @@ export interface ApprovalState {
 export interface HarnessInputState {
   messageId: string;
   invocationId: string;
-  harnessTargetId: string;
-  contextId: string;
+  harnessName: string;
+  runtimeId: string;
   harness?: string;
   status: HarnessInputStatus;
   delivery: "prompt" | "steer" | "followUp";
@@ -225,21 +225,21 @@ export interface HarnessState {
   harnessInvocations: Map<string, HarnessInvocationState>;
   usage: UsageTotal;
   /** Target-scoped 状态统一入口；Harness 类型不是状态实例的查询键。 */
-  perTarget: Map<string, HarnessTargetState>;
+  perTarget: Map<string, HarnessConfigurationState>;
   /** Context × Target 原生 binding 状态。 */
   perContextTarget: Map<string, ContextTargetState>;
   /** 最近一次结构化错误；willRetry 时 runState 仍应为 running（由事件源保证） */
-  lastError?: ErrorUpdate & { seq: number; contextId?: string; invocationId?: string };
+  lastError?: ErrorUpdate & { seq: number; runtimeId?: string; invocationId?: string };
   /**
    * 错误历史（append-only），同时进 timeline（id 为 `err_<seq>`）：
    * 启动失败、admission 错误、quota 耗尽等属于会话流的一部分，要按发生位置内联展示。
    */
-  errors: Map<string, ErrorUpdate & { seq: number; contextId?: string; invocationId?: string }>;
+  errors: Map<string, ErrorUpdate & { seq: number; runtimeId?: string; invocationId?: string }>;
   /**
    * 提示历史（append-only），同时进 timeline（id 为 `n_<seq>`）：打断标记、
    * harness warning 等属于会话流的一部分，要按发生位置内联展示。
    */
-  notices: Array<Notice & { seq: number; contextId?: string; invocationId?: string }>;
+  notices: Array<Notice & { seq: number; runtimeId?: string; invocationId?: string }>;
   invocationSummaries: InvocationSummaryState[];
   lastSeq: number;
 }
@@ -290,8 +290,8 @@ function getOrCreateMessage(
   createdAt: string,
   turnId?: string,
   harness?: string,
-  harnessTargetId?: string,
-  contextId?: string,
+  harnessName?: string,
+  runtimeId?: string,
   source?: EventSource,
   place = true,
 ): MessageState | undefined {
@@ -303,25 +303,25 @@ function getOrCreateMessage(
   let msg = state.messages.get(id);
   if (!msg) {
     const content: MessageState = role === "user"
-      ? inputMessage(id, createdAt, state.harnessInputs.get(id)?.source ?? source, harnessTargetId)
+      ? inputMessage(id, createdAt, state.harnessInputs.get(id)?.source ?? source, harnessName)
       : {
           kind: "output", messageId: id, role, content: [], createdAt,
-          source: harnessTargetId ? { kind: "harness", key: harnessTargetId } : actorOf(source ?? { type: "aide" }),
+          source: harnessName ? { kind: "harness", key: harnessName } : actorOf(source ?? { type: "aide" }),
           target: { ...HUMAN_ACTOR },
         };
     msg = {
       ...content,
       invocationId: turnId,
       harness,
-      harnessTargetId,
-      contextId,
+      harnessName,
+      runtimeId,
     };
     state.messages.set(id, msg);
     if (place) placeMessage(state, id);
   } else {
     if (!msg.harness) msg.harness = harness;
-    if (!msg.harnessTargetId) msg.harnessTargetId = harnessTargetId;
-    if (!msg.contextId) msg.contextId = contextId;
+    if (!msg.harnessName) msg.harnessName = harnessName;
+    if (!msg.runtimeId) msg.runtimeId = runtimeId;
   }
   return msg;
 }
@@ -331,16 +331,16 @@ function getOrCreateToolCall(
   id: string,
   turnId?: string,
   harness?: string,
-  harnessTargetId?: string,
-  contextId?: string,
+  harnessName?: string,
+  runtimeId?: string,
 ): ToolCallState {
   let tc = state.toolCalls.get(id);
   if (!tc) {
     tc = {
       toolCallId: id,
       harness,
-      harnessTargetId,
-      contextId,
+      harnessName,
+      runtimeId,
       status: "pending",
       content: [],
       locations: [],
@@ -351,8 +351,8 @@ function getOrCreateToolCall(
   } else if (!tc.harness) {
     tc.harness = harness;
   }
-  if (!tc.harnessTargetId) tc.harnessTargetId = harnessTargetId;
-  if (!tc.contextId) tc.contextId = contextId;
+  if (!tc.harnessName) tc.harnessName = harnessName;
+  if (!tc.runtimeId) tc.runtimeId = runtimeId;
   return tc;
 }
 
@@ -377,7 +377,7 @@ function applyMessageUpsert(
     pendingSteer ? undefined : ev.invocationId,
     ev.harness,
     eventTargetId(ev),
-    ev.contextId,
+    ev.runtimeId,
     ev.source,
     !pendingSteer,
   );
@@ -406,8 +406,8 @@ function applyMessageUpsert(
       // interrupted Turn, not at the hidden pending steer's original position.
       msg.invocationId = ev.invocationId;
       msg.harness = ev.harness;
-      msg.harnessTargetId = eventTargetId(ev);
-      msg.contextId = ev.contextId;
+      msg.harnessName = eventTargetId(ev);
+      msg.runtimeId = ev.runtimeId;
       const timelineIndex = state.timeline.findIndex(
         (item) => item.type === "message" && item.id === msg.messageId,
       );
@@ -438,7 +438,7 @@ function applyMessageChunk(
     pendingSteer ? undefined : ev.invocationId,
     ev.harness,
     eventTargetId(ev),
-    ev.contextId,
+    ev.runtimeId,
     ev.source,
     !pendingSteer,
   );
@@ -467,7 +467,7 @@ function applyHarnessInputUpdate(
   // Transcript position or an executed Turn. Later receipts only add facts.
   const known = getMessage(state, p.messageId);
   const message = getOrCreateMessage(state, p.messageId, "user", ev.ts, undefined, ev.harness,
-    p.harnessTargetId, p.contextId, p.source, false);
+    p.harnessName, p.runtimeId, p.source, false);
   if (!message) return;
   // Queue transitions update execution state, never rewrite an existing Message.
   if (!known) message.content = [...p.blocks];
@@ -483,8 +483,8 @@ function applyHarnessInputUpdate(
   state.harnessInputs.set(p.messageId, {
     messageId: p.messageId,
     invocationId: p.invocationId,
-    harnessTargetId: p.harnessTargetId,
-    contextId: p.contextId,
+    harnessName: p.harnessName,
+    runtimeId: p.runtimeId,
     ...(ev.harness === undefined ? {} : { harness: ev.harness }),
     status,
     delivery: p.delivery,
@@ -507,7 +507,7 @@ function applyToolCallUpdate(state: HarnessState, ev: EventEnvelope<"tool_call_u
     ev.invocationId,
     ev.harness,
     eventTargetId(ev),
-    ev.contextId,
+    ev.runtimeId,
   );
   if (p.title !== undefined) tc.title = p.title === null ? undefined : p.title;
   if (p.kind !== undefined) tc.kind = p.kind === null ? undefined : p.kind;
@@ -580,8 +580,8 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
         state.activeInvocations.set(ev.invocationId, {
           invocationId: ev.invocationId,
           harness: ev.harness ?? existing?.harness,
-          harnessTargetId: eventTargetId(ev) ?? existing?.harnessTargetId,
-          contextId: ev.contextId ?? existing?.contextId,
+          harnessName: eventTargetId(ev) ?? existing?.harnessName,
+          runtimeId: ev.runtimeId ?? existing?.runtimeId,
           state: hasPendingBlocking(state, ev.invocationId) ? "requires_action" : p.state,
           startedAt: existing?.startedAt ?? (ev.ts ? Date.parse(ev.ts) || undefined : undefined),
           phase: existing?.phase,
@@ -623,7 +623,7 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
         ev.invocationId,
         ev.harness,
         eventTargetId(ev),
-        ev.contextId,
+        ev.runtimeId,
       );
       tc.content.push(p.content);
       break;
@@ -638,8 +638,8 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
         entries: [...p.entries],
         invocationId: ev.invocationId ?? existing?.invocationId,
         harness,
-        harnessTargetId: eventTargetId(ev) ?? existing?.harnessTargetId,
-        contextId: ev.contextId ?? existing?.contextId,
+        harnessName: eventTargetId(ev) ?? existing?.harnessName,
+        runtimeId: ev.runtimeId ?? existing?.runtimeId,
       });
       for (const scope of executionScopes(state, ev)) scope.lastPlanId = p.planId;
       break;
@@ -655,8 +655,8 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       state.proposedPlans.set(p.planId, {
         ...p,
         harness: ev.harness,
-        harnessTargetId: eventTargetId(ev),
-        contextId: ev.contextId,
+        harnessName: eventTargetId(ev),
+        runtimeId: ev.runtimeId,
         invocationId: ev.invocationId,
       });
       break;
@@ -670,11 +670,11 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
     }
     case "task_update": {
       const p = ev.payload;
-      const harnessTargetId = eventTargetId(ev);
+      const harnessName = eventTargetId(ev);
       const taskKey = harnessTaskKey({
         taskId: p.taskId,
-        contextId: ev.contextId,
-        harnessTargetId,
+        runtimeId: ev.runtimeId,
+        harnessName,
         harnessSessionId: ev.harnessSessionId,
       });
       const existing = state.tasks.get(taskKey);
@@ -694,9 +694,9 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       }
       next.taskKey = taskKey;
       next.harness = ev.harness ?? existing?.harness;
-      next.harnessTargetId = harnessTargetId ?? existing?.harnessTargetId;
+      next.harnessName = harnessName ?? existing?.harnessName;
       next.harnessSessionId = ev.harnessSessionId ?? existing?.harnessSessionId;
-      next.contextId = ev.contextId ?? existing?.contextId;
+      next.runtimeId = ev.runtimeId ?? existing?.runtimeId;
       next.invocationId = ev.invocationId ?? existing?.invocationId;
       state.tasks.set(taskKey, next);
       break;
@@ -803,8 +803,8 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
         pluginInstanceId:
           ev.source.type === "plugin" ? ev.source.pluginInstanceId : undefined,
         phase: "queued",
-        contextId: ev.payload.contextId,
-        harnessTargetId: ev.payload.harnessTargetId,
+        runtimeId: ev.payload.runtimeId,
+        harnessName: ev.payload.harnessName,
       });
       state.timeline.push({
         type: "harness_invocation",
@@ -816,8 +816,8 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       const request = state.harnessInvocations.get(ev.payload.invocationId);
       if (!request) break;
       request.phase = "queued";
-      request.harnessTargetId = ev.payload.harnessTargetId;
-      request.contextId = ev.payload.contextId;
+      request.harnessName = ev.payload.harnessName;
+      request.runtimeId = ev.payload.runtimeId;
       request.messageId = ev.payload.messageId;
       request.invocationId = ev.payload.invocationId;
       break;
@@ -847,7 +847,7 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
         ...ev.payload,
         seq: ev.seq,
         invocationId: ev.invocationId,
-        ...(ev.contextId ? { contextId: ev.contextId } : {}),
+        ...(ev.runtimeId ? { runtimeId: ev.runtimeId } : {}),
       };
       state.lastError = errorEntry;
       // 将错误加入 timeline 和 errors map
@@ -869,7 +869,7 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
         ...ev.payload,
         seq: ev.seq,
         invocationId: ev.invocationId,
-        ...(ev.contextId ? { contextId: ev.contextId } : {}),
+        ...(ev.runtimeId ? { runtimeId: ev.runtimeId } : {}),
       });
       state.timeline.push({ type: "notice", id: `n_${ev.seq}` });
       break;
@@ -877,8 +877,8 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
       const summary: InvocationSummaryState = {
         ...ev.payload,
         harness: ev.harness,
-        harnessTargetId: ev.harnessTargetId,
-        contextId: ev.contextId,
+        harnessName: ev.harnessName,
+        runtimeId: ev.runtimeId,
       };
       state.invocationSummaries.push(summary);
       const request = [...state.harnessInvocations.values()].find(
@@ -903,16 +903,16 @@ export function applyEvent(state: HarnessState, ev: AnyEventEnvelope): HarnessSt
   return state;
 }
 
-/** HarnessTarget 是唯一状态实例坐标；缺省即无 Target 归属，绝不从 Harness 类型反推。 */
-function eventTargetId(ev: Pick<AnyEventEnvelope, "harnessTargetId">): string | undefined {
-  return ev.harnessTargetId;
+/** HarnessConfiguration 是唯一状态实例坐标；缺省即无 Target 归属，绝不从 Harness 类型反推。 */
+function eventTargetId(ev: Pick<AnyEventEnvelope, "harnessName">): string | undefined {
+  return ev.harnessName;
 }
 
 /** 取或建 Target 状态槽；所有 Target-scoped 快照只经过这一处归属。 */
 function targetScoped(
   state: HarnessState,
-  ev: Pick<AnyEventEnvelope, "harnessTargetId" | "harness">,
-): HarnessTargetState | undefined {
+  ev: Pick<AnyEventEnvelope, "harnessName" | "harness">,
+): HarnessConfigurationState | undefined {
   const targetId = eventTargetId(ev);
   if (!targetId) return undefined;
   let scoped = state.perTarget.get(targetId);
@@ -929,18 +929,18 @@ function targetScoped(
   return scoped;
 }
 
-export function contextTargetStateKey(contextId: string, harnessTargetId: string): string {
-  return `${contextId}\0${harnessTargetId}`;
+export function contextTargetStateKey(runtimeId: string, harnessName: string): string {
+  return `${runtimeId}\0${harnessName}`;
 }
 
 function laneTargetScoped(
   state: HarnessState,
-  ev: Pick<AnyEventEnvelope, "harnessTargetId" | "contextId" | "harness">,
+  ev: Pick<AnyEventEnvelope, "harnessName" | "runtimeId" | "harness">,
 ): ContextTargetState | undefined {
-  const contextId = ev.contextId;
-  const targetId = ev.harnessTargetId;
-  if (!contextId || !targetId) return undefined;
-  const key = contextTargetStateKey(contextId, targetId);
+  const runtimeId = ev.runtimeId;
+  const targetId = ev.harnessName;
+  if (!runtimeId || !targetId) return undefined;
+  const key = contextTargetStateKey(runtimeId, targetId);
   let scoped = state.perContextTarget.get(key);
   if (!scoped) {
     scoped = {
@@ -957,10 +957,10 @@ function laneTargetScoped(
 
 function executionScopes(
   state: HarnessState,
-  ev: Pick<AnyEventEnvelope, "harnessTargetId" | "contextId" | "harness">,
-): Array<HarnessTargetState | ContextTargetState> {
+  ev: Pick<AnyEventEnvelope, "harnessName" | "runtimeId" | "harness">,
+): Array<HarnessConfigurationState | ContextTargetState> {
   return [targetScoped(state, ev), laneTargetScoped(state, ev)].filter(
-    (scope): scope is HarnessTargetState | ContextTargetState => scope !== undefined,
+    (scope): scope is HarnessConfigurationState | ContextTargetState => scope !== undefined,
   );
 }
 

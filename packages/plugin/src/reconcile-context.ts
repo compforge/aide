@@ -25,13 +25,10 @@ export interface HarnessInvocationInput extends VerbInput {
   readonly operation?: "prompt";
   readonly prompt: string;
   readonly title: string;
-  /** Replace this target native context with the supplied bounded prompt; never replay old turns. */
-  readonly freshContext?: boolean;
-  /** Optional status property holding AgentStatus (usually "agent").
-   * The resource schema declares it; the Host persists native bindings there. */
-  readonly agentKey?: string;
-  /** Omit to use the application's configured default HarnessTarget. */
-  readonly harnessTargetId?: string;
+  /** Native recovery parameters supplied by the caller; the verb never reads resource status. */
+  readonly session?: import("./harness.ts").AgentStatus["session"];
+  /** Omit to use the application's configured default HarnessConfiguration. */
+  readonly harness?: string;
 }
 
 export interface CompletedHarnessValue {
@@ -42,7 +39,7 @@ export interface CompletedHarnessValue {
 
 export type HarnessValue = CompletedHarnessValue;
 
-export type HarnessResult = VerbResult<HarnessValue>;
+export type HarnessResult = VerbResult<HarnessValue> & { readonly agent?: import("./harness.ts").AgentStatus };
 
 /** A receipt acknowledges an operation, never completion of its business inputs. */
 export interface HarnessOperationValue {
@@ -51,17 +48,17 @@ export interface HarnessOperationValue {
   readonly session?: import("./harness.ts").AgentStatus["session"];
 }
 interface HarnessOperationOptions extends VerbInput {
-  readonly harnessTargetId?: string;
-  readonly agentKey?: string;
+  readonly harness?: string;
 }
 export type HarnessOperationInput = HarnessOperationOptions & (
-  | { readonly operation: "create" | "close" }
+  | { readonly operation: "create" }
+  | { readonly operation: "close"; readonly session: NonNullable<import("./harness.ts").AgentStatus["session"]> }
   | { readonly operation: "abort"; readonly invocationId: string }
   | { readonly operation: "resume"; readonly session: NonNullable<import("./harness.ts").AgentStatus["session"]> }
   | { readonly operation: "followUp" | "steer"; readonly invocationId: string; readonly messageId: string; readonly prompt: string }
 );
 export type HarnessVerbInput = HarnessInvocationInput | HarnessOperationInput;
-export type HarnessOperationResult = VerbResult<HarnessOperationValue>;
+export type HarnessOperationResult = VerbResult<HarnessOperationValue> & { readonly agent?: import("./harness.ts").AgentStatus };
 
 /**
  * @spec Controller verbs suspend the same live Plugin execution until a terminal result; Aide never re-enqueues a Resource merely to deliver that result.

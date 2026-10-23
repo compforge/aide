@@ -5,13 +5,11 @@ import personalDefinitions from "../plugins/personal/definitions.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
-import { resourceExecutionKey } from "../src/host/plugin/execution-context.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import { LOCAL_ME } from "../plugins/personal/person/model.ts";
 import type { Persons } from "../plugins/personal/person/service.ts";
 import { memoryAgentDir } from "./pi-memory-fixture.ts";
 import { Aide } from "../src/app.ts";
-import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ConversationStore } from "./conversation-fixture.ts";
 import assert from "node:assert/strict";
@@ -95,7 +93,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   });
   const eventsOf: import("../src/host/harness/adapter.ts").HarnessEventSink = (event) => {
     events.push(event);
-    session.appendEvent({ ...event, source: { type: "harness", harnessTargetId: "assistant" }, harness, harnessTargetId: "assistant", contextId: "main" });
+    session.appendEvent({ ...event, source: { type: "harness", harnessName: "assistant" }, harness, harnessName: "assistant", runtimeId: "main" });
     if (event.kind === "state_update" && event.payload.state === "idle") finished?.();
   };
   const reference: import("../src/host/harness/adapter.ts").SessionReferenceSink = value => { binding = value; };
@@ -239,7 +237,7 @@ test("Chief executes all five Work tools through the SDK and keeps commentary ou
   const sessionFile = (fixture.binding().resumeState!.data as { sessionFile: string }).sessionFile;
   await assert.rejects(createPiAgent({ ...fixture.config, sessionFile }), /does not belong/);
   await assert.rejects(createChiefAgent({ ...fixture.config, sessionFile,
-    work: { ...fixture.work, conversationId: "another" } as WorkService }), /does not belong/);
+    scope: "chief:another-resource", work: { ...fixture.work, conversationId: "another" } as WorkService }), /does not belong/);
 });
 
 test("Pi model failure and cancellation settle once, without a successful final answer", { timeout: 30_000 }, async (t) => {
@@ -298,9 +296,9 @@ test("Aide isolates continuous native contexts across conversations, restart and
   const home = join(fixture.config.cwd, "aide");
   const log = pino({ level: "silent" });
   let aide: Aide;
-  const open = (cwd = fixture.config.cwd) => new Aide(home, { cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" }, createAdapter: (target, ports) =>
+  const open = (cwd = fixture.config.cwd) => new Aide(home, { cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" }, createAdapter: (target, ports) =>
     createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
-      chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }, log);
+      chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }) }, log);
   const send = async (sessionId: string, conversationId: string, id: string) => {
     await aide.receive(fixtureIncoming({ channelId: "web", sessionId, conversationId, id, text: `question-${id}` })); await aide.settled();
     assert.equal(aide.personal.conversations.inputs().at(-1)!.consumption.phase, "done");
@@ -502,7 +500,7 @@ test("Task and Routine execute with the default Pi Harness and its configured pa
   writeFileSync(join(skill, "SKILL.md"), "---\nname: fixture-as-ops\ndescription: Inspect AgentSphere environment evidence.\n---\nRead-only environment operations.\n");
   const piConfig = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir,
     model: { provider: "fixture", id: "work-model" }, skillPaths: [join(skill, "SKILL.md")] });
-  const aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" }, createAdapter: (target, ports) =>
+  const aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" }, createAdapter: (target, ports) =>
     createHarnessAdapter(target, { ...ports, piConfig, targetConfig: { harness: target.harness } }) }, pino({ level: "silent" }));
   t.after(() => aide.close());
   await aide.start();
@@ -537,9 +535,9 @@ test("Chief retains native context across acknowledged Inputs and restart", { ti
   });
   const home = join(fixture.config.cwd, "continuous-home");
   let aide: Aide;
-  const open = () => new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },
+  const open = () => new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
-      ...(target.harness === "chief" ? { chiefSession: aide.chiefSession(target.id, fixture.config.config) } : {}) }) }, pino({ level: "silent" }));
+      ...(target.harness === "chief" ? { chiefSession: aide.chiefSession(ports.scope, fixture.config.config) } : {}) }) }, pino({ level: "silent" }));
   aide = open();
   try {
     await aide.conversations.ensure("me"); await aide.start();
@@ -552,7 +550,6 @@ test("Chief retains native context across acknowledged Inputs and restart", { ti
     assert.match(JSON.stringify(fixture.requests[before]!.messages), /remember-unique-evidence/);
     assert.match(JSON.stringify(fixture.requests[before]!.messages), /followup-evidence/);
     assert.equal(aide.outputs().length, 0);
-    assert.ok(aide.invocations().every(i => !i.freshContext));
   } finally { await aide.close(); }
 });
 
@@ -596,9 +593,9 @@ test("Aide steers immediate Input and independently completes both inputs within
     : index === 1 || index === 2 ? { tool: "assess_input", args: { inputId: index === 1 ? "first" : "urgent", conversationSummary: "Observation handled without notification", summary: "Observation handled without notification" } }
     : { text: "Handled internally" });
   const home = join(fixture.config.cwd, "steer-home");
-  const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },
+  const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
-      chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }, pino({ level: "silent" }));
+      chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
   t.after(async () => { release(); await aide.close(); });
   await aide.conversations.ensure("me"); await aide.start();
   const submit = (id: string, attention: "deferred" | "immediate") => aide.conversations.submit(id, { sessionId: "me", origin: "source", originId: "fixture", attention, text: id });
@@ -676,9 +673,9 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
     return { tool: "assess_input", args: { inputId, conversationSummary: "Recorded fact", summary: "Recorded fact" } };
   });
   const home = join(fixture.config.cwd, "route-home");
-  const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultTarget: { id: "default", harness: "pi" },
+  const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
-      ...(target.harness === "route" ? { routeSession: aide.routeSession(fixture.config.config) } : { chiefSession: aide.chiefSession(target.id, fixture.config.config) }) }) }, pino({ level: "silent" }));
+      ...(target.harness === "route" ? { routeSession: aide.routeSession(ports.scope, fixture.config.config) } : { chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }) }) }, pino({ level: "silent" }));
   t.after(async () => { release(); await aide.close(); });
   targetUid = (await aide.conversations.ensure("topic")).metadata.uid; await aide.start();
   await aide.conversations.submit("route-first", { origin: "source", originId: "fixture", text: "subject-one" });
@@ -698,7 +695,7 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
   const followup = routeRequests.find(r => JSON.stringify(r.messages).includes("subject-two"))!;
   assert.match(JSON.stringify(followup.messages), /subject-one/);
   assert.equal(aide.conversations.list().length, 1);
-  assert.equal(aide.invocations().filter(i => i.harnessTargetId === "personal-route").length, 1);
+  assert.equal(aide.invocations().filter(i => i.harnessName === "route").length, 1);
 });
 
 

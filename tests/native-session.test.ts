@@ -5,10 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import type { AgentStatus, ResourceClient, ResourceDefinition } from "@compforge/aide-plugin";
-import { AgentStatusSchema } from "../plugins/personal/session.ts";
+import { AgentStatusSchema, prepareAgent, saveAgent } from "../plugins/personal/session.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
-import { ResourceSession } from "../src/host/harness/session.ts";
 import { ExecutionService } from "../src/host/runtime/execution.ts";
 import type { ExecutionScope } from "../src/protocol/verbs.ts";
 import type { Harness, HarnessEventSink, OpenOptions, SessionReferenceSink } from "../src/host/harness/adapter.ts";
@@ -16,23 +15,23 @@ import { openCodexThread } from "../src/host/harness/codex/thread.ts";
 
 const TYPE = { apiVersion: "example.dev/v1", kind: "Document" };
 const definition: ResourceDefinition = { type: TYPE, schema: { spec: z.object({}),
-  status: z.object({ agent: AgentStatusSchema.optional(), progress: z.string().optional() }).strict() } };
+  status: z.object({ agent: AgentStatusSchema.optional(), progress: z.string().optional(), execution: z.object({ id: z.string(), startedAt: z.string() }).optional() }).strict() } };
 async function setup(t: { after(fn: () => void | Promise<void>): void }) {
   const home = mkdtempSync(join(tmpdir(), "aide-native-session-"));
   const store = new PluginResourceStore({ home, pluginInstanceId: "example" });
   store.storage.register("example", [definition]);
   const resources = createResourceClient(store);
-  const resource = await resources.create(TYPE, { name: "one", spec: {}, status: { progress: "initial" } });
+  const resource = await resources.create(TYPE, { name: "one", spec: {}, status: { progress: "initial", execution: { id: "execution", startedAt: new Date().toISOString() } } });
   const scope: ExecutionScope = { pluginInstanceId: "example", namespace: resource.metadata.namespace, executionId: "execution",
     resourceRef: { ...TYPE, namespace: resource.metadata.namespace, name: resource.metadata.name, uid: resource.metadata.uid } };
   t.after(() => rmSync(home, { recursive: true, force: true }));
   return { home, resources, scope, resource, store };
 }
 const target = { id: "configured", harness: "test" };
-const request = { verb: "harness" as const, input: { title: "native", prompt: "only this input", timeoutMs: 3000, agentKey: "agent" } };
+const request = { verb: "harness" as const, input: { title: "native", prompt: "only this input", timeoutMs: 3000 } };
 
-test("resource native binding preserves sibling status under concurrent updates and fences resource recreation", async t => {
-  const { resources, scope, store } = await setup(t);
+test("Operator saves recovery parameters with resource version and UID checks", async t => {
+  const { resources, scope, store, resource } = await setup(t);
   let conflict = true;
   const racing: ResourceClient = { ...resources, async patchStatus(resource, patch) {
     if (conflict) {
@@ -42,19 +41,37 @@ test("resource native binding preserves sibling status under concurrent updates 
     }
     return resources.patchStatus(resource, patch);
   } };
-  const owner = new ResourceSession(racing, scope, "agent", target.id, target.harness);
-  await owner.write({ harness: "native-wire-name", harnessSessionId: "native-one" });
+  const agent = { harness: "configured", session: { id: "native-one" } };
+  await saveAgent(racing, resource, scope.executionId, agent);
   const saved = await resources.get<unknown, { agent: AgentStatus; progress: string }>(scope.resourceRef!);
-  assert.deepEqual(saved!.status, { progress: "concurrent", agent: { harness: "test", targetId: "configured", session: { id: "native-one" } } });
-  assert.equal((await owner.read())!.harnessSessionId, "native-one");
-  assert.equal(await new ResourceSession(resources, scope, "agent", "another", "test").read(), undefined);
-  assert.equal(await new ResourceSession(resources, scope, "agent", target.id, "another").read(), undefined);
+  assert.equal(saved!.status.progress, "concurrent");
+  assert.deepEqual(saved!.status.agent, agent);
   await resources.delete(TYPE, "one", scope.namespace);
-  await assert.rejects(owner.write({ harness: "test", harnessSessionId: "deleting" }), /deleted/);
+  await assert.rejects(saveAgent(resources, resource, scope.executionId, agent), /no longer active/);
   store.finalizeDeletion(TYPE, "one", scope.namespace);
   await resources.create(TYPE, { name: "one", spec: {} });
-  await assert.rejects(owner.write({ harness: "test", harnessSessionId: "late-old-binding" }), /missing|deleted|UID|uid/i);
-  assert.equal((await resources.get<unknown, { agent?: AgentStatus }>({ ...TYPE, name: "one", namespace: scope.namespace }))!.status.agent, undefined);
+  await assert.rejects(saveAgent(resources, resource, scope.executionId, agent), /missing|active|UID|uid/i);
+});
+
+/** @case The verb returns late native references without knowing the caller's persistence layout. */
+for (const stopReason of ["end_turn", "cancelled"] as const) test("late native identity is returned after " + stopReason, async t => {
+  const { home, resources, scope } = await setup(t);
+  let publish!: SessionReferenceSink;
+  let sink!: HarnessEventSink;
+  const service = new ExecutionService(home, { cwd: home, harnesses: [target], defaultHarness: target.id, resolveHarness: () => target,
+    createAdapter: () => ({ harness: "test", capabilities: { prompt: {} },
+      async create(_options, events, reference) { sink = events; publish = reference; return { harness: "test", handleId: "live" }; },
+      async resume(options, events, reference) { return this.create(options, events, reference); },
+      async prompt(_ref, input) {
+        publish({ identity: { id: "late-native" } });
+        sink({ kind: "state_update", invocationId: input.invocationId, payload: { state: "idle", stopReason } });
+        return { accepted: true, effective: "new_turn" };
+      }, async abort() {}, async close() {},
+    }) });
+  t.after(() => service.close());
+  const result = await service.invoke(scope, request);
+  assert.deepEqual(result.agent, { harness: "configured", session: { id: "late-native" } });
+  assert.equal((await resources.get<unknown, { agent?: AgentStatus }>(scope.resourceRef!))!.status.agent, undefined);
 });
 
 /** @case Native session identity is durable before prompt dispatch; restarting Aide restores it without any event replay. */
@@ -81,13 +98,18 @@ test("execution resumes solely from resource status and keeps the native ID sepa
       }, async abort() {}, async close() {},
     };
   };
-  const open = () => new ExecutionService(home, { cwd: home, targets: [target], defaultTargetId: target.id,
-    resolveTarget: () => target, createAdapter, resources: () => resources });
+  const open = () => new ExecutionService(home, { cwd: home, harnesses: [target], defaultHarness: target.id,
+    resolveHarness: () => target, createAdapter });
   let service = open();
   t.after(() => service.close());
-  assert.equal((await service.invoke(scope, request)).state, "success");
-  assert.equal((await service.invoke({ ...scope, executionId: "followup" }, request)).state, "success");
-  assert.equal(opened.length, 1, "Followup uses the live native session");
+  const created = await service.invoke(scope, { verb: "harness", input: { operation: "create", timeoutMs: 3000 } });
+  assert.ok(created.agent?.session);
+  const resource = (await resources.get(scope.resourceRef!))!;
+  await resources.patchStatus(resource, { agent: created.agent });
+  const continuing = { ...request, input: { ...request.input, session: created.agent.session } };
+  assert.equal((await service.invoke(scope, continuing)).state, "success");
+  assert.equal((await service.invoke({ ...scope, executionId: "followup", controllerName: "another-controller" }, continuing)).state, "success");
+  assert.equal(opened.length, 1, "Explicit session parameters reuse the live native session across controllers");
   const competitor = open();
   await assert.rejects(competitor.invoke(scope, request), /already active/);
   await competitor.close();
@@ -95,7 +117,7 @@ test("execution resumes solely from resource status and keeps the native ID sepa
   assert.equal(service.view([ids[0]!]).invocationSummaries.length, 1);
   await service.close(); service = open();
   assert.equal(service.view(ids).messages.size, 0);
-  assert.equal((await service.invoke({ ...scope, executionId: "resumed" }, request)).state, "success");
+  assert.equal((await service.invoke({ ...scope, executionId: "resumed" }, continuing)).state, "success");
   assert.equal(opened[1]!.sessionId, "native-one");
   assert.equal(opened[1]!.resumeState, undefined, "An ID-only adapter needs no fabricated recovery payload");
   assert.deepEqual(prompts, Array.from({ length: 3 }, () => [{ type: "text", text: "only this input" }]));
@@ -103,46 +125,43 @@ test("execution resumes solely from resource status and keeps the native ID sepa
   assert.equal(existsSync(join(home, "harness", "meta.json")), false);
 });
 
-for (const scenario of ["open", "completed", "cancelled"] as const) test(`reference persistence failure during ${scenario} releases the native runtime`, async t => {
-  const late = scenario !== "open";
-  const { home, resources, scope } = await setup(t);
-  let sends = 0;
-  let unavailable = true;
-  const broken: ResourceClient = { ...resources, async patchStatus(resource, patch) {
-    if (unavailable) throw new Error("binding storage unavailable");
-    return resources.patchStatus(resource, patch);
-  } };
-  const service = new ExecutionService(home, { cwd: home, targets: [target], defaultTargetId: target.id, resolveTarget: () => target,
-    resources: () => broken, createAdapter() {
-      let sink: HarnessEventSink;
-      let publish: SessionReferenceSink;
-      return { harness: "test", capabilities: { prompt: {} },
-        async resume(options, events, reference) { return this.create(options, events, reference); },
-        async create(_options, events, binding) {
-          sink = events; publish = binding;
-          if (!late) publish({ identity: { id: "native" } });
-          return { harness: "test", handleId: "temporary" };
-        },
-        async prompt(_handle, input) {
-          sends++;
-          publish({ identity: { id: "native" } });
-          sink({ kind: "state_update", invocationId: input.invocationId, payload: { state: "idle", stopReason: unavailable && scenario === "cancelled" ? "cancelled" : "end_turn" } });
-          return { accepted: true, effective: "new_turn" };
-        }, async abort() {}, async close() {},
-      };
-    } });
+/** @case Failing to save Operator state closes the created handle without submitting business input. */
+test("Operator persistence failure cannot dispatch prompt or poison the next create", async t => {
+  const { home, resources, scope, resource } = await setup(t);
+  let creates = 0, closes = 0, prompts = 0;
+  const service = new ExecutionService(home, { cwd: home, harnesses: [target], defaultHarness: target.id, resolveHarness: () => target,
+    createAdapter: () => ({ harness: "test", capabilities: { prompt: {} },
+      async create(_options, _events, publish) { publish({ identity: { id: `native-${++creates}` } }); return { harness: "test", handleId: String(creates) }; },
+      async resume() { throw new Error("No resume expected"); },
+      async prompt() { prompts++; return { accepted: true, effective: "new_turn" }; },
+      async abort() {}, async close() { closes++; },
+    }) });
   t.after(() => service.close());
-  if (scenario === "cancelled") {
-    const result = await service.invoke(scope, request);
-    assert.equal(result.state, "success");
-    if (result.state === "success") assert.equal((result.value as { result: { stopReason: string } }).result.stopReason, "cancelled");
-  } else await assert.rejects(service.invoke(scope, request), /binding storage unavailable/);
-  assert.equal(sends, late ? 1 : 0);
-  assert.equal((await resources.get<unknown, { agent?: AgentStatus }>(scope.resourceRef!))!.status.agent, undefined);
-  unavailable = false;
-  assert.equal((await service.invoke({ ...scope, executionId: "later-input" }, request)).state, "success");
-  assert.equal(sends, late ? 2 : 1, "the very next input reaches Harness once storage recovers");
-  assert.equal((await resources.get<unknown, { agent: AgentStatus }>(scope.resourceRef!))!.status.agent.session!.id, "native");
+  const execution = { executionId: scope.executionId, verbs: { harness: (input: import("@compforge/aide-plugin").HarnessVerbInput) => service.invoke(scope, { verb: "harness", input }) } } as unknown as import("@compforge/aide-plugin").ReconcileContext;
+  const unavailable: ResourceClient = { ...resources, async patchStatus() { throw new Error("storage unavailable"); } };
+  await assert.rejects(prepareAgent(unavailable, execution, resource, target.id), /storage unavailable/);
+  assert.equal(prompts, 0); assert.equal(closes, 1);
+  const agent = await prepareAgent(resources, execution, resource, target.id);
+  assert.equal(agent.session!.id, "native-2");
+  assert.deepEqual((await resources.get<unknown, { agent: AgentStatus }>(scope.resourceRef!))!.status.agent, agent);
+});
+
+test("omitting session creates a new native loop and failed calls still return known recovery parameters", async t => {
+  const { home, scope } = await setup(t);
+  let creates = 0;
+  const service = new ExecutionService(home, { cwd: home, harnesses: [target], defaultHarness: target.id, resolveHarness: () => target,
+    createAdapter: () => ({ harness: "test", capabilities: { prompt: {} },
+      async create(_options, _events, publish) { publish({ identity: { id: `native-${++creates}` } }); return { harness: "test", handleId: String(creates) }; },
+      async resume() { throw new Error("No implicit resume allowed"); },
+      async prompt() { throw new Error("dispatch failed"); }, async abort() {}, async close() {},
+    }) });
+  t.after(() => service.close());
+  const first = await service.invoke(scope, request);
+  assert.equal(first.state, "failure");
+  assert.equal(first.agent?.session?.id, "native-1");
+  const second = await service.invoke(scope, request);
+  assert.equal(second.state, "failure");
+  assert.equal(second.agent?.session?.id, "native-2");
 });
 
 test("a requested Codex session cannot silently fall back to a new thread", async () => {
@@ -156,8 +175,8 @@ test("a requested Codex session cannot silently fall back to a new thread", asyn
 test("Harness verbs create, close and resume through the provider contract", async t => {
   const { home, resources, scope } = await setup(t);
   const calls: string[] = [];
-  const service = new ExecutionService(home, { cwd: home, targets: [target], defaultTargetId: target.id,
-    resolveTarget: () => target, resources: () => resources, createAdapter: () => ({ harness: "test", capabilities: { prompt: {} },
+  const service = new ExecutionService(home, { cwd: home, harnesses: [target], defaultHarness: target.id,
+    resolveHarness: () => target, createAdapter: () => ({ harness: "test", capabilities: { prompt: {} },
       async create(_options, _events, reference) {
         calls.push("create"); reference({ identity: { id: "native" } });
         return { harness: "test", handleId: "live" };
@@ -171,11 +190,12 @@ test("Harness verbs create, close and resume through the provider contract", asy
     }) });
   t.after(() => service.close());
   const operate = (input: import("@compforge/aide-plugin").HarnessOperationInput) => service.invoke(scope, { verb: "harness", input });
-  assert.equal((await operate({ operation: "create", agentKey: "agent", timeoutMs: 1000 })).state, "success");
+  const created = await operate({ operation: "create", timeoutMs: 1000 });
+  assert.deepEqual(created.agent, { harness: "configured", session: { id: "native" } });
   assert.equal(service.listHarnessInvocations().length, 0);
-  assert.equal((await resources.get<unknown, { agent: AgentStatus }>(scope.resourceRef!))!.status.agent.session!.id, "native");
-  await operate({ operation: "close", timeoutMs: 1000 });
-  await operate({ operation: "resume", session: { id: "native" }, agentKey: "agent", timeoutMs: 1000 });
+  assert.equal((await resources.get<unknown, { agent?: AgentStatus }>(scope.resourceRef!))!.status.agent, undefined, "verb never writes CRDs");
+  await operate({ operation: "close", session: { id: "native" }, timeoutMs: 1000 });
+  await operate({ operation: "resume", session: { id: "native" }, timeoutMs: 1000 });
   assert.deepEqual(calls, ["create", "close", "resume:native"]);
   assert.equal(service.listHarnessInvocations().length, 0, "session operations create no inference invocation");
 });
@@ -187,8 +207,8 @@ test("cancelled cold startup failure does not retain a failed runtime", async t 
   let opened!: () => void;
   const opening = new Promise<void>(resolve => { opened = resolve; });
   let attempts = 0, sends = 0;
-  const service = new ExecutionService(home, { cwd: home, targets: [target], defaultTargetId: target.id,
-    resolveTarget: () => target, resources: () => resources, createAdapter() {
+  const service = new ExecutionService(home, { cwd: home, harnesses: [target], defaultHarness: target.id,
+    resolveHarness: () => target, createAdapter() {
       let sink: HarnessEventSink;
       return { harness: "test", capabilities: { prompt: {} },
         async create(_options, events, reference) {
@@ -217,8 +237,8 @@ test("followUp receipts are scoped to the owning resource and do not complete in
   let invocationId = "";
   let started!: () => void;
   const active = new Promise<void>(resolve => { started = resolve; });
-  const service = new ExecutionService(home, { cwd: home, targets: [target], defaultTargetId: target.id,
-    resolveTarget: () => target, resources: () => resources, createAdapter: () => ({ harness: "test", capabilities: { prompt: {} },
+  const service = new ExecutionService(home, { cwd: home, harnesses: [target], defaultHarness: target.id,
+    resolveHarness: () => target, createAdapter: () => ({ harness: "test", capabilities: { prompt: {} },
       async create(_options, events, reference) { sink = events; reference({ identity: { id: "native" } }); return { harness: "test", handleId: "live" }; },
       async resume(options, events, reference) { return this.create(options, events, reference); },
       async prompt(_ref, input) { invocationId = input.invocationId; started(); return { accepted: true, effective: "new_turn" }; },
@@ -242,7 +262,7 @@ test("followUp receipts are scoped to the owning resource and do not complete in
   assert.equal(view.harnessInputs.get("followup")!.deliveryOutcome, "applied");
   const unsupported = await service.invoke(scope, { ...followup, input: { ...followup.input, operation: "steer", messageId: "unsupported" } });
   assert.deepEqual(unsupported, { state: "success", value: { outcome: "rejected", reason: "steer_unsupported" } });
-  await assert.rejects(service.invoke(scope, { ...followup, input: { ...followup.input, harnessTargetId: "wrong-target" } }), /does not match/);
+  await assert.rejects(service.invoke(scope, { ...followup, input: { ...followup.input, harness: "wrong-config" } }), /does not match/);
   const cancelled = await service.invoke({ ...scope, controllerName: "intake" }, { verb: "harness", input: { operation: "abort", invocationId, timeoutMs: 1000 } });
   assert.deepEqual(cancelled, { state: "success", value: { outcome: "accepted" } });
   assert.equal((await running).state, "dismissed");
@@ -254,8 +274,8 @@ test("idle native handles are bounded and evicted resources resume through their
   let created = 0;
   let live = 0;
   const reopened: string[] = [];
-  const service = new ExecutionService(home, { cwd: home, targets: [target], defaultTargetId: target.id,
-    resolveTarget: () => target, resources: () => resources, createAdapter() {
+  const service = new ExecutionService(home, { cwd: home, harnesses: [target], defaultHarness: target.id,
+    resolveHarness: () => target, createAdapter() {
       let sink: HarnessEventSink;
       return { harness: "test", capabilities: { prompt: {} },
         async resume(options, events, reference) { return this.create(options, events, reference); },
@@ -272,14 +292,14 @@ test("idle native handles are bounded and evicted resources resume through their
       };
     } });
   t.after(() => service.close());
-  await service.invoke(scope, request);
+  const first = await service.invoke(scope, request);
   for (let i = 0; i < 45; i++) {
     const resource = await resources.create(TYPE, { name: `other-${i}`, spec: {} });
     await service.invoke({ ...scope, executionId: `run-${i}`, resourceRef: { ...scope.resourceRef!, name: resource.metadata.name, uid: resource.metadata.uid } }, request);
   }
   assert.equal(live, 40);
   assert.equal(service.listHarnessInvocations().length, 40);
-  await service.invoke({ ...scope, executionId: "after-eviction" }, request);
+  await service.invoke({ ...scope, executionId: "after-eviction" }, { ...request, input: { ...request.input, session: first.agent!.session } });
   assert.deepEqual(reopened, ["native-1"]);
   assert.equal(created, 46);
   assert.equal(live, 40);

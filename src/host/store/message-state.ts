@@ -4,9 +4,9 @@ import type { Input, Output, InputRequest, InputResponse } from "../message/type
 /** Execution associations belong to the Harness projection, not Message identity. */
 export interface MessageExecution {
   invocationId?: string;
-  contextId?: string;
+  runtimeId?: string;
   harness?: string;
-  harnessTargetId?: string;
+  harnessName?: string;
 }
 
 export interface InputState extends Input, MessageExecution {

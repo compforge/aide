@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { HarnessTargetConfig } from "../target.ts";
+import type { HarnessOptions } from "../configuration.ts";
 
 export const ClaudeConfigSchema = z.object({
   executable: z.string().trim().min(1).optional(),
@@ -10,11 +10,11 @@ export interface ClaudeTargetConfig {
   executable?: string;
 }
 
-export const DEFAULT_CLAUDE_TARGET_CONFIG: HarnessTargetConfig = Object.freeze({
+export const DEFAULT_CLAUDE_TARGET_CONFIG: HarnessOptions = Object.freeze({
   harness: "claude",
 });
 
-export function resolveClaudeTargetConfig(config: HarnessTargetConfig, environment: Readonly<Record<string, string | undefined>> = process.env): ClaudeTargetConfig {
+export function resolveClaudeTargetConfig(config: HarnessOptions, environment: Readonly<Record<string, string | undefined>> = process.env): ClaudeTargetConfig {
   const configured = typeof config.executable === "string" && config.executable.trim()
     ? config.executable
     : undefined;

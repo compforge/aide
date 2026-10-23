@@ -18,7 +18,7 @@ export interface CodexAdapterOptions {
   openApproval: OpenApproval;
   log?: LogSink;
   nativeEvent?: NativeEventSink;
-  /** HarnessTarget 固定环境；同名项覆盖每次 open 传入的动态环境。 */
+  /** HarnessConfiguration 固定环境；同名项覆盖每次 open 传入的动态环境。 */
   env?: Readonly<Record<string, string>>;
   /** 缺省由 auto-review 审批；显式 user 时请求进入应用审批入口。 */
   approvalReviewer?: "user" | "auto_review";

@@ -5,7 +5,7 @@ import type {
   EventDraft,
   EventEnvelope,
 } from "../event/index.ts";
-import type { HarnessLaunchSnapshot } from "../harness/target.ts";
+import type { HarnessLaunchSnapshot } from "../harness/configuration.ts";
 
 export type DeliveryAttemptPhase =
   | "prepared"
@@ -46,8 +46,8 @@ export interface HarnessDeliveryAttemptState {
   launchSnapshot: HarnessLaunchSnapshot;
   invocationId: string;
   harness?: string;
-  harnessTargetId: string;
-  contextId?: string;
+  harnessName: string;
+  runtimeId?: string;
   harnessSessionId?: string;
   phase: DeliveryAttemptPhase;
   /** 曾收到 admission Receipt；进入 uncertain 不抹掉这条已经发生的事实。 */
@@ -98,9 +98,9 @@ class DeliveryAttemptIndex {
 
     if (update.phase === "prepared") {
       if (existing) return existing;
-      if (!event.invocationId || !event.harnessTargetId) {
+      if (!event.invocationId || !event.harnessName) {
         throw new Error(
-          `delivery attempt ${update.attemptId} prepared without invocationId or harnessTargetId`,
+          `delivery attempt ${update.attemptId} prepared without invocationId or harnessName`,
         );
       }
       const state: HarnessDeliveryAttemptState = {
@@ -109,8 +109,8 @@ class DeliveryAttemptIndex {
         launchSnapshot: update.launchSnapshot,
         invocationId: event.invocationId,
         harness: event.harness,
-        harnessTargetId: event.harnessTargetId,
-        contextId: event.contextId,
+        harnessName: event.harnessName,
+        runtimeId: event.runtimeId,
         harnessSessionId: event.harnessSessionId,
         phase: "prepared",
         accepted: false,
@@ -167,8 +167,8 @@ function canTransition(
 type AttemptDraft = EventDraft<"_aide_delivery_attempt_update"> & {
   /** 保留当前调用的执行归属。 */
   harness?: string;
-  harnessTargetId?: string;
-  contextId?: string;
+  harnessName?: string;
+  runtimeId?: string;
 };
 type AttemptEnvelope = EventEnvelope<"_aide_delivery_attempt_update">;
 
@@ -347,8 +347,8 @@ export class DeliveryAttempts<TContext> {
       kind: "_aide_delivery_attempt_update",
       parentEventId,
       harness: attempt.harness,
-      harnessTargetId: attempt.harnessTargetId,
-      contextId: attempt.contextId,
+      harnessName: attempt.harnessName,
+      runtimeId: attempt.runtimeId,
       harnessSessionId,
       invocationId: attempt.invocationId,
       payload: update,

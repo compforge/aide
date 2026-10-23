@@ -58,7 +58,7 @@ export type DshClientFactory = (options: DeepSeekHarnessOptions) => DshClientLik
 export interface DshAdapterOptions extends DshTargetConfig {
   log?: LogSink;
   nativeEvent?: NativeEventSink;
-  /** HarnessTarget 固定环境；同名项覆盖每次 open 传入的动态环境。 */
+  /** HarnessConfiguration 固定环境；同名项覆盖每次 open 传入的动态环境。 */
   env?: Readonly<Record<string, string>>;
   /** 测试注入点；生产直接使用 SDK 的 DeepSeekHarness。 */
   clientFactory?: DshClientFactory;

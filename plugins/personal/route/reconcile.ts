@@ -1,7 +1,7 @@
 import type { PluginContext, ReconcileContext, Watch } from "@compforge/aide-plugin";
 import { INPUT_TYPE } from "../input/model.ts";
 import { pendingInputs, resourceRef } from "../input/state.ts";
-import { ROUTE_NAME, ROUTE_TYPE, ROUTE_TARGET, type RouteResource } from "./model.ts";
+import { ROUTE_NAME, ROUTE_TYPE, ROUTE_HARNESS, type RouteResource } from "./model.ts";
 import { routeByRules, defaultDestination } from "./rules.ts";
 import { routed, deliver, type RoutingInput } from "./delivery.ts";
 import { finalizeExecution, nextInput, retryDelay, runInput, submitPending } from "../loop.ts";
@@ -44,6 +44,6 @@ export async function reconcileRouteAgent(context: PluginContext, execution: Rec
     await deliver(context, input, [await defaultDestination(context)], "No existing Conversation"); return { requeueAfterMs: 1 };
   }
   const prompt = `Route this input. Read the current Conversation catalog with list_conversations; use route_input to commit its destinations. Earlier context may be stale.\n${JSON.stringify({ inputId: input.metadata.name })}\n${inputPrinter.describe(input).slice(0, routePolicy(context.instance.config.route).contextChars)}\nUse read_input for complete evidence.`;
-  await runInput(context, execution.withContext({ inputId: input.metadata.name }), route, ROUTE_TARGET, prompt, input.metadata.name);
+  await runInput(context, execution.withContext({ inputId: input.metadata.name }), route, ROUTE_HARNESS, prompt, input.metadata.name);
   return { requeueAfterMs: 1 };
 }

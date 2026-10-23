@@ -1,4 +1,4 @@
-import type { ReconcileSnapshot, HarnessTargetSnapshot } from "@compforge/aide-plugin";
+import type { ReconcileSnapshot, HarnessConfigurationSnapshot } from "@compforge/aide-plugin";
 export type { ReconcileSnapshot } from "@compforge/aide-plugin";
 
 /** @spec Reconcile receives configuration only; unrelated executions cannot grow its snapshot.
@@ -6,11 +6,11 @@ export type { ReconcileSnapshot } from "@compforge/aide-plugin";
  */
 export function createReconcileSnapshot(options: {
   readonly cwd?: string;
-  readonly harnessTargets?: readonly HarnessTargetSnapshot[];
+  readonly harnesses?: readonly HarnessConfigurationSnapshot[];
 }): ReconcileSnapshot {
   return Object.freeze({
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-    harnessTargets: Object.freeze((options.harnessTargets ?? []).map(target => Object.freeze({ ...target }))),
+    harnesses: Object.freeze((options.harnesses ?? []).map(target => Object.freeze({ ...target }))),
   });
 }
 

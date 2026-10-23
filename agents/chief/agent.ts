@@ -7,7 +7,7 @@ import { createPiAgent, type PiAgentOptions } from "../pi/agent.ts";
 import { workTools } from "./work-tools.ts";
 import { personContext } from "./person.ts";
 
-export interface ChiefAgentOptions extends Omit<PiAgentOptions, "scope" | "systemPrompt" | "extensionPaths" | "extensionFactories"> {
+export interface ChiefAgentOptions extends Omit<PiAgentOptions, "systemPrompt" | "extensionPaths" | "extensionFactories"> {
   work: WorkService;
   persons?: Persons;
   beforeWorkMutation?: () => void;
@@ -47,7 +47,7 @@ export function createChiefAgent(options: ChiefAgentOptions): Promise<AgentSessi
       beforeWorkMutation?.(); return tool.execute(...args);
     } };
   });
-  return createPiAgent({ ...pi, scope: `chief:${work.conversationId}`, systemPrompt,
+  return createPiAgent({ ...pi, scope: options.scope ?? "chief", systemPrompt,
     extensionPaths: [fileURLToPath(import.meta.resolve("pi-hermes-memory"))],
     extensionFactories: persons ? [personContext(persons)] : [],
     tools: [...workCapabilities, ...(persons ? personTools(persons, beforeWorkMutation) : []), ...tools] });

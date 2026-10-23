@@ -13,7 +13,6 @@ function session() {
   const root = mkdtempSync(join(tmpdir(), "aide-harness-invocation-"));
   roots.push(root);
   const journal = new HarnessFixtures(root).create({ cwd: "/repo" });
-  journal.setExecutionContext("resource-context", { contextId: "resource-context", harnessSessions: {} });
   return journal;
 }
 
@@ -32,8 +31,8 @@ function invocation(
       verb: "harness",
       title: "Implement requirement",
       prompt: "Implement REQ-1 and run its focused tests.",
-      contextId: "resource-context",
-      harnessTargetId: "codex",
+      runtimeId: "resource-context",
+      harnessName: "codex",
       ...overrides,
     },
   };
@@ -58,7 +57,7 @@ describe("HarnessInvocations", () => {
       executionId: "pex_1",
       verb: "harness",
       phase: "queued",
-      contextId: "resource-context",
+      runtimeId: "resource-context",
     });
     const scheduled = store.scheduled(pending.invocationId)!;
     const result = store.wait(pending.invocationId);
@@ -66,8 +65,8 @@ describe("HarnessInvocations", () => {
       kind: "user_message",
       source: { type: "plugin", pluginInstanceId: scheduled.pluginInstanceId },
       harness: "codex",
-      harnessTargetId: scheduled.harnessTargetId,
-      contextId: scheduled.contextId,
+      harnessName: scheduled.harnessName,
+      runtimeId: scheduled.runtimeId,
       invocationId: scheduled.invocationId,
       payload: {
         messageId: scheduled.messageId,
@@ -78,8 +77,8 @@ describe("HarnessInvocations", () => {
       kind: "_aide_invocation_summary",
       source: { type: "aide" },
       harness: "codex",
-      harnessTargetId: scheduled.harnessTargetId,
-      contextId: scheduled.contextId,
+      harnessName: scheduled.harnessName,
+      runtimeId: scheduled.runtimeId,
       invocationId: scheduled.invocationId,
       payload: {
         invocationId: scheduled.invocationId,
@@ -109,7 +108,7 @@ describe("HarnessInvocations", () => {
     const store = new HarnessInvocations(handle);
     const pending = store.record(invocation(handle.id));
     const scheduled = store.scheduled(pending.invocationId)!;
-    expect(scheduled.contextId).toBe("resource-context");
+    expect(scheduled.runtimeId).toBe("resource-context");
     expect(scheduled.invocationId).toBe(pending.invocationId);
     expect("newLane" in scheduled).toBe(false);
     store.close();

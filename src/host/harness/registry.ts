@@ -17,13 +17,13 @@ import { PiAdapter, type PiSessionFactory } from "./pi/adapter.ts";
 import { resolveDshTargetConfig } from "./dsh/config.ts";
 import {
   targetEnvironmentFor,
-  type HarnessTargetConfig,
-} from "./target.ts";
+  type HarnessOptions,
+} from "./configuration.ts";
 import { FileHookTrustStore } from "../config/hook.ts";
 import type { LogSink } from "../logging.ts";
 import { HARNESS_IDENTITIES, HARNESSES, parseHarness, type HarnessName, type HarnessIdentity } from "./ids.ts";
 import type { HarnessSessionInspector } from "./native-session.ts";
-import type { HarnessTarget, HarnessTargetProbeResult } from "./target.ts";
+import type { HarnessConfiguration, HarnessProbeResult } from "./configuration.ts";
 
 export { HARNESSES, parseHarness, type HarnessName };
 
@@ -35,11 +35,11 @@ export interface HarnessAdapterOptions {
   chiefSession?: PiSessionFactory;
   routeSession?: PiSessionFactory;
   /** Adapter 工厂的实例坐标；工厂负责把 Target 配置 lowering 成具体 Adapter 依赖。 */
-  target: HarnessTarget;
+  target: HarnessConfiguration;
   openApproval: OpenApproval;
   log?: LogSink;
   nativeEvent?: NativeEventSink;
-  targetConfig: HarnessTargetConfig;
+  targetConfig: HarnessOptions;
   /** 已校验的 Target 固定环境；覆盖每次 open 动态传入的同名变量。 */
   env?: Readonly<Record<string, string>>;
   rootDir?: string;
@@ -51,17 +51,17 @@ export interface HarnessDefinition<Id extends string = string> extends HarnessId
   /** 固定认色：用户会形成"橙=claude"的肌肉记忆，颜色不随池子调整漂移 */
   color: string;
   create(options: HarnessAdapterOptions): Harness;
-  probe?: (options: HarnessProbeOptions) => Promise<HarnessTargetProbeResult>;
+  probe?: (options: HarnessProbeOptions) => Promise<HarnessProbeResult>;
   /** Aide 外部 HarnessSession 的只读历史观察；不得启动或修改会话。 */
   sessionInspector?: HarnessSessionInspector;
 }
 
 export interface HarnessProbeOptions {
-  target: HarnessTarget;
+  target: HarnessConfiguration;
   cwd: string;
   env?: Record<string, string>;
   log?: LogSink;
-  targetConfig: HarnessTargetConfig;
+  targetConfig: HarnessOptions;
 }
 
 /**
@@ -175,16 +175,16 @@ export function harnessShortName(idOrSessionKey: string): string {
 }
 
 export function createHarnessAdapter(
-  target: HarnessTarget,
+  target: HarnessConfiguration,
   options: Omit<HarnessAdapterOptions, "target">,
 ): Harness {
   const definition = HARNESS_REGISTRY.find((candidate) => candidate.id === target.harness);
   if (!definition) {
-    throw new Error(`HarnessTarget ${target.id} references an unregistered Harness: ${target.harness}`);
+    throw new Error(`HarnessConfiguration ${target.id} references an unregistered Harness: ${target.harness}`);
   }
   if (harnessDefinitionFor(options.targetConfig.harness)?.id !== target.harness) {
     throw new Error(
-      `HarnessTarget config mismatch for ${target.id}: target=${target.harness}, config=${options.targetConfig.harness}`,
+      `HarnessConfiguration config mismatch for ${target.id}: target=${target.harness}, config=${options.targetConfig.harness}`,
     );
   }
   const env = targetEnvironmentFor(options.targetConfig, target.id);
@@ -196,17 +196,17 @@ export function createHarnessAdapter(
 }
 
 /** Target 级发现的唯一入口；没有 probe 的 Harness 返回空快照，不为发现而创建 Adapter。 */
-export async function probeHarnessTarget(
-  target: HarnessTarget,
+export async function probeHarnessConfiguration(
+  target: HarnessConfiguration,
   options: Omit<HarnessProbeOptions, "target">,
-): Promise<HarnessTargetProbeResult> {
+): Promise<HarnessProbeResult> {
   const definition = HARNESS_REGISTRY.find((candidate) => candidate.id === target.harness);
   if (!definition) {
-    throw new Error(`HarnessTarget ${target.id} references an unregistered Harness: ${target.harness}`);
+    throw new Error(`HarnessConfiguration ${target.id} references an unregistered Harness: ${target.harness}`);
   }
   if (harnessDefinitionFor(options.targetConfig.harness)?.id !== target.harness) {
     throw new Error(
-      `HarnessTarget config mismatch for ${target.id}: target=${target.harness}, config=${options.targetConfig.harness}`,
+      `HarnessConfiguration config mismatch for ${target.id}: target=${target.harness}, config=${options.targetConfig.harness}`,
     );
   }
   const targetEnv = targetEnvironmentFor(options.targetConfig, target.id);

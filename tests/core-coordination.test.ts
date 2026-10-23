@@ -20,11 +20,10 @@ import { fakeOptions } from "./fake-harness.ts";
 test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit conversation", async () => {
   const root = mkdtempSync(join(tmpdir(), "aide-core-coordination-"));
   const session = new HarnessFixtures(root).create({ cwd: root });
-  session.setHarnessTarget("default", { harnessTargetId: "default", harness: "codex" });
   const options = fakeOptions({ execute: async () => ({ action: "done", summary: "checked", recent: "checked", notification: "ok", question: null, nextAt: null }) }, root);
   const core = new ApplicationRuntime(root, { cwd: root,
     instances: [{ pluginInstanceId: "fixture", pluginId: "tests/coordination", packageVersion: "1.0.0", marketplace: "builtin", config: {} }],
-    harness: { targets: [{ id: "default", harness: "codex" }], defaultTargetId: "default", createAdapter: options.createAdapter },
+    harness: { harnesses: [{ id: "default", harness: "codex" }], defaultHarness: "default", createAdapter: options.createAdapter },
     plugins: { pluginSupervisor: new PluginSupervisor(),
       loadPackageEntry: async (pluginId, version) => ({ pluginId, version, entryUrl: new URL("./fixtures/coordination-plugin.ts", import.meta.url).href,
         resourcesUrl: new URL("./fixtures/coordination-definitions.ts", import.meta.url).href }) },

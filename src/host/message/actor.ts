@@ -9,7 +9,7 @@ export function actorOf(source: EventSource): ActorRef {
   switch (source.type) {
     case "user": return { ...HUMAN_ACTOR };
     case "aide": return { ...AIDE_ACTOR };
-    case "harness": return { kind: "harness", key: source.harnessTargetId };
+    case "harness": return { kind: "harness", key: source.harnessName };
     case "plugin": return { kind: "plugin", key: source.pluginInstanceId };
     case "schedule": return { kind: "schedule", key: source.scheduleId };
   }

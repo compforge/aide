@@ -32,7 +32,6 @@ function stores() {
   const root = mkdtempSync(join(tmpdir(), "aide-plugin-runner-"));
   roots.push(root);
   const sessionHandle = new HarnessFixtures(root).create({ id: "runner", cwd: root });
-  sessionHandle.setExecutionContext("main", { contextId: "main", harnessSessions: {} });
   const packageDir = join(root, "installed-package");
   const entry = join(packageDir, "index.ts");
   mkdirSync(packageDir, { recursive: true });
@@ -127,7 +126,7 @@ describe("Plugin Runner process boundary", () => {
       kind: "_aide_invocation_summary",
       source: { type: "aide" },
       harness: "codex",
-      harnessTargetId: "codex_default",
+      harnessName: "codex_default",
       invocationId: "turn_runner",
       payload: {
         invocationId: "turn_runner",
@@ -194,7 +193,7 @@ describe("Plugin Runner process boundary", () => {
     await manager.start();
 
     const notification = manager.inlineHook("harness.input", {
-      invocationId: "say-from-hook", attemptId: "attempt", harnessTargetId: "codex",
+      invocationId: "say-from-hook", attemptId: "attempt", harnessName: "codex",
       messageId: "message", operation: "new_turn",
     });
     await waitFor(() => outputs.length === 1);
@@ -226,7 +225,7 @@ describe("Plugin Runner process boundary", () => {
     const manager = new Manager({
       instances,
       log: entry => session.log(entry),
-      harnessTargets: [
+      harnesses: [
         { id: "codex", harness: "codex" },
         { id: "codex_secondary", harness: "codex" },
       ],
@@ -272,7 +271,7 @@ describe("Plugin Runner process boundary", () => {
     });
     await manager.start();
 
-    manager.deferHook("harness.output", { invocationId: "published", kind: "agent_message", harnessTargetId: "codex", eventId: "event", seq: 1 });
+    manager.deferHook("harness.output", { invocationId: "published", kind: "agent_message", harnessName: "codex", eventId: "event", seq: 1 });
     await waitFor(() => outputs.length === 1);
     await manager.settled();
     expect(outputs).toEqual(["Continue outbound publication?"]);
@@ -287,7 +286,7 @@ describe("Plugin Runner process boundary", () => {
       kind: "_aide_invocation_summary",
       source: { type: "aide" },
       harness: "codex",
-      harnessTargetId: "codex_default",
+      harnessName: "codex_default",
       invocationId: "turn_crash",
       payload: {
         invocationId: "turn_crash",
@@ -423,7 +422,7 @@ describe("Plugin Runner process boundary", () => {
     try {
       await manager.start();
       // Hook notifications fail open, but an unresponsive Runner must still be terminated.
-      await manager.inlineHook("harness.input", { attemptId: "blocked", harnessTargetId: "codex", invocationId: "blocked-hook", messageId: "message", operation: "new_turn" });
+      await manager.inlineHook("harness.input", { attemptId: "blocked", harnessName: "codex", invocationId: "blocked-hook", messageId: "message", operation: "new_turn" });
       await waitFor(() => !manager.isInstanceActive("process_timeout"));
       expect(failures).toHaveLength(1);
       expect(String(failures[0]!.error)).toMatch(/Plugin Runner invoke timed out/);

@@ -320,8 +320,8 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   const root = mkdtempSync(join(tmpdir(), "aide-execution-target-"));
   const seen: string[] = [];
   const options = fakeOptions({ chief: async () => "hello", execute: async () => done }, root);
-  const defaultTarget = { id: "chosen", harness, model: "configured-model" };
-  const aide = new Aide(root, { ...options, defaultTarget, createAdapter: (target) => {
+  const defaultHarnessConfig = { id: "chosen", harness, model: "configured-model" };
+  const aide = new Aide(root, { ...options, defaultHarnessConfig, createAdapter: (target) => {
     seen.push(`${target.id}:${target.harness}`); return options.createAdapter(target);
   } }, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
@@ -330,9 +330,9 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   await aide.receive(fixtureIncoming({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "hello" }));
   await aide.settled();
   // Mutating the caller's object cannot change future Sessions' startup target.
-  defaultTarget.model = "changed-after-startup";
+  defaultHarnessConfig.model = "changed-after-startup";
   aide.personal;
-  assert.equal(aide.runtime.targets.find(target => target.id === "chosen")!.model, "configured-model");
+  assert.equal(aide.runtime.harnesses.find(target => target.id === "chosen")!.model, "configured-model");
   await aide.work("me").create(task); await aide.settled();
   await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "sample" } });
   await aide.event({ id: "sample", sessionId: "me", conversationId: "me", name: "sample", text: "sample" });
@@ -341,7 +341,7 @@ test(`Aide routes Task and Routine to the prepared ${harness} target while Chief
   assert.equal(aide.works().find((work) => work.kind === "routine")!.status, "scheduled");
   assert.ok(seen.some((item) => item.endsWith(":chief")));
   assert.equal(seen.filter((item) => item === `chosen:${harness}`).length, 2);
-  assert.equal(aide.runtime.targets.find(target => target.id === "chosen")!.harness, harness);
+  assert.equal(aide.runtime.harnesses.find(target => target.id === "chosen")!.harness, harness);
 });
 
 test("Routine event Input deduplication survives Input collection and restart", async t => {

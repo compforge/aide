@@ -1,7 +1,6 @@
 import { assignmentWatch, cancelAssignments, resourceRef } from "../input/state.ts";
 import type { PluginContext, ReconcileContext, Watch } from "@compforge/aide-plugin";
 import { CONVERSATION_TYPE, type ConversationResource } from "./model.ts";
-import { chiefTarget } from "../chief-model.ts";
 import { inputPrinter } from "../input/printer.ts";
 import { finalizeExecution, nextInput, runInput, submitPending } from "../loop.ts";
 import { conversationPolicy } from "./config.ts";
@@ -56,6 +55,6 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   const material = input ? inputPrinter.describe(input) : "Scheduled review: inspect current delegated work. Communication is optional.";
   const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: input ? "input" : "timer", conversationId: c.spec.id, address: c.spec.address, summary: c.status.summary, recent: c.status.recent, summaryChars: policy.summaryChars, inputId: input?.metadata.name, inputs: input ? [{ inputId: input.metadata.name, description: material.slice(0, policy.contextChars - 3000) }] : [], at: new Date().toISOString() })}\n${input ? "Use read_input for complete evidence and unresolved inputs." : material}`;
   await runInput(context, execution.withContext({ conversationId: c.spec.id, ...(input ? { inputId: input.metadata.name, inputIds: [input.metadata.name] } : {}) }), c,
-    chiefTarget(c.spec.id), prompt, input?.metadata.name);
+    "chief", prompt, input?.metadata.name);
   return { requeueAfterMs: 1 };
 }

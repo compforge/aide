@@ -3,9 +3,6 @@ import { join, resolve } from "node:path";
 import { InvocationExecutor, type InvocationExecutorOptions } from "../controller/index.ts";
 import type { ApprovalResult } from "../approval/types.ts";
 import { HarnessActivity, RECENT_INVOCATIONS } from "../harness/activity.ts";
-import { ResourceSession } from "../harness/session.ts";
-import { resourceExecutionKey } from "../plugin/execution-context.ts";
-import type { ResourceClient } from "@compforge/aide-plugin";
 import { emptyHarnessState, type HarnessState } from "../harness/state.ts";
 import type { ScheduledHarnessInvocation } from "../harness/invocation.ts";
 import { HarnessCalls, type HarnessExecution, type HarnessRequest } from "../harness/calls.ts";
@@ -14,28 +11,27 @@ import { acquireWriterLock, releaseWriterLock } from "../store/lease.ts";
 import { logError } from "../logging.ts";
 import { validateHarness, isHarnessInvocation } from "../../plugin-context.ts";
 
-export type ExecutionOptions = Omit<InvocationExecutorOptions, "records"> & { resources?(pluginInstanceId: string): ResourceClient };
-type Target = { id: string; harness: string; model?: string; effort?: string };
+export type ExecutionOptions = Omit<InvocationExecutorOptions, "records">;
+type Configuration = { id: string; harness: string; model?: string; effort?: string };
 const activeExecutors = new Set<string>();
 
 /**
  * @spec Aide coordinates live calls and approvals; only native Harness sessions recover agent state.
- * @why Resource status owns recovery references. Execution progress is transient and never replayed.
+ * @why Operators supply recovery parameters; this service never accesses their resources. Progress is transient.
  * @link docs/kernel.md
  */
 export class ExecutionService implements HarnessExecution {
   private backend?: { records: HarnessActivity; controller: InvocationExecutor; calls: HarnessCalls; unsubscribe: () => void };
   private closing?: Promise<void>;
-  private readonly usingContexts = new Map<string, number>();
-  private readonly idleContexts = new Set<string>();
-  private readonly retiringContexts = new Map<string, Promise<void>>();
-  private readonly sessions = new Map<string, ResourceSession>();
+  private readonly usingRuntimes = new Map<string, number>();
+  private readonly idleRuntimes = new Set<string>();
+  private readonly retiringRuntimes = new Map<string, Promise<void>>();
   private readonly listeners = new Set<() => void>();
-  private readonly targets = new Map<string, Target>();
+  private readonly harnesses = new Map<string, Configuration>();
   constructor(private readonly home: string, private readonly options: ExecutionOptions & {
-    cwd: string; targets?: readonly Target[]; defaultTargetId?: string;
+    cwd: string; harnesses?: readonly Configuration[]; defaultHarness?: string;
   }) {
-    for (const target of options.targets ?? []) this.targets.set(target.id, { ...target });
+    for (const target of options.harnesses ?? []) this.harnesses.set(target.id, { ...target });
   }
   private open(): NonNullable<ExecutionService["backend"]> {
     if (this.closing) throw new Error("Execution service is closing");
@@ -47,15 +43,11 @@ export class ExecutionService implements HarnessExecution {
     activeExecutors.add(dir);
     let records: HarnessActivity | undefined;
     try {
-      records = new HarnessActivity(dir, resolve(this.options.cwd), async (contextId, targetId, session) => {
-        const owner = this.sessions.get(`${contextId}\0${targetId}`);
-        if (owner) await owner.write(session);
-      });
-      for (const target of this.targets.values()) this.configureTarget(records, target);
+      records = new HarnessActivity(dir, resolve(this.options.cwd));
       const controller = new InvocationExecutor({ ...this.options, records });
       const calls = new HarnessCalls({ records,
-        targets: () => [...this.targets.values()],
-        defaultTargetId: this.options.defaultTargetId,
+        harnesses: () => [...this.harnesses.values()],
+        defaultHarness: this.options.defaultHarness,
         enqueueHarnessInvocation: request => this.enqueue(request),
         cancelHarnessInvocation: id => this.cancel(id),
         log: entry => records!.log(entry),
@@ -78,14 +70,7 @@ export class ExecutionService implements HarnessExecution {
       throw error;
     }
   }
-  private configureTarget(records: HarnessActivity, target: Target): void {
-    records.setHarnessTarget(target.id, { ...target, harnessTargetId: target.id });
-  }
-  registerTarget(target: Target): void {
-    this.targets.set(target.id, { ...target });
-    if (this.backend) this.configureTarget(this.backend.records, target);
-  }
-  async invoke(scope: ExecutionScope, request: HarnessRequest) {
+  async invoke(scope: ExecutionScope, request: HarnessRequest): Promise<import("@compforge/aide-plugin").HarnessResult | import("@compforge/aide-plugin").HarnessOperationResult> {
     validateHarness(request.input);
     const running = this.performInvocation(scope, request);
     if (isHarnessInvocation(request.input)) return running;
@@ -102,61 +87,58 @@ export class ExecutionService implements HarnessExecution {
     const operation = request.input;
     if (operation.operation === "followUp" || operation.operation === "steer" || operation.operation === "abort") {
       const invocation = backend.calls.listHarnessInvocations().find(i => i.invocationId === operation.invocationId);
-      if (!invocation || invocation.pluginInstanceId !== scope.pluginInstanceId || invocation.resourceRef?.uid !== scope.resourceRef?.uid || !scope.resourceRef?.uid || !invocation.contextId) {
+      if (!invocation || invocation.pluginInstanceId !== scope.pluginInstanceId || invocation.resourceRef?.uid !== scope.resourceRef?.uid || !scope.resourceRef?.uid || !invocation.runtimeId) {
         throw new Error("Harness input must target an invocation owned by the calling resource");
       }
-      if (operation.harnessTargetId && operation.harnessTargetId !== invocation.harnessTargetId) throw new Error("Harness operation target does not match its invocation");
+      if (operation.harness && operation.harness !== invocation.harnessName) throw new Error("Harness selection does not match its invocation");
       if (operation.operation === "abort") {
         return { state: "success" as const, value: { outcome: backend.calls.cancelHarnessInvocation(operation.invocationId) ? "accepted" as const : "rejected" as const } };
       }
-      return { state: "success" as const, value: await backend.controller.operate(invocation.contextId, invocation.harnessTargetId, operation) };
+      return { state: "success" as const, value: await backend.controller.operate(invocation.runtimeId, invocation.harnessName, operation) };
     }
-    const contextId = resourceExecutionKey(scope);
-    this.usingContexts.set(contextId, (this.usingContexts.get(contextId) ?? 0) + 1);
-    this.idleContexts.delete(contextId);
+    const name = request.input.harness ?? this.options.defaultHarness;
+    const configuration = name ? this.harnesses.get(name) : undefined;
+    if (!configuration) throw new Error(`Unknown Harness configuration: ${name}`);
+    const runtime = operation.operation === "close"
+      ? backend.controller.findRuntime(configuration.id, scope, operation.session.id)
+      : backend.controller.prepare(configuration.id, scope, "session" in operation ? operation.session : undefined);
+    if (!runtime) return { state: "success" as const, value: { outcome: "accepted" as const } };
+    const runtimeId = runtime.runtimeId;
+    const reference = () => ({ harness: configuration.id, ...(runtime.session ? { session: structuredClone(runtime.session) } : {}) });
+    this.usingRuntimes.set(runtimeId, (this.usingRuntimes.get(runtimeId) ?? 0) + 1);
+    this.idleRuntimes.delete(runtimeId);
     try {
-      await this.retiringContexts.get(contextId);
-      const targetId = request.input.harnessTargetId ?? this.options.defaultTargetId;
-      const target = targetId ? this.targets.get(targetId) : undefined;
-      if (!target) throw new Error(`Unknown HarnessTarget: ${targetId}`);
-      if (!backend.records.meta.contexts[contextId]) backend.records.setExecutionContext(contextId, { contextId, harnessSessions: {} });
-      if (request.input.agentKey) {
-        if (!this.options.resources) throw new Error("Harness native session requires ResourceClient access");
-        const owner = new ResourceSession(this.options.resources(scope.pluginInstanceId), scope, request.input.agentKey, target.id, target.harness);
-        const session = await owner.read();
-        const context = backend.records.requireExecutionContext(contextId);
-        if (!context.harnessSessions[target.id] && session) context.harnessSessions[target.id] = session;
-        this.sessions.set(`${contextId}\0${target.id}`, owner);
-      }
+      await this.retiringRuntimes.get(runtimeId);
+      let result;
       if (!isHarnessInvocation(operation)) {
-        return { state: "success" as const, value: await backend.controller.operate(contextId, target.id, operation) };
-      }
-      return await backend.calls.invoke(scope, request);
+        result = { state: "success" as const, value: await backend.controller.operate(runtimeId, configuration.id, operation) };
+      } else result = await backend.calls.invoke(scope, request, runtimeId);
+      return { ...result, agent: reference() };
+    } catch (error) {
+      return { state: "failure" as const, error: error instanceof Error ? error.message : String(error), agent: reference() };
     } finally {
-      const remaining = this.usingContexts.get(contextId)! - 1;
-      if (remaining) this.usingContexts.set(contextId, remaining);
+      const remaining = this.usingRuntimes.get(runtimeId)! - 1;
+      if (remaining) this.usingRuntimes.set(runtimeId, remaining);
       else {
-        this.usingContexts.delete(contextId);
-        this.idleContexts.add(contextId);
-        await this.trimIdleContexts();
+        this.usingRuntimes.delete(runtimeId);
+        this.idleRuntimes.add(runtimeId);
+        await this.trimIdleRuntimes();
       }
     }
   }
-  private async trimIdleContexts(): Promise<void> {
+  private async trimIdleRuntimes(): Promise<void> {
     const backend = this.backend!;
     const closing: Promise<void>[] = [];
-    for (const contextId of this.idleContexts) {
-      if (this.idleContexts.size <= RECENT_INVOCATIONS) break;
-      this.idleContexts.delete(contextId);
+    for (const runtimeId of this.idleRuntimes) {
+      if (this.idleRuntimes.size <= RECENT_INVOCATIONS) break;
+      this.idleRuntimes.delete(runtimeId);
       const retirement = (async () => {
-        if (!await backend.controller.releaseContext(contextId)) return;
-        delete backend.records.meta.contexts[contextId];
-        for (const key of this.sessions.keys()) if (key.startsWith(`${contextId}\0`)) this.sessions.delete(key);
+        if (!await backend.controller.releaseRuntime(runtimeId)) return;
         for (const key of backend.records.projection.perContextTarget.keys()) {
-          if (key.startsWith(`${contextId}\0`)) backend.records.projection.perContextTarget.delete(key);
+          if (key.startsWith(`${runtimeId}\0`)) backend.records.projection.perContextTarget.delete(key);
         }
-      })().finally(() => this.retiringContexts.delete(contextId));
-      this.retiringContexts.set(contextId, retirement);
+      })().finally(() => this.retiringRuntimes.delete(runtimeId));
+      this.retiringRuntimes.set(runtimeId, retirement);
       closing.push(retirement);
     }
     await Promise.all(closing);
@@ -164,13 +146,11 @@ export class ExecutionService implements HarnessExecution {
   listHarnessInvocations() { return this.backend?.calls.listHarnessInvocations() ?? []; }
   cancelHarnessInvocation(id?: string) { return this.backend?.calls.cancelHarnessInvocation(id) ?? false; }
   failExecution(id: string, error: string) { this.backend?.calls.failExecution(id, error); }
-  enqueue(request: ScheduledHarnessInvocation) {
-    const { records, controller } = this.open();
-    if (!records.meta.contexts[request.contextId]) records.setExecutionContext(request.contextId, { contextId: request.contextId, harnessSessions: {} });
+  private enqueue(request: ScheduledHarnessInvocation) {
+    const { controller } = this.open();
     return controller.enqueueHarnessInvocation({
       pluginInstanceId: request.pluginInstanceId,
-      harnessTargetId: request.harnessTargetId, contextId: request.contextId,
-      freshContext: request.freshContext,
+      harnessName: request.harnessName, runtimeId: request.runtimeId,
       source: { type: "plugin", pluginInstanceId: request.pluginInstanceId },
       messageId: request.messageId, invocationId: request.invocationId, blocks: [...request.blocks],
     });
@@ -199,7 +179,7 @@ export class ExecutionService implements HarnessExecution {
     return this.closing ??= (async () => {
       const backend = this.backend;
       if (!backend) return;
-      try { await Promise.all(this.retiringContexts.values()); await backend.controller.close(); }
+      try { await Promise.all(this.retiringRuntimes.values()); await backend.controller.close(); }
       finally {
         backend.calls.close(); backend.unsubscribe();
         try { await backend.records.closeLogs(); }

@@ -22,7 +22,7 @@ import type {
   SessionReferenceSink,
   ModelOption,
 } from "../adapter.ts";
-import type { HarnessTargetProbeResult } from "../target.ts";
+import type { HarnessProbeResult } from "../configuration.ts";
 import type { MessageReplies } from "../message-replies.ts";
 import type { ClaudeDurableMappingState, TaskEntry, TaskToolOp } from "./mapping.ts";
 import { readClaudeSettings } from "./settings.ts";
@@ -306,7 +306,7 @@ async function initializeWithTimeout(queryHandle: Query): Promise<SDKControlInit
 }
 
 /**
- * HarnessTarget 级只读发现。它使用独立、不可持久化、禁用工具/MCP 的 SDK query，
+ * HarnessConfiguration 级只读发现。它使用独立、不可持久化、禁用工具/MCP 的 SDK query，
  * 只完成 initialize/control 握手，不创建用户消息或可恢复的 HarnessSession。
  */
 export async function probeClaudeTarget(options: {
@@ -315,7 +315,7 @@ export async function probeClaudeTarget(options: {
   executablePath?: string;
   log?: LogSink;
   queryFactory?: typeof query;
-}): Promise<HarnessTargetProbeResult> {
+}): Promise<HarnessProbeResult> {
   const idleInput = idleClaudeInput();
   const settings = await readClaudeSettings(options.cwd, options.log, options.env);
   const queryHandle = (options.queryFactory ?? query)({

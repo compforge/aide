@@ -34,7 +34,7 @@ Host 的 `ResourceStorage` 将所有插件 Resource 存入共享 SQLite，以按
 
 每次写入在事务内同步记录、引用索引、回执和必要的回收。无法满足容量约束时整个事务回滚，变更通知只在提交后发出。因此过载会阻止接收更多工作，不会通过删除正在承担的工作来腾空间。完成并缩小记录的更新允许在超配额状态下提交。
 
-原生历史与 checkpoint 由 Harness 管理；资源 status.agent 仅保存 Harness、Target 与必要的会话恢复引用，引用计入资源配额。Resource 配额不等于进程 RSS 或全部磁盘文件的硬上限。
+原生历史与 checkpoint 由 Harness 管理；Operator 可在资源 status.agent 保存下次调用所需的配置名和会话引用，引用计入资源配额。Harness verb 不读写这些字段。Resource 配额不等于进程 RSS 或全部磁盘文件的硬上限。
 
 ## Resource Printer
 
@@ -64,9 +64,9 @@ harness verb 封装 Harness interface：prompt 返回执行结果，其余操作
 
 `execution.withContext(attributes)` 为后续动作附加不透明的业务元数据，主资源身份由运行时提供。Personal 定义并解释 conversationId、inputId、inputIds，底座只持久保存 attributes。Channel 通过 Personal 解析关联，再显式查询对应执行的展示投影。其他组件按职责使用 Core 服务，不必经由 Verb。
 
-Harness 上下文由主资源 UID 与 Controller 名称确定，不接受应用插件选择 Lane。`harness({ freshContext: true })` 用调用方提供的摘要和必要材料建立新原生上下文。宿主没有执行历史回放或 catch-up；持续上下文使用资源 status.agent 中的原生引用恢复。
+Harness verb 接收配置名和可选 session；未传 session 时创建新会话，传入时复用或恢复。Operator 决定如何保存返回的引用，底座不另建 Context 目录，也不从资源 UID、Controller 或配置名推导原生 session。
 
-Reconcile 快照只包含运行目录和 HarnessTarget 配置，不携带全局历史。Harness 返回 invocationId 与 result，不返回 Lane 或 Turn 对象。执行结束不等于资源目标完成。结果校验、下一步安排、等待用户和业务终态都属于插件。
+Reconcile 快照只包含运行目录和 HarnessConfiguration 配置，不携带全局历史。Harness 返回 invocationId 与 result，不返回 Lane 或 Turn 对象。执行结束不等于资源目标完成。结果校验、下一步安排、等待用户和业务终态都属于插件。
 
 ## Personal 实例
 

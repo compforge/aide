@@ -11,7 +11,7 @@ import type {
 
 interface HarnessApprovalBinding {
   target: { id: string };
-  contextId: string;
+  runtimeId: string;
 }
 
 type AppendEvent<TBinding> = (
@@ -48,8 +48,8 @@ export class HarnessApprovalContinuations<
     invocationId: string | undefined,
     context?: ApprovalContext,
   ): Promise<ApprovalResult> {
-    const harnessTargetId = binding.target.id;
-    const request = createInputRequest(draft, { kind: "harness", key: harnessTargetId });
+    const harnessName = binding.target.id;
+    const request = createInputRequest(draft, { kind: "harness", key: harnessName });
 
     return new Promise((resolve, reject) => {
       this.pending.set(request.messageId, {
@@ -66,7 +66,7 @@ export class HarnessApprovalContinuations<
             payload: request,
             ...(context?.raw !== undefined ? { raw: context.raw } : {}),
           },
-          { type: "harness", harnessTargetId },
+          { type: "harness", harnessName },
         );
       } catch (error) {
         this.pending.delete(request.messageId);

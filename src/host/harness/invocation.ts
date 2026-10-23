@@ -30,9 +30,8 @@ export interface HarnessInvocationSnapshot extends ExecutionAssociation {
   readonly executionId: string;
   readonly verb: "harness";
   readonly phase: HarnessInvocationPhase;
-  readonly freshContext?: boolean;
-  readonly harnessTargetId: string;
-  readonly contextId?: string;
+  readonly harnessName: string;
+  readonly runtimeId?: string;
   readonly result?: InvocationSummary;
   readonly cancellation?: Readonly<HarnessInvocationCancelled>;
   readonly failure?: Readonly<HarnessInvocationFailed>;
@@ -44,23 +43,21 @@ export interface ReconcileHarnessInvocation {
     readonly verb: "harness";
     readonly title: string;
     readonly prompt: string;
-    readonly contextId: string;
-    readonly freshContext?: boolean;
-    readonly harnessTargetId: string;
+    readonly runtimeId: string;
+    readonly harnessName: string;
   };
 }
 
 type HarnessInvocationRecords = Pick<
   HarnessActivity,
-  "appendEvent" | "subscribe" | "requireExecutionContext"
+  "appendEvent" | "subscribe"
 >;
 
 export interface ScheduledHarnessInvocation {
   readonly invocationId: string;
   readonly pluginInstanceId: string;
-  readonly harnessTargetId: string;
-  readonly contextId: string;
-  readonly freshContext?: boolean;
+  readonly harnessName: string;
+  readonly runtimeId: string;
   readonly source: "user" | "plugin";
   readonly messageId: string;
   readonly blocks: readonly PromptBlock[];
@@ -121,12 +118,11 @@ function snapshotOf(state: InvocationState): HarnessInvocationSnapshot {
     ...(recorded.resourceRef ? { resourceRef: recorded.resourceRef } : {}),
     verb: recorded.verb,
     phase: phaseOf(state),
-    freshContext: recorded.freshContext,
-    harnessTargetId: recorded.harnessTargetId,
+    harnessName: recorded.harnessName,
     ...(state.scheduled === undefined
       ? {}
       : {
-          contextId: state.scheduled.payload.contextId,
+          runtimeId: state.scheduled.payload.runtimeId,
         }),
     ...(state.result === undefined
       ? {}
@@ -155,9 +151,8 @@ function scheduledOf(
   return Object.freeze({
     invocationId: scheduled.invocationId,
     pluginInstanceId: pluginInstanceIdOf(state),
-    harnessTargetId: scheduled.harnessTargetId,
-    contextId: scheduled.contextId,
-    freshContext: recorded.freshContext,
+    harnessName: scheduled.harnessName,
+    runtimeId: scheduled.runtimeId,
     source: "plugin",
     messageId: scheduled.messageId,
     blocks: invocationBlocks(state),
@@ -183,7 +178,6 @@ export class HarnessInvocations {
   }
 
   record(draft: ReconcileHarnessInvocation): HarnessInvocationSnapshot {
-    this.records.requireExecutionContext(draft.invocation.contextId);
     const invocationId = newId("hinv");
     const invocation = draft.invocation;
     this.records.appendEvent({
@@ -199,9 +193,8 @@ export class HarnessInvocations {
         verb: invocation.verb,
         title: invocation.title,
         prompt: invocation.prompt,
-        contextId: invocation.contextId,
-        freshContext: invocation.freshContext,
-        harnessTargetId: invocation.harnessTargetId,
+        runtimeId: invocation.runtimeId,
+        harnessName: invocation.harnessName,
       },
     });
     const state = this.states.get(invocationId);
@@ -333,12 +326,11 @@ export class HarnessInvocations {
     if (state.cancelled || state.failed || state.result) return;
     const recorded = state.recorded.payload;
     invocationBlocks(state);
-    this.records.requireExecutionContext(recorded.contextId);
     const scheduled: HarnessInvocationScheduled = {
       invocationId: recorded.invocationId,
       messageId: newId("m"),
-      harnessTargetId: recorded.harnessTargetId,
-      contextId: recorded.contextId,
+      harnessName: recorded.harnessName,
+      runtimeId: recorded.runtimeId,
     };
     this.records.appendEvent({
       kind: "_aide_harness_invocation_scheduled",

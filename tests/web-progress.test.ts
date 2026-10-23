@@ -15,7 +15,6 @@ import { test } from "node:test";
 import pino from "pino";
 import { decodeSse, PatchEmitter, applyPatch, type PatchEvent } from "@compforge/agentue/ui";
 import { Aide } from "../src/app.ts";
-import { chiefTarget } from "../plugins/personal/chief-model.ts";
 import { httpChannel } from "../src/api/index.ts";
 import { conversationView, type ConversationView } from "../src/channel/view.ts";
 import { conversationPatches } from "../src/api/stream.ts";
@@ -35,12 +34,12 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const emitters = new Map<string, { sink: HarnessEventSink; turnId: string }>();
   const options = fakeOptions({ async chief() { await gate; return "最终答复"; }, async execute() { throw new Error("Unexpected Work"); } }, root);
   const log = pino({ level: "silent" });
-  const aide = new Aide(root, { ...options, createAdapter(target) {
+  const aide = new Aide(root, { ...options, createAdapter(target, ports) {
     const adapter = options.createAdapter(target);
     const open = adapter.create.bind(adapter), send = adapter.prompt.bind(adapter);
     let sink: HarnessEventSink;
     adapter.create = async (...args) => { sink = args[1]; return open(...args); };
-    adapter.prompt = async (ref, input) => { emitters.set(target.id, { sink, turnId: input.invocationId }); return send(ref, input); };
+    adapter.prompt = async (ref, input) => { emitters.set(ports.scope.resourceRef!.name, { sink, turnId: input.invocationId }); return send(ref, input); };
     return adapter;
   } }, log);
   const server = httpChannel(aide, log);
@@ -91,7 +90,9 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
     body: JSON.stringify({ id: "a1", sessionId: "a", text: "查看资料", channelId: "forged-channel" }) });
   assert.equal(accepted.status, 200);
   await aide.receive(fixtureIncoming({ channelId: "web", id: "b1", sessionId: "b", conversationId: "b", text: "另一会话的私有内容" }));
-  await until(() => emitters.has(chiefTarget("a")) && emitters.has(chiefTarget("b")));
+  const firstKey = aide.personal.conversations.resource("a")!.metadata.name;
+  const secondKey = aide.personal.conversations.resource("b")!.metadata.name;
+  await until(() => emitters.has(firstKey) && emitters.has(secondKey));
   const runningView = conversationView(aide, "a");
   const runningInput = runningView.blocks.find((block) => block.type === "input")!;
   assert.ok(runningView.meta.activity);
@@ -101,8 +102,8 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
     assert.ok(history.some((block) => block.id === runningInput.id), "Input remains visible while queued and running");
     assert.ok(!history.some((block) => block.type === "execution" && block.group_id === runningView.meta.activity!.id));
   }
-  const { sink, turnId } = emitters.get(chiefTarget("a"))!;
-  const other = emitters.get(chiefTarget("b"))!;
+  const { sink, turnId } = emitters.get(firstKey)!;
+  const other = emitters.get(secondKey)!;
   other.sink({ kind: "agent_thought_chunk", invocationId: other.turnId, payload: { messageId: "thought-b", content: { type: "text", text: "另一会话的思考" } } });
   sink({ kind: "agent_thought_chunk", invocationId: turnId, payload: { messageId: "thought-a", content: { type: "text", text: "先检查资料" } } });
   sink({ kind: "tool_call_update", invocationId: turnId, payload: { toolCallId: "read-a", title: "read", status: "in_progress", rawInput: { path: "/tmp/README" } } });

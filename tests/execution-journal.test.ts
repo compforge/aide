@@ -15,7 +15,7 @@ test("execution facts reopen unchanged and malformed or unsupported records fail
   const first: EventEnvelope<"state_update"> = {
     v: ENVELOPE_VERSION, eventId: "event-1", seq: 1, ts: "2026-10-22T00:00:00.000Z",
     scope: { type: "application" }, source: { type: "aide" }, kind: "state_update",
-    invocationId: "call-1", contextId: "resource", payload: { state: "idle", stopReason: "end_turn" },
+    invocationId: "call-1", runtimeId: "resource", payload: { state: "idle", stopReason: "end_turn" },
     raw: { turnId: "provider-native", laneId: "provider-data" },
   };
   ledger.record(first);

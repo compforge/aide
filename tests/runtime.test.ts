@@ -8,7 +8,6 @@ import type { PluginPackage, ResourceDefinition } from "@compforge/aide-plugin";
 import { ApplicationRuntime } from "../src/host/runtime/index.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
-import { resourceExecutionKey } from "../src/host/plugin/execution-context.ts";
 import { assertResourceUid } from "../src/host/plugin/resource/type.ts";
 
 const TYPE = { apiVersion: "example.dev/v1", kind: "Document" };
@@ -103,8 +102,7 @@ test("Resource-only runtime does not load Harness history or require an executio
   t.after(() => runtime.close());
   await runtime.start();
   assert.throws(() => runtime.executions, /Harness execution is not configured/);
-  assert.throws(() => runtime.registerTarget({ id: "test", harness: "test" }), /Harness execution is not configured/);
-  assert.deepEqual(runtime.targets, []);
+  assert.deepEqual(runtime.harnesses, []);
   const client = runtime.plugins.resourceClient("example");
   const resource = await client.create(TYPE, { name: "one", spec: { text: "hello" } });
   await runtime.plugins.settled();
@@ -133,14 +131,7 @@ test("Resource commits publish no writes on rollback and isolate observer failur
   assert.equal(observed, 1);
 });
 
-test("Execution context follows resource incarnation and controller, independent of the journal", () => {
-  const scope = { namespace: "v1" as const, executionId: "run-one", pluginInstanceId: "example",
-    resourceRef: { ...TYPE, namespace: "v1" as const, name: "one", uid: "uid-one" } };
-  const key = resourceExecutionKey(scope);
-  assert.equal(resourceExecutionKey({ ...scope, executionId: "run-two" }), key);
-  assert.notEqual(resourceExecutionKey({ ...scope, resourceRef: { ...scope.resourceRef, uid: "uid-two" } }), key);
-  assert.notEqual(resourceExecutionKey({ ...scope, controllerName: "batch" }), key);
-  assert.throws(() => resourceExecutionKey({ ...scope, resourceRef: { ...scope.resourceRef, uid: undefined } }), /UID-pinned/);
+test("Resource UIDs remain safe storage identities", () => {
   assert.doesNotThrow(() => assertResourceUid("input:stable-id"));
   for (const uid of ["../other", "a/b", "a\\b", "", ".", ".."]) assert.throws(() => assertResourceUid(uid));
 });
@@ -154,11 +145,11 @@ test("Reconcile snapshots contain configuration only and execution views require
   const journal = new HarnessFixtures(root).create({ id: "aide:execution", cwd: root });
   for (const turnId of ["mine", "unrelated"]) journal.appendEvent({ kind: "_aide_invocation_summary", source: { type: "aide" },
     payload: { invocationId: turnId, finalText: turnId, toolCalls: [] } });
-  const executions = new ExecutionService(root, { cwd: root, resolveTarget: () => undefined, createAdapter: () => { throw new Error("No execution requested"); } });
+  const executions = new ExecutionService(root, { cwd: root, resolveHarness: () => undefined, createAdapter: () => { throw new Error("No execution requested"); } });
   t.after(() => executions.close());
-  const snapshot = createReconcileSnapshot({ cwd: root, harnessTargets: [{ id: "configured", harness: "test" }] });
-  assert.deepEqual(Object.keys(snapshot).sort(), ["cwd", "harnessTargets"]);
-  assert.ok(Object.isFrozen(snapshot.harnessTargets[0]));
+  const snapshot = createReconcileSnapshot({ cwd: root, harnesses: [{ id: "configured", harness: "test" }] });
+  assert.deepEqual(Object.keys(snapshot).sort(), ["cwd", "harnesses"]);
+  assert.ok(Object.isFrozen(snapshot.harnesses[0]));
   assert.deepEqual(executions.view([]).invocationSummaries, []);
   assert.deepEqual(executions.view(["mine"]).invocationSummaries, [], "Execution history is never imported from another runtime");
   await executions.close();
@@ -170,7 +161,7 @@ test("Failed application initialization releases its execution lease", async (t)
   const root = home(t);
   const options = {
     cwd: root, instances: [],
-    harness: { targets: [], createAdapter: () => { throw new Error("No Harness expected"); } },
+    harness: { harnesses: [], createAdapter: () => { throw new Error("No Harness expected"); } },
     plugins: { maxTotalConcurrency: 0 },
   };
   assert.throws(() => new ApplicationRuntime(root, options), /maxTotalConcurrency/);
@@ -185,13 +176,12 @@ test("Failed application initialization releases its execution lease", async (t)
   await runtime!.close();
 });
 
-/** @case Read-only inspection and configured targets cannot force an unused Harness backend into existence. */
+/** @case Read-only inspection and configured harnesses cannot force an unused Harness backend into existence. */
 test("Unused Harness capabilities have no storage lifecycle", async (t) => {
   const { ExecutionService } = await import("../src/host/runtime/execution.ts");
   const root = home(t);
   const target = { id: "available", harness: "test" };
-  const executions = new ExecutionService(root, { cwd: root, targets: [target], resolveTarget: () => target, createAdapter: () => { throw new Error("Unused Harness must not start"); } });
-  executions.registerTarget({ ...target, model: "configured" });
+  const executions = new ExecutionService(root, { cwd: root, harnesses: [target], resolveHarness: () => target, createAdapter: () => { throw new Error("Unused Harness must not start"); } });
   const unsubscribe = executions.subscribe(() => {});
   assert.deepEqual(executions.listHarnessInvocations(), []);
   assert.deepEqual(executions.approvals(), []);

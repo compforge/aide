@@ -15,7 +15,7 @@ export type DeferredHookStage = Exclude<HookStage, InlineHookStage>;
 /** Read-only view of one Core dispatch of a HarnessInput to its Adapter. */
 export interface HarnessInputDispatch {
   readonly attemptId: string;
-  readonly harnessTargetId: string;
+  readonly harnessName: string;
   readonly invocationId: string;
   readonly messageId: string;
   readonly operation: "new_turn" | "steer" | "followUp";
@@ -24,7 +24,7 @@ export interface HarnessInputDispatch {
 /** Reference to a Harness-originated Aide Event after Core commits it. */
 export interface AideEventReference {
   readonly kind: string;
-  readonly harnessTargetId: string;
+  readonly harnessName: string;
   readonly invocationId?: string;
   readonly eventId: string;
   readonly seq: number;

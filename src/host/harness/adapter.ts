@@ -1,6 +1,6 @@
 // Adapter 统一抽象："小核心 + 可选能力"（见 docs/harness/README.md）。
 // 各家用原生协议接入，归一成 HarnessEvent 交给 sink；source / harness /
-// harnessTargetId 由宿主在可信边界补齐，提交后才成为 Aide Event。
+// harnessName 由宿主在可信边界补齐，提交后才成为 Aide Event。
 
 import type {
   ConfigValue,
@@ -28,7 +28,7 @@ export interface HarnessSessionHandle {
   resumed?: boolean;
 }
 
-/** HarnessSession 在所属 HarnessTarget 内的稳定身份。 */
+/** HarnessSession 在所属 HarnessConfiguration 内的稳定身份。 */
 export interface HarnessSessionIdentity {
   id: string;
 }

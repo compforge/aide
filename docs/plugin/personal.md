@@ -241,7 +241,7 @@ Conversation、Task、Routine、Person 共用 status.summary 和 status.recent �
 
 Personal 的共享上下文 Schema 在每次持久写入时执行预算：summary 最多 16000 字符（Conversation 可配置更低预算），recent 最多 40 条且正文总计最多 16000 字符。超出窗口时保留较新记录，边界条目标记省略；Host 负责执行 Schema 和整体资源容量，不替业务总结。需要长期保留的认识应由模型合并进 summary、结构化状态或长期记忆，不要求每条旧记录都变成 summary。
 
-Work 的执行材料显式选择目标、触发条件、当前状态、summary、recent 和本次 Input，使用 Harness 的 freshContext 重建有界上下文；Route / Chief 继续使用持续原生会话。Work 每次接收最多 20 条、序列化材料合计最多 64000 字符的待处理 Input，保留完整主消息与 Chief note；可选 observation 预览最多 8000 字符，截断时显式标记。超过本轮预算的输入留待后续处理；单条无法容纳的输入报错并保留待处理状态，不静默完成。
+Work 的执行材料显式选择目标、触发条件、当前状态、summary、recent 和本次 Input，不传 session，直接以有界材料调用 Harness prompt；Route / Chief 则传入已保存的 session 延续原生会话。Work 每次接收最多 20 条、序列化材料合计最多 64000 字符的待处理 Input，保留完整主消息与 Chief note；可选 observation 预览最多 8000 字符，截断时显式标记。超过本轮预算的输入留待后续处理；单条无法容纳的输入报错并保留待处理状态，不静默完成。
 
 Work 的请求应用和上下文处理分开记录：Input.handle.appliedAt 表示确定性请求已应用，避免恢复时重复修改状态；暂停或拒绝请求可直接完成。需要执行的材料仍保持待处理，进入执行时将底座 executionId 写到所选 Input。合法执行结果、累计 summary、recent、Input 完成痕迹和 Output 在同一事务提交；执行期间的新 Input 不属于该次确认。失败或结果无效时保留未完成输入与错误，Work 进入待核对状态，不自动重放；显式恢复后才继续。暂停和完成状态不会被普通观察自动恢复。
 

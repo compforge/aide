@@ -1,13 +1,13 @@
 import type { PromptBlock, StopReason } from "./event/index.ts";
-import type { HarnessTarget } from "./harness/target.ts";
+import type { HarnessConfiguration } from "./harness/configuration.ts";
 import type { HarnessInput, HarnessInputSource, HarnessInputStatus } from "./harness/input.ts";
 
 export interface QueueSnapshot {
   messageId: string;
   enqueueSeq: number;
   invocationId: string;
-  harnessTargetId: string;
-  contextId: string;
+  harnessName: string;
+  runtimeId: string;
   harness: string;
   blocks: PromptBlock[];
   source: HarnessInputSource;
@@ -26,14 +26,14 @@ export interface QueueItem extends HarnessInput {
 }
 
 interface QueueBinding {
-  readonly contextId: string;
+  readonly runtimeId: string;
 }
 
 /** Active invocation state; admission and terminal recording own queue release. */
 export interface QueueRun<TBinding extends QueueBinding> {
   readonly invocationId: string;
   readonly binding: TBinding;
-  readonly contextId: string;
+  readonly runtimeId: string;
   readonly input?: QueueItem;
   readonly release: () => void;
   status: "active" | "finalized";
@@ -62,7 +62,7 @@ export class InvocationQueue<TBinding extends QueueBinding> {
   private currentRun: QueueRun<TBinding> | undefined;
 
   constructor(
-    readonly contextId: string,
+    readonly runtimeId: string,
     private readonly beforeTransition: BeforeInputTransition,
   ) {}
 
@@ -95,13 +95,13 @@ export class InvocationQueue<TBinding extends QueueBinding> {
     invocationId: string,
     input?: QueueItem,
   ): { run: QueueRun<TBinding>; settled: Promise<void> } {
-    if (binding.contextId !== this.contextId) {
+    if (binding.runtimeId !== this.runtimeId) {
       throw new Error(
-        `Queue ${this.contextId} cannot start a run for context ${binding.contextId}`,
+        `Queue ${this.runtimeId} cannot start a run for context ${binding.runtimeId}`,
       );
     }
     if (this.activeRun) {
-      throw new Error(`Context ${this.contextId} already has an active Queue run`);
+      throw new Error(`Context ${this.runtimeId} already has an active Queue run`);
     }
     let release!: () => void;
     const settled = new Promise<void>((resolve) => {
@@ -110,7 +110,7 @@ export class InvocationQueue<TBinding extends QueueBinding> {
     const run: QueueRun<TBinding> = {
       invocationId,
       binding,
-      contextId: binding.contextId,
+      runtimeId: binding.runtimeId,
       input,
       release,
       status: "active",
@@ -138,7 +138,7 @@ export class InvocationQueue<TBinding extends QueueBinding> {
   }
 
   enqueue(
-    target: HarnessTarget,
+    target: HarnessConfiguration,
     blocks: PromptBlock[],
     options: {
       source?: HarnessInputSource;
@@ -161,7 +161,7 @@ export class InvocationQueue<TBinding extends QueueBinding> {
       invocationId: options.identity.invocationId,
       messageId: options.identity.messageId,
       target,
-      contextId: this.contextId,
+      runtimeId: this.runtimeId,
       blocks,
       source: options?.source ?? { type: "user" },
       ...(options?.harnessInvocationId === undefined
@@ -209,6 +209,6 @@ export class InvocationQueue<TBinding extends QueueBinding> {
     if (!removed) return undefined;
     removed.status = "recalled";
     removed.resolve?.("recalled");
-    return { messageId: removed.messageId, enqueueSeq: removed.enqueueSeq, invocationId: removed.invocationId, harnessTargetId: removed.target.id, contextId: removed.contextId, harness: removed.target.harness, blocks: removed.blocks, source: removed.source, harnessInvocationId: removed.harnessInvocationId };
+    return { messageId: removed.messageId, enqueueSeq: removed.enqueueSeq, invocationId: removed.invocationId, harnessName: removed.target.id, runtimeId: removed.runtimeId, harness: removed.target.harness, blocks: removed.blocks, source: removed.source, harnessInvocationId: removed.harnessInvocationId };
   }
 }

@@ -43,13 +43,13 @@ export function applyInputDelivery(state: HarnessState, ev: EventEnvelope<"input
   }
   if (outcome === "applied") {
     if (!message) {
-      message = { ...inputMessage(messageId, ev.ts, input?.source, ev.harnessTargetId), content: input ? [...input.blocks] : [], delivery: input?.delivery ?? "steer" };
+      message = { ...inputMessage(messageId, ev.ts, input?.source, ev.harnessName), content: input ? [...input.blocks] : [], delivery: input?.delivery ?? "steer" };
       state.messages.set(messageId, message);
     }
     message.invocationId = ev.invocationId;
     message.harness = ev.harness;
-    message.harnessTargetId = ev.harnessTargetId;
-    message.contextId = ev.contextId;
+    message.harnessName = ev.harnessName;
+    message.runtimeId = ev.runtimeId;
     message.consumedAt = ev.seq;
     // Older ledgers may already have a hidden admission-time slot. Remove that
     // slot only on this first consumption, never on a duplicate receipt.

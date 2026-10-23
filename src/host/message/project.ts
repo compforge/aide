@@ -39,7 +39,7 @@ export function inputRequestMessage(event: EventEnvelope<"approval.requested">):
   return {
     ...request,
     invocationId: event.invocationId,
-    contextId: event.contextId,
+    runtimeId: event.runtimeId,
   };
 }
 
@@ -49,6 +49,6 @@ export function inputResponseMessage(
   return {
     ...event.payload,
     invocationId: event.invocationId,
-    contextId: event.contextId,
+    runtimeId: event.runtimeId,
   };
 }

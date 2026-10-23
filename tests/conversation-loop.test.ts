@@ -61,7 +61,6 @@ test("Deferred arrivals follow up without repeating old prompt material or delet
   release(); await aide.settled();
   assert.equal(calls.length, 2); assert.doesNotMatch(calls[1]!, /fact first/);
   assert.deepEqual(aide.conversations.get("me")!.pendingInputIds, []);
-  assert.equal(aide.invocations().filter(i => i.conversationId === "me").every(i => !i.freshContext), true);
 });
 
 test("Model end_turn without assess_input retains an explicit failure and never silently retries effects", async t => {

@@ -1,4 +1,4 @@
-// Codex app-server 只提供 hooks/list，没有持久 trust 写接口。Aide 因而按 HarnessTarget
+// Codex app-server 只提供 hooks/list，没有持久 trust 写接口。Aide 因而按 HarnessConfiguration
 // 保存用户已审过的 hook 精确定义指纹；定义或执行目标变化时都重新询问。
 
 import { createHash } from "node:crypto";
@@ -82,9 +82,9 @@ function trustedHooks(state: PersistedHookState): Record<string, Record<string, 
   const trust = isRecord(state.trust) ? state.trust : {};
   const savedTargets = isRecord(trust.targets) ? trust.targets : {};
   const targets: Record<string, Record<string, string>> = {};
-  for (const [harnessTargetId, rawHooks] of Object.entries(savedTargets)) {
-    if (!harnessTargetId.trim() || !isRecord(rawHooks)) continue;
-    targets[harnessTargetId] = Object.fromEntries(
+  for (const [harnessName, rawHooks] of Object.entries(savedTargets)) {
+    if (!harnessName.trim() || !isRecord(rawHooks)) continue;
+    targets[harnessName] = Object.fromEntries(
       Object.entries(rawHooks).flatMap(([key, fingerprint]) =>
         key.trim() && typeof fingerprint === "string" && fingerprint.trim()
           ? [[key, fingerprint] as const]
@@ -99,7 +99,7 @@ export class FileHookTrustStore implements HookTrustStore {
   private readonly warnings = new Set<string>();
 
   constructor(
-    private readonly harnessTargetId: string,
+    private readonly harnessName: string,
     private readonly rootDir?: string,
   ) {}
 
@@ -109,7 +109,7 @@ export class FileHookTrustStore implements HookTrustStore {
       this.warnings.add(loaded.error);
       return false;
     }
-    return trustedHooks(loaded.state)[this.harnessTargetId]?.[hook.key] === hookTrustFingerprint(hook);
+    return trustedHooks(loaded.state)[this.harnessName]?.[hook.key] === hookTrustFingerprint(hook);
   }
 
   takeWarnings(): string[] {
@@ -126,14 +126,14 @@ export class FileHookTrustStore implements HookTrustStore {
       const state = loaded.state;
       const trust = isRecord(state.trust) ? state.trust : {};
       const targets = isRecord(trust.targets) ? trust.targets : {};
-      const savedTarget = targets[this.harnessTargetId];
+      const savedTarget = targets[this.harnessName];
       const existing = isRecord(savedTarget) ? savedTarget : {};
       const trusted = { ...existing };
       for (const hook of hooks) trusted[hook.key] = hookTrustFingerprint(hook);
 
       const next: PersistedHookState = {
         ...state,
-        trust: { ...trust, targets: { ...targets, [this.harnessTargetId]: trusted } },
+        trust: { ...trust, targets: { ...targets, [this.harnessName]: trusted } },
       };
       const temporary = `${path}.${process.pid}.tmp`;
       try {

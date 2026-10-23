@@ -1,4 +1,4 @@
-import type { HarnessTargetProbeResult } from "../target.ts";
+import type { HarnessProbeResult } from "../configuration.ts";
 import { codexModels, codexEfforts } from "./runtime.ts";
 import { withCodexPeer, type CodexNativePeer } from "./peer.ts";
 import { STARTUP_REQUEST_TIMEOUT_MS } from "./process.ts";
@@ -21,7 +21,7 @@ export async function readCodexModelData(peer: CodexNativePeer): Promise<{ data:
   return { data };
 }
 
-export async function readCodexCatalog(peer: CodexNativePeer): Promise<HarnessTargetProbeResult> {
+export async function readCodexCatalog(peer: CodexNativePeer): Promise<HarnessProbeResult> {
   const catalog = await readCodexModelData(peer);
   const models = codexModels(catalog);
   return {
@@ -34,6 +34,6 @@ export async function readCodexCatalog(peer: CodexNativePeer): Promise<HarnessTa
   };
 }
 
-export function probeCodexTarget(options: { command?: string[]; cwd: string; env?: Readonly<Record<string, string>> }): Promise<HarnessTargetProbeResult> {
+export function probeCodexTarget(options: { command?: string[]; cwd: string; env?: Readonly<Record<string, string>> }): Promise<HarnessProbeResult> {
   return withCodexPeer(options, readCodexCatalog);
 }

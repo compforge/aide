@@ -1,6 +1,6 @@
 import { iconFor } from "@compforge/aide-plugin";
 import { initialConversationName } from "../plugins/personal/conversation/model.ts";
-import { ROUTE_TARGET } from "../plugins/personal/route/model.ts";
+import { ROUTE_HARNESS } from "../plugins/personal/route/model.ts";
 import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { ResourceStorage } from "./host/resource/storage.ts";
 import { SayInputSchema } from "../plugins/personal/output/action.ts";
@@ -37,7 +37,7 @@ import { IncomingSchema, type Incoming } from "./channel/message.ts";
 
 export interface AideOptions {
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
-  defaultTarget: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
+  defaultHarnessConfig: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
   createAdapter: ExecutionOptions["createAdapter"];
 }
 
@@ -60,7 +60,7 @@ export class Aide {
 
   readonly runtime: ApplicationRuntime;
   readonly personal: Personal;
-  private readonly defaultTarget: AideOptions["defaultTarget"];
+  private readonly defaultHarnessConfig: AideOptions["defaultHarnessConfig"];
   private readonly listeners = new Set<() => void>();
   private readonly watches: ReturnType<typeof requirementWatches>;
   private readonly environmentSources: ReturnType<typeof environmentSources>;
@@ -78,7 +78,7 @@ export class Aide {
   private defaultSelection: Promise<void> = Promise.resolve();
 
   constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
-    this.defaultTarget = Object.freeze({ ...options.defaultTarget });
+    this.defaultHarnessConfig = Object.freeze({ ...options.defaultHarnessConfig });
     const config = options.config;
     const { sources } = parsePersonalConfig(config?.plugins.personal);
     this.meMarks = { identities: [LOCAL_ME, ...(config?.connectors.lark?.me ?? []).map((i) => ({ provider: "lark", scope: i.appId, id: i.openId }))] };
@@ -111,8 +111,8 @@ export class Aide {
       cwd: options.cwd,
       instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ route: parsePersonalConfig(config?.plugins.personal).route, conversation: parsePersonalConfig(config?.plugins.personal).conversation, watches: this.watches,
         environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
-      harness: { targets: [{ ...this.defaultTarget }, { id: ROUTE_TARGET, harness: "route" }],
-        defaultTargetId: this.defaultTarget.id, createAdapter: options.createAdapter },
+      harness: { harnesses: [{ ...this.defaultHarnessConfig }, { id: ROUTE_HARNESS, harness: "route" }, { id: "chief", harness: "chief" }],
+        defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.conversations.changed(change); this.notify(); },
         actions: { "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
@@ -161,10 +161,10 @@ export class Aide {
 
   work(conversationId: string) { return this.personal.work(conversationId); }
 
-  routeSession(config: Parameters<Personal["routeSession"]>[0]) { return this.personal.routeSession(config); }
+  routeSession(scope: Parameters<Personal["routeSession"]>[0], config: Parameters<Personal["routeSession"]>[1]) { return this.personal.routeSession(scope, config); }
 
-  chiefSession(targetId: string, config: Parameters<Personal["chiefSession"]>[1]) {
-    return this.personal.chiefSession(targetId, config);
+  chiefSession(scope: Parameters<Personal["chiefSession"]>[0], config: Parameters<Personal["chiefSession"]>[1]) {
+    return this.personal.chiefSession(scope, config);
   }
 
   async outputDelivered(outputId: string) { if (this.outputStore.get(outputId)) this.outputStore.delivered(outputId); }

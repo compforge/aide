@@ -16,10 +16,13 @@ import {
   type PromptBlock,
   type StopReason,
 } from "../event/index.ts";
-import type { HarnessContext } from "./hook.ts";
-import { createHarnessLaunchSnapshot } from "../harness/target.ts";
+import type { LiveHarness } from "./hook.ts";
+import type { ExecutionScope } from "../../protocol/verbs.ts";
+import type { AgentStatus } from "@compforge/aide-plugin";
+import { randomUUID } from "node:crypto";
+import { createHarnessLaunchSnapshot } from "../harness/configuration.ts";
 import { isSessionConfigurable, isModelConfigurable, isEffortConfigurable, isModelReadable } from "../harness/adapter.ts";
-import type { HarnessTarget } from "../harness/target.ts";
+import type { HarnessConfiguration } from "../harness/configuration.ts";
 import type {
   ApprovalDraft,
   ApprovalResult,
@@ -58,9 +61,8 @@ export type {
 
 export interface HarnessInvocationInput {
   readonly pluginInstanceId: string;
-  readonly harnessTargetId: string;
-  readonly contextId: string;
-  readonly freshContext?: boolean;
+  readonly harnessName: string;
+  readonly runtimeId: string;
   readonly source: HarnessInputSource;
   readonly messageId: string;
   readonly invocationId: string;
@@ -80,6 +82,9 @@ function eventSourceOf(source: HarnessInputSource): EventSource {
 
 /** Controller 注入给 Adapter 的 Core ports；原生 Harness verb 只能经这些边界 lowering。 */
 export interface HarnessAdapterPorts {
+  /** Host-owned call scope for application tool composition; never inferred from configuration names. */
+  scope: ExecutionScope;
+  runtimeId: string;
   openApproval: OpenApproval;
   log: LogSink;
   nativeEvent: NativeEventSink;
@@ -87,16 +92,16 @@ export interface HarnessAdapterPorts {
 
 export interface InvocationExecutorOptions {
   records: HarnessActivity;
-  /** 目标尚未选择 model 时使用的 HarnessTarget 级持久偏好。 */
+  /** 目标尚未选择 model 时使用的 HarnessConfiguration 级持久偏好。 */
   modelPreferences?: Readonly<Record<string, string>>;
-  /** 目标尚未选择 effort 时使用的 HarnessTarget 级持久偏好。 */
+  /** 目标尚未选择 effort 时使用的 HarnessConfiguration 级持久偏好。 */
   effortPreferences?: Readonly<Record<string, string>>;
   /** 工厂按 target.harness 选择 Adapter，并可使用 target.id lowering 实例级配置。 */
-  createAdapter(target: HarnessTarget, handlers: HarnessAdapterPorts): Harness;
+  createAdapter(target: HarnessConfiguration, handlers: HarnessAdapterPorts): Harness;
   /** Optional Plugin notification surface for Harness send and event intake boundaries. */
   hooks?: HarnessHookGateway;
-  /** HarnessTarget identity 的唯一 owner；未知 id 必须返回 undefined，不能反推 Harness。 */
-  resolveTarget(harnessTargetId: string): HarnessTarget | undefined;
+  /** HarnessConfiguration identity 的唯一 owner；未知 id 必须返回 undefined，不能反推 Harness。 */
+  resolveHarness(harnessName: string): (HarnessConfiguration & { model?: string; effort?: string }) | undefined;
   onChange?: () => void;
   /**
    * cancel 后等待 harness 确认终态的宽限期。到期仍无终态则合成 terminal error 并
@@ -114,17 +119,17 @@ const DEFAULT_EXECUTION_CONCURRENCY = 4;
 /** 打断标记文案：cancelled 终态时落一条 notice，执行时间线显示取消原因 */
 export const INTERRUPTED_NOTICE_TITLE = "Conversation interrupted — tell the agent what to do differently";
 
-/** @spec Execute admitted Harness invocations, serial per resource context and concurrent across contexts.
- * @why Resource controllers own business scheduling; this executor only protects native bindings and records execution facts.
+/** @spec Execute admitted calls serially per live native session, with bounded concurrency across sessions.
+ * @why Operators own business scheduling; this executor protects live handles and records transient call facts.
  * @link docs/kernel.md
  */
 export class InvocationExecutor {
-  /** Resource context × HarnessTarget → live binding. */
-  private readonly contexts = new Map<string, HarnessContext>();
-  /** Every Queue is permanently bound to one resource context. */
-  private readonly queues = new Map<string, InvocationQueue<HarnessContext>>();
-  private readonly deliveryAttempts: DeliveryAttempts<HarnessContext>;
-  private readonly harnessApprovals: HarnessApprovalContinuations<HarnessContext>;
+  /** Ephemeral native runtimes; recovery parameters always come from the caller. */
+  private readonly runtimes = new Map<string, LiveHarness>();
+  /** Serializes accepted prompt calls on one live runtime; never a business Input inbox. */
+  private readonly queues = new Map<string, InvocationQueue<LiveHarness>>();
+  private readonly deliveryAttempts: DeliveryAttempts<LiveHarness>;
+  private readonly harnessApprovals: HarnessApprovalContinuations<LiveHarness>;
   private readonly unsubscribeApprovals: () => void;
   private readonly harnessHooks: HarnessHookCoordinator;
   private lifecycleState: "open" | "closing" | "closed" = "open";
@@ -134,7 +139,7 @@ export class InvocationExecutor {
   /** 已开始处理的 Queue item 从 Harness setup 起即对 UI 可见。 */
   private readonly processing = new Map<
     string,
-    { target: HarnessTarget; startedAt: number }
+    { target: HarnessConfiguration; startedAt: number }
   >();
 
   constructor(private readonly options: InvocationExecutorOptions) {
@@ -163,7 +168,7 @@ export class InvocationExecutor {
       append: (binding, event) =>
         this.appendEvent(binding, event, {
           type: "harness",
-          harnessTargetId: binding.target.id,
+          harnessName: binding.target.id,
         }),
       log: (entry) => options.records.log(entry),
     });
@@ -182,8 +187,8 @@ export class InvocationExecutor {
       source: eventSourceOf(input.source),
       ...(input.parentEventId === undefined ? {} : { parentEventId: input.parentEventId }),
       harness: input.target.harness,
-      harnessTargetId: input.target.id,
-      contextId: input.contextId,
+      harnessName: input.target.id,
+      runtimeId: input.runtimeId,
       invocationId: payload.invocationId,
       payload,
     }).seq;
@@ -202,7 +207,7 @@ export class InvocationExecutor {
     if (result.kind === "cancelled" && run?.status === "active") {
       this.options.records.log({
         level: "info", source: "aide", component: "controller.approval",
-        harnessTargetId: run.binding.target.id, invocationId: invocationId,
+        harnessName: run.binding.target.id, invocationId: invocationId,
         message: "approval cancelled; interrupting associated execution",
       });
       void this.interruptRecord(run);
@@ -211,34 +216,33 @@ export class InvocationExecutor {
   }
 
   private openHarnessApproval(
-    contextId: string,
-    harnessTargetId: string,
+    runtimeId: string,
+    harnessName: string,
     draft: ApprovalDraft,
     context?: ApprovalContext,
   ): Promise<ApprovalResult> {
-    const binding = this.contexts.get(this.contextKey(contextId, harnessTargetId));
-    if (!binding) return Promise.reject(new Error(`unknown context binding for approval: ${contextId} × ${harnessTargetId}`));
-    const active = this.queueForContext(contextId).activeRun;
+    const binding = this.runtimes.get(this.runtimeKey(runtimeId, harnessName));
+    if (!binding) return Promise.reject(new Error(`unknown context binding for approval: ${runtimeId} × ${harnessName}`));
+    const active = this.queueForRuntime(runtimeId).activeRun;
     const invocationId =
       context?.invocationId ?? active?.invocationId ?? binding.setupInvocationId;
     return this.harnessApprovals.open(binding, draft, invocationId, context);
   }
 
-  private queueForContext(contextId: string): InvocationQueue<HarnessContext> {
-    this.options.records.requireExecutionContext(contextId);
-    let queue = this.queues.get(contextId);
+  private queueForRuntime(runtimeId: string): InvocationQueue<LiveHarness> {
+    let queue = this.queues.get(runtimeId);
     if (!queue) {
-      queue = new InvocationQueue<HarnessContext>(
-        contextId,
+      queue = new InvocationQueue<LiveHarness>(
+        runtimeId,
         (input, status, update) =>
           this.recordHarnessInputTransition(input, status, update),
       );
-      this.queues.set(contextId, queue);
+      this.queues.set(runtimeId, queue);
     }
     return queue;
   }
 
-  private runForInvocation(invocationId: string): QueueRun<HarnessContext> | undefined {
+  private runForInvocation(invocationId: string): QueueRun<LiveHarness> | undefined {
     for (const queue of this.queues.values()) {
       const run = queue.run(invocationId);
       if (run) return run;
@@ -246,13 +250,13 @@ export class InvocationExecutor {
     return undefined;
   }
 
-  private nextRunnableQueue(): InvocationQueue<HarnessContext> | undefined {
+  private nextRunnableQueue(): InvocationQueue<LiveHarness> | undefined {
     return [...this.queues.values()]
       .filter(
         (queue) =>
           queue.head !== undefined &&
           !queue.activeRun &&
-          !this.processing.has(queue.contextId),
+          !this.processing.has(queue.runtimeId),
       )
       .sort((left, right) => left.head!.enqueueSeq - right.head!.enqueueSeq)[0];
   }
@@ -286,19 +290,9 @@ export class InvocationExecutor {
         new Error(`HarnessInvocation already has a live Input: ${input.invocationId}`),
       );
     }
-    const target = this.targetFor(input.harnessTargetId);
-    const contextId = this.options.records.requireExecutionContext(input.contextId).contextId;
-    if (input.freshContext) {
-      if (this.processing.has(contextId) || this.harnessInputs.some((item) => item.contextId === contextId)) throw new Error("Cannot replace an active context");
-      const key = this.contextKey(contextId, target.id);
-      const binding = this.contexts.get(key);
-      if (binding) await this.closeHarness(binding);
-      this.contexts.delete(key);
-      this.options.records.setContextHarnessSession(contextId, target.id, {
-        harness: target.harness,
-      });
-    }
-    const queue = this.queueForContext(contextId);
+    const target = this.targetFor(input.harnessName);
+    const runtimeId = input.runtimeId;
+    const queue = this.queueForRuntime(runtimeId);
     const submission = queue.enqueue(target, input.blocks, {
       source: input.source,
       harnessInvocationId: input.invocationId,
@@ -321,12 +315,11 @@ export class InvocationExecutor {
     if (!send) return { accepted: false, reason: `${operation}_unsupported` };
     const existing = this.options.records.projection.harnessInputs.get(messageId);
     if (existing) return { accepted: existing.deliveryOutcome !== "failed", reason: "already_admitted" };
-    const input = { messageId, invocationId, contextId: binding.contextId, target: binding.target, blocks: [{ type: "text" as const, text }],
+    const input = { messageId, invocationId, runtimeId: binding.runtimeId, target: binding.target, blocks: [{ type: "text" as const, text }],
       source: run.input?.source ?? { type: "user" as const }, status: "dispatching" as const, delivery: operation };
     this.appendEvent(binding, { kind: "harness_input.updated", invocationId, payload: harnessInputUpdate(input, "dispatching") }, { type: "aide" });
     const prompt = { invocationId, messageId, blocks: input.blocks };
     try {
-      await this.flushReferences(binding);
       const before = this.harnessHooks.beforeInput(this.harnessHooks.dispatch(binding, prompt, messageId, operation));
       if (before) await before;
       if (run.status !== "active") {
@@ -371,7 +364,7 @@ export class InvocationExecutor {
     return undefined;
   }
 
-  private async interruptRecord(active: QueueRun<HarnessContext>): Promise<void> {
+  private async interruptRecord(active: QueueRun<LiveHarness>): Promise<void> {
     if (!active.binding.ref) {
       // preparing：Esc 立即生效，不被冷启动绑住。启动流程继续完成——成功则 binding
       // 保留给后续 turn 复用；卡死由 adapter 的启动期超时兜底，不会永久占住队列。
@@ -392,7 +385,7 @@ export class InvocationExecutor {
         source: "aide",
         component: "controller.cancel",
         harness: active.binding.adapter.harness,
-        harnessTargetId: active.binding.target.id,
+        harnessName: active.binding.target.id,
         invocationId: active.invocationId,
         message: "harness cancel request failed",
         error: logError(error),
@@ -406,16 +399,16 @@ export class InvocationExecutor {
   }
 
   /** Release only an idle context. Native state is already owned by its Harness. */
-  async releaseContext(contextId: string): Promise<boolean> {
-    const queue = this.queues.get(contextId);
-    if (this.processing.has(contextId) || queue?.head || queue?.activeRun) return false;
-    const bindings = [...this.contexts.entries()].filter(([, binding]) => binding.contextId === contextId);
-    for (const [key] of bindings) this.contexts.delete(key);
-    this.queues.delete(contextId);
+  async releaseRuntime(runtimeId: string): Promise<boolean> {
+    const queue = this.queues.get(runtimeId);
+    if (this.processing.has(runtimeId) || queue?.head || queue?.activeRun) return false;
+    const bindings = [...this.runtimes.entries()].filter(([, binding]) => binding.runtimeId === runtimeId);
+    for (const [key] of bindings) this.runtimes.delete(key);
+    this.queues.delete(runtimeId);
     for (const [, binding] of bindings) {
       try { await this.closeHarness(binding); }
       catch (error) { this.options.records.log({ level: "warn", source: "aide", component: "controller.release",
-        message: "Idle native session close failed", harnessTargetId: binding.target.id, error: logError(error) }); }
+        message: "Idle native session close failed", harnessName: binding.target.id, error: logError(error) }); }
     }
     return true;
   }
@@ -429,7 +422,7 @@ export class InvocationExecutor {
 
   private async closeActive(): Promise<void> {
     const closing: Promise<void>[] = [];
-    for (const binding of this.contexts.values()) {
+    for (const binding of this.runtimes.values()) {
       closing.push(
         this.closeHarness(binding).catch((error) => {
           this.options.records.log({
@@ -437,7 +430,7 @@ export class InvocationExecutor {
             source: "aide",
             component: "controller.close",
             harness: binding.adapter.harness,
-            harnessTargetId: binding.target.id,
+            harnessName: binding.target.id,
             message: "harness close failed",
             error: logError(error),
           });
@@ -491,9 +484,9 @@ export class InvocationExecutor {
 
   /** Record the prompt and running fact before opening the native binding. */
   private startInvocation(
-    binding: HarnessContext,
+    binding: LiveHarness,
     opts: { invocationId: string; input?: QueueItem; harnessSessionId?: string },
-  ): { record: QueueRun<HarnessContext>; run: QueueRun<HarnessContext>; settled: Promise<void> } {
+  ): { record: QueueRun<LiveHarness>; run: QueueRun<LiveHarness>; settled: Promise<void> } {
     let inputEventId: string | undefined;
     if (opts.input) {
       const inputEvent = this.appendEvent(
@@ -524,34 +517,32 @@ export class InvocationExecutor {
       },
       { type: "aide" },
     );
-    const queue = this.queueForContext(binding.contextId);
+    const queue = this.queueForRuntime(binding.runtimeId);
     const { run, settled } = queue.startRun(binding, opts.invocationId, opts.input);
     run.inputEventId = inputEventId;
     return { record: run, run, settled };
   }
 
   private async runQueueItem(input: QueueItem): Promise<void> {
-    this.processing.set(input.contextId, {
+    this.processing.set(input.runtimeId, {
       target: input.target,
       startedAt: Date.now(),
     });
 
     // Publish the input before cold startup so live progress is visible during initialization.
-    let binding: HarnessContext;
-    let record: QueueRun<HarnessContext>;
-    let run: QueueRun<HarnessContext>;
+    let binding: LiveHarness;
+    let record: QueueRun<LiveHarness>;
+    let run: QueueRun<LiveHarness>;
     let settled: Promise<void>;
     try {
-      binding = this.contextFor(input.contextId, input.target.id, input.invocationId);
-      const context = this.options.records.meta.contexts[input.contextId];
-      if (!context) throw new Error(`Execution context not found: ${input.contextId}`);
+      binding = this.runtimeFor(input.runtimeId, input.target.id, input.invocationId);
       ({ record, run, settled } = this.startInvocation(binding, {
         invocationId: input.invocationId,
         input,
-        harnessSessionId: context.harnessSessions[input.target.id]?.harnessSessionId,
+        harnessSessionId: binding.session?.id,
       }));
     } catch (error) {
-      this.processing.delete(input.contextId);
+      this.processing.delete(input.runtimeId);
       this.changed();
       throw error;
     }
@@ -572,8 +563,7 @@ export class InvocationExecutor {
     }
 
     try {
-      await this.ensureHarness(input.contextId, input.target.id);
-      await this.flushReferences(binding);
+      await this.ensureHarness(input.runtimeId, input.target.id);
       // A cold open can finish after close() has frozen scheduling. The Binding
       // has already released that late handle; close the accepted Aide invocation as
       // cancelled and leave later queued Inputs durable for the next resume.
@@ -596,9 +586,7 @@ export class InvocationExecutor {
         );
       }
 
-      const records = this.options.records;
-      const meta = records.meta.contexts[input.contextId]?.harnessSessions[input.target.id];
-      if (!meta?.launchSnapshot) {
+      if (!binding.launchSnapshot) {
         throw new Error(
           `cannot prepare harness delivery for invocation ${record.invocationId}: missing HarnessLaunchSnapshot`,
         );
@@ -607,8 +595,8 @@ export class InvocationExecutor {
         invocationId: record.invocationId,
         inputEventId: run.inputEventId,
         inputId: input.messageId,
-        launchSnapshot: meta.launchSnapshot,
-        harnessSessionId: meta.harnessSessionId,
+        launchSnapshot: binding.launchSnapshot,
+        harnessSessionId: binding.session?.id,
       });
       const promptInput: PromptInput = {
         invocationId: input.invocationId,
@@ -655,7 +643,6 @@ export class InvocationExecutor {
       }
       this.deliveryAttempts.markAccepted(binding, attempt);
       await settled;
-      await this.flushReferences(binding);
     } catch (error) {
       // Invocation cancellation does not make a failed native runtime reusable.
       const detail = error instanceof Error ? error.message : String(error);
@@ -664,22 +651,22 @@ export class InvocationExecutor {
         source: "aide",
         component: "controller.turn",
         harness: input.target.harness,
-        harnessTargetId: targetKey,
+        harnessName: targetKey,
         invocationId: input.invocationId,
         message: "Harness invocation or native binding failed",
         error: logError(error),
       });
       // Close the live execution on startup/admission failure, then report failure to the caller.
       this.synthesizeTerminal(run, { message: detail, stopReason: "error" });
-      // A failed binding write must not poison every subsequent followup or permit another unsaved call.
-      this.contexts.delete(this.contextKey(input.contextId, input.target.id));
+      // A failed native runtime must not poison later explicit resume attempts.
+      this.runtimes.delete(this.runtimeKey(input.runtimeId, input.target.id));
       await this.closeHarness(binding).catch(() => {});
       if (record.status === "finalized" && this.options.records.projection.stopReasons.get(input.invocationId) === "cancelled") return;
       throw new Error(`Harness ${targetKey}: ${detail}`, {
         cause: error,
       });
     } finally {
-      this.processing.delete(input.contextId);
+      this.processing.delete(input.runtimeId);
       this.deliveryAttempts.release(input.invocationId);
       this.changed();
     }
@@ -687,7 +674,7 @@ export class InvocationExecutor {
 
   /** Deliver live events to the current execution and UI; never persist or replay them. */
   private appendEvent(
-    binding: HarnessContext,
+    binding: LiveHarness,
     ev: AnyEventDraft,
     source: EventSource,
   ): AnyEventEnvelope {
@@ -695,8 +682,8 @@ export class InvocationExecutor {
       ...ev,
       source,
       harness: binding.adapter.harness,
-      harnessTargetId: binding.target.id,
-      contextId: binding.contextId,
+      harnessName: binding.target.id,
+      runtimeId: binding.runtimeId,
     } as AnyNewEvent) as AnyEventEnvelope;
     if (envelope.kind === "state_update") {
       const p = envelope.payload;
@@ -745,8 +732,8 @@ export class InvocationExecutor {
         kind: "_aide_notice",
         source: { type: "aide" },
         harness: record.binding.adapter.harness,
-        harnessTargetId: record.binding.target.id,
-        contextId: record.contextId,
+        harnessName: record.binding.target.id,
+        runtimeId: record.runtimeId,
         invocationId: invocationId,
         payload: { level: "warning", title: INTERRUPTED_NOTICE_TITLE },
       });
@@ -754,7 +741,7 @@ export class InvocationExecutor {
 
     records.summarizeInvocationEvent(invocationId);
 
-    this.queueForContext(run.contextId).finishRun(run, stopReason);
+    this.queueForRuntime(run.runtimeId).finishRun(run, stopReason);
 
     this.changed();
   }
@@ -765,7 +752,7 @@ export class InvocationExecutor {
    * 启动与投递失败（stopReason:"error"）。
    */
   private synthesizeTerminal(
-    record: Pick<QueueRun<HarnessContext>, "binding" | "invocationId" | "status">,
+    record: Pick<QueueRun<LiveHarness>, "binding" | "invocationId" | "status">,
     opts: { message?: string; stopReason: StopReason },
   ): void {
     if (record.status === "finalized") return;
@@ -794,66 +781,74 @@ export class InvocationExecutor {
   /**
    * Establish call correlation before native startup, so startup approvals and progress have an owner.
    */
-  private contextKey(contextId: string, harnessTargetId: string): string {
-    return `${contextId}\0${harnessTargetId}`;
+  private runtimeKey(runtimeId: string, harnessName: string): string {
+    return `${runtimeId}\0${harnessName}`;
   }
 
-  private contextFor(
-    contextId: string,
-    harnessTargetId: string,
+  private runtimeFor(
+    runtimeId: string,
+    harnessName: string,
     setupInvocationId?: string,
-  ): HarnessContext {
-    const key = this.contextKey(contextId, harnessTargetId);
-    let binding = this.contexts.get(key);
-    if (!binding) {
-      const context = this.options.records.meta.contexts[contextId];
-      if (!context) throw new Error(`Execution context not found: ${contextId}`);
-      const target = this.targetFor(harnessTargetId);
-      const adapter = this.options.createAdapter(target, {
+  ): LiveHarness {
+    const key = this.runtimeKey(runtimeId, harnessName);
+    const binding = this.runtimes.get(key);
+    if (!binding) throw new Error(`No prepared Harness call: ${runtimeId}`);
+    if (setupInvocationId) binding.setupInvocationId = setupInvocationId;
+    return binding;
+  }
+
+  /** Prepare an ephemeral runtime from explicit parameters. No resource fields are read or written. */
+  prepare(harnessName: string, scope: ExecutionScope, session?: AgentStatus["session"]): LiveHarness {
+    const previous = session ? this.findRuntime(harnessName, scope, session.id) : undefined;
+    if (previous) return previous;
+    const runtimeId = randomUUID();
+    const key = this.runtimeKey(runtimeId, harnessName);
+    const target = this.targetFor(harnessName);
+    const adapter = this.options.createAdapter(target, {
+        scope, runtimeId,
         openApproval: (approval, context) =>
-          this.openHarnessApproval(contextId, target.id, approval, context),
+          this.openHarnessApproval(runtimeId, target.id, approval, context),
         log: (entry) =>
-          this.options.records.log({ ...entry, harnessTargetId: target.id }),
+          this.options.records.log({ ...entry, harnessName: target.id }),
         nativeEvent: (event) =>
           this.options.records.nativeEvent(
             target.id,
             target.harness,
             event,
-            contextId,
+            runtimeId,
           ),
       });
-      binding = { contextId, target, adapter, setupInvocationId };
-      this.contexts.set(key, binding);
-    }
-    return binding;
+    const runtime = { runtimeId, target, adapter, scope, session };
+    this.runtimes.set(key, runtime);
+    return runtime;
   }
 
-  /** Resolve configuration and save references; native runtime ownership remains in Harness. */
-  private async ensureHarness(contextId: string, targetId: string): Promise<HarnessContext> {
-    const context = this.contextFor(contextId, targetId);
+  findRuntime(harnessName: string, scope: ExecutionScope, sessionId: string): LiveHarness | undefined {
+    return [...this.runtimes.values()].find(runtime => runtime.target.id === harnessName && runtime.session?.id === sessionId
+      && runtime.scope.pluginInstanceId === scope.pluginInstanceId && runtime.scope.resourceRef?.uid === scope.resourceRef?.uid);
+  }
+
+  /** Open the provider from caller-supplied parameters; references are returned, never persisted here. */
+  private async ensureHarness(runtimeId: string, targetId: string): Promise<LiveHarness> {
+    const context = this.runtimeFor(runtimeId, targetId);
     const existingOpen = this.opening.get(context);
     if (existingOpen) { await existingOpen; return context; }
     if (context.ref) return context;
     const records = this.options.records;
-    const previous = records.requireExecutionContext(contextId).harnessSessions[targetId];
-    const options = { cwd: records.meta.cwd, sessionId: previous?.harnessSessionId, resumeState: previous?.resumeState };
+    const options = { cwd: records.cwd, sessionId: context.session?.id, resumeState: context.session?.resume };
     const receive = (event: import("../harness/adapter.ts").HarnessEvent) => this.harnessHooks.acceptHarnessEvent(context, event);
     let publishedId: string | undefined;
     const reference = (value: import("../harness/adapter.ts").HarnessSessionReference) => {
+      if (options.sessionId && value.identity.id !== options.sessionId) throw new Error("Harness resumed a different native session");
       if (publishedId && publishedId !== value.identity.id) throw new Error("Harness changed native session identity within a live runtime");
       publishedId = value.identity.id;
-      const session = { harness: context.target.harness, harnessSessionId: value.identity.id, resumeState: value.resumeState };
-      const pending = (this.referenceWrites.get(context) ?? Promise.resolve()).then(() => records.saveSession?.(contextId, targetId, session));
-      this.referenceWrites.set(context, pending);
-      void pending.catch(() => {});
-      records.setContextHarnessSession(contextId, targetId, { ...records.requireExecutionContext(contextId).harnessSessions[targetId], ...session });
+      context.session = { id: value.identity.id, ...(value.resumeState ? { resume: value.resumeState } : {}) };
     };
     const opening = (async () => {
       context.ref = options.sessionId
         ? await context.adapter.resume({ ...options, sessionId: options.sessionId }, receive, reference)
         : await context.adapter.create(options, receive, reference);
-      await this.flushReferences(context);
-      const configured = records.meta.harnessTargets[targetId];
+      const configured = this.options.resolveHarness(targetId);
       let model = configured?.model ?? this.options.modelPreferences?.[targetId];
       const effort = configured?.effort ?? this.options.effortPreferences?.[targetId];
       if (model) {
@@ -864,14 +859,10 @@ export class InvocationExecutor {
         if (isSessionConfigurable(context.adapter)) await context.adapter.setConfig(context.ref, "effort", effort);
         else if (isEffortConfigurable(context.adapter)) await context.adapter.setEffort(context.ref, effort);
       }
-      if (configured?.mode && isSessionConfigurable(context.adapter)) await context.adapter.setConfig(context.ref, "mode", configured.mode);
       if (isModelReadable(context.adapter)) model = context.adapter.currentModel(context.ref) ?? undefined;
-      records.setContextHarnessSession(contextId, targetId, {
-        ...records.requireExecutionContext(contextId).harnessSessions[targetId], harness: context.target.harness,
-        launchSnapshot: createHarnessLaunchSnapshot({ target: context.target, harnessSessionKey: context.adapter.harness, cwd: options.cwd, model, effort }),
-      });
+      context.launchSnapshot = createHarnessLaunchSnapshot({ target: context.target, harnessSessionKey: context.adapter.harness, cwd: options.cwd, model, effort });
       records.log({ level: "info", source: "aide", component: "harness.session", harness: context.target.harness,
-        harnessTargetId: targetId, message: "Native session opened", attributes: { contextId, resumed: context.ref.resumed ?? false } });
+        harnessName: targetId, message: "Native session opened", attributes: { runtimeId, resourceUid: context.scope.resourceRef?.uid ?? null, sessionId: context.session?.id ?? null, resumed: context.ref.resumed ?? false } });
     })();
     this.opening.set(context, opening);
     try { await opening; return context; }
@@ -879,10 +870,10 @@ export class InvocationExecutor {
   }
 
   /** Session operations use the same provider boundary without creating an inference invocation. */
-  async operate(contextId: string, targetId: string, input: import("@compforge/aide-plugin").HarnessOperationInput): Promise<import("@compforge/aide-plugin").HarnessOperationValue> {
+  async operate(runtimeId: string, targetId: string, input: import("@compforge/aide-plugin").HarnessOperationInput): Promise<import("@compforge/aide-plugin").HarnessOperationValue> {
     this.assertOpen();
-    const key = this.contextKey(contextId, targetId);
-    const current = this.contexts.get(key);
+    const key = this.runtimeKey(runtimeId, targetId);
+    const current = this.runtimes.get(key);
     if (input.operation === "abort") {
       const run = this.runForInvocation(input.invocationId);
       if (run) await this.interruptRecord(run);
@@ -892,55 +883,43 @@ export class InvocationExecutor {
       const result = await this.appendInput(input.operation, input.invocationId, input.messageId, input.prompt);
       return { outcome: result.accepted ? "accepted" : "rejected", reason: result.reason };
     }
-    if (this.processing.has(contextId) || this.queues.get(contextId)?.head || (current && this.opening.has(current))) return { outcome: "rejected", reason: "session_busy" };
+    if (this.processing.has(runtimeId) || this.queues.get(runtimeId)?.head || (current && this.opening.has(current))) return { outcome: "rejected", reason: "session_busy" };
     if (input.operation === "close") {
       if (current) await this.closeHarness(current);
       return { outcome: "accepted" };
     }
-    if (current) await this.closeHarness(current);
-    const target = this.targetFor(targetId);
-    this.options.records.setContextHarnessSession(contextId, targetId, { harness: target.harness,
-      ...(input.operation === "resume" ? { harnessSessionId: input.session.id, resumeState: input.session.resume } : {}) });
-    const context = this.contextFor(contextId, targetId);
+    const context = this.runtimeFor(runtimeId, targetId);
     try {
-      await this.ensureHarness(contextId, targetId);
-      await this.flushReferences(context);
-      const saved = this.options.records.requireExecutionContext(contextId).harnessSessions[targetId];
-      return { outcome: "accepted", ...(saved?.harnessSessionId ? { session: { id: saved.harnessSessionId, resume: saved.resumeState } } : {}) };
+      await this.ensureHarness(runtimeId, targetId);
+      if (!context.session) {
+        await this.closeHarness(context);
+        return { outcome: "rejected", reason: "session_reference_unavailable" };
+      }
+      return { outcome: "accepted", ...(context.session ? { session: context.session } : {}) };
     } catch (error) {
       await this.closeHarness(context).catch(() => {});
       throw error;
     }
   }
 
-  private readonly opening = new Map<HarnessContext, Promise<void>>();
-  private readonly referenceWrites = new Map<HarnessContext, Promise<void>>();
-  private async flushReferences(context: HarnessContext): Promise<void> {
-    let pending: Promise<void> | undefined;
-    do { pending = this.referenceWrites.get(context); await pending; }
-    while (pending !== this.referenceWrites.get(context));
-  }
-  private async closeHarness(context: HarnessContext): Promise<void> {
-    const key = this.contextKey(context.contextId, context.target.id);
-    if (this.contexts.get(key) === context) this.contexts.delete(key);
+  private readonly opening = new Map<LiveHarness, Promise<void>>();
+  private async closeHarness(context: LiveHarness): Promise<void> {
+    const key = this.runtimeKey(context.runtimeId, context.target.id);
+    if (this.runtimes.get(key) === context) this.runtimes.delete(key);
     await this.opening.get(context)?.catch(() => {});
     const ref = context.ref;
     context.ref = undefined;
-    try { if (ref) await context.adapter.close(ref); }
-    finally {
-      try { await this.flushReferences(context); }
-      finally { this.referenceWrites.delete(context); }
-    }
+    if (ref) await context.adapter.close(ref);
   }
 
-  private targetFor(harnessTargetId: string): HarnessTarget {
-    const resolved = this.options.resolveTarget(harnessTargetId);
+  private targetFor(harnessName: string): HarnessConfiguration {
+    const resolved = this.options.resolveHarness(harnessName);
     if (!resolved) {
-      throw new Error(`HarnessTarget not registered: ${harnessTargetId}`);
+      throw new Error(`HarnessConfiguration not registered: ${harnessName}`);
     }
-    if (!resolved.id || resolved.id !== harnessTargetId || !resolved.harness) {
+    if (!resolved.id || resolved.id !== harnessName || !resolved.harness) {
       throw new Error(
-        `invalid HarnessTarget for ${harnessTargetId}: id=${resolved.id}, harness=${resolved.harness}`,
+        `invalid HarnessConfiguration for ${harnessName}: id=${resolved.id}, harness=${resolved.harness}`,
       );
     }
     return Object.freeze({ id: resolved.id, harness: resolved.harness });

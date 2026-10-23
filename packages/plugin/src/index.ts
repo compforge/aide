@@ -107,7 +107,7 @@ export type {
   ResourceOwnerReference,
 } from "./resource.ts";
 
-export type { HarnessTargetSnapshot, ReconcileSnapshot, HarnessExecutionResult, HarnessToolCall } from "./snapshot.ts";
+export type { HarnessConfigurationSnapshot, ReconcileSnapshot, HarnessExecutionResult, HarnessToolCall } from "./snapshot.ts";
 export type { ResourceCommit } from "./resource.ts";
 export type * from "./connectors/index.ts";
 

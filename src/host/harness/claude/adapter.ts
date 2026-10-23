@@ -82,7 +82,7 @@ export interface ClaudeAdapterOptions {
   openApproval: OpenApproval;
   log?: LogSink;
   nativeEvent?: NativeEventSink;
-  /** HarnessTarget 固定环境；同名项覆盖每次 open 传入的动态环境。 */
+  /** HarnessConfiguration 固定环境；同名项覆盖每次 open 传入的动态环境。 */
   env?: Readonly<Record<string, string>>;
   /** claude 可执行文件路径；默认 AIDE_CLAUDE_BIN 环境变量，再默认交给 SDK 自己找 */
   executablePath?: string;
@@ -342,7 +342,7 @@ export class ClaudeAdapter implements Harness {
       rt.models = claudeModels(rt.modelInfos);
       return;
     }
-    // 静态发现归 HarnessTarget probe；live Adapter 在尚未启动 query 时只提供稳定别名。
+    // 静态发现归 HarnessConfiguration probe；live Adapter 在尚未启动 query 时只提供稳定别名。
     rt.models = CLAUDE_FALLBACK_MODELS;
   }
 
