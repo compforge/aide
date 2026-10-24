@@ -215,7 +215,7 @@ test("Personal SDK requests carry assistant policy and refresh human identity in
       assert.match(request, /\\"provider\\":\\"web\\"/);
     } finally { agent.dispose(); }
   }
-  const me = (await fixture.persons.me())!;
+  const me = (await fixture.persons.findIdentity(LOCAL_ME))!;
   const before = await background();
   await fixture.persons.edit(me.metadata.name, me.metadata.uid, me.metadata.resourceVersion, { ...me.spec, name: "Updated human" });
   assert.doesNotMatch(before.text(), /Updated human/);

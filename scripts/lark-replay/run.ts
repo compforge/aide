@@ -49,9 +49,11 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
   const eventsPath = join(directory, "events.jsonl");
   const append = (event: unknown) => appendFileSync(eventsPath, JSON.stringify(event) + "\n", { mode: 0o600 });
   const aide: Aide = new Aide(join(directory, "state"), {
-    cwd: join(directory, "workspace"), timezone: "Asia/Shanghai", connectors, larkAppId: snapshot.identity.accountId,
+    cwd: join(directory, "workspace"), timezone: "Asia/Shanghai", connectors,
     defaultHarnessConfig: { id: "default", harness: "pi" },
-    config: ConfigSchema.parse({ connectors: { lark: { appId: snapshot.identity.accountId, userId: snapshot.identity.userId,
+    // Admit captured destinations without constructing a transport or sending real messages.
+    config: ConfigSchema.parse({ channels: { replay: { kind: "lark", label: "Replay only", enabled: true,
+      appId: snapshot.identity.accountId, appSecret: "replay-no-delivery" } }, connectors: { lark: { appId: snapshot.identity.accountId, userId: snapshot.identity.userId,
       me: snapshot.meIds.map(openId => ({ appId: snapshot.identity.accountId, openId })) } },
       plugins: { personal: { weave: { enabled: options.weave, intervalMs: 1000 } } } }),
     createAdapter: options.createAdapter ?? ((target, ports) => {

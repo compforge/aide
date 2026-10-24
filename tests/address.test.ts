@@ -33,15 +33,17 @@ test("Source addresses never supply direct or urgency-based reply destinations",
     source: observed, attention: "immediate", relation: "sent", text: "Me asks a colleague a question" });
   const before = store.outputs().length;
   await assert.rejects(store.say("observations", "external", "unsolicited reply", undefined, { respondToInputId: "external" }), /Direct replies require a Channel Input/);
-  await assert.rejects(store.say("observations", "external", "implicit reply"), /explicit target/);
   assert.equal(store.outputs().length, before);
+  await aide.persons.initialize();
+  const fallback = await store.say("observations", "external", "Notify Me rather than the observed group");
+  assert.deepEqual(store.outputStore.get(fallback.outputId)!.spec.target, webAddress("observations"));
   const explicit = await store.say("observations", "external", "Aide's suggestion", undefined, { target: contact });
   assert.deepEqual(store.outputStore.get(explicit.outputId)!.spec.target, contact);
   await store.ensure("known-contact", contact);
   await seedInput(store, "urgent-observation", { topicId: "known-contact", origin: "source", originId: "personal.lark",
     source: observed, attention: "immediate", text: "external change" });
   const notification = await store.say("known-contact", "urgent-observation", "Update within an existing mandate");
-  assert.deepEqual(store.outputStore.get(notification.outputId)!.spec.target, contact);
+  assert.deepEqual(store.outputStore.get(notification.outputId)!.spec.target, webAddress("known-contact"), "Topic address does not override default contact");
 });
 
 test("ChannelAddress extends Address and owns canonical endpoint encoding and admission", () => {
