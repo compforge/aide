@@ -1,3 +1,5 @@
+import { resourceRef } from "../plugins/personal/input/state.ts";
+import { understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { fixtureAddress, fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -113,4 +115,31 @@ test("Recreated Topic has fresh execution context and no old outputs or progress
   await aide.receive(fixtureIncoming({ channelId: "web", id: "old", topicId: "me", text: "旧请求" })); await aide.settled();
   assert.equal(calls, 2);
   assert.equal(aide.outputs().some((m) => m.text === "旧请求"), false);
+});
+
+/** @case Hierarchy and Weave deletion vetoes remain domain refusals through the HTTP API. */
+test("Web reports Topic hierarchy, absorption, Default and Weave deletion refusals", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "aide-delete-tree-"));
+  const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("No execution expected"); } }, dir), log);
+  const topics = aide.personal.topics;
+  const resources = aide.personal.plugins.resourceClient("personal");
+  for (const id of ["parent", "child", "frozen", "default"]) await topics.ensure(id);
+  const parent = topics.resource("parent")!;
+  let child = topics.resource("child")!;
+  child = await resources.replace(child, { ...child.spec, parentRef: resourceRef(parent) }, { ...child.status, summary: "未吸收的事实" });
+  const frozen = topics.resource("frozen")!;
+  await resources.patchStatus(frozen, { weaveLock: "pending-group" });
+  const permanent = topics.resource("default")!;
+  await resources.replace(permanent, { ...permanent.spec, default: true }, permanent.status);
+  const { server, remove } = await listen(aide);
+  t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
+  for (const [id, expected] of [["parent", /子主题/], ["child", /尚未吸收/], ["frozen", /正在整理/], ["default", /默认主题不能删除/]] as const) {
+    const before = topics.resource(id)!;
+    const response = await remove(id, Number(before.metadata.resourceVersion));
+    assert.equal(response.status, 409);
+    assert.match((await response.json() as { error: string }).error, expected);
+    assert.deepEqual(topics.resource(id), before);
+  }
+  await resources.patchStatus(topics.resource("parent")!, { absorbed: { [child.metadata.uid]: understandingVersion(child) } });
+  assert.equal((await remove("child", Number(child.metadata.resourceVersion))).status, 200);
 });

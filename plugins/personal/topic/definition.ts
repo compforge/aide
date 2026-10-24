@@ -5,7 +5,7 @@ import { z } from "zod";
 import { TopicTriggerSchema } from "./trigger.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { AddressSchema } from "../../../src/address.ts";
-import { TOPIC_TYPE, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
+import { TOPIC_TYPE, TopicDeletionBlocked, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
 import { LoopExecutionSchema } from "../loop.ts";
 import { ResourceRefSchema } from "../topic/ref.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
@@ -46,18 +46,18 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     if (previous.status.weaveLock && !previous.status.execution && understandingVersion(current) !== understandingVersion(previous)) throw new Error("Weave has frozen Topic understanding");
     validateDefault(current, context);
   }, delete: (resource, context) => {
-    if (resource.spec.default) throw new Error("Default Topic cannot be deleted");
+    if (resource.spec.default) throw new TopicDeletionBlocked("default", "Default Topic cannot be deleted");
     const staged = context.list<Record<string, never>, WeaveStatus>(WEAVE_TYPE).some(w => w.status.plan?.id === resource.spec.id && !w.status.plan.moving);
-    if (resource.status.execution || (resource.status.weaveLock && !staged)) throw new Error("Topic is busy");
-    if (context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).some(t => t.spec.parentRef?.uid === resource.metadata.uid)) throw new Error("Topic still has children");
+    if (resource.status.execution || (resource.status.weaveLock && !staged)) throw new TopicDeletionBlocked("busy", "Topic is busy");
+    if (context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).some(t => t.spec.parentRef?.uid === resource.metadata.uid)) throw new TopicDeletionBlocked("children", "Topic still has children");
     const pending = context.list<InputSpec, InputStatus>(INPUT_TYPE).some(i =>
       (i.status.route?.result?.topics.some(t => t.uid === resource.metadata.uid) || i.status.assess?.[resource.metadata.uid])
       && Object.values(i.status.assess ?? {}).some(a => !a.completedAt));
-    if (pending) throw new Error("Topic has pending Input");
-    if (WORK_TYPES.some(type => context.list<WorkResource["spec"], WorkResource["status"]>(type).some(w => w.spec.topicId === resource.spec.id))) throw new Error("Topic still owns Work");
+    if (pending) throw new TopicDeletionBlocked("busy", "Topic has pending Input");
+    if (WORK_TYPES.some(type => context.list<WorkResource["spec"], WorkResource["status"]>(type).some(w => w.spec.topicId === resource.spec.id))) throw new TopicDeletionBlocked("work", "Topic still owns Work");
     if (resource.spec.parentRef) {
       const parent = context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).find(t => t.metadata.uid === resource.spec.parentRef!.uid);
-      if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource)) throw new Error("Parent must absorb Topic understanding before deletion");
+      if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource)) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");
     }
   } },
   indexes: { topicKey: r => r.metadata.deletionTimestamp || !r.spec.topicKey ? [] : [r.spec.topicKey],

@@ -37,7 +37,7 @@ import { WorkService } from "./work.ts";
 import { output, Store } from "./store.ts";
 import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
 import { TOPIC_TYPE, INPUT_TYPE, digest } from "./chief-model.ts";
-import { type TopicDeletion } from "./topic/model.ts";
+import { TopicDeletionBlocked, type TopicDeletion } from "./topic/model.ts";
 import { TopicStore, topicKey } from "./topic/store.ts";
 import type { InputStore } from "./input/store.ts";
 import { chiefTools } from "../../agents/chief/chief-tools.ts";
@@ -256,7 +256,13 @@ export class Personal {
     const hasWork = WORK_TYPES.some((type) => this.store.resources.list<WorkSpec, unknown>(type)
       .some((work) => work.spec.topicId === topicId));
     if (hasWork) return { deleted: false, reason: "work" };
-    await this.plugins.resourceClient("personal").delete(TOPIC_TYPE, topic.metadata.name, "v1", { uid: topic.metadata.uid, resourceVersion: topic.metadata.resourceVersion });
+    try {
+      await this.plugins.resourceClient("personal").delete(TOPIC_TYPE, topic.metadata.name, "v1", { uid: topic.metadata.uid, resourceVersion: topic.metadata.resourceVersion });
+    } catch (error) {
+      if (error instanceof TopicDeletionBlocked) return { deleted: false, reason: error.reason };
+      if (error instanceof Error && error.message === "Resource version conflict before deletion; read it again") return { deleted: false, reason: "changed" };
+      throw error;
+    }
     this.log.info({ topicId, revision, resourceUid: topic.metadata.uid }, "Deleted topic");
     return { deleted: true };
   }

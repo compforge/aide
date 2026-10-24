@@ -205,10 +205,13 @@ export function httpChannel(aide: WebService, log: Logger) {
         const result = await aide.deleteTopic(topicId, revision, uid);
         if (result.deleted) { json(response, 200, result); return; }
         const errors = {
-          missing: "该会话已删除或不存在。",
-          changed: "会话已更新，请刷新后重新确认删除。",
-          busy: "会话还有待处理输入、执行或问题，请处理完成后再删除。",
-          work: "会话还有事项或安排，请先删除这些工作。",
+          missing: "该主题已删除或不存在。",
+          changed: "主题已更新，请刷新后重新确认删除。",
+          busy: "主题还有待处理输入、执行或正在整理，请处理完成后再删除。",
+          work: "主题还有事项或安排，请先删除这些工作。",
+          default: "默认主题不能删除。",
+          children: "主题还有子主题，请先处理子主题。",
+          unabsorbed: "父主题尚未吸收该主题的最新理解，暂时不能删除。",
         };
         log.info({ topicId, revision, reason: result.reason }, "Topic deletion rejected");
         json(response, result.reason === "missing" ? 404 : 409, { error: errors[result.reason] });

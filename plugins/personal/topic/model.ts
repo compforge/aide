@@ -17,7 +17,12 @@ export interface TopicStatus extends ResourceContext {
   receipts: Array<{ key: string; responseId: string }>;
 }
 export type TopicResource = Resource<TopicSpec, TopicStatus>;
-export type TopicDeletion = { deleted: true } | { deleted: false; reason: "missing" | "changed" | "busy" | "work" };
+export type TopicDeletionBlock = "busy" | "work" | "default" | "children" | "unabsorbed";
+export type TopicDeletion = { deleted: true } | { deleted: false; reason: "missing" | "changed" | TopicDeletionBlock };
+/** The transactional validator owns deletion rules; callers can present expected refusals without duplicating them. */
+export class TopicDeletionBlocked extends Error {
+  constructor(readonly reason: TopicDeletionBlock, message: string) { super(message); }
+}
 export interface Topic extends TopicSpec {
   revision: number; createdAt: string; pendingInputIds: string[]; outputs: OutputView[];
 }
