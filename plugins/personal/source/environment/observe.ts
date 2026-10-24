@@ -1,4 +1,4 @@
-import type { TopicKeyProvider } from "../../../../src/topic-key.ts";
+import type { TopicLocator } from "../../topic/locator.ts";
 import { describeWorkloadChanges, type WorkloadChange, type WorkloadEvent } from "./changes.ts";
 import { bindSourceInput } from "../input.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -15,9 +15,9 @@ export interface EnvironmentSourceStatus {
   lastObservedAt?: string;
   error?: string | null;
 }
-export const environmentTopics: TopicKeyProvider<{ environment: string; namespace?: string }> = {
-  topicKey: ({ environment, namespace }) => `environment:${JSON.stringify([environment, namespace ?? ""])}`,
-};
+export const environmentTopics = {
+  locate: ({ environment, namespace }) => ({ kind: "key" as const, key: `environment:${JSON.stringify([environment, namespace ?? ""])}` }),
+} satisfies TopicLocator<{ environment: string; namespace?: string }>;
 const identity = (workload: WorkloadSnapshot) => `${workload.kind}/${workload.name}`;
 
 export function workloadChanges(before: EnvironmentSnapshot, after: EnvironmentSnapshot): WorkloadChange[] {
@@ -60,7 +60,7 @@ export async function observeEnvironment(context: Pick<PluginContext, "resources
     const event: WorkloadEvent = { type: "workload.changed", environment: snapshot.environment, namespace: snapshot.namespace,
       observedAt: snapshot.observedAt, previousObservedAt: baseline!.observedAt, changes };
     const submit = bindSourceInput(SOURCES.environments, resource, context.resources);
-    await submit(name, { topicKey: environmentTopics.topicKey(snapshot), relation: "observed", text: describeWorkloadChanges(event), observation: { ...event } });
+    await submit(name, { topicKey: environmentTopics.locate(snapshot).key, relation: "observed", text: describeWorkloadChanges(event), observation: { ...event } });
   }
   await context.resources.patchStatus(resource, { baseline: snapshot, sequence: changes.length ? sequence : resource.status.sequence ?? 0,
     lastObservedAt: snapshot.observedAt, error: null });

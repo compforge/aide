@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { Logger } from "pino";
 import type { WebService } from "./service.ts";
 import { validInputResult } from "../host/approval/answer.ts";
-import { IncomingSchema } from "../channel/message.ts";
+import { IncomingSchema, webTopicLocator } from "../channel/message.ts";
 import { topicList } from "../channel/view.ts";
 import { streamTopic } from "./stream.ts";
 import { inputList, inputDetail } from "./inputs.ts";
@@ -186,7 +186,8 @@ export function httpChannel(aide: WebService, log: Logger) {
         json(response, completed ? 200 : 409, { completed: completed });
       } else if (request.method === "POST" && url.pathname === "/messages") {
         const input = IncomingSchema.omit({ channelId: true, observation: true, source: true, topicKey: true }).extend({ topicId: z.string().min(1) }).parse(await body(request));
-        json(response, 200, await receive({ ...input, source: webAddress(input.topicId) }));
+        const topicId = webTopicLocator.locate(input).id;
+        json(response, 200, await receive({ ...input, topicId, source: webAddress(topicId) }));
       } else if (request.method === "POST" && url.pathname === "/topics/default") {
         const { topicId, enabled } = TopicDefaultSchema.parse(await body(request));
         const resource = aide.topics.resource(topicId);

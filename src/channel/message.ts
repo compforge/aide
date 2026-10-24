@@ -1,3 +1,4 @@
+import type { TopicLocator } from "../../plugins/personal/topic/locator.ts";
 import { ChannelAddressSchema } from "./address.ts";
 import { z } from "zod";
 export const IncomingSchema = z.object({
@@ -10,3 +11,8 @@ export const IncomingSchema = z.object({
   observation: z.record(z.string(), z.unknown()).optional(),
 });
 export type Incoming = z.infer<typeof IncomingSchema>;
+
+/** Web messages explicitly select a Topic rather than deriving a source key. */
+export const webTopicLocator = {
+  locate: ({ topicId }) => ({ kind: "id" as const, id: topicId }),
+} satisfies TopicLocator<{ topicId: string }>;

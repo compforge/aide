@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { larkTopicKeys } from "../topic-key.ts";
+import type { TopicLocator } from "../../plugins/personal/topic/locator.ts";
 import type { Address, ChannelAddress } from "@compforge/aide-plugin";
 
 export function isChannelAddress(address: Address): address is ChannelAddress {
@@ -14,12 +14,20 @@ export function larkAddress(appId: string, chatId: string): ChannelAddress {
   if (!appId || !chatId) throw new Error("Lark address requires appId and chatId");
   return { kind: "channel", channelId: "lark", endpoint: [appId, chatId].map(encodeURIComponent).join("/") };
 }
+/** A shared locator keeps user observation and bot intake in the same Lark namespace. */
+export const larkTopicLocator = {
+  locate({ appId, chatId, threadId, direct }) {
+    if (!appId || !chatId) throw new Error("Lark topic key requires appId and chatId");
+    return { kind: "key" as const, key: `lark:${appId}:${chatId}${!direct && threadId ? `:thread:${threadId}` : ""}` };
+  },
+} satisfies TopicLocator<{ appId: string; chatId: string; threadId?: string; direct?: boolean }>;
+
 /**
  * @spec Lark topics share app/chat identity across Channel and Source; group threads have their own Topic.
  * @link docs/connector/lark-messages.md#topic-创建与归属
  */
 export function larkTopicKey(appId: string, chatId: string, threadId?: string): string {
-  return larkTopicKeys.topicKey({ appId, chatId, threadId })!;
+  return larkTopicLocator.locate({ appId, chatId, threadId }).key;
 }
 export function larkEndpoint(address: Address): { appId: string; chatId: string } | undefined {
   if (!isChannelAddress(address) || address.channelId !== "lark") return;

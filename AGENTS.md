@@ -66,6 +66,7 @@ plugins/personal/
   weave/                   # 全局 Weave CRD、分批组织与安全交接
   route/                   # 全局 Route CRD：规则分发、持续分类与原子分派
   topic/                   # Topic CRD 的模型、操作与 Reconcile
+    locator.ts             # Channel / Source 提供 Topic 定位信息的领域契约
     model.ts               # 资源定义与会话类型
     store.ts               # 宿主侧会话、Input 消费投影与消息流
     config.ts              # 输入预览与近期摘要预算

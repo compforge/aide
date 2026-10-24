@@ -1,4 +1,4 @@
-import type { TopicKeyProvider } from "../../../../src/topic-key.ts";
+import type { TopicLocator } from "../../topic/locator.ts";
 import { larkAddress, larkTopicKey } from "../../../../src/channel/address.ts";
 import { Persons } from "../../person/service.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -63,8 +63,8 @@ const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, n
  * @case tests/message-source.test.ts
  * @link docs/connector/lark-messages.md
  */
-class MessageObservation implements TopicKeyProvider<{ chatId: string; threadId?: string }> {
-  topicKey(input: { chatId: string; threadId?: string }): string { return larkTopicKey(this.watch.accountId, input.chatId, input.threadId); }
+class MessageObservation implements TopicLocator<{ chatId: string; threadId?: string }> {
+  locate(input: { chatId: string; threadId?: string }) { return { kind: "key" as const, key: larkTopicKey(this.watch.accountId, input.chatId, input.threadId) }; }
   private readonly submitInput: ReturnType<typeof bindSourceInput>;
   constructor(private readonly context: Context, private resource: Source, private readonly connectors: ConnectorClient, private readonly now: number) {
     this.submitInput = bindSourceInput(SOURCES.lark, resource, context.resources);
@@ -242,7 +242,7 @@ class MessageObservation implements TopicKeyProvider<{ chatId: string; threadId?
       source: larkAddress(this.watch.accountId, message.chatId),
       ...(relation ? { relation } : {}),
       ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
-      topicKey: this.topicKey({ chatId: message.chatId, threadId: entry.kind === "mention" ? message.threadId : undefined }),
+      topicKey: this.locate({ chatId: message.chatId, threadId: entry.kind === "mention" ? message.threadId : undefined }).key,
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,
         kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,

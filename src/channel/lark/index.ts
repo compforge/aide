@@ -1,4 +1,4 @@
-import type { TopicKeyProvider } from "../../topic-key.ts";
+import type { TopicLocator } from "../../../plugins/personal/topic/locator.ts";
 import { larkAddress, larkTopicKey, larkEndpoint } from "../address.ts";
 import { channelOutputs } from "../output.ts";
 import type { OutputView } from "../../output.ts";
@@ -46,8 +46,8 @@ type State = z.infer<typeof StateSchema>;
  * @why Platform acknowledgement must not depend on business processing or model latency.
  * @see {@link ../../../docs/channel/lark.md}
  */
-export class LarkChannel implements TopicKeyProvider<{ chatId: string; threadId?: string }> {
-  topicKey(input: { chatId: string; threadId?: string }): string { return larkTopicKey(this.appId, input.chatId, input.threadId); }
+export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: string }> {
+  locate(input: { chatId: string; threadId?: string }) { return { kind: "key" as const, key: larkTopicKey(this.appId, input.chatId, input.threadId) }; }
   private readonly acceptInput: ReturnType<typeof bindChannelInput>;
   private readonly path: string;
   private readonly prefix: string;
@@ -112,7 +112,7 @@ export class LarkChannel implements TopicKeyProvider<{ chatId: string; threadId?
     const { message_id: id, chat_id: chatId } = message;
     if (this.state.received.includes(id)) return;
     const threadId = message.chat_type === "group" ? message.thread_id : undefined;
-    const topicId = this.topicKey({ chatId, threadId });
+    const topicId = this.locate({ chatId, threadId }).key;
     let text: unknown;
     if (message.message_type === "text") {
       if (message.chat_type === "group") {

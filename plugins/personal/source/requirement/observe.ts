@@ -1,4 +1,4 @@
-import type { TopicKeyProvider } from "../../../../src/topic-key.ts";
+import type { TopicLocator } from "../../topic/locator.ts";
 import { type ConnectorClient, type PluginContext, type RequirementAccount, type RequirementIdentity, type RequirementSummary, type Resource } from "@compforge/aide-plugin";
 import { bindSourceInput, type SourceInput } from "../input.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -27,8 +27,8 @@ const iso = (n: number) => new Date(n).toISOString();
  * @spec Comments have their own bounded time windows; work-item updated_at is not a comment watermark.
  * @link docs/connector/requirements.md
  */
-class RequirementObservation implements TopicKeyProvider<RequirementIdentity> {
-  topicKey(_identity: RequirementIdentity): string { return this.resource.spec.topicKey; }
+class RequirementObservation implements TopicLocator<RequirementIdentity> {
+  locate(_identity: RequirementIdentity) { return { kind: "key" as const, key: this.resource.spec.topicKey }; }
   private readonly persons: Persons;
   private account!: RequirementAccount;
   private me: Me = { identities: [] };
@@ -66,7 +66,7 @@ class RequirementObservation implements TopicKeyProvider<RequirementIdentity> {
     return relationToPerson(this.me, { ...(author ? { author: identity(author) } : {}), recipients: recipients.map(identity), observer });
   }
   private base(identity: RequirementIdentity): SourceInput {
-    return { topicKey: this.topicKey(identity), source: requirementAddress(identity, this.account.scope), text: "", attention: "deferred" };
+    return { topicKey: this.locate(identity).key, source: requirementAddress(identity, this.account.scope), text: "", attention: "deferred" };
   }
   private async snapshot(item: RequirementSummary & { description?: string }) {
     const key = keyOf(item), previous = this.tracked[key];

@@ -43,17 +43,21 @@ Topic 使用独立 ID / UID，名称和来源 key 不充当资源身份。字段
 
 Default 是永久、独立的 root。它承接无合适归属的输入，不参与 Weave 分组，不被挂到其他 Topic 下，也不作为分组父节点接纳其他 Topic；不允许删除或静默回收。该例外不授予额外执行或外发权限。
 
-## topicKey 能力
+## TopicLocator 能力
 
-Channel / Source 复用小能力接口，而不是共同继承一套通信或观察生命周期：
+Channel / Source 复用 [TopicLocator](../../plugins/personal/topic/locator.ts) 领域契约，具体定位规则留在各自适配器中，而不是共同继承一套通信或观察生命周期：
 
 ```ts
-interface TopicKeyProvider<T> {
-  topicKey(input: T): string | undefined;
+type TopicSelector =
+  | { kind: "id"; id: string }
+  | { kind: "key"; key: string };
+
+interface TopicLocator<T> {
+  locate(input: T): TopicSelector | undefined;
 }
 ```
 
-具体适配器针对已经解析的消息实现或组合这个能力，生成 Input 时附带 topicKey。现有身份与展示 Definition 不因此承担协议解析职责。方法同步、确定性、无副作用；不调用模型、不创建 Topic，无明确规则时返回 undefined。
+具体适配器针对已经解析的消息实现或组合这个能力，生成 Input 时将结果写入 topicId 或 topicKey。ID 和 key 都是精确定位：前者指定 Topic 身份，后者指定稳定来源归属。未来可以增加泛化或模糊特征，由 Route 解释并决定归属；当前不实现这些变体，也不把模糊特征编码成精确 key。现有身份与展示 Definition 不因此承担协议解析职责。方法同步、确定性、无副作用；不调用模型、不创建 Topic，无明确规则时返回 undefined。
 
 key 的作用域包含必要的平台和账号信息，避免无关来源碰撞。来源相同的 Channel 与 Source 使用同一规则，不能仅因入口类型不同就拆开。示例沿用 [Lark 的来源划分](../connector/lark-messages.md#topic-创建与归属)：
 
