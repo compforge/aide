@@ -16,17 +16,17 @@ export async function updateConversation(resources: ResourceClient, ref: Readonl
   }
 }
 
-export const ConversationContextSchema = z.object({ version: z.string(), summary: z.string().max(SUMMARY_CHARS), recent: z.string().min(1).max(RECENT_CHARS) }).strict();
+export const ConversationContextSchema = z.object({ version: z.string(), summary: z.string().max(SUMMARY_CHARS), recent: z.string().min(1).max(RECENT_CHARS).optional() }).strict();
 export type ConversationContextUpdate = z.infer<typeof ConversationContextSchema>;
 
-/** @spec A timer review can update understanding without inventing or completing an Input. Stale synthesis must be merged again. */
+/** @spec Meaningful synthesis updates understanding independently of Input receipts; recent evidence is optional. Stale synthesis must be merged again. */
 export async function summarizeConversation(resources: ResourceClient, owner: Readonly<ConversationResource>, executionId: string, raw: unknown, summaryChars: number) {
   const args = ConversationContextSchema.parse(raw);
   if (args.summary.length > summaryChars) throw new Error(`Conversation summary exceeds ${summaryChars} characters; condense and retry`);
   const updated = await updateConversation(resources, owner, current => {
     if (current.status.execution?.id !== executionId) throw new Error("Chief execution is no longer active");
     if (current.metadata.resourceVersion !== args.version) throw new Error("Conversation context changed; read_input and merge again");
-    return { summary: args.summary, recent: [...current.status.recent, { at: new Date().toISOString(), text: args.recent }] };
+    return { summary: args.summary, ...(args.recent ? { recent: [...current.status.recent, { at: new Date().toISOString(), text: args.recent }] } : {}) };
   });
-  return { version: updated.metadata.resourceVersion, summary: updated.status.summary, recent: updated.status.recent };
+  return { version: updated.metadata.resourceVersion };
 }

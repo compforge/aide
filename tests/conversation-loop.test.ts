@@ -45,7 +45,8 @@ test("Completion atomically acknowledges only admitted inputs; redelivery and re
   assert.deepEqual(aide.conversations.get("me")!.pendingInputIds, ["later"]);
   assert.equal(await routeTo(client, c.metadata, aide.conversations.inputStore.get("one")!), false);
   assert.equal(aide.outputs().length, 0);
-  assert.equal(aide.conversations.resource("me")!.status.summary, "Nothing needs action");
+  assert.equal(aide.conversations.resource("me")!.status.summary, "");
+  assert.deepEqual(aide.conversations.resource("me")!.status.recent, []);
   await assert.rejects(assessAll(client, c, "old", { inputIds: ["one"], summary: "stale" }), /no longer active/);
 });
 

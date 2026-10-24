@@ -45,7 +45,8 @@ test("A say request for information finishes processing; the answer is a new Inp
   assert.equal(aide.personal.core.executions.approvals().length, 0);
   await aide.close();
   aide = new Aide(home, options, pino({ level: "silent" }));
-  assert.match(new ConversationBackground(aide.personal.store, aide.conversations.resource("me"), "me").text(), /请提供目标环境。/);
+  assert.doesNotMatch(new ConversationBackground(aide.personal.store, aide.conversations.resource("me"), "me").text(), /请提供目标环境。/, "A processing receipt is not automatically topic understanding");
+  assert.equal(aide.outputs().at(-1)!.text, "请提供目标环境。", "The question remains in the durable Output");
   await aide.receive(fixtureIncoming({ channelId: "web", id: "answer", sessionId: "me", text: "test 环境" })); await aide.settled();
   const after = aide.invocations().at(-1)!;
   assert.notEqual(after.invocationId, before.invocationId);

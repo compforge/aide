@@ -1,3 +1,4 @@
+import { inputPreview } from "../plugins/personal/input/prompt.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type Resource } from "@compforge/aide-plugin";
@@ -36,4 +37,24 @@ test("Input summaries collapse whitespace and cap previews without truncating de
   const long = input({ text: "😀".repeat(121) });
   assert.equal(inputPrinter.summarize(long), "😀".repeat(119) + "…");
   assert.ok(inputPrinter.describe(long).endsWith(long.spec.text));
+});
+
+/** @case Large evidence stays queryable without entering automatic model material. */
+test("automatic Input preview preserves identity and text but excludes full observations", () => {
+  const fact = input({ origin: "source", originId: "personal.environments", relation: "observed", sessionId: "topic",
+    text: "api: restart +1; readiness unchanged", observation: { changes: [{ before: "private-evidence-marker".repeat(2000), after: "full-evidence" }] } });
+  const original = structuredClone(fact);
+  const preview = inputPreview(fact, 1000);
+  assert.match(preview, /api: restart \+1/);
+  assert.match(preview, /Session: topic/);
+  assert.match(preview, /Relation to Person: observed/);
+  assert.match(preview, /read_input/);
+  assert.doesNotMatch(preview, /private-evidence-marker|full-evidence/);
+  assert.match(inputPrinter.describe(fact), /private-evidence-marker/);
+  assert.deepEqual(fact, original);
+  assert.ok(preview.length < inputPrinter.describe(fact).length / 20);
+  const long = inputPreview(input({ text: "x".repeat(5000), observation: { evidence: true } }), 1000);
+  assert.ok(long.length <= 1000);
+  assert.match(long, /Text truncated/);
+  assert.match(long, /observation evidence/);
 });

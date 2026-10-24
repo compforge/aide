@@ -1,3 +1,4 @@
+import { describeWorkloadChanges, type WorkloadChange, type WorkloadEvent } from "./changes.ts";
 import { bindSourceInput } from "../input.ts";
 import { isDeepStrictEqual } from "node:util";
 import { SOURCES } from "../definition.ts";
@@ -13,33 +14,6 @@ export interface EnvironmentSourceStatus {
   lastObservedAt?: string;
   error?: string | null;
 }
-interface WorkloadChange { before?: WorkloadSnapshot; after?: WorkloadSnapshot }
-interface WorkloadEvent {
-  type: "workload.changed";
-  environment: string;
-  namespace: string;
-  observedAt: string;
-  previousObservedAt: string;
-  changes: WorkloadChange[];
-}
-/** The producer describes observed facts; Chief owns decisions about their significance. */
-function describeWorkloadChanges(event: WorkloadEvent): string {
-  const lines = event.changes.slice(0, 20).map(({ before, after }) => {
-    const workload = after ?? before!;
-    const identity = `${workload.kind} ${workload.name}`;
-    if (!before) return `- ${identity}：新增`;
-    if (!after) return `- ${identity}：移除`;
-    const fields = [
-      before.generation !== after.generation ? `generation ${before.generation} → ${after.generation}` : "",
-      JSON.stringify(before.images) !== JSON.stringify(after.images) ? `镜像 ${before.images.map((i) => i.image).join(", ")} → ${after.images.map((i) => i.image).join(", ")}` : "",
-      before.ready !== after.ready || before.desired !== after.desired ? `就绪副本 ${before.ready}/${before.desired} → ${after.ready}/${after.desired}` : "",
-    ].filter(Boolean);
-    return `- ${identity}：${fields.length ? fields.join("；") : "Pod 或运行状态变化"}`;
-  });
-  if (event.changes.length > lines.length) lines.push(`其余 ${event.changes.length - lines.length} 项变化见完整观察数据。`);
-  return `${event.environment} / ${event.namespace}：${event.changes.length} 项 Workload 变化。\n\n${lines.join("\n")}`.slice(0, 32_000);
-}
-
 const identity = (workload: WorkloadSnapshot) => `${workload.kind}/${workload.name}`;
 
 export function workloadChanges(before: EnvironmentSnapshot, after: EnvironmentSnapshot): WorkloadChange[] {

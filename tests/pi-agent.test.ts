@@ -301,7 +301,7 @@ test("Aide isolates continuous native contexts across conversations, restart and
     const activation = messageText(messages.findLast(m => m.role === "user")!.content).split("Activation: ").at(-1)!.split("\n")[0]!;
     const inputId = JSON.parse(activation).inputId;
     return index % 3 === 0 ? { tool: "say", args: { text: `native-response-${index / 3}` } }
-      : index % 3 === 1 ? { tool: "assess_input", args: { inputId, conversationSummary: "Handled request", summary: "Handled request" } }
+      : index % 3 === 1 ? { tool: "assess_input", args: { inputId, summary: "Handled request" } }
       : { text: `Internal summary ${Math.floor(index / 3)}` };
   });
   const home = join(fixture.config.cwd, "aide");
@@ -541,7 +541,7 @@ test("Chief retains native context across acknowledged Inputs and restart", { ti
     const activation = raw.split("Activation: ").at(-1)?.split("\n")[0];
     if (!activation) throw new Error("No input activation");
     const inputId = JSON.parse(activation).inputId;
-    return { tool: "assess_input", args: { inputId, conversationSummary: "Recorded the observation", summary: "Recorded the observation" } };
+    return { tool: "assess_input", args: { inputId, summary: "Recorded the observation" } };
   });
   const home = join(fixture.config.cwd, "continuous-home");
   let aide: Aide;
@@ -600,7 +600,7 @@ test("Route exposes only routing, catalog and shared-memory retrieval tools", as
 test("Aide steers immediate Input and independently completes both inputs within one Chief invocation", { timeout: 20_000 }, async t => {
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting the first input", pause }
-    : index === 1 || index === 2 ? { tool: "assess_input", args: { inputId: index === 1 ? "first" : "urgent", conversationSummary: "Observation handled without notification", summary: "Observation handled without notification" } }
+    : index === 1 || index === 2 ? { tool: "assess_input", args: { inputId: index === 1 ? "first" : "urgent", summary: "Observation handled without notification" } }
     : { text: "Handled internally" });
   const home = join(fixture.config.cwd, "steer-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
@@ -682,7 +682,7 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
     const inputId = raw.includes("New Input:")
       ? JSON.parse(raw.split("\n").find(line => line.startsWith('{"inputId":'))!).inputId
       : JSON.parse(raw.split("Activation: ").at(-1)!.split("\n")[0]!).inputId;
-    return { tool: "assess_input", args: { inputId, conversationSummary: "Recorded fact", summary: "Recorded fact" } };
+    return { tool: "assess_input", args: { inputId, summary: "Recorded fact" } };
   });
   const home = join(fixture.config.cwd, "route-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },

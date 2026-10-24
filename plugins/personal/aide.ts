@@ -1,3 +1,4 @@
+import { inputPreview } from "./input/prompt.ts";
 import { conversationCandidates, contextPage } from "./background.ts";
 import { Background as ConversationBackground } from "./conversation/background.ts";
 import { Background as RouteBackground } from "./route/background.ts";
@@ -80,8 +81,7 @@ export class Personal {
       };
       const assess = async (input: AssessInput) => {
         const c = active();
-        const result = await assessInput(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input,
-          conversationPolicy(this.options.conversation).summaryChars);
+        const result = await assessInput(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input);
         this.log.info({ conversationId, inputId: input.inputId, workUids: input.workRequests?.map(r => r.workUid) ?? [] }, "Chief assessment completed");
         return result;
       };
@@ -199,7 +199,7 @@ export class Personal {
     }
     const { input, executionId: id, invocationId } = admitted;
     const operation = immediate(input.spec) ? "steer" : "followUp";
-    const message = `New Input:\n${JSON.stringify({ inputId })}\n${inputPrinter.describe(input).slice(0, 12000)}\nUse read_input for full facts. Submit the business receipt when handled.`;
+    const message = `New Input:\n${JSON.stringify({ inputId })}\n${inputPreview(input)}\nUse read_input for full facts. Submit the business receipt when handled.`;
     try {
       const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
         operation, invocationId, messageId: `input:${input.metadata.uid}:${ref.uid}`, prompt: message, timeoutMs: 30_000,

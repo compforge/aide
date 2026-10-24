@@ -159,7 +159,9 @@ test("Chief appends the same original Input to two works without losing observat
     assert.equal(input.inputId, "changed");
     assert.match(input.description, /Origin: source\/personal.environments/);
     assert.match(input.description, /executor workload changed/);
-    assert.deepEqual(JSON.parse(input.description.split("\n\nObservation:\n")[1]!), observation);
+    assert.doesNotMatch(input.description, /Observation:/);
+    assert.match(input.description, /observation evidence.*read_input/);
+    assert.deepEqual(aide.conversations.inputStore.get(input.inputId)!.spec.observation, observation);
     await handoff(aide.conversations, aide.runtime.plugins.resourceClient("personal"), input.inputId, [taskId, routineId].map(id => ({ workUid: aide.work("me").read(id).uid!, request: { action: "context", note: "核对 executor 变化" } })));
     return "已交给相关工作核对。";
   }, execute: async (work) => {

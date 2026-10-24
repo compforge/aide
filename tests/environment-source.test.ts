@@ -1,3 +1,4 @@
+import { describeWorkloadChanges } from "../plugins/personal/source/environment/changes.ts";
 import { EventLedger } from "../src/host/event/ledger.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
@@ -49,7 +50,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   await assert.rejects(observeEnvironment({ logger, resources: { ...resources(), async patchStatus() { throw new Error("Crash"); } } }, resource(), connectors), /Crash/);
   assert.equal(conversations.list().length, 1);
   assert.match(conversations.list()[0]!.spec.text, /dev \/ app.*Workload/);
-  assert.match(conversations.list()[0]!.spec.text, /Deployment api.*镜像 A → B/);
+  assert.match(conversations.list()[0]!.spec.text, /Deployment api.*镜像 api=A → api=B/);
   assert.equal(conversations.list()[0]!.spec.originRef!.uid, resource().metadata.uid);
   assert.equal(resource().status.baseline!.workloads[0]!.images[0]!.image, "A");
   const reopened = sessions.open(session.id);
@@ -125,7 +126,8 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   };
   await poll();
   assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
-  assert.match(prompts.at(-1)!, /workload.changed/);
+  assert.match(prompts.at(-1)!, /镜像 api=A → api=B/);
+  assert.doesNotMatch(prompts.at(-1)!, /"before"|"after"/);
   assert.ok(aide.outputs().filter((message) => message.conversationId === "other").some((message) => message.text === "关注的服务有变化"));
   assert.equal(aide.works().length, 0);
   const sessions = new HarnessFixtures(root); const persisted = sessions.open("aide:execution");
@@ -136,4 +138,50 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await aide.start(); await aide.settled();
   assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
   assert.equal(prompts.length, 2, "Channel and observation each call Chief once; Default-only routing needs no Agent");
+});
+
+const pod = (uid: string, restarts = 0, imageId = "sha256:a") => ({ name: `api-${uid}`, uid, phase: "Running", ready: true, terminating: false,
+  containers: [{ name: "api", image: "tag", imageId, ready: true, restarts, state: "running", reason: "", lastExitReason: "" }] });
+const deltaText = (before: WorkloadSnapshot, after: WorkloadSnapshot) => describeWorkloadChanges({ type: "workload.changed", environment: "dev", namespace: "app",
+  previousObservedAt: "2026-10-24T00:00:00Z", observedAt: "2026-10-24T00:05:00Z", changes: [{ before, after }] });
+
+/** @case Aggregate counters must not mistake replacement resets for recovery or hide simultaneous restarts. */
+test("environment delta separates Pod turnover from same-container restart increments", () => {
+  const before = { ...workload("tag"), desired: 2, ready: 2, pods: [pod("removed", 20), pod("stays")] };
+  const after = { ...before, pods: [pod("stays", 1), pod("added")] };
+  const text = deltaText(before, after);
+  assert.match(text, /Pod 新增 1、移除 1/);
+  assert.match(text, /同一 Pod\/容器重启 \+1/);
+  assert.match(text, /就绪副本 2\/2（未变）/);
+  assert.doesNotMatch(text, /api-removed|api-added|发布|重启 -19/);
+  const unknown = { ...after, pods: [pod("stays", 1), pod("newer", 4)] };
+  assert.match(deltaText(after, unknown), /已有重启 4/);
+  const reset = { ...before, pods: [pod("removed", 0), pod("stays")] };
+  assert.match(deltaText(before, reset), /重启计数回退/);
+});
+
+test("compact environment deltas retain worsening, recovery and changed runtime image evidence", () => {
+  const before = { ...workload("tag"), pods: [pod("one")] };
+  const crashed = { ...before, ready: 0, pods: [{ ...pod("one", 1), ready: false, containers: [{ ...pod("one", 1).containers[0]!, ready: false,
+    state: "waiting", reason: "CrashLoopBackOff", lastExitReason: "OOMKilled" }] }] };
+  const text = deltaText(before, crashed);
+  assert.match(text, /就绪副本 1\/1 → 0\/1/);
+  assert.match(text, /CrashLoopBackOff/);
+  assert.match(text, /OOMKilled/);
+  const recovered = { ...before, pods: [pod("one", 1)] };
+  assert.match(deltaText(crashed, recovered), /就绪副本 0\/1 → 1\/1/);
+  assert.match(deltaText(crashed, recovered), /CrashLoopBackOff.*→ running/);
+  const digestChanged = { ...before, pods: [pod("two", 0, "sha256:b")] };
+  assert.match(deltaText(before, digestChanged), /镜像声明未变/);
+  assert.match(deltaText(before, digestChanged), /运行镜像标识集合变化/);
+});
+
+test("large ordinary Pod turnover has a compact delta without erasing the evidence", () => {
+  const before = { ...workload("tag"), desired: 100, ready: 100, pods: Array.from({ length: 100 }, (_, i) => pod(`old-${i}`)) };
+  const after = { ...before, pods: Array.from({ length: 100 }, (_, i) => pod(`new-${i}`)) };
+  const text = deltaText(before, after);
+  assert.ok(text.length < 350);
+  assert.match(text, /Pod 新增 100、移除 100/);
+  assert.doesNotMatch(text, /api-old|api-new/);
+  assert.ok(JSON.stringify({ before, after }).length > text.length * 50);
 });
