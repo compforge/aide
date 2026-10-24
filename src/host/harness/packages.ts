@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DefaultPackageManager, loadSkills, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { Logger } from "pino";
-import { configPath, type AideConfig } from "../../config.ts";
+import type { AideConfig } from "../../config.ts";
 
 type PackageHarness = "pi" | "chief" | "task" | "routine";
 
@@ -27,10 +27,11 @@ function harnessPackages(home: string, harness: PackageHarness, config: AideConf
 
 /**
  * @spec Each Harness loads only its declared, installed package skills. Topic startup never installs packages.
+ * @why The caller supplies the resolved config path; package loading must not import the root config loader and form a schema initialization cycle.
  * @link docs/configuration.md
  * @case tests/harness-config.test.ts
  */
-export async function loadHarnessSkills(home: string, harness: PackageHarness, config: AideConfig, log: Logger, file = configPath(home)): Promise<string[]> {
+export async function loadHarnessSkills(home: string, harness: PackageHarness, config: AideConfig, log: Logger, file: string): Promise<string[]> {
   const installation = harnessPackages(home, harness, config, file);
   const { packages, receipt, fingerprint } = installation;
   if (packages.length && (!existsSync(receipt) || readFileSync(receipt, "utf8") !== fingerprint)) {
@@ -62,7 +63,7 @@ async function resolveHarnessSkills({ harness, manager, packages, agentDir }: Re
 }
 
 /** @spec Package installation and updates are explicit operations; the caller must hold the service lock. */
-export async function syncHarnessPackages(home: string, harness: PackageHarness, config: AideConfig, log: Logger, file = configPath(home)): Promise<void> {
+export async function syncHarnessPackages(home: string, harness: PackageHarness, config: AideConfig, log: Logger, file: string): Promise<void> {
   const installation = harnessPackages(home, harness, config, file);
   const { manager, packages, agentDir, receipt, fingerprint } = installation;
   // Pi shares a Git checkout across refs. Invalidate first so a failed update cannot serve an older declaration.
