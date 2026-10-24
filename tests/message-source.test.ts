@@ -26,6 +26,7 @@ import { larkProgress } from "../src/channel/lark/card.ts";
 import { loadConfig } from "../src/config.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { messageRelation } from "../plugins/personal/source/message/relation.ts";
+import { inputPreview } from "../plugins/personal/input/prompt.ts";
 
 const logger = { debug() {}, info() {}, warn() {}, error() {} };
 const now = Date.parse("2026-10-20T08:00:00Z");
@@ -117,6 +118,8 @@ test("Missing context submits the original message in the first poll and remains
   assert.equal(f.inputs.list().length, 1);
   const input = f.inputs.list()[0]!;
   assert.equal(input.spec.text, "Lark 群内 @：om_at");
+  assert.match(inputPreview(input), /"author":\{"id":"ou_other","type":"user"\}/);
+  assert.match(inputPreview(input), /"mentions":\["ou_me"\]/);
   assert.equal(input.spec.topicKey, "lark:cli_app:oc_chat");
   assert.equal(Object.hasOwn(input.spec.observation!, "context"), false);
   assert.doesNotMatch(JSON.stringify(input.spec), /Permission denied/);
@@ -360,6 +363,13 @@ test("Discussion batches retain each person's relation; replies to my own messag
   assert.deepEqual(context.messages.map(({ id, relation }) => [id, relation]), [
     [mine.id, "sent"], [reply.id, "received"], [ambient.id, "observed"],
   ]);
+  const preview = inputPreview(update);
+  for (const [item, relation] of [[mine, "sent"], [reply, "received"], [ambient, "observed"]] as const) {
+    assert.ok(preview.includes(`${JSON.stringify({ messageId: item.id, at: item.createdAt, author: { id: item.sender.id, type: item.sender.type },
+      relationToMe: relation, mentions: item.mentions, replyToMessageId: item.parentId })}\n${item.content}`),
+      "Every follow-up keeps its author and relation adjacent to its text, without expanding observation");
+  }
+  assert.match(preview, /"scope":"cli_app","observerId":"ou_me"/);
 });
 
 /** @case Source creates the topic without a reply address; Channel reuses it and replies to its incoming address. */

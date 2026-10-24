@@ -44,6 +44,7 @@ export async function createPiAgent(options: PiAgentOptions): Promise<AgentSessi
   }
   const settings = SettingsManager.inMemory(structuredClone(options.config.settings));
   const loader = new DefaultResourceLoader({ cwd, agentDir, settingsManager: settings,
+    noContextFiles: options.config.loadContextFiles === false,
     ...(skillPaths === undefined ? {} : { noSkills: true, additionalSkillPaths: [...skillPaths] }),
     noExtensions: true, additionalExtensionPaths: options.extensionPaths, extensionFactories: options.extensionFactories,
     noPromptTemplates: true, noThemes: true, ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}) });

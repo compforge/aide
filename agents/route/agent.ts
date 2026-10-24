@@ -1,3 +1,4 @@
+import { assistantInstructions, attributionInstructions } from "../personal.ts";
 import { fileURLToPath } from "node:url";
 import { createPiAgent, type PiAgentOptions } from "../pi/agent.ts";
 import { routeTools, type RouteTools } from "./tools.ts";
@@ -14,7 +15,7 @@ Finish naturally when all admitted inputs have been routed. Final text is intern
  */
 export function createRouteAgent(options: Pick<PiAgentOptions, "cwd" | "sessionFile" | "sessionId" | "config" | "background"> & { port: RouteTools; scope?: string }) {
   const { port, scope = "personal:route", ...pi } = options;
-  return createPiAgent({ ...pi, config: { ...pi.config, skillPaths: [] }, scope, systemPrompt: routeInstructions,
+  return createPiAgent({ ...pi, config: { ...pi.config, skillPaths: [] }, scope, systemPrompt: [assistantInstructions, attributionInstructions, routeInstructions].join("\n\n"),
     nativeTools: [], tools: routeTools(port), extensionPaths: [fileURLToPath(import.meta.resolve("pi-hermes-memory"))],
     extensionToolNames: ["memory_search", "session_search"], extensionFactories: [] });
 }

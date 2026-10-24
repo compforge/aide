@@ -10,6 +10,7 @@
     "node": ">=22.19.0"
   },
   "scripts": {
+    "replay:lark": "bun scripts/lark-replay/main.ts",
     "start": "bun src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",

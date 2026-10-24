@@ -31,6 +31,8 @@ export interface PiConfig {
   readonly settings: Readonly<Settings>;
   readonly modelRuntime: ModelRuntime;
   readonly skillPaths?: readonly string[];
+  /** Isolated replay may exclude ambient ancestor AGENTS.md / CLAUDE.md context. */
+  readonly loadContextFiles?: boolean;
 }
 
 /** Credentials remain SDK-owned; definitions and request settings are captured at startup. */

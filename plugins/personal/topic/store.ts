@@ -133,6 +133,10 @@ export class TopicStore {
     let receivers = options.receivers === undefined ? undefined : [...options.receivers];
     if (options.respondToInputId) {
       const reply = attached(options.respondToInputId).spec;
+      // @spec Only Channel inputs establish an implicit reply path. Source addresses locate observations, not assistant conversations.
+      // @link docs/kernel.md#观察委托与代理
+      // @case tests/address.test.ts
+      if (reply.origin !== "channel") throw new Error("Direct replies require a Channel Input; an observation or assistant decision is not a direct request. Remain silent or choose an independently known, authorized notification target.");
       target = reply.source;
       // A direct reply identifies its sender; explicit receivers (including []) remain the caller's decision.
       if (receivers === undefined && reply.sender) receivers = [reply.sender];
@@ -140,7 +144,7 @@ export class TopicStore {
     }
     if (!target) {
       const candidates = (inputIds.length ? inputIds : owner ? [] : this.pending(initial.metadata.uid).map(i => i.metadata.name)).map(attached)
-        .filter((i) => (i.spec.attention ?? (i.spec.origin === "channel" ? "immediate" : "deferred")) === "immediate");
+        .filter((i) => i.spec.origin === "channel" && (i.spec.attention ?? "immediate") === "immediate");
       if (candidates.length) {
         const first = candidates[0]!.spec.source;
         if (!first || candidates.some((i) => !i.spec.source || !sameAddress(first, i.spec.source))) {

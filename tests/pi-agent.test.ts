@@ -131,6 +131,97 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
     reopen: async () => { await adapter.close(ref); ref = await open(); return ref; } };
 }
 
+test("Replay loadout rejects an invented call to a disabled native tool", { timeout: 20_000 }, async t => {
+  const { restrictSession } = await import("../scripts/lark-replay/run.ts");
+  const fixture = await setup(t, (_request, index) => index === 0
+    ? { tool: "write", args: { path: "forbidden.txt", content: "must not be written" } }
+    : { text: "Denied tool acknowledged" });
+  restrictSession(fixture.native());
+  await fixture.run("Attempt the disabled tool", "restricted");
+  assert.equal(existsSync(join(fixture.config.cwd, "forbidden.txt")), false);
+  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /not found|not available|Unknown tool/i);
+  assert.ok((fixture.requests[0]!.tools as unknown[] | undefined)?.length === 0 || fixture.requests[0]!.tools === undefined);
+  writeFileSync(join(fixture.config.cwd, "AGENTS.md"), "ancestor-context-must-not-leak");
+  const isolated = await createPiAgent({ ...fixture.config, config: { ...fixture.config.config, loadContextFiles: false } });
+  try { assert.doesNotMatch(isolated.systemPrompt, /ancestor-context-must-not-leak/); }
+  finally { isolated.dispose(); }
+});
+
+test("Replay SDK groups roots and routes subsequent source input to the new root", { timeout: 45_000 }, async t => {
+  const { replay } = await import("../scripts/lark-replay/run.ts");
+  const fixture = await setup(t, request => {
+    const messages = request.messages as Array<{ role: string; content: unknown }>;
+    const last = messages.at(-1)!;
+    if (JSON.stringify(messages).includes("You are Weave")) {
+      if (last.role !== "tool") return { tool: "list_topics", args: {} };
+      const value = JSON.parse(messageText(last.content));
+      if (value.items?.length >= 2) return { tool: "group_topics", args: {
+        topics: value.items.map((item: { uid: string; version: string }) => ({ uid: item.uid, version: item.version })),
+        name: "Related fixture evidence", summary: "Both source observations retained",
+      } };
+      return { text: "Finished organizing" };
+    }
+    if (last.role === "tool") return { text: "Handled internally" };
+    const activation = messageText(last.content).split("Activation: ").at(-1)?.split("\n")[0];
+    if (!activation) throw new Error("No replay Input activation");
+    return { tool: "assess_input", args: { inputId: JSON.parse(activation).inputId, summary: "Recorded replay evidence" } };
+  });
+  const directory = join(fixture.config.cwd, "replay-sdk"); mkdirSync(directory); mkdirSync(join(directory, "workspace"));
+  const start = "2026-10-19T00:00:00.000Z", end = "2026-10-19T01:00:00.000Z";
+  await replay({ version: 1, collectedAt: end, start, end, identity: { accountId: "cli_test", userId: "ou_me" }, meIds: ["ou_me"],
+    messages: ["first", "second", "later"].map((id, n) => ({ id, chatId: n === 1 ? "oc_b" : "oc_a", content: id,
+      createdAt: `2026-10-19T00:${String((n + 1) * 10).padStart(2, "0")}:00.000Z`, sender: { id: "ou_peer", type: "user" }, mentions: [], deleted: false })),
+    directIds: ["first", "second", "later"], groupIds: [],
+    coverage: [
+      ...["direct", "group"].map(operation => ({ operation: operation as "direct" | "group", key: "", start, end, complete: true, pages: 1 })),
+      ...["oc_a", "oc_b"].map(key => ({ operation: "history" as const, key, start: "2026-10-18T23:55:00.000Z", end, complete: true, pages: 1 })),
+    ],
+  }, { directory, weave: true, batchSize: 1, timeoutMs: 15_000, revision: "fixture", datasetHash: "fixture", model: fixture.config.config });
+  const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
+  assert.equal(result.topics.length, 3);
+  const root = result.topics.find((topic: { parentRef?: unknown }) => !topic.parentRef);
+  const later = result.inputs.find((input: any) => input.input.spec.observation.message.id === "later").input;
+  assert.notEqual(later.status.route.result.topics[0].uid, root.uid);
+  assert.deepEqual(Object.keys(later.status.assess), [root.uid]);
+  assert.ok(result.usage.chief.calls > 0); assert.ok(result.usage.weave.calls > 0);
+  assert.equal(result.protocolFixture, false);
+  assert.equal(result.state, "completed");
+});
+
+/** @case Native request wiring keeps all Personal roles separate from Me; scripted replies do not prove semantic compliance. */
+test("Personal SDK requests carry assistant policy and refresh human identity independently of agent roles", { timeout: 30_000 }, async t => {
+  const { identityBackground } = await import("../agents/personal.ts");
+  const { createTaskAgent } = await import("../agents/task/agent.ts");
+  const { createRoutineAgent } = await import("../agents/routine/agent.ts");
+  const { createWeaveAgent } = await import("../agents/weave/agent.ts");
+  const fixture = await setup(t, () => ({ text: "protocol fixture" }), "chief");
+  await fixture.run("Direct request to Aide", "identity-chief");
+  const chiefRequest = JSON.stringify(fixture.requests.at(-1)!.messages);
+  assert.match(chiefRequest, /Human|human served by Aide/);
+  assert.match(chiefRequest, /\\"provider\\":\\"web\\"/);
+  const background = identityBackground(fixture.persons, () => ({ text: () => "current-resource-marker" }));
+  for (const create of [createTaskAgent, createRoutineAgent,
+    (options: Parameters<typeof createTaskAgent>[0]) => createWeaveAgent({ ...options, scope: "identity-weave", tools: [] }),
+    (options: Parameters<typeof createTaskAgent>[0]) => createRouteAgent({ ...options, port: { route: async value => value, input: () => [], topics: () => [] } }),
+  ]) {
+    const agent = await create({ ...fixture.config, background });
+    try {
+      await agent.prompt("Inspect the supplied context only");
+      const request = JSON.stringify(fixture.requests.at(-1)!.messages);
+      assert.match(request, /independent assistant serving Me/);
+      assert.match(request, /Aide's proposal is not Me's preference/);
+      assert.match(request, /current-resource-marker/);
+      assert.match(request, /Human served by Aide, not the assistant/);
+      assert.match(request, /\\"provider\\":\\"web\\"/);
+    } finally { agent.dispose(); }
+  }
+  const me = (await fixture.persons.me())!;
+  const before = await background();
+  await fixture.persons.edit(me.metadata.name, me.metadata.uid, me.metadata.resourceVersion, { ...me.spec, name: "Updated human" });
+  assert.doesNotMatch(before.text(), /Updated human/);
+  assert.match((await background()).text(), /Updated human/);
+});
+
 test("Pi streams thought and answer before completion without duplicating the final text", { timeout: 20_000 }, async (t) => {
   let release!: () => void;
   const pause = new Promise<void>((resolve) => { release = resolve; });

@@ -1,3 +1,5 @@
+import { identityBackground } from "../../../agents/personal.ts";
+import type { Persons } from "../person/service.ts";
 import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { PiSessionFactory } from "../../../src/host/harness/pi/adapter.ts";
@@ -12,7 +14,7 @@ import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../topic/model.ts"
 import { understandingVersion } from "../topic/tree.ts";
 import { contextPage } from "../background.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
-export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, summaryChars: number, batchSize: number): PiSessionFactory {
+export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, summaryChars: number, batchSize: number, persons?: Persons): PiSessionFactory {
   const ref = scope.resourceRef;
   if (scope.pluginInstanceId !== "personal" || ref?.kind !== "Weave" || !ref.uid) throw new Error("Weave requires its resource scope");
   return async options => {
@@ -42,11 +44,11 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
           const text = JSON.stringify({ name: t.spec.name, summary: t.status.summary, recent: t.status.recent });
           return result({ uid, version: understandingVersion(t), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } },
-      { name: "group_topics", label: "Group topics", description: "Propose a new parent containing 2-8 roots. Summary must preserve material understanding from every child. This schedules a safe handoff.",
+      { name: "group_topics", label: "Group topics", description: "Propose a new parent containing 2-8 roots. Summary must preserve material understanding, explicit authors and confirmation state from every child. Never resolve an ambiguous I as Me or promote Aide proposals to user decisions. This schedules a safe handoff.",
         parameters: Type.Object({ topics: Type.Array(Type.Object({ uid: Type.String(), version: Type.String() }), { minItems: 2, maxItems: 8 }),
           name: Type.String({ minLength: 1, maxLength: 200 }), summary: Type.String({ minLength: 1, maxLength: summaryChars }) }),
         async execute(_id, args) { return result(await planGroup(plugins.resourceClient("personal"), active(), args, summaryChars)); } },
     ];
-    return createWeaveAgent({ ...options, config, scope: `weave:${ref.uid}`, tools });
+    return createWeaveAgent({ ...options, config, scope: `weave:${ref.uid}`, tools, background: identityBackground(persons) });
   };
 }

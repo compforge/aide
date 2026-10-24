@@ -58,3 +58,29 @@ test("automatic Input preview preserves identity and text but excludes full obse
   assert.match(long, /Text truncated/);
   assert.match(long, /observation evidence/);
 });
+
+/** @case The same sent relation is not enough to tell an external statement from a request to Aide. */
+test("preview distinguishes Me, the channel assistant and the credential observer without exposing other evidence", () => {
+  const observation = { provider: "lark", accountId: "cli_scope", chatId: "oc_chat", chatType: "group",
+    sender: { type: "user", id: "ou_me" }, assistant: { id: "ou_bot", name: "Aide" }, mentions: ["ou_bot", "ou_peer"],
+    privateEvidence: "must-stay-out-of-preview" };
+  const direct = input({ originId: "lark", relation: "sent", text: "按你的建议帮我做", observation });
+  const preview = inputPreview(direct);
+  assert.match(preview, /Message accepted by Aide's Lark channel/);
+  assert.match(preview, /"accountId":"cli_scope"/);
+  assert.match(preview, /"sender":\{"id":"ou_me","type":"user"\}/);
+  assert.match(preview, /"assistant":\{"id":"ou_bot","name":"Aide"\}/);
+  assert.match(preview, /"mentions":\["ou_bot","ou_peer"\]/);
+  assert.doesNotMatch(preview, /must-stay-out-of-preview/);
+  const source = inputPreview(input({ origin: "source", originId: "personal.lark-messages", relation: "sent",
+    text: "李乾坤对同事说：我来弄下", observation }));
+  assert.match(source, /External observation/);
+  assert.doesNotMatch(source, /Message accepted by Aide|"assistant"/);
+  const unknown = inputPreview(input({ originId: "lark", observation: { ...observation, assistant: undefined } }));
+  assert.doesNotMatch(unknown, /ou_bot.*name|"assistant":/);
+  const broken = inputPreview(input({ originId: "lark", observation: { provider: "lark", sender: "unknown" } }));
+  assert.match(broken, /Participant details unavailable/);
+  assert.match(inputPreview(input({ origin: "chief", originId: "chief" })), /Originating actor: Aide/);
+  assert.match(inputPreview(input()), /Me → Aide/);
+  assert.ok(inputPreview(direct, 400).length <= 400);
+});
