@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ChatMessage, MessageConnector } from "@compforge/aide-plugin";
@@ -8,6 +9,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { SnapshotSchema, SnapshotMessages, collectSnapshot, triggerMessages, type Snapshot } from "../scripts/lark-replay/snapshot.ts";
 import { replay, restrictSession } from "../scripts/lark-replay/run.ts";
 import { report } from "../scripts/lark-replay/report.ts";
+import { ReplayTimeoutSchema } from "../scripts/lark-replay/config.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const start = "2026-10-19T00:00:00.000Z", end = "2026-10-19T01:00:00.000Z";
@@ -19,7 +21,8 @@ function fixture(): Snapshot {
     messages: [message("first", "2026-10-19T00:01:00.000Z"), message("future", "2026-10-19T00:30:00.000Z")],
     directIds: ["first", "future"], groupIds: [],
     coverage: ["direct", "group", "history", "thread"].map(operation => ({ operation: operation as Snapshot["coverage"][number]["operation"],
-      key: operation === "history" ? "oc_test" : operation === "thread" ? "omt_test" : "", start, end, complete: true, pages: 1 })) };
+      key: operation === "history" ? "oc_test" : operation === "thread" ? "omt_test" : "",
+      start: operation === "history" ? "2026-10-18T23:46:00.000Z" : start, end, complete: true, pages: 1 })) };
 }
 
 test("Replay snapshot gates all read paths by cutoff and never guesses pre-edit content", async () => {
@@ -49,9 +52,29 @@ test("Snapshot pagination, search membership and incomplete history remain disti
   assert.deepEqual(second.messages.map(m => m.id), ["future"]);
   assert.equal(second.hasMore, false);
   assert.deepEqual((await connector.search({ start, end, chatType: "group" })).messages, []);
-  const history = await connector.history({ chatId: "oc_test", start, end });
-  assert.equal(history.messages.length, 3); assert.equal(history.hasMore, true); assert.equal(history.nextToken, undefined);
+  await assert.rejects(connector.history({ chatId: "oc_test", start, end }), /Incomplete snapshot coverage: history oc_test/);
+  assert.throws(() => connector.assertCoverage(), /Incomplete snapshot coverage/);
 });
+
+for (const operation of ["history", "thread"] as const) {
+  test(`Incomplete ${operation} coverage fails replay even when Source catches the read error`, { timeout: 15_000 }, async () => {
+    const directory = mkdtempSync(join(tmpdir(), "aide-replay-coverage-"));
+    try {
+      const snapshot = fixture();
+      if (operation === "thread") snapshot.messages.forEach(message => { message.threadId = "omt_test"; });
+      snapshot.coverage.find(coverage => coverage.operation === operation)!.complete = false;
+      mkdirSync(join(directory, "workspace"));
+      const options = fakeOptions({ notify: false, async execute() { throw new Error("No Work"); } },
+        join(directory, "workspace"), [], join(directory, "state"));
+      await assert.rejects(replay(snapshot, { directory, weave: false, batchSize: 20, timeoutMs: 5000,
+        revision: "fixture", datasetHash: "fixture", createAdapter: options.createAdapter }), new RegExp(`Incomplete snapshot coverage: ${operation}`));
+      const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
+      assert.equal(result.state, "error");
+      assert.match(result.failure, new RegExp(`Incomplete snapshot coverage: ${operation}`));
+      assert.equal(result.coverage.find((coverage: Snapshot["coverage"][number]) => coverage.operation === operation).complete, false);
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+}
 
 test("Collection follows pages, keeps context separate and records gaps without claiming completeness", async () => {
   let calls = 0;
@@ -89,13 +112,75 @@ test("Malformed discovery references are rejected before replay", () => {
   assert.equal(SnapshotSchema.safeParse(snapshot).success, false);
 });
 
+test("Replay initialization failures release their directory and restore process state before retry", { timeout: 30_000 }, () => {
+  const directory = mkdtempSync(join(tmpdir(), "aide-replay-init-"));
+  try {
+    writeFileSync(join(directory, "snapshot.json"), JSON.stringify(fixture()));
+    // A fresh process keeps Hermes module initialization isolated from other test runtimes.
+    const script = `
+      import assert from "node:assert/strict";
+      import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+      import { join } from "node:path";
+      import { main } from ${JSON.stringify(new URL("../scripts/lark-replay/main.ts", import.meta.url).href)};
+      const root = ${JSON.stringify(directory)}, run = join(root, "run"), modelPath = join(root, "model.json");
+      const args = ["replay", "--dataset", join(root, "snapshot.json"), "--run", run, "--model", modelPath,
+        "--weave", "off", "--timeout-ms", "5000"];
+      const valid = { provider: "replay-fixture", id: "test", api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1" };
+      delete process.env.REPLAY_MISSING_TEST_KEY;
+      process.env.REPLAY_LOCAL_TEST_KEY = "local-fixture-only";
+      const previousUmask = process.umask(0o022);
+      for (const [model, error, agentDir] of [
+        [{}, /provider/, undefined],
+        [valid, /requires model.apiKeyEnv/, "original-agent-dir"],
+        [{ ...valid, apiKeyEnv: "REPLAY_MISSING_TEST_KEY" }, /missing environment variable/, undefined],
+        [{ ...valid, api: "unsupported-replay-api", apiKeyEnv: "REPLAY_LOCAL_TEST_KEY" }, /no registered SDK implementation/, "original-agent-dir"],
+      ]) {
+        if (agentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+        else process.env.PI_CODING_AGENT_DIR = agentDir;
+        writeFileSync(modelPath, JSON.stringify(model));
+        await assert.rejects(main(args), error);
+        assert.equal(existsSync(run), false, JSON.stringify(model));
+        assert.equal(process.umask(), 0o022);
+        assert.equal(process.env.PI_CODING_AGENT_DIR, agentDir);
+      }
+      // Invalid timeout is rejected before claiming any directory.
+      for (const timeout of ["1000", "2199", "4999"]) {
+        await assert.rejects(main([...args.slice(0, -1), timeout]), /5000/);
+        assert.equal(existsSync(run), false);
+      }
+      // Correct the model and retry exactly the same path; local connection failure must retain run evidence.
+      writeFileSync(modelPath, JSON.stringify({ ...valid, apiKeyEnv: "REPLAY_LOCAL_TEST_KEY" }));
+      await assert.rejects(main(args), /did not finish/);
+      assert.equal(JSON.parse(readFileSync(join(run, "result.json"), "utf8")).state, "error");
+      const manifest = readFileSync(join(run, "manifest.json"), "utf8");
+      assert.equal(process.umask(), 0o022);
+      assert.equal(process.env.PI_CODING_AGENT_DIR, "original-agent-dir");
+      await assert.rejects(main(args), /EEXIST/);
+      assert.equal(readFileSync(join(run, "manifest.json"), "utf8"), manifest);
+      assert.equal(process.umask(), 0o022);
+      assert.equal(process.env.PI_CODING_AGENT_DIR, "original-agent-dir");
+      process.umask(previousUmask);
+    `;
+    const scriptPath = join(directory, "check.ts");
+    writeFileSync(scriptPath, script);
+    const result = spawnSync(process.execPath, [scriptPath], { encoding: "utf8", timeout: 25_000 });
+    assert.equal(result.status, 0, `${result.error ?? ""}\n${result.stderr}\n${result.stdout}`);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("Replay timeout bounds leave room for quiet confirmation", () => {
+  for (const timeout of [1000, 2199, 4999, 3_600_001]) assert.equal(ReplayTimeoutSchema.safeParse(timeout).success, false);
+  assert.equal(ReplayTimeoutSchema.parse(5000), 5000);
+  assert.equal(ReplayTimeoutSchema.parse(undefined), 180_000);
+});
+
 test("An unacknowledged Input times out with failed-run evidence, never a success report", { timeout: 15_000 }, async () => {
   const directory = mkdtempSync(join(tmpdir(), "aide-replay-timeout-"));
   try {
     mkdirSync(join(directory, "workspace"));
     const options = fakeOptions({ complete: false, notify: false, async execute() { throw new Error("No Work"); } },
       join(directory, "workspace"), [], join(directory, "state"));
-    await assert.rejects(replay(fixture(), { directory, weave: false, batchSize: 20, timeoutMs: 1000,
+    await assert.rejects(replay(fixture(), { directory, weave: false, batchSize: 20, timeoutMs: 5000,
       revision: "fixture", datasetHash: "fixture", createAdapter: options.createAdapter }), /did not finish/);
     const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
     assert.equal(result.state, "error"); assert.equal(result.batches, 0);
@@ -108,7 +193,7 @@ test("Historical replay uses the real Source, routing, Chief receipts and report
   try {
     mkdirSync(join(directory, "workspace"));
     const options = fakeOptions({ notify: false, async execute() { throw new Error("Replay must not execute Work"); } }, join(directory, "workspace"), [], join(directory, "state"));
-    await replay(fixture(), { directory, weave: false, batchSize: 1, timeoutMs: 20_000, revision: "fixture", datasetHash: "fixture", createAdapter: options.createAdapter });
+    await replay(fixture(), { directory, weave: false, batchSize: 1, timeoutMs: 5000, revision: "fixture", datasetHash: "fixture", createAdapter: options.createAdapter });
     const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
     assert.equal(result.state, "completed"); assert.equal(result.inputs.length, 2);
     assert.equal(result.topics.length, 1); assert.equal(result.protocolFixture, true);

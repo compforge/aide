@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { SnapshotSchema, collectSnapshot, triggerMessages } from "./snapshot.ts";
+import { ReplayTimeoutSchema } from "./config.ts";
 
 const help = `Lark historical replay (private artifacts; no external delivery)
   npm run replay:lark -- collect --config <aide.yaml> --start <ISO> --end <ISO> --out <snapshot.json> [--max-pages 100]
@@ -13,6 +14,7 @@ const help = `Lark historical replay (private artifacts; no external delivery)
 
 model.json uses Aide's Pi model schema; supply credentials through apiKeyEnv.
 Replay uses fresh Pi/Hermes state and no live connectors. Run directories must not already exist.
+Batch timeout includes quiet confirmation and must be at least 5000ms.
 `;
 const required = (value: string | undefined, name: string) => {
   if (!value) throw new Error(`--${name} is required`);
@@ -58,29 +60,44 @@ export async function main(args = process.argv.slice(2)) {
     if (!triggerMessages(snapshot).length) throw new Error("Snapshot has no replayable trigger messages");
     const weave = z.enum(["on", "off"]).parse(required(values.weave, "weave")) === "on";
     const batchSize = z.coerce.number().int().min(1).max(1000).parse(values["batch-size"] ?? 20);
-    const timeoutMs = z.coerce.number().int().min(1000).max(3_600_000).parse(values["timeout-ms"] ?? 180_000);
+    const timeoutMs = ReplayTimeoutSchema.parse(values["timeout-ms"]);
     const modelInput = JSON.parse(readFileSync(resolve(required(values.model, "model")), "utf8"));
     const directory = resolve(required(values.run, "run"));
-    // @spec Claim a fresh directory before any runtime import. Hermes resolves its root at module initialization.
-    // @link docs/e2e-lark-replay.md
-    process.umask(0o077);
-    mkdirSync(directory, { mode: 0o700 });
-    for (const sub of ["pi", "workspace", "state"]) mkdirSync(join(directory, sub), { mode: 0o700 });
-    process.env.PI_CODING_AGENT_DIR = join(directory, "pi");
-    writeFileSync(join(directory, "pi", "hermes-memory-config.json"), JSON.stringify({
-      reviewEnabled: false, correctionDetection: false, flushOnCompact: false, flushOnShutdown: false,
-    }));
-    const { resolvePiConfig, PiModelConfigSchema } = await import("../../src/host/harness/pi/config.ts");
-    const selection = PiModelConfigSchema.parse(modelInput);
-    if (!selection.apiKeyEnv) throw new Error("Replay requires model.apiKeyEnv and fresh credentials, not ambient Pi auth");
-    const model = { ...await resolvePiConfig({ cwd: join(directory, "workspace"), agentDir: join(directory, "pi"), model: selection, skillPaths: [] }), loadContextFiles: false };
     const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: new URL("../../", import.meta.url), encoding: "utf8" }).trim();
     const dirty = execFileSync("git", ["status", "--porcelain"], { cwd: new URL("../../", import.meta.url), encoding: "utf8" }).trim();
-    writeFileSync(join(directory, "manifest.json"), JSON.stringify({ revision, dirty: !!dirty, selection, weave, batchSize, timeoutMs,
-      datasetHash: createHash("sha256").update(dataset).digest("hex"), snapshotRange: [snapshot.start, snapshot.end] }, null, 2));
-    const { replay } = await import("./run.ts");
-    await replay(snapshot, { directory, weave, batchSize, timeoutMs, revision: revision + (dirty ? "-dirty" : ""),
-      datasetHash: createHash("sha256").update(dataset).digest("hex"), model });
+    // Claim ownership before changing process state; an existing directory is never ours to clean up.
+    mkdirSync(directory, { mode: 0o700 });
+    const previousUmask = process.umask(0o077), previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    let initialized = false;
+    // @spec Before the manifest is committed, initialization failure releases only this invocation's directory.
+    // @why Hermes needs isolation before runtime imports; restore globals on every exit and retain started-run evidence.
+    // @link docs/e2e-lark-replay.md
+    // @case tests/lark-replay.test.ts
+    try {
+      for (const sub of ["pi", "workspace", "state"]) mkdirSync(join(directory, sub), { mode: 0o700 });
+      process.env.PI_CODING_AGENT_DIR = join(directory, "pi");
+      writeFileSync(join(directory, "pi", "hermes-memory-config.json"), JSON.stringify({
+        reviewEnabled: false, correctionDetection: false, flushOnCompact: false, flushOnShutdown: false,
+      }));
+      const { resolvePiConfig, PiModelConfigSchema } = await import("../../src/host/harness/pi/config.ts");
+      const selection = PiModelConfigSchema.parse(modelInput);
+      if (!selection.apiKeyEnv) throw new Error("Replay requires model.apiKeyEnv and fresh credentials, not ambient Pi auth");
+      if (!process.env[selection.apiKeyEnv]?.trim()) throw new Error(`model.apiKeyEnv references missing environment variable ${selection.apiKeyEnv}`);
+      const model = { ...await resolvePiConfig({ cwd: join(directory, "workspace"), agentDir: join(directory, "pi"), model: selection, skillPaths: [] }), loadContextFiles: false };
+      writeFileSync(join(directory, "manifest.json"), JSON.stringify({ revision, dirty: !!dirty, selection, weave, batchSize, timeoutMs,
+        datasetHash: createHash("sha256").update(dataset).digest("hex"), snapshotRange: [snapshot.start, snapshot.end] }, null, 2));
+      initialized = true;
+      const { replay } = await import("./run.ts");
+      await replay(snapshot, { directory, weave, batchSize, timeoutMs, revision: revision + (dirty ? "-dirty" : ""),
+        datasetHash: createHash("sha256").update(dataset).digest("hex"), model });
+    } catch (error) {
+      if (!initialized) rmSync(directory, { recursive: true, force: true });
+      throw error;
+    } finally {
+      process.umask(previousUmask);
+      if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
     process.stdout.write(`Replay completed: ${directory}/result.json\n`);
     return;
   }

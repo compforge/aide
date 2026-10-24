@@ -14,6 +14,7 @@ import { MessageWatchSchema, type MessageWatch } from "../../plugins/personal/so
 import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "../../plugins/personal/source/message/observe.ts";
 import { WEAVE_TYPE, type WeaveStatus } from "../../plugins/personal/weave/model.ts";
 import { SnapshotMessages, triggerMessages, type Snapshot } from "./snapshot.ts";
+import { ReplayTimeoutSchema, settleMs } from "./config.ts";
 
 export const replayTools = new Set([
   "read_input", "assess_input", "say", "summarize_topic", "list_topics", "read_topic", "group_topics", "route_input",
@@ -38,6 +39,7 @@ export interface ReplayOptions {
 }
 
 export async function replay(snapshot: Snapshot, options: ReplayOptions) {
+  const timeoutMs = ReplayTimeoutSchema.parse(options.timeoutMs);
   const messages = new SnapshotMessages(snapshot), { directory } = options;
   const destination = pino.destination({ dest: join(directory, "replay.log"), sync: true });
   const log = pino(destination);
@@ -90,9 +92,10 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
     inputs: aide.topics.inputStore.list().map(input => inputDetail(aide, input.metadata.name)), invocations: aide.invocations() });
   // A settled scheduler may still have unfinished receipts or a future Weave timer. Check all three.
   const drain = async () => {
-    const deadline = Date.now() + options.timeoutMs;
+    const deadline = Date.now() + timeoutMs;
     let stableSince = 0, last = "";
     while (Date.now() < deadline) {
+      messages.assertCoverage();
       const inputs = aide.topics.inputStore.list();
       const done = inputs.every(i => i.status.route?.completedAt && Object.values(i.status.assess ?? {}).every(a => a.completedAt));
       const topics = aide.topics.list();
@@ -103,11 +106,11 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
       const fingerprint = JSON.stringify([topics, inputs.map(i => i.status), weave?.status.fingerprint, weave?.status.scanned,
         weave?.status.plan, weave?.status.execution]);
       if (!quiet || fingerprint !== last) stableSince = Date.now();
-      if (quiet && Date.now() - stableSince >= 2200) return;
+      if (quiet && Date.now() - stableSince >= settleMs) return;
       last = fingerprint;
       await delay(100);
     }
-    throw new Error(`Replay batch did not finish within ${options.timeoutMs}ms; inspect retained Input receipts and executions`);
+    throw new Error(`Replay batch did not finish within ${timeoutMs}ms; inspect retained Input receipts and executions`);
   };
   try {
     await aide.start();
@@ -126,6 +129,7 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
       for (let page = 0; ; page++) {
         if (page >= 10_000) throw new Error("Replay Source pagination budget exceeded");
         await observeMessages({ resources, logger }, source, connectors, Date.parse(cutoff));
+        messages.assertCoverage();
         source = (await resources.get<MessageWatch, MessageSourceStatus>({ ...MESSAGE_SOURCE_TYPE, ...source.metadata }))!;
         if (source.status.scans?.length === 2 && source.status.scans.every(s => !s.window && Date.parse(s.watermark ?? "") >= Date.parse(cutoff))
           && !source.status.pending?.some(p => p.delivery || p.follow?.token)) break;

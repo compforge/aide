@@ -33,6 +33,7 @@ export class SnapshotMessages implements MessageConnector {
   private cutoff: number;
   private readonly direct: Set<string>;
   private readonly group: Set<string>;
+  private coverageFailure?: Error;
   constructor(readonly snapshot: Snapshot) {
     this.cutoff = Date.parse(snapshot.start);
     this.direct = new Set(snapshot.directIds); this.group = new Set(snapshot.groupIds);
@@ -46,42 +47,51 @@ export class SnapshotMessages implements MessageConnector {
   private visible() {
     return this.snapshot.messages.filter(m => Date.parse(m.createdAt) <= this.cutoff && !edited(m));
   }
-  private complete(operation: Snapshot["coverage"][number]["operation"], key: string, start: number, end: number) {
+  /** @spec A Source may catch connector errors; replay must still fail rather than report missing discussions as completed.
+   * @link docs/e2e-lark-replay.md
+   * @case tests/lark-replay.test.ts
+   */
+  assertCoverage() {
+    if (this.coverageFailure) throw this.coverageFailure;
+  }
+  private requireCoverage(operation: Snapshot["coverage"][number]["operation"], key: string, start: number, end: number) {
     const ranges = this.snapshot.coverage.filter(c => c.operation === operation && c.key === key && c.complete)
       .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
     let through = start;
     for (const range of ranges) {
       if (Date.parse(range.start) > through) break;
       through = Math.max(through, Date.parse(range.end));
-      if (through >= end) return true;
+      if (through >= end) return;
     }
-    return false;
+    this.coverageFailure ??= new Error(`Incomplete snapshot coverage: ${operation} ${key || "discovery"} ${new Date(start).toISOString()}..${new Date(end).toISOString()}; recollect before replay`);
+    throw this.coverageFailure;
   }
-  private page(rows: ChatMessage[], query: { pageToken?: string; limit?: number; order?: "asc" | "desc" }, complete: boolean, through: number): MessagePage {
+  private page(rows: ChatMessage[], query: { pageToken?: string; limit?: number; order?: "asc" | "desc" }, through: number): MessagePage {
     const offset = Number(query.pageToken ?? 0), limit = query.limit ?? 50;
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error("Invalid snapshot page request");
     rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
     if (query.order === "desc") rows.reverse();
     const next = offset + limit;
-    return { messages: rows.slice(offset, next), hasMore: next < rows.length || !complete,
+    return { messages: rows.slice(offset, next), hasMore: next < rows.length,
       ...(next < rows.length ? { nextToken: String(next) } : {}), observedThrough: new Date(through).toISOString() };
   }
   async search(query: MessageSearchQuery) {
     const start = Math.max(Date.parse(query.start), Date.parse(this.snapshot.start)), end = Math.min(Date.parse(query.end), this.cutoff);
     const kinds = query.chatType === "p2p" ? ["direct"] as const : query.chatType === "group" ? ["group"] as const : ["direct", "group"] as const;
+    for (const kind of kinds) this.requireCoverage(kind, "", start, end);
     const rows = this.visible().filter(m => Date.parse(m.createdAt) >= start && Date.parse(m.createdAt) <= end
       && kinds.some(k => (k === "direct" ? this.direct : this.group).has(m.id))
       && (!query.atMe || m.mentions.includes(this.snapshot.identity.userId)));
-    return this.page(rows, query, kinds.every(k => this.complete(k, "", start, end)), end);
+    return this.page(rows, query, end);
   }
   async history(query: MessageQuery & { chatId: string; order?: "asc" | "desc" }) {
     const start = Date.parse(query.start), end = Math.min(Date.parse(query.end), this.cutoff);
-    return this.page(this.visible().filter(m => m.chatId === query.chatId && Date.parse(m.createdAt) >= start && Date.parse(m.createdAt) <= end), query,
-      this.complete("history", query.chatId, start, end), end);
+    this.requireCoverage("history", query.chatId, start, end);
+    return this.page(this.visible().filter(m => m.chatId === query.chatId && Date.parse(m.createdAt) >= start && Date.parse(m.createdAt) <= end), query, end);
   }
   async thread(query: { threadId: string; pageToken?: string; limit?: number; order?: "asc" | "desc" }) {
-    return this.page(this.visible().filter(m => m.threadId === query.threadId), query,
-      this.complete("thread", query.threadId, Date.parse(this.snapshot.start), this.cutoff), this.cutoff);
+    this.requireCoverage("thread", query.threadId, Date.parse(this.snapshot.start), this.cutoff);
+    return this.page(this.visible().filter(m => m.threadId === query.threadId), query, this.cutoff);
   }
 }
 
