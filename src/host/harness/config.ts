@@ -38,7 +38,7 @@ export async function resolveHarnessConfigs(config: AideConfig, sources: {
   catch (error) { throw new Error(`${sources.file}: harnesses.route: ${error instanceof Error ? error.message : "configuration resolution failed"}`); }
   let weave: PiConfig;
   try { weave = config.harnesses.weave.model ? await resolvePiConfig({ ...sources, model: config.harnesses.weave.model, skillPaths: [] }) : { ...chief, skillPaths: [] }; }
-  catch (error) { throw new Error(`Weave configuration failed: ${String(error)}`); }
+  catch (error) { throw new Error(`${sources.file}: harnesses.weave: ${error instanceof Error ? error.message : "configuration resolution failed"}`); }
   const taskSkills = await loadHarnessSkills(sources.home, "task", config, sources.log, sources.file);
   let task: PiConfig;
   try { task = config.harnesses.task.model

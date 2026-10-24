@@ -32,9 +32,13 @@ const CardSchema = z.object({ cardId: z.string(), sent: z.boolean(), sequence: z
 type Card = z.infer<typeof CardSchema>;
 const NoticeSchema = z.object({ id: z.string(), topicId: z.string(), at: z.string(), role: z.literal("aide"), text: z.string(), workId: z.null() });
 type Notice = z.infer<typeof NoticeSchema>;
+/** @spec Persisted Lark inputs always have an exact source key, including when intake fails.
+ * @case tests/lark.test.ts
+ */
+const LarkIncomingSchema = IncomingSchema.omit({ channelId: true }).extend({ topicKey: IncomingSchema.shape.topicKey.unwrap() });
 const StateSchema = z.object({
   cards: z.record(z.string(), CardSchema).default({}),
-  pending: z.array(IncomingSchema.omit({ channelId: true })), received: z.array(z.string()),
+  pending: z.array(LarkIncomingSchema), received: z.array(z.string()),
   chats: z.record(z.string(), z.string()), notices: z.array(NoticeSchema), delivered: z.array(z.string()),
 });
 type State = z.infer<typeof StateSchema>;
@@ -126,7 +130,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     // Group normalization yields; concurrent duplicate deliveries must still persist only once.
     if (this.stopped) throw new Error("Lark channel is stopping");
     if (this.state.received.includes(id)) return;
-    const input = IncomingSchema.omit({ channelId: true }).safeParse({ id, topicKey: topicId, text, source: larkAddress(this.appId, chatId),
+    const input = LarkIncomingSchema.safeParse({ id, topicKey: topicId, text, source: larkAddress(this.appId, chatId),
       observation: { provider: "lark", accountId: this.appId, chatId, chatType: message.chat_type, ...(threadId ? { threadId } : {}),
         sender: { type: sender.sender_type, ...(sender.sender_id?.open_id ? { id: sender.sender_id.open_id } : {}) },
         mentions: (message.mentions ?? []).flatMap((mention) => mention.id.open_id ? [mention.id.open_id] : []) } });
@@ -156,7 +160,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
         this.log.info({ messageId: input.id, topicId: input.topicKey }, "Lark input routed");
       } catch {
         if (this.stopped) return;
-        failure = this.notice(input.id, input.topicKey!,  "这条请求处理失败。请查看网页中的事项状态，再发一条消息要求重试或继续。");
+        failure = this.notice(input.id, input.topicKey,  "这条请求处理失败。请查看网页中的事项状态，再发一条消息要求重试或继续。");
         this.log.error({ messageId: input.id, topicId: input.topicKey }, "Lark input failed; explicit user retry required");
       }
       this.save({ ...this.state, pending: this.state.pending.slice(1),

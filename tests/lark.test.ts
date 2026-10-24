@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -63,6 +63,27 @@ test("Lark inbox survives restart; duplicate events do not execute twice; ordina
   assert.equal(aide.works().length, 0);
   assert.equal(sent.at(-1)!.text, "你好，小明");
   assert.ok(sent.every((message) => message.chatId === "oc_chat"));
+});
+
+test("Lark rejects persisted inputs without an exact topic key before intake", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-key-"));
+  let received = 0;
+  const aide = { receive: async () => { received++; throw new Error("Unexpected intake"); }, outputs: () => [] };
+  const { transport } = fakeTransport();
+  const channel = new LarkChannel(home, "cli_test", aide, transport, log);
+  t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
+  channel.receive(event("pending", "待处理"));
+  await channel.close();
+  const path = join(home, "channels", readdirSync(join(home, "channels"))[0]!);
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  const key = saved.pending[0].topicKey;
+  delete saved.pending[0].topicKey;
+  for (const legacy of [false, true]) {
+    if (legacy) saved.pending[0].sessionId = key;
+    writeFileSync(path, JSON.stringify(saved));
+    assert.throws(() => new LarkChannel(home, "cli_test", aide, transport, log), /topicKey/);
+  }
+  assert.equal(received, 0, "An unlocatable persisted input must never reach routing");
 });
 
 test("Lark sends proactive output, retries the same part id after failure, and isolates apps/chats", async (t) => {

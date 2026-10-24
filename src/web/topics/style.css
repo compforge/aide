@@ -23,8 +23,8 @@ main { grid-template-columns: 230px minmax(0, 1fr); }
 #topic-notice { margin: 10px; color: #9b5b11; }
 #topic-heading { font-size: 16px; margin: 0 0 6px; overflow-wrap: anywhere; }
 .topic-header { display: flex; align-items: start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-.topic-entry { position: relative; }
-.topic-entry .list-link { margin-bottom: 0; }
+.topic-entry { position: relative; display: flex; align-items: center; }
+.topic-entry .list-link { flex: 1; min-width: 0; margin-bottom: 0; }
 .topic-entry .list-link strong { padding-right: 64px; }
 .topic-copy { flex: none; padding: 5px 8px; background: transparent; color: #68776c; font-size: 12px; }
 .topic-copy:hover { background: #e8eee3; }
@@ -136,4 +136,4 @@ details { font-size: 12px; color: #68776c; margin-top: 8px; }
 .topic-indicators .topic-status-icon { display: inline-flex; margin: 0; overflow: visible; }
 
 
-.topic-expand { align-self: center; border: 0; background: transparent; cursor: pointer; color: inherit; padding: .35rem; }
+.topic-expand { flex: none; border: 0; background: transparent; cursor: pointer; color: inherit; padding: .35rem; }

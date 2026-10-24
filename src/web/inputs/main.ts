@@ -9,7 +9,7 @@ let lastDetail = '', lastList = '';
 const query = new URLSearchParams();
 const selects = { connector: 'input-connector', sourceUid: 'input-source', state: 'input-state' } as const;
 const time = (at?: string) => at ? Number.isFinite(Date.parse(at)) ? new Date(at).toLocaleString() : at : '时间未记录';
-const statusLabels: Record<string, string> = { completed: '已确认完成', cancelled: '已取消', rejected: '已拒绝', assigned: '已分派', applied: '已应用',
+const statusLabels: Record<string, string> = { completed: '已确认完成', cancelled: '已取消', rejected: '已拒绝', assigned: '已分派', bound: '已绑定', applied: '已应用',
   started: '已开始', attention: '待核对', recorded: '保留的异常记录', pending: '尚未完成', retrying: '等待重试', delivered: '已送达', sending: '投递中', failed: '投递失败', uncertain: '投递待核对' };
 
 function loadLocation() {
