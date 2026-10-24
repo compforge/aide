@@ -93,7 +93,7 @@ test("Collected Input redelivery is acknowledged without recreating the resource
   store.storage.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 1 } }));
   const spec = { origin: "source" as const, originId: "fixture", text: "fact" };
   const first = store.submit("owner", "one", spec);
-  store.update(first, { route: { completedAt: new Date().toISOString(), result: { conversations: [], reason: "ignored" } } });
+  store.update(first, { route: { completedAt: new Date().toISOString(), result: { topics: [], reason: "ignored" } } });
   store.submit("owner", "two", spec);
   assert.equal(store.get("one"), undefined);
   let notifications = 0; store.subscribe(() => notifications++);

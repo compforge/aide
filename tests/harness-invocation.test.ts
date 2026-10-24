@@ -152,9 +152,9 @@ test("Application correlations remain opaque and a new runtime does not recover 
   const calls = new HarnessInvocations(handle);
   const draft = invocation(handle.id);
   const result = calls.record({ ...draft, scope: { ...draft.scope,
-    attributes: { conversationId: "topic", inputIds: ["input-one"], customCorrelation: "opaque" } } });
-  expect(result.attributes).toEqual({ conversationId: "topic", inputIds: ["input-one"], customCorrelation: "opaque" });
-  expect("conversationId" in result).toBe(false);
+    attributes: { topicId: "topic", inputIds: ["input-one"], customCorrelation: "opaque" } } });
+  expect(result.attributes).toEqual({ topicId: "topic", inputIds: ["input-one"], customCorrelation: "opaque" });
+  expect("topicId" in result).toBe(false);
   calls.close();
   const next = new HarnessInvocations(handle);
   expect(next.list()).toEqual([]);

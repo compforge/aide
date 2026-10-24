@@ -1,8 +1,9 @@
 import type { PluginContext, Resource, ResourceCommit } from "@compforge/aide-plugin";
-import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type ConversationStatus } from "../conversation/model.ts";
+import { TOPIC_TYPE, initialTopicName, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
 import type { Destination } from "./model.ts";
+import { topicPath } from "../topic/tree.ts";
 export type RoutingContext = Pick<PluginContext, "resources"> & { logger: Pick<PluginContext["logger"], "info"> };
 export type RoutingInput = Readonly<Resource<InputSpec, InputStatus>>;
 export const routed = (input: RoutingInput) => !!input.status.route?.completedAt;
@@ -13,22 +14,28 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
     if (!input) throw new Error("Input no longer exists");
     if (routed(input)) return;
     if (!destinations.length) throw new Error("Route needs a destination or Default");
-    const conversations = await Promise.all([...new Map(destinations.map(d => [d.uid, d])).values()].map(async d => {
-      const c = await context.resources.get<ConversationSpec, ConversationStatus>({ ...CONVERSATION_TYPE, namespace: "v1", ...d });
-      if (!c || c.metadata.deletionTimestamp) throw new Error(`Conversation no longer exists: ${d.uid}`);
+    const topics = await Promise.all([...new Map(destinations.map(d => [d.uid, d])).values()].map(async d => {
+      const c = await context.resources.get<TopicSpec, TopicStatus>({ ...TOPIC_TYPE, namespace: "v1", ...d });
+      if (!c || c.metadata.deletionTimestamp) throw new Error(`Topic no longer exists: ${d.uid}`);
       return c;
     }));
     const at = new Date().toISOString();
     const assess = { ...input.status.assess };
-    for (const c of conversations) assess[c.metadata.uid] ??= { resource: resourceRef(c), assignedAt: at };
+    const all = await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
+    const paths = topics.map(t => topicPath(all, t));
+    const touched = [...new Map(paths.flat().map(t => [t.metadata.uid, t])).values()];
+    for (const path of paths) {
+      const root = path[path.length - 1]!;
+      assess[root.metadata.uid] ??= { resource: resourceRef(root), assignedAt: at };
+    }
     try {
       await context.resources.commit([
-        ...conversations.map(c => (c.spec.name ? { operation: "patchStatus", resource: c, patch: {} }
-          : { operation: "replace", resource: c, spec: { ...c.spec, name: initialConversationName(input.spec.text) }, status: c.status }) as ResourceCommit),
+        ...touched.map(c => ({ operation: "replace", resource: c, spec: { ...c.spec, name: c.spec.name || initialTopicName(input.spec.text) },
+          status: { ...c.status, lastInputAt: at } }) as ResourceCommit),
         { operation: "patchStatus", resource: input, patch: { assess, route: { ...input.status.route, completedAt: at,
-          result: { conversations: conversations.map(resourceRef), reason } } } },
+          result: { topics: topics.map(resourceRef), reason } } } },
       ]);
-      context.logger.info("Input routed", { attributes: { inputId: input.metadata.name, conversationUids: conversations.map(c => c.metadata.uid), reason } });
+      context.logger.info("Input routed", { attributes: { inputId: input.metadata.name, topicUids: topics.map(c => c.metadata.uid), reason } });
       return;
     } catch (e) { if (n >= 8 || !/version conflict/.test(String(e))) throw e; }
   }

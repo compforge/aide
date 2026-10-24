@@ -106,9 +106,9 @@ test("Only configured sources poll; removing policies stops restored observers w
   assert.deepEqual(seen.assignees.at(-1), []);
 });
 
-test("Conversation configuration budgets context and rejects obsolete batching controls", () => {
-  for (const key of ["maxPending", "batchSize", "maxWaitSeconds"]) assert.throws(() => parsePersonalConfig({ conversation: { [key]: 5 } }), /Invalid Personal config/);
-  assert.equal(parsePersonalConfig({ conversation: { contextChars: 4096, summaryChars: 1000 } }).conversation!.contextChars, 4096);
+test("Topic configuration budgets context and rejects obsolete batching controls", () => {
+  for (const key of ["maxPending", "batchSize", "maxWaitSeconds"]) assert.throws(() => parsePersonalConfig({ topic: { [key]: 5 } }), /Invalid Personal config/);
+  assert.equal(parsePersonalConfig({ topic: { contextChars: 4096, summaryChars: 1000 } }).topic!.contextChars, 4096);
 });
 
 

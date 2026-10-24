@@ -50,7 +50,7 @@ test("Person catalog resolves identities across sessions, preserves profiles acr
   assert.equal((await f.aide.persons.read(first.metadata.name)).metadata.uid, first.metadata.uid);
   assert.deepEqual((await f.aide.persons.read(first.metadata.name)).status.summary, summarized.status.summary);
   assert.equal("sessionId" in (await f.aide.persons.read(first.metadata.name)).metadata, false);
-  assert.equal(f.aide.conversationIds().includes("personal:persons"), false);
+  assert.equal(f.aide.topicIds().includes("personal:persons"), false);
 });
 
 test("summary_person guards shared summary versions while Input retention remains independent", async (t) => {
@@ -67,7 +67,7 @@ test("summary_person guards shared summary versions while Input retention remain
   const inputs = new InputStore(f.home);
   inputs.storage.configure({ kinds: { "aide.dev/Input": { maxCount: 1 } } } as Parameters<typeof inputs.storage.configure>[0]);
   const input = inputs.submit("test", "old", { origin: "source", originId: "test", text: "evidence", sender: personRef(current) });
-  inputs.update(input, { route: { completedAt: new Date().toISOString(), result: { conversations: [], reason: "test" } } });
+  inputs.update(input, { route: { completedAt: new Date().toISOString(), result: { topics: [], reason: "test" } } });
   inputs.submit("test", "new", { origin: "source", originId: "test", text: "no sender" });
   assert.equal(inputs.get("old"), undefined);
   assert.equal(inputs.get("new")!.spec.sender, undefined);
@@ -94,7 +94,7 @@ test("Web exposes two navigation pages and edits the same Person with conflict d
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   for (const path of ["/", "/people"]) {
     const html = await (await fetch(base + path)).text();
-    assert.match(html, /Conversations/); assert.match(html, /Persons/);
+    assert.match(html, /Topics/); assert.match(html, /Persons/);
   }
   const me = (await f.aide.persons.me())!;
   assert.equal((await (await fetch(base + "/persons")).json() as unknown[]).length, 1);

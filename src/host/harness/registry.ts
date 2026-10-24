@@ -31,11 +31,12 @@ export interface HarnessAdapterOptions {
   /** Optional generic Pi factory; by default uses Pi configuration and native tools. */
   piSession?: PiSessionFactory;
   piConfig?: PiConfig;
-  /** Personal composition supplies the Chief agent and conversation-scoped capabilities. */
+  /** Personal composition supplies the Chief agent and topic-scoped capabilities. */
   chiefSession?: PiSessionFactory;
   taskSession?: PiSessionFactory;
   routineSession?: PiSessionFactory;
   routeSession?: PiSessionFactory;
+  weaveSession?: PiSessionFactory;
   /** Adapter 工厂的实例坐标；工厂负责把 Target 配置 lowering 成具体 Adapter 依赖。 */
   target: HarnessConfiguration;
   openApproval: OpenApproval;
@@ -71,6 +72,13 @@ export interface HarnessProbeOptions {
  * @link docs/harness/README.md
  */
 export const HARNESS_REGISTRY = [
+  { ...HARNESS_IDENTITIES.weave, shortName: "weave", color: "#a6da95",
+    create: ({ weaveSession, log, nativeEvent, env }) => {
+      if (!weaveSession) throw new Error("Weave requires a host-bound agent factory");
+      if (env && Object.keys(env).length) throw new Error("Embedded Weave does not support environment overrides");
+      return new PiAdapter({ harness: "weave", createSession: weaveSession, log, nativeEvent });
+    },
+  },
   {
     ...HARNESS_IDENTITIES.routine, shortName: "routine", color: "#a6da95",
     create: ({ routineSession, log, nativeEvent, env }) => {

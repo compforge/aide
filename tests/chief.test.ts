@@ -10,7 +10,7 @@ import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });
 
-test("Chief accepts duplicate input once, answers without Work, isolates conversations and never replays a failed turn", async (t) => {
+test("Chief accepts duplicate input once, answers without Work, isolates topics and never replays a failed turn", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-chief-"));
   const prompts: string[] = [];
   let calls = 0;
@@ -23,18 +23,18 @@ test("Chief accepts duplicate input once, answers without Work, isolates convers
     execute: async () => { throw new Error("Unexpected Work"); } }, root, prompts);
   let aide = new Aide(root, options, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  const input = { channelId: "web", id: "one", sessionId: "me", conversationId: "me", text: "private-information" };
+  const input = { channelId: "web", id: "one",  topicId: "me", text: "private-information" };
   const [first, duplicate] = await Promise.all([aide.receive(fixtureIncoming(input)), aide.receive(fixtureIncoming(input))]);
   assert.deepEqual(first, duplicate);
   await aide.settled();
   assert.equal(calls, 1);
-  assert.deepEqual(aide.personal.conversations.get("me")!.pendingInputIds, []);
+  assert.deepEqual(aide.personal.topics.get("me")!.pendingInputIds, []);
   assert.equal(aide.works().length, 0);
   assert.deepEqual(aide.outputs().map((m) => m.text), ["直接回答"]);
-  await aide.receive(fixtureIncoming({ ...input, sessionId: "other", conversationId: "other", text: "hello" })); await aide.settled();
+  await aide.receive(fixtureIncoming({ ...input,  topicId: "other", text: "hello" })); await aide.settled();
   assert.doesNotMatch(prompts[1]!, /private-information/);
   await aide.receive(fixtureIncoming({ ...input, id: "failed", text: "fail" })); await aide.settled();
-  assert.equal(aide.personal.conversations.inputs("me").find(i => i.spec.text === "fail")!.consumption.phase, "failed");
+  assert.equal(aide.personal.topics.inputs("me").find(i => i.spec.text === "fail")!.consumption.phase, "failed");
   await aide.close(); aide = new Aide(root, options, log); await aide.start();
   await aide.receive(fixtureIncoming({ ...input, id: "failed", text: "fail" })); await aide.settled();
   assert.equal(calls, 3);

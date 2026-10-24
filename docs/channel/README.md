@@ -4,14 +4,14 @@ Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、提供
 
 | Channel | 输入与会话划分 | 输出与交互 |
 | --- | --- | --- |
-| [Web](web.md) | URL 选择 conversationId，左侧列表切换已有会话 | 消息、流式进展、历史执行、事项与安排；回答问题和原生 Harness 请求 |
+| [Web](web.md) | URL 选择 topicId，左侧列表切换已有会话 | 消息、流式进展、历史执行、事项与安排；回答问题和原生 Harness 请求 |
 | [Lark](lark.md) | 应用 ID + chat ID 确定会话；接收单聊与群内 @本机器人 | 流式卡片展示 Chief 思考与回复、问答续轮、工作结果与安排通知，送回原聊天 |
 
 ## 输入、会话与回复
 
-Channel 提交用户消息时提供 source 地址、稳定 sessionId 与消息去重身份，不需要理解 Personal 的 Conversation。Lark 使用应用与聊天身份，Web 使用所选 Conversation 的话题标识。Channel 通过绑定 Definition 的入口提交消息，Core 保存 Input 并返回持久化回执；Personal 经 Route 决定归属。输入直接投影为输入卡片，Output 独立承载回复与通知；接收成功不代表模型已经回答或目标已经完成。
+Channel 提交用户消息时提供 source 地址、稳定 sessionId 与消息去重身份，不需要理解 Personal 的 Topic。Lark 使用应用与聊天身份，Web 使用所选 Topic 的话题标识。Channel 通过绑定 Definition 的入口提交消息，Core 保存 Input 并返回持久化回执；Personal 经 Route 决定归属。输入直接投影为输入卡片，Output 独立承载回复与通知；接收成功不代表模型已经回答或目标已经完成。
 
-Personal 决定输入进入哪个 Conversation、是否创建 Work。普通回答直接进入消息流，需要持续跟进时才操作 Task / Routine。同一话题的后续消息可以回答问题或补充已有工作。Web 的 Conversation 列表是 Personal 的业务视图，可以查看 Lark 或 Source 会话。
+Personal 决定输入进入哪个 Topic、是否创建 Work。普通回答直接进入消息流，需要持续跟进时才操作 Task / Routine。同一话题的后续消息可以回答问题或补充已有工作。Web 的 Topic 列表是 Personal 的业务视图，可以查看 Lark 或 Source 会话。
 
 Source 是外部观察入口，可以提交带话题 sessionId 或没有话题线索的 Input，也可以携带观察所在的 source 地址。Route 分派后，Chief决定是否及向哪里沟通；Lark 投递读取 Output.target，不从话题身份推导聊天目标。地址与收件处选择见 [Output](../personal/output.md)。
 
@@ -21,7 +21,7 @@ Source 是外部观察入口，可以提交带话题 sessionId 或没有话题�
 
 思考、工具调用和文字增量属于执行进展，来自 Harness 事件的有界实时投影。Web 使用 Markdown 展示；Lark 使用原生流式卡片，合并更新思考与正文，最终收口到同一张卡片。进展不写成新的用户 Input，也不触发 Work。
 
-Chief 的问答可通过两个 Channel 回答。当前原生 Harness 授权和 Hook 信任通过 Web 处理；网页按 Conversation 筛选已关联的问题，未关联会话的宿主交互保留在本地收件区。
+Chief 的问答可通过两个 Channel 回答。当前原生 Harness 授权和 Hook 信任通过 Web 处理；网页按 Topic 筛选已关联的问题，未关联会话的宿主交互保留在本地收件区。
 
 ## 回复展示状态
 

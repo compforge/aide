@@ -19,7 +19,7 @@ const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<
 export function workTools(work: WorkService): ToolDefinition[] {
   return [
     tool({ name: "list_work", label: "List work",
-      description: "List this conversation's tasks and routines. Check for related work before creating a new item.",
+      description: "List this topic's tasks and routines. Check for related work before creating a new item.",
       parameters: Type.Object({}, { additionalProperties: false }),
       async execute(_id, _args, signal) { signal?.throwIfAborted(); return result(work.list()); },
     }),
@@ -50,7 +50,7 @@ export function workTools(work: WorkService): ToolDefinition[] {
       async execute(callId, { workId, ...args }, signal) { signal?.throwIfAborted(); return result(await work.requestInput(workId, args, callId)); },
     }),
     tool({ name: "delete_work", label: "Delete work",
-      description: "Delete explicitly unwanted work using its latest revision. Keeps conversation messages; does not undo external actions or cancel an already running command.",
+      description: "Delete explicitly unwanted work using its latest revision. Keeps topic messages; does not undo external actions or cancel an already running command.",
       parameters: Type.Object({ id, revision }, { additionalProperties: false }),
       async execute(_id, args, signal) {
         signal?.throwIfAborted(); await work.delete(args.id, args.revision); return result({ id: args.id, deleted: true });

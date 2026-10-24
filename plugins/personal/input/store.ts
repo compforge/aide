@@ -49,7 +49,7 @@ export class InputStore {
     const receipt = this.receipt(id);
     if (receipt && receipt.fingerprint !== fingerprint) throw new Error("Input identity already exists with different content or owner");
     const resource: Resource<InputSpec, InputStatus> = { ...INPUT_TYPE, metadata: { name: id, namespace: "v1", uid: `input:${id}`,
-      resourceVersion: "1", generation: 1, creationTimestamp: receipt?.at ?? new Date().toISOString() }, spec, status: receipt ? { route: { completedAt: receipt.at, result: { conversations: [], reason: "Previously accepted Input has expired" } } } : status };
+      resourceVersion: "1", generation: 1, creationTimestamp: receipt?.at ?? new Date().toISOString() }, spec, status: receipt ? { route: { completedAt: receipt.at, result: { topics: [], reason: "Previously accepted Input has expired" } } } : status };
     // A bounded receipt acknowledges redelivery without recreating a collected fact or waking consumers.
     if (receipt) return resource;
     this.storage.write(key, "personal", { owner, object: resource, control: {} }, { key: `input:${id}`, value: JSON.stringify({ at: resource.metadata.creationTimestamp, fingerprint }) });

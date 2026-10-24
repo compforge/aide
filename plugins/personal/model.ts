@@ -20,7 +20,7 @@ export type WorkInputRequest = z.infer<typeof WorkInputRequestSchema>;
 export const WorkSchema = z.object({
   uid: z.string().optional(),
   id: z.string(),
-  conversationId: z.string(),
+  topicId: z.string(),
   kind: z.enum(["task", "routine"]),
   title: z.string(),
   instruction: z.string(),
@@ -33,7 +33,7 @@ export const WorkSchema = z.object({
 });
 export type Work = z.infer<typeof WorkSchema>;
 
-export type WorkSpecFields = Pick<Work, "conversationId" | "title" | "instruction" | "revision">;
+export type WorkSpecFields = Pick<Work, "topicId" | "title" | "instruction" | "revision">;
 export type WorkStatus = Omit<Work, keyof WorkSpecFields | "id" | "uid" | "kind" | "trigger">;
 
 export { IncomingSchema, type Incoming } from "../../src/channel/message.ts";
@@ -56,5 +56,5 @@ export function validateTrigger(kind: Work["kind"], trigger: Trigger | null, now
   }
 }
 
-export const WorkSpecSchema = WorkSchema.pick({ conversationId: true, title: true, instruction: true, revision: true }).strict();
+export const WorkSpecSchema = WorkSchema.pick({ topicId: true, title: true, instruction: true, revision: true }).strict();
 export const WorkStatusSchema = WorkSchema.pick({ status: true, nextAt: true, question: true, summary: true, recent: true }).strict();

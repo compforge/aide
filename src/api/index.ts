@@ -1,5 +1,5 @@
 import { createWebAssets } from "./assets.ts";
-import type { ConversationItem } from "./types.ts";
+import type { TopicItem } from "./types.ts";
 import { visibleOutput } from "../channel/output.ts";
 import { webAddress } from "../channel/address.ts";
 import { SUMMARY_CHARS } from "../../plugins/personal/context.ts";
@@ -10,22 +10,22 @@ import { z } from "zod";
 import type { Logger } from "pino";
 import type { WebService } from "./service.ts";
 import { validInputResult } from "../host/approval/answer.ts";
-import { IncomingSchema } from "../channel/message.ts";
-import { conversationList } from "../channel/view.ts";
-import { streamConversation } from "./stream.ts";
+import { IncomingSchema, webTopicLocator } from "../channel/message.ts";
+import { topicList } from "../channel/view.ts";
+import { streamTopic } from "./stream.ts";
 import { inputList, inputDetail } from "./inputs.ts";
 
 const EventSchema = IncomingSchema.omit({ text: true, channelId: true, source: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
 
-const ConversationDefaultSchema = z.object({ conversationId: z.string().min(1), enabled: z.boolean() }).strict();
+const TopicDefaultSchema = z.object({ topicId: z.string().min(1), enabled: z.boolean() }).strict();
 
-const ConversationTriggerSchema = z.object({ conversationId: z.string().min(1) }).extend({ enabled: z.boolean() }).strict();
+const TopicTriggerSchema = z.object({ topicId: z.string().min(1) }).extend({ enabled: z.boolean() }).strict();
 
-const DeleteConversationSchema = z.object({ conversationId: z.string().min(1), uid: z.string().min(1), revision: z.number().int().positive() }).strict();
+const DeleteTopicSchema = z.object({ topicId: z.string().min(1), uid: z.string().min(1), revision: z.number().int().positive() }).strict();
 
-const DeleteWorkSchema = z.object({ id: z.string().min(1), conversationId: z.string().min(1) }).extend({
+const DeleteWorkSchema = z.object({ id: z.string().min(1), topicId: z.string().min(1) }).extend({
   revision: z.number().int().positive(),
 }).strict();
 
@@ -77,10 +77,10 @@ export function httpChannel(aide: WebService, log: Logger) {
       if (request.method === "POST" && request.headers["content-type"]?.split(";", 1)[0]?.trim() !== "application/json") {
         json(response, 415, { error: "Content-Type must be application/json" }); return;
       }
-      if (request.method === "GET" && url.pathname === "/" && !url.searchParams.get("conversation")) {
-        const selected = conversationList(aide).find((item) => item.default);
+      if (request.method === "GET" && url.pathname === "/" && !url.searchParams.get("topic")) {
+        const selected = topicList(aide).find((item) => item.default);
         if (selected) {
-          url.searchParams.set("conversation", selected.id);
+          url.searchParams.set("topic", selected.id);
           response.writeHead(302, { location: url.pathname + url.search, "cache-control": "no-store" });
           response.end(); return;
         }
@@ -97,20 +97,20 @@ export function httpChannel(aide: WebService, log: Logger) {
         json(response, 200, { status: "ok", revision: process.env.AIDE_REVISION ?? "development" }); return;
       }
       if (request.method === "GET" && url.pathname === "/stream") {
-        const conversationId = url.searchParams.get("conversationId");
-        if (!conversationId || conversationId.length > 200) { json(response, 400, { error: "conversationId is required (max 200 characters)" }); return; }
-        streamConversation(response, aide, conversationId, log); return;
+        const topicId = url.searchParams.get("topicId");
+        if (!topicId || topicId.length > 200) { json(response, 400, { error: "topicId is required (max 200 characters)" }); return; }
+        streamTopic(response, aide, topicId, log); return;
       }
-      if (request.method === "GET" && url.pathname === "/conversations") {
+      if (request.method === "GET" && url.pathname === "/topics") {
         const counts = new Map<string, { taskCount: number; routineCount: number }>();
         for (const work of aide.works()) {
-          const count = counts.get(work.conversationId) ?? { taskCount: 0, routineCount: 0 };
+          const count = counts.get(work.topicId) ?? { taskCount: 0, routineCount: 0 };
           if (work.kind === "task") count.taskCount++; else count.routineCount++;
-          counts.set(work.conversationId, count);
+          counts.set(work.topicId, count);
         }
-        json(response, 200, conversationList(aide).map((item) => ({ ...item,
+        json(response, 200, topicList(aide).map((item) => ({ ...item,
           ...(counts.get(item.id) ?? { taskCount: 0, routineCount: 0 }),
-        })) satisfies ConversationItem[]); return;
+        })) satisfies TopicItem[]); return;
       }
       if (request.method === "GET" && url.pathname === "/inputs/list") {
         const query = InputListSchema.parse(Object.fromEntries(url.searchParams));
@@ -166,7 +166,7 @@ export function httpChannel(aide: WebService, log: Logger) {
         }
         return;
       }
-      // Native permissions and Hook trust are independent of conversation messages.
+      // Native permissions and Hook trust are independent of topic messages.
       if (request.method === "GET" && url.pathname === "/approvals") {
         json(response, 200, aide.runtime.executions.approvals()
           .map((item) => item.request).filter((item) => item.status === "pending"));
@@ -185,52 +185,56 @@ export function httpChannel(aide: WebService, log: Logger) {
         log.info({ messageId, kind: result.kind, completed: completed }, "Native approval response");
         json(response, completed ? 200 : 409, { completed: completed });
       } else if (request.method === "POST" && url.pathname === "/messages") {
-        const input = IncomingSchema.omit({ channelId: true, observation: true, source: true }).parse(await body(request));
-        json(response, 200, await receive({ ...input, source: webAddress(input.sessionId) }));
-      } else if (request.method === "POST" && url.pathname === "/conversations/default") {
-        const { conversationId, enabled } = ConversationDefaultSchema.parse(await body(request));
-        const resource = aide.conversations.resource(conversationId);
+        const input = IncomingSchema.omit({ channelId: true, observation: true, source: true, topicKey: true }).extend({ topicId: z.string().min(1) }).parse(await body(request));
+        const topicId = webTopicLocator.locate(input).id;
+        json(response, 200, await receive({ ...input, topicId, source: webAddress(topicId) }));
+      } else if (request.method === "POST" && url.pathname === "/topics/default") {
+        const { topicId, enabled } = TopicDefaultSchema.parse(await body(request));
+        const resource = aide.topics.resource(topicId);
         if (!resource || resource.metadata.deletionTimestamp) { json(response, 404, { error: "会话不存在。" }); return; }
-        await aide.setDefaultConversation(conversationId, enabled);
-        json(response, 200, { conversationId, default: enabled });
-      } else if (request.method === "POST" && url.pathname === "/conversations/trigger") {
-        const { conversationId, enabled } = ConversationTriggerSchema.parse(await body(request));
-        if (!aide.conversations.get(conversationId)) {
+        await aide.setDefaultTopic(topicId, enabled);
+        json(response, 200, { topicId, default: enabled });
+      } else if (request.method === "POST" && url.pathname === "/topics/trigger") {
+        const { topicId, enabled } = TopicTriggerSchema.parse(await body(request));
+        if (!aide.topics.get(topicId)) {
           json(response, 404, { error: "会话不存在。" }); return;
         }
-        json(response, 200, await aide.setConversationTrigger(conversationId, enabled));
-      } else if (request.method === "POST" && url.pathname === "/conversations/delete") {
-        const { conversationId, revision, uid } = DeleteConversationSchema.parse(await body(request));
-        const result = await aide.deleteConversation(conversationId, revision, uid);
+        json(response, 200, await aide.setTopicTrigger(topicId, enabled));
+      } else if (request.method === "POST" && url.pathname === "/topics/delete") {
+        const { topicId, revision, uid } = DeleteTopicSchema.parse(await body(request));
+        const result = await aide.deleteTopic(topicId, revision, uid);
         if (result.deleted) { json(response, 200, result); return; }
         const errors = {
-          missing: "该会话已删除或不存在。",
-          changed: "会话已更新，请刷新后重新确认删除。",
-          busy: "会话还有待处理输入、执行或问题，请处理完成后再删除。",
-          work: "会话还有事项或安排，请先删除这些工作。",
+          missing: "该主题已删除或不存在。",
+          changed: "主题已更新，请刷新后重新确认删除。",
+          busy: "主题还有待处理输入、执行或正在整理，请处理完成后再删除。",
+          work: "主题还有事项或安排，请先删除这些工作。",
+          default: "默认主题不能删除。",
+          children: "主题还有子主题，请先处理子主题。",
+          unabsorbed: "父主题尚未吸收该主题的最新理解，暂时不能删除。",
         };
-        log.info({ conversationId, revision, reason: result.reason }, "Conversation deletion rejected");
+        log.info({ topicId, revision, reason: result.reason }, "Topic deletion rejected");
         json(response, result.reason === "missing" ? 404 : 409, { error: errors[result.reason] });
       } else if (request.method === "POST" && url.pathname === "/work/delete") {
-        const { id, conversationId, revision } = DeleteWorkSchema.parse(await body(request));
-        const work = aide.works().find((item) => item.id === id && item.conversationId === conversationId);
+        const { id, topicId, revision } = DeleteWorkSchema.parse(await body(request));
+        const work = aide.works().find((item) => item.id === id && item.topicId === topicId);
         if (!work) { json(response, 404, { error: "该工作已删除或不属于当前会话。" }); return; }
         if (work.revision !== revision) {
           json(response, 409, { error: "工作已更新，请刷新后重新确认删除。" }); return;
         }
         // @spec Web deletion uses the same scoped, revision-checked lifecycle as Chief's Work tools.
-        await aide.work(conversationId).delete(id, revision);
+        await aide.work(topicId).delete(id, revision);
         json(response, 200, { deleted: true });
       } else if (request.method === "POST" && url.pathname === "/events") {
         json(response, 200, { matched: await aide.event(EventSchema.parse(await body(request))) });
       } else if (request.method === "GET" && ["/messages", "/work"].includes(url.pathname)) {
-        const conversationId = url.searchParams.get("conversationId");
-        if (!conversationId) { json(response, 400, { error: "conversationId is required" }); return; }
+        const topicId = url.searchParams.get("topicId");
+        if (!topicId) { json(response, 400, { error: "topicId is required" }); return; }
         if (url.pathname === "/work") {
-          json(response, 200, aide.works().filter((work) => work.conversationId === conversationId));
+          json(response, 200, aide.works().filter((work) => work.topicId === topicId));
         } else {
-          const conversation = aide.conversations.resource(conversationId);
-          const messages = aide.outputs().filter((item) => conversation && visibleOutput(item, conversation));
+          const topic = aide.topics.resource(topicId);
+          const messages = aide.outputs().filter((item) => topic && visibleOutput(item, topic));
           const after = url.searchParams.get("after");
           const index = after ? messages.findIndex((item) => item.id === after) : -1;
           if (after && index < 0) { json(response, 400, { error: "Unknown message cursor" }); return; }

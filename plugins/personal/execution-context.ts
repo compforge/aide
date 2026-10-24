@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { ExecutionAssociation } from "@compforge/aide-plugin";
 
 const Association = z.object({
-  conversationId: z.string().optional(),
+  topicId: z.string().optional(),
   inputId: z.string().optional(),
   inputIds: z.array(z.string()).optional(),
 });

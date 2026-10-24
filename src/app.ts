@@ -1,5 +1,5 @@
 import { iconFor } from "@compforge/aide-plugin";
-import { initialConversationName } from "../plugins/personal/conversation/model.ts";
+import { initialTopicName } from "../plugins/personal/topic/model.ts";
 import { ROUTE_HARNESS } from "../plugins/personal/route/model.ts";
 import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { ResourceStorage } from "./host/resource/storage.ts";
@@ -113,20 +113,20 @@ export class Aide {
     let personal: Personal | undefined;
     this.runtime = new ApplicationRuntime(home, {
       cwd: options.cwd,
-      instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ route: parsePersonalConfig(config?.plugins.personal).route, conversation: parsePersonalConfig(config?.plugins.personal).conversation, task: parsePersonalConfig(config?.plugins.personal).task, routine: parsePersonalConfig(config?.plugins.personal).routine, watches: this.watches,
+      instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ weave: parsePersonalConfig(config?.plugins.personal).weave, route: parsePersonalConfig(config?.plugins.personal).route, topic: parsePersonalConfig(config?.plugins.personal).topic, task: parsePersonalConfig(config?.plugins.personal).task, routine: parsePersonalConfig(config?.plugins.personal).routine, watches: this.watches,
         environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
-      harness: { harnesses: [{ ...this.defaultHarnessConfig }, { id: ROUTE_HARNESS, harness: "route" }, { id: "chief", harness: "chief" }, { id: "task", harness: "task" }, { id: "routine", harness: "routine" }],
+      harness: { harnesses: [{ ...this.defaultHarnessConfig }, { id: "weave", harness: "weave" }, { id: ROUTE_HARNESS, harness: "route" }, { id: "chief", harness: "chief" }, { id: "task", harness: "task" }, { id: "routine", harness: "routine" }],
         defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
-        onResourceChange: (change) => { personal?.conversations.changed(change); this.notify(); },
+        onResourceChange: (change) => { personal?.topics.changed(change); this.notify(); },
         actions: { "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
           const input = SayInputSchema.parse(raw);
           const text = input.text;
           const association = personalExecution(context);
-          if (!association.conversationId) throw new Error("Personal say requires Conversation context");
+          if (!association.topicId) throw new Error("Personal say requires Topic context");
           const owner = context.resourceRef && ["Task", "Routine"].includes(context.resourceRef.kind) ? this.personal.store.resources.get<unknown, { execution?: { id: string } | null }>(context.resourceRef, context.resourceRef.name, context.resourceRef.namespace) : undefined;
           if (owner && (owner.metadata.deletionTimestamp || owner.metadata.uid !== context.resourceRef?.uid)) throw new Error("Work Output owner is no longer active");
-          return this.personal.conversations.say(association.conversationId, association.inputId, text, context.executionId, input, owner);
+          return this.personal.topics.say(association.topicId, association.inputId, text, context.executionId, input, owner);
         } },
         pluginSupervisor: new PluginSupervisor(),
         loadPackageEntry: async (pluginId, version) => {
@@ -140,32 +140,33 @@ export class Aide {
       },
     });
     this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, me: this.meMarks,
-      conversation: parsePersonalConfig(config?.plugins.personal).conversation }, log,
+      topic: parsePersonalConfig(config?.plugins.personal).topic, weave: parsePersonalConfig(config?.plugins.personal).weave }, log,
       { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore });
     this.runtime.subscribe(() => this.notify());
-    this.personal.conversations.subscribe(() => this.notify());
+    this.personal.topics.subscribe(() => this.notify());
   }
 
-  get conversations() { return this.personal.conversations; }
+  get topics() { return this.personal.topics; }
 
   async receive(raw: unknown) {
     const input = IncomingSchema.parse(raw);
     this.inputDefinition({ origin: "channel", originId: input.channelId });
     if (input.source.channelId !== input.channelId) throw new Error("Channel input address belongs to a different Channel");
     const scope = this.personal;
-    await this.conversations.ensure(input.sessionId, input.source, initialConversationName(input.text));
     await this.start();
     return scope.receive(input);
   }
 
-  async event(input: Omit<Incoming, "channelId" | "source"> & { name: string; conversationId?: string }): Promise<number> {
+  async event(input: Omit<Incoming, "channelId" | "source"> & { name: string; topicId?: string }): Promise<number> {
     const scope = this.personal;
-    await this.conversations.ensure(input.sessionId);
     await this.start(); await scope.start();
-    return scope.event({ ...input, conversationId: input.conversationId ?? input.sessionId });
+    if (!input.topicId) throw new Error("Event requires an explicit Topic");
+    return scope.event({ ...input, topicId: input.topicId });
   }
 
-  work(conversationId: string) { return this.personal.work(conversationId); }
+  work(topicId: string) { return this.personal.work(topicId); }
+
+  weaveSession(scope: Parameters<Personal["weaveSession"]>[0], config: Parameters<Personal["weaveSession"]>[1]) { return this.personal.weaveSession(scope, config); }
 
   routeSession(scope: Parameters<Personal["routeSession"]>[0], config: Parameters<Personal["routeSession"]>[1]) { return this.personal.routeSession(scope, config); }
 
@@ -184,26 +185,26 @@ export class Aide {
 
   works() { return this.personal.works(); }
   invocations() { return this.personal.invocations(); }
-  conversationIds() { return this.personal.conversationIds(); }
+  topicIds() { return this.personal.topicIds(); }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(): void { for (const listener of this.listeners) listener(); }
-  async deleteConversation(conversationId: string, revision: number, uid: string): Promise<import("../plugins/personal/conversation/model.ts").ConversationDeletion> {
+  async deleteTopic(topicId: string, revision: number, uid: string): Promise<import("../plugins/personal/topic/model.ts").TopicDeletion> {
     const scope = this.personal;
-    const result = await scope.deleteConversation(conversationId, revision, uid);
+    const result = await scope.deleteTopic(topicId, revision, uid);
     if (result.deleted) this.notify();
     return result;
   }
 
   /** @spec Default selection is atomic and storage enforces uniqueness against concurrent Route fallback creation.
-   * @link docs/personal/conversation.md#删除与验证
+   * @link docs/personal/topic.md#删除与验证
    */
-  setDefaultConversation(conversationId: string, enabled: boolean): Promise<void> {
+  setDefaultTopic(topicId: string, enabled: boolean): Promise<void> {
     const change = this.defaultSelection.then(async () => {
       for (let attempt = 0; ; attempt++) {
-        const resource = this.conversations.resource(conversationId);
-        if (!resource || resource.metadata.deletionTimestamp) throw new Error("Conversation does not exist");
-        const previous = enabled ? this.conversations.list().filter(c => c.default && c.id !== conversationId)
-          .map(c => this.conversations.resource(c.id)!) : [];
+        const resource = this.topics.resource(topicId);
+        if (!resource || resource.metadata.deletionTimestamp) throw new Error("Topic does not exist");
+        const previous = enabled ? this.topics.list().filter(c => c.default && c.id !== topicId)
+          .map(c => this.topics.resource(c.id)!) : [];
         try {
           await this.runtime.plugins.resourceClient("personal").commit([
             ...previous.map(c => ({ operation: "replace" as const, resource: c, spec: { ...c.spec, default: false }, status: c.status })),
@@ -211,21 +212,21 @@ export class Aide {
           ]);
           break;
         } catch (error) {
-          if (attempt >= 8 || !/version conflict|Default Conversation already exists/.test(String(error))) throw error;
+          if (attempt >= 8 || !/version conflict|Default Topic already exists/.test(String(error))) throw error;
         }
       }
-      this.log.info({ conversationId, enabled }, "Default conversation configured");
+      this.log.info({ topicId, enabled }, "Default topic configured");
       this.notify();
     });
-    this.defaultSelection = change.catch((err) => { this.log.error({ err, conversationId }, "Default conversation selection failed"); });
+    this.defaultSelection = change.catch((err) => { this.log.error({ err, topicId }, "Default topic selection failed"); });
     return change;
   }
 
-  async setConversationTrigger(conversationId: string, enabled: boolean) {
+  async setTopicTrigger(topicId: string, enabled: boolean) {
     const scope = this.personal;
-    if (!this.conversations.get(conversationId)) throw new Error("Conversation does not exist");
-    const trigger = await scope.conversations.setTriggerEnabled(conversationId, enabled);
-    this.log.info({ conversationId, ...trigger }, "Conversation trigger configured");
+    if (!this.topics.get(topicId)) throw new Error("Topic does not exist");
+    const trigger = await scope.topics.setTriggerEnabled(topicId, enabled);
+    this.log.info({ topicId, ...trigger }, "Topic trigger configured");
     this.notify();
     return trigger;
   }
@@ -248,9 +249,9 @@ export class Aide {
   async settled(): Promise<void> {
     await this.start();
     for (;;) {
-      const before = JSON.stringify([this.inputs.list(), this.conversations.list()]);
+      const before = JSON.stringify([this.inputs.list(), this.topics.list()]);
       await this.personal.settled();
-      const after = JSON.stringify([this.inputs.list(), this.conversations.list()]);
+      const after = JSON.stringify([this.inputs.list(), this.topics.list()]);
       if (before === after) break;
     }
   }

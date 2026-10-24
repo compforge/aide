@@ -14,7 +14,7 @@ Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controll
 | Harness | 承接模型和工具执行，拥有原生历史与可恢复会话 |
 | Plugin | 拥有领域模型、完成条件、恢复策略与对外行为 |
 
-业务资源属于插件实例与 namespace，身份不依附执行 Session。底座不预注册 Input、Output 或 Conversation；一个插件可以只观察和协调资源，另一个插件可以通过 Harness 请求判断。应用负责装配通信入口和投递能力。
+业务资源属于插件实例与 namespace，身份不依附执行 Session。底座不预注册 Input、Output 或 Topic；一个插件可以只观察和协调资源，另一个插件可以通过 Harness 请求判断。应用负责装配通信入口和投递能力。
 
 ## 一次协调如何推进
 
@@ -28,7 +28,7 @@ Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controll
 
 ## Host 与 Runner
 
-Host 持有资源存储、Connector、Harness Adapter 和原生权限审批；Runner 运行插件回调、Source、Watch、队列、重试和 Reconcile。每个启用插件实例有自己的 Runner，数量不随 Conversation 增加；进程内插件使用相同契约。
+Host 持有资源存储、Connector、Harness Adapter 和原生权限审批；Runner 运行插件回调、Source、Watch、队列、重试和 Reconcile。每个启用插件实例有自己的 Runner，数量不随 Topic 增加；进程内插件使用相同契约。
 
 双方通过 src/protocol 协作，不互相导入实现。公共契约位于 packages/plugin。资源定义在恢复和 Controller 启动前加载，校验、打印与容量规则不依赖 Runner 存活。插件私有目录按 package global 与 instance 组织。
 
@@ -52,6 +52,6 @@ Plugin / Operator 通过 ResourceClient 操作 CRD，通过 Verb 发起非 CRD �
 
 ## 应用方式
 
-[Personal](personal/README.md) 将 Channel / Source 的内容保存为 Input，经 Route 归入 Conversation，由 Chief 研判并按需交给 Task / Routine。Input.status 保存 route / assess / handle 痕迹；Output 独立记录表达与投递；Person 保存身份和认识。
+[Personal](personal/README.md) 将 Channel / Source 的内容保存为 Input，经 Route 归入 Topic，由 Chief 研判并按需交给 Task / Routine。Input.status 保存 route / assess / handle 痕迹；Output 独立记录表达与投递；Person 保存身份和认识。
 
 应用装配在 src/app.ts 完成。配置在启动时解析，详见 [配置](configuration.md)；运行目录、备份和诊断见 [部署](deployment.md)，真实依赖验收见 [E2E](e2e.md)。

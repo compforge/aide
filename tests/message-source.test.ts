@@ -90,7 +90,7 @@ test("Direct messages include my speech; exact group mentions exclude bots, dele
   assert.deepEqual(f.inputs.list().map((input) => input.spec.relation).sort(), ["received", "received", "sent"]);
   assert.ok(f.inputs.list().every((input) => input.spec.originRef?.uid === f.resource().metadata.uid));
   assert.ok(f.inputs.list().every((input) => input.spec.text.includes(String((input.spec.observation!.message as { content: string }).content))));
-  assert.ok(f.inputs.list().every((input) => input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id && input.spec.sessionId === "lark:cli_app:oc_chat"));
+  assert.ok(f.inputs.list().every((input) => input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id && input.spec.topicKey === "lark:cli_app:oc_chat"));
   assert.ok(f.resource().status.scans!.every((scan) => scan.watermark === new Date(now).toISOString()));
   await f.observe(now + 60_000);
   assert.equal(f.inputs.list().length, 3, "Overlapping discovery and unchanged context remain silent");
@@ -104,7 +104,7 @@ test("Group thread identity is independent of sender and message; direct message
     message("b", { threadId: "omt_b" }), message("plain"),
   ]));
   await f.observe();
-  const sessions = Object.fromEntries(f.inputs.list().map(i => [i.spec.observation!.originalMessageId, i.spec.sessionId]));
+  const sessions = Object.fromEntries(f.inputs.list().map(i => [i.spec.observation!.originalMessageId, i.spec.topicKey]));
   assert.deepEqual(sessions, { dm: "lark:cli_app:oc_chat", a: "lark:cli_app:oc_chat:thread:omt_a",
     a2: "lark:cli_app:oc_chat:thread:omt_a", b: "lark:cli_app:oc_chat:thread:omt_b", plain: "lark:cli_app:oc_chat" });
 });
@@ -117,7 +117,7 @@ test("Missing context submits the original message in the first poll and remains
   assert.equal(f.inputs.list().length, 1);
   const input = f.inputs.list()[0]!;
   assert.equal(input.spec.text, "Lark 群内 @：om_at");
-  assert.equal(input.spec.sessionId, "lark:cli_app:oc_chat");
+  assert.equal(input.spec.topicKey, "lark:cli_app:oc_chat");
   assert.equal(Object.hasOwn(input.spec.observation!, "context"), false);
   assert.doesNotMatch(JSON.stringify(input.spec), /Permission denied/);
   assert.match(JSON.stringify(f.warnings), /Permission denied/);
@@ -231,7 +231,7 @@ test("Only associated replies trigger follow-up; duplicate polls stay silent and
   const update = f.inputs.list().find((input) => input.spec.observation!.kind === "discussion")!;
   assert.equal(update.spec.observation!.originalMessageId, "om_at");
   assert.equal(update.spec.relation, "observed");
-  assert.ok(f.inputs.list().every((input) => input.spec.sessionId === "lark:cli_app:oc_chat"));
+  assert.ok(f.inputs.list().every((input) => input.spec.topicKey === "lark:cli_app:oc_chat"));
   assert.doesNotMatch(JSON.stringify(update.spec.observation!.context), /om_unrelated/);
   await f.observe(now + 120_000);
   assert.equal(f.inputs.list().length, 2); assert.equal(f.resource().status.pending!.length, 0);
@@ -307,7 +307,7 @@ test("Follow-up pagination resumes across restart and a terminal delivery surviv
   await f.restart(); await f.observe(now + 180_000);
   assert.equal(f.inputs.list().length, 3); assert.equal(f.resource().status.pending!.length, 0);
   assert.equal(calls, 2);
-  assert.ok(f.inputs.list().every(input => input.spec.sessionId === "lark:cli_app:oc_chat:thread:omt_thread"));
+  assert.ok(f.inputs.list().every(input => input.spec.topicKey === "lark:cli_app:oc_chat:thread:omt_thread"));
 });
 
 test("Thread context uses explicit thread reads, bounds text and reports incomplete pages", async () => {
@@ -391,17 +391,17 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   }, pino({ level: "silent" }));
   let channel = channelFor();
   t.after(async () => { await channel.close(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.personal.conversations.ensure("inbox", fixtureAddress("inbox"));
-  await aide.setDefaultConversation("inbox", true);
+  await aide.personal.topics.ensure("inbox", fixtureAddress("inbox"));
+  await aide.setDefaultTopic("inbox", true);
   // Persist a registered bot chat before observing user messages, but defer processing its request.
   await channel.receive({ sender: { sender_type: "user" }, message: {
     message_id: "om_channel", chat_id: "oc_group", chat_type: "group", message_type: "text",
     content: JSON.stringify({ text: "@_user_1 channel request" }),
     mentions: [{ key: "@_user_1", id: { open_id: "ou_bot" } }],
   } });
-  await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "inbox", conversationId: "inbox", id: "hello", text: "hello" }));
+  await aide.receive(fixtureIncoming({ channelId: "web", topicKey: "inbox", topicId: "inbox", id: "hello", text: "hello" }));
   await aide.start(); await aide.settled();
-  const inputs = aide.personal.conversations.inputStore;
+  const inputs = aide.personal.topics.inputStore;
   assert.equal(inputs.list().filter((input) => input.spec.originId === "personal.lark").length, 3);
   assert.ok(!aide.outputs().some((reply) => reply.text === "source-private-reply"), "An observed chat is not a default reply address");
   await channel.deliver();
@@ -417,42 +417,42 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   assert.ok(prompts.some((prompt) => prompt.includes("om_dm")));
   for (const chatId of ["oc_chat", "oc_group"]) {
     const sessionId = `lark:cli_app:${chatId}`;
-    const store = aide.personal.conversations;
-    const expected = inputs.list().filter((input) => input.spec.originId === "personal.lark").filter((input) => input.spec.sessionId === sessionId).map((input) => input.metadata.name).sort();
-    assert.equal(store.list().filter((c) => c.id === sessionId).length, 1, "Messages from the same observed chat reuse one Conversation");
-    assert.equal(store.resource(sessionId)!.spec.address, undefined);
-    assert.deepEqual([...store.inputs(sessionId).map((i) => i.metadata.name)].sort(), expected);
-    for (const id of expected) assert.equal(aide.personal.conversations.input(id, "inbox"), undefined);
+    const store = aide.personal.topics;
+    const expected = inputs.list().filter((input) => input.spec.originId === "personal.lark").filter((input) => input.spec.topicKey === sessionId).map((input) => input.metadata.name).sort();
+    assert.equal(store.list().filter((c) => c.topicKey === sessionId).length, 1, "Messages from the same observed chat reuse one Topic");
+    assert.equal(store.byKey(sessionId)!.spec.address, undefined);
+    assert.deepEqual([...store.inputs(store.byKey(sessionId)!.spec.id).map((i) => i.metadata.name)].sort(), expected);
+    for (const id of expected) assert.equal(aide.personal.topics.input(id, "inbox"), undefined);
   }
-  assert.equal(aide.personal.conversations.list().filter((c) => c.id === MESSAGE_SESSION).length, 0);
-  const sourceGroupId = "lark:cli_app:oc_group";
-  const sourceGroupUid = aide.personal.conversations.resource(sourceGroupId)!.metadata.uid;
-  const groupId = "lark:cli_app:oc_group";
+  assert.equal(aide.personal.topics.list().filter((c) => c.id === MESSAGE_SESSION).length, 0);
+  const sourceGroupId = aide.topics.byKey("lark:cli_app:oc_group")!.spec.id;
+  const sourceGroupUid = aide.personal.topics.resource(sourceGroupId)!.metadata.uid;
+  const groupId = sourceGroupId;
   await channel.dispatch(); await aide.settled(); await channel.deliver();
   assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }]);
-  const reply = aide.outputs().find(output => output.conversationId === groupId && output.text === "channel-reply")!;
-  assert.ok(larkProgress(aide, groupId).some(view => view.messageIds.includes(reply.id)), "Cards match the incoming address even without a Conversation default address");
-  const store = aide.personal.conversations;
+  const reply = aide.outputs().find(output => output.topicId === groupId && output.text === "channel-reply")!;
+  assert.ok(larkProgress(aide, groupId).some(view => view.messageIds.includes(reply.id)), "Cards match the incoming address even without a Topic default address");
+  const store = aide.personal.topics;
   assert.equal(store.list().filter((c) => c.id === groupId).length, 1);
   assert.equal(store.inputs(groupId).length, 3);
   assert.equal(store.resource(groupId)!.metadata.uid, sourceGroupUid);
   const channelInput = store.inputs(groupId).find(input => input.spec.origin === "channel")!;
   assert.equal(channelInput.spec.origin, "channel");
-  assert.equal(channelInput.spec.sessionId, groupId);
-  assert.equal(aide.personal.conversations.input(channelInput.metadata.name, "inbox"), undefined);
-  const channelPrompt = prompts.find((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).conversationId === groupId)!;
+  assert.equal(channelInput.spec.topicKey, "lark:cli_app:oc_group");
+  assert.equal(aide.personal.topics.input(channelInput.metadata.name, "inbox"), undefined);
+  const channelPrompt = prompts.find((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).topicId === groupId)!;
   assert.ok(channelPrompt);
   const groupUid = store.resource(groupId)!.metadata.uid;
   const previous = searches;
-  aide.conversations.get("another"); await aide.settled();
+  aide.topics.get("another"); await aide.settled();
   assert.equal(searches, previous);
   await channel.close(); await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   channel = channelFor();
   await aide.start(); await aide.settled(); await channel.dispatch(); await channel.deliver();
   assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }], "Restart must neither leak historical Source replies nor duplicate delivered Channel replies");
-  assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.lark").length, 3);
-  assert.equal(aide.personal.conversations.resource(groupId)!.metadata.uid, groupUid);
-  assert.equal(aide.personal.conversations.inputs(groupId).length, 3);
-  assert.equal(aide.personal.conversations.resource(sourceGroupId)!.metadata.uid, sourceGroupUid);
+  assert.equal(aide.personal.topics.inputStore.list().filter((input) => input.spec.originId === "personal.lark").length, 3);
+  assert.equal(aide.personal.topics.resource(groupId)!.metadata.uid, groupUid);
+  assert.equal(aide.personal.topics.inputs(groupId).length, 3);
+  assert.equal(aide.personal.topics.resource(sourceGroupId)!.metadata.uid, sourceGroupUid);
   assert.equal(aide.works().length, 0);
 });

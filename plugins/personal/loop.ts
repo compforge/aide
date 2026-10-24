@@ -12,6 +12,7 @@ export type LoopResource = Resource<unknown, LoopStatus>;
 export const immediate = (input: InputSpec) => (input.attention ?? (input.origin === "channel" ? "immediate" : "deferred")) === "immediate";
 export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
   if (input.metadata.deletionTimestamp) return false;
+  if (owner.kind === "Topic" && ((owner.spec as { parentRef?: unknown }).parentRef || (owner.status as { weaveLock?: string }).weaveLock)) return false;
   const receipt = attemptOf(input, resourceRef(owner));
   if (receipt?.completedAt) return false;
   if (owner.kind === "Route") return !receipt?.executionId || (!!input.status.route?.nextAttemptAt && Date.parse(input.status.route.nextAttemptAt) <= Date.now());
@@ -43,6 +44,7 @@ export async function submitPending(context: PluginContext, execution: Reconcile
 export async function runInput(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>, target: string, prompt: string, inputId?: string) {
   const current = await context.resources.get<unknown, LoopStatus>(resourceRef(owner));
   if (!current || current.metadata.deletionTimestamp || current.status.execution) return;
+  if (current.kind === "Topic" && ((current.spec as { parentRef?: unknown }).parentRef || (current.status as { weaveLock?: string }).weaveLock)) return;
   const input = inputId ? await context.resources.get<InputSpec, import("./input/model.ts").InputStatus>(inputRef(inputId)) : undefined;
   if (inputId && (!input || !eligible(input, current))) return;
   const startedAt = new Date().toISOString();
@@ -53,14 +55,17 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
       ...(current.kind === "Route" ? { attempts: (input.status.route?.attempts ?? 0) + 1 } : {}) }) }] : []),
   ]);
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", executionId: execution.executionId } });
+  let completed = false;
   let error = "Agent ended without confirming input completion";
   try {
     const agent = await prepareAgent(context.resources, execution, current, target);
-    const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Conversation" ? "Chief" : current.kind, prompt, timeoutMs: 172800_000 });
+    const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Topic" ? "Chief" : current.kind, prompt, timeoutMs: 172800_000 });
+    completed = result.state === "success" && result.value.result.stopReason === "end_turn";
     if (result.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, result.agent);
     if (result.state !== "success" || result.value.result.stopReason !== "end_turn") error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
   } catch (cause) { error = String(cause); }
   finally { await finalizeExecution(context, current, execution.executionId, error); }
+  return completed;
 }
 /** @spec Route classification may retry; uncertain Chief effects require inspection. Both retain admission evidence across restart. */
 export async function finalizeExecution(context: Pick<PluginContext, "resources" | "logger">, owner: Readonly<LoopResource>, executionId: string,

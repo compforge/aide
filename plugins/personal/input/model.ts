@@ -14,7 +14,9 @@ export interface InputSpec {
    * Inputs sharing this ID have common context; different IDs do not imply unrelated topics or exclusive routing.
    * @link docs/personal/input.md#内容身份与调度
    */
-  sessionId?: string;
+  topicKey?: string;
+  /** Explicit Topic selection, e.g. the Web composer. Final binding is persisted in route.result. */
+  topicId?: string;
   /** Scheduling urgency, independent of authority or notification intent. */
   attention?: "immediate" | "deferred";
   origin: "channel" | "source" | "chief";
@@ -55,7 +57,7 @@ export interface InputStatus {
   route?: Attempt & {
     nextAttemptAt?: string;
     attempts?: number;
-    result?: { conversations: Array<ResourceRef & { uid: string }>; reason: string };
+    result?: { topics: Array<ResourceRef & { uid: string }>; reason: string };
   };
   assess?: Record<string, Assessment>;
   handle?: Record<string, Handling>;

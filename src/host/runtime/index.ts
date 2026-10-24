@@ -9,7 +9,7 @@ import type { ResourceType } from "@compforge/aide-plugin";
 import { PluginInstanceStore } from "../plugin/instance.ts";
 
 /**
- * @spec One application runtime owns plugin activation and resource scheduling, independent of conversations.
+ * @spec One application runtime owns plugin activation and resource scheduling, independent of topics.
  * @spec Harness is an optional capability; resource-only startup never opens its execution history.
  * @case tests/runtime.test.ts
  * @why Resource ownership and scheduling must not depend on the native session storage layout.

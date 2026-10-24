@@ -6,15 +6,15 @@ import { join } from "node:path";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { conversationCandidates, contextPage, relatedWork } from "../plugins/personal/background.ts";
+import { topicCandidates, contextPage, relatedWork } from "../plugins/personal/background.ts";
 import { Background as RouteBackground } from "../plugins/personal/route/background.ts";
-import { Background as ConversationBackground } from "../plugins/personal/conversation/background.ts";
+import { Background as TopicBackground } from "../plugins/personal/topic/background.ts";
 import { Background as RoutineBackground } from "../plugins/personal/routine/background.ts";
 import { Background as TaskBackground } from "../plugins/personal/task/background.ts";
 import { TASK_TYPE, type TaskResource } from "../plugins/personal/task/model.ts";
 import type { RoutineResource } from "../plugins/personal/routine/model.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
-import { CONVERSATION_TYPE, type ConversationSpec, type ConversationStatus } from "../plugins/personal/conversation/model.ts";
+import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
 
 /** @case Context is scoped and bounded, survives catalog changes, and ignores irrelevant execution bookkeeping. */
 test("resource context pages all live candidates and isolate related Work", async t => {
@@ -24,10 +24,10 @@ test("resource context pages all live candidates and isolate related Work", asyn
   const resources = aide.runtime.plugins.resourceClient("personal");
   const store = aide.personal.store;
   for (let i = 0; i < 25; i++) {
-    const c = await aide.conversations.ensure(`topic-${i}`);
+    const c = await aide.topics.ensure(`topic-${i}`);
     await resources.patchStatus(c, { summary: "topic detail ".repeat(1000) });
   }
-  const candidates = conversationCandidates(store);
+  const candidates = topicCandidates(store);
   const ids: string[] = [];
   let page = contextPage(candidates);
   while (true) {
@@ -39,17 +39,17 @@ test("resource context pages all live candidates and isolate related Work", asyn
   }
   assert.deepEqual(ids, candidates.map(c => c.uid));
   assert.ok(new RouteBackground(store).text().length < 16500);
-  const c = store.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE).find(c => c.metadata.uid === candidates.at(-1)!.uid)!;
+  const c = store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).find(c => c.metadata.uid === candidates.at(-1)!.uid)!;
   const captured = new RouteBackground(store);
   const before = captured.text();
   await resources.patchStatus(c, { receipts: [{ key: "execution-bookkeeping", responseId: "response" }] });
   assert.deepEqual(new RouteBackground(store).text(), before);
-  await resources.patchStatus(aide.conversations.resource(c.spec.id)!, { summary: "changed-beyond-first-page" });
+  await resources.patchStatus(aide.topics.resource(c.spec.id)!, { summary: "changed-beyond-first-page" });
   assert.notDeepEqual(new RouteBackground(store).text(), before, "An off-page change invalidates previously read pages");
-  await resources.patchStatus(aide.conversations.resource("topic-0")!, { summary: "current-topic-understanding" });
-  const deleted = aide.conversations.resource("topic-1")!;
+  await resources.patchStatus(aide.topics.resource("topic-0")!, { summary: "current-topic-understanding" });
+  const deleted = aide.topics.resource("topic-1")!;
   await resources.delete(deleted, deleted.metadata.name);
-  assert.ok(!conversationCandidates(store).some(c => c.uid === deleted.metadata.uid));
+  assert.ok(!topicCandidates(store).some(c => c.uid === deleted.metadata.uid));
 
   const definition = { kind: "routine" as const, title: "Related responsibility", instruction: "Inspect assigned evidence", trigger: { cron: null, timezone: "UTC", event: "sample" } };
   const own = await aide.work("topic-0").create(definition);
@@ -61,7 +61,7 @@ test("resource context pages all live candidates and isolate related Work", asyn
   assert.match(context, /current-topic-understanding/);
   assert.match(context, /Related responsibility/);
   assert.doesNotMatch(context, /foreign-work-marker/);
-  const chief = new ConversationBackground(store, aide.conversations.resource("topic-0"), "topic-0");
+  const chief = new TopicBackground(store, aide.topics.resource("topic-0"), "topic-0");
   assert.match(chief.text(), /Related responsibility/);
   assert.equal(captured.text(), before, "A captured Background remains stable after resource changes");
   const task = await aide.work("topic-0").create({ kind: "task", title: "Finite goal", instruction: "task-objective-marker", trigger: null });

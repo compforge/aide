@@ -2,14 +2,14 @@ import type { ServerResponse } from "node:http";
 import type { Logger } from "pino";
 import type { ChannelService } from "../channel/service.ts";
 import { encodeSse, PatchEmitter, type PatchEvent } from "@compforge/agentue/ui";
-import { conversationView, type ConversationView } from "../channel/view.ts";
+import { topicView, type TopicView } from "../channel/view.ts";
 
 /**
- * @spec AgentUE owns patch semantics; Aide selects the conversation's renderable state.
+ * @spec AgentUE owns patch semantics; Aide selects the topic's renderable state.
  * @why Removed/reordered blocks require a replacement start because AgentUE has no delete operation.
  * @link docs/channel/web.md
  */
-export function conversationPatches(emitter: PatchEmitter, previous: ConversationView | undefined, next: ConversationView): PatchEvent[] {
+export function topicPatches(emitter: PatchEmitter, previous: TopicView | undefined, next: TopicView): PatchEvent[] {
   if (!previous || previous.blocks.some((block, index) => next.blocks[index]?.id !== block.id)) return [emitter.start(next)];
   const events: PatchEvent[] = [];
   if (JSON.stringify(previous.meta.context) !== JSON.stringify(next.meta.context)) {
@@ -29,8 +29,8 @@ export function conversationPatches(emitter: PatchEmitter, previous: Conversatio
 }
 
 /** Every connection starts a fresh delivery from the authoritative projection, without replaying actions. */
-export function streamConversation(response: ServerResponse, aide: ChannelService, conversationId: string, log: Logger): void {
-  const initial = conversationView(aide, conversationId);
+export function streamTopic(response: ServerResponse, aide: ChannelService, topicId: string, log: Logger): void {
+  const initial = topicView(aide, topicId);
   response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", "x-accel-buffering": "no" });
   const emitter = new PatchEmitter();
   let previous = initial;
@@ -45,12 +45,12 @@ export function streamConversation(response: ServerResponse, aide: ChannelServic
     timer = undefined;
     if (closed || blocked) return;
     try {
-      const next = conversationView(aide, conversationId);
-      const events = conversationPatches(emitter, previous, next);
+      const next = topicView(aide, topicId);
+      const events = topicPatches(emitter, previous, next);
       previous = next;
       if (events.length) blocked = !response.write(events.map((event) => encodeSse(event)).join(""));
     } catch (err) {
-      log.error({ err, conversationId }, "Web conversation stream failed");
+      log.error({ err, topicId }, "Web topic stream failed");
       finish(emitter.error("view_failed", "无法更新对话进展，请重新连接。"));
     }
   };

@@ -82,20 +82,20 @@ test("Routine silence releases only the agent; events clear idle state and delet
   assert.equal(closes, 1);
   assert.equal(get(work.id).metadata.deletionTimestamp, undefined);
   const stale = get(work.id);
-  await aide.event({ id: "wake", conversationId: "me", sessionId: "me", name: "sample", text: "changed" });
+  await aide.event({ id: "wake", topicId: "me",  name: "sample", text: "changed" });
   assert.equal(get(work.id).status.idleSince, null);
   assert.equal(get(work.id).status.agentStoppedAt, null);
   await aide.work("me").requestInput(work.id, { text: "user context" });
   await assert.rejects(resources.delete(ROUTINE_TYPE, work.id, "v1", { uid: stale.metadata.uid, resourceVersion: stale.metadata.resourceVersion }), /version conflict/);
   await resources.delete(ROUTINE_TYPE, work.id, "v1");
   await assert.rejects(aide.work("me").requestInput(work.id, { text: "too late" }), /Unknown work|being deleted/);
-  assert.equal(await aide.event({ id: "late-event", conversationId: "me", sessionId: "me", name: "sample", text: "late" }), 0);
-  const input = await aide.conversations.submit("late", { origin: "channel", originId: "web", text: "late request" });
-  const c = aide.conversations.resource("me")!;
+  assert.equal(await aide.event({ id: "late-event", topicId: "me",  name: "sample", text: "late" }), 0);
+  const input = await aide.topics.submit("late", { origin: "channel", originId: "web", text: "late request" });
+  const c = aide.topics.resource("me")!;
   await deliver(context, input, [c.metadata], "same topic");
-  await assert.rejects(handoff(aide.conversations, resources, "late", [{ workUid: work.uid!, request: {} }]), /Work unavailable/);
+  await assert.rejects(handoff(aide.topics, resources, "late", [{ workUid: work.uid!, request: {} }]), /Work unavailable/);
   await reconcileRoutine(context, execution, get(work.id));
-  assert.equal(aide.conversations.inputStore.query("handlePending", work.uid!).length, 0);
+  assert.equal(aide.topics.inputStore.query("handlePending", work.uid!).length, 0);
 });
 
 /** @case A released Routine remains timer-driven and an unreported timer execution is never replayed automatically. */
@@ -129,13 +129,13 @@ test("Routine controller releases an idle session and resumes on a later event w
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const work = await aide.work("me").create(definition);
   const get = () => aide.personal.store.resources.get(ROUTINE_TYPE, work.id) as RoutineResource;
-  await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "sample", text: "first" });
+  await aide.event({ id: "first",  topicId: "me", name: "sample", text: "first" });
   await aide.start(); await aide.settled();
   const agent = get().status.agent;
   for (let n = 0; n < 250 && !get().status.agentStoppedAt; n++) await Bun.sleep(10);
   assert.ok(get().status.agentStoppedAt);
   assert.equal(get().metadata.deletionTimestamp, undefined);
-  await aide.event({ id: "second", sessionId: "me", conversationId: "me", name: "sample", text: "second" });
+  await aide.event({ id: "second",  topicId: "me", name: "sample", text: "second" });
   await aide.settled();
   assert.equal(runs, 2);
   assert.equal(get().status.status, "scheduled");

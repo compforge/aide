@@ -107,7 +107,7 @@ if (result.state === "success") {
 }
 ```
 
-`execution.withContext(attributes)` attaches opaque application metadata to subsequent actions. The runtime persists it without interpreting business fields; Personal owns its conversation and input associations. The initiating resource identity is supplied by the runtime and cannot be changed by this metadata.
+`execution.withContext(attributes)` attaches opaque application metadata to subsequent actions. The runtime persists it without interpreting business fields; Personal owns its topic and input associations. The initiating resource identity is supplied by the runtime and cannot be changed by this metadata.
 
 Controllers use `execution.verbs.connectors({ timeoutMs })` for connector actions. Other components may use `context.connectors` directly. Connector timeout ends the wait without promising cancellation of the underlying provider operation.
 

@@ -16,10 +16,10 @@ test("Discovery requires an explicit assignee scope and unique watch identity", 
   assert.throws(() => requirementWatches(parsePersonalConfig({ sources: { requirements: [watch, watch] } }).sources.requirements), /Duplicate/);
 });
 
-test("Watches sharing a connector get separate conversations unless explicitly routed together", () => {
+test("Watches sharing a connector get separate topics unless explicitly routed together", () => {
   const watches = requirementWatches(parsePersonalConfig({ sources: {
     requirements: [{ id: "mine", source: "work", userKeys: ["me"] }, { id: "team", source: "work", userKeys: ["team"] },
-      { id: "urgent", source: "work", sessionId: "lark:bot:chat", userKeys: ["me"] }],
+      { id: "urgent", source: "work", topicKey: "lark:bot:chat", userKeys: ["me"] }],
   } }).sources.requirements);
-  assert.deepEqual(watches.map((watch) => watch.sessionId), ["source:mine", "source:team", "lark:bot:chat"]);
+  assert.deepEqual(watches.map((watch) => watch.topicKey), ["source:mine", "source:team", "lark:bot:chat"]);
 });

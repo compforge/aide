@@ -16,11 +16,11 @@ import pino from "pino";
 import { decodeSse, PatchEmitter, applyPatch, type PatchEvent } from "@compforge/agentue/ui";
 import { Aide } from "../src/app.ts";
 import { httpChannel } from "../src/api/index.ts";
-import { conversationView, type ConversationView } from "../src/channel/view.ts";
-import { conversationPatches } from "../src/api/stream.ts";
+import { topicView, type TopicView } from "../src/channel/view.ts";
+import { topicPatches } from "../src/api/stream.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { seedInput } from "./conversation-fixture.ts";
+import { seedInput } from "./topic-fixture.ts";
 
 async function until(check: () => boolean) {
   for (let i = 0; i < 500; i++) { if (check()) return; await Bun.sleep(10); }
@@ -55,11 +55,11 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const page = await fetch(base);
   assert.match(page.headers.get("content-security-policy")!, /script-src 'self'/);
   assert.match(await page.text(), /src="\/app.js"/);
-  async function connect(conversationId: string) {
+  async function connect(topicId: string) {
     const controller = new AbortController(); connections.push(controller);
-    const response = await fetch(`${base}/stream?conversationId=${conversationId}`, { signal: controller.signal });
+    const response = await fetch(`${base}/stream?topicId=${topicId}`, { signal: controller.signal });
     assert.match(response.headers.get("content-type")!, /text\/event-stream/);
-    const views: ConversationView[] = [];
+    const views: TopicView[] = [];
     const events: PatchEvent[] = [];
     let snapshot = {};
     const reader = response.body!.getReader();
@@ -74,26 +74,26 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
           const { event } = decodeSse(frame);
           events.push(event);
           snapshot = applyPatch(snapshot, event);
-          views.push(structuredClone(snapshot) as ConversationView);
+          views.push(structuredClone(snapshot) as TopicView);
         }
       }
     })().catch((error) => { if (!controller.signal.aborted) throw error; });
     return { views, events, close: async () => { controller.abort(); await reading; } };
   }
   assert.equal((await fetch(base + "/stream")).status, 400);
-  assert.equal((await fetch(base + "/stream?conversationId=a", { headers: { origin: "https://foreign.test" } })).status, 403);
+  assert.equal((await fetch(base + "/stream?topicId=a", { headers: { origin: "https://foreign.test" } })).status, 403);
   const first = await connect("a");
   await until(() => first.views.length > 0);
   assert.equal(first.events[0]!.op, "start");
-  assert.deepEqual(first.views[0], { version: "1.0", biz: "aide.conversation", blocks: [], meta: { conversation_id: "a", context: null, activity: null } });
+  assert.deepEqual(first.views[0], { version: "1.0", biz: "aide.topic", blocks: [], meta: { topic_id: "a", context: null, activity: null } });
   const accepted = await fetch(base + "/messages", { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id: "a1", sessionId: "a", text: "查看资料", channelId: "forged-channel" }) });
+    body: JSON.stringify({ id: "a1", topicId: "a", text: "查看资料", channelId: "forged-channel" }) });
   assert.equal(accepted.status, 200);
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "b1", sessionId: "b", conversationId: "b", text: "另一会话的私有内容" }));
-  const firstKey = aide.personal.conversations.resource("a")!.metadata.name;
-  const secondKey = aide.personal.conversations.resource("b")!.metadata.name;
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "b1",  topicId: "b", text: "另一会话的私有内容" }));
+  const firstKey = aide.personal.topics.resource("a")!.metadata.name;
+  const secondKey = aide.personal.topics.resource("b")!.metadata.name;
   await until(() => emitters.has(firstKey) && emitters.has(secondKey));
-  const runningView = conversationView(aide, "a");
+  const runningView = topicView(aide, "a");
   const runningInput = runningView.blocks.find((block) => block.type === "input")!;
   assert.ok(runningView.meta.activity);
   assert.equal(runningInput.group_id, runningView.meta.activity!.id);
@@ -135,7 +135,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.role === "aide").length, 1);
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content, "最终答复");
   const completed = second.views.at(-1)!;
-  const context = aide.conversations.resource("a")!.status;
+  const context = aide.topics.resource("a")!.status;
   assert.deepEqual(completed.meta.context, { summary: context.summary, recent: context.recent });
   assert.equal(completed.blocks.find((block) => block.type === "execution")!.status, "completed");
   const groupId = completed.blocks.find((block) => block.type === "execution")!.group_id;
@@ -144,7 +144,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(completed.blocks.filter((block) => block.type === "input").length, 1);
   assert.equal(completed.blocks.find((block) => block.role === "user")!.group_id, groupId);
   assert.equal(completed.blocks.find((block) => block.role === "user")!.origin, "channel");
-  assert.equal(completed.blocks.find((block) => block.role === "user")!.inputId, aide.personal.conversations.inputs("a")[0]!.metadata.name);
+  assert.equal(completed.blocks.find((block) => block.role === "user")!.inputId, aide.personal.topics.inputs("a")[0]!.metadata.name);
   assert.equal(completed.blocks.find((block) => block.type === "execution")!.harness, "chief");
   assert.equal(completed.blocks.find((block) => block.type === "thought")!.content, "先检查资料");
   assert.equal(completed.blocks.find((block) => block.type === "tool")!.detail, "/tmp/README");
@@ -160,12 +160,12 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
     await until(() => second.events.at(-1)?.op === "end");
     assert.deepEqual(second.events.slice(-2).map((event) => event.op), ["error", "end"]);
     assert.equal(second.views.at(-1)!.meta.error!.code, "view_failed");
-    assert.equal((await fetch(base + "/stream?conversationId=a")).status, 500);
+    assert.equal((await fetch(base + "/stream?topicId=a")).status, 500);
   } finally { aide.outputs = messages; }
   await second.close();
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "a2", sessionId: "a", conversationId: "a", text: "再聊一个问题" }));
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "a2",  topicId: "a", text: "再聊一个问题" }));
   await aide.settled();
-  const later = conversationView(aide, "a");
+  const later = topicView(aide, "a");
   assert.equal(later.blocks.filter((block) => block.type === "execution").length, 2);
   assert.equal(new Set(later.blocks.filter((block) => block.type === "execution").map((block) => block.group_id)).size, 2);
   for (const reply of later.blocks.filter((block) => block.role === "aide")) {
@@ -176,18 +176,18 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   await aide.close();
   const reopened = new Aide(root, options, log);
   try {
-    const restored = conversationView(reopened, "a");
+    const restored = topicView(reopened, "a");
     assert.deepEqual(restored.blocks.filter(b => b.type === "input" || b.type === "message"), later.blocks.filter(b => b.type === "input" || b.type === "message"));
     assert.equal(restored.blocks.filter(b => b.type === "execution" || b.parent_id).length, 0, "Native execution history is not replayed by Aide");
-    assert.doesNotMatch(JSON.stringify(conversationView(reopened, "a")), /另一会话/);
+    assert.doesNotMatch(JSON.stringify(topicView(reopened, "a")), /另一会话/);
   } finally { await reopened.close(); }
 });
 
 test("AgentUE reducer reconstructs growing, corrected and removed progress without duplicated text", () => {
   const emitter = new PatchEmitter();
-  const initial: ConversationView = { version: "1.0", biz: "aide.conversation", meta: { conversation_id: "a", context: null, activity: null },
+  const initial: TopicView = { version: "1.0", biz: "aide.topic", meta: { topic_id: "a", context: null, activity: null },
     blocks: [{ id: "output:answer", type: "text", content: "整理" }] };
-  let previous: ConversationView | undefined;
+  let previous: TopicView | undefined;
   let snapshot = {};
   for (const next of [initial,
     { ...initial, meta: { ...initial.meta, context: { summary: "当前话题", recent: [{ at: "2026-10-23T08:00:00Z", text: "确认当前结论" }] } } },
@@ -195,7 +195,7 @@ test("AgentUE reducer reconstructs growing, corrected and removed progress witho
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "整理重点" }] },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "已完成" }] },
     { ...initial, blocks: [] }]) {
-    for (const event of conversationPatches(emitter, previous, next)) snapshot = applyPatch(snapshot, event);
+    for (const event of topicPatches(emitter, previous, next)) snapshot = applyPatch(snapshot, event);
     assert.deepEqual(snapshot, next);
     previous = next;
   }
@@ -209,12 +209,12 @@ test("Web exposes failed consumption on the Input without sending an automatic w
     execute: async () => { throw new Error("No Work expected"); },
   }, root), pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "failed-reply", sessionId: "failed", conversationId: "failed", text: "检查展示故障" }));
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "failed-reply",  topicId: "failed", text: "检查展示故障" }));
   await aide.settled();
-  const view = conversationView(aide, "failed");
+  const view = topicView(aide, "failed");
   const reply = view.blocks.find((block) => block.type === "input")!;
   assert.equal(reply.status, "failed");
-  assert.equal(reply.group_id, aide.personal.conversations.inputs("failed")[0]!.consumption.executionId);
+  assert.equal(reply.group_id, aide.personal.topics.inputs("failed")[0]!.consumption.executionId);
   assert.ok(aide.invocations().some((invocation) => invocation.executionId === reply.group_id));
   assert.match(reply.content, /检查展示故障/);
   assert.ok(!view.blocks.some((block) => block.role === "aide"));
@@ -226,19 +226,19 @@ test("Source receipts expose original evidence before processing and remain visi
   const options = fakeOptions({ async execute() { throw new Error("No Work expected"); } }, root);
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  const store = aide.personal.conversations;
+  const store = aide.personal.topics;
   await assert.rejects(store.submit("missing-origin", { origin: "source", text: "缺少来源身份" } as InputSpec), /originId/);
   assert.equal(store.inputStore.get("missing-origin"), undefined);
   const observation = { type: "workload.changed", environment: "test", namespace: "vke-system", changes: [
     { before: { kind: "Deployment", name: "sandbox-server", generation: 1129 }, after: { kind: "Deployment", name: "sandbox-server", generation: 1130 } },
   ] };
-  await seedInput(store, "environment", { conversationId: "inbox", origin: "source", originId: SOURCES.environments.id, text: "test / vke-system：Deployment sandbox-server generation 1129 → 1130", observation }, { phase: "done", result: { summary: "No delegated work" } });
-  await seedInput(store, "mention", { conversationId: "inbox", origin: "source", originId: SOURCES.lark.id, text: "Lark 群内 @：请确认发布窗口", observation: {
+  await seedInput(store, "environment", { topicId: "inbox", origin: "source", originId: SOURCES.environments.id, text: "test / vke-system：Deployment sandbox-server generation 1129 → 1130", observation }, { phase: "done", result: { summary: "No delegated work" } });
+  await seedInput(store, "mention", { topicId: "inbox", origin: "source", originId: SOURCES.lark.id, text: "Lark 群内 @：请确认发布窗口", observation: {
     provider: "lark", kind: "mention", message: { id: "om_example", content: "请确认发布窗口" }, context: { messages: [{ content: "完整上下文" }] },
   } });
-  await seedInput(store, "failed", { conversationId: "inbox", origin: "source", originId: SOURCES.requirements.id, text: "其它 Source 的原始输入" }, { phase: "failed" });
-  await seedInput(aide.personal.conversations, "private", { conversationId: "other", origin: "source", originId: "personal.environments", text: "另一会话的私有输入" });
-  const view = conversationView(aide, "inbox");
+  await seedInput(store, "failed", { topicId: "inbox", origin: "source", originId: SOURCES.requirements.id, text: "其它 Source 的原始输入" }, { phase: "failed" });
+  await seedInput(aide.personal.topics, "private", { topicId: "other", origin: "source", originId: "personal.environments", text: "另一会话的私有输入" });
+  const view = topicView(aide, "inbox");
   const receipts = view.blocks.filter((block) => block.type === "input");
   assert.equal(receipts.length, 3);
   assert.equal(new Set(receipts.map((block) => block.id)).size, 3);
@@ -262,7 +262,7 @@ test("Source receipts expose original evidence before processing and remain visi
   assert.equal(aide.outputs().length, 0, "Showing Input facts must not manufacture outbound messages");
   // Close without starting a Runner: queued and consumed receipts both reconstruct directly from persisted facts.
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
-  assert.deepEqual(conversationView(aide, "inbox"), view);
+  assert.deepEqual(topicView(aide, "inbox"), view);
 });
 
 test("Harness presentation resolves persisted wire names and canonical IDs to the same definition", () => {
@@ -292,24 +292,24 @@ test("Bound Channels preserve distinct input identities and rebuild user/source 
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const web = bindChannelInput(CHANNELS.web, (input) => aide.receive(input));
   const lark = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
-  const input = { id: "same-external-id", sessionId: "inbox", source: webAddress("inbox"), text: "Web 用户交代" };
+  const input = { id: "same-external-id", topicId: "inbox", source: webAddress("inbox"), text: "Web 用户交代" };
   const receipt = await web(input); await aide.settled();
   assert.deepEqual(await web(input), receipt);
   const other = await lark({ ...input, source: larkAddress("bot", "chat"), text: "Lark 用户补充" }); await aide.settled();
   assert.notEqual(other.inputId, receipt.inputId);
-  const store = aide.personal.conversations;
-  await seedInput(store, "observation", { conversationId: "inbox", origin: "source", originId: SOURCES.environments.id, text: "部署镜像已变化" },
+  const store = aide.personal.topics;
+  await seedInput(store, "observation", { topicId: "inbox", origin: "source", originId: SOURCES.environments.id, text: "部署镜像已变化" },
     { phase: "done", result: { summary: "Not relevant" } });
   assert.equal(store.outputs("inbox").length, 2, "Only the two replies are stored as Messages");
   assert.equal(store.inputs("inbox").length, 3);
-  const before = conversationView(aide, "inbox");
+  const before = topicView(aide, "inbox");
   assert.equal(before.blocks.filter((block) => block.type === "input").length, 3);
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
-  assert.deepEqual(conversationView(aide, "inbox").blocks.filter(b => b.type === "input" || b.type === "message"),
+  assert.deepEqual(topicView(aide, "inbox").blocks.filter(b => b.type === "input" || b.type === "message"),
     before.blocks.filter(b => b.type === "input" || b.type === "message"));
-  await web({ id: "next", sessionId: "inbox", source: webAddress("inbox"), text: "继续处理" }); await aide.settled();
-  const history = aide.personal.conversations.inputs("inbox").map((i) => ({ role: i.spec.origin === "channel" ? "user" : "source", text: i.spec.text }));
-  assert.doesNotMatch(prompts.at(-1)!, /Recent conversation:/, "Warm native history is not injected again");
+  await web({ id: "next", topicId: "inbox", source: webAddress("inbox"), text: "继续处理" }); await aide.settled();
+  const history = aide.personal.topics.inputs("inbox").map((i) => ({ role: i.spec.origin === "channel" ? "user" : "source", text: i.spec.text }));
+  assert.doesNotMatch(prompts.at(-1)!, /Recent topic:/, "Warm native history is not injected again");
   assert.ok(history.some((item) => item.role === "user" && item.text === "Web 用户交代"));
   assert.ok(history.some((item) => item.role === "user" && item.text === "Lark 用户补充"));
   assert.ok(history.some((item) => item.role === "source" && item.text === "部署镜像已变化"));

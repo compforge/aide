@@ -8,7 +8,7 @@ import { type Address, type ResourceListOptions } from "@compforge/aide-plugin";
 import { OUTPUT_TYPE, type Output, type OutputSpec, type OutputStatus } from "./model.ts";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 
-/** @spec Output is independent of Input and Conversation lifetime. Associations are provenance, not retention edges.
+/** @spec Output is independent of Input and Topic lifetime. Associations are provenance, not retention edges.
  * @spec Content, receivers and target never change after admission. Only the Host transport updates delivery state.
  * @link docs/personal/output.md
  */
@@ -21,14 +21,14 @@ export class OutputStore {
     this.storage = ResourceStorage.open(home);
     this.storage.register("personal", [OutputDefinition]);
     this.resources = new PluginResourceStore({ home: this.storage.home, pluginInstanceId: "personal" });
-    this.storage.db.exec(`CREATE INDEX IF NOT EXISTS output_conversation ON resources(json_extract(data,'$.object.spec.conversation.uid')) WHERE kind='aide.dev/Output';
+    this.storage.db.exec(`CREATE INDEX IF NOT EXISTS output_topic ON resources(json_extract(data,'$.object.spec.topic.uid')) WHERE kind='aide.dev/Output';
       CREATE INDEX IF NOT EXISTS output_execution ON resources(json_extract(data,'$.object.spec.executionId')) WHERE kind='aide.dev/Output';`);
   }
   get(id: string): Output | undefined { return this.storage.read(this.key(id), true)?.object as Output | undefined; }
-  list(options: { owner?: string; conversationUid?: string; executionId?: string; inputId?: string; after?: string; limit?: number; matchLabels?: ResourceListOptions["matchLabels"] } = {}): Output[] {
+  list(options: { owner?: string; topicUid?: string; executionId?: string; inputId?: string; after?: string; limit?: number; matchLabels?: ResourceListOptions["matchLabels"] } = {}): Output[] {
     const clauses = ["kind='aide.dev/Output'"];
     const args: string[] = [];
-    for (const [path, value] of [["$.owner", options.owner], ["$.object.spec.conversation.uid", options.conversationUid], ["$.object.spec.executionId", options.executionId]] as const) {
+    for (const [path, value] of [["$.owner", options.owner], ["$.object.spec.topic.uid", options.topicUid], ["$.object.spec.executionId", options.executionId]] as const) {
       if (value !== undefined) { clauses.push(`json_extract(data,'${path}')=?`); args.push(value); }
     }
     if (options.after) { clauses.push("key>?"); args.push(this.key(options.after)); }
@@ -66,7 +66,7 @@ export class OutputStore {
     const at = new Date(Math.max(Date.now(), latest ? Date.parse(latest) + 1 : 0)).toISOString();
     const output: Output = { ...OUTPUT_TYPE, metadata: { name: id, uid: `output:${id}`, namespace: "v1",
       creationTimestamp: at, resourceVersion: "1", generation: 1,
-      labels: { "aide.dev/conversation-uid": spec.conversation.uid, ...(spec.executionId ? { "aide.dev/execution-id": spec.executionId } : {}) } }, spec,
+      labels: { "aide.dev/topic-uid": spec.topic.uid, ...(spec.executionId ? { "aide.dev/execution-id": spec.executionId } : {}) } }, spec,
       status: isChannelAddress(spec.target) && spec.target.channelId === "web" ? { phase: "delivered", attempts: 0, deliveredAt: new Date().toISOString() } : { phase: "pending", attempts: 0 } };
     this.storage.write(key, "personal", { owner, object: output, control: {} }, { key: `output:${id}`, value: JSON.stringify({ fingerprint }) });
     this.notify(output); return output;

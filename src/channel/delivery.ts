@@ -14,7 +14,7 @@ export function reconcileChannelOutputs(outputs: OutputStore, larkAppId: string 
     catch (error) {
       const phase = output.status.phase === "sending" || output.status.attempts > 0 ? "uncertain" : "failed";
       const reason = String(error).slice(0, 4000);
-      log.error({ outputId: output.metadata.name, conversationId: output.spec.conversationId,
+      log.error({ outputId: output.metadata.name, topicId: output.spec.topicId,
         target: output.spec.target, attempts: output.status.attempts, phase, retryable: false,
         error: reason }, "Output has no configured delivery Channel");
       outputs.update(output.metadata.name, status => ({ ...status, phase, nextAttemptAt: undefined, lastError: reason }));

@@ -39,7 +39,7 @@ export async function reconcileRouteAgent(context: PluginContext, execution: Rec
   if (!input) return retryDelay(context.resources, route);
   if (routed(input)) return;
   if (await routeByRules(context, input)) return { requeueAfterMs: 1 };
-  const prompt = `Route this input. Use the current candidate Conversation context; list_conversations supplies remaining candidate pages; use route_input to commit its destinations. Earlier context may be stale.\n${JSON.stringify({ inputId: input.metadata.name })}\n${inputPreview(input, routePolicy(context.instance.config.route).contextChars)}\nUse read_input for complete evidence.`;
+  const prompt = `Route this input. Use the current candidate Topic context; list_topics supplies remaining candidate pages; use route_input to commit its destinations. Earlier context may be stale.\n${JSON.stringify({ inputId: input.metadata.name })}\n${inputPreview(input, routePolicy(context.instance.config.route).contextChars)}\nUse read_input for complete evidence.`;
   await runInput(context, execution.withContext({ inputId: input.metadata.name }), route, ROUTE_HARNESS, prompt, input.metadata.name);
   return { requeueAfterMs: 1 };
 }

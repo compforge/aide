@@ -224,14 +224,15 @@ Personal 的 `config.ts` 组合各类 Source 策略，装配阶段解析后仅�
 配置输入允许缺省和引用；有效配置已补齐默认值、解析模型与路径，并在创建运行实例之前验证。
 Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。整体原则见 [Kernel](kernel.md)。
 
-## Conversation 消费策略
+## Topic 消费策略
 
-`plugins.personal.conversation` 控制 Input 预览和近期处理摘要大小，独立于 Source 的采集频率：
+`plugins.personal.topic` 控制 Input 预览和近期处理摘要大小，独立于 Source 的采集频率：
 
 ```yaml
 plugins:
   personal:
-    conversation:
+    topic:
+      idleMs: 604800000       # 子树 7 天无新 Input，可在安全交接后回收
       contextChars: 48000
       summaryChars: 4000
 ```
@@ -240,7 +241,7 @@ plugins:
 - 普通输入在当前调用结束后 followup，复用原生历史；immediate 通过 steer 进入当前调用。明确不支持或拒绝时留队等待 followup，不中断现有动作。
 - trigger 到期仍可在没有新 Input 时执行回顾。一次调用最多两天。
 - `contextChars` 限制新 Input 的描述预览，全文通过 `read_input` 分页读取；原生历史和压缩由 SDK 管理。
-- `summaryChars` 限制 Conversation 累计认识的长度，模型需合并后替换；近期处理记录使用 recent，统一限制条数和总字符数。长期认识使用共享记忆，委托进展保存在 Work。
+- `summaryChars` 限制 Topic 累计认识的长度，模型需合并后替换；近期处理记录使用 recent，统一限制条数和总字符数。长期认识使用共享记忆，委托进展保存在 Work。
 - `assess_input` 提交业务消费回执并原子建立 Work 办理记录。没有回执的已尝试输入保留失败证据，不自动重放。
 
 
@@ -280,6 +281,23 @@ plugins:
       contextChars: 16000
 ```
 
-规则命中立即投递；未命中交给持续复用原生上下文的 Route loop。contextChars 限制新 Input 预览；read_input 提供全文，list_conversations 分页读取当前目录。route_input 在同一事务提交完整去向与全部 assess，具体契约见 [Route](personal/route.md)。
+规则命中立即投递；未命中交给持续复用原生上下文的 Route loop。contextChars 限制新 Input 预览；read_input 提供全文，list_topics 分页读取当前目录。route_input 在同一事务提交完整去向与全部 assess，具体契约见 [Route](personal/route.md)。
 
 `harnesses.route.model` 可以独立选择模型，字段同 Pi 的 model；未声明时复用 Chief 启动配置。Route 不可设为 defaultHarness，只拥有路由、目录和共享记忆检索工具，不加载业务执行工具或技能。纯分类失败按输入退避重试，已经完成路由的输入不重复分派。
+
+
+## Weave 主题整理
+
+```yaml
+plugins:
+  personal:
+    weave:
+      enabled: true
+      intervalMs: 300000
+      rootThreshold: 20
+      batchSize: 12
+harnesses:
+  weave: {}  # 可配置 model，缺省复用 Chief 模型；无通用执行/外发工具
+```
+
+周期扫描使用有界候选、搜索和认识指纹；达到根数量阈值且目录变化时提前整理。一次最多组织 8 个 root，只创建一个新父节点。静默优先级来自 lastInputAt，分组和摘要更新不刷新活动时间。具体交接、锁与回收见 [Topic](personal/topic.md)。

@@ -22,12 +22,12 @@ Channel / Source 经绑定的入口提交 Input，稳定身份用于传输去重
 | status 阶段 | 写入者与完成条件 |
 | --- | --- |
 | route | Route 的规则或 route_input 保存完整去向与理由 |
-| assess[Conversation UID] | Chief 用 assess_input 确认本话题的研判 |
+| assess[Topic UID] | Chief 用 assess_input 确认本话题的研判 |
 | handle[Work UID] | Work 应用请求，再用 report_task / report_routine 确认办理 |
 
-route_input 在同一事务写入 route 结果和全部 assess；assess_input 在同一事务完成研判并建立必要的 handle。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 可以关联多个 Conversation、多个 Work，各自独立确认。
+route_input 在同一事务写入 route 结果和全部 assess；assess_input 在同一事务完成研判并建立必要的 handle。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 可以关联多个 Topic、多个 Work，各自独立确认。
 
-未完成可能是尚未接纳、运行、退避或待核对。接纳记录不等于完成；原生调用结束也不代替工具回执。Route 分类失败可以按输入退避重试，Chief / Work 可能已经产生副作用，需核对后继续。详细策略分别归 [Route](route.md)、[Conversation](conversation.md)、[Task](task.md) 与 [Routine](routine.md)。
+未完成可能是尚未接纳、运行、退避或待核对。接纳记录不等于完成；原生调用结束也不代替工具回执。Route 分类失败可以按输入退避重试，Chief / Work 可能已经产生副作用，需核对后继续。详细策略分别归 [Route](route.md)、[Topic](topic.md)、[Task](task.md) 与 [Routine](routine.md)。
 
 ## 研判与办理
 
@@ -61,7 +61,7 @@ Output 只在其 inputIds 显式包含当前 Input 时关联，不按相邻顺�
 
 ## 验证
 
-`tests/route.test.ts` 覆盖原子分派与重试；`tests/input-assessment.test.ts` 覆盖研判、办理交接和释放；`tests/work-context.test.ts` 覆盖精确确认与事务回滚；`tests/conversation-intake.test.ts` 覆盖接收与重投。
+`tests/route.test.ts` 覆盖原子分派与重试；`tests/input-assessment.test.ts` 覆盖研判、办理交接和释放；`tests/work-context.test.ts` 覆盖精确确认与事务回滚；`tests/topic-intake.test.ts` 覆盖接收与重投。
 
 `tests/input-browse.test.ts` 覆盖筛选后分页、来源选项、稳定排序、消费回执终态、独立消费者、已删除目标、明确 Output 关联及 HTTP 页面与查询。
 

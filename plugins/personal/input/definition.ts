@@ -6,7 +6,7 @@ import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
 import { AddressSchema } from "../../../src/address.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { inputPrinter } from "./printer.ts";
-export const InputSpecSchema = z.object({ source: AddressSchema.optional(), sessionId: z.string().min(1).max(200).optional(), origin: z.enum(["channel", "source", "chief"]),
+export const InputSpecSchema = z.object({ source: AddressSchema.optional(), topicKey: z.string().min(1).max(500).optional(), topicId: z.string().min(1).optional(), origin: z.enum(["channel", "source", "chief"]),
   originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
   sender: z.object({ apiVersion: z.string(), kind: z.literal("Person"), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict().optional(),
   attention: z.enum(["immediate", "deferred"]).optional(),
@@ -21,13 +21,17 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   type: INPUT_TYPE,
   schema: { spec: InputSpecSchema, status: z.object({
     route: attempt.extend({ nextAttemptAt: z.string().optional(), attempts: z.number().int().nonnegative().optional(),
-      result: z.object({ conversations: z.array(ref), reason: z.string() }).strict().optional() }).optional(),
+      result: z.object({ topics: z.array(ref), reason: z.string() }).strict().optional() }).optional(),
     assess: z.record(z.string(), assessment).optional(),
     handle: z.record(z.string(), assessment.extend({ appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
   }).strict() },
-  validator: { update(previous, current) { if (!isDeepStrictEqual(previous.spec, current.spec)) throw new Error("Input content is immutable"); } },
+  validator: { update(previous, current) {
+    if (!isDeepStrictEqual(previous.spec, current.spec)) throw new Error("Input content is immutable");
+    if (previous.status.route?.completedAt && !isDeepStrictEqual(previous.status.route.result, current.status.route?.result)) throw new Error("Input Topic binding is immutable");
+  } },
   printer: inputPrinter,
   indexes: {
+    topic: r => r.status.route?.result?.topics.map(t => t.uid) ?? [],
     routePending: r => r.status.route?.completedAt ? [] : ["pending"],
     assess: r => Object.keys(r.status.assess ?? {}),
     assessPending: r => Object.entries(r.status.assess ?? {}).filter(([, s]) => !s.completedAt).map(([uid]) => uid),

@@ -6,7 +6,7 @@ const result = (value: unknown) => ({ content: [{ type: "text" as const, text: J
 /** @spec Chief revises understanding, preserving user corrections in summary; never changes identities or Me marks. */
 export function personTools(persons: Persons, beforeMutation?: () => void): ToolDefinition[] {
   return [
-    tool({ name: "list_persons", label: "List persons", description: "Find known people across conversations. Names are not unique. Read a person before revising their summary.",
+    tool({ name: "list_persons", label: "List persons", description: "Find known people across topics. Names are not unique. Read a person before revising their summary.",
       parameters: Type.Object({}), async execute() { return result((await persons.list()).map((p) => ({ id: p.metadata.name, name: p.spec.name, isMe: p.isMe }))); } }),
     tool({ name: "read_person", label: "Read person", description: "Read identities, current summary, recent evidence and resource version.",
       parameters: Type.Object({ id: Type.String({ minLength: 1 }), uid: Type.Optional(Type.String({ minLength: 1, description: "Supply the UID when reading an Input/Output Person reference; the referenced person may have been deleted." })) }),

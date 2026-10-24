@@ -3,7 +3,7 @@ const PAGE_SIZE = 10;
 type PersonItem = { isMe?: boolean; metadata: { name: string }; spec: { name: string }; status: { summary: string } };
 
 /**
- * @spec Me stays first on every matching page, outside the ordinary page quota, like the default conversation.
+ * @spec Me stays first on every matching page, outside the ordinary page quota, like the default topic.
  * @spec Other people with accumulated understanding come first; preserve the directory order within each group.
  */
 export function personPage<T extends PersonItem>(items: T[], query: string, requestedPage: number | null, selectedId: string | null) {

@@ -23,7 +23,7 @@ async function setup(t: TestContext, agent: Agent) {
   const path = dir;
   const aide = new Aide(path, fakeOptions(agent, path), log);
   t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
-  await aide.personal.conversations.ensure("me", fixtureAddress("me"));
+  await aide.personal.topics.ensure("me", fixtureAddress("me"));
   await aide.start();
   return { aide, path };
 }
@@ -34,10 +34,10 @@ test("Routine end_turn without a tool report stays uncertain across restart and 
   const agent: Agent = { complete: false, execute: async () => { runs++; return done; } };
   const { aide, path } = await setup(t, agent);
   const work = await aide.work("me").create(routine);
-  await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" });
+  await aide.event({ id: "first",  topicId: "me", name: "start", text: "start" });
   await aide.settled();
   assert.equal(aide.work("me").read(work.id).status, "uncertain");
-  const input = aide.conversations.inputStore.query("handlePending", work.uid!)[0]!;
+  const input = aide.topics.inputStore.query("handlePending", work.uid!)[0]!;
   assert.match(input.status.handle![work.uid!]!.lastError!, /without confirming/);
   assert.equal(aide.outputs().length, 0);
   await aide.close();
@@ -61,7 +61,7 @@ test(`${definition.kind} asks, persists a question across restart, then records 
   };
   const { aide, path } = await setup(t, agent);
   id = (await aide.work("me").create(definition)).id;
-  if (definition.kind === "routine") (await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" }));
+  if (definition.kind === "routine") (await aide.event({ id: "first",  topicId: "me", name: "start", text: "start" }));
   await aide.settled();
   assert.equal(aide.works()[0]?.status, "waiting");
   await aide.close();
@@ -91,9 +91,9 @@ test("Routine business completion depends on its tool report, independently of f
     return adapter;
   } }, log);
   t.after(async () => { await aide.close(); rmSync(dir, { recursive: true, force: true }); });
-  await aide.personal.conversations.ensure("me", fixtureAddress("me"));
+  await aide.personal.topics.ensure("me", fixtureAddress("me"));
   await aide.start(); await aide.work("me").create(routine);
-  await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" }); await aide.settled();
+  await aide.event({ id: "first",  topicId: "me", name: "start", text: "start" }); await aide.settled();
   assert.equal(aide.works()[0]!.status, "scheduled");
   assert.equal(aide.works()[0]!.summary, done.summary);
 });
@@ -106,7 +106,7 @@ test("Routine can be triggered by event, deduplicates deliveries, and stays acti
   (await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "docs.changed" } }));
   await aide.settled();
   assert.equal(runs, 0);
-  const event = { id: "event-1", sessionId: "me", conversationId: "me", name: "docs.changed", text: "new document" };
+  const event = { id: "event-1",  topicId: "me", name: "docs.changed", text: "new document" };
   assert.equal((await aide.event(event)), 1);
   assert.equal((await aide.event(event)), 0);
   await aide.settled();
@@ -129,7 +129,7 @@ test("replacing a Task with a Routine uses distinct identities and retains the c
   assert.notEqual(routine.id, original.id);
   assert.deepEqual(tools.list().map((work) => work.id), [routine.id]);
   assert.ok(aide.outputs().some((item) => item.workId === original.id && item.text === done.notification));
-  assert.equal((await aide.event({ id: "next", sessionId: "me", conversationId: "me", name: "check.again", text: "检查更新" })), 1);
+  assert.equal((await aide.event({ id: "next",  topicId: "me", name: "check.again", text: "检查更新" })), 1);
   await aide.settled();
   assert.equal(tools.read(routine.id).status, "scheduled");
   assert.ok(aide.outputs().some((item) => item.workId === routine.id && item.text === done.notification));
@@ -249,7 +249,7 @@ test(`${definition.kind} requeues a dynamic wait and applies its own completion 
   const { aide } = await setup(t, { execute: async () => ++runs === 1
     ? { ...done, action: "wait", nextAt: new Date(Date.now() + 200).toISOString() } : done });
   const work = (await aide.work("me").create(definition));
-  if (definition.kind === "routine") (await aide.event({ id: "first", sessionId: "me", conversationId: "me", name: "start", text: "start" }));
+  if (definition.kind === "routine") (await aide.event({ id: "first",  topicId: "me", name: "start", text: "start" }));
   const expected = definition.kind === "task" ? "done" : "scheduled";
   // Timer-triggered reconciles are owned by Manager, not Aide's explicit wake promises.
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -262,14 +262,14 @@ test(`${definition.kind} requeues a dynamic wait and applies its own completion 
   assert.equal(aide.work("me").read(work.id).nextAt, null);
 });
 
-// @case restart_new_cwd: changing execution cwd preserves personal work and conversation state.
+// @case restart_new_cwd: changing execution cwd preserves personal work and topic state.
 test("Aide resumes the same Session and personal state when execution cwd changes", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-cwd-restart-"));
   const agent: Agent = { chief: async () => "记住了", execute: async () => { throw new Error("Unexpected execution"); } };
   const first = new Aide(root, fakeOptions(agent, join(root, "code-a"), [], root), log);
   let restarted: Aide | undefined;
   t.after(async () => { await first.close(); await restarted?.close(); rmSync(root, { recursive: true, force: true }); });
-  await first.receive(fixtureIncoming({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "你好" }));
+  await first.receive(fixtureIncoming({ channelId: "web", id: "hello",  topicId: "me", text: "你好" }));
   await first.settled();
   const routine = await first.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "manual" } });
   const messages = first.outputs();
@@ -289,7 +289,7 @@ test("Aide resumes the same Session and personal state when execution cwd change
   await restarted.start(); await restarted.settled();
   assert.equal(restarted.work("me").read(routine.id).title, routine.title);
   assert.deepEqual(restarted.outputs(), messages);
-  await restarted.receive(fixtureIncoming({ channelId: "web", id: "again", sessionId: "me", conversationId: "me", text: "继续聊" }));
+  await restarted.receive(fixtureIncoming({ channelId: "web", id: "again",  topicId: "me", text: "继续聊" }));
   await restarted.settled();
   assert.ok(executionCwds.length > 0);
   assert.ok(executionCwds.every((cwd) => cwd === join(root, "code-b")));
@@ -305,7 +305,7 @@ test("Task uses its dedicated agent without an Aide execution store", async (t) 
     return options.createAdapter(target);
   } }, log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.personal.conversations.ensure("me", fixtureAddress("me"));
+  await aide.personal.topics.ensure("me", fixtureAddress("me"));
   await aide.start();
   await aide.work("me").create(task); await aide.settled();
   assert.equal(aide.works()[0]!.status, "done");
@@ -325,7 +325,7 @@ test(`Task, Routine and Chief remain dedicated agents with default Harness ${har
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   aide.personal;
 
-  await aide.receive(fixtureIncoming({ channelId: "web", id: "hello", sessionId: "me", conversationId: "me", text: "hello" }));
+  await aide.receive(fixtureIncoming({ channelId: "web", id: "hello",  topicId: "me", text: "hello" }));
   await aide.settled();
   // Mutating the caller's object cannot change future Sessions' startup target.
   defaultHarnessConfig.model = "changed-after-startup";
@@ -333,7 +333,7 @@ test(`Task, Routine and Chief remain dedicated agents with default Harness ${har
   assert.equal(aide.runtime.harnesses.find(target => target.id === "chosen")!.model, "configured-model");
   await aide.work("me").create(task); await aide.settled();
   await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "sample" } });
-  await aide.event({ id: "sample", sessionId: "me", conversationId: "me", name: "sample", text: "sample" });
+  await aide.event({ id: "sample",  topicId: "me", name: "sample", text: "sample" });
   await aide.settled();
   assert.equal(aide.works().find((work) => work.kind === "task")!.status, "done");
   assert.equal(aide.works().find((work) => work.kind === "routine")!.status, "scheduled");
@@ -347,15 +347,15 @@ test(`Task, Routine and Chief remain dedicated agents with default Harness ${har
 test("Routine event Input deduplication survives Input collection and restart", async t => {
   const { aide, path } = await setup(t, { execute: async () => done });
   await aide.work("me").create({ ...task, kind: "routine", trigger: { cron: null, timezone: "UTC", event: "sample" } });
-  const event = { id: "same-event", sessionId: "me", conversationId: "me", name: "sample", text: "sample evidence" };
+  const event = { id: "same-event",  topicId: "me", name: "sample", text: "sample evidence" };
   assert.equal(await aide.event(event), 1);
   await aide.settled();
-  const store = aide.conversations.inputStore;
+  const store = aide.topics.inputStore;
   const fact = store.list().find(input => input.spec.originId === "personal.events")!;
   assert.ok(Object.values(fact.status.handle!).every(receipt => receipt.completedAt));
   store.storage.configure({ kinds: { "aide.dev/Input": { maxCount: 1 } } } as Parameters<typeof store.storage.configure>[0]);
   store.submit("unrouted", "eviction-pressure", { origin: "source", originId: "test", text: "new fact" }, {
-    route: { completedAt: new Date().toISOString(), result: { conversations: [], reason: "test" } },
+    route: { completedAt: new Date().toISOString(), result: { topics: [], reason: "test" } },
   });
   assert.equal(store.get(fact.metadata.name), undefined);
   const invocations = aide.invocations().length;

@@ -13,7 +13,7 @@ src/
   main.ts                  # 启动 Channel 与 Harness
   app.ts                   # 装配全局 ApplicationRuntime、Personal 与通信入口
   web/                     # 浏览器页面；每页的 HTML、TS 入口、样式与交互模块放在一起
-    conversations/         # 导航、时间线、输入、工作与审批；main 管理轮询和 SSE
+    topics/                # 导航、时间线、输入、工作与审批；main 管理轮询和 SSE
     persons/               # 人物导航、资料和认识编辑
     inputs/                # 跨会话输入筛选、分页与处理 Timeline
     shared/                # DOM、HTTP、剪贴板、Markdown 与公共样式
@@ -63,15 +63,17 @@ plugins/personal/
   output/                  # Output 定义、投递状态、action 与 Printer
   aide.ts                  # 全局 Personal 服务：领域工具装配、输入与恢复
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
+  weave/                   # 全局 Weave CRD、分批组织与安全交接
   route/                   # 全局 Route CRD：规则分发、持续分类与原子分派
-  conversation/            # Conversation CRD 的模型、操作与 Reconcile
+  topic/                   # Topic CRD 的模型、操作与 Reconcile
+    locator.ts             # Channel / Source 提供 Topic 定位信息的领域契约
     model.ts               # 资源定义与会话类型
     store.ts               # 宿主侧会话、Input 消费投影与消息流
     config.ts              # 输入预览与近期摘要预算
     trigger.ts             # 定时触发配置
     reconcile.ts           # 独立接收与 agent Controller、定时回顾
     assess.ts              # 原子研判完成与 Work 交接
-    state.ts               # Conversation 身份检查和 CAS 更新
+    state.ts               # Topic 身份检查和 CAS 更新
   source/                  # Source 分类定义与三类观察资源
     definition.ts          # 来源身份、名称与稳定图标
     environment/           # EnvironmentSource
@@ -84,16 +86,16 @@ plugins/personal/
     requirement/           # RequirementSource
       config.ts            # 需求观察范围与配置校验
       observe.ts           # 需求观察、水位和调度
-  config.ts                # Conversation / Task / Routine / Source 配置、严格校验与默认值
+  config.ts                # Topic / Task / Routine / Source 配置、严格校验与默认值
   task/                    # Task CRD
     model.ts               # 资源定义
     reconcile.ts           # 输入接收、持续执行与两阶段静默回收
-    agent.ts               # Host 绑定 Task / Conversation 工具范围
+    agent.ts               # Host 绑定 Task / Topic 工具范围
     config.ts              # agent 静默与 Task 保留时长
   routine/                 # Routine CRD
     model.ts               # 资源定义
     reconcile.ts           # 持续职责执行与静默释放 agent
-    agent.ts               # Host 绑定 Routine / Conversation 工具范围
+    agent.ts               # Host 绑定 Routine / Topic 工具范围
     config.ts              # agent 静默时长
   model.ts                 # 共用 Work 字段、状态、消息与触发契约
   resources.ts             # Task / Routine 聚合与 Work 视图
@@ -105,6 +107,7 @@ plugins/personal/
 agents/
   pi/                      # 通用 Pi Agent：SDK、原生工具与会话
   route/                   # 专用路由 Agent，仅分类、目录和共享记忆检索
+  weave/                   # 专用主题整理 Agent，识别 root 关联并提议归组
   task/                    # 稳定目标的持续办理 Agent，复用 Pi
   routine/                 # 持续职责 Agent，复用 Pi
   chief/                   # Personal 提示词、Person / Work / 问答 / Connector 工具
@@ -116,15 +119,15 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 ## 关键约定
 
-- 底座提供 TypeScript controller-runtime，服务 Plugin Operator；Personal 拥有 Input、Output、Person、Conversation、Task、Routine 与业务判断。通用资源和调度不能导入 Personal，应用装配负责安装定义、通信 action 和投递器。
+- 底座提供 TypeScript controller-runtime，服务 Plugin Operator；Personal 拥有 Input、Output、Person、Topic、Task、Routine 与业务判断。通用资源和调度不能导入 Personal，应用装配负责安装定义、通信 action 和投递器。
 - Host / Runner 不互相导入实现。Runner 经 ResourceClient、Connector API 与 Verb 请求宿主能力，不持有 Store、凭证客户端或 Harness SDK。共享协议放在 src/protocol，公共插件契约放在 packages/plugin。
 - 每种 CRD 在所属 plugin package 下有独立目录，模型、Reconcile 和专属辅助代码就近组织；跨资源协作留在插件层。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
 - 资源身份按插件实例与 namespace 组织，引用固定 UID。同一 Controller 对同一资源串行；主资源纯 status 更新不自动唤醒自身，协作方显式声明 Watch。资源所有者决定能否释放，Host 执行容量限制与合格对象的淘汰排序。
 - Operator 通过 Harness interface / verb 操作原生 agent loop，恢复参数由 Operator 自己保存。Personal 的 status.agent 只是调用参数；Harness verb 不读写 CRD。原生持久化、历史与恢复属于 Harness，实时投影和诊断日志不承担恢复。
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。可能已有外部副作用的中断先核对，不自动重放。
 - Channel / Source 通过绑定 Definition 的入口形成 Input，正文保存事实，证据留在 observation。路由统一归 Route，Default 只兜底；Input.status 的 route / assess / handle 是处理事实，消费者按索引查询。
-- Person 保存人物身份与认识，Me 是可选标记，与访问凭证独立。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；话题 sessionId、通信地址和授权分别判断。
-- Conversation、Task、Routine、Person 用 summary 保存累计认识，recent 保存有界近期依据；结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
+- Person 保存人物身份与认识，Me 是可选标记，与访问凭证独立。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。
+- Topic、Task、Routine、Person 用 summary 保存累计认识，recent 保存有界近期依据；结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
 - Task 承担有限目标，Routine 承担持续职责。领域 Agent 与通用 Pi 共用适配，工具按资源 UID 和当前 execution 绑定；业务请求与消费凭据落在 Input。Chief / Work 通过 say 产生独立 Output，report 与 say 分别提交；普通回答是新 Input，原生权限由独立 Approval 处理。
 - Connector 声明访问能力，plugins.<plugin>.sources 声明观察策略，Source 先保存 Input 再推进水位。所有模块在自己的 config.ts 声明契约，启动时解析一次；显式值优先于默认值，空数组不回退，运行中不重读配置。
 - Web 按页面组织，入口管理轮询与 SSE 生命周期，交互模块持有自身状态；共用浏览器能力放在 web/shared，展示类型经 type-only import 使用。Channel 展示进展不产生业务 Output。
@@ -134,7 +137,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 - [文档导航](docs/README.md)：使用、开发与验收的阅读入口。
 - [Kernel](docs/kernel.md)、[Plugin](docs/plugin/README.md)、[Resource](docs/plugin/resource.md)：底座边界、协调、定义、事务与容量；[公共契约](packages/plugin/README.md)。
-- [Personal](docs/personal/README.md)：对象与完整流程；[Input](docs/personal/input.md)、[Route](docs/personal/route.md)、[Conversation](docs/personal/conversation.md)、[Output](docs/personal/output.md)。
+- [Personal](docs/personal/README.md)：对象与完整流程；[Input](docs/personal/input.md)、[Route](docs/personal/route.md)、[Topic](docs/personal/topic.md)、[Output](docs/personal/output.md)。
+- [Topic 与 Weave 方案](docs/personal/topic.md)：来源归属、主题组织、root 处理与静默回收契约。
 - [Chief](docs/personal/chief.md)：判断、提示词、上下文与记忆优化；[Person](docs/personal/person.md)、[Task](docs/personal/task.md)、[Routine](docs/personal/routine.md)。
 - [Harness](docs/harness/README.md)、[Pi](docs/harness/pi.md)：通用执行契约与原生适配。
 - [Channel](docs/channel/README.md)：[Web](docs/channel/web.md)、[Lark](docs/channel/lark.md)。
