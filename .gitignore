@@ -1,3 +1,4 @@
 node_modules/
 .aide/
 *.log
+.e2e-runs/
