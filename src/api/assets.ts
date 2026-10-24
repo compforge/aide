@@ -9,6 +9,7 @@ export function createWebAssets() {
     { route: "/", directory: "topics", bundle: "/app" },
     { route: "/people", directory: "persons", bundle: "/persons" },
     { route: "/inputs", directory: "inputs", bundle: "/inputs" },
+    { route: "/connections", directory: "connections", bundle: "/connections" },
   ];
   const files = new Map<string, Asset>();
   for (const [route, file, type] of [

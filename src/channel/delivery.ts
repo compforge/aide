@@ -7,10 +7,10 @@ import { assertChannelDelivery, isChannelAddress } from "./address.ts";
  * @why Admission and restart use the same ownership rule; the delivery layer owns recovery decisions and diagnostics.
  * @link docs/personal/output.md
  */
-export function reconcileChannelOutputs(outputs: OutputStore, larkAppId: string | undefined, log: Logger): void {
+export function reconcileChannelOutputs(outputs: OutputStore, larkAppIds: readonly string[], log: Logger): void {
   for (const output of outputs.list()) {
     if (!isChannelAddress(output.spec.target) || !["pending", "sending"].includes(output.status.phase)) continue;
-    try { assertChannelDelivery(output.spec.target, larkAppId); }
+    try { assertChannelDelivery(output.spec.target, larkAppIds); }
     catch (error) {
       const phase = output.status.phase === "sending" || output.status.attempts > 0 ? "uncertain" : "failed";
       const reason = String(error).slice(0, 4000);

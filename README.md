@@ -54,7 +54,7 @@ For an always-on Linux setup, proxy settings, or access through an SSH tunnel, s
 
 ## Use Lark
 
-Set `AIDE_LARK_APP_ID` and `AIDE_LARK_APP_SECRET` to connect your bot. Send it a direct message or @mention it in a group; no public callback endpoint is required. With CardKit permissions enabled, replies and progress appear in a streaming card.
+Add a named Lark Channel under **接入** in the Web UI (or `channels` in `config.yaml`) and restart Aide to connect your bot. Send it a direct message or @mention it in a group; no public callback endpoint is required. With CardKit permissions enabled, replies and progress appear in a streaming card.
 
 See [Lark setup](docs/channel/lark.md) for bot creation and permissions. Text messages are supported in direct chats and group @mentions. Agent permission requests still need to be handled in the web app.
 

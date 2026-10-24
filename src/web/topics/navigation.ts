@@ -119,7 +119,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
       topicMenu.replaceChildren();
       const actions = [['trigger', item.trigger.enabled ? '取消回顾' : '开启回顾']];
       if (!item.default) actions.push(['delete', '删除主题']);
-      if (!item.default) actions.push(['default', '设为默认主题']);
+      if (!item.default && !topicItems.some(child => child.parentUid === item.uid)) actions.push(['default', '设为默认主题']);
       for (const [action, label] of actions as [string, string][]) {
         const option = element('button', label, action === 'delete' ? 'topic-delete' : '');
         option.type = 'button'; option.setAttribute('role', 'menuitem');
@@ -192,7 +192,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
       if (item.preview) link.append(element('span', item.preview, 'muted'));
       link.append(element('span', '事项 ' + (item.taskCount ?? 0) + ' · 安排 ' + (item.routineCount ?? 0), 'muted topic-counts'));
       const indicators = element('span', undefined, 'topic-indicators');
-      if (item.default) indicators.append(topicStatusIcon('默认联络处', '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>'));
+      if (item.default) indicators.append(topicStatusIcon('默认主题', '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>'));
       if (item.trigger?.enabled) indicators.append(topicStatusIcon('主动回顾已开启', '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M3 5l3-3m12 0 3 3M6 20l-2 2m14-2 2 2"/>'));
       if (indicators.childElementCount) link.append(indicators);
       const row = element('div', undefined, 'topic-row');

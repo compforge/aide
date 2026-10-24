@@ -5,7 +5,7 @@ import { z } from "zod";
 import { TopicTriggerSchema } from "./trigger.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { AddressSchema } from "../../../src/address.ts";
-import { TOPIC_TYPE, TopicDeletionBlocked, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
+import { TOPIC_TYPE, TopicDeletionBlocked, TopicDefaultBlocked, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
 import { LoopExecutionSchema } from "../loop.ts";
 import { ResourceRefSchema } from "../topic/ref.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
@@ -40,16 +40,16 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       nextTriggerAt: z.string().nullable().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
   validator: { create: validateDefault, update: (previous, current, context) => {
     // @spec Selecting a grouped leaf as Default detaches it only after its previous processing scope is quiet.
-    // @link docs/personal/topic.md#默认联络处
+    // @link docs/personal/topic.md#默认主题
     if (current.spec.default && !previous.spec.default) {
       const all = context.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-      if (all.some(t => t.spec.parentRef?.uid === current.metadata.uid)) throw new Error("Default Topic cannot have children; select a leaf Topic");
-      if (previous.status.weaveLock || current.status.weaveLock) throw new Error("Topic is being organized; retry after Weave completes");
+      if (all.some(t => t.spec.parentRef?.uid === current.metadata.uid)) throw new TopicDefaultBlocked("Default Topic cannot have children; select a leaf Topic");
+      if (previous.status.weaveLock || current.status.weaveLock) throw new TopicDefaultBlocked("Topic is being organized; retry after Weave completes");
       if (previous.spec.parentRef) {
-        if (topicPath(all, previous).some(t => t.status.execution || t.status.weaveLock)) throw new Error("Topic processing is active; retry after it completes");
+        if (topicPath(all, previous).some(t => t.status.execution || t.status.weaveLock)) throw new TopicDefaultBlocked("Topic processing is active; retry after it completes");
         if (context.list<InputSpec, InputStatus>(INPUT_TYPE).some(i =>
           (i.status.route?.result?.topics.some(t => t.uid === previous.metadata.uid) || i.status.assess?.[previous.metadata.uid])
-          && Object.values(i.status.assess ?? {}).some(a => !a.completedAt))) throw new Error("Topic has pending Input; retry after assessment completes");
+          && Object.values(i.status.assess ?? {}).some(a => !a.completedAt))) throw new TopicDefaultBlocked("Topic has pending Input; retry after assessment completes");
       }
     }
     if (previous.spec.id !== current.spec.id || previous.spec.topicKey !== current.spec.topicKey) throw new Error("Topic identity is immutable");

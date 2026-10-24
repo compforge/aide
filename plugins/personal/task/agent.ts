@@ -47,7 +47,7 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
           const text = inputPrinter.describe(input);
           return result({ inputId, handling: input.status.handle[task.metadata.uid], text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } }),
-      tool({ name: "say", label: "Say", description: "Create an Output through this Task's Topic. Choose respondToInputId only for an assigned Channel Input; observations have no implicit reply path. Otherwise choose an independently known target within the mandate. Topic grouping never grants a destination. Success means accepted, not delivered; Host owns delivery and recovery.",
+      tool({ name: "say", label: "Say", description: "Create an Output through this Task's Topic. Choose respondToInputId only for an assigned Channel Input; observations have no implicit reply path. Otherwise choose an independently known target within the mandate. An unambiguous immediate Channel Input supplies the reply address, including its original group. If you cannot determine a target, omit both to contact Me through the configured default Channel. Topic grouping never grants a destination. Success means accepted, not delivered; Host owns delivery and recovery.",
         parameters: Type.Object({ text: Type.String({ minLength: 1 }), inputIds: Type.Optional(Type.Array(Type.String())),
           respondToInputId: Type.Optional(Type.String()), target: Type.Optional(Type.Union([
             Type.Object({ kind: Type.Literal("channel"), channelId: Type.String(), endpoint: Type.String() }),

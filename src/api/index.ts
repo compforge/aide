@@ -1,3 +1,5 @@
+import { ChannelSettings, ChannelSettingsChangeSchema, ChannelSettingsError } from "../channel/settings.ts";
+import { TopicDefaultBlocked } from "../../plugins/personal/topic/model.ts";
 import { createWebAssets } from "./assets.ts";
 import type { TopicItem } from "./types.ts";
 import { visibleOutput } from "../channel/output.ts";
@@ -64,7 +66,7 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 }
 
 /** Local channel bridge: accept messages/events and let adapters poll the durable outgoing log. */
-export function httpChannel(aide: WebService, log: Logger) {
+export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSettings) {
   const receive = bindChannelInput(CHANNELS.web, (input) => aide.receive(input));
   const assets = createWebAssets();
   return createServer(async (request, response) => {
@@ -92,6 +94,11 @@ export function httpChannel(aide: WebService, log: Logger) {
           "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         });
         response.end(asset.content); return;
+      }
+      if (url.pathname === "/channels/config" && (request.method === "GET" || request.method === "POST")) {
+        if (!settings) { json(response, 503, { error: "此运行实例未提供配置编辑能力。" }); return; }
+        json(response, 200, request.method === "GET" ? settings.snapshot() : settings.change(ChannelSettingsChangeSchema.parse(await body(request))));
+        return;
       }
       if (request.method === "GET" && url.pathname === "/health") {
         json(response, 200, { status: "ok", revision: process.env.AIDE_REVISION ?? "development" }); return;
@@ -192,7 +199,14 @@ export function httpChannel(aide: WebService, log: Logger) {
         const { topicId, enabled } = TopicDefaultSchema.parse(await body(request));
         const resource = aide.topics.resource(topicId);
         if (!resource || resource.metadata.deletionTimestamp) { json(response, 404, { error: "会话不存在。" }); return; }
-        await aide.setDefaultTopic(topicId, enabled);
+        try { await aide.setDefaultTopic(topicId, enabled); }
+        catch (error) {
+          if (error instanceof TopicDefaultBlocked) {
+            log.info({ topicId, reason: error.message }, "Default Topic selection rejected");
+            json(response, 409, { error: error.message.includes("children") ? "只有叶子主题可以设为默认，请选择没有子主题的主题。" : "主题正在处理输入或整理，请完成后重试。" }); return;
+          }
+          throw error;
+        }
         json(response, 200, { topicId, default: enabled });
       } else if (request.method === "POST" && url.pathname === "/topics/trigger") {
         const { topicId, enabled } = TopicTriggerSchema.parse(await body(request));
@@ -244,6 +258,7 @@ export function httpChannel(aide: WebService, log: Logger) {
         json(response, 404, { error: "Unknown route" });
       }
     } catch (error) {
+      if (error instanceof ChannelSettingsError) { json(response, error.status, { error: error.message }); return; }
       log.error({ err: error, path: request.url }, "Channel request failed");
       json(response, error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 500,
         { error: "Request failed; check the Aide log" });

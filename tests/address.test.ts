@@ -48,7 +48,7 @@ test("ChannelAddress extends Address and owns canonical endpoint encoding and ad
   const channel: ChannelAddress = larkAddress("app/one", "chat:二/%");
   const address: Address = channel;
   assert.deepEqual(parseAddress(address), channel);
-  assert.deepEqual(larkEndpoint(address), { appId: "app/one", chatId: "chat:二/%" });
+  assert.deepEqual(larkEndpoint(address), { appId: "app/one", receiveId: "chat:二/%", receiveIdType: "chat_id" });
   assert.equal(larkEndpoint(webAddress("topic")), undefined);
   for (const target of [
     { kind: "email", endpoint: "someone@example.com" },
@@ -125,7 +125,9 @@ test("say resolves direct, aggregate and proactive targets without guessing from
   assert.deepEqual(store.get("mixed")!.pendingInputIds, ["a", "b"]);
   await assert.rejects(store.say("mixed", undefined, "conflict", "run", { target: a, respondToInputId: "b" }), /not both/);
   await store.ensure("addressless");
-  await assert.rejects(store.say("addressless", undefined, "cannot infer"), /explicit target/);
+  await aide.persons.initialize();
+  const defaultReply = await store.say("addressless", undefined, "contact me");
+  assert.deepEqual(store.outputStore.get(defaultReply.outputId)!.spec.target, webAddress("addressless"));
   const proactive = await store.say("addressless", undefined, "proactive", undefined, { target: b });
   assert.deepEqual(store.outputStore.get(proactive.outputId)!.spec.target, b);
   assert.equal(store.outputStore.get(proactive.outputId)!.spec.inputIds, undefined);
@@ -246,7 +248,7 @@ test("Aide rejects unowned targets and diagnoses pending delivery after the Chan
   assert.deepEqual(receipt, { outputId: receipt.outputId, accepted: true });
   assert.equal(aide.outputStore.get(receipt.outputId)!.status.phase, "pending");
   await aide.close();
-  const restarted = new Aide(root, { ...options, larkAppId: undefined }, pino({ level: "silent" }));
+  const restarted = new Aide(root, { ...options, config: { ...options.config, channels: {} } }, pino({ level: "silent" }));
   try {
     await restarted.start();
     const output = restarted.outputStore.get(receipt.outputId)!;

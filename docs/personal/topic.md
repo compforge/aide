@@ -218,7 +218,9 @@ assess_input 只保存单次研判回执（最多 1000 字符）并原子交接 
 
 summaryChars 默认 4000、最高 16000；contextChars 默认 48000。近期依据仍受统一数量和字符预算约束。详情见[配置](../configuration.md#topic-消费策略)。
 
-## 默认联络处
+## 默认主题
+
+Default Topic 承接规则与 Route agent 无法明确归属的输入。主动联系 Me 由 Default Channel 决定，与默认主题独立。
 
 实例最多一个 Default。用户可以通过主题菜单的“设为默认主题”选择或切换 Default，Route 在没有 Default 时建立兜底主题。切换原子地取消旧标记并设置新标记；旧主题、Input、Output、认识和 Work 保留，不迁移到新 Default。当前 Default 不能直接取消或删除，可以先选择另一个主题。
 

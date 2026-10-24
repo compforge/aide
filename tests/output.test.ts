@@ -173,10 +173,10 @@ test("Reconfigured channels fail pending Outputs and preserve uncertain sends wi
   for (const id of ["pending", "sending", "retrying", "delivered"]) f.outputs.create("owner", id, { ...f.spec(), target: larkAddress("app", "chat") });
   f.outputs.begin("sending"); f.outputs.delivered("delivered");
   f.outputs.begin("retrying"); f.outputs.retry("retrying", "ambiguous send", new Date(0).toISOString());
-  const reopened = new OutputStore(f.root, target => assertChannelDelivery(target, "different-app"));
+  const reopened = new OutputStore(f.root, target => assertChannelDelivery(target, ["different-app"]));
   const logs: Record<string, unknown>[] = [];
   const log = pino({}, { write(line) { logs.push(JSON.parse(line)); } });
-  reconcileChannelOutputs(reopened, "different-app", log);
+  reconcileChannelOutputs(reopened, ["different-app"], log);
   assert.deepEqual(new Set(logs.map(record => record.outputId)), new Set(["pending", "sending", "retrying"]));
   assert.ok(logs.every(record => record.level === 50 && record.retryable === false && record.target && record.error));
   assert.equal(reopened.get("pending")!.status.phase, "failed");
@@ -186,7 +186,7 @@ test("Reconfigured channels fail pending Outputs and preserve uncertain sends wi
   assert.equal(reopened.get("retrying")!.status.phase, "uncertain");
   assert.equal(reopened.get("retrying")!.status.attempts, 1);
   assert.equal(reopened.get("delivered")!.status.phase, "delivered");
-  reconcileChannelOutputs(reopened, "different-app", log);
+  reconcileChannelOutputs(reopened, ["different-app"], log);
   assert.equal(logs.length, 3, "Terminal failures are not logged on every restart");
   assert.deepEqual(reopened.get("pending")!.spec.target, larkAddress("app", "chat"));
 });

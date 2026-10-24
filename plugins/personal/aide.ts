@@ -62,13 +62,13 @@ export class Personal {
   private readonly pending = new Set<Promise<unknown>>();
 
   constructor(private readonly options: { timezone: string; persons: Persons; me: Me; topic?: unknown; weave?: unknown }, private readonly log: Logger,
-    runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore }) {
+    runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore; contactMe?: ConstructorParameters<typeof TopicStore>[4] }) {
     this.core = runtime.runtime;
     this.connectors = runtime.connectors;
     this.plugins = this.core.plugins;
     const resources = new PluginResourceStore({ home: runtime.inputs.storage.home, pluginInstanceId: "personal" });
     const client = this.plugins.resourceClient("personal");
-    this.store = new Store(resources, client, new TopicStore(resources, client, runtime.inputs, runtime.outputs));
+    this.store = new Store(resources, client, new TopicStore(resources, client, runtime.inputs, runtime.outputs, runtime.contactMe));
   }
 
   /** @spec Persistent native tools resolve the live execution on each call, never capture a completed invocation's verbs. */

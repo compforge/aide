@@ -23,6 +23,9 @@ export type TopicDeletion = { deleted: true } | { deleted: false; reason: "missi
 export class TopicDeletionBlocked extends Error {
   constructor(readonly reason: TopicDeletionBlock, message: string) { super(message); }
 }
+export class TopicDefaultBlocked extends Error {
+  constructor(message: string) { super(message); }
+}
 export interface Topic extends TopicSpec {
   revision: number; createdAt: string; pendingInputIds: string[]; outputs: OutputView[];
 }

@@ -19,7 +19,8 @@ export const topicKey = digest;
 /** @spec Topic is a Personal Resource. Input facts are shared; consumption and replies belong to each Topic. */
 export class TopicStore {
   private readonly listeners = new Set<(topic: Topic) => void>();
-  constructor(readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly inputStore: InputStore, readonly outputStore = new OutputStore(resources.storage.home)) {
+  constructor(readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly inputStore: InputStore, readonly outputStore = new OutputStore(resources.storage.home),
+    private readonly contactMe?: (topicId: string) => Promise<{ target: Address; receivers: import("@compforge/aide-plugin").ResourceRef[] }>) {
 
   }
   changed(change: ResourceClientChange): void {
@@ -120,6 +121,7 @@ export class TopicStore {
     options: Omit<SayInput, "text"> = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { execution?: { id: string } | null }>): Promise<SayReceipt> {
     const initial = await this.ensure(topicId);
     const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
+    const previous = this.outputStore.get(id);
     if (options.respondToInputId && options.target) throw new Error("say must choose respondToInputId or target, not both");
     const inputIds = [...new Set([...(options.inputIds ?? (inputId ? [inputId] : [])), ...(options.respondToInputId ? [options.respondToInputId] : [])])];
     const attached = (id: string) => {
@@ -142,6 +144,11 @@ export class TopicStore {
       if (receivers === undefined && reply.sender) receivers = [reply.sender];
       if (!target) throw new Error(`Reply Input has no address: ${options.respondToInputId}`);
     }
+    // A repeated tool call keeps its admitted destination even if new immediate Inputs have arrived.
+    if (!target && previous) {
+      target = previous.spec.target;
+      receivers ??= previous.spec.receivers;
+    }
     if (!target) {
       const candidates = (inputIds.length ? inputIds : owner ? [] : this.pending(initial.metadata.uid).map(i => i.metadata.name)).map(attached)
         .filter((i) => i.spec.origin === "channel" && (i.spec.attention ?? "immediate") === "immediate");
@@ -151,9 +158,15 @@ export class TopicStore {
           throw new Error("say requires respondToInputId or target for Inputs with different or missing addresses");
         }
         target = first;
-      } else target = initial.spec.address;
+      } else if (this.contactMe) {
+        const destination = await this.contactMe(topicId);
+        target = destination.target;
+        if (receivers !== undefined && JSON.stringify(receivers) !== JSON.stringify(destination.receivers))
+          throw new Error("Default say contacts Me; other receivers require an explicit target");
+        receivers = destination.receivers;
+      }
     }
-    if (!target) throw new Error("say requires an explicit target; this Topic has no address");
+    if (!target) throw new Error("say requires an explicit target or a configured default Channel");
     for (let attempt = 0; ; attempt++) {
       const c = this.resource(topicId);
       if (!c || c.metadata.uid !== initial.metadata.uid) throw new Error("Output Topic was replaced");

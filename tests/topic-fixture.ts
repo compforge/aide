@@ -22,9 +22,9 @@ export class TopicStore extends PersonalTopics {
     const scope = { ...session, id: session.id ?? "test", home: session.home ?? session.dir };
     const resources = new PluginResourceStore({ home: scope.home, pluginInstanceId: "personal" });
     resources.storage.register("personal", personalDefinitions);
-    const outputStore = new OutputStore(scope.home, target => assertChannelDelivery(target, "app"));
+    const outputStore = new OutputStore(scope.home, target => assertChannelDelivery(target, ["app"]));
     const provider = personalAdmission(new InputStore(scope.home), outputStore);
-    super(resources, createResourceClient(resources, (change) => this.changed(change), undefined, provider), new InputStore(scope.home), outputStore);
+    super(resources, createResourceClient(resources, (change) => this.changed(change), undefined, provider), new InputStore(scope.home), outputStore, async id => ({ target: fixtureAddress(id), receivers: [] }));
     this.defaultTopicId = scope.id;
   }
 }

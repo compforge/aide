@@ -199,7 +199,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
       if (message.status.nextAttemptAt && Date.now() < Date.parse(message.status.nextAttemptAt)) continue;
       const endpoint = larkEndpoint(message.target);
       if (!endpoint) continue;
-      const { chatId } = endpoint;
+      const { receiveId, receiveIdType } = endpoint;
       await this.aide.outputSending?.(message.id);
       const parts = textParts(message.text);
       for (const [index, text] of parts.entries()) {
@@ -207,7 +207,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
         const id = this.deliveryId(message.id, index);
         if (this.state.delivered.includes(id)) continue;
         try {
-          await this.transport.send(chatId, text, id);
+          await this.transport.send(receiveId, text, id, receiveIdType);
         } catch (error) {
           this.retryAt = Date.now() + 10_000;
           const nextAttemptAt = new Date(this.retryAt).toISOString(), failure = larkSendFailure(error);
