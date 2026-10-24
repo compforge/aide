@@ -1,3 +1,4 @@
+import { LOCAL_ME, personRef } from "../plugins/personal/person/model.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -31,7 +32,7 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   const notification = await aide.topics.say("group-topic", undefined, "需要你关注", undefined, { idempotencyKey: "notice" });
   const original = aide.outputStore.get(notification.outputId)!;
   assert.deepEqual(original.spec.target, larkPersonAddress("cli_work", "ou_me"));
-  assert.equal(original.spec.receivers?.[0]?.uid, (await aide.persons.me())!.metadata.uid);
+  assert.equal(original.spec.receivers?.[0]?.uid, (await aide.persons.findIdentity({ provider: "lark", scope: "cli_work", id: "ou_me" }))!.metadata.uid);
   assert.equal(aide.topics.inputs().length, 0);
   const sent: Array<{ to: string; type?: string; text: string }> = [];
   const channel = new LarkChannel(home, "cli_work", aide, { start: async () => {}, close() {}, async send(to, text, _id, type) { sent.push({ to, text, type }); } }, log);
@@ -57,6 +58,9 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   assert.deepEqual(aide.outputStore.get(pending.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_me"));
   const fresh = await aide.topics.say("group-topic", undefined, "新通知");
   assert.deepEqual(aide.outputStore.get(fresh.outputId)!.spec.target, larkPersonAddress("cli_personal", "ou_personal"));
+  const personal = (await aide.persons.findIdentity({ provider: "lark", scope: "cli_personal", id: "ou_personal" }))!;
+  assert.deepEqual(aide.outputStore.get(fresh.outputId)!.spec.receivers, [personRef(personal)]);
+  assert.notEqual(personal.metadata.uid, original.spec.receivers![0]!.uid);
 });
 
 test("Me is optional for replies and must be resolved in the sending app's scope", async t => {
@@ -117,4 +121,48 @@ test("Channel page and API expose saved state without credentials", async t => {
   const post = (path: string, value: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
   const response = await post("/channels/config", { operation: "save", revision: settings.snapshot().revision, id: "work", channel: bot() });
   assert.equal(response.status, 200); assert.doesNotMatch(await response.text(), /private-secret/);
+});
+
+/** @case Marking an observed account as Me preserves its identity and understanding across application restarts. */
+test("Configuring existing Persons as Channel Me does not merge them or block startup", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-existing-me-"));
+  const cfg = config(); delete cfg.channels.work!.me; delete cfg.channels.personal!.me;
+  const options = fakeOptions({ async chief() { return "ok"; }, async execute() { throw new Error("No work"); } }, home);
+  let aide = new Aide(home, { ...options, config: cfg }, log);
+  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  await aide.start();
+  const identity = { provider: "lark", scope: "cli_work", id: "ou_me" };
+  const observed = await aide.persons.observe(identity, "李乾坤");
+  const person = await aide.persons.edit(observed.metadata.name, observed.metadata.uid, observed.metadata.resourceVersion, observed.spec, "用户修正的认识");
+  const web = (await aide.persons.findIdentity(LOCAL_ME))!;
+  const evidence = aide.topics.inputStore.submit("evidence", "earlier", { origin: "source", originId: "test", text: "此前的消息", sender: personRef(person) });
+  await aide.close();
+  aide = new Aide(home, { ...options, config: config() }, log);
+  await aide.start();
+  const marked = await aide.persons.read(person.metadata.name);
+  assert.equal(marked.isMe, true);
+  assert.deepEqual(marked.spec, person.spec);
+  assert.deepEqual(marked.status, person.status);
+  assert.equal(marked.metadata.uid, person.metadata.uid);
+  assert.equal(marked.metadata.resourceVersion, person.metadata.resourceVersion);
+  assert.deepEqual(aide.topics.inputStore.get(evidence.metadata.name)!.spec.sender, personRef(person));
+  assert.equal((await aide.persons.findIdentity(LOCAL_ME))!.metadata.uid, web.metadata.uid);
+  assert.deepEqual((await aide.persons.findIdentity(LOCAL_ME))!.spec.identities, [LOCAL_ME]);
+  const output = await aide.topics.say("notice", undefined, "默认联系我");
+  assert.deepEqual(aide.outputStore.get(output.outputId)!.spec.receivers, [personRef(person)]);
+  assert.deepEqual(aide.outputStore.get(output.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_me"));
+  await aide.close();
+  // Connector knowledge alone neither selects the default recipient nor marks this Channel's sender as Me.
+  const withoutMe = config(); delete withoutMe.channels.work!.me;
+  withoutMe.connectors.lark = { timeoutMs: 15000, me: [{ appId: "cli_work", openId: "ou_me" }] };
+  aide = new Aide(home, { ...options, config: withoutMe }, log);
+  await aide.start();
+  await assert.rejects(aide.topics.say("notice", undefined, "没有渠道 Me"), /configure channels.work.me/);
+  await aide.personal.receive({ id: "incoming", channelId: "lark", topicId: "message", text: "hello", source: larkAddress("cli_work", "oc_group"),
+    observation: { provider: "lark", accountId: "cli_work", sender: { id: "ou_me", type: "user" }, mentions: [] } });
+  const incoming = aide.topics.inputStore.list().find(i => i.spec.text === "hello")!;
+  assert.equal(incoming.spec.relation, undefined);
+  assert.equal(incoming.spec.sender!.uid, person.metadata.uid);
+  const reply = await aide.topics.say("message", undefined, "仍可回复原群", undefined, { respondToInputId: incoming.metadata.name });
+  assert.deepEqual(aide.outputStore.get(reply.outputId)!.spec.target, larkAddress("cli_work", "oc_group"));
 });

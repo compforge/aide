@@ -84,11 +84,16 @@ export class Aide {
     this.defaultHarnessConfig = Object.freeze({ ...options.defaultHarnessConfig });
     const config = options.config;
     const { sources } = parsePersonalConfig(config?.plugins.personal);
-    this.meMarks = { identities: [LOCAL_ME, ...(config?.connectors.lark?.me ?? []).map((i) => ({ provider: "lark", scope: i.appId, id: i.openId })),
-      ...Object.values(config?.channels ?? {}).flatMap(c => c.me ? [{ provider: "lark", scope: c.appId, id: c.me.openId }] : [])] };
+    const connectorMe = { identities: (config?.connectors.lark?.me ?? []).map(i => ({ provider: "lark", scope: i.appId, id: i.openId })) };
+    const channelMe = { identities: [LOCAL_ME, ...Object.values(config?.channels ?? {}).flatMap(c => c.me ? [{ provider: "lark", scope: c.appId, id: c.me.openId }] : [])] };
+    this.meMarks = { identities: [...channelMe.identities, ...connectorMe.identities] };
     this.meMarks.identities = [...new Map(this.meMarks.identities.map(identity => [JSON.stringify(identity), identity])).values()];
-    this.watches = requirementWatches(sources.requirements);
-    this.messageSource = messageWatch(sources.lark, config?.connectors.lark, this.meMarks);
+    const requirements = loadMeegoRequirementConfigs(config?.connectors ?? {});
+    this.watches = requirementWatches(sources.requirements).map(watch => {
+      const me = requirements.find(c => c.source === watch.source)?.me;
+      return { ...watch, ...(me ? { me } : {}) };
+    });
+    this.messageSource = messageWatch(sources.lark, config?.connectors.lark, connectorMe);
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
     this.environmentSources = environmentSources(sources.environments, environments);
     const storage = ResourceStorage.open(home);
@@ -99,7 +104,7 @@ export class Aide {
     this.unsubscribeOutputs = this.outputStore.subscribe(() => this.notify());
     this.inputs.storage.onRetentionError = (resource, error) => this.log.error({ err: error, kind: resource.kind, uid: resource.metadata.uid }, "Resource retention decision failed; preserved resource");
     this.unsubscribeResources = this.inputs.storage.subscribe((scope, resource) => { this.log.info({ scope, kind: resource.kind, uid: resource.metadata.uid }, "Resource reclaimed"); });
-    validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
+    validateWatchScopes(this.watches, requirements);
     this.log.info({
       meIdentities: this.meMarks.identities.length,
       environments: this.environmentSources.map(({ environment, namespace, intervalMs }) => ({ environment, namespace, intervalMs })),
@@ -140,7 +145,7 @@ export class Aide {
         },
       },
     });
-    this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, me: this.meMarks,
+    this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, channelMe,
       topic: parsePersonalConfig(config?.plugins.personal).topic, weave: parsePersonalConfig(config?.plugins.personal).weave }, log,
       { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore, contactMe: topicId => this.contactMe(topicId) });
     this.runtime.subscribe(() => this.notify());
@@ -209,17 +214,17 @@ export class Aide {
    * @link docs/channel/README.md
    */
   private async contactMe(topicId: string) {
-    const me = await this.persons.me();
-    if (!me) throw new Error("Default say requires Me identity configuration");
     const id = this.options.config?.defaultChannel ?? "web";
-    const receivers = [personRef(me)];
-    if (id === "web") return { target: webAddress(topicId), receivers };
-    const channel = this.options.config?.channels[id];
-    if (!channel?.enabled) throw new Error(`Default Channel is unavailable: ${id}`);
-    const identities = me.spec.identities.filter(i => i.provider === "lark" && i.scope === channel.appId);
-    const openId = channel.me?.openId ?? (identities.length === 1 ? identities[0]!.id : undefined);
-    if (!openId) throw new Error(`Default Channel ${id} needs Me's identity in app ${channel.appId}; configure channels.${id}.me`);
-    return { target: larkPersonAddress(channel.appId, openId), receivers };
+    let identity = LOCAL_ME;
+    if (id !== "web") {
+      const channel = this.options.config?.channels[id];
+      if (!channel?.enabled) throw new Error(`Default Channel is unavailable: ${id}`);
+      if (!channel.me) throw new Error(`Default Channel ${id} needs Me's identity in app ${channel.appId}; configure channels.${id}.me`);
+      identity = { provider: "lark", scope: channel.appId, id: channel.me.openId };
+    }
+    const me = await this.persons.findIdentity(identity);
+    if (!me) throw new Error(`Default Channel ${id} has no Person for its configured Me identity`);
+    return { target: id === "web" ? webAddress(topicId) : larkPersonAddress(identity.scope, identity.id), receivers: [personRef(me)] };
   }
 
   private async initializePeople() {
@@ -229,6 +234,7 @@ export class Aide {
       this.meMarks.identities.push({ provider: account.provider, scope: account.scope, id: config.me.userKey });
     }
     await this.persons.initialize();
+    this.log.info({ meIdentities: this.meMarks.identities.length, mePersons: (await this.persons.list()).filter(p => p.isMe).length }, "Me identities resolved without merging Persons");
   }
   start(): Promise<void> {
     return this.starting ??= Promise.resolve().then(async () => {

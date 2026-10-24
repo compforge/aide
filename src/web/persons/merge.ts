@@ -41,9 +41,7 @@ export class PersonMerge {
       const item = node('article', undefined, 'person-candidate');
       item.append(identityDetails(person));
       const button = node('button', '合并', 'secondary'); button.type = 'button';
-      button.disabled = person.isMe;
-      button.title = person.isMe ? '请在「我」的详情中合并其他人物' : '合并到当前人物';
-      if (person.isMe) item.setAttribute('aria-label', '我：请在「我」的详情中合并其他人物');
+      button.title = '合并到当前人物';
       button.onclick = () => { void this.open(person); };
       item.append(button); $('person-same-name-list').append(item);
     }
@@ -58,7 +56,6 @@ export class PersonMerge {
       const read = (p: PersonView) => request<PersonView>('/persons?' + new URLSearchParams({ id: p.metadata.name, uid: p.metadata.uid }));
       const [source, target] = await Promise.all([read(candidate), read(current)]);
       if (target.metadata.resourceVersion !== current.metadata.resourceVersion) throw new Error('当前人物资料已更新，请重新加载后合并。');
-      if (source.isMe) throw new Error('请保留「我」，在「我」的详情中合并其他人物。');
       this.source = source; this.target = target;
       for (const [id, person] of [['person-merge-source', source], ['person-merge-target', target]] as const) {
         $(id).replaceChildren(node('strong', person.spec.name + (person.isMe ? ' · 我' : '')), identityDetails(person), node('p', person.status.summary || '尚未积累认识。'));

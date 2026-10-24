@@ -59,10 +59,8 @@ test("Person commit validates preceding writes and rolls back data plus notifica
   const [created] = await client.commit([{ operation: "create", type: PERSON_TYPE, name: "one", spec: { name: "Alice", identities: [identity] }, status }]);
   assert.equal(changes, 1);
   assert.equal(("sessionId" in created!.metadata ? "unexpected" : undefined), undefined);
-  const me = (await persons.me())!;
-  await assert.rejects(client.commit([{ operation: "replace", resource: me, spec: { ...me.spec, identities: [] }, status }]), /cannot be removed/);
+  const me = (await persons.findIdentity(LOCAL_ME))!;
   await assert.rejects(client.patchStatus(me, { updatedBy: "unknown" } as unknown as PersonStatus));
-  await assert.rejects(client.delete(PERSON_TYPE, "me"), /Me cannot be deleted/);
   assert.equal((await persons.read("one")).metadata.deletionTimestamp, undefined);
 });
 

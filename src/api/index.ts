@@ -159,9 +159,6 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
           if (/version conflict|incarnation changed|Unknown Person|not found/.test(String(error))) {
             json(response, 409, { error: "人物资料已更新或删除。请取消并重新加载，再核对合并内容。" }); return;
           }
-          if (String(error).includes("Me cannot be deleted")) {
-            json(response, 409, { error: "请保留「我」，在「我」的详情中合并其他人物。" }); return;
-          }
           if (String(error).includes("into itself")) { json(response, 400, { error: "不能将人物合并到自己。" }); return; }
           if (/identity|identities/.test(String(error)) && !(error instanceof z.ZodError)) {
             json(response, 409, { error: "人物身份已变化，请重新加载后核对。" }); return;

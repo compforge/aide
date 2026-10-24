@@ -19,7 +19,7 @@ channels:
       openId: ou_yourOpenId      # 必须属于上面的机器人应用
 ```
 
-`defaultChannel` 引用启用的实例，或内置 `web`。应用 ID 在实例间唯一；停用当前默认实例前需选择其他默认渠道。Me 可从 Person 目录中该应用下的唯一身份解析，也可在此明确指定。不需要配置 chatId 或先发一条消息。
+`defaultChannel` 引用启用的实例，或内置 `web`。应用 ID 在实例间唯一；停用当前默认实例前需选择其他默认渠道。主动联系 Me 使用所选 Channel 自己的 me 配置，并按该身份查找 Person；不从 Connector 配置或其他 Person 账号推导。不需要配置 chatId 或先发一条消息。
 
 Web「接入」页编辑同一份配置，显示当前启动快照与已保存配置是否不同；保存后需重启。页面不返回 App Secret，编辑同一应用时留空保留，更换应用需重新填写。服务用版本校验拒绝过期编辑，原子替换 YAML 并保留无关字段及注释，文件权限为 600。实际连接和投递仍需检查运行日志及 Output 状态。
 
@@ -72,8 +72,8 @@ plugins:
       lark: {}
 ```
 
-Me 中的 appId 是 openId 的身份作用域，不指定 CLI 登录应用。多个标记归属同一个 Person。
-只使用机器人 Channel 时可仅配置 me，不配置 CLI appId/userId；启用消息 Source 则必须成对配置 CLI 账号。
+Me 中的 appId 是 openId 的身份作用域，不指定 CLI 登录应用。多个标记可以匹配不同 Person；每个身份复用已有档案，配置不会自动合并人物。
+只使用机器人 Channel 时在 channels.<名称>.me 配置本人身份，无需配置 CLI 账号；启用消息 Source 则必须成对配置 CLI appId/userId，connectors.lark.me 独立控制该 Connector 的本人识别。
 当前 CLI 读取实现使用用户授权，Me 标记不会扩大其访问范围或把用户授权切换为机器人授权。
 CLI 账号不必是本人；观察到执行账号的私信或 @ 不会自动归为本人收到。
 修改 Me 配置后重启，既有 Input 保留原关系；人物资料和认知在 Web Persons 编辑后立即生效。

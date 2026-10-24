@@ -1,3 +1,4 @@
+import { personContext } from "../agents/chief/person.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -89,12 +90,11 @@ test("Merge rolls back deletion and Watch notifications if the target fails vali
   assert.equal(f.changes(), before + 1);
 });
 
-test("Merge guards both incarnations, stale sources, self-merge and Me; retains bounded evidence", async t => {
-  const f = await setup(t), source = await f.create("source"), target = await f.create("target"), me = (await f.persons.me())!;
+test("Merge guards both incarnations, stale sources, self-merge; retains bounded evidence", async t => {
+  const f = await setup(t), source = await f.create("source"), target = await f.create("target"), me = (await f.persons.findIdentity(LOCAL_ME))!;
   await assert.rejects(f.persons.merge(version(source), version(source)), /itself/);
   await assert.rejects(f.persons.merge({ ...version(source), uid: "old-uid" }, version(target)), /version conflict/);
   await assert.rejects(f.persons.merge(version(source), { ...version(target), uid: "old-uid" }), /version conflict/);
-  await assert.rejects(f.persons.merge(version(me), version(target)), /Me cannot be deleted/);
   const updated = await f.client.patchStatus(source, { recent: Array.from({ length: 40 }, (_, i) => ({ at: new Date(1000 * i).toISOString(), text: "e".repeat(1000) })) });
   await assert.rejects(f.persons.merge(version(source), version(target)), /version conflict/);
   const merged = await f.persons.merge(version(updated), version(me), "用户确认后的认识");
@@ -129,4 +129,30 @@ test("Summary merge keeps differing contents, avoids exact duplication and does 
   assert.equal(mergePersonSummary("当前", ""), "当前");
   assert.equal(mergePersonSummary("相同", "相同"), "相同");
   assert.equal(mergePersonSummary("a".repeat(16000), "b".repeat(16000)).length, 32002);
+});
+
+/** @case Lark and WeChat identities identify the same human without requiring a merged Person; explicit merging transfers marks. */
+test("Me marks preserve separate platform Persons and follow an explicit merge", async t => {
+  const f = await setup(t);
+  const lark = { provider: "lark", scope: "cli_work", id: "ou_me" };
+  const wechat = { provider: "wechat", scope: "personal", id: "wx_me" };
+  const first = await f.persons.observe(lark, "李乾坤");
+  const second = await f.persons.observe(wechat, "李乾坤");
+  const marks = { identities: [LOCAL_ME, lark, wechat] };
+  const persons = openPersonCatalog(f.home, marks, log, () => {}).persons;
+  await persons.initialize();
+  assert.equal((await persons.list()).filter(p => p.isMe).length, 3);
+  await persons.summarize(first.metadata.name, first.metadata.uid, first.metadata.resourceVersion, "Lark preference " + "a".repeat(9000), "Explicit work preference");
+  await persons.summarize(second.metadata.name, second.metadata.uid, second.metadata.resourceVersion, "WeChat preference " + "b".repeat(9000), "Explicit personal preference");
+  const context = await personContext(persons);
+  assert.match(context, /Lark preference/); assert.match(context, /WeChat preference/);
+  assert.ok(context.length < 11000, "Additional Me profiles share the existing context text budget");
+  assert.equal((await persons.findIdentity(lark))!.metadata.uid, first.metadata.uid);
+  assert.equal((await persons.findIdentity(wechat))!.metadata.uid, second.metadata.uid);
+  const merged = await persons.merge(version(await persons.read(first.metadata.name)), version(await persons.read(second.metadata.name)), "保留双方确认的偏好");
+  assert.equal(merged.isMe, true);
+  assert.equal((await persons.findIdentity(lark))!.metadata.uid, second.metadata.uid);
+  await persons.initialize();
+  assert.equal((await persons.findIdentity(wechat))!.metadata.uid, second.metadata.uid);
+  assert.equal((await persons.list()).filter(p => p.isMe).length, 2);
 });

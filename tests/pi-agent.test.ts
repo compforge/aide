@@ -506,13 +506,13 @@ test("an entirely Aide-defined provider performs a real SDK request with explici
 
 test("Chief profiles people through tools and refreshes shared user corrections every turn", { timeout: 30_000 }, async (t) => {
   const writer = await setup(t, (_request, index) => index === 0
-    ? { tool: "read_person", args: { id: "me" } }
-    : index === 1 ? { tool: "summary_person", args: { id: "me", uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "Prefers concise Chinese answers; explicit statement, 2026-10-21.", recent: "Observed stated preference" } }
+    ? { tool: "read_person", args: { id: me.metadata.name } }
+    : index === 1 ? { tool: "summary_person", args: { id: me.metadata.name, uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "Prefers concise Chinese answers; explicit statement, 2026-10-21.", recent: "Observed stated preference" } }
     : { text: "已更新" }, "chief");
-  const me = (await writer.persons.me())!;
+  const me = (await writer.persons.findIdentity(LOCAL_ME))!;
   const turn = await writer.run("我更喜欢简洁中文，记一下。", "person-write");
   assert.equal(turn.stopReason, "end_turn");
-  assert.match((await writer.persons.me())!.status.summary, /concise Chinese/);
+  assert.match((await writer.persons.findIdentity(LOCAL_ME))!.status.summary, /concise Chinese/);
   assert.equal(existsSync(writer.personFile), false);
   const context = (request: Record<string, unknown>) => JSON.stringify(request.messages);
   await writer.run("现在呢", "person-refresh");
@@ -521,13 +521,13 @@ test("Chief profiles people through tools and refreshes shared user corrections 
   const reader = await setup(t, () => ({ text: "明白" }), "chief", undefined, writer.persons);
   await reader.run("新话题", "shared");
   assert.match(context(reader.requests.at(-1)!), /concise Chinese/);
-  const latest = (await writer.persons.me())!;
+  const latest = (await writer.persons.findIdentity(LOCAL_ME))!;
   await writer.persons.edit(latest.metadata.name, latest.metadata.uid, latest.metadata.resourceVersion,
     latest.spec, "Prefer detailed explanations for architecture.");
   await reader.run("最新偏好", "corrected");
   assert.match(context(reader.requests.at(-1)!), /detailed explanations/);
   assert.match(context(reader.requests.at(-1)!), /Explicit corrections take priority/);
-  assert.equal((await writer.persons.me())!.status.summary, "Prefer detailed explanations for architecture.");
+  assert.equal((await writer.persons.findIdentity(LOCAL_ME))!.status.summary, "Prefer detailed explanations for architecture.");
   assert.doesNotMatch(context(reader.requests.at(-1)!), /concise Chinese/);
   await reader.reopen();
   assert.equal(existsSync(reader.personFile), false);

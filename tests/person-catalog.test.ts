@@ -31,7 +31,7 @@ async function setup(t: TestContext) {
 
 test("Person catalog resolves identities across sessions, preserves profiles across restart and rejects identity collisions", async (t) => {
   const f = await setup(t);
-  const me = (await f.aide.persons.me())!;
+  const me = (await f.aide.persons.findIdentity(LOCAL_ME))!;
   assert.equal(me.spec.identities.some((i) => i.id === "ou_operator"), false);
   const identity = { provider: "lark", scope: "cli_bot", id: "ou_zhang" };
   const [first, again] = await Promise.all([f.aide.persons.observe(identity, "张三"), f.aide.persons.observe(identity, "张三")]);
@@ -55,13 +55,13 @@ test("Person catalog resolves identities across sessions, preserves profiles acr
 
 test("summary_person guards shared summary versions while Input retention remains independent", async (t) => {
   const f = await setup(t);
-  const me = (await f.aide.persons.me())!;
+  const me = (await f.aide.persons.findIdentity(LOCAL_ME))!;
   const edited = await f.aide.persons.edit(me.metadata.name, me.metadata.uid, me.metadata.resourceVersion,
     me.spec, "不要再把别人的观点当成我的偏好。");
   const tool = personTools(f.aide.persons).find((tool) => tool.name === "summary_person")!;
-  await assert.rejects(tool.execute("stale", { id: "me", uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "stale", recent: "Observed stated preference" }, undefined, undefined, {} as never), /version conflict/);
-  await tool.execute("fresh", { id: "me", uid: edited.metadata.uid, version: edited.metadata.resourceVersion, summary: edited.status.summary + "明确表达：关注机器人的可靠性。", recent: "Observed stated preference" }, undefined, undefined, {} as never);
-  const current = (await f.aide.persons.me())!;
+  await assert.rejects(tool.execute("stale", { id: me.metadata.name, uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "stale", recent: "Observed stated preference" }, undefined, undefined, {} as never), /version conflict/);
+  await tool.execute("fresh", { id: me.metadata.name, uid: edited.metadata.uid, version: edited.metadata.resourceVersion, summary: edited.status.summary + "明确表达：关注机器人的可靠性。", recent: "Observed stated preference" }, undefined, undefined, {} as never);
+  const current = (await f.aide.persons.findIdentity(LOCAL_ME))!;
   assert.deepEqual(current.spec.identities, me.spec.identities);
   assert.ok(current.status.summary.startsWith(edited.status.summary));
   const inputs = new InputStore(f.home);
@@ -71,7 +71,7 @@ test("summary_person guards shared summary versions while Input retention remain
   inputs.submit("test", "new", { origin: "source", originId: "test", text: "no sender" });
   assert.equal(inputs.get("old"), undefined);
   assert.equal(inputs.get("new")!.spec.sender, undefined);
-  assert.equal((await f.aide.persons.me())!.status.summary, current.status.summary);
+  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.status.summary, current.status.summary);
 });
 
 test("Execution identities do not identify Me; connector reads contribute people without attributing their views", async (t) => {
@@ -96,28 +96,28 @@ test("Web exposes two navigation pages and edits the same Person with conflict d
     const html = await (await fetch(base + path)).text();
     assert.match(html, /Topics/); assert.match(html, /Persons/);
   }
-  const me = (await f.aide.persons.me())!;
-  assert.equal((await (await fetch(base + "/persons")).json() as unknown[]).length, 1);
+  const me = (await f.aide.persons.findIdentity(LOCAL_ME))!;
+  assert.equal((await (await fetch(base + "/persons")).json() as unknown[]).length, 3);
   const body = { id: me.metadata.name, uid: me.metadata.uid, version: me.metadata.resourceVersion,
     spec: { ...me.spec, name: "张三" }, summary: "偏好简洁中文" };
   const save = () => fetch(base + "/persons/edit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   assert.equal((await save()).status, 200);
-  assert.equal((await f.aide.persons.me())!.status.summary, "偏好简洁中文");
+  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.status.summary, "偏好简洁中文");
   assert.equal((await save()).status, 409);
   const edit = async (summary?: string) => {
-    const current = (await f.aide.persons.me())!;
+    const current = (await f.aide.persons.findIdentity(LOCAL_ME))!;
     return fetch(base + "/persons/edit", { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: current.metadata.name, uid: current.metadata.uid, version: current.metadata.resourceVersion,
         spec: { ...current.spec, name: "张三（同事）" }, summary }) });
   };
   assert.equal((await edit()).status, 200);
-  assert.equal((await f.aide.persons.me())!.status.summary, "偏好简洁中文", "Identity-only edits preserve the summary");
+  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.status.summary, "偏好简洁中文", "Identity-only edits preserve the summary");
   assert.equal((await edit("x".repeat(16001))).status, 400);
-  assert.equal((await f.aide.persons.me())!.status.summary, "偏好简洁中文");
+  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.status.summary, "偏好简洁中文");
   assert.equal((await edit("")).status, 200);
-  assert.equal((await f.aide.persons.me())!.status.summary, "", "An explicit empty summary clears it");
+  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.status.summary, "", "An explicit empty summary clears it");
   assert.equal((await fetch(base + "/persons?id=missing")).status, 404);
-  const resource = await f.aide.catalog.client.get({ ...PERSON_TYPE, namespace: "v1", name: "me" });
+  const resource = await f.aide.catalog.client.get({ ...PERSON_TYPE, namespace: "v1", name: me.metadata.name });
   assert.equal(resource!.metadata.uid, me.metadata.uid);
 });
 

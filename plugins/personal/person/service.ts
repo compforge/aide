@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
 import { mergePersonSummary } from "./merge.ts";
-import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, type Me, type Person, type PersonIdentity, type PersonResource, type PersonStatus } from "./model.ts";
+import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, LOCAL_ME, type Me, type Person, type PersonIdentity, type PersonResource, type PersonStatus } from "./model.ts";
 
 /**
  * @spec Every topic resolves people in one catalog. Profiles contain no Input references.
@@ -19,19 +19,13 @@ export class Persons {
     if (!person || person.metadata.deletionTimestamp || (uid !== undefined && person.metadata.uid !== uid)) throw new Error(`Unknown Person: ${id}`);
     return { ...person, isMe: isMe(person.spec, this.marks) };
   }
-  async me() {
-    const matches = (await this.list()).filter((p) => p.isMe);
-    if (matches.length > 1) throw new Error("Me identities match multiple Persons; correct the identity bindings");
-    return matches[0];
-  }
+  /** @spec Me marks resolve existing identity owners; configuration never merges Person records.
+   * @link docs/personal/person.md#身份me-与关系
+   */
   async initialize() {
-    const current = await this.me();
-    if (!current) return this.resources.create(PERSON_TYPE, { name: "me",
-      spec: PersonSchema.parse({ name: "我", identities: this.marks.identities }), status: { ...this.status("connector"), summary: "", recent: [] } });
-    const identities = [...current.spec.identities];
-    for (const identity of this.marks.identities) if (!identities.some((i) => identityKey(i) === identityKey(identity))) identities.push(identity);
-    if (identities.length !== current.spec.identities.length) await this.resources.replace(current, { ...current.spec, identities }, { ...current.status, ...this.status("connector") });
-    return current;
+    for (const identity of this.marks.identities) {
+      await this.observe(identity, identityKey(identity) === identityKey(LOCAL_ME) ? "我" : undefined);
+    }
   }
   async observe(raw: PersonIdentity, name?: string): Promise<Readonly<PersonResource>> {
     const identity = IdentitySchema.parse(raw);
@@ -62,6 +56,9 @@ export class Persons {
   }
   async edit(id: string, uid: string, version: string, spec: Person, summary?: string) {
     const current = await this.version(id, uid, version);
+    const retained = new Set(spec.identities.map(identityKey));
+    if (current.spec.identities.some(i => this.marks.identities.some(mark => identityKey(mark) === identityKey(i)) && !retained.has(identityKey(i))))
+      throw new Error("A configured Me identity cannot be removed; change the Me configuration first or merge the Person");
     // @spec User corrections replace the same summary Chief reads; stale writers must reread and merge.
     const status = { ...current.status, ...this.status("user") };
     if (summary !== undefined && summary !== current.status.summary) {
@@ -86,7 +83,6 @@ export class Persons {
     const [from, into] = await Promise.all([
       this.version(source.id, source.uid, source.version), this.version(target.id, target.uid, target.version),
     ]);
-    if (from.isMe || from.metadata.name === "me") throw new Error("Me cannot be deleted; merge other Persons into Me");
     const identities = [...new Map([...into.spec.identities, ...from.spec.identities].map((i) => [identityKey(i), i])).values()];
     const status = this.status("user");
     const [, merged] = await this.resources.commit([
@@ -101,7 +97,7 @@ export class Persons {
     const person = merged as PersonResource;
     return { ...person, isMe: isMe(person.spec, this.marks) };
   }
-  private async findIdentity(identity: PersonIdentity) {
+  async findIdentity(identity: PersonIdentity) {
     return (await this.list()).find((p) => p.spec.identities.some((i) => identityKey(i) === identityKey(identity)));
   }
   private async version(id: string, uid: string, version: string) {
