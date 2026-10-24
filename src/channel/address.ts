@@ -13,6 +13,14 @@ export function larkAddress(appId: string, chatId: string): ChannelAddress {
   if (!appId || !chatId) throw new Error("Lark address requires appId and chatId");
   return { kind: "channel", channelId: "lark", endpoint: [appId, chatId].map(encodeURIComponent).join("/") };
 }
+/**
+ * @spec Lark topics share app/chat identity across Channel and Source; group threads have their own Conversation.
+ * @link docs/connector/lark-messages.md#conversation-创建与归属
+ */
+export function larkConversationId(appId: string, chatId: string, threadId?: string): string {
+  if (!appId || !chatId) throw new Error("Lark Conversation requires appId and chatId");
+  return `lark:${appId}:${chatId}${threadId ? `:thread:${threadId}` : ""}`;
+}
 export function larkEndpoint(address: Address): { appId: string; chatId: string } | undefined {
   if (!isChannelAddress(address) || address.channelId !== "lark") return;
   const parts = address.endpoint.split("/");

@@ -287,6 +287,7 @@ test("Lark upgrades persisted legacy panels only once when execution continues",
   const path = join(f.home, "channels", readdirSync(join(f.home, "channels"))[0]!);
   const state = JSON.parse(readFileSync(path, "utf8"));
   delete state.cards.input.layout; delete state.cards.input.previews;
+  state.chats = ["oc_chat"];
   writeFileSync(path, JSON.stringify(state));
   await f.reopen();
   f.view({ phase: "running", think: "继续处理" }); await f.channel.deliver();

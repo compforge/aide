@@ -1,4 +1,6 @@
 import { deliver } from "../plugins/personal/route/delivery.ts";
+import { routeByRules } from "../plugins/personal/route/rules.ts";
+import { larkAddress } from "../src/channel/address.ts";
 import { nextInput } from "../plugins/personal/loop.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import assert from "node:assert/strict";
@@ -56,6 +58,38 @@ test("rules route only to matched conversations; original Input can fan out with
   assert.equal(aide.conversations.inputs("inbox").length, 0);
   for (const id of ["a", "b"]) assert.ok(aide.conversations.input("followup", id));
   assert.deepEqual(aide.conversations.inputStore.list().filter(i => !i.status.route?.completedAt).map(i => i.metadata.name), []);
+});
+
+test("Lark Source creates and reuses explicit topics without model routing or a default reply address", async t => {
+  const { aide } = setup(t);
+  const ctx = context(aide);
+  const fallback = await aide.conversations.ensure("default");
+  const original = await aide.conversations.submit("old", source("historical input"));
+  await deliver(ctx, original, [fallback.metadata], "old routing decision");
+  const topics = ["lark:cli_app:oc_group", "lark:cli_app:oc_group:thread:omt_a",
+    "lark:cli_app:oc_group:thread:omt_b", "lark:cli_app:oc_other", "lark:cli_other:oc_group"];
+  for (const [index, sessionId] of topics.entries()) {
+    const input = await aide.conversations.submit(`topic-${index}`, { origin: "source", originId: "personal.lark",
+      sessionId, source: larkAddress(index === 4 ? "cli_other" : "cli_app", index === 3 ? "oc_other" : "oc_group"),
+      text: "发布策略讨论", observation: { originalInputId: "old" } });
+    assert.deepEqual(await Promise.all([routeByRules(ctx, input), routeByRules(ctx, input)]), [true, true]);
+    const c = aide.conversations.resource(sessionId)!;
+    assert.equal(c.spec.name, "发布策略讨论");
+    assert.equal(c.spec.address, undefined);
+    assert.deepEqual(aide.conversations.inputStore.get(input.metadata.name)!.status.route!.result!.conversations.map(c => c.uid), [c.metadata.uid]);
+  }
+  const sessionId = topics[1]!;
+  const first = aide.conversations.resource(sessionId)!;
+  const followup = await aide.conversations.submit("followup", { origin: "source", originId: "personal.lark",
+    sessionId, text: "另一成员的更新", observation: { originalInputId: "old", userId: "ou_another" } });
+  await Promise.all([routeByRules(ctx, followup), routeByRules(ctx, followup)]);
+  assert.equal(aide.conversations.resource(sessionId)!.metadata.uid, first.metadata.uid);
+  assert.equal(aide.conversations.inputs(sessionId).length, 2);
+  assert.equal(aide.conversations.inputs("default").length, 1);
+  await ctx.resources.delete(CONVERSATION_TYPE, first.metadata.name);
+  const pending = await aide.conversations.submit("deleting", { origin: "source", originId: "personal.lark", sessionId, text: "wait" });
+  await assert.rejects(routeByRules(ctx, pending), /Conversation unavailable/);
+  assert.equal(aide.conversations.inputStore.get("deleting")!.status.route, undefined);
 });
 
 test("semantic routing fans out, fallback goes only to Default, and finished inputs leave the global queue", async t => {

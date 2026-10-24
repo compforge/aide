@@ -9,6 +9,7 @@ import { Aide } from "../src/app.ts";
 import type { OutputView } from "../src/output.ts";
 import { fixtureOutput } from "./output-fixture.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
+import type { Incoming } from "../src/channel/message.ts";
 import { larkConfig, larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark/client.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
@@ -171,6 +172,58 @@ test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats a
     "lark:cli_group:oc_group", "lark:cli_group:oc_other_group", "lark:cli_group:oc_direct",
   ]));
   assert.equal(aide.works().length, 0);
+});
+
+test("Lark persists thread topics while cards and failure notices retain the real chat destination", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-threads-"));
+  const received: Incoming[] = [], queried: string[] = [], cardChats: string[] = [];
+  const { transport, sent } = fakeTransport({ openId: "ou_bot", name: "Aide" });
+  transport.cards = {
+    async create() { return "card"; }, async send(chatId) { cardChats.push(chatId); },
+    async content() {}, async patch() {}, async settings() {}, async update() {},
+  };
+  const aide = { async receive(input: Incoming) {
+    received.push(input);
+    if (input.id === "failed") throw new Error("intake failed");
+    return { inputId: input.id, at: new Date().toISOString() };
+  }, outputs: () => [] };
+  const reader = (id: string) => {
+    queried.push(id);
+    return [{ id, phase: "queued" as const, think: "", content: "", messageIds: [], overflow: false }];
+  };
+  let channel = new LarkChannel(home, "cli_app", aide, transport, log, reader);
+  t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
+  const group = (id: string, threadId?: string, messageType = "text") => ({
+    sender: { sender_type: "user", sender_id: { open_id: id === "a2" ? "ou_another" : "ou_sender" } },
+    message: { ...event(id, "@_user_1 check", "oc_group").message, chat_type: "group", thread_id: threadId,
+      message_type: messageType, mentions: [{ key: "@_user_1", id: { open_id: "ou_bot" } }] },
+  });
+  await Promise.all([channel.receive(group("a", "omt_a")), channel.receive(group("a", "omt_a"))]);
+  await channel.receive(group("a2", "omt_a"));
+  await channel.receive(group("plain"));
+  await channel.receive(group("image", "omt_b", "image"));
+  await channel.receive(group("failed", "omt_a"));
+  const dm = event("dm", "hello", "oc_dm");
+  await channel.receive({ ...dm, message: { ...dm.message, thread_id: "omt_ignored" } });
+  await channel.close();
+  channel = new LarkChannel(home, "cli_app", aide, transport, log, reader);
+  await channel.dispatch(); await channel.deliver();
+  assert.deepEqual(received.map(i => i.sessionId), [
+    "lark:cli_app:oc_group:thread:omt_a", "lark:cli_app:oc_group:thread:omt_a",
+    "lark:cli_app:oc_group", "lark:cli_app:oc_group:thread:omt_a", "lark:cli_app:oc_dm",
+  ]);
+  assert.equal(received[0]!.observation!.threadId, "omt_a");
+  assert.deepEqual(new Set(queried), new Set([
+    "lark:cli_app:oc_group:thread:omt_a", "lark:cli_app:oc_group:thread:omt_b",
+    "lark:cli_app:oc_group", "lark:cli_app:oc_dm",
+  ]));
+  assert.deepEqual(cardChats.sort(), ["oc_dm", "oc_group", "oc_group", "oc_group"]);
+  assert.equal(sent.length, 2);
+  assert.ok(sent.every(n => n.chatId === "oc_group"));
+  await channel.close();
+  channel = new LarkChannel(home, "cli_app", aide, transport, log, reader);
+  await channel.receive(group("a", "omt_a")); await channel.dispatch(); await channel.deliver();
+  assert.equal(received.length, 5); assert.equal(sent.length, 2); assert.equal(cardChats.length, 4);
 });
 
 test("Lark accepts nullable permission-restricted user IDs and still requires the bot open ID", async (t) => {
