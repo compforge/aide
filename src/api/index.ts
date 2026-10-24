@@ -1,5 +1,4 @@
 import { ChannelSettings, ChannelSettingsChangeSchema, ChannelSettingsError } from "../channel/settings.ts";
-import { TopicDefaultBlocked } from "../../plugins/personal/topic/model.ts";
 import { createWebAssets } from "./assets.ts";
 import type { TopicItem } from "./types.ts";
 import { visibleOutput } from "../channel/output.ts";
@@ -20,8 +19,6 @@ import { inputList, inputDetail } from "./inputs.ts";
 const EventSchema = IncomingSchema.omit({ text: true, channelId: true, source: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
-
-const TopicDefaultSchema = z.object({ topicId: z.string().min(1), enabled: z.boolean() }).strict();
 
 const TopicTriggerSchema = z.object({ topicId: z.string().min(1) }).extend({ enabled: z.boolean() }).strict();
 
@@ -195,19 +192,6 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         const input = IncomingSchema.omit({ channelId: true, observation: true, source: true, topicKey: true }).extend({ topicId: z.string().min(1) }).parse(await body(request));
         const topicId = webTopicLocator.locate(input).id;
         json(response, 200, await receive({ ...input, topicId, source: webAddress(topicId) }));
-      } else if (request.method === "POST" && url.pathname === "/topics/default") {
-        const { topicId, enabled } = TopicDefaultSchema.parse(await body(request));
-        const resource = aide.topics.resource(topicId);
-        if (!resource || resource.metadata.deletionTimestamp) { json(response, 404, { error: "会话不存在。" }); return; }
-        try { await aide.setDefaultTopic(topicId, enabled); }
-        catch (error) {
-          if (error instanceof TopicDefaultBlocked) {
-            log.info({ topicId, reason: error.message }, "Default Topic selection rejected");
-            json(response, 409, { error: error.message.includes("children") ? "只有叶子主题可以设为默认，请选择没有子主题的主题。" : "主题正在处理输入或整理，请完成后重试。" }); return;
-          }
-          throw error;
-        }
-        json(response, 200, { topicId, default: enabled });
       } else if (request.method === "POST" && url.pathname === "/topics/trigger") {
         const { topicId, enabled } = TopicTriggerSchema.parse(await body(request));
         if (!aide.topics.get(topicId)) {

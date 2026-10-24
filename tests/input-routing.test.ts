@@ -54,8 +54,7 @@ test("Restart retries rules without replaying completed topic work", async (t) =
   const a = aide.personal, b = aide.personal, source = aide.personal;
   await a.topics.ensure("a");
   const cb = await b.topics.ensure("b");
-  await aide.setDefaultTopic("a", true);
-  const ca = a.topics.resource("a")!;
+  await aide.topics.ensure("default");
   const fact = await source.topics.submit("event", { origin: "source", originId: "personal.environments", topicId: "b", text: "recover fanout" });
 
   await aide.close();

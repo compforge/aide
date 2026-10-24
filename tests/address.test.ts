@@ -65,7 +65,7 @@ test("Channel creation captures its first address, bypasses Default and subseque
   const { aide } = setup(t);
   const inbox = webAddress("inbox"), group = larkAddress("app", "group"), elsewhere = larkAddress("app", "elsewhere");
   await aide.receive({ id: "hello", channelId: "web", topicId: "inbox", text: "hello", source: inbox });
-  await aide.settled(); await aide.setDefaultTopic("inbox", true);
+  await aide.settled(); await aide.topics.ensure("default");
   await aide.receive({ id: "first", channelId: "lark", topicId: "opaque-topic", text: "first", source: group });
   await aide.settled();
   const topic = aide.personal.topics;

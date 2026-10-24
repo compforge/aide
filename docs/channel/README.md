@@ -9,7 +9,7 @@ Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、提供
 
 ## 默认沟通渠道
 
-Default Topic 决定无法明确归类的 Input 放在哪里；Default Channel 决定 Aide 主动联系 Me 时使用哪个沟通实例。两者独立，不因切换默认主题而改变通知出口。
+Default Topic 是系统维护的输入兜底处，接收无法明确归类的 Input；用户配置 Default Channel，决定 Aide 主动联系 Me 时使用哪个沟通实例。两者独立，Topic 归属不决定默认通知出口。
 
 默认 say 的语义是 `defaultChannel.send(aide, me, content)`。from 由实例的机器人凭证确定，to 来自 Me 在该应用下的身份；具体平台地址属于 Channel 内部。无需用户再配置默认地址，也不要求此前聊过。Lark 可以直接向 open_id 发送；Web 将内容发布在产出 Topic 的页面中。
 

@@ -5,6 +5,7 @@ import type { OutputView } from "../../../src/output.ts";
 import type { LoopExecution } from "../loop.ts";
 import type { TopicTrigger } from "./trigger.ts";
 export const TOPIC_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Topic" } as const;
+export const DEFAULT_TOPIC_ID = "default";
 export interface TopicSpec { address?: Address; id: string; name?: string; default?: boolean; trigger?: TopicTrigger;
   topicKey?: string; parentRef?: ResourceRef & { uid: string } }
 export interface TopicStatus extends ResourceContext {
@@ -22,9 +23,6 @@ export type TopicDeletion = { deleted: true } | { deleted: false; reason: "missi
 /** The transactional validator owns deletion rules; callers can present expected refusals without duplicating them. */
 export class TopicDeletionBlocked extends Error {
   constructor(readonly reason: TopicDeletionBlock, message: string) { super(message); }
-}
-export class TopicDefaultBlocked extends Error {
-  constructor(message: string) { super(message); }
 }
 export interface Topic extends TopicSpec {
   revision: number; createdAt: string; pendingInputIds: string[]; outputs: OutputView[];

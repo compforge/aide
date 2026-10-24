@@ -1,3 +1,4 @@
+import { ensureDefaultTopic } from "./default.ts";
 import { topicSubtree } from "./tree.ts";
 import { resourceRef } from "../input/state.ts";
 import { parseAddress, sameAddress } from "../../../src/address.ts";
@@ -8,7 +9,7 @@ import type { SayInput, SayReceipt } from "../output/model.ts";
 import { InputStore } from "../input/store.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import type { ResourceClientChange } from "../../../src/host/plugin/resource/client.ts";
-import { TOPIC_TYPE, initialTopicName, type Topic, type TopicResource, type TopicInput, type TopicRun, type TopicSpec, type TopicStatus } from "./model.ts";
+import { DEFAULT_TOPIC_ID, TOPIC_TYPE, initialTopicName, type Topic, type TopicResource, type TopicInput, type TopicRun, type TopicSpec, type TopicStatus } from "./model.ts";
 import { outputView, type OutputDraft, type OutputView } from "../../../src/output.ts";
 import { OutputStore } from "../output/store.ts";
 import { outputWrite } from "../output.ts";
@@ -40,6 +41,7 @@ export class TopicStore {
   get(id: string): Topic | undefined { const r = this.resource(id); return r && this.project(r); }
   /** @spec The creating Channel supplies its address and first-input name before asynchronous routing; later attachment cannot replace either. */
   async ensure(id: string, address?: Address, name?: string): Promise<TopicResource> {
+    if (id === DEFAULT_TOPIC_ID) return ensureDefaultTopic(this.client);
     const previous = this.resources.find<TopicSpec, TopicStatus>(TOPIC_TYPE, topicKey(id));
     if (previous?.metadata.deletionTimestamp) throw new Error("Topic is being deleted; retry after deletion completes");
     if (previous) return previous;

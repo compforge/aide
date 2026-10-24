@@ -1,3 +1,4 @@
+import { digest } from "../chief-model.ts";
 import { WEAVE_TYPE, type WeaveStatus } from "../weave/model.ts";
 import { AgentStatusSchema } from "../session.ts";
 import { ContextFields } from "../context.ts";
@@ -5,14 +6,18 @@ import { z } from "zod";
 import { TopicTriggerSchema } from "./trigger.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { AddressSchema } from "../../../src/address.ts";
-import { TOPIC_TYPE, TopicDeletionBlocked, TopicDefaultBlocked, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
+import { TOPIC_TYPE, TopicDeletionBlocked, DEFAULT_TOPIC_ID, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
 import { LoopExecutionSchema } from "../loop.ts";
 import { ResourceRefSchema } from "../topic/ref.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { WORK_TYPES, type WorkResource } from "../resources.ts";
-import { topicPath, understandingVersion } from "./tree.ts";
-/** @spec User selection and Route fallback cannot establish two live Default topics. */
+import { understandingVersion } from "./tree.ts";
+/** @spec Default is a system-owned singleton; ordinary Topics cannot adopt or relinquish that role. */
 function validateDefault(resource: Readonly<TopicResource>, context: ResourceValidationContext) {
+  const systemDefault = !!resource.spec.default;
+  if (systemDefault !== (resource.spec.id === DEFAULT_TOPIC_ID) || systemDefault !== (resource.metadata.name === digest(DEFAULT_TOPIC_ID)))
+    throw new Error("Default Topic identity is reserved for the system");
+  if (systemDefault && (resource.spec.address || resource.spec.topicKey)) throw new Error("Default Topic cannot have a source address or key");
   const all = context.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
   if (resource.spec.default && resource.spec.parentRef) throw new Error("Default Topic must remain a root");
   if (resource.spec.topicKey && !resource.metadata.deletionTimestamp && all.some(c => c.metadata.uid !== resource.metadata.uid && !c.metadata.deletionTimestamp && c.spec.topicKey === resource.spec.topicKey))
@@ -39,19 +44,6 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       lastInputAt: z.string().datetime().optional(), weaveLock: z.string().nullable().optional(), absorbed: z.record(z.string(), z.string()).optional(),
       nextTriggerAt: z.string().nullable().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
   validator: { create: validateDefault, update: (previous, current, context) => {
-    // @spec Selecting a grouped leaf as Default detaches it only after its previous processing scope is quiet.
-    // @link docs/personal/topic.md#默认主题
-    if (current.spec.default && !previous.spec.default) {
-      const all = context.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-      if (all.some(t => t.spec.parentRef?.uid === current.metadata.uid)) throw new TopicDefaultBlocked("Default Topic cannot have children; select a leaf Topic");
-      if (previous.status.weaveLock || current.status.weaveLock) throw new TopicDefaultBlocked("Topic is being organized; retry after Weave completes");
-      if (previous.spec.parentRef) {
-        if (topicPath(all, previous).some(t => t.status.execution || t.status.weaveLock)) throw new TopicDefaultBlocked("Topic processing is active; retry after it completes");
-        if (context.list<InputSpec, InputStatus>(INPUT_TYPE).some(i =>
-          (i.status.route?.result?.topics.some(t => t.uid === previous.metadata.uid) || i.status.assess?.[previous.metadata.uid])
-          && Object.values(i.status.assess ?? {}).some(a => !a.completedAt))) throw new TopicDefaultBlocked("Topic has pending Input; retry after assessment completes");
-      }
-    }
     if (previous.spec.id !== current.spec.id || previous.spec.topicKey !== current.spec.topicKey) throw new Error("Topic identity is immutable");
     if (current.spec.parentRef && current.status.execution) throw new Error("Only a root Topic can execute");
     if (current.status.weaveLock && current.status.execution?.id !== previous.status.execution?.id && current.status.execution) throw new Error("Weave has frozen Topic intake");

@@ -109,7 +109,6 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   const initialReads = reads;
   await aide.receive(fixtureIncoming({ channelId: "web", topicId: "other", id: "hello", text: "hello" })); await aide.settled();
   assert.equal(reads, initialReads, "Opening another Session must not duplicate the observer");
-  await aide.setDefaultTopic("other", true);
   current = snapshot("B");
   const poll = async () => {
     const scope = aide.personal;
@@ -137,7 +136,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();
   assert.equal(aide.personal.topics.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
-  assert.equal(prompts.length, 2, "Channel and observation each call Chief once; Default-only routing needs no Agent");
+  assert.equal(prompts.length, 2, "Channel and observation each call Chief once");
 });
 
 const pod = (uid: string, restarts = 0, imageId = "sha256:a") => ({ name: `api-${uid}`, uid, phase: "Running", ready: true, terminating: false,

@@ -129,8 +129,6 @@ test("Web reports Topic hierarchy, absorption, Default and Weave deletion refusa
   child = await resources.replace(child, { ...child.spec, parentRef: resourceRef(parent) }, { ...child.status, summary: "未吸收的事实" });
   const frozen = topics.resource("frozen")!;
   await resources.patchStatus(frozen, { weaveLock: "pending-group" });
-  const permanent = topics.resource("default")!;
-  await resources.replace(permanent, { ...permanent.spec, default: true }, permanent.status);
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
   for (const [id, expected] of [["parent", /子主题/], ["child", /尚未吸收/], ["frozen", /正在整理/], ["default", /默认主题不能删除/]] as const) {

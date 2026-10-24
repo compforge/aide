@@ -8,7 +8,7 @@ import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { ConfigSchema, loadConfig } from "../src/config.ts";
 import { ChannelSettings, ChannelSettingsError } from "../src/channel/settings.ts";
-import { larkAddress, larkPersonAddress, webAddress } from "../src/channel/address.ts";
+import { larkAddress, larkPersonAddress } from "../src/channel/address.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
 import { httpChannel } from "../src/api/index.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -39,8 +39,7 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   assert.deepEqual(sent, [{ to: "ou_me", type: "open_id", text: "需要你关注" }]);
   assert.equal(aide.outputStore.get(notification.outputId)!.status.phase, "delivered");
   const pending = await aide.topics.say("group-topic", undefined, "尚未投递", undefined, { idempotencyKey: "pending" });
-  await aide.setDefaultTopic("group-topic", true);
-  await aide.topics.ensure("new-default"); await aide.setDefaultTopic("new-default", true);
+  await aide.topics.ensure("default");
   await seedInput(aide.topics, "mention", { topicId: "group-topic", origin: "channel", originId: "lark", source: group, text: "@Aide 回复我" });
   assert.deepEqual(await aide.topics.say("group-topic", undefined, "尚未投递", undefined, { idempotencyKey: "pending" }), pending);
   assert.deepEqual(aide.outputStore.get(pending.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_me"));
@@ -104,7 +103,7 @@ test("Channel settings redact secrets, detect stale edits and preserve unrelated
   assert.equal(view.channels[0]!.enabled, false);
 });
 
-test("Channel page and API expose saved state without credentials; parent Default selection returns a domain conflict", async t => {
+test("Channel page and API expose saved state without credentials", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-channel-api-"));
   const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("No work"); } }, home), log);
   const settings = new ChannelSettings(join(home, "config.yaml"), ConfigSchema.parse({}), log);
@@ -118,9 +117,4 @@ test("Channel page and API expose saved state without credentials; parent Defaul
   const post = (path: string, value: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
   const response = await post("/channels/config", { operation: "save", revision: settings.snapshot().revision, id: "work", channel: bot() });
   assert.equal(response.status, 200); assert.doesNotMatch(await response.text(), /private-secret/);
-  const parent = await aide.topics.ensure("parent", webAddress("parent")), child = await aide.topics.ensure("child");
-  await aide.runtime.plugins.resourceClient("personal").replace(child, { ...child.spec, parentRef: resourceRef(parent) }, child.status);
-  const rejected = await post("/topics/default", { topicId: "parent", enabled: true });
-  assert.equal(rejected.status, 409); assert.match((await rejected.json() as { error: string }).error, /叶子主题/);
-  assert.equal(aide.topics.resource("parent")!.spec.default, undefined);
 });

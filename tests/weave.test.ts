@@ -114,7 +114,6 @@ test("Topic expiry checks child absorption, releases source key, and never reviv
   assert.notEqual(f.aide.topics.byKey("a")!.metadata.uid, a.metadata.uid);
   assert.equal(f.aide.topics.byKey("a")!.spec.parentRef, undefined);
   const fallback = await f.aide.topics.ensure("default");
-  await f.resources.replace(fallback, { ...fallback.spec, default: true }, fallback.status);
   await assert.rejects(f.group(f.aide.topics.resource("default")!, b), /non-Default roots/);
   await assert.rejects(f.resources.delete(TOPIC_TYPE, fallback.metadata.name), /cannot be deleted/);
 });

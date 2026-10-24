@@ -402,7 +402,7 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   let channel = channelFor();
   t.after(async () => { await channel.close(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.personal.topics.ensure("inbox", fixtureAddress("inbox"));
-  await aide.setDefaultTopic("inbox", true);
+  await aide.topics.ensure("default");
   // Persist a registered bot chat before observing user messages, but defer processing its request.
   await channel.receive({ sender: { sender_type: "user" }, message: {
     message_id: "om_channel", chat_id: "oc_group", chat_type: "group", message_type: "text",
@@ -450,7 +450,7 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   assert.equal(channelInput.spec.origin, "channel");
   assert.equal(channelInput.spec.topicKey, "lark:cli_app:oc_group");
   assert.equal(aide.personal.topics.input(channelInput.metadata.name, "inbox"), undefined);
-  const channelPrompt = prompts.find((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).topicId === groupId)!;
+  const channelPrompt = prompts.filter(prompt => prompt.includes("Activation: ")).find((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).topicId === groupId)!;
   assert.ok(channelPrompt);
   const groupUid = store.resource(groupId)!.metadata.uid;
   const previous = searches;

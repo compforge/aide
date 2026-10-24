@@ -79,7 +79,6 @@ export class Aide {
   get persons() { return this.catalog.persons; }
   private starting?: Promise<void>;
   private closed = false;
-  private defaultSelection: Promise<void> = Promise.resolve();
 
   constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
     this.defaultHarnessConfig = Object.freeze({ ...options.defaultHarnessConfig });
@@ -197,36 +196,6 @@ export class Aide {
     return result;
   }
 
-  /** @spec Default selection atomically replaces the marker and detaches a selected leaf without moving its facts or work.
-   * @link docs/personal/topic.md#默认主题
-   */
-  setDefaultTopic(topicId: string, enabled: boolean): Promise<void> {
-    const change = this.defaultSelection.then(async () => {
-      for (let attempt = 0; ; attempt++) {
-        const resource = this.topics.resource(topicId);
-        if (!resource || resource.metadata.deletionTimestamp) throw new Error("Topic does not exist");
-        if (resource.spec.default === enabled) return;
-        if (!enabled && resource.spec.default) throw new Error("Select another default Topic instead of clearing the default");
-        const { parentRef, ...rootSpec } = resource.spec;
-        const previous = enabled ? this.topics.list().filter(c => c.default && c.id !== topicId)
-          .map(c => this.topics.resource(c.id)!) : [];
-        try {
-          await this.runtime.plugins.resourceClient("personal").commit([
-            ...previous.map(c => ({ operation: "replace" as const, resource: c, spec: { ...c.spec, default: false }, status: c.status })),
-            { operation: "replace", resource, spec: { ...(enabled ? rootSpec : resource.spec), default: enabled }, status: resource.status },
-          ]);
-          this.log.info({ topicId, enabled, previousTopicIds: previous.map(c => c.spec.id), detachedFromUid: enabled ? parentRef?.uid : undefined }, "Default topic configured");
-          break;
-        } catch (error) {
-          if (attempt >= 8 || !/version conflict|Default Topic already exists/.test(String(error))) throw error;
-        }
-      }
-      this.notify();
-    });
-    this.defaultSelection = change.catch((err) => { this.log.error({ err, topicId }, "Default topic selection failed"); });
-    return change;
-  }
-
   async setTopicTrigger(topicId: string, enabled: boolean) {
     const scope = this.personal;
     if (!this.topics.get(topicId)) throw new Error("Topic does not exist");
@@ -280,7 +249,6 @@ export class Aide {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    await this.defaultSelection;
     await this.personal.close();
     this.listeners.clear();
     this.unsubscribeResources();
