@@ -34,7 +34,7 @@ test("Concurrent Chief assessments preserve each other and atomically establish 
   }
   await Promise.all([[a, wa], [b, wb]].map(async ([owner, work]) => {
     const c = owner as typeof a, w = work as typeof wa;
-    await assessInput(resources, c, c.spec.id, { inputId: "fact", conversationSummary: `Assessed by ${c.spec.id}`, summary: `Assessed by ${c.spec.id}`, workRequests: [{ workUid: w.uid!, request: { action: "context" } }] });
+    await assessInput(resources, c, c.spec.id, { inputId: "fact", summary: `Assessed by ${c.spec.id}`, workRequests: [{ workUid: w.uid!, request: { action: "context" } }] });
   }));
   const result = aide.conversations.inputStore.get("fact")!;
   assert.ok(result.status.assess![a.metadata.uid]!.completedAt);
@@ -43,7 +43,7 @@ test("Concurrent Chief assessments preserve each other and atomically establish 
   assert.equal(InputDefinition.retention!.releasedAt(result), undefined);
   assert.deepEqual(aide.conversations.pending(a.metadata.uid), []);
   assert.equal("pendingInputIds" in aide.conversations.resource("a")!.status, false);
-  await assessInput(resources, a, "a", { inputId: "fact", conversationSummary: "repeat", summary: "repeat" });
+  await assessInput(resources, a, "a", { inputId: "fact", summary: "repeat" });
   assert.deepEqual(aide.conversations.inputStore.get("fact"), result);
 });
 
@@ -58,10 +58,10 @@ test("Failed handoff rolls back assessment, Work assignments and summary; foreig
   const before = aide.conversations.inputStore.get("fact")!;
   const handlesBefore = aide.conversations.inputStore.query("handlePending", w.uid!);
   const conversationBefore = aide.conversations.resource("me")!.status;
-  await assert.rejects(assessInput(resources, c, "live", { inputId: "fact", conversationSummary: "bad", summary: "bad", workRequests: [{ workUid: foreign.uid!, request: {} }] }), /Work unavailable/);
+  await assert.rejects(assessInput(resources, c, "live", { inputId: "fact", summary: "bad", workRequests: [{ workUid: foreign.uid!, request: {} }] }), /Work unavailable/);
   const failing = { ...resources, commit: (writes: Parameters<typeof resources.commit>[0]) => resources.commit([...writes,
     { operation: "create", type: { ...INPUT_TYPE, kind: "Unregistered" }, name: "failure", spec: {}, status: {} }]) };
-  await assert.rejects(assessInput(failing, c, "live", { inputId: "fact", conversationSummary: "handoff", summary: "handoff", workRequests: [{ workUid: w.uid!, request: {} }] }), /Unknown resource/);
+  await assert.rejects(assessInput(failing, c, "live", { inputId: "fact", summary: "handoff", workRequests: [{ workUid: w.uid!, request: {} }] }), /Unknown resource/);
   assert.deepEqual(aide.conversations.inputStore.get("fact"), before);
   assert.deepEqual(aide.conversations.resource("me")!.status, conversationBefore);
   assert.deepEqual(aide.conversations.inputStore.query("handlePending", w.uid!), handlesBefore);
@@ -81,7 +81,7 @@ test("Input protects every unfinished stage; deleting its Work ends handling and
   await assert.rejects(second(), /capacity/);
   await resources.patchStatus(aide.conversations.resource("me")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
   await admit(resources, "one", c.metadata.uid, "live");
-  await assessInput(resources, c, "live", { inputId: "one", conversationSummary: "Delegated", summary: "Delegated", workRequests: [{ workUid: w.uid!, request: {} }] });
+  await assessInput(resources, c, "live", { inputId: "one", summary: "Delegated", workRequests: [{ workUid: w.uid!, request: {} }] });
   await assert.rejects(second(), /capacity/);
   const target = (await resources.list({ apiVersion: INPUT_TYPE.apiVersion, kind: "Task" }))[0]!;
   await resources.delete(target, target.metadata.name);
@@ -112,4 +112,43 @@ test("Conversation review replaces cumulative understanding, bounds recent and r
   await assert.rejects(summarizeConversation(resources, current, "wrong-execution", { version: current.metadata.resourceVersion, summary: "stale", recent: "stale" }, 4000), /no longer active/);
   await assert.rejects(summarizeConversation(resources, current, "review", { version: current.metadata.resourceVersion, summary: "x".repeat(4001), recent: "oversize" }, 4000), /exceeds/);
   assert.deepEqual(aide.conversations.resource("me")!.status, current.status);
+});
+
+/** @case Repeated silent receipts do not evict important context or imply an unresolved anomaly recovered. */
+test("quiet assessments retain topic understanding; explicit synthesis can update summary without recent", async t => {
+  const { summarizeConversation } = await import("../plugins/personal/conversation/state.ts");
+  const { aide, resources, context } = setup(t);
+  const c = await aide.conversations.ensure("me");
+  const recent = [{ at: new Date().toISOString(), text: "User asked to investigate recurrent OOM" }];
+  await resources.patchStatus(c, { execution: { id: "live", startedAt: new Date().toISOString() }, summary: "OOM unresolved; investigation delegated", recent });
+  for (let i = 0; i < 45; i++) {
+    const fact = await aide.conversations.submit(`quiet-${i}`, { origin: "source", originId: "fixture", text: "same-image Pod churn" });
+    await deliver(context, fact, [c.metadata], "same subject");
+    await admit(resources, fact.metadata.name, c.metadata.uid, "live");
+    await assessInput(resources, c, "live", { inputId: fact.metadata.name, summary: "No new action" });
+    assert.ok(aide.conversations.inputStore.get(fact.metadata.name)!.status.assess![c.metadata.uid]!.completedAt);
+  }
+  const current = aide.conversations.resource("me")!;
+  assert.equal(current.status.summary, "OOM unresolved; investigation delegated");
+  assert.deepEqual(current.status.recent, recent);
+  const receipt = await summarizeConversation(resources, current, "live", { version: current.metadata.resourceVersion, summary: "OOM cause confirmed; fix pending" }, 4000);
+  assert.deepEqual(Object.keys(receipt), ["version"], "Do not echo all context back into model history");
+  assert.deepEqual(aide.conversations.resource("me")!.status.recent, recent);
+  assert.equal(aide.conversations.resource("me")!.status.summary, "OOM cause confirmed; fix pending");
+});
+
+test("assessment cannot complete across an execution switch during its commit", async t => {
+  const { aide, resources, context } = setup(t);
+  const c = await aide.conversations.ensure("me");
+  const fact = await aide.conversations.submit("switch", { origin: "source", originId: "fixture", text: "observation" });
+  await deliver(context, fact, [c.metadata], "topic");
+  await resources.patchStatus(aide.conversations.resource("me")!, { execution: { id: "old", startedAt: new Date().toISOString() } });
+  await admit(resources, "switch", c.metadata.uid, "old");
+  let switched = false;
+  const racing = { ...resources, commit: async (writes: Parameters<typeof resources.commit>[0]) => {
+    if (!switched) { switched = true; await resources.patchStatus(aide.conversations.resource("me")!, { execution: { id: "new", startedAt: new Date().toISOString() } }); }
+    return resources.commit(writes);
+  } };
+  await assert.rejects(assessInput(racing, c, "old", { inputId: "switch", summary: "quiet" }), /no longer active/);
+  assert.equal(aide.conversations.inputStore.get("switch")!.status.assess![c.metadata.uid]!.completedAt, undefined);
 });

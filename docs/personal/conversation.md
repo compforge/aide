@@ -12,9 +12,9 @@ Conversation 的 status.agent 保存所选 Harness 与原生 sessionId，Operato
 
 ## 研判与上下文
 
-assess_input 明确完成单条输入的研判：本次 summary 写入 Input 回执和 Conversation.recent，合并旧认识后的 conversationSummary 替换 Conversation.summary，并原子建立必要的 Work handle。say 独立创建 Output，不代替研判回执。
+assess_input 明确完成单条输入的研判：最多 1000 字符的处理摘要只写入 Input 回执，并原子建立必要的 Work handle。它不改写 Conversation.summary / recent。say 独立创建 Output，不代替研判回执。
 
-summary 描述话题、相关委托、关键结论和未决问题；recent 保留近期依据。Chief 通过 read_input 获取最新上下文与版本，更新冲突时重读后合并。没有 Input 的定时回顾使用 summarize_conversation 更新认识，不虚构消费记录。原生上下文承接连续推理，跨话题记忆由 [Chief](chief.md#上下文与记忆) 管理。
+summary 描述话题、相关委托、关键结论和未决问题；recent 保留有意义的近期依据。出现新认识时，Chief 通过 summarize_conversation 更新 summary，可选提供一条 recent；省略 recent 保留原有依据。Chief 通过 read_input 获取最新上下文与版本，更新冲突时重读后合并。有 Input 的研判和无 Input 的定时回顾都可以更新认识，但静默处理完成本身不构成更新理由。持续异常保留到有证据解决，恶化或恢复时更新同一问题；不逐轮复述 Pod 轮转、重启计数及未变化的现场。原生上下文承接连续推理，跨话题记忆由 [Chief](chief.md#上下文与记忆) 管理。
 
 预览与摘要预算见 [Conversation 配置](../configuration.md#conversation-消费策略)。Input 的完整内容可按需读取；近期窗口的裁剪不代表工作目标已经完成。共同语义见 [有界认识与近期依据](README.md#有界认识与近期依据)。
 

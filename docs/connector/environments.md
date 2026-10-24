@@ -78,6 +78,17 @@ Workload 身份是环境、namespace、kind、name；UID 表达同名资源的�
 镜像、generation、副本数、Pod UID、容器重启数、最近退出原因、运行状态和就绪状态参与比较；资源列表顺序、resourceVersion 和时间戳不产生变化。
 只保存这些运行事实，不把完整 manifest、环境变量或 Secret 内容写入 Input。一次轮询的所有变化合成一个 `workload.changed` 观察，包含各 Workload 的 before/after；新增只有 after，移除只有 before。
 
+Input.text 提供紧凑的事实差异，完整 before/after 保存在 Input.observation。正文聚合 Pod 新增/移除、就绪副本、容器状态和退出原因；重启增量只比较同一 Pod UID 下的同名容器，新增容器已有的重启数与计数回退分别说明。镜像声明与实际运行镜像标识集合分别比较，声明未变不能据此断言运行镜像未变。超出展示预算的变化明确提示从证据读取。
+
+例如同镜像 Pod 轮转且就绪数稳定时，正文只需表达：
+
+```text
+prod / app：1 项 Workload 变化。
+- Deployment api：镜像声明未变；就绪副本 3/3（未变）；Pod 新增 1、移除 1
+```
+
+Route / Chief 默认读取这份正文，具体 Pod、镜像标识和完整现场按需用 read_input 核对。Source 保留变化事实，不替 Chief 判断其业务价值，也不因常规变化而丢弃 Input。Chief 的静默处理只需简短研判回执；值得关注的异常、用户委托和未决问题进入话题 summary，未解决的问题继续保留，恶化或恢复时更新，不把同一现场逐轮写进 recent 和长期记忆。这减少上下文材料与重复整理，不减少有变化时的模型调用次数。
+
 首次成功采样静默建立基线，不向 Chief 提交历史变化。后续变化先保存 Input，再推进基线；若在二者之间中断，先用已保存 Input 恢复那次基线，再继续观察。
 输入身份包含观察序号，因此 A→B→A→B 会保留两次 A→B。读取失败、分页不完整或 Pod 归属采样不完整时保留基线，记录错误并按间隔重试，不把采集失败当作资源删除。
 

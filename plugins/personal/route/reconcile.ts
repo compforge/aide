@@ -5,7 +5,7 @@ import { ROUTE_NAME, ROUTE_TYPE, ROUTE_HARNESS, type RouteResource } from "./mod
 import { routeByRules } from "./rules.ts";
 import { routed, type RoutingInput } from "./delivery.ts";
 import { finalizeExecution, nextInput, retryDelay, runInput, submitPending } from "../loop.ts";
-import { inputPrinter } from "../input/printer.ts";
+import { inputPreview } from "../input/prompt.ts";
 import { routePolicy } from "./config.ts";
 const request = () => [{ name: ROUTE_NAME, namespace: "v1" as const }];
 function watches(): Watch[] {
@@ -39,7 +39,7 @@ export async function reconcileRouteAgent(context: PluginContext, execution: Rec
   if (!input) return retryDelay(context.resources, route);
   if (routed(input)) return;
   if (await routeByRules(context, input)) return { requeueAfterMs: 1 };
-  const prompt = `Route this input. Use the current candidate Conversation context; list_conversations supplies remaining candidate pages; use route_input to commit its destinations. Earlier context may be stale.\n${JSON.stringify({ inputId: input.metadata.name })}\n${inputPrinter.describe(input).slice(0, routePolicy(context.instance.config.route).contextChars)}\nUse read_input for complete evidence.`;
+  const prompt = `Route this input. Use the current candidate Conversation context; list_conversations supplies remaining candidate pages; use route_input to commit its destinations. Earlier context may be stale.\n${JSON.stringify({ inputId: input.metadata.name })}\n${inputPreview(input, routePolicy(context.instance.config.route).contextChars)}\nUse read_input for complete evidence.`;
   await runInput(context, execution.withContext({ inputId: input.metadata.name }), route, ROUTE_HARNESS, prompt, input.metadata.name);
   return { requeueAfterMs: 1 };
 }

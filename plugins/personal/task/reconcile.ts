@@ -1,3 +1,4 @@
+import { inputPreview } from "../input/prompt.ts";
 import { assignmentWatch, cancelAssignments, resourceRef, pendingInputs } from "../input/state.ts";
 import type { PluginContext, ReconcileContext, Watch } from "@compforge/aide-plugin";
 import { TASK_TYPE, type TaskSpec, type TaskStatus, type TaskResource } from "./model.ts";
@@ -46,6 +47,7 @@ export async function reconcileTask(context: PluginContext, execution: Reconcile
     task = await context.resources.patchStatus(task, { status: "running", nextAt: null, idleSince: null, agentStoppedAt: null });
     const prompt = `Use the current resource context for your entrusted work; read_task, read_input and read_conv supply missing or truncated evidence. Verify existing effects before handling failed inputs.
 Activation: ${JSON.stringify({ taskId: task.metadata.name, conversationId: task.spec.conversationId, inputId: input?.metadata.name, kind: input ? "input" : "timer" })}
+${input ? inputPreview(input) : ""}
 Report handled inputs and progress using report_task; use say for useful user communication.`;
     await runInput(context, execution.withContext({ conversationId: task.spec.conversationId, taskId: task.metadata.name }), task, "task", prompt, input?.metadata.name);
     return { requeueAfterMs: 1 };

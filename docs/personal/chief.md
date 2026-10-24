@@ -36,8 +36,8 @@ Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 - read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。
 - say 产生独立 Output；答复是新的 Input，不挂起 Harness 等待。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
-- assess_input 原子保存单条研判结果、更新累计 conversationSummary，并建立 Work handle；不值得通知的观察可以静默完成。
-- summarize_conversation 用于无 Input 的回顾，按 read_input 返回的版本更新 summary / recent，不伪造输入消费。
+- assess_input 原子保存单条 Input 的简短研判回执，并建立 Work handle；不改写 Conversation.summary / recent，不值得通知的观察可以静默完成。
+- summarize_conversation 在话题目标、异常、委托、关键结论或未决问题发生有意义的变化时，按 read_input 返回的版本替换 summary；recent 可选。输入研判与定时回顾都可使用，不要求每次处理都更新。
 
 提示词表达判断策略，工具边界保证持久化与会话范围。say 提问只产生 Output；用户是否回答不阻塞其它输入，已有 Work 的 waiting 状态表达具体工作的等待。
 
@@ -68,7 +68,7 @@ user：Input 3
 assistant / tool：结合新进展回答或交接，避免重复创建工作
 ```
 
-当前状态从 CRD 投影为请求前缀，不追加进历史，也不参与历史压缩；重启后重新读取。输入保留内容、人物、地址与证据。工具回执和对话作为执行历史，由 Pi 管理压缩；Person 与 Conversation 的 summary 仍由各自资源维护。用户修正、Work 状态与外部事实不能被历史摘要覆盖，状态内容也不扩大操作权限。
+当前状态从 CRD 投影为请求前缀，不追加进历史，也不参与历史压缩；重启后重新读取。自动输入预览保留内容、人物和地址，完整 observation 留在 Input，通过 read_input 按需读取；不要例行展开所有证据。工具回执和对话作为执行历史，由 Pi 管理压缩；Person 与 Conversation 的 summary 仍由各自资源维护。用户修正、Work 状态与外部事实不能被历史摘要覆盖，状态内容也不扩大操作权限。
 
 常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整认识仍保存在资源中。
 
@@ -85,7 +85,7 @@ sent 提供本人表达的线索，仍需辨别引用与代发；received 和 ob
 
 人物资料的唯一存储来源是 Person CRD，Web Persons 提供编辑入口。人物维护使用专用工具，普通文件工具和 Hermes 不承担这份资料的维护。
 
-连续上下文由 Pi SDK 管理历史、压缩与恢复。新输入只提供本次预览，普通输入 followup，immediate 使用 steer。assess_input 保存有界近期研判摘要和回执；长期知识通过 Hermes 保留，Task / Routine 保存工作状态。原生会话或调用结束不能代替业务确认。
+连续上下文由 Pi SDK 管理历史、压缩与恢复。新输入只提供本次预览，普通输入 followup，immediate 使用 steer。assess_input 只在 Input 保存简短研判回执；summarize_conversation 独立维护话题认识。常规静默观察不复制进 summary、recent 或长期记忆，持续异常与已有委托仍应保留，恶化或恢复时更新；长期知识通过 Hermes 保留，Task / Routine 保存工作状态。原生会话或调用结束不能代替业务确认。
 
 Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Conversation 摘要用于控制话题窗口，与 Hermes 的长期记忆维护分别管理；Personal 不直接调用模型做记忆维护。
 
