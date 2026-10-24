@@ -1,3 +1,4 @@
+import { Background as ConversationBackground } from "../plugins/personal/conversation/background.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -44,12 +45,13 @@ test("A say request for information finishes processing; the answer is a new Inp
   assert.equal(aide.personal.core.executions.approvals().length, 0);
   await aide.close();
   aide = new Aide(home, options, pino({ level: "silent" }));
+  assert.match(new ConversationBackground(aide.personal.store, aide.conversations.resource("me"), "me").text(), /请提供目标环境。/);
   await aide.receive(fixtureIncoming({ channelId: "web", id: "answer", sessionId: "me", text: "test 环境" })); await aide.settled();
   const after = aide.invocations().at(-1)!;
   assert.notEqual(after.invocationId, before.invocationId);
   assert.deepEqual(aide.personal.conversations.get("me")!.pendingInputIds, []);
   const material = JSON.parse(prompts.at(-1)!.split("Activation: ")[1]!.split("\n")[0]!);
-  assert.equal(material.summary, "请提供目标环境。");
+  assert.equal(material.summary, undefined, "Current understanding is supplied by the context projection, not copied into each Input");
   assert.equal(material.inputs.length, 1, "Only the new Input is replayed; prior understanding is bounded context");
   assert.match(prompts.at(-1)!, /test 环境/);
   await aide.receive(first); await aide.settled();

@@ -198,3 +198,24 @@ test("Default fallback creation and user selection preserve one global Default",
   assert.deepEqual(await defaultDestination(ctx), { name: chosen.metadata.name, uid: chosen.metadata.uid });
   await assert.rejects(ctx.resources.create(CONVERSATION_TYPE, { name: "duplicate-default", spec: { id: "duplicate", default: true }, status: { receipts: [] } }), /Default Conversation already exists/);
 });
+
+/** @case No topic candidates means no semantic choice, including future arrivals and deleting topics. */
+test("only Default routes repeated source inputs without invoking Route; channel creation still takes precedence", async t => {
+  let calls = 0;
+  const { aide } = setup(t, { async execute() { throw new Error("No Work"); }, async route() { calls++; throw new Error("No routing model needed"); } });
+  await aide.conversations.ensure("inbox");
+  await aide.setDefaultConversation("inbox", true);
+  const deleting = await aide.conversations.ensure("deleting");
+  await context(aide).resources.delete(CONVERSATION_TYPE, deleting.metadata.name);
+  await aide.start();
+  for (let i = 0; i < 3; i++) {
+    await aide.conversations.submit(`observation-${i}`, source("unknown topic", "unknown"));
+    await aide.settled();
+    assert.ok(aide.conversations.input(`observation-${i}`, "inbox"));
+  }
+  await aide.conversations.submit("new-chat", { origin: "channel", originId: "web", text: "new topic", sessionId: "chat" });
+  await aide.settled();
+  assert.ok(aide.conversations.input("new-chat", "chat"));
+  assert.equal(aide.conversations.input("new-chat", "inbox"), undefined);
+  assert.equal(calls, 0);
+});

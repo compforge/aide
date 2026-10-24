@@ -46,6 +46,34 @@ Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。
 人物认知由 Personal 的 Person CRD 承载，Hermes 提供其它通用记忆与检索。
 
+### 上下文组织与优化
+
+Chief 的直接回答、研判和工作交接都依赖当前话题与已有委托。当前按以下消息结构组织上下文；业务前缀的刷新与消息机制见 [Route 上下文组织](route.md#上下文组织与优化)。
+
+Chief 的话题材料由 [Conversation Background](../../plugins/personal/conversation/background.ts) 提供，包含当前会话的 summary、recent 和相关 Work；Chief 装配时再结合最新 Me 认识，形成最终 `Background`。每次模型请求前通过 `background()` 构造快照，Harness 调用 `text()` 生成 custom → user 前缀。读取最新资源与文本化快照分开，通用契约见 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
+
+```text
+system：Chief 的固定职责、沟通规则和授权边界
+custom → user：Background.text()，当前业务背景 v1
+  conversation：当前话题 summary、有限 recent
+  work：所属 Conversation 的 Task / Routine UID、目标和状态
+  me：服务对象的当前认识与明确修正
+user：Input 1
+assistant / tool：按需直接处理或 say，assess_input 确认研判
+user：Input 2                         # 状态没变，保持相同背景前缀
+assistant / tool：处理与回执
+后续请求的 custom → user 前缀：变化部分替换为 v2
+  work：已有 Task 的新进展；其它背景不变
+user：Input 3
+assistant / tool：结合新进展回答或交接，避免重复创建工作
+```
+
+当前状态从 CRD 投影为请求前缀，不追加进历史，也不参与历史压缩；重启后重新读取。输入保留内容、人物、地址与证据。工具回执和对话作为执行历史，由 Pi 管理压缩；Person 与 Conversation 的 summary 仍由各自资源维护。用户修正、Work 状态与外部事实不能被历史摘要覆盖，状态内容也不扩大操作权限。
+
+常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整认识仍保存在资源中。
+
+效果优化优先检查模型是否看到了最新委托、是否重复查询或重复建 Work、是否为简单回答装入了过多材料。调整背景内容、刷新时机、Input 预览与按需读取边界，并结合回答准确性、提醒价值、上下文 token 和缓存表现验证；不靠不断叠加提示词弥补过期或重复上下文。
+
 ### 人物认知
 
 Chief 每轮读取共享目录中的 Me，将姓名、用户明确修正和精简后的当前认识放入上下文。其它人物通过 list_persons / read_person 按需查询；工具读取完整资料和最新版本。

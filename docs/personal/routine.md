@@ -14,6 +14,7 @@ Routine.spec.trigger 声明 cron 或事件订阅。cron 到期可以在没有 In
 | --- | --- |
 | read_routine | 读取职责、触发条件、当前状态、累计认识和近期依据 |
 | read_input | 列出待处理 Input，或分页读取分派给当前 Routine 的材料 |
+| list_work | 分页查看同会话 Task / Routine 概况，不获得其它 Work 的操作权限 |
 | read_conv | 读取所属 Conversation 背景，不扩大委托授权 |
 | say | 创建用户可见 Output，关联 Routine UID、execution 和可选 Input |
 | report_routine | 原子提交进展、当前轮次状态和明确列出的 Input 回执 |
@@ -29,6 +30,35 @@ report_routine 的 inputIds 必须是已接纳、已处理的输入，与一次�
 finalText 只保留为执行记录，不解析为业务结果、不自动发送给用户。没有回执的已接纳 Input 或没有报告的定时执行进入 uncertain，保留错误和执行关联。明确恢复前先核对已有副作用，不自动重放。暂停期间收到报告仍保留 paused。
 
 say 和 report_routine 分别持久化。Output 投递失败只重试投递，不重复本轮工作。新发现若需要独立目标，可通过 say 提出后续 Task，由 Chief 安排；Routine 不自行扩展职责。
+
+## 上下文组织与优化
+
+Routine 长期接收观察与触发，不能把每轮已处理事实都保留为常驻背景。当前采用以下消息结构组织上下文；常驻背景使用 Pi custom → user 投影，通用语义见 [Route 上下文组织](route.md#上下文组织与优化)。
+
+Routine 使用本资源目录下的 [Background](../../plugins/personal/routine/background.ts)，保存自身职责、trigger、累计认识、所属会话和相关 Work 的当前快照。`background()` 在每次模型请求前重新构造它，包括定时唤醒和运行中的后续输入；Harness 调用 `Background.text()` 生成 custom → user 前缀。`text()` 只负责文本化，读取最新资源发生在构造阶段。通用契约见 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
+
+```text
+system：Routine 的固定职责、执行约束和报告契约
+custom → user：Background.text()，当前业务背景 v1
+  objective：自身职责、trigger、状态、summary 与有限 recent
+  conversation：所属话题背景
+  work：同一 Conversation 的相关 Task / Routine 概况
+user：Input 1 或本轮定时触发说明
+assistant / tool：判断变化、按需 say、report_routine 提交本轮结果
+后续请求的 custom → user 前缀：objective 认识 v2  # 已提交的新结论或跟进状态
+user：Input 2
+assistant / tool：结合当前认识处理新观察
+user：Input 3                         # 状态没变，背景前缀不变
+assistant / tool：处理与回执
+```
+
+定时触发说明不需要虚构 Input。职责和累计认识常驻，逐条观察、操作与回执进入可压缩的执行历史；新变化按需替换对应背景部分。相关 Work 信息帮助识别已有跟进，不扩大 Routine 职责，也不要求每轮重新查询全部工作。
+
+业务背景是请求投影，不追加到原生 transcript，也不参与历史压缩；恢复后从 CRD 重建。
+
+常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整认识仍保存在资源中。
+
+优化重点是能否识别值得推进或告知的变化、避免重复提醒和重复操作，并在长期运行后仍保留未决问题。结合有效通知与漏报、重复工具调用、上下文增长、压缩频率和每轮耗时，调整观察预览、当前状态与历史材料的拼接结构；模型成本下降不能以漏掉重要变化为代价。
 
 ## 会话与生命周期
 

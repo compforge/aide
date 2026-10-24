@@ -135,5 +135,5 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();
   assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
-  assert.equal(prompts.length, 3, "Channel, semantic routing and observation handling each call their Agent once");
+  assert.equal(prompts.length, 2, "Channel and observation each call Chief once; Default-only routing needs no Agent");
 });

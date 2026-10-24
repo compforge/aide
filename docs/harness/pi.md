@@ -28,6 +28,20 @@ const adapter = createHarnessAdapter(
 
 Agent 不自动发现环境中的扩展、提示词命令或交互主题；装配方可通过 extensionPaths 显式提供扩展路径，工具和钩子由 Pi SDK 加载。Adapter 负责扩展启动与退出事件。通用 Pi 默认不携带记忆扩展，并禁用自动整轮重试。完整执行期限由 Harness 调用方管理。
 
+## 当前业务背景
+
+上下文分为三个层次：system 保存固定 instruction、tools 和 rules；custom 保存当前业务背景，在 LLM 侧转换为 user；普通 user 消息承载陆续到达的 Input。业务背景可以包含候选会话、当前 CRD 的 summary、近期依据和相关工作，具体内容由业务决定。
+
+`Background` 是本次请求的业务快照，提供 `text(): string`。调用方通过 `createPiAgent({ background: () => new ConversationBackground(...) })` 提供它；工厂读取最新资源，`text()` 只文本化快照，Harness 不解释其中的业务字段。
+
+Personal 的 Route、Conversation、Task、Routine 分别在自己的目录实现 Background，共用有界投影与文本组织辅助函数；它们是派生对象，不是新的 CRD，也不单独持久化。
+
+公开的 `agent.transformContext` 在每次模型请求前调用工厂、取得 `Background.text()`，作为一个 custom message 投影到历史消息之前，包括工具后续轮次、followUp 和 steer。SDK 仍负责 system、工具声明和原生消息转换；业务材料不写进 system。内容不变时前缀保持相同，变化时下一次请求使用新内容，移除的 part 不再提供。
+
+这个前缀是当前资源的派生视图，不追加到原生 transcript，因此不会积累多个旧快照，也不参与历史压缩。压缩保留对话、工具与回执的摘要；恢复时从 CRD 重建当前背景。Aide 不编辑原生会话文件，不存另一套快照历史或模型已读版本。排查当次背景应查看实际模型请求，原生 transcript 只反映历史事实。
+
+读取当前背景失败会终止本次推理，避免带着旧事实继续。快照生成之后资源仍可能变化，写入工具继续校验 UID、版本和执行归属。动态前缀也占上下文预算；Personal 提供有界预览和分页补查，不把常驻背景当作额外授权。
+
 ## 压缩与失败恢复
 
 Pi 原生管理上下文压缩与 checkpoint。使用 Pi 1.4.0 的摘要预算：`reserveTokens` 决定压缩触发时机，摘要输出受模型能力与实际请求剩余空间约束，不再额外限制为 `0.8 × reserveTokens`。模型的 `contextWindow` 和 `maxTokens` 仍需按实际服务配置。

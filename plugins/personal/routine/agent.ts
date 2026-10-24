@@ -1,3 +1,5 @@
+import { contextPage, relatedWork } from "../background.ts";
+import { Background } from "./background.ts";
 import type { Logger } from "pino";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -26,6 +28,9 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
     };
     const verbs = () => { const routine = current(); return plugins.executionVerbs(routine.status.execution!.id, { conversationId: routine.spec.conversationId, routineId: routine.metadata.name }); };
     const tools: ToolDefinition[] = [
+      tool({ name: "list_work", label: "List related work", description: "Page through this Conversation's Task and Routine summaries; does not delegate or resume work.",
+        parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
+        async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, current().spec.conversationId), offset)); } }),
       tool({ name: "read_routine", label: "Read routine", description: "Read this Routine's objective, state and cumulative understanding.", parameters: Type.Object({}),
         async execute() { return result(current()); } }),
       tool({ name: "read_conv", label: "Read conversation", description: "Read the owning Conversation as context, not additional authority.", parameters: Type.Object({}),
@@ -58,6 +63,6 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
           return result(report);
         } }),
     ];
-    return createRoutineAgent({ ...options, config, scope: `routine:${ref.uid}`, tools });
+    return createRoutineAgent({ ...options, config, scope: `routine:${ref.uid}`, tools, background: () => new Background(store, current()) });
   };
 }
