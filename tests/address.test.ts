@@ -104,7 +104,7 @@ test("An addressless Topic stays addressless after Source and Channel append; di
   } finally { await reopened.close(); }
 });
 
-/** @case Ambiguous pending destinations require deliberate recipient selection; associated Inputs need not map one-to-one to Outputs. */
+/** @case Rules reply to an unambiguous source; explicit Agent decisions win, and unresolved destinations fall back to Me. */
 test("say resolves direct, aggregate and proactive targets without guessing from IDs or consuming Inputs", async (t) => {
   const { aide } = setup(t);
   const scope = aide.personal, store = scope.topics;
@@ -112,9 +112,11 @@ test("say resolves direct, aggregate and proactive targets without guessing from
   await seedInput(store, "a", { origin: "channel", originId: "lark", source: a, topicId: "mixed", text: "a" });
   await seedInput(store, "b", { origin: "channel", originId: "lark", source: b, topicId: "mixed", text: "b" });
   await scope.plugins.resourceClient("personal").patchStatus(store.resource("mixed")!, { execution: { id: "run", startedAt: new Date().toISOString() } });
-  await assert.rejects(store.say("mixed", undefined, "ambiguous", "run"), /different or missing addresses/);
-  assert.equal(aide.outputs().length, 0);
-  assert.deepEqual(store.outputs("mixed"), []);
+  await aide.persons.initialize();
+  const fallback = await store.say("mixed", undefined, "unable to choose", "run");
+  assert.deepEqual(store.outputStore.get(fallback.outputId)!.spec.target, webAddress("mixed"));
+  const rule = await store.say("mixed", undefined, "reply to a", "run", { inputIds: ["a"] });
+  assert.deepEqual(store.outputStore.get(rule.outputId)!.spec.target, a);
   const options = { respondToInputId: "b", idempotencyKey: "tool-1" };
   const first = await store.say("mixed", undefined, "reply to b", "run", options);
   assert.deepEqual(await store.say("mixed", undefined, "reply to b", "run", options), first);
@@ -122,6 +124,7 @@ test("say resolves direct, aggregate and proactive targets without guessing from
   assert.deepEqual(store.outputStore.get(first.outputId)!.spec.inputIds, ["b"]);
   const aggregate = await store.say("mixed", undefined, "aggregate", "run", { target: a, inputIds: ["a", "b"] });
   assert.deepEqual(store.outputStore.get(aggregate.outputId)!.spec.inputIds, ["a", "b"]);
+  assert.deepEqual(store.outputStore.get(aggregate.outputId)!.spec.target, a);
   assert.deepEqual(store.get("mixed")!.pendingInputIds, ["a", "b"]);
   await assert.rejects(store.say("mixed", undefined, "conflict", "run", { target: a, respondToInputId: "b" }), /not both/);
   await store.ensure("addressless");

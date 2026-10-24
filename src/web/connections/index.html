@@ -9,6 +9,7 @@
     <p>默认渠道用于 Aide 主动联系你。回复已有消息时，仍使用该消息所在的群聊或私聊。</p>
     <p id="channel-status" role="status" aria-live="polite"></p>
     <p id="channel-error" role="alert"></p>
+    <p id="person-warning" role="status" class="muted"></p>
     <div class="toolbar"><label>默认沟通渠道 <select id="default-channel"></select></label><button id="save-default" type="button">保存默认渠道</button><button id="refresh" type="button">刷新</button></div>
     <div id="channel-list"></div>
     <button id="add-channel" type="button">新增 Lark 渠道</button>
@@ -22,7 +23,8 @@
       <label>Aide 应用 App ID<input id="channel-app" required pattern="cli_[a-zA-Z0-9]+" placeholder="cli_..."></label>
       <label>App Secret<input id="channel-secret" type="password" autocomplete="new-password" maxlength="1000"></label>
       <p class="muted">密钥仅写入服务器配置，不会返回页面。修改同一应用时留空保留；更换应用需重新填写。</p>
-      <label>我在此应用下的身份（可选）<select id="known-me"><option value="">选择已知身份，或在下方填写</option></select><input id="channel-me" pattern="ou_[a-zA-Z0-9]+" placeholder="Me 的 open_id（ou_...）"></label>
+      <label>选择已知的 Me 身份（可选）<select id="known-me"><option value="">选择已知身份，或在下方填写</option></select></label>
+      <label>Me 的 open_id（可选）<input id="channel-me" pattern="ou_[a-zA-Z0-9]+" placeholder="ou_..."></label>
       <p class="muted">Me 是可选身份标记，与机器人凭证独立。默认联系你时需要此身份，无需先发过私聊；其他应用的 open_id 不能直接复用。</p>
       <div class="toolbar"><button type="submit">保存</button><button id="cancel-edit" type="button">取消</button></div>
     </form>

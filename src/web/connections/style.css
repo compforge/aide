@@ -10,3 +10,10 @@
 #channel-form input:not([type=checkbox]), select { padding: 8px; font: inherit; }
 #channel-error { color: #a23535; }
 button { cursor: pointer; padding: 8px 14px; }
+
+@media (max-width: 760px) {
+  header { display: flex; flex-wrap: wrap; padding: 16px; }
+  .main-tabs { flex-wrap: wrap; }
+  .connections-page { margin: 16px auto; padding: 0 16px; }
+  #channel-form input:not([type=checkbox]), select { min-width: 0; max-width: 100%; }
+}

@@ -20,7 +20,7 @@ Output 是 Personal 定义的 `aide.dev/v1alpha1 Output`。`spec.text`、`spec.r
 
 Input 的 `source?: Address` 表达事情发生、可以联络的位置；`sender` 引用 Person，`sessionId` 表达话题共性，三者独立。Lark Source 可以记录观察消息所在群的地址，这本身不要求回复。
 
-Topic 的 `spec.address?: Address` 只在创建时从首个 Channel Input 初始化。Source 创建的会话不自动拥有默认地址；后续追加、转发到 default 会话或改变 default 标记均不覆盖地址，也不为无地址会话补值。
+Topic 的 `spec.address?: Address` 只在创建时从首个 Channel Input 初始化。Source 创建的会话不自动拥有默认地址；后续追加或路由到系统 Default 均不覆盖地址，也不为无地址会话补值。
 
 `say` 的目标选择：
 
@@ -34,7 +34,7 @@ Topic 的 `spec.address?: Address` 只在创建时从首个 Channel Input 初始
 
 Channel 地址在 Output 持久化之前还要通过实际投递配置校验：未启用 Lark 或 appId 与机器人 Channel 不一致时拒绝创建，ResourceClient 的组合事务整笔回滚。Connector 观察身份不等于机器人发送身份，不能直接替换 appId 来猜一个可达地址。
 
-地址缺失或多个 immediate 地址冲突时，工具返回错误，要求明确选择；不会猜测会话名称或默认群。可以为多个 Input 合并生成一个 Output，也可以不关联 Input 而主动通知。Chief 提示词保留当前 Input 地址与 Topic 的来源地址供明确选路；默认通知按 Channel 配置发送，不将 Topic 的来源地址当成默认出口。
+地址选择遵循“明确规则 → Agent 判断 → 默认联系 Me”的顺序。多个 immediate 地址冲突或缺失时，不从其中猜一个群；Agent 可以明确选择，无法确定则默认联系 Me。显式指定的无效 target 或缺少 source 的 respondToInputId 仍返回错误，不悄悄改投其他地址。可以为多个 Input 合并生成一个 Output，也可以不关联 Input 而主动通知。Chief 提示词保留当前 Input 地址与 Topic 的来源地址供明确选路；默认通知按 Channel 配置发送，不将 Topic 的来源地址当成默认出口。
 
 Work 的 say 通过所属 Topic 选择地址。缺少可用地址时返回错误，不创建无目标 Output；业务 report 与沟通独立，是否已完成应分别核对。
 

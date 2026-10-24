@@ -156,11 +156,11 @@ export class TopicStore {
         .filter((i) => i.spec.origin === "channel" && (i.spec.attention ?? "immediate") === "immediate");
       if (candidates.length) {
         const first = candidates[0]!.spec.source;
-        if (!first || candidates.some((i) => !i.spec.source || !sameAddress(first, i.spec.source))) {
-          throw new Error("say requires respondToInputId or target for Inputs with different or missing addresses");
-        }
-        target = first;
-      } else if (this.contactMe) {
+        if (first && candidates.every(i => i.spec.source && sameAddress(first, i.spec.source))) target = first;
+      }
+      // @spec Rules resolve an unambiguous reply; the Agent can choose an explicit address. An unresolved choice contacts Me.
+      // @link docs/personal/output.md#地址与收件处
+      if (!target && this.contactMe) {
         const destination = await this.contactMe(topicId);
         target = destination.target;
         if (receivers !== undefined && JSON.stringify(receivers) !== JSON.stringify(destination.receivers))

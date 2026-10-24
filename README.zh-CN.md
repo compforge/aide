@@ -54,7 +54,7 @@ Linux 常驻运行、代理配置和 SSH 转发见[部署与诊断](docs/deploym
 
 ## 接入 Lark
 
-配置 `AIDE_LARK_APP_ID` 和 `AIDE_LARK_APP_SECRET` 后，可以通过机器人单聊或群内 @机器人交办事情，无需公网回调地址。开启 CardKit 权限后，回复与进展会显示在流式卡片中。
+在 Web「接入」页面添加 Lark 渠道，填写机器人 App ID / App Secret 并启用，保存后重启 Aide，即可通过机器人单聊或群内 @机器人交办事情，无需公网回调地址。也可在 `config.yaml` 中配置 `channels.<名称>`，见[渠道配置](docs/configuration.md)。Me 身份为可选项；选择默认渠道并提供该应用下的 Me 身份后，Aide 可主动联系你。开启 CardKit 权限后，回复与进展会显示在流式卡片中。
 
 机器人创建和权限配置见[Lark 接入](docs/channel/lark.md)。当前支持单聊和群内 @本机器人的文字消息；Agent 的权限请求仍需在网页中处理。
 
