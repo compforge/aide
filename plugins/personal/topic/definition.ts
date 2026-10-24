@@ -10,7 +10,7 @@ import { LoopExecutionSchema } from "../loop.ts";
 import { ResourceRefSchema } from "../topic/ref.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { WORK_TYPES, type WorkResource } from "../resources.ts";
-import { understandingVersion } from "./tree.ts";
+import { topicPath, understandingVersion } from "./tree.ts";
 /** @spec User selection and Route fallback cannot establish two live Default topics. */
 function validateDefault(resource: Readonly<TopicResource>, context: ResourceValidationContext) {
   const all = context.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
@@ -39,7 +39,19 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       lastInputAt: z.string().datetime().optional(), weaveLock: z.string().nullable().optional(), absorbed: z.record(z.string(), z.string()).optional(),
       nextTriggerAt: z.string().nullable().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
   validator: { create: validateDefault, update: (previous, current, context) => {
-    if (previous.spec.default && !current.spec.default) throw new Error("Default Topic is permanent");
+    // @spec Selecting a grouped leaf as Default detaches it only after its previous processing scope is quiet.
+    // @link docs/personal/topic.md#默认联络处
+    if (current.spec.default && !previous.spec.default) {
+      const all = context.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
+      if (all.some(t => t.spec.parentRef?.uid === current.metadata.uid)) throw new Error("Default Topic cannot have children; select a leaf Topic");
+      if (previous.status.weaveLock || current.status.weaveLock) throw new Error("Topic is being organized; retry after Weave completes");
+      if (previous.spec.parentRef) {
+        if (topicPath(all, previous).some(t => t.status.execution || t.status.weaveLock)) throw new Error("Topic processing is active; retry after it completes");
+        if (context.list<InputSpec, InputStatus>(INPUT_TYPE).some(i =>
+          (i.status.route?.result?.topics.some(t => t.uid === previous.metadata.uid) || i.status.assess?.[previous.metadata.uid])
+          && Object.values(i.status.assess ?? {}).some(a => !a.completedAt))) throw new Error("Topic has pending Input; retry after assessment completes");
+      }
+    }
     if (previous.spec.id !== current.spec.id || previous.spec.topicKey !== current.spec.topicKey) throw new Error("Topic identity is immutable");
     if (current.spec.parentRef && current.status.execution) throw new Error("Only a root Topic can execute");
     if (current.status.weaveLock && current.status.execution?.id !== previous.status.execution?.id && current.status.execution) throw new Error("Weave has frozen Topic intake");

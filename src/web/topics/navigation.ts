@@ -78,6 +78,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
   async function changeTopic(item: TopicItem, action: string) {
     topicMenu.hidePopover();
     if (topicUpdating) return;
+    if (action === 'default' && item.parentUid && !confirm('将「' + item.name + '」从父主题中独立出来，并设为默认主题？\n原默认主题会保留为普通主题，已有内容和工作不迁移。')) return;
     if (action === 'delete' && !confirm('删除主题「' + item.name + '」及其聊天记录？\n有待处理内容或关联事项、安排时，需要先处理。')) return;
     topicUpdating = true;
     document.querySelectorAll<HTMLButtonElement>('.topic-more').forEach((button) => { button.disabled = true; });
@@ -118,7 +119,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
       topicMenu.replaceChildren();
       const actions = [['trigger', item.trigger.enabled ? '取消回顾' : '开启回顾']];
       if (!item.default) actions.push(['delete', '删除主题']);
-      if (!topicItems.some(t => t.default) && !item.parentUid) actions.push(['default', '设为默认主题']);
+      if (!item.default) actions.push(['default', '设为默认主题']);
       for (const [action, label] of actions as [string, string][]) {
         const option = element('button', label, action === 'delete' ? 'topic-delete' : '');
         option.type = 'button'; option.setAttribute('role', 'menuitem');
