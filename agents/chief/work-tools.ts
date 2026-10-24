@@ -4,7 +4,7 @@ import type { WorkService } from "../../plugins/personal/work.ts";
 
 const definition = {
   kind: Type.Union([Type.Literal("task"), Type.Literal("routine")]),
-  title: Type.String({ minLength: 1 }), instruction: Type.String({ minLength: 1 }),
+  title: Type.String({ minLength: 1 }), instruction: Type.String({ minLength: 1, description: "State the goal entrusted to Aide, its authorization basis and scope; distinguish background facts and unconfirmed proposals." }),
   trigger: Type.Union([Type.Null(), Type.Object({
     cron: Type.Union([Type.String(), Type.Null()]), timezone: Type.String(),
     event: Type.Union([Type.String(), Type.Null()]),
@@ -34,7 +34,7 @@ export function workTools(work: WorkService): ToolDefinition[] {
       async execute(callId, { text }, signal) { signal?.throwIfAborted(); return result(await work.createInput(text, callId)); },
     }),
     tool({ name: "create_work", label: "Create work",
-      description: "Entrust a finite goal (task) or ongoing responsibility (routine) to Aide. Ordinary questions and immediate CLI queries do not need work items. Task trigger must be null; routine needs cron or event.",
+      description: "Entrust a finite goal (task) or ongoing responsibility (routine) to Aide. Me committing to a colleague or Aide proposing help is not itself a delegation. Ordinary questions and immediate CLI queries do not need work items. Task trigger must be null; routine needs cron or event.",
       parameters: Type.Object({ ...definition, inputId: Type.Optional(id) }, { additionalProperties: false }),
       async execute(callId, { inputId, ...args }, signal) {
         signal?.throwIfAborted();

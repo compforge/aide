@@ -23,6 +23,27 @@ function setup(t: TestContext) {
   return { aide, root, options };
 }
 
+/** @case External observations cannot become direct reply paths, even when urgent; an existing contact path still permits notifications. */
+test("Source addresses never supply direct or urgency-based reply destinations", async t => {
+  const { aide } = setup(t);
+  const store = aide.personal.topics;
+  const observed = larkAddress("app", "observed-group"), contact = webAddress("contact");
+  await store.ensure("observations");
+  await seedInput(store, "external", { topicId: "observations", origin: "source", originId: "personal.lark",
+    source: observed, attention: "immediate", relation: "sent", text: "Me asks a colleague a question" });
+  const before = store.outputs().length;
+  await assert.rejects(store.say("observations", "external", "unsolicited reply", undefined, { respondToInputId: "external" }), /Direct replies require a Channel Input/);
+  await assert.rejects(store.say("observations", "external", "implicit reply"), /explicit target/);
+  assert.equal(store.outputs().length, before);
+  const explicit = await store.say("observations", "external", "Aide's suggestion", undefined, { target: contact });
+  assert.deepEqual(store.outputStore.get(explicit.outputId)!.spec.target, contact);
+  await store.ensure("known-contact", contact);
+  await seedInput(store, "urgent-observation", { topicId: "known-contact", origin: "source", originId: "personal.lark",
+    source: observed, attention: "immediate", text: "external change" });
+  const notification = await store.say("known-contact", "urgent-observation", "Update within an existing mandate");
+  assert.deepEqual(store.outputStore.get(notification.outputId)!.spec.target, contact);
+});
+
 test("ChannelAddress extends Address and owns canonical endpoint encoding and admission", () => {
   const channel: ChannelAddress = larkAddress("app/one", "chat:二/%");
   const address: Address = channel;

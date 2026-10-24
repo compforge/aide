@@ -31,6 +31,7 @@ export interface SayInput {
   readonly text: string;
   readonly inputIds?: readonly string[];
   readonly idempotencyKey?: string;
+  /** Only a Channel Input establishes a direct reply path; observations require a separately chosen notification target. */
   readonly respondToInputId?: string;
   readonly target?: Address;
   /** Person references; explicit [] suppresses inference from respondToInputId's sender. */

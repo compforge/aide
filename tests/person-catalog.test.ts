@@ -175,7 +175,11 @@ test("Web merge validates reviewed versions, finalizes the source and tolerates 
   assert.equal((await f.aide.persons.observe(source.spec.identities[0]!)).metadata.uid, target.metadata.uid);
   const read = personTools(f.aide.persons).find(tool => tool.name === "read_person")!;
   const missing = await read.execute("deleted", { id: source.metadata.name, uid: source.metadata.uid }, undefined, undefined, {} as never);
-  assert.match(JSON.stringify(missing), /no longer exists/);
+  assert.match(JSON.stringify(missing), /No Person matched/);
+  const wrongId = await read.execute("uid-as-id", { id: target.metadata.uid }, undefined, undefined, {} as never);
+  assert.match(JSON.stringify(wrongId), /does not establish deletion/);
+  const matched = await read.execute("exact-reference", { id: target.metadata.name, uid: target.metadata.uid }, undefined, undefined, {} as never);
+  assert.ok(JSON.stringify(matched).includes(target.metadata.uid), "The same living person remains readable through the exact reference");
   const html = await (await fetch(base + "/people")).text();
   assert.match(html, /同名人物/); assert.match(html, /姓名相同不代表同一个人/); assert.match(html, /确认是同一人并合并/);
   assert.equal((await fetch(base + "/persons.js")).status, 200);

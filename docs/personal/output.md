@@ -24,9 +24,11 @@ Topic 的 `spec.address?: Address` 只在创建时从首个 Channel Input 初始
 
 `say` 的目标选择：
 
-1. `respondToInputId` 直接回复该 Input.source，并将它加入可选 inputIds；没有显式指定 receivers 时，以该 Input.sender 作为收件人。
+1. `respondToInputId` 仅接受 Channel Input，直接回复其 source，并将它加入可选 inputIds；没有显式指定 receivers 时，以该 Input.sender 作为收件人。Source 观察和 Chief 自主决定不构成直接回复入口，使用它们会拒绝创建 Output。
 2. `target` 明确选择通知地址，不能同时指定 respondToInputId。
-3. 两者都未提供时，关联 Input（未指定时为当前调用关联的材料）中的 immediate 输入必须具有同一个地址；没有 immediate 输入时使用 Topic.address。
+3. 两者都未提供时，关联 Input（未指定时为当前调用关联的材料）中的 immediate Channel 输入必须具有同一个地址；没有这样的输入时使用 Topic.address。Source 的 attention 即使为 immediate，也不使观察地址成为隐式回复目标。
+
+根据外部观察主动沟通时，Agent 仍须独立判断授权，并选择已知的通知目标；指定 target 只是明确目的地，不自动产生授权。助理身份和代理边界见 [Kernel](../kernel.md#助理定位与身份边界)。
 
 `Output.receivers` 是可选的 Person 资源引用列表，与 Input.sender 使用相同引用结构。它记录内容说给谁，target 记录送到哪里：可以在同一个群回复多人，也可以把多处信息整理后向另一个地址的负责人汇报。显式 receivers 覆盖直接回复的默认值，空列表表示不指定个人；仅关联 inputIds 不推导收件人。收件人不改变投递数量，不自动解析平台账号或添加群内 @。
 

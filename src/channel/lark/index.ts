@@ -132,6 +132,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     if (this.state.received.includes(id)) return;
     const input = LarkIncomingSchema.safeParse({ id, topicKey: topicId, text, source: larkAddress(this.appId, chatId),
       observation: { provider: "lark", accountId: this.appId, chatId, chatType: message.chat_type, ...(threadId ? { threadId } : {}),
+        ...(botIdentity ? { assistant: { id: botIdentity.openId, name: botIdentity.name } } : {}),
         sender: { type: sender.sender_type, ...(sender.sender_id?.open_id ? { id: sender.sender_id.open_id } : {}) },
         mentions: (message.mentions ?? []).flatMap((mention) => mention.id.open_id ? [mention.id.open_id] : []) } });
     this.save({ ...this.state,

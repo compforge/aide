@@ -1,3 +1,4 @@
+import { identityBackground } from "../../agents/personal.ts";
 import { weavePolicy } from "./weave/config.ts";
 import { topicTools } from "./topic/tools.ts";
 import { topicSubtree } from "./topic/tree.ts";
@@ -108,15 +109,15 @@ export class Personal {
   }
 
   weaveSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
-    return weaveSession(scope, config, this.store, this.plugins, topicPolicy(this.options.topic).summaryChars, weavePolicy(this.options.weave).batchSize);
+    return weaveSession(scope, config, this.store, this.plugins, topicPolicy(this.options.topic).summaryChars, weavePolicy(this.options.weave).batchSize, this.options.persons);
   }
 
   routineSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
-    return routineSession(scope, config, this.store, this.plugins, this.log);
+    return routineSession(scope, config, this.store, this.plugins, this.log, this.options.persons);
   }
 
   taskSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
-    return taskSession(scope, config, this.store, this.plugins, this.log);
+    return taskSession(scope, config, this.store, this.plugins, this.log, this.options.persons);
   }
 
   routeSession(scope: ExecutionScope, config: ChiefAgentOptions["config"]): PiSessionFactory {
@@ -131,7 +132,7 @@ export class Personal {
         this.plugins.executionVerbs(route.status.execution.id, {});
         return route;
       };
-      return createRouteAgent({ ...options, config, scope: `route:${initial.metadata.uid}`, background: () => { active(); return new RouteBackground(this.store); }, port: {
+      return createRouteAgent({ ...options, config, scope: `route:${initial.metadata.uid}`, background: identityBackground(this.options.persons, () => { active(); return new RouteBackground(this.store); }), port: {
         topics: (offset, query, parentUid) => {
           active();
           const page = contextPage(topicCandidates(this.store, query, parentUid), offset);

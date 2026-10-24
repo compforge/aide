@@ -1,3 +1,5 @@
+import { identityBackground } from "../../../agents/personal.ts";
+import type { Persons } from "../person/service.ts";
 import { contextPage, relatedWork } from "../background.ts";
 import { Background } from "./background.ts";
 import type { Logger } from "pino";
@@ -16,7 +18,7 @@ import { say } from "../output/action.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<T> => definition;
 /** Host binds scope; the model never supplies Task or Topic identity. */
-export function taskSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, log: Logger): PiSessionFactory {
+export function taskSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, log: Logger, persons?: Persons): PiSessionFactory {
   const ref = scope.resourceRef;
   if (scope.pluginInstanceId !== "personal" || ref?.kind !== TASK_TYPE.kind || ref.apiVersion !== TASK_TYPE.apiVersion || !ref.uid) throw new Error("Task requires its owning resource scope");
   return async options => {
@@ -45,7 +47,7 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
           const text = inputPrinter.describe(input);
           return result({ inputId, handling: input.status.handle[task.metadata.uid], text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } }),
-      tool({ name: "say", label: "Say", description: "Create an Output through this Task's Topic. Choose respondToInputId for an assigned Input or an explicit known target. Topic grouping never grants a destination. Success means accepted, not delivered; Host owns delivery and recovery.",
+      tool({ name: "say", label: "Say", description: "Create an Output through this Task's Topic. Choose respondToInputId only for an assigned Channel Input; observations have no implicit reply path. Otherwise choose an independently known target within the mandate. Topic grouping never grants a destination. Success means accepted, not delivered; Host owns delivery and recovery.",
         parameters: Type.Object({ text: Type.String({ minLength: 1 }), inputIds: Type.Optional(Type.Array(Type.String())),
           respondToInputId: Type.Optional(Type.String()), target: Type.Optional(Type.Union([
             Type.Object({ kind: Type.Literal("channel"), channelId: Type.String(), endpoint: Type.String() }),
@@ -56,7 +58,7 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
           for (const inputId of args.inputIds ?? []) if (!store.topics.inputStore.get(inputId)?.status.handle?.[task.metadata.uid]) throw new Error("Output input is not assigned to Task");
           return result(await say(verbs(), { ...args, idempotencyKey: id }));
         } }),
-      tool({ name: "report_task", label: "Report task", description: "Atomically update Task progress and acknowledge only inputs actually handled. Use say separately for user-visible communication.",
+      tool({ name: "report_task", label: "Report task", description: "Atomically update Task progress and acknowledge only inputs actually handled. Preserve explicit actors, authorization scope and proposal/confirmation state in summary and recent. Use say separately for user-visible communication.",
         parameters: Type.Object({ inputIds: Type.Array(Type.String()), summary: Type.String({ minLength: 1, maxLength: 16000 }), recent: Type.String({ minLength: 1, maxLength: 16000 }),
           action: Type.Union([Type.Literal("done"), Type.Literal("wait"), Type.Literal("ask")]), question: Type.Optional(Type.String()), nextAt: Type.Optional(Type.String()) }),
         async execute(_id, args) {
@@ -67,6 +69,6 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
           return result(report);
         } }),
     ];
-    return createTaskAgent({ ...options, config, scope: `task:${ref.uid}`, tools, background: () => new Background(store, current()) });
+    return createTaskAgent({ ...options, config, scope: `task:${ref.uid}`, tools, background: identityBackground(persons, () => new Background(store, current())) });
   };
 }

@@ -1,3 +1,4 @@
+import { assistantInstructions, attributionInstructions } from "../personal.ts";
 import type { Persons } from "../../plugins/personal/person/service.ts";
 import { personTools } from "./person-tools.ts";
 import { fileURLToPath } from "node:url";
@@ -51,7 +52,7 @@ export function createChiefAgent(options: ChiefAgentOptions): Promise<AgentSessi
       beforeWorkMutation?.(); return tool.execute(...args);
     } };
   });
-  return createPiAgent({ ...pi, scope: options.scope ?? "chief", systemPrompt: [systemPrompt, persons ? personInstructions : ""].filter(Boolean).join("\n\n"),
+  return createPiAgent({ ...pi, scope: options.scope ?? "chief", systemPrompt: [assistantInstructions, attributionInstructions, systemPrompt, persons ? personInstructions : ""].filter(Boolean).join("\n\n"),
     extensionPaths: [fileURLToPath(import.meta.resolve("pi-hermes-memory"))],
     background: async () => {
       const current = await options.background?.();

@@ -186,6 +186,9 @@ test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats a
   await channel.dispatch(); await aide.settled(); await channel.deliver();
   assert.equal(prompts.length, 3);
   assert.ok(prompts.some((prompt) => prompt.includes("看下 @小王 的需求")));
+  assert.ok(prompts.every((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).inputs
+    .some((input: { description: string }) => input.description.includes('"assistant":{"id":"ou_aide","name":"Aide"}'))),
+    "Known bot identity survives pending inbox persistence and enters model previews");
   assert.ok(prompts.every((prompt) => !prompt.includes("@_user_")));
   assert.deepEqual(new Set(sent.map((item) => item.chatId)), new Set(["oc_group", "oc_other_group", "oc_direct"]));
   assert.equal(sent.length, 3);

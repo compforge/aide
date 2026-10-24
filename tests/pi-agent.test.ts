@@ -185,6 +185,40 @@ test("Replay SDK groups roots and routes subsequent source input to the new root
   assert.equal(result.state, "completed");
 });
 
+/** @case Native request wiring keeps all Personal roles separate from Me; scripted replies do not prove semantic compliance. */
+test("Personal SDK requests carry assistant policy and refresh human identity independently of agent roles", { timeout: 30_000 }, async t => {
+  const { identityBackground } = await import("../agents/personal.ts");
+  const { createTaskAgent } = await import("../agents/task/agent.ts");
+  const { createRoutineAgent } = await import("../agents/routine/agent.ts");
+  const { createWeaveAgent } = await import("../agents/weave/agent.ts");
+  const fixture = await setup(t, () => ({ text: "protocol fixture" }), "chief");
+  await fixture.run("Direct request to Aide", "identity-chief");
+  const chiefRequest = JSON.stringify(fixture.requests.at(-1)!.messages);
+  assert.match(chiefRequest, /Human|human served by Aide/);
+  assert.match(chiefRequest, /\\"provider\\":\\"web\\"/);
+  const background = identityBackground(fixture.persons, () => ({ text: () => "current-resource-marker" }));
+  for (const create of [createTaskAgent, createRoutineAgent,
+    (options: Parameters<typeof createTaskAgent>[0]) => createWeaveAgent({ ...options, scope: "identity-weave", tools: [] }),
+    (options: Parameters<typeof createTaskAgent>[0]) => createRouteAgent({ ...options, port: { route: async value => value, input: () => [], topics: () => [] } }),
+  ]) {
+    const agent = await create({ ...fixture.config, background });
+    try {
+      await agent.prompt("Inspect the supplied context only");
+      const request = JSON.stringify(fixture.requests.at(-1)!.messages);
+      assert.match(request, /independent assistant serving Me/);
+      assert.match(request, /Aide's proposal is not Me's preference/);
+      assert.match(request, /current-resource-marker/);
+      assert.match(request, /Human served by Aide, not the assistant/);
+      assert.match(request, /\\"provider\\":\\"web\\"/);
+    } finally { agent.dispose(); }
+  }
+  const me = (await fixture.persons.me())!;
+  const before = await background();
+  await fixture.persons.edit(me.metadata.name, me.metadata.uid, me.metadata.resourceVersion, { ...me.spec, name: "Updated human" });
+  assert.doesNotMatch(before.text(), /Updated human/);
+  assert.match((await background()).text(), /Updated human/);
+});
+
 test("Pi streams thought and answer before completion without duplicating the final text", { timeout: 20_000 }, async (t) => {
   let release!: () => void;
   const pause = new Promise<void>((resolve) => { release = resolve; });
