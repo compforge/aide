@@ -1,3 +1,6 @@
+import { conversationCandidates, contextPage } from "./background.ts";
+import { Background as ConversationBackground } from "./conversation/background.ts";
+import { Background as RouteBackground } from "./route/background.ts";
 import { routineSession } from "./routine/agent.ts";
 import { taskSession } from "./task/agent.ts";
 import type { PiConfig } from "../../src/host/harness/pi/config.ts";
@@ -95,7 +98,7 @@ export class Personal {
         this.log.info({ conversationId }, "Chief understanding updated");
         return result;
       });
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(conversationId), persons: this.options.persons, tools, beforeWorkMutation: () => { active(); } });
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(conversationId), persons: this.options.persons, tools, background: () => new ConversationBackground(this.store, active(), conversationId), beforeWorkMutation: () => { active(); } });
     };
   }
 
@@ -119,14 +122,11 @@ export class Personal {
         this.plugins.executionVerbs(route.status.execution.id, {});
         return route;
       };
-      return createRouteAgent({ ...options, config, scope: `route:${initial.metadata.uid}`, port: {
+      return createRouteAgent({ ...options, config, scope: `route:${initial.metadata.uid}`, background: () => { active(); return new RouteBackground(this.store); }, port: {
         conversations: offset => {
           active();
-          const all = this.conversations.list().map(view => {
-            const c = this.conversations.resource(view.id)!;
-            return { uid: c.metadata.uid, name: c.spec.name, default: !!c.spec.default, summary: (c.status.summary ?? "").slice(0, 2000) };
-          });
-          return { conversations: all.slice(offset, offset + 20), nextOffset: offset + 20 < all.length ? offset + 20 : null };
+          const page = contextPage(conversationCandidates(this.store), offset);
+          return { conversations: page.items, total: page.total, fingerprint: page.fingerprint, nextOffset: page.nextOffset };
         },
         input: (id, offset) => { const r = active(); return this.readLoopInput(resourceRef(r), id, offset); },
         route: async raw => {

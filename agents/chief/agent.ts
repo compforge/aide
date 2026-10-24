@@ -5,7 +5,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { WorkService } from "../../plugins/personal/work.ts";
 import { createPiAgent, type PiAgentOptions } from "../pi/agent.ts";
 import { workTools } from "./work-tools.ts";
-import { personContext } from "./person.ts";
+import { personInstructions, personContext } from "./person.ts";
 
 export interface ChiefAgentOptions extends Omit<PiAgentOptions, "systemPrompt" | "extensionPaths" | "extensionFactories"> {
   work: WorkService;
@@ -22,7 +22,7 @@ Resolve aliases to the returned canonical name. If a target is absent, ask for c
 Use available filesystem tools and CLIs with their existing credentials when a question needs facts.
 Do not create a task just because you need a tool. Do not routinely acknowledge a request before answering.
 Use Work tools when the user entrusts an ongoing responsibility or a goal that needs follow-through.
-Look for related work first. Reading progress does not mean resuming work. Use assess_input to finish assessment and hand off the original Input to related Work atomically. Use request_work only for a new independent request. The work reconciler owns progress and completion.
+Use the current conversation and work context parts for context and related work; read tools provide missing or truncated details. Look for related work first. Reading progress does not mean resuming work. Use assess_input to finish assessment and hand off the original Input to related Work atomically. Use request_work only for a new independent request. The work reconciler owns progress and completion.
 For create_work(kind=task), pass the received inputId; creation already establishes its handle. Finish Chief assessment separately with assess_input, without duplicating that assignment. For an independent decision within existing authority, create_input records a new Input first. Never assign to deleting work.
 Task and Routine are separate resources. To change kind, create the target work with relevant context, then pause or delete the original as appropriate. The new work has its own identity.
 Only claim a creation, input delivery, deletion or external action succeeded after checking the tool result.
@@ -49,8 +49,12 @@ export function createChiefAgent(options: ChiefAgentOptions): Promise<AgentSessi
       beforeWorkMutation?.(); return tool.execute(...args);
     } };
   });
-  return createPiAgent({ ...pi, scope: options.scope ?? "chief", systemPrompt,
+  return createPiAgent({ ...pi, scope: options.scope ?? "chief", systemPrompt: [systemPrompt, persons ? personInstructions : ""].filter(Boolean).join("\n\n"),
     extensionPaths: [fileURLToPath(import.meta.resolve("pi-hermes-memory"))],
-    extensionFactories: persons ? [personContext(persons)] : [],
+    background: async () => {
+      const current = await options.background?.();
+      const me = persons ? await personContext(persons) : undefined;
+      return { text: () => [current?.text(), me ? `<me>\n${me}\n</me>` : ""].filter(Boolean).join("\n\n") };
+    },
     tools: [...workCapabilities, ...(persons ? personTools(persons, beforeWorkMutation) : []), ...tools] });
 }

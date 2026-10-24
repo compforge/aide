@@ -24,7 +24,7 @@ Channel / Source → Input
 
 “持续运行”指复用同一原生上下文，没有输入时可以空闲。空闲时通过 harness verb 的 prompt 启动；运行中，默认 Controller 先保存 Input 的 execution 接纳记录，再经同一个 verb 调用原生 followUp，immediate 则调用 steer。多条 Input 可以在同一 invocation 中分别通过 route_input 完成。明确拒绝才释放接纳记录，结果不确定时保留证据；当前大部分 immediate 带明确 sessionId，会先被规则直接分派。模型等待不阻塞默认 Controller 的规则处理。
 
-规则匹配 Input.sessionId 与 Conversation 话题；originalInputId 已有路由结果时可以沿其归属关联。前置 Input 尚未决定时，它只是证据，不构成硬等待依赖。Channel 的明确新话题可以创建 Conversation，Source 的陌生话题线索本身不创建。规则仍未命中且没有任何 Conversation 时直接建立 Default。
+规则匹配 Input.sessionId 与 Conversation 话题；originalInputId 已有路由结果时可以沿其归属关联。前置 Input 尚未决定时，它只是证据，不构成硬等待依赖。Channel 的明确新话题可以创建 Conversation，Source 的陌生话题线索本身不创建。规则仍未命中且没有存活的非 Default 候选时，直接分派给 Default；尚无 Default 则建立它。只有一个普通话题时仍需判断是否相关，因此交给 Route Agent。
 
 ## 工具与完成条件
 
@@ -50,6 +50,40 @@ Input 自身保护未完成的 route、assess、handle。全部完成后才进�
 ## 连续上下文与记忆
 
 Route 与 Chief 隔离原生上下文、共用 Hermes 长期记忆；Route 只读检索，Chief 可积累记忆。当前资源事实和用户纠正优先于历史；记忆和外部输入不授予执行权限。原生历史、压缩和恢复由 Harness 管理；Route Operator 在 `status.agent` 保存下次调用所需的配置名和原生会话引用。
+
+## 上下文组织与优化
+
+上下文组织是后续效果优化的重点。固定职责属于 system；会变化的候选信息属于业务背景，以 Pi custom message 投影，LLM 侧是 user；Input 保留为独立 user 消息。当前按以下结构准备每次模型请求，v1 / v2 只表示内容变化，不是 CRD 版本字段：
+
+Route 使用本资源目录下的 [Background](../../plugins/personal/route/background.ts) 保存候选会话快照。每次模型请求前，`background()` 工厂读取最新资源并构造快照；Harness 调用 `Background.text()`，将结果放到 custom → user 的业务前缀。`text()` 只负责文本化，不重新读取资源。共用契约见 [Background 接口](../../agents/background.ts) 和 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
+
+```text
+请求 1
+  system：固定 instruction、tools、rules
+  custom → user：Background.text()，候选会话快照 v1
+    A：UID、名称、Default 标记、summary
+    B：UID、名称、Default 标记、summary
+  user：Input 1
+  assistant / tool：route_input(...) 与分派回执
+
+请求 2（会话信息未变）
+  system：同上
+  custom → user：Background.text()，同一快照 v1
+  历史：Input 1、处理与回执
+  user：Input 2
+
+请求 3（B.summary 变化）
+  system：同上
+  custom → user：Background.text()，当前快照 v2 替换前缀中的 v1
+  历史：已有对话、处理与回执
+  user：Input 3
+```
+
+背景前缀在每次模型请求前从资源刷新，覆盖连续调用中的工具后续轮次、followUp 和 steer。内容不变时前缀不变；变化后替换旧材料，不在历史中反复追加快照。它不进入 transcript 或历史摘要，压缩和重启后重新从资源构建。`system.sections` 仍可用于固定系统结构，业务数据不因常驻而成为系统指令。机制见 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
+
+候选来自存活的 Conversation，按 UID 稳定排序，每个 summary 最多预览 2000 字符；快照按 20 项和约 16000 个 JSON 字符限制，附 total / nextOffset，通过 list_conversations 补查余下候选。fingerprint 按完整投影内容计算，未展示页的变化也会刷新前缀；指纹变化后重新补查旧分页结果。指纹不持久化，也不表示模型已经阅读。目标提交时仍检查当前资源，名称和 summary 都不授予权限。
+
+没有非 Default 候选时通过确定性规则分派。其它场景的优化重点是：是否反复读取未变的目录、是否遗漏候选变化、是否被旧 summary 误导，以及每条 Input 的模型调用、上下文 token、缓存表现和完成耗时。动态前缀会影响缓存，当前只保证结构和内容稳定，不承诺具体 provider 的缓存命中率。
 
 ## 长期演进方向
 

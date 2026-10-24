@@ -53,7 +53,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   if (due) c = await updateConversation(context.resources, c, () => ({ nextTriggerAt: nextTriggerAt(trigger) }));
   const policy = conversationPolicy(context.instance.config.conversation);
   const material = input ? inputPrinter.describe(input) : "Scheduled review: inspect current delegated work. Communication is optional.";
-  const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: input ? "input" : "timer", conversationId: c.spec.id, address: c.spec.address, summary: c.status.summary, recent: c.status.recent, summaryChars: policy.summaryChars, inputId: input?.metadata.name, inputs: input ? [{ inputId: input.metadata.name, description: material.slice(0, policy.contextChars - 3000) }] : [], at: new Date().toISOString() })}\n${input ? "Use read_input for complete evidence and unresolved inputs." : material}`;
+  const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: input ? "input" : "timer", conversationId: c.spec.id, address: c.spec.address, summaryChars: policy.summaryChars, inputId: input?.metadata.name, inputs: input ? [{ inputId: input.metadata.name, description: material.slice(0, policy.contextChars - 3000) }] : [], at: new Date().toISOString() })}\n${input ? "Use read_input for complete evidence and unresolved inputs." : material}`;
   await runInput(context, execution.withContext({ conversationId: c.spec.id, ...(input ? { inputId: input.metadata.name, inputIds: [input.metadata.name] } : {}) }), c,
     "chief", prompt, input?.metadata.name);
   return { requeueAfterMs: 1 };

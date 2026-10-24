@@ -14,7 +14,7 @@ export function routeTools(port: RouteTools): ToolDefinition[] {
     tool({ name: "route_input", label: "Route input", description: "Commit the complete routing decision for one admitted Input. Multiple Conversation UIDs are allowed; [] selects Default. A successful call acknowledges routing, not business processing.",
       parameters: Type.Object({ inputId: text, conversationUids: Type.Array(text, { maxItems: 100 }), reason: text }),
       async execute(_id, args, signal) { signal?.throwIfAborted(); return result(await port.route(args)); } }),
-    tool({ name: "list_conversations", label: "List conversations", description: "Read the current Conversation catalog and summaries. Follow nextOffset until null; retained context may be stale.",
+    tool({ name: "list_conversations", label: "List conversations", description: "Read remaining candidate summaries beyond the current conversations context part. Follow nextOffset until null when the section is incomplete.",
       parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, args) { return result(port.conversations(args.offset ?? 0)); } }),
     tool({ name: "read_input", label: "Read input", description: "Read a pending routing Input in text pages. Omit inputId to list pending IDs and delivery state. Follow nextOffset.",

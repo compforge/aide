@@ -1,3 +1,4 @@
+import type { ReadBackground } from "../agents/background.ts";
 import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { PiAdapter } from "../src/host/harness/pi/adapter.ts";
 import { createRouteAgent } from "../agents/route/agent.ts";
@@ -39,7 +40,7 @@ function messageText(content: unknown): string {
 }
 
 /** Real Pi SDK and HTTP protocol; only the remote model is scripted. No external credentials or network. */
-async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" | "route" = "pi", model: PiModelConfigInput = { provider: "fixture", id: "test-model" }, sharedPersons?: Persons) {
+async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" | "route" = "pi", model: PiModelConfigInput = { provider: "fixture", id: "test-model" }, sharedPersons?: Persons, background?: ReadBackground) {
   const root = mkdtempSync(join(tmpdir(), "aide-pi-sdk-"));
   const personFile = join(root, "PERSON.md");
   const requests: Record<string, unknown>[] = [];
@@ -90,7 +91,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   let native: AgentSession | undefined;
   const adapter = createHarnessAdapter({ id: "assistant", harness }, {
     targetConfig: { harness }, openApproval: async () => { throw new Error("Unexpected interaction"); },
-    piSession: async (input) => (native = await createPiAgent({ ...config, ...input })),
+    piSession: async (input) => (native = await createPiAgent({ ...config, ...input, background })),
     routeSession: (input) => createRouteAgent({ ...config, ...input, port: { async route(value) { return value; }, conversations() { return { conversations: [], nextOffset: null }; }, input() { return {}; } } }),
     chiefSession: (input) => createChiefAgent({ ...config, ...input, work, persons }),
   });
@@ -422,20 +423,21 @@ test("Chief profiles people through tools and refreshes shared user corrections 
   assert.equal(turn.stopReason, "end_turn");
   assert.match((await writer.persons.me())!.status.summary, /concise Chinese/);
   assert.equal(existsSync(writer.personFile), false);
-  const system = (request: Record<string, unknown>) => JSON.stringify((request.messages as Array<{ role: string }>).filter((m) => ["system", "developer"].includes(m.role)));
+  const context = (request: Record<string, unknown>) => JSON.stringify(request.messages);
   await writer.run("现在呢", "person-refresh");
-  assert.match(system(writer.requests.at(-1)!), /concise Chinese/);
+  assert.match(context(writer.requests[2]!), /concise Chinese/, "The Person update is visible on the next tool turn of the same invocation");
+  assert.match(context(writer.requests.at(-1)!), /concise Chinese/);
   const reader = await setup(t, () => ({ text: "明白" }), "chief", undefined, writer.persons);
   await reader.run("新话题", "shared");
-  assert.match(system(reader.requests.at(-1)!), /concise Chinese/);
+  assert.match(context(reader.requests.at(-1)!), /concise Chinese/);
   const latest = (await writer.persons.me())!;
   await writer.persons.edit(latest.metadata.name, latest.metadata.uid, latest.metadata.resourceVersion,
     latest.spec, "Prefer detailed explanations for architecture.");
   await reader.run("最新偏好", "corrected");
-  assert.match(system(reader.requests.at(-1)!), /detailed explanations/);
-  assert.match(system(reader.requests.at(-1)!), /Explicit corrections take priority/);
+  assert.match(context(reader.requests.at(-1)!), /detailed explanations/);
+  assert.match(context(reader.requests.at(-1)!), /Explicit corrections take priority/);
   assert.equal((await writer.persons.me())!.status.summary, "Prefer detailed explanations for architecture.");
-  assert.doesNotMatch(system(reader.requests.at(-1)!), /concise Chinese/);
+  assert.doesNotMatch(context(reader.requests.at(-1)!), /concise Chinese/);
   await reader.reopen();
   assert.equal(existsSync(reader.personFile), false);
 });
@@ -635,6 +637,8 @@ test("Aide steers immediate Input and independently completes both inputs within
   const first = aide.conversations.inputStore.get("first")!.status.assess![uid]!;
   const urgent = aide.conversations.inputStore.get("urgent")!.status.assess![uid]!;
   assert.ok(first.completedAt); assert.ok(urgent.completedAt); assert.equal(first.executionId, urgent.executionId);
+  const background = JSON.stringify((fixture.requests[1]!.messages as Array<{ role: string; content: unknown }>).filter(m => m.role === "user" && messageText(m.content).includes("<aide_background")));
+  assert.match(background, /Concurrent status 1/, "Chief sees concurrent summary updates at the steer boundary");
   assert.equal(aide.invocations().filter(i => i.conversationId === "me").length, 1);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
   const admitted = [...state.harnessInputs.values()].find(i => i.delivery === "steer")!;
@@ -685,11 +689,14 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
       ...(target.harness === "route" ? { routeSession: aide.routeSession(ports.scope, fixture.config.config) } : { chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }) }) }, pino({ level: "silent" }));
   t.after(async () => { release(); await aide.close(); });
-  targetUid = (await aide.conversations.ensure("topic")).metadata.uid; await aide.start();
+  targetUid = (await aide.conversations.ensure("topic")).metadata.uid;
+  await aide.runtime.plugins.resourceClient("personal").patchStatus(aide.conversations.resource("topic")!, { summary: "topic-state-one" });
+  await aide.start();
   await aide.conversations.submit("route-first", { origin: "source", originId: "fixture", text: "subject-one" });
   for (let i = 0; i < 300 && routeCalls < 3; i++) await Bun.sleep(10);
   assert.equal(routeCalls, 3);
   assert.equal(aide.conversations.inputStore.get("route-first")!.status.route?.result, undefined);
+  await aide.runtime.plugins.resourceClient("personal").patchStatus(aide.conversations.resource("topic")!, { summary: "topic-state-two" });
   await aide.conversations.submit("route-second", { origin: "source", originId: "fixture", text: "subject-two" });
   for (let i = 0; i < 300 && !aide.conversations.inputStore.get("route-second")!.status.route?.executionId; i++) await Bun.sleep(10);
   assert.ok(aide.conversations.inputStore.get("route-second")!.status.route?.executionId);
@@ -702,6 +709,10 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
   }
   const followup = routeRequests.find(r => JSON.stringify(r.messages).includes("subject-two"))!;
   assert.match(JSON.stringify(followup.messages), /subject-one/);
+  const context = (request: Record<string, unknown>) => JSON.stringify((request.messages as Array<{ role: string; content: unknown }>).filter(m => m.role === "user" && messageText(m.content).includes("<aide_background")));
+  assert.match(context(routeRequests[0]!), /topic-state-one/);
+  assert.match(context(followup), /topic-state-two/);
+  assert.doesNotMatch(context(followup), /topic-state-one/);
   assert.equal(aide.conversations.list().length, 1);
   assert.equal(aide.invocations().filter(i => i.harnessName === "route").length, 1);
 });
@@ -823,7 +834,7 @@ test(`${kind} ${attention} Input joins the active native invocation`, { timeout:
   const at = new Date().toISOString();
   // Seed the result of Chief assessment; the real Work controllers own subsequent admission and execution.
   await resources.commit([
-    { operation: "patchStatus", resource: task, patch: { idleSince: null, agentStoppedAt: null } },
+    { operation: "patchStatus", resource: task, patch: { idleSince: null, agentStoppedAt: null, summary: "updated-work-understanding" } },
     { operation: "create", type: INPUT_TYPE, name: laterId,
       spec: { origin: "source", originId: "fixture", attention, text: "later unique evidence" }, status: {
         route: { completedAt: at, result: { conversations: [resourceRef(c)], reason: "same topic" } },
@@ -840,6 +851,9 @@ test(`${kind} ${attention} Input joins the active native invocation`, { timeout:
   assert.equal(aide.work("me").read(work.id).status, kind === "task" ? "done" : "scheduled");
   for (const id of [firstId, laterId]) assert.ok(aide.conversations.inputStore.get(id)!.status.handle![work.uid!]!.completedAt);
   assert.match(JSON.stringify(fixture.requests[1]!.messages), /later unique evidence/);
+  const context = (request: Record<string, unknown>) => JSON.stringify((request.messages as Array<{ role: string; content: unknown }>).filter(m => m.role === "user" && messageText(m.content).includes("<aide_background")));
+  assert.match(context(fixture.requests[1]!), /updated-work-understanding/);
+  assert.match(context(fixture.requests[2]!), /Both inspected/, "A report refreshes the next model turn in the same invocation");
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
   const admitted = [...state.harnessInputs.values()].find(i => i.delivery === (attention === "immediate" ? "steer" : "followUp"));
   assert.equal(admitted?.deliveryOutcome, "applied");
@@ -874,4 +888,75 @@ test("Pi native compaction uses model output budget and resumes a valid checkpoi
   assert.equal((await fixture.run("Review a new independent input", "next")).stopReason, "end_turn");
   assert.ok(JSON.stringify(fixture.requests.at(-1)).includes("Valid checkpoint"));
   assert.equal(summaries, completedSummaries, "Resume must reuse the checkpoint");
+});
+
+/** @case Business context remains a current user-role prefix across tools, followUp, steer, compaction and resume. */
+for (const operation of ["followUp", "steer"] as const) test(`Pi refreshes custom context during ${operation} and rebuilds it after native recovery`, { timeout: 20_000 }, async t => {
+  let release!: () => void;
+  const pause = new Promise<void>(resolve => { release = resolve; });
+  t.after(() => release());
+  let context: Record<string, string> = { conversations: "catalog-version-one", obsolete: "deleted-part-marker" };
+  const fixture = await setup(t, (request, index) => {
+    if (JSON.stringify(request.messages).includes("context summarization assistant")) {
+      assert.doesNotMatch(JSON.stringify(request.messages), /catalog-version|deleted-part-marker/, "Current background is not historical summarization material");
+      return { text: "Checkpoint: keep handling inputs." };
+    }
+    return { text: "Processed", ...(index === 0 ? { pause } : {}) };
+  }, "pi", undefined, undefined, () => { const snapshot = { ...context }; return { text: () => JSON.stringify(snapshot) }; });
+  const background = (request: Record<string, unknown>) => (request.messages as Array<{ role: string; content: unknown }>).filter(m => messageText(m.content).includes("<aide_background"));
+  const running = fixture.run("input one", "live-context");
+  for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
+  assert.equal(fixture.requests.length, 1);
+  assert.match(JSON.stringify(background(fixture.requests[0]!)), /catalog-version-one/);
+  assert.ok(background(fixture.requests[0]!).every(m => m.role === "user"));
+  context = { conversations: "catalog-version-two" };
+  const accepted = await fixture.adapter[operation]!(fixture.ref(), { invocationId: "live-context", messageId: "next-input", blocks: [{ type: "text", text: "input two" }] });
+  assert.equal(accepted.accepted, true);
+  release(); await running;
+  const request = fixture.requests[1]!;
+  assert.equal(background(request).length, 1);
+  assert.match(JSON.stringify(background(request)), /catalog-version-two/);
+  assert.doesNotMatch(JSON.stringify(request.messages), /catalog-version-one|deleted-part-marker/);
+  assert.equal((request.messages as Array<{ role: string }>).find(m => m.role === "user"), background(request)[0], "Business background precedes input history");
+  await fixture.run("same state", "unchanged");
+  assert.deepEqual(background(fixture.requests.at(-1)!), background(request), "Unchanged background keeps an identical prefix");
+  assert.doesNotMatch(JSON.stringify(fixture.native().sessionManager.getEntries()), /catalog-version|deleted-part-marker/, "Derived material does not accumulate in native history");
+  fixture.native().settingsManager.applyOverrides({ compaction: { enabled: false, reserveTokens: 1000, keepRecentTokens: 0 } });
+  await fixture.native().compact();
+  const id = fixture.native().sessionId;
+  context = { conversations: "catalog-version-three-after-restart" };
+  await fixture.reopen();
+  assert.equal(fixture.native().sessionId, id);
+  await fixture.run("after restart", "resumed-context");
+  assert.match(JSON.stringify(background(fixture.requests.at(-1)!)), /catalog-version-three-after-restart/);
+  assert.doesNotMatch(JSON.stringify(fixture.requests.at(-1)!.messages), /catalog-version-two/);
+});
+
+test("Pi refuses stale context when reading current resources fails", { timeout: 20_000 }, async t => {
+  let fail = true;
+  const fixture = await setup(t, () => ({ text: "Processed" }), "pi", undefined, undefined, () => {
+    if (fail) throw new Error("Current resource unavailable");
+    return { text: () => "recovered resource" };
+  });
+  await fixture.run("first", "unavailable");
+  assert.equal(fixture.requests.length, 0);
+  fail = false;
+  await fixture.run("new input", "recovered");
+  assert.equal(fixture.requests.length, 1);
+  assert.match(JSON.stringify(fixture.requests[0]!.messages), /recovered resource/);
+});
+
+/** @case A failed refresh after a tool stops inference; it must not silently continue with old resource facts. */
+test("Pi stops the current loop when context cannot refresh between tool turns", { timeout: 20_000 }, async t => {
+  let fail = false;
+  const fixture = await setup(t, () => {
+    fail = true;
+    return { tool: "bash", args: { command: "printf fixture" } };
+  }, "pi", undefined, undefined, () => {
+    if (fail) throw new Error("Resource refresh failed");
+    return { text: () => "initial resource state" };
+  });
+  const result = await fixture.run("Inspect", "refresh-failed");
+  assert.equal(fixture.requests.length, 1);
+  assert.notEqual(result.stopReason, "end_turn");
 });

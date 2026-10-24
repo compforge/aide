@@ -1,3 +1,5 @@
+import { bindBackground } from "./background.ts";
+import type { ReadBackground } from "../background.ts";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
@@ -19,6 +21,8 @@ export interface PiAgentOptions {
   /** Host-bound scope prevents resuming a session with different application tools/context. */
   scope?: string;
   systemPrompt?: string;
+  /** Current business background, projected as custom/user messages before input history. */
+  background?: ReadBackground;
 }
 
 /**
@@ -65,5 +69,6 @@ export async function createPiAgent(options: PiAgentOptions): Promise<AgentSessi
       text: "Initialize this Aide agent session. Subsequent inputs provide the work to perform; this initialization requests no external action." }], timestamp: Date.now() });
   }
   session.agent.state.messages = session.sessionManager.buildSessionContext().messages;
+  if (options.background) bindBackground(session, options.background);
   return session;
 }

@@ -4,7 +4,10 @@ import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts"
 import { deliver, routed, type RoutingContext, type RoutingInput } from "./delivery.ts";
 import type { Destination } from "./model.ts";
 
-/** @spec Topic affinity and original-input receipts route directly; Default is never an unconditional copy. */
+/** @spec Topic affinity and original-input receipts route directly; Default is never an unconditional copy.
+ * @spec Without any live non-Default candidate, fallback is deterministic; Channel topic creation takes precedence.
+ * @link docs/personal/route.md
+ */
 export async function routeByRules(context: RoutingContext, original: RoutingInput): Promise<boolean> {
   const input = (await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, ...original.metadata }))!;
   if (routed(input)) return true;
@@ -32,7 +35,11 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
     if (!c || c.metadata.deletionTimestamp || c.spec.id !== sessionId) throw new Error(`Channel Conversation unavailable: ${name}`);
     destinations.set(c.metadata.uid, c.metadata);
   }
-  if (!destinations.size) return false;
+  if (!destinations.size) {
+    if (conversations.some(c => !c.spec.default)) return false;
+    await deliver(context, input, [await defaultDestination(context)], "No non-Default Conversation candidates");
+    return true;
+  }
   await deliver(context, input, [...destinations.values()].map(({ name, uid }) => ({ name, uid })), "Deterministic topic or original Input");
   return true;
 }
