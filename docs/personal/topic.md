@@ -30,7 +30,7 @@ Topic 使用独立 ID / UID，名称和来源 key 不充当资源身份。字段
 | parentRef | 可选的父 Topic 引用，固定到 UID |
 | summary / recent | 累计认识与有界的近期依据 |
 | lastInputAt | 本 Topic 及其子树最后一次接纳新 Input 的时间 |
-| default | 当前默认主题标记，切换时原子地转移 |
+| default | 系统兜底主题标记，与保留身份 `default` 一致，不可转移 |
 | status.agent / status.execution | root 的原生会话引用和执行状态；非 root 不继续运行 Chief |
 
 只持久化 parentRef，不再持久化 children 列表。按 parentRef 索引反向查询直接子节点，沿 parentRef 向上寻找 root；API / Web 可以返回由此生成的树投影。
@@ -218,11 +218,13 @@ assess_input 只保存单次研判回执（最多 1000 字符）并原子交接 
 
 summaryChars 默认 4000、最高 16000；contextChars 默认 48000。近期依据仍受统一数量和字符预算约束。详情见[配置](../configuration.md#topic-消费策略)。
 
-## 默认联络处
+## 默认主题
 
-实例最多一个 Default。用户可以通过主题菜单的“设为默认主题”选择或切换 Default，Route 在没有 Default 时建立兜底主题。切换原子地取消旧标记并设置新标记；旧主题、Input、Output、认识和 Work 保留，不迁移到新 Default。当前 Default 不能直接取消或删除，可以先选择另一个主题。
+Default Topic 承接规则与 Route agent 无法明确归属的输入。主动联系 Me 由 Default Channel 决定，与默认主题独立。
 
-Default 必须是没有子主题的独立 root，不参与 Weave，也不能作为其他 Topic 的父节点。选择已有子主题时，操作会将它从父主题独立出来；已有处理回执保留原归属，后续输入由它自己的 Chief 处理。若原处理路径仍有执行、该主题有待研判 Input，或 Weave 正在整理，则拒绝切换并提示重试。包含子主题的父主题不能直接设为 Default。默认标记不自动启用定时回顾，不授予通信地址或执行权限。
+Default 由系统维护，Route 首次需要兜底时自动创建，后续输入与服务重启均复用同一资源。`default` 是保留身份；并发创建只产生一个 Default，不将已有业务 Topic 提升为默认。Web 保留默认标记和列表置顶，不提供设置、切换或取消 Default 的操作，也不提供对应 API。
+
+Default 是没有子主题的独立 root，不参与 Weave，不能作为其他 Topic 的父节点，也不能删除。它不绑定来源地址或 topicKey，不自动启用定时回顾，不授予通信或执行权限。用户仍可在其中交流和开启回顾；给 Me 发通知使用 Default Channel。
 
 ## Topic 定时回顾
 

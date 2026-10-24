@@ -7,7 +7,7 @@ export const WatchSchema = z.object({
   repositories: z.array(RepositorySchema).default([]),
   userKeys: z.array(z.string().trim().min(1)).min(1),
 }).strict();
-export type Watch = Omit<z.infer<typeof WatchSchema>, "topicKey"> & { topicKey: string };
+export type Watch = Omit<z.infer<typeof WatchSchema>, "topicKey"> & { topicKey: string; me?: { userKey: string } };
 
 export function requirementWatches(config: readonly z.infer<typeof WatchSchema>[]): Watch[] {
   const watches: Watch[] = config.map((watch) => ({ ...watch, topicKey: watch.topicKey ?? `source:${watch.id}` }));

@@ -1,3 +1,4 @@
+import { ChannelSettings, ChannelSettingsChangeSchema, ChannelSettingsError } from "../channel/settings.ts";
 import { createWebAssets } from "./assets.ts";
 import type { TopicItem } from "./types.ts";
 import { visibleOutput } from "../channel/output.ts";
@@ -18,8 +19,6 @@ import { inputList, inputDetail } from "./inputs.ts";
 const EventSchema = IncomingSchema.omit({ text: true, channelId: true, source: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
-
-const TopicDefaultSchema = z.object({ topicId: z.string().min(1), enabled: z.boolean() }).strict();
 
 const TopicTriggerSchema = z.object({ topicId: z.string().min(1) }).extend({ enabled: z.boolean() }).strict();
 
@@ -64,7 +63,7 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 }
 
 /** Local channel bridge: accept messages/events and let adapters poll the durable outgoing log. */
-export function httpChannel(aide: WebService, log: Logger) {
+export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSettings) {
   const receive = bindChannelInput(CHANNELS.web, (input) => aide.receive(input));
   const assets = createWebAssets();
   return createServer(async (request, response) => {
@@ -92,6 +91,11 @@ export function httpChannel(aide: WebService, log: Logger) {
           "content-security-policy": "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
         });
         response.end(asset.content); return;
+      }
+      if (url.pathname === "/channels/config" && (request.method === "GET" || request.method === "POST")) {
+        if (!settings) { json(response, 503, { error: "此运行实例未提供配置编辑能力。" }); return; }
+        json(response, 200, request.method === "GET" ? settings.snapshot() : settings.change(ChannelSettingsChangeSchema.parse(await body(request))));
+        return;
       }
       if (request.method === "GET" && url.pathname === "/health") {
         json(response, 200, { status: "ok", revision: process.env.AIDE_REVISION ?? "development" }); return;
@@ -155,9 +159,6 @@ export function httpChannel(aide: WebService, log: Logger) {
           if (/version conflict|incarnation changed|Unknown Person|not found/.test(String(error))) {
             json(response, 409, { error: "人物资料已更新或删除。请取消并重新加载，再核对合并内容。" }); return;
           }
-          if (String(error).includes("Me cannot be deleted")) {
-            json(response, 409, { error: "请保留「我」，在「我」的详情中合并其他人物。" }); return;
-          }
           if (String(error).includes("into itself")) { json(response, 400, { error: "不能将人物合并到自己。" }); return; }
           if (/identity|identities/.test(String(error)) && !(error instanceof z.ZodError)) {
             json(response, 409, { error: "人物身份已变化，请重新加载后核对。" }); return;
@@ -188,12 +189,6 @@ export function httpChannel(aide: WebService, log: Logger) {
         const input = IncomingSchema.omit({ channelId: true, observation: true, source: true, topicKey: true }).extend({ topicId: z.string().min(1) }).parse(await body(request));
         const topicId = webTopicLocator.locate(input).id;
         json(response, 200, await receive({ ...input, topicId, source: webAddress(topicId) }));
-      } else if (request.method === "POST" && url.pathname === "/topics/default") {
-        const { topicId, enabled } = TopicDefaultSchema.parse(await body(request));
-        const resource = aide.topics.resource(topicId);
-        if (!resource || resource.metadata.deletionTimestamp) { json(response, 404, { error: "会话不存在。" }); return; }
-        await aide.setDefaultTopic(topicId, enabled);
-        json(response, 200, { topicId, default: enabled });
       } else if (request.method === "POST" && url.pathname === "/topics/trigger") {
         const { topicId, enabled } = TopicTriggerSchema.parse(await body(request));
         if (!aide.topics.get(topicId)) {
@@ -244,6 +239,7 @@ export function httpChannel(aide: WebService, log: Logger) {
         json(response, 404, { error: "Unknown route" });
       }
     } catch (error) {
+      if (error instanceof ChannelSettingsError) { json(response, error.status, { error: error.message }); return; }
       log.error({ err: error, path: request.url }, "Channel request failed");
       json(response, error instanceof z.ZodError || error instanceof SyntaxError ? 400 : 500,
         { error: "Request failed; check the Aide log" });

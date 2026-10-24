@@ -55,7 +55,7 @@ function mountTopic(topicId: string | null) {
     byId("notice").textContent = "Enter 发送 · Shift + Enter 换行";
     mountComposer(topicId, poll, signal);
   } else {
-    byId("notice").textContent = "选择已有主题，或新建对话；可以将常用私聊设为默认联络处。";
+    byId("notice").textContent = "选择已有主题，或新建对话；默认主题承接暂时无法归类的信息。";
     byId("connection").textContent = "";
   }
 

@@ -9,12 +9,7 @@ Lark Channel 把机器人单聊和群内 @机器人的文字接到现有 Persona
 1. 在 [Lark 开发者后台](https://open.feishu.cn/app) 创建企业自建应用，开启机器人能力，设置应用可用范围。Aide 使用单一执行身份；同一应用内的单聊与群聊共用服务端 CLI 能力和凭据，会话划分不提供权限隔离。
 2. 开通应用权限 `im:message.p2p_msg:readonly`（读取发给机器人的单聊消息）、`im:message:send_as_bot`（以应用身份发送消息），以及 `cardkit:card:write`（创建与更新流式卡片）。Channel 不依赖 lark-cli 的用户登录态。
    需要群内 @ 接入时，再开通 `im:message.group_at_msg:readonly`（获取群组中用户 @机器人的消息），并将机器人加入目标群；无需开通读取群内所有消息的权限。
-3. 在服务器的 `~/.config/aide/env` 填入下面两个变量，执行 `chmod 600 ~/.config/aide/env`，然后重启 Aide。凭证不要提交到仓库或发到聊天中。
-
-   ```dotenv
-   AIDE_LARK_APP_ID=cli_your_app_id
-   AIDE_LARK_APP_SECRET=your_app_secret
-   ```
+3. 在 Web「接入」新增 Lark 渠道，填写机器人 App ID / App Secret；也可以在 `config.yaml` 的 `channels.<实例标识>` 中配置。保存后重启 Aide。配置文件权限应为 `600`，凭证不要提交到仓库或发到聊天中。完整示例见[配置](../configuration.md#沟通渠道)。
 
 4. 在日志看到 `Lark WebSocket connected` 后，在开放平台的“事件与回调”选择“使用长连接接收事件”，订阅 `im.message.receive_v1`。
 5. 发布应用版本，使权限、机器人能力和事件配置生效。Lark 中找到机器人，发一条文字消息。
@@ -26,7 +21,7 @@ systemctl --user restart aide
 journalctl --user -u aide -f
 ```
 
-本地运行时把相同变量放入进程环境后运行 `npm start`。两个变量都不设则禁用 Lark；只设一个会启动失败。HTTP 服务仍监听本地，不需要暴露公网。需要代理时配置服务的 `HTTPS_PROXY` / `HTTP_PROXY`；WebSocket 也会使用代理。
+本地运行同样读取 config.yaml。未配置 Lark 实例或实例 enabled 为 false 时不启动对应机器人；可以配置多个不同应用的实例，每个应用只配置一次。HTTP 服务仍监听本地，不需要暴露公网。需要代理时配置服务的 `HTTPS_PROXY` / `HTTP_PROXY`；WebSocket 也会使用代理。
 
 同一个机器人应用只运行一个消息消费者，避免多个 Aide 或其他机器人程序竞争事件。参考 Lark 官方的[事件订阅配置](https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-/request-url-configuration-case)、[接收消息](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive)和[发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create)。
 
@@ -43,7 +38,7 @@ journalctl --user -u aide -f
 
 入站事件先保存到 `AIDE_HOME/channels/` 再确认接收，后台依次交给 Aide，避免模型响应超过平台回调时限。Lark 消息 ID 用于去重；未处理的收件在重启后继续。消息提交后异步处理，Chief 失败会保留提示，等待用户核对后新发消息明确重试。已进入业务执行的中断仍遵循 `uncertain` 规则，不自动重放。
 
-出站包括 Chief 回复、业务追问、Task 结果和 Routine 通知，每秒检查持久消息。发送串行，失败后间隔 10 秒重试；长文本分段发送，每段单独记录送达。Output 的 target 明确指定 appId 与 chatId，无需该聊天先发来消息；网页和其他应用的 Output 不会被转发。群回复沿用同一流式卡片和持久 outbox，发送回原群。
+出站包括 Chief 回复、业务追问、Task 结果和 Routine 通知，每秒检查持久消息。发送串行，失败后间隔 10 秒重试；长文本分段发送，每段单独记录送达。Output 的 target 明确指定发送应用与收件目标：群回复使用 chat_id，默认联系 Me 使用同一应用下的 open_id。后者直接调用 message.create(receive_id_type=open_id)，无需先有私聊或查询聊天历史；网页和其他应用的 Output 不会被转发。群回复沿用同一流式卡片和持久 outbox，发送回原群。
 
 投递记录按消息 ID 保存，不依赖时间游标，避免遗漏稍后写入的消息。发送失败或进程在发送后落盘前退出时，重试沿用相同的 Lark `uuid`。平台的去重窗口有限，超过窗口后仍可能重复送达，不能保证端到端 exactly-once。收发历史暂不自动清理，适用于单用户原型。
 

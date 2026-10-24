@@ -4,7 +4,7 @@ import { bindSourceInput, type SourceInput } from "../input.ts";
 import { isDeepStrictEqual } from "node:util";
 import { requirementAddress } from "../../../../connectors/requirements/address.ts";
 import { Persons } from "../../person/service.ts";
-import { LOCAL_ME, type Me } from "../../person/model.ts";
+import type { Me } from "../../person/model.ts";
 import { observeRequirementPeople } from "../../person/requirements.ts";
 import { relationToPerson } from "../../person/relation.ts";
 import { SOURCES } from "../definition.ts";
@@ -33,7 +33,7 @@ class RequirementObservation implements TopicLocator<RequirementIdentity> {
   private account!: RequirementAccount;
   private me: Me = { identities: [] };
   constructor(private readonly context: Context, private resource: Source, private readonly connectors: ConnectorClient, private readonly now: string) {
-    this.persons = new Persons(context.resources, { identities: [LOCAL_ME] });
+    this.persons = new Persons(context.resources, { identities: [] });
   }
   private get tracked() { return this.resource.status.tracked ?? {}; }
   private async save(patch: Partial<RequirementSourceStatus>) {
@@ -149,8 +149,7 @@ class RequirementObservation implements TopicLocator<RequirementIdentity> {
   async run() {
     await this.deliver();
     this.account = await this.connectors.requirements.identity(this.resource.spec.source);
-    const person = await this.persons.me();
-    this.me = { identities: person?.spec.identities ?? [] };
+    this.me = { identities: this.resource.spec.me ? [{ provider: this.account.provider, scope: this.account.scope, id: this.resource.spec.me.userKey }] : [] };
     if (this.resource.status.scope !== this.account.scope) await this.save({ scope: this.account.scope, tracked: {}, scan: null, scannedThrough: null });
     // Existing work remains observable after completion or reassignment removes it from discovery queries.
     const existing = Object.keys(this.tracked);

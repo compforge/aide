@@ -11,7 +11,9 @@ import { personRequirements } from "../plugins/personal/person/requirements.ts";
 import { requirementOutputs } from "../plugins/personal/output/requirements.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
 import { reconcileChannelOutputs } from "./channel/delivery.ts";
-import { assertChannelDelivery } from "./channel/address.ts";
+import { enabledLarkApps } from "./channel/config.ts";
+import { personRef } from "../plugins/personal/person/model.ts";
+import { larkPersonAddress, webAddress, assertChannelDelivery } from "./channel/address.ts";
 import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import type { SourceDefinition } from "../plugins/personal/source/input.ts";
@@ -40,8 +42,6 @@ import { IncomingSchema, type Incoming } from "./channel/message.ts";
 export interface AideOptions {
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   defaultHarnessConfig: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
-  /** The configured bot Channel app, independent of the Lark Connector account. */
-  larkAppId?: string;
   createAdapter: ExecutionOptions["createAdapter"];
 }
 
@@ -79,26 +79,32 @@ export class Aide {
   get persons() { return this.catalog.persons; }
   private starting?: Promise<void>;
   private closed = false;
-  private defaultSelection: Promise<void> = Promise.resolve();
 
   constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
     this.defaultHarnessConfig = Object.freeze({ ...options.defaultHarnessConfig });
     const config = options.config;
     const { sources } = parsePersonalConfig(config?.plugins.personal);
-    this.meMarks = { identities: [LOCAL_ME, ...(config?.connectors.lark?.me ?? []).map((i) => ({ provider: "lark", scope: i.appId, id: i.openId }))] };
-    this.watches = requirementWatches(sources.requirements);
-    this.messageSource = messageWatch(sources.lark, config?.connectors.lark, this.meMarks);
+    const connectorMe = { identities: (config?.connectors.lark?.me ?? []).map(i => ({ provider: "lark", scope: i.appId, id: i.openId })) };
+    const channelMe = { identities: [LOCAL_ME, ...Object.values(config?.channels ?? {}).flatMap(c => c.me ? [{ provider: "lark", scope: c.appId, id: c.me.openId }] : [])] };
+    this.meMarks = { identities: [...channelMe.identities, ...connectorMe.identities] };
+    this.meMarks.identities = [...new Map(this.meMarks.identities.map(identity => [JSON.stringify(identity), identity])).values()];
+    const requirements = loadMeegoRequirementConfigs(config?.connectors ?? {});
+    this.watches = requirementWatches(sources.requirements).map(watch => {
+      const me = requirements.find(c => c.source === watch.source)?.me;
+      return { ...watch, ...(me ? { me } : {}) };
+    });
+    this.messageSource = messageWatch(sources.lark, config?.connectors.lark, connectorMe);
     const environments = resolveEnvironmentConfig(config?.connectors.environments);
     this.environmentSources = environmentSources(sources.environments, environments);
     const storage = ResourceStorage.open(home);
     storage.configure(config?.resources);
     storage.register("personal", personalDefinitions);
     this.inputs = new InputStore(home);
-    this.outputStore = new OutputStore(home, target => assertChannelDelivery(target, options.larkAppId));
+    this.outputStore = new OutputStore(home, target => assertChannelDelivery(target, enabledLarkApps(config?.channels ?? {})));
     this.unsubscribeOutputs = this.outputStore.subscribe(() => this.notify());
     this.inputs.storage.onRetentionError = (resource, error) => this.log.error({ err: error, kind: resource.kind, uid: resource.metadata.uid }, "Resource retention decision failed; preserved resource");
     this.unsubscribeResources = this.inputs.storage.subscribe((scope, resource) => { this.log.info({ scope, kind: resource.kind, uid: resource.metadata.uid }, "Resource reclaimed"); });
-    validateWatchScopes(this.watches, loadMeegoRequirementConfigs(config?.connectors ?? {}));
+    validateWatchScopes(this.watches, requirements);
     this.log.info({
       meIdentities: this.meMarks.identities.length,
       environments: this.environmentSources.map(({ environment, namespace, intervalMs }) => ({ environment, namespace, intervalMs })),
@@ -139,9 +145,9 @@ export class Aide {
         },
       },
     });
-    this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, me: this.meMarks,
+    this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, channelMe,
       topic: parsePersonalConfig(config?.plugins.personal).topic, weave: parsePersonalConfig(config?.plugins.personal).weave }, log,
-      { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore });
+      { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore, contactMe: topicId => this.contactMe(topicId) });
     this.runtime.subscribe(() => this.notify());
     this.personal.topics.subscribe(() => this.notify());
   }
@@ -195,36 +201,6 @@ export class Aide {
     return result;
   }
 
-  /** @spec Default selection atomically replaces the marker and detaches a selected leaf without moving its facts or work.
-   * @link docs/personal/topic.md#默认联络处
-   */
-  setDefaultTopic(topicId: string, enabled: boolean): Promise<void> {
-    const change = this.defaultSelection.then(async () => {
-      for (let attempt = 0; ; attempt++) {
-        const resource = this.topics.resource(topicId);
-        if (!resource || resource.metadata.deletionTimestamp) throw new Error("Topic does not exist");
-        if (resource.spec.default === enabled) return;
-        if (!enabled && resource.spec.default) throw new Error("Select another default Topic instead of clearing the default");
-        const { parentRef, ...rootSpec } = resource.spec;
-        const previous = enabled ? this.topics.list().filter(c => c.default && c.id !== topicId)
-          .map(c => this.topics.resource(c.id)!) : [];
-        try {
-          await this.runtime.plugins.resourceClient("personal").commit([
-            ...previous.map(c => ({ operation: "replace" as const, resource: c, spec: { ...c.spec, default: false }, status: c.status })),
-            { operation: "replace", resource, spec: { ...(enabled ? rootSpec : resource.spec), default: enabled }, status: resource.status },
-          ]);
-          this.log.info({ topicId, enabled, previousTopicIds: previous.map(c => c.spec.id), detachedFromUid: enabled ? parentRef?.uid : undefined }, "Default topic configured");
-          break;
-        } catch (error) {
-          if (attempt >= 8 || !/version conflict|Default Topic already exists/.test(String(error))) throw error;
-        }
-      }
-      this.notify();
-    });
-    this.defaultSelection = change.catch((err) => { this.log.error({ err, topicId }, "Default topic selection failed"); });
-    return change;
-  }
-
   async setTopicTrigger(topicId: string, enabled: boolean) {
     const scope = this.personal;
     if (!this.topics.get(topicId)) throw new Error("Topic does not exist");
@@ -234,17 +210,36 @@ export class Aide {
     return trigger;
   }
 
+  /** @spec Default say sends from the selected bot to Me, without relying on prior chat or Topic address.
+   * @link docs/channel/README.md
+   */
+  private async contactMe(topicId: string) {
+    const id = this.options.config?.defaultChannel ?? "web";
+    let identity = LOCAL_ME;
+    if (id !== "web") {
+      const channel = this.options.config?.channels[id];
+      if (!channel?.enabled) throw new Error(`Default Channel is unavailable: ${id}`);
+      if (!channel.me) throw new Error(`Default Channel ${id} needs Me's identity in app ${channel.appId}; configure channels.${id}.me`);
+      identity = { provider: "lark", scope: channel.appId, id: channel.me.openId };
+    }
+    const me = await this.persons.findIdentity(identity);
+    if (!me) throw new Error(`Default Channel ${id} has no Person for its configured Me identity`);
+    return { target: id === "web" ? webAddress(topicId) : larkPersonAddress(identity.scope, identity.id), receivers: [personRef(me)] };
+  }
+
   private async initializePeople() {
     for (const config of loadMeegoRequirementConfigs(this.options.config?.connectors ?? {})) {
       if (!config.me) continue;
       const account = await this.connectors.requirements.identity(config.source);
       this.meMarks.identities.push({ provider: account.provider, scope: account.scope, id: config.me.userKey });
     }
-    await this.persons.initialize();
+    const result = await this.persons.initialize();
+    if (result.conflict) this.log.error(result.conflict, "Me consolidation deferred; original Persons preserved");
+    this.log.info({ meIdentities: this.meMarks.identities.length, mePersons: (await this.persons.list()).filter(p => p.isMe).length, merged: result.merged }, "Me identities reconciled");
   }
   start(): Promise<void> {
     return this.starting ??= Promise.resolve().then(async () => {
-      reconcileChannelOutputs(this.outputStore, this.options.larkAppId, this.log);
+      reconcileChannelOutputs(this.outputStore, enabledLarkApps(this.options.config?.channels ?? {}), this.log);
       await this.initializePeople();
       await this.personal.start();
     });
@@ -261,7 +256,6 @@ export class Aide {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    await this.defaultSelection;
     await this.personal.close();
     this.listeners.clear();
     this.unsubscribeResources();

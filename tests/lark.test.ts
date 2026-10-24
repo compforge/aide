@@ -10,7 +10,7 @@ import type { OutputView } from "../src/output.ts";
 import { fixtureOutput } from "./output-fixture.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
 import type { Incoming } from "../src/channel/message.ts";
-import { larkConfig, larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark/client.ts";
+import { larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark/client.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });
@@ -332,16 +332,11 @@ test("official SDK resolves bot identity before accepting events, and keeps priv
   assert.equal(received.length, 2);
 });
 
-test("Lark is optional and incomplete credentials fail without exposing secrets", () => {
-  assert.equal(larkConfig({}), undefined);
-  assert.throws(() => larkConfig({ AIDE_LARK_APP_SECRET: "secret" }), /^Error: Set both/);
-  assert.deepEqual(larkConfig({ AIDE_LARK_APP_ID: "cli_test", AIDE_LARK_APP_SECRET: "secret" }), { appId: "cli_test", appSecret: "secret" });
-});
-
 test("official SDK sends bot text with a stable uuid and checks API-level failure", async (t) => {
   const original = Lark.defaultHttpInstance.defaults.adapter;
   t.after(() => { Lark.defaultHttpInstance.defaults.adapter = original; });
   let rejectSend = false;
+  let direct = false;
   let sends = 0;
   Lark.defaultHttpInstance.defaults.adapter = async (config) => {
     assert.equal(config.timeout, 15_000);
@@ -350,8 +345,8 @@ test("official SDK sends bot text with a stable uuid and checks API-level failur
       data = { code: 0, tenant_access_token: "test-token", expire: 7200 };
     } else {
       assert.ok(config.url?.endsWith("/im/v1/messages"));
-      assert.equal(config.params.receive_id_type, "chat_id");
-      assert.deepEqual(JSON.parse(config.data), { receive_id: "oc_test", msg_type: "text", content: JSON.stringify({ text: "你好😀" }), uuid: "test-send-id" });
+      assert.equal(config.params.receive_id_type, direct ? "open_id" : "chat_id");
+      assert.deepEqual(JSON.parse(config.data), { receive_id: direct ? "ou_me" : "oc_test", msg_type: "text", content: JSON.stringify({ text: "你好😀" }), uuid: "test-send-id" });
       sends++;
       data = rejectSend ? { code: 99991672, msg: "scope missing" } : { code: 0, data: { message_id: "om_sent" } };
     }
@@ -366,7 +361,9 @@ test("official SDK sends bot text with a stable uuid and checks API-level failur
     assert.equal(larkSendFailure(error).apiCode, 99991672);
     return true;
   });
-  assert.equal(sends, 2);
+  rejectSend = false; direct = true;
+  await transport.send("ou_me", "你好😀", "test-send-id", "open_id");
+  assert.equal(sends, 3);
 });
 
 test("Lark receipt failures do not block later replies; restart retries receipts without resending", async (t) => {

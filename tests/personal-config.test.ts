@@ -125,7 +125,7 @@ test("Meego Me resolves canonical identity without equating profile or watched p
   const aide = new Aide(root, { ...fakeOptions(agent, root), connectors, config: loadConfig(configFile) }, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.start();
-  const me = await aide.persons.me();
+  const me = await aide.persons.findIdentity({ provider: "meego", scope: "https://meego.test/canonical", id: "human" });
   assert.ok(me?.spec.identities.some((identity) => identity.provider === "meego" && identity.scope === "https://meego.test/canonical" && identity.id === "human"));
   assert.ok(!me?.spec.identities.some((identity) => identity.id === "robot"));
 });

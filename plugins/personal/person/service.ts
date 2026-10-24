@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
+import { SUMMARY_CHARS } from "../context.ts";
 import { mergePersonSummary } from "./merge.ts";
-import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, type Me, type Person, type PersonIdentity, type PersonResource, type PersonStatus } from "./model.ts";
+import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, LOCAL_ME, type Me, type Person, type PersonIdentity, type PersonResource, type PersonStatus } from "./model.ts";
 
 /**
  * @spec Every topic resolves people in one catalog. Profiles contain no Input references.
- * @spec Matching uses scoped identifiers, never names; merging is an explicit user decision.
+ * @spec Matching uses scoped identifiers, never names; Me configuration or explicit user confirmation establishes shared identity.
  * @link docs/personal/person.md
  */
 export class Persons {
@@ -19,19 +20,48 @@ export class Persons {
     if (!person || person.metadata.deletionTimestamp || (uid !== undefined && person.metadata.uid !== uid)) throw new Error(`Unknown Person: ${id}`);
     return { ...person, isMe: isMe(person.spec, this.marks) };
   }
-  async me() {
-    const matches = (await this.list()).filter((p) => p.isMe);
-    if (matches.length > 1) throw new Error("Me identities match multiple Persons; correct the identity bindings");
-    return matches[0];
-  }
-  async initialize() {
-    const current = await this.me();
-    if (!current) return this.resources.create(PERSON_TYPE, { name: "me",
-      spec: PersonSchema.parse({ name: "我", identities: this.marks.identities }), status: { ...this.status("connector"), summary: "", recent: [] } });
-    const identities = [...current.spec.identities];
-    for (const identity of this.marks.identities) if (!identities.some((i) => identityKey(i) === identityKey(identity))) identities.push(identity);
-    if (identities.length !== current.spec.identities.length) await this.resources.replace(current, { ...current.spec, identities }, { ...current.status, ...this.status("connector") });
-    return current;
+  /** @spec Configured Me accounts identify one human; consolidate identity owners atomically before starting consumers.
+   * @spec Preserve the local Me owner when present, otherwise the oldest matching Person. Repeated initialization is a no-op.
+   * @link docs/personal/person.md#身份me-与关系
+   * @case tests/person-merge.test.ts
+   */
+  async initialize(): Promise<{ merged: number; conflict?: { personIds: string[]; reason: string } }> {
+    const marks = [...new Map(this.marks.identities.map(i => [identityKey(i), IdentitySchema.parse(i)])).values()];
+    if (!marks.length) return { merged: 0 };
+    const people = (await this.list()).filter(p => p.isMe).sort((a, b) =>
+      a.metadata.creationTimestamp.localeCompare(b.metadata.creationTimestamp) || a.metadata.name.localeCompare(b.metadata.name));
+    const local = identityKey(LOCAL_ME);
+    const target = people.find(p => p.spec.identities.some(i => identityKey(i) === local)) ?? people[0];
+    if (!target) {
+      const identity = marks.find(i => identityKey(i) === local) ?? marks[0]!;
+      await this.resources.create(PERSON_TYPE, {
+        name: createHash("sha256").update(identityKey(identity)).digest("hex").slice(0, 32),
+        spec: PersonSchema.parse({ name: "我", identities: marks }),
+        status: { ...this.status("connector"), summary: "", recent: [] },
+      });
+      return { merged: 0 };
+    }
+    const sources = people.filter(p => p.metadata.uid !== target.metadata.uid);
+    const identities = [...new Map([...target.spec.identities, ...sources.flatMap(p => p.spec.identities), ...marks]
+      .map(i => [identityKey(i), i])).values()];
+    if (!sources.length && identities.length === target.spec.identities.length) return { merged: 0 };
+    const summary = sources.reduce((text, p) => mergePersonSummary(text, p.status.summary), target.status.summary);
+    // Configuration must not silently discard understanding or prevent startup when consolidation needs user editing.
+    if (summary.length > SUMMARY_CHARS || identities.length > 100) return { merged: 0, conflict: {
+      personIds: people.map(p => p.metadata.name),
+      reason: summary.length > SUMMARY_CHARS ? "Combined Me summary exceeds the Person budget; consolidate the summaries before merging" : "Combined Me identities exceed the Person budget",
+    } };
+    const status = this.status("connector");
+    await this.resources.commit([
+      ...sources.map(resource => ({ operation: "delete" as const, resource })),
+      { operation: "replace", resource: target, spec: PersonSchema.parse({ ...target.spec, identities }), status: {
+        ...status, summary,
+        recent: sources.length ? [...target.status.recent, ...sources.flatMap(p => p.status.recent)]
+          .sort((a, b) => a.at.localeCompare(b.at))
+          .concat({ at: status.updatedAt, text: `Me 配置确认同一人，合并了${sources.map(p => `「${p.spec.name}」（${p.metadata.name}）`).join("、")}。` }) : target.status.recent,
+      } },
+    ]);
+    return { merged: sources.length };
   }
   async observe(raw: PersonIdentity, name?: string): Promise<Readonly<PersonResource>> {
     const identity = IdentitySchema.parse(raw);
@@ -62,6 +92,9 @@ export class Persons {
   }
   async edit(id: string, uid: string, version: string, spec: Person, summary?: string) {
     const current = await this.version(id, uid, version);
+    const retained = new Set(spec.identities.map(identityKey));
+    if (current.spec.identities.some(i => this.marks.identities.some(mark => identityKey(mark) === identityKey(i)) && !retained.has(identityKey(i))))
+      throw new Error("A configured Me identity cannot be removed; change the Me configuration first or merge the Person");
     // @spec User corrections replace the same summary Chief reads; stale writers must reread and merge.
     const status = { ...current.status, ...this.status("user") };
     if (summary !== undefined && summary !== current.status.summary) {
@@ -86,7 +119,6 @@ export class Persons {
     const [from, into] = await Promise.all([
       this.version(source.id, source.uid, source.version), this.version(target.id, target.uid, target.version),
     ]);
-    if (from.isMe || from.metadata.name === "me") throw new Error("Me cannot be deleted; merge other Persons into Me");
     const identities = [...new Map([...into.spec.identities, ...from.spec.identities].map((i) => [identityKey(i), i])).values()];
     const status = this.status("user");
     const [, merged] = await this.resources.commit([
@@ -101,7 +133,7 @@ export class Persons {
     const person = merged as PersonResource;
     return { ...person, isMe: isMe(person.spec, this.marks) };
   }
-  private async findIdentity(identity: PersonIdentity) {
+  async findIdentity(identity: PersonIdentity) {
     return (await this.list()).find((p) => p.spec.identities.some((i) => identityKey(i) === identityKey(identity)));
   }
   private async version(id: string, uid: string, version: string) {

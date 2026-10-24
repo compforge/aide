@@ -1,0 +1,19 @@
+@import "../shared/style.css";
+.connections-page { display: block; height: auto; max-width: 960px; margin: 32px auto; padding: 0 24px; }
+.connections-page section { margin-bottom: 32px; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 20px 0; }
+.channel-card { padding: 18px; border: 1px solid var(--line, #dce2d9); border-radius: 12px; margin: 16px 0; }
+.channel-card h3 { margin: 0 0 8px; }
+.channel-card p { overflow-wrap: anywhere; }
+#channel-form { display: grid; gap: 16px; max-width: 640px; }
+#channel-form label { display: grid; gap: 6px; }
+#channel-form input:not([type=checkbox]), select { padding: 8px; font: inherit; }
+#channel-error { color: #a23535; }
+button { cursor: pointer; padding: 8px 14px; }
+
+@media (max-width: 760px) {
+  header { display: flex; flex-wrap: wrap; padding: 16px; }
+  .main-tabs { flex-wrap: wrap; }
+  .connections-page { margin: 16px auto; padding: 0 16px; }
+  #channel-form input:not([type=checkbox]), select { min-width: 0; max-width: 100%; }
+}

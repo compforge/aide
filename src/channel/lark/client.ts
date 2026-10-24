@@ -2,16 +2,9 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
 import { z } from "zod";
+import type { LarkChannelConfig } from "../config.ts";
 
-const ConfigSchema = z.object({ appId: z.string().min(1), appSecret: z.string().min(1) });
-export type LarkConfig = z.infer<typeof ConfigSchema>;
-
-export function larkConfig(env: NodeJS.ProcessEnv): LarkConfig | undefined {
-  if (!env.AIDE_LARK_APP_ID && !env.AIDE_LARK_APP_SECRET) return undefined;
-  const parsed = ConfigSchema.safeParse({ appId: env.AIDE_LARK_APP_ID, appSecret: env.AIDE_LARK_APP_SECRET });
-  if (!parsed.success) throw new Error("Set both AIDE_LARK_APP_ID and AIDE_LARK_APP_SECRET");
-  return parsed.data;
-}
+export type LarkConfig = Pick<LarkChannelConfig, "appId" | "appSecret">;
 
 export interface LarkCardTransport {
   create(card: unknown): Promise<string>;
@@ -26,7 +19,7 @@ export interface LarkTransport {
   readonly botIdentity?: Lark.BotIdentity;
   cards?: LarkCardTransport;
   start(receive: (event: unknown) => void | Promise<void>): Promise<void>;
-  send(chatId: string, text: string, id: string): Promise<void>;
+  send(receiveId: string, text: string, id: string, receiveIdType?: "chat_id" | "open_id"): Promise<void>;
   close(): void;
 }
 
@@ -98,10 +91,10 @@ export function larkTransport(config: LarkConfig, log: Logger): LarkTransport {
       const eventDispatcher = new Lark.EventDispatcher({ logger }).register({ "im.message.receive_v1": async (event) => receive(event) });
       await ws.start({ eventDispatcher });
     },
-    async send(chatId, text, id) {
+    async send(receiveId, text, id, receiveIdType = "chat_id") {
       const response = await client.im.message.create({
-        params: { receive_id_type: "chat_id" },
-        data: { receive_id: chatId, msg_type: "text", content: JSON.stringify({ text }), uuid: id },
+        params: { receive_id_type: receiveIdType },
+        data: { receive_id: receiveId, msg_type: "text", content: JSON.stringify({ text }), uuid: id },
       });
       if (response.code !== 0 || !response.data?.message_id) {
         throw new LarkSendError(response.code);

@@ -2,7 +2,6 @@ import type { TopicLocator } from "../../topic/locator.ts";
 import { larkAddress, larkTopicKey } from "../../../../src/channel/address.ts";
 import { Persons } from "../../person/service.ts";
 import { isDeepStrictEqual } from "node:util";
-import { LOCAL_ME } from "../../person/model.ts";
 import { observePeople } from "../../person/messages.ts";
 import { bindSourceInput, type SourceInput } from "../input.ts";
 import { SOURCES } from "../definition.ts";
@@ -69,8 +68,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
   constructor(private readonly context: Context, private resource: Source, private readonly connectors: ConnectorClient, private readonly now: number) {
     this.submitInput = bindSourceInput(SOURCES.lark, resource, context.resources);
   }
-  private personIds?: string[];
-  private get watch() { return { ...this.resource.spec, personIds: this.personIds ?? this.resource.spec.personIds }; }
+  private get watch() { return this.resource.spec; }
   /** @spec Discovery and follow-up must agree on which mentions receive an independent Input. */
   private discoversMention(message: ChatMessage) {
     const ids = this.watch.personIds.length ? this.watch.personIds : [this.watch.userId];
@@ -93,9 +91,6 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
   }
 
   async run() {
-    const people = new Persons(this.context.resources, { identities: [LOCAL_ME] });
-    const me = await people.me();
-    if (me) this.personIds = me.spec.identities.filter((i) => i.provider === "lark" && i.scope === this.resource.spec.accountId).map((i) => i.id);
     const account = await this.connectors.messages.identity();
     if (account.accountId !== this.watch.accountId || account.userId !== this.watch.userId) {
       throw new Error("Message Source account differs from the connected user");

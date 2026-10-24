@@ -44,8 +44,8 @@ async function seedRoute(aide: Aide) {
 test("rules preserve one stable binding and inherit the original Input without copying to Default", async t => {
   let models = 0;
   const { aide } = setup(t, { async chief() { return "processed"; }, async route() { models++; throw new Error("Rules must not call Route Agent"); }, async execute() { throw new Error("No Work"); } });
-  for (const id of ["inbox", "a", "b"]) await aide.topics.ensure(id);
-  await aide.setDefaultTopic("inbox", true);
+  for (const id of ["a", "b"]) await aide.topics.ensure(id);
+  await aide.topics.ensure("default");
   await aide.start();
   const original = await aide.personal.topics.submit("original", source("original", "a"));
   await aide.settled();
@@ -54,7 +54,7 @@ test("rules preserve one stable binding and inherit the original Input without c
   await aide.personal.topics.submit("followup", { ...source("follow up"), observation: { originalInputId: "original" } });
   await aide.settled();
   assert.equal(models, 0);
-  assert.equal(aide.topics.inputs("inbox").length, 0);
+  assert.equal(aide.topics.inputs("default").length, 0);
   assert.ok(aide.topics.input("followup", "a"));
   assert.equal(aide.topics.input("followup", "b"), undefined);
   assert.deepEqual(aide.topics.inputStore.list().filter(i => !i.status.route?.completedAt).map(i => i.metadata.name), []);
@@ -101,16 +101,16 @@ test("semantic routing fans out, fallback goes only to Default, and finished inp
     return JSON.stringify({ decisions: data.inputs.map((i: { id: string }) => ({ inputId: i.id,
       topicUids: i.id === "shared" ? matches.map((c: { uid: string }) => c.uid) : [], reason: "Relevant topics" })) });
   } });
-  for (const id of ["inbox", "a", "b"]) await aide.topics.ensure(id);
-  await aide.setDefaultTopic("inbox", true); await aide.start();
+  for (const id of ["a", "b"]) await aide.topics.ensure(id);
+  await aide.topics.ensure("default"); await aide.start();
   await aide.personal.topics.submit("shared", source("cross-topic event"));
   await aide.settled();
   assert.equal(calls, 1);
   for (const id of ["a", "b"]) assert.ok(aide.topics.input("shared", id));
-  assert.equal(aide.topics.input("shared", "inbox"), undefined);
+  assert.equal(aide.topics.input("shared", "default"), undefined);
   assert.equal(aide.topics.resource("unknown-source-topic"), undefined);
   await aide.personal.topics.submit("fallback", source("unmatched")); await aide.settled();
-  assert.ok(aide.topics.input("fallback", "inbox"));
+  assert.ok(aide.topics.input("fallback", "default"));
   assert.equal(aide.topics.input("fallback", "a"), undefined);
   assert.equal((await route(aide)).status.execution, null);
   assert.equal((await route(aide)).status.agent?.harness, "route");
@@ -219,36 +219,22 @@ test("due Route retries compete with fresh arrivals and an undecided predecessor
   assert.ok(inputs.get("followup")!.status.route?.nextAttemptAt);
 });
 
-test("Default fallback creation and user selection preserve one global Default", async t => {
-  const { aide } = setup(t);
-  await aide.topics.ensure("chosen");
-  const { defaultDestination } = await import("../plugins/personal/route/rules.ts");
-  const ctx = context(aide);
-  const results = await Promise.allSettled([defaultDestination(ctx), aide.setDefaultTopic("chosen", true)]);
-  assert.ok(results.some(result => result.status === "fulfilled"));
-  assert.equal(aide.topics.list().filter(c => c.default).length, 1);
-  const chosen = aide.topics.resource(aide.topics.list().find(c => c.default)!.id)!;
-  assert.deepEqual(await defaultDestination(ctx), { name: chosen.metadata.name, uid: chosen.metadata.uid });
-  await assert.rejects(ctx.resources.create(TOPIC_TYPE, { name: "duplicate-default", spec: { id: "duplicate", default: true }, status: { receipts: [] } }), /Default Topic already exists/);
-});
-
 /** @case No topic candidates means no semantic choice, including future arrivals and deleting topics. */
 test("only Default routes repeated source inputs without invoking Route; channel creation still takes precedence", async t => {
   let calls = 0;
   const { aide } = setup(t, { async execute() { throw new Error("No Work"); }, async route() { calls++; throw new Error("No routing model needed"); } });
-  await aide.topics.ensure("inbox");
-  await aide.setDefaultTopic("inbox", true);
+  await aide.topics.ensure("default");
   const deleting = await aide.topics.ensure("deleting");
   await context(aide).resources.delete(TOPIC_TYPE, deleting.metadata.name);
   await aide.start();
   for (let i = 0; i < 3; i++) {
     await aide.topics.submit(`observation-${i}`, source("unknown topic"));
     await aide.settled();
-    assert.ok(aide.topics.input(`observation-${i}`, "inbox"));
+    assert.ok(aide.topics.input(`observation-${i}`, "default"));
   }
   await aide.topics.submit("new-chat", { origin: "channel", originId: "web", text: "new topic", topicId: "chat" });
   await aide.settled();
   assert.ok(aide.topics.input("new-chat", "chat"));
-  assert.equal(aide.topics.input("new-chat", "inbox"), undefined);
+  assert.equal(aide.topics.input("new-chat", "default"), undefined);
   assert.equal(calls, 0);
 });

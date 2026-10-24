@@ -1,3 +1,4 @@
+import { personContext } from "../agents/chief/person.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -89,12 +90,11 @@ test("Merge rolls back deletion and Watch notifications if the target fails vali
   assert.equal(f.changes(), before + 1);
 });
 
-test("Merge guards both incarnations, stale sources, self-merge and Me; retains bounded evidence", async t => {
-  const f = await setup(t), source = await f.create("source"), target = await f.create("target"), me = (await f.persons.me())!;
+test("Merge guards both incarnations, stale sources, self-merge; retains bounded evidence", async t => {
+  const f = await setup(t), source = await f.create("source"), target = await f.create("target"), me = (await f.persons.findIdentity(LOCAL_ME))!;
   await assert.rejects(f.persons.merge(version(source), version(source)), /itself/);
   await assert.rejects(f.persons.merge({ ...version(source), uid: "old-uid" }, version(target)), /version conflict/);
   await assert.rejects(f.persons.merge(version(source), { ...version(target), uid: "old-uid" }), /version conflict/);
-  await assert.rejects(f.persons.merge(version(me), version(target)), /Me cannot be deleted/);
   const updated = await f.client.patchStatus(source, { recent: Array.from({ length: 40 }, (_, i) => ({ at: new Date(1000 * i).toISOString(), text: "e".repeat(1000) })) });
   await assert.rejects(f.persons.merge(version(source), version(target)), /version conflict/);
   const merged = await f.persons.merge(version(updated), version(me), "用户确认后的认识");
@@ -129,4 +129,87 @@ test("Summary merge keeps differing contents, avoids exact duplication and does 
   assert.equal(mergePersonSummary("当前", ""), "当前");
   assert.equal(mergePersonSummary("相同", "相同"), "相同");
   assert.equal(mergePersonSummary("a".repeat(16000), "b".repeat(16000)).length, 32002);
+});
+
+/** @case Independent Me configurations confirm one human; Person merges accounts and understanding atomically and idempotently. */
+test("Me configuration consolidates existing Lark and WeChat Persons into one record", async t => {
+  const f = await setup(t);
+  const local = (await f.persons.findIdentity(LOCAL_ME))!;
+  const lark = { provider: "lark", scope: "cli_work", id: "ou_me" };
+  const wechat = { provider: "wechat", scope: "personal", id: "wx_me" };
+  const first = await f.persons.observe(lark, "李乾坤");
+  const second = await f.persons.observe(wechat, "李乾坤");
+  await f.persons.summarize(first.metadata.name, first.metadata.uid, first.metadata.resourceVersion, "Lark preference", "Explicit work preference");
+  await f.persons.summarize(second.metadata.name, second.metadata.uid, second.metadata.resourceVersion, "WeChat preference", "Explicit personal preference");
+  const persons = openPersonCatalog(f.home, { identities: [LOCAL_ME, lark, wechat] }, log, () => {}).persons;
+  assert.equal((await persons.initialize()).merged, 2);
+  const me = (await persons.findIdentity(lark))!;
+  assert.equal(me.metadata.uid, local.metadata.uid);
+  assert.equal((await persons.findIdentity(wechat))!.metadata.uid, me.metadata.uid);
+  assert.equal((await persons.list()).filter(p => p.isMe).length, 1);
+  assert.deepEqual(new Set(me.spec.identities.map(i => i.provider)), new Set(["web", "lark", "wechat"]));
+  assert.equal(me.status.summary.includes("Lark preference"), true);
+  assert.equal(me.status.summary.includes("WeChat preference"), true);
+  assert.ok(me.status.recent.some(e => e.text === "Explicit work preference"));
+  assert.ok(me.status.recent.some(e => e.text === "Explicit personal preference"));
+  const context = await personContext(persons);
+  assert.match(context, /Lark preference/); assert.match(context, /WeChat preference/);
+  assert.deepEqual(await persons.initialize(), { merged: 0 });
+  assert.equal((await persons.findIdentity(lark))!.metadata.resourceVersion, me.metadata.resourceVersion);
+  // Removing or reordering configuration does not split the human or change the retained UID.
+  const reordered = openPersonCatalog(f.home, { identities: [wechat, LOCAL_ME] }, log, () => {}).persons;
+  await reordered.initialize();
+  assert.equal((await reordered.findIdentity(wechat))!.metadata.uid, me.metadata.uid);
+  assert.equal((await reordered.findIdentity(lark))!.metadata.uid, me.metadata.uid);
+});
+
+test("Fresh Me configuration creates one Person and later account configuration enriches it", async t => {
+  const f = await setup(t);
+  const lark = { provider: "lark", scope: "cli_work", id: "ou_me" };
+  const wechat = { provider: "wechat", scope: "personal", id: "wx_me" };
+  // These marks have no existing owner; the unrelated local identity is not selected implicitly.
+  const persons = new Persons(f.client, { identities: [lark, wechat] });
+  await persons.initialize();
+  const me = (await persons.findIdentity(lark))!;
+  assert.equal((await persons.findIdentity(wechat))!.metadata.uid, me.metadata.uid);
+  assert.equal((await persons.list()).filter(p => p.isMe).length, 1);
+  const extra = { provider: "lark", scope: "cli_other", id: "ou_other" };
+  const enriched = new Persons(f.client, { identities: [extra, wechat, lark] });
+  await enriched.initialize();
+  assert.equal((await enriched.findIdentity(extra))!.metadata.uid, me.metadata.uid);
+});
+
+test("Me consolidation preserves all profiles when their combined understanding exceeds the budget", async t => {
+  const f = await setup(t), local = (await f.persons.findIdentity(LOCAL_ME))!;
+  const external = { provider: "lark", scope: "cli_work", id: "ou_me" };
+  const other = await f.persons.observe(external);
+  await f.persons.summarize(local.metadata.name, local.metadata.uid, local.metadata.resourceVersion, "a".repeat(9000), "first");
+  await f.persons.summarize(other.metadata.name, other.metadata.uid, other.metadata.resourceVersion, "b".repeat(9000), "second");
+  const persons = new Persons(f.client, { identities: [LOCAL_ME, external] });
+  const before = await persons.list();
+  const result = await persons.initialize();
+  assert.match(result.conflict!.reason, /summary exceeds/);
+  assert.deepEqual(await persons.list(), before);
+  const context = await personContext(persons);
+  assert.ok(context.length < 11000, "Pending consolidation still shares the context text budget");
+  const merged = await persons.merge(version(await persons.read(other.metadata.name)), version(await persons.read(local.metadata.name)), "用户精简的共同认识");
+  assert.deepEqual(await persons.initialize(), { merged: 0 });
+  assert.equal((await persons.findIdentity(external))!.metadata.uid, merged.metadata.uid);
+});
+
+test("A conflicting Me consolidation cannot partially delete identity owners", async t => {
+  const f = await setup(t), local = (await f.persons.findIdentity(LOCAL_ME))!;
+  const external = { provider: "lark", scope: "cli_work", id: "ou_me" };
+  const other = await f.persons.observe(external);
+  const marks = { identities: [LOCAL_ME, external] };
+  const racing = new Persons({ ...f.client, async commit(writes) {
+    await f.client.patchStatus(local, { summary: "并发用户修正" });
+    return f.client.commit(writes);
+  } }, marks);
+  await assert.rejects(racing.initialize(), /version conflict/);
+  assert.equal((await f.persons.findIdentity(external))!.metadata.uid, other.metadata.uid);
+  const persons = new Persons(f.client, marks);
+  await persons.initialize();
+  assert.equal((await persons.findIdentity(external))!.metadata.uid, local.metadata.uid);
+  assert.equal((await persons.findIdentity(external))!.status.summary, "并发用户修正");
 });

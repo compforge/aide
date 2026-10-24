@@ -33,7 +33,7 @@ plugins:
 三个配置表达不同的含义：
 
 - `profile` 选择执行读写的 CLI 账号，可以是受托账号。
-- `me.userKey` 标记被服务的人。启动时解析规范 host / project key，再把稳定 user key 加入 Personal.me 的外部身份。
+- `me.userKey` 标记被服务的人。启动时解析规范 host / project key，以规范作用域和稳定 user key 识别本人，并与其他已配置 Me 身份归入同一个 Person；Source 仍只使用该 Connector 的 Me 配置判断关系。
 - `userKeys` 选择观察哪些负责人的工作；可以包含他人，不会把这些人标记成 Me。
 
 `me` 可省略。没有匹配的 Me 身份时，Input.relation 保持未知。Person 身份使用提供方标识、规范 host/project scope 和 user key；显示名不参与身份匹配，也不凭同名把不同平台的人物合并。Connector 读取会贡献人物身份和姓名，Chief 通过 `summary_person` 积累认识。

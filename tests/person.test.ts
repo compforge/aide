@@ -64,7 +64,7 @@ test("Input relation is validated, survives restart and reaches Chief's descript
 test("Lark sender evidence survives its durable inbox and Personal classifies it using shared bindings", { timeout: 20_000 }, async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-person-channel-"));
   const configFile = join(home, "config.yaml");
-  writeFileSync(configFile, JSON.stringify({ connectors: { lark: { me: [{ appId: "cli_app", openId: "ou_me" }] } } }));
+  writeFileSync(configFile, JSON.stringify({ channels: { work: { kind: "lark", label: "Work", enabled: true, appId: "cli_app", appSecret: "test-secret", me: { openId: "ou_me" } } } }));
   const prompts: string[] = [];
   const log = pino({ level: "silent" });
   const aide = new Aide(home, { ...fakeOptions({ async chief() { return "ok"; }, async execute() { throw new Error("No work expected"); } }, home, prompts), config: loadConfig(configFile) }, log);
@@ -80,7 +80,7 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   const inputs = aide.personal.topics.inputStore.list();
   assert.equal(inputs.find((input) => input.spec.text === "mine")!.spec.relation, "sent");
   assert.equal(inputs.find((input) => input.spec.text === "other")!.spec.relation, undefined);
-  const self = (await aide.persons.me())!;
+  const self = (await aide.persons.findIdentity(me))!;
   assert.equal(inputs.find((input) => input.spec.text === "mine")!.spec.sender!.uid, self.metadata.uid);
   const other = inputs.find((input) => input.spec.text === "other")!.spec.sender!;
   assert.equal((await aide.persons.read(other.name)).isMe, false);

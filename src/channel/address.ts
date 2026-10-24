@@ -29,21 +29,27 @@ export const larkTopicLocator = {
 export function larkTopicKey(appId: string, chatId: string, threadId?: string): string {
   return larkTopicLocator.locate({ appId, chatId, threadId }).key;
 }
-export function larkEndpoint(address: Address): { appId: string; chatId: string } | undefined {
+export function larkPersonAddress(appId: string, openId: string): ChannelAddress {
+  if (!appId || !openId) throw new Error("Lark person address requires appId and openId");
+  return { kind: "channel", channelId: "lark", endpoint: [appId, "open_id", openId].map(encodeURIComponent).join("/") };
+}
+export function larkEndpoint(address: Address): { appId: string; receiveId: string; receiveIdType: "chat_id" | "open_id" } | undefined {
   if (!isChannelAddress(address) || address.channelId !== "lark") return;
   const parts = address.endpoint.split("/");
-  if (parts.length !== 2 || parts.some((p) => !p)) throw new Error("Invalid Lark address endpoint");
-  const [appId, chatId] = parts.map(decodeURIComponent);
-  if (larkAddress(appId!, chatId!).endpoint !== address.endpoint) throw new Error("Lark address endpoint must use canonical encoding");
-  return { appId: appId!, chatId: chatId! };
+  if (parts.some(p => !p) || (parts.length !== 2 && (parts.length !== 3 || parts[1] !== "open_id"))) throw new Error("Invalid Lark address endpoint");
+  const decoded = parts.map(decodeURIComponent), appId = decoded[0]!, receiveId = decoded.at(-1)!;
+  const receiveIdType = parts.length === 2 ? "chat_id" : "open_id";
+  const canonical = receiveIdType === "chat_id" ? larkAddress(appId, receiveId) : larkPersonAddress(appId, receiveId);
+  if (canonical.endpoint !== address.endpoint) throw new Error("Lark address endpoint must use canonical encoding");
+  return { appId, receiveId, receiveIdType };
 }
 /** @spec Observing an address through a Connector does not configure a Channel to send to it. */
-export function assertChannelDelivery(address: Address, larkAppId?: string): void {
+export function assertChannelDelivery(address: Address, larkAppIds: readonly string[] = []): void {
   if (!isChannelAddress(address)) return; // Connector destinations have their own delivery preflight.
   if (address.channelId === "web") return;
   const endpoint = larkEndpoint(address);
-  if (!endpoint || endpoint.appId !== larkAppId) {
-    throw new Error(`No configured Channel can deliver to ${JSON.stringify(address)}. ${larkAppId ? `Lark Channel appId is ${larkAppId}.` : "Lark Channel is disabled."} Use a known Channel address; do not substitute app IDs in Connector addresses.`);
+  if (!endpoint || !larkAppIds.includes(endpoint.appId)) {
+    throw new Error(`No configured Channel can deliver to ${JSON.stringify(address)}. ${larkAppIds.length ? `Enabled Lark apps: ${larkAppIds.join(", ")}.` : "Lark Channel is disabled."} Use a known Channel address; do not substitute app IDs in Connector addresses.`);
   }
 }
 export const ChannelAddressSchema = z.object({ kind: z.literal("channel"), channelId: z.string().min(1), endpoint: z.string().min(1).max(2000) }).strict().superRefine((address, ctx) => {

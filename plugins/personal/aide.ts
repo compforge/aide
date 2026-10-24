@@ -46,7 +46,7 @@ import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/age
 import type { PiSessionFactory } from "../../src/host/harness/pi/adapter.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { channelRelation } from "./person/relation.ts";
-import { personRef, type Me } from "./person/model.ts";
+import { LOCAL_ME, personRef, type Me } from "./person/model.ts";
 import type { Persons } from "./person/service.ts";
 
 /** Channels and Sources submit durable input; Chief decides whether Work is needed. */
@@ -61,14 +61,14 @@ export class Personal {
   readonly core: ApplicationRuntime;
   private readonly pending = new Set<Promise<unknown>>();
 
-  constructor(private readonly options: { timezone: string; persons: Persons; me: Me; topic?: unknown; weave?: unknown }, private readonly log: Logger,
-    runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore }) {
+  constructor(private readonly options: { timezone: string; persons: Persons; channelMe: Me; topic?: unknown; weave?: unknown }, private readonly log: Logger,
+    runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore; contactMe?: ConstructorParameters<typeof TopicStore>[4] }) {
     this.core = runtime.runtime;
     this.connectors = runtime.connectors;
     this.plugins = this.core.plugins;
     const resources = new PluginResourceStore({ home: runtime.inputs.storage.home, pluginInstanceId: "personal" });
     const client = this.plugins.resourceClient("personal");
-    this.store = new Store(resources, client, new TopicStore(resources, client, runtime.inputs, runtime.outputs));
+    this.store = new Store(resources, client, new TopicStore(resources, client, runtime.inputs, runtime.outputs, runtime.contactMe));
   }
 
   /** @spec Persistent native tools resolve the live execution on each call, never capture a completed invocation's verbs. */
@@ -230,8 +230,6 @@ export class Personal {
     }
   }
 
-  get me() { return this.options.persons.me(); }
-
   get topics() { return this.store.topics; }
   invocations() { return this.plugins.listHarnessInvocations().map(invocation => ({ ...invocation, ...personalExecution(invocation) })); }
   topicIds() { return [...new Set([...this.store.topics.list().map((item) => item.id), ...this.works().map((item) => item.topicId)])]; }
@@ -340,10 +338,9 @@ export class Personal {
   }
 
   private async acceptChannel(id: string, input: Incoming) {
-    const me = await this.me;
-    const relation = channelRelation(me?.spec ?? this.options.me, input);
+    const relation = channelRelation(this.options.channelMe, input);
     let sender;
-    if (input.channelId === "web") { const me = await this.me; if (me) sender = personRef(me); }
+    if (input.channelId === "web") { const me = await this.options.persons.findIdentity(LOCAL_ME); if (me) sender = personRef(me); }
     else if (input.channelId === "lark") {
       const observation = input.observation as { provider?: string; accountId?: string; sender?: { id?: string; type?: string; name?: string }; mentions?: string[] } | undefined;
       if (observation?.provider === "lark" && observation.accountId) {

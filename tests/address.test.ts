@@ -33,22 +33,24 @@ test("Source addresses never supply direct or urgency-based reply destinations",
     source: observed, attention: "immediate", relation: "sent", text: "Me asks a colleague a question" });
   const before = store.outputs().length;
   await assert.rejects(store.say("observations", "external", "unsolicited reply", undefined, { respondToInputId: "external" }), /Direct replies require a Channel Input/);
-  await assert.rejects(store.say("observations", "external", "implicit reply"), /explicit target/);
   assert.equal(store.outputs().length, before);
+  await aide.persons.initialize();
+  const fallback = await store.say("observations", "external", "Notify Me rather than the observed group");
+  assert.deepEqual(store.outputStore.get(fallback.outputId)!.spec.target, webAddress("observations"));
   const explicit = await store.say("observations", "external", "Aide's suggestion", undefined, { target: contact });
   assert.deepEqual(store.outputStore.get(explicit.outputId)!.spec.target, contact);
   await store.ensure("known-contact", contact);
   await seedInput(store, "urgent-observation", { topicId: "known-contact", origin: "source", originId: "personal.lark",
     source: observed, attention: "immediate", text: "external change" });
   const notification = await store.say("known-contact", "urgent-observation", "Update within an existing mandate");
-  assert.deepEqual(store.outputStore.get(notification.outputId)!.spec.target, contact);
+  assert.deepEqual(store.outputStore.get(notification.outputId)!.spec.target, webAddress("known-contact"), "Topic address does not override default contact");
 });
 
 test("ChannelAddress extends Address and owns canonical endpoint encoding and admission", () => {
   const channel: ChannelAddress = larkAddress("app/one", "chat:二/%");
   const address: Address = channel;
   assert.deepEqual(parseAddress(address), channel);
-  assert.deepEqual(larkEndpoint(address), { appId: "app/one", chatId: "chat:二/%" });
+  assert.deepEqual(larkEndpoint(address), { appId: "app/one", receiveId: "chat:二/%", receiveIdType: "chat_id" });
   assert.equal(larkEndpoint(webAddress("topic")), undefined);
   for (const target of [
     { kind: "email", endpoint: "someone@example.com" },
@@ -65,7 +67,7 @@ test("Channel creation captures its first address, bypasses Default and subseque
   const { aide } = setup(t);
   const inbox = webAddress("inbox"), group = larkAddress("app", "group"), elsewhere = larkAddress("app", "elsewhere");
   await aide.receive({ id: "hello", channelId: "web", topicId: "inbox", text: "hello", source: inbox });
-  await aide.settled(); await aide.setDefaultTopic("inbox", true);
+  await aide.settled(); await aide.topics.ensure("default");
   await aide.receive({ id: "first", channelId: "lark", topicId: "opaque-topic", text: "first", source: group });
   await aide.settled();
   const topic = aide.personal.topics;
@@ -104,7 +106,7 @@ test("An addressless Topic stays addressless after Source and Channel append; di
   } finally { await reopened.close(); }
 });
 
-/** @case Ambiguous pending destinations require deliberate recipient selection; associated Inputs need not map one-to-one to Outputs. */
+/** @case Rules reply to an unambiguous source; explicit Agent decisions win, and unresolved destinations fall back to Me. */
 test("say resolves direct, aggregate and proactive targets without guessing from IDs or consuming Inputs", async (t) => {
   const { aide } = setup(t);
   const scope = aide.personal, store = scope.topics;
@@ -112,9 +114,11 @@ test("say resolves direct, aggregate and proactive targets without guessing from
   await seedInput(store, "a", { origin: "channel", originId: "lark", source: a, topicId: "mixed", text: "a" });
   await seedInput(store, "b", { origin: "channel", originId: "lark", source: b, topicId: "mixed", text: "b" });
   await scope.plugins.resourceClient("personal").patchStatus(store.resource("mixed")!, { execution: { id: "run", startedAt: new Date().toISOString() } });
-  await assert.rejects(store.say("mixed", undefined, "ambiguous", "run"), /different or missing addresses/);
-  assert.equal(aide.outputs().length, 0);
-  assert.deepEqual(store.outputs("mixed"), []);
+  await aide.persons.initialize();
+  const fallback = await store.say("mixed", undefined, "unable to choose", "run");
+  assert.deepEqual(store.outputStore.get(fallback.outputId)!.spec.target, webAddress("mixed"));
+  const rule = await store.say("mixed", undefined, "reply to a", "run", { inputIds: ["a"] });
+  assert.deepEqual(store.outputStore.get(rule.outputId)!.spec.target, a);
   const options = { respondToInputId: "b", idempotencyKey: "tool-1" };
   const first = await store.say("mixed", undefined, "reply to b", "run", options);
   assert.deepEqual(await store.say("mixed", undefined, "reply to b", "run", options), first);
@@ -122,10 +126,13 @@ test("say resolves direct, aggregate and proactive targets without guessing from
   assert.deepEqual(store.outputStore.get(first.outputId)!.spec.inputIds, ["b"]);
   const aggregate = await store.say("mixed", undefined, "aggregate", "run", { target: a, inputIds: ["a", "b"] });
   assert.deepEqual(store.outputStore.get(aggregate.outputId)!.spec.inputIds, ["a", "b"]);
+  assert.deepEqual(store.outputStore.get(aggregate.outputId)!.spec.target, a);
   assert.deepEqual(store.get("mixed")!.pendingInputIds, ["a", "b"]);
   await assert.rejects(store.say("mixed", undefined, "conflict", "run", { target: a, respondToInputId: "b" }), /not both/);
   await store.ensure("addressless");
-  await assert.rejects(store.say("addressless", undefined, "cannot infer"), /explicit target/);
+  await aide.persons.initialize();
+  const defaultReply = await store.say("addressless", undefined, "contact me");
+  assert.deepEqual(store.outputStore.get(defaultReply.outputId)!.spec.target, webAddress("addressless"));
   const proactive = await store.say("addressless", undefined, "proactive", undefined, { target: b });
   assert.deepEqual(store.outputStore.get(proactive.outputId)!.spec.target, b);
   assert.equal(store.outputStore.get(proactive.outputId)!.spec.inputIds, undefined);
@@ -246,7 +253,7 @@ test("Aide rejects unowned targets and diagnoses pending delivery after the Chan
   assert.deepEqual(receipt, { outputId: receipt.outputId, accepted: true });
   assert.equal(aide.outputStore.get(receipt.outputId)!.status.phase, "pending");
   await aide.close();
-  const restarted = new Aide(root, { ...options, larkAppId: undefined }, pino({ level: "silent" }));
+  const restarted = new Aide(root, { ...options, config: { ...options.config, channels: {} } }, pino({ level: "silent" }));
   try {
     await restarted.start();
     const output = restarted.outputStore.get(receipt.outputId)!;

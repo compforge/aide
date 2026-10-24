@@ -4,6 +4,27 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 `config.yaml` 是 Aide 声明的事实来源。启动时完成模块校验后才恢复业务资源 和启动 Channel；修改配置后重启服务。
 新建、恢复和重建 Harness 都复用启动配置，运行期间修改 Aide 或 Pi 的 models/settings 文件不会改变它。
 
+## 沟通渠道
+
+```yaml
+defaultChannel: lark-work
+channels:
+  lark-work:
+    kind: lark
+    label: 飞书 · 工作账号
+    enabled: true
+    appId: cli_yourAppId
+    appSecret: your-app-secret
+    me:                         # 可选，与应用凭证独立
+      openId: ou_yourOpenId      # 必须属于上面的机器人应用
+```
+
+`defaultChannel` 引用启用的实例，或内置 `web`。应用 ID 在实例间唯一；停用当前默认实例前需选择其他默认渠道。主动联系 Me 使用所选 Channel 自己的 me 配置，并按该身份查找 Person；不从 Connector 配置或其他 Person 账号推导。不需要配置 chatId 或先发一条消息。
+
+Web「接入」页编辑同一份配置，显示当前启动快照与已保存配置是否不同；保存后需重启。页面不返回 App Secret，编辑同一应用时留空保留，更换应用需重新填写。服务用版本校验拒绝过期编辑，原子替换 YAML 并保留无关字段及注释，文件权限为 600。实际连接和投递仍需检查运行日志及 Output 状态。
+
+Lark Channel 不再读取 `AIDE_LARK_APP_ID` / `AIDE_LARK_APP_SECRET`。机器人配置属于 channels；`connectors.lark` 的应用与用户登录态继续用于观察消息，二者互不替代。详细语义见 [Channel](channel/README.md#默认沟通渠道)。
+
 ## 来源与优先级
 
 配置文件的选择顺序是：调用方显式路径 > `AIDE_CONFIG` > `$AIDE_HOME/config.yaml`。
@@ -17,6 +38,8 @@ Host 在启动时加载一份配置快照，验证后按职责装配 Connector�
 
 | 配置 | 所有者与用途 |
 |---|---|
+| `defaultChannel` | 主动联系 Me 的默认 Channel 实例，缺省为内置 `web` |
+| `channels` | 命名沟通实例、机器人凭证与可选 Me 身份 |
 | `resources` | Host 的持久 Resource 容量、按 Group/Kind 的回收策略与去重窗口 |
 | `connectors` | Host 装配全局环境目录、需求、Forge 与 Lark 消息读取能力 |
 | `harnesses` | Host 装配 Agent 的模型选择和扩展能力；支持 `pi`、`chief`、`route`、`task`、`routine`、`codex`、`claude`、`dsh` |
@@ -49,8 +72,8 @@ plugins:
       lark: {}
 ```
 
-Me 中的 appId 是 openId 的身份作用域，不指定 CLI 登录应用。多个标记归属同一个 Person。
-只使用机器人 Channel 时可仅配置 me，不配置 CLI appId/userId；启用消息 Source 则必须成对配置 CLI 账号。
+Me 中的 appId 是 openId 的身份作用域，不指定 CLI 登录应用。多个标记声明同一个人；启动时据此归并已有 Person，将各平台账号保存为同一人物的多个身份。配置仍按接入独立生效。
+只使用机器人 Channel 时在 channels.<名称>.me 配置本人身份，无需配置 CLI 账号；启用消息 Source 则必须成对配置 CLI appId/userId，connectors.lark.me 独立控制该 Connector 的本人识别。
 当前 CLI 读取实现使用用户授权，Me 标记不会扩大其访问范围或把用户授权切换为机器人授权。
 CLI 账号不必是本人；观察到执行账号的私信或 @ 不会自动归为本人收到。
 修改 Me 配置后重启，既有 Input 保留原关系；人物资料和认知在 Web Persons 编辑后立即生效。
