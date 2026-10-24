@@ -233,8 +233,9 @@ export class Aide {
       const account = await this.connectors.requirements.identity(config.source);
       this.meMarks.identities.push({ provider: account.provider, scope: account.scope, id: config.me.userKey });
     }
-    await this.persons.initialize();
-    this.log.info({ meIdentities: this.meMarks.identities.length, mePersons: (await this.persons.list()).filter(p => p.isMe).length }, "Me identities resolved without merging Persons");
+    const result = await this.persons.initialize();
+    if (result.conflict) this.log.error(result.conflict, "Me consolidation deferred; original Persons preserved");
+    this.log.info({ meIdentities: this.meMarks.identities.length, mePersons: (await this.persons.list()).filter(p => p.isMe).length, merged: result.merged }, "Me identities reconciled");
   }
   start(): Promise<void> {
     return this.starting ??= Promise.resolve().then(async () => {

@@ -72,7 +72,7 @@ plugins:
       lark: {}
 ```
 
-Me 中的 appId 是 openId 的身份作用域，不指定 CLI 登录应用。多个标记可以匹配不同 Person；每个身份复用已有档案，配置不会自动合并人物。
+Me 中的 appId 是 openId 的身份作用域，不指定 CLI 登录应用。多个标记声明同一个人；启动时据此归并已有 Person，将各平台账号保存为同一人物的多个身份。配置仍按接入独立生效。
 只使用机器人 Channel 时在 channels.<名称>.me 配置本人身份，无需配置 CLI 账号；启用消息 Source 则必须成对配置 CLI appId/userId，connectors.lark.me 独立控制该 Connector 的本人识别。
 当前 CLI 读取实现使用用户授权，Me 标记不会扩大其访问范围或把用户授权切换为机器人授权。
 CLI 账号不必是本人；观察到执行账号的私信或 @ 不会自动归为本人收到。

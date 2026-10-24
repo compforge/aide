@@ -60,7 +60,7 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   assert.deepEqual(aide.outputStore.get(fresh.outputId)!.spec.target, larkPersonAddress("cli_personal", "ou_personal"));
   const personal = (await aide.persons.findIdentity({ provider: "lark", scope: "cli_personal", id: "ou_personal" }))!;
   assert.deepEqual(aide.outputStore.get(fresh.outputId)!.spec.receivers, [personRef(personal)]);
-  assert.notEqual(personal.metadata.uid, original.spec.receivers![0]!.uid);
+  assert.equal(personal.metadata.uid, original.spec.receivers![0]!.uid, "Both Channels contact the same Person using different accounts");
 });
 
 test("Me is optional for replies and must be resolved in the sending app's scope", async t => {
@@ -123,8 +123,8 @@ test("Channel page and API expose saved state without credentials", async t => {
   assert.equal(response.status, 200); assert.doesNotMatch(await response.text(), /private-secret/);
 });
 
-/** @case Marking an observed account as Me preserves its identity and understanding across application restarts. */
-test("Configuring existing Persons as Channel Me does not merge them or block startup", async t => {
+/** @case Marking an observed account as Me consolidates it into the existing Me without losing understanding or blocking startup. */
+test("Configuring existing Persons as Channel Me consolidates their accounts without blocking startup", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-existing-me-"));
   const cfg = config(); delete cfg.channels.work!.me; delete cfg.channels.personal!.me;
   const options = fakeOptions({ async chief() { return "ok"; }, async execute() { throw new Error("No work"); } }, home);
@@ -139,17 +139,17 @@ test("Configuring existing Persons as Channel Me does not merge them or block st
   await aide.close();
   aide = new Aide(home, { ...options, config: config() }, log);
   await aide.start();
-  const marked = await aide.persons.read(person.metadata.name);
+  const marked = (await aide.persons.findIdentity(identity))!;
   assert.equal(marked.isMe, true);
-  assert.deepEqual(marked.spec, person.spec);
-  assert.deepEqual(marked.status, person.status);
-  assert.equal(marked.metadata.uid, person.metadata.uid);
-  assert.equal(marked.metadata.resourceVersion, person.metadata.resourceVersion);
+  assert.equal(marked.metadata.uid, web.metadata.uid);
+  assert.equal(marked.status.summary, person.status.summary);
+  assert.ok(marked.status.recent.some(entry => entry.text.includes("Me 配置确认同一人")));
+  assert.equal((await aide.persons.list()).filter(p => p.isMe).length, 1);
   assert.deepEqual(aide.topics.inputStore.get(evidence.metadata.name)!.spec.sender, personRef(person));
   assert.equal((await aide.persons.findIdentity(LOCAL_ME))!.metadata.uid, web.metadata.uid);
-  assert.deepEqual((await aide.persons.findIdentity(LOCAL_ME))!.spec.identities, [LOCAL_ME]);
+  assert.ok(marked.spec.identities.some(i => i.scope === "cli_personal" && i.id === "ou_personal"));
   const output = await aide.topics.say("notice", undefined, "默认联系我");
-  assert.deepEqual(aide.outputStore.get(output.outputId)!.spec.receivers, [personRef(person)]);
+  assert.deepEqual(aide.outputStore.get(output.outputId)!.spec.receivers, [personRef(marked)]);
   assert.deepEqual(aide.outputStore.get(output.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_me"));
   await aide.close();
   // Connector knowledge alone neither selects the default recipient nor marks this Channel's sender as Me.
@@ -162,7 +162,7 @@ test("Configuring existing Persons as Channel Me does not merge them or block st
     observation: { provider: "lark", accountId: "cli_work", sender: { id: "ou_me", type: "user" }, mentions: [] } });
   const incoming = aide.topics.inputStore.list().find(i => i.spec.text === "hello")!;
   assert.equal(incoming.spec.relation, undefined);
-  assert.equal(incoming.spec.sender!.uid, person.metadata.uid);
+  assert.equal(incoming.spec.sender!.uid, marked.metadata.uid);
   const reply = await aide.topics.say("message", undefined, "仍可回复原群", undefined, { respondToInputId: incoming.metadata.name });
   assert.deepEqual(aide.outputStore.get(reply.outputId)!.spec.target, larkAddress("cli_work", "oc_group"));
 });

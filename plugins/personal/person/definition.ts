@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { ResourceDefinition, ResourceValidationContext, Resource } from "@compforge/aide-plugin";
 import { PersonSchema, PERSON_TYPE, identityKey, type Person, type PersonStatus } from "./model.ts";
 
-/** @spec Account ownership is unique; Me marks do not require a single Person resource.
+/** @spec Account ownership is unique; Me consolidation can transfer identities atomically between Persons.
  * @link docs/personal/person.md#身份me-与关系
  */
 function validate(resource: Readonly<Resource<Person, PersonStatus>>, context: ResourceValidationContext) {
