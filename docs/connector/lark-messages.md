@@ -30,9 +30,7 @@ plugins:
 Source 产出的消息均进入处理流程，当前主动采集单聊和群内 @。
 只声明 Connector 时，Chief 仍可按需读取上下文。
 已有 Lark Channel 的机器人交互不受此配置影响。初次启用默认观察最近五分钟，不导入全部历史。
-Source 为 Input 设置 `sessionId = source:lark:<appId>:<userId>:<chatId>`，表达同账号、同用户、同聊天的话题共性；机器人 Channel 使用独立的 `lark:<appId>:<chatId>`。观察资源按配置建立，不随 Conversation 数量重复启动。
-
-话题归属统一由 [Route](../personal/route.md) 决定。已有明确匹配可以直接分派，陌生 Source 话题线索本身不自动创建 Conversation；无合适归属才使用 Default。观察到群地址不自动产生默认输出地址，也不要求向原群发送消息。
+观察资源按配置建立，不随 Conversation 数量重复启动。Source 与机器人 Channel 使用下述同一套 Conversation 归属规则。
 
 | 操作 | 权限 |
 |---|---|
@@ -45,6 +43,33 @@ Source 为 Input 设置 `sessionId = source:lark:<appId>:<userId>:<chatId>`，�
 应用权限、用户授权和会话可见性需同时满足。群历史可见设置、保密模式、外部群和应用类型仍可能限制访问。
 参考 [获取会话历史消息](https://open.feishu.cn/document/server-docs/im-v1/message/list)。
 表情回复与附件下载不属于默认读取过程，不为它们申请额外权限。
+
+## Conversation 创建与归属
+
+Lark 消息按应用、聊天及群话题确定 `Input.sessionId`，其值也是 `Conversation.spec.id`：
+
+| 已接纳的消息 | Conversation ID |
+|---|---|
+| 单聊，包括发给 Aide 机器人的单聊 | `lark:<appId>:<chatId>` |
+| 群内 @，消息没有 `threadId` | `lark:<appId>:<chatId>` |
+| 群话题内 @，消息有 `threadId` | `lark:<appId>:<chatId>:thread:<threadId>` |
+
+普通群消息也有 chatId；是否属于独立话题由平台返回的 threadId 决定，不从正文、发送人、messageId 或 rootId 猜测。
+同群不同话题分别建 Conversation；同一话题不同成员的消息复用同一个 Conversation。单聊始终按 chatId 归属。
+用户身份 Source 与机器人 Channel 的 appId、chatId、threadId 相同时共用上下文；不同 appId 不合并。userId 不参与会话 ID。
+
+首次接纳的消息建立 Conversation，后续复用。[Route](../personal/route.md) 对 Lark Source 的明确话题直接创建并分派，
+机器人 Channel 在接收入站时建立话题；两条路径均不让模型决定是否建会话。Source 的初始消息与短期 discussion 更新沿用同一规则，
+不会因 originalInputId 曾被路由到 Default 而再次落入 Default。显示名称取首条输入的内容预览，改名不改变会话 ID。
+重复投递和重启复用现存对象；目标正在删除时拒绝向该对象分派。
+
+会话创建与消息采集资格独立：Source 仍只采集配置范围内的单聊、明确 @ 用户和短期关联讨论；Channel 仍只接收单聊与精确 @ 机器人的群消息。
+建立 Conversation 不代表开始读取全群，也不延长默认五分钟的短期跟进。未被采集的消息不会因群或话题已经有 Conversation 而自动进入。
+
+Source 观察到的群地址不自动设置为 Conversation 的默认回复地址。Source 先建的会话随后收到机器人请求时，
+Chief 可按该请求的 Input 地址回复；机器人先建的会话保留原有默认地址。共用上下文不额外授予发送权限，是否 say 仍由 Chief 根据委托判断。
+发送地址仍是 appId 与 chatId，threadId 只划分内部上下文；当前回复与进展卡片发回原聊天，不新增平台话题内回复能力。
+已完成的历史 Input 不重分派，也不自动合并旧的 `source:lark:...` Conversation。
 
 ## 消息与上下文
 

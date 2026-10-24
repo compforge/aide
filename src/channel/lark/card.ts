@@ -42,7 +42,7 @@ export function larkProgress(aide: ChannelService, conversationId: string): Lark
       : members.every(i => i.consumption.phase === "done") ? "done" : "queued";
     const ids = new Set(view.blocks.filter((b) => b.type === "message" && b.group_id === group).map((b) => b.id.replace(/^message:/, "")));
     // A Conversation may produce Outputs for another destination; a progress card cannot deliver those.
-    const address = aide.conversations.resource(conversationId)?.spec.address;
+    const address = input.spec.source;
     const addressed = channelOutputs(aide).filter((o) => address && sameAddress(o.target, address));
     const responses = addressed.filter((m) => ids.has(m.id));
     const text = responses.map((message) => message.text).join("\n\n");

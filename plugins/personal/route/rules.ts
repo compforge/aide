@@ -3,36 +3,44 @@ import { CONVERSATION_TYPE, initialConversationName, type ConversationSpec, type
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { deliver, routed, type RoutingContext, type RoutingInput } from "./delivery.ts";
 import type { Destination } from "./model.ts";
+import { SOURCES } from "../source/definition.ts";
 
-/** @spec Topic affinity and original-input receipts route directly; Default is never an unconditional copy.
- * @spec Without any live non-Default candidate, fallback is deterministic; Channel topic creation takes precedence.
+/**
+ * @spec Lark topics create/reuse their Conversation directly; other inputs may inherit original-input destinations.
+ * @spec Without any live non-Default candidate, fallback is deterministic; explicit topic creation takes precedence.
  * @link docs/personal/route.md
+ * @link docs/connector/lark-messages.md#conversation-创建与归属
+ * @case tests/route.test.ts
  */
 export async function routeByRules(context: RoutingContext, original: RoutingInput): Promise<boolean> {
   const input = (await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, ...original.metadata }))!;
   if (routed(input)) return true;
+  const larkTopic = (input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id)
+    || (input.spec.origin === "channel" && input.spec.originId === "lark");
   const conversations = (await context.resources.list<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE)).filter(c => !c.metadata.deletionTimestamp);
   const destinations = new Map<string, Destination>();
   for (const c of conversations) if (input.spec.sessionId && c.spec.id === input.spec.sessionId) destinations.set(c.metadata.uid, c.metadata);
   const originalId = input.spec.observation?.originalInputId;
-  if (typeof originalId === "string" && originalId !== input.metadata.name) {
+  if (!larkTopic && typeof originalId === "string" && originalId !== input.metadata.name) {
     const preceding = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: originalId });
     for (const c of conversations) if (preceding?.status.route?.result?.conversations.some(ref => ref.uid === c.metadata.uid)) destinations.set(c.metadata.uid, c.metadata);
   }
   // An undecided predecessor is evidence, not a dependency that can block this Input forever.
-  if (!destinations.size && input.spec.origin === "channel" && input.spec.sessionId) {
+  // Lark admission already established a concrete chat/topic; model classification cannot change its identity.
+  if (!destinations.size && (input.spec.origin === "channel" || larkTopic) && input.spec.sessionId) {
     const sessionId = input.spec.sessionId;
     const name = digest(sessionId);
     let c = await context.resources.get<ConversationSpec, ConversationStatus>({ ...CONVERSATION_TYPE, namespace: "v1", name });
     if (!c) {
       try { c = await context.resources.create<ConversationSpec, ConversationStatus>(CONVERSATION_TYPE, { name,
-        spec: { id: sessionId, name: initialConversationName(input.spec.text), ...(input.spec.source ? { address: input.spec.source } : {}) }, status: { receipts: [], summary: "", recent: [] } }); }
+        spec: { id: sessionId, name: initialConversationName(input.spec.text), ...(input.spec.origin === "channel" && input.spec.source ? { address: input.spec.source } : {}) }, status: { receipts: [], summary: "", recent: [] } });
+        context.logger.info("Route created Conversation for admitted input", { attributes: { inputId: input.metadata.name, conversationId: sessionId, origin: input.spec.origin, uid: c.metadata.uid } }); }
       catch (error) {
         if (!String(error).includes("resource already exists")) throw error;
         c = await context.resources.get<ConversationSpec, ConversationStatus>({ ...CONVERSATION_TYPE, namespace: "v1", name });
       }
     }
-    if (!c || c.metadata.deletionTimestamp || c.spec.id !== sessionId) throw new Error(`Channel Conversation unavailable: ${name}`);
+    if (!c || c.metadata.deletionTimestamp || c.spec.id !== sessionId) throw new Error(`Input Conversation unavailable: ${sessionId}`);
     destinations.set(c.metadata.uid, c.metadata);
   }
   if (!destinations.size) {

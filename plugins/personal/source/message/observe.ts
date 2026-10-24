@@ -1,4 +1,4 @@
-import { larkAddress } from "../../../../src/channel/address.ts";
+import { larkAddress, larkConversationId } from "../../../../src/channel/address.ts";
 import { Persons } from "../../person/service.ts";
 import { isDeepStrictEqual } from "node:util";
 import { LOCAL_ME } from "../../person/model.ts";
@@ -55,8 +55,9 @@ const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, n
  * @spec A restarted delivery reuses its exact Input and next observation state, never a fresh live snapshot.
  * @spec An observed original message is sufficient: absent context never delays its Input.
  * @spec Only retrieved context accompanies an Input; read failures stay in logs and never create discussion Inputs.
- * @spec Initial and discussion Inputs share source:lark:<appId>:<userId>:<chatId> affinity, separate from bot Channel conversations.
- * @why User observations must not enter the bot chat history or its automatic outbound delivery.
+ * @spec Initial and discussion Inputs share app/chat/thread affinity with the bot Channel, independent of the observing user.
+ * @link docs/connector/lark-messages.md#conversation-创建与归属
+ * @why Observing a chat address alone does not configure a default reply destination.
  * @why IM context is evidence from other people, not a delegation from the account owner.
  * @case tests/message-source.test.ts
  * @link docs/connector/lark-messages.md
@@ -239,7 +240,7 @@ class MessageObservation {
       source: larkAddress(this.watch.accountId, message.chatId),
       ...(relation ? { relation } : {}),
       ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
-      sessionId: `source:lark:${this.watch.accountId}:${this.watch.userId}:${message.chatId}`,
+      sessionId: larkConversationId(this.watch.accountId, message.chatId, entry.kind === "mention" ? message.threadId : undefined),
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,
         kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,

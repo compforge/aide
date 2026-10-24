@@ -22,6 +22,7 @@ import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageWatch } 
 import { readMessageContext } from "../plugins/personal/source/message/context.ts";
 import { Aide } from "../src/app.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
+import { larkProgress } from "../src/channel/lark/card.ts";
 import { loadConfig } from "../src/config.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { messageRelation } from "../plugins/personal/source/message/relation.ts";
@@ -89,11 +90,23 @@ test("Direct messages include my speech; exact group mentions exclude bots, dele
   assert.deepEqual(f.inputs.list().map((input) => input.spec.relation).sort(), ["received", "received", "sent"]);
   assert.ok(f.inputs.list().every((input) => input.spec.originRef?.uid === f.resource().metadata.uid));
   assert.ok(f.inputs.list().every((input) => input.spec.text.includes(String((input.spec.observation!.message as { content: string }).content))));
-  assert.ok(f.inputs.list().every((input) => input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id && input.spec.sessionId === "source:lark:cli_app:ou_me:oc_chat"));
+  assert.ok(f.inputs.list().every((input) => input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id && input.spec.sessionId === "lark:cli_app:oc_chat"));
   assert.ok(f.resource().status.scans!.every((scan) => scan.watermark === new Date(now).toISOString()));
   await f.observe(now + 60_000);
   assert.equal(f.inputs.list().length, 3, "Overlapping discovery and unchanged context remain silent");
   assert.equal(f.resource().status.pending!.length, 1, "Direct messages do not create duplicate follow-up Inputs");
+});
+
+test("Group thread identity is independent of sender and message; direct messages stay chat-scoped", async t => {
+  const f = fixture(t);
+  f.incoming(async query => page(query.chatType === "p2p" ? [message("dm", { threadId: "omt_dm" })] : [
+    message("a", { threadId: "omt_a" }), message("a2", { threadId: "omt_a", sender: { type: "user", id: "ou_another" } }),
+    message("b", { threadId: "omt_b" }), message("plain"),
+  ]));
+  await f.observe();
+  const sessions = Object.fromEntries(f.inputs.list().map(i => [i.spec.observation!.originalMessageId, i.spec.sessionId]));
+  assert.deepEqual(sessions, { dm: "lark:cli_app:oc_chat", a: "lark:cli_app:oc_chat:thread:omt_a",
+    a2: "lark:cli_app:oc_chat:thread:omt_a", b: "lark:cli_app:oc_chat:thread:omt_b", plain: "lark:cli_app:oc_chat" });
 });
 
 test("Missing context submits the original message in the first poll and remains deduplicated after restart", async (t) => {
@@ -104,7 +117,7 @@ test("Missing context submits the original message in the first poll and remains
   assert.equal(f.inputs.list().length, 1);
   const input = f.inputs.list()[0]!;
   assert.equal(input.spec.text, "Lark 群内 @：om_at");
-  assert.equal(input.spec.sessionId, "source:lark:cli_app:ou_me:oc_chat");
+  assert.equal(input.spec.sessionId, "lark:cli_app:oc_chat");
   assert.equal(Object.hasOwn(input.spec.observation!, "context"), false);
   assert.doesNotMatch(JSON.stringify(input.spec), /Permission denied/);
   assert.match(JSON.stringify(f.warnings), /Permission denied/);
@@ -218,7 +231,7 @@ test("Only associated replies trigger follow-up; duplicate polls stay silent and
   const update = f.inputs.list().find((input) => input.spec.observation!.kind === "discussion")!;
   assert.equal(update.spec.observation!.originalMessageId, "om_at");
   assert.equal(update.spec.relation, "observed");
-  assert.ok(f.inputs.list().every((input) => input.spec.sessionId === "source:lark:cli_app:ou_me:oc_chat"));
+  assert.ok(f.inputs.list().every((input) => input.spec.sessionId === "lark:cli_app:oc_chat"));
   assert.doesNotMatch(JSON.stringify(update.spec.observation!.context), /om_unrelated/);
   await f.observe(now + 120_000);
   assert.equal(f.inputs.list().length, 2); assert.equal(f.resource().status.pending!.length, 0);
@@ -294,6 +307,7 @@ test("Follow-up pagination resumes across restart and a terminal delivery surviv
   await f.restart(); await f.observe(now + 180_000);
   assert.equal(f.inputs.list().length, 3); assert.equal(f.resource().status.pending!.length, 0);
   assert.equal(calls, 2);
+  assert.ok(f.inputs.list().every(input => input.spec.sessionId === "lark:cli_app:oc_chat:thread:omt_thread"));
 });
 
 test("Thread context uses explicit thread reads, bounds text and reports incomplete pages", async () => {
@@ -348,8 +362,8 @@ test("Discussion batches retain each person's relation; replies to my own messag
   ]);
 });
 
-/** @case Registering a bot chat never makes user-observed Inputs eligible for its durable outbox. */
-test("Real Runner keeps observed chat topics private while Channel delivery survives restart", { timeout: 20_000 }, async (t) => {
+/** @case Source creates the topic without a reply address; Channel reuses it and replies to its incoming address. */
+test("Real Runner shares Lark chat topics across Source and Channel without inferring a Source reply address", { timeout: 20_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me", me: [{ appId: "cli_app", openId: "ou_me" }] } },
@@ -379,8 +393,6 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   t.after(async () => { await channel.close(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.personal.conversations.ensure("inbox", fixtureAddress("inbox"));
   await aide.setDefaultConversation("inbox", true);
-  // Existing private topics can be matched by Source hints without opening bot chat contexts.
-  for (const chatId of ["oc_chat", "oc_group"]) await aide.conversations.ensure(`source:lark:cli_app:ou_me:${chatId}`, fixtureAddress("inbox"));
   // Persist a registered bot chat before observing user messages, but defer processing its request.
   await channel.receive({ sender: { sender_type: "user" }, message: {
     message_id: "om_channel", chat_id: "oc_group", chat_type: "group", message_type: "text",
@@ -391,7 +403,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   await aide.start(); await aide.settled();
   const inputs = aide.personal.conversations.inputStore;
   assert.equal(inputs.list().filter((input) => input.spec.originId === "personal.lark").length, 3);
-  assert.ok(aide.outputs().some((reply) => reply.text === "source-private-reply"), "The Source must produce a reply to exercise delivery exclusion");
+  assert.ok(!aide.outputs().some((reply) => reply.text === "source-private-reply"), "An observed chat is not a default reply address");
   await channel.deliver();
   assert.deepEqual(sent, [], "Observing a user mention must not send Source replies to the registered bot chat");
   const observed = inputs.list().filter((input) => input.spec.originId === "personal.lark")[0]!;
@@ -404,30 +416,32 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   assert.ok(observed.status.route?.completedAt);
   assert.ok(prompts.some((prompt) => prompt.includes("om_dm")));
   for (const chatId of ["oc_chat", "oc_group"]) {
-    const sessionId = `source:lark:cli_app:ou_me:${chatId}`;
+    const sessionId = `lark:cli_app:${chatId}`;
     const store = aide.personal.conversations;
     const expected = inputs.list().filter((input) => input.spec.originId === "personal.lark").filter((input) => input.spec.sessionId === sessionId).map((input) => input.metadata.name).sort();
     assert.equal(store.list().filter((c) => c.id === sessionId).length, 1, "Messages from the same observed chat reuse one Conversation");
+    assert.equal(store.resource(sessionId)!.spec.address, undefined);
     assert.deepEqual([...store.inputs(sessionId).map((i) => i.metadata.name)].sort(), expected);
     for (const id of expected) assert.equal(aide.personal.conversations.input(id, "inbox"), undefined);
   }
   assert.equal(aide.personal.conversations.list().filter((c) => c.id === MESSAGE_SESSION).length, 0);
-  const sourceGroupId = "source:lark:cli_app:ou_me:oc_group";
+  const sourceGroupId = "lark:cli_app:oc_group";
   const sourceGroupUid = aide.personal.conversations.resource(sourceGroupId)!.metadata.uid;
   const groupId = "lark:cli_app:oc_group";
   await channel.dispatch(); await aide.settled(); await channel.deliver();
   assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }]);
+  const reply = aide.outputs().find(output => output.conversationId === groupId && output.text === "channel-reply")!;
+  assert.ok(larkProgress(aide, groupId).some(view => view.messageIds.includes(reply.id)), "Cards match the incoming address even without a Conversation default address");
   const store = aide.personal.conversations;
   assert.equal(store.list().filter((c) => c.id === groupId).length, 1);
-  assert.equal(store.inputs(groupId).map((i) => i.metadata.name).length, 1);
-  assert.equal(aide.personal.conversations.inputs(sourceGroupId).map((i) => i.metadata.name).length, 2);
-  const channelInput = store.inputs(groupId)[0]!;
+  assert.equal(store.inputs(groupId).length, 3);
+  assert.equal(store.resource(groupId)!.metadata.uid, sourceGroupUid);
+  const channelInput = store.inputs(groupId).find(input => input.spec.origin === "channel")!;
   assert.equal(channelInput.spec.origin, "channel");
   assert.equal(channelInput.spec.sessionId, groupId);
   assert.equal(aide.personal.conversations.input(channelInput.metadata.name, "inbox"), undefined);
   const channelPrompt = prompts.find((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).conversationId === groupId)!;
   assert.ok(channelPrompt);
-  assert.doesNotMatch(channelPrompt, /om_at|source-private-reply/, "User observation history must not enter the group's bot prompt");
   const groupUid = store.resource(groupId)!.metadata.uid;
   const previous = searches;
   aide.conversations.get("another"); await aide.settled();
@@ -438,8 +452,7 @@ test("Real Runner keeps observed chat topics private while Channel delivery surv
   assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }], "Restart must neither leak historical Source replies nor duplicate delivered Channel replies");
   assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.lark").length, 3);
   assert.equal(aide.personal.conversations.resource(groupId)!.metadata.uid, groupUid);
-  assert.equal(aide.personal.conversations.inputs(groupId).map((i) => i.metadata.name).length, 1);
+  assert.equal(aide.personal.conversations.inputs(groupId).length, 3);
   assert.equal(aide.personal.conversations.resource(sourceGroupId)!.metadata.uid, sourceGroupUid);
-  assert.equal(aide.personal.conversations.inputs(sourceGroupId).map((i) => i.metadata.name).length, 2);
   assert.equal(aide.works().length, 0);
 });

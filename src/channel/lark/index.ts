@@ -1,4 +1,4 @@
-import { larkAddress, larkEndpoint } from "../address.ts";
+import { larkAddress, larkConversationId, larkEndpoint } from "../address.ts";
 import { channelOutputs } from "../output.ts";
 import type { OutputView } from "../../output.ts";
 import { CHANNELS, bindChannelInput } from "../definition.ts";
@@ -21,7 +21,7 @@ const EventSchema = z.object({
   sender: z.object({ sender_type: z.string(),
     sender_id: UserIdsSchema.optional() }),
   message: z.object({ message_id: z.string().min(1), chat_id: z.string().min(1),
-    chat_type: z.string(), message_type: z.string(), content: z.string(),
+    chat_type: z.string(), message_type: z.string(), content: z.string(), thread_id: z.string().optional(),
     mentions: z.array(z.object({ key: z.string().min(1), name: z.string().optional(),
       id: UserIdsSchema })).optional() }),
 });
@@ -34,13 +34,13 @@ type Notice = z.infer<typeof NoticeSchema>;
 const StateSchema = z.object({
   cards: z.record(z.string(), CardSchema).default({}),
   pending: z.array(IncomingSchema.omit({ channelId: true })), received: z.array(z.string()),
-  chats: z.array(z.string()), notices: z.array(NoticeSchema), delivered: z.array(z.string()),
+  chats: z.record(z.string(), z.string()), notices: z.array(NoticeSchema), delivered: z.array(z.string()),
 });
 type State = z.infer<typeof StateSchema>;
 
 /**
  * @spec Persist inbound messages before acknowledging Lark; acknowledge outbound delivery only after send succeeds.
- * @spec Bot chat identity is lark:<appId>:<chatId>; user-observation Sources use independent topics.
+ * @spec Conversation identity includes a group thread when available; delivery retains the actual chat address.
  * @case tests/message-source.test.ts
  * @why Platform acknowledgement must not depend on business processing or model latency.
  * @see {@link ../../../docs/channel/lark.md}
@@ -63,8 +63,11 @@ export class LarkChannel {
     this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
     this.path = join(home, "channels", `lark-${createHash("sha256").update(appId).digest("hex").slice(0, 16)}.json`);
-    this.state = existsSync(this.path) ? StateSchema.parse(JSON.parse(readFileSync(this.path, "utf8")))
-      : { cards: {}, pending: [], received: [], chats: [], notices: [], delivered: [] };
+    const saved = existsSync(this.path) ? JSON.parse(readFileSync(this.path, "utf8"))
+      : { cards: {}, pending: [], received: [], chats: {}, notices: [], delivered: [] };
+    // Preserve previously registered chat-level topics and pending delivery receipts on upgrade.
+    if (Array.isArray(saved.chats)) saved.chats = Object.fromEntries(saved.chats.map((chatId: string) => [larkConversationId(appId, chatId), chatId]));
+    this.state = StateSchema.parse(saved);
   }
 
   async start(): Promise<void> {
@@ -106,7 +109,8 @@ export class LarkChannel {
     }
     const { message_id: id, chat_id: chatId } = message;
     if (this.state.received.includes(id)) return;
-    const conversationId = this.prefix + chatId;
+    const threadId = message.chat_type === "group" ? message.thread_id : undefined;
+    const conversationId = larkConversationId(this.appId, chatId, threadId);
     let text: unknown;
     if (message.message_type === "text") {
       if (message.chat_type === "group") {
@@ -121,7 +125,7 @@ export class LarkChannel {
     if (this.stopped) throw new Error("Lark channel is stopping");
     if (this.state.received.includes(id)) return;
     const input = IncomingSchema.omit({ channelId: true }).safeParse({ id, sessionId: conversationId, text, source: larkAddress(this.appId, chatId),
-      observation: { provider: "lark", accountId: this.appId, chatId, chatType: message.chat_type,
+      observation: { provider: "lark", accountId: this.appId, chatId, chatType: message.chat_type, ...(threadId ? { threadId } : {}),
         sender: { type: sender.sender_type, ...(sender.sender_id?.open_id ? { id: sender.sender_id.open_id } : {}) },
         mentions: (message.mentions ?? []).flatMap((mention) => mention.id.open_id ? [mention.id.open_id] : []) } });
     this.save({ ...this.state,
@@ -129,7 +133,7 @@ export class LarkChannel {
       notices: input.success ? this.state.notices : [...this.state.notices,
         this.notice(id, conversationId, "目前支持文字消息，请发送不超过 32000 字的非空文字；群内请 @Aide 后描述问题。")],
       received: [...this.state.received, id],
-      chats: this.state.chats.includes(chatId) ? this.state.chats : [...this.state.chats, chatId],
+      chats: { ...this.state.chats, [conversationId]: chatId },
     });
     this.log.info({ messageId: id, conversationId, chatType: message.chat_type, accepted: input.success }, "Lark message received");
   }
@@ -167,12 +171,11 @@ export class LarkChannel {
 
   private async drainOutbox(): Promise<void> {
     if (this.transport.cards && this.progress) {
-      for (const chatId of this.state.chats) {
-        const conversationId = this.prefix + chatId;
+      for (const [conversationId, chatId] of Object.entries(this.state.chats)) {
         for (const view of this.progress(conversationId)) {
           if (this.stopped) return;
           if (Date.now() < (this.cardRetry.get(view.id) ?? 0)) continue;
-          try { await this.updateCard(chatId, view); }
+          try { await this.updateCard(conversationId, chatId, view); }
           catch {
             this.cardRetry.set(view.id, Date.now() + 10_000);
             this.log.warn({ inputId: view.id, conversationId }, "Lark progress update failed; final text delivery remains available. Check cardkit:card:write scope and network");
@@ -180,7 +183,7 @@ export class LarkChannel {
         }
       }
     }
-    const notices: OutputView[] = this.state.notices.map((n) => ({ ...n, conversationUid: "", target: larkAddress(this.appId, n.conversationId.slice(this.prefix.length)), status: { phase: "pending", attempts: 0 } }));
+    const notices: OutputView[] = this.state.notices.map((n) => ({ ...n, conversationUid: "", target: larkAddress(this.appId, this.state.chats[n.conversationId]!), status: { phase: "pending", attempts: 0 } }));
     const outputs = [...channelOutputs(this.aide), ...notices]
       .filter((o) => larkEndpoint(o.target)?.appId === this.appId)
       .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
@@ -229,7 +232,7 @@ export class LarkChannel {
    * @spec Card operations share a persisted increasing sequence; only a finalized card acknowledges business Message delivery.
    * @link docs/channel/lark.md
    */
-  private async updateCard(chatId: string, view: LarkProgress): Promise<void> {
+  private async updateCard(conversationId: string, chatId: string, view: LarkProgress): Promise<void> {
     const transport = this.transport.cards!;
     const live = view.phase === "running" || view.phase === "queued";
     let card = this.state.cards[view.id];
@@ -244,7 +247,7 @@ export class LarkChannel {
     if (!card.sent) {
       await transport.send(chatId, card.cardId, this.deliveryId(`card:${view.id}`, 0));
       card.sent = true; this.saveCard(view.id, card);
-      this.log.info({ inputId: view.id, conversationId: this.prefix + chatId }, "Lark progress card delivered");
+      this.log.info({ inputId: view.id, conversationId }, "Lark progress card delivered");
     }
     const signature = JSON.stringify(view);
     if (card.signature === signature) return;
@@ -282,7 +285,7 @@ export class LarkChannel {
       if (!view.overflow) {
         const receipts = view.messageIds.map((id) => this.deliveryId(id, 0));
         this.save({ ...this.state, delivered: [...new Set([...this.state.delivered, ...receipts])] });
-        for (const id of view.messageIds) await this.acknowledge(this.prefix + chatId, id);
+        for (const id of view.messageIds) await this.acknowledge(conversationId, id);
       }
       this.log.info({ inputId: view.id, phase: view.phase }, "Lark progress card settled");
     }

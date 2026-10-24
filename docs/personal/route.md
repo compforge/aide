@@ -24,7 +24,11 @@ Channel / Source → Input
 
 “持续运行”指复用同一原生上下文，没有输入时可以空闲。空闲时通过 harness verb 的 prompt 启动；运行中，默认 Controller 先保存 Input 的 execution 接纳记录，再经同一个 verb 调用原生 followUp，immediate 则调用 steer。多条 Input 可以在同一 invocation 中分别通过 route_input 完成。明确拒绝才释放接纳记录，结果不确定时保留证据；当前大部分 immediate 带明确 sessionId，会先被规则直接分派。模型等待不阻塞默认 Controller 的规则处理。
 
-规则匹配 Input.sessionId 与 Conversation 话题；originalInputId 已有路由结果时可以沿其归属关联。前置 Input 尚未决定时，它只是证据，不构成硬等待依赖。Channel 的明确新话题可以创建 Conversation，Source 的陌生话题线索本身不创建。规则仍未命中且没有存活的非 Default 候选时，直接分派给 Default；尚无 Default 则建立它。只有一个普通话题时仍需判断是否相关，因此交给 Route Agent。
+规则匹配 Input.sessionId 与 Conversation 话题；originalInputId 已有路由结果时可以沿其归属关联。前置 Input 尚未决定时，它只是证据，不构成硬等待依赖。
+Channel 的明确新话题可以创建 Conversation；Lark Source 同样按明确的聊天或群话题创建，并且不沿 originalInputId 扩展到其他归属，
+详见 [Lark Conversation 创建与归属](../connector/lark-messages.md#conversation-创建与归属)。Source 创建时不采用观察地址作为默认回复地址。
+其他 Source 的陌生话题线索本身不创建。规则仍未命中且没有存活的非 Default 候选时，直接分派给 Default；尚无 Default 则建立它。
+只有一个普通话题时仍需判断是否相关，因此交给 Route Agent。
 
 ## 工具与完成条件
 
