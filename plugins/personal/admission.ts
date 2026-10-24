@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { TASK_TYPE, type TaskSpec } from "./task/model.ts";
-import { CONVERSATION_TYPE } from "./conversation/model.ts";
+import { TOPIC_TYPE } from "./topic/model.ts";
 import { digest } from "./chief-model.ts";
 import { resourceRef } from "./input/state.ts";
 import type { ResourceAdmission } from "../../src/host/plugin/resource/client.ts";
@@ -17,9 +17,9 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
       const spec = init.spec as TaskSpec;
       if (!spec.initialInputId) throw new Error("Task requires an initial Input");
       const input = inputs.get(spec.initialInputId);
-      const conversation = inputs.resources.get(CONVERSATION_TYPE, digest(spec.conversationId));
-      if (conversation.metadata.deletionTimestamp || !input || input.metadata.deletionTimestamp || !input.status.assess?.[conversation.metadata.uid])
-        throw new Error("Initial Input is not assigned to the Task Conversation");
+      const topic = inputs.resources.get(TOPIC_TYPE, digest(spec.topicId));
+      if (topic.metadata.deletionTimestamp || !input || input.metadata.deletionTimestamp || !input.status.assess?.[topic.metadata.uid])
+        throw new Error("Initial Input is not assigned to the Task Topic");
       const existing = inputs.resources.find(TASK_TYPE, init.name);
       if (existing) {
         if (existing.metadata.deletionTimestamp || !isDeepStrictEqual(existing.spec, spec)) throw new Error("Task creation identity is already used");
@@ -34,12 +34,12 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
     if (type.apiVersion === INPUT_TYPE.apiVersion && type.kind === INPUT_TYPE.kind) {
       if (init.namespace && init.namespace !== "v1") throw new Error("Input uses the Personal global namespace");
       const spec = init.spec as InputSpec;
-      return inputs.submit(spec.sessionId ?? "personal", init.name, spec, init.status as InputStatus | undefined);
+      return inputs.submit(spec.topicKey ?? spec.topicId ?? "personal", init.name, spec, init.status as InputStatus | undefined);
     }
     if (type.apiVersion === OUTPUT_TYPE.apiVersion && type.kind === OUTPUT_TYPE.kind) {
       if (init.namespace && init.namespace !== "v1") throw new Error("Output uses the Personal global namespace");
       const spec = init.spec as OutputSpec;
-      return outputs.create(spec.conversationId, init.name, spec);
+      return outputs.create(spec.topicId, init.name, spec);
     }
   };
 }

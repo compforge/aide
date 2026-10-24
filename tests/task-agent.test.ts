@@ -38,8 +38,8 @@ function setup(t: TestContext) {
 /** @case Initial handling and Task creation are atomic, without prematurely completing Chief assessment. */
 test("Task creation assigns the original Input atomically and distinguishes multiple goals from retries", async t => {
   const { aide, resources, context, get } = setup(t);
-  const c = await aide.conversations.ensure("me");
-  const input = await aide.conversations.submit("original", { origin: "channel", originId: "web", text: "inspect two repositories" });
+  const c = await aide.topics.ensure("me");
+  const input = await aide.topics.submit("original", { origin: "channel", originId: "web", text: "inspect two repositories" });
   await deliver(context, input, [c.metadata], "same topic");
   const service = aide.work("me");
   const first = await service.create(definition, "original", "tool-1");
@@ -48,7 +48,7 @@ test("Task creation assigns the original Input atomically and distinguishes mult
   assert.equal(first.uid, retry.uid);
   assert.notEqual(first.uid, second.uid);
   assert.equal(get(first.id).spec.initialInputId, "original");
-  const fact = aide.conversations.inputStore.get("original")!;
+  const fact = aide.topics.inputStore.get("original")!;
   assert.equal(fact.status.assess![c.metadata.uid]!.completedAt, undefined);
   assert.deepEqual(Object.keys(fact.status.handle!).sort(), [first.uid!, second.uid!].sort());
   await assert.rejects(aide.work("other").create(definition, "original", "foreign"), /not assigned/);
@@ -58,7 +58,7 @@ test("Task creation assigns the original Input atomically and distinguishes mult
     { operation: "create", type: { ...INPUT_TYPE, kind: "Unknown" }, name: "fail", spec: {}, status: {} },
   ]), /Unknown resource/);
   assert.equal(aide.personal.store.resources.find(TASK_TYPE, "rolled-back"), undefined);
-  assert.deepEqual(aide.conversations.inputStore.get("original"), fact);
+  assert.deepEqual(aide.topics.inputStore.get("original"), fact);
 });
 
 /** @case report_task alone acknowledges business handling, and rejects unrelated or unadmitted inputs atomically. */
@@ -67,22 +67,22 @@ test("Task report commits progress with exact receipts; end of inference without
   const work = await aide.work("me").create(definition);
   const task = await active(work.id);
   await aide.work("me").requestInput(work.id, { text: "later evidence" }, "later");
-  const later = aide.conversations.inputStore.query("handlePending", work.uid!).find(i => i.metadata.name !== task.spec.initialInputId)!;
+  const later = aide.topics.inputStore.query("handlePending", work.uid!).find(i => i.metadata.name !== task.spec.initialInputId)!;
   const before = get(work.id);
   await assert.rejects(reportWork(resources, task, "run", { action: "done", summary: "Verified", recent: "Verified", inputIds: [task.spec.initialInputId, later.metadata.name] }), /not admitted/);
   assert.deepEqual(get(work.id), before);
   await assert.rejects(reportWork(resources, task, "wrong", { inputIds: [], summary: "bad", recent: "bad", action: "done" }), /no longer active/);
   await reportWork(resources, task, "run", { inputIds: [task.spec.initialInputId], summary: "First inspected", recent: "First evidence", action: "done" });
   assert.equal(get(work.id).status.status, "ready");
-  assert.ok(aide.conversations.inputStore.get(task.spec.initialInputId)!.status.handle![work.uid!]!.completedAt);
-  assert.equal(aide.conversations.inputStore.get(later.metadata.name)!.status.handle![work.uid!]!.completedAt, undefined);
+  assert.ok(aide.topics.inputStore.get(task.spec.initialInputId)!.status.handle![work.uid!]!.completedAt);
+  assert.equal(aide.topics.inputStore.get(later.metadata.name)!.status.handle![work.uid!]!.completedAt, undefined);
   await finalizeExecution(context, task, "run");
   assert.equal(get(work.id).status.status, "ready");
   const another = await aide.work("me").create(definition);
   const unreported = await active(another.id);
   await finalizeExecution(context, unreported, "run");
   assert.equal(get(another.id).status.status, "uncertain");
-  assert.match(aide.conversations.inputStore.get(unreported.spec.initialInputId)!.status.handle![another.uid!]!.lastError!, /interrupted/);
+  assert.match(aide.topics.inputStore.get(unreported.spec.initialInputId)!.status.handle![another.uid!]!.lastError!, /interrupted/);
 });
 
 /** @case Input assignment and deletion serialize through the same Task version; neither can revive a deleting UID. */
@@ -100,11 +100,11 @@ test("Input assignment defeats stale idle deletion; deletion fences Chief handof
   assert.ok(get(work.id).metadata.deletionTimestamp);
   assert.deepEqual(aide.work("me").list(), []);
   await assert.rejects(aide.work("me").requestInput(work.id, { text: "too late" }), /Unknown work|being deleted/);
-  const input = await aide.conversations.submit("late", { origin: "channel", originId: "web", text: "late request" });
-  const c = aide.conversations.resource("me")!;
+  const input = await aide.topics.submit("late", { origin: "channel", originId: "web", text: "late request" });
+  const c = aide.topics.resource("me")!;
   await deliver(context, input, [c.metadata], "same topic");
-  await assert.rejects(handoff(aide.conversations, resources, "late", [{ workUid: work.uid!, request: {} }]), /Work unavailable/);
-  assert.equal(aide.conversations.inputStore.get("late")!.status.handle?.[work.uid!], undefined);
+  await assert.rejects(handoff(aide.topics, resources, "late", [{ workUid: work.uid!, request: {} }]), /Work unavailable/);
+  assert.equal(aide.topics.inputStore.get("late")!.status.handle?.[work.uid!], undefined);
 });
 
 /** @case Agent stop precedes Task deletion; a future wake or unresolved handling prevents resource reclamation. */
@@ -126,7 +126,7 @@ test("Task idle lifecycle releases the agent, retains its native ID, then reques
   assert.deepEqual(get(work.id).status.agent, { harness: "task", sessionId: "native-id" });
   assert.equal(get(work.id).metadata.deletionTimestamp, undefined);
   await aide.work("me").requestInput(work.id, { text: "Needs later inspection" }, "inspect-later");
-  const unresolved = aide.conversations.inputStore.query("handlePending", work.uid!)[0]!;
+  const unresolved = aide.topics.inputStore.query("handlePending", work.uid!)[0]!;
   await resources.patchStatus(unresolved, { handle: { ...unresolved.status.handle, [work.uid!]: {
     ...unresolved.status.handle![work.uid!]!, appliedAt: new Date().toISOString(), executionId: "previous", lastError: "Needs inspection",
   } } });
@@ -156,5 +156,5 @@ test("Task controller finalizes the resource after both idle stages without repl
   for (let n = 0; n < 350 && aide.personal.store.resources.find(TASK_TYPE, work.id); n++) await Bun.sleep(10);
   assert.equal(aide.personal.store.resources.find(TASK_TYPE, work.id), undefined);
   assert.equal(runs, 1);
-  assert.ok(aide.conversations.inputStore.list().every(i => i.status.handle?.[work.uid!]?.completedAt));
+  assert.ok(aide.topics.inputStore.list().every(i => i.status.handle?.[work.uid!]?.completedAt));
 });

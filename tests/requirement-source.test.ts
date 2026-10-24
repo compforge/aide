@@ -31,7 +31,7 @@ function fixture(t: TestContext, me = true) {
   const catalog = openPersonCatalog(root, marks, pino({ level: "silent" }), () => {});
   const client = () => createResourceClient(store, undefined, undefined, personalAdmission(inputs, new OutputStore(session.home)));
   let resources = client();
-  const watch: Watch = { id: "work", source: "work", sessionId: session.id, intervalMs: 300000, repositories: [], userKeys: ["me"] };
+  const watch: Watch = { id: "work", source: "work", topicKey: session.id, intervalMs: 300000, repositories: [], userKeys: ["me"] };
   store.create({ type: SOURCE_TYPE, name: "watch", spec: watch, status: {} });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   let current = item(), list: (q: RequirementListQuery | undefined) => Promise<RequirementPage<RequirementSummary>> = async () => ({ items: [current] });

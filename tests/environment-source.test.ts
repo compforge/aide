@@ -32,10 +32,10 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   const root = mkdtempSync(join(tmpdir(), "aide-env-source-"));
   const sessions = new HarnessFixtures(root); const session = sessions.create({ id: "owner", cwd: root });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
-  const conversations = new InputStore(session.home);
+  const topics = new InputStore(session.home);
   let store = new PluginResourceStore({ home: session.home, pluginInstanceId: "personal" });
   store.storage.register("personal", personalDefinitions);
-  const resources = () => createResourceClient(store, undefined, undefined, personalAdmission(conversations, new OutputStore(session.home)));
+  const resources = () => createResourceClient(store, undefined, undefined, personalAdmission(topics, new OutputStore(session.home)));
   const watch: EnvironmentSourceSpec = { environment: "dev", namespace: "app", intervalMs: 300_000 };
   store.create({ type: ENVIRONMENT_SOURCE_TYPE, name: "changes", spec: watch, status: {} });
   let current = snapshot("A"); let failure = false; let reads = 0;
@@ -44,14 +44,14 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   } } };
   const resource = () => store.get<EnvironmentSourceSpec, EnvironmentSourceStatus>(ENVIRONMENT_SOURCE_TYPE, "changes");
   const observe = () => observeEnvironment({ logger, resources: resources() }, resource(), connectors);
-  await observe(); assert.equal(conversations.list().length, 0);
-  current = { ...current, observedAt: "later" }; await observe(); assert.equal(conversations.list().length, 0);
+  await observe(); assert.equal(topics.list().length, 0);
+  current = { ...current, observedAt: "later" }; await observe(); assert.equal(topics.list().length, 0);
   current = snapshot("B");
   await assert.rejects(observeEnvironment({ logger, resources: { ...resources(), async patchStatus() { throw new Error("Crash"); } } }, resource(), connectors), /Crash/);
-  assert.equal(conversations.list().length, 1);
-  assert.match(conversations.list()[0]!.spec.text, /dev \/ app.*Workload/);
-  assert.match(conversations.list()[0]!.spec.text, /Deployment api.*镜像 api=A → api=B/);
-  assert.equal(conversations.list()[0]!.spec.originRef!.uid, resource().metadata.uid);
+  assert.equal(topics.list().length, 1);
+  assert.match(topics.list()[0]!.spec.text, /dev \/ app.*Workload/);
+  assert.match(topics.list()[0]!.spec.text, /Deployment api.*镜像 api=A → api=B/);
+  assert.equal(topics.list()[0]!.spec.originRef!.uid, resource().metadata.uid);
   assert.equal(resource().status.baseline!.workloads[0]!.images[0]!.image, "A");
   const reopened = sessions.open(session.id);
   t.after(() => reopened.closeLogs());
@@ -59,18 +59,18 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   current = snapshot("C"); const previousReads = reads;
   await observe(); assert.equal(reads, previousReads, "Recover the committed input before reading the new live value");
   assert.equal(resource().status.baseline!.workloads[0]!.images[0]!.image, "B");
-  assert.equal(conversations.list().length, 1);
-  await observe(); assert.equal(conversations.list().length, 2);
+  assert.equal(topics.list().length, 1);
+  await observe(); assert.equal(topics.list().length, 2);
   current = snapshot("A"); await observe();
   current = snapshot("B"); await observe();
-  assert.equal(conversations.list().length, 4, "A-B occurs twice and needs two independent input identities");
+  assert.equal(topics.list().length, 4, "A-B occurs twice and needs two independent input identities");
   failure = true; const baseline = resource().status.baseline;
   await assert.rejects(observe(), /Forbidden/); assert.deepEqual(resource().status.baseline, baseline);
   failure = false; current = { ...snapshot("B"), workloads: [] }; await observe();
-  assert.ok(conversations.list().every((input) => input.spec.originId === SOURCES.environments.id));
-  const event = conversations.list().at(-1)!.spec.observation!;
+  assert.ok(topics.list().every((input) => input.spec.originId === SOURCES.environments.id));
+  const event = topics.list().at(-1)!.spec.observation!;
   assert.deepEqual((event.changes as { after?: unknown }[]).map((c) => c.after), [undefined]);
-  assert.ok(conversations.list().every((input) => input.spec.sessionId === undefined));
+  assert.ok(topics.list().every((input) => input.spec.topicKey?.startsWith("environment:")));
   assert.equal(store.list({ apiVersion: "aide.dev/v1alpha1", kind: "Task" }).length, 0);
 });
 
@@ -107,9 +107,9 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await aide.start(); await aide.settled();
   assert.ok(reads >= 2); assert.equal(prompts.length, 0);
   const initialReads = reads;
-  await aide.receive(fixtureIncoming({ channelId: "web", sessionId: "other", conversationId: "other", id: "hello", text: "hello" })); await aide.settled();
+  await aide.receive(fixtureIncoming({ channelId: "web", topicId: "other", id: "hello", text: "hello" })); await aide.settled();
   assert.equal(reads, initialReads, "Opening another Session must not duplicate the observer");
-  await aide.setDefaultConversation("other", true);
+  await aide.setDefaultTopic("other", true);
   current = snapshot("B");
   const poll = async () => {
     const scope = aide.personal;
@@ -118,17 +118,17 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
     for (const resource of resources) await scope.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1",
       resourceApiVersion: ENVIRONMENT_SOURCE_TYPE.apiVersion, resourceKind: ENVIRONMENT_SOURCE_TYPE.kind, resourceId: resource.metadata.name });
     for (let attempt = 0; attempt < 500; attempt++) {
-      if (scope.conversations.inputStore.list().some((input) => !!input.status.route?.completedAt)) break;
+      if (scope.topics.inputStore.list().some((input) => !!input.status.route?.completedAt)) break;
       await Bun.sleep(10);
     }
     await aide.settled();
-    assert.ok(scope.conversations.inputStore.list().some((input) => !!input.status.route?.completedAt));
+    assert.ok(scope.topics.inputStore.list().some((input) => !!input.status.route?.completedAt));
   };
   await poll();
-  assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
+  assert.equal(aide.personal.topics.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
   assert.match(prompts.at(-1)!, /镜像 api=A → api=B/);
   assert.doesNotMatch(prompts.at(-1)!, /"before"|"after"/);
-  assert.ok(aide.outputs().filter((message) => message.conversationId === "other").some((message) => message.text === "关注的服务有变化"));
+  assert.equal(aide.outputs().filter((message) => message.topicId !== "other").length, 0, "Source Topics do not inherit a reply address");
   assert.equal(aide.works().length, 0);
   const sessions = new HarnessFixtures(root); const persisted = sessions.open("aide:execution");
   const events = new EventLedger({ path: join(root, "connectors", "calls.jsonl") }).read().filter((event) => event.kind === "connector.started");
@@ -136,7 +136,7 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   await persisted.closeLogs();
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();
-  assert.equal(aide.personal.conversations.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
+  assert.equal(aide.personal.topics.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
   assert.equal(prompts.length, 2, "Channel and observation each call Chief once; Default-only routing needs no Agent");
 });
 

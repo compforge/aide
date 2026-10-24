@@ -45,11 +45,11 @@ export async function reconcileRoutine(context: PluginContext, execution: Reconc
   const due = routine.status.status === "scheduled" && !!routine.status.nextAt && Date.parse(routine.status.nextAt) <= Date.now();
   if (!blocked && (input || due)) {
     routine = await context.resources.patchStatus(routine, { status: "running", nextAt: null, idleSince: null, agentStoppedAt: null });
-    const prompt = `Use the current resource context for your entrusted work; read_routine, read_input and read_conv supply missing or truncated evidence. Verify existing effects before handling failed inputs.
-Activation: ${JSON.stringify({ routineId: routine.metadata.name, conversationId: routine.spec.conversationId, inputId: input?.metadata.name, kind: input ? "input" : "timer" })}
+    const prompt = `Use the current resource context for your entrusted work; read_routine, read_input and read_topic supply missing or truncated evidence. Verify existing effects before handling failed inputs.
+Activation: ${JSON.stringify({ routineId: routine.metadata.name, topicId: routine.spec.topicId, inputId: input?.metadata.name, kind: input ? "input" : "timer" })}
 ${input ? inputPreview(input) : ""}
 Report handled inputs and progress using report_routine; use say for useful user communication.`;
-    await runInput(context, execution.withContext({ conversationId: routine.spec.conversationId, routineId: routine.metadata.name }), routine, "routine", prompt, input?.metadata.name);
+    await runInput(context, execution.withContext({ topicId: routine.spec.topicId, routineId: routine.metadata.name }), routine, "routine", prompt, input?.metadata.name);
     return { requeueAfterMs: 1 };
   }
   if (routine.status.status === "running") {

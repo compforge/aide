@@ -117,7 +117,7 @@ const DEFAULT_CANCEL_GRACE_MS = 10_000;
 const DEFAULT_EXECUTION_CONCURRENCY = 4;
 
 /** 打断标记文案：cancelled 终态时落一条 notice，执行时间线显示取消原因 */
-export const INTERRUPTED_NOTICE_TITLE = "Conversation interrupted — tell the agent what to do differently";
+export const INTERRUPTED_NOTICE_TITLE = "Topic interrupted — tell the agent what to do differently";
 
 /** @spec Execute admitted calls serially per live native session, with bounded concurrency across sessions.
  * @why Operators own business scheduling; this executor protects live handles and records transient call facts.

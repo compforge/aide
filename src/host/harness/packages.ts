@@ -26,7 +26,7 @@ function harnessPackages(home: string, harness: PackageHarness, config: AideConf
 }
 
 /**
- * @spec Each Harness loads only its declared, installed package skills. Conversation startup never installs packages.
+ * @spec Each Harness loads only its declared, installed package skills. Topic startup never installs packages.
  * @link docs/configuration.md
  * @case tests/harness-config.test.ts
  */

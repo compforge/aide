@@ -5,7 +5,7 @@ import type { ChannelService } from "../channel/service.ts";
 import { inputPrinter } from "../../plugins/personal/input/printer.ts";
 
 export interface InputConsumer {
-  ref: ResourceRef; label: string; available: boolean; conversationId?: string;
+  ref: ResourceRef; label: string; available: boolean; topicId?: string;
 }
 export interface InputTimelineEntry {
   id: string; at?: string; stage: "receive" | "route" | "assess" | "handle" | "output";
@@ -16,7 +16,7 @@ function definition(aide: ChannelService, input: { origin: "channel" | "source" 
   catch { return `${input.origin} / ${input.originId}`; }
 }
 export function inputList(aide: ChannelService, query: InputBrowseQuery) {
-  const store = aide.conversations.inputStore, result = browseInputs(store, query), facets = inputFacets(store);
+  const store = aide.topics.inputStore, result = browseInputs(store, query), facets = inputFacets(store);
   return { ...result, items: result.items.map(({ input, ...state }) => ({
     ...state, id: input.metadata.name, uid: input.metadata.uid, at: input.metadata.creationTimestamp,
     origin: input.spec.origin, originId: input.spec.originId, label: definition(aide, input.spec),
@@ -36,24 +36,24 @@ export function inputList(aide: ChannelService, query: InputBrowseQuery) {
  * @link docs/personal/input.md
  */
 export function inputDetail(aide: ChannelService, id: string, uid?: string) {
-  const input = aide.conversations.inputStore.get(id);
+  const input = aide.topics.inputStore.get(id);
   if (!input || input.metadata.deletionTimestamp || (uid !== undefined && uid !== input.metadata.uid)) return;
   const timeline: InputTimelineEntry[] = [{ id: "received", at: input.metadata.creationTimestamp, stage: "receive", title: "接收 Input", text: definition(aide, input.spec), status: "completed" }];
   const consumer = (ref: ResourceRef): InputConsumer => {
-    const current = aide.conversations.resources.find<Record<string, unknown>, unknown>(ref, ref.name, ref.namespace as ResourceNamespace);
+    const current = aide.topics.resources.find<Record<string, unknown>, unknown>(ref, ref.name, ref.namespace as ResourceNamespace);
     const available = !!current && current.metadata.uid === ref.uid && !current.metadata.deletionTimestamp;
     const spec = available ? current.spec : undefined;
     const label = spec && [spec.name, spec.title, spec.id].find(value => typeof value === "string");
-    const conversationId = spec && (ref.kind === "Conversation" ? spec.id : spec.conversationId);
+    const topicId = spec && (ref.kind === "Topic" ? spec.id : spec.topicId);
     return { ref, label: typeof label === "string" ? label : ref.name, available,
-      ...(typeof conversationId === "string" ? { conversationId } : {}) };
+      ...(typeof topicId === "string" ? { topicId } : {}) };
   };
   const attempt = (key: string, stage: "route" | "assess" | "handle", value: Attempt, assigned?: Assessment) => {
-    const target = assigned && consumer(assigned.resource), label = stage === "route" ? "路由" : stage === "assess" ? "会话研判" : "Work 办理";
+    const target = assigned && consumer(assigned.resource), label = stage === "route" ? "路由" : stage === "assess" ? "根主题研判" : "Work 办理";
     const append = (suffix: string, title: string, at?: string, text?: string, status?: string) => timeline.push({
       id: `${key}:${suffix}`, stage, title, at, text, status, consumer: target, executionId: value.executionId,
     });
-    if (assigned) append("assigned", stage === "assess" ? "分派到会话" : "交给 Work", assigned.assignedAt,
+    if (assigned) append("assigned", stage === "assess" ? "交给根主题处理" : "交给 Work", assigned.assignedAt,
       stage === "handle" ? JSON.stringify((assigned as Handling).request, null, 2) : undefined, "assigned");
     if (stage === "handle" && (value as Handling).appliedAt) append("applied", "Work 已应用请求", (value as Handling).appliedAt, undefined, "applied");
     if (value.startedAt) append("started", `${label}开始（最近记录）`, value.startedAt, undefined, "started");
@@ -65,15 +65,16 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
   const route = input.status.route;
   if (route) {
     attempt("route", "route", route);
+    for (const target of route.result?.topics ?? []) timeline.push({ id: `binding:${target.uid}`, at: route.completedAt, stage: "route", title: "绑定来源主题", consumer: consumer(target), status: "bound" });
     if (route.result) timeline.push({ id: "route:result", at: route.completedAt, stage: "route", title: "路由结果", text: route.result.reason,
-      status: `${route.result.conversations.length} 个会话` });
+      status: `${route.result.topics.length} 个主题` });
     if (!route.completedAt && route.nextAttemptAt) timeline.push({ id: "route:retry", stage: "route", title: "路由等待重试", text: `计划重试时间：${route.nextAttemptAt}`, status: "retrying" });
   } else timeline.push({ id: "route:pending", stage: "route", title: "等待路由", status: "pending" });
   for (const [key, value] of Object.entries(input.status.assess ?? {})) attempt(`assess:${key}`, "assess", value, value);
   for (const [key, value] of Object.entries(input.status.handle ?? {})) attempt(`handle:${key}`, "handle", value, value);
-  const outputs = aide.conversations.outputStore.list({ inputId: id });
+  const outputs = aide.topics.outputStore.list({ inputId: id });
   for (const output of outputs) {
-    const target = consumer(output.spec.conversation);
+    const target = consumer(output.spec.topic);
     timeline.push({ id: `output:${output.metadata.name}`, stage: "output", at: output.metadata.creationTimestamp, title: "创建 Output",
       text: output.spec.text, status: output.status.phase, consumer: target, executionId: output.spec.executionId });
     if (output.status.deliveredAt) timeline.push({ id: `output:${output.metadata.name}:delivered`, stage: "output", at: output.status.deliveredAt,

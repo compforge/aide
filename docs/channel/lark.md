@@ -33,13 +33,13 @@ journalctl --user -u aide -f
 ## 收发与恢复
 
 单聊及无话题的群消息使用 `lark:<appId>:<chatId>`；群消息带 thread_id 时使用 `lark:<appId>:<chatId>:thread:<threadId>`。
-同一应用、聊天和话题的用户身份 Source 与机器人 Channel 共用 Conversation，不同群话题分别保存上下文。
-完整规则及创建、采集和回复地址的区别见 [Conversation 创建与归属](../connector/lark-messages.md#conversation-创建与归属)。
-可在网页左侧选择该会话，或使用 `/?conversation=<编码后的 Conversation ID>` 查看消息与工作，实际 ID 可从收消息日志取得。
+同一应用、聊天和话题的用户身份 Source 与机器人 Channel 共用 Topic，不同群话题分别保存上下文。
+完整规则及创建、采集和回复地址的区别见 [Topic 创建与归属](../connector/lark-messages.md#topic-创建与归属)。
+可在网页左侧选择该会话，或使用 `/?topic=<编码后的 Topic ID>` 查看消息与工作，实际 ID 可从收消息日志取得。
 
 服务启动时通过 Lark `/bot/v3/info` 获取当前机器人的 `open_id`。群消息只有在 mentions 中精确包含该身份时才接收，SDK 负责去掉本机器人的 @占位符并保留其他成员的显示名称。普通群消息、@其他机器人、@所有人及机器人发送的消息均忽略；不会将普通聊天注入 Chief 上下文。群内追问的回答也需要 @Aide。
 
-身份查询失败时日志提示群接入已禁用，单聊继续可用；修复访问条件后重启服务重新解析身份。过滤原因写入 debug 日志，接收日志包含 chatType、messageId 和 conversationId，不记录消息正文。
+身份查询失败时日志提示群接入已禁用，单聊继续可用；修复访问条件后重启服务重新解析身份。过滤原因写入 debug 日志，接收日志包含 chatType、messageId 和 topicId，不记录消息正文。
 
 入站事件先保存到 `AIDE_HOME/channels/` 再确认接收，后台依次交给 Aide，避免模型响应超过平台回调时限。Lark 消息 ID 用于去重；未处理的收件在重启后继续。消息提交后异步处理，Chief 失败会保留提示，等待用户核对后新发消息明确重试。已进入业务执行的中断仍遵循 `uncertain` 规则，不自动重放。
 

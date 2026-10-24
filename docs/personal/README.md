@@ -8,7 +8,7 @@ Personal 是 Aide 的内置个人助手插件。Input 带来内容、人物和�
 
 这个过程包含归属判断、关联上下文、核实事实、研判影响、推进工作和选择沟通时机。有些 Input 只更新认识、记忆或已有工作的进展；多条 Input 可以汇聚成一条 Output，一条 Input 也可能在持续跟进中促成多次 Output。静默处理同样可以有明确的判断和结果。
 
-Input 同时承载收到的事实和围绕这份事实的处理进展。原始内容保持不变，各组件将自己负责环节的处理时间、去向、结论及异常写入 Input.status。沿着一条 Input，可以知道它被分派到哪些 Conversation、哪些 Chief 已经研判、哪些 Task / Routine 正在办理，以及还有什么尚未完成。这为协作、恢复与问题排查提供共同依据。
+Input 同时承载收到的事实和围绕这份事实的处理进展。原始内容保持不变，各组件将自己负责环节的处理时间、去向、结论及异常写入 Input.status。沿着一条 Input，可以知道它被分派到哪些 Topic、哪些 Chief 已经研判、哪些 Task / Routine 正在办理，以及还有什么尚未完成。这为协作、恢复与问题排查提供共同依据。
 
 可以借用 Kubernetes Pod 的直觉理解这种协作：多个组件围绕同一个持久对象工作，各自在 status 中留下负责环节的痕迹。Aide 中，route、assess、handle 分别表达路由、研判和办理。Input 保存这些环节的状态与结果摘要；详细执行轨迹、工作目标与进展、输出正文分别由执行记录、Work 和 Output 承载，并遵循各自的保留策略。
 
@@ -21,13 +21,14 @@ Input 同时承载收到的事实和围绕这份事实的处理进展。原始�
 | 对象 | 承担的职责 | 详细设计 |
 | --- | --- | --- |
 | Input | 收到的事实，以及各组件的处理痕迹 | [输入](input.md) |
-| Route | 为输入选择一个或多个话题，无合适归属时使用 Default | [路由](route.md) |
-| Conversation / Chief | 承接话题，研判输入，直接处理或委托工作 | [会话](conversation.md)、[Chief](chief.md) |
+| Weave | 把相关根主题组织到新父主题下，安全交接消费与工作 | [主题树](topic.md) |
+| Route | 为输入选择一个话题，无合适归属时使用 Default | [路由](route.md) |
+| Topic / Chief | 承接话题，研判输入，直接处理或委托工作 | [会话](topic.md)、[Chief](chief.md) |
 | Task / Routine | 有限目标与持续职责的独立生命周期 | [Task](task.md)、[Routine](routine.md) |
 | Person | 人物身份、可选 Me 标记和持续积累的认识 | [人物](person.md) |
 | Output | 已决定表达的内容、对象、地址与投递状态 | [输出](output.md) |
 
-Channel 和 Source 负责形成 Input。Route 的确定性规则直接分派，其余交给持续 Route Agent；Chief 在所属 Conversation 中研判，必要时建立 Task / Routine 的办理记录。各 Agent 通过工具明确确认业务进展，通过 say 创建 Output，投递器负责发送和回执。
+Channel 和 Source 负责形成 Input。Route 的确定性规则直接分派，其余交给持续 Route Agent；Chief 在所属 Topic 中研判，必要时建立 Task / Routine 的办理记录。各 Agent 通过工具明确确认业务进展，通过 say 创建 Output，投递器负责发送和回执。
 
 Reconcile 负责确定性协调，Agent 负责非确定性判断。运行中的新材料通过 followUp / steer 加入原生上下文；工具回执确认处理完成。模型结束、输入处理完成、工作目标达成和消息送达是不同事实。
 
@@ -37,11 +38,11 @@ Aide 的主动性围绕一个动作展开：把发生的事放入合适的上下
 
 | 上下文 | 承载什么 | 协调与判断的职责 |
 | --- | --- | --- |
-| Conversation | 一个话题的交流、近期关注与相关委托 | 理解新输入或定时回顾，直接处理简单事情，将持续工作交给 Work |
+| Topic | 一个话题的交流、近期关注与相关委托 | 理解新输入或定时回顾，直接处理简单事情，将持续工作交给 Work |
 | Task | 有限目标、完成条件、相关事实、执行历史与当前阻塞 | 持续推进目标直至完成 |
 | Routine | 持续职责、历史基线与当前轮次的目标和进展 | 推进当前轮次直至完成，再等待下一轮触发 |
 
-归位可以涉及零个、一个或多个上下文，也可以止于 Conversation。Input 保留原始事实与来源；关联上下文时，保存引用或将相关事实、用户决定承接到对应资源。需要持续跟进时优先关联已有 Work，再按需要创建 Task / Routine。目标与进展由这些资源持有，Harness 的会话和记忆帮助理解它们。
+归位可以涉及零个、一个或多个上下文，也可以止于 Topic。Input 保留原始事实与来源；关联上下文时，保存引用或将相关事实、用户决定承接到对应资源。需要持续跟进时优先关联已有 Work，再按需要创建 Task / Routine。目标与进展由这些资源持有，Harness 的会话和记忆帮助理解它们。
 
 例如 executor 的 Pod 发生变化，Route 先把输入归入关注该服务的话题，Chief 再判断后续处理。若话题下已有“跟进 OOM 修复”的 Task，就将变化作为新证据交给它继续核实；若属于稳定性巡检，则进入 Routine 当前轮次的观察；只有近期关注时，Chief 可以核实后直接提醒。没有改变判断的新信息可以静默处理。
 
@@ -57,7 +58,7 @@ Source 和 trigger 提供重新判断的机会。已有委托决定可以继续�
 
 ## 有界认识与近期依据
 
-Conversation、Task、Routine、Person 共用 summary + recent：summary 保存截至当前仍有价值的整体认识，recent 保存有界的近期观察、判断、动作或结果。具体目标、委托、身份仍由各资源的结构化字段承担。
+Topic、Task、Routine、Person 共用 summary + recent：summary 保存截至当前仍有价值的整体认识，recent 保存有界的近期观察、判断、动作或结果。具体目标、委托、身份仍由各资源的结构化字段承担。
 
 模型合并长期有用的认识，Schema 约束文本与近期窗口，Host 执行资源容量管理。超过窗口的 recent 可以被裁剪；summary 超预算则拒绝写入，让模型重新合并。两者都不承诺完整历史，也不要求每条旧记录都转为 summary。
 
@@ -65,6 +66,6 @@ Conversation、Task、Routine、Person 共用 summary + recent：summary 保存�
 
 ## 运行与验证
 
-Personal 的资源定义与 Controller 经普通 Plugin 契约注册；Source、Route、Conversation、Task 和 Routine 各自协调资源，Person 共享目录按需读写。Controller 之间通过资源变更与索引协作，依据持久回执判断业务完成状态。
+Personal 的资源定义与 Controller 经普通 Plugin 契约注册；Source、Route、Topic、Task 和 Routine 各自协调资源，Person 共享目录按需读写。Controller 之间通过资源变更与索引协作，依据持久回执判断业务完成状态。
 
 框架机制见 [Plugin](../plugin/README.md)，原生执行边界见 [Harness](../harness/README.md)，外部接入见 [Connector 与 Source](../connector/README.md)。配置阈值集中在 [配置](../configuration.md)，真实模型和平台效果按 [E2E](../e2e.md) 验收。各主题文档链接相应自动测试；替身测试不证明真实提供方连通或模型判断质量。

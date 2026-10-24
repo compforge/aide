@@ -72,6 +72,6 @@ ssh -N -L 7433:127.0.0.1:7433 user@your-server
 
 ## 执行诊断
 
-HTTP 与 Personal 装配日志进入标准输出；应用根目录的 `runtime.log` 保存插件和调度日志，Runner 激活日志记录 pid。应用根目录的 `harness-runtime.log` / `harness-native.jsonl` 保存有界执行诊断与原生协议诊断，不参与恢复；原生会话引用位于资源的 `status.agent`，历史由 Harness 自己保存；Connector 调用事实位于 `connectors/calls.jsonl`。未使用 Harness 的新实例不会启动执行后端。检查问题时先记录版本、revision、conversationId、Work id 与 invocationId，再核对外部操作是否已经发生。
+HTTP 与 Personal 装配日志进入标准输出；应用根目录的 `runtime.log` 保存插件和调度日志，Runner 激活日志记录 pid。应用根目录的 `harness-runtime.log` / `harness-native.jsonl` 保存有界执行诊断与原生协议诊断，不参与恢复；原生会话引用位于资源的 `status.agent`，历史由 Harness 自己保存；Connector 调用事实位于 `connectors/calls.jsonl`。未使用 Harness 的新实例不会启动执行后端。检查问题时先记录版本、revision、topicId、Work id 与 invocationId，再核对外部操作是否已经发生。
 
 Pi 和 Chief 可分别在 Aide 配置中声明模型并引用凭证环境变量，也可继承 Pi 原生配置。连接器设置见 [Connector 与 Source](connector/README.md)，Lark 机器人设置见 [Lark](channel/lark.md)。通过 `/health` 不能证明这些依赖可用。

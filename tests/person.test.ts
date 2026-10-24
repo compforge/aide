@@ -77,7 +77,7 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   await channel.receive(event("other", "ou_other"));
   await channel.close(); channel = new LarkChannel(home, "cli_app", aide, transport, log);
   await channel.dispatch(); await aide.settled();
-  const inputs = aide.personal.conversations.inputStore.list();
+  const inputs = aide.personal.topics.inputStore.list();
   assert.equal(inputs.find((input) => input.spec.text === "mine")!.spec.relation, "sent");
   assert.equal(inputs.find((input) => input.spec.text === "other")!.spec.relation, undefined);
   const self = (await aide.persons.me())!;

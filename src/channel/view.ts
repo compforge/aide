@@ -1,14 +1,16 @@
+import { topicSubtree } from "../../plugins/personal/topic/tree.ts";
+import { TOPIC_TYPE, type TopicResource } from "../../plugins/personal/topic/model.ts";
 import { isChannelAddress } from "./address.ts";
 import { channelOutputs, visibleOutput } from "./output.ts";
 import { inputPrinter } from "../../plugins/personal/input/printer.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { harnessIdentityFor } from "../host/harness/ids.ts";
-import { conversationTrigger, type ConversationTrigger } from "../../plugins/personal/conversation/trigger.ts";
+import { topicTrigger, type TopicTrigger } from "../../plugins/personal/topic/trigger.ts";
 import type { ChannelService } from "./service.ts";
 import type { ResourceContext } from "../../plugins/personal/context.ts";
 import { PROTOCOL_VERSION, type BaseBlock, type ModelMeta, type UIModel } from "@compforge/agentue/ui";
 
-export interface ConversationBlock extends BaseBlock {
+export interface TopicBlock extends BaseBlock {
   type: "summary" | "input" | "message" | "execution" | "thought" | "text" | "tool";
   content: string;
   role?: "user" | "aide";
@@ -27,37 +29,41 @@ export interface ConversationBlock extends BaseBlock {
   icon?: string;
   harness?: string;
 }
-interface ConversationMeta extends ModelMeta {
-  conversation_id: string;
+interface TopicMeta extends ModelMeta {
+  topic_id: string;
   context: ResourceContext | null;
   activity: { id: string; phase: string; queued: number } | null;
 }
-export type ConversationView = UIModel<ConversationBlock, ConversationMeta>;
+export type TopicView = UIModel<TopicBlock, TopicMeta>;
 
 /**
- * @spec Retained live progress uses explicit invocation and Conversation associations; it does not survive service restart.
+ * @spec Retained live progress uses explicit invocation and Topic associations; it does not survive service restart.
  * @spec AgentUE group_id binds executions and official replies to their persisted Chief activation.
- * @spec Every Channel or Source Input attached to this Conversation stays visible, including queued and quietly consumed observations.
+ * @spec Every Channel or Source Input attached to this Topic stays visible, including queued and quietly consumed observations.
  * @spec Input cards and Harness identity project persisted facts without creating outbound Messages.
  * @case tests/web-progress.test.ts
  * @spec Questions are ordinary Outputs; native permissions use a separate Approval surface.
  * @why Completion folds execution details; it never deletes them or creates extra delivered Messages.
  * @link docs/channel/web.md
  */
-export function conversationView(aide: ChannelService, conversationId: string): ConversationView {
-  if (!aide.conversations.get(conversationId)) return { version: PROTOCOL_VERSION, biz: "aide.conversation", blocks: [], meta: { conversation_id: conversationId, context: null, activity: null } };
-  const history = aide.invocations().filter(item => item.conversationId === conversationId);
+export function topicView(aide: ChannelService, topicId: string): TopicView {
+  if (!aide.topics.get(topicId)) return { version: PROTOCOL_VERSION, biz: "aide.topic", blocks: [], meta: { topic_id: topicId, context: null, activity: null } };
+  const resource = aide.topics.resource(topicId)!;
+  const members = topicSubtree(aide.topics.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE), resource);
+  const memberIds = new Set(members.map(t => t.spec.id)), memberUids = new Set(members.map(t => t.metadata.uid));
+  const inputIds = new Set(aide.topics.inputs(topicId).map(i => i.metadata.name));
+  const history = aide.invocations().filter(item => memberIds.has(item.topicId ?? "") || item.inputIds?.some(id => inputIds.has(id)));
   const state = aide.runtime.executions.view(history.flatMap(item => item.invocationId ? [item.invocationId] : []));
-  const runs = aide.conversations.runs(conversationId);
+  const runs = aide.topics.runs(topicId);
   const active = runs.find((input) => !input.input && input.status.phase === "running");
   const queued = runs.filter((input) => !input.status.phase).length;
   const runId = (item: { inputId?: string; executionId: string }) => item.executionId;
-  const resource = aide.conversations.resource(conversationId);
   const turnInputs = new Map([...state.harnessInputs.values()].map((input) => [input.invocationId, input]));
   const invocations = history.filter((item) => {
-    if (item.conversationId !== conversationId || !resource) return false;
-    if (item.resourceRef?.kind === "Conversation") return item.resourceRef.uid === resource.metadata.uid;
-    // Deleted Work may retain progress in its original Conversation, never in a later incarnation.
+    if (item.inputIds?.some(id => inputIds.has(id))) return true;
+    if (!memberIds.has(item.topicId ?? "")) return false;
+    if (item.resourceRef?.kind === "Topic") return memberUids.has(item.resourceRef.uid ?? "");
+    // Deleted Work may retain progress in its original Topic, never in a later incarnation.
     const input = item.invocationId && turnInputs.get(item.invocationId);
     const at = input && state.messages.get(input.messageId)?.createdAt;
     return !at || at >= resource.metadata.creationTimestamp;
@@ -72,12 +78,12 @@ export function conversationView(aide: ChannelService, conversationId: string): 
   const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.invocationId))
     .map((input) => [input.invocationId, input]));
   const summaries = new Map(state.invocationSummaries.filter((turn) => relatedTurns.has(turn.invocationId)).map((turn) => [turn.invocationId, turn]));
-  const executions = new Map<string, { header: ConversationBlock; blocks: ConversationBlock[] }>();
-  const roots: ConversationBlock[] = channelOutputs(aide).filter((message) => resource && visibleOutput(message, resource))
+  const executions = new Map<string, { header: TopicBlock; blocks: TopicBlock[] }>();
+  const roots: TopicBlock[] = channelOutputs(aide).filter((message) => resource && (visibleOutput(message, resource) || memberUids.has(message.topicUid) || message.inputIds?.some(id => inputIds.has(id))))
     .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, receivers: message.receivers, target: message.target,
       ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
     }));
-  if (resource?.status.summary) roots.push({ id: "conversation-summary", type: "summary", label: "历史摘要", icon: "📝",
+  if (resource?.status.summary) roots.push({ id: "topic-summary", type: "summary", label: "历史摘要", icon: "📝",
     content: resource.status.summary!, at: resource.metadata.creationTimestamp });
   for (const run of runs) {
     if (!run.input) continue;
@@ -89,7 +95,7 @@ export function conversationView(aide: ChannelService, conversationId: string): 
       status: run.status.phase ?? "queued",
       detail: [inputPrinter.describe(input), run.status.summary, run.status.error].filter(Boolean).join("\n\n") });
   }
-  const append = (turnId: string, block: ConversationBlock) => {
+  const append = (turnId: string, block: TopicBlock) => {
     const input = turns.get(turnId);
     if (!input) return;
     let execution = executions.get(turnId);
@@ -128,20 +134,21 @@ export function conversationView(aide: ChannelService, conversationId: string): 
     .flatMap((block) => [block, ...children.get(block.id) ?? []]);
   const live = [...executions.values()].some((execution) => execution.header.status === "running");
   return {
-    version: PROTOCOL_VERSION, biz: "aide.conversation", blocks,
-    meta: { conversation_id: conversationId, context: resource ? { summary: resource.status.summary, recent: resource.status.recent } : null, activity: active || queued || live ? {
-      id: active?.id ?? `queued:${conversationId}`, phase: active?.status.phase ?? "queued", queued,
+    version: PROTOCOL_VERSION, biz: "aide.topic", blocks,
+    meta: { topic_id: topicId, context: resource ? { summary: resource.status.summary, recent: resource.status.recent } : null, activity: active || queued || live ? {
+      id: active?.id ?? `queued:${topicId}`, phase: active?.status.phase ?? "queued", queued,
     } : null },
   };
 }
 
 
-export interface ConversationSummary {
+export interface TopicSummary {
   id: string;
   revision: number | null;
   uid: string | null;
-  sessionId: string;
-  trigger: ConversationTrigger;
+  topicKey?: string;
+  parentUid?: string;
+  trigger: TopicTrigger;
   default: boolean;
   name: string;
   preview: string;
@@ -149,34 +156,34 @@ export interface ConversationSummary {
 }
 
 /**
- * @spec Navigation includes Channel/Source conversations and work-only scopes; summaries expose the Conversation name and delivered preview, without other input prompts or execution details.
+ * @spec Navigation includes Channel/Source topics and work-only scopes; summaries expose the Topic name and delivered preview, without other input prompts or execution details.
  * @link docs/channel/web.md
  */
-export function conversationList(aide: ChannelService): ConversationSummary[] {
-  const summaries = new Map<string, ConversationSummary>();
+export function topicList(aide: ChannelService): TopicSummary[] {
+  const summaries = new Map<string, TopicSummary>();
   const ensure = (id: string) => {
     let summary = summaries.get(id);
     if (!summary) {
-      const resource = aide.conversations.resource(id);
-      summary = { id, uid: resource?.metadata.uid ?? null, revision: aide.conversations.get(id)?.revision ?? null,
-        sessionId: id, trigger: conversationTrigger(resource?.spec.trigger),
+      const resource = aide.topics.resource(id);
+      summary = { id, uid: resource?.metadata.uid ?? null, revision: aide.topics.get(id)?.revision ?? null,
+        ...(resource?.spec.topicKey ? { topicKey: resource.spec.topicKey } : {}), ...(resource?.spec.parentRef ? { parentUid: resource.spec.parentRef.uid } : {}), trigger: topicTrigger(resource?.spec.trigger),
         default: resource?.spec.default === true && !resource.metadata.deletionTimestamp,
-        name: aide.conversations.get(id)?.name || "未命名会话", preview: "", updatedAt: "" };
+        name: aide.topics.get(id)?.name || "未命名会话", preview: "", updatedAt: "" };
       summaries.set(id, summary);
     }
     return summary;
   };
-  for (const conversation of aide.conversations.list()) ensure(conversation.id).updatedAt = conversation.createdAt;
-  for (const input of aide.conversations.inputs()) {
-    const summary = ensure(input.conversationId);
+  for (const topic of aide.topics.list()) ensure(topic.id).updatedAt = topic.createdAt;
+  for (const input of aide.topics.inputs()) {
+    const summary = ensure(input.topicId);
     if (input.metadata.creationTimestamp > summary.updatedAt) summary.updatedAt = input.metadata.creationTimestamp;
   }
-  for (const id of aide.conversationIds()) ensure(id);
+  for (const id of aide.topicIds()) ensure(id);
   for (const message of channelOutputs(aide)) {
-    const destinations = new Set([message.conversationId]);
+    const destinations = new Set([message.topicId]);
     if (isChannelAddress(message.target) && message.target.channelId === "web") destinations.add(message.target.endpoint);
     for (const id of destinations) {
-      const current = aide.conversations.resource(id);
+      const current = aide.topics.resource(id);
       if (!current || !visibleOutput(message, current)) continue;
       const summary = ensure(id);
       const text = message.text.replace(/\s+/g, " ").trim();

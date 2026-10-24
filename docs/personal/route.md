@@ -1,6 +1,6 @@
 # Route：话题归属与连续分类
 
-Route 为 Input 寻找一个或多个相关 Conversation。明确规则由 Reconcile 执行，其余提交给持续运行的 Route Agent；找不到相关话题才使用 Default。Default 不接受额外的无条件副本，也不承担基础设施故障兜底。
+Route 为 Input 寻找一个相关 Topic。明确规则由 Reconcile 执行，其余提交给持续运行的 Route Agent；找不到相关话题才使用 Default。Default 不接受额外的无条件副本，也不承担基础设施故障兜底。
 
 ```text
 Channel / Source → Input
@@ -9,9 +9,9 @@ Channel / Source → Input
                    ├─ 命中 ─────────────┐
                    └─ followup → Route Agent → route_input
                                          ↓
-                Input.status.route + assess[Conversation UID]
+                Input.status.route + assess[Topic UID]
                                          ↓
-                    Conversation Reconcile → Chief Agent
+                    Topic Reconcile → Chief Agent
                                          ↓ assess_input
                          assess 完成 + handle[Work UID]
                                          ↓
@@ -22,24 +22,22 @@ Channel / Source → Input
 
 `Route/global` 保存当前 execution 与原生 agent 会话引用，待路由事实由 Input 索引提供。默认 Controller 根据 Input 索引发现待路由事实，处理规则；具名 `agent` Controller 把其余输入交给持久 Route Agent。Reconcile 是确定性协调器，Agent 承担非确定性判断。
 
-“持续运行”指复用同一原生上下文，没有输入时可以空闲。空闲时通过 harness verb 的 prompt 启动；运行中，默认 Controller 先保存 Input 的 execution 接纳记录，再经同一个 verb 调用原生 followUp，immediate 则调用 steer。多条 Input 可以在同一 invocation 中分别通过 route_input 完成。明确拒绝才释放接纳记录，结果不确定时保留证据；当前大部分 immediate 带明确 sessionId，会先被规则直接分派。模型等待不阻塞默认 Controller 的规则处理。
+“持续运行”指复用同一原生上下文，没有输入时可以空闲。空闲时通过 harness verb 的 prompt 启动；运行中，默认 Controller 先保存 Input 的 execution 接纳记录，再经同一个 verb 调用原生 followUp，immediate 则调用 steer。多条 Input 可以在同一 invocation 中分别通过 route_input 完成。明确拒绝才释放接纳记录，结果不确定时保留证据；当前大部分 immediate 带明确 topicKey 或 topicId，会先被规则直接分派。模型等待不阻塞默认 Controller 的规则处理。
 
-规则匹配 Input.sessionId 与 Conversation 话题；originalInputId 已有路由结果时可以沿其归属关联。前置 Input 尚未决定时，它只是证据，不构成硬等待依赖。
-Channel 的明确新话题可以创建 Conversation；Lark Source 同样按明确的聊天或群话题创建，并且不沿 originalInputId 扩展到其他归属，
-详见 [Lark Conversation 创建与归属](../connector/lark-messages.md#conversation-创建与归属)。Source 创建时不采用观察地址作为默认回复地址。
-其他 Source 的陌生话题线索本身不创建。规则仍未命中且没有存活的非 Default 候选时，直接分派给 Default；尚无 Default 则建立它。
-只有一个普通话题时仍需判断是否相关，因此交给 Route Agent。
+规则先处理 Input.topicKey：复用一个可接纳 Topic，缺失时创建独立 ID 的来源 Topic。显式 topicId 用于 Web 选择；新 Web 主题可创建，其他显式引用必须存在。无 key 和显式目标时，可以继承 originalInputId 的稳定归属；否则从 root 候选做语义路由。前置 Input 尚未决定只表示证据缺失，不构成等待依赖。
+
+Channel 与 Source 的同源 key 使用相同规则，详见 [Lark](../connector/lark-messages.md#topic-创建与归属)。有 key 的来源 Topic 不自动获得默认回复地址。规则未命中且没有存活非 Default root 时直接投给 Default；没有 Default 时建立它。
 
 ## 工具与完成条件
 
 | 工具 | 用途 |
 | --- | --- |
-| `list_conversations({ offset? })` | 当前会话 UID、名称、Default 标记与摘要 |
+| `list_topics({ offset?, query?, parentUid? })` | 默认返回根主题；支持按名称/摘要搜索，以及某个父主题的直接子节点 |
 | `read_input({ inputId?, offset? })` | 分页查看事实或待路由项及尝试记录 |
-| `route_input({ inputId, conversationUids, reason })` | 原子提交完整路由决定；空目标数组表示 Default |
+| `route_input({ inputId, topicUids, reason })` | 原子提交完整路由决定；空目标数组表示 Default |
 | `memory_search`、`session_search` | 检索共享记忆与历史 |
 
-`route_input` 仅提供给 Route。工具验证本次 execution 确实接纳了 Input，目标必须是现存 Conversation UID。一次事务写入 `Input.status.route.result`、completedAt 和所有 `assess[uid]`；建立 assess 即完成交付。目标版本检查与写入处于同一事务，删除或替换目标不能导致误投。
+`route_input` 仅提供给 Route。工具验证本次 execution 确实接纳了 Input，目标必须是现存 Topic UID。一次事务写入 `Input.status.route.result`、completedAt 和当前根的 `assess[uid]`；稳定归属保存在 route.result.topics，沿 parentRef 找 root，绑定不因 Weave 改变；建立 assess 即完成交付。目标版本检查与写入处于同一事务，删除或替换目标不能导致误投。
 
 已完成的重复调用不改分派结果、不重置 assess。工具调用成功才表示路由完成；模型结束或说“已分派”不算确认。Chief 使用独立的 `assess_input`，`say` 另行产生 Output。
 
@@ -49,7 +47,7 @@ Channel 的明确新话题可以创建 Conversation；Lark Source 同样按明�
 
 完成分派的 Input 永远不因 Route 重试而重分派。Chief 已尝试但未确认时可能有外部副作用，保留证据供后续核对，不采用 Route 的自动重试策略。收尾事务失败时，下次 Reconcile 先提交遗留状态和释放 execution，不重复调用 Harness。
 
-Input 自身保护未完成的 route、assess、handle。全部完成后才进入 Host 容量回收候选；目标删除会把未完成的对应阶段标为 cancelled，不转给同名新实例。处理凭据随 Input 回收，入站去重回执在配置的窗口内继续防止重投复活。
+Input 自身保护未完成的 route、assess、handle。全部完成后才进入 Host 容量回收候选；Topic 有未完成消费时拒绝删除；Work 显式删除可结束它自己的办理记录，不转给同名新实例。处理凭据随 Input 回收，入站去重回执在配置的窗口内继续防止重投复活。
 
 ## 连续上下文与记忆
 
@@ -85,15 +83,15 @@ Route 使用本资源目录下的 [Background](../../plugins/personal/route/back
 
 背景前缀在每次模型请求前从资源刷新，覆盖连续调用中的工具后续轮次、followUp 和 steer。内容不变时前缀不变；变化后替换旧材料，不在历史中反复追加快照。它不进入 transcript 或历史摘要，压缩和重启后重新从资源构建。`system.sections` 仍可用于固定系统结构，业务数据不因常驻而成为系统指令。机制见 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
 
-候选来自存活的 Conversation，按 UID 稳定排序，每个 summary 最多预览 2000 字符；快照按 20 项和约 16000 个 JSON 字符限制，附 total / nextOffset，通过 list_conversations 补查余下候选。fingerprint 按完整投影内容计算，未展示页的变化也会刷新前缀；指纹变化后重新补查旧分页结果。指纹不持久化，也不表示模型已经阅读。目标提交时仍检查当前资源，名称和 summary 都不授予权限。
+默认候选来自存活、未处于准备/交接状态的 root Topic，按 UID 稳定排序，每个 summary 最多预览 2000 字符；快照按 20 项和约 16000 个 JSON 字符限制，附 total / nextOffset，通过 list_topics 搜索相关候选或下钻子主题，不要求遍历全目录。fingerprint 按完整投影内容计算，未展示页的变化也会刷新前缀；指纹变化后只重读需要依赖的页面。指纹不持久化，也不表示模型已经阅读。目标提交时仍检查当前资源，名称和 summary 都不授予权限。
 
 没有非 Default 候选时通过确定性规则分派。其它场景的优化重点是：是否反复读取未变的目录、是否遗漏候选变化、是否被旧 summary 误导，以及每条 Input 的模型调用、上下文 token、缓存表现和完成耗时。动态前缀会影响缓存，当前只保证结构和内容稳定，不承诺具体 provider 的缓存命中率。
 
 ## 长期演进方向
 
-长期可以借鉴 Jev 的决策模型思路，为 Route 引入专门的 decision model：结合近期 Input、当前 Conversation 状态、已确认的分派决定与用户纠正反馈，学习话题归属。历史分派是可修正的决策记录，不自动作为正确标签；模型效果应根据后续反馈验证。
+长期可以借鉴 Jev 的决策模型思路，为 Route 引入专门的 decision model：结合近期 Input、当前 Topic 状态、已确认的分派决定与用户纠正反馈，学习话题归属。历史分派是可修正的决策记录，不自动作为正确标签；模型效果应根据后续反馈验证。
 
-当前由持续复用上下文的 Route Agent 接收 followup，并通过 `route_input` 提交一个或多个相关 Conversation；判断没有合适归属时由 Default 承接。未来 decision model 可以辅助候选选择，或在判断足够明确时承接分派决策，沿用 `route_input` 的目标校验、原子分派和幂等确认契约。模型不能明确判断时仍交给 Route Agent；Default 表达没有合适归属的业务决定。此处记录演进方向，当前不引入训练、反馈采集或新的模型后端。
+当前由持续复用上下文的 Route Agent 接收 followup，并通过 `route_input` 提交一个相关 Topic；判断没有合适归属时由 Default 承接。未来 decision model 可以辅助候选选择，或在判断足够明确时承接分派决策，沿用 `route_input` 的目标校验、原子分派和幂等确认契约。模型不能明确判断时仍交给 Route Agent；Default 表达没有合适归属的业务决定。此处记录演进方向，当前不引入训练、反馈采集或新的模型后端。
 
 ## 配置、实现与验证
 

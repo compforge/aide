@@ -32,9 +32,9 @@ Agent 不自动发现环境中的扩展、提示词命令或交互主题；装�
 
 上下文分为三个层次：system 保存固定 instruction、tools 和 rules；custom 保存当前业务背景，在 LLM 侧转换为 user；普通 user 消息承载陆续到达的 Input。业务背景可以包含候选会话、当前 CRD 的 summary、近期依据和相关工作，具体内容由业务决定。
 
-`Background` 是本次请求的业务快照，提供 `text(): string`。调用方通过 `createPiAgent({ background: () => new ConversationBackground(...) })` 提供它；工厂读取最新资源，`text()` 只文本化快照，Harness 不解释其中的业务字段。
+`Background` 是本次请求的业务快照，提供 `text(): string`。调用方通过 `createPiAgent({ background: () => new TopicBackground(...) })` 提供它；工厂读取最新资源，`text()` 只文本化快照，Harness 不解释其中的业务字段。
 
-Personal 的 Route、Conversation、Task、Routine 分别在自己的目录实现 Background，共用有界投影与文本组织辅助函数；它们是派生对象，不是新的 CRD，也不单独持久化。
+Personal 的 Route、Topic、Task、Routine 分别在自己的目录实现 Background，共用有界投影与文本组织辅助函数；它们是派生对象，不是新的 CRD，也不单独持久化。
 
 公开的 `agent.transformContext` 在每次模型请求前调用工厂、取得 `Background.text()`，作为一个 custom message 投影到历史消息之前，包括工具后续轮次、followUp 和 steer。SDK 仍负责 system、工具声明和原生消息转换；业务材料不写进 system。内容不变时前缀保持相同，变化时下一次请求使用新内容，移除的 part 不再提供。
 

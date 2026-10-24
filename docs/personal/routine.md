@@ -1,6 +1,6 @@
 # Routine：持续职责与每轮办理
 
-Routine 是同一 Conversation 下持续存在的委托职责。`agents/routine/` 与 Chief、Task 平级，拥有独立提示词和领域工具，复用 Pi SDK 与 PiAdapter。它比较新旧观察、处理值得推进的变化，必要时通过 say 通知或询问用户。
+Routine 是同一 Topic 下持续存在的委托职责。`agents/routine/` 与 Chief、Task 平级，拥有独立提示词和领域工具，复用 Pi SDK 与 PiAdapter。它比较新旧观察、处理值得推进的变化，必要时通过 say 通知或询问用户。
 
 ## 触发与执行
 
@@ -15,7 +15,7 @@ Routine.spec.trigger 声明 cron 或事件订阅。cron 到期可以在没有 In
 | read_routine | 读取职责、触发条件、当前状态、累计认识和近期依据 |
 | read_input | 列出待处理 Input，或分页读取分派给当前 Routine 的材料 |
 | list_work | 分页查看同会话 Task / Routine 概况，不获得其它 Work 的操作权限 |
-| read_conv | 读取所属 Conversation 背景，不扩大委托授权 |
+| read_topic | 读取所属 Topic 背景，不扩大委托授权 |
 | say | 创建用户可见 Output，关联 Routine UID、execution 和可选 Input |
 | report_routine | 原子提交进展、当前轮次状态和明确列出的 Input 回执 |
 
@@ -41,8 +41,8 @@ Routine 使用本资源目录下的 [Background](../../plugins/personal/routine/
 system：Routine 的固定职责、执行约束和报告契约
 custom → user：Background.text()，当前业务背景 v1
   objective：自身职责、trigger、状态、summary 与有限 recent
-  conversation：所属话题背景
-  work：同一 Conversation 的相关 Task / Routine 概况
+  topic：所属话题背景
+  work：同一 Topic 的相关 Task / Routine 概况
 user：Input 1 或本轮定时触发说明
 assistant / tool：判断变化、按需 say、report_routine 提交本轮结果
 后续请求的 custom → user 前缀：objective 认识 v2  # 已提交的新结论或跟进状态

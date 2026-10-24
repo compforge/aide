@@ -14,13 +14,13 @@ const target: RequirementAddress = { kind: "requirement", source: "work", catego
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-comment-output-")), store = new OutputStore(root);
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const spec: OutputSpec = { text: "收到", target, conversationId: "topic", conversation: { apiVersion: "personal.aide.dev/v1", kind: "Conversation", namespace: "v1", name: "topic", uid: "topic-uid" } };
+  const spec: OutputSpec = { text: "收到", target, topicId: "topic", topic: { apiVersion: "personal.aide.dev/v1", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } };
   const requirements = { ...emptyConnectors.requirements, async identity() { return { provider: "meego", scope: target.scope }; } };
   return { root, store, spec, requirements };
 }
 const log = pino({ level: "silent" });
 
-test("Requirement addresses pin project scope independently of Person and Conversation", () => {
+test("Requirement addresses pin project scope independently of Person and Topic", () => {
   assert.deepEqual(parseAddress(target), target);
   assert.equal(sameAddress(target, parseAddress({ ...target, scope: "different" })), false);
   assert.throws(() => parseAddress({ kind: "requirement", source: "work", category: "issue", id: "1" }));

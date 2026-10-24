@@ -17,6 +17,7 @@ export const HarnessesConfigSchema = z.object({
   chief: ChiefConfigSchema.prefault({}),
   task: PiConfigSchema.prefault({}),
   routine: PiConfigSchema.prefault({}),
+  weave: z.object({ model: PiConfigSchema.shape.model }).strict().prefault({}),
   route: z.object({ model: PiConfigSchema.shape.model }).strict().prefault({}),
 }).strict();
 
@@ -35,6 +36,9 @@ export async function resolveHarnessConfigs(config: AideConfig, sources: {
   let route: PiConfig;
   try { route = config.harnesses.route.model ? await resolvePiConfig({ ...sources, model: config.harnesses.route.model, skillPaths: [] }) : { ...chief, skillPaths: [] }; }
   catch (error) { throw new Error(`${sources.file}: harnesses.route: ${error instanceof Error ? error.message : "configuration resolution failed"}`); }
+  let weave: PiConfig;
+  try { weave = config.harnesses.weave.model ? await resolvePiConfig({ ...sources, model: config.harnesses.weave.model, skillPaths: [] }) : { ...chief, skillPaths: [] }; }
+  catch (error) { throw new Error(`Weave configuration failed: ${String(error)}`); }
   const taskSkills = await loadHarnessSkills(sources.home, "task", config, sources.log, sources.file);
   let task: PiConfig;
   try { task = config.harnesses.task.model
@@ -72,12 +76,12 @@ export async function resolveHarnessConfigs(config: AideConfig, sources: {
   const defaultHarnessConfig = Object.freeze({ id: "default", harness,
     ...(typeof defaultHarnessOptions.model === "string" ? { model: defaultHarnessOptions.model } : {}) });
   sources.log.info({ harness, harnessName: defaultHarnessConfig.id }, "Resolved default execution Harness");
-  for (const [harness, resolved] of [["chief", chief], ["route", route], ["task", task], ["routine", routine], ["pi", pi]] as const) {
+  for (const [harness, resolved] of [["weave", weave], ["chief", chief], ["route", route], ["task", task], ["routine", routine], ["pi", pi]] as const) {
     if (!resolved) continue;
     sources.log.info({ harness, provider: resolved.model.provider, model: resolved.model.id,
       skills: resolved.skillPaths?.length ?? 0,
-      modelSource: config.harnesses[harness].model ? sources.file : ["route", "task", "routine"].includes(harness) ? "Chief model" : "Pi defaults", inheritedFrom: resolved.agentDir },
+      modelSource: config.harnesses[harness].model ? sources.file : ["weave", "route", "task", "routine"].includes(harness) ? "Chief model" : "Pi defaults", inheritedFrom: resolved.agentDir },
     "Resolved startup harness configuration");
   }
-  return Object.freeze({ chief, route, task, routine, pi, defaultHarnessConfig, defaultHarnessOptions: Object.freeze(structuredClone(defaultHarnessOptions)) });
+  return Object.freeze({ chief, weave, route, task, routine, pi, defaultHarnessConfig, defaultHarnessOptions: Object.freeze(structuredClone(defaultHarnessOptions)) });
 }

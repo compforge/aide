@@ -15,7 +15,7 @@ import { inputPrinter } from "../input/printer.ts";
 import { say } from "../output/action.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<T> => definition;
-/** Host binds scope; the model never supplies Routine or Conversation identity. */
+/** Host binds scope; the model never supplies Routine or Topic identity. */
 export function routineSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, log: Logger): PiSessionFactory {
   const ref = scope.resourceRef;
   if (scope.pluginInstanceId !== "personal" || ref?.kind !== ROUTINE_TYPE.kind || ref.apiVersion !== ROUTINE_TYPE.apiVersion || !ref.uid) throw new Error("Routine requires its owning resource scope");
@@ -23,33 +23,37 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
     const current = () => {
       const routine = store.resources.get<RoutineSpec, RoutineStatus>(ROUTINE_TYPE, ref.name, ref.namespace);
       if (routine.metadata.uid !== ref.uid || routine.metadata.deletionTimestamp || !routine.status.execution) throw new Error("Routine execution is no longer active");
-      plugins.executionVerbs(routine.status.execution.id, { conversationId: routine.spec.conversationId, routineId: routine.metadata.name });
+      plugins.executionVerbs(routine.status.execution.id, { topicId: routine.spec.topicId, routineId: routine.metadata.name });
       return routine;
     };
-    const verbs = () => { const routine = current(); return plugins.executionVerbs(routine.status.execution!.id, { conversationId: routine.spec.conversationId, routineId: routine.metadata.name }); };
+    const verbs = () => { const routine = current(); return plugins.executionVerbs(routine.status.execution!.id, { topicId: routine.spec.topicId, routineId: routine.metadata.name }); };
     const tools: ToolDefinition[] = [
-      tool({ name: "list_work", label: "List related work", description: "Page through this Conversation's Task and Routine summaries; does not delegate or resume work.",
+      tool({ name: "list_work", label: "List related work", description: "Page through this Topic's Task and Routine summaries; does not delegate or resume work.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
-        async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, current().spec.conversationId), offset)); } }),
+        async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, current().spec.topicId), offset)); } }),
       tool({ name: "read_routine", label: "Read routine", description: "Read this Routine's objective, state and cumulative understanding.", parameters: Type.Object({}),
         async execute() { return result(current()); } }),
-      tool({ name: "read_conv", label: "Read conversation", description: "Read the owning Conversation as context, not additional authority.", parameters: Type.Object({}),
-        async execute() { const c = store.conversations.resource(current().spec.conversationId); return result(c ? { ...c.spec, summary: c.status.summary, recent: c.status.recent } : null); } }),
+      tool({ name: "read_topic", label: "Read topic", description: "Read the owning Topic as context, not additional authority.", parameters: Type.Object({}),
+        async execute() { const c = store.topics.resource(current().spec.topicId); return result(c ? { ...c.spec, summary: c.status.summary, recent: c.status.recent } : null); } }),
       tool({ name: "read_input", label: "Read input", description: "List pending assigned inputs, or page through one assigned input. Failed attempts need effect inspection.",
         parameters: Type.Object({ inputId: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { inputId, offset = 0 }) {
-          const routine = current(), storeInputs = store.conversations.inputStore;
+          const routine = current(), storeInputs = store.topics.inputStore;
           if (!inputId) { const all = storeInputs.query("handlePending", routine.metadata.uid); return result({ inputs: all.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, handling: i.status.handle![routine.metadata.uid] })), nextOffset: offset + 20 < all.length ? offset + 20 : null }); }
           const input = storeInputs.get(inputId);
           if (!input?.status.handle?.[routine.metadata.uid]) throw new Error("Input is not assigned to this Routine");
           const text = inputPrinter.describe(input);
           return result({ inputId, handling: input.status.handle[routine.metadata.uid], text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } }),
-      tool({ name: "say", label: "Say", description: "Create an Output through this Routine's Conversation. Success means the Output was accepted, not delivered. Delivery and recovery are handled by the Host.",
-        parameters: Type.Object({ text: Type.String({ minLength: 1 }), inputIds: Type.Optional(Type.Array(Type.String())) }),
+      tool({ name: "say", label: "Say", description: "Create an Output through this Routine's Topic. Choose respondToInputId for an assigned Input or an explicit known target. Topic grouping never grants a destination. Success means accepted, not delivered; Host owns delivery and recovery.",
+        parameters: Type.Object({ text: Type.String({ minLength: 1 }), inputIds: Type.Optional(Type.Array(Type.String())),
+          respondToInputId: Type.Optional(Type.String()), target: Type.Optional(Type.Union([
+            Type.Object({ kind: Type.Literal("channel"), channelId: Type.String(), endpoint: Type.String() }),
+            Type.Object({ kind: Type.Literal("requirement"), source: Type.String(), category: Type.String(), id: Type.String(), scope: Type.String() }),
+          ])) }),
         async execute(id, args) {
           const routine = current();
-          for (const inputId of args.inputIds ?? []) if (!store.conversations.inputStore.get(inputId)?.status.handle?.[routine.metadata.uid]) throw new Error("Output input is not assigned to Routine");
+          for (const inputId of args.inputIds ?? []) if (!store.topics.inputStore.get(inputId)?.status.handle?.[routine.metadata.uid]) throw new Error("Output input is not assigned to Routine");
           return result(await say(verbs(), { ...args, idempotencyKey: id }));
         } }),
       tool({ name: "report_routine", label: "Report routine", description: "Atomically update Routine progress and acknowledge only inputs actually handled. Use say separately for user-visible communication.",

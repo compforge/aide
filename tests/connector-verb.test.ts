@@ -27,7 +27,7 @@ test("Connector Verb persists dispatch and outcome; orphan recovery records unce
   const options = { connectorCalls, connectors, capacity: new ReconcileCapacity(1) };
   const verb = new Verb(options);
   t.after(async () => { release?.(); verb.close(); rmSync(root, { recursive: true, force: true }); });
-  const context = { pluginInstanceId: "personal", namespace: "v1" as const, executionId: "exec-1", conversationId: "conv" };
+  const context = { pluginInstanceId: "personal", namespace: "v1" as const, executionId: "exec-1", topicId: "conv" };
   await verb.beginRemote(context);
   const invoke = (timeoutMs: number) => verb.invoke(context, { verb: "connector", input: { request: { operation: "environments.list" }, timeoutMs } });
   assert.equal((await invoke(1000)).state, "success");
@@ -38,7 +38,7 @@ test("Connector Verb persists dispatch and outcome; orphan recovery records unce
   const settled = ledger.read().filter((event) => event.kind === "connector.settled");
   assert.deepEqual(settled.map((event) => event.payload.outcome), ["success", "failure", "timeout"]);
   ledger.record({ v: ENVELOPE_VERSION, seq: 100, eventId: "orphan", ts: new Date().toISOString(), scope: { type: "application" }, kind: "connector.started", source: { type: "plugin", pluginInstanceId: "personal" },
-    payload: { callId: "orphan", executionId: "exec-crashed", attributes: { conversationId: "conv" }, request: { operation: "environments.list" } } });
+    payload: { callId: "orphan", executionId: "exec-crashed", attributes: { topicId: "conv" }, request: { operation: "environments.list" } } });
   verb.close();
   const restarted = new Verb({ ...options, connectorCalls: new ConnectorCalls(root) });
   restarted.failOrphans(); restarted.failOrphans(); restarted.close();

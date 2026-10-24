@@ -8,7 +8,7 @@ import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import definitions from "../plugins/personal/definitions.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../plugins/personal/input/model.ts";
-import { CONVERSATION_TYPE } from "../plugins/personal/conversation/model.ts";
+import { TOPIC_TYPE } from "../plugins/personal/topic/model.ts";
 import { digest } from "../plugins/personal/chief-model.ts";
 import { workType, type WorkSpec } from "../plugins/personal/resources.ts";
 import { newWork } from "../plugins/personal/work.ts";
@@ -25,15 +25,15 @@ async function fixture(t: TestContext, kind: "task" | "routine" = "task") {
   const store = new PluginResourceStore({ home, pluginInstanceId: "personal" });
   store.storage.register("personal", definitions);
   const resources = createResourceClient(store);
-  await resources.create(CONVERSATION_TYPE, { name: digest("me"), spec: { id: "me" }, status: {} });
+  await resources.create(TOPIC_TYPE, { name: digest("me"), spec: { id: "me" }, status: {} });
   const work = newWork("me", { kind, title: "Follow up", instruction: "Check evidence", trigger: kind === "routine" ? { cron: "* * * * *", timezone: "UTC", event: null } : null });
-  const { id, conversationId, title, instruction, revision, kind: _kind, trigger: _trigger, ...status } = work;
-  const original = await resources.create<WorkSpec, WorkAgentStatus>(workType(kind), { name: id, spec: { conversationId, title, instruction, revision, ...(kind === "routine" ? { trigger: work.trigger! } : { initialInputId: "fixture-initial" }) }, status });
+  const { id, topicId, title, instruction, revision, kind: _kind, trigger: _trigger, ...status } = work;
+  const original = await resources.create<WorkSpec, WorkAgentStatus>(workType(kind), { name: id, spec: { topicId, title, instruction, revision, ...(kind === "routine" ? { trigger: work.trigger! } : { initialInputId: "fixture-initial" }) }, status });
   const context = { resources, logger: { info() {}, warn() {}, error() {} } } as unknown as PluginContext;
   const read = async () => (await resources.get<WorkSpec, WorkAgentStatus>(resourceRef(original)))!;
   const add = (name: string, text = name) => resources.create<InputSpec, InputStatus>(INPUT_TYPE, { name,
     spec: { origin: "source", originId: "test", text }, status: {
-      route: { completedAt: new Date().toISOString(), result: { conversations: [], reason: "assigned" } },
+      route: { completedAt: new Date().toISOString(), result: { topics: [], reason: "assigned" } },
       handle: { [original.metadata.uid]: { resource: resourceRef(original), assignedAt: new Date().toISOString(), request: { action: "context" } } },
     } });
   const pending = () => resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "handlePending", value: original.metadata.uid } });
@@ -124,7 +124,7 @@ test("Shared Input admission conflicts occur before Harness effects; a fresh rec
     if (!conflicted && writes.some(write => write.operation === "patchStatus" && write.patch.execution)) {
       conflicted = true;
       const input = (await f.pending())[0]!;
-      await f.resources.patchStatus(input, { route: { ...input.status.route, result: { conversations: [], reason: "Concurrent coordinator update" } } });
+      await f.resources.patchStatus(input, { route: { ...input.status.route, lastError: "Concurrent coordinator update" } });
     }
     return f.resources.commit(writes);
   } } };
@@ -140,5 +140,5 @@ test("Shared Input admission conflicts occur before Harness effects; a fresh rec
   assert.equal(calls, 1);
   assert.equal((await f.pending()).length, 0);
   const input = await f.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: "shared" });
-  assert.equal(input!.status.route!.result!.reason, "Concurrent coordinator update");
+  assert.equal(input!.status.route!.lastError, "Concurrent coordinator update");
 });

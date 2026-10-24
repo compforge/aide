@@ -8,7 +8,8 @@ Aide 通过 Channel 与 Source 接收事实，由 Personal 判断、推进已有
 | --- | --- |
 | 配好模型并启动服务 | [配置](configuration.md) → [部署与诊断](deployment.md) |
 | 理解个人助手如何工作 | [Personal](personal/README.md) → [Input](personal/input.md) → [Route](personal/route.md) |
-| 改进 Chief 的判断与记忆 | [Conversation](personal/conversation.md) → [Chief](personal/chief.md) → [Person](personal/person.md) |
+| 改进 Chief 的判断与记忆 | [Topic](personal/topic.md) → [Chief](personal/chief.md) → [Person](personal/person.md) |
+| 主题组织、信息收敛与静默回收 | [Topic 与 Weave](personal/topic.md) |
 | 持续推进目标或职责 | [Task](personal/task.md)、[Routine](personal/routine.md) |
 | 理解回复与通知的去向 | [Output](personal/output.md) → [Channel](channel/README.md) |
 | 接入外部信息 | [Connector 与 Source](connector/README.md) |

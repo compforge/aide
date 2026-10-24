@@ -1,4 +1,4 @@
-import type { ConversationBlock } from "./view.ts";
+import type { TopicBlock } from "./view.ts";
 import MarkdownIt from "markdown-it";
 
 const markdown = new MarkdownIt({ html: false });
@@ -54,7 +54,7 @@ export function answerPreview(content: string, phase: string): string {
 }
 
 /** @spec Inputs stay in the transcript while their execution and replies move into the live activity panel. */
-export function historyBlocks(blocks: readonly ConversationBlock[], activity: { id: string } | null): ConversationBlock[] {
+export function historyBlocks(blocks: readonly TopicBlock[], activity: { id: string } | null): TopicBlock[] {
   const liveIds = new Set(blocks.filter((block) => block.type === "execution" &&
     (block.status === "running" || (activity && block.group_id === activity.id))).map((block) => block.id));
   return blocks.filter((block) => block.type === "input" ||

@@ -2,15 +2,15 @@ import { z } from "zod";
 
 export const RepositorySchema = z.object({ forge: z.string().min(1), path: z.string().min(1) });
 export const WatchSchema = z.object({
-  id: z.string().min(1), source: z.string().min(1), sessionId: z.string().min(1).max(200).optional(),
+  id: z.string().min(1), source: z.string().min(1), topicKey: z.string().min(1).max(200).optional(),
   intervalMs: z.number().int().min(30_000).default(300_000),
   repositories: z.array(RepositorySchema).default([]),
   userKeys: z.array(z.string().trim().min(1)).min(1),
 }).strict();
-export type Watch = Omit<z.infer<typeof WatchSchema>, "sessionId"> & { sessionId: string };
+export type Watch = Omit<z.infer<typeof WatchSchema>, "topicKey"> & { topicKey: string };
 
 export function requirementWatches(config: readonly z.infer<typeof WatchSchema>[]): Watch[] {
-  const watches: Watch[] = config.map((watch) => ({ ...watch, sessionId: watch.sessionId ?? `source:${watch.id}` }));
+  const watches: Watch[] = config.map((watch) => ({ ...watch, topicKey: watch.topicKey ?? `source:${watch.id}` }));
   if (new Set(watches.map((item) => item.id)).size !== watches.length) throw new Error("Duplicate watch id");
   return watches;
 }

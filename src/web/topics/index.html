@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aide</title>
+<link rel="icon" href="/favicon.ico" sizes="32x32" type="image/vnd.microsoft.icon">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
+<link rel="stylesheet" href="/app.css">
+<header><h1 class="brand"><img src="/icon.png" width="32" height="32" alt="">Aide</h1><span class="muted">把事情交给我，持续为你推进。</span><nav class="main-tabs" aria-label="主导航"><a href="/" aria-current="page">Topics</a><a href="/people">Persons</a><a href="/inputs">Inputs</a></nav><span id="connection" class="muted" aria-live="polite">连接中</span></header>
+<main>
+  <nav class="topics" aria-label="主题列表">
+    <h2>主题</h2>
+    <div class="topic-row">
+      <button id="new-topic" class="topic-new" type="button">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7"/><path d="m16 3 5 5M10 14l-1 4 4-1 9-9a3.5 3.5 0 0 0-5-5z"/></svg>
+        <span>新聊天</span>
+      </button>
+    </div>
+    <div id="topic-list"></div>
+    <div id="topic-pagination" class="topic-pagination" role="group" aria-label="主题分页" hidden>
+      <button id="topic-previous" type="button" aria-label="上一页主题">上一页</button>
+      <span id="topic-page" class="muted" role="status"></span>
+      <button id="topic-next" type="button" aria-label="下一页主题">下一页</button>
+    </div>
+    <div id="topic-notice" class="muted" role="status"></div>
+  </nav>
+  <section class="topic" aria-label="主题详情">
+    <div class="topic-header">
+      <h2 id="topic-heading">选择一个主题</h2>
+      <span id="topic-copy"></span>
+    </div>
+    <div id="topic-tabs" role="tablist" aria-label="主题内容" hidden>
+      <button id="tab-dialogue" type="button" role="tab" aria-controls="panel-dialogue" aria-selected="true">对话</button>
+      <button id="tab-summary" type="button" role="tab" aria-controls="panel-summary" aria-selected="false" tabindex="-1">摘要</button>
+      <button id="tab-recent" type="button" role="tab" aria-controls="panel-recent" aria-selected="false" tabindex="-1">近期记录</button>
+      <button id="tab-tasks" type="button" role="tab" aria-controls="panel-tasks" aria-selected="false" tabindex="-1">事项 <span id="task-count" class="tab-count">0</span></button>
+      <button id="tab-routines" type="button" role="tab" aria-controls="panel-routines" aria-selected="false" tabindex="-1">安排 <span id="routine-count" class="tab-count">0</span></button>
+    </div>
+    <div id="poll-notice" role="status"></div>
+    <div id="approvals" aria-label="等待你处理的执行请求" aria-live="polite"></div>
+    <p id="work-notice" role="status" class="muted"></p>
+    <div id="panel-dialogue" class="topic-panel dialogue-panel" role="tabpanel" aria-labelledby="tab-dialogue">
+      <div id="messages" role="log" aria-label="消息记录"><div id="history"></div><section id="activity" aria-label="Aide 执行进展" hidden></section></div>
+      <form id="composer">
+        <textarea id="input" aria-label="交办事情或回答问题" placeholder="交办一件事，或者告诉我你想长期关注什么…" maxlength="32000" required></textarea>
+        <button id="send" type="submit">发送</button>
+      </form>
+      <div id="notice" role="status">Enter 发送 · Shift + Enter 换行</div>
+    </div>
+    <section id="panel-summary" class="topic-panel" role="tabpanel" aria-labelledby="tab-summary" tabindex="0" hidden>
+      <div id="topic-summary" class="markdown"></div>
+    </section>
+    <section id="panel-recent" class="topic-panel" role="tabpanel" aria-labelledby="tab-recent" tabindex="0" hidden>
+      <div id="topic-recent"></div>
+    </section>
+    <section id="panel-tasks" class="topic-panel" role="tabpanel" aria-labelledby="tab-tasks" tabindex="0" hidden>
+      <div id="tasks"></div>
+    </section>
+    <section id="panel-routines" class="topic-panel" role="tabpanel" aria-labelledby="tab-routines" tabindex="0" hidden>
+      <div id="routines"></div>
+    </section>
+  </section>
+</main>
+<script type="module" src="/app.js"></script>
+</html>

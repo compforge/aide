@@ -1,4 +1,5 @@
-import { larkAddress, larkConversationId } from "../../../../src/channel/address.ts";
+import type { TopicKeyProvider } from "../../../../src/topic-key.ts";
+import { larkAddress, larkTopicKey } from "../../../../src/channel/address.ts";
 import { Persons } from "../../person/service.ts";
 import { isDeepStrictEqual } from "node:util";
 import { LOCAL_ME } from "../../person/model.ts";
@@ -21,7 +22,7 @@ interface Scan {
 }
 interface Delivery {
   name: string;
-  spec: SourceInput & { sessionId: string };
+  spec: SourceInput & { topicKey: string };
   known: string[];
   related: string[];
 }
@@ -56,13 +57,14 @@ const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, n
  * @spec An observed original message is sufficient: absent context never delays its Input.
  * @spec Only retrieved context accompanies an Input; read failures stay in logs and never create discussion Inputs.
  * @spec Initial and discussion Inputs share app/chat/thread affinity with the bot Channel, independent of the observing user.
- * @link docs/connector/lark-messages.md#conversation-创建与归属
+ * @link docs/connector/lark-messages.md#topic-创建与归属
  * @why Observing a chat address alone does not configure a default reply destination.
  * @why IM context is evidence from other people, not a delegation from the account owner.
  * @case tests/message-source.test.ts
  * @link docs/connector/lark-messages.md
  */
-class MessageObservation {
+class MessageObservation implements TopicKeyProvider<{ chatId: string; threadId?: string }> {
+  topicKey(input: { chatId: string; threadId?: string }): string { return larkTopicKey(this.watch.accountId, input.chatId, input.threadId); }
   private readonly submitInput: ReturnType<typeof bindSourceInput>;
   constructor(private readonly context: Context, private resource: Source, private readonly connectors: ConnectorClient, private readonly now: number) {
     this.submitInput = bindSourceInput(SOURCES.lark, resource, context.resources);
@@ -240,7 +242,7 @@ class MessageObservation {
       source: larkAddress(this.watch.accountId, message.chatId),
       ...(relation ? { relation } : {}),
       ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
-      sessionId: larkConversationId(this.watch.accountId, message.chatId, entry.kind === "mention" ? message.threadId : undefined),
+      topicKey: this.topicKey({ chatId: message.chatId, threadId: entry.kind === "mention" ? message.threadId : undefined }),
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,
         kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,
@@ -259,7 +261,7 @@ class MessageObservation {
     await this.update({ ...entry, sequence: entry.sequence + 1, known: delivery.known,
       related: delivery.related, delivery: null });
     this.context.logger.info("Lark observation Input committed", { attributes: {
-      messageId: entry.message.id, inputId: delivery.name, sessionId: delivery.spec.sessionId,
+      messageId: entry.message.id, inputId: delivery.name, topicKey: delivery.spec.topicKey,
       kind: String(delivery.spec.observation!.kind), relation: delivery.spec.relation ?? "unknown" } });
     if (entry.kind === "direct" || entry.finished) await this.remove(entry);
   }

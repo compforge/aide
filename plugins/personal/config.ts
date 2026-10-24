@@ -1,7 +1,8 @@
+import { WeavePolicySchema } from "./weave/config.ts";
 import { RoutinePolicySchema } from "./routine/config.ts";
 import { TaskPolicySchema } from "./task/config.ts";
 import { RoutePolicySchema } from "./route/config.ts";
-import { ConversationPolicySchema } from "./conversation/config.ts";
+import { TopicPolicySchema } from "./topic/config.ts";
 import { z } from "zod";
 import { EnvironmentWatchSchema } from "./source/environment/config.ts";
 import { MessageWatchSchema } from "./source/message/config.ts";
@@ -14,10 +15,11 @@ import { WatchSchema } from "./source/requirement/config.ts";
  * @case tests/personal-config.test.ts
  */
 export const PersonalConfigSchema = z.object({
-  conversation: ConversationPolicySchema.optional(),
+  topic: TopicPolicySchema.optional(),
   task: TaskPolicySchema.optional(),
   routine: RoutinePolicySchema.optional(),
   route: RoutePolicySchema.optional(),
+  weave: WeavePolicySchema.optional(),
   sources: z.object({
     environments: EnvironmentWatchSchema.optional(),
     lark: MessageWatchSchema.optional(),

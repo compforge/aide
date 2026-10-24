@@ -9,8 +9,8 @@ export interface OutputSpec {
   target: Address;
   /** @spec Intended Person references may dangle after deletion; independent of the delivery address and contributing Inputs. */
   receivers?: ResourceRef[];
-  conversation: ResourceRef & { uid: string };
-  conversationId: string;
+  topic: ResourceRef & { uid: string };
+  topicId: string;
   executionId?: string;
   producer?: ResourceRef;
   inputIds?: string[];

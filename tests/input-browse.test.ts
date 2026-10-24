@@ -12,7 +12,7 @@ import { inputList, inputDetail } from "../src/api/inputs.ts";
 import { browseInputs, inputFacets } from "../plugins/personal/input/browse.ts";
 import { INPUT_TYPE, type InputStatus, type InputSpec } from "../plugins/personal/input/model.ts";
 import { InputDefinition } from "../plugins/personal/input/definition.ts";
-import { CONVERSATION_TYPE } from "../plugins/personal/conversation/model.ts";
+import { TOPIC_TYPE } from "../plugins/personal/topic/model.ts";
 import { TASK_TYPE } from "../plugins/personal/task/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { webAddress } from "../src/channel/address.ts";
@@ -25,9 +25,9 @@ function setup(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-input-browse-"));
   const aide = new Aide(home, fakeOptions({ async chief() { return "ok"; }, async execute() { throw new Error("No Work expected"); } }, home), log);
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
-  return { home, aide, store: aide.conversations.inputStore };
+  return { home, aide, store: aide.topics.inputStore };
 }
-const finished = (): InputStatus => ({ route: { completedAt: new Date().toISOString(), result: { conversations: [], reason: "Quiet observation" } } });
+const finished = (): InputStatus => ({ route: { completedAt: new Date().toISOString(), result: { topics: [], reason: "Quiet observation" } } });
 const observation = (n: number): InputSpec => ({ origin: "source", originId: "personal.requirements", text: `需求 ${n} needle 中文 %_`,
   source: requirementAddress({ source: "work", category: "story", id: String(n) }, "project"),
   originRef: { apiVersion: "aide.dev/v1alpha1", kind: "RequirementSource", namespace: "v1", name: n % 2 ? "watch-a" : "watch-b", uid: n % 2 ? "source-a" : "source-b" } });
@@ -59,7 +59,7 @@ test("Input browsing filters before paging, orders ties deterministically and ke
 
 test("Completion requires every consumer receipt; exceptions remain searchable without claiming current failure", t => {
   const { store } = setup(t);
-  const at = new Date().toISOString(), ref = { ...CONVERSATION_TYPE, namespace: "v1" as const, name: "gone", uid: "gone-uid" };
+  const at = new Date().toISOString(), ref = { ...TOPIC_TYPE, namespace: "v1" as const, name: "gone", uid: "gone-uid" };
   store.submit("test", "unrouted", { origin: "channel", originId: "web", text: "pending" });
   store.submit("test", "pending-work", observation(1), { ...finished(), assess: { a: { resource: ref, assignedAt: at, completedAt: at } },
     handle: { w: { resource: { ...ref, kind: "Task" }, assignedAt: at, request: { action: "context" } } } });
@@ -103,20 +103,20 @@ test("Planned retries are not historical events, and completed routing never app
 
 test("Timeline retains independent consumers, resolves exact UIDs and includes only explicit Output associations", async t => {
   const { aide, store } = setup(t);
-  const a = await aide.conversations.ensure("a", webAddress("a"), "会话 A"), b = await aide.conversations.ensure("b", webAddress("b"), "旧会话 B");
+  const a = await aide.topics.ensure("a", webAddress("a"), "会话 A"), b = await aide.topics.ensure("b", webAddress("b"), "旧会话 B");
   const work = await aide.work("a").create({ kind: "task", title: "核对进展", instruction: "check", trigger: null });
-  const task = aide.conversations.resources.get(TASK_TYPE, work.id);
+  const task = aide.topics.resources.get(TASK_TYPE, work.id);
   let input = store.submit("test", "shared & #1", observation(1));
   const at = (n: number) => new Date(Date.parse(input.metadata.creationTimestamp) + n * 1000).toISOString();
-  input = store.update(input, { route: { startedAt: at(1), completedAt: at(2), attempts: 2, result: { conversations: [resourceRef(a), resourceRef(b)], reason: "两个话题都相关" } },
+  input = store.update(input, { route: { startedAt: at(1), completedAt: at(2), attempts: 2, result: { topics: [resourceRef(a), resourceRef(b)], reason: "两个话题都相关" } },
     assess: { [a.metadata.uid]: { resource: resourceRef(a), assignedAt: at(2), startedAt: at(3), completedAt: at(4), executionId: "chief-run", result: { summary: "交给 Task" } },
       [b.metadata.uid]: { resource: resourceRef(b), assignedAt: at(2), completedAt: at(5), result: { summary: "目标已删除", disposition: "cancelled" } } },
     handle: { [task.metadata.uid]: { resource: resourceRef(task), assignedAt: at(4), appliedAt: at(5), startedAt: at(6), executionId: "task-run", request: { action: "context", note: "核对" }, lastError: "需要核对既有副作用" } } });
-  aide.conversations.resources.requestDeletion(CONVERSATION_TYPE, b.metadata.name);
-  aide.conversations.resources.finalizeDeletion(CONVERSATION_TYPE, b.metadata.name);
-  const replacement = await aide.conversations.ensure("b", webAddress("b"), "新会话 B");
+  aide.topics.resources.requestDeletion(TOPIC_TYPE, b.metadata.name);
+  aide.topics.resources.finalizeDeletion(TOPIC_TYPE, b.metadata.name);
+  const replacement = await aide.topics.ensure("b", webAddress("b"), "新会话 B");
   assert.notEqual(replacement.metadata.uid, b.metadata.uid);
-  const base = { target: webAddress("a"), conversationId: "a", conversation: { ...resourceRef(a), uid: a.metadata.uid }, executionId: "chief-run" };
+  const base = { target: webAddress("a"), topicId: "a", topic: { ...resourceRef(a), uid: a.metadata.uid }, executionId: "chief-run" };
   aide.outputStore.create("a", "related", { ...base, text: "显式关联的回复", inputIds: [input.metadata.name, "other"] });
   aide.outputStore.create("a", "unrelated", { ...base, text: "同一 execution 的其他回复", inputIds: ["other"] });
   const detail = inputDetail(aide, input.metadata.name)!;
@@ -126,7 +126,7 @@ test("Timeline retains independent consumers, resolves exact UIDs and includes o
   assert.ok(detail.timeline.some(e => e.stage === "handle" && e.title.includes("尚未确认完成")));
   assert.ok(detail.timeline.some(e => e.stage === "assess" && e.status === "cancelled"));
   assert.equal(detail.timeline.find(e => e.consumer?.ref.uid === b.metadata.uid)!.consumer!.available, false);
-  assert.equal(detail.timeline.find(e => e.consumer?.ref.uid === a.metadata.uid)!.consumer!.conversationId, "a");
+  assert.equal(detail.timeline.find(e => e.consumer?.ref.uid === a.metadata.uid)!.consumer!.topicId, "a");
   assert.equal(detail.timeline.find(e => e.title === "Work 办理异常记录")!.at, undefined);
   assert.equal(detail.timeline.some(e => e.text?.includes("同一 execution 的其他回复")), false);
   assert.equal(detail.timeline.some(e => e.stage === "handle" && e.status === "completed"), false, "A reply is not a Work handling receipt");
@@ -158,7 +158,7 @@ test("Inputs HTTP routes validate filters and paginate all retained inputs, incl
   assert.equal((await fetch(url + '/inputs/detail?uid=missing')).status, 400);
   for (const path of ['/', '/people', '/inputs']) {
     const response = await fetch(url + path); assert.equal(response.status, 200);
-    const html = await response.text(); assert.match(html, /href="\/inputs"/); assert.match(html, /Persons/); assert.match(html, /Conversations/);
+    const html = await response.text(); assert.match(html, /href="\/inputs"/); assert.match(html, /Persons/); assert.match(html, /Topics/);
   }
   for (const path of ['/inputs.js', '/inputs.css']) assert.equal((await fetch(url + path)).status, 200);
   await aide.close();

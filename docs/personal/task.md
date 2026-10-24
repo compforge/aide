@@ -1,6 +1,6 @@
 # Task：有限目标与持续办理
 
-Task 是同一 Conversation 下、围绕稳定工作范围持续办理的载体。`agents/task/` 与 `agents/chief/` 平级，复用 `agents/pi/` 和 PiAdapter。Task 使用自己的系统提示词和必要的领域工具；[Routine](routine.md) 使用独立 Agent，二者复用原生会话管理、输入接纳与回执机制，每个资源使用独立会话，各自管理生命周期。
+Task 是同一 Topic 下、围绕稳定工作范围持续办理的载体。`agents/task/` 与 `agents/chief/` 平级，复用 `agents/pi/` 和 PiAdapter。Task 使用自己的系统提示词和必要的领域工具；[Routine](routine.md) 使用独立 Agent，二者复用原生会话管理、输入接纳与回执机制，每个资源使用独立会话，各自管理生命周期。
 
 ## 目标与完成依据
 
@@ -10,7 +10,7 @@ Task 与 Routine 的区别由目标是否终结决定，执行次数与时长不
 
 ## 创建与输入
 
-Chief 创建 Task 时通过 `create_work` 传入 `inputId`。Task.spec.initialInputId 和该 Input 的 handle 在同一事务建立；事务提交后 Task 才能执行。Chief 的 assess 回执独立确认，一个 Input 可以创建多个不同目标的 Task。创建去重包含 Conversation UID、初始 Input ID 和工具调用身份，同一次调用重试复用原 Task，不同目标使用不同身份。
+Chief 创建 Task 时通过 `create_work` 传入 `inputId`。Task.spec.initialInputId 和该 Input 的 handle 在同一事务建立；事务提交后 Task 才能执行。Chief 的 assess 回执独立确认，一个 Input 可以创建多个不同目标的 Task。创建去重包含 Topic UID、初始 Input ID 和工具调用身份，同一次调用重试复用原 Task，不同目标使用不同身份。
 
 没有外部 Input 的主动决定先经 `create_input` 记录为独立的 origin=chief Input，再创建 Task；它不会扩大已有委托授权。程序调用 WorkService.create 省略 inputId 时，将等价的独立 Input 与 Task 一起创建。
 
@@ -23,11 +23,11 @@ Chief 创建 Task 时通过 `create_work` 传入 `inputId`。Task.spec.initialIn
 | read_task | 读取目标、状态、累计认识与近期依据 |
 | read_input | 列出待处理 Input，或分页读取已分派的原始材料与办理痕迹 |
 | list_work | 分页查看同会话 Task / Routine 概况，不获得其它 Work 的操作权限 |
-| read_conv | 读取所属 Conversation 的背景 |
-| say | 通过 Conversation 创建用户可见 Output，关联 Task UID、execution 与可选 Input |
+| read_topic | 读取所属 Topic 的背景 |
+| say | 通过 Topic 创建用户可见 Output，关联 Task UID、execution 与可选 Input |
 | report_task | 原子更新进展、done/wait/ask 状态及明确列出的 Input 办理回执 |
 
-工具由 Host 根据 Task UID 和当前 execution 装配，模型不能自选其它 Task 或 Conversation。文件和 CLI 操作沿用 Pi 原生能力及现有凭证。Conversation 背景和外部材料不是新增授权。
+工具由 Host 根据 Task UID 和当前 execution 装配，模型不能自选其它 Task 或 Topic。文件和 CLI 操作沿用 Pi 原生能力及现有凭证。Topic 背景和外部材料不是新增授权。
 
 `task.status.agent = { harness: "task", sessionId }`。Reconcile 先 create、保存 ID，再提交业务输入；恢复和持久化使用 [Pi 的原生 SDK](../harness/pi.md)。`status.execution` 表达当前执行，`lastExecutionId` 保留最近执行关联。模型 final text 不会完成 Input，也不会发送给用户；必须分别调用 report_task 和 say。中断或未确认输入保留痕迹并进入 uncertain，明确核对已有副作用后才能继续，不能自动重放。
 
@@ -43,8 +43,8 @@ Task 使用本资源目录下的 [Background](../../plugins/personal/task/backgr
 system：Task 的固定职责、执行约束和报告契约
 custom → user：Background.text()，当前业务背景 v1
   objective：自身目标、完成条件、状态、summary 与有限 recent
-  conversation：所属话题背景
-  work：同一 Conversation 的相关 Task / Routine 概况
+  topic：所属话题背景
+  work：同一 Topic 的相关 Task / Routine 概况
 user：Input 1
 assistant / tool：执行、按需 say、report_task 提交进展与办理回执
 后续请求的 custom → user 前缀：objective 进展 v2     # 由已提交的资源状态刷新

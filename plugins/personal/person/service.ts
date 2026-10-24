@@ -4,7 +4,7 @@ import { mergePersonSummary } from "./merge.ts";
 import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, type Me, type Person, type PersonIdentity, type PersonResource, type PersonStatus } from "./model.ts";
 
 /**
- * @spec Every conversation resolves people in one catalog. Profiles contain no Input references.
+ * @spec Every topic resolves people in one catalog. Profiles contain no Input references.
  * @spec Matching uses scoped identifiers, never names; merging is an explicit user decision.
  * @link docs/personal/person.md
  */

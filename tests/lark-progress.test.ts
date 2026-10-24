@@ -1,4 +1,4 @@
-import { seedInput } from "./conversation-fixture.ts";
+import { seedInput } from "./topic-fixture.ts";
 import { assessAll } from "./input-state-fixture.ts";
 import { larkAddress } from "../src/channel/address.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
@@ -19,9 +19,9 @@ import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
 import { fakeOptions } from "./fake-harness.ts";
 
 const log = pino({ level: "silent" });
-const conversationId = "lark:cli_progress:oc_chat";
+const topicId = "lark:cli_progress:oc_chat";
 const event = { sender: { sender_type: "user" }, message: { message_id: "om_input", chat_id: "oc_chat", chat_type: "p2p", message_type: "text", content: '{"text":"检查工作"}' } };
-const message = (id: string, text: string): OutputView => fixtureOutput({ id, text, conversationId, role: "aide", workId: null, at: new Date().toISOString() });
+const message = (id: string, text: string): OutputView => fixtureOutput({ id, text, topicId, role: "aide", workId: null, at: new Date().toISOString() });
 
 function cardRegions(card: ReturnType<typeof progressCard>) {
   const envelope = card.body.elements.find((element) => "elements" in element)!;
@@ -49,7 +49,7 @@ function setup(t: TestContext) {
       async settings(...args) { record("settings", args); card.config.streaming_mode = args[1]; },
       async update(...args) { record("update", args); card = structuredClone(args[1]) as typeof card; } } };
   const aide = { receive: async () => { throw new Error("Delivery must not execute input"); }, outputs: () => messages };
-  const reader = (id: string) => { assert.equal(id, conversationId); return [view]; };
+  const reader = (id: string) => { assert.equal(id, topicId); return [view]; };
   let channel = new LarkChannel(home, "cli_progress", aide, transport, log, reader);
   channel.receive(event);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
@@ -218,31 +218,31 @@ test("Lark projects Harness progress but only explicit messages become replies",
     adapter.prompt = async (ref, input) => { emitter = { sink, turnId: input.invocationId }; return send(ref, input); }; return adapter;
   } }, log);
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  await aide.receive(fixtureIncoming({ channelId: "lark", id: "om_live", sessionId: conversationId, conversationId, text: "查看工作" }));
+  await aide.receive(fixtureIncoming({ channelId: "lark", id: "om_live",  topicId, text: "查看工作" }));
   for (let i = 0; i < 200 && !emitter; i++) await Bun.sleep(10);
   assert.ok(emitter);
   emitter.sink({ kind: "agent_thought_chunk", invocationId: emitter.turnId, payload: { messageId: "thought", content: { type: "text", text: "先读资料" } } });
   emitter.sink({ kind: "agent_message_chunk", invocationId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "正在核对" } } });
-  const live = larkProgress(aide, conversationId)[0]!;
+  const live = larkProgress(aide, topicId)[0]!;
   assert.equal(live.phase, "running"); assert.equal(live.think, "先读资料"); assert.equal(live.content, "");
   assert.deepEqual(larkProgress(aide, "me"), []);
   emitter.sink({ kind: "tool_call_update", invocationId: emitter.turnId, payload: { toolCallId: "active", title: "采集内存", status: "in_progress" } });
   emitter.sink({ kind: "tool_call_update", invocationId: emitter.turnId, payload: { toolCallId: "finished", title: "读取环境", status: "completed" } });
-  assert.equal(larkProgress(aide, conversationId)[0]!.process?.tool, "采集内存 · 执行中");
+  assert.equal(larkProgress(aide, topicId)[0]!.process?.tool, "采集内存 · 执行中");
   emitter.sink({ kind: "tool_call_update", invocationId: emitter.turnId, payload: { toolCallId: "active", status: "failed" } });
-  assert.ok(larkProgress(aide, conversationId)[0]!.think.includes("failed"), "Tool failure remains available in details");
+  assert.ok(larkProgress(aide, topicId)[0]!.think.includes("failed"), "Tool failure remains available in details");
   emitter.sink({ kind: "agent_message_chunk", invocationId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "\u0000".repeat(4000) + "最新结果已到达" } } });
-  const large = larkProgress(aide, conversationId)[0]!;
+  const large = larkProgress(aide, topicId)[0]!;
   assert.equal(large.content, "", "Raw model text is internal, even while streaming");
   assert.equal(large.overflow, false);
   assert.ok(Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(large, false)) })) <= 28_000);
   release(); await aide.settled();
-  const done = larkProgress(aide, conversationId)[0]!;
+  const done = larkProgress(aide, topicId)[0]!;
   assert.equal(done.phase, "done"); assert.equal(done.content, "最终答案"); assert.equal(done.messageIds.length, 1);
   const original = aide.outputStore.get(done.messageIds[0]!)!;
   aide.outputStore.create(("sessionId" in original.metadata ? "unexpected" : undefined)!, "another-destination", { ...original.spec,
     text: "另一群的专属内容", target: larkAddress("cli_progress", "another-chat") });
-  const addressed = larkProgress(aide, conversationId)[0]!;
+  const addressed = larkProgress(aide, topicId)[0]!;
   assert.equal(addressed.content, "最终答案");
   assert.deepEqual(addressed.messageIds, done.messageIds, "A card cannot deliver or acknowledge another destination's Output");
 });
@@ -303,14 +303,14 @@ test("Lark keeps a shared invocation card running until steered input and execut
   const home = mkdtempSync(join(tmpdir(), "aide-lark-steer-card-"));
   const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("No work"); } }, home), log);
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
-  const spec = { conversationId, origin: "channel" as const, originId: "lark", source: larkAddress("cli_progress", "oc_chat"), text: "request" };
-  await seedInput(aide.conversations, "first", spec, { phase: "done", executionId: "live" });
-  await seedInput(aide.conversations, "urgent", spec, { phase: "running", executionId: "live" });
-  assert.equal(larkProgress(aide, conversationId).length, 1);
-  assert.equal(larkProgress(aide, conversationId)[0]!.phase, "running");
+  const spec = { topicId, origin: "channel" as const, originId: "lark", source: larkAddress("cli_progress", "oc_chat"), text: "request" };
+  await seedInput(aide.topics, "first", spec, { phase: "done", executionId: "live" });
+  await seedInput(aide.topics, "urgent", spec, { phase: "running", executionId: "live" });
+  assert.equal(larkProgress(aide, topicId).length, 1);
+  assert.equal(larkProgress(aide, topicId)[0]!.phase, "running");
   const client = aide.runtime.plugins.resourceClient("personal");
-  await assessAll(client, aide.conversations.resource(conversationId)!, "live", { inputIds: ["urgent"], summary: "Handled" });
-  assert.equal(larkProgress(aide, conversationId)[0]!.phase, "running");
-  await client.patchStatus(aide.conversations.resource(conversationId)!, { execution: null });
-  assert.equal(larkProgress(aide, conversationId)[0]!.phase, "done");
+  await assessAll(client, aide.topics.resource(topicId)!, "live", { inputIds: ["urgent"], summary: "Handled" });
+  assert.equal(larkProgress(aide, topicId)[0]!.phase, "running");
+  await client.patchStatus(aide.topics.resource(topicId)!, { execution: null });
+  assert.equal(larkProgress(aide, topicId)[0]!.phase, "done");
 });

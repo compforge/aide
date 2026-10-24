@@ -2,17 +2,17 @@
 
 Chief 是 Aide 面向用户的接话与分流入口，也能直接办事，职责类似 System 1：结合上下文快速判断，当轮能处理的问题直接回答或调用工具完成；需要独立推进、等待和跟踪的事情，优先关联已有 Work，再按需要创建 Task 或 Routine。分流依据是是否需要独立的工作生命周期，复杂度只是参考，调用工具不必先创建工作。
 
-Route 将用户消息或外部观察归入话题后，Chief 结合话题中的 Work 判断下一步；Conversation 自身的 trigger 也会触发回顾。输入分配到 Conversation、Task 或 Routine，本质是让一件事进入能解释它、承接它的上下文，具体模型见 [Personal 的主动性与上下文](README.md#主动性与上下文)。Chief 可直接处理、创建或删除工作，或通过 `assess_input` 向已有 Work 交接输入；Work Reconcile 决定如何改变状态与推进。需要用户决定时询问，没有值得打扰的新情况时保持安静。Chief 的判断质量，尤其是提示词、上下文组织与记忆机制，是 Personal Agent 的持续优化重点。
+Route 将用户消息或外部观察归入话题后，Chief 结合话题中的 Work 判断下一步；Topic 自身的 trigger 也会触发回顾。输入分配到 Topic、Task 或 Routine，本质是让一件事进入能解释它、承接它的上下文，具体模型见 [Personal 的主动性与上下文](README.md#主动性与上下文)。Chief 可直接处理、创建或删除工作，或通过 `assess_input` 向已有 Work 交接输入；Work Reconcile 决定如何改变状态与推进。需要用户决定时询问，没有值得打扰的新情况时保持安静。Chief 的判断质量，尤其是提示词、上下文组织与记忆机制，是 Personal Agent 的持续优化重点。
 
 Chief 使用独立的 `chief` Harness 身份，Agent 位于 `agents/chief/`；它组合 [通用 Pi](../harness/pi.md)，复用 PiAdapter 的执行与事件机制。通用边界见 [Harness](../harness/README.md)，工作生命周期与问答编排见 [Personal](README.md)。
 
 ## Agent 与 Controller
 
-Chief Agent 负责判断，Personal Route 负责话题归位。Conversation 的接收 Controller 与 agent Controller 分别接纳新 Input 和调用 Chief；assess_input 确认消费，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
+Chief Agent 负责判断，Personal Route 负责话题归位。Topic 的接收 Controller 与 agent Controller 分别接纳新 Input 和调用 Chief；assess_input 确认消费，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
 
-所有 Conversation 共用 Chief 配置。Personal 的 chiefSession 工厂根据调用 scope 的 ResourceRef 校验 Conversation UID，装配限定该会话范围的 WorkService 与工具。工具每次执行都重新确认当前 execution，不捕获过期 verbs。
+所有 Topic 共用 Chief 配置。Personal 的 chiefSession 工厂根据调用 scope 的 ResourceRef 校验 Topic UID，装配限定该会话范围的 WorkService 与工具。工具每次执行都重新确认当前 execution，不捕获过期 verbs。
 
-原生会话由 Pi SDK 管理持久化；Chief scope 使用 Conversation UID，防止同名重建后恢复旧会话。Operator 在 status.agent 保存配置名和 sessionId，后续原样传给 Harness verb；底座不读写这个字段。用户通过 say 收到问题，后续答复以新的 Input 进入。空闲时 prompt，运行中普通输入 followUp、紧急输入 steer；一个 invocation 可以处理多个 Input，assess_input 的业务回执分别确认完成。
+原生会话由 Pi SDK 管理持久化；Chief scope 使用 Topic UID，防止同名重建后恢复旧会话。Operator 在 status.agent 保存配置名和 sessionId，后续原样传给 Harness verb；底座不读写这个字段。用户通过 say 收到问题，后续答复以新的 Input 进入。空闲时 prompt，运行中普通输入 followUp、紧急输入 steer；一个 invocation 可以处理多个 Input，assess_input 的业务回执分别确认完成。
 
 ## 主动判断与沟通
 
@@ -28,7 +28,7 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 
 ## 提示词与工具
 
-当前稳定角色规则在 `agents/chief/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/conversation/reconcile.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；后续回答同样作为普通 Input 接纳。
+当前稳定角色规则在 `agents/chief/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/topic/reconcile.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；后续回答同样作为普通 Input 接纳。
 
 Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 
@@ -36,8 +36,8 @@ Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 - read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。
 - say 产生独立 Output；答复是新的 Input，不挂起 Harness 等待。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
-- assess_input 原子保存单条 Input 的简短研判回执，并建立 Work handle；不改写 Conversation.summary / recent，不值得通知的观察可以静默完成。
-- summarize_conversation 在话题目标、异常、委托、关键结论或未决问题发生有意义的变化时，按 read_input 返回的版本替换 summary；recent 可选。输入研判与定时回顾都可使用，不要求每次处理都更新。
+- assess_input 原子保存单条 Input 的简短研判回执，并建立 Work handle；不改写 Topic.summary / recent，不值得通知的观察可以静默完成。
+- summarize_topic 在话题目标、异常、委托、关键结论或未决问题发生有意义的变化时，按 read_input 返回的版本替换 summary；recent 可选。输入研判与定时回顾都可使用，不要求每次处理都更新。
 
 提示词表达判断策略，工具边界保证持久化与会话范围。say 提问只产生 Output；用户是否回答不阻塞其它输入，已有 Work 的 waiting 状态表达具体工作的等待。
 
@@ -50,13 +50,13 @@ Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-h
 
 Chief 的直接回答、研判和工作交接都依赖当前话题与已有委托。当前按以下消息结构组织上下文；业务前缀的刷新与消息机制见 [Route 上下文组织](route.md#上下文组织与优化)。
 
-Chief 的话题材料由 [Conversation Background](../../plugins/personal/conversation/background.ts) 提供，包含当前会话的 summary、recent 和相关 Work；Chief 装配时再结合最新 Me 认识，形成最终 `Background`。每次模型请求前通过 `background()` 构造快照，Harness 调用 `text()` 生成 custom → user 前缀。读取最新资源与文本化快照分开，通用契约见 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
+Chief 的话题材料由 [Topic Background](../../plugins/personal/topic/background.ts) 提供，包含当前会话的 summary、recent 和相关 Work；Chief 装配时再结合最新 Me 认识，形成最终 `Background`。每次模型请求前通过 `background()` 构造快照，Harness 调用 `text()` 生成 custom → user 前缀。读取最新资源与文本化快照分开，通用契约见 [Pi 当前业务背景](../harness/pi.md#当前业务背景)。
 
 ```text
 system：Chief 的固定职责、沟通规则和授权边界
 custom → user：Background.text()，当前业务背景 v1
-  conversation：当前话题 summary、有限 recent
-  work：所属 Conversation 的 Task / Routine UID、目标和状态
+  topic：当前话题 summary、有限 recent
+  work：所属 Topic 的 Task / Routine UID、目标和状态
   me：服务对象的当前认识与明确修正
 user：Input 1
 assistant / tool：按需直接处理或 say，assess_input 确认研判
@@ -68,7 +68,7 @@ user：Input 3
 assistant / tool：结合新进展回答或交接，避免重复创建工作
 ```
 
-当前状态从 CRD 投影为请求前缀，不追加进历史，也不参与历史压缩；重启后重新读取。自动输入预览保留内容、人物和地址，完整 observation 留在 Input，通过 read_input 按需读取；不要例行展开所有证据。工具回执和对话作为执行历史，由 Pi 管理压缩；Person 与 Conversation 的 summary 仍由各自资源维护。用户修正、Work 状态与外部事实不能被历史摘要覆盖，状态内容也不扩大操作权限。
+当前状态从 CRD 投影为请求前缀，不追加进历史，也不参与历史压缩；重启后重新读取。自动输入预览保留内容、人物和地址，完整 observation 留在 Input，通过 read_input 按需读取；不要例行展开所有证据。工具回执和对话作为执行历史，由 Pi 管理压缩；Person 与 Topic 的 summary 仍由各自资源维护。用户修正、Work 状态与外部事实不能被历史摘要覆盖，状态内容也不扩大操作权限。
 
 常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整认识仍保存在资源中。
 
@@ -85,9 +85,9 @@ sent 提供本人表达的线索，仍需辨别引用与代发；received 和 ob
 
 人物资料的唯一存储来源是 Person CRD，Web Persons 提供编辑入口。人物维护使用专用工具，普通文件工具和 Hermes 不承担这份资料的维护。
 
-连续上下文由 Pi SDK 管理历史、压缩与恢复。新输入只提供本次预览，普通输入 followup，immediate 使用 steer。assess_input 只在 Input 保存简短研判回执；summarize_conversation 独立维护话题认识。常规静默观察不复制进 summary、recent 或长期记忆，持续异常与已有委托仍应保留，恶化或恢复时更新；长期知识通过 Hermes 保留，Task / Routine 保存工作状态。原生会话或调用结束不能代替业务确认。
+连续上下文由 Pi SDK 管理历史、压缩与恢复。新输入只提供本次预览，普通输入 followup，immediate 使用 steer。assess_input 只在 Input 保存简短研判回执；summarize_topic 独立维护话题认识。常规静默观察不复制进 summary、recent 或长期记忆，持续异常与已有委托仍应保留，恶化或恢复时更新；长期知识通过 Hermes 保留，Task / Routine 保存工作状态。原生会话或调用结束不能代替业务确认。
 
-Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Conversation 摘要用于控制话题窗口，与 Hermes 的长期记忆维护分别管理；Personal 不直接调用模型做记忆维护。
+Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Topic 摘要用于控制话题窗口，与 Hermes 的长期记忆维护分别管理；Personal 不直接调用模型做记忆维护。
 
 ### 记忆如何参与判断
 
@@ -114,7 +114,7 @@ Chief 使用上游记忆工具维护有长期价值的信息，保留足以理�
 
 `hermes-memory-config.json` 中的 `memoryDir` 可单独更改全局记忆目录；其它选项和文件由 [上游配置文档](https://github.com/chandra447/pi-hermes-memory#configuration) 定义。依赖随 `npm install` 安装，不需要另运行 `pi install` 或 `aide sync`。
 
-此处全局记忆由同一进程根目录下的 Chief 共享，项目记忆按 Hermes 的 cwd 规则划分，**不按 Aide Session 或 Conversation 隔离**。不同群的原生对话上下文仍独立，但扩展的长期记忆和会话检索可能跨会话使用。不要把 Conversation 分组理解为记忆访问边界。
+此处全局记忆由同一进程根目录下的 Chief 共享，项目记忆按 Hermes 的 cwd 规则划分，**不按 Aide Session 或 Topic 隔离**。不同群的原生对话上下文仍独立，但扩展的长期记忆和会话检索可能跨会话使用。不要把 Topic 分组理解为记忆访问边界。
 
 ### 扩展生命周期
 

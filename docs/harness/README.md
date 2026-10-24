@@ -6,7 +6,7 @@ Harness 向 Aide 提供 Agent 执行能力。宿主通过统一接口提交输�
 
 ## Operator 调用边界
 
-Operator 根据 Harness interface，通过 verb 操作原生 agent loop。调用需要的配置名和会话引用都是显式参数；Harness verb 不读取或修改 CRD，也不知道 status.agent、Conversation、Task 或 Routine。
+Operator 根据 Harness interface，通过 verb 操作原生 agent loop。调用需要的配置名和会话引用都是显式参数；Harness verb 不读取或修改 CRD，也不知道 status.agent、Topic、Task 或 Routine。
 
 调用方可以为服务重启保存少量参数，例如：
 

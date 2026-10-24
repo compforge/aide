@@ -18,14 +18,14 @@ test("Input descriptions preserve original text and optional opaque evidence wit
   assert.match(described, /Origin: channel\/web/);
   assert.match(described, /Received: 2026-10-21T00:00:00Z/);
   assert.ok(described.endsWith(plain.spec.text));
-  assert.doesNotMatch(described, /Observation:|Session:|Timezone:|Reply to:|Source resource:/);
+  assert.doesNotMatch(described, /Observation:|Topic key:|Timezone:|Reply to:|Source resource:/);
   const evidence = { provider: "new-provider", message: { content: "@me 原文" }, context: { messages: ["之前的消息"] } };
-  const source = input({ origin: "source", originId: "unknown.source", sessionId: "topic-1", timezone: "Asia/Shanghai",
+  const source = input({ origin: "source", originId: "unknown.source", topicKey: "topic-1", timezone: "Asia/Shanghai",
     originRef: { apiVersion: "example.dev/v1", kind: "Source", name: "mine", namespace: "v1" }, observation: evidence });
   const before = structuredClone(source);
   const description = inputPrinter.describe(source);
   assert.match(description, /Origin: source\/unknown.source/);
-  assert.match(description, /Session: topic-1\nTimezone: Asia\/Shanghai/);
+  assert.match(description, /Topic key: topic-1\nTimezone: Asia\/Shanghai/);
   assert.ok(description.includes(JSON.stringify(source.spec.originRef)));
   assert.deepEqual(JSON.parse(description.split("\n\nObservation:\n")[1]!), evidence);
   assert.deepEqual(source, before);
@@ -41,12 +41,12 @@ test("Input summaries collapse whitespace and cap previews without truncating de
 
 /** @case Large evidence stays queryable without entering automatic model material. */
 test("automatic Input preview preserves identity and text but excludes full observations", () => {
-  const fact = input({ origin: "source", originId: "personal.environments", relation: "observed", sessionId: "topic",
+  const fact = input({ origin: "source", originId: "personal.environments", relation: "observed", topicKey: "topic",
     text: "api: restart +1; readiness unchanged", observation: { changes: [{ before: "private-evidence-marker".repeat(2000), after: "full-evidence" }] } });
   const original = structuredClone(fact);
   const preview = inputPreview(fact, 1000);
   assert.match(preview, /api: restart \+1/);
-  assert.match(preview, /Session: topic/);
+  assert.match(preview, /Topic key: topic/);
   assert.match(preview, /Relation to Person: observed/);
   assert.match(preview, /read_input/);
   assert.doesNotMatch(preview, /private-evidence-marker|full-evidence/);

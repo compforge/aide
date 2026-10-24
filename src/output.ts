@@ -1,10 +1,10 @@
 import type { Address, ResourceRef } from "@compforge/aide-plugin";
 import type { Output, OutputStatus } from "../plugins/personal/output/model.ts";
-export interface OutputDraft { id: string; conversationId: string; text: string; workId: string | null; target?: Address; receivers?: ResourceRef[] }
+export interface OutputDraft { id: string; topicId: string; text: string; workId: string | null; target?: Address; receivers?: ResourceRef[] }
 export interface OutputView extends OutputDraft {
   at: string;
   role: "aide";
-  conversationUid: string;
+  topicUid: string;
   target: Address;
   executionId?: string;
   inputIds?: string[];
@@ -13,7 +13,7 @@ export interface OutputView extends OutputDraft {
 }
 export function outputView(output: Readonly<Output>): OutputView {
   const { metadata, spec, status } = output;
-  return { role: "aide", id: metadata.name, conversationId: spec.conversationId, conversationUid: spec.conversation.uid,
+  return { role: "aide", id: metadata.name, topicId: spec.topicId, topicUid: spec.topic.uid,
     text: spec.text, at: metadata.creationTimestamp, target: spec.target, receivers: spec.receivers, workId: spec.producer?.name ?? null,
     executionId: spec.executionId, inputIds: spec.inputIds, status, deliveredAt: status.deliveredAt };
 }

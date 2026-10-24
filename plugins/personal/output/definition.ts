@@ -11,7 +11,7 @@ export const OutputSpecSchema = z.object({
   text: z.string().min(1).max(128_000),
   target: AddressSchema,
   receivers: z.array(ref.extend({ kind: z.literal("Person"), namespace: z.string().transform(parseResourceNamespace), uid: z.string().min(1) })).max(100).optional(),
-  conversation: ref.extend({ uid: z.string().min(1) }), conversationId: z.string().min(1),
+  topic: ref.extend({ uid: z.string().min(1) }), topicId: z.string().min(1),
   executionId: z.string().optional(), producer: ref.optional(), inputIds: z.array(z.string().min(1)).max(1001).optional(),
 }).strict();
 export const OutputStatusSchema = z.object({ phase: z.enum(["pending", "sending", "delivered", "failed", "uncertain"]), attempts: z.number().int().nonnegative(),

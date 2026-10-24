@@ -24,7 +24,7 @@ export function boundContext(messages: ChatMessage[], observedThrough: string, t
 }
 
 /**
- * @spec Context reads are bounded observations, not a claim that the complete conversation was retrieved.
+ * @spec Context reads are bounded observations, not a claim that the complete topic was retrieved.
  * @why Thread previews in group history are incomplete; explicit thread reads preserve that boundary.
  * @link docs/connector/lark-messages.md
  */

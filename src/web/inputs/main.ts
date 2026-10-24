@@ -76,7 +76,7 @@ function renderDetail(detail: InputDetailView) {
   const input = detail.input;
   for (const [label, value] of [
     ['Input ID', input.metadata.name], ['接收时间', time(input.metadata.creationTimestamp)],
-    ['来源', `${input.spec.origin} / ${input.spec.originId}`], ['话题线索', input.spec.sessionId],
+    ['来源', `${input.spec.origin} / ${input.spec.originId}`], ['来源 Topic Key', input.spec.topicKey],
     ['来源地址', input.spec.source && JSON.stringify(input.spec.source)], ['观察源', input.spec.originRef && `${input.spec.originRef.kind} / ${input.spec.originRef.name}`],
   ] as const) if (value) $('input-facts').append(node('dt', label), node('dd', value));
   if (input.spec.sender) {
@@ -93,8 +93,8 @@ function renderDetail(detail: InputDetailView) {
     item.append(node('span', time(entry.at), 'muted'), node('strong', entry.title));
     if (entry.consumer) {
       const consumer = entry.consumer;
-      if (consumer.available && consumer.conversationId) {
-        const link = node('a', `${consumer.ref.kind} · ${consumer.label}`); link.href = '/?conversation=' + encodeURIComponent(consumer.conversationId); item.append(link);
+      if (consumer.available && consumer.topicId) {
+        const link = node('a', `${consumer.ref.kind} · ${consumer.label}`); link.href = '/?topic=' + encodeURIComponent(consumer.topicId); item.append(link);
       } else item.append(node('span', `${consumer.ref.kind} · ${consumer.label}${consumer.available ? '' : '（已删除或不可用）'}`, 'muted'));
     }
     if (entry.status) item.append(node('span', statusLabels[entry.status] ?? entry.status, 'input-stage-status'));

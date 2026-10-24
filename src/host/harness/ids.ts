@@ -22,6 +22,7 @@ export const HARNESS_IDENTITIES = {
   claude: { id: "claude", aliases: ["cc"], label: "Claude Code", sessionKey: "claude-code", icon: iconFor("harness:claude") },
   dsh: { id: "dsh", aliases: ["deepseek"], label: "DeepSeek Harness", sessionKey: "deepseek-harness", icon: iconFor("harness:dsh") },
   pi: { id: "pi", aliases: [], label: "Pi", sessionKey: "pi", icon: iconFor("harness:pi") },
+  weave: { id: "weave", aliases: [], label: "Weave", sessionKey: "weave", icon: iconFor("harness:chief") },
   route: { id: "route", aliases: [], label: "Route", sessionKey: "route", icon: iconFor("harness:chief") },
   routine: { id: "routine", aliases: [], label: "Routine", sessionKey: "routine", icon: iconFor("harness:chief") },
   task: { id: "task", aliases: [], label: "Task", sessionKey: "task", icon: iconFor("harness:chief") },

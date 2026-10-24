@@ -9,7 +9,7 @@ import { reportWork } from "../plugins/personal/work-report.ts";
 import { assessAll } from "./input-state-fixture.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
-import { CONVERSATION_TYPE } from "../plugins/personal/conversation/model.ts";
+import { TOPIC_TYPE } from "../plugins/personal/topic/model.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { defaultDestination } from "../plugins/personal/route/rules.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
@@ -17,9 +17,9 @@ import { assertChannelDelivery } from "../src/channel/address.ts";
 import { sameAddress } from "../src/address.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputSpec } from "../plugins/personal/output.ts";
-import type { ConversationResource } from "../plugins/personal/conversation/model.ts";
+import type { TopicResource } from "../plugins/personal/topic/model.ts";
 import { ConfigSchema } from "../src/config.ts";
-import type { ConversationStatus } from "../plugins/personal/conversation/model.ts";
+import type { TopicStatus } from "../plugins/personal/topic/model.ts";
 import { randomUUID } from "node:crypto";
 import type { Harness, HarnessEventSink, PromptInput } from "../src/host/harness/adapter.ts";
 import type { Work } from "../plugins/personal/model.ts";
@@ -38,11 +38,11 @@ export interface Agent {
 
 /** Exercise the real Runner/verb/Turn path; replace only the external Harness protocol. */
 export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], home = cwd, larkAppId?: string) {
-  return { config: ConfigSchema.parse({}), larkAppId, cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): Harness => {
+  return { config: ConfigSchema.parse({ plugins: { personal: { weave: { enabled: false } } } }), larkAppId, cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): Harness => {
     const workType = target.harness === "routine" ? ROUTINE_TYPE : TASK_TYPE;
     let sink: HarnessEventSink;
     let active: PromptInput | undefined;
-    let conversationId: string | undefined;
+    let topicId: string | undefined;
     let workId: string | undefined;
     const finish = (turnId: string, stopReason: string) => {
       if (active?.invocationId !== turnId) return;
@@ -63,14 +63,14 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
         const prompt = input.blocks.map((block) => block.type === "text" ? block.text : "").join("\n");
         requests.push(prompt);
         const activation = prompt.split("Activation: ")[1]?.split("\n")[0];
-        if (activation) { conversationId = JSON.parse(activation).conversationId; workId = JSON.parse(activation).taskId ?? JSON.parse(activation).routineId; }
+        if (activation) { topicId = JSON.parse(activation).topicId; workId = JSON.parse(activation).taskId ?? JSON.parse(activation).routineId; }
         const data = (label: string) => JSON.parse(prompt.split(label)[1]!.split("\n")[0]!);
         void Promise.resolve().then<Outcome | string>(() => target.harness === "route"
           ? (() => {
             const resources = new PluginResourceStore({ home, pluginInstanceId: "personal" });
             const inputId = JSON.parse(prompt.split("\n").find(line => line.startsWith('{"inputId":'))!).inputId;
-            const data = { inputs: [{ id: inputId }], conversations: resources.list(CONVERSATION_TYPE).map(c => ({ ...(c.spec as object), uid: c.metadata.uid })) };
-            return agent.route?.(JSON.stringify(data)) ?? JSON.stringify({ decisions: [{ inputId, conversationUids: [], reason: "No match" }] });
+            const data = { inputs: [{ id: inputId }], topics: resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE).filter(c => !c.spec.parentRef && !c.status.weaveLock && !c.metadata.deletionTimestamp).map(c => ({ ...(c.spec as object), uid: c.metadata.uid })) };
+            return agent.route?.(JSON.stringify(data)) ?? JSON.stringify({ decisions: [{ inputId, topicUids: [], reason: "No match" }] });
           })()
           : target.harness === "chief"
           ? agent.chief?.(prompt) ?? "你好"
@@ -89,31 +89,31 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const inputs = new InputStore(home).query("handlePending", task.metadata.uid).filter(i => i.status.handle![task.metadata.uid]!.executionId === task.status.execution?.id);
             await reportWork(resources, task, task.status.execution!.id, { inputIds: inputs.map(i => i.metadata.name), summary: outcome.summary,
               recent: outcome.recent, action: outcome.action, question: outcome.question, nextAt: outcome.nextAt });
-            const c = (await resources.list<ConversationResource["spec"], ConversationStatus>(CONVERSATION_TYPE)).find(c => c.spec.id === task.spec.conversationId);
+            const c = (await resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE)).find(c => c.spec.id === task.spec.topicId);
             const text = outcome.action === "ask" ? outcome.question : outcome.notification;
-            if (c?.spec.address && text) new OutputStore(home, target => assertChannelDelivery(target, larkAppId)).create(c.spec.id, randomUUID(), outputSpec(c, { conversationId: c.spec.id, text }, { producer: { ...workType, name: workId, namespace: "v1", uid: task.metadata.uid } }));
+            if (c?.spec.address && text) new OutputStore(home, target => assertChannelDelivery(target, larkAppId)).create(c.spec.id, randomUUID(), outputSpec(c, { topicId: c.spec.id, text }, { producer: { ...workType, name: workId, namespace: "v1", uid: task.metadata.uid } }));
           }
           if (target.harness === "route") {
             for (const decision of JSON.parse(String(result)).decisions) {
               const context = { resources, logger: { info() {} } };
-              const all = await resources.list(CONVERSATION_TYPE);
-              const destinations = decision.conversationUids.map((uid: string) => {
+              const all = await resources.list(TOPIC_TYPE);
+              const destinations = decision.topicUids.map((uid: string) => {
                 const c = all.find(c => c.metadata.uid === uid); if (!c) throw new Error("Unknown routing target"); return { name: c.metadata.name, uid };
               });
               if (!destinations.length) destinations.push(await defaultDestination(context));
               await deliver(context, new InputStore(home).get(decision.inputId)!, destinations, decision.reason);
             }
           }
-          if (target.harness === "chief" && conversationId) {
-            const all = await resources.list<ConversationResource["spec"], ConversationStatus>(CONVERSATION_TYPE);
-            const c = all.find(c => c.spec.id === conversationId)!;
+          if (target.harness === "chief" && topicId) {
+            const all = await resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE);
+            const c = all.find(c => c.spec.id === topicId)!;
             const run = c.status.execution;
             const ids = new InputStore(home).list().filter(i => !i.status.assess?.[c.metadata.uid]?.completedAt && i.status.assess?.[c.metadata.uid]?.executionId === run?.id).map(i => i.metadata.name);
             const immediate = ids.map(id => new InputStore(home).get(id)!.spec).filter(i => (i.attention ?? (i.origin === "channel" ? "immediate" : "deferred")) === "immediate");
             const first = immediate[0]?.source;
             const address = immediate.length ? (first && immediate.every(i => i.source && sameAddress(first, i.source)) ? first : undefined) : c.spec.address;
             if (run && address && agent.notify !== false && typeof result === "string" && result) {
-              new OutputStore(home, target => assertChannelDelivery(target, larkAppId)).create(conversationId, randomUUID(), outputSpec(c, { conversationId, text: result }, { executionId: run.id, target: address, inputIds: ids }));
+              new OutputStore(home, target => assertChannelDelivery(target, larkAppId)).create(topicId, randomUUID(), outputSpec(c, { topicId, text: result }, { executionId: run.id, target: address, inputIds: ids }));
             }
             if (run && ids.length && agent.complete !== false) await assessAll(resources, c, run.id, { inputIds: ids, summary: String(result) || "Handled silently" });
           }

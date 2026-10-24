@@ -3,7 +3,7 @@ import type { EffortOption, ModelOption } from "./adapter.ts";
 
 /**
  * Startup configuration only: id selects a configuration, harness selects its implementation.
- * Configurations do not identify resources or native sessions and are never registered per conversation.
+ * Configurations do not identify resources or native sessions and are never registered per topic.
  */
 export interface HarnessConfiguration {
   readonly id: string;

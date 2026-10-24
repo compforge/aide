@@ -5,10 +5,10 @@ import type { Incoming } from "../channel/message.ts";
 export interface WebService extends ChannelService {
   readonly persons: import("../../plugins/personal/person/service.ts").Persons;
   start(): Promise<void>;
-  deleteConversation(conversationId: string, revision: number, uid: string): Promise<import("../../plugins/personal/conversation/model.ts").ConversationDeletion>;
-  setDefaultConversation(conversationId: string, enabled: boolean): Promise<void>;
-  setConversationTrigger(conversationId: string, enabled: boolean): Promise<import("../../plugins/personal/conversation/trigger.ts").ConversationTrigger>;
-  works(): readonly { id: string; conversationId: string; revision: number; kind: "task" | "routine" }[];
+  deleteTopic(topicId: string, revision: number, uid: string): Promise<import("../../plugins/personal/topic/model.ts").TopicDeletion>;
+  setDefaultTopic(topicId: string, enabled: boolean): Promise<void>;
+  setTopicTrigger(topicId: string, enabled: boolean): Promise<import("../../plugins/personal/topic/trigger.ts").TopicTrigger>;
+  works(): readonly { id: string; topicId: string; revision: number; kind: "task" | "routine" }[];
   event(input: Omit<Incoming, "channelId" | "source"> & { name: string }): Promise<number>;
-  work(conversationId: string): { delete(id: string, revision: number): Promise<void> };
+  work(topicId: string): { delete(id: string, revision: number): Promise<void> };
 }

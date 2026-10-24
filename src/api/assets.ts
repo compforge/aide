@@ -6,7 +6,7 @@ interface Asset { type: string; content: string | Buffer }
 /** Fixed routes only: request paths never become filesystem paths. */
 export function createWebAssets() {
   const pages = [
-    { route: "/", directory: "conversations", bundle: "/app" },
+    { route: "/", directory: "topics", bundle: "/app" },
     { route: "/people", directory: "persons", bundle: "/persons" },
     { route: "/inputs", directory: "inputs", bundle: "/inputs" },
   ];

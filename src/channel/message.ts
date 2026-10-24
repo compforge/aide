@@ -4,7 +4,8 @@ export const IncomingSchema = z.object({
   source: ChannelAddressSchema,
   id: z.string().min(1).max(200),
   channelId: z.string().min(1),
-  sessionId: z.string().min(1).max(200),
+  topicKey: z.string().min(1).max(500).optional(),
+  topicId: z.string().min(1).optional(),
   text: z.string().min(1).max(32_000),
   observation: z.record(z.string(), z.unknown()).optional(),
 });
