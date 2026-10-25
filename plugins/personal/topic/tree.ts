@@ -41,3 +41,11 @@ export async function ensureSourceTopic(resources: ResourceClient, key: string, 
     return created;
   }
 }
+
+/** @spec Unabsorbed child versions are derived work. Leaf knowledge propagates bottom-up without new external Input. */
+export function pendingAbsorption(all: readonly TopicResource[], root: TopicResource) {
+  return topicSubtree(all, root).filter(t => t.spec.parentRef && !t.status.weaveLock)
+    .filter(t => all.find(p => p.metadata.uid === t.spec.parentRef!.uid)?.status.absorbed?.[t.metadata.uid] !== understandingVersion(t))
+    .sort((a, b) => topicPath(all, b).length - topicPath(all, a).length)
+    .map(t => ({ uid: t.metadata.uid, parentUid: t.spec.parentRef!.uid, version: understandingVersion(t) }));
+}

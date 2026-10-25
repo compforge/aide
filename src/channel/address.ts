@@ -14,6 +14,11 @@ export function larkAddress(appId: string, chatId: string): ChannelAddress {
   if (!appId || !chatId) throw new Error("Lark address requires appId and chatId");
   return { kind: "channel", channelId: "lark", endpoint: [appId, chatId].map(encodeURIComponent).join("/") };
 }
+/** Reply to a message inside its existing Lark thread; chat identity remains explicit. */
+export function larkThreadAddress(appId: string, chatId: string, messageId: string): ChannelAddress {
+  if (!appId || !chatId || !messageId) throw new Error("Lark thread address requires app, chat and message IDs");
+  return { kind: "channel", channelId: "lark", endpoint: [appId, chatId, "thread", messageId].map(encodeURIComponent).join("/") };
+}
 /** A shared locator keeps user observation and bot intake in the same Lark namespace. */
 export const larkTopicLocator = {
   locate({ appId, chatId, threadId, direct }) {
@@ -33,9 +38,14 @@ export function larkPersonAddress(appId: string, openId: string): ChannelAddress
   if (!appId || !openId) throw new Error("Lark person address requires appId and openId");
   return { kind: "channel", channelId: "lark", endpoint: [appId, "open_id", openId].map(encodeURIComponent).join("/") };
 }
-export function larkEndpoint(address: Address): { appId: string; receiveId: string; receiveIdType: "chat_id" | "open_id" } | undefined {
+export function larkEndpoint(address: Address): { appId: string; receiveId: string; receiveIdType: "chat_id" | "open_id"; replyToMessageId?: string } | undefined {
   if (!isChannelAddress(address) || address.channelId !== "lark") return;
   const parts = address.endpoint.split("/");
+  if (parts.length === 4 && parts[2] === "thread" && parts.every(Boolean)) {
+    const [appId, chatId, , messageId] = parts.map(decodeURIComponent) as [string, string, string, string];
+    if (larkThreadAddress(appId, chatId, messageId).endpoint !== address.endpoint) throw new Error("Lark address endpoint must use canonical encoding");
+    return { appId, receiveId: chatId, receiveIdType: "chat_id", replyToMessageId: messageId };
+  }
   if (parts.some(p => !p) || (parts.length !== 2 && (parts.length !== 3 || parts[1] !== "open_id"))) throw new Error("Invalid Lark address endpoint");
   const decoded = parts.map(decodeURIComponent), appId = decoded[0]!, receiveId = decoded.at(-1)!;
   const receiveIdType = parts.length === 2 ? "chat_id" : "open_id";

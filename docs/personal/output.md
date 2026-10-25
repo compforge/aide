@@ -16,6 +16,14 @@ Output 是 Personal 定义的 `aide.dev/v1alpha1 Output`。`spec.text`、`spec.r
 
 `say` 成功返回 `{ outputId, accepted: true }`，只确认内容已持久化接纳，不表示已送达。Agent 记录已创建输出即可，不负责查询送达或投递重试；Host / Channel 维护持久投递状态，界面与诊断按需查看。不因 pending 重建消息。Chief 用工具调用 ID 去重；同一调用的重试返回原 Output，不同调用可以为同一批输入创建多个 Output。Task / Routine 的 report 原子提交业务进展与 Input 办理回执，say 独立创建 Output；两个工具不是同一笔事务。投递失败不会重新运行 Harness 或外部动作，输出存在也不证明 report 已成功。
 
+## 统一沟通工具
+
+Chief、Task、Routine 共用 say 和只读 list_contacts。Aide 始终是发送者；to={me:true} 联系被服务者，to={personId,uid} 联系其他 Person。Agent 根据已有委托判断主动联系权限；工具验证活跃执行、输入归属、身份与目的地，Channel 使用自己的机器人身份发送。知道某人的身份、能读取其消息，不构成主动联系授权。
+
+list_contacts 提供分页联系人和不含凭证的 Channel 配置名。指定 Person 与 channelId 时，解析该 Channel app 作用域内唯一的身份并私聊；指定 target 则明确群聊或其他地址。显式联系 Me 可以省略 channelId，使用默认 Channel。缺失、过期或有歧义的身份报错，不改投其他人。to 与 receivers 互斥；respondToInputId 与 to / channelId / target 互斥。
+
+Lark 话题 Channel Input 的地址包含原消息 ID。回复时使用 SDK message.reply 和 reply_in_thread，Output 持久保存该位置；不会仅因同属一个 Topic 就在群主流发出话题答复。
+
 ## 地址与收件处
 
 Input 的 `source?: Address` 表达事情发生、可以联络的位置；`sender` 引用 Person，`sessionId` 表达话题共性，三者独立。Lark Source 可以记录观察消息所在群的地址，这本身不要求回复。
@@ -30,17 +38,19 @@ Topic 的 `spec.address?: Address` 只在创建时从首个 Channel Input 初始
 
 根据外部观察主动沟通时，Agent 仍须独立判断授权，并选择已知的通知目标；指定 target 只是明确目的地，不自动产生授权。助理身份和代理边界见 [Kernel](../kernel.md#助理定位与身份边界)。
 
-`Output.receivers` 是可选的 Person 资源引用列表，与 Input.sender 使用相同引用结构。它记录内容说给谁，target 记录送到哪里：可以在同一个群回复多人，也可以把多处信息整理后向另一个地址的负责人汇报。显式 receivers 覆盖直接回复的默认值，空列表表示不指定个人；仅关联 inputIds 不推导收件人。显式收件人不改变投递数量、不添加群内 @。默认通知固定接收人为 Me，由应用结合所选 Channel 解析其平台身份；其他收件人需要明确提供 target。
+`Output.receivers` 是可选的 Person 资源引用列表，与 Input.sender 使用相同引用结构。它记录内容说给谁，target 记录送到哪里：可以在同一个群回复多人，也可以把多处信息整理后向另一个地址的负责人汇报。显式 receivers 覆盖直接回复的默认值，空列表表示不指定个人；仅关联 inputIds 不推导收件人。显式收件人不改变投递数量、不添加群内 @。默认通知固定接收人为 Me，由应用结合所选 Channel 解析其平台身份；其他收件人可以通过 to 与 channelId 解析私聊位置，或明确提供 target。
 
 Channel 地址在 Output 持久化之前还要通过实际投递配置校验：未启用 Lark 或 appId 与机器人 Channel 不一致时拒绝创建，ResourceClient 的组合事务整笔回滚。Connector 观察身份不等于机器人发送身份，不能直接替换 appId 来猜一个可达地址。
 
 地址选择遵循“明确规则 → Agent 判断 → 默认联系 Me”的顺序。多个 immediate 地址冲突或缺失时，不从其中猜一个群；Agent 可以明确选择，无法确定则默认联系 Me。显式指定的无效 target 或缺少 source 的 respondToInputId 仍返回错误，不悄悄改投其他地址。可以为多个 Input 合并生成一个 Output，也可以不关联 Input 而主动通知。Chief 提示词保留当前 Input 地址与 Topic 的来源地址供明确选路；默认通知按 Channel 配置发送，不将 Topic 的来源地址当成默认出口。
 
-Work 的 say 通过所属 Topic 选择地址。缺少可用地址时返回错误，不创建无目标 Output；业务 report 与沟通独立，是否已完成应分别核对。
+Work 的 say 与 Chief 使用同一目的地规则；所属 Topic 只提供业务归属。缺少可用地址时返回错误，不创建无目标 Output；业务 report 与沟通独立，是否已完成应分别核对。
 
 Output 的 `status` 由 Host 与 Channel 维护。Lark 持久记录 pending / sending、尝试次数、重试时间与最终 delivered；failed / uncertain 为终止或待核对状态，不自动重投。Web 创建成功即表示已发布，记录 delivered，不表示用户已经阅读。执行成功、业务目标完成、通知创建与外部送达各有独立证据。
 
 ## 原子提交与恢复
+
+中断 Work 原子记录 uncertain 和 recoveryNotice，再通过统一 say 显式联系 Me。解析失败保留通知待办，30 秒后重试，重启继续处理；通知 ID 作为幂等键，创建 Output 后清除待办。通知没有原 Topic 地址也能发出，通知失败不重放业务执行。
 
 `ResourceClient.commit` 可在同一个插件实例范围内组合业务状态更新与 Output 创建。Host 用一个同步 SQLite 事务完成版本校验、容量检查和写入，提交后才发布变更通知。Harness 原生历史和远端发送不在该事务内。事务能力不意味着分别调用的 report 与 say 自动原子化。
 

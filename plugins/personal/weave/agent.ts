@@ -1,3 +1,4 @@
+import { weaveCandidates, candidatePage } from "./candidates.ts";
 import { identityBackground } from "../../../agents/personal.ts";
 import type { Persons } from "../person/service.ts";
 import { Type } from "typebox";
@@ -12,7 +13,6 @@ import { WEAVE_TYPE, type WeaveStatus } from "./model.ts";
 import { planGroup } from "./service.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { understandingVersion } from "../topic/tree.ts";
-import { contextPage } from "../background.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, summaryChars: number, batchSize: number, persons?: Persons): PiSessionFactory {
   const ref = scope.resourceRef;
@@ -26,15 +26,13 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
     };
     const roots = () => {
       active();
-      return store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).filter(t => !t.metadata.deletionTimestamp && !t.spec.parentRef && !t.spec.default && !t.status.weaveLock)
-        .sort((a, b) => (a.status.lastInputAt ?? a.metadata.creationTimestamp).localeCompare(b.status.lastInputAt ?? b.metadata.creationTimestamp) || a.metadata.uid.localeCompare(b.metadata.uid));
+      return weaveCandidates(store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE));
     };
     const tools: ToolDefinition[] = [
       { name: "list_topics", label: "List root topics", description: "One bounded batch of root summaries, oldest inactive first. Search for related peers; do not expand the entire catalog.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })), query: Type.Optional(Type.String()) }),
         async execute(_id, { offset = 0, query }) {
-          return result(contextPage(roots().filter(t => !query || [t.spec.name, t.status.summary].join(" ").toLowerCase().includes(query.toLowerCase()))
-            .map(t => ({ uid: t.metadata.uid, name: t.spec.name, summary: t.status.summary.slice(0, 1200), version: understandingVersion(t), lastInputAt: t.status.lastInputAt })), offset, batchSize));
+          return result(candidatePage(roots().filter(t => !query || [t.spec.name, t.status.summary].join(" ").toLowerCase().includes(query.toLowerCase())), offset, batchSize));
         } },
       { name: "read_topic", label: "Read root topic", description: "Read full root understanding in bounded text pages. version pins the understanding used by group_topics.",
         parameters: Type.Object({ uid: Type.String(), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),

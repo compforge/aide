@@ -146,8 +146,10 @@ export class Aide {
       },
     });
     this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, channelMe,
+      channels: [{ id: "web", provider: "local", default: (config?.defaultChannel ?? "web") === "web" },
+        ...Object.entries(config?.channels ?? {}).filter(([, c]) => c.enabled).map(([id, c]) => ({ id, provider: "lark", scope: c.appId, default: config?.defaultChannel === id }))],
       topic: parsePersonalConfig(config?.plugins.personal).topic, weave: parsePersonalConfig(config?.plugins.personal).weave }, log,
-      { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore, contactMe: topicId => this.contactMe(topicId) });
+      { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore, resolveContact: (topicId, to, channelId, target) => this.resolveContact(topicId, to, channelId, target) });
     this.runtime.subscribe(() => this.notify());
     this.personal.topics.subscribe(() => this.notify());
   }
@@ -210,21 +212,34 @@ export class Aide {
     return trigger;
   }
 
-  /** @spec Default say sends from the selected bot to Me, without relying on prior chat or Topic address.
+  /** @spec Resolve recipients in the selected Channel scope; Aide remains the sender. Default Me contact never relies on Topic address.
    * @link docs/channel/README.md
    */
-  private async contactMe(topicId: string) {
-    const id = this.options.config?.defaultChannel ?? "web";
+  private async resolveContact(topicId: string, to?: import("../plugins/personal/output/model.ts").SayInput["to"], channelId?: string, target?: import("@compforge/aide-plugin").Address) {
+    const explicitPerson = to && "personId" in to ? await this.persons.read(to.personId, to.uid) : undefined;
+    if (explicitPerson && !channelId && !target) throw new Error("Contacting a Person requires channelId or an explicit target");
+    if (target) {
+      const person = explicitPerson ?? (await this.persons.list()).find(p => p.isMe);
+      if (!person) throw new Error("Me is not configured");
+      return { target, receivers: [personRef(person)] };
+    }
+    const id = channelId ?? this.options.config?.defaultChannel ?? "web";
     let identity = LOCAL_ME;
     if (id !== "web") {
       const channel = this.options.config?.channels[id];
-      if (!channel?.enabled) throw new Error(`Default Channel is unavailable: ${id}`);
-      if (!channel.me) throw new Error(`Default Channel ${id} needs Me's identity in app ${channel.appId}; configure channels.${id}.me`);
-      identity = { provider: "lark", scope: channel.appId, id: channel.me.openId };
-    }
-    const me = await this.persons.findIdentity(identity);
-    if (!me) throw new Error(`Default Channel ${id} has no Person for its configured Me identity`);
-    return { target: id === "web" ? webAddress(topicId) : larkPersonAddress(identity.scope, identity.id), receivers: [personRef(me)] };
+      if (!channel?.enabled) throw new Error(`Channel is unavailable: ${id}`);
+      if (explicitPerson) {
+        const identities = explicitPerson.spec.identities.filter(i => i.provider === "lark" && i.scope === channel.appId);
+        if (identities.length !== 1) throw new Error(`Person ${explicitPerson.metadata.name} needs one Lark identity in Channel ${id}`);
+        identity = identities[0]!;
+      } else {
+        if (!channel.me) throw new Error(`Default Channel ${id} needs Me's identity in app ${channel.appId}; configure channels.${id}.me`);
+        identity = { provider: "lark", scope: channel.appId, id: channel.me.openId };
+      }
+    } else if (explicitPerson && !explicitPerson.isMe) throw new Error("Web Channel only contacts Me; specify another Channel or an explicit target");
+    const person = explicitPerson ?? await this.persons.findIdentity(identity);
+    if (!person) throw new Error(`Default Channel ${id} has no Person for its configured Me identity`);
+    return { target: id === "web" ? webAddress(topicId) : larkPersonAddress(identity.scope, identity.id), receivers: [personRef(person)] };
   }
 
   private async initializePeople() {

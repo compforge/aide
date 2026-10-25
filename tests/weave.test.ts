@@ -1,3 +1,5 @@
+import { registerWeave } from "../plugins/personal/weave/reconcile.ts";
+import { candidatePage, weaveCandidates } from "../plugins/personal/weave/candidates.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -152,4 +154,118 @@ test("Weave drains more than 100 writes in frozen batches before exposing a new 
   assert.equal(f.aide.topics.pending(uid).length, 121);
   assert.equal(f.aide.topics.pending(a.metadata.uid).length, 0);
   assert.equal(f.aide.topics.inputs(root.id).length, 121);
+});
+
+
+test("Weave advances only the bounded snapshot and retries interrupted analysis", async t => {
+  const f = fixture(t); await f.initialize();
+  for (let i = 0; i < 24; i++) {
+    const topic = await ensureSourceTopic(f.resources, `page:${i}`, "name");
+    await f.resources.replace(topic, { ...topic.spec, name: "n".repeat(200) }, { ...topic.status, summary: "s".repeat(1200) });
+  }
+  const roots = weaveCandidates(await f.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE));
+  assert.ok(candidatePage(roots, 0, 12).items.length < 12);
+  let reconcile!: (execution: any, owner: any) => Promise<unknown>;
+  const context = { ...f.context, instance: { config: { weave: { intervalMs: 1000 } } }, controllers: { register(def: any) { reconcile = def.reconcile; } } } as unknown as PluginContext;
+  registerWeave(context);
+  const seen = new Set<string>();
+  let fail = true;
+  const execution = { executionId: "scan", verbs: { async harness(args: any) {
+    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "weave", sessionId: "native" } };
+    if (fail) return { state: "failure", error: "interrupted" };
+    const batch = JSON.parse(args.prompt.split("\n").at(-1));
+    batch.items.forEach((item: any) => seen.add(item.uid));
+    return { state: "success", value: { result: { stopReason: "end_turn" } } };
+  } } };
+  await reconcile(execution, await f.weave());
+  assert.equal((await f.weave()).status.scanned, 0);
+  fail = false;
+  for (let i = 0; i < 3; i++) {
+    await f.resources.patchStatus(await f.weave(), { nextAt: "2000-01-01T00:00:00.000Z" });
+    await reconcile(execution, await f.weave());
+    assert.equal((await f.weave()).status.scanned, seen.size);
+  }
+  assert.equal(seen.size, 24);
+  await f.resources.patchStatus(f.refresh(roots[0]!), { summary: "changed during scan" });
+  await f.resources.patchStatus(await f.weave(), { nextAt: "2000-01-01T00:00:00.000Z" });
+  await reconcile(execution, await f.weave());
+  assert.ok((await f.weave()).status.scanned! < 24, "changed directory starts a fresh scan");
+});
+
+test("A quiet changed child wakes root synthesis without Input and can then expire", async t => {
+  const f = fixture(t); await f.initialize();
+  const a = await ensureSourceTopic(f.resources, "absorb:a", "A"), b = await ensureSourceTopic(f.resources, "absorb:b", "B");
+  await f.group(a, b); await applyGroup(f.resources, await f.weave());
+  const root = f.aide.topics.list().find(t => !t.parentRef)!;
+  await f.resources.patchStatus(f.refresh(a), { summary: "New evidence", lastInputAt: "2000-01-01T00:00:00.000Z" });
+  const before = f.aide.topics.resource(root.id)!.status.lastInputAt;
+  let prompts = 0;
+  const execution: any = { executionId: "absorb", withContext() { return this; }, verbs: { async harness(args: any) {
+    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
+    prompts++;
+    assert.match(args.prompt, /"kind":"absorb"/);
+    const current = f.aide.topics.resource(root.id)!;
+    await summarizeTopic(f.resources, current, "absorb", { version: current.metadata.resourceVersion, summary: "New evidence retained",
+      absorbed: [{ uid: a.metadata.uid, version: understandingVersion(f.refresh(a)) }] }, 4000);
+    return { state: "success", value: { result: { stopReason: "end_turn" } } };
+  } } };
+  await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
+  assert.equal(prompts, 1);
+  assert.equal(f.aide.topics.inputs().length, 0);
+  assert.equal(f.aide.topics.resource(root.id)!.status.lastInputAt, before);
+  await collectTopic(f.context, f.refresh(a));
+  assert.equal(f.aide.topics.resource(a.spec.id), undefined);
+  await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
+  assert.equal(prompts, 1);
+});
+
+test("Root Chief admits a bounded backlog with urgent Input first and independent receipts", async t => {
+  const f = fixture(t);
+  for (let i = 0; i < 10; i++) await f.input(`batch-${i}`, "batch");
+  const root = f.aide.topics.byKey("batch")!;
+  const urgent = await f.aide.topics.submit("urgent", { origin: "channel", originId: "web", topicKey: "batch", attention: "immediate", text: "urgent question" });
+  await routeByRules(f.context, urgent);
+  let prompts = 0;
+  const execution: any = { executionId: "batch", withContext() { return this; }, verbs: { async harness(args: any) {
+    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
+    prompts++;
+    const activation = JSON.parse(args.prompt.split("Activation: ")[1].split("\n")[0]);
+    assert.equal(activation.inputs.length, 8);
+    assert.equal(activation.inputs[0].inputId, "urgent");
+    for (const item of activation.inputs) {
+      const fact = f.aide.topics.inputStore.get(item.inputId)!;
+      assert.equal(fact.status.assess![root.metadata.uid]!.executionId, "batch");
+      await f.resources.patchStatus(fact, { assess: { ...fact.status.assess, [root.metadata.uid]: { ...fact.status.assess![root.metadata.uid]!, completedAt: new Date().toISOString() } } });
+    }
+    return { state: "success", value: { result: { stopReason: "end_turn" } } };
+  } } };
+  await reconcileChief(f.context, execution, f.refresh(root));
+  assert.equal(prompts, 1);
+  assert.equal(f.aide.topics.pending(root.metadata.uid).length, 3);
+  assert.ok(f.aide.topics.pending(root.metadata.uid).every(i => !i.status.assess![root.metadata.uid]!.executionId));
+});
+
+
+test("Unfinished synthesis backs off without inventing Input or refreshing activity", async t => {
+  const f = fixture(t); await f.initialize();
+  const a = await ensureSourceTopic(f.resources, "retry:a", "A"), b = await ensureSourceTopic(f.resources, "retry:b", "B");
+  await f.group(a, b); await applyGroup(f.resources, await f.weave());
+  const root = f.aide.topics.list().find(t => !t.parentRef)!;
+  await f.resources.patchStatus(f.refresh(a), { summary: "Awaiting synthesis" });
+  let prompts = 0;
+  const execution: any = { executionId: "retry", withContext() { return this; }, verbs: { async harness(args: any) {
+    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
+    prompts++;
+    return { state: "failure", error: "unavailable" };
+  } } };
+  await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
+  await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
+  assert.equal(prompts, 1);
+  assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 1);
+  await f.resources.patchStatus(f.aide.topics.resource(root.id)!, { nextAbsorbAt: "2000-01-01T00:00:00.000Z" });
+  await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
+  assert.equal(prompts, 2);
+  assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 2);
+  assert.ok(Date.parse(f.aide.topics.resource(root.id)!.status.nextAbsorbAt!) > Date.now() + 110_000);
+  assert.equal(f.aide.topics.inputs().length, 0);
 });
