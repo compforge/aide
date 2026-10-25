@@ -13,6 +13,8 @@ export interface TopicStatus extends ResourceContext {
   weaveLock?: string | null;
   absorbed?: Record<string, string>;
   agent?: import("@compforge/aide-plugin").AgentStatus;
+  nextAbsorbAt?: string;
+  absorbAttempts?: number;
   nextTriggerAt?: string | null;
   execution?: LoopExecution | null;
   receipts: Array<{ key: string; responseId: string }>;

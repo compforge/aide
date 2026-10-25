@@ -21,7 +21,7 @@ export const topicKey = digest;
 export class TopicStore {
   private readonly listeners = new Set<(topic: Topic) => void>();
   constructor(readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly inputStore: InputStore, readonly outputStore = new OutputStore(resources.storage.home),
-    private readonly contactMe?: (topicId: string) => Promise<{ target: Address; receivers: import("@compforge/aide-plugin").ResourceRef[] }>) {
+    private readonly resolveContact?: (topicId: string, to?: SayInput["to"], channelId?: string, target?: Address) => Promise<{ target: Address; receivers: import("@compforge/aide-plugin").ResourceRef[] }>) {
 
   }
   changed(change: ResourceClientChange): void {
@@ -124,7 +124,7 @@ export class TopicStore {
     const initial = await this.ensure(topicId);
     const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
     const previous = this.outputStore.get(id);
-    if (options.respondToInputId && options.target) throw new Error("say must choose respondToInputId or target, not both");
+    if (options.respondToInputId && (options.target || options.to || options.channelId)) throw new Error("say must choose respondToInputId or target, not both");
     const inputIds = [...new Set([...(options.inputIds ?? (inputId ? [inputId] : [])), ...(options.respondToInputId ? [options.respondToInputId] : [])])];
     const attached = (id: string) => {
       const input = this.inputStore.get(id);
@@ -135,6 +135,20 @@ export class TopicStore {
     for (const id of inputIds) attached(id);
     let target: Address | undefined = options.target && parseAddress(options.target);
     let receivers = options.receivers === undefined ? undefined : [...options.receivers];
+    if (options.to || options.channelId) {
+      if (options.receivers !== undefined) throw new Error("say must choose to or receivers, not both");
+      if (options.target && options.channelId) throw new Error("say must choose target or channelId, not both");
+      if (!options.to) throw new Error("say channelId requires an explicit recipient");
+      if (!this.resolveContact) throw new Error("Person contact is unavailable");
+      if (previous) {
+        const recipient = options.to;
+        if ("personId" in recipient && !previous.spec.receivers?.some(r => r.uid === recipient.uid)) throw new Error("Output identity already exists with a different recipient");
+        target = previous.spec.target; receivers = previous.spec.receivers;
+      } else {
+        const destination = await this.resolveContact(topicId, options.to, options.channelId, target);
+        target = destination.target; receivers = destination.receivers;
+      }
+    }
     if (options.respondToInputId) {
       const reply = attached(options.respondToInputId).spec;
       // @spec Only Channel inputs establish an implicit reply path. Source addresses locate observations, not assistant conversations.
@@ -160,8 +174,8 @@ export class TopicStore {
       }
       // @spec Rules resolve an unambiguous reply; the Agent can choose an explicit address. An unresolved choice contacts Me.
       // @link docs/personal/output.md#地址与收件处
-      if (!target && this.contactMe) {
-        const destination = await this.contactMe(topicId);
+      if (!target && this.resolveContact) {
+        const destination = await this.resolveContact(topicId);
         target = destination.target;
         if (receivers !== undefined && JSON.stringify(receivers) !== JSON.stringify(destination.receivers))
           throw new Error("Default say contacts Me; other receivers require an explicit target");

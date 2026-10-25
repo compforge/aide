@@ -19,7 +19,7 @@ export interface LarkTransport {
   readonly botIdentity?: Lark.BotIdentity;
   cards?: LarkCardTransport;
   start(receive: (event: unknown) => void | Promise<void>): Promise<void>;
-  send(receiveId: string, text: string, id: string, receiveIdType?: "chat_id" | "open_id"): Promise<void>;
+  send(receiveId: string, text: string, id: string, receiveIdType?: "chat_id" | "open_id", replyToMessageId?: string): Promise<void>;
   close(): void;
 }
 
@@ -91,8 +91,11 @@ export function larkTransport(config: LarkConfig, log: Logger): LarkTransport {
       const eventDispatcher = new Lark.EventDispatcher({ logger }).register({ "im.message.receive_v1": async (event) => receive(event) });
       await ws.start({ eventDispatcher });
     },
-    async send(receiveId, text, id, receiveIdType = "chat_id") {
-      const response = await client.im.message.create({
+    async send(receiveId, text, id, receiveIdType = "chat_id", replyToMessageId) {
+      const response = replyToMessageId ? await client.im.message.reply({
+        path: { message_id: replyToMessageId },
+        data: { msg_type: "text", content: JSON.stringify({ text }), uuid: id, reply_in_thread: true },
+      }) : await client.im.message.create({
         params: { receive_id_type: receiveIdType },
         data: { receive_id: receiveId, msg_type: "text", content: JSON.stringify({ text }), uuid: id },
       });

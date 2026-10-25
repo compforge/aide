@@ -1,5 +1,5 @@
 import type { TopicLocator } from "../../../plugins/personal/topic/locator.ts";
-import { larkAddress, larkTopicKey, larkEndpoint } from "../address.ts";
+import { larkAddress, larkThreadAddress, larkTopicKey, larkEndpoint } from "../address.ts";
 import { channelOutputs } from "../output.ts";
 import type { OutputView } from "../../output.ts";
 import { CHANNELS, bindChannelInput } from "../definition.ts";
@@ -130,7 +130,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     // Group normalization yields; concurrent duplicate deliveries must still persist only once.
     if (this.stopped) throw new Error("Lark channel is stopping");
     if (this.state.received.includes(id)) return;
-    const input = LarkIncomingSchema.safeParse({ id, topicKey: topicId, text, source: larkAddress(this.appId, chatId),
+    const input = LarkIncomingSchema.safeParse({ id, topicKey: topicId, text, source: threadId ? larkThreadAddress(this.appId, chatId, id) : larkAddress(this.appId, chatId),
       observation: { provider: "lark", accountId: this.appId, chatId, chatType: message.chat_type, ...(threadId ? { threadId } : {}),
         ...(botIdentity ? { assistant: { id: botIdentity.openId, name: botIdentity.name } } : {}),
         sender: { type: sender.sender_type, ...(sender.sender_id?.open_id ? { id: sender.sender_id.open_id } : {}) },
@@ -207,7 +207,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
         const id = this.deliveryId(message.id, index);
         if (this.state.delivered.includes(id)) continue;
         try {
-          await this.transport.send(receiveId, text, id, receiveIdType);
+          await this.transport.send(receiveId, text, id, receiveIdType, endpoint.replyToMessageId);
         } catch (error) {
           this.retryAt = Date.now() + 10_000;
           const nextAttemptAt = new Date(this.retryAt).toISOString(), failure = larkSendFailure(error);

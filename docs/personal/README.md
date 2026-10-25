@@ -4,7 +4,7 @@ Personal 是 Aide 的内置个人助手插件。Input 带来内容、人物和�
 
 ## 从大量输入到有价值的输出
 
-Aide 从 Connector 和 Channel 持续接收输入，围绕话题理解和推进事情，再通过 Channel 向相关的人发出有价值的输出，把成百上千条输入转化为人的注意力可以承受的沟通。判断价值要结合用户的目标、已有委托与当前处境，让用户把注意力放在需要了解和决定的事情上。
+Aide 从 Channel 和 Source 持续接收输入，围绕话题理解和推进事情，再通过 Channel 向相关的人发出有价值的输出，把成百上千条输入转化为人的注意力可以承受的沟通。判断价值要结合用户的目标、已有委托与当前处境，让用户把注意力放在需要了解和决定的事情上。
 
 这个过程包含归属判断、关联上下文、核实事实、研判影响、推进工作和选择沟通时机。有些 Input 只更新认识、记忆或已有工作的进展；多条 Input 可以汇聚成一条 Output，一条 Input 也可能在持续跟进中促成多次 Output。静默处理同样可以有明确的判断和结果。
 
@@ -16,21 +16,29 @@ Input 同时承载收到的事实和围绕这份事实的处理进展。原始�
 
 ## 对象与主流程
 
+Personal 的业务主线是：
+
+**Channel / Source → Input → Topic → root Chief → Task / Routine 或 Output**
+
+Channel / Source 将交流和观察形成 Input，保留事实与来源；Route 确定 Input 的 Topic 归属；当前 root Topic 的 Chief 综合子树输入，在已有授权范围内直接处理，或交给 Task / Routine 持续办理。Chief 与工作 Agent 在需要沟通时产生 Output，也可以静默完成研判或推进工作。
+
+Weave 作用于 Topic 之间的关系：把值得共同理解的主题组织到新父 Topic 下，使后续输入由共同 root 的 Chief 综合处理。Input 的原始 Topic 归属保持稳定，实际处理位置随主题树解析到当前 root；主题组织、人物身份、通信目的地和授权分别表达各自的事实。
+
 ![Personal 的输入、路由、研判、办理与输出](../assets/personal-flow.svg)
 
 | 对象 | 承担的职责 | 详细设计 |
 | --- | --- | --- |
 | Input | 收到的事实，以及各组件的处理痕迹 | [输入](input.md) |
-| Weave | 把相关根主题组织到新父主题下，安全交接消费与工作 | [主题树](topic.md) |
+| Weave | 组织相关主题，促进跨来源知识融合，收敛独立处理上下文 | [Weave](weave.md)、[主题树](topic.md) |
 | Route | 为输入选择一个话题，无合适归属时使用 Default | [路由](route.md) |
-| Topic / Chief | 承接话题，研判输入，直接处理或委托工作 | [会话](topic.md)、[Chief](chief.md) |
+| Topic / Chief | Topic 保存主题认识，Chief 在 root 综合研判子树输入，直接处理或委托工作 | [主题](topic.md)、[Chief](chief.md) |
 | Task / Routine | 有限目标与持续职责的独立生命周期 | [Task](task.md)、[Routine](routine.md) |
 | Person | 人物身份、可选 Me 标记和持续积累的认识 | [人物](person.md) |
 | Output | 已决定表达的内容、对象、地址与投递状态 | [输出](output.md) |
 
-Channel 和 Source 负责形成 Input。Route 的确定性规则直接分派，其余交给持续 Route Agent；Chief 在所属 Topic 中研判，必要时建立 Task / Routine 的办理记录。各 Agent 通过工具明确确认业务进展，通过 say 创建 Output，投递器负责发送和回执。
+Route 的确定性规则直接分派，其余交给持续 Route Agent。各 Agent 通过工具明确确认业务进展，通过 say 创建 Output，投递器负责发送和回执。
 
-Reconcile 负责确定性协调，Agent 负责非确定性判断。运行中的新材料通过 followUp / steer 加入原生上下文；工具回执确认处理完成。模型结束、输入处理完成、工作目标达成和消息送达是不同事实。
+Personal 采用 [工具驱动与持续接纳](../harness/README.md#agent-的使用方式与持续职责) 的 Agent 使用方式：Chief 服务于 root Topic 的综合理解与研判，Task Agent 服务于有限目标，Routine Agent 服务于持续职责。Reconcile 负责确定性协调，Agent 负责非确定性判断；新动向通过 followUp / steer 加入运行中的会话，以 assess_input、report_task / report_routine 和 say 分别提交研判、办理进展与沟通。业务完成以这些回执为准，最终文本用于内部执行摘要。
 
 ## 主动性与上下文
 

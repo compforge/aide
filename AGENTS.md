@@ -140,7 +140,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - [文档导航](docs/README.md)：使用、开发与验收的阅读入口。
 - [Kernel](docs/kernel.md)、[Plugin](docs/plugin/README.md)、[Resource](docs/plugin/resource.md)：底座边界、协调、定义、事务与容量；[公共契约](packages/plugin/README.md)。
 - [Personal](docs/personal/README.md)：对象与完整流程；[Input](docs/personal/input.md)、[Route](docs/personal/route.md)、[Topic](docs/personal/topic.md)、[Output](docs/personal/output.md)。
-- [Topic 与 Weave 方案](docs/personal/topic.md)：来源归属、主题组织、root 处理与静默回收契约。
+- [Topic](docs/personal/topic.md)、[Weave](docs/personal/weave.md)：来源归属、知识融合、root 处理与静默回收契约。
 - [Chief](docs/personal/chief.md)：判断、提示词、上下文与记忆优化；[Person](docs/personal/person.md)、[Task](docs/personal/task.md)、[Routine](docs/personal/routine.md)。
 - [Harness](docs/harness/README.md)、[Pi](docs/harness/pi.md)：通用执行契约与原生适配。
 - [Channel](docs/channel/README.md)：[Web](docs/channel/web.md)、[Lark](docs/channel/lark.md)。

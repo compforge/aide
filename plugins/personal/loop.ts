@@ -19,12 +19,16 @@ export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
   return !!receipt && !receipt.executionId && (!["Task", "Routine"].includes(owner.kind) || !!input.status.handle?.[owner.metadata.uid]?.appliedAt);
 }
 /** @spec Due retries compete by original arrival, independently of new input selection; a failed parent cannot starve. */
-export async function nextInput(resources: ResourceClient, owner: Readonly<LoopResource>) {
+export async function nextInputs(resources: ResourceClient, owner: Readonly<LoopResource>, limit: number) {
   const inputs = await pendingInputs(resources, resourceRef(owner));
   return [...inputs].filter(i => eligible(i, owner)).sort((a, b) =>
     (owner.kind === "Route" ? 0 : Number(immediate(b.spec)) - Number(immediate(a.spec)))
-    || a.metadata.creationTimestamp.localeCompare(b.metadata.creationTimestamp) || a.metadata.name.localeCompare(b.metadata.name))[0];
+    || a.metadata.creationTimestamp.localeCompare(b.metadata.creationTimestamp) || a.metadata.name.localeCompare(b.metadata.name)).slice(0, limit);
 }
+export async function nextInput(resources: ResourceClient, owner: Readonly<LoopResource>) {
+  return (await nextInputs(resources, owner, 1))[0];
+}
+
 export async function retryDelay(resources: ResourceClient, owner: Readonly<LoopResource>) {
   const times = (await pendingInputs(resources, resourceRef(owner))).flatMap(i => i.status.route?.nextAttemptAt ? [Date.parse(i.status.route.nextAttemptAt)] : []);
   return times.length ? { requeueAfterMs: Math.max(1, Math.min(...times) - Date.now()) } : undefined;
@@ -41,20 +45,22 @@ export async function submitPending(context: PluginContext, execution: Reconcile
   return retry ? { requeueAfterMs: 100 } : undefined;
 }
 /** Persist admission before effects. Only tools can finish business processing, never end_turn. */
-export async function runInput(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>, target: string, prompt: string, inputId?: string) {
+export async function runInput(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>, target: string, prompt: string, inputId?: string, batchIds: readonly string[] = []) {
   const current = await context.resources.get<unknown, LoopStatus>(resourceRef(owner));
   if (!current || current.metadata.deletionTimestamp || current.status.execution) return;
   if (current.kind === "Topic" && ((current.spec as { parentRef?: unknown }).parentRef || (current.status as { weaveLock?: string }).weaveLock)) return;
-  const input = inputId ? await context.resources.get<InputSpec, import("./input/model.ts").InputStatus>(inputRef(inputId)) : undefined;
-  if (inputId && (!input || !eligible(input, current))) return;
+  const inputIds = [...new Set([...(inputId ? [inputId] : []), ...batchIds])];
+  if (inputIds.length > 20) throw new Error("Agent admission batch exceeds 20 Inputs");
+  const inputs = await Promise.all(inputIds.map(id => context.resources.get<InputSpec, import("./input/model.ts").InputStatus>(inputRef(id))));
+  if (inputs.some(input => !input || !eligible(input, current))) return;
   const startedAt = new Date().toISOString();
   await context.resources.commit([
     { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, admissionRevision: 0 } } },
-    ...(input ? [{ operation: "patchStatus" as const, resource: input, patch: attemptPatch(input, resourceRef(current), {
+    ...inputs.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: attemptPatch(input!, resourceRef(current), {
       executionId: execution.executionId, startedAt, nextAttemptAt: undefined,
-      ...(current.kind === "Route" ? { attempts: (input.status.route?.attempts ?? 0) + 1 } : {}) }) }] : []),
+      ...(current.kind === "Route" ? { attempts: (input!.status.route?.attempts ?? 0) + 1 } : {}) }) })),
   ]);
-  context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", executionId: execution.executionId } });
+  context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", inputIds, executionId: execution.executionId } });
   let completed = false;
   let error = "Agent ended without confirming input completion";
   try {

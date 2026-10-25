@@ -1,3 +1,4 @@
+import { sayTool, contactsTool, type ContactChannel } from "../output/tool.ts";
 import { identityBackground } from "../../../agents/personal.ts";
 import type { Persons } from "../person/service.ts";
 import { contextPage, relatedWork } from "../background.ts";
@@ -18,7 +19,7 @@ import { say } from "../output/action.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<T> => definition;
 /** Host binds scope; the model never supplies Task or Topic identity. */
-export function taskSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, log: Logger, persons?: Persons): PiSessionFactory {
+export function taskSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, log: Logger, persons?: Persons, channels: readonly ContactChannel[] = []): PiSessionFactory {
   const ref = scope.resourceRef;
   if (scope.pluginInstanceId !== "personal" || ref?.kind !== TASK_TYPE.kind || ref.apiVersion !== TASK_TYPE.apiVersion || !ref.uid) throw new Error("Task requires its owning resource scope");
   return async options => {
@@ -30,6 +31,7 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
     };
     const verbs = () => { const task = current(); return plugins.executionVerbs(task.status.execution!.id, { topicId: task.spec.topicId, taskId: task.metadata.name }); };
     const tools: ToolDefinition[] = [
+      ...(persons ? [contactsTool(persons, channels, current)] : []),
       tool({ name: "list_work", label: "List related work", description: "Page through this Topic's Task and Routine summaries; does not delegate or resume work.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, current().spec.topicId), offset)); } }),
@@ -47,17 +49,7 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
           const text = inputPrinter.describe(input);
           return result({ inputId, handling: input.status.handle[task.metadata.uid], text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } }),
-      tool({ name: "say", label: "Say", description: "Create an Output through this Task's Topic. Choose respondToInputId only for an assigned Channel Input; observations have no implicit reply path. Otherwise choose an independently known target within the mandate. An unambiguous immediate Channel Input supplies the reply address, including its original group. If you cannot determine a target, omit both to contact Me through the configured default Channel. Topic grouping never grants a destination. Success means accepted, not delivered; Host owns delivery and recovery.",
-        parameters: Type.Object({ text: Type.String({ minLength: 1 }), inputIds: Type.Optional(Type.Array(Type.String())),
-          respondToInputId: Type.Optional(Type.String()), target: Type.Optional(Type.Union([
-            Type.Object({ kind: Type.Literal("channel"), channelId: Type.String(), endpoint: Type.String() }),
-            Type.Object({ kind: Type.Literal("requirement"), source: Type.String(), category: Type.String(), id: Type.String(), scope: Type.String() }),
-          ])) }),
-        async execute(id, args) {
-          const task = current();
-          for (const inputId of args.inputIds ?? []) if (!store.topics.inputStore.get(inputId)?.status.handle?.[task.metadata.uid]) throw new Error("Output input is not assigned to Task");
-          return result(await say(verbs(), { ...args, idempotencyKey: id }));
-        } }),
+      sayTool((id, input) => say(verbs(), { ...input, idempotencyKey: id })),
       tool({ name: "report_task", label: "Report task", description: "Atomically update Task progress and acknowledge only inputs actually handled. Preserve explicit actors, authorization scope and proposal/confirmation state in summary and recent. Use say separately for user-visible communication.",
         parameters: Type.Object({ inputIds: Type.Array(Type.String()), summary: Type.String({ minLength: 1, maxLength: 16000 }), recent: Type.String({ minLength: 1, maxLength: 16000 }),
           action: Type.Union([Type.Literal("done"), Type.Literal("wait"), Type.Literal("ask")]), question: Type.Optional(Type.String()), nextAt: Type.Optional(Type.String()) }),

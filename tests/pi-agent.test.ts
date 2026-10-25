@@ -789,6 +789,7 @@ test("Pi cancellation clears unapplied steering before the next invocation", { t
 test("Aide Route commits tool decisions, rejects invented targets and reuses its context for later input", { timeout: 30_000 }, async t => {
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   let targetUid = ""; let routeCalls = 0;
+  const chiefAssessed = new Set<string>();
   const routeRequests: Record<string, unknown>[] = [];
   const fixture = await setup(t, request => {
     const messages = request.messages as Array<{role: string; content: unknown}>;
@@ -803,10 +804,12 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
       if (messages.at(-1)!.role === "tool") return { text: "Routed" };
       return { tool: "route_input", args: { inputId, topicUids: [targetUid], reason: "continuing subject" } };
     }
-    if (messages.at(-1)!.role === "tool") return { text: "Handled" };
-    const inputId = raw.includes("New Input:")
-      ? JSON.parse(raw.split("\n").find(line => line.startsWith('{"inputId":'))!).inputId
-      : JSON.parse(raw.split("Activation: ").at(-1)!.split("\n")[0]!).inputId;
+    const ids: string[] = raw.includes("New Input:")
+      ? [JSON.parse(raw.split("\n").find(line => line.startsWith('{"inputId":'))!).inputId]
+      : JSON.parse(raw.split("Activation: ").at(-1)!.split("\n")[0]!).inputs.map((i: { inputId: string }) => i.inputId);
+    const inputId = ids.find(id => !chiefAssessed.has(id));
+    if (!inputId) return { text: "Handled" };
+    chiefAssessed.add(inputId);
     return { tool: "assess_input", args: { inputId, summary: "Recorded fact" } };
   });
   const home = join(fixture.config.cwd, "route-home");

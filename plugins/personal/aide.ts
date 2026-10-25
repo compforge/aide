@@ -1,3 +1,4 @@
+import { contactsTool, type ContactChannel } from "./output/tool.ts";
 import { identityBackground } from "../../agents/personal.ts";
 import { weavePolicy } from "./weave/config.ts";
 import { topicTools } from "./topic/tools.ts";
@@ -35,7 +36,7 @@ import { ApplicationRuntime } from "../../src/host/runtime/index.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
 import { IncomingSchema, type Incoming, type OutputView } from "./model.ts";
 import { WorkService } from "./work.ts";
-import { output, Store } from "./store.ts";
+import { Store } from "./store.ts";
 import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
 import { TOPIC_TYPE, INPUT_TYPE, digest } from "./chief-model.ts";
 import { TopicDeletionBlocked, type TopicDeletion } from "./topic/model.ts";
@@ -57,18 +58,20 @@ export class Personal {
   private intake: Promise<unknown> = Promise.resolve();
   private starting?: Promise<void>;
   private closed = false;
+  private noticeTimer?: ReturnType<typeof setTimeout>;
+  private noticeDelivery?: Promise<void>;
 
   readonly core: ApplicationRuntime;
   private readonly pending = new Set<Promise<unknown>>();
 
-  constructor(private readonly options: { timezone: string; persons: Persons; channelMe: Me; topic?: unknown; weave?: unknown }, private readonly log: Logger,
-    runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore; contactMe?: ConstructorParameters<typeof TopicStore>[4] }) {
+  constructor(private readonly options: { timezone: string; persons: Persons; channelMe: Me; channels?: readonly ContactChannel[]; topic?: unknown; weave?: unknown }, private readonly log: Logger,
+    runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore; resolveContact?: ConstructorParameters<typeof TopicStore>[4] }) {
     this.core = runtime.runtime;
     this.connectors = runtime.connectors;
     this.plugins = this.core.plugins;
     const resources = new PluginResourceStore({ home: runtime.inputs.storage.home, pluginInstanceId: "personal" });
     const client = this.plugins.resourceClient("personal");
-    this.store = new Store(resources, client, new TopicStore(resources, client, runtime.inputs, runtime.outputs, runtime.contactMe));
+    this.store = new Store(resources, client, new TopicStore(resources, client, runtime.inputs, runtime.outputs, runtime.resolveContact));
   }
 
   /** @spec Persistent native tools resolve the live execution on each call, never capture a completed invocation's verbs. */
@@ -104,7 +107,7 @@ export class Personal {
         this.log.info({ topicId }, "Chief understanding updated");
         return result;
       });
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...topicTools(this.store, active)], background: () => new TopicBackground(this.store, active(), topicId), beforeWorkMutation: () => { active(); } });
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, contactsTool(this.options.persons, this.options.channels ?? [], active), ...topicTools(this.store, active)], background: () => new TopicBackground(this.store, active(), topicId), beforeWorkMutation: () => { active(); } });
     };
   }
 
@@ -113,11 +116,11 @@ export class Personal {
   }
 
   routineSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
-    return routineSession(scope, config, this.store, this.plugins, this.log, this.options.persons);
+    return routineSession(scope, config, this.store, this.plugins, this.log, this.options.persons, this.options.channels);
   }
 
   taskSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
-    return taskSession(scope, config, this.store, this.plugins, this.log, this.options.persons);
+    return taskSession(scope, config, this.store, this.plugins, this.log, this.options.persons, this.options.channels);
   }
 
   routeSession(scope: ExecutionScope, config: ChiefAgentOptions["config"]): PiSessionFactory {
@@ -285,14 +288,47 @@ export class Personal {
       await finalizeExecution({ resources, logger: { debug: () => {}, info: () => {}, warn: (message: string, detail?: unknown) => this.log.warn({ detail }, message), error: () => {} } }, c, id);
       this.log.warn({ resourceUid: c.metadata.uid, executionId: id }, "Recovered interrupted agent without replaying actions");
     }
-    for (const work of this.store.read().works) {
-      if (work.status !== "running") continue;
-      work.status = "uncertain"; work.nextAt = null;
-      const text = `「${work.title}」执行被中断，结果未知。请核对外部结果后告诉我是否继续。`;
-      work.recent.push({ at: new Date().toISOString(), text });
-      const target = this.topics.resource(work.topicId)?.spec.address;
-      await this.store.save(work, target ? [output(work.topicId, text, work.id, target)] : []);
-      this.log.warn({ workId: work.id }, "Recovered interrupted work as uncertain");
+    for (const type of WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work-status.ts").WorkAgentStatus>(type)) {
+      if (work.metadata.deletionTimestamp || work.status.status !== "running") continue;
+      const text = `「${work.spec.title}」执行被中断，结果未知。请核对外部结果后告诉我是否继续。`;
+      await resources.patchStatus(work, { status: "uncertain", nextAt: null,
+        recoveryNotice: { id: `interrupted:${work.metadata.uid}:${work.status.execution?.id ?? work.metadata.resourceVersion}`, text },
+        recent: [...work.status.recent, { at: new Date().toISOString(), text }] });
+      this.log.warn({ workId: work.metadata.name }, "Recovered interrupted work as uncertain; notification pending");
+    }
+    await this.deliverRecoveryNotices();
+  }
+
+  /** @spec Recovery notice intent survives failed address resolution and restarts; stable keys prevent duplicate Outputs.
+   * @link docs/personal/output.md#原子提交与恢复
+   */
+  private deliverRecoveryNotices(): Promise<void> {
+    return this.noticeDelivery ??= this.flushRecoveryNotices().finally(() => { this.noticeDelivery = undefined; });
+  }
+
+  private async flushRecoveryNotices(): Promise<void> {
+    const resources = this.plugins.resourceClient("personal");
+    let retry = false;
+    for (const type of WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work-status.ts").WorkAgentStatus>(type)) {
+      const notice = work.status.recoveryNotice;
+      if (!notice || work.metadata.deletionTimestamp) continue;
+      try {
+        await this.topics.say(work.spec.topicId, undefined, notice.text, undefined,
+          { to: { me: true }, inputIds: [], idempotencyKey: notice.id });
+        const current = await resources.get<WorkSpec, import("./work-status.ts").WorkAgentStatus>(resourceRef(work));
+        if (current?.status.recoveryNotice?.id === notice.id) await resources.patchStatus(current, { recoveryNotice: null });
+        this.log.info({ workId: work.metadata.name, noticeId: notice.id }, "Recovery notification accepted");
+      } catch (error) {
+        retry = true;
+        this.log.warn({ workId: work.metadata.name, noticeId: notice.id, err: error }, "Recovery notification remains pending");
+      }
+    }
+    if (retry && !this.closed && !this.noticeTimer) {
+      this.noticeTimer = setTimeout(() => {
+        this.noticeTimer = undefined;
+        void this.deliverRecoveryNotices().catch(err => this.log.error({ err }, "Recovery notification retry failed"));
+      }, 30_000);
+      this.noticeTimer.unref();
     }
   }
 
@@ -388,6 +424,8 @@ export class Personal {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    if (this.noticeTimer) clearTimeout(this.noticeTimer);
+    await this.noticeDelivery;
     await this.starting; await this.core.close(); await this.intake;
   }
 }

@@ -9,7 +9,7 @@ import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { ConfigSchema, loadConfig } from "../src/config.ts";
 import { ChannelSettings, ChannelSettingsError } from "../src/channel/settings.ts";
-import { larkAddress, larkPersonAddress } from "../src/channel/address.ts";
+import { larkAddress, larkThreadAddress, larkPersonAddress } from "../src/channel/address.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
 import { httpChannel } from "../src/api/index.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -165,4 +165,69 @@ test("Configuring existing Persons as Channel Me consolidates their accounts wit
   assert.equal(incoming.spec.sender!.uid, marked.metadata.uid);
   const reply = await aide.topics.say("message", undefined, "仍可回复原群", undefined, { respondToInputId: incoming.metadata.name });
   assert.deepEqual(aide.outputStore.get(reply.outputId)!.spec.target, larkAddress("cli_work", "oc_group"));
+});
+
+
+test("Shared say resolves Person identities by Channel, keeps Aide as sender and explicitly contacts Me", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-person-say-"));
+  const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No inference"); } }, home), config: config() }, log);
+  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  await aide.persons.initialize();
+  const person = await aide.persons.observe({ provider: "lark", scope: "cli_work", id: "ou_colleague" }, "李阳");
+  const to = { personId: person.metadata.name, uid: person.metadata.uid };
+  const sent = await aide.topics.say("default", undefined, "我是 Aide，受托询问部署进展。", undefined, { to, channelId: "work", idempotencyKey: "question" });
+  assert.deepEqual(aide.outputStore.get(sent.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_colleague"));
+  assert.deepEqual(aide.outputStore.get(sent.outputId)!.spec.receivers, [personRef(person)]);
+  await assert.rejects(aide.topics.say("default", undefined, "bad", undefined, { to }), /requires channelId/);
+  await assert.rejects(aide.topics.say("default", undefined, "bad", undefined, { to, channelId: "personal" }), /needs one Lark identity/);
+  await assert.rejects(aide.topics.say("default", undefined, "bad", undefined, { to: { ...to, uid: "stale" }, channelId: "work" }), /Unknown Person/);
+  await seedInput(aide.topics, "group-mention", { topicId: "default", origin: "channel", originId: "lark", source: larkAddress("cli_work", "oc_group"), text: "question" });
+  const me = await aide.topics.say("default", "group-mention", "联系被服务者", undefined, { to: { me: true } });
+  assert.deepEqual(aide.outputStore.get(me.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_me"));
+  const resources = aide.runtime.plugins.resourceClient("personal");
+  await resources.delete(person, person.metadata.name, "v1");
+  assert.deepEqual(await aide.topics.say("default", undefined, "我是 Aide，受托询问部署进展。", undefined, { to, channelId: "work", idempotencyKey: "question" }), sent);
+  await assert.rejects(aide.topics.say("default", undefined, "new", undefined, { to, channelId: "work" }), /Unknown Person/);
+});
+
+test("Interrupted addressless work retains notification intent until Me can be resolved", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-recovery-notice-"));
+  const options = { ...fakeOptions({ async execute() { throw new Error("No inference"); } }, home), config: config() };
+  let aide = new Aide(home, options, log);
+  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  const work = await aide.work("default").create({ kind: "task", title: "Verify", instruction: "Inspect", trigger: null });
+  await aide.personal.store.save({ ...work, status: "running" });
+  await aide.personal.recoverInterrupted();
+  assert.equal(aide.personal.store.get(work.id).status, "uncertain");
+  const notice = aide.personal.store.get(work.id).recoveryNotice;
+  assert.ok(notice);
+  assert.equal(aide.outputs().length, 0);
+  await aide.close();
+  aide = new Aide(home, options, log);
+  await aide.persons.initialize();
+  await aide.personal.recoverInterrupted();
+  assert.equal(aide.personal.store.get(work.id).recoveryNotice, null);
+  assert.equal(aide.outputs().length, 1);
+  assert.deepEqual(aide.outputs()[0]!.target, larkPersonAddress("cli_work", "ou_me"));
+  // Simulate a crash after Output acceptance but before clearing the durable notice.
+  await aide.personal.store.save({ ...aide.personal.store.get(work.id), recoveryNotice: notice });
+  await aide.personal.recoverInterrupted();
+  assert.equal(aide.outputs().length, 1);
+});
+
+
+test("Lark thread replies preserve the original message endpoint through Output delivery", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-thread-output-"));
+  const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No inference"); } }, home), config: config() }, log);
+  const calls: unknown[][] = [];
+  const channel = new LarkChannel(home, "cli_work", aide, { start: async () => {}, close() {}, async send(...args) { calls.push(args); } }, log);
+  t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  const target = larkThreadAddress("cli_work", "oc_group", "om_original");
+  await seedInput(aide.topics, "thread-input", { topicId: "thread", origin: "channel", originId: "lark", source: target, text: "question" });
+  const receipt = await aide.topics.say("thread", "thread-input", "reply", undefined, { respondToInputId: "thread-input" });
+  await channel.deliver();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]![0], "oc_group");
+  assert.equal(calls[0]![4], "om_original");
+  assert.equal(aide.outputStore.get(receipt.outputId)!.status.phase, "delivered");
 });

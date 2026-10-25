@@ -34,6 +34,10 @@ export interface SayInput {
   /** Only a Channel Input establishes a direct reply path; observations require a separately chosen notification target. */
   readonly respondToInputId?: string;
   readonly target?: Address;
+  /** Aide is always the speaker; this selects the recipient, never an impersonation identity. */
+  readonly to?: { me: true } | { personId: string; uid: string };
+  /** Configured Channel for private Person contact; target selects an explicit group/address. */
+  readonly channelId?: string;
   /** Person references; explicit [] suppresses inference from respondToInputId's sender. */
   readonly receivers?: readonly ResourceRef[];
 }
