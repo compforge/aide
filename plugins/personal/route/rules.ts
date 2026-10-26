@@ -17,7 +17,7 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
   const input = (await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, ...original.metadata }))!;
   if (routed(input)) return true;
   if (input.spec.topicKey) {
-    const topic = await ensureSourceTopic(context.resources, input.spec.topicKey, input.spec.text);
+    const topic = await ensureSourceTopic(context.resources, input.spec.topicKey, input.spec.text, input.spec.topicName);
     await deliver(context, input, [topic.metadata], "Source topic key");
     return true;
   }
@@ -28,7 +28,7 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
     if (!topic && input.spec.origin === "channel") {
       try {
         topic = await context.resources.create(TOPIC_TYPE, { name: digest(input.spec.topicId),
-          spec: { id: input.spec.topicId, name: initialTopicName(input.spec.text), ...(input.spec.source ? { address: input.spec.source } : {}) },
+          spec: { id: input.spec.topicId, name: initialTopicName(input.spec.topicName || input.spec.text), ...(input.spec.source ? { address: input.spec.source } : {}) },
           status: { receipts: [], summary: "", recent: [] } });
       } catch (error) {
         if (!String(error).includes("resource already exists")) throw error;

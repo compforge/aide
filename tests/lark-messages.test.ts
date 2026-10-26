@@ -7,7 +7,7 @@ import { chiefTools } from "../agents/chief/chief-tools.ts";
 
 const config = { ...LarkMessagesConfigSchema.parse({ appId: "cli_app", userId: "ou_me" }), appId: "cli_app", userId: "ou_me" };
 const identity = { appId: "cli_app", identities: { user: { available: true, openId: "ou_me" } } };
-const row = { message_id: "om_one", chat_id: "oc_chat", content: "hello", create_time: "2026-10-20 07:37",
+const row = { message_id: "om_one", chat_id: "oc_chat", chat_name: "沙箱支持群", content: "hello", create_time: "2026-10-20 07:37",
   deleted: false, sender: { id: "ou_other", sender_type: "user", name: "Colleague" },
   mentions: [{ id: "ou_me", name: "Me" }], reply_to: "om_parent", thread_id: "omt_thread" };
 const query = { start: "2026-10-20T07:00:00Z", end: "2026-10-20T08:00:00Z" };
@@ -23,6 +23,7 @@ test("Lark Connector pins user identity, maps UTC compact rows, and preserves si
     await dispatchConnector(host, request) as T);
   const page = await client.messages.search({ ...query, chatType: "group", atMe: true, pageToken: "previous", limit: 2 });
   assert.equal(page.nextToken, "next");
+  assert.equal(page.messages[0]!.chatName, "沙箱支持群");
   assert.equal(page.messages[0]!.createdAt, "2026-10-20T07:37:00.000Z");
   assert.equal(page.messages[0]!.parentId, "om_parent");
   assert.deepEqual(page.messages[0]!.mentions, ["ou_me"]);
@@ -90,5 +91,16 @@ test("Lark sender filtering stays scoped through Connector IPC and rejects empty
   assert.ok(!search.includes("--is-at-me"));
   for (const senderIds of [[], ["--all"], ["ou_human,ou_other"]]) {
     assert.throws(() => host.messages.search({ ...query, senderIds }));
+  }
+});
+
+test("Missing chat names do not reject otherwise complete Lark messages", async () => {
+  for (const chat_name of [undefined, null, "", "  "]) {
+    const connector = new LarkMessages(config, async args => args[0] === "auth" ? identity : {
+      ok: true, identity: "user", data: { messages: [{ ...row, chat_name }], has_more: false },
+    });
+    const page = await connector.search(query);
+    assert.equal(page.messages[0]!.id, row.message_id);
+    assert.equal(page.messages[0]!.chatName, undefined);
   }
 });

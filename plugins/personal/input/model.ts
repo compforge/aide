@@ -15,6 +15,8 @@ export interface InputSpec {
    * @link docs/personal/input.md#内容身份与调度
    */
   topicKey?: string;
+  /** Suggested initial Topic name from the input adapter; does not select or rename an existing Topic. */
+  topicName?: string;
   /** Explicit Topic selection, e.g. the Web composer. Final binding is persisted in route.result. */
   topicId?: string;
   /** Scheduling urgency, independent of authority or notification intent. */

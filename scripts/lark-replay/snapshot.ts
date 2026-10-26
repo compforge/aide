@@ -3,7 +3,7 @@ import type { ChatMessage, MessageConnector, MessagePage, MessageQuery, MessageS
 
 const time = z.iso.datetime({ offset: true });
 const message = z.object({
-  id: z.string(), chatId: z.string(), threadId: z.string().optional(), parentId: z.string().optional(),
+  id: z.string(), chatId: z.string(), chatName: z.string().optional(), threadId: z.string().optional(), parentId: z.string().optional(),
   rootId: z.string().optional(), threadPosition: z.string().optional(),
   sender: z.object({ id: z.string(), type: z.string(), name: z.string().optional() }),
   content: z.string(), createdAt: time, updatedAt: time.optional(), mentions: z.array(z.string()),
@@ -123,8 +123,10 @@ export async function collectSnapshot(connector: MessageConnector, options: {
         for (const m of page.messages) {
           if (Date.parse(m.createdAt) > Date.parse(result.end)) continue;
           const previous = messages.get(m.id);
-          if (previous && JSON.stringify(previous) !== JSON.stringify(m)) throw new Error("Message changed during collection; recollect a stable snapshot");
-          messages.set(m.id, m); if (ids && !ids.includes(m.id)) ids.push(m.id);
+          if (previous && JSON.stringify({ ...previous, chatName: undefined }) !== JSON.stringify({ ...m, chatName: undefined }))
+            throw new Error("Message changed during collection; recollect a stable snapshot");
+          messages.set(m.id, { ...m, ...(previous?.chatName || m.chatName ? { chatName: previous?.chatName || m.chatName } : {}) });
+          if (ids && !ids.includes(m.id)) ids.push(m.id);
         }
         options.progress?.(operation, coverage.pages);
         if (!page.hasMore) { coverage.complete = true; return; }

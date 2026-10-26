@@ -401,7 +401,7 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   const sent: Array<{ chatId: string; text: string }> = [];
   const channelFor = () => new LarkChannel(root, "cli_app", aide, {
     botIdentity: { openId: "ou_bot", name: "Aide" },
-    async start() {}, close() {}, async send(chatId, text) { sent.push({ chatId, text }); },
+    async start() {}, close() {}, async chatName() { return undefined; }, async send(chatId, text) { sent.push({ chatId, text }); },
   }, pino({ level: "silent" }));
   let channel = channelFor();
   t.after(async () => { await channel.close(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
@@ -526,4 +526,25 @@ test("Missing explicit Me identities never enables a login-owner sent scan", asy
   await f.observe();
   assert.equal(f.inputs.list().length, 0);
   assert.equal(f.resource().status.scans!.some(scan => scan.kind === "sent"), false);
+});
+
+test("Lark Source freezes readable chat names and preserves them in compact model context", async t => {
+  const f = fixture(t);
+  const group = message("om_group_name", { chatId: "oc_group", chatName: "DBA 优化讨论", content: "@Me" });
+  const threaded = message("om_thread_name", { chatId: "oc_group", chatName: "DBA 优化讨论", threadId: "omt_named",
+    rootId: "om_root", content: "请看看" });
+  const direct = message("om_dm_name", { chatName: "李萌", mentions: [], sender: { id: "ou_me", type: "user" } });
+  f.incoming(async query => page(query.chatType === "p2p" ? [direct] : query.senderIds ? [] : [group, threaded]));
+  f.history([message("om_root", { threadId: "omt_named", content: "OB 查询优化" })]);
+  await f.observe();
+  const inputs = f.inputs.list();
+  const named = inputs.find(i => i.spec.observation?.originalMessageId === group.id)!;
+  assert.equal(named.spec.topicName, "DBA 优化讨论");
+  assert.equal(named.spec.topicKey, "lark:cli_app:oc_group");
+  assert.equal((named.spec.observation!.message as ChatMessage).chatName, group.chatName);
+  assert.match(inputPreview(named), /DBA 优化讨论/);
+  assert.equal(inputs.find(i => i.spec.observation?.originalMessageId === threaded.id)!.spec.topicName, "DBA 优化讨论 · OB 查询优化");
+  assert.equal(inputs.find(i => i.spec.observation?.originalMessageId === direct.id)!.spec.topicName, "李萌");
+  await f.restart(); await f.observe(now + 1000);
+  assert.equal(f.inputs.list().length, inputs.length);
 });

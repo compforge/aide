@@ -238,3 +238,31 @@ test("only Default routes repeated source inputs without invoking Route; channel
   assert.equal(aide.topics.input("new-chat", "default"), undefined);
   assert.equal(calls, 0);
 });
+
+test("Source names initialize Topics once; names never select a Topic or overwrite a Weave parent", async t => {
+  const { aide } = setup(t);
+  const ctx = context(aide);
+  const make = (id: string, topicKey: string, topicName?: string) => aide.topics.submit(id, {
+    origin: "source", originId: "personal.lark", topicKey, ...(topicName ? { topicName } : {}), text: "Lark 群内 @：@Me",
+  });
+  const one = await make("named-one", "lark:app:oc_one", "DBA 优化讨论");
+  await Promise.all([routeByRules(ctx, one), routeByRules(ctx, one)]);
+  let topic = aide.topics.byKey(one.spec.topicKey!)!;
+  assert.equal(topic.spec.name, "DBA 优化讨论");
+  const other = await make("named-other", "lark:app:oc_other", "DBA 优化讨论");
+  await routeByRules(ctx, other);
+  assert.notEqual(aide.topics.byKey(other.spec.topicKey!)!.metadata.uid, topic.metadata.uid);
+  const parent = await aide.topics.ensure("parent", undefined, "数据库性能治理");
+  topic = await ctx.resources.replace(topic, { ...topic.spec, name: "已整理的主题", parentRef: {
+    apiVersion: parent.apiVersion, kind: parent.kind, namespace: parent.metadata.namespace,
+    name: parent.metadata.name, uid: parent.metadata.uid,
+  } }, topic.status);
+  const later = await make("named-later", one.spec.topicKey!, "群的新名称");
+  await routeByRules(ctx, later);
+  assert.equal(aide.topics.byKey(one.spec.topicKey!)!.spec.name, "已整理的主题");
+  assert.equal(aide.topics.resource("parent")!.spec.name, "数据库性能治理");
+  assert.equal(aide.topics.byKey(one.spec.topicKey!)!.metadata.uid, topic.metadata.uid);
+  const fallback = await make("unnamed", "lark:app:oc_unnamed");
+  await routeByRules(ctx, fallback);
+  assert.equal(aide.topics.byKey(fallback.spec.topicKey!)!.spec.name, fallback.spec.text);
+});

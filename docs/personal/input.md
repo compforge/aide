@@ -10,7 +10,8 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 | origin、originId、originRef | Channel / Source / Chief 分类、来源定义与可选观察资源引用 |
 | sender、relation | 可选的 Person，以及输入相对于 Me 的关系 |
 | source | 可选 Address，表示事情发生或可以联络的位置 |
-| sessionId | 上游提供的话题共性，由路由规则解释 |
+| topicId、topicKey | TopicLocator 提供的精确 Topic ID 或稳定来源关联键 |
+| topicName | 来源提供的初始名称建议；不参与匹配，不覆盖既有 Topic 名称 |
 | attention | immediate 或 deferred，表达处理紧迫性 |
 
 字段的完整类型与必选性见 [InputSpec](../../plugins/personal/input/model.ts)。人物、地址、话题线索和调度分别回答不同问题；紧迫性、来源和 relation 都不自动授予执行权限或要求外发。

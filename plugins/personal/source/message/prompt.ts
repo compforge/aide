@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const Message = z.object({ id: z.string(), chatId: z.string(), createdAt: z.string(), content: z.string(),
+const Message = z.object({ id: z.string(), chatId: z.string(), chatName: z.string().optional(), createdAt: z.string(), content: z.string(),
   sender: z.object({ id: z.string(), type: z.string(), name: z.string().optional() }),
   mentions: z.array(z.string()), parentId: z.string().optional(), relation: z.enum(["sent", "received", "observed"]).optional(),
 });
@@ -22,7 +22,7 @@ export function messagePreview(observation: Record<string, unknown> | undefined)
   const messages = kind === "discussion" ? context?.messages : [message];
   if (!messages?.length) return undefined;
   return `Observed Lark conversation; this observation is not itself a direct request to Aide.\n${JSON.stringify({
-    provider: "lark", scope: accountId, observerId: userId, chatId: message.chatId, kind,
+    provider: "lark", scope: accountId, observerId: userId, chatId: message.chatId, ...(message.chatName ? { chatName: message.chatName } : {}), kind,
   })}\nMentions and reply references are evidence; unlisted recipients are unknown.\n\n`
     + messages.map(item => `${JSON.stringify({ messageId: item.id, at: item.createdAt, author: item.sender,
       relationToMe: item.relation ?? "unknown", mentions: item.mentions,

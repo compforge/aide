@@ -28,7 +28,7 @@ const iso = (n: number) => new Date(n).toISOString();
  * @link docs/connector/requirements.md
  */
 class RequirementObservation implements TopicLocator<RequirementIdentity> {
-  locate(_identity: RequirementIdentity) { return { kind: "key" as const, key: this.resource.spec.topicKey }; }
+  locate(_identity: RequirementIdentity) { return { selector: { kind: "key" as const, key: this.resource.spec.topicKey } }; }
   private readonly persons: Persons;
   private account!: RequirementAccount;
   private me: Me = { identities: [] };
@@ -66,7 +66,7 @@ class RequirementObservation implements TopicLocator<RequirementIdentity> {
     return relationToPerson(this.me, { ...(author ? { author: identity(author) } : {}), recipients: recipients.map(identity), observer });
   }
   private base(identity: RequirementIdentity): SourceInput {
-    return { topicKey: this.locate(identity).key, source: requirementAddress(identity, this.account.scope), text: "", attention: "deferred" };
+    return { topicKey: this.locate(identity).selector.key, source: requirementAddress(identity, this.account.scope), text: "", attention: "deferred" };
   }
   private async snapshot(item: RequirementSummary & { description?: string }) {
     const key = keyOf(item), previous = this.tracked[key];

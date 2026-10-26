@@ -22,7 +22,7 @@ function fakeTransport(botIdentity?: LarkTransport["botIdentity"]) {
   const sent: { chatId: string; text: string; id: string }[] = [];
   const transport: LarkTransport = {
     botIdentity,
-    async start() {}, close() {},
+    async start() {}, close() {}, async chatName() { return undefined; },
     async send(chatId, text, id) { sent.push({ chatId, text, id }); },
   };
   return { transport, sent };
@@ -164,6 +164,8 @@ test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats a
     async execute() { throw new Error("No Work expected"); },
   }, home, [], home, "cli_group"), log);
   const { transport, sent } = fakeTransport({ openId: "ou_aide", name: "Aide" });
+  const lookups: string[] = [];
+  transport.chatName = async chatId => { lookups.push(chatId); return chatId === "oc_group" ? "沙箱支持群" : "另一支持群"; };
   let channel = new LarkChannel(home, "cli_group", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const group = (id: string, text: string, chatId = "oc_group", mentions = [
@@ -181,10 +183,16 @@ test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats a
   await channel.receive(group("om_other_group", "@_user_1 检查另一个群", "oc_other_group"));
   await channel.receive(event("om_direct", "检查单聊", "oc_direct"));
   // Pending group input and its cleaned text survive restart before Chief executes it.
+  assert.deepEqual(lookups, [], "Durable receipt must precede network metadata lookup");
   await channel.close(); channel = new LarkChannel(home, "cli_group", aide, transport, log);
   await channel.receive(addressed);
   await channel.dispatch(); await aide.settled(); await channel.deliver();
   assert.equal(prompts.length, 3);
+  assert.deepEqual(lookups, ["oc_group", "oc_other_group"]);
+  const namedTopic = aide.topics.byKey("lark:cli_group:oc_group")!;
+  assert.equal(namedTopic.spec.name, "沙箱支持群");
+  assert.equal(aide.topics.get(namedTopic.spec.id)!.name, "沙箱支持群");
+  assert.ok(prompts.some(prompt => prompt.includes("沙箱支持群")));
   assert.ok(prompts.some((prompt) => prompt.includes("看下 @小王 的需求")));
   assert.ok(prompts.every((prompt) => JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!).inputs
     .some((input: { description: string }) => input.description.includes('"assistant":{"id":"ou_aide","name":"Aide"}'))),
@@ -202,6 +210,8 @@ test("Lark persists thread topics while cards and failure notices retain the rea
   const home = mkdtempSync(join(tmpdir(), "aide-lark-threads-"));
   const received: Incoming[] = [], queried: string[] = [], cardChats: string[] = [];
   const { transport, sent } = fakeTransport({ openId: "ou_bot", name: "Aide" });
+  let nameReads = 0;
+  transport.chatName = async () => { nameReads++; return "支持群"; };
   transport.cards = {
     async create() { return "card"; }, async send(chatId) { cardChats.push(chatId); },
     async content() {}, async patch() {}, async settings() {}, async update() {},
@@ -237,6 +247,9 @@ test("Lark persists thread topics while cards and failure notices retain the rea
     "lark:cli_app:oc_group", "lark:cli_app:oc_group:thread:omt_a", "lark:cli_app:oc_dm",
   ]);
   assert.equal(received[0]!.observation!.threadId, "omt_a");
+  assert.equal(received[0]!.topicName, "支持群 · check");
+  assert.equal(received[2]!.topicName, "支持群");
+  assert.equal(nameReads, 1, "Same-chat metadata is cached independently of thread keys");
   assert.deepEqual(new Set(queried), new Set([
     "lark:cli_app:oc_group:thread:omt_a", "lark:cli_app:oc_group:thread:omt_b",
     "lark:cli_app:oc_group", "lark:cli_app:oc_dm",
@@ -385,4 +398,27 @@ test("Lark receipt failures do not block later replies; restart retries receipts
   channel = new LarkChannel(home, "cli_test", aide, transport, log);
   await channel.deliver();
   assert.ok(receipts.includes("first")); assert.equal(sent.length, 2);
+});
+
+test("Chat name lookup failures keep group intake available and never expose SDK errors", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-name-failure-"));
+  const received: Incoming[] = [], entries: string[] = [];
+  let reads = 0;
+  const { transport } = fakeTransport({ openId: "ou_bot", name: "Aide" });
+  transport.chatName = async () => { reads++; throw new Error("secret credentials"); };
+  const channel = new LarkChannel(home, "cli_names", {
+    async receive(input) { received.push(input); return { inputId: input.id, at: new Date().toISOString() }; }, outputs: () => [],
+  }, transport, pino({ level: "warn" }, { write(line) { entries.push(line); } }));
+  t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
+  for (const id of ["one", "two"]) {
+    const incoming = event(id, "@_user_1 hello");
+    await channel.receive({ ...incoming, message: { ...incoming.message, chat_type: "group",
+      mentions: [{ key: "@_user_1", id: { open_id: "ou_bot" }, name: "Aide" }] } });
+  }
+  await channel.dispatch();
+  assert.equal(reads, 1); assert.equal(received.length, 2);
+  assert.ok(received.every(input => input.topicName === undefined && input.text === "hello"));
+  assert.equal(entries.length, 1);
+  assert.match(entries[0]!, /chat name unavailable/);
+  assert.doesNotMatch(entries[0]!, /secret credentials/);
 });

@@ -18,6 +18,7 @@ export interface LarkCardTransport {
 export interface LarkTransport {
   readonly botIdentity?: Lark.BotIdentity;
   cards?: LarkCardTransport;
+  chatName(chatId: string): Promise<string | undefined>;
   start(receive: (event: unknown) => void | Promise<void>): Promise<void>;
   send(receiveId: string, text: string, id: string, receiveIdType?: "chat_id" | "open_id", replyToMessageId?: string): Promise<void>;
   close(): void;
@@ -77,6 +78,11 @@ export function larkTransport(config: LarkConfig, log: Logger): LarkTransport {
   });
   return {
     get botIdentity() { return botIdentity; },
+    async chatName(chatId) {
+      const response = await client.im.chat.get({ path: { chat_id: chatId } });
+      if (response.code !== 0) throw new Error(`Lark chat.get failed (code ${response.code ?? "missing"})`);
+      return response.data?.name?.trim() || undefined;
+    },
     async start(receive) {
       try {
         const response = await client.request<{ code?: number; bot?: { open_id?: string; app_name?: string } }>({

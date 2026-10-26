@@ -6,7 +6,7 @@ import { messagePreview } from "../source/message/prompt.ts";
 import { SOURCES } from "../source/definition.ts";
 
 const LarkParticipants = z.object({ provider: z.literal("lark"), accountId: z.string(),
-  chatId: z.string(), chatType: z.string(), sender: z.object({ id: z.string().optional(), type: z.string() }),
+  chatId: z.string(), chatName: z.string().optional(), chatType: z.string(), sender: z.object({ id: z.string().optional(), type: z.string() }),
   assistant: z.object({ id: z.string(), name: z.string() }).optional(), mentions: z.array(z.string()),
 });
 

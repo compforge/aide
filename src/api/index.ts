@@ -186,8 +186,8 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         log.info({ messageId, kind: result.kind, completed: completed }, "Native approval response");
         json(response, completed ? 200 : 409, { completed: completed });
       } else if (request.method === "POST" && url.pathname === "/messages") {
-        const input = IncomingSchema.omit({ channelId: true, observation: true, source: true, topicKey: true }).extend({ topicId: z.string().min(1) }).parse(await body(request));
-        const topicId = webTopicLocator.locate(input).id;
+        const input = IncomingSchema.omit({ channelId: true, observation: true, source: true, topicKey: true, topicName: true }).extend({ topicId: z.string().min(1) }).parse(await body(request));
+        const topicId = webTopicLocator.locate(input).selector.id;
         json(response, 200, await receive({ ...input, topicId, source: webAddress(topicId) }));
       } else if (request.method === "POST" && url.pathname === "/topics/trigger") {
         const { topicId, enabled } = TopicTriggerSchema.parse(await body(request));

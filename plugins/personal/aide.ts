@@ -385,7 +385,7 @@ export class Personal {
         // A mention has no subject type; it may identify the bot rather than a person.
       }
     }
-    const fact = await this.topics.submit(id, { attention: "immediate", topicKey: input.topicKey, topicId: input.topicId, text: input.text, timezone: this.options.timezone,
+    const fact = await this.topics.submit(id, { attention: "immediate", topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
       origin: "channel", originId: input.channelId, source: input.source, ...(sender ? { sender } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });
     return fact;
