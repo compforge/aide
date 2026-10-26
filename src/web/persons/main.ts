@@ -23,6 +23,7 @@ function hasUnsavedChanges() {
   return dirty || saving || (editingSummary && $<HTMLTextAreaElement>('person-summary').value !== selected.status.summary);
 }
 function renderList() {
+  $('person-count').textContent = String(people.length);
   $('person-list').replaceChildren();
   const query = $<HTMLInputElement>('person-search').value.trim().toLowerCase();
   const result = personPage(people, query, requestedPage, selected?.metadata.name ?? initialId);

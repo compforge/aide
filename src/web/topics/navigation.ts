@@ -140,6 +140,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
   }
   function renderTopics(topics: TopicItem[]) {
     topicItems = topics;
+    $('topic-count').textContent = String(topics.length);
     const ancestry = new Map(topics.map(t => [t.uid, t]));
     let parent = topics.find(t => t.id === topicId)?.parentUid;
     const visited = new Set<string>();
