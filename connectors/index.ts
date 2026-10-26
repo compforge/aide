@@ -26,7 +26,7 @@ export class Connectors implements ConnectorClient {
       comments: (identity, query) => this.requirement(identity.source).comments(identity, query),
     } satisfies ConnectorClient["requirements"]);
     this.forges = Object.freeze({
-      discover: (forge, query) => this.forge(forge).discover(query),
+      readPullRequests: (forge, query) => this.forge(forge).readPullRequests(query),
       list: (forge, path, query) => this.forge(forge).list(path, query),
       get: (reference) => this.forge(reference.repository.forge.name).get(reference),
       comments: (reference) => this.forge(reference.repository.forge.name).comments(reference),

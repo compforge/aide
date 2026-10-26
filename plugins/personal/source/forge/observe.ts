@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import type { ConnectorClient, PluginContext, PullRequestKey, Resource } from "@compforge/aide-plugin";
+import type { ConnectorClient, PluginContext, PullRequestObservation, Resource } from "@compforge/aide-plugin";
 import { digest, INPUT_TYPE } from "../../chief-model.ts";
 import { bindSourceInput, type SourceInput } from "../input.ts";
 import { SOURCES } from "../definition.ts";
@@ -13,11 +13,10 @@ export type { ForgeSourceStatus } from "./state.ts";
 type Context = Pick<PluginContext, "resources" | "logger">;
 type Source = Resource<ForgeWatch, ForgeSourceStatus>;
 const iso = (n: number) => new Date(n).toISOString();
-const BATCH_SIZE = 5;
 
 /**
  * @spec A frozen observation and Input are durable before its baseline advances. Repeated transitions keep separate occurrence IDs.
- * @spec Tracked open PRs are read directly, so merging out of an open inventory cannot hide their terminal transition.
+ * @spec The repocli cursor advances only after all frozen PullRequest facts have been consumed; platform discovery belongs to the reader.
  * @link docs/connector/forge.md
  * @case tests/forge-source.test.ts
  */
@@ -38,10 +37,8 @@ class ForgeObservation {
     await this.save({ tracked: { ...this.tracked, [plan.key]: plan.entry }, pending: null });
     this.context.logger.info("Forge change admitted as Input", { attributes: { watchId: this.resource.spec.id, inputId: plan.name, forge: plan.entry.snapshot.repository.forge.name, path: plan.entry.snapshot.repository.path, number: plan.entry.snapshot.number, state: plan.entry.snapshot.state } });
   }
-  private async observe({ repository, number }: PullRequestKey) {
-    const identity = { repository, number };
-    const snapshot = await this.connectors.forges.get(identity);
-    if (keyOf(snapshot) !== keyOf(identity)) throw new Error("Forge returned a different PR identity");
+  private async observe(snapshot: PullRequestObservation) {
+    const identity = { repository: snapshot.repository, number: snapshot.number };
     const key = keyOf(identity), previous = this.tracked[key];
     const observedFingerprint = fingerprint(snapshot);
     if (previous?.fingerprint === observedFingerprint) return;
@@ -56,50 +53,40 @@ revision：${previous?.snapshot.headSha ?? "未知"} → ${snapshot.headSha ?? "
     const spec: SourceInput = { topicKey: `forge:${key}`, topicName: `${identity.repository.path} #${identity.number}`.slice(0, 80), relation: "observed", attention: "deferred",
       text: `PR/MR ${identity.repository.forge.name}/${identity.repository.path} #${identity.number}：${snapshot.title}
 ${change}${revision}${review}
-评审线程：${snapshot.reviewThreads}；合并条件：${snapshot.mergeability}
+评审线程：${snapshot.reviewThreads}；代码冲突：${snapshot.conflictState}；合并条件：${snapshot.mergeReadiness}
 ${snapshot.url}`.slice(0, 32_000),
       observation: { kind: previous ? "forge.changed" : "forge.discovered", pullRequest: snapshot,
         ...(previous ? { previous: previous.snapshot } : {}), authorScope: this.resource.spec.author } };
     await this.save({ sequence, pending: { name, key, spec, entry } });
     await this.deliver();
   }
-  private async discover() {
-    let scan = this.resource.status.scan;
-    if (!scan) {
-      const { initialized, scannedThrough } = this.resource.status;
-      scan = { query: { author: this.resource.spec.author, state: initialized ? "all" : "open", updatedBefore: this.now,
-        ...(initialized ? { updatedAfter: scannedThrough ? iso(Date.parse(scannedThrough) - 60_000) : iso(Date.parse(this.now) - this.resource.spec.initialLookbackMs) } : {}) }, offset: 0 };
-      await this.save({ scan });
+  private async read() {
+    if (this.resource.status.batch) return;
+    if (!this.resource.status.since && !this.resource.status.cursor) {
+      await this.save({ since: iso(Date.parse(this.now) - this.resource.spec.initialLookbackMs) });
     }
-    if (!scan.page) {
-      const page = await this.connectors.forges.discover(this.resource.spec.forge, scan.query);
-      if (page.nextCursor && page.nextCursor === scan.query.cursor) throw new Error("Forge discovery pagination did not advance");
-      if (page.items.some(i => i.repository.forge.name !== this.resource.spec.forge)) throw new Error("Forge discovery returned a foreign identity");
-      scan = { ...scan, page }; await this.save({ scan });
-    }
-    const end = Math.min(scan.page!.items.length, scan.offset + BATCH_SIZE);
-    while (scan.offset < end) {
-      await this.observe(scan.page!.items[scan.offset]!);
-      scan = { ...scan, offset: scan.offset + 1 }; await this.save({ scan });
-    }
-    if (scan.offset < scan.page!.items.length) return;
-    if (scan.page!.nextCursor) await this.save({ scan: { query: { ...scan.query, cursor: scan.page!.nextCursor }, offset: 0 } });
-    else if (scan.query.state === "open") await this.save({ initialized: true, scan: null });
-    else await this.save({ scannedThrough: scan.query.updatedBefore, scan: null });
+    const result = await this.connectors.forges.readPullRequests(this.resource.spec.forge, {
+      author: this.resource.spec.author, cursor: this.resource.status.cursor, since: this.resource.status.since,
+      tracked: [...Object.values(this.tracked).filter(entry => entry.snapshot.state === "open").map(entry => entry.snapshot),
+        ...(this.resource.status.seed ?? [])],
+    });
+    // Freeze facts and the proposed cursor before any Input is admitted.
+    await this.save({ batch: { result, offset: 0 } });
   }
-  private async refresh() {
-    const status = this.resource.status;
-    if (!status.refreshAfter && status.refreshedAt && Date.parse(this.now) - Date.parse(status.refreshedAt) < this.resource.spec.intervalMs) return;
-    const keys = Object.keys(this.tracked).filter(key => this.tracked[key]!.snapshot.state === "open" && (!status.refreshAfter || key > status.refreshAfter)).sort();
-    const batch = keys.slice(0, BATCH_SIZE);
-    const errors: string[] = [];
-    for (const key of batch) {
-      try { await this.observe(this.tracked[key]!.snapshot); }
-      catch (error) { if (this.resource.status.pending) throw error; errors.push(`${key}: ${String(error)}`); }
-      await this.save({ refreshAfter: key });
+  private async consume() {
+    let batch = this.resource.status.batch!;
+    while (batch.offset < batch.result.items.length) {
+      await this.observe(batch.result.items[batch.offset]!);
+      batch = { ...batch, offset: batch.offset + 1 };
+      await this.save({ batch });
     }
-    if (keys.length <= BATCH_SIZE) await this.save({ refreshAfter: null, refreshedAt: this.now });
-    if (errors.length) throw new Error(errors.join("; "));
+    const { result } = batch;
+    const consumed = new Set(result.items.map(keyOf));
+    const remaining = (this.resource.status.seed ?? []).filter(key => !consumed.has(keyOf(key)));
+    await this.save({ cursor: result.cursor, readPending: result.pending, batch: null,
+      // A partial batch cannot discharge other legacy references, including failed terminal reads.
+      seed: remaining.length ? remaining : null, error: result.errors.join("; ") || null });
+    if (result.errors.length) throw new Error(result.errors.join("; "));
   }
   async run() {
     const upgraded = upgradeCheckpoint(this.resource.status);
@@ -108,16 +95,13 @@ ${snapshot.url}`.slice(0, 32_000),
       this.context.logger.info("Forge checkpoint upgraded to shared PR facts", { attributes: { watchId: this.resource.spec.id } });
     }
     await this.deliver();
-    const errors: string[] = [];
-    try { await this.discover(); } catch (error) { if (this.resource.status.pending) throw error; errors.push(String(error)); }
-    // Discovery failure must not prevent already-known PRs from reaching merged/closed.
-    try { await this.refresh(); } catch (error) { errors.push(String(error)); }
-    if (errors.length) throw new Error(`Forge observation incomplete: ${errors.join("; ")}`);
+    await this.read();
+    await this.consume();
     const cutoff = Date.parse(this.now) - this.resource.spec.initialLookbackMs;
     const tracked = Object.fromEntries(Object.entries(this.tracked).filter(([, entry]) => !entry.terminalAt || Date.parse(entry.terminalAt) >= cutoff));
     await this.save({ tracked, lastObservedAt: this.now, error: null });
     this.context.logger.info("Forge observation completed", { attributes: { watchId: this.resource.spec.id, forge: this.resource.spec.forge,
-      author: this.resource.spec.author, tracked: Object.keys(tracked).length, scanPending: Boolean(this.resource.status.scan) } });
+      author: this.resource.spec.author, tracked: Object.keys(tracked).length, readPending: Boolean(this.resource.status.readPending) } });
   }
 }
 export async function observeForge(context: Context, resource: Source, connectors: ConnectorClient, now = new Date().toISOString()) {
@@ -139,7 +123,7 @@ export function registerForgeSources(context: PluginContext) {
         if (current && current.metadata.uid === resource.metadata.uid) await context.resources.patchStatus(current, { error: error instanceof Error ? error.message : String(error) });
       }
       const latest = await context.resources.get<ForgeWatch, ForgeSourceStatus>({ ...FORGE_SOURCE_TYPE, ...resource.metadata });
-      const pending = latest?.status.scan || latest?.status.pending || latest?.status.refreshAfter || !latest?.status.scannedThrough;
+      const pending = latest?.status.batch || latest?.status.pending || latest?.status.readPending || !latest?.status.cursor;
       return { requeueAfterMs: pending && !latest?.status.error ? 1000 : resource.spec.intervalMs };
     },
   });
