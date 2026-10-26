@@ -1,7 +1,10 @@
+import { discoveryAuthor, discoveryPage, nextPage } from "./discovery.ts";
 import type {
   Comment,
   ForgeConnector,
   PullRequestIdentity,
+  PullRequestDiscoveryQuery,
+  PullRequestPage,
   PullRequestListQuery,
   PullRequestLifecycle,
   PullRequestMergeability,
@@ -100,6 +103,30 @@ export class GitHubForgeConnector implements ForgeConnector {
     this.#now = options.now ?? (() => new Date());
   }
 
+  async discover(query: PullRequestDiscoveryQuery): Promise<PullRequestPage> {
+    const page = discoveryPage(query);
+    if (page > 20) throw new Error("GitHub discovery exceeds the 1000-result search window");
+    const end = new Date(query.updatedBefore).toISOString();
+    const window = query.updatedAfter ? `${new Date(query.updatedAfter).toISOString()}..${end}` : `<=${end}`;
+    const q = `is:pr author:${query.author} updated:${window}${query.state === "open" ? " is:open" : ""}`;
+    const { data, headers } = await this.#http.request("GET", `${this.#restBase}/search/issues?${new URLSearchParams({ q, sort: "updated", order: "asc", per_page: "50", page: String(page) })}`, { headers: this.#headers() });
+    const result = record("GitHub PR discovery", data);
+    if (result.incomplete_results !== false || !Number.isSafeInteger(result.total_count) || Number(result.total_count) > 1000) {
+      throw new Error("GitHub PR discovery incomplete or exceeds 1000 results; checkpoint retained");
+    }
+    const items = records("GitHub PR discovery items", result.items).map(row => {
+      const repository = nonEmptyString("GitHub discovery repository_url", row.repository_url);
+      const prefix = `${this.#restBase}/repos/`;
+      if (!repository.startsWith(prefix) || !row.pull_request || !Number.isSafeInteger(row.number) || Number(row.number) < 1) throw new Error("Invalid GitHub PR discovery identity");
+      const path = repository.slice(prefix.length);
+      repositoryPath(path);
+      if (!discoveryAuthor(row.user, "login", query.author)) throw new Error("GitHub discovery returned another author's PR");
+      return { forge: this.forge, path, number: Number(row.number) };
+    });
+    const cursor = nextPage(headers, page, "github");
+    return { items, ...(cursor ? { nextCursor: cursor } : {}) };
+  }
+
   async list(
     path: string,
     query: PullRequestListQuery,
@@ -195,6 +222,10 @@ export class GitHubForgeConnector implements ForgeConnector {
       reviewThreads,
       ...(reviewActivity ? { reviewActivityKey: reviewActivity } : {}),
       mergeability: mergeability(pullRequest),
+      ...(typeof (pullRequest.head as Record<string, unknown> | undefined)?.sha === "string" ? { headSha: (pullRequest.head as Record<string, string>).sha } : {}),
+      ...(typeof (pullRequest.base as Record<string, unknown> | undefined)?.sha === "string" ? { baseSha: (pullRequest.base as Record<string, string>).sha } : {}),
+      ...(typeof pullRequest.updated_at === "string" ? { updatedAt: pullRequest.updated_at } : {}),
+      ...(typeof pullRequest.merged_at === "string" ? { mergedAt: pullRequest.merged_at } : {}),
       observedAt: this.#now().toISOString(),
     };
   }

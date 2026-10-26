@@ -1,3 +1,4 @@
+import { ForgeWatchSchema } from "./source/forge/config.ts";
 import { WeavePolicySchema } from "./weave/config.ts";
 import { RoutinePolicySchema } from "./routine/config.ts";
 import { TaskPolicySchema } from "./task/config.ts";
@@ -24,6 +25,7 @@ export const PersonalConfigSchema = z.object({
     environments: EnvironmentWatchSchema.optional(),
     lark: MessageWatchSchema.optional(),
     requirements: z.array(WatchSchema).default([]),
+    forges: z.array(ForgeWatchSchema).default([]),
   }).strict().prefault({}),
 }).strict();
 

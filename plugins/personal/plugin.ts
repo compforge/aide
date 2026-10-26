@@ -1,3 +1,4 @@
+import { registerForgeSources } from "./source/forge/observe.ts";
 import { registerWeave } from "./weave/reconcile.ts";
 import type { PluginPackage } from "@compforge/aide-plugin";
 import { registerTopics } from "./topic/reconcile.ts";
@@ -17,6 +18,7 @@ const plugin: PluginPackage = {
     registerRoute(context);
     registerTopics(context);
     registerSources(context);
+    registerForgeSources(context);
     registerMessageSources(context);
     registerEnvironmentSources(context);
     registerTasks(context);

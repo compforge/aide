@@ -14,7 +14,7 @@ import { fakeOptions } from "./fake-harness.ts";
 const agent = { async execute(): Promise<never> { throw new Error("Unexpected work"); } };
 
 test("Personal sources use one strict namespace, explicit scopes and no Lark kinds", () => {
-  assert.deepEqual(parsePersonalConfig(), { sources: { requirements: [] } });
+  assert.deepEqual(parsePersonalConfig(), { sources: { requirements: [], forges: [] } });
   const policy = parsePersonalConfig({ sources: { lark: {}, environments: { targets: [] }, requirements: [] } });
   assert.equal(policy.sources.lark!.intervalMs, 60_000);
   assert.deepEqual(policy.sources.environments!.targets, []);
@@ -38,6 +38,7 @@ test("Startup rejects Source references without matching Connectors before openi
   const configFile = join(root, "config.yaml");
   for (const sources of [
     { lark: {} },
+    { forges: [{ id: "mine", forge: "missing", author: "me" }] },
     { environments: { targets: [{ environment: "missing", namespaces: ["app"] }] } },
     { requirements: [{ id: "mine", source: "missing", userKeys: ["me"] }] },
   ]) {

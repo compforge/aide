@@ -11,7 +11,7 @@ Host 装配统一客户端并持有凭证，Runner 经类型化 API 查询。平
 | [环境](environments.md) | 环境声明、Kubernetes Workload 采样、变化基线 |
 | [Lark 消息](lark-messages.md) | 用户身份读取、单聊与群内 @、可选上下文与短期跟进 |
 | [需求平台](requirements.md) | 需求及评论观察、人物识别、评论投递与回读 |
-| Forge | GitHub / GitLab PR 与评论的按需查询，目前没有定时 Source |
+| [Forge](forge.md) | GitHub / GitLab PR 按需查询、按账号跨仓库观察状态与 revision 变化 |
 
 Lark 用户消息观察与 [机器人 Channel](../channel/lark.md) 使用不同身份和入口，分别配置。总体字段优先级见 [配置](../configuration.md)。
 

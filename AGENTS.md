@@ -84,6 +84,7 @@ plugins/personal/
       config.ts            # Lark 消息观察与跟进策略
       observe.ts           # 单聊、群内 @ 与本人发言观察、水位和短期讨论跟进
       context.ts           # IM 有界上下文、话题根消息与缺口
+    forge/                 # ForgeSource：账号范围发现、状态/revision 变化与持久 Input
     requirement/           # RequirementSource
       config.ts            # 需求观察范围与配置校验
       observe.ts           # 需求观察、水位和调度
@@ -144,7 +145,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - [Chief](docs/personal/chief.md)：判断、提示词、上下文与记忆优化；[Person](docs/personal/person.md)、[Task](docs/personal/task.md)、[Routine](docs/personal/routine.md)。
 - [Harness](docs/harness/README.md)、[Pi](docs/harness/pi.md)：通用执行契约与原生适配。
 - [Channel](docs/channel/README.md)：[Web](docs/channel/web.md)、[Lark](docs/channel/lark.md)。
-- [Connector 与 Source](docs/connector/README.md)：[环境](docs/connector/environments.md)、[Lark 消息](docs/connector/lark-messages.md)、[需求平台](docs/connector/requirements.md)。
+- [Connector 与 Source](docs/connector/README.md)：[Forge](docs/connector/forge.md)、[环境](docs/connector/environments.md)、[Lark 消息](docs/connector/lark-messages.md)、[需求平台](docs/connector/requirements.md)。
 - [配置](docs/configuration.md)、[部署与诊断](docs/deployment.md)、[真实验收](docs/e2e.md)。
 
 ## 定向验证
