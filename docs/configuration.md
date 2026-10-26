@@ -325,3 +325,7 @@ harnesses:
 ```
 
 周期扫描使用有界候选、搜索和认识指纹；达到根数量阈值且目录变化时提前整理。一次最多组织 8 个 root，只创建一个新父节点。静默优先级来自 lastInputAt，分组和摘要更新不刷新活动时间。具体交接、锁与回收见 [Topic](personal/topic.md)。
+
+## Observation
+
+`observation.captureRequests` 控制 Pi 请求补录，默认关闭。原生 Session 可直接导出；补录的单 Session 和总磁盘预算、查看与导出入口见 [Observation](observation.md)。

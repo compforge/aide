@@ -1,3 +1,4 @@
+import { agentCall } from "../observation/reference.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import type { ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
@@ -14,7 +15,7 @@ export type AssessInput = z.input<typeof AssessInputSchema>;
  * @spec Assessment does not update Topic summary/recent; meaningful understanding is maintained explicitly.
  * @link docs/personal/chief.md
  */
-export async function assessInput(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown) {
+export async function assessInput(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, toolCallId?: string) {
   const args = AssessInputSchema.parse(raw);
   if (new Set(args.workRequests.map(r => r.workUid)).size !== args.workRequests.length) throw new Error("Duplicate Work request");
   for (let n = 0; ; n++) {
@@ -42,7 +43,7 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
       await resources.commit([
         ...guards,
         { operation: "patchStatus", resource: input, patch: { handle, assess: { ...input.status.assess, [c.metadata.uid]: {
-          ...assessment, completedAt: at, result: { summary: args.summary, disposition: "completed" } } } } },
+          ...assessment, ...(toolCallId ? { completedBy: agentCall(c.status, toolCallId) } : {}), completedAt: at, result: { summary: args.summary, disposition: "completed" } } } } },
         // Guard the owning execution/version without turning every receipt into durable topic understanding.
         { operation: "patchStatus", resource: c, patch: {} },
       ]);

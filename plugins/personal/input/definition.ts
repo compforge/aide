@@ -1,3 +1,5 @@
+import { AgentStatusSchema } from "../session.ts";
+import { AgentCallSchema } from "../observation/reference.ts";
 import { WorkInputRequestSchema } from "../model.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
@@ -16,7 +18,7 @@ export const InputSpecSchema = z.object({ source: AddressSchema.optional(), topi
   observation: z.record(z.string(), z.unknown()).optional() }).strict();
 
 const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict();
-const attempt = z.object({ executionId: z.string().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(), lastError: z.string().optional() }).strict();
+const attempt = z.object({ agent: AgentStatusSchema.optional(), completedBy: AgentCallSchema.optional(), executionId: z.string().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(), lastError: z.string().optional() }).strict();
 const assessment = attempt.extend({ resource: ref, assignedAt: z.string(), result: z.object({ summary: z.string(), disposition: z.enum(["completed", "cancelled", "rejected"]).optional() }).strict().optional() });
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   type: INPUT_TYPE,

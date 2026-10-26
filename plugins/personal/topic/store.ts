@@ -1,3 +1,4 @@
+import { agentCall } from "../observation/reference.ts";
 import { ensureDefaultTopic } from "./default.ts";
 import { topicSubtree } from "./tree.ts";
 import { resourceRef } from "../input/state.ts";
@@ -120,7 +121,7 @@ export class TopicStore {
     }
   }
   async say(topicId: string, inputId: string | undefined, text: string, executionId?: string,
-    options: Omit<SayInput, "text"> = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { execution?: { id: string } | null }>): Promise<SayReceipt> {
+    options: Omit<SayInput, "text"> = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { agent?: import("@compforge/aide-plugin").AgentStatus; execution?: { id: string } | null }>): Promise<SayReceipt> {
     const initial = await this.ensure(topicId);
     const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
     const previous = this.outputStore.get(id);
@@ -187,13 +188,14 @@ export class TopicStore {
       const c = this.resource(topicId);
       if (!c || c.metadata.uid !== initial.metadata.uid) throw new Error("Output Topic was replaced");
       if (owner) {
-        const latest = await this.client.get<unknown, { execution?: { id: string } | null }>(resourceRef(owner));
+        const latest = await this.client.get<unknown, { agent?: import("@compforge/aide-plugin").AgentStatus; execution?: { id: string } | null }>(resourceRef(owner));
         if (!latest || latest.metadata.deletionTimestamp) throw new Error("Output owner is no longer active");
         owner = latest;
       }
       if (executionId && (owner ? owner.status.execution?.id : c.status.execution?.id) !== executionId) throw new Error("Output execution is no longer active");
       const draft: OutputDraft = { id, topicId, text, workId: null };
-      const association = { ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds } : {}) };
+      const createdBy = agentCall((owner ?? c).status, options.idempotencyKey);
+      const association = { ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
       try {
         await this.client.commit([
           { operation: "patchStatus", resource: c, patch: {} },

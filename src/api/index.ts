@@ -14,6 +14,8 @@ import { validInputResult } from "../host/approval/answer.ts";
 import { IncomingSchema, webTopicLocator } from "../channel/message.ts";
 import { topicList } from "../channel/view.ts";
 import { streamTopic } from "./stream.ts";
+import { renderHTML } from "@compforge/agent-observation";
+import { inputObservation, ObservationQuery } from "./observation.ts";
 import { inputList, inputDetail } from "./inputs.ts";
 
 const EventSchema = IncomingSchema.omit({ text: true, channelId: true, source: true }).extend({
@@ -119,6 +121,20 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
       if (request.method === "GET" && url.pathname === "/inputs/list") {
         const query = InputListSchema.parse(Object.fromEntries(url.searchParams));
         await aide.start(); json(response, 200, inputList(aide, query)); return;
+      }
+      if (request.method === "GET" && (url.pathname === "/inputs/job" || url.pathname === "/inputs/session")) {
+        const query = ObservationQuery.parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const view = await inputObservation(aide, url.pathname, query);
+        if (!view) { json(response, 404, { error: "Input 或关联的 Session 不可用。" }); return; }
+        response.setHeader("cache-control", "no-store");
+        if (query.download) response.setHeader("content-disposition", `attachment; filename="${url.pathname.endsWith("job") ? "job" : "session"}.${query.format}"`);
+        if (query.format === "html") {
+          const html = renderHTML(view);
+          response.writeHead(200, { "content-type": "text/html; charset=utf-8", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'" });
+          response.end(html);
+        } else json(response, 200, view);
+        return;
       }
       if (request.method === "GET" && url.pathname === "/inputs/detail") {
         const query = z.object({ id: z.string().min(1).max(200), uid: z.string().min(1).max(250).optional() }).strict().parse(Object.fromEntries(url.searchParams));

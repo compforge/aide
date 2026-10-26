@@ -40,6 +40,8 @@ export interface InputSpec {
 }
 /** Each coordinator owns its own status. A model turn ending is not business completion. */
 export interface Attempt {
+  agent?: import("@compforge/aide-plugin").AgentStatus;
+  completedBy?: import("../observation/reference.ts").AgentCall;
   executionId?: string;
   startedAt?: string;
   completedAt?: string;

@@ -167,3 +167,31 @@ test("Inputs HTTP routes validate filters and paginate all retained inputs, incl
   assert.deepEqual(inputDetail(reopened, item.id)!.input.status, detail.input.status);
   await reopened.close();
 });
+
+/** @case Observation endpoints only read Sessions attached to the exact Input UID. */
+test("Input observation HTTP exports JSON and escaped HTML with exact reference guards", async t => {
+  const { aide, store } = setup(t);
+  let reads = 0;
+  aide.readSession = async agent => { reads++; return { schema_version: "agent-ledger/session@1", session: { source: "pi", id: agent.sessionId }, nodes: [] }; };
+  const input = store.submit("test", "observe", { origin: "source", originId: "test", text: "<script>alert(1)</script>" },
+    { route: { completedAt: new Date().toISOString(), agent: { harness: "route", sessionId: "native" }, result: { topics: [], reason: "rule" } } });
+  store.update(input, { route: { ...input.status.route!, completedAt: new Date().toISOString() } });
+  const server = httpChannel(aide, log); server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const query = new URLSearchParams({ id: input.metadata.name, uid: input.metadata.uid });
+  const job = await fetch(`${base}/inputs/job?${query}&download=1`);
+  assert.equal(job.status, 200); assert.match(job.headers.get("content-disposition")!, /job.json/);
+  assert.equal((await job.json() as { job: { id: string } }).job.id, input.metadata.uid);
+  const html = await (await fetch(`${base}/inputs/job?${query}&format=html`)).text();
+  assert.ok(!html.includes("<script>alert(1)</script>")); assert.ok(html.includes("&lt;script&gt;"));
+  const count = reads;
+  assert.equal((await fetch(`${base}/inputs/session?${query}&harness=route&sessionId=unrelated`)).status, 404);
+  assert.equal((await fetch(`${base}/inputs/session?${query}&harness=chief&sessionId=native`)).status, 404);
+  assert.equal((await fetch(`${base}/inputs/job?id=observe&uid=wrong`)).status, 404);
+  assert.equal((await fetch(`${base}/inputs/session?${query}&file=/etc/passwd`)).status, 400);
+  assert.equal(reads, count);
+  const session = await fetch(`${base}/inputs/session?${query}&harness=route&sessionId=native`);
+  assert.equal(session.status, 200); assert.equal(reads, count + 1);
+  assert.equal((await session.json() as { schema_version: string }).schema_version, "agent-ledger/session@1");
+});

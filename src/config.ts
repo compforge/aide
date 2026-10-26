@@ -1,3 +1,4 @@
+import { ObservationConfigSchema } from "../agents/pi/observation.ts";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -23,6 +24,7 @@ export const ConfigSchema = z.object({
   defaultChannel: z.string().min(1).default("web"),
   channels: ChannelsConfigSchema,
   resources: ResourceStorageConfigSchema.optional(),
+  observation: ObservationConfigSchema.optional(),
   connectors: ConnectorsConfigSchema.prefault({}),
   plugins: z.record(z.string(), record).default({}),
   harnesses: HarnessesConfigSchema.prefault({}),

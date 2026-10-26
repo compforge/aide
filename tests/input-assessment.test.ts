@@ -152,3 +152,22 @@ test("assessment cannot complete across an execution switch during its commit", 
   await assert.rejects(assessInput(racing, c, "old", { inputId: "switch", summary: "quiet" }), /no longer active/);
   assert.equal(aide.topics.inputStore.get("switch")!.status.assess![c.metadata.uid]!.completedAt, undefined);
 });
+
+test("Recovery acknowledgement records its own native call without rewriting original admission", async t => {
+  const { aide, resources, context } = setup(t);
+  const c = await aide.topics.ensure("me");
+  const input = await aide.topics.submit("recover", { origin: "channel", originId: "web", text: "check effects" });
+  await deliver(context, input, [c.metadata], "explicit");
+  const originalAgent = { harness: "chief", sessionId: "original-native" };
+  const currentAgent = { harness: "chief", sessionId: "recovery-native" };
+  const assigned = aide.topics.inputStore.get("recover")!;
+  aide.topics.inputStore.update(assigned, { assess: { [c.metadata.uid]: { ...assigned.status.assess![c.metadata.uid]!,
+    executionId: "old-run", agent: originalAgent, lastError: "Interrupted after effects" } } });
+  await resources.patchStatus(aide.topics.resource("me")!, { agent: currentAgent, execution: { id: "new-run", startedAt: new Date().toISOString() } });
+  await assessInput(resources, c, "new-run", { inputId: "recover", summary: "Verified effects" }, "ack-native-id");
+  const receipt = aide.topics.inputStore.get("recover")!.status.assess![c.metadata.uid]!;
+  assert.equal(receipt.executionId, "old-run"); assert.deepEqual(receipt.agent, originalAgent);
+  assert.deepEqual(receipt.completedBy, { agent: currentAgent, executionId: "new-run", toolCallId: "ack-native-id" });
+  await assessInput(resources, c, "new-run", { inputId: "recover", summary: "repeat" }, "different-call");
+  assert.deepEqual(aide.topics.inputStore.get("recover")!.status.assess![c.metadata.uid], receipt);
+});

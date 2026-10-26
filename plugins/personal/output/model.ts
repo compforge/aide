@@ -14,6 +14,9 @@ export interface OutputSpec {
   executionId?: string;
   producer?: ResourceRef;
   inputIds?: string[];
+  /** Exact input incarnations at Output creation, keyed by input name. */
+  inputUids?: Record<string, string>;
+  createdBy?: import("../observation/reference.ts").AgentCall;
 }
 export interface OutputStatus {
   phase: "pending" | "sending" | "delivered" | "failed" | "uncertain";

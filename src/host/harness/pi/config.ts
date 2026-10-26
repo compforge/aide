@@ -26,6 +26,7 @@ type Settings = ReturnType<SettingsManager["getSettings"]>;
  * @case tests/harness-config.test.ts
  */
 export interface PiConfig {
+  readonly observation?: import("../../../../agents/pi/observation.ts").PiObservations;
   readonly agentDir: string;
   readonly model: Model;
   readonly settings: Readonly<Settings>;
