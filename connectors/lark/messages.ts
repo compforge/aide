@@ -97,8 +97,9 @@ export class LarkMessages implements MessageConnector {
   search(query: MessageSearchQuery): Promise<MessagePage> {
     const input = QuerySchema.parse(query);
     const chatType = z.enum(["p2p", "group"]).optional().parse(query.chatType);
+    const senderIds = z.array(z.string().regex(/^ou_[a-zA-Z0-9]+$/)).min(1).optional().parse(query.senderIds);
     return this.read(["im", "+messages-search", ...(query.atMe ? ["--is-at-me"] : []),
-      ...(chatType ? ["--chat-type", chatType] : []), "--sender-type", "user",
+      ...(chatType ? ["--chat-type", chatType] : []), ...(senderIds ? ["--sender", senderIds.join(",")] : []), "--sender-type", "user",
       "--start", cliTime(input.start), "--end", cliTime(input.end), ...this.pagination(input)], input.end);
   }
 

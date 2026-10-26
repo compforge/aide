@@ -173,7 +173,7 @@ test("Replay SDK groups roots and routes subsequent source input to the new root
       createdAt: `2026-10-19T00:${String((n + 1) * 10).padStart(2, "0")}:00.000Z`, sender: { id: "ou_peer", type: "user" }, mentions: [], deleted: false })),
     directIds: ["first", "second", "later"], groupIds: [],
     coverage: [
-      ...["direct", "group"].map(operation => ({ operation: operation as "direct" | "group", key: "", start, end, complete: true, pages: 1 })),
+      ...["direct", "group", "sent"].map(operation => ({ operation: operation as "direct" | "group" | "sent", key: "", start, end, complete: true, pages: 1 })),
       ...["oc_a", "oc_b"].map(key => ({ operation: "history" as const, key, start: "2026-10-18T23:55:00.000Z", end, complete: true, pages: 1 })),
     ],
   }, { directory, weave: true, batchSize: 1, timeoutMs: 15_000, revision: "fixture", datasetHash: "fixture", model: fixture.config.config });

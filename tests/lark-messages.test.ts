@@ -75,3 +75,20 @@ test("Lark process concurrency is bounded and released after a failure", async (
   await new Promise((resolve) => setImmediate(resolve));
   releases.forEach((release) => release()); await Promise.all([one, two]);
 });
+
+
+test("Lark sender filtering stays scoped through Connector IPC and rejects empty or malformed IDs", async () => {
+  const commands: string[][] = [];
+  const host = { ...emptyConnectors, messages: new LarkMessages(config, async args => {
+    commands.push([...args]); return args[0] === "auth" ? identity : response;
+  }) };
+  const client = createConnectorClient(async <T>(request: Parameters<typeof dispatchConnector>[1]): Promise<T> =>
+    await dispatchConnector(host, request) as T);
+  await client.messages.search({ ...query, chatType: "group", senderIds: ["ou_human", "ou_second"] });
+  const search = commands[1]!;
+  assert.equal(search[search.indexOf("--sender") + 1], "ou_human,ou_second");
+  assert.ok(!search.includes("--is-at-me"));
+  for (const senderIds of [[], ["--all"], ["ou_human,ou_other"]]) {
+    assert.throws(() => host.messages.search({ ...query, senderIds }));
+  }
+});

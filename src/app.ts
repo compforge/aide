@@ -109,7 +109,7 @@ export class Aide {
       meIdentities: this.meMarks.identities.length,
       environments: this.environmentSources.map(({ environment, namespace, intervalMs }) => ({ environment, namespace, intervalMs })),
       requirements: this.watches.map(({ id, source, intervalMs }) => ({ id, connector: source, intervalMs })),
-      lark: this.messageSource ? { intervalMs: this.messageSource.intervalMs, scenarios: ["direct", "mention"] } : null,
+      lark: this.messageSource ? { intervalMs: this.messageSource.intervalMs, scenarios: ["direct", "mention", ...(this.messageSource.personIds.length ? ["sent"] : [])] } : null,
     }, "Personal observation sources configured");
     const connectors = options.connectors ?? Connectors.fromConfig(config?.connectors ?? {});
     this.catalog = openPersonCatalog(home, this.meMarks, log, () => this.notify());

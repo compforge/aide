@@ -10,7 +10,7 @@ import { PiAdapter } from "../../src/host/harness/pi/adapter.ts";
 import type { PiConfig } from "../../src/host/harness/pi/config.ts";
 import { emptyConnectors } from "../../src/connector-client.ts";
 import { inputDetail } from "../../src/api/inputs.ts";
-import { MessageWatchSchema, type MessageWatch } from "../../plugins/personal/source/message/config.ts";
+import { MESSAGE_KINDS, MessageWatchSchema, type MessageWatch } from "../../plugins/personal/source/message/config.ts";
 import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "../../plugins/personal/source/message/observe.ts";
 import { WEAVE_TYPE, type WeaveStatus } from "../../plugins/personal/weave/model.ts";
 import { SnapshotMessages, triggerMessages, type Snapshot } from "./snapshot.ts";
@@ -119,7 +119,7 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
     const watch: MessageWatch = { ...MessageWatchSchema.parse({}), ...snapshot.identity, personIds: snapshot.meIds };
     // No configured lark Source: only this runner advances observation time, never a wall-clock polling controller.
     let source = await resources.create<MessageWatch, MessageSourceStatus>(MESSAGE_SOURCE_TYPE, { name: "replay", spec: watch,
-      status: { scans: ["direct", "mention"].map(kind => ({ kind: kind as "direct" | "mention",
+      status: { scans: MESSAGE_KINDS.map(kind => ({ kind,
         watermark: new Date(Date.parse(snapshot.start) + watch.overlapMs).toISOString() })) } });
     const triggers = triggerMessages(snapshot);
     const cutoffs: string[] = [];
@@ -133,7 +133,7 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
         await observeMessages({ resources, logger }, source, connectors, Date.parse(cutoff));
         messages.assertCoverage();
         source = (await resources.get<MessageWatch, MessageSourceStatus>({ ...MESSAGE_SOURCE_TYPE, ...source.metadata }))!;
-        if (source.status.scans?.length === 2 && source.status.scans.every(s => !s.window && Date.parse(s.watermark ?? "") >= Date.parse(cutoff))
+        if (source.status.scans?.length === MESSAGE_KINDS.length && source.status.scans.every(s => !s.window && Date.parse(s.watermark ?? "") >= Date.parse(cutoff))
           && !source.status.pending?.some(p => p.delivery || p.follow?.token)) break;
       }
       await drain();

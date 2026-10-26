@@ -7,7 +7,7 @@ import { bindSourceInput, type SourceInput } from "../input.ts";
 import { SOURCES } from "../definition.ts";
 import type { ChatMessage, ConnectorClient, MessagePage, PluginContext, Resource } from "@compforge/aide-plugin";
 import { INPUT_TYPE, digest } from "../../chief-model.ts";
-import { type MessageKind, type MessageWatch } from "./config.ts";
+import { MESSAGE_KINDS, type MessageKind, type MessageWatch } from "./config.ts";
 import { boundContext, readMessageContext, type MessageContext } from "./context.ts";
 import { messageRelation } from "./relation.ts";
 
@@ -74,6 +74,13 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     const ids = this.watch.personIds.length ? this.watch.personIds : [this.watch.userId];
     return !message.deleted && message.sender.type === "user" && message.mentions.some((id) => ids.includes(id));
   }
+  /** @spec Me's group speech is observed independently of mentions; execution credentials never imply authorship.
+   * @case tests/message-source.test.ts
+   * @link docs/connector/lark-messages.md
+   */
+  private discoversSent(message: ChatMessage) {
+    return !message.deleted && message.sender.type === "user" && this.watch.personIds.includes(message.sender.id);
+  }
   private get pending() { return this.resource.status.pending ?? []; }
   private get scans() { return this.resource.status.scans ?? []; }
 
@@ -97,7 +104,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     }
     for (const entry of [...this.pending]) if (entry.delivery) await this.deliver(entry);
     const failures: string[] = [];
-    for (const kind of ["direct", "mention"] as const) {
+    for (const kind of MESSAGE_KINDS) {
       try { await this.discover(kind); }
       catch (error) { failures.push(`${kind}: ${error instanceof Error ? error.message : String(error)}`); }
     }
@@ -105,7 +112,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
       const entry = this.pending.find((item) => item.message.id === saved.message.id)!;
       if (entry.finished) await this.remove(entry);
       else if (!entry.sequence) await this.initialize(entry);
-      else if (entry.kind === "mention") await this.follow(entry);
+      else if (entry.kind !== "direct") await this.follow(entry);
     }
     for (const scan of [...this.scans]) await this.commitScan(scan);
     if (failures.length) throw new Error(`Lark discovery incomplete: ${failures.join("; ")}`);
@@ -113,6 +120,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
   }
 
   private async discover(kind: MessageKind) {
+    if (kind === "sent" && !this.watch.personIds.length) return;
     let scan = this.scans.find((item) => item.kind === kind) ?? { kind };
     if (scan.window?.page) return;
     if (!scan.window) {
@@ -123,11 +131,12 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     const window = scan.window!;
     const page = await this.connectors.messages.search({ start: window.start, end: window.end,
       ...(window.token ? { pageToken: window.token } : {}), limit: 10,
-      chatType: kind === "direct" ? "p2p" : "group", ...(kind === "mention" && this.watch.personIds.length === 1 && this.watch.personIds.includes(this.watch.userId) ? { atMe: true } : {}) });
+      chatType: kind === "direct" ? "p2p" : "group", ...(kind === "sent" ? { senderIds: this.watch.personIds } : {}), ...(kind === "mention" && this.watch.personIds.length === 1 && this.watch.personIds.includes(this.watch.userId) ? { atMe: true } : {}) });
     const pending = [...this.pending]; const ids: string[] = [];
     for (const message of page.messages) {
       if (message.deleted || message.sender.type !== "user" ||
-          (kind === "mention" && !this.discoversMention(message))) continue;
+          (kind === "mention" && !this.discoversMention(message)) ||
+          (kind === "sent" && !this.discoversSent(message))) continue;
       ids.push(message.id);
       if (pending.some((item) => item.message.id === message.id) ||
           await this.context.resources.get(inputRef(inputName(this.watch, message.id, 0)))) continue;
@@ -203,26 +212,28 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     const eligible = page.messages.filter((message) => !message.deleted && Date.parse(message.createdAt) <= Date.parse(follow.end));
     const related = this.related(entry, eligible);
     const fresh = eligible.filter((message) => related.includes(message.id) && !entry.known.includes(message.id)
-      // Another explicit mention has its own discovered Input.
-      && !this.discoversMention(message));
+      // Explicit mentions and Me's speech each have their own discovered Input.
+      && !this.discoversMention(message) && !this.discoversSent(message));
     const known = [...new Set([...entry.known, ...eligible.filter((message) => related.includes(message.id)).map((message) => message.id)])];
     const finished = !hasMore && Date.parse(follow.end) >= Date.parse(entry.followUntil);
     const next = { ...entry, related, finished, follow: hasMore ? { ...follow, token: page.nextToken! } : null };
     if (fresh.length) {
-      await this.plan(next, boundContext(fresh, follow.end, hasMore, this.watch.maxContextChars), known, related);
+      await this.plan(next, boundContext(fresh, follow.end, hasMore, this.watch.maxContextChars), known, related, eligible);
     } else await this.update({ ...next, known });
     if (finished && !fresh.length) {
       await this.remove(entry);
     }
   }
 
-  private async plan(entry: PendingMessage, context: MessageContext | undefined, known: string[], related: string[]) {
+  private async plan(entry: PendingMessage, context: MessageContext | undefined, known: string[], related: string[], relatedMessages: ChatMessage[] = []) {
     const name = inputName(this.watch, entry.message.id, entry.sequence);
     const evidence = [entry.message, ...(context?.messages ?? [])];
     const persons = new Persons(this.context.resources, { identities: this.watch.personIds.map((id) => ({ provider: "lark", scope: this.watch.accountId, id })) });
     const senders = await observePeople(persons, this.watch.accountId, evidence);
+    // Reply authorship can depend on a message already admitted by another discovery scan.
+    const relationContext = [...evidence, ...relatedMessages];
     const annotate = (message: ChatMessage) => {
-      const relation = messageRelation(this.watch, message, entry.kind === "direct", evidence);
+      const relation = messageRelation(this.watch, message, entry.kind === "direct", relationContext);
       return { ...message, ...(senders.has(message.id) ? { person: senders.get(message.id) } : {}),
         ...(relation ? { relation } : {}) };
     };
@@ -231,13 +242,13 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     // A batch can mix my speech and other people's reactions. Its per-message relations remain authoritative.
     const relations = new Set(annotatedContext?.messages.map((item) => item.relation));
     const relation = entry.sequence ? (relations.size === 1 ? annotatedContext!.messages[0]!.relation : this.watch.personIds.includes(this.watch.userId) ? "observed" : undefined) : message.relation;
-    const kind = entry.sequence ? "讨论进展" : entry.kind === "direct" ? "私聊" : "群内 @";
+    const kind = entry.sequence ? "讨论进展" : entry.kind === "direct" ? "私聊" : entry.kind === "sent" ? "群内本人发言" : "群内 @";
     const content = entry.sequence ? (context?.messages ?? []).map((item) => item.content).join("\n\n") : message.content;
     const spec: Delivery["spec"] = {
       source: larkAddress(this.watch.accountId, message.chatId),
       ...(relation ? { relation } : {}),
       ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
-      topicKey: this.locate({ chatId: message.chatId, threadId: entry.kind === "mention" ? message.threadId : undefined }).key,
+      topicKey: this.locate({ chatId: message.chatId, threadId: entry.kind === "direct" ? undefined : message.threadId }).key,
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,
         kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,

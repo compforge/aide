@@ -20,7 +20,7 @@ function fixture(): Snapshot {
   return { version: 1, collectedAt: end, start, end, identity: { accountId: "cli_test", userId: "ou_me" }, meIds: ["ou_me"],
     messages: [message("first", "2026-10-19T00:01:00.000Z"), message("future", "2026-10-19T00:30:00.000Z")],
     directIds: ["first", "future"], groupIds: [],
-    coverage: ["direct", "group", "history", "thread"].map(operation => ({ operation: operation as Snapshot["coverage"][number]["operation"],
+    coverage: ["direct", "group", "sent", "history", "thread"].map(operation => ({ operation: operation as Snapshot["coverage"][number]["operation"],
       key: operation === "history" ? "oc_test" : operation === "thread" ? "omt_test" : "",
       start: operation === "history" ? "2026-10-18T23:46:00.000Z" : start, end, complete: true, pages: 1 })) };
 }
@@ -91,7 +91,7 @@ test("Collection follows pages, keeps context separate and records gaps without 
     async thread() { throw new Error("Unexpected thread read"); },
   };
   const snapshot = await collectSnapshot(connector, { start, end, meIds: ["ou_me"], maxPages: 5 });
-  assert.equal(calls, 3);
+  assert.equal(calls, 4);
   assert.deepEqual(snapshot.directIds, ["first", "future"]);
   assert.equal(snapshot.coverage.filter(c => c.operation === "history" && !c.complete).length, 1);
   assert.equal(snapshot.coverage.find(c => c.operation === "history")!.end, end);
@@ -205,4 +205,26 @@ test("Historical replay uses the real Source, routing, Chief receipts and report
     report(directory);
     assert.match(readFileSync(join(directory, "report.md"), "utf8"), /未对外发送/);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+
+test("Replay collects Me group speech separately and never substitutes mention coverage for sent discovery", async () => {
+  const mine = message("sent-to-colleague", "2026-10-19T00:05:00.000Z", {
+    sender: { id: "ou_me", type: "user" }, mentions: ["ou_colleague"], content: "@colleague please update the configuration" });
+  const context = message("context-only", "2026-10-19T00:06:00.000Z");
+  const queries: import("@compforge/aide-plugin").MessageSearchQuery[] = [];
+  const snapshot = await collectSnapshot({
+    identity: async () => fixture().identity,
+    async search(query) { queries.push(query); return { messages: query.senderIds ? [mine] : [], hasMore: false, observedThrough: end }; },
+    async history() { return { messages: [mine, context], hasMore: false, observedThrough: end }; },
+    async thread() { throw new Error("Unexpected thread read"); },
+  }, { start, end, meIds: ["ou_me"], maxPages: 5 });
+  assert.deepEqual(queries.filter(query => query.senderIds).map(query => query.senderIds), [["ou_me"]]);
+  assert.deepEqual(triggerMessages(snapshot).map(m => m.id), [mine.id]);
+  const connector = new SnapshotMessages(snapshot); connector.advance(end);
+  assert.deepEqual((await connector.search({ start, end, chatType: "group", senderIds: ["ou_me"] })).messages.map(m => m.id), [mine.id]);
+  assert.equal((await connector.search({ start, end, chatType: "group", senderIds: ["ou_peer"] })).messages.length, 0);
+  snapshot.coverage = snapshot.coverage.filter(c => c.operation !== "sent");
+  const incomplete = new SnapshotMessages(snapshot); incomplete.advance(end);
+  await assert.rejects(incomplete.search({ start, end, chatType: "group", senderIds: ["ou_me"] }), /Incomplete snapshot coverage: sent/);
 });

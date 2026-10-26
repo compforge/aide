@@ -18,7 +18,7 @@ import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "../plugins/personal/source/message/observe.ts";
-import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageWatch } from "../plugins/personal/source/message/config.ts";
+import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageKind, type MessageWatch } from "../plugins/personal/source/message/config.ts";
 import { readMessageContext } from "../plugins/personal/source/message/context.ts";
 import { Aide } from "../src/app.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
@@ -39,7 +39,7 @@ const page = (messages: ChatMessage[], extra: Partial<MessagePage> = {}): Messag
 const person = { identities: [{ provider: "lark", scope: "cli_app", id: "ou_me" }] };
 const watch = (patch: Partial<MessageWatch> = {}) => ({ ...messageWatch(MessageWatchSchema.parse({}), { appId: "cli_app", userId: "ou_me" }, person)!, ...patch });
 
-function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "mention") {
+function fixture(t: TestContext, spec = watch(), discoveryKind?: MessageKind) {
   const root = mkdtempSync(join(tmpdir(), "aide-message-source-"));
   const sessions = new HarnessFixtures(root); const session = sessions.create({ id: MESSAGE_SESSION, cwd: root });
   const inputs = new InputStore(root);
@@ -60,7 +60,7 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: "direct" | "men
   const connectors = { ...emptyConnectors, messages: {
     async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
     async search(query: MessageSearchQuery) {
-      if (discoveryKind && (query.chatType === "p2p" ? "direct" : "mention") !== discoveryKind) return page([]);
+      if (discoveryKind && (query.chatType === "p2p" ? "direct" : query.senderIds ? "sent" : "mention") !== discoveryKind) return page([]);
       searches.push(query); return incoming(query);
     },
     async history() { reads++; if (contextError) throw new Error("Permission denied"); return page(history); },
@@ -344,7 +344,7 @@ test("Message observation requires an account and has no configurable kinds", ()
 });
 
 test("Discussion batches retain each person's relation; replies to my own messages are received", async (t) => {
-  const f = fixture(t, watch(), "mention");
+  const f = fixture(t);
   const mine = message("om_mine", { sender: { id: "ou_me", type: "user" }, mentions: [], parentId: "om_at" });
   const reply = message("om_reply_to_me", { mentions: [], parentId: mine.id });
   const ambient = message("om_ambient", { mentions: [], parentId: "om_at" });
@@ -353,18 +353,22 @@ test("Discussion batches retain each person's relation; replies to my own messag
   assert.equal(messageRelation(watch({ personIds: ["ou_me", "ou_second"] }), alternate, true), "sent");
   assert.equal(messageRelation(watch(), alternate, true), "received");
   assert.equal(messageRelation(watch(), reply, false, [mine]), "received");
-  f.incoming(async () => page([message("om_at")]));
+  f.incoming(async query => page(query.chatType === "group" && !query.senderIds ? [message("om_at")] : []));
   await f.observe();
   f.history([mine, reply, ambient]);
+  f.incoming(async query => page(query.chatType === "p2p" ? [] : query.senderIds ? [mine] : [message("om_at")]));
   await f.observe(now + 60_000);
+  const sent = f.inputs.list().find(input => input.spec.observation!.kind === "sent")!;
+  assert.equal(sent.spec.relation, "sent");
+  assert.match(inputPreview(sent), /"relationToMe":"sent"/);
   const update = f.inputs.list().find((input) => input.spec.observation!.kind === "discussion")!;
   assert.equal(update.spec.relation, "observed");
   const context = update.spec.observation!.context as { messages: Array<{ id: string; relation: string }> };
   assert.deepEqual(context.messages.map(({ id, relation }) => [id, relation]), [
-    [mine.id, "sent"], [reply.id, "received"], [ambient.id, "observed"],
+    [reply.id, "received"], [ambient.id, "observed"],
   ]);
   const preview = inputPreview(update);
-  for (const [item, relation] of [[mine, "sent"], [reply, "received"], [ambient, "observed"]] as const) {
+  for (const [item, relation] of [[reply, "received"], [ambient, "observed"]] as const) {
     assert.ok(preview.includes(`${JSON.stringify({ messageId: item.id, at: item.createdAt, author: { id: item.sender.id, type: item.sender.type },
       relationToMe: relation, mentions: item.mentions, replyToMessageId: item.parentId })}\n${item.content}`),
       "Every follow-up keeps its author and relation adjacent to its text, without expanding observation");
@@ -465,4 +469,61 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   assert.equal(aide.personal.topics.inputs(groupId).length, 3);
   assert.equal(aide.personal.topics.resource(sourceGroupId)!.metadata.uid, sourceGroupUid);
   assert.equal(aide.works().length, 0);
+});
+
+/** @case Me asking a colleague to change configuration is observed as sent, never as a request to Aide. */
+test("Group speech from explicit Me identities is independently discovered with stable topic affinity", async t => {
+  const f = fixture(t, watch({ personIds: ["ou_human", "ou_second"] }), "sent");
+  const mine = message("om_config", { sender: { id: "ou_human", type: "user" }, mentions: ["ou_colleague"],
+    content: "@colleague Please update workspaceSync.trustedDownloadHosts" });
+  const plain = message("om_plain", { sender: { id: "ou_second", type: "user" }, mentions: [] });
+  const threaded = message("om_threaded", { ...mine, id: "om_threaded", threadId: "omt_topic" });
+  f.incoming(async query => {
+    assert.deepEqual(query.senderIds, ["ou_human", "ou_second"]);
+    assert.equal(query.chatType, "group"); assert.equal(query.atMe, undefined);
+    return page([mine, plain, threaded, message("om_login", { sender: { id: "ou_me", type: "user" }, mentions: [] }),
+      message("om_other", { mentions: [] }), { ...mine, id: "om_deleted", deleted: true },
+      { ...mine, id: "om_bot", sender: { id: "ou_human", type: "app" } }]);
+  });
+  await f.observe();
+  assert.equal(f.inputs.list().length, 3);
+  for (const input of f.inputs.list()) {
+    assert.equal(input.spec.origin, "source"); assert.equal(input.spec.relation, "sent");
+    assert.equal(input.spec.observation!.kind, "sent"); assert.ok(input.spec.sender);
+    assert.match(inputPreview(input), /observation is not itself a direct request to Aide/);
+    assert.match(inputPreview(input), /"relationToMe":"sent"/);
+    assert.equal(input.spec.topicKey, input.spec.observation!.originalMessageId === threaded.id
+      ? "lark:cli_app:oc_chat:thread:omt_topic" : "lark:cli_app:oc_chat");
+  }
+  await f.restart(); await f.observe(now + 60_000);
+  assert.equal(f.inputs.list().length, 3);
+  assert.equal(f.resource().status.scans!.find(scan => scan.kind === "sent")!.watermark, new Date(now + 60_000).toISOString());
+});
+
+test("Sent and mention searches share deduplication and keep separate pagination progress", async t => {
+  const f = fixture(t);
+  const both = message("om_both", { sender: { id: "ou_me", type: "user" } });
+  const sent = message("om_sent", { sender: { id: "ou_me", type: "user" }, mentions: ["ou_colleague"] });
+  f.incoming(async query => query.chatType === "p2p" ? page([]) : !query.senderIds ? page([both])
+    : query.pageToken ? page([sent]) : page([both], { hasMore: true, nextToken: "sent-page-2" }));
+  await f.observe();
+  assert.equal(f.inputs.list().length, 1);
+  assert.equal(f.resource().status.scans!.find(scan => scan.kind === "sent")!.watermark, undefined);
+  assert.equal(f.resource().status.scans!.find(scan => scan.kind === "mention")!.watermark, new Date(now).toISOString());
+  await f.restart(); await f.observe(now + 60_000);
+  assert.equal(f.inputs.list().length, 2);
+  assert.ok(f.inputs.list().every(input => input.spec.relation === "sent"));
+  assert.equal(f.searches.filter(query => query.senderIds).at(-1)!.end, new Date(now).toISOString());
+  assert.equal(f.resource().status.scans!.find(scan => scan.kind === "sent")!.watermark, new Date(now).toISOString());
+});
+
+test("Missing explicit Me identities never enables a login-owner sent scan", async t => {
+  const f = fixture(t, watch({ personIds: [] }));
+  f.incoming(async query => {
+    assert.equal(query.senderIds, undefined);
+    return page(query.chatType === "p2p" ? [] : [message("om_login", { sender: { id: "ou_me", type: "user" }, mentions: [] })]);
+  });
+  await f.observe();
+  assert.equal(f.inputs.list().length, 0);
+  assert.equal(f.resource().status.scans!.some(scan => scan.kind === "sent"), false);
 });

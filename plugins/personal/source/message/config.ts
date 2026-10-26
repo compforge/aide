@@ -13,7 +13,8 @@ export const MessageWatchSchema = z.object({
   maxContextChars: z.number().int().min(1000).max(100_000).default(16_000),
   followupMs: z.number().int().min(0).max(3_600_000).default(300_000),
 }).strict();
-export type MessageKind = "direct" | "mention";
+export const MESSAGE_KINDS = ["direct", "mention", "sent"] as const;
+export type MessageKind = typeof MESSAGE_KINDS[number];
 export type MessageWatch = z.infer<typeof MessageWatchSchema> & { accountId: string; userId: string; personIds: string[] };
 
 export function messageWatch(watch: z.infer<typeof MessageWatchSchema> | undefined, account?: { appId?: string; userId?: string }, person: Me = { identities: [] }): MessageWatch | undefined {

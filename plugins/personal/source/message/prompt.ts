@@ -5,7 +5,7 @@ const Message = z.object({ id: z.string(), chatId: z.string(), createdAt: z.stri
   mentions: z.array(z.string()), parentId: z.string().optional(), relation: z.enum(["sent", "received", "observed"]).optional(),
 });
 const Observation = z.object({ provider: z.literal("lark"), accountId: z.string(), userId: z.string(),
-  kind: z.enum(["direct", "mention", "discussion"]), message: Message,
+  kind: z.enum(["direct", "mention", "sent", "discussion"]), message: Message,
   context: z.object({ messages: z.array(Message) }).optional(),
 });
 

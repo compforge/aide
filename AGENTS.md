@@ -82,7 +82,7 @@ plugins/personal/
       observe.ts           # Workload 观察、基线和变化 Input
     message/               # MessageSource
       config.ts            # Lark 消息观察与跟进策略
-      observe.ts           # 单聊、群内 @ 观察、水位和短期讨论跟进
+      observe.ts           # 单聊、群内 @ 与本人发言观察、水位和短期讨论跟进
       context.ts           # IM 有界上下文、话题根消息与缺口
     requirement/           # RequirementSource
       config.ts            # 需求观察范围与配置校验
