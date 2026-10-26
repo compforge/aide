@@ -74,3 +74,29 @@ test("Job preserves Output clock discrepancies as evidence without exporting neg
   assert.match(job.issues!.join("\n"), /finish precedes admission/);
   assert.doesNotThrow(() => inspect(job));
 });
+
+/** @case Receiving an Input is not evidence that routing has started or completed. */
+test("Unrouted Input exports no synthetic route and never completes from an empty receipt list", async () => {
+  const input: Input = { ...fixture(), status: {} };
+  const job = await inputJob(input, []);
+  assert.equal(job.status, "unknown"); assert.equal(job.finished_at, undefined);
+  assert.deepEqual(job.nodes.map(n => n.kind), ["input"]);
+  assert.match(job.issues!.join("\n"), /No routing receipt/);
+  assert.doesNotThrow(() => inspect(job));
+  const missingRoute: Input = { ...fixture(), status: { assess: fixture().status.assess } };
+  assert.notEqual((await inputJob(missingRoute, [])).status, "completed");
+});
+
+test("Assigned assessment remains unknown until its recorded attempt starts", async () => {
+  const base = fixture();
+  const assigned: Input = { ...base, status: { route: base.status.route,
+    assess: { [topic.uid]: { resource: topic, assignedAt: at } } } };
+  const waiting = await inputJob(assigned, []);
+  assert.equal(waiting.status, "unknown");
+  assert.equal(waiting.nodes.find(n => n.id.startsWith("assess:"))!.status, "unknown");
+  const active: Input = { ...assigned, status: { ...assigned.status,
+    assess: { [topic.uid]: { ...assigned.status.assess![topic.uid]!, startedAt: at, executionId: "started" } } } };
+  const running = await inputJob(active, []);
+  assert.equal(running.status, "running");
+  assert.equal(running.nodes.find(n => n.id.startsWith("assess:"))!.status, "running");
+});

@@ -6,9 +6,9 @@
 
 Job ID 是 Input UID，来源为 `aide.input`。Input.status 的 route、assess、handle 保存当前处理回执，接纳时记录 `agent` 原生引用；完成处理的工具记录 `completedBy`，包含 harness、sessionId、executionId、toolCallId。接纳执行与确认执行分开：后一次执行可以核对前一次中断后留下的效果。
 
-Output 保存 `createdBy` 和明确关联 Input 的 UID。一个 Output 可以关联多个 Input，也可以没有 Input；关联表示来源，不代表完成处理。JobView 从这些事实生成路由、研判、办理和投递 Operation，再关联确认工具及其直接产生者 ModelCall。原生 Session 中其它调用不自动归到这个 Job。重复 tool call ID 无法唯一定位时标明缺口，不按文本或时间猜测。
+Output 保存 `createdBy` 和明确关联 Input 的 UID。`createdBy` 只来自发起该 Output 的明确 agent execution，并固定为首次接纳时的事实；重试沿用原值，包括原本没有该字段的情况。系统恢复通知没有 agent execution，不借用 Topic 中恰好活跃的 Chief，也不把通知去重键当作 tool call ID。一个 Output 可以关联多个 Input，也可以没有 Input；关联表示来源，不代表完成处理。JobView 从这些事实生成路由、研判、办理和投递 Operation，再关联确认工具及其直接产生者 ModelCall。原生 Session 中其它调用不自动归到这个 Job。重复 tool call ID 无法唯一定位时标明缺口，不按文本或时间猜测。
 
-同一个 ModelCall 可能处理多个 Input，因此可以出现在多个 Job 中，不能将其成本跨 Job 直接累加。Job 的 completed 只表示 Input 处理回执已完成；Work 目标达成、Output 投递成功分别看各自记录。静默处理不要求 Output。
+同一个 ModelCall 可能处理多个 Input，因此可以出现在多个 Job 中，不能将其成本跨 Job 直接累加。Job 的 completed 只表示 Input 处理回执已完成；Work 目标达成、Output 投递成功分别看各自记录。静默处理不要求 Output。没有路由回执时不生成路由 Operation，也不判定 Job 已完成；尚未开始的处理投影为 unknown，等待状态通过已有分派事实和 issues 说明。
 
 SessionView 保留完整原生上下文，适合检查 prompt、工具调用和连续 followup。Input UID、消费者 UID 和原生 Session 引用不依赖消费者仍然存在。资源回收、Session 清理、缺少请求补录或记录不完整都显式呈现为 issues；当前回执不冒充完整重试历史。
 
@@ -20,7 +20,7 @@ Web → Inputs → 选择 Input → Observation：查看 JobView 或关联的 Se
 - `GET /inputs/session?id=...&uid=...&harness=chief&sessionId=...`：`agent-ledger/session@1`。
 - `format=html` 返回独立 HTML；`download=1` 下载快照。
 
-Session 读取必须匹配该 Input 或其显式关联 Output 保存的引用，不接受任意文件路径。导出是按需快照，不再写一套全局执行日志。模型 Session 可能包含多个 Input 的上下文，分享前按实际内容选择范围。
+未装配 Session reader 时，JobView 保留业务证据并注明读取能力缺失，Session 端点返回 unavailable（404）。Session 读取必须匹配该 Input 或其显式关联 Output 保存的引用，不接受任意文件路径。导出是按需快照，不再写一套全局执行日志。模型 Session 可能包含多个 Input 的上下文，分享前按实际内容选择范围。
 
 ## 原生存储与可选请求补录
 

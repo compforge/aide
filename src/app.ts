@@ -54,10 +54,7 @@ export interface AideOptions {
  * @link docs/kernel.md
  */
 export class Aide {
-  readSession: import("./observation.ts").ReadSession = agent => {
-    if (!this.options.readSession) return Promise.reject(new Error("Session observation reader is unavailable"));
-    return this.options.readSession(agent);
-  };
+  readSession?: import("./observation.ts").ReadSession;
   private readonly inputDefinitions = new Map<string, ChannelDefinition | SourceDefinition>([
     ...Object.values(CHANNELS).map((definition) => [`channel:${definition.id}`, definition] as const),
     ...Object.values(SOURCES).map((definition) => [`source:${definition.id}`, definition] as const),
@@ -88,6 +85,7 @@ export class Aide {
   private closed = false;
 
   constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
+    this.readSession = options.readSession;
     this.defaultHarnessConfig = Object.freeze({ ...options.defaultHarnessConfig });
     const config = options.config;
     const { sources } = parsePersonalConfig(config?.plugins.personal);

@@ -9,7 +9,7 @@ type Agent = Parameters<ReadSession>[0];
 const key = (agent: Agent) => JSON.stringify([agent.harness, agent.sessionId]);
 const value = (raw: unknown): NonNullable<Operation["data"]> => JSON.parse(JSON.stringify(raw));
 const attempts = (input: Input): [string, Attempt][] => [
-  ["route", input.status.route ?? {}],
+  ...(input.status.route ? [["route", input.status.route] as [string, Attempt]] : []),
   ...Object.entries(input.status.assess ?? {}).map(([uid, receipt]): [string, Attempt] => [`assess:${uid}`, receipt]),
   ...Object.entries(input.status.handle ?? {}).map(([uid, receipt]): [string, Attempt] => [`handle:${uid}`, receipt]),
 ];
@@ -50,13 +50,16 @@ function flatten(nodes: readonly Node[]): Node[] {
  */
 export async function inputJob(input: Input, allOutputs: readonly Output[], read?: ReadSession): Promise<JobView> {
   const outputs = associatedOutputs(input, allOutputs), receipts = attempts(input);
-  const complete = receipts.every(([, r]) => !!r.completedAt);
+  // @spec Missing routing evidence is waiting/unknown, never a synthetic attempt or vacuous completion.
+  const complete = !!input.status.route?.completedAt && receipts.every(([, r]) => !!r.completedAt);
+  const active = receipts.some(([, r]) => r.startedAt && !r.completedAt);
   const issues = ["Receipts describe retained current state, not a complete retry history. Native evidence and Outputs may be reclaimed independently."];
+  if (!input.status.route) issues.push("No routing receipt recorded; routing has not been observed.");
   const received: ObservedInput = { kind: "input", id: `input:${input.metadata.uid}`, content: value(input.spec), started_at: input.metadata.creationTimestamp };
   const view: JobView = {
     schema_version: "agent-ledger/job@1", job: { source: "aide.input", id: input.metadata.uid },
     name: input.metadata.name, goal: input.spec.text,
-    status: complete ? "completed" : receipts.some(([, r]) => r.lastError && !r.completedAt) ? "outcome_unknown" : "running",
+    status: complete ? "completed" : receipts.some(([, r]) => r.lastError && !r.completedAt) ? "outcome_unknown" : active ? "running" : "unknown",
     ...timing("job", input.metadata.creationTimestamp, complete ? receipts.map(([, r]) => r.completedAt!).sort().at(-1) : undefined, issues),
     nodes: [received],
     relations: [], attributes: { completion: "Input processing only; not Work goal completion or Output delivery", sessions: value(inputSessions(input, outputs)),
@@ -69,7 +72,7 @@ export async function inputJob(input: Input, allOutputs: readonly Output[], read
     const assigned = receipt as Assessment;
     const operation: Operation = { kind: "operation", id, operation: `aide.${id.split(":")[0]}`, data: value(receipt),
       ...timing(id, receipt.startedAt ?? assigned.assignedAt, receipt.completedAt, issues),
-      status: receipt.completedAt ? (assigned.result?.disposition === "cancelled" ? "cancelled" : "completed") : receipt.lastError ? "outcome_unknown" : "running",
+      status: receipt.completedAt ? (assigned.result?.disposition === "cancelled" ? "cancelled" : "completed") : receipt.lastError ? "outcome_unknown" : receipt.startedAt ? "running" : "unknown",
       evidence: [{ source: "aide.input", id: input.metadata.uid }] };
     view.nodes.push(operation);
     if (receipt.completedBy) calls.push({ operation: id, call: receipt.completedBy });

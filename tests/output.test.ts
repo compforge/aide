@@ -244,3 +244,47 @@ test("Lark delivery failures retain diagnostic codes and delivery context withou
   assert.doesNotMatch(JSON.stringify(timeout), /SECRET/);
   assert.deepEqual(larkSendFailure(new Error("SECRET")), { error: "Lark message.create failed; no diagnostic code available" });
 });
+
+/** @case System recovery notices keep a stable deduplication key across unrelated Chief executions. */
+test("System notifications never borrow a live Chief call and remain idempotent across execution changes", async t => {
+  const f = await setup(t);
+  const notice = (key: string) => f.topics.say("topic", undefined, "Recovery notification", undefined,
+    { target: webAddress("topic"), inputIds: [], idempotencyKey: key });
+  const idle = await notice("idle-notice");
+  await f.client.patchStatus(f.topics.resource("topic")!, {
+    agent: { harness: "chief", sessionId: "chief-session-1" }, execution: { id: "unrelated-1", startedAt: new Date().toISOString() },
+  });
+  const active = await notice("active-notice");
+  assert.deepEqual(await notice("idle-notice"), idle);
+  assert.equal(f.outputs.get(active.outputId)!.spec.createdBy, undefined);
+  assert.equal(f.outputs.get(idle.outputId)!.spec.createdBy, undefined);
+  await f.client.patchStatus(f.topics.resource("topic")!, { execution: null });
+  assert.deepEqual(await notice("active-notice"), active);
+  await f.client.patchStatus(f.topics.resource("topic")!, {
+    agent: { harness: "chief", sessionId: "chief-session-2" }, execution: { id: "unrelated-2", startedAt: new Date().toISOString() },
+  });
+  assert.deepEqual(await notice("active-notice"), active);
+  assert.equal(f.outputs.list().length, 2);
+});
+
+/** @case Replayed agent Output retains first-admission provenance, including an absent reference. */
+test("Output retries preserve original call evidence without weakening immutable content checks", async t => {
+  const f = await setup(t);
+  await f.client.patchStatus(f.topics.resource("topic")!, {
+    agent: { harness: "chief", sessionId: "first-session" }, execution: { id: "run", startedAt: new Date().toISOString() },
+  });
+  const say = (key: string, text = "answer") => f.topics.say("topic", undefined, text, "run", { target: webAddress("topic"), idempotencyKey: key });
+  const first = await say("tool-call");
+  const recorded = f.outputs.get(first.outputId)!.spec.createdBy;
+  assert.deepEqual(recorded, { agent: { harness: "chief", sessionId: "first-session" }, executionId: "run", toolCallId: "tool-call" });
+  await f.client.patchStatus(f.topics.resource("topic")!, { agent: { harness: "chief" } });
+  const absent = await say("without-reference");
+  assert.equal(f.outputs.get(absent.outputId)!.spec.createdBy, undefined);
+  await f.client.patchStatus(f.topics.resource("topic")!, { agent: { harness: "chief", sessionId: "new-session" } });
+  assert.deepEqual(await say("tool-call"), first);
+  assert.deepEqual(f.outputs.get(first.outputId)!.spec.createdBy, recorded);
+  assert.deepEqual(await say("without-reference"), absent);
+  assert.equal(f.outputs.get(absent.outputId)!.spec.createdBy, undefined);
+  await assert.rejects(say("tool-call", "different answer"), /different content/);
+  assert.equal(f.outputs.list().length, 2);
+});
