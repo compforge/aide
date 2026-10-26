@@ -1,4 +1,5 @@
-import type { ConnectorClient, EnvironmentDirectory, ForgeConnector, RequirementConnector } from "@compforge/aide-plugin";
+import type { ConnectorClient, EnvironmentDirectory, RequirementConnector } from "@compforge/aide-plugin";
+import type { ForgeReader } from "@compforge/repocli";
 import { createForgeConnectors } from "./forge/config.ts";
 import { createMeegoRequirementConnectors } from "./requirements/meego.ts";
 import { resolveEnvironmentConfig } from "./environments/config.ts";
@@ -13,7 +14,7 @@ export class Connectors implements ConnectorClient {
   readonly forges: ConnectorClient["forges"];
   constructor(
     private readonly requirementProviders: readonly RequirementConnector[],
-    private readonly forgeProviders: readonly ForgeConnector[],
+    private readonly forgeProviders: readonly ForgeReader[],
     readonly environments: EnvironmentDirectory = new Environments(),
     readonly messages: ConnectorClient["messages"] = emptyConnectors.messages,
     private readonly messageAccount?: { provider: "lark"; accountId: string; userId: string },
@@ -27,12 +28,8 @@ export class Connectors implements ConnectorClient {
     this.forges = Object.freeze({
       discover: (forge, query) => this.forge(forge).discover(query),
       list: (forge, path, query) => this.forge(forge).list(path, query),
-      get: (identity) => this.forge(identity.forge).get(identity),
-      comments: async (identity) => {
-        const connector = this.forge(identity.forge);
-        if (!connector.comments) throw new Error("Connector does not support comments");
-        return connector.comments(identity);
-      },
+      get: (reference) => this.forge(reference.repository.forge.name).get(reference),
+      comments: (reference) => this.forge(reference.repository.forge.name).comments(reference),
     } satisfies ConnectorClient["forges"]);
   }
 
@@ -64,7 +61,7 @@ export class Connectors implements ConnectorClient {
     return connector;
   }
 
-  private forge(forge: string): ForgeConnector {
+  private forge(forge: string): ForgeReader {
     const connector = this.forgeProviders.find((item) => item.forge === forge);
     if (!connector) throw new Error(`Forge ${forge} is not configured with credentials`);
     return connector;

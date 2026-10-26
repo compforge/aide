@@ -71,8 +71,8 @@ describe("Plugin Runner process boundary", () => {
       pluginInstanceId: id, pluginId: "tests/environment-plugin", packageVersion: "1.0.0", marketplace: "fixtures",
     });
     const requirement = { source: "work", category: "story", id: "1", title: "Shared", state: "open" as const };
-    const identity = { forge: "forge", path: "org/repo", number: 1 };
-    const pull = { identity, title: "Shared PR", url: "https://example.com/1", lifecycle: "open" as const,
+    const identity = { repository: { forge: { name: "forge" }, path: "org/repo" }, number: 1 };
+    const pull = { ...identity, title: "Shared PR", url: "https://example.com/1", state: "open" as const,
       reviewThreads: "none" as const, mergeability: "ready" as const, observedAt: "2026-10-19T00:00:00Z" };
     let reads = 0;
     const connectors = new Connectors([{

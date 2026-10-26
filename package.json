@@ -23,6 +23,7 @@
     "@compforge/agentue": "0.0.1",
     "@compforge/aide-plugin": "file:packages/plugin",
     "@compforge/harness-toolbox": "0.3.10",
+    "@compforge/repocli": "0.5.0",
     "@deepseek-ai/dsh-sdk-client": "npm:@qiankun01/dsh-sdk-client@0.1.6-alpha.1",
     "@earendil-works/pi-ai": "1.4.0",
     "@earendil-works/pi-coding-agent": "1.4.0",

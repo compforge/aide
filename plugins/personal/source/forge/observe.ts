@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import type { ConnectorClient, PluginContext, PullRequest, PullRequestDiscoveryQuery, PullRequestPage, Resource } from "@compforge/aide-plugin";
+import type { ConnectorClient, PluginContext, PullRequestKey, Resource } from "@compforge/aide-plugin";
 import { digest, INPUT_TYPE } from "../../chief-model.ts";
 import { bindSourceInput, type SourceInput } from "../input.ts";
 import { SOURCES } from "../definition.ts";
@@ -7,17 +7,11 @@ import type { ForgeWatch } from "./config.ts";
 import { FORGE_SOURCE_TYPE } from "./definition.ts";
 export { FORGE_SOURCE_TYPE } from "./definition.ts";
 
-interface Tracked { snapshot: PullRequest; fingerprint: string; terminalAt?: string }
-interface Scan { query: PullRequestDiscoveryQuery; page?: PullRequestPage; offset: number }
-export interface ForgeSourceStatus {
-  initialized?: boolean; sequence?: number; tracked?: Record<string, Tracked>;
-  scan?: Scan | null; scannedThrough?: string;
-  pending?: { name: string; key: string; spec: SourceInput; entry: Tracked } | null;
-  refreshAfter?: string | null; refreshedAt?: string; lastObservedAt?: string; error?: string | null;
-}
+import { fingerprint, keyOf, upgradeCheckpoint, type Tracked, type ForgeSourceStatus } from "./state.ts";
+export type { ForgeSourceStatus } from "./state.ts";
+
 type Context = Pick<PluginContext, "resources" | "logger">;
 type Source = Resource<ForgeWatch, ForgeSourceStatus>;
-const keyOf = (pr: PullRequest["identity"]) => JSON.stringify([pr.forge, pr.path, pr.number]);
 const iso = (n: number) => new Date(n).toISOString();
 const BATCH_SIZE = 5;
 
@@ -42,26 +36,25 @@ class ForgeObservation {
       await bindSourceInput(SOURCES.forges, this.resource, this.context.resources)(plan.name, plan.spec);
     }
     await this.save({ tracked: { ...this.tracked, [plan.key]: plan.entry }, pending: null });
-    this.context.logger.info("Forge change admitted as Input", { attributes: { watchId: this.resource.spec.id, inputId: plan.name, ...plan.entry.snapshot.identity, lifecycle: plan.entry.snapshot.lifecycle } });
+    this.context.logger.info("Forge change admitted as Input", { attributes: { watchId: this.resource.spec.id, inputId: plan.name, forge: plan.entry.snapshot.repository.forge.name, path: plan.entry.snapshot.repository.path, number: plan.entry.snapshot.number, state: plan.entry.snapshot.state } });
   }
-  private async observe(identity: PullRequest["identity"]) {
+  private async observe({ repository, number }: PullRequestKey) {
+    const identity = { repository, number };
     const snapshot = await this.connectors.forges.get(identity);
-    if (keyOf(snapshot.identity) !== keyOf(identity)) throw new Error("Forge returned a different PR identity");
+    if (keyOf(snapshot) !== keyOf(identity)) throw new Error("Forge returned a different PR identity");
     const key = keyOf(identity), previous = this.tracked[key];
-    // Polling metadata and target-branch movement alone do not describe a new authored change.
-    const { observedAt: _, updatedAt: __, baseSha: ___, ...facts } = snapshot;
-    const fingerprint = digest(facts);
-    if (previous?.fingerprint === fingerprint) return;
-    const entry: Tracked = { snapshot, fingerprint, ...(snapshot.lifecycle !== "open" ? { terminalAt: previous?.terminalAt ?? this.now } : {}) };
+    const observedFingerprint = fingerprint(snapshot);
+    if (previous?.fingerprint === observedFingerprint) return;
+    const entry: Tracked = { snapshot, fingerprint: observedFingerprint, ...(snapshot.state !== "open" ? { terminalAt: previous?.terminalAt ?? this.now } : {}) };
     const sequence = (this.resource.status.sequence ?? 0) + 1;
     const name = digest([this.resource.metadata.uid, sequence]);
-    const change = previous ? `${previous.snapshot.lifecycle} → ${snapshot.lifecycle}` : `首次观察：${snapshot.lifecycle}`;
+    const change = previous ? `${previous.snapshot.state} → ${snapshot.state}` : `首次观察：${snapshot.state}`;
     const review = previous && (previous.snapshot.reviewActivityKey !== snapshot.reviewActivityKey || previous.snapshot.reviewThreads !== snapshot.reviewThreads)
       ? "\n评审线程有变化；完整内容可按需查询。" : "";
     const revision = previous?.snapshot.headSha !== snapshot.headSha ? `
 revision：${previous?.snapshot.headSha ?? "未知"} → ${snapshot.headSha ?? "未知"}` : "";
-    const spec: SourceInput = { topicKey: `forge:${key}`, topicName: `${identity.path} #${identity.number}`.slice(0, 80), relation: "observed", attention: "deferred",
-      text: `PR/MR ${identity.forge}/${identity.path} #${identity.number}：${snapshot.title}
+    const spec: SourceInput = { topicKey: `forge:${key}`, topicName: `${identity.repository.path} #${identity.number}`.slice(0, 80), relation: "observed", attention: "deferred",
+      text: `PR/MR ${identity.repository.forge.name}/${identity.repository.path} #${identity.number}：${snapshot.title}
 ${change}${revision}${review}
 评审线程：${snapshot.reviewThreads}；合并条件：${snapshot.mergeability}
 ${snapshot.url}`.slice(0, 32_000),
@@ -81,7 +74,7 @@ ${snapshot.url}`.slice(0, 32_000),
     if (!scan.page) {
       const page = await this.connectors.forges.discover(this.resource.spec.forge, scan.query);
       if (page.nextCursor && page.nextCursor === scan.query.cursor) throw new Error("Forge discovery pagination did not advance");
-      if (page.items.some(i => i.forge !== this.resource.spec.forge)) throw new Error("Forge discovery returned a foreign identity");
+      if (page.items.some(i => i.repository.forge.name !== this.resource.spec.forge)) throw new Error("Forge discovery returned a foreign identity");
       scan = { ...scan, page }; await this.save({ scan });
     }
     const end = Math.min(scan.page!.items.length, scan.offset + BATCH_SIZE);
@@ -97,11 +90,11 @@ ${snapshot.url}`.slice(0, 32_000),
   private async refresh() {
     const status = this.resource.status;
     if (!status.refreshAfter && status.refreshedAt && Date.parse(this.now) - Date.parse(status.refreshedAt) < this.resource.spec.intervalMs) return;
-    const keys = Object.keys(this.tracked).filter(key => this.tracked[key]!.snapshot.lifecycle === "open" && (!status.refreshAfter || key > status.refreshAfter)).sort();
+    const keys = Object.keys(this.tracked).filter(key => this.tracked[key]!.snapshot.state === "open" && (!status.refreshAfter || key > status.refreshAfter)).sort();
     const batch = keys.slice(0, BATCH_SIZE);
     const errors: string[] = [];
     for (const key of batch) {
-      try { await this.observe(this.tracked[key]!.snapshot.identity); }
+      try { await this.observe(this.tracked[key]!.snapshot); }
       catch (error) { if (this.resource.status.pending) throw error; errors.push(`${key}: ${String(error)}`); }
       await this.save({ refreshAfter: key });
     }
@@ -109,6 +102,11 @@ ${snapshot.url}`.slice(0, 32_000),
     if (errors.length) throw new Error(errors.join("; "));
   }
   async run() {
+    const upgraded = upgradeCheckpoint(this.resource.status);
+    if (upgraded) {
+      await this.save(upgraded);
+      this.context.logger.info("Forge checkpoint upgraded to shared PR facts", { attributes: { watchId: this.resource.spec.id } });
+    }
     await this.deliver();
     const errors: string[] = [];
     try { await this.discover(); } catch (error) { if (this.resource.status.pending) throw error; errors.push(String(error)); }

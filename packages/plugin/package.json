@@ -1,6 +1,6 @@
 {
   "name": "@compforge/aide-plugin",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Public protocol and authoring types for Aide plugins.",
   "type": "module",
   "license": "Apache-2.0",
@@ -26,6 +26,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@compforge/harness-common": "0.5.1"
+    "@compforge/harness-common": "0.5.8",
+    "@compforge/repocli": "0.5.0"
   }
 }

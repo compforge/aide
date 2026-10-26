@@ -61,7 +61,16 @@ const snapshot = await context.connectors.environments.workloads("dev", "app");
 
 Environment names and aliases resolve to a canonical name. Listing returns compact declarations; reading returns access coordinates, without opening kubeconfig files or connecting to the target. Unknown targets reject. The Environment / Host identity contracts come from `@compforge/harness-common`; no toolbox access lifecycle is implied.
 
-Requirements and forges expose typed list / get operations, with forge comments available separately. Connectors are global capabilities, while a plugin's observation policy belongs in its instance config. See [Connector configuration](../../docs/connector/README.md).
+Requirements and forges expose typed list / get operations, with forge comments available separately. Forge references and query/comment types come from `@compforge/repocli`, whose Repository / PullRequest facts use `@compforge/harness-common`. `PullRequestObservation` is re-exported from repocli and extends common's serializable `PullRequestSnapshot`; it has `repository`, `number` and `state`, and excludes identity methods. Plugins use the Host Connector and do not instantiate repocli clients.
+
+```ts
+const pull = await context.connectors.forges.get({
+  repository: { forge: { name: "github.com" }, path: "org/repo" }, number: 7,
+});
+// pull.state is open / merged / closed; no id() methods cross IPC.
+```
+
+Version 0.14 replaces the former flattened `PullRequestIdentity` and `PullRequest.lifecycle` with this shared reference and observation shape. Connectors are global capabilities, while a plugin's observation policy belongs in its instance config. See [Connector configuration](../../docs/connector/README.md).
 
 ## Resources and scheduling
 
