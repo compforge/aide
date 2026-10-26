@@ -1,19 +1,9 @@
 import {
   jsonObject,
 } from "../config.ts";
-import type { Fetch } from "./http.ts";
-import { GitHubForgeConnector } from "./github.ts";
-import { GitLabForgeConnector } from "./gitlab.ts";
-import type { ForgeConnector } from "./protocol.ts";
+import { createForgeReader, type ForgeFetch, type ForgeReader, type ForgeReaderConfig } from "@compforge/repocli";
 
-export interface ForgeConfig {
-  readonly forge: string;
-  readonly provider: "github" | "gitlab";
-  /** Network host used by the provider adapter. */
-  readonly host: string;
-  readonly uids?: readonly string[];
-  readonly token?: string;
-}
+export type ForgeConfig = Omit<ForgeReaderConfig, "token"> & { readonly token?: string };
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -118,17 +108,13 @@ export function createForgeConnectors(
   config: Readonly<Record<string, unknown>>,
   options: {
     readonly environment?: Environment;
-    readonly fetch?: Fetch;
+    readonly fetch?: ForgeFetch;
   } = {},
-): readonly ForgeConnector[] {
-  const connectors: ForgeConnector[] = [];
+): readonly ForgeReader[] {
+  const connectors: ForgeReader[] = [];
   for (const entry of loadForgeConfigs(config, options.environment)) {
     if (!entry.token) continue;
-    connectors.push(
-      entry.provider === "github"
-        ? new GitHubForgeConnector(entry, options)
-        : new GitLabForgeConnector(entry, options),
-    );
+    connectors.push(createForgeReader({ ...entry, token: entry.token }, { fetch: options.fetch }));
   }
   return connectors;
 }

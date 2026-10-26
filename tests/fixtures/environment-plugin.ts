@@ -19,8 +19,8 @@ const plugin: PluginPackage = {
           requirementComments: await context.connectors.requirements.comments({ source: "work", category: "story", id: "1" }),
           requirement: await context.connectors.requirements.get({ source: "work", category: "story", id: "1" }),
           pulls: await context.connectors.forges.list("forge", "org/repo", { state: "open", limit: 10 }),
-          pull: await context.connectors.forges.get({ forge: "forge", path: "org/repo", number: 1 }),
-          comments: await context.connectors.forges.comments({ forge: "forge", path: "org/repo", number: 1 }),
+          pull: await context.connectors.forges.get({ repository: { forge: { name: "forge" }, path: "org/repo" }, number: 1 }),
+          comments: await context.connectors.forges.comments({ repository: { forge: { name: "forge" }, path: "org/repo" }, number: 1 }),
         };
         await context.resources.patchStatus(resource, { done: true, result });
         } catch (error) { await context.resources.patchStatus(resource, { done: true, error: String(error) }); }
