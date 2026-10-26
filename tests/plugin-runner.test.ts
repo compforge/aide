@@ -78,7 +78,8 @@ describe("Plugin Runner process boundary", () => {
     const connectors = new Connectors([{
       source: "work", provider: "fixture", async identity() { return { provider: "fixture", scope: "p" }; }, async comments() { return { items: [] }; }, async list() { reads++; return { items: [requirement] }; }, async get() { return requirement; },
     }], [{
-      forge: "forge", provider: "github", async list() { return [identity]; }, async get() { return pull; }, async comments() { return []; },
+      forge: "forge", provider: "github",
+      async discover() { return { items: [] }; }, async list() { return [identity]; }, async get() { return pull; }, async comments() { return []; },
     }], new Environments(resolveEnvironmentConfig({ dev: { kind: "host", aliases: ["开发"], host: { name: "vm", transport: "ssh", address: "not-contacted.invalid" } } })));
     const failures: unknown[] = [];
     const manager = new Manager({

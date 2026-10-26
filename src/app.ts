@@ -1,3 +1,5 @@
+import { forgeWatches } from "../plugins/personal/source/forge/config.ts";
+import { loadForgeConfigs } from "../connectors/forge/config.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { initialTopicName } from "../plugins/personal/topic/model.ts";
 import { ROUTE_HARNESS } from "../plugins/personal/route/model.ts";
@@ -84,6 +86,7 @@ export class Aide {
     this.defaultHarnessConfig = Object.freeze({ ...options.defaultHarnessConfig });
     const config = options.config;
     const { sources } = parsePersonalConfig(config?.plugins.personal);
+    const forgeSources = forgeWatches(sources.forges, loadForgeConfigs(config?.connectors ?? {}));
     const connectorMe = { identities: (config?.connectors.lark?.me ?? []).map(i => ({ provider: "lark", scope: i.appId, id: i.openId })) };
     const channelMe = { identities: [LOCAL_ME, ...Object.values(config?.channels ?? {}).flatMap(c => c.me ? [{ provider: "lark", scope: c.appId, id: c.me.openId }] : [])] };
     this.meMarks = { identities: [...channelMe.identities, ...connectorMe.identities] };
@@ -107,6 +110,7 @@ export class Aide {
     validateWatchScopes(this.watches, requirements);
     this.log.info({
       meIdentities: this.meMarks.identities.length,
+      forges: forgeSources.map(({ id, forge, author, intervalMs }) => ({ id, forge, author, intervalMs })),
       environments: this.environmentSources.map(({ environment, namespace, intervalMs }) => ({ environment, namespace, intervalMs })),
       requirements: this.watches.map(({ id, source, intervalMs }) => ({ id, connector: source, intervalMs })),
       lark: this.messageSource ? { intervalMs: this.messageSource.intervalMs, scenarios: ["direct", "mention", ...(this.messageSource.personIds.length ? ["sent"] : [])] } : null,
@@ -120,7 +124,7 @@ export class Aide {
     this.runtime = new ApplicationRuntime(home, {
       cwd: options.cwd,
       instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ weave: parsePersonalConfig(config?.plugins.personal).weave, route: parsePersonalConfig(config?.plugins.personal).route, topic: parsePersonalConfig(config?.plugins.personal).topic, task: parsePersonalConfig(config?.plugins.personal).task, routine: parsePersonalConfig(config?.plugins.personal).routine, watches: this.watches,
-        environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
+        forgeSources, environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
       harness: { harnesses: [{ ...this.defaultHarnessConfig }, { id: "weave", harness: "weave" }, { id: ROUTE_HARNESS, harness: "route" }, { id: "chief", harness: "chief" }, { id: "task", harness: "task" }, { id: "routine", harness: "routine" }],
         defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },

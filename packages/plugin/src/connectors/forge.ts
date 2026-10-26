@@ -26,6 +26,11 @@ export interface PullRequest {
   readonly reviewActivityKey?: string;
   readonly mergeability: PullRequestMergeability;
   readonly observedAt: string;
+  /** Provider facts; absence means unavailable, never an unchanged revision. */
+  readonly headSha?: string;
+  readonly baseSha?: string;
+  readonly updatedAt?: string;
+  readonly mergedAt?: string;
 }
 
 /** One top-level provider-neutral comment, with review replies nested. */
@@ -46,12 +51,26 @@ export interface PullRequestListQuery {
   readonly limit: number;
 }
 
+export interface PullRequestDiscoveryQuery {
+  /** Explicit platform username, independent of the credential owner. */
+  readonly author: string;
+  readonly state: "open" | "all";
+  readonly updatedAfter?: string;
+  readonly updatedBefore: string;
+  readonly cursor?: string;
+}
+export interface PullRequestPage {
+  readonly items: readonly PullRequestIdentity[];
+  readonly nextCursor?: string;
+}
+
 /**
  * Read-only provider boundary for PullRequest discovery and observation.
  * `forge` selects one configured Forge without leaking provider details into
  * the Resource identity.
  */
 export interface ForgeConnector {
+  discover(query: PullRequestDiscoveryQuery): Promise<PullRequestPage>;
   readonly forge: string;
   readonly provider: "github" | "gitlab";
   /** Lists provider objects; the calling Source owns the admission policy. */

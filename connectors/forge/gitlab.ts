@@ -1,7 +1,10 @@
+import { discoveryAuthor, discoveryPage, nextPage } from "./discovery.ts";
 import type {
   Comment,
   ForgeConnector,
   PullRequestIdentity,
+  PullRequestDiscoveryQuery,
+  PullRequestPage,
   PullRequestListQuery,
   PullRequestLifecycle,
   PullRequestMergeability,
@@ -104,6 +107,25 @@ export class GitLabForgeConnector implements ForgeConnector {
     this.#now = options.now ?? (() => new Date());
   }
 
+  async discover(query: PullRequestDiscoveryQuery): Promise<PullRequestPage> {
+    const page = discoveryPage(query);
+    const parameters = new URLSearchParams({ scope: "all", author_username: query.author,
+      state: query.state === "open" ? "opened" : "all", updated_before: query.updatedBefore,
+      order_by: "updated_at", sort: "asc", per_page: "50", page: String(page) });
+    if (query.updatedAfter) parameters.set("updated_after", query.updatedAfter);
+    const { data, headers } = await this.#http.request("GET", `${this.#apiBase}/merge_requests?${parameters}`, { headers: this.#headers() });
+    const items = records("GitLab MR discovery", data).map(row => {
+      const url = new URL(nonEmptyString("GitLab discovery web_url", row.web_url));
+      const suffix = `/-/merge_requests/${row.iid}`;
+      if (!Number.isSafeInteger(row.iid) || Number(row.iid) < 1 || !url.pathname.endsWith(suffix)) throw new Error("Invalid GitLab MR discovery identity");
+      const path = decodeURIComponent(url.pathname.slice(1, -suffix.length));
+      if (!path || !discoveryAuthor(row.author, "username", query.author)) throw new Error("Invalid GitLab discovery repository or author");
+      return { forge: this.forge, path, number: Number(row.iid) };
+    });
+    const cursor = nextPage(headers, page, "gitlab");
+    return { items, ...(cursor ? { nextCursor: cursor } : {}) };
+  }
+
   async list(
     path: string,
     query: PullRequestListQuery,
@@ -202,6 +224,10 @@ export class GitLabForgeConnector implements ForgeConnector {
       reviewThreads,
       ...(reviewActivity ? { reviewActivityKey: reviewActivity } : {}),
       mergeability: mergeability(mergeRequest),
+      ...(typeof mergeRequest.sha === "string" ? { headSha: mergeRequest.sha } : {}),
+      ...(typeof (mergeRequest.diff_refs as Record<string, unknown> | undefined)?.base_sha === "string" ? { baseSha: (mergeRequest.diff_refs as Record<string, string>).base_sha } : {}),
+      ...(typeof mergeRequest.updated_at === "string" ? { updatedAt: mergeRequest.updated_at } : {}),
+      ...(typeof mergeRequest.merged_at === "string" ? { mergedAt: mergeRequest.merged_at } : {}),
       observedAt: this.#now().toISOString(),
     };
   }
