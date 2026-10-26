@@ -58,9 +58,15 @@ export async function createPiAgent(options: PiAgentOptions): Promise<AgentSessi
   }
   const extensionTools = extensions.extensions.flatMap((extension) => [...extension.tools.keys()]).filter(name => !options.extensionToolNames || options.extensionToolNames.includes(name));
   const tools = options.tools ?? [];
-  const { session } = await createAgentSession({ cwd, agentDir, sessionManager: manager ?? SessionManager.create(cwd, `${agentDir}/sessions`), modelRuntime,
+  const native = manager ?? SessionManager.create(cwd, `${agentDir}/sessions`);
+  const capture = options.config.observation?.open(native);
+  let session: AgentSession;
+  try {
+    ({ session } = await createAgentSession({ cwd, agentDir, sessionManager: capture?.manager ?? native, modelRuntime,
     settingsManager: settings, resourceLoader: loader, model,
-    tools: [...(options.nativeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls"]), ...tools.map((tool) => tool.name), ...extensionTools], customTools: tools });
+    tools: [...(options.nativeTools ?? ["read", "bash", "edit", "write", "grep", "find", "ls"]), ...tools.map((tool) => tool.name), ...extensionTools], customTools: tools }));
+  } catch (error) { capture?.close(); throw error; }
+  capture?.bind(session);
   if (!session.model) { session.dispose(); throw new Error("Pi has no configured model; configure Pi auth/models or select a model"); }
   if (!manager) {
     session.sessionManager.appendCustomEntry("aide.agent-scope", { scope: options.scope ?? "pi" });

@@ -1,3 +1,4 @@
+import { AgentCallSchema } from "../observation/reference.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { type ResourceDefinition } from "@compforge/aide-plugin";
@@ -12,6 +13,7 @@ export const OutputSpecSchema = z.object({
   target: AddressSchema,
   receivers: z.array(ref.extend({ kind: z.literal("Person"), namespace: z.string().transform(parseResourceNamespace), uid: z.string().min(1) })).max(100).optional(),
   topic: ref.extend({ uid: z.string().min(1) }), topicId: z.string().min(1),
+  inputUids: z.record(z.string(), z.string().min(1)).optional(), createdBy: AgentCallSchema.optional(),
   executionId: z.string().optional(), producer: ref.optional(), inputIds: z.array(z.string().min(1)).max(1001).optional(),
 }).strict();
 export const OutputStatusSchema = z.object({ phase: z.enum(["pending", "sending", "delivered", "failed", "uncertain"]), attempts: z.number().int().nonnegative(),

@@ -1,3 +1,8 @@
+import { inputJob } from "../plugins/personal/observation/job.ts";
+import { PiObservations, ObservationConfigSchema } from "../agents/pi/observation.ts";
+import { readObservation } from "@compforge/agent-pi/observation";
+import { inspect, type ModelCall, type ToolCall } from "@compforge/agent-observation";
+import { readdirSync } from "node:fs";
 import type { ReadBackground } from "../agents/background.ts";
 import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { PiAdapter } from "../src/host/harness/pi/adapter.ts";
@@ -23,7 +28,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
-import { resolvePiConfig, type PiModelConfigInput } from "../src/host/harness/pi/config.ts";
+import { resolvePiConfig, type PiModelConfigInput, type PiConfig } from "../src/host/harness/pi/config.ts";
 import { createPiAgent } from "../agents/pi/agent.ts";
 import { createChiefAgent } from "../agents/chief/agent.ts";
 import { WorkService } from "../plugins/personal/work.ts";
@@ -40,7 +45,7 @@ function messageText(content: unknown): string {
 }
 
 /** Real Pi SDK and HTTP protocol; only the remote model is scripted. No external credentials or network. */
-async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" | "route" = "pi", model: PiModelConfigInput = { provider: "fixture", id: "test-model" }, sharedPersons?: Persons, background?: ReadBackground) {
+async function setup(t: TestContext, respond: (request: Record<string, unknown>, index: number) => Reply, harness: "pi" | "chief" | "route" = "pi", model: PiModelConfigInput = { provider: "fixture", id: "test-model" }, sharedPersons?: Persons, background?: ReadBackground, captureRequests = false) {
   const root = mkdtempSync(join(tmpdir(), "aide-pi-sdk-"));
   const personFile = join(root, "PERSON.md");
   const requests: Record<string, unknown>[] = [];
@@ -84,7 +89,8 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
   const store = new Store(resources, createResourceClient(resources, undefined, undefined, personalAdmission(new InputStore(root), new OutputStore(root))), new TopicStore(session));
   const work = new WorkService(store, "me", pino({ level: "silent" }));
   const inputs = { cwd: root, agentDir, model };
-  const config = { ...inputs, config: await resolvePiConfig({ ...inputs, ...(harness === "chief" ? { skillPaths: [] } : {}) }) };
+  const observation = new PiObservations(join(root, "observations"), ObservationConfigSchema.parse({ captureRequests }), pino({ level: "silent" }));
+  const config: typeof inputs & { config: PiConfig } = { ...inputs, config: { ...await resolvePiConfig({ ...inputs, ...(harness === "chief" ? { skillPaths: [] } : {}) }), observation } };
   const events: HarnessEvent[] = [];
   let binding: HarnessSessionReference | undefined;
   let finished: (() => void) | undefined;
@@ -127,7 +133,7 @@ async function setup(t: TestContext, respond: (request: Record<string, unknown>,
     await terminal;
     return session.summarizeInvocation(turnId);
   }
-  return { work, config, session, adapter, events, requests, requestHeaders, run, personFile, persons, native: () => native!, ref: () => ref, binding: () => binding!,
+  return { work, config, observation, session, adapter, events, requests, requestHeaders, run, personFile, persons, native: () => native!, ref: () => ref, binding: () => binding!,
     reopen: async () => { await adapter.close(ref); ref = await open(); return ref; } };
 }
 
@@ -832,7 +838,15 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
   for (const id of ["route-first", "route-second"]) {
     const input = aide.topics.inputStore.get(id)!;
     assert.ok(input.status.route?.completedAt);
+    assert.ok(input.status.route.agent?.sessionId);
+    assert.equal(input.status.route.completedBy?.agent.harness, "route");
     assert.deepEqual(Object.keys(input.status.assess!), [targetUid]);
+    const assessment = input.status.assess![targetUid]!;
+    assert.equal(assessment.agent?.harness, "chief"); assert.ok(assessment.completedBy?.toolCallId);
+    const job = await inputJob(input, [], agent => fixture.observation.read(fixture.config.cwd, fixture.config.config, agent.sessionId));
+    for (const call of [input.status.route.completedBy!, assessment.completedBy!])
+      assert.ok(job.nodes.some(n => n.kind === "tool_call" && (n as ToolCall).tool_call_id === call.toolCallId && n.session?.id === call.agent.sessionId));
+    assert.doesNotThrow(() => inspect(job));
     assert.ok(input.status.assess![targetUid]!.completedAt);
   }
   const followup = routeRequests.find(r => JSON.stringify(r.messages).includes("subject-two"))!;
@@ -917,6 +931,15 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     const output = aide.outputStore.list()[0]!;
     assert.equal(output.spec.producer?.uid, work.uid);
     assert.deepEqual(output.spec.inputIds, [inputId]);
+    const fact = aide.topics.inputStore.get(inputId)!;
+    assert.deepEqual(output.spec.inputUids, { [inputId]: fact.metadata.uid });
+    assert.deepEqual(output.spec.createdBy?.agent, agent);
+    const receipt = fact.status.handle![work.uid!]!;
+    assert.deepEqual(receipt.agent, agent); assert.deepEqual(receipt.completedBy?.agent, agent);
+    const job = await inputJob(fact, [output], ref => fixture.observation.read(fixture.config.cwd, fixture.config.config, ref.sessionId));
+    for (const call of [receipt.completedBy!, output.spec.createdBy!])
+      assert.ok(job.nodes.some(n => n.kind === "tool_call" && (n as ToolCall).tool_call_id === call.toolCallId));
+    assert.doesNotThrow(() => inspect(job));
     if (kind === "routine") assert.equal(aide.topics.inputStore.get(inputId)!.status.assess, undefined);
     await aide.close(); aide = open(); await aide.start();
     const before = fixture.requests.length;
@@ -1087,4 +1110,30 @@ test("Pi stops the current loop when context cannot refresh between tool turns",
   const result = await fixture.run("Inspect", "refresh-failed");
   assert.equal(fixture.requests.length, 1);
   assert.notEqual(result.stopReason, "end_turn");
+});
+
+/** @case Native Session remains authoritative; provider request evidence survives close/resume without copying response bodies. */
+test("Pi Observation preserves request Background and stable native links after resume", async t => {
+  let background = "current background v1";
+  const f = await setup(t, () => ({ text: "native-only answer" }), "pi", { provider: "fixture", id: "test-model" }, undefined,
+    async () => ({ text: () => background }), true);
+  await f.run("first input", "first");
+  const id = f.binding().identity.id;
+  const first = await f.observation.read(f.config.cwd, f.config.config, id);
+  const models = first.nodes.filter(n => n.kind === "model_call") as ModelCall[];
+  assert.equal(models.length, 1);
+  assert.match(JSON.stringify(models[0]!.request), /current background v1/);
+  assert.match(JSON.stringify(models[0]!.response), /native-only answer/);
+  assert.doesNotThrow(() => inspect(first));
+  await f.reopen(); background = "current background v2";
+  await f.run("followup input", "second");
+  const resumed = await f.observation.read(f.config.cwd, f.config.config, id);
+  const resumedModels = resumed.nodes.filter(n => n.kind === "model_call") as ModelCall[];
+  assert.equal(resumedModels.length, 2); assert.equal(resumedModels[0]!.id, models[0]!.id);
+  assert.match(JSON.stringify(resumedModels[1]!.request), /current background v2/);
+  assert.equal(readdirSync(f.observation.directory).length, 1);
+  const supplement = readObservation(join(f.observation.directory, readdirSync(f.observation.directory)[0]!), id);
+  assert.equal(supplement.nodes.some(n => JSON.stringify((n as ModelCall).response ?? {}).includes("native-only answer")), false);
+  const native = SessionManager.open(f.native().sessionFile!);
+  assert.equal(JSON.stringify(native.getEntries()).includes("current background v2"), false);
 });

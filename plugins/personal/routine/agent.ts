@@ -55,7 +55,7 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
           action: Type.Union([Type.Literal("done"), Type.Literal("wait"), Type.Literal("ask")]), question: Type.Optional(Type.String()), nextAt: Type.Optional(Type.String()) }),
         async execute(_id, args) {
           const routine = current();
-          const report = await reportWork(plugins.resourceClient("personal"), routine, routine.status.execution!.id, args);
+          const report = await reportWork(plugins.resourceClient("personal"), routine, routine.status.execution!.id, args, _id);
           log.info({ routineId: routine.metadata.name, routineUid: routine.metadata.uid, executionId: routine.status.execution!.id,
             inputIds: report.inputIds, status: report.status }, "Routine progress reported");
           return result(report);

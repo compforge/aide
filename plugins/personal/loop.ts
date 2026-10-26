@@ -2,7 +2,7 @@ import { z } from "zod";
 import { prepareAgent, saveAgent } from "./session.ts";
 import type { PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
 import type { InputSpec } from "./input/model.ts";
-import { inputRef, pendingInputs, resourceRef, attemptOf, attemptPatch, type Input } from "./input/state.ts";
+import { inputRef, pendingInputs, resourceRef, changeAttempt, attemptOf, attemptPatch, type Input } from "./input/state.ts";
 export { inputRef } from "./input/state.ts";
 /** A persistent native session owns context; each invocation has a separate durable admission identity. */
 export const LoopExecutionSchema = z.object({ id: z.string(), startedAt: z.string(), admissionRevision: z.number().int().nonnegative().optional() }).strict();
@@ -57,7 +57,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   await context.resources.commit([
     { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, admissionRevision: 0 } } },
     ...inputs.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: attemptPatch(input!, resourceRef(current), {
-      executionId: execution.executionId, startedAt, nextAttemptAt: undefined,
+      executionId: execution.executionId, agent: undefined, startedAt, nextAttemptAt: undefined,
       ...(current.kind === "Route" ? { attempts: (input!.status.route?.attempts ?? 0) + 1 } : {}) }) })),
   ]);
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", inputIds, executionId: execution.executionId } });
@@ -65,6 +65,8 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   let error = "Agent ended without confirming input completion";
   try {
     const agent = await prepareAgent(context.resources, execution, current, target);
+    for (const id of inputIds) await changeAttempt(context.resources, id, resourceRef(current), receipt =>
+      receipt?.executionId === execution.executionId && !receipt.completedAt ? { agent } : {});
     const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Topic" ? "Chief" : current.kind, prompt, timeoutMs: 172800_000 });
     completed = result.state === "success" && result.value.result.stopReason === "end_turn";
     if (result.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, result.agent);

@@ -62,6 +62,7 @@ plugins/personal/
     messages.ts            # Connector 消息贡献人物事实
   input/                   # Input 定义、幂等接收、分页检索、保留策略与 Printer
   output/                  # Output 定义、投递状态、action 与 Printer
+  observation/             # Input JobView、原生调用引用与业务证据关联
   aide.ts                  # 全局 Personal 服务：领域工具装配、输入与恢复
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
   weave/                   # 全局 Weave CRD、分批组织与安全交接
@@ -107,7 +108,7 @@ plugins/personal/
   work-input.ts            # Work Reconcile 查询 Input 办理记录与应用请求
   store.ts                 # 宿主端工作存取、消息与去重投影
 agents/
-  pi/                      # 通用 Pi Agent：SDK、原生工具与会话
+  pi/                      # 通用 Pi Agent：SDK、原生工具、会话与有界 Observation 补录
   route/                   # 专用路由 Agent，仅分类、目录和共享记忆检索
   weave/                   # 专用主题整理 Agent，识别 root 关联并提议归组
   task/                    # 稳定目标的持续办理 Agent，复用 Pi
@@ -146,6 +147,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - [Harness](docs/harness/README.md)、[Pi](docs/harness/pi.md)：通用执行契约与原生适配。
 - [Channel](docs/channel/README.md)：[Web](docs/channel/web.md)、[Lark](docs/channel/lark.md)。
 - [Connector 与 Source](docs/connector/README.md)：[Forge](docs/connector/forge.md)、[环境](docs/connector/environments.md)、[Lark 消息](docs/connector/lark-messages.md)、[需求平台](docs/connector/requirements.md)。
+- [Observation](docs/observation.md)：Input JobView、原生 SessionView、请求补录与证据缺口。
 - [配置](docs/configuration.md)、[部署与诊断](docs/deployment.md)、[真实验收](docs/e2e.md)。
 
 ## 定向验证

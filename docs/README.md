@@ -15,6 +15,7 @@ Aide 通过 Channel 与 Source 接收事实，由 Personal 判断、推进已有
 | 接入外部信息 | [Connector 与 Source](connector/README.md) |
 | 开发插件或修改底座 | [Kernel](kernel.md) → [Plugin](plugin/README.md) → [Resource](plugin/resource.md) |
 | 接入或修改 Agent 执行 | [Harness](harness/README.md) → [Pi](harness/pi.md) |
+| 分析 Input 处理与 Agent 上下文 | [Observation](observation.md) |
 | 验证真实使用效果 | [E2E](e2e.md) |
 
 ## 内容归属

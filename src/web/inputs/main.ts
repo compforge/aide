@@ -83,6 +83,17 @@ function renderDetail(detail: InputDetailView) {
     const link = node('a', '查看人物资料'); link.href = '/people?' + new URLSearchParams({ person: input.spec.sender.name, uid: input.spec.sender.uid! });
     const value = node('dd'); value.append(link); $('input-facts').append(node('dt', '发送者'), value);
   }
+  const observation = $('input-observation'); observation.replaceChildren();
+  const link = (title: string, path: string, extra: Record<string, string> = {}) => {
+    const anchor = node('a', title); anchor.href = path + '?' + new URLSearchParams({ id: input.metadata.name, uid: input.metadata.uid, ...extra });
+    anchor.target = '_blank'; anchor.rel = 'noopener'; observation.append(anchor, document.createTextNode(' · '));
+  };
+  link('查看 JobView', '/inputs/job', { format: 'html' });
+  link('下载 Job JSON', '/inputs/job', { download: '1' });
+  for (const agent of detail.sessions) {
+    link(`${agent.harness} Session`, '/inputs/session', { ...agent, format: 'html' });
+    link('下载 Session JSON', '/inputs/session', { ...agent, download: '1' });
+  }
   $('input-text').textContent = input.spec.text;
   $('input-evidence').textContent = JSON.stringify(input.spec.observation ?? {}, null, 2);
   $('input-status').textContent = JSON.stringify({ status: input.status, outputs: detail.outputs }, null, 2);

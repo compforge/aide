@@ -1,3 +1,4 @@
+import type { AgentCall } from "../observation/reference.ts";
 import type { PluginContext, Resource, ResourceCommit } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, initialTopicName, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
@@ -8,7 +9,7 @@ export type RoutingContext = Pick<PluginContext, "resources"> & { logger: Pick<P
 export type RoutingInput = Readonly<Resource<InputSpec, InputStatus>>;
 export const routed = (input: RoutingInput) => !!input.status.route?.completedAt;
 /** @spec A routing decision and all assessment assignments are one atomic fact. Repeated decisions never reopen a consumer. */
-export async function deliver(context: RoutingContext, original: RoutingInput, destinations: Destination[], reason: string) {
+export async function deliver(context: RoutingContext, original: RoutingInput, destinations: Destination[], reason: string, completedBy?: AgentCall) {
   for (let n = 0; ; n++) {
     const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, ...original.metadata });
     if (!input) throw new Error("Input no longer exists");
@@ -32,7 +33,7 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
       await context.resources.commit([
         ...touched.map(c => ({ operation: "replace", resource: c, spec: { ...c.spec, name: c.spec.name || initialTopicName(input.spec.text) },
           status: { ...c.status, lastInputAt: at } }) as ResourceCommit),
-        { operation: "patchStatus", resource: input, patch: { assess, route: { ...input.status.route, completedAt: at,
+        { operation: "patchStatus", resource: input, patch: { assess, route: { ...input.status.route, ...(completedBy ? { completedBy } : {}), completedAt: at,
           result: { topics: topics.map(resourceRef), reason } } } },
       ]);
       context.logger.info("Input routed", { attributes: { inputId: input.metadata.name, topicUids: topics.map(c => c.metadata.uid), reason } });

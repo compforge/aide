@@ -45,6 +45,7 @@ export interface AideOptions {
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   defaultHarnessConfig: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
   createAdapter: ExecutionOptions["createAdapter"];
+  readSession?: import("./observation.ts").ReadSession;
 }
 
 /**
@@ -53,6 +54,10 @@ export interface AideOptions {
  * @link docs/kernel.md
  */
 export class Aide {
+  readSession: import("./observation.ts").ReadSession = agent => {
+    if (!this.options.readSession) return Promise.reject(new Error("Session observation reader is unavailable"));
+    return this.options.readSession(agent);
+  };
   private readonly inputDefinitions = new Map<string, ChannelDefinition | SourceDefinition>([
     ...Object.values(CHANNELS).map((definition) => [`channel:${definition.id}`, definition] as const),
     ...Object.values(SOURCES).map((definition) => [`source:${definition.id}`, definition] as const),

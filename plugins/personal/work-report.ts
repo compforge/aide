@@ -1,3 +1,4 @@
+import { agentCall } from "./observation/reference.ts";
 import { z } from "zod";
 import type { Resource, ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
 import { SUMMARY_CHARS, RECENT_CHARS } from "./context.ts";
@@ -15,7 +16,7 @@ export const WorkReportSchema = z.object({ inputIds: z.array(z.string().min(1)).
  * @link docs/personal/input.md#研判与办理
  * @case tests/work-context.test.ts
  */
-export async function reportWork(resources: ResourceClient, owner: Readonly<Resource<WorkSpec, WorkAgentStatus>>, executionId: string, raw: unknown) {
+export async function reportWork(resources: ResourceClient, owner: Readonly<Resource<WorkSpec, WorkAgentStatus>>, executionId: string, raw: unknown, toolCallId?: string) {
   const args = WorkReportSchema.parse(raw);
   if (new Set(args.inputIds).size !== args.inputIds.length) throw new Error("Duplicate input IDs in Work report");
   if (args.action === "ask" && !args.question?.trim()) throw new Error("ask requires question");
@@ -32,7 +33,7 @@ export async function reportWork(resources: ResourceClient, owner: Readonly<Reso
       if (receipt.completedAt) continue;
       if (!receipt.executionId || (receipt.executionId !== executionId && !receipt.lastError)) throw new Error(`Input is not admitted: ${id}`);
       writes.push({ operation: "patchStatus", resource: input, patch: { handle: { ...input.status.handle, [work.metadata.uid]: {
-        ...receipt, completedAt: at, result: { summary: args.recent, disposition: "completed" },
+        ...receipt, ...(toolCallId ? { completedBy: agentCall(work.status, toolCallId) } : {}), completedAt: at, result: { summary: args.recent, disposition: "completed" },
       } } } });
     }
     const remaining = (await pendingInputs(resources, resourceRef(work))).some(input => !args.inputIds.includes(input.metadata.name));

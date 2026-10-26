@@ -17,6 +17,7 @@ import { personalExecution } from "./execution-context.ts";
 import { say } from "./output/action.ts";
 import type { OutputStore } from "./output/store.ts";
 import { createRouteAgent } from "../../agents/route/agent.ts";
+import { agentCall } from "./observation/reference.ts";
 import { assessInput, type AssessInput } from "./topic/assess.ts";
 import { attemptOf, attemptPatch, resourceRef, changeAttempt } from "./input/state.ts";
 import { topicPolicy } from "./topic/config.ts";
@@ -88,9 +89,9 @@ export class Personal {
         this.plugins.executionVerbs(c.status.execution.id, { topicId });
         return c;
       };
-      const assess = async (input: AssessInput) => {
+      const assess = async (input: AssessInput, toolCallId: string) => {
         const c = active();
-        const result = await assessInput(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input);
+        const result = await assessInput(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, toolCallId);
         this.log.info({ topicId, inputId: input.inputId, workUids: input.workRequests?.map(r => r.workUid) ?? [] }, "Chief assessment completed");
         return result;
       };
@@ -142,7 +143,7 @@ export class Personal {
           return { topics: page.items, total: page.total, fingerprint: page.fingerprint, nextOffset: page.nextOffset };
         },
         input: (id, offset) => { const r = active(); return this.readLoopInput(resourceRef(r), id, offset); },
-        route: async raw => {
+        route: async (raw, toolCallId) => {
           const args = z.object({ inputId: z.string(), topicUids: z.array(z.string()).max(1), reason: z.string().min(1).max(4000) }).strict().parse(raw);
           const r = active();
           const input = this.topics.inputStore.get(args.inputId);
@@ -158,7 +159,7 @@ export class Personal {
             return { name: c.metadata.name, uid };
           });
           if (!destinations.length) destinations.push(await defaultDestination(context));
-          await deliver(context, input, destinations, args.reason);
+          await deliver(context, input, destinations, args.reason, agentCall(r.status, toolCallId));
           return { routed: args.inputId, topicUids: destinations.map(c => c.uid) };
         },
       } });
@@ -197,7 +198,7 @@ export class Personal {
         await resources.commit([
           // This is an admission revision, including rejected dispatches, not a count of consumed Inputs.
           { operation: "patchStatus", resource: resource!, patch: { execution: { ...resource!.status.execution!, admissionRevision: (resource!.status.execution!.admissionRevision ?? 0) + 1 } } },
-          { operation: "patchStatus", resource: input, patch: attemptPatch(input, ref, { executionId: id, startedAt: new Date().toISOString(), lastError: undefined, nextAttemptAt: undefined,
+          { operation: "patchStatus", resource: input, patch: attemptPatch(input, ref, { executionId: id, agent: resource.status.agent, startedAt: new Date().toISOString(), lastError: undefined, nextAttemptAt: undefined,
             ...(ref.kind === "Route" ? { attempts: (input.status.route?.attempts ?? 0) + 1 } : {}) }) },
         ]);
         admitted = { input, executionId: id, invocationId: invocation.invocationId };
@@ -220,7 +221,7 @@ export class Personal {
       if (result.state !== "success") throw new Error(`Harness ${operation} ${result.state}${result.state === "failure" ? `: ${result.error}` : ""}`);
       const outcome = { accepted: result.value.outcome === "accepted", reason: result.value.reason };
       if (!outcome.accepted) {
-        await changeAttempt(resources, inputId, ref, p => p?.executionId === id && !p.completedAt ? { executionId: undefined, startedAt: undefined } : {});
+        await changeAttempt(resources, inputId, ref, p => p?.executionId === id && !p.completedAt ? { executionId: undefined, agent: undefined, startedAt: undefined } : {});
         // An explicit rejection has no effects. Wake followup even if the invocation ended during admission.
         void this.plugins.enqueue({ pluginInstanceId: "personal", namespace: ref.namespace, resourceApiVersion: ref.apiVersion, resourceKind: ref.kind, resourceId: ref.name, controllerName: "agent" })
           .catch(error => this.log.error({ err: error, inputId }, "Could not schedule rejected steer for followup"));

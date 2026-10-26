@@ -1,3 +1,4 @@
+import { inputSessions } from "../../plugins/personal/observation/job.ts";
 import type { ResourceRef, ResourceNamespace } from "@compforge/aide-plugin";
 import { browseInputs, inputFacets, type InputBrowseQuery } from "../../plugins/personal/input/browse.ts";
 import type { Attempt, Assessment, Handling } from "../../plugins/personal/input/model.ts";
@@ -82,7 +83,7 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
     if (output.status.lastError) timeline.push({ id: `output:${output.metadata.name}:error`, stage: "output", title: "Output 投递异常记录", text: output.status.lastError, status: output.status.phase, consumer: target });
   }
   timeline.sort((a, b) => a.at && b.at ? a.at.localeCompare(b.at) : a.at ? -1 : b.at ? 1 : 0);
-  return { input, label: definition(aide, input.spec), timeline, outputCount: outputs.length,
+  return { input, sessions: inputSessions(input, outputs), label: definition(aide, input.spec), timeline, outputCount: outputs.length,
     routeAttempts: route?.attempts ?? 0,
     outputs: outputs.map(o => ({ id: o.metadata.name, target: o.spec.target, status: o.status })) };
 }

@@ -1,3 +1,5 @@
+import { PiObservations, ObservationConfigSchema } from "../agents/pi/observation.ts";
+import type { PiConfig } from "./host/harness/pi/config.ts";
 import { ChannelSettings } from "./channel/settings.ts";
 import { configPath, loadConfig } from "./config.ts";
 import { resolveHarnessConfigs } from "./host/harness/config.ts";
@@ -28,10 +30,22 @@ await withAsyncFileLock(path, async () => {
   const file = configPath(home);
   const config = loadConfig();
   const cwd = resolve(environment.AIDE_CWD ?? process.cwd());
-  const harnesses = await resolveHarnessConfigs(config, { home, cwd, file, environment, log });
+  const resolved = await resolveHarnessConfigs(config, { home, cwd, file, environment, log });
+  const observation = new PiObservations(resolve(home, "observations/pi"), ObservationConfigSchema.parse(config.observation ?? {}), log);
+  log.info({ observation: ObservationConfigSchema.parse(config.observation ?? {}) }, "Resolved Pi observation policy");
+  const observed = (config: PiConfig) => ({ ...config, observation });
+  const harnesses = { ...resolved, chief: observed(resolved.chief), route: observed(resolved.route), weave: observed(resolved.weave),
+    task: observed(resolved.task), routine: observed(resolved.routine), pi: resolved.pi && observed(resolved.pi) };
+  const sessionConfigs: Record<string, PiConfig | undefined> = { chief: harnesses.chief, route: harnesses.route, weave: harnesses.weave,
+    task: harnesses.task, routine: harnesses.routine, pi: harnesses.pi };
   const connectors = Connectors.fromConfig(config.connectors, environment);
   const aide: Aide = new Aide(home, {
     config, connectors,
+    readSession: agent => {
+      const selected = sessionConfigs[agent.harness];
+      if (!selected) throw new Error("Session observation is not supported for this Harness");
+      return observation.read(cwd, selected, agent.sessionId);
+    },
     cwd, timezone, defaultHarnessConfig: harnesses.defaultHarnessConfig,
     createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, rootDir: home,
       targetConfig: target.harness === "weave" ? { harness: "weave" } : target.harness === "routine" ? { harness: "routine" } : target.harness === "task" ? { harness: "task" } : target.harness === "route" ? { harness: "route" } : target.harness === "chief" ? { harness: "chief" } : harnesses.defaultHarnessOptions,
