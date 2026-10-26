@@ -195,3 +195,25 @@ test("Input observation HTTP exports JSON and escaped HTML with exact reference 
   assert.equal(session.status, 200); assert.equal(reads, count + 1);
   assert.equal((await session.json() as { schema_version: string }).schema_version, "agent-ledger/session@1");
 });
+
+/** @case Missing optional observation capability is unavailable, not an internal server error. */
+test("Observation reader absence returns unavailable while Job export retains business facts", async t => {
+  const { aide, store } = setup(t);
+  assert.equal(aide.readSession, undefined);
+  const input = store.submit("test", "optional-reader", observation(0), {
+    route: { ...finished().route, agent: { harness: "route", sessionId: "native" } },
+  });
+  const server = httpChannel(aide, log); server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const query = new URLSearchParams({ id: input.metadata.name, uid: input.metadata.uid });
+  const session = await fetch(`${base}/inputs/session?${query}&harness=route&sessionId=native`);
+  assert.equal(session.status, 404);
+  const response = await fetch(`${base}/inputs/job?${query}`);
+  assert.equal(response.status, 200);
+  const job = await response.json() as { nodes: { id: string }[]; issues: string[] };
+  assert.ok(job.nodes.some(n => n.id === "route"));
+  assert.match(job.issues.join("\n"), /Session reader unavailable/);
+  aide.readSession = async () => { throw new Error("Native file read failure"); };
+  assert.equal((await fetch(`${base}/inputs/session?${query}&harness=route&sessionId=native`)).status, 500);
+});

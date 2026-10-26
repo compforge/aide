@@ -194,7 +194,13 @@ export class TopicStore {
       }
       if (executionId && (owner ? owner.status.execution?.id : c.status.execution?.id) !== executionId) throw new Error("Output execution is no longer active");
       const draft: OutputDraft = { id, topicId, text, workId: null };
-      const createdBy = agentCall((owner ?? c).status, options.idempotencyKey);
+      // @spec Provenance belongs to the first admission. System notices have no agent execution;
+      // their deduplication key is not a tool-call ID, even when this Topic has an active Chief.
+      // @link docs/observation.md
+      // @case tests/output.test.ts
+      const accepted = this.outputStore.get(id);
+      const createdBy = accepted ? accepted.spec.createdBy
+        : executionId ? agentCall((owner ?? c).status, options.idempotencyKey) : undefined;
       const association = { ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
       try {
         await this.client.commit([
