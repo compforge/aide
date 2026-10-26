@@ -13,7 +13,7 @@ export const SnapshotSchema = z.object({
   version: z.literal(1), collectedAt: time, start: time, end: time,
   identity: z.object({ accountId: z.string(), userId: z.string() }), meIds: z.array(z.string()).min(1),
   messages: z.array(message), directIds: z.array(z.string()), groupIds: z.array(z.string()),
-  coverage: z.array(z.object({ operation: z.enum(["direct", "group", "history", "thread"]), key: z.string(),
+  coverage: z.array(z.object({ operation: z.enum(["direct", "group", "sent", "history", "thread"]), key: z.string(),
     start: time, end: time, complete: z.boolean(), pages: z.number(), error: z.string().optional() })),
 }).superRefine((s, context) => {
   if (Date.parse(s.start) >= Date.parse(s.end)) context.addIssue({ code: "custom", message: "Snapshot start must precede end" });
@@ -78,10 +78,11 @@ export class SnapshotMessages implements MessageConnector {
   async search(query: MessageSearchQuery) {
     const start = Math.max(Date.parse(query.start), Date.parse(this.snapshot.start)), end = Math.min(Date.parse(query.end), this.cutoff);
     const kinds = query.chatType === "p2p" ? ["direct"] as const : query.chatType === "group" ? ["group"] as const : ["direct", "group"] as const;
-    for (const kind of kinds) this.requireCoverage(kind, "", start, end);
+    for (const kind of kinds) this.requireCoverage(kind === "group" && query.senderIds ? "sent" : kind, "", start, end);
     const rows = this.visible().filter(m => Date.parse(m.createdAt) >= start && Date.parse(m.createdAt) <= end
       && kinds.some(k => (k === "direct" ? this.direct : this.group).has(m.id))
-      && (!query.atMe || m.mentions.includes(this.snapshot.identity.userId)));
+      && (!query.atMe || m.mentions.includes(this.snapshot.identity.userId))
+      && (!query.senderIds || query.senderIds.includes(m.sender.id)));
     return this.page(rows, query, end);
   }
   async history(query: MessageQuery & { chatId: string; order?: "asc" | "desc" }) {
@@ -99,7 +100,7 @@ export function triggerMessages(snapshot: Snapshot) {
   const direct = new Set(snapshot.directIds), group = new Set(snapshot.groupIds);
   return snapshot.messages.filter(m => !edited(m) && !m.deleted && m.sender.type === "user"
     && Date.parse(m.createdAt) >= Date.parse(snapshot.start) && Date.parse(m.createdAt) <= Date.parse(snapshot.end)
-    && (direct.has(m.id) || (group.has(m.id) && m.mentions.some(id => snapshot.meIds.includes(id)))))
+    && (direct.has(m.id) || (group.has(m.id) && (snapshot.meIds.includes(m.sender.id) || m.mentions.some(id => snapshot.meIds.includes(id))))))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
 }
 
@@ -136,8 +137,8 @@ export async function collectSnapshot(connector: MessageConnector, options: {
   // Daily search windows bound collection and match the production source's maximum lookback.
   for (let start = Date.parse(options.start); start < Date.parse(options.end); start += 86_400_000) {
     const from = new Date(start).toISOString(), end = new Date(Math.min(start + 86_400_000, Date.parse(options.end))).toISOString();
-    for (const kind of ["direct", "group"] as const) await collect(kind, "", from, end, token => connector.search({ start: from, end,
-      chatType: kind === "direct" ? "p2p" : "group", ...(kind === "group" && options.meIds.length === 1 && options.meIds[0] === identity.userId ? { atMe: true } : {}),
+    for (const kind of ["direct", "group", "sent"] as const) await collect(kind, "", from, end, token => connector.search({ start: from, end,
+      chatType: kind === "direct" ? "p2p" : "group", ...(kind === "sent" ? { senderIds: options.meIds } : {}), ...(kind === "group" && options.meIds.length === 1 && options.meIds[0] === identity.userId ? { atMe: true } : {}),
       pageToken: token, limit: 50 }), kind === "direct" ? result.directIds : result.groupIds);
   }
   result.messages = [...messages.values()];

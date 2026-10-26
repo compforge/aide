@@ -92,7 +92,7 @@ test("Only configured sources poll; removing policies stops restored observers w
   assert.deepEqual([...new Set(seen.messageKinds)].sort(), ["group", "p2p"]);
   assert.deepEqual([...new Set(seen.assignees.map((keys) => keys.join(",")))].sort(), ["me", "team"]);
   const summary = logs.findLast((line) => line.msg === "Personal observation sources configured")!;
-  assert.deepEqual(summary.lark, { intervalMs: 60_000, scenarios: ["direct", "mention"] });
+  assert.deepEqual(summary.lark, { intervalMs: 60_000, scenarios: ["direct", "mention", "sent"] });
   assert.doesNotMatch(JSON.stringify(summary), /ou_me|cli_app|userKeys/);
   const counts = structuredClone(seen);
   await aide.close();

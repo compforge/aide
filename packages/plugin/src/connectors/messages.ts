@@ -25,6 +25,7 @@ export interface MessageQuery {
 export interface MessageSearchQuery extends MessageQuery {
   chatType?: "p2p" | "group";
   atMe?: boolean;
+  senderIds?: string[];
 }
 
 /** A page is complete only when the provider reports no continuation or enrichment gap. */

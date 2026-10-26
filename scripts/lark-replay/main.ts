@@ -56,7 +56,7 @@ export async function main(args = process.argv.slice(2)) {
   if (command === "replay") {
     const dataset = readFileSync(resolve(required(values.dataset, "dataset")), "utf8");
     const snapshot = SnapshotSchema.parse(JSON.parse(dataset));
-    if (snapshot.coverage.some(c => ["direct", "group"].includes(c.operation) && !c.complete)) throw new Error("Replay refuses incomplete discovery; recollect before comparing runs");
+    if (snapshot.coverage.some(c => ["direct", "group", "sent"].includes(c.operation) && !c.complete)) throw new Error("Replay refuses incomplete discovery; recollect before comparing runs");
     if (!triggerMessages(snapshot).length) throw new Error("Snapshot has no replayable trigger messages");
     const weave = z.enum(["on", "off"]).parse(required(values.weave, "weave")) === "on";
     const batchSize = z.coerce.number().int().min(1).max(1000).parse(values["batch-size"] ?? 20);
