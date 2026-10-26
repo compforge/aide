@@ -5,6 +5,8 @@ export const FORGE_SOURCE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Forge
 const record = z.record(z.string(), z.unknown());
 export const ForgeSourceDefinition: ResourceDefinition = { type: FORGE_SOURCE_TYPE,
   schema: { spec: ForgeWatchSchema, status: z.object({
+    cursor: z.string().optional(), batch: record.nullable().optional(), readPending: z.boolean().optional(),
+    since: z.string().optional(), seed: z.array(record).nullable().optional(),
     initialized: z.boolean().optional(), sequence: z.number().int().nonnegative().optional(),
     tracked: z.record(z.string(), record).optional(), scan: record.nullable().optional(),
     scannedThrough: z.string().optional(), pending: record.nullable().optional(),

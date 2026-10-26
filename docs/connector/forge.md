@@ -39,20 +39,26 @@ GitHub 使用 GITHUB_TOKEN / GH_TOKEN，GitLab 使用 GITLAB_TOKEN；也可沿�
 
 ## 发现、变化和恢复
 
-首次分两阶段：先发现全部可见的 open PR/MR，再补充默认最近七天内更新过的对象，包括 merged / closed。首次快照也会生成 Input，供 Chief 建立背景，不强制通知用户。后续扫描固定的更新时间窗口，保留一分钟重叠，并按页保存进度。时间窗只有全部页面处理成功后才推进。
+Source 通过 `readPullRequests` 按 author 读取通用 PullRequest 事实，并将已有 open 对象的 Key 作为 tracked 传入。
+首次历史范围由 initialLookbackMs 决定；初始发现、平台时间窗、分页覆盖检查、增量重叠、已知对象复查和读取恢复都由 repocli 负责。
+Aide 不解释页号、平台窗口或 cursor 内容。发现失败与已知对象的读取结果可以在同一批返回；成功事实仍接纳，错误记录在 Source status 和日志中。
+已结束对象的业务基线保留 initialLookbackMs，后续重新打开由通用读取结果接回。
 
-已跟踪的 open PR/MR 会直接读取，因此合并后离开 open 列表不会遗漏终态。发现失败时仍尝试复查已知对象；读取失败保留原基线，不能推断对象关闭或合并。已结束对象的基线保留 initialLookbackMs，后续重新打开可由增量发现接回。
+生命周期 state=merged 表示已经合并；conflictState 表示代码冲突，mergeReadiness 表示平台合并条件。
+无冲突不能推出 ready，ready 不能推出 merged。Source 按这些独立的通用事实判断变化，不包含 GitHub / GitLab 状态映射。
 
 Input 包含当前快照、前一快照和来源身份，变化覆盖生命周期、head revision、标题、评审线程及合并条件。observedAt / updatedAt、目标分支 base revision、来源分支等补充元数据或诊断措辞的单独变化不会触发 Input。完整 diff、提交明细和普通评论正文没有自动采集；现有按需评论工具仍可使用，评审线程信息不可用时明确为 unknown。
 
-每次变化先冻结待发布计划，再写 Input，最后推进基线；pending Input 在恢复完成前受引用保护。重启恢复同一计划，已提交变化不重复生成 Input；加载旧 identity/lifecycle 检查点时转换基线和分页引用，保留发生序号、Topic key 与冻结的 pending Input 正文和 id；A→B→A→B 是四次观察，使用独立发生序号。日志记录 Source、PR 身份、Input id、终态及读取失败，便于追踪输入来源。
+每次变化先冻结待发布计划，再写 Input，最后推进基线；pending Input 在恢复完成前受引用保护。重启恢复同一计划，已提交变化不重复生成 Input；加载旧 identity/lifecycle/mergeability 检查点时转换基线，旧 unfinished scan 从原历史起点重新读取并保留已缓存引用，保留发生序号、Topic key 与冻结的 pending Input 正文和 id；A→B→A→B 是四次观察，使用独立发生序号。日志记录 Source、PR 身份、Input id、终态及读取失败，便于追踪输入来源。
 
 Topic key 由 forge + 目标仓 path + PR number/MR iid 组成；fork、追加提交和 force-push 不改变该身份。同号但不同仓库的 PR 不合并。Input.relation 为 observed，authorScope 只描述发现范围，不把合并动作或他人评审归为 Me 的发言，也不授予修改或合并权限。
 
 ## 覆盖与验证
 
-轮询记录实际观察到的状态，不保证捕获两次轮询之间的每个中间状态。单次处理最多推进五个发现对象和五个已跟踪对象，其余通过保存的游标继续；观测间隔默认五分钟。
+轮询记录实际观察到的状态，不保证捕获两次轮询之间的每个中间状态。repocli 返回有界批次及 pending，Source 决定继续读取还是等待下一次观察间隔。
+平台结果集移动、窗口容量和搜索索引的覆盖限制由 repocli 负责报告；错误不表示没有变化。
 
-GitHub 使用 author 限定的 PR search，单个查询窗口超过 1000 条或返回 incomplete_results 时保留检查点并报告错误，不声称扫描完成。当前尚未自动切分超大时间窗。GitLab 使用跨项目的 merge_requests 查询，按显式 author_username 和时间范围分页。API 与覆盖依据见 [GitHub Search](https://docs.github.com/en/rest/search/search#search-issues-and-pull-requests)、[GitLab Merge requests](https://docs.gitlab.com/api/merge_requests/)。
+每批结果先冻结到 Source status；逐个 Input 可靠接纳完成后才保存该批 cursor。重启先恢复冻结批次，不重新读取覆盖它。
+Source 的 pending Input、批次进度和变化基线属于业务接纳状态；cursor 的结构、版本、查询窗口与平台页码属于 repocli。
 
-tests/forge-source.test.ts 覆盖 merged 离开发现列表、发现失败时复查、Input 写入后中断恢复、旧检查点升级、重复轮询、反复 revision 变化、跨仓同号、分页检查点，以及 repocli → Host Connector → 真实 Runner IPC → Input → Route → Chief 的处理回执。tests/forge.test.ts 覆盖 Aide 配置、两平台客户端装配、公共事实序列化和 Chief 查询参数适配。平台分页、映射及 HTTP 细节的回归归 repocli。平台使用替身；真实账号可见范围、网络与线上部署需另外验收。
+tests/forge-source.test.ts 覆盖 merged 离开发现列表、发现失败时复查、Input 写入后中断恢复、旧检查点升级、重复轮询、反复 revision 变化、跨仓同号、冻结批次与不透明游标提交，以及 repocli → Host Connector → 真实 Runner IPC → Input → Route → Chief 的处理回执。tests/forge.test.ts 覆盖 Aide 配置、两平台客户端装配、公共事实序列化和 Chief 查询参数适配。平台分页移动、窗口覆盖不足、映射及 HTTP 细节的回归归 repocli。平台使用替身；真实账号可见范围、网络与线上部署需另外验收。

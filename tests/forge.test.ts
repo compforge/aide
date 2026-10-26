@@ -92,8 +92,9 @@ for (const provider of ["github", "gitlab"] as const) test(`${provider} repocli 
     return JSON.parse(JSON.stringify(value));
   });
   const reference = { repository: { forge: { name: "work" }, path: "org/repo" }, number: 7 };
-  const page = await client.forges.discover("work", { author: "me", state: "all", updatedBefore: "2026-10-26T00:00:00Z" });
-  expect(page.items).toEqual([reference]);
+  const page = await client.forges.readPullRequests("work", { author: "me" });
+  expect(page.items).toHaveLength(1); expect(page.items[0]).toMatchObject(reference);
+  expect(typeof page.cursor).toBe("string");
   expect(await client.forges.list("work", "org/repo", { state: "merged", limit: 5 })).toEqual([reference]);
   const observed = await client.forges.get(page.items[0]!);
   expect(observed).toMatchObject({ ...reference, state: "merged", headSha: "head", baseSha: "base", sourceBranch: "feature", targetBranch: "main" });

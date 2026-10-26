@@ -1,11 +1,11 @@
 import type { EnvironmentDirectory, EnvironmentSummary } from "./environment.ts";
 import type { Requirement, RequirementIdentity, RequirementListQuery, RequirementSummary, RequirementPage, RequirementAccount, RequirementComment, RequirementCommentQuery } from "./requirements.ts";
-import type { ForgeComment, PullRequestObservation, PullRequestKey, PullRequestListQuery, PullRequestDiscoveryQuery, PullRequestPage } from "@compforge/repocli";
+import type { ForgeComment, PullRequestObservation, PullRequestKey, PullRequestListQuery, PullRequestReadQuery, PullRequestReadResult, PullRequestCursor } from "@compforge/repocli";
 import type { MessageConnector } from "./messages.ts";
 
 export type * from "./environment.ts";
 export type * from "./requirements.ts";
-export type { ForgeComment, PullRequestObservation, PullRequestKey, PullRequestListQuery, PullRequestDiscoveryQuery, PullRequestPage } from "@compforge/repocli";
+export type { ForgeComment, PullRequestObservation, PullRequestKey, PullRequestListQuery, PullRequestReadQuery, PullRequestReadResult, PullRequestCursor } from "@compforge/repocli";
 export type * from "./messages.ts";
 
 export interface ConnectorCatalog {
@@ -27,7 +27,7 @@ export interface ConnectorClient {
     comments(identity: RequirementIdentity, query?: RequirementCommentQuery): Promise<RequirementPage<RequirementComment>>;
   };
   readonly forges: {
-    discover(forge: string, query: PullRequestDiscoveryQuery): Promise<PullRequestPage>;
+    readPullRequests(forge: string, query: PullRequestReadQuery): Promise<PullRequestReadResult>;
     list(forge: string, path: string, query: PullRequestListQuery): Promise<readonly PullRequestKey[]>;
     get(identity: PullRequestKey): Promise<PullRequestObservation>;
     comments(identity: PullRequestKey): Promise<readonly ForgeComment[]>;

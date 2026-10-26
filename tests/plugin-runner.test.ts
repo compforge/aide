@@ -73,13 +73,14 @@ describe("Plugin Runner process boundary", () => {
     const requirement = { source: "work", category: "story", id: "1", title: "Shared", state: "open" as const };
     const identity = { repository: { forge: { name: "forge" }, path: "org/repo" }, number: 1 };
     const pull = { ...identity, title: "Shared PR", url: "https://example.com/1", state: "open" as const,
-      reviewThreads: "none" as const, mergeability: "ready" as const, observedAt: "2026-10-19T00:00:00Z" };
+      reviewThreads: "none" as const, conflictState: "none" as const, mergeReadiness: "ready" as const, observedAt: "2026-10-19T00:00:00Z" };
     let reads = 0;
     const connectors = new Connectors([{
       source: "work", provider: "fixture", async identity() { return { provider: "fixture", scope: "p" }; }, async comments() { return { items: [] }; }, async list() { reads++; return { items: [requirement] }; }, async get() { return requirement; },
     }], [{
       forge: "forge", provider: "github",
-      async discover() { return { items: [] }; }, async list() { return [identity]; }, async get() { return pull; }, async comments() { return []; },
+      async discover() { return { items: [] }; },
+        async readPullRequests() { return { items: [], cursor: "fixture" as import("@compforge/repocli").PullRequestCursor, pending: false, errors: [] }; }, async list() { return [identity]; }, async get() { return pull; }, async comments() { return []; },
     }], new Environments(resolveEnvironmentConfig({ dev: { kind: "host", aliases: ["开发"], host: { name: "vm", transport: "ssh", address: "not-contacted.invalid" } } })));
     const failures: unknown[] = [];
     const manager = new Manager({
