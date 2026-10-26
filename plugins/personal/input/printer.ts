@@ -15,6 +15,7 @@ export const inputPrinter: ResourcePrinter<InputSpec> = {
       `Received: ${metadata.creationTimestamp}`,
     ];
     if (spec.source) lines.push(`Source address: ${JSON.stringify(spec.source)}`);
+    if (spec.topicName !== undefined) lines.push(`Suggested Topic name: ${spec.topicName}`);
     if (spec.topicKey !== undefined) lines.push(`Topic key: ${spec.topicKey}`);
     if (spec.topicId !== undefined) lines.push(`Explicit Topic: ${spec.topicId}`);
     if (spec.relation !== undefined) lines.push(`Relation to Person: ${spec.relation}`);

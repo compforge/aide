@@ -3,6 +3,14 @@ export type TopicSelector =
   | { kind: "id"; id: string }
   | { kind: "key"; key: string };
 
+/** @spec The selector determines affinity; the optional source-provided name only initializes presentation.
+ * @link docs/personal/topic.md#topiclocator-能力
+ */
+export interface TopicLocation {
+  selector: TopicSelector;
+  name?: string;
+}
+
 /**
  * @spec Adapters derive optional Topic location information from parsed facts without I/O or resource creation.
  * IDs and source keys are both exact selectors. Future variants may carry generalized or fuzzy features;
@@ -11,5 +19,5 @@ export type TopicSelector =
  * @link docs/personal/topic.md#topiclocator-能力
  */
 export interface TopicLocator<T> {
-  locate(input: T): TopicSelector | undefined;
+  locate(input: T): TopicLocation | undefined;
 }

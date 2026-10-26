@@ -1,5 +1,5 @@
 import type { TopicLocator } from "../../../plugins/personal/topic/locator.ts";
-import { larkAddress, larkThreadAddress, larkTopicKey, larkEndpoint } from "../address.ts";
+import { larkAddress, larkThreadAddress, larkTopicKey, larkTopicLocator, larkEndpoint } from "../address.ts";
 import { channelOutputs } from "../output.ts";
 import type { OutputView } from "../../output.ts";
 import { CHANNELS, bindChannelInput } from "../definition.ts";
@@ -50,8 +50,10 @@ type State = z.infer<typeof StateSchema>;
  * @why Platform acknowledgement must not depend on business processing or model latency.
  * @see {@link ../../../docs/channel/lark.md}
  */
-export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: string }> {
-  locate(input: { chatId: string; threadId?: string }) { return { kind: "key" as const, key: larkTopicKey(this.appId, input.chatId, input.threadId) }; }
+export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: string; chatName?: string; text?: string }> {
+  locate(input: { chatId: string; threadId?: string; chatName?: string; text?: string }) {
+    return larkTopicLocator.locate({ ...input, appId: this.appId });
+  }
   private readonly acceptInput: ReturnType<typeof bindChannelInput>;
   private readonly path: string;
   private readonly prefix: string;
@@ -63,6 +65,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
   private retryAt = 0;
   private readonly cardRetry = new Map<string, number>();
   private readonly receiptRetry = new Map<string, number>();
+  private readonly chatNames = new Map<string, { name?: string; until: number }>();
 
   constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "outputs" | "outputDelivered" | "outputSending" | "outputRetry">,
     private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
@@ -116,7 +119,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     const { message_id: id, chat_id: chatId } = message;
     if (this.state.received.includes(id)) return;
     const threadId = message.chat_type === "group" ? message.thread_id : undefined;
-    const topicId = this.locate({ chatId, threadId }).key;
+    const topicId = this.locate({ chatId, threadId }).selector.key;
     let text: unknown;
     if (message.message_type === "text") {
       if (message.chat_type === "group") {
@@ -145,6 +148,29 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     this.log.info({ messageId: id, topicId, chatType: message.chat_type, accepted: input.success }, "Lark message received");
   }
 
+  /** @spec Name lookup follows durable receipt and cannot reject a valid message. Cache misses, including failures, are bounded.
+   * @case tests/lark.test.ts
+   * @link docs/channel/lark.md
+   */
+  private async withTopicName(input: z.infer<typeof LarkIncomingSchema>) {
+    const observation = input.observation;
+    if (input.topicName || observation?.chatType !== "group" || typeof observation.chatId !== "string") return input;
+    const chatId = observation.chatId;
+    let cached = this.chatNames.get(chatId);
+    if (!cached || cached.until <= Date.now()) {
+      let name: string | undefined;
+      try { name = await this.transport.chatName(chatId); }
+      catch { this.log.warn({ chatId }, "Lark chat name unavailable; accepting message without a source name"); }
+      cached = { name, until: Date.now() + 300_000 };
+      this.chatNames.delete(chatId);
+      if (this.chatNames.size >= 256) this.chatNames.delete(this.chatNames.keys().next().value!);
+      this.chatNames.set(chatId, cached);
+    }
+    const location = this.locate({ chatId, ...(typeof observation.threadId === "string" ? { threadId: observation.threadId } : {}),
+      chatName: cached.name, text: input.text });
+    return location.name ? { ...input, topicName: location.name, observation: { ...observation, chatName: cached.name } } : input;
+  }
+
   dispatch(): Promise<void> {
     if (this.inbound) return this.inbound;
     if (this.stopped) return Promise.resolve();
@@ -154,9 +180,15 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
 
   private async drainInbox(): Promise<void> {
     while (!this.stopped && this.state.pending.length) {
-      const input = this.state.pending[0]!;
+      let input = this.state.pending[0]!;
       let failure: Notice | undefined;
       try {
+        const named = await this.withTopicName(input);
+        if (this.stopped) return;
+        if (named !== input) {
+          input = named;
+          this.save({ ...this.state, pending: [input, ...this.state.pending.slice(1)] });
+        }
         await this.acceptInput(input);
         this.log.info({ messageId: input.id, topicId: input.topicKey }, "Lark input routed");
       } catch {

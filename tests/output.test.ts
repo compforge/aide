@@ -131,7 +131,7 @@ test("Lark sends to explicit Output target after Topic deletion and reuses retry
   await f.client.delete(f.topic, f.topic.metadata.name);
   const sent: { chatId: string; id: string }[] = [];
   let fail = true;
-  const transport: LarkTransport = { async start() {}, close() {}, async send(chatId, _text, id) {
+  const transport: LarkTransport = { async start() {}, close() {}, async chatName() { return undefined; }, async send(chatId, _text, id) {
     sent.push({ chatId, id }); if (fail) { fail = false; throw new Error("ambiguous send"); }
   } };
   const service = { receive: async () => { throw new Error("must not execute Input"); }, outputs: () => f.outputs.list().map(outputView),
@@ -218,7 +218,7 @@ test("Lark delivery failures retain diagnostic codes and delivery context withou
   const error = Object.assign(new Error("PRIVATE SDK ERROR"), { code: "ERR_BAD_REQUEST",
     config: { headers: { Authorization: "SECRET TOKEN" }, data: "PRIVATE MESSAGE" },
     response: { status: 403, data: { code: 99991672, msg: "PRIVATE RESPONSE" } } });
-  const transport: LarkTransport = { async start() {}, close() {}, async send() { throw error; } };
+  const transport: LarkTransport = { async start() {}, close() {}, async chatName() { return undefined; }, async send() { throw error; } };
   const channel = new LarkChannel(f.root, "app", {
     receive: async () => { throw new Error("unused"); }, outputs: () => f.outputs.list().map(outputView),
     outputSending: async id => f.outputs.begin(id),

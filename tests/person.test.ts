@@ -68,7 +68,7 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   const prompts: string[] = [];
   const log = pino({ level: "silent" });
   const aide = new Aide(home, { ...fakeOptions({ async chief() { return "ok"; }, async execute() { throw new Error("No work expected"); } }, home, prompts), config: loadConfig(configFile) }, log);
-  const transport = { async start() {}, close() {}, async send() {} };
+  const transport = { async start() {}, close() {}, async chatName() { return undefined; }, async send() {} };
   let channel = new LarkChannel(home, "cli_app", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const event = (id: string, userId: string) => ({ sender: { sender_type: "user", sender_id: { open_id: userId } },

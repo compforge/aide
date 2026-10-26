@@ -16,7 +16,7 @@ export interface EnvironmentSourceStatus {
   error?: string | null;
 }
 export const environmentTopics = {
-  locate: ({ environment, namespace }) => ({ kind: "key" as const, key: `environment:${JSON.stringify([environment, namespace ?? ""])}` }),
+  locate: ({ environment, namespace }) => ({ selector: { kind: "key" as const, key: `environment:${JSON.stringify([environment, namespace ?? ""])}` } }),
 } satisfies TopicLocator<{ environment: string; namespace?: string }>;
 const identity = (workload: WorkloadSnapshot) => `${workload.kind}/${workload.name}`;
 
@@ -60,7 +60,7 @@ export async function observeEnvironment(context: Pick<PluginContext, "resources
     const event: WorkloadEvent = { type: "workload.changed", environment: snapshot.environment, namespace: snapshot.namespace,
       observedAt: snapshot.observedAt, previousObservedAt: baseline!.observedAt, changes };
     const submit = bindSourceInput(SOURCES.environments, resource, context.resources);
-    await submit(name, { topicKey: environmentTopics.locate(snapshot).key, relation: "observed", text: describeWorkloadChanges(event), observation: { ...event } });
+    await submit(name, { topicKey: environmentTopics.locate(snapshot).selector.key, relation: "observed", text: describeWorkloadChanges(event), observation: { ...event } });
   }
   await context.resources.patchStatus(resource, { baseline: snapshot, sequence: changes.length ? sequence : resource.status.sequence ?? 0,
     lastObservedAt: snapshot.observedAt, error: null });

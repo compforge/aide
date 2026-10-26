@@ -7,6 +7,7 @@ export const IncomingSchema = z.object({
   channelId: z.string().min(1),
   topicKey: z.string().min(1).max(500).optional(),
   topicId: z.string().min(1).optional(),
+  topicName: z.string().trim().min(1).max(80).optional(),
   text: z.string().min(1).max(32_000),
   observation: z.record(z.string(), z.unknown()).optional(),
 });
@@ -14,5 +15,5 @@ export type Incoming = z.infer<typeof IncomingSchema>;
 
 /** Web messages explicitly select a Topic rather than deriving a source key. */
 export const webTopicLocator = {
-  locate: ({ topicId }) => ({ kind: "id" as const, id: topicId }),
+  locate: ({ topicId }) => ({ selector: { kind: "id" as const, id: topicId } }),
 } satisfies TopicLocator<{ topicId: string }>;

@@ -1,5 +1,5 @@
 import type { TopicLocator } from "../../topic/locator.ts";
-import { larkAddress, larkTopicKey } from "../../../../src/channel/address.ts";
+import { larkAddress, larkTopicLocator } from "../../../../src/channel/address.ts";
 import { Persons } from "../../person/service.ts";
 import { isDeepStrictEqual } from "node:util";
 import { observePeople } from "../../person/messages.ts";
@@ -62,8 +62,10 @@ const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, n
  * @case tests/message-source.test.ts
  * @link docs/connector/lark-messages.md
  */
-class MessageObservation implements TopicLocator<{ chatId: string; threadId?: string }> {
-  locate(input: { chatId: string; threadId?: string }) { return { kind: "key" as const, key: larkTopicKey(this.watch.accountId, input.chatId, input.threadId) }; }
+class MessageObservation implements TopicLocator<{ chatId: string; threadId?: string; chatName?: string; text?: string }> {
+  locate(input: { chatId: string; threadId?: string; chatName?: string; text?: string }) {
+    return larkTopicLocator.locate({ ...input, appId: this.watch.accountId });
+  }
   private readonly submitInput: ReturnType<typeof bindSourceInput>;
   constructor(private readonly context: Context, private resource: Source, private readonly connectors: ConnectorClient, private readonly now: number) {
     this.submitInput = bindSourceInput(SOURCES.lark, resource, context.resources);
@@ -244,11 +246,14 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     const relation = entry.sequence ? (relations.size === 1 ? annotatedContext!.messages[0]!.relation : this.watch.personIds.includes(this.watch.userId) ? "observed" : undefined) : message.relation;
     const kind = entry.sequence ? "讨论进展" : entry.kind === "direct" ? "私聊" : entry.kind === "sent" ? "群内本人发言" : "群内 @";
     const content = entry.sequence ? (context?.messages ?? []).map((item) => item.content).join("\n\n") : message.content;
+    const root = context?.messages.find(item => item.id === message.rootId || item.id === message.threadId);
+    const location = this.locate({ chatId: message.chatId, threadId: entry.kind === "direct" ? undefined : message.threadId,
+      chatName: message.chatName, text: root?.content || message.content });
     const spec: Delivery["spec"] = {
       source: larkAddress(this.watch.accountId, message.chatId),
       ...(relation ? { relation } : {}),
       ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
-      topicKey: this.locate({ chatId: message.chatId, threadId: entry.kind === "direct" ? undefined : message.threadId }).key,
+      topicKey: location.selector.key, ...(location.name ? { topicName: location.name } : {}),
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,
         kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,

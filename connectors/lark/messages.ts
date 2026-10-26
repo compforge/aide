@@ -32,7 +32,7 @@ export function larkCliRunner(timeoutMs: number): LarkCliRunner {
 }
 
 const MessageSchema = z.object({
-  message_id: z.string().min(1), chat_id: z.string().min(1), content: z.string(),
+  message_id: z.string().min(1), chat_id: z.string().min(1), chat_name: z.string().nullish(), content: z.string(),
   create_time: z.string(), update_time: z.string().optional(), deleted: z.boolean(),
   sender: z.object({ id: z.string(), sender_type: z.string(), name: z.string().optional() }),
   mentions: z.array(z.object({ id: z.string() })).default([]),
@@ -55,7 +55,7 @@ function message(value: unknown): ChatMessage {
   const parsed = MessageSchema.safeParse(value);
   if (!parsed.success) throw new Error("Lark CLI returned an incomplete message; discovery watermark retained");
   const row = parsed.data;
-  return { id: row.message_id, chatId: row.chat_id, content: row.content, createdAt: timestamp(row.create_time),
+  return { id: row.message_id, chatId: row.chat_id, ...(row.chat_name?.trim() ? { chatName: row.chat_name.trim() } : {}), content: row.content, createdAt: timestamp(row.create_time),
     ...(row.update_time ? { updatedAt: timestamp(row.update_time) } : {}),
     sender: { id: row.sender.id, type: row.sender.sender_type, ...(row.sender.name ? { name: row.sender.name } : {}) },
     mentions: row.mentions.map((item) => item.id), deleted: row.deleted,

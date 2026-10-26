@@ -1,6 +1,8 @@
 export interface ChatMessage {
   id: string;
   chatId: string;
+  /** Provider-supplied chat name, or the other participant's name for a direct chat. */
+  chatName?: string;
   threadId?: string;
   parentId?: string;
   rootId?: string;

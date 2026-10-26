@@ -60,7 +60,7 @@ Lark 消息按应用、聊天及群话题确定 `Input.topicKey`；当前 key �
 
 首次接纳的消息建立 Topic，后续复用。[Route](../personal/route.md) 对 Lark Source 的明确话题直接创建并分派，
 机器人 Channel 在接收入站时建立话题；两条路径均不让模型决定是否建会话。Source 的初始消息与短期 discussion 更新沿用同一规则，
-不会因 originalInputId 曾被路由到 Default 而再次落入 Default。显示名称取首条输入的内容预览，改名不改变会话 ID。
+不会因 originalInputId 曾被路由到 Default 而再次落入 Default。显示名称通过 TopicLocator 返回的 name 经 Input.topicName 传给 Route：普通群使用群名称；群话题使用“群名称 · 话题内容简述”，Source 优先使用已读到的根消息；私聊使用搜索结果提供的对方名称。无法取得名称时取首条输入预览。名称仅初始化新 Topic，后续消息不覆盖既有名称；改名不改变身份。
 重复投递和重启复用现存对象；目标正在删除时拒绝向该对象分派。
 
 会话创建与消息采集资格独立：Source 采集配置范围内的单聊、明确 @ 用户、群内本人发言和短期关联讨论；Channel 仍只接收单聊与精确 @ 机器人的群消息。
@@ -74,7 +74,8 @@ Chief 可按该请求的 Input 地址回复；机器人与 Source 建立的来�
 ## 消息与上下文
 
 Connector 提供消息搜索、群历史和话题回复的分页读取，查询条件与 Personal 触发策略分离。
-消息保留发送人、群、原消息 ID、时间、mentions、可用的回复与话题关联及原消息链接。
+消息保留发送人、群、可用的 chatName、原消息 ID、时间、mentions、可用的回复与话题关联及原消息链接。
+消息搜索原生返回 chat_name，Connector 直接映射为 chatName；不为每条 Source 消息额外查询群信息。群名随消息进入 observation 和精简模型预览，群名称缺失不构成消息读取失败。
 `--is-at-me` 也可能命中 `@所有人`，Source 必须检查结构化 mentions 中的用户 ID。
 三个场景均排除机器人发送的和已撤回的消息。本人发言保留为 `relation: sent`；
 发给本人的消息为 `received`。上下文逐条保留 relation，普通讨论为 `observed`，可确认回复本人发言的消息为 `received`。

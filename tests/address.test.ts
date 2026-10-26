@@ -11,7 +11,7 @@ import pino from "pino";
 import type { Address, ChannelAddress } from "@compforge/aide-plugin";
 import { Aide } from "../src/app.ts";
 import { parseAddress } from "../src/address.ts";
-import { larkAddress, larkEndpoint, webAddress } from "../src/channel/address.ts";
+import { larkAddress, larkEndpoint, larkTopicLocator, webAddress } from "../src/channel/address.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { seedInput } from "./topic-fixture.ts";
 
@@ -68,16 +68,18 @@ test("Channel creation captures its first address, bypasses Default and subseque
   const inbox = webAddress("inbox"), group = larkAddress("app", "group"), elsewhere = larkAddress("app", "elsewhere");
   await aide.receive({ id: "hello", channelId: "web", topicId: "inbox", text: "hello", source: inbox });
   await aide.settled(); await aide.topics.ensure("default");
-  await aide.receive({ id: "first", channelId: "lark", topicId: "opaque-topic", text: "first", source: group });
+  await aide.receive({ id: "first", channelId: "lark", topicId: "opaque-topic", topicName: "群名称", text: "first", source: group });
   await aide.settled();
   const topic = aide.personal.topics;
   assert.deepEqual(topic.resource("opaque-topic")!.spec.address, group);
+  assert.equal(topic.resource("opaque-topic")!.spec.name, "群名称");
   assert.deepEqual(aide.personal.topics.resource("inbox")!.spec.address, inbox);
   const replies = aide.outputs().filter((o) => o.target.kind === "channel" && (o.target as ChannelAddress).endpoint === group.endpoint);
   assert.equal(replies.length, 1, "Only the explicit topic replies; Default receives no copy");
-  await aide.receive({ id: "second", channelId: "lark", topicId: "opaque-topic", text: "second", source: elsewhere });
+  await aide.receive({ id: "second", channelId: "lark", topicId: "opaque-topic", topicName: "不能覆盖已有名称", text: "second", source: elsewhere });
   await aide.settled();
   assert.deepEqual(topic.resource("opaque-topic")!.spec.address, group);
+  assert.equal(topic.resource("opaque-topic")!.spec.name, "群名称");
   assert.ok(aide.outputs().some((o) => o.topicId === "opaque-topic" && (o.target as ChannelAddress).endpoint === elsewhere.endpoint));
   await assert.rejects(aide.receive({ id: "wrong", channelId: "web", topicId: "must-not-exist", text: "wrong", source: group }), /different Channel/);
   assert.equal(aide.topics.get("must-not-exist"), undefined);
@@ -264,4 +266,17 @@ test("Aide rejects unowned targets and diagnoses pending delivery after the Chan
       { target: larkAddress("app", "bot-chat") }), /disabled/);
     assert.equal(restarted.outputs().length, 1);
   } finally { await restarted.close(); }
+});
+
+test("Lark names describe exact locations without changing affinity or requiring metadata", () => {
+  const input = { appId: "cli_app", chatId: "oc_group" };
+  const group = larkTopicLocator.locate({ ...input, chatName: "  DBA\n优化讨论  ", text: "@Me" });
+  assert.deepEqual(group, { selector: { kind: "key", key: "lark:cli_app:oc_group" }, name: "DBA 优化讨论" });
+  assert.deepEqual(larkTopicLocator.locate({ ...input, chatName: "同群的新名称" }).selector, group.selector);
+  assert.deepEqual(larkTopicLocator.locate(input), { selector: group.selector });
+  const thread = larkTopicLocator.locate({ ...input, chatName: "DBA 优化讨论", threadId: "omt_thread", text: "OB 查询优化" });
+  assert.equal(thread.name, "DBA 优化讨论 · OB 查询优化");
+  assert.equal(thread.selector.key, "lark:cli_app:oc_group:thread:omt_thread");
+  assert.equal(larkTopicLocator.locate({ ...input, chatName: "李萌", direct: true, threadId: "ignored" }).name, "李萌");
+  assert.equal(larkTopicLocator.locate({ ...input, chatName: "x".repeat(1000) }).name!.length, 80);
 });

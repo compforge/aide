@@ -42,7 +42,7 @@ function setup(t: TestContext) {
       if (element.elements) patchElement(element.elements, id, patch);
     }
   };
-  const transport: LarkTransport = { async start() {}, close() {}, async send(...args) { record("text", args); },
+  const transport: LarkTransport = { async start() {}, close() {}, async chatName() { return undefined; }, async send(...args) { record("text", args); },
     cards: { async create(...args) { record("create", args); card = structuredClone(args[0]) as typeof card; return `card-${calls.filter((call) => call.kind === "create").length}`; }, async send(...args) { record("send", args); },
       async content(...args) { record("content", args); patchElement(card.body.elements, args[1], { content: args[2] }); },
       async patch(...args) { record("patch", args); for (const [id, value] of Object.entries(args[1])) patchElement(card.body.elements, id, value); },
@@ -313,4 +313,23 @@ test("Lark keeps a shared invocation card running until steered input and execut
   assert.equal(larkProgress(aide, topicId)[0]!.phase, "running");
   await client.patchStatus(aide.topics.resource(topicId)!, { execution: null });
   assert.equal(larkProgress(aide, topicId)[0]!.phase, "done");
+});
+
+test("Lark chat names use the existing SDK client and timeout", async t => {
+  const original = Lark.defaultHttpInstance.defaults.adapter;
+  t.after(() => { Lark.defaultHttpInstance.defaults.adapter = original; });
+  let code = 0;
+  const requests: string[] = [];
+  Lark.defaultHttpInstance.defaults.adapter = async config => {
+    assert.equal(config.timeout, 15_000);
+    const data = config.url?.includes("tenant_access_token") ? { code: 0, tenant_access_token: "fixture", expire: 7200 }
+      : (requests.push(config.url!), { code, data: { name: "沙箱支持群" } });
+    return { data, status: 200, statusText: "OK", headers: {}, config };
+  };
+  const transport = larkTransport({ appId: "cli_names_sdk", appSecret: "fixture" }, log);
+  t.after(() => transport.close());
+  assert.equal(await transport.chatName("oc_group"), "沙箱支持群");
+  assert.ok(requests[0]!.endsWith("/im/v1/chats/oc_group"));
+  code = 99991672;
+  await assert.rejects(transport.chatName("oc_group"), /99991672/);
 });

@@ -228,3 +228,23 @@ test("Replay collects Me group speech separately and never substitutes mention c
   const incomplete = new SnapshotMessages(snapshot); incomplete.advance(end);
   await assert.rejects(incomplete.search({ start, end, chatType: "group", senderIds: ["ou_me"] }), /Incomplete snapshot coverage: sent/);
 });
+
+test("Replay retains search chat names when history omits metadata while still rejecting changed message content", async () => {
+  const row = message("named", "2026-10-19T00:01:00.000Z", { mentions: ["ou_me"] });
+  let changed = false;
+  const connector: MessageConnector = {
+    async identity() { return { accountId: "cli_test", userId: "ou_me" }; },
+    async search(query) { return { messages: query.chatType === "group" && !query.senderIds ? [{ ...row, chatName: "DBA 优化讨论" }] : [], hasMore: false, observedThrough: end }; },
+    async history() { return { messages: [{ ...row, ...(changed ? { content: "edited" } : {}) }], hasMore: false, observedThrough: end }; },
+    async thread() { return { messages: [], hasMore: false, observedThrough: end }; },
+  };
+  const snapshot = await collectSnapshot(connector, { start, end, meIds: ["ou_me"], maxPages: 2 });
+  assert.ok(snapshot.coverage.every(item => item.complete));
+  assert.equal(snapshot.messages[0]!.chatName, "DBA 优化讨论");
+  const replay = new SnapshotMessages(SnapshotSchema.parse(JSON.parse(JSON.stringify(snapshot))));
+  replay.advance(end);
+  assert.equal((await replay.search({ start, end, chatType: "group" })).messages[0]!.chatName, "DBA 优化讨论");
+  changed = true;
+  const unstable = await collectSnapshot(connector, { start, end, meIds: ["ou_me"], maxPages: 2 });
+  assert.match(unstable.coverage.find(item => item.operation === "history")!.error!, /Message changed/);
+});

@@ -29,6 +29,7 @@ journalctl --user -u aide -f
 
 单聊及无话题的群消息使用 `lark:<appId>:<chatId>`；群消息带 thread_id 时使用 `lark:<appId>:<chatId>:thread:<threadId>`。
 同一应用、聊天和话题的用户身份 Source 与机器人 Channel 共用 Topic，不同群话题分别保存上下文。
+新建来源 Topic 优先显示群名称；群话题附带首条接纳内容的简述。Channel 在事件持久化之后、提交业务 Input 之前，通过现有 SDK 的 chat.get 读取群名，保存为 observation.chatName，并由 TopicLocator 提供初始名称。名称查询沿用 SDK 客户端和 15 秒超时；按群缓存 5 分钟，最多保留 256 项，包括失败结果。可开通 im:chat:read 供机器人读取群名；无权限、名称缺失或查询失败时正常接收消息，沿用正文预览名称。后续消息不重命名已有 Topic，名称不影响来源 key 或回复地址。
 完整规则及创建、采集和回复地址的区别见 [Topic 创建与归属](../connector/lark-messages.md#topic-创建与归属)。
 可在网页左侧选择该会话，或使用 `/?topic=<编码后的 Topic ID>` 查看消息与工作，实际 ID 可从收消息日志取得。
 

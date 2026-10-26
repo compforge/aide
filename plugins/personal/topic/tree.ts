@@ -25,14 +25,18 @@ export function topicSubtree(all: readonly TopicResource[], root: TopicResource)
 export const understandingVersion = (topic: TopicResource): string =>
   createHash("sha256").update(JSON.stringify([topic.status.summary, topic.status.recent])).digest("hex");
 
-/** @spec Source identity is reusable; Topic identity is new after expiry. Uniqueness is checked in the storage transaction. */
-export async function ensureSourceTopic(resources: ResourceClient, key: string, text: string): Promise<TopicResource> {
+/** @spec Source identity is reusable; Topic identity is new after expiry. Uniqueness is checked in the storage transaction.
+ * @spec A source name initializes a new Topic; later messages never rename an existing Topic or its Weave parent.
+ * @case tests/route.test.ts
+ * @link docs/personal/topic.md#topiclocator-能力
+ */
+export async function ensureSourceTopic(resources: ResourceClient, key: string, text: string, name?: string): Promise<TopicResource> {
   const find = async () => (await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "topicKey", value: key } }))[0];
   const current = await find();
   if (current) return current;
   const id = randomUUID();
   try {
-    return await resources.create(TOPIC_TYPE, { name: digest(id), spec: { id, topicKey: key, name: initialTopicName(text) },
+    return await resources.create(TOPIC_TYPE, { name: digest(id), spec: { id, topicKey: key, name: initialTopicName(name?.trim() || text) },
       status: { receipts: [], summary: "", recent: [] } });
   } catch (error) {
     if (!String(error).includes("Topic key already exists")) throw error;
