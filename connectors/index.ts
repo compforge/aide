@@ -3,7 +3,7 @@ import { EnvironmentKind, EnvironmentVersion, type EnvironmentDirectory } from "
 import { RequirementKind, RequirementVersion, type RequirementOperations, type RequirementConnector, type RequirementIdentity } from "@compforge/aide-connector/requirement";
 import { MessageKind, MessageVersion } from "@compforge/aide-connector/message";
 import type { ConnectorClient } from "@compforge/aide-plugin";
-import type { ConnectorApi } from "@compforge/aide-connector";
+import type { ConnectorApi, ConnectorPackage } from "@compforge/aide-connector";
 import { ConnectorRegistry, type ConnectorInvocationOptions } from "../src/host/connector/registry.ts";
 import { loadConnectorPackages, type ConnectorConfigurations } from "../src/host/connector/packages.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
@@ -18,7 +18,7 @@ export class Connectors implements ConnectorClient {
   readonly list: ConnectorClient["list"];
   readonly get: ConnectorClient["get"];
   readonly call: ConnectorClient["call"];
-  constructor(readonly registry = new ConnectorRegistry(), private readonly requirementProviders: readonly RequirementConnector[] = []) {
+  constructor(readonly registry = new ConnectorRegistry()) {
     this.list = registry.list.bind(registry);
     this.get = registry.get.bind(registry);
     this.call = registry.call.bind(registry);
@@ -62,12 +62,11 @@ export class Connectors implements ConnectorClient {
     if (entries.length > 1) throw new Error(`Ambiguous Connector selection: ${kind}; use a discovered reference`);
     return entries[0] ? this.get<A>(entries[0]) : undefined;
   }
-  static async load(config: ConnectorConfigurations, options: { registration?: string; baseDir?: string; environment?: Readonly<Record<string, string | undefined>>; log?: (message: string, attributes: Record<string, unknown>) => void } = {}): Promise<Connectors> {
-    const providers: RequirementConnector[] = [];
+  static async load(config: ConnectorConfigurations, options: { registration?: string | ConnectorPackage; baseDir?: string; environment?: Readonly<Record<string, string | undefined>>; log?: (message: string, attributes: Record<string, unknown>) => void } = {}): Promise<Connectors> {
     const registry = new ConnectorRegistry(options.log);
     try {
-      await loadConnectorPackages(registry, config, { ...options, definitions: builtinDefinitions(providers) });
-      return new Connectors(registry, providers);
+      await loadConnectorPackages(registry, config, { ...options, definitions: builtinDefinitions() });
+      return new Connectors(registry);
     } catch (error) { await registry.close(); throw error; }
   }
   async describe() {
@@ -89,8 +88,8 @@ export class Connectors implements ConnectorClient {
   async close(): Promise<void> { await this.registry.close(); }
   /** Output delivery remains a Host-owned write path. */
   async addRequirementComment(identity: RequirementIdentity, comment: { text: string; deliveryId: string }) {
-    const provider = this.requirementProviders.find(item => item.source === identity.source);
-    if (!provider?.addComment) throw new Error(`Requirement connector does not support comment delivery: ${identity.source}`);
-    return provider.addComment(identity, comment);
+    const ref = this.registry.descriptions(RequirementKind, RequirementVersion).find(item => item.name === identity.source);
+    if (!ref) throw new Error(`Unknown requirement connector: ${identity.source}`);
+    return await this.registry.callHost(ref, "addComment", [identity, comment]) as Awaited<ReturnType<NonNullable<RequirementConnector["addComment"]>>>;
   }
 }

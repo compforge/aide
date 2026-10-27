@@ -21,7 +21,7 @@ export type ConnectorConfigurations = Readonly<Record<string, ConnectorConfigura
  * @case tests/connector-packages.test.ts
  */
 export async function loadConnectorPackages(registry: ConnectorRegistry, config: ConnectorConfigurations,
-  options: { baseDir?: string; environment?: Readonly<Record<string, string | undefined>>; registration?: string; definitions?: readonly ConnectorDefinition[] } = {}): Promise<void> {
+  options: { baseDir?: string; environment?: Readonly<Record<string, string | undefined>>; registration?: string | ConnectorPackage; definitions?: readonly ConnectorDefinition[] } = {}): Promise<void> {
   const definitions = new Map<string, { definition: ConnectorDefinition; packageIdentity: string }>();
 
   const baseDir = options.baseDir ?? process.cwd();
@@ -29,10 +29,12 @@ export async function loadConnectorPackages(registry: ConnectorRegistry, config:
   const require = createRequire(resolve(baseDir, "package.json"));
   if (options.registration) {
     const specifier = options.registration;
-    if (/^[a-z]+:/i.test(specifier)) throw new Error("Connector packages must be installed modules or local paths");
-    const path = isAbsolute(specifier) || specifier.startsWith(".") ? resolve(baseDir, specifier) : require.resolve(specifier);
-    const url = pathToFileURL(path).href;
-    const entry: ConnectorPackage = (await import(url)).default;
+    let entry: ConnectorPackage;
+    if (typeof specifier === "string") {
+      if (/^[a-z]+:/i.test(specifier)) throw new Error("Connector packages must be installed modules or local paths");
+      const path = isAbsolute(specifier) || specifier.startsWith(".") ? resolve(baseDir, specifier) : require.resolve(specifier);
+      entry = (await import(pathToFileURL(path).href)).default;
+    } else entry = specifier;
     if (!entry || typeof entry.id !== "string" || !entry.id.trim() || typeof entry.version !== "string" || !entry.version.trim() || !entry.connectors || typeof entry.connectors !== "object" || Array.isArray(entry.connectors)) throw new Error(`Invalid Connector package: ${specifier}`);
     for (const [name, definition] of Object.entries(entry.connectors)) {
       if (!name.trim() || !definition || typeof definition.config?.parse !== "function" || typeof definition.create !== "function") throw new Error(`Invalid Connector definition in ${entry.id}`);

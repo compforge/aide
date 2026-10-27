@@ -8,7 +8,7 @@ import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import { Aide } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
-import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
+const workCatalog = (me?: { userKey: string }) => [{ kind: "requirement", version: "v1", name: "work", revision: "fixture", methods: ["list", "identity"], metadata: { ...(me ? { me } : {}) } }];
 import { fakeOptions } from "./fake-harness.ts";
 
 const agent = { async execute(): Promise<never> { throw new Error("Unexpected work"); } };
@@ -27,9 +27,6 @@ test("Personal sources use one strict namespace, explicit scopes and no Lark kin
   ]) assert.throws(() => parsePersonalConfig(config), /Invalid Personal config/);
   assert.throws(() => parsePersonalConfig({ sources: { lark: { intervalMs: "SECRET_SENTINEL" } } }),
     (error: unknown) => error instanceof Error && error.message.includes("sources.lark.intervalMs") && !error.message.includes("SECRET_SENTINEL"));
-  assert.throws(() => loadMeegoRequirementConfigs({ requirements: {
-    work: { provider: "meego", projectKey: "p", userKeys: ["me"] },
-  } }), /Invalid Meego connector fields/);
 });
 
 test("Startup rejects Source references without matching Connectors before opening Sessions", async (t) => {
@@ -53,7 +50,7 @@ test("Only configured sources poll; removing policies stops restored observers w
   const configFile = join(root, "config.yaml");
   const declarations = { environments: { kind: "environment", version: "v1", config: { dev: { kind: "kubernetes", kubeconfig: "unused" } } },
     lark: { kind: "messages", version: "v1", config: { appId: "cli_app", userId: "ou_me", me: [{ appId: "cli_app", openId: "ou_me" }] } },
-    work: { kind: "requirement", version: "v1", config: { provider: "meego", projectKey: "p" } } };
+    work: { kind: "requirement", version: "v1", config: { provider: "tracker", projectKey: "p" } } };
   const person = { identities: [{ provider: "lark", scope: "cli_app", id: "ou_me" }] };
   const sources = { environments: { targets: [{ environment: "dev", namespaces: ["app"] }] }, lark: {},
     requirements: [{ id: "mine", source: "work", userKeys: ["me"] }, { id: "team", source: "work", userKeys: ["team"] }] };
@@ -70,13 +67,13 @@ test("Only configured sources poll; removing policies stops restored observers w
         return { messages: [], hasMore: false, observedThrough: new Date().toISOString() };
       },
     },
-    requirements: { ...emptyConnectors.requirements, async identity() { return { provider: "meego", scope: "fixture/p" }; }, async list(_source: string, query?: { assigneeUserKeys?: readonly string[] }) {
+    requirements: { ...emptyConnectors.requirements, async identity() { return { provider: "tracker", scope: "fixture/p" }; }, async list(_source: string, query?: { assigneeUserKeys?: readonly string[] }) {
       seen.assignees.push([...query?.assigneeUserKeys ?? []]); return { items: [] };
     } },
   };
   const logs: Record<string, unknown>[] = [];
   const log = pino({}, { write(line) { logs.push(JSON.parse(line)); } });
-  const create = () => new Aide(root, { ...fakeOptions(agent, root), connectors, config: loadConfig(configFile) }, log);
+  const create = () => new Aide(root, { ...fakeOptions(agent, root), connectors, connectorCatalog: workCatalog(), config: loadConfig(configFile) }, log);
   writeFileSync(configFile, JSON.stringify({ connectors: declarations }));
   let aide = create();
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
@@ -113,20 +110,20 @@ test("Topic configuration budgets context and rejects obsolete batching controls
 });
 
 
-test("Meego Me resolves canonical identity without equating profile or watched people with Me", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "aide-meego-me-"));
+test("Requirement Me resolves canonical identity without equating profile or watched people with Me", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "aide-tracker-me-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: {work: {kind:"requirement",version:"v1",config:{
-    provider: "meego", projectKey: "alias", profile: "robot", me: { userKey: "human" },
+    provider: "tracker", projectKey: "alias", profile: "robot", me: { userKey: "human" },
   }}} }));
   const connectors = { ...emptyConnectors, requirements: { ...emptyConnectors.requirements,
-    async identity() { return { provider: "meego", scope: "https://meego.test/canonical" }; },
+    async identity() { return { provider: "tracker", scope: "https://tracker.test/canonical" }; },
     async list() { return { items: [] }; },
   } };
-  const aide = new Aide(root, { ...fakeOptions(agent, root), connectors, config: loadConfig(configFile) }, pino({ level: "silent" }));
+  const aide = new Aide(root, { ...fakeOptions(agent, root), connectors, connectorCatalog: workCatalog({ userKey: "human" }), config: loadConfig(configFile) }, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.start();
-  const me = await aide.persons.findIdentity({ provider: "meego", scope: "https://meego.test/canonical", id: "human" });
-  assert.ok(me?.spec.identities.some((identity) => identity.provider === "meego" && identity.scope === "https://meego.test/canonical" && identity.id === "human"));
+  const me = await aide.persons.findIdentity({ provider: "tracker", scope: "https://tracker.test/canonical", id: "human" });
+  assert.ok(me?.spec.identities.some((identity) => identity.provider === "tracker" && identity.scope === "https://tracker.test/canonical" && identity.id === "human"));
   assert.ok(!me?.spec.identities.some((identity) => identity.id === "robot"));
 });

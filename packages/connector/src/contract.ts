@@ -28,6 +28,8 @@ export interface ConnectorContext {
 }
 export interface ConnectorImplementation<A extends ConnectorApi<A>> {
   readonly handlers: ConnectorHandlers<A>;
+  /** Trusted Host delivery only; never discoverable or callable through Plugin IPC. */
+  readonly hostHandlers?: Readonly<Record<string, (context: ConnectorCallContext, ...args: any[]) => Promise<unknown>>>;
   readonly metadata?: Readonly<Record<string, unknown>>;
   close?(): Promise<void> | void;
 }

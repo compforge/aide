@@ -45,7 +45,7 @@ export interface RequirementListQuery {
 
 /**
  * Requirement-platform port expressed only in Aide domain terms.
- * Meego and future providers map their DTOs at this boundary.
+ * Providers map their DTOs at this boundary.
  */
 export interface RequirementConnector {
   /** Stable config key used to route a selected Requirement back here. */
