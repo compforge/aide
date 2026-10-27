@@ -7,17 +7,30 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Connectors } from "../connectors/index.ts";
 import { ConnectorRegistry } from "../src/host/connector/registry.ts";
 import { loadConnectorPackages } from "../src/host/connector/packages.ts";
-import { TicketKind } from "./fixtures/connector-contract.ts";
+import { TicketKind, type TicketApi } from "./fixtures/connector-contract.ts";
 
 const entry=fileURLToPath(new URL("./fixtures/connector-package.ts",import.meta.url));
-const config={packages:[entry],instances:{work:{type:"fixture-one",config:{prefix:"W",tokenEnv:"TEST_TOKEN"}},personal:{type:"fixture-two",config:{prefix:"P",tokenEnv:"TEST_TOKEN"}}}};
+const config={packages:[entry],connections:{work:{type:"fixture-one",config:{prefix:"W",tokenEnv:"TEST_TOKEN"}},personal:{type:"fixture-two",config:{prefix:"P",tokenEnv:"TEST_TOKEN"}}}};
 
 test("an installed external package supplies multiple same-kind connectors through the normal Host registry",async()=>{
   const connectors=await Connectors.load(config,{environment:{TEST_TOKEN:"PRIVATE_CREDENTIAL"}});
   const refs=await connectors.list(TicketKind);assert.equal(refs.length,2);
   assert(!JSON.stringify(refs).includes("PRIVATE_CREDENTIAL"));assert(!JSON.stringify(refs).includes("tokenEnv"));
-  for(const ref of refs) assert.equal((await connectors.get(TicketKind,ref).read("ISSUE-1")).connector,ref.name);
+  for(const ref of refs) assert.equal((await connectors.get<TicketApi>(ref).read("ISSUE-1")).connector,ref.name);
   await connectors.close();
+});
+
+test("same-kind connections work independently when one call times out", async () => {
+  const connectors = await Connectors.load(config, { environment: { TEST_TOKEN: "fixture" } });
+  try {
+    const refs = await connectors.list("fixture.ticket", "v1");
+    const work = refs.find(ref => ref.name === "work")!, personal = refs.find(ref => ref.name === "personal")!;
+    await Promise.all([
+      assert.rejects(connectors.call(work, "wait", [1000], { timeoutMs: 20 }), /timed out/),
+      connectors.get<TicketApi>(personal).read("ISSUE-1").then(result => assert.equal(result.connector, "personal")),
+    ]);
+    assert.equal((await connectors.get<TicketApi>(personal).read("ISSUE-2")).connector, "personal");
+  } finally { await connectors.close(); }
 });
 
 test("environment changes invalidate references while an unchanged access configuration is stable",async()=>{
@@ -25,24 +38,95 @@ test("environment changes invalidate references while an unchanged access config
   const ref=(await one.list(TicketKind))[0]!;
   assert.equal(ref.revision,(await same.list(TicketKind))[0]!.revision);
   assert.notEqual(ref.revision,(await changed.list(TicketKind))[0]!.revision);
-  await assert.rejects(changed.get(TicketKind,ref).read("x"),/stale/);
+  await assert.rejects(changed.get<TicketApi>(ref).read("x"),/stale/);
   await one.close();await same.close();await changed.close();
 });
 
 test("configuration errors are scoped without exposing values, disabled entries do not instantiate",async()=>{
-  await assert.rejects(Connectors.load({...config,instances:{bad:{type:"fixture-one",config:{prefix:"private-sentinel"}}}},{environment:{TEST_TOKEN:"x"}}),error=>error instanceof Error&&error.message.includes("bad")&&!error.message.includes("private-sentinel"));
-  await assert.rejects(Connectors.load({...config,instances:{bad:{type:"missing"}}}),/not installed/);
+  await assert.rejects(Connectors.load({...config,connections:{bad:{type:"fixture-one",config:{prefix:"private-sentinel"}}}},{environment:{TEST_TOKEN:"x"}}),error=>error instanceof Error&&error.message.includes("bad")&&!error.message.includes("private-sentinel"));
+  await assert.rejects(Connectors.load({...config,connections:{bad:{type:"missing"}}}),/not installed/);
   await assert.rejects(Connectors.load({packages:[entry,entry]}),/configured twice/);
-  const connectors=await Connectors.load({...config,instances:{off:{type:"missing",enabled:false}}});
+  const connectors=await Connectors.load({...config,connections:{off:{type:"missing",enabled:false}}});
   assert.equal((await connectors.list(TicketKind)).length,0);await connectors.close();
 });
 
 test("failed package assembly closes already created bindings",async()=>{
   const registry=new ConnectorRegistry();
-  await assert.rejects(loadConnectorPackages(registry,{...config,instances:{good:config.instances.work,bad:{type:"missing"}}},{environment:{TEST_TOKEN:"x"}}),/not installed/);
+  await assert.rejects(loadConnectorPackages(registry,{...config,connections:{good:config.connections.work,bad:{type:"missing"}}},{environment:{TEST_TOKEN:"x"}}),/not installed/);
   assert.equal((await registry.list(TicketKind)).length,0);
   assert((globalThis as typeof globalThis&{ticketConnectorsClosed?:string[]}).ticketConnectorsClosed?.includes("good"));
   await registry.close();
+});
+
+test("malformed external definitions fail with package identity before creating a connection", async t => {
+  const root = mkdtempSync(join(tmpdir(), "aide-malformed-definitions-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const cases = [
+    { name: "missing-kind", kind: "undefined" },
+    { name: "null-kind", kind: "null" },
+    { name: "object-kind", kind: '{kind:"fixture"}' },
+    { name: "numeric-kind", kind: '123' },
+    { name: "empty-kind", kind: '""' },
+    { name: "blank-kind", kind: '"  "' },
+    { name: "invalid-type", kind: '"fixture"', type: 123 },
+    { name: "missing-version", kind: '"fixture"', version: "undefined" },
+    { name: "numeric-version", kind: '"fixture"', version: "1" },
+    { name: "empty-version", kind: '"fixture"', version: '""' },
+  ].map(item => {
+    const path = join(root, item.name + ".mjs");
+    writeFileSync(path, `export let created = false;
+      export default {id:"package-${item.name}",version:"1.0.0",connectors:[{
+        type:${JSON.stringify(item.type ?? "fixture")},kind:${item.kind},version:${item.version ?? '"v1"'},config:{parse(value){return value;}},
+        create(){created=true;return {handlers:{async read(){return "ok";}}};}
+      }]};`);
+    return { ...item, path };
+  });
+  for (const item of cases) {
+    const registry = new ConnectorRegistry();
+    try {
+      await assert.rejects(loadConnectorPackages(registry, { packages: [item.path], connections: { work: { type: "fixture" } } }), error => {
+        assert(error instanceof Error && !(error instanceof TypeError));
+        assert.match(error.message, /Invalid Connector (kind|version|definition)/);
+        assert(error.message.includes("package-" + item.name));
+        return true;
+      });
+      assert.equal((await import(pathToFileURL(item.path).href)).created, false);
+      assert.equal((await registry.list()).length, 0);
+    } finally { await registry.close(); }
+  }
+});
+
+test("malformed implementations close themselves and prior connections without hiding the assembly error", async t => {
+  const root = mkdtempSync(join(tmpdir(), "aide-malformed-implementations-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, "package.mjs");
+  writeFileSync(path, `export const closed=[];
+    export default {id:"malformed-implementation",version:"1.0.0",connectors:[{
+      type:"fixture",kind:"fixture",version:"v1",config:{parse(value){return value;}},
+      create(context, config){return {
+        handlers:config.mode==="null"?null:config.mode==="array"?[]:config.mode==="missing"?undefined:{async read(){return "ok";}},
+        async close(){closed.push({name:context.name,aborted:context.signal.aborted});if(config.failClose)throw new Error("private-close-error");}
+      };}
+    }]};`);
+  const fixture = await import(pathToFileURL(path).href);
+  for (const mode of ["null", "array", "missing"]) {
+    fixture.closed.length = 0;
+    const registry = new ConnectorRegistry();
+    try {
+      await assert.rejects(loadConnectorPackages(registry, { packages: [path], connections: {
+        good: { type: "fixture" }, bad: { type: "fixture", config: { mode, failClose: true } },
+      } }), error => {
+        assert(error instanceof Error && !(error instanceof TypeError));
+        assert.match(error.message, /Invalid Connector implementation: bad/);
+        assert(error.message.includes("fixture from malformed-implementation@1.0.0"));
+        assert(!error.message.includes("private-close-error"));
+        return true;
+      });
+      assert.equal((await registry.list()).length, 0);
+      assert.deepEqual(fixture.closed, [{ name: "bad", aborted: true }, { name: "good", aborted: true }]);
+    } finally { await registry.close(); }
+    assert.equal(fixture.closed.length, 2);
+  }
 });
 
 test("npm-style package resolution uses the configured base directory",async t=>{
@@ -85,7 +169,7 @@ test("an external Forge implementation feeds the existing repository and PR Sour
   const {fakeOptions}=await import("./fake-harness.ts");const {InputStore}=await import("../plugins/personal/input/store.ts");
   const {default:pino}=await import("pino");
   const root=mkdtempSync(join(tmpdir(),"aide-external-forge-"));
-  const config=ConfigSchema.parse({connectors:{packages:[fileURLToPath(new URL("./fixtures/forge-connector-package.ts",import.meta.url))],instances:{work:{type:"fixture-forge"}}},
+  const config=ConfigSchema.parse({connectors:{packages:[fileURLToPath(new URL("./fixtures/forge-connector-package.ts",import.meta.url))],connections:{work:{type:"fixture-forge"}}},
     plugins:{personal:{weave:{enabled:false},sources:{repositories:[{id:"repos",forge:"forge.external"}],pullRequests:[{id:"mine",repositories:"repos",author:"me"}]}}}});
   const connectors=await Connectors.load(config.connectors,{environment:{EXTERNAL_TOKEN:"HOST_ONLY"}});
   const prompts:string[]=[];
@@ -101,7 +185,7 @@ test("an external Forge implementation feeds the existing repository and PR Sour
 
 test("built-in Forge providers use the same configured connection path and coexist with external kinds",async()=>{
   const {ForgeKind}=await import("@compforge/aide-connector/forge");
-  const connectors=await Connectors.load({...config,instances:{...config.instances,github:{type:"github",config:{host:"github.example.com",tokenEnv:"TEST_TOKEN"}}}},{environment:{TEST_TOKEN:"fixture"}});
+  const connectors=await Connectors.load({...config,connections:{...config.connections,github:{type:"github",config:{host:"github.example.com",tokenEnv:"TEST_TOKEN"}}}},{environment:{TEST_TOKEN:"fixture"}});
   const [forge]=await connectors.list(ForgeKind);
   assert.equal(forge?.name,"github");assert.equal(forge?.metadata.forge,"github.example.com");
   assert.equal((await connectors.list(TicketKind)).length,2);

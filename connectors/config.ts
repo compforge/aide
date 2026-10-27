@@ -6,7 +6,7 @@ export const ConnectorsConfigSchema = z.object({
   environments: record.default({}), requirements: record.default({}), forges: record.default({}),
   lark: LarkMessagesConfigSchema.optional(),
   packages: z.array(z.string().min(1)).default([]),
-  instances: z.record(z.string(), z.object({
+  connections: z.record(z.string(), z.object({
     type: z.string().min(1), enabled: z.boolean().default(true), config: record.default({}),
     maxConcurrentCalls: z.number().int().min(1).max(1024).optional(),
     maxQueuedCalls: z.number().int().min(0).max(10000).optional(),

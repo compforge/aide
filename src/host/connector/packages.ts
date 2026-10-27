@@ -12,12 +12,13 @@ export interface ConnectorConfiguration extends ConnectorLimits {
 }
 export interface ConnectorPackageConfig {
   readonly packages?: readonly string[];
-  readonly instances?: Readonly<Record<string, ConnectorConfiguration>>;
+  readonly connections?: Readonly<Record<string, ConnectorConfiguration>>;
 }
 
 /**
  * @spec Only explicitly configured, already installed local/npm modules are loaded into the trusted Host.
  * @spec Configuration and environment reads stay in Host factories; callers receive only descriptions and method results.
+ * @spec Invalid definitions fail before creation; invalid implementations are closed without hiding the scoped assembly error.
  * @link docs/connector/extensions.md
  * @case tests/connector-packages.test.ts
  */
@@ -38,14 +39,16 @@ export async function loadConnectorPackages(registry: ConnectorRegistry, config:
     const entry: ConnectorPackage = (await import(url)).default;
     if (!entry || typeof entry.id !== "string" || !entry.id.trim() || typeof entry.version !== "string" || !entry.version.trim() || !Array.isArray(entry.connectors)) throw new Error(`Invalid Connector package: ${specifier}`);
     for (const definition of entry.connectors) {
-      if (!definition?.type?.trim() || typeof definition.config?.parse !== "function" || typeof definition.create !== "function") throw new Error(`Invalid Connector definition in ${entry.id}`);
+      if (typeof definition?.type !== "string" || !definition.type.trim() || typeof definition.config?.parse !== "function" || typeof definition.create !== "function") throw new Error(`Invalid Connector definition in ${entry.id}`);
+      if (typeof definition.kind !== "string" || !definition.kind.trim()) throw new Error(`Invalid Connector kind in ${entry.id} (${definition.type}): expected a non-empty string`);
+      if (typeof definition.version !== "string" || !definition.version.trim()) throw new Error(`Invalid Connector version in ${entry.id} (${definition.type}): expected a non-empty string`);
       if (definitions.has(definition.type)) throw new Error(`Connector implementation type is registered twice: ${definition.type}`);
       definitions.set(definition.type, { definition, packageIdentity: `${entry.id}@${entry.version}` });
     }
   }
   const created = [];
   try {
-    for (const [name, binding] of Object.entries(config.instances ?? {})) {
+    for (const [name, binding] of Object.entries(config.connections ?? {})) {
       if (binding.enabled === false) continue;
       const selected = definitions.get(binding.type);
       if (!selected) throw new Error(`Connector implementation is not installed: ${binding.type} (${name})`);
@@ -65,15 +68,20 @@ export async function loadConnectorPackages(registry: ConnectorRegistry, config:
           } }, parsed);
       } catch { abort.abort(); throw new Error(`Connector creation failed: ${name} (${binding.type})`); }
       createdFactory = true;
-      if (!implementation || typeof implementation.handlers !== "object" || (implementation.close !== undefined && typeof implementation.close !== "function")) {
-        abort.abort(); throw new Error(`Invalid Connector implementation: ${name} (${binding.type})`);
-      }
-      const revision = createHash("sha256").update(JSON.stringify([packageIdentity, binding.type, binding.config ?? {}, [...reads].sort()])).digest("hex");
       try {
+        if (!implementation || !implementation.handlers || typeof implementation.handlers !== "object" || Array.isArray(implementation.handlers) || (implementation.close !== undefined && typeof implementation.close !== "function")) {
+          throw new Error(`Invalid Connector implementation: ${name} (${binding.type} from ${packageIdentity})`);
+        }
+        const revision = createHash("sha256").update(JSON.stringify([packageIdentity, binding.type, definition.version, binding.config ?? {}, [...reads].sort()])).digest("hex");
         const close = implementation.close?.bind(implementation);
-        created.push(registry.register(definition.kind, name, { ...implementation, close: async () => { abort.abort(new Error("Connector closed")); await close?.(); } },
+        created.push(registry.register(definition.kind, definition.version, name, { ...implementation, close: async () => { abort.abort(new Error("Connector closed")); await close?.(); } },
           { revision, maxConcurrentCalls: binding.maxConcurrentCalls, maxQueuedCalls: binding.maxQueuedCalls, signal: abort.signal }));
-      } catch (error) { abort.abort(); await implementation.close?.(); throw error; }
+      } catch (error) {
+        abort.abort();
+        try { if (typeof implementation?.close === "function") await implementation.close(); }
+        catch { /* Preserve the scoped assembly error even if provider cleanup fails. */ }
+        throw error;
+      }
     }
   } catch (error) {
     for (const ref of created.reverse()) { try { await registry.unregister(ref); } catch { /* Preserve the original assembly failure. */ } }

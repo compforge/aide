@@ -1,14 +1,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { createConnectorAccess, defineConnectorKind, connectorData, ConnectorTimeoutError, type ConnectorApi, type ConnectorAccess, type ConnectorCallOptions,
-  type ConnectorRequest, type ConnectorDescription, type ConnectorImplementation, type ConnectorKind, type ConnectorRef } from "@compforge/aide-connector";
+import { createConnectorAccess, connectorData, ConnectorTimeoutError, type ConnectorApi, type ConnectorAccess, type ConnectorCallOptions,
+  type ConnectorRequest, type ConnectorDescription, type ConnectorImplementation, type ConnectorRef } from "@compforge/aide-connector";
 
 export interface ConnectorInvocationOptions extends ConnectorCallOptions { readonly signal?: AbortSignal }
 export interface ConnectorLimits { readonly maxConcurrentCalls?: number; readonly maxQueuedCalls?: number }
 interface Binding {
   description: ConnectorDescription;
   implementation: ConnectorImplementation<any>;
-  kind: ConnectorKind;
   abort: AbortController;
   active: number;
   queue: Array<{ start(): void; cancel(error: Error): void }>;
@@ -18,15 +17,14 @@ const keyOf = (ref: Pick<ConnectorRef, "kind" | "name">) => JSON.stringify([ref.
 const cancelled = (signal: AbortSignal) => signal.reason instanceof Error ? signal.reason : new Error("Connector call cancelled");
 
 /**
- * @spec Every caller resolves the same (kind,name) binding. Stale revisions, unknown methods and conflicting contracts fail explicitly.
+ * @spec Every caller resolves the same (kind,name) binding. Stale versions/revisions and unknown methods fail explicitly; callable methods come from the registered handlers.
  * @spec Descriptions expose only declared public metadata. Queueing and active calls share one Connector capacity budget.
- * @why Kinds are extension-owned contracts; registering a new kind never requires another core dispatch branch.
+ * @why Kind is a string identifier; operation signatures belong to domain interfaces, not a core runtime schema.
  * @link docs/connector/extensions.md
  * @case tests/connector-registry.test.ts
  */
 export class ConnectorRegistry implements ConnectorAccess {
   private readonly bindings = new Map<string, Binding>();
-  private readonly contracts = new Map<string, string>();
   private closed = false;
   private closing?: Promise<void>;
   private readonly callOptions = new AsyncLocalStorage<ConnectorInvocationOptions>();
@@ -42,41 +40,41 @@ export class ConnectorRegistry implements ConnectorAccess {
     try { this.log?.(message, attributes); } catch { /* Diagnostics do not own access lifecycle. */ }
   }
 
-  register<A extends ConnectorApi<A>>(kind: ConnectorKind<A>, name: string, implementation: ConnectorImplementation<A>,
+  register<A extends ConnectorApi<A>>(kind: string, version: string, name: string, implementation: ConnectorImplementation<A>,
     options: ConnectorLimits & { revision?: string; signal?: AbortSignal } = {}): ConnectorDescription {
     if (this.closed) throw new Error("Connector registry is closed");
-    const contract = defineConnectorKind(kind);
+    if (typeof kind !== "string" || !kind.trim()) throw new Error("Connector kind must be a non-empty string");
+    if (typeof version !== "string" || !version.trim()) throw new Error(`Connector version must be a non-empty string: ${kind}`);
     if (!name.trim()) throw new Error("Connector name must not be empty");
-    const key = keyOf({ kind: kind.kind, name });
-    if (this.bindings.has(key)) throw new Error(`Connector already registered: ${kind.kind}/${name}`);
-    const signature = JSON.stringify([...contract.methods].sort());
-    const contractKey = JSON.stringify([kind.kind, kind.version]);
-    if (this.contracts.has(contractKey) && this.contracts.get(contractKey) !== signature) throw new Error(`Conflicting Connector kind contract: ${kind.kind}@${kind.version}`);
-    for (const method of contract.methods) if (typeof implementation.handlers[method] !== "function") throw new Error(`Connector ${kind.kind}/${name} is missing method ${method}`);
+    const key = keyOf({ kind, name });
+    if (this.bindings.has(key)) throw new Error(`Connector already registered: ${kind}/${name}`);
+    if (!implementation?.handlers || typeof implementation.handlers !== "object" || Array.isArray(implementation.handlers)) throw new Error(`Invalid Connector handlers: ${kind}/${name}`);
+    const methods = Object.keys(implementation.handlers);
+    if (!methods.length || methods.some(method => !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(method)
+      || ["then", "constructor", "prototype", "__proto__"].includes(method) || typeof implementation.handlers[method as keyof A] !== "function")) throw new Error(`Invalid Connector handlers: ${kind}/${name}`);
     const maxConcurrentCalls = options.maxConcurrentCalls ?? 4, maxQueuedCalls = options.maxQueuedCalls ?? 64;
-    if (!Number.isSafeInteger(maxConcurrentCalls) || maxConcurrentCalls < 1 || !Number.isSafeInteger(maxQueuedCalls) || maxQueuedCalls < 0) throw new Error(`Invalid Connector capacity: ${kind.kind}/${name}`);
+    if (!Number.isSafeInteger(maxConcurrentCalls) || maxConcurrentCalls < 1 || !Number.isSafeInteger(maxQueuedCalls) || maxQueuedCalls < 0) throw new Error(`Invalid Connector capacity: ${kind}/${name}`);
     const metadata = connectorData(implementation.metadata ?? {});
-    const description: ConnectorDescription = Object.freeze({ kind: kind.kind, name, revision: options.revision ?? randomUUID(),
-      version: kind.version, methods: Object.freeze([...contract.methods]), metadata: structuredClone(metadata) });
+    const description: ConnectorDescription = Object.freeze({ kind, version, name, revision: options.revision ?? randomUUID(),
+      methods: Object.freeze(methods), metadata: structuredClone(metadata) });
     const abort = new AbortController();
     if (options.signal) {
       if (options.signal.aborted) throw cancelled(options.signal);
       options.signal.addEventListener("abort", () => abort.abort(options.signal!.reason), { once: true });
     }
-    this.contracts.set(contractKey, signature);
-    this.bindings.set(key, { description, implementation, kind: contract, abort, active: 0, queue: [], limits: { maxConcurrentCalls, maxQueuedCalls } });
-    this.report("Connector registered", { kind: kind.kind, name, version: kind.version });
+    this.bindings.set(key, { description, implementation, abort, active: 0, queue: [], limits: { maxConcurrentCalls, maxQueuedCalls } });
+    this.report("Connector registered", { kind, version, name });
     return structuredClone(description);
   }
-  descriptions(kind?: string, version?: number): readonly ConnectorDescription[] {
+  descriptions(kind?: string, version?: string): readonly ConnectorDescription[] {
     if (this.closed) throw new Error("Connector registry is closed");
-    return [...this.bindings.values()].filter(b => !b.abort.signal.aborted && (!kind || b.description.kind === kind) && (version === undefined || b.description.version === version))
+    return [...this.bindings.values()].filter(b => !b.abort.signal.aborted && (kind === undefined || b.description.kind === kind) && (version === undefined || b.description.version === version))
       .map(b => structuredClone(b.description));
   }
-  async list<A extends ConnectorApi<A>>(kind?: ConnectorKind<A>): Promise<readonly ConnectorDescription[]> {
-    return this.descriptions(kind?.kind, kind?.version);
+  async list(kind?: string, version?: string): Promise<readonly ConnectorDescription[]> {
+    return this.descriptions(kind, version);
   }
-  get<A extends ConnectorApi<A>>(kind: ConnectorKind<A>, connector: ConnectorDescription): A { return this.client.get(kind, connector); }
+  get<A extends ConnectorApi<A>>(connector: ConnectorDescription): A { return this.client.get<A>(connector); }
 
   async call(ref: ConnectorRef, method: string, supplied: readonly unknown[], options: ConnectorInvocationOptions = {}): Promise<unknown> {
     const binding = this.bindings.get(keyOf(ref));
@@ -85,8 +83,6 @@ export class ConnectorRegistry implements ConnectorAccess {
     if (!binding.description.methods.includes(method)) throw new Error(`Connector method is not registered: ${ref.kind}/${ref.name}.${method}`);
     let args = [...supplied]; while (args.length && args.at(-1) === undefined) args.pop();
     args = connectorData(args);
-    const validation = binding.kind.validation?.[method];
-    if (validation) args = validation.args.parse(args);
     const inherited = this.callOptions.getStore();
     const timeoutMs = Math.min(options.timeoutMs ?? inherited?.timeoutMs ?? 90_000, inherited?.timeoutMs ?? Infinity);
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) throw new Error("Connector timeoutMs must be a positive timer-safe integer");
@@ -101,7 +97,7 @@ export class ConnectorRegistry implements ConnectorAccess {
         if (signal.aborted) throw cancelled(signal);
         return binding.implementation.handlers[method]!({ signal }, ...args);
       }).then(value => {
-        return connectorData(validation ? validation.result.parse(value) : value);
+        return connectorData(value);
       }).finally(() => this.release(binding));
       let onAbort: () => void = () => {};
       try {
@@ -133,7 +129,7 @@ export class ConnectorRegistry implements ConnectorAccess {
   private release(binding: Binding) { binding.active--; binding.queue.shift()?.start(); }
   async unregister(ref: ConnectorRef): Promise<void> {
     const binding = this.bindings.get(keyOf(ref));
-    if (!binding || binding.description.revision !== ref.revision) throw new Error(`Connector reference is stale: ${ref.kind}/${ref.name}`);
+    if (!binding || binding.description.revision !== ref.revision || binding.description.version !== ref.version) throw new Error(`Connector reference is stale: ${ref.kind}/${ref.name}`);
     this.bindings.delete(keyOf(ref)); binding.abort.abort(new Error("Connector closed"));
     try { await binding.implementation.close?.(); }
     finally { this.report("Connector closed", { kind: ref.kind, name: ref.name }); }

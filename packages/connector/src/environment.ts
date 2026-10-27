@@ -1,4 +1,3 @@
-import { defineConnectorKind } from "./contract.ts";
 import type { Environment, HostEnvironment } from "@compforge/harness-common";
 
 /** A configured deployment identity; discovery does not establish connectivity. */
@@ -46,4 +45,5 @@ export interface EnvironmentSnapshot {
   readonly workloads: readonly WorkloadSnapshot[];
 }
 
-export const EnvironmentKind = defineConnectorKind<EnvironmentDirectory>({ kind: "environment", version: 1, methods: ["list", "get", "workloads"] });
+export const EnvironmentKind = "environment";
+export const EnvironmentVersion = "v1";

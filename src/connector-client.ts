@@ -41,7 +41,7 @@ export function dispatchConnector(client: ConnectorClient, request: ConnectorReq
   if (options && host.withCallOptions) return host.withCallOptions(options, () => dispatchConnector(client, request));
   switch (request.operation) {
     case "connector.list": return client.list().then(items => items.filter(item =>
-      (!request.kind || item.kind === request.kind) && (request.version === undefined || item.version === request.version)));
+      (request.kind === undefined || item.kind === request.kind) && (request.version === undefined || item.version === request.version)));
     case "connector.call": return client.call(request.connector, request.method, request.args, { timeoutMs: request.timeoutMs });
     case "describe": return client.describe();
     case "messages.identity": return client.messages.identity();

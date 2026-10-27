@@ -1,4 +1,3 @@
-import { defineConnectorKind } from "./contract.ts";
 /** Provider-neutral lifecycle state used by Requirement Loop policy. */
 export type RequirementState =
   | "open"
@@ -84,4 +83,5 @@ export interface RequirementPage<T> {
 }
 
 export type RequirementOperations = Pick<RequirementConnector, "list" | "get" | "identity" | "comments">;
-export const RequirementKind = defineConnectorKind<RequirementOperations>({ kind: "requirement", version: 1, methods: ["list", "get", "identity", "comments"] });
+export const RequirementKind = "requirement";
+export const RequirementVersion = "v1";

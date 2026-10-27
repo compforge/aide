@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createForgeReader, ForgeRateLimitError, type ForgeReader } from "@compforge/repocli";
-import { ForgeKind, type ForgeOperations } from "@compforge/aide-connector/forge";
+import { ForgeKind, ForgeVersion, type ForgeOperations } from "@compforge/aide-connector/forge";
 import type { ConnectorDefinition, ConnectorImplementation } from "@compforge/aide-connector";
 
 export function forgeImplementation(reader: ForgeReader): ConnectorImplementation<ForgeOperations> {
@@ -22,7 +22,7 @@ export function forgeImplementation(reader: ForgeReader): ConnectorImplementatio
 const ConfigSchema = z.object({ host: z.string().trim().min(1), forge: z.string().trim().min(1).optional(),
   tokenEnv: z.string().min(1).optional(), token: z.string().trim().min(1).optional() }).strict();
 const definition = (provider: "github" | "gitlab"): ConnectorDefinition<z.infer<typeof ConfigSchema>, ForgeOperations> => ({
-  type: provider, kind: ForgeKind, config: ConfigSchema,
+  type: provider, kind: ForgeKind, version: ForgeVersion, config: ConfigSchema,
   create(context, config) {
     const token = config.tokenEnv ? context.env(config.tokenEnv) : provider === "github"
       ? context.env("GITHUB_TOKEN") || context.env("GH_TOKEN") : context.env("GITLAB_TOKEN");

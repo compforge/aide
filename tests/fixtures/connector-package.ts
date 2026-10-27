@@ -1,7 +1,7 @@
 import type { ConnectorDefinition, ConnectorPackage } from "@compforge/aide-connector";
-import { TicketKind, type TicketApi } from "./connector-contract.ts";
+import { TicketKind, TicketVersion, type TicketApi } from "./connector-contract.ts";
 interface Config { prefix: string; tokenEnv: string }
-const definition = (type: string): ConnectorDefinition<Config, TicketApi> => ({ type, kind: TicketKind,
+const definition = (type: string): ConnectorDefinition<Config, TicketApi> => ({ type, kind: TicketKind, version: TicketVersion,
   config: { parse(value: unknown) {
     const config = value as Config;
     if (!config || typeof config.prefix !== "string" || typeof config.tokenEnv !== "string") throw new Error("Invalid Ticket config");

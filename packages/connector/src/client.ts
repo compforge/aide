@@ -1,5 +1,5 @@
 import { connectorData } from "./data.ts";
-import type { ConnectorAccess, ConnectorCallOptions, ConnectorApi, ConnectorDescription, ConnectorKind, ConnectorRef, ConnectorRequest } from "./contract.ts";
+import type { ConnectorAccess, ConnectorCallOptions, ConnectorApi, ConnectorDescription, ConnectorRef, ConnectorRequest } from "./contract.ts";
 
 /** The same typed client is used by Host callers, Plugin callbacks and execution-scoped verbs. */
 export function createConnectorAccess(invoke: <T>(request: ConnectorRequest) => Promise<T>): ConnectorAccess {
@@ -10,13 +10,12 @@ export function createConnectorAccess(invoke: <T>(request: ConnectorRequest) => 
       method, args: connectorData(args), ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}) });
   };
   return Object.freeze({
-    list: <A extends ConnectorApi<A>>(kind?: ConnectorKind<A>) => invoke<readonly ConnectorDescription[]>({ operation: "connector.list",
-      ...(kind ? { kind: kind.kind, version: kind.version } : {}) }),
+    list: (kind?: string, version?: string) => invoke<readonly ConnectorDescription[]>({ operation: "connector.list",
+      ...(kind !== undefined ? { kind } : {}), ...(version !== undefined ? { version } : {}) }),
     call,
-    get<A extends ConnectorApi<A>>(kind: ConnectorKind<A>, connector: ConnectorDescription): A {
-      if (kind.kind !== connector.kind || kind.version !== connector.version || kind.methods.some(method => !connector.methods.includes(method))) throw new Error(`Connector contract mismatch: ${connector.kind}/${connector.name}`);
+    get<A extends ConnectorApi<A>>(connector: ConnectorDescription): A {
       const reference = Object.freeze({ kind: connector.kind, version: connector.version, name: connector.name, revision: connector.revision });
-      return Object.freeze(Object.fromEntries(kind.methods.map(method => [method, (...args: unknown[]) => call(reference, method, args)]))) as A;
+      return Object.freeze(Object.fromEntries(connector.methods.map(method => [method, (...args: unknown[]) => call(reference, method, args)]))) as A;
     },
   });
 }

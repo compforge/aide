@@ -1,3 +1,4 @@
+import { ForgeKind, ForgeVersion } from "@compforge/aide-connector/forge";
 import { validateForgeSources } from "../plugins/personal/source/pull-request/config.ts";
 import { forgeConnectionRevision, loadForgeConfigs } from "../connectors/forge/config.ts";
 import { iconFor } from "@compforge/aide-plugin";
@@ -92,11 +93,11 @@ export class Aide {
     const config = options.config;
     const { sources } = parsePersonalConfig(config?.plugins.personal);
     const forgeConfigs = loadForgeConfigs(config?.connectors ?? {});
-    const discoveredForges = (options.connectorCatalog ?? []).filter(d => d.kind === "forge").map(d => ({ forge: String(d.metadata.forge ?? d.name) }));
+    const discoveredForges = (options.connectorCatalog ?? []).filter(d => d.kind === ForgeKind && d.version === ForgeVersion).map(d => ({ forge: String(d.metadata.forge ?? d.name) }));
     validateForgeSources(sources.repositories, sources.pullRequests, [...forgeConfigs, ...discoveredForges]);
     const forgeConnectionRevisions = Object.fromEntries([
       ...forgeConfigs.map(forge => [forge.forge, forgeConnectionRevision(forge)]),
-      ...(options.connectorCatalog ?? []).filter(d => d.kind === "forge").map(d => [String(d.metadata.forge ?? d.name), d.revision]),
+      ...(options.connectorCatalog ?? []).filter(d => d.kind === ForgeKind && d.version === ForgeVersion).map(d => [String(d.metadata.forge ?? d.name), d.revision]),
     ]);
     const connectorMe = { identities: (config?.connectors.lark?.me ?? []).map(i => ({ provider: "lark", scope: i.appId, id: i.openId })) };
     const channelMe = { identities: [LOCAL_ME, ...Object.values(config?.channels ?? {}).flatMap(c => c.me ? [{ provider: "lark", scope: c.appId, id: c.me.openId }] : [])] };
@@ -129,7 +130,7 @@ export class Aide {
     }, "Personal observation sources configured");
     const connectors = options.connectors ?? (this.ownedConnectors = Connectors.fromConfig(config?.connectors ?? {}));
     this.catalog = openPersonCatalog(home, this.meMarks, log, () => this.notify());
-    this.connectors = { ...(connectors instanceof Connectors ? { withCallOptions: connectors.withCallOptions.bind(connectors) } : {}), list: kind => connectors.list(kind), get: connectors.get.bind(connectors), call: connectors.call.bind(connectors), requirements: requirementOutputs(personRequirements(connectors.requirements, this.persons), this.outputStore), forges: connectors.forges,
+    this.connectors = { ...(connectors instanceof Connectors ? { withCallOptions: connectors.withCallOptions.bind(connectors) } : {}), list: (kind, version) => connectors.list(kind, version), get: connectors.get.bind(connectors), call: connectors.call.bind(connectors), requirements: requirementOutputs(personRequirements(connectors.requirements, this.persons), this.outputStore), forges: connectors.forges,
       environments: connectors.environments, describe: () => connectors.describe(),
       messages: config?.connectors.lark?.appId ? personMessages(connectors.messages, this.persons, config.connectors.lark.appId) : connectors.messages };
     let personal: Personal | undefined;

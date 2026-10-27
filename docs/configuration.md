@@ -48,7 +48,7 @@ Lark Channel 不再读取 `AIDE_LARK_APP_ID` / `AIDE_LARK_APP_SECRET`。机器�
 没有声明的 Connector/Source/package 默认为空。Connector 和 Plugin 的具体字段由所属实现校验，
 不放宽顶层或 Harness 的字段检查。配置不是 Plugin 之间传递凭证的通道。
 
-Connector 可通过 `connectors.packages` 加载外部包，在 `connectors.instances` 配置其工作连接；Kind、发现与调用见 [Connector 扩展](connector/extensions.md)。
+Connector 可通过 `connectors.packages` 加载外部包，在 `connectors.connections` 配置其工作连接；Kind、发现与调用见 [Connector 扩展](connector/extensions.md)。
 
 Connector 配置访问能力，声明它不会启动持续观察。Personal 的策略统一位于 `plugins.personal.sources`：
 
