@@ -13,6 +13,21 @@ import { withAsyncFileLock } from "../src/host/file-lock.ts";
 
 const log = pino({ level: "silent" });
 
+test("Reconcile concurrency configuration defaults to eight and requires a positive integer", () => {
+  const home = mkdtempSync(join(tmpdir(), "aide-reconcile-config-"));
+  const file = join(home, "config.yaml");
+  try {
+    writeFileSync(file, "reconcile: {}\n");
+    expect(loadConfig(file).reconcile?.maxTotalConcurrency).toBe(8);
+    writeFileSync(file, "reconcile:\n  maxTotalConcurrency: 3\n");
+    expect(loadConfig(file).reconcile?.maxTotalConcurrency).toBe(3);
+    for (const maxTotalConcurrency of [0, -1, 1.5, "8", null]) {
+      writeFileSync(file, JSON.stringify({ reconcile: { maxTotalConcurrency } }));
+      expect(() => loadConfig(file)).toThrow("reconcile.maxTotalConcurrency");
+    }
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("Chief config validates model and package declarations without echoing values", () => {
   const home = mkdtempSync(join(tmpdir(), "aide-harness-config-"));
   const file = join(home, "config.yaml");

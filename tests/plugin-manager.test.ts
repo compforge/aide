@@ -270,6 +270,26 @@ describe("plugin Manager", () => {
     await manager.close();
   });
 
+  test("admits eight Reconciles by default and queues the ninth", async () => {
+    const root = testRoot();
+    const resources = store(root, "default_capacity");
+    const gate = deferred();
+    const started: string[] = [];
+    for (let i = 0; i < 9; i++) createResource(resources, "Requirement", `item-${i}`);
+    const manager = new Manager({ instances: instanceStore(root) });
+    manager.registerController({ store: resources, resourceType: resourceType("Requirement"), maxConcurrency: 16,
+      async reconcile(_context, resource) { started.push(resource.metadata.name); await gate.promise; },
+    });
+    const executions = Array.from({ length: 9 }, (_, i) => manager.enqueue(key("default_capacity", `item-${i}`)));
+    try {
+      await waitFor(() => started.length >= 8);
+      expect(started).toHaveLength(8);
+      gate.resolve();
+      await Promise.all(executions);
+      expect(started).toHaveLength(9);
+    } finally { gate.resolve(); await Promise.allSettled(executions); await manager.close(); }
+  });
+
   test("routes many Plugin instances through one globally bounded capacity", async () => {
     const root = testRoot();
     const reqloopStore = store(root, "reqloop_default");

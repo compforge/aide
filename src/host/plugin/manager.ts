@@ -1,3 +1,4 @@
+import { DEFAULT_MAX_TOTAL_CONCURRENCY } from "../../reconcile/config.ts";
 import { createPluginVerbs } from "../../plugin-context.ts";
 import { ResourceStorage } from "../resource/storage.ts";
 import { ResourcePrinters } from "./resource/printer.ts";
@@ -105,7 +106,7 @@ export interface ManagerOptions {
   readonly connectors?: ConnectorClient;
   readonly actions?: VerbOptions["actions"];
   readonly onResourceChange?: (change: ResourceClientChange) => void;
-  /** 所有 Controller 合计可占用的执行容量；默认 1。 */
+  /** New Reconcile admission threshold across Controllers; defaults to 8. Resuming verbs may exceed it. */
   maxTotalConcurrency?: number;
   /** Application-owned plugin configuration repository. */
   instances: PluginInstanceRepository;
@@ -231,7 +232,7 @@ export class Manager {
   constructor(options: ManagerOptions) {
     this.resourceHome = options.resourceHome ?? options.instances.home;
     this.resourceAdmissions = options.resourceAdmissions;
-    this.remoteConcurrency = options.maxTotalConcurrency ?? 1;
+    this.remoteConcurrency = options.maxTotalConcurrency ?? DEFAULT_MAX_TOTAL_CONCURRENCY;
     this.capacity = new ReconcileCapacity(this.remoteConcurrency);
     this.now = options.now ?? (() => new Date());
     this.instances = options.instances;
@@ -791,6 +792,8 @@ export class Manager {
   }
 
   private async startManager(): Promise<void> {
+    this.log?.({ level: "info", source: "aide", component: "plugin.controller", message: "Controller scheduling configured",
+      attributes: { maxTotalConcurrency: this.remoteConcurrency } });
     const enabled = this.instances.list().filter((instance) => instance.enabled);
     const declarationErrors = new Map<string, unknown>();
     for (const instance of enabled) {
@@ -1150,37 +1153,52 @@ export class Manager {
     }
   }
 
+  /** @spec Host-managed Source discovery gates Watch delivery independently of execution capacity.
+   * @case tests/plugin-manager.test.ts
+   */
   private async activateControllerSources(
     controller: ManagedController,
   ): Promise<void> {
-    const cronSources = controller.cronSources?.() ?? [];
-    if (cronSources.length > 0) {
-      this.cronSourceQueue.register(controller.scope, cronSources);
+    // Runner startup owns its queues and initial enumeration; Host must keep
+    // forwarding changes between concurrently starting Runner controllers.
+    if (controller instanceof RunnerController) {
+      await controller.startSources();
+      return;
     }
-    await controller.startSources?.((sourceId, error) => {
-      try {
-        this.log?.({
-          level: "error",
-          source: "aide",
-          component: "plugin.source",
-          message: `Plugin source ${sourceId} failed`,
-          pluginInstanceId: controller.scope.pluginInstanceId,
-          error: logError(error),
-          attributes: {
-            resourceApiVersion: controller.scope.resourceApiVersion,
-            resourceKind: controller.scope.resourceKind,
-            sourceId,
-          },
-        });
-        this.onControllerSourceError?.(Object.freeze({
-          scope: controller.scope,
-          sourceId,
-          error,
-        }));
-      } catch {
-        // Source diagnostics must not interrupt discovery or live delivery.
+    const id = reconcileScopeId(controller.scope);
+    this.suspendedControllers.add(id);
+    try {
+      const cronSources = controller.cronSources?.() ?? [];
+      if (cronSources.length > 0) {
+        this.cronSourceQueue.register(controller.scope, cronSources);
       }
-    });
+      await controller.startSources?.((sourceId, error) => {
+        try {
+          this.log?.({
+            level: "error",
+            source: "aide",
+            component: "plugin.source",
+            message: `Plugin source ${sourceId} failed`,
+            pluginInstanceId: controller.scope.pluginInstanceId,
+            error: logError(error),
+            attributes: {
+              resourceApiVersion: controller.scope.resourceApiVersion,
+              resourceKind: controller.scope.resourceKind,
+              sourceId,
+            },
+          });
+          this.onControllerSourceError?.(Object.freeze({
+            scope: controller.scope,
+            sourceId,
+            error,
+          }));
+        } catch {
+          // Source diagnostics must not interrupt discovery or live delivery.
+        }
+      });
+    } finally {
+      if (this.controllers.get(id) === controller) this.suspendedControllers.delete(id);
+    }
   }
 
   private enqueueCronSourceResources(

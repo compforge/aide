@@ -45,6 +45,7 @@ export class ReconcileCapacity {
     const admission = this.acquire();
     if (admission) await admission;
     let held = true;
+    let finished = false;
     const lease: ReconcileCapacityLease = Object.freeze({
       suspend: async <U>(wait: Promise<U>): Promise<U> => {
         if (held) {
@@ -54,9 +55,9 @@ export class ReconcileCapacity {
         try {
           return await wait;
         } finally {
-          if (!held) {
-            const resume = this.acquire();
-            if (resume) await resume;
+          if (!held && !finished) {
+            // The live continuation already owns admission; only new work queues.
+            this.active += 1;
             held = true;
           }
         }
@@ -65,6 +66,7 @@ export class ReconcileCapacity {
     try {
       return await execute(lease);
     } finally {
+      finished = true;
       if (held) this.release();
     }
   }
@@ -78,15 +80,24 @@ export class ReconcileCapacity {
   }
 
   private release(): void {
-    const next = this.waiting.shift();
-    if (next) next();
-    else this.active -= 1;
+    this.active -= 1;
+    if (this.active < this.limit) {
+      const next = this.waiting.shift();
+      if (next) {
+        this.active += 1;
+        next();
+      }
+    }
   }
 }
 
 /**
- * @spec Suspending a reconcile releases its capacity slot for the full external wait and reacquires a slot before the original continuation resumes.
- * @rule A Plugin verb wait must suspend both the Controller-local and Manager-global leases so one human wait cannot block unrelated Resources at either limit.
+ * @spec Capacity limits new Reconcile admission. Verb waits release capacity; settled continuations resume without queuing, even above the limit.
+ * @rule While resumed work fills or exceeds the limit, no new execution is admitted. Same-resource serialization spans all waits.
+ * @rule Parallel waits share one lease; their continuations must not restore capacity more than once or after execution ends.
+ * @link docs/kernel.md
+ * @case tests/reconcile-capacity.test.ts
+ * @case tests/plugin-runner.test.ts
  */
 export interface ReconcileCapacityLease {
   suspend<T>(wait: Promise<T>): Promise<T>;

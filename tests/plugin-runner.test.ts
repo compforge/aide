@@ -377,6 +377,43 @@ describe("Plugin Runner process boundary", () => {
     await manager.close();
   });
 
+  test("a completed verb resumes through the Runner backlog without triggering its watchdog", async () => {
+    const { instances, session, entry } = stores();
+    instances.create({ pluginInstanceId: "capacity", pluginId: "tests/process-plugin", marketplace: "fixtures", packageVersion: "1.0.0" });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let waiting = false;
+    const failures: PluginRunnerFailure[] = [];
+    const manager = new Manager({ instances, log: record => session.log(record), maxTotalConcurrency: 1,
+      actions: { "capacity/wait": async () => { waiting = true; await gate; return {}; } },
+      pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: 1000 }),
+      async loadPackageEntry(pluginId, version) { return { pluginId, version, entryUrl: pathToFileURL(entry).href,
+        resourcesUrl: new URL("./fixtures/process-definitions.ts", import.meta.url).href }; },
+      onRunnerFailure(failure) { failures.push(failure); },
+    });
+    try {
+      await manager.start();
+      const resources = manager.resourceClient("capacity");
+      await resources.create(PROCESS_TYPE, { name: "waiting", spec: { operation: "capacity-wait" } });
+      await waitFor(() => waiting, 2000);
+      await Promise.all(Array.from({ length: 32 }, (_, index) => resources.create(PROCESS_TYPE,
+        { name: `backlog-${index}`, spec: { operation: "capacity-step" } })));
+      // The backlog takes longer than the watchdog, but each individual step is short.
+      release();
+      let resumed = false;
+      const deadline = Date.now() + 750;
+      while (Date.now() < deadline) {
+        const resource = await resources.get<unknown, { result?: string }>({ ...PROCESS_TYPE, namespace: "v1", name: "waiting" });
+        if (resource?.status.result === "resumed") { resumed = true; break; }
+        await Bun.sleep(5);
+      }
+      expect(resumed).toBe(true);
+      await manager.settled();
+      expect(failures).toEqual([]);
+      expect(manager.isInstanceActive("capacity")).toBe(true);
+    } finally { release(); await manager.close(); }
+  });
+
   test("Controller watchdog terminates a blocked Reconcile while Host remains responsive", async () => {
     const { instances, session, entry } = stores();
     instances.create({ pluginInstanceId: "controller_timeout", pluginId: "tests/process-plugin", marketplace: "fixtures", packageVersion: "1.0.0" });
