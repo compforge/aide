@@ -67,7 +67,7 @@ test("Me is optional for replies and must be resolved in the sending app's scope
   const home = mkdtempSync(join(tmpdir(), "aide-channel-me-"));
   const cfg = config(); delete cfg.channels.work!.me;
   // An identity belonging to a different app cannot be substituted.
-  cfg.connectors.lark = { timeoutMs: 15000, appId: "cli_connector", userId: "ou_observer", me: [{ appId: "cli_connector", openId: "ou_observer" }] };
+  cfg.connectors.lark = { kind: "messages", version: "v1", enabled: true, config: { timeoutMs: 15000, appId: "cli_connector", userId: "ou_observer", me: [{ appId: "cli_connector", openId: "ou_observer" }] } };
   const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No work"); } }, home), config: cfg }, log);
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
   await aide.persons.initialize();
@@ -154,7 +154,7 @@ test("Configuring existing Persons as Channel Me consolidates their accounts wit
   await aide.close();
   // Connector knowledge alone neither selects the default recipient nor marks this Channel's sender as Me.
   const withoutMe = config(); delete withoutMe.channels.work!.me;
-  withoutMe.connectors.lark = { timeoutMs: 15000, me: [{ appId: "cli_work", openId: "ou_me" }] };
+  withoutMe.connectors.lark = { kind: "messages", version: "v1", enabled: true, config: { timeoutMs: 15000, me: [{ appId: "cli_work", openId: "ou_me" }] } };
   aide = new Aide(home, { ...options, config: withoutMe }, log);
   await aide.start();
   await assert.rejects(aide.topics.say("notice", undefined, "没有渠道 Me"), /configure channels.work.me/);

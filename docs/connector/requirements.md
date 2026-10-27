@@ -6,7 +6,7 @@ Aide 持续观察指定负责人名下的工作项和讨论，把变化交给 Ch
 
 服务用户需要能执行提供方 CLI，并已完成该 CLI 的登录。Aide 复用 CLI profile，不保存 OAuth 凭证。每条 CLI 命令有 20 秒超时和 4 MiB 输出上限。
 
-Connector 声明位于 `connectors.requirements.<name>`，包含以下字段：
+Connector 直接声明在 `connectors.<name>`，kind 为 requirement，version 为 v1；其 config 包含以下字段：
 
 | 字段 | 含义 |
 |---|---|

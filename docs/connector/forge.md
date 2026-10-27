@@ -29,17 +29,24 @@ Chief 的 list_pull_requests 使用 pageSize / cursor；read_pull_request_review
 
 ```yaml
 connectors:
-  forges:
-    github.com:
-      type: github
-    code.byted.org:
-      type: gitlab
+  github.com:
+    kind: forge
+    version: v1
+    config:
+      provider: github
+      host: github.com
+  gitlab.example.com:
+    kind: forge
+    version: v1
+    config:
+      provider: gitlab
+      host: gitlab.example.com
 plugins:
   personal:
     sources:
       repositories:
         - id: company-repositories
-          forge: code.byted.org
+          forge: gitlab.example.com
           refreshIntervalMs: 21600000
           retryIntervalMs: 60000
       pullRequests:
@@ -54,7 +61,7 @@ plugins:
 ```
 
 GitHub 使用 GITHUB_TOKEN / GH_TOKEN，GitLab 使用 GITLAB_TOKEN；也可在 Connector 配置 token。
-凭证决定可访问范围，author 显式决定 PR 作者。Connector uids 不参与查询。
+凭证决定可访问范围，author 显式决定 PR 作者。
 PullRequest 策略选择 repositories 引用或 forge 账号范围之一；每种 Source 的 id 唯一，
 一个 Forge 配置一个 RepositorySource，同一 Forge/author 只使用一条 PR 发现策略，避免重叠观察。
 未知 Connector、未知 RepositorySource 引用及重复范围在启动时拒绝。

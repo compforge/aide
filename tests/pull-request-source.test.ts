@@ -18,8 +18,8 @@ import { observePullRequests, PULL_REQUEST_SOURCE_TYPE, type PullRequestSourceSt
 import { PullRequestSourceSpecSchema, validateForgeSources, type PullRequestSourceSpec } from "../plugins/personal/source/pull-request/config.ts";
 import { Aide } from "../src/app.ts";
 import { ConfigSchema } from "../src/config.ts";
-import { Connectors } from "../connectors/index.ts";
-import { createForgeConnectors } from "../connectors/forge/config.ts";
+import { createConnectors } from "./connector-fixture.ts";
+import { createForgeReader } from "@compforge/repocli";
 import { fakeOptions } from "./fake-harness.ts";
 
 const logger = { debug() {}, info() {}, warn() {}, error() {} };
@@ -142,8 +142,7 @@ test("configured accounts stay explicit and unique",()=>{
 test("real Runner discovers across IPC and routes a merged Input to Chief; disabled Source stays idle", { timeout: 20_000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), "aide-forge-runner-"));
   let current = pr(); let discoveries = 0; const prompts: string[] = [];
-  const connectors = new Connectors([], createForgeConnectors({ forges: { "gitlab.test": { type: "gitlab", token: "fixture" }, "unavailable.test": { type: "gitlab", token: "fixture" } } }, {
-    environment: {}, fetch: async input => {
+  const connectors = createConnectors([], [{forge:"gitlab.test",provider:"gitlab" as const,host:"gitlab.test",token:"fixture"},{forge:"unavailable.test",provider:"gitlab" as const,host:"unavailable.test",token:"fixture"}].map(config => createForgeReader(config, {fetch: async input => {
       const url = new URL(String(input));
       if (url.hostname === "unavailable.test") return new Response("Unavailable", {status: 503});
       const mr = { iid: current.number, title: current.title, web_url: current.url, state: current.state === "open" ? "opened" : current.state,
@@ -151,9 +150,8 @@ test("real Runner discovers across IPC and routes a merged Input to Chief; disab
       if (url.pathname === "/api/v4/merge_requests") { discoveries++; return Response.json([mr]); }
       if (url.pathname.endsWith("/discussions")) return Response.json([]);
       return Response.json(mr);
-    },
-  }));
-  const config = ConfigSchema.parse({ connectors: { forges: { "gitlab.test": { type: "gitlab" }, "unavailable.test": { type: "gitlab" } } },
+    }})));
+  const config = ConfigSchema.parse({ connectors: {"gitlab.test": {kind:"forge",version:"v1",config:{provider:"gitlab",host:"gitlab.test",forge:"gitlab.test"}},"unavailable.test": {kind:"forge",version:"v1",config:{provider:"gitlab",host:"unavailable.test",forge:"unavailable.test"}}},
     plugins: { personal: { weave: { enabled: false }, sources: { pullRequests: [{ id: "mine", forge: "gitlab.test", author: "me" }, {id: "unavailable", forge: "unavailable.test", author: "me"}] } } } });
   const agent = { notify: false, async chief(prompt: string) { prompts.push(prompt); return "Recorded"; }, async execute(): Promise<never> { throw new Error("No work was delegated"); } };
   let aide = new Aide(root, { ...fakeOptions(agent, root), connectors, config }, pino({ level: "silent" }));

@@ -23,7 +23,7 @@ export type ConnectorHandlers<A extends ConnectorApi<A>> = {
 export interface ConnectorContext {
   readonly name: string;
   readonly signal: AbortSignal;
-  /** Reads the Host's immutable environment snapshot; reads also bind the connection revision. */
+  /** Reads the Host's immutable environment snapshot; reads also bind the Connector revision. */
   env(name: string): string | undefined;
 }
 export interface ConnectorImplementation<A extends ConnectorApi<A>> {
@@ -32,24 +32,23 @@ export interface ConnectorImplementation<A extends ConnectorApi<A>> {
   close?(): Promise<void> | void;
 }
 export interface ConnectorDefinition<C = any, A extends ConnectorApi<A> = any> {
-  readonly type: string;
   readonly kind: string;
   /** Operation contract version; independent of the providing package release. */
   readonly version: string;
   readonly config: ConnectorSchema<C>;
   create(context: ConnectorContext, config: C): Promise<ConnectorImplementation<A>> | ConnectorImplementation<A>;
 }
-/** One trusted Host-loaded distribution may supply any number of Connector kinds/implementations. */
+/** Host installation entry: bind configured names to imported factories, independently of declarations. */
 export interface ConnectorPackage {
   readonly id: string;
   readonly version: string;
-  readonly connectors: readonly ConnectorDefinition[];
+  readonly connectors: Readonly<Record<string, ConnectorDefinition>>;
 }
 export interface ConnectorCallOptions {
   readonly timeoutMs?: number;
 }
 export interface ConnectorAccess {
-  /** Both filters use exact string equality; omission discovers all matching connections. */
+  /** Both filters use exact string equality; omission discovers all matching Connectors. */
   list(kind?: string, version?: string): Promise<readonly ConnectorDescription[]>;
   get<A extends ConnectorApi<A>>(connector: ConnectorDescription): A;
   /** Transport-level invocation; callers normally use get() for typed methods. */

@@ -4,7 +4,7 @@
 
 ## 准备
 
-在安装好依赖、已通过 `lark-cli` 用户身份授权的机器运行。采集复用 `connectors.lark` 的 appId、userId、Me 身份和超时配置；不会启用配置里的其他 Connector 或 Source。每个查询串行分页，`--max-pages` 默认 100，是单个查询的上限。先选半天做小样本，再扩大时间范围。
+在安装好依赖、已通过 `lark-cli` 用户身份授权的机器运行。采集复用 `connectors.lark.config` 的 appId、userId、Me 身份和超时配置；不会启用配置里的其他 Connector 或 Source。每个查询串行分页，`--max-pages` 默认 100，是单个查询的上限。先选半天做小样本，再扩大时间范围。
 
 产物含私人消息、人物资料和模型输出，放在已忽略的 `.e2e-runs/`，不要提交。快照文件权限为 600，运行目录为 700。命令不覆盖已有快照或运行目录。
 

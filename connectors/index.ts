@@ -5,18 +5,9 @@ import { MessageKind, MessageVersion } from "@compforge/aide-connector/message";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorApi } from "@compforge/aide-connector";
 import { ConnectorRegistry, type ConnectorInvocationOptions } from "../src/host/connector/registry.ts";
-import { loadConnectorPackages, type ConnectorPackageConfig } from "../src/host/connector/packages.ts";
-import type { ForgeReader } from "@compforge/repocli";
-import { forgeDefinitions, forgeImplementation } from "./forge/definition.ts";
-import { createForgeConnectors, loadForgeConfigs, forgeConnectionRevision } from "./forge/config.ts";
-import { createMeegoRequirementConnectors } from "./requirements/meego.ts";
-import { resolveEnvironmentConfig } from "./environments/config.ts";
-import { Environments } from "./environments.ts";
-import { LarkMessages } from "./lark/messages.ts";
-import { LarkMessagesConfigSchema } from "./lark/config.ts";
+import { loadConnectorPackages, type ConnectorConfigurations } from "../src/host/connector/packages.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
-
-type Configuration = ConnectorPackageConfig & Readonly<Record<string, unknown>> & { environments?: Record<string, unknown>; requirements?: Record<string, unknown>; forges?: Record<string, unknown>; lark?: unknown };
+import { builtinDefinitions } from "./definitions.ts";
 
 /** One Host registry is shared by typed built-in adapters, arbitrary external kinds, Plugins and verbs. */
 export class Connectors implements ConnectorClient {
@@ -27,39 +18,21 @@ export class Connectors implements ConnectorClient {
   readonly list: ConnectorClient["list"];
   readonly get: ConnectorClient["get"];
   readonly call: ConnectorClient["call"];
-  constructor(
-    private readonly requirementProviders: readonly RequirementConnector[],
-    forgeProviders: readonly ForgeReader[],
-    environments: EnvironmentDirectory = new Environments(),
-    messages: ConnectorClient["messages"] = emptyConnectors.messages,
-    private readonly messageAccount?: { provider: "lark"; accountId: string; userId: string },
-    readonly registry = new ConnectorRegistry(),
-    revisions: Readonly<Record<string, string>> = {},
-  ) {
+  constructor(readonly registry = new ConnectorRegistry(), private readonly requirementProviders: readonly RequirementConnector[] = []) {
     this.list = registry.list.bind(registry);
     this.get = registry.get.bind(registry);
     this.call = registry.call.bind(registry);
-    for (const provider of requirementProviders) registry.register<RequirementOperations>(RequirementKind, RequirementVersion, provider.source, {
-      handlers: {
-        list: (_call, query) => provider.list(query), get: (_call, identity) => provider.get(identity),
-        identity: () => provider.identity(), comments: (_call, identity, query) => provider.comments(identity, query),
-      }, metadata: { provider: provider.provider },
-    });
-    for (const reader of forgeProviders) {
-      registry.register(ForgeKind, ForgeVersion, reader.forge, forgeImplementation(reader), { revision: revisions[reader.forge] });
-    }
-    const environmentRef = registry.register<EnvironmentDirectory>(EnvironmentKind, EnvironmentVersion, "environments", { handlers: {
-      list: () => environments.list(), get: (_call, name) => environments.get(name),
-      workloads: (_call, name, namespace) => environments.workloads(name, namespace),
-    } });
-    this.environments = registry.get<EnvironmentDirectory>(environmentRef);
-    if (messageAccount) {
-      const ref = registry.register<ConnectorClient["messages"]>(MessageKind, MessageVersion, messageAccount.accountId, { handlers: {
-        identity: () => messages.identity(), search: (_call, query) => messages.search(query),
-        history: (_call, query) => messages.history(query), thread: (_call, query) => messages.thread(query),
-      }, metadata: messageAccount });
-      this.messages = registry.get<ConnectorClient["messages"]>(ref);
-    } else this.messages = messages;
+    const environmentClient = () => this.single<EnvironmentDirectory>(EnvironmentKind, EnvironmentVersion);
+    this.environments = {
+      list: () => environmentClient()?.list() ?? Promise.resolve([]),
+      get: name => { const client = environmentClient(); if (!client) return Promise.reject(new Error(`Unknown environment: ${name}`)); return client.get(name); },
+      workloads: (name, namespace) => { const client = environmentClient(); if (!client) return Promise.reject(new Error(`Unknown environment: ${name}`)); return client.workloads(name, namespace); },
+    };
+    const messages = () => this.single<ConnectorClient["messages"]>(MessageKind, MessageVersion) ?? emptyConnectors.messages;
+    this.messages = {
+      identity: () => messages().identity(), search: query => messages().search(query),
+      history: query => messages().history(query), thread: query => messages().thread(query),
+    };
     this.requirements = Object.freeze({
       list: (source, query) => this.client<RequirementOperations>(RequirementKind, RequirementVersion, source).list(query),
       get: identity => this.client<RequirementOperations>(RequirementKind, RequirementVersion, identity.source).get(identity),
@@ -84,27 +57,30 @@ export class Connectors implements ConnectorClient {
     if (!ref) throw new Error(`Unknown ${kind === "requirement" ? "requirement connector" : kind === "forge" ? "Forge connector" : "connector"}: ${name}`);
     return this.get<A>(ref);
   }
-  static fromConfig(config: Configuration, environment: Readonly<Record<string, string | undefined>> = process.env, registry = new ConnectorRegistry()): Connectors {
-    if (config.packages?.length || Object.keys(config.connections ?? {}).length) throw new Error("External Connector packages require await Connectors.load()");
-    const lark = config.lark === undefined ? undefined : LarkMessagesConfigSchema.parse(config.lark);
-    const revisions = Object.fromEntries(loadForgeConfigs(config, environment).map(c => [c.forge, forgeConnectionRevision(c)]));
-    return new Connectors(createMeegoRequirementConnectors(config), createForgeConnectors(config, { environment }), new Environments(resolveEnvironmentConfig(config.environments)),
-      lark?.appId && lark.userId ? new LarkMessages({ appId: lark.appId, userId: lark.userId, timeoutMs: lark.timeoutMs }) : undefined,
-      lark?.appId && lark.userId ? { provider: "lark", accountId: lark.appId, userId: lark.userId } : undefined, registry, revisions);
+  private single<A extends ConnectorApi<A>>(kind: string, version: string): A | undefined {
+    const entries = this.registry.descriptions(kind, version);
+    if (entries.length > 1) throw new Error(`Ambiguous Connector selection: ${kind}; use a discovered reference`);
+    return entries[0] ? this.get<A>(entries[0]) : undefined;
   }
-  static async load(config: Configuration, options: { baseDir?: string; environment?: Readonly<Record<string, string | undefined>>; log?: (message: string, attributes: Record<string, unknown>) => void } = {}): Promise<Connectors> {
-    const { packages, connections, ...builtin } = config;
-    const connectors = Connectors.fromConfig(builtin, options.environment, new ConnectorRegistry(options.log));
-    try { await loadConnectorPackages(connectors.registry, { packages, connections }, { ...options, definitions: forgeDefinitions }); return connectors; }
-    catch (error) { await connectors.close(); throw error; }
+  static async load(config: ConnectorConfigurations, options: { registration?: string; baseDir?: string; environment?: Readonly<Record<string, string | undefined>>; log?: (message: string, attributes: Record<string, unknown>) => void } = {}): Promise<Connectors> {
+    const providers: RequirementConnector[] = [];
+    const registry = new ConnectorRegistry(options.log);
+    try {
+      await loadConnectorPackages(registry, config, { ...options, definitions: builtinDefinitions(providers) });
+      return new Connectors(registry, providers);
+    } catch (error) { await registry.close(); throw error; }
   }
   async describe() {
     const requirements = await this.list(RequirementKind, RequirementVersion), forges = await this.list(ForgeKind, ForgeVersion);
+    const messages = this.registry.descriptions(MessageKind, MessageVersion);
+    const metadata = messages.length === 1 ? messages[0]!.metadata : undefined;
+    const messageAccount = metadata?.provider === "lark" && typeof metadata.accountId === "string" && typeof metadata.userId === "string"
+      ? { provider: "lark" as const, accountId: metadata.accountId, userId: metadata.userId } : undefined;
     return {
       environments: await this.environments.list(),
       requirements: requirements.map(d => ({ source: d.name, provider: String(d.metadata.provider ?? "external") })),
       forges: forges.map(d => ({ forge: String(d.metadata.forge ?? d.name), provider: String(d.metadata.provider ?? "external") })),
-      ...(this.messageAccount ? { messages: this.messageAccount } : {}),
+      ...(messageAccount ? { messages: messageAccount } : {}),
     };
   }
   withCallOptions<T>(options: ConnectorInvocationOptions, operation: () => Promise<T>): Promise<T> {

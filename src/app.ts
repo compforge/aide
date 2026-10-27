@@ -1,6 +1,6 @@
 import { ForgeKind, ForgeVersion } from "@compforge/aide-connector/forge";
 import { validateForgeSources } from "../plugins/personal/source/pull-request/config.ts";
-import { forgeConnectionRevision, loadForgeConfigs } from "../connectors/forge/config.ts";
+import { personalConnectorConfig } from "./personal-connectors.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { initialTopicName } from "../plugins/personal/topic/model.ts";
 import { ROUTE_HARNESS } from "../plugins/personal/route/model.ts";
@@ -30,7 +30,6 @@ import type { ConnectorClient } from "@compforge/aide-plugin";
 import { Personal } from "../plugins/personal/aide.ts";
 import { environmentSources } from "../plugins/personal/source/environment/config.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
-import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
 import { requirementWatches, validateWatchScopes } from "../plugins/personal/source/requirement/config.ts";
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import { messageWatch } from "../plugins/personal/source/message/config.ts";
@@ -91,25 +90,26 @@ export class Aide {
     this.readSession = options.readSession;
     this.defaultHarnessConfig = Object.freeze({ ...options.defaultHarnessConfig });
     const config = options.config;
+    if (!options.connectors && Object.values(config?.connectors ?? {}).some(c => c.enabled)) {
+      throw new Error("Configured Connectors require await Connectors.load() before constructing Aide");
+    }
     const { sources } = parsePersonalConfig(config?.plugins.personal);
-    const forgeConfigs = loadForgeConfigs(config?.connectors ?? {});
-    const discoveredForges = (options.connectorCatalog ?? []).filter(d => d.kind === ForgeKind && d.version === ForgeVersion).map(d => ({ forge: String(d.metadata.forge ?? d.name) }));
-    validateForgeSources(sources.repositories, sources.pullRequests, [...forgeConfigs, ...discoveredForges]);
-    const forgeConnectionRevisions = Object.fromEntries([
-      ...forgeConfigs.map(forge => [forge.forge, forgeConnectionRevision(forge)]),
-      ...(options.connectorCatalog ?? []).filter(d => d.kind === ForgeKind && d.version === ForgeVersion).map(d => [String(d.metadata.forge ?? d.name), d.revision]),
-    ]);
-    const connectorMe = { identities: (config?.connectors.lark?.me ?? []).map(i => ({ provider: "lark", scope: i.appId, id: i.openId })) };
+    const personalConnectors = personalConnectorConfig(config?.connectors);
+    const connectorCatalog = options.connectorCatalog ?? (options.connectors instanceof Connectors ? options.connectors.registry.descriptions() : []);
+    const discoveredForges = connectorCatalog.filter(d => d.kind === ForgeKind && d.version === ForgeVersion);
+    validateForgeSources(sources.repositories, sources.pullRequests, discoveredForges.map(d => ({ forge: String(d.metadata.forge ?? d.name) })));
+    const forgeConnectionRevisions = Object.fromEntries(discoveredForges.map(d => [String(d.metadata.forge ?? d.name), d.revision]));
+    const connectorMe = { identities: (personalConnectors.lark?.me ?? []).map(i => ({ provider: "lark", scope: i.appId, id: i.openId })) };
     const channelMe = { identities: [LOCAL_ME, ...Object.values(config?.channels ?? {}).flatMap(c => c.me ? [{ provider: "lark", scope: c.appId, id: c.me.openId }] : [])] };
     this.meMarks = { identities: [...channelMe.identities, ...connectorMe.identities] };
     this.meMarks.identities = [...new Map(this.meMarks.identities.map(identity => [JSON.stringify(identity), identity])).values()];
-    const requirements = loadMeegoRequirementConfigs(config?.connectors ?? {});
+    const requirements = loadMeegoRequirementConfigs(personalConnectors);
     this.watches = requirementWatches(sources.requirements).map(watch => {
       const me = requirements.find(c => c.source === watch.source)?.me;
       return { ...watch, ...(me ? { me } : {}) };
     });
-    this.messageSource = messageWatch(sources.lark, config?.connectors.lark, connectorMe);
-    const environments = resolveEnvironmentConfig(config?.connectors.environments);
+    this.messageSource = messageWatch(sources.lark, personalConnectors.lark, connectorMe);
+    const environments = personalConnectors.environments;
     this.environmentSources = environmentSources(sources.environments, environments);
     const storage = ResourceStorage.open(home);
     storage.configure(config?.resources);
@@ -128,11 +128,11 @@ export class Aide {
       requirements: this.watches.map(({ id, source, intervalMs }) => ({ id, connector: source, intervalMs })),
       lark: this.messageSource ? { intervalMs: this.messageSource.intervalMs, scenarios: ["direct", "mention", ...(this.messageSource.personIds.length ? ["sent"] : [])] } : null,
     }, "Personal observation sources configured");
-    const connectors = options.connectors ?? (this.ownedConnectors = Connectors.fromConfig(config?.connectors ?? {}));
+    const connectors = options.connectors ?? (this.ownedConnectors = new Connectors());
     this.catalog = openPersonCatalog(home, this.meMarks, log, () => this.notify());
     this.connectors = { ...(connectors instanceof Connectors ? { withCallOptions: connectors.withCallOptions.bind(connectors) } : {}), list: (kind, version) => connectors.list(kind, version), get: connectors.get.bind(connectors), call: connectors.call.bind(connectors), requirements: requirementOutputs(personRequirements(connectors.requirements, this.persons), this.outputStore), forges: connectors.forges,
       environments: connectors.environments, describe: () => connectors.describe(),
-      messages: config?.connectors.lark?.appId ? personMessages(connectors.messages, this.persons, config.connectors.lark.appId) : connectors.messages };
+      messages: personalConnectors.lark?.appId ? personMessages(connectors.messages, this.persons, personalConnectors.lark.appId) : connectors.messages };
     let personal: Personal | undefined;
     this.runtime = new ApplicationRuntime(home, {
       cwd: options.cwd,
@@ -260,7 +260,7 @@ export class Aide {
   }
 
   private async initializePeople() {
-    for (const config of loadMeegoRequirementConfigs(this.options.config?.connectors ?? {})) {
+    for (const config of loadMeegoRequirementConfigs(personalConnectorConfig(this.options.config?.connectors))) {
       if (!config.me) continue;
       const account = await this.connectors.requirements.identity(config.source);
       this.meMarks.identities.push({ provider: account.provider, scope: account.scope, id: config.me.userKey });

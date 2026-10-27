@@ -51,9 +51,9 @@ test("Startup rejects Source references without matching Connectors before openi
 test("Only configured sources poll; removing policies stops restored observers while Connector reads remain available", { timeout: 20_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-source-lifecycle-"));
   const configFile = join(root, "config.yaml");
-  const declarations = { environments: { dev: { kind: "kubernetes", kubeconfig: "unused" } },
-    lark: { appId: "cli_app", userId: "ou_me", me: [{ appId: "cli_app", openId: "ou_me" }] },
-    requirements: { work: { provider: "meego", projectKey: "p" } } };
+  const declarations = { environments: { kind: "environment", version: "v1", config: { dev: { kind: "kubernetes", kubeconfig: "unused" } } },
+    lark: { kind: "messages", version: "v1", config: { appId: "cli_app", userId: "ou_me", me: [{ appId: "cli_app", openId: "ou_me" }] } },
+    work: { kind: "requirement", version: "v1", config: { provider: "meego", projectKey: "p" } } };
   const person = { identities: [{ provider: "lark", scope: "cli_app", id: "ou_me" }] };
   const sources = { environments: { targets: [{ environment: "dev", namespaces: ["app"] }] }, lark: {},
     requirements: [{ id: "mine", source: "work", userKeys: ["me"] }, { id: "team", source: "work", userKeys: ["team"] }] };
@@ -116,9 +116,9 @@ test("Topic configuration budgets context and rejects obsolete batching controls
 test("Meego Me resolves canonical identity without equating profile or watched people with Me", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-meego-me-"));
   const configFile = join(root, "config.yaml");
-  writeFileSync(configFile, JSON.stringify({ connectors: { requirements: { work: {
+  writeFileSync(configFile, JSON.stringify({ connectors: {work: {kind:"requirement",version:"v1",config:{
     provider: "meego", projectKey: "alias", profile: "robot", me: { userKey: "human" },
-  } } } }));
+  }}} }));
   const connectors = { ...emptyConnectors, requirements: { ...emptyConnectors.requirements,
     async identity() { return { provider: "meego", scope: "https://meego.test/canonical" }; },
     async list() { return { items: [] }; },

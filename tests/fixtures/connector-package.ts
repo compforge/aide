@@ -1,7 +1,7 @@
 import type { ConnectorDefinition, ConnectorPackage } from "@compforge/aide-connector";
 import { TicketKind, TicketVersion, type TicketApi } from "./connector-contract.ts";
 interface Config { prefix: string; tokenEnv: string }
-const definition = (type: string): ConnectorDefinition<Config, TicketApi> => ({ type, kind: TicketKind, version: TicketVersion,
+const definition = (): ConnectorDefinition<Config, TicketApi> => ({ kind: TicketKind, version: TicketVersion,
   config: { parse(value: unknown) {
     const config = value as Config;
     if (!config || typeof config.prefix !== "string" || typeof config.tokenEnv !== "string") throw new Error("Invalid Ticket config");
@@ -27,4 +27,4 @@ const definition = (type: string): ConnectorDefinition<Config, TicketApi> => ({ 
     } };
   },
 });
-export default { id: "fixture-connectors", version: "1.0.0", connectors: [definition("fixture-one"), definition("fixture-two")] } satisfies ConnectorPackage;
+export default { id: "fixture-connectors", version: "1.0.0", connectors: { work: definition(), personal: definition(), good: definition(), bad: definition() } } satisfies ConnectorPackage;

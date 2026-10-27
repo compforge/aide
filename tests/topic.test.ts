@@ -99,7 +99,7 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
 test("Source watches restore once globally, independently of Channel topics", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-source-routing-"));
   const path = join(root, "config.yaml");
-  writeFileSync(path, JSON.stringify({ connectors: { requirements: { work: { provider: "meego", projectKey: "p" } } },
+  writeFileSync(path, JSON.stringify({ connectors: {work: {kind:"requirement",version:"v1",config:{ provider: "meego", projectKey: "p" }}},
     plugins: { personal: { sources: { requirements: [
       { id: "one", source: "work", userKeys: ["me"], topicKey: "source:one" },
       { id: "two", source: "work", userKeys: ["me"], topicKey: "source:two" },

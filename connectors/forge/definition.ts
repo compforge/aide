@@ -19,15 +19,14 @@ export function forgeImplementation(reader: ForgeReader): ConnectorImplementatio
     listPullRequestComments: (_call, key) => reader.listPullRequestComments(key),
   } };
 }
-const ConfigSchema = z.object({ host: z.string().trim().min(1), forge: z.string().trim().min(1).optional(),
+const ConfigSchema = z.object({ provider: z.enum(["github", "gitlab"]), host: z.string().trim().min(1), forge: z.string().trim().min(1).optional(),
   tokenEnv: z.string().min(1).optional(), token: z.string().trim().min(1).optional() }).strict();
-const definition = (provider: "github" | "gitlab"): ConnectorDefinition<z.infer<typeof ConfigSchema>, ForgeOperations> => ({
-  type: provider, kind: ForgeKind, version: ForgeVersion, config: ConfigSchema,
+export const forgeDefinition: ConnectorDefinition<z.infer<typeof ConfigSchema>, ForgeOperations> = {
+  kind: ForgeKind, version: ForgeVersion, config: ConfigSchema,
   create(context, config) {
-    const token = config.tokenEnv ? context.env(config.tokenEnv) : provider === "github"
+    const token = config.tokenEnv ? context.env(config.tokenEnv) : config.provider === "github"
       ? context.env("GITHUB_TOKEN") || context.env("GH_TOKEN") : context.env("GITLAB_TOKEN");
     if (!token && !config.token) throw new Error("Forge credential is missing");
-    return forgeImplementation(createForgeReader({ forge: config.forge ?? config.host, host: config.host, provider, token: token ?? config.token! }));
+    return forgeImplementation(createForgeReader({ forge: config.forge ?? config.host, host: config.host, provider: config.provider, token: token ?? config.token! }));
   },
-});
-export const forgeDefinitions = [definition("github"), definition("gitlab")] as const;
+};

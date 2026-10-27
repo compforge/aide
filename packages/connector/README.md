@@ -1,6 +1,6 @@
 # @compforge/aide-connector
 
-Public contracts for external operations in Aide. A Connector kind is a string such as `"forge"`; a configured connection provides the operations declared by its domain interface. Plugins, Reconcile callbacks and verbs discover connections and use the same typed methods without depending on their provider.
+Public contracts for external operations in Aide. A Connector kind is a string such as `"forge"`; a configured Connector provides the operations declared by its domain interface. Plugins, Reconcile callbacks and verbs discover Connectors and use the same typed methods without depending on their provider.
 
 The package root contains generic contracts and client helpers. Domain contracts have separate entrypoints, each exporting its kind/version string constants and related operation types:
 
@@ -39,7 +39,6 @@ import { TicketKind, TicketVersion, type Tickets } from "./contract.ts";
 
 interface Config { tokenEnv: string }
 const connector: ConnectorDefinition<Config, Tickets> = {
-  type: "example-tickets",
   kind: TicketKind,
   version: TicketVersion,
   config: {
@@ -68,44 +67,44 @@ const connector: ConnectorDefinition<Config, Tickets> = {
 export default {
   id: "example-connectors",
   version: "1.0.0",
-  connectors: [connector],
+  connectors: { work: connector, personal: connector },
 } satisfies ConnectorPackage;
 ```
 
-Each handler receives the Host call context first, followed by the domain method's ordinary arguments. `context.signal` belongs to the connection lifetime; `call.signal` belongs to an individual invocation. Handlers must honor cancellation and use bounded provider-client deadlines. A timeout cannot prove an external write did not happen; Aide never automatically replays interrupted operations.
+Each handler receives the Host call context first, followed by the domain method's ordinary arguments. `context.signal` belongs to the Connector lifetime; `call.signal` belongs to an individual invocation. Handlers must honor cancellation and use bounded provider-client deadlines. A timeout cannot prove an external write did not happen; Aide never automatically replays interrupted operations.
 
 Factories receive parsed private configuration and an immutable Host environment accessor. `env()` reads bind the access revision and must be resolved during creation. Only explicitly declared public metadata crosses discovery; configuration and environment values are not included. Connector modules are trusted Host code, not a security sandbox.
 
 ## Discover and use
 
 ```ts
-for (const connection of await context.connectors.list(TicketKind, TicketVersion)) {
-  const tickets = context.connectors.get<Tickets>(connection);
+for (const Connector of await context.connectors.list(TicketKind, TicketVersion)) {
+  const tickets = context.connectors.get<Tickets>(Connector);
   const ticket = await tickets.read("ISSUE-1");
 }
 ```
 
-`list("forge")` discovers every Forge connection; `list("forge", "v1")` filters by exact contract version. Each configured connection has its own name, access settings and call budget. Consumers can use all returned connections.
+`list("forge")` discovers every Forge Connector; `list("forge", "v1")` filters by exact contract version. Each configured Connector has its own name, access settings and call budget. Consumers can use all returned Connectors.
 
 An execution-scoped client uses the same API:
 
 ```ts
 const access = execution.verbs.connectors({ timeoutMs: 30_000 });
-for (const connection of await access.list(TicketKind, TicketVersion)) {
-  await access.get<Tickets>(connection).read("ISSUE-1");
+for (const Connector of await access.list(TicketKind, TicketVersion)) {
+  await access.get<Tickets>(Connector).read("ISSUE-1");
 }
 ```
 
-Descriptions contain kind, version, name, opaque revision, handler method names and public metadata. Names are unique within a Kind. References pin the selected connection version and revision; replacing a connection cannot silently redirect an old client. Callers should discover again after configuration changes. A description means locally registered, not verified remote health.
+Descriptions contain kind, version, name, opaque revision, handler method names and public metadata. Names are unique within a Kind. References pin the selected Connector version and revision; replacing a Connector cannot silently redirect an old client. Callers should discover again after configuration changes. A description means locally registered, not verified remote health.
 
 Only plain JSON facts cross the boundary. Optional object fields with undefined values are omitted; unsupported values and cyclic data fail explicitly. Direct and IPC calls use the same canonical representation.
 
 ## Loading and lifecycle
 
-The Aide Host loads explicitly configured local modules or installed npm packages; it does not download packages. Each enabled entry in `connectors.connections` creates one working connection; its key becomes the connection name. Duplicate names/types, invalid kinds, handlers and configuration fail during assembly. Partial assembly rolls back already created connections.
+The Aide Host loads explicitly configured local modules or installed npm packages; it does not download packages. Declarations live directly under `connectors.<name>` and contain `kind`, `version`, private `config` and optional call limits. Installation is separate: `AIDE_CONNECTOR_REGISTRATION` names a local/installed module whose default export binds names to factories. Explicit name bindings must match the declared kind/version; otherwise startup fails. Unbound names may use a built-in default for that kind/version. Invalid kinds, handlers and configuration fail during assembly. Partial assembly rolls back already created Connectors.
 
-All callers of one connection share `maxConcurrentCalls` and `maxQueuedCalls`. A deadline includes queue wait, and timed-out queued calls never start. These are invocation-capacity limits; they do not claim to limit every HTTP request inside an implementation. Request rate/burst controls remain future work and should reuse provider transports.
+All callers of one Connector share `maxConcurrentCalls` and `maxQueuedCalls`. A deadline includes queue wait, and timed-out queued calls never start. These are invocation-capacity limits; they do not claim to limit every HTTP request inside an implementation. Request rate/burst controls remain future work and should reuse provider transports.
 
-Disabling a connection takes effect on restart. Host registry removal aborts queued and active calls, then closes the implementation. Dynamic configuration reload, persistent Connector Resources and a separate Source SDK are not part of this contract.
+Disabling a Connector takes effect on restart. Host registry removal aborts queued and active calls, then closes the implementation. Dynamic configuration reload, persistent Connector Resources and a separate Source SDK are not part of this contract.
 
 Configuration and implementation details: [Connector extensions](../../docs/connector/extensions.md).

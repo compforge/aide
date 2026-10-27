@@ -1,3 +1,4 @@
+import { emptyConnectors } from "../src/connector-client.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
 import type { Resource } from "@compforge/aide-plugin";
 import type { WorkSpec } from "../plugins/personal/resources.ts";
@@ -39,7 +40,7 @@ export interface Agent {
 /** Exercise the real Runner/verb/Turn path; replace only the external Harness protocol. */
 export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], home = cwd, larkAppId?: string) {
   const channels: import("../src/channel/config.ts").ChannelsConfig = larkAppId ? { test: { kind: "lark", label: "Test bot", enabled: true, appId: larkAppId, appSecret: "test-secret" } } : {};
-  return { config: { ...ConfigSchema.parse({ plugins: { personal: { weave: { enabled: false } } } }), channels }, cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): Harness => {
+  return { connectors: emptyConnectors, config: { ...ConfigSchema.parse({ plugins: { personal: { weave: { enabled: false } } } }), channels }, cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" as const }, createAdapter: (target: { harness: string } = { harness: "pi" }): Harness => {
     const workType = target.harness === "routine" ? ROUTINE_TYPE : TASK_TYPE;
     let sink: HarnessEventSink;
     let active: PromptInput | undefined;

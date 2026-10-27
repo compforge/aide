@@ -39,7 +39,7 @@ await withAsyncFileLock(path, async () => {
     task: observed(resolved.task), routine: observed(resolved.routine), pi: resolved.pi && observed(resolved.pi) };
   const sessionConfigs: Record<string, PiConfig | undefined> = { chief: harnesses.chief, route: harnesses.route, weave: harnesses.weave,
     task: harnesses.task, routine: harnesses.routine, pi: harnesses.pi };
-  const connectors = await Connectors.load(config.connectors, { environment, baseDir: dirname(file), log: (message, attributes) => log.info(attributes, message) });
+  const connectors = await Connectors.load(config.connectors, { environment, registration: environment.AIDE_CONNECTOR_REGISTRATION, baseDir: dirname(file), log: (message, attributes) => log.info(attributes, message) });
   try {
     const aide: Aide = new Aide(home, {
       config, connectors, connectorCatalog: await connectors.list(),

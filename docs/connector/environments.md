@@ -6,31 +6,34 @@ Connector 声明访问坐标并读取运行事实，Personal Source 保存观察
 
 全局文件的选择、字段优先级和默认值规则见 [配置](../configuration.md)。Connector 声明由 Host 在启动时装配，修改后重启。
 
-环境直接声明在 `connectors.environments.<name>`，配置 key 就是环境身份。Personal 的观察范围位于 `plugins.personal.sources.environments`：
+环境目录声明为 kind: environment、version: v1 的 Connector，目录项位于 `connectors.environments.config.<name>`；目录项的 key 是环境身份。Personal 的观察范围位于 `plugins.personal.sources.environments`：
 
 ```yaml
 connectors:
   environments:
-    dev:
-      kind: kubernetes
-      description: 开发联调环境
-      aliases: [开发环境]
-      kubeconfig: ~/.kube/dev
-      context: dev
-    devbox:
-      kind: host
-      description: Linux 开发机
-      host:
-        name: devbox
-        transport: ssh
-        address: devbox
+    kind: environment
+    version: v1
+    config:
+      dev:
+        kind: kubernetes
+        description: 开发联调环境
+        aliases: [ 开发环境 ]
+        kubeconfig: ~/.kube/dev
+        context: dev
+      devbox:
+        kind: host
+        description: Linux 开发机
+        host:
+          name: devbox
+          transport: ssh
+          address: devbox
 plugins:
   personal:
     sources:
       environments:
         targets:
           - environment: dev
-            namespaces: [app]
+            namespaces: [ app ]
         intervalMs: 300000
 ```
 
