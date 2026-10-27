@@ -1,4 +1,4 @@
-import type { MessageConnector, MessageSearchQuery, PullRequestKey, PullRequestListQuery, PullRequestReadQuery, RequirementIdentity, RequirementListQuery, RequirementCommentQuery } from "@compforge/aide-plugin";
+import type { MessageConnector, MessageSearchQuery, PullRequestKey, PullRequestQuery, PullRequestScanQuery, RequirementIdentity, RequirementListQuery, RequirementCommentQuery } from "@compforge/aide-plugin";
 
 export type ConnectorRequest =
   | { readonly operation: "describe" }
@@ -13,7 +13,8 @@ export type ConnectorRequest =
   | { readonly operation: "requirements.get"; readonly identity: RequirementIdentity }
   | { readonly operation: "requirements.identity"; readonly source: string }
   | { readonly operation: "requirements.comments"; readonly identity: RequirementIdentity; readonly query?: RequirementCommentQuery }
-  | { readonly operation: "forges.readPullRequests"; readonly forge: string; readonly query: PullRequestReadQuery }
-  | { readonly operation: "forges.list"; readonly forge: string; readonly path: string; readonly query: PullRequestListQuery }
-  | { readonly operation: "forges.get"; readonly identity: PullRequestKey }
-  | { readonly operation: "forges.comments"; readonly identity: PullRequestKey };
+  | { readonly operation: "forges.scanPullRequests"; readonly forge: string; readonly query: PullRequestScanQuery }
+  | { readonly operation: "forges.listPullRequests"; readonly forge: string; readonly query: PullRequestQuery }
+  | { readonly operation: "forges.getPullRequest"; readonly key: PullRequestKey }
+  | { readonly operation: "forges.getPullRequestReview"; readonly key: PullRequestKey }
+  | { readonly operation: "forges.listPullRequestComments"; readonly key: PullRequestKey };

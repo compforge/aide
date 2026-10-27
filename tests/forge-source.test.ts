@@ -4,15 +4,18 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import type { PullRequestObservation, PullRequestKey, PullRequestReadQuery, PullRequestReadResult, PullRequestCursor } from "@compforge/aide-plugin";
+import type { PullRequestSnapshot, PullRequestKey, PullRequestScanQuery, PullRequestScanResult, PullRequestScanCursor } from "@compforge/aide-plugin";
 import definitions from "../plugins/personal/definitions.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
+import { bindSourceInput, type SourceInput } from "../plugins/personal/source/input.ts";
+import { SOURCES } from "../plugins/personal/source/definition.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
+import { nextForgePollDelay } from "../plugins/personal/source/forge/state.ts";
 import { observeForge, FORGE_SOURCE_TYPE, type ForgeSourceStatus } from "../plugins/personal/source/forge/observe.ts";
 import { ForgeWatchSchema, forgeWatches, type ForgeWatch } from "../plugins/personal/source/forge/config.ts";
 import { Aide } from "../src/app.ts";
@@ -23,8 +26,8 @@ import { fakeOptions } from "./fake-harness.ts";
 
 const logger = { debug() {}, info() {}, warn() {}, error() {} };
 const at = (seconds = 0) => new Date(Date.parse("2026-10-26T00:00:00Z") + seconds * 1000).toISOString();
-const pr = (number = 1, path = "org/repo"): PullRequestObservation => ({ repository: { forge: { name: "gitlab.test" }, path }, number, title: "Reduce latency",
-  url: `https://gitlab.test/${path}/-/merge_requests/${number}`, state: "open", reviewThreads: "none", conflictState: "unknown", mergeReadiness: "unknown", headSha: "a", observedAt: at() });
+const pr = (number = 1, path = "org/repo"): PullRequestSnapshot => ({ repository: { forge: { name: "gitlab.test" }, path }, number, title: "Reduce latency",
+  url: `https://gitlab.test/${path}/-/merge_requests/${number}`, state: "open", conflictState: "unknown", mergeReadiness: "unknown", headSha: "a" });
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-forge-"));
   const sessions = new HarnessFixtures(root), session = sessions.create({ id: "forge", cwd: root });
@@ -37,99 +40,150 @@ function fixture(t: TestContext) {
   store.create({ type: FORGE_SOURCE_TYPE, name: "watch", spec: watch, status: {} });
   t.after(async () => { await session.closeLogs(); rmSync(root, { recursive: true, force: true }); });
   let current = pr(), failure = false;
-  let read: (query: PullRequestReadQuery) => Promise<PullRequestReadResult> = async () => ({ items: failure ? [] : [current],
-    cursor: "reader-cursor" as PullRequestCursor, pending: false, errors: failure ? ["Forbidden"] : [] });
+  let read: (query: PullRequestScanQuery) => Promise<PullRequestScanResult> = async () => ({ items: failure ? [] : [current],
+    cursor: "reader-cursor" as PullRequestScanCursor, pending: false, complete: !failure, issues: failure ? [{stage: "get", kind: "auth", message: "Forbidden"}] : [] });
   const connectors = { ...emptyConnectors, forges: { ...emptyConnectors.forges,
-    async readPullRequests(_forge: string, query: PullRequestReadQuery) { return read(query); },
+    async scanPullRequests(_forge: string, query: PullRequestScanQuery) { return read(query); },
   } };
   const resource = () => store.get<ForgeWatch, ForgeSourceStatus>(FORGE_SOURCE_TYPE, "watch");
   return { root, inputs, connectors, resource, get resources() { return resources; },
-    setPR(value: PullRequestObservation) { current = value; }, setRead(fn: typeof read) { read = fn; }, setFailure(value: boolean) { failure = value; },
+    setPR(value: PullRequestSnapshot) { current = value; }, setRead(fn: typeof read) { read = fn; }, setFailure(value: boolean) { failure = value; },
     observe(seconds = 0) { return observeForge({ logger, resources }, resource(), connectors, at(seconds)); },
     async restart() { const reopened = sessions.open(session.id); t.after(() => reopened.closeLogs()); store = new PluginResourceStore({ home: reopened.home, pluginInstanceId: "personal" }); resources = client(); },
   };
 }
 
-test("merged is emitted once even after an MR disappears from discovery, including discovery failure", async t => {
-  const f = fixture(t); await f.observe();
-  f.setRead(async q => {
-    assert.ok(q.tracked?.some(p => p.number === 1));
-    return { items: [{ ...pr(), state: "merged", mergedAt: at(20) }], cursor: "partial-cursor" as PullRequestCursor, pending: true, errors: ["Search unavailable"] };
+const scanResult = (items: readonly PullRequestSnapshot[], extra: Partial<PullRequestScanResult> = {}): PullRequestScanResult => ({
+  items, cursor: "scan-cursor" as PullRequestScanCursor, pending: false, complete: true, issues: [], ...extra,
+});
+const merged = (number=1): PullRequestSnapshot => ({...pr(number),state:"merged",mergedAt:at(20)});
+
+test("merged is admitted once while coverage issues survive and successful items are consumed", async t => {
+  const f=fixture(t);await f.observe();assert.equal(f.inputs.list().length,0);
+  f.setRead(async query=>{
+    assert.deepEqual(query.scope,{kind:"account",author:"me"});assert(query.tracked?.some(key=>key.number===1));
+    return scanResult([merged()],{pending:true,complete:false,issues:[{stage:"list",kind:"transport",message:"Search unavailable"}]});
   });
-  await assert.rejects(f.observe(30), /Search unavailable/);
-  const merged = f.inputs.list().filter(i => i.spec.text.includes("open → merged"));
-  assert.equal(merged.length, 1);
-  assert.equal(merged[0]!.spec.originId, "personal.forges");
-  assert.equal(merged[0]!.spec.topicKey, f.inputs.list()[0]!.spec.topicKey);
-  assert.equal(merged[0]!.spec.originRef!.uid, f.resource().metadata.uid);
-  f.setRead(async () => ({ items: [], cursor: "cursor" as PullRequestCursor, pending: false, errors: [] })); await f.restart(); await f.observe(60); await f.observe(90);
-  assert.equal(f.inputs.list().length, 2);
+  await f.observe(30);assert.equal(f.inputs.list().length,1);
+  assert.equal(f.resource().status.scanComplete,false);assert.equal(f.resource().status.issues?.[0]?.kind,"transport");
+  assert.equal(f.resource().status.error,null);assert.equal(f.resource().status.cursor,"scan-cursor");
+  const input=f.inputs.list()[0]!;assert.equal(input.spec.observation?.kind,"forge.merged");
+  assert.equal(input.spec.originRef?.uid,f.resource().metadata.uid);
+  f.setRead(async()=>scanResult([merged()]));await f.restart();await f.observe(60);
+  assert.equal(f.inputs.list().length,1);assert.deepEqual(f.resource().status.issues,[]);assert.equal(f.resource().status.scanComplete,true);
 });
 
-test("a crash after Input persistence recovers the frozen transition before observing a newer revision", async t => {
-  const f = fixture(t);
-  const failing: typeof f.resources = { ...f.resources, async patchStatus(current, patch) {
-    if ("pending" in patch && patch.pending === null) throw new Error("Interrupted after Input");
-    return f.resources.patchStatus(current, patch);
-  } };
-  await assert.rejects(observeForge({ logger, resources: failing }, f.resource(), f.connectors, at()), /Interrupted/);
-  assert.equal(f.inputs.list().length, 1); assert.ok(f.resource().status.pending);
-  f.setPR({ ...pr(), headSha: "b", state: "merged" }); await f.restart(); await f.observe(30); await f.observe(60);
-  assert.equal(f.inputs.list().length, 2); assert.equal(f.resource().status.pending, null);
-  const change = f.inputs.list().find(i => i.spec.observation?.kind === "forge.changed")!;
-  assert.equal((change.spec.observation!.previous as PullRequestObservation).headSha, "a");
-  assert.equal((change.spec.observation!.pullRequest as PullRequestObservation).headSha, "b");
-  await f.observe(60); assert.equal(f.inputs.list().length, 2);
+test("crash after Input persistence preserves the frozen plan and does not emit another merge for a new revision",async t=>{
+  const f=fixture(t);await f.observe();f.setPR(merged());
+  const interrupted:typeof f.resources={...f.resources,async patchStatus(resource,patch){
+    if("pending" in patch && patch.pending===null)throw new Error("Interrupted after Input");
+    return f.resources.patchStatus(resource,patch);
+  }};
+  await assert.rejects(observeForge({logger,resources:interrupted},f.resource(),f.connectors,at(30)),/Interrupted/);
+  assert.equal(f.inputs.list().length,1);assert(f.resource().status.pending);
+  const frozen=f.inputs.list()[0]!.spec;
+  f.setPR({...merged(),headSha:"newer"});await f.restart();await f.observe(60);await f.observe(90);
+  assert.equal(f.inputs.list().length,1);assert.deepEqual(f.inputs.list()[0]!.spec,frozen);
+  assert.equal(f.resource().status.pending,null);assert.equal(Object.values(f.resource().status.tracked!)[0]!.snapshot.headSha,"newer");
 });
 
-test("revision A-B-A-B and close/reopen/merge are occurrences; polling timestamps are not changes", async t => {
-  const f = fixture(t); await f.observe();
-  for (const [i, sha] of ["b", "a", "b"].entries()) { f.setPR({ ...pr(), headSha: sha }); await f.observe(i + 1); }
-  assert.equal(f.inputs.list().length, 4);
-  f.setPR({ ...pr(), headSha: "b", observedAt: at(10), updatedAt: at(10) }); await f.observe(10);
-  assert.equal(f.inputs.list().length, 4);
-  for (const [i, state] of (["closed", "open", "merged"] as const).entries()) { f.setPR({ ...pr(), headSha: "b", state }); await f.observe(20 + i); }
-  assert.equal(f.inputs.list().length, 7);
-  assert.equal(new Set(f.inputs.list().map(i => i.metadata.name)).size, 7);
+test("open revisions, titles, close and reopen update baselines silently; each later merge is an occurrence",async t=>{
+  const f=fixture(t);await f.observe();
+  for(const [i,headSha] of ["b","a","b"].entries()){f.setPR({...pr(),headSha,title:"Updated"});await f.observe(i+1);}
+  f.setPR({...pr(),state:"closed"});await f.observe(10);f.setPR(pr());await f.observe(20);
+  assert.equal(f.inputs.list().length,0);
+  f.setPR(merged());await f.observe(30);f.setPR({...merged(),updatedAt:at(40),baseSha:"moving"});await f.observe(40);
+  assert.equal(f.inputs.list().length,1);
+  f.setPR(pr());await f.observe(50);f.setPR(merged());await f.observe(60);
+  assert.equal(f.inputs.list().length,2);assert.equal(f.resource().status.sequence,2);
 });
 
-test("a frozen batch recovers before reading again and commits its opaque cursor after all Inputs", async t => {
-  const f = fixture(t); let reads = 0;
-  f.setRead(async () => { reads++; return { items: [pr(), pr(1, "other/repo")], cursor: "completed-batch" as PullRequestCursor, pending: false, errors: [] }; });
-  const interrupted: typeof f.resources = { ...f.resources, async patchStatus(resource, patch) {
-    if ("batch" in patch && (patch.batch as { offset: number } | null)?.offset === 1) throw new Error("Interrupted between batch items");
-    return f.resources.patchStatus(resource, patch);
-  } };
-  await assert.rejects(observeForge({ logger, resources: interrupted }, f.resource(), f.connectors, at()), /Interrupted/);
-  assert.equal(f.inputs.list().length, 1); assert.equal(f.resource().status.cursor, undefined);
-  await f.restart(); await f.observe(30);
-  assert.equal(reads, 1); assert.equal(f.inputs.list().length, 2);
-  assert.equal(new Set(f.inputs.list().map(i => i.spec.topicKey)).size, 2);
-  assert.equal(f.resource().status.cursor, "completed-batch"); assert.equal(f.resource().status.batch, null);
+test("frozen batch resumes at its offset and commits the opaque scan cursor only after all merges",async t=>{
+  const f=fixture(t);let reads=0;
+  f.setRead(async()=>{reads++;return scanResult([merged(1),merged(2)]);});
+  const interrupted:typeof f.resources={...f.resources,async patchStatus(resource,patch){
+    if("batch" in patch && (patch.batch as {offset:number}|null)?.offset===1)throw new Error("between items");
+    return f.resources.patchStatus(resource,patch);
+  }};
+  await assert.rejects(observeForge({logger,resources:interrupted},f.resource(),f.connectors,at(30)),/between items/);
+  assert.equal(f.inputs.list().length,1);assert.equal(f.resource().status.cursor,null);
+  await f.restart();await f.observe(60);
+  assert.equal(reads,1);assert.equal(f.inputs.list().length,2);assert.equal(f.resource().status.cursor,"scan-cursor");
 });
 
-test("a failed PR read retains the baseline and page; later merge remains observable", async t => {
-  const f = fixture(t); await f.observe(); const baseline = f.resource().status.tracked;
-  f.setPR({ ...pr(), state: "merged" }); f.setFailure(true);
-  await assert.rejects(f.observe(30), /Forbidden/); assert.deepEqual(f.resource().status.tracked, baseline);
-  assert.equal(f.resource().status.error, "Forbidden");
-  f.setFailure(false); await f.observe(60); assert.equal(f.inputs.list().length, 2);
+test("partial failures retain baselines and resume seeds without blocking a later merge",async t=>{
+  const f=fixture(t);await f.observe();const baseline=f.resource().status.tracked;
+  await f.resources.patchStatus(f.resource(),{seed:[pr(1),pr(2)]});
+  f.setFailure(true);await f.observe(30);assert.deepEqual(f.resource().status.tracked,baseline);assert.equal(f.resource().status.seed?.length,2);
+  f.setRead(async()=>scanResult([merged(2)],{complete:false,issues:[{stage:"get",kind:"not_found",message:"1 missing",key:pr(1)}]}));
+  await f.observe(60);assert.deepEqual(f.resource().status.seed?.map(key=>key.number),[1]);assert.equal(f.inputs.list().length,1);
 });
 
-test("configured account scopes are explicit and unique", () => {
-  const watch = ForgeWatchSchema.parse({ id: "mine", forge: "gitlab.test", author: "me" });
-  assert.equal(watch.intervalMs, 300_000);
-  assert.throws(() => ForgeWatchSchema.parse({ ...watch, author: "me is:merged" }));
-  assert.throws(() => forgeWatches([watch], []), /unknown connector/);
-  assert.throws(() => forgeWatches([watch, { ...watch, id: "duplicate" }], [{ forge: watch.forge }]), /Duplicate/);
+test("source scheduling distinguishes pending work, coverage gaps and rate-limit backoff",()=>{
+  assert.equal(nextForgePollDelay({cursor:"c" as PullRequestScanCursor,scanPending:true,issues:[{stage:"get",kind:"not_found",message:"missing"}]},30_000),1000);
+  assert.equal(nextForgePollDelay({cursor:"c" as PullRequestScanCursor,scanPending:false,scanComplete:false},30_000),30_000);
+  assert.equal(nextForgePollDelay({scanPending:true,issues:[{stage:"list",kind:"rate_limit",message:"limited",retryAfterMs:120_000}]},30_000),120_000);
+  assert.equal(nextForgePollDelay({batch:{} as never,error:"Input failed"},30_000),30_000);
+});
+
+function legacy(value:PullRequestSnapshot){const {repository,number,state,...facts}=value;return {...facts,identity:{forge:repository.forge.name,path:repository.path,number},lifecycle:state,reviewThreads:"none",reviewActivityKey:"old-review"};}
+
+test("legacy identities and reader cursors migrate without changing Topic keys or manufacturing events",async t=>{
+  const f=fixture(t);const key=JSON.stringify(["gitlab.test","org/repo",1]);
+  await f.resources.patchStatus(f.resource(),{cursor:"v1-opaque" as PullRequestScanCursor,since:at(-86400),sequence:8,
+    tracked:{[key]:{snapshot:legacy(pr()),fingerprint:"old"}},
+    scan:{query:{updatedAfter:at(-172800)},page:{items:[legacy(pr(99)).identity]},offset:0},
+  } as unknown as Partial<ForgeSourceStatus>);
+  f.setRead(async query=>{assert.equal(query.cursor,undefined);assert(query.tracked?.some(key=>key.number===99));assert(Date.parse(query.initialSince!)<=Date.parse(at(-172800)));return scanResult([pr()]);});
+  await f.restart();await f.observe(30);assert.equal(f.inputs.list().length,0);assert.equal(f.resource().status.sequence,8);
+  assert.equal(f.resource().status.schemaVersion,2);assert.equal(f.resource().status.scan,null);
+  assert.equal("reviewThreads" in f.resource().status.tracked![key]!.snapshot,false);
+  f.setRead(async()=>scanResult([merged()]));await f.observe(60);
+  assert.equal(f.inputs.list()[0]!.spec.topicKey,`forge:${key}`);assert.equal(f.resource().status.sequence,9);
+});
+
+for(const persisted of [false,true])test(`legacy frozen Input stays immutable through migration (already persisted: ${persisted})`,async t=>{
+  const f=fixture(t);const key=JSON.stringify(["gitlab.test","org/repo",1]);
+  const snapshot=legacy(pr());const spec={topicKey:`forge:${key}`,topicName:"org/repo #1",relation:"observed",attention:"deferred",text:"Frozen legacy plan",observation:{kind:"forge.changed",pullRequest:snapshot}};
+  const pending={name:"frozen-before-upgrade",key,spec,entry:{snapshot,fingerprint:"old"}};
+  await f.resources.patchStatus(f.resource(),{sequence:12,pending} as unknown as Partial<ForgeSourceStatus>);
+  if(persisted) await bindSourceInput(SOURCES.forges,f.resource(),f.resources)(pending.name,pending.spec as SourceInput);
+  await f.restart();await f.observe(30);await f.observe(60);assert.equal(f.inputs.list().length,1);
+  assert.equal(f.inputs.list()[0]!.metadata.name,pending.name);assert.deepEqual(f.inputs.list()[0]!.spec.observation,spec.observation);
+  assert.equal(f.resource().status.sequence,12);
+  f.setPR(merged());await f.observe(90);assert.equal(f.inputs.list().length,2);
+});
+
+test("v1 buffered batch drains before new I/O but never commits its old reader cursor",async t=>{
+  const f=fixture(t);let reads=0;
+  await f.resources.patchStatus(f.resource(),{batch:{offset:1,result:{items:[merged(1),merged(2)],cursor:"old-proposed",pending:false,errors:[]}}} as unknown as Partial<ForgeSourceStatus>);
+  f.setRead(async query=>{reads++;assert.equal(query.cursor,undefined);return scanResult([]);});
+  await f.observe(30);assert.equal(reads,0);assert.equal(f.inputs.list().length,1);assert.equal(f.resource().status.cursor,null);
+  await f.observe(60);assert.equal(reads,1);assert.equal(f.resource().status.cursor,"scan-cursor");
+});
+
+test("expired baselines and missing merge times do not replay historical merges",async t=>{
+  const f=fixture(t);f.setPR({...pr(),state:"merged"});await f.observe();assert.equal(f.inputs.list().length,0);
+  f.setPR(merged(2));await f.observe(30);assert.equal(f.inputs.list().length,1);
+  f.setRead(async()=>scanResult([]));await f.observe(9*86400);
+  assert.equal(Object.keys(f.resource().status.tracked!).length,0);
+  f.setRead(async()=>scanResult([merged(2)]));await f.observe(9*86400+30);assert.equal(f.inputs.list().length,1);
+});
+
+test("configured accounts stay explicit and unique",()=>{
+  const watch=ForgeWatchSchema.parse({id:"mine",forge:"gitlab.test",author:"me"});
+  assert.equal(watch.intervalMs,300_000);assert.throws(()=>ForgeWatchSchema.parse({...watch,author:"me is:merged"}));
+  assert.throws(()=>forgeWatches([watch],[]),/unknown connector/);
+  assert.throws(()=>forgeWatches([watch,{...watch,id:"duplicate"}],[{forge:watch.forge}]),/Duplicate/);
 });
 
 test("real Runner discovers across IPC and routes a merged Input to Chief; disabled Source stays idle", { timeout: 20_000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), "aide-forge-runner-"));
   let current = pr(); let discoveries = 0; const prompts: string[] = [];
-  const connectors = new Connectors([], createForgeConnectors({ forges: { "gitlab.test": { type: "gitlab", token: "fixture" } } }, {
+  const connectors = new Connectors([], createForgeConnectors({ forges: { "gitlab.test": { type: "gitlab", token: "fixture" }, "unavailable.test": { type: "gitlab", token: "fixture" } } }, {
     environment: {}, fetch: async input => {
       const url = new URL(String(input));
+      if (url.hostname === "unavailable.test") return new Response("Unavailable", {status: 503});
       const mr = { iid: current.number, title: current.title, web_url: current.url, state: current.state === "open" ? "opened" : current.state,
         sha: current.headSha, author: { username: "me" } };
       if (url.pathname === "/api/v4/merge_requests") { discoveries++; return Response.json([mr]); }
@@ -137,8 +191,8 @@ test("real Runner discovers across IPC and routes a merged Input to Chief; disab
       return Response.json(mr);
     },
   }));
-  const config = ConfigSchema.parse({ connectors: { forges: { "gitlab.test": { type: "gitlab" } } },
-    plugins: { personal: { weave: { enabled: false }, sources: { forges: [{ id: "mine", forge: "gitlab.test", author: "me" }] } } } });
+  const config = ConfigSchema.parse({ connectors: { forges: { "gitlab.test": { type: "gitlab" }, "unavailable.test": { type: "gitlab" } } },
+    plugins: { personal: { weave: { enabled: false }, sources: { forges: [{ id: "mine", forge: "gitlab.test", author: "me" }, {id: "unavailable", forge: "unavailable.test", author: "me"}] } } } });
   const agent = { notify: false, async chief(prompt: string) { prompts.push(prompt); return "Recorded"; }, async execute(): Promise<never> { throw new Error("No work was delegated"); } };
   let aide = new Aide(root, { ...fakeOptions(agent, root), connectors, config }, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
@@ -147,12 +201,15 @@ test("real Runner discovers across IPC and routes a merged Input to Chief; disab
     if (Date.now() > deadline) throw new Error("Forge Source/Chief did not settle");
     await new Promise(r => setTimeout(r, 20));
   } };
-  await aide.start(); await until(() => inputs.list().some(i => Object.values(i.status.assess ?? {}).some(a => a.completedAt)));
+  const sourceStore = new PluginResourceStore({ home: root, pluginInstanceId: "personal" });
+  await aide.start(); await until(() => Object.keys(sourceStore.list<ForgeWatch, ForgeSourceStatus>(FORGE_SOURCE_TYPE).find(source => source.spec.id === "mine")?.status.tracked ?? {}).length === 1);
+  assert.equal(inputs.list().length, 0);
   current = { ...current, state: "merged", headSha: "b" };
   const store = new PluginResourceStore({ home: root, pluginInstanceId: "personal" });
-  const source = store.list<ForgeWatch, ForgeSourceStatus>(FORGE_SOURCE_TYPE)[0]!;
+  const source = store.list<ForgeWatch, ForgeSourceStatus>(FORGE_SOURCE_TYPE).find(source => source.spec.id === "mine")!;
   await aide.runtime.enqueue("personal", FORGE_SOURCE_TYPE, source.metadata.name);
-  await until(() => inputs.list().filter(i => Object.values(i.status.assess ?? {}).some(a => a.completedAt)).length === 2);
+  await until(() => inputs.list().filter(i => Object.values(i.status.assess ?? {}).some(a => a.completedAt)).length === 1);
+  assert(sourceStore.list<ForgeWatch, ForgeSourceStatus>(FORGE_SOURCE_TYPE).find(source => source.spec.id === "unavailable")?.status.issues?.length);
   assert.ok(prompts.some(p => p.includes("merged"))); assert.equal(aide.topics.list().filter(c => !c.default).length, 1);
   assert.equal(aide.personal.store.read().works.length, 0);
   await aide.close(); const before = discoveries;
@@ -160,97 +217,23 @@ test("real Runner discovers across IPC and routes a merged Input to Chief; disab
   await aide.start(); await aide.settled(); assert.equal(discoveries, before);
 });
 
-function legacy(pr: PullRequestObservation) {
-  const { repository, number, state, ...facts } = pr;
-  return { ...facts, identity: { forge: repository.forge.name, path: repository.path, number }, lifecycle: state };
-}
 
-test("legacy checkpoints preserve baselines and resume keys without trusting platform page offsets", async t => {
-  const f = fixture(t); const key = JSON.stringify(["gitlab.test", "org/repo", 1]);
-  await f.resources.patchStatus(f.resource(), {
-    sequence: 1, tracked: { [key]: { snapshot: legacy(pr()), fingerprint: "old-format" } },
-    scan: { query: { author: "me", state: "all", updatedAfter: at(-86400), updatedBefore: at(30) }, page: { items: [legacy(pr(99)).identity, legacy(pr()).identity] }, offset: 1 },
-  } as unknown as Partial<ForgeSourceStatus>);
-  f.setRead(async q => {
-    assert.ok(q.tracked?.some(p => p.number === 99));
-    assert.ok(Date.parse(q.since!) <= Date.parse(at(-86400)));
-    return { items: [pr()], cursor: "upgraded" as PullRequestCursor, pending: false, errors: [] };
-  });
-  await f.restart(); await f.observe(30);
-  assert.equal(f.inputs.list().length, 0); assert.equal(f.resource().status.sequence, 1);
-  assert.equal(f.resource().status.scan, null);
-  assert.equal(f.resource().status.tracked![key]!.snapshot.state, "open");
-  assert.equal("identity" in f.resource().status.tracked![key]!.snapshot, false);
-  f.setRead(async () => ({ items: [{ ...pr(), state: "merged" }], cursor: "cursor" as PullRequestCursor, pending: false, errors: [] }));
-  await f.observe(60);
-  const inputs = f.inputs.list(); assert.equal(inputs.length, 1);
-  assert.equal(inputs[0]!.spec.topicKey, `forge:${key}`);
-  assert.ok(inputs.some(input => input.spec.text.includes("open → merged")));
+test("a frozen batch retains its acceptance horizon across a long interruption",async t=>{
+  const f=fixture(t);f.setRead(async()=>scanResult([merged(1),merged(2)]));
+  const interrupted:typeof f.resources={...f.resources,async patchStatus(resource,patch){
+    if("batch" in patch && (patch.batch as {offset:number}|null)?.offset===1)throw new Error("between items");
+    return f.resources.patchStatus(resource,patch);
+  }};
+  await assert.rejects(observeForge({logger,resources:interrupted},f.resource(),f.connectors,at(30)),/between items/);
+  await f.restart();await f.observe(9*86400);
+  assert.equal(f.inputs.list().length,2);assert.equal(f.resource().status.cursor,"scan-cursor");
 });
 
-for (const persisted of [false, true]) test(`legacy pending Input survives upgrade (already persisted: ${persisted})`, async t => {
-  const f = fixture(t); const snapshot = legacy(pr());
-  const key = JSON.stringify([snapshot.identity.forge, snapshot.identity.path, snapshot.identity.number]);
-  const name = "frozen-before-upgrade";
-  const spec = { topicKey: `forge:${key}`, topicName: "org/repo #1", relation: "observed", attention: "deferred", text: "Frozen observation",
-    observation: { kind: "forge.discovered", pullRequest: snapshot } };
-  await f.resources.patchStatus(f.resource(), { sequence: 12, initialized: true,
-    pending: { name, key, spec, entry: { snapshot, fingerprint: "old-format" } } } as unknown as Partial<ForgeSourceStatus>);
-  if (persisted) {
-    const failing: typeof f.resources = { ...f.resources, async patchStatus(resource, patch) {
-      if ("pending" in patch && patch.pending === null) throw new Error("Interrupted after Input");
-      return f.resources.patchStatus(resource, patch);
-    } };
-    await assert.rejects(observeForge({ logger, resources: failing }, f.resource(), f.connectors, at()), /Interrupted/);
-    // Simulate the old process having persisted the Input before leaving its old checkpoint behind.
-    await f.resources.patchStatus(f.resource(), { pending: { name, key, spec, entry: { snapshot, fingerprint: "old-format" } } } as unknown as Partial<ForgeSourceStatus>);
-  }
-  await f.restart(); await f.observe(30); await f.observe(60);
-  assert.equal(f.inputs.list().length, 1); assert.equal(f.inputs.list()[0]!.metadata.name, name);
-  assert.deepEqual(f.inputs.list()[0]!.spec.observation, spec.observation);
-  assert.equal(f.resource().status.sequence, 12); assert.equal(f.resource().status.pending, null);
-  f.setPR({ ...pr(), state: "merged" }); await f.observe(90);
-  assert.equal(f.inputs.list().length, 2); assert.equal(f.resource().status.sequence, 13);
-});
 
-test("snapshot enrichment and diagnostic wording do not manufacture authored changes", async t => {
-  const f = fixture(t); await f.observe();
-  f.setPR({ ...pr(), sourceBranch: "feature", targetBranch: "main", baseSha: "moving-base", updatedAt: at(30),
-    sourceRepository: { forge: { name: "gitlab.test" }, path: "fork/repo" }, reviewError: "review unavailable" });
-  await f.observe(30); assert.equal(f.inputs.list().length, 1);
-  f.setPR({ ...pr(), reviewThreads: "unknown", reviewError: "review unavailable" });
-  await f.observe(60); assert.equal(f.inputs.list().length, 2);
-  f.setPR({ ...pr(), reviewThreads: "unknown", reviewError: "a different diagnostic" });
-  await f.observe(90); assert.equal(f.inputs.list().length, 2);
-});
-
-test("legacy ready only establishes code conflict facts, never merge readiness", async t => {
-  const f = fixture(t), key = JSON.stringify(["gitlab.test", "org/repo", 1]);
-  const { conflictState: _conflict, mergeReadiness: _readiness, ...old } = pr();
-  await f.resources.patchStatus(f.resource(), { sequence: 7, tracked: { [key]: {
-    snapshot: { ...old, mergeability: "ready" }, fingerprint: "old-fingerprint",
-  } } } as unknown as Partial<ForgeSourceStatus>);
-  f.setPR({ ...pr(), conflictState: "none", mergeReadiness: "unknown" });
-  await f.observe();
-  assert.equal(f.inputs.list().length, 0);
-  assert.equal(f.resource().status.tracked![key]!.snapshot.mergeReadiness, "unknown");
-  assert.equal(f.resource().status.sequence, 7);
-});
-
-test("legacy resume keys survive partial batches and are removed only after their facts are admitted", async t => {
-  const f = fixture(t);
-  await f.resources.patchStatus(f.resource(), { seed: [pr(1), pr(2)] });
-  f.setRead(async () => ({ items: [pr(1)], cursor: "partial" as PullRequestCursor, pending: true, errors: [] }));
-  await f.observe();
-  assert.deepEqual(f.resource().status.seed?.map(key => key.number), [2]);
-  f.setRead(async () => ({ items: [], cursor: "retry" as PullRequestCursor, pending: false, errors: ["PR 2 unavailable"] }));
-  await assert.rejects(f.observe(30), /unavailable/);
-  assert.deepEqual(f.resource().status.seed?.map(key => key.number), [2]);
-  f.setRead(async q => {
-    assert.ok(q.tracked?.some(key => key.number === 2));
-    return { items: [{ ...pr(2), state: "merged" }], cursor: "done" as PullRequestCursor, pending: false, errors: [] };
-  });
-  await f.observe(60);
-  assert.equal(f.resource().status.seed, null);
-  assert.ok(f.inputs.list().some(input => input.spec.text.includes("#2") && input.spec.text.includes("merged")));
+test("legacy mergeability ready never becomes platform merge readiness during migration",async t=>{
+  const f=fixture(t),key=JSON.stringify(["gitlab.test","org/repo",1]);
+  const {conflictState:_conflict,mergeReadiness:_readiness,...facts}=pr();
+  await f.resources.patchStatus(f.resource(),{sequence:7,tracked:{[key]:{snapshot:{...facts,mergeability:"ready"},fingerprint:"old"}}} as unknown as Partial<ForgeSourceStatus>);
+  f.setPR({...pr(),conflictState:"none",mergeReadiness:"unknown"});await f.observe();
+  assert.equal(f.inputs.list().length,0);assert.equal(f.resource().status.tracked![key]!.snapshot.mergeReadiness,"unknown");assert.equal(f.resource().status.sequence,7);
 });

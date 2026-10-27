@@ -85,7 +85,7 @@ plugins/personal/
       config.ts            # Lark 消息观察与跟进策略
       observe.ts           # 单聊、群内 @ 与本人发言观察、水位和短期讨论跟进
       context.ts           # IM 有界上下文、话题根消息与缺口
-    forge/                 # ForgeSource：账号范围发现、状态/revision 变化与持久 Input
+    forge/                 # ForgeSource：账号扫描、common 快照基线、合并 Input 与恢复进度
     requirement/           # RequirementSource
       config.ts            # 需求观察范围与配置校验
       observe.ts           # 需求观察、水位和调度
