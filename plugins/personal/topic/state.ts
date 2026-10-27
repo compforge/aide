@@ -1,5 +1,5 @@
 import { resourceRef } from "../input/state.ts";
-import { topicSubtree, understandingVersion, summaryVersion } from "./tree.ts";
+import { readTopicSubtree, understandingVersion, summaryVersion } from "./tree.ts";
 import { z } from "zod";
 import { SUMMARY_CHARS } from "../context.ts";
 import { upsertNote, NoteUpdateSchema } from "../notes.ts";
@@ -31,8 +31,8 @@ async function targetTopic(resources: ResourceClient, owner: Readonly<TopicResou
   const current = await resources.get<TopicSpec, TopicStatus>(resourceRef(owner));
   if (!current || current.metadata.uid !== owner.metadata.uid || current.metadata.deletionTimestamp
     || current.status.execution?.id !== executionId) throw new Error("Chief execution is no longer active");
-  const all = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-  const target = topicSubtree(all, current).find(t => t.metadata.uid === (topicUid ?? current.metadata.uid));
+  const all = await readTopicSubtree(resources, resourceRef(current));
+  const target = all.find(t => t.metadata.uid === (topicUid ?? current.metadata.uid));
   if (!target) throw new Error("Topic is outside this root");
   return { current, target, all };
 }

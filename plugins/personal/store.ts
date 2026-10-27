@@ -23,6 +23,11 @@ export class Store {
     };
   }
 
+  workResources(topicIds: readonly string[]): WorkResource[] {
+    return topicIds.flatMap(topicId => WORK_TYPES.flatMap(type => this.resources.list<WorkSpec, WorkStatus>(type,
+      { matchIndex: { name: "topicId", value: topicId } }))).filter(work => !work.metadata.deletionTimestamp);
+  }
+
   private listResources(): WorkResource[] {
     return WORK_TYPES.flatMap((type) => this.resources.list<WorkSpec, WorkStatus>(type));
   }

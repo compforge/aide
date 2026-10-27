@@ -2,7 +2,6 @@ import { contactsTool, type ContactChannel } from "./output/tool.ts";
 import { identityBackground } from "../../agents/personal.ts";
 import { weavePolicy } from "./weave/config.ts";
 import { topicTools } from "./topic/tools.ts";
-import { topicSubtree } from "./topic/tree.ts";
 import { weaveSession } from "./weave/agent.ts";
 import { WEAVE_TYPE } from "./weave/model.ts";
 import { inputPreview } from "./input/prompt.ts";

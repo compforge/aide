@@ -1,7 +1,7 @@
 import type { Resource, ResourceClient, ResourceRef, Watch } from "@compforge/aide-plugin";
 import { INPUT_TYPE, type InputSpec, type InputStatus, type Attempt, type Assessment } from "./model.ts";
-import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "../topic/model.ts";
-import { topicSubtree, topicPath } from "../topic/tree.ts";
+import type { TopicResource } from "../topic/model.ts";
+import { readTopicSubtree, readTopicRoot } from "../topic/tree.ts";
 export type Input = Readonly<Resource<InputSpec, InputStatus>>;
 export const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, name });
 export const resourceRef = (r: Readonly<Resource<unknown, unknown>>) => ({ apiVersion: r.apiVersion, kind: r.kind, namespace: r.metadata.namespace, name: r.metadata.name, uid: r.metadata.uid });
@@ -31,9 +31,7 @@ export function attemptPatch(input: Input, owner: ResourceRef, change: AttemptCh
 }
 export async function topicScope(resources: ResourceClient, owner: ResourceRef): Promise<TopicResource[]> {
   if (owner.kind !== "Topic") return [];
-  const all = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-  const topic = all.find(t => t.metadata.uid === owner.uid);
-  return topic && !topic.metadata.deletionTimestamp ? topicSubtree(all, topic) : [];
+  return readTopicSubtree(resources, owner);
 }
 export async function pendingInputs(resources: ResourceClient, owner: ResourceRef, topics?: readonly TopicResource[]) {
   if (owner.kind !== "Topic") return resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: stage(owner) === "route"
@@ -58,11 +56,8 @@ export function assignmentWatch(key: "assess" | "handle", kind: string, resource
     const changed = Object.values(input.status[key] ?? {}).filter(s => s.resource.kind === kind
       && (!previous || JSON.stringify(previous.status[key]?.[s.resource.uid]) !== JSON.stringify(s)));
     if (key !== "assess" || !resources) return changed.map(s => ({ name: s.resource.name, namespace: s.resource.namespace }));
-    const all = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-    const roots = changed.flatMap(s => {
-      const topic = all.find(t => t.metadata.uid === s.resource.uid && !t.metadata.deletionTimestamp);
-      return topic ? [topicPath(all, topic).at(-1)!] : [];
-    });
+    const roots = (await Promise.all(changed.map(s => readTopicRoot(resources, s.resource))))
+      .filter((topic): topic is TopicResource => !!topic);
     return [...new Map(roots.map(t => [t.metadata.uid, { name: t.metadata.name, namespace: t.metadata.namespace }])).values()];
   };
   return { resourceType: INPUT_TYPE, handler: { create: async ({ object }) => targets(object as Input),

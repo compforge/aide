@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { INPUT_TYPE } from "./input/model.ts";
 import { resourceRef } from "./input/state.ts";
 import { WorkInputRequestSchema } from "./model.ts";
-import { workType } from "./resources.ts";
+import { workType, toWork } from "./resources.ts";
 import { digest } from "./chief-model.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -34,8 +34,7 @@ export class WorkService {
 
   list(): Work[] {
     const topic = this.store.topics.resource(this.topicId);
-    const ids = new Set(topic ? this.store.topics.scope(topic.metadata.uid).map(t => t.spec.id) : []);
-    return this.store.read().works.filter(work => ids.has(work.topicId));
+    return this.store.workResources(topic ? this.store.topics.scope(topic.metadata.uid).map(t => t.spec.id) : []).map(toWork);
   }
 
   read(id: string): Work {
