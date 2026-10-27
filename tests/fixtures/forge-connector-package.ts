@@ -1,5 +1,5 @@
 import type { ConnectorDefinition, ConnectorPackage, ConnectorKind } from "@compforge/aide-connector";
-import type { ForgeOperations, PullRequestScanCursor } from "@compforge/aide-connector/builtin";
+import type { ForgeOperations, PullRequestScanCursor } from "@compforge/aide-connector/forge";
 const kind:ConnectorKind<ForgeOperations>={kind:"forge",version:1,methods:["listRepositories","scanPullRequests","listPullRequests","getPullRequest","getPullRequestReview","listPullRequestComments"]};
 const definition:ConnectorDefinition<Record<string,unknown>,ForgeOperations>={type:"fixture-forge",kind,config:{parse(value){return value as Record<string,unknown>;}},create(context){
   if(!context.env("EXTERNAL_TOKEN"))throw new Error("Missing credential");

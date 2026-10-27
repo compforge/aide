@@ -1,3 +1,4 @@
+import { defineConnectorKind } from "./contract.ts";
 export interface ChatMessage {
   id: string;
   chatId: string;
@@ -45,3 +46,5 @@ export interface MessageConnector {
   history(query: MessageQuery & { chatId: string; order?: "asc" | "desc" }): Promise<MessagePage>;
   thread(query: { threadId: string; pageToken?: string; limit?: number; order?: "asc" | "desc" }): Promise<MessagePage>;
 }
+
+export const MessageKind = defineConnectorKind<MessageConnector>({ kind: "messages", version: 1, methods: ["identity", "search", "history", "thread"] });

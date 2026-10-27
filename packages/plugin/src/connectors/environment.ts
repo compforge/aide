@@ -1,1 +1,1 @@
-export type * from "@compforge/aide-connector/builtin";
+export type * from "@compforge/aide-connector/environment";

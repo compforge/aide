@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createForgeReader, ForgeRateLimitError, type ForgeReader } from "@compforge/repocli";
-import { ForgeKind, type ForgeOperations } from "@compforge/aide-connector/builtin";
+import { ForgeKind, type ForgeOperations } from "@compforge/aide-connector/forge";
 import type { ConnectorDefinition, ConnectorImplementation } from "@compforge/aide-connector";
 
 export function forgeImplementation(reader: ForgeReader): ConnectorImplementation<ForgeOperations> {

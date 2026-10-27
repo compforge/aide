@@ -11,7 +11,10 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./builtin": "./src/builtin/index.ts"
+    "./forge": "./src/forge.ts",
+    "./environment": "./src/environment.ts",
+    "./requirement": "./src/requirement.ts",
+    "./message": "./src/message.ts"
   },
   "files": [
     "src",

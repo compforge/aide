@@ -100,7 +100,7 @@ test("an external Forge implementation feeds the existing repository and PR Sour
 });
 
 test("built-in Forge providers use the same configured connection path and coexist with external kinds",async()=>{
-  const {ForgeKind}=await import("@compforge/aide-connector/builtin");
+  const {ForgeKind}=await import("@compforge/aide-connector/forge");
   const connectors=await Connectors.load({...config,instances:{...config.instances,github:{type:"github",config:{host:"github.example.com",tokenEnv:"TEST_TOKEN"}}}},{environment:{TEST_TOKEN:"fixture"}});
   const [forge]=await connectors.list(ForgeKind);
   assert.equal(forge?.name,"github");assert.equal(forge?.metadata.forge,"github.example.com");

@@ -2,7 +2,16 @@
 
 Public contracts for external operations in Aide. A Connector Kind defines asynchronous methods; a configured connection implements that Kind. Plugins, Reconcile callbacks and verbs discover connections and use the same typed methods without depending on their provider.
 
-The package root contains generic contracts and client helpers. Existing Forge, environment, requirement and message contracts are available from `@compforge/aide-connector/builtin`; these do not form a closed Kind enum. Source observation continues to use `@compforge/aide-plugin` Resource/Controller APIs.
+The package root contains generic contracts and client helpers. Domain contracts have separate entrypoints, each exporting its Kind and related types:
+
+| Entrypoint | Kind |
+| --- | --- |
+| `@compforge/aide-connector/forge` | `ForgeKind` |
+| `@compforge/aide-connector/environment` | `EnvironmentKind` |
+| `@compforge/aide-connector/requirement` | `RequirementKind` |
+| `@compforge/aide-connector/message` | `MessageKind` |
+
+Both built-in and external implementations can implement these contracts; they do not form a closed Kind enum. Provider implementations live in the Host's `connectors/` directory or external packages. Source observation continues to use `@compforge/aide-plugin` Resource/Controller APIs.
 
 ## Runtime and TypeScript
 

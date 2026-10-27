@@ -58,7 +58,7 @@ Source 可以遍历同 Kind 的所有连接；各连接的观察范围、作者�
 
 ## Forge 集成
 
-ForgeKind 及现有环境、需求、消息契约位于 `@compforge/aide-connector/builtin`。通用 SDK 根入口独立于这些业务契约；`aide-plugin` 继续转出已有的内置访问类型，并增加通用发现和调用能力。
+ForgeKind 与相关类型由 `@compforge/aide-connector/forge` 导出；环境、需求、消息契约分别由 `/environment`、`/requirement`、`/message` 导出。每个入口同时提供 Kind 和对应类型，内置与外部提供方共享同一契约；具体实现位于顶层 `connectors/` 或外部包。通用 SDK 根入口独立于这些领域契约；`aide-plugin` 提供 Plugin 使用的聚合 ConnectorClient，并转出领域类型。
 
 外部 Forge 实现提供与 ForgeKind 相同的方法，并在 metadata 声明稳定的 forge 身份和 provider 展示名。注册 name 可以是逻辑别名，metadata.forge 用于 Repository/PullRequest 业务身份。现有 Source 的 forge 选择与业务事实使用这一身份。若同一业务身份存在多个连接，通用客户端应使用发现的引用明确选择；便利访问接口在无法唯一选择时拒绝调用。
 

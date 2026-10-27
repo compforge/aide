@@ -1,6 +1,8 @@
-import { ForgeKind, RequirementKind, EnvironmentKind, MessageKind,
-  type ConnectorClient,
-  type EnvironmentDirectory, type RequirementOperations, type RequirementConnector } from "@compforge/aide-connector/builtin";
+import { ForgeKind } from "@compforge/aide-connector/forge";
+import { EnvironmentKind, type EnvironmentDirectory } from "@compforge/aide-connector/environment";
+import { RequirementKind, type RequirementOperations, type RequirementConnector, type RequirementIdentity } from "@compforge/aide-connector/requirement";
+import { MessageKind } from "@compforge/aide-connector/message";
+import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorCallOptions, ConnectorApi, ConnectorKind, ConnectorHandlers } from "@compforge/aide-connector";
 import { ConnectorRegistry, type ConnectorInvocationOptions } from "../src/host/connector/registry.ts";
 import { loadConnectorPackages, type ConnectorPackageConfig } from "../src/host/connector/packages.ts";
@@ -108,7 +110,7 @@ export class Connectors implements ConnectorClient {
   }
   async close(): Promise<void> { await this.registry.close(); }
   /** Output delivery remains a Host-owned write path. */
-  async addRequirementComment(identity: import("@compforge/aide-connector/builtin").RequirementIdentity, comment: { text: string; deliveryId: string }) {
+  async addRequirementComment(identity: RequirementIdentity, comment: { text: string; deliveryId: string }) {
     const provider = this.requirementProviders.find(item => item.source === identity.source);
     if (!provider?.addComment) throw new Error(`Requirement connector does not support comment delivery: ${identity.source}`);
     return provider.addComment(identity, comment);
