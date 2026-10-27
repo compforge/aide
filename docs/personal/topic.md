@@ -120,7 +120,7 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 原生会话通过 Harness 支持的方式初始化、持久化与恢复。新父 Topic 的 Chief 读取子主题认识，不拼接、改写子 Chief 的原生会话文件，不重放已完成的输入。模型请求前的业务背景继续使用 [Background](../harness/pi.md#当前业务背景) 通道。
 
-子主题认识变化唤醒当前 root；无新 Input 时仍核对未吸收版本，并由现有 Chief 自底向上吸收。吸收尝试间隔至少 60 秒，无进展时逐步退避至 15 分钟，等待和重启不会伪造 Input 或刷新活跃时间。启动时最多合批接纳 8 条积压 Input，紧迫输入优先且无额外等待窗口；每条保留独立回执，运行中新消息继续通过 steer / followUp 接纳。
+子主题认识变化唤醒当前 root；无新 Input 时仍核对未吸收版本，并由现有 Chief 自底向上吸收。吸收尝试间隔至少 60 秒，无进展时逐步退避至 15 分钟，等待和重启不会伪造 Input 或刷新活跃时间。Chief 被其它输入、定时回顾或知识整理激活时，最多合批接纳 8 条积压 Input，按 Immediate、Normal、Deferred 排序；每条保留独立回执。Deferred 积压本身不激活 Chief，运行中也不自动追加投递；Chief 可主动读取并研判相关积存事实。
 
 树结构本身不保证模型负担下降。root 数量、背景字符数、按需读取量与模型调用频率都需要预算；突发的普通输入可合批处理，不把每次资源变化都变成一次模型调用。
 
@@ -221,7 +221,7 @@ Weave 记录候选 UID、新父 UID、组织理由、认识吸收版本与交接
 
 ## 接纳与连续执行
 
-Topic 的接收 Controller 查询 Input.assessPending，具名 agent Controller 驱动根 Chief。空闲时 prompt，运行中 deferred Input 使用 followUp，immediate 使用 steer；原生接纳前持久化 executionId。Channel 的显式 Topic 规则在 Input 持久化和去重之后完成，避免先建空主题或被重投复活。
+Topic 的接收 Controller 查询 Input.assessPending，具名 agent Controller 驱动根 Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 只挂载，不推动 Chief 运行，调度语义见 [Input](input.md#内容身份与调度)。原生接纳前持久化 executionId。Channel 的显式 Topic 规则在 Input 持久化和去重之后完成，避免先建空主题或被重投复活。
 
 明确拒绝 steer 时释放该次接纳；结果未知保留证据。status.agent 只保存 harness 和原生 sessionId，恢复由 SDK 承担。成为子节点后释放 Chief 原生句柄，不修改旧历史。
 
@@ -241,7 +241,7 @@ Default 是没有子主题的独立 root，不参与 Weave，不能作为其他 
 
 ## Topic 定时回顾
 
-根 Topic 的 trigger 默认关闭，开启后默认每小时回顾一次；重启合并错过的周期。回顾不生成外部 Input，也不刷新 lastInputAt。成为子节点后不再独立回顾。Routine 的 cron/event 继续承担具体职责，区别于 Chief 的综合回顾。
+根 Topic 的 trigger 默认关闭，开启后默认每小时回顾一次，同时可批量研判积存的 Deferred Input；重启合并错过的周期。回顾不生成外部 Input，也不刷新 lastInputAt。成为子节点后不再独立回顾。Routine 的 cron/event 继续承担具体职责，区别于 Chief 的综合回顾。
 
 ## 删除与验证
 

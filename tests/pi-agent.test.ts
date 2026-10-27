@@ -1,3 +1,4 @@
+import { InputAttention } from "../plugins/personal/input/model.ts";
 import { inputJob } from "../plugins/personal/observation/job.ts";
 import { PiObservations, ObservationConfigSchema } from "../agents/pi/observation.ts";
 import { readObservation } from "@compforge/agent-pi/observation";
@@ -739,8 +740,8 @@ test("Aide steers immediate Input and independently completes both inputs within
       chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
   t.after(async () => { release(); await aide.close(); });
   await aide.topics.ensure("me"); await aide.start();
-  const submit = (id: string, attention: "deferred" | "immediate") => aide.topics.submit(id, { topicId: "me", origin: "source", originId: "fixture", attention, text: id });
-  await submit("first", "deferred");
+  const submit = (id: string, attention: InputAttention) => aide.topics.submit(id, { topicId: "me", origin: "source", originId: "fixture", attention, text: id });
+  await submit("first", InputAttention.Normal);
   for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
   assert.equal(fixture.requests.length, 1);
   // Concurrent consumption/status writes invalidate ten admission snapshots: exhaust one local retry budget, then requeue.
@@ -757,7 +758,7 @@ test("Aide steers immediate Input and independently completes both inputs within
       return client.commit(writes);
     } };
   });
-  await submit("urgent", "immediate");
+  await submit("urgent", InputAttention.Immediate);
   const uid = aide.topics.resource("me")!.metadata.uid;
   for (let i = 0; i < 200 && !aide.topics.inputStore.get("urgent")?.status.assess?.[uid]?.executionId; i++) await Bun.sleep(10);
   assert.equal(aide.topics.inputStore.get("urgent")!.status.assess?.[uid]?.executionId !== undefined, true);
@@ -957,7 +958,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
 
 /** @case Later Work inputs use native followUp or steer within the admitted invocation, with separate durable receipts. */
 for (const kind of ["task", "routine"] as const)
-for (const attention of ["deferred", "immediate"] as const)
+for (const attention of [InputAttention.Normal, InputAttention.Immediate] as const)
 test(`${kind} ${attention} Input joins the active native invocation`, { timeout: 20_000 }, async t => {
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   let firstId = "", laterId = "";
@@ -1006,7 +1007,7 @@ test(`${kind} ${attention} Input joins the active native invocation`, { timeout:
   assert.match(context(fixture.requests[1]!), /updated-work-understanding/);
   assert.match(context(fixture.requests[2]!), /Both inspected/, "A report refreshes the next model turn in the same invocation");
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
-  const admitted = [...state.harnessInputs.values()].find(i => i.delivery === (attention === "immediate" ? "steer" : "followUp"));
+  const admitted = [...state.harnessInputs.values()].find(i => i.delivery === (attention === InputAttention.Immediate ? "steer" : "followUp"));
   assert.equal(admitted?.deliveryOutcome, "applied");
 });
 
@@ -1136,4 +1137,38 @@ test("Pi Observation preserves request Background and stable native links after 
   assert.equal(supplement.nodes.some(n => JSON.stringify((n as ModelCall).response ?? {}).includes("native-only answer")), false);
   const native = SessionManager.open(f.native().sessionFile!);
   assert.equal(JSON.stringify(native.getEntries()).includes("current background v2"), false);
+});
+
+/** @case Deferred arrivals never enter native queues, but an active Chief may discover and assess them. */
+test("Chief can read and assess a late Deferred Input without steer or followUp", { timeout: 20_000 }, async t => {
+  let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
+  const fixture = await setup(t, (_request, index) => index === 0 ? { tool: "read_input", args: {}, pause }
+    : index === 1 ? { tool: "read_input", args: { inputId: "deferred" } }
+    : index === 2 ? { tool: "assess_input", args: { inputId: "deferred", summary: "Relevant observation inspected" } }
+    : index === 3 ? { tool: "assess_input", args: { inputId: "first", summary: "Request handled" } }
+    : { text: "Handled internally" });
+  const home = join(fixture.config.cwd, "deferred-home");
+  const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness },
+      chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }) }, pino({ level: "silent" }));
+  t.after(async () => { release(); await aide.close(); });
+  const c = await aide.topics.ensure("me"); await aide.start();
+  await aide.topics.submit("first", { topicId: "me", origin: "source", originId: "fixture", attention: InputAttention.Normal, text: "request" });
+  for (let i = 0; i < 200 && !fixture.requests.length; i++) await Bun.sleep(10);
+  assert.equal(fixture.requests.length, 1);
+  await aide.topics.submit("deferred", { topicId: "me", origin: "source", originId: "fixture", attention: InputAttention.Deferred, text: "late-deferred-evidence" });
+  for (let i = 0; i < 200 && !aide.topics.inputStore.get("deferred")?.status.route?.completedAt; i++) await Bun.sleep(10);
+  const before = aide.topics.inputStore.get("deferred")!.status.assess![c.metadata.uid]!;
+  assert.equal(before.executionId, undefined);
+  assert.equal(aide.topics.resource("me")!.status.execution!.admissionRevision, 0);
+  release(); await aide.settled();
+  const first = aide.topics.inputStore.get("first")!.status.assess![c.metadata.uid]!;
+  const deferred = aide.topics.inputStore.get("deferred")!.status.assess![c.metadata.uid]!;
+  assert.ok(deferred.completedAt); assert.ok(deferred.startedAt); assert.ok(deferred.completedBy);
+  assert.equal(deferred.executionId, first.executionId);
+  assert.equal(deferred.agent?.sessionId, first.agent?.sessionId);
+  assert.match(JSON.stringify(fixture.requests[2]!.messages), /late-deferred-evidence/);
+  assert.equal(aide.invocations().filter(i => i.topicId === "me").length, 1);
+  const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
+  assert.ok([...state.harnessInputs.values()].every(i => i.delivery !== "steer" && i.delivery !== "followUp"));
 });

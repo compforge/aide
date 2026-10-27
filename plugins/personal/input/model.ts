@@ -3,6 +3,17 @@ import type { ResourceRef } from "@compforge/aide-plugin";
 
 export interface InputReceipt { inputId: string; at: string }
 
+/**
+ * @spec Deferred Inputs attach without activating Chief or entering its native input queue.
+ * An already active Chief may assess them, regardless of what activated it.
+ * @link docs/personal/input.md#内容身份与调度
+ */
+export enum InputAttention {
+  Immediate = "immediate",
+  Normal = "normal",
+  Deferred = "deferred",
+}
+
 export type InputRelation = "sent" | "received" | "observed";
 
 export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Input" } as const;
@@ -20,7 +31,7 @@ export interface InputSpec {
   /** Explicit Topic selection, e.g. the Web composer. Final binding is persisted in route.result. */
   topicId?: string;
   /** Scheduling urgency, independent of authority or notification intent. */
-  attention?: "immediate" | "deferred";
+  attention?: InputAttention;
   origin: "channel" | "source" | "chief";
   /** ChannelDefinition or SourceDefinition ID, selected by origin. */
   originId: string;
@@ -38,6 +49,9 @@ export interface InputSpec {
   timezone?: string;
   observation?: Record<string, unknown>;
 }
+export const inputAttention = (input: InputSpec): InputAttention =>
+  input.attention ?? (input.origin === "channel" ? InputAttention.Immediate : InputAttention.Normal);
+
 /** Each coordinator owns its own status. A model turn ending is not business completion. */
 export interface Attempt {
   agent?: import("@compforge/aide-plugin").AgentStatus;

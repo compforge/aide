@@ -1,3 +1,4 @@
+import { InputAttention } from "../plugins/personal/input/model.ts";
 import { describeWorkloadChanges } from "../plugins/personal/source/environment/changes.ts";
 import { EventLedger } from "../src/host/event/ledger.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
@@ -67,7 +68,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   failure = true; const baseline = resource().status.baseline;
   await assert.rejects(observe(), /Forbidden/); assert.deepEqual(resource().status.baseline, baseline);
   failure = false; current = { ...snapshot("B"), workloads: [] }; await observe();
-  assert.ok(topics.list().every((input) => input.spec.originId === SOURCES.environments.id));
+  assert.ok(topics.list().every((input) => input.spec.originId === SOURCES.environments.id && input.spec.attention === InputAttention.Deferred));
   const event = topics.list().at(-1)!.spec.observation!;
   assert.deepEqual((event.changes as { after?: unknown }[]).map((c) => c.after), [undefined]);
   assert.ok(topics.list().every((input) => input.spec.topicKey?.startsWith("environment:")));
@@ -88,7 +89,7 @@ test("Environment policy selects namespaces independently of Connector defaults 
   assert.throws(() => environmentSources({ ...policy, targets: [...policy.targets, { environment: "dev", namespaces: ["app"] }] }, environments), /Duplicate/);
 });
 
-test("Real Runner observes through Connector Verb, routes to Chief once, and restores its baseline", { timeout: 15_000 }, async (t) => {
+test("Real Runner defers environment observations until review and restores its baseline", { timeout: 15_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-env-runner-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: {environments: {kind:"environment",version:"v1",config:{
@@ -125,6 +126,17 @@ test("Real Runner observes through Connector Verb, routes to Chief once, and res
   };
   await poll();
   assert.equal(aide.personal.topics.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
+  assert.equal(prompts.length, 1, "Environment arrival must not call Chief");
+  const input = aide.personal.topics.inputStore.list().find(input => input.spec.originId === SOURCES.environments.id)!;
+  assert.equal(input.spec.attention, InputAttention.Deferred);
+  const assignment = Object.values(input.status.assess!)[0]!;
+  assert.equal(assignment.executionId, undefined);
+  const scope = aide.personal, client = scope.plugins.resourceClient("personal");
+  const topic = (await client.get<import("../plugins/personal/topic/model.ts").TopicSpec, import("../plugins/personal/topic/model.ts").TopicStatus>(assignment.resource))!;
+  await client.replace(topic, { ...topic.spec, trigger: { enabled: true, intervalSeconds: 3600 } },
+    { ...topic.status, nextTriggerAt: new Date(Date.now() - 1000).toISOString() });
+  await aide.settled();
+  assert.ok(aide.topics.inputStore.get(input.metadata.name)!.status.assess![assignment.resource.uid]!.completedAt);
   assert.match(prompts.at(-1)!, /镜像 api=A → api=B/);
   assert.doesNotMatch(prompts.at(-1)!, /"before"|"after"/);
   assert.equal(aide.outputs().filter((message) => message.topicId !== "other").length, 0, "Source Topics do not inherit a reply address");

@@ -5,7 +5,7 @@ import { resourceRef } from "../input/state.ts";
 import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient, Address } from "@compforge/aide-plugin";
-import type { InputSpec } from "../input/model.ts";
+import { InputAttention, inputAttention, type InputSpec } from "../input/model.ts";
 import type { SayInput, SayReceipt } from "../output/model.ts";
 import { InputStore } from "../input/store.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
@@ -168,7 +168,7 @@ export class TopicStore {
     }
     if (!target) {
       const candidates = (inputIds.length ? inputIds : owner ? [] : this.pending(initial.metadata.uid).map(i => i.metadata.name)).map(attached)
-        .filter((i) => i.spec.origin === "channel" && (i.spec.attention ?? "immediate") === "immediate");
+        .filter((i) => i.spec.origin === "channel" && inputAttention(i.spec) === InputAttention.Immediate);
       if (candidates.length) {
         const first = candidates[0]!.spec.source;
         if (first && candidates.every(i => i.spec.source && sameAddress(first, i.spec.source))) target = first;

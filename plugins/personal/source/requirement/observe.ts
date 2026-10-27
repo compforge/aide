@@ -1,3 +1,4 @@
+import { InputAttention } from "../../input/model.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
 import { type ConnectorClient, type PluginContext, type RequirementAccount, type RequirementIdentity, type RequirementSummary, type Resource } from "@compforge/aide-plugin";
 import { bindSourceInput, type SourceInput } from "../input.ts";
@@ -66,7 +67,7 @@ class RequirementObservation implements TopicLocator<RequirementIdentity> {
     return relationToPerson(this.me, { ...(author ? { author: identity(author) } : {}), recipients: recipients.map(identity), observer });
   }
   private base(identity: RequirementIdentity): SourceInput {
-    return { topicKey: this.locate(identity).selector.key, source: requirementAddress(identity, this.account.scope), text: "", attention: "deferred" };
+    return { topicKey: this.locate(identity).selector.key, source: requirementAddress(identity, this.account.scope), text: "", attention: InputAttention.Normal };
   }
   private async snapshot(item: RequirementSummary & { description?: string }) {
     const key = keyOf(item), previous = this.tracked[key];

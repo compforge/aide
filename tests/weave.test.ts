@@ -1,3 +1,4 @@
+import { InputAttention } from "../plugins/personal/input/model.ts";
 import { registerWeave } from "../plugins/personal/weave/reconcile.ts";
 import { candidatePage, weaveCandidates } from "../plugins/personal/weave/candidates.ts";
 import assert from "node:assert/strict";
@@ -223,7 +224,7 @@ test("Root Chief admits a bounded backlog with urgent Input first and independen
   const f = fixture(t);
   for (let i = 0; i < 10; i++) await f.input(`batch-${i}`, "batch");
   const root = f.aide.topics.byKey("batch")!;
-  const urgent = await f.aide.topics.submit("urgent", { origin: "channel", originId: "web", topicKey: "batch", attention: "immediate", text: "urgent question" });
+  const urgent = await f.aide.topics.submit("urgent", { origin: "channel", originId: "web", topicKey: "batch", attention: InputAttention.Immediate, text: "urgent question" });
   await routeByRules(f.context, urgent);
   let prompts = 0;
   const execution: any = { executionId: "batch", withContext() { return this; }, verbs: { async harness(args: any) {
