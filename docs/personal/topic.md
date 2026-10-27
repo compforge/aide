@@ -231,6 +231,8 @@ Topic 的接收 Controller 查询 Input.assessPending，具名 agent Controller 
 
 assess_input 只保存单次研判回执（最多 1000 字符）并原子交接 Work。summarize_topic 修订长期认识，topicUid 可指定根内的子主题；absorbed 使用直接子主题的 understandingVersion，只有查看回执时可以省略 summary。upsert_note 独立维护近期事项，默认目标为当前 Topic，target 可指定根内子 Topic 或已读取的 Person。必须先读取目标，提交时校验根执行、目标资源版本和子认识版本；过期综合需重读。完整契约见[有界认识与近期依据](README.md#有界认识与近期依据)。
 
+list_topics 提供用于定位的预览：摘要和 Note 文本被截断时标记 `… [truncated]`，`noteTotal` 包含未展示的 Note。依赖不完整内容做判断或确认 absorbed 版本前，使用 read_topic 补读；`nextOffset` 非空时继续读取，为空表示全文结束。
+
 summaryChars 默认 4000、最高 16000；contextChars 默认 48000。近期依据仍受统一数量和字符预算约束。详情见[配置](../configuration.md#topic-消费策略)。
 
 ## 默认主题
