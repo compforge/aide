@@ -12,6 +12,7 @@ export interface TopicStatus extends ResourceContext {
   lastInputAt?: string;
   weaveLock?: string | null;
   absorbed?: Record<string, string>;
+  absorbedSummaries?: Record<string, string>;
   agent?: import("@compforge/aide-plugin").AgentStatus;
   nextAbsorbAt?: string;
   absorbAttempts?: number;

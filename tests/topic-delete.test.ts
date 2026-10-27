@@ -86,7 +86,7 @@ test("Recreated Topic has fresh execution context and no old outputs or progress
   let calls = 0;
   aide = new Aide(dir, fakeOptions({ chief: async () => {
     return ++calls === 1 ? "旧答案" : "新答案";
-  }, execute: async () => ({ action: "done", summary: "旧工作完成", recent: "旧工作完成", notification: "旧工作回复", question: null, nextAt: null }) }, dir), log);
+  }, execute: async () => ({ action: "done", report: "旧工作完成", notification: "旧工作回复", question: null, nextAt: null }) }, dir), log);
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
   await aide.receive(fixtureIncoming({ channelId: "web", id: "old", topicId: "me", text: "旧请求" }));

@@ -1,5 +1,5 @@
 import { weaveCandidates, candidateFingerprint, candidatePage } from "./candidates.ts";
-import { understandingVersion } from "../topic/tree.ts";
+import { summaryVersion } from "../topic/tree.ts";
 import type { PluginContext, Watch } from "@compforge/aide-plugin";
 import { WEAVE_TYPE, WEAVE_NAME, type WeaveResource } from "./model.ts";
 import { weavePolicy } from "./config.ts";
@@ -16,7 +16,7 @@ export function registerWeave(context: PluginContext) {
     resourceType: WEAVE_TYPE, maxConcurrency: 1, watches: [watch, { resourceType: TOPIC_TYPE, handler: { create: async () => request(), delete: async () => request(),
       update: async ({ oldObject, newObject }) => {
         const a = oldObject as import("../topic/model.ts").TopicResource, b = newObject as import("../topic/model.ts").TopicResource;
-        return a.spec.parentRef?.uid !== b.spec.parentRef?.uid || understandingVersion(a) !== understandingVersion(b) ? request() : [];
+        return a.spec.parentRef?.uid !== b.spec.parentRef?.uid || summaryVersion(a) !== summaryVersion(b) ? request() : [];
       } } }],
     sources: [{ type: "resource", sourceId: "global", async start(source) { await source.emit({ name: WEAVE_NAME, spec: {} }); } }],
     async reconcile(execution, initial) {

@@ -45,13 +45,11 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         rejection = reason;
-        work.recent.push({ at: new Date().toISOString(), text: `Input ${input.id} rejected: ${reason}` });
         context.logger.warn("Work input rejected", { attributes: { workId: work.id, inputId: input.id, reason } });
       }
       if (!rejection && input.action !== "context") changed = true;
       const at = new Date().toISOString();
       const complete = !!rejection || input.action === "pause";
-      if (!rejection && input.action !== "context") work.recent.push({ at, text: `Applied ${input.action}: ${input.text.slice(0, 2000)}` });
       receipts.push({ operation: "patchStatus" as const, resource: fact, patch: { handle: { ...fact.status.handle, [resource.metadata.uid]: {
         ...receipt, appliedAt: at, ...(complete ? { startedAt: at, completedAt: at,
         result: { summary: rejection ?? `Applied ${input.action} request`, disposition: rejection ? "rejected" as const : "completed" as const } } : {}) } } } });

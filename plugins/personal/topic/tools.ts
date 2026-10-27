@@ -4,23 +4,23 @@ import type { Store } from "../store.ts";
 import type { TopicResource } from "./model.ts";
 import { topicSubtree, understandingVersion } from "./tree.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "./model.ts";
-import { contextPage } from "../background.ts";
+import { contextPage, understanding } from "../background.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 /** Root agents may inspect their own subtree, never expand unrelated trees into automatic context. */
 export function topicTools(store: Store, active: () => TopicResource): ToolDefinition[] {
   const subtree = () => topicSubtree(store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE), active());
   return [
-    { name: "list_topics", label: "List child topics", description: "List direct children within this root's subtree, with bounded summaries and understanding versions.",
+    { name: "list_topics", label: "List child topics", description: "List direct children within this root's subtree with summary and Note previews for discovery. Text ending in [truncated] is incomplete; noteTotal counts all Notes, including omitted ones. Before relying on incomplete context or confirming absorbed versions, use read_topic(uid) and continue with offset=nextOffset until the needed context is read. Follow this list's nextOffset to discover remaining children.",
       parameters: Type.Object({ parentUid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, { parentUid, offset = 0 }) {
         const root = active(), parent = parentUid ?? root.metadata.uid;
         const all = subtree();
         if (!all.some(t => t.metadata.uid === parent)) throw new Error("Topic is outside this root");
         return result(contextPage(all.filter(t => t.spec.parentRef?.uid === parent).map(t => ({
-          uid: t.metadata.uid, name: t.spec.name, summary: t.status.summary.slice(0, 1200), version: understandingVersion(t),
+          uid: t.metadata.uid, name: t.spec.name, ...understanding(t.status, 1200), version: understandingVersion(t),
         })), offset));
       } },
-    { name: "read_topic", label: "Read topic", description: "Read this root or a descendant's full understanding in text pages. Use its resource version for summarize_topic and understandingVersion for absorbed receipts.",
+    { name: "read_topic", label: "Read topic", description: "Read this root or a descendant's full summary and Notes in text pages. A non-null nextOffset means more text remains: continue with offset=nextOffset; null marks the end. Use its resource version for summarize_topic and understandingVersion for absorbed receipts after reviewing the child context.",
       parameters: Type.Object({ uid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, { uid, offset = 0 }) {
         const root = active(), topic = subtree().find(t => t.metadata.uid === (uid ?? root.metadata.uid));

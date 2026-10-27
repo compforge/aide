@@ -29,6 +29,7 @@ export const WorkSchema = z.object({
   revision: z.number().int(),
   nextAt: z.string().nullable(),
   question: z.string().nullable(),
+  lastReport: z.object({ at: z.string(), text: z.string().max(16000) }).strict().optional(),
   recoveryNotice: z.object({ id: z.string(), text: z.string() }).strict().nullable().optional(),
   ...ContextFields,
 });
@@ -58,4 +59,4 @@ export function validateTrigger(kind: Work["kind"], trigger: Trigger | null, now
 }
 
 export const WorkSpecSchema = WorkSchema.pick({ topicId: true, title: true, instruction: true, revision: true }).strict();
-export const WorkStatusSchema = WorkSchema.pick({ status: true, nextAt: true, question: true, recoveryNotice: true, summary: true, recent: true }).strict();
+export const WorkStatusSchema = WorkSchema.pick({ status: true, nextAt: true, question: true, recoveryNotice: true, lastReport: true, summary: true, recent: true }).strict();

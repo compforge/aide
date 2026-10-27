@@ -28,7 +28,7 @@ Topic 使用独立 ID / UID，名称和来源 key 不充当资源身份。字段
 | name | 便于理解的主题名称，可以变化 |
 | topicKey | 可选的来源关联键；一个 key 同时只对应一个可接纳的 Topic |
 | parentRef | 可选的父 Topic 引用，固定到 UID |
-| summary / recent | 累计认识与有界的近期依据 |
+| summary / recent | 长期认识与有界的近期事项 Note |
 | lastInputAt | 本 Topic 及其子树最后一次接纳新 Input 的时间 |
 | default | 系统兜底主题标记，与保留身份 `default` 一致，不可转移 |
 | status.agent / status.execution | root 的原生会话引用和执行状态；非 root 不继续运行 Chief |
@@ -110,9 +110,9 @@ Chief 只在 root 运行。子树中新到的 Input 由这个 root 接纳，中�
 
 root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子节点没有独立 Chief，不意味着局部 summary 无人维护。已有层级中的综合认识也可以作为后续 root 的阅读材料。
 
-沿用当前 [认识与回执分离](#研判与上下文) 的约定：assess 记录单次处理事实，summary / recent 在出现有意义的新认识时更新；静默完成一条 Input 不要求追加一条重复摘要。
+沿用当前 [认识与回执分离](#研判与上下文) 的约定：assess 记录单次处理事实，summary 只在长期认识变化时修订；recent 按同一事项持续维护 Note，二者独立。静默完成一条 Input 不要求维护认识。
 
-父 Topic 逐步吸收子 Topic 的 summary 和必要证据，不机械拼接全文。吸收过程保留来源、分歧、未决问题，并记录已吸收的子认识版本；同一版本不会被反复追加，版本变化后可以继续吸收。
+父 Topic 按需综合子 Topic 的长期认识和近期事项，不机械拼接全文。摘要变化可以唤醒综合；Note 单独变化不启动额外的摘要维护，在新输入或定时回顾已激活时一并查看。review 可以只确认已查看的子认识版本，不要求重传或改写父 summary。记录完整上下文和摘要两种已查看版本；Weave 的候选扫描不因 Note 单独变化重新启动；新建父 Topic 时保留按预算合并的子 Note；完整上下文版本仍保护交接和子 Topic 回收，未查看的 Note 不被静默丢弃。
 
 每次模型请求的 Background 只加载有界材料：
 
@@ -229,7 +229,9 @@ Topic 的接收 Controller 查询 Input.assessPending，具名 agent Controller 
 
 ## 研判与上下文
 
-assess_input 只保存单次研判回执（最多 1000 字符）并原子交接 Work。summarize_topic 更新累计认识，可选 recent；topicUid 可指定根内的子主题，absorbed 使用直接子主题的 understandingVersion。必须先 read_topic，提交时校验根执行、目标资源版本和子认识版本；过期综合需重读。根的无参 read_input 仍提供当前上下文和版本。
+assess_input 只保存单次研判回执（最多 1000 字符）并原子交接 Work。summarize_topic 修订长期认识，topicUid 可指定根内的子主题；absorbed 使用直接子主题的 understandingVersion，只有查看回执时可以省略 summary。upsert_note 独立维护近期事项，默认目标为当前 Topic，target 可指定根内子 Topic 或已读取的 Person。必须先读取目标，提交时校验根执行、目标资源版本和子认识版本；过期综合需重读。完整契约见[有界认识与近期依据](README.md#有界认识与近期依据)。
+
+list_topics 提供用于定位的预览：摘要和 Note 文本被截断时标记 `… [truncated]`，`noteTotal` 包含未展示的 Note。依赖不完整内容做判断或确认 absorbed 版本前，使用 read_topic 补读；`nextOffset` 非空时继续读取，为空表示全文结束。
 
 summaryChars 默认 4000、最高 16000；contextChars 默认 48000。近期依据仍受统一数量和字符预算约束。详情见[配置](../configuration.md#topic-消费策略)。
 

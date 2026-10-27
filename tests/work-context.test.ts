@@ -43,7 +43,7 @@ async function fixture(t: TestContext, kind: "task" | "routine" = "task") {
     for (const id of inputIds) await changeAttempt(resources, id, resourceRef(original), () => ({ executionId, startedAt: new Date().toISOString() }));
     return read();
   };
-  const report = async (inputIds: string[]) => reportWork(resources, await read(), "run", { inputIds, action: "done", summary: "Current verified progress", recent: "Checked evidence" });
+  const report = async (inputIds: string[]) => reportWork(resources, await read(), "run", { inputIds, action: "done", report: "Current verified progress" });
   return { context, original, resources, add, read, pending, admit, report };
 }
 
@@ -62,7 +62,9 @@ test("Work intake preserves primary text and leaves receipts pending until expli
     await finalizeExecution(f.context, await f.read(), "run");
   }
   assert.equal(seen.size, 65);
-  assert.equal((await f.read()).status.summary, "Current verified progress");
+  assert.equal((await f.read()).status.summary, "");
+  assert.equal((await f.read()).status.lastReport!.text, "Current verified progress");
+  assert.deepEqual((await f.read()).status.recent, []);
 });
 
 test("Work report acknowledges exact admitted IDs; late arrivals remain pending", async t => {
@@ -88,7 +90,7 @@ test(`${kind} finalization preserves failed admission evidence for explicit reco
   assert.equal((await f.read()).status.execution, null);
 });
 
-test("Periodic Routine reports retain bounded observations and schedule the next occurrence", async t => {
+test("Periodic Routine reports schedule the next occurrence without rewriting understanding", async t => {
   const f = await fixture(t, "routine");
   for (let tick = 0; tick < 90; tick++) {
     await f.admit([]); await f.report([]);
@@ -99,7 +101,7 @@ test("Periodic Routine reports retain bounded observations and schedule the next
     assert.ok(current.status.recent.length <= RECENT_COUNT);
     assert.ok(current.status.recent.reduce((sum, entry) => sum + entry.text.length, 0) <= RECENT_CHARS);
   }
-  assert.equal((await f.read()).status.recent.length, RECENT_COUNT);
+  assert.equal((await f.read()).status.recent.length, 0);
 });
 
 test("Work progress and receipts roll back together; tool persistence can retry without inference", async t => {
@@ -109,7 +111,7 @@ test("Work progress and receipts roll back together; tool persistence can retry 
     commit: (writes: Parameters<typeof f.resources.commit>[0]) => f.resources.commit([...writes,
       { operation: "create", type: { apiVersion: "aide.dev/v1alpha1", kind: "Unknown" }, name: "fail", spec: {}, status: {} }]),
   };
-  await assert.rejects(reportWork(failing, before, "run", { inputIds: ["atomic"], action: "done", summary: "Verified", recent: "Checked" }), /Unknown resource/);
+  await assert.rejects(reportWork(failing, before, "run", { inputIds: ["atomic"], action: "done", report: "Verified" }), /Unknown resource/);
   assert.deepEqual(await f.read(), before);
   assert.deepEqual((await f.pending())[0], inputBefore);
   await f.report(["atomic"]);

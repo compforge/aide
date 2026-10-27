@@ -1,6 +1,6 @@
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { registerWeave } from "../plugins/personal/weave/reconcile.ts";
-import { candidatePage, weaveCandidates } from "../plugins/personal/weave/candidates.ts";
+import { candidatePage, weaveCandidates, candidateFingerprint } from "../plugins/personal/weave/candidates.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -269,4 +269,19 @@ test("Unfinished synthesis backs off without inventing Input or refreshing activ
   assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 2);
   assert.ok(Date.parse(f.aide.topics.resource(root.id)!.status.nextAbsorbAt!) > Date.now() + 110_000);
   assert.equal(f.aide.topics.inputs().length, 0);
+});
+
+/** @case Grouping retains recent matters with their stable identities instead of moving progress into parent summary. */
+test("Weave carries bounded child Notes into the parent while keeping a durable parent summary", async t => {
+  const f = fixture(t); await f.initialize();
+  const a = await ensureSourceTopic(f.resources, "note:a", "A"), b = await ensureSourceTopic(f.resources, "note:b", "B");
+  const note = { id: "verification-progress", createdAt: "2026-10-27T00:00:00Z", updatedAt: "2026-10-27T01:00:00Z", text: "A reports verification is 50% complete" };
+  const fingerprint = candidateFingerprint([a, b]);
+  await f.resources.patchStatus(a, { recent: [note] });
+  assert.equal(candidateFingerprint([f.refresh(a), b]), fingerprint, "Note-only changes do not restart the stable-topic scan");
+  await f.group(f.refresh(a), b); await applyGroup(f.resources, await f.weave());
+  const parent = f.aide.topics.resource(f.aide.topics.list().find(topic => !topic.parentRef)!.id)!;
+  assert.deepEqual(parent.status.recent, [note]);
+  assert.equal(parent.status.summary, "Preserved child findings");
+  assert.ok(parent.status.absorbedSummaries?.[a.metadata.uid]);
 });

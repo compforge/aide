@@ -13,6 +13,8 @@ import { inputDetail, inputList } from "../src/api/inputs.ts";
 import { topicView } from "../src/channel/view.ts";
 import { inputJob } from "../plugins/personal/observation/job.ts";
 import { topicTrigger, createTriggerInput } from "../plugins/personal/topic/trigger.ts";
+import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
+import { summaryVersion, understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
@@ -218,4 +220,26 @@ test("Runner checks default-enabled roots from creation, skips busy periods, and
   await aide.setTopicTrigger("root", false); await aide.settled();
   await Bun.sleep(1100);
   assert.equal(ticks, 2);
+});
+
+
+test("Idle trigger reviews Note-only child progress without requiring a summary rewrite", async t => {
+  const f = await fixture(t);
+  const child = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "note-child",
+    spec: { id: "note-child", parentRef: resourceRef(f.read()) }, status: { summary: "Stable child rule", recent: [], receipts: [] } });
+  await f.resources.patchStatus(f.read(), { summary: "Stable parent rule",
+    absorbed: { [child.metadata.uid]: understandingVersion(child) }, absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
+  const at = new Date().toISOString();
+  await f.resources.patchStatus(child, { recent: [{ id: "deployment", createdAt: at, updatedAt: at, text: "Deployment is 50% complete" }] });
+  await f.run();
+  assert.equal(f.calls.length, 0, "Note changes do not activate summary maintenance");
+  await f.due();
+  await f.run();
+  assert.equal(f.calls.length, 1);
+  assert.match(f.calls[0]!.prompt, /System-scheduled reflection/);
+  assert.ok(f.calls[0]!.prompt.includes(child.metadata.uid), "Scheduled input includes pending child context for review");
+  assert.match(f.calls[0]!.prompt, /confirm absorbed versions without summary/);
+  assert.equal(f.read().status.summary, "Stable parent rule");
+  const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "trigger")!;
+  assert.ok(review.status.assess![f.read().metadata.uid]!.completedAt);
 });

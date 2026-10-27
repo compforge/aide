@@ -17,7 +17,7 @@ import { reconcileTask } from "../plugins/personal/task/reconcile.ts";
 import { finalizeExecution } from "../plugins/personal/loop.ts";
 import { handoff } from "./input-state-fixture.ts";
 const definition = { kind: "task" as const, title: "Check", instruction: "Inspect evidence", trigger: null };
-const completed = { action: "done" as const, summary: "Verified", recent: "Inspected evidence", notification: null, question: null, nextAt: null };
+const completed = { action: "done" as const, report: "Verified", notification: null, question: null, nextAt: null };
 function setup(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-task-agent-"));
   const aide = new Aide(home, fakeOptions({ execute: async () => completed }, home), pino({ level: "silent" }));
@@ -69,10 +69,10 @@ test("Task report commits progress with exact receipts; end of inference without
   await aide.work("me").requestInput(work.id, { text: "later evidence" }, "later");
   const later = aide.topics.inputStore.query("handlePending", work.uid!).find(i => i.metadata.name !== task.spec.initialInputId)!;
   const before = get(work.id);
-  await assert.rejects(reportWork(resources, task, "run", { action: "done", summary: "Verified", recent: "Verified", inputIds: [task.spec.initialInputId, later.metadata.name] }), /not admitted/);
+  await assert.rejects(reportWork(resources, task, "run", { action: "done", report: "Verified", inputIds: [task.spec.initialInputId, later.metadata.name] }), /not admitted/);
   assert.deepEqual(get(work.id), before);
-  await assert.rejects(reportWork(resources, task, "wrong", { inputIds: [], summary: "bad", recent: "bad", action: "done" }), /no longer active/);
-  await reportWork(resources, task, "run", { inputIds: [task.spec.initialInputId], summary: "First inspected", recent: "First evidence", action: "done" });
+  await assert.rejects(reportWork(resources, task, "wrong", { inputIds: [], report: "bad", action: "done" }), /no longer active/);
+  await reportWork(resources, task, "run", { inputIds: [task.spec.initialInputId], report: "First inspected", action: "done" });
   assert.equal(get(work.id).status.status, "ready");
   assert.ok(aide.topics.inputStore.get(task.spec.initialInputId)!.status.handle![work.uid!]!.completedAt);
   assert.equal(aide.topics.inputStore.get(later.metadata.name)!.status.handle![work.uid!]!.completedAt, undefined);
@@ -112,7 +112,7 @@ test("Task idle lifecycle releases the agent, retains its native ID, then reques
   const { aide, resources, context, get, active } = setup(t);
   const work = await aide.work("me").create(definition);
   const task = await active(work.id);
-  await reportWork(resources, task, "run", { inputIds: [task.spec.initialInputId], summary: "Verified", recent: "Verified", action: "done" });
+  await reportWork(resources, task, "run", { inputIds: [task.spec.initialInputId], report: "Verified", action: "done" });
   await finalizeExecution(context, task, "run");
   await resources.patchStatus(get(work.id), { agent: { harness: "task", sessionId: "native-id" } });
   let closes = 0;

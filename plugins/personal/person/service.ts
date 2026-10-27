@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
+import { upsertNote, type NoteUpdate } from "../notes.ts";
 import { SUMMARY_CHARS } from "../context.ts";
 import { mergePersonSummary } from "./merge.ts";
 import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, LOCAL_ME, type Me, type Person, type PersonIdentity, type PersonResource, type PersonStatus } from "./model.ts";
@@ -57,8 +58,7 @@ export class Persons {
       { operation: "replace", resource: target, spec: PersonSchema.parse({ ...target.spec, identities }), status: {
         ...status, summary,
         recent: sources.length ? [...target.status.recent, ...sources.flatMap(p => p.status.recent)]
-          .sort((a, b) => a.at.localeCompare(b.at))
-          .concat({ at: status.updatedAt, text: `Me 配置确认同一人，合并了${sources.map(p => `「${p.spec.name}」（${p.metadata.name}）`).join("、")}。` }) : target.status.recent,
+          .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)) : target.status.recent,
       } },
     ]);
     return { merged: sources.length };
@@ -99,14 +99,17 @@ export class Persons {
     const status = { ...current.status, ...this.status("user") };
     if (summary !== undefined && summary !== current.status.summary) {
       status.summary = summary;
-      status.recent = [...status.recent, { at: status.updatedAt, text: "用户修订了当前认识。" }];
     }
     return this.resources.replace(current, PersonSchema.parse(spec), status);
   }
-  async summarize(id: string, uid: string, version: string, summary: string, recent: string) {
+  async summarize(id: string, uid: string, version: string, summary: string) {
     const current = await this.version(id, uid, version);
-    return this.resources.replace(current, current.spec, { ...current.status, ...this.status("chief"), summary,
-      recent: [...current.status.recent, { at: new Date().toISOString(), text: recent }] });
+    if (current.status.summary === summary) return current;
+    return this.resources.replace(current, current.spec, { ...current.status, ...this.status("chief"), summary });
+  }
+  async upsertNote(id: string, uid: string, args: NoteUpdate, callId: string) {
+    const current = await this.read(id, uid);
+    return upsertNote(this.resources, current, args, callId);
   }
   /**
    * @spec Append to the target and delete the source atomically. Names never prove identity.
@@ -126,8 +129,7 @@ export class Persons {
       { operation: "delete", resource: from },
       { operation: "replace", resource: into, spec: PersonSchema.parse({ ...into.spec, identities }), status: {
         ...status, summary: summary ?? mergePersonSummary(into.status.summary, from.status.summary),
-        recent: [...into.status.recent, ...from.status.recent].sort((a, b) => a.at.localeCompare(b.at))
-          .concat({ at: status.updatedAt, text: `用户确认同一人，合并了「${from.spec.name}」（${from.metadata.name}）。` }),
+        recent: [...into.status.recent, ...from.status.recent].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)),
       } },
     ]);
     const person = merged as PersonResource;

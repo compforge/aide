@@ -1,8 +1,9 @@
+import { retainRecent } from "../context.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
 import { digest } from "../chief-model.ts";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "../topic/model.ts";
-import { understandingVersion } from "../topic/tree.ts";
+import { understandingVersion, summaryVersion } from "../topic/tree.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
 import { WORK_TYPES, type WorkResource } from "../resources.ts";
@@ -67,7 +68,7 @@ export async function applyGroup(resources: ResourceClient, weave: WeaveResource
   const name = digest(plan.id);
   let parent = all.find(t => t.spec.id === plan.id);
   if (!parent) parent = await resources.create(TOPIC_TYPE, { name, spec: { id: plan.id, name: plan.name },
-    status: { receipts: [], summary: plan.summary, recent: [], weaveLock: plan.id } });
+    status: { receipts: [], summary: plan.summary, recent: retainRecent(concrete.flatMap(topic => topic.status.recent)), weaveLock: plan.id } });
   const uid = parent.metadata.uid, parentRef = resourceRef(parent);
   const transfers: ResourceCommit[] = [
     ...inputs.map(resource => {
@@ -94,6 +95,7 @@ export async function applyGroup(resources: ResourceClient, weave: WeaveResource
     ...transfers,
     { operation: "patchStatus", resource: parent, patch: { weaveLock: null,
       absorbed: Object.fromEntries(concrete.map(t => [t.metadata.uid, understandingVersion(t)])),
+      absorbedSummaries: Object.fromEntries(concrete.map(t => [t.metadata.uid, summaryVersion(t)])),
       lastInputAt: concrete.map(t => t.status.lastInputAt ?? t.metadata.creationTimestamp).sort().at(-1) } },
     { operation: "patchStatus", resource: weave, patch: { plan: null } },
   ];

@@ -8,7 +8,7 @@ import { Aide } from "../src/app.ts";
 import { InputAttention, inputAttention } from "../plugins/personal/input/model.ts";
 import { InputSpecSchema } from "../plugins/personal/input/definition.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
-import { understandingVersion } from "../plugins/personal/topic/tree.ts";
+import { understandingVersion, summaryVersion } from "../plugins/personal/topic/tree.ts";
 import { fakeOptions, type Agent } from "./fake-harness.ts";
 
 function setup(t: { after(fn: () => Promise<void>): void }, agent: Partial<Agent> = {}) {
@@ -46,7 +46,7 @@ for (const target of ["root", "child"]) test(`Deferred ${target} inputs wait and
   if (target === "child") {
     const child = await aide.topics.ensure("child");
     await client.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
-    await client.patchStatus(root, { absorbed: { [child.metadata.uid]: understandingVersion(child) } });
+    await client.patchStatus(root, { absorbed: { [child.metadata.uid]: understandingVersion(child) }, absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
   }
   await aide.start();
   await submit("early", target); await aide.settled();
@@ -103,7 +103,7 @@ test("Child understanding can activate Chief and include Deferred without a time
   const { aide, client, submit, prompts } = setup(t);
   const root = await aide.topics.ensure("root"), child = await aide.topics.ensure("child");
   await client.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
-  await client.patchStatus(root, { absorbed: { [child.metadata.uid]: understandingVersion(child) } });
+  await client.patchStatus(root, { absorbed: { [child.metadata.uid]: understandingVersion(child) }, absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
   await aide.start(); await submit("deferred", "child"); await aide.settled();
   assert.equal(prompts.length, 0);
   await client.patchStatus(aide.topics.resource("child")!, { summary: "New understanding" });

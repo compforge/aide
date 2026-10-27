@@ -25,13 +25,15 @@ Chief 创建 Task 时通过 `create_work` 传入 `inputId`。Task.spec.initialIn
 | list_work | 分页查看同会话 Task / Routine 概况，不获得其它 Work 的操作权限 |
 | read_topic | 读取所属 Topic 的背景 |
 | say | 通过 Topic 创建用户可见 Output，关联 Task UID、execution 与可选 Input |
+| summarize_task | 独立修订本资源的长期认识 |
+| upsert_note | 按同一事项创建或更新近期 Note，目标由 Host 绑定 |
 | report_task | 原子更新进展、done/wait/ask 状态及明确列出的 Input 办理回执 |
 
 工具由 Host 根据 Task UID 和当前 execution 装配，模型不能自选其它 Task 或 Topic。文件和 CLI 操作沿用 Pi 原生能力及现有凭证。Topic 背景和外部材料不是新增授权。
 
 `task.status.agent = { harness: "task", sessionId }`。Reconcile 先 create、保存 ID，再提交业务输入；恢复和持久化使用 [Pi 的原生 SDK](../harness/pi.md)。`status.execution` 表达当前执行，`lastExecutionId` 保留最近执行关联。模型 final text 不会完成 Input，也不会发送给用户；必须分别调用 report_task 和 say。中断或未确认输入保留痕迹并进入 uncertain，明确核对已有副作用后才能继续，不能自动重放。
 
-report_task 的 done 表示本次目标已完成；若还有未确认 Input 则继续 ready。ask 保存问题并等待回答，wait 保存未来 nextAt。用户沟通与办理确认分别持久化，消息投递失败不会重跑工作。
+report_task 的 report 保存本次办理说明并更新 lastReport，不改写 summary 或 Note。done 表示本次目标已完成；若还有未确认 Input 则继续 ready。ask 保存问题并等待回答，wait 保存未来 nextAt。用户沟通与办理确认分别持久化，消息投递失败不会重跑工作。
 
 ## 上下文组织与优化
 
@@ -42,7 +44,7 @@ Task 使用本资源目录下的 [Background](../../plugins/personal/task/backgr
 ```text
 system：Task 的固定职责、执行约束和报告契约
 custom → user：Background.text()，当前业务背景 v1
-  objective：自身目标、完成条件、状态、summary 与有限 recent
+  objective：自身目标、完成条件、状态、长期 summary、有限 Note 与 lastReport
   topic：所属话题背景
   work：同一 Topic 的相关 Task / Routine 概况
 user：Input 1
@@ -58,7 +60,7 @@ assistant / tool：处理与回执
 
 业务背景是请求投影，不追加到原生 transcript，也不参与历史压缩；恢复后从 CRD 重建。
 
-常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整认识仍保存在资源中。
+summary 与 Note 的职责、工具和预算见[有界认识与近期依据](README.md#有界认识与近期依据)。常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整认识仍保存在资源中。
 
 优化重点是新输入能否接上已有进展、是否重复执行已完成动作、是否遗漏阻塞和完成条件。根据实际轨迹调整目标与状态的呈现、相关工作范围、近期证据预算和工具补查时机，比较完成质量、重复动作、上下文大小与处理耗时；恢复仍须核对不确定副作用。
 

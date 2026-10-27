@@ -66,11 +66,17 @@ Source 和 trigger 提供重新判断的机会。已有委托决定可以继续�
 
 ## 有界认识与近期依据
 
-Topic、Task、Routine、Person 共用 summary + recent：summary 保存截至当前仍有价值的整体认识，recent 保存有界的近期观察、判断、动作或结果。具体目标、委托、身份仍由各资源的结构化字段承担。
+Topic、Person、Task、Routine 共用两种独立的认识。summary 保存长期有效、低频变化的认识，不保证始终正确或完整；只有形成值得长期保留的新认识或需要修正旧认识时才更新。字数不足时，比较新旧内容的重要性、稳定性和长期价值，新内容不能仅因更新或更具体而挤掉更值得保留的旧认识。Task 的长期价值相对于该目标的生命周期，结构化目标、身份、授权和业务状态仍由各自字段承担。
 
-模型合并长期有用的认识，Schema 约束文本与近期窗口，Host 执行资源容量管理。超过窗口的 recent 可以被裁剪；summary 超预算则拒绝写入，让模型重新合并。两者都不承诺完整历史，也不要求每条旧记录都转为 summary。
+recent 保存近期事项的 Note。每条有 id、createdAt、updatedAt、text；一个事项跨多个 Input 持续更新，例如开始、完成 50%、报告完成。text 是该事项完整的当前认识，保留实际作者、必要依据和不确定性，区分报告完成与已验证完成。Note 可以在原始 Input 释放后继续承接近期上下文；事项完成不自动提升为 summary。
 
-原始事实与处理痕迹由 Input 保存，对外表达由 Output 保存，原生推理历史由 Harness 管理。Hermes 承接跨话题的通用记忆；它与当前业务事实冲突时，先核对事实。人物 profile 可以继续扩展，summary / recent 只是其中一部分。
+summarize_topic、summarize_person、summarize_task、summarize_routine 修订各自的 summary，不写 recent。upsert_note 不传 noteId 创建，传入则更新已有事项；写入需要读取目标取得的资源版本，创建重试复用工具调用身份。更新会刷新 updatedAt 并将该事项放到窗口末端，createdAt 保留。不存在或已淘汰的 noteId 拒绝更新，不隐式重建。
+
+四类资源共用 Note 结构和容量规则，但工具描述与范围由其 Agent 决定。Chief 可维护当前根及子 Topic，或显式选择已读取的 Person；Task/Routine 的目标由宿主绑定，模型不能指定其它资源。维护认识不确认 Input 办理、不完成 Work，也不授予执行权限。
+
+recent 按更新时间保留最多 40 条、合计 16000 字符；优先保留最新事项，必要时截断较旧条目的正文。summary 的存储上限为 16000 字符，Topic 另受配置的 summaryChars 约束。常驻背景只展示有界预览，省略内容通过对应读取工具查询。保留预算不是要求每轮写满窗口，临时观察也不要求改写 summary。
+
+report_task / report_routine 原子提交本次 report、业务状态和明确列出的 Input 回执，并保存 lastReport 供恢复和进展查询；它们不替换 summary、不自动追加 Note。用户沟通仍独立通过 say。Person 的人工修正直接更新同一 summary，保留用户来源；身份合并保留并归并已有 Note，不自动制造事项笔记。
 
 ## 运行与验证
 
