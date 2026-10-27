@@ -27,6 +27,15 @@ const plugin: PluginPackage = {
           return;
         }
         const probe = async () => {
+          if (operation === "capacity-wait") {
+            const result = await execution.verbs.action("wait", {});
+            if (result.state !== "success") throw new Error("Capacity probe verb failed");
+            return "resumed";
+          }
+          if (operation === "capacity-step") {
+            await new Promise(resolve => setTimeout(resolve, 50));
+            return "step completed";
+          }
           if (operation === "no-builtins") {
             const rejected: string[] = [];
             for (const kind of ["Input", "Output", "Turn", "Session", "Target", "SessionTargetBinding"]) {

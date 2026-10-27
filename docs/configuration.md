@@ -124,6 +124,17 @@ plugins:
       requirements: []
 ```
 
+## Reconcile 调度
+
+```yaml
+reconcile:
+  maxTotalConcurrency: 8
+```
+
+`maxTotalConcurrency` 是正整数，缺省为 8，限制每个 Runner 启动新 Reconcile 的全局并发；Controller 自己声明的局部阈值仍生效。配置在启动时加载，修改后重启生效。
+
+等待 verb 会释放容量，返回后直接恢复执行，允许暂时超过阈值；达到或超过阈值时不启动新的 Reconcile。同资源仍串行，外部调用预算由 Connector、Harness 各自负责。调度契约见 [Kernel](kernel.md)。
+
 ## 默认执行 Harness
 
 根级 `defaultHarness` 缺省为 `pi`，可选 `pi`、`codex`、`claude`、`dsh`。这是 Aide 的装配选择，

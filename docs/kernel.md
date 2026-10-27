@@ -48,7 +48,9 @@ Plugin / Operator 通过 ResourceClient 操作 CRD，通过 Verb 发起非 CRD �
 
 资源所有者声明能否释放，Host 执行容量限制与合格对象的淘汰排序。未完成的工作不能仅因 LRU 而被删除。事务、引用和容量的具体契约见 [Resource](plugin/resource.md)。
 
-等待 Harness 或 Connector 时释放执行容量，当前 Reconcile 的同资源串行约束仍保留。插件根据持久事实恢复，不能依赖进程内队列或异步调用栈跨重启存在。
+Controller 局部并发和 Runner 全局并发共同限制新 Reconcile 的启动。全局默认 8，由 `reconcile.maxTotalConcurrency` 配置；局部阈值由 Controller 声明。等待 verb 时释放两层容量，返回后恢复计数并直接继续，不重新排队。恢复允许暂时超限；达到或超过阈值时停止启动新执行，已有执行继续推进。同一 Controller 对同一资源的串行约束贯穿等待与恢复。
+
+该阈值不限制所有尚未结束的外部调用，也不保证超限幅度或持续时间；Connector 与 Harness 各自控制下游预算。Controller watchdog 在等待 Host verb 时暂停，返回后继续计时，不存在恢复容量的排队等待。插件根据持久事实恢复，不能依赖进程内队列或异步调用栈跨重启存在。
 
 ## 助理定位与身份边界
 
