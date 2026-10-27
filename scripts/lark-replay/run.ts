@@ -53,8 +53,8 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
     defaultHarnessConfig: { id: "default", harness: "pi" },
     // Admit captured destinations without constructing a transport or sending real messages.
     config: ConfigSchema.parse({ channels: { replay: { kind: "lark", label: "Replay only", enabled: true,
-      appId: snapshot.identity.accountId, appSecret: "replay-no-delivery" } }, connectors: { lark: { appId: snapshot.identity.accountId, userId: snapshot.identity.userId,
-      me: snapshot.meIds.map(openId => ({ appId: snapshot.identity.accountId, openId })) } },
+      appId: snapshot.identity.accountId, appSecret: "replay-no-delivery" } }, connectors: { lark: { kind: "messages", version: "v1", config: { appId: snapshot.identity.accountId, userId: snapshot.identity.userId,
+      me: snapshot.meIds.map(openId => ({ appId: snapshot.identity.accountId, openId })) } } },
       plugins: { personal: { weave: { enabled: options.weave, intervalMs: 1000 } } } }),
     createAdapter: options.createAdapter ?? ((target, ports) => {
       if (!["chief", "route", "weave"].includes(target.harness)) throw new Error(`Replay forbids ${target.harness} execution`);
