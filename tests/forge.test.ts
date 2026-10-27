@@ -15,14 +15,13 @@ describe("Forge config", () => {
       forges: {
         "github.com": {
           token: "configured-github",
-          uids: ["octocat", "42"],
-        },
+          uids: ["ignored-legacy-author"],
+          },
         "code.example.com": {
           type: "gitlab",
           api_host: "gitlab-api.example.com",
           token: "configured-gitlab",
-          uids: ["42", "owner"],
-        },
+          },
       },
     };
 
@@ -34,14 +33,12 @@ describe("Forge config", () => {
         forge: "github.com",
         provider: "github",
         host: "github.com",
-        uids: ["octocat", "42"],
         token: "environment-github",
       },
       {
         forge: "code.example.com",
         provider: "gitlab",
         host: "gitlab-api.example.com",
-        uids: ["42", "owner"],
         token: "environment-gitlab",
       },
     ]);
@@ -92,16 +89,18 @@ for (const provider of ["github", "gitlab"] as const) test(`${provider} repocli 
     return JSON.parse(JSON.stringify(value));
   });
   const reference = { repository: { forge: { name: "work" }, path: "org/repo" }, number: 7 };
-  const page = await client.forges.readPullRequests("work", { author: "me" });
+  const page = await client.forges.scanPullRequests("work", { scope: { kind: "account", author: "me" } });
   expect(page.items).toHaveLength(1); expect(page.items[0]).toMatchObject(reference);
   expect(typeof page.cursor).toBe("string");
-  expect(await client.forges.list("work", "org/repo", { state: "merged", limit: 5 })).toEqual([reference]);
-  const observed = await client.forges.get(page.items[0]!);
+  expect((await client.forges.listPullRequests("work", { scope: {kind: "repository", repository: reference.repository}, state: "merged", pageSize: 5 })).items).toEqual([reference]);
+  const observed = await client.forges.getPullRequest(page.items[0]!);
   expect(observed).toMatchObject({ ...reference, state: "merged", headSha: "head", baseSha: "base", sourceBranch: "feature", targetBranch: "main" });
   expect("id" in observed).toBe(false); expect("id" in observed.repository).toBe(false);
   expect(observed.sourceRepository).toEqual({ forge: { name: "work" }, path: provider === "github" ? "contributor/repo" : "org/repo" });
-  if (provider === "github") { expect(observed.reviewThreads).toBe("unknown"); expect(observed.reviewError).toContain("403"); }
-  expect(await client.forges.comments(reference)).toEqual([]);
+  expect(calls.some(url => url.pathname.endsWith("/graphql") || url.pathname.endsWith("/discussions"))).toBe(false);
+  if (provider === "github") await expect(client.forges.getPullRequestReview(reference)).rejects.toThrow("403");
+  else expect((await client.forges.getPullRequestReview(reference)).reviewThreadState).toBe("none");
+  expect(await client.forges.listPullRequestComments(reference)).toEqual([]);
   // Chief keeps compact tool arguments while the Connector uses the shared reference shape.
   for (const name of ["read_pull_request", "read_pull_request_comments"]) {
     const tool = chiefTools(client).find(tool => tool.name === name)!;

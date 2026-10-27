@@ -19,18 +19,6 @@ function optionalString(name: string, value: unknown): string | undefined {
   return requiredString(name, value);
 }
 
-function optionalStrings(
-  name: string,
-  value: unknown,
-): readonly string[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error(`${name} must be a non-empty string array`);
-  }
-  return Object.freeze(
-    value.map((item, index) => requiredString(`${name}[${index}]`, item)),
-  );
-}
 
 function inferredProvider(host: string): "github" | "gitlab" {
   return host === "github.com" || host.startsWith("github.")
@@ -88,17 +76,12 @@ export function loadForgeConfigs(
       `Aide forge ${forge} token`,
       config.token,
     );
-    const uids = optionalStrings(
-      `Aide forge ${forge} uids`,
-      config.uids,
-    );
     const token =
       environmentToken(configuredProvider, environment) ?? configuredToken;
     return Object.freeze({
       forge,
       provider: configuredProvider,
       host,
-      ...(uids ? { uids } : {}),
       ...(token ? { token } : {}),
     });
   });

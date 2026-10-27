@@ -61,10 +61,10 @@ const snapshot = await context.connectors.environments.workloads("dev", "app");
 
 Environment names and aliases resolve to a canonical name. Listing returns compact declarations; reading returns access coordinates, without opening kubeconfig files or connecting to the target. Unknown targets reject. The Environment / Host identity contracts come from `@compforge/harness-common`; no toolbox access lifecycle is implied.
 
-Requirements and forges expose typed list / get operations, with forge comments available separately. Forge references and query/comment types come from `@compforge/repocli`, whose Repository / PullRequest facts use `@compforge/harness-common`. `PullRequestObservation` is re-exported from repocli and extends common's serializable `PullRequestSnapshot`; it has `repository`, `number` and `state`, and excludes identity methods. Plugins use the Host Connector and do not instantiate repocli clients.
+Requirements expose typed list/get operations. Forge capabilities use explicit `listPullRequests`, `scanPullRequests`, `getPullRequest`, `getPullRequestReview` and `listPullRequestComments` methods. Keys and base snapshots come from `@compforge/harness-common`; paging, scan and review contracts come from `@compforge/repocli` 0.8.0. These are serializable facts without identity methods. Plugins use Host Connector IPC and do not instantiate credential-bearing clients. Version 0.16 replaces the old Forge get/list/readPullRequests signatures; Host and plugin consumers must migrate together. Reviews are requested independently from lifecycle facts, and list results are pages with optional coverage issues.
 
 ```ts
-const pull = await context.connectors.forges.get({
+const pull = await context.connectors.forges.getPullRequest({
   repository: { forge: { name: "github.com" }, path: "org/repo" }, number: 7,
 });
 // pull.state is open / merged / closed; no id() methods cross IPC.

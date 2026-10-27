@@ -23,10 +23,11 @@ export function createConnectorClient(invoke: <T>(request: ConnectorRequest) => 
       comments: (identity, query) => invoke({ operation: "requirements.comments", identity, ...(query ? { query } : {}) }),
     } satisfies ConnectorClient["requirements"]),
     forges: Object.freeze({
-      readPullRequests: (forge, query) => invoke({ operation: "forges.readPullRequests", forge, query }),
-      list: (forge, path, query) => invoke({ operation: "forges.list", forge, path, query }),
-      get: (identity) => invoke({ operation: "forges.get", identity }),
-      comments: (identity) => invoke({ operation: "forges.comments", identity }),
+      scanPullRequests: (forge, query) => invoke({ operation: "forges.scanPullRequests", forge, query }),
+      listPullRequests: (forge, query) => invoke({ operation: "forges.listPullRequests", forge, query }),
+      getPullRequest: (key) => invoke({ operation: "forges.getPullRequest", key }),
+      getPullRequestReview: (key) => invoke({ operation: "forges.getPullRequestReview", key }),
+      listPullRequestComments: (key) => invoke({ operation: "forges.listPullRequestComments", key }),
     } satisfies ConnectorClient["forges"]),
   } satisfies ConnectorClient);
 }
@@ -45,10 +46,11 @@ export function dispatchConnector(client: ConnectorClient, request: ConnectorReq
     case "requirements.get": return client.requirements.get(request.identity);
     case "requirements.identity": return client.requirements.identity(request.source);
     case "requirements.comments": return client.requirements.comments(request.identity, request.query);
-    case "forges.readPullRequests": return client.forges.readPullRequests(request.forge, request.query);
-    case "forges.list": return client.forges.list(request.forge, request.path, request.query);
-    case "forges.get": return client.forges.get(request.identity);
-    case "forges.comments": return client.forges.comments(request.identity);
+    case "forges.scanPullRequests": return client.forges.scanPullRequests(request.forge, request.query);
+    case "forges.listPullRequests": return client.forges.listPullRequests(request.forge, request.query);
+    case "forges.getPullRequest": return client.forges.getPullRequest(request.key);
+    case "forges.getPullRequestReview": return client.forges.getPullRequestReview(request.key);
+    case "forges.listPullRequestComments": return client.forges.listPullRequestComments(request.key);
   }
 }
 

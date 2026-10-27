@@ -1,14 +1,28 @@
-# Forge PR/MR 变化输入
+# Forge PR/MR 合并输入
 
-Forge Connector 提供 GitHub / GitLab 的只读访问，ForgeSource 按显式账号跨仓库发现 PR/MR，将变化保存为 Personal Input。Route 使用 PR 身份创建或复用 Topic，Chief 再决定静默更新认识、关联已有委托或沟通。Source 不直接创建 Work 或 Output。
+Forge Connector 提供 GitHub / GitLab 的只读访问，ForgeSource 按显式账号跨仓观察 PR/MR。
+当前自动输入聚焦已经合并的事实：Source 保存 Input，Route 按 PR 身份定位 Topic，Chief 决定更新认识、
+关联已有委托或沟通。Source 不直接创建 Work 或 Output。
 
-## 职责与公共事实
+## 职责与公共契约
 
-Repository / PullRequest 的身份与平台事实来自 `@compforge/harness-common`，GitHub / GitLab 的请求、发现分页、评论读取、错误分类及限流退避由 `@compforge/repocli` 提供。Aide 从启动配置装配这些客户端，Host 持有凭证，Runner 通过 Connector 能力访问；Personal ForgeSource 拥有账号观察策略、持久检查点与 Input 接纳。
+Repository / PullRequest 身份和基础事实来自 `@compforge/harness-common`。`@compforge/repocli` 提供
+平台请求、分页、扫描覆盖、不透明检查点和 HTTP 约束。Host 持有客户端及凭证，Runner 通过 Connector IPC
+请求能力；Personal ForgeSource 拥有观察策略、业务基线、持久接纳与调度。
 
-Connector 使用 repocli 的 `PullRequestKey`（`repository.forge.name`、`repository.path`、`number`），直接返回 repocli 的 `PullRequestObservation`，其基础字段是 common 的 `PullRequestSnapshot`：生命周期字段为 `state`，不传递 PR / Repository 的 `id()` 方法。身份方法只属于进程内对象，不能假定它们经过 IPC 或持久化后仍存在。Source 的 Topic key 保持原有目标仓库身份，fork 来源不参与分组。
+| Connector 操作 | 结果 |
+|---|---|
+| `scanPullRequests(forge, query)` | 有界批次：common snapshots、cursor、pending、complete、issues |
+| `listPullRequests(forge, query)` | 单页 common keys，nextCursor 与可选 issues；显式 account/repository scope |
+| `getPullRequest(key)` | common `PullRequestSnapshot`，不请求评审 |
+| `getPullRequestReview(key)` | 独立的评审状态、活动指纹和可用的合并条件 |
+| `listPullRequestComments(key)` | 评论及嵌套回复 |
 
-平台读取的默认单次请求期限为 10 秒、响应上限 4 MiB；这些约束由 repocli 维护。评审读取失败时保留 PR 基本事实，`reviewThreads` 为 `unknown`，`reviewError` 保存原因；限流错误继续传播并由客户端退避，不能当成没有变化。
+类型复用 common / repocli，Aide 不定义第二套平台模型，不传递依赖 id() 方法的对象。
+Chief 的 list_pull_requests 使用 pageSize / cursor，返回单页而不是静默截断的数组；
+read_pull_request_review 按需查询评审。评审失败不会撤回先前得到的生命周期事实。
+单页 continuation 当前封装平台页号，不是稳定的 last_id/keyset；扫描 cursor 则是独立的恢复检查点。
+Aide 不解析任何 cursor 内部字段。
 
 ## 配置
 
@@ -33,32 +47,68 @@ plugins:
           author: your-gitlab-username
 ```
 
-GitHub 使用 GITHUB_TOKEN / GH_TOKEN，GitLab 使用 GITLAB_TOKEN；也可沿用 Connector 的 token 配置。凭证与 author 独立：author 是平台用户名，不是显示名，也不从 token 身份推断。只能发现凭证可见的仓库；Source 不要求仓库清单。Connector 的旧 uids 筛选仍用于按仓库 list，账号 discovery 始终使用 Source 的显式 author。
+GitHub 使用 GITHUB_TOKEN / GH_TOKEN，GitLab 使用 GITLAB_TOKEN；也可在 Connector 配置 token。
+凭证不决定作者，author 必须是显式平台 username。旧 Connector uids 不再参与查询，加载已有共享配置时忽略它。
+Source id 与 forge/author 组合分别唯一；引用未知 Forge 时启动拒绝。省略或清空 forges 不启动观察，
+删除配置并重启后遗留 Source 不再执行。配置启动时解析，修改后重启生效。
+本轮继续账号扫描，不引入仓库清单缓存或仓库枚举回退；不可用的账号端点保留覆盖错误。
 
-每个 Source id 和 forge/author 组合必须唯一，引用不存在的 Forge 在启动时拒绝。forges 省略或为空数组时不启动观察；删除配置并重启后，遗留 Source 不再执行。配置启动时解析一次，修改后重启生效。
+## 观察与 Input 接纳
 
-## 发现、变化和恢复
+Source 调用 `scanPullRequests({scope: {kind: "account", author}, initialSince, cursor, tracked})`，
+tracked 包含已有 open 对象及升级时保留的待补查 keys。平台时间窗、分页、重叠和失败对象重试全部属于 repocli。
+初始历史回看由 initialLookbackMs 决定；repocli 另枚举 open 清单。
 
-Source 通过 `readPullRequests` 按 author 读取通用 PullRequest 事实，并将已有 open 对象的 Key 作为 tracked 传入。
-首次历史范围由 initialLookbackMs 决定；初始发现、平台时间窗、分页覆盖检查、增量重叠、已知对象复查和读取恢复都由 repocli 负责。
-Aide 不解释页号、平台窗口或 cursor 内容。发现失败与已知对象的读取结果可以在同一批返回；成功事实仍接纳，错误记录在 Source status 和日志中。
-已结束对象的业务基线保留 initialLookbackMs，后续重新打开由通用读取结果接回。
+Source status 分开保存：
 
-生命周期 state=merged 表示已经合并；conflictState 表示代码冲突，mergeReadiness 表示平台合并条件。
-无冲突不能推出 ready，ready 不能推出 merged。Source 按这些独立的通用事实判断变化，不包含 GitHub / GitLab 状态映射。
+- tracked：common snapshot 与基础事实指纹，代表已消费基线；open 持续跟踪，terminal 基线保留一个回看周期。
+- cursor / scanPending / scanComplete / issues：repocli 扫描进度及覆盖状态。
+- batch：冻结的结果、逐项 offset 与本批 inputSince，尚未整体提交扫描检查点。
+- pending / sequence：已冻结 Input 计划与发生序号，保证写入中断后恢复同一个 Input。
 
-Input 包含当前快照、前一快照和来源身份，变化覆盖生命周期、head revision、标题、评审线程及合并条件。observedAt / updatedAt、目标分支 base revision、来源分支等补充元数据或诊断措辞的单独变化不会触发 Input。完整 diff、提交明细和普通评论正文没有自动采集；现有按需评论工具仍可使用，评审线程信息不可用时明确为 unknown。
+open、closed、revision、标题和合并条件变化只更新基线。已有对象从非 merged 变为 merged 时生成
+`observation.kind=forge.merged` 的 Input；首次发现 merged，只有明确的 mergedAt 落在接纳回看范围内才补录。
+缺失合并时间的未知历史对象只建立基线，之后已跟踪 open→merged 不要求平台提供 mergedAt。
+inputSince 随保留期限单调前进，避免已过期基线对应的旧合并在历史重扫时再次补录。
+冻结 batch 保存自己的 inputSince，恢复时使用冻结值，不因长时间中断而过滤未消费结果。
 
-每次变化先冻结待发布计划，再写 Input，最后推进基线；pending Input 在恢复完成前受引用保护。重启恢复同一计划，已提交变化不重复生成 Input；加载旧 identity/lifecycle/mergeability 检查点时转换基线，旧 unfinished scan 从原历史起点重新读取并保留已缓存引用，保留发生序号、Topic key 与冻结的 pending Input 正文和 id；A→B→A→B 是四次观察，使用独立发生序号。日志记录 Source、PR 身份、Input id、终态及读取失败，便于追踪输入来源。
+评审不自动轮询、不进入基础事实指纹。conflictState、mergeReadiness、state=merged 互不替代。
+Input 保存当前快照、已有的前一快照和 authorScope；Topic key 沿用 forge + 目标仓 path + number。
+同号不同仓库保持独立，fork 或追加提交不改变 Topic 身份。relation=observed 不表示 Me 发言或授予修改权限。
 
-Topic key 由 forge + 目标仓 path + PR number/MR iid 组成；fork、追加提交和 force-push 不改变该身份。同号但不同仓库的 PR 不合并。Input.relation 为 observed，authorScope 只描述发现范围，不把合并动作或他人评审归为 Me 的发言，也不授予修改或合并权限。
+每次合并先冻结 Input 计划，再持久写 Input，最后推进基线与 batch offset；全部 items 消费后才提交 cursor。
+pending Input 在完成前受资源引用保护。重启先恢复冻结计划和 batch，不重新读取覆盖未消费事实。
+已写 Input 的重放使用同一 name；继续观察同一个 merged 的元数据变化不会再生成合并 Input。
 
-## 覆盖与验证
+## 覆盖、调度与恢复
 
-轮询记录实际观察到的状态，不保证捕获两次轮询之间的每个中间状态。repocli 返回有界批次及 pending，Source 决定继续读取还是等待下一次观察间隔。
-平台结果集移动、窗口容量和搜索索引的覆盖限制由 repocli 负责报告；错误不表示没有变化。
+部分失败的批次仍消费成功 items，原样保存结构化 issues。列表缺席、404、鉴权失败或覆盖缺口均不表示合并。
+scanPending 与 scanComplete 独立：pending=true 表示还有工作，complete=false 表示有工作或尚存覆盖缺口。
+404 不阻止下一批健康对象；pending=false 即使不完整也回到正常轮询。认证、传输、容量错误按正常间隔退避，
+rate_limit 额外尊重 retryAfterMs。Input 持久化等整次执行异常使用 status.error，不能把部分覆盖错误伪装成无变化。
+Source 日志记录 watchId、Forge、PR key、Input id、pending/complete 和 issue stage/kind/window。
+不同 Source 独立调度，一个 Forge 的失败不阻止另一个 Forge 输入。
 
-每批结果先冻结到 Source status；逐个 Input 可靠接纳完成后才保存该批 cursor。重启先恢复冻结批次，不重新读取覆盖它。
-Source 的 pending Input、批次进度和变化基线属于业务接纳状态；cursor 的结构、版本、查询窗口与平台页码属于 repocli。
+repocli 的每请求超时和响应上限沿用库默认值。扫描的重试、发现与 tracked 阶段各有 20 秒预算，
+Source 的 Connector 调用期限为 90 秒，给三个阶段及 IPC 留出余量。
+轮询只提供当时可见的快照，不是完整事件日志；删除、失权、搜索索引延迟或不可用端点造成的缺口仍需处理。
 
-tests/forge-source.test.ts 覆盖 merged 离开发现列表、发现失败时复查、Input 写入后中断恢复、旧检查点升级、重复轮询、反复 revision 变化、跨仓同号、冻结批次与不透明游标提交，以及 repocli → Host Connector → 真实 Runner IPC → Input → Route → Chief 的处理回执。tests/forge.test.ts 覆盖 Aide 配置、两平台客户端装配、公共事实序列化和 Chief 查询参数适配。平台分页移动、窗口覆盖不足、映射及 HTTP 细节的回归归 repocli。平台使用替身；真实账号可见范围、网络与线上部署需另外验收。
+## 从旧版本升级
+
+Aide Source schemaVersion=2 与 repocli cursor 版本是不同契约。升级一次性执行：
+
+1. 将 identity/lifecycle/mergeability 基线转换为 common 字段，移除历史评审附加字段，重新计算基础指纹。
+2. 保留 Source UID、Topic key、sequence 和 pending Input 的 name、正文、observation；只转换 pending 内部基线。
+3. 保留旧 batch 的 items 和消费 offset，先消费完冻结事实；旧 batch 提议的 cursor 不再提交。
+4. 废弃 v1 cursor，以保留的初始回看起点和 seed/open keys 启动新扫描；不读取私有 cursor 字段。
+5. 业务基线与 inputSince 防止旧历史被当作新变化。消费方部署必须与插件公共契约一同升级。
+
+repocli 新 cursor 还绑定连接凭据；更换 token 后旧 cursor 会被拒绝。需要重置扫描进度时保留业务基线、
+pending、batch 和 sequence，不能通过清空整个 Source 来解决游标不兼容。
+
+## 验证
+
+`tests/forge-source.test.ts` 覆盖合并接纳、部分失败、冻结 Input/batch、旧状态升级、历史去重、限流调度，
+以及真实 Runner IPC→Input→Route→Chief 的处理回执和跨 Forge 故障隔离。
+`tests/forge.test.ts` 覆盖两平台客户端装配、公共事实序列化及独立评审访问；平台分页、映射与 HTTP 细节由 repocli 验证。
+上述测试使用平台替身；真实账号可见范围和部署效果需另行验收。
