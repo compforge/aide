@@ -76,3 +76,11 @@ ssh -N -L 7433:127.0.0.1:7433 user@your-server
 HTTP 与 Personal 装配日志进入标准输出；应用根目录的 `runtime.log` 保存插件和调度日志，Runner 激活日志记录 pid。应用根目录的 `harness-runtime.log` / `harness-native.jsonl` 保存有界执行诊断与原生协议诊断，不参与恢复；原生会话引用位于资源的 `status.agent`，历史由 Harness 自己保存；Connector 调用事实位于 `connectors/calls.jsonl`。未使用 Harness 的新实例不会启动执行后端。检查问题时先记录版本、revision、topicId、Work id 与 invocationId，再核对外部操作是否已经发生。
 
 Pi 和 Chief 可分别在 Aide 配置中声明模型并引用凭证环境变量，也可继承 Pi 原生配置。连接器设置见 [Connector 与 Source](connector/README.md)，Lark 机器人设置见 [Lark](channel/lark.md)。通过 `/health` 不能证明这些依赖可用。
+
+## Controller 超时诊断
+
+Runner 的 Reconcile 日志自动携带 `executionId`；资源与 Printer IPC 使用同一标识关联。`Plugin Runner Controller execution timed out` 在终止进程前记录 Controller、资源身份、执行总耗时、当前 watchdog 计时、未完成的 Host 操作（最多 8 项）、最近完成的操作，以及各操作的次数和累计/最大耗时。
+
+`Plugin Runner Host operation slow` 记录超过 1 秒的非 verb Host 操作、结果数量和耗时；verb 沿用已有起止日志。`Plugin Runner Host round trip slow` 在 Runner 记录超过 1 秒的非 verb RPC 往返时间，并附 Host 回复前的处理耗时与差额。差额包含请求/回复传输、序列化和调度，不能单独等同网络延迟。Host 操作日志耗时从收到请求到回复发出，不包含请求到达 Host 之前的传输等待；并行操作的累计耗时不能当作执行墙钟时间。若未完成操作为空，可结合最近完成操作、Source 阶段日志判断 Runner 内部处理、IPC 传输或事件循环阻塞的可能性，不能仅据此断言 CPU 卡死。
+
+Repository Source 记录清单状态、交接批次与当前子观察器；PullRequest Source 记录策略检查、扫描、冻结批次、消费进度与游标提交。按同一个 `executionId` 查询即可区分外部调用、资源访问和批处理阶段。诊断不输出资源正文、patch、配置或不透明游标，也不改变超时和恢复行为。

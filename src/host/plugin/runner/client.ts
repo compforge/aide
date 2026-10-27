@@ -1,3 +1,4 @@
+import { hostOperation, type HostOperation } from "../../../protocol/ipc.ts";
 import type { RuntimeScope } from "../../../protocol/runtime.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { dispatchConnector, emptyConnectors } from "../../../connector-client.ts";
@@ -39,6 +40,18 @@ interface ExecutionCall {
   blockers: number;
 }
 
+interface ControllerExecution {
+  scope: ExecutionScope;
+  startedAt: number;
+  armedAt: number;
+  timer?: ReturnType<typeof setTimeout>;
+  blockers: number;
+  pending: Map<number, { operation: HostOperation; startedAt: number }>;
+  completed: number;
+  operations: Record<string, { count: number; totalMs: number; maxMs: number }>;
+  lastCompleted?: { operation: HostOperation; elapsedMs: number; finishedAt: number };
+}
+
 export interface PluginRunnerCallbacks {
   readonly controllerRequest?: (request: Extract<HostRequest, { method: "controller.begin" | "controller.finish" | "controller.schedule" }>) => Promise<unknown>;
   readonly connectors?: ConnectorClient;
@@ -72,7 +85,7 @@ export interface PluginRunnerClientOptions extends PluginRunnerCallbacks {
  * @rule Restore the host async causal scope by executionId before handling a Runner verb callback.
  */
 export class PluginRunnerClient {
-  private readonly controllerTimers = new Map<string, { timer?: ReturnType<typeof setTimeout>; blockers: number }>();
+  private readonly controllerTimers = new Map<string, ControllerExecution>();
 
   private readonly child: Bun.Subprocess<"ignore", "pipe", "pipe">;
   private readonly callbacks: PluginRunnerCallbacks;
@@ -300,6 +313,13 @@ export class PluginRunnerClient {
   }
 
   private async handleChildCall(call: ChildCall): Promise<void> {
+    const executionId = call.request.method === "verb.invoke" ? call.request.context.executionId
+      : call.request.method === "controller.finish" ? call.request.scope.executionId : call.executionId;
+    const diagnostic = executionId ? this.controllerTimers.get(executionId) : undefined;
+    const operation = hostOperation(call.request), startedAt = performance.now();
+    diagnostic?.pending.set(call.callId, { operation, startedAt });
+    let resultCount: number | undefined;
+    let outcome = "success";
     const resumeTimeout = call.request.method === "verb.invoke"
       ? this.pauseControllerTimeout(call.request.context.executionId) ?? this.pauseExecutionTimeout(call.request.context.executionId)
       : undefined;
@@ -314,22 +334,44 @@ export class PluginRunnerClient {
           () => this.handleHostRequest(call.request),
         )
         : this.handleHostRequest(call.request));
+      if (Array.isArray(value)) resultCount = value.length;
       this.replyToChild({
         kind: "parent-reply",
         callId: call.callId,
+        hostElapsedMs: Math.round(performance.now() - startedAt),
         ok: true,
         value,
       } satisfies ParentReply);
     } catch (error) {
+      outcome = "failure";
       this.replyToChild({
         kind: "parent-reply",
         callId: call.callId,
+        hostElapsedMs: Math.round(performance.now() - startedAt),
         ok: false,
         error: serializedError(error),
       } satisfies ParentReply);
     } finally {
+      const elapsedMs = Math.round(performance.now() - startedAt);
+      if (diagnostic) {
+        diagnostic.pending.delete(call.callId);
+        diagnostic.completed++;
+        const stats = diagnostic.operations[operation.method] ??= { count: 0, totalMs: 0, maxMs: 0 };
+        stats.count++; stats.totalMs += elapsedMs; stats.maxMs = Math.max(stats.maxMs, elapsedMs);
+        diagnostic.lastCompleted = { operation, elapsedMs, finishedAt: performance.now() };
+      }
+      if (call.request.method !== "verb.invoke" && elapsedMs >= 1000) {
+        this.diagnosticLog("warn", "Plugin Runner Host operation slow", {
+          executionId: executionId ?? null, ...operation, elapsedMs, outcome, resultCount: resultCount ?? null,
+        });
+      }
       resumeTimeout?.();
     }
+  }
+
+  private diagnosticLog(level: "warn" | "error", message: string, attributes: NonNullable<PluginLogRecord["context"]>["attributes"]): void {
+    try { this.callbacks.onLog({ level, message, context: { component: "runner", attributes } }); }
+    catch { /* Diagnostics cannot change execution or failure semantics. */ }
   }
 
   private replyToChild(reply: ParentReply): void {
@@ -357,7 +399,7 @@ export class PluginRunnerClient {
           const result = await this.callbacks.controllerRequest(request);
           if (request.method === "controller.begin" && result) {
             const { scope } = result as { scope: ExecutionScope };
-            this.controllerTimers.set(scope.executionId, { blockers: 0 });
+            this.controllerTimers.set(scope.executionId, { scope, startedAt: performance.now(), armedAt: performance.now(), blockers: 0, pending: new Map(), completed: 0, operations: {} });
             this.armControllerTimeout(scope.executionId);
           }
           return result;
@@ -474,10 +516,29 @@ export class PluginRunnerClient {
     if (execution?.timer) clearTimeout(execution.timer);
     this.controllerTimers.delete(id);
   }
+  /** @spec Capture bounded, payload-free Host operation evidence before terminating a timed-out Controller.
+   * @case tests/runner-diagnostics.test.ts
+   * @link docs/deployment.md#controller-超时诊断
+   */
   private armControllerTimeout(id: string): void {
     const execution = this.controllerTimers.get(id);
     if (!execution || execution.blockers || this.closing || this.failed) return;
-    execution.timer = setTimeout(() => this.fail(new Error(`Plugin Runner Controller execution ${id} timed out after ${this.requestTimeoutMs}ms`), true), this.requestTimeoutMs);
+    execution.armedAt = performance.now();
+    execution.timer = setTimeout(() => {
+      const now = performance.now();
+      this.diagnosticLog("error", "Plugin Runner Controller execution timed out", {
+        executionId: id, controllerName: execution.scope.controllerName ?? "default",
+        resourceKind: execution.scope.resourceRef?.kind ?? null, resourceName: execution.scope.resourceRef?.name ?? null,
+        resourceUid: execution.scope.resourceRef?.uid ?? null,
+        elapsedMs: Math.round(now - execution.startedAt), watchdogElapsedMs: Math.round(now - execution.armedAt),
+        pendingHostCallCount: execution.pending.size,
+        pendingHostCalls: [...execution.pending.values()].slice(0, 8).map(call => ({ ...call.operation, elapsedMs: Math.round(now - call.startedAt) })),
+        completedHostCalls: execution.completed, operations: execution.operations,
+        lastCompletedHostCall: execution.lastCompleted ? { ...execution.lastCompleted.operation, elapsedMs: execution.lastCompleted.elapsedMs,
+          finishedAgoMs: Math.round(now - execution.lastCompleted.finishedAt) } : null,
+      });
+      this.fail(new Error(`Plugin Runner Controller execution ${id} timed out after ${this.requestTimeoutMs}ms`), true);
+    }, this.requestTimeoutMs);
     execution.timer.unref?.();
   }
   private pauseControllerTimeout(id: string): (() => void) | undefined {

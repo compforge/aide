@@ -1,3 +1,4 @@
+import { runnerExecution } from "./execution.ts";
 import { deepFreeze } from "../reconcile/snapshot.ts";
 import { validateSources } from "../reconcile/source.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -119,23 +120,28 @@ export class Controllers {
     const admission = await this.callHost<ReconcileAdmission | undefined>({ method: "controller.begin", key });
     if (!admission) { this.due.schedule(key, null); return; }
     const { scope, snapshot, resource } = deepFreeze(admission);
-    this.log.info("Controller execution started", { attributes: { executionId: scope.executionId, resourceKind: resource.kind, resourceId: resource.metadata.name } });
-    try {
-      const context = createReconcileContext(snapshot, scope, (context, request) =>
-        lease.suspend(this.callHost<VerbResponse>({ method: "verb.invoke", context, request })));
-      const result = await entry.definition.reconcile(context, resource);
-      const after = result?.requeueAfterMs;
-      if (after !== undefined && (!Number.isSafeInteger(after) || after < 1)) throw new Error("requeueAfterMs must be a positive integer");
-      const finished = await this.callHost<{ deleted: boolean; nextAt?: string }>({ method: "controller.finish", scope, resource, ...(after === undefined ? {} : { requeueAfterMs: after }) });
-      this.log.info("Controller execution finished", { attributes: { executionId: scope.executionId, resourceKind: resource.kind, resourceId: resource.metadata.name } });
-      entry.attempts.delete(reconcileKeyId(key));
-      if (finished.deleted) entry.queue!.forgetPending(key);
-      if (!entry.abort.signal.aborted) this.due.schedule(key, finished.nextAt ? new Date(finished.nextAt) : null);
-    } catch (error) {
-      await this.callHost({ method: "controller.finish", scope, resource, failed: String(error) }).catch(() => {});
-      throw error;
-    }
+    await runnerExecution.run(scope.executionId, async () => {
+      const startedAt = performance.now();
+      const attributes = { executionId: scope.executionId, controllerName: scope.controllerName ?? "default", resourceKind: resource.kind, resourceId: resource.metadata.name, resourceUid: resource.metadata.uid };
+      this.log.info("Controller execution started", { attributes });
+      try {
+        const context = createReconcileContext(snapshot, scope, (context, request) =>
+          lease.suspend(this.callHost<VerbResponse>({ method: "verb.invoke", context, request })));
+        const result = await entry.definition.reconcile(context, resource);
+        const after = result?.requeueAfterMs;
+        if (after !== undefined && (!Number.isSafeInteger(after) || after < 1)) throw new Error("requeueAfterMs must be a positive integer");
+        const finished = await this.callHost<{ deleted: boolean; nextAt?: string }>({ method: "controller.finish", scope, resource, ...(after === undefined ? {} : { requeueAfterMs: after }) });
+        this.log.info("Controller execution finished", { attributes: { ...attributes, elapsedMs: Math.round(performance.now() - startedAt) } });
+        entry.attempts.delete(reconcileKeyId(key));
+        if (finished.deleted) entry.queue!.forgetPending(key);
+        if (!entry.abort.signal.aborted) this.due.schedule(key, finished.nextAt ? new Date(finished.nextAt) : null);
+      } catch (error) {
+        await this.callHost({ method: "controller.finish", scope, resource, failed: String(error) }).catch(() => {});
+        throw error;
+      }
+    });
   }
+
   private background(promise: Promise<unknown>): void {
     this.pending.add(promise);
     void promise.finally(() => this.pending.delete(promise)).catch(() => {});

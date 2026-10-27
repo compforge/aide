@@ -33,20 +33,30 @@ class RepositoryObservation {
     const desired = (this.resource.status.snapshot?.value ?? []).flatMap(repo => policies.map(w => pullRequestSpec(w, this.resource, repo)));
     let offset = this.resource.status.handoff?.policyKey === policyKey ? this.resource.status.handoff.offset : 0;
     const end = Math.min(offset + HANDOFF_BATCH_SIZE, desired.length);
+    const startedAt = performance.now();
+    this.context.logger.info("Repository handoff batch started", { attributes: {
+      watchId: this.resource.spec.id, offset, end, total: desired.length } });
     while (offset < end) {
       const spec = desired[offset]!;
       const name = pullRequestSourceName(spec);
+      this.context.logger.info("Repository handoff child started", { attributes: {
+        watchId: this.resource.spec.id, offset, end, path: spec.repository!.path, childName: name } });
       if (await configureSource(this.context.resources, PULL_REQUEST_SOURCE_TYPE, name, spec, this.resource.metadata.namespace)) {
         this.context.logger.info("Repository discovered; PullRequest Source created", { attributes: { repositorySource: this.resource.spec.id, watchId: spec.id, forge: spec.forge, path: spec.repository!.path } });
       }
       offset++;
       await this.save({ handoff: { offset, policyKey } });
     }
+    this.context.logger.info("Repository handoff batch finished", { attributes: {
+      watchId: this.resource.spec.id, offset, total: desired.length, elapsedMs: Math.round(performance.now() - startedAt) } });
     if (offset < desired.length) return false;
     await this.save({ handoff: null });
     return true;
   }
   async run(): Promise<number> {
+    this.context.logger.info("Repository observation started", { attributes: { watchId: this.resource.spec.id, forge: this.resource.spec.forge,
+      cachedRepositories: this.resource.status.snapshot?.value.length ?? 0, handoffOffset: this.resource.status.handoff?.offset ?? null,
+      refreshPending: Boolean(this.resource.status.refresh) } });
     if (this.resource.status.retiredAt) await this.save({ retiredAt: null });
     const handedOff = Boolean(this.resource.status.handoff);
     if (handedOff && !await this.handoff()) return 1000;
