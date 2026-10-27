@@ -131,9 +131,23 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
       await this.save({ scans: [...this.scans.filter((item) => item.kind !== kind), scan] });
     }
     const window = scan.window!;
-    const page = await this.connectors.messages.search({ start: window.start, end: window.end,
-      ...(window.token ? { pageToken: window.token } : {}), limit: 10,
-      chatType: kind === "direct" ? "p2p" : "group", ...(kind === "sent" ? { senderIds: this.watch.personIds } : {}), ...(kind === "mention" && this.watch.personIds.length === 1 && this.watch.personIds.includes(this.watch.userId) ? { atMe: true } : {}) });
+    let page: MessagePage;
+    try {
+      page = await this.connectors.messages.search({ start: window.start, end: window.end,
+        ...(window.token ? { pageToken: window.token } : {}), limit: 10,
+        chatType: kind === "direct" ? "p2p" : "group", ...(kind === "sent" ? { senderIds: this.watch.personIds } : {}), ...(kind === "mention" && this.watch.personIds.length === 1 && this.watch.personIds.includes(this.watch.userId) ? { atMe: true } : {}) });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (!window.token || !/Lark read failed \(api\/(?:[^/()]+\/)?1020\)/.test(detail)) throw error;
+      // @spec Lark's rejected continuation restarts only the fixed window; its watermark and accepted Inputs remain unchanged.
+      // @case tests/message-source.test.ts
+      // @link docs/connector/lark-messages.md
+      await this.save({ scans: this.scans.map(item => item.kind === kind
+        ? { ...item, window: { start: window.start, end: window.end } } : item) });
+      this.context.logger.warn("Lark discovery cursor expired; fixed window will restart", { attributes: {
+        kind, start: window.start, end: window.end, code: 1020 } });
+      return;
+    }
     const pending = [...this.pending]; const ids: string[] = [];
     for (const message of page.messages) {
       if (message.deleted || message.sender.type !== "user" ||
