@@ -1,67 +1,75 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { personPage } from "../src/web/persons/pagination.ts";
+import { test, type TestContext } from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ResourceStorage } from "../src/host/resource/storage.ts";
+import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
+import { PersonDefinition } from "../plugins/personal/person/definition.ts";
+import { PERSON_TYPE, LOCAL_ME } from "../plugins/personal/person/model.ts";
+import { browsePersons } from "../plugins/personal/person/browse.ts";
 
-function person(id: string, understanding = "", name = id) {
-  return { metadata: { name: id }, spec: { name }, status: { summary: understanding } };
+const marks = { identities: [LOCAL_ME] };
+function setup(t: TestContext) {
+  const home = mkdtempSync(join(tmpdir(), "aide-person-list-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const storage = ResourceStorage.open(home); storage.register("personal", [PersonDefinition]);
+  const store = new PluginResourceStore({ home, pluginInstanceId: "personal" });
+  return { storage, store, create(id: string, summary = "", name = id, me = false) {
+    return store.create({ type: PERSON_TYPE, name: id, spec: { name, identities: me ? [LOCAL_ME] : [] },
+      status: { summary, recent: [], updatedAt: new Date().toISOString(), updatedBy: "user" } });
+  } };
 }
 
-test("Person pages put understanding first and preserve order within both groups without mutating the directory", () => {
-  const items = Array.from({ length: 23 }, (_, index) => person(String(index), index % 3 === 0 ? "Known" : ""));
-  const original = [...items];
-  const pages = [1, 2, 3].map((page) => personPage(items, "", page, null));
-  assert.deepEqual(pages.map((page) => page.items.length), [10, 10, 3]);
-  assert.ok(pages.every((page) => page.pages === 3 && page.total === 23));
-  assert.deepEqual(pages.flatMap((page) => page.items), [...items.filter((p) => p.status.summary), ...items.filter((p) => !p.status.summary)]);
-  assert.deepEqual(items, original);
-  assert.deepEqual(personPage([person("blank", " \n "), person("known", "Text")], "", 1, null).items.map((p) => p.metadata.name), ["known", "blank"]);
+/** @case Search and understanding-first ordering apply before SQL paging; Me stays outside totals and page quotas. */
+test("Person SQL pages are complete and understanding-first, with explicit Me pinned on every matching page", t => {
+  const f = setup(t);
+  const people = Array.from({ length: 23 }, (_, i) => f.create(`person-${String(i).padStart(2, "0")}`, i % 3 === 0 ? "Known" : " \n\t ", `Alice ${i}`));
+  f.create("me", "", "Alice Me", true);
+  const pages = [1, 2, 3].map(page => browsePersons(f.storage, marks, { page, pageSize: 10 }));
+  assert.deepEqual(pages.map(p => p.items.length), [10, 10, 3]);
+  assert.ok(pages.every(p => p.total === 23 && p.pinned[0]!.id === "me" && p.pages === 3));
+  const expected = [...people.filter(p => p.status.summary.trim()), ...people.filter(p => !p.status.summary.trim())];
+  assert.deepEqual(pages.flatMap(p => p.items.map(i => i.id)), expected.map(p => p.metadata.name));
+  assert.equal(browsePersons(f.storage, marks, { q: "ALICE" }).total, 23);
+  const one = browsePersons(f.storage, marks, { q: "Alice 22" });
+  assert.equal(one.total, 1); assert.equal(one.pinned.length, 0); assert.equal(one.items[0]!.id, "person-22");
+  assert.equal(browsePersons(f.storage, { identities: [] }).total, 24, "Names never determine Me");
+  assert.equal(browsePersons(f.storage, marks, { q: "nobody", page: 99 }).page, 1);
+  assert.equal(browsePersons(f.storage, marks, { q: "' OR 1=1 --" }).total, 0);
 });
 
-test("Person search filters before pagination and orders matching people by understanding", () => {
-  const items = [person("other", "Known", "Other"), ...Array.from({ length: 11 }, (_, i) => person(String(i), i === 10 ? "Known" : "", `Alice ${i}`))];
-  const first = personPage(items, " ALICE ", 1, null);
-  assert.equal(first.total, 11);
-  assert.equal(first.pages, 2);
-  assert.equal(first.items[0]?.metadata.name, "10");
-  assert.deepEqual(personPage(items, "alice", 2, null).items.map((p) => p.metadata.name), ["9"]);
-  assert.deepEqual(personPage(items, "nobody", 4, null), { page: 1, pages: 1, total: 0, items: [] });
+test("Person SQL selection follows reordered profiles while explicit page requests stay fixed", t => {
+  const f = setup(t);
+  const people = Array.from({ length: 21 }, (_, i) => f.create(`person-${String(i).padStart(2, "0")}`));
+  const selected = people[20]!;
+  assert.equal(browsePersons(f.storage, marks, { selectedId: selected.metadata.name, pageSize: 10 }).page, 3);
+  f.store.patchStatus(PERSON_TYPE, selected.metadata.name, { summary: "Now known" });
+  assert.equal(browsePersons(f.storage, marks, { selectedId: selected.metadata.name, pageSize: 10 }).page, 1);
+  assert.equal(browsePersons(f.storage, marks, { selectedId: selected.metadata.name, pageSize: 10, page: 2 }).page, 2);
+  f.store.requestDeletion(PERSON_TYPE, selected.metadata.name);
+  assert.equal(browsePersons(f.storage, marks, { page: 3, pageSize: 10 }).page, 2);
 });
 
-test("Person pagination follows the initial selection while explicit browsing retains its page", () => {
-  const items = Array.from({ length: 21 }, (_, i) => person(String(i)));
-  assert.equal(personPage(items, "", null, "20").page, 3);
-  assert.equal(personPage(items, "", 2, "20").page, 2);
-  const profiled = items.map((p) => p.metadata.name === "20" ? person("20", "New understanding") : p);
-  assert.equal(personPage(profiled, "", null, "20").page, 1);
-  assert.equal(personPage(profiled, "", 2, "20").page, 2);
-  assert.equal(personPage(items.slice(0, 10), "", 3, null).page, 1);
-  assert.deepEqual(personPage([], "", null, null), { page: 1, pages: 1, total: 0, items: [] });
+test("Exact-name merge candidates span all pages and exclude only the selected UID", t => {
+  const f = setup(t);
+  const people = Array.from({ length: 24 }, (_, i) => f.create(`person-${String(i).padStart(2, "0")}`, "", "Same"));
+  f.create("different", "", "Same prefix");
+  const selected = people[23]!;
+  const pages = [1, 2, 3].map(page => browsePersons(f.storage, marks, { page, pageSize: 10, name: "Same", excludeUid: selected.metadata.uid }));
+  assert.ok(pages.every(p => p.total === 23));
+  assert.deepEqual(new Set(pages.flatMap(p => p.items.map(i => i.uid))), new Set(people.slice(0, 23).map(p => p.metadata.uid)));
 });
 
-test("Me stays first on every page outside the ordinary quota, even without understanding", () => {
-  const ordinary = Array.from({ length: 21 }, (_, index) => person(String(index), index % 3 === 0 ? "Known" : ""));
-  const me = { ...person("me"), isMe: true };
-  const items = [...ordinary.slice(0, 12), me, ...ordinary.slice(12)];
-  const pages = [1, 2, 3].map((page) => personPage(items, "", page, null));
-  assert.deepEqual(pages.map((page) => page.items.length), [11, 11, 2]);
-  assert.ok(pages.every((page) => page.items[0] === me && page.pages === 3 && page.total === 22));
-  assert.deepEqual(pages.flatMap((page) => page.items.slice(1)), [
-    ...ordinary.filter((p) => p.status.summary), ...ordinary.filter((p) => !p.status.summary),
-  ]);
-  assert.equal(personPage(items, "", null, me.metadata.name).page, 1);
-  assert.equal(personPage(items, "", 2, me.metadata.name).page, 2);
-  assert.deepEqual(personPage([me], "", 8, null), { page: 1, pages: 1, total: 1, items: [me] });
-});
-
-test("Me pinning respects search and adjusts pages when the identity mark changes", () => {
-  const ordinary = Array.from({ length: 10 }, (_, index) => person(String(index), "", `Alice ${index}`));
-  const me = { ...person("me", "", "Alice Me"), isMe: true };
-  const items = [...ordinary, me];
-  assert.equal(personPage(items, "ALICE", 2, null).page, 1, "Me must not create an extra page");
-  assert.equal(personPage(items, "ALICE", 1, null).items[0], me);
-  assert.deepEqual(personPage(items, "Alice 9", 1, null).items, [ordinary[9]]);
-  assert.deepEqual(personPage(items, "nobody", 2, null), { page: 1, pages: 1, total: 0, items: [] });
-  const unmarked = items.map((p) => ({ ...p, isMe: false }));
-  assert.equal(personPage(unmarked, "", 2, null).items[0]?.metadata.name, "me");
-  assert.equal(personPage(unmarked, "", 2, null).pages, 2);
+test("Person lists return bounded summaries, exclude foreign scopes and do not refresh retention access", t => {
+  const f = setup(t);
+  f.create("person", "s".repeat(2000));
+  f.storage.register("foreign", [PersonDefinition]);
+  new PluginResourceStore({ home: f.storage.home, pluginInstanceId: "foreign" }).create({ type: PERSON_TYPE, name: "foreign",
+    spec: { name: "Other", identities: [] }, status: { summary: "", recent: [], updatedAt: new Date().toISOString(), updatedBy: "user" } });
+  const before = f.storage.db.prepare("SELECT key, accessed FROM resources ORDER BY key").all();
+  const result = browsePersons(f.storage, marks);
+  assert.equal(result.total, 1); assert.equal(result.items[0]!.preview.length, 80);
+  assert.ok(!("identities" in result.items[0]!)); assert.ok(!("status" in result.items[0]!));
+  assert.deepEqual(f.storage.db.prepare("SELECT key, accessed FROM resources ORDER BY key").all(), before);
 });

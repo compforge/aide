@@ -1,5 +1,11 @@
 @import '../shared/style.css';
-main { grid-template-columns: 230px minmax(0, 1fr); }
+main { grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+#topic-filters { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 0; padding: 16px; border-bottom: 1px solid #d8dfd5; }
+#topic-filters label { display: flex; flex: 1 1 260px; min-width: 0; align-items: center; gap: 10px; font-size: 13px; }
+#topic-filters label > span { flex: none; white-space: nowrap; }
+#topic-filters input { flex: 1; width: 0; min-width: 0; border: 1px solid #c9d5ca; border-radius: 8px; padding: 8px; background: white; color: inherit; font: inherit; }
+.topic-filter-actions { display: flex; gap: 10px; }
+#topic-filters button { padding: 8px 12px; font-size: 13px; }
 .topic { min-width: 0; padding: 24px; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 #topic-tabs { display: flex; flex: none; gap: 8px; overflow-x: auto; border-bottom: 1px solid #d8dfd5; margin-bottom: 18px; padding-bottom: 8px; }
 #topic-tabs[hidden], .topic-panel[hidden] { display: none; }

@@ -1,11 +1,9 @@
 import { topicSubtree } from "../../plugins/personal/topic/tree.ts";
 import { TOPIC_TYPE, type TopicResource } from "../../plugins/personal/topic/model.ts";
-import { isChannelAddress } from "./address.ts";
 import { channelOutputs, visibleOutput } from "./output.ts";
 import { inputPrinter } from "../../plugins/personal/input/printer.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { harnessIdentityFor } from "../host/harness/ids.ts";
-import { topicTrigger, type TopicTrigger } from "../../plugins/personal/topic/trigger.ts";
 import type { ChannelService } from "./service.ts";
 import type { ResourceContext } from "../../plugins/personal/context.ts";
 import { PROTOCOL_VERSION, type BaseBlock, type ModelMeta, type UIModel } from "@compforge/agentue/ui";
@@ -139,58 +137,4 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
       id: active?.id ?? `queued:${topicId}`, phase: active?.status.phase ?? "queued", queued,
     } : null },
   };
-}
-
-
-export interface TopicSummary {
-  id: string;
-  revision: number | null;
-  uid: string | null;
-  topicKey?: string;
-  parentUid?: string;
-  trigger: TopicTrigger;
-  default: boolean;
-  name: string;
-  preview: string;
-  updatedAt: string;
-}
-
-/**
- * @spec Navigation includes Channel/Source topics and work-only scopes; summaries expose the Topic name and delivered preview, without other input prompts or execution details.
- * @link docs/channel/web.md
- */
-export function topicList(aide: ChannelService): TopicSummary[] {
-  const summaries = new Map<string, TopicSummary>();
-  const ensure = (id: string) => {
-    let summary = summaries.get(id);
-    if (!summary) {
-      const resource = aide.topics.resource(id);
-      summary = { id, uid: resource?.metadata.uid ?? null, revision: aide.topics.get(id)?.revision ?? null,
-        ...(resource?.spec.topicKey ? { topicKey: resource.spec.topicKey } : {}), ...(resource?.spec.parentRef ? { parentUid: resource.spec.parentRef.uid } : {}), trigger: topicTrigger(resource?.spec.trigger),
-        default: resource?.spec.default === true && !resource.metadata.deletionTimestamp,
-        name: aide.topics.get(id)?.name || "未命名会话", preview: "", updatedAt: "" };
-      summaries.set(id, summary);
-    }
-    return summary;
-  };
-  for (const topic of aide.topics.list()) ensure(topic.id).updatedAt = topic.createdAt;
-  for (const input of aide.topics.inputs()) {
-    const summary = ensure(input.topicId);
-    if (input.metadata.creationTimestamp > summary.updatedAt) summary.updatedAt = input.metadata.creationTimestamp;
-  }
-  for (const id of aide.topicIds()) ensure(id);
-  for (const message of channelOutputs(aide)) {
-    const destinations = new Set([message.topicId]);
-    if (isChannelAddress(message.target) && message.target.channelId === "web") destinations.add(message.target.endpoint);
-    for (const id of destinations) {
-      const current = aide.topics.resource(id);
-      if (!current || !visibleOutput(message, current)) continue;
-      const summary = ensure(id);
-      const text = message.text.replace(/\s+/g, " ").trim();
-      // Messages are chronological; quiet Source inputs do not erase the latest reply preview.
-      summary.preview = text.slice(0, 100);
-      if (message.at > summary.updatedAt) summary.updatedAt = message.at;
-    }
-  }
-  return [...summaries.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
 }

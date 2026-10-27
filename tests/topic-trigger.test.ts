@@ -74,8 +74,8 @@ test("Web persists per-Topic enablement; cadence belongs to Chief", async t => {
   assert.equal((await post({ topicId: "root", enabled: true, intervalSeconds: 1 })).status, 400);
   assert.equal((await post({ topicId: "root", enabled: false })).status, 200);
   assert.equal(f.read().status.nextTriggerAt, null);
-  const rows = await (await fetch(base + "/topics")).json() as { id: string; trigger: { enabled: boolean } }[];
-  assert.equal(rows.find(row => row.id === "other")!.trigger.enabled, true);
+  const rows = await (await fetch(base + "/topics")).json() as { items: { id: string; trigger: { enabled: boolean } }[] };
+  assert.equal(rows.items.find(row => row.id === "other")!.trigger.enabled, true);
   await f.aide.close();
   const reopened = new Aide(f.home, f.options, log);
   try { assert.deepEqual(reopened.topics.resource("root")!.spec.trigger, { enabled: false }); }

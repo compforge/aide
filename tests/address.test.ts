@@ -1,7 +1,8 @@
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { once } from "node:events";
 import { httpChannel } from "../src/api/index.ts";
-import { topicView, topicList } from "../src/channel/view.ts";
+import { browseTopics } from "../plugins/personal/topic/browse.ts";
+import { topicView } from "../src/channel/view.ts";
 import { visibleOutput } from "../src/channel/output.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -167,7 +168,7 @@ test("Web displays explicitly addressed Output in the receiving endpoint and exc
   const result = await store.say("producer", undefined, "delivered to recipient", undefined, { target: webAddress("recipient") });
   for (const id of ["producer", "recipient"]) {
     assert.ok(topicView(aide, id).blocks.some((b) => b.content === "delivered to recipient"));
-    assert.equal(topicList(aide).find((c) => c.id === id)!.preview, "delivered to recipient");
+    assert.equal(browseTopics(aide.topics).items.find((c) => c.id === id)!.preview, "delivered to recipient");
   }
   const recipient = aide.personal.topics.resource("recipient")!;
   const output = aide.outputs().find((o) => o.id === result.outputId)!;

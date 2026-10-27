@@ -1,20 +1,22 @@
 import './style.css';
-import { personPage } from './pagination.ts';
 import { PersonMerge } from './merge.ts';
 import { renderMarkdown } from '../shared/markdown.ts';
 import { byId as $, element as node, find } from '../shared/dom.ts';
 import { request, errorMessage } from '../shared/http.ts';
-import type { PersonView } from '../../api/types.ts';
+import type { PersonView, PersonItem, PersonListView } from '../../api/types.ts';
 import type { Person, PersonIdentity } from '../../../plugins/personal/person/model.ts';
 
-let people: PersonView[] = [], selected: PersonView;
+let people: PersonItem[] = [], selected: PersonView, page: PersonListView | undefined;
+let listRequest: AbortController | undefined, detailRequest: AbortController | undefined;
+let timer: ReturnType<typeof setTimeout> | undefined, searchTimer: ReturnType<typeof setTimeout> | undefined, paused = false;
+let listGeneration = 0, detailGeneration = 0, lastList = '';
 let dirty = false, editingSummary = false, saving = false;
 let requestedPage: number | null = null, currentPage = 1;
 const initialId = new URL(location.href).searchParams.get('person');
 const initialUid = new URL(location.href).searchParams.get('uid');
 const merging = new PersonMerge({ current: () => selected, hasUnsavedChanges, busy: setSaving,
   merged(source, target) {
-    people = people.filter((p) => p.metadata.uid !== source.metadata.uid);
+    people = people.filter((p) => p.uid !== source.metadata.uid);
     adoptPerson(target); renderEditor();
     $('person-notice').textContent = '已合并，被合并人物已删除。';
   },
@@ -23,30 +25,66 @@ function hasUnsavedChanges() {
   return dirty || saving || (editingSummary && $<HTMLTextAreaElement>('person-summary').value !== selected.status.summary);
 }
 function renderList() {
-  $('person-count').textContent = String(people.length);
+  if (!page) return;
+  const total = page.total + page.pinned.length;
+  $('person-count').textContent = String(total);
+  const signature = JSON.stringify({ page, selected: selected?.metadata.uid, q: $<HTMLInputElement>('person-search').value.trim() });
+  if (signature === lastList) return;
+  lastList = signature;
   $('person-list').replaceChildren();
-  const query = $<HTMLInputElement>('person-search').value.trim().toLowerCase();
-  const result = personPage(people, query, requestedPage, selected?.metadata.name ?? initialId);
-  currentPage = result.page;
+  currentPage = page.page;
   if (requestedPage !== null) requestedPage = currentPage;
-  for (const person of result.items) {
-    const link = node('a', undefined, 'list-link'); link.href = '/people?' + new URLSearchParams({ person: person.metadata.name, uid: person.metadata.uid });
-    if (selected?.metadata.name === person.metadata.name) link.setAttribute('aria-current', 'page');
-    link.append(node('strong', person.spec.name + (person.isMe ? ' · 我' : '')), node('span', person.status.summary.trim().slice(0, 80) || '尚未积累认识', 'muted'));
-    if (person.status.updatedAt) link.append(node('span', new Date(person.status.updatedAt).toLocaleString(), 'muted'));
+  for (const person of people) {
+    const link = node('a', undefined, 'list-link');
+    const params = new URLSearchParams({ person: person.id, uid: person.uid });
+    const q = $<HTMLInputElement>('person-search').value.trim(); if (q) params.set('q', q);
+    params.set('page', String(currentPage)); link.href = '/people?' + params;
+    if (selected?.metadata.uid === person.uid) link.setAttribute('aria-current', 'page');
+    link.append(node('strong', person.name + (person.isMe ? ' · 我' : '')), node('span', person.preview || '尚未积累认识', 'muted'));
+    if (person.updatedAt) link.append(node('span', new Date(person.updatedAt).toLocaleString(), 'muted'));
     link.onclick = async (event) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.defaultPrevented) return;
       event.preventDefault();
       if (saving || (hasUnsavedChanges() && !confirm('放弃尚未保存的修改？'))) return;
-      await select(person.metadata.name, person.metadata.uid);
+      await select(person.id, person.uid);
     };
     $('person-list').append(link);
   }
-  $('person-pagination').hidden = result.pages <= 1;
-  $('person-page').textContent = `${result.page} / ${result.pages}`;
-  $<HTMLButtonElement>('person-previous').disabled = result.page <= 1;
-  $<HTMLButtonElement>('person-next').disabled = result.page >= result.pages;
-  $('person-list-notice').textContent = !people.length ? '还没有人物。' : result.total ? `${result.total} 位人物` : '没有匹配的人物。';
+  $('person-pagination').hidden = page.pages <= 1;
+  $('person-page').textContent = `${page.page} / ${page.pages}`;
+  $<HTMLButtonElement>('person-previous').disabled = page.page <= 1;
+  $<HTMLButtonElement>('person-next').disabled = page.page >= page.pages;
+  $('person-list-notice').textContent = total ? `${total} 位人物` : '没有匹配的人物。';
 }
+function saveLocation() {
+  const url = new URL(location.href);
+  if (selected) { url.searchParams.set('person', selected.metadata.name); url.searchParams.set('uid', selected.metadata.uid); }
+  const q = $<HTMLInputElement>('person-search').value.trim();
+  if (q) url.searchParams.set('q', q); else url.searchParams.delete('q');
+  if (requestedPage !== null) url.searchParams.set('page', String(requestedPage)); else url.searchParams.delete('page');
+  history.replaceState(null, '', url);
+}
+async function loadPeople() {
+  clearTimeout(timer); listRequest?.abort();
+  const controller = new AbortController(), token = ++listGeneration;
+  listRequest = controller;
+  const query = new URLSearchParams({ pageSize: '10' });
+  const q = $<HTMLInputElement>('person-search').value.trim(); if (q) query.set('q', q);
+  if (requestedPage !== null) query.set('page', String(requestedPage));
+  const id = selected?.metadata.name ?? initialId; if (id) query.set('selectedId', id);
+  try {
+    const result = await request<PersonListView>('/persons?' + query, { signal: controller.signal });
+    if (token !== listGeneration || paused) return;
+    page = result; people = [...result.pinned, ...result.items]; renderList(); saveLocation();
+  } catch (error) { if (token === listGeneration && !paused) $('person-list-notice').textContent = errorMessage(error); }
+  finally {
+    if (token === listGeneration) {
+      listRequest = undefined;
+      schedulePeople();
+    }
+  }
+}
+function schedulePeople() { clearTimeout(timer); schedulePeople(); }
 function identityRow(identity: PersonIdentity = { provider: '', scope: '', id: '' }) {
   const row = node('div', undefined, 'person-identity');
   const local = identity.provider === 'web' && identity.scope === 'local' && identity.id === 'me';
@@ -77,13 +115,13 @@ function setSaving(value: boolean) {
   for (const id of ['person-reload', 'person-summary-edit', 'person-summary-cancel', 'person-summary-confirm']) $<HTMLButtonElement>(id).disabled = value;
   $<HTMLTextAreaElement>('person-summary').readOnly = value;
 }
-function adoptPerson(person: PersonView) {
+function adoptPerson(person: PersonView, refreshList = true) {
   selected = { ...selected, ...person };
-  people = people.map((p) => p.metadata.name === person.metadata.name ? { ...p, ...selected } : p);
   $('person-heading').textContent = selected.spec.name + (selected.isMe ? ' · 我' : '');
   $('person-updated').textContent = selected.status.updatedAt ? '最近更新：' + new Date(selected.status.updatedAt).toLocaleString() : '';
   renderList();
-  merging.render(people);
+  void merging.render();
+  if (refreshList) void loadPeople();
 }
 function renderEditor() {
   dirty = false;
@@ -93,11 +131,15 @@ function renderEditor() {
   $('person-identities').replaceChildren(); selected.spec.identities.forEach(identityRow);
 }
 async function select(id: string, uid?: string) {
+  detailRequest?.abort(); const controller = new AbortController(), token = ++detailGeneration;
+  detailRequest = controller;
   try {
-    const [person, all] = await Promise.all([request<PersonView>('/persons?' + new URLSearchParams({ id, ...(uid ? { uid } : {}) })), request<PersonView[]>('/persons')]);
-    people = all; adoptPerson(person); renderEditor();
-    $('person-notice').textContent = ''; history.replaceState(null, '', '/people?' + new URLSearchParams({ person: id, uid: person.metadata.uid }));
+    const person = await request<PersonView>('/persons?' + new URLSearchParams({ id, ...(uid ? { uid } : {}) }), { signal: controller.signal });
+    if (token !== detailGeneration || paused) return;
+    adoptPerson(person, false); renderEditor();
+    $('person-notice').textContent = ''; saveLocation();
   } catch (error) {
+    if (token !== detailGeneration || paused) return;
     $('person-notice').textContent = errorMessage(error);
     if (!selected) { $('person-heading').textContent = '人物不可用'; $('person-empty').textContent = '人物可能已删除。历史消息仍可正常查看，请从左侧选择其他人物。'; }
   }
@@ -106,9 +148,9 @@ function savePerson(spec: Person, summary?: string) {
   return request<PersonView>('/persons/edit', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id: selected.metadata.name, uid: selected.metadata.uid, version: selected.metadata.resourceVersion, spec, summary }) });
 }
-$<HTMLInputElement>('person-search').oninput = () => { requestedPage = 1; renderList(); };
-$('person-previous').onclick = () => { requestedPage = currentPage - 1; renderList(); };
-$('person-next').onclick = () => { requestedPage = currentPage + 1; renderList(); };
+$<HTMLInputElement>('person-search').oninput = () => { requestedPage = 1; listGeneration++; listRequest?.abort(); clearTimeout(timer); clearTimeout(searchTimer); searchTimer = setTimeout(() => void loadPeople(), 250); };
+$('person-previous').onclick = () => { requestedPage = currentPage - 1; void loadPeople(); };
+$('person-next').onclick = () => { requestedPage = currentPage + 1; void loadPeople(); };
 $('person-editor').oninput = (event) => { if (event.target !== $<HTMLTextAreaElement>('person-summary')) dirty = true; };
 $('identity-add').onclick = () => { identityRow(); dirty = true; };
 $<HTMLButtonElement>('person-reload').onclick = () => { if (!saving && (!hasUnsavedChanges() || confirm('重新加载将放弃尚未保存的修改，继续？'))) void select(selected.metadata.name, selected.metadata.uid); };
@@ -143,5 +185,15 @@ $('person-editor').onsubmit = async (event) => {
   finally { setSaving(false); }
 };
 window.addEventListener('beforeunload', (event) => { if (hasUnsavedChanges()) { event.preventDefault(); event.returnValue = ''; } });
-try { people = await request<PersonView[]>('/persons'); renderList(); const id = initialId || people.find((p) => p.isMe)?.metadata.name; if (id) await select(id, initialId ? initialUid ?? undefined : undefined); }
-catch (error) { $('person-list-notice').textContent = errorMessage(error); }
+window.addEventListener('pagehide', () => {
+  paused = true; listGeneration++; detailGeneration++;
+  clearTimeout(timer); clearTimeout(searchTimer); listRequest?.abort(); detailRequest?.abort(); merging.pause();
+});
+window.addEventListener('pageshow', event => { if (event.persisted) { paused = false; void loadPeople(); if (selected) void merging.render(); } });
+const initialParams = new URL(location.href).searchParams;
+$<HTMLInputElement>('person-search').value = initialParams.get('q') ?? '';
+const initialPage = Number(initialParams.get('page'));
+if (Number.isSafeInteger(initialPage) && initialPage > 0) requestedPage = initialPage;
+await loadPeople();
+const initialPerson = people.find(p => p.isMe);
+if (initialId || initialPerson) await select(initialId ?? initialPerson!.id, initialId ? initialUid ?? undefined : initialPerson!.uid);

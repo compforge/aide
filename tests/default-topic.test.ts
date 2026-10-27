@@ -11,7 +11,7 @@ import { once } from "node:events";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { httpChannel } from "../src/api/index.ts";
-import { topicList } from "../src/channel/view.ts";
+import { browseTopics } from "../plugins/personal/topic/browse.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { defaultDestination } from "../plugins/personal/route/rules.ts";
 import { TOPIC_TYPE } from "../plugins/personal/topic/model.ts";
@@ -40,7 +40,7 @@ test("Default Topic is system-maintained, unique and persisted", async t => {
   const destinations = await Promise.all(Array.from({ length: 8 }, () => defaultDestination(context)));
   assert.ok(destinations.every(d => d.uid === destinations[0]!.uid));
   const fallback = aide.topics.resource("default")!;
-  assert.deepEqual(topicList(aide).filter(t => t.default).map(t => t.id), ["default"]);
+  assert.deepEqual(browseTopics(aide.topics).pinned.map(t => t.id), ["default"]);
   assert.equal(fallback.spec.address, undefined);
   // Opening the reserved Topic through a channel does not replace its identity, name or address.
   assert.deepEqual(await aide.topics.ensure("default", webAddress("private"), "Private"), fallback);
@@ -62,7 +62,7 @@ test("Default Topic is system-maintained, unique and persisted", async t => {
   assert.equal((await fetch(base + "/?topic=private", { redirect: "manual" })).status, 200);
   await aide.close(); aide = new Aide(root, options, log);
   assert.equal(aide.topics.resource("default")!.metadata.uid, fallback.metadata.uid);
-  assert.deepEqual(topicList(aide).filter(t => t.default).map(t => t.id), ["default"]);
+  assert.deepEqual(browseTopics(aide.topics).pinned.map(t => t.id), ["default"]);
 });
 
 /** @case Default receives unmatched Inputs; explicit topic rules bypass it and redelivery remains idempotent. */

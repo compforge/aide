@@ -1,11 +1,12 @@
 import './style.css';
 import { byId as $, element as node } from '../shared/dom.ts';
 import { request, errorMessage } from '../shared/http.ts';
-import type { InputListView, InputDetailView } from '../../api/types.ts';
+import type { InputListView, InputDetailView, InputFiltersView } from '../../api/types.ts';
 
 let page: InputListView | undefined, selected: { id: string; uid?: string } | undefined;
 let generation = 0, timer: ReturnType<typeof setTimeout> | undefined, active: AbortController | undefined;
 let lastDetail = '', lastList = '';
+let filtersRequest: AbortController | undefined;
 const query = new URLSearchParams();
 const selects = { connector: 'input-connector', sourceUid: 'input-source', state: 'input-state' } as const;
 const time = (at?: string) => at ? Number.isFinite(Date.parse(at)) ? new Date(at).toLocaleString() : at : '时间未记录';
@@ -41,9 +42,6 @@ function renderList(result: InputListView) {
   const signature = JSON.stringify({ result, query: query.toString(), selected });
   if (signature === lastList) return;
   lastList = signature;
-  options('input-origin', '全部来源类型', result.filters.origins);
-  options('input-connector', '全部 Connector', result.filters.connectors);
-  options('input-source', '全部观察源', result.filters.sources);
   $('input-list').replaceChildren();
   for (const input of result.items) {
     const link = node('a', undefined, 'list-link');
@@ -63,6 +61,16 @@ function renderList(result: InputListView) {
   $<HTMLButtonElement>('input-previous').disabled = result.page <= 1;
   $<HTMLButtonElement>('input-next').disabled = result.page >= result.pages;
   $('input-list-notice').textContent = result.total ? '' : '没有匹配的 Input。';
+}
+async function refreshFilters() {
+  filtersRequest?.abort(); const controller = new AbortController(); filtersRequest = controller;
+  try {
+    const result = await request<InputFiltersView>('/inputs/filters', { signal: controller.signal });
+    if (controller.signal.aborted) return;
+    options('input-origin', '全部来源类型', result.origins);
+    options('input-connector', '全部 Connector', result.connectors);
+    options('input-source', '全部观察源', result.sources);
+  } catch (error) { if (!controller.signal.aborted) $('input-list-notice').textContent = '筛选项更新失败：' + errorMessage(error); }
 }
 function renderDetail(detail: InputDetailView) {
   // Keep open evidence panels and text selection stable during polling.
@@ -154,11 +162,11 @@ $('input-filters').onsubmit = event => {
   if ($<HTMLInputElement>('input-errors').checked) query.set('errors', 'true'); else query.delete('errors');
   selected = undefined; saveLocation(true); void refresh();
 };
-$('input-reset').onclick = () => { history.pushState(null, '', '/inputs'); loadLocation(); void refresh(); };
-$('input-refresh').onclick = () => { void refresh(); };
+$('input-reset').onclick = () => { history.pushState(null, '', '/inputs'); loadLocation(); void refresh(); void refreshFilters(); };
+$('input-refresh').onclick = () => { void refresh(); void refreshFilters(); };
 $('input-previous').onclick = () => { if (page && page.page > 1) { query.set('page', String(page.page - 1)); saveLocation(true); void refresh(); } };
 $('input-next').onclick = () => { if (page && page.page < page.pages) { query.set('page', String(page.page + 1)); saveLocation(true); void refresh(); } };
 window.addEventListener('popstate', () => { loadLocation(); lastDetail = ''; void refresh(); });
-window.addEventListener('pagehide', () => { generation++; clearTimeout(timer); active?.abort(); });
-window.addEventListener('pageshow', event => { if (event.persisted) void refresh(); });
-loadLocation(); void refresh();
+window.addEventListener('pagehide', () => { generation++; clearTimeout(timer); active?.abort(); filtersRequest?.abort(); });
+window.addEventListener('pageshow', event => { if (event.persisted) { void refresh(); void refreshFilters(); } });
+loadLocation(); void refresh(); void refreshFilters();

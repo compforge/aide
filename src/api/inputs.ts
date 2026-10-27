@@ -17,17 +17,21 @@ function definition(aide: ChannelService, input: { origin: "channel" | "source" 
   catch { return `${input.origin} / ${input.originId}`; }
 }
 export function inputList(aide: ChannelService, query: InputBrowseQuery) {
-  const store = aide.topics.inputStore, result = browseInputs(store, query), facets = inputFacets(store);
+  const store = aide.topics.inputStore, result = browseInputs(store, query);
   return { ...result, items: result.items.map(({ input, ...state }) => ({
     ...state, id: input.metadata.name, uid: input.metadata.uid, at: input.metadata.creationTimestamp,
     origin: input.spec.origin, originId: input.spec.originId, label: definition(aide, input.spec),
     preview: inputPrinter.summarize(input), source: input.spec.originRef,
     assessments: Object.keys(input.status.assess ?? {}).length, handlings: Object.keys(input.status.handle ?? {}).length,
-  })), filters: {
+  })) };
+}
+export function inputFilters(aide: ChannelService) {
+  const facets = inputFacets(aide.topics.inputStore);
+  return {
     origins: [...new Map(facets.map(f => [`${f.origin}:${f.originId}`, { value: `${f.origin}:${f.originId}`, label: `${definition(aide, f)} · ${f.origin}` }])).values()],
     connectors: [...new Set(facets.map(f => f.connector))].sort().map(value => ({ value, label: value || "无 Connector / 未记录" })),
     sources: [...new Map(facets.filter(f => f.sourceUid).map(f => [f.sourceUid, { value: f.sourceUid, label: `${f.sourceKind} / ${f.sourceName}` }])).values()],
-  } };
+  };
 }
 
 /**

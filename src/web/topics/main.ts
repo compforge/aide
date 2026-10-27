@@ -61,7 +61,7 @@ function mountTopic(topicId: string | null) {
 
   /** @spec Polling failures never replace submission results or stream connection status. */
   async function poll() {
-    if (polling || signal.aborted) return;
+    if (polling || signal.aborted || document.hidden) return;
     polling = true;
     try {
       if (!topicId) { await navigation.refresh(); return; }
@@ -105,7 +105,7 @@ function mountTopic(topicId: string | null) {
 
 function start() {
   if (timer !== undefined) return;
-  void current.poll(); timer = setInterval(() => void current.poll(), 1500);
+  void current.poll(); timer = setInterval(() => void current.poll(), 5000);
   current.connect();
 }
 

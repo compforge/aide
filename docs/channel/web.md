@@ -59,9 +59,15 @@ tests/web-progress.test.ts 用真实 Host / Runner / HTTP、浏览器 reducer �
 
 浏览器 Tab 标题固定为 `Aide`，会话名称只显示在页面内。
 
-左侧列表在 Web 侧分页，每页显示 10 个普通会话，默认会话独立置顶并保留在每一页。普通会话沿用最近活动排序。未指定页码时持续跟随当前会话所在页，包括新聊天首次保存后排序变化；自动定位不向 URL 写入固定页码。用户主动翻页或点击会话链接时携带页码，打开链接、刷新和前进后退保留所选页；删除导致页数减少时回到有效的最后一页。每个条目展示关联的事项（Task）数和安排（Routine）数，包含已完成但尚未删除的工作，与会话内事项、安排 tab 的统计范围一致。
+Topic 列表由 Personal 在 SQLite 中先筛选、按最近活动排序，再使用 LIMIT / OFFSET 分页；浏览器每页请求 10 条。`GET /topics` 接收 `page`、`pageSize`、`q`、`parentId` 和 `selectedId`，返回 `{ items, pinned, total, page, pageSize, pages, path }`。接口默认每页 20 条，上限 100；`total` 只统计普通条目，Default 放在 `pinned`，不占普通页名额。计数与页面读取处于同一数据库事务，不更新容量访问时间。
 
-网页左栏通过 `GET /topics` 列出 Personal 的 Topic，列表携带所属 sessionId，展示 Topic 的 name 与最近消息摘要；name 初始取首个 Input 文本，后续输入保留名称。列表和对话标题旁提供 ID 复制入口，页面不铺开展示 ID，按最近输入或消息时间排序。名称取首个 Input 的单行文本（最多 80 字符），摘要取已交付消息，不包含其它 Source 观察正文或 Harness 执行细节。当前 URL 指定的空会话仍可进入；浏览列表不创建会话。
+过滤区域位于列表与详情上方。`q` 按名称或 Topic ID 做字面子串搜索；`parentId` 留空时只查询 root，填写父主题 ID 后只查询其直接子主题，不递归展开。过滤发生在分页前，Default 也必须匹配当前条件才置顶。筛选、页码和选中项保存在 URL，筛选变化回到第一页，重置恢复 root 列表。不存在的父主题返回空列表。
+
+未指定页码时，`selectedId` 将选中主题定位到当前 parent 范围内的所在页；root 列表中的深层链接定位到其 root。`path` 只读取选中主题的祖先链，供标题和定位使用，不枚举整棵树。新聊天尚未持久化时可进入详情，不因浏览列表创建资源。显式翻页保持页码，删除导致页数减少时回到有效的最后一页。
+
+列表从资源的轻量字段、Input 绑定索引及 Output 索引读取活动时间和最近回复预览，不调用装配完整输入、输出历史的 Topic 详情投影。静默 Source 输入更新活动时间但不覆盖回复预览；Topic UID 和目标创建时间继续隔离旧实例的消息。Task / Routine 数量只按返回条目批量聚合，包含已完成但尚未删除的工作。列表不返回观察正文或 Harness 执行细节。
+
+列表轮询间隔为 5 秒，只在页面可见时运行；同一列表请求不重叠，查询变化取消旧请求并拒绝迟到响应。当前 Topic 的消息与执行仍由 SSE 更新。列表查询记录 query、耗时、页码、总数、返回条数和响应字节数；查询达到 500 毫秒时记录 warning，不记录搜索正文。
 
 列表每项保留复制 ID 图标，其余操作收在三点菜单中；点击展开，点击外部或按 Escape 关闭，也可使用方向键选择。主动回顾显示“开启回顾／取消回顾”，普通主题还提供“删除主题”。Default Topic 由系统维护，不提供设置或切换入口。复制和三点按钮位于条目内部右上角；条目底部以小房子表示系统兜底主题、小闹钟表示主动回顾已开启，悬停显示说明。默认主题的业务语义见 [Personal](../personal/topic.md#默认主题)。打开首页时进入已存在的 Default Topic；URL 明确指定的会话优先。系统尚未创建 Default 时展示会话选择与列表顶部的“新聊天”条目，不注入固定的 `me` 会话。新对话在首次发送消息时才持久化。
 
@@ -117,7 +123,7 @@ curl -s http://127.0.0.1:7433/events \
 
 会话列表的「主动回顾」开关修改对应 Topic 的 trigger，默认关闭、间隔 3600 秒。各 Topic 独立控制。尚未持久保存的空会话没有开关。页面不提供间隔编辑。
 
-`GET /topics` 返回 `sessionId` 和 `trigger`；`POST /topics/trigger` 接收 `{ topicId, enabled }`，校验会话存在后持久化，拒绝额外的间隔字段。关闭不会取消已有输入或委托。调度和判断见 [Personal](../personal/topic.md#topic-定时回顾)。
+`GET /topics` 的条目返回 `id` 和 `trigger`；`POST /topics/trigger` 接收 `{ topicId, enabled }`，校验会话存在后持久化，拒绝额外的间隔字段。关闭不会取消已有输入或委托。调度和判断见 [Personal](../personal/topic.md#topic-定时回顾)。
 
 ## 人物导航与编辑
 
@@ -129,4 +135,10 @@ Inputs 提供全局输入目录，支持按 Connector、来源类型、具体观
 
 人物详情默认以只读正文展示当前认识，标题后的编辑图标进入编辑状态。编辑框右下角提供取消与确认：取消恢复原文，确认直接保存当前认识，不提交姓名或身份中尚未保存的修改。称呼与外部身份沿用资料保存操作。编辑提交 uid 和 resourceVersion；并发冲突保留编辑状态和草稿，提示重新加载并合并。外部身份重复或 Me 绑定冲突会拒绝保存，本地单人身份不可移除。
 
-GET /persons 列表，GET /persons?id=... 详情，POST /persons/edit 更新；这些接口调用同一 Personal 人物服务和 ResourceClient。打开页面不创建 Topic。
+`GET /persons` 使用同样的固定分页契约，额外返回 `pinned`。`q` 在 SQL 中按姓名筛选；普通人物先按是否已有认识排序，再按资源名稳定排序，显式 Me 根据配置身份置顶，不按名字推断。列表只返回 ID、UID、版本、姓名、认识预览和更新时间；完整身份、summary、recent 通过 `GET /persons?id=...&uid=...` 按需读取。点击人物不重新获取全量目录，5 秒轮询只刷新当前列表页，编辑草稿不被轮询覆盖。
+
+同名合并候选使用独立的 `name` 精确筛选和 `excludeUid` 条件分页查询，与导航当前页无关。候选列表不判断身份相同；进入确认框时重新读取双方完整身份和资源版本，继续执行原有 UID / version 校验。`POST /persons/edit` 和 `/persons/merge` 沿用同一 Personal 人物服务。打开页面不创建 Topic。
+
+`GET /inputs/list` 保留已有 SQL 分页；筛选选项改由独立的 `GET /inputs/filters` 读取。选项只在页面进入、返回及手动刷新时更新，不随翻页、筛选或 5 秒列表轮询重复聚合。已有筛选值暂不出现在选项中时仍保留当前选择。
+
+`tests/topic-list.test.ts` 与 `tests/person-list.test.ts` 覆盖筛选后分页、置顶、稳定排序、父主题范围、选中项定位和独立候选；`tests/input-browse.test.ts` 覆盖 Input 分页和筛选项独立查询。HTTP 用例同时检查浏览器入口可构建。

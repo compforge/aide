@@ -8,6 +8,11 @@
 <link rel="stylesheet" href="/app.css">
 <header><h1 class="brand"><img src="/icon.png" width="32" height="32" alt="">Aide</h1><span class="muted">把事情交给我，持续为你推进。</span><nav class="main-tabs" aria-label="主导航"><a href="/" aria-current="page">Topics</a><a href="/people">Persons</a><a href="/inputs">Inputs</a><a href="/connections">接入</a></nav><span id="connection" class="muted" aria-live="polite">连接中</span></header>
 <main>
+  <form id="topic-filters" aria-label="主题过滤">
+    <label><span>搜索</span><input id="topic-search" type="search" maxlength="200" placeholder="名称或 Topic ID"></label>
+    <label><span>父主题</span><input id="topic-parent" maxlength="200" placeholder="父主题 ID，留空查看 root"></label>
+    <div class="topic-filter-actions"><button type="submit">筛选</button><button id="topic-reset" type="button">重置</button></div>
+  </form>
   <nav class="topics" aria-label="主题列表">
     <h2 class="list-heading">主题<span id="topic-count" class="muted" aria-label="话题总数"></span></h2>
     <div class="topic-row">
