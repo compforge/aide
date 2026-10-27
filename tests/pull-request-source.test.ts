@@ -12,6 +12,8 @@ import { OutputStore } from "../plugins/personal/output/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
+import { routeByRules } from "../plugins/personal/route/rules.ts";
+import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { nextPullRequestPollDelay } from "../plugins/personal/source/pull-request/state.ts";
 import { observePullRequests, PULL_REQUEST_SOURCE_TYPE, type PullRequestSourceStatus } from "../plugins/personal/source/pull-request/observe.ts";
@@ -69,6 +71,44 @@ test("merged is admitted once while coverage issues survive and successful items
   assert.equal(input.spec.originRef?.uid,f.resource().metadata.uid);
   f.setRead(async()=>scanResult([merged()]));await f.restart();await f.observe(60);
   assert.equal(f.inputs.list().length,1);assert.deepEqual(f.resource().status.issues,[]);assert.equal(f.resource().status.scanComplete,true);
+});
+
+/** @case Repository grouping preserves per-PR occurrences, Forge isolation, and an existing Topic name. */
+test("merged inputs share repository Topics while PR baselines and other Forge repositories stay independent", async t => {
+  const f = fixture(t);
+  const requests = [pr(1), pr(2), pr(1, "org/other"), { ...pr(1), repository: { forge: { name: "other.test" }, path: "org/repo" } }];
+  let current = requests;
+  f.setRead(async () => scanResult(current));
+  await f.observe(); assert.equal(f.inputs.list().length, 0);
+  current = requests.map(request => ({ ...request, state: "merged", mergedAt: at(20) }));
+  await f.observe(30);
+  assert.equal(f.inputs.list().length, 4);
+  assert.equal(Object.keys(f.resource().status.snapshot!.value).length, 4);
+  const route = async () => {
+    for (const input of f.inputs.list()) assert.equal(await routeByRules({ resources: f.resources, logger }, input), true);
+  };
+  await route();
+  const topics = await f.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
+  assert.equal(topics.length, 3);
+  const shared = topics.find(topic => topic.spec.topicKey === 'forge:["gitlab.test","org/repo"]')!;
+  assert.equal(shared.spec.name, "org/repo");
+  assert.ok(topics.some(topic => topic.spec.topicKey === 'forge:["gitlab.test","org/other"]'));
+  assert.ok(topics.some(topic => topic.spec.topicKey === 'forge:["other.test","org/repo"]'));
+  const inputs = f.inputs.list().filter(input => input.spec.topicKey === shared.spec.topicKey);
+  assert.equal(inputs.length, 2);
+  assert.ok(inputs.every(input => input.status.route!.result!.topics[0]!.uid === shared.metadata.uid && input.spec.topicName === "org/repo"));
+  assert.ok(inputs.some(input => input.spec.text.includes("#1")));
+  assert.ok(inputs.some(input => input.spec.text.includes("#2")));
+  await f.resources.replace(shared, { ...shared.spec, name: "Project progress" }, shared.status);
+  current = [requests[0]!, ...current.slice(1)]; await f.observe(40);
+  current = [{ ...merged(), mergedAt: at(50) }, ...current.slice(1)]; await f.observe(60);
+  assert.equal(f.inputs.list().length, 5, "Re-merging one PR is a new occurrence; other merged PRs are not replayed");
+  await route();
+  const latest = (await f.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE)).find(topic => topic.metadata.uid === shared.metadata.uid)!;
+  assert.equal(latest.spec.name, "Project progress");
+  assert.equal(f.inputs.list().filter(input => input.status.route!.result!.topics[0]!.uid === shared.metadata.uid).length, 3);
+  await f.restart(); await f.observe(90);
+  assert.equal(f.inputs.list().length, 5);
 });
 
 test("crash after Input persistence preserves the frozen plan and does not emit another merge for a new revision",async t=>{
