@@ -16,7 +16,7 @@ import { finalizeExecution } from "../plugins/personal/loop.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { handoff } from "./input-state-fixture.ts";
 const definition = { kind: "routine" as const, title: "Watch", instruction: "Inspect changes", trigger: { cron: null, timezone: "UTC", event: "sample" } };
-const completed = { action: "done" as const, summary: "Verified", recent: "Inspected evidence", notification: null, question: null, nextAt: null };
+const completed = { action: "done" as const, report: "Verified", notification: null, question: null, nextAt: null };
 function setup(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-routine-agent-"));
   const aide = new Aide(home, fakeOptions({ execute: async () => completed }, home), pino({ level: "silent" }));
@@ -36,9 +36,9 @@ function setup(t: TestContext) {
 test("Routine report distinguishes done, ask and wait and preserves a concurrent pause", async t => {
   const { aide, resources, context, get, active } = setup(t);
   const work = await aide.work("me").create({ ...definition, trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } });
-  const report = async (args: object) => reportWork(resources, get(work.id), "run", { inputIds: [], summary: "Verified", recent: "Evidence", ...args });
+  const report = async (args: object) => reportWork(resources, get(work.id), "run", { inputIds: [], report: "Verified", ...args });
   await active(work.id);
-  for (const args of [{ action: "ask" }, { action: "wait", nextAt: "2000-01-01T00:00:00Z" }, { action: "done", summary: "" }]) await assert.rejects(report(args));
+  for (const args of [{ action: "ask" }, { action: "wait", nextAt: "2000-01-01T00:00:00Z" }, { action: "done", report: "" }]) await assert.rejects(report(args));
   assert.equal(get(work.id).status.status, "running");
   await report({ action: "done" });
   assert.equal(get(work.id).status.status, "scheduled");
@@ -63,7 +63,7 @@ test("Routine silence releases only the agent; events clear idle state and delet
   const { aide, resources, context, get, active } = setup(t);
   const work = await aide.work("me").create(definition);
   await active(work.id);
-  await reportWork(resources, get(work.id), "run", { inputIds: [], action: "done", summary: "Checked", recent: "No changes" });
+  await reportWork(resources, get(work.id), "run", { inputIds: [], action: "done", report: "Checked" });
   await finalizeExecution(context, get(work.id), "run");
   assert.equal(get(work.id).status.nextAt, null);
   await resources.patchStatus(get(work.id), { agent: { harness: "routine", sessionId: "native-id" } });

@@ -20,7 +20,7 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   const log = pino({ level: "silent" });
   const aide = new Aide(dir, fakeOptions({
     chief: async () => { if (++routes === 1) throw new Error("Model failed"); return "今天完成了三件事"; },
-    execute: async () => ({ action: "done", summary: "Read work log", recent: "Read work log", notification: "今天完成了三件事", question: null, nextAt: null }),
+    execute: async () => ({ action: "done", report: "Read work log", notification: "今天完成了三件事", question: null, nextAt: null }),
   }, dir, requests), log);
   const server = httpChannel(aide, log);
   t.after(async () => {

@@ -12,7 +12,7 @@ import { Background as RouteBackground } from "./route/background.ts";
 import { routineSession } from "./routine/agent.ts";
 import { taskSession } from "./task/agent.ts";
 import type { PiConfig } from "../../src/host/harness/pi/config.ts";
-import { summarizeTopic } from "./topic/state.ts";
+import { summarizeTopic, upsertTopicNote } from "./topic/state.ts";
 import { personalExecution } from "./execution-context.ts";
 import { say } from "./output/action.ts";
 import type { OutputStore } from "./output/store.ts";
@@ -105,10 +105,15 @@ export class Personal {
         const c = active();
         const result = await summarizeTopic(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input,
           topicPolicy(this.options.topic).summaryChars);
-        this.log.info({ topicId }, "Chief understanding updated");
+        this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
       });
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, contactsTool(this.options.persons, this.options.channels ?? [], active), ...topicTools(this.store, active)], background: () => new TopicBackground(this.store, active(), topicId), beforeWorkMutation: () => { active(); } });
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, contactsTool(this.options.persons, this.options.channels ?? [], active), ...topicTools(this.store, active)], background: () => new TopicBackground(this.store, active(), topicId), topicNote: async (input, callId) => {
+        const c = active();
+        const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
+        this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, noteId: result.noteId, version: result.version }, "Topic Note updated");
+        return result;
+      }, beforeWorkMutation: () => { active(); } });
     };
   }
 
@@ -293,8 +298,7 @@ export class Personal {
       if (work.metadata.deletionTimestamp || work.status.status !== "running") continue;
       const text = `「${work.spec.title}」执行被中断，结果未知。请核对外部结果后告诉我是否继续。`;
       await resources.patchStatus(work, { status: "uncertain", nextAt: null,
-        recoveryNotice: { id: `interrupted:${work.metadata.uid}:${work.status.execution?.id ?? work.metadata.resourceVersion}`, text },
-        recent: [...work.status.recent, { at: new Date().toISOString(), text }] });
+        recoveryNotice: { id: `interrupted:${work.metadata.uid}:${work.status.execution?.id ?? work.metadata.resourceVersion}`, text } });
       this.log.warn({ workId: work.metadata.name }, "Recovered interrupted work as uncertain; notification pending");
     }
     await this.deliverRecoveryNotices();

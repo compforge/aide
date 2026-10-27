@@ -17,11 +17,13 @@ Routine.spec.trigger 声明 cron 或事件订阅。cron 到期可以在没有 In
 | list_work | 分页查看同会话 Task / Routine 概况，不获得其它 Work 的操作权限 |
 | read_topic | 读取所属 Topic 背景，不扩大委托授权 |
 | say | 创建用户可见 Output，关联 Routine UID、execution 和可选 Input |
+| summarize_routine | 独立修订本资源的长期认识 |
+| upsert_note | 按同一事项创建或更新近期 Note，目标由 Host 绑定 |
 | report_routine | 原子提交进展、当前轮次状态和明确列出的 Input 回执 |
 
 工具绑定宿主确定的 Routine UID；每次调用检查当前 execution，模型不能选择其它资源范围。文件、CLI 和能力包使用 Pi 原生机制与现有凭证。
 
-report_routine 的 inputIds 必须是已接纳、已处理的输入，与一次资源状态更新共同提交。未列出的 Input 不会被确认。summary 替换累计认识，recent 追加本次依据，均遵守 Personal 的有界保留约定。
+report_routine 的 inputIds 必须是已接纳、已处理的输入，与一次资源状态更新共同提交。未列出的 Input 不会被确认。report 是本次办理说明，同时保存在 lastReport；summary 和 Note 独立维护，不因每轮报告而重写。
 
 - done 完成本轮。尚有未确认 Input 时继续 ready，否则回到 scheduled；cron 重新计算下次时间，纯事件职责保持 nextAt=null 等待事件。
 - ask 保存问题并进入 waiting，问题通过 say 单独发送；回答经 Chief 分派为新 Input 后继续。
@@ -56,7 +58,7 @@ assistant / tool：处理与回执
 
 业务背景是请求投影，不追加到原生 transcript，也不参与历史压缩；恢复后从 CRD 重建。
 
-常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整认识仍保存在资源中。
+summary 与 Note 的职责、工具和预算见[有界认识与近期依据](README.md#有界认识与近期依据)。常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整认识仍保存在资源中。
 
 优化重点是能否识别值得推进或告知的变化、避免重复提醒和重复操作，并在长期运行后仍保留未决问题。结合有效通知与漏报、重复工具调用、上下文增长、压缩频率和每轮耗时，调整观察预览、当前状态与历史材料的拼接结构；模型成本下降不能以漏掉重要变化为代价。
 

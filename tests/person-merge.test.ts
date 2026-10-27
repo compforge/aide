@@ -55,7 +55,7 @@ test("Same names only select candidates; merging appends to the chosen Person wi
   assert.deepEqual(merged.spec.identities, [...target.spec.identities, ...source.spec.identities]);
   assert.equal(merged.status.summary, "保留人物认识\n\n来源人物认识");
   assert.equal(merged.status.updatedBy, "user");
-  assert.ok(merged.status.recent.at(-1)!.text.includes(source.metadata.name));
+  assert.equal(merged.status.recent.length, 0, "Identity merging does not invent a recent matter");
   assert.equal((await f.persons.read(namesake.metadata.name)).metadata.resourceVersion, namesake.metadata.resourceVersion);
   await assert.rejects(f.persons.read(source.metadata.name), /Unknown Person/);
   assert.equal((await f.persons.observe(identity("source"))).metadata.uid, target.metadata.uid);
@@ -96,7 +96,7 @@ test("Merge guards both incarnations, stale sources, self-merge; retains bounded
   await assert.rejects(f.persons.merge(version(source), version(source)), /itself/);
   await assert.rejects(f.persons.merge({ ...version(source), uid: "old-uid" }, version(target)), /version conflict/);
   await assert.rejects(f.persons.merge(version(source), { ...version(target), uid: "old-uid" }), /version conflict/);
-  const updated = await f.client.patchStatus(source, { recent: Array.from({ length: 40 }, (_, i) => ({ at: new Date(1000 * i).toISOString(), text: "e".repeat(1000) })) });
+  const updated = await f.client.patchStatus(source, { recent: Array.from({ length: 40 }, (_, i) => ({ id: `note-${i}`, createdAt: new Date(1000 * i).toISOString(), updatedAt: new Date(1000 * i).toISOString(), text: "e".repeat(1000) })) });
   await assert.rejects(f.persons.merge(version(source), version(target)), /version conflict/);
   const merged = await f.persons.merge(version(updated), version(me), "用户确认后的认识");
   assert.equal(merged.isMe, true);
@@ -140,8 +140,12 @@ test("Me configuration consolidates existing Lark and WeChat Persons into one re
   const wechat = { provider: "wechat", scope: "personal", id: "wx_me" };
   const first = await f.persons.observe(lark, "李乾坤");
   const second = await f.persons.observe(wechat, "李乾坤");
-  await f.persons.summarize(first.metadata.name, first.metadata.uid, first.metadata.resourceVersion, "Lark preference", "Explicit work preference");
-  await f.persons.summarize(second.metadata.name, second.metadata.uid, second.metadata.resourceVersion, "WeChat preference", "Explicit personal preference");
+  await f.persons.summarize(first.metadata.name, first.metadata.uid, first.metadata.resourceVersion, "Lark preference");
+  await f.persons.summarize(second.metadata.name, second.metadata.uid, second.metadata.resourceVersion, "WeChat preference");
+  for (const [person, text] of [[first, "Explicit work preference"], [second, "Explicit personal preference"]] as const) {
+    const current = await f.persons.read(person.metadata.name);
+    await f.persons.upsertNote(current.metadata.name, current.metadata.uid, { version: current.metadata.resourceVersion, text }, `note-${person.metadata.name}`);
+  }
   const persons = openPersonCatalog(f.home, { identities: [LOCAL_ME, lark, wechat] }, log, () => {}).persons;
   assert.equal((await persons.initialize()).merged, 2);
   const me = (await persons.findIdentity(lark))!;
@@ -184,8 +188,8 @@ test("Me consolidation preserves all profiles when their combined understanding 
   const f = await setup(t), local = (await f.persons.findIdentity(LOCAL_ME))!;
   const external = { provider: "lark", scope: "cli_work", id: "ou_me" };
   const other = await f.persons.observe(external);
-  await f.persons.summarize(local.metadata.name, local.metadata.uid, local.metadata.resourceVersion, "a".repeat(9000), "first");
-  await f.persons.summarize(other.metadata.name, other.metadata.uid, other.metadata.resourceVersion, "b".repeat(9000), "second");
+  await f.persons.summarize(local.metadata.name, local.metadata.uid, local.metadata.resourceVersion, "a".repeat(9000));
+  await f.persons.summarize(other.metadata.name, other.metadata.uid, other.metadata.resourceVersion, "b".repeat(9000));
   const persons = new Persons(f.client, { identities: [LOCAL_ME, external] });
   const before = await persons.list();
   const result = await persons.initialize();

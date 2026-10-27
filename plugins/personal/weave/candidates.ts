@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { TopicResource } from "../topic/model.ts";
-import { understandingVersion } from "../topic/tree.ts";
+import { understandingVersion, summaryVersion } from "../topic/tree.ts";
 import { contextPage } from "../background.ts";
 
 export function weaveCandidates(topics: readonly TopicResource[]) {
@@ -8,7 +8,7 @@ export function weaveCandidates(topics: readonly TopicResource[]) {
     .sort((a, b) => (a.status.lastInputAt ?? a.metadata.creationTimestamp).localeCompare(b.status.lastInputAt ?? b.metadata.creationTimestamp) || a.metadata.uid.localeCompare(b.metadata.uid));
 }
 export function candidateFingerprint(roots: readonly TopicResource[]) {
-  return createHash("sha256").update(JSON.stringify(roots.map(t => [t.metadata.uid, t.spec.name, understandingVersion(t), t.status.lastInputAt]))).digest("hex");
+  return createHash("sha256").update(JSON.stringify(roots.map(t => [t.metadata.uid, t.spec.name, summaryVersion(t), t.status.lastInputAt]))).digest("hex");
 }
 /** @spec Scan progress measures the actual bounded snapshot supplied to inference, never the requested page size.
  * @link docs/personal/weave.md

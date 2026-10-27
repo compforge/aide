@@ -190,8 +190,8 @@ test("AgentUE reducer reconstructs growing, corrected and removed progress witho
   let previous: TopicView | undefined;
   let snapshot = {};
   for (const next of [initial,
-    { ...initial, meta: { ...initial.meta, context: { summary: "当前话题", recent: [{ at: "2026-10-23T08:00:00Z", text: "确认当前结论" }] } } },
-    { ...initial, meta: { ...initial.meta, context: { summary: "修订后的话题", recent: [{ at: "2026-10-23T09:00:00Z", text: "补充待办依据" }] } } },
+    { ...initial, meta: { ...initial.meta, context: { summary: "当前话题", recent: [{ id: String("2026-10-23T08:00:00Z"), createdAt: "2026-10-23T08:00:00Z", updatedAt: "2026-10-23T08:00:00Z", text: "确认当前结论" }] } } },
+    { ...initial, meta: { ...initial.meta, context: { summary: "修订后的话题", recent: [{ id: String("2026-10-23T09:00:00Z"), createdAt: "2026-10-23T09:00:00Z", updatedAt: "2026-10-23T09:00:00Z", text: "补充待办依据" }] } } },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "整理重点" }] },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "已完成" }] },
     { ...initial, blocks: [] }]) {

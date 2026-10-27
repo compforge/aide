@@ -26,7 +26,7 @@ import { randomUUID } from "node:crypto";
 import type { Harness, HarnessEventSink, PromptInput } from "../src/host/harness/adapter.ts";
 import type { Work } from "../plugins/personal/model.ts";
 export interface Outcome {
-  action: "done" | "ask" | "wait"; summary: string; recent: string;
+  action: "done" | "ask" | "wait"; report: string;
   notification: string | null; question: string | null; nextAt: string | null;
 }
 
@@ -90,8 +90,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const task = (await resources.get({ ...workType, name: workId, namespace: "v1" })) as AgentWork;
             const outcome = typeof result === "string" ? JSON.parse(result) : result;
             const inputs = new InputStore(home).query("handlePending", task.metadata.uid).filter(i => i.status.handle![task.metadata.uid]!.executionId === task.status.execution?.id);
-            await reportWork(resources, task, task.status.execution!.id, { inputIds: inputs.map(i => i.metadata.name), summary: outcome.summary,
-              recent: outcome.recent, action: outcome.action, question: outcome.question, nextAt: outcome.nextAt });
+            await reportWork(resources, task, task.status.execution!.id, { inputIds: inputs.map(i => i.metadata.name), report: outcome.report, action: outcome.action, question: outcome.question, nextAt: outcome.nextAt });
             const c = (await resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE)).find(c => c.spec.id === task.spec.topicId);
             const text = outcome.action === "ask" ? outcome.question : outcome.notification;
             if (c?.spec.address && text) new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])).create(c.spec.id, randomUUID(), outputSpec(c, { topicId: c.spec.id, text }, { producer: { ...workType, name: workId, namespace: "v1", uid: task.metadata.uid } }));

@@ -514,7 +514,7 @@ test("an entirely Aide-defined provider performs a real SDK request with explici
 test("Chief profiles people through tools and refreshes shared user corrections every turn", { timeout: 30_000 }, async (t) => {
   const writer = await setup(t, (_request, index) => index === 0
     ? { tool: "read_person", args: { id: me.metadata.name } }
-    : index === 1 ? { tool: "summary_person", args: { id: me.metadata.name, uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "Prefers concise Chinese answers; explicit statement, 2026-10-21.", recent: "Observed stated preference" } }
+    : index === 1 ? { tool: "summarize_person", args: { id: me.metadata.name, uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "Prefers concise Chinese answers; explicit statement, 2026-10-21." } }
     : { text: "已更新" }, "chief");
   const me = (await writer.persons.findIdentity(LOCAL_ME))!;
   const turn = await writer.run("我更喜欢简洁中文，记一下。", "person-write");
@@ -605,7 +605,7 @@ export default function (pi) {
 test("Routine uses its dedicated Pi agent and independently configured package skills", { timeout: 30_000 }, async t => {
   let inputId = "";
   const fixture = await setup(t, (_request, index) => index === 0
-    ? { tool: "report_routine", args: { inputIds: [inputId], action: "done", summary: "checked", recent: "checked" } }
+    ? { tool: "report_routine", args: { inputIds: [inputId], action: "done", report: "checked" } }
     : { text: "Recorded" });
   const home = join(fixture.config.cwd, "work-home");
   const skill = join(fixture.config.cwd, "capabilities", "as-ops"); mkdirSync(skill, { recursive: true });
@@ -684,7 +684,7 @@ test("Route exposes only routing, catalog and shared-memory retrieval tools", as
     assert.match(JSON.stringify(request.messages), /You are Route/);
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
     for (const name of ["route_input", "list_topics", "read_input", "memory_search"]) assert.ok(names.includes(name), name);
-    for (const name of ["say", "assess_input", "create_work", "bash", "summary_person", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
+    for (const name of ["say", "assess_input", "create_work", "bash", "summarize_person", "memory_add", "memory_replace", "memory_remove"]) assert.equal(names.includes(name), false, name);
     return { text: answer };
   }, "route");
   const result = await fixture.run(JSON.stringify({ inputs: [{ id: "one", text: "event" }], topics: [] }), "route-one");
@@ -896,16 +896,20 @@ test("Pi waits for in-flight steer admission before releasing a settled binding"
 for (const kind of ["task", "routine"] as const)
 test(`${kind} native session resumes by ID with scoped reading, say and report tools`, { timeout: 30_000 }, async t => {
   let inputId = "", phase = 0;
+  let currentWork: () => import("../plugins/personal/resources.ts").WorkResource;
   const fixture = await setup(t, (request, index) => {
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
-    for (const tool of [`read_${kind}`, "read_input", "read_topic", "say", `report_${kind}`]) assert.ok(names.includes(tool));
+    for (const tool of [`read_${kind}`, "read_input", "read_topic", "say", `report_${kind}`, "upsert_note", `summarize_${kind}`]) assert.ok(names.includes(tool));
     assert.equal(names.includes("create_work"), false);
-    switch (index % 6) {
+    switch (index % 8) {
       case 0: return { tool: `read_${kind}`, args: {} };
       case 1: return { tool: "read_input", args: { inputId } };
       case 2: return { tool: "read_topic", args: {} };
       case 3: return { tool: "say", args: { text: `Verified phase ${phase}`, inputIds: [inputId] } };
-      case 4: return { tool: `report_${kind}`, args: { inputIds: [inputId], summary: `Verified ${phase}`, recent: "Evidence inspected", action: "done" } };
+      case 4: return { tool: "upsert_note", args: { version: currentWork().metadata.resourceVersion,
+        ...(currentWork().status.recent[0] ? { noteId: currentWork().status.recent[0]!.id } : {}), text: `Evidence verification phase ${phase}` } };
+      case 5: return { tool: `summarize_${kind}`, args: { version: currentWork().metadata.resourceVersion, summary: "Retain verified evidence and actual authorship." } };
+      case 6: return { tool: `report_${kind}`, args: { inputIds: [inputId], report: `Verified ${phase}`, action: "done" } };
       default: return { text: "Task progress recorded" };
     }
   });
@@ -920,6 +924,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     const work = await aide.work("me").create({ kind, title: "Inspect evidence", instruction: "unique-work-evidence", trigger: kind === "routine" ? { cron: null, timezone: "UTC", event: "sample" } : null });
     const { workType } = await import("../plugins/personal/resources.ts");
     const get = () => aide.personal.store.resources.get(workType(kind), work.id) as import("../plugins/personal/routine/model.ts").RoutineResource;
+    currentWork = get;
     if (kind === "routine") await aide.event({ id: "first",  topicId: "me", name: "sample", text: "initial observation" });
     inputId = aide.topics.inputStore.query("handlePending", work.uid!)[0]!.metadata.name;
     await aide.start(); await aide.settled();
@@ -952,6 +957,10 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     assert.deepEqual(get().status.agent, agent);
     assert.match(JSON.stringify(fixture.requests[before]!.messages), /unique-work-evidence/);
     assert.equal(aide.outputs().length, 2);
+    assert.equal(get().status.recent.length, 1);
+    assert.equal(get().status.recent[0]!.text, "Evidence verification phase 1");
+    assert.equal(get().status.summary, "Retain verified evidence and actual authorship.");
+    assert.equal(get().status.lastReport!.text, "Verified 1");
     assert.ok(aide.topics.inputStore.list().every(i => i.status.handle?.[work.uid!]?.completedAt));
   } finally { await aide.close(); }
 });
@@ -963,7 +972,7 @@ test(`${kind} ${attention} Input joins the active native invocation`, { timeout:
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   let firstId = "", laterId = "";
   const fixture = await setup(t, (_request, index) => index === 0 ? { text: "Inspecting", pause }
-    : index === 1 ? { tool: `report_${kind}`, args: { inputIds: [firstId, laterId], action: "done", summary: "Both inspected", recent: "Verified both inputs" } }
+    : index === 1 ? { tool: `report_${kind}`, args: { inputIds: [firstId, laterId], action: "done", report: "Both inspected" } }
     : { text: "Recorded" });
   const home = join(fixture.config.cwd, "task-active-home");
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" },

@@ -1,18 +1,19 @@
 import { agentCall } from "./observation/reference.ts";
 import { z } from "zod";
 import type { Resource, ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
-import { SUMMARY_CHARS, RECENT_CHARS } from "./context.ts";
+import { RECENT_CHARS } from "./context.ts";
 import { inputRef, resourceRef, pendingInputs } from "./input/state.ts";
 import type { InputSpec, InputStatus } from "./input/model.ts";
 import type { WorkSpec } from "./resources.ts";
 import type { WorkAgentStatus } from "./work-status.ts";
 import { nextOccurrence } from "./model.ts";
 export const WorkReportSchema = z.object({ inputIds: z.array(z.string().min(1)).max(99),
-  summary: z.string().min(1).max(SUMMARY_CHARS), recent: z.string().min(1).max(RECENT_CHARS),
+  report: z.string().trim().min(1).max(RECENT_CHARS),
   action: z.enum(["done", "wait", "ask"]), question: z.string().nullable().optional(), nextAt: z.string().nullable().optional(),
 }).strict();
 /**
- * @spec Work progress and exact input acknowledgements commit together; an end_turn never acknowledges business work.
+ * @spec Work progress, latest report and exact input acknowledgements commit together; an end_turn never acknowledges business work.
+ * @spec Reports never rewrite long-lived summary or create recent Notes.
  * @link docs/personal/input.md#研判与办理
  * @case tests/work-context.test.ts
  */
@@ -33,14 +34,13 @@ export async function reportWork(resources: ResourceClient, owner: Readonly<Reso
       if (receipt.completedAt) continue;
       if (!receipt.executionId || (receipt.executionId !== executionId && !receipt.lastError)) throw new Error(`Input is not admitted: ${id}`);
       writes.push({ operation: "patchStatus", resource: input, patch: { handle: { ...input.status.handle, [work.metadata.uid]: {
-        ...receipt, ...(toolCallId ? { completedBy: agentCall(work.status, toolCallId) } : {}), completedAt: at, result: { summary: args.recent, disposition: "completed" },
+        ...receipt, ...(toolCallId ? { completedBy: agentCall(work.status, toolCallId) } : {}), completedAt: at, result: { summary: args.report, disposition: "completed" },
       } } } });
     }
     const remaining = (await pendingInputs(resources, resourceRef(work))).some(input => !args.inputIds.includes(input.metadata.name));
     const recurring = work.kind === "Routine" && "trigger" in work.spec;
     const status = work.status.status === "paused" ? "paused" : args.action === "ask" ? "waiting" : args.action === "wait" ? "scheduled" : remaining ? "ready" : recurring ? "scheduled" : "done";
-    writes.push({ operation: "patchStatus", resource: work, patch: { status, summary: args.summary,
-      recent: [...work.status.recent, { at, text: args.recent }], question: args.action === "ask" ? args.question : null,
+    writes.push({ operation: "patchStatus", resource: work, patch: { status, lastReport: { at, text: args.report }, question: args.action === "ask" ? args.question : null,
       nextAt: status === "scheduled" ? (args.action === "wait" ? args.nextAt : recurring ? nextOccurrence(work.spec.trigger, new Date()) : null) : null, lastExecutionId: executionId } });
     try { await resources.commit(writes); return { inputIds: args.inputIds, status }; }
     catch (error) { if (attempt >= 8 || !/version conflict/i.test(String(error))) throw error; }

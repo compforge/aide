@@ -17,8 +17,8 @@ export function createTopicContextPanel() {
     if (!context?.recent.length) recent.append(element("p", "暂无近期记录。", "muted"));
     for (const entry of [...(context?.recent ?? [])].reverse()) {
       const item = element("article", undefined, "context-entry");
-      const time = element("time", new Date(entry.at).toLocaleString(), "muted");
-      time.dateTime = entry.at;
+      const time = element("time", new Date(entry.updatedAt).toLocaleString(), "muted");
+      time.dateTime = entry.updatedAt;
       const content = element("div", undefined, "markdown");
       updateMarkdown(content, entry.text);
       item.append(time, content);

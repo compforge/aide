@@ -24,7 +24,7 @@ plugins:
 执行凭证由 Connector 管理。公开 `metadata.me.userKey` 标记被服务的人，`identity()` 返回规范 provider/scope；
 Source 的 `userKeys` 仅决定观察哪些负责人，可以包含他人，不会把这些人标记成 Me。
 
-`me` 可省略。没有匹配的 Me 身份时，Input.relation 保持未知。Person 身份使用提供方标识、规范 host/project scope 和 user key；显示名不参与身份匹配，也不凭同名把不同平台的人物合并。Connector 读取会贡献人物身份和姓名，Chief 通过 `summary_person` 积累认识。
+`me` 可省略。没有匹配的 Me 身份时，Input.relation 保持未知。Person 身份使用提供方标识、规范 host/project scope 和 user key；显示名不参与身份匹配，也不凭同名把不同平台的人物合并。Connector 读取会贡献人物身份和姓名，Chief 通过 `summarize_person` 积累认识。
 
 ## 观察与恢复
 

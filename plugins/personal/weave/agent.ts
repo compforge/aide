@@ -42,7 +42,7 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
           const text = JSON.stringify({ name: t.spec.name, summary: t.status.summary, recent: t.status.recent });
           return result({ uid, version: understandingVersion(t), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } },
-      { name: "group_topics", label: "Group topics", description: "Propose a new parent containing 2-8 roots. Summary must preserve material understanding, explicit authors and confirmation state from every child. Never resolve an ambiguous I as Me or promote Aide proposals to user decisions. This schedules a safe handoff.",
+      { name: "group_topics", label: "Group topics", description: "Propose a new parent containing 2-8 roots. Summary retains long-lived, infrequently changing connections, explicit authors and confirmation state. Temporary progress stays in child Notes; handoff retains a bounded combined Note window. Do not copy temporary facts into summary. Never resolve an ambiguous I as Me or promote Aide proposals to user decisions. This schedules a safe handoff.",
         parameters: Type.Object({ topics: Type.Array(Type.Object({ uid: Type.String(), version: Type.String() }), { minItems: 2, maxItems: 8 }),
           name: Type.String({ minLength: 1, maxLength: 200 }), summary: Type.String({ minLength: 1, maxLength: summaryChars }) }),
         async execute(_id, args) { return result(await planGroup(plugins.resourceClient("personal"), active(), args, summaryChars)); } },

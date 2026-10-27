@@ -17,7 +17,7 @@ export function topicTools(store: Store, active: () => TopicResource): ToolDefin
         const all = subtree();
         if (!all.some(t => t.metadata.uid === parent)) throw new Error("Topic is outside this root");
         return result(contextPage(all.filter(t => t.spec.parentRef?.uid === parent).map(t => ({
-          uid: t.metadata.uid, name: t.spec.name, summary: t.status.summary.slice(0, 1200), version: understandingVersion(t),
+          uid: t.metadata.uid, name: t.spec.name, recent: t.status.recent.slice(-3).map(note => ({ ...note, text: note.text.slice(0, 500) })), summary: t.status.summary.slice(0, 1200), version: understandingVersion(t),
         })), offset));
       } },
     { name: "read_topic", label: "Read topic", description: "Read this root or a descendant's full understanding in text pages. Use its resource version for summarize_topic and understandingVersion for absorbed receipts.",

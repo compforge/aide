@@ -87,7 +87,9 @@ test("Work Reconcile validates requests and only explicit control can resume pau
   await service.requestInput(work.id, { action: "update", text: "change", changes: { trigger: { cron: "0 9 * * *", timezone: "UTC", event: null } } });
   await consume(work.id);
   assert.equal(service.read(work.id).trigger, null);
-  assert.match(service.read(work.id).recent.at(-1)!.text, /Task cannot/);
+  const fact = store.topics.inputStore.list().find(input => Object.values(input.status.handle ?? {}).some(receipt => receipt.result?.disposition === "rejected"))!;
+  assert.match(fact.status.handle![work.uid!]!.result!.summary, /Task cannot/);
+  assert.deepEqual(service.read(work.id).recent, []);
   await service.requestInput(work.id, { action: "pause", text: "暂停" }); await consume(work.id);
   assert.equal(service.read(work.id).status, "paused");
   await seedInput(store.topics, "pod", { topicId: "me", origin: "source", originId: "personal.environments", text: "Pod replaced" });
@@ -113,7 +115,7 @@ test("Work service writes wake the existing Worker and reconcile; deletion durin
   const running = new Promise<void>((resolve) => { started = resolve; });
   const aide = new Aide(root, fakeOptions({ chief: async () => { throw new Error("No topic expected"); },
     execute: async () => { started(); await gate;
-      return { action: "done", summary: "checked", recent: "checked", notification: "完成", question: null, nextAt: null }; },
+      return { action: "done", report: "checked", notification: "完成", question: null, nextAt: null }; },
   }, root), log);
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.start();
@@ -170,7 +172,7 @@ test("Chief appends the same original Input to two works without losing observat
     assert.match(work.inputs.at(-1)!.text, /executor workload changed/);
     assert.match(work.inputs.at(-1)!.note!, /核对 executor 变化/);
     assert.deepEqual(aide.topics.inputStore.get("changed")!.spec.observation, observation);
-    return { action: "done", summary: "verified", recent: "verified", notification: null, question: null, nextAt: null };
+    return { action: "done", report: "verified", notification: null, question: null, nextAt: null };
   } }, root), log);
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   const taskWork = await aide.work("me").create(task); taskId = taskWork.id;

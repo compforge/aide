@@ -14,7 +14,7 @@ import { fakeOptions, type Agent } from "./fake-harness.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
 
 const log = pino({ level: "silent" });
-const done: Outcome = { action: "done", summary: "Checked and finished", recent: "Checked and finished", notification: "完成了", question: null, nextAt: null };
+const done: Outcome = { action: "done", report: "Checked and finished", notification: "完成了", question: null, nextAt: null };
 const routine = { kind: "routine" as const, title: "处理待办", instruction: "检查并处理待办", trigger: { cron: null, timezone: "UTC", event: "start" } };
 const task = { kind: "task" as const, title: "处理待办", instruction: "检查并处理待办", trigger: null };
 
@@ -55,7 +55,7 @@ test(`${definition.kind} asks, persists a question across restart, then records 
   const agent: Agent = {
     execute: async (work) => {
       if (++runs === 1) return { ...done, action: "ask", question: "使用哪个项目？" };
-      assert.ok(work.recent.some((entry) => entry.text.includes("项目 A")));
+      assert.ok(work.inputs.some((entry) => entry.text.includes("项目 A")));
       return done;
     },
   };
@@ -95,7 +95,7 @@ test("Routine business completion depends on its tool report, independently of f
   await aide.start(); await aide.work("me").create(routine);
   await aide.event({ id: "first",  topicId: "me", name: "start", text: "start" }); await aide.settled();
   assert.equal(aide.works()[0]!.status, "scheduled");
-  assert.equal(aide.works()[0]!.summary, done.summary);
+  assert.equal(aide.works()[0]!.lastReport!.text, done.report);
 });
 
 test("Routine can be triggered by event, deduplicates deliveries, and stays active", async (t) => {
@@ -122,7 +122,7 @@ test("replacing a Task with a Routine uses distinct identities and retains the c
   await aide.settled();
   const prior = tools.read(original.id);
   const routine = (await tools.create({ kind: "routine", title: prior.title,
-    instruction: `${prior.instruction}\nPrevious result: ${prior.recent.at(-1)!.text}`,
+    instruction: `${prior.instruction}\nPrevious result: ${prior.lastReport!.text}`,
     trigger: { cron: null, timezone: "UTC", event: "check.again" } }));
   (await tools.delete(original.id, prior.revision));
   await aide.settled();
@@ -204,7 +204,7 @@ test("an update during execution is reconciled using the latest instruction", as
   await aide.settled();
   assert.equal(seen.length, 2);
   assert.equal(seen[1]?.instruction, "处理新目标");
-  assert.ok(seen[1]?.recent.some((entry) => entry.text === done.summary));
+  assert.equal(seen[1]?.lastReport?.text, done.report);
 });
 
 test("cron schedules use the specified timezone", () => {
@@ -254,7 +254,7 @@ test(`${definition.kind} requeues a dynamic wait and applies its own completion 
   // Timer-triggered reconciles are owned by Manager, not Aide's explicit wake promises.
   for (let attempt = 0; attempt < 200; attempt++) {
     const current = aide.work("me").read(work.id);
-    if (runs === 2 && current.status === expected && current.recent.length === 2) break;
+    if (runs === 2 && current.status === expected && current.lastReport?.text === done.report) break;
     await Bun.sleep(10);
   }
   assert.equal(runs, 2);

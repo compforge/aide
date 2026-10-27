@@ -94,7 +94,7 @@ function identityRow(identity: PersonIdentity = { provider: '', scope: '', id: '
   const remove = node('button', '移除', 'secondary'); remove.type = 'button'; remove.disabled = local; remove.onclick = () => { row.remove(); dirty = true; }; row.append(remove); $('person-identities').append(row);
 }
 function renderSummary() {
-  $('person-recent').replaceChildren(...selected.status.recent.map((entry) => node('p', `${entry.at} · ${entry.text}`)));
+  $('person-recent').replaceChildren(...selected.status.recent.map((entry) => node('p', `${entry.updatedAt} · ${entry.text}`)));
   const text = selected.status.summary;
   $('person-summary-read').innerHTML = renderMarkdown(text || '尚未积累认识。');
   $('person-summary-read').classList.toggle('muted', !text);

@@ -22,6 +22,9 @@ export function topicPath(all: readonly TopicResource[], leaf: TopicResource): T
 export function topicSubtree(all: readonly TopicResource[], root: TopicResource): TopicResource[] {
   return all.filter(t => !t.metadata.deletionTimestamp && topicPath(all, t).some(p => p.metadata.uid === root.metadata.uid));
 }
+/** Summary changes drive maintenance; full context versions still fence Weave and deletion. */
+export const summaryVersion = (topic: TopicResource): string =>
+  createHash("sha256").update(topic.status.summary).digest("hex");
 export const understandingVersion = (topic: TopicResource): string =>
   createHash("sha256").update(JSON.stringify([topic.status.summary, topic.status.recent])).digest("hex");
 
@@ -46,10 +49,15 @@ export async function ensureSourceTopic(resources: ResourceClient, key: string, 
   }
 }
 
-/** @spec Unabsorbed child versions are derived work. Leaf knowledge propagates bottom-up without new external Input. */
-export function pendingAbsorption(all: readonly TopicResource[], root: TopicResource) {
+/** @spec Summary changes can activate parent maintenance. Note-only changes join an already active review.
+ * @spec Full context review remains necessary before a child can be reclaimed.
+ * @link docs/personal/topic.md#研判与上下文
+ */
+export function pendingAbsorption(all: readonly TopicResource[], root: TopicResource, includeNotes = false) {
   return topicSubtree(all, root).filter(t => t.spec.parentRef && !t.status.weaveLock)
-    .filter(t => all.find(p => p.metadata.uid === t.spec.parentRef!.uid)?.status.absorbed?.[t.metadata.uid] !== understandingVersion(t))
+    .filter(t => includeNotes
+      ? all.find(p => p.metadata.uid === t.spec.parentRef!.uid)?.status.absorbed?.[t.metadata.uid] !== understandingVersion(t)
+      : all.find(p => p.metadata.uid === t.spec.parentRef!.uid)?.status.absorbedSummaries?.[t.metadata.uid] !== summaryVersion(t))
     .sort((a, b) => topicPath(all, b).length - topicPath(all, a).length)
     .map(t => ({ uid: t.metadata.uid, parentUid: t.spec.parentRef!.uid, version: understandingVersion(t) }));
 }
