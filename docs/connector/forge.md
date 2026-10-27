@@ -121,7 +121,11 @@ inputSince 随保留期限单调前进，避免过期基线对应的历史合并
 每次合并先冻结 Input 计划，再持久写 Input，最后推进 snapshot 基线与 batch offset；全部 items 消费后才提交 cursor。
 pending Input 在完成前受资源引用保护。重启先恢复冻结计划和 batch，重放使用同一 Input name。
 评审不自动轮询、不进入基础事实指纹；同一个 merged 的后续元数据变化不再形成合并 Input。
-Topic key 使用 forge + 目标仓 path + number；relation=observed 不表示 Me 发言或授权修改代码。
+Topic key 使用 `forge:${JSON.stringify([forge.name, repository.path])}`：同一 Forge 仓库的 PR/MR 共用一个 Topic，
+不同仓库或不同 Forge 保持独立。topicName 使用仓库 path，仅初始化新 Topic，不覆盖已有名称。
+PR 编号、revision 和完整快照保留在 Input 正文与 observation；观察基线、指纹与去重仍按 forge + path + number 区分。
+旧的 PR Topic 与历史 Input 不自动迁移；升级前已冻结的 pending Input 继续按原计划交付，新生成的 Input 使用仓库 key。
+relation=observed 不表示 Me 发言或授权修改代码。
 
 ## 覆盖与调度
 

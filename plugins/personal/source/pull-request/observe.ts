@@ -1,3 +1,4 @@
+import type { TopicLocator } from "../../topic/locator.ts";
 import { InputAttention } from "../../input/model.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ConnectorClient, PluginContext, PullRequestSnapshot, Resource } from "@compforge/aide-plugin";
@@ -20,6 +21,16 @@ type Source = Resource<PullRequestSourceSpec, PullRequestSourceStatus>;
 const iso = (n: number) => new Date(n).toISOString();
 
 /**
+ * @spec Pull requests in one Forge repository share a Topic; PR baselines retain their full identities.
+ * @why Repository context accumulates across merges while different repositories and Forges remain distinct.
+ * @case tests/pull-request-source.test.ts
+ * @link docs/connector/forge.md#pullrequestsource快照与-input
+ */
+export const repositoryTopics = {
+  locate: ({ forge, path }) => ({ selector: { kind: "key" as const, key: `forge:${JSON.stringify([forge.name, path])}` }, name: path }),
+} satisfies TopicLocator<PullRequestSnapshot["repository"]>;
+
+/**
  * @spec A frozen observation and Input are durable before its baseline advances. Repeated transitions keep separate occurrence IDs.
  * @spec The repocli cursor advances only after all frozen PullRequest facts have been consumed; platform discovery belongs to the reader.
  * @link docs/connector/forge.md
@@ -40,7 +51,7 @@ class PullRequestObservation {
       await bindSourceInput(SOURCES.pullRequests, this.resource, this.context.resources)(plan.name, plan.spec);
     }
     await this.save({ snapshot: { value: { ...this.tracked, [plan.key]: plan.entry }, observedAt: this.now }, pending: null });
-    this.context.logger.info("Forge change admitted as Input", { attributes: { watchId: this.resource.spec.id, inputId: plan.name, forge: plan.entry.snapshot.repository.forge.name, path: plan.entry.snapshot.repository.path, number: plan.entry.snapshot.number, state: plan.entry.snapshot.state ?? "unknown" } });
+    this.context.logger.info("Forge change admitted as Input", { attributes: { watchId: this.resource.spec.id, inputId: plan.name, topicKey: plan.spec.topicKey ?? null, forge: plan.entry.snapshot.repository.forge.name, path: plan.entry.snapshot.repository.path, number: plan.entry.snapshot.number, state: plan.entry.snapshot.state ?? "unknown" } });
   }
   private async observe(snapshot: PullRequestSnapshot, inputSince: string) {
     const identity = { repository: snapshot.repository, number: snapshot.number };
@@ -56,7 +67,8 @@ class PullRequestObservation {
     const sequence = (this.resource.status.sequence ?? 0) + 1;
     const name = digest([this.resource.metadata.uid, sequence]);
     const change = previous ? `${previous.snapshot.state ?? "未知"} → merged` : "首次观察到已合并";
-    const spec: SourceInput = { topicKey: `forge:${key}`, topicName: `${identity.repository.path} #${identity.number}`.slice(0, 80), relation: "observed", attention: InputAttention.Normal,
+    const location = repositoryTopics.locate(identity.repository);
+    const spec: SourceInput = { topicKey: location.selector.key, topicName: location.name.slice(0, 80), relation: "observed", attention: InputAttention.Normal,
       text: `PR/MR ${identity.repository.forge.name}/${identity.repository.path} #${identity.number}：${snapshot.title ?? ""}
 ${change}
 revision：${snapshot.headSha ?? "未知"}
