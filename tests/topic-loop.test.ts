@@ -38,7 +38,7 @@ test("Chief can assess material without claiming it; redelivery and repeated com
   const client = aide.runtime.plugins.resourceClient("personal");
   for (const id of ["one", "later"]) await routeTo(client, c.metadata, await submit(id));
   await client.patchStatus(aide.topics.resource("me")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
-  await admit(client, "one", c.metadata.uid, "live");
+  await admit(client, "one", "live");
   assert.deepEqual(aide.topics.get("me")!.pendingInputIds, ["one", "later"]);
   await assessAll(client, c, "live", { inputIds: ["one"], summary: "Nothing needs action" });
   await assessAll(client, c, "live", { inputIds: ["one"], summary: "Nothing needs action" });

@@ -84,6 +84,6 @@ root Chief 按拓扑顺序沿 parent 索引遍历自己整棵 Topic tree，取�
 
 明确未接收的 steer / followUp 可以撤回本次接纳；撤回前再次检查 executionId 与未完成状态。超时、断连和进程中断保留标记及异常，不自动重放。接纳与外部调用不是同一个事务，因此保证的是至多一次自动提交，不保证必达：标记成功后、发送前崩溃也需要核对。`assessExecution` 让执行结束或重启恢复按执行 ID 找到未完成 Input，归组后也能留下异常证据。
 
-原生会话引用 `agent` 用于观测，去重只依赖 executionId。`completedBy` 记录确认完成的工具调用，可以来自后来核对效果的执行，且不会改写原来的接纳身份。接纳、研判完成、Work 完成和 Output 送达是独立事实。新结构不兼容旧的 per-topic assess 与 Topic.notifiedInputs；本次不提供旧数据迁移。
+原生会话引用 `agent` 用于观测，去重只依赖 executionId。`completedBy` 记录确认完成的工具调用，可以来自后来核对效果的执行，且不会改写原来的接纳身份。Web / Lark 展示优先关联完成工具的 executionId，未记录完成工具时才回退到接纳 executionId。接纳、研判完成、Work 完成和 Output 送达是独立事实。新结构不兼容旧的 per-topic assess 与 Topic.notifiedInputs；本次不提供旧数据迁移。
 
 `tests/input-admission.test.ts` 覆盖跨 root 竞争、初始 prompt 与 followUp 竞争、批次重选、明确拒绝、未知结果保留、重启恢复和归组后按树查询材料。

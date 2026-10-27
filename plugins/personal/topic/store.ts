@@ -48,6 +48,11 @@ export class TopicStore {
     if (previous) return previous;
     return this.client.create(TOPIC_TYPE, { name: topicKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), trigger: topicTrigger() }, status: { receipts: [], summary: "", recent: [] } });
   }
+  /**
+   * @spec Presentation follows the completing execution when recorded; the original admission stays on Input for recovery.
+   * @link docs/personal/input.md#归属与-chief-通知
+   * @case tests/input-assessment.test.ts
+   */
   inputs(topicId?: string): TopicInput[] {
     const selected = topicId ? this.resource(topicId) : undefined;
     if (topicId && !selected) return [];
@@ -66,7 +71,7 @@ export class TopicStore {
       const receipt = input.status.assess;
       return [{ ...input, topicId: topic.spec.id, consumption: {
         phase: receipt?.completedAt ? "done" as const : undefined,
-        executionId: receipt?.executionId ?? receipt?.completedBy?.executionId ?? outputExecutions.get(input.metadata.uid), summary: receipt?.result?.summary,
+        executionId: receipt?.completedBy?.executionId ?? receipt?.executionId ?? outputExecutions.get(input.metadata.uid), summary: receipt?.result?.summary,
       } }];
     });
   }
