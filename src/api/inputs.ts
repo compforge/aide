@@ -22,7 +22,7 @@ export function inputList(aide: ChannelService, query: InputBrowseQuery) {
     ...state, id: input.metadata.name, uid: input.metadata.uid, at: input.metadata.creationTimestamp,
     origin: input.spec.origin, originId: input.spec.originId, label: definition(aide, input.spec),
     preview: inputPrinter.summarize(input), source: input.spec.originRef,
-    assessments: Object.keys(input.status.assess ?? {}).length, handlings: Object.keys(input.status.handle ?? {}).length,
+    assessments: input.status.assess ? 1 : 0, handlings: Object.keys(input.status.handle ?? {}).length,
   })) };
 }
 export function inputFilters(aide: ChannelService) {
@@ -53,7 +53,7 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
     return { ref, label: typeof label === "string" ? label : ref.name, available,
       ...(typeof topicId === "string" ? { topicId } : {}) };
   };
-  const attempt = (key: string, stage: "route" | "assess" | "handle", value: Attempt, assigned?: Assessment) => {
+  const attempt = (key: string, stage: "route" | "assess" | "handle", value: Attempt, assigned?: Handling) => {
     const target = assigned && consumer(assigned.resource), label = stage === "route" ? "路由" : stage === "assess" ? "根主题研判" : "Work 办理";
     const append = (suffix: string, title: string, at?: string, text?: string, status?: string) => timeline.push({
       id: `${key}:${suffix}`, stage, title, at, text, status, consumer: target, executionId: value.executionId,
@@ -62,8 +62,8 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
       stage === "handle" ? JSON.stringify((assigned as Handling).request, null, 2) : undefined, "assigned");
     if (stage === "handle" && (value as Handling).appliedAt) append("applied", "Work 已应用请求", (value as Handling).appliedAt, undefined, "applied");
     if (value.startedAt) append("started", `${label}开始（最近记录）`, value.startedAt, undefined, "started");
-    if (value.completedAt) append("completed", `${label}${assigned?.result?.disposition === "cancelled" ? "取消" : assigned?.result?.disposition === "rejected" ? "拒绝" : "完成"}`,
-      value.completedAt, assigned?.result?.summary, assigned?.result?.disposition ?? "completed");
+    if (value.completedAt) append("completed", `${label}${(value as Assessment).result?.disposition === "cancelled" ? "取消" : (value as Assessment).result?.disposition === "rejected" ? "拒绝" : "完成"}`,
+      value.completedAt, (value as Assessment).result?.summary, (value as Assessment).result?.disposition ?? "completed");
     if (value.lastError) append("error", `${label}异常记录`, undefined, value.lastError, value.completedAt ? "recorded" : "attention");
     if (!value.completedAt) append("pending", `${label}尚未确认完成`, undefined, undefined, "pending");
   };
@@ -75,7 +75,7 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
       status: `${route.result.topics.length} 个主题` });
     if (!route.completedAt && route.nextAttemptAt) timeline.push({ id: "route:retry", stage: "route", title: "路由等待重试", text: `计划重试时间：${route.nextAttemptAt}`, status: "retrying" });
   } else timeline.push({ id: "route:pending", stage: "route", title: "等待路由", status: "pending" });
-  for (const [key, value] of Object.entries(input.status.assess ?? {})) attempt(`assess:${key}`, "assess", value, value);
+  if (input.status.assess) attempt("assess", "assess", input.status.assess);
   for (const [key, value] of Object.entries(input.status.handle ?? {})) attempt(`handle:${key}`, "handle", value, value);
   const outputs = aide.topics.outputStore.list({ inputId: id });
   for (const output of outputs) {

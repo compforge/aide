@@ -21,9 +21,8 @@ const connector = `CASE
     THEN 'environments:' || ${field("spec.observation.environment")}
   ELSE '' END`;
 const unfinished = (stage: string) => `EXISTS (SELECT 1 FROM json_each(data, '$.object.status.${stage}') WHERE json_extract(value, '$.completedAt') IS NULL)`;
-const completed = `(${field("status.route.completedAt")} IS NOT NULL AND NOT ${unfinished("assess")} AND NOT ${unfinished("handle")})`;
-const errors = `(${field("status.route.lastError")} IS NOT NULL OR EXISTS
-  (SELECT 1 FROM json_each(data, '$.object.status.assess') WHERE json_extract(value, '$.lastError') IS NOT NULL) OR EXISTS
+const completed = `(${field("status.route.completedAt")} IS NOT NULL AND (json_type(data, '$.object.status.assess') IS NULL OR ${field("status.assess.completedAt")} IS NOT NULL) AND NOT ${unfinished("handle")})`;
+const errors = `(${field("status.route.lastError")} IS NOT NULL OR ${field("status.assess.lastError")} IS NOT NULL OR EXISTS
   (SELECT 1 FROM json_each(data, '$.object.status.handle') WHERE json_extract(value, '$.lastError') IS NOT NULL))`;
 const scope = `scope = 'personal' AND kind = 'aide.dev/Input' AND ${field("metadata.namespace")} = 'v1' AND ${field("metadata.deletionTimestamp")} IS NULL`;
 

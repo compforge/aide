@@ -146,7 +146,7 @@ test("Runner builds repository observers over IPC; a failed repository does not 
   const healthy = sources().find(s => s.spec.repository?.path === "org/healthy")!;
   assert.equal(inputs.list().length, 0); merged = true;
   await aide.runtime.enqueue("personal", PULL_REQUEST_SOURCE_TYPE, healthy.metadata.name);
-  await until(() => inputs.list().some(i => Object.values(i.status.assess ?? {}).some(a => a.completedAt)));
+  await until(() => inputs.list().some(i => i.status.assess?.completedAt));
   await until(() => sources().some(s => s.spec.repository?.path === "org/broken" && Boolean(s.status.issues?.length)));
   assert.equal(inputs.list().length, 1); assert(prompts.some(p => p.includes("merged"))); assert.equal(inventories, 1);
   await aide.close();

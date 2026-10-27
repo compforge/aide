@@ -208,7 +208,7 @@ test("real Runner discovers across IPC and routes a merged Input to Chief; disab
   const store = new PluginResourceStore({ home: root, pluginInstanceId: "personal" });
   const source = store.list<PullRequestSourceSpec, PullRequestSourceStatus>(PULL_REQUEST_SOURCE_TYPE).find(source => source.spec.id === "mine")!;
   await aide.runtime.enqueue("personal", PULL_REQUEST_SOURCE_TYPE, source.metadata.name);
-  await until(() => inputs.list().filter(i => Object.values(i.status.assess ?? {}).some(a => a.completedAt)).length === 1);
+  await until(() => inputs.list().filter(i => i.status.assess?.completedAt).length === 1);
   assert(sourceStore.list<PullRequestSourceSpec, PullRequestSourceStatus>(PULL_REQUEST_SOURCE_TYPE).find(source => source.spec.id === "unavailable")?.status.issues?.length);
   assert.ok(prompts.some(p => p.includes("merged"))); assert.equal(aide.topics.list().filter(c => !c.default).length, 1);
   assert.equal(aide.personal.store.read().works.length, 0);

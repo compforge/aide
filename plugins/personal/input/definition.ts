@@ -19,16 +19,19 @@ export const InputSpecSchema = z.object({ source: AddressSchema.optional(), topi
 
 const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict();
 const attempt = z.object({ agent: AgentStatusSchema.optional(), completedBy: AgentCallSchema.optional(), executionId: z.string().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(), lastError: z.string().optional() }).strict();
-const assessment = z.object({ completedAt: z.string().optional(), completedBy: AgentCallSchema.optional(), resource: ref, assignedAt: z.string(), result: z.object({ summary: z.string(), disposition: z.enum(["completed", "cancelled", "rejected"]).optional() }).strict().optional() }).strict();
+const assessment = attempt.extend({ result: z.object({ summary: z.string(), disposition: z.enum(["completed", "cancelled", "rejected"]).optional() }).strict().optional() });
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   type: INPUT_TYPE,
   schema: { spec: InputSpecSchema, status: z.object({
     route: attempt.extend({ nextAttemptAt: z.string().optional(), attempts: z.number().int().nonnegative().optional(),
       result: z.object({ topics: z.array(ref), reason: z.string() }).strict().optional() }).optional(),
-    assess: z.record(z.string(), assessment).optional(),
-    handle: z.record(z.string(), assessment.extend({ ...attempt.shape, appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
+    assess: assessment.optional(),
+    handle: z.record(z.string(), assessment.extend({ resource: ref, assignedAt: z.string(), appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
   }).strict() },
   validator: { update(previous, current) {
+    if (previous.status.assess?.executionId && current.status.assess?.executionId
+      && previous.status.assess.executionId !== current.status.assess.executionId) throw new Error("Input is already admitted to a Chief execution");
+    if (previous.status.assess?.completedAt && !isDeepStrictEqual(previous.status.assess, current.status.assess)) throw new Error("Input assessment is already completed");
     if (!isDeepStrictEqual(previous.spec, current.spec)) throw new Error("Input content is immutable");
     if (previous.status.route?.completedAt && !isDeepStrictEqual(previous.status.route.result, current.status.route?.result)) throw new Error("Input Topic binding is immutable");
   } },
@@ -36,13 +39,14 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   indexes: {
     topic: r => r.status.route?.result?.topics.map(t => t.uid) ?? [],
     routePending: r => r.status.route?.completedAt ? [] : ["pending"],
-    assess: r => Object.keys(r.status.assess ?? {}),
-    assessPending: r => Object.entries(r.status.assess ?? {}).filter(([, s]) => !s.completedAt).map(([uid]) => uid),
+    assessPending: r => r.status.assess && !r.status.assess.completedAt ? r.status.route?.result?.topics.map(t => t.uid) ?? [] : [],
+    assessReady: r => r.status.assess && !r.status.assess.completedAt && !r.status.assess.executionId ? r.status.route?.result?.topics.map(t => t.uid) ?? [] : [],
+    assessExecution: r => r.status.assess?.executionId && !r.status.assess.completedAt ? [r.status.assess.executionId] : [],
     handle: r => Object.keys(r.status.handle ?? {}),
     handlePending: r => Object.entries(r.status.handle ?? {}).filter(([, s]) => !s.completedAt).map(([uid]) => uid),
   },
   retention: { releasedAt: r => {
-    const completed = [r.status.route?.completedAt, ...Object.values(r.status.assess ?? {}).map(s => s.completedAt), ...Object.values(r.status.handle ?? {}).map(s => s.completedAt)];
+    const completed = [r.status.route?.completedAt, ...(r.status.assess ? [r.status.assess.completedAt] : []), ...Object.values(r.status.handle ?? {}).map(s => s.completedAt)];
     return completed.every(Boolean) ? (completed as string[]).sort().at(-1) : undefined;
   }, references: () => [] },
 };

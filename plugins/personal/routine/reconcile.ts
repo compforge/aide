@@ -11,7 +11,7 @@ async function cleanup(context: PluginContext, execution: ReconcileContext, rout
     const closed = await execution.verbs.harness({ operation: "close", ...routine.status.agent, sessionId: routine.status.agent.sessionId, timeoutMs: 30_000 });
     if (closed.state !== "success" || closed.value.outcome !== "accepted") throw new Error("Routine native session is still busy or could not close");
   }
-  await cancelAssignments(context.resources, resourceRef(routine), "handle");
+  await cancelAssignments(context.resources, resourceRef(routine));
 }
 const loopWatch: Watch = { resourceType: ROUTINE_TYPE, handler: { create: async () => [], delete: async () => [], update: async ({ oldObject, newObject }) => {
   const a = oldObject as RoutineResource, b = newObject as RoutineResource;

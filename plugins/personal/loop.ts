@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { prepareAgent, saveAgent } from "./session.ts";
 import type { PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
-import { InputAttention, inputAttention, type InputSpec } from "./input/model.ts";
-import { inputRef, pendingInputs, resourceRef, changeAttempt, attemptOf, attemptPatch, assessments, topicScope, type Input } from "./input/state.ts";
+import { InputAttention, inputAttention, INPUT_TYPE, type InputSpec } from "./input/model.ts";
+import { inputRef, pendingInputs, resourceRef, changeAttempt, changeAssessment, attemptOf, attemptPatch, belongsToTopic, topicScope, type Input } from "./input/state.ts";
 export { inputRef } from "./input/state.ts";
 /** A persistent native session owns context; each invocation has a separate durable admission identity. */
 export const LoopExecutionSchema = z.object({ id: z.string(), startedAt: z.string(), admissionRevision: z.number().int().nonnegative().optional() }).strict();
@@ -17,7 +17,7 @@ export const canActivate = (input: InputSpec, owner: Pick<LoopResource, "kind">)
 export function eligible(input: Input, owner: Readonly<LoopResource>, topicUids = new Set([owner.metadata.uid])): boolean {
   if (input.metadata.deletionTimestamp) return false;
   if (owner.kind === "Topic") return !(owner.spec as { parentRef?: unknown }).parentRef
-    && assessments(input, resourceRef(owner), topicUids).some(([, a]) => !a.completedAt);
+    && belongsToTopic(input, resourceRef(owner), topicUids) && !!input.status.assess && !input.status.assess.completedAt && !input.status.assess.executionId;
   const receipt = attemptOf(input, resourceRef(owner));
   if (receipt?.completedAt) return false;
   if (owner.kind === "Route") return !receipt?.executionId || (!!input.status.route?.nextAttemptAt && Date.parse(input.status.route.nextAttemptAt) <= Date.now());
@@ -28,7 +28,7 @@ export async function nextInputs(resources: ResourceClient, owner: Readonly<Loop
   scope?: readonly import("./topic/model.ts").TopicResource[]) {
   const topics = scope ?? await topicScope(resources, resourceRef(owner));
   const topicUids = new Set(topics.map(t => t.metadata.uid));
-  const inputs = await pendingInputs(resources, resourceRef(owner), topics);
+  const inputs = await pendingInputs(resources, resourceRef(owner), topics, "assessReady");
   return [...inputs].filter(i => eligible(i, owner, topicUids)).sort((a, b) =>
     (owner.kind === "Route" ? 0 : attentionOrder[inputAttention(a.spec)] - attentionOrder[inputAttention(b.spec)])
     || a.metadata.creationTimestamp.localeCompare(b.metadata.creationTimestamp) || a.metadata.name.localeCompare(b.metadata.name)).slice(0, limit);
@@ -46,16 +46,15 @@ export async function submitPending(context: PluginContext, execution: Reconcile
   let retry = false;
   const topics = await topicScope(context.resources, resourceRef(owner));
   const topicUids = new Set(topics.map(t => t.metadata.uid));
-  for (const input of await pendingInputs(context.resources, resourceRef(owner), topics)) {
+  for (const input of await pendingInputs(context.resources, resourceRef(owner), topics, "assessReady")) {
     if (!eligible(input, owner, topicUids) || !canActivate(input.spec, owner)) continue;
-    if (owner.kind === "Topic" && (owner.status as import("./topic/model.ts").TopicStatus).notifiedInputs?.includes(input.metadata.uid)) continue;
     const result = await execution.verbs.action<{ accepted: boolean; reason?: string }>(owner.kind === "Topic" ? "submit_topic" : "submit_input", { inputId: input.metadata.name, operation: immediate(input.spec) ? "steer" : "followUp" });
     if (result.state === "failure") throw new Error(`Agent Input admission failed: ${result.error ?? "unknown error"}`);
     if (result.state === "success" && !result.value.accepted && ["not_running", "admission_conflict"].includes(result.value.reason ?? "")) retry = true;
   }
   return retry ? { requeueAfterMs: 100 } : undefined;
 }
-/** @spec Only the owning Reconcile invokes its Agent. Chief progress stays on Topic; Route and Work retain per-Input execution receipts. */
+/** @spec Only the owning Reconcile invokes its Agent. All automatic input paths persist their admission before dispatch; version conflicts never dispatch stale batches. */
 export async function runInput(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>, target: string, prompt: string, inputId?: string, batchIds: readonly string[] = []) {
   const current = await context.resources.get<unknown, LoopStatus>(resourceRef(owner));
   if (!current || current.metadata.deletionTimestamp || current.status.execution) return;
@@ -67,20 +66,25 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   const topicUids = new Set(topics.map(t => t.metadata.uid));
   if (inputs.some(input => !input || !eligible(input, current, topicUids))) return;
   const startedAt = new Date().toISOString();
-  await context.resources.commit([
-    { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, admissionRevision: 0 },
-      ...(current.kind === "Topic" ? { notifiedInputs: [...new Set([
-        ...((current.status as import("./topic/model.ts").TopicStatus).notifiedInputs ?? []), ...(inputs as Input[]).map(i => i.metadata.uid)])],
-        notifiedWeaveRevision: (owner.status as import("./topic/model.ts").TopicStatus).weaveRevision ?? 0, lastError: null } : {}) } },
-    ...(current.kind === "Topic" ? [] : inputs.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: attemptPatch(input!, resourceRef(current), {
-      executionId: execution.executionId, agent: undefined, startedAt, nextAttemptAt: undefined,
-      ...(current.kind === "Route" ? { attempts: (input!.status.route?.attempts ?? 0) + 1 } : {}) }) }))),
-  ]);
+  try {
+    await context.resources.commit([
+      { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, admissionRevision: 0 },
+        ...(current.kind === "Topic" ? { notifiedWeaveRevision: (owner.status as import("./topic/model.ts").TopicStatus).weaveRevision ?? 0, lastError: null } : {}) } },
+      ...inputs.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: attemptPatch(input!, resourceRef(current), {
+        executionId: execution.executionId, agent: undefined, startedAt, lastError: undefined, nextAttemptAt: undefined,
+        ...(current.kind === "Route" ? { attempts: (input!.status.route?.attempts ?? 0) + 1 } : {}) }, topicUids) })),
+    ]);
+  } catch (error) {
+    // Reconcile reselects the remaining inputs and rebuilds its prompt after a competing claim.
+    if (current.kind === "Topic" && /version conflict/.test(String(error))) return;
+    throw error;
+  }
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", inputIds, executionId: execution.executionId } });
   let completed = false;
   let error = "Agent ended without confirming input completion";
   try {
     const agent = await prepareAgent(context.resources, execution, current, target);
+    for (const input of current.kind === "Topic" ? inputs as Input[] : []) await changeAssessment(context.resources, input, execution.executionId, { agent });
     for (const id of current.kind === "Topic" ? [] : inputIds) await changeAttempt(context.resources, id, resourceRef(current), receipt =>
       receipt?.executionId === execution.executionId && !receipt.completedAt ? { agent } : {});
     const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Topic" ? "Chief" : current.kind, prompt, timeoutMs: 172800_000 });
@@ -92,7 +96,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   return completed;
 }
 /**
- * @spec Route and Work retain admission evidence; Chief failures stay on Topic and never claim Input ownership.
+ * @spec Admission evidence survives completion of the invocation and restart; unknown effects never automatically replay.
  * @why Chief idle time starts after every execution, including failure or recovery; missed timer checks never force continuation.
  * @case tests/topic-trigger.test.ts
  */
@@ -101,11 +105,12 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
   for (let n = 0; ; n++) {
     const latest = await context.resources.get<unknown, LoopStatus>(resourceRef(owner));
     if (!latest || latest.status.execution?.id !== executionId) return;
-    const unfinished = latest.kind === "Topic" ? [] : (await pendingInputs(context.resources, resourceRef(latest)))
-      .filter(i => attemptOf(i, resourceRef(latest))?.executionId === executionId);
+    const unfinished = latest.kind === "Topic"
+      ? await context.resources.list<import("./input/model.ts").InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessExecution", value: executionId } })
+      : (await pendingInputs(context.resources, resourceRef(latest))).filter(i => attemptOf(i, resourceRef(latest))?.executionId === executionId);
     try {
       await context.resources.commit([
-        ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error,
+        ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: latest.kind === "Topic" ? { assess: { ...i.status.assess, lastError: error || "Chief ended without confirming input completion" } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error,
           ...(latest.kind === "Route" ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
         { operation: "patchStatus", resource: latest, patch: { execution: null, ...(latest.kind === "Topic" ? { idleSince: new Date().toISOString(), lastError: error || null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
           lastExecutionId: executionId,

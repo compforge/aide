@@ -176,7 +176,8 @@ test("fanout is atomic: failed commit leaves no assignments; retry records every
   assert.deepEqual(aide.topics.inputStore.get("fanout")!.status, {});
   await deliver(ctx, input, [a.metadata, b.metadata], "shared");
   const committed = aide.topics.inputStore.get("fanout")!;
-  assert.equal(Object.keys(committed.status.assess!).length, 2);
+  assert.deepEqual(committed.status.assess, {});
+  assert.equal(committed.status.route!.result!.topics.length, 2);
   assert.ok(committed.status.route?.completedAt);
   await deliver(ctx, input, [b.metadata], "different retry must not change the decision");
   assert.deepEqual(aide.topics.inputStore.get("fanout"), committed);

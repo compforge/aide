@@ -1,7 +1,7 @@
 import { inspect, selectNodes, type JobView, type Node, type Operation, type SessionView, type ToolCall, type Input as ObservedInput } from "@compforge/agent-observation";
 import type { ReadSession } from "../../../src/observation.ts";
 import type { Input } from "../input/state.ts";
-import type { Attempt, Assessment } from "../input/model.ts";
+import type { Attempt, Handling } from "../input/model.ts";
 import type { Output } from "../output/model.ts";
 import type { AgentCall } from "./reference.ts";
 
@@ -10,7 +10,7 @@ const key = (agent: Agent) => JSON.stringify([agent.harness, agent.sessionId]);
 const value = (raw: unknown): NonNullable<Operation["data"]> => JSON.parse(JSON.stringify(raw));
 const attempts = (input: Input): [string, Attempt][] => [
   ...(input.status.route ? [["route", input.status.route] as [string, Attempt]] : []),
-  ...Object.entries(input.status.assess ?? {}).map(([uid, receipt]): [string, Attempt] => [`assess:${uid}`, receipt]),
+  ...(input.status.assess ? [["assess", input.status.assess] as [string, Attempt]] : []),
   ...Object.entries(input.status.handle ?? {}).map(([uid, receipt]): [string, Attempt] => [`handle:${uid}`, receipt]),
 ];
 export const associatedOutputs = (input: Input, outputs: readonly Output[]) => outputs.filter(o =>
@@ -69,7 +69,7 @@ export async function inputJob(input: Input, allOutputs: readonly Output[], read
   };
   const calls: { operation: string; call: AgentCall }[] = [];
   for (const [id, receipt] of receipts) {
-    const assigned = receipt as Assessment;
+    const assigned = receipt as Handling;
     const operation: Operation = { kind: "operation", id, operation: `aide.${id.split(":")[0]}`, data: value(receipt),
       ...timing(id, receipt.startedAt ?? assigned.assignedAt, receipt.completedAt, issues),
       status: receipt.completedAt ? (assigned.result?.disposition === "cancelled" ? "cancelled" : "completed") : receipt.lastError ? "outcome_unknown" : receipt.startedAt ? "running" : "unknown",

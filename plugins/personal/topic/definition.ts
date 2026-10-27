@@ -40,7 +40,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   schema: { spec: z.object({ id: z.string(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     trigger: TopicTriggerSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({  receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
-      notifiedInputs: z.array(z.string()).optional(), weaveRevision: z.number().int().nonnegative().optional(),
+      weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).optional(), absorbedSummaries: z.record(z.string(), z.string()).optional(),
       nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), nextTriggerAt: z.string().datetime().nullable().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
@@ -54,8 +54,8 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     if (resource.status.execution) throw new TopicDeletionBlocked("busy", "Topic is busy");
     if (context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).some(t => t.spec.parentRef?.uid === resource.metadata.uid)) throw new TopicDeletionBlocked("children", "Topic still has children");
     const pending = context.list<InputSpec, InputStatus>(INPUT_TYPE).some(i =>
-      (i.status.route?.result?.topics.some(t => t.uid === resource.metadata.uid) || i.status.assess?.[resource.metadata.uid])
-      && Object.values(i.status.assess ?? {}).some(a => !a.completedAt));
+      (i.status.route?.result?.topics.some(t => t.uid === resource.metadata.uid))
+      && !!i.status.assess && !i.status.assess.completedAt);
     if (pending) throw new TopicDeletionBlocked("busy", "Topic has pending Input");
     if (WORK_TYPES.some(type => context.list<WorkResource["spec"], WorkResource["status"]>(type).some(w => w.spec.topicId === resource.spec.id))) throw new TopicDeletionBlocked("work", "Topic still owns Work");
     if (resource.spec.parentRef) {

@@ -70,7 +70,7 @@ test("Model end_turn leaves unreviewed material without automatically resending 
   const { aide, submit, root, options } = setup(t, { complete: false, async chief() { calls++; return "I handled it"; } });
   await aide.topics.ensure("me"); await aide.start(); await submit("unacknowledged"); await aide.settled();
   assert.equal(calls, 1); assert.equal(aide.topics.input("unacknowledged", "me")!.consumption.phase, undefined);
-  assert.ok(aide.topics.resource("me")!.status.notifiedInputs?.includes(aide.topics.inputStore.get("unacknowledged")!.metadata.uid));
+  assert.ok(aide.topics.inputStore.get("unacknowledged")!.status.assess?.executionId);
   await aide.close();
   const restarted = new Aide(root, options, pino({ level: "silent" }));
   try { await restarted.start(); await restarted.settled(); assert.equal(calls, 1); }
@@ -116,7 +116,7 @@ for (const kind of ["Topic", "Route"] as const) for (const failure of ["write fa
       : reconcileRouteAgent(context, execution(id), await read() as RouteResource);
     await assert.rejects(reconcile("attempted"), new RegExp(failure));
     assert.equal((await read()).status.execution?.id, "attempted");
-    assert.equal(!!attemptOf(aide.topics.inputStore.get("first")!, resourceRef(resource))?.executionId, kind === "Route");
+    assert.equal(!!attemptOf(aide.topics.inputStore.get("first")!, resourceRef(resource))?.executionId, true);
     await reconcile("finalization-retry");
     assert.equal((await read()).status.execution, null);
     assert.ok(kind === "Topic" ? ((await read()).status as TopicResource["status"]).lastError : attemptOf(aide.topics.inputStore.get("first")!, resourceRef(resource))?.lastError);
@@ -126,7 +126,7 @@ for (const kind of ["Topic", "Route"] as const) for (const failure of ["write fa
 
     await reconcile("next-call");
     assert.equal(calls, 2);
-    assert.equal(attemptOf(aide.topics.inputStore.get("first")!, resourceRef(resource))?.executionId, kind === "Route" ? "attempted" : undefined);
+    assert.equal(attemptOf(aide.topics.inputStore.get("first")!, resourceRef(resource))?.executionId, "attempted");
   });
 }
 
@@ -138,8 +138,8 @@ test("Chief notification bookkeeping does not wake Topic Reconcile", async t => 
   const topic = await aide.topics.ensure("me");
   const definitions: any[] = [];
   registerTopics({ resources, instance: { config: {} }, controllers: { register(definition: unknown) { definitions.push(definition); } } } as unknown as PluginContext);
-  const notified = await resources.patchStatus(topic, { notifiedInputs: ["material"], notifiedWeaveRevision: 1 });
-  const reverted = await resources.patchStatus(notified, { notifiedInputs: [], notifiedWeaveRevision: 0 });
+  const notified = await resources.patchStatus(topic, { notifiedWeaveRevision: 1 });
+  const reverted = await resources.patchStatus(notified, { notifiedWeaveRevision: 0 });
   const changed = await resources.patchStatus(reverted, { weaveRevision: 2 });
   for (const definition of definitions) {
     const watch = definition.watches.find((w: any) => w.resourceType.kind === "Topic");

@@ -210,9 +210,9 @@ Weave 记录候选 UID、新父 UID、组织理由、认识吸收版本与交接
 
 一个 root Topic 对应一个 Chief，常规读取范围是该 root 的整棵 Topic 子树。宿主和 Runner 从当前 Topic 出发，按 parent UID 索引逐层读取子节点，直到没有下一层；这是父节点先于子节点的拓扑排序，以广度优先遍历实现。Input、Work 与认识查询限定在所得子树内，不先枚举全局 Topic。Weave 修改父子关系后，下次读取自然反映新的子树，Input 和 Work 的原始归属不变。
 
-Topic 的接收 Reconcile 查询子树的 Input.assessPending，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 只挂载，Chief 被其它原因激活时可以主动处理。
+Topic 的接收 Reconcile 查询子树的 Input.assessReady，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 只挂载，Chief 被其它原因激活时可以主动处理。
 
-Input 不保存 Chief 的接纳 executionId、agent 或占有关系。Topic 的 `notifiedInputs` 保存尚未完成研判的材料通知进度，完成后清理，避免同一个 root 的重复 Reconcile 重复发送；它不限制另一个 root 查看这些材料。`assess_input` 记录所属 Topic 的研判结果及可选的完成工具证据，不要求当前 Chief 事先领取。执行状态、原生 session 和失败原因保留在 Topic；不确定结果不自动重发已通知的材料，后续回顾需先核对已有 Work 和副作用。
+Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Topic Reconcile 在 prompt / steer / followUp 之前，通过资源事务竞争 Input 接纳；已有接纳或已完成则忽略。Topic 不保存逐条 Input 的通知进度，仍保存 execution、agent 与 Weave 通知版本。assess_input 原子完成唯一研判及 Work 交接，主动读取材料不会重新接纳；后续核对可以提交完成证据。未知投递结果保留标记，不自动重放。完整查询、并发和恢复契约见 [Input](input.md#归属与-chief-通知)。
 
 明确拒绝 steer / followUp 时恢复待通知状态。status.agent 保存 harness 和原生 sessionId，恢复由 SDK 承担。旧 Chief 自然结束后再释放成为子节点的原生句柄，不修改历史。
 

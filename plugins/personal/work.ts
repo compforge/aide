@@ -51,7 +51,7 @@ export class WorkService {
     await this.store.client.create(INPUT_TYPE, { name: inputId,
       spec: { origin: "chief", originId: "personal.chief", text: content, topicId: this.topicId }, status: {
         route: { completedAt: at, result: { topics: [resourceRef(topic)], reason: "Independent Chief decision" } },
-        assess: { [topic.metadata.uid]: { resource: resourceRef(topic), assignedAt: at, completedAt: at, result: { summary: content } } },
+        assess: { completedAt: at, result: { summary: content } },
       } });
     this.log.info({ inputId, topicId: this.topicId }, "Chief decision recorded");
     return { inputId };
@@ -69,7 +69,7 @@ export class WorkService {
         ...(!inputId ? [{ operation: "create" as const, type: INPUT_TYPE, name: initialInputId,
           spec: { origin: "chief", originId: "personal.chief", text: work.instruction, topicId: this.topicId }, status: {
             route: { completedAt: at, result: { topics: [resourceRef(topic)], reason: "Independent Chief task" } },
-            assess: { [topic.metadata.uid]: { resource: resourceRef(topic), assignedAt: at, completedAt: at, result: { summary: work.instruction } } },
+            assess: { completedAt: at, result: { summary: work.instruction } },
           } }] : []),
         { operation: "create", type: workType("task"), name: work.id,
           spec: { topicId: work.topicId, title: work.title, instruction: work.instruction, revision: work.revision, initialInputId },
@@ -96,7 +96,7 @@ export class WorkService {
       { operation: "patchStatus", resource: target, patch: { idleSince: null, agentStoppedAt: null } },
       { operation: "create", type: INPUT_TYPE, name, spec: { origin: "chief", originId: "personal.chief", text, topicId: c.spec.id, observation: { work: resourceRef(target), request: parsed } }, status: {
         route: { completedAt: at, result: { topics: [resourceRef(c)], reason: "Independent Chief request" } },
-        assess: { [c.metadata.uid]: { resource: resourceRef(c), assignedAt: at, completedAt: at, result: { summary: text } } },
+        assess: { completedAt: at, result: { summary: text } },
         handle: { [target.metadata.uid]: { resource: resourceRef(target), assignedAt: at, request: parsed } },
       } },
     ]);

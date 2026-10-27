@@ -184,7 +184,7 @@ test("An unacknowledged Input times out with failed-run evidence, never a succes
       revision: "fixture", datasetHash: "fixture", createAdapter: options.createAdapter }), /did not finish/);
     const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
     assert.equal(result.state, "error"); assert.equal(result.batches, 0);
-    assert.ok(result.inputs.some((i: any) => Object.values(i.input.status.assess ?? {}).some((s: any) => !s.completedAt)));
+    assert.ok(result.inputs.some((i: any) => i.input.status.assess && !i.input.status.assess.completedAt));
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

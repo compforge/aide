@@ -61,9 +61,9 @@ test("Completion requires every consumer receipt; exceptions remain searchable w
   const { store } = setup(t);
   const at = new Date().toISOString(), ref = { ...TOPIC_TYPE, namespace: "v1" as const, name: "gone", uid: "gone-uid" };
   store.submit("test", "unrouted", { origin: "channel", originId: "web", text: "pending" });
-  store.submit("test", "pending-work", observation(1), { ...finished(), assess: { a: { resource: ref, assignedAt: at, completedAt: at } },
+  store.submit("test", "pending-work", observation(1), { ...finished(), assess: { completedAt: at },
     handle: { w: { resource: { ...ref, kind: "Task" }, assignedAt: at, request: { action: "context" } } } });
-  store.submit("test", "cancelled", observation(2), { ...finished(), assess: { a: { resource: ref, assignedAt: at, completedAt: at, result: { summary: "Deleted", disposition: "cancelled" } } } });
+  store.submit("test", "cancelled", observation(2), { ...finished(), assess: { completedAt: at, result: { summary: "Deleted", disposition: "cancelled" } } });
   store.submit("test", "recovered", observation(3), { route: { ...finished().route, lastError: "Previous error" } });
   assert.deepEqual(new Set(browseInputs(store, { state: "pending" }).items.map(i => i.input.metadata.name)), new Set(["unrouted", "pending-work"]));
   assert.equal(browseInputs(store, { state: "completed" }).total, 2);
@@ -109,8 +109,7 @@ test("Timeline retains independent consumers, resolves exact UIDs and includes o
   let input = store.submit("test", "shared & #1", observation(1));
   const at = (n: number) => new Date(Date.parse(input.metadata.creationTimestamp) + n * 1000).toISOString();
   input = store.update(input, { route: { startedAt: at(1), completedAt: at(2), attempts: 2, result: { topics: [resourceRef(a), resourceRef(b)], reason: "两个话题都相关" } },
-    assess: { [a.metadata.uid]: { resource: resourceRef(a), assignedAt: at(2), completedAt: at(4), result: { summary: "交给 Task" } },
-      [b.metadata.uid]: { resource: resourceRef(b), assignedAt: at(2), completedAt: at(5), result: { summary: "目标已删除", disposition: "cancelled" } } },
+    assess: { completedAt: at(4), result: { summary: "交给 Task" } },
     handle: { [task.metadata.uid]: { resource: resourceRef(task), assignedAt: at(4), appliedAt: at(5), startedAt: at(6), executionId: "task-run", request: { action: "context", note: "核对" }, lastError: "需要核对既有副作用" } } });
   aide.topics.resources.requestDeletion(TOPIC_TYPE, b.metadata.name);
   aide.topics.resources.finalizeDeletion(TOPIC_TYPE, b.metadata.name);
@@ -124,7 +123,7 @@ test("Timeline retains independent consumers, resolves exact UIDs and includes o
   assert.equal(detail.routeAttempts, 2);
   assert.ok(detail.timeline.some(e => e.title === "Work 已应用请求"));
   assert.ok(detail.timeline.some(e => e.stage === "handle" && e.title.includes("尚未确认完成")));
-  assert.ok(detail.timeline.some(e => e.stage === "assess" && e.status === "cancelled"));
+  assert.ok(detail.timeline.some(e => e.stage === "assess" && e.status === "completed"));
   assert.equal(detail.timeline.find(e => e.consumer?.ref.uid === b.metadata.uid)!.consumer!.available, false);
   assert.equal(detail.timeline.find(e => e.consumer?.ref.uid === a.metadata.uid)!.consumer!.topicId, "a");
   assert.equal(detail.timeline.find(e => e.title === "Work 办理异常记录")!.at, undefined);

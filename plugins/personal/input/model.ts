@@ -62,11 +62,11 @@ export interface Attempt {
   lastError?: string;
 }
 export interface Assessment extends Attempt {
-  resource: ResourceRef & { uid: string };
-  assignedAt: string;
   result?: { summary: string; disposition?: "completed" | "cancelled" | "rejected" };
 }
 export interface Handling extends Assessment {
+  resource: ResourceRef & { uid: string };
+  assignedAt: string;
   /** Request applied; contextual handling still awaits execution confirmation. */
   appliedAt?: string;
   request: import("../model.ts").WorkInputRequest;
@@ -77,6 +77,12 @@ export interface InputStatus {
     attempts?: number;
     result?: { topics: Array<ResourceRef & { uid: string }>; reason: string };
   };
-  assess?: Record<string, Assessment>;
+  /**
+   * @spec One global assessment. All automatic Chief submissions atomically claim executionId before dispatch.
+   * @why Multiple routed Topics and reparenting must not automatically submit the same Input twice.
+   * @link docs/personal/input.md#归属与-chief-通知
+   * @case tests/input-admission.test.ts
+   */
+  assess?: Assessment;
   handle?: Record<string, Handling>;
 }

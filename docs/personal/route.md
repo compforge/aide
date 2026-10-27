@@ -9,7 +9,7 @@ Channel / Source → Input
                    ├─ 命中 ─────────────┐
                    └─ followup → Route Agent → route_input
                                          ↓
-                Input.status.route + assess[Topic UID]
+                Input.status.route + assess
                                          ↓
                     Topic Reconcile → Chief Agent
                                          ↓ assess_input
@@ -37,7 +37,7 @@ Channel 与 Source 的同源 key 使用相同规则，详见 [Lark](../connector
 | `route_input({ inputId, topicUids, reason })` | 原子提交完整路由决定；空目标数组表示 Default |
 | `memory_search`、`session_search` | 检索共享记忆与历史 |
 
-`route_input` 仅提供给 Route。工具验证本次 execution 确实接纳了 Input，目标必须是现存 Topic UID。一次事务写入 `Input.status.route.result`、completedAt 和当前根的 `assess[uid]`；稳定归属保存在 route.result.topics，沿 parentRef 找 root，绑定不因 Weave 改变；建立 assess 即完成交付。目标版本检查与写入处于同一事务，删除或替换目标不能导致误投。
+`route_input` 仅提供给 Route。工具验证本次 execution 确实接纳了 Input，目标必须是现存 Topic UID。一次事务写入 `Input.status.route.result`、completedAt 和一条全局空 `assess`；稳定归属保存在 route.result.topics，沿 parentRef 找 root，绑定不因 Weave 改变；建立 assess 即完成路由，Chief 接纳另由 Topic Reconcile 竞争。目标版本检查与写入处于同一事务，删除或替换目标不能导致误投。
 
 已完成的重复调用不改分派结果、不重置 assess。工具调用成功才表示路由完成；模型结束或说“已分派”不算确认。Chief 使用独立的 `assess_input`，`say` 另行产生 Output。
 

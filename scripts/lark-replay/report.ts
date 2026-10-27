@@ -17,7 +17,7 @@ export function report(directory: string) {
   const result: Result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
   const roots = result.topics.filter(t => !t.parentRef);
   const unfinished = result.inputs.filter(i => !i.input.status.route?.completedAt
-    || Object.values(i.input.status.assess ?? {}).some(a => !a.completedAt));
+    || (!!i.input.status.assess && !i.input.status.assess.completedAt));
   const lines = ["# Lark 回放报告", "", `运行状态：${result.state}。${result.failure ? inline(result.failure) : ""}`,
     `代码：${result.revision}；数据集 SHA256：${result.datasetHash}。`,
     `Weave：${result.weave ? "开" : "关"}；完成批次：${result.batches}；协议替身：${result.protocolFixture}。`,

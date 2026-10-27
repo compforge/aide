@@ -178,7 +178,7 @@ test("an external Forge implementation feeds the existing repository and PR Sour
   t.after(async()=>{await aide.close();await connectors.close();rmSync(root,{recursive:true,force:true});});
   const inputs=new InputStore(root);await aide.start();
   const deadline=Date.now()+12000;
-  while(!inputs.list().some(i=>Object.values(i.status.assess??{}).some(a=>a.completedAt))){if(Date.now()>deadline)throw new Error("External Forge pipeline did not settle");await new Promise(r=>setTimeout(r,20));}
+  while(!inputs.list().some(i=>i.status.assess?.completedAt)){if(Date.now()>deadline)throw new Error("External Forge pipeline did not settle");await new Promise(r=>setTimeout(r,20));}
   assert.equal(inputs.list().length,1);assert.equal(inputs.list()[0]!.spec.observation?.kind,"forge.merged");
   assert(prompts.some(p=>p.includes("External merge")));assert(!JSON.stringify(inputs.list()).includes("HOST_ONLY"));
 });

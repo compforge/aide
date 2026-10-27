@@ -313,7 +313,7 @@ test("Lark keeps a shared invocation card running until steered input and execut
   await aide.topics.submit("first", spec);
   for (let n = 0; n < 200 && !aide.topics.resource(topicId)!.status.execution; n++) await Bun.sleep(10);
   await aide.topics.submit("urgent", spec);
-  for (let n = 0; n < 200 && !aide.topics.resource(topicId)!.status.notifiedInputs?.includes(aide.topics.inputStore.get("urgent")!.metadata.uid); n++) await Bun.sleep(10);
+  for (let n = 0; n < 200 && !aide.topics.inputStore.get("urgent")!.status.assess?.executionId; n++) await Bun.sleep(10);
   assert.equal(larkProgress(aide, topicId).length, 1);
   assert.equal(larkProgress(aide, topicId)[0]!.phase, "running");
   const client = aide.runtime.plugins.resourceClient("personal");

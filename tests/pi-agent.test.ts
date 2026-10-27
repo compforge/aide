@@ -189,7 +189,7 @@ test("Replay SDK groups roots and routes subsequent source input to the new root
   const root = result.topics.find((topic: { parentRef?: unknown }) => !topic.parentRef);
   const later = result.inputs.find((input: any) => input.input.spec.observation.message.id === "later").input;
   assert.notEqual(later.status.route.result.topics[0].uid, root.uid);
-  assert.deepEqual(Object.keys(later.status.assess), [later.status.route.result.topics[0].uid]);
+  assert.ok(later.status.assess);
   assert.ok(result.usage.chief.calls > 0); assert.ok(result.usage.weave.calls > 0);
   assert.equal(result.protocolFixture, false);
   assert.equal(result.state, "completed");
@@ -749,22 +749,24 @@ test("Aide steers immediate Input and independently completes both inputs within
   let conflicts = 10;
   t.mock.method(aide.runtime.plugins, "resourceClient", (instance: string) => {
     const client = resourceClient(instance);
-    return { ...client, async patchStatus(resource: any, patch: any) {
-      if ((patch.execution?.admissionRevision ?? 0) > 0 && conflicts > 0)
-        await client.patchStatus(resource, { summary: `Concurrent status ${conflicts--}` });
-      return client.patchStatus(resource, patch);
+    return { ...client, async commit(writes: readonly import("@compforge/aide-plugin").ResourceCommit[]) {
+      const admission = writes.find(w => w.operation === "patchStatus" && w.resource.kind === "Topic"
+        && ((w.patch as any).execution?.admissionRevision ?? 0) > 0);
+      if (admission?.operation === "patchStatus" && conflicts > 0)
+        await client.patchStatus(admission.resource, { summary: `Concurrent status ${conflicts--}` });
+      return client.commit(writes);
     } };
   });
   await submit("urgent", InputAttention.Immediate);
   const uid = aide.topics.resource("me")!.metadata.uid;
-  for (let i = 0; i < 200 && !aide.topics.resource("me")!.status.notifiedInputs?.includes(aide.topics.inputStore.get("urgent")!.metadata.uid); i++) await Bun.sleep(10);
-  assert.ok(aide.topics.resource("me")!.status.notifiedInputs?.includes(aide.topics.inputStore.get("urgent")!.metadata.uid));
+  for (let i = 0; i < 200 && !aide.topics.inputStore.get("urgent")!.status.assess?.executionId; i++) await Bun.sleep(10);
+  assert.ok(aide.topics.inputStore.get("urgent")!.status.assess?.executionId);
   assert.equal(conflicts, 0);
   assert.equal(aide.topics.resource("me")!.status.execution!.admissionRevision, 1);
   release(); await aide.settled();
   assert.deepEqual(aide.topics.get("me")!.pendingInputIds, []);
-  const first = aide.topics.inputStore.get("first")!.status.assess![uid]!;
-  const urgent = aide.topics.inputStore.get("urgent")!.status.assess![uid]!;
+  const first = aide.topics.inputStore.get("first")!.status.assess!;
+  const urgent = aide.topics.inputStore.get("urgent")!.status.assess!;
   assert.ok(first.completedAt); assert.ok(urgent.completedAt); assert.equal(first.executionId, urgent.executionId);
   const background = JSON.stringify((fixture.requests[1]!.messages as Array<{ role: string; content: unknown }>).filter(m => m.role === "user" && messageText(m.content).includes("<aide_background")));
   assert.match(background, /Concurrent status 1/, "Chief sees concurrent summary updates at the steer boundary");
@@ -838,14 +840,14 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
     assert.ok(input.status.route?.completedAt);
     assert.ok(input.status.route.agent?.sessionId);
     assert.equal(input.status.route.completedBy?.agent.harness, "route");
-    assert.deepEqual(Object.keys(input.status.assess!), [targetUid]);
-    const assessment = input.status.assess![targetUid]!;
+    assert.ok(input.status.assess?.executionId);
+    const assessment = input.status.assess!;
     assert.equal(assessment.completedBy?.agent.harness, "chief"); assert.ok(assessment.completedBy?.toolCallId);
     const job = await inputJob(input, [], agent => fixture.observation.read(fixture.config.cwd, fixture.config.config, agent.sessionId));
     for (const call of [input.status.route.completedBy!, assessment.completedBy!])
       assert.ok(job.nodes.some(n => n.kind === "tool_call" && (n as ToolCall).tool_call_id === call.toolCallId && n.session?.id === call.agent.sessionId));
     assert.doesNotThrow(() => inspect(job));
-    assert.ok(input.status.assess![targetUid]!.completedAt);
+    assert.ok(input.status.assess!.completedAt);
   }
   const followup = routeRequests.find(r => JSON.stringify(r.messages).includes("subject-two"))!;
   assert.match(JSON.stringify(followup.messages), /subject-one/);
@@ -996,7 +998,7 @@ test(`${kind} ${attention} Input joins the active native invocation`, { timeout:
     { operation: "create", type: INPUT_TYPE, name: laterId,
       spec: { origin: "source", originId: "fixture", attention, text: "later unique evidence" }, status: {
         route: { completedAt: at, result: { topics: [resourceRef(c)], reason: "same topic" } },
-        assess: { [c.metadata.uid]: { resource: resourceRef(c), assignedAt: at, completedAt: at, result: { summary: "Delegate" } } },
+        assess: { completedAt: at, result: { summary: "Delegate" } },
         handle: { [work.uid!]: { resource: resourceRef(task), assignedAt: at, request: { action: "context" } } },
       } },
   ]);
@@ -1164,14 +1166,14 @@ test("Chief can read and assess a late Deferred Input without steer or followUp"
   assert.equal(fixture.requests.length, 1);
   await aide.topics.submit("deferred", { topicId: "me", origin: "source", originId: "fixture", attention: InputAttention.Deferred, text: "late-deferred-evidence" });
   for (let i = 0; i < 200 && !aide.topics.inputStore.get("deferred")?.status.route?.completedAt; i++) await Bun.sleep(10);
-  const before = aide.topics.inputStore.get("deferred")!.status.assess![c.metadata.uid]!;
+  const before = aide.topics.inputStore.get("deferred")!.status.assess!;
   assert.equal(before.executionId, undefined);
   assert.equal(aide.topics.resource("me")!.status.execution!.admissionRevision, 0);
   release(); await aide.settled();
-  const first = aide.topics.inputStore.get("first")!.status.assess![c.metadata.uid]!;
-  const deferred = aide.topics.inputStore.get("deferred")!.status.assess![c.metadata.uid]!;
+  const first = aide.topics.inputStore.get("first")!.status.assess!;
+  const deferred = aide.topics.inputStore.get("deferred")!.status.assess!;
   assert.ok(deferred.completedAt); assert.equal(deferred.startedAt, undefined); assert.ok(deferred.completedBy);
-  assert.equal(deferred.executionId, first.executionId);
+  assert.equal(deferred.executionId, undefined, "read-only discovery does not create automatic admission");
   assert.equal(deferred.completedBy?.agent.sessionId, first.completedBy?.agent.sessionId);
   assert.match(JSON.stringify(fixture.requests[2]!.messages), /late-deferred-evidence/);
   assert.equal(aide.invocations().filter(i => i.topicId === "me").length, 1);
@@ -1231,5 +1233,5 @@ test("Weave wakes busy root Chief through its Reconcile without moving or claimi
   assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 1);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
   assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 1);
-  assert.ok(!("executionId" in aide.topics.inputStore.get("first")!.status.assess![parent.metadata.uid]!));
+  assert.ok(aide.topics.inputStore.get("first")!.status.assess?.executionId);
 });

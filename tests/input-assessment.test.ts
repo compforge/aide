@@ -22,7 +22,7 @@ function setup(t: { after(fn: () => Promise<void>): void }) {
 }
 const task = { kind: "task" as const, title: "Check", instruction: "Verify evidence", trigger: null };
 
-test("Concurrent Chief assessments preserve each other and atomically establish independent Work handling", async t => {
+test("Concurrent Chief assessments complete once and atomically establish only the winning Work handoff", async t => {
   const { aide, resources, context } = setup(t);
   const a = await aide.topics.ensure("a"), b = await aide.topics.ensure("b");
   const wa = await aide.work("a").create(task), wb = await aide.work("b").create(task);
@@ -30,16 +30,16 @@ test("Concurrent Chief assessments preserve each other and atomically establish 
   await deliver(context, input, [a.metadata, b.metadata], "Both topics");
   for (const c of [a, b]) {
     await resources.patchStatus(aide.topics.resource(c.spec.id)!, { execution: { id: c.spec.id, startedAt: new Date().toISOString() } });
-    await admit(resources, "fact", c.metadata.uid, c.spec.id);
   }
   await Promise.all([[a, wa], [b, wb]].map(async ([owner, work]) => {
     const c = owner as typeof a, w = work as typeof wa;
     await assessInput(resources, c, c.spec.id, { inputId: "fact", summary: `Assessed by ${c.spec.id}`, workRequests: [{ workUid: w.uid!, request: { action: "context" } }] });
   }));
   const result = aide.topics.inputStore.get("fact")!;
-  assert.ok(result.status.assess![a.metadata.uid]!.completedAt);
-  assert.ok(result.status.assess![b.metadata.uid]!.completedAt);
-  assert.deepEqual(Object.keys(result.status.handle!).sort(), [wa.uid!, wb.uid!].sort());
+  assert.ok(result.status.assess!.completedAt);
+  assert.equal(Object.keys(result.status.handle!).length, 1);
+  const winner = result.status.assess!.result!.summary.endsWith("a") ? wa : wb;
+  assert.deepEqual(Object.keys(result.status.handle!), [winner.uid]);
   assert.equal(InputDefinition.retention!.releasedAt(result), undefined);
   assert.deepEqual(aide.topics.pending(a.metadata.uid), []);
   assert.equal("pendingInputIds" in aide.topics.resource("a")!.status, false);
@@ -73,7 +73,7 @@ test("Input protects every unfinished stage; deleting its Work ends handling and
   const w = await aide.work("me").create(task);
   const store = aide.topics.inputStore;
   const initialTask = (await resources.list({ ...INPUT_TYPE, kind: "Task" }))[0]!;
-  await cancelAssignments(resources, resourceRef(initialTask), "handle");
+  await cancelAssignments(resources, resourceRef(initialTask));
   store.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Input": { maxCount: 1 } } }));
   const input = await aide.topics.submit("one", { origin: "source", originId: "fixture", text: "fact" });
   await deliver(context, input, [c.metadata], "topic");
@@ -85,11 +85,11 @@ test("Input protects every unfinished stage; deleting its Work ends handling and
   await assert.rejects(second(), /capacity/);
   const target = (await resources.list({ apiVersion: INPUT_TYPE.apiVersion, kind: "Task" }))[0]!;
   await resources.delete(target, target.metadata.name);
-  await cancelAssignments(resources, resourceRef(target), "handle");
+  await cancelAssignments(resources, resourceRef(target));
   assert.equal(store.get("one")!.status.handle![w.uid!]!.result!.disposition, "cancelled");
   await second();
   assert.equal(store.get("one"), undefined);
-  assert.deepEqual(store.query("assess", c.metadata.uid), []);
+  assert.deepEqual(store.query("topic", c.metadata.uid), []);
   assert.ok(store.receipt("one"));
 });
 
@@ -125,7 +125,7 @@ test("quiet assessments retain topic understanding; explicit synthesis can updat
     await deliver(context, fact, [c.metadata], "same subject");
     await admit(resources, fact.metadata.name, c.metadata.uid, "live");
     await assessInput(resources, c, "live", { inputId: fact.metadata.name, summary: "No new action" });
-    assert.ok(aide.topics.inputStore.get(fact.metadata.name)!.status.assess![c.metadata.uid]!.completedAt);
+    assert.ok(aide.topics.inputStore.get(fact.metadata.name)!.status.assess!.completedAt);
   }
   const current = aide.topics.resource("me")!;
   assert.equal(current.status.summary, "OOM unresolved; investigation delegated");
@@ -150,8 +150,8 @@ test(`${attention} assessment cannot complete across an execution switch during 
     return resources.commit(writes);
   } };
   await assert.rejects(assessInput(racing, c, "old", { inputId: "switch", summary: "quiet" }), /no longer active/);
-  assert.equal(aide.topics.inputStore.get("switch")!.status.assess![c.metadata.uid]!.completedAt, undefined);
-  if (attention === InputAttention.Deferred) assert.equal(aide.topics.inputStore.get("switch")!.status.assess![c.metadata.uid]!.executionId, undefined);
+  assert.equal(aide.topics.inputStore.get("switch")!.status.assess!.completedAt, undefined);
+  if (attention === InputAttention.Deferred) assert.equal(aide.topics.inputStore.get("switch")!.status.assess!.executionId, undefined);
 });
 
 test("Assessment records completion evidence without claiming Chief execution ownership", async t => {
@@ -162,9 +162,9 @@ test("Assessment records completion evidence without claiming Chief execution ow
   const currentAgent = { harness: "chief", sessionId: "recovery-native" };
   await resources.patchStatus(aide.topics.resource("me")!, { agent: currentAgent, execution: { id: "new-run", startedAt: new Date().toISOString() } });
   await assessInput(resources, c, "new-run", { inputId: "recover", summary: "Verified effects" }, "ack-native-id");
-  const receipt = aide.topics.inputStore.get("recover")!.status.assess![c.metadata.uid]!;
+  const receipt = aide.topics.inputStore.get("recover")!.status.assess!;
   assert.equal(receipt.executionId, undefined); assert.equal(receipt.agent, undefined);
   assert.deepEqual(receipt.completedBy, { agent: currentAgent, executionId: "new-run", toolCallId: "ack-native-id" });
   await assessInput(resources, c, "new-run", { inputId: "recover", summary: "repeat" }, "different-call");
-  assert.deepEqual(aide.topics.inputStore.get("recover")!.status.assess![c.metadata.uid], receipt);
+  assert.deepEqual(aide.topics.inputStore.get("recover")!.status.assess, receipt);
 });

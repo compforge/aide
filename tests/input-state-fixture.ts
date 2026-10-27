@@ -15,8 +15,8 @@ export async function admit(resources: ResourceClient, inputId: string, uid: str
   const c = (await resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Topic" })).find(c => c.metadata.uid === uid)!;
   const input = await resources.get<import("../plugins/personal/input/model.ts").InputSpec, import("../plugins/personal/input/model.ts").InputStatus>({ apiVersion: "aide.dev/v1alpha1", kind: "Input", name: inputId, namespace: "v1" });
   if (!input) throw new Error(`Input missing: ${inputId}`);
-  await resources.patchStatus(c, { notifiedInputs: [...new Set([...(c.status as import("../plugins/personal/topic/model.ts").TopicStatus).notifiedInputs ?? [], input!.metadata.uid])] });
-  return input!;
+  if (input.status.assess?.completedAt || input.status.assess?.executionId) return input;
+  return resources.patchStatus(input, { assess: { ...input.status.assess, executionId, startedAt: new Date().toISOString() } });
 }
 
 export async function handoff(store: import("../plugins/personal/topic/store.ts").TopicStore, resources: ResourceClient, inputId: string, requests: import("../plugins/personal/topic/assess.ts").AssessInput["workRequests"], summary = "Handed to Work") {

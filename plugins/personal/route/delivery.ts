@@ -8,7 +8,7 @@ import { topicPath } from "../topic/tree.ts";
 export type RoutingContext = Pick<PluginContext, "resources"> & { logger: Pick<PluginContext["logger"], "info"> };
 export type RoutingInput = Readonly<Resource<InputSpec, InputStatus>>;
 export const routed = (input: RoutingInput) => !!input.status.route?.completedAt;
-/** @spec A routing decision and all assessment assignments are one atomic fact. Repeated decisions never reopen a consumer. */
+/** @spec A routing decision and the global assessment are one atomic fact. Repeated decisions never reopen a consumer. */
 export async function deliver(context: RoutingContext, original: RoutingInput, destinations: Destination[], reason: string, completedBy?: AgentCall, rootsOnly = false) {
   for (let n = 0; ; n++) {
     const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, ...original.metadata });
@@ -21,11 +21,10 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
       return c;
     }));
     const at = new Date().toISOString();
-    const assess = { ...input.status.assess };
+    const assess = input.status.assess ?? {};
     const all = await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
     const paths = topics.map(t => topicPath(all, t));
     const touched = [...new Map(paths.flat().map(t => [t.metadata.uid, t])).values()];
-    for (const topic of topics) assess[topic.metadata.uid] ??= { resource: resourceRef(topic), assignedAt: at };
     try {
       await context.resources.commit([
         ...touched.map(c => ({ operation: "replace", resource: c, spec: { ...c.spec, name: c.spec.name || initialTopicName(input.spec.text) },

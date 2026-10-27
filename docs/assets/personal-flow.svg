@@ -29,7 +29,7 @@
 <text x="1280" y="328">Task / Routine</text><text class="small" x="1280" y="368">有限目标 / 持续职责</text><text class="small" x="1280" y="402">专属 Agent · 独立生命周期</text>
 <text class="small" x="475" y="476">route → assess 分派</text><text class="small" x="840" y="476">assess_input → handle 交接</text><text class="small" x="1280" y="476">report_task / report_routine</text>
 <rect class="box" x="40" y="520" width="570" height="145" fill="#e6eef8"/>
-<text x="325" y="560">Input.status：协作与追踪依据</text><text class="small" x="325" y="600">route → assess[Conversation UID] → handle[Work UID]</text><text class="small" x="325" y="636">各自确认 · 全部完成后才可回收</text>
+<text x="325" y="560">Input.status：协作与追踪依据</text><text class="small" x="325" y="600">route → assess → handle[Work UID]</text><text class="small" x="325" y="636">各自确认 · 全部完成后才可回收</text>
 <path class="line" d="M840 485 V530"/><text class="small" x="880" y="519">say</text>
 <path class="line" d="M1280 490 V515 H1040 V600 H1008"/><text class="small" x="1170" y="507">say</text>
 <rect class="box" x="680" y="540" width="320" height="125" fill="#f5eddf"/>

@@ -49,7 +49,6 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const memberIds = new Set(members.map(t => t.spec.id)), memberUids = new Set(members.map(t => t.metadata.uid));
   const runs = aide.topics.runs(topicId);
   const facts = runs.flatMap(run => run.input ? [run.input] : []);
-  const factsByUid = new Map(facts.map(input => [input.metadata.uid, input]));
   const inputIds = new Set(facts.map(i => i.metadata.name));
   const history = aide.invocations().filter(item => memberIds.has(item.topicId ?? "") || item.inputIds?.some(id => inputIds.has(id)));
   const state = aide.runtime.executions.view(history.flatMap(item => item.invocationId ? [item.invocationId] : []));
@@ -73,16 +72,7 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const messageRuns = new Map<string, string>();
   for (const message of channelOutputs(aide)) if (message.executionId) messageRuns.set(message.id, message.executionId);
   const inputExecutions = new Map(invocations.flatMap((i) => (i.inputIds ?? []).map((id) => [id, i.executionId] as const)));
-  // Native notifications provide explicit transient links for steered/follow-up material; Input itself owns no Chief invocation.
-  const chiefInvocations = new Map(invocations.filter(i => i.resourceRef?.kind === "Topic").map(i => [i.invocationId, i]));
-  for (const notification of state.harnessInputs.values()) {
-    const invocation = chiefInvocations.get(notification.invocationId);
-    if (!invocation || notification.deliveryOutcome === "failed") continue;
-    const suffix = `:${invocation.resourceRef!.uid}`;
-    if (!notification.messageId.startsWith("input:") || !notification.messageId.endsWith(suffix)) continue;
-    const fact = factsByUid.get(notification.messageId.slice("input:".length, -suffix.length));
-    if (fact) inputExecutions.set(fact.metadata.name, invocation.executionId);
-  }
+  // Chief admission is persisted on Input, including steer/followUp and unconfirmed results.
   const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.invocationId))
     .map((input) => [input.invocationId, input]));
   const summaries = new Map(state.invocationSummaries.filter((turn) => relatedTurns.has(turn.invocationId)).map((turn) => [turn.invocationId, turn]));
@@ -97,7 +87,7 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
     if (!run.input) continue;
     const input = run.input, definition = aide.inputDefinition(input.spec);
     roots.push({ id: `input:${input.metadata.name}`, type: "input", relation: input.spec.relation, sender: input.spec.sender, source: input.spec.source, origin: input.spec.origin, originId: definition.id,
-      inputId: input.metadata.name, group_id: inputExecutions.get(input.metadata.name) ?? input.consumption.executionId ?? input.metadata.name, label: definition.label, icon: definition.icon,
+      inputId: input.metadata.name, group_id: input.consumption.executionId ?? inputExecutions.get(input.metadata.name) ?? input.metadata.name, label: definition.label, icon: definition.icon,
       ...(input.spec.origin === "channel" ? { role: "user" as const } : {}),
       at: input.metadata.creationTimestamp, content: input.spec.text,
       status: run.status.phase ?? "queued",
