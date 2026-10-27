@@ -80,6 +80,8 @@ ${snapshot.url ?? ""}`.slice(0, 32_000),
   }
   private async read() {
     if (this.resource.status.batch) return;
+    this.context.logger.info("PullRequest scan started", { attributes: { watchId: this.resource.spec.id, forge: this.resource.spec.forge,
+      path: this.resource.spec.repository?.path ?? null, tracked: Object.keys(this.tracked).length } });
     const result = await this.connectors.forges.scanPullRequests(this.resource.spec.forge, {
       scope: this.resource.spec.repository
         ? { kind: "repository", repository: this.resource.spec.repository, author: this.resource.spec.author }
@@ -87,17 +89,27 @@ ${snapshot.url ?? ""}`.slice(0, 32_000),
       initialSince: this.resource.status.initialSince,
       tracked: Object.values(this.tracked).filter(entry => entry.snapshot.state === "open").map(entry => entry.snapshot),
     });
+    this.context.logger.info("PullRequest scan returned; freezing batch", { attributes: {
+      items: result.items.length, pending: result.pending, complete: result.complete, issues: result.issues.length } });
     // Freeze facts and the proposed cursor before any Input is admitted.
     await this.save({ batch: { result, offset: 0, inputSince: this.resource.status.inputSince! } });
   }
   private async consume() {
     let batch = this.resource.status.batch!;
+    const startedAt = performance.now();
+    this.context.logger.info("PullRequest batch consumption started", { attributes: {
+      watchId: this.resource.spec.id, offset: batch.offset, items: batch.result.items.length } });
     while (batch.offset < batch.result.items.length) {
+      if (batch.offset % 10 === 0) this.context.logger.info("PullRequest batch consumption progress", { attributes: {
+        offset: batch.offset, items: batch.result.items.length, number: batch.result.items[batch.offset]!.number,
+        elapsedMs: Math.round(performance.now() - startedAt) } });
       await this.observe(batch.result.items[batch.offset]!, batch.inputSince);
       batch = { ...batch, offset: batch.offset + 1 };
       await this.save({ batch });
     }
     const { result } = batch;
+    this.context.logger.info("PullRequest batch consumed; committing cursor", { attributes: {
+      offset: batch.offset, items: result.items.length, elapsedMs: Math.round(performance.now() - startedAt) } });
     await this.save({ ...(result.cursor ? { cursor: result.cursor } : {}), scanPending: result.pending, scanComplete: result.complete,
       batch: null, issues: result.issues, error: null });
     if (result.issues.length) this.context.logger.warn("Forge scan retained coverage gaps", { attributes: {
@@ -179,6 +191,8 @@ export function registerPullRequestSources(context: PluginContext) {
       if (resource.metadata.deletionTimestamp) return;
       let failed = false;
       try {
+        context.logger.info("PullRequest Source policy check started", { attributes: {
+          watchId: resource.spec.id, forge: resource.spec.forge, path: resource.spec.repository?.path ?? null } });
         const active = await pullRequestSourceActive(context, resource, watches, repositories, revisions);
         await observePullRequests(context, resource, execution.verbs.connectors({ timeoutMs: 90_000 }), new Date().toISOString(), active);
         if (!active) return;

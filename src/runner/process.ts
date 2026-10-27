@@ -1,3 +1,5 @@
+import { hostOperation, type HostOperation } from "../protocol/ipc.ts";
+import { runnerExecution } from "./execution.ts";
 import type { RuntimeScope } from "../protocol/runtime.ts";
 import { Controllers } from "./controllers.ts";
 import { createConnectorClient } from "../connector-client.ts";
@@ -28,6 +30,9 @@ import {
 } from "../protocol/ipc.ts";
 
 interface PendingCall {
+  readonly startedAt: number;
+  readonly executionId?: string;
+  readonly operation: HostOperation;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: unknown) => void;
 }
@@ -59,13 +64,15 @@ function callHost<T>(request: HostRequest): Promise<T> {
   if (closing) {
     return Promise.reject(new Error("Plugin Runner is closing"));
   }
+  const executionId = runnerExecution.getStore();
   const callId = nextHostCallId++;
   return new Promise<unknown>((resolve, reject) => {
-    pendingHostCalls.set(callId, { resolve, reject });
+    pendingHostCalls.set(callId, { resolve, reject, startedAt: performance.now(), executionId, operation: hostOperation(request) });
     try {
       send({
         kind: "child-call",
         callId,
+        ...(executionId ? { executionId } : {}),
         request,
       } satisfies ChildCall);
     } catch (error) {
@@ -285,10 +292,12 @@ function pluginLogger(): PluginContext["logger"] {
     context?: PluginLogContext,
   ): void => {
     try {
+      const executionId = runnerExecution.getStore();
       const record: PluginLogRecord = {
         level,
         message,
-        ...(context ? { context } : {}),
+        ...(executionId ? { context: { ...context,
+          attributes: { ...context?.attributes, executionId } } } : context ? { context } : {}),
       };
       send({ kind: "log", record });
     } catch {
@@ -365,6 +374,14 @@ function handleParentReply(reply: ParentReply): void {
   const pending = pendingHostCalls.get(reply.callId);
   if (!pending) return;
   pendingHostCalls.delete(reply.callId);
+  const elapsedMs = Math.round(performance.now() - pending.startedAt);
+  if (pending.operation.method !== "verb.invoke" && elapsedMs >= 1000) {
+    pluginLogger().warn("Plugin Runner Host round trip slow", { component: "runner", attributes: {
+      executionId: pending.executionId ?? null, callId: reply.callId, ...pending.operation, elapsedMs,
+      hostHandlingMs: reply.hostElapsedMs ?? null,
+      outsideHostHandlingMs: reply.hostElapsedMs === undefined ? null : Math.max(0, elapsedMs - reply.hostElapsedMs),
+    } });
+  }
   if (reply.ok) pending.resolve(reply.value);
   else pending.reject(restoredError(reply.error));
 }

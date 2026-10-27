@@ -130,6 +130,25 @@ export type HostRequest =
       readonly patch: Readonly<Record<string, unknown>>;
     };
 
+export type HostOperation = Record<string, string | number | null> & { method: string };
+/** Whitelist identity and cardinality; never log request payloads, resource bodies or cursors. */
+export function hostOperation(request: HostRequest): HostOperation {
+  const operation: HostOperation = { method: request.method };
+  const ref = request.method === "resource.get" ? request.ref
+    : "resource" in request ? { kind: request.resource.kind, ...request.resource.metadata }
+    : "type" in request ? request.type : undefined;
+  if (ref) {
+    operation.resourceKind = ref.kind;
+    if ("name" in ref && typeof ref.name === "string") operation.resourceName = ref.name;
+    if ("namespace" in ref && typeof ref.namespace === "string") operation.namespace = ref.namespace;
+  }
+  if (request.method === "resource.create") { operation.resourceName = request.init.name; operation.namespace = request.init.namespace ?? null; }
+  if (request.method === "resource.delete") { operation.resourceName = request.name; operation.namespace = request.namespace ?? null; }
+  if (request.method === "resource.list") operation.namespace = request.options?.namespace ?? null;
+  if (request.method === "resource.commit") operation.writeCount = request.writes.length;
+  return operation;
+}
+
 export interface RunnerSignal {
   readonly kind: "log";
   readonly record: PluginLogRecord;
@@ -165,6 +184,8 @@ export type ChildReply =
 export interface ChildCall {
   readonly kind: "child-call";
   readonly callId: number;
+  /** Correlates resource/printer waits with a Reconcile; never grants execution authority. */
+  readonly executionId?: string;
   readonly request: HostRequest;
 }
 
@@ -172,12 +193,14 @@ export type ParentReply =
   | {
       readonly kind: "parent-reply";
       readonly callId: number;
+      readonly hostElapsedMs?: number;
       readonly ok: true;
       readonly value: unknown;
     }
   | {
       readonly kind: "parent-reply";
       readonly callId: number;
+      readonly hostElapsedMs?: number;
       readonly ok: false;
       readonly error: SerializedError;
     };
