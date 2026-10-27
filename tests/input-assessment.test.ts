@@ -11,7 +11,7 @@ import { deliver } from "../plugins/personal/route/delivery.ts";
 import { admit } from "./input-state-fixture.ts";
 import { cancelAssignments, resourceRef } from "../plugins/personal/input/state.ts";
 import { InputDefinition } from "../plugins/personal/input/definition.ts";
-import { INPUT_TYPE } from "../plugins/personal/input/model.ts";
+import { INPUT_TYPE, InputAttention } from "../plugins/personal/input/model.ts";
 import { ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
 function setup(t: { after(fn: () => Promise<void>): void }) {
   const home = mkdtempSync(join(tmpdir(), "aide-assess-"));
@@ -137,13 +137,14 @@ test("quiet assessments retain topic understanding; explicit synthesis can updat
   assert.equal(aide.topics.resource("me")!.status.summary, "OOM cause confirmed; fix pending");
 });
 
-test("assessment cannot complete across an execution switch during its commit", async t => {
+for (const attention of [InputAttention.Normal, InputAttention.Deferred])
+test(`${attention} assessment cannot complete across an execution switch during its commit`, async t => {
   const { aide, resources, context } = setup(t);
   const c = await aide.topics.ensure("me");
-  const fact = await aide.topics.submit("switch", { origin: "source", originId: "fixture", text: "observation" });
+  const fact = await aide.topics.submit("switch", { origin: "source", originId: "fixture", attention, text: "observation" });
   await deliver(context, fact, [c.metadata], "topic");
   await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "old", startedAt: new Date().toISOString() } });
-  await admit(resources, "switch", c.metadata.uid, "old");
+  if (attention !== InputAttention.Deferred) await admit(resources, "switch", c.metadata.uid, "old");
   let switched = false;
   const racing = { ...resources, commit: async (writes: Parameters<typeof resources.commit>[0]) => {
     if (!switched) { switched = true; await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "new", startedAt: new Date().toISOString() } }); }
@@ -151,6 +152,7 @@ test("assessment cannot complete across an execution switch during its commit", 
   } };
   await assert.rejects(assessInput(racing, c, "old", { inputId: "switch", summary: "quiet" }), /no longer active/);
   assert.equal(aide.topics.inputStore.get("switch")!.status.assess![c.metadata.uid]!.completedAt, undefined);
+  if (attention === InputAttention.Deferred) assert.equal(aide.topics.inputStore.get("switch")!.status.assess![c.metadata.uid]!.executionId, undefined);
 });
 
 test("Recovery acknowledgement records its own native call without rewriting original admission", async t => {

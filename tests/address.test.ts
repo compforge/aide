@@ -1,3 +1,4 @@
+import { InputAttention } from "../plugins/personal/input/model.ts";
 import { once } from "node:events";
 import { httpChannel } from "../src/api/index.ts";
 import { topicView, topicList } from "../src/channel/view.ts";
@@ -30,7 +31,7 @@ test("Source addresses never supply direct or urgency-based reply destinations",
   const observed = larkAddress("app", "observed-group"), contact = webAddress("contact");
   await store.ensure("observations");
   await seedInput(store, "external", { topicId: "observations", origin: "source", originId: "personal.lark",
-    source: observed, attention: "immediate", relation: "sent", text: "Me asks a colleague a question" });
+    source: observed, attention: InputAttention.Immediate, relation: "sent", text: "Me asks a colleague a question" });
   const before = store.outputs().length;
   await assert.rejects(store.say("observations", "external", "unsolicited reply", undefined, { respondToInputId: "external" }), /Direct replies require a Channel Input/);
   assert.equal(store.outputs().length, before);
@@ -41,7 +42,7 @@ test("Source addresses never supply direct or urgency-based reply destinations",
   assert.deepEqual(store.outputStore.get(explicit.outputId)!.spec.target, contact);
   await store.ensure("known-contact", contact);
   await seedInput(store, "urgent-observation", { topicId: "known-contact", origin: "source", originId: "personal.lark",
-    source: observed, attention: "immediate", text: "external change" });
+    source: observed, attention: InputAttention.Immediate, text: "external change" });
   const notification = await store.say("known-contact", "urgent-observation", "Update within an existing mandate");
   assert.deepEqual(store.outputStore.get(notification.outputId)!.spec.target, webAddress("known-contact"), "Topic address does not override default contact");
 });

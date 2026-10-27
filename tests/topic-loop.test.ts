@@ -1,3 +1,4 @@
+import { InputAttention } from "../plugins/personal/input/model.ts";
 import { attemptOf, resourceRef } from "../plugins/personal/input/state.ts";
 import type { PluginContext, ReconcileContext, ResourceCommit } from "@compforge/aide-plugin";
 import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
@@ -22,7 +23,7 @@ function setup(t: { after(fn: () => Promise<void>): void }, agent: Partial<Agent
   const options = fakeOptions({ notify: false, async execute() { throw new Error("No work"); }, ...agent }, root);
   const aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
-  const submit = (id: string, attention: "immediate" | "deferred" = "deferred") => aide.topics.submit(id,
+  const submit = (id: string, attention: InputAttention = InputAttention.Normal) => aide.topics.submit(id,
     { topicId: "me", origin: "source", originId: "personal.environments", text: `fact ${id}`, attention });
   return { aide, submit, root, options };
 }
@@ -50,7 +51,7 @@ test("Completion atomically acknowledges only admitted inputs; redelivery and re
   await assert.rejects(assessAll(client, c, "old", { inputIds: ["one"], summary: "stale" }), /no longer active/);
 });
 
-test("Deferred arrivals follow up without repeating old prompt material or deleting concurrent arrivals", async t => {
+test("Normal arrivals follow up without repeating old prompt material or deleting concurrent arrivals", async t => {
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
   const calls: string[] = [];
   const { aide, submit } = setup(t, { async chief(prompt) { calls.push(prompt); if (calls.length === 1) await gate; return "Handled"; } });
@@ -81,7 +82,7 @@ test("An unsupported steer leaves the urgent input queued for explicit followup 
   const { aide, submit } = setup(t, { async chief() { calls++; if (calls === 1) await gate; return "Handled"; } });
   t.after(() => release());
   await aide.topics.ensure("me"); await aide.start(); await submit("first"); await until(() => calls === 1);
-  await submit("urgent", "immediate"); await until(() => aide.topics.get("me")!.pendingInputIds.includes("urgent"));
+  await submit("urgent", InputAttention.Immediate); await until(() => aide.topics.get("me")!.pendingInputIds.includes("urgent"));
   assert.equal(calls, 1); release(); await aide.settled(); assert.equal(calls, 2);
   assert.deepEqual(aide.topics.get("me")!.pendingInputIds, []);
 });

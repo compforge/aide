@@ -4,7 +4,7 @@ import { WorkInputRequestSchema } from "../model.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { type ResourceDefinition } from "@compforge/aide-plugin";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
+import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "./model.ts";
 import { AddressSchema } from "../../../src/address.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { inputPrinter } from "./printer.ts";
@@ -12,7 +12,7 @@ export const InputSpecSchema = z.object({ source: AddressSchema.optional(), topi
   topicName: z.string().trim().min(1).max(80).optional(),
   originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
   sender: z.object({ apiVersion: z.string(), kind: z.literal("Person"), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict().optional(),
-  attention: z.enum(["immediate", "deferred"]).optional(),
+  attention: z.enum(InputAttention).optional(),
   originRef: z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform((value) => value === "v1" ? value : parseResourceNamespace(value)), name: z.string(), uid: z.string() }).strict().optional(),
   text: z.string().min(1).max(32_000), timezone: z.string().optional(),
   observation: z.record(z.string(), z.unknown()).optional() }).strict();

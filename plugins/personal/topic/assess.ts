@@ -3,7 +3,7 @@ import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import type { ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
+import { INPUT_TYPE, InputAttention, inputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
 import { WorkInputRequestSchema, type WorkStatus } from "../model.ts";
 import { WORK_TYPES, type WorkSpec } from "../resources.ts";
@@ -12,6 +12,7 @@ export const AssessInputSchema = z.object({ inputId: z.string().min(1), summary:
 export type AssessInput = z.input<typeof AssessInputSchema>;
 /**
  * @spec Finishing Chief assessment and assigning Work handling are atomic; receipts remain on Input.
+ * @spec Active Chief may atomically claim and assess an unstarted Deferred Input; other execution ownership remains guarded.
  * @spec Assessment does not update Topic summary/recent; meaningful understanding is maintained explicitly.
  * @link docs/personal/chief.md
  */
@@ -25,7 +26,8 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
     const assessment = input?.status.assess?.[c.metadata.uid];
     if (!input || !assessment) throw new Error("Input does not belong to this Chief");
     if (assessment.completedAt) return { assessed: args.inputId };
-    if (!assessment.executionId || (assessment.executionId !== executionId && !assessment.lastError)) throw new Error("Input has not been admitted to this Chief");
+    const claimDeferred = !assessment.executionId && inputAttention(input.spec) === InputAttention.Deferred;
+    if ((!assessment.executionId && !claimDeferred) || (assessment.executionId && assessment.executionId !== executionId && !assessment.lastError)) throw new Error("Input has not been admitted to this Chief");
     const work = (await Promise.all(WORK_TYPES.map(t => resources.list<WorkSpec, WorkStatus>(t)))).flat();
     const handle = { ...input.status.handle };
     const guards: ResourceCommit[] = [];
@@ -43,7 +45,7 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
       await resources.commit([
         ...guards,
         { operation: "patchStatus", resource: input, patch: { handle, assess: { ...input.status.assess, [c.metadata.uid]: {
-          ...assessment, ...(toolCallId ? { completedBy: agentCall(c.status, toolCallId) } : {}), completedAt: at, result: { summary: args.summary, disposition: "completed" } } } } },
+          ...assessment, ...(claimDeferred ? { executionId, startedAt: at, ...(c.status.agent ? { agent: c.status.agent } : {}) } : {}), ...(toolCallId ? { completedBy: agentCall(c.status, toolCallId) } : {}), completedAt: at, result: { summary: args.summary, disposition: "completed" } } } } },
         // Guard the owning execution/version without turning every receipt into durable topic understanding.
         { operation: "patchStatus", resource: c, patch: {} },
       ]);

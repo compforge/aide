@@ -1,3 +1,4 @@
+import { InputAttention } from "../../input/model.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ConnectorClient, PluginContext, PullRequestSnapshot, Resource } from "@compforge/aide-plugin";
 import { digest, INPUT_TYPE } from "../../chief-model.ts";
@@ -55,7 +56,7 @@ class PullRequestObservation {
     const sequence = (this.resource.status.sequence ?? 0) + 1;
     const name = digest([this.resource.metadata.uid, sequence]);
     const change = previous ? `${previous.snapshot.state ?? "未知"} → merged` : "首次观察到已合并";
-    const spec: SourceInput = { topicKey: `forge:${key}`, topicName: `${identity.repository.path} #${identity.number}`.slice(0, 80), relation: "observed", attention: "deferred",
+    const spec: SourceInput = { topicKey: `forge:${key}`, topicName: `${identity.repository.path} #${identity.number}`.slice(0, 80), relation: "observed", attention: InputAttention.Normal,
       text: `PR/MR ${identity.repository.forge.name}/${identity.repository.path} #${identity.number}：${snapshot.title ?? ""}
 ${change}
 revision：${snapshot.headSha ?? "未知"}

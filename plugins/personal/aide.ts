@@ -21,7 +21,7 @@ import { agentCall } from "./observation/reference.ts";
 import { assessInput, type AssessInput } from "./topic/assess.ts";
 import { attemptOf, attemptPatch, resourceRef, changeAttempt } from "./input/state.ts";
 import { topicPolicy } from "./topic/config.ts";
-import { immediate, eligible, finalizeExecution, type LoopStatus } from "./loop.ts";
+import { immediate, canActivate, eligible, finalizeExecution, type LoopStatus } from "./loop.ts";
 import { ROUTE_TYPE, type RouteStatus } from "./route/model.ts";
 import { deliver, routed } from "./route/delivery.ts";
 import { defaultDestination, routeByRules } from "./route/rules.ts";
@@ -31,7 +31,7 @@ import type { TopicSpec, TopicStatus } from "./topic/model.ts";
 import { inputPrinter } from "./input/printer.ts";
 import type { Logger } from "pino";
 import type { Resource, ResourceType } from "@compforge/aide-plugin";
-import type { InputReceipt, InputSpec, InputStatus } from "./input/model.ts";
+import { InputAttention, inputAttention, type InputReceipt, type InputSpec, type InputStatus } from "./input/model.ts";
 import type { Manager } from "../../src/host/plugin/manager.ts";
 import { ApplicationRuntime } from "../../src/host/runtime/index.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
@@ -171,12 +171,12 @@ export class Personal {
       ? { name: "routePending", value: "pending" } : { name: "assessPending", value: owner.uid! } });
     const c = owner.kind === "Topic" ? this.store.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, owner.name) : undefined;
     if (!id) return { ...(c ? { context: { version: c.metadata.resourceVersion, summary: c.status.summary, recent: c.status.recent,
-      summaryChars: topicPolicy(this.options.topic).summaryChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, status: attemptOf(i, owner) })),
+      summaryChars: topicPolicy(this.options.topic).summaryChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, attention: inputAttention(i.spec), status: attemptOf(i, owner) })),
       nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
     const input = this.topics.inputStore.get(id);
     if (!input || (!inputs.some(i => i.metadata.name === id) && !(history && c && (input.status.assess?.[owner.uid!] || input.status.route?.result?.topics.some(ref => topicSubtree(this.store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE), c).some(t => t.metadata.uid === ref.uid)))))) throw new Error("Input is not attached to this resource");
     const description = inputPrinter.describe(input);
-    return { inputId: id, status: attemptOf(input, owner), text: description.slice(offset, offset + 8000), nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
+    return { inputId: id, attention: inputAttention(input.spec), status: attemptOf(input, owner), text: description.slice(offset, offset + 8000), nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
   }
 
   /** @spec Only the owning resource's intake controller may steer its live agent; admission is durable before dispatch. */
@@ -191,7 +191,7 @@ export class Personal {
       const resource = await resources.get<unknown, LoopStatus>(ref);
       const input = await resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: inputId });
       const id = resource?.status.execution?.id;
-      if (!id || !input || !resource || !eligible(input, resource)) return { accepted: false };
+      if (!id || !input || !resource || !eligible(input, resource) || !canActivate(input.spec, resource)) return { accepted: false };
       const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === id && i.phase === "running");
       if (!invocation) return { accepted: false, reason: "not_running" };
       try {
@@ -226,7 +226,7 @@ export class Personal {
         void this.plugins.enqueue({ pluginInstanceId: "personal", namespace: ref.namespace, resourceApiVersion: ref.apiVersion, resourceKind: ref.kind, resourceId: ref.name, controllerName: "agent" })
           .catch(error => this.log.error({ err: error, inputId }, "Could not schedule rejected steer for followup"));
       }
-      this.log.info({ inputId, consumerUid: ref.uid, invocationId, operation, ...outcome }, "Agent Input admission");
+      this.log.info({ inputId, consumerUid: ref.uid, invocationId, attention: inputAttention(input.spec), operation, ...outcome }, "Agent Input admission");
       return outcome;
     } catch (error) {
       await changeAttempt(resources, inputId, ref, p => p?.executionId === id && !p.completedAt ? { lastError: String(error) } : {});
@@ -386,7 +386,7 @@ export class Personal {
         // A mention has no subject type; it may identify the bot rather than a person.
       }
     }
-    const fact = await this.topics.submit(id, { attention: "immediate", topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
+    const fact = await this.topics.submit(id, { attention: InputAttention.Immediate, topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
       origin: "channel", originId: input.channelId, source: input.source, ...(sender ? { sender } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });
     return fact;

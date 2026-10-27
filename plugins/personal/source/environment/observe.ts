@@ -1,3 +1,4 @@
+import { InputAttention } from "../../input/model.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
 import { describeWorkloadChanges, type WorkloadChange, type WorkloadEvent } from "./changes.ts";
 import { bindSourceInput } from "../input.ts";
@@ -30,6 +31,7 @@ export function workloadChanges(before: EnvironmentSnapshot, after: EnvironmentS
 }
 
 /**
+ * @spec Every environment change is Deferred: preserve the fact without waking Chief.
  * @spec Initial observation is silent. Inputs are durable before the baseline advances.
  * @why A sequence identifies an occurrence, so A→B→A→B is not suppressed as a duplicate.
  * @case tests/environment-source.test.ts
@@ -60,13 +62,13 @@ export async function observeEnvironment(context: Pick<PluginContext, "resources
     const event: WorkloadEvent = { type: "workload.changed", environment: snapshot.environment, namespace: snapshot.namespace,
       observedAt: snapshot.observedAt, previousObservedAt: baseline!.observedAt, changes };
     const submit = bindSourceInput(SOURCES.environments, resource, context.resources);
-    await submit(name, { topicKey: environmentTopics.locate(snapshot).selector.key, relation: "observed", text: describeWorkloadChanges(event), observation: { ...event } });
+    await submit(name, { topicKey: environmentTopics.locate(snapshot).selector.key, relation: "observed", attention: InputAttention.Deferred, text: describeWorkloadChanges(event), observation: { ...event } });
   }
   await context.resources.patchStatus(resource, { baseline: snapshot, sequence: changes.length ? sequence : resource.status.sequence ?? 0,
     lastObservedAt: snapshot.observedAt, error: null });
   context.logger.info(baseline ? "Environment observation completed" : "Environment baseline established", {
     attributes: { watchId: resource.spec.environment, environment: snapshot.environment, namespace: snapshot.namespace,
-      workloads: snapshot.workloads.length, changed: changes.length, ...(changes.length ? { inputId: name } : {}) },
+      workloads: snapshot.workloads.length, changed: changes.length, ...(changes.length ? { inputId: name, attention: InputAttention.Deferred } : {}) },
   });
 }
 

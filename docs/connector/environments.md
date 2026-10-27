@@ -72,7 +72,7 @@ Personal 按 `sources.environments.targets` 中的环境和 namespace 生成观�
 目标引用 Connector 的名称或别名，解析后以规范名称保存。namespace 来自 Source 策略，不从 Connector 的查询默认值推导。
 未声明环境 Source 或 `targets: []` 时不启动观察；显式引用不存在的环境、Host / generic 环境、SSH 访问或重复目标时启动报错。
 
-环境 Source 按配置目标建立观察资源，维护基线与调度，不随聊天数量重复采样。变化生成不带话题 sessionId 的 Input，交给 Route 判断归属。关闭聊天 trigger 不关闭环境观察；修改配置后重启生效，策略变化会静默建立新的基线，移除的策略停止观察。
+环境 Source 按配置目标建立观察资源，维护基线与调度，不随聊天数量重复采样。所有变化生成 attention=Deferred 的 Input，交给 Route 判断归属，只挂到 Topic 下，不主动唤醒 Chief 或投递 steer / followUp。Chief 因其它输入、定时回顾或知识整理运行时可以顺带研判。关闭聊天 trigger 不关闭环境观察；修改配置后重启生效，策略变化会静默建立新的基线，移除的策略停止观察。
 
 观察以 namespace 内的 Deployment、StatefulSet、DaemonSet 和无 Controller 的独立 Pod 为范围，ReplicaSet 用来追溯 Pod 到 Deployment 的归属。
 归属按 ownerReference 的 Controller UID 解析，不猜 Pod 名称前缀。Job/CronJob、独立 ReplicaSet 和自定义 Controller 的 Pod 不在此范围。
@@ -90,7 +90,7 @@ prod / app：1 项 Workload 变化。
 - Deployment api：镜像声明未变；就绪副本 3/3（未变）；Pod 新增 1、移除 1
 ```
 
-Route / Chief 默认读取这份正文，具体 Pod、镜像标识和完整现场按需用 read_input 核对。Source 保留变化事实，不替 Chief 判断其业务价值，也不因常规变化而丢弃 Input。Chief 的静默处理只需简短研判回执；值得关注的异常、用户委托和未决问题进入话题 summary，未解决的问题继续保留，恶化或恢复时更新，不把同一现场逐轮写进 recent 和长期记忆。这减少上下文材料与重复整理，不减少有变化时的模型调用次数。
+Route / Chief 默认读取这份正文，具体 Pod、镜像标识和完整现场按需用 read_input 核对。Source 保留变化事实，不替 Chief 判断其业务价值，也不因常规变化而丢弃 Input。Chief 的静默处理只需简短研判回执；值得关注的异常、用户委托和未决问题进入话题 summary，未解决的问题继续保留，恶化或恢复时更新，不把同一现场逐轮写进 recent 和长期记忆。Deferred 将持续采样与 Chief 唤醒分开；紧凑正文与静默研判进一步减少上下文材料和重复整理。
 
 首次成功采样静默建立基线，不向 Chief 提交历史变化。后续变化先保存 Input，再推进基线；若在二者之间中断，先用已保存 Input 恢复那次基线，再继续观察。
 输入身份包含观察序号，因此 A→B→A→B 会保留两次 A→B。读取失败、分页不完整或 Pod 归属采样不完整时保留基线，记录错误并按间隔重试，不把采集失败当作资源删除。

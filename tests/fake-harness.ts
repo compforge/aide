@@ -1,3 +1,4 @@
+import { InputAttention, inputAttention } from "../plugins/personal/input/model.ts";
 import { emptyConnectors } from "../src/connector-client.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
 import type { Resource } from "@compforge/aide-plugin";
@@ -111,7 +112,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const c = all.find(c => c.spec.id === topicId)!;
             const run = c.status.execution;
             const ids = new InputStore(home).list().filter(i => !i.status.assess?.[c.metadata.uid]?.completedAt && i.status.assess?.[c.metadata.uid]?.executionId === run?.id).map(i => i.metadata.name);
-            const immediate = ids.map(id => new InputStore(home).get(id)!.spec).filter(i => (i.attention ?? (i.origin === "channel" ? "immediate" : "deferred")) === "immediate");
+            const immediate = ids.map(id => new InputStore(home).get(id)!.spec).filter(i => inputAttention(i) === InputAttention.Immediate);
             const first = immediate[0]?.source;
             const address = immediate.length ? (first && immediate.every(i => i.source && sameAddress(first, i.source)) ? first : undefined) : c.spec.address;
             if (run && address && agent.notify !== false && typeof result === "string" && result) {
