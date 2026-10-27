@@ -1,5 +1,5 @@
 import type { ConnectorClient, EnvironmentDirectory, RequirementConnector } from "@compforge/aide-plugin";
-import type { ForgeReader } from "@compforge/repocli";
+import { ForgeRateLimitError, type ForgeReader } from "@compforge/repocli";
 import { createForgeConnectors } from "./forge/config.ts";
 import { createMeegoRequirementConnectors } from "./requirements/meego.ts";
 import { resolveEnvironmentConfig } from "./environments/config.ts";
@@ -26,6 +26,13 @@ export class Connectors implements ConnectorClient {
       comments: (identity, query) => this.requirement(identity.source).comments(identity, query),
     } satisfies ConnectorClient["requirements"]);
     this.forges = Object.freeze({
+      listRepositories: async (forge, query) => {
+        try { return await this.forge(forge).listRepositories(query); }
+        catch (error) {
+          if (!(error instanceof ForgeRateLimitError)) throw error;
+          return { items: [], issues: [{ stage: "list", kind: "rate_limit", message: error.message, retryAfterMs: error.retryAfterMs }] };
+        }
+      },
       scanPullRequests: (forge, query) => this.forge(forge).scanPullRequests(query),
       listPullRequests: (forge, query) => this.forge(forge).listPullRequests(query),
       getPullRequest: (key) => this.forge(key.repository.forge.name).getPullRequest(key),

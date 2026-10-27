@@ -1,9 +1,15 @@
+import { createHash } from "node:crypto";
 import {
   jsonObject,
 } from "../config.ts";
 import { createForgeReader, type ForgeFetch, type ForgeReader, type ForgeReaderConfig } from "@compforge/repocli";
 
 export type ForgeConfig = Omit<ForgeReaderConfig, "token"> & { readonly token?: string };
+
+/** Non-secret binding for persisted observations; credentials and endpoints changing invalidate old Source instances. */
+export function forgeConnectionRevision(config: ForgeConfig): string {
+  return createHash("sha256").update(JSON.stringify([config.forge, config.provider, config.host, config.token ?? null])).digest("hex");
+}
 
 type Environment = Readonly<Record<string, string | undefined>>;
 

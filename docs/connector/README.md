@@ -10,7 +10,7 @@ Connector 通常按外部系统或服务划分，一个外部接入对应一个 
 
 一个 Connector 可以支持多个业务 Source。Source 按业务目标和观察生命周期划分，分别拥有观察范围、刷新频率、快照、检查点和下游交接策略。需要独立调度、重试或回收时，Source 的粒度可以细到一个业务 Resource；集合观察与单对象观察都由实际业务决定，不要求 Source 与 Connector 一一对应。
 
-Forge 的演进方向是一个 Forge Connector 支持 RepositorySource 与 PullRequestSource：前者维护低频刷新的仓库清单，后者观察 PR 变化。两者共享外部访问能力，各自拥有业务状态；Source 可以维护其它观察资源，也可以将变化形成 Input。当前实现仍使用 ForgeSource，拆分属于后续更新，不代表这些新资源已经可配置。
+Forge 由一个 Forge Connector 支持 RepositorySource 与 PullRequestSource：前者维护低频刷新的仓库清单，后者观察 PR 变化。两者共享外部访问能力，各自拥有业务状态；Source 可以维护其它观察资源，也可以将变化形成 Input。配置、快照与恢复契约见 [Forge](forge.md)。
 
 ## 外部访问约束（长期方向）
 
@@ -29,7 +29,7 @@ Forge 的演进方向是一个 Forge Connector 支持 RepositorySource 与 PullR
 | [环境](environments.md) | 环境声明、Kubernetes Workload 采样、变化基线 |
 | [Lark 消息](lark-messages.md) | 用户身份读取、单聊与群内 @、可选上下文与短期跟进 |
 | [需求平台](requirements.md) | 需求及评论观察、人物识别、评论投递与回读 |
-| [Forge](forge.md) | GitHub / GitLab PR 按需查询、按账号跨仓库观察状态与 revision 变化 |
+| [Forge](forge.md) | GitHub / GitLab 仓库清单缓存、按仓库或账号观察 PR 合并 |
 
 Lark 用户消息观察与 [机器人 Channel](../channel/lark.md) 使用不同身份和入口，分别配置。总体字段优先级见 [配置](../configuration.md)。
 
@@ -52,7 +52,7 @@ connectors:
 
 配置 key 是逻辑身份，api_host 可覆盖 API 域名。GITHUB_TOKEN / GH_TOKEN、GITLAB_TOKEN 优先于文件 token；没有凭证的 Forge 不启用。统一 HTTP 客户端处理协议、超时与错误，Source 策略不进入 Connector 的默认查询。
 
-PR 作者范围由 `plugins.personal.sources.forges[].author` 显式指定，凭证不决定作者。旧 Connector `uids` 字段在加载时忽略，不参与查询；配置示例与观察契约见 [Forge](forge.md)。
+PR 作者范围由 `plugins.personal.sources.pullRequests[].author` 显式指定，凭证不决定作者。旧 Connector `uids` 字段在加载时忽略，不参与查询；配置示例与观察契约见 [Forge](forge.md)。
 
 ## 验证
 

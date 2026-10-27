@@ -23,6 +23,7 @@ export function createConnectorClient(invoke: <T>(request: ConnectorRequest) => 
       comments: (identity, query) => invoke({ operation: "requirements.comments", identity, ...(query ? { query } : {}) }),
     } satisfies ConnectorClient["requirements"]),
     forges: Object.freeze({
+      listRepositories: (forge, query) => invoke({ operation: "forges.listRepositories", forge, ...(query ? { query } : {}) }),
       scanPullRequests: (forge, query) => invoke({ operation: "forges.scanPullRequests", forge, query }),
       listPullRequests: (forge, query) => invoke({ operation: "forges.listPullRequests", forge, query }),
       getPullRequest: (key) => invoke({ operation: "forges.getPullRequest", key }),
@@ -46,6 +47,7 @@ export function dispatchConnector(client: ConnectorClient, request: ConnectorReq
     case "requirements.get": return client.requirements.get(request.identity);
     case "requirements.identity": return client.requirements.identity(request.source);
     case "requirements.comments": return client.requirements.comments(request.identity, request.query);
+    case "forges.listRepositories": return client.forges.listRepositories(request.forge, request.query);
     case "forges.scanPullRequests": return client.forges.scanPullRequests(request.forge, request.query);
     case "forges.listPullRequests": return client.forges.listPullRequests(request.forge, request.query);
     case "forges.getPullRequest": return client.forges.getPullRequest(request.key);
