@@ -10,7 +10,8 @@ Aide 以单个服务实例管理自己的状态目录。配置模型、CLI 和�
 | --- | --- |
 | `AIDE_HOME` | 状态文件目录，默认 `~/.aide` |
 | `AIDE_CWD` | CLI 执行工作目录，默认启动目录 |
-| `AIDE_PORT` | 本地端口，默认 `7433` |
+| `AIDE_HOST` | 监听地址，默认 `0.0.0.0`；仅本机访问可设为 `127.0.0.1` |
+| `AIDE_PORT` | 监听端口，默认 `7433` |
 | `AIDE_TIMEZONE` | 默认时区，默认服务器时区；可设 `Asia/Shanghai` |
 | `AIDE_CONFIG` | 全局 Connector、Harness 与 Plugin 配置，默认 `$AIDE_HOME/config.yaml`；[字段与优先级](configuration.md) |
 | `LOG_LEVEL` | 结构化日志级别，默认 `info` |
@@ -62,7 +63,7 @@ curl -s http://127.0.0.1:7433/health
 
 `/health` 只报告 HTTP 服务存活及部署版本，不代表模型或业务 CLI 连通。通过真实任务验证模型和 CLI。服务更新后重新运行安装脚本；通过文件同步部署时可用 `AIDE_REVISION=<commit>` 标识源码版本。
 
-在自己的电脑建立转发后打开 <http://127.0.0.1:7433>：
+默认监听所有 IPv4 接口，可在自己的电脑打开 `http://<服务器地址>:7433`。若设置 `AIDE_HOST=127.0.0.1`，可建立 SSH 转发后打开 <http://127.0.0.1:7433>：
 
 ```sh
 ssh -N -L 7433:127.0.0.1:7433 user@your-server

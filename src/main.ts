@@ -22,6 +22,7 @@ const environment = Object.freeze({ ...process.env });
 const log = pino({ level: environment.LOG_LEVEL ?? "info" });
 const home = resolve(environment.AIDE_HOME ?? `${homedir()}/.aide`);
 const path = resolve(home, "host");
+const host = environment.AIDE_HOST ?? "0.0.0.0";
 const port = z.coerce.number().int().min(1).max(65535).parse(environment.AIDE_PORT ?? "7433");
 const timezone = environment.AIDE_TIMEZONE ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 new Intl.DateTimeFormat("en", { timeZone: timezone });
@@ -58,7 +59,7 @@ await withAsyncFileLock(path, async () => {
     }),
   }, log);
   const server = httpChannel(aide, log, new ChannelSettings(file, config, log));
-  server.listen(port, "127.0.0.1");
+  server.listen(port, host);
   await once(server, "listening");
   await aide.start();
   const requirementDelivery = new RequirementOutputDelivery(aide.outputStore, connectors, log);
@@ -69,7 +70,7 @@ await withAsyncFileLock(path, async () => {
     void bot.start().catch(() => channelLog.error("Lark channel startup failed; check credentials and network"));
     return bot;
   });
-  log.info({ port, path }, "Aide listening on localhost");
+  log.info({ host, port, path }, "Aide listening");
   await new Promise<void>((done) => {
     const stop = () => {
       process.off("SIGTERM", stop);
