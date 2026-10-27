@@ -32,10 +32,10 @@ export interface InputSpec {
   topicId?: string;
   /** Scheduling urgency, independent of authority or notification intent. */
   attention?: InputAttention;
-  origin: "channel" | "source" | "chief";
-  /** ChannelDefinition or SourceDefinition ID, selected by origin. */
+  origin: "channel" | "source" | "chief" | "trigger";
+  /** Channel/Source definition or internal producer ID, selected by origin. */
   originId: string;
-  /** Producing Source resource; provenance, never a routing destination. */
+  /** Producing Source or Topic resource; provenance, never an implicit routing destination. */
   originRef?: ResourceRef;
   /**
    * @spec Relation to the Person: authored by them, addressed to them, or visible in their information environment.

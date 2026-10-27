@@ -267,6 +267,19 @@ Personal 的 `config.ts` 组合各类 Source 策略，装配阶段解析后仅�
 配置输入允许缺省和引用；有效配置已补齐默认值、解析模型与路径，并在创建运行实例之前验证。
 Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。整体原则见 [Kernel](kernel.md)。
 
+## Chief 定时回顾
+
+```yaml
+harnesses:
+  chief:
+    config:
+      trigger:
+        intervalSeconds: 60   # 检查周期
+        idleSeconds: 900      # Chief 连续空闲多久后回顾
+```
+
+两项均为正整数秒，可独立配置。Topic 只保存 `trigger.enabled` 开关。首次空闲从 Topic 创建时计算，后续从任意一轮 Chief 执行结束时计算；Deferred Input 到达不会重置计时。回顾生成已绑定 root Topic 的系统 Input（`origin: trigger`、`attention: normal`），经普通处理链路复用当前原生 session，并通过 `assess_input` 保存结果；检查 memory、Topic 认识、未决问题、Work 和待处理 Input，不要求已有新变化。系统 Input 不刷新 Topic 的业务活跃时间。检查期间正在运行的 Chief 不会收到额外 steer / followUp，也不会在结束后补跑错过的周期。
+
 ## Topic 消费策略
 
 `plugins.personal.topic` 控制 Input 预览和近期处理摘要大小，独立于 Source 的采集频率：
@@ -280,9 +293,9 @@ plugins:
       summaryChars: 4000
 ```
 
-- Channel 默认 immediate，Source 默认 deferred；紧迫性不代表授权或必须外发。
+- Channel 默认 immediate，Source 默认 normal；EnvironmentSource 明确使用 deferred，定时回顾使用 normal；紧迫性不代表授权或必须外发。
 - 普通输入在当前调用结束后 followup，复用原生历史；immediate 通过 steer 进入当前调用。明确不支持或拒绝时留队等待 followup，不中断现有动作。
-- trigger 到期仍可在没有新 Input 时执行回顾。一次调用最多两天。
+- root Topic 的 `trigger.enabled` 默认开启。Chief 连续空闲达到阈值后，检查会发起回顾，即使没有新 Input；运行中的 Chief 不因定时检查而追加执行，每轮结束后重新计算空闲时间。一次调用最多两天。
 - `contextChars` 限制新 Input 的描述预览，全文通过 `read_input` 分页读取；原生历史和压缩由 SDK 管理。
 - `summaryChars` 限制 Topic 累计认识的长度，模型需合并后替换；近期处理记录使用 recent，统一限制条数和总字符数。长期认识使用共享记忆，委托进展保存在 Work。
 - `assess_input` 提交业务消费回执并原子建立 Work 办理记录。没有回执的已尝试输入保留失败证据，不自动重放。

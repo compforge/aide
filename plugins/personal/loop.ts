@@ -79,7 +79,11 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   finally { await finalizeExecution(context, current, execution.executionId, error); }
   return completed;
 }
-/** @spec Route classification may retry; uncertain Chief effects require inspection. Both retain admission evidence across restart. */
+/**
+ * @spec Route classification may retry; uncertain Chief effects require inspection. Both retain admission evidence across restart.
+ * @why Chief idle time starts after every execution, including failure or recovery; missed timer checks never force continuation.
+ * @case tests/topic-trigger.test.ts
+ */
 export async function finalizeExecution(context: Pick<PluginContext, "resources" | "logger">, owner: Readonly<LoopResource>, executionId: string,
   error = "Previous execution interrupted; inspect existing effects before continuing") {
   for (let n = 0; ; n++) {
@@ -90,7 +94,7 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
       await context.resources.commit([
         ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: attemptPatch(i, resourceRef(latest), { lastError: error,
           ...(latest.kind === "Route" ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
-        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(["Task", "Routine"].includes(latest.kind) ? {
+        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(latest.kind === "Topic" ? { idleSince: new Date().toISOString() } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
           lastExecutionId: executionId,
           ...((unfinished.length || (latest.status as LoopStatus & { status?: string }).status === "running")
             && (latest.status as LoopStatus & { status?: string }).status !== "paused" ? { status: "uncertain" } : {}),

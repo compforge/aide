@@ -34,7 +34,7 @@ const PersonVersionSchema = z.object({ id: z.string().min(1), uid: z.string().mi
 const MergePersonSchema = z.object({ source: PersonVersionSchema, target: PersonVersionSchema, summary: z.string().max(SUMMARY_CHARS) }).strict();
 const InputListSchema = z.object({
   page: z.coerce.number().int().min(1).max(1_000_000).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(20),
-  q: z.string().trim().max(200).optional(), origin: z.enum(["channel", "source", "chief"]).optional(),
+  q: z.string().trim().max(200).optional(), origin: z.enum(["channel", "source", "chief", "trigger"]).optional(),
   originId: z.string().max(200).optional(), connector: z.string().max(200).optional(), sourceUid: z.string().max(200).optional(),
   state: z.enum(["pending", "completed"]).optional(), errors: z.enum(["true", "false"]).transform(v => v === "true").optional(),
 }).strict();

@@ -6,7 +6,8 @@ import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from
 import { inputPreview } from "../input/prompt.ts";
 import { canActivate, finalizeExecution, nextInputs, runInput, submitPending } from "../loop.ts";
 import { topicPolicy } from "./config.ts";
-import { topicTrigger, nextTriggerAt } from "./trigger.ts";
+import { topicTrigger, createTriggerInput } from "./trigger.ts";
+import { ChiefTriggerConfigSchema, type ChiefTriggerConfig } from "../../../agents/chief/config.ts";
 import { updateTopic } from "./state.ts";
 
 const instructions = `Review this Topic and process its admitted inputs. Retain earlier context, verify current Work and relevant memory.
@@ -36,10 +37,11 @@ function watch(context: PluginContext): Watch {
     } } };
 }
 export function registerTopics(context: PluginContext): void {
+  const triggerConfig = ChiefTriggerConfigSchema.parse(context.instance.config.chiefTrigger ?? {});
   context.controllers.register({ resourceType: TOPIC_TYPE, maxConcurrency: 1, watches: [watch(context), assignmentWatch("assess", "Topic")],
     reconcile: (execution, c: Readonly<TopicResource>) => reconcileTopic(context, execution, c) });
   context.controllers.register({ name: "agent", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [watch(context), assignmentWatch("assess", "Topic")],
-    reconcile: (execution, c: Readonly<TopicResource>) => reconcileChief(context, execution, c) });
+    reconcile: (execution, c: Readonly<TopicResource>) => reconcileChief(context, execution, c, triggerConfig) });
 }
 
 /** @spec Intake can steer while the agent controller waits for inference. Timer activation remains independent of new input. */
@@ -52,10 +54,12 @@ export async function reconcileTopic(context: PluginContext, execution: Reconcil
 /**
  * @spec Deferred backlog cannot activate Chief, but may join a bounded batch activated by
  * another Input, scheduled review or child understanding. Later arrivals never force continuation.
+ * @spec Periodic checks review idle roots even without new Inputs. Serialized Chief execution and completion-based idle time suppress busy ticks.
+ * @case tests/topic-trigger.test.ts
  * @case tests/topic-attention.test.ts
  * @link docs/personal/topic.md#topic-定时回顾
  */
-export async function reconcileChief(context: PluginContext, execution: ReconcileContext, initial: Readonly<TopicResource>) {
+export async function reconcileChief(context: PluginContext, execution: ReconcileContext, initial: Readonly<TopicResource>, triggerConfig: ChiefTriggerConfig = ChiefTriggerConfigSchema.parse({})) {
   if (initial.metadata.deletionTimestamp) { await releaseTopicAgent(context, execution, initial); return; }
   if (initial.spec.parentRef) { await releaseTopicAgent(context, execution, initial); return; }
   if (initial.status.weaveLock) return;
@@ -65,15 +69,28 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   }
   let c = initial;
   const trigger = topicTrigger(c.spec.trigger);
-  if (trigger.enabled && !c.status.nextTriggerAt) c = await updateTopic(context.resources, c, () => ({ nextTriggerAt: nextTriggerAt(trigger) }));
-  const due = trigger.enabled && !!c.status.nextTriggerAt && Date.parse(c.status.nextTriggerAt) <= Date.now();
-  const inputs = await nextInputs(context.resources, c, 8);
-  const input = inputs[0];
-  const activatingInput = inputs.find(i => canActivate(i.spec, c));
+  const now = Date.now();
+  const checkDue = trigger.enabled && !!c.status.nextTriggerAt && Date.parse(c.status.nextTriggerAt) <= now;
+  const idleSince = c.status.idleSince ?? c.metadata.creationTimestamp;
+  const due = checkDue && now - Date.parse(idleSince) >= triggerConfig.idleSeconds * 1000;
+  let inputs = await nextInputs(context.resources, c, 8);
   const absorption = pendingAbsorption(await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE), c);
   const absorbDelay = Math.max(0, Date.parse(c.status.nextAbsorbAt ?? "1970-01-01") - Date.now());
   const absorb = absorption.length > 0 && absorbDelay === 0;
-  if (!activatingInput && !due && !absorb) return { requeueAfterMs: Math.max(1, Math.min(60_000,
+  if (trigger.enabled && (!c.status.nextTriggerAt || checkDue)) {
+    const nextTriggerAt = new Date(now + triggerConfig.intervalSeconds * 1000).toISOString();
+    if (due && !inputs.some(i => canActivate(i.spec, c)) && !absorb) {
+      const review = await createTriggerInput(context, c, nextTriggerAt);
+      // Include arrivals during creation in this turn; reserve one slot so the review cannot become a separate queued turn.
+      inputs = await nextInputs(context.resources, c, 8);
+      if (!inputs.some(i => i.metadata.name === review.metadata.name)) inputs = [...inputs.slice(0, 7), review];
+    } else {
+      c = await updateTopic(context.resources, c, () => ({ nextTriggerAt }));
+    }
+  }
+  const input = inputs[0];
+  const activatingInput = inputs.find(i => canActivate(i.spec, c));
+  if (!activatingInput && !absorb) return { requeueAfterMs: Math.max(1, Math.min(60_000,
     trigger.enabled && c.status.nextTriggerAt ? Date.parse(c.status.nextTriggerAt) - Date.now() : Infinity,
     absorption.length ? absorbDelay : Infinity)) };
   // @why Persist cooldown before inference so crashes and unsuccessful synthesis cannot hot-loop.
@@ -81,10 +98,9 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     nextAbsorbAt: new Date(Date.now() + Math.min(900_000, 60_000 * 2 ** (current.status.absorbAttempts ?? 0))).toISOString(),
     absorbAttempts: Math.min(5, (current.status.absorbAttempts ?? 0) + 1),
   }));
-  if (due) c = await updateTopic(context.resources, c, () => ({ nextTriggerAt: nextTriggerAt(trigger) }));
   const policy = topicPolicy(context.instance.config.topic);
-  const material = due ? "Scheduled review: inspect current delegated work. Communication is optional." : "Knowledge maintenance only: synthesize pending child versions. No new user request.";
-  const prompt = `${instructions}\n${absorption.length ? `Knowledge maintenance: absorb changed children bottom-up, preserve attribution and disagreements; no new mandate or reply obligation. Pending versions (bounded): ${JSON.stringify(absorption.slice(0, 20))}. Read remaining children as needed.` : ""}\nActivation: ${JSON.stringify({ kind: activatingInput ? "input" : due ? "timer" : "absorb", topicId: c.spec.id, address: c.spec.address, summaryChars: policy.summaryChars, inputId: input?.metadata.name, inputs: inputs.map(i => ({ inputId: i.metadata.name, description: inputPreview(i, Math.floor((policy.contextChars - 3000) / inputs.length)) })), at: new Date().toISOString() })}\n${due || !input ? material : ""}\n${input ? "Use read_input for complete evidence and unresolved inputs." : ""}`;
+  const material = "Knowledge maintenance only: synthesize pending child versions. No new user request.";
+  const prompt = `${instructions}\n${absorption.length ? `Knowledge maintenance: absorb changed children bottom-up, preserve attribution and disagreements; no new mandate or reply obligation. Pending versions (bounded): ${JSON.stringify(absorption.slice(0, 20))}. Read remaining children as needed.` : ""}\nActivation: ${JSON.stringify({ kind: activatingInput ? "input" : "absorb", topicId: c.spec.id, address: c.spec.address, summaryChars: policy.summaryChars, inputId: input?.metadata.name, inputs: inputs.map(i => ({ inputId: i.metadata.name, description: inputPreview(i, Math.floor((policy.contextChars - 3000) / inputs.length)) })), at: new Date().toISOString() })}\n${!activatingInput ? material : ""}\n${input ? "Use read_input for complete evidence and unresolved inputs." : ""}`;
   const completed = await runInput(context, execution.withContext({ topicId: c.spec.id, ...(input ? { inputId: input.metadata.name, inputIds: inputs.map(i => i.metadata.name) } : {}) }), c,
     "chief", prompt, input?.metadata.name, inputs.map(i => i.metadata.name));
   if (absorption.length) {
