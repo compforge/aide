@@ -32,7 +32,7 @@ export async function createTriggerInput(context: Pick<PluginContext, "resources
   };
   const status: InputStatus = {
     route: { completedAt: at, result: { topics: [target], reason: "Scheduled review of this root Topic" } },
-    assess: { [target.uid]: { resource: target, assignedAt: at } },
+    assess: {},
   };
   await context.resources.commit([
     { operation: "patchStatus", resource: topic, patch: { nextTriggerAt } },

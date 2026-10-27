@@ -49,7 +49,7 @@ test("Task creation assigns the original Input atomically and distinguishes mult
   assert.notEqual(first.uid, second.uid);
   assert.equal(get(first.id).spec.initialInputId, "original");
   const fact = aide.topics.inputStore.get("original")!;
-  assert.equal(fact.status.assess![c.metadata.uid]!.completedAt, undefined);
+  assert.equal(fact.status.assess!.completedAt, undefined);
   assert.deepEqual(Object.keys(fact.status.handle!).sort(), [first.uid!, second.uid!].sort());
   await assert.rejects(aide.work("other").create(definition, "original", "foreign"), /not assigned/);
   assert.deepEqual(aide.work("other").list(), []);
@@ -137,7 +137,7 @@ test("Task idle lifecycle releases the agent, retains its native ID, then reques
   assert.equal(await reconcileTask(context, execution, get(work.id)), undefined);
   assert.equal(get(work.id).metadata.deletionTimestamp, undefined);
   const { cancelAssignments } = await import("../plugins/personal/input/state.ts");
-  await cancelAssignments(resources, resourceRef(get(work.id)), "handle");
+  await cancelAssignments(resources, resourceRef(get(work.id)));
   await resources.patchStatus(get(work.id), { status: "done", nextAt: null });
   await reconcileTask(context, execution, get(work.id));
   assert.ok(get(work.id).metadata.deletionTimestamp);

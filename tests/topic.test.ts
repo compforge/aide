@@ -34,7 +34,7 @@ test("Independent Input facts and Personal consumption survive reopening with ve
   await client.patchStatus(c, { execution: { id: "exec", startedAt: new Date().toISOString() } });
   await assert.rejects(client.patchStatus(c, { summary: "stale" }), /version conflict/);
   assert.equal(store.input("m1")!.metadata.resourceVersion, store.inputStore.get("m1")!.metadata.resourceVersion);
-  await admit(client, "m1", c.metadata.uid, "exec");
+  await admit(client, "m1", "exec");
   await assessAll(client, c, "exec", { inputIds: ["m1"], summary: "answer" });
   await assert.rejects(assessAll(client, c, "wrong", { inputIds: ["m1"], summary: "answer" }), /no longer active/);
   const reopened = new TopicStore({ dir });
@@ -79,7 +79,7 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
   const interrupted = aide.personal.topics.resource("a")!;
   const client = aide.personal.plugins.resourceClient("personal");
   await client.patchStatus(interrupted, { execution: { id: "interrupted", startedAt: new Date().toISOString() } });
-  await admit(client, active.metadata.name, interrupted.metadata.uid, "interrupted");
+  await admit(client, active.metadata.name, "interrupted");
   await seedInput(aide.personal.topics, "queued", { topicId: "b", text: "process-after-restart", origin: "channel", originId: "web" });
   await aide.close();
   aide = new Aide(root, options, pino({ level: "silent" }));

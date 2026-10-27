@@ -136,22 +136,22 @@ test("Real Runner groups deferred observations by canonical environment and rest
   const prod = inputs.filter(input => input.spec.topicKey === "environment:prod");
   assert.equal(dev.length, 2); assert.equal(prod.length, 1);
   assert.deepEqual(dev.map(input => input.spec.observation!.namespace).sort(), ["app", "other"]);
-  const assignedUid = (input: typeof inputs[number]) => Object.values(input.status.assess!)[0]!.resource.uid;
+  const assignedUid = (input: typeof inputs[number]) => input.status.route!.result!.topics[0]!.uid;
   assert.equal(assignedUid(dev[0]!), assignedUid(dev[1]!));
   assert.notEqual(assignedUid(dev[0]!), assignedUid(prod[0]!));
   assert.ok(inputs.every(input => input.spec.topicName === input.spec.observation!.environment && input.spec.attention === InputAttention.Deferred));
   const input = dev[0]!;
-  const assignment = Object.values(input.status.assess!)[0]!;
+  const assignment = input.status.assess!;
   assert.equal(assignment.executionId, undefined);
   const scope = aide.personal, client = scope.plugins.resourceClient("personal");
-  const topic = (await client.get<import("../plugins/personal/topic/model.ts").TopicSpec, import("../plugins/personal/topic/model.ts").TopicStatus>(assignment.resource))!;
+  const topic = (await client.get<import("../plugins/personal/topic/model.ts").TopicSpec, import("../plugins/personal/topic/model.ts").TopicStatus>(input.status.route!.result!.topics[0]!))!;
   assert.equal(topic.spec.name, "dev");
   await client.replace(topic, { ...topic.spec, trigger: { enabled: true } },
     { ...topic.status, nextTriggerAt: new Date(Date.now() - 1000).toISOString(), idleSince: new Date(Date.now() - 901_000).toISOString() });
   await scope.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1", resourceApiVersion: topic.apiVersion,
     resourceKind: topic.kind, resourceId: topic.metadata.name, controllerName: "agent" });
   await aide.settled();
-  assert.ok(aide.topics.inputStore.get(input.metadata.name)!.status.assess![assignment.resource.uid]!.completedAt);
+  assert.ok(aide.topics.inputStore.get(input.metadata.name)!.status.assess!.completedAt);
   assert.match(prompts.at(-1)!, /镜像 api=A → api=B/);
   assert.doesNotMatch(prompts.at(-1)!, /"before"|"after"/);
   assert.equal(aide.outputs().filter((message) => message.topicId !== "other").length, 0, "Source Topics do not inherit a reply address");

@@ -81,12 +81,8 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   const due = checkDue && now - Date.parse(idleSince) >= triggerConfig.idleSeconds * 1000;
   const topics = await readTopicSubtree(context.resources, resourceRef(c));
   const pending = await nextInputs(context.resources, c, Number.MAX_SAFE_INTEGER, topics);
-  const notified = new Set(c.status.notifiedInputs ?? []);
-  const fresh = pending.filter(i => !notified.has(i.metadata.uid));
   const weave = (c.status.weaveRevision ?? 0) > (c.status.notifiedWeaveRevision ?? 0);
-  let inputs = fresh.slice(0, 8);
-  const retained = (c.status.notifiedInputs ?? []).filter(uid => pending.some(i => i.metadata.uid === uid));
-  if (retained.length !== notified.size) c = await updateTopic(context.resources, c, () => ({ notifiedInputs: retained }));
+  let inputs = pending.slice(0, 8);
   let absorption = pendingAbsorption(topics, c);
   const absorbDelay = Math.max(0, Date.parse(c.status.nextAbsorbAt ?? "1970-01-01") - Date.now());
   const absorb = absorption.length > 0 && absorbDelay === 0;
@@ -103,7 +99,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   }
   if (weave || absorb) inputs = [...new Map([...inputs, ...pending].map(i => [i.metadata.uid, i])).values()].slice(0, 8);
   const input = inputs[0];
-  const activatingInput = inputs.find(i => canActivate(i.spec, c) && !notified.has(i.metadata.uid));
+  const activatingInput = inputs.find(i => canActivate(i.spec, c));
   if (!activatingInput && !absorb && !weave) return { requeueAfterMs: Math.max(1, Math.min(60_000,
     trigger.enabled && c.status.nextTriggerAt ? Date.parse(c.status.nextTriggerAt) - Date.now() : Infinity,
     absorption.length ? absorbDelay : Infinity)) };

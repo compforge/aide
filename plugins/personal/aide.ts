@@ -18,7 +18,7 @@ import type { OutputStore } from "./output/store.ts";
 import { createRouteAgent } from "../../agents/route/agent.ts";
 import { agentCall } from "./observation/reference.ts";
 import { assessInput, type AssessInput } from "./topic/assess.ts";
-import { assessments, attemptOf, topicScope, attemptPatch, resourceRef, changeAttempt } from "./input/state.ts";
+import { belongsToTopic, attemptOf, topicScope, attemptPatch, resourceRef, changeAttempt, changeAssessment } from "./input/state.ts";
 import { topicPolicy } from "./topic/config.ts";
 import { canActivate, eligible, finalizeExecution, type LoopStatus } from "./loop.ts";
 import { ROUTE_TYPE, type RouteStatus } from "./route/model.ts";
@@ -180,7 +180,7 @@ export class Personal {
       nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
     const input = this.topics.inputStore.get(id);
     if (!input || (!inputs.some(i => i.metadata.name === id) && !(history && c &&
-      (assessments(input, owner).length || assessments(input, owner, members).length)))) throw new Error("Input is not attached to this resource");
+      (belongsToTopic(input, owner) || belongsToTopic(input, owner, members))))) throw new Error("Input is not attached to this resource");
     const description = inputPrinter.describe(input);
     return { inputId: id, attention: inputAttention(input.spec), status: status(input), text: description.slice(offset, offset + 8000), nextOffset: offset + 8000 < description.length ? offset + 8000 : null };
   }
@@ -221,7 +221,7 @@ export class Personal {
     const message = `New Input:\n${JSON.stringify({ inputId })}\n${inputPreview(input)}\nUse read_input for full facts. Submit the business receipt when handled.`;
     try {
       const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
-        operation, invocationId, messageId: `input:${input.metadata.uid}:${ref.uid}`, prompt: message, timeoutMs: 30_000,
+        operation, invocationId, messageId: `input:${input.metadata.uid}`, prompt: message, timeoutMs: 30_000,
       });
       if (result.state !== "success") throw new Error(`Harness ${operation} ${result.state}${result.state === "failure" ? `: ${result.error}` : ""}`);
       const outcome = { accepted: result.value.outcome === "accepted", reason: result.value.reason };
@@ -239,7 +239,7 @@ export class Personal {
     }
   }
 
-  /** @spec Only Topic Reconcile chooses when/how to notify Chief. This Host bridge dispatches the requested verb and stores Topic-local progress. */
+  /** @spec Only Topic Reconcile chooses when/how to notify Chief. This Host bridge dispatches the requested verb and atomically admits each Input once across all Topics. */
   async submitTopic(scope: ExecutionScope, raw: unknown) {
     const args = z.object({ inputId: z.string().min(1).optional(), weaveRevision: z.number().int().positive().optional(),
       operation: z.enum(["steer", "followUp"]) }).strict().refine(a => !!a.inputId !== !!a.weaveRevision).parse(raw);
@@ -255,30 +255,36 @@ export class Personal {
       if (!invocation) return { accepted: false, reason: "not_running" };
       const input = args.inputId ? this.topics.inputStore.get(args.inputId) : undefined;
       const members = new Set((await topicScope(resources, ref)).map(t => t.metadata.uid));
-      if (args.inputId && (!input || !eligible(input, topic, members) || !canActivate(input.spec, topic)
-        || topic.status.notifiedInputs?.includes(input.metadata.uid))) return { accepted: false };
+      if (args.inputId && (!input || !eligible(input, topic, members) || !canActivate(input.spec, topic))) return { accepted: false };
       if (args.weaveRevision && (args.weaveRevision > (topic.status.weaveRevision ?? 0)
         || args.weaveRevision <= (topic.status.notifiedWeaveRevision ?? 0))) return { accepted: false };
       try {
-        await resources.patchStatus(topic, {
-          execution: { ...topic.status.execution, admissionRevision: (topic.status.execution.admissionRevision ?? 0) + 1 },
-          ...(input ? { notifiedInputs: [...new Set([...(topic.status.notifiedInputs ?? []), input.metadata.uid])] }
-            : { notifiedWeaveRevision: args.weaveRevision }),
-        });
+        await resources.commit([
+          { operation: "patchStatus", resource: topic, patch: {
+            execution: { ...topic.status.execution, admissionRevision: (topic.status.execution.admissionRevision ?? 0) + 1 },
+            ...(!input ? { notifiedWeaveRevision: args.weaveRevision } : {}),
+          } },
+          ...(input ? [{ operation: "patchStatus" as const, resource: input, patch: { assess: { ...input.status.assess,
+            executionId: topic.status.execution.id, startedAt: new Date().toISOString(), agent: topic.status.agent,
+          } } }] : []),
+        ]);
       } catch (error) { if (n < 8 && /version conflict/.test(String(error))) continue; throw error; }
+      if (input) this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid,
+        executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const prompt = input ? `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nRead current Topic material and assess when useful.`
         : "Topic structure changed through Weave. Review the current subtree's understanding, Inputs and Work; decide what needs attention. Existing Work retains its original Topic.";
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,
-          messageId: input ? `input:${input.metadata.uid}:${ref.uid}` : `weave:${ref.uid}:${args.weaveRevision}`, prompt, timeoutMs: 30_000,
+          messageId: input ? `input:${input.metadata.uid}` : `weave:${ref.uid}:${args.weaveRevision}`, prompt, timeoutMs: 30_000,
         });
         if (result.state !== "success") throw new Error(`Chief notification failed: ${result.state}`);
         const accepted = result.value.outcome === "accepted";
         if (!accepted) {
-          await updateTopic(resources, topic, current => input
-            ? { notifiedInputs: (current.status.notifiedInputs ?? []).filter(uid => uid !== input.metadata.uid) }
-            : current.status.notifiedWeaveRevision === args.weaveRevision ? { notifiedWeaveRevision: topic.status.notifiedWeaveRevision ?? 0 } : {});
+          if (input) await changeAssessment(resources, input, topic.status.execution.id,
+            { executionId: undefined, agent: undefined, startedAt: undefined, lastError: undefined });
+          else await updateTopic(resources, topic, current => current.status.notifiedWeaveRevision === args.weaveRevision
+            ? { notifiedWeaveRevision: topic.status.notifiedWeaveRevision ?? 0 } : {});
           // Queue the owning agent Reconcile after the current execution; retrying intake on this bookkeeping would hot-loop unsupported verbs.
           void this.plugins.enqueue({ pluginInstanceId: "personal", namespace: ref.namespace, resourceApiVersion: ref.apiVersion,
             resourceKind: ref.kind, resourceId: ref.name, controllerName: "agent" })
@@ -287,6 +293,7 @@ export class Personal {
         this.log.info({ topicUid: ref.uid, inputId: args.inputId, weaveRevision: args.weaveRevision, operation: args.operation, accepted }, "Chief notification dispatched by Reconcile");
         return { accepted, reason: result.value.reason };
       } catch (error) {
+        if (input) await changeAssessment(resources, input, topic.status.execution.id, { lastError: String(error) });
         await updateTopic(resources, topic, () => ({ lastError: String(error) }));
         throw error;
       }

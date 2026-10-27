@@ -11,7 +11,6 @@ export interface TopicSpec { address?: Address; id: string; name?: string; defau
 export interface TopicStatus extends ResourceContext {
   lastInputAt?: string;
   /** Notification progress belongs to the Topic, not to its Input material. */
-  notifiedInputs?: string[];
   weaveRevision?: number;
   notifiedWeaveRevision?: number;
   lastError?: string | null;

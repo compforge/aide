@@ -44,7 +44,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
       if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
       calls.push(args);
       if (fail) return { state: "failure", error: "provider disconnected" };
-      const admitted = aide.topics.inputStore.list().filter(i => read().status.notifiedInputs?.includes(i.metadata.uid) && !i.status.assess?.[read().metadata.uid]?.completedAt);
+      const admitted = aide.topics.inputStore.list().filter(i => i.status.assess?.executionId === executionId && !i.status.assess?.completedAt);
       await assessAll(resources, read(), executionId, { inputIds: admitted.map(i => i.metadata.name), summary: "Nothing needs action" });
       return { state: "success", value: { result: { stopReason: "end_turn" } } };
     } } } as unknown as ReconcileContext;
@@ -94,7 +94,7 @@ test("Idle review is a pre-routed Input with a processing receipt and Job View, 
   assert.equal(input.spec.attention, InputAttention.Normal);
   assert.deepEqual(input.status.route!.result!.topics, [resourceRef(f.read())]);
   assert.equal(input.status.route!.executionId, undefined, "No Route model invocation");
-  assert.ok(input.status.assess![f.read().metadata.uid]!.completedAt);
+  assert.ok(input.status.assess!.completedAt);
   assert.equal(f.read().status.lastInputAt, before);
   assert.ok(f.read().status.idleSince);
   assert.equal(f.calls.length, 1);
@@ -105,7 +105,7 @@ test("Idle review is a pre-routed Input with a processing receipt and Job View, 
   assert.equal(inputList(f.aide, { origin: "trigger" }).items.length, 1);
   assert.ok(inputDetail(f.aide, input.metadata.name)!.timeline.some(e => e.stage === "assess" && e.status === "completed"));
   assert.equal((await inputJob(input, [])).status, "completed");
-  assert.deepEqual(inputDetail(f.aide, input.metadata.name)!.sessions, [], "no native tool evidence is invented by this fixture");
+  assert.deepEqual(inputDetail(f.aide, input.metadata.name)!.sessions, [f.read().status.agent], "admission retains the native session even without completing tool evidence");
   assert.ok(topicView(f.aide, "root").blocks.some(b => b.origin === "trigger" && b.label === "定时回顾"));
   await f.run();
   assert.equal(f.calls.length, 1);
@@ -125,7 +125,7 @@ test("Checks advance independently of idle eligibility; Deferred arrivals do not
   await f.resources.patchStatus(f.read(), { nextTriggerAt: past() });
   await f.run({ intervalSeconds: 17, idleSeconds: 20 });
   assert.equal(f.calls.length, 1);
-  assert.ok(f.aide.topics.inputStore.get("observation")!.status.assess![f.read().metadata.uid]!.completedAt);
+  assert.ok(f.aide.topics.inputStore.get("observation")!.status.assess!.completedAt);
   const finishedAt = f.read().status.idleSince;
   await f.resources.patchStatus(f.read(), { nextTriggerAt: past() });
   await f.run({ intervalSeconds: 17, idleSeconds: 20 });
@@ -162,7 +162,7 @@ test("Creation is atomic and a normal arrival during creation joins the same exe
   assert.equal(f.calls.length, 1);
   assert.match(f.calls[0]!.prompt, /concurrent message/);
   assert.equal(f.aide.topics.inputStore.list().length, 2);
-  assert.ok(f.aide.topics.inputStore.list().every(i => i.status.assess![f.read().metadata.uid]!.completedAt));
+  assert.ok(f.aide.topics.inputStore.list().every(i => i.status.assess!.completedAt));
 });
 
 test("Repeated stale checks cannot duplicate an Input; a restart before admission consumes it once", async t => {
@@ -179,7 +179,7 @@ test("Repeated stale checks cannot duplicate an Input; a restart before admissio
     assert.equal(restarted.invocations().filter(i => i.topicId === "root").length, 1);
     const inputs = restarted.topics.inputStore.list();
     assert.equal(inputs.length, 1);
-    assert.ok(inputs[0]!.status.assess![stale.metadata.uid]!.completedAt);
+    assert.ok(inputs[0]!.status.assess!.completedAt);
   } finally { await restarted.close(); }
 });
 
@@ -241,5 +241,5 @@ test("Idle trigger reviews Note-only child progress without requiring a summary 
   assert.match(f.calls[0]!.prompt, /confirm absorbed versions without summary/);
   assert.equal(f.read().status.summary, "Stable parent rule");
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "trigger")!;
-  assert.ok(review.status.assess![f.read().metadata.uid]!.completedAt);
+  assert.ok(review.status.assess!.completedAt);
 });

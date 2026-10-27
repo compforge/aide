@@ -13,8 +13,8 @@ function fixture(): Input {
   return { apiVersion: "aide.dev/v1alpha1", kind: "Input", metadata: { name: "input", uid: "uid-1", namespace: "v1", creationTimestamp: at, resourceVersion: "1", generation: 1 },
     spec: { origin: "channel", originId: "web", text: "check this" }, status: {
       route: { completedAt: at, result: { topics: [topic], reason: "explicit selection" } },
-      assess: { [topic.uid]: { resource: topic, assignedAt: at, startedAt: at, completedAt: at, agent,
-        executionId: "admitted-run", completedBy: { agent, executionId: "recovery-run", toolCallId: "ack" }, result: { summary: "quietly checked", disposition: "completed" } } },
+      assess: { startedAt: at, completedAt: at, agent,
+        executionId: "admitted-run", completedBy: { agent, executionId: "recovery-run", toolCallId: "ack" }, result: { summary: "quietly checked", disposition: "completed" } },
     } };
 }
 const model: ModelCall = { kind: "model_call", id: "model-1", status: "completed" };
@@ -31,7 +31,7 @@ test("Job joins explicit acknowledgement and shared model, not all calls in a co
   assert.equal(job.job.id, "uid-1"); assert.equal(job.status, "completed");
   assert.deepEqual(job.nodes.filter(n => n.session).map(n => n.id), ["model-1", "tool-1"]);
   assert.equal(job.relations?.[0]?.target.session?.id, agent.sessionId);
-  assert.equal((job.nodes.find(n => n.id.startsWith("assess:")) as Operation).data && input.status.assess![topic.uid]!.executionId, "admitted-run");
+  assert.equal((job.nodes.find(n => n.id === "assess") as Operation).data && input.status.assess!.executionId, "admitted-run");
   assert.match(String(job.attributes?.attribution), /shared/);
   assert.doesNotThrow(() => inspect(job)); assert.match(renderHTML(job), /quietly checked/);
   assert.deepEqual(inputSessions(input, []), [agent]);
@@ -52,12 +52,12 @@ test("Missing native Session, unfinished processing and ambiguous tool IDs prese
   const input = fixture();
   const missing = await inputJob(input, [], async () => { throw new Error("Native Pi session is missing"); });
   assert.equal(missing.status, "completed"); assert.match(missing.issues!.join("\n"), /session is missing/);
-  assert.ok(missing.nodes.some(n => n.id === `assess:${topic.uid}`));
+  assert.ok(missing.nodes.some(n => n.id === "assess"));
   const branched = session(); branched.nodes.push({ ...tool, id: "second-branch" } as ToolCall);
   const ambiguous = await inputJob(input, [], async () => branched);
   assert.equal(ambiguous.nodes.some(n => n.kind === "tool_call"), false); assert.match(ambiguous.issues!.join("\n"), /2 native matches/);
-  const pending = structuredClone(input); delete pending.status.assess![topic.uid]!.completedAt; delete pending.status.assess![topic.uid]!.completedBy;
-  pending.status.assess![topic.uid]!.lastError = "Interrupted";
+  const pending = structuredClone(input); delete pending.status.assess!.completedAt; delete pending.status.assess!.completedBy;
+  pending.status.assess!.lastError = "Interrupted";
   const interrupted = await inputJob(pending, [], async () => session());
   assert.equal(interrupted.status, "outcome_unknown"); assert.equal(interrupted.nodes.some(n => n.kind === "model_call"), false);
 });
@@ -90,13 +90,13 @@ test("Unrouted Input exports no synthetic route and never completes from an empt
 test("Assigned assessment remains unknown until its recorded attempt starts", async () => {
   const base = fixture();
   const assigned: Input = { ...base, status: { route: base.status.route,
-    assess: { [topic.uid]: { resource: topic, assignedAt: at } } } };
+    assess: { } } };
   const waiting = await inputJob(assigned, []);
   assert.equal(waiting.status, "unknown");
-  assert.equal(waiting.nodes.find(n => n.id.startsWith("assess:"))!.status, "unknown");
+  assert.equal(waiting.nodes.find(n => n.id === "assess")!.status, "unknown");
   const active: Input = { ...assigned, status: { ...assigned.status,
-    assess: { [topic.uid]: { ...assigned.status.assess![topic.uid]!, startedAt: at, executionId: "started" } } } };
+    assess: { ...assigned.status.assess, startedAt: at, executionId: "started" } } };
   const running = await inputJob(active, []);
   assert.equal(running.status, "running");
-  assert.equal(running.nodes.find(n => n.id.startsWith("assess:"))!.status, "running");
+  assert.equal(running.nodes.find(n => n.id === "assess")!.status, "running");
 });

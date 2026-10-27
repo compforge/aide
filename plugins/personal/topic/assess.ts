@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
-import { resourceRef, topicScope, assessments } from "../input/state.ts";
+import { resourceRef, topicScope, belongsToTopic } from "../input/state.ts";
 import { WorkInputRequestSchema, type WorkStatus } from "../model.ts";
 import { WORK_TYPES, type WorkSpec } from "../resources.ts";
 export const AssessInputSchema = z.object({ inputId: z.string().min(1), summary: z.string().min(1).max(1000),
@@ -12,7 +12,7 @@ export const AssessInputSchema = z.object({ inputId: z.string().min(1), summary:
 export type AssessInput = z.input<typeof AssessInputSchema>;
 /**
  * @spec Finishing Chief assessment and assigning Work handling are atomic; receipts remain on Input.
- * @spec Active Chief may assess any material in its Topic subtree, including Deferred; Input never owns a Chief execution.
+ * @spec Active Chief may assess any material in its Topic subtree, including Deferred; completion does not automatically resubmit material.
  * @spec Assessment does not update Topic summary/recent; meaningful understanding is maintained explicitly.
  * @link docs/personal/chief.md
  */
@@ -26,10 +26,8 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
     if (!input) throw new Error("Input is unavailable");
     const topics = await topicScope(resources, resourceRef(c));
     const topicUids = new Set(topics.map(t => t.metadata.uid));
-    const accessible = assessments(input, resourceRef(c), topicUids);
-    if (!accessible.length) throw new Error("Input does not belong to this Topic subtree");
-    const selected = accessible.filter(([, a]) => !a.completedAt);
-    if (!selected.length) return { assessed: args.inputId };
+    if (!belongsToTopic(input, resourceRef(c), topicUids)) throw new Error("Input does not belong to this Topic subtree");
+    if (input.status.assess?.completedAt) return { assessed: args.inputId };
     const work = args.workRequests.length ? (await Promise.all(topics.flatMap(topic => WORK_TYPES.map(type =>
       resources.list<WorkSpec, WorkStatus>(type, { matchIndex: { name: "topicId", value: topic.spec.id } }))))).flat() : [];
     const handle = { ...input.status.handle };
@@ -48,10 +46,8 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
       await resources.commit([
         ...guards,
         { operation: "patchStatus", resource: input, patch: { handle, assess: { ...input.status.assess,
-          ...Object.fromEntries(selected.map(([uid, assessment]) => [uid, {
-            ...assessment,
-            ...(toolCallId ? { completedBy: agentCall(c.status, toolCallId) } : {}), completedAt: at, result: { summary: args.summary, disposition: "completed" },
-          }])) } } },
+          ...(toolCallId ? { completedBy: agentCall(c.status, toolCallId) } : {}), completedAt: at, result: { summary: args.summary, disposition: "completed" },
+        } } },
         // Guard the owning execution/version without turning every receipt into durable topic understanding.
         { operation: "patchStatus", resource: c, patch: {} },
       ]);

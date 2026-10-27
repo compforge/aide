@@ -27,7 +27,7 @@ test("Channel and Source Inputs share idempotent admission beyond the old pendin
   }
   assert.equal(scope.topics.get("topic")!.pendingInputIds.length, 125);
   assert.equal(new Set(scope.topics.get("topic")!.pendingInputIds).size, 125);
-  assert.equal(!!scope.topics.inputStore.get("input-124")!.status.assess?.[topic.metadata.uid], true);
+  assert.equal(!!scope.topics.inputStore.get("input-124")!.status.assess, true);
 });
 
 test("A say request for information finishes processing; the answer is a new Input in the same context", async (t) => {

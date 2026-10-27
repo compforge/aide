@@ -1,7 +1,7 @@
 import { agentCall } from "../observation/reference.ts";
 import { ensureDefaultTopic } from "./default.ts";
 import { topicSubtree } from "./tree.ts";
-import { resourceRef, assessments } from "../input/state.ts";
+import { resourceRef, belongsToTopic } from "../input/state.ts";
 import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient, Address } from "@compforge/aide-plugin";
@@ -18,7 +18,7 @@ import { digest } from "../chief-model.ts";
 import { topicTrigger } from "./trigger.ts";
 export const topicKey = digest;
 
-/** @spec Topic is a Personal Resource. Input facts are shared; consumption and replies belong to each Topic. */
+/** @spec Topic is a Personal Resource. Input assessment is global; Topic routing determines material visibility and each Output records its producer. */
 export class TopicStore {
   private readonly listeners = new Set<(topic: Topic) => void>();
   constructor(readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly inputStore: InputStore, readonly outputStore = new OutputStore(resources.storage.home),
@@ -48,6 +48,11 @@ export class TopicStore {
     if (previous) return previous;
     return this.client.create(TOPIC_TYPE, { name: topicKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), trigger: topicTrigger() }, status: { receipts: [], summary: "", recent: [] } });
   }
+  /**
+   * @spec Presentation follows the completing execution when recorded; the original admission stays on Input for recovery.
+   * @link docs/personal/input.md#归属与-chief-通知
+   * @case tests/input-assessment.test.ts
+   */
   inputs(topicId?: string): TopicInput[] {
     const selected = topicId ? this.resource(topicId) : undefined;
     if (topicId && !selected) return [];
@@ -55,18 +60,18 @@ export class TopicStore {
     const members = new Set(all.map(t => t.metadata.uid));
     const outputExecutions = new Map(this.outputStore.list().flatMap(o => o.spec.executionId
       ? Object.values(o.spec.inputUids ?? {}).map(uid => [uid, o.spec.executionId!] as const) : []));
-    return this.inputStore.list().flatMap(input => {
+    const inputs = selected
+      ? [...new Map(all.flatMap(t => this.inputStore.query("topic", t.metadata.uid)).map(i => [i.metadata.uid, i])).values()]
+      : this.inputStore.list();
+    return inputs.flatMap(input => {
       const binding = input.status.route?.result?.topics.find(ref => members.has(ref.uid));
-      const own = selected && input.status.assess?.[selected.metadata.uid];
-      if (!binding && !own) return [];
+      if (!binding) return [];
       const topic = selected ?? all.find(t => t.metadata.uid === binding?.uid);
       if (!topic) return [];
-      const receipts = Object.values(input.status.assess ?? {}).filter(a => selected ? members.has(a.resource.uid) || a.resource.uid === selected.metadata.uid : true);
-      const receipt = own ?? receipts.sort((a, b) => (b.assignedAt ?? "").localeCompare(a.assignedAt ?? ""))[0]
-        ?? Object.values(input.status.assess ?? {})[0];
+      const receipt = input.status.assess;
       return [{ ...input, topicId: topic.spec.id, consumption: {
         phase: receipt?.completedAt ? "done" as const : undefined,
-        executionId: receipt?.completedBy?.executionId ?? outputExecutions.get(input.metadata.uid), summary: receipt?.result?.summary,
+        executionId: receipt?.completedBy?.executionId ?? receipt?.executionId ?? outputExecutions.get(input.metadata.uid), summary: receipt?.result?.summary,
       } }];
     });
   }
@@ -132,7 +137,7 @@ export class TopicStore {
       const input = this.inputStore.get(id);
       const members = new Set(this.scope(initial.metadata.uid).map(t => t.metadata.uid));
       const assigned = owner ? input?.status.handle?.[owner.metadata.uid] : input &&
-        (assessments(input, resourceRef(initial), members).length);
+        (belongsToTopic(input, resourceRef(initial), members));
       if (!input || !assigned) throw new Error(`say Input is not attached to this Topic: ${id}`);
       return input;
     };

@@ -110,7 +110,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const all = await resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE);
             const c = all.find(c => c.spec.id === topicId)!;
             const run = c.status.execution;
-            const ids = new InputStore(home).list().filter(i => c.status.notifiedInputs?.includes(i.metadata.uid) && Object.values(i.status.assess ?? {}).some(a => !a.completedAt)).map(i => i.metadata.name);
+            const ids = new InputStore(home).list().filter(i => i.status.assess?.executionId === c.status.execution?.id && !i.status.assess?.completedAt).map(i => i.metadata.name);
             const immediate = ids.map(id => new InputStore(home).get(id)!.spec).filter(i => inputAttention(i) === InputAttention.Immediate);
             const first = immediate[0]?.source;
             const address = immediate.length ? (first && immediate.every(i => i.source && sameAddress(first, i.source)) ? first : undefined) : c.spec.address;

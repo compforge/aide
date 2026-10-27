@@ -50,7 +50,7 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   assert.deepEqual(aide.outputStore.get(immediate.outputId)!.spec.target, group);
   // Mark assessment complete so the following notification is not another reply to the pending mention.
   const input = aide.topics.inputStore.get("mention")!, topic = aide.topics.resource("group-topic")!;
-  aide.topics.inputStore.update(input, { assess: { [topic.metadata.uid]: { resource: resourceRef(topic), assignedAt: new Date().toISOString(), completedAt: new Date().toISOString(), result: { summary: "done" } } } });
+  aide.topics.inputStore.update(input, { assess: { completedAt: new Date().toISOString(), result: { summary: "done" } } });
   await aide.close();
   aide = new Aide(home, { ...options, config: { ...options.config, defaultChannel: "personal" } }, log);
   await aide.persons.initialize();

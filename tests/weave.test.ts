@@ -57,7 +57,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
       parent: { uid: b.metadata.uid, version: understandingVersion(f.refresh(b)) } }, 4000);
     assert.equal(f.refresh(a).status.execution?.id, "old-chief");
     assert.equal(f.refresh(a).spec.parentRef?.uid, b.metadata.uid);
-    assert.deepEqual(f.aide.topics.inputStore.get("first")!.status.assess, first.status.assess, "Weave and Chief activation never claim Input");
+    assert.equal(f.aide.topics.inputStore.get("first")!.status.assess?.executionId, "old-chief", "Weave preserves the original admission");
     await f.input("second", "source:a");
     const rootExecution: any = { executionId: "root-chief", withContext() { return this; }, verbs: { async harness(message: any) {
       if (message.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native-b" } };
@@ -86,8 +86,8 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
   for (const id of ["first", "second"]) {
     const input = f.aide.topics.inputStore.get(id)!;
     assert.deepEqual(input.status.route!.result!.topics, [resourceRef(a)]);
-    assert.deepEqual(Object.keys(input.status.assess!), [a.metadata.uid]);
-    assert.equal(input.status.assess![a.metadata.uid]!.executionId, undefined);
+    assert.ok(input.status.assess);
+    assert.equal(input.status.assess!.executionId, id === "first" ? "old-chief" : "root-chief");
   }
   assert.deepEqual(await nextInputs(f.resources, f.refresh(a), 8), [], "child cannot start a new Chief");
   assert.deepEqual(topicCandidates(f.aide.personal.store).map(c => c.uid), [b.metadata.uid]);
@@ -108,7 +108,7 @@ test("Weave rejects stale understanding and cycles but does not wait for uncerta
 test("Topic expiry checks child absorption, releases source key, and never revives an old routed Input", async t => {
   const f = fixture(t); await f.initialize();
   const fact = await f.input("old", "a"), a = f.aide.topics.byKey("a")!, b = await ensureSourceTopic(f.resources, "b", "B");
-  await f.resources.patchStatus(fact, { assess: { [a.metadata.uid]: { ...fact.status.assess![a.metadata.uid]!, completedAt: new Date().toISOString() } } });
+  await f.resources.patchStatus(fact, { assess: { ...fact.status.assess, completedAt: new Date().toISOString() } });
   await f.group(a, b);
   const parent = f.aide.topics.list().find(t => !t.parentRef)!;
   await f.resources.patchStatus(f.refresh(a), { summary: "Changed child finding", lastInputAt: "2000-01-01T00:00:00.000Z" });
@@ -143,7 +143,7 @@ test("Nested Weave preserves the leaf path and propagates actual Input activity 
   const path = topicPath(all, f.refresh(a));
   assert.equal(path.length, 3);
   assert.equal(new Set(path.map(t => t.status.lastInputAt)).size, 1);
-  assert.deepEqual(Object.keys(input.status.assess!), [a.metadata.uid]);
+  assert.ok(input.status.assess);
   const cyclic = f.refresh(path[2]!);
   await assert.rejects(f.resources.replace(cyclic, { ...cyclic.spec, parentRef: resourceRef(a) }, cyclic.status), /cycle/);
 });
@@ -160,7 +160,7 @@ test("Weave groups a large backlog without moving any Input or batching migratio
   assert.equal(f.aide.topics.pending(a.metadata.uid).length, 120);
   assert.equal((await nextInputs(f.resources, root, 8)).length, 8);
   await f.input("later", "burst");
-  assert.deepEqual(Object.keys(f.aide.topics.inputStore.get("later")!.status.assess!), [a.metadata.uid]);
+  assert.deepEqual(f.aide.topics.inputStore.get("later")!.status.assess, {});
 });
 
 test("Weave advances only the bounded snapshot and retries interrupted analysis", async t => {
@@ -242,16 +242,15 @@ test("Root Chief admits a bounded backlog with urgent Input first and independen
     assert.equal(activation.inputs[0].inputId, "urgent");
     for (const item of activation.inputs) {
       const fact = f.aide.topics.inputStore.get(item.inputId)!;
-      assert.ok(f.refresh(root).status.notifiedInputs?.includes(fact.metadata.uid));
-      assert.equal(fact.status.assess![root.metadata.uid]!.executionId, undefined);
-      await f.resources.patchStatus(fact, { assess: { ...fact.status.assess, [root.metadata.uid]: { ...fact.status.assess![root.metadata.uid]!, completedAt: new Date().toISOString() } } });
+      assert.equal(fact.status.assess?.executionId, execution.executionId);
+      await f.resources.patchStatus(fact, { assess: { ...fact.status.assess, completedAt: new Date().toISOString() } });
     }
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
   } } };
   await reconcileChief(f.context, execution, f.refresh(root));
   assert.equal(prompts, 1);
   assert.equal(f.aide.topics.pending(root.metadata.uid).length, 3);
-  assert.ok(f.aide.topics.pending(root.metadata.uid).every(i => !i.status.assess![root.metadata.uid]!.executionId));
+  assert.ok(f.aide.topics.pending(root.metadata.uid).every(i => !i.status.assess!.executionId));
 });
 
 

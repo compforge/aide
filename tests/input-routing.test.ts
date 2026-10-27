@@ -26,7 +26,7 @@ test("Concurrent appends preserve both Inputs and consumption state; repeats do 
   const current = scope.topics.resource("target")!;
   assert.deepEqual(scope.topics.get("target")!.pendingInputIds.sort(), ["first", "second"]);
   const fact = scope.topics.inputStore.get("first")!;
-  scope.topics.inputStore.update(fact, { assess: { ...fact.status.assess, [c.metadata.uid]: { ...fact.status.assess![c.metadata.uid]!, completedAt: new Date().toISOString() } } });
+  scope.topics.inputStore.update(fact, { assess: { ...fact.status.assess, completedAt: new Date().toISOString() } });
   const before = scope.topics.resource("target")!;
   let writes = 0;
   const resources = { ...client, replace: (async (...args: Parameters<typeof client.replace>) => { writes++; return client.replace(...args); }) as typeof client.replace };
@@ -35,7 +35,7 @@ test("Concurrent appends preserve both Inputs and consumption state; repeats do 
   assert.deepEqual(scope.topics.resource("target"), before);
   await assert.rejects(client.delete(TOPIC_TYPE, c.metadata.name), /pending Input/);
   const pending = scope.topics.inputStore.get("second")!;
-  scope.topics.inputStore.update(pending, { assess: { ...pending.status.assess, [c.metadata.uid]: { ...pending.status.assess![c.metadata.uid]!, completedAt: new Date().toISOString() } } });
+  scope.topics.inputStore.update(pending, { assess: { ...pending.status.assess, completedAt: new Date().toISOString() } });
   await client.delete(TOPIC_TYPE, c.metadata.name);
   assert.equal(await routeTo(client, target, first), false);
   scope.store.resources.finalizeDeletion(TOPIC_TYPE, c.metadata.name);

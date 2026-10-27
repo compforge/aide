@@ -31,10 +31,9 @@ export async function collectTopic(context: PluginContext, topic: TopicResource)
     const parent = await context.resources.get<TopicSpec, TopicStatus>(topic.spec.parentRef);
     if (!parent || parent.status.absorbed?.[topic.metadata.uid] !== understandingVersion(topic)) return delay;
   }
-  const inputs = (await Promise.all(["topic", "assess"].map(name => context.resources.list<InputSpec, InputStatus>(INPUT_TYPE,
-    { matchIndex: { name, value: topic.metadata.uid } })))).flat();
-  if (inputs.some(i => (i.status.route?.result?.topics.some(t => t.uid === topic.metadata.uid) || i.status.assess?.[topic.metadata.uid])
-    && Object.values(i.status.assess ?? {}).some(a => !a.completedAt))) return delay;
+  const inputs = await context.resources.list<InputSpec, InputStatus>(INPUT_TYPE,
+    { matchIndex: { name: "assessPending", value: topic.metadata.uid } });
+  if (inputs.length) return delay;
   const work = (await Promise.all(WORK_TYPES.map(t => context.resources.list<WorkResource["spec"], WorkResource["status"]>(t,
     { matchIndex: { name: "topicId", value: topic.spec.id } })))).flat();
   if (work.some(w => w.spec.topicId === topic.spec.id)) return delay;

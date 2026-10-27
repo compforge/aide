@@ -100,7 +100,7 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
     while (Date.now() < deadline) {
       messages.assertCoverage();
       const inputs = aide.topics.inputStore.list();
-      const done = inputs.every(i => i.status.route?.completedAt && Object.values(i.status.assess ?? {}).every(a => a.completedAt));
+      const done = inputs.every(i => i.status.route?.completedAt && (!i.status.assess || !!i.status.assess.completedAt));
       const topics = aide.topics.list();
       const roots = topics.filter(t => !t.default && !t.parentRef);
       const weave = await resources.get<Record<string, never>, WeaveStatus>({ ...WEAVE_TYPE, name: "global", namespace: "v1" });
