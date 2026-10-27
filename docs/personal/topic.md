@@ -74,6 +74,7 @@ key 的作用域包含必要的平台和账号信息，避免无关来源碰撞�
 | --- | --- |
 | Lark 单聊，或没有 threadId 的群消息 | `lark:<appId>:<chatId>` |
 | Lark 群话题 | `lark:<appId>:<chatId>:thread:<threadId>` |
+| EnvironmentSource，同一环境的所有 namespace | `environment:<规范环境名>` |
 
 userId、发送人和单条 messageId 不参与该规则。正文相似程度由 Weave 判断，不进入来源 key。Web 显式选择已有 Topic 时可以直接提交目标引用，无需重新猜测来源归属。
 

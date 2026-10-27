@@ -71,7 +71,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   assert.ok(topics.list().every((input) => input.spec.originId === SOURCES.environments.id && input.spec.attention === InputAttention.Deferred));
   const event = topics.list().at(-1)!.spec.observation!;
   assert.deepEqual((event.changes as { after?: unknown }[]).map((c) => c.after), [undefined]);
-  assert.ok(topics.list().every((input) => input.spec.topicKey?.startsWith("environment:")));
+  assert.ok(topics.list().every((input) => input.spec.topicKey === "environment:dev" && input.spec.topicName === "dev"));
   assert.equal(store.list({ apiVersion: "aide.dev/v1alpha1", kind: "Task" }).length, 0);
 });
 
@@ -89,24 +89,28 @@ test("Environment policy selects namespaces independently of Connector defaults 
   assert.throws(() => environmentSources({ ...policy, targets: [...policy.targets, { environment: "dev", namespaces: ["app"] }] }, environments), /Duplicate/);
 });
 
-test("Real Runner defers environment observations until review and restores its baseline", { timeout: 15_000 }, async (t) => {
+/** @case Environment Topics span namespaces, isolate environments, and preserve observation baselines on restart. */
+test("Real Runner groups deferred observations by canonical environment and restores namespace baselines", { timeout: 15_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-env-runner-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: {environments: {kind:"environment",version:"v1",config:{
     dev: { kind: "kubernetes", kubeconfig: "unused", namespace: "app", aliases: ["开发"] },
-  }}}, plugins: { personal: { sources: { environments: { targets: [{ environment: "dev", namespaces: ["app", "other"] }] } } } } }));
+    prod: { kind: "kubernetes", kubeconfig: "unused", namespace: "app" },
+  }}}, plugins: { personal: { sources: { environments: { targets: [
+    { environment: "开发", namespaces: ["app", "other"] }, { environment: "prod", namespaces: ["app"] },
+  ] } } } } }));
   let current = snapshot("A"); let reads = 0;
   const prompts: string[] = [];
   const config = loadConfig(configFile);
   const options = { ...fakeOptions({ chief: async () => "关注的服务有变化", async execute() { throw new Error("Unexpected work"); } }, root, prompts), config,
     connectors: { ...emptyConnectors, environments: { ...emptyConnectors.environments, async workloads(name: string, namespace?: string) {
-      assert.equal(name, "dev"); assert.ok(["app", "other"].includes(namespace!)); reads++;
-      return namespace === "app" ? current : { ...snapshot("unchanged"), namespace: "other" };
+      assert.ok(["dev", "prod"].includes(name)); assert.ok(["app", "other"].includes(namespace!)); reads++;
+      return { ...current, environment: name, namespace: namespace! };
     } } } };
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.start(); await aide.settled();
-  assert.ok(reads >= 2); assert.equal(prompts.length, 0);
+  assert.ok(reads >= 3); assert.equal(prompts.length, 0);
   const initialReads = reads;
   await aide.receive(fixtureIncoming({ channelId: "web", topicId: "other", id: "hello", text: "hello" })); await aide.settled();
   assert.equal(reads, initialReads, "Opening another Session must not duplicate the observer");
@@ -114,25 +118,34 @@ test("Real Runner defers environment observations until review and restores its 
   const poll = async () => {
     const scope = aide.personal;
     const resources = await scope.plugins.resourceClient("personal").list(ENVIRONMENT_SOURCE_TYPE);
-    assert.equal(resources.length, 2);
+    assert.equal(resources.length, 3);
     for (const resource of resources) await scope.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1",
       resourceApiVersion: ENVIRONMENT_SOURCE_TYPE.apiVersion, resourceKind: ENVIRONMENT_SOURCE_TYPE.kind, resourceId: resource.metadata.name });
     for (let attempt = 0; attempt < 500; attempt++) {
-      if (scope.topics.inputStore.list().some((input) => !!input.status.route?.completedAt)) break;
+      if (scope.topics.inputStore.list().filter(input => input.spec.originId === SOURCES.environments.id && input.status.route?.completedAt).length === 3) break;
       await Bun.sleep(10);
     }
     await aide.settled();
-    assert.ok(scope.topics.inputStore.list().some((input) => !!input.status.route?.completedAt));
+    assert.equal(scope.topics.inputStore.list().filter(input => input.spec.originId === SOURCES.environments.id && input.status.route?.completedAt).length, 3);
   };
   await poll();
-  assert.equal(aide.personal.topics.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
+  assert.equal(aide.personal.topics.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 3);
   assert.equal(prompts.length, 1, "Environment arrival must not call Chief");
-  const input = aide.personal.topics.inputStore.list().find(input => input.spec.originId === SOURCES.environments.id)!;
-  assert.equal(input.spec.attention, InputAttention.Deferred);
+  const inputs = aide.personal.topics.inputStore.list().filter(input => input.spec.originId === SOURCES.environments.id);
+  const dev = inputs.filter(input => input.spec.topicKey === "environment:dev");
+  const prod = inputs.filter(input => input.spec.topicKey === "environment:prod");
+  assert.equal(dev.length, 2); assert.equal(prod.length, 1);
+  assert.deepEqual(dev.map(input => input.spec.observation!.namespace).sort(), ["app", "other"]);
+  const assignedUid = (input: typeof inputs[number]) => Object.values(input.status.assess!)[0]!.resource.uid;
+  assert.equal(assignedUid(dev[0]!), assignedUid(dev[1]!));
+  assert.notEqual(assignedUid(dev[0]!), assignedUid(prod[0]!));
+  assert.ok(inputs.every(input => input.spec.topicName === input.spec.observation!.environment && input.spec.attention === InputAttention.Deferred));
+  const input = dev[0]!;
   const assignment = Object.values(input.status.assess!)[0]!;
   assert.equal(assignment.executionId, undefined);
   const scope = aide.personal, client = scope.plugins.resourceClient("personal");
   const topic = (await client.get<import("../plugins/personal/topic/model.ts").TopicSpec, import("../plugins/personal/topic/model.ts").TopicStatus>(assignment.resource))!;
+  assert.equal(topic.spec.name, "dev");
   await client.replace(topic, { ...topic.spec, trigger: { enabled: true, intervalSeconds: 3600 } },
     { ...topic.status, nextTriggerAt: new Date(Date.now() - 1000).toISOString() });
   await aide.settled();
@@ -147,7 +160,7 @@ test("Real Runner defers environment observations until review and restores its 
   await persisted.closeLogs();
   await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
   await aide.start(); await aide.settled();
-  assert.equal(aide.personal.topics.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 1);
+  assert.equal(aide.personal.topics.inputStore.list().filter((input) => input.spec.originId === "personal.environments").length, 3);
   assert.equal(prompts.length, 2, "Channel and observation each call Chief once");
 });
 

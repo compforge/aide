@@ -16,9 +16,15 @@ export interface EnvironmentSourceStatus {
   lastObservedAt?: string;
   error?: string | null;
 }
+/**
+ * @spec Namespaces share their canonical environment's Topic while retaining independent observation baselines.
+ * @why Cross-namespace changes contribute to one environment context.
+ * @case tests/environment-source.test.ts
+ * @link docs/connector/environments.md#environment-变化
+ */
 export const environmentTopics = {
-  locate: ({ environment, namespace }) => ({ selector: { kind: "key" as const, key: `environment:${JSON.stringify([environment, namespace ?? ""])}` } }),
-} satisfies TopicLocator<{ environment: string; namespace?: string }>;
+  locate: ({ environment }) => ({ selector: { kind: "key" as const, key: `environment:${environment}` }, name: environment }),
+} satisfies TopicLocator<{ environment: string }>;
 const identity = (workload: WorkloadSnapshot) => `${workload.kind}/${workload.name}`;
 
 export function workloadChanges(before: EnvironmentSnapshot, after: EnvironmentSnapshot): WorkloadChange[] {
@@ -56,19 +62,20 @@ export async function observeEnvironment(context: Pick<PluginContext, "resources
     return;
   }
   const snapshot = await connectors.environments.workloads(resource.spec.environment, resource.spec.namespace);
+  const location = environmentTopics.locate(snapshot);
   const baseline = resource.status.baseline;
   const changes = baseline ? workloadChanges(baseline, snapshot) : [];
   if (changes.length) {
     const event: WorkloadEvent = { type: "workload.changed", environment: snapshot.environment, namespace: snapshot.namespace,
       observedAt: snapshot.observedAt, previousObservedAt: baseline!.observedAt, changes };
     const submit = bindSourceInput(SOURCES.environments, resource, context.resources);
-    await submit(name, { topicKey: environmentTopics.locate(snapshot).selector.key, relation: "observed", attention: InputAttention.Deferred, text: describeWorkloadChanges(event), observation: { ...event } });
+    await submit(name, { topicKey: location.selector.key, topicName: location.name, relation: "observed", attention: InputAttention.Deferred, text: describeWorkloadChanges(event), observation: { ...event } });
   }
   await context.resources.patchStatus(resource, { baseline: snapshot, sequence: changes.length ? sequence : resource.status.sequence ?? 0,
     lastObservedAt: snapshot.observedAt, error: null });
   context.logger.info(baseline ? "Environment observation completed" : "Environment baseline established", {
     attributes: { watchId: resource.spec.environment, environment: snapshot.environment, namespace: snapshot.namespace,
-      workloads: snapshot.workloads.length, changed: changes.length, ...(changes.length ? { inputId: name, attention: InputAttention.Deferred } : {}) },
+      workloads: snapshot.workloads.length, changed: changes.length, ...(changes.length ? { inputId: name, topicKey: location.selector.key, attention: InputAttention.Deferred } : {}) },
   });
 }
 
