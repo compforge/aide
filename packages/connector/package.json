@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@compforge/harness-common": "0.5.9",
-    "@compforge/repocli": "0.8.0"
+    "@compforge/repocli": "0.9.0"
   },
   "devDependencies": {
     "typescript": "^5.9.0"

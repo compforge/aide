@@ -225,12 +225,53 @@ test("built-in access revisions change with endpoint, protocol or credentials", 
 test("all built-in kinds are assembled under their declared names", async () => {
   const connectors = await Connectors.load({
     office: { kind: "environment", version: "v1", config: { laptop: { kind: "host" } } },
-    work: { kind: "requirement", version: "v1", config: { provider: "meego", projectKey: "project" } },
     chat: { kind: "messages", version: "v1", config: { appId: "cli_app", userId: "ou_user" } },
   });
   try {
-    assert.deepEqual((await connectors.list()).map(d => d.name), ["office", "work", "chat"]);
+    assert.deepEqual((await connectors.list()).map(d => d.name), ["office", "chat"]);
     assert.deepEqual(await connectors.environments.list(), [{ name: "laptop", kind: "host" }]);
     assert.equal((await connectors.describe()).messages?.accountId, "cli_app");
   } finally { await connectors.close(); }
+});
+
+test("embedded external requirement keeps Host delivery out of discovery and public calls", async () => {
+  let sent = 0;
+  const connectors = await Connectors.load({ work: { kind: "requirement", version: "v1" } }, { registration: {
+    id: "external.requirements", version: "1", connectors: { work: {
+      kind: "requirement", version: "v1", config: { parse: value => value },
+      create: () => ({ metadata: { provider: "tracker", me: { userKey: "human" } }, handlers: {
+        identity: async () => ({ provider: "tracker", scope: "project" }), list: async () => ({ items: [] }),
+      }, hostHandlers: { addComment: async () => { sent++; return { id: "receipt", scope: "project" }; } } }),
+    } },
+  } });
+  try {
+    const [ref] = await connectors.list("requirement");
+    assert.deepEqual(ref!.methods, ["identity", "list"]);
+    await assert.rejects(connectors.call(ref!, "addComment", []), /method is not registered/);
+    assert.equal(sent, 0);
+    assert.deepEqual(await connectors.addRequirementComment({ source: "work", category: "issue", id: "1" }, { text: "ok", deliveryId: "out:1" }), { id: "receipt", scope: "project" });
+    assert.equal(sent, 1);
+  } finally { await connectors.close(); }
+});
+
+test("public Forge adapter carries cancellation to transport and turns rate limits into discovery issues", async () => {
+  const { createForgeReader } = await import("@compforge/repocli");
+  const { forgeImplementation } = await import("@compforge/aide-connector/forge");
+  let transportAborted = false;
+  const reader = createForgeReader({ provider: "gitlab", forge: "forge.test", host: "forge.test", token: "fixture" }, {
+    fetch: async (_url, init) => {
+      await new Promise((_, reject) => init?.signal?.addEventListener("abort", () => { transportAborted = true; reject(new Error("cancelled")); }, { once: true }));
+      return Response.json([]);
+    },
+  });
+  const implementation = forgeImplementation(reader), abort = new AbortController();
+  const pending = implementation.handlers.listRepositories({ signal: abort.signal });
+  abort.abort();
+  await assert.rejects(pending, /cancelled/); assert.equal(transportAborted, true);
+  await implementation.close?.();
+  const limited = createForgeReader({ provider: "github", forge: "github.test", host: "github.test", token: "fixture" }, {
+    fetch: async () => new Response("private", { status: 429, headers: { "retry-after": "5" } }),
+  });
+  const page = await forgeImplementation(limited).handlers.listRepositories({ signal: new AbortController().signal });
+  assert.equal(page.issues?.[0]?.kind, "rate_limit"); assert.equal(page.issues?.[0]?.retryAfterMs, 5000);
 });

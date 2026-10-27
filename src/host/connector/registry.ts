@@ -52,6 +52,9 @@ export class ConnectorRegistry implements ConnectorAccess {
     const methods = Object.keys(implementation.handlers);
     if (!methods.length || methods.some(method => !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(method)
       || ["then", "constructor", "prototype", "__proto__"].includes(method) || typeof implementation.handlers[method as keyof A] !== "function")) throw new Error(`Invalid Connector handlers: ${kind}/${name}`);
+    if (implementation.hostHandlers !== undefined && (!implementation.hostHandlers || typeof implementation.hostHandlers !== "object" || Array.isArray(implementation.hostHandlers)
+      || Object.entries(implementation.hostHandlers).some(([method, handler]) => !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(method)
+        || ["then", "constructor", "prototype", "__proto__"].includes(method) || typeof handler !== "function"))) throw new Error(`Invalid Host Connector handlers: ${kind}/${name}`);
     const maxConcurrentCalls = options.maxConcurrentCalls ?? 4, maxQueuedCalls = options.maxQueuedCalls ?? 64;
     if (!Number.isSafeInteger(maxConcurrentCalls) || maxConcurrentCalls < 1 || !Number.isSafeInteger(maxQueuedCalls) || maxQueuedCalls < 0) throw new Error(`Invalid Connector capacity: ${kind}/${name}`);
     const metadata = connectorData(implementation.metadata ?? {});
@@ -77,10 +80,18 @@ export class ConnectorRegistry implements ConnectorAccess {
   get<A extends ConnectorApi<A>>(connector: ConnectorDescription): A { return this.client.get<A>(connector); }
 
   async call(ref: ConnectorRef, method: string, supplied: readonly unknown[], options: ConnectorInvocationOptions = {}): Promise<unknown> {
+    return this.invoke(ref, method, supplied, options, false);
+  }
+  /** @spec Host delivery shares capacity and cancellation, but is absent from the public access transport. */
+  async callHost(ref: ConnectorRef, method: string, supplied: readonly unknown[], options: ConnectorInvocationOptions = {}): Promise<unknown> {
+    return this.invoke(ref, method, supplied, options, true);
+  }
+  private async invoke(ref: ConnectorRef, method: string, supplied: readonly unknown[], options: ConnectorInvocationOptions, host: boolean): Promise<unknown> {
     const binding = this.bindings.get(keyOf(ref));
     if (this.closed || !binding || binding.abort.signal.aborted) throw new Error(`Connector is unavailable: ${ref.kind}/${ref.name}`);
     if (binding.description.revision !== ref.revision || binding.description.version !== ref.version) throw new Error(`Connector reference is stale: ${ref.kind}/${ref.name}`);
-    if (!binding.description.methods.includes(method)) throw new Error(`Connector method is not registered: ${ref.kind}/${ref.name}.${method}`);
+    const handlers = host ? binding.implementation.hostHandlers : binding.implementation.handlers;
+    if (!handlers || !Object.hasOwn(handlers, method) || (!host && !binding.description.methods.includes(method))) throw new Error(`Connector method is not registered: ${ref.kind}/${ref.name}.${method}`);
     let args = [...supplied]; while (args.length && args.at(-1) === undefined) args.pop();
     args = connectorData(args);
     const inherited = this.callOptions.getStore();
@@ -95,7 +106,7 @@ export class ConnectorRegistry implements ConnectorAccess {
       const startedAt = Date.now();
       const operation = Promise.resolve().then(() => {
         if (signal.aborted) throw cancelled(signal);
-        return binding.implementation.handlers[method]!({ signal }, ...args);
+        return handlers[method]!({ signal }, ...args);
       }).then(value => {
         return connectorData(value);
       }).finally(() => this.release(binding));

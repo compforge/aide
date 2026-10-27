@@ -10,12 +10,12 @@ import { emptyConnectors } from "../src/connector-client.ts";
 import { parseAddress, sameAddress } from "../src/address.ts";
 import type { RequirementAddress, RequirementComment } from "@compforge/aide-plugin";
 import type { OutputSpec } from "../plugins/personal/output/model.ts";
-const target: RequirementAddress = { kind: "requirement", source: "work", category: "issue", id: "1", scope: "https://meego.test/p" };
+const target: RequirementAddress = { kind: "requirement", source: "work", category: "issue", id: "1", scope: "https://tracker.test/p" };
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-comment-output-")), store = new OutputStore(root);
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const spec: OutputSpec = { text: "收到", target, topicId: "topic", topic: { apiVersion: "personal.aide.dev/v1", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } };
-  const requirements = { ...emptyConnectors.requirements, async identity() { return { provider: "meego", scope: target.scope }; } };
+  const requirements = { ...emptyConnectors.requirements, async identity() { return { provider: "tracker", scope: target.scope }; } };
   return { root, store, spec, requirements };
 }
 const log = pino({ level: "silent" });
@@ -53,7 +53,7 @@ test("Ambiguous send is not retried; correlated observation can recover the rece
 test("Interrupted sending and connector reconfiguration never produce another comment", async (t) => {
   const f = fixture(t); f.store.create("s", "interrupted", f.spec); f.store.begin("interrupted"); f.store.create("s", "reconfigured", f.spec);
   let sends = 0;
-  const writer = { requirements: { ...f.requirements, async identity() { return { provider: "meego", scope: "elsewhere" }; } }, async addRequirementComment() { sends++; return { id: "bad", scope: "elsewhere" }; } };
+  const writer = { requirements: { ...f.requirements, async identity() { return { provider: "tracker", scope: "elsewhere" }; } }, async addRequirementComment() { sends++; return { id: "bad", scope: "elsewhere" }; } };
   await new RequirementOutputDelivery(f.store, writer, log).flush();
   assert.equal(sends, 0); assert.ok(f.store.list().every((o) => o.status.phase === "uncertain"));
 });

@@ -99,14 +99,15 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
 test("Source watches restore once globally, independently of Channel topics", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-source-routing-"));
   const path = join(root, "config.yaml");
-  writeFileSync(path, JSON.stringify({ connectors: {work: {kind:"requirement",version:"v1",config:{ provider: "meego", projectKey: "p" }}},
+  writeFileSync(path, JSON.stringify({ connectors: {work: {kind:"requirement",version:"v1",config:{ provider: "tracker", projectKey: "p" }}},
     plugins: { personal: { sources: { requirements: [
       { id: "one", source: "work", userKeys: ["me"], topicKey: "source:one" },
       { id: "two", source: "work", userKeys: ["me"], topicKey: "source:two" },
     ] } } } }));
   let polls = 0;
   const options = { ...fakeOptions({ execute: async () => { throw new Error("Unexpected execution"); } }, root), config: loadConfig(path),
-    connectors: { ...emptyConnectors, requirements: { ...emptyConnectors.requirements, identity: async () => ({ provider: "meego", scope: "fixture/p" }), list: async () => { polls++; return { items: [] }; } } } };
+    connectorCatalog: [{ kind: "requirement", version: "v1", name: "work", revision: "fixture", methods: ["list", "identity"], metadata: {} }],
+    connectors: { ...emptyConnectors, requirements: { ...emptyConnectors.requirements, identity: async () => ({ provider: "tracker", scope: "fixture/p" }), list: async () => { polls++; return { items: [] }; } } } };
   let aide = new Aide(root, options, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.start(); await aide.settled();

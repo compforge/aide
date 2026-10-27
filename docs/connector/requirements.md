@@ -4,18 +4,9 @@ Aide 持续观察指定负责人名下的工作项和讨论，把变化交给 Ch
 
 ## 配置
 
-服务用户需要能执行提供方 CLI，并已完成该 CLI 的登录。Aide 复用 CLI profile，不保存 OAuth 凭证。每条 CLI 命令有 20 秒超时和 4 MiB 输出上限。
-
-Connector 直接声明在 `connectors.<name>`，kind 为 requirement，version 为 v1；其 config 包含以下字段：
-
-| 字段 | 含义 |
-|---|---|
-| `provider` | 对应 Connector 实现的提供方标识 |
-| `projectKey` | 目标项目标识 |
-| `profile` | 提供方 CLI 的执行账号配置，可省略 |
-| `categories` | 工作项类别，例如 `story`、`issue` |
-| `assigneeField` | 负责人字段，缺省为 `current_status_operator` |
-| `me.userKey` | 被服务的人的稳定用户键，可省略 |
+需求平台实现由外部 Connector 包提供，安装方式见 [Connector 扩展](extensions.md)。
+Connector 声明在 `connectors.<name>`，kind 为 requirement，version 为 v1；私有 config 由提供方解释。
+Aide 只消费 RequirementOperations、公开 metadata 和规范身份，不内置平台 CLI 或项目字段。
 
 配置好名为 `work` 的 Connector 后，Personal 的观察策略如下：
 
@@ -30,17 +21,14 @@ plugins:
           intervalMs: 300000
 ```
 
-三个配置表达不同的含义：
-
-- `profile` 选择执行读写的 CLI 账号，可以是受托账号。
-- `me.userKey` 标记被服务的人。启动时解析规范 host / project key，以规范作用域和稳定 user key 识别本人，并与其他已配置 Me 身份归入同一个 Person；Source 仍只使用该 Connector 的 Me 配置判断关系。
-- `userKeys` 选择观察哪些负责人的工作；可以包含他人，不会把这些人标记成 Me。
+执行凭证由 Connector 管理。公开 `metadata.me.userKey` 标记被服务的人，`identity()` 返回规范 provider/scope；
+Source 的 `userKeys` 仅决定观察哪些负责人，可以包含他人，不会把这些人标记成 Me。
 
 `me` 可省略。没有匹配的 Me 身份时，Input.relation 保持未知。Person 身份使用提供方标识、规范 host/project scope 和 user key；显示名不参与身份匹配，也不凭同名把不同平台的人物合并。Connector 读取会贡献人物身份和姓名，Chief 通过 `summary_person` 积累认识。
 
 ## 观察与恢复
 
-需求列表按配置类别、负责人字段及更新时间窗口分页。一次扫描固定结束时间，沿提供方 session/cursor 读完所有页才推进水位；第一页不使用会截断结果的 MQL LIMIT。随后扫描保留一分钟重叠窗口。已跟踪工作项独立读取详情，因此完成、关闭、转交给别人不会仅因从负责人列表消失而漏掉最后一次变化。
+需求列表按配置类别、负责人字段及更新时间窗口分页。一次扫描固定结束时间，沿提供方 session/cursor 读完所有页才推进水位。随后扫描保留一分钟重叠窗口。已跟踪工作项独立读取详情，因此完成、关闭、转交给别人不会仅因从负责人列表消失而漏掉最后一次变化。
 
 首次发现尚未结束的工作项会生成 Input，并以发现时间建立评论基线。后续标题、状态、负责人和描述变化会生成新的事实输入。评论单独按固定时间窗口分页，不依赖工作项的 updated_at；首次发现前的历史评论可按需读取，但不会批量送入 Chief。完成或转交的工作项读完当前评论窗口后退出跟踪。
 
@@ -70,4 +58,4 @@ Host 投递器先核对保存地址的项目 scope，再标记 sending 并调用
 
 `npm run check` 覆盖 Connector 分页和映射、跨 Runner 的读取、Me 与执行账号区分、Source 检查点及重启、完成/转交、评论独立水位、长文本、Output 回执与回声过滤、发送不确定时停止重试。外部服务和模型使用替身。
 
-真实接入还需用目标项目确认实际字段、权限和评论响应；CLI 命令结构验证不等同于端到端验收。真实评论发送需要明确的工作项和内容，不由自动测试触发。
+真实接入还需用目标项目确认实际字段、权限和评论响应；替身测试不等同于端到端验收。真实评论发送需要明确的工作项和内容，不由自动测试触发。

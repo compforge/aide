@@ -18,6 +18,7 @@ import { LarkChannel } from "./channel/lark/index.ts";
 import { larkTransport } from "./channel/lark/client.ts";
 import { withAsyncFileLock } from "./host/file-lock.ts";
 
+export async function startAide(options: { connectorRegistration?: import("@compforge/aide-connector").ConnectorPackage } = {}): Promise<void> {
 const environment = Object.freeze({ ...process.env });
 const log = pino({ level: environment.LOG_LEVEL ?? "info" });
 const home = resolve(environment.AIDE_HOME ?? `${homedir()}/.aide`);
@@ -39,7 +40,7 @@ await withAsyncFileLock(path, async () => {
     task: observed(resolved.task), routine: observed(resolved.routine), pi: resolved.pi && observed(resolved.pi) };
   const sessionConfigs: Record<string, PiConfig | undefined> = { chief: harnesses.chief, route: harnesses.route, weave: harnesses.weave,
     task: harnesses.task, routine: harnesses.routine, pi: harnesses.pi };
-  const connectors = await Connectors.load(config.connectors, { environment, registration: environment.AIDE_CONNECTOR_REGISTRATION, baseDir: dirname(file), log: (message, attributes) => log.info(attributes, message) });
+  const connectors = await Connectors.load(config.connectors, { environment, registration: environment.AIDE_CONNECTOR_REGISTRATION ?? options.connectorRegistration, baseDir: dirname(file), log: (message, attributes) => log.info(attributes, message) });
   try {
     const aide: Aide = new Aide(home, {
       config, connectors, connectorCatalog: await connectors.list(),
@@ -90,3 +91,7 @@ await withAsyncFileLock(path, async () => {
     log.info("Aide stopped");
   } finally { await connectors.close(); }
 }, 0);
+
+}
+
+if (import.meta.main) await startAide();

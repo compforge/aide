@@ -27,7 +27,7 @@ function fixture(t: TestContext, me = true) {
   const inputs = new InputStore(root);
   let store = new PluginResourceStore({ home: session.home, pluginInstanceId: "personal" });
   store.storage.register("personal", personalDefinitions);
-  const marks = { identities: [LOCAL_ME, ...(me ? [{ provider: "meego", scope: "https://meego.test/p", id: "me" }] : [])] };
+  const marks = { identities: [LOCAL_ME, ...(me ? [{ provider: "tracker", scope: "https://tracker.test/p", id: "me" }] : [])] };
   const catalog = openPersonCatalog(root, marks, pino({ level: "silent" }), () => {});
   const client = () => createResourceClient(store, undefined, undefined, personalAdmission(inputs, new OutputStore(session.home)));
   let resources = client();
@@ -37,7 +37,7 @@ function fixture(t: TestContext, me = true) {
   let current = item(), list: (q: RequirementListQuery | undefined) => Promise<RequirementPage<RequirementSummary>> = async () => ({ items: [current] });
   let comments: (q: RequirementCommentQuery | undefined) => Promise<RequirementPage<RequirementComment>> = async () => ({ items: [] });
   const connectors = { ...emptyConnectors, requirements: {
-    async identity() { return { provider: "meego", scope: "https://meego.test/p" }; },
+    async identity() { return { provider: "tracker", scope: "https://tracker.test/p" }; },
     async list(_source: string, q?: RequirementListQuery) { return list(q); },
     async get(identity: { id: string }) { return { ...current, id: identity.id }; },
     async comments(_identity: unknown, q?: RequirementCommentQuery) { return comments(q); },

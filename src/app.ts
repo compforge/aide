@@ -33,7 +33,7 @@ import { InputStore } from "../plugins/personal/input/store.ts";
 import { requirementWatches, validateWatchScopes } from "../plugins/personal/source/requirement/config.ts";
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import { messageWatch } from "../plugins/personal/source/message/config.ts";
-import { loadMeegoRequirementConfigs } from "../connectors/requirements/meego.ts";
+import { requirementCatalog } from "../connectors/requirements/catalog.ts";
 import { Connectors } from "../connectors/index.ts";
 import type { AideConfig, DefaultHarness } from "./config.ts";
 import { type ExecutionOptions } from "./host/runtime/execution.ts";
@@ -80,6 +80,7 @@ export class Aide {
   private readonly unsubscribeResources: () => void;
   private readonly connectors: ConnectorClient;
   private readonly ownedConnectors?: Connectors;
+  private readonly requirementConnections: ReturnType<typeof requirementCatalog>;
   private readonly meMarks: Me & { identities: PersonIdentity[] };
   readonly catalog: ReturnType<typeof openPersonCatalog>;
   get persons() { return this.catalog.persons; }
@@ -103,7 +104,7 @@ export class Aide {
     const channelMe = { identities: [LOCAL_ME, ...Object.values(config?.channels ?? {}).flatMap(c => c.me ? [{ provider: "lark", scope: c.appId, id: c.me.openId }] : [])] };
     this.meMarks = { identities: [...channelMe.identities, ...connectorMe.identities] };
     this.meMarks.identities = [...new Map(this.meMarks.identities.map(identity => [JSON.stringify(identity), identity])).values()];
-    const requirements = loadMeegoRequirementConfigs(personalConnectors);
+    const requirements = this.requirementConnections = requirementCatalog(connectorCatalog);
     this.watches = requirementWatches(sources.requirements).map(watch => {
       const me = requirements.find(c => c.source === watch.source)?.me;
       return { ...watch, ...(me ? { me } : {}) };
@@ -260,7 +261,7 @@ export class Aide {
   }
 
   private async initializePeople() {
-    for (const config of loadMeegoRequirementConfigs(personalConnectorConfig(this.options.config?.connectors))) {
+    for (const config of this.requirementConnections) {
       if (!config.me) continue;
       const account = await this.connectors.requirements.identity(config.source);
       this.meMarks.identities.push({ provider: account.provider, scope: account.scope, id: config.me.userKey });

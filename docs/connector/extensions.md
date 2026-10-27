@@ -49,7 +49,7 @@ export default {
 
 内置 forge/v1 工厂使用 repocli；其私有 config.provider 选择 repocli 支持的 github 或 gitlab 协议，config.host 指定地址，config.forge 可覆盖业务身份。provider 不是 Host 实现注册标识，外部工厂可使用完全不同的配置 schema。上例 github 使用内置工厂，codebase 使用独立安装的私有工厂；Aide 不包含公司域名或专属 API。
 
-内置 environment/v1 工厂的 config 是环境目录；requirement/v1 使用 Meego 配置；messages/v1 使用 Lark app/user 配置。它们都经过同一装配、容量和关闭流程。现有 Personal 环境/消息便利接口各使用一个目录/账号；多 Connector 的通用调用通过发现的引用明确选择。
+内置 environment/v1 工厂的 config 是环境目录；requirement/v1 由外部安装入口提供；messages/v1 使用 Lark app/user 配置。它们都经过同一装配、容量和关闭流程。现有 Personal 环境/消息便利接口各使用一个目录/账号；多 Connector 的通用调用通过发现的引用明确选择。
 
 config 由所选工厂校验，凭证建议通过 tokenEnv 等配置引用，在 create(context, config) 中调用 context.env() 解析。环境依赖在创建阶段固定，其值与注册入口版本、契约和私有配置共同生成访问 revision，描述不返回原值。更换实现时更新注册入口版本。非法定义在工厂运行前拒绝；配置、创建或注册失败时，已创建 Connector 逆序关闭，错误仅报告 name、契约和注册来源。
 
@@ -82,3 +82,19 @@ Host 向 handler 传入 call.signal，Connector关闭或期限到达时取消。
 ## 验证
 
 connector-registry 测试覆盖字符串 kind 发现、方法表校验、引用绑定、共享容量、排队过期与关闭；connector-packages 测试覆盖本地/npm 包装配、非法 kind/handlers 诊断、配置与凭证隔离、失败清理及回滚，以及真实 Runner 中的新 Kind 和外部 Forge→Source→Input→Chief 链路。测试使用外部实现替身，不证明具体内部平台 API 的可用性。
+
+## 内嵌安装与 Host 投递
+
+发行版可导入 `startAide({ connectorRegistration })`，提供内存中的 ConnectorPackage；
+`AIDE_CONNECTOR_REGISTRATION` 显式配置仍优先选择已安装入口。导入启动模块不自动启动服务。
+
+`handlers` 对 Plugin/verb 可见；`hostHandlers` 只给受信 Host 投递器调用，不进入方法发现或 IPC。
+两类调用共用绑定修订、容量、超时、取消和关闭。需求评论通过 Host 的 `addComment` handler 返回 `{id, scope}`，
+由 Output 管理发送授权、持久回执及 uncertain 恢复。外部包属于受信 Host 代码，不是沙箱。
+
+需求 Connector 可在公开 metadata 中声明 `me: { userKey }`，仅表示显式配置的人；
+Personal 通过 `identity()` 返回的 provider/scope 建立身份，绝不解析提供方私有 config 或从凭证推断 Me。
+
+Forge 提供方使用公共 `@compforge/aide-connector/forge` 的 `forgeImplementation(reader)`，
+由它统一转接 repocli ForgeReader、限流 issue、可选 withSignal 协作取消与 close。
+内置和外部提供方采用同一路径；SDK 不识别私有平台协议。

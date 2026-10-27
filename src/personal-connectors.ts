@@ -14,6 +14,5 @@ export function personalConnectorConfig(config: ConnectorsConfig = {}) {
   return {
     lark: messages ? LarkMessagesConfigSchema.parse(messages) : undefined,
     environments: resolveEnvironmentConfig(select("environment")),
-    requirements: Object.fromEntries(entries.filter(([, c]) => c.kind === "requirement").map(([name, c]) => [name, c.config])),
   };
 }
