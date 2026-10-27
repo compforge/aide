@@ -46,7 +46,7 @@ src/
       activity.ts          # 有界实时执行投影，不持久化或回放
       configuration.ts     # Harness 配置选择与模型参数
       state.ts             # 执行事件的状态投影
-    connector/             # Connector 调用事实、未知结果恢复与独立写入租约
+    connector/             # 外部包加载、Kind 注册与调用、连接生命周期、调用事实及未知结果恢复
     store/                 # 文件租约与消息投影辅助
   runner/                  # Plugin 注册、Watch、队列、重试、Source 与 Reconcile
   reconcile/               # 共用的去重队列、容量与定时机制
@@ -118,7 +118,8 @@ agents/
   routine/                 # 持续职责 Agent，复用 Pi
   chief/                   # Personal 提示词、Person / Work / 问答 / Connector 工具
 connectors/                # 全局环境目录、需求平台访问；Forge 配置装配与 repocli 只读能力
-packages/plugin/           # @compforge/aide-plugin 公共契约
+packages/connector/        # @compforge/aide-connector：通用 Kind、连接描述、外部实现与调用契约
+packages/plugin/           # @compforge/aide-plugin：Resource、Controller、Source、Watch 与 Hook 公共契约
 tests/                     # 内核、插件、Channel 与 Agent 验证
 scripts/install-service.sh # Linux 用户级 systemd 服务
 ```
@@ -137,6 +138,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Topic、Task、Routine、Person 用 summary 保存累计认识，recent 保存有界近期依据；结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
 - Task 承担有限目标，Routine 承担持续职责。领域 Agent 与通用 Pi 共用适配，工具按资源 UID 和当前 execution 绑定；业务请求与消费凭据落在 Input。Chief / Work 通过 say 产生独立 Output，report 与 say 分别提交；普通回答是新 Input，原生权限由独立 Approval 处理。
 - Forge 的 Repository / PullRequest 模型复用 harness-common，平台读取、增量发现完整性、不透明游标与 HTTP 约束由 repocli lib 承担；Aide Connector 负责配置与调用路由，Personal RepositorySource 负责清单缓存与观察任务交接，PullRequestSource 负责 PR 基线、检查点与 Input。契约见 [Forge](docs/connector/forge.md)。
+- Connector kind 与 version 是独立字符串，connectors 直接按 name 声明；领域 interface 定义操作契约，安装入口按 name 注册实现，配置不使用 type 或 packages/instances 包装；Plugin 与 verb 按 kind 发现 Connector 并通过同一客户端调用，私有配置和凭证不进入 Runner。Source 继续复用 Plugin 机制，Connector 是否作为 Resource 独立演进。契约见 [Connector 扩展](docs/connector/extensions.md)。
 - Connector 按外部系统或服务组织操作与适配；一个 Connector 可支持多个业务 Source，Source 可细到单个业务 Resource，按观察生命周期独立保存状态与调度。长期访问约束包括可配置限速与并发预算，由共享该外部配额的调用统一遵守。边界与建设状态见 [Connector 与 Source](docs/connector/README.md)。
 - plugins.<plugin>.sources 声明观察策略，形成 Input 的 Source 先保存 Input 再推进水位。所有模块在自己的 config.ts 声明契约，启动时解析一次；显式值优先于默认值，空数组不回退，运行中不重读配置。Web 可保存命名 Channel 与 defaultChannel 到同一份配置，重启生效；默认 say 联系 Me，不依赖 Topic 的来源地址或私聊历史。
 - Web 按页面组织，入口管理轮询与 SSE 生命周期，交互模块持有自身状态；共用浏览器能力放在 web/shared，展示类型经 type-only import 使用。Channel 展示进展不产生业务 Output。

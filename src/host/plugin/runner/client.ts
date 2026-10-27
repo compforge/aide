@@ -366,7 +366,7 @@ export class PluginRunnerClient {
         }
       }
 
-      case "connector.read":
+      case "connector.request":
         if (this.failed || this.closing) throw new Error("Plugin Runner is no longer active");
         return dispatchConnector(this.callbacks.connectors ?? emptyConnectors, request.request);
       case "verb.invoke":

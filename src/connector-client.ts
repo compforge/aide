@@ -1,9 +1,11 @@
+import { createConnectorAccess } from "@compforge/aide-connector";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorRequest } from "./protocol/connectors.ts";
 
 /** Typed facade over the existing Host/Runner request transport. */
 export function createConnectorClient(invoke: <T>(request: ConnectorRequest) => Promise<T>): ConnectorClient {
   return Object.freeze({
+    ...createConnectorAccess(invoke),
     describe: () => invoke({ operation: "describe" }),
     messages: Object.freeze({
       identity: () => invoke({ operation: "messages.identity" }),
@@ -33,8 +35,14 @@ export function createConnectorClient(invoke: <T>(request: ConnectorRequest) => 
   } satisfies ConnectorClient);
 }
 
-export function dispatchConnector(client: ConnectorClient, request: ConnectorRequest): Promise<unknown> {
+export function dispatchConnector(client: ConnectorClient, request: ConnectorRequest, options?: import("@compforge/aide-connector").ConnectorCallOptions & { signal?: AbortSignal }): Promise<unknown> {
+  // Host-only context propagation also covers the built-in typed facades; it is never sent over IPC.
+  const host = client as ConnectorClient & { withCallOptions?<T>(options: import("@compforge/aide-connector").ConnectorCallOptions & { signal?: AbortSignal }, operation: () => Promise<T>): Promise<T> };
+  if (options && host.withCallOptions) return host.withCallOptions(options, () => dispatchConnector(client, request));
   switch (request.operation) {
+    case "connector.list": return client.list().then(items => items.filter(item =>
+      (request.kind === undefined || item.kind === request.kind) && (request.version === undefined || item.version === request.version)));
+    case "connector.call": return client.call(request.connector, request.method, request.args, { timeoutMs: request.timeoutMs });
     case "describe": return client.describe();
     case "messages.identity": return client.messages.identity();
     case "messages.search": return client.messages.search(request.query);
@@ -58,6 +66,7 @@ export function dispatchConnector(client: ConnectorClient, request: ConnectorReq
 
 /** Hosts without configured connectors still expose the same discoverable capability. */
 export const emptyConnectors = createConnectorClient(async <T>(request: ConnectorRequest): Promise<T> => {
+  if (request.operation === "connector.list") return [] as T;
   if (request.operation === "describe") return { environments: [], requirements: [], forges: [] } as T;
   if (request.operation === "environments.list") return [] as T;
   throw new Error("Connector is not configured");

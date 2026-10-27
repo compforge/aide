@@ -13,12 +13,15 @@ Host 通过服务进程 PATH 中的 `lark-cli` 读取消息，使用服务用户
 ```yaml
 connectors:
   lark:
-    appId: cli_example
-    userId: ou_example
-    timeoutMs: 20000
-    me:
-      - appId: cli_example
-        openId: ou_human
+    kind: messages
+    version: v1
+    config:
+      appId: cli_example
+      userId: ou_example
+      timeoutMs: 20000
+      me:
+        - appId: cli_example
+          openId: ou_human
 plugins:
   personal:
     sources:

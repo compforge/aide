@@ -1,3 +1,4 @@
+import { ConnectorTimeoutError } from "@compforge/aide-connector";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { dispatchConnector, emptyConnectors } from "../../connector-client.ts";
 import { randomUUID } from "node:crypto";
@@ -182,14 +183,19 @@ export class Verb {
       if (!this.connectorCalls) throw new Error("connector() requires persistent call storage");
       const callId = this.connectorCalls.start(context, request.input.request);
       let timer: ReturnType<typeof setTimeout> | undefined;
+      const abort = new AbortController();
       try {
         const result = await Promise.race([
-          dispatchConnector(this.connectors, request.input.request).then((value) => ({ state: "success" as const, value })),
-          new Promise<{ state: "timeout" }>((resolve) => { timer = setTimeout(() => resolve({ state: "timeout" }), request.input.timeoutMs); }),
+          dispatchConnector(this.connectors, request.input.request, { timeoutMs: request.input.timeoutMs, signal: abort.signal }).then((value) => ({ state: "success" as const, value })),
+          new Promise<{ state: "timeout" }>((resolve) => { timer = setTimeout(() => { abort.abort(new ConnectorTimeoutError("Connector verb timed out")); resolve({ state: "timeout" }); }, request.input.timeoutMs); }),
         ]);
         this.connectorCalls.settle(callId, result.state);
         return result;
       } catch (error) {
+        if (error instanceof ConnectorTimeoutError) {
+          this.connectorCalls.settle(callId, "timeout");
+          return { state: "timeout" };
+        }
         this.connectorCalls.settle(callId, "failure", error instanceof Error ? error.message : String(error));
         throw error;
       } finally { if (timer) clearTimeout(timer); }

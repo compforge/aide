@@ -20,8 +20,8 @@ import { pullRequestSourceActive } from "../plugins/personal/source/pull-request
 import type { PullRequestSourceStatus } from "../plugins/personal/source/pull-request/state.ts";
 import { Aide } from "../src/app.ts";
 import { ConfigSchema } from "../src/config.ts";
-import { Connectors } from "../connectors/index.ts";
-import { createForgeConnectors } from "../connectors/forge/config.ts";
+import { createConnectors } from "./connector-fixture.ts";
+import { createForgeReader } from "@compforge/repocli";
 import { fakeOptions } from "./fake-harness.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 
@@ -122,8 +122,7 @@ test("configuration rejects unknown inventories, duplicate discovery scopes and 
 test("Runner builds repository observers over IPC; a failed repository does not prevent merged Input delivery", { timeout: 25_000 }, async t => {
   const root = mkdtempSync(join(tmpdir(), "aide-repository-runner-"));
   let merged = false, inventories = 0; const prompts: string[] = [];
-  const connectors = new Connectors([], createForgeConnectors({ forges: { work: { type: "gitlab", api_host: "gitlab.test", token: "fixture" } } }, {
-    environment: {}, fetch: async input => {
+  const connectors = createConnectors([], [createForgeReader({forge:"work",provider:"gitlab",host:"gitlab.test",token:"fixture"}, {fetch: async input => {
       const url = new URL(String(input));
       if (url.pathname === "/api/v4/projects") { inventories++; return Response.json([{ path_with_namespace: "org/healthy" }, { path_with_namespace: "org/broken" }]); }
       if (url.pathname.includes("broken")) return new Response("Unavailable", { status: 503 });
@@ -131,9 +130,8 @@ test("Runner builds repository observers over IPC; a failed repository does not 
       const mr = { iid: 1, title: "Scoped observation", web_url: "https://gitlab.test/org/healthy/-/merge_requests/1", state: merged ? "merged" : "opened", sha: "head", author: { username: "me" } };
       if (url.pathname.endsWith("/merge_requests")) { assert.equal(url.searchParams.get("author_username"), "me"); return Response.json([mr]); }
       return Response.json(mr);
-    },
-  }));
-  const config = ConfigSchema.parse({ connectors: { forges: { work: { type: "gitlab", api_host: "gitlab.test" } } }, plugins: { personal: { weave: { enabled: false }, sources: {
+    }})]);
+  const config = ConfigSchema.parse({ connectors: {work: {kind:"forge",version:"v1",config:{provider:"gitlab",host:"gitlab.test",forge:"work"}}}, plugins: { personal: { weave: { enabled: false }, sources: {
     repositories: [{ id: "repos", forge: "work" }], pullRequests: [{ id: "mine", repositories: "repos", author: "me" }],
   } } } });
   const agent = { notify: false, async chief(prompt: string) { prompts.push(prompt); return "Recorded"; }, async execute(): Promise<never> { throw new Error("No delegated work"); } };

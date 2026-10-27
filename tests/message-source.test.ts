@@ -380,7 +380,7 @@ test("Discussion batches retain each person's relation; replies to my own messag
 test("Real Runner shares Lark chat topics across Source and Channel without inferring a Source reply address", { timeout: 20_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
-  writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_app", userId: "ou_me", me: [{ appId: "cli_app", openId: "ou_me" }] } },
+  writeFileSync(configFile, JSON.stringify({ connectors: {lark: {kind:"messages",version:"v1",config:{ appId: "cli_app", userId: "ou_me", me: [{ appId: "cli_app", openId: "ou_me" }] }}},
     plugins: { personal: { sources: { lark: {} } } } }));
   let searches = 0;
   const prompts: string[] = [];

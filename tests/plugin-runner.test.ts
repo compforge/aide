@@ -23,7 +23,7 @@ import {
   serializedError,
 } from "../src/protocol/ipc.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
-import { Connectors } from "../connectors/index.ts";
+import { createConnectors } from "./connector-fixture.ts";
 import { Environments } from "../connectors/environments.ts";
 
 const roots: string[] = [];
@@ -75,7 +75,7 @@ describe("Plugin Runner process boundary", () => {
     const pull = { ...identity, title: "Shared PR", url: "https://example.com/1", state: "open" as const,
       reviewThreads: "none" as const, conflictState: "none" as const, mergeReadiness: "ready" as const, observedAt: "2026-10-19T00:00:00Z" };
     let reads = 0;
-    const connectors = new Connectors([{
+    const connectors = createConnectors([{
       source: "work", provider: "fixture", async identity() { return { provider: "fixture", scope: "p" }; }, async comments() { return { items: [] }; }, async list() { reads++; return { items: [requirement] }; }, async get() { return requirement; },
     }], [{
       forge: "forge", provider: "github",

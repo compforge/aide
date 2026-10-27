@@ -1,0 +1,36 @@
+{
+  "name": "@compforge/aide-connector",
+  "version": "0.1.0",
+  "description": "Connector contracts and typed discovery/call clients for Aide.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/compforge/aide.git",
+    "directory": "packages/connector"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./forge": "./src/forge.ts",
+    "./environment": "./src/environment.ts",
+    "./requirement": "./src/requirement.ts",
+    "./message": "./src/message.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@compforge/harness-common": "0.5.9",
+    "@compforge/repocli": "0.8.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

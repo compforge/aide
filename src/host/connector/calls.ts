@@ -52,6 +52,7 @@ export class ConnectorCalls {
   start(scope: ExecutionScope, request: EventPayloadMap["connector.started"]["request"]): string {
     this.open();
     const callId = newId("cc");
+    if (request.operation === "connector.call") request = { ...request, args: [] };
     const event: Started = { v: ENVELOPE_VERSION, eventId: newId("ev"), ts: new Date().toISOString(), seq: this.nextSeq,
       scope: { type: "application" }, source: { type: "plugin", pluginInstanceId: scope.pluginInstanceId },
       kind: "connector.started", payload: { callId, executionId: scope.executionId, request,

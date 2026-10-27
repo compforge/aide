@@ -1,6 +1,6 @@
 import type { MessageConnector, MessageSearchQuery, PageQuery, PullRequestKey, PullRequestQuery, PullRequestScanQuery, RequirementIdentity, RequirementListQuery, RequirementCommentQuery } from "@compforge/aide-plugin";
 
-export type ConnectorRequest =
+export type ConnectorRequest = import("@compforge/aide-connector").ConnectorRequest
   | { readonly operation: "describe" }
   | { readonly operation: "messages.identity" }
   | { readonly operation: "messages.search"; readonly query: MessageSearchQuery }

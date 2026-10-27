@@ -21,8 +21,8 @@ const log = pino({ level: "silent" });
 async function setup(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-person-catalog-"));
   const configFile = join(home, "config.yaml");
-  writeFileSync(configFile, JSON.stringify({ connectors: { lark: { appId: "cli_execution", userId: "ou_operator",
-    me: [{ appId: "cli_bot", openId: "ou_human" }, { appId: "cli_execution", openId: "ou_me" }] } } }));
+  writeFileSync(configFile, JSON.stringify({ connectors: {lark: {kind:"messages",version:"v1",config:{ appId: "cli_execution", userId: "ou_operator",
+    me: [{ appId: "cli_bot", openId: "ou_human" }, { appId: "cli_execution", openId: "ou_me" }] }}} }));
   const options = { ...fakeOptions({ async chief() { return "ok"; }, async execute() { throw new Error("No work"); } }, home), config: loadConfig(configFile) };
   let aide = new Aide(home, options, log); await aide.start();
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });

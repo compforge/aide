@@ -18,23 +18,26 @@ test("config owns declarations and each host gets one snapshot, without opening 
   const file = path();
   writeFileSync(file, `connectors:
   environments:
-    dev:
-      kind: kubernetes
-      description: Development
-      aliases: [开发]
-      kubeconfig: /does-not-exist/dev.yaml
-      context: dev
-      namespace: app
-      host: {name: devbox, transport: ssh, address: unreachable.invalid}
-    workstation:
-      kind: host
-    other:
-      description: Generic target
+    kind: environment
+    version: v1
+    config:
+      dev:
+        kind: kubernetes
+        description: Development
+        aliases: [开发]
+        kubeconfig: /does-not-exist/dev.yaml
+        context: dev
+        namespace: app
+        host: {name: devbox, transport: ssh, address: unreachable.invalid}
+      workstation:
+        kind: host
+      other:
+        description: Generic target
 plugins:
   personal:
     sources: {}
 `);
-  const connectors = Connectors.fromConfig(loadConfig(file).connectors);
+  const connectors = await Connectors.load(loadConfig(file).connectors);
   const environment = await connectors.environments.get("开发");
   expect(environment).toMatchObject({ name: "dev", context: "dev", namespace: "app", host: { transport: "ssh" } });
   expect(await connectors.environments.list()).toEqual([
@@ -44,9 +47,9 @@ plugins:
   expect(JSON.stringify(await connectors.describe())).not.toContain("kubeconfig");
   // @case Unknown names never inherit the user's default kubeconfig.
   await expect(connectors.environments.get("missing")).rejects.toThrow("Unknown environment: missing");
-  writeFileSync(file, "connectors: {environments: {new: {kind: host}}}");
+  writeFileSync(file, "connectors: {environments: {kind: environment, version: v1, config: {new: {kind: host}}}}");
   expect((await connectors.environments.get("dev")).name).toBe("dev");
-  expect(await Connectors.fromConfig(loadConfig(file).connectors).environments.list()).toEqual([{ name: "new", kind: "host" }]);
+  expect(await (await Connectors.load(loadConfig(file).connectors)).environments.list()).toEqual([{ name: "new", kind: "host" }]);
   const mutated = environment as unknown as { host: { address: string }; aliases: string[] };
   mutated.host.address = "changed"; mutated.aliases.push("changed");
   expect((await connectors.environments.get("dev")).host).toMatchObject({ address: "unreachable.invalid" });
@@ -79,7 +82,7 @@ test("config defaults, explicit path, YAML/JSON, and structural errors are deter
     delete process.env.AIDE_CONFIG;
     process.env.AIDE_HOME = join(file, "..");
     expect(configPath("/home/aide")).toBe("/home/aide/config.yaml");
-    expect(loadConfig()).toEqual({ connectors: { environments: {}, requirements: {}, forges: {} }, plugins: {}, defaultHarness: "pi", defaultChannel: "web", channels: {}, harnesses: { codex: {}, claude: {}, dsh: {}, pi: { packages: [] }, chief: { packages: [] }, task: { packages: [] }, routine: { packages: [] }, route: {}, weave: {} } });
+    expect(loadConfig()).toEqual({ connectors: {}, plugins: {}, defaultHarness: "pi", defaultChannel: "web", channels: {}, harnesses: { codex: {}, claude: {}, dsh: {}, pi: { packages: [] }, chief: { packages: [] }, task: { packages: [] }, routine: { packages: [] }, route: {}, weave: {} } });
     expect(() => loadConfig(file)).toThrow("Aide config not found");
     process.env.AIDE_CONFIG = file;
     expect(configPath("/ignored")).toBe(file);
@@ -88,9 +91,9 @@ test("config defaults, explicit path, YAML/JSON, and structural errors are deter
       writeFileSync(file, text);
       expect(() => loadConfig(file)).toThrow(/Invalid Aide/);
     }
-    writeFileSync(file, JSON.stringify({ connectors: { environments: { dev: { kind: "host" } } } }));
+    writeFileSync(file, JSON.stringify({ connectors: {environments: {kind:"environment",version:"v1",config:{ dev: { kind: "host" } }}} }));
     process.env.AIDE_CONFIG = `${file}.missing`;
-    expect(loadConfig(file).connectors.environments).toEqual({ dev: { kind: "host" } });
+    expect(loadConfig(file).connectors.environments!.config).toEqual({ dev: { kind: "host" } });
   } finally {
     if (previous === undefined) delete process.env.AIDE_CONFIG; else process.env.AIDE_CONFIG = previous;
     if (previousHome === undefined) delete process.env.AIDE_HOME; else process.env.AIDE_HOME = previousHome;

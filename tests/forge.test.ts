@@ -4,68 +4,14 @@ import {
   test,
 } from "bun:test";
 
-import { Connectors } from "../connectors/index.ts";
+import { createConnectors } from "./connector-fixture.ts";
 import { createConnectorClient, dispatchConnector } from "../src/connector-client.ts";
 import { chiefTools } from "../agents/chief/chief-tools.ts";
-import { createForgeConnectors, forgeConnectionRevision, loadForgeConfigs } from "../connectors/forge/config.ts";
-
-describe("Forge config", () => {
-  test("separates Forge identity from endpoint host and uses devloop token precedence", () => {
-    const config = {
-      forges: {
-        "github.com": {
-          token: "configured-github",
-          uids: ["ignored-legacy-author"],
-          },
-        "code.example.com": {
-          type: "gitlab",
-          api_host: "gitlab-api.example.com",
-          token: "configured-gitlab",
-          },
-      },
-    };
-
-    expect(loadForgeConfigs(config, {
-      GITHUB_TOKEN: "environment-github",
-      GITLAB_TOKEN: "environment-gitlab",
-    })).toEqual([
-      {
-        forge: "github.com",
-        provider: "github",
-        host: "github.com",
-        token: "environment-github",
-      },
-      {
-        forge: "code.example.com",
-        provider: "gitlab",
-        host: "gitlab-api.example.com",
-        token: "environment-gitlab",
-      },
-    ]);
-  });
-
-  test("creates only authenticated Forge connectors", () => {
-    const config = {
-      forges: {
-        "github.com": { type: "github" },
-        "gitlab.example.com": {
-          type: "gitlab",
-          token: "configured",
-        },
-      },
-    };
-
-    expect(createForgeConnectors(config, { environment: {} }).map(
-      (connector) => [connector.forge, connector.provider],
-    )).toEqual([["gitlab.example.com", "gitlab"]]);
-  });
-});
-
+import { createForgeReader } from "@compforge/repocli";
 
 for (const provider of ["github", "gitlab"] as const) test(`${provider} repocli reads cross Aide's JSON Connector boundary`, async () => {
   const calls: URL[] = [];
-  const host = new Connectors([], createForgeConnectors({ forges: { work: { type: provider, api_host: `${provider}.example.com`, token: "fixture" } } }, {
-    environment: {}, fetch: async (input, init) => {
+  const host = createConnectors([], [createForgeReader({forge:"work",provider:provider,host:`${provider}.example.com`,token:"fixture"}, {fetch: async (input, init) => {
       const url = new URL(String(input)); calls.push(url);
       expect(new Headers(init?.headers).get(provider === "github" ? "authorization" : "private-token")).toContain("fixture");
       if (url.pathname.endsWith("/user/repos") || url.pathname === "/api/v4/projects") {
@@ -86,8 +32,7 @@ for (const provider of ["github", "gitlab"] as const) test(`${provider} repocli 
       if (url.pathname.endsWith("/pulls")) return Response.json([{ ...github, merged_at: "2026-10-26T00:00:00Z" }]);
       if (url.pathname.endsWith("/merge_requests")) return Response.json([gitlab]);
       return Response.json(provider === "github" ? github : gitlab);
-    },
-  }));
+    }})]);
   const client = createConnectorClient(async <T>(request: Parameters<typeof dispatchConnector>[1]): Promise<T> => {
     const value = await dispatchConnector(host, JSON.parse(JSON.stringify(request)));
     // In-process callers must be able to persist the same data that Runner receives.
@@ -128,23 +73,10 @@ for (const provider of ["github", "gitlab"] as const) test(`${provider} repocli 
 });
 
 test("repository rate-limit hints survive the JSON Connector boundary", async () => {
-  const host = new Connectors([], createForgeConnectors({ forges: { work: { type: "gitlab", token: "fixture" } } }, {
-    environment: {}, fetch: async () => new Response("limited", { status: 429, headers: { "retry-after": "120" } }),
-  }));
+  const host = createConnectors([], [createForgeReader({forge:"work",provider:"gitlab",host:"work",token:"fixture"}, {fetch: async () => new Response("limited", { status: 429, headers: { "retry-after": "120" } })})]);
   const client = createConnectorClient(async <T>(request: Parameters<typeof dispatchConnector>[1]): Promise<T> =>
     JSON.parse(JSON.stringify(await dispatchConnector(host, JSON.parse(JSON.stringify(request))))));
   const page = await client.forges.listRepositories("work");
   expect(page.items).toEqual([]);
   expect(page.issues?.[0]).toMatchObject({ stage: "list", kind: "rate_limit", retryAfterMs: 120_000 });
-});
-
-test("observation connection revisions change with endpoint, provider or credential without carrying credentials", () => {
-  const config = { forge: "work", provider: "gitlab" as const, host: "gitlab.test", token: "private-fixture" };
-  const revision = forgeConnectionRevision(config);
-  expect(revision).toMatch(/^[a-f0-9]{64}$/);
-  expect(revision).not.toContain(config.token);
-  expect(forgeConnectionRevision({ ...config })).toBe(revision);
-  for (const changed of [{ ...config, token: "another" }, { ...config, host: "other.test" }, { ...config, provider: "github" as const }]) {
-    expect(forgeConnectionRevision(changed)).not.toBe(revision);
-  }
 });

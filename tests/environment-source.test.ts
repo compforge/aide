@@ -91,9 +91,9 @@ test("Environment policy selects namespaces independently of Connector defaults 
 test("Real Runner observes through Connector Verb, routes to Chief once, and restores its baseline", { timeout: 15_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-env-runner-"));
   const configFile = join(root, "config.yaml");
-  writeFileSync(configFile, JSON.stringify({ connectors: { environments: {
+  writeFileSync(configFile, JSON.stringify({ connectors: {environments: {kind:"environment",version:"v1",config:{
     dev: { kind: "kubernetes", kubeconfig: "unused", namespace: "app", aliases: ["开发"] },
-  } }, plugins: { personal: { sources: { environments: { targets: [{ environment: "dev", namespaces: ["app", "other"] }] } } } } }));
+  }}}, plugins: { personal: { sources: { environments: { targets: [{ environment: "dev", namespaces: ["app", "other"] }] } } } } }));
   let current = snapshot("A"); let reads = 0;
   const prompts: string[] = [];
   const config = loadConfig(configFile);

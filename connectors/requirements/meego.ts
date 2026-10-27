@@ -130,6 +130,3 @@ export class MeegleCliRequirementConnector implements RequirementConnector {
     return { id, scope: account.scope };
   }
 }
-export function createMeegoRequirementConnectors(config: Readonly<Record<string, unknown>>, run?: MeegleCliRunner): readonly RequirementConnector[] {
-  return loadMeegoRequirementConfigs(config).map((config) => new MeegleCliRequirementConnector(config, run));
-}

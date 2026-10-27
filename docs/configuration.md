@@ -48,6 +48,8 @@ Lark Channel 不再读取 `AIDE_LARK_APP_ID` / `AIDE_LARK_APP_SECRET`。机器�
 没有声明的 Connector/Source/package 默认为空。Connector 和 Plugin 的具体字段由所属实现校验，
 不放宽顶层或 Harness 的字段检查。配置不是 Plugin 之间传递凭证的通道。
 
+Connector 直接按 `connectors.<name>` 声明 kind、version 和 config；Host 通过 `AIDE_CONNECTOR_REGISTRATION` 独立加载实现注册入口。声明、注册和调用见 [Connector 扩展](connector/extensions.md)。
+
 Connector 配置访问能力，声明它不会启动持续观察。Personal 的策略统一位于 `plugins.personal.sources`：
 
 - `environments` 显式选择环境与 namespace；`targets: []` 关闭环境观察。
@@ -55,18 +57,21 @@ Connector 配置访问能力，声明它不会启动持续观察。Personal 的�
 - `requirements` 配置需求观察列表，包含 Connector 引用、负责人范围与间隔；空数组关闭需求观察。
 - `repositories` 配置 Forge 仓库清单的低频刷新与失败重试；`pullRequests` 指定作者，通过仓库清单引用或直接账号范围观察 PR/MR 合并。两种 Source 独立保存快照与恢复进度；空数组关闭相应观察。见 [Forge](connector/forge.md)。
 
-`connectors.lark.me` 标记代表本人的外部身份，与 CLI 执行的 `appId/userId` 独立：
+`connectors.lark.config.me` 标记代表本人的外部身份，与 CLI 执行的 `appId/userId` 独立：
 
 ```yaml
 connectors:
   lark:
-    appId: cli_execution
-    userId: ou_operator
-    me:
-      - appId: cli_execution
-        openId: ou_human
-      - appId: cli_bot
-        openId: ou_human_in_bot_app
+    kind: messages
+    version: v1
+    config:
+      appId: cli_execution
+      userId: ou_operator
+      me:
+        - appId: cli_execution
+          openId: ou_human
+        - appId: cli_bot
+          openId: ou_human_in_bot_app
 plugins:
   personal:
     sources:
@@ -74,7 +79,7 @@ plugins:
 ```
 
 Me 中的 appId 是 openId 的身份作用域，不指定 CLI 登录应用。多个标记声明同一个人；启动时据此归并已有 Person，将各平台账号保存为同一人物的多个身份。配置仍按接入独立生效。
-只使用机器人 Channel 时在 channels.<名称>.me 配置本人身份，无需配置 CLI 账号；启用消息 Source 则必须成对配置 CLI appId/userId，connectors.lark.me 独立控制该 Connector 的本人识别。
+只使用机器人 Channel 时在 channels.<名称>.me 配置本人身份，无需配置 CLI 账号；启用消息 Source 则必须成对配置 CLI appId/userId，connectors.lark.config.me 独立控制该 Connector 的本人识别。
 当前 CLI 读取实现使用用户授权，Me 标记不会扩大其访问范围或把用户授权切换为机器人授权。
 CLI 账号不必是本人；观察到执行账号的私信或 @ 不会自动归为本人收到。
 修改 Me 配置后重启，既有 Input 保留原关系；人物资料和认知在 Web Persons 编辑后立即生效。
@@ -87,9 +92,12 @@ defaultHarness: pi
 
 connectors:
   environments:
-    dev:
-      kind: kubernetes
-      kubeconfig: ~/.kube/dev
+    kind: environment
+    version: v1
+    config:
+      dev:
+        kind: kubernetes
+        kubeconfig: ~/.kube/dev
 
 harnesses:
   pi:
@@ -111,7 +119,7 @@ plugins:
       environments:
         targets:
           - environment: dev
-            namespaces: [example]
+            namespaces: [ example ]
         intervalMs: 300000
       requirements: []
 ```
