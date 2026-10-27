@@ -22,6 +22,8 @@ Forge 由一个 Forge Connector 支持 RepositorySource 与 PullRequestSource：
 
 当前各接入已有的超时和限流错误处理以实现及对应文档为准；这里定义的是待建设的统一配置与共享预算能力，不表示当前已具备 Connector 级统一限速器。
 
+外部实现的包入口、Kind 注册、发现与调用见 [Connector 扩展](extensions.md)。Source 继续复用 Plugin 的运行机制。
+
 ## 接入目录
 
 | 接入 | 访问与观察 |

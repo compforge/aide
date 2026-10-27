@@ -237,7 +237,7 @@ async function activate(
     runtime: Object.freeze({ ...(runtime.cwd ? { cwd: runtime.cwd } : {}) }),
     dataDirs: Object.freeze({ ...dataDirs }),
     resources,
-    connectors: createConnectorClient((request) => callHost({ method: "connector.read", request })),
+    connectors: createConnectorClient((request) => callHost({ method: "connector.request", request })),
     logger: pluginLogger(),
     controllers: Object.freeze({
       register<TSpec, TStatus>(controller: Controller<TSpec, TStatus>) {

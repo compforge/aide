@@ -32,4 +32,6 @@ Plugin / Operator 通过 ResourceClient 操作 CRD，通过 Verb 发起非 CRD �
 
 execution.withContext 为动作附加不透明 attributes；主资源身份由运行时提供，业务关联由插件解释。Harness verb 只接收配置和原生会话参数，不读写 CRD；调用者决定如何保存恢复引用。原生接收回执、工具业务回执和外部送达分别确认。
 
+Connector Kind 与外部实现使用独立的 [Connector SDK](../../packages/connector/README.md)；Plugin 可按 Kind 发现并调用已注册连接，普通回调与 execution-scoped verb 共用客户端契约。业务 Source 继续作为 Plugin 的 Resource/Controller 实现。
+
 完整公开契约与注册示例见 [aide-plugin](../../packages/plugin/README.md)。[Personal](../personal/README.md) 是这些机制的内置使用者。

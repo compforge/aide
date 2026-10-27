@@ -63,7 +63,7 @@ export function createPluginVerbs(
     connectors(options: { timeoutMs: number }) {
       validateTimeout("connector", options.timeoutMs);
       return createConnectorClient(async <T>(request: import("./protocol/connectors.ts").ConnectorRequest): Promise<T> => {
-        const result = await invoke(scope, { verb: "connector", input: { request, timeoutMs: options.timeoutMs } });
+        const result = await invoke(scope, { verb: "connector", input: { request: request.operation === "connector.call" ? { ...request, timeoutMs: options.timeoutMs } : request, timeoutMs: options.timeoutMs } });
         if (result.state !== "success") throw new Error(`Connector ${request.operation} ${result.state}${result.state === "failure" ? `: ${result.error}` : ""}`);
         return result.value as T;
       });

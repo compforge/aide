@@ -76,7 +76,7 @@ export type HostRequest =
 
   | { readonly method: "resource.commit"; readonly writes: readonly import("@compforge/aide-plugin").ResourceCommit[] }
   | { readonly method: "resource.replace"; readonly resource: Resource<unknown, unknown>; readonly spec: unknown; readonly status: unknown }
-  | { readonly method: "connector.read"; readonly request: ConnectorRequest }
+  | { readonly method: "connector.request"; readonly request: ConnectorRequest }
   | {
       readonly method: "verb.invoke";
       readonly context: ExecutionScope;

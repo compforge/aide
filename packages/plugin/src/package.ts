@@ -98,7 +98,7 @@ export interface PluginContext {
 }
 
 /**
- * One installable group of Resource schemas, Controllers, Sources, and Connectors.
+ * One installable group of Resource schemas, Controllers, Sources, and Hooks.
  *
  * @spec A Plugin Package declares resource types per definition; one enabled PluginInstance activates one Worker, while each Resource carries its own namespace.
  */

@@ -50,7 +50,7 @@ An enabled instance has a host Binding and a Runner process. Register capabiliti
 
 ## Global connectors
 
-`context.connectors` exposes host-owned read capabilities to every plugin. The host loads one configuration snapshot; Runner calls use the existing IPC transport. A plugin does not load provider credentials or construct provider clients.
+`context.connectors` exposes host-owned access capabilities to every plugin. The host loads one configuration snapshot; Runner calls use the existing IPC transport. A plugin does not load provider credentials or construct provider clients.
 
 ```ts
 const catalog = await context.connectors.describe();
@@ -61,7 +61,7 @@ const snapshot = await context.connectors.environments.workloads("dev", "app");
 
 Environment names and aliases resolve to a canonical name. Listing returns compact declarations; reading returns access coordinates, without opening kubeconfig files or connecting to the target. Unknown targets reject. The Environment / Host identity contracts come from `@compforge/harness-common`; no toolbox access lifecycle is implied.
 
-Requirements expose typed list/get operations. Forge capabilities use explicit `listRepositories`, `listPullRequests`, `scanPullRequests`, `getPullRequest`, `getPullRequestReview` and `listPullRequestComments` methods. Keys and base snapshots come from `@compforge/harness-common`; paging, scan and review contracts come from `@compforge/repocli` 0.8.0. These are serializable facts without identity methods. Plugins use Host Connector IPC and do not instantiate credential-bearing clients. Version 0.17 adds repository pages to the Forge Connector contract; Host and plugin consumers must update together. Reviews are requested independently from lifecycle facts, and list results are pages with optional coverage issues.
+Requirements expose typed list/get operations. Forge capabilities use explicit `listRepositories`, `listPullRequests`, `scanPullRequests`, `getPullRequest`, `getPullRequestReview` and `listPullRequestComments` methods. Keys and base snapshots come from `@compforge/harness-common`; paging, scan and review contracts come from `@compforge/repocli` 0.8.0. These are serializable facts without identity methods. Plugins use Host Connector IPC and do not instantiate credential-bearing clients. Version 0.18 adds open Connector Kind discovery and typed clients through `@compforge/aide-connector`; Host and plugin consumers must update together. Reviews are requested independently from lifecycle facts, and list results are pages with optional coverage issues.
 
 ```ts
 const pull = await context.connectors.forges.getPullRequest({
@@ -200,3 +200,5 @@ Resource definitions can declare pure multi-value `indexes`, queried with `resou
 The Operator may persist AgentStatus = { harness, sessionId? } anywhere its schema permits. Harness verbs accept these values as parameters and return known references in result.agent; the Host never reads or patches resource status. Personal Route / Chief / Task call create and persist the returned reference before a long-running prompt. If persistence fails, they close the runtime without dispatching input. Providers that cannot publish a native identity during create reject that operation; a one-shot prompt can still return a reference learned during execution. Native history and checkpoints remain owned by the Harness.
 
 Resource deletion accepts optional `{ uid, resourceVersion }` preconditions as the fourth argument to `resources.delete(type, name, namespace, preconditions)`. Check and deletion marking occur in the same transaction. Idle collection uses this guard so a newly assigned input invalidates an older collection decision. Once deletionTimestamp is set, mutations cannot resume that resource.
+
+External Connector kinds are defined by their owning packages. Plugins can use `context.connectors.list(Kind)` / `get(Kind, description)` directly, or the same API through `execution.verbs.connectors({ timeoutMs })`. The new [Connector SDK](../connector/README.md) owns these contracts; Sources continue to use the existing Plugin Resource/Controller lifecycle.
