@@ -10,7 +10,7 @@ import type { Manager } from "../../../src/host/plugin/manager.ts";
 import type { Store } from "../store.ts";
 import { createWeaveAgent } from "../../../agents/weave/agent.ts";
 import { WEAVE_TYPE, type WeaveStatus } from "./model.ts";
-import { planGroup } from "./service.ts";
+import { groupTopics } from "./service.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { understandingVersion } from "../topic/tree.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
@@ -42,10 +42,11 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
           const text = JSON.stringify({ name: t.spec.name, summary: t.status.summary, recent: t.status.recent });
           return result({ uid, version: understandingVersion(t), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } },
-      { name: "group_topics", label: "Group topics", description: "Propose a new parent containing 2-8 roots. Summary retains long-lived, infrequently changing connections, explicit authors and confirmation state. Temporary progress stays in child Notes; handoff retains a bounded combined Note window. Do not copy temporary facts into summary. Never resolve an ambiguous I as Me or promote Aide proposals to user decisions. This schedules a safe handoff.",
-        parameters: Type.Object({ topics: Type.Array(Type.Object({ uid: Type.String(), version: Type.String() }), { minItems: 2, maxItems: 8 }),
-          name: Type.String({ minLength: 1, maxLength: 200 }), summary: Type.String({ minLength: 1, maxLength: summaryChars }) }),
-        async execute(_id, args) { return result(await planGroup(plugins.resourceClient("personal"), active(), args, summaryChars)); } },
+      { name: "group_topics", label: "Group topics", description: "Attach 1-8 roots to an existing parent, or create a new parent for 2-8 roots. For a new parent provide name and summary preserving long-lived connections, attribution, disagreements and confirmation state. Temporary progress stays in child Notes; grouping retains a bounded combined Note window. Do not copy temporary facts into summary. Existing parents keep their own understanding for Chief to synthesize. Running agents may finish; data ownership stays unchanged.",
+        parameters: Type.Object({ topics: Type.Array(Type.Object({ uid: Type.String(), version: Type.String() }), { minItems: 1, maxItems: 8 }),
+          parent: Type.Optional(Type.Object({ uid: Type.String(), version: Type.String() })),
+          name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })), summary: Type.Optional(Type.String({ minLength: 1, maxLength: summaryChars })) }),
+        async execute(_id, args) { return result(await groupTopics(plugins.resourceClient("personal"), active(), args, summaryChars)); } },
     ];
     return createWeaveAgent({ ...options, config, scope: `weave:${ref.uid}`, tools, background: identityBackground(persons) });
   };

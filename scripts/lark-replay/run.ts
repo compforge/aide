@@ -1,3 +1,4 @@
+import { candidateVersion } from "../../plugins/personal/weave/candidates.ts";
 import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -104,9 +105,8 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
       const roots = topics.filter(t => !t.default && !t.parentRef);
       const weave = await resources.get<Record<string, never>, WeaveStatus>({ ...WEAVE_TYPE, name: "global", namespace: "v1" });
       const quiet = done && !topics.some(t => aide.topics.resource(t.id)?.status.execution)
-        && (!options.weave || (weave && !weave.status.execution && !weave.status.plan && (roots.length < 2 || (weave.status.scanned ?? 0) >= roots.length)));
-      const fingerprint = JSON.stringify([topics, inputs.map(i => i.status), weave?.status.fingerprint, weave?.status.scanned,
-        weave?.status.plan, weave?.status.execution]);
+        && (!options.weave || (weave && !weave.status.execution && (roots.length < 2 || roots.every(t => weave.status.reviewed?.[aide.topics.resource(t.id)!.metadata.uid]?.version === candidateVersion(aide.topics.resource(t.id)!)))));
+      const fingerprint = JSON.stringify([topics, inputs.map(i => i.status), weave?.status.reviewed, weave?.status.execution]);
       if (!quiet || fingerprint !== last) stableSince = Date.now();
       if (quiet && Date.now() - stableSince >= settleMs) return;
       last = fingerprint;

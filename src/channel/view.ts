@@ -73,6 +73,14 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const messageRuns = new Map<string, string>();
   for (const message of channelOutputs(aide)) if (message.executionId) messageRuns.set(message.id, message.executionId);
   const inputExecutions = new Map(invocations.flatMap((i) => (i.inputIds ?? []).map((id) => [id, i.executionId] as const)));
+  // Native notifications provide explicit transient links for steered/follow-up material; Input itself owns no Chief invocation.
+  const facts = aide.topics.inputs(topicId);
+  for (const notification of state.harnessInputs.values()) {
+    const invocation = invocations.find(i => i.invocationId === notification.invocationId && i.resourceRef?.kind === "Topic");
+    if (!invocation || notification.deliveryOutcome === "failed") continue;
+    const fact = facts.find(i => notification.messageId === `input:${i.metadata.uid}:${invocation.resourceRef!.uid}`);
+    if (fact) inputExecutions.set(fact.metadata.name, invocation.executionId);
+  }
   const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.invocationId))
     .map((input) => [input.invocationId, input]));
   const summaries = new Map(state.invocationSummaries.filter((turn) => relatedTurns.has(turn.invocationId)).map((turn) => [turn.invocationId, turn]));

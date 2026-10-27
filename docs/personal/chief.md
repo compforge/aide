@@ -8,7 +8,7 @@ Chief 使用独立的 `chief` Harness 身份，Agent 位于 `agents/chief/`；�
 
 ## Agent 与 Controller
 
-Chief Agent 负责判断，Personal Route 负责话题归位。Topic 的接收 Controller 与 agent Controller 分别接纳新 Input 和调用 Chief；assess_input 确认消费，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
+Chief Agent 负责判断，Personal Route 负责话题归位。Topic 的接收 Controller 与 agent Controller 分别通知新材料和调用 Chief；assess_input 确认消费，say 保存独立 Output。Task / Routine 的持久状态与 Reconcile 仍属于 Personal。
 
 所有 Topic 共用 Chief 配置。Personal 的 chiefSession 工厂根据调用 scope 的 ResourceRef 校验 Topic UID，装配限定该会话范围的 WorkService 与工具。工具每次执行都重新确认当前 execution，不捕获过期 verbs。
 
@@ -135,4 +135,4 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 
 ## 与 Route 的协作
 
-输入分派契约见 [Route](route.md)。Chief 只确认自己接纳的输入并按需交给 Work；Route 与 Chief 隔离原生上下文，共用 Hermes 长期记忆，Route 只检索、Chief 可以维护。Default 的 Chief 按普通话题规则判断，不因兜底身份获得额外授权。
+输入分派契约见 [Route](route.md)。Chief 可以研判当前 Topic 子树的材料并按需交给 Work；Route 与 Chief 隔离原生上下文，共用 Hermes 长期记忆，Route 只检索、Chief 可以维护。Default 的 Chief 按普通话题规则判断，不因兜底身份获得额外授权。

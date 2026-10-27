@@ -53,7 +53,7 @@ for (const target of ["root", "child"]) test(`Deferred ${target} inputs wait and
   const early = aide.topics.inputStore.get("early")!;
   assert.ok(early.status.route?.completedAt);
   assert.equal(early.status.route!.result!.topics[0]!.uid, aide.topics.resource(target)!.metadata.uid);
-  assert.equal(early.status.assess![root.metadata.uid]!.executionId, undefined);
+  assert.equal(early.status.assess![aide.topics.resource(target)!.metadata.uid]!.executionId, undefined);
   assert.equal(prompts.length, 0);
   await submit("normal", "root", InputAttention.Normal); await until(() => prompts.length === 1);
   assert.match(prompts[0]!, /fact early/);
@@ -61,12 +61,12 @@ for (const target of ["root", "child"]) test(`Deferred ${target} inputs wait and
   await submit("late", target);
   await until(() => !!aide.topics.inputStore.get("late")?.status.route?.completedAt);
   await Bun.sleep(100);
-  assert.equal(aide.topics.inputStore.get("late")!.status.assess![root.metadata.uid]!.executionId, undefined);
+  assert.equal(aide.topics.inputStore.get("late")!.status.assess![aide.topics.resource(target)!.metadata.uid]!.executionId, undefined);
   assert.equal(aide.topics.resource("root")!.status.execution!.admissionRevision, 0);
   release(); await aide.settled();
   assert.equal(prompts.length, 1, "Late Deferred must not force another turn");
-  for (const id of ["early", "normal"]) assert.ok(aide.topics.inputStore.get(id)!.status.assess![root.metadata.uid]!.completedAt);
-  assert.equal(aide.topics.inputStore.get("late")!.status.assess![root.metadata.uid]!.completedAt, undefined);
+  for (const id of ["early", "normal"]) assert.ok(Object.values(aide.topics.inputStore.get(id)!.status.assess!).every(a => a.completedAt));
+  assert.equal(aide.topics.inputStore.get("late")!.status.assess![aide.topics.resource(target)!.metadata.uid]!.completedAt, undefined);
 });
 
 test("Deferred backlog survives restart with trigger disabled and timer reviews remain bounded", async t => {
@@ -111,5 +111,5 @@ test("Child understanding can activate Chief and include Deferred without a time
   assert.equal(prompts.length, 1);
   assert.match(prompts[0]!, /"kind":"absorb"/);
   assert.match(prompts[0]!, /fact deferred/);
-  assert.ok(aide.topics.inputStore.get("deferred")!.status.assess![root.metadata.uid]!.completedAt);
+  assert.ok(aide.topics.inputStore.get("deferred")!.status.assess![child.metadata.uid]!.completedAt);
 });

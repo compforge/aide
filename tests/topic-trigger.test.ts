@@ -44,7 +44,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
       if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
       calls.push(args);
       if (fail) return { state: "failure", error: "provider disconnected" };
-      const admitted = aide.topics.inputStore.list().filter(i => i.status.assess?.[read().metadata.uid]?.executionId === executionId);
+      const admitted = aide.topics.inputStore.list().filter(i => read().status.notifiedInputs?.includes(i.metadata.uid) && !i.status.assess?.[read().metadata.uid]?.completedAt);
       await assessAll(resources, read(), executionId, { inputIds: admitted.map(i => i.metadata.name), summary: "Nothing needs action" });
       return { state: "success", value: { result: { stopReason: "end_turn" } } };
     } } } as unknown as ReconcileContext;
@@ -105,7 +105,7 @@ test("Idle review is a pre-routed Input with a processing receipt and Job View, 
   assert.equal(inputList(f.aide, { origin: "trigger" }).items.length, 1);
   assert.ok(inputDetail(f.aide, input.metadata.name)!.timeline.some(e => e.stage === "assess" && e.status === "completed"));
   assert.equal((await inputJob(input, [])).status, "completed");
-  assert.deepEqual(inputDetail(f.aide, input.metadata.name)!.sessions, [{ harness: "chief", sessionId: "native" }]);
+  assert.deepEqual(inputDetail(f.aide, input.metadata.name)!.sessions, [], "no native tool evidence is invented by this fixture");
   assert.ok(topicView(f.aide, "root").blocks.some(b => b.origin === "trigger" && b.label === "定时回顾"));
   await f.run();
   assert.equal(f.calls.length, 1);

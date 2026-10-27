@@ -1,5 +1,4 @@
 import { digest } from "../chief-model.ts";
-import { WEAVE_TYPE, type WeaveStatus } from "../weave/model.ts";
 import { AgentStatusSchema } from "../session.ts";
 import { ContextFields } from "../context.ts";
 import { z } from "zod";
@@ -41,18 +40,18 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   schema: { spec: z.object({ id: z.string(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     trigger: TopicTriggerSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({  receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
-      lastInputAt: z.string().datetime().optional(), weaveLock: z.string().nullable().optional(), absorbed: z.record(z.string(), z.string()).optional(), absorbedSummaries: z.record(z.string(), z.string()).optional(),
+      notifiedInputs: z.array(z.string()).optional(), weaveRevision: z.number().int().nonnegative().optional(),
+      notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
+      lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).optional(), absorbedSummaries: z.record(z.string(), z.string()).optional(),
       nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), nextTriggerAt: z.string().datetime().nullable().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
   validator: { create: validateDefault, update: (previous, current, context) => {
     if (previous.spec.id !== current.spec.id || previous.spec.topicKey !== current.spec.topicKey) throw new Error("Topic identity is immutable");
-    if (current.spec.parentRef && current.status.execution) throw new Error("Only a root Topic can execute");
-    if (current.status.weaveLock && current.status.execution?.id !== previous.status.execution?.id && current.status.execution) throw new Error("Weave has frozen Topic intake");
-    if (previous.status.weaveLock && !previous.status.execution && understandingVersion(current) !== understandingVersion(previous)) throw new Error("Weave has frozen Topic understanding");
+    if (current.spec.parentRef && current.status.execution && current.status.execution.id !== previous.status.execution?.id)
+      throw new Error("Only a root Topic can start Chief");
     validateDefault(current, context);
   }, delete: (resource, context) => {
     if (resource.spec.default) throw new TopicDeletionBlocked("default", "Default Topic cannot be deleted");
-    const staged = context.list<Record<string, never>, WeaveStatus>(WEAVE_TYPE).some(w => w.status.plan?.id === resource.spec.id && !w.status.plan.moving);
-    if (resource.status.execution || (resource.status.weaveLock && !staged)) throw new TopicDeletionBlocked("busy", "Topic is busy");
+    if (resource.status.execution) throw new TopicDeletionBlocked("busy", "Topic is busy");
     if (context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).some(t => t.spec.parentRef?.uid === resource.metadata.uid)) throw new TopicDeletionBlocked("children", "Topic still has children");
     const pending = context.list<InputSpec, InputStatus>(INPUT_TYPE).some(i =>
       (i.status.route?.result?.topics.some(t => t.uid === resource.metadata.uid) || i.status.assess?.[resource.metadata.uid])

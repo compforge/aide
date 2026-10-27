@@ -16,13 +16,13 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 
 字段的完整类型与必选性见 [InputSpec](../../plugins/personal/input/model.ts)。人物、地址、话题线索和调度分别回答不同问题；紧迫性、来源和 relation 都不自动授予执行权限或要求外发。
 
-Immediate 在 Chief 空闲时启动处理，运行中通过 steer 加入；Normal 在空闲时启动处理，运行中通过 followUp 排队。Deferred 只路由和挂载，不因到达而启动所属 root Chief，也不进入其 steer / followUp 队列。Chief 因其它输入、定时回顾或知识整理运行时，可以顺带处理 Deferred；运行中主动发现的未开始 Deferred 也可通过 assess_input 原子记录本次执行与研判完成。
+Immediate 在 Chief 空闲时启动处理，运行中通过 steer 加入；Normal 在空闲时启动处理，运行中通过 followUp 排队。Deferred 只路由和挂载，不因到达而启动所属 root Chief，也不进入其 steer / followUp 队列。Chief 因其它输入、定时回顾或知识整理运行时，可以顺带处理 Deferred；运行中主动发现的 Deferred 也可通过 assess_input 记录研判结果。
 
 未填写 attention 时，Channel 默认 Immediate，Source / Chief / Trigger 默认 Normal。attention 不限制 Route 分类，也不阻止 Chief 明确交给 Task / Routine 的办理。Deferred 未被研判时保持待处理；Topic trigger 可以关闭，不增加独立批处理计时器。
 
 Channel / Source 经绑定的入口提交 Input，稳定身份用于传输去重；接收回执只证明持久化成功。Source 先保存 Input，再推进观察水位。原始消息满足提交条件时，即使可选上下文读取失败仍可接收，具体证据与权限见对应接入文档。
 
-系统定时回顾使用 `origin: trigger`、`originId: personal.topic-trigger`，`originRef` 指向产生它的 root Topic。`observation` 保存检查到期时间、实际触发时间和空闲起点。满足空闲条件才生成，创建时已包含路由结果与研判目标；既不调用 Route 模型，也不刷新 Topic 的业务活跃时间。Chief 复用普通 Input 的接纳与 `assess_input` 回执，详见 [定时回顾](topic.md#topic-定时回顾)。
+系统定时回顾使用 `origin: trigger`、`originId: personal.topic-trigger`，`originRef` 指向产生它的 root Topic。`observation` 保存检查到期时间、实际触发时间和空闲起点。满足空闲条件才生成，创建时已包含路由结果与研判目标；既不调用 Route 模型，也不刷新 Topic 的业务活跃时间。Chief 复用普通材料通知和 `assess_input` 回执，详见 [定时回顾](topic.md#topic-定时回顾)。
 
 ## 路由、研判与办理
 
@@ -34,7 +34,7 @@ Channel / Source 经绑定的入口提交 Input，稳定身份用于传输去重
 
 route_input 在同一事务写入 route 结果和全部 assess；assess_input 在同一事务完成研判并建立必要的 handle。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 可以关联多个 Topic、多个 Work，各自独立确认。
 
-未完成可能是尚未接纳、运行、退避或待核对。接纳记录不等于完成；原生调用结束也不代替工具回执。Route 分类失败可以按输入退避重试，Chief / Work 可能已经产生副作用，需核对后继续。详细策略分别归 [Route](route.md)、[Topic](topic.md)、[Task](task.md) 与 [Routine](routine.md)。
+未完成可能是尚未接纳、运行、退避或待核对。接纳记录不等于完成；原生调用结束也不代替工具回执。Route 分类失败可以按输入退避重试，Work 可能已经产生副作用，需核对后继续；Chief 的执行失败记录在 Topic，材料自身不记录 Chief 占有状态。详细策略分别归 [Route](route.md)、[Topic](topic.md)、[Task](task.md) 与 [Routine](routine.md)。
 
 ## 研判与办理
 
@@ -73,3 +73,9 @@ Output 只在其 inputIds 显式包含当前 Input 时关联，不按相邻顺�
 `tests/input-browse.test.ts` 覆盖筛选后分页、来源选项、稳定排序、消费回执终态、独立消费者、已删除目标、明确 Output 关联及 HTTP 页面与查询。
 
 自动送入 Route / Chief / Task / Routine 的预览保留正文、来源与身份信息，不展开 observation；有证据时附上 read_input 入口说明，正文超预算时明确提示截断。原始证据和完整正文仍由 InputPrinter.describe 提供，Web 与按需读取不丢失信息。预览减少每轮重复携带的材料，不改变输入的路由、处理确认或保留策略。
+
+## 归属与 Chief 通知
+
+Input 固定绑定 Route 确定的 Topic。明确规则允许直接绑定子 Topic；无规则时 Route 只选择当前 root。Weave 不迁移绑定或研判记录。
+
+Input 是 root Chief 可查看的子树材料，不记录哪个 Chief 领取了它。Chief 的通知进度、执行与失败状态留在 Topic；Input.assess 只保存 Topic 归属、研判结果和可选的完成工具证据。Route 分类和 Task / Routine 办理仍保留各自的执行回执。`completedBy` 是已发生工具调用的观测证据，不是 Chief 的占有关系或执行门槛。

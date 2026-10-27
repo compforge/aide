@@ -1,6 +1,7 @@
+import { topicSubtree } from "./topic/tree.ts";
 import { isDeepStrictEqual } from "node:util";
 import { TASK_TYPE, type TaskSpec } from "./task/model.ts";
-import { TOPIC_TYPE } from "./topic/model.ts";
+import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "./topic/model.ts";
 import { digest } from "./chief-model.ts";
 import { resourceRef } from "./input/state.ts";
 import type { ResourceAdmission } from "../../src/host/plugin/resource/client.ts";
@@ -17,8 +18,10 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
       const spec = init.spec as TaskSpec;
       if (!spec.initialInputId) throw new Error("Task requires an initial Input");
       const input = inputs.get(spec.initialInputId);
-      const topic = inputs.resources.get(TOPIC_TYPE, digest(spec.topicId));
-      if (topic.metadata.deletionTimestamp || !input || input.metadata.deletionTimestamp || !input.status.assess?.[topic.metadata.uid])
+      const topic = inputs.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, digest(spec.topicId));
+      const members = new Set(topicSubtree(inputs.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE), topic).map(t => t.metadata.uid));
+      const attached = input && Object.entries(input.status.assess ?? {}).some(([uid]) => members.has(uid));
+      if (topic.metadata.deletionTimestamp || !input || input.metadata.deletionTimestamp || !attached)
         throw new Error("Initial Input is not assigned to the Task Topic");
       const existing = inputs.resources.find(TASK_TYPE, init.name);
       if (existing) {

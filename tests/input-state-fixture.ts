@@ -13,7 +13,10 @@ export async function routeTo(resources: ResourceClient, target: { name: string;
 }
 export async function admit(resources: ResourceClient, inputId: string, uid: string, executionId: string) {
   const c = (await resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Topic" })).find(c => c.metadata.uid === uid)!;
-  return changeAttempt(resources, inputId, resourceRef(c), () => ({ executionId, startedAt: new Date().toISOString() }));
+  const input = await resources.get<import("../plugins/personal/input/model.ts").InputSpec, import("../plugins/personal/input/model.ts").InputStatus>({ apiVersion: "aide.dev/v1alpha1", kind: "Input", name: inputId, namespace: "v1" });
+  if (!input) throw new Error(`Input missing: ${inputId}`);
+  await resources.patchStatus(c, { notifiedInputs: [...new Set([...(c.status as import("../plugins/personal/topic/model.ts").TopicStatus).notifiedInputs ?? [], input!.metadata.uid])] });
+  return input!;
 }
 
 export async function handoff(store: import("../plugins/personal/topic/store.ts").TopicStore, resources: ResourceClient, inputId: string, requests: import("../plugins/personal/topic/assess.ts").AssessInput["workRequests"], summary = "Handed to Work") {

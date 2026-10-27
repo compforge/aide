@@ -4,11 +4,11 @@ import { understandingVersion, summaryVersion } from "../topic/tree.ts";
 import { contextPage } from "../background.ts";
 
 export function weaveCandidates(topics: readonly TopicResource[]) {
-  return topics.filter(t => !t.metadata.deletionTimestamp && !t.spec.parentRef && !t.spec.default && !t.status.weaveLock)
+  return topics.filter(t => !t.metadata.deletionTimestamp && !t.spec.parentRef && !t.spec.default)
     .sort((a, b) => (a.status.lastInputAt ?? a.metadata.creationTimestamp).localeCompare(b.status.lastInputAt ?? b.metadata.creationTimestamp) || a.metadata.uid.localeCompare(b.metadata.uid));
 }
-export function candidateFingerprint(roots: readonly TopicResource[]) {
-  return createHash("sha256").update(JSON.stringify(roots.map(t => [t.metadata.uid, t.spec.name, summaryVersion(t), t.status.lastInputAt]))).digest("hex");
+export function candidateVersion(topic: TopicResource) {
+  return createHash("sha256").update(JSON.stringify([topic.spec.name, summaryVersion(topic)])).digest("hex");
 }
 /** @spec Scan progress measures the actual bounded snapshot supplied to inference, never the requested page size.
  * @link docs/personal/weave.md

@@ -9,7 +9,7 @@ export type RoutingContext = Pick<PluginContext, "resources"> & { logger: Pick<P
 export type RoutingInput = Readonly<Resource<InputSpec, InputStatus>>;
 export const routed = (input: RoutingInput) => !!input.status.route?.completedAt;
 /** @spec A routing decision and all assessment assignments are one atomic fact. Repeated decisions never reopen a consumer. */
-export async function deliver(context: RoutingContext, original: RoutingInput, destinations: Destination[], reason: string, completedBy?: AgentCall) {
+export async function deliver(context: RoutingContext, original: RoutingInput, destinations: Destination[], reason: string, completedBy?: AgentCall, rootsOnly = false) {
   for (let n = 0; ; n++) {
     const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, ...original.metadata });
     if (!input) throw new Error("Input no longer exists");
@@ -17,7 +17,7 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
     if (!destinations.length) throw new Error("Route needs a destination or Default");
     const topics = await Promise.all([...new Map(destinations.map(d => [d.uid, d])).values()].map(async d => {
       const c = await context.resources.get<TopicSpec, TopicStatus>({ ...TOPIC_TYPE, namespace: "v1", ...d });
-      if (!c || c.metadata.deletionTimestamp) throw new Error(`Topic no longer exists: ${d.uid}`);
+      if (!c || c.metadata.deletionTimestamp || (rootsOnly && c.spec.parentRef)) throw new Error(`Topic no longer exists: ${d.uid}`);
       return c;
     }));
     const at = new Date().toISOString();
@@ -25,10 +25,7 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
     const all = await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
     const paths = topics.map(t => topicPath(all, t));
     const touched = [...new Map(paths.flat().map(t => [t.metadata.uid, t])).values()];
-    for (const path of paths) {
-      const root = path[path.length - 1]!;
-      assess[root.metadata.uid] ??= { resource: resourceRef(root), assignedAt: at };
-    }
+    for (const topic of topics) assess[topic.metadata.uid] ??= { resource: resourceRef(topic), assignedAt: at };
     try {
       await context.resources.commit([
         ...touched.map(c => ({ operation: "replace", resource: c, spec: { ...c.spec, name: c.spec.name || initialTopicName(input.spec.text) },

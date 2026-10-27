@@ -202,7 +202,7 @@ test("AgentUE reducer reconstructs growing, corrected and removed progress witho
 });
 
 
-test("Web exposes failed consumption on the Input without sending an automatic warning", async (t) => {
+test("Web retains Input material and shows interrupted Chief execution without an automatic warning", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-web-failed-reply-"));
   const aide = new Aide(root, fakeOptions({
     chief: async () => { throw new Error("controlled model failure"); },
@@ -213,8 +213,8 @@ test("Web exposes failed consumption on the Input without sending an automatic w
   await aide.settled();
   const view = topicView(aide, "failed");
   const reply = view.blocks.find((block) => block.type === "input")!;
-  assert.equal(reply.status, "failed");
-  assert.equal(reply.group_id, aide.personal.topics.inputs("failed")[0]!.consumption.executionId);
+  assert.equal(reply.status, "queued");
+  assert.ok(aide.topics.resource("failed")!.status.lastError);
   assert.ok(aide.invocations().some((invocation) => invocation.executionId === reply.group_id));
   assert.match(reply.content, /检查展示故障/);
   assert.ok(!view.blocks.some((block) => block.role === "aide"));
@@ -256,7 +256,8 @@ test("Source receipts expose original evidence before processing and remain visi
   assert.equal(receipts.find((block) => block.inputId === "failed")!.icon, SOURCES.requirements.icon);
   assert.equal(mention.content, "Lark 群内 @：请确认发布窗口");
   assert.match(mention.detail!, /完整上下文/);
-  assert.equal(receipts.find((block) => block.inputId === "failed")!.status, "failed");
+  assert.equal(receipts.find((block) => block.inputId === "failed")!.status, "queued");
+  assert.ok(store.resource("inbox")!.status.lastError);
   assert.match(receipts.find((block) => block.inputId === "failed")!.detail!, /其它 Source 的原始输入/);
   assert.doesNotMatch(JSON.stringify(view), /另一会话/);
   assert.equal(aide.outputs().length, 0, "Showing Input facts must not manufacture outbound messages");

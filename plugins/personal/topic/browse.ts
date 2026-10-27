@@ -11,8 +11,7 @@ export interface TopicListItem {
 }
 const field = (alias: string, path: string) => `json_extract(${alias}.data, '$.object.${path}')`;
 const activeTopic = (alias: string) => `${alias}.scope = 'personal' AND ${alias}.kind = 'aide.dev/Topic'
-  AND ${field(alias, "metadata.namespace")} = 'v1' AND ${field(alias, "metadata.deletionTimestamp")} IS NULL
-  AND coalesce(${field(alias, "status.weaveLock")}, '') <> ${field(alias, "spec.id")}`;
+  AND ${field(alias, "metadata.namespace")} = 'v1' AND ${field(alias, "metadata.deletionTimestamp")} IS NULL`;
 const activeInput = `r.scope = 'personal' AND r.kind = 'aide.dev/Input' AND ${field("r", "metadata.namespace")} = 'v1'
   AND ${field("r", "metadata.deletionTimestamp")} IS NULL`;
 const output = `o.scope = 'personal' AND o.kind = 'aide.dev/Output' AND ${field("o", "metadata.namespace")} = 'v1'

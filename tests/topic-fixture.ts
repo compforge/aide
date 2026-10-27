@@ -45,16 +45,15 @@ export async function seedInput(store: PersonalTopics, id: string, spec: InputSp
     // Fixture timestamps must also match the immutable SQL creation-time projection.
     store.outputStore.storage.db.prepare("UPDATE resources SET created=? WHERE key=?").run(o.at, key);
   }
+  const fact = store.inputStore.get(id)!;
   await resources.replace(c, { ...c.spec, name: c.spec.name || initialTopicName(input.text) }, { ...c.status,
     ...(status.phase === "running" ? { execution: { id: status.executionId ?? "fixture", startedAt: new Date().toISOString() } } : {}),
-
+    ...(status.phase && status.phase !== "queued" ? { notifiedInputs: [...new Set([...(c.status.notifiedInputs ?? []), fact.metadata.uid])] } : {}),
+    ...(["failed", "interrupted"].includes(status.phase ?? "") ? { lastError: status.result?.error ?? "Interrupted" } : {}),
   });
-  const fact = store.inputStore.get(id)!;
   store.inputStore.update(fact, { assess: { ...fact.status.assess, [c.metadata.uid]: {
     resource: resourceRef(c), assignedAt: new Date().toISOString(),
-    ...(status.phase && status.phase !== "queued" ? { executionId: status.executionId ?? "fixture", startedAt: new Date().toISOString() } : {}),
-    ...(status.phase === "done" ? { completedAt: new Date().toISOString(), result: { summary: status.result?.summary ?? "Done" } } : {}),
-    ...(["failed", "interrupted"].includes(status.phase ?? "") ? { lastError: status.result?.error ?? "Interrupted" } : {}),
-  } }, route: fact.status.route ?? { completedAt: new Date().toISOString(), result: { topics: [resourceRef(c)], reason: "Fixture destination" } } });
+    ...(status.phase === "done" ? { completedAt: new Date().toISOString(), completedBy: { agent: { harness: "chief", sessionId: "fixture-session" }, executionId: status.executionId ?? "fixture", toolCallId: id }, result: { summary: status.result?.summary ?? "Done" } } : {}),
+  } }, route: fact.status.route ?? { completedAt: new Date().toISOString(), completedBy: { agent: { harness: "chief", sessionId: "fixture-session" }, executionId: status.executionId ?? "fixture", toolCallId: id }, result: { topics: [resourceRef(c)], reason: "Fixture destination" } } });
   return store.input(id, topicId)!;
 }
