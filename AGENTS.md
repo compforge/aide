@@ -76,7 +76,7 @@ plugins/personal/
     reconcile.ts           # 独立接收与 agent Controller、定时回顾
     assess.ts              # 原子研判完成与 Work 交接
     state.ts               # Topic 身份检查和 CAS 更新
-  source/                  # Source 分类定义与三类观察资源
+  source/                  # Source 分类定义与业务观察资源
     definition.ts          # 来源身份、名称与稳定图标
     environment/           # EnvironmentSource
       config.ts            # 环境观察目标与 namespace 策略
@@ -85,7 +85,10 @@ plugins/personal/
       config.ts            # Lark 消息观察与跟进策略
       observe.ts           # 单聊、群内 @ 与本人发言观察、水位和短期讨论跟进
       context.ts           # IM 有界上下文、话题根消息与缺口
-    forge/                 # ForgeSource：账号扫描、common 快照基线、合并 Input 与恢复进度
+    repository/            # RepositorySource：仓库清单缓存、分页刷新与 PR 观察任务交接
+    pull-request/          # PullRequestSource：按仓库或账号扫描、合并 Input 与恢复进度
+    snapshot.ts            # Source 已提交事实与观察时间；刷新和交接进度由各 Source 持有
+    configure.ts           # 观察策略更新保留同一观察范围的 UID 与检查点
     requirement/           # RequirementSource
       config.ts            # 需求观察范围与配置校验
       observe.ts           # 需求观察、水位和调度
@@ -133,8 +136,9 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Person 保存人物身份与认识，Me 是可选标记，与访问凭证独立。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。
 - Topic、Task、Routine、Person 用 summary 保存累计认识，recent 保存有界近期依据；结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
 - Task 承担有限目标，Routine 承担持续职责。领域 Agent 与通用 Pi 共用适配，工具按资源 UID 和当前 execution 绑定；业务请求与消费凭据落在 Input。Chief / Work 通过 say 产生独立 Output，report 与 say 分别提交；普通回答是新 Input，原生权限由独立 Approval 处理。
-- Forge 的 Repository / PullRequest 模型复用 harness-common，平台读取、增量发现完整性、不透明游标与 HTTP 约束由 repocli lib 承担；Aide Connector 负责配置与调用路由，Personal ForgeSource 负责观察策略、检查点与 Input。契约见 [Forge](docs/connector/forge.md)。
-- Connector 声明访问能力，plugins.<plugin>.sources 声明观察策略，Source 先保存 Input 再推进水位。所有模块在自己的 config.ts 声明契约，启动时解析一次；显式值优先于默认值，空数组不回退，运行中不重读配置。Web 可保存命名 Channel 与 defaultChannel 到同一份配置，重启生效；默认 say 联系 Me，不依赖 Topic 的来源地址或私聊历史。
+- Forge 的 Repository / PullRequest 模型复用 harness-common，平台读取、增量发现完整性、不透明游标与 HTTP 约束由 repocli lib 承担；Aide Connector 负责配置与调用路由，Personal RepositorySource 负责清单缓存与观察任务交接，PullRequestSource 负责 PR 基线、检查点与 Input。契约见 [Forge](docs/connector/forge.md)。
+- Connector 按外部系统或服务组织操作与适配；一个 Connector 可支持多个业务 Source，Source 可细到单个业务 Resource，按观察生命周期独立保存状态与调度。长期访问约束包括可配置限速与并发预算，由共享该外部配额的调用统一遵守。边界与建设状态见 [Connector 与 Source](docs/connector/README.md)。
+- plugins.<plugin>.sources 声明观察策略，形成 Input 的 Source 先保存 Input 再推进水位。所有模块在自己的 config.ts 声明契约，启动时解析一次；显式值优先于默认值，空数组不回退，运行中不重读配置。Web 可保存命名 Channel 与 defaultChannel 到同一份配置，重启生效；默认 say 联系 Me，不依赖 Topic 的来源地址或私聊历史。
 - Web 按页面组织，入口管理轮询与 SSE 生命周期，交互模块持有自身状态；共用浏览器能力放在 web/shared，展示类型经 type-only import 使用。Channel 展示进展不产生业务 Output。
 - 根目录 VERSION 是产品版本，每次提交递增一次，默认 patch。设计文档描述当前模型与 why，详细契约各有主说明位置，其它文档用链接引用；代码意图标记链接到对应主题。
 

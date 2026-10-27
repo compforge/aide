@@ -18,6 +18,7 @@ const plugin: PluginPackage = {
           requirementAccount: await context.connectors.requirements.identity("work"),
           requirementComments: await context.connectors.requirements.comments({ source: "work", category: "story", id: "1" }),
           requirement: await context.connectors.requirements.get({ source: "work", category: "story", id: "1" }),
+          repositories: await context.connectors.forges.listRepositories("forge", { pageSize: 10 }),
           pulls: await context.connectors.forges.listPullRequests("forge", { scope: {kind: "repository", repository: {forge: {name: "forge"}, path: "org/repo"}}, state: "open", pageSize: 10 }),
           pull: await context.connectors.forges.getPullRequest({ repository: { forge: { name: "forge" }, path: "org/repo" }, number: 1 }),
           comments: await context.connectors.forges.listPullRequestComments({ repository: { forge: { name: "forge" }, path: "org/repo" }, number: 1 }),

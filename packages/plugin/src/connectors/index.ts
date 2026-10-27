@@ -1,13 +1,13 @@
-import type { PullRequestKey, PullRequestSnapshot } from "@compforge/harness-common";
-export type { PullRequestKey, PullRequestSnapshot } from "@compforge/harness-common";
+import type { RepositoryKey, RepositorySnapshot, PullRequestKey, PullRequestSnapshot } from "@compforge/harness-common";
+export type { RepositoryKey, RepositorySnapshot, PullRequestKey, PullRequestSnapshot } from "@compforge/harness-common";
 import type { EnvironmentDirectory, EnvironmentSummary } from "./environment.ts";
 import type { Requirement, RequirementIdentity, RequirementListQuery, RequirementSummary, RequirementPage, RequirementAccount, RequirementComment, RequirementCommentQuery } from "./requirements.ts";
-import type { ForgeComment, Page, PullRequestQuery, PullRequestReviewObservation, PullRequestScanQuery, PullRequestScanResult, PullRequestScanCursor, ForgeReadIssue } from "@compforge/repocli";
+import type { ForgeComment, Page, PageQuery, PullRequestQuery, PullRequestReviewObservation, PullRequestScanQuery, PullRequestScanResult, PullRequestScanCursor, ForgeReadIssue } from "@compforge/repocli";
 import type { MessageConnector } from "./messages.ts";
 
 export type * from "./environment.ts";
 export type * from "./requirements.ts";
-export type { ForgeComment, Page, PullRequestQuery, PullRequestReviewObservation, PullRequestScanQuery, PullRequestScanResult, PullRequestScanCursor, ForgeReadIssue } from "@compforge/repocli";
+export type { ForgeComment, Page, PageQuery, PullRequestQuery, PullRequestReviewObservation, PullRequestScanQuery, PullRequestScanResult, PullRequestScanCursor, ForgeReadIssue } from "@compforge/repocli";
 export type * from "./messages.ts";
 
 export interface ConnectorCatalog {
@@ -29,6 +29,7 @@ export interface ConnectorClient {
     comments(identity: RequirementIdentity, query?: RequirementCommentQuery): Promise<RequirementPage<RequirementComment>>;
   };
   readonly forges: {
+    listRepositories(forge: string, query?: PageQuery): Promise<Page<RepositorySnapshot>>;
     scanPullRequests(forge: string, query: PullRequestScanQuery): Promise<PullRequestScanResult>;
     listPullRequests(forge: string, query: PullRequestQuery): Promise<Page<PullRequestKey>>;
     getPullRequest(key: PullRequestKey): Promise<PullRequestSnapshot>;

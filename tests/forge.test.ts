@@ -7,7 +7,7 @@ import {
 import { Connectors } from "../connectors/index.ts";
 import { createConnectorClient, dispatchConnector } from "../src/connector-client.ts";
 import { chiefTools } from "../agents/chief/chief-tools.ts";
-import { createForgeConnectors, loadForgeConfigs } from "../connectors/forge/config.ts";
+import { createForgeConnectors, forgeConnectionRevision, loadForgeConfigs } from "../connectors/forge/config.ts";
 
 describe("Forge config", () => {
   test("separates Forge identity from endpoint host and uses devloop token precedence", () => {
@@ -68,6 +68,12 @@ for (const provider of ["github", "gitlab"] as const) test(`${provider} repocli 
     environment: {}, fetch: async (input, init) => {
       const url = new URL(String(input)); calls.push(url);
       expect(new Headers(init?.headers).get(provider === "github" ? "authorization" : "private-token")).toContain("fixture");
+      if (url.pathname.endsWith("/user/repos") || url.pathname === "/api/v4/projects") {
+        const second = url.searchParams.get("page") === "2";
+        const rows = provider === "github" ? [{ full_name: second ? "org/second" : "org/first" }] : [{ path_with_namespace: second ? "org/second" : "org/first" }];
+        const next = new URL(url); next.searchParams.set("page", "2");
+        return Response.json(rows, { headers: second ? {} : provider === "github" ? { link: `<${next}>; rel="next"` } : { "x-next-page": "2" } });
+      }
       if (url.pathname.endsWith("/graphql")) return new Response("Review unavailable", { status: 403 });
       const github = { number: 7, title: "Shared facts", html_url: "https://github.example.com/org/repo/pull/7", state: "closed", merged: true,
         head: { sha: "head", ref: "feature", repo: { full_name: "contributor/repo" } }, base: { sha: "base", ref: "main" } };
@@ -88,6 +94,12 @@ for (const provider of ["github", "gitlab"] as const) test(`${provider} repocli 
     expect(structuredClone(value)).toEqual(JSON.parse(JSON.stringify(value)));
     return JSON.parse(JSON.stringify(value));
   });
+  const first = await client.forges.listRepositories("work", { pageSize: 5 });
+  expect(first.items).toEqual([{ forge: { name: "work" }, path: "org/first" }]);
+  expect(first.nextCursor).toBeString();
+  const second = await client.forges.listRepositories("work", { pageSize: 5, cursor: first.nextCursor });
+  expect(second.items).toEqual([{ forge: { name: "work" }, path: "org/second" }]);
+  expect(second.nextCursor).toBeUndefined();
   const reference = { repository: { forge: { name: "work" }, path: "org/repo" }, number: 7 };
   const page = await client.forges.scanPullRequests("work", { scope: { kind: "account", author: "me" } });
   expect(page.items).toHaveLength(1); expect(page.items[0]).toMatchObject(reference);
@@ -113,4 +125,26 @@ for (const provider of ["github", "gitlab"] as const) test(`${provider} repocli 
     else expect(value).toEqual([]);
   }
   expect(calls.length).toBeGreaterThan(4);
+});
+
+test("repository rate-limit hints survive the JSON Connector boundary", async () => {
+  const host = new Connectors([], createForgeConnectors({ forges: { work: { type: "gitlab", token: "fixture" } } }, {
+    environment: {}, fetch: async () => new Response("limited", { status: 429, headers: { "retry-after": "120" } }),
+  }));
+  const client = createConnectorClient(async <T>(request: Parameters<typeof dispatchConnector>[1]): Promise<T> =>
+    JSON.parse(JSON.stringify(await dispatchConnector(host, JSON.parse(JSON.stringify(request))))));
+  const page = await client.forges.listRepositories("work");
+  expect(page.items).toEqual([]);
+  expect(page.issues?.[0]).toMatchObject({ stage: "list", kind: "rate_limit", retryAfterMs: 120_000 });
+});
+
+test("observation connection revisions change with endpoint, provider or credential without carrying credentials", () => {
+  const config = { forge: "work", provider: "gitlab" as const, host: "gitlab.test", token: "private-fixture" };
+  const revision = forgeConnectionRevision(config);
+  expect(revision).toMatch(/^[a-f0-9]{64}$/);
+  expect(revision).not.toContain(config.token);
+  expect(forgeConnectionRevision({ ...config })).toBe(revision);
+  for (const changed of [{ ...config, token: "another" }, { ...config, host: "other.test" }, { ...config, provider: "github" as const }]) {
+    expect(forgeConnectionRevision(changed)).not.toBe(revision);
+  }
 });

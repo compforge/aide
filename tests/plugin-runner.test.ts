@@ -79,7 +79,7 @@ describe("Plugin Runner process boundary", () => {
       source: "work", provider: "fixture", async identity() { return { provider: "fixture", scope: "p" }; }, async comments() { return { items: [] }; }, async list() { reads++; return { items: [requirement] }; }, async get() { return requirement; },
     }], [{
       forge: "forge", provider: "github",
-      async listRepositories() { return {items: []}; },
+      async listRepositories() { return {items: [identity.repository]}; },
       async scanPullRequests() { return { items: [], cursor: "fixture" as import("@compforge/repocli").PullRequestScanCursor, pending: false, complete: true, issues: [] }; },
       async listPullRequests() { return {items: [identity]}; }, async getPullRequest() { return pull; },
       async getPullRequestReview() { return {key: identity, reviewThreadState: "none" as const, observedAt: "2026-10-19T00:00:00Z"}; },
@@ -101,7 +101,7 @@ describe("Plugin Runner process boundary", () => {
           environment: { name: "dev", host: { address: "not-contacted.invalid" } },
           catalog: { requirements: [{ source: "work", provider: "fixture" }], forges: [{ forge: "forge", provider: "github" }] },
           requirementAccount: { provider: "fixture", scope: "p" }, requirementComments: { items: [] },
-          requirements: { items: [requirement] }, requirement, pulls: {items: [identity]}, pull, comments: [],
+          requirements: { items: [requirement] }, requirement, repositories: { items: [identity.repository] }, pulls: {items: [identity]}, pull, comments: [],
         });
         await expect(runProbe(manager, id, ENVIRONMENT_TYPE, "missing")).rejects.toThrow("Unknown environment: missing");
       }

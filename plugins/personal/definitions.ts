@@ -1,4 +1,5 @@
-import { ForgeSourceDefinition } from "./source/forge/definition.ts";
+import { RepositorySourceDefinition } from "./source/repository/definition.ts";
+import { PullRequestSourceDefinition } from "./source/pull-request/definition.ts";
 import { WeaveDefinition } from "./weave/definition.ts";
 import { RouteDefinition } from "./route/definition.ts";
 import { InputDefinition } from "./input/definition.ts";
@@ -9,4 +10,4 @@ import { RoutineDefinition } from "./routine/definition.ts";
 import { EnvironmentSourceDefinition } from "./source/environment/definition.ts";
 import { MessageSourceDefinition } from "./source/message/definition.ts";
 import { RequirementSourceDefinition } from "./source/requirement/definition.ts";
-export default [ForgeSourceDefinition, WeaveDefinition, RouteDefinition, InputDefinition, OutputDefinition, TopicDefinition, TaskDefinition, RoutineDefinition, EnvironmentSourceDefinition, MessageSourceDefinition, RequirementSourceDefinition];
+export default [RepositorySourceDefinition, PullRequestSourceDefinition, WeaveDefinition, RouteDefinition, InputDefinition, OutputDefinition, TopicDefinition, TaskDefinition, RoutineDefinition, EnvironmentSourceDefinition, MessageSourceDefinition, RequirementSourceDefinition];

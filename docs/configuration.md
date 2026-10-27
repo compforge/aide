@@ -53,7 +53,7 @@ Connector 配置访问能力，声明它不会启动持续观察。Personal 的�
 - `environments` 显式选择环境与 namespace；`targets: []` 关闭环境观察。
 - `lark: {}` 启用默认观察策略，不按消息类型限制输入；Source 产出的消息均进入处理流程，当前采集能力覆盖单聊和群内 @。字段与权限见 [Lark 消息观察](connector/lark-messages.md)。
 - `requirements` 配置需求观察列表，包含 Connector 引用、负责人范围与间隔；空数组关闭需求观察。
-- `forges` 配置 PR/MR 观察列表，按显式平台用户名跨仓库发现并持续观察，重点接纳 merged 等状态变化；空数组关闭观察。见 [Forge](connector/forge.md)。
+- `repositories` 配置 Forge 仓库清单的低频刷新与失败重试；`pullRequests` 指定作者，通过仓库清单引用或直接账号范围观察 PR/MR 合并。两种 Source 独立保存快照与恢复进度；空数组关闭相应观察。见 [Forge](connector/forge.md)。
 
 `connectors.lark.me` 标记代表本人的外部身份，与 CLI 执行的 `appId/userId` 独立：
 

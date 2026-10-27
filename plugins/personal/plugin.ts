@@ -1,4 +1,5 @@
-import { registerForgeSources } from "./source/forge/observe.ts";
+import { registerRepositorySources } from "./source/repository/observe.ts";
+import { registerPullRequestSources } from "./source/pull-request/observe.ts";
 import { registerWeave } from "./weave/reconcile.ts";
 import type { PluginPackage } from "@compforge/aide-plugin";
 import { registerTopics } from "./topic/reconcile.ts";
@@ -18,7 +19,8 @@ const plugin: PluginPackage = {
     registerRoute(context);
     registerTopics(context);
     registerSources(context);
-    registerForgeSources(context);
+    registerRepositorySources(context);
+    registerPullRequestSources(context);
     registerMessageSources(context);
     registerEnvironmentSources(context);
     registerTasks(context);
