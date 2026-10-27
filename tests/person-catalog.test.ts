@@ -97,7 +97,7 @@ test("Web exposes two navigation pages and edits the same Person with conflict d
     assert.match(html, /Topics/); assert.match(html, /Persons/);
   }
   const me = (await f.aide.persons.findIdentity(LOCAL_ME))!;
-  assert.equal((await (await fetch(base + "/persons")).json() as unknown[]).length, 1);
+  assert.equal((await (await fetch(base + "/persons")).json() as { pinned: unknown[] }).pinned.length, 1);
   const body = { id: me.metadata.name, uid: me.metadata.uid, version: me.metadata.resourceVersion,
     spec: { ...me.spec, name: "张三" }, summary: "偏好简洁中文" };
   const save = () => fetch(base + "/persons/edit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

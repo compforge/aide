@@ -8,7 +8,7 @@ import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { httpChannel } from "../src/api/index.ts";
-import { inputList, inputDetail } from "../src/api/inputs.ts";
+import { inputList, inputFilters, inputDetail } from "../src/api/inputs.ts";
 import { browseInputs, inputFacets } from "../plugins/personal/input/browse.ts";
 import { INPUT_TYPE, type InputStatus, type InputSpec } from "../plugins/personal/input/model.ts";
 import { InputDefinition } from "../plugins/personal/input/definition.ts";
@@ -18,7 +18,7 @@ import { resourceRef } from "../plugins/personal/input/state.ts";
 import { webAddress } from "../src/channel/address.ts";
 import { requirementAddress } from "../connectors/requirements/address.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
-import type { InputDetailView, InputListView } from "../src/api/types.ts";
+import type { InputDetailView, InputListView, InputFiltersView } from "../src/api/types.ts";
 
 const log = pino({ level: "silent" });
 function setup(t: TestContext) {
@@ -52,8 +52,8 @@ test("Input browsing filters before paging, orders ties deterministically and ke
   assert.equal(browseInputs(store, { q: "absent", page: 99 }).page, 1);
   const result = inputList(aide, { q: "absent" });
   assert.equal(result.items.length, 0);
-  assert.ok(result.filters.connectors.some(c => c.value === "requirements:work"));
-  assert.equal(result.filters.sources.length, 2);
+  assert.ok(inputFilters(aide).connectors.some(c => c.value === "requirements:work"));
+  assert.equal(inputFilters(aide).sources.length, 2);
   assert.equal("observation" in inputList(aide, {}).items[0]!, false, "List returns a preview rather than source evidence");
 });
 
@@ -146,6 +146,9 @@ test("Inputs HTTP routes validate filters and paginate all retained inputs, incl
   const first = await (await fetch(url + "/inputs/list?pageSize=10")).json() as InputListView;
   const second = await (await fetch(url + "/inputs/list?pageSize=10&page=2")).json() as InputListView;
   assert.equal(first.total, 27); assert.equal(first.items.length, 10); assert.equal(first.pages, 3);
+  assert.equal("filters" in first, false, "Page polling never recomputes global facets");
+  const filters = await (await fetch(url + "/inputs/filters")).json() as InputFiltersView;
+  assert.ok(filters.connectors.some(c => c.value === "requirements:work"));
   assert.equal(new Set([...first.items, ...second.items].map(i => i.uid)).size, 20);
   const filtered = await (await fetch(url + "/inputs/list?connector=requirements%3Awork&sourceUid=source-a")).json() as InputListView;
   assert.equal(filtered.total, 13);

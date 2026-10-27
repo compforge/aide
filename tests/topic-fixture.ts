@@ -42,6 +42,8 @@ export async function seedInput(store: PersonalTopics, id: string, spec: InputSp
     const key = store.outputStore.key(o.id);
     const stored = store.outputStore.storage.read(key)!;
     store.outputStore.storage.write(key, "personal", { ...stored, object: { ...resource, metadata: { ...resource.metadata, creationTimestamp: o.at } } });
+    // Fixture timestamps must also match the immutable SQL creation-time projection.
+    store.outputStore.storage.db.prepare("UPDATE resources SET created=? WHERE key=?").run(o.at, key);
   }
   await resources.replace(c, { ...c.spec, name: c.spec.name || initialTopicName(input.text) }, { ...c.status,
     ...(status.phase === "running" ? { execution: { id: status.executionId ?? "fixture", startedAt: new Date().toISOString() } } : {}),

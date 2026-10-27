@@ -1,6 +1,5 @@
 import { ChannelSettings, ChannelSettingsChangeSchema, ChannelSettingsError } from "../channel/settings.ts";
 import { createWebAssets } from "./assets.ts";
-import type { TopicItem } from "./types.ts";
 import { visibleOutput } from "../channel/output.ts";
 import { webAddress } from "../channel/address.ts";
 import { SUMMARY_CHARS } from "../../plugins/personal/context.ts";
@@ -12,11 +11,13 @@ import type { Logger } from "pino";
 import type { WebService } from "./service.ts";
 import { validInputResult } from "../host/approval/answer.ts";
 import { IncomingSchema, webTopicLocator } from "../channel/message.ts";
-import { topicList } from "../channel/view.ts";
+import { browseTopics } from "../../plugins/personal/topic/browse.ts";
+import { DEFAULT_TOPIC_ID } from "../../plugins/personal/topic/model.ts";
+import { browsePersons } from "../../plugins/personal/person/browse.ts";
 import { streamTopic } from "./stream.ts";
 import { renderHTML } from "@compforge/agent-observation";
 import { inputObservation, ObservationQuery } from "./observation.ts";
-import { inputList, inputDetail } from "./inputs.ts";
+import { inputList, inputFilters, inputDetail } from "./inputs.ts";
 
 const EventSchema = IncomingSchema.omit({ text: true, channelId: true, source: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
@@ -32,8 +33,13 @@ const DeleteWorkSchema = z.object({ id: z.string().min(1), topicId: z.string().m
 
 const PersonVersionSchema = z.object({ id: z.string().min(1), uid: z.string().min(1), version: z.string().min(1) }).strict();
 const MergePersonSchema = z.object({ source: PersonVersionSchema, target: PersonVersionSchema, summary: z.string().max(SUMMARY_CHARS) }).strict();
-const InputListSchema = z.object({
-  page: z.coerce.number().int().min(1).max(1_000_000).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(20),
+const PageSchema = z.object({
+  page: z.coerce.number().int().min(1).max(1_000_000).optional(), pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+const TopicListSchema = PageSchema.extend({ parentId: z.string().trim().max(200).optional(), q: z.string().trim().max(200).optional(), selectedId: z.string().min(1).max(200).optional() }).strict();
+const PersonListSchema = PageSchema.extend({ q: z.string().trim().max(200).optional(), name: z.string().max(200).optional(),
+  excludeUid: z.string().min(1).max(250).optional(), selectedId: z.string().min(1).max(200).optional() }).strict();
+const InputListSchema = PageSchema.extend({
   q: z.string().trim().max(200).optional(), origin: z.enum(["channel", "source", "chief", "trigger"]).optional(),
   originId: z.string().max(200).optional(), connector: z.string().max(200).optional(), sourceUid: z.string().max(200).optional(),
   state: z.enum(["pending", "completed"]).optional(), errors: z.enum(["true", "false"]).transform(v => v === "true").optional(),
@@ -68,6 +74,12 @@ function json(response: ServerResponse, status: number, value: unknown): void {
 export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSettings) {
   const receive = bindChannelInput(CHANNELS.web, (input) => aide.receive(input));
   const assets = createWebAssets();
+  function listJson(response: ServerResponse, value: { items: unknown[]; total: number; page: number; pageSize: number }, query: string, started: number) {
+    const queryMs = Math.round(performance.now() - started), payload = JSON.stringify(value);
+    const attributes = { query, queryMs, responseBytes: Buffer.byteLength(payload), total: value.total, page: value.page, pageSize: value.pageSize, returned: value.items.length };
+    if (queryMs >= 500) log.warn(attributes, "Slow Web list query"); else log.debug(attributes, "Web list queried");
+    response.writeHead(200, { "content-type": "application/json; charset=utf-8" }); response.end(payload);
+  }
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
@@ -79,9 +91,9 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         json(response, 415, { error: "Content-Type must be application/json" }); return;
       }
       if (request.method === "GET" && url.pathname === "/" && !url.searchParams.get("topic")) {
-        const selected = topicList(aide).find((item) => item.default);
+        const selected = aide.topics.resource(DEFAULT_TOPIC_ID);
         if (selected) {
-          url.searchParams.set("topic", selected.id);
+          url.searchParams.set("topic", selected.spec.id);
           response.writeHead(302, { location: url.pathname + url.search, "cache-control": "no-store" });
           response.end(); return;
         }
@@ -108,19 +120,22 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         streamTopic(response, aide, topicId, log); return;
       }
       if (request.method === "GET" && url.pathname === "/topics") {
-        const counts = new Map<string, { taskCount: number; routineCount: number }>();
-        for (const work of aide.works()) {
-          const count = counts.get(work.topicId) ?? { taskCount: 0, routineCount: 0 };
-          if (work.kind === "task") count.taskCount++; else count.routineCount++;
-          counts.set(work.topicId, count);
-        }
-        json(response, 200, topicList(aide).map((item) => ({ ...item,
-          ...(counts.get(item.id) ?? { taskCount: 0, routineCount: 0 }),
-        })) satisfies TopicItem[]); return;
+        const query = TopicListSchema.parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const started = performance.now();
+        listJson(response, browseTopics(aide.topics, query), "topics", started); return;
       }
       if (request.method === "GET" && url.pathname === "/inputs/list") {
         const query = InputListSchema.parse(Object.fromEntries(url.searchParams));
-        await aide.start(); json(response, 200, inputList(aide, query)); return;
+        await aide.start();
+        const started = performance.now();
+        listJson(response, inputList(aide, query), "inputs", started); return;
+      }
+      if (request.method === "GET" && url.pathname === "/inputs/filters") {
+        await aide.start();
+        const started = performance.now(), result = inputFilters(aide);
+        log.debug({ query: "input-filters", durationMs: Math.round(performance.now() - started) }, "Web filters queried");
+        json(response, 200, result); return;
       }
       if (request.method === "GET" && (url.pathname === "/inputs/job" || url.pathname === "/inputs/session")) {
         const query = ObservationQuery.parse(Object.fromEntries(url.searchParams));
@@ -148,7 +163,11 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         if (id) {
           try { json(response, 200, await aide.persons.read(id, url.searchParams.get("uid") ?? undefined)); }
           catch (error) { if (!String(error).includes("Unknown Person")) throw error; json(response, 404, { error: "人物不存在。" }); }
-        } else json(response, 200, await aide.persons.list());
+        } else {
+          const query = PersonListSchema.parse(Object.fromEntries(url.searchParams));
+          const started = performance.now();
+          listJson(response, browsePersons(aide.topics.resources.storage, aide.persons.marks, query), "persons", started);
+        }
         return;
       }
       if (request.method === "POST" && url.pathname === "/persons/edit") {

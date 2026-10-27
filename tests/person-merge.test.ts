@@ -10,7 +10,8 @@ import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import { LOCAL_ME, PERSON_TYPE, personRef, type PersonResource } from "../plugins/personal/person/model.ts";
 import { Persons } from "../plugins/personal/person/service.ts";
 import { mergePersonSummary } from "../plugins/personal/person/merge.ts";
-import { sameNamedPersons } from "../src/web/persons/merge.ts";
+import { browsePersons } from "../plugins/personal/person/browse.ts";
+import { ResourceStorage } from "../src/host/resource/storage.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { inputPrinter } from "../plugins/personal/input/printer.ts";
@@ -43,7 +44,7 @@ test("Same names only select candidates; merging appends to the chosen Person wi
   const target = await f.create("target", "田斐", "保留人物认识");
   const namesake = await f.create("namesake");
   await f.create("different", "其他人");
-  assert.deepEqual(new Set(sameNamedPersons(await f.persons.list(), target).map(p => p.metadata.uid)), new Set([source.metadata.uid, namesake.metadata.uid]));
+  assert.deepEqual(new Set(browsePersons(ResourceStorage.open(f.home), marks, { name: target.spec.name, excludeUid: target.metadata.uid }).items.map(p => p.uid)), new Set([source.metadata.uid, namesake.metadata.uid]));
   const sender = personRef(source), inputs = new InputStore(f.home), outputs = new OutputStore(f.home);
   const input = inputs.submit("test", "historical", { origin: "channel", originId: "web", text: "历史消息", sender });
   const output = outputs.create("test", "reply", { text: "历史回复", target: webAddress("topic"), receivers: [sender], topicId: "topic",

@@ -47,7 +47,7 @@ test("Web deletes a revision-checked Topic and preserves shared Input and siblin
   const currentRevision = scope.topics.get("a")!.revision;
   assert.equal((await remove("a", currentRevision)).status, 200);
   assert.equal((await remove("a", currentRevision)).status, 404);
-  assert.deepEqual((await (await fetch(base + "/topics")).json() as { id: string }[]).map((c) => c.id), ["b"]);
+  assert.deepEqual((await (await fetch(base + "/topics")).json() as { items: { id: string }[] }).items.map((c) => c.id), ["b"]);
   assert.equal(scope.topics.inputStore.get("shared-input")?.spec.text, "共同观察");
   assert.equal(scope.topics.input("shared-input", "b")?.consumption.phase, "done");
   assert.deepEqual(topicView(aide, "a").blocks, []);

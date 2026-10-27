@@ -2,8 +2,10 @@ import type { InputSpec, InputStatus } from "./model.ts";
 import type { Resource } from "@compforge/aide-plugin";
 import type { InputStore } from "./store.ts";
 
-export interface InputBrowseQuery {
-  page?: number; pageSize?: number; q?: string;
+import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
+
+export interface InputBrowseQuery extends PageQuery {
+  q?: string;
   origin?: InputSpec["origin"]; originId?: string; connector?: string; sourceUid?: string;
   state?: "pending" | "completed"; errors?: boolean;
 }
@@ -31,8 +33,7 @@ const scope = `scope = 'personal' AND kind = 'aide.dev/Input' AND ${field("metad
  * @link docs/personal/input.md
  */
 export function browseInputs(store: InputStore, query: InputBrowseQuery = {}) {
-  const pageSize = query.pageSize ?? 20, requested = query.page ?? 1;
-  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100 || !Number.isSafeInteger(requested) || requested < 1) throw new Error("Invalid Input page");
+  const size = pageSize(query);
   const clauses = [scope], args: (string | number)[] = [];
   for (const [expression, value] of [
     [field("spec.origin"), query.origin], [field("spec.originId"), query.originId],
@@ -47,10 +48,10 @@ export function browseInputs(store: InputStore, query: InputBrowseQuery = {}) {
   const where = clauses.join(" AND ");
   return store.storage.transaction(() => {
     const total = Number(store.storage.db.prepare(`SELECT count(*) AS count FROM resources WHERE ${where}`).get(...args)!.count);
-    const pages = Math.max(1, Math.ceil(total / pageSize)), page = Math.min(requested, pages);
+    const bounds = pageBounds(total, size, query.page);
     const rows = store.storage.db.prepare(`SELECT data, ${connector} AS connector, ${completed} AS completed, ${errors} AS errors
-      FROM resources WHERE ${where} ORDER BY created DESC, key DESC LIMIT ? OFFSET ?`).all(...args, pageSize, (page - 1) * pageSize);
-    return { page, pageSize, pages, total, items: rows.map(row => ({
+      FROM resources WHERE ${where} ORDER BY created DESC, key DESC LIMIT ? OFFSET ?`).all(...args, size, (bounds.page - 1) * size);
+    return { ...bounds, items: rows.map(row => ({
       input: JSON.parse(row.data as string).object as Resource<InputSpec, InputStatus>,
       connector: row.connector as string, state: row.completed ? "completed" as const : "pending" as const, errors: Boolean(row.errors),
     })) };

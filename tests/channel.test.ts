@@ -146,8 +146,10 @@ test("topic navigation lists persisted scopes without creating them and keeps me
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); assert.ok(address && typeof address !== "string");
   const url = `http://127.0.0.1:${address.port}`;
-  const list = async () => await (await fetch(url + "/topics")).json() as
-    { id: string; name: string; preview: string; updatedAt: string; taskCount: number; routineCount: number }[];
+  const list = async () => {
+    const page = await (await fetch(url + "/topics")).json() as import("../src/api/types.ts").TopicListView;
+    return [...page.pinned, ...page.items];
+  };
   assert.deepEqual(await list(), []);
   await fetch(url + "/?topic=unsent");
   assert.equal(aide.topics.list().length, 0);

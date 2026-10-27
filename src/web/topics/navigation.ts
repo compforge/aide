@@ -1,9 +1,8 @@
 import { byId as $, element, newId } from '../shared/dom.ts';
 import { request, errorMessage } from '../shared/http.ts';
 import { copyText } from '../shared/clipboard.ts';
-import { topicPage, topicTree } from './pagination.ts';
-import type { TopicItem } from '../../api/types.ts';
-type NavigationItem = TopicItem | { id: string; name: string; preview: string; default?: false; trigger?: undefined; taskCount?: 0; routineCount?: 0 };
+import type { TopicItem, TopicListView } from '../../api/types.ts';
+
 
 /**
  * @spec Topic selection keeps the current document and sidebar; Back/Forward restores the selected scope.
@@ -24,9 +23,17 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
     return button;
   }
 
-  const expanded = new Set<string>();
   let lastTopics = '', topicUpdating = false;
-  let topicItems: TopicItem[] = [];
+  let topicItems: TopicItem[] = [], result: TopicListView | undefined;
+  let active: AbortController | undefined, generation = 0;
+  const filters = new URLSearchParams();
+  function readFilters(url: URL) {
+    filters.delete('q'); filters.delete('parentId');
+    for (const key of ['q', 'parentId']) if (url.searchParams.get(key)) filters.set(key, url.searchParams.get(key)!);
+    $<HTMLInputElement>('topic-search').value = filters.get('q') ?? '';
+    $<HTMLInputElement>('topic-parent').value = filters.get('parentId') ?? '';
+  }
+  readFilters(new URL(location.href));
   const initialPage = Number(new URL(location.href).searchParams.get('page'));
   let requestedPage = Number.isSafeInteger(initialPage) && initialPage > 0 ? initialPage : null;
   let currentPage = 1;
@@ -38,7 +45,9 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
     const page = Number(url.searchParams.get('page'));
     requestedPage = Number.isSafeInteger(page) && page > 0 ? page : null;
     history[replace ? 'replaceState' : 'pushState'](null, '', url.href);
-    renderTopics(topicItems);
+    readFilters(url);
+    renderSelection();
+    void refreshTopics(true);
     if (changed) onSelect(topicId);
   }
   window.addEventListener('popstate', () => {
@@ -49,7 +58,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
     $(id).addEventListener('click', () => {
       topicMenu.hidePopover();
       requestedPage = currentPage + offset;
-      renderTopics(topicItems);
+      void refreshTopics(true);
       $('topic-list').parentElement!.scrollTop = 0;
     });
   }
@@ -85,14 +94,15 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
       const payload = action === 'delete' ? { topicId: item.id, revision: item.revision, uid: item.uid }
         : { topicId: item.id, enabled: !item.trigger.enabled };
       await request('/topics/' + action, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
-      const remaining = await request<TopicItem[]>('/topics');
+      await refreshTopics(true);
+      const remaining = topicItems;
       if (action === 'delete' && item.id === topicId) {
         const url = new URL(location.href);
         const next = remaining.find((candidate) => candidate.default) || remaining[0];
         if (next) url.searchParams.set('topic', next.id); else url.searchParams.delete('topic');
-        topicItems = remaining; navigate(url, true); return;
+        navigate(url, true); return;
       }
-      lastTopics = ''; renderTopics(remaining);
+      lastTopics = ''; renderTopics();
       $('topic-notice').textContent = action === 'delete' ? '已删除「' + item.name + '」。' : '';
     } catch (error) {
       $('topic-notice').textContent = '主题操作失败：' + errorMessage(error);
@@ -138,43 +148,36 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
     icon.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + drawing + '</svg>';
     return icon;
   }
-  function renderTopics(topics: TopicItem[]) {
-    topicItems = topics;
-    $('topic-count').textContent = String(topics.length);
-    const ancestry = new Map(topics.map(t => [t.uid, t]));
-    let parent = topics.find(t => t.id === topicId)?.parentUid;
-    const visited = new Set<string>();
-    while (parent && !visited.has(parent)) { visited.add(parent); expanded.add(parent); parent = ancestry.get(parent)?.parentUid; }
-    const tree = topicTree(topics, expanded);
-    const depths = new Map(tree.map(t => [t.item.id, t.depth]));
-    const items: NavigationItem[] = tree.map(t => t.item);
-    if (topicId && !items.some((item) => item.id === topicId)) items.push({ id: topicId, name: '新对话', preview: '' });
-    const current = items.find((item) => item.id === topicId);
-    $('topic-heading').textContent = current?.name || '选择一个主题';
+  function renderSelection() {
+    const current = topicItems.find(item => item.id === topicId) ?? result?.path.find(item => item.id === topicId);
+    $('topic-heading').textContent = current?.name || (topicId ? '新对话' : '选择一个主题');
     const copy = $('topic-copy');
     if (copy.dataset.topicId !== (topicId ?? '')) {
       copy.dataset.topicId = topicId ?? '';
       copy.replaceChildren(...(topicId ? [topicCopyButton(topicId)] : []));
     }
     for (const link of $('topic-list').querySelectorAll<HTMLAnchorElement>('.list-link')) {
-      if (link.dataset.topicId === topicId) link.setAttribute('aria-current', 'page');
-      else link.removeAttribute('aria-current');
+      if (link.dataset.topicId === topicId) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current');
     }
-    const paged = topicPage(items, requestedPage, topicId);
-    currentPage = paged.page;
-    requestedPage = paged.requestedPage;
+  }
+  function renderTopics() {
+    renderSelection();
+    if (!result) return;
+    $('topic-count').textContent = String(result.total + result.pinned.length);
+    currentPage = result.page;
+    if (requestedPage !== null) requestedPage = currentPage;
     const pageUrl = new URL(location.href);
     if (requestedPage === null) pageUrl.searchParams.delete('page');
     else pageUrl.searchParams.set('page', String(requestedPage));
     history.replaceState(null, '', pageUrl.href);
-    $('topic-pagination').hidden = paged.pages === 1;
-    $('topic-page').textContent = currentPage + ' / ' + paged.pages;
+    $('topic-pagination').hidden = result.pages === 1;
+    $('topic-page').textContent = currentPage + ' / ' + result.pages;
     $<HTMLButtonElement>('topic-previous').disabled = currentPage === 1;
-    $<HTMLButtonElement>('topic-next').disabled = currentPage === paged.pages;
-    const signature = JSON.stringify({ page: paged.page, items: paged.items });
+    $<HTMLButtonElement>('topic-next').disabled = currentPage === result.pages;
+    const signature = JSON.stringify({ page: result.page, items: topicItems, topicId, filters: filters.toString() });
     if (signature === lastTopics) return;
     lastTopics = signature;
-    const links = paged.items.map((item) => {
+    const links = topicItems.map((item) => {
       const link = element('a', undefined, 'list-link');
       const url = new URL(location.href); url.searchParams.set('topic', item.id);
       url.searchParams.set('page', String(currentPage));
@@ -198,29 +201,42 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
       const entry = element('div', undefined, 'topic-entry');
       const actions = element('div', undefined, 'topic-actions');
       actions.append(topicCopyButton(item.id, true));
-      if ('revision' in item) actions.append(topicMenuButton(item));
-      const children = 'uid' in item && topics.some(t => t.parentUid === item.uid);
-      if (children && 'uid' in item && item.uid) {
-        const toggle = element('button', expanded.has(item.uid) ? '▾' : '▸', 'topic-expand');
-        toggle.type = 'button'; toggle.setAttribute('aria-label', '展开或收起子主题');
-        toggle.setAttribute('aria-expanded', String(expanded.has(item.uid)));
-        toggle.addEventListener('click', () => { expanded.has(item.uid!) ? expanded.delete(item.uid!) : expanded.add(item.uid!); lastTopics = ''; renderTopics(topicItems); });
-        entry.append(toggle);
-      }
-      row.style.paddingInlineStart = `${(depths.get(item.id) ?? 0) * 14}px`;
+      actions.append(topicMenuButton(item));
       entry.append(link, actions); row.append(entry);
       return row;
     });
     $('topic-list').replaceChildren(...links);
   }
-  async function refreshTopics() {
+  async function refreshTopics(force = false) {
+    if (signal.aborted || (!force && (document.hidden || active || topicUpdating || topicMenu.matches(':popover-open')))) return;
+    active?.abort();
+    const controller = new AbortController(), token = ++generation;
+    active = controller;
+    const query = new URLSearchParams(filters); query.set('pageSize', '10');
+    if (requestedPage !== null) query.set('page', String(requestedPage));
+    if (topicId) query.set('selectedId', topicId);
     try {
-      if (topicUpdating || topicMenu.matches(':popover-open')) return;
-      renderTopics(await request<TopicItem[]>('/topics'));
+      const next = await request<TopicListView>('/topics?' + query, { signal: AbortSignal.any([signal, controller.signal]) });
+      if (token !== generation || signal.aborted) return;
+      result = next; topicItems = [...next.pinned, ...next.items]; renderTopics();
       if ($('topic-notice').textContent === '主题列表暂时无法更新，正在重试。') $('topic-notice').textContent = '';
-    } catch { $('topic-notice').textContent = '主题列表暂时无法更新，正在重试。'; }
+    } catch { if (token === generation && !signal.aborted) $('topic-notice').textContent = '主题列表暂时无法更新，正在重试。'; }
+    finally { if (active === controller) active = undefined; }
   }
+  $('topic-filters').addEventListener('submit', event => {
+    event.preventDefault();
+    const url = new URL(location.href);
+    for (const [key, id] of [['q', 'topic-search'], ['parentId', 'topic-parent']] as const) {
+      const value = $<HTMLInputElement>(id).value.trim();
+      if (value) url.searchParams.set(key, value); else url.searchParams.delete(key);
+    }
+    url.searchParams.set('page', '1'); navigate(url);
+  }, { signal });
+  $('topic-reset').addEventListener('click', () => {
+    const url = new URL(location.href); url.searchParams.delete('q'); url.searchParams.delete('parentId');
+    url.searchParams.set('page', '1'); navigate(url);
+  }, { signal });
   $('new-topic').addEventListener('click', () => { navigate(new URL('/?topic=' + encodeURIComponent('web:' + newId()), location.href)); });
-  signal.addEventListener('abort', () => topicMenu.remove(), { once: true });
+  signal.addEventListener('abort', () => { active?.abort(); topicMenu.remove(); }, { once: true });
   return { refresh: refreshTopics };
 }

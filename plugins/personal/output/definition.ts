@@ -5,6 +5,7 @@ import { type ResourceDefinition } from "@compforge/aide-plugin";
 import { OUTPUT_TYPE, type OutputSpec, type OutputStatus } from "./model.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { AddressSchema } from "../../../src/address.ts";
+import { isChannelAddress } from "../../../src/channel/address.ts";
 import { outputPrinter } from "./printer.ts";
 const ref = z.object({ apiVersion: z.string().min(1), kind: z.string().min(1), namespace: z.string().transform((value) => value === "v1" ? value : parseResourceNamespace(value)), name: z.string().min(1),
   uid: z.string().optional() }).strict();
@@ -21,6 +22,7 @@ export const OutputStatusSchema = z.object({ phase: z.enum(["pending", "sending"
 
 
 export const OutputDefinition: ResourceDefinition<OutputSpec, OutputStatus> = {
+  indexes: { topic: r => [r.spec.topic.uid], webEndpoint: r => isChannelAddress(r.spec.target) && r.spec.target.channelId === "web" ? [r.spec.target.endpoint] : [] },
   type: OUTPUT_TYPE, schema: { spec: OutputSpecSchema, status: OutputStatusSchema }, printer: outputPrinter,
   validator: { update(previous, current) { if (!isDeepStrictEqual(previous.spec, current.spec)) throw new Error("Output content is immutable"); } },
   retention: { releasedAt: (r) => (r.status as OutputStatus).phase === "delivered" ? (r.status as OutputStatus).deliveredAt
