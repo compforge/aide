@@ -24,16 +24,19 @@ export async function collectTopic(context: PluginContext, topic: TopicResource)
   if (topic.spec.default || topic.status.execution) return delay;
   const remaining = Date.parse(topic.status.lastInputAt ?? topic.metadata.creationTimestamp) + topicPolicy(context.instance.config.topic).idleMs - Date.now();
   if (remaining > 0) return { requeueAfterMs: Math.min(remaining, delay.requeueAfterMs) };
-  const all = await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-  if (all.some(t => t.spec.parentRef?.uid === topic.metadata.uid)) return delay;
+  const children = await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE,
+    { matchIndex: { name: "parent", value: topic.metadata.uid } });
+  if (children.length) return delay;
   if (topic.spec.parentRef) {
-    const parent = all.find(t => t.metadata.uid === topic.spec.parentRef!.uid);
+    const parent = await context.resources.get<TopicSpec, TopicStatus>(topic.spec.parentRef);
     if (!parent || parent.status.absorbed?.[topic.metadata.uid] !== understandingVersion(topic)) return delay;
   }
-  const inputs = await context.resources.list<InputSpec, InputStatus>(INPUT_TYPE);
+  const inputs = (await Promise.all(["topic", "assess"].map(name => context.resources.list<InputSpec, InputStatus>(INPUT_TYPE,
+    { matchIndex: { name, value: topic.metadata.uid } })))).flat();
   if (inputs.some(i => (i.status.route?.result?.topics.some(t => t.uid === topic.metadata.uid) || i.status.assess?.[topic.metadata.uid])
     && Object.values(i.status.assess ?? {}).some(a => !a.completedAt))) return delay;
-  const work = (await Promise.all(WORK_TYPES.map(t => context.resources.list<WorkResource["spec"], WorkResource["status"]>(t)))).flat();
+  const work = (await Promise.all(WORK_TYPES.map(t => context.resources.list<WorkResource["spec"], WorkResource["status"]>(t,
+    { matchIndex: { name: "topicId", value: topic.spec.id } })))).flat();
   if (work.some(w => w.spec.topicId === topic.spec.id)) return delay;
   await context.resources.delete(TOPIC_TYPE, topic.metadata.name, "v1", { uid: topic.metadata.uid, resourceVersion: topic.metadata.resourceVersion });
   context.logger.info("Quiet Topic deletion requested", { attributes: { topicUid: topic.metadata.uid, topicKey: topic.spec.topicKey ?? null, lastInputAt: topic.status.lastInputAt ?? null } });

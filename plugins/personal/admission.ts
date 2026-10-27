@@ -19,7 +19,7 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
       if (!spec.initialInputId) throw new Error("Task requires an initial Input");
       const input = inputs.get(spec.initialInputId);
       const topic = inputs.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, digest(spec.topicId));
-      const members = new Set(topicSubtree(inputs.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE), topic).map(t => t.metadata.uid));
+      const members = new Set(topicSubtree(topic, parent => inputs.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { namespace: parent.metadata.namespace, matchIndex: { name: "parent", value: parent.metadata.uid } })).map(t => t.metadata.uid));
       const attached = input && Object.entries(input.status.assess ?? {}).some(([uid]) => members.has(uid));
       if (topic.metadata.deletionTimestamp || !input || input.metadata.deletionTimestamp || !attached)
         throw new Error("Initial Input is not assigned to the Task Topic");

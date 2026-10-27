@@ -24,8 +24,9 @@ export function eligible(input: Input, owner: Readonly<LoopResource>, topicUids 
   return !!receipt && !receipt.executionId && (!["Task", "Routine"].includes(owner.kind) || !!input.status.handle?.[owner.metadata.uid]?.appliedAt);
 }
 /** @spec Due retries compete by original arrival, independently of new input selection; a failed parent cannot starve. */
-export async function nextInputs(resources: ResourceClient, owner: Readonly<LoopResource>, limit: number) {
-  const topics = await topicScope(resources, resourceRef(owner));
+export async function nextInputs(resources: ResourceClient, owner: Readonly<LoopResource>, limit: number,
+  scope?: readonly import("./topic/model.ts").TopicResource[]) {
+  const topics = scope ?? await topicScope(resources, resourceRef(owner));
   const topicUids = new Set(topics.map(t => t.metadata.uid));
   const inputs = await pendingInputs(resources, resourceRef(owner), topics);
   return [...inputs].filter(i => eligible(i, owner, topicUids)).sort((a, b) =>

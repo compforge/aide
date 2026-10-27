@@ -1,8 +1,8 @@
-import { pendingAbsorption, topicPath, summaryVersion } from "./tree.ts";
+import { pendingAbsorption, readTopicRoot, readTopicSubtree, summaryVersion } from "./tree.ts";
 import { collectTopic, releaseTopicAgent } from "./lifecycle.ts";
-import { assignmentWatch } from "../input/state.ts";
+import { assignmentWatch, resourceRef } from "../input/state.ts";
 import type { PluginContext, ReconcileContext, Watch } from "@compforge/aide-plugin";
-import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
+import { TOPIC_TYPE, type TopicResource } from "./model.ts";
 import { inputPreview } from "../input/prompt.ts";
 import { canActivate, finalizeExecution, nextInputs, runInput, submitPending } from "../loop.ts";
 import { topicPolicy } from "./config.ts";
@@ -26,10 +26,9 @@ function watch(context: PluginContext): Watch {
     update: async ({ oldObject, newObject }) => {
       const a = oldObject as TopicResource, b = newObject as TopicResource;
       if (summaryVersion(a) !== summaryVersion(b) || JSON.stringify(a.status.absorbed) !== JSON.stringify(b.status.absorbed) || a.spec.parentRef?.uid !== b.spec.parentRef?.uid || a.status.weaveRevision !== b.status.weaveRevision) {
-        const all = await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
         if (!b.metadata.deletionTimestamp) {
-          const root = topicPath(all, b).at(-1)!;
-          return [{ name: root.metadata.name, namespace: root.metadata.namespace }];
+          const root = await readTopicRoot(context.resources, resourceRef(b));
+          return root ? [{ name: root.metadata.name, namespace: root.metadata.namespace }] : [];
         }
       }
       return a.status.execution?.id !== b.status.execution?.id || a.status.lastInputAt !== b.status.lastInputAt
@@ -80,14 +79,15 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   const checkDue = trigger.enabled && !!c.status.nextTriggerAt && Date.parse(c.status.nextTriggerAt) <= now;
   const idleSince = c.status.idleSince ?? c.metadata.creationTimestamp;
   const due = checkDue && now - Date.parse(idleSince) >= triggerConfig.idleSeconds * 1000;
-  const pending = await nextInputs(context.resources, c, Number.MAX_SAFE_INTEGER);
+  const topics = await readTopicSubtree(context.resources, resourceRef(c));
+  const pending = await nextInputs(context.resources, c, Number.MAX_SAFE_INTEGER, topics);
   const notified = new Set(c.status.notifiedInputs ?? []);
   const fresh = pending.filter(i => !notified.has(i.metadata.uid));
   const weave = (c.status.weaveRevision ?? 0) > (c.status.notifiedWeaveRevision ?? 0);
   let inputs = fresh.slice(0, 8);
   const retained = (c.status.notifiedInputs ?? []).filter(uid => pending.some(i => i.metadata.uid === uid));
   if (retained.length !== notified.size) c = await updateTopic(context.resources, c, () => ({ notifiedInputs: retained }));
-  let absorption = pendingAbsorption(await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE), c);
+  let absorption = pendingAbsorption(topics, c);
   const absorbDelay = Math.max(0, Date.parse(c.status.nextAbsorbAt ?? "1970-01-01") - Date.now());
   const absorb = absorption.length > 0 && absorbDelay === 0;
   if (trigger.enabled && (!c.status.nextTriggerAt || checkDue)) {
@@ -107,7 +107,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   if (!activatingInput && !absorb && !weave) return { requeueAfterMs: Math.max(1, Math.min(60_000,
     trigger.enabled && c.status.nextTriggerAt ? Date.parse(c.status.nextTriggerAt) - Date.now() : Infinity,
     absorption.length ? absorbDelay : Infinity)) };
-  if (activatingInput || due || weave) absorption = pendingAbsorption(await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE), c, true);
+  if (activatingInput || due || weave) absorption = pendingAbsorption(topics, c, true);
   // @why Persist cooldown before inference so crashes and unsuccessful synthesis cannot hot-loop.
   if (absorption.length) c = await updateTopic(context.resources, c, current => ({
     nextAbsorbAt: new Date(Date.now() + Math.min(900_000, 60_000 * 2 ** (current.status.absorbAttempts ?? 0))).toISOString(),
@@ -119,8 +119,8 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   const completed = await runInput(context, execution.withContext({ topicId: c.spec.id, ...(input ? { inputId: input.metadata.name, inputIds: inputs.map(i => i.metadata.name) } : {}) }), c,
     "chief", prompt, input?.metadata.name, inputs.map(i => i.metadata.name));
   if (absorption.length) {
-    const all = await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-    const root = all.find(t => t.metadata.uid === c.metadata.uid);
+    const all = await readTopicSubtree(context.resources, resourceRef(c));
+    const root = all[0];
     if (root && !root.metadata.deletionTimestamp && !root.spec.parentRef) {
       const remaining = pendingAbsorption(all, root, true);
       const progressed = absorption.some(before => !remaining.some(after => before.uid === after.uid && before.version === after.version));

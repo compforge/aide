@@ -30,7 +30,8 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
     if (!accessible.length) throw new Error("Input does not belong to this Topic subtree");
     const selected = accessible.filter(([, a]) => !a.completedAt);
     if (!selected.length) return { assessed: args.inputId };
-    const work = (await Promise.all(WORK_TYPES.map(t => resources.list<WorkSpec, WorkStatus>(t)))).flat();
+    const work = args.workRequests.length ? (await Promise.all(topics.flatMap(topic => WORK_TYPES.map(type =>
+      resources.list<WorkSpec, WorkStatus>(type, { matchIndex: { name: "topicId", value: topic.spec.id } }))))).flat() : [];
     const handle = { ...input.status.handle };
     const guards: ResourceCommit[] = [];
     const at = new Date().toISOString();

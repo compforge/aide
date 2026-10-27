@@ -1,5 +1,3 @@
-import { topicSubtree } from "../../plugins/personal/topic/tree.ts";
-import { TOPIC_TYPE, type TopicResource } from "../../plugins/personal/topic/model.ts";
 import { channelOutputs, visibleOutput } from "./output.ts";
 import { inputPrinter } from "../../plugins/personal/input/printer.ts";
 import { iconFor } from "@compforge/aide-plugin";
@@ -47,7 +45,7 @@ export type TopicView = UIModel<TopicBlock, TopicMeta>;
 export function topicView(aide: ChannelService, topicId: string): TopicView {
   if (!aide.topics.get(topicId)) return { version: PROTOCOL_VERSION, biz: "aide.topic", blocks: [], meta: { topic_id: topicId, context: null, activity: null } };
   const resource = aide.topics.resource(topicId)!;
-  const members = topicSubtree(aide.topics.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE), resource);
+  const members = aide.topics.scope(resource.metadata.uid);
   const memberIds = new Set(members.map(t => t.spec.id)), memberUids = new Set(members.map(t => t.metadata.uid));
   const runs = aide.topics.runs(topicId);
   const facts = runs.flatMap(run => run.input ? [run.input] : []);

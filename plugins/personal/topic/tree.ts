@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { ResourceClient } from "@compforge/aide-plugin";
+import type { ResourceClient, ResourceReader, ResourceRef } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, initialTopicName, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 import { digest } from "../chief-model.ts";
 
@@ -19,8 +19,56 @@ export function topicPath(all: readonly TopicResource[], leaf: TopicResource): T
   }
   return path;
 }
-export function topicSubtree(all: readonly TopicResource[], root: TopicResource): TopicResource[] {
-  return all.filter(t => !t.metadata.deletionTimestamp && topicPath(all, t).some(p => p.metadata.uid === root.metadata.uid));
+/**
+ * @spec Read only descendants reached through the parent index; unrelated Topic trees are never loaded.
+ * @why 拓扑排序：按父子依赖逐层广度优先遍历，父节点先于子节点，无需加载全局 Topic。
+ * @case tests/topic-tree.test.ts
+ * @link docs/personal/topic.md#接纳与连续执行
+ */
+export function topicSubtree(root: TopicResource, children: (parent: TopicResource) => readonly TopicResource[]): TopicResource[] {
+  if (root.metadata.deletionTimestamp) return [];
+  const topics = [root], seen = new Set([root.metadata.uid]);
+  for (let index = 0; index < topics.length; index++) {
+    for (const child of children(topics[index]!)) {
+      if (child.metadata.deletionTimestamp || seen.has(child.metadata.uid)) continue;
+      seen.add(child.metadata.uid);
+      topics.push(child);
+    }
+  }
+  return topics;
+}
+
+/** Async Resource API traversal for Runner-side controllers; same parent-first topology as topicSubtree. */
+export async function readTopicSubtree(resources: ResourceReader, ref: ResourceRef): Promise<TopicResource[]> {
+  const root = await resources.get<TopicSpec, TopicStatus>(ref);
+  if (!root || root.metadata.deletionTimestamp) return [];
+  const topics = [root], seen = new Set([root.metadata.uid]);
+  for (let index = 0; index < topics.length; index++) {
+    const parent = topics[index]!;
+    const children = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE, {
+      namespace: parent.metadata.namespace, matchIndex: { name: "parent", value: parent.metadata.uid },
+    });
+    for (const child of children) {
+      if (child.metadata.deletionTimestamp || seen.has(child.metadata.uid)) continue;
+      seen.add(child.metadata.uid);
+      topics.push(child);
+    }
+  }
+  return topics;
+}
+
+/** Resolve wakeups by UID-pinned parent references, without discovering unrelated roots. */
+export async function readTopicRoot(resources: ResourceReader, ref: ResourceRef): Promise<TopicResource | undefined> {
+  let topic = await resources.get<TopicSpec, TopicStatus>(ref);
+  if (topic?.metadata.deletionTimestamp) return;
+  const seen = new Set<string>();
+  while (topic) {
+    if (topic.metadata.deletionTimestamp || seen.has(topic.metadata.uid)) throw new Error("Topic path unavailable");
+    seen.add(topic.metadata.uid);
+    if (!topic.spec.parentRef) return topic;
+    topic = await resources.get<TopicSpec, TopicStatus>(topic.spec.parentRef);
+    if (!topic) throw new Error("Topic parent no longer exists");
+  }
 }
 /** Summary changes drive maintenance; full context versions still fence Weave and deletion. */
 export const summaryVersion = (topic: TopicResource): string =>
@@ -53,11 +101,21 @@ export async function ensureSourceTopic(resources: ResourceClient, key: string, 
  * @spec Full context review remains necessary before a child can be reclaimed.
  * @link docs/personal/topic.md#研判与上下文
  */
-export function pendingAbsorption(all: readonly TopicResource[], root: TopicResource, includeNotes = false) {
-  return topicSubtree(all, root).filter(t => t.spec.parentRef)
-    .filter(t => includeNotes
-      ? all.find(p => p.metadata.uid === t.spec.parentRef!.uid)?.status.absorbed?.[t.metadata.uid] !== understandingVersion(t)
-      : all.find(p => p.metadata.uid === t.spec.parentRef!.uid)?.status.absorbedSummaries?.[t.metadata.uid] !== summaryVersion(t))
-    .sort((a, b) => topicPath(all, b).length - topicPath(all, a).length)
-    .map(t => ({ uid: t.metadata.uid, parentUid: t.spec.parentRef!.uid, version: understandingVersion(t) }));
+export function pendingAbsorption(topics: readonly TopicResource[], root: TopicResource, includeNotes = false) {
+  const children = new Map<string, TopicResource[]>();
+  for (const topic of topics) if (topic.spec.parentRef) {
+    const siblings = children.get(topic.spec.parentRef.uid) ?? [];
+    siblings.push(topic);
+    children.set(topic.spec.parentRef.uid, siblings);
+  }
+  const subtree = topicSubtree(root, parent => children.get(parent.metadata.uid) ?? []);
+  const byUid = new Map(subtree.map(topic => [topic.metadata.uid, topic]));
+  const depths = new Map([[root.metadata.uid, 0]]);
+  for (const topic of subtree.slice(1)) depths.set(topic.metadata.uid, depths.get(topic.spec.parentRef!.uid)! + 1);
+  return subtree.slice(1)
+    .filter(topic => includeNotes
+      ? byUid.get(topic.spec.parentRef!.uid)?.status.absorbed?.[topic.metadata.uid] !== understandingVersion(topic)
+      : byUid.get(topic.spec.parentRef!.uid)?.status.absorbedSummaries?.[topic.metadata.uid] !== summaryVersion(topic))
+    .sort((a, b) => depths.get(b.metadata.uid)! - depths.get(a.metadata.uid)!)
+    .map(topic => ({ uid: topic.metadata.uid, parentUid: topic.spec.parentRef!.uid, version: understandingVersion(topic) }));
 }

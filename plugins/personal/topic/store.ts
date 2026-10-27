@@ -49,10 +49,10 @@ export class TopicStore {
     return this.client.create(TOPIC_TYPE, { name: topicKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), trigger: topicTrigger() }, status: { receipts: [], summary: "", recent: [] } });
   }
   inputs(topicId?: string): TopicInput[] {
-    const all = this.listResources();
     const selected = topicId ? this.resource(topicId) : undefined;
     if (topicId && !selected) return [];
-    const members = new Set((selected ? topicSubtree(all, selected) : all).map(t => t.metadata.uid));
+    const all = selected ? this.scope(selected.metadata.uid) : this.listResources();
+    const members = new Set(all.map(t => t.metadata.uid));
     const outputExecutions = new Map(this.outputStore.list().flatMap(o => o.spec.executionId
       ? Object.values(o.spec.inputUids ?? {}).map(uid => [uid, o.spec.executionId!] as const) : []));
     return this.inputStore.list().flatMap(input => {
@@ -93,9 +93,8 @@ export class TopicStore {
     return trigger;
   }
   outputs(topicId?: string): OutputView[] {
-    const all = this.listResources();
     const selected = topicId ? this.resource(topicId) : undefined;
-    const resources = topicId ? selected ? topicSubtree(all, selected) : [] : all;
+    const resources = topicId ? selected ? this.scope(selected.metadata.uid) : [] : this.listResources();
     return resources.flatMap((c) => this.outputStore.list({ topicUid: c.metadata.uid }).map(outputView))
       .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
   }
@@ -131,7 +130,7 @@ export class TopicStore {
     const inputIds = [...new Set([...(options.inputIds ?? (inputId ? [inputId] : [])), ...(options.respondToInputId ? [options.respondToInputId] : [])])];
     const attached = (id: string) => {
       const input = this.inputStore.get(id);
-      const members = new Set(topicSubtree(this.listResources(), this.resource(topicId)!).map(t => t.metadata.uid));
+      const members = new Set(this.scope(initial.metadata.uid).map(t => t.metadata.uid));
       const assigned = owner ? input?.status.handle?.[owner.metadata.uid] : input &&
         (assessments(input, resourceRef(initial), members).length);
       if (!input || !assigned) throw new Error(`say Input is not attached to this Topic: ${id}`);
@@ -217,8 +216,12 @@ export class TopicStore {
     }
   }
   scope(uid: string) {
-    const all = this.listResources(), root = all.find(t => t.metadata.uid === uid);
-    return root ? topicSubtree(all, root) : [];
+    const storage = this.resources.storage;
+    const row = storage.db.prepare("SELECT key FROM resources WHERE uid = ? AND scope = ? AND kind = 'aide.dev/Topic'")
+      .get(uid, this.resources.scope);
+    const root = row ? storage.read(row.key as string)?.object as TopicResource | undefined : undefined;
+    return root && root.metadata.namespace === "v1" ? topicSubtree(root, parent => this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE,
+      { namespace: parent.metadata.namespace, matchIndex: { name: "parent", value: parent.metadata.uid } })) : [];
   }
   pending(uid: string) {
     const inputs = this.scope(uid).flatMap(t => this.inputStore.query("assessPending", t.metadata.uid));

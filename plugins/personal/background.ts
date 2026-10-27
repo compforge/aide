@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import type { Store } from "./store.ts";
 import type { TopicResource } from "./topic/model.ts";
 import { TOPIC_TYPE } from "./topic/model.ts";
-import { toWork, WORK_TYPES, type WorkResource } from "./resources.ts";
-import type { WorkStatus } from "./model.ts";
+import { toWork, type WorkResource } from "./resources.ts";
 import type { ResourceContext } from "./context.ts";
 
 const preview = (text: string | undefined, limit: number) => (text ?? "").length > limit ? text!.slice(0, limit) + "… [truncated]" : text ?? "";
@@ -48,9 +47,7 @@ export function routeParts(store: Store) {
 
 export function relatedWork(store: Store, topicId: string) {
   const topic = store.topics.resource(topicId);
-  const ids = new Set(topic ? store.topics.scope(topic.metadata.uid).map(t => t.spec.id) : []);
-  return WORK_TYPES.flatMap(type => store.resources.list<WorkResource["spec"], WorkStatus>(type))
-    .filter(w => !w.metadata.deletionTimestamp && ids.has(w.spec.topicId))
+  return store.workResources(topic ? store.topics.scope(topic.metadata.uid).map(t => t.spec.id) : [])
     .sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid)).map(w => {
       const work = toWork(w);
       return { id: work.id, uid: work.uid, topicId: work.topicId, kind: work.kind, title: preview(work.title, 200), status: work.status,
@@ -60,8 +57,8 @@ export function relatedWork(store: Store, topicId: string) {
 }
 
 export function topicParts(store: Store, c: TopicResource | undefined, topicId: string) {
-  return { topic: topicPart(c), children: part(contextPage(c ? store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE)
-    .filter(t => !t.metadata.deletionTimestamp && t.spec.parentRef?.uid === c.metadata.uid)
+  return { topic: topicPart(c), children: part(contextPage(c ? store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
+    { matchIndex: { name: "parent", value: c.metadata.uid } }).filter(t => !t.metadata.deletionTimestamp)
     .map(t => ({ uid: t.metadata.uid, name: t.spec.name, summary: preview(t.status.summary, 1000) })) : []), "list_topics and read_topic"), work: part(contextPage(relatedWork(store, topicId)), "list_work for remaining summaries; read tools for this resource") };
 }
 
