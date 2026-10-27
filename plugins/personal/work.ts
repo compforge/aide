@@ -24,7 +24,7 @@ export function newWork(topicId: string, definition: WorkDefinition, now = new D
 }
 
 /**
- * @spec Tools operate on the caller-bound topic, never a model-supplied scope. Writes notify all matching resource watches.
+ * @spec Work belongs permanently to its creating Chief Topic; subtree access never moves ownership. Writes notify all matching resource watches.
  * @link docs/personal/README.md
  */
 export class WorkService {
@@ -32,7 +32,11 @@ export class WorkService {
     if (!topicId.trim()) throw new Error("Work tools require a topicId");
   }
 
-  list(): Work[] { return this.store.read().works.filter((work) => work.topicId === this.topicId); }
+  list(): Work[] {
+    const topic = this.store.topics.resource(this.topicId);
+    const ids = new Set(topic ? this.store.topics.scope(topic.metadata.uid).map(t => t.spec.id) : []);
+    return this.store.read().works.filter(work => ids.has(work.topicId));
+  }
 
   read(id: string): Work {
     const work = this.list().find((item) => item.id === id);

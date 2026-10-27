@@ -100,9 +100,9 @@ flowchart TD
 
 入站先执行已有 Input 身份去重。对真正的新输入，有 key 就复用可接纳 Topic，没有则创建；Topic 创建、key 唯一性与绑定需要覆盖并发接纳。旧 Input 的重复投递不能在原 Topic 被回收后重新创建 Topic 或触发处理。
 
-有明确 key 的输入通常挂在来源 leaf，之后一直保留这一归属。没有明确 key 的输入由 Route 选择，目标可以是 root 或子 Topic。Route 默认背景只有 root 候选及其有界概况，必要时查询具体子主题；不会把全部 leaf 目录常驻到模型上下文。
+有明确 key 的输入通常挂在来源 leaf，之后一直保留这一归属。有明确路由规则的 Input 固定挂到目标 Topic；没有明确规则的输入由 Route 选择当前 root。Route 背景只有 root 候选及其有界概况，不会把全部 leaf 目录常驻到模型上下文。
 
-Chief 只在 root 运行。子树中新到的 Input 由这个 root 接纳，中间节点不逐层启动 Agent。一次 Output 可以综合多个 leaf 的输入，重复、无新增价值的事实可以静默吸收；紧迫性、来源关系和主题归属本身不构成执行授权。
+Chief 只在 root 启动新执行；运行中的 Topic 成为子节点后，旧 Chief 可以自然完成。子树的 Input 作为这个 root 的材料，中间节点不逐层启动 Agent。一次 Output 可以综合多个 leaf 的输入，重复、无新增价值的事实可以静默吸收；紧迫性、来源关系和主题归属本身不构成执行授权。
 
 默认只确定一个 Topic 归属。现有跨 Topic fanout 不能机械复制到树的每一层：共同祖先不能因此重复研判同一 Input。若保留跨主题引用，引用展示与实际消费必须分开。
 
@@ -122,7 +122,7 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 原生会话通过 Harness 支持的方式初始化、持久化与恢复。新父 Topic 的 Chief 读取子主题认识，不拼接、改写子 Chief 的原生会话文件，不重放已完成的输入。模型请求前的业务背景继续使用 [Background](../harness/pi.md#当前业务背景) 通道。
 
-子主题认识变化唤醒当前 root；无新 Input 时仍核对未吸收版本，并由现有 Chief 自底向上吸收。吸收尝试间隔至少 60 秒，无进展时逐步退避至 15 分钟，等待和重启不会伪造 Input 或刷新活跃时间。Chief 被其它输入、定时回顾或知识整理激活时，最多合批接纳 8 条积压 Input，按 Immediate、Normal、Deferred 排序；每条保留独立回执。Deferred 积压本身不激活 Chief，运行中也不自动追加投递；Chief 可主动读取并研判相关积存事实。
+子主题 summary 变化唤醒当前 root；Note 单独变化等待其它原因激活后一起检查。无新 Input 时仍核对未吸收的 summary 版本，并由现有 Chief 自底向上吸收。吸收尝试间隔至少 60 秒，无进展时逐步退避至 15 分钟，等待和重启不会伪造 Input 或刷新活跃时间。Chief 被其它输入、定时回顾或知识整理激活时，最多合批提示 8 条积压 Input，按 Immediate、Normal、Deferred 排序；每条保留独立回执。Deferred 积压本身不激活 Chief，运行中也不自动追加投递；Chief 可主动读取并研判相关积存事实。
 
 树结构本身不保证模型负担下降。root 数量、背景字符数、按需读取量与模型调用频率都需要预算；突发的普通输入可合批处理，不把每次资源变化都变成一次模型调用。
 
@@ -132,44 +132,29 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 组件、目录和配置统一使用 weave，与 route 的动词命名保持一致。Weave 属于 Personal：模型判断主题关系，Operator 执行有边界、可核对的资源修改。它不代替 Chief 研判输入、创建工作或对外回复。
 
-### 当前操作：建立共同父主题
+### 当前操作：组织 Topic 关系
 
-对两个或多个值得共同维护上下文的 root，创建一个新的父 Topic，并将它们挂在下面：
+`group_topics` 支持将 1–8 个 root 挂到已有 root，或为 2–8 个 root 创建共同父 Topic。已有父节点保留名称、认识和 trigger 开关；新父节点使用默认 trigger 配置和 Weave 提供的综合认识。Default 不参与分组。
 
-```mermaid
-flowchart TD
-    C["C：新 root / 共同处理上下文"] --> A["A：原 Topic，原 key 与 Input 保留"]
-    C --> B["B：原 Topic，原 key 与 Input 保留"]
-```
+Input 固定属于路由确定的 Topic，Task / Routine 固定属于创建它的 Chief 所在 Topic。root 只表示当前处理入口。例如 topic1 的 Chief 因 input1 创建 task1，二者都留在 topic1；topic1 挂到 topic2 后，topic2 的 Chief 根据 topic1 的新 Input 创建 task2，task2 属于 topic2。父 Chief 可以查看和操作子树已有 Work，但不会修改其所属 Topic。
 
-可继续将 C 与另一个 root D 组织到新父 E 下。该操作可以称为 group_topics；它只是 Weave 当前支持的动作，不能将 weave 本身等同于固定的建树函数。
+候选必须是存活、非 Default 的 root，使用 UID 与认识版本核对。父子关系提交使用资源版本校验并拒绝环；分组事务只更新关系和父节点状态，不扫描或迁移 Input / Work，也不等待 Chief 或 Work 结束。创建父 Topic 需要先取得宿主分配的 UID，随后原子提交全部父子关系；提交失败清理未使用的新父节点。
 
-一次分组减少 root 数量，但会新增一个总节点。Weave 收敛独立处理上下文，静默回收控制保留节点的规模，两者共同承担容量治理。
+旧 Chief 运行期间允许其 Topic 成为子节点。旧执行可自然完成、提交研判和认识；后续不再为子 Topic 启动 Chief。子认识的后续变化由当前 root 吸收。已有材料可以被新旧 Chief 查看，不通过 Input 占有锁阻止重复研判。
 
-候选必须是存活、可交接、非 Default 的 root。语义相似只是线索，判断标准是这些主题是否值得由同一个 Chief 持续维护共同认识。不能为了降低数量，将没有合理共同主题的内容强行归组。
+### 扫描与触发
 
-### 两种触发
+Weave 的 Reconcile 按周期或 root 数量压力选择有界候选，再触发 Weave Agent。默认 rootThreshold=20、intervalMs=300000、batchSize=12，压力触发的调用间隔至少为 min(30000, intervalMs)。每轮最多分组一次。
 
-| 触发 | 处理方式 |
-| --- | --- |
-| root 数量超过阈值 | 从最久没有新 Input 的 root 开始，寻找适合共同组织的主题 |
-| 周期整理 | 按批轮转检查 root，目录或认识变化后重新检查，整理同类主题 |
+扫描进度按 Topic UID 保存实际展示的名称/summary 版本和检查时间；Note 单独变化不使已检查的版本失效。未检查的 Topic 优先，已变化的 Topic 按上次检查时间轮转；单个 Topic 的变化不重置其它进度。lastInputAt 只影响静默排序，不使已检查的认识失效。失败不确认覆盖；检查期间发生变化的 Topic 会再次进入候选；离开 root 集合的记录被清理。
 
-静默决定优先检查顺序，不直接证明主题相关。无合适候选就跳过；没有新证据的候选组合不反复判断。每轮限制检查数、组合数和模型预算，避免全量两两比较。默认 rootThreshold=20、intervalMs=300000、batchSize=12；达到阈值且目录变化时提前整理，两次调用至少间隔 min(30000, intervalMs)。每轮最多分组一次、每组 2–8 个 root。目录指纹使用身份、名称和认识版本；一轮分页扫描结束后，未变化的目录不继续调用模型。Controller 将实际候选快照注入本轮提示词；按实际展示数量推进游标，字符预算截断不会跳过候选。成功结束且目录未变化才确认覆盖；失败保留批次，指纹或排序变化重新从头扫描。
+### Agent 触发边界
 
-### 处理责任交接
+Route、Chief、Task、Routine、Weave Agent 只能由各自对应的 Reconcile 触发，包含 prompt、steer 和 followUp。工具与协作组件只修改资源，不跨角色直接调用 Agent。Host action 只执行对应 Reconcile 请求的 Harness 操作。
 
-分组必须同时解决拓扑修改与执行交接，不能只写 parentRef：
+Weave 更新父节点的 `weaveRevision`，资源 Watch 唤醒 root Topic Reconcile。Chief 空闲时，由 agent Reconcile 复用或创建原生 session 发起回顾；正在运行时，由接收 Reconcile 发 followUp。`notifiedWeaveRevision` 合并已通知的变化，重复 Reconcile 不重复排队；明确拒绝投递时恢复待通知状态。新父即使已有综合摘要，也会收到结构变化通知。
 
-1. 核对候选的 UID、版本、root 身份、Default 标记及删除状态，准备新父的综合认识。
-2. 暂停旧 root 接纳新的 Chief 执行；输入仍持久化到原 Topic 并等待处理。已有执行完成或经明确恢复流程收尾后再交接，可能有副作用的调用不自动重放。
-3. 先建立带 weaveLock 的准备父节点（不进入 Route 候选、不执行 Chief），再在资源事务中更新全部候选的 parentRef；冲突时重新读取，不留下只挂入一部分节点的结果。
-4. 在旧根与新父均冻结时，按宿主最多 100 个写入的事务预算分批转移尚未开始的消费和空闲 Task / Routine；完成后才原子切换所有 parentRef 并启用新根。管理责任交给新 root，保留原始 Input 引用及已完成回执，避免同一输入被两个 Chief 同时接纳。仍有执行时等待；未完成且已有 executionId 的不确定副作用阻止本次分组，释放锁供原 Chief 核对。候选认识变化也取消本次计划，等待重新综合。
-5. 新 root 恢复接纳，旧 root 的 Chief 释放。阶段进度须可恢复，重试不重复创建父节点或重复消费。
-
-新父在交接完成前处于不可执行的准备状态；拓扑事务提交本身不能提前启动其 Chief，进程重启也必须遵守同一接纳门槛。
-
-拓扑变化后，Route 的既有候选需要在提交时重新核对。无 key 输入仍可挂到已成为子节点的有效 Topic，但处理位置必须解析到当前 root；deleting Topic 不能接收新绑定。
+无明确规则的 Input 只由 Route 选择当前 root，提交时重新核对；有明确规则的 Input 固定挂到指定 Topic，包括子节点。已完成路由的 Input 不随结构变化重新绑定。Trigger Input 也固定属于产生它的 Topic，成为子节点后不再独立产生定时回顾。
 
 ## 静默回收
 
@@ -207,9 +192,9 @@ Weave 记录候选 UID、新父 UID、组织理由、认识吸收版本与交接
 | 验收场景 | 必须成立的结果 |
 | --- | --- |
 | 同 key 并发接纳、进程重启、重复投递 | 只绑定一个可接纳 Topic；原 Input 不重新执行 |
-| 有 key 与无 key 的输入 | 前者确定性绑定；后者可选 root 或子 Topic，无合适归属进入 Default |
+| 有 key 与无 key 的输入 | 前者确定性绑定；后者只选择当前 root，无合适归属进入 Default |
 | 多个 Topic 建立共同父节点 | 只持久化 parentRef，无环、无双父，Input 原归属不变 |
-| 分组与输入、执行、重启并发 | 处理责任明确，交接可恢复，无遗漏和重复副作用 |
+| 分组与输入、执行、重启并发 | 固定归属不变，旧 Chief 可完成，新 root 由 Reconcile 通知 |
 | 跨 leaf 的连续输入 | root Chief 形成综合认识，支持合并输出或静默处理 |
 | 子主题认识更新与重复吸收 | 最新证据可追溯，已吸收版本不重复堆积 |
 | Default 参与分组或删除 | 操作被拒绝，Default 始终独立存活 |
@@ -223,9 +208,11 @@ Weave 记录候选 UID、新父 UID、组织理由、认识吸收版本与交接
 
 ## 接纳与连续执行
 
-Topic 的接收 Controller 查询 Input.assessPending，具名 agent Controller 驱动根 Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 只挂载，不推动 Chief 运行，调度语义见 [Input](input.md#内容身份与调度)。原生接纳前持久化 executionId。Channel 的显式 Topic 规则在 Input 持久化和去重之后完成，避免先建空主题或被重投复活。
+Topic 的接收 Reconcile 查询子树的 Input.assessPending，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 只挂载，Chief 被其它原因激活时可以主动处理。
 
-明确拒绝 steer 时释放该次接纳；结果未知保留证据。status.agent 只保存 harness 和原生 sessionId，恢复由 SDK 承担。成为子节点后释放 Chief 原生句柄，不修改旧历史。
+Input 不保存 Chief 的接纳 executionId、agent 或占有关系。Topic 的 `notifiedInputs` 保存尚未完成研判的材料通知进度，完成后清理，避免同一个 root 的重复 Reconcile 重复发送；它不限制另一个 root 查看这些材料。`assess_input` 记录所属 Topic 的研判结果及可选的完成工具证据，不要求当前 Chief 事先领取。执行状态、原生 session 和失败原因保留在 Topic；不确定结果不自动重发已通知的材料，后续回顾需先核对已有 Work 和副作用。
+
+明确拒绝 steer / followUp 时恢复待通知状态。status.agent 保存 harness 和原生 sessionId，恢复由 SDK 承担。旧 Chief 自然结束后再释放成为子节点的原生句柄，不修改历史。
 
 ## 研判与上下文
 
@@ -251,6 +238,6 @@ Default 是没有子主题的独立 root，不参与 Weave，不能作为其他 
 
 ## 删除与验证
 
-显式删除与静默回收都在存储事务内校验 Default、子节点、执行、weaveLock、未完成 Input、相关 Work 和父节点吸收版本。删除请求使用 UID 与资源版本作为前置条件。历史 Input/Output 可引用已消失的 Topic，不根据同名或同 key 猜测替代实例。
+显式删除与静默回收都在存储事务内校验 Default、子节点、执行、未完成 Input、相关 Work 和父节点吸收版本。删除请求使用 UID 与资源版本作为前置条件。历史 Input/Output 可引用已消失的 Topic，不根据同名或同 key 猜测替代实例。
 
 [Weave 场景](../../tests/weave.test.ts)、[接纳](../../tests/topic-intake.test.ts)、[定时回顾](../../tests/topic-trigger.test.ts)、[默认主题](../../tests/default-topic.test.ts)和[删除](../../tests/topic-delete.test.ts)覆盖生命周期；[Pi 场景](../../tests/pi-agent.test.ts)覆盖原生连续执行。模拟测试不证明真实主题整理质量。

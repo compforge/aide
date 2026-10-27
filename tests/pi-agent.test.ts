@@ -189,7 +189,7 @@ test("Replay SDK groups roots and routes subsequent source input to the new root
   const root = result.topics.find((topic: { parentRef?: unknown }) => !topic.parentRef);
   const later = result.inputs.find((input: any) => input.input.spec.observation.message.id === "later").input;
   assert.notEqual(later.status.route.result.topics[0].uid, root.uid);
-  assert.deepEqual(Object.keys(later.status.assess), [root.uid]);
+  assert.deepEqual(Object.keys(later.status.assess), [later.status.route.result.topics[0].uid]);
   assert.ok(result.usage.chief.calls > 0); assert.ok(result.usage.weave.calls > 0);
   assert.equal(result.protocolFixture, false);
   assert.equal(result.state, "completed");
@@ -723,7 +723,7 @@ test("Weave uses a dedicated native session and commits grouping through its res
   const weave = (await aide.runtime.plugins.resourceClient("personal").list<Record<string, never>, import("../plugins/personal/weave/model.ts").WeaveStatus>(WEAVE_TYPE))[0]!;
   assert.equal(weave.status.agent?.harness, "weave");
   assert.ok(weave.status.agent?.sessionId);
-  assert.equal(weave.status.plan, null);
+  assert.equal(weave.status.execution, null);
   assert.equal(aide.outputs().length, 0);
 });
 
@@ -749,19 +749,16 @@ test("Aide steers immediate Input and independently completes both inputs within
   let conflicts = 10;
   t.mock.method(aide.runtime.plugins, "resourceClient", (instance: string) => {
     const client = resourceClient(instance);
-    return { ...client, async commit(writes: Parameters<typeof client.commit>[0]) {
-      const admission = writes.find(w => w.operation === "patchStatus"
-        && ((w.patch as { execution?: { admissionRevision?: number } }).execution?.admissionRevision ?? 0) > 0);
-      if (admission?.operation === "patchStatus" && conflicts > 0) {
-        await client.patchStatus(admission.resource, { summary: `Concurrent status ${conflicts--}` });
-      }
-      return client.commit(writes);
+    return { ...client, async patchStatus(resource: any, patch: any) {
+      if ((patch.execution?.admissionRevision ?? 0) > 0 && conflicts > 0)
+        await client.patchStatus(resource, { summary: `Concurrent status ${conflicts--}` });
+      return client.patchStatus(resource, patch);
     } };
   });
   await submit("urgent", InputAttention.Immediate);
   const uid = aide.topics.resource("me")!.metadata.uid;
-  for (let i = 0; i < 200 && !aide.topics.inputStore.get("urgent")?.status.assess?.[uid]?.executionId; i++) await Bun.sleep(10);
-  assert.equal(aide.topics.inputStore.get("urgent")!.status.assess?.[uid]?.executionId !== undefined, true);
+  for (let i = 0; i < 200 && !aide.topics.resource("me")!.status.notifiedInputs?.includes(aide.topics.inputStore.get("urgent")!.metadata.uid); i++) await Bun.sleep(10);
+  assert.ok(aide.topics.resource("me")!.status.notifiedInputs?.includes(aide.topics.inputStore.get("urgent")!.metadata.uid));
   assert.equal(conflicts, 0);
   assert.equal(aide.topics.resource("me")!.status.execution!.admissionRevision, 1);
   release(); await aide.settled();
@@ -843,7 +840,7 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
     assert.equal(input.status.route.completedBy?.agent.harness, "route");
     assert.deepEqual(Object.keys(input.status.assess!), [targetUid]);
     const assessment = input.status.assess![targetUid]!;
-    assert.equal(assessment.agent?.harness, "chief"); assert.ok(assessment.completedBy?.toolCallId);
+    assert.equal(assessment.completedBy?.agent.harness, "chief"); assert.ok(assessment.completedBy?.toolCallId);
     const job = await inputJob(input, [], agent => fixture.observation.read(fixture.config.cwd, fixture.config.config, agent.sessionId));
     for (const call of [input.status.route.completedBy!, assessment.completedBy!])
       assert.ok(job.nodes.some(n => n.kind === "tool_call" && (n as ToolCall).tool_call_id === call.toolCallId && n.session?.id === call.agent.sessionId));
@@ -1173,11 +1170,66 @@ test("Chief can read and assess a late Deferred Input without steer or followUp"
   release(); await aide.settled();
   const first = aide.topics.inputStore.get("first")!.status.assess![c.metadata.uid]!;
   const deferred = aide.topics.inputStore.get("deferred")!.status.assess![c.metadata.uid]!;
-  assert.ok(deferred.completedAt); assert.ok(deferred.startedAt); assert.ok(deferred.completedBy);
+  assert.ok(deferred.completedAt); assert.equal(deferred.startedAt, undefined); assert.ok(deferred.completedBy);
   assert.equal(deferred.executionId, first.executionId);
-  assert.equal(deferred.agent?.sessionId, first.agent?.sessionId);
+  assert.equal(deferred.completedBy?.agent.sessionId, first.completedBy?.agent.sessionId);
   assert.match(JSON.stringify(fixture.requests[2]!.messages), /late-deferred-evidence/);
   assert.equal(aide.invocations().filter(i => i.topicId === "me").length, 1);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
   assert.ok([...state.harnessInputs.values()].every(i => i.delivery !== "steer" && i.delivery !== "followUp"));
+});
+
+/** @case Weave changes resources only; the owning Topic Reconcile sends one native followUp while Chief is busy. */
+test("Weave wakes busy root Chief through its Reconcile without moving or claiming Input", { timeout: 20_000 }, async t => {
+  const { ConfigSchema } = await import("../src/config.ts");
+  const { WEAVE_TYPE } = await import("../plugins/personal/weave/model.ts");
+  const { groupTopics } = await import("../plugins/personal/weave/service.ts");
+  const { understandingVersion } = await import("../plugins/personal/topic/tree.ts");
+  let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
+  let aide: Aide;
+  const fixture = await setup(t, (_request, index) => {
+    if (index === 0) return { text: "Reviewing material", pause };
+    if (index === 1) return { tool: "assess_input", args: { inputId: "first", summary: "Reviewed" } };
+    if (index === 2) {
+      const parent = aide.topics.resource("parent")!, child = aide.topics.resource("child")!;
+      return { tool: "summarize_topic", args: { version: parent.metadata.resourceVersion, summary: "Combined understanding",
+        absorbed: [{ uid: child.metadata.uid, version: understandingVersion(child) }] } };
+    }
+    return { text: "Done" };
+  });
+  aide = new Aide(join(fixture.config.cwd, "weave-notify-home"), { cwd: fixture.config.cwd, timezone: "UTC",
+    config: ConfigSchema.parse({ plugins: { personal: { weave: { enabled: false } } } }), defaultHarnessConfig: { id: "default", harness: "pi" },
+    createAdapter: (target, ports) => createHarnessAdapter(target, { ...ports, targetConfig: { harness: target.harness }, chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }),
+  }, pino({ level: "silent" }));
+  t.after(async () => { release(); await aide.close(); });
+  const parent = await aide.topics.ensure("parent"), child = await aide.topics.ensure("child");
+  const resources = aide.runtime.plugins.resourceClient("personal");
+  const weave = await resources.create(WEAVE_TYPE, { name: "global", spec: {}, status: {} });
+  const notices: any[] = [];
+  const submit = aide.personal.submitTopic.bind(aide.personal);
+  t.mock.method(aide.personal, "submitTopic", async (scope: Parameters<typeof submit>[0], args: unknown) => {
+    if ((args as any).weaveRevision) notices.push({ scope, args });
+    return submit(scope, args);
+  });
+  await aide.start();
+  await aide.topics.submit("first", { topicId: "parent", origin: "source", originId: "fixture", text: "first" });
+  for (let n = 0; n < 200 && !fixture.requests.length; n++) await Bun.sleep(10);
+  assert.equal(fixture.requests.length, 1);
+  await groupTopics(resources, weave, { topics: [{ uid: child.metadata.uid, version: understandingVersion(child) }],
+    parent: { uid: parent.metadata.uid, version: understandingVersion(aide.topics.resource("parent")!) } }, 4000);
+  for (let n = 0; n < 200 && aide.topics.resource("parent")!.status.notifiedWeaveRevision !== 1; n++) await Bun.sleep(10);
+  assert.equal(aide.topics.resource("parent")!.status.notifiedWeaveRevision, 1);
+  for (let n = 0; n < 3; n++) await aide.runtime.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1", resourceApiVersion: parent.apiVersion,
+    resourceKind: parent.kind, resourceId: parent.metadata.name });
+  await Bun.sleep(100);
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0].scope.resourceRef.uid, parent.metadata.uid);
+  assert.equal(notices[0].scope.controllerName, undefined);
+  assert.equal(notices[0].args.operation, "followUp");
+  release(); await aide.settled();
+  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Topic structure changed through Weave/);
+  assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 1);
+  const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
+  assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 1);
+  assert.ok(!("executionId" in aide.topics.inputStore.get("first")!.status.assess![parent.metadata.uid]!));
 });

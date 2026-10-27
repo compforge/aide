@@ -109,7 +109,7 @@ test("Timeline retains independent consumers, resolves exact UIDs and includes o
   let input = store.submit("test", "shared & #1", observation(1));
   const at = (n: number) => new Date(Date.parse(input.metadata.creationTimestamp) + n * 1000).toISOString();
   input = store.update(input, { route: { startedAt: at(1), completedAt: at(2), attempts: 2, result: { topics: [resourceRef(a), resourceRef(b)], reason: "两个话题都相关" } },
-    assess: { [a.metadata.uid]: { resource: resourceRef(a), assignedAt: at(2), startedAt: at(3), completedAt: at(4), executionId: "chief-run", result: { summary: "交给 Task" } },
+    assess: { [a.metadata.uid]: { resource: resourceRef(a), assignedAt: at(2), completedAt: at(4), result: { summary: "交给 Task" } },
       [b.metadata.uid]: { resource: resourceRef(b), assignedAt: at(2), completedAt: at(5), result: { summary: "目标已删除", disposition: "cancelled" } } },
     handle: { [task.metadata.uid]: { resource: resourceRef(task), assignedAt: at(4), appliedAt: at(5), startedAt: at(6), executionId: "task-run", request: { action: "context", note: "核对" }, lastError: "需要核对既有副作用" } } });
   aide.topics.resources.requestDeletion(TOPIC_TYPE, b.metadata.name);

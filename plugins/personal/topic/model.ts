@@ -10,7 +10,11 @@ export interface TopicSpec { address?: Address; id: string; name?: string; defau
   topicKey?: string; parentRef?: ResourceRef & { uid: string } }
 export interface TopicStatus extends ResourceContext {
   lastInputAt?: string;
-  weaveLock?: string | null;
+  /** Notification progress belongs to the Topic, not to its Input material. */
+  notifiedInputs?: string[];
+  weaveRevision?: number;
+  notifiedWeaveRevision?: number;
+  lastError?: string | null;
   absorbed?: Record<string, string>;
   absorbedSummaries?: Record<string, string>;
   agent?: import("@compforge/aide-plugin").AgentStatus;

@@ -18,7 +18,7 @@ export const topicTrigger = (trigger?: TopicTrigger): TopicTrigger => TopicTrigg
  * @link docs/personal/topic.md#topic-定时回顾
  */
 export async function createTriggerInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, nextTriggerAt: string) {
-  if (topic.spec.parentRef || topic.metadata.deletionTimestamp || topic.status.execution || topic.status.weaveLock || !topicTrigger(topic.spec.trigger).enabled)
+  if (topic.spec.parentRef || topic.metadata.deletionTimestamp || topic.status.execution || !topicTrigger(topic.spec.trigger).enabled)
     throw new Error("Idle review requires an enabled, idle root Topic");
   const dueAt = topic.status.nextTriggerAt!;
   const inputId = `topic-trigger-${digest([topic.metadata.uid, dueAt])}`;

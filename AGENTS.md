@@ -65,7 +65,7 @@ plugins/personal/
   observation/             # Input JobView、原生调用引用与业务证据关联
   aide.ts                  # 全局 Personal 服务：领域工具装配、输入与恢复
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine
-  weave/                   # 全局 Weave CRD、分批组织与安全交接
+  weave/                   # 全局 Weave CRD、有界扫描与 Topic 关系整理
   route/                   # 全局 Route CRD：规则分发、持续分类与原子分派
   topic/                   # Topic CRD 的模型、操作与 Reconcile
     locator.ts             # Channel / Source 提供 Topic 定位信息的领域契约
@@ -132,6 +132,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 每种 CRD 在所属 plugin package 下有独立目录，模型、Reconcile 和专属辅助代码就近组织；跨资源协作留在插件层。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
 - 资源身份按插件实例与 namespace 组织，引用固定 UID。同一 Controller 对同一资源串行；主资源纯 status 更新不自动唤醒自身，协作方显式声明 Watch。资源所有者决定能否释放，Host 执行容量限制与合格对象的淘汰排序。
 - Operator 通过 Harness interface / verb 操作原生 agent loop，恢复参数由 Operator 自己保存。Personal 的 status.agent 只是调用参数；Harness verb 不读写 CRD。原生持久化、历史与恢复属于 Harness，实时投影和诊断日志不承担恢复。
+- Route、Chief、Task、Routine、Weave Agent 只由各自对应的 Reconcile 触发，包括 prompt、steer 与 followUp；协作组件和 Agent 工具通过资源变化协作，不直接触发其它角色。
+- Input 是固定所属 Topic 的材料；Chief 通知与执行状态留在 Topic，Input.assess 不记录 Chief 接纳或占有关系。Task / Routine 固定属于创建它的 Chief 所在 Topic，Weave 只改变父子关系。
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。可能已有外部副作用的中断先核对，不自动重放。
 - Channel / Source 通过绑定 Definition 的入口形成 Input，正文保存事实，证据留在 observation。路由统一归 Route，Default Topic 由系统按需创建并维护，只兜底，不提供手动切换；Input.status 的 route / assess / handle 是处理事实，消费者按索引查询。
 - Person 保存人物身份与认识，Me 是可选标记，与访问凭证独立。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。

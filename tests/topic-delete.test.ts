@@ -117,21 +117,19 @@ test("Recreated Topic has fresh execution context and no old outputs or progress
   assert.equal(aide.outputs().some((m) => m.text === "旧请求"), false);
 });
 
-/** @case Hierarchy and Weave deletion vetoes remain domain refusals through the HTTP API. */
-test("Web reports Topic hierarchy, absorption, Default and Weave deletion refusals", async (t) => {
+/** @case Hierarchy deletion vetoes remain domain refusals through the HTTP API. */
+test("Web reports Topic hierarchy, absorption, Default deletion refusals", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "aide-delete-tree-"));
   const aide = new Aide(dir, fakeOptions({ execute: async () => { throw new Error("No execution expected"); } }, dir), log);
   const topics = aide.personal.topics;
   const resources = aide.personal.plugins.resourceClient("personal");
-  for (const id of ["parent", "child", "frozen", "default"]) await topics.ensure(id);
+  for (const id of ["parent", "child", "default"]) await topics.ensure(id);
   const parent = topics.resource("parent")!;
   let child = topics.resource("child")!;
   child = await resources.replace(child, { ...child.spec, parentRef: resourceRef(parent) }, { ...child.status, summary: "未吸收的事实" });
-  const frozen = topics.resource("frozen")!;
-  await resources.patchStatus(frozen, { weaveLock: "pending-group" });
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
-  for (const [id, expected] of [["parent", /子主题/], ["child", /尚未吸收/], ["frozen", /正在整理/], ["default", /默认主题不能删除/]] as const) {
+  for (const [id, expected] of [["parent", /子主题/], ["child", /尚未吸收/], ["default", /默认主题不能删除/]] as const) {
     const before = topics.resource(id)!;
     const response = await remove(id, Number(before.metadata.resourceVersion));
     assert.equal(response.status, 409);

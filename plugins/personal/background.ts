@@ -25,7 +25,7 @@ function topicPart(c: TopicResource | undefined) {
 
 export function topicCandidates(store: Store, query?: string, parentUid?: string) {
   return store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE)
-    .filter(c => !c.metadata.deletionTimestamp && (parentUid ? c.spec.parentRef?.uid === parentUid : !c.spec.parentRef) && !c.status.weaveLock
+    .filter(c => !c.metadata.deletionTimestamp && (parentUid ? c.spec.parentRef?.uid === parentUid : !c.spec.parentRef)
       && (!query || [c.spec.name, c.status.summary].join(" ").toLowerCase().includes(query.toLowerCase()))).sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid))
     .map(c => ({ uid: c.metadata.uid, name: preview(c.spec.name, 200), default: !!c.spec.default, summary: preview(c.status.summary, 2000) }));
 }
@@ -47,11 +47,13 @@ export function routeParts(store: Store) {
 }
 
 export function relatedWork(store: Store, topicId: string) {
+  const topic = store.topics.resource(topicId);
+  const ids = new Set(topic ? store.topics.scope(topic.metadata.uid).map(t => t.spec.id) : []);
   return WORK_TYPES.flatMap(type => store.resources.list<WorkResource["spec"], WorkStatus>(type))
-    .filter(w => !w.metadata.deletionTimestamp && w.spec.topicId === topicId)
+    .filter(w => !w.metadata.deletionTimestamp && ids.has(w.spec.topicId))
     .sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid)).map(w => {
       const work = toWork(w);
-      return { id: work.id, uid: work.uid, kind: work.kind, title: preview(work.title, 200), status: work.status,
+      return { id: work.id, uid: work.uid, topicId: work.topicId, kind: work.kind, title: preview(work.title, 200), status: work.status,
         nextAt: work.nextAt, question: preview(work.question ?? "", 500), summary: preview(work.summary, 1000), recent: understanding(work).recent,
         lastReport: work.lastReport ? { at: work.lastReport.at, text: preview(work.lastReport.text, 500) } : undefined };
     });

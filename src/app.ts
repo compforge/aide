@@ -144,7 +144,7 @@ export class Aide {
         defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { maxTotalConcurrency: config?.reconcile?.maxTotalConcurrency, connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.topics.changed(change); this.notify(); },
-        actions: { "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
+        actions: { "personal/submit_topic": (context, input) => this.personal.submitTopic(context, input), "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
           const input = SayInputSchema.parse(raw);
           const text = input.text;
           const association = personalExecution(context);

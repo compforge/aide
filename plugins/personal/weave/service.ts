@@ -1,104 +1,58 @@
 import { retainRecent } from "../context.ts";
 import { randomUUID } from "node:crypto";
-import type { ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
+import type { ResourceClient } from "@compforge/aide-plugin";
 import { digest } from "../chief-model.ts";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "../topic/model.ts";
 import { understandingVersion, summaryVersion } from "../topic/tree.ts";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
-import { WORK_TYPES, type WorkResource } from "../resources.ts";
 import { GroupSchema, type WeaveResource } from "./model.ts";
 
-/** @spec Freeze intake before waiting for old executions. A durable plan survives process restarts.
+/**
+ * @spec Grouping changes only parent relationships. Existing Chief executions drain naturally; Input and Work ownership never moves.
+ * @spec Version guards fence concurrent grouping and understanding changes, without freezing intake or waiting for Work.
  * @link docs/personal/topic.md
  * @case tests/weave.test.ts
  */
-export async function planGroup(resources: ResourceClient, weave: WeaveResource, raw: unknown, summaryChars: number) {
+export async function groupTopics(resources: ResourceClient, weave: WeaveResource, raw: unknown, summaryChars: number) {
   const group = GroupSchema.parse(raw);
-  if (weave.status.plan) throw new Error("Weave already has a pending handoff");
-  if (group.summary.length > summaryChars) throw new Error("Condense the proposed summary");
-  if (new Set(group.topics.map(t => t.uid)).size !== group.topics.length) throw new Error("Distinct roots required");
+  if ((group.summary?.length ?? 0) > summaryChars) throw new Error("Condense the proposed summary");
+  const refs = [...group.topics, ...(group.parent ? [group.parent] : [])];
+  if (new Set(refs.map(t => t.uid)).size !== refs.length) throw new Error("Distinct roots required");
   const all = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-  const roots = group.topics.map(ref => {
+  const resolve = (ref: { uid: string; version: string }) => {
     const topic = all.find(t => t.metadata.uid === ref.uid);
-    if (!topic || topic.metadata.deletionTimestamp || topic.spec.default || topic.spec.parentRef || topic.status.weaveLock) throw new Error("Only available non-Default roots can be grouped");
+    if (!topic || topic.metadata.deletionTimestamp || topic.spec.default || topic.spec.parentRef) throw new Error("Only available non-Default roots can be grouped");
     if (understandingVersion(topic) !== ref.version) throw new Error("Topic understanding changed; read again");
     return topic;
-  });
-  const plan = { ...group, id: randomUUID(), at: new Date().toISOString() };
-  await resources.commit([
-    ...roots.map(resource => ({ operation: "patchStatus" as const, resource, patch: { weaveLock: plan.id } })),
-    { operation: "patchStatus", resource: weave, patch: { plan } },
-  ]);
-  return { planId: plan.id, state: "waiting_for_quiescence" };
-}
-
-/** @spec Binding and completed receipts stay unchanged; only unstarted consumption and idle Work move.
- * Unknown effects block grouping instead of being replayed in a new native session.
- */
-export async function applyGroup(resources: ResourceClient, weave: WeaveResource): Promise<"waiting" | "applied" | "stale"> {
-  const plan = weave.status.plan;
-  if (!plan) return "stale";
-  const all = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-  const roots = plan.topics.map(ref => all.find(t => t.metadata.uid === ref.uid));
-  if (roots.some(t => t?.status.execution)) return "waiting";
-  const valid = roots.every((t, i) => t && !t.metadata.deletionTimestamp && !t.spec.parentRef && !t.spec.default
-    && t.status.weaveLock === plan.id && understandingVersion(t) === plan.topics[i]!.version);
-  const concrete = roots.filter((t): t is TopicResource => !!t);
-  const pending = (await Promise.all(concrete.map(t => resources.list<InputSpec, InputStatus>(INPUT_TYPE,
-    { matchIndex: { name: "assessPending", value: t.metadata.uid } })))).flat();
-  const inputs = [...new Map(pending.map(i => [i.metadata.uid, i])).values()];
-  const uncertain = inputs.some(i => concrete.some(t => {
-    const a = i.status.assess?.[t.metadata.uid]; return a && !a.completedAt && a.executionId;
-  }));
-  if ((!valid || uncertain) && !plan.moving) {
-    const staged = all.find(t => t.spec.id === plan.id);
-    await resources.commit([
-      ...concrete.filter(t => t.status.weaveLock === plan.id).map(resource => ({ operation: "patchStatus" as const, resource, patch: { weaveLock: null } })),
-      ...(staged ? [{ operation: "delete" as const, resource: staged }] : []),
-      { operation: "patchStatus", resource: weave, patch: { plan: null } },
-    ]);
-    return "stale";
+  };
+  const children = group.topics.map(resolve);
+  let parent: TopicResource;
+  if (group.parent) parent = resolve(group.parent);
+  else {
+    // The Resource API assigns UIDs on create. The new empty root is valid on its own;
+    // all parent edges and synthesized understanding are then published in one commit.
+    const id = randomUUID();
+    parent = await resources.create(TOPIC_TYPE, { name: digest(id), spec: { id, name: group.name! },
+      status: { receipts: [], summary: "", recent: [] } });
   }
-  if (!valid || uncertain) throw new Error("Moving Weave plan lost its frozen roots; inspect before continuing");
-  const work = (await Promise.all(WORK_TYPES.map(type => resources.list<WorkResource["spec"], WorkResource["status"]>(type)))).flat()
-    .filter(w => !w.metadata.deletionTimestamp && concrete.some(t => t.spec.id === w.spec.topicId));
-  if (work.some(w => (w.status as import("../loop.ts").LoopStatus).execution)) return "waiting";
-  // A staged parent stays hidden from routing and execution until the handoff commits.
-  const name = digest(plan.id);
-  let parent = all.find(t => t.spec.id === plan.id);
-  if (!parent) parent = await resources.create(TOPIC_TYPE, { name, spec: { id: plan.id, name: plan.name },
-    status: { receipts: [], summary: plan.summary, recent: retainRecent(concrete.flatMap(topic => topic.status.recent)), weaveLock: plan.id } });
-  const uid = parent.metadata.uid, parentRef = resourceRef(parent);
-  const transfers: ResourceCommit[] = [
-    ...inputs.map(resource => {
-      const assess = { ...resource.status.assess };
-      for (const t of concrete) if (assess[t.metadata.uid] && !assess[t.metadata.uid]!.completedAt) delete assess[t.metadata.uid];
-      assess[uid] = { resource: parentRef, assignedAt: new Date().toISOString() };
-      return { operation: "patchStatus" as const, resource, patch: { assess } };
-    }),
-    ...work.map(resource => ({ operation: "replace" as const, resource, spec: { ...resource.spec, topicId: parent!.spec.id }, status: resource.status })),
-  ];
-  const batchSize = 100 - concrete.length - 2;
-  if (transfers.length > batchSize) {
+  try {
     await resources.commit([
-      ...concrete.map(resource => ({ operation: "patchStatus" as const, resource, patch: {} })),
-      { operation: "patchStatus", resource: parent, patch: {} },
-      ...transfers.slice(0, batchSize),
-      { operation: "patchStatus", resource: weave, patch: { plan: { ...plan, moving: true } } },
+      ...children.map(resource => ({ operation: "replace" as const, resource, spec: { ...resource.spec, parentRef: resourceRef(parent) },
+        status: { ...resource.status, nextTriggerAt: null } })),
+      { operation: "patchStatus", resource: parent, patch: { weaveRevision: (parent.status.weaveRevision ?? 0) + 1,
+        ...(!group.parent ? { summary: group.summary!, recent: retainRecent(children.flatMap(t => t.status.recent)),
+          absorbed: Object.fromEntries(children.map(t => [t.metadata.uid, understandingVersion(t)])),
+          absorbedSummaries: Object.fromEntries(children.map(t => [t.metadata.uid, summaryVersion(t)])) } : {}),
+        lastInputAt: (group.parent ? [parent, ...children] : children).map(t => t.status.lastInputAt ?? t.metadata.creationTimestamp).sort().at(-1),
+      } },
+      { operation: "patchStatus", resource: weave, patch: {} },
     ]);
-    return "waiting";
+  } catch (error) {
+    if (!group.parent) {
+      try { await resources.delete(TOPIC_TYPE, parent.metadata.name, "v1", { uid: parent.metadata.uid, resourceVersion: parent.metadata.resourceVersion }); }
+      catch (cleanup) { throw new AggregateError([error, cleanup], `Grouping failed; unused parent ${parent.metadata.uid} requires inspection`); }
+    }
+    throw error;
   }
-  const writes: ResourceCommit[] = [
-    ...concrete.map(resource => ({ operation: "replace" as const, resource, spec: { ...resource.spec, parentRef },
-      status: { ...resource.status, weaveLock: null, nextTriggerAt: null } })),
-    ...transfers,
-    { operation: "patchStatus", resource: parent, patch: { weaveLock: null,
-      absorbed: Object.fromEntries(concrete.map(t => [t.metadata.uid, understandingVersion(t)])),
-      absorbedSummaries: Object.fromEntries(concrete.map(t => [t.metadata.uid, summaryVersion(t)])),
-      lastInputAt: concrete.map(t => t.status.lastInputAt ?? t.metadata.creationTimestamp).sort().at(-1) } },
-    { operation: "patchStatus", resource: weave, patch: { plan: null } },
-  ];
-  await resources.commit(writes);
-  return "applied";
+  return { parentUid: parent.metadata.uid, childUids: children.map(t => t.metadata.uid), state: "grouped" };
 }

@@ -35,7 +35,7 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
         topic = await context.resources.get<TopicSpec, TopicStatus>({ ...TOPIC_TYPE, namespace: "v1", name: digest(input.spec.topicId) });
       }
     }
-    if (!topic || topic.metadata.deletionTimestamp || topic.status.weaveLock === topic.spec.id) throw new Error("Explicit Topic unavailable");
+    if (!topic || topic.metadata.deletionTimestamp) throw new Error("Explicit Topic unavailable");
     destinations.set(topic.metadata.uid, topic.metadata);
   }
   const originalId = input.spec.observation?.originalInputId;

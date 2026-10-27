@@ -301,17 +301,27 @@ test("Lark upgrades persisted legacy panels only once when execution continues",
 /** @case One native invocation can acknowledge inputs incrementally without closing its IM card early. */
 test("Lark keeps a shared invocation card running until steered input and execution settle", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-steer-card-"));
-  const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("No work"); } }, home), log);
-  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+  const options = fakeOptions({ notify: false, async chief() { await gate; return "Handled"; }, async execute() { throw new Error("No work"); } }, home);
+  const aide = new Aide(home, { ...options, createAdapter(target) {
+    return { ...options.createAdapter(target), async steer() { return { accepted: true as const, effective: "steer" as const }; } };
+  } }, log);
+  t.after(async () => { release(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  await aide.topics.ensure(topicId);
+  await aide.start();
   const spec = { topicId, origin: "channel" as const, originId: "lark", source: larkAddress("cli_progress", "oc_chat"), text: "request" };
-  await seedInput(aide.topics, "first", spec, { phase: "done", executionId: "live" });
-  await seedInput(aide.topics, "urgent", spec, { phase: "running", executionId: "live" });
+  await aide.topics.submit("first", spec);
+  for (let n = 0; n < 200 && !aide.topics.resource(topicId)!.status.execution; n++) await Bun.sleep(10);
+  await aide.topics.submit("urgent", spec);
+  for (let n = 0; n < 200 && !aide.topics.resource(topicId)!.status.notifiedInputs?.includes(aide.topics.inputStore.get("urgent")!.metadata.uid); n++) await Bun.sleep(10);
   assert.equal(larkProgress(aide, topicId).length, 1);
   assert.equal(larkProgress(aide, topicId)[0]!.phase, "running");
   const client = aide.runtime.plugins.resourceClient("personal");
-  await assessAll(client, aide.topics.resource(topicId)!, "live", { inputIds: ["urgent"], summary: "Handled" });
+  const current = aide.topics.resource(topicId)!;
+  await assessAll(client, current, current.status.execution!.id, { inputIds: ["first"], summary: "Handled" });
   assert.equal(larkProgress(aide, topicId)[0]!.phase, "running");
-  await client.patchStatus(aide.topics.resource(topicId)!, { execution: null });
+  release(); await aide.settled();
+  assert.equal(larkProgress(aide, topicId).length, 1);
   assert.equal(larkProgress(aide, topicId)[0]!.phase, "done");
 });
 

@@ -49,10 +49,12 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const resource = aide.topics.resource(topicId)!;
   const members = topicSubtree(aide.topics.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE), resource);
   const memberIds = new Set(members.map(t => t.spec.id)), memberUids = new Set(members.map(t => t.metadata.uid));
-  const inputIds = new Set(aide.topics.inputs(topicId).map(i => i.metadata.name));
+  const runs = aide.topics.runs(topicId);
+  const facts = runs.flatMap(run => run.input ? [run.input] : []);
+  const factsByUid = new Map(facts.map(input => [input.metadata.uid, input]));
+  const inputIds = new Set(facts.map(i => i.metadata.name));
   const history = aide.invocations().filter(item => memberIds.has(item.topicId ?? "") || item.inputIds?.some(id => inputIds.has(id)));
   const state = aide.runtime.executions.view(history.flatMap(item => item.invocationId ? [item.invocationId] : []));
-  const runs = aide.topics.runs(topicId);
   const active = runs.find((input) => !input.input && input.status.phase === "running");
   const queued = runs.filter((input) => !input.status.phase).length;
   const runId = (item: { inputId?: string; executionId: string }) => item.executionId;
@@ -73,6 +75,16 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const messageRuns = new Map<string, string>();
   for (const message of channelOutputs(aide)) if (message.executionId) messageRuns.set(message.id, message.executionId);
   const inputExecutions = new Map(invocations.flatMap((i) => (i.inputIds ?? []).map((id) => [id, i.executionId] as const)));
+  // Native notifications provide explicit transient links for steered/follow-up material; Input itself owns no Chief invocation.
+  const chiefInvocations = new Map(invocations.filter(i => i.resourceRef?.kind === "Topic").map(i => [i.invocationId, i]));
+  for (const notification of state.harnessInputs.values()) {
+    const invocation = chiefInvocations.get(notification.invocationId);
+    if (!invocation || notification.deliveryOutcome === "failed") continue;
+    const suffix = `:${invocation.resourceRef!.uid}`;
+    if (!notification.messageId.startsWith("input:") || !notification.messageId.endsWith(suffix)) continue;
+    const fact = factsByUid.get(notification.messageId.slice("input:".length, -suffix.length));
+    if (fact) inputExecutions.set(fact.metadata.name, invocation.executionId);
+  }
   const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.invocationId))
     .map((input) => [input.invocationId, input]));
   const summaries = new Map(state.invocationSummaries.filter((turn) => relatedTurns.has(turn.invocationId)).map((turn) => [turn.invocationId, turn]));

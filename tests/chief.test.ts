@@ -34,7 +34,8 @@ test("Chief accepts duplicate input once, answers without Work, isolates topics 
   await aide.receive(fixtureIncoming({ ...input,  topicId: "other", text: "hello" })); await aide.settled();
   assert.doesNotMatch(prompts[1]!, /private-information/);
   await aide.receive(fixtureIncoming({ ...input, id: "failed", text: "fail" })); await aide.settled();
-  assert.equal(aide.personal.topics.inputs("me").find(i => i.spec.text === "fail")!.consumption.phase, "failed");
+  assert.equal(aide.personal.topics.inputs("me").find(i => i.spec.text === "fail")!.consumption.phase, undefined);
+  assert.ok(aide.topics.resource("me")!.status.lastError);
   await aide.close(); aide = new Aide(root, options, log); await aide.start();
   await aide.receive(fixtureIncoming({ ...input, id: "failed", text: "fail" })); await aide.settled();
   assert.equal(calls, 3);

@@ -88,7 +88,8 @@ test("Startup resumes queued inputs but fails interrupted input without replayin
   assert.equal(calls.length, 1);
   assert.match(calls[0]!, /process-after-restart/);
   assert.doesNotMatch(calls[0]!, /do-not-replay/);
-  assert.equal(aide.personal.topics.input("active")!.consumption.phase, "failed");
+  assert.equal(aide.personal.topics.input("active")!.consumption.phase, undefined);
+  assert.ok(aide.topics.resource("a")!.status.lastError);
   const notices = aide.outputs().filter((m) => m.topicId === "a");
   assert.equal(notices.length, 0);
   await aide.personal.recoverInterrupted();

@@ -72,7 +72,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
           ? (() => {
             const resources = new PluginResourceStore({ home, pluginInstanceId: "personal" });
             const inputId = JSON.parse(prompt.split("\n").find(line => line.startsWith('{"inputId":'))!).inputId;
-            const data = { inputs: [{ id: inputId }], topics: resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE).filter(c => !c.spec.parentRef && !c.status.weaveLock && !c.metadata.deletionTimestamp).map(c => ({ ...(c.spec as object), uid: c.metadata.uid })) };
+            const data = { inputs: [{ id: inputId }], topics: resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE).filter(c => !c.spec.parentRef && !c.metadata.deletionTimestamp).map(c => ({ ...(c.spec as object), uid: c.metadata.uid })) };
             return agent.route?.(JSON.stringify(data)) ?? JSON.stringify({ decisions: [{ inputId, topicUids: [], reason: "No match" }] });
           })()
           : target.harness === "chief"
@@ -110,12 +110,12 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const all = await resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE);
             const c = all.find(c => c.spec.id === topicId)!;
             const run = c.status.execution;
-            const ids = new InputStore(home).list().filter(i => !i.status.assess?.[c.metadata.uid]?.completedAt && i.status.assess?.[c.metadata.uid]?.executionId === run?.id).map(i => i.metadata.name);
+            const ids = new InputStore(home).list().filter(i => c.status.notifiedInputs?.includes(i.metadata.uid) && Object.values(i.status.assess ?? {}).some(a => !a.completedAt)).map(i => i.metadata.name);
             const immediate = ids.map(id => new InputStore(home).get(id)!.spec).filter(i => inputAttention(i) === InputAttention.Immediate);
             const first = immediate[0]?.source;
             const address = immediate.length ? (first && immediate.every(i => i.source && sameAddress(first, i.source)) ? first : undefined) : c.spec.address;
             if (run && address && agent.notify !== false && typeof result === "string" && result) {
-              new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])).create(topicId, randomUUID(), outputSpec(c, { topicId, text: result }, { executionId: run.id, target: address, inputIds: ids }));
+              new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])).create(topicId, randomUUID(), outputSpec(c, { topicId, text: result }, { executionId: run.id, target: address, inputIds: ids, inputUids: Object.fromEntries(ids.map(id => [id, new InputStore(home).get(id)!.metadata.uid])) }));
             }
             if (run && ids.length && agent.complete !== false) await assessAll(resources, c, run.id, { inputIds: ids, summary: String(result) || "Handled silently" });
           }

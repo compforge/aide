@@ -29,7 +29,7 @@ export type TopicNoteUpdate = z.infer<typeof TopicNoteSchema>;
 
 async function targetTopic(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, topicUid?: string) {
   const current = await resources.get<TopicSpec, TopicStatus>(resourceRef(owner));
-  if (!current || current.metadata.uid !== owner.metadata.uid || current.metadata.deletionTimestamp || current.spec.parentRef
+  if (!current || current.metadata.uid !== owner.metadata.uid || current.metadata.deletionTimestamp
     || current.status.execution?.id !== executionId) throw new Error("Chief execution is no longer active");
   const all = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
   const target = topicSubtree(all, current).find(t => t.metadata.uid === (topicUid ?? current.metadata.uid));

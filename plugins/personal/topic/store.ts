@@ -1,7 +1,7 @@
 import { agentCall } from "../observation/reference.ts";
 import { ensureDefaultTopic } from "./default.ts";
 import { topicSubtree } from "./tree.ts";
-import { resourceRef } from "../input/state.ts";
+import { resourceRef, assessments } from "../input/state.ts";
 import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient, Address } from "@compforge/aide-plugin";
@@ -38,7 +38,7 @@ export class TopicStore {
   byKey(key: string): TopicResource | undefined {
     return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "topicKey", value: key } })[0];
   }
-  list(): Topic[] { return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).filter((r) => !r.metadata.deletionTimestamp && r.status.weaveLock !== r.spec.id).map((r) => this.project(r as TopicResource)); }
+  list(): Topic[] { return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).filter((r) => !r.metadata.deletionTimestamp).map((r) => this.project(r as TopicResource)); }
   get(id: string): Topic | undefined { const r = this.resource(id); return r && this.project(r); }
   /** @spec The creating Channel supplies its address and first-input name before asynchronous routing; later attachment cannot replace either. */
   async ensure(id: string, address?: Address, name?: string): Promise<TopicResource> {
@@ -53,6 +53,8 @@ export class TopicStore {
     const selected = topicId ? this.resource(topicId) : undefined;
     if (topicId && !selected) return [];
     const members = new Set((selected ? topicSubtree(all, selected) : all).map(t => t.metadata.uid));
+    const outputExecutions = new Map(this.outputStore.list().flatMap(o => o.spec.executionId
+      ? Object.values(o.spec.inputUids ?? {}).map(uid => [uid, o.spec.executionId!] as const) : []));
     return this.inputStore.list().flatMap(input => {
       const binding = input.status.route?.result?.topics.find(ref => members.has(ref.uid));
       const own = selected && input.status.assess?.[selected.metadata.uid];
@@ -63,8 +65,8 @@ export class TopicStore {
       const receipt = own ?? receipts.sort((a, b) => (b.assignedAt ?? "").localeCompare(a.assignedAt ?? ""))[0]
         ?? Object.values(input.status.assess ?? {})[0];
       return [{ ...input, topicId: topic.spec.id, consumption: {
-        phase: receipt?.completedAt ? "done" as const : receipt?.lastError ? "failed" as const : receipt?.executionId ? "running" as const : undefined,
-        executionId: receipt?.executionId, summary: receipt?.result?.summary, error: receipt?.completedAt ? undefined : receipt?.lastError,
+        phase: receipt?.completedAt ? "done" as const : undefined,
+        executionId: receipt?.completedBy?.executionId ?? outputExecutions.get(input.metadata.uid), summary: receipt?.result?.summary,
       } }];
     });
   }
@@ -129,7 +131,9 @@ export class TopicStore {
     const inputIds = [...new Set([...(options.inputIds ?? (inputId ? [inputId] : [])), ...(options.respondToInputId ? [options.respondToInputId] : [])])];
     const attached = (id: string) => {
       const input = this.inputStore.get(id);
-      const assigned = owner ? input?.status.handle?.[owner.metadata.uid] : input?.status.assess?.[initial.metadata.uid];
+      const members = new Set(topicSubtree(this.listResources(), this.resource(topicId)!).map(t => t.metadata.uid));
+      const assigned = owner ? input?.status.handle?.[owner.metadata.uid] : input &&
+        (assessments(input, resourceRef(initial), members).length);
       if (!input || !assigned) throw new Error(`say Input is not attached to this Topic: ${id}`);
       return input;
     };
@@ -212,7 +216,14 @@ export class TopicStore {
       } catch (error) { if (attempt >= 8 || !/version conflict/.test(String(error))) throw error; }
     }
   }
-  pending(uid: string) { return this.inputStore.query("assessPending", uid); }
+  scope(uid: string) {
+    const all = this.listResources(), root = all.find(t => t.metadata.uid === uid);
+    return root ? topicSubtree(all, root) : [];
+  }
+  pending(uid: string) {
+    const inputs = this.scope(uid).flatMap(t => this.inputStore.query("assessPending", t.metadata.uid));
+    return [...new Map(inputs.map(i => [i.metadata.uid, i])).values()];
+  }
   private project(r: TopicResource): Topic {
     const pending = this.pending(r.metadata.uid);
     return { ...r.spec, name: r.spec.name || initialTopicName(pending[0]?.spec.text ?? ""), revision: Number(r.metadata.resourceVersion), createdAt: r.metadata.creationTimestamp,

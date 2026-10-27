@@ -19,14 +19,14 @@ export const InputSpecSchema = z.object({ source: AddressSchema.optional(), topi
 
 const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict();
 const attempt = z.object({ agent: AgentStatusSchema.optional(), completedBy: AgentCallSchema.optional(), executionId: z.string().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(), lastError: z.string().optional() }).strict();
-const assessment = attempt.extend({ resource: ref, assignedAt: z.string(), result: z.object({ summary: z.string(), disposition: z.enum(["completed", "cancelled", "rejected"]).optional() }).strict().optional() });
+const assessment = z.object({ completedAt: z.string().optional(), completedBy: AgentCallSchema.optional(), resource: ref, assignedAt: z.string(), result: z.object({ summary: z.string(), disposition: z.enum(["completed", "cancelled", "rejected"]).optional() }).strict().optional() }).strict();
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   type: INPUT_TYPE,
   schema: { spec: InputSpecSchema, status: z.object({
     route: attempt.extend({ nextAttemptAt: z.string().optional(), attempts: z.number().int().nonnegative().optional(),
       result: z.object({ topics: z.array(ref), reason: z.string() }).strict().optional() }).optional(),
     assess: z.record(z.string(), assessment).optional(),
-    handle: z.record(z.string(), assessment.extend({ appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
+    handle: z.record(z.string(), assessment.extend({ ...attempt.shape, appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
   }).strict() },
   validator: { update(previous, current) {
     if (!isDeepStrictEqual(previous.spec, current.spec)) throw new Error("Input content is immutable");

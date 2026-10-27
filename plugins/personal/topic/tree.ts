@@ -54,7 +54,7 @@ export async function ensureSourceTopic(resources: ResourceClient, key: string, 
  * @link docs/personal/topic.md#研判与上下文
  */
 export function pendingAbsorption(all: readonly TopicResource[], root: TopicResource, includeNotes = false) {
-  return topicSubtree(all, root).filter(t => t.spec.parentRef && !t.status.weaveLock)
+  return topicSubtree(all, root).filter(t => t.spec.parentRef)
     .filter(t => includeNotes
       ? all.find(p => p.metadata.uid === t.spec.parentRef!.uid)?.status.absorbed?.[t.metadata.uid] !== understandingVersion(t)
       : all.find(p => p.metadata.uid === t.spec.parentRef!.uid)?.status.absorbedSummaries?.[t.metadata.uid] !== summaryVersion(t))

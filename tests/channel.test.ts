@@ -54,7 +54,8 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   assert.equal(failed.status, 200);
   await aide.settled();
   assert.equal(aide.outputs().length, 0);
-  assert.equal(aide.topics.inputs("me")[0]!.consumption.phase, "failed");
+  assert.equal(aide.topics.inputs("me")[0]!.consumption.phase, undefined);
+  assert.ok(aide.topics.resource("me")!.status.lastError);
   assert.equal(aide.works().length, 0);
   const response = await fetch(`${url}/messages`, {
     method: "POST", headers: { "content-type": "application/json" },

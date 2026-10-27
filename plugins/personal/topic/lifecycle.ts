@@ -21,7 +21,7 @@ export async function releaseTopicAgent(context: PluginContext, execution: Recon
  */
 export async function collectTopic(context: PluginContext, topic: TopicResource) {
   const delay = { requeueAfterMs: 60_000 };
-  if (topic.spec.default || topic.status.execution || topic.status.weaveLock) return delay;
+  if (topic.spec.default || topic.status.execution) return delay;
   const remaining = Date.parse(topic.status.lastInputAt ?? topic.metadata.creationTimestamp) + topicPolicy(context.instance.config.topic).idleMs - Date.now();
   if (remaining > 0) return { requeueAfterMs: Math.min(remaining, delay.requeueAfterMs) };
   const all = await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
