@@ -1,8 +1,26 @@
 # Connector 与 Source
 
-Connector 是 Host 提供的外部访问能力；Source 是 Personal 的持续观察策略。connectors 声明访问方式与账号，plugins.personal.sources 选择关注范围和频率。只声明 Connector 可供按需读取，不启动观察。
+Connector 提供外部资源的操作与适配；业务 Source 根据这些能力组织持续观察。connectors 声明访问方式与账号，plugins.personal.sources 选择关注范围和频率。只声明 Connector 可供按需读取，不启动观察。
 
 Host 装配统一客户端并持有凭证，Runner 经类型化 API 查询。平台评论写入由 Host 消费 Output；来源观察不直接通知用户或创建 Work。访问账号与可选 Me 标记分别表达权限与被服务的人，见 [Person](../personal/person.md)。
+
+## 职责与粒度
+
+Connector 通常按外部系统或服务划分，一个外部接入对应一个 Connector，通过连接配置区分实例与账号。它统一承接认证、协议和数据适配、外部操作与访问约束。同一外部系统内的 Repository、PullRequest 等业务对象，由同一个 Connector 暴露相应能力。
+
+一个 Connector 可以支持多个业务 Source。Source 按业务目标和观察生命周期划分，分别拥有观察范围、刷新频率、快照、检查点和下游交接策略。需要独立调度、重试或回收时，Source 的粒度可以细到一个业务 Resource；集合观察与单对象观察都由实际业务决定，不要求 Source 与 Connector 一一对应。
+
+Forge 的演进方向是一个 Forge Connector 支持 RepositorySource 与 PullRequestSource：前者维护低频刷新的仓库清单，后者观察 PR 变化。两者共享外部访问能力，各自拥有业务状态；Source 可以维护其它观察资源，也可以将变化形成 Input。当前实现仍使用 ForgeSource，拆分属于后续更新，不代表这些新资源已经可配置。
+
+## 外部访问约束（长期方向）
+
+外部资源具有请求配额和承载能力，Connector 的长期契约应包含可配置的请求速率、突发额度与并发上限，并配合超时、有界等待和重试策略。Source 的观察频率表达业务时效要求；实际外部请求还必须遵守接入侧的统一访问预算。
+
+限速应按外部服务真实的配额范围组织，例如服务实例、账号或接口。共享配额的多个 Source、插件和按需调用应共享预算，新增 Source 或并发资源不能各自获得一份独立额度。分页请求、内部重试同样计入实际请求预算；底层统一客户端已有的控制能力应直接复用，避免在多个层次重复排队与重试。
+
+遇到服务端限流时，应遵守其重试时间提示并进行有界退避，将等待、限流与失败反馈给调用方。Source 据此保留检查点并重新调度。诊断应能区分业务轮询间隔、预算等待和外部请求失败，且不记录凭证。
+
+当前各接入已有的超时和限流错误处理以实现及对应文档为准；这里定义的是待建设的统一配置与共享预算能力，不表示当前已具备 Connector 级统一限速器。
 
 ## 接入目录
 
