@@ -223,6 +223,56 @@ test("Search pages keep a fixed window across restart and never advance on provi
   assert.equal(f.resource().status.scans![0]!.watermark, new Date(now).toISOString());
 });
 
+/** @case Expired discovery cursors recover across restart without losing window coverage or duplicating accepted messages. */
+test("Expired Lark search tokens restart the fixed window and deduplicate earlier pages", async (t) => {
+  const f = fixture(t, watch(), "direct");
+  let restarted = false;
+  f.incoming(async query => {
+    if (query.pageToken === "expired") throw new Error("Connector messages.search failure: Lark read failed (api/unknown/1020)");
+    if (query.pageToken === "fresh") return page([message("om_two")]);
+    return page([message("om_one")], { hasMore: true, nextToken: restarted ? "fresh" : "expired" });
+  });
+  await f.observe();
+  const first = structuredClone(f.resource().status.scans!.find(scan => scan.kind === "direct")!);
+  assert.equal(first.window!.token, "expired");
+  assert.equal(f.inputs.list().length, 1);
+  await f.restart();
+  restarted = true;
+  await f.observe(now + 60_000);
+  const reset = f.resource().status.scans!.find(scan => scan.kind === "direct")!;
+  assert.equal(reset.watermark, first.watermark);
+  assert.deepEqual(reset.window, { start: first.window!.start, end: first.window!.end });
+  assert.equal(f.inputs.list().length, 1);
+  assert.match(JSON.stringify(f.warnings), /discovery cursor expired/);
+  await f.restart();
+  await f.observe(now + 120_000);
+  assert.equal(f.inputs.list().length, 1, "Replayed first page does not create another Input");
+  assert.equal(f.resource().status.scans!.find(scan => scan.kind === "direct")!.window!.token, "fresh");
+  await f.observe(now + 180_000);
+  const complete = f.resource().status.scans!.find(scan => scan.kind === "direct")!;
+  assert.equal(complete.watermark, first.window!.end);
+  assert.equal(complete.window, undefined);
+  assert.equal(f.inputs.list().length, 2);
+  assert.ok(f.searches.every(query => query.start === first.window!.start && query.end === first.window!.end));
+});
+
+test("Only Lark API 1020 on a continuation clears a discovery token", async (t) => {
+  for (const detail of ["Lark read failed (api/unknown/999)", "Lark read failed (authorization/missing_scope/1020)"]) {
+    const f = fixture(t, watch(), "direct");
+    f.incoming(async () => page([message("om_one")], { hasMore: true, nextToken: "keep" }));
+    await f.observe();
+    const before = structuredClone(f.resource().status.scans!.find(scan => scan.kind === "direct"));
+    f.incoming(async () => { throw new Error(detail); });
+    await assert.rejects(f.observe(now + 60_000), /Lark read failed/);
+    assert.deepEqual(f.resource().status.scans!.find(scan => scan.kind === "direct"), before);
+  }
+  const f = fixture(t, watch(), "direct");
+  f.incoming(async () => { throw new Error("Lark read failed (api/unknown/1020)"); });
+  await assert.rejects(f.observe(), /1020/);
+  assert.equal(f.resource().status.scans!.find(scan => scan.kind === "direct")!.window!.token, undefined);
+  assert.equal(f.warnings.length, 0, "A first-page failure cannot be recovered by clearing a token");
+});
+
 test("Only associated replies trigger follow-up; duplicate polls stay silent and tracking expires", async (t) => {
   const f = fixture(t, watch({ followupMs: 120_000 }), "mention");
   f.incoming(async () => page([message("om_at")]));
