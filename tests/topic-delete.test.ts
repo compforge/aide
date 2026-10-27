@@ -42,7 +42,7 @@ test("Web deletes a revision-checked Topic and preserves shared Input and siblin
   assert.equal((await remove("a", 0)).status, 400);
   assert.equal((await remove("a", revision, { sessionId: "other" })).status, 400);
   assert.equal((await fetch(base + "/topics/delete", { method: "POST", headers: { origin: "https://unrelated.example", "content-type": "application/json" }, body: JSON.stringify({ topicId: "a", revision }) })).status, 403);
-  await aide.setTopicTrigger("a", true); await aide.settled();
+  await aide.setTopicTrigger("a", false); await aide.settled();
   assert.equal((await remove("a", revision)).status, 409);
   const currentRevision = scope.topics.get("a")!.revision;
   assert.equal((await remove("a", currentRevision)).status, 200);

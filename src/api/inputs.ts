@@ -12,7 +12,7 @@ export interface InputTimelineEntry {
   id: string; at?: string; stage: "receive" | "route" | "assess" | "handle" | "output";
   title: string; text?: string; status?: string; consumer?: InputConsumer; executionId?: string;
 }
-function definition(aide: ChannelService, input: { origin: "channel" | "source" | "chief"; originId: string }) {
+function definition(aide: ChannelService, input: { origin: "channel" | "source" | "chief" | "trigger"; originId: string }) {
   try { return aide.inputDefinition(input).label; }
   catch { return `${input.origin} / ${input.originId}`; }
 }

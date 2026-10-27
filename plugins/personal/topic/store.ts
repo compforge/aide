@@ -15,7 +15,7 @@ import { outputView, type OutputDraft, type OutputView } from "../../../src/outp
 import { OutputStore } from "../output/store.ts";
 import { outputWrite } from "../output.ts";
 import { digest } from "../chief-model.ts";
-import { topicTrigger, nextTriggerAt } from "./trigger.ts";
+import { topicTrigger } from "./trigger.ts";
 export const topicKey = digest;
 
 /** @spec Topic is a Personal Resource. Input facts are shared; consumption and replies belong to each Topic. */
@@ -87,7 +87,7 @@ export class TopicStore {
     const trigger = topicTrigger(c.spec.trigger);
     if (trigger.enabled === enabled) return trigger;
     trigger.enabled = enabled;
-    await this.client.replace(c, { ...c.spec, trigger }, { ...c.status, nextTriggerAt: enabled ? nextTriggerAt(trigger) : null });
+    await this.client.replace(c, { ...c.spec, trigger }, { ...c.status, nextTriggerAt: null });
     return trigger;
   }
   outputs(topicId?: string): OutputView[] {

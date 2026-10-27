@@ -24,12 +24,13 @@ export function createTimeline() {
     for (const block of harnesses.values()) heading.append(identityBadge(block.icon, block.label));
   }
   function receivedInput(block: TopicBlock) {
-    const source = block.origin === 'source';
+    const source = block.origin === 'source' || block.origin === 'trigger';
+    const originLabel = block.origin === 'trigger' ? '系统' : source ? 'Source' : 'Channel';
     const summary = block.type === 'summary';
     const node = element('article', undefined, 'message received-input ' + (source || summary ? 'source' : 'user'));
     if (block.inputId) node.dataset.inputId = block.inputId;
     const header = element('div', undefined, 'input-heading');
-    header.append(identityBadge(block.icon, summary ? block.label : (source ? 'Source' : 'Channel') + (block.label ? ' · ' + block.label : '') + (block.relation === 'sent' ? ' · 你' : '')));
+    header.append(identityBadge(block.icon, summary ? block.label : originLabel + (block.label ? ' · ' + block.label : '') + (block.relation === 'sent' ? ' · 你' : '')));
     if (block.sender?.name) {
       const sender = element('a', '人物资料');
       sender.href = '/people?' + new URLSearchParams({ person: block.sender.name, ...(block.sender.uid ? { uid: block.sender.uid } : {}) });

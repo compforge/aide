@@ -16,6 +16,7 @@ export interface TopicStatus extends ResourceContext {
   nextAbsorbAt?: string;
   absorbAttempts?: number;
   nextTriggerAt?: string | null;
+  idleSince?: string;
   execution?: LoopExecution | null;
   receipts: Array<{ key: string; responseId: string }>;
 }

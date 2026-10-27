@@ -146,8 +146,10 @@ test("Real Runner groups deferred observations by canonical environment and rest
   const scope = aide.personal, client = scope.plugins.resourceClient("personal");
   const topic = (await client.get<import("../plugins/personal/topic/model.ts").TopicSpec, import("../plugins/personal/topic/model.ts").TopicStatus>(assignment.resource))!;
   assert.equal(topic.spec.name, "dev");
-  await client.replace(topic, { ...topic.spec, trigger: { enabled: true, intervalSeconds: 3600 } },
-    { ...topic.status, nextTriggerAt: new Date(Date.now() - 1000).toISOString() });
+  await client.replace(topic, { ...topic.spec, trigger: { enabled: true } },
+    { ...topic.status, nextTriggerAt: new Date(Date.now() - 1000).toISOString(), idleSince: new Date(Date.now() - 901_000).toISOString() });
+  await scope.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1", resourceApiVersion: topic.apiVersion,
+    resourceKind: topic.kind, resourceId: topic.metadata.name, controllerName: "agent" });
   await aide.settled();
   assert.ok(aide.topics.inputStore.get(input.metadata.name)!.status.assess![assignment.resource.uid]!.completedAt);
   assert.match(prompts.at(-1)!, /镜像 api=A → api=B/);

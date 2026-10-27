@@ -243,7 +243,9 @@ Default 是没有子主题的独立 root，不参与 Weave，不能作为其他 
 
 ## Topic 定时回顾
 
-根 Topic 的 trigger 默认关闭，开启后默认每小时回顾一次，同时可批量研判积存的 Deferred Input；重启合并错过的周期。回顾不生成外部 Input，也不刷新 lastInputAt。成为子节点后不再独立回顾。Routine 的 cron/event 继续承担具体职责，区别于 Chief 的综合回顾。
+根 Topic 的 `trigger.enabled` 默认开启；Chief Harness 的 `config.trigger.intervalSeconds`（默认 60 秒）控制检查间隔，`idleSeconds`（默认 900 秒）控制连续空闲多久后回顾。每次 Chief 执行结束后重新计算空闲时间，尚未执行过的 Topic 从创建时计算；Deferred Input 到达不重置空闲时间。Chief 正在执行时不会因定时检查 steer、followUp 或积攒补跑，恢复中断执行后也重新计时。
+
+满足空闲条件即回顾，即使没有积存 Input 或已知变化，也会检查相关 memory、当前认识、未决问题与 Work，并可批量研判 Deferred Input。回顾生成 `origin: trigger`、`attention: normal` 的系统 Input，创建时即绑定当前 root Topic 并建立研判目标，不调用 Route 模型。检查时间推进与 Input 创建原子提交；同一轮检查不会重复生成。Chief 通过正常 Input 链路复用原生 session，用 `assess_input` 留下回顾结果。已有普通 Input 或知识吸收激活 Chief 时，不另行生成回顾 Input；生成期间到达的消息可合并进同一轮。系统 Input 不刷新 lastInputAt，也不新增授权。成为子节点后不再独立回顾。Routine 的 cron/event 继续承担具体职责，区别于 Chief 的综合回顾。
 
 ## 删除与验证
 
