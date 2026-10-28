@@ -10,6 +10,16 @@ Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标�
 
 所有创建、更新和删除请求都在存储事务内经过 Schema 与 Validator，包括 Agent 工具、Source 与 commit。Schema 的规范化输出作为持久数据；Validator 可读取同一作用域内的事务快照，包含当前 commit 已完成的前序写入。它不能执行异步工作或外部副作用。校验、引用计算或配额失败会回滚整笔写入。
 
+## API 版本与演进
+
+apiVersion 表达资源结构与语义契约，metadata.generation 表达 spec 修订，metadata.resourceVersion 用于并发控制；产品 VERSION 与它们独立。
+
+不兼容的结构或语义调整必须升级受影响 Kind 的 apiVersion，例如 v1alpha1 → v1alpha2。兼容性新增可留在原版本；已有 Condition 含义的改变同样属于契约变更。升版需要同步 Schema、类型声明、引用与消费入口。
+
+当前开发阶段旧版本先不处理：不实现转换、迁移、双读或字段回退，也不自动删除旧记录。存储与查询按 apiVersion 区分，修改版本号不会使旧记录自动变成新版本。未来确需保留旧数据时再单独建设版本转换能力。
+
+Personal 的共享状态片段、Conditions 与对象独有状态的更新方案见 [资源状态与组件协作](../status.md)。
+
 ## 事务与删除
 
 ResourceClient.commit 在同一插件实例的存储事务中组合 create、replace、patchStatus 和 delete。delete 携带资源快照，校验 UID 与 resourceVersion 后提交级联删除请求，最终移除仍走标准 Reconcile / finalize 生命周期。Schema、版本、引用、索引或配额失败会回滚，Watch 只在提交后收到通知。事务可提交资源与幂等回执，但不能包含外部请求；外部动作成功后的写入冲突不能靠重做动作解决。
