@@ -167,7 +167,7 @@ test("topic navigation lists persisted scopes without creating them and keeps me
   const before = aide.topics.list();
   const summaries = await list();
   assert.deepEqual(summaries.map((item) => item.id), [group, "work-only", "source:requirements", "me"]);
-  assert.deepEqual(summaries[0], { id: group, uid: aide.personal.topics.resource(group)!.metadata.uid, revision: aide.personal.topics.get(group)!.revision, default: false, trigger: { enabled: true }, name: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2), taskCount: 1, routineCount: 0 });
+  assert.deepEqual(summaries[0], { id: group, uid: aide.personal.topics.resource(group)!.metadata.uid, revision: aide.personal.topics.get(group)!.revision, default: false, trigger: { enabled: true }, name: "检查 <项目> 进展", preview: "群会话的回复", updatedAt: at(2), taskCount: 1, routineCount: 0, childCount: 0 });
   assert.deepEqual(summaries.map((item) => [item.taskCount, item.routineCount]), [[1, 0], [0, 1], [0, 0], [0, 0]]);
   assert.equal(summaries.find((item) => item.id === "source:requirements")?.preview, "");
   assert.equal(summaries.find((item) => item.id === "source:requirements")?.name, "private observation");
