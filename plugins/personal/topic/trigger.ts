@@ -2,15 +2,53 @@ import { commitStatus } from "../status.ts";
 import type { maintenanceAgenda } from "./maintenance.ts";
 import { z } from "zod";
 import type { PluginContext } from "@compforge/aide-plugin";
-import type { TopicResource } from "./model.ts";
+import type { TopicResource, TopicStatus } from "./model.ts";
+import { ChiefTriggerConfigSchema, type ChiefTriggerConfig } from "../../../agents/chief/config.ts";
+import { readTopicSubtree } from "./tree.ts";
 import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
-import { inputRef, resourceRef } from "../input/state.ts";
+import { inputRef, pendingInputs, resourceRef, type Input } from "../input/state.ts";
 import { digest } from "../chief-model.ts";
 
 /** Root Topics opt into Chief idle reviews; cadence belongs to Chief configuration. */
 export const TopicTriggerSchema = z.object({ enabled: z.boolean().default(true) }).strict();
 export type TopicTrigger = z.infer<typeof TopicTriggerSchema>;
 export const topicTrigger = (trigger?: TopicTrigger): TopicTrigger => TopicTriggerSchema.parse(trigger ?? {});
+
+export function idleReviewDelay(config: ChiefTriggerConfig, count = 0): number {
+  return 1000 * (config.backoff
+    ? Math.min(config.idleSeconds * config.backoff.factor ** count, config.backoff.maxIdleSeconds)
+    : config.idleSeconds);
+}
+
+/**
+ * @spec Only a successful timer-only execution with completed receipts and no business backlog advances backoff.
+ * @why The caller commits this patch with execution release; its execution-ID fence makes repeated finalization harmless.
+ * @spec Concurrent business arrivals change the root activity/version, so stale finalization cannot extend their wait.
+ * @case tests/topic-trigger.test.ts
+ * @link docs/personal/topic.md#topic-定时回顾
+ */
+export async function idleReviewCompletion(context: Pick<PluginContext, "resources" | "instance">,
+  previous: Readonly<TopicResource>, current: Readonly<TopicResource>,
+  outcome: { inputs?: readonly Input[]; succeeded: boolean; at: string }): Promise<Partial<TopicStatus>> {
+  const config = ChiefTriggerConfigSchema.parse(context.instance.config.chiefTrigger ?? {});
+  if (!config.backoff) return {};
+  const { inputs, succeeded, at } = outcome;
+  const enabled = !current.spec.parentRef && !current.metadata.deletionTimestamp && topicTrigger(current.spec.trigger).enabled;
+  let quiet = enabled && succeeded && !!inputs?.length && inputs.every(i => i.spec.origin === "trigger")
+    && !current.status.execution?.admissionRevision && current.status.lastInputAt === previous.status.lastInputAt
+    && current.status.weaveRevision === previous.status.weaveRevision;
+  if (quiet) {
+    const receipts = await Promise.all(inputs!.map(i => context.resources.get<InputSpec, InputStatus>(resourceRef(i))));
+    quiet = receipts.every((i, index) => i?.metadata.uid === inputs![index]!.metadata.uid
+      && i?.status.assess?.executionId === current.status.execution!.id && !!i.status.assess.completedAt);
+    if (quiet) {
+      const topics = await readTopicSubtree(context.resources, resourceRef(current));
+      quiet = !(await pendingInputs(context.resources, resourceRef(current), topics)).some(i => i.spec.origin !== "trigger");
+    }
+  }
+  const idleReviewCount = quiet ? Math.min(Number.MAX_SAFE_INTEGER, (current.status.idleReviewCount ?? 0) + 1) : 0;
+  return { idleReviewCount, nextTriggerAt: enabled ? new Date(Date.parse(at) + idleReviewDelay(config, idleReviewCount)).toISOString() : null };
+}
 
 /**
  * @spec An idle review is born routed to its root, with normal attention and no new authority.

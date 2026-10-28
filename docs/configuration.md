@@ -276,9 +276,16 @@ harnesses:
       trigger:
         intervalSeconds: 60   # 检查周期
         idleSeconds: 900      # Chief 连续空闲多久后回顾
+        backoff:             # 可选；省略时保持固定回顾间隔
+          factor: 2
+          maxIdleSeconds: 7200
 ```
 
 两项均为正整数秒，可独立配置。Topic 只保存 `trigger.enabled` 开关。首次空闲从 Topic 创建时计算，后续从任意一轮 Chief 执行结束时计算；Deferred Input 到达不会重置计时。回顾生成已绑定 root Topic 的系统 Input（`origin: trigger`、`attention: normal`），经普通处理链路复用当前原生 session，并通过 `assess_input` 保存结果；检查 memory、Topic 认识、未决问题、Work 和待处理 Input，不要求已有新变化。系统 Input 不刷新 Topic 的业务活跃时间。检查期间正在运行的 Chief 不会收到额外 steer / followUp，也不会在结束后补跑错过的周期。
+
+`backoff.factor` 必须大于 1；`maxIdleSeconds` 为正整数秒，不小于 `idleSeconds`。启用后，每次成功完成且未处理业务 Input、没有新增业务输入或待研判业务积压的定时回顾，下一次等待按倍数增长，最长不超过上限。上述配置依次等待 15、30、60、120 分钟，此后维持 120 分钟；等待从执行完成时计算，`intervalSeconds` 检查频率不变。
+
+新业务 Input 重置退避，并将回顾提前到不晚于输入到达后的基础间隔；Deferred 仍不直接激活 Chief，也不因连续到达而推迟已有计划。回顾自身的 trigger Input 不重置退避。失败、中断或缺少研判完成回执时恢复基础间隔，保留原有待核对状态，不自动重放。退避次数与下次时间持久化，正常重启继续原计划；重新启用回顾或子 Topic 独立为 root 时从基础间隔开始。子理解更新和 Task / Routine 独立调度不等待退避到期。详细契约见 [Topic 定时回顾](personal/topic.md#topic-定时回顾)。
 
 ## Topic 消费策略
 

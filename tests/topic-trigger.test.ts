@@ -17,6 +17,8 @@ import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/persona
 import { summaryVersion, understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
+import { ChiefTriggerConfigSchema, type ChiefTriggerConfig } from "../agents/chief/config.ts";
+import { finalizeExecution } from "../plugins/personal/loop.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { assessAll, routeTo } from "./input-state-fixture.ts";
@@ -35,23 +37,28 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   await aide.topics.ensure("root");
   const resources = aide.runtime.plugins.resourceClient("personal");
   const read = () => aide.topics.resource("root")!;
-  const context = { resources: { ...resources }, logger: { info() {}, warn() {}, error() {} }, instance: { config: {} } } as unknown as PluginContext;
+  const config: { chiefTrigger?: ChiefTriggerConfig } = {};
+  const context = { resources: { ...resources }, logger: { info() {}, warn() {}, error() {} }, instance: { config } } as unknown as PluginContext;
   const calls: { prompt: string; sessionId: string }[] = [];
+  const hooks: { beforeAssess?: () => Promise<void>; afterAssess?: () => Promise<void>; skipAssessment?: boolean } = {};
   let sequence = 0;
-  const run = async (trigger = { intervalSeconds: 60, idleSeconds: 900 }, fail = false) => {
+  const run = async (trigger: ChiefTriggerConfig = { intervalSeconds: 60, idleSeconds: 900 }, fail = false) => {
+    config.chiefTrigger = trigger;
     const executionId = `run-${++sequence}`;
     const execution = { executionId, withContext() { return this; }, verbs: { async harness(args: { operation?: string; prompt: string; sessionId: string }) {
       if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
       calls.push(args);
       if (fail) return { state: "failure", error: "provider disconnected" };
+      await hooks.beforeAssess?.();
       const admitted = aide.topics.inputStore.list().filter(i => i.status.assess?.executionId === executionId && !i.status.assess?.completedAt);
-      await assessAll(resources, read(), executionId, { inputIds: admitted.map(i => i.metadata.name), summary: "Nothing needs action" });
+      if (!hooks.skipAssessment) await assessAll(resources, read(), executionId, { inputIds: admitted.map(i => i.metadata.name), summary: "Nothing needs action" });
+      await hooks.afterAssess?.();
       return { state: "success", value: { result: { stopReason: "end_turn" } } };
     } } } as unknown as ReconcileContext;
     return reconcileChief(context, execution, read(), trigger);
   };
   const due = () => resources.patchStatus(read(), { nextTriggerAt: past(), idleSince: past() });
-  return { aide, resources, context, calls, read, run, due, home, options };
+  return { aide, resources, context, calls, read, run, due, home, options, hooks };
 }
 
 test("Chief trigger defaults and independent settings validate under config.trigger", () => {
@@ -63,6 +70,172 @@ test("Chief trigger defaults and independent settings validate under config.trig
   for (const key of ["intervalSeconds", "idleSeconds"]) for (const value of [0, -1, 0.5, "60", 2_147_484])
     assert.throws(() => config({ [key]: value }));
   assert.throws(() => config({ reconcileIntervalSeconds: 60 }));
+  assert.deepEqual(config({ backoff: { factor: 2, maxIdleSeconds: 7200 } }), {
+    intervalSeconds: 60, idleSeconds: 900, backoff: { factor: 2, maxIdleSeconds: 7200 },
+  });
+  for (const factor of [0, 1, -2, Infinity, NaN]) assert.throws(() => config({ backoff: { factor, maxIdleSeconds: 7200 } }));
+  for (const maxIdleSeconds of [0, 899, 900.5, 2_147_484]) assert.throws(() => config({ backoff: { factor: 2, maxIdleSeconds } }));
+});
+
+const backoff = ChiefTriggerConfigSchema.parse({ backoff: { factor: 2, maxIdleSeconds: 7200 } });
+const fullyIdle = () => new Date(Date.now() - 7201_000).toISOString();
+
+/** @case Successful empty reviews double the delay, cap it, and atomically survive duplicate finalization and restart. */
+test("Quiet review backoff doubles from completion, caps, and persists across restart", async t => {
+  const f = await fixture(t);
+  for (const [count, delay] of [[1, 1800_000], [2, 3600_000], [3, 7200_000], [4, 7200_000]]) {
+    await f.resources.patchStatus(f.read(), { nextTriggerAt: past(), idleSince: fullyIdle() });
+    await f.run(backoff);
+    const topic = f.read();
+    assert.equal(topic.status.idleReviewCount, count);
+    assert.equal(Date.parse(topic.status.nextTriggerAt!) - Date.parse(topic.status.idleSince!), delay);
+    assert.equal(topic.status.execution, null);
+    assert.equal(topic.status.lastInputAt, undefined, "Trigger Inputs never reset backoff or create business activity");
+    const executionId = f.aide.topics.inputStore.list().at(-1)!.status.assess!.executionId!;
+    await finalizeExecution(f.context, topic, executionId, "");
+    assert.equal(f.read().metadata.resourceVersion, topic.metadata.resourceVersion);
+    await f.run(backoff);
+    assert.equal(f.calls.length, count, "Checks between reviews must not call the model");
+  }
+  const saved = f.read().status;
+  f.options.config.harnesses.chief.config.trigger = backoff;
+  await f.aide.close();
+  const restarted = new Aide(f.home, f.options, log);
+  try {
+    await restarted.start(); await restarted.settled();
+    const status = restarted.topics.resource("root")!.status;
+    assert.equal(status.idleReviewCount, saved.idleReviewCount);
+    assert.equal(status.nextTriggerAt, saved.nextTriggerAt);
+    assert.equal(restarted.invocations().length, 0);
+  } finally { await restarted.close(); }
+});
+
+for (const target of ["root", "child"]) for (const attention of [InputAttention.Normal, InputAttention.Deferred])
+test(`${attention} ${target} input resets backoff without changing activation semantics`, async t => {
+  const f = await fixture(t);
+  if (target === "child") {
+    const child = await f.aide.topics.ensure("child");
+    const attached = await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(f.read()) }, child.status);
+    await f.resources.patchStatus(f.read(), { absorbed: { [attached.metadata.uid]: understandingVersion(attached) },
+      absorbedSummaries: { [attached.metadata.uid]: summaryVersion(attached) } });
+  }
+  const idleSince = new Date(Date.now() - 1000).toISOString();
+  await f.resources.patchStatus(f.read(), { idleReviewCount: 3, idleSince,
+    nextTriggerAt: new Date(Date.now() + 7200_000).toISOString() });
+  const input = await f.aide.topics.submit("new-business", { topicId: target, origin: "source", originId: "fixture", attention, text: "new fact" });
+  await routeTo(f.resources, f.aide.topics.resource(target)!.metadata, input);
+  const arrivedAt = Date.parse(f.read().status.lastInputAt!);
+  await f.run(backoff);
+  assert.equal(f.read().status.idleReviewCount, 0);
+  if (attention === InputAttention.Deferred) {
+    assert.equal(f.calls.length, 0, "Resetting backoff must not activate Deferred inputs");
+    assert.ok(Date.parse(f.read().status.nextTriggerAt!) <= arrivedAt + 900_000);
+    const deadline = f.read().status.nextTriggerAt;
+    await f.run(backoff);
+    assert.equal(f.read().status.nextTriggerAt, deadline, "Repeated checks must not postpone the deadline");
+    await f.due(); await f.run(backoff);
+  }
+  assert.equal(f.calls.length, 1);
+  assert.ok(f.aide.topics.inputStore.get("new-business")!.status.assess!.completedAt);
+  assert.equal(f.read().status.idleReviewCount, 0, "A review handling business inputs is not empty");
+});
+
+test("Child understanding still activates Chief before the backed-off review deadline", async t => {
+  const f = await fixture(t);
+  const child = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "changed-child",
+    spec: { id: "changed-child", parentRef: resourceRef(f.read()) }, status: { summary: "New durable understanding", recent: [], receipts: [] } });
+  await f.resources.patchStatus(f.read(), { idleReviewCount: 3, idleSince: new Date().toISOString(),
+    nextTriggerAt: new Date(Date.now() + 7200_000).toISOString() });
+  await f.run(backoff);
+  assert.equal(f.calls.length, 1);
+  assert.match(f.calls[0]!.prompt, /"kind":"absorb"/);
+  assert.ok(f.calls[0]!.prompt.includes(child.metadata.uid));
+  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.aide.topics.inputStore.list().length, 0, "Event activation needs no timer Input");
+});
+
+test("A business followUp admitted during a review resets backoff even after its receipt completes", async t => {
+  const f = await fixture(t);
+  await f.resources.patchStatus(f.read(), { nextTriggerAt: past(), idleSince: fullyIdle(), idleReviewCount: 2 });
+  f.hooks.beforeAssess = async () => {
+    const input = await f.aide.topics.submit("followup", { topicId: "root", origin: "channel", originId: "fixture", text: "new request" });
+    await routeTo(f.resources, f.read().metadata, input);
+    const execution = f.read().status.execution!;
+    await f.resources.patchStatus(f.aide.topics.inputStore.get("followup")!, { assess: { executionId: execution.id, startedAt: execution.startedAt } });
+    await f.resources.patchStatus(f.read(), { execution: { ...execution, admissionRevision: 1 } });
+  };
+  await f.run(backoff);
+  assert.ok(f.aide.topics.inputStore.get("followup")!.status.assess!.completedAt);
+  assert.equal(f.read().status.idleReviewCount, 0);
+});
+
+test("Deferred arrival during inference prevents backoff growth and waits for another activation", async t => {
+  const f = await fixture(t);
+  await f.resources.patchStatus(f.read(), { nextTriggerAt: past(), idleSince: fullyIdle(), idleReviewCount: 2 });
+  f.hooks.afterAssess = async () => {
+    const input = await f.aide.topics.submit("late", { topicId: "root", origin: "source", originId: "fixture", attention: InputAttention.Deferred, text: "late fact" });
+    await routeTo(f.resources, f.read().metadata, input);
+  };
+  await f.run(backoff);
+  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.aide.topics.inputStore.get("late")!.status.assess!.executionId, undefined);
+  assert.equal(Date.parse(f.read().status.nextTriggerAt!) - Date.parse(f.read().status.idleSince!), 900_000);
+});
+
+test("Business arrival racing the final commit wins over a quiet review", async t => {
+  const f = await fixture(t);
+  await f.due();
+  let once = true;
+  f.context.resources.commit = async writes => {
+    if (once && writes.some(w => w.operation === "patchStatus" && w.resource.kind === "Topic" && w.patch.idleReviewCount === 1)) {
+      once = false;
+      const input = await f.aide.topics.submit("race", { topicId: "root", origin: "source", originId: "fixture", attention: InputAttention.Deferred, text: "arrived at commit" });
+      await routeTo(f.resources, f.read().metadata, input);
+    }
+    return f.resources.commit(writes);
+  };
+  await f.run(backoff);
+  assert.equal(once, false);
+  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.read().status.execution, null);
+  assert.equal(Date.parse(f.read().status.nextTriggerAt!) - Date.parse(f.read().status.idleSince!), 900_000);
+});
+
+for (const mode of ["failure", "missing_receipt", "interrupted"] as const)
+test(`${mode} cannot advance quiet-review backoff`, async t => {
+  const f = await fixture(t);
+  await f.resources.patchStatus(f.read(), { nextTriggerAt: past(), idleSince: fullyIdle(), idleReviewCount: 2 });
+  if (mode === "interrupted") await f.resources.patchStatus(f.read(), { execution: { id: "interrupted", startedAt: past() } });
+  if (mode === "missing_receipt") f.hooks.skipAssessment = true;
+  await f.run(backoff, mode === "failure");
+  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.read().status.execution, null);
+  assert.equal(Date.parse(f.read().status.nextTriggerAt!) - Date.parse(f.read().status.idleSince!), 900_000);
+  if (mode !== "interrupted") assert.ok(f.aide.topics.inputStore.list()[0]!.status.assess!.lastError);
+});
+
+test("Disabling and re-enabling review clears backoff and starts a base idle period", async t => {
+  const f = await fixture(t);
+  await f.resources.patchStatus(f.read(), { idleReviewCount: 3, idleSince: fullyIdle(), nextTriggerAt: past() });
+  await f.aide.setTopicTrigger("root", false);
+  await f.run(backoff);
+  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.read().status.nextTriggerAt, null);
+  await f.aide.setTopicTrigger("root", true);
+  await f.run(backoff);
+  assert.equal(f.calls.length, 0);
+  assert.equal(Date.parse(f.read().status.nextTriggerAt!) - Date.parse(f.read().status.idleSince!), 900_000);
+});
+
+test("Removing backoff configuration restores the base cadence instead of retaining a long deadline", async t => {
+  const f = await fixture(t);
+  await f.resources.patchStatus(f.read(), { idleReviewCount: 3, idleSince: past(),
+    nextTriggerAt: new Date(Date.now() + 7200_000).toISOString() });
+  await f.run();
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.read().status.idleReviewCount, 0);
+  await f.run();
+  assert.equal(f.calls.length, 1);
 });
 
 test("Web persists per-Topic enablement; cadence belongs to Chief", async t => {
