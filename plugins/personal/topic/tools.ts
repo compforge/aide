@@ -6,7 +6,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Store } from "../store.ts";
 import type { TopicResource } from "./model.ts";
 import { understandingVersion } from "./tree.ts";
-import { contextPage, understanding } from "../background.ts";
+import { contextPage, topicPage, understanding } from "../background.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<T> => definition;
 /** Root agents may inspect their own subtree, never expand unrelated trees into automatic context. */
@@ -43,9 +43,9 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
         const root = active(), parent = parentUid ?? root.metadata.uid;
         const all = subtree();
         if (!all.some(t => t.metadata.uid === parent)) throw new Error("Topic is outside this root");
-        return result(contextPage(all.filter(t => t.spec.parentRef?.uid === parent).map(t => ({
+        return result(topicPage(all.filter(t => t.spec.parentRef?.uid === parent), t => ({
           uid: t.metadata.uid, name: t.spec.name, persons: topicPersons(store, t), ...understanding(t.status, 1200), version: understandingVersion(t), organization: t.status.organization,
-        })), offset));
+        }), offset));
       } },
     { name: "read_topic", label: "Read topic", description: "Read this root or a descendant's full summary and Notes in text pages. A non-null nextOffset means more text remains: continue with offset=nextOffset; null marks the end. Use its resource version for summarize_topic and understandingVersion for absorbed receipts after reviewing the child context.",
       parameters: Type.Object({ uid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),

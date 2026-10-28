@@ -6,7 +6,7 @@ import { join } from "node:path";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import { topicCandidates, contextPage, relatedWork } from "../plugins/personal/background.ts";
+import { topicCandidates, topicCandidatePage, relatedWork } from "../plugins/personal/background.ts";
 import { Background as RouteBackground } from "../plugins/personal/route/background.ts";
 import { Background as TopicBackground } from "../plugins/personal/topic/background.ts";
 import { Background as RoutineBackground } from "../plugins/personal/routine/background.ts";
@@ -31,17 +31,17 @@ test("resource context pages all live candidates and isolate related Work", asyn
   }
   const candidates = topicCandidates(store);
   const ids: string[] = [];
-  let page = contextPage(candidates);
+  let page = topicCandidatePage(store);
   while (true) {
     assert.ok(JSON.stringify(page.items).length < 16100);
     assert.ok(page.items.length > 0 && page.items.length <= 20);
     ids.push(...page.items.map(c => c.uid));
     if (page.nextOffset === null) break;
-    page = contextPage(candidates, page.nextOffset);
+    page = topicCandidatePage(store, page.nextOffset);
   }
-  assert.deepEqual(ids, candidates.map(c => c.uid));
+  assert.deepEqual(ids, candidates.map(c => c.metadata.uid));
   assert.ok(new RouteBackground(store).text().length < 16500);
-  const c = store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).find(c => c.metadata.uid === candidates.at(-1)!.uid)!;
+  const c = store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).find(c => c.metadata.uid === candidates.at(-1)!.metadata.uid)!;
   const captured = new RouteBackground(store);
   const before = captured.text();
   await resources.patchStatus(c, { receipts: [{ key: "execution-bookkeeping", responseId: "response" }] });
@@ -51,7 +51,7 @@ test("resource context pages all live candidates and isolate related Work", asyn
   await resources.patchStatus(aide.topics.resource("topic-0")!, { summary: "current-topic-understanding" });
   const deleted = aide.topics.resource("topic-1")!;
   await resources.delete(deleted, deleted.metadata.name);
-  assert.ok(!topicCandidates(store).some(c => c.uid === deleted.metadata.uid));
+  assert.ok(!topicCandidates(store).some(c => c.metadata.uid === deleted.metadata.uid));
 
   const definition = { kind: "routine" as const, title: "Related responsibility", instruction: "Inspect assigned evidence", trigger: { cron: null, timezone: "UTC", event: "sample" } };
   const own = await aide.work("topic-0").create(definition);

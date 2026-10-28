@@ -308,13 +308,15 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 ### 近期相关人物
 
-`persons` 是读取时派生的上下文视图，不持久化为 Topic 字段。查询沿当前 Topic 的 parent 索引找到子树，再按 Input.status.topic 索引读取当前归属的材料；Input 移动、子树拆分或归组后，下次读取自然反映新归属，不参考首次 route 回执。
+`status.recent` 继续保存 Note 列表；每条 Note 可带 `persons?: PersonRef[]`，表达该事项明确涉及的人物，引用固定 UID。Chief 从 Input.sender / receivers、read_person 或已有 Note 获取人物依据，维护有价值的事项时记录关联；不为填充名单专门创建 Note。引用也可沿用已有证据中的历史人物，即使该 Person 已删除。更新时省略 persons 保留已有关联，显式 `[]` 清空。旧 Note 无此字段仍有效，无需回填。
 
-当前从最近 7 天内最新的至多 50 条 Source / Channel Input 提取 sender、receivers，以及 Lark 多人消息证据中已识别的作者和接收者，按 Person UID 去重。预览最多 8 人，仅包含引用与展示名，缺失或被同名新实例替换的人物标记 unavailable；不展开人物 summary / recent。视图同时标明时间窗、采样条数、是否还有 Input、样本内省略的人数，空列表不证明没有相关人物。
+上下文里的 `persons` 从当前 Topic 自身 recent 中按 UID 去重提取，最多预览 8 人，返回 `source: recentNotes`、Note 数和省略人数。它表示“近期事项涉及的人物”，允许不完整；不会回查 Input 或递归汇总子树。Root Chief 综合子主题事项时保留人物引用，Weave 创建父 Topic 时也随 Note 一起保留。人物已删除或被同名新实例替换时标记 unavailable，不展开私密人物认识。原先基于 Input 创建时间的 7 天 / 50 条采样规则不再使用。
 
-Route 的 root 候选、Chief 的主题背景和主题读取工具包含此预览；Weave 通过 list_topics / read_topic 按需读取，初始检查批次仍保持轻量。预览计入各自分页字符预算，Chief 需要人物认识时再调用 read_person。采样使用数据库端时间、数量限制和引用投影，不把整段历史正文载入自动上下文。
+Route、Chief、Weave 的列表在确定范围、排序和 offset 后，逐条补充活动、人物名称等派生信息，达到条数或字符预算即停止，最多多计算一条因字符预算放不下的候选；nextOffset 指向未返回的下一条。人物名称采用只读投影，不刷新 Person 的访问时间，不开启写事务。Note 自动预览同样最多携带 8 个引用，超出部分以 personsOmitted 标明，完整引用保留在 Note 中并可分页读取。完整 Topic 读取只解析所选 Topic 的人物。
 
-共同人物是语义关联的参考，应结合主题名称、summary、近期活动和组织调整原因。既不设置“交集超过多少就合并”的阈值，也不因没有交集否定关联；尤其 Me 可能出现在大量无关主题中。此派生信息不单独触发 Weave，也不改变归组权限。验证见 `tests/topic-persons.test.ts`。
+`catalogFingerprint` 根据已加载的 Topic UID、名称、组织调整依据、认识版本和最近 Input 时间计算，覆盖目录顺序、名称、组织调整依据及已记录的认识；`fingerprint` 根据本页实际返回内容计算。目录指纹不为未展示项查询活动、人物名称，也不承诺这些派生数据仍然有效，依赖详情前重新读取相关页面。
+
+共同人物仅是语义关联的参考，结合名称、summary、近期活动与组织调整原因判断；不按人物交集阈值自动归组，也不以缺少交集否定关联。Me 的广泛出现尤其不能充当归组理由。人物关联变化沿用 Note 的刷新与回顾节奏，不单独激活 Agent。验证见 `tests/topic-persons.test.ts`。
 
 ### 研判与上下文
 

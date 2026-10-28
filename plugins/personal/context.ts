@@ -1,3 +1,4 @@
+import { PersonRefSchema } from "./person/model.ts";
 import { z } from "zod";
 
 export const SUMMARY_CHARS = 16000;
@@ -6,7 +7,7 @@ export const RECENT_CHARS = 16000;
 /** @spec One resource-local Note follows one recent matter with a stable identity and Host-maintained timestamps.
  * @link docs/personal/README.md#有界认识与近期依据
  */
-export const NoteSchema = z.object({ id: z.string().min(1), createdAt: z.string(), updatedAt: z.string(), text: z.string() }).strict();
+export const NoteSchema = z.object({ id: z.string().min(1), createdAt: z.string(), updatedAt: z.string(), text: z.string(), persons: z.array(PersonRefSchema).optional() }).strict();
 export type Note = z.infer<typeof NoteSchema>;
 /**
  * @spec Updated Notes move to the newest end. All persisted writes apply the same count and character budgets.

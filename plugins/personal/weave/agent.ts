@@ -27,10 +27,10 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
     };
     const roots = () => {
       active();
-      return weaveCandidates(store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE));
+      return weaveCandidates(store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "root", value: "root" } }));
     };
     const tools: ToolDefinition[] = [
-      { name: "list_topics", label: "List root topics", description: "Search all available roots, including previously reviewed roots and roots with children. rootCount is the full catalog; matchingRootCount is this search. Read bounded pages with sampled related Persons; shared people are a contextual clue, never an automatic merge criterion. Do not expand the entire catalog.",
+      { name: "list_topics", label: "List root topics", description: "Search all available roots, including previously reviewed roots and roots with children. rootCount is the full catalog; matchingRootCount is this search. Read bounded pages with Persons associated with recent Notes; shared people are a contextual clue, never an automatic merge criterion. Do not expand the entire catalog.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })), query: Type.Optional(Type.String()) }),
         async execute(_id, { offset = 0, query }) {
           return result(searchRootTopics(roots(), query, offset, batchSize, topic => topicPersons(store, topic)));

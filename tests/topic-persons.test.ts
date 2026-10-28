@@ -13,10 +13,11 @@ import { inputPrinter } from "../plugins/personal/input/printer.ts";
 import { personRef, PERSON_TYPE, type PersonRef } from "../plugins/personal/person/model.ts";
 import { knownReceivers, messageReceivers } from "../plugins/personal/person/receivers.ts";
 import { topicPersons } from "../plugins/personal/topic/persons.ts";
-import { moveMaterial, moveTopic } from "../plugins/personal/topic/organize.ts";
+import { retainRecent } from "../plugins/personal/context.ts";
+import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
-import { topicCandidates, topicParts } from "../plugins/personal/background.ts";
+import { topicCandidatePage, topicParts, understanding } from "../plugins/personal/background.ts";
 import { searchRootTopics } from "../plugins/personal/weave/candidates.ts";
 import { topicTools } from "../plugins/personal/topic/tools.ts";
 import type { ChatMessage } from "@compforge/aide-plugin";
@@ -64,65 +65,112 @@ test("receiver resolution uses scoped verified humans and actual direct/reply ev
   assert.deepEqual(await messageReceivers(f.aide.persons, "cli_people", message, [{ ...parent, chatId: "different" }]), []);
 });
 
-test("Topic people follow current subtree ownership and keep historical references separate from replacement Persons", async t => {
-  const f = fixture(t), root = await f.aide.topics.ensure("root"), other = await f.aide.topics.ensure("other");
-  const raw = await f.aide.topics.ensure("child");
-  const child = await f.resources.replace(raw, { ...raw.spec, parentRef: resourceRef(root) }, raw.status);
-  const sender = await f.person("sender", "Sender"), receiver = await f.person("receiver", "Receiver"), author = await f.person("author", "Author");
-  const privatePerson = await f.aide.persons.read(sender.name, sender.uid);
-  await f.aide.persons.summarize(sender.name, sender.uid, privatePerson.metadata.resourceVersion, "private-profile-marker");
-  const fact = await f.input("conversation", child, { originId: SOURCES.lark.id, sender, receivers: [receiver, sender],
-    text: "private-body-marker", observation: { message: { person: sender }, context: { messages: [
-      { person: author }, { person: author, receivers: [receiver] },
-      { person: { ...author, kind: "Topic" } }, { person: { ...author, namespace: "malformed" } }, { sender: { id: "ou_not-a-person-reference" } },
-    ] } } });
-  await f.input("elsewhere", other, { sender: await f.person("foreign") });
-  const projected = topicPersons(f.store, root);
-  assert.deepEqual(projected.items.map(p => p.ref.uid).sort(), [sender.uid, receiver.uid, author.uid].sort());
-  assert.equal(projected.sampledInputs, 1);
-  assert.doesNotMatch(JSON.stringify(projected), /private-profile-marker|private-body-marker|not-a-person-reference/);
-  const active = await f.resources.patchStatus(root, { execution: { id: "chief", startedAt: new Date().toISOString() } });
-  const move = (topicUid: string) => moveMaterial(f.resources, active, { kind: "Input", id: fact.metadata.name, topicUid, reason: "Reclassify current evidence" });
-  await move(root.metadata.uid);
-  assert.equal(topicPersons(f.store, child).items.length, 0);
-  assert.deepEqual(f.aide.topics.inputStore.get(fact.metadata.name)!.status.route, fact.status.route, "Historical route does not control the derived view");
-  assert.equal(topicPersons(f.store, root).items.length, 3);
-  await move(child.metadata.uid);
-  const independent = await moveTopic(f.resources, active, { uid: child.metadata.uid, parentUid: null, reason: "Independent responsibility" });
-  assert.equal(topicPersons(f.store, root).items.length, 0);
-  assert.ok(topicPersons(f.store, independent).items.some(p => p.ref.uid === author.uid));
-  await f.resources.delete(PERSON_TYPE, receiver.name);
-  f.store.resources.finalizeDeletion(PERSON_TYPE, receiver.name);
-  await f.resources.create(PERSON_TYPE, { name: receiver.name, spec: { name: "Replacement", identities: [] }, status: { summary: "", recent: [], updatedAt: new Date().toISOString(), updatedBy: "user" } });
-  const stale = topicPersons(f.store, independent).items.find(p => p.ref.uid === receiver.uid)!;
-  assert.ok("unavailable" in stale && stale.unavailable);
-  assert.equal("name" in stale, false);
-  assert.deepEqual(topicPersons(f.store, independent, Date.now() + 8 * 86400_000).items, [], "old Inputs leave the rolling window");
+test("Notes keep optional UID-pinned people through updates, clearing, retention and stale references", async t => {
+  const f = fixture(t), initial = await f.aide.topics.ensure("notes");
+  await f.resources.patchStatus(initial, { execution: { id: "chief", startedAt: new Date().toISOString() } });
+  const read = () => f.aide.topics.resource("notes")!;
+  const one = await f.person("one", "Same name"), two = await f.person("two", "Same name");
+  const update = (args: Record<string, unknown>, call: string) => upsertTopicNote(f.resources, read(), "chief", {
+    version: read().metadata.resourceVersion, text: "Discuss release", ...args,
+  } as never, call);
+  const created = await update({}, "create");
+  assert.equal(read().status.recent[0]!.persons, undefined, "Old Notes remain valid");
+  await update({ noteId: created.noteId, persons: [one, two, one] }, "people");
+  assert.deepEqual(read().status.recent[0]!.persons, [one, two], "Same text can gain people; UID deduplicates, names do not");
+  await update({ noteId: created.noteId, text: "Discuss release progress" }, "progress");
+  assert.deepEqual(read().status.recent[0]!.persons, [one, two]);
+  assert.deepEqual(retainRecent(read().status.recent)[0]!.persons, [one, two], "Synthesis/retention preserves associations");
+  await assert.rejects(update({ noteId: created.noteId, persons: [{ ...one, kind: "Topic" }] }, "invalid"), /Person/);
+  await f.resources.delete(PERSON_TYPE, one.name);
+  f.store.resources.finalizeDeletion(PERSON_TYPE, one.name);
+  await f.resources.create(PERSON_TYPE, { name: one.name, spec: { name: "Replacement", identities: [] },
+    status: { summary: "private-profile-marker", recent: [], updatedAt: new Date().toISOString(), updatedBy: "user" } });
+  await update({ noteId: created.noteId, text: "Keep historical attribution" }, "historical");
+  const view = topicPersons(f.store, read());
+  assert.equal(view.items.length, 2);
+  assert.ok("unavailable" in view.items[0]! && view.items[0].unavailable);
+  assert.doesNotMatch(JSON.stringify(view), /Replacement|private-profile-marker/);
+  const copied = await update({ persons: [one] }, "copy-historical");
+  assert.deepEqual(read().status.recent.find(n => n.id === copied.noteId)!.persons, [one]);
+  await update({ noteId: copied.noteId, persons: [] }, "clear-copy");
+  await update({ noteId: created.noteId, persons: [] }, "clear");
+  assert.deepEqual(read().status.recent[0]!.persons, []);
+  assert.deepEqual(topicPersons(f.store, read()).items, []);
 });
 
-test("bounded samples reach Route, Chief and Weave without changing grouping or exposing profiles", async t => {
-  const f = fixture(t), root = await f.aide.topics.ensure("bounded");
+test("Topic people use only its own recent Notes and project names without Input scans or retention writes", async t => {
+  const f = fixture(t), root = await f.aide.topics.ensure("root"), child = await f.aide.topics.ensure("child");
   const refs = await Promise.all(Array.from({ length: 10 }, (_, i) => f.person(`p${i}`)));
-  for (let i = 0; i < 52; i++) await f.input(`input-${i}`, root, { receivers: refs });
-  const expected = topicPersons(f.store, root);
-  assert.equal(expected.items.length, 8);
-  assert.equal(expected.omittedPersons, 2);
-  assert.equal(expected.sampledInputs, 50);
-  assert.equal(expected.hasMoreInputs, true);
-  assert.deepEqual(topicCandidates(f.store).find(t => t.uid === root.metadata.uid)!.persons, expected);
-  const part = topicParts(f.store, root, root.spec.id).topic;
-  assert.match(part, /sampledInputs/);
-  const tools = topicTools(f.store, () => root);
-  const read = await tools.find(t => t.name === "read_topic")!.execute("read", {}, undefined, undefined, {} as never);
-  assert.match(JSON.stringify(read), /sampledInputs/);
-  const roots = [];
-  for (let i = 0; i < 12; i++) {
-    const c = await f.aide.topics.ensure(`weave-${i}`);
-    roots.push(await f.resources.patchStatus(c, { summary: "s".repeat(1200) }));
+  await f.input("unnoted", root, { sender: refs[0], receivers: refs });
+  const at = new Date().toISOString();
+  await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(root) }, { ...child.status,
+    recent: [{ id: "child-note", createdAt: at, updatedAt: at, text: "Child matter", persons: refs }] });
+  assert.deepEqual(topicPersons(f.store, root).items, [], "Neither Inputs nor child Notes implicitly populate the root");
+  const noted = await f.resources.patchStatus(root, { recent: [{ id: "root-note", createdAt: at, updatedAt: at, text: "Synthesized matter", persons: refs }] });
+  const db = f.store.resources.storage.db, before = db.prepare("SELECT total_changes() AS n").get()!.n;
+  const expected = topicPersons(f.store, noted);
+  assert.equal(db.prepare("SELECT total_changes() AS n").get()!.n, before);
+  assert.equal(expected.items.length, 8); assert.equal(expected.omittedPersons, 2);
+  assert.equal(expected.source, "recentNotes"); assert.equal(expected.noteCount, 1);
+  const preview = understanding(noted.status).recent[0]!;
+  assert.equal(preview.persons!.length, 8); assert.equal(preview.personsOmitted, 2);
+  assert.equal(noted.status.recent[0]!.persons!.length, 10, "Only the preview is truncated");
+  assert.deepEqual(topicCandidatePage(f.store).items.find(t => t.uid === root.metadata.uid)!.persons, expected);
+  assert.match(topicParts(f.store, noted, root.spec.id).topic, /recentNotes/);
+  const read = await topicTools(f.store, () => noted).find(t => t.name === "read_topic")!.execute("read", {}, undefined, undefined, {} as never);
+  assert.match(JSON.stringify(read), /recentNotes/);
+});
+
+test("Weave enriches only page candidates, preserves offsets and separates directory and page fingerprints", async t => {
+  const f = fixture(t), base = await f.aide.topics.ensure("base");
+  const roots = Array.from({ length: 100 }, (_, i) => ({ ...base, metadata: { ...base.metadata, uid: String(i) }, spec: { id: String(i) } }));
+  let calls = 0;
+  const project = () => { calls++; return { items: [], source: "recentNotes" as const, noteCount: 0, omittedPersons: 0 }; };
+  const first = searchRootTopics(roots, undefined, 0, 12, project);
+  assert.equal(calls, 12); assert.equal(first.items.length, 12); assert.equal(first.matchingRootCount, 100);
+  calls = 0;
+  const next = searchRootTopics(roots, undefined, first.nextOffset!, 12, project);
+  assert.equal(calls, 12); assert.equal(next.items[0]!.uid, "12");
+  assert.equal(first.catalogFingerprint, next.catalogFingerprint); assert.notEqual(first.fingerprint, next.fingerprint);
+  const changed = searchRootTopics(roots, undefined, 0, 12, () => ({ ...project(), omittedPersons: 1 }));
+  assert.equal(first.catalogFingerprint, changed.catalogFingerprint); assert.notEqual(first.fingerprint, changed.fingerprint);
+  calls = 0;
+  assert.equal(searchRootTopics(roots, undefined, 100, 12, project).items.length, 0); assert.equal(calls, 0);
+  const large = roots.map(r => ({ ...r, status: { ...r.status, summary: "s".repeat(1200) } }));
+  calls = 0;
+  const bounded = searchRootTopics(large, undefined, 0, 20, project);
+  assert.ok(bounded.items.length < 20); assert.equal(calls, bounded.items.length + 1);
+  assert.equal(bounded.nextOffset, bounded.items.length);
+});
+
+test("Route and Chief query people and recent activity only for the current page", async t => {
+  const f = fixture(t), person = await f.person("participant"), at = new Date().toISOString();
+  for (let i = 0; i < 25; i++) {
+    const root = await f.aide.topics.ensure(`root-${i}`);
+    await f.resources.patchStatus(root, { summary: "s".repeat(2000), recent: [{ id: "note", text: "Matter", createdAt: at, updatedAt: at, persons: [person] }] });
   }
-  const page = searchRootTopics(roots, undefined, 0, 12, () => expected);
-  assert.ok(page.nextOffset !== null, "person previews count against the page budget");
-  assert.ok(JSON.stringify(page.items).length < 17000);
-  assert.equal(page.items[0]!.persons!.items.length, 8);
-  assert.equal(f.aide.topics.resource(root.spec.id)!.spec.parentRef, undefined, "people are evidence, not a grouping action");
+  const db = f.store.resources.storage.db, prepare = db.prepare.bind(db);
+  let people = 0, activities = 0;
+  db.prepare = ((sql: string, ...args: unknown[]) => {
+    if (sql.includes("kind='aide.dev/Person'")) people++;
+    if (sql.includes("WITH RECURSIVE tree")) activities++;
+    return prepare(sql, ...args as []);
+  }) as typeof db.prepare;
+  t.after(() => { db.prepare = prepare; });
+  const page = topicCandidatePage(f.store);
+  assert.ok(page.items.length < 20);
+  assert.equal(people, page.items.length + 1); assert.equal(activities, page.items.length + 1);
+  const root = await f.aide.topics.ensure("chief");
+  for (const child of f.store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE).filter(t => t.metadata.uid !== root.metadata.uid))
+    await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
+  people = 0;
+  const tools = topicTools(f.store, () => root);
+  const result = await tools.find(t => t.name === "list_topics")!.execute("page", {}, undefined, undefined, {} as never);
+  const content = result.content[0]!; assert.equal(content.type, "text");
+  if (content.type !== "text") throw new Error("Expected text");
+  const children = JSON.parse(content.text);
+  assert.equal(people, children.items.length + (children.items.length < 20 ? 1 : 0));
+  people = 0;
+  topicParts(f.store, root, root.spec.id);
+  assert.ok(people <= 21, "Automatic Chief background also bounds child projections");
 });

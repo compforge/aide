@@ -2,7 +2,7 @@ import type { TopicPersons } from "../topic/persons.ts";
 import { createHash } from "node:crypto";
 import type { TopicResource } from "../topic/model.ts";
 import { understandingVersion, summaryVersion } from "../topic/tree.ts";
-import { contextPage } from "../background.ts";
+import { topicPage } from "../background.ts";
 
 export function weaveCandidates(topics: readonly TopicResource[]) {
   return topics.filter(t => !t.metadata.deletionTimestamp && !t.spec.parentRef && !t.spec.default)
@@ -20,8 +20,8 @@ export function candidateVersion(topic: TopicResource) {
  * @link docs/personal/weave.md
  */
 export function candidatePage(roots: readonly TopicResource[], offset: number, limit: number, persons?: (topic: TopicResource) => TopicPersons) {
-  return contextPage(roots.map(t => ({ uid: t.metadata.uid, name: t.spec.name?.slice(0, 200), summary: t.status.summary.slice(0, 1200),
-    ...(persons ? { persons: persons(t) } : {}), version: understandingVersion(t), lastInputAt: t.status.lastInputAt, organization: t.status.organization })), offset, limit);
+  return topicPage(roots, t => ({ uid: t.metadata.uid, name: t.spec.name?.slice(0, 200), summary: t.status.summary.slice(0, 1200),
+    ...(persons ? { persons: persons(t) } : {}), version: understandingVersion(t), lastInputAt: t.status.lastInputAt, organization: t.status.organization }), offset, limit);
 }
 
 /** @spec Search counts describe matching roots, independently of the global catalog and pending review batch.

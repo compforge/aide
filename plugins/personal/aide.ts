@@ -8,7 +8,7 @@ import { topicTools } from "./topic/tools.ts";
 import { weaveSession } from "./weave/agent.ts";
 import { WEAVE_TYPE } from "./weave/model.ts";
 import { inputPreview } from "./input/prompt.ts";
-import { topicCandidates, contextPage } from "./background.ts";
+import { topicCandidatePage } from "./background.ts";
 import { Background as TopicBackground } from "./topic/background.ts";
 import { Background as RouteBackground } from "./route/background.ts";
 import { routineSession } from "./routine/agent.ts";
@@ -146,8 +146,8 @@ export class Personal {
       return createRouteAgent({ ...options, config, scope: `route:${initial.metadata.uid}`, background: identityBackground(this.options.persons, () => { active(); return new RouteBackground(this.store); }), port: {
         topics: (offset, query, parentUid) => {
           active();
-          const page = contextPage(topicCandidates(this.store, query, parentUid), offset);
-          return { topics: page.items, total: page.total, fingerprint: page.fingerprint, nextOffset: page.nextOffset };
+          const page = topicCandidatePage(this.store, offset, query, parentUid);
+          return { topics: page.items, total: page.total, catalogFingerprint: page.catalogFingerprint, fingerprint: page.fingerprint, nextOffset: page.nextOffset };
         },
         input: (id, offset) => { const r = active(); return this.readLoopInput(resourceRef(r), id, offset); },
         route: async (raw, toolCallId) => {

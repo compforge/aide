@@ -14,7 +14,7 @@ import { resourceRef, assignmentWatch } from "../plugins/personal/input/state.ts
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
 import { readTopicSubtree, understandingVersion } from "../plugins/personal/topic/tree.ts";
-import { topicCandidates } from "../plugins/personal/background.ts";
+import { topicCandidatePage } from "../plugins/personal/background.ts";
 import { TASK_TYPE, type TaskResource } from "../plugins/personal/task/model.ts";
 import { ROUTINE_TYPE, type RoutineResource } from "../plugins/personal/routine/model.ts";
 import { WEAVE_TYPE } from "../plugins/personal/weave/model.ts";
@@ -111,7 +111,7 @@ test("Maintenance counts direct ownership and Route includes bounded activity fr
   await moveMaterial(f.resources, f.root(), { kind: "Input", id: "two", topicUid: child.metadata.uid, reason: "Specific subject" });
   agenda = await maintenanceAgenda(f.resources, await tree(), { maxInput: 1 });
   assert.equal(agenda.reason, "review", "moving one material resolves direct pressure without changing tree totals");
-  const candidates = topicCandidates(f.aide.personal.store);
+  const candidates = topicCandidatePage(f.aide.personal.store).items;
   const entry = candidates.find(c => c.uid === f.root().metadata.uid)!;
   assert.ok(entry.recent?.some(r => r.text.startsWith("two:")), "root activity covers descendants even with no summary");
   assert.ok(entry.recent!.length <= 3 && entry.recent!.every(r => r.text.length <= 240));
