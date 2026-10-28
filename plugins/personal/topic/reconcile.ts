@@ -1,4 +1,4 @@
-import { refreshSummaryConditions } from "./conditions.ts";
+import { registerTopicObservations } from "./conditions.ts";
 import { maintenanceAgenda } from "./maintenance.ts";
 import { pendingAbsorption, readTopicRoot, readTopicSubtree, summaryVersion } from "./tree.ts";
 import { collectTopic, releaseTopicAgent } from "./lifecycle.ts";
@@ -42,6 +42,7 @@ function watch(context: PluginContext): Watch {
     } } };
 }
 export function registerTopics(context: PluginContext): void {
+  registerTopicObservations(context);
   const triggerConfig = ChiefTriggerConfigSchema.parse(context.instance.config.chiefTrigger ?? {});
   context.controllers.register({ resourceType: TOPIC_TYPE, maxConcurrency: 1, watches: [watch(context), assignmentWatch("assess", "Topic", context.resources)],
     reconcile: (execution, c: Readonly<TopicResource>) => reconcileTopic(context, execution, c) });
@@ -79,7 +80,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     return { requeueAfterMs: 1 };
   }
   if (initial.spec.parentRef) { await releaseTopicAgent(context, execution, initial); return; }
-  let c = await refreshSummaryConditions(context.resources, initial);
+  let c = initial;
   const trigger = topicTrigger(c.spec.trigger);
   const now = Date.now();
   const checkDue = trigger.enabled && !!c.status.nextTriggerAt && Date.parse(c.status.nextTriggerAt) <= now;
@@ -95,7 +96,13 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   if (trigger.enabled && (!c.status.nextTriggerAt || checkDue)) {
     const nextTriggerAt = new Date(now + triggerConfig.intervalSeconds * 1000).toISOString();
     if (due && !inputs.some(i => canActivate(i.spec, c)) && !absorb && !weave) {
-      const review = await createTriggerInput(context, c, nextTriggerAt, await maintenanceAgenda(context.resources, topics, context.instance.config.topic));
+      let review;
+      try { review = await createTriggerInput(context, c, nextTriggerAt, await maintenanceAgenda(context.resources, topics, context.instance.config.topic)); }
+      catch (error) {
+        // Another controller may have updated the Topic; rebuild eligibility and the agenda before retrying.
+        if (/version conflict/.test(String(error))) return { requeueAfterMs: 1 };
+        throw error;
+      }
       // Re-read arrivals after creation; business Inputs keep priority over the queued maintenance request.
       inputs = await nextInputs(context.resources, c, 8);
       if (!inputs.some(i => i.spec.origin !== "trigger" && canActivate(i.spec, c))
@@ -118,7 +125,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   }));
   const policy = topicPolicy(context.instance.config.topic);
   const material = "Knowledge maintenance only: review pending child versions without requiring summary edits. No new user request.";
-  const prompt = `${instructions}\n${weave ? "Topic structure changed through Weave. Review current subtree material and existing Work before deciding what needs attention." : ""}\n${c.status.lastError ? `Previous Chief execution requires inspection: ${c.status.lastError}` : ""}\n${absorption.length ? `Knowledge maintenance: review changed children bottom-up, preserve attribution and disagreements; revise summary only for lasting changes, maintain Notes for recent matters, or confirm absorbed versions without summary; no new mandate or reply obligation. Pending versions (bounded): ${JSON.stringify(absorption.slice(0, 20))}. Read remaining children as needed.` : ""}\nActivation: ${JSON.stringify({ kind: activatingInput ? "input" : weave ? "weave" : "absorb", topicId: c.spec.id, address: c.spec.address, summaryChars: policy.summaryChars, inputId: input?.metadata.name, inputs: inputs.map(i => ({ inputId: i.metadata.name, description: inputPreview(i, Math.floor((policy.contextChars - 3000) / inputs.length)) })), at: new Date().toISOString() })}\n${!activatingInput ? material : ""}\n${input ? "Use read_input for complete evidence and unresolved inputs." : ""}`;
+  const prompt = `${instructions}\n${weave ? "Topic structure changed. Review current subtree material and existing Work before deciding what needs attention." : ""}\n${c.status.lastError ? `Previous Chief execution requires inspection: ${c.status.lastError}` : ""}\n${absorption.length ? `Knowledge maintenance: review changed children bottom-up, preserve attribution and disagreements; revise summary only for lasting changes, maintain Notes for recent matters, or confirm absorbed versions without summary; no new mandate or reply obligation. Pending versions (bounded): ${JSON.stringify(absorption.slice(0, 20))}. Read remaining children as needed.` : ""}\nActivation: ${JSON.stringify({ kind: activatingInput ? "input" : weave ? "weave" : "absorb", topicId: c.spec.id, address: c.spec.address, summaryChars: policy.summaryChars, inputId: input?.metadata.name, inputs: inputs.map(i => ({ inputId: i.metadata.name, description: inputPreview(i, Math.floor((policy.contextChars - 3000) / inputs.length)) })), at: new Date().toISOString() })}\n${!activatingInput ? material : ""}\n${input ? "Use read_input for complete evidence and unresolved inputs." : ""}`;
   const completed = await runInput(context, execution.withContext({ topicId: c.spec.id, ...(input ? { inputId: input.metadata.name, inputIds: inputs.map(i => i.metadata.name) } : {}) }), c,
     "chief", prompt, input?.metadata.name, inputs.map(i => i.metadata.name));
   if (absorption.length) {

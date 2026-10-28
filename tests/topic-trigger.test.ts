@@ -243,3 +243,23 @@ test("Idle trigger reviews Note-only child progress without requiring a summary 
   const review = f.aide.topics.inputStore.list().find(i => i.spec.origin === "trigger")!;
   assert.ok(review.status.assess!.completedAt);
 });
+
+/** @case Concurrent summary observation retries eligibility before creating an idle-review Input. */
+test("Idle review retries after concurrent observation without dispatching a stale review", async t => {
+  const f = await fixture(t);
+  await f.due();
+  let conflict = true;
+  f.context.resources.commit = async writes => {
+    if (conflict && writes.some(w => w.operation === "create" && w.type.kind === "Input")) {
+      conflict = false;
+      await f.resources.patchStatus(f.read(), { summaryDependencies: {} });
+    }
+    return f.resources.commit(writes);
+  };
+  assert.deepEqual(await f.run(), { requeueAfterMs: 1 });
+  assert.equal(f.aide.topics.inputStore.list().length, 0);
+  assert.equal(f.calls.length, 0);
+  await f.run();
+  assert.equal(f.aide.topics.inputStore.list().length, 1);
+  assert.equal(f.calls.length, 1);
+});

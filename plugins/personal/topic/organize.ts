@@ -1,9 +1,8 @@
-import { workPhase } from "../status.ts";
 import { commitStatus } from "../status.ts";
 import { ORGANIZATION_COOLDOWN_MS } from "../weave/config.ts";
 import { OrganizationSchema } from "./ref.ts";
 import { z } from "zod";
-import type { ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
+import type { ResourceClient } from "@compforge/aide-plugin";
 import { digest } from "../chief-model.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
@@ -12,8 +11,8 @@ import { TOPIC_TYPE, type TopicResource } from "./model.ts";
 import { readTopicSubtree } from "./tree.ts";
 
 const reasonSchema = z.string().trim().min(1).max(2000);
-/** @spec Chief reorganizes only its current tree. Version fences cover every observed edge and active execution.
- * @why Concurrent grouping or intake invalidates the whole decision, including a newly detached subtree's responsibility handoff.
+/** @spec Chief reorganizes only its current tree. Transaction validators check current ancestry and active execution.
+ * @why Only changed resources are written; current dependency checks protect responsibility handoff without whole-tree fences.
  * @link docs/personal/topic.md#归属调整与责任交接
  * @case tests/topic-ownership.test.ts
  */
@@ -23,18 +22,6 @@ async function scope(resources: ResourceClient, actor: TopicResource) {
   if (!root || root.spec.parentRef || !root.status.execution || root.status.execution.id !== actor.status.execution?.id)
     throw new Error("Organization requires the active root Chief");
   return { root, topics };
-}
-function fences(topics: TopicResource[], excluded: Set<string> = new Set(), activity?: { topicUid: string; at: string }): ResourceCommit[] {
-  const affected = new Set<string>();
-  let current = topics.find(t => t.metadata.uid === activity?.topicUid);
-  while (current && !affected.has(current.metadata.uid)) {
-    affected.add(current.metadata.uid);
-    current = topics.find(t => t.metadata.uid === current!.spec.parentRef?.uid);
-  }
-  return topics.filter(t => !excluded.has(t.metadata.uid)).map(resource => ({ operation: "patchStatus", resource,
-    // Carry the evidence's actual age; organizing must never invent new business activity.
-    patch: activity && affected.has(resource.metadata.uid)
-      ? { lastInputAt: [resource.status.lastInputAt ?? resource.metadata.creationTimestamp, activity.at].sort().at(-1)! } : {} }));
 }
 export async function createChildTopic(resources: ResourceClient, actor: TopicResource, args: { parentUid?: string; name: string; summary: string; reason: string }, callId: string) {
   const { root, topics } = await scope(resources, actor);
@@ -46,8 +33,8 @@ export async function createChildTopic(resources: ResourceClient, actor: TopicRe
     if (!topics.some(t => t.metadata.uid === existing.metadata.uid)) throw new Error("Created Topic has moved; reread the tree");
     return existing;
   }
-  const organization = OrganizationSchema.parse({ at: new Date().toISOString(), reason: args.reason, actorUid: root.metadata.uid, toUid: parent.metadata.uid });
-  await commitStatus(resources, [...fences(topics), { operation: "create", type: TOPIC_TYPE, name,
+  const organization = OrganizationSchema.parse({ at: new Date().toISOString(), reason: args.reason, actorUid: root.metadata.uid, executionId: root.status.execution!.id, toUid: parent.metadata.uid });
+  await commitStatus(resources, [{ operation: "create", type: TOPIC_TYPE, name,
     spec: { id, name: z.string().trim().min(1).max(200).parse(args.name), parentRef: resourceRef(parent) },
     status: { summary: z.string().max(4000).parse(args.summary), recent: [], receipts: [], organization } }]);
   return (await resources.get<TopicResource["spec"], TopicResource["status"]>({ ...TOPIC_TYPE, namespace: "v1", name }))!;
@@ -61,9 +48,13 @@ export async function moveMaterial(resources: ResourceClient, actor: TopicResour
   if (!material || material.metadata.deletionTimestamp || !topics.some(t => t.metadata.uid === material.status.topic?.uid))
     throw new Error("Material is outside this root");
   if (material.status.topic!.uid === target.metadata.uid) return material;
-  const organization = OrganizationSchema.parse({ at: new Date().toISOString(), reason: args.reason, actorUid: root.metadata.uid,
+  const organization = OrganizationSchema.parse({ at: new Date().toISOString(), reason: args.reason, actorUid: root.metadata.uid, executionId: root.status.execution!.id,
     fromUid: material.status.topic!.uid, toUid: target.metadata.uid });
-  await commitStatus(resources, [...fences(topics, new Set(), args.kind === "Input" ? { topicUid: target.metadata.uid, at: material.metadata.creationTimestamp } : undefined), { operation: "patchStatus", resource: material, patch: { topic: resourceRef(target), organization } }]);
+  await commitStatus(resources, [
+    { operation: "patchStatus", resource: material, patch: { topic: resourceRef(target), organization } },
+    ...(args.kind === "Input" ? [{ operation: "patchStatus" as const, resource: target,
+      patch: { lastInputAt: [target.status.lastInputAt ?? target.metadata.creationTimestamp, material.metadata.creationTimestamp].sort().at(-1)! } }] : []),
+  ]);
   return (await resources.get<InputSpec | WorkResource["spec"], InputStatus | WorkResource["status"]>(resourceRef(material)))!;
 }
 export async function moveTopic(resources: ResourceClient, actor: TopicResource, args: { uid: string; parentUid: string | null; reason: string }) {
@@ -78,18 +69,14 @@ export async function moveTopic(resources: ResourceClient, actor: TopicResource,
     throw new Error("Topic organization is cooling down; review its recorded reason before reversing");
   const subtree = await readTopicSubtree(resources, resourceRef(topic));
   if (subtree.some(t => t.metadata.uid === parent?.metadata.uid)) throw new Error("Topic parent cycle");
-  const busyInputs = (await Promise.all(subtree.map(t => resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessPending", value: t.metadata.uid } })))).flat();
-  const work = (await Promise.all(subtree.flatMap(t => WORK_TYPES.map(type => resources.list<WorkResource["spec"], import("../work-status.ts").WorkAgentStatus>(type,
-    { matchIndex: { name: "topic", value: t.metadata.uid } }))))).flat();
-  if (subtree.some(t => t.status.execution) || busyInputs.some(i => i.status.assess?.executionId) || work.some(w => w.status.execution || workPhase(w) === "running"))
-    throw new Error("Subtree still has active processing; retry after completion");
   const { parentRef: _, ...spec } = topic.spec;
-  const organization = OrganizationSchema.parse({ at: new Date().toISOString(), reason: reasonSchema.parse(args.reason), actorUid: root.metadata.uid,
+  const organization = OrganizationSchema.parse({ at: new Date().toISOString(), reason: reasonSchema.parse(args.reason), actorUid: root.metadata.uid, executionId: root.status.execution!.id,
     fromUid: topic.spec.parentRef?.uid, ...(parent ? { toUid: parent.metadata.uid } : {}) });
-  await commitStatus(resources, [...fences(topics, new Set([topic.metadata.uid]), parent ? { topicUid: parent.metadata.uid, at: topic.status.lastInputAt ?? topic.metadata.creationTimestamp } : undefined),
-    ...busyInputs.map(resource => ({ operation: "patchStatus" as const, resource, patch: {} })),
-    ...work.map(resource => ({ operation: "patchStatus" as const, resource, patch: {} })),
+  await commitStatus(resources, [
     { operation: "replace", resource: topic, spec: { ...spec, ...(parent ? { parentRef: resourceRef(parent) } : {}) },
-      status: { ...topic.status, organization, nextTriggerAt: null, weaveRevision: (topic.status.weaveRevision ?? 0) + 1 } }]);
+      status: { ...topic.status, organization, nextTriggerAt: null, weaveRevision: (topic.status.weaveRevision ?? 0) + 1 } },
+    // Notify the old root of changed responsibility and reject admissions prepared against its previous tree.
+    { operation: "patchStatus", resource: root, patch: { weaveRevision: (root.status.weaveRevision ?? 0) + 1 } },
+  ]);
   return (await resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(topic)))!;
 }

@@ -54,6 +54,8 @@ status 按对象需要组合三类内容：
 
 ResourceClient.commit 在同一插件实例的存储事务中组合 create、replace、patchStatus 和 delete。delete 携带资源快照，校验 UID 与 resourceVersion 后提交级联删除请求，最终移除仍走标准 Reconcile / finalize 生命周期。Schema、版本、引用、索引或配额失败会回滚，Watch 只在提交后收到通知。事务可提交资源与幂等回执，但不能包含外部请求；外部动作成功后的写入冲突不能靠重做动作解决。
 
+单次 commit 上限为 100 个写操作，业务不能通过对整棵树空写来把无界依赖集变成写集。Definition Validator 的 `context.get(type, uid)` 和 `context.list(type, { namespace, matchIndex })` 在当前存储事务中同步读取依赖，保留插件实例与精确 apiVersion/kind 隔离，读取结果是独立快照；list 未指定 namespace 时覆盖本插件该类型的全部 namespace。前序写入和索引变更对后续校验可见，校验失败整体回滚。Host 提供读取与事务机制，祖先链、责任归属和在途工作等业务约束由插件声明。
+
 资源引用使用精确 UID；跨外部能力等待后应重新读取，避免更新同名替代资源。删除先写 deletionTimestamp，再由 Controller 完成终止处理和 finalize；结构性 owner 关系支持级联删除。
 
 ## 索引

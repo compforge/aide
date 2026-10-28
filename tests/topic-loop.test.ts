@@ -145,6 +145,7 @@ test("Chief notification bookkeeping does not wake Topic Reconcile", async t => 
     const watch = definition.watches.find((w: any) => w.resourceType.kind === "Topic");
     assert.deepEqual(await watch.handler.update({ oldObject: topic, newObject: notified }), []);
     assert.deepEqual(await watch.handler.update({ oldObject: notified, newObject: reverted }), []);
-    assert.deepEqual(await watch.handler.update({ oldObject: reverted, newObject: changed }), [{ name: topic.metadata.name, namespace: "v1" }]);
+    assert.deepEqual(await watch.handler.update({ oldObject: reverted, newObject: changed }),
+      definition.name === "summary" ? [] : [{ name: topic.metadata.name, namespace: "v1" }]);
   }
 });

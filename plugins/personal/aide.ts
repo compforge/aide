@@ -274,7 +274,7 @@ export class Personal {
       if (input) this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid,
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const prompt = input ? `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nRead current Topic material and assess when useful.`
-        : "Topic structure changed through Weave. Review the current subtree's understanding, Inputs and Work; decide what needs attention. Existing Work retains its original Topic.";
+        : "Topic structure changed. Review the current subtree's understanding, Inputs and Work; decide what needs attention. Existing Work retains its original Topic.";
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,

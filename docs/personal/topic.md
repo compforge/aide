@@ -109,7 +109,7 @@ Topic 使用独立 ID / UID，名称和来源 key 不充当资源身份。字段
 | spec.topicKey | 可选的来源关联键；一个 key 同时只对应一个可接纳的 Topic |
 | spec.parentRef | 可选的父 Topic 引用，固定到 UID |
 | status.summary / status.recent | 长期认识与有界的近期事项 Note |
-| status.lastInputAt | 本 Topic 及其子树最后一次接纳新 Input 的时间 |
+| status.lastInputAt | 本 Topic 及其子树已观察到的最后一次业务 Input 时间；子节点活动异步向上传播 |
 | spec.default | 系统兜底主题标记，与保留身份 `default` 一致，不可转移 |
 | status.agent / status.execution | root 的原生会话引用和执行状态；非 root 不继续运行 Chief |
 
@@ -132,14 +132,16 @@ id 保存业务标识；name、topicKey、parentRef、default 表达展示、来
 | 字段 | 含义与维护者 |
 | --- | --- |
 | absorbed / absorbedSummaries | Chief 已查看的子主题完整认识版本与 summary 版本 |
-| summaryDependencies | root Reconciler 判断 SummaryCurrent 时使用的子树 summary 版本 |
+| summaryDependencies | 各 Topic 汇总调谐时观察到的直接子 Topic summary 版本 |
 | weaveRevision / notifiedWeaveRevision | 结构调整与 Chief 通知进度 |
 | nextAbsorbAt / absorbAttempts | 认识吸收的重试时间与退避进度 |
 | nextTriggerAt / idleSince | 定时维护检查与空闲进度 |
 | organization | Chief 或 Weave 最近一次组织调整的原因和前后关系 |
 | lastError / receipts | 执行异常与幂等请求回执 |
 
-SummaryCurrent 由 root Reconciler 按子树依赖判断，表示需要吸收的子 summary 已处理，不保证模型判断正确。子主题变化后由 Watch 唤醒重算，版本冲突拒绝过期提交；自身 generation 不能代替子树依赖。NeedsAttention 跟随 Chief 执行异常更新。条件与相应事实一起提交，规则见 [Conditions](../plugin/resource.md#conditions-契约)。
+SummaryCurrent 由每个 Topic 的 `summary` Reconciler 观察直接子节点：直接子 summary 未吸收或子节点报告 False 时为 False，子节点尚无当前 generation 的有效观察时为 Unknown，其余为 True。`summaryDependencies` 保存本次观察到的直接子 summary 版本，自身 generation 不能代替这些依赖；条件表达已记录的认识吸收进度，不保证模型判断正确。
+
+每轮只更新当前 Topic，子节点的 summary、汇总条件和业务活动变化通过 Watch 向上传播。子节点可能在读取后再次变化，下一轮调谐修正观察；不把整棵树放进同一事务，也不以 SummaryCurrent 作为整理或删除的授权。NeedsAttention 跟随 Chief 执行异常更新。当前对象的条件与相应事实一起提交，规则见 [Conditions](../plugin/resource.md#conditions-契约)。
 
 
 ### 默认主题
@@ -231,13 +233,19 @@ Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Topic Reconc
 
 满足空闲条件即回顾，即使没有积存 Input 或已知变化，也会检查相关 memory、当前认识、未决问题与 Work，并可批量研判 Deferred Input。回顾生成 `origin: trigger`、`attention: normal` 的系统 Input，创建时即绑定当前 root Topic 并建立研判目标，不调用 Route 模型。检查时间推进与 Input 创建原子提交；同一轮检查不会重复生成。Chief 通过正常 Input 链路复用原生 session，用 `assess_input` 留下回顾结果。已有普通 Input 或知识吸收激活 Chief 时，不另行生成回顾 Input；生成期间到达的消息可合并进同一轮。系统 Input 不刷新 lastInputAt，也不新增授权。成为子节点后不再独立回顾。Routine 的 cron/event 继续承担具体职责，区别于 Chief 的综合回顾。
 
+### 汇总调谐
+
+每个 Topic 都运行独立的 `summary` Controller，读取直接子节点，维护自身 SummaryCurrent、summaryDependencies 和已观察到的 lastInputAt。纯汇总写入不再次唤醒自身，相关变化唤醒父节点；重新挂靠时通知新旧父节点。版本冲突后重新调谐，不能拿旧依赖直接重试写入。
+
+汇总不调用 Agent，也不是 root 处理 Input 的前置步骤。业务 Reconcile 仍只有 root 能启动或复用 Chief；定时回顾创建遇到并发更新时重新检查资格和维护议题，再尝试创建 Input。
+
 ### 树内整理与维护优先级
 
 Reconciler 优先接纳可激活的业务 Input；空闲且到检查时间时，先检查直接材料压力，再检查直接子 Topic 压力，最后安排常规回顾。维护请求通过内部 trigger Input 交接，observation 包含原因、数量和阈值，最多列出 8 个需要整理的节点；不扩大授权、不刷新业务活跃时间。完整树内可按需继续查询。
 
 `plugins.personal.topic.maxInput` 默认 40，统计直接归属且保留的业务 Input，排除 trigger；`maxWork` 默认 8，统计未完成 Task 与持续 Routine；`maxChildren` 默认 8，统计直接子 Topic。这些阈值触发检查，不强制拆分。每次回顾仍遵循 Chief 空闲间隔，同一状态不会在每次 Reconcile 立即重试。
 
-Chief 用 `list_inputs` 分页发现已处理材料，通过 `create_topic`、`move_input`、`move_work`、`move_topic` 整理当前树；move_topic 的 parentUid=null 表示独立子树。迁移保留身份与处理回执，记录操作者、原因、时间与前后归属。资源版本保护整个观察到的树；子树仍有执行或 Input 接纳时，独立操作等待完成。新 root 由自身 Reconcile 接管 Chief，Weave 读取拆分原因并保留观察间隔。
+Chief 用 `list_inputs` 分页发现已处理材料，通过 `create_topic`、`move_input`、`move_work`、`move_topic` 整理当前树；move_topic 的 parentUid=null 表示独立子树。迁移保留身份与处理回执，记录操作者、原因、时间与前后归属；Chief 写入的 organization 同时记录 executionId，供提交时核验当前执行。事务内通过 UID 和索引读取校验当前 Chief execution、真实祖先链、无环约束及待移动子树的在途工作；只写实际变化的资源，不给整棵树空写版本栅栏。子树仍有执行或 Input 接纳时，移动等待完成；同一事务推进原 root 的结构版本，阻止按旧树快照准备的后续接纳，并通知 Chief 重读责任范围。新 root 由自身 Reconcile 接管 Chief，Weave 读取拆分原因并保留观察间隔。
 
 ### Agent 触发边界
 
@@ -340,4 +348,4 @@ Weave 记录候选 UID、新父 UID、组织理由、认识吸收版本与交接
 
 观察指标包括 root / leaf 数量与静默回收量、每轮模型输入量和调用次数、Weave 检查与有效组织次数、Input 到有效 Output 的收敛程度、重复提醒率及重要信息遗漏。功能测试通过不等于真实模型已经获得预期的信息整理效果，需以真实输入轨迹另行验收。
 
-[状态测试](../../tests/status.test.ts)覆盖 SummaryCurrent 的依赖版本与并发冲突。
+[状态测试](../../tests/status.test.ts)覆盖 SummaryCurrent 的直接依赖、并发变化后的最终收敛和超过 100 个节点的逐级传播；[归属测试](../../tests/topic-ownership.test.ts)覆盖大树整理、祖先变化、在途接纳与并发成环。

@@ -98,7 +98,7 @@ test("Concurrent grouping fences Chief material moves without partial ownership 
     }
     return f.resources.commit(writes);
   } };
-  await assert.rejects(moveMaterial(resources, f.root(), { kind: "Input", id: "race", topicUid: child.metadata.uid, reason: "Move" }), /version conflict/);
+  await assert.rejects(moveMaterial(resources, f.root(), { kind: "Input", id: "race", topicUid: child.metadata.uid, reason: "Move" }), /active root Chief/);
   assert.deepEqual(f.aide.topics.inputStore.get("race")!.status.topic, fact.status.topic);
 });
 
@@ -133,4 +133,89 @@ test("Maintenance agenda survives persistence for unnamed Topics and business In
   const ready = await nextInputs(f.resources, f.root(), 8);
   assert.equal(ready.at(-1)!.metadata.uid, review.metadata.uid);
   assert.equal((await maintenanceAgenda(f.resources, [f.root()], { maxInput: 1 })).topics[0]!.inputs, 2, "review Inputs never amplify maintenance pressure");
+});
+
+
+test("Chief organizes trees larger than the transaction limit without writing unrelated resources", async t => {
+  const f = await fixture(t), branch = await f.child();
+  for (let i = 0; i < 105; i++) await f.resources.create(TOPIC_TYPE, { name: `large-${i}`,
+    spec: { id: `large-${i}`, parentRef: resourceRef(branch) }, status: { summary: "", recent: [], receipts: [] } });
+  const input = await f.input("large-fact");
+  const task = await f.aide.work("root").create({ kind: "task", title: "Move", instruction: "Move scope", trigger: null });
+  const before = await f.resources.list(TOPIC_TYPE);
+  const writes: number[] = [];
+  const resources: ResourceClient = { ...f.resources, async commit(items) { writes.push(items.length); return f.resources.commit(items); } };
+  const target = await createChildTopic(resources, f.root(), { name: "New", summary: "New", reason: "Specific subject" }, "large-target");
+  await moveMaterial(resources, f.root(), { kind: "Input", id: input.metadata.name, topicUid: target.metadata.uid, reason: "Relevant" });
+  await moveMaterial(resources, f.root(), { kind: "Task", id: task.id, topicUid: target.metadata.uid, reason: "Relevant" });
+  await moveTopic(resources, f.root(), { uid: branch.metadata.uid, parentUid: null, reason: "Independent responsibility" });
+  assert.deepEqual(writes, [1, 2, 1, 2]);
+  const after = await f.resources.list(TOPIC_TYPE);
+  for (const topic of before.filter(topic => ![branch.metadata.uid, f.root().metadata.uid].includes(topic.metadata.uid)))
+    assert.equal(after.find(a => a.metadata.uid === topic.metadata.uid)!.metadata.resourceVersion, topic.metadata.resourceVersion, "unrelated observations are not writes");
+});
+
+test("Transaction checks detect changed intermediate ancestry and expired Chief executions", async t => {
+  for (const race of ["ancestor", "execution"] as const) {
+    const f = await fixture(t), branch = await f.child();
+    const target = await createChildTopic(f.resources, f.root(), { parentUid: branch.metadata.uid, name: "Target", summary: "", reason: "Specific" }, "nested");
+    const input = await f.input(`race-${race}`);
+    const resources: ResourceClient = { ...f.resources, async commit(writes) {
+      if (race === "ancestor") {
+        const { parentRef, ...spec } = branch.spec;
+        await f.resources.replace(branch, spec, branch.status);
+      } else await f.resources.patchStatus(f.root(), { execution: { id: "replacement", startedAt: new Date().toISOString() } });
+      return f.resources.commit(writes);
+    } };
+    await assert.rejects(moveMaterial(resources, f.root(), { kind: "Input", id: input.metadata.name, topicUid: target.metadata.uid, reason: "Move" }), /outside the current root|active root Chief/);
+    assert.deepEqual(f.aide.topics.inputStore.get(input.metadata.name)!.status.topic, input.status.topic);
+  }
+});
+
+test("Unrelated summary updates do not invalidate ownership decisions", async t => {
+  const f = await fixture(t), branch = await f.child(), input = await f.input("unrelated");
+  const resources: ResourceClient = { ...f.resources, async commit(writes) {
+    await f.resources.patchStatus(f.root(), { summary: "New unrelated background" });
+    return f.resources.commit(writes);
+  } };
+  const moved = await moveMaterial(resources, f.root(), { kind: "Input", id: input.metadata.name, topicUid: branch.metadata.uid, reason: "Move" });
+  assert.equal(moved.status.topic!.uid, branch.metadata.uid);
+});
+
+test("Detaching checks newly admitted Inputs in the transaction, including arrivals after discovery", async t => {
+  const f = await fixture(t), branch = await f.child();
+  const { INPUT_TYPE } = await import("../plugins/personal/input/model.ts");
+  const resources: ResourceClient = { ...f.resources, async commit(writes) {
+    await f.resources.create(INPUT_TYPE, { name: "late", spec: { origin: "source", originId: "fixture", text: "New work" },
+      status: { topic: resourceRef(branch), assess: { executionId: "chief", startedAt: new Date().toISOString() } } });
+    return f.resources.commit(writes);
+  } };
+  await assert.rejects(moveTopic(resources, f.root(), { uid: branch.metadata.uid, parentUid: null, reason: "Detach" }), /active processing/);
+  assert.equal((await f.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(branch)))!.spec.parentRef!.uid, f.root().metadata.uid);
+});
+
+test("Transaction ancestry checks reject two competing edge changes that would form a cycle", async t => {
+  const f = await fixture(t), a = await f.child();
+  const b = await createChildTopic(f.resources, f.root(), { name: "B", summary: "", reason: "Sibling" }, "sibling");
+  const resources: ResourceClient = { ...f.resources, async commit(writes) {
+    await f.resources.replace(b, { ...b.spec, parentRef: resourceRef(a) }, b.status);
+    return f.resources.commit(writes);
+  } };
+  await assert.rejects(moveTopic(resources, f.root(), { uid: a.metadata.uid, parentUid: b.metadata.uid, reason: "Group" }), /cycle/);
+  assert.equal((await f.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(a)))!.spec.parentRef!.uid, f.root().metadata.uid);
+});
+
+/** @case A detach committed before admission invalidates the old root snapshot and rolls back the Input claim. */
+test("Detached subtrees reject admissions prepared by the previous root", async t => {
+  const f = await fixture(t), branch = await f.child();
+  await f.input("detaching");
+  await moveMaterial(f.resources, f.root(), { kind: "Input", id: "detaching", topicUid: branch.metadata.uid, reason: "Child material" });
+  const owner = f.root(), input = f.aide.topics.inputStore.get("detaching")!;
+  await moveTopic(f.resources, owner, { uid: branch.metadata.uid, parentUid: null, reason: "Independent scope" });
+  await assert.rejects(f.resources.commit([
+    { operation: "patchStatus", resource: owner, patch: { execution: { ...owner.status.execution!, admissionRevision: 1 } } },
+    { operation: "patchStatus", resource: input, patch: { assess: { executionId: "chief", startedAt: new Date().toISOString() } } },
+  ]), /version conflict/);
+  assert.equal(f.aide.topics.inputStore.get("detaching")!.status.assess?.executionId, undefined);
+  assert.equal(f.root().status.weaveRevision, (owner.status.weaveRevision ?? 0) + 1);
 });

@@ -1230,7 +1230,7 @@ test("Weave wakes busy root Chief through its Reconcile without moving or claimi
   assert.equal(notices[0].scope.controllerName, undefined);
   assert.equal(notices[0].args.operation, "followUp");
   release(); await aide.settled();
-  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Topic structure changed through Weave/);
+  assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Topic structure changed/);
   assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 1);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
   assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 1);

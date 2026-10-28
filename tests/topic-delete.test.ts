@@ -1,3 +1,4 @@
+import { moveMaterial, moveTopic } from "../plugins/personal/topic/organize.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { assessInput } from "../plugins/personal/topic/assess.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
@@ -39,8 +40,10 @@ test("Web deletes a revision-checked Topic and preserves shared Input and siblin
   await deliver({ resources, logger: { info() {} } }, fact, [a.metadata], "Initial evidence");
   await resources.patchStatus(aide.topics.resource("a")!, { execution: { id: "fixture", startedAt: new Date().toISOString() } });
   await assessInput(resources, aide.topics.resource("a")!, "fixture", { inputId: "shared-input", summary: "Done" });
+  await resources.replace(b, { ...b.spec, parentRef: resourceRef(a) }, b.status);
+  await moveMaterial(resources, aide.topics.resource("a")!, { kind: "Input", id: "shared-input", topicUid: b.metadata.uid, reason: "Evidence belongs with b" });
+  await moveTopic(resources, aide.topics.resource("a")!, { uid: b.metadata.uid, parentUid: null, reason: "Independent topic" });
   await resources.patchStatus(aide.topics.resource("a")!, { execution: null });
-  await resources.patchStatus(aide.topics.inputStore.get("shared-input")!, { topic: resourceRef(b) });
   await scope.topics.archive("a", [{ id: "old", topicId: "a", text: "只属于 a", workId: null, target: fixtureAddress("a") }]);
   await aide.start(); await aide.settled();
   const { server, base, remove } = await listen(aide);

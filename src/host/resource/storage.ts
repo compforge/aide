@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import type { Resource, ResourceType, ResourceDefinition } from "@compforge/aide-plugin";
+import type { Resource, ResourceType, ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { validateResourceType } from "../plugin/resource/type.ts";
 
 const limit = z.number().int().positive();
@@ -116,9 +116,30 @@ export class ResourceStorage {
     (resource as { spec: unknown }).spec = definition.schema.spec.parse(resource.spec);
     (resource as { status: unknown }).status = definition.schema.status.parse(resource.status);
   }
-  private validationContext(scope: string) {
-    return { list: <S, T>(type: ResourceType) => [...this.keys(scope)].map((key) => this.read(key)!.object)
-      .filter((r) => r.apiVersion === type.apiVersion && r.kind === type.kind).map((r) => structuredClone(r) as Resource<S, T>) };
+  /** @spec Validators read transaction-local dependencies without turning observations into writes.
+   * @link docs/plugin/resource.md#事务与删除
+   * @case tests/resource-definition.test.ts
+   */
+  private validationContext(scope: string): ResourceValidationContext {
+    return {
+      get: <S, T>(type: ResourceType, uid: string) => {
+        const row = this.db.prepare("SELECT data FROM resources WHERE scope=? AND uid=? AND kind=?").get(scope, uid, kindKey(type));
+        if (!row) return;
+        const resource = (JSON.parse(row.data as string) as StoredResource).object;
+        if (resource.apiVersion !== type.apiVersion || resource.kind !== type.kind) return;
+        return resource as Resource<S, T>;
+      },
+      list: <S, T>(type: ResourceType, options?: Parameters<ResourceValidationContext["list"]>[1]) => {
+        if (options?.matchIndex && !this.definition(scope, type).indexes?.[options.matchIndex.name])
+          throw new Error(`Unknown resource index: ${options.matchIndex.name}`);
+        const rows = options?.matchIndex
+          ? this.db.prepare("SELECT r.data FROM resource_indexes i JOIN resources r ON r.key=i.source WHERE r.scope=? AND r.kind=? AND i.name=? AND i.value=? ORDER BY r.created,r.rowid")
+            .all(scope, kindKey(type), options.matchIndex.name, options.matchIndex.value)
+          : this.db.prepare("SELECT data FROM resources WHERE scope=? AND kind=? ORDER BY created,rowid").all(scope, kindKey(type));
+        return rows.map(row => (JSON.parse(row.data as string) as StoredResource).object)
+          .filter(r => r.apiVersion === type.apiVersion && r.kind === type.kind && (!options?.namespace || r.metadata.namespace === options.namespace)) as Resource<S, T>[];
+      },
+    };
   }
   private indexLifecycle(key: string, scope: string, resource: Resource<unknown, unknown>): void {
     const definition = this.definitions.get(this.definitionKey(scope, resource));

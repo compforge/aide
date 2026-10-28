@@ -1,7 +1,8 @@
 import { isDeepStrictEqual } from "node:util";
 import type { Resource, ResourceReader, ResourceRef, ResourceValidationContext } from "@compforge/aide-plugin";
 import type { InputSpec, InputStatus } from "../input/model.ts";
-import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "./model.ts";
+import type { Organization } from "./ref.ts";
+import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 
 export async function assignedTopicId(resources: ResourceReader, ref: ResourceRef): Promise<string> {
   const topic = await resources.get<TopicSpec, TopicStatus>(ref);
@@ -9,8 +10,9 @@ export async function assignedTopicId(resources: ResourceReader, ref: ResourceRe
   return topic.spec.id;
 }
 export function requireTopic(ref: ResourceRef | undefined, context: ResourceValidationContext) {
-  const topic = ref && context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).find(t => t.metadata.uid === ref.uid && t.metadata.name === ref.name);
-  if (!topic || topic.metadata.deletionTimestamp) throw new Error("Assigned Topic unavailable");
+  const topic = ref?.uid ? context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, ref.uid) : undefined;
+  if (!topic || topic.metadata.name !== ref?.name || topic.metadata.namespace !== ref.namespace
+    || ref.apiVersion !== TOPIC_TYPE.apiVersion || ref.kind !== TOPIC_TYPE.kind || topic.metadata.deletionTimestamp) throw new Error("Assigned Topic unavailable");
   return topic;
 }
 /** @spec Reassignment changes visibility, never routing history or completed processing receipts.
@@ -19,8 +21,31 @@ export function requireTopic(ref: ResourceRef | undefined, context: ResourceVali
  */
 export function guardInputTopic(previous: Resource<InputSpec, InputStatus>, current: Resource<InputSpec, InputStatus>, context: ResourceValidationContext) {
   if (isDeepStrictEqual(previous.status.topic, current.status.topic)) return;
-  requireTopic(current.status.topic, context);
+  const target = requireTopic(current.status.topic, context);
+  if (previous.status.topic) requireOrganization(current.status.organization, context, [requireTopic(previous.status.topic, context), target]);
   if (previous.status.topic && ((previous.status.assess?.executionId && !previous.status.assess.completedAt)
     || (current.status.assess?.executionId && !current.status.assess.completedAt)))
     throw new Error("Finish Input assessment before moving Topic ownership");
+}
+
+/** @spec Chief ownership changes validate the current tree and execution inside the storage transaction.
+ * @why Unrelated summary changes do not invalidate a move; changed responsibility does, even on an intermediate ancestor.
+ * @link docs/personal/topic.md#归属调整与责任交接
+ * @case tests/topic-ownership.test.ts
+ */
+export function requireOrganization(organization: Organization | undefined, context: ResourceValidationContext, topics: readonly TopicResource[]) {
+  const actor = organization && context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, organization.actorUid);
+  if (!actor || actor.metadata.deletionTimestamp || actor.spec.parentRef || !organization?.executionId
+    || actor.status.execution?.id !== organization.executionId) throw new Error("Organization requires the active root Chief");
+  for (const topic of topics) {
+    let current = topic;
+    const seen = new Set<string>();
+    while (current.spec.parentRef) {
+      if (seen.has(current.metadata.uid)) throw new Error("Topic parent cycle");
+      seen.add(current.metadata.uid);
+      current = requireTopic(current.spec.parentRef, context);
+    }
+    if (current.metadata.uid !== actor.metadata.uid) throw new Error("Organization target is outside the current root");
+  }
+  return actor;
 }

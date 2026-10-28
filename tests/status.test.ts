@@ -16,7 +16,7 @@ import type { WorkSpec, WorkResource } from "../plugins/personal/resources.ts";
 import type { WorkAgentStatus } from "../plugins/personal/work-status.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { reportWork } from "../plugins/personal/work-report.ts";
-import { refreshSummaryConditions } from "../plugins/personal/topic/conditions.ts";
+import { refreshSummaryConditions, summaryWatch } from "../plugins/personal/topic/conditions.ts";
 import { summaryVersion } from "../plugins/personal/topic/tree.ts";
 
 function fixture(t: TestContext) {
@@ -89,22 +89,52 @@ test("Task completion is generation-bound; Routine completion records one occurr
   }
 });
 
-test("Topic summary condition tracks child versions without global queries and fences concurrent changes", async t => {
+test("Topic observations write one object, retain observed dependencies and converge after child changes", async t => {
   const f = fixture(t), root = await f.topic("root"), child = await f.topic("child", root);
+  const leaf = await refreshSummaryConditions(f.resources, child);
   let reviewed = await refreshSummaryConditions(f.resources, root);
   assert.equal(conditionTrue(reviewed.status.conditions, "SummaryCurrent"), false);
   reviewed = await patchStatus(f.resources, reviewed, { absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
   reviewed = await refreshSummaryConditions(f.resources, reviewed);
   assert.ok(conditionTrue(reviewed.status.conditions, "SummaryCurrent"));
-  const updated = await patchStatus(f.resources, (await f.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(child)))!, { summary: "New understanding" });
-  const raced = { ...f.resources, async commit(writes: Parameters<typeof f.resources.commit>[0]) {
+  assert.equal((await f.resources.get(resourceRef(child)))!.metadata.resourceVersion, leaf.metadata.resourceVersion);
+  const updated = await patchStatus(f.resources, leaf, { summary: "New understanding" });
+  const raced: typeof f.resources = { ...f.resources, async patchStatus(resource, patch) {
     await patchStatus(f.resources, updated, { summary: "Changed during observation" });
-    return f.resources.commit(writes);
+    return f.resources.patchStatus(resource, patch);
   } };
-  await assert.rejects(refreshSummaryConditions(raced, reviewed), /version conflict/);
+  reviewed = await refreshSummaryConditions(raced, reviewed);
+  assert.equal(reviewed.status.summaryDependencies![child.metadata.uid], summaryVersion(updated), "observation keeps its actual evidence version");
   const after = await refreshSummaryConditions(f.resources, reviewed);
   assert.equal(conditionTrue(after.status.conditions, "SummaryCurrent"), false);
-  assert.notEqual(after.status.summaryDependencies![child.metadata.uid], summaryVersion(child));
+  assert.notEqual(after.status.summaryDependencies![child.metadata.uid], summaryVersion(updated), "a later reconcile catches up");
+});
+
+test("Large Topic observations propagate bottom-up without making Chief intake wait for the tree", async t => {
+  const f = fixture(t), root = await f.topic("root"), branch = await f.topic("branch", root);
+  const leaves: TopicResource[] = [];
+  for (let i = 0; i < 105; i++) leaves.push(await f.topic(`leaf-${i}`, branch));
+  const resources: typeof f.resources = { ...f.resources,
+    async commit() { throw new Error("Observation must not batch-write dependencies"); },
+    async list(type, options) { assert.equal(options?.matchIndex?.name, "parent"); return f.resources.list(type, options); },
+  };
+  let parent = await patchStatus(f.resources, root, { absorbedSummaries: { [branch.metadata.uid]: summaryVersion(branch) } });
+  parent = await refreshSummaryConditions(resources, parent);
+  assert.equal(parent.status.conditions!.find(c => c.type === "SummaryCurrent")!.status, "Unknown");
+  for (const leaf of leaves) await refreshSummaryConditions(resources, leaf);
+  const absorbed = Object.fromEntries(leaves.map(l => [l.metadata.uid, summaryVersion(l)]));
+  let child = await patchStatus(f.resources, branch, { absorbedSummaries: absorbed });
+  child = await refreshSummaryConditions(resources, child);
+  parent = await refreshSummaryConditions(resources, parent);
+  assert.ok(conditionTrue(parent.status.conditions, "SummaryCurrent"));
+  const first = (await f.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(leaves[0]!)))!;
+  await patchStatus(f.resources, first, { summary: "Changed" });
+  const changed = await refreshSummaryConditions(resources, child);
+  assert.equal(conditionTrue(changed.status.conditions, "SummaryCurrent"), false);
+  assert.deepEqual(await summaryWatch().handler.update!({ oldObject: child, newObject: changed } as never), [{ name: root.metadata.name, namespace: "v1" }]);
+  parent = await refreshSummaryConditions(resources, parent);
+  assert.equal(conditionTrue(parent.status.conditions, "SummaryCurrent"), false);
+  assert.deepEqual(await summaryWatch().handler.update!({ oldObject: parent, newObject: parent } as never), []);
 });
 
 test("Domain v1alpha2 schemas reject the former Work state bag and do not read old-version identities", async t => {
