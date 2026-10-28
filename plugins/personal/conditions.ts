@@ -5,7 +5,7 @@ export type Condition = z.infer<typeof ConditionSchema>;
 export const ConditionsSchema = z.array(ConditionSchema).default([]).refine(items => new Set(items.map(c => c.type)).size === items.length, "Condition types must be unique");
 export type ConditionValue = Omit<Condition, "lastTransitionTime">;
 /** @spec Each owner replaces only its condition types; reason changes preserve transition time when status is unchanged.
- * @link docs/status.md#conditions-契约
+ * @link docs/plugin/resource.md#conditions-契约
  * @case tests/status.test.ts
  */
 export function setConditions(previous: readonly Condition[] = [], values: readonly ConditionValue[], at = new Date().toISOString()): Condition[] {

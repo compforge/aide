@@ -38,7 +38,7 @@ Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controll
 
 任务交接需要说明“为什么现在做、希望检查什么”，具体操作由 Agent 根据上下文选择。数量阈值可以触发整理检查，但不直接证明哪些对象相关，也不强制 Agent 修改组织结构；决定保持现状时同样留下判断依据。执行结束和业务完成分别依据执行事实与业务回执判断。
 
-Personal 用 Input 承载 Chief 的定时维护请求，并由对应 Reconciler 调用各角色；这种交接形式属于 Personal，通用底座不要求插件使用 Input。业务场景见 [Topic 的分层整理与收敛](topic.md#分层-topic-的整理与收敛)。
+Personal 用 Input 承载 Chief 的定时维护请求，并由对应 Reconciler 调用各角色；这种交接形式属于 Personal，通用底座不要求插件使用 Input。业务场景见 [Topic 的分层整理与收敛](personal/topic.md#分层-topic-的整理与收敛)。
 
 ## Host 与 Runner
 

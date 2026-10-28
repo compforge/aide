@@ -8,7 +8,7 @@ import type { TopicResource } from "./model.ts";
 
 /** @spec SummaryCurrent observes the whole owned subtree; generation alone cannot describe child dependencies.
  * @why Version fences reject a judgment if a child changes between observation and commit. Child watches trigger a later refresh.
- * @link docs/status.md#conditions-契约
+ * @link docs/personal/topic.md#status
  * @case tests/status.test.ts
  */
 export async function refreshSummaryConditions(resources: ResourceClient, root: TopicResource): Promise<TopicResource> {

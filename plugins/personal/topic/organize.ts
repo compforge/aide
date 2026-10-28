@@ -14,7 +14,7 @@ import { readTopicSubtree } from "./tree.ts";
 const reasonSchema = z.string().trim().min(1).max(2000);
 /** @spec Chief reorganizes only its current tree. Version fences cover every observed edge and active execution.
  * @why Concurrent grouping or intake invalidates the whole decision, including a newly detached subtree's responsibility handoff.
- * @link docs/topic.md#归属调整与责任交接
+ * @link docs/personal/topic.md#归属调整与责任交接
  * @case tests/topic-ownership.test.ts
  */
 async function scope(resources: ResourceClient, actor: TopicResource) {

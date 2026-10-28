@@ -15,7 +15,7 @@ export function requireTopic(ref: ResourceRef | undefined, context: ResourceVali
 }
 /** @spec Reassignment changes visibility, never routing history or completed processing receipts.
  * @why An admitted Input finishes before moving, so its active Chief cannot lose authority mid-turn.
- * @link docs/topic.md#归属调整与责任交接
+ * @link docs/personal/topic.md#归属调整与责任交接
  */
 export function guardInputTopic(previous: Resource<InputSpec, InputStatus>, current: Resource<InputSpec, InputStatus>, context: ResourceValidationContext) {
   if (isDeepStrictEqual(previous.status.topic, current.status.topic)) return;

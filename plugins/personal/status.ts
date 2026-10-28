@@ -39,7 +39,7 @@ function workConditions(resource: Resource<WorkSpecFields, WorkAgentStatus>): Co
 /** @spec Personal owners construct facts and their conditions before one version-checked write.
  * @why Like controller-runtime Status().Patch, storage persists the supplied observation; it does not infer business conditions.
  * @case tests/status.test.ts
- * @link docs/status.md#conditions-契约
+ * @link docs/plugin/resource.md#conditions-契约
  */
 function observed(kind: string, spec: unknown, status: unknown, generation: number, deletionTimestamp?: string): unknown {
   if (kind === "Input") return inputStatus(status as InputStatus);

@@ -18,7 +18,37 @@ apiVersion 表达资源结构与语义契约，metadata.generation 表达 spec �
 
 当前开发阶段旧版本先不处理：不实现转换、迁移、双读或字段回退，也不自动删除旧记录。存储与查询按 apiVersion 区分，修改版本号不会使旧记录自动变成新版本。未来确需保留旧数据时再单独建设版本转换能力。
 
-Personal 的共享状态片段、Conditions 与对象独有状态的更新方案见 [资源状态与组件协作](../status.md)。
+## Spec、Status 与写入责任
+
+spec 表达期望或输入契约，status 表达组件已观察到的事实。各 Kind 声明字段含义、写入者及允许写入的阶段；多个组件协作时按字段分工，用 UID 和 resourceVersion 校验更新依据，保留其它组件负责的状态。事件用于唤醒，恢复与协调依赖持久事实。
+
+status 按对象需要组合三类内容：
+
+| 内容 | 用途 | 示例 |
+| --- | --- | --- |
+| 具体事实与回执 | 保存当前关系、结果与恢复依据 | 资源引用、接纳和完成回执 |
+| conditions | 提供稳定的状态判断 | 目标是否达成、是否需要介入 |
+| 调谐进度 | 支持等待、重试与重启后继续 | 已观察版本、重试时间、检查进度 |
+
+详细执行轨迹独立保存，status 不无限追加模型调用、工具输出和每次 Reconcile 日志。防止重复办理所需的接纳与完成回执属于业务事实，不降级为可能丢失的诊断事件。共享片段由对象按语义组合，不要求所有 Kind 继承包含大量可选字段的 BaseStatus。
+
+## Conditions 契约
+
+需要稳定状态判断的 Kind 可声明 conditions。集合按 type 唯一，每种条件有明确的维护者和业务含义；Host 不要求所有资源具有 conditions，也不将所有条件取 AND 作为通用 Ready。
+
+| 字段 | 契约 |
+| --- | --- |
+| type | 稳定的业务判断名称，含义属于 API 契约 |
+| status | True、False 或 Unknown；缺失条件表示尚无判断，不能推断为成功 |
+| reason / message | reason 是稳定机器分类，message 说明当前依据或问题 |
+| lastTransitionTime | 仅在 status 改变时更新；reason、message 或观察版本变化不刷新它 |
+| observedGeneration | 判断依据 spec 时记录对应的 metadata.generation |
+
+组件在提交前合并自己负责的条件与具体事实，保留其它条件，通过现有 ResourceClient 的版本校验和事务一起提交。Host 校验并持久化调用方提供的状态，不推断业务条件，不设置通用派生钩子。发生冲突时重新读取、重新判断并提交；已发生的外部动作不能为重试写入而重复执行。
+
+跨资源的判断保存依赖版本，由 Watch 与 Reconcile 重算；自身 observedGeneration 无法代表外部依赖的新旧。消费者按契约识别过期结论，不能将旧 True 当作对新状态的保证。Conditions 补充具体事实，不代替幂等、并发控制或安全交接，也不自动解决数据兼容。
+
+这与 controller-runtime 的边界一致：Status().Patch 提交调用方构造的状态，MergeFromWithOptimisticLock 提供 resourceVersion 检查；kubelet 构造自己负责的条件并保留其它组件的条件。跨对象判断是带依赖依据的最终一致观察，不承诺全局同时更新。
 
 ## 事务与删除
 
