@@ -306,6 +306,16 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 树结构本身不保证模型负担下降。root 数量、背景字符数、按需读取量与模型调用频率都需要预算；突发的普通输入可合批处理，不把每次资源变化都变成一次模型调用。
 
+### 近期相关人物
+
+`persons` 是读取时派生的上下文视图，不持久化为 Topic 字段。查询沿当前 Topic 的 parent 索引找到子树，再按 Input.status.topic 索引读取当前归属的材料；Input 移动、子树拆分或归组后，下次读取自然反映新归属，不参考首次 route 回执。
+
+当前从最近 7 天内最新的至多 50 条 Source / Channel Input 提取 sender、receivers，以及 Lark 多人消息证据中已识别的作者和接收者，按 Person UID 去重。预览最多 8 人，仅包含引用与展示名，缺失或被同名新实例替换的人物标记 unavailable；不展开人物 summary / recent。视图同时标明时间窗、采样条数、是否还有 Input、样本内省略的人数，空列表不证明没有相关人物。
+
+Route 的 root 候选、Chief 的主题背景和主题读取工具包含此预览；Weave 通过 list_topics / read_topic 按需读取，初始检查批次仍保持轻量。预览计入各自分页字符预算，Chief 需要人物认识时再调用 read_person。采样使用数据库端时间、数量限制和引用投影，不把整段历史正文载入自动上下文。
+
+共同人物是语义关联的参考，应结合主题名称、summary、近期活动和组织调整原因。既不设置“交集超过多少就合并”的阈值，也不因没有交集否定关联；尤其 Me 可能出现在大量无关主题中。此派生信息不单独触发 Weave，也不改变归组权限。验证见 `tests/topic-persons.test.ts`。
+
 ### 研判与上下文
 
 assess_input 只保存单次研判回执（最多 1000 字符）并原子交接 Work。summarize_topic 修订长期认识，topicUid 可指定根内的子主题；absorbed 使用直接子主题的 understandingVersion，只有查看回执时可以省略 summary。upsert_note 独立维护近期事项，默认目标为当前 Topic，target 可指定根内子 Topic 或已读取的 Person。必须先读取目标，提交时校验根执行、目标资源版本和子认识版本；过期综合需重读。完整契约见[有界认识与近期依据](README.md#有界认识与近期依据)。

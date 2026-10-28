@@ -1,3 +1,4 @@
+import { messageReceivers } from "../../person/receivers.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
 import { larkAddress, larkTopicLocator } from "../../../../src/channel/address.ts";
 import { Persons } from "../../person/service.ts";
@@ -248,9 +249,12 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     const senders = await observePeople(persons, this.watch.accountId, evidence);
     // Reply authorship can depend on a message already admitted by another discovery scan.
     const relationContext = [...evidence, ...relatedMessages];
+    const recipients = new Map<string, Awaited<ReturnType<typeof messageReceivers>>>();
+    for (const message of evidence) recipients.set(message.id,
+      await messageReceivers(persons, this.watch.accountId, message, relationContext, entry.kind === "direct" ? this.watch.userId : undefined));
     const annotate = (message: ChatMessage) => {
       const relation = messageRelation(this.watch, message, entry.kind === "direct", relationContext);
-      return { ...message, ...(senders.has(message.id) ? { person: senders.get(message.id) } : {}),
+      return { ...message, receivers: recipients.get(message.id) ?? [], ...(senders.has(message.id) ? { person: senders.get(message.id) } : {}),
         ...(relation ? { relation } : {}) };
     };
     const message = { ...annotate(entry.message), content: entry.message.content.slice(0, this.watch.maxContextChars) };
@@ -267,6 +271,8 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
       source: larkAddress(this.watch.accountId, message.chatId),
       ...(relation ? { relation } : {}),
       ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
+      receivers: entry.sequence ? [...new Map((context?.messages ?? []).flatMap(m => recipients.get(m.id) ?? []).map(ref => [ref.uid, ref])).values()]
+        : recipients.get(entry.message.id) ?? [],
       topicKey: location.selector.key, ...(location.name ? { topicName: location.name } : {}),
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,

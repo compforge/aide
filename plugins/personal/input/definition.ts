@@ -1,3 +1,4 @@
+import { PersonRefSchema } from "../person/model.ts";
 import { ConditionsSchema } from "../conditions.ts";
 import { AgentStatusSchema } from "../session.ts";
 import { AgentCallSchema } from "../observation/reference.ts";
@@ -14,7 +15,8 @@ import { inputPrinter } from "./printer.ts";
 export const InputSpecSchema = z.object({ source: AddressSchema.optional(), topicKey: z.string().min(1).max(500).optional(), topicId: z.string().min(1).optional(), origin: z.enum(["channel", "source", "chief", "trigger"]),
   topicName: z.string().trim().min(1).max(80).optional(),
   originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
-  sender: z.object({ apiVersion: z.string(), kind: z.literal("Person"), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict().optional(),
+  sender: PersonRefSchema.optional(),
+  receivers: z.array(PersonRefSchema).optional(),
   attention: z.enum(InputAttention).optional(),
   originRef: z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform((value) => value === "v1" ? value : parseResourceNamespace(value)), name: z.string(), uid: z.string() }).strict().optional(),
   text: z.string().min(1).max(32_000), timezone: z.string().optional(),

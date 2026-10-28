@@ -74,14 +74,19 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   const event = (id: string, userId: string) => ({ sender: { sender_type: "user", sender_id: { open_id: userId } },
     message: { message_id: id, chat_id: "oc_chat", chat_type: "p2p", message_type: "text", content: JSON.stringify({ text: id }) } });
   await channel.receive(event("mine", "ou_me"));
-  await channel.receive(event("other", "ou_other"));
+  const addressed = event("other", "ou_other");
+  await channel.receive({ ...addressed, message: { ...addressed.message,
+    mentions: [{ key: "@_human", id: { open_id: "ou_me" } }, { key: "@_bot", id: { open_id: "ou_bot" } }] } });
   await channel.close(); channel = new LarkChannel(home, "cli_app", aide, transport, log);
   await channel.dispatch(); await aide.settled();
   const inputs = aide.personal.topics.inputStore.list();
   assert.equal(inputs.find((input) => input.spec.text === "mine")!.spec.relation, "sent");
-  assert.equal(inputs.find((input) => input.spec.text === "other")!.spec.relation, undefined);
+  assert.equal(inputs.find((input) => input.spec.text === "other")!.spec.relation, "received");
   const self = (await aide.persons.findIdentity(me))!;
   assert.equal(inputs.find((input) => input.spec.text === "mine")!.spec.sender!.uid, self.metadata.uid);
+  assert.deepEqual(inputs.find(input => input.spec.text === "mine")!.spec.receivers, [], "A bot DM has no implicit human receiver");
+  assert.equal(inputs.find(input => input.spec.text === "other")!.spec.receivers?.[0]?.uid, self.metadata.uid);
+  assert.equal(inputs.find(input => input.spec.text === "other")!.spec.receivers?.length, 1, "Unresolved bot mentions do not become Persons");
   const other = inputs.find((input) => input.spec.text === "other")!.spec.sender!;
   assert.equal((await aide.persons.read(other.name)).isMe, false);
   assert.deepEqual(inputs.find((input) => input.spec.text === "mine")!.spec.observation!.sender, { id: "ou_me", type: "user" });
