@@ -19,7 +19,7 @@ Aide relates new information to your topics and existing work. Within an existin
 
 ## Topics, tasks, and routines
 
-A **topic** keeps a topic's messages and related work together. Aide's assistant, **Chief**, answers everyday questions directly and helps you manage ongoing work as tasks and routines.
+A **topic** keeps related messages and work together. Aide's assistant, **Chief**, answers everyday questions directly and helps you manage ongoing work as tasks and routines.
 
 - A **task** has a finish line, such as getting a PR merged. It can last minutes or weeks and involve multiple rounds of work and waiting.
 - A **routine** is an ongoing responsibility, such as checking for project blockers every morning. Completing one round leaves it waiting for the next.
@@ -60,7 +60,7 @@ See [Lark setup](docs/channel/lark.md) for bot creation and permissions. Text me
 
 ## Before you rely on it
 
-Aide currently serves one user through a single service instance. Its HTTP interface has no authentication, so keep it on a trusted local connection or access it through an SSH tunnel. Topics group topics; they do not provide account or permission isolation, and long-term memory may be shared across topics.
+Aide currently serves one user through a single service instance. Its HTTP interface has no authentication, so keep it on a trusted local connection or access it through an SSH tunnel. Topics organize messages and work; they do not provide account or permission isolation, and long-term memory may be shared across topics.
 
 State is stored in `~/.aide` by default. The service must remain running to make progress. After a restart, Aide restores saved work and schedules; interrupted actions or results it cannot validate wait for your review before you explicitly continue. Check external effects before retrying. Pausing or deleting work does not undo actions already taken.
 
