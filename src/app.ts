@@ -61,7 +61,7 @@ export class Aide {
     ...Object.values(SOURCES).map((definition) => [`source:${definition.id}`, definition] as const),
   ]);
   inputDefinition(origin: Pick<InputSpec, "origin" | "originId">) {
-    if (origin.origin === "trigger" && origin.originId === "personal.topic-trigger") return { id: origin.originId, label: "定时回顾", icon: iconFor("harness:chief") };
+    if (origin.origin === "trigger" && origin.originId === "personal.topic-review") return { id: origin.originId, label: "定时回顾", icon: iconFor("harness:chief") };
     if (origin.origin === "chief" && origin.originId === "personal.chief") return { id: origin.originId, label: "Chief 请求", icon: iconFor("harness:chief") };
     const definition = this.inputDefinitions.get(`${origin.origin}:${origin.originId}`);
     if (!definition) throw new Error(`Unknown input definition: ${origin.origin}:${origin.originId}`);
@@ -142,7 +142,7 @@ export class Aide {
     this.runtime = new ApplicationRuntime(home, {
       cwd: options.cwd,
       instances: [{ pluginInstanceId: "personal", pluginId: "aide.personal", packageVersion: "0.1.0", marketplace: "builtin", config: JSON.parse(JSON.stringify({ weave: parsePersonalConfig(config?.plugins.personal).weave, route: parsePersonalConfig(config?.plugins.personal).route, topic: parsePersonalConfig(config?.plugins.personal).topic, task: parsePersonalConfig(config?.plugins.personal).task, routine: parsePersonalConfig(config?.plugins.personal).routine, watches: this.watches,
-        chiefTrigger: config?.harnesses.chief.config.trigger, forgeConnectionRevisions, repositorySources: sources.repositories, pullRequestSources: sources.pullRequests, environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
+        forgeConnectionRevisions, repositorySources: sources.repositories, pullRequestSources: sources.pullRequests, environmentSources: this.environmentSources, ...(this.messageSource ? { messageSource: this.messageSource } : {}) })) }],
       harness: { harnesses: [{ ...this.defaultHarnessConfig }, { id: "weave", harness: "weave" }, { id: ROUTE_HARNESS, harness: "route" }, { id: "chief", harness: "chief" }, { id: "task", harness: "task" }, { id: "routine", harness: "routine" }],
         defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { maxTotalConcurrency: config?.reconcile?.maxTotalConcurrency, connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
@@ -225,13 +225,13 @@ export class Aide {
     return result;
   }
 
-  async setTopicTrigger(topicId: string, enabled: boolean) {
+  async setTopicReview(topicId: string, enabled: boolean) {
     const scope = this.personal;
     if (!this.topics.get(topicId)) throw new Error("Topic does not exist");
-    const trigger = await scope.topics.setTriggerEnabled(topicId, enabled);
-    this.log.info({ topicId, ...trigger }, "Topic trigger configured");
+    const review = await scope.topics.setReviewEnabled(topicId, enabled);
+    this.log.info({ topicId, ...review }, "Topic review configured");
     this.notify();
-    return trigger;
+    return review;
   }
 
   /** @spec Resolve recipients in the selected Channel scope; Aide remains the sender. Default Me contact never relies on Topic address.

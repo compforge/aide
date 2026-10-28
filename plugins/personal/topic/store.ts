@@ -16,7 +16,7 @@ import { outputView, type OutputDraft, type OutputView } from "../../../src/outp
 import { OutputStore } from "../output/store.ts";
 import { outputWrite } from "../output.ts";
 import { digest } from "../chief-model.ts";
-import { topicTrigger } from "./trigger.ts";
+import { topicReview } from "./review.ts";
 export const topicKey = digest;
 
 /** @spec Topic is a Personal Resource. Input assessment is global; Topic routing determines material visibility and each Output records its producer. */
@@ -51,7 +51,7 @@ export class TopicStore {
     const previous = this.resources.find<TopicSpec, TopicStatus>(TOPIC_TYPE, topicKey(id));
     if (previous?.metadata.deletionTimestamp) throw new Error("Topic is being deleted; retry after deletion completes");
     if (previous) return previous;
-    return this.client.create(TOPIC_TYPE, { name: topicKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), trigger: topicTrigger() }, status: { receipts: [], summary: "", recent: [] } });
+    return this.client.create(TOPIC_TYPE, { name: topicKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), review: topicReview() }, status: { receipts: [], summary: "", recent: [] } });
   }
   /**
    * @spec Presentation follows the completing execution when recorded; the original admission stays on Input for recovery.
@@ -94,14 +94,14 @@ export class TopicStore {
     }
     return runs;
   }
-  async setTriggerEnabled(id: string, enabled: boolean): Promise<import("./trigger.ts").TopicTrigger> {
+  async setReviewEnabled(id: string, enabled: boolean): Promise<import("./review.ts").TopicReview> {
     const c = this.resource(id); if (!c) throw new Error("Topic does not exist");
-    const trigger = topicTrigger(c.spec.trigger);
-    if (trigger.enabled === enabled) return trigger;
-    trigger.enabled = enabled;
-    await this.client.replace(c, { ...c.spec, trigger }, { ...c.status, nextTriggerAt: null, idleReviewCount: 0,
+    const review = topicReview(c.spec.review);
+    if (review.enabled === enabled) return review;
+    review.enabled = enabled;
+    await this.client.replace(c, { ...c.spec, review }, { ...c.status, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null,
       ...(enabled ? { idleSince: new Date().toISOString() } : {}) });
-    return trigger;
+    return review;
   }
   outputs(topicId?: string): OutputView[] {
     const selected = topicId ? this.resource(topicId) : undefined;

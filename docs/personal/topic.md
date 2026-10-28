@@ -125,7 +125,7 @@ Default 是永久、独立的 root。它承接无合适归属的输入，不参�
 
 ### Spec
 
-id 保存业务标识；name、topicKey、parentRef、default 表达展示、来源关联和树结构；trigger 保存是否启用维护，address 保存可选的来源地址，不能由父子关系推导外发目的地。
+id 保存业务标识；name、topicKey、parentRef、default 表达展示、来源关联和树结构；review 保存是否启用维护，address 保存可选的来源地址，不能由父子关系推导外发目的地。
 
 ### Status
 
@@ -135,8 +135,9 @@ id 保存业务标识；name、topicKey、parentRef、default 表达展示、来
 | summaryDependencies | 各 Topic 汇总调谐时观察到的直接子 Topic summary 版本 |
 | weaveRevision / notifiedWeaveRevision | 结构调整与 Chief 通知进度 |
 | nextAbsorbAt / absorbAttempts | 认识吸收的重试时间与退避进度 |
-| nextTriggerAt / idleSince | 定时维护检查与空闲进度 |
-| idleReviewCount | 连续完成的空闲回顾次数，缺省为 0；用于可选指数退避 |
+| reviewCheckedAt / idleSince | Reconcile 上次到期检查时间 / Chief 最近执行完成时间 |
+| idleReviewCount | 连续无事可做的到期检查次数，缺省为 0；用于可选指数退避 |
+| idleReviewReset | 本轮空闲期首次观察到业务输入的时间与重置前次数；执行完成或责任边界重置时清除 |
 | organization | Chief 或 Weave 最近一次组织调整的原因和前后关系 |
 | lastError / receipts | 执行异常与幂等请求回执 |
 
@@ -230,15 +231,17 @@ Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Topic Reconc
 
 ### Topic 定时回顾
 
-根 Topic 的 `trigger.enabled` 默认开启；Chief Harness 的 `config.trigger.intervalSeconds`（默认 60 秒）控制检查间隔，`idleSeconds`（默认 900 秒）控制连续空闲多久后回顾。每次 Chief 执行结束后重新计算空闲时间，尚未执行过的 Topic 从创建时计算；Deferred Input 到达不重置空闲时间。Chief 正在执行时不会因定时检查 steer、followUp 或积攒补跑，恢复中断执行后也重新计时。
+Topic 配置区分 `trigger.intervalSeconds`（默认 60 秒，固定唤醒 Reconcile）和 `review`（业务回顾策略）。单个 Topic 的 `spec.review.enabled` 默认开启；关闭只停止后台回顾，不停止协调、业务输入或结构通知。Chief Harness 不持有业务调度配置。
 
-可选 `config.trigger.backoff` 让没有业务输入的 root 逐步降低回顾频率。基础等待为 `idleSeconds`，成功空闲回顾后等待 `min(idleSeconds × factor ^ idleReviewCount, maxIdleSeconds)`；检查周期不增长。不配置时保持固定间隔。
+Reconcile 先处理业务 Input、结构通知和子 summary 吸收。后台回顾到期时，检查尚未接纳的 deferred 输入、待吸收的完整子认识和直接材料/子节点数量压力。存在这些需求才创建维护 Input；否则只记录 `reviewCheckedAt` 并增加 `idleReviewCount`，不创建 Input、不调用模型。中间的固定 tick 不递增次数、不移动回顾基准。Task / Routine 的期限、cron/event 由各自 Reconcile 负责。
 
-只有由 trigger Input 启动、对应研判回执已完成、执行期间未接纳其它输入或结构通知，且收尾时子树没有待研判业务 Input 的成功执行，才增加 `idleReviewCount`。调度判断不依赖模型自述“没有变化”，也不把 trigger、摘要更新和普通 status 写入当作业务活动。新业务 Input 重置退避，当前更早的回顾计划不推迟，Deferred 最晚在到达后的基础间隔进入一次回顾机会，但仍不主动激活 Chief；有积压的回顾保持基础间隔。
+`review.idleSeconds` 默认 900 秒，可选 `review.backoff` 将等待调整为 `min(idleSeconds × factor ^ idleReviewCount, maxIdleSeconds)`。不配置时使用固定基础等待。等待基准取最近一次 Chief 完成时间和到期检查时间中更晚的时间；两者缺失时从创建时间开始。新业务输入重置次数，持久保存本轮首次观察到的业务时间和重置前次数：取原等待基准按当前策略计算的时间，与首次业务时间加当前基础等待中更早者，连续输入不反复推迟。
 
-退避次数、完成时间和下次回顾时间与 execution 释放原子提交，并由 execution ID 与资源版本保护：重复收尾不重复递增，收尾期间到达的业务输入使旧写入冲突后重新判断。失败、研判未确认和中断恢复均回到基础间隔，原有未知效果仍待核对；重启保留已完成回顾的计划，不补跑错过的周期。关闭维护清除计划与次数，重新开启及子 Topic 独立时重新开始基础空闲周期。子理解与结构变化仍沿既有事件路径触发，Task / Routine 的期限、cron/event 不受影响。运行日志记录退避次数、重置原因及 nextTriggerAt。
+回顾截止时间由事实和当前策略计算，不持久化独立 deadline。修改基础等待、倍数或上限并重启后，下一次固定检查使用新策略，已到期只检查一次，不补跑错过的周期。执行完成、失败和中断恢复均清除前一轮检查/重置状态并恢复基础等待，已有未知效果继续等待核对。关闭回顾清除次数和检查状态；重新开启或子 Topic 独立时从基础等待开始。
 
-满足空闲条件即回顾，即使没有积存 Input 或已知变化，也会检查相关 memory、当前认识、未决问题与 Work，并可批量研判 Deferred Input。回顾生成 `origin: trigger`、`attention: normal` 的系统 Input，创建时即绑定当前 root Topic 并建立研判目标，不调用 Route 模型。检查时间推进与 Input 创建原子提交；同一轮检查不会重复生成。Chief 通过正常 Input 链路复用原生 session，用 `assess_input` 留下回顾结果。已有普通 Input 或知识吸收激活 Chief 时，不另行生成回顾 Input；生成期间到达的消息可合并进同一轮。系统 Input 不刷新 lastInputAt，也不新增授权。成为子节点后不再独立回顾。Routine 的 cron/event 继续承担具体职责，区别于 Chief 的综合回顾。
+维护请求沿现有 Input 链路处理：`origin: trigger`、`attention: normal`，创建即绑定当前 root 并建立研判目标，无需 Route 模型。检查记录与 Input 原子提交，由 Topic 版本保护并发到达和归组；已有业务或维护 Input 直接复用。Chief 复用原生 session，通过 `assess_input` 留下研判回执。系统 Input 不刷新 `lastInputAt`、不新增授权；运行中不追加定时维护或积攒补跑。
+
+运行日志区分「生成维护 Input」与「无事退避」，记录 Topic、原因、检查时间、次数及按当前策略计算的下一次资格时间。
 
 ### 汇总调谐
 
@@ -287,7 +290,7 @@ Topic 删除的事务校验只读取 parent、assessPending、Work topic 索引�
 
 显式删除与静默回收都在存储事务内校验 Default、子节点、执行、未完成 Input、相关 Work 和父节点吸收版本。删除请求使用 UID 与资源版本作为前置条件。历史 Input/Output 可引用已消失的 Topic，不根据同名或同 key 猜测替代实例。
 
-[Weave 场景](../../tests/weave.test.ts)、[接纳](../../tests/topic-intake.test.ts)、[定时回顾](../../tests/topic-trigger.test.ts)、[默认主题](../../tests/default-topic.test.ts)和[删除](../../tests/topic-delete.test.ts)覆盖生命周期；[Pi 场景](../../tests/pi-agent.test.ts)覆盖原生连续执行。模拟测试不证明真实主题整理质量。
+[Weave 场景](../../tests/weave.test.ts)、[接纳](../../tests/topic-intake.test.ts)、[定时回顾](../../tests/topic-review.test.ts)、[默认主题](../../tests/default-topic.test.ts)和[删除](../../tests/topic-delete.test.ts)覆盖生命周期；[Pi 场景](../../tests/pi-agent.test.ts)覆盖原生连续执行。模拟测试不证明真实主题整理质量。
 
 ## Agent
 

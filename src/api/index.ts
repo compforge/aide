@@ -23,7 +23,7 @@ const EventSchema = IncomingSchema.omit({ text: true, channelId: true, source: t
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
 
-const TopicTriggerSchema = z.object({ topicId: z.string().min(1) }).extend({ enabled: z.boolean() }).strict();
+const TopicReviewSchema = z.object({ topicId: z.string().min(1) }).extend({ enabled: z.boolean() }).strict();
 
 const DeleteTopicSchema = z.object({ topicId: z.string().min(1), uid: z.string().min(1), revision: z.number().int().positive() }).strict();
 
@@ -224,12 +224,12 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         const input = IncomingSchema.omit({ channelId: true, observation: true, source: true, topicKey: true, topicName: true }).extend({ topicId: z.string().min(1) }).parse(await body(request));
         const topicId = webTopicLocator.locate(input).selector.id;
         json(response, 200, await receive({ ...input, topicId, source: webAddress(topicId) }));
-      } else if (request.method === "POST" && url.pathname === "/topics/trigger") {
-        const { topicId, enabled } = TopicTriggerSchema.parse(await body(request));
+      } else if (request.method === "POST" && url.pathname === "/topics/review") {
+        const { topicId, enabled } = TopicReviewSchema.parse(await body(request));
         if (!aide.topics.get(topicId)) {
           json(response, 404, { error: "会话不存在。" }); return;
         }
-        json(response, 200, await aide.setTopicTrigger(topicId, enabled));
+        json(response, 200, await aide.setTopicReview(topicId, enabled));
       } else if (request.method === "POST" && url.pathname === "/topics/delete") {
         const { topicId, revision, uid } = DeleteTopicSchema.parse(await body(request));
         const result = await aide.deleteTopic(topicId, revision, uid);

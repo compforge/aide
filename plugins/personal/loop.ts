@@ -1,8 +1,6 @@
 import { commitStatus } from "./status.ts";
 import { z } from "zod";
 import { prepareAgent, saveAgent } from "./session.ts";
-import { idleReviewCompletion } from "./topic/trigger.ts";
-import type { TopicResource } from "./topic/model.ts";
 import type { PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
 import { InputAttention, inputAttention, INPUT_TYPE, type InputSpec } from "./input/model.ts";
 import { inputRef, pendingInputs, resourceRef, changeAttempt, changeAssessment, attemptOf, attemptPatch, belongsToTopic, topicScope, type Input } from "./input/state.ts";
@@ -96,17 +94,16 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
     if (result.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, result.agent);
     if (result.state !== "success" || result.value.result.stopReason !== "end_turn") error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
   } catch (cause) { error = String(cause); }
-  finally { await finalizeExecution(context, current, execution.executionId, current.kind === "Topic" && completed ? "" : error,
-    current.kind === "Topic" ? inputs as Input[] : undefined); }
+  finally { await finalizeExecution(context, current, execution.executionId, current.kind === "Topic" && completed ? "" : error); }
   return completed;
 }
 /**
  * @spec Admission evidence survives completion of the invocation and restart; unknown effects never automatically replay.
  * @why Chief idle time starts after every execution, including failure or recovery; missed timer checks never force continuation.
- * @case tests/topic-trigger.test.ts
+ * @case tests/topic-review.test.ts
  */
-export async function finalizeExecution(context: Pick<PluginContext, "resources" | "logger" | "instance">, owner: Readonly<LoopResource>, executionId: string,
-  error = "Previous execution interrupted; inspect existing effects before continuing", admittedInputs?: readonly Input[]) {
+export async function finalizeExecution(context: Pick<PluginContext, "resources" | "logger">, owner: Readonly<LoopResource>, executionId: string,
+  error = "Previous execution interrupted; inspect existing effects before continuing") {
   for (let n = 0; ; n++) {
     const latest = await context.resources.get<unknown, LoopStatus>(resourceRef(owner));
     if (!latest || latest.status.execution?.id !== executionId) return;
@@ -114,23 +111,16 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
       ? await context.resources.list<import("./input/model.ts").InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessExecution", value: executionId } })
       : (await pendingInputs(context.resources, resourceRef(latest))).filter(i => attemptOf(i, resourceRef(latest))?.executionId === executionId);
     const at = new Date().toISOString();
-    const review = latest.kind === "Topic" ? await idleReviewCompletion(context, owner as TopicResource, latest as TopicResource,
-      { inputs: admittedInputs, succeeded: !error && !unfinished.length, at }) : {};
     try {
       await commitStatus(context.resources, [
         ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: latest.kind === "Topic" ? { assess: { ...i.status.assess, lastError: error || "Chief ended without confirming input completion" } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error,
           ...(latest.kind === "Route" ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
-        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, ...review } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
+        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
           lastExecutionId: executionId,
           ...((unfinished.length || (latest.status as import("./work-status.ts").WorkAgentStatus).lastExecutionId !== executionId)
             ? { recovery: { reason: "ExecutionUncertain", message: error || "Execution ended without a business receipt" } } : {}),
         } : {}) } },
       ]);
-      if (review.idleReviewCount !== undefined) context.logger.info("Topic idle review scheduled", { attributes: {
-        topicUid: latest.metadata.uid, executionId, previousCount: (latest.status as import("./topic/model.ts").TopicStatus).idleReviewCount ?? 0,
-        idleReviewCount: review.idleReviewCount, nextTriggerAt: review.nextTriggerAt ?? null,
-        reason: error || unfinished.length ? "execution_incomplete" : review.idleReviewCount ? "quiet_review" : "activity_or_maintenance",
-      } });
       if (latest.kind === "Topic" && error) context.logger.warn("Chief execution requires inspection", { attributes: { topicUid: latest.metadata.uid, executionId, error } });
       if (unfinished.length) context.logger.warn("Agent inputs await recovery", { attributes: { resourceUid: latest.metadata.uid, executionId,
         inputIds: unfinished.map(i => i.metadata.name), recovery: latest.kind === "Route" ? "retry" : "inspect", error } });

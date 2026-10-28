@@ -92,7 +92,7 @@ assistant / tool
 
 ### 当前操作：组织 Topic 关系
 
-`group_topics` 支持将 1–8 个 root 挂到已有 root，或为 2–8 个 root 创建共同父 Topic。已有父节点保留名称、认识和 trigger 开关；新父节点使用默认 trigger 配置和 Weave 提供的综合认识。Default 不参与分组。
+`group_topics` 支持将 1–8 个 root 挂到已有 root，或为 2–8 个 root 创建共同父 Topic。已有父节点保留名称、认识和 review 开关；新父节点使用默认 review 配置和 Weave 提供的综合认识。Default 不参与分组。
 
 Input、Task、Routine 通过 status.topic 保存当前归属。初次路由确定 Input 归属，Chief 创建 Work 时使用自己的 Topic；空闲整理可在树内调整归属。root 只表示当前处理入口。例如 topic1 的 Chief 因 input1 创建 task1，二者都留在 topic1；topic1 挂到 topic2 后，topic2 的 Chief 根据 topic1 的新 Input 创建 task2，task2 属于 topic2。父 Chief 可以查看、操作子树已有 Work，并在 Work 空闲时调整其归属。
 

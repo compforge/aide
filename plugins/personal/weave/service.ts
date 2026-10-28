@@ -42,7 +42,7 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
   try {
     await commitStatus(resources, [
       ...children.map(resource => ({ operation: "replace" as const, resource, spec: { ...resource.spec, parentRef: resourceRef(parent) },
-        status: { ...resource.status, nextTriggerAt: null, idleReviewCount: 0, organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid,
+        status: { ...resource.status, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null, organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid,
           toUid: parent.metadata.uid, reason: `Weave grouped under ${parent.spec.name ?? parent.spec.id}` } } })),
       { operation: "patchStatus", resource: parent, patch: { organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid, reason: "Weave combined related roots" }, weaveRevision: (parent.status.weaveRevision ?? 0) + 1,
         ...(!group.parent ? { summary: group.summary!, recent: retainRecent(children.flatMap(t => t.status.recent)),

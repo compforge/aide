@@ -92,7 +92,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
     document.querySelectorAll<HTMLButtonElement>('.topic-more').forEach((button) => { button.disabled = true; });
     try {
       const payload = action === 'delete' ? { topicId: item.id, revision: item.revision, uid: item.uid }
-        : { topicId: item.id, enabled: !item.trigger.enabled };
+        : { topicId: item.id, enabled: !item.review.enabled };
       await request('/topics/' + action, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
       await refreshTopics(true);
       const remaining = topicItems;
@@ -126,7 +126,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
       if (wasOpen && menuButton === button) return;
       menuButton = button;
       topicMenu.replaceChildren();
-      const actions = [['trigger', item.trigger.enabled ? '取消回顾' : '开启回顾']];
+      const actions = [['review', item.review.enabled ? '取消回顾' : '开启回顾']];
       if (!item.default) actions.push(['delete', '删除主题']);
       for (const [action, label] of actions as [string, string][]) {
         const option = element('button', label, action === 'delete' ? 'topic-delete' : '');
@@ -203,7 +203,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
         indicators.append(children);
       }
       if (item.default) indicators.append(topicStatusIcon('系统兜底主题', '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>'));
-      if (item.trigger?.enabled) indicators.append(topicStatusIcon('主动回顾已开启', '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M3 5l3-3m12 0 3 3M6 20l-2 2m14-2 2 2"/>'));
+      if (item.review?.enabled) indicators.append(topicStatusIcon('主动回顾已开启', '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M3 5l3-3m12 0 3 3M6 20l-2 2m14-2 2 2"/>'));
       if (indicators.childElementCount) link.append(indicators);
       const row = element('div', undefined, 'topic-row');
       const entry = element('div', undefined, 'topic-entry');

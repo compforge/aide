@@ -69,7 +69,7 @@ test("Chief reads its Topic tree and related Work through scoped indexes", async
   const f = fixture(t);
   const root = await f.aide.topics.ensure("root"), child = await f.aide.topics.ensure("child"), other = await f.aide.topics.ensure("other");
   await f.attach(child, root);
-  await f.resources.replace(f.current(root), { ...root.spec, trigger: { enabled: false } }, root.status);
+  await f.resources.replace(f.current(root), { ...root.spec, review: { enabled: false } }, root.status);
   const logger = { debug() {}, info() {}, warn() {}, error() {} };
   const context = { resources: f.resources, logger, instance: { config: {} } } as unknown as PluginContext;
   for (const topic of [child, other]) {

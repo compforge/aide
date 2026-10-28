@@ -125,7 +125,7 @@ curl -s http://127.0.0.1:7433/events \
 
 会话列表的「主动回顾」开关修改对应 Topic 的 trigger，默认关闭、间隔 3600 秒。各 Topic 独立控制。尚未持久保存的空会话没有开关。页面不提供间隔编辑。
 
-`GET /topics` 的条目返回 `id` 和 `trigger`；`POST /topics/trigger` 接收 `{ topicId, enabled }`，校验会话存在后持久化，拒绝额外的间隔字段。关闭不会取消已有输入或委托。调度和判断见 [Personal](../personal/topic.md#topic-定时回顾)。
+`GET /topics` 的条目返回 `id` 和 `review`；`POST /topics/review` 接收 `{ topicId, enabled }`，校验会话存在后持久化，拒绝额外的间隔字段。关闭不会取消已有输入或委托。调度和判断见 [Personal](../personal/topic.md#topic-定时回顾)。
 
 ## 人物导航与编辑
 

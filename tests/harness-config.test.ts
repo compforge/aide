@@ -37,7 +37,7 @@ test("Chief config validates model and package declarations without echoing valu
       expect(() => loadConfig(file)).toThrow("Invalid Aide config structure");
     }
     writeFileSync(file, "harnesses:\n  chief:\n    model:\n      provider: fixture\n      id: chosen-model\n    packages: [./capabilities]\n");
-    expect(loadConfig(file).harnesses.chief).toEqual({ model: { provider: "fixture", id: "chosen-model" }, packages: ["./capabilities"], config: { trigger: { intervalSeconds: 60, idleSeconds: 900 } } });
+    expect(loadConfig(file).harnesses.chief).toEqual({ model: { provider: "fixture", id: "chosen-model" }, packages: ["./capabilities"] });
     writeFileSync(file, JSON.stringify({ harnesses: { chief: { model: "invalid-secret" } } }));
     try { loadConfig(file); throw new Error("Expected invalid config"); }
     catch (error) {
