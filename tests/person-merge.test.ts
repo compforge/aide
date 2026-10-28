@@ -48,7 +48,7 @@ test("Same names only select candidates; merging appends to the chosen Person wi
   const sender = personRef(source), inputs = new InputStore(f.home), outputs = new OutputStore(f.home);
   const input = inputs.submit("test", "historical", { origin: "channel", originId: "web", text: "历史消息", sender });
   const output = outputs.create("test", "reply", { text: "历史回复", target: webAddress("topic"), receivers: [sender], topicId: "topic",
-    topic: { apiVersion: "aide.dev/v1alpha1", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } });
+    topic: { apiVersion: "aide.dev/v1alpha2", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } });
   const merged = await f.persons.merge(version(source), version(target));
   assert.equal(merged.metadata.uid, target.metadata.uid);
   assert.equal(merged.spec.name, target.spec.name);

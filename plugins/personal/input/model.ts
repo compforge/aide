@@ -16,7 +16,7 @@ export enum InputAttention {
 
 export type InputRelation = "sent" | "received" | "observed";
 
-export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Input" } as const;
+export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha2", kind: "Input" } as const;
 export interface InputSpec {
   /** Where the input was received; independent of its producer, sender and topic. */
   source?: Address;
@@ -28,7 +28,7 @@ export interface InputSpec {
   topicKey?: string;
   /** Suggested initial Topic name from the input adapter; does not select or rename an existing Topic. */
   topicName?: string;
-  /** Explicit Topic selection, e.g. the Web composer. Final binding is persisted in route.result. */
+  /** Explicit Topic selection, e.g. the Web composer. Current binding is persisted in status.topic. */
   topicId?: string;
   /** Scheduling urgency, independent of authority or notification intent. */
   attention?: InputAttention;
@@ -72,6 +72,10 @@ export interface Handling extends Assessment {
   request: import("../model.ts").WorkInputRequest;
 }
 export interface InputStatus {
+  conditions?: import("../conditions.ts").Condition[];
+  organization?: import("../topic/ref.ts").Organization;
+  /** Current ownership; routing receipts retain the initial decision. */
+  topic?: ResourceRef & { uid: string };
   route?: Attempt & {
     nextAttemptAt?: string;
     attempts?: number;
@@ -79,7 +83,7 @@ export interface InputStatus {
   };
   /**
    * @spec One global assessment. All automatic Chief submissions atomically claim executionId before dispatch.
-   * @why Multiple routed Topics and reparenting must not automatically submit the same Input twice.
+   * @why Ownership changes and concurrent admission must not automatically submit the same Input twice.
    * @link docs/personal/input.md#归属与-chief-通知
    * @case tests/input-admission.test.ts
    */

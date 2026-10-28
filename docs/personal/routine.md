@@ -1,14 +1,55 @@
 # Routine：持续职责与每轮办理
 
+## 整体定位
+
 Routine 是同一 Topic 下持续存在的委托职责。`agents/routine/` 与 Chief、Task 平级，拥有独立提示词和领域工具，复用 Pi SDK 与 PiAdapter。它比较新旧观察、处理值得推进的变化，必要时通过 say 通知或询问用户。
 
-## 触发与执行
+当前归属保存在 `status.topic`，使用固定 UID 的 Topic 引用；spec 保存工作目标与触发规则。Chief 可以在自己的树内调整空闲工作的归属，保留身份、进展、调度与办理回执；正在执行时拒绝迁移。
+
+## CRD
+
+类型为 `aide.dev/v1alpha2 Routine`。完整字段见 [模型](../../plugins/personal/routine/model.ts)与[状态 Schema](../../plugins/personal/work-status.ts)。
+
+### Spec
+
+title、instruction 保存持续职责；trigger 声明 cron、timezone 或 event；paused 表达用户的暂停期望。
+
+### Status
+
+| 字段 | 含义 |
+| --- | --- |
+| topic / organization | 当前 Topic UID 与最近一次归属调整依据 |
+| summary / recent | 长期认识和有界近期事项 |
+| agent / execution / lastExecutionId | 原生会话、当前执行和最近报告的执行关联；execution 记录启动时的 observedGeneration |
+| waiting | question 表达待回答问题，until 表达等待到期时间 |
+| recovery / recoveryNotice | 需核对的结果或副作用，以及待创建的恢复通知 |
+| lastReport | 最近一次办理报告，与长期认识分开 |
+| idleSince / agentStoppedAt | 静默与运行句柄释放进度 |
+| lastOccurrence / nextTriggerAt | 最近一次完成的触发结果与下一次计划时间；纯事件职责可没有下次时间 |
+
+Operational 表达职责能否接收和处理触发，暂停、删除或需要介入时为 False；NeedsAttention 表示 recovery 或等待用户回答。单次成功不终止职责，也不产生 Task 的 completion。状态构造函数与办理事实一起更新条件，通用规则见 [Conditions](../plugin/resource.md#conditions-契约)。
+
+## Reconciler
+
+### 触发与执行
 
 Routine.spec.trigger 声明 cron 或事件订阅。cron 到期可以在没有 Input 时启动一轮；事件形成 Input 并为匹配的 Routine 建立 handle。Chief 的 assess_input 或 request_work 也能向已有 Routine 提供材料和决定。事件 Input 不需要虚构 Chief assess 记录。
 
 接收 Controller 应用确定性请求，agent Controller 调用持续会话。先保存 status.execution 和 Input 的接纳痕迹，再提交原生执行；运行中普通 Input 通过 followUp 追加，immediate 通过 steer 追加。每条 Input 的业务回执独立于原生接收回执。
 
-## 工具与结果
+### 会话与生命周期
+
+`routine.status.agent = { harness: "routine", sessionId }`。Reconcile 通过 create 获取并持久保存原生 ID，再提交业务输入；恢复依赖 Pi SDK 的初始化、持久化及按 ID 查找，不复制会话文件或维护第二份历史。status.execution 与 lastExecutionId 记录当前及最近执行。
+
+执行结束、没有下一条可执行 Input 后写入 idleSince；正在推理和执行工具不算静默。静默达到配置时长后 close 运行句柄并记录 agentStoppedAt，保留 sessionId。新事件或 Chief 分派与清除计时在同一事务提交；cron 到期在启动时清除计时。
+
+Routine 没有静默资源回收阶段。职责、trigger 和累计认识持续保留，后续触发恢复同一原生会话。显式删除才设置 deletionTimestamp；分派和事件匹配拒绝 deleting 目标，删除 Reconcile 关闭句柄、取消遗留 handle 后由框架 finalize。
+
+模型和包分别配置在 harnesses.routine.model / packages，模型缺省复用 Chief，packages 缺省为空且独立同步。静默时长由 plugins.personal.routine.agentIdleMs 配置，见 [配置](../configuration.md)。
+
+## Agent
+
+### 工具与结果
 
 | 工具 | 职责 |
 | --- | --- |
@@ -25,15 +66,21 @@ Routine.spec.trigger 声明 cron 或事件订阅。cron 到期可以在没有 In
 
 report_routine 的 inputIds 必须是已接纳、已处理的输入，与一次资源状态更新共同提交。未列出的 Input 不会被确认。report 是本次办理说明，同时保存在 lastReport；summary 和 Note 独立维护，不因每轮报告而重写。
 
-- done 完成本轮。尚有未确认 Input 时继续 ready，否则回到 scheduled；cron 重新计算下次时间，纯事件职责保持 nextAt=null 等待事件。
+- done 完成本轮。尚有未确认 Input 时继续 ready，否则回到 scheduled；cron 重新计算下次时间，纯事件职责保持 nextTriggerAt=null 等待事件。
 - ask 保存问题并进入 waiting，问题通过 say 单独发送；回答经 Chief 分派为新 Input 后继续。
-- wait 保存未来 nextAt 并结束当前调用，到期再唤醒；不用长时间 sleep 占用执行。
+- wait 保存 waiting.until 并结束当前调用，到期再唤醒；不用长时间 sleep 占用执行。
 
 finalText 只保留为执行记录，不解析为业务结果、不自动发送给用户。没有回执的已接纳 Input 或没有报告的定时执行进入 uncertain，保留错误和执行关联。明确恢复前先核对已有副作用，不自动重放。暂停期间收到报告仍保留 paused。
 
 say 和 report_routine 分别持久化。Output 投递失败只重试投递，不重复本轮工作。新发现若需要独立目标，可通过 say 提出后续 Task，由 Chief 安排；Routine 不自行扩展职责。
 
-## 上下文组织与优化
+执行开始记录目标或职责版本。spec 在执行途中改变时，旧报告不能确认新版本；Agent 需用 read_routine 重新读取资源、核对结果，并显式报告当前 observedGeneration。暂停期间可以保存旧执行针对原版本的结果，但不能据此确认新版本目标。
+
+### Context View
+
+以下是 prompt 的文本大纲；system 放固定规则，user 分为动态业务背景与本轮输入。背景包括配置后的 Me 身份认识；工具定义与执行历史由 Harness 提供。
+
+#### 上下文组织与优化
 
 Routine 长期接收观察与触发，不能把每轮已处理事实都保留为常驻背景。当前采用以下消息结构组织上下文；常驻背景使用 Pi custom → user 投影，通用语义见 [Route 上下文组织](route.md#上下文组织与优化)。
 
@@ -62,16 +109,8 @@ summary 与 Note 的职责、工具和预算见[有界认识与近期依据](REA
 
 优化重点是能否识别值得推进或告知的变化、避免重复提醒和重复操作，并在长期运行后仍保留未决问题。结合有效通知与漏报、重复工具调用、上下文增长、压缩频率和每轮耗时，调整观察预览、当前状态与历史材料的拼接结构；模型成本下降不能以漏掉重要变化为代价。
 
-## 会话与生命周期
-
-`routine.status.agent = { harness: "routine", sessionId }`。Reconcile 通过 create 获取并持久保存原生 ID，再提交业务输入；恢复依赖 Pi SDK 的初始化、持久化及按 ID 查找，不复制会话文件或维护第二份历史。status.execution 与 lastExecutionId 记录当前及最近执行。
-
-执行结束、没有下一条可执行 Input 后写入 idleSince；正在推理和执行工具不算静默。静默达到配置时长后 close 运行句柄并记录 agentStoppedAt，保留 sessionId。新事件或 Chief 分派与清除计时在同一事务提交；cron 到期在启动时清除计时。
-
-Routine 没有静默资源回收阶段。职责、trigger 和累计认识持续保留，后续触发恢复同一原生会话。显式删除才设置 deletionTimestamp；分派和事件匹配拒绝 deleting 目标，删除 Reconcile 关闭句柄、取消遗留 handle 后由框架 finalize。
-
-模型和包分别配置在 harnesses.routine.model / packages，模型缺省复用 Chief，packages 缺省为空且独立同步。静默时长由 plugins.personal.routine.agentIdleMs 配置，见 [配置](../configuration.md)。
-
 ## 验证
 
 `tests/routine-agent.test.ts` 覆盖轮次报告、静默释放、定时恢复、职责保留和删除隔离。`tests/work-context.test.ts` 覆盖精确回执、事务回滚、接纳冲突和有界进展。`tests/pi-agent.test.ts` 使用真实 Pi SDK、Runner 和模拟模型验证专属工具、事件 Input 的 say、跨重启恢复、followUp / steer 与独立能力包；不代表真实模型及外部业务系统验收。
+
+[状态测试](../../tests/status.test.ts)覆盖目标版本、条件更新和 Task / Routine 完成语义的区别。

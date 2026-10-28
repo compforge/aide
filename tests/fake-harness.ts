@@ -82,7 +82,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const task = store.get(workType, workId!) as AgentWork;
             const inputs = new InputStore(home).query("handlePending", task.metadata.uid).filter(i => i.status.handle![task.metadata.uid]!.executionId === task.status.execution?.id)
               .map(i => ({ inputId: i.metadata.name, ...i.spec, note: i.status.handle![task.metadata.uid]!.request.note }));
-            return agent.execute({ ...toWork(task), inputs });
+            return agent.execute({ ...toWork(task, store.get<TopicResource["spec"], TopicStatus>(TOPIC_TYPE, task.status.topic.name).spec.id), inputs });
           })() : agent.execute(data("Work: "))).then(async (result) => {
           if (active?.invocationId !== input.invocationId) return;
           const resources = createResourceClient(new PluginResourceStore({ home, pluginInstanceId: "personal" }));
@@ -90,8 +90,8 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const task = (await resources.get({ ...workType, name: workId, namespace: "v1" })) as AgentWork;
             const outcome = typeof result === "string" ? JSON.parse(result) : result;
             const inputs = new InputStore(home).query("handlePending", task.metadata.uid).filter(i => i.status.handle![task.metadata.uid]!.executionId === task.status.execution?.id);
-            await reportWork(resources, task, task.status.execution!.id, { inputIds: inputs.map(i => i.metadata.name), report: outcome.report, action: outcome.action, question: outcome.question, nextAt: outcome.nextAt });
-            const c = (await resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE)).find(c => c.spec.id === task.spec.topicId);
+            await reportWork(resources, task, task.status.execution!.id, { observedGeneration: task.metadata.generation, inputIds: inputs.map(i => i.metadata.name), report: outcome.report, action: outcome.action, question: outcome.question, nextAt: outcome.nextAt });
+            const c = (await resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE)).find(c => c.metadata.uid === task.status.topic.uid);
             const text = outcome.action === "ask" ? outcome.question : outcome.notification;
             if (c?.spec.address && text) new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])).create(c.spec.id, randomUUID(), outputSpec(c, { topicId: c.spec.id, text }, { producer: { ...workType, name: workId, namespace: "v1", uid: task.metadata.uid } }));
           }

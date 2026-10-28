@@ -1,3 +1,4 @@
+import { TASK_TYPE } from "../plugins/personal/task/model.ts";
 import { LOCAL_ME, personRef } from "../plugins/personal/person/model.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -196,7 +197,8 @@ test("Interrupted addressless work retains notification intent until Me can be r
   let aide = new Aide(home, options, log);
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const work = await aide.work("default").create({ kind: "task", title: "Verify", instruction: "Inspect", trigger: null });
-  await aide.personal.store.save({ ...work, status: "running" });
+  const interrupted = aide.personal.store.resources.get(TASK_TYPE, work.id);
+  await aide.runtime.plugins.resourceClient("personal").patchStatus(interrupted, { execution: { id: "interrupted", startedAt: new Date().toISOString() } });
   await aide.personal.recoverInterrupted();
   assert.equal(aide.personal.store.get(work.id).status, "uncertain");
   const notice = aide.personal.store.get(work.id).recoveryNotice;

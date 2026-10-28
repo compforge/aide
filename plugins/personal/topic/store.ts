@@ -1,3 +1,4 @@
+import { commitStatus } from "../status.ts";
 import { agentCall } from "../observation/reference.ts";
 import { ensureDefaultTopic } from "./default.ts";
 import { topicSubtree } from "./tree.ts";
@@ -35,6 +36,10 @@ export class TopicStore {
     const resource = this.resources.find<TopicSpec, TopicStatus>(TOPIC_TYPE, topicKey(id));
     return resource?.metadata.deletionTimestamp ? undefined : resource;
   }
+  byRef(ref: import("@compforge/aide-plugin").ResourceRef): TopicResource | undefined {
+    const topic = this.resources.find<TopicSpec, TopicStatus>(TOPIC_TYPE, ref.name, ref.namespace);
+    return topic && topic.metadata.uid === ref.uid && !topic.metadata.deletionTimestamp ? topic : undefined;
+  }
   byKey(key: string): TopicResource | undefined {
     return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "topicKey", value: key } })[0];
   }
@@ -64,7 +69,7 @@ export class TopicStore {
       ? [...new Map(all.flatMap(t => this.inputStore.query("topic", t.metadata.uid)).map(i => [i.metadata.uid, i])).values()]
       : this.inputStore.list();
     return inputs.flatMap(input => {
-      const binding = input.status.route?.result?.topics.find(ref => members.has(ref.uid));
+      const binding = input.status.topic && members.has(input.status.topic.uid) ? input.status.topic : undefined;
       if (!binding) return [];
       const topic = selected ?? all.find(t => t.metadata.uid === binding?.uid);
       if (!topic) return [];
@@ -111,7 +116,7 @@ export class TopicStore {
     for (let attempt = 0; ; attempt++) {
       const c = await this.ensure(id);
       try {
-        await this.client.commit([
+        await commitStatus(this.client, [
           { operation: "patchStatus", resource: c, patch: { receipts: [...new Map([...c.status.receipts, ...receipts].map((r) => [r.key, r])).values()].slice(-100) } },
           ...outputs.map((o) => outputWrite(c, o)),
         ]);
@@ -211,7 +216,7 @@ export class TopicStore {
         : executionId ? agentCall((owner ?? c).status, options.idempotencyKey) : undefined;
       const association = { ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
       try {
-        await this.client.commit([
+        await commitStatus(this.client, [
           { operation: "patchStatus", resource: c, patch: {} },
           ...(owner ? [{ operation: "patchStatus" as const, resource: owner, patch: {} }] : []),
           outputWrite(c, draft, association),
@@ -222,7 +227,7 @@ export class TopicStore {
   }
   scope(uid: string) {
     const storage = this.resources.storage;
-    const row = storage.db.prepare("SELECT key FROM resources WHERE uid = ? AND scope = ? AND kind = 'aide.dev/Topic'")
+    const row = storage.db.prepare("SELECT key FROM resources WHERE uid = ? AND scope = ? AND kind = 'aide.dev/Topic' AND json_extract(data, '$.object.apiVersion') = 'aide.dev/v1alpha2'")
       .get(uid, this.resources.scope);
     const root = row ? storage.read(row.key as string)?.object as TopicResource | undefined : undefined;
     return root && root.metadata.namespace === "v1" ? topicSubtree(root, parent => this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE,

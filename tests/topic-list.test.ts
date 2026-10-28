@@ -43,7 +43,7 @@ test("Topic SQL pages keep Default outside the quota, follow selection and clamp
   assert.equal(browseTopics(store, { selectedId: "root-20", page: 2, pageSize: 10 }).page, 2);
   const resource = store.resource("root-20")!;
   store.inputStore.submit("test", "latest", { origin: "source", originId: "test", text: "quiet fact" }, {
-    route: { completedAt: new Date().toISOString(), result: { topics: [resourceRef(resource)], reason: "fixture" } },
+    topic: resourceRef(resource), route: { completedAt: new Date().toISOString(), result: { topics: [resourceRef(resource)], reason: "fixture" } },
   });
   assert.equal(browseTopics(store, { selectedId: "root-20", pageSize: 10 }).page, 1);
   assert.equal(browseTopics(store, { page: 999, pageSize: 10 }).page, 3);
@@ -86,7 +86,7 @@ test("Topic summaries use indexed facts without global views and quiet input nev
   const work = await aide.work("topic").create({ kind: "task", title: "Check", instruction: "Inspect", trigger: null });
   store.outputStore.create("topic", "reply", { text: "Latest\n reply", topicId: "topic", topic: { ...resourceRef(topic), uid: topic.metadata.uid }, target: webAddress("topic") });
   store.inputStore.submit("test", "quiet", { origin: "source", originId: "test", text: "private source fact", observation: { huge: "secret".repeat(1000) } }, {
-    route: { completedAt: new Date().toISOString(), result: { topics: [resourceRef(topic)], reason: "fixture" } },
+    topic: resourceRef(topic), route: { completedAt: new Date().toISOString(), result: { topics: [resourceRef(topic)], reason: "fixture" } },
   });
   const fail = () => { throw new Error("Global views must not be used for Web lists"); };
   store.list = fail; store.get = fail; store.inputs = fail; store.outputStore.list = fail; aide.works = fail; aide.outputs = fail;

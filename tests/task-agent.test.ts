@@ -1,3 +1,4 @@
+import { workPhase } from "../plugins/personal/status.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -27,7 +28,7 @@ function setup(t: TestContext) {
   const get = (id: string) => aide.personal.store.resources.get(TASK_TYPE, id) as TaskResource;
   async function active(id: string) {
     let task = get(id);
-    await resources.patchStatus(task, { status: "running", execution: { id: "run", startedAt: new Date().toISOString() } });
+    await resources.patchStatus(task, { execution: { id: "run", startedAt: new Date().toISOString() } });
     task = get(id);
     await changeAttempt(resources, task.spec.initialInputId, resourceRef(task), () => ({ executionId: "run", startedAt: new Date().toISOString() }));
     return task;
@@ -73,15 +74,15 @@ test("Task report commits progress with exact receipts; end of inference without
   assert.deepEqual(get(work.id), before);
   await assert.rejects(reportWork(resources, task, "wrong", { inputIds: [], report: "bad", action: "done" }), /no longer active/);
   await reportWork(resources, task, "run", { inputIds: [task.spec.initialInputId], report: "First inspected", action: "done" });
-  assert.equal(get(work.id).status.status, "ready");
+  assert.equal(workPhase(get(work.id)), "ready");
   assert.ok(aide.topics.inputStore.get(task.spec.initialInputId)!.status.handle![work.uid!]!.completedAt);
   assert.equal(aide.topics.inputStore.get(later.metadata.name)!.status.handle![work.uid!]!.completedAt, undefined);
   await finalizeExecution(context, task, "run");
-  assert.equal(get(work.id).status.status, "ready");
+  assert.equal(workPhase(get(work.id)), "ready");
   const another = await aide.work("me").create(definition);
   const unreported = await active(another.id);
   await finalizeExecution(context, unreported, "run");
-  assert.equal(get(another.id).status.status, "uncertain");
+  assert.equal(workPhase(get(another.id)), "uncertain");
   assert.match(aide.topics.inputStore.get(unreported.spec.initialInputId)!.status.handle![another.uid!]!.lastError!, /interrupted/);
 });
 
@@ -130,15 +131,15 @@ test("Task idle lifecycle releases the agent, retains its native ID, then reques
   await resources.patchStatus(unresolved, { handle: { ...unresolved.status.handle, [work.uid!]: {
     ...unresolved.status.handle![work.uid!]!, appliedAt: new Date().toISOString(), executionId: "previous", lastError: "Needs inspection",
   } } });
-  await resources.patchStatus(get(work.id), { idleSince: "2000-01-01T00:00:00Z", agentStoppedAt: "2000-01-01T00:00:00Z", status: "scheduled", nextAt: "2100-01-01T00:00:00Z" });
+  await resources.patchStatus(get(work.id), { idleSince: "2000-01-01T00:00:00Z", agentStoppedAt: "2000-01-01T00:00:00Z", waiting: { until: "2100-01-01T00:00:00Z" } });
   assert.ok((await reconcileTask(context, execution, get(work.id)))!.requeueAfterMs! > 1000);
   assert.equal(get(work.id).metadata.deletionTimestamp, undefined);
-  await resources.patchStatus(get(work.id), { status: "uncertain", nextAt: "2000-01-01T00:00:00Z" });
+  await resources.patchStatus(get(work.id), { recovery: { reason: "ExecutionUncertain", message: "Inspect effects" }, waiting: { until: "2000-01-01T00:00:00Z" } });
   assert.equal(await reconcileTask(context, execution, get(work.id)), undefined);
   assert.equal(get(work.id).metadata.deletionTimestamp, undefined);
   const { cancelAssignments } = await import("../plugins/personal/input/state.ts");
   await cancelAssignments(resources, resourceRef(get(work.id)));
-  await resources.patchStatus(get(work.id), { status: "done", nextAt: null });
+  await resources.patchStatus(get(work.id), { recovery: null, waiting: null });
   await reconcileTask(context, execution, get(work.id));
   assert.ok(get(work.id).metadata.deletionTimestamp);
 });

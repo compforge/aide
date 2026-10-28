@@ -67,7 +67,7 @@ test("Chief serializes inputs within a topic while another topic can proceed", a
   assert.deepEqual(calls.filter((call) => call.topicId.endsWith("group-a")).map((call) => call.text), ["a-first", "a-second"]);
   assert.equal(aide.topicIds().length, 2);
   assert.throws(() => aide.personal.store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "ChiefInput" }), /Unknown resource definition/);
-  assert.equal(aide.personal.store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Topic" }).length, 2);
+  assert.equal(aide.personal.store.resources.list({ apiVersion: "aide.dev/v1alpha2", kind: "Topic" }).length, 2);
 });
 
 test("Startup resumes queued inputs but fails interrupted input without replaying its actions", async (t) => {

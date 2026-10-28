@@ -1,3 +1,5 @@
+import { workPhase } from "./status.ts";
+import { commitStatus, patchStatus } from "./status.ts";
 import { contactsTool, type ContactChannel } from "./output/tool.ts";
 import { identityBackground } from "../../agents/personal.ts";
 import { weavePolicy } from "./weave/config.ts";
@@ -107,7 +109,7 @@ export class Personal {
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
       });
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, contactsTool(this.options.persons, this.options.channels ?? [], active), ...topicTools(this.store, active)], background: () => new TopicBackground(this.store, active(), topicId), topicNote: async (input, callId) => {
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, contactsTool(this.options.persons, this.options.channels ?? [], active), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), topicNote: async (input, callId) => {
         const c = active();
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, noteId: result.noteId, version: result.version }, "Topic Note updated");
@@ -201,7 +203,7 @@ export class Personal {
       const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === id && i.phase === "running");
       if (!invocation) return { accepted: false, reason: "not_running" };
       try {
-        await resources.commit([
+        await commitStatus(resources, [
           // This is an admission revision, including rejected dispatches, not a count of consumed Inputs.
           { operation: "patchStatus", resource: resource!, patch: { execution: { ...resource!.status.execution!, admissionRevision: (resource!.status.execution!.admissionRevision ?? 0) + 1 } } },
           { operation: "patchStatus", resource: input, patch: attemptPatch(input, ref, { executionId: id, agent: resource.status.agent, startedAt: new Date().toISOString(), lastError: undefined, nextAttemptAt: undefined,
@@ -259,7 +261,7 @@ export class Personal {
       if (args.weaveRevision && (args.weaveRevision > (topic.status.weaveRevision ?? 0)
         || args.weaveRevision <= (topic.status.notifiedWeaveRevision ?? 0))) return { accepted: false };
       try {
-        await resources.commit([
+        await commitStatus(resources, [
           { operation: "patchStatus", resource: topic, patch: {
             execution: { ...topic.status.execution, admissionRevision: (topic.status.execution.admissionRevision ?? 0) + 1 },
             ...(!input ? { notifiedWeaveRevision: args.weaveRevision } : {}),
@@ -272,7 +274,7 @@ export class Personal {
       if (input) this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid,
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const prompt = input ? `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nRead current Topic material and assess when useful.`
-        : "Topic structure changed through Weave. Review the current subtree's understanding, Inputs and Work; decide what needs attention. Existing Work retains its original Topic.";
+        : "Topic structure changed. Review the current subtree's understanding, Inputs and Work; decide what needs attention. Existing Work retains its original Topic.";
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,
@@ -323,7 +325,7 @@ export class Personal {
     const executing = this.invocations().some((invocation) => invocation.topicId === topicId && ["queued", "running", "uncertain"].includes(invocation.phase));
     if (unfinished || executing) return { deleted: false, reason: "busy" };
     const hasWork = WORK_TYPES.some((type) => this.store.resources.list<WorkSpec, unknown>(type)
-      .some((work) => work.spec.topicId === topicId));
+      .some((work) => (work.status as import("./model.ts").WorkStatus).topic.uid === topic.metadata.uid));
     if (hasWork) return { deleted: false, reason: "work" };
     try {
       await this.plugins.resourceClient("personal").delete(TOPIC_TYPE, topic.metadata.name, "v1", { uid: topic.metadata.uid, resourceVersion: topic.metadata.resourceVersion });
@@ -356,9 +358,9 @@ export class Personal {
       this.log.warn({ resourceUid: c.metadata.uid, executionId: id }, "Recovered interrupted agent without replaying actions");
     }
     for (const type of WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work-status.ts").WorkAgentStatus>(type)) {
-      if (work.metadata.deletionTimestamp || work.status.status !== "running") continue;
+      if (work.metadata.deletionTimestamp || workPhase(work) !== "running") continue;
       const text = `「${work.spec.title}」执行被中断，结果未知。请核对外部结果后告诉我是否继续。`;
-      await resources.patchStatus(work, { status: "uncertain", nextAt: null,
+      await patchStatus(resources, work, { recovery: { reason: "ExecutionUncertain", message: "Inspect effects before resuming" }, waiting: null,
         recoveryNotice: { id: `interrupted:${work.metadata.uid}:${work.status.execution?.id ?? work.metadata.resourceVersion}`, text } });
       this.log.warn({ workId: work.metadata.name }, "Recovered interrupted work as uncertain; notification pending");
     }
@@ -379,10 +381,10 @@ export class Personal {
       const notice = work.status.recoveryNotice;
       if (!notice || work.metadata.deletionTimestamp) continue;
       try {
-        await this.topics.say(work.spec.topicId, undefined, notice.text, undefined,
+        await this.topics.say(this.store.topicId(work.status.topic), undefined, notice.text, undefined,
           { to: { me: true }, inputIds: [], idempotencyKey: notice.id });
         const current = await resources.get<WorkSpec, import("./work-status.ts").WorkAgentStatus>(resourceRef(work));
-        if (current?.status.recoveryNotice?.id === notice.id) await resources.patchStatus(current, { recoveryNotice: null });
+        if (current?.status.recoveryNotice?.id === notice.id) await patchStatus(resources, current, { recoveryNotice: null });
         this.log.info({ workId: work.metadata.name, noticeId: notice.id }, "Recovery notification accepted");
       } catch (error) {
         retry = true;
@@ -470,10 +472,10 @@ export class Personal {
     const c = this.topics.resource(input.topicId)!;
     const at = new Date().toISOString();
     const resources = targets.map(work => this.store.resources.get(workType(work.kind), work.id));
-    await this.store.client.commit([
+    await commitStatus(this.store.client, [
       ...resources.map(resource => ({ operation: "patchStatus" as const, resource, patch: { idleSince: null, agentStoppedAt: null } })),
       { operation: "create", type: INPUT_TYPE, name, spec, status: {
-        route: { completedAt: at, result: { topics: [resourceRef(c)], reason: "Routine event subscription" } },
+        topic: resourceRef(c), route: { completedAt: at, result: { topics: [resourceRef(c)], reason: "Routine event subscription" } },
         handle: Object.fromEntries(resources.map(resource => [resource.metadata.uid, { resource: resourceRef(resource), assignedAt: at, request: { action: "context" } }])),
       } },
     ]);

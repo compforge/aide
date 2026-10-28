@@ -83,7 +83,8 @@ export interface ResourceSchema<T> { parse(value: unknown): T }
 
 export interface ResourceValidationContext {
   /** Transaction-local snapshots in the same resource scope, including preceding writes in a commit. */
-  list<S, T>(type: ResourceType): readonly Readonly<Resource<S, T>>[];
+  get<S, T>(type: ResourceType, uid: string): Readonly<Resource<S, T>> | undefined;
+  list<S, T>(type: ResourceType, options?: Pick<ResourceListOptions, "namespace" | "matchIndex">): readonly Readonly<Resource<S, T>>[];
 }
 export interface ResourceValidator<S, T> {
   create?(resource: Readonly<Resource<S, T>>, context: ResourceValidationContext): void;

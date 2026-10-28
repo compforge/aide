@@ -22,7 +22,7 @@ Personal 的业务主线是：
 
 Channel / Source 将交流和观察形成 Input，保留事实与来源；Route 确定 Input 的 Topic 归属；当前 root Topic 的 Chief 综合子树输入，在已有授权范围内直接处理，或交给 Task / Routine 持续办理。Chief 与工作 Agent 在需要沟通时产生 Output，也可以静默完成研判或推进工作。
 
-Weave 作用于 Topic 之间的关系：把值得共同理解的主题组织到新父 Topic 下，使后续输入由共同 root 的 Chief 综合处理。Input 的原始 Topic 归属保持稳定，实际处理位置随主题树解析到当前 root；主题组织、人物身份、通信目的地和授权分别表达各自的事实。
+Weave 作用于 Topic 之间的关系：把值得共同理解的主题组织到新父 Topic 下，使后续输入由共同 root 的 Chief 综合处理。Input、Task、Routine 的当前归属由 status.topic 保存；Chief 可在树内调整，实际处理位置随主题树解析到当前 root；主题组织、人物身份、通信目的地和授权分别表达各自的事实。
 
 ![Personal 的输入、路由、研判、办理与输出](../assets/personal-flow.svg)
 
@@ -39,6 +39,24 @@ Weave 作用于 Topic 之间的关系：把值得共同理解的主题组织到�
 Route 的确定性规则直接分派，其余交给持续 Route Agent。各 Agent 通过工具明确确认业务进展，通过 say 创建 Output，投递器负责发送和回执。
 
 Personal 采用 [工具驱动与持续接纳](../harness/README.md#agent-的使用方式与持续职责) 的 Agent 使用方式：Chief 服务于 root Topic 的综合理解与研判，Task Agent 服务于有限目标，Routine Agent 服务于持续职责。Reconcile 负责确定性协调，Agent 负责非确定性判断；新动向通过 followUp / steer 加入运行中的会话，以 assess_input、report_task / report_routine 和 say 分别提交研判、办理进展与沟通。业务完成以这些回执为准，最终文本用于内部执行摘要。
+
+## 资源状态与组件协作
+
+Input、Task、Routine、Topic 使用 aide.dev/v1alpha2；Route、Weave、Person、Output 的当前版本为 aide.dev/v1alpha1。每个对象的字段、维护者与生命周期在其专属文档中展开；通用并发、Conditions 和版本演进见 [Resource](../plugin/resource.md)。
+
+Input 保存原始事实，Task 承担有限目标，Routine 承担持续职责，Topic 保存主题认识和组织关系。Route、Chief、Weave 围绕对象工作；原生执行结束、Input 研判完成、目标达成和 Output 送达分别记录。
+
+| 共享片段 | 适用对象与边界 |
+| --- | --- |
+| status.topic | Input、Task、Routine 的唯一当前 Topic UID 引用；Topic 使用 spec.parentRef 表达父子关系 |
+| summary / recent | Topic、Task、Routine、Person 的长期认识与近期事项；Input 的解释留在研判回执 |
+| agent / execution | Topic、Task、Routine、Route、Weave 的原生会话与执行；Input 只在处理回执中引用执行 |
+| organization | Input、Task、Routine、Topic 最近一次组织调整的操作者、原因、时间和前后关系 |
+| conditions | Input、Task、Routine、Topic 按各自业务语义声明条件；不强求同一组状态判断 |
+
+Personal 在 plugins/personal/conditions.ts 实现条件更新规则，在 status.ts 构造自身负责的事实与条件；使用现有 ResourceClient 提交，不让 Host 理解 Personal 的业务语义。Work DTO 的 status、nextAt、question、revision 是展示投影，CRD 分别保存暂停期望、等待、执行和业务结果，以 metadata.generation 表达 spec 修订。
+
+各对象文档按“整体定位、CRD（如有）、Reconciler（如有）、Agent（如有）”组织。Agent 下的 Context View 是文本形式的 prompt 大纲，说明 system 和 user 各由哪些部分构成，以发现重复、过期、缺失或越界的上下文。它与执行历史的 SessionView、单次业务证据的 JobView 分工不同；实际请求仍以录制证据为准。
 
 ## 主动性与上下文
 

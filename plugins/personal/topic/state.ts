@@ -1,3 +1,4 @@
+import { commitStatus, patchStatus } from "../status.ts";
 import { resourceRef } from "../input/state.ts";
 import { readTopicSubtree, understandingVersion, summaryVersion } from "./tree.ts";
 import { z } from "zod";
@@ -14,7 +15,7 @@ export async function updateTopic(resources: ResourceClient, ref: Readonly<Topic
     if (!current || current.metadata.uid !== ref.metadata.uid || current.metadata.deletionTimestamp) throw new Error("Topic no longer exists");
     const patch = change(current);
     if (!Object.keys(patch).length) return current;
-    try { return await resources.patchStatus(current, patch); }
+    try { return await patchStatus(resources, current, patch); }
     catch (error) { if (attempt >= 8 || !/version conflict/.test(String(error))) throw error; }
   }
 }
@@ -56,7 +57,7 @@ export async function summarizeTopic(resources: ResourceClient, owner: Readonly<
     absorbedSummaries[ref.uid] = summaryVersion(child);
     return child;
   });
-  await resources.commit([
+  await commitStatus(resources, [
     ...children.map(resource => ({ operation: "patchStatus" as const, resource, patch: {} })),
     ...(target.metadata.uid === current.metadata.uid ? [] : [{ operation: "patchStatus" as const, resource: current, patch: {} }]),
     { operation: "patchStatus", resource: target, patch: { ...(args.summary !== undefined ? { summary: args.summary } : {}),

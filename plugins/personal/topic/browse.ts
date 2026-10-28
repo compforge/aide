@@ -10,9 +10,9 @@ export interface TopicListItem {
   trigger: TopicTrigger; default: boolean; preview: string; updatedAt: string; taskCount: number; routineCount: number;
 }
 const field = (alias: string, path: string) => `json_extract(${alias}.data, '$.object.${path}')`;
-const activeTopic = (alias: string) => `${alias}.scope = 'personal' AND ${alias}.kind = 'aide.dev/Topic'
+const activeTopic = (alias: string) => `${alias}.scope = 'personal' AND ${alias}.kind = 'aide.dev/Topic' AND ${field(alias, "apiVersion")} = 'aide.dev/v1alpha2'
   AND ${field(alias, "metadata.namespace")} = 'v1' AND ${field(alias, "metadata.deletionTimestamp")} IS NULL`;
-const activeInput = `r.scope = 'personal' AND r.kind = 'aide.dev/Input' AND ${field("r", "metadata.namespace")} = 'v1'
+const activeInput = `r.scope = 'personal' AND r.kind = 'aide.dev/Input' AND ${field("r", "apiVersion")} = 'aide.dev/v1alpha2' AND ${field("r", "metadata.namespace")} = 'v1'
   AND ${field("r", "metadata.deletionTimestamp")} IS NULL`;
 const output = `o.scope = 'personal' AND o.kind = 'aide.dev/Output' AND ${field("o", "metadata.namespace")} = 'v1'
   AND ${field("o", "metadata.deletionTimestamp")} IS NULL`;
@@ -63,7 +63,7 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
         ...(row.topicKey ? { topicKey: row.topicKey as string } : {}), ...(row.parentUid ? { parentUid: row.parentUid as string } : {}),
         trigger: topicTrigger(row.trigger ? JSON.parse(row.trigger as string) : undefined), default: Boolean(row.isDefault),
         preview: (reply?.text as string ?? "").replace(/\s+/g, " ").trim().slice(0, 100), updatedAt: row.updatedAt as string,
-        ...(counts.get(row.id as string) ?? { taskCount: 0, routineCount: 0 }) };
+        ...(counts.get(row.uid as string) ?? { taskCount: 0, routineCount: 0 }) };
     };
     // Fetch exactly the selected ancestor chain; opening a deep link never enumerates the directory.
     const ancestors: Record<string, unknown>[] = [];
@@ -92,11 +92,11 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
       const row = db.prepare(`WITH candidates AS (SELECT ${columns} FROM resources t WHERE t.uid = ? AND ${activeTopic("t")})${facts()} SELECT * FROM activity`).get(topic.uid as string);
       return row;
     }).filter((row): row is NonNullable<typeof row> => !!row);
-    const ids = [...new Set([...itemRows, ...pinnedRows, ...pathRows].map(row => row.id as string))];
+    const ids = [...new Set([...itemRows, ...pinnedRows, ...pathRows].map(row => row.uid as string))];
     if (ids.length) {
       const rows = db.prepare(`SELECT i.value AS topicId, r.kind, count(*) AS n FROM resource_indexes i CROSS JOIN resources r ON r.key = i.source
-        WHERE i.name = 'topicId' AND i.value IN (${ids.map(() => "?").join(",")}) AND r.scope = 'personal'
-          AND r.kind IN ('aide.dev/Task', 'aide.dev/Routine') AND ${field("r", "metadata.namespace")} = 'v1'
+        WHERE i.name = 'topic' AND i.value IN (${ids.map(() => "?").join(",")}) AND r.scope = 'personal'
+          AND r.kind IN ('aide.dev/Task', 'aide.dev/Routine') AND ${field("r", "apiVersion")} = 'aide.dev/v1alpha2' AND ${field("r", "metadata.namespace")} = 'v1'
           AND ${field("r", "metadata.deletionTimestamp")} IS NULL GROUP BY i.value, r.kind`).all(...ids);
       for (const row of rows) {
         const value = counts.get(row.topicId as string) ?? { taskCount: 0, routineCount: 0 };

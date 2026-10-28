@@ -178,3 +178,40 @@ test("Resource indexes follow commits, rollback and deletion without scanning un
   await client.delete(TYPE, "a"); store.finalizeDeletion(TYPE, "a");
   assert.equal((await query("done")).length, 0);
 });
+
+
+test("Validator UID and indexed reads observe preceding transaction writes, remain isolated, and roll back", async t => {
+  const dir = home(t), store = new PluginResourceStore({ home: dir, pluginInstanceId: "example" });
+  const indexed: ResourceDefinition = { ...document, indexes: { label: r => [r.spec.label] } };
+  const oldType = { ...TYPE, apiVersion: "tests.aide.dev/v1alpha1" };
+  let checked = false, targetUid = "", otherUid = "";
+  const checkType = { ...TYPE, kind: "Check" };
+  store.storage.register("example", [indexed, { ...indexed, type: oldType }, { ...document, type: checkType, validator: { create(_r, context) {
+    const found = context.get<{ text: string; label: string }, { count: number }>(TYPE, targetUid)!;
+    assert.equal(found.spec.label, "done");
+    assert.equal(context.get(TYPE, otherUid), undefined, "UID reads cannot cross plugin scopes");
+    assert.equal(context.get(oldType, targetUid), undefined, "UID reads respect API versions");
+    assert.deepEqual(context.list(TYPE, { namespace: "v1", matchIndex: { name: "label", value: "done" } }).map(r => r.metadata.name), ["target"]);
+    found.spec.label = "mutated snapshot";
+    assert.equal(context.get<{ label: string }, unknown>(TYPE, targetUid)!.spec.label, "done");
+    assert.throws(() => context.list(TYPE, { matchIndex: { name: "missing", value: "done" } }), /Unknown resource index/);
+    checked = true;
+    throw new Error("reject check");
+  } } }]);
+  const client = createResourceClient(store);
+  const target = await client.create(TYPE, { name: "target", spec: { text: "one", label: "pending" } }); targetUid = target.metadata.uid;
+  await client.create(TYPE, { name: "namespace", namespace: "v1/project/other", spec: { text: "two", label: "done" } });
+  await client.create(oldType, { name: "old", spec: { text: "three", label: "done" } });
+  const other = new PluginResourceStore({ home: dir, pluginInstanceId: "other" }); other.storage.register("other", [indexed]);
+  otherUid = (await createResourceClient(other).create(TYPE, { name: "foreign", spec: { text: "foreign", label: "done" } })).metadata.uid;
+  const keys = store.storage.keys;
+  store.storage.keys = function* () { throw new Error("Validator must not scan the resource scope"); };
+  try {
+    await assert.rejects(client.commit([
+      { operation: "replace", resource: target, spec: { ...target.spec, label: "done" }, status: target.status },
+      { operation: "create", type: checkType, name: "check", spec: { text: "check" }, status: {} },
+    ]), /reject check/);
+  } finally { store.storage.keys = keys; }
+  assert.ok(checked);
+  assert.deepEqual(await client.get({ ...TYPE, namespace: "v1", name: "target" }), target);
+});

@@ -1,3 +1,4 @@
+import { commitStatus } from "./status.ts";
 import { z } from "zod";
 import { prepareAgent, saveAgent } from "./session.ts";
 import type { PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
@@ -5,7 +6,7 @@ import { InputAttention, inputAttention, INPUT_TYPE, type InputSpec } from "./in
 import { inputRef, pendingInputs, resourceRef, changeAttempt, changeAssessment, attemptOf, attemptPatch, belongsToTopic, topicScope, type Input } from "./input/state.ts";
 export { inputRef } from "./input/state.ts";
 /** A persistent native session owns context; each invocation has a separate durable admission identity. */
-export const LoopExecutionSchema = z.object({ id: z.string(), startedAt: z.string(), admissionRevision: z.number().int().nonnegative().optional() }).strict();
+export const LoopExecutionSchema = z.object({ id: z.string(), startedAt: z.string(), admissionRevision: z.number().int().nonnegative().optional(), observedGeneration: z.number().int().positive().optional() }).strict();
 export type LoopExecution = z.infer<typeof LoopExecutionSchema>;
 export interface LoopStatus { agent?: import("@compforge/aide-plugin").AgentStatus; execution?: LoopExecution | null }
 export type LoopResource = Resource<unknown, LoopStatus>;
@@ -31,6 +32,7 @@ export async function nextInputs(resources: ResourceClient, owner: Readonly<Loop
   const inputs = await pendingInputs(resources, resourceRef(owner), topics, "assessReady");
   return [...inputs].filter(i => eligible(i, owner, topicUids)).sort((a, b) =>
     (owner.kind === "Route" ? 0 : attentionOrder[inputAttention(a.spec)] - attentionOrder[inputAttention(b.spec)])
+    || (owner.kind === "Topic" ? Number(a.spec.origin === "trigger") - Number(b.spec.origin === "trigger") : 0)
     || a.metadata.creationTimestamp.localeCompare(b.metadata.creationTimestamp) || a.metadata.name.localeCompare(b.metadata.name)).slice(0, limit);
 }
 export async function nextInput(resources: ResourceClient, owner: Readonly<LoopResource>) {
@@ -67,8 +69,8 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   if (inputs.some(input => !input || !eligible(input, current, topicUids))) return;
   const startedAt = new Date().toISOString();
   try {
-    await context.resources.commit([
-      { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, admissionRevision: 0 },
+    await commitStatus(context.resources, [
+      { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, admissionRevision: 0, observedGeneration: current.metadata.generation },
         ...(current.kind === "Topic" ? { notifiedWeaveRevision: (owner.status as import("./topic/model.ts").TopicStatus).weaveRevision ?? 0, lastError: null } : {}) } },
       ...inputs.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: attemptPatch(input!, resourceRef(current), {
         executionId: execution.executionId, agent: undefined, startedAt, lastError: undefined, nextAttemptAt: undefined,
@@ -109,13 +111,13 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
       ? await context.resources.list<import("./input/model.ts").InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessExecution", value: executionId } })
       : (await pendingInputs(context.resources, resourceRef(latest))).filter(i => attemptOf(i, resourceRef(latest))?.executionId === executionId);
     try {
-      await context.resources.commit([
+      await commitStatus(context.resources, [
         ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: latest.kind === "Topic" ? { assess: { ...i.status.assess, lastError: error || "Chief ended without confirming input completion" } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error,
           ...(latest.kind === "Route" ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
         { operation: "patchStatus", resource: latest, patch: { execution: null, ...(latest.kind === "Topic" ? { idleSince: new Date().toISOString(), lastError: error || null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
           lastExecutionId: executionId,
-          ...((unfinished.length || (latest.status as LoopStatus & { status?: string }).status === "running")
-            && (latest.status as LoopStatus & { status?: string }).status !== "paused" ? { status: "uncertain" } : {}),
+          ...((unfinished.length || (latest.status as import("./work-status.ts").WorkAgentStatus).lastExecutionId !== executionId)
+            ? { recovery: { reason: "ExecutionUncertain", message: error || "Execution ended without a business receipt" } } : {}),
         } : {}) } },
       ]);
       if (latest.kind === "Topic" && error) context.logger.warn("Chief execution requires inspection", { attributes: { topicUid: latest.metadata.uid, executionId, error } });

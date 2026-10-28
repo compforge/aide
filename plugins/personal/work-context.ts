@@ -1,3 +1,4 @@
+import { patchStatus } from "./status.ts";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Resource, ResourceClient } from "@compforge/aide-plugin";
@@ -23,7 +24,7 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
       async execute(_id, args, signal) {
         signal?.throwIfAborted(); const owner = read();
         if (owner.metadata.resourceVersion !== args.version) throw new Error(`${kind} summary version conflict; read it again`);
-        const updated = await resources.patchStatus(owner, { summary: args.summary });
+        const updated = await patchStatus(resources, owner, { summary: args.summary });
         log.info({ workUid: owner.metadata.uid, executionId: owner.status.execution!.id, kind, version: updated.metadata.resourceVersion }, "Work summary updated");
         return result({ version: updated.metadata.resourceVersion });
       } }),

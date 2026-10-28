@@ -39,7 +39,7 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
         async execute(_id, { uid, offset = 0 }) {
           const t = roots().find(t => t.metadata.uid === uid);
           if (!t) throw new Error("Root Topic unavailable");
-          const text = JSON.stringify({ name: t.spec.name, summary: t.status.summary, recent: t.status.recent });
+          const text = JSON.stringify({ name: t.spec.name, summary: t.status.summary, recent: t.status.recent, organization: t.status.organization });
           return result({ uid, version: understandingVersion(t), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } },
       { name: "group_topics", label: "Group topics", description: "Attach 1-8 roots to an existing parent, or create a new parent for 2-8 roots. For a new parent provide name and summary preserving long-lived connections, attribution, disagreements and confirmation state. Temporary progress stays in child Notes; grouping retains a bounded combined Note window. Do not copy temporary facts into summary. Existing parents keep their own understanding for Chief to synthesize. Running agents may finish; data ownership stays unchanged.",

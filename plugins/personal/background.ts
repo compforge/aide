@@ -1,3 +1,4 @@
+import { recentActivity } from "./route/activity.ts";
 import { createHash } from "node:crypto";
 import type { Store } from "./store.ts";
 import type { TopicResource } from "./topic/model.ts";
@@ -19,14 +20,18 @@ ${JSON.stringify(data)}`;
  * @link docs/personal/route.md#上下文组织与优化
  */
 function topicPart(c: TopicResource | undefined) {
-  return part(c ? { uid: c.metadata.uid, ...c.spec, ...understanding(c.status) } : null, "read_input for Chief; read_topic for Work");
+  return part(c ? { uid: c.metadata.uid, ...c.spec, organization: c.status.organization, ...understanding(c.status) } : null, "read_input for Chief; read_topic for Work");
 }
 
 export function topicCandidates(store: Store, query?: string, parentUid?: string) {
   return store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE)
     .filter(c => !c.metadata.deletionTimestamp && (parentUid ? c.spec.parentRef?.uid === parentUid : !c.spec.parentRef)
       && (!query || [c.spec.name, c.status.summary].join(" ").toLowerCase().includes(query.toLowerCase()))).sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid))
-    .map(c => ({ uid: c.metadata.uid, name: preview(c.spec.name, 200), default: !!c.spec.default, summary: preview(c.status.summary, 2000) }));
+    .map(c => {
+      const recent = recentActivity(store, c);
+      return { uid: c.metadata.uid, ...(c.spec.name ? { name: preview(c.spec.name, 200) } : {}), default: !!c.spec.default,
+        ...(c.status.summary ? { summary: preview(c.status.summary, 2000) } : {}), ...(recent.length ? { recent } : {}) };
+    });
 }
 
 /** A page is bounded by both count and serialized size; nextOffset never silently drops candidates. */
@@ -47,9 +52,9 @@ export function routeParts(store: Store) {
 
 export function relatedWork(store: Store, topicId: string) {
   const topic = store.topics.resource(topicId);
-  return store.workResources(topic ? store.topics.scope(topic.metadata.uid).map(t => t.spec.id) : [])
+  return store.workResources(topic ? store.topics.scope(topic.metadata.uid).map(t => t.metadata.uid) : [])
     .sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid)).map(w => {
-      const work = toWork(w);
+      const work = store.toWork(w);
       return { id: work.id, uid: work.uid, topicId: work.topicId, kind: work.kind, title: preview(work.title, 200), status: work.status,
         nextAt: work.nextAt, question: preview(work.question ?? "", 500), summary: preview(work.summary, 1000), recent: understanding(work).recent,
         lastReport: work.lastReport ? { at: work.lastReport.at, text: preview(work.lastReport.text, 500) } : undefined };
@@ -59,11 +64,11 @@ export function relatedWork(store: Store, topicId: string) {
 export function topicParts(store: Store, c: TopicResource | undefined, topicId: string) {
   return { topic: topicPart(c), children: part(contextPage(c ? store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
     { matchIndex: { name: "parent", value: c.metadata.uid } }).filter(t => !t.metadata.deletionTimestamp)
-    .map(t => ({ uid: t.metadata.uid, name: t.spec.name, summary: preview(t.status.summary, 1000) })) : []), "list_topics and read_topic"), work: part(contextPage(relatedWork(store, topicId)), "list_work for remaining summaries; read tools for this resource") };
+    .map(t => ({ uid: t.metadata.uid, conditions: t.status.conditions ?? [], name: t.spec.name, summary: preview(t.status.summary, 1000) })) : []), "list_topics and read_topic"), work: part(contextPage(relatedWork(store, topicId)), "list_work for remaining summaries; read tools for this resource") };
 }
 
 export function workParts(store: Store, resource: WorkResource) {
-  const work = toWork(resource);
+  const work = store.toWork(resource);
   return { ...topicParts(store, store.topics.resource(work.topicId), work.topicId),
     objective: part({ id: work.id, uid: work.uid, kind: work.kind, title: preview(work.title, 200), instruction: preview(work.instruction, 8000),
       trigger: work.trigger, status: work.status, nextAt: work.nextAt, lastReport: work.lastReport ? { at: work.lastReport.at, text: preview(work.lastReport.text, 1000) } : undefined, question: preview(work.question ?? "", 1000), ...understanding(work) }, `read_${work.kind}`) };

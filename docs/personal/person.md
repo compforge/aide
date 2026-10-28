@@ -1,10 +1,26 @@
 # Person：身份与认识
 
-## 身份、Me 与关系
+## 整体定位
+
+Person 保存人物身份和认识，供各 Topic 共享；Me 是基于已配置身份的本人标记，与执行凭证独立。人物的判断和认识更新发生在 Chief 的正常轮次，不启动 Person Agent。
+
+## CRD
+
+类型为 `aide.dev/v1alpha1 Person`，见[模型](../../plugins/personal/person/model.ts)。
+
+### Spec
+
+name 保存展示名，identities 保存 provider / scope / id 组成的外部身份。姓名不决定唯一性；Me 按配置与身份匹配，不是凭证推导的 spec 标记。
+
+### Status
+
+summary / recent 保存长期认识与有界近期事项，updatedAt / updatedBy 记录 summary 修订时间与 user、chief 或 connector 来源。完整更新规则见[认识与用户修正](#认识与用户修正)。
+
+### 身份、Me 与关系
 
 Chief 持续理解人，并围绕人的目标推进事。Person 是人物 CRD，包含“我”和其他人；Work 是需要持续推进的 Task / Routine。
 
-Person 保存姓名、外部身份和 profile。身份由 provider / scope / id 唯一确定，姓名只用于展示；同一人可绑定多个账号，跨应用的裸 ID 不作比较。外部资料同步只补全尚未识别的名字，不覆盖用户资料或认知。
+Person 保存姓名、外部身份和人物认识。身份由 provider / scope / id 唯一确定，姓名只用于展示；同一人可绑定多个账号，跨应用的裸 ID 不作比较。外部资料同步只补全尚未识别的名字，不覆盖用户资料或认知。
 
 Person 是人物身份与认知的基础，Me 是附加的可选身份标记：它告诉 Aide，各个接入中的哪些账号代表“我”。Connector 与 Channel 带来的可识别人类身份都按 Person 组织；未配置该入口的 Me 时，仍正常接收和处理 Input、识别人并积累人物认知。配置 Me 后，Aide 才能将该入口中的身份认作本人，并结合其他已绑定身份形成跨入口的本人认知。
 
@@ -25,15 +41,11 @@ Input.relation 描述输入相对于 Me 的关系：
 
 Web 输入为 sent。别人私信机器人或仅 @ 机器人不能据此认定为我收到；Lark Source 对各条消息分别分类，混合讨论仅在本人的观察范围内归为 observed。环境与需求监控属于配置的观察范围。关系随 Input 持久保存，不因后续身份编辑而改写历史。
 
-## 认识与用户修正
+## Reconciler
 
-Person 的 status.summary 保存长期有效、低频变化的人物认识，status.recent 保存可持续更新的近期事项 Note。Chief 通过 summarize_person 只修订 summary，通过 upsert_note 显式选择 Person 创建或更新 Note；共用[有界认识契约](README.md#有界认识与近期依据)。用户在 Web Persons 直接编辑同一个 status.summary，updatedBy 保留用户来源，Note 原样保留；后续只改 Note 也不改变 summary 的修订来源和时间。Chief 必须读取最新版本并尊重用户明确修正，不能用旧上下文中的推断覆盖它。身份补全、仅编辑身份和启动更新均保留现有认识。并发更新必须重读后合并，不能盲目覆盖。
+Person Controller 只处理标准删除生命周期，没有外部清理动作；身份补全和用户合并由 Personal 服务在资源事务中完成。
 
-summary 和 recent 只是人物资料的一部分，不代表完整的长期 profile。职责、关系、经历等资料可以按其自身语义继续组织；近期窗口的裁剪不授权删除长期资料。
-
-人物工具沿用 Work 的接入方式：模型工具调用 Personal 服务，再经 ResourceClient 更新 CRD，无需新增 Core verb 或人物输入队列。读取、补充、合并、纠错在正常 Chief 轮次内发生，Topic 摘要仍只维护话题窗口。详见 [Chief](chief.md#人物认知)。
-
-## 用户合并人物
+### 用户合并人物
 
 Persons 详情按 `spec.name` 精确查询其他同名人物，候选独立分页，不依赖导航当前页；每项展示认识预览和「核对并合并」入口。同名只提供候选，不证明是同一个人；Connector 始终按 provider / scope / id 匹配。用户在当前人物 B 的详情中选择 A 的「合并」，在弹窗核对双方身份与认知后确认 A → B；有未保存修改时先保存或取消。
 
@@ -42,6 +54,16 @@ Persons 详情按 `spec.name` 精确查询其他同名人物，候选独立分�
 `Persons.merge` 校验双方 UID 和 resourceVersion，通过 `ResourceClient.commit` 原子提交 A 的删除请求与 B 的更新；删除标记先于身份追加校验，事务外不会看到身份转移的中间状态。任何失败全部回滚，提交后才通知 Watch；Person 的标准 Reconcile 随后 finalize A，重启后也会继续。A 不保留别名或 mergedInto 记录。
 
 Input.sender / Output.receivers 是允许悬空的历史引用，不保证 Person 存在。合并不改写历史 Input/Output，也不将 A 的引用重定向到 B。读取缺失人物时保留消息正文和已有来源证据；引用带 UID 时必须校验，避免把重建的同名资源认作旧人物。后续输入按已转移的外部身份匹配 B。
+
+## Chief 协作
+
+### 认识与用户修正
+
+Person 的 status.summary 保存长期有效、低频变化的人物认识，status.recent 保存可持续更新的近期事项 Note。Chief 通过 summarize_person 只修订 summary，通过 upsert_note 显式选择 Person 创建或更新 Note；共用[有界认识契约](README.md#有界认识与近期依据)。用户在 Web Persons 直接编辑同一个 status.summary，updatedBy 保留用户来源，Note 原样保留；后续只改 Note 也不改变 summary 的修订来源和时间。Chief 必须读取最新版本并尊重用户明确修正，不能用旧上下文中的推断覆盖它。身份补全、仅编辑身份和启动更新均保留现有认识。并发更新必须重读后合并，不能盲目覆盖。
+
+summary 和 recent 只是人物资料的一部分，不代表完整的长期 profile。职责、关系、经历等资料可以按其自身语义继续组织；近期窗口的裁剪不授权删除长期资料。
+
+人物工具沿用 Work 的接入方式：模型工具调用 Personal 服务，再经 ResourceClient 更新 CRD，无需新增 Core verb 或人物输入队列。读取、补充、合并、纠错在正常 Chief 轮次内发生，Topic 摘要仍只维护话题窗口。详见 [Chief](chief.md#人物认知)。
 
 ## 验证
 

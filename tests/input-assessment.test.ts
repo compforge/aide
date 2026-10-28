@@ -26,20 +26,20 @@ const task = { kind: "task" as const, title: "Check", instruction: "Verify evide
 test("Concurrent Chief assessments complete once and atomically establish only the winning Work handoff", async t => {
   const { aide, resources, context } = setup(t);
   const a = await aide.topics.ensure("a"), b = await aide.topics.ensure("b");
-  const wa = await aide.work("a").create(task), wb = await aide.work("b").create(task);
+  const wa = await aide.work("a").create(task), wb = await aide.work("a").create(task);
   const input = await aide.topics.submit("fact", { origin: "source", originId: "fixture", text: "shared evidence" });
-  await deliver(context, input, [a.metadata, b.metadata], "Both topics");
+  await deliver(context, input, [a.metadata], "One current Topic");
   for (const c of [a, b]) {
     await resources.patchStatus(aide.topics.resource(c.spec.id)!, { execution: { id: c.spec.id, startedAt: new Date().toISOString() } });
   }
-  await Promise.all([[a, wa], [b, wb]].map(async ([owner, work]) => {
+  await Promise.all([[a, wa], [a, wb]].map(async ([owner, work]) => {
     const c = owner as typeof a, w = work as typeof wa;
-    await assessInput(resources, c, c.spec.id, { inputId: "fact", summary: `Assessed by ${c.spec.id}`, workRequests: [{ workUid: w.uid!, request: { action: "context" } }] });
+    await assessInput(resources, c, c.spec.id, { inputId: "fact", summary: `Assigned to ${w.id}`, workRequests: [{ workUid: w.uid!, request: { action: "context" } }] });
   }));
   const result = aide.topics.inputStore.get("fact")!;
   assert.ok(result.status.assess!.completedAt);
   assert.equal(Object.keys(result.status.handle!).length, 1);
-  const winner = result.status.assess!.result!.summary.endsWith("a") ? wa : wb;
+  const winner = result.status.assess!.result!.summary.endsWith(wa.id) ? wa : wb;
   assert.deepEqual(Object.keys(result.status.handle!), [winner.uid]);
   assert.equal(InputDefinition.retention!.releasedAt(result), undefined);
   assert.deepEqual(aide.topics.pending(a.metadata.uid), []);

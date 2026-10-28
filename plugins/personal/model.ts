@@ -1,4 +1,7 @@
+import { ConditionsSchema, type Condition } from "./conditions.ts";
+import { OrganizationSchema } from "./topic/ref.ts";
 import { ContextFields } from "./context.ts";
+import { ResourceRefSchema } from "./topic/ref.ts";
 import { z } from "zod";
 import { CronExpressionParser } from "cron-parser";
 
@@ -18,6 +21,7 @@ export const WorkInputRequestSchema = z.object({
 export type WorkInputRequest = z.infer<typeof WorkInputRequestSchema>;
 
 export const WorkSchema = z.object({
+  conditions: ConditionsSchema,
   uid: z.string().optional(),
   id: z.string(),
   topicId: z.string(),
@@ -35,8 +39,22 @@ export const WorkSchema = z.object({
 });
 export type Work = z.infer<typeof WorkSchema>;
 
-export type WorkSpecFields = Pick<Work, "topicId" | "title" | "instruction" | "revision">;
-export type WorkStatus = Omit<Work, keyof WorkSpecFields | "id" | "uid" | "kind" | "trigger">;
+export type WorkSpecFields = Pick<Work, "title" | "instruction"> & { paused?: boolean };
+export interface WorkStatus {
+  topic: import("@compforge/aide-plugin").ResourceRef & { uid: string };
+  organization?: z.infer<typeof OrganizationSchema>;
+  summary: string; recent: import("./context.ts").Note[];
+  conditions?: Condition[];
+  waiting?: { question?: string; until?: string } | null;
+  recovery?: { reason: "ExecutionUncertain" | "InvalidResult"; message: string } | null;
+  lastReport?: { at: string; text: string };
+  recoveryNotice?: { id: string; text: string } | null;
+  completion?: WorkOutcome | null;
+  lastOccurrence?: WorkOutcome | null;
+  nextTriggerAt?: string | null;
+}
+export interface WorkOutcome { at: string; text: string; observedGeneration: number; executionId?: string }
+
 
 export { IncomingSchema, type Incoming } from "../../src/channel/message.ts";
 export type { OutputDraft, OutputView } from "../../src/output.ts";
@@ -58,5 +76,10 @@ export function validateTrigger(kind: Work["kind"], trigger: Trigger | null, now
   }
 }
 
-export const WorkSpecSchema = WorkSchema.pick({ topicId: true, title: true, instruction: true, revision: true }).strict();
-export const WorkStatusSchema = WorkSchema.pick({ status: true, nextAt: true, question: true, recoveryNotice: true, lastReport: true, summary: true, recent: true }).strict();
+export const WorkSpecSchema = WorkSchema.pick({ title: true, instruction: true }).extend({ paused: z.boolean().default(false) }).strict();
+export const WorkOutcomeSchema = z.object({ at: z.string().datetime(), text: z.string(), observedGeneration: z.number().int().positive(), executionId: z.string().optional() }).strict();
+export const WorkStatusSchema = z.object({ ...ContextFields, topic: ResourceRefSchema, organization: OrganizationSchema.optional(), conditions: ConditionsSchema,
+  waiting: z.object({ question: z.string().min(1).optional(), until: z.string().datetime().optional() }).strict().nullable().optional(),
+  recovery: z.object({ reason: z.enum(["ExecutionUncertain", "InvalidResult"]), message: z.string() }).strict().nullable().optional(),
+  lastReport: WorkSchema.shape.lastReport, recoveryNotice: WorkSchema.shape.recoveryNotice,
+}).strict();

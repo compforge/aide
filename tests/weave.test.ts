@@ -387,3 +387,32 @@ test("Weave retains the old binding and coverage when session release fails", as
   assert.deepEqual((await f.weave()).status.agent, agent);
   assert.deepEqual((await f.weave()).status.reviewed, {});
 });
+
+/** @case Checked roots above a soft target are reconsidered after a bounded interval, without forcing unrelated grouping. */
+test("Weave revisits unchanged roots above its soft target without spinning between checks", async t => {
+  const f = fixture(t); await f.initialize();
+  const roots = await Promise.all(["one", "two"].map(key => ensureSourceTopic(f.resources, key, key)));
+  const old = "2000-01-01T00:00:00.000Z";
+  await f.resources.patchStatus(await f.weave(), { reviewed: Object.fromEntries(roots.map(topic => [topic.metadata.uid, { version: candidateVersion(topic), at: old }])) });
+  let reconcile!: (execution: any, owner: any) => Promise<unknown>;
+  registerWeave({ ...f.context, instance: { config: { weave: { maxRoots: 1, intervalMs: 1000, reviewIntervalMs: 60_000 } } },
+    controllers: { register(def: any) { reconcile = def.reconcile; } } } as unknown as PluginContext);
+  const prompts: any[] = [];
+  const execution = { executionId: "pressure", verbs: { async harness(args: any) {
+    if (args.operation === "close") return { state: "success", value: { outcome: "accepted" } };
+    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "weave", sessionId: "pressure" } };
+    prompts.push(JSON.parse(args.prompt.split("\n").at(-1)));
+    return { state: "success", value: { result: { stopReason: "end_turn" } } };
+  } } };
+  await reconcile(execution, await f.weave());
+  assert.equal(prompts.length, 1); assert.equal(prompts[0].maxRoots, 1); assert.equal(prompts[0].rootCount, 2);
+  await f.resources.patchStatus(await f.weave(), { nextAt: old, lastRunAt: old });
+  await reconcile(execution, await f.weave());
+  assert.equal(prompts.length, 1, "unchanged pressure does not immediately repeat inference");
+  const current = await f.weave();
+  await f.resources.patchStatus(current, { nextAt: old, lastRunAt: old,
+    reviewed: Object.fromEntries(Object.entries(current.status.reviewed!).map(([uid, value]) => [uid, { ...value, at: old }])) });
+  await reconcile(execution, await f.weave());
+  assert.equal(prompts.length, 2);
+  assert.equal(f.aide.topics.list().filter(t => !t.parentRef).length, 2, "soft pressure does not force a grouping");
+});

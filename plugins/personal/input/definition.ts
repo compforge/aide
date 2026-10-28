@@ -1,6 +1,9 @@
+import { ConditionsSchema } from "../conditions.ts";
 import { AgentStatusSchema } from "../session.ts";
 import { AgentCallSchema } from "../observation/reference.ts";
 import { WorkInputRequestSchema } from "../model.ts";
+import { ResourceRefSchema, OrganizationSchema } from "../topic/ref.ts";
+import { guardInputTopic } from "../topic/ownership.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { type ResourceDefinition } from "@compforge/aide-plugin";
@@ -23,24 +26,26 @@ const assessment = attempt.extend({ result: z.object({ summary: z.string(), disp
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   type: INPUT_TYPE,
   schema: { spec: InputSpecSchema, status: z.object({
+    conditions: ConditionsSchema, topic: ResourceRefSchema.optional(), organization: OrganizationSchema.optional(),
     route: attempt.extend({ nextAttemptAt: z.string().optional(), attempts: z.number().int().nonnegative().optional(),
       result: z.object({ topics: z.array(ref), reason: z.string() }).strict().optional() }).optional(),
     assess: assessment.optional(),
     handle: z.record(z.string(), assessment.extend({ resource: ref, assignedAt: z.string(), appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
   }).strict() },
-  validator: { update(previous, current) {
+  validator: { update(previous, current, context) {
+    guardInputTopic(previous, current, context);
     if (previous.status.assess?.executionId && current.status.assess?.executionId
       && previous.status.assess.executionId !== current.status.assess.executionId) throw new Error("Input is already admitted to a Chief execution");
     if (previous.status.assess?.completedAt && !isDeepStrictEqual(previous.status.assess, current.status.assess)) throw new Error("Input assessment is already completed");
     if (!isDeepStrictEqual(previous.spec, current.spec)) throw new Error("Input content is immutable");
-    if (previous.status.route?.completedAt && !isDeepStrictEqual(previous.status.route.result, current.status.route?.result)) throw new Error("Input Topic binding is immutable");
+    if (previous.status.route?.completedAt && !isDeepStrictEqual(previous.status.route.result, current.status.route?.result)) throw new Error("Input routing receipt is immutable");
   } },
   printer: inputPrinter,
   indexes: {
-    topic: r => r.status.route?.result?.topics.map(t => t.uid) ?? [],
+    topic: r => r.status.topic ? [r.status.topic.uid] : [],
     routePending: r => r.status.route?.completedAt ? [] : ["pending"],
-    assessPending: r => r.status.assess && !r.status.assess.completedAt ? r.status.route?.result?.topics.map(t => t.uid) ?? [] : [],
-    assessReady: r => r.status.assess && !r.status.assess.completedAt && !r.status.assess.executionId ? r.status.route?.result?.topics.map(t => t.uid) ?? [] : [],
+    assessPending: r => r.status.assess && !r.status.assess.completedAt ? (r.status.topic ? [r.status.topic.uid] : []) : [],
+    assessReady: r => r.status.assess && !r.status.assess.completedAt && !r.status.assess.executionId ? (r.status.topic ? [r.status.topic.uid] : []) : [],
     assessExecution: r => r.status.assess?.executionId && !r.status.assess.completedAt ? [r.status.assess.executionId] : [],
     handle: r => Object.keys(r.status.handle ?? {}),
     handlePending: r => Object.entries(r.status.handle ?? {}).filter(([, s]) => !s.completedAt).map(([uid]) => uid),

@@ -1,3 +1,4 @@
+import { inputStatus } from "../status.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { InputDefinition, InputSpecSchema } from "./definition.ts";
 import { createHash } from "node:crypto";
@@ -49,7 +50,7 @@ export class InputStore {
     const receipt = this.receipt(id);
     if (receipt && receipt.fingerprint !== fingerprint) throw new Error("Input identity already exists with different content or owner");
     const resource: Resource<InputSpec, InputStatus> = { ...INPUT_TYPE, metadata: { name: id, namespace: "v1", uid: `input:${id}`,
-      resourceVersion: "1", generation: 1, creationTimestamp: receipt?.at ?? new Date().toISOString() }, spec, status: receipt ? { route: { completedAt: receipt.at, result: { topics: [], reason: "Previously accepted Input has expired" } } } : status };
+      resourceVersion: "1", generation: 1, creationTimestamp: receipt?.at ?? new Date().toISOString() }, spec, status: receipt ? { route: { completedAt: receipt.at, result: { topics: [], reason: "Previously accepted Input has expired" } } } : inputStatus(status) };
     // A bounded receipt acknowledges redelivery without recreating a collected fact or waking consumers.
     if (receipt) return resource;
     this.storage.write(key, "personal", { owner, object: resource, control: {} }, { key: `input:${id}`, value: JSON.stringify({ at: resource.metadata.creationTimestamp, fingerprint }) });
@@ -58,7 +59,7 @@ export class InputStore {
   update(resource: Resource<InputSpec, InputStatus>, patch: Partial<InputStatus>): Resource<InputSpec, InputStatus> {
     const key = this.key(resource.metadata.name), stored = this.storage.read(key);
     if (!stored || stored.object.metadata.uid !== resource.metadata.uid || stored.object.metadata.resourceVersion !== resource.metadata.resourceVersion) throw new Error("Input resource version conflict; read it again");
-    const next = { ...resource, metadata: { ...resource.metadata, resourceVersion: String(Number(resource.metadata.resourceVersion) + 1) }, status: { ...resource.status, ...structuredClone(patch) } };
+    const next = { ...resource, metadata: { ...resource.metadata, resourceVersion: String(Number(resource.metadata.resourceVersion) + 1) }, status: inputStatus({ ...resource.status, ...structuredClone(patch) }) };
     this.storage.write(key, "personal", { ...stored, object: next }); this.notify(stored.owner as string, next); return next;
   }
   subscribe(listener: (owner: string, input: Resource<InputSpec, InputStatus>) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }

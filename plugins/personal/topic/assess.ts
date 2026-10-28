@@ -1,3 +1,4 @@
+import { commitStatus } from "../status.ts";
 import { agentCall } from "../observation/reference.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
@@ -29,12 +30,12 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
     if (!belongsToTopic(input, resourceRef(c), topicUids)) throw new Error("Input does not belong to this Topic subtree");
     if (input.status.assess?.completedAt) return { assessed: args.inputId };
     const work = args.workRequests.length ? (await Promise.all(topics.flatMap(topic => WORK_TYPES.map(type =>
-      resources.list<WorkSpec, WorkStatus>(type, { matchIndex: { name: "topicId", value: topic.spec.id } }))))).flat() : [];
+      resources.list<WorkSpec, WorkStatus>(type, { matchIndex: { name: "topic", value: topic.metadata.uid } }))))).flat() : [];
     const handle = { ...input.status.handle };
     const guards: ResourceCommit[] = [];
     const at = new Date().toISOString();
     for (const { workUid, request } of args.workRequests) {
-      const target = work.find(w => w.metadata.uid === workUid && topics.some(t => t.spec.id === w.spec.topicId) && !w.metadata.deletionTimestamp);
+      const target = work.find(w => w.metadata.uid === workUid && topics.some(t => t.metadata.uid === w.status.topic.uid) && !w.metadata.deletionTimestamp);
       if (!target) throw new Error(`Work unavailable in this Topic: ${workUid}`);
       if (input.spec.origin === "source" && request.action !== "context") throw new Error("Source facts cannot be control requests");
       const previous = handle[workUid];
@@ -43,7 +44,7 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
       guards.push({ operation: "patchStatus", resource: target, patch: { idleSince: null, agentStoppedAt: null } });
     }
     try {
-      await resources.commit([
+      await commitStatus(resources, [
         ...guards,
         { operation: "patchStatus", resource: input, patch: { handle, assess: { ...input.status.assess,
           ...(toolCallId ? { completedBy: agentCall(c.status, toolCallId) } : {}), completedAt: at, result: { summary: args.summary, disposition: "completed" },

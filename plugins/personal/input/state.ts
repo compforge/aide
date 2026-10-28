@@ -1,3 +1,4 @@
+import { patchStatus } from "../status.ts";
 import type { Resource, ResourceClient, ResourceRef, Watch } from "@compforge/aide-plugin";
 import { INPUT_TYPE, type InputSpec, type InputStatus, type Attempt } from "./model.ts";
 import type { TopicResource } from "../topic/model.ts";
@@ -6,9 +7,9 @@ export type Input = Readonly<Resource<InputSpec, InputStatus>>;
 export const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, name });
 export const resourceRef = (r: Readonly<Resource<unknown, unknown>>) => ({ apiVersion: r.apiVersion, kind: r.kind, namespace: r.metadata.namespace, name: r.metadata.name, uid: r.metadata.uid });
 export const stage = (owner: ResourceRef) => owner.kind === "Route" ? "route" : ["Task", "Routine"].includes(owner.kind) ? "handle" : "assess";
-/** Routing determines material visibility; assessment/admission is global to the Input. */
+/** Current Topic ownership determines material visibility; assessment/admission is global to the Input. */
 export function belongsToTopic(input: Input, owner: ResourceRef, topicUids?: ReadonlySet<string>): boolean {
-  return !!input.status.route?.result?.topics.some(t => topicUids ? topicUids.has(t.uid) : t.uid === owner.uid);
+  return !!input.status.topic && (topicUids ? topicUids.has(input.status.topic.uid) : input.status.topic.uid === owner.uid);
 }
 export const attemptOf = (input: Input, owner: ResourceRef, topicUids?: ReadonlySet<string>): Attempt | undefined => {
   if (stage(owner) === "route") return input.status.route;
@@ -44,11 +45,11 @@ export async function changeAttempt(resources: ResourceClient, id: string, owner
   for (let n = 0; ; n++) {
     const input = await resources.get<InputSpec, InputStatus>(inputRef(id));
     if (!input) throw new Error(`Input missing: ${id}`);
-    try { return await resources.patchStatus(input, attemptPatch(input, owner, change)); }
+    try { return await patchStatus(resources, input, attemptPatch(input, owner, change)); }
     catch (e) { if (n >= 8 || !/version conflict/.test(String(e))) throw e; }
   }
 }
-/** Input changes wake their current processing roots, while durable assignments stay on their source Topics. */
+/** Input ownership and assessment changes wake the current processing root. */
 export function assignmentWatch(key: "assess" | "handle", kind: string, resources?: ResourceClient): Watch {
   const targets = async (input: Input, previous?: Input) => {
     if (key === "handle") return Object.values(input.status.handle ?? {}).filter(s => s.resource.kind === kind
@@ -58,8 +59,8 @@ export function assignmentWatch(key: "assess" | "handle", kind: string, resource
     // dispatching Reconcile queues a retry after its active Chief finishes.
     if (previous && !!previous.status.assess === !!input.status.assess
       && previous.status.assess?.completedAt === input.status.assess?.completedAt
-      && JSON.stringify(previous.status.route?.result) === JSON.stringify(input.status.route?.result)) return [];
-    const targets = input.status.route?.result?.topics ?? [];
+      && previous.status.topic?.uid === input.status.topic?.uid) return [];
+    const targets = input.status.topic ? [input.status.topic] : [];
     if (!resources) return targets.map(t => ({ name: t.name, namespace: t.namespace }));
     const roots = (await Promise.all(targets.map(t => readTopicRoot(resources, t))))
       .filter((topic): topic is TopicResource => !!topic);
@@ -76,7 +77,7 @@ export async function cancelAssignments(resources: ResourceClient, owner: Resour
       const receipt = input?.status.handle?.[owner.uid!];
       if (!input || !receipt || receipt.completedAt) break;
       try {
-        await resources.patchStatus(input, { handle: { ...input.status.handle, [owner.uid!]: { ...receipt,
+        await patchStatus(resources, input, { handle: { ...input.status.handle, [owner.uid!]: { ...receipt,
           completedAt: new Date().toISOString(), result: { summary: "Assigned resource deleted", disposition: "cancelled" } } } });
         break;
       } catch (e) { if (n >= 8 || !/version conflict/.test(String(e))) throw e; }
@@ -90,7 +91,7 @@ export async function changeAssessment(resources: ResourceClient, original: Inpu
     const input = await resources.get<InputSpec, InputStatus>(resourceRef(original));
     if (!input || input.metadata.uid !== original.metadata.uid || input.status.assess?.executionId !== executionId || input.status.assess.completedAt) return;
     const assess = Object.fromEntries(Object.entries({ ...input.status.assess, ...change }).filter(([, v]) => v !== undefined));
-    try { await resources.patchStatus(input, { assess }); return; }
+    try { await patchStatus(resources, input, { assess }); return; }
     catch (error) { if (n >= 8 || !/version conflict/.test(String(error))) throw error; }
   }
 }
