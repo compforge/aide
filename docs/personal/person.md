@@ -26,7 +26,7 @@ Person 是人物身份与认知的基础，Me 是附加的可选身份标记：�
 
 访问授权与本人标记分别声明：Connector 的执行身份决定能访问哪些数据，每个 Channel / Connector 的 Me 配置在自己的平台身份范围内生效，Person 的 isMe 汇总这些标记。以 Lark 为例，外层 appId / userId 校验 CLI 使用的应用与已授权用户，实际凭证由 CLI 管理；me 中的 appId / openId 标记该应用下哪个人是本人，不授予访问权限。执行账号可能属于另一个人，不能从登录凭证推导本人。本地单人 Web 有固定身份 web / local / me。配置按接入分别保存，Person 按现实中的人归一。Lark、WeChat 等接入都配置 Me，就明确声明这些账号属于同一个人。启动时按平台身份查找已有档案，优先保留持有本地 Web 身份的 Person，否则保留最早创建的匹配档案；没有匹配档案时创建一个 Person，并绑定全部已配置身份。已有多个档案时，在同一事务中归并身份、summary 和有界 recent，再删除来源档案；重复启动不重写未变化的数据。历史引用沿用下述人物合并规则。未配置某个入口的 Me，不从登录凭证或其他入口的标记推断。合并后的 summary 或身份数量超过 Person 上限时，保留全部原档案、记录待归并错误并继续启动；用户精简认识或调整身份后可显式合并，不为自动归并丢弃已有认识。撤掉某个 Me 配置只停止该入口的本人识别，不自动拆开已经确认同一人的档案。
 
-Person 目录属于 Personal 插件实例，由各 Topic 共享。资源与引用不携带 sessionId，目录不启动 Harness；Person Controller 只参与标准删除生命周期，无外部清理动作。人物资源受容量保护，ResourceClient 写入在同一存储事务内做版本、Schema、身份唯一性校验，包括批量 commit。
+Person 目录属于 Personal 插件实例，由各 Topic 共享。资源与引用不携带 sessionId，目录不启动 Harness；Person Controller 只参与标准删除生命周期，无外部清理动作。人物资源受容量保护，ResourceClient 写入在同一存储事务内做版本、Schema、身份唯一性校验，包括批量 commit。唯一性通过 provider / scope / id 的精确身份索引校验，只查询新加入的身份；改名、summary / recent 更新和移除身份不扫描人物目录。删除标记与索引移除同事务提交，后续身份转移校验可立即看到释放结果。
 
 Channel、Source 和按需 Connector 消息读取持续贡献人物事实。发送者及上下文中的作者拥有可识别用户身份时解析为 Person；缺少主体类型的提及 ID 保留为证据，避免把机器人建成人物；系统事件不需要人物。Input.sender 是可选的 Person 引用，多作者讨论没有单一发送者时留空，逐条作者保留在 observation 中。Output.receivers 同样引用 Person，可以为空或包含多人；Input.source 与 Output.target 使用 Address。Aide 结合输入性质、已有委托与处理进展，决定是否沟通、对谁表达、送到哪里；这些决定不要求与单条 Input 一一对应。
 

@@ -15,8 +15,12 @@ import { ResourceRefSchema } from "../topic/ref.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { WORK_TYPES, type WorkResource } from "../resources.ts";
 import { understandingVersion } from "./tree.ts";
-/** @spec Default is a system-owned singleton; ordinary Topics cannot adopt or relinquish that role. */
-function validateDefault(resource: Readonly<TopicResource>, context: ResourceValidationContext) {
+/** @spec Default is a system-owned singleton; ordinary Topics cannot adopt or relinquish that role.
+ * @why Only creation checks the singleton index; updates preserve the reserved immutable identity.
+ * @case tests/resource-validation-scope.test.ts
+ * @link docs/personal/topic.md#默认主题
+ */
+function validateDefault(resource: Readonly<TopicResource>, context: ResourceValidationContext, previous?: Readonly<TopicResource>) {
   const systemDefault = !!resource.spec.default;
   if (systemDefault !== (resource.spec.id === DEFAULT_TOPIC_ID) || systemDefault !== (resource.metadata.name === digest(DEFAULT_TOPIC_ID)))
     throw new Error("Default Topic identity is reserved for the system");
@@ -33,7 +37,9 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
     if (value.spec.default) throw new Error("Topic parent unavailable");
     parent = value.spec.parentRef;
   }
-  if (resource.spec.default && !resource.metadata.deletionTimestamp && context.list<TopicSpec, TopicStatus>(TOPIC_TYPE)
+  // Default identity cannot change after creation; status writes need no uniqueness lookup.
+  if (!previous && resource.spec.default && !resource.metadata.deletionTimestamp && context.list<TopicSpec, TopicStatus>(TOPIC_TYPE,
+    { matchIndex: { name: "default", value: "default" } })
     .some(c => c.spec.default && !c.metadata.deletionTimestamp && c.metadata.uid !== resource.metadata.uid)) {
     throw new Error("Default Topic already exists");
   }
@@ -51,23 +57,25 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     if (previous.spec.id !== current.spec.id || previous.spec.topicKey !== current.spec.topicKey) throw new Error("Topic identity is immutable");
     if (current.spec.parentRef && current.status.execution && current.status.execution.id !== previous.status.execution?.id)
       throw new Error("Only a root Topic can start Chief");
-    validateDefault(current, context);
+    validateDefault(current, context, previous);
     guardTopicOrganization(current, context, previous);
   }, delete: (resource, context) => {
+    // @spec Deletion checks current indexed dependents in the write transaction, including preceding writes.
+    // @case tests/resource-validation-scope.test.ts
+    // @link docs/personal/topic.md#静默回收
     if (resource.spec.default) throw new TopicDeletionBlocked("default", "Default Topic cannot be deleted");
     if (resource.status.execution) throw new TopicDeletionBlocked("busy", "Topic is busy");
-    if (context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).some(t => t.spec.parentRef?.uid === resource.metadata.uid)) throw new TopicDeletionBlocked("children", "Topic still has children");
-    const pending = context.list<InputSpec, InputStatus>(INPUT_TYPE).some(i =>
-      (i.status.topic?.uid === resource.metadata.uid)
-      && !!i.status.assess && !i.status.assess.completedAt);
+    if (context.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "parent", value: resource.metadata.uid } }).length) throw new TopicDeletionBlocked("children", "Topic still has children");
+    const pending = context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessPending", value: resource.metadata.uid } }).length;
     if (pending) throw new TopicDeletionBlocked("busy", "Topic has pending Input");
-    if (WORK_TYPES.some(type => context.list<WorkResource["spec"], WorkResource["status"]>(type).some(w => w.status.topic.uid === resource.metadata.uid))) throw new TopicDeletionBlocked("work", "Topic still owns Work");
+    if (WORK_TYPES.some(type => context.list<WorkResource["spec"], WorkResource["status"]>(type, { matchIndex: { name: "topic", value: resource.metadata.uid } }).length)) throw new TopicDeletionBlocked("work", "Topic still owns Work");
     if (resource.spec.parentRef) {
-      const parent = context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).find(t => t.metadata.uid === resource.spec.parentRef!.uid);
+      const parent = context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, resource.spec.parentRef.uid);
       if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource)) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");
     }
   } },
-  indexes: { topicKey: r => r.metadata.deletionTimestamp || !r.spec.topicKey ? [] : [r.spec.topicKey],
+  indexes: { default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],
+    topicKey: r => r.metadata.deletionTimestamp || !r.spec.topicKey ? [] : [r.spec.topicKey],
     parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], root: r => !r.metadata.deletionTimestamp && !r.spec.parentRef ? ["root"] : [] },
   retention: { releasedAt: () => undefined, references: () => {
     return [];
