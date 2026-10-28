@@ -1,4 +1,4 @@
-import { weaveCandidates, candidatePage } from "./candidates.ts";
+import { weaveCandidates, searchRootTopics } from "./candidates.ts";
 import { identityBackground } from "../../../agents/personal.ts";
 import type { Persons } from "../person/service.ts";
 import { Type } from "typebox";
@@ -29,10 +29,10 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
       return weaveCandidates(store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE));
     };
     const tools: ToolDefinition[] = [
-      { name: "list_topics", label: "List root topics", description: "One bounded batch of root summaries, oldest inactive first. Search for related peers; do not expand the entire catalog.",
+      { name: "list_topics", label: "List root topics", description: "Search all available roots, including previously reviewed roots and roots with children. rootCount is the full catalog; matchingRootCount is this search. Read bounded pages; do not expand the entire catalog.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })), query: Type.Optional(Type.String()) }),
         async execute(_id, { offset = 0, query }) {
-          return result(candidatePage(roots().filter(t => !query || [t.spec.name, t.status.summary].join(" ").toLowerCase().includes(query.toLowerCase())), offset, batchSize));
+          return result(searchRootTopics(roots(), query, offset, batchSize));
         } },
       { name: "read_topic", label: "Read root topic", description: "Read full root understanding in bounded text pages. version pins the understanding used by group_topics.",
         parameters: Type.Object({ uid: Type.String(), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),

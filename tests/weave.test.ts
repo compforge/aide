@@ -2,8 +2,9 @@ import { assessInput } from "../plugins/personal/topic/assess.ts";
 import { runInput, nextInputs } from "../plugins/personal/loop.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { registerWeave } from "../plugins/personal/weave/reconcile.ts";
-import { candidatePage, weaveCandidates, candidateVersion } from "../plugins/personal/weave/candidates.ts";
+import { candidatePage, weaveCandidates, candidateVersion, searchRootTopics } from "../plugins/personal/weave/candidates.ts";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -178,9 +179,10 @@ test("Weave advances only the bounded snapshot and retries interrupted analysis"
   let fail = true;
   const execution = { executionId: "scan", verbs: { async harness(args: any) {
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "weave", sessionId: "native" } };
+    if (args.operation === "close") return { state: "success", value: { outcome: "accepted" } };
     if (fail) return { state: "failure", error: "interrupted" };
     const batch = JSON.parse(args.prompt.split("\n").at(-1));
-    batch.items.forEach((item: any) => seen.add(item.uid));
+    batch.candidates.forEach((item: any) => seen.add(item.uid));
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
   } } };
   await reconcile(execution, await f.weave());
@@ -292,4 +294,96 @@ test("Weave carries bounded child Notes into the parent while keeping a durable 
   assert.deepEqual(parent.status.recent, [note]);
   assert.equal(parent.status.summary, "Preserved child findings");
   assert.ok(parent.status.absorbedSummaries?.[a.metadata.uid]);
+});
+
+/** @case Old view receipts are rechecked once, with a fresh session for each bounded batch. */
+test("Weave replaces legacy checks and sessions without repeatedly resetting coverage", async t => {
+  const f = fixture(t); await f.initialize();
+  const roots = await Promise.all(["one", "two", "three"].map(key => ensureSourceTopic(f.resources, key, key)));
+  const at = "2000-01-01T00:00:00.000Z";
+  const legacy = Object.fromEntries(roots.map(topic => [topic.metadata.uid, { at,
+    version: createHash("sha256").update(JSON.stringify([topic.spec.name, createHash("sha256").update(topic.status.summary).digest("hex")])).digest("hex") }]));
+  await f.resources.patchStatus(await f.weave(), { reviewed: legacy, agent: { harness: "weave", sessionId: "obsolete-rules" } });
+  let reconcile!: (execution: any, owner: any) => Promise<unknown>;
+  registerWeave({ ...f.context, instance: { config: { weave: { intervalMs: 1000, batchSize: 2 } } },
+    controllers: { register(def: any) { reconcile = def.reconcile; } } } as unknown as PluginContext);
+  const closed: string[] = [], prompts: any[] = [];
+  let created = 0;
+  const execution = { executionId: "fresh-scan", verbs: { async harness(args: any) {
+    if (args.operation === "close") {
+      closed.push(args.sessionId);
+      return { state: "success", value: { outcome: "accepted" } };
+    }
+    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "weave", sessionId: `fresh-${++created}` } };
+    assert.equal(args.sessionId, `fresh-${created}`);
+    prompts.push(JSON.parse(args.prompt.split("\n").at(-1)));
+    return { state: "success", value: { result: { stopReason: "end_turn" } } };
+  } } };
+  for (let i = 0; i < 3; i++) {
+    await f.resources.patchStatus(await f.weave(), { nextAt: at });
+    await reconcile(execution, await f.weave());
+  }
+  assert.equal(created, 2, "a completed scan does not create more sessions without changed evidence");
+  assert.deepEqual(closed, ["obsolete-rules", "fresh-1"]);
+  assert.deepEqual(prompts.map(p => [p.rootCount, p.pendingCount, p.candidates.length]), [[3, 3, 2], [3, 1, 1]]);
+  assert.ok(prompts.every(p => p.total === undefined), "pending count cannot masquerade as the catalog total");
+  assert.equal(new Set(prompts.flatMap(p => p.candidates.map((c: any) => c.uid))).size, 3);
+  const reviewed = (await f.weave()).status.reviewed!;
+  for (const root of roots) assert.equal(reviewed[root.metadata.uid]!.version, candidateVersion(root));
+});
+
+/** @case One pending root can find and join an already reviewed parent outside its batch. */
+test("Weave distinguishes a single candidate from its catalog and extends an existing tree", async t => {
+  const f = fixture(t); await f.initialize();
+  const a = await ensureSourceTopic(f.resources, "existing-a", "A"), b = await ensureSourceTopic(f.resources, "existing-b", "B");
+  await f.group(a, b);
+  const parent = f.aide.topics.resource(f.aide.topics.list().find(topic => !topic.parentRef)!.id)!;
+  const candidate = await ensureSourceTopic(f.resources, "new-child", "Related evidence");
+  const other = await ensureSourceTopic(f.resources, "other", "Independent topic");
+  const at = "2000-01-01T00:00:00.000Z";
+  await f.resources.patchStatus(await f.weave(), { reviewed: Object.fromEntries([parent, other].map(topic =>
+    [topic.metadata.uid, { at, version: candidateVersion(topic) }])) });
+  let reconcile!: (execution: any, owner: any) => Promise<unknown>;
+  registerWeave({ ...f.context, controllers: { register(def: any) { reconcile = def.reconcile; } } } as unknown as PluginContext);
+  const execution = { executionId: "single-candidate", verbs: { async harness(args: any) {
+    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "weave", sessionId: "fresh" } };
+    const batch = JSON.parse(args.prompt.split("\n").at(-1));
+    assert.equal(batch.rootCount, 3);
+    assert.equal(batch.pendingCount, 1);
+    assert.deepEqual(batch.candidates.map((c: any) => c.uid), [candidate.metadata.uid]);
+    const roots = weaveCandidates(await f.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE));
+    const found = searchRootTopics(roots, "Shared subject", 0, 12);
+    assert.equal(found.rootCount, 3);
+    assert.equal(found.matchingRootCount, 1);
+    assert.equal(found.query, "Shared subject");
+    assert.deepEqual(found.items.map(c => c.uid), [parent.metadata.uid]);
+    const noMatch = searchRootTopics(roots, "missing subject", 0, 12);
+    assert.equal(noMatch.rootCount, 3);
+    assert.equal(noMatch.matchingRootCount, 0);
+    await groupTopics(f.resources, await f.weave(), { topics: [{ uid: candidate.metadata.uid, version: understandingVersion(f.refresh(candidate)) }],
+      parent: { uid: parent.metadata.uid, version: found.items[0]!.version } }, 4000);
+    return { state: "success", value: { result: { stopReason: "end_turn" } } };
+  } } };
+  await reconcile(execution, await f.weave());
+  assert.equal(f.refresh(candidate).spec.parentRef?.uid, parent.metadata.uid);
+  assert.equal(f.refresh(a).spec.parentRef?.uid, parent.metadata.uid);
+  assert.equal(f.refresh(b).spec.parentRef?.uid, parent.metadata.uid);
+  assert.equal(weaveCandidates(await f.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE)).length, 2);
+  assert.equal((await f.weave()).status.reviewed?.[candidate.metadata.uid], undefined, "grouped children leave the root scan");
+});
+
+test("Weave retains the old binding and coverage when session release fails", async t => {
+  const f = fixture(t); await f.initialize();
+  await ensureSourceTopic(f.resources, "a", "A"); await ensureSourceTopic(f.resources, "b", "B");
+  const agent = { harness: "weave", sessionId: "previous-session" };
+  await f.resources.patchStatus(await f.weave(), { agent, reviewed: {} });
+  let reconcile!: (execution: any, owner: any) => Promise<unknown>;
+  registerWeave({ ...f.context, controllers: { register(def: any) { reconcile = def.reconcile; } } } as unknown as PluginContext);
+  const execution = { executionId: "release-failed", verbs: { async harness(args: any) {
+    assert.equal(args.operation, "close", "do not start inference before the prior session is released");
+    return { state: "failure", error: "close unavailable" };
+  } } };
+  await assert.rejects(reconcile(execution, await f.weave()), /Previous Weave session could not close/);
+  assert.deepEqual((await f.weave()).status.agent, agent);
+  assert.deepEqual((await f.weave()).status.reviewed, {});
 });
