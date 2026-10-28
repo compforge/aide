@@ -37,31 +37,16 @@ function fixture(t: TestContext) {
   return { aide, resources, context, current, input, prompts, execution };
 }
 
-/** @case Concurrent root prompts share one Input CAS; a losing batch is rebuilt without dropping its remaining Inputs. */
-test("Two roots race one Input, then the losing root processes only its unclaimed remainder", async t => {
+/** @case One current Topic rejects fanout without partially routing the Input. */
+test("Routing requires one current Topic", async t => {
   const f = fixture(t), a = await f.aide.topics.ensure("a"), b = await f.aide.topics.ensure("b");
-  await f.input("shared", [a, b]);
+  await assert.rejects(f.input("shared", [a, b]), /exactly one/);
+  assert.equal(f.aide.topics.inputStore.get("shared")!.status.topic, undefined);
   await f.input("only-a", [a]); await f.input("only-b", [b]);
-  let arrived = 0;
-  let release!: () => void;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const racing: ResourceClient = { ...f.resources, async commit(writes) {
-    if (writes.some(w => w.operation === "patchStatus" && w.resource.kind === "Input" && "assess" in w.patch) && arrived < 2) {
-      if (++arrived === 2) release(); await gate;
-    }
-    return f.resources.commit(writes);
-  } };
-  await Promise.all([a, b].map(c => runInput({ ...f.context, resources: racing }, f.execution(c.spec.id), f.current(c), "chief", "shared batch", "shared", [`only-${c.spec.id}`])));
-  assert.equal(f.prompts.length, 1);
-  const winner = f.aide.topics.inputStore.get("shared")!.status.assess!.executionId!;
-  const loser = winner === "a" ? b : a;
-  assert.deepEqual((await nextInputs(f.resources, f.current(loser), 8)).map(i => i.metadata.name), [`only-${loser.spec.id}`]);
-  await reconcileChief(f.context, f.execution("remaining"), f.current(loser));
+  await Promise.all([a, b].map(c => reconcileChief(f.context, f.execution(c.spec.id), f.current(c))));
   assert.equal(f.prompts.length, 2);
-  assert.match(f.prompts[1]!.prompt, new RegExp(`only-${loser.spec.id}`));
-  assert.doesNotMatch(f.prompts[1]!.prompt, /"inputId":"shared"/);
-  assert.equal(f.aide.topics.inputStore.get("shared")!.status.assess!.executionId, winner);
-  assert.ok(f.aide.topics.pending(loser.metadata.uid).some(i => i.metadata.name === "shared"), "unfinished material remains inspectable");
+  assert.equal(f.aide.topics.inputStore.get("only-a")!.status.assess!.executionId, "a");
+  assert.equal(f.aide.topics.inputStore.get("only-b")!.status.assess!.executionId, "b");
 });
 
 function mockRunning(f: ReturnType<typeof fixture>, dispatch: (args: unknown) => Promise<unknown>) {
@@ -74,13 +59,13 @@ async function running(f: ReturnType<typeof fixture>, c: TopicResource) {
 }
 
 /** @case Native steer and followUp must use the Chief execution ID, not the intake Reconcile execution ID. */
-test("Steer and followUp racing across roots dispatch once and retain uncertain admission across recovery", async t => {
+test("Steer and followUp racing within one root dispatch once and retain uncertain admission across recovery", async t => {
   const f = fixture(t), a = await f.aide.topics.ensure("a"), b = await f.aide.topics.ensure("b");
-  await running(f, a); await running(f, b); await f.input("shared", [a, b]);
+  await running(f, a); await f.input("shared", [a]);
   let count = 0;
   mockRunning(f, async () => { count++; return { state: "success", value: { outcome: "accepted" } }; });
   const results = await Promise.all([f.aide.personal.submitTopic(intake(a), { inputId: "shared", operation: "steer" }),
-    f.aide.personal.submitTopic(intake(b), { inputId: "shared", operation: "followUp" })]);
+    f.aide.personal.submitTopic(intake(a), { inputId: "shared", operation: "followUp" })]);
   assert.equal(count, 1); assert.equal(results.filter(r => r.accepted).length, 1);
   const receipt = f.aide.topics.inputStore.get("shared")!.status.assess!;
   assert.ok(["a", "b"].includes(receipt.executionId!));
@@ -90,19 +75,17 @@ test("Steer and followUp racing across roots dispatch once and retain uncertain 
   assert.equal(count, 1);
 });
 
-test("An in-flight initial prompt loses safely to followUp admission", async t => {
-  const f = fixture(t), a = await f.aide.topics.ensure("a"), b = await f.aide.topics.ensure("b");
-  await running(f, b); await f.input("shared", [a, b]);
-  let dispatched = 0, raced = false;
-  mockRunning(f, async () => { dispatched++; return { state: "success", value: { outcome: "accepted" } }; });
+test("An in-flight initial prompt loses safely to a competing prompt admission", async t => {
+  const f = fixture(t), a = await f.aide.topics.ensure("a");
+  await f.input("shared", [a]);
+  let raced = false;
   const resources: ResourceClient = { ...f.resources, async commit(writes) {
-    if (!raced) { raced = true; await f.aide.personal.submitTopic(intake(b), { inputId: "shared", operation: "followUp" }); }
+    if (!raced) { raced = true; await runInput(f.context, f.execution("winner"), f.current(a), "chief", "shared", "shared"); }
     return f.resources.commit(writes);
   } };
-  await runInput({ ...f.context, resources }, f.execution("a"), f.current(a), "chief", "shared", "shared");
-  assert.equal(dispatched, 1); assert.equal(f.prompts.length, 0);
-  assert.equal(f.current(a).status.execution, undefined, "losing claim rolls back Topic execution too");
-  assert.equal(f.aide.topics.inputStore.get("shared")!.status.assess!.executionId, "b");
+  await runInput({ ...f.context, resources }, f.execution("loser"), f.current(a), "chief", "shared", "shared");
+  assert.equal(f.prompts.length, 1);
+  assert.equal(f.aide.topics.inputStore.get("shared")!.status.assess!.executionId, "winner");
 });
 
 for (const outcome of ["rejected", "unknown", "completed"] as const) test(`Chief notification ${outcome} preserves the appropriate admission evidence`, async t => {

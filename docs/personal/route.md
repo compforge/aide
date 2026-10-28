@@ -37,7 +37,7 @@ Channel 与 Source 的同源 key 使用相同规则，详见 [Lark](../connector
 | `route_input({ inputId, topicUids, reason })` | 原子提交完整路由决定；空目标数组表示 Default |
 | `memory_search`、`session_search` | 检索共享记忆与历史 |
 
-`route_input` 仅提供给 Route。工具验证本次 execution 确实接纳了 Input，目标必须是现存 Topic UID。一次事务写入 `Input.status.route.result`、completedAt 和一条全局空 `assess`；稳定归属保存在 route.result.topics，沿 parentRef 找 root，绑定不因 Weave 改变；建立 assess 即完成路由，Chief 接纳另由 Topic Reconcile 竞争。目标版本检查与写入处于同一事务，删除或替换目标不能导致误投。
+`route_input` 仅提供给 Route。工具验证本次 execution 确实接纳了 Input，目标必须是现存 Topic UID。一次事务写入 `Input.status.topic`、`Input.status.route.result`、completedAt 和一条全局空 `assess`；status.topic 是唯一的当前归属，route.result 保存初次路由判断。沿 parentRef 找 root，Weave 归组不搬迁 Input，Chief 可以在树内细化归属；建立 assess 即完成路由，Chief 接纳另由 Topic Reconcile 竞争。目标版本检查与写入处于同一事务，删除或替换目标不能导致误投。
 
 已完成的重复调用不改分派结果、不重置 assess。工具调用成功才表示路由完成；模型结束或说“已分派”不算确认。Chief 使用独立的 `assess_input`，`say` 另行产生 Output。
 
@@ -54,6 +54,8 @@ Input 自身保护未完成的 route、assess、handle。全部完成后才进�
 Route 与 Chief 隔离原生上下文、共用 Hermes 长期记忆；Route 只读检索，Chief 可积累记忆。当前资源事实和用户纠正优先于历史；记忆和外部输入不授予执行权限。原生历史、压缩和恢复由 Harness 管理；Route Operator 在 `status.agent` 保存下次调用所需的配置名和原生会话引用。
 
 ## 上下文组织与优化
+
+每个候选 root 占一个条目：身份 UID，以及有则展示的名称、summary 和近期活动。名称最多 200 字符、summary 最多 2000 字符；近期活动从子树 Input、Work 进展和 Topic Note 中选最近 3 条，每条最多 240 字符。通过归属与父子关系索引查询，自动上下文不加载历史正文；目录同时受分页条数和字符预算限制，缺失详情按需读取。
 
 上下文组织是后续效果优化的重点。固定职责属于 system；会变化的候选信息属于业务背景，以 Pi custom message 投影，LLM 侧是 user；Input 保留为独立 user 消息。当前按以下结构准备每次模型请求，v1 / v2 只表示内容变化，不是 CRD 版本字段：
 
@@ -99,4 +101,4 @@ Route 使用本资源目录下的 [Background](../../plugins/personal/route/back
 
 实现入口：[Route Agent](../../agents/route/agent.ts)、[Reconcile](../../plugins/personal/route/reconcile.ts)、[规则](../../plugins/personal/route/rules.ts)、[原子分派](../../plugins/personal/route/delivery.ts)、[持续调用与恢复](../../plugins/personal/loop.ts)。
 
-[路由测试](../../tests/route.test.ts)覆盖规则、Default、并发、原子 fanout 和重试公平性；[研判测试](../../tests/input-assessment.test.ts)覆盖 Work 交接与释放；[SDK 测试](../../tests/pi-agent.test.ts)覆盖工具权限、持久上下文和 steer。模拟模型测试不证明真实语义路由准确率。
+[路由测试](../../tests/route.test.ts)覆盖规则、Default、并发、单一归属的原子提交 和重试公平性；[研判测试](../../tests/input-assessment.test.ts)覆盖 Work 交接与释放；[SDK 测试](../../tests/pi-agent.test.ts)覆盖工具权限、持久上下文和 steer。模拟模型测试不证明真实语义路由准确率。

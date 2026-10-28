@@ -1,3 +1,4 @@
+import { patchStatus } from "./status.ts";
 import { z } from "zod";
 import type { AgentStatus, ReconcileContext, ResourceClient } from "@compforge/aide-plugin";
 import type { LoopResource, LoopStatus } from "./loop.ts";
@@ -14,7 +15,7 @@ export async function saveAgent(resources: ResourceClient, owner: Readonly<LoopR
   for (let attempt = 0; ; attempt++) {
     const current = await resources.get<unknown, LoopStatus>(resourceRef(owner));
     if (!current || current.metadata.uid !== owner.metadata.uid || current.metadata.deletionTimestamp || current.status.execution?.id !== executionId) throw new Error("Agent owner is no longer active");
-    try { await resources.patchStatus(current, { agent }); return; }
+    try { await patchStatus(resources, current, { agent }); return; }
     catch (error) { if (attempt >= 8 || !String(error).includes("version conflict")) throw error; }
   }
 }

@@ -3,7 +3,7 @@ import type { ResourceClient, ResourceReader, ResourceRef } from "@compforge/aid
 import { TOPIC_TYPE, initialTopicName, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 import { digest } from "../chief-model.ts";
 
-/** @spec Only parentRef stores hierarchy. Input binding stays at its original Topic across grouping.
+/** @spec Only parentRef stores hierarchy. Grouping preserves current Input ownership; explicit material moves change status.topic.
  * @link docs/personal/topic.md
  */
 export function topicPath(all: readonly TopicResource[], leaf: TopicResource): TopicResource[] {

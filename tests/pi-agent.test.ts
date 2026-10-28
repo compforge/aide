@@ -1,3 +1,4 @@
+import { workPhase } from "../plugins/personal/status.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { inputJob } from "../plugins/personal/observation/job.ts";
 import { PiObservations, ObservationConfigSchema } from "../agents/pi/observation.ts";
@@ -927,7 +928,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     if (kind === "routine") await aide.event({ id: "first",  topicId: "me", name: "sample", text: "initial observation" });
     inputId = aide.topics.inputStore.query("handlePending", work.uid!)[0]!.metadata.name;
     await aide.start(); await aide.settled();
-    assert.equal(get().status.status, kind === "task" ? "done" : "scheduled", JSON.stringify(get()));
+    assert.equal(workPhase(get()), kind === "task" ? "done" : "scheduled", JSON.stringify(get()));
     const agent = get().status.agent!;
     assert.deepEqual(Object.keys(agent).sort(), ["harness", "sessionId"]);
     assert.equal(agent.harness, kind);
@@ -952,7 +953,7 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     await aide.work("me").requestInput(work.id, { text: "followup-task-evidence" }, "followup");
     inputId = aide.topics.inputStore.query("handlePending", work.uid!)[0]!.metadata.name;
     await aide.settled();
-    assert.equal(get().status.status, kind === "task" ? "done" : "scheduled", JSON.stringify(get()));
+    assert.equal(workPhase(get()), kind === "task" ? "done" : "scheduled", JSON.stringify(get()));
     assert.deepEqual(get().status.agent, agent);
     assert.match(JSON.stringify(fixture.requests[before]!.messages), /unique-work-evidence/);
     assert.equal(aide.outputs().length, 2);
@@ -997,7 +998,7 @@ test(`${kind} ${attention} Input joins the active native invocation`, { timeout:
     { operation: "patchStatus", resource: task, patch: { idleSince: null, agentStoppedAt: null, summary: "updated-work-understanding" } },
     { operation: "create", type: INPUT_TYPE, name: laterId,
       spec: { origin: "source", originId: "fixture", attention, text: "later unique evidence" }, status: {
-        route: { completedAt: at, result: { topics: [resourceRef(c)], reason: "same topic" } },
+        topic: resourceRef(c), route: { completedAt: at, result: { topics: [resourceRef(c)], reason: "same topic" } },
         assess: { completedAt: at, result: { summary: "Delegate" } },
         handle: { [work.uid!]: { resource: resourceRef(task), assignedAt: at, request: { action: "context" } } },
       } },

@@ -1,3 +1,4 @@
+import { statusPatch } from "./status.ts";
 import { topicSubtree } from "./topic/tree.ts";
 import { isDeepStrictEqual } from "node:util";
 import { TASK_TYPE, type TaskSpec } from "./task/model.ts";
@@ -18,9 +19,11 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
       const spec = init.spec as TaskSpec;
       if (!spec.initialInputId) throw new Error("Task requires an initial Input");
       const input = inputs.get(spec.initialInputId);
-      const topic = inputs.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, digest(spec.topicId));
+      const target = (init.status as import("./task/model.ts").TaskStatus).topic;
+      const topic = inputs.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, target.name, target.namespace);
+      if (topic.metadata.uid !== target.uid) throw new Error("Task Topic was replaced");
       const members = new Set(topicSubtree(topic, parent => inputs.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { namespace: parent.metadata.namespace, matchIndex: { name: "parent", value: parent.metadata.uid } })).map(t => t.metadata.uid));
-      const attached = input && input.status.route?.result?.topics.some(t => members.has(t.uid));
+      const attached = input && input.status.topic && members.has(input.status.topic.uid);
       if (topic.metadata.deletionTimestamp || !input || input.metadata.deletionTimestamp || !attached)
         throw new Error("Initial Input is not assigned to the Task Topic");
       const existing = inputs.resources.find(TASK_TYPE, init.name);
@@ -29,9 +32,9 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
         return existing;
       }
       const task = writes.create(type, init);
-      writes.patchStatus(input, { handle: { ...input.status.handle, [task.metadata.uid]: {
+      writes.patchStatus(input, statusPatch(input, { handle: { ...input.status.handle, [task.metadata.uid]: {
         resource: resourceRef(task), assignedAt: new Date().toISOString(), request: { action: "context" },
-      } } });
+      } } }));
       return task;
     }
     if (type.apiVersion === INPUT_TYPE.apiVersion && type.kind === INPUT_TYPE.kind) {

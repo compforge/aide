@@ -27,20 +27,20 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
     const current = () => {
       const routine = store.resources.get<RoutineSpec, RoutineStatus>(ROUTINE_TYPE, ref.name, ref.namespace);
       if (routine.metadata.uid !== ref.uid || routine.metadata.deletionTimestamp || !routine.status.execution) throw new Error("Routine execution is no longer active");
-      plugins.executionVerbs(routine.status.execution.id, { topicId: routine.spec.topicId, routineId: routine.metadata.name });
+      plugins.executionVerbs(routine.status.execution.id, { topicId: store.topicId(routine.status.topic), routineId: routine.metadata.name });
       return routine;
     };
-    const verbs = () => { const routine = current(); return plugins.executionVerbs(routine.status.execution!.id, { topicId: routine.spec.topicId, routineId: routine.metadata.name }); };
+    const verbs = () => { const routine = current(); return plugins.executionVerbs(routine.status.execution!.id, { topicId: store.topicId(routine.status.topic), routineId: routine.metadata.name }); };
     const tools: ToolDefinition[] = [
       ...workContextTools("routine", plugins.resourceClient("personal"), current, log),
       ...(persons ? [contactsTool(persons, channels, current)] : []),
       tool({ name: "list_work", label: "List related work", description: "Page through this Topic's Task and Routine summaries; does not delegate or resume work.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
-        async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, current().spec.topicId), offset)); } }),
+        async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, store.topicId(current().status.topic)), offset)); } }),
       tool({ name: "read_routine", label: "Read routine", description: "Read this Routine's objective, state, latest handling report, long-lived summary and recent Notes.", parameters: Type.Object({}),
         async execute() { return result(current()); } }),
       tool({ name: "read_topic", label: "Read topic", description: "Read the owning Topic as context, not additional authority.", parameters: Type.Object({}),
-        async execute() { const c = store.topics.resource(current().spec.topicId); return result(c ? { ...c.spec, summary: c.status.summary, recent: c.status.recent } : null); } }),
+        async execute() { const c = store.topics.resource(store.topicId(current().status.topic)); return result(c ? { ...c.spec, summary: c.status.summary, recent: c.status.recent } : null); } }),
       tool({ name: "read_input", label: "Read input", description: "List pending assigned inputs, or page through one assigned input. Failed attempts need effect inspection.",
         parameters: Type.Object({ inputId: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { inputId, offset = 0 }) {
@@ -53,7 +53,7 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
         } }),
       sayTool((id, input) => say(verbs(), { ...input, idempotencyKey: id })),
       tool({ name: "report_routine", label: "Report routine", description: "Atomically update Routine progress and acknowledge only inputs actually handled. report is a brief account of what was actually handled, preserving actors, authorization and confirmation state. This never updates long-lived summary or recent Notes. Use the independent summary and Note tools only when needed. Use say separately for user-visible communication.",
-        parameters: Type.Object({ inputIds: Type.Array(Type.String()), report: Type.String({ minLength: 1, maxLength: 16000, description: "Brief result and evidence for this handling attempt, not long-lived understanding." }),
+        parameters: Type.Object({ observedGeneration: Type.Optional(Type.Integer({ minimum: 1, description: "metadata.generation from the current resource. Read and verify the updated goal if it changed during execution." })), inputIds: Type.Array(Type.String()), report: Type.String({ minLength: 1, maxLength: 16000, description: "Brief result and evidence for this handling attempt, not long-lived understanding." }),
           action: Type.Union([Type.Literal("done"), Type.Literal("wait"), Type.Literal("ask")]), question: Type.Optional(Type.String()), nextAt: Type.Optional(Type.String()) }),
         async execute(_id, args) {
           const routine = current();

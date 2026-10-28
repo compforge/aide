@@ -4,11 +4,14 @@ import type { InputSpec, InputStatus } from "../input/model.ts";
 import type { OutputView } from "../../../src/output.ts";
 import type { LoopExecution } from "../loop.ts";
 import type { TopicTrigger } from "./trigger.ts";
-export const TOPIC_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Topic" } as const;
+export const TOPIC_TYPE = { apiVersion: "aide.dev/v1alpha2", kind: "Topic" } as const;
 export const DEFAULT_TOPIC_ID = "default";
 export interface TopicSpec { address?: Address; id: string; name?: string; default?: boolean; trigger?: TopicTrigger;
   topicKey?: string; parentRef?: ResourceRef & { uid: string } }
 export interface TopicStatus extends ResourceContext {
+  summaryDependencies?: Record<string, string>;
+  conditions?: import("../conditions.ts").Condition[];
+  organization?: import("./ref.ts").Organization;
   lastInputAt?: string;
   /** Notification progress belongs to the Topic, not to its Input material. */
   weaveRevision?: number;

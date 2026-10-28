@@ -41,7 +41,7 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
   const originalId = input.spec.observation?.originalInputId;
   if (!destinations.size && typeof originalId === "string" && originalId !== input.metadata.name) {
     const preceding = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: originalId });
-    for (const c of topics) if (preceding?.status.route?.result?.topics.some(ref => ref.uid === c.metadata.uid)) { destinations.set(c.metadata.uid, c.metadata); break; }
+    for (const c of topics) if (preceding?.status.topic?.uid === c.metadata.uid) { destinations.set(c.metadata.uid, c.metadata); break; }
   }
   if (!destinations.size) {
     if (topics.some(c => !c.spec.default && !c.spec.parentRef)) return false;

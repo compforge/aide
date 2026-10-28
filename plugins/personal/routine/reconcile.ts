@@ -1,3 +1,6 @@
+import { workPhase, workDueAt, workBlocked } from "../status.ts";
+import { patchStatus } from "../status.ts";
+import { assignedTopicId } from "../topic/ownership.ts";
 import { inputPreview } from "../input/prompt.ts";
 import { assignmentWatch, cancelAssignments, resourceRef } from "../input/state.ts";
 import type { PluginContext, ReconcileContext, Watch } from "@compforge/aide-plugin";
@@ -15,7 +18,7 @@ async function cleanup(context: PluginContext, execution: ReconcileContext, rout
 }
 const loopWatch: Watch = { resourceType: ROUTINE_TYPE, handler: { create: async () => [], delete: async () => [], update: async ({ oldObject, newObject }) => {
   const a = oldObject as RoutineResource, b = newObject as RoutineResource;
-  return a.status.execution?.id !== b.status.execution?.id || a.status.status !== b.status.status
+  return a.status.execution?.id !== b.status.execution?.id || workPhase(a) !== workPhase(b)
     ? [{ name: b.metadata.name, namespace: b.metadata.namespace }] : [];
 } } };
 
@@ -23,7 +26,7 @@ const loopWatch: Watch = { resourceType: ROUTINE_TYPE, handler: { create: async 
 export async function reconcileRoutineIntake(context: PluginContext, execution: ReconcileContext, routine: Readonly<RoutineResource>) {
   if (routine.metadata.deletionTimestamp) return cleanup(context, execution, routine);
   const updated = await consumeWorkInputs(context, routine) as RoutineResource | undefined;
-  if (!updated || ["paused", "uncertain", "invalid_result"].includes(updated.status.status)) return;
+  if (!updated || workBlocked(updated)) return;
   return submitPending(context, execution, updated);
 }
 
@@ -40,25 +43,25 @@ export async function reconcileRoutine(context: PluginContext, execution: Reconc
   }
   let routine = await consumeWorkInputs(context, initial) as RoutineResource | undefined;
   if (!routine) return;
-  const blocked = ["paused", "uncertain", "invalid_result"].includes(routine.status.status);
+  const blocked = workBlocked(routine);
   const input = await nextInput(context.resources, routine);
-  const due = routine.status.status === "scheduled" && !!routine.status.nextAt && Date.parse(routine.status.nextAt) <= Date.now();
+  const due = workPhase(routine) === "scheduled" && !!workDueAt(routine) && Date.parse(workDueAt(routine)!) <= Date.now();
   if (!blocked && (input || due)) {
-    routine = await context.resources.patchStatus(routine, { status: "running", nextAt: null, idleSince: null, agentStoppedAt: null });
+    routine = await patchStatus(context.resources, routine, { waiting: null, nextTriggerAt: null, idleSince: null, agentStoppedAt: null });
     const prompt = `Use the current resource context for your entrusted work; read_routine, read_input and read_topic supply missing or truncated evidence. Verify existing effects before handling failed inputs.
-Activation: ${JSON.stringify({ routineId: routine.metadata.name, topicId: routine.spec.topicId, inputId: input?.metadata.name, kind: input ? "input" : "timer" })}
+Activation: ${JSON.stringify({ routineId: routine.metadata.name, topicId: await assignedTopicId(context.resources, routine.status.topic), inputId: input?.metadata.name, kind: input ? "input" : "timer" })}
 ${input ? inputPreview(input) : ""}
 Report handled inputs and progress using report_routine; use say for useful user communication.`;
-    await runInput(context, execution.withContext({ topicId: routine.spec.topicId, routineId: routine.metadata.name }), routine, "routine", prompt, input?.metadata.name);
+    await runInput(context, execution.withContext({ topicId: await assignedTopicId(context.resources, routine.status.topic), routineId: routine.metadata.name }), routine, "routine", prompt, input?.metadata.name);
     return { requeueAfterMs: 1 };
   }
-  if (routine.status.status === "running") {
-    await context.resources.patchStatus(routine, { status: "uncertain" });
+  if (workPhase(routine) === "running") {
+    await patchStatus(context.resources, routine, { recovery: { reason: "ExecutionUncertain", message: "Inspect interrupted execution" } });
     return;
   }
   const policy = routinePolicy(context.instance.config.routine);
-  if (!routine.status.idleSince) routine = await context.resources.patchStatus(routine, { idleSince: new Date().toISOString() });
-  const untilTimer = !blocked && routine.status.status === "scheduled" && routine.status.nextAt ? Math.max(1, Date.parse(routine.status.nextAt) - Date.now()) : Infinity;
+  if (!routine.status.idleSince) routine = await patchStatus(context.resources, routine, { idleSince: new Date().toISOString() });
+  const untilTimer = !blocked && workPhase(routine) === "scheduled" && workDueAt(routine) ? Math.max(1, Date.parse(workDueAt(routine)!) - Date.now()) : Infinity;
   if (!routine.status.agentStoppedAt) {
     const remaining = Date.parse(routine.status.idleSince!) + policy.agentIdleMs - Date.now();
     if (remaining > 0) return { requeueAfterMs: Math.min(remaining, untilTimer) };
@@ -66,7 +69,7 @@ Report handled inputs and progress using report_routine; use say for useful user
       const closed = await execution.verbs.harness({ operation: "close", ...routine.status.agent, sessionId: routine.status.agent.sessionId, timeoutMs: 30_000 });
       if (closed.state !== "success" || closed.value.outcome !== "accepted") throw new Error("Could not release idle Routine agent");
     }
-    routine = await context.resources.patchStatus(routine, { agentStoppedAt: new Date().toISOString() });
+    routine = await patchStatus(context.resources, routine, { agentStoppedAt: new Date().toISOString() });
     context.logger.info("Idle Routine agent stopped", { attributes: { routineId: routine.metadata.name, sessionId: routine.status.agent?.sessionId ?? null } });
   }
   if (Number.isFinite(untilTimer)) return { requeueAfterMs: untilTimer };

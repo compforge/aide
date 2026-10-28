@@ -337,7 +337,7 @@ plugins:
       contextChars: 16000
 ```
 
-规则命中立即投递；未命中交给持续复用原生上下文的 Route loop。contextChars 限制新 Input 预览；read_input 提供全文，list_topics 分页读取当前目录。route_input 在同一事务提交完整去向与全部 assess，具体契约见 [Route](personal/route.md)。
+规则命中立即投递；未命中交给持续复用原生上下文的 Route loop。contextChars 限制新 Input 预览；read_input 提供全文，list_topics 分页读取当前目录。route_input 在同一事务提交唯一当前归属、首次路由回执和 assess，具体契约见 [Route](personal/route.md)。
 
 `harnesses.route.model` 可以独立选择模型，字段同 Pi 的 model；未声明时复用 Chief 启动配置。Route 不可设为 defaultHarness，只拥有路由、目录和共享记忆检索工具，不加载业务执行工具或技能。纯分类失败按输入退避重试，已经完成路由的输入不重复分派。
 
@@ -350,14 +350,33 @@ plugins:
     weave:
       enabled: true
       intervalMs: 300000
-      rootThreshold: 20
+      maxRoots: 20
+      reviewIntervalMs: 3600000
       batchSize: 12
 harnesses:
   weave: {}  # 可配置 model，缺省复用 Chief 模型；无通用执行/外发工具
 ```
 
-周期扫描使用有界候选、搜索和认识指纹；达到根数量阈值且目录变化时提前整理。一次最多组织 8 个 root，只创建一个新父节点。静默优先级来自 lastInputAt，分组和摘要更新不刷新活动时间。具体交接、锁与回收见 [Topic](personal/topic.md)。
+周期扫描使用有界候选、搜索和认识指纹；root 超过软目标时提前检查，已检查且未变化的候选按 reviewIntervalMs 重查。每轮最多归组一次，可挂入已有 root 或创建共同父节点。静默优先级来自 lastInputAt，分组和摘要更新不刷新活动时间。具体交接、锁与回收见 [Topic](personal/topic.md)。
 
 ## Observation
 
 `observation.captureRequests` 控制 Pi 请求补录，默认关闭。原生 Session 可直接导出；补录的单 Session 和总磁盘预算、查看与导出入口见 [Observation](observation.md)。
+
+## Topic 整理与 root 软目标
+
+```yaml
+plugins:
+  personal:
+    topic:
+      maxInput: 40
+      maxWork: 8
+      maxChildren: 8
+    weave:
+      maxRoots: 20
+      intervalMs: 300000
+      reviewIntervalMs: 3600000
+      batchSize: 12
+```
+
+Topic 阈值按直接归属判断，由空闲 Chief 决定如何整理；Weave 的 maxRoots 统计普通 root，Default 单独兜底，允许无合理归并方案时超标。超过目标时，未变化但已检查的 root 在 reviewIntervalMs 后重查；独立子树有 15 分钟观察期。来源 topicKey 仍保留确定性定位语义。长期设计见 [Topic](topic.md)。

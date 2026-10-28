@@ -50,7 +50,7 @@ export async function seedInput(store: PersonalTopics, id: string, spec: InputSp
     ...(status.phase === "running" ? { execution: { id: status.executionId ?? "fixture", startedAt: new Date().toISOString() } } : {}),
     ...(["failed", "interrupted"].includes(status.phase ?? "") ? { lastError: status.result?.error ?? "Interrupted" } : {}),
   });
-  store.inputStore.update(fact, { assess: {
+  store.inputStore.update(fact, { topic: resourceRef(c), assess: {
     ...(status.phase && status.phase !== "queued" ? { executionId: status.executionId ?? "fixture", startedAt: new Date().toISOString() } : {}),
     ...(["failed", "interrupted"].includes(status.phase ?? "") ? { lastError: status.result?.error ?? "Interrupted" } : {}),
     ...(status.phase === "done" ? { completedAt: new Date().toISOString(), completedBy: { agent: { harness: "chief", sessionId: "fixture-session" }, executionId: status.executionId ?? "fixture", toolCallId: id }, result: { summary: status.result?.summary ?? "Done" } } : {}),

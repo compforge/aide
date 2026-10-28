@@ -20,7 +20,7 @@ export function inputList(aide: ChannelService, query: InputBrowseQuery) {
   const store = aide.topics.inputStore, result = browseInputs(store, query);
   return { ...result, items: result.items.map(({ input, ...state }) => ({
     ...state, id: input.metadata.name, uid: input.metadata.uid, at: input.metadata.creationTimestamp,
-    origin: input.spec.origin, originId: input.spec.originId, label: definition(aide, input.spec),
+    conditions: input.status.conditions ?? [], origin: input.spec.origin, originId: input.spec.originId, label: definition(aide, input.spec),
     preview: inputPrinter.summarize(input), source: input.spec.originRef,
     assessments: input.status.assess ? 1 : 0, handlings: Object.keys(input.status.handle ?? {}).length,
   })) };
@@ -49,7 +49,8 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
     const available = !!current && current.metadata.uid === ref.uid && !current.metadata.deletionTimestamp;
     const spec = available ? current.spec : undefined;
     const label = spec && [spec.name, spec.title, spec.id].find(value => typeof value === "string");
-    const topicId = spec && (ref.kind === "Topic" ? spec.id : spec.topicId);
+    const ownership = available ? (current.status as { topic?: ResourceRef }).topic : undefined;
+    const topicId = spec && (ref.kind === "Topic" ? spec.id : ownership ? aide.topics.byRef(ownership)?.spec.id : undefined);
     return { ref, label: typeof label === "string" ? label : ref.name, available,
       ...(typeof topicId === "string" ? { topicId } : {}) };
   };

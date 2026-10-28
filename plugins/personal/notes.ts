@@ -1,3 +1,4 @@
+import { commitStatus } from "./status.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Resource, ResourceClient } from "@compforge/aide-plugin";
@@ -26,7 +27,7 @@ export async function upsertNote(resources: ResourceClient, owner: Readonly<Reso
   if (previous?.text === args.text) return { noteId: id, version: owner.metadata.resourceVersion };
   const at = new Date().toISOString();
   const note = { id, createdAt: previous?.createdAt ?? at, updatedAt: at, text: args.text };
-  await resources.commit([
+  await commitStatus(resources, [
     ...fences.map(resource => ({ operation: "patchStatus" as const, resource, patch: {} })),
     { operation: "patchStatus", resource: owner, patch: { recent: retainRecent([...notes.filter(item => item.id !== id), note]) } },
   ]);

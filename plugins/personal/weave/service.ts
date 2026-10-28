@@ -1,3 +1,5 @@
+import { commitStatus } from "../status.ts";
+import { separationCoolingDown } from "./config.ts";
 import { retainRecent } from "../context.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
@@ -22,6 +24,8 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
   const resolve = (ref: { uid: string; version: string }) => {
     const topic = all.find(t => t.metadata.uid === ref.uid);
     if (!topic || topic.metadata.deletionTimestamp || topic.spec.default || topic.spec.parentRef) throw new Error("Only available non-Default roots can be grouped");
+    if (separationCoolingDown(topic))
+      throw new Error("Topic organization is cooling down; respect the recorded boundary and retry later");
     if (understandingVersion(topic) !== ref.version) throw new Error("Topic understanding changed; read again");
     return topic;
   };
@@ -36,10 +40,11 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
       status: { receipts: [], summary: "", recent: [] } });
   }
   try {
-    await resources.commit([
+    await commitStatus(resources, [
       ...children.map(resource => ({ operation: "replace" as const, resource, spec: { ...resource.spec, parentRef: resourceRef(parent) },
-        status: { ...resource.status, nextTriggerAt: null } })),
-      { operation: "patchStatus", resource: parent, patch: { weaveRevision: (parent.status.weaveRevision ?? 0) + 1,
+        status: { ...resource.status, nextTriggerAt: null, organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid,
+          toUid: parent.metadata.uid, reason: `Weave grouped under ${parent.spec.name ?? parent.spec.id}` } } })),
+      { operation: "patchStatus", resource: parent, patch: { organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid, reason: "Weave combined related roots" }, weaveRevision: (parent.status.weaveRevision ?? 0) + 1,
         ...(!group.parent ? { summary: group.summary!, recent: retainRecent(children.flatMap(t => t.status.recent)),
           absorbed: Object.fromEntries(children.map(t => [t.metadata.uid, understandingVersion(t)])),
           absorbedSummaries: Object.fromEntries(children.map(t => [t.metadata.uid, summaryVersion(t)])) } : {}),

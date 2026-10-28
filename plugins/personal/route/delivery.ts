@@ -1,3 +1,4 @@
+import { commitStatus } from "../status.ts";
 import type { AgentCall } from "../observation/reference.ts";
 import type { PluginContext, Resource, ResourceCommit } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, initialTopicName, type TopicSpec, type TopicStatus } from "../topic/model.ts";
@@ -14,7 +15,7 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
     const input = await context.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, ...original.metadata });
     if (!input) throw new Error("Input no longer exists");
     if (routed(input)) return;
-    if (!destinations.length) throw new Error("Route needs a destination or Default");
+    if (destinations.length !== 1) throw new Error("Route needs exactly one Topic destination");
     const topics = await Promise.all([...new Map(destinations.map(d => [d.uid, d])).values()].map(async d => {
       const c = await context.resources.get<TopicSpec, TopicStatus>({ ...TOPIC_TYPE, namespace: "v1", ...d });
       if (!c || c.metadata.deletionTimestamp || (rootsOnly && c.spec.parentRef)) throw new Error(`Topic no longer exists: ${d.uid}`);
@@ -26,10 +27,10 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
     const paths = topics.map(t => topicPath(all, t));
     const touched = [...new Map(paths.flat().map(t => [t.metadata.uid, t])).values()];
     try {
-      await context.resources.commit([
+      await commitStatus(context.resources, [
         ...touched.map(c => ({ operation: "replace", resource: c, spec: { ...c.spec, name: c.spec.name || initialTopicName(input.spec.text) },
           status: { ...c.status, lastInputAt: at } }) as ResourceCommit),
-        { operation: "patchStatus", resource: input, patch: { assess, route: { ...input.status.route, ...(completedBy ? { completedBy } : {}), completedAt: at,
+        { operation: "patchStatus", resource: input, patch: { topic: resourceRef(topics[0]!), assess, route: { ...input.status.route, ...(completedBy ? { completedBy } : {}), completedAt: at,
           result: { topics: topics.map(resourceRef), reason } } } },
       ]);
       context.logger.info("Input routed", { attributes: { inputId: input.metadata.name, topicUids: topics.map(c => c.metadata.uid), reason } });

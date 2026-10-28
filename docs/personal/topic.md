@@ -2,6 +2,8 @@
 
 Topic 是 Personal 的业务对象；Weave 负责组织主题关系。本文是当前模型和生命周期契约，运行效果仍须用真实输入轨迹验证。
 
+主题组织的长期设计见 [Topic：分层整理与收敛](../topic.md#分层-topic-的整理与收敛)，其中展开 Reconciler 与 Agent 分工、归属调整和软 root 目标。
+
 ## 目标与职责
 
 大量 Input 从不同 Channel 和 Source 涌入时，逐条回复会放大噪声；每个外部聊天或 thread 长期独占一个处理上下文，又会让同一主题的线索分散。Topic 先保存稳定的来源归属，再通过主题之间的组织，让相关输入在共同上下文中形成认识。
@@ -83,7 +85,7 @@ userId、发送人和单条 messageId 不参与该规则。正文相似程度由
 
 ## Input 归属与 root 处理
 
-Input 保留可选 topicKey、确定后的 Topic 引用，以及实际处理它的 root / execution / 回执。原始事实和来源证据只保存一次。归属一旦确定，不因 Weave 重新挂载到父节点，也不因树结构变化重新消费已完成输入。
+Input 保留可选 topicKey、status.topic 中的当前 Topic 引用，以及实际处理它的 execution / 回执。原始事实和来源证据只保存一次。Weave 挂载父子关系保留材料归属；Chief 可以在树内调整归属，已完成输入不重新消费。
 
 ```mermaid
 flowchart TD
@@ -91,7 +93,7 @@ flowchart TD
     K -->|有| B["确定性绑定到 Topic"]
     K -->|无| R["Route 从 root 目录判断，可按需下钻"]
     R --> T["选择 Topic；无合适归属则选 Default"]
-    B --> L["持久化稳定的 Topic 归属"]
+    B --> L["持久化当前 Topic 归属与路由回执"]
     T --> L
     L --> P["沿 parentRef 找到当前 root"]
     P --> C["root Chief 综合处理"]
@@ -100,11 +102,11 @@ flowchart TD
 
 入站先执行已有 Input 身份去重。对真正的新输入，有 key 就复用可接纳 Topic，没有则创建；Topic 创建、key 唯一性与绑定需要覆盖并发接纳。旧 Input 的重复投递不能在原 Topic 被回收后重新创建 Topic 或触发处理。
 
-有明确 key 的输入通常挂在来源 leaf，之后一直保留这一归属。有明确路由规则的 Input 固定挂到目标 Topic；没有明确规则的输入由 Route 选择当前 root。Route 背景只有 root 候选及其有界概况，不会把全部 leaf 目录常驻到模型上下文。
+有明确 key 的输入通常挂在来源 leaf，Chief 可以在处理后细化这一归属。有明确路由规则的 Input 初始挂到目标 Topic；没有明确规则的输入由 Route 选择当前 root。Route 背景只有 root 候选及其有界概况，不会把全部 leaf 目录常驻到模型上下文。
 
 Chief 只在 root 启动新执行；运行中的 Topic 成为子节点后，旧 Chief 可以自然完成。子树的 Input 作为这个 root 的材料，中间节点不逐层启动 Agent。一次 Output 可以综合多个 leaf 的输入，重复、无新增价值的事实可以静默吸收；紧迫性、来源关系和主题归属本身不构成执行授权。
 
-默认只确定一个 Topic 归属。现有跨 Topic fanout 不能机械复制到树的每一层：共同祖先不能因此重复研判同一 Input。若保留跨主题引用，引用展示与实际消费必须分开。
+每个 Input 只有一个当前 Topic 归属。跨主题引用展示与实际消费分开；树结构和归属变化都不重置全局研判回执。
 
 ## 认识积累与上下文预算
 
@@ -136,7 +138,7 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 `group_topics` 支持将 1–8 个 root 挂到已有 root，或为 2–8 个 root 创建共同父 Topic。已有父节点保留名称、认识和 trigger 开关；新父节点使用默认 trigger 配置和 Weave 提供的综合认识。Default 不参与分组。
 
-Input 固定属于路由确定的 Topic，Task / Routine 固定属于创建它的 Chief 所在 Topic。root 只表示当前处理入口。例如 topic1 的 Chief 因 input1 创建 task1，二者都留在 topic1；topic1 挂到 topic2 后，topic2 的 Chief 根据 topic1 的新 Input 创建 task2，task2 属于 topic2。父 Chief 可以查看和操作子树已有 Work，但不会修改其所属 Topic。
+Input、Task、Routine 通过 status.topic 保存当前归属。初次路由确定 Input 归属，Chief 创建 Work 时使用自己的 Topic；空闲整理可在树内调整归属。root 只表示当前处理入口。例如 topic1 的 Chief 因 input1 创建 task1，二者都留在 topic1；topic1 挂到 topic2 后，topic2 的 Chief 根据 topic1 的新 Input 创建 task2，task2 属于 topic2。父 Chief 可以查看、操作子树已有 Work，并在 Work 空闲时调整其归属。
 
 候选必须是存活、非 Default 的 root，使用 UID 与认识版本核对。父子关系提交使用资源版本校验并拒绝环；分组事务只更新关系和父节点状态，不扫描或迁移 Input / Work，也不等待 Chief 或 Work 结束。创建父 Topic 需要先取得宿主分配的 UID，随后原子提交全部父子关系；提交失败清理未使用的新父节点。
 
@@ -144,7 +146,7 @@ Input 固定属于路由确定的 Topic，Task / Routine 固定属于创建它�
 
 ### 扫描与触发
 
-Weave 的 Reconcile 按周期或 root 数量压力选择有界候选，再触发 Weave Agent。默认 rootThreshold=20、intervalMs=300000、batchSize=12，压力触发的调用间隔至少为 min(30000, intervalMs)。每轮最多分组一次。
+Weave 的 Reconcile 按周期或 root 数量压力选择有界候选，再触发 Weave Agent。默认 maxRoots=20、reviewIntervalMs=3600000、intervalMs=300000、batchSize=12，压力触发的调用间隔至少为 min(30000, intervalMs)。每轮最多分组一次。
 
 扫描进度按 Topic UID 保存实际展示的名称/summary 与候选视图契约版本和检查时间；Note 单独变化不使已检查的版本失效。未检查的 Topic 优先，已变化的 Topic 按上次检查时间轮转；单个 Topic 的变化不重置其它进度。lastInputAt 只影响静默排序，不使已检查的认识失效。失败不确认覆盖；检查期间发生变化的 Topic 会再次进入候选；离开 root 集合的记录被清理。
 
@@ -154,7 +156,7 @@ Route、Chief、Task、Routine、Weave Agent 只能由各自对应的 Reconcile 
 
 Weave 更新父节点的 `weaveRevision`，资源 Watch 唤醒 root Topic Reconcile。Chief 空闲时，由 agent Reconcile 复用或创建原生 session 发起回顾；正在运行时，由接收 Reconcile 发 followUp。`notifiedWeaveRevision` 合并已通知的变化，重复 Reconcile 不重复排队；明确拒绝投递时恢复待通知状态。新父即使已有综合摘要，也会收到结构变化通知。
 
-无明确规则的 Input 只由 Route 选择当前 root，提交时重新核对；有明确规则的 Input 固定挂到指定 Topic，包括子节点。已完成路由的 Input 不随结构变化重新绑定。Trigger Input 也固定属于产生它的 Topic，成为子节点后不再独立产生定时回顾。
+无明确规则的 Input 只由 Route 选择当前 root，提交时重新核对；有明确规则的 Input 初始挂到指定 Topic，包括子节点。Weave 不重绑定 Input；Chief 的归属迁移不改写已经完成的路由记录。Trigger Input 也固定属于产生它的 Topic，成为子节点后不再独立产生定时回顾。
 
 ## 静默回收
 
@@ -194,7 +196,7 @@ Weave 记录候选 UID、新父 UID、组织理由、认识吸收版本与交接
 | 同 key 并发接纳、进程重启、重复投递 | 只绑定一个可接纳 Topic；原 Input 不重新执行 |
 | 有 key 与无 key 的输入 | 前者确定性绑定；后者只选择当前 root，无合适归属进入 Default |
 | 多个 Topic 建立共同父节点 | 只持久化 parentRef，无环、无双父，Input 原归属不变 |
-| 分组与输入、执行、重启并发 | 固定归属不变，旧 Chief 可完成，新 root 由 Reconcile 通知 |
+| 分组与输入、执行、重启并发 | Weave 保留材料归属，旧 Chief 可完成，新 root 由 Reconcile 通知 |
 | 跨 leaf 的连续输入 | root Chief 形成综合认识，支持合并输出或静默处理 |
 | 子主题认识更新与重复吸收 | 最新证据可追溯，已吸收版本不重复堆积 |
 | Default 参与分组或删除 | 操作被拒绝，Default 始终独立存活 |
@@ -243,3 +245,11 @@ Default 是没有子主题的独立 root，不参与 Weave，不能作为其他 
 显式删除与静默回收都在存储事务内校验 Default、子节点、执行、未完成 Input、相关 Work 和父节点吸收版本。删除请求使用 UID 与资源版本作为前置条件。历史 Input/Output 可引用已消失的 Topic，不根据同名或同 key 猜测替代实例。
 
 [Weave 场景](../../tests/weave.test.ts)、[接纳](../../tests/topic-intake.test.ts)、[定时回顾](../../tests/topic-trigger.test.ts)、[默认主题](../../tests/default-topic.test.ts)和[删除](../../tests/topic-delete.test.ts)覆盖生命周期；[Pi 场景](../../tests/pi-agent.test.ts)覆盖原生连续执行。模拟测试不证明真实主题整理质量。
+
+## 树内整理与维护优先级
+
+Reconciler 优先接纳可激活的业务 Input；空闲且到检查时间时，先检查直接材料压力，再检查直接子 Topic 压力，最后安排常规回顾。维护请求通过内部 trigger Input 交接，observation 包含原因、数量和阈值，最多列出 8 个需要整理的节点；不扩大授权、不刷新业务活跃时间。完整树内可按需继续查询。
+
+`plugins.personal.topic.maxInput` 默认 40，统计直接归属且保留的业务 Input，排除 trigger；`maxWork` 默认 8，统计未完成 Task 与持续 Routine；`maxChildren` 默认 8，统计直接子 Topic。这些阈值触发检查，不强制拆分。每次回顾仍遵循 Chief 空闲间隔，同一状态不会在每次 Reconcile 立即重试。
+
+Chief 用 `list_inputs` 分页发现已处理材料，通过 `create_topic`、`move_input`、`move_work`、`move_topic` 整理当前树；move_topic 的 parentUid=null 表示独立子树。迁移保留身份与处理回执，记录操作者、原因、时间与前后归属。资源版本保护整个观察到的树；子树仍有执行或 Input 接纳时，独立操作等待完成。新 root 由自身 Reconcile 接管 Chief，Weave 读取拆分原因并保留观察间隔。

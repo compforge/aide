@@ -36,10 +36,11 @@ test("Web deletes a revision-checked Topic and preserves shared Input and siblin
   const a = await aide.topics.ensure("a"), b = await aide.topics.ensure("b");
   const resources = aide.runtime.plugins.resourceClient("personal");
   const fact = await aide.topics.submit("shared-input", { origin: "source", originId: "personal.environments", text: "共同观察" });
-  await deliver({ resources, logger: { info() {} } }, fact, [a.metadata, b.metadata], "Shared evidence");
+  await deliver({ resources, logger: { info() {} } }, fact, [a.metadata], "Initial evidence");
   await resources.patchStatus(aide.topics.resource("a")!, { execution: { id: "fixture", startedAt: new Date().toISOString() } });
   await assessInput(resources, aide.topics.resource("a")!, "fixture", { inputId: "shared-input", summary: "Done" });
   await resources.patchStatus(aide.topics.resource("a")!, { execution: null });
+  await resources.patchStatus(aide.topics.inputStore.get("shared-input")!, { topic: resourceRef(b) });
   await scope.topics.archive("a", [{ id: "old", topicId: "a", text: "只属于 a", workId: null, target: fixtureAddress("a") }]);
   await aide.start(); await aide.settled();
   const { server, base, remove } = await listen(aide);

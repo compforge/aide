@@ -1,3 +1,5 @@
+import { commitStatus } from "./status.ts";
+import { assignedTopicId } from "./topic/ownership.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "./input/model.ts";
 import { resourceRef } from "./input/state.ts";
 import type { PluginContext } from "@compforge/aide-plugin";
@@ -14,21 +16,21 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
   for (let attempt = 0; attempt < 20; attempt++) {
     const resource = await context.resources.get<WorkSpec, WorkStatus>(ref);
     if (!resource || resource.metadata.deletionTimestamp) return;
-    const work = toWork(resource);
+    const work = toWork(resource, await assignedTopicId(context.resources, resource.status.topic));
     const pending = await context.resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "handlePending", value: resource.metadata.uid } });
     const unapplied = pending.filter(fact => !fact.status.handle![resource.metadata.uid]!.appliedAt);
     if (!unapplied.length) return resource;
     const receipts = [];
-    let changed = false;
+    let paused = !!resource.spec.paused;
     for (const fact of unapplied) {
       const receipt = fact.status.handle![resource.metadata.uid]!;
       const input = { ...fact.spec, ...receipt.request, id: fact.metadata.name, at: fact.metadata.creationTimestamp };
       let rejection: string | undefined;
       try {
-        if (input.action === "pause") { work.status = "paused"; work.nextAt = null; work.question = null; }
+        if (input.action === "pause") { paused = true; work.status = "paused"; work.nextAt = null; work.question = null; }
         else if (input.action === "resume" || input.action === "answer") {
           if (input.action === "answer" && work.status !== "waiting") throw new Error("answer requires waiting work");
-          work.status = "ready"; work.nextAt = null; work.question = null;
+          paused = false; work.status = "ready"; work.nextAt = null; work.question = null;
         } else {
           if (input.action === "update") {
             const desired = { ...work, ...input.changes };
@@ -47,7 +49,7 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
         rejection = reason;
         context.logger.warn("Work input rejected", { attributes: { workId: work.id, inputId: input.id, reason } });
       }
-      if (!rejection && input.action !== "context") changed = true;
+
       const at = new Date().toISOString();
       const complete = !!rejection || input.action === "pause";
       receipts.push({ operation: "patchStatus" as const, resource: fact, patch: { handle: { ...fact.status.handle, [resource.metadata.uid]: {
@@ -56,9 +58,11 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
     }
     const { title, instruction, recent, status, nextAt, question } = work;
     try {
-      await context.resources.commit([
-        { operation: "replace", resource, spec: { ...resource.spec, revision: resource.spec.revision + Number(changed), title, instruction, ...(work.kind === "routine" ? { trigger: work.trigger! } : {}) },
-          status: { ...resource.status, recent, status, nextAt, question } },
+      await commitStatus(context.resources, [
+        { operation: "replace", resource, spec: { ...resource.spec, paused, title, instruction, ...(work.kind === "routine" ? { trigger: work.trigger! } : {}) },
+          status: { ...resource.status, recent, waiting: question ? { question } : work.kind === "task" && nextAt ? { until: nextAt } : null,
+            recovery: ["uncertain", "invalid_result"].includes(status) ? resource.status.recovery : null,
+            ...(work.kind === "task" ? { completion: status === "done" ? resource.status.completion : null } : { nextTriggerAt: nextAt }) } },
         ...receipts,
       ]);
       const updated = await context.resources.get<WorkSpec, WorkStatus>(resourceRef(resource));

@@ -1,3 +1,5 @@
+import { workDueAt } from "../plugins/personal/status.ts";
+import { workPhase } from "../plugins/personal/status.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -25,7 +27,7 @@ function setup(t: TestContext) {
   const context = { resources, instance: { config: { routine: { agentIdleMs: 1000 } } }, logger: { info() {}, warn() {} } } as unknown as PluginContext;
   const get = (id: string) => aide.personal.store.resources.get(ROUTINE_TYPE, id) as RoutineResource;
   async function active(id: string, inputIds: string[] = []) {
-    const routine = await resources.patchStatus(get(id), { status: "running", execution: { id: "run", startedAt: new Date().toISOString() } });
+    const routine = await resources.patchStatus(get(id), { execution: { id: "run", startedAt: new Date().toISOString() } });
     for (const inputId of inputIds) await changeAttempt(resources, inputId, resourceRef(routine), () => ({ executionId: "run", startedAt: new Date().toISOString() }));
     return routine;
   }
@@ -39,23 +41,24 @@ test("Routine report distinguishes done, ask and wait and preserves a concurrent
   const report = async (args: object) => reportWork(resources, get(work.id), "run", { inputIds: [], report: "Verified", ...args });
   await active(work.id);
   for (const args of [{ action: "ask" }, { action: "wait", nextAt: "2000-01-01T00:00:00Z" }, { action: "done", report: "" }]) await assert.rejects(report(args));
-  assert.equal(get(work.id).status.status, "running");
+  assert.equal(workPhase(get(work.id)), "running");
   await report({ action: "done" });
-  assert.equal(get(work.id).status.status, "scheduled");
-  assert.ok(Date.parse(get(work.id).status.nextAt!) > Date.now());
+  assert.equal(workPhase(get(work.id)), "scheduled");
+  assert.ok(Date.parse(workDueAt(get(work.id))!) > Date.now());
   await report({ action: "ask", question: "Which repository?" });
-  assert.equal(get(work.id).status.status, "waiting");
-  assert.equal(get(work.id).status.question, "Which repository?");
-  assert.equal(get(work.id).status.nextAt, null);
+  assert.equal(workPhase(get(work.id)), "waiting");
+  assert.equal(get(work.id).status.waiting?.question, "Which repository?");
+  assert.equal(workDueAt(get(work.id)), null);
   await report({ action: "wait", nextAt: "2100-01-01T00:00:00Z" });
-  assert.equal(get(work.id).status.nextAt, "2100-01-01T00:00:00Z");
-  await resources.patchStatus(get(work.id), { status: "paused" });
+  assert.equal(workDueAt(get(work.id)), "2100-01-01T00:00:00Z");
+  await resources.replace(get(work.id), { ...get(work.id).spec, paused: true }, get(work.id).status);
   await report({ action: "done" });
-  assert.equal(get(work.id).status.status, "paused");
+  assert.equal(workPhase(get(work.id)), "paused");
   await finalizeExecution(context, get(work.id), "run");
-  assert.equal(get(work.id).status.status, "paused");
+  assert.equal(workPhase(get(work.id)), "paused");
+  await resources.replace(get(work.id), { ...get(work.id).spec, paused: false }, { ...get(work.id).status, lastExecutionId: "previous" });
   await active(work.id); await finalizeExecution(context, get(work.id), "run");
-  assert.equal(get(work.id).status.status, "uncertain");
+  assert.equal(workPhase(get(work.id)), "uncertain");
 });
 
 /** @case Idle time starts after execution settles; release retains the native ID and never deletes the Routine. */
@@ -65,7 +68,7 @@ test("Routine silence releases only the agent; events clear idle state and delet
   await active(work.id);
   await reportWork(resources, get(work.id), "run", { inputIds: [], action: "done", report: "Checked" });
   await finalizeExecution(context, get(work.id), "run");
-  assert.equal(get(work.id).status.nextAt, null);
+  assert.equal(workDueAt(get(work.id)), null);
   await resources.patchStatus(get(work.id), { agent: { harness: "routine", sessionId: "native-id" } });
   let closes = 0;
   const execution = { verbs: { harness: async () => { closes++; return { state: "success", value: { outcome: "accepted" } }; } } } as unknown as ReconcileContext;
@@ -102,7 +105,7 @@ test("Routine silence releases only the agent; events clear idle state and delet
 test("Routine timer wake preserves the native identity; a missing report blocks automatic replay", async t => {
   const { aide, resources, context, get } = setup(t);
   const work = await aide.work("me").create(definition);
-  await resources.patchStatus(get(work.id), { status: "scheduled", nextAt: "2100-01-01T00:00:00Z", idleSince: "2000-01-01T00:00:00Z", agentStoppedAt: "2000-01-01T00:00:00Z", agent: { harness: "routine", sessionId: "native-id" } });
+  await resources.patchStatus(get(work.id), { nextTriggerAt: "2100-01-01T00:00:00Z", idleSince: "2000-01-01T00:00:00Z", agentStoppedAt: "2000-01-01T00:00:00Z", agent: { harness: "routine", sessionId: "native-id" } });
   let prompts = 0;
   const execution = { executionId: "timer", withContext() { return this; }, verbs: { async harness(args: { sessionId: string; prompt: string }) {
     prompts++;
@@ -113,10 +116,10 @@ test("Routine timer wake preserves the native identity; a missing report blocks 
   } } } as unknown as ReconcileContext;
   assert.ok((await reconcileRoutine(context, execution, get(work.id)))!.requeueAfterMs! > 1000);
   assert.equal(prompts, 0);
-  await resources.patchStatus(get(work.id), { nextAt: "2000-01-01T00:00:00Z" });
+  await resources.patchStatus(get(work.id), { nextTriggerAt: "2000-01-01T00:00:00Z" });
   await reconcileRoutine(context, execution, get(work.id));
   assert.equal(prompts, 1);
-  assert.equal(get(work.id).status.status, "uncertain");
+  assert.equal(workPhase(get(work.id)), "uncertain");
   await reconcileRoutine(context, execution, get(work.id));
   assert.equal(prompts, 1);
 });
@@ -138,7 +141,7 @@ test("Routine controller releases an idle session and resumes on a later event w
   await aide.event({ id: "second",  topicId: "me", name: "sample", text: "second" });
   await aide.settled();
   assert.equal(runs, 2);
-  assert.equal(get().status.status, "scheduled");
+  assert.equal(workPhase(get()), "scheduled");
   assert.deepEqual(get().status.agent, agent);
   assert.equal(get().status.agentStoppedAt, null);
 });

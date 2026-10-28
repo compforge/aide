@@ -1,6 +1,6 @@
 # Personal 资源状态与组件协作
 
-本文记录 Input、Task、Routine、Topic 的目标状态模型与更新方案。Conditions、Task/Routine 状态拆分及相应 API 升版尚未落地；当前实现以各资源 Schema 为准。资源版本规则见 [Resource](plugin/resource.md#api-版本与演进)。
+本文维护 Input、Task、Routine、Topic 的状态契约。四类资源使用 aide.dev/v1alpha2；当前实现以各资源 Schema 为准。资源版本规则见 [Resource](plugin/resource.md#api-版本与演进)。
 
 ## 对象与写入责任
 
@@ -53,7 +53,7 @@ Reconciler 接收资源变化，完成确定性处理，并安排优先级、接
 
 共享当前归属、认识、会话、执行、等待原因、最近报告及恢复核对信息。结果需要注明对应的目标或职责版本，使用 metadata.generation 表达 spec 的修订依据，避免另建含义相同的计数器。
 
-Task 保存当前目标版本的完成结果与依据。Routine 保存触发消费进度、当前或最近一次触发实例的结果，以及下一次计划时间；一次执行成功不表示持续职责完成。
+Task 保存当前目标版本的完成结果与依据。执行开始记录 observedGeneration；目标在执行中改变时，旧报告不能确认新目标，Agent 需重新读取资源、核对结果并显式报告当前 observedGeneration。暂停期间允许旧执行保存原版本结果，但不能确认新版本目标。Routine 保存触发消费进度、当前或最近一次触发实例的结果，以及下一次计划时间；一次执行成功不表示持续职责完成。
 
 拆开调度、执行和业务结果，不再让同一个枚举同时承担 running、scheduled、done 等不同维度。暂停若表达用户期望，归入 spec；status 表达是否已经落实以及剩余在途执行。外部效果不确定时先核对，不以重试代替恢复判断。
 
@@ -67,9 +67,9 @@ Task 保存当前目标版本的完成结果与依据。Routine 保存触发消�
 
 reason 是稳定的机器分类，message 说明具体问题。lastTransitionTime 仅在条件状态变化时更新，不随每次 Reconcile 刷新。条件类型及含义是 API 契约，不按 Agent 命名，不要求四类对象拥有相同条件，也不把所有条件取 AND 作为通用 Ready。
 
-以下候选在落地时按实际查询、展示与协作需求选择，并确定唯一维护者：
+当前条件如下。Input 条件由处理回执构造函数维护，Work 条件由办理状态构造函数维护；Topic 的 SummaryCurrent 由 root Reconciler 维护，NeedsAttention 跟随 Chief 执行结果更新：
 
-| 对象 | 候选条件 | 语义 |
+| 对象 | 条件 | 语义 |
 | --- | --- | --- |
 | Input | Assessed | 已产生持久化研判结论，不代表所有办理已完成 |
 | Input | HandlingComplete | 已建立的办理义务全部结束，成功与否读取各回执；研判尚未完成时不能宣布完成，研判完成且无需办理时成立 |
@@ -78,16 +78,20 @@ reason 是稳定的机器分类，message 说明具体问题。lastTransitionTim
 | Topic | SummaryCurrent | 当前需要吸收的子主题认识版本已处理，不代表模型判断必然正确 |
 | 按需适用 | NeedsAttention | 存在必须由用户介入的问题，明确解除条件 |
 
-能在同一事务计算的条件与事实一起写入。跨资源的异步判断保存依赖版本，由 Watch 与 Reconcile 重算；自身 observedGeneration 无法代表外部依赖的新旧。消费者根据条件契约识别过期结论，不能将旧 True 当作对新状态的保证。
+Personal 的状态构造函数在提交前合并自己负责的条件与事实，以现有 ResourceClient 的版本检查和事务一起写入；Host 不推断业务条件，也不增加 ResourceDefinition 派生钩子。相同条件状态下更新 reason/message 不刷新 lastTransitionTime。跨资源的异步判断保存依赖版本，由 Watch 与 Reconcile 重算；自身 observedGeneration 无法代表外部依赖的新旧。消费者根据条件契约识别过期结论，不能将旧 True 当作对新状态的保证。
 
 Conditions 提供稳定消费接口，不自动提供数据兼容，也不代替并发控制、幂等与安全交接。
 
-## 更新顺序与验证
+## 实现与验证
 
-1. 定义 Condition 基础结构、更新规则与各条件维护者，选定真实消费者。
-2. 按对象拆分 Schema：Input 保留处理回执；Task/Routine 分离目标完成与触发进度；Topic 保留子树版本依据。共享片段不改变对象的业务责任。
-3. 对发生不兼容结构或语义变化的 Kind 升级 apiVersion（当前 v1alpha1 的下一版为 v1alpha2）。同步定义、创建入口、引用、索引、工具与测试。兼容性新增不强制升版。
-4. 将条件计算接入所属 Reconciler 和业务提交事务，UI 与跨组件判断按稳定条件读取，详细诊断仍展开具体事实。
+1. Conditions 结构和更新规则位于 plugins/personal/conditions.ts，状态构造位于 status.ts；Input API、Work 展示与 Topic 工具提供条件观察。
+2. Schema 按对象拆分：Input 保留处理回执；Task/Routine 分离目标完成与触发进度；Topic 保留子树版本依据。共享片段不改变对象的业务责任。
+3. 四类资源升级为 v1alpha2，定义、引用、创建入口与直接 SQL 查询统一使用新版本。其它资源的 API 版本不随之改变。兼容性新增不强制升版。
+4. Task 使用 completion，Routine 使用 lastOccurrence/nextTriggerAt；共用 waiting、recovery、execution 与认识字段。spec.paused 保存暂停期望，metadata.generation 替代 spec.revision。Work DTO 的 status/nextAt/question/revision 是展示投影，不是持久 CRD 字段。Topic 的 summaryDependencies 保存被检查子树的 summary 版本，由 Reconcile 以版本检查刷新 SummaryCurrent。
 5. 验证多组件更新不会覆盖彼此事实；条件与回执一致；重启不重复执行；spec 或依赖版本变化后不会误用旧结论；Task 完成和 Routine 单次完成具有不同生命周期。
 
 当前开发阶段只实现新版本契约，不实现旧版本读取、转换、迁移或兼容回退；也不自动删除旧记录。升版用于明确边界，不宣称旧数据已转换或可继续使用。历史数据治理作为未来独立需求处理。
+
+## 参考边界
+
+controller-runtime 的 Status().Patch 提交调用方构造的状态，MergeFromWithOptimisticLock 提供 resourceVersion 检查；kubelet 生成自己负责的条件，合并时保留其他组件的条件。Aide 采用相同的业务侧构造边界；跨对象条件是带依赖依据的最终一致观察，不承诺全局同时更新。

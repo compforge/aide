@@ -2,6 +2,8 @@
 
 Routine 是同一 Topic 下持续存在的委托职责。`agents/routine/` 与 Chief、Task 平级，拥有独立提示词和领域工具，复用 Pi SDK 与 PiAdapter。它比较新旧观察、处理值得推进的变化，必要时通过 say 通知或询问用户。
 
+当前归属保存在 `status.topic`，使用固定 UID 的 Topic 引用；spec 保存工作目标与触发规则。Chief 可以在自己的树内调整空闲工作的归属，保留身份、进展、调度与办理回执；正在执行时拒绝迁移。
+
 ## 触发与执行
 
 Routine.spec.trigger 声明 cron 或事件订阅。cron 到期可以在没有 Input 时启动一轮；事件形成 Input 并为匹配的 Routine 建立 handle。Chief 的 assess_input 或 request_work 也能向已有 Routine 提供材料和决定。事件 Input 不需要虚构 Chief assess 记录。
@@ -25,9 +27,9 @@ Routine.spec.trigger 声明 cron 或事件订阅。cron 到期可以在没有 In
 
 report_routine 的 inputIds 必须是已接纳、已处理的输入，与一次资源状态更新共同提交。未列出的 Input 不会被确认。report 是本次办理说明，同时保存在 lastReport；summary 和 Note 独立维护，不因每轮报告而重写。
 
-- done 完成本轮。尚有未确认 Input 时继续 ready，否则回到 scheduled；cron 重新计算下次时间，纯事件职责保持 nextAt=null 等待事件。
+- done 完成本轮。尚有未确认 Input 时继续 ready，否则回到 scheduled；cron 重新计算下次时间，纯事件职责保持 nextTriggerAt=null 等待事件。
 - ask 保存问题并进入 waiting，问题通过 say 单独发送；回答经 Chief 分派为新 Input 后继续。
-- wait 保存未来 nextAt 并结束当前调用，到期再唤醒；不用长时间 sleep 占用执行。
+- wait 保存 waiting.until 并结束当前调用，到期再唤醒；不用长时间 sleep 占用执行。
 
 finalText 只保留为执行记录，不解析为业务结果、不自动发送给用户。没有回执的已接纳 Input 或没有报告的定时执行进入 uncertain，保留错误和执行关联。明确恢复前先核对已有副作用，不自动重放。暂停期间收到报告仍保留 paused。
 
@@ -75,3 +77,7 @@ Routine 没有静默资源回收阶段。职责、trigger 和累计认识持续�
 ## 验证
 
 `tests/routine-agent.test.ts` 覆盖轮次报告、静默释放、定时恢复、职责保留和删除隔离。`tests/work-context.test.ts` 覆盖精确回执、事务回滚、接纳冲突和有界进展。`tests/pi-agent.test.ts` 使用真实 Pi SDK、Runner 和模拟模型验证专属工具、事件 Input 的 say、跨重启恢复、followUp / steer 与独立能力包；不代表真实模型及外部业务系统验收。
+
+## v1alpha2 状态
+
+Routine 用 lastOccurrence 保存一次触发的结果，用 nextTriggerAt 保存下一次计划；Operational 表达持续职责能否接收和处理触发，不把单次成功当成职责终止。 spec.paused 表达暂停期望，waiting、recovery 和 execution 分别表达等待、待核对问题与执行。完整字段分工和 Conditions 契约见 [资源状态](../status.md)。

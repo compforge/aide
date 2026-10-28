@@ -2,6 +2,8 @@
 
 Task 是同一 Topic 下、围绕稳定工作范围持续办理的载体。`agents/task/` 与 `agents/chief/` 平级，复用 `agents/pi/` 和 PiAdapter。Task 使用自己的系统提示词和必要的领域工具；[Routine](routine.md) 使用独立 Agent，二者复用原生会话管理、输入接纳与回执机制，每个资源使用独立会话，各自管理生命周期。
 
+当前归属保存在 `status.topic`，使用固定 UID 的 Topic 引用；spec 保存工作目标。Chief 可以在自己的树内调整空闲工作的归属，保留身份、进展、调度与办理回执；正在执行时拒绝迁移。
+
 ## 目标与完成依据
 
 Task 有明确的完成条件，没有周期职责的 trigger；执行和等待可以跨越多次调用。done 应有工具结果、产物或外部状态支撑，不能只凭模型说“完成”。report_task 提交结论与依据，say 在有必要沟通时单独表达结果。
@@ -33,7 +35,7 @@ Chief 创建 Task 时通过 `create_work` 传入 `inputId`。Task.spec.initialIn
 
 `task.status.agent = { harness: "task", sessionId }`。Reconcile 先 create、保存 ID，再提交业务输入；恢复和持久化使用 [Pi 的原生 SDK](../harness/pi.md)。`status.execution` 表达当前执行，`lastExecutionId` 保留最近执行关联。模型 final text 不会完成 Input，也不会发送给用户；必须分别调用 report_task 和 say。中断或未确认输入保留痕迹并进入 uncertain，明确核对已有副作用后才能继续，不能自动重放。
 
-report_task 的 report 保存本次办理说明并更新 lastReport，不改写 summary 或 Note。done 表示本次目标已完成；若还有未确认 Input 则继续 ready。ask 保存问题并等待回答，wait 保存未来 nextAt。用户沟通与办理确认分别持久化，消息投递失败不会重跑工作。
+report_task 的 report 保存本次办理说明并更新 lastReport，不改写 summary 或 Note。done 表示本次目标已完成；若还有未确认 Input 则继续 ready。ask 保存问题并等待回答，wait 保存 waiting.until。用户沟通与办理确认分别持久化，消息投递失败不会重跑工作。
 
 ## 上下文组织与优化
 
@@ -70,10 +72,14 @@ summary 与 Note 的职责、工具和预算见[有界认识与近期依据](REA
 
 静默达到 agentIdleMs 后 close 运行句柄，写入 agentStoppedAt，保留原生 sessionId；再经过 idleRetentionMs 才可回收 Task。保留期间的新 Input 可以恢复同一原生会话。默认值与范围见 [Task 静默策略](../configuration.md#task-静默策略)。
 
-待处理 Input、paused / uncertain 状态、等待用户、未来 nextAt 都阻止 Task 回收，但允许释放空闲运行句柄。回收不以业务 done 为必要条件。达到回收条件后，以 UID 和 resourceVersion 前置条件请求删除，由资源层设置 deletionTimestamp；删除阶段关闭句柄、取消遗留办理记录，Controller 完成 finalize。
+待处理 Input、paused / uncertain 状态、等待用户、未来等待时间都阻止 Task 回收，但允许释放空闲运行句柄。回收不以业务 done 为必要条件。达到回收条件后，以 UID 和 resourceVersion 前置条件请求删除，由资源层设置 deletionTimestamp；删除阶段关闭句柄、取消遗留办理记录，Controller 完成 finalize。
 
 Chief 的列表过滤 deleting Task，分派事务也校验 UID、版本和 deletionTimestamp。分派先提交，旧的回收判断失效；删除先提交，新分派被拒绝。已进入删除流程的 Task 不撤销删除、不恢复执行。Task 资源回收不直接删除 SDK 会话文件或独立 Input / Output。
 
 ## 验证
 
 `tests/task-agent.test.ts` 覆盖创建原子性、独立目标去重、明确回执、删除与分派竞争及两阶段回收。`tests/pi-agent.test.ts` 使用真实 Pi SDK、Runner 和模拟模型，覆盖 Task 工具、同一会话恢复和运行中的 followUp / steer；这些测试不代表真实模型或外部业务系统验收。
+
+## v1alpha2 状态
+
+Task 用 completion 保存当前目标版本的完成回执，Succeeded 只确认相同 metadata.generation 的目标。 spec.paused 表达暂停期望，waiting、recovery 和 execution 分别表达等待、待核对问题与执行。完整字段分工和 Conditions 契约见 [资源状态](../status.md)。

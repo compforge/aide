@@ -1,3 +1,5 @@
+import { workObservation, workDueAt } from "../plugins/personal/status.ts";
+import { workPhase } from "../plugins/personal/status.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -25,10 +27,10 @@ async function fixture(t: TestContext, kind: "task" | "routine" = "task") {
   const store = new PluginResourceStore({ home, pluginInstanceId: "personal" });
   store.storage.register("personal", definitions);
   const resources = createResourceClient(store);
-  await resources.create(TOPIC_TYPE, { name: digest("me"), spec: { id: "me" }, status: {} });
+  const topic = await resources.create(TOPIC_TYPE, { name: digest("me"), spec: { id: "me" }, status: {} });
   const work = newWork("me", { kind, title: "Follow up", instruction: "Check evidence", trigger: kind === "routine" ? { cron: "* * * * *", timezone: "UTC", event: null } : null });
   const { id, topicId, title, instruction, revision, kind: _kind, trigger: _trigger, ...status } = work;
-  const original = await resources.create<WorkSpec, WorkAgentStatus>(workType(kind), { name: id, spec: { topicId, title, instruction, revision, ...(kind === "routine" ? { trigger: work.trigger! } : { initialInputId: "fixture-initial" }) }, status });
+  const original = await resources.create<WorkSpec, WorkAgentStatus>(workType(kind), { name: id, spec: { title, instruction, paused: false, ...(kind === "routine" ? { trigger: work.trigger! } : { initialInputId: "fixture-initial" }) }, status: { ...workObservation(work, 1), topic: resourceRef(topic) } });
   const context = { resources, logger: { info() {}, warn() {}, error() {} } } as unknown as PluginContext;
   const read = async () => (await resources.get<WorkSpec, WorkAgentStatus>(resourceRef(original)))!;
   const add = (name: string, text = name) => resources.create<InputSpec, InputStatus>(INPUT_TYPE, { name,
@@ -39,7 +41,7 @@ async function fixture(t: TestContext, kind: "task" | "routine" = "task") {
   const pending = () => resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "handlePending", value: original.metadata.uid } });
   const admit = async (inputIds: string[], executionId = "run") => {
     await consumeWorkInputs(context, await read());
-    await resources.patchStatus(await read(), { status: "running", execution: { id: executionId, startedAt: new Date().toISOString() } });
+    await resources.patchStatus(await read(), { execution: { id: executionId, startedAt: new Date().toISOString() } });
     for (const id of inputIds) await changeAttempt(resources, id, resourceRef(original), () => ({ executionId, startedAt: new Date().toISOString() }));
     return read();
   };
@@ -71,7 +73,7 @@ test("Work report acknowledges exact admitted IDs; late arrivals remain pending"
   const f = await fixture(t); await f.add("first"); await f.admit(["first"]);
   await f.add("late");
   await f.report(["first"]);
-  assert.equal((await f.read()).status.status, "ready");
+  assert.equal(workPhase((await f.read())), "ready");
   assert.deepEqual((await f.pending()).map(i => i.metadata.name), ["late"]);
   await finalizeExecution(f.context, await f.read(), "run");
   await f.admit(["late"]); await f.report(["late"]);
@@ -82,7 +84,7 @@ for (const kind of ["task", "routine"] as const)
 test(`${kind} finalization preserves failed admission evidence for explicit recovery`, async t => {
   const f = await fixture(t, kind); await f.add("uncertain"); await f.admit(["uncertain"]);
   await finalizeExecution(f.context, await f.read(), "run", "provider disconnected");
-  assert.equal((await f.read()).status.status, "uncertain");
+  assert.equal(workPhase((await f.read())), "uncertain");
   const receipt = (await f.pending())[0]!.status.handle![f.original.metadata.uid]!;
   assert.match(receipt.lastError!, /provider disconnected/);
   assert.equal(receipt.completedAt, undefined);
@@ -96,8 +98,8 @@ test("Periodic Routine reports schedule the next occurrence without rewriting un
     await f.admit([]); await f.report([]);
     await finalizeExecution(f.context, await f.read(), "run");
     const current = await f.read();
-    assert.equal(current.status.status, "scheduled");
-    assert.ok(Date.parse(current.status.nextAt!) > Date.now());
+    assert.equal(workPhase(current), "scheduled");
+    assert.ok(Date.parse(workDueAt(current)!) > Date.now());
     assert.ok(current.status.recent.length <= RECENT_COUNT);
     assert.ok(current.status.recent.reduce((sum, entry) => sum + entry.text.length, 0) <= RECENT_CHARS);
   }

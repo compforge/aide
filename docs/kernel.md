@@ -26,6 +26,20 @@ Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controll
 
 同一 Controller 对同一资源串行，不同资源可以并行。多个具名 Controller 可以观察同一种资源，有各自的队列和定时记录，共享写入仍使用 CAS。纯 status 更新不自动唤醒主 Controller，协作方按需声明 Watch。事件用于唤醒，持久资源承载事实。
 
+## Reconciler 与 Agent 的分工
+
+**Reconciler 是模块的入口：接收 CRD 变化，直接完成确定性工作，并决定何时触发 Agent；Agent 带着上下文负责语义判断与具体行动。** Reconciler 根据持久状态安排优先级、执行接纳、重试与等待。例如 Route 先由 Reconciler 按明确规则直接分派，需要语义判断时才触发 Agent。具体业务规则属于插件，通用运行时提供队列、并发和执行能力。
+
+| 角色 | 负责的判断 | 交付给协作方的内容 |
+| --- | --- | --- |
+| Reconciler | 直接执行确定性规则，安排优先级，决定调用 Agent 或等待 | 确定性处理结果，或交给 Agent 的任务、触发原因与约束 |
+| Agent | 如何理解材料、采取哪些动作、是否需要调整 | 工具动作、业务结果、判断依据及需要等待的条件 |
+| 工具与资源事务 | 动作是否满足资源范围、版本、执行归属等硬约束 | 可核对的状态变化、回执或明确失败 |
+
+任务交接需要说明“为什么现在做、希望检查什么”，具体操作由 Agent 根据上下文选择。数量阈值可以触发整理检查，但不直接证明哪些对象相关，也不强制 Agent 修改组织结构；决定保持现状时同样留下判断依据。执行结束和业务完成分别依据执行事实与业务回执判断。
+
+Personal 用 Input 承载 Chief 的定时维护请求，并由对应 Reconciler 调用各角色；这种交接形式属于 Personal，通用底座不要求插件使用 Input。业务场景见 [Topic 的分层整理与收敛](topic.md#分层-topic-的整理与收敛)。
+
 ## Host 与 Runner
 
 Host 持有资源存储、Connector、Harness Adapter 和原生权限审批；Runner 运行插件回调、Source、Watch、队列、重试和 Reconcile。每个启用插件实例有自己的 Runner，数量不随 Topic 增加；进程内插件使用相同契约。

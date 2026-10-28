@@ -13,14 +13,14 @@ export function weaveCandidates(topics: readonly TopicResource[]) {
  */
 const REVIEW_CONTRACT = "root-catalog-v2";
 export function candidateVersion(topic: TopicResource) {
-  return createHash("sha256").update(JSON.stringify([REVIEW_CONTRACT, topic.spec.name, summaryVersion(topic)])).digest("hex");
+  return createHash("sha256").update(JSON.stringify([REVIEW_CONTRACT, topic.spec.name, summaryVersion(topic), topic.status.organization])).digest("hex");
 }
 /** @spec Scan progress measures the actual bounded snapshot supplied to inference, never the requested page size.
  * @link docs/personal/weave.md
  */
 export function candidatePage(roots: readonly TopicResource[], offset: number, limit: number) {
   return contextPage(roots.map(t => ({ uid: t.metadata.uid, name: t.spec.name?.slice(0, 200), summary: t.status.summary.slice(0, 1200),
-    version: understandingVersion(t), lastInputAt: t.status.lastInputAt })), offset, limit);
+    version: understandingVersion(t), lastInputAt: t.status.lastInputAt, organization: t.status.organization })), offset, limit);
 }
 
 /** @spec Search counts describe matching roots, independently of the global catalog and pending review batch.

@@ -50,7 +50,7 @@ test("rules preserve one stable binding and inherit the original Input without c
   const original = await aide.personal.topics.submit("original", source("original", "a"));
   await aide.settled();
   const latest = aide.personal.topics.inputStore.get(original.metadata.name)!;
-  assert.throws(() => aide.topics.inputStore.update(latest, { route: { ...latest.status.route, result: { topics: [], reason: "rewrite" } } }), /binding is immutable/);
+  assert.throws(() => aide.topics.inputStore.update(latest, { route: { ...latest.status.route, result: { topics: [], reason: "rewrite" } } }), /routing receipt is immutable/);
   await aide.personal.topics.submit("followup", { ...source("follow up"), observation: { originalInputId: "original" } });
   await aide.settled();
   assert.equal(models, 0);
@@ -92,21 +92,22 @@ test("Lark Source creates and reuses explicit topics without model routing or a 
   assert.ok(aide.topics.inputStore.get("deleting")!.status.route?.completedAt);
 });
 
-test("semantic routing fans out, fallback goes only to Default, and finished inputs leave the global queue", async t => {
+test("semantic routing selects one Topic, fallback goes only to Default, and finished inputs leave the global queue", async t => {
   let calls = 0;
   const { aide } = setup(t, { async execute() { throw new Error("No Work"); }, async route(prompt) {
     calls++;
     const data = JSON.parse(prompt);
     const matches = data.topics.filter((c: { id: string }) => ["a", "b"].includes(c.id));
     return JSON.stringify({ decisions: data.inputs.map((i: { id: string }) => ({ inputId: i.id,
-      topicUids: i.id === "shared" ? matches.map((c: { uid: string }) => c.uid) : [], reason: "Relevant topics" })) });
+      topicUids: i.id === "shared" ? matches.slice(0, 1).map((c: { uid: string }) => c.uid) : [], reason: "Relevant topics" })) });
   } });
   for (const id of ["a", "b"]) await aide.topics.ensure(id);
   await aide.topics.ensure("default"); await aide.start();
   await aide.personal.topics.submit("shared", source("cross-topic event"));
   await aide.settled();
   assert.equal(calls, 1);
-  for (const id of ["a", "b"]) assert.ok(aide.topics.input("shared", id));
+  assert.ok(aide.topics.input("shared", "a"));
+  assert.equal(aide.topics.input("shared", "b"), undefined);
   assert.equal(aide.topics.input("shared", "default"), undefined);
   assert.equal(aide.topics.resource("unknown-source-topic"), undefined);
   await aide.personal.topics.submit("fallback", source("unmatched")); await aide.settled();
@@ -166,18 +167,18 @@ test("recovery discovers input committed before Route existed and routes it on s
   assert.deepEqual(restarted.topics.inputStore.list().filter(i => !i.status.route?.completedAt).map(i => i.metadata.name), []);
 });
 
-test("fanout is atomic: failed commit leaves no assignments; retry records every target once", async t => {
+test("routing is atomic: failed commit leaves no ownership or receipt; retry records one destination", async t => {
   const { aide } = setup(t);
   const a = await aide.topics.ensure("a"), b = await aide.topics.ensure("b");
   const input = await aide.topics.submit("fanout", source("shared"));
   const ctx = context(aide);
   const failing = { ...ctx, resources: { ...ctx.resources, async commit() { throw new Error("disk unavailable"); } } };
-  await assert.rejects(deliver(failing, input, [a.metadata, b.metadata], "shared"), /disk unavailable/);
-  assert.deepEqual(aide.topics.inputStore.get("fanout")!.status, {});
-  await deliver(ctx, input, [a.metadata, b.metadata], "shared");
+  await assert.rejects(deliver(failing, input, [a.metadata], "shared"), /disk unavailable/);
+  assert.deepEqual(aide.topics.inputStore.get("fanout")!.status, input.status);
+  await deliver(ctx, input, [a.metadata], "shared");
   const committed = aide.topics.inputStore.get("fanout")!;
   assert.deepEqual(committed.status.assess, {});
-  assert.equal(committed.status.route!.result!.topics.length, 2);
+  assert.equal(committed.status.route!.result!.topics.length, 1);
   assert.ok(committed.status.route?.completedAt);
   await deliver(ctx, input, [b.metadata], "different retry must not change the decision");
   assert.deepEqual(aide.topics.inputStore.get("fanout"), committed);
@@ -193,7 +194,7 @@ test("a deleted candidate cannot redirect a decision to its replacement", async 
   const replacement = await aide.topics.ensure("target");
   assert.notEqual(c.metadata.uid, replacement.metadata.uid);
   await assert.rejects(deliver(ctx, input, [c.metadata], "pinned"), /no longer exists/);
-  assert.deepEqual(aide.topics.inputStore.get("pending")!.status, {});
+  assert.deepEqual(aide.topics.inputStore.get("pending")!.status, input.status);
   assert.deepEqual(aide.topics.get("target")!.pendingInputIds, []);
 });
 

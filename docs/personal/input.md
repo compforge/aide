@@ -2,6 +2,8 @@
 
 Input 保存收到的内容及来源证据，各组件在同一资源上留下自己的处理进展。它使一条信息从接收到路由、研判和办理的过程可追溯；输入数量与输出数量没有一对一关系。
 
+`status.topic` 保存唯一的当前 Topic 归属，引用固定 UID。`status.route` 只保存首次路由处理记录；spec 中的 topicId / topicKey 保存入站定位信息。Chief 在树内移动 Input 时更新当前归属和迁移原因，保留原始事实与 route / assess / handle 回执；已接纳但尚未完成研判的 Input 先完成处理再迁移。归属查询、待研判索引和工具范围均使用 status.topic。
+
 ## 内容、身份与调度
 
 | 信息 | 含义 |
@@ -32,7 +34,7 @@ Channel / Source 经绑定的入口提交 Input，稳定身份用于传输去重
 | assess | Topic Reconcile 原子记录 Chief 接纳；Chief 用 assess_input 确认 Input 的唯一研判 |
 | handle[Work UID] | Work 应用请求，再用 report_task / report_routine 确认办理 |
 
-route_input 在同一事务写入 route 结果和一条空 assess；assess_input 在同一事务完成研判并建立必要的 handle。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 可以关联多个 Topic，但只保存一份研判；多个 Work 仍按各自 UID 独立确认。
+route_input 在同一事务写入 route 结果和一条空 assess；assess_input 在同一事务完成研判并建立必要的 handle。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 只有一个当前 Topic，保存一份研判；多个 Work 仍按各自 UID 独立确认。
 
 未完成可能是尚未接纳、运行、退避或待核对。接纳记录不等于完成；原生调用结束也不代替工具回执。Route 分类失败可以按输入退避重试，Work 可能已经产生副作用，需核对后继续；Chief 执行失败记录在 Topic，未完成 Input 的 assess 保留接纳标记与异常供核对。详细策略分别归 [Route](route.md)、[Topic](topic.md)、[Task](task.md) 与 [Routine](routine.md)。
 
@@ -78,7 +80,7 @@ Output 只在其 inputIds 显式包含当前 Input 时关联，不按相邻顺�
 
 Input 固定绑定 Route 确定的 Topic。明确规则允许直接绑定子 Topic；无规则时 Route 只选择当前 root。Weave 不迁移绑定或研判记录。
 
-root Chief 按拓扑顺序沿 parent 索引遍历自己整棵 Topic tree，取得所有 Topic UID，再用这些 UID 查询 Input 索引并按 Input UID 去重。Input 的挂载关系来自 `status.route.result.topics`：`topic` 查询全部材料，`assessPending` 查询未完成研判，`assessReady` 只查询尚未接纳且未完成的 Input。不会先读取全局 Input 再筛选。
+root Chief 按拓扑顺序沿 parent 索引遍历自己整棵 Topic tree，取得所有 Topic UID，再用这些 UID 查询 Input 索引并按 Input UID 去重。Input 的当前挂载关系来自 `status.topic`：`topic` 查询全部材料，`assessPending` 查询未完成研判，`assessReady` 只查询尚未接纳且未完成的 Input。不会先读取全局 Input 再筛选。
 
 初始 prompt、steer 和 followUp 在发送前，用同一资源事务检查当前 Topic 的版本与 execution，并写入 `Input.status.assess.executionId`、`startedAt`。executionId 指向实际 Chief 执行，不是接收 Reconcile 的执行。竞争失败者重读后忽略已接纳的 Input；初始批次有冲突时整批回滚，下一轮重新选择剩余 Input 并生成 prompt。接纳之后仍可被其它 Topic 的 Chief 主动读取为材料，但不会再次自动提交。Deferred 在被选入已激活 Chief 的批次之前不占接纳标记，主动读取也不占标记；直接完成研判则阻止后续自动提交。
 
@@ -87,3 +89,5 @@ root Chief 按拓扑顺序沿 parent 索引遍历自己整棵 Topic tree，取�
 原生会话引用 `agent` 用于观测，去重只依赖 executionId。`completedBy` 记录确认完成的工具调用，可以来自后来核对效果的执行，且不会改写原来的接纳身份。Web / Lark 展示优先关联完成工具的 executionId，未记录完成工具时才回退到接纳 executionId。接纳、研判完成、Work 完成和 Output 送达是独立事实。新结构不兼容旧的 per-topic assess 与 Topic.notifiedInputs；本次不提供旧数据迁移。
 
 `tests/input-admission.test.ts` 覆盖跨 root 竞争、初始 prompt 与 followUp 竞争、批次重选、明确拒绝、未知结果保留、重启恢复和归组后按树查询材料。
+
+状态条件与 apiVersion 规则见 [资源状态](../status.md)。Assessed、HandlingComplete、NeedsAttention 与处理回执一起提交；HandlingComplete 表示办理义务结束，不代表全部成功。

@@ -35,8 +35,8 @@ export async function collectTopic(context: PluginContext, topic: TopicResource)
     { matchIndex: { name: "assessPending", value: topic.metadata.uid } });
   if (inputs.length) return delay;
   const work = (await Promise.all(WORK_TYPES.map(t => context.resources.list<WorkResource["spec"], WorkResource["status"]>(t,
-    { matchIndex: { name: "topicId", value: topic.spec.id } })))).flat();
-  if (work.some(w => w.spec.topicId === topic.spec.id)) return delay;
+    { matchIndex: { name: "topic", value: topic.metadata.uid } })))).flat();
+  if (work.some(w => w.status.topic.uid === topic.metadata.uid)) return delay;
   await context.resources.delete(TOPIC_TYPE, topic.metadata.name, "v1", { uid: topic.metadata.uid, resourceVersion: topic.metadata.resourceVersion });
   context.logger.info("Quiet Topic deletion requested", { attributes: { topicUid: topic.metadata.uid, topicKey: topic.spec.topicKey ?? null, lastInputAt: topic.status.lastInputAt ?? null } });
   return delay;

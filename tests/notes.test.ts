@@ -1,3 +1,4 @@
+import { workPhase } from "../plugins/personal/status.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -104,7 +105,7 @@ test(`${kind} uses host-bound Note and summary tools without acknowledging busin
   const work = await f.aide.work("notes").create({ kind, title: "Investigate", instruction: "Verify evidence",
     trigger: kind === "routine" ? { cron: "* * * * *", timezone: "UTC", event: null } : null });
   const get = () => f.aide.personal.store.resources.get<WorkSpec, WorkAgentStatus>(workType(kind), work.id);
-  await f.resources.patchStatus(get(), { status: "running", execution: { id: "work-live", startedAt: new Date().toISOString() } });
+  await f.resources.patchStatus(get(), { execution: { id: "work-live", startedAt: new Date().toISOString() } });
   const tools = workContextTools(kind, f.resources, get, log);
   const note = tools.find(tool => tool.name === "upsert_note")!;
   const summarize = tools.find(tool => tool.name === `summarize_${kind}`)!;
@@ -115,17 +116,17 @@ test(`${kind} uses host-bound Note and summary tools without acknowledging busin
   await call(note, "progress", { version: get().metadata.resourceVersion, noteId: created.id, text: "Checks complete; external verification remains" });
   assert.equal(get().status.recent.length, 1);
   assert.equal(get().status.summary, before.status.summary);
-  assert.equal(get().status.status, "running");
+  assert.equal(workPhase(get()), "running");
   await call(summarize, "rule", { version: get().metadata.resourceVersion, summary: "Reported success requires independent verification" });
   assert.equal(get().status.recent[0]!.id, created.id);
-  assert.equal(get().status.status, "running");
+  assert.equal(workPhase(get()), "running");
   assert.match(JSON.stringify(relatedWork(f.aide.personal.store, "notes")), /external verification remains/);
   const memory = get().status;
   await reportWork(f.resources, get(), "work-live", { inputIds: [], report: "Checked available evidence", action: "done" });
   assert.equal(get().status.lastReport!.text, "Checked available evidence");
   assert.equal(get().status.summary, memory.summary);
   assert.deepEqual(get().status.recent, memory.recent);
-  assert.equal(get().status.status, kind === "task" ? "ready" : "scheduled");
+  assert.equal(workPhase(get()), kind === "task" ? "ready" : "scheduled");
   await f.resources.patchStatus(get(), { execution: null });
   await assert.rejects(call(note, "late", { version: get().metadata.resourceVersion, text: "late write" }), /no longer active/);
 });

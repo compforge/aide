@@ -1,3 +1,5 @@
+import { workPhase } from "./status.ts";
+import { commitStatus } from "./status.ts";
 import { agentCall } from "./observation/reference.ts";
 import { z } from "zod";
 import type { Resource, ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
@@ -7,7 +9,7 @@ import type { InputSpec, InputStatus } from "./input/model.ts";
 import type { WorkSpec } from "./resources.ts";
 import type { WorkAgentStatus } from "./work-status.ts";
 import { nextOccurrence } from "./model.ts";
-export const WorkReportSchema = z.object({ inputIds: z.array(z.string().min(1)).max(99),
+export const WorkReportSchema = z.object({ observedGeneration: z.number().int().positive().optional(), inputIds: z.array(z.string().min(1)).max(99),
   report: z.string().trim().min(1).max(RECENT_CHARS),
   action: z.enum(["done", "wait", "ask"]), question: z.string().nullable().optional(), nextAt: z.string().nullable().optional(),
 }).strict();
@@ -25,6 +27,9 @@ export async function reportWork(resources: ResourceClient, owner: Readonly<Reso
   for (let attempt = 0; ; attempt++) {
     const work = await resources.get<WorkSpec, WorkAgentStatus>(resourceRef(owner));
     if (!work || work.metadata.deletionTimestamp || work.status.execution?.id !== executionId) throw new Error("Work execution is no longer active");
+    const generation = args.observedGeneration ?? work.status.execution!.observedGeneration ?? work.metadata.generation;
+    if (generation !== work.metadata.generation && (!work.spec.paused || args.observedGeneration !== undefined))
+      throw new Error("Work spec changed; read the current resource and report its observedGeneration after verifying the updated goal");
     const at = new Date().toISOString();
     const writes: ResourceCommit[] = [];
     for (const id of args.inputIds) {
@@ -39,10 +44,17 @@ export async function reportWork(resources: ResourceClient, owner: Readonly<Reso
     }
     const remaining = (await pendingInputs(resources, resourceRef(work))).some(input => !args.inputIds.includes(input.metadata.name));
     const recurring = work.kind === "Routine" && "trigger" in work.spec;
-    const status = work.status.status === "paused" ? "paused" : args.action === "ask" ? "waiting" : args.action === "wait" ? "scheduled" : remaining ? "ready" : recurring ? "scheduled" : "done";
-    writes.push({ operation: "patchStatus", resource: work, patch: { status, lastReport: { at, text: args.report }, question: args.action === "ask" ? args.question : null,
-      nextAt: status === "scheduled" ? (args.action === "wait" ? args.nextAt : recurring ? nextOccurrence(work.spec.trigger, new Date()) : null) : null, lastExecutionId: executionId } });
-    try { await resources.commit(writes); return { inputIds: args.inputIds, status }; }
+    const outcome = { at, text: args.report, executionId, observedGeneration: generation };
+    const update: Partial<WorkAgentStatus> = { lastReport: { at, text: args.report }, lastExecutionId: executionId,
+      waiting: args.action === "ask" ? { question: args.question! } : args.action === "wait" ? { until: args.nextAt! } : null,
+      recovery: null,
+      ...(recurring ? { lastOccurrence: args.action === "done" && !remaining ? outcome : work.status.lastOccurrence ?? null,
+        nextTriggerAt: args.action === "done" && !remaining ? nextOccurrence(work.spec.trigger, new Date()) : null }
+        : { completion: args.action === "done" && !remaining ? outcome : null }),
+    };
+    const status = workPhase({ ...work, status: { ...work.status, ...update } });
+    writes.push({ operation: "patchStatus", resource: work, patch: update });
+    try { await commitStatus(resources, writes); return { inputIds: args.inputIds, status }; }
     catch (error) { if (attempt >= 8 || !/version conflict/i.test(String(error))) throw error; }
   }
 }

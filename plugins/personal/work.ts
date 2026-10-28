@@ -1,8 +1,9 @@
+import { commitStatus } from "./status.ts";
 import { isDeepStrictEqual } from "node:util";
 import { INPUT_TYPE } from "./input/model.ts";
 import { resourceRef } from "./input/state.ts";
 import { WorkInputRequestSchema } from "./model.ts";
-import { workType, toWork } from "./resources.ts";
+import { workType } from "./resources.ts";
 import { digest } from "./chief-model.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -19,12 +20,12 @@ export function newWork(topicId: string, definition: WorkDefinition, now = new D
   const desired = WorkDefinitionSchema.parse(definition);
   validateTrigger(desired.kind, desired.trigger, now);
   return { id: randomUUID(), topicId, ...desired,
-    status: desired.kind === "routine" ? "scheduled" : "ready", revision: 1,
+    conditions: [], status: desired.kind === "routine" ? "scheduled" : "ready", revision: 1,
     nextAt: nextOccurrence(desired.trigger, now), question: null, summary: "", recent: [] };
 }
 
 /**
- * @spec Work belongs permanently to its creating Chief Topic; subtree access never moves ownership. Writes notify all matching resource watches.
+ * @spec Work starts in its creating Chief Topic; explicit organization may move idle ownership. Writes notify all matching resource watches.
  * @link docs/personal/README.md
  */
 export class WorkService {
@@ -34,7 +35,7 @@ export class WorkService {
 
   list(): Work[] {
     const topic = this.store.topics.resource(this.topicId);
-    return this.store.workResources(topic ? this.store.topics.scope(topic.metadata.uid).map(t => t.spec.id) : []).map(toWork);
+    return this.store.workResources(topic ? this.store.topics.scope(topic.metadata.uid).map(t => t.metadata.uid) : []).map(r => this.store.toWork(r));
   }
 
   read(id: string): Work {
@@ -50,6 +51,7 @@ export class WorkService {
     const at = new Date().toISOString();
     await this.store.client.create(INPUT_TYPE, { name: inputId,
       spec: { origin: "chief", originId: "personal.chief", text: content, topicId: this.topicId }, status: {
+        topic: resourceRef(topic),
         route: { completedAt: at, result: { topics: [resourceRef(topic)], reason: "Independent Chief decision" } },
         assess: { completedAt: at, result: { summary: content } },
       } });
@@ -65,15 +67,16 @@ export class WorkService {
       const initialInputId = inputId ?? digest([topic.metadata.uid, "chief-task", key]);
       work.id = digest([topic.metadata.uid, initialInputId, key]);
       const at = new Date().toISOString();
-      await this.store.client.commit([
+      await commitStatus(this.store.client, [
         ...(!inputId ? [{ operation: "create" as const, type: INPUT_TYPE, name: initialInputId,
           spec: { origin: "chief", originId: "personal.chief", text: work.instruction, topicId: this.topicId }, status: {
+            topic: resourceRef(topic),
             route: { completedAt: at, result: { topics: [resourceRef(topic)], reason: "Independent Chief task" } },
             assess: { completedAt: at, result: { summary: work.instruction } },
           } }] : []),
         { operation: "create", type: workType("task"), name: work.id,
-          spec: { topicId: work.topicId, title: work.title, instruction: work.instruction, revision: work.revision, initialInputId },
-          status: { status: "ready", nextAt: null, question: null, summary: "", recent: [] } },
+          spec: { title: work.title, instruction: work.instruction, paused: false, initialInputId },
+          status: { topic: resourceRef(topic), waiting: null, summary: "", recent: [] } },
       ]);
     } else await this.store.save(work);
     this.log.info({ workId: work.id, topicId: this.topicId, kind: work.kind }, "Work tool created work");
@@ -92,9 +95,10 @@ export class WorkService {
     const name = digest([target.metadata.uid, key]);
     const previous = this.store.topics.inputStore.get(name);
     if (previous && !isDeepStrictEqual(previous.status.handle?.[target.metadata.uid]?.request, parsed)) throw new Error("Input already has a different Work request; use a new identity");
-    await this.store.client.commit([
+    await commitStatus(this.store.client, [
       { operation: "patchStatus", resource: target, patch: { idleSince: null, agentStoppedAt: null } },
       { operation: "create", type: INPUT_TYPE, name, spec: { origin: "chief", originId: "personal.chief", text, topicId: c.spec.id, observation: { work: resourceRef(target), request: parsed } }, status: {
+        topic: resourceRef(c),
         route: { completedAt: at, result: { topics: [resourceRef(c)], reason: "Independent Chief request" } },
         assess: { completedAt: at, result: { summary: text } },
         handle: { [target.metadata.uid]: { resource: resourceRef(target), assignedAt: at, request: parsed } },

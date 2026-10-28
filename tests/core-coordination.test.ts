@@ -22,16 +22,16 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit topic
   const session = new HarnessFixtures(root).create({ cwd: root });
   const options = fakeOptions({ execute: async () => ({ action: "done", report: "checked", notification: "ok", question: null, nextAt: null }) }, root);
   const core = new ApplicationRuntime(root, { cwd: root,
-    instances: [{ pluginInstanceId: "fixture", pluginId: "tests/coordination", packageVersion: "1.0.0", marketplace: "builtin", config: {} }],
+    instances: [{ pluginInstanceId: "personal", pluginId: "tests/coordination", packageVersion: "1.0.0", marketplace: "builtin", config: {} }],
     harness: { harnesses: [{ id: "default", harness: "codex" }], defaultHarness: "default", createAdapter: options.createAdapter },
     plugins: { pluginSupervisor: new PluginSupervisor(),
       loadPackageEntry: async (pluginId, version) => ({ pluginId, version, entryUrl: new URL("./fixtures/coordination-plugin.ts", import.meta.url).href,
         resourcesUrl: new URL("./fixtures/coordination-definitions.ts", import.meta.url).href }) },
   });
   const manager = core.plugins;
-  const resources = new PluginResourceStore({ home: root, pluginInstanceId: "fixture" });
+  const resources = new PluginResourceStore({ home: root, pluginInstanceId: "personal" });
   const topics = new TopicStore(session);
-  const store = new Store(resources, manager.resourceClient("fixture"), topics);
+  const store = new Store(resources, manager.resourceClient("personal"), topics);
   const work = new WorkService(store, "group-a", pino({ level: "silent" }));
   try {
     await core.start();
@@ -39,7 +39,7 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit topic
     await manager.settled();
     const observer = { apiVersion: "tests.aide.dev/v1alpha1", kind: "WorkObserver" };
     expect(resources.get(observer, "observer", "v1/project/coordination").status).toMatchObject({ answer: "observed", count: 1 });
-    const projection: ChannelService = { inputDefinition: () => { throw new Error("No Input expected"); }, runtime: core, topics,
+    const projection: ChannelService = { inputDefinition: input => ({ id: input.originId, label: "Fixture input", icon: "fixture" }), runtime: core, topics,
       subscribe: (listener) => core.subscribe(listener), outputs: () => [], invocations: () => manager.listHarnessInvocations().map(invocation => ({ ...invocation, ...personalExecution(invocation) })), topicIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
     expect(topicView(projection, "group-a").blocks.some((block) => block.type === "execution")).toBe(true);
     expect(topicView(projection, "group-b").blocks).toHaveLength(0);

@@ -1,3 +1,5 @@
+import { ConditionsSchema } from "../conditions.ts";
+import { OrganizationSchema } from "../topic/ref.ts";
 import { digest } from "../chief-model.ts";
 import { AgentStatusSchema } from "../session.ts";
 import { ContextFields } from "../context.ts";
@@ -39,7 +41,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   type: TOPIC_TYPE,
   schema: { spec: z.object({ id: z.string(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     trigger: TopicTriggerSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
-    status: z.object({  receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
+    status: z.object({ conditions: ConditionsSchema, summaryDependencies: z.record(z.string(), z.string()).optional(), organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).optional(), absorbedSummaries: z.record(z.string(), z.string()).optional(),
@@ -54,10 +56,10 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     if (resource.status.execution) throw new TopicDeletionBlocked("busy", "Topic is busy");
     if (context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).some(t => t.spec.parentRef?.uid === resource.metadata.uid)) throw new TopicDeletionBlocked("children", "Topic still has children");
     const pending = context.list<InputSpec, InputStatus>(INPUT_TYPE).some(i =>
-      (i.status.route?.result?.topics.some(t => t.uid === resource.metadata.uid))
+      (i.status.topic?.uid === resource.metadata.uid)
       && !!i.status.assess && !i.status.assess.completedAt);
     if (pending) throw new TopicDeletionBlocked("busy", "Topic has pending Input");
-    if (WORK_TYPES.some(type => context.list<WorkResource["spec"], WorkResource["status"]>(type).some(w => w.spec.topicId === resource.spec.id))) throw new TopicDeletionBlocked("work", "Topic still owns Work");
+    if (WORK_TYPES.some(type => context.list<WorkResource["spec"], WorkResource["status"]>(type).some(w => w.status.topic.uid === resource.metadata.uid))) throw new TopicDeletionBlocked("work", "Topic still owns Work");
     if (resource.spec.parentRef) {
       const parent = context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).find(t => t.metadata.uid === resource.spec.parentRef!.uid);
       if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource)) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");

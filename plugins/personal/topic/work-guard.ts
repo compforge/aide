@@ -1,9 +1,14 @@
+import { workPhase } from "../status.ts";
+import { isDeepStrictEqual } from "node:util";
 import type { Resource, ResourceValidationContext } from "@compforge/aide-plugin";
-import type { LoopStatus } from "../loop.ts";
-import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "./model.ts";
-/** @spec Work belongs to a live Topic, independently of its current root and Chief. */
-export function guardWork(current: Resource<{ topicId: string }, LoopStatus>, context: ResourceValidationContext, previous?: Resource<{ topicId: string }, LoopStatus>) {
-  const topic = context.list<TopicSpec, TopicStatus>(TOPIC_TYPE).find(t => t.spec.id === current.spec.topicId);
-  if (topic?.metadata.deletionTimestamp) throw new Error("Work requires a live Topic");
-  if (previous && previous.spec.topicId !== current.spec.topicId) throw new Error("Work Topic ownership is immutable");
+import type { WorkAgentStatus } from "../work-status.ts";
+import { requireTopic } from "./ownership.ts";
+/** @spec Work has one UID-pinned current Topic. Running work finishes before ownership changes.
+ * @link docs/topic.md#归属调整与责任交接
+ */
+export function guardWork(current: Resource<import("../model.ts").WorkSpecFields, WorkAgentStatus>, context: ResourceValidationContext, previous?: Resource<import("../model.ts").WorkSpecFields, WorkAgentStatus>) {
+  requireTopic(current.status.topic, context);
+  if (previous && !isDeepStrictEqual(previous.status.topic, current.status.topic)
+    && (previous.status.execution || current.status.execution || workPhase(previous) === "running" || workPhase(current) === "running"))
+    throw new Error("Finish Work execution before moving Topic ownership");
 }
