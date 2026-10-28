@@ -91,7 +91,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
     assert.equal(input.status.assess!.executionId, id === "first" ? "old-chief" : "root-chief");
   }
   assert.deepEqual(await nextInputs(f.resources, f.refresh(a), 8), [], "child cannot start a new Chief");
-  assert.deepEqual(topicCandidates(f.aide.personal.store).map(c => c.uid), [b.metadata.uid]);
+  assert.deepEqual(topicCandidates(f.aide.personal.store).map(c => c.metadata.uid), [b.metadata.uid]);
 });
 
 test("Weave rejects stale understanding and cycles but does not wait for uncertain Chief effects", async t => {
@@ -285,7 +285,9 @@ test("Unfinished synthesis backs off without inventing Input or refreshing activ
 test("Weave carries bounded child Notes into the parent while keeping a durable parent summary", async t => {
   const f = fixture(t); await f.initialize();
   const a = await ensureSourceTopic(f.resources, "note:a", "A"), b = await ensureSourceTopic(f.resources, "note:b", "B");
-  const note = { id: "verification-progress", createdAt: "2026-10-27T00:00:00Z", updatedAt: "2026-10-27T01:00:00Z", text: "A reports verification is 50% complete" };
+  const person = await f.aide.persons.observe({ provider: "test", scope: "weave", id: "reporter" }, "Reporter");
+  const note = { id: "verification-progress", createdAt: "2026-10-27T00:00:00Z", updatedAt: "2026-10-27T01:00:00Z", text: "A reports verification is 50% complete",
+    persons: [{ apiVersion: "aide.dev/v1alpha1", kind: "Person" as const, namespace: "v1" as const, name: person.metadata.name, uid: person.metadata.uid }] };
   const version = candidateVersion(a);
   await f.resources.patchStatus(a, { recent: [note] });
   assert.equal(candidateVersion(f.refresh(a)), version, "Note-only changes do not restart the stable-topic scan");

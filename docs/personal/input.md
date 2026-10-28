@@ -30,7 +30,7 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 
 Lark Source 根据私信实际收件账号、同一聊天内被回复消息的发送人物、已对应 Person 的 @ 对象填写；讨论批次保留逐条人物证据，并将本批明确接收者去重写入 receivers。Lark Channel 记录已知人物 @，私信机器人本身不产生人物收件人。裸 @ ID 不能证明是人，不凭它创建 Person；原始 mentions 继续留在 observation。该列表是可确认的接收者，不承诺完整受众，也不证明实际已读、认可或授权。
 
-这些事实支持 [Topic 近期相关人物](topic.md#近期相关人物) 的读取时派生；移动 Input 只改 status.topic，不改 sender / receivers。验证见 `tests/topic-persons.test.ts`、`tests/message-source.test.ts` 与 `tests/person.test.ts`。
+这些事实供 Chief 维护近期 Note 时识别相关人物；[Topic 近期相关人物](topic.md#近期相关人物) 从 Note 的人物关联派生；移动 Input 只改 status.topic，不改 sender / receivers。验证见 `tests/topic-persons.test.ts`、`tests/message-source.test.ts` 与 `tests/person.test.ts`。
 
 ### Status
 
