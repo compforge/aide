@@ -35,6 +35,7 @@ connectors:
     config:
       provider: github
       host: github.com
+      me: { username: your-github-login }
   gitlab.example.com:
     kind: forge
     version: v1
@@ -62,6 +63,9 @@ plugins:
 
 GitHub 使用 GITHUB_TOKEN / GH_TOKEN，GitLab 使用 GITLAB_TOKEN；也可在 Connector 配置 token。
 凭证决定可访问范围，author 显式决定 PR 作者。
+`connectors.<名称>.config.me.username` 显式标记本人账号；GitHub、GitLab 及提供相同公开 metadata 的 Forge Connector 都可使用。
+Host 将其映射为 `{ provider, scope: forge, id: username }`，与 Web、Lark、Meego 的本人身份汇总到同一个 Person。
+省略 me 不会从 token、执行账号或 Source 的 author 筛选推断本人；相同用户名在不同平台或 Forge 范围内仍是不同身份。
 PullRequest 策略选择 repositories 引用或 forge 账号范围之一；每种 Source 的 id 唯一，
 一个 Forge 配置一个 RepositorySource，同一 Forge/author 只使用一条 PR 发现策略，避免重叠观察。
 未知 Connector、未知 RepositorySource 引用及重复范围在启动时拒绝。

@@ -1,4 +1,4 @@
-import { ForgeKind, ForgeVersion } from "@compforge/aide-connector/forge";
+import { forgeCatalog } from "../connectors/forge/catalog.ts";
 import { validateForgeSources } from "../plugins/personal/source/pull-request/config.ts";
 import { personalConnectorConfig } from "./personal-connectors.ts";
 import { iconFor } from "@compforge/aide-plugin";
@@ -98,10 +98,13 @@ export class Aide {
     const { sources } = parsePersonalConfig(config?.plugins.personal);
     const personalConnectors = personalConnectorConfig(config?.connectors);
     const connectorCatalog = options.connectorCatalog ?? (options.connectors instanceof Connectors ? options.connectors.registry.descriptions() : []);
-    const discoveredForges = connectorCatalog.filter(d => d.kind === ForgeKind && d.version === ForgeVersion);
-    validateForgeSources(sources.repositories, sources.pullRequests, discoveredForges.map(d => ({ forge: String(d.metadata.forge ?? d.name) })));
-    const forgeConnectionRevisions = Object.fromEntries(discoveredForges.map(d => [String(d.metadata.forge ?? d.name), d.revision]));
-    const connectorMe = { identities: (personalConnectors.lark?.me ?? []).map(i => ({ provider: "lark", scope: i.appId, id: i.openId })) };
+    const discoveredForges = forgeCatalog(connectorCatalog);
+    validateForgeSources(sources.repositories, sources.pullRequests, discoveredForges);
+    const forgeConnectionRevisions = Object.fromEntries(discoveredForges.map(d => [d.forge, d.revision]));
+    const connectorMe = { identities: [
+      ...(personalConnectors.lark?.me ?? []).map(i => ({ provider: "lark", scope: i.appId, id: i.openId })),
+      ...discoveredForges.flatMap(d => d.me ? [{ provider: d.provider, scope: d.forge, id: d.me.username }] : []),
+    ] };
     const channelMe = { identities: [LOCAL_ME, ...Object.values(config?.channels ?? {}).flatMap(c => c.me ? [{ provider: "lark", scope: c.appId, id: c.me.openId }] : [])] };
     this.meMarks = { identities: [...channelMe.identities, ...connectorMe.identities] };
     this.meMarks.identities = [...new Map(this.meMarks.identities.map(identity => [JSON.stringify(identity), identity])).values()];
