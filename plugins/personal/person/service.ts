@@ -136,7 +136,8 @@ export class Persons {
     return { ...person, isMe: isMe(person.spec, this.marks) };
   }
   async findIdentity(identity: PersonIdentity) {
-    return (await this.list()).find((p) => p.spec.identities.some((i) => identityKey(i) === identityKey(identity)));
+    return (await this.resources.list<Person, PersonStatus>(PERSON_TYPE, { matchIndex: { name: "identity", value: identityKey(identity) } }))
+      .filter(p => !p.metadata.deletionTimestamp).map(p => ({ ...p, isMe: isMe(p.spec, this.marks) }))[0];
   }
   private async version(id: string, uid: string, version: string) {
     const current = await this.read(id);

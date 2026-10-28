@@ -121,5 +121,5 @@ test("child previews expose omitted Notes and text; paged reads recover the comp
     offset = read.nextOffset;
   }
   assert.ok(pages > 1, "Full understanding exceeds a single read page");
-  assert.deepEqual(JSON.parse(text), { ...child.spec, conditions: child.status.conditions, summary: child.status.summary, recent: notes });
+  assert.deepEqual(JSON.parse(text), { ...child.spec, persons: preview.persons, conditions: child.status.conditions, summary: child.status.summary, recent: notes });
 });

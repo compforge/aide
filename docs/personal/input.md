@@ -16,13 +16,21 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 | --- | --- |
 | text、observation | 来源内容与证据；外部观察保留事实，系统 trigger 保存回顾请求及触发时间 |
 | origin、originId、originRef | Channel / Source / Chief / Trigger 分类、来源定义与可选产生资源引用 |
-| sender、relation | 可选的 Person，以及输入相对于 Me 的关系 |
+| sender、receivers、relation | 可选的发送 Person、明确识别的接收 Person 引用列表，以及输入相对于 Me 的关系 |
 | source | 可选 Address，表示事情发生或可以联络的位置 |
 | topicId、topicKey | TopicLocator 提供的精确 Topic ID 或稳定来源关联键 |
 | topicName | 来源提供的初始名称建议；不参与匹配，不覆盖既有 Topic 名称 |
 | attention | InputAttention 字符串枚举：immediate、normal、deferred，表达注意力调度需求 |
 
 字段的完整类型与必选性见 [InputSpec](../../plugins/personal/input/model.ts)。人物、地址、话题线索和调度分别回答不同问题；紧迫性、来源和 relation 都不自动授予执行权限或要求外发。
+
+### 接收人物
+
+`spec.receivers?: PersonRef[]` 保存来源证据中明确识别的接收人物，每个引用固定 Person UID；与 sender 一样属于不可变的输入事实。缺省表示未提供这项信息，`[]` 表示没有列出明确接收人物，**不等于 all**。本版不建模 all，不展开群成员，也不把 Aide 或机器人作为 Person。旧 Input 无需回填。
+
+Lark Source 根据私信实际收件账号、同一聊天内被回复消息的发送人物、已对应 Person 的 @ 对象填写；讨论批次保留逐条人物证据，并将本批明确接收者去重写入 receivers。Lark Channel 记录已知人物 @，私信机器人本身不产生人物收件人。裸 @ ID 不能证明是人，不凭它创建 Person；原始 mentions 继续留在 observation。该列表是可确认的接收者，不承诺完整受众，也不证明实际已读、认可或授权。
+
+这些事实支持 [Topic 近期相关人物](topic.md#近期相关人物) 的读取时派生；移动 Input 只改 status.topic，不改 sender / receivers。验证见 `tests/topic-persons.test.ts`、`tests/message-source.test.ts` 与 `tests/person.test.ts`。
 
 ### Status
 

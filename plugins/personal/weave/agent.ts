@@ -1,3 +1,4 @@
+import { topicPersons } from "../topic/persons.ts";
 import { weaveCandidates, searchRootTopics } from "./candidates.ts";
 import { identityBackground } from "../../../agents/personal.ts";
 import type { Persons } from "../person/service.ts";
@@ -29,17 +30,17 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
       return weaveCandidates(store.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE));
     };
     const tools: ToolDefinition[] = [
-      { name: "list_topics", label: "List root topics", description: "Search all available roots, including previously reviewed roots and roots with children. rootCount is the full catalog; matchingRootCount is this search. Read bounded pages; do not expand the entire catalog.",
+      { name: "list_topics", label: "List root topics", description: "Search all available roots, including previously reviewed roots and roots with children. rootCount is the full catalog; matchingRootCount is this search. Read bounded pages with sampled related Persons; shared people are a contextual clue, never an automatic merge criterion. Do not expand the entire catalog.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })), query: Type.Optional(Type.String()) }),
         async execute(_id, { offset = 0, query }) {
-          return result(searchRootTopics(roots(), query, offset, batchSize));
+          return result(searchRootTopics(roots(), query, offset, batchSize, topic => topicPersons(store, topic)));
         } },
       { name: "read_topic", label: "Read root topic", description: "Read full root understanding in bounded text pages. version pins the understanding used by group_topics.",
         parameters: Type.Object({ uid: Type.String(), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { uid, offset = 0 }) {
           const t = roots().find(t => t.metadata.uid === uid);
           if (!t) throw new Error("Root Topic unavailable");
-          const text = JSON.stringify({ name: t.spec.name, summary: t.status.summary, recent: t.status.recent, organization: t.status.organization });
+          const text = JSON.stringify({ name: t.spec.name, persons: topicPersons(store, t), summary: t.status.summary, recent: t.status.recent, organization: t.status.organization });
           return result({ uid, version: understandingVersion(t), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } },
       { name: "group_topics", label: "Group topics", description: "Attach 1-8 roots to an existing parent, or create a new parent for 2-8 roots. For a new parent provide name and summary preserving long-lived connections, attribution, disagreements and confirmation state. Temporary progress stays in child Notes; grouping retains a bounded combined Note window. Do not copy temporary facts into summary. Existing parents keep their own understanding for Chief to synthesize. Running agents may finish; data ownership stays unchanged.",

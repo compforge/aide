@@ -1,3 +1,4 @@
+import { topicPersons } from "./persons.ts";
 import { createChildTopic, moveMaterial, moveTopic } from "./organize.ts";
 import type { Logger } from "pino";
 import { Type, type TSchema } from "typebox";
@@ -43,7 +44,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
         const all = subtree();
         if (!all.some(t => t.metadata.uid === parent)) throw new Error("Topic is outside this root");
         return result(contextPage(all.filter(t => t.spec.parentRef?.uid === parent).map(t => ({
-          uid: t.metadata.uid, name: t.spec.name, ...understanding(t.status, 1200), version: understandingVersion(t), organization: t.status.organization,
+          uid: t.metadata.uid, name: t.spec.name, persons: topicPersons(store, t), ...understanding(t.status, 1200), version: understandingVersion(t), organization: t.status.organization,
         })), offset));
       } },
     { name: "read_topic", label: "Read topic", description: "Read this root or a descendant's full summary and Notes in text pages. A non-null nextOffset means more text remains: continue with offset=nextOffset; null marks the end. Use its resource version for summarize_topic and understandingVersion for absorbed receipts after reviewing the child context.",
@@ -51,7 +52,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
       async execute(_id, { uid, offset = 0 }) {
         const root = active(), topic = subtree().find(t => t.metadata.uid === (uid ?? root.metadata.uid));
         if (!topic) throw new Error("Topic is outside this root");
-        const text = JSON.stringify({ ...topic.spec, conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: topic.status.summary, recent: topic.status.recent, organization: topic.status.organization });
+        const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: topic.status.summary, recent: topic.status.recent, organization: topic.status.organization });
         return result({ uid: topic.metadata.uid, version: topic.metadata.resourceVersion, understandingVersion: understandingVersion(topic),
           text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
       } },

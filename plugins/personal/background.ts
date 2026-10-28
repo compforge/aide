@@ -1,3 +1,4 @@
+import { topicPersons } from "./topic/persons.ts";
 import { recentActivity } from "./route/activity.ts";
 import { createHash } from "node:crypto";
 import type { Store } from "./store.ts";
@@ -19,8 +20,8 @@ ${JSON.stringify(data)}`;
 /** @spec Stable, bounded custom/user projections exclude execution bookkeeping; CRDs remain the source of truth.
  * @link docs/personal/route.md#上下文组织与优化
  */
-function topicPart(c: TopicResource | undefined) {
-  return part(c ? { uid: c.metadata.uid, ...c.spec, organization: c.status.organization, ...understanding(c.status) } : null, "read_input for Chief; read_topic for Work");
+function topicPart(store: Store, c: TopicResource | undefined) {
+  return part(c ? { uid: c.metadata.uid, ...c.spec, persons: topicPersons(store, c), organization: c.status.organization, ...understanding(c.status) } : null, "read_input for Chief; read_topic for Work");
 }
 
 export function topicCandidates(store: Store, query?: string, parentUid?: string) {
@@ -29,7 +30,7 @@ export function topicCandidates(store: Store, query?: string, parentUid?: string
       && (!query || [c.spec.name, c.status.summary].join(" ").toLowerCase().includes(query.toLowerCase()))).sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid))
     .map(c => {
       const recent = recentActivity(store, c);
-      return { uid: c.metadata.uid, ...(c.spec.name ? { name: preview(c.spec.name, 200) } : {}), default: !!c.spec.default,
+      return { uid: c.metadata.uid, persons: topicPersons(store, c), ...(c.spec.name ? { name: preview(c.spec.name, 200) } : {}), default: !!c.spec.default,
         ...(c.status.summary ? { summary: preview(c.status.summary, 2000) } : {}), ...(recent.length ? { recent } : {}) };
     });
 }
@@ -62,9 +63,9 @@ export function relatedWork(store: Store, topicId: string) {
 }
 
 export function topicParts(store: Store, c: TopicResource | undefined, topicId: string) {
-  return { topic: topicPart(c), children: part(contextPage(c ? store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
+  return { topic: topicPart(store, c), children: part(contextPage(c ? store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
     { matchIndex: { name: "parent", value: c.metadata.uid } }).filter(t => !t.metadata.deletionTimestamp)
-    .map(t => ({ uid: t.metadata.uid, conditions: t.status.conditions ?? [], name: t.spec.name, summary: preview(t.status.summary, 1000) })) : []), "list_topics and read_topic"), work: part(contextPage(relatedWork(store, topicId)), "list_work for remaining summaries; read tools for this resource") };
+    .map(t => ({ uid: t.metadata.uid, persons: topicPersons(store, t), conditions: t.status.conditions ?? [], name: t.spec.name, summary: preview(t.status.summary, 1000) })) : []), "list_topics and read_topic"), work: part(contextPage(relatedWork(store, topicId)), "list_work for remaining summaries; read tools for this resource") };
 }
 
 export function workParts(store: Store, resource: WorkResource) {

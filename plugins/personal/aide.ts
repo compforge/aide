@@ -1,3 +1,4 @@
+import { knownReceivers } from "./person/receivers.ts";
 import { workPhase } from "./status.ts";
 import { commitStatus, patchStatus } from "./status.ts";
 import { contactsTool, type ContactChannel } from "./output/tool.ts";
@@ -444,17 +445,19 @@ export class Personal {
   private async acceptChannel(id: string, input: Incoming) {
     const relation = channelRelation(this.options.channelMe, input);
     let sender;
+    let receivers: InputSpec["receivers"];
     if (input.channelId === "web") { const me = await this.options.persons.findIdentity(LOCAL_ME); if (me) sender = personRef(me); }
     else if (input.channelId === "lark") {
       const observation = input.observation as { provider?: string; accountId?: string; sender?: { id?: string; type?: string; name?: string }; mentions?: string[] } | undefined;
       if (observation?.provider === "lark" && observation.accountId) {
         const identity = (id: string) => ({ provider: "lark", scope: observation.accountId!, id });
         if (observation.sender?.type === "user" && observation.sender.id) sender = personRef(await this.options.persons.observe(identity(observation.sender.id), observation.sender.name));
-        // A mention has no subject type; it may identify the bot rather than a person.
+        // Only already identified humans are recipients; bot/unresolved mentions remain observation evidence.
+        receivers = await knownReceivers(this.options.persons, observation.accountId, observation.mentions ?? []);
       }
     }
     const fact = await this.topics.submit(id, { attention: InputAttention.Immediate, topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
-      origin: "channel", originId: input.channelId, source: input.source, ...(sender ? { sender } : {}), ...(relation ? { relation } : {}),
+      origin: "channel", originId: input.channelId, source: input.source, ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });
     return fact;
   }

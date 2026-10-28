@@ -136,7 +136,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Input、Task、Routine 通过 status.topic 保存唯一且可调整的 Topic UID 引用；Input.assess 保存全局唯一研判及 Chief 接纳 executionId，自动 prompt / steer / followUp 在提交前通过资源事务竞争接纳；Topic 保存 Chief 执行与原生会话。Route 保存首次路由回执，Chief 在树内整理归属，Weave 只改变父子关系。
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。可能已有外部副作用的中断先核对，不自动重放。
 - Channel / Source 通过绑定 Definition 的入口形成 Input，正文保存事实，证据留在 observation。路由统一归 Route，Default Topic 由系统按需创建并维护，只兜底，不提供手动切换；Input.status 的 route / assess / handle 是处理事实，消费者按索引查询。
-- Person 保存人物身份与认识，Me 是可选标记，与访问凭证独立。Input.sender / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。
+- Person 保存人物身份与认识，Me 是可选标记，与访问凭证独立。Input.sender / Input.receivers / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。
 - Topic、Task、Routine、Person 用 summary 保存长期有效、低频变化的认识，recent 保存按稳定 Note ID 持续更新的近期事项；两者独立写入，办理报告只确认业务状态与 Input 回执。结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
 - Task 承担有限目标，Routine 承担持续职责。领域 Agent 与通用 Pi 共用适配，工具按资源 UID 和当前 execution 绑定；业务请求与消费凭据落在 Input。Chief / Work 通过 say 产生独立 Output，report 与 say 分别提交；普通回答是新 Input，原生权限由独立 Approval 处理。
 - Forge 的 Repository / PullRequest 模型复用 harness-common，平台读取、增量发现完整性、不透明游标与 HTTP 约束由 repocli lib 承担；Aide Connector 负责配置与调用路由，Personal RepositorySource 负责清单缓存与观察任务交接，PullRequestSource 负责 PR 基线、检查点与 Input。契约见 [Forge](docs/connector/forge.md)。

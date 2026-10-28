@@ -41,6 +41,8 @@ Input.relation 描述输入相对于 Me 的关系：
 
 Web 输入为 sent。别人私信机器人或仅 @ 机器人不能据此认定为我收到；Lark Source 对各条消息分别分类，混合讨论仅在本人的观察范围内归为 observed。环境与需求监控属于配置的观察范围。关系随 Input 持久保存，不因后续身份编辑而改写历史。
 
+Input 的 sender / receivers 引用人物 UID；Topic 可以从当前子树 Input 派生[近期相关人物](topic.md#近期相关人物)，但不维护另一份人物名单，也不据此自动更新 Person 认识。
+
 ## Reconciler
 
 Person Controller 只处理标准删除生命周期，没有外部清理动作；身份补全和用户合并由 Personal 服务在资源事务中完成。
