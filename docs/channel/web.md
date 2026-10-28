@@ -59,6 +59,8 @@ tests/web-progress.test.ts 用真实 Host / Runner / HTTP、浏览器 reducer �
 
 浏览器 Tab 标题固定为 `Aide`，会话名称只显示在页面内。
 
+root 会话条目以孩子图标加数字（如 `👶 3`）显示直属子主题数量（含 0），悬停提示“直属子主题”，只统计存活的直接子主题，不含孙级；计数按当前页及定位条目的 parent 索引批量聚合，与列表搜索条件独立。
+
 Topic 列表由 Personal 在 SQLite 中先筛选、按最近活动排序，再使用 LIMIT / OFFSET 分页；浏览器每页请求 10 条。`GET /topics` 接收 `page`、`pageSize`、`q`、`parentId` 和 `selectedId`，返回 `{ items, pinned, total, page, pageSize, pages, path }`。接口默认每页 20 条，上限 100；`total` 只统计普通条目，Default 放在 `pinned`，不占普通页名额。计数与页面读取处于同一数据库事务，不更新容量访问时间。
 
 过滤区域位于列表与详情上方。`q` 按名称或 Topic ID 做字面子串搜索；`parentId` 留空时只查询 root，填写父主题 ID 后只查询其直接子主题，不递归展开。过滤发生在分页前，Default 也必须匹配当前条件才置顶。筛选、页码和选中项保存在 URL，筛选变化回到第一页，重置恢复 root 列表。不存在的父主题返回空列表。

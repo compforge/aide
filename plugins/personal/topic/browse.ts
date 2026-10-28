@@ -7,7 +7,7 @@ import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
 export interface TopicBrowseQuery extends PageQuery { parentId?: string; q?: string; selectedId?: string }
 export interface TopicListItem {
   id: string; uid: string; revision: number; name: string; topicKey?: string; parentUid?: string;
-  trigger: TopicTrigger; default: boolean; preview: string; updatedAt: string; taskCount: number; routineCount: number;
+  trigger: TopicTrigger; default: boolean; preview: string; updatedAt: string; taskCount: number; routineCount: number; childCount: number;
 }
 const field = (alias: string, path: string) => `json_extract(${alias}.data, '$.object.${path}')`;
 const activeTopic = (alias: string) => `${alias}.scope = 'personal' AND ${alias}.kind = 'aide.dev/Topic' AND ${field(alias, "apiVersion")} = 'aide.dev/v1alpha2'
@@ -38,6 +38,7 @@ const order = "updatedAt DESC, id ASC, uid ASC";
 
 /**
  * @spec Page siblings in SQL after activity ordering. Default is pinned outside root totals; the parent filter selects direct children and defaults to roots.
+ * @spec Child counts use indexed live direct children, independent of search and paging; descendants are excluded.
  * @spec Quiet Inputs change activity without replacing the reply preview; UID checks prevent recreated Topics inheriting old replies.
  * @why Lists read only lightweight columns and indexed facts, never TopicStore.project or global Input/Output/Work views.
  * @link docs/channel/web.md#会话导航
@@ -54,6 +55,7 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
       WHERE membership.name = ? AND membership.value = ? AND ${activeTopic("t")}${query.q ? ` AND (instr(lower(coalesce(${field("t", "spec.name")}, '')), lower(?)) > 0
         OR instr(lower(${field("t", "spec.id")}), lower(?)) > 0)` : ""})`;
     const counts = new Map<string, { taskCount: number; routineCount: number }>();
+    const childCounts = new Map<string, number>();
     const project = (row: Record<string, unknown>): TopicListItem => {
       const reply = row.replyKey ? db.prepare(`SELECT ${field("r", "spec.text")} AS text FROM resources r WHERE key = ?`).get(row.replyKey as string) : undefined;
       const pending = !row.name ? db.prepare(`SELECT ${field("r", "spec.text")} AS text FROM resource_indexes i CROSS JOIN resources r ON r.key = i.source
@@ -62,6 +64,7 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
         name: row.name as string || initialTopicName(pending?.text as string ?? "") || "未命名会话",
         ...(row.topicKey ? { topicKey: row.topicKey as string } : {}), ...(row.parentUid ? { parentUid: row.parentUid as string } : {}),
         trigger: topicTrigger(row.trigger ? JSON.parse(row.trigger as string) : undefined), default: Boolean(row.isDefault),
+        childCount: childCounts.get(row.uid as string) ?? 0,
         preview: (reply?.text as string ?? "").replace(/\s+/g, " ").trim().slice(0, 100), updatedAt: row.updatedAt as string,
         ...(counts.get(row.uid as string) ?? { taskCount: 0, routineCount: 0 }) };
     };
@@ -94,6 +97,9 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
     }).filter((row): row is NonNullable<typeof row> => !!row);
     const ids = [...new Set([...itemRows, ...pinnedRows, ...pathRows].map(row => row.uid as string))];
     if (ids.length) {
+      const children = db.prepare(`SELECT i.value AS parentUid, count(*) AS n FROM resource_indexes i CROSS JOIN resources t ON t.key = i.source
+        WHERE i.name = 'parent' AND i.value IN (${ids.map(() => "?").join(",")}) AND ${activeTopic("t")} GROUP BY i.value`).all(...ids);
+      for (const row of children) childCounts.set(row.parentUid as string, Number(row.n));
       const rows = db.prepare(`SELECT i.value AS topicId, r.kind, count(*) AS n FROM resource_indexes i CROSS JOIN resources r ON r.key = i.source
         WHERE i.name = 'topic' AND i.value IN (${ids.map(() => "?").join(",")}) AND r.scope = 'personal'
           AND r.kind IN ('aide.dev/Task', 'aide.dev/Routine') AND ${field("r", "apiVersion")} = 'aide.dev/v1alpha2' AND ${field("r", "metadata.namespace")} = 'v1'

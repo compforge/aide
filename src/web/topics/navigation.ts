@@ -194,6 +194,14 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
       if (item.preview) link.append(element('span', item.preview, 'muted'));
       link.append(element('span', '事项 ' + (item.taskCount ?? 0) + ' · 安排 ' + (item.routineCount ?? 0), 'muted topic-counts'));
       const indicators = element('span', undefined, 'topic-indicators');
+      if (!item.parentUid) {
+        const count = item.childCount ?? 0;
+        const children = element('span', '👶 ' + count, 'topic-status-icon');
+        children.title = '直属子主题：' + count;
+        children.setAttribute('role', 'img');
+        children.setAttribute('aria-label', children.title);
+        indicators.append(children);
+      }
       if (item.default) indicators.append(topicStatusIcon('系统兜底主题', '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>'));
       if (item.trigger?.enabled) indicators.append(topicStatusIcon('主动回顾已开启', '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M3 5l3-3m12 0 3 3M6 20l-2 2m14-2 2 2"/>'));
       if (indicators.childElementCount) link.append(indicators);

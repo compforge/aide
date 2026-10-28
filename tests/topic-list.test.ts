@@ -7,6 +7,7 @@ import { join } from "node:path";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
+import { understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { browseTopics } from "../plugins/personal/topic/browse.ts";
 import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
@@ -64,6 +65,9 @@ test("Topic parent filtering excludes grandchildren and locates deep links witho
   child(store, await store.ensure("grandchild"), middle);
   tieTopics(db);
   assert.deepEqual(browseTopics(store).items.map(i => i.id), ["other", "parent"]);
+  assert.equal(browseTopics(store).items.find(i => i.id === "parent")!.childCount, 21, "Grandchildren are excluded");
+  assert.equal(browseTopics(store).items.find(i => i.id === "other")!.childCount, 0);
+  assert.equal(browseTopics(store, { q: "Parent", pageSize: 1 }).items[0]!.childCount, 21, "Count does not depend on the displayed page or search");
   const second = browseTopics(store, { parentId: "parent", page: 2, pageSize: 10 });
   assert.equal(second.total, 21); assert.equal(second.pinned.length, 0); assert.equal(second.items.length, 10);
   assert.ok(second.items.every(i => i.parentUid === parent.metadata.uid));
@@ -77,6 +81,14 @@ test("Topic parent filtering excludes grandchildren and locates deep links witho
   assert.deepEqual(selected.path.map(i => i.id), ["parent", "child-20", "grandchild"]);
   assert.equal(browseTopics(store, { selectedId: "grandchild", pageSize: 1 }).page, 2);
   assert.equal(browseTopics(store, { q: "' OR 1=1 --" }).total, 0);
+  const deleting = store.resource("child-00")!;
+  store.resources.patchStatus(TOPIC_TYPE, parent.metadata.name, { absorbed: { [deleting.metadata.uid]: understandingVersion(deleting) } });
+  store.resources.requestDeletion(TOPIC_TYPE, deleting.metadata.name);
+  assert.equal(browseTopics(store).items.find(i => i.id === "parent")!.childCount, 20, "Deleting children are excluded");
+  child(store, store.resource("child-01")!, store.resource("other")!);
+  const regrouped = browseTopics(store);
+  assert.equal(regrouped.items.find(i => i.id === "parent")!.childCount, 19);
+  assert.equal(regrouped.items.find(i => i.id === "other")!.childCount, 1);
 });
 
 test("Topic summaries use indexed facts without global views and quiet input never erases the reply preview", async t => {
@@ -106,7 +118,7 @@ test("Topic HTTP validates paging and filters and serves the integrated browser 
   t.after(() => { server.closeAllConnections(); server.close(); });
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const result = await (await fetch(base + "/topics?pageSize=1&q=needle")).json() as TopicListView;
-  assert.equal(result.total, 1); assert.equal(result.items[0]!.id, "normal"); assert.equal(result.pinned.length, 0);
+  assert.equal(result.total, 1); assert.equal(result.items[0]!.id, "normal"); assert.equal(result.items[0]!.childCount, 0); assert.equal(result.pinned.length, 0);
   for (const query of ["page=0", "pageSize=101", "extra=true"]) assert.equal((await fetch(base + "/topics?" + query)).status, 400);
   const html = await (await fetch(base + "/?topic=normal")).text(); assert.match(html, /id="topic-parent"/);
   assert.equal((await fetch(base + "/app.js")).status, 200);
