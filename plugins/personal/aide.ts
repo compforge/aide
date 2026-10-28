@@ -352,10 +352,11 @@ export class Personal {
   /** @spec Recovery retains unacknowledged effects as failed evidence; it never silently resubmits Chief actions. */
   async recoverInterrupted(): Promise<void> {
     const resources = this.plugins.resourceClient("personal");
+    const instance = this.plugins.listInstances().find(i => i.pluginInstanceId === "personal")!;
     for (const type of [TOPIC_TYPE, ROUTE_TYPE, WEAVE_TYPE]) for (const c of await resources.list<unknown, LoopStatus>(type)) {
       if (!c.status.execution) continue;
       const id = c.status.execution.id;
-      await finalizeExecution({ resources, logger: { debug: () => {}, info: () => {}, warn: (message: string, detail?: unknown) => this.log.warn({ detail }, message), error: () => {} } }, c, id);
+      await finalizeExecution({ resources, instance, logger: { debug: () => {}, info: (message, detail) => this.log.info({ detail }, message), warn: (message: string, detail?: unknown) => this.log.warn({ detail }, message), error: () => {} } }, c, id);
       this.log.warn({ resourceUid: c.metadata.uid, executionId: id }, "Recovered interrupted agent without replaying actions");
     }
     for (const type of WORK_TYPES) for (const work of await resources.list<WorkSpec, import("./work-status.ts").WorkAgentStatus>(type)) {

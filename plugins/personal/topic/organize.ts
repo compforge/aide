@@ -74,7 +74,8 @@ export async function moveTopic(resources: ResourceClient, actor: TopicResource,
     fromUid: topic.spec.parentRef?.uid, ...(parent ? { toUid: parent.metadata.uid } : {}) });
   await commitStatus(resources, [
     { operation: "replace", resource: topic, spec: { ...spec, ...(parent ? { parentRef: resourceRef(parent) } : {}) },
-      status: { ...topic.status, organization, nextTriggerAt: null, weaveRevision: (topic.status.weaveRevision ?? 0) + 1 } },
+      status: { ...topic.status, organization, nextTriggerAt: null, idleReviewCount: 0, idleSince: organization.at,
+        weaveRevision: (topic.status.weaveRevision ?? 0) + 1 } },
     // Notify the old root of changed responsibility and reject admissions prepared against its previous tree.
     { operation: "patchStatus", resource: root, patch: { weaveRevision: (root.status.weaveRevision ?? 0) + 1 } },
   ]);

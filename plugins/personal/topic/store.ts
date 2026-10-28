@@ -99,7 +99,8 @@ export class TopicStore {
     const trigger = topicTrigger(c.spec.trigger);
     if (trigger.enabled === enabled) return trigger;
     trigger.enabled = enabled;
-    await this.client.replace(c, { ...c.spec, trigger }, { ...c.status, nextTriggerAt: null });
+    await this.client.replace(c, { ...c.spec, trigger }, { ...c.status, nextTriggerAt: null, idleReviewCount: 0,
+      ...(enabled ? { idleSince: new Date().toISOString() } : {}) });
     return trigger;
   }
   outputs(topicId?: string): OutputView[] {

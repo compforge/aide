@@ -8,7 +8,7 @@ import { TOPIC_TYPE, type TopicResource } from "./model.ts";
 import { inputPreview } from "../input/prompt.ts";
 import { canActivate, finalizeExecution, nextInputs, runInput, submitPending } from "../loop.ts";
 import { topicPolicy } from "./config.ts";
-import { topicTrigger, createTriggerInput } from "./trigger.ts";
+import { topicTrigger, createTriggerInput, idleReviewDelay } from "./trigger.ts";
 import { ChiefTriggerConfigSchema, type ChiefTriggerConfig } from "../../../agents/chief/config.ts";
 import { updateTopic } from "./state.ts";
 
@@ -83,9 +83,30 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   let c = initial;
   const trigger = topicTrigger(c.spec.trigger);
   const now = Date.now();
+  if (!triggerConfig.backoff && c.status.idleReviewCount) {
+    c = await updateTopic(context.resources, c, current => ({ idleReviewCount: 0,
+      nextTriggerAt: trigger.enabled ? new Date(Math.min(current.status.nextTriggerAt ? Date.parse(current.status.nextTriggerAt) : Infinity,
+        Date.parse(current.status.idleSince ?? current.metadata.creationTimestamp) + triggerConfig.idleSeconds * 1000)).toISOString() : null }));
+    context.logger.info("Topic idle review backoff disabled", { attributes: {
+      topicUid: c.metadata.uid, previousCount: initial.status.idleReviewCount ?? 0, nextTriggerAt: c.status.nextTriggerAt ?? null,
+    } });
+  }
+  if (triggerConfig.backoff && trigger.enabled && c.status.lastInputAt
+    && c.status.lastInputAt > (c.status.idleSince ?? c.metadata.creationTimestamp)) {
+    const deadline = Date.parse(c.status.lastInputAt) + triggerConfig.idleSeconds * 1000;
+    if (c.status.idleReviewCount || !c.status.nextTriggerAt || Date.parse(c.status.nextTriggerAt) > deadline) {
+      c = await updateTopic(context.resources, c, current => ({ idleReviewCount: 0,
+        nextTriggerAt: new Date(Math.min(current.status.nextTriggerAt ? Date.parse(current.status.nextTriggerAt) : Infinity, deadline)).toISOString() }));
+      context.logger.info("Topic idle review reset by business input", { attributes: {
+        topicUid: c.metadata.uid, lastInputAt: c.status.lastInputAt ?? null, previousCount: initial.status.idleReviewCount ?? 0,
+        idleReviewCount: 0, nextTriggerAt: c.status.nextTriggerAt ?? null,
+      } });
+    }
+  }
   const checkDue = trigger.enabled && !!c.status.nextTriggerAt && Date.parse(c.status.nextTriggerAt) <= now;
   const idleSince = c.status.idleSince ?? c.metadata.creationTimestamp;
-  const due = checkDue && now - Date.parse(idleSince) >= triggerConfig.idleSeconds * 1000;
+  const idleDelay = idleReviewDelay(triggerConfig, c.status.idleReviewCount);
+  const due = checkDue && now - Date.parse(idleSince) >= idleDelay;
   const topics = await readTopicSubtree(context.resources, resourceRef(c));
   const pending = await nextInputs(context.resources, c, Number.MAX_SAFE_INTEGER, topics);
   const weave = (c.status.weaveRevision ?? 0) > (c.status.notifiedWeaveRevision ?? 0);
@@ -94,7 +115,8 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   const absorbDelay = Math.max(0, Date.parse(c.status.nextAbsorbAt ?? "1970-01-01") - Date.now());
   const absorb = absorption.length > 0 && absorbDelay === 0;
   if (trigger.enabled && (!c.status.nextTriggerAt || checkDue)) {
-    const nextTriggerAt = new Date(now + triggerConfig.intervalSeconds * 1000).toISOString();
+    const nextTriggerAt = new Date(triggerConfig.backoff && !checkDue
+      ? Date.parse(idleSince) + idleDelay : now + triggerConfig.intervalSeconds * 1000).toISOString();
     if (due && !inputs.some(i => canActivate(i.spec, c)) && !absorb && !weave) {
       let review;
       try { review = await createTriggerInput(context, c, nextTriggerAt, await maintenanceAgenda(context.resources, topics, context.instance.config.topic)); }

@@ -136,6 +136,7 @@ id 保存业务标识；name、topicKey、parentRef、default 表达展示、来
 | weaveRevision / notifiedWeaveRevision | 结构调整与 Chief 通知进度 |
 | nextAbsorbAt / absorbAttempts | 认识吸收的重试时间与退避进度 |
 | nextTriggerAt / idleSince | 定时维护检查与空闲进度 |
+| idleReviewCount | 连续完成的空闲回顾次数，缺省为 0；用于可选指数退避 |
 | organization | Chief 或 Weave 最近一次组织调整的原因和前后关系 |
 | lastError / receipts | 执行异常与幂等请求回执 |
 
@@ -230,6 +231,12 @@ Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Topic Reconc
 ### Topic 定时回顾
 
 根 Topic 的 `trigger.enabled` 默认开启；Chief Harness 的 `config.trigger.intervalSeconds`（默认 60 秒）控制检查间隔，`idleSeconds`（默认 900 秒）控制连续空闲多久后回顾。每次 Chief 执行结束后重新计算空闲时间，尚未执行过的 Topic 从创建时计算；Deferred Input 到达不重置空闲时间。Chief 正在执行时不会因定时检查 steer、followUp 或积攒补跑，恢复中断执行后也重新计时。
+
+可选 `config.trigger.backoff` 让没有业务输入的 root 逐步降低回顾频率。基础等待为 `idleSeconds`，成功空闲回顾后等待 `min(idleSeconds × factor ^ idleReviewCount, maxIdleSeconds)`；检查周期不增长。不配置时保持固定间隔。
+
+只有由 trigger Input 启动、对应研判回执已完成、执行期间未接纳其它输入或结构通知，且收尾时子树没有待研判业务 Input 的成功执行，才增加 `idleReviewCount`。调度判断不依赖模型自述“没有变化”，也不把 trigger、摘要更新和普通 status 写入当作业务活动。新业务 Input 重置退避，当前更早的回顾计划不推迟，Deferred 最晚在到达后的基础间隔进入一次回顾机会，但仍不主动激活 Chief；有积压的回顾保持基础间隔。
+
+退避次数、完成时间和下次回顾时间与 execution 释放原子提交，并由 execution ID 与资源版本保护：重复收尾不重复递增，收尾期间到达的业务输入使旧写入冲突后重新判断。失败、研判未确认和中断恢复均回到基础间隔，原有未知效果仍待核对；重启保留已完成回顾的计划，不补跑错过的周期。关闭维护清除计划与次数，重新开启及子 Topic 独立时重新开始基础空闲周期。子理解与结构变化仍沿既有事件路径触发，Task / Routine 的期限、cron/event 不受影响。运行日志记录退避次数、重置原因及 nextTriggerAt。
 
 满足空闲条件即回顾，即使没有积存 Input 或已知变化，也会检查相关 memory、当前认识、未决问题与 Work，并可批量研判 Deferred Input。回顾生成 `origin: trigger`、`attention: normal` 的系统 Input，创建时即绑定当前 root Topic 并建立研判目标，不调用 Route 模型。检查时间推进与 Input 创建原子提交；同一轮检查不会重复生成。Chief 通过正常 Input 链路复用原生 session，用 `assess_input` 留下回顾结果。已有普通 Input 或知识吸收激活 Chief 时，不另行生成回顾 Input；生成期间到达的消息可合并进同一轮。系统 Input 不刷新 lastInputAt，也不新增授权。成为子节点后不再独立回顾。Routine 的 cron/event 继续承担具体职责，区别于 Chief 的综合回顾。
 
