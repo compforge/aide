@@ -146,7 +146,7 @@ Input 固定属于路由确定的 Topic，Task / Routine 固定属于创建它�
 
 Weave 的 Reconcile 按周期或 root 数量压力选择有界候选，再触发 Weave Agent。默认 rootThreshold=20、intervalMs=300000、batchSize=12，压力触发的调用间隔至少为 min(30000, intervalMs)。每轮最多分组一次。
 
-扫描进度按 Topic UID 保存实际展示的名称/summary 版本和检查时间；Note 单独变化不使已检查的版本失效。未检查的 Topic 优先，已变化的 Topic 按上次检查时间轮转；单个 Topic 的变化不重置其它进度。lastInputAt 只影响静默排序，不使已检查的认识失效。失败不确认覆盖；检查期间发生变化的 Topic 会再次进入候选；离开 root 集合的记录被清理。
+扫描进度按 Topic UID 保存实际展示的名称/summary 与候选视图契约版本和检查时间；Note 单独变化不使已检查的版本失效。未检查的 Topic 优先，已变化的 Topic 按上次检查时间轮转；单个 Topic 的变化不重置其它进度。lastInputAt 只影响静默排序，不使已检查的认识失效。失败不确认覆盖；检查期间发生变化的 Topic 会再次进入候选；离开 root 集合的记录被清理。
 
 ### Agent 触发边界
 
