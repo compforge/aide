@@ -69,10 +69,10 @@ for (const target of ["root", "child"]) test(`Deferred ${target} inputs wait and
   assert.equal(aide.topics.inputStore.get("late")!.status.assess!.completedAt, undefined);
 });
 
-test("Deferred backlog survives restart with trigger disabled and timer reviews remain bounded", async t => {
+test("Deferred backlog survives restart with review disabled and timer reviews remain bounded", async t => {
   const { aide, submit, prompts, home, options } = setup(t);
   const root = await aide.topics.ensure("root");
-  await aide.setTopicTrigger("root", false);
+  await aide.setTopicReview("root", false);
   await aide.start();
   for (let i = 0; i < 10; i++) await submit(`deferred-${i}`);
   await aide.settled(); assert.equal(prompts.length, 0);
@@ -84,8 +84,8 @@ test("Deferred backlog survives restart with trigger disabled and timer reviews 
     const resources = restarted.runtime.plugins.resourceClient("personal");
     for (const remaining of [3, 0]) {
       const c = restarted.topics.resource("root")!;
-      await resources.replace(c, { ...c.spec, trigger: { enabled: true } },
-        { ...c.status, nextTriggerAt: new Date(Date.now() - 1000).toISOString(), idleSince: new Date(Date.now() - 901_000).toISOString() });
+      await resources.replace(c, { ...c.spec, review: { enabled: true } },
+        { ...c.status, reviewCheckedAt: null, idleSince: new Date(Date.now() - 901_000).toISOString() });
       // Simulate the existing timer's reconcile, including when only its status deadline changed.
       await restarted.runtime.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1", resourceApiVersion: c.apiVersion,
         resourceKind: c.kind, resourceId: c.metadata.name, controllerName: "agent" });

@@ -1,10 +1,7 @@
 import { z } from "zod";
 import { PiConfigSchema, resolvePiConfig } from "../pi/config.ts";
-import { ChiefTriggerConfigSchema } from "../../../../agents/chief/config.ts";
 
-export const ChiefConfigSchema = PiConfigSchema.extend({
-  config: z.object({ trigger: ChiefTriggerConfigSchema.prefault({}) }).strict().prefault({}),
-});
+export const ChiefConfigSchema = PiConfigSchema;
 export type ChiefConfigInput = z.infer<typeof ChiefConfigSchema>;
 
 /** @spec Chief inherits model settings explicitly and loads only its declared package skills. */

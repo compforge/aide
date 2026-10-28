@@ -75,13 +75,13 @@ test("Work moves without changing objective, schedule or history, and running co
 
 test("Detaching preserves a subtree, releases its root responsibility and prevents immediate Weave reversal", async t => {
   const f = await fixture(t), child = await f.child();
-  await f.resources.patchStatus(child, { idleReviewCount: 3, nextTriggerAt: new Date(Date.now() + 7200_000).toISOString() });
+  await f.resources.patchStatus(child, { idleReviewCount: 3, reviewCheckedAt: new Date().toISOString() });
   const grandchild = await createChildTopic(f.resources, f.root(), { parentUid: child.metadata.uid, name: "Details", summary: "Details", reason: "Group details" }, "grandchild");
   await assert.rejects(moveTopic(f.resources, f.root(), { uid: child.metadata.uid, parentUid: grandchild.metadata.uid, reason: "Cycle" }), /cycle/);
   const independent = await moveTopic(f.resources, f.root(), { uid: child.metadata.uid, parentUid: null, reason: "Distinct sustained responsibility" });
   assert.equal(independent.spec.parentRef, undefined);
   assert.equal(independent.status.idleReviewCount, 0);
-  assert.equal(independent.status.nextTriggerAt, null);
+  assert.equal(independent.status.reviewCheckedAt, null);
   assert.equal(independent.status.idleSince, independent.status.organization!.at);
   assert.equal((await readTopicSubtree(f.resources, resourceRef(independent))).length, 2);
   assert.equal((await readTopicSubtree(f.resources, resourceRef(f.root()))).length, 1);
@@ -123,13 +123,13 @@ test("Maintenance counts direct ownership and Route includes bounded activity fr
 });
 
 test("Maintenance agenda survives persistence for unnamed Topics and business Inputs precede queued reviews", async t => {
-  const { createTriggerInput } = await import("../plugins/personal/topic/trigger.ts");
+  const { createReviewInput } = await import("../plugins/personal/topic/review.ts");
   const { nextInputs } = await import("../plugins/personal/loop.ts");
   const f = await fixture(t);
   await f.input("one"); await f.input("two");
-  await f.resources.patchStatus(f.root(), { execution: null, nextTriggerAt: "2000-01-01T00:00:00.000Z" });
+  await f.resources.patchStatus(f.root(), { execution: null, idleSince: "2000-01-01T00:00:00.000Z" });
   const agenda = await maintenanceAgenda(f.resources, [f.root()], { maxInput: 1 });
-  const review = await createTriggerInput({ resources: f.resources, logger }, f.root(), new Date(Date.now() + 60_000).toISOString(), agenda);
+  const review = await createReviewInput({ resources: f.resources, logger }, f.root(), new Date(Date.now() + 60_000).toISOString(), agenda);
   assert.match(review.spec.text, /direct Input and Work ownership/);
   assert.deepEqual(review.spec.observation!.maintenance, agenda);
   const { inputPreview } = await import("../plugins/personal/input/prompt.ts");

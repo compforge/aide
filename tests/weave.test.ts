@@ -48,7 +48,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
   const f = fixture(t); await f.initialize();
   const first = await f.input("first", "source:a");
   const a = f.aide.topics.byKey("source:a")!, b = await ensureSourceTopic(f.resources, "source:b", "B");
-  await f.resources.replace(b, { ...b.spec, trigger: { enabled: false } }, b.status);
+  await f.resources.replace(b, { ...b.spec, review: { enabled: false } }, b.status);
   const definition = { kind: "task" as const, title: "Check", instruction: "Check evidence", trigger: null };
   let task1 = "", task2 = "", rootPrompts = 0;
   const execution: any = { executionId: "old-chief", withContext() { return this; }, verbs: { async harness(args: any) {
@@ -80,7 +80,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
   assert.equal(rootPrompts, 1);
   assert.equal(f.aide.works().find(w => w.id === task1)!.topicId, a.spec.id);
   assert.equal(f.aide.works().find(w => w.id === task2)!.topicId, b.spec.id);
-  assert.equal(f.refresh(b).spec.trigger?.enabled, false, "existing parent keeps its trigger policy");
+  assert.equal(f.refresh(b).spec.review?.enabled, false, "existing parent keeps its review policy");
   assert.equal(f.refresh(a).status.summary, "Late finding");
   assert.equal(f.refresh(a).status.recent[0]?.text, "Late progress from the draining Chief");
   assert.equal(f.refresh(a).status.execution, null);

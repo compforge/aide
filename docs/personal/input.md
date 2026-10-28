@@ -52,11 +52,11 @@ Input 不单独启动 Reconciler 或 Agent。Route、Topic、Task、Routine 的 
 
 Immediate 在 Chief 空闲时启动处理，运行中通过 steer 加入；Normal 在空闲时启动处理，运行中通过 followUp 排队。Deferred 只路由和挂载，不因到达而启动所属 root Chief，也不进入其 steer / followUp 队列。Chief 因其它输入、定时回顾或知识整理运行时，可以顺带处理 Deferred；运行中主动发现的 Deferred 也可通过 assess_input 记录研判结果。
 
-未填写 attention 时，Channel 默认 Immediate，Source / Chief / Trigger 默认 Normal。attention 不限制 Route 分类，也不阻止 Chief 明确交给 Task / Routine 的办理。Deferred 未被研判时保持待处理；Topic trigger 可以关闭，不增加独立批处理计时器。
+未填写 attention 时，Channel 默认 Immediate，Source / Chief / Trigger 默认 Normal。attention 不限制 Route 分类，也不阻止 Chief 明确交给 Task / Routine 的办理。Deferred 未被研判时保持待处理；Topic review 可以关闭，不增加独立批处理计时器。
 
 Channel / Source 经绑定的入口提交 Input，稳定身份用于传输去重；接收回执只证明持久化成功。Source 先保存 Input，再推进观察水位。原始消息满足提交条件时，即使可选上下文读取失败仍可接收，具体证据与权限见对应接入文档。
 
-系统定时回顾使用 `origin: trigger`、`originId: personal.topic-trigger`，`originRef` 指向产生它的 root Topic。`observation` 保存检查到期时间、实际触发时间和空闲起点。满足空闲条件才生成，创建时已包含路由结果与研判目标；既不调用 Route 模型，也不刷新 Topic 的业务活跃时间。Chief 复用普通材料通知和 `assess_input` 回执，详见 [定时回顾](topic.md#topic-定时回顾)。
+系统定时回顾使用 `origin: trigger`、`originId: personal.topic-review`，`originRef` 指向产生它的 root Topic。`observation` 保存检查到期时间、实际触发时间和空闲起点。Reconcile 在回顾到期且发现待处理材料或维护需求时才生成，创建时已包含路由结果与研判目标；既不调用 Route 模型，也不刷新 Topic 的业务活跃时间。Chief 复用普通材料通知和 `assess_input` 回执，详见 [定时回顾](topic.md#topic-定时回顾)。
 
 ### 路由、研判与办理
 

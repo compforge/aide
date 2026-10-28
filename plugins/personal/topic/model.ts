@@ -3,10 +3,10 @@ import type { Resource, Address, ResourceRef } from "@compforge/aide-plugin";
 import type { InputSpec, InputStatus } from "../input/model.ts";
 import type { OutputView } from "../../../src/output.ts";
 import type { LoopExecution } from "../loop.ts";
-import type { TopicTrigger } from "./trigger.ts";
+import type { TopicReview } from "./review.ts";
 export const TOPIC_TYPE = { apiVersion: "aide.dev/v1alpha2", kind: "Topic" } as const;
 export const DEFAULT_TOPIC_ID = "default";
-export interface TopicSpec { address?: Address; id: string; name?: string; default?: boolean; trigger?: TopicTrigger;
+export interface TopicSpec { address?: Address; id: string; name?: string; default?: boolean; review?: TopicReview;
   topicKey?: string; parentRef?: ResourceRef & { uid: string } }
 export interface TopicStatus extends ResourceContext {
   summaryDependencies?: Record<string, string>;
@@ -22,8 +22,9 @@ export interface TopicStatus extends ResourceContext {
   agent?: import("@compforge/aide-plugin").AgentStatus;
   nextAbsorbAt?: string;
   absorbAttempts?: number;
-  nextTriggerAt?: string | null;
+  reviewCheckedAt?: string | null;
   idleReviewCount?: number;
+  idleReviewReset?: { at: string; previousCount: number } | null;
   idleSince?: string;
   execution?: LoopExecution | null;
   receipts: Array<{ key: string; responseId: string }>;

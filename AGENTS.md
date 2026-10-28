@@ -71,8 +71,8 @@ plugins/personal/
     locator.ts             # Channel / Source 提供 Topic 定位信息的领域契约
     model.ts               # 资源定义与会话类型
     store.ts               # 宿主侧会话、Input 消费投影与消息流
-    config.ts              # 输入预览与近期摘要预算
-    trigger.ts             # 定时触发配置
+    config.ts              # 定时协调、回顾退避、整理阈值与上下文预算
+    review.ts              # 回顾资格、退避与维护 Input
     reconcile.ts           # 独立接收与 agent Controller、定时回顾
     assess.ts              # 原子研判完成与 Work 交接
     state.ts               # Topic 身份检查和 CAS 更新

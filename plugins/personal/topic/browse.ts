@@ -1,13 +1,13 @@
 import { digest } from "../chief-model.ts";
 import type { TopicStore } from "./store.ts";
 import { initialTopicName, TOPIC_TYPE } from "./model.ts";
-import { topicTrigger, type TopicTrigger } from "./trigger.ts";
+import { topicReview, type TopicReview } from "./review.ts";
 import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
 
 export interface TopicBrowseQuery extends PageQuery { parentId?: string; q?: string; selectedId?: string }
 export interface TopicListItem {
   id: string; uid: string; revision: number; name: string; topicKey?: string; parentUid?: string;
-  trigger: TopicTrigger; default: boolean; preview: string; updatedAt: string; taskCount: number; routineCount: number; childCount: number;
+  review: TopicReview; default: boolean; preview: string; updatedAt: string; taskCount: number; routineCount: number; childCount: number;
 }
 const field = (alias: string, path: string) => `json_extract(${alias}.data, '$.object.${path}')`;
 const activeTopic = (alias: string) => `${alias}.scope = 'personal' AND ${alias}.kind = 'aide.dev/Topic' AND ${field(alias, "apiVersion")} = 'aide.dev/v1alpha2'
@@ -33,7 +33,7 @@ const facts = (predicate = "") => `, facts AS MATERIALIZED (SELECT c.*,
 const columns = `t.key, t.uid, t.created, ${field("t", "spec.id")} AS id, ${field("t", "metadata.resourceVersion")} AS revision,
   ${field("t", "spec.name")} AS name, ${field("t", "spec.topicKey")} AS topicKey,
   ${field("t", "spec.parentRef.uid")} AS parentUid, coalesce(${field("t", "spec.default")}, 0) AS isDefault,
-  ${field("t", "spec.trigger")} AS trigger, ${field("t", "status.lastInputAt")} AS lastInputAt`;
+  ${field("t", "spec.review")} AS review, ${field("t", "status.lastInputAt")} AS lastInputAt`;
 const order = "updatedAt DESC, id ASC, uid ASC";
 
 /**
@@ -63,7 +63,7 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
       return { id: row.id as string, uid: row.uid as string, revision: Number(row.revision),
         name: row.name as string || initialTopicName(pending?.text as string ?? "") || "未命名会话",
         ...(row.topicKey ? { topicKey: row.topicKey as string } : {}), ...(row.parentUid ? { parentUid: row.parentUid as string } : {}),
-        trigger: topicTrigger(row.trigger ? JSON.parse(row.trigger as string) : undefined), default: Boolean(row.isDefault),
+        review: topicReview(row.review ? JSON.parse(row.review as string) : undefined), default: Boolean(row.isDefault),
         childCount: childCounts.get(row.uid as string) ?? 0,
         preview: (reply?.text as string ?? "").replace(/\s+/g, " ").trim().slice(0, 100), updatedAt: row.updatedAt as string,
         ...(counts.get(row.uid as string) ?? { taskCount: 0, routineCount: 0 }) };

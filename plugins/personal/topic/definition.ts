@@ -6,7 +6,7 @@ import { digest } from "../chief-model.ts";
 import { AgentStatusSchema } from "../session.ts";
 import { ContextFields } from "../context.ts";
 import { z } from "zod";
-import { TopicTriggerSchema } from "./trigger.ts";
+import { TopicReviewSchema } from "./review.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
 import { AddressSchema } from "../../../src/address.ts";
 import { TOPIC_TYPE, TopicDeletionBlocked, DEFAULT_TOPIC_ID, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
@@ -47,12 +47,13 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
 export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   type: TOPIC_TYPE,
   schema: { spec: z.object({ id: z.string(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
-    trigger: TopicTriggerSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
+    review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({ conditions: ConditionsSchema, summaryDependencies: z.record(z.string(), z.string()).optional(), organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
+      idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
       lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).optional(), absorbedSummaries: z.record(z.string(), z.string()).optional(),
-      nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), nextTriggerAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
+      nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
   validator: { create: (resource, context) => { validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
     if (previous.spec.id !== current.spec.id || previous.spec.topicKey !== current.spec.topicKey) throw new Error("Topic identity is immutable");
     if (current.spec.parentRef && current.status.execution && current.status.execution.id !== previous.status.execution?.id)

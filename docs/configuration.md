@@ -267,25 +267,29 @@ Personal 的 `config.ts` 组合各类 Source 策略，装配阶段解析后仅�
 配置输入允许缺省和引用；有效配置已补齐默认值、解析模型与路径，并在创建运行实例之前验证。
 Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖顺序的判断。整体原则见 [Kernel](kernel.md)。
 
-## Chief 定时回顾
+## Topic 定时协调与回顾
 
 ```yaml
-harnesses:
-  chief:
-    config:
+plugins:
+  personal:
+    topic:
       trigger:
-        intervalSeconds: 60   # 检查周期
-        idleSeconds: 900      # Chief 连续空闲多久后回顾
-        backoff:             # 可选；省略时保持固定回顾间隔
+        intervalSeconds: 60   # 固定唤醒 Reconcile；业务事件也可以唤醒
+      review:
+        idleSeconds: 900      # 基础回顾检查等待
+        backoff:             # 可选；省略时固定等待
           factor: 2
           maxIdleSeconds: 7200
 ```
 
-两项均为正整数秒，可独立配置。Topic 只保存 `trigger.enabled` 开关。首次空闲从 Topic 创建时计算，后续从任意一轮 Chief 执行结束时计算；Deferred Input 到达不会重置计时。回顾生成已绑定 root Topic 的系统 Input（`origin: trigger`、`attention: normal`），经普通处理链路复用当前原生 session，并通过 `assess_input` 保存结果；检查 memory、Topic 认识、未决问题、Work 和待处理 Input，不要求已有新变化。系统 Input 不刷新 Topic 的业务活跃时间。检查期间正在运行的 Chief 不会收到额外 steer / followUp，也不会在结束后补跑错过的周期。
+`trigger` 只配置定时协调机制；`review` 配置 Reconcile 的业务检查策略。Chief Harness 只配置模型和能力包，不接受业务调度字段。`intervalSeconds`、`idleSeconds` 和 `maxIdleSeconds` 均为 1–2147483 的整数秒；`factor` 大于 1，上限不小于基础等待。
 
-`backoff.factor` 必须大于 1；`maxIdleSeconds` 为正整数秒，不小于 `idleSeconds`。启用后，每次成功完成且未处理业务 Input、没有新增业务输入或待研判业务积压的定时回顾，下一次等待按倍数增长，最长不超过上限。上述配置依次等待 15、30、60、120 分钟，此后维持 120 分钟；等待从执行完成时计算，`intervalSeconds` 检查频率不变。
+定时唤醒不会直接调用模型。Reconcile 在回顾到期后检查 deferred 输入、待吸收的子主题认识及材料/子节点整理压力；需要判断时生成已绑定 root 的维护 Input，无事可做时只记录检查时间并增加退避次数。以上配置的空检查依次等待 15、30、60、120 分钟，之后保持 120 分钟；期间的 Reconcile 唤醒间隔仍为 60 秒。
 
-新业务 Input 重置退避，并将回顾提前到不晚于输入到达后的基础间隔；Deferred 仍不直接激活 Chief，也不因连续到达而推迟已有计划。回顾自身的 trigger Input 不重置退避。失败、中断或缺少研判完成回执时恢复基础间隔，保留原有待核对状态，不自动重放。退避次数与下次时间持久化，正常重启继续原计划；重新启用回顾或子 Topic 独立为 root 时从基础间隔开始。子理解更新和 Task / Routine 独立调度不等待退避到期。详细契约见 [Topic 定时回顾](personal/topic.md#topic-定时回顾)。
+正常业务 Input 直接复用，Immediate / Normal 与结构、子 summary 变化不等待回顾退避。Deferred 保持延后处理，新业务输入重置退避且连续到达不推迟已安排的机会。执行完成或中断恢复后重新开始基础等待；不自动重放已有未知效果。
+
+修改基础等待、倍数或上限并重启后，按持久化时间事实与当前配置重新计算资格；最迟在下一次固定检查时应用，不从重启时重新等待，也不补跑历史周期。每个 Topic 通过 `spec.review.enabled` 开关后台回顾，关闭不停止定时协调、输入接纳或既有职责。完整契约见 [Topic 定时回顾](personal/topic.md#topic-定时回顾)。
+
 
 ## Topic 消费策略
 
@@ -302,7 +306,7 @@ plugins:
 
 - Channel 默认 immediate，Source 默认 normal；EnvironmentSource 明确使用 deferred，定时回顾使用 normal；紧迫性不代表授权或必须外发。
 - 普通输入在当前调用结束后 followup，复用原生历史；immediate 通过 steer 进入当前调用。明确不支持或拒绝时留队等待 followup，不中断现有动作。
-- root Topic 的 `trigger.enabled` 默认开启。Chief 连续空闲达到阈值后，检查会发起回顾，即使没有新 Input；运行中的 Chief 不因定时检查而追加执行，每轮结束后重新计算空闲时间。一次调用最多两天。
+- root Topic 的 `review.enabled` 默认开启；定时协调根据数据决定是否发起回顾，无事时退避且不调用模型。运行中的 Chief 不因定时检查追加执行，一次调用最多两天。
 - `contextChars` 限制新 Input 的描述预览，全文通过 `read_input` 分页读取；原生历史和压缩由 SDK 管理。
 - `summaryChars` 限制 Topic 累计认识的长度，模型需合并后替换；近期处理记录使用 recent，统一限制条数和总字符数。长期认识使用共享记忆，委托进展保存在 Work。
 - `assess_input` 提交业务消费回执并原子建立 Work 办理记录。没有回执的已尝试输入保留失败证据，不自动重放。
