@@ -80,3 +80,17 @@ test("repository rate-limit hints survive the JSON Connector boundary", async ()
   expect(page.items).toEqual([]);
   expect(page.issues?.[0]).toMatchObject({ stage: "list", kind: "rate_limit", retryAfterMs: 120_000 });
 });
+
+test("Forge Me metadata is explicit, scoped and independent of credentials", async () => {
+  const { Connectors } = await import("../connectors/index.ts");
+  const connectors = await Connectors.load({ work: { kind: "forge", version: "v1", enabled: true,
+    config: { provider: "github", host: "github.example", forge: "work-forge", tokenEnv: "BOT_TOKEN", me: { username: "human" } } } },
+    { environment: { BOT_TOKEN: "private-execution-token" } });
+  try {
+    const [entry] = await connectors.list("forge");
+    expect(entry!.metadata).toEqual({ forge: "work-forge", provider: "github", me: { username: "human" } });
+    expect(JSON.stringify(entry)).not.toContain("private-execution-token");
+  } finally { await connectors.close(); }
+  await expect(Connectors.load({ work: { kind: "forge", version: "v1", enabled: true,
+    config: { provider: "github", host: "github.example", me: { username: " " } } } })).rejects.toThrow();
+});

@@ -95,3 +95,27 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   assert.doesNotMatch(history, /Text:\nother/);
   assert.match(history, /Origin: channel/);
 });
+
+test("Configured Forge Me accounts join the same Person without marking the execution account", async t => {
+  const { emptyConnectors } = await import("../src/connector-client.ts");
+  const { forgeCatalog } = await import("../connectors/forge/catalog.ts");
+  const home = mkdtempSync(join(tmpdir(), "aide-forge-me-"));
+  const descriptions = [
+    { kind: "forge", version: "v1", name: "github-connection", revision: "github-r1", methods: [], metadata: { provider: "github", forge: "github.example", me: { username: "human" } } },
+    { kind: "forge", version: "v1", name: "codebase-connection", revision: "codebase-r1", methods: [], metadata: { provider: "codebase", forge: "code.byted.org", me: { username: "human.work" } } },
+    { kind: "forge", version: "v1", name: "unmarked", revision: "r1", methods: [], metadata: { provider: "github", forge: "unmarked.example" } },
+  ];
+  const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No Work"); } }, home),
+    connectors: emptyConnectors, connectorCatalog: descriptions }, pino({ level: "silent" }));
+  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  const operator = await aide.persons.observe({ provider: "github", scope: "github.example", id: "operator" }, "Execution account");
+  await aide.start();
+  const github = await aide.persons.findIdentity({ provider: "github", scope: "github.example", id: "human" });
+  const codebase = await aide.persons.findIdentity({ provider: "codebase", scope: "code.byted.org", id: "human.work" });
+  assert.ok(github && codebase);
+  assert.equal(github.metadata.uid, codebase.metadata.uid);
+  assert.equal(github.isMe, true);
+  assert.equal((await aide.persons.read(operator.metadata.name)).isMe, false);
+  assert.equal((await aide.persons.list()).filter(p => p.isMe).length, 1);
+  assert.throws(() => forgeCatalog([{ ...descriptions[0]!, metadata: { ...descriptions[0]!.metadata, me: { username: "" } } }]));
+});
