@@ -1,7 +1,7 @@
 import type { TopicPersons } from "../topic/persons.ts";
 import { createHash } from "node:crypto";
 import type { TopicResource } from "../topic/model.ts";
-import { understandingVersion, summaryVersion } from "../topic/tree.ts";
+import { summaryVersion } from "../topic/tree.ts";
 import { topicPage } from "../background.ts";
 
 export function weaveCandidates(topics: readonly TopicResource[]) {
@@ -12,16 +12,18 @@ export function weaveCandidates(topics: readonly TopicResource[]) {
  * Changing this contract invalidates old checks once, without repeatedly resetting scan progress.
  * @case tests/weave.test.ts
  */
-const REVIEW_CONTRACT = "root-catalog-v2";
+const REVIEW_CONTRACT = "root-catalog-v3";
 export function candidateVersion(topic: TopicResource) {
   return createHash("sha256").update(JSON.stringify([REVIEW_CONTRACT, topic.spec.name, summaryVersion(topic), topic.status.organization])).digest("hex");
 }
-/** @spec Scan progress measures the actual bounded snapshot supplied to inference, never the requested page size.
+/** @spec Discovery pages expose no grouping version; read_topic supplies the reviewed Note-inclusive version.
+ * @case tests/weave.test.ts
+ * @spec Scan progress measures the actual bounded snapshot supplied to inference, never the requested page size.
  * @link docs/personal/weave.md
  */
 export function candidatePage(roots: readonly TopicResource[], offset: number, limit: number, persons?: (topic: TopicResource) => TopicPersons) {
   return topicPage(roots, t => ({ uid: t.metadata.uid, name: t.spec.name?.slice(0, 200), summary: t.status.summary.slice(0, 1200),
-    ...(persons ? { persons: persons(t) } : {}), version: understandingVersion(t), lastInputAt: t.status.lastInputAt, organization: t.status.organization }), offset, limit);
+    ...(persons ? { persons: persons(t) } : {}), lastInputAt: t.status.lastInputAt, organization: t.status.organization }), offset, limit);
 }
 
 /** @spec Search counts describe matching roots, independently of the global catalog and pending review batch.

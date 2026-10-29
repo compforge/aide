@@ -78,10 +78,10 @@ user：动态身份背景（如已配置 Me）
 user：本轮检查请求
   rootCount：普通 root 总数
   maxRoots：软目标；pendingCount：待检查数
-  candidates：本批有界候选的 UID、名称、summary、版本与组织调整依据
+  candidates：本批有界候选的 UID、名称、summary 与组织调整依据；目录不提供归组版本
 assistant / tool
   list_topics：搜索批外相关 root，区分全局数与匹配数，附近期相关人物预览
-  read_topic：分页补读当前认识、拆分原因及近期相关人物预览
+  read_topic：分页补读当前认识、拆分原因及近期相关人物预览，返回包含 Note UID/版本的归组版本；每个拟归组对象均须先读取
   group_topics：校验所读版本后提交一次归组
 ```
 

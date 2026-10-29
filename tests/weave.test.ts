@@ -290,6 +290,10 @@ test("Weave retains independent child Notes without copying them into the parent
   const a = await f.aide.topics.ensure("noted-a"), b = await f.aide.topics.ensure("noted-b");
   await seedNotes(f.resources, a, [{ id: "evidence", text: "Child evidence" }]);
   const currentA = f.aide.topics.resource("noted-a")!;
+  for (const page of [candidatePage([currentA], 0, 12), searchRootTopics([currentA], undefined, 0, 12)]) {
+    assert.equal(page.items[0]!.uid, currentA.metadata.uid);
+    assert.equal("version" in page.items[0]!, false, "Discovery cannot supply a version that omits unread Notes");
+  }
   const currentB = f.aide.topics.resource("noted-b")!;
   const grouped = await groupTopics(f.resources, await f.weave(), { name: "Shared", summary: "Durable", topics: [currentA, currentB].map(t => ({ uid: t.metadata.uid, version: understandingVersion(t, notes(f.aide.topics.resources, t.metadata.uid)) })) }, 4000);
   const parent = f.aide.topics.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE).find(t => t.metadata.uid === grouped.parentUid)!;
@@ -363,7 +367,7 @@ test("Weave distinguishes a single candidate from its catalog and extends an exi
     assert.equal(noMatch.rootCount, 3);
     assert.equal(noMatch.matchingRootCount, 0);
     await groupTopics(f.resources, await f.weave(), { topics: [{ uid: candidate.metadata.uid, version: understandingVersion(f.refresh(candidate)) }],
-      parent: { uid: parent.metadata.uid, version: found.items[0]!.version } }, 4000);
+      parent: { uid: parent.metadata.uid, version: understandingVersion(f.refresh(parent), notes(f.aide.topics.resources, parent.metadata.uid)) } }, 4000);
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
   } } };
   await reconcile(execution, await f.weave());

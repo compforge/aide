@@ -143,6 +143,15 @@ test("Work summary and Notes use content versions and enforce the bound subject"
   const tool = tools.find(t => t.name === "upsert_note")!;
   await tool.execute("note", { text: "Current check" }, undefined, undefined, {} as never);
   assert.equal((await readNotes(f.resources, original.metadata.uid)).length, 1);
+  const current = (await f.resources.get<WorkResource["spec"], WorkResource["status"]>(resourceRef(original)))!;
+  const race: ResourceClient = { ...f.resources, async patch(resource, patch, options) {
+    await f.resources.patchStatus(current, { summary: "Concurrent correction" });
+    return f.resources.patch(resource, patch, options);
+  } };
+  const summarize = workContextTools("routine", race, () => current, log).find(t => t.name === "summarize_routine")!;
+  await assert.rejects(summarize.execute("race", { version: contentVersion(current), summary: "Unseen overwrite" }, undefined, undefined, {} as never),
+    (error: Error) => /summary version conflict; read_routine and merge again/.test(error.message) && (error.cause as Error).name === "TEST_OPERATION_FAILED");
+  assert.equal((await f.resources.get<WorkResource["spec"], WorkResource["status"]>(resourceRef(original)))!.status.summary, "Concurrent correction");
   await assert.rejects(tool.execute("outside", { subject: resourceRef(f.root), text: "Wrong subject" }, undefined, undefined, {} as never), /own content/);
 });
 

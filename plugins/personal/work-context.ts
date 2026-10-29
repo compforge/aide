@@ -37,7 +37,11 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
           { op: "test", path: "/status/summary", value: owner.status.summary },
           { op: "replace", path: "/status/summary", value: args.summary },
           { op: "add", path: "/status/contextWriter", value: { resource: SubjectSchema.parse(resourceRef(owner)), executionId: owner.status.execution!.id } },
-        ] });
+        ] }).catch(error => {
+          if (error instanceof Error && error.name === "TEST_OPERATION_FAILED")
+            throw new Error(`${kind} summary version conflict; read_${kind} and merge again`, { cause: error });
+          throw error;
+        });
         log.info({ workUid: owner.metadata.uid, executionId: owner.status.execution!.id, kind, version: contentVersion(updated) }, "Work summary updated");
         return result({ version: contentVersion(updated) });
       } }),
