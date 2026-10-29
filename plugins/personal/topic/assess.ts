@@ -27,8 +27,10 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
     if (!input) throw new Error("Input is unavailable");
     const topics = await topicScope(resources, resourceRef(c));
     const topicUids = new Set(topics.map(t => t.metadata.uid));
-    if (!belongsToTopic(input, resourceRef(c), topicUids)) throw new Error("Input does not belong to this Topic subtree");
+    if (input.status.assess?.executionId !== executionId && !belongsToTopic(input, resourceRef(c), topicUids)) throw new Error("Input does not belong to this Topic subtree");
     if (input.status.assess?.completedAt) return { assessed: args.inputId };
+    if (input.status.assess?.executionId && input.status.assess.executionId !== executionId && !input.status.assess.lastError)
+      throw new Error("Input is already admitted to another Chief execution");
     const work = args.workRequests.length ? (await Promise.all(topics.flatMap(topic => WORK_TYPES.map(type =>
       resources.list<WorkSpec, WorkStatus>(type, { matchIndex: { name: "topic", value: topic.metadata.uid } }))))).flat() : [];
     const handle = { ...input.status.handle };

@@ -61,7 +61,7 @@ export class Aide {
     ...Object.values(SOURCES).map((definition) => [`source:${definition.id}`, definition] as const),
   ]);
   inputDefinition(origin: Pick<InputSpec, "origin" | "originId">) {
-    if (origin.origin === "trigger" && origin.originId === "personal.topic-review") return { id: origin.originId, label: "定时回顾", icon: iconFor("harness:chief") };
+    if (["aide:review", "aide:triage", "aide:organize"].includes(origin.origin)) return { id: origin.origin, label: ({ "aide:review": "回顾", "aide:triage": "分理", "aide:organize": "组织" } as Record<string, string>)[origin.origin]!, icon: iconFor("harness:chief") };
     if (origin.origin === "chief" && origin.originId === "personal.chief") return { id: origin.originId, label: "Chief 请求", icon: iconFor("harness:chief") };
     const definition = this.inputDefinitions.get(`${origin.origin}:${origin.originId}`);
     if (!definition) throw new Error(`Unknown input definition: ${origin.origin}:${origin.originId}`);

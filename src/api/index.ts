@@ -40,7 +40,7 @@ const TopicListSchema = PageSchema.extend({ parentId: z.string().trim().max(200)
 const PersonListSchema = PageSchema.extend({ q: z.string().trim().max(200).optional(), name: z.string().max(200).optional(),
   excludeUid: z.string().min(1).max(250).optional(), selectedId: z.string().min(1).max(200).optional() }).strict();
 const InputListSchema = PageSchema.extend({
-  q: z.string().trim().max(200).optional(), origin: z.enum(["channel", "source", "chief", "trigger"]).optional(),
+  q: z.string().trim().max(200).optional(), origin: z.enum(["channel", "source", "chief", "aide:review", "aide:triage", "aide:organize"]).optional(),
   originId: z.string().max(200).optional(), connector: z.string().max(200).optional(), sourceUid: z.string().max(200).optional(),
   state: z.enum(["pending", "completed"]).optional(), errors: z.enum(["true", "false"]).transform(v => v === "true").optional(),
 }).strict();

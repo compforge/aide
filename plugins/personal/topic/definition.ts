@@ -37,7 +37,6 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
     if (visited.has(parent.uid)) throw new Error("Topic parent cycle");
     visited.add(parent.uid);
     const value = requireTopic(parent, context);
-    if (value.spec.default) throw new Error("Topic parent unavailable");
     parent = value.spec.parentRef;
   }
   // Default identity cannot change after creation; status writes need no uniqueness lookup.
@@ -54,6 +53,8 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     status: z.object({ conditions: ConditionsSchema, summaryDependencies: z.record(z.string(), z.string()).optional(), organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
+      capacityRequests: z.partialRecord(z.enum(["aide:triage", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), inputId: z.string() }).strict()).optional(),
+      yieldToInput: z.boolean().optional(),
       idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
       lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).default({}), absorbedSummaries: z.record(z.string(), z.string()).default({}),
       nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
@@ -94,6 +95,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   } },
   indexes: { default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],
     topicKey: r => r.metadata.deletionTimestamp || !r.spec.topicKey ? [] : [r.spec.topicKey],
+    liveParent: r => !r.metadata.deletionTimestamp && r.spec.parentRef ? [r.spec.parentRef.uid] : [],
     parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], root: r => !r.metadata.deletionTimestamp && !r.spec.parentRef ? ["root"] : [] },
   retention: { releasedAt: () => undefined, references: () => {
     return [];

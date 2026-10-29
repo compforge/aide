@@ -183,6 +183,7 @@ test("Recovered assessment groups the Input with the completing Chief execution"
   const input = await aide.topics.submit("recover-view", { origin: "channel", originId: "web", text: "verify prior effects" });
   await deliver(context, input, [c.metadata], "explicit");
   const admitted = aide.topics.inputStore.get(input.metadata.name)!;
+  await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "old-run", startedAt: new Date().toISOString() } });
   await resources.patchStatus(admitted, { assess: { executionId: "old-run", startedAt: new Date().toISOString(), lastError: "Interrupted" } });
   assert.equal(aide.topics.input(input.metadata.name, "me")!.consumption.executionId, "old-run");
   assert.equal(topicView(aide, "me").blocks.find(b => b.inputId === input.metadata.name)!.group_id, "old-run");

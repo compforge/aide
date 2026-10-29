@@ -24,8 +24,8 @@ export function createTimeline() {
     for (const block of harnesses.values()) heading.append(identityBadge(block.icon, block.label));
   }
   function receivedInput(block: TopicBlock) {
-    const source = block.origin === 'source' || block.origin === 'trigger';
-    const originLabel = block.origin === 'trigger' ? '系统' : source ? 'Source' : 'Channel';
+    const source = block.origin === 'source' || ['aide:review', 'aide:triage', 'aide:organize'].includes(block.origin ?? '');
+    const originLabel = ['aide:review', 'aide:triage', 'aide:organize'].includes(block.origin ?? '') ? '系统' : source ? 'Source' : 'Channel';
     const summary = block.type === 'summary';
     const node = element('article', undefined, 'message received-input ' + (source || summary ? 'source' : 'user'));
     if (block.inputId) node.dataset.inputId = block.inputId;

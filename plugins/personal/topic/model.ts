@@ -22,6 +22,9 @@ export interface TopicStatus extends ResourceContext {
   agent?: import("@compforge/aide-plugin").AgentStatus;
   nextAbsorbAt?: string;
   absorbAttempts?: number;
+  /** Capacity maintenance has its own clock and yields one activation to waiting business material. */
+  capacityRequests?: Partial<Record<"aide:triage" | "aide:organize", { checkedAt: string; inputId: string }>>;
+  yieldToInput?: boolean;
   reviewCheckedAt?: string | null;
   idleReviewCount?: number;
   idleReviewReset?: { at: string; previousCount: number } | null;

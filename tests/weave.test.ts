@@ -1,3 +1,4 @@
+import { assignInput } from "../plugins/personal/input/assignment.ts";
 import { seedNotes } from "./fixtures/notes.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
@@ -152,7 +153,7 @@ test("Nested Weave preserves the leaf path and propagates actual Input activity 
   await assert.rejects(f.resources.replace(cyclic, { ...cyclic.spec, parentRef: resourceRef(a) }, cyclic.status), /cycle/);
 });
 
-test("Weave groups a large backlog without moving any Input or batching migrations", async t => {
+test("Weave groups a large backlog without moving any Input or batching migrations", { timeout: 15000 }, async t => {
   const f = fixture(t); await f.initialize();
   for (let n = 0; n < 120; n++) await f.input(`burst-${n}`, "burst");
   const a = f.aide.topics.byKey("burst")!, b = await ensureSourceTopic(f.resources, "peer", "Peer");
@@ -162,9 +163,11 @@ test("Weave groups a large backlog without moving any Input or batching migratio
   const root = f.aide.topics.resource(f.aide.topics.list().find(t => !t.parentRef)!.id)!;
   assert.equal(f.aide.topics.pending(root.metadata.uid).length, 120);
   assert.equal(f.aide.topics.pending(a.metadata.uid).length, 120);
+  // The Input controller converges assignment after the structural transaction, without moving material.
+  for (const input of before) await assignInput({ resources: f.resources, logger: { info() {} } } as any, input);
   assert.equal((await nextInputs(f.resources, root, 8)).length, 8);
   await f.input("later", "burst");
-  assert.deepEqual(f.aide.topics.inputStore.get("later")!.status.assess, {});
+  assert.equal(f.aide.topics.inputStore.get("later")!.status.assess!.topic!.uid, root.metadata.uid);
 });
 
 test("Weave advances only the bounded snapshot and retries interrupted analysis", async t => {

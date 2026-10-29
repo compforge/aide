@@ -21,7 +21,7 @@ function loadLocation() {
   $<HTMLInputElement>('input-search').value = query.get('q') ?? '';
   $<HTMLInputElement>('input-errors').checked = query.get('errors') === 'true';
   for (const [key, id] of Object.entries(selects)) selectValue(id, query.get(key) ?? '*');
-  selectValue('input-origin', query.has('originId') ? `${query.get('origin') ?? 'source'}:${query.get('originId')}` : '*');
+  selectValue('input-origin', query.has('originId') ? JSON.stringify([query.get('origin') ?? 'source', query.get('originId')]) : '*');
 }
 function selectValue(id: string, value: string) {
   const select = $<HTMLSelectElement>(id);
@@ -158,7 +158,7 @@ $('input-filters').onsubmit = event => {
   }
   const origin = $<HTMLSelectElement>('input-origin').value;
   if (origin === '*') { query.delete('origin'); query.delete('originId'); }
-  else { const split = origin.indexOf(':'); query.set('origin', origin.slice(0, split)); query.set('originId', origin.slice(split + 1)); }
+  else { const [kind, id] = JSON.parse(origin) as [string, string]; query.set('origin', kind); query.set('originId', id); }
   if ($<HTMLInputElement>('input-errors').checked) query.set('errors', 'true'); else query.delete('errors');
   selected = undefined; saveLocation(true); void refresh();
 };
