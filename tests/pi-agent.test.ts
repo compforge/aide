@@ -160,16 +160,27 @@ test("Replay loadout rejects an invented call to a disabled native tool", { time
 
 test("Replay SDK groups roots and routes subsequent source input to the new root", { timeout: 45_000 }, async t => {
   const { replay } = await import("../scripts/lark-replay/run.ts");
+  let pendingRoots: string[] = [];
+  let reviewedRoots: { uid: string; version: string }[] = [];
   const fixture = await setup(t, request => {
     const messages = request.messages as Array<{ role: string; content: unknown }>;
     const last = messages.at(-1)!;
     if (JSON.stringify(messages).includes("You are Weave")) {
       if (last.role !== "tool") return { tool: "list_topics", args: {} };
       const value = JSON.parse(messageText(last.content));
-      if (value.items?.length >= 2) return { tool: "group_topics", args: {
-        topics: value.items.map((item: { uid: string; version: string }) => ({ uid: item.uid, version: item.version })),
-        name: "Related fixture evidence", summary: "Both source observations retained",
-      } };
+      if (value.items?.length >= 2) {
+        assert.ok(value.items.every((item: object) => !("version" in item)));
+        pendingRoots = value.items.map((item: { uid: string }) => item.uid);
+        reviewedRoots = [];
+        return { tool: "read_topic", args: { uid: pendingRoots.shift()! } };
+      }
+      if (value.uid && value.version) {
+        reviewedRoots.push({ uid: value.uid, version: value.version });
+        if (pendingRoots.length) return { tool: "read_topic", args: { uid: pendingRoots.shift()! } };
+        return { tool: "group_topics", args: {
+          topics: reviewedRoots, name: "Related fixture evidence", summary: "Both source observations retained",
+        } };
+      }
       return { text: "Finished organizing" };
     }
     if (last.role === "tool") return { text: "Handled internally" };
