@@ -1,7 +1,7 @@
 import type { RuntimeScope } from "./runtime.ts";
 import type { ReconcileKey } from "./reconcile.ts";
 import type { ConnectorRequest } from "./connectors.ts";
-import type { PluginDataDirectories, PluginInstance, PluginLogLevel, PluginLogContext, HookStage, Resource, ResourceListOptions, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
+import type { PluginDataDirectories, PluginInstance, PluginLogLevel, PluginLogContext, HookStage, Resource, ResourceListOptions, ResourcePageOptions, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 import type {
   ExecutionScope,
   VerbRequest,
@@ -87,6 +87,11 @@ export type HostRequest =
       readonly ref: ResourceRef;
     }
   | {
+      readonly method: "resource.listPage";
+      readonly type: ResourceType;
+      readonly options: ResourcePageOptions;
+    }
+  | {
       readonly method: "resource.list";
       readonly type: ResourceType;
       readonly options?: ResourceListOptions;
@@ -146,7 +151,8 @@ export function hostOperation(request: HostRequest): HostOperation {
   }
   if (request.method === "resource.create") { operation.resourceName = request.init.name; operation.namespace = request.init.namespace ?? null; }
   if (request.method === "resource.delete") { operation.resourceName = request.name; operation.namespace = request.namespace ?? null; }
-  if (request.method === "resource.list") operation.namespace = request.options?.namespace ?? null;
+  if (request.method === "resource.list" || request.method === "resource.listPage") operation.namespace = request.options?.namespace ?? null;
+  if (request.method === "resource.listPage") { operation.limit = request.options.limit; operation.continued = Number(!!request.options.continue); }
   if (request.method === "resource.commit") operation.writeCount = request.writes.length;
   return operation;
 }

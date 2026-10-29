@@ -103,6 +103,8 @@ export type {
   ResourceWriter,
   ResourceMergePatch, ResourceJSONPatch, ResourcePatchOperation, ResourcePatch, ResourcePatchOptions,
   ResourceListOptions,
+  ResourcePageOptions,
+  ResourcePage,
   ResourceMetadata,
   ResourceOwnerReference,
 } from "./resource.ts";
@@ -116,4 +118,4 @@ export { iconFor } from "./icon.ts";
 
 export type { ResourceDefinition, ResourceRetention, ResourceSchema, ResourceValidator, ResourceValidationContext } from "./resource.ts";
 
-export { ResourceVersionConflict, ResourceIncarnationChanged } from "./resource.ts";
+export { ResourceVersionConflict, ResourceIncarnationChanged, ResourceExpired, ResourceContinueInvalid } from "./resource.ts";

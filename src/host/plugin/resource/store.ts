@@ -7,7 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-import type { Resource, ResourcePatch, ResourceListOptions, ResourceNamespace, ResourceOwnerReference, ResourceType } from "@compforge/aide-plugin";
+import type { Resource, ResourcePatch, ResourceListOptions, ResourcePageOptions, ResourcePage, ResourceNamespace, ResourceOwnerReference, ResourceType } from "@compforge/aide-plugin";
 
 import { newId } from "../../event/ids.ts";
 import { withAsyncFileLock, withFileLock } from "../../store/file-lock.ts";
@@ -386,6 +386,23 @@ export class PluginResourceStore {
         left.metadata.namespace.localeCompare(right.metadata.namespace) ||
         left.metadata.name.localeCompare(right.metadata.name)
       );
+  }
+
+  listPage<S, T>(type: ResourceType, options: ResourcePageOptions): ResourcePage<S, T> {
+    validateResourceType(type);
+    const namespace = this.resourceNamespace(options.namespace ?? "v1");
+    const matchLabels = labelMap("resource list matchLabels", options.matchLabels);
+    const definition = this.storage.definition(this.scope, type);
+    if (options.matchIndex && !definition.indexes?.[options.matchIndex.name])
+      throw new Error(`Unknown resource index: ${options.matchIndex.name}`);
+    return this.storage.transaction(() => {
+      const page = this.storage.pages.list(this.scope, type, { ...options, namespace, matchLabels });
+      return { metadata: page.metadata, items: page.keys.map(key => {
+        const stored = this.storage.read<StoredPluginResource<S, T>>(key)!;
+        const { name, namespace } = stored.object.metadata;
+        return this.validateStored<S, T>(key, type, name, namespace as ResourceNamespace, stored).object;
+      }) };
+    });
   }
 
   /** @spec Desired state and its initial observation commit atomically under one resource version. */

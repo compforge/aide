@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import type { Resource, ResourceCommit, ResourceClient as PublicResourceClient, ResourceListOptions, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
+import type { Resource, ResourceCommit, ResourceClient as PublicResourceClient, ResourceListOptions, ResourcePageOptions, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 
 import { PluginResourceStore } from "./store.ts";
 
@@ -191,6 +191,9 @@ export function createResourceClient(
   return Object.freeze({
     get,
     commit,
+    async listPage<S, T>(type: ResourceType, options: ResourcePageOptions) {
+      return deepFreeze(store.listPage<S, T>(type, options));
+    },
     async list<TSpec, TStatus>(
       type: ResourceType,
       options?: ResourceListOptions,

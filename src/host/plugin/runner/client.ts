@@ -426,6 +426,8 @@ export class PluginRunnerClient {
         return await this.callbacks.resources.replace(request.resource, request.spec, request.status);
       case "resource.get":
         return await this.callbacks.resources.get(request.ref);
+      case "resource.listPage":
+        return await this.callbacks.resources.listPage(request.type, request.options);
       case "resource.list":
         return await this.callbacks.resources.list(
           request.type,
