@@ -1,3 +1,4 @@
+import { ResourcePages } from "./pages.ts";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -35,6 +36,7 @@ const databases = new Map<string, ResourceStorage>();
  */
 export class ResourceStorage {
   readonly db: DatabaseSync;
+  readonly pages: ResourcePages;
   private config = ResourceStorageConfigSchema.parse({});
   private readonly definitions = new Map<string, ResourceDefinition>();
   private readonly listeners = new Set<(scope: string, resource: Resource<unknown, unknown>) => void>();
@@ -64,6 +66,7 @@ export class ResourceStorage {
       CREATE TABLE IF NOT EXISTS resource_indexes (source TEXT NOT NULL REFERENCES resources(key) ON DELETE CASCADE, name TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(source,name,value));
       CREATE INDEX IF NOT EXISTS resource_index_lookup ON resource_indexes(name,value,source);
       CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, expires INTEGER NOT NULL, value TEXT NOT NULL);`);
+    this.pages = new ResourcePages(this.db);
     this.db.exec("UPDATE resources SET released=NULL");
   }
   configure(config?: Partial<ResourceStorageConfig>): void { this.config = ResourceStorageConfigSchema.parse(config ?? {}); }
@@ -92,6 +95,7 @@ export class ResourceStorage {
       }
       if (!added.length) return;
       this.transaction(() => {
+        for (const definition of definitions) this.pages.invalidate(owner, definition.type);
         for (const row of this.db.prepare("SELECT key,scope,data FROM resources").iterate()) {
           if (row.scope as string !== owner) continue;
           const resource = (JSON.parse(row.data as string) as StoredResource).object;

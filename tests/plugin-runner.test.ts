@@ -360,6 +360,9 @@ describe("Plugin Runner process boundary", () => {
     });
     expect(await runProbe(manager, "process_default", PROCESS_TYPE, "resource-ref"))
       .toEqual({ currentUid: expect.stringMatching(/^pr_/) });
+    expect(await runProbe(manager, "process_default", PROCESS_TYPE, "page-contract")).toEqual({
+      names: ["page-a", "page-b", "page-c"], end: "", sameVersion: true, invalid: "ResourceContinueInvalid", expired: "ResourceExpired",
+    });
     expect(await runProbe(manager, "process_default", PROCESS_TYPE, "patch-contract")).toEqual({ left: 2, right: 2, literal: null, testError: "TEST_OPERATION_FAILED", lockError: "ResourceVersionConflict" });
     const keys = await runProbe<string[]>(manager, "process_default", PROCESS_TYPE, "execution-context");
     expect(keys).toContain("executionId");

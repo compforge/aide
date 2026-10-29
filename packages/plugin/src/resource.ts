@@ -116,7 +116,24 @@ export interface ResourceListOptions {
   readonly matchIndex?: { readonly name: string; readonly value: string };
 }
 
+/** One bounded page; selectors must remain unchanged while following metadata.continue.
+ * @spec Pages share a collection revision or fail with ResourceExpired; no mixed-revision results.
+ * @link docs/plugin/resource.md#分页查询
+ */
+export interface ResourcePageOptions extends ResourceListOptions {
+  /** Required positive integer, at most 1000. */
+  readonly limit: number;
+  readonly continue?: string;
+}
+export interface ResourcePage<S, T> {
+  readonly items: readonly Readonly<Resource<S, T>>[];
+  readonly metadata: { readonly resourceVersion: string; readonly continue: string };
+}
+export class ResourceExpired extends Error { override name = "ResourceExpired" }
+export class ResourceContinueInvalid extends Error { override name = "ResourceContinueInvalid" }
+
 export interface ResourceReader {
+  listPage<S, T>(type: ResourceType, options: ResourcePageOptions): Promise<ResourcePage<S, T>>;
   get<TSpec, TStatus>(
     ref: ResourceRef,
   ): Promise<Readonly<Resource<TSpec, TStatus>> | undefined>;
