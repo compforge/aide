@@ -1,6 +1,6 @@
+import { readNotes } from "../note/query.ts";
 import { commitStatus } from "../status.ts";
 import { separationCoolingDown } from "./config.ts";
-import { retainRecent } from "../context.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
 import { digest } from "../chief-model.ts";
@@ -21,12 +21,14 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
   const refs = [...group.topics, ...(group.parent ? [group.parent] : [])];
   if (new Set(refs.map(t => t.uid)).size !== refs.length) throw new Error("Distinct roots required");
   const all = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
+  const selected = new Set(refs.map(ref => ref.uid));
+  const versions = new Map(await Promise.all(all.filter(t => selected.has(t.metadata.uid)).map(async t => [t.metadata.uid, understandingVersion(t, await readNotes(resources, t.metadata.uid))] as const)));
   const resolve = (ref: { uid: string; version: string }) => {
     const topic = all.find(t => t.metadata.uid === ref.uid);
     if (!topic || topic.metadata.deletionTimestamp || topic.spec.default || topic.spec.parentRef) throw new Error("Only available non-Default roots can be grouped");
     if (separationCoolingDown(topic))
       throw new Error("Topic organization is cooling down; respect the recorded boundary and retry later");
-    if (understandingVersion(topic) !== ref.version) throw new Error("Topic understanding changed; read again");
+    if (versions.get(topic.metadata.uid) !== ref.version) throw new Error("Topic understanding changed; read again");
     return topic;
   };
   const children = group.topics.map(resolve);
@@ -37,16 +39,16 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
     // all parent edges and synthesized understanding are then published in one commit.
     const id = randomUUID();
     parent = await resources.create(TOPIC_TYPE, { name: digest(id), spec: { id, name: group.name! },
-      status: { receipts: [], summary: "", recent: [] } });
+      status: { receipts: [], summary: "" } });
   }
   try {
     await commitStatus(resources, [
       ...children.map(resource => ({ operation: "replace" as const, resource, spec: { ...resource.spec, parentRef: resourceRef(parent) },
         status: { ...resource.status, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null, organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid,
-          toUid: parent.metadata.uid, reason: `Weave grouped under ${parent.spec.name ?? parent.spec.id}` } } })),
-      { operation: "patchStatus", resource: parent, patch: { organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid, reason: "Weave combined related roots" }, weaveRevision: (parent.status.weaveRevision ?? 0) + 1,
-        ...(!group.parent ? { summary: group.summary!, recent: retainRecent(children.flatMap(t => t.status.recent)),
-          absorbed: Object.fromEntries(children.map(t => [t.metadata.uid, understandingVersion(t)])),
+          reviewedVersion: versions.get(resource.metadata.uid), toUid: parent.metadata.uid, reason: `Weave grouped under ${parent.spec.name ?? parent.spec.id}` } } })),
+      { operation: "patchStatus", resource: parent, patch: { organization: { at: new Date().toISOString(), actorUid: weave.metadata.uid, ...(group.parent ? { reviewedVersion: versions.get(parent.metadata.uid) } : {}), reason: "Weave combined related roots" }, weaveRevision: (parent.status.weaveRevision ?? 0) + 1,
+        ...(!group.parent ? { summary: group.summary!,
+          absorbed: Object.fromEntries(children.map(t => [t.metadata.uid, versions.get(t.metadata.uid)!])),
           absorbedSummaries: Object.fromEntries(children.map(t => [t.metadata.uid, summaryVersion(t)])) } : {}),
         lastInputAt: (group.parent ? [parent, ...children] : children).map(t => t.status.lastInputAt ?? t.metadata.creationTimestamp).sort().at(-1),
       } },

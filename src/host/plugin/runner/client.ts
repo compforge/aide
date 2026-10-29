@@ -446,7 +446,7 @@ export class PluginRunnerClient {
       case "resource.patch":
         return await this.callbacks.resources.patch(
           request.resource,
-          request.patch,
+          request.patch, request.options,
         );
       case "resource.patchMetadata":
         return await this.callbacks.resources.patchMetadata(
@@ -456,7 +456,7 @@ export class PluginRunnerClient {
       case "resource.patchStatus":
         return await this.callbacks.resources.patchStatus(
           request.resource,
-          request.patch,
+          request.patch, request.options,
         );
 
     }

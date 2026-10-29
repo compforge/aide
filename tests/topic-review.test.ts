@@ -1,3 +1,4 @@
+import { committedStatus } from "./fixtures/resource-write.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -183,7 +184,7 @@ test(`${changed} maintenance is selected from Topic data`, async t => {
   if (changed === "structure") await f.resources.patchStatus(f.read(), { weaveRevision: 1 });
   else {
     const child = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.read()) },
-      status: { summary: changed === "summary" ? "New understanding" : "", recent: [], receipts: [] } });
+      status: { summary: changed === "summary" ? "New understanding" : "", receipts: [] } });
     if (changed === "notes") {
       await f.resources.patchStatus(f.read(), { absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
       await f.run({ review: backoff }); assert.equal(f.calls.length, 0);
@@ -209,7 +210,7 @@ test("Arrival racing an empty decision invalidates the inspected root and retrie
   const f = await fixture(t); await f.due();
   let once = true;
   f.context.resources.commit = async writes => {
-    if (once && writes.some(w => w.operation === "patchStatus" && w.resource.kind === "Topic" && w.patch.idleReviewCount === 1)) {
+    if (once && writes.some(w => "resource" in w && w.resource.kind === "Topic" && committedStatus(w)?.idleReviewCount === 1)) {
       once = false; await f.input("race", InputAttention.Normal);
     }
     return f.resources.commit(writes);

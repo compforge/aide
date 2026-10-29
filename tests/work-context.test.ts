@@ -1,3 +1,4 @@
+import { committedStatus } from "./fixtures/resource-write.ts";
 import { workObservation, workDueAt } from "../plugins/personal/status.ts";
 import { workPhase } from "../plugins/personal/status.ts";
 import assert from "node:assert/strict";
@@ -66,7 +67,6 @@ test("Work intake preserves primary text and leaves receipts pending until expli
   assert.equal(seen.size, 65);
   assert.equal((await f.read()).status.summary, "");
   assert.equal((await f.read()).status.lastReport!.text, "Current verified progress");
-  assert.deepEqual((await f.read()).status.recent, []);
 });
 
 test("Work report acknowledges exact admitted IDs; late arrivals remain pending", async t => {
@@ -100,10 +100,7 @@ test("Periodic Routine reports schedule the next occurrence without rewriting un
     const current = await f.read();
     assert.equal(workPhase(current), "scheduled");
     assert.ok(Date.parse(workDueAt(current)!) > Date.now());
-    assert.ok(current.status.recent.length <= RECENT_COUNT);
-    assert.ok(current.status.recent.reduce((sum, entry) => sum + entry.text.length, 0) <= RECENT_CHARS);
   }
-  assert.equal((await f.read()).status.recent.length, 0);
 });
 
 test("Work progress and receipts roll back together; tool persistence can retry without inference", async t => {
@@ -125,7 +122,7 @@ test("Shared Input admission conflicts occur before Harness effects; a fresh rec
   await consumeWorkInputs(f.context, await f.read());
   let conflicted = false, calls = 0;
   const context = { ...f.context, resources: { ...f.resources, async commit(writes: Parameters<typeof f.resources.commit>[0]) {
-    if (!conflicted && writes.some(write => write.operation === "patchStatus" && write.patch.execution)) {
+    if (!conflicted && writes.some(write => committedStatus(write)?.execution)) {
       conflicted = true;
       const input = (await f.pending())[0]!;
       await f.resources.patchStatus(input, { route: { ...input.status.route, lastError: "Concurrent coordinator update" } });

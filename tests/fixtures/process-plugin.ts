@@ -39,12 +39,29 @@ const plugin: PluginPackage = {
           if (operation === "no-builtins") {
             const rejected: string[] = [];
             for (const kind of ["Input", "Output", "Turn", "Session", "Target", "SessionTargetBinding"]) {
-              try { await context.resources.list({ apiVersion: ["Input", "Task", "Routine", "Topic"].includes(kind) ? "aide.dev/v1alpha2" : "aide.dev/v1alpha1", kind }); }
+              try { await context.resources.list({ apiVersion: ["Task", "Routine", "Topic"].includes(kind) ? "aide.dev/v1alpha3" : ["Input", "Person"].includes(kind) ? "aide.dev/v1alpha2" : "aide.dev/v1alpha1", kind }); }
               catch (error) { if (!String(error).includes("Unknown resource definition")) throw error; rejected.push(kind); }
             }
             return rejected;
           }
 
+          if (operation === "patch-contract") {
+            const original = await context.resources.patch(resource, { type: "merge", value: { status: { left: 1, right: 1 } } });
+            await context.resources.patch(original, { type: "merge", value: { status: { right: 2 } } });
+            await context.resources.patch(original, { type: "json", value: [
+              { op: "test", path: "/status/left", value: 1 }, { op: "replace", path: "/status/left", value: 2 },
+              { op: "add", path: "/status/literal", value: null },
+            ] });
+            let testError = "", lockError = "";
+            try { await context.resources.commit([
+              { operation: "patchStatus", resource, patch: { right: 9 } },
+              { operation: "patch", resource, patch: { type: "json", value: [{ op: "test", path: "/status/left", value: 1 }] } },
+            ]); } catch (error) { testError = (error as Error).name; }
+            try { await context.resources.patchStatus(original, { done: false }, { resourceVersion: original.metadata.resourceVersion }); }
+            catch (error) { lockError = (error as Error).name; }
+            const current = await context.resources.get<unknown, Record<string, unknown>>({ ...resource, ...resource.metadata });
+            return { left: current!.status.left, right: current!.status.right, literal: current!.status.literal, testError, lockError };
+          }
           if (operation === "execution-context") {
             return Object.keys(execution).sort();
           }
@@ -85,7 +102,9 @@ const plugin: PluginPackage = {
         };
         try {
           const result = await probe();
-          await context.resources.patchStatus(resource, { done: true, result });
+          await context.resources.patch(resource, { type: "json", value: [
+            { op: "add", path: "/status/done", value: true }, { op: "add", path: "/status/result", value: result },
+          ] });
         } catch (error) {
           await context.resources.patchStatus(resource, { done: true, error: String(error) });
         }

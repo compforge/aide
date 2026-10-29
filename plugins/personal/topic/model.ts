@@ -4,7 +4,7 @@ import type { InputSpec, InputStatus } from "../input/model.ts";
 import type { OutputView } from "../../../src/output.ts";
 import type { LoopExecution } from "../loop.ts";
 import type { TopicReview } from "./review.ts";
-export const TOPIC_TYPE = { apiVersion: "aide.dev/v1alpha2", kind: "Topic" } as const;
+export const TOPIC_TYPE = { apiVersion: "aide.dev/v1alpha3", kind: "Topic" } as const;
 export const DEFAULT_TOPIC_ID = "default";
 export interface TopicSpec { address?: Address; id: string; name?: string; default?: boolean; review?: TopicReview;
   topicKey?: string; parentRef?: ResourceRef & { uid: string } }

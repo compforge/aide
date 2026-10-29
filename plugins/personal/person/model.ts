@@ -2,7 +2,7 @@ import type { ResourceContext } from "../context.ts";
 import { z } from "zod";
 import type { Resource, ResourceRef } from "@compforge/aide-plugin";
 
-export const PERSON_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Person" } as const;
+export const PERSON_TYPE = { apiVersion: "aide.dev/v1alpha2", kind: "Person" } as const;
 export const IdentitySchema = z.object({ provider: z.string().trim().min(1), scope: z.string().trim().min(1), id: z.string().trim().min(1) }).strict()
   .superRefine((identity, ctx) => {
     if (identity.provider !== "lark") return;

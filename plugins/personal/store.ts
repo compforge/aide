@@ -1,3 +1,4 @@
+import { notes } from "./note/query.ts";
 import { isDeepStrictEqual } from "node:util";
 import { workObservation } from "./status.ts";
 import { commitStatus } from "./status.ts";
@@ -23,7 +24,7 @@ export class Store {
     if (!topic) throw new Error(`Work Topic unavailable: ${ref.uid}`);
     return topic.spec.id;
   }
-  toWork(resource: WorkResource): Work { return toWork(resource, this.topicId(resource.status.topic)); }
+  toWork(resource: WorkResource): Work { return toWork(resource, this.topicId(resource.status.topic), notes(this.resources, resource.metadata.uid)); }
   constructor(readonly resources: PluginResourceStore, readonly client: ResourceClient, readonly topics: TopicStore) {}
 
   read(): { works: Work[]; outputs: OutputView[] } {

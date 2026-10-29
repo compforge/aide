@@ -1,5 +1,6 @@
+import jsonPatch from "fast-json-patch";
 import { isDeepStrictEqual } from "node:util";
-import type { Resource, ResourceClient, ResourceCommit } from "@compforge/aide-plugin";
+import type { Resource, ResourceClient, ResourceCommit, ResourcePatchOperation } from "@compforge/aide-plugin";
 import { setConditions, type Condition, type ConditionValue } from "./conditions.ts";
 import type { InputStatus } from "./input/model.ts";
 import type { WorkSpecFields, WorkStatus, Work } from "./model.ts";
@@ -52,14 +53,16 @@ export function statusPatch<S, T>(resource: Readonly<Resource<S, T>>, patch: Par
   return observed(resource.kind, resource.spec, { ...resource.status, ...patch }, resource.metadata.generation, resource.metadata.deletionTimestamp) as T;
 }
 export function patchStatus<S, T>(resources: ResourceClient, resource: Readonly<Resource<S, T>>, patch: Partial<T>): Promise<Resource<S, T>> {
-  return resources.patchStatus(resource, statusPatch(resource, patch));
+  return resources.patch(resource, { type: "json", value: jsonPatch.compare(resource.status as object, statusPatch(resource, patch) as object)
+    .map(op => ({ ...op, path: `/status${op.path}` })) as ResourcePatchOperation[] }, { resourceVersion: resource.metadata.resourceVersion });
 }
 export function commitStatus(resources: ResourceClient, writes: readonly ResourceCommit[]) {
   return resources.commit(writes.map(write => {
-    if (write.operation === "patchStatus") return { ...write, patch: statusPatch(write.resource, write.patch) };
+    if (write.operation === "patchStatus") return { operation: "patch" as const, resource: write.resource, options: { resourceVersion: write.resource.metadata.resourceVersion },
+      patch: { type: "json" as const, value: jsonPatch.compare(write.resource.status as object, statusPatch(write.resource, write.patch) as object).map(op => ({ ...op, path: `/status${op.path}` })) as ResourcePatchOperation[] } };
     if (write.operation === "replace") return { ...write, status: observed(write.resource.kind, write.spec, write.status,
       write.resource.metadata.generation + Number(!isDeepStrictEqual(write.resource.spec, write.spec)), write.resource.metadata.deletionTimestamp) };
-    if (write.operation === "create" && write.type.apiVersion === "aide.dev/v1alpha2") return { ...write, status: observed(write.type.kind, write.spec, write.status ?? {}, 1) };
+    if (write.operation === "create" && ["aide.dev/v1alpha2", "aide.dev/v1alpha3"].includes(write.type.apiVersion)) return { ...write, status: observed(write.type.kind, write.spec, write.status ?? {}, 1) };
     return write;
   }));
 }
@@ -67,7 +70,7 @@ export function commitStatus(resources: ResourceClient, writes: readonly Resourc
 export function workObservation(work: Work, generation: number): Omit<WorkStatus, "topic"> {
   const at = work.lastReport?.at ?? new Date().toISOString();
   const outcome = { at, text: work.lastReport?.text ?? "", observedGeneration: generation };
-  return { summary: work.summary, recent: work.recent,
+  return { summary: work.summary,
     ...(work.lastReport ? { lastReport: work.lastReport } : {}), ...(work.recoveryNotice ? { recoveryNotice: work.recoveryNotice } : {}),
     waiting: work.status === "waiting" ? { question: work.question! } : work.kind === "task" && work.nextAt ? { until: work.nextAt } : null,
     recovery: ["uncertain", "invalid_result", "running"].includes(work.status) ? { reason: work.status === "invalid_result" ? "InvalidResult" : "ExecutionUncertain", message: "Inspect previous execution effects" } : null,

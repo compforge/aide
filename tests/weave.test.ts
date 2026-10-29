@@ -1,3 +1,6 @@
+import { seedNotes } from "./fixtures/notes.ts";
+import { notes } from "../plugins/personal/note/query.ts";
+import { contentVersion } from "../plugins/personal/context-write.ts";
 import { assessInput } from "../plugins/personal/topic/assess.ts";
 import { runInput, nextInputs } from "../plugins/personal/loop.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
@@ -71,7 +74,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
     await reconcileChief(f.context, rootExecution, f.refresh(b));
     await assessInput(f.resources, f.refresh(a), "old-chief", { inputId: "first", summary: "Old Chief finished naturally" });
     const current = f.refresh(a);
-    await summarizeTopic(f.resources, current, "old-chief", { version: current.metadata.resourceVersion, summary: "Late finding" }, 4000);
+    await summarizeTopic(f.resources, current, "old-chief", { version: contentVersion(current), summary: "Late finding" }, 4000);
     const afterSummary = f.refresh(a);
     await upsertTopicNote(f.resources, afterSummary, "old-chief", { version: afterSummary.metadata.resourceVersion, text: "Late progress from the draining Chief" }, "late-note");
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
@@ -82,7 +85,7 @@ test("Weave reparents a running Chief immediately; materials and old Work stay w
   assert.equal(f.aide.works().find(w => w.id === task2)!.topicId, b.spec.id);
   assert.equal(f.refresh(b).spec.review?.enabled, false, "existing parent keeps its review policy");
   assert.equal(f.refresh(a).status.summary, "Late finding");
-  assert.equal(f.refresh(a).status.recent[0]?.text, "Late progress from the draining Chief");
+  assert.equal(notes(f.aide.topics.resources, a.metadata.uid)[0]?.text, "Late progress from the draining Chief");
   assert.equal(f.refresh(a).status.execution, null);
   for (const id of ["first", "second"]) {
     const input = f.aide.topics.inputStore.get(id)!;
@@ -117,7 +120,7 @@ test("Topic expiry checks child absorption, releases source key, and never reviv
   assert.ok(f.aide.topics.resource(a.spec.id), "unabsorbed child survives");
   await f.resources.patchStatus(f.aide.topics.resource(parent.id)!, { execution: { id: "synthesis", startedAt: new Date().toISOString() } });
   const p = f.aide.topics.resource(parent.id)!;
-  await summarizeTopic(f.resources, p, "synthesis", { version: p.metadata.resourceVersion, summary: "Changed child finding retained",
+  await summarizeTopic(f.resources, p, "synthesis", { version: contentVersion(p), summary: "Changed child finding retained",
     absorbed: [{ uid: a.metadata.uid, version: understandingVersion(f.refresh(a)) }] }, 4000);
   await collectTopic(f.context, f.refresh(a));
   assert.equal(f.aide.topics.resource(a.spec.id), undefined);
@@ -215,7 +218,7 @@ test("A quiet changed child wakes root synthesis without Input and can then expi
     prompts++;
     assert.match(args.prompt, /"kind":"absorb"/);
     const current = f.aide.topics.resource(root.id)!;
-    await summarizeTopic(f.resources, current, "absorb", { version: current.metadata.resourceVersion, summary: "New evidence retained",
+    await summarizeTopic(f.resources, current, "absorb", { version: contentVersion(current), summary: "New evidence retained",
       absorbed: [{ uid: a.metadata.uid, version: understandingVersion(f.refresh(a)) }] }, 4000);
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
   } } };
@@ -282,20 +285,21 @@ test("Unfinished synthesis backs off without inventing Input or refreshing activ
 });
 
 /** @case Grouping retains recent matters with their stable identities instead of moving progress into parent summary. */
-test("Weave carries bounded child Notes into the parent while keeping a durable parent summary", async t => {
+test("Weave retains independent child Notes without copying them into the parent", async t => {
   const f = fixture(t); await f.initialize();
-  const a = await ensureSourceTopic(f.resources, "note:a", "A"), b = await ensureSourceTopic(f.resources, "note:b", "B");
-  const person = await f.aide.persons.observe({ provider: "test", scope: "weave", id: "reporter" }, "Reporter");
-  const note = { id: "verification-progress", createdAt: "2026-10-27T00:00:00Z", updatedAt: "2026-10-27T01:00:00Z", text: "A reports verification is 50% complete",
-    persons: [{ apiVersion: "aide.dev/v1alpha1", kind: "Person" as const, namespace: "v1" as const, name: person.metadata.name, uid: person.metadata.uid }] };
-  const version = candidateVersion(a);
-  await f.resources.patchStatus(a, { recent: [note] });
-  assert.equal(candidateVersion(f.refresh(a)), version, "Note-only changes do not restart the stable-topic scan");
-  await f.group(f.refresh(a), b);
-  const parent = f.aide.topics.resource(f.aide.topics.list().find(topic => !topic.parentRef)!.id)!;
-  assert.deepEqual(parent.status.recent, [note]);
-  assert.equal(parent.status.summary, "Preserved child findings");
-  assert.ok(parent.status.absorbedSummaries?.[a.metadata.uid]);
+  const a = await f.aide.topics.ensure("noted-a"), b = await f.aide.topics.ensure("noted-b");
+  await seedNotes(f.resources, a, [{ id: "evidence", text: "Child evidence" }]);
+  const currentA = f.aide.topics.resource("noted-a")!;
+  for (const page of [candidatePage([currentA], 0, 12), searchRootTopics([currentA], undefined, 0, 12)]) {
+    assert.equal(page.items[0]!.uid, currentA.metadata.uid);
+    assert.equal("version" in page.items[0]!, false, "Discovery cannot supply a version that omits unread Notes");
+  }
+  const currentB = f.aide.topics.resource("noted-b")!;
+  const grouped = await groupTopics(f.resources, await f.weave(), { name: "Shared", summary: "Durable", topics: [currentA, currentB].map(t => ({ uid: t.metadata.uid, version: understandingVersion(t, notes(f.aide.topics.resources, t.metadata.uid)) })) }, 4000);
+  const parent = f.aide.topics.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE).find(t => t.metadata.uid === grouped.parentUid)!;
+  assert.equal(parent.status.summary, "Durable");
+  assert.equal(notes(f.aide.topics.resources, parent.metadata.uid).length, 0);
+  assert.equal(notes(f.aide.topics.resources, a.metadata.uid)[0]!.text, "Child evidence");
 });
 
 /** @case Old view receipts are rechecked once, with a fresh session for each bounded batch. */
@@ -363,7 +367,7 @@ test("Weave distinguishes a single candidate from its catalog and extends an exi
     assert.equal(noMatch.rootCount, 3);
     assert.equal(noMatch.matchingRootCount, 0);
     await groupTopics(f.resources, await f.weave(), { topics: [{ uid: candidate.metadata.uid, version: understandingVersion(f.refresh(candidate)) }],
-      parent: { uid: parent.metadata.uid, version: found.items[0]!.version } }, 4000);
+      parent: { uid: parent.metadata.uid, version: understandingVersion(f.refresh(parent), notes(f.aide.topics.resources, parent.metadata.uid)) } }, 4000);
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
   } } };
   await reconcile(execution, await f.weave());

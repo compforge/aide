@@ -1,3 +1,4 @@
+import { NoteViewSchema } from "./note/model.ts";
 import { ConditionsSchema, type Condition } from "./conditions.ts";
 import { OrganizationSchema } from "./topic/ref.ts";
 import { ContextFields } from "./context.ts";
@@ -20,7 +21,7 @@ export const WorkInputRequestSchema = z.object({
   "Only an update request accepts and requires changes");
 export type WorkInputRequest = z.infer<typeof WorkInputRequestSchema>;
 
-export const WorkSchema = z.object({
+export const WorkSchema = z.object({ recent: z.array(NoteViewSchema).default([]),
   conditions: ConditionsSchema,
   uid: z.string().optional(),
   id: z.string(),
@@ -43,7 +44,7 @@ export type WorkSpecFields = Pick<Work, "title" | "instruction"> & { paused?: bo
 export interface WorkStatus {
   topic: import("@compforge/aide-plugin").ResourceRef & { uid: string };
   organization?: z.infer<typeof OrganizationSchema>;
-  summary: string; recent: import("./context.ts").Note[];
+  summary: string; contextWriter?: import("./note/model.ts").NoteStatus["writer"];
   conditions?: Condition[];
   waiting?: { question?: string; until?: string } | null;
   recovery?: { reason: "ExecutionUncertain" | "InvalidResult"; message: string } | null;

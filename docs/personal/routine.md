@@ -19,7 +19,7 @@ title、instruction 保存持续职责；trigger 声明 cron、timezone 或 even
 | 字段 | 含义 |
 | --- | --- |
 | topic / organization | 当前 Topic UID 与最近一次归属调整依据 |
-| summary / recent | 长期认识和有界近期事项 |
+| summary | 长期认识；recent 从独立 Note 查询，不在 status 中保存 |
 | agent / execution / lastExecutionId | 原生会话、当前执行和最近报告的执行关联；execution 记录启动时的 observedGeneration |
 | waiting | question 表达待回答问题，until 表达等待到期时间 |
 | recovery / recoveryNotice | 需核对的结果或副作用，以及待创建的恢复通知 |
@@ -105,7 +105,7 @@ assistant / tool：处理与回执
 
 业务背景是请求投影，不追加到原生 transcript，也不参与历史压缩；恢复后从 CRD 重建。
 
-summary 与 Note 的职责、工具和预算见[有界认识与近期依据](README.md#有界认识与近期依据)。常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整认识仍保存在资源中。
+summary 与 Note 的职责、工具和预算见[有界认识与近期依据](README.md#有界认识与近期依据)。常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整事项保存在独立 Note 中，通过 read_note 读取。
 
 优化重点是能否识别值得推进或告知的变化、避免重复提醒和重复操作，并在长期运行后仍保留未决问题。结合有效通知与漏报、重复工具调用、上下文增长、压缩频率和每轮耗时，调整观察预览、当前状态与历史材料的拼接结构；模型成本下降不能以漏掉重要变化为代价。
 

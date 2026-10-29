@@ -1,3 +1,6 @@
+import { seedNotes } from "./fixtures/notes.ts";
+import { contentVersion } from "../plugins/personal/context-write.ts";
+import { readNotes } from "../plugins/personal/note/query.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { once } from "node:events";
@@ -41,7 +44,7 @@ test("Person catalog resolves identities across sessions, preserves profiles acr
   const scope = f.aide.personal; await scope.start();
   const across = new Persons(scope.plugins.resourceClient("personal"), { identities: [LOCAL_ME] });
   assert.equal((await across.read(first.metadata.name)).metadata.uid, first.metadata.uid);
-  const summarized = await across.summarize(first.metadata.name, first.metadata.uid, first.metadata.resourceVersion, "2026-10-21：关注可靠性；来自明确表达。");
+  const summarized = await across.summarize(first.metadata.name, first.metadata.uid, contentVersion(first), "2026-10-21：关注可靠性；来自明确表达。");
   await assert.rejects(f.aide.persons.edit(sameName.metadata.name, sameName.metadata.uid, sameName.metadata.resourceVersion,
     { ...sameName.spec, identities: [identity] }), /already belongs/);
   await assert.rejects(f.aide.persons.edit(me.metadata.name, me.metadata.uid, me.metadata.resourceVersion,
@@ -59,8 +62,8 @@ test("summarize_person guards shared summary versions while Input retention rema
   const edited = await f.aide.persons.edit(me.metadata.name, me.metadata.uid, me.metadata.resourceVersion,
     me.spec, "不要再把别人的观点当成我的偏好。");
   const tool = personTools(f.aide.persons).find((tool) => tool.name === "summarize_person")!;
-  await assert.rejects(tool.execute("stale", { id: me.metadata.name, uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "stale" }, undefined, undefined, {} as never), /version conflict/);
-  await tool.execute("fresh", { id: me.metadata.name, uid: edited.metadata.uid, version: edited.metadata.resourceVersion, summary: edited.status.summary + "明确表达：关注机器人的可靠性。" }, undefined, undefined, {} as never);
+  await assert.rejects(tool.execute("stale", { id: me.metadata.name, uid: me.metadata.uid, version: contentVersion(me), summary: "stale" }, undefined, undefined, {} as never), /version conflict/);
+  await tool.execute("fresh", { id: me.metadata.name, uid: edited.metadata.uid, version: contentVersion(edited), summary: edited.status.summary + "明确表达：关注机器人的可靠性。" }, undefined, undefined, {} as never);
   const current = (await f.aide.persons.findIdentity(LOCAL_ME))!;
   assert.deepEqual(current.spec.identities, me.spec.identities);
   assert.ok(current.status.summary.startsWith(edited.status.summary));
@@ -125,32 +128,29 @@ test("Person context is bounded and survives identity enrichment, user correctio
   const f = await setup(t);
   const identity = { provider: "lark", scope: "cli_bot", id: "ou_context" };
   let current = await f.aide.persons.observe(identity);
-  current = await f.aide.persons.summarize(current.metadata.name, current.metadata.uid, current.metadata.resourceVersion, "Stable understanding");
-  for (let n = 0; n < 55; n++) {
-    await f.aide.persons.upsertNote(current.metadata.name, current.metadata.uid,
-      { version: current.metadata.resourceVersion, text: `Observation ${n}: ${"e".repeat(2000)}` }, `observation-${n}`);
-    current = await f.aide.persons.read(current.metadata.name);
-  }
-  assert.ok(current.status.recent.length <= 40);
-  assert.ok(current.status.recent.reduce((sum, item) => sum + item.text.length, 0) <= 16000);
-  const summary = current.status.summary, recent = current.status.recent;
+  current = await f.aide.persons.summarize(current.metadata.name, current.metadata.uid, contentVersion(current), "Stable understanding");
+  await seedNotes(f.aide.runtime.plugins.resourceClient("personal"), current, Array.from({ length: 55 }, (_, n) => ({ id: `observation-${n}`, text: `Observation ${n}: ${"e".repeat(2000)}` })));
+  const recent = await readNotes(f.aide.runtime.plugins.resourceClient("personal"), current.metadata.uid, "people");
+  assert.ok(recent.length <= 40);
+  assert.ok(recent.reduce((sum, item) => sum + item.text.length, 0) <= 16000);
+  const summary = current.status.summary;
   current = await f.aide.persons.observe(identity, "张三");
   assert.equal(current.status.summary, summary);
-  assert.deepEqual(current.status.recent, recent);
+  assert.deepEqual(await readNotes(f.aide.runtime.plugins.resourceClient("personal"), current.metadata.uid, "people"), recent);
   current = await f.aide.persons.edit(current.metadata.name, current.metadata.uid, current.metadata.resourceVersion,
     current.spec, "以用户明确表述为准");
   assert.equal(current.status.summary, "以用户明确表述为准");
   assert.equal(current.status.updatedBy, "user");
-  assert.deepEqual(current.status.recent, recent, "User corrections preserve recent Notes");
-  const correctedRecent = current.status.recent;
+  assert.deepEqual(await readNotes(f.aide.runtime.plugins.resourceClient("personal"), current.metadata.uid, "people"), recent, "User corrections preserve recent Notes");
+  const correctedRecent = await readNotes(f.aide.runtime.plugins.resourceClient("personal"), current.metadata.uid, "people");
   current = await f.aide.persons.edit(current.metadata.name, current.metadata.uid, current.metadata.resourceVersion,
     { ...current.spec, name: "张三（同事）" });
   assert.equal(current.status.summary, "以用户明确表述为准");
-  assert.deepEqual(current.status.recent, correctedRecent);
+  assert.deepEqual(await readNotes(f.aide.runtime.plugins.resourceClient("personal"), current.metadata.uid, "people"), correctedRecent);
   await f.restart();
   const restored = await f.aide.persons.read(current.metadata.name);
   assert.equal(restored.status.summary, "以用户明确表述为准");
-  assert.deepEqual(restored.status.recent, correctedRecent);
+  assert.deepEqual(restored.recent, correctedRecent);
   assert.deepEqual(restored.spec, current.spec);
 });
 

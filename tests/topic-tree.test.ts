@@ -81,8 +81,9 @@ test("Chief reads its Topic tree and related Work through scoped indexes", async
   // Absorb current child understanding so this quiet read has no inference work.
   await f.resources.patchStatus(f.current(root), { absorbed: { [child.metadata.uid]: understandingVersion(f.current(child)) },
     absorbedSummaries: { [child.metadata.uid]: summaryVersion(f.current(child)) } });
+  const childWork = f.aide.work(child.spec.id).list()[0]!;
   const store = f.aide.personal.store, originalList = store.resources.list.bind(store.resources);
-  const allowed = new Set([root.metadata.uid, child.metadata.uid, root.spec.id, child.spec.id]);
+  const allowed = new Set([root.metadata.uid, child.metadata.uid, root.spec.id, child.spec.id, childWork.uid!]);
   store.resources.list = (type, options) => {
     assert.ok(options?.matchIndex, `Unscoped ${type.kind} read`);
     assert.ok(allowed.has(options.matchIndex.value), `Unrelated ${type.kind} read`);

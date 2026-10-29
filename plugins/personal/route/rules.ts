@@ -29,7 +29,7 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
       try {
         topic = await context.resources.create(TOPIC_TYPE, { name: digest(input.spec.topicId),
           spec: { id: input.spec.topicId, name: initialTopicName(input.spec.topicName || input.spec.text), ...(input.spec.source ? { address: input.spec.source } : {}) },
-          status: { receipts: [], summary: "", recent: [] } });
+          status: { receipts: [], summary: "" } });
       } catch (error) {
         if (!String(error).includes("resource already exists")) throw error;
         topic = await context.resources.get<TopicSpec, TopicStatus>({ ...TOPIC_TYPE, namespace: "v1", name: digest(input.spec.topicId) });

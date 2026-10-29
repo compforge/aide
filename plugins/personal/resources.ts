@@ -13,14 +13,14 @@ export function workType(kind: Work["kind"]) {
 }
 
 /** @spec Work is the tool/channel view of Task and Routine, not a persisted resource kind. */
-export function toWork(resource: WorkResource, topicId: string): Work {
+export function toWork(resource: WorkResource, topicId: string, recent: import("./note/model.ts").Note[] = []): Work {
   if (resource.kind !== TASK_TYPE.kind && resource.kind !== ROUTINE_TYPE.kind) {
     throw new Error(`Not personal work: ${resource.kind}/${resource.metadata.name}`);
   }
   const observation = resource.status;
   const kind = resource.kind === TASK_TYPE.kind ? "task" : "routine";
   const trigger = "trigger" in resource.spec ? resource.spec.trigger : null;
-  const work = WorkSchema.parse({ id: resource.metadata.name, uid: resource.metadata.uid, ...resource.spec, ...observation, topicId, kind, trigger, revision: resource.metadata.generation, status: workPhase(resource), nextAt: workDueAt(resource), question: resource.status.waiting?.question ?? null });
+  const work = WorkSchema.parse({ id: resource.metadata.name, uid: resource.metadata.uid, ...resource.spec, ...observation, recent, topicId, kind, trigger, revision: resource.metadata.generation, status: workPhase(resource), nextAt: workDueAt(resource), question: resource.status.waiting?.question ?? null });
   validateTrigger(kind, work.trigger, new Date());
   return work;
 }

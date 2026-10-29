@@ -1,3 +1,4 @@
+import jsonPatch from "fast-json-patch";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
@@ -192,11 +193,12 @@ test("Crash after Input creation replays the saved delivery, not a changed live 
   f.incoming(async () => page([message("om_dm", { mentions: [] })]));
   f.history([message("om_context", { content: "original context" })]);
   let crashed = false;
-  await assert.rejects(observeMessages({ logger, resources: { ...f.resources, async patchStatus(resource, patch) {
+  await assert.rejects(observeMessages({ logger, resources: { ...f.resources, async patch(resource, value, options) {
+    const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(resource), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
     if (!crashed && f.inputs.list().length && (patch as MessageSourceStatus).pending?.some((item) => item.sequence === 1)) {
       crashed = true; throw new Error("Crash after Input");
     }
-    return f.resources.patchStatus(resource, patch);
+    return f.resources.patch(resource, value, options);
   } } }, f.resource(), f.connectors, now), /Crash after Input/);
   assert.equal(f.inputs.list().length, 1);
   const reads = f.reads;
@@ -353,11 +355,12 @@ test("Follow-up pagination resumes across restart and a terminal delivery surviv
   assert.equal(f.resource().status.pending![0]!.follow!.token, "page2");
   await f.restart();
   let crashed = false;
-  await assert.rejects(observeMessages({ logger, resources: { ...f.resources, async patchStatus(resource, patch) {
+  await assert.rejects(observeMessages({ logger, resources: { ...f.resources, async patch(resource, value, options) {
+    const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(resource), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
     if (!crashed && f.inputs.list().length === 3 && (patch as MessageSourceStatus).pending?.some((entry) => entry.sequence === 3)) {
       crashed = true; throw new Error("Crash on terminal delivery");
     }
-    return f.resources.patchStatus(resource, patch);
+    return f.resources.patch(resource, value, options);
   } } }, f.resource(), f.connectors, now + 120_000), /Crash on terminal delivery/);
   assert.equal(f.inputs.list().length, 3);
   await f.restart(); await f.observe(now + 180_000);

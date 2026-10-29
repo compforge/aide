@@ -1,3 +1,7 @@
+import { readNote } from "./note/service.ts";
+import { contentVersion } from "./context-write.ts";
+import { SubjectSchema } from "./note/model.ts";
+import { notes } from "./note/query.ts";
 import { knownReceivers } from "./person/receivers.ts";
 import { workPhase } from "./status.ts";
 import { commitStatus, patchStatus } from "./status.ts";
@@ -110,12 +114,12 @@ export class Personal {
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
       });
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, contactsTool(this.options.persons, this.options.channels ?? [], active), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), topicNote: async (input, callId) => {
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, contactsTool(this.options.persons, this.options.channels ?? [], active), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
         const c = active();
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
-        this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, noteId: result.noteId, version: result.version }, "Topic Note updated");
+        this.log.info({ topicId, topicUid: input.subject?.uid ?? c.metadata.uid, noteId: result.noteId, version: result.version }, "Topic Note updated");
         return result;
-      }, beforeWorkMutation: () => { active(); } });
+      }, contextWriter: () => { const c = active(); return { resource: SubjectSchema.parse(resourceRef(c)), executionId: c.status.execution!.id }; }, beforeWorkMutation: () => { active(); } });
     };
   }
 
@@ -178,7 +182,7 @@ export class Personal {
     const c = owner.kind === "Topic" ? this.store.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, owner.name) : undefined;
     const members = c ? new Set(this.topics.scope(c.metadata.uid).map(t => t.metadata.uid)) : undefined;
     const status = (i: Readonly<Resource<InputSpec, InputStatus>>) => attemptOf(i, owner) ?? attemptOf(i, owner, members);
-    if (!id) return { ...(c ? { context: { version: c.metadata.resourceVersion, summary: c.status.summary, recent: c.status.recent,
+    if (!id) return { ...(c ? { context: { version: contentVersion(c), summary: c.status.summary, recent: notes(this.store.resources, c.metadata.uid),
       summaryChars: topicPolicy(this.options.topic).summaryChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, attention: inputAttention(i.spec), status: status(i) })),
       nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
     const input = this.topics.inputStore.get(id);

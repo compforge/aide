@@ -71,7 +71,7 @@ test("Resource commit rolls back result and Output together on validation, confl
   assert.deepEqual(f.changes, []); assert.equal(notifications, 0);
   work = await f.client.patchStatus(work, { done: false });
   await f.client.patchStatus(work, { done: true });
-  await assert.rejects(f.client.commit([write("conflicted"), { operation: "patchStatus", resource: work, patch: { done: false } }]), /version conflict/);
+  await assert.rejects(f.client.commit([write("conflicted"), { operation: "patchStatus", resource: work, options: { resourceVersion: work.metadata.resourceVersion }, patch: { done: false } }]), /version conflict/);
   assert.equal(f.outputs.get("conflicted"), undefined);
   assert.equal(f.outputs.storage.hasReceipt("output:conflicted"), false);
   const current = f.topics.resources.get<{}, { done: boolean }>(type, "work");
@@ -277,7 +277,7 @@ test("Output retries preserve original call evidence without weakening immutable
   const first = await say("tool-call");
   const recorded = f.outputs.get(first.outputId)!.spec.createdBy;
   assert.deepEqual(recorded, { agent: { harness: "chief", sessionId: "first-session" }, executionId: "run", toolCallId: "tool-call" });
-  await f.client.patchStatus(f.topics.resource("topic")!, { agent: { harness: "chief" } });
+  await f.client.patch(f.topics.resource("topic")!, { type: "json", value: [{ op: "replace", path: "/status/agent", value: { harness: "chief" } }] });
   const absent = await say("without-reference");
   assert.equal(f.outputs.get(absent.outputId)!.spec.createdBy, undefined);
   await f.client.patchStatus(f.topics.resource("topic")!, { agent: { harness: "chief", sessionId: "new-session" } });

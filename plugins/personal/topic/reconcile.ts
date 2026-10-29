@@ -1,3 +1,5 @@
+import { readNotes } from "../note/query.ts";
+import { understandingVersion } from "./tree.ts";
 import { registerTopicObservations } from "./conditions.ts";
 import { maintenanceAgenda } from "./maintenance.ts";
 import { pendingAbsorption, readTopicRoot, readTopicSubtree, summaryVersion } from "./tree.ts";
@@ -99,13 +101,14 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   const pending = await nextInputs(context.resources, c, Number.MAX_SAFE_INTEGER, topics);
   const weave = (c.status.weaveRevision ?? 0) > (c.status.notifiedWeaveRevision ?? 0);
   let inputs = pending.slice(0, 8);
-  let absorption = pendingAbsorption(topics, c);
+  const versions = new Map(await Promise.all(topics.map(async t => [t.metadata.uid, understandingVersion(t, await readNotes(context.resources, t.metadata.uid))] as const)));
+  let absorption = pendingAbsorption(topics, c, false, versions);
   const absorbDelay = Math.max(0, Date.parse(c.status.nextAbsorbAt ?? "1970-01-01") - Date.now());
   const absorb = absorption.length > 0 && absorbDelay === 0;
   if (due && !inputs.some(i => canActivate(i.spec, c)) && !absorb && !weave) {
     const agenda = await maintenanceAgenda(context.resources, topics, policy);
     const needsReview = pending.some(i => i.spec.origin !== "trigger")
-      || pendingAbsorption(topics, c, true).length > 0 || agenda.reason !== "review";
+      || pendingAbsorption(topics, c, true, versions).length > 0 || agenda.reason !== "review";
     try {
       if (needsReview) {
         const request = await createReviewInput(context, c, schedule.dueAt, agenda);
@@ -132,7 +135,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   const input = inputs[0];
   const activatingInput = inputs.find(i => canActivate(i.spec, c));
   if (!activatingInput && !absorb && !weave) return { requeueAfterMs: Math.max(1, Math.min(intervalMs, absorption.length ? absorbDelay : Infinity)) };
-  if (activatingInput || due || weave) absorption = pendingAbsorption(topics, c, true);
+  if (activatingInput || due || weave) absorption = pendingAbsorption(topics, c, true, versions);
   // @why Persist cooldown before inference so crashes and unsuccessful synthesis cannot hot-loop.
   if (absorption.length) c = await updateTopic(context.resources, c, current => ({
     nextAbsorbAt: new Date(Date.now() + Math.min(900_000, 60_000 * 2 ** (current.status.absorbAttempts ?? 0))).toISOString(),
@@ -146,7 +149,8 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     const all = await readTopicSubtree(context.resources, resourceRef(c));
     const root = all[0];
     if (root && !root.metadata.deletionTimestamp && !root.spec.parentRef) {
-      const remaining = pendingAbsorption(all, root, true);
+      const latestVersions = new Map(await Promise.all(all.map(async t => [t.metadata.uid, understandingVersion(t, await readNotes(context.resources, t.metadata.uid))] as const)));
+      const remaining = pendingAbsorption(all, root, true, latestVersions);
       const progressed = absorption.some(before => !remaining.some(after => before.uid === after.uid && before.version === after.version));
       if (progressed) await updateTopic(context.resources, root, () => ({ absorbAttempts: 0, nextAbsorbAt: new Date(Date.now() + 60_000).toISOString() }));
       context.logger.info("Topic understanding maintenance reconciled", { attributes: { topicUid: root.metadata.uid, completed: !!completed, progressed, pending: remaining.length } });

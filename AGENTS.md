@@ -53,6 +53,7 @@ src/
   protocol/                # Host / Runner 共用 IPC 与 verb 契约
   plugin-context.ts        # 共用上下文构造与 verb 参数校验
 plugins/personal/
+  note/                    # 独立事项 CRD、subject/people 索引与容量保留
   person/                  # Person CRD 与跨会话人物目录
     model.ts               # 人物资料、外部身份、Me 标记与认识
     catalog.ts             # Host 共享资源作用域与身份唯一性校验
@@ -128,6 +129,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 - Aide 是 Me 的独立助理；Chief / Route / Weave / Task / Routine 是助理内部角色。外部交流不是自动委托，凭证不决定身份；摘要、归并和工作交接保留作者、确认状态与授权范围。身份契约见 [Kernel](docs/kernel.md#助理定位与身份边界)。
 - 底座提供 TypeScript controller-runtime，服务 Plugin Operator；Personal 拥有 Input、Output、Person、Topic、Task、Routine 与业务判断。通用资源和调度不能导入 Personal，应用装配负责安装定义、通信 action 和投递器。
+- 修改资源更新、并发、条件写入或协调机制时，先核对 [Resource 更新契约](docs/plugin/resource.md#更新操作与并发) 与 Kubernetes / controller-runtime；通用能力缺口优先在底座解决，再接入业务调用方。明确当前实现与设计目标，不用上层逐点重试或独立版本体系替代缺失的写入语义。
 - Host / Runner 不互相导入实现。Runner 经 ResourceClient、Connector API 与 Verb 请求宿主能力，不持有 Store、凭证客户端或 Harness SDK。共享协议放在 src/protocol，公共插件契约放在 packages/plugin。
 - 每种 CRD 在所属 plugin package 下有独立目录，模型、Reconcile 和专属辅助代码就近组织；跨资源协作留在插件层。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
 - 资源身份按插件实例与 namespace 组织，引用固定 UID。同一 Controller 对同一资源串行；主资源纯 status 更新不自动唤醒自身，协作方显式声明 Watch。资源所有者决定能否释放，Host 执行容量限制与合格对象的淘汰排序。
@@ -137,7 +139,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。可能已有外部副作用的中断先核对，不自动重放。
 - Channel / Source 通过绑定 Definition 的入口形成 Input，正文保存事实，证据留在 observation。路由统一归 Route，Default Topic 由系统按需创建并维护，只兜底，不提供手动切换；Input.status 的 route / assess / handle 是处理事实，消费者按索引查询。
 - Person 保存人物身份与认识，Me 是可选标记，与访问凭证独立。Input.sender / Input.receivers / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。
-- Topic、Task、Routine、Person 用 summary 保存长期有效、低频变化的认识，recent 保存按稳定 Note ID 持续更新的近期事项；两者独立写入，办理报告只确认业务状态与 Input 回执。结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
+- Topic、Task、Routine、Person 用 summary 保存长期有效、低频变化的认识，独立 Note 保存按稳定 ID 持续更新的近期事项，subject 关联 Topic/Work、people 关联人物，recent 仅作查询投影；两者独立写入，办理报告只确认业务状态与 Input 回执。结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
 - Task 承担有限目标，Routine 承担持续职责。领域 Agent 与通用 Pi 共用适配，工具按资源 UID 和当前 execution 绑定；业务请求与消费凭据落在 Input。Chief / Work 通过 say 产生独立 Output，report 与 say 分别提交；普通回答是新 Input，原生权限由独立 Approval 处理。
 - Forge 的 Repository / PullRequest 模型复用 harness-common，平台读取、增量发现完整性、不透明游标与 HTTP 约束由 repocli lib 承担；Aide Connector 负责配置与调用路由，Personal RepositorySource 负责清单缓存与观察任务交接，PullRequestSource 负责 PR 基线、检查点与 Input。契约见 [Forge](docs/connector/forge.md)。
 - Connector kind 与 version 是独立字符串，connectors 直接按 name 声明；领域 interface 定义操作契约，安装入口按 name 注册实现，配置不使用 type 或 packages/instances 包装；Plugin 与 verb 按 kind 发现 Connector 并通过同一客户端调用，私有配置和凭证不进入 Runner。Source 继续复用 Plugin 机制，Connector 是否作为 Resource 独立演进。契约见 [Connector 扩展](docs/connector/extensions.md)。

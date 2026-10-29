@@ -1,3 +1,4 @@
+import jsonPatch from "fast-json-patch";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -26,7 +27,7 @@ function fixture(t: TestContext) {
   store.storage.register("personal", definitions);
   const resources = createResourceClient(store);
   const topic = async (name: string, parent?: TopicResource) => resources.create<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { name,
-    spec: { id: name, ...(parent ? { parentRef: resourceRef(parent) } : {}) }, status: { summary: "", recent: [], receipts: [] } });
+    spec: { id: name, ...(parent ? { parentRef: resourceRef(parent) } : {}) }, status: { summary: "", receipts: [] } });
   return { store, resources, topic };
 }
 
@@ -66,7 +67,7 @@ test("Task completion is generation-bound; Routine completion records one occurr
     const routine = type.kind === "Routine";
     const spec: WorkSpec = { title: "Observe", instruction: "Check evidence", paused: false,
       ...(routine ? { trigger: { cron: "0 * * * *", timezone: "UTC", event: null } } : { initialInputId: "fact" }) };
-    await commitStatus(f.resources, [{ operation: "create", type, name: type.kind, spec, status: { topic: resourceRef(root), summary: "", recent: [],
+    await commitStatus(f.resources, [{ operation: "create", type, name: type.kind, spec, status: { topic: resourceRef(root), summary: "",
       execution: { id: "run", startedAt: new Date().toISOString(), observedGeneration: 1 } } }]);
     const read = async () => (await f.resources.get<WorkSpec, WorkAgentStatus>({ ...type, namespace: "v1", name: type.kind }))!;
     const work = await read();
@@ -99,9 +100,10 @@ test("Topic observations write one object, retain observed dependencies and conv
   assert.ok(conditionTrue(reviewed.status.conditions, "SummaryCurrent"));
   assert.equal((await f.resources.get(resourceRef(child)))!.metadata.resourceVersion, leaf.metadata.resourceVersion);
   const updated = await patchStatus(f.resources, leaf, { summary: "New understanding" });
-  const raced: typeof f.resources = { ...f.resources, async patchStatus(resource, patch) {
+  const raced: typeof f.resources = { ...f.resources, async patch(resource, value, options) {
+    const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(resource), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
     await patchStatus(f.resources, updated, { summary: "Changed during observation" });
-    return f.resources.patchStatus(resource, patch);
+    return f.resources.patch(resource, value, options);
   } };
   reviewed = await refreshSummaryConditions(raced, reviewed);
   assert.equal(reviewed.status.summaryDependencies![child.metadata.uid], summaryVersion(updated), "observation keeps its actual evidence version");
@@ -139,7 +141,7 @@ test("Large Topic observations propagate bottom-up without making Chief intake w
 
 test("Domain v1alpha2 schemas reject the former Work state bag and do not read old-version identities", async t => {
   const f = fixture(t), root = await f.topic("root");
-  assert.ok([INPUT_TYPE, TASK_TYPE, ROUTINE_TYPE, TOPIC_TYPE].every(type => type.apiVersion === "aide.dev/v1alpha2"));
+  assert.ok([TASK_TYPE, ROUTINE_TYPE, TOPIC_TYPE].every(type => type.apiVersion === "aide.dev/v1alpha3"));
   await assert.rejects(f.resources.create(TASK_TYPE, { name: "old-shape", spec: { title: "old", instruction: "old", initialInputId: "fact", revision: 1 },
     status: { topic: resourceRef(root), status: "done", nextAt: null, question: null } }));
   const oldType = { ...TOPIC_TYPE, apiVersion: "aide.dev/v1alpha1" };

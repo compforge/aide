@@ -108,7 +108,7 @@ Topic 使用独立 ID / UID，名称和来源 key 不充当资源身份。字段
 | spec.name | 便于理解的主题名称，可以变化 |
 | spec.topicKey | 可选的来源关联键；一个 key 同时只对应一个可接纳的 Topic |
 | spec.parentRef | 可选的父 Topic 引用，固定到 UID |
-| status.summary / status.recent | 长期认识与有界的近期事项 Note |
+| status.summary | 长期认识；recent 从独立 Note 的 subject 索引查询 |
 | status.lastInputAt | 本 Topic 及其子树已观察到的最后一次业务 Input 时间；子节点活动异步向上传播 |
 | spec.default | 系统兜底主题标记，与保留身份 `default` 一致，不可转移 |
 | status.agent / status.execution | root 的原生会话引用和执行状态；非 root 不继续运行 Chief |
@@ -302,7 +302,7 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 沿用当前 [认识与回执分离](#研判与上下文) 的约定：assess 记录单次处理事实，summary 只在长期认识变化时修订；recent 按同一事项持续维护 Note，二者独立。静默完成一条 Input 不要求维护认识。
 
-父 Topic 按需综合子 Topic 的长期认识和近期事项，不机械拼接全文。摘要变化可以唤醒综合；Note 单独变化不启动额外的摘要维护，在新输入或定时回顾已激活时一并查看。review 可以只确认已查看的子认识版本，不要求重传或改写父 summary。记录完整上下文和摘要两种已查看版本；Weave 的候选扫描不因 Note 单独变化重新启动；新建父 Topic 时保留按预算合并的子 Note；完整上下文版本仍保护交接和子 Topic 回收，未查看的 Note 不被静默丢弃。
+父 Topic 按需综合子 Topic 的长期认识和近期事项，不机械拼接全文。摘要变化可以唤醒综合；Note 单独变化不启动额外的摘要维护，在新输入或定时回顾已激活时一并查看。review 可以只确认已查看的子认识版本，不要求重传或改写父 summary。记录完整上下文和摘要两种已查看版本；Weave 的候选扫描不因 Note 单独变化重新启动；新建父 Topic 保留子 Note 的原始 subject，按需综合时创建自己的 Note；完整上下文版本仍保护交接和子 Topic 回收，未查看的 Note 不被静默丢弃。
 
 每次模型请求的 Background 只加载有界材料：
 
@@ -318,11 +318,11 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 ### 近期相关人物
 
-`status.recent` 继续保存 Note 列表；每条 Note 可带 `persons?: PersonRef[]`，表达该事项明确涉及的人物，引用固定 UID。Chief 从 Input.sender / receivers、read_person 或已有 Note 获取人物依据，维护有价值的事项时记录关联；不为填充名单专门创建 Note。引用也可沿用已有证据中的历史人物，即使该 Person 已删除。更新时省略 persons 保留已有关联，显式 `[]` 清空。旧 Note 无此字段仍有效，无需回填。
+近期事项保存为独立 Note CRD，`spec.subject` 关联 Topic / Task / Routine，`spec.people` 关联人物。省略 people 保留已有引用，[] 清空；历史人物可悬空。完整契约见 [Note](note.md)。
 
-上下文里的 `persons` 从当前 Topic 自身 recent 中按 UID 去重提取，最多预览 8 人，返回 `source: recentNotes`、Note 数和省略人数。它表示“近期事项涉及的人物”，允许不完整；不会回查 Input 或递归汇总子树。Root Chief 综合子主题事项时保留人物引用，Weave 创建父 Topic 时也随 Note 一起保留。人物已删除或被同名新实例替换时标记 unavailable，不展开私密人物认识。原先基于 Input 创建时间的 7 天 / 50 条采样规则不再使用。
+上下文里的 persons 从当前 Topic 自身 Note 查询窗口中按 UID 去重，最多预览 8 人，返回 source=recentNotes、Note 数和省略人数；不回查 Input 或递归汇总子树。父 Topic 不复制子 Note。人物删除或重建时显示 unavailable，不展开私密资料。
 
-Route、Chief、Weave 的列表在确定范围、排序和 offset 后，逐条补充活动、人物名称等派生信息，达到条数或字符预算即停止，最多多计算一条因字符预算放不下的候选；nextOffset 指向未返回的下一条。人物名称采用只读投影，不刷新 Person 的访问时间，不开启写事务。Note 自动预览同样最多携带 8 个引用，超出部分以 personsOmitted 标明，完整引用保留在 Note 中并可分页读取。完整 Topic 读取只解析所选 Topic 的人物。
+Route、Chief、Weave 的列表在确定范围、排序和 offset 后，逐条补充活动、人物名称等派生信息，达到条数或字符预算即停止，最多多计算一条因字符预算放不下的候选；nextOffset 指向未返回的下一条。人物名称采用只读投影，不刷新 Person 的访问时间，不开启写事务。Note 自动预览同样最多携带 8 个引用，超出部分以 peopleOmitted 标明，完整引用保留在 Note 中并可分页读取。完整 Topic 读取只解析所选 Topic 的人物。
 
 `catalogFingerprint` 根据已加载的 Topic UID、名称、组织调整依据、认识版本和最近 Input 时间计算，覆盖目录顺序、名称、组织调整依据及已记录的认识；`fingerprint` 根据本页实际返回内容计算。目录指纹不为未展示项查询活动、人物名称，也不承诺这些派生数据仍然有效，依赖详情前重新读取相关页面。
 
@@ -330,7 +330,7 @@ Route、Chief、Weave 的列表在确定范围、排序和 offset 后，逐条�
 
 ### 研判与上下文
 
-assess_input 只保存单次研判回执（最多 1000 字符）并原子交接 Work。summarize_topic 修订长期认识，topicUid 可指定根内的子主题；absorbed 使用直接子主题的 understandingVersion，只有查看回执时可以省略 summary。upsert_note 独立维护近期事项，默认目标为当前 Topic，target 可指定根内子 Topic 或已读取的 Person。必须先读取目标，提交时校验根执行、目标资源版本和子认识版本；过期综合需重读。完整契约见[有界认识与近期依据](README.md#有界认识与近期依据)。
+assess_input 保存单次研判回执并原子交接 Work。summarize_topic 使用内容 version 修订长期认识，absorbed 使用直接子 Topic 的 understandingVersion；提交时校验 summary 旧值、当前执行与真实归属，并在事务内查询子 Note 版本。upsert_note 默认当前 Topic，可指定子树中的 subject，通过 people 关联人物；不同 Note 不互相锁住。完整规则见 [Note](note.md)。
 
 list_topics 提供用于定位的预览：摘要和 Note 文本被截断时标记 `… [truncated]`，`noteTotal` 包含未展示的 Note。依赖不完整内容做判断或确认 absorbed 版本前，使用 read_topic 补读；`nextOffset` 非空时继续读取，为空表示全文结束。
 

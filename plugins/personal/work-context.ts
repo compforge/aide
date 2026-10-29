@@ -1,10 +1,12 @@
-import { patchStatus } from "./status.ts";
+import { contentVersion } from "./context-write.ts";
+import { SubjectSchema } from "./note/model.ts";
+import { resourceRef } from "./input/state.ts";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Resource, ResourceClient } from "@compforge/aide-plugin";
 import type { Logger } from "pino";
 import { noteDescription, noteFields, summaryDescription } from "../../agents/context-tools.ts";
-import { upsertNote } from "./notes.ts";
+import { readNote, upsertNote } from "./note/service.ts";
 import type { WorkSpec } from "./resources.ts";
 import type { WorkAgentStatus } from "./work-status.ts";
 const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<T> => definition;
@@ -19,14 +21,29 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
     return resource;
   };
   return [
+    tool({ name: "read_note", label: "Read note", description: "Read the complete text and content version of one Note belonging to this Work.",
+      parameters: Type.Object({ noteId: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+      async execute(_id, args) {
+        const owner = read(), note = await readNote(resources, args.noteId);
+        if (note.subject.uid !== owner.metadata.uid) throw new Error("Note belongs to another Work");
+        return result(note);
+      } }),
     tool({ name: `summarize_${kind}`, label: `Summarize ${kind}`, description: `${summaryDescription} Retain findings, constraints and conclusions that remain useful within this ${kind === "task" ? "task's lifetime" : "ongoing responsibility"}. The Host binds the target. Never changes the objective, schedule or business status.`,
       parameters: Type.Object({ version: Type.String({ minLength: 1 }), summary: Type.String({ maxLength: 16000 }) }, { additionalProperties: false }),
       async execute(_id, args, signal) {
         signal?.throwIfAborted(); const owner = read();
-        if (owner.metadata.resourceVersion !== args.version) throw new Error(`${kind} summary version conflict; read it again`);
-        const updated = await patchStatus(resources, owner, { summary: args.summary });
-        log.info({ workUid: owner.metadata.uid, executionId: owner.status.execution!.id, kind, version: updated.metadata.resourceVersion }, "Work summary updated");
-        return result({ version: updated.metadata.resourceVersion });
+        if (contentVersion(owner) !== args.version) throw new Error(`${kind} summary version conflict; read it again`);
+        const updated = await resources.patch(owner, { type: "json", value: [
+          { op: "test", path: "/status/summary", value: owner.status.summary },
+          { op: "replace", path: "/status/summary", value: args.summary },
+          { op: "add", path: "/status/contextWriter", value: { resource: SubjectSchema.parse(resourceRef(owner)), executionId: owner.status.execution!.id } },
+        ] }).catch(error => {
+          if (error instanceof Error && error.name === "TEST_OPERATION_FAILED")
+            throw new Error(`${kind} summary version conflict; read_${kind} and merge again`, { cause: error });
+          throw error;
+        });
+        log.info({ workUid: owner.metadata.uid, executionId: owner.status.execution!.id, kind, version: contentVersion(updated) }, "Work summary updated");
+        return result({ version: contentVersion(updated) });
       } }),
     tool({ name: "upsert_note", label: "Upsert note", description: `${noteDescription} ${kind === "task"
       ? "Track this task's progress, blockers, attempts and verification results. Distinguish planned, executed and verified actions."

@@ -76,7 +76,7 @@ export class WorkService {
           } }] : []),
         { operation: "create", type: workType("task"), name: work.id,
           spec: { title: work.title, instruction: work.instruction, paused: false, initialInputId },
-          status: { topic: resourceRef(topic), waiting: null, summary: "", recent: [] } },
+          status: { topic: resourceRef(topic), waiting: null, summary: "" } },
       ]);
     } else await this.store.save(work);
     this.log.info({ workId: work.id, topicId: this.topicId, kind: work.kind }, "Work tool created work");

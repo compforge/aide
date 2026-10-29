@@ -1,7 +1,7 @@
 import type { RuntimeScope } from "./runtime.ts";
 import type { ReconcileKey } from "./reconcile.ts";
 import type { ConnectorRequest } from "./connectors.ts";
-import type { PluginDataDirectories, PluginInstance, PluginLogLevel, PluginLogContext, HookStage, Resource, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
+import type { PluginDataDirectories, PluginInstance, PluginLogLevel, PluginLogContext, HookStage, Resource, ResourceListOptions, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 import type {
   ExecutionScope,
   VerbRequest,
@@ -114,7 +114,8 @@ export type HostRequest =
   | {
       readonly method: "resource.patch";
       readonly resource: Readonly<Resource<unknown, unknown>>;
-      readonly patch: ResourceMergePatch;
+      readonly patch: ResourcePatch;
+      readonly options?: ResourcePatchOptions;
     }
   | {
       readonly method: "resource.patchMetadata";
@@ -128,6 +129,7 @@ export type HostRequest =
       readonly method: "resource.patchStatus";
       readonly resource: Readonly<Resource<unknown, unknown>>;
       readonly patch: Readonly<Record<string, unknown>>;
+      readonly options?: ResourcePatchOptions;
     };
 
 export type HostOperation = Record<string, string | number | null> & { method: string };

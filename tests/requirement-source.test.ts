@@ -1,3 +1,4 @@
+import jsonPatch from "fast-json-patch";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -52,9 +53,10 @@ function fixture(t: TestContext, me = true) {
 
 test("Input plans survive interruption and repeated A-B-A-B changes remain distinct", async (t) => {
   const f = fixture(t); await f.catalog.persons.initialize();
-  const failing: typeof f.resources = { ...f.resources, async patchStatus(current, patch) {
+  const failing: typeof f.resources = { ...f.resources, async patch(current, value, options) {
+    const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(current), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
     if ("pending" in patch && patch.pending === null) throw new Error("Interrupted after Input");
-    return f.resources.patchStatus(current, patch);
+    return f.resources.patch(current, value, options);
   } };
   await assert.rejects(observeRequirements({ logger, resources: failing }, f.resource(), f.connectors, at()), /Interrupted/);
   assert.equal(f.inputs.list().length, 1); assert.ok(f.resource().status.pending);

@@ -56,11 +56,11 @@ export async function consumeWorkInputs(context: PluginContext, original: WorkRe
         ...receipt, appliedAt: at, ...(complete ? { startedAt: at, completedAt: at,
         result: { summary: rejection ?? `Applied ${input.action} request`, disposition: rejection ? "rejected" as const : "completed" as const } } : {}) } } } });
     }
-    const { title, instruction, recent, status, nextAt, question } = work;
+    const { title, instruction, status, nextAt, question } = work;
     try {
       await commitStatus(context.resources, [
         { operation: "replace", resource, spec: { ...resource.spec, paused, title, instruction, ...(work.kind === "routine" ? { trigger: work.trigger! } : {}) },
-          status: { ...resource.status, recent, waiting: question ? { question } : work.kind === "task" && nextAt ? { until: nextAt } : null,
+          status: { ...resource.status, waiting: question ? { question } : work.kind === "task" && nextAt ? { until: nextAt } : null,
             recovery: ["uncertain", "invalid_result"].includes(status) ? resource.status.recovery : null,
             ...(work.kind === "task" ? { completion: status === "done" ? resource.status.completion : null } : { nextTriggerAt: nextAt }) } },
         ...receipts,

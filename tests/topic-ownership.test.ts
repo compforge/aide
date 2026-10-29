@@ -143,7 +143,7 @@ test("Maintenance agenda survives persistence for unnamed Topics and business In
 test("Chief organizes trees larger than the transaction limit without writing unrelated resources", async t => {
   const f = await fixture(t), branch = await f.child();
   for (let i = 0; i < 105; i++) await f.resources.create(TOPIC_TYPE, { name: `large-${i}`,
-    spec: { id: `large-${i}`, parentRef: resourceRef(branch) }, status: { summary: "", recent: [], receipts: [] } });
+    spec: { id: `large-${i}`, parentRef: resourceRef(branch) }, status: { summary: "", receipts: [] } });
   const input = await f.input("large-fact");
   const task = await f.aide.work("root").create({ kind: "task", title: "Move", instruction: "Move scope", trigger: null });
   const before = await f.resources.list(TOPIC_TYPE);
@@ -217,7 +217,7 @@ test("Detached subtrees reject admissions prepared by the previous root", async 
   const owner = f.root(), input = f.aide.topics.inputStore.get("detaching")!;
   await moveTopic(f.resources, owner, { uid: branch.metadata.uid, parentUid: null, reason: "Independent scope" });
   await assert.rejects(f.resources.commit([
-    { operation: "patchStatus", resource: owner, patch: { execution: { ...owner.status.execution!, admissionRevision: 1 } } },
+    { operation: "patchStatus", resource: owner, options: { resourceVersion: owner.metadata.resourceVersion }, patch: { execution: { ...owner.status.execution!, admissionRevision: 1 } } },
     { operation: "patchStatus", resource: input, patch: { assess: { executionId: "chief", startedAt: new Date().toISOString() } } },
   ]), /version conflict/);
   assert.equal(f.aide.topics.inputStore.get("detaching")!.status.assess?.executionId, undefined);

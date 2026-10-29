@@ -1,3 +1,4 @@
+import { patchStatus } from "../../status.ts";
 import { messageReceivers } from "../../person/receivers.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
 import { larkAddress, larkTopicLocator } from "../../../../src/channel/address.ts";
@@ -93,7 +94,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     if (!latest || latest.metadata.deletionTimestamp || !isDeepStrictEqual(latest.spec, this.resource.spec)) {
       throw new Error("Message Source changed during observation");
     }
-    this.resource = await this.context.resources.patchStatus(latest, patch);
+    this.resource = await patchStatus(this.context.resources, latest, patch);
   }
 
   private update(entry: PendingMessage) {
@@ -320,7 +321,7 @@ export function registerMessageSources(context: PluginContext): void {
       catch (error) {
         context.logger.error("Lark message observation failed; discovery progress retained", { error });
         const current = await context.resources.get<MessageWatch, MessageSourceStatus>({ ...MESSAGE_SOURCE_TYPE, ...resource.metadata });
-        if (current) await context.resources.patchStatus(current, { error: error instanceof Error ? error.message : String(error) });
+        if (current) await patchStatus(context.resources, current, { error: error instanceof Error ? error.message : String(error) });
       }
       return { requeueAfterMs: watch.intervalMs };
     },

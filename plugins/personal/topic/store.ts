@@ -51,7 +51,7 @@ export class TopicStore {
     const previous = this.resources.find<TopicSpec, TopicStatus>(TOPIC_TYPE, topicKey(id));
     if (previous?.metadata.deletionTimestamp) throw new Error("Topic is being deleted; retry after deletion completes");
     if (previous) return previous;
-    return this.client.create(TOPIC_TYPE, { name: topicKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), review: topicReview() }, status: { receipts: [], summary: "", recent: [] } });
+    return this.client.create(TOPIC_TYPE, { name: topicKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), review: topicReview() }, status: { receipts: [], summary: "" } });
   }
   /**
    * @spec Presentation follows the completing execution when recorded; the original admission stays on Input for recovery.
@@ -228,7 +228,7 @@ export class TopicStore {
   }
   scope(uid: string) {
     const storage = this.resources.storage;
-    const row = storage.db.prepare("SELECT key FROM resources WHERE uid = ? AND scope = ? AND kind = 'aide.dev/Topic' AND json_extract(data, '$.object.apiVersion') = 'aide.dev/v1alpha2'")
+    const row = storage.db.prepare("SELECT key FROM resources WHERE uid = ? AND scope = ? AND kind = 'aide.dev/Topic' AND json_extract(data, '$.object.apiVersion') = 'aide.dev/v1alpha3'")
       .get(uid, this.resources.scope);
     const root = row ? storage.read(row.key as string)?.object as TopicResource | undefined : undefined;
     return root && root.metadata.namespace === "v1" ? topicSubtree(root, parent => this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE,

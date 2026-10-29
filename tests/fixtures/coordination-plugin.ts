@@ -2,7 +2,7 @@ import { assignmentWatch } from "../../plugins/personal/input/state.ts";
 import { consumeWorkInputs } from "../../plugins/personal/work-input.ts";
 import type { WorkResource } from "../../plugins/personal/resources.ts";
 import type { PluginPackage } from "@compforge/aide-plugin";
-const task = { apiVersion: "aide.dev/v1alpha2", kind: "Task" };
+const task = { apiVersion: "aide.dev/v1alpha3", kind: "Task" };
 const observation = { apiVersion: "tests.aide.dev/v1alpha1", kind: "WorkObserver" };
 const namespace = "v1/project/coordination";
 const plugin: PluginPackage = {
