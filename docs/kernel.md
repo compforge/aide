@@ -16,6 +16,12 @@ Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controll
 
 业务资源属于插件实例与 namespace，身份不依附执行 Session。底座不预注册 Input、Output 或 Topic；一个插件可以只观察和协调资源，另一个插件可以通过 Harness 请求判断。应用负责装配通信入口和投递能力。
 
+## 底座能力的演进依据
+
+资源更新、并发、条件写入与协调机制优先对齐 Kubernetes API / controller-runtime 的成熟语义。遇到业务层冲突、重试或协作需求，先检查 ResourceClient、协议、Storage 和 Controller 的公共能力是否准确，再决定是否需要领域特例；底座能力缺口由底座解决，插件保留字段所有权和业务判断。已有机制可复用时不新增上层补丁或独立版本体系。
+
+[Resource](plugin/resource.md#更新操作与并发) 是更新语义、Kubernetes 对应关系、当前实现缺口及验收边界的主说明；公共接口位于 packages/plugin。差异需明确记录：本地多资源事务是 Aide 的能力，不假定 Kubernetes 后端天然支持。实现状态与设计目标分别标明，不能把参考模型写成已交付能力。
+
 ## 一次协调如何推进
 
 1. Source、API 或工具通过 ResourceClient 创建或更新资源。
@@ -24,7 +30,7 @@ Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controll
 4. Reconcile 读取最新状态，决定直接请求外部能力、调用 Harness，或等待。
 5. 业务组件保存进展和回执，必要时返回下次唤醒时间。
 
-同一 Controller 对同一资源串行，不同资源可以并行。多个具名 Controller 可以观察同一种资源，有各自的队列和定时记录，共享写入仍使用 CAS。纯 status 更新不自动唤醒主 Controller，协作方按需声明 Watch。事件用于唤醒，持久资源承载事实。
+同一 Controller 对同一资源串行，不同资源可以并行。多个具名 Controller 可以观察同一种资源，有各自的队列和定时记录，当前共享写入使用资源版本 CAS；局部 Patch 的演进见 [Resource 更新契约](plugin/resource.md#更新操作与并发)。纯 status 更新不自动唤醒主 Controller，协作方按需声明 Watch。事件用于唤醒，持久资源承载事实。
 
 ## Reconciler 与 Agent 的分工
 

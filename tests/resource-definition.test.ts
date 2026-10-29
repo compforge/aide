@@ -49,7 +49,7 @@ test("Person commit validates preceding writes and rolls back data plus notifica
   await persons.initialize();
   changes = 0;
   const identity = { provider: "test", scope: "team", id: "alice" };
-  const status = { summary: "", recent: [], updatedAt: new Date().toISOString(), updatedBy: "user" as const };
+  const status = { summary: "", updatedAt: new Date().toISOString(), updatedBy: "user" as const };
   await assert.rejects(client.commit([
     { operation: "create", type: PERSON_TYPE, name: "one", spec: { name: "Alice", identities: [identity] }, status },
     { operation: "create", type: PERSON_TYPE, name: "two", spec: { name: "Alias", identities: [identity] }, status },
@@ -67,7 +67,7 @@ test("Person commit validates preceding writes and rolls back data plus notifica
 test("Concurrent client admissions cannot bind the same external identity twice", async (t) => {
   const { client } = openPersonCatalog(home(t), { identities: [LOCAL_ME] }, pino({ level: "silent" }), () => {});
   const spec: Person = { name: "Alice", identities: [{ provider: "test", scope: "team", id: "alice" }] };
-  const status: PersonStatus = { summary: "", recent: [], updatedAt: new Date().toISOString(), updatedBy: "user" };
+  const status: PersonStatus = { summary: "", updatedAt: new Date().toISOString(), updatedBy: "user" };
   const results = await Promise.allSettled(["one", "two"].map((name) => client.create(PERSON_TYPE, { name, spec, status })));
   assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
   assert.equal((await client.list(PERSON_TYPE)).length, 1);

@@ -1,3 +1,4 @@
+import { committedStatus } from "./fixtures/resource-write.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { attemptOf, resourceRef } from "../plugins/personal/input/state.ts";
 import type { PluginContext, ReconcileContext, ResourceCommit } from "@compforge/aide-plugin";
@@ -47,7 +48,6 @@ test("Chief can assess material without claiming it; redelivery and repeated com
   assert.equal(await routeTo(client, c.metadata, aide.topics.inputStore.get("one")!), false);
   assert.equal(aide.outputs().length, 0);
   assert.equal(aide.topics.resource("me")!.status.summary, "");
-  assert.deepEqual(aide.topics.resource("me")!.status.recent, []);
   await assert.rejects(assessAll(client, c, "old", { inputIds: ["one"], summary: "stale" }), /no longer active/);
 });
 
@@ -103,7 +103,7 @@ for (const kind of ["Topic", "Route"] as const) for (const failure of ["write fa
     let failures = failure === "write failure" ? 1 : 9;
     let calls = 0;
     const context = { resources: { ...client, async commit(writes: readonly ResourceCommit[]) {
-      if (writes.some(w => w.operation === "patchStatus" && (w.patch as { execution?: unknown }).execution === null) && failures-- > 0) throw new Error(failure);
+      if (writes.some(w => committedStatus(w)?.execution === null) && failures-- > 0) throw new Error(failure);
       return client.commit(writes);
     } }, logger: { info() {}, warn() {}, error() {} }, instance: { config: {} } } as unknown as PluginContext;
     const execution = (executionId: string): ReconcileContext => {

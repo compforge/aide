@@ -1,3 +1,4 @@
+import { patchStatus } from "../../status.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ConnectorClient, PluginContext, Resource } from "@compforge/aide-plugin";
 import { digest } from "../../chief-model.ts";
@@ -25,7 +26,7 @@ class RepositoryObservation {
   private async save(patch: Partial<RepositorySourceStatus>) {
     const latest = await this.context.resources.get<RepositorySourceSpec, RepositorySourceStatus>({ ...REPOSITORY_SOURCE_TYPE, ...this.resource.metadata });
     if (!latest || latest.metadata.uid !== this.resource.metadata.uid || latest.metadata.deletionTimestamp || !isDeepStrictEqual(latest.spec, this.resource.spec)) throw new Error("Repository Source changed during observation");
-    this.resource = await this.context.resources.patchStatus(latest, patch);
+    this.resource = await patchStatus(this.context.resources, latest, patch);
   }
   private async handoff() {
     const policies = this.policies.filter(w => "repositories" in w && w.repositories === this.resource.spec.id);
@@ -115,7 +116,7 @@ export function registerRepositorySources(context: PluginContext) {
     async reconcile(execution, resource) {
       if (resource.metadata.deletionTimestamp) return;
       if (!watches.some(w => isDeepStrictEqual(w, resource.spec))) {
-        if (!resource.status.retiredAt) await context.resources.patchStatus(resource, { retiredAt: new Date().toISOString() });
+        if (!resource.status.retiredAt) await patchStatus(context.resources, resource, { retiredAt: new Date().toISOString() });
         return;
       }
       try {
@@ -124,7 +125,7 @@ export function registerRepositorySources(context: PluginContext) {
         context.logger.error("Repository refresh failed; cached inventory and progress retained", { error, attributes: {
           watchId: resource.spec.id, forge: resource.spec.forge, snapshotAt: resource.status.snapshot?.observedAt ?? null } });
         const current = await context.resources.get<RepositorySourceSpec, RepositorySourceStatus>({ ...REPOSITORY_SOURCE_TYPE, ...resource.metadata });
-        if (current && current.metadata.uid === resource.metadata.uid) await context.resources.patchStatus(current, {
+        if (current && current.metadata.uid === resource.metadata.uid) await patchStatus(context.resources, current, {
           error: error instanceof Error ? error.message : String(error), retryAt: new Date(Date.now() + resource.spec.retryIntervalMs).toISOString() });
         return { requeueAfterMs: resource.spec.retryIntervalMs };
       }

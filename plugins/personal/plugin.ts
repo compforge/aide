@@ -1,3 +1,4 @@
+import { registerNotes } from "./note/reconcile.ts";
 import { registerRepositorySources } from "./source/repository/observe.ts";
 import { registerPullRequestSources } from "./source/pull-request/observe.ts";
 import { registerWeave } from "./weave/reconcile.ts";
@@ -26,6 +27,7 @@ const plugin: PluginPackage = {
     registerTasks(context);
     registerRoutines(context);
     registerPersons(context);
+    registerNotes(context);
   },
 };
 export default plugin;

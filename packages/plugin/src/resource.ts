@@ -132,13 +132,30 @@ export interface ResourceMergePatch {
   readonly value: Readonly<Record<string, unknown>>;
 }
 
+/** Stable error names also survive the Runner IPC boundary. */
+export class ResourceVersionConflict extends Error { override name = "ResourceVersionConflict" }
+export class ResourceIncarnationChanged extends Error { override name = "ResourceIncarnationChanged" }
+
+/** RFC 6902 operations. Tests and writes run against one transaction-local snapshot. */
+export type ResourcePatchOperation =
+  | { readonly op: "add" | "replace" | "test"; readonly path: string; readonly value: unknown }
+  | { readonly op: "remove"; readonly path: string }
+  | { readonly op: "move" | "copy"; readonly path: string; readonly from: string };
+export interface ResourceJSONPatch { readonly type: "json"; readonly value: readonly ResourcePatchOperation[] }
+export type ResourcePatch = ResourceMergePatch | ResourceJSONPatch;
+export interface ResourcePatchOptions {
+  /** Opt in to whole-resource optimistic concurrency. UID is always checked. */
+  readonly resourceVersion?: string;
+}
+
 /** A bounded atomic write set within one Plugin resource scope; external effects are not part of the transaction. */
 export type ResourceCommit =
   | { operation: "create"; type: ResourceType; name: string; spec: unknown; status?: unknown }
   /** Requests deletion under the supplied UID/version; normal reconciliation performs final removal. */
   | { operation: "delete"; resource: Resource<unknown, unknown> }
   | { operation: "replace"; resource: Resource<unknown, unknown>; spec: unknown; status: unknown }
-  | { operation: "patchStatus"; resource: Resource<unknown, unknown>; patch: Record<string, unknown> };
+  | { operation: "patch"; resource: Resource<unknown, unknown>; patch: ResourcePatch; options?: ResourcePatchOptions }
+  | { operation: "patchStatus"; resource: Resource<unknown, unknown>; patch: Record<string, unknown>; options?: ResourcePatchOptions };
 
 export interface ResourceWriter {
   commit(writes: readonly ResourceCommit[]): Promise<readonly Readonly<Resource<unknown, unknown>>[]>;
@@ -164,10 +181,11 @@ export interface ResourceWriter {
     namespace?: ResourceNamespace,
     preconditions?: { readonly uid: string; readonly resourceVersion: string },
   ): Promise<void>;
-  /** Applies one optimistic patch against the supplied Resource incarnation/version. */
+  /** Applies a patch to the latest Resource incarnation. A snapshot version is not an implicit precondition. */
   patch<TSpec, TStatus>(
     resource: Readonly<Resource<TSpec, TStatus>>,
-    patch: ResourceMergePatch,
+    patch: ResourcePatch,
+    options?: ResourcePatchOptions,
   ): Promise<Readonly<Resource<TSpec, TStatus>>>;
   /**
    * Patches Plugin-owned metadata by key. A null value removes that key.
@@ -185,6 +203,7 @@ export interface ResourceWriter {
   patchStatus<TSpec, TStatus>(
     resource: Readonly<Resource<TSpec, TStatus>>,
     patch: Partial<TStatus>,
+    options?: ResourcePatchOptions,
   ): Promise<Readonly<Resource<TSpec, TStatus>>>;
 }
 

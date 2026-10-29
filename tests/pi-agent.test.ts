@@ -1,3 +1,6 @@
+import { committedStatus } from "./fixtures/resource-write.ts";
+import { notes } from "../plugins/personal/note/query.ts";
+import { contentVersion } from "../plugins/personal/context-write.ts";
 import { workPhase } from "../plugins/personal/status.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { inputJob } from "../plugins/personal/observation/job.ts";
@@ -515,7 +518,7 @@ test("an entirely Aide-defined provider performs a real SDK request with explici
 test("Chief profiles people through tools and refreshes shared user corrections every turn", { timeout: 30_000 }, async (t) => {
   const writer = await setup(t, (_request, index) => index === 0
     ? { tool: "read_person", args: { id: me.metadata.name } }
-    : index === 1 ? { tool: "summarize_person", args: { id: me.metadata.name, uid: me.metadata.uid, version: me.metadata.resourceVersion, summary: "Prefers concise Chinese answers; explicit statement, 2026-10-21." } }
+    : index === 1 ? { tool: "summarize_person", args: { id: me.metadata.name, uid: me.metadata.uid, version: contentVersion(me), summary: "Prefers concise Chinese answers; explicit statement, 2026-10-21." } }
     : { text: "已更新" }, "chief");
   const me = (await writer.persons.findIdentity(LOCAL_ME))!;
   const turn = await writer.run("我更喜欢简洁中文，记一下。", "person-write");
@@ -751,9 +754,9 @@ test("Aide steers immediate Input and independently completes both inputs within
   t.mock.method(aide.runtime.plugins, "resourceClient", (instance: string) => {
     const client = resourceClient(instance);
     return { ...client, async commit(writes: readonly import("@compforge/aide-plugin").ResourceCommit[]) {
-      const admission = writes.find(w => w.operation === "patchStatus" && w.resource.kind === "Topic"
-        && ((w.patch as any).execution?.admissionRevision ?? 0) > 0);
-      if (admission?.operation === "patchStatus" && conflicts > 0)
+      const admission = writes.find(w => "resource" in w && w.resource.kind === "Topic"
+        && (committedStatus(w)?.execution?.admissionRevision ?? 0) > 0);
+      if (admission && "resource" in admission && conflicts > 0)
         await client.patchStatus(admission.resource, { summary: `Concurrent status ${conflicts--}` });
       return client.commit(writes);
     } };
@@ -906,9 +909,9 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
       case 1: return { tool: "read_input", args: { inputId } };
       case 2: return { tool: "read_topic", args: {} };
       case 3: return { tool: "say", args: { text: `Verified phase ${phase}`, inputIds: [inputId] } };
-      case 4: return { tool: "upsert_note", args: { version: currentWork().metadata.resourceVersion,
-        ...(currentWork().status.recent[0] ? { noteId: currentWork().status.recent[0]!.id } : {}), text: `Evidence verification phase ${phase}` } };
-      case 5: return { tool: `summarize_${kind}`, args: { version: currentWork().metadata.resourceVersion, summary: "Retain verified evidence and actual authorship." } };
+      case 4: return { tool: "upsert_note", args: { version: notes(aide.topics.resources, currentWork().metadata.uid)[0]?.version,
+        ...(notes(aide.topics.resources, currentWork().metadata.uid)[0] ? { noteId: notes(aide.topics.resources, currentWork().metadata.uid)[0]!.id } : {}), text: `Evidence verification phase ${phase}` } };
+      case 5: return { tool: `summarize_${kind}`, args: { version: contentVersion(currentWork()), summary: "Retain verified evidence and actual authorship." } };
       case 6: return { tool: `report_${kind}`, args: { inputIds: [inputId], report: `Verified ${phase}`, action: "done" } };
       default: return { text: "Task progress recorded" };
     }
@@ -957,8 +960,8 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     assert.deepEqual(get().status.agent, agent);
     assert.match(JSON.stringify(fixture.requests[before]!.messages), /unique-work-evidence/);
     assert.equal(aide.outputs().length, 2);
-    assert.equal(get().status.recent.length, 1);
-    assert.equal(get().status.recent[0]!.text, "Evidence verification phase 1");
+    assert.equal(notes(aide.topics.resources, get().metadata.uid).length, 1);
+    assert.equal(notes(aide.topics.resources, get().metadata.uid)[0]!.text, "Evidence verification phase 1");
     assert.equal(get().status.summary, "Retain verified evidence and actual authorship.");
     assert.equal(get().status.lastReport!.text, "Verified 1");
     assert.ok(aide.topics.inputStore.list().every(i => i.status.handle?.[work.uid!]?.completedAt));
@@ -1195,7 +1198,7 @@ test("Weave wakes busy root Chief through its Reconcile without moving or claimi
     if (index === 1) return { tool: "assess_input", args: { inputId: "first", summary: "Reviewed" } };
     if (index === 2) {
       const parent = aide.topics.resource("parent")!, child = aide.topics.resource("child")!;
-      return { tool: "summarize_topic", args: { version: parent.metadata.resourceVersion, summary: "Combined understanding",
+      return { tool: "summarize_topic", args: { version: contentVersion(parent), summary: "Combined understanding",
         absorbed: [{ uid: child.metadata.uid, version: understandingVersion(child) }] } };
     }
     return { text: "Done" };

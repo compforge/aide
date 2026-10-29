@@ -32,7 +32,7 @@ test("Independent Input facts and Personal consumption survive reopening with ve
   const c = store.resource("group-a")!;
   const client = createResourceClient(store.resources);
   await client.patchStatus(c, { execution: { id: "exec", startedAt: new Date().toISOString() } });
-  await assert.rejects(client.patchStatus(c, { summary: "stale" }), /version conflict/);
+  await assert.rejects(client.patchStatus(c, { summary: "stale" }, { resourceVersion: c.metadata.resourceVersion }), /version conflict/);
   assert.equal(store.input("m1")!.metadata.resourceVersion, store.inputStore.get("m1")!.metadata.resourceVersion);
   await admit(client, "m1", "exec");
   await assessAll(client, c, "exec", { inputIds: ["m1"], summary: "answer" });
@@ -67,7 +67,7 @@ test("Chief serializes inputs within a topic while another topic can proceed", a
   assert.deepEqual(calls.filter((call) => call.topicId.endsWith("group-a")).map((call) => call.text), ["a-first", "a-second"]);
   assert.equal(aide.topicIds().length, 2);
   assert.throws(() => aide.personal.store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "ChiefInput" }), /Unknown resource definition/);
-  assert.equal(aide.personal.store.resources.list({ apiVersion: "aide.dev/v1alpha2", kind: "Topic" }).length, 2);
+  assert.equal(aide.personal.store.resources.list({ apiVersion: "aide.dev/v1alpha3", kind: "Topic" }).length, 2);
 });
 
 test("Startup resumes queued inputs but fails interrupted input without replaying its actions", async (t) => {

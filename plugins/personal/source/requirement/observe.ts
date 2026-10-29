@@ -1,3 +1,4 @@
+import { patchStatus } from "../../status.ts";
 import { InputAttention } from "../../input/model.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
 import { type ConnectorClient, type PluginContext, type RequirementAccount, type RequirementIdentity, type RequirementSummary, type Resource } from "@compforge/aide-plugin";
@@ -40,7 +41,7 @@ class RequirementObservation implements TopicLocator<RequirementIdentity> {
   private async save(patch: Partial<RequirementSourceStatus>) {
     const latest = await this.context.resources.get<Watch, RequirementSourceStatus>({ ...SOURCE_TYPE, ...this.resource.metadata });
     if (!latest || latest.metadata.deletionTimestamp || latest.metadata.uid !== this.resource.metadata.uid || !isDeepStrictEqual(latest.spec, this.resource.spec)) throw new Error("Requirement Source changed during observation");
-    this.resource = await this.context.resources.patchStatus(latest, patch);
+    this.resource = await patchStatus(this.context.resources, latest, patch);
   }
   private async setEntry(key: string, entry?: TrackedRequirement) {
     const tracked = { ...this.tracked };
@@ -187,7 +188,7 @@ export function registerSources(context: PluginContext): void {
       catch (error) {
         context.logger.error("Requirement observation failed; checkpoint retained", { error, attributes: { watchId: resource.spec.id } });
         const current = await context.resources.get<Watch, RequirementSourceStatus>({ ...SOURCE_TYPE, ...resource.metadata });
-        if (current) await context.resources.patchStatus(current, { error: error instanceof Error ? error.message : String(error) });
+        if (current) await patchStatus(context.resources, current, { error: error instanceof Error ? error.message : String(error) });
       }
       const latest = await context.resources.get<Watch, RequirementSourceStatus>({ ...SOURCE_TYPE, ...resource.metadata });
       const unfinished = latest?.status.scan || latest?.status.pending || Object.values(latest?.status.tracked ?? {}).some((e) => e.window);

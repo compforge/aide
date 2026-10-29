@@ -1,6 +1,8 @@
+import { contentVersion } from "../context-write.ts";
+import type { NoteStatus } from "../note/model.ts";
 import { createHash } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
-import { upsertNote, type NoteUpdate } from "../notes.ts";
+import { readNotes } from "../note/query.ts";
 import { SUMMARY_CHARS } from "../context.ts";
 import { mergePersonSummary } from "./merge.ts";
 import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, LOCAL_ME, type Me, type Person, type PersonIdentity, type PersonResource, type PersonStatus } from "./model.ts";
@@ -19,7 +21,7 @@ export class Persons {
   async read(id: string, uid?: string) {
     const person = await this.resources.get<Person, PersonStatus>({ ...PERSON_TYPE, namespace: "v1", name: id });
     if (!person || person.metadata.deletionTimestamp || (uid !== undefined && person.metadata.uid !== uid)) throw new Error(`Unknown Person: ${id}`);
-    return { ...person, isMe: isMe(person.spec, this.marks) };
+    return { ...person, summaryVersion: contentVersion(person), recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
   }
   /** @spec Configured Me accounts identify one human; consolidate identity owners atomically before starting consumers.
    * @spec Preserve the local Me owner when present, otherwise the oldest matching Person. Repeated initialization is a no-op.
@@ -38,7 +40,7 @@ export class Persons {
       await this.resources.create(PERSON_TYPE, {
         name: createHash("sha256").update(identityKey(identity)).digest("hex").slice(0, 32),
         spec: PersonSchema.parse({ name: "我", identities: marks }),
-        status: { ...this.status("connector"), summary: "", recent: [] },
+        status: { ...this.status("connector"), summary: "" },
       });
       return { merged: 0 };
     }
@@ -57,8 +59,6 @@ export class Persons {
       ...sources.map(resource => ({ operation: "delete" as const, resource })),
       { operation: "replace", resource: target, spec: PersonSchema.parse({ ...target.spec, identities }), status: {
         ...status, summary,
-        recent: sources.length ? [...target.status.recent, ...sources.flatMap(p => p.status.recent)]
-          .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)) : target.status.recent,
       } },
     ]);
     return { merged: sources.length };
@@ -81,7 +81,7 @@ export class Persons {
     }
     const id = createHash("sha256").update(identityKey(identity)).digest("hex").slice(0, 32);
     try { return await this.resources.create(PERSON_TYPE, { name: id,
-      spec: PersonSchema.parse({ name: name || identity.id, identities: [identity] }), status: { ...this.status("connector"), summary: "", recent: [] } }); }
+      spec: PersonSchema.parse({ name: name || identity.id, identities: [identity] }), status: { ...this.status("connector"), summary: "" } }); }
     catch (error) {
       if (!/already exists|identity already belongs/.test(String(error))) throw error;
       // A concurrent merge may have transferred the identity since the initial lookup.
@@ -96,20 +96,22 @@ export class Persons {
     if (current.spec.identities.some(i => this.marks.identities.some(mark => identityKey(mark) === identityKey(i)) && !retained.has(identityKey(i))))
       throw new Error("A configured Me identity cannot be removed; change the Me configuration first or merge the Person");
     // @spec User corrections replace the same summary Chief reads; stale writers must reread and merge.
-    const status = { ...current.status, ...this.status("user") };
+    const { contextWriter: _, ...previousStatus } = current.status;
+    const status = { ...previousStatus, ...this.status("user") };
     if (summary !== undefined && summary !== current.status.summary) {
       status.summary = summary;
     }
     return this.resources.replace(current, PersonSchema.parse(spec), status);
   }
-  async summarize(id: string, uid: string, version: string, summary: string) {
-    const current = await this.version(id, uid, version);
-    if (current.status.summary === summary) return current;
-    return this.resources.replace(current, current.spec, { ...current.status, ...this.status("chief"), summary });
-  }
-  async upsertNote(id: string, uid: string, args: NoteUpdate, callId: string) {
+  async summarize(id: string, uid: string, version: string, summary: string, writer?: NoteStatus["writer"]) {
     const current = await this.read(id, uid);
-    return upsertNote(this.resources, current, args, callId);
+    if (contentVersion(current) !== version) throw new Error("Person summary version conflict; read it again");
+    return this.resources.patch(current, { type: "json", value: [
+      { op: "test", path: "/status/summary", value: current.status.summary },
+      { op: "replace", path: "/status/summary", value: summary },
+      ...Object.entries(this.status("chief")).map(([key, value]) => ({ op: "add" as const, path: `/status/${key}`, value })),
+      ...(writer ? [{ op: "add" as const, path: "/status/contextWriter", value: writer }] : []),
+    ] });
   }
   /**
    * @spec Append to the target and delete the source atomically. Names never prove identity.
@@ -129,11 +131,10 @@ export class Persons {
       { operation: "delete", resource: from },
       { operation: "replace", resource: into, spec: PersonSchema.parse({ ...into.spec, identities }), status: {
         ...status, summary: summary ?? mergePersonSummary(into.status.summary, from.status.summary),
-        recent: [...into.status.recent, ...from.status.recent].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt)),
       } },
     ]);
     const person = merged as PersonResource;
-    return { ...person, isMe: isMe(person.spec, this.marks) };
+    return { ...person, summaryVersion: contentVersion(person), recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
   }
   async findIdentity(identity: PersonIdentity) {
     return (await this.resources.list<Person, PersonStatus>(PERSON_TYPE, { matchIndex: { name: "identity", value: identityKey(identity) } }))

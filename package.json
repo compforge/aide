@@ -21,6 +21,7 @@
     "@compforge/agent-observation": "0.2.0",
     "@compforge/agent-pi": "0.3.0",
     "@compforge/agentue": "0.0.1",
+    "@compforge/aide-connector": "file:packages/connector",
     "@compforge/aide-plugin": "file:packages/plugin",
     "@compforge/harness-toolbox": "0.3.10",
     "@compforge/repocli": "0.9.0",
@@ -31,18 +32,20 @@
     "@lumis-sh/wasm-bash": "0.26.4",
     "bun": "1.4.2",
     "cron-parser": "^5.6.2",
+    "fast-json-patch": "3.1.1",
     "https-proxy-agent": "^8.0.0",
+    "json-merge-patch": "1.0.2",
     "markdown-it": "15.0.3",
     "pi-hermes-memory": "0.9.10",
     "pino": "^10.1.0",
     "typebox": "1.3.27",
     "web-tree-sitter": "0.25.10",
     "yaml": "^2.9.0",
-    "zod": "^4.1.12",
-    "@compforge/aide-connector": "file:packages/connector"
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/bun": "^1.3.0",
+    "@types/json-merge-patch": "1.0.0",
     "@types/markdown-it": "14.2.0",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0"

@@ -1,3 +1,5 @@
+import { contentVersion } from "../context-write.ts";
+import { notes } from "../note/query.ts";
 import { topicPersons } from "./persons.ts";
 import { createChildTopic, moveMaterial, moveTopic } from "./organize.ts";
 import type { Logger } from "pino";
@@ -37,23 +39,23 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
         const items = store.topics.inputStore.query("topic", topic.metadata.uid).filter(i => !i.metadata.deletionTimestamp && i.spec.origin !== "trigger");
         return result(contextPage(items.map(i => ({ id: i.metadata.name, topicUid: i.status.topic!.uid, text: i.spec.text.slice(0, 240), assessed: !!i.status.assess?.completedAt })), offset));
       } }),
-    { name: "list_topics", label: "List child topics", description: "List direct children within this root's subtree with summary and Note previews for discovery. Text ending in [truncated] is incomplete; noteTotal counts all Notes, including omitted ones. Before relying on incomplete context or confirming absorbed versions, use read_topic(uid) and continue with offset=nextOffset until the needed context is read. Follow this list's nextOffset to discover remaining children.",
+    { name: "list_topics", label: "List child topics", description: "List direct children within this root's subtree with summary and Note previews for discovery. Text ending in [truncated] is incomplete; noteTotal counts Notes in the retained recent window, including omitted previews. Before relying on incomplete context or confirming absorbed versions, use read_topic(uid) and continue with offset=nextOffset until the needed context is read. Follow this list's nextOffset to discover remaining children.",
       parameters: Type.Object({ parentUid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, { parentUid, offset = 0 }) {
         const root = active(), parent = parentUid ?? root.metadata.uid;
         const all = subtree();
         if (!all.some(t => t.metadata.uid === parent)) throw new Error("Topic is outside this root");
         return result(topicPage(all.filter(t => t.spec.parentRef?.uid === parent), t => ({
-          uid: t.metadata.uid, name: t.spec.name, persons: topicPersons(store, t), ...understanding(t.status, 1200), version: understandingVersion(t), organization: t.status.organization,
+          uid: t.metadata.uid, name: t.spec.name, persons: topicPersons(store, t), ...understanding({ ...t.status, recent: notes(store.resources, t.metadata.uid) }, 1200), version: understandingVersion(t, notes(store.resources, t.metadata.uid)), organization: t.status.organization,
         }), offset));
       } },
-    { name: "read_topic", label: "Read topic", description: "Read this root or a descendant's full summary and Notes in text pages. A non-null nextOffset means more text remains: continue with offset=nextOffset; null marks the end. Use its resource version for summarize_topic and understandingVersion for absorbed receipts after reviewing the child context.",
+    { name: "read_topic", label: "Read topic", description: "Read this root or a descendant's full summary and recent Note window in text pages. Use read_note for the complete text of a truncated Note. A non-null nextOffset means more text remains: continue with offset=nextOffset; null marks the end. Use its content version for summarize_topic and understandingVersion for absorbed receipts after reviewing the child context.",
       parameters: Type.Object({ uid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, { uid, offset = 0 }) {
         const root = active(), topic = subtree().find(t => t.metadata.uid === (uid ?? root.metadata.uid));
         if (!topic) throw new Error("Topic is outside this root");
-        const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: topic.status.summary, recent: topic.status.recent, organization: topic.status.organization });
-        return result({ uid: topic.metadata.uid, version: topic.metadata.resourceVersion, understandingVersion: understandingVersion(topic),
+        const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: topic.status.summary, recent: notes(store.resources, topic.metadata.uid), organization: topic.status.organization });
+        return result({ uid: topic.metadata.uid, version: contentVersion(topic), understandingVersion: understandingVersion(topic, notes(store.resources, topic.metadata.uid)),
           text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
       } },
   ];

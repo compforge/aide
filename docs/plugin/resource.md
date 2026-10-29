@@ -20,7 +20,7 @@ apiVersion 表达资源结构与语义契约，metadata.generation 表达 spec �
 
 ## Spec、Status 与写入责任
 
-spec 表达期望或输入契约，status 表达组件已观察到的事实。各 Kind 声明字段含义、写入者及允许写入的阶段；多个组件协作时按字段分工，用 UID 和 resourceVersion 校验更新依据，保留其它组件负责的状态。事件用于唤醒，恢复与协调依赖持久事实。
+spec 表达期望或输入契约，status 表达组件已观察到的事实。各 Kind 声明字段含义、写入者及允许写入的阶段；多个组件协作时按字段分工，UID 固定资源身份，写入条件表达操作依赖，保留其它组件负责的状态。更新操作按依赖选择局部 Patch、条件 Patch 或显式 CAS，见下节。事件用于唤醒，恢复与协调依赖持久事实。
 
 status 按对象需要组合三类内容：
 
@@ -31,6 +31,49 @@ status 按对象需要组合三类内容：
 | 调谐进度 | 支持等待、重试与重启后继续 | 已观察版本、重试时间、检查进度 |
 
 详细执行轨迹独立保存，status 不无限追加模型调用、工具输出和每次 Reconcile 日志。防止重复办理所需的接纳与完成回执属于业务事实，不降级为可能丢失的诊断事件。共享片段由对象按语义组合，不要求所有 Kind 继承包含大量可选字段的 BaseStatus。
+
+## 更新操作与并发
+
+ResourceClient、Host/Runner 协议与 Storage 共同提供以下更新语义。不同组件可并行修改同一 Resource 的不同字段；整份资源版本只在明确依赖完整快照时作为前置条件。
+
+| 操作 | Aide 契约 | Kubernetes 对应 |
+| --- | --- | --- |
+| replace | 校验 UID 和快照 resourceVersion，整体替换 spec/status | Update 的乐观锁 |
+| patch，type=merge | 将 JSON Merge Patch 应用到事务内最新对象；不隐含快照版本条件 | JSON Merge Patch；MergeFrom 默认不锁版本 |
+| patch，type=json | RFC 6902 test 与修改在一个事务内执行 | JSON Patch |
+| patch 的 options.resourceVersion | 显式启用整份资源乐观锁 | MergeFromWithOptimisticLock |
+| patchStatus | 仅对 status 应用 Merge Patch；同样接受显式 resourceVersion | status 子资源的局部更新 |
+| patchMetadata | 仅合并 labels/annotations；不隐含快照版本条件 | 元数据局部 Patch |
+
+Merge Patch 递归合并对象，整体替换数组，null 删除字段。`{}` 不清空已有对象，省略字段也不删除旧值。需要保存 JSON null 或整体替换一个 map 时使用 JSON Patch 的 add/replace。每种 Resource 的 Schema 仍可提供默认值；无效结构拒绝写入。
+
+```ts
+// 调度字段已变化也不会阻塞这项独立赋值。
+await resources.patchStatus(snapshot, { progress: "observed" });
+// 依赖旧内容的编辑明确声明条件。
+await resources.patch(snapshot, { type: "json", value: [
+  { op: "test", path: "/status/summary", value: snapshot.status.summary },
+  { op: "replace", path: "/status/summary", value: revisedSummary },
+] });
+// 状态转移若依赖完整快照，显式锁版本。
+await resources.patchStatus(snapshot, { phase: "accepted" }, {
+  resourceVersion: snapshot.metadata.resourceVersion,
+});
+```
+
+普通 Patch 仍校验 UID，不能用旧句柄修改重建后的同名资源。可写路径仅限 spec、status、metadata.labels 和 metadata.annotations；身份、版本、结构 owner、删除标记和 Host 调度字段不可修改。`patchStatus` 无法越过 status 范围。已进入删除阶段的资源由领域 Validator 决定哪些终止写入仍允许，内容工具拒绝继续编辑。
+
+Storage 在 SQLite 写事务内读取当前对象，在副本上应用 Patch，验证元数据、Schema 和领域约束，再提交版本、索引与容量变化。spec 实际变化推进 generation；有效变更推进 resourceVersion；规范化后的空操作不增加版本、不发送 Watch。Watch 的前后对象来自真实事务快照。commit 可混合普通与条件 Patch，任何一步失败全部回滚；IPC 使用相同路径和错误名称。
+
+显式版本冲突的 Error.name 是 ResourceVersionConflict，UID 变化是 ResourceIncarnationChanged；JSON test 失败保留 TEST_OPERATION_FAILED。Schema/Validator 错误原样返回。IPC 保留 name、message、stack、cause；跨进程根据 name 分类，不依赖 instanceof。条件失败需要重新读取实际依赖，不能盲目重放失败 test 或重做已发生的外部动作。
+
+### 字段、集合与领域依赖
+
+调用方只提交实际变化。条件数组不是自动按 type 合并的 map：Personal 的状态转换辅助函数计算 JSON 差异、显式携带整份快照 CAS，保证事实和派生条件一致，冲突后由代码重新协调；不会展开旧 status 提交，也不会覆盖其它组件的条件。内容工具走独立条件 Patch，校验旧内容；执行身份和当前祖先链由插件 Validator 在事务内读取。底座不认识 summary、Note 或 Chief。
+
+Aide 对齐 [Kubernetes 更新语义](https://kubernetes.io/docs/reference/using-api/api-concepts/#updates-to-existing-resources) 和 [controller-runtime 的显式乐观锁](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/client#MergeFromWithOptimisticLock)。本轮提供 JSON Merge Patch / JSON Patch，不提供 Strategic Merge Patch、Server-Side Apply 或 managedFields。多资源 commit 与跨资源 Validator 是 Aide 的本地事务扩展，不能视为 Kubernetes 的跨对象事务。
+
+验证覆盖普通并发合并、条件失败、原子回滚、UID 替换、元数据校验、无变化通知及真实 Runner IPC，见 tests/resource-patch.test.ts、tests/plugin-runner.test.ts。Personal 的内容与独立 Note 契约见 [Note](../personal/note.md)。
 
 ## Conditions 契约
 
@@ -44,15 +87,15 @@ status 按对象需要组合三类内容：
 | lastTransitionTime | 仅在 status 改变时更新；reason、message 或观察版本变化不刷新它 |
 | observedGeneration | 判断依据 spec 时记录对应的 metadata.generation |
 
-组件在提交前合并自己负责的条件与具体事实，保留其它条件，通过现有 ResourceClient 的版本校验和事务一起提交。Host 校验并持久化调用方提供的状态，不推断业务条件，不设置通用派生钩子。发生冲突时重新读取、重新判断并提交；已发生的外部动作不能为重试写入而重复执行。
+当前实现中，组件在提交前合并自己负责的条件与具体事实，保留其它条件，通过 ResourceClient 的版本校验和事务一起提交；局部条件更新的演进遵循上面的更新契约。Host 校验并持久化调用方提供的状态，不推断业务条件，不设置通用派生钩子。发生冲突时重新读取、重新判断并提交；已发生的外部动作不能为重试写入而重复执行。
 
 跨资源的判断保存依赖版本，由 Watch 与 Reconcile 重算；自身 observedGeneration 无法代表外部依赖的新旧。消费者按契约识别过期结论，不能将旧 True 当作对新状态的保证。Conditions 补充具体事实，不代替幂等、并发控制或安全交接，也不自动解决数据兼容。
 
-这与 controller-runtime 的边界一致：Status().Patch 提交调用方构造的状态，MergeFromWithOptimisticLock 提供 resourceVersion 检查；kubelet 构造自己负责的条件并保留其它组件的条件。跨对象判断是带依赖依据的最终一致观察，不承诺全局同时更新。
+这与 Kubernetes 的领域边界一致：条件由所属组件构造，存储不推导其业务含义。但更新语义必须区分普通差异 Patch 与显式 MergeFromWithOptimisticLock，不能将 resourceVersion 检查当成所有 Status().Patch 的默认行为。跨对象判断是带依赖依据的最终一致观察，不承诺全局同时更新。
 
 ## 事务与删除
 
-ResourceClient.commit 在同一插件实例的存储事务中组合 create、replace、patchStatus 和 delete。delete 携带资源快照，校验 UID 与 resourceVersion 后提交级联删除请求，最终移除仍走标准 Reconcile / finalize 生命周期。Schema、版本、引用、索引或配额失败会回滚，Watch 只在提交后收到通知。事务可提交资源与幂等回执，但不能包含外部请求；外部动作成功后的写入冲突不能靠重做动作解决。
+ResourceClient.commit 在同一插件实例的存储事务中组合 create、replace、patch、patchStatus 和 delete。delete 携带资源快照，校验 UID 与 resourceVersion 后提交级联删除请求，最终移除仍走标准 Reconcile / finalize 生命周期。Schema、版本、引用、索引或配额失败会回滚，Watch 只在提交后收到通知。事务可提交资源与幂等回执，但不能包含外部请求；外部动作成功后的写入冲突不能靠重做动作解决。
 
 单次 commit 上限为 100 个写操作，业务不能通过对整棵树空写来把无界依赖集变成写集。Definition Validator 的 `context.get(type, uid)` 和 `context.list(type, { namespace, matchIndex })` 在当前存储事务中同步读取依赖，保留插件实例与精确 apiVersion/kind 隔离，读取结果是独立快照；list 未指定 namespace 时覆盖本插件该类型的全部 namespace。前序写入和索引变更对后续校验可见，校验失败整体回滚。Host 提供读取与事务机制，祖先链、责任归属和在途工作等业务约束由插件声明。
 

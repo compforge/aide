@@ -25,7 +25,7 @@ title、instruction 保存有限目标，initialInputId 指向初始 Input；pau
 | 字段 | 含义 |
 | --- | --- |
 | topic / organization | 当前 Topic UID 与最近一次归属调整依据 |
-| summary / recent | 长期认识和有界近期事项 |
+| summary | 长期认识；recent 从独立 Note 查询，不在 status 中保存 |
 | agent / execution / lastExecutionId | 原生会话、当前执行和最近报告的执行关联；execution 记录启动时的 observedGeneration |
 | waiting | question 表达待回答问题，until 表达等待到期时间 |
 | recovery / recoveryNotice | 需核对的结果或副作用，以及待创建的恢复通知 |
@@ -109,7 +109,7 @@ assistant / tool：处理与回执
 
 业务背景是请求投影，不追加到原生 transcript，也不参与历史压缩；恢复后从 CRD 重建。
 
-summary 与 Note 的职责、工具和预算见[有界认识与近期依据](README.md#有界认识与近期依据)。常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整认识仍保存在资源中。
+summary 与 Note 的职责、工具和预算见[有界认识与近期依据](README.md#有界认识与近期依据)。常驻 summary 最多预览 8000 字符，recent 最多 3 条、每条 500 字符；所属会话的 Work 列表按 20 项和约 16000 个 JSON 字符分页。省略信息通过读取工具补查，完整事项保存在独立 Note 中，通过 read_note 读取。
 
 优化重点是新输入能否接上已有进展、是否重复执行已完成动作、是否遗漏阻塞和完成条件。根据实际轨迹调整目标与状态的呈现、相关工作范围、近期证据预算和工具补查时机，比较完成质量、重复动作、上下文大小与处理耗时；恢复仍须核对不确定副作用。
 

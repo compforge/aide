@@ -1,3 +1,5 @@
+import { notes } from "../plugins/personal/note/query.ts";
+import { seedNotes } from "./fixtures/notes.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -71,30 +73,30 @@ test("Notes keep optional UID-pinned people through updates, clearing, retention
   const read = () => f.aide.topics.resource("notes")!;
   const one = await f.person("one", "Same name"), two = await f.person("two", "Same name");
   const update = (args: Record<string, unknown>, call: string) => upsertTopicNote(f.resources, read(), "chief", {
-    version: read().metadata.resourceVersion, text: "Discuss release", ...args,
+    version: args.noteId ? notes(f.store.resources, read().metadata.uid).find(n => n.id === args.noteId)?.version : undefined, text: "Discuss release", ...args,
   } as never, call);
   const created = await update({}, "create");
-  assert.equal(read().status.recent[0]!.persons, undefined, "Old Notes remain valid");
-  await update({ noteId: created.noteId, persons: [one, two, one] }, "people");
-  assert.deepEqual(read().status.recent[0]!.persons, [one, two], "Same text can gain people; UID deduplicates, names do not");
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid)[0]!.people, []);
+  await update({ noteId: created.noteId, people: [one, two, one] }, "people");
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid)[0]!.people, [one, two], "Same text can gain people; UID deduplicates, names do not");
   await update({ noteId: created.noteId, text: "Discuss release progress" }, "progress");
-  assert.deepEqual(read().status.recent[0]!.persons, [one, two]);
-  assert.deepEqual(retainRecent(read().status.recent)[0]!.persons, [one, two], "Synthesis/retention preserves associations");
-  await assert.rejects(update({ noteId: created.noteId, persons: [{ ...one, kind: "Topic" }] }, "invalid"), /Person/);
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid)[0]!.people, [one, two]);
+  assert.deepEqual(retainRecent(notes(f.store.resources, read().metadata.uid))[0]!.people, [one, two], "Synthesis/retention preserves associations");
+  await assert.rejects(update({ noteId: created.noteId, people: [{ ...one, kind: "Topic" }] }, "invalid"), /Person/);
   await f.resources.delete(PERSON_TYPE, one.name);
   f.store.resources.finalizeDeletion(PERSON_TYPE, one.name);
   await f.resources.create(PERSON_TYPE, { name: one.name, spec: { name: "Replacement", identities: [] },
-    status: { summary: "private-profile-marker", recent: [], updatedAt: new Date().toISOString(), updatedBy: "user" } });
+    status: { summary: "private-profile-marker", updatedAt: new Date().toISOString(), updatedBy: "user" } });
   await update({ noteId: created.noteId, text: "Keep historical attribution" }, "historical");
   const view = topicPersons(f.store, read());
   assert.equal(view.items.length, 2);
   assert.ok("unavailable" in view.items[0]! && view.items[0].unavailable);
   assert.doesNotMatch(JSON.stringify(view), /Replacement|private-profile-marker/);
-  const copied = await update({ persons: [one] }, "copy-historical");
-  assert.deepEqual(read().status.recent.find(n => n.id === copied.noteId)!.persons, [one]);
-  await update({ noteId: copied.noteId, persons: [] }, "clear-copy");
-  await update({ noteId: created.noteId, persons: [] }, "clear");
-  assert.deepEqual(read().status.recent[0]!.persons, []);
+  const copied = await update({ people: [one] }, "copy-historical");
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid).find(n => n.id === copied.noteId)!.people, [one]);
+  await update({ noteId: copied.noteId, people: [] }, "clear-copy");
+  await update({ noteId: created.noteId, people: [] }, "clear");
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid)[0]!.people, []);
   assert.deepEqual(topicPersons(f.store, read()).items, []);
 });
 
@@ -103,18 +105,19 @@ test("Topic people use only its own recent Notes and project names without Input
   const refs = await Promise.all(Array.from({ length: 10 }, (_, i) => f.person(`p${i}`)));
   await f.input("unnoted", root, { sender: refs[0], receivers: refs });
   const at = new Date().toISOString();
-  await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(root) }, { ...child.status,
-    recent: [{ id: "child-note", createdAt: at, updatedAt: at, text: "Child matter", persons: refs }] });
+  await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
+  await seedNotes(f.resources, child, [{ id: "child-note", text: "Child matter", people: refs }]);
   assert.deepEqual(topicPersons(f.store, root).items, [], "Neither Inputs nor child Notes implicitly populate the root");
-  const noted = await f.resources.patchStatus(root, { recent: [{ id: "root-note", createdAt: at, updatedAt: at, text: "Synthesized matter", persons: refs }] });
+  await seedNotes(f.resources, root, [{ id: "root-note", text: "Synthesized matter", people: refs }]);
+  const noted = f.aide.topics.resource("root")!;
   const db = f.store.resources.storage.db, before = db.prepare("SELECT total_changes() AS n").get()!.n;
   const expected = topicPersons(f.store, noted);
   assert.equal(db.prepare("SELECT total_changes() AS n").get()!.n, before);
   assert.equal(expected.items.length, 8); assert.equal(expected.omittedPersons, 2);
   assert.equal(expected.source, "recentNotes"); assert.equal(expected.noteCount, 1);
-  const preview = understanding(noted.status).recent[0]!;
-  assert.equal(preview.persons!.length, 8); assert.equal(preview.personsOmitted, 2);
-  assert.equal(noted.status.recent[0]!.persons!.length, 10, "Only the preview is truncated");
+  const preview = understanding({ ...noted.status, recent: notes(f.store.resources, noted.metadata.uid) }).recent[0]!;
+  assert.equal(preview.people!.length, 8); assert.equal(preview.peopleOmitted, 2);
+  assert.equal(notes(f.store.resources, noted.metadata.uid)[0]!.people!.length, 10, "Only the preview is truncated");
   assert.deepEqual(topicCandidatePage(f.store).items.find(t => t.uid === root.metadata.uid)!.persons, expected);
   assert.match(topicParts(f.store, noted, root.spec.id).topic, /recentNotes/);
   const read = await topicTools(f.store, () => noted).find(t => t.name === "read_topic")!.execute("read", {}, undefined, undefined, {} as never);
@@ -147,7 +150,8 @@ test("Route and Chief query people and recent activity only for the current page
   const f = fixture(t), person = await f.person("participant"), at = new Date().toISOString();
   for (let i = 0; i < 25; i++) {
     const root = await f.aide.topics.ensure(`root-${i}`);
-    await f.resources.patchStatus(root, { summary: "s".repeat(2000), recent: [{ id: "note", text: "Matter", createdAt: at, updatedAt: at, persons: [person] }] });
+    await f.resources.patchStatus(root, { summary: "s".repeat(2000) });
+    await seedNotes(f.resources, root, [{ id: "note", text: "Matter", people: [person] }]);
   }
   const db = f.store.resources.storage.db, prepare = db.prepare.bind(db);
   let people = 0, activities = 0;

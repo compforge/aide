@@ -1,3 +1,4 @@
+import { contentVersion } from "../plugins/personal/context-write.ts";
 import { personContext } from "../agents/chief/person.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -48,14 +49,13 @@ test("Same names only select candidates; merging appends to the chosen Person wi
   const sender = personRef(source), inputs = new InputStore(f.home), outputs = new OutputStore(f.home);
   const input = inputs.submit("test", "historical", { origin: "channel", originId: "web", text: "历史消息", sender });
   const output = outputs.create("test", "reply", { text: "历史回复", target: webAddress("topic"), receivers: [sender], topicId: "topic",
-    topic: { apiVersion: "aide.dev/v1alpha2", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } });
+    topic: { apiVersion: "aide.dev/v1alpha3", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } });
   const merged = await f.persons.merge(version(source), version(target));
   assert.equal(merged.metadata.uid, target.metadata.uid);
   assert.equal(merged.spec.name, target.spec.name);
   assert.deepEqual(merged.spec.identities, [...target.spec.identities, ...source.spec.identities]);
   assert.equal(merged.status.summary, "保留人物认识\n\n来源人物认识");
   assert.equal(merged.status.updatedBy, "user");
-  assert.equal(merged.status.recent.length, 0, "Identity merging does not invent a recent matter");
   assert.equal((await f.persons.read(namesake.metadata.name)).metadata.resourceVersion, namesake.metadata.resourceVersion);
   await assert.rejects(f.persons.read(source.metadata.name), /Unknown Person/);
   assert.equal((await f.persons.observe(identity("source"))).metadata.uid, target.metadata.uid);
@@ -96,14 +96,12 @@ test("Merge guards both incarnations, stale sources, self-merge; retains bounded
   await assert.rejects(f.persons.merge(version(source), version(source)), /itself/);
   await assert.rejects(f.persons.merge({ ...version(source), uid: "old-uid" }, version(target)), /version conflict/);
   await assert.rejects(f.persons.merge(version(source), { ...version(target), uid: "old-uid" }), /version conflict/);
-  const updated = await f.client.patchStatus(source, { recent: Array.from({ length: 40 }, (_, i) => ({ id: `note-${i}`, createdAt: new Date(1000 * i).toISOString(), updatedAt: new Date(1000 * i).toISOString(), text: "e".repeat(1000) })) });
+  const updated = await f.client.patchStatus(source, { summary: "Concurrent correction" });
   await assert.rejects(f.persons.merge(version(source), version(target)), /version conflict/);
   const merged = await f.persons.merge(version(updated), version(me), "用户确认后的认识");
   assert.equal(merged.isMe, true);
   assert.equal(merged.spec.name, me.spec.name);
   assert.equal(merged.status.summary, "用户确认后的认识");
-  assert.ok(merged.status.recent.length <= 40);
-  assert.ok(merged.status.recent.reduce((n, entry) => n + entry.text.length, 0) <= 16000);
 });
 
 test("Concurrent merges have one winner; losing target never gains identities", async t => {
@@ -140,12 +138,8 @@ test("Me configuration consolidates existing Lark and WeChat Persons into one re
   const wechat = { provider: "wechat", scope: "personal", id: "wx_me" };
   const first = await f.persons.observe(lark, "李乾坤");
   const second = await f.persons.observe(wechat, "李乾坤");
-  await f.persons.summarize(first.metadata.name, first.metadata.uid, first.metadata.resourceVersion, "Lark preference");
-  await f.persons.summarize(second.metadata.name, second.metadata.uid, second.metadata.resourceVersion, "WeChat preference");
-  for (const [person, text] of [[first, "Explicit work preference"], [second, "Explicit personal preference"]] as const) {
-    const current = await f.persons.read(person.metadata.name);
-    await f.persons.upsertNote(current.metadata.name, current.metadata.uid, { version: current.metadata.resourceVersion, text }, `note-${person.metadata.name}`);
-  }
+  await f.persons.summarize(first.metadata.name, first.metadata.uid, contentVersion(first), "Lark preference");
+  await f.persons.summarize(second.metadata.name, second.metadata.uid, contentVersion(second), "WeChat preference");
   const persons = openPersonCatalog(f.home, { identities: [LOCAL_ME, lark, wechat] }, log, () => {}).persons;
   assert.equal((await persons.initialize()).merged, 2);
   const me = (await persons.findIdentity(lark))!;
@@ -155,8 +149,6 @@ test("Me configuration consolidates existing Lark and WeChat Persons into one re
   assert.deepEqual(new Set(me.spec.identities.map(i => i.provider)), new Set(["web", "lark", "wechat"]));
   assert.equal(me.status.summary.includes("Lark preference"), true);
   assert.equal(me.status.summary.includes("WeChat preference"), true);
-  assert.ok(me.status.recent.some(e => e.text === "Explicit work preference"));
-  assert.ok(me.status.recent.some(e => e.text === "Explicit personal preference"));
   const context = await personContext(persons);
   assert.match(context, /Lark preference/); assert.match(context, /WeChat preference/);
   assert.deepEqual(await persons.initialize(), { merged: 0 });
@@ -188,8 +180,8 @@ test("Me consolidation preserves all profiles when their combined understanding 
   const f = await setup(t), local = (await f.persons.findIdentity(LOCAL_ME))!;
   const external = { provider: "lark", scope: "cli_work", id: "ou_me" };
   const other = await f.persons.observe(external);
-  await f.persons.summarize(local.metadata.name, local.metadata.uid, local.metadata.resourceVersion, "a".repeat(9000));
-  await f.persons.summarize(other.metadata.name, other.metadata.uid, other.metadata.resourceVersion, "b".repeat(9000));
+  await f.persons.summarize(local.metadata.name, local.metadata.uid, contentVersion(local), "a".repeat(9000));
+  await f.persons.summarize(other.metadata.name, other.metadata.uid, contentVersion(other), "b".repeat(9000));
   const persons = new Persons(f.client, { identities: [LOCAL_ME, external] });
   const before = await persons.list();
   const result = await persons.initialize();

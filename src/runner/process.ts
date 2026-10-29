@@ -3,7 +3,7 @@ import { runnerExecution } from "./execution.ts";
 import type { RuntimeScope } from "../protocol/runtime.ts";
 import { Controllers } from "./controllers.ts";
 import { createConnectorClient } from "../connector-client.ts";
-import type { Controller, Hook, HookStage, HookSubjectMap, PluginContext, PluginDataDirectories, PluginInstance, PluginLogContext, PluginLogLevel, PluginPackage, ReconcileSnapshot, Resource, ResourceClient, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
+import type { Controller, Hook, HookStage, HookSubjectMap, PluginContext, PluginDataDirectories, PluginInstance, PluginLogContext, PluginLogLevel, PluginPackage, ReconcileSnapshot, Resource, ResourceClient, ResourceListOptions, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../protocol/ipc.ts";
 import {
   createHookContext
@@ -142,10 +142,11 @@ const resources: ResourceClient = Object.freeze({
   },
   async patch<TSpec, TStatus>(
     resource: Readonly<Resource<TSpec, TStatus>>,
-    patch: ResourceMergePatch,
+    patch: ResourcePatch,
+    options?: ResourcePatchOptions,
   ) {
     return await callHost<Readonly<Resource<TSpec, TStatus>>>({
-      method: "resource.patch",
+      method: "resource.patch", options,
       resource: resource as Readonly<Resource<unknown, unknown>>,
       patch,
     });
@@ -166,9 +167,10 @@ const resources: ResourceClient = Object.freeze({
   async patchStatus<TSpec, TStatus>(
     resource: Readonly<Resource<TSpec, TStatus>>,
     patch: Partial<TStatus>,
+    options?: ResourcePatchOptions,
   ) {
     return await callHost<Readonly<Resource<TSpec, TStatus>>>({
-      method: "resource.patchStatus",
+      method: "resource.patchStatus", options,
       resource: resource as Readonly<Resource<unknown, unknown>>,
       patch: patch as Readonly<Record<string, unknown>>,
     });

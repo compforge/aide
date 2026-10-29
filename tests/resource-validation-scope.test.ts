@@ -47,9 +47,9 @@ function fixture(t: TestContext) {
   store.storage.register("personal", declared.map(watched));
   const resources = createResourceClient(store);
   const topic = (name: string, parent?: TopicResource) => resources.create<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
-    { name, spec: { id: name, ...(parent ? { parentRef: resourceRef(parent) } : {}) }, status: { summary: "", recent: [], receipts: [] } });
+    { name, spec: { id: name, ...(parent ? { parentRef: resourceRef(parent) } : {}) }, status: { summary: "", receipts: [] } });
   const person = (name: string, identities: PersonIdentity[]) => resources.create<Person, PersonStatus>(PERSON_TYPE,
-    { name, spec: { name, identities }, status: { summary: "", recent: [], updatedAt: new Date().toISOString(), updatedBy: "user" } });
+    { name, spec: { name, identities }, status: { summary: "", updatedAt: new Date().toISOString(), updatedBy: "user" } });
   return { store, resources, queries, topic, person };
 }
 
@@ -111,7 +111,7 @@ test("Topic deletion reads indexed dependents and the parent UID, not retained h
   await f.resources.delete(TOPIC_TYPE, leaf.metadata.name);
   assert.ok((await f.resources.get(resourceRef(leaf)))!.metadata.deletionTimestamp);
   const listed = f.queries.filter(q => q.index);
-  assert.deepEqual(listed.map(q => [q.kind, q.index]), [["Topic", "parent"], ["Input", "assessPending"], ["Task", "topic"], ["Routine", "topic"]]);
+  assert.deepEqual(listed.map(q => [q.kind, q.index]), [["Topic", "parent"], ["Input", "assessPending"], ["Task", "topic"], ["Routine", "topic"], ["Note", "subject"]]);
   assert.ok(listed.every(q => q.count === 0));
   assert.ok(f.queries.some(q => q.uid === parent.metadata.uid));
 });

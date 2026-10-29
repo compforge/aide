@@ -101,7 +101,7 @@ export type {
   ResourceReader,
   ResourcePrinter,
   ResourceWriter,
-  ResourceMergePatch,
+  ResourceMergePatch, ResourceJSONPatch, ResourcePatchOperation, ResourcePatch, ResourcePatchOptions,
   ResourceListOptions,
   ResourceMetadata,
   ResourceOwnerReference,
@@ -115,3 +115,5 @@ export type { ExecutionAssociation } from "./reconcile-context.ts";
 export { iconFor } from "./icon.ts";
 
 export type { ResourceDefinition, ResourceRetention, ResourceSchema, ResourceValidator, ResourceValidationContext } from "./resource.ts";
+
+export { ResourceVersionConflict, ResourceIncarnationChanged } from "./resource.ts";

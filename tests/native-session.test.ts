@@ -1,3 +1,4 @@
+import jsonPatch from "fast-json-patch";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
@@ -33,13 +34,14 @@ const request = { verb: "harness" as const, input: { title: "native", prompt: "o
 test("Operator saves recovery parameters with resource version and UID checks", async t => {
   const { resources, scope, store, resource } = await setup(t);
   let conflict = true;
-  const racing: ResourceClient = { ...resources, async patchStatus(resource, patch) {
+  const racing: ResourceClient = { ...resources, async patch(resource, value, options) {
+    const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(resource), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
     if (conflict) {
       conflict = false;
       const latest = (await resources.get<unknown, { progress: string }>(scope.resourceRef!))!;
       await resources.patchStatus(latest, { progress: "concurrent" });
     }
-    return resources.patchStatus(resource, patch);
+    return resources.patch(resource, value, options);
   } };
   const agent = { harness: "configured", sessionId: "native-one" };
   await saveAgent(racing, resource, scope.executionId, agent);
@@ -138,7 +140,7 @@ test("Operator persistence failure cannot dispatch prompt or poison the next cre
     }) });
   t.after(() => service.close());
   const execution = { executionId: scope.executionId, verbs: { harness: (input: import("@compforge/aide-plugin").HarnessVerbInput) => service.invoke(scope, { verb: "harness", input }) } } as unknown as import("@compforge/aide-plugin").ReconcileContext;
-  const unavailable: ResourceClient = { ...resources, async patchStatus() { throw new Error("storage unavailable"); } };
+  const unavailable: ResourceClient = { ...resources, async patch() { throw new Error("storage unavailable"); } };
   await assert.rejects(prepareAgent(unavailable, execution, resource, target.id), /storage unavailable/);
   assert.equal(prompts, 0); assert.equal(closes, 1);
   const agent = await prepareAgent(resources, execution, resource, target.id);

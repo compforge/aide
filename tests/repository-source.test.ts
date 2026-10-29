@@ -1,3 +1,4 @@
+import jsonPatch from "fast-json-patch";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -76,9 +77,10 @@ test("failed and incomplete refreshes keep the complete inventory and respect ba
 
 test("child creation resumes after persistence before offset commit, with bounded fanout", async t => {
   const f = fixture(t); f.setRead(async () => ({ items: Array.from({ length: 25 }, (_, i) => repo(`org/r${i}`)) }));
-  const interrupted: typeof f.resources = { ...f.resources, async patchStatus(resource, patch) {
+  const interrupted: typeof f.resources = { ...f.resources, async patch(resource, value, options) {
+    const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(resource), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
     if ((patch as Partial<RepositorySourceStatus>).handoff?.offset === 1) throw new Error("handoff interrupted");
-    return f.resources.patchStatus(resource, patch);
+    return f.resources.patch(resource, value, options);
   } };
   await assert.rejects(observeRepositories({ resources: interrupted, logger }, f.resource(), f.connectors, [f.policy], at()), /handoff interrupted/);
   assert.equal(f.children().length, 1); const first = f.children()[0]!.metadata.uid;

@@ -17,7 +17,7 @@ function setup(t: TestContext) {
   const store = new PluginResourceStore({ home, pluginInstanceId: "personal" });
   return { storage, store, create(id: string, summary = "", name = id, me = false) {
     return store.create({ type: PERSON_TYPE, name: id, spec: { name, identities: me ? [LOCAL_ME] : [] },
-      status: { summary, recent: [], updatedAt: new Date().toISOString(), updatedBy: "user" } });
+      status: { summary, updatedAt: new Date().toISOString(), updatedBy: "user" } });
   } };
 }
 
@@ -66,7 +66,7 @@ test("Person lists return bounded summaries, exclude foreign scopes and do not r
   f.create("person", "s".repeat(2000));
   f.storage.register("foreign", [PersonDefinition]);
   new PluginResourceStore({ home: f.storage.home, pluginInstanceId: "foreign" }).create({ type: PERSON_TYPE, name: "foreign",
-    spec: { name: "Other", identities: [] }, status: { summary: "", recent: [], updatedAt: new Date().toISOString(), updatedBy: "user" } });
+    spec: { name: "Other", identities: [] }, status: { summary: "", updatedAt: new Date().toISOString(), updatedBy: "user" } });
   const before = f.storage.db.prepare("SELECT key, accessed FROM resources ORDER BY key").all();
   const result = browsePersons(f.storage, marks);
   assert.equal(result.total, 1); assert.equal(result.items[0]!.preview.length, 80);

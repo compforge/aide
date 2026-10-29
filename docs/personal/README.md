@@ -49,7 +49,7 @@ Input 保存原始事实，Task 承担有限目标，Routine 承担持续职责�
 | 共享片段 | 适用对象与边界 |
 | --- | --- |
 | status.topic | Input、Task、Routine 的唯一当前 Topic UID 引用；Topic 使用 spec.parentRef 表达父子关系 |
-| summary / recent | Topic、Task、Routine、Person 的长期认识与近期事项；Input 的解释留在研判回执 |
+| summary / Note | 各资源的长期认识与独立近期事项；recent 为查询视图，Input 的解释留在研判回执 |
 | agent / execution | Topic、Task、Routine、Route、Weave 的原生会话与执行；Input 只在处理回执中引用执行 |
 | organization | Input、Task、Routine、Topic 最近一次组织调整的操作者、原因、时间和前后关系 |
 | conditions | Input、Task、Routine、Topic 按各自业务语义声明条件；不强求同一组状态判断 |
@@ -84,20 +84,11 @@ Source 和 trigger 提供重新判断的机会。已有委托决定可以继续�
 
 ## 有界认识与近期依据
 
-Note 可携带 `persons?: PersonRef[]`，保存事项涉及的人物 UID 引用。更新时省略保留、`[]` 清空；旧 Note 无需回填。综合与保留窗口裁剪保留这些引用，Topic 从自身近期 Note 派生人物预览，见 [近期相关人物](topic.md#近期相关人物)。
+Topic、Task、Routine、Person 的 summary 保存长期有效、低频变化的认识。选择保留内容时比较重要性、稳定性和持久价值；较新或更详细不自动优于已有认识，用户明确修正优先于旧推断。
 
+近期事项保存为独立 [Note](note.md)。统一 upsert_note 用 subject 关联 Topic / Work、people 关联人物，不必为不同目标选择不同写入工具。recent 是查询窗口，不持久化在四类资源中；原始 Note 正文完整保存。summary 与 Note 分别校验自身内容，调度更新不制造模型侧误冲突。
 
-Topic、Person、Task、Routine 共用两种独立的认识。summary 保存长期有效、低频变化的认识，不保证始终正确或完整；只有形成值得长期保留的新认识或需要修正旧认识时才更新。字数不足时，比较新旧内容的重要性、稳定性和长期价值，新内容不能仅因更新或更具体而挤掉更值得保留的旧认识。Task 的长期价值相对于该目标的生命周期，结构化目标、身份、授权和业务状态仍由各自字段承担。
-
-recent 保存近期事项的 Note。每条有 id、createdAt、updatedAt、text；一个事项跨多个 Input 持续更新，例如开始、完成 50%、报告完成。text 是该事项完整的当前认识，保留实际作者、必要依据和不确定性，区分报告完成与已验证完成。Note 可以在原始 Input 释放后继续承接近期上下文；事项完成不自动提升为 summary。
-
-summarize_topic、summarize_person、summarize_task、summarize_routine 修订各自的 summary，不写 recent。upsert_note 不传 noteId 创建，传入则更新已有事项；写入需要读取目标取得的资源版本，创建重试复用工具调用身份。更新会刷新 updatedAt 并将该事项放到窗口末端，createdAt 保留。不存在或已淘汰的 noteId 拒绝更新，不隐式重建。
-
-四类资源共用 Note 结构和容量规则，但工具描述与范围由其 Agent 决定。Chief 可维护当前根及子 Topic，或显式选择已读取的 Person；Task/Routine 的目标由宿主绑定，模型不能指定其它资源。维护认识不确认 Input 办理、不完成 Work，也不授予执行权限。
-
-recent 按更新时间保留最多 40 条、合计 16000 字符；优先保留最新事项，必要时截断较旧条目的正文。summary 的存储上限为 16000 字符，Topic 另受配置的 summaryChars 约束。常驻背景只展示有界预览，省略内容通过对应读取工具查询。保留预算不是要求每轮写满窗口，临时观察也不要求改写 summary。
-
-report_task / report_routine 原子提交本次 report、业务状态和明确列出的 Input 回执，并保存 lastReport 供恢复和进展查询；它们不替换 summary、不自动追加 Note。用户沟通仍独立通过 say。Person 的人工修正直接更新同一 summary，保留用户来源；身份合并保留并归并已有 Note，不自动制造事项笔记。
+report_task / report_routine 只原子提交办理报告、业务状态与 Input 回执，不自动更新 summary 或 Note。维护认识也不确认 Input、不完成 Work、不授予新的执行权限。详细字段、工具、预算、并发和生命周期契约见 [Note](note.md)。
 
 ## 运行与验证
 

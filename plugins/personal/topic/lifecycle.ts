@@ -1,3 +1,4 @@
+import { readNotes } from "../note/query.ts";
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 import { topicPolicy } from "./config.ts";
@@ -29,7 +30,7 @@ export async function collectTopic(context: PluginContext, topic: TopicResource)
   if (children.length) return delay;
   if (topic.spec.parentRef) {
     const parent = await context.resources.get<TopicSpec, TopicStatus>(topic.spec.parentRef);
-    if (!parent || parent.status.absorbed?.[topic.metadata.uid] !== understandingVersion(topic)) return delay;
+    if (!parent || parent.status.absorbed?.[topic.metadata.uid] !== understandingVersion(topic, await readNotes(context.resources, topic.metadata.uid))) return delay;
   }
   const inputs = await context.resources.list<InputSpec, InputStatus>(INPUT_TYPE,
     { matchIndex: { name: "assessPending", value: topic.metadata.uid } });

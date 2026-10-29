@@ -1,16 +1,13 @@
-import { PersonRefSchema } from "./person/model.ts";
+import { NoteWriterSchema, type NoteStatus } from "./note/model.ts";
 import { z } from "zod";
 
 export const SUMMARY_CHARS = 16000;
 export const RECENT_COUNT = 40;
 export const RECENT_CHARS = 16000;
-/** @spec One resource-local Note follows one recent matter with a stable identity and Host-maintained timestamps.
- * @link docs/personal/README.md#有界认识与近期依据
- */
-export const NoteSchema = z.object({ id: z.string().min(1), createdAt: z.string(), updatedAt: z.string(), text: z.string(), persons: z.array(PersonRefSchema).optional() }).strict();
-export type Note = z.infer<typeof NoteSchema>;
+export type { Note } from "./note/model.ts";
+import type { Note } from "./note/model.ts";
 /**
- * @spec Updated Notes move to the newest end. All persisted writes apply the same count and character budgets.
+ * @spec Updated Notes move to the newest end. Read projections apply count and character budgets; stored Notes remain complete.
  * @link docs/personal/README.md#有界认识与近期依据
  */
 export function retainRecent(entries: readonly Note[]): Note[] {
@@ -26,9 +23,9 @@ export function retainRecent(entries: readonly Note[]): Note[] {
   return retained.reverse();
 }
 export const ContextFields = {
+  contextWriter: NoteWriterSchema.optional(),
   summary: z.string().max(SUMMARY_CHARS).default(""),
-  recent: z.array(NoteSchema).default([]).refine(notes => new Set(notes.map(note => note.id)).size === notes.length,
-    "Note IDs must be unique within a resource").transform(retainRecent),
 };
 /** @spec Long-lived, infrequently changing summary and recent matter Notes are maintained independently. */
-export interface ResourceContext { summary: string; recent: Note[] }
+export interface ResourceContext { summary: string; contextWriter?: NoteStatus["writer"] }
+export interface ContextView extends ResourceContext { recent: Note[] }

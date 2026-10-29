@@ -1,9 +1,10 @@
+import { notes } from "../../plugins/personal/note/query.ts";
 import { channelOutputs, visibleOutput } from "./output.ts";
 import { inputPrinter } from "../../plugins/personal/input/printer.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { harnessIdentityFor } from "../host/harness/ids.ts";
 import type { ChannelService } from "./service.ts";
-import type { ResourceContext } from "../../plugins/personal/context.ts";
+import type { ContextView } from "../../plugins/personal/context.ts";
 import { PROTOCOL_VERSION, type BaseBlock, type ModelMeta, type UIModel } from "@compforge/agentue/ui";
 
 export interface TopicBlock extends BaseBlock {
@@ -27,7 +28,7 @@ export interface TopicBlock extends BaseBlock {
 }
 interface TopicMeta extends ModelMeta {
   topic_id: string;
-  context: ResourceContext | null;
+  context: ContextView | null;
   activity: { id: string; phase: string; queued: number } | null;
 }
 export type TopicView = UIModel<TopicBlock, TopicMeta>;
@@ -133,7 +134,7 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const live = [...executions.values()].some((execution) => execution.header.status === "running");
   return {
     version: PROTOCOL_VERSION, biz: "aide.topic", blocks,
-    meta: { topic_id: topicId, context: resource ? { summary: resource.status.summary, recent: resource.status.recent } : null, activity: active || queued || live ? {
+    meta: { topic_id: topicId, context: resource ? { summary: resource.status.summary, recent: notes(aide.topics.resources, resource.metadata.uid) } : null, activity: active || queued || live ? {
       id: active?.id ?? `queued:${topicId}`, phase: active?.status.phase ?? "queued", queued,
     } : null },
   };

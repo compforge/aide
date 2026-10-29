@@ -1,3 +1,4 @@
+import jsonPatch from "fast-json-patch";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { describeWorkloadChanges } from "../plugins/personal/source/environment/changes.ts";
 import { EventLedger } from "../src/host/event/ledger.ts";
@@ -48,7 +49,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   await observe(); assert.equal(topics.list().length, 0);
   current = { ...current, observedAt: "later" }; await observe(); assert.equal(topics.list().length, 0);
   current = snapshot("B");
-  await assert.rejects(observeEnvironment({ logger, resources: { ...resources(), async patchStatus() { throw new Error("Crash"); } } }, resource(), connectors), /Crash/);
+  await assert.rejects(observeEnvironment({ logger, resources: { ...resources(), async patch() { throw new Error("Crash"); } } }, resource(), connectors), /Crash/);
   assert.equal(topics.list().length, 1);
   assert.match(topics.list()[0]!.spec.text, /dev \/ app.*Workload/);
   assert.match(topics.list()[0]!.spec.text, /Deployment api.*镜像 api=A → api=B/);
@@ -72,7 +73,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   const event = topics.list().at(-1)!.spec.observation!;
   assert.deepEqual((event.changes as { after?: unknown }[]).map((c) => c.after), [undefined]);
   assert.ok(topics.list().every((input) => input.spec.topicKey === "environment:dev" && input.spec.topicName === "dev"));
-  assert.equal(store.list({ apiVersion: "aide.dev/v1alpha2", kind: "Task" }).length, 0);
+  assert.equal(store.list({ apiVersion: "aide.dev/v1alpha3", kind: "Task" }).length, 0);
 });
 
 test("Environment policy selects namespaces independently of Connector defaults and resolves aliases", () => {

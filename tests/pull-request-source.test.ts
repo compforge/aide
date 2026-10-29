@@ -1,3 +1,4 @@
+import jsonPatch from "fast-json-patch";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -113,9 +114,10 @@ test("merged inputs share repository Topics while PR baselines and other Forge r
 
 test("crash after Input persistence preserves the frozen plan and does not emit another merge for a new revision",async t=>{
   const f=fixture(t);await f.observe();f.setPR(merged());
-  const interrupted:typeof f.resources={...f.resources,async patchStatus(resource,patch){
+  const interrupted:typeof f.resources={...f.resources,async patch(resource, value, options) {
+    const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(resource), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
     if("pending" in patch && patch.pending===null)throw new Error("Interrupted after Input");
-    return f.resources.patchStatus(resource,patch);
+    return f.resources.patch(resource, value, options);
   }};
   await assert.rejects(observePullRequests({logger,resources:interrupted},f.resource(),f.connectors,at(30)),/Interrupted/);
   assert.equal(f.inputs.list().length,1);assert(f.resource().status.pending);
@@ -139,9 +141,10 @@ test("open revisions, titles, close and reopen update baselines silently; each l
 test("frozen batch resumes at its offset and commits the opaque scan cursor only after all merges",async t=>{
   const f=fixture(t);let reads=0;
   f.setRead(async()=>{reads++;return scanResult([merged(1),merged(2)]);});
-  const interrupted:typeof f.resources={...f.resources,async patchStatus(resource,patch){
+  const interrupted:typeof f.resources={...f.resources,async patch(resource, value, options) {
+    const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(resource), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
     if("batch" in patch && (patch.batch as {offset:number}|null)?.offset===1)throw new Error("between items");
-    return f.resources.patchStatus(resource,patch);
+    return f.resources.patch(resource, value, options);
   }};
   await assert.rejects(observePullRequests({logger,resources:interrupted},f.resource(),f.connectors,at(30)),/between items/);
   assert.equal(f.inputs.list().length,1);assert.equal(f.resource().status.cursor,undefined);
@@ -220,9 +223,10 @@ test("real Runner discovers across IPC and routes a merged Input to Chief; disab
 
 test("a frozen batch retains its acceptance horizon across a long interruption",async t=>{
   const f=fixture(t);f.setRead(async()=>scanResult([merged(1),merged(2)]));
-  const interrupted:typeof f.resources={...f.resources,async patchStatus(resource,patch){
+  const interrupted:typeof f.resources={...f.resources,async patch(resource, value, options) {
+    const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(resource), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
     if("batch" in patch && (patch.batch as {offset:number}|null)?.offset===1)throw new Error("between items");
-    return f.resources.patchStatus(resource,patch);
+    return f.resources.patch(resource, value, options);
   }};
   await assert.rejects(observePullRequests({logger,resources:interrupted},f.resource(),f.connectors,at(30)),/between items/);
   await f.restart();await f.observe(9*86400);
@@ -233,9 +237,10 @@ test("a frozen batch retains its acceptance horizon across a long interruption",
 
 test("a retired observer drains frozen Inputs and batches without another Forge request", async t => {
   const f = fixture(t); f.setRead(async () => scanResult([merged(1), merged(2)]));
-  const interrupted: typeof f.resources = { ...f.resources, async patchStatus(resource, patch) {
+  const interrupted: typeof f.resources = { ...f.resources, async patch(resource, value, options) {
+    const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(resource), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
     if ("pending" in patch && patch.pending === null) throw new Error("stop after Input");
-    return f.resources.patchStatus(resource, patch);
+    return f.resources.patch(resource, value, options);
   } };
   await assert.rejects(observePullRequests({ logger, resources: interrupted }, f.resource(), f.connectors, at(30)), /stop after Input/);
   assert(f.resource().status.pending); assert.equal(f.inputs.list().length, 1);

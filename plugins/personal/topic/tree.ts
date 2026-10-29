@@ -73,8 +73,8 @@ export async function readTopicRoot(resources: ResourceReader, ref: ResourceRef)
 /** Summary changes drive maintenance; full context versions still fence Weave and deletion. */
 export const summaryVersion = (topic: TopicResource): string =>
   createHash("sha256").update(topic.status.summary).digest("hex");
-export const understandingVersion = (topic: TopicResource): string =>
-  createHash("sha256").update(JSON.stringify([topic.status.summary, topic.status.recent])).digest("hex");
+export const understandingVersion = (topic: TopicResource, notes: readonly import("../note/model.ts").Note[] = []): string =>
+  createHash("sha256").update(JSON.stringify([topic.status.summary, notes.map(n => [n.uid, n.version])])).digest("hex");
 
 /** @spec Source identity is reusable; Topic identity is new after expiry. Uniqueness is checked in the storage transaction.
  * @spec A source name initializes a new Topic; later messages never rename an existing Topic or its Weave parent.
@@ -88,7 +88,7 @@ export async function ensureSourceTopic(resources: ResourceClient, key: string, 
   const id = randomUUID();
   try {
     return await resources.create(TOPIC_TYPE, { name: digest(id), spec: { id, topicKey: key, name: initialTopicName(name?.trim() || text) },
-      status: { receipts: [], summary: "", recent: [] } });
+      status: { receipts: [], summary: "" } });
   } catch (error) {
     if (!String(error).includes("Topic key already exists")) throw error;
     const created = await find();
@@ -101,7 +101,7 @@ export async function ensureSourceTopic(resources: ResourceClient, key: string, 
  * @spec Full context review remains necessary before a child can be reclaimed.
  * @link docs/personal/topic.md#研判与上下文
  */
-export function pendingAbsorption(topics: readonly TopicResource[], root: TopicResource, includeNotes = false) {
+export function pendingAbsorption(topics: readonly TopicResource[], root: TopicResource, includeNotes = false, versions = new Map<string, string>()) {
   const children = new Map<string, TopicResource[]>();
   for (const topic of topics) if (topic.spec.parentRef) {
     const siblings = children.get(topic.spec.parentRef.uid) ?? [];
@@ -114,8 +114,8 @@ export function pendingAbsorption(topics: readonly TopicResource[], root: TopicR
   for (const topic of subtree.slice(1)) depths.set(topic.metadata.uid, depths.get(topic.spec.parentRef!.uid)! + 1);
   return subtree.slice(1)
     .filter(topic => includeNotes
-      ? byUid.get(topic.spec.parentRef!.uid)?.status.absorbed?.[topic.metadata.uid] !== understandingVersion(topic)
+      ? byUid.get(topic.spec.parentRef!.uid)?.status.absorbed?.[topic.metadata.uid] !== (versions.get(topic.metadata.uid) ?? understandingVersion(topic))
       : byUid.get(topic.spec.parentRef!.uid)?.status.absorbedSummaries?.[topic.metadata.uid] !== summaryVersion(topic))
     .sort((a, b) => depths.get(b.metadata.uid)! - depths.get(a.metadata.uid)!)
-    .map(topic => ({ uid: topic.metadata.uid, parentUid: topic.spec.parentRef!.uid, version: understandingVersion(topic) }));
+    .map(topic => ({ uid: topic.metadata.uid, parentUid: topic.spec.parentRef!.uid, version: (versions.get(topic.metadata.uid) ?? understandingVersion(topic)) }));
 }

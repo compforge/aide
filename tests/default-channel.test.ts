@@ -144,7 +144,6 @@ test("Configuring existing Persons as Channel Me consolidates their accounts wit
   assert.equal(marked.isMe, true);
   assert.equal(marked.metadata.uid, web.metadata.uid);
   assert.equal(marked.status.summary, person.status.summary);
-  assert.deepEqual(marked.status.recent, person.status.recent);
   assert.equal((await aide.persons.list()).filter(p => p.isMe).length, 1);
   assert.deepEqual(aide.topics.inputStore.get(evidence.metadata.name)!.spec.sender, personRef(person));
   assert.equal((await aide.persons.findIdentity(LOCAL_ME))!.metadata.uid, web.metadata.uid);

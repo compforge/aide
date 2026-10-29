@@ -1,3 +1,4 @@
+import { patchStatus } from "../../status.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
 import { InputAttention } from "../../input/model.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -42,7 +43,7 @@ class PullRequestObservation {
   private async save(patch: Partial<PullRequestSourceStatus>) {
     const latest = await this.context.resources.get<PullRequestSourceSpec, PullRequestSourceStatus>({ ...PULL_REQUEST_SOURCE_TYPE, ...this.resource.metadata });
     if (!latest || latest.metadata.uid !== this.resource.metadata.uid || latest.metadata.deletionTimestamp || !isDeepStrictEqual(latest.spec, this.resource.spec)) throw new Error("PullRequest Source changed during observation");
-    this.resource = await this.context.resources.patchStatus(latest, patch);
+    this.resource = await patchStatus(this.context.resources, latest, patch);
   }
   private async deliver() {
     const plan = this.resource.status.pending;
@@ -200,7 +201,7 @@ export function registerPullRequestSources(context: PluginContext) {
         failed = true;
         context.logger.error("PullRequest observation failed; checkpoint retained", { error, attributes: { watchId: resource.spec.id, forge: resource.spec.forge, path: resource.spec.repository?.path ?? null } });
         const current = await context.resources.get<PullRequestSourceSpec, PullRequestSourceStatus>({ ...PULL_REQUEST_SOURCE_TYPE, ...resource.metadata });
-        if (current && current.metadata.uid === resource.metadata.uid) await context.resources.patchStatus(current, { error: error instanceof Error ? error.message : String(error) });
+        if (current && current.metadata.uid === resource.metadata.uid) await patchStatus(context.resources, current, { error: error instanceof Error ? error.message : String(error) });
       }
       const latest = await context.resources.get<PullRequestSourceSpec, PullRequestSourceStatus>({ ...PULL_REQUEST_SOURCE_TYPE, ...resource.metadata });
       return { requeueAfterMs: failed ? resource.spec.intervalMs : nextPullRequestPollDelay(latest?.status ?? {}, resource.spec.intervalMs) };

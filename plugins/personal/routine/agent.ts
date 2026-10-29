@@ -1,3 +1,5 @@
+import { contentVersion } from "../context-write.ts";
+import { notes } from "../note/query.ts";
 import { workContextTools } from "../work-context.ts";
 import { sayTool, contactsTool, type ContactChannel } from "../output/tool.ts";
 import { identityBackground } from "../../../agents/personal.ts";
@@ -38,9 +40,9 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, store.topicId(current().status.topic)), offset)); } }),
       tool({ name: "read_routine", label: "Read routine", description: "Read this Routine's objective, state, latest handling report, long-lived summary and recent Notes.", parameters: Type.Object({}),
-        async execute() { return result(current()); } }),
+        async execute() { const r = current(); return result({ ...r, version: contentVersion(r), recent: notes(store.resources, r.metadata.uid) }); } }),
       tool({ name: "read_topic", label: "Read topic", description: "Read the owning Topic as context, not additional authority.", parameters: Type.Object({}),
-        async execute() { const c = store.topics.resource(store.topicId(current().status.topic)); return result(c ? { ...c.spec, summary: c.status.summary, recent: c.status.recent } : null); } }),
+        async execute() { const c = store.topics.resource(store.topicId(current().status.topic)); return result(c ? { ...c.spec, summary: c.status.summary, recent: notes(store.resources, c.metadata.uid) } : null); } }),
       tool({ name: "read_input", label: "Read input", description: "List pending assigned inputs, or page through one assigned input. Failed attempts need effect inspection.",
         parameters: Type.Object({ inputId: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { inputId, offset = 0 }) {

@@ -1,4 +1,5 @@
-import type { Resource, ResourceCommit, ResourceClient as PublicResourceClient, ResourceListOptions, ResourceMergePatch, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
+import { isDeepStrictEqual } from "node:util";
+import type { Resource, ResourceCommit, ResourceClient as PublicResourceClient, ResourceListOptions, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 
 import { PluginResourceStore } from "./store.ts";
 
@@ -136,36 +137,33 @@ export function createResourceClient(
     return created;
   }
   function replace<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, spec: TSpec, status: TStatus) {
-    if (store.get(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace).metadata.uid !== resource.metadata.uid) throw new Error("Resource incarnation changed before replacement");
-    const updated = deepFreeze(store.replace(resource, resource.metadata.name, spec, status, {
-      expectedResourceVersion: resource.metadata.resourceVersion, namespace: resource.metadata.namespace as ResourceNamespace,
-    }));
-    if (updated.metadata.resourceVersion !== resource.metadata.resourceVersion) changed("status-updated", updated, resource);
-    return updated;
+    return store.storage.transaction(() => {
+      const current = store.get<TSpec, TStatus>(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace);
+      const updated = deepFreeze(store.replace(resource, resource.metadata.name, spec, status, {
+        expectedUid: resource.metadata.uid, expectedResourceVersion: resource.metadata.resourceVersion, namespace: resource.metadata.namespace as ResourceNamespace,
+      }));
+      if (updated.metadata.resourceVersion !== current.metadata.resourceVersion) changed("status-updated", updated, deepFreeze(current));
+      return updated;
+    });
   }
-  function patchStatus<TSpec, TStatus>(
-    resource: Readonly<Resource<TSpec, TStatus>>,
-    patch: Partial<TStatus>,
-  ) {
-    if (store.get(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace).metadata.uid !== resource.metadata.uid) throw new Error("Resource incarnation changed before status update");
-    const patched = deepFreeze(
-      store.patchStatus<TSpec, TStatus>(
-        resource,
-        resource.metadata.name,
-        patch,
-        {
-          expectedResourceVersion: resource.metadata.resourceVersion,
-          namespace: resource.metadata.namespace as ResourceNamespace,
-        },
-      ),
-    );
-    if (
-      patched.metadata.resourceVersion !==
-      resource.metadata.resourceVersion
-    ) {
-      changed("status-updated", patched, resource);
-    }
-    return patched;
+
+  function patch<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, value: ResourcePatch, options?: ResourcePatchOptions) {
+    return store.storage.transaction(() => {
+      const current = store.get<TSpec, TStatus>(resource, resource.metadata.name, resource.metadata.namespace as ResourceNamespace);
+      const updated = deepFreeze(store.patch<TSpec, TStatus>(resource, resource.metadata.name, value, {
+        expectedUid: resource.metadata.uid, expectedResourceVersion: options?.resourceVersion,
+        namespace: resource.metadata.namespace as ResourceNamespace,
+      }));
+      if (updated.metadata.resourceVersion !== current.metadata.resourceVersion) {
+        const metadataChanged = !isDeepStrictEqual(current.metadata.labels, updated.metadata.labels)
+          || !isDeepStrictEqual(current.metadata.annotations, updated.metadata.annotations);
+        changed(metadataChanged ? "metadata-updated" : "status-updated", updated, deepFreeze(current));
+      }
+      return updated;
+    });
+  }
+  function patchStatus<TSpec, TStatus>(resource: Readonly<Resource<TSpec, TStatus>>, value: Partial<TStatus>, options?: ResourcePatchOptions) {
+    return patch(resource, { type: "merge", value: { status: value } }, options);
   }
   function requestDeletion(type: ResourceType, name: string, namespace: ResourceNamespace = "v1", preconditions?: { uid: string; resourceVersion: string }) {
     const updates = store.requestDeletion(type, name, undefined, namespace, preconditions);
@@ -187,7 +185,7 @@ export function createResourceClient(
       ? create(w.type, { name: w.name, spec: w.spec, status: w.status })
       : w.operation === "delete" ? requestDeletion(w.resource, w.resource.metadata.name, w.resource.metadata.namespace as ResourceNamespace,
         { uid: w.resource.metadata.uid, resourceVersion: w.resource.metadata.resourceVersion })
-      : w.operation === "replace" ? replace(w.resource, w.spec, w.status) : patchStatus(w.resource, w.patch))) as Resource<unknown, unknown>[];
+      : w.operation === "replace" ? replace(w.resource, w.spec, w.status) : w.operation === "patch" ? patch(w.resource, w.patch, w.options) : patchStatus(w.resource, w.patch, w.options))) as Resource<unknown, unknown>[];
   }
 
   return Object.freeze({
@@ -211,40 +209,10 @@ export function createResourceClient(
     ) {
       requestDeletion(type, name, namespace, preconditions);
     },
-    async patch<TSpec, TStatus>(
-      resource: Readonly<Resource<TSpec, TStatus>>,
-      patch: ResourceMergePatch,
-    ) {
-      throw new Error(
-        `Resource ${resource.apiVersion}/${resource.kind} does not support generic patch`,
-      );
-    },
-    async patchMetadata<TSpec, TStatus>(
-      resource: Readonly<Resource<TSpec, TStatus>>,
-      patch: {
-        readonly labels?: Readonly<Record<string, string | null>>;
-        readonly annotations?: Readonly<Record<string, string | null>>;
-      },
-    ) {
-      const patched = deepFreeze(
-        store.patchMetadata<TSpec, TStatus>(
-          resource,
-          resource.metadata.name,
-          patch,
-          {
-            expectedResourceVersion: resource.metadata.resourceVersion,
-            namespace: resource.metadata.namespace as ResourceNamespace,
-          },
-        ),
-      );
-      if (
-        patched.metadata.resourceVersion !==
-        resource.metadata.resourceVersion
-      ) {
-        changed("metadata-updated", patched, resource);
-      }
-      return patched;
-    },
-    patchStatus: async <S, T>(resource: Readonly<Resource<S, T>>, patch: Partial<T>) => patchStatus(resource, patch),
+    patch: async <S, T>(resource: Readonly<Resource<S, T>>, value: ResourcePatch, options?: ResourcePatchOptions) => patch(resource, value, options),
+    async patchMetadata<S, T>(resource: Readonly<Resource<S, T>>, value: {
+      readonly labels?: Readonly<Record<string, string | null>>; readonly annotations?: Readonly<Record<string, string | null>>;
+    }) { return patch(resource, { type: "merge", value: { metadata: value } }); },
+    patchStatus: async <S, T>(resource: Readonly<Resource<S, T>>, patch: Partial<T>, options?: ResourcePatchOptions) => patchStatus(resource, patch, options),
   });
 }

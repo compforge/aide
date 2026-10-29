@@ -1,3 +1,4 @@
+import { notes } from "../note/query.ts";
 import type { Store } from "../store.ts";
 import { PERSON_TYPE, type PersonRef } from "../person/model.ts";
 import type { TopicResource } from "./model.ts";
@@ -12,7 +13,7 @@ const PERSON_LIMIT = 8;
  */
 export function topicPersons(store: Store, topic: TopicResource) {
   const people = new Map<string, PersonRef>();
-  for (const note of [...topic.status.recent].reverse()) for (const ref of note.persons ?? []) {
+  for (const note of [...notes(store.resources, topic.metadata.uid)].reverse()) for (const ref of note.people ?? []) {
     if (!people.has(ref.uid)) people.set(ref.uid, ref);
   }
   const refs = [...people.values()].slice(0, PERSON_LIMIT);
@@ -29,7 +30,7 @@ export function topicPersons(store: Store, topic: TopicResource) {
     return { ref, ...(ref.apiVersion === PERSON_TYPE.apiVersion && person?.id === ref.name
       ? { name: String(person.name).slice(0, 200) } : { unavailable: true }) };
   });
-  return { items, source: "recentNotes" as const, noteCount: topic.status.recent.length,
+  return { items, source: "recentNotes" as const, noteCount: notes(store.resources, topic.metadata.uid).length,
     omittedPersons: Math.max(0, people.size - items.length) };
 }
 

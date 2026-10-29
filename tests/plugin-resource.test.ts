@@ -149,7 +149,8 @@ describe("PluginResourceStore", () => {
     });
     expect(status.metadata.generation).toBe(2);
     expect(status.metadata.resourceVersion).toBe("3");
-    expect(status.status).toEqual({ phase: "running", evidence: null });
+    expect(status.status.phase).toBe("running");
+    expect("evidence" in status.status).toBe(false);
 
     const due = new Date("2026-07-25T01:02:03.000Z");
     resources.setNextReconcileAt(REQ_LOOP_RUN, "run_1", due);

@@ -1,3 +1,6 @@
+import { notes } from "../note/query.ts";
+import { requireContentWriter } from "../context-write.ts";
+import { guardContext } from "../context-write.ts";
 import { guardTopicOrganization } from "./organization.ts";
 import { requireTopic } from "./ownership.ts";
 import { ConditionsSchema } from "../conditions.ts";
@@ -52,9 +55,23 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
-      lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).optional(), absorbedSummaries: z.record(z.string(), z.string()).optional(),
+      lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).default({}), absorbedSummaries: z.record(z.string(), z.string()).default({}),
       nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
   validator: { create: (resource, context) => { validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
+    guardContext(previous, current, context);
+    const reviewed = current.status.organization?.reviewedVersion;
+    if (reviewed && JSON.stringify(previous.status.organization) !== JSON.stringify(current.status.organization)
+      && understandingVersion(previous, notes(context, previous.metadata.uid)) !== reviewed)
+      throw new Error("Topic understanding changed before organization");
+    if (JSON.stringify(previous.status.absorbed) !== JSON.stringify(current.status.absorbed)) {
+      if (current.status.contextWriter) requireContentWriter(current, current.status.contextWriter, context);
+      for (const [uid, version] of Object.entries(current.status.absorbed ?? {})) {
+        if (previous.status.absorbed?.[uid] === version) continue;
+        const child = context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, uid);
+        if (!child || child.metadata.deletionTimestamp || child.spec.parentRef?.uid !== current.metadata.uid || understandingVersion(child, notes(context, uid)) !== version)
+          throw new Error("Child understanding changed; read and review again");
+      }
+    }
     if (previous.spec.id !== current.spec.id || previous.spec.topicKey !== current.spec.topicKey) throw new Error("Topic identity is immutable");
     if (current.spec.parentRef && current.status.execution && current.status.execution.id !== previous.status.execution?.id)
       throw new Error("Only a root Topic can start Chief");
@@ -72,7 +89,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     if (WORK_TYPES.some(type => context.list<WorkResource["spec"], WorkResource["status"]>(type, { matchIndex: { name: "topic", value: resource.metadata.uid } }).length)) throw new TopicDeletionBlocked("work", "Topic still owns Work");
     if (resource.spec.parentRef) {
       const parent = context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, resource.spec.parentRef.uid);
-      if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource)) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");
+      if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource, notes(context, resource.metadata.uid))) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");
     }
   } },
   indexes: { default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],

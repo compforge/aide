@@ -1,9 +1,12 @@
-import { commitStatus, patchStatus } from "../status.ts";
+import { contentVersion } from "../context-write.ts";
+import { SubjectSchema } from "../note/model.ts";
+import { readNotes } from "../note/query.ts";
+import { patchStatus } from "../status.ts";
 import { resourceRef } from "../input/state.ts";
 import { readTopicSubtree, understandingVersion, summaryVersion } from "./tree.ts";
 import { z } from "zod";
 import { SUMMARY_CHARS } from "../context.ts";
-import { upsertNote, NoteUpdateSchema } from "../notes.ts";
+import { upsertNote, NoteUpdateSchema } from "../note/service.ts";
 import type { ResourceClient } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 
@@ -25,7 +28,7 @@ export const TopicContextSchema = z.object({ topicUid: z.string().optional(),
   version: z.string(), summary: z.string().max(SUMMARY_CHARS).optional(),
 }).strict().refine(args => args.summary !== undefined || !!args.absorbed?.length, "Supply summary or reviewed child versions");
 export type TopicContextUpdate = z.infer<typeof TopicContextSchema>;
-export const TopicNoteSchema = NoteUpdateSchema.extend({ topicUid: z.string().optional() });
+export const TopicNoteSchema = NoteUpdateSchema;
 export type TopicNoteUpdate = z.infer<typeof TopicNoteSchema>;
 
 async function targetTopic(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, topicUid?: string) {
@@ -48,27 +51,28 @@ export async function summarizeTopic(resources: ResourceClient, owner: Readonly<
   const args = TopicContextSchema.parse(raw);
   if (args.summary !== undefined && args.summary.length > summaryChars) throw new Error(`Topic summary exceeds ${summaryChars} characters; select more durable understanding`);
   const { current, target, all } = await targetTopic(resources, owner, executionId, args.topicUid);
-  if (target.metadata.resourceVersion !== args.version) throw new Error("Topic context changed; read_topic and merge again");
+  if (contentVersion(target) !== args.version) throw new Error("Topic context changed; read_topic and merge again");
   const absorbed = { ...target.status.absorbed }, absorbedSummaries = { ...target.status.absorbedSummaries };
-  const children = (args.absorbed ?? []).map(ref => {
+  const children = await Promise.all((args.absorbed ?? []).map(async ref => {
     const child = all.find(t => t.metadata.uid === ref.uid && t.spec.parentRef?.uid === target.metadata.uid && !t.metadata.deletionTimestamp);
-    if (!child || understandingVersion(child) !== ref.version) throw new Error("Child understanding changed; read and review again");
+    if (!child || understandingVersion(child, await readNotes(resources, child.metadata.uid)) !== ref.version) throw new Error("Child understanding changed; read and review again");
     absorbed[ref.uid] = ref.version;
     absorbedSummaries[ref.uid] = summaryVersion(child);
     return child;
-  });
-  await commitStatus(resources, [
-    ...children.map(resource => ({ operation: "patchStatus" as const, resource, patch: {} })),
-    ...(target.metadata.uid === current.metadata.uid ? [] : [{ operation: "patchStatus" as const, resource: current, patch: {} }]),
-    { operation: "patchStatus", resource: target, patch: { ...(args.summary !== undefined ? { summary: args.summary } : {}),
-      ...(args.absorbed?.length ? { absorbed, absorbedSummaries } : {}) } },
-  ]);
-  const updated = (await resources.get<TopicSpec, TopicStatus>(resourceRef(target)))!;
-  return { version: updated.metadata.resourceVersion, understandingVersion: understandingVersion(updated) };
+  }));
+  const updated = await resources.patch(target, { type: "json", value: [
+    { op: "test", path: "/status/summary", value: target.status.summary },
+    ...(args.summary !== undefined ? [{ op: "replace" as const, path: "/status/summary", value: args.summary }] : []),
+    { op: "add", path: "/status/contextWriter", value: { resource: SubjectSchema.parse(resourceRef(current)), executionId } },
+    ...children.flatMap(child => [
+      { op: "add" as const, path: `/status/absorbed/${child.metadata.uid}`, value: absorbed[child.metadata.uid] },
+      { op: "add" as const, path: `/status/absorbedSummaries/${child.metadata.uid}`, value: absorbedSummaries[child.metadata.uid] },
+    ]),
+  ] });
+  return { version: contentVersion(updated), understandingVersion: understandingVersion(updated, await readNotes(resources, updated.metadata.uid)) };
 }
 
 export async function upsertTopicNote(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, callId: string) {
-  const { topicUid, ...args } = TopicNoteSchema.parse(raw);
-  const { current, target } = await targetTopic(resources, owner, executionId, topicUid);
-  return upsertNote(resources, target, args, `${executionId}:${callId}`, target.metadata.uid === current.metadata.uid ? [] : [current]);
+  const { current } = await targetTopic(resources, owner, executionId);
+  return upsertNote(resources, current, raw, callId);
 }

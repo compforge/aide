@@ -1,3 +1,5 @@
+import { notes as storedNotes } from "../plugins/personal/note/query.ts";
+import { seedNotes } from "./fixtures/notes.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -86,9 +88,11 @@ test("child previews expose omitted Notes and text; paged reads recover the comp
   const notes = ["Older unresolved matter", "A".repeat(500), "B".repeat(501), "C".repeat(9000) + " Not independently verified"].map((text, i) =>
     ({ id: `note-${i}`, createdAt: at, updatedAt: at, text }));
   const child = await resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "preview-child",
-    spec: { id: "preview-child", parentRef: resourceRef(root) }, status: { summary: "S".repeat(1201), recent: notes, receipts: [] } });
+    spec: { id: "preview-child", parentRef: resourceRef(root) }, status: { summary: "S".repeat(1201), receipts: [] } });
   const short = await resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "short-child",
-    spec: { id: "short-child", parentRef: resourceRef(root) }, status: { summary: "Complete summary", recent: [notes[0]!], receipts: [] } });
+    spec: { id: "short-child", parentRef: resourceRef(root) }, status: { summary: "Complete summary", receipts: [] } });
+  await seedNotes(resources, child, notes);
+  await seedNotes(resources, short, [notes[0]!]);
   const tools = topicTools(aide.personal.store, () => root);
   const call = async (name: string, args: Record<string, unknown>) => {
     const result = await tools.find(tool => tool.name === name)!.execute("preview-test", args, undefined, undefined, {} as never);
@@ -102,14 +106,14 @@ test("child previews expose omitted Notes and text; paged reads recover the comp
   assert.equal(preview.noteTotal, 4);
   assert.equal(preview.recent.length, 3);
   assert.equal(preview.summary, "S".repeat(1200) + "… [truncated]");
-  assert.deepEqual(preview.recent[0], notes[1], "Exactly fitting text remains complete");
+  assert.equal(preview.recent[0].text, notes[1]!.text, "Exactly fitting text remains complete");
   assert.equal(preview.recent[1].text, "B".repeat(500) + "… [truncated]");
   assert.equal(preview.recent[2].text, "C".repeat(500) + "… [truncated]");
-  assert.equal(preview.recent[2].id, notes[3]!.id);
+  assert.ok(preview.recent[2].id.endsWith(notes[3]!.id));
   const complete = page.items.find((item: { uid: string }) => item.uid === short.metadata.uid);
   assert.equal(complete.summary, "Complete summary");
   assert.equal(complete.noteTotal, 1);
-  assert.deepEqual(complete.recent, [notes[0]]);
+  assert.deepEqual(complete.recent.map((n: { text: string }) => n.text), [notes[0]!.text]);
   let offset = 0, text = "", pages = 0;
   while (true) {
     const read = await call("read_topic", { uid: child.metadata.uid, offset });
@@ -121,5 +125,5 @@ test("child previews expose omitted Notes and text; paged reads recover the comp
     offset = read.nextOffset;
   }
   assert.ok(pages > 1, "Full understanding exceeds a single read page");
-  assert.deepEqual(JSON.parse(text), { ...child.spec, persons: preview.persons, conditions: child.status.conditions, summary: child.status.summary, recent: notes });
+  assert.deepEqual(JSON.parse(text), { ...child.spec, persons: preview.persons, conditions: child.status.conditions, summary: child.status.summary, recent: storedNotes(aide.topics.resources, child.metadata.uid) });
 });

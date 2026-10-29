@@ -1,3 +1,5 @@
+import { contentVersion } from "../context-write.ts";
+import { notes } from "../note/query.ts";
 import { topicPersons } from "../topic/persons.ts";
 import { weaveCandidates, searchRootTopics } from "./candidates.ts";
 import { identityBackground } from "../../../agents/personal.ts";
@@ -40,8 +42,8 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
         async execute(_id, { uid, offset = 0 }) {
           const t = roots().find(t => t.metadata.uid === uid);
           if (!t) throw new Error("Root Topic unavailable");
-          const text = JSON.stringify({ name: t.spec.name, persons: topicPersons(store, t), summary: t.status.summary, recent: t.status.recent, organization: t.status.organization });
-          return result({ uid, version: understandingVersion(t), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
+          const text = JSON.stringify({ name: t.spec.name, persons: topicPersons(store, t), summary: t.status.summary, recent: notes(store.resources, t.metadata.uid), organization: t.status.organization });
+          return result({ uid, version: understandingVersion(t, notes(store.resources, t.metadata.uid)), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } },
       { name: "group_topics", label: "Group topics", description: "Attach 1-8 roots to an existing parent, or create a new parent for 2-8 roots. For a new parent provide name and summary preserving long-lived connections, attribution, disagreements and confirmation state. Temporary progress stays in child Notes; grouping retains a bounded combined Note window. Do not copy temporary facts into summary. Existing parents keep their own understanding for Chief to synthesize. Running agents may finish; data ownership stays unchanged.",
         parameters: Type.Object({ topics: Type.Array(Type.Object({ uid: Type.String(), version: Type.String() }), { minItems: 1, maxItems: 8 }),

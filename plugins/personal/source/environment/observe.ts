@@ -1,3 +1,4 @@
+import { patchStatus } from "../../status.ts";
 import { InputAttention } from "../../input/model.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
 import { describeWorkloadChanges, type WorkloadChange, type WorkloadEvent } from "./changes.ts";
@@ -56,7 +57,7 @@ export async function observeEnvironment(context: Pick<PluginContext, "resources
       if (change.after) workloads.set(identity(change.after), change.after);
       else if (change.before) workloads.delete(identity(change.before));
     }
-    await context.resources.patchStatus(resource, { sequence, error: null, lastObservedAt: event.observedAt,
+    await patchStatus(context.resources, resource, { sequence, error: null, lastObservedAt: event.observedAt,
       baseline: { ...resource.status.baseline, observedAt: event.observedAt, workloads: [...workloads.values()] } });
     context.logger.info("Environment observation recovered", { attributes: { watchId: resource.spec.environment, inputId: name, sequence } });
     return;
@@ -71,7 +72,7 @@ export async function observeEnvironment(context: Pick<PluginContext, "resources
     const submit = bindSourceInput(SOURCES.environments, resource, context.resources);
     await submit(name, { topicKey: location.selector.key, topicName: location.name, relation: "observed", attention: InputAttention.Deferred, text: describeWorkloadChanges(event), observation: { ...event } });
   }
-  await context.resources.patchStatus(resource, { baseline: snapshot, sequence: changes.length ? sequence : resource.status.sequence ?? 0,
+  await patchStatus(context.resources, resource, { baseline: snapshot, sequence: changes.length ? sequence : resource.status.sequence ?? 0,
     lastObservedAt: snapshot.observedAt, error: null });
   context.logger.info(baseline ? "Environment observation completed" : "Environment baseline established", {
     attributes: { watchId: resource.spec.environment, environment: snapshot.environment, namespace: snapshot.namespace,
@@ -95,7 +96,7 @@ export function registerEnvironmentSources(context: PluginContext): void {
         context.logger.error("Environment observation failed; baseline retained", { error,
           attributes: { watchId: resource.spec.environment, environment: resource.spec.environment, namespace: resource.spec.namespace ?? "" } });
         const current = await context.resources.get<EnvironmentSourceSpec, EnvironmentSourceStatus>({ ...ENVIRONMENT_SOURCE_TYPE, ...resource.metadata });
-        if (current) await context.resources.patchStatus(current, { error: error instanceof Error ? error.message : String(error) });
+        if (current) await patchStatus(context.resources, current, { error: error instanceof Error ? error.message : String(error) });
       }
       return { requeueAfterMs: resource.spec.intervalMs };
     },

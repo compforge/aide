@@ -1,10 +1,13 @@
+import { ResourceVersionConflict, ResourceIncarnationChanged } from "@compforge/aide-plugin";
+import jsonPatch from "fast-json-patch";
+import mergePatch from "json-merge-patch";
 import { ResourceStorage } from "../../resource/storage.ts";
 import { assertPathSegment, assertResourceUid, validateResourceType } from "./type.ts";
 import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-import type { Resource, ResourceListOptions, ResourceNamespace, ResourceOwnerReference, ResourceType } from "@compforge/aide-plugin";
+import type { Resource, ResourcePatch, ResourceListOptions, ResourceNamespace, ResourceOwnerReference, ResourceType } from "@compforge/aide-plugin";
 
 import { newId } from "../../event/ids.ts";
 import { withAsyncFileLock, withFileLock } from "../../store/file-lock.ts";
@@ -26,6 +29,7 @@ export interface PluginResourceStoreOptions {
 interface MutationOptions {
   controllerName?: string;
   expectedResourceVersion?: string;
+  expectedUid?: string;
   namespace?: ResourceNamespace;
 }
 
@@ -424,30 +428,46 @@ export class PluginResourceStore {
     }).object;
   }
 
-  patchStatus<TSpec = Record<string, unknown>, TStatus = Record<string, unknown>>(
-    type: ResourceType,
-    name: string,
-    patch: Partial<TStatus>,
-    options: MutationOptions = {},
-  ): PluginResource<TSpec, TStatus> {
-    const statusPatch = jsonObject("status patch", patch);
-    return this.mutate<TSpec, TStatus>(type, name, options, (current) => {
-      const status = { ...current.object.status, ...statusPatch };
-      if (isDeepStrictEqual(current.object.status, status)) return current;
-      return {
-        ...current,
-        object: {
-          ...current.object,
-          metadata: {
-            ...current.object.metadata,
-            resourceVersion: nextResourceVersion(
-              current.object.metadata.resourceVersion,
-            ),
-          },
-          status,
-        },
-      };
+  /** @spec Patches apply to the transaction-local object; immutable metadata is never writable.
+   * @case tests/resource-patch.test.ts
+   * @link docs/plugin/resource.md#更新操作与并发
+   */
+  patch<TSpec, TStatus>(type: ResourceType, name: string, patch: ResourcePatch, options: MutationOptions = {}): PluginResource<TSpec, TStatus> {
+    const writable = (path: string) => /^\/(spec|status)(\/|$)/.test(path) || /^\/metadata\/(labels|annotations)(\/|$)/.test(path);
+    if (patch.type === "json") {
+      for (const op of patch.value) {
+        if (op.op !== "test" && (!writable(op.path) || (op.op === "move" && !writable(op.from))))
+          throw new Error(`Invalid resource patch path: ${op.path}`);
+      }
+    } else if (patch.type === "merge") {
+      for (const key of Object.keys(patch.value)) {
+        if (!["spec", "status", "metadata"].includes(key)) throw new Error(`Invalid resource patch field: ${key}`);
+      }
+      if (patch.value.metadata !== undefined) {
+        const metadata = jsonObject("metadata patch", patch.value.metadata as Record<string, unknown>);
+        if (Object.keys(metadata).some(k => !["labels", "annotations"].includes(k))) throw new Error("Resource identity metadata is immutable");
+      }
+    } else throw new Error("Unknown resource patch type");
+    return this.mutate<TSpec, TStatus>(type, name, options, current => {
+      const document = structuredClone(current.object);
+      const next = (patch.type === "merge" ? mergePatch.apply(document, structuredClone(patch.value))
+        : jsonPatch.applyPatch(document, structuredClone(patch.value) as jsonPatch.Operation[], true, true).newDocument) as PluginResource<TSpec, TStatus>;
+      this.validateObject(type, name, current.object.metadata.namespace as ResourceNamespace, next);
+      const definition = this.storage.definition(this.scope, type);
+      (next as { spec: TSpec }).spec = definition.schema.spec.parse(jsonObject("spec", next.spec));
+      (next as { status: TStatus }).status = definition.schema.status.parse(jsonObject("status", next.status));
+      if (isDeepStrictEqual(current.object, next)) return current;
+      return { ...current, object: { ...next, metadata: { ...next.metadata,
+        generation: current.object.metadata.generation + Number(!isDeepStrictEqual(current.object.spec, next.spec)),
+        resourceVersion: nextResourceVersion(current.object.metadata.resourceVersion),
+      } } };
     }).object;
+  }
+
+  patchStatus<TSpec = Record<string, unknown>, TStatus = Record<string, unknown>>(
+    type: ResourceType, name: string, patch: Partial<TStatus>, options: MutationOptions = {},
+  ): PluginResource<TSpec, TStatus> {
+    return this.patch(type, name, { type: "merge", value: { status: jsonObject("status patch", patch) } }, options);
   }
 
   patchMetadata<TSpec = Record<string, unknown>, TStatus = Record<string, unknown>>(
@@ -677,12 +697,13 @@ export class PluginResourceStore {
     const path = this.resourceKey(type, name, namespace);
     return this.storage.transaction(() => withFileLock(this.lockPath(path), () => {
       const current = this.readStored<TSpec, TStatus>(type, name, namespace);
+      if (options.expectedUid !== undefined && current.object.metadata.uid !== options.expectedUid) throw new ResourceIncarnationChanged("Resource incarnation changed before mutation");
       if (
         options.expectedResourceVersion !== undefined &&
         options.expectedResourceVersion !==
           current.object.metadata.resourceVersion
       ) {
-        throw new Error(
+        throw new ResourceVersionConflict(
           `plugin resource version conflict: expected ${options.expectedResourceVersion}, current ${current.object.metadata.resourceVersion}`,
         );
       }

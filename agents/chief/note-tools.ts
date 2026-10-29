@@ -1,31 +1,17 @@
-import { Type, type TSchema } from "typebox";
+import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { Persons } from "../../plugins/personal/person/service.ts";
-import type { TopicNoteUpdate } from "../../plugins/personal/topic/state.ts";
+import type { NoteUpdate } from "../../plugins/personal/note/service.ts";
 import { noteDescription, noteFields } from "../context-tools.ts";
-
-const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<T> => definition;
-
-export function chiefNoteTools(persons?: Persons,
-  topic?: (input: TopicNoteUpdate, callId: string) => Promise<unknown>, beforeMutation?: () => void): ToolDefinition[] {
-  if (!persons && !topic) return [];
-  return [tool({ name: "upsert_note", label: "Upsert note",
-    description: `${noteDescription} For Topic Notes, connect recent events and progress within the current root's subtree. For Person Notes, record that person's temporary plans, concerns and interactions, preserving the actual speaker. Their commitments are not mandates to Aide. Target defaults to the current Topic; Person targets require the id and uid from read_person.`,
-    parameters: Type.Object({ ...noteFields, target: Type.Optional(Type.Union([
-      Type.Object({ kind: Type.Literal("topic"), uid: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: false }),
-      Type.Object({ kind: Type.Literal("person"), id: Type.String({ minLength: 1 }), uid: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
-    ])) }, { additionalProperties: false }),
-    async execute(callId, { target, ...args }, signal) {
+export function chiefNoteTools(upsert?: (input: NoteUpdate, callId: string) => Promise<unknown>, beforeMutation?: () => void, read?: (id: string) => Promise<unknown>): ToolDefinition[] {
+  if (!upsert) return [];
+  const reads: ToolDefinition[] = read ? [{ name: "read_note", label: "Read note", description: "Read one complete independent Note, including its content version and subject. Use this when recent or background text was truncated.",
+    parameters: Type.Object({ noteId: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+    async execute(_id, args) { return { content: [{ type: "text", text: JSON.stringify(await read((args as { noteId: string }).noteId)) }], details: {} }; },
+  }] : [];
+  return [...reads, { name: "upsert_note", label: "Upsert note", description: `${noteDescription} subject defaults to the current Topic. Other subjects must belong to this Topic subtree. Associate people directly; no separate Person Note operation is needed.`,
+    parameters: Type.Object(noteFields, { additionalProperties: false }),
+    async execute(callId, args, signal) {
       signal?.throwIfAborted(); beforeMutation?.();
-      let value: unknown;
-      if (target?.kind === "person") {
-        if (!persons) throw new Error("Person Notes are unavailable");
-        value = await persons.upsertNote(target.id, target.uid, args, callId);
-      } else {
-        if (!topic) throw new Error("Topic Notes are unavailable; select a Person target");
-        value = await topic({ ...args, ...(target?.uid ? { topicUid: target.uid } : {}) }, callId);
-      }
-      return { content: [{ type: "text", text: JSON.stringify(value) }], details: {} };
-    },
-  })];
+      return { content: [{ type: "text", text: JSON.stringify(await upsert(args as NoteUpdate, callId)) }], details: {} };
+    } }];
 }

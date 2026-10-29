@@ -36,7 +36,7 @@ export async function createChildTopic(resources: ResourceClient, actor: TopicRe
   const organization = OrganizationSchema.parse({ at: new Date().toISOString(), reason: args.reason, actorUid: root.metadata.uid, executionId: root.status.execution!.id, toUid: parent.metadata.uid });
   await commitStatus(resources, [{ operation: "create", type: TOPIC_TYPE, name,
     spec: { id, name: z.string().trim().min(1).max(200).parse(args.name), parentRef: resourceRef(parent) },
-    status: { summary: z.string().max(4000).parse(args.summary), recent: [], receipts: [], organization } }]);
+    status: { summary: z.string().max(4000).parse(args.summary), receipts: [], organization } }]);
   return (await resources.get<TopicResource["spec"], TopicResource["status"]>({ ...TOPIC_TYPE, namespace: "v1", name }))!;
 }
 export async function moveMaterial(resources: ResourceClient, actor: TopicResource, args: { kind: "Input" | "Task" | "Routine"; id: string; topicUid: string; reason: string }) {

@@ -1,3 +1,4 @@
+import { guardContext } from "../context-write.ts";
 import { ContextFields } from "../context.ts";
 import { z } from "zod";
 import type { ResourceDefinition, ResourceValidationContext, Resource } from "@compforge/aide-plugin";
@@ -20,6 +21,6 @@ function validate(resource: Readonly<Resource<Person, PersonStatus>>, context: R
 export const PersonDefinition: ResourceDefinition<Person, PersonStatus> = { type: PERSON_TYPE,
   schema: { spec: PersonSchema, status: z.object({ ...ContextFields, updatedAt: z.string(), updatedBy: z.enum(["user", "chief", "connector"]) }).strict() },
   indexes: { identity: r => r.metadata.deletionTimestamp ? [] : r.spec.identities.map(identityKey) },
-  validator: { create: validate, update: (previous, resource, context) => validate(resource, context, previous) },
-  printer: { describe: r => `${r.spec.name}\n${JSON.stringify({ ...r.spec, summary: r.status.summary, recent: r.status.recent }, null, 2)}`, summarize: r => r.spec.name },
+  validator: { create: validate, update: (previous, resource, context) => { guardContext(previous, resource, context); validate(resource, context, previous); } },
+  printer: { describe: r => `${r.spec.name}\n${JSON.stringify({ ...r.spec, summary: r.status.summary }, null, 2)}`, summarize: r => r.spec.name },
 };

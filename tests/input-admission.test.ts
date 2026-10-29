@@ -136,10 +136,10 @@ test("Only routing and completion wake assessment watchers, not claim or rejecti
   const fact = await f.input("fact", [a]);
   const watch = assignmentWatch("assess", "Topic", f.resources);
   const claimed = await f.resources.patchStatus(fact, { assess: { executionId: "a", startedAt: new Date().toISOString() } });
-  const rejected = await f.resources.patchStatus(claimed, { assess: {} });
+  const rejected = await f.resources.patch(claimed, { type: "json", value: [{ op: "replace", path: "/status/assess", value: {} }] });
   const completed = await f.resources.patchStatus(rejected, { assess: { completedAt: new Date().toISOString() } });
   assert.deepEqual(await watch.handler.update!({ oldObject: fact, newObject: claimed } as any), []);
   assert.deepEqual(await watch.handler.update!({ oldObject: claimed, newObject: rejected } as any), []);
   assert.deepEqual(await watch.handler.update!({ oldObject: rejected, newObject: completed } as any), [{ name: a.metadata.name, namespace: a.metadata.namespace }]);
-  await assert.rejects(f.resources.patchStatus(completed, { assess: {} }), /already completed/);
+  await assert.rejects(f.resources.patch(completed, { type: "json", value: [{ op: "replace", path: "/status/assess", value: {} }] }), /already completed/);
 });
