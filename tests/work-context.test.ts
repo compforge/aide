@@ -65,7 +65,7 @@ test("Work intake preserves primary text and leaves receipts pending until expli
     await finalizeExecution(f.context, await f.read(), "run");
   }
   assert.equal(seen.size, 65);
-  assert.equal((await f.read()).status.summary, "");
+  assert.equal((await f.read()).status.summaryRevision ?? "", "");
   assert.equal((await f.read()).status.lastReport!.text, "Current verified progress");
 });
 

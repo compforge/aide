@@ -14,7 +14,7 @@ export async function ensureDefaultTopic(resources: ResourceClient): Promise<Top
   if (current) return current;
   try {
     return await resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, {
-      name, spec: { id: DEFAULT_TOPIC_ID, name: "Default", default: true }, status: { receipts: [], summary: "" },
+      name, spec: { id: DEFAULT_TOPIC_ID, name: "Default", default: true }, status: { receipts: [] },
     });
   } catch (error) {
     if (!String(error).includes("resource already exists")) throw error;

@@ -1,3 +1,4 @@
+import { summaryText } from "../plugins/personal/note/summary.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { historyBlocks } from "../src/channel/reply-layout.ts";
 import { larkAddress, webAddress } from "../src/channel/address.ts";
@@ -136,8 +137,8 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.role === "aide").length, 1);
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content, "最终答复");
   const completed = second.views.at(-1)!;
-  const context = aide.topics.resource("a")!.status;
-  assert.deepEqual(completed.meta.context, { summary: context.summary, recent: notes(aide.topics.resources, aide.topics.resource("a")!.metadata.uid) });
+  const topic = aide.topics.resource("a")!;
+  assert.deepEqual(completed.meta.context, { summary: summaryText(aide.topics.resources, topic), recent: notes(aide.topics.resources, aide.topics.resource("a")!.metadata.uid, "subject") });
   assert.equal(completed.blocks.find((block) => block.type === "execution")!.status, "completed");
   const groupId = completed.blocks.find((block) => block.type === "execution")!.group_id;
   assert.ok(groupId, "Execution grouping must use durable Input ownership");
@@ -191,8 +192,8 @@ test("AgentUE reducer reconstructs growing, corrected and removed progress witho
   let previous: TopicView | undefined;
   let snapshot = {};
   for (const next of [initial,
-    { ...initial, meta: { ...initial.meta, context: { summary: "当前话题", recent: [{ id: "first", uid: "first-uid", version: "one", people: [], subject: { apiVersion: "aide.dev/v1alpha3", kind: "Topic" as const, namespace: "v1" as const, name: "topic", uid: "topic-uid" }, createdAt: "2026-10-23T08:00:00Z", updatedAt: "2026-10-23T08:00:00Z", text: "确认当前结论" }] } } },
-    { ...initial, meta: { ...initial.meta, context: { summary: "修订后的话题", recent: [{ id: "note", uid: "note-uid", version: "one", people: [], subject: { apiVersion: "aide.dev/v1alpha3", kind: "Topic" as const, namespace: "v1" as const, name: "topic", uid: "topic-uid" }, createdAt: "2026-10-23T09:00:00Z", updatedAt: "2026-10-23T09:00:00Z", text: "补充待办依据" }] } } },
+    { ...initial, meta: { ...initial.meta, context: { summary: "当前话题", recent: [{ id: "first", uid: "first-uid", version: "one", people: [], subject: { apiVersion: "aide.dev/v1alpha4", kind: "Topic" as const, namespace: "v1" as const, name: "topic", uid: "topic-uid" }, createdAt: "2026-10-23T08:00:00Z", updatedAt: "2026-10-23T08:00:00Z", text: "确认当前结论" }] } } },
+    { ...initial, meta: { ...initial.meta, context: { summary: "修订后的话题", recent: [{ id: "note", uid: "note-uid", version: "one", people: [], subject: { apiVersion: "aide.dev/v1alpha4", kind: "Topic" as const, namespace: "v1" as const, name: "topic", uid: "topic-uid" }, createdAt: "2026-10-23T09:00:00Z", updatedAt: "2026-10-23T09:00:00Z", text: "补充待办依据" }] } } },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "整理重点" }] },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "已完成" }] },
     { ...initial, blocks: [] }]) {

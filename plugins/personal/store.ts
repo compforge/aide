@@ -1,3 +1,4 @@
+import { summaryText, summaryReference } from "./note/summary.ts";
 import { notes } from "./note/query.ts";
 import { isDeepStrictEqual } from "node:util";
 import { workObservation } from "./status.ts";
@@ -24,7 +25,7 @@ export class Store {
     if (!topic) throw new Error(`Work Topic unavailable: ${ref.uid}`);
     return topic.spec.id;
   }
-  toWork(resource: WorkResource): Work { return toWork(resource, this.topicId(resource.status.topic), notes(this.resources, resource.metadata.uid)); }
+  toWork(resource: WorkResource): Work { return toWork(resource, this.topicId(resource.status.topic), notes(this.resources, resource.metadata.uid, "subject"), summaryText(this.resources, resource), summaryReference(this.resources, resource)); }
   constructor(readonly resources: PluginResourceStore, readonly client: ResourceClient, readonly topics: TopicStore) {}
 
   read(): { works: Work[]; outputs: OutputView[] } {
@@ -76,7 +77,7 @@ export class Store {
     if (current && current.kind !== type.kind) throw new Error("Work kind is immutable; create the other type and pause or delete the original work");
     const c = await this.topics.ensure(topicId);
     const generation = current ? current.metadata.generation + Number(!isDeepStrictEqual({ ...current.spec, ...spec }, current.spec)) : 1;
-    const status: WorkStatus = { ...current?.status, ...workObservation(work, generation), topic: resourceRef(c) };
+    const status: WorkStatus = { ...current?.status, ...workObservation(work, generation), summaryRevision: current?.status.summaryRevision ?? "", topic: resourceRef(c) };
     await commitStatus(this.client, [
       current ? { operation: "replace", resource: current, spec: { ...current.spec, ...spec }, status } : { operation: "create", type, name: id, spec, status },
       ...outputs.map((o) => outputWrite(c, o, { producer: current ? { ...type, name: id, namespace: current.metadata.namespace, uid: current.metadata.uid }

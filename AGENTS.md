@@ -2,7 +2,7 @@
 
 ## 项目定位与边界
 
-Aide 是小型、自托管的 personal agent，将持续到来的信息转化为认识、行动与有价值的沟通，围绕用户目标跨执行与等待持续跟进。Personal 将 Input 整合为具体事项的 Note，再提炼主题与人物的长期 summary，并形成和调整 Topic tree；这些认识与组织关系共同支撑后续判断。Web / Lark Channel 与 Source 提交输入，Chief 直接处理简单事情，将持续工作交给 Task / Routine。Host / Runner 提供通用运行机制。
+Aide 是小型、自托管的 personal agent，将持续到来的信息转化为认识、行动与有价值的沟通，围绕用户目标跨执行与等待持续跟进。Personal 结合已有 Note 与最新 Input 作判断，按需更新近期事项认识和长期摘要 Note、调整 Topic tree，并产生必要的 Output。近期与长期认识统一保存为 Note；认知更新可以静默发生，答复不必先写 Note。Web / Lark Channel 与 Source 提交输入，Chief 直接处理简单事情，将持续工作交给 Task / Routine。Host / Runner 提供通用运行机制。
 
 项目有两个目标：做好 personal agent，并积累可复用的 TypeScript controller-runtime 底座。Personal 是底座的首个应用与验证场景，领域模型留在插件，通用资源、查询和调度能力沉淀到底座。按绿地视角开发，不建设账号权限中心或多实例平台。业务判断放在 Personal 与 Chief Agent；修改通用机制前先说明具体需求和现有能力缺口。
 
@@ -140,7 +140,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。可能已有外部副作用的中断先核对，不自动重放。
 - Channel / Source 通过绑定 Definition 的入口形成 Input，正文保存事实，证据留在 observation。路由统一归 Route，Default Topic 由系统按需创建并维护，只兜底，不提供手动切换；Input.status 的 route / assess / handle 是处理事实，消费者按索引查询。
 - Person 保存人物身份与认识，Me 是可选标记，与访问凭证独立。Input.sender / Input.receivers / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。
-- Topic、Task、Routine、Person 用 summary 保存长期有效、低频变化的认识，独立 Note 按稳定 ID 保存具体事项的当前认识，subject 关联 Topic/Work、people 关联人物，recent 仅作查询投影，完整发现走 list_notes，事项归位走 move_note，提炼回顾走 review_notes；两者独立写入，办理报告只确认业务状态与 Input 回执。结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
+- 长期认识保存在 summaryOf 指向 Topic、Task、Routine、Person 的 Note 中，对象不保存 summary 字段；summaryRevision 仅为派生内容指纹。summaryOf 按对象 UID 索引且唯一；目标对象存在时保护该 Note，目标实际移除后按普通容量回收，同名重建不算原对象。独立 Note 按稳定 ID 保存具体事项的当前认识，subject 关联 Topic/Work、people 关联人物，recent 仅作查询投影，完整发现走 list_notes，事项归位走 move_note，提炼回顾走 review_notes；两者独立写入，办理报告只确认业务状态与 Input 回执。结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
 - Topic tree 表达对主题关系与职责层次的理解，并决定 root Chief 的处理范围。整理以关联价值和用户目标为依据，容量阈值安排整理时机；压缩保留影响判断的事实、分歧与未决问题。认知沉淀主线见 [Personal](docs/personal/README.md#从-input-到认识与成果)。
 - Task 承担有限目标，Routine 承担持续职责。领域 Agent 与通用 Pi 共用适配，工具按资源 UID 和当前 execution 绑定；业务请求与消费凭据落在 Input。Chief / Work 通过 say 产生独立 Output，report 与 say 分别提交；普通回答是新 Input，原生权限由独立 Approval 处理。
 - Forge 的 Repository / PullRequest 模型复用 harness-common，平台读取、增量发现完整性、不透明游标与 HTTP 约束由 repocli lib 承担；Aide Connector 负责配置与调用路由，Personal RepositorySource 负责清单缓存与观察任务交接，PullRequestSource 负责 PR 基线、检查点与 Input。契约见 [Forge](docs/connector/forge.md)。

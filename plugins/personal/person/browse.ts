@@ -5,9 +5,12 @@ import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
 export interface PersonBrowseQuery extends PageQuery { q?: string; name?: string; excludeUid?: string; selectedId?: string }
 export interface PersonListItem { id: string; uid: string; version: string; name: string; isMe: boolean; preview: string; updatedAt: string }
 const field = (path: string) => `json_extract(data, '$.object.${path}')`;
+const summary = `(SELECT json_extract(n.data, '$.object.spec.text') FROM resource_indexes i JOIN resources n ON n.key = i.source WHERE n.scope = 'personal'
+  AND n.kind = 'aide.dev/Note' AND i.name = 'summaryOf' AND i.value = resources.uid
+  AND json_extract(n.data, '$.object.metadata.deletionTimestamp') IS NULL)`;
 const columns = `${field("metadata.name")} AS id, uid, ${field("metadata.resourceVersion")} AS version,
-  ${field("spec.name")} AS name, substr(trim(${field("status.summary")}), 1, 80) AS preview, ${field("status.updatedAt")} AS updatedAt,
-  length(trim(${field("status.summary")}, char(9,10,11,12,13,32))) > 0 AS known`;
+  ${field("spec.name")} AS name, substr(trim(coalesce(${summary}, '')), 1, 80) AS preview, ${field("status.updatedAt")} AS updatedAt,
+  length(trim(coalesce(${summary}, ''), char(9,10,11,12,13,32))) > 0 AS known`;
 const order = "known DESC, id ASC, uid ASC";
 
 /**

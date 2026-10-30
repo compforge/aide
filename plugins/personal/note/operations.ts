@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { retryOnConflict, type ResourceClient } from "@compforge/aide-plugin";
 import { resourceRef } from "../input/state.ts";
-import { SubjectSchema, NOTE_TYPE, noteVersion, type NoteSpec, type NoteStatus } from "./model.ts";
+import { WriterResourceSchema, SubjectSchema, NOTE_TYPE, noteVersion, type NoteSpec, type NoteStatus } from "./model.ts";
 import type { TopicResource } from "../topic/model.ts";
 
 export const MoveNoteSchema = z.object({ noteId: z.string().min(1), version: z.string().min(1), subject: SubjectSchema, reason: z.string().trim().min(1).max(2000) }).strict();
@@ -16,7 +16,7 @@ export async function moveNote(resources: ResourceClient, actor: TopicResource, 
   if (!actor.status.execution) throw new Error("Note move requires an active Chief");
   if (JSON.stringify(note.spec.subject) === JSON.stringify(args.subject)) return { noteId: args.noteId, version: noteVersion(note) };
   const updated = await resources.replace(note, { ...note.spec, subject: args.subject }, { ...note.status,
-    writer: { resource: SubjectSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id },
+    writer: { resource: WriterResourceSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id },
     organization: { at: new Date().toISOString(), reason: args.reason, from: note.spec.subject, to: args.subject } });
   return { noteId: args.noteId, version: noteVersion(updated) };
 }
@@ -36,7 +36,7 @@ export async function reviewNotes(resources: ResourceClient, actor: TopicResourc
     versions.set(ref.noteId, ref.version);
   }
   if (!actor.status.execution) throw new Error("Review requires an active Chief");
-  const writer = { resource: SubjectSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id };
+  const writer = { resource: WriterResourceSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id };
   await retryOnConflict(async () => {
     const writes = await Promise.all([...versions].map(async ([noteId, version]) => {
       const note = await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: noteId });

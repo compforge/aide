@@ -1,3 +1,4 @@
+import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { createReviewInput } from "../plugins/personal/topic/review.ts";
 import { maintenanceAgenda } from "../plugins/personal/topic/maintenance.ts";
 import assert from "node:assert/strict";
@@ -56,7 +57,7 @@ test("Note discovery covers retained history beyond recent with bounded search p
 
 test("move_note preserves matter identity and age, rejects stale versions and cross-root moves", async t => {
   const f = await setup(t);
-  const child = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
+  const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
   const outsider = await f.aide.topics.ensure("outside");
   const initial = await f.note({ text: "One continuing matter" }, "start"), before = await readNote(f.resources, initial.noteId);
   const moved = await moveNote(f.resources, f.read(), { ...initial, subject: resourceRef(child), reason: "Matter belongs to the child" });
@@ -73,8 +74,8 @@ test("move_note preserves matter identity and age, rejects stale versions and cr
 
 test("move_note rechecks ancestor changes in the write transaction and supports Work subjects", async t => {
   const f = await setup(t);
-  const child = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
-  const routine = await f.resources.create(ROUTINE_TYPE, { name: "work", spec: { title: "Watch", instruction: "Watch", trigger: { cron: null, event: "tick", timezone: "UTC" } }, status: { topic: resourceRef(f.root), summary: "" } });
+  const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
+  const routine = await createWithSummary(f.resources, ROUTINE_TYPE, { name: "work", spec: { title: "Watch", instruction: "Watch", trigger: { cron: null, event: "tick", timezone: "UTC" } }, status: { topic: resourceRef(f.root), summary: "" } });
   const initial = await f.note({ text: "A continuing matter" }, "start");
   const moved = await moveNote(f.resources, f.read(), { ...initial, subject: resourceRef(routine), reason: "Delegated" });
   const client: ResourceClient = { ...f.resources, async replace(resource, spec, status) {
@@ -109,7 +110,7 @@ test("Note review is versioned, bounded and follows current roots without refres
 
 test("Work Notes are routed to the responsible root's review queue", async t => {
   const f = await setup(t);
-  const work = await f.resources.create(ROUTINE_TYPE, { name: "work", spec: { title: "Watch", instruction: "Watch", trigger: { cron: null, event: "tick", timezone: "UTC" } }, status: { topic: resourceRef(f.root), summary: "" } });
+  const work = await createWithSummary(f.resources, ROUTINE_TYPE, { name: "work", spec: { title: "Watch", instruction: "Watch", trigger: { cron: null, event: "tick", timezone: "UTC" } }, status: { topic: resourceRef(f.root), summary: "" } });
   const n = await f.note({ text: "Verification finding", subject: resourceRef(work) }, "work-note");
   await reconcileNote(f.context, await f.get(n.noteId));
   assert.equal(f.read().status.noteReviewQueue![0]!.noteId, n.noteId);
@@ -135,7 +136,7 @@ test("Topic silence retains knowledge; capacity evicts oldest safe candidates an
 
 test("root knowledge needs explicit release; unseen Note changes invalidate approval", async t => {
   const f = await setup(t);
-  await f.resources.patchStatus(f.read(), { summary: "Lasting knowledge" });
+  await patchSummary(f.resources, f.read(), { summary: "Lasting knowledge" });
   const tools = topicTools(f.aide.personal.store, f.read, log);
   const release = tools.find(t => t.name === "release_topic")!;
   const call = (version: string) => release.execute("release", { version, reason: "Retained elsewhere" }, undefined, undefined, {} as never);
@@ -171,7 +172,7 @@ test("root-local Notes trigger an internal review even with idle review off, and
 
 test("full Topic capacity preserves root knowledge until a current explicit release", async t => {
   const f = await setup(t);
-  await f.resources.patchStatus(f.read(), { summary: "Lasting knowledge", execution: null });
+  await patchSummary(f.resources, f.read(), { summary: "Lasting knowledge", execution: null });
   const count = f.aide.topics.list().length;
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Topic": { maxCount: count } } }));
   await assert.rejects(f.aide.topics.ensure("overflow"), /capacity exhausted/);
@@ -239,7 +240,7 @@ test("review_notes re-reads unrelated writes but never substitutes newly edited 
 
 test("review_notes checks current ancestry even when its receipt is already present", async t => {
   const f = await setup(t);
-  const child = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
+  const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
   const n = await f.note({ text: "Child matter", subject: resourceRef(child) }, "child");
   await reviewNotes(f.resources, f.read(), { notes: [n] });
   const client: ResourceClient = { ...f.resources, async commit(writes) {
@@ -309,7 +310,7 @@ test("recent Note projection reads at most 40 objects and no full list", async t
   let reads = 0;
   storage.read = (...args) => { reads++; return read(...args); };
   try {
-    const recent = notes(f.aide.topics.resources, f.root.metadata.uid);
+    const recent = notes(f.aide.topics.resources, f.root.metadata.uid, "subject");
     assert.equal(recent.length, 40); assert.equal(reads, 40);
   } finally { storage.read = read; }
 });

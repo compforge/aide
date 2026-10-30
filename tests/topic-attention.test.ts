@@ -1,3 +1,4 @@
+import { patchSummary } from "./summary-fixture.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -106,7 +107,7 @@ test("Child understanding can activate Chief and include Deferred without a time
   await client.patchStatus(root, { absorbed: { [child.metadata.uid]: understandingVersion(child) }, absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
   await aide.start(); await submit("deferred", "child"); await aide.settled();
   assert.equal(prompts.length, 0);
-  await client.patchStatus(aide.topics.resource("child")!, { summary: "New understanding" });
+  await patchSummary(client, aide.topics.resource("child")!, { summary: "New understanding" });
   await aide.settled();
   assert.equal(prompts.length, 1);
   assert.match(prompts[0]!, /"kind":"absorb"/);

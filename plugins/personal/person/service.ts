@@ -1,5 +1,6 @@
+import { prepareSummary, readSummary, summaryView, writeSummary } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
-import type { NoteStatus } from "../note/model.ts";
+import { noteReference, type NoteStatus, type NoteSpec, type NoteReference } from "../note/model.ts";
 import { createHash } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
 import { pageNotes, readNotes } from "../note/query.ts";
@@ -29,7 +30,7 @@ export class Persons {
   }
   async read(id: string, uid?: string) {
     const person = await this.profile(id, uid);
-    return { ...person, summaryVersion: contentVersion(person), recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
+    return { ...await summaryView(this.resources, person), recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
   }
   /** @spec Configured Me accounts identify one human; consolidate identity owners atomically before starting consumers.
    * @spec Preserve the local Me owner when present, otherwise the oldest matching Person. Repeated initialization is a no-op.
@@ -48,7 +49,7 @@ export class Persons {
       await this.resources.create(PERSON_TYPE, {
         name: createHash("sha256").update(identityKey(identity)).digest("hex").slice(0, 32),
         spec: PersonSchema.parse({ name: "我", identities: marks }),
-        status: { ...this.status("connector"), summary: "" },
+        status: { ...this.status("connector") },
       });
       return { merged: 0 };
     }
@@ -56,17 +57,20 @@ export class Persons {
     const identities = [...new Map([...target.spec.identities, ...sources.flatMap(p => p.spec.identities), ...marks]
       .map(i => [identityKey(i), i])).values()];
     if (!sources.length && identities.length === target.spec.identities.length) return { merged: 0 };
-    const summary = sources.reduce((text, p) => mergePersonSummary(text, p.status.summary), target.status.summary);
+    const texts = await Promise.all([target, ...sources].map(p => readSummary(this.resources, p)));
+    const summary = texts.reduce((text, note) => mergePersonSummary(text, note?.spec.text ?? ""), "");
     // Configuration must not silently discard understanding or prevent startup when consolidation needs user editing.
     if (summary.length > SUMMARY_CHARS || identities.length > 100) return { merged: 0, conflict: {
       personIds: people.map(p => p.metadata.name),
       reason: summary.length > SUMMARY_CHARS ? "Combined Me summary exceeds the Person budget; consolidate the summaries before merging" : "Combined Me identities exceed the Person budget",
     } };
     const status = this.status("connector");
+    const prepared = await prepareSummary(this.resources, target, { text: summary, people: texts.flatMap(n => n?.spec.people ?? []) });
     await this.resources.commit([
+      ...prepared.writes,
       ...sources.map(resource => ({ operation: "delete" as const, resource })),
       { operation: "replace", resource: target, spec: PersonSchema.parse({ ...target.spec, identities }), status: {
-        ...status, summary,
+        ...status, ...prepared.status,
       } },
     ]);
     return { merged: sources.length };
@@ -89,7 +93,7 @@ export class Persons {
     }
     const id = createHash("sha256").update(identityKey(identity)).digest("hex").slice(0, 32);
     try { return await this.resources.create(PERSON_TYPE, { name: id,
-      spec: PersonSchema.parse({ name: name || identity.id, identities: [identity] }), status: { ...this.status("connector"), summary: "" } }); }
+      spec: PersonSchema.parse({ name: name || identity.id, identities: [identity] }), status: { ...this.status("connector") } }); }
     catch (error) {
       if (!/already exists|identity already belongs/.test(String(error))) throw error;
       // A concurrent merge may have transferred the identity since the initial lookup.
@@ -106,21 +110,18 @@ export class Persons {
     // @spec User corrections replace the same summary Chief reads; stale writers must reread and merge.
     const { contextWriter: _, ...previousStatus } = current.status;
     const status = { ...previousStatus, ...this.status("user") };
-    if (summary !== undefined && summary !== current.status.summary) {
-      status.summary = summary;
-    }
-    return this.resources.replace(current, PersonSchema.parse(spec), status);
+    const prepared = summary === undefined ? { note: undefined, writes: [], status: {} } : await prepareSummary(this.resources, current, { text: summary });
+    const results = await this.resources.commit([...prepared.writes,
+      { operation: "replace", resource: current, spec: PersonSchema.parse(spec), status: { ...status, ...prepared.status } }]);
+    return this.view(results.at(-1) as PersonResource, summary ?? current.summaryText, noteReference(prepared.note) ?? current.summaryNote);
   }
-  async summarize(id: string, uid: string, version: string, summary: string, writer?: NoteStatus["writer"]) {
+  async summarize(id: string, uid: string, version: string, summary: string, writer?: NoteStatus["writer"], people?: NoteSpec["people"]) {
     const current = await this.read(id, uid);
     if (contentVersion(current) !== version) throw new Error("Person summary version conflict; read it again");
-    return this.resources.patch(current, { type: "json", value: [
-      { op: "test", path: "/status/summary", value: current.status.summary },
-      { op: "replace", path: "/status/summary", value: summary },
-      ...Object.entries(this.status("chief")).map(([key, value]) => ({ op: "add" as const, path: `/status/${key}`, value })),
-      ...(writer ? [{ op: "add" as const, path: "/status/contextWriter", value: writer }] : []),
-    ] });
+    const committed = await writeSummary(this.resources, current, { text: summary, people }, writer, version, this.status("chief"));
+    return this.view(committed, summary, committed.summaryNote);
   }
+
   /**
    * @spec Append to the target and delete the source atomically. Names never prove identity.
    * @spec Historical Input/Output references may dangle and are never rewritten by a merge.
@@ -134,19 +135,27 @@ export class Persons {
     ]);
     const identities = [...new Map([...into.spec.identities, ...from.spec.identities].map((i) => [identityKey(i), i])).values()];
     const status = this.status("user");
-    const [, merged] = await this.resources.commit([
+    const mergedText = summary ?? mergePersonSummary(into.summaryText, from.summaryText);
+    const prepared = await prepareSummary(this.resources, into, { text: mergedText, people: [...into.summaryNote?.people ?? [], ...from.summaryNote?.people ?? []] });
+    const writes = await this.resources.commit([
+      ...prepared.writes,
       // Exclude the retiring identity owner before validating the target, within the same transaction.
       { operation: "delete", resource: from },
       { operation: "replace", resource: into, spec: PersonSchema.parse({ ...into.spec, identities }), status: {
-        ...status, summary: summary ?? mergePersonSummary(into.status.summary, from.status.summary),
+        ...status, ...prepared.status,
       } },
     ]);
-    const person = merged as PersonResource;
-    return { ...person, summaryVersion: contentVersion(person), recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
+    const person = writes.at(-1) as PersonResource;
+    return this.view(person, mergedText, noteReference(prepared.note));
+  }
+  private async view(person: PersonResource, summaryText: string, summaryNote?: NoteReference) {
+    return { ...person, summaryText, summaryNote, summaryVersion: contentVersion(person),
+      recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
   }
   async findIdentity(identity: PersonIdentity) {
-    return (await this.resources.list<Person, PersonStatus>(PERSON_TYPE, { matchIndex: { name: "identity", value: identityKey(identity) } }))
-      .filter(p => !p.metadata.deletionTimestamp).map(p => ({ ...p, isMe: isMe(p.spec, this.marks) }))[0];
+    const person = (await this.resources.list<Person, PersonStatus>(PERSON_TYPE, { matchIndex: { name: "identity", value: identityKey(identity) } }))
+      .find(p => !p.metadata.deletionTimestamp);
+    return person ? { ...await summaryView(this.resources, person), isMe: isMe(person.spec, this.marks) } : undefined;
   }
   private async version(id: string, uid: string, version: string) {
     const current = await this.read(id);

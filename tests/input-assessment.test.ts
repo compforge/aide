@@ -1,3 +1,5 @@
+import { summaryText } from "../plugins/personal/note/summary.ts";
+import { patchSummary } from "./summary-fixture.ts";
 import { TASK_TYPE } from "../plugins/personal/task/model.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
@@ -102,16 +104,16 @@ test("Topic Notes are bounded independently of long-lived summary and reject sta
   const { summarizeTopic, upsertTopicNote } = await import("../plugins/personal/topic/state.ts");
   const { aide, resources } = setup(t);
   await aide.topics.ensure("me");
-  await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "review", startedAt: new Date().toISOString() }, summary: "Durable distinction" });
+  await patchSummary(resources, aide.topics.resource("me")!, { execution: { id: "review", startedAt: new Date().toISOString() }, summary: "Durable distinction" });
   const stale = aide.topics.resource("me")!;
   for (let n = 0; n < 55; n++) {
     const c = aide.topics.resource("me")!;
     await upsertTopicNote(resources, c, "review", { version: c.metadata.resourceVersion, text: `Review ${n}: ${"e".repeat(2000)}` }, `review-${n}`);
   }
   const current = aide.topics.resource("me")!;
-  assert.equal(current.status.summary, "Durable distinction");
-  assert.ok(notes(aide.topics.resources, current.metadata.uid).length <= 40);
-  assert.ok(notes(aide.topics.resources, current.metadata.uid).reduce((sum, entry) => sum + entry.text.length, 0) <= 16000);
+  assert.equal(summaryText(aide.topics.resources, current), "Durable distinction");
+  assert.ok(notes(aide.topics.resources, current.metadata.uid, "subject").length <= 40);
+  assert.ok(notes(aide.topics.resources, current.metadata.uid, "subject").reduce((sum, entry) => sum + entry.text.length, 0) <= 16000);
   assert.equal(contentVersion(stale), contentVersion(current), "Independent notes do not change summary version");
   await assert.rejects(summarizeTopic(resources, current, "wrong-execution", { version: contentVersion(current), summary: "stale" }, 4000), /no longer active/);
   await assert.rejects(summarizeTopic(resources, current, "review", { version: contentVersion(current), summary: "x".repeat(4001) }, 4000), /exceeds/);
@@ -124,9 +126,9 @@ test("quiet assessments retain topic understanding; explicit synthesis can updat
   const { aide, resources, context } = setup(t);
   const c = await aide.topics.ensure("me");
   const recent = [{ id: String(new Date().toISOString()), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), text: "User asked to investigate recurrent OOM" }];
-  await resources.patchStatus(c, { execution: { id: "live", startedAt: new Date().toISOString() }, summary: "OOM unresolved; investigation delegated" });
+  await patchSummary(resources, c, { execution: { id: "live", startedAt: new Date().toISOString() }, summary: "OOM unresolved; investigation delegated" });
   await seedNotes(resources, c, recent);
-  const storedNotes = notes(aide.topics.resources, c.metadata.uid);
+  const storedNotes = notes(aide.topics.resources, c.metadata.uid, "subject");
   for (let i = 0; i < 45; i++) {
     const fact = await aide.topics.submit(`quiet-${i}`, { origin: "source", originId: "fixture", text: "same-image Pod churn" });
     await deliver(context, fact, [c.metadata], "same subject");
@@ -135,12 +137,12 @@ test("quiet assessments retain topic understanding; explicit synthesis can updat
     assert.ok(aide.topics.inputStore.get(fact.metadata.name)!.status.assess!.completedAt);
   }
   const current = aide.topics.resource("me")!;
-  assert.equal(current.status.summary, "OOM unresolved; investigation delegated");
-  assert.deepEqual(notes(aide.topics.resources, current.metadata.uid), storedNotes);
+  assert.equal(summaryText(aide.topics.resources, current), "OOM unresolved; investigation delegated");
+  assert.deepEqual(notes(aide.topics.resources, current.metadata.uid, "subject"), storedNotes);
   const receipt = await summarizeTopic(resources, current, "live", { version: contentVersion(current), summary: "OOM cause confirmed; fix pending" }, 4000);
   assert.deepEqual(Object.keys(receipt), ["version", "understandingVersion"], "Do not echo all context back into model history");
-  assert.deepEqual(notes(aide.topics.resources, current.metadata.uid), storedNotes);
-  assert.equal(aide.topics.resource("me")!.status.summary, "OOM cause confirmed; fix pending");
+  assert.deepEqual(notes(aide.topics.resources, current.metadata.uid, "subject"), storedNotes);
+  assert.equal(summaryText(aide.topics.resources, aide.topics.resource("me")!), "OOM cause confirmed; fix pending");
 });
 
 for (const attention of [InputAttention.Normal, InputAttention.Deferred])

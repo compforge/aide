@@ -1,3 +1,4 @@
+import { patchSummary } from "./summary-fixture.ts";
 import jsonPatch from "fast-json-patch";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -27,7 +28,7 @@ function fixture(t: TestContext) {
   store.storage.register("personal", definitions);
   const resources = createResourceClient(store);
   const topic = async (name: string, parent?: TopicResource) => resources.create<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { name,
-    spec: { id: name, ...(parent ? { parentRef: resourceRef(parent) } : {}) }, status: { summary: "", receipts: [] } });
+    spec: { id: name, ...(parent ? { parentRef: resourceRef(parent) } : {}) }, status: { receipts: [] } });
   return { store, resources, topic };
 }
 
@@ -67,7 +68,7 @@ test("Task completion is generation-bound; Routine completion records one occurr
     const routine = type.kind === "Routine";
     const spec: WorkSpec = { title: "Observe", instruction: "Check evidence", paused: false,
       ...(routine ? { trigger: { cron: "0 * * * *", timezone: "UTC", event: null } } : { initialInputId: "fact" }) };
-    await commitStatus(f.resources, [{ operation: "create", type, name: type.kind, spec, status: { topic: resourceRef(root), summary: "",
+    await commitStatus(f.resources, [{ operation: "create", type, name: type.kind, spec, status: { topic: resourceRef(root),
       execution: { id: "run", startedAt: new Date().toISOString(), observedGeneration: 1 } } }]);
     const read = async () => (await f.resources.get<WorkSpec, WorkAgentStatus>({ ...type, namespace: "v1", name: type.kind }))!;
     const work = await read();
@@ -99,10 +100,10 @@ test("Topic observations write one object, retain observed dependencies and conv
   reviewed = await refreshSummaryConditions(f.resources, reviewed);
   assert.ok(conditionTrue(reviewed.status.conditions, "SummaryCurrent"));
   assert.equal((await f.resources.get(resourceRef(child)))!.metadata.resourceVersion, leaf.metadata.resourceVersion);
-  const updated = await patchStatus(f.resources, leaf, { summary: "New understanding" });
+  const updated = await patchSummary(f.resources, leaf, { summary: "New understanding" });
   const raced: typeof f.resources = { ...f.resources, async patch(resource, value, options) {
     const patch = (value.type === "json" ? jsonPatch.applyPatch(structuredClone(resource), value.value as jsonPatch.Operation[]).newDocument.status : value.value.status) as Record<string, any>;
-    await patchStatus(f.resources, updated, { summary: "Changed during observation" });
+    await patchSummary(f.resources, updated, { summary: "Changed during observation" });
     return f.resources.patch(resource, value, options);
   } };
   reviewed = await refreshSummaryConditions(raced, reviewed);
@@ -130,7 +131,7 @@ test("Large Topic observations propagate bottom-up without making Chief intake w
   parent = await refreshSummaryConditions(resources, parent);
   assert.ok(conditionTrue(parent.status.conditions, "SummaryCurrent"));
   const first = (await f.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(leaves[0]!)))!;
-  await patchStatus(f.resources, first, { summary: "Changed" });
+  await patchSummary(f.resources, first, { summary: "Changed" });
   const changed = await refreshSummaryConditions(resources, child);
   assert.equal(conditionTrue(changed.status.conditions, "SummaryCurrent"), false);
   assert.deepEqual(await summaryWatch().handler.update!({ oldObject: child, newObject: changed } as never), [{ name: root.metadata.name, namespace: "v1" }]);
@@ -141,7 +142,7 @@ test("Large Topic observations propagate bottom-up without making Chief intake w
 
 test("Domain v1alpha2 schemas reject the former Work state bag and do not read old-version identities", async t => {
   const f = fixture(t), root = await f.topic("root");
-  assert.ok([TASK_TYPE, ROUTINE_TYPE, TOPIC_TYPE].every(type => type.apiVersion === "aide.dev/v1alpha3"));
+  assert.ok([TASK_TYPE, ROUTINE_TYPE, TOPIC_TYPE].every(type => type.apiVersion === TOPIC_TYPE.apiVersion));
   await assert.rejects(f.resources.create(TASK_TYPE, { name: "old-shape", spec: { title: "old", instruction: "old", initialInputId: "fact", revision: 1 },
     status: { topic: resourceRef(root), status: "done", nextAt: null, question: null } }));
   const oldType = { ...TOPIC_TYPE, apiVersion: "aide.dev/v1alpha1" };

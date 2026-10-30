@@ -1,3 +1,4 @@
+import { patchSummary } from "./summary-fixture.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
 import { personContext } from "../agents/chief/person.ts";
 import assert from "node:assert/strict";
@@ -49,12 +50,12 @@ test("Same names only select candidates; merging appends to the chosen Person wi
   const sender = personRef(source), inputs = new InputStore(f.home), outputs = new OutputStore(f.home);
   const input = inputs.submit("test", "historical", { origin: "channel", originId: "web", text: "历史消息", sender });
   const output = outputs.create("test", "reply", { text: "历史回复", target: webAddress("topic"), receivers: [sender], topicId: "topic",
-    topic: { apiVersion: "aide.dev/v1alpha3", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } });
+    topic: { apiVersion: "aide.dev/v1alpha4", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } });
   const merged = await f.persons.merge(version(source), version(target));
   assert.equal(merged.metadata.uid, target.metadata.uid);
   assert.equal(merged.spec.name, target.spec.name);
   assert.deepEqual(merged.spec.identities, [...target.spec.identities, ...source.spec.identities]);
-  assert.equal(merged.status.summary, "保留人物认识\n\n来源人物认识");
+  assert.equal(merged.summaryText, "保留人物认识\n\n来源人物认识");
   assert.equal(merged.status.updatedBy, "user");
   assert.equal((await f.persons.read(namesake.metadata.name)).metadata.resourceVersion, namesake.metadata.resourceVersion);
   await assert.rejects(f.persons.read(source.metadata.name), /Unknown Person/);
@@ -67,7 +68,7 @@ test("Same names only select candidates; merging appends to the chosen Person wi
   assert.match(inputPrinter.describe(input), /历史消息/);
   assert.match(outputPrinter.describe(output), /历史回复/);
   // Even if a resource name is reused, an old UID must not resolve to the new person.
-  await f.client.create(PERSON_TYPE, { name: source.metadata.name, spec: { name: "其他人", identities: [] }, status: source.status });
+  await f.client.create(PERSON_TYPE, { name: source.metadata.name, spec: { name: "其他人", identities: [] }, status: { ...source.status, summaryRevision: "" } });
   await assert.rejects(f.persons.read(sender.name, sender.uid), /Unknown Person/);
   const reopened = openPersonCatalog(f.home, marks, log, () => {}).persons;
   assert.equal((await reopened.observe(identity("source"))).metadata.uid, target.metadata.uid);
@@ -76,18 +77,18 @@ test("Same names only select candidates; merging appends to the chosen Person wi
 test("Merge rolls back deletion and Watch notifications if the target fails validation", async t => {
   const f = await setup(t), source = await f.create("source"), target = await f.create("target");
   const before = f.changes();
-  await assert.rejects(f.persons.merge(version(source), version(target), "x".repeat(16001)), /Too big/);
+  await assert.rejects(f.persons.merge(version(source), version(target), "x".repeat(16001)), /exceeds 16000/);
   assert.deepEqual(await f.persons.read(source.metadata.name), source);
   assert.deepEqual(await f.persons.read(target.metadata.name), target);
   assert.equal(f.changes(), before);
   // A target update after service reads must also roll back the preceding deletion request.
   const racing = new Persons({ ...f.client, async commit(writes: readonly ResourceCommit[]) {
-    await f.client.patchStatus(target, { summary: "并发认知" });
+    await patchSummary(f.client, target, { summary: "并发认知" });
     return f.client.commit(writes);
   } }, marks);
   await assert.rejects(racing.merge(version(source), version(target)), /version conflict/);
   assert.deepEqual(await f.persons.read(source.metadata.name), source);
-  assert.equal((await f.persons.read(target.metadata.name)).status.summary, "并发认知");
+  assert.equal((await f.persons.read(target.metadata.name)).summaryText, "并发认知");
   assert.equal(f.changes(), before + 1);
 });
 
@@ -96,12 +97,12 @@ test("Merge guards both incarnations, stale sources, self-merge; retains bounded
   await assert.rejects(f.persons.merge(version(source), version(source)), /itself/);
   await assert.rejects(f.persons.merge({ ...version(source), uid: "old-uid" }, version(target)), /version conflict/);
   await assert.rejects(f.persons.merge(version(source), { ...version(target), uid: "old-uid" }), /version conflict/);
-  const updated = await f.client.patchStatus(source, { summary: "Concurrent correction" });
+  const updated = await patchSummary(f.client, source, { summary: "Concurrent correction" });
   await assert.rejects(f.persons.merge(version(source), version(target)), /version conflict/);
   const merged = await f.persons.merge(version(updated), version(me), "用户确认后的认识");
   assert.equal(merged.isMe, true);
   assert.equal(merged.spec.name, me.spec.name);
-  assert.equal(merged.status.summary, "用户确认后的认识");
+  assert.equal(merged.summaryText, "用户确认后的认识");
 });
 
 test("Concurrent merges have one winner; losing target never gains identities", async t => {
@@ -147,8 +148,8 @@ test("Me configuration consolidates existing Lark and WeChat Persons into one re
   assert.equal((await persons.findIdentity(wechat))!.metadata.uid, me.metadata.uid);
   assert.equal((await persons.list()).filter(p => p.isMe).length, 1);
   assert.deepEqual(new Set(me.spec.identities.map(i => i.provider)), new Set(["web", "lark", "wechat"]));
-  assert.equal(me.status.summary.includes("Lark preference"), true);
-  assert.equal(me.status.summary.includes("WeChat preference"), true);
+  assert.equal(me.summaryText.includes("Lark preference"), true);
+  assert.equal(me.summaryText.includes("WeChat preference"), true);
   const context = await personContext(persons);
   assert.match(context, /Lark preference/); assert.match(context, /WeChat preference/);
   assert.deepEqual(await persons.initialize(), { merged: 0 });
@@ -200,7 +201,7 @@ test("A conflicting Me consolidation cannot partially delete identity owners", a
   const other = await f.persons.observe(external);
   const marks = { identities: [LOCAL_ME, external] };
   const racing = new Persons({ ...f.client, async commit(writes) {
-    await f.client.patchStatus(local, { summary: "并发用户修正" });
+    await patchSummary(f.client, local, { summary: "并发用户修正" });
     return f.client.commit(writes);
   } }, marks);
   await assert.rejects(racing.initialize(), /version conflict/);
@@ -208,5 +209,5 @@ test("A conflicting Me consolidation cannot partially delete identity owners", a
   const persons = new Persons(f.client, marks);
   await persons.initialize();
   assert.equal((await persons.findIdentity(external))!.metadata.uid, local.metadata.uid);
-  assert.equal((await persons.findIdentity(external))!.status.summary, "并发用户修正");
+  assert.equal((await persons.findIdentity(external))!.summaryText, "并发用户修正");
 });

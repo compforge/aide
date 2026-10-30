@@ -6,7 +6,7 @@ Person 保存人物身份和认识，供各 Topic 共享；Me 是基于已配置
 
 ## CRD
 
-类型为 `aide.dev/v1alpha1 Person`，见[模型](../../plugins/personal/person/model.ts)。
+类型为 `aide.dev/v1alpha3 Person`，见[模型](../../plugins/personal/person/model.ts)。
 
 ### Spec
 
@@ -14,7 +14,7 @@ name 保存展示名，identities 保存 provider / scope / id 组成的外部�
 
 ### Status
 
-summary 保存长期认识，recent 通过独立 Note 查询有界近期事项，updatedAt / updatedBy 记录 summary 修订时间与 user、chief 或 connector 来源。完整更新规则见[认识与用户修正](#认识与用户修正)。
+summaryRevision 保存摘要 Note 的派生内容指纹，正文按 Note.summaryOf 索引读取；recent 查询普通 Note 的有界近期事项。updatedAt / updatedBy 记录资料修订时间与 user、chief 或 connector 来源。完整更新规则见[认识与用户修正](#认识与用户修正)。
 
 ### 身份、Me 与关系
 
@@ -61,7 +61,7 @@ Input.sender / Output.receivers 是允许悬空的历史引用，不保证 Perso
 
 ### 认识与用户修正
 
-Person 的 status.summary 保存长期认识；recent 通过独立 Note 的 people 索引查询。Chief 通过 summarize_person 修订 summary，通过统一 upsert_note 的 people 关联人物；共用[有界认识契约](README.md#有界认识与近期依据)。用户在 Web Persons 直接编辑同一个 status.summary，updatedBy 保留用户来源，Note 原样保留；后续只改 Note 也不改变 summary 的修订来源和时间。Chief 必须读取最新版本并尊重用户明确修正，不能用旧上下文中的推断覆盖它。身份补全、仅编辑身份和启动更新均保留现有认识。summary 工具只在内容冲突时重读合并，使用 read_person.summaryVersion；身份资料的整体编辑继续校验资源版本。
+Person 不保存 summary 字段；按 Note.summaryOf 索引查找人物摘要，读取视图的 summaryText 提供长期认识正文；recent 通过独立 Note 的 people 索引查询。Chief 通过 summarize_person 修订 summary，通过统一 upsert_note 的 people 关联人物；共用[有界认识契约](README.md#有界认识与近期依据)。用户在 Web Persons 编辑同一份 Note 正文，updatedBy 保留用户来源，普通事项 Note 原样保留；后续只改事项 Note 也不改变 summary 的修订来源和时间。Chief 必须读取最新版本并尊重用户明确修正，不能用旧上下文中的推断覆盖它。身份补全、仅编辑身份和启动更新均保留现有认识。summary 工具只在内容冲突时重读合并，使用 read_person.summaryVersion；身份资料的整体编辑继续校验资源版本。
 
 summary 和 recent 查询视图只是人物资料的一部分，不代表完整的长期 profile。职责、关系、经历等资料可以按其自身语义继续组织；近期窗口的裁剪不授权删除长期资料。
 

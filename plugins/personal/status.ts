@@ -62,7 +62,7 @@ export function commitStatus(resources: ResourceClient, writes: readonly Resourc
       patch: { type: "json" as const, value: jsonPatch.compare(write.resource.status as object, statusPatch(write.resource, write.patch) as object).map(op => ({ ...op, path: `/status${op.path}` })) as ResourcePatchOperation[] } };
     if (write.operation === "replace") return { ...write, status: observed(write.resource.kind, write.spec, write.status,
       write.resource.metadata.generation + Number(!isDeepStrictEqual(write.resource.spec, write.spec)), write.resource.metadata.deletionTimestamp) };
-    if (write.operation === "create" && ["aide.dev/v1alpha2", "aide.dev/v1alpha3"].includes(write.type.apiVersion)) return { ...write, status: observed(write.type.kind, write.spec, write.status ?? {}, 1) };
+    if (write.operation === "create" && ["aide.dev/v1alpha2", "aide.dev/v1alpha3", "aide.dev/v1alpha4"].includes(write.type.apiVersion)) return { ...write, status: observed(write.type.kind, write.spec, write.status ?? {}, 1) };
     return write;
   }));
 }
@@ -70,7 +70,7 @@ export function commitStatus(resources: ResourceClient, writes: readonly Resourc
 export function workObservation(work: Work, generation: number): Omit<WorkStatus, "topic"> {
   const at = work.lastReport?.at ?? new Date().toISOString();
   const outcome = { at, text: work.lastReport?.text ?? "", observedGeneration: generation };
-  return { summary: work.summary,
+  return { summaryRevision: work.summaryRevision,
     ...(work.lastReport ? { lastReport: work.lastReport } : {}), ...(work.recoveryNotice ? { recoveryNotice: work.recoveryNotice } : {}),
     waiting: work.status === "waiting" ? { question: work.question! } : work.kind === "task" && work.nextAt ? { until: work.nextAt } : null,
     recovery: ["uncertain", "invalid_result", "running"].includes(work.status) ? { reason: work.status === "invalid_result" ? "InvalidResult" : "ExecutionUncertain", message: "Inspect previous execution effects" } : null,

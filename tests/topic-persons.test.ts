@@ -1,3 +1,4 @@
+import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { seedNotes } from "./fixtures/notes.ts";
 import assert from "node:assert/strict";
@@ -73,19 +74,19 @@ test("Notes keep optional UID-pinned people through updates, clearing, retention
   const read = () => f.aide.topics.resource("notes")!;
   const one = await f.person("one", "Same name"), two = await f.person("two", "Same name");
   const update = (args: Record<string, unknown>, call: string) => upsertTopicNote(f.resources, read(), "chief", {
-    version: args.noteId ? notes(f.store.resources, read().metadata.uid).find(n => n.id === args.noteId)?.version : undefined, text: "Discuss release", ...args,
+    version: args.noteId ? notes(f.store.resources, read().metadata.uid, "subject").find(n => n.id === args.noteId)?.version : undefined, text: "Discuss release", ...args,
   } as never, call);
   const created = await update({}, "create");
-  assert.deepEqual(notes(f.store.resources, read().metadata.uid)[0]!.people, []);
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, []);
   await update({ noteId: created.noteId, people: [one, two, one] }, "people");
-  assert.deepEqual(notes(f.store.resources, read().metadata.uid)[0]!.people, [one, two], "Same text can gain people; UID deduplicates, names do not");
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, [one, two], "Same text can gain people; UID deduplicates, names do not");
   await update({ noteId: created.noteId, text: "Discuss release progress" }, "progress");
-  assert.deepEqual(notes(f.store.resources, read().metadata.uid)[0]!.people, [one, two]);
-  assert.deepEqual(retainRecent(notes(f.store.resources, read().metadata.uid))[0]!.people, [one, two], "Synthesis/retention preserves associations");
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, [one, two]);
+  assert.deepEqual(retainRecent(notes(f.store.resources, read().metadata.uid, "subject"))[0]!.people, [one, two], "Synthesis/retention preserves associations");
   await assert.rejects(update({ noteId: created.noteId, people: [{ ...one, kind: "Topic" }] }, "invalid"), /Person/);
   await f.resources.delete(PERSON_TYPE, one.name);
   f.store.resources.finalizeDeletion(PERSON_TYPE, one.name);
-  await f.resources.create(PERSON_TYPE, { name: one.name, spec: { name: "Replacement", identities: [] },
+  await createWithSummary(f.resources, PERSON_TYPE, { name: one.name, spec: { name: "Replacement", identities: [] },
     status: { summary: "private-profile-marker", updatedAt: new Date().toISOString(), updatedBy: "user" } });
   await update({ noteId: created.noteId, text: "Keep historical attribution" }, "historical");
   const view = topicPersons(f.store, read());
@@ -93,10 +94,10 @@ test("Notes keep optional UID-pinned people through updates, clearing, retention
   assert.ok("unavailable" in view.items[0]! && view.items[0].unavailable);
   assert.doesNotMatch(JSON.stringify(view), /Replacement|private-profile-marker/);
   const copied = await update({ people: [one] }, "copy-historical");
-  assert.deepEqual(notes(f.store.resources, read().metadata.uid).find(n => n.id === copied.noteId)!.people, [one]);
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject").find(n => n.id === copied.noteId)!.people, [one]);
   await update({ noteId: copied.noteId, people: [] }, "clear-copy");
   await update({ noteId: created.noteId, people: [] }, "clear");
-  assert.deepEqual(notes(f.store.resources, read().metadata.uid)[0]!.people, []);
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, []);
   assert.deepEqual(topicPersons(f.store, read()).items, []);
 });
 
@@ -115,9 +116,9 @@ test("Topic people use only its own recent Notes and project names without Input
   assert.equal(db.prepare("SELECT total_changes() AS n").get()!.n, before);
   assert.equal(expected.items.length, 8); assert.equal(expected.omittedPersons, 2);
   assert.equal(expected.source, "recentNotes"); assert.equal(expected.noteCount, 1);
-  const preview = understanding({ ...noted.status, recent: notes(f.store.resources, noted.metadata.uid) }).recent[0]!;
+  const preview = understanding({ ...noted.status, summary: "", recent: notes(f.store.resources, noted.metadata.uid, "subject") }).recent[0]!;
   assert.equal(preview.people!.length, 8); assert.equal(preview.peopleOmitted, 2);
-  assert.equal(notes(f.store.resources, noted.metadata.uid)[0]!.people!.length, 10, "Only the preview is truncated");
+  assert.equal(notes(f.store.resources, noted.metadata.uid, "subject")[0]!.people!.length, 10, "Only the preview is truncated");
   assert.deepEqual(topicCandidatePage(f.store).items.find(t => t.uid === root.metadata.uid)!.persons, expected);
   assert.match(topicParts(f.store, noted, root.spec.id).topic, /recentNotes/);
   const read = await topicTools(f.store, () => noted).find(t => t.name === "read_topic")!.execute("read", {}, undefined, undefined, {} as never);
@@ -141,7 +142,7 @@ test("Weave enriches only page candidates, preserves offsets and separates direc
   assert.equal(searchRootTopics(roots, undefined, 100, 12, project).items.length, 0); assert.equal(calls, 0);
   const large = roots.map(r => ({ ...r, status: { ...r.status, summary: "s".repeat(1200) } }));
   calls = 0;
-  const bounded = searchRootTopics(large, undefined, 0, 20, project);
+  const bounded = searchRootTopics(large, undefined, 0, 20, project, () => "s".repeat(1200));
   assert.ok(bounded.items.length < 20); assert.equal(calls, bounded.items.length + 1);
   assert.equal(bounded.nextOffset, bounded.items.length);
 });
@@ -150,7 +151,7 @@ test("Route and Chief query people and recent activity only for the current page
   const f = fixture(t), person = await f.person("participant"), at = new Date().toISOString();
   for (let i = 0; i < 25; i++) {
     const root = await f.aide.topics.ensure(`root-${i}`);
-    await f.resources.patchStatus(root, { summary: "s".repeat(2000) });
+    await patchSummary(f.resources, root, { summary: "s".repeat(2000) });
     await seedNotes(f.resources, root, [{ id: "note", text: "Matter", people: [person] }]);
   }
   const db = f.store.resources.storage.db, prepare = db.prepare.bind(db);

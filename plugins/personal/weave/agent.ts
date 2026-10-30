@@ -1,3 +1,5 @@
+import { noteFields } from "../../../agents/context-tools.ts";
+import { summaryText, summaryReference } from "../note/summary.ts";
 import { notes } from "../note/query.ts";
 import { topicPersons } from "../topic/persons.ts";
 import { weaveCandidates, searchRootTopics } from "./candidates.ts";
@@ -34,7 +36,7 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
       { name: "list_topics", label: "List root topics", description: "Search all available roots, including previously reviewed roots and roots with children. rootCount is the full catalog; matchingRootCount is this search. Read bounded pages with Persons associated with recent Notes; shared people are a contextual clue, never an automatic merge criterion. Read each proposed root with read_topic to obtain its current grouping version. Do not expand the entire catalog.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })), query: Type.Optional(Type.String()) }),
         async execute(_id, { offset = 0, query }) {
-          return result(searchRootTopics(roots(), query, offset, batchSize, topic => topicPersons(store, topic)));
+          return result(searchRootTopics(roots(), query, offset, batchSize, topic => topicPersons(store, topic), topic => summaryText(store.resources, topic), topic => summaryReference(store.resources, topic)));
         } },
       { name: "read_topic", label: "Read root topic", description: "Read full root understanding in bounded text pages. version pins the understanding used by group_topics.",
         parameters: Type.Object({ uid: Type.String(), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
@@ -42,13 +44,13 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
           active();
           const t = store.resources.page<TopicSpec, TopicStatus>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: uid } }).items[0];
           if (!t || t.metadata.deletionTimestamp || t.spec.parentRef || t.spec.default) throw new Error("Root Topic unavailable");
-          const text = JSON.stringify({ name: t.spec.name, persons: topicPersons(store, t), summary: t.status.summary, recent: notes(store.resources, t.metadata.uid), organization: t.status.organization });
-          return result({ uid, version: understandingVersion(t, notes(store.resources, t.metadata.uid)), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
+          const text = JSON.stringify({ name: t.spec.name, persons: topicPersons(store, t), summary: summaryText(store.resources, t), summaryUid: summaryReference(store.resources, t)?.uid, summaryNote: summaryReference(store.resources, t), recent: notes(store.resources, t.metadata.uid, "subject"), organization: t.status.organization });
+          return result({ uid, version: understandingVersion(t, notes(store.resources, t.metadata.uid, "subject")), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } },
       { name: "group_topics", label: "Group topics", description: "Attach 1-8 roots to an existing parent, or create a new parent for 2-8 roots. For a new parent provide name and summary preserving long-lived connections, attribution, disagreements and confirmation state. Temporary progress stays in child Notes; grouping retains a bounded combined Note window. Do not copy temporary facts into summary. Existing parents keep their own understanding for Chief to synthesize. Running agents may finish; data ownership stays unchanged.",
         parameters: Type.Object({ topics: Type.Array(Type.Object({ uid: Type.String(), version: Type.String() }), { minItems: 1, maxItems: 8 }),
           parent: Type.Optional(Type.Object({ uid: Type.String(), version: Type.String() })),
-          name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })), summary: Type.Optional(Type.String({ minLength: 1, maxLength: summaryChars })) }),
+          people: noteFields.people, name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })), summary: Type.Optional(Type.String({ minLength: 1, maxLength: summaryChars })) }),
         async execute(_id, args) { return result(await groupTopics(plugins.resourceClient("personal"), active(), args, summaryChars)); } },
     ];
     return createWeaveAgent({ ...options, config, scope: `weave:${ref.uid}`, tools, background: identityBackground(persons) });

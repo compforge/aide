@@ -1,3 +1,4 @@
+import { summaryText, summaryReference } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
 import { notes } from "../note/query.ts";
 import { workContextTools } from "../work-context.ts";
@@ -40,9 +41,9 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, store.topicId(current().status.topic)), offset)); } }),
       tool({ name: "read_task", label: "Read task", description: "Read this Task's objective, state, latest handling report, long-lived summary and recent Notes.", parameters: Type.Object({}),
-        async execute() { const r = current(); return result({ ...r, version: contentVersion(r), recent: notes(store.resources, r.metadata.uid) }); } }),
+        async execute() { const r = current(); return result({ ...r, summaryText: summaryText(store.resources, r), summaryNote: summaryReference(store.resources, r), version: contentVersion(r), recent: notes(store.resources, r.metadata.uid, "subject") }); } }),
       tool({ name: "read_topic", label: "Read topic", description: "Read the owning Topic as context, not additional authority.", parameters: Type.Object({}),
-        async execute() { const c = store.topics.resource(store.topicId(current().status.topic)); return result(c ? { ...c.spec, summary: c.status.summary, recent: notes(store.resources, c.metadata.uid) } : null); } }),
+        async execute() { const c = store.topics.resource(store.topicId(current().status.topic)); return result(c ? { ...c.spec, summary: summaryText(store.resources, c), summaryUid: summaryReference(store.resources, c)?.uid, summaryNote: summaryReference(store.resources, c), recent: notes(store.resources, c.metadata.uid, "subject") } : null); } }),
       tool({ name: "read_input", label: "Read input", description: "List pending assigned inputs, or page through one assigned input. Failed attempts need effect inspection.",
         parameters: Type.Object({ inputId: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { inputId, offset = 0 }) {

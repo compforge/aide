@@ -1,3 +1,5 @@
+import { summaryText } from "../plugins/personal/note/summary.ts";
+import { patchSummary, createWithSummary } from "./summary-fixture.ts";
 import { groupTopics } from "../plugins/personal/weave/service.ts";
 import { WEAVE_TYPE } from "../plugins/personal/weave/model.ts";
 import { readNote } from "../plugins/personal/note/service.ts";
@@ -30,9 +32,9 @@ async function setup(t: TestContext) {
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const resources = aide.runtime.plugins.resourceClient("personal");
   const original = await aide.topics.ensure("notes");
-  const root = await resources.patchStatus(original, { execution: { id: "live", startedAt: new Date().toISOString() }, summary: "Distinguish reported and verified completion." });
+  const root = await patchSummary(resources, original, { execution: { id: "live", startedAt: new Date().toISOString() }, summary: "Distinguish reported and verified completion." });
   const read = () => aide.topics.resource("notes")!;
-  const recent = () => notes(aide.topics.resources, root.metadata.uid);
+  const recent = () => notes(aide.topics.resources, root.metadata.uid, "subject");
   const upsert = (raw: unknown, callId: string, client = resources) => upsertTopicNote(client, root, "live", raw, callId);
   return { aide, resources, root, read, recent, upsert };
 }
@@ -48,7 +50,7 @@ test("one independent Note follows progress; tool retries preserve newer content
   assert.equal(replay.version, done.version);
   assert.equal((await f.upsert({ ...done, text: "X reported complete; verification pending" }, "same")).version, done.version);
   assert.equal(f.recent().find(n => n.id === first.noteId)!.createdAt, at);
-  assert.equal(f.read().status.summary, initial.status.summary);
+  assert.equal(f.read().status.summaryRevision, initial.status.summaryRevision);
   assert.equal("recent" in f.read().status, false);
   await assert.rejects(f.upsert({ ...first, text: "stale edit" }, "stale"), /version conflict/);
   await assert.rejects(f.upsert({ noteId: "missing", version: done.version, text: "resurrection" }, "missing"), /no longer exists/);
@@ -62,21 +64,21 @@ test("summary edits survive scheduling and Note changes, but reject concurrent c
   assert.equal(f.recent().length, 1);
   await assert.rejects(summarizeTopic(f.resources, original, "live", { version, summary: "old interpretation" }, 4000), /context changed/);
   const current = f.read();
-  const race: ResourceClient = { ...f.resources, async patch(resource, patch, options) {
-    await f.resources.patchStatus(current, { summary: "Concurrent user correction" });
-    return f.resources.patch(resource, patch, options);
+  const race: ResourceClient = { ...f.resources, async commit(writes) {
+    await patchSummary(f.resources, current, { summary: "Concurrent user correction" });
+    return f.resources.commit(writes);
   } };
   await assert.rejects(summarizeTopic(race, current, "live", { version: contentVersion(current), summary: "overwrite" }, 4000), /Test operation failed/);
-  assert.equal(f.read().status.summary, "Concurrent user correction");
+  assert.equal(summaryText(f.aide.topics.resources, f.read()), "Concurrent user correction");
 });
 test("content writes validate execution and intermediate Topic ownership inside the transaction", async t => {
   const f = await setup(t);
   const other = await f.aide.topics.ensure("other");
-  const middle = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "middle", spec: { id: "middle", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
-  const leaf = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "leaf", spec: { id: "leaf", parentRef: resourceRef(middle) }, status: { summary: "", receipts: [] } });
-  const race: ResourceClient = { ...f.resources, async patch(resource, patch, options) {
+  const middle = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "middle", spec: { id: "middle", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
+  const leaf = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "leaf", spec: { id: "leaf", parentRef: resourceRef(middle) }, status: { summary: "", receipts: [] } });
+  const race: ResourceClient = { ...f.resources, async commit(writes) {
     await f.resources.replace(middle, { ...middle.spec, parentRef: resourceRef(other) }, middle.status);
-    return f.resources.patch(resource, patch, options);
+    return f.resources.commit(writes);
   } };
   await assert.rejects(summarizeTopic(race, f.root, "live", { topicUid: leaf.metadata.uid, version: contentVersion(leaf), summary: "outside" }, 4000), /outside/);
   const switchExecution: ResourceClient = { ...f.resources, async create(type, init) {
@@ -120,38 +122,38 @@ test("Notes outlive subjects and capacity evicts old Notes without recreating ev
 });
 test("child understanding includes independent Note revisions and detects concurrent Note creation", async t => {
   const f = await setup(t);
-  const child = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "Child", receipts: [] } });
+  const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "Child", receipts: [] } });
   await f.upsert({ subject: resourceRef(child), text: "Child evidence" }, "child-note");
-  const version = understandingVersion(child, await readNotes(f.resources, child.metadata.uid));
-  const race: ResourceClient = { ...f.resources, async patch(resource, patch, options) {
+  const version = understandingVersion(child, await readNotes(f.resources, child.metadata.uid, "subject"));
+  const race: ResourceClient = { ...f.resources, async commit(writes) {
     await f.upsert({ subject: resourceRef(child), text: "Late evidence" }, "late-note");
-    return f.resources.patch(resource, patch, options);
+    return f.resources.commit(writes);
   } };
   await assert.rejects(summarizeTopic(race, f.root, "live", { version: contentVersion(f.read()), absorbed: [{ uid: child.metadata.uid, version }] }, 4000), /Child understanding changed/);
   assert.equal(f.read().status.absorbed?.[child.metadata.uid], undefined);
-  const latest = understandingVersion(child, await readNotes(f.resources, child.metadata.uid));
+  const latest = understandingVersion(child, await readNotes(f.resources, child.metadata.uid, "subject"));
   await summarizeTopic(f.resources, f.root, "live", { version: contentVersion(f.read()), absorbed: [{ uid: child.metadata.uid, version: latest }] }, 4000);
   assert.equal(f.read().status.absorbed?.[child.metadata.uid], latest);
 });
 test("Work summary and Notes use content versions and enforce the bound subject", async t => {
   const f = await setup(t);
-  const original = await f.resources.create(ROUTINE_TYPE, { name: "work", spec: { title: "Monitor", instruction: "Check", paused: false, trigger: { cron: null, event: "tick", timezone: "UTC" } },
+  const original = await createWithSummary(f.resources, ROUTINE_TYPE, { name: "work", spec: { title: "Monitor", instruction: "Check", paused: false, trigger: { cron: null, event: "tick", timezone: "UTC" } },
     status: { topic: resourceRef(f.root), summary: "", execution: { id: "work-live", startedAt: new Date().toISOString() } } }) as WorkResource;
   const tools = workContextTools("routine", f.resources, () => original, log);
   await f.resources.patchStatus(original, { nextTriggerAt: new Date().toISOString() });
   await tools.find(t => t.name === "summarize_routine")!.execute("summary", { version: contentVersion(original), summary: "Stable" }, undefined, undefined, {} as never);
   const tool = tools.find(t => t.name === "upsert_note")!;
   await tool.execute("note", { text: "Current check" }, undefined, undefined, {} as never);
-  assert.equal((await readNotes(f.resources, original.metadata.uid)).length, 1);
   const current = (await f.resources.get<WorkResource["spec"], WorkResource["status"]>(resourceRef(original)))!;
-  const race: ResourceClient = { ...f.resources, async patch(resource, patch, options) {
-    await f.resources.patchStatus(current, { summary: "Concurrent correction" });
-    return f.resources.patch(resource, patch, options);
+  assert.equal((await readNotes(f.resources, current.metadata.uid, "subject")).length, 1);
+  const race: ResourceClient = { ...f.resources, async commit(writes) {
+    await patchSummary(f.resources, current, { summary: "Concurrent correction" });
+    return f.resources.commit(writes);
   } };
   const summarize = workContextTools("routine", race, () => current, log).find(t => t.name === "summarize_routine")!;
   await assert.rejects(summarize.execute("race", { version: contentVersion(current), summary: "Unseen overwrite" }, undefined, undefined, {} as never),
-    (error: Error) => /summary version conflict; read_routine and merge again/.test(error.message) && (error.cause as Error).name === "TEST_OPERATION_FAILED");
-  assert.equal((await f.resources.get<WorkResource["spec"], WorkResource["status"]>(resourceRef(original)))!.status.summary, "Concurrent correction");
+    /Test operation failed/);
+  assert.equal(summaryText(f.aide.topics.resources, (await f.resources.get<WorkResource["spec"], WorkResource["status"]>(resourceRef(original)))!), "Concurrent correction");
   await assert.rejects(tool.execute("outside", { subject: resourceRef(f.root), text: "Wrong subject" }, undefined, undefined, {} as never), /own content/);
 });
 
@@ -184,12 +186,14 @@ test("Weave grouping rejects Note-only changes between review and commit", async
 
 test("summary response version identifies its committed content, not a later concurrent edit", async t => {
   const f = await setup(t), initial = f.read();
-  const race: ResourceClient = { ...f.resources, async patch(resource, patch, options) {
-    const written = await f.resources.patch(resource, patch, options);
-    await f.resources.patchStatus(f.read(), { summary: "Later correction" });
+  let committedVersion = "";
+  const race: ResourceClient = { ...f.resources, async commit(writes) {
+    const written = await f.resources.commit(writes);
+    committedVersion = contentVersion(written.at(-1) as any);
+    await patchSummary(f.resources, f.read(), { summary: "Later correction" });
     return written;
   } };
   const result = await summarizeTopic(race, initial, "live", { version: contentVersion(initial), summary: "My synthesis" }, 4000);
-  assert.equal(result.version, contentVersion({ ...initial, status: { ...initial.status, summary: "My synthesis" } }));
+  assert.equal(result.version, committedVersion);
   await assert.rejects(summarizeTopic(f.resources, initial, "live", { version: result.version, summary: "Would overwrite unseen correction" }, 4000), /context changed/);
 });

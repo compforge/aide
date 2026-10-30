@@ -1,10 +1,11 @@
+import { writeSummary, type SummaryResource } from "./summary.ts";
 import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Resource, ResourceClient } from "@compforge/aide-plugin";
 import { PersonRefSchema } from "../person/model.ts";
 import { resourceRef } from "../input/state.ts";
-import { NOTE_TYPE, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus } from "./model.ts";
+import { NOTE_TYPE, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus } from "./model.ts";
 
 export const NoteUpdateSchema = z.object({ version: z.string().min(1).optional(), noteId: z.string().min(1).optional(),
   subject: SubjectSchema.optional(), text: z.string().trim().min(1).max(16000), people: z.array(PersonRefSchema).optional(),
@@ -19,7 +20,7 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
   raw: unknown, callId: string) {
   const args = NoteUpdateSchema.parse(raw);
   if (!callId || !actor.status.execution) throw new Error("Note requires an active execution and tool-call identity");
-  const writer = { resource: SubjectSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id };
+  const writer = { resource: WriterResourceSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id };
   const id = args.noteId ?? `note-${createHash("sha256").update(JSON.stringify([actor.metadata.uid, writer.executionId, callId])).digest("hex").slice(0, 32)}`;
   const ref = { ...NOTE_TYPE, namespace: "v1" as const, name: id };
   const previous = await resources.get<NoteSpec, NoteStatus>(ref);
@@ -29,6 +30,15 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
   const spec = { subject: args.subject ?? previous?.spec.subject ?? writer.resource, text: args.text,
     people: args.people ? [...new Map(args.people.map(p => [p.uid, p])).values()] : previous?.spec.people ?? [] };
   if (previous && !isDeepStrictEqual(previous.spec.subject, spec.subject)) throw new Error("Use move_note to change an existing Note subject");
+  if (previous?.spec.summaryOf) {
+    const owner = await resources.get<SummaryResource["spec"], SummaryResource["status"]>(previous.spec.subject);
+    if (owner) {
+      if (owner.status.summaryRevision !== args.version) throw new Error("Note content version conflict; read the Note again");
+      const updated = await writeSummary(resources, owner, { text: args.text, people: args.people }, writer,
+        undefined, owner.kind === "Person" ? { updatedAt: new Date().toISOString(), updatedBy: "chief" } : {});
+      return { noteId: id, version: updated.status.summaryRevision! };
+    }
+  }
   if (previous && isDeepStrictEqual(previous.spec, spec)) return { noteId: id, version: noteVersion(previous) };
   const status = { ...previous?.status, updatedAt: new Date().toISOString(), writer };
   try {
@@ -45,7 +55,8 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
 
 /** Read the complete stored matter when a context window or preview truncated it. */
 export async function readNote(resources: ResourceClient, noteId: string) {
-  const resource = await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: noteId });
+  const resource = await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: noteId })
+    ?? (await resources.page<NoteSpec, NoteStatus>(NOTE_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "uid", value: noteId } })).items[0];
   if (!resource || resource.metadata.deletionTimestamp) throw new Error(`Note no longer exists: ${noteId}`);
   return noteView(resource);
 }

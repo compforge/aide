@@ -1,3 +1,5 @@
+import { summaryText, summaryReference } from "../plugins/personal/note/summary.ts";
+import { patchSummary, createWithSummary } from "./summary-fixture.ts";
 import { notes as storedNotes } from "../plugins/personal/note/query.ts";
 import { seedNotes } from "./fixtures/notes.ts";
 import assert from "node:assert/strict";
@@ -29,7 +31,7 @@ test("resource context pages all live candidates and isolate related Work", asyn
   const store = aide.personal.store;
   for (let i = 0; i < 25; i++) {
     const c = await aide.topics.ensure(`topic-${i}`);
-    await resources.patchStatus(c, { summary: "topic detail ".repeat(1000) });
+    await patchSummary(resources, c, { summary: "topic detail ".repeat(1000) });
   }
   const candidates = topicCandidates(store);
   const ids: string[] = [];
@@ -48,9 +50,9 @@ test("resource context pages all live candidates and isolate related Work", asyn
   const before = captured.text();
   await resources.patchStatus(c, { receipts: [{ key: "execution-bookkeeping", responseId: "response" }] });
   assert.deepEqual(new RouteBackground(store).text(), before);
-  await resources.patchStatus(aide.topics.resource(c.spec.id)!, { summary: "changed-beyond-first-page" });
+  await patchSummary(resources, aide.topics.resource(c.spec.id)!, { summary: "changed-beyond-first-page" });
   assert.notDeepEqual(new RouteBackground(store).text(), before, "An off-page change invalidates previously read pages");
-  await resources.patchStatus(aide.topics.resource("topic-0")!, { summary: "current-topic-understanding" });
+  await patchSummary(resources, aide.topics.resource("topic-0")!, { summary: "current-topic-understanding" });
   const deleted = aide.topics.resource("topic-1")!;
   await resources.delete(deleted, deleted.metadata.name);
   assert.ok(!topicCandidates(store).some(c => c.metadata.uid === deleted.metadata.uid));
@@ -87,9 +89,9 @@ test("child previews expose omitted Notes and text; paged reads recover the comp
   const at = new Date().toISOString();
   const notes = ["Older unresolved matter", "A".repeat(500), "B".repeat(501), "C".repeat(9000) + " Not independently verified"].map((text, i) =>
     ({ id: `note-${i}`, createdAt: at, updatedAt: at, text }));
-  const child = await resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "preview-child",
+  const child = await createWithSummary<TopicSpec, TopicStatus>(resources, TOPIC_TYPE, { name: "preview-child",
     spec: { id: "preview-child", parentRef: resourceRef(root) }, status: { summary: "S".repeat(1201), receipts: [] } });
-  const short = await resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "short-child",
+  const short = await createWithSummary<TopicSpec, TopicStatus>(resources, TOPIC_TYPE, { name: "short-child",
     spec: { id: "short-child", parentRef: resourceRef(root) }, status: { summary: "Complete summary", receipts: [] } });
   await seedNotes(resources, child, notes);
   await seedNotes(resources, short, [notes[0]!]);
@@ -125,5 +127,5 @@ test("child previews expose omitted Notes and text; paged reads recover the comp
     offset = read.nextOffset;
   }
   assert.ok(pages > 1, "Full understanding exceeds a single read page");
-  assert.deepEqual(JSON.parse(text), { ...child.spec, persons: preview.persons, conditions: child.status.conditions, summary: child.status.summary, recent: storedNotes(aide.topics.resources, child.metadata.uid) });
+  assert.deepEqual(JSON.parse(text), { ...child.spec, persons: preview.persons, conditions: child.status.conditions, summary: summaryText(aide.topics.resources, child), summaryUid: summaryReference(aide.topics.resources, child)?.uid, summaryNote: summaryReference(aide.topics.resources, child), recent: storedNotes(aide.topics.resources, child.metadata.uid, "subject") });
 });

@@ -97,7 +97,7 @@ Chief 拆分时留下原因和所依据的主题状态，Weave 归拢时读取�
 
 ## CRD
 
-类型为 `aide.dev/v1alpha2 Topic`。完整字段见[模型](../../plugins/personal/topic/model.ts)。
+类型为 `aide.dev/v1alpha4 Topic`。完整字段见[模型](../../plugins/personal/topic/model.ts)。
 
 ### Topic 身份与树结构
 
@@ -108,7 +108,7 @@ Topic 使用独立 ID / UID，名称和来源 key 不充当资源身份。字段
 | spec.name | 便于理解的主题名称，可以变化 |
 | spec.topicKey | 可选的来源关联键；一个 key 同时只对应一个可接纳的 Topic |
 | spec.parentRef | 可选的父 Topic 引用，固定到 UID |
-| status.summary | 长期认识；recent 从独立 Note 的 subject 索引查询 |
+| status.summaryRevision | 摘要 Note 的派生内容指纹；通过 Note.summaryOf 索引读取正文，recent 从普通 Note 的 subject 索引查询 |
 | status.lastInputAt | 本 Topic 及其子树已观察到的最后一次业务 Input 时间；子节点活动异步向上传播 |
 | spec.default | 系统兜底主题标记，与保留身份 `default` 一致，不可转移 |
 | status.agent / status.execution | root 的原生会话引用和执行状态；非 root 不继续运行 Chief |

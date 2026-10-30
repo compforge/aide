@@ -1,5 +1,7 @@
+import { PersonRefSchema } from "../person/model.ts";
+import { prepareSummary } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
-import { SubjectSchema } from "../note/model.ts";
+import { WriterResourceSchema, SubjectSchema } from "../note/model.ts";
 import { readNotes } from "../note/query.ts";
 import { patchStatus } from "../status.ts";
 import { resourceRef } from "../input/state.ts";
@@ -24,8 +26,8 @@ export async function updateTopic(resources: ResourceClient, ref: Readonly<Topic
 
 export const TopicContextSchema = z.object({ topicUid: z.string().optional(),
   absorbed: z.array(z.object({ uid: z.string(), version: z.string() }).strict()).max(20).optional(),
-  version: z.string(), summary: z.string().max(SUMMARY_CHARS).optional(),
-}).strict().refine(args => args.summary !== undefined || !!args.absorbed?.length, "Supply summary or reviewed child versions");
+  version: z.string(), people: z.array(PersonRefSchema).optional(), summary: z.string().max(SUMMARY_CHARS).optional(),
+}).strict().refine(args => args.summary !== undefined || !!args.absorbed?.length, "Supply summary or reviewed child versions").refine(args => args.people === undefined || args.summary !== undefined, "Supply summary when changing its people");
 export type TopicContextUpdate = z.infer<typeof TopicContextSchema>;
 export const TopicNoteSchema = NoteUpdateSchema;
 export type TopicNoteUpdate = z.infer<typeof TopicNoteSchema>;
@@ -40,7 +42,7 @@ async function targetTopic(resources: ResourceClient, owner: Readonly<TopicResou
 }
 
 /**
- * @spec Long-lived summary and child review receipts can change independently; neither appends a Note.
+ * @spec Long-lived summary and child review receipts can change independently; neither appends a matter Note.
  * @spec Reviewed child versions are checked atomically before they can be reclaimed.
  * @case tests/notes.test.ts
  * @link docs/personal/topic.md#研判与上下文
@@ -53,21 +55,24 @@ export async function summarizeTopic(resources: ResourceClient, owner: Readonly<
   const absorbed = { ...target.status.absorbed }, absorbedSummaries = { ...target.status.absorbedSummaries };
   const children = await Promise.all((args.absorbed ?? []).map(async ref => {
     const child = (await resources.page<TopicSpec, TopicStatus>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: ref.uid } })).items[0];
-    if (!child || child.metadata.deletionTimestamp || child.spec.parentRef?.uid !== target.metadata.uid || understandingVersion(child, await readNotes(resources, child.metadata.uid)) !== ref.version) throw new Error("Child understanding changed; read and review again");
+    if (!child || child.metadata.deletionTimestamp || child.spec.parentRef?.uid !== target.metadata.uid || understandingVersion(child, await readNotes(resources, child.metadata.uid, "subject")) !== ref.version) throw new Error("Child understanding changed; read and review again");
     absorbed[ref.uid] = ref.version;
     absorbedSummaries[ref.uid] = summaryVersion(child);
     return child;
   }));
-  const updated = await resources.patch(target, { type: "json", value: [
-    { op: "test", path: "/status/summary", value: target.status.summary },
-    ...(args.summary !== undefined ? [{ op: "replace" as const, path: "/status/summary", value: args.summary }] : []),
-    { op: "add", path: "/status/contextWriter", value: { resource: SubjectSchema.parse(resourceRef(current)), executionId } },
+  const writer = { resource: WriterResourceSchema.parse(resourceRef(current)), executionId };
+  const prepared = args.summary === undefined ? { writes: [], status: {} } : await prepareSummary(resources, target, { text: args.summary, people: args.people }, writer, args.version);
+  const committed = await resources.commit([...prepared.writes, { operation: "patch", resource: target, patch: { type: "json", value: [
+    ...(target.status.summaryRevision === undefined ? [] : [{ op: "test" as const, path: "/status/summaryRevision", value: target.status.summaryRevision }]),
+    ...Object.entries(prepared.status).map(([key, value]) => ({ op: "add" as const, path: `/status/${key}`, value })),
+    { op: "add", path: "/status/contextWriter", value: { resource: WriterResourceSchema.parse(resourceRef(current)), executionId } },
     ...children.flatMap(child => [
       { op: "add" as const, path: `/status/absorbed/${child.metadata.uid}`, value: absorbed[child.metadata.uid] },
       { op: "add" as const, path: `/status/absorbedSummaries/${child.metadata.uid}`, value: absorbedSummaries[child.metadata.uid] },
     ]),
-  ] });
-  return { version: contentVersion(updated), understandingVersion: understandingVersion(updated, await readNotes(resources, updated.metadata.uid)) };
+  ] } }]);
+  const updated = committed.at(-1) as TopicResource;
+  return { version: contentVersion(updated), understandingVersion: understandingVersion(updated, await readNotes(resources, updated.metadata.uid, "subject")) };
 }
 
 export async function upsertTopicNote(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, callId: string) {

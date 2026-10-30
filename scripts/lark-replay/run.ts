@@ -1,3 +1,4 @@
+import { summaryText } from "../../plugins/personal/note/summary.ts";
 import { notes } from "../../plugins/personal/note/query.ts";
 import { candidateVersion } from "../../plugins/personal/weave/candidates.ts";
 import { appendFileSync, writeFileSync } from "node:fs";
@@ -91,7 +92,7 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
   let currentCutoff = snapshot.start;
   const capture = (cutoff: string) => ({ cutoff, at: new Date().toISOString(), topics: aide.topics.list().map(t => {
     const resource = aide.topics.resource(t.id)!;
-    return { ...t, uid: resource.metadata.uid, summary: resource.status.summary, recent: notes(aide.topics.resources, resource.metadata.uid) };
+    return { ...t, uid: resource.metadata.uid, summary: summaryText(aide.topics.resources, resource), recent: notes(aide.topics.resources, resource.metadata.uid) };
   }), outputs: aide.outputs(),
     inputs: aide.topics.inputStore.list().map(input => inputDetail(aide, input.metadata.name)), invocations: aide.invocations() });
   // A settled scheduler may still have unfinished receipts or a future Weave timer. Check all three.

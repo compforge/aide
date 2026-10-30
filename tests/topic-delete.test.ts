@@ -1,3 +1,4 @@
+import { patchSummary } from "./summary-fixture.ts";
 import { moveMaterial, moveTopic } from "../plugins/personal/topic/organize.ts";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { assessInput } from "../plugins/personal/topic/assess.ts";
@@ -137,7 +138,8 @@ test("Web reports Topic hierarchy, absorption, Default deletion refusals", async
   for (const id of ["parent", "child", "default"]) await topics.ensure(id);
   const parent = topics.resource("parent")!;
   let child = topics.resource("child")!;
-  child = await resources.replace(child, { ...child.spec, parentRef: resourceRef(parent) }, { ...child.status, summary: "未吸收的事实" });
+  child = await resources.replace(child, { ...child.spec, parentRef: resourceRef(parent) }, child.status);
+  child = await patchSummary(resources, child, { summary: "未吸收的事实" });
   const { server, remove } = await listen(aide);
   t.after(async () => { server.closeAllConnections(); server.close(); await aide.close(); rmSync(dir, { recursive: true, force: true }); });
   for (const [id, expected] of [["parent", /子主题/], ["child", /尚未吸收/], ["default", /默认主题不能删除/]] as const) {

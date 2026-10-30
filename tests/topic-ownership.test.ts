@@ -1,3 +1,4 @@
+import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { patchStatus } from "../plugins/personal/status.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -142,7 +143,7 @@ test("Maintenance agenda survives persistence for unnamed Topics and business In
 
 test("Chief organizes trees larger than the transaction limit without writing unrelated resources", async t => {
   const f = await fixture(t), branch = await f.child();
-  for (let i = 0; i < 105; i++) await f.resources.create(TOPIC_TYPE, { name: `large-${i}`,
+  for (let i = 0; i < 105; i++) await createWithSummary(f.resources, TOPIC_TYPE, { name: `large-${i}`,
     spec: { id: `large-${i}`, parentRef: resourceRef(branch) }, status: { summary: "", receipts: [] } });
   const input = await f.input("large-fact");
   const task = await f.aide.work("root").create({ kind: "task", title: "Move", instruction: "Move scope", trigger: null });
@@ -153,7 +154,7 @@ test("Chief organizes trees larger than the transaction limit without writing un
   await moveMaterial(resources, f.root(), { kind: "Input", id: input.metadata.name, topicUid: target.metadata.uid, reason: "Relevant" });
   await moveMaterial(resources, f.root(), { kind: "Task", id: task.id, topicUid: target.metadata.uid, reason: "Relevant" });
   await moveTopic(resources, f.root(), { uid: branch.metadata.uid, parentUid: null, reason: "Independent responsibility" });
-  assert.deepEqual(writes, [1, 2, 1, 2]);
+  assert.deepEqual(writes, [1, 2, 2, 1, 2]);
   const after = await f.resources.list(TOPIC_TYPE);
   for (const topic of before.filter(topic => ![branch.metadata.uid, f.root().metadata.uid].includes(topic.metadata.uid)))
     assert.equal(after.find(a => a.metadata.uid === topic.metadata.uid)!.metadata.resourceVersion, topic.metadata.resourceVersion, "unrelated observations are not writes");
@@ -179,7 +180,7 @@ test("Transaction checks detect changed intermediate ancestry and expired Chief 
 test("Unrelated summary updates do not invalidate ownership decisions", async t => {
   const f = await fixture(t), branch = await f.child(), input = await f.input("unrelated");
   const resources: ResourceClient = { ...f.resources, async commit(writes) {
-    await f.resources.patchStatus(f.root(), { summary: "New unrelated background" });
+    await patchSummary(f.resources, f.root(), { summary: "New unrelated background" });
     return f.resources.commit(writes);
   } };
   const moved = await moveMaterial(resources, f.root(), { kind: "Input", id: input.metadata.name, topicUid: branch.metadata.uid, reason: "Move" });

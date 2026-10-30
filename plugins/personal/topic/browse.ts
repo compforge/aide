@@ -10,7 +10,7 @@ export interface TopicListItem {
   review: TopicReview; default: boolean; preview: string; updatedAt: string; taskCount: number; routineCount: number; childCount: number;
 }
 const field = (alias: string, path: string) => `json_extract(${alias}.data, '$.object.${path}')`;
-const activeTopic = (alias: string) => `${alias}.scope = 'personal' AND ${alias}.kind = 'aide.dev/Topic' AND ${field(alias, "apiVersion")} = 'aide.dev/v1alpha3'
+const activeTopic = (alias: string) => `${alias}.scope = 'personal' AND ${alias}.kind = 'aide.dev/Topic' AND ${field(alias, "apiVersion")} = '${TOPIC_TYPE.apiVersion}'
   AND ${field(alias, "metadata.namespace")} = 'v1' AND ${field(alias, "metadata.deletionTimestamp")} IS NULL`;
 const activeInput = `r.scope = 'personal' AND r.kind = 'aide.dev/Input' AND ${field("r", "apiVersion")} = 'aide.dev/v1alpha3' AND ${field("r", "metadata.namespace")} = 'v1'
   AND ${field("r", "metadata.deletionTimestamp")} IS NULL`;
@@ -102,7 +102,7 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
       for (const row of children) childCounts.set(row.parentUid as string, Number(row.n));
       const rows = db.prepare(`SELECT i.value AS topicId, r.kind, count(*) AS n FROM resource_indexes i CROSS JOIN resources r ON r.key = i.source
         WHERE i.name = 'topic' AND i.value IN (${ids.map(() => "?").join(",")}) AND r.scope = 'personal'
-          AND r.kind IN ('aide.dev/Task', 'aide.dev/Routine') AND ${field("r", "apiVersion")} = 'aide.dev/v1alpha3' AND ${field("r", "metadata.namespace")} = 'v1'
+          AND r.kind IN ('aide.dev/Task', 'aide.dev/Routine') AND ${field("r", "apiVersion")} = 'aide.dev/v1alpha4' AND ${field("r", "metadata.namespace")} = 'v1'
           AND ${field("r", "metadata.deletionTimestamp")} IS NULL GROUP BY i.value, r.kind`).all(...ids);
       for (const row of rows) {
         const value = counts.get(row.topicId as string) ?? { taskCount: 0, routineCount: 0 };

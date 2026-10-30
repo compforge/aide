@@ -1,3 +1,5 @@
+import { summaryText, prepareSummary } from "../plugins/personal/note/summary.ts";
+import { patchSummary } from "./summary-fixture.ts";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
@@ -534,7 +536,7 @@ test("Chief profiles people through tools and refreshes shared user corrections 
   const me = (await writer.persons.findIdentity(LOCAL_ME))!;
   const turn = await writer.run("我更喜欢简洁中文，记一下。", "person-write");
   assert.equal(turn.stopReason, "end_turn");
-  assert.match((await writer.persons.findIdentity(LOCAL_ME))!.status.summary, /concise Chinese/);
+  assert.match((await writer.persons.findIdentity(LOCAL_ME))!.summaryText, /concise Chinese/);
   assert.equal(existsSync(writer.personFile), false);
   const context = (request: Record<string, unknown>) => JSON.stringify(request.messages);
   await writer.run("现在呢", "person-refresh");
@@ -549,7 +551,7 @@ test("Chief profiles people through tools and refreshes shared user corrections 
   await reader.run("最新偏好", "corrected");
   assert.match(context(reader.requests.at(-1)!), /detailed explanations/);
   assert.match(context(reader.requests.at(-1)!), /Explicit corrections take priority/);
-  assert.equal((await writer.persons.findIdentity(LOCAL_ME))!.status.summary, "Prefer detailed explanations for architecture.");
+  assert.equal((await writer.persons.findIdentity(LOCAL_ME))!.summaryText, "Prefer detailed explanations for architecture.");
   assert.doesNotMatch(context(reader.requests.at(-1)!), /concise Chinese/);
   await reader.reopen();
   assert.equal(existsSync(reader.personFile), false);
@@ -768,7 +770,7 @@ test("Aide steers immediate Input and independently completes both inputs within
       const admission = writes.find(w => "resource" in w && w.resource.kind === "Topic"
         && (committedStatus(w)?.execution?.admissionRevision ?? 0) > 0);
       if (admission && "resource" in admission && conflicts > 0)
-        await client.patchStatus(admission.resource, { summary: `Concurrent status ${conflicts--}` });
+        await patchSummary(client, admission.resource, { summary: `Concurrent status ${conflicts--}` });
       return client.commit(writes);
     } };
   });
@@ -839,13 +841,13 @@ test("Aide Route commits tool decisions, rejects invented targets and reuses its
       ...(target.harness === "route" ? { routeSession: aide.routeSession(ports.scope, fixture.config.config) } : { chiefSession: aide.chiefSession(ports.scope, fixture.config.config) }) }) }, pino({ level: "silent" }));
   t.after(async () => { release(); await aide.close(); });
   targetUid = (await aide.topics.ensure("topic")).metadata.uid;
-  await aide.runtime.plugins.resourceClient("personal").patchStatus(aide.topics.resource("topic")!, { summary: "topic-state-one" });
+  await patchSummary(aide.runtime.plugins.resourceClient("personal"), aide.topics.resource("topic")!, { summary: "topic-state-one" });
   await aide.start();
   await aide.topics.submit("route-first", { origin: "source", originId: "fixture", text: "subject-one" });
   for (let i = 0; i < 300 && routeCalls < 3; i++) await Bun.sleep(10);
   assert.equal(routeCalls, 3);
   assert.equal(aide.topics.inputStore.get("route-first")!.status.route?.result, undefined);
-  await aide.runtime.plugins.resourceClient("personal").patchStatus(aide.topics.resource("topic")!, { summary: "topic-state-two" });
+  await patchSummary(aide.runtime.plugins.resourceClient("personal"), aide.topics.resource("topic")!, { summary: "topic-state-two" });
   await aide.topics.submit("route-second", { origin: "source", originId: "fixture", text: "subject-two" });
   for (let i = 0; i < 300 && !aide.topics.inputStore.get("route-second")!.status.route?.executionId; i++) await Bun.sleep(10);
   assert.ok(aide.topics.inputStore.get("route-second")!.status.route?.executionId);
@@ -920,8 +922,8 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
       case 1: return { tool: "read_input", args: { inputId } };
       case 2: return { tool: "read_topic", args: {} };
       case 3: return { tool: "say", args: { text: `Verified phase ${phase}`, inputIds: [inputId] } };
-      case 4: return { tool: "upsert_note", args: { version: notes(aide.topics.resources, currentWork().metadata.uid)[0]?.version,
-        ...(notes(aide.topics.resources, currentWork().metadata.uid)[0] ? { noteId: notes(aide.topics.resources, currentWork().metadata.uid)[0]!.id } : {}), text: `Evidence verification phase ${phase}` } };
+      case 4: return { tool: "upsert_note", args: { version: notes(aide.topics.resources, currentWork().metadata.uid, "subject")[0]?.version,
+        ...(notes(aide.topics.resources, currentWork().metadata.uid, "subject")[0] ? { noteId: notes(aide.topics.resources, currentWork().metadata.uid, "subject")[0]!.id } : {}), text: `Evidence verification phase ${phase}` } };
       case 5: return { tool: `summarize_${kind}`, args: { version: contentVersion(currentWork()), summary: "Retain verified evidence and actual authorship." } };
       case 6: return { tool: `report_${kind}`, args: { inputIds: [inputId], report: `Verified ${phase}`, action: "done" } };
       default: return { text: "Task progress recorded" };
@@ -971,9 +973,9 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     assert.deepEqual(get().status.agent, agent);
     assert.match(JSON.stringify(fixture.requests[before]!.messages), /unique-work-evidence/);
     assert.equal(aide.outputs().length, 2);
-    assert.equal(notes(aide.topics.resources, get().metadata.uid).length, 1);
-    assert.equal(notes(aide.topics.resources, get().metadata.uid)[0]!.text, "Evidence verification phase 1");
-    assert.equal(get().status.summary, "Retain verified evidence and actual authorship.");
+    assert.equal(notes(aide.topics.resources, get().metadata.uid, "subject").length, 1);
+    assert.equal(notes(aide.topics.resources, get().metadata.uid, "subject")[0]!.text, "Evidence verification phase 1");
+    assert.equal(summaryText(aide.topics.resources, get()), "Retain verified evidence and actual authorship.");
     assert.equal(get().status.lastReport!.text, "Verified 1");
     const inputs = aide.topics.inputStore.list();
     assert.ok(inputs.filter(i => i.status.handle?.[work.uid!]).every(i => i.status.handle![work.uid!]!.completedAt));
@@ -1007,11 +1009,13 @@ test(`${kind} ${attention} Input joins the active native invocation`, { timeout:
   const { resourceRef } = await import("../plugins/personal/input/state.ts");
   laterId = "later";
   const c = aide.topics.resource("me")!;
-  const task = aide.personal.store.resources.get(workType(kind), work.id);
+  const task = aide.personal.store.resources.get<import("../plugins/personal/resources.ts").WorkSpec, import("../plugins/personal/work-status.ts").WorkAgentStatus>(workType(kind), work.id);
   const at = new Date().toISOString();
   // Seed the result of Chief assessment; the real Work controllers own subsequent admission and execution.
+  const prepared = await prepareSummary(resources, task, { text: "updated-work-understanding" });
   await resources.commit([
-    { operation: "patchStatus", resource: task, patch: { idleSince: null, agentStoppedAt: null, summary: "updated-work-understanding" } },
+    ...prepared.writes,
+    { operation: "patchStatus", resource: task, patch: { idleSince: null, agentStoppedAt: null, ...prepared.status } },
     { operation: "create", type: INPUT_TYPE, name: laterId,
       spec: { origin: "source", originId: "fixture", attention, text: "later unique evidence" }, status: {
         topic: resourceRef(c), route: { completedAt: at, result: { topics: [resourceRef(c)], reason: "same topic" } },
