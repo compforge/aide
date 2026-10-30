@@ -4,7 +4,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Aide is a self-hosted personal agent that follows through on the work you delegate. Ask a question, delegate a goal, or set up an ongoing responsibility through the web app or Lark. Aide keeps track of progress, asks when it needs your decision, and picks up the work as new information arrives. You spend less time checking progress, repeating context, and reminding it what to do next.
+Aide is a self-hosted personal agent that builds an understanding of the people and matters you care about and follows through on the work you delegate. Ask a question, delegate a goal, or set up an ongoing responsibility through the web app or Lark. Aide organizes incoming messages and external changes into topics, develops its understanding, and advances work within your delegation. It asks when it needs your decision, so you spend less time repeating context and checking progress and more time on important decisions.
 
 For example: “Follow this PR until it is merged. Handle review comments, ask me when a decision is needed, and tell me when it lands.” The same task can span multiple rounds of work and waiting. Aide continues working on your server when you close the chat or shut down your laptop.
 
@@ -19,7 +19,9 @@ Aide relates new information to your topics and existing work. Within an existin
 
 ## Topics, tasks, and routines
 
-A **topic** keeps related messages and work together. Aide's assistant, **Chief**, answers everyday questions directly and helps you manage ongoing work as tasks and routines.
+A **topic** organizes related information, understanding, and work. Aide brings successive updates about the same matter into a note, develops lasting knowledge about topics and people, and adjusts the topic hierarchy as its understanding grows. This knowledge helps it interpret new messages and continue from existing progress.
+
+Aide's assistant, **Chief**, answers everyday questions directly and helps you manage ongoing work as tasks and routines.
 
 - A **task** has a finish line, such as getting a PR merged. It can last minutes or weeks and involve multiple rounds of work and waiting.
 - A **routine** is an ongoing responsibility, such as checking for project blockers every morning. Completing one round leaves it waiting for the next.

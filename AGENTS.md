@@ -2,7 +2,7 @@
 
 ## 项目定位与边界
 
-Aide 是小型、自托管的 personal agent，围绕用户交付的目标跨执行与等待持续跟进，减少用户催进度、重复背景与纠错的负担。Web / Lark Channel 与 Source 提交输入，Personal 插件的 Chief 负责判断，普通问题直接回复，需要跟进时操作 Task / Routine。Host / Runner 提供可供其它插件使用的运行机制。
+Aide 是小型、自托管的 personal agent，将持续到来的信息转化为认识、行动与有价值的沟通，围绕用户目标跨执行与等待持续跟进。Personal 将 Input 整合为具体事项的 Note，再提炼主题与人物的长期 summary，并形成和调整 Topic tree；这些认识与组织关系共同支撑后续判断。Web / Lark Channel 与 Source 提交输入，Chief 直接处理简单事情，将持续工作交给 Task / Routine。Host / Runner 提供通用运行机制。
 
 按绿地视角开发，先走通个人助手场景，不建设账号权限中心、共享 SDK 或多实例平台。业务判断放在 Personal 与 Chief Agent；修改通用机制前先说明具体需求和现有能力缺口。
 
@@ -129,7 +129,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 ## 关键约定
 
 - Aide 是 Me 的独立助理；Chief / Route / Weave / Task / Routine 是助理内部角色。外部交流不是自动委托，凭证不决定身份；摘要、归并和工作交接保留作者、确认状态与授权范围。身份契约见 [Kernel](docs/kernel.md#助理定位与身份边界)。
-- 底座提供 TypeScript controller-runtime，服务 Plugin Operator；Personal 拥有 Input、Output、Person、Topic、Task、Routine 与业务判断。通用资源和调度不能导入 Personal，应用装配负责安装定义、通信 action 和投递器。
+- 底座提供 TypeScript controller-runtime，服务 Plugin Operator；Personal 拥有 Input、Note、Output、Person、Topic、Task、Routine 与业务判断。通用资源和调度不能导入 Personal，应用装配负责安装定义、通信 action 和投递器。
 - 修改资源更新、并发、条件写入或协调机制时，先核对 [Resource 更新契约](docs/plugin/resource.md#更新操作与并发) 与 Kubernetes / controller-runtime；通用能力缺口优先在底座解决，再接入业务调用方。明确当前实现与设计目标，不用上层逐点重试或独立版本体系替代缺失的写入语义。
 - Host / Runner 不互相导入实现。Runner 经 ResourceClient、Connector API 与 Verb 请求宿主能力，不持有 Store、凭证客户端或 Harness SDK。共享协议放在 src/protocol，公共插件契约放在 packages/plugin。
 - 每种 CRD 在所属 plugin package 下有独立目录，模型、Reconcile 和专属辅助代码就近组织；跨资源协作留在插件层。ResourceDefinition 集中声明 Schema、校验、Printer、索引与保留策略；所有写入在存储事务内校验，提交后通知 Watch。
@@ -140,7 +140,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。可能已有外部副作用的中断先核对，不自动重放。
 - Channel / Source 通过绑定 Definition 的入口形成 Input，正文保存事实，证据留在 observation。路由统一归 Route，Default Topic 由系统按需创建并维护，只兜底，不提供手动切换；Input.status 的 route / assess / handle 是处理事实，消费者按索引查询。
 - Person 保存人物身份与认识，Me 是可选标记，与访问凭证独立。Input.sender / Input.receivers / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。
-- Topic、Task、Routine、Person 用 summary 保存长期有效、低频变化的认识，独立 Note 保存按稳定 ID 持续更新的近期事项，subject 关联 Topic/Work、people 关联人物，recent 仅作查询投影；两者独立写入，办理报告只确认业务状态与 Input 回执。结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
+- Topic、Task、Routine、Person 用 summary 保存长期有效、低频变化的认识，独立 Note 按稳定 ID 保存具体事项的当前认识，subject 关联 Topic/Work、people 关联人物，recent 仅作查询投影；两者独立写入，办理报告只确认业务状态与 Input 回执。结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
+- Topic tree 表达对主题关系与职责层次的理解，并决定 root Chief 的处理范围。整理以关联价值和用户目标为依据，容量阈值安排整理时机；压缩保留影响判断的事实、分歧与未决问题。认知沉淀主线见 [Personal](docs/personal/README.md#从-input-到认识与成果)。
 - Task 承担有限目标，Routine 承担持续职责。领域 Agent 与通用 Pi 共用适配，工具按资源 UID 和当前 execution 绑定；业务请求与消费凭据落在 Input。Chief / Work 通过 say 产生独立 Output，report 与 say 分别提交；普通回答是新 Input，原生权限由独立 Approval 处理。
 - Forge 的 Repository / PullRequest 模型复用 harness-common，平台读取、增量发现完整性、不透明游标与 HTTP 约束由 repocli lib 承担；Aide Connector 负责配置与调用路由，Personal RepositorySource 负责清单缓存与观察任务交接，PullRequestSource 负责 PR 基线、检查点与 Input。契约见 [Forge](docs/connector/forge.md)。
 - Connector kind 与 version 是独立字符串，connectors 直接按 name 声明；领域 interface 定义操作契约，安装入口按 name 注册实现，配置不使用 type 或 packages/instances 包装；Plugin 与 verb 按 kind 发现 Connector 并通过同一客户端调用，私有配置和凭证不进入 Runner。Source 继续复用 Plugin 机制，Connector 是否作为 Resource 独立演进。契约见 [Connector 扩展](docs/connector/extensions.md)。
@@ -153,7 +154,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 - [文档导航](docs/README.md)：使用、开发与验收的阅读入口。
 - [Kernel](docs/kernel.md)、[Plugin](docs/plugin/README.md)、[Resource](docs/plugin/resource.md)：底座边界、协调、定义、事务与容量；[公共契约](packages/plugin/README.md)。
-- [Personal](docs/personal/README.md)：对象与完整流程；[Input](docs/personal/input.md)、[Route](docs/personal/route.md)、[Topic](docs/personal/topic.md)、[Output](docs/personal/output.md)。
+- [Personal](docs/personal/README.md)：认知沉淀、对象与完整流程；[Input](docs/personal/input.md)、[Note](docs/personal/note.md)、[Route](docs/personal/route.md)、[Topic](docs/personal/topic.md)、[Output](docs/personal/output.md)。
 - [Topic](docs/personal/topic.md)、[Weave](docs/personal/weave.md)：来源归属、知识融合、root 处理与静默回收契约。
 - [Chief](docs/personal/chief.md)：判断、提示词、上下文与记忆优化；[Person](docs/personal/person.md)、[Task](docs/personal/task.md)、[Routine](docs/personal/routine.md)。
 - [Harness](docs/harness/README.md)、[Pi](docs/harness/pi.md)：通用执行契约与原生适配。

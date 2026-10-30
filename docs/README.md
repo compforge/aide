@@ -1,6 +1,6 @@
 # Aide 文档
 
-Aide 通过 Channel 与 Source 接收事实，由 Personal 判断、推进已有委托，并在需要沟通时产生 Output。底座提供资源协调和 Harness 操作能力。
+Aide 将持续到来的 Input 整合为事项 Note，提炼主题与人物的长期认识，并形成和调整 Topic tree。Personal 据此判断、推进已有委托，在需要沟通时产生 Output。底座提供资源协调和 Harness 操作能力。
 
 ## 从哪里开始
 
@@ -8,6 +8,7 @@ Aide 通过 Channel 与 Source 接收事实，由 Personal 判断、推进已有
 | --- | --- |
 | 配好模型并启动服务 | [配置](configuration.md) → [部署与诊断](deployment.md) |
 | 理解个人助手如何工作 | [Personal](personal/README.md) → [Input](personal/input.md) → [Route](personal/route.md) |
+| 理解信息如何沉淀为认识 | [认知沉淀](personal/README.md#从-input-到认识与成果) → [Note](personal/note.md) → [Topic](personal/topic.md)、[Person](personal/person.md) |
 | 改进 Chief 的判断与记忆 | [Topic](personal/topic.md) → [Chief](personal/chief.md) → [Person](personal/person.md) |
 | 主题组织、信息收敛与静默回收 | [Topic](personal/topic.md) → [Weave](personal/weave.md) |
 | 持续推进目标或职责 | [Task](personal/task.md)、[Routine](personal/routine.md) |

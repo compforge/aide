@@ -84,7 +84,7 @@ assistant / tool：结合新进展回答或交接，避免重复创建工作
 ### 上下文与记忆
 
 Aide 组合开源产品的通用记忆能力。Chief 内置固定版本的 [pi-hermes-memory](https://github.com/chandra447/pi-hermes-memory)，由 Pi 的扩展加载器显式加载。
-人物认知由 Personal 的 Person CRD 承载，Hermes 提供其它通用记忆与检索。
+事项认识由 Note 承载，主题、人物和工作的长期认识由各自 summary 承载，Topic tree 保存主题组织关系；Hermes 提供通用记忆与检索。职责与沉淀主线见 [Personal](README.md#从-input-到认识与成果)。
 
 #### 人物认知
 
@@ -97,9 +97,9 @@ sent 提供本人表达的线索，仍需辨别引用与代发；received 和 ob
 
 人物资料的唯一存储来源是 Person CRD，Web Persons 提供编辑入口。人物维护使用专用工具，普通文件工具和 Hermes 不承担这份资料的维护。
 
-连续上下文由 Pi SDK 管理历史、压缩与恢复。新输入只提供本次预览，普通输入 followup，immediate 使用 steer。assess_input 只在 Input 保存简短研判回执；summarize_topic 独立维护话题认识。常规静默观察不复制进 summary、recent 或长期记忆，持续事项通过同一 Note 维护，恶化或恢复时更新；长期知识通过 Hermes 保留，Task / Routine 保存工作状态。原生会话或调用结束不能代替业务确认。
+连续上下文由 Pi SDK 管理历史、压缩与恢复。新输入只提供本次预览，普通输入 followup，immediate 使用 steer。assess_input 只在 Input 保存简短研判回执；summarize_topic 独立维护话题认识。常规静默观察不复制进 summary、recent 或长期记忆，持续事项通过同一 Note 维护，恶化或恢复时更新；主题、人物与工作的长期认识通过各自 summary 维护，Task / Routine 保存工作状态。原生会话或调用结束不能代替业务确认。
 
-Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Topic 摘要用于控制话题窗口，与 Hermes 的长期记忆维护分别管理；Personal 不直接调用模型做记忆维护。
+Hermes 提供 `memory_add`、`memory_replace`、`memory_remove`、`memory_search`、`session_search` 等工具。默认 policy-only 模式注入使用策略，按需检索记忆；固定用户要求、后台学习、纠错捕获、压缩前和退出时整理均沿用扩展自己的实现与配置。Topic summary 承载主题的长期认识，并作为判断新输入的背景；Hermes 的记忆与检索由扩展维护。Personal 通过 Harness 调用 Agent，由 Agent 使用相应工具维护认识。
 
 #### 记忆如何参与判断
 
