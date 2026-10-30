@@ -37,6 +37,7 @@
     <div id="topic-tabs" class="detail-tabs" role="tablist" aria-label="主题内容" hidden>
       <button id="tab-dialogue" type="button" role="tab" aria-controls="panel-dialogue" aria-selected="true">对话</button>
       <button id="tab-summary" type="button" role="tab" aria-controls="panel-summary" aria-selected="false" tabindex="-1">摘要</button>
+      <button id="tab-tree" type="button" role="tab" aria-controls="panel-tree" aria-selected="false" tabindex="-1">组织</button>
       <button id="tab-recent" type="button" role="tab" aria-controls="panel-recent" aria-selected="false" tabindex="-1">近期记录</button>
       <button id="tab-tasks" type="button" role="tab" aria-controls="panel-tasks" aria-selected="false" tabindex="-1">事项 <span id="task-count" class="tab-count">0</span></button>
       <button id="tab-routines" type="button" role="tab" aria-controls="panel-routines" aria-selected="false" tabindex="-1">安排 <span id="routine-count" class="tab-count">0</span></button>
@@ -54,6 +55,11 @@
     </div>
     <section id="panel-summary" class="topic-panel" role="tabpanel" aria-labelledby="tab-summary" tabindex="0" hidden>
       <div id="topic-summary" class="markdown"></div>
+    </section>
+    <section id="panel-tree" class="topic-panel" role="tabpanel" aria-labelledby="tab-tree" tabindex="0" hidden>
+      <button id="topic-tree-refresh" type="button">刷新</button>
+      <p id="topic-tree-notice" role="status" class="muted"></p>
+      <ul id="topic-tree" aria-label="主题父子关系"></ul>
     </section>
     <section id="panel-recent" class="topic-panel" role="tabpanel" aria-labelledby="tab-recent" tabindex="0" hidden>
       <div id="topic-recent"></div>

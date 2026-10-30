@@ -11,6 +11,7 @@ import { createWorkPanel } from "./work.ts";
 import { createTopicContextPanel } from "./context.ts";
 import { createApprovals } from "./approvals.ts";
 import { mountComposer } from "./composer.ts";
+import { createTopicTree } from "./tree.ts";
 import { mountTopicTabs } from "./tabs.ts";
 
 const lifetime = new AbortController();
@@ -30,9 +31,10 @@ function mountTopic(topicId: string | null) {
   const query = "?topicId=" + encodeURIComponent(topicId ?? "");
   const timeline = createTimeline();
   let latestView: TopicView | undefined;
+  const tree = createTopicTree(topicId, signal);
   const tabs = mountTopicTabs(!!topicId, signal, () => {
     if (latestView) timeline.render(latestView);
-  });
+  }, () => tree.show());
   const work = createWorkPanel(topicId ?? "", poll, signal);
   const context = createTopicContextPanel();
   const approvals = createApprovals(poll, signal);

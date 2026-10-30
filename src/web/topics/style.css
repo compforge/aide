@@ -140,3 +140,17 @@ details { font-size: 12px; color: #68776c; margin-top: 8px; }
 
 
 .topic-expand { flex: none; border: 0; background: transparent; cursor: pointer; color: inherit; padding: .35rem; }
+
+#topic-tree, #topic-tree ul { list-style: none; padding-left: 22px; margin: 0; }
+#topic-tree { padding: 12px 0; }
+#topic-tree li { position: relative; padding: 5px 0 5px 18px; }
+#topic-tree ul > li { border-left: 1px solid #bbcbbb; }
+#topic-tree ul > li::before { content: ''; position: absolute; top: 18px; left: 0; width: 12px; border-top: 1px solid #bbcbbb; }
+#topic-tree ul > li:last-child { border-left-color: transparent; }
+#topic-tree ul > li:last-child::after { content: ''; position: absolute; top: 0; left: -1px; height: 18px; border-left: 1px solid #bbcbbb; }
+#topic-tree summary, .tree-name { padding: 3px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+#topic-tree summary { cursor: pointer; }
+#topic-tree .tree-current > .tree-name, #topic-tree .tree-current > details > summary { color: #294f3a; background: #dfeadd; font-weight: 600; }
+#topic-tree p:empty, .tree-pages:empty { display: none; }
+.tree-pages { display: flex; gap: 8px; align-items: center; margin: 8px 0 8px 22px; }
+#topic-tree-refresh, .tree-pages button { background: #e8eee3; color: #20342b; padding: 6px 10px; font-size: 13px; }
