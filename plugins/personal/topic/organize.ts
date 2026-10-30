@@ -62,7 +62,7 @@ export async function moveTopic(resources: ResourceClient, actor: TopicResource,
   const topic = topics.find(t => t.metadata.uid === args.uid);
   const parent = args.parentUid ? topics.find(t => t.metadata.uid === args.parentUid) : undefined;
   if (!topic || topic.metadata.uid === root.metadata.uid || topic.spec.default) throw new Error("Only a descendant may move or become independent");
-  if (args.parentUid && !parent) throw new Error("Parent is outside this root or Default");
+  if (args.parentUid && !parent) throw new Error("Parent is outside this root");
   if (topic.spec.parentRef?.uid === parent?.metadata.uid) return topic;
   if (topic.status.organization && topic.status.organization.actorUid !== root.metadata.uid
     && Date.parse(topic.status.organization.at) + ORGANIZATION_COOLDOWN_MS > Date.now())
