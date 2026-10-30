@@ -1,3 +1,4 @@
+import { invalidateAssignment } from "./input/assignment.ts";
 import { commitStatus } from "./status.ts";
 import { z } from "zod";
 import { prepareAgent, saveAgent } from "./session.ts";
@@ -96,7 +97,14 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
     ]);
   } catch (error) {
     // Reconcile reselects the remaining inputs and rebuilds its prompt after a competing claim.
-    if (current.kind === "Topic" && /version conflict|processing assignment changed/.test(String(error))) return;
+    if (current.kind === "Topic" && /processing assignment changed/.test(String(error))) {
+      for (const input of inputs) {
+        const latest = await context.resources.get<InputSpec, import("./input/model.ts").InputStatus>(inputRef(input!.metadata.name));
+        if (latest) await invalidateAssignment(context, latest);
+      }
+      return;
+    }
+    if (current.kind === "Topic" && /version conflict/.test(String(error))) return;
     throw error;
   }
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", inputIds, executionId: execution.executionId } });

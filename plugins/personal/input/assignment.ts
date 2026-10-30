@@ -1,9 +1,8 @@
 import type { PluginContext, ResourceValidationContext, Watch } from "@compforge/aide-plugin";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
+import { INPUT_TYPE } from "./model.ts";
 import { resourceRef, type Input } from "./state.ts";
 import { patchStatus } from "../status.ts";
-import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
-import { readTopicRoot, readTopicSubtree } from "../topic/tree.ts";
+import { readTopicRoot } from "../topic/tree.ts";
 import { requireTopic } from "../topic/ownership.ts";
 
 /** @spec Assignment is separate from material ownership and never resets admission or completion.
@@ -11,7 +10,7 @@ import { requireTopic } from "../topic/ownership.ts";
  * @case tests/input-assignment.test.ts
  */
 export async function assignInput(context: Pick<PluginContext, "resources" | "logger">, input: Input) {
-  if (input.metadata.deletionTimestamp || !input.status.topic || !input.status.assess || input.status.assess.completedAt) return;
+  if (input.metadata.deletionTimestamp || !input.status.topic || !input.status.assess || input.status.assess.completedAt || input.status.assess.executionId) return;
   const root = await readTopicRoot(context.resources, input.status.topic);
   if (!root || input.status.assess?.topic?.uid === root.metadata.uid) return;
   await patchStatus(context.resources, input, { assess: { ...input.status.assess, topic: resourceRef(root) } });
@@ -24,8 +23,13 @@ export async function assignInput(context: Pick<PluginContext, "resources" | "lo
 export function guardAssessment(previous: Input, current: Input, context: ResourceValidationContext) {
   const changed = previous.status.assess?.topic?.uid !== current.status.assess?.topic?.uid;
   const admitted = !previous.status.assess?.executionId && !!current.status.assess?.executionId;
+  if (changed && (previous.status.assess?.executionId || previous.status.assess?.completedAt))
+    throw new Error("Admitted assessment owner is immutable");
   if (!changed && !admitted) return;
-  if (!current.status.assess?.topic) throw new Error("Input has no processing Topic");
+  if (!current.status.assess?.topic) {
+    if (previous.status.assess?.executionId || previous.status.assess?.completedAt || admitted) throw new Error("Cannot invalidate an admitted assessment");
+    return;
+  }
   let root = requireTopic(current.status.topic, context);
   const seen = new Set<string>();
   while (root.spec.parentRef) {
@@ -40,23 +44,17 @@ export function guardAssessment(previous: Input, current: Input, context: Resour
 }
 
 export function registerInputs(context: PluginContext) {
-  const topology: Watch = { resourceType: TOPIC_TYPE, handler: { create: async () => [], delete: async () => [], update: async ({ oldObject, newObject }) => {
-    const old = oldObject as TopicResource, topic = newObject as TopicResource;
-    if (old.spec.parentRef?.uid === topic.spec.parentRef?.uid) return [];
-    // Structural changes fan out once. Ordinary Input scheduling never discovers the responsibility tree.
-    const requests = [];
-    for (const member of await readTopicSubtree(context.resources, resourceRef(topic))) {
-      // One indexed snapshot per member avoids expiring continuation tokens while live Inputs change.
-      const inputs = await context.resources.list<InputSpec, InputStatus>(INPUT_TYPE, {
-        matchIndex: { name: "assessPending", value: member.metadata.uid } });
-      requests.push(...inputs.map(i => ({ name: i.metadata.name, namespace: i.metadata.namespace })));
-    }
-    return requests;
-  } } };
   const changed: Watch = { resourceType: INPUT_TYPE, handler: { create: async () => [], delete: async () => [], update: async ({ oldObject, newObject }) => {
     const a = oldObject as Input, b = newObject as Input;
-    return a.status.topic?.uid !== b.status.topic?.uid ? [{ name: b.metadata.name, namespace: b.metadata.namespace }] : [];
+    return (a.status.topic?.uid !== b.status.topic?.uid || (!!a.status.assess?.topic && !b.status.assess?.topic)) ? [{ name: b.metadata.name, namespace: b.metadata.namespace }] : [];
   } } };
-  context.controllers.register({ resourceType: INPUT_TYPE, maxConcurrency: 4, watches: [changed, topology],
+  context.controllers.register({ resourceType: INPUT_TYPE, maxConcurrency: 4, watches: [changed],
     reconcile: async (_execution, input: Input) => assignInput(context, input) });
+}
+
+/** Invalidation is durable; the Input Watch and Topic repair both rebuild missing assignments. */
+export async function invalidateAssignment(context: Pick<PluginContext, "resources">, input: Input) {
+  if (!input.status.assess?.topic || input.status.assess.executionId || input.status.assess.completedAt) return;
+  const { topic: _, ...assess } = input.status.assess;
+  await patchStatus(context.resources, input, { assess });
 }

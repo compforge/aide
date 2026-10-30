@@ -239,3 +239,11 @@ test("Maintenance reads only threshold witnesses through indexed pages", async t
   assert.equal(agenda.topics[0]!.truncated, true);
   assert.equal(decoded, 3);
 });
+
+/** @case Material migration leaves a recoverable missing cache even if its notification is lost. */
+test("Moving unclaimed material invalidates its processing cache atomically", async t => {
+  const f = await fixture(t), child = await f.child(); await f.input("pending-move");
+  const moved = await moveMaterial(f.resources, f.root(), { kind: "Input", id: "pending-move", topicUid: child.metadata.uid, reason: "File" });
+  assert.equal((moved.status as import("../plugins/personal/input/model.ts").InputStatus).assess!.topic, undefined);
+  assert.equal(f.aide.topics.inputStore.query("unassigned", child.metadata.uid).length, 1);
+});

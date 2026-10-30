@@ -42,6 +42,9 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   }, update(previous, current, context) {
     if (previous.status.assess?.completedAt && !isDeepStrictEqual({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error("Input assessment is already completed");
     guardInputTopic(previous, current, context);
+    if (previous.status.topic && previous.status.topic.uid !== current.status.topic?.uid
+      && current.status.assess && !current.status.assess.executionId && !current.status.assess.completedAt && current.status.assess.topic)
+      throw new Error("Moving pending Input requires invalidating processing assignment");
     guardAssessment(previous, current, context);
     if (previous.status.assess?.executionId && current.status.assess?.executionId
       && previous.status.assess.executionId !== current.status.assess.executionId) throw new Error("Input is already admitted to a Chief execution");
@@ -51,6 +54,8 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   printer: inputPrinter,
   indexes: {
     topic: r => r.status.topic ? [r.status.topic.uid] : [],
+    assignmentPending: r => !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.executionId && !r.status.assess.completedAt ? [r.status.topic.uid] : [],
+    unassigned: r => !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.topic && !r.status.assess.executionId && !r.status.assess.completedAt ? [r.status.topic.uid] : [],
     unfiled: r => !r.metadata.deletionTimestamp && !isInternalInput(r.spec) && !r.spec.topicKey && r.status.topic ? [r.status.topic.uid] : [],
     internalPending: r => !r.metadata.deletionTimestamp && isInternalInput(r.spec) && r.status.topic && !r.status.assess?.completedAt
       ? [JSON.stringify([r.status.topic.uid, r.spec.origin])] : [],

@@ -7,6 +7,8 @@ import pino from "pino";
 import type { PluginContext, ReconcileContext, ResourceClient } from "@compforge/aide-plugin";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
+import { reconcileAssignments } from "../plugins/personal/topic/assignment.ts";
+import { invalidateAssignment } from "../plugins/personal/input/assignment.ts";
 import { assignInput, registerInputs } from "../plugins/personal/input/assignment.ts";
 import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../plugins/personal/input/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
@@ -68,7 +70,7 @@ test("An ancestor move redistributes pending Inputs while preserving an old exec
     await assignInput(f.context, f.aide.topics.inputStore.get("in-flight")!);
     const moved = f.aide.topics.inputStore.get("in-flight")!;
     assert.equal(moved.status.topic!.uid, f.child.metadata.uid);
-    assert.equal(moved.status.assess!.topic!.uid, f.other.metadata.uid);
+    assert.equal(moved.status.assess!.topic!.uid, f.root.metadata.uid);
     assert.equal(moved.status.assess!.executionId, "old-chief");
     assert.deepEqual(await nextInputs(f.resources, f.read(f.other), 8), []);
     await assessInput(f.resources, f.read(f.root), "old-chief", { inputId: fact.metadata.name, summary: "Old Chief finishes" });
@@ -92,15 +94,60 @@ test("Transaction rejects a stale assignee even before the topology watcher upda
   assert.equal(f.aide.topics.inputStore.get("pending")!.status.assess!.executionId, "current");
 });
 
-test("Topic topology watch reaches descendant pending Inputs; unrelated status changes do not fan out", async t => {
-  const f = await fixture(t); await f.input("deep");
+test("Missing assignment triggers only the Input watch and is repaired even when that notification is lost", async t => {
+  const f = await fixture(t); const before = await f.input("deep");
+  await reconcileAssignments(f.context, f.read(f.child));
   const registrations: Parameters<PluginContext["controllers"]["register"]>[0][] = [];
   registerInputs({ ...f.context, controllers: { register: c => { registrations.push(c); } } } as PluginContext);
-  const watch = registrations[0]!.watches![1]!;
-  const before = f.read(f.root);
-  const after = await f.resources.replace(before, { ...before.spec, parentRef: resourceRef(f.other) }, before.status);
-  assert.deepEqual(await watch.handler.update({ oldObject: before, newObject: after } as never), [{ name: "deep", namespace: "v1" }]);
-  assert.deepEqual(await watch.handler.update({ oldObject: after, newObject: { ...after, status: { ...after.status, lastError: "unrelated" } } } as never), []);
+  assert.equal(registrations[0]!.watches!.length, 1);
+  await invalidateAssignment(f.context, f.aide.topics.inputStore.get("deep")!);
+  const after = f.aide.topics.inputStore.get("deep")!;
+  assert.equal(after.status.assess!.topic, undefined);
+  assert.deepEqual(await registrations[0]!.watches![0]!.handler.update({ oldObject: before, newObject: after } as never), [{ name: "deep", namespace: "v1" }]);
+  await reconcileAssignments(f.context, f.read(f.child));
+  assert.equal(f.aide.topics.inputStore.get("deep")!.status.assess!.topic!.uid, f.root.metadata.uid);
+});
+
+test("Periodic direct reconciliation notices ancestor moves, including an A-B-A move between checks", async t => {
+  const f = await fixture(t); await f.input("deep");
+  await reconcileAssignments(f.context, f.read(f.child));
+  const version = f.read(f.child).status.assignmentRefresh!.version;
+  let root = f.read(f.root);
+  await f.resources.replace(root, { ...root.spec, parentRef: resourceRef(f.other) }, root.status);
+  await assignInput(f.context, f.aide.topics.inputStore.get("deep")!);
+  root = f.read(f.root); const { parentRef, ...spec } = root.spec;
+  await f.resources.replace(root, spec, root.status);
+  await reconcileAssignments(f.context, f.read(f.child));
+  assert.notEqual(f.read(f.child).status.assignmentRefresh!.version, version);
+  assert.equal(f.aide.topics.inputStore.get("deep")!.status.assess!.topic!.uid, f.root.metadata.uid);
+});
+
+test("Refresh resumes bounded pages after interruption and a second root change", { timeout: 15000 }, async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 45; i++) await f.input(`item-${String(i).padStart(3, "0")}`);
+  const root = f.read(f.root);
+  await f.resources.replace(root, { ...root.spec, parentRef: resourceRef(f.other) }, root.status);
+  let reads = 0;
+  const failing = { ...f.context, resources: { ...f.resources, listPage: async (...args: Parameters<ResourceClient["listPage"]>) => {
+    if (++reads === 2) throw new Error("interrupted after checkpoint");
+    return f.resources.listPage(...args);
+  } } } as PluginContext;
+  await assert.rejects(reconcileAssignments(failing, f.read(f.child)), /interrupted/);
+  assert.ok(f.read(f.child).status.assignmentRefresh!.cursor);
+  assert.equal(f.aide.topics.inputStore.get("item-000")!.status.assess!.topic, undefined);
+  const third = await f.aide.topics.ensure("third");
+  const other = f.read(f.other);
+  await f.resources.replace(other, { ...other.spec, parentRef: resourceRef(third) }, other.status);
+  await reconcileAssignments(f.context, f.read(f.child));
+  await reconcileAssignments(f.context, f.read(f.child));
+  assert.ok(f.read(f.child).status.assignmentRefresh!.complete);
+  assert.ok(f.aide.topics.inputStore.list().every(i => i.status.assess!.topic!.uid === third.metadata.uid));
+  const child = f.read(f.child);
+  await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(f.other) }, child.status);
+  let more = true, rounds = 0;
+  while (more && rounds++ < 4) more = await reconcileAssignments(f.context, f.read(f.child));
+  assert.equal(more, false);
+  assert.ok(f.aide.topics.inputStore.list().every(i => i.status.assess!.topic!.uid === third.metadata.uid));
 });
 
 test("Child capacity creates deduplicated built-in Inputs assigned to root and excludes keyed and internal material", async t => {

@@ -54,6 +54,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       capacityRequests: z.partialRecord(z.enum(["aide:triage", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), inputId: z.string() }).strict()).optional(),
+      assignmentRefresh: z.object({ version: z.string(), cursor: z.string(), complete: z.boolean() }).strict().optional(),
       yieldToInput: z.boolean().optional(),
       idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
       lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).default({}), absorbedSummaries: z.record(z.string(), z.string()).default({}),

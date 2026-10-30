@@ -9,6 +9,7 @@ export const DEFAULT_TOPIC_ID = "default";
 export interface TopicSpec { address?: Address; id: string; name?: string; default?: boolean; review?: TopicReview;
   topicKey?: string; parentRef?: ResourceRef & { uid: string } }
 export interface TopicStatus extends ResourceContext {
+  assignmentRefresh?: { version: string; cursor: string; complete: boolean };
   summaryDependencies?: Record<string, string>;
   conditions?: import("../conditions.ts").Condition[];
   organization?: import("./ref.ts").Organization;

@@ -117,13 +117,15 @@ export interface ResourceListOptions {
 }
 
 /** One bounded page; selectors must remain unchanged while following metadata.continue.
- * @spec Pages share a collection revision or fail with ResourceExpired; no mixed-revision results.
+ * @spec Default pages share a collection revision or fail; live traversal returns current objects between stable key bounds.
  * @link docs/plugin/resource.md#分页查询
  */
 export interface ResourcePageOptions extends ResourceListOptions {
   /** Required positive integer, at most 1000. */
   readonly limit: number;
   readonly continue?: string;
+  /** consistent expires on collection changes; live advances through changing objects up to an initial key bound. */
+  readonly consistency?: "consistent" | "live";
 }
 export interface ResourcePage<S, T> {
   readonly items: readonly Readonly<Resource<S, T>>[];

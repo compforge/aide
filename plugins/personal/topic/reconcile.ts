@@ -1,3 +1,4 @@
+import { reconcileAssignments } from "./assignment.ts";
 import { INPUT_TYPE, isInternalInput, isCapacityInput, type InputSpec, type InputStatus } from "../input/model.ts";
 import { readNotes } from "../note/query.ts";
 import { understandingVersion } from "./tree.ts";
@@ -74,6 +75,8 @@ export function registerTopics(context: PluginContext): void {
 /** @spec Intake can steer while the agent controller waits for inference. Timer activation remains independent of new input. */
 export async function reconcileTopic(context: PluginContext, execution: ReconcileContext, c: Readonly<TopicResource>) {
   if (c.metadata.deletionTimestamp) { await releaseTopicAgent(context, execution, c); return; }
+  if (await reconcileAssignments(context, c)) return { requeueAfterMs: 1 };
+  c = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(c)))!;
   await ensureCapacityInputs(context, c);
   c = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(c)))!;
   if (!c.spec.parentRef) {

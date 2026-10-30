@@ -50,8 +50,11 @@ export async function moveMaterial(resources: ResourceClient, actor: TopicResour
   if (material.status.topic!.uid === target.metadata.uid) return material;
   const organization = OrganizationSchema.parse({ at: new Date().toISOString(), reason: args.reason, actorUid: root.metadata.uid, executionId: root.status.execution!.id,
     fromUid: material.status.topic!.uid, toUid: target.metadata.uid });
+  const assessment = args.kind === "Input" ? (material.status as InputStatus).assess : undefined;
+  const { topic: _assignee, ...unassigned } = assessment ?? {};
   await commitStatus(resources, [
-    { operation: "patchStatus", resource: material, patch: { topic: resourceRef(target), organization } },
+    { operation: "patchStatus", resource: material, patch: { topic: resourceRef(target), organization,
+      ...(assessment && !assessment.executionId && !assessment.completedAt ? { assess: unassigned } : {}) } },
     ...(args.kind === "Input" ? [{ operation: "patchStatus" as const, resource: target,
       patch: { lastInputAt: [target.status.lastInputAt ?? target.metadata.creationTimestamp, material.metadata.creationTimestamp].sort().at(-1)! } }] : []),
   ]);

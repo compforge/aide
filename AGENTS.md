@@ -74,6 +74,7 @@ plugins/personal/
     store.ts               # 宿主侧会话、Input 消费投影与消息流
     config.ts              # 定时协调、回顾退避、整理阈值与上下文预算
     review.ts              # 回顾资格、退避与维护 Input
+    assignment.ts          # 祖先指纹、直属待办缓存刷新与缺失分派补偿
     reconcile.ts           # 独立接收与 agent Controller、定时回顾
     assess.ts              # 原子研判完成与 Work 交接
     state.ts               # Topic 身份检查和 CAS 更新
@@ -135,7 +136,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - 资源身份按插件实例与 namespace 组织，引用固定 UID。同一 Controller 对同一资源串行；主资源纯 status 更新不自动唤醒自身，协作方显式声明 Watch。资源所有者决定能否释放，Host 执行容量限制与合格对象的淘汰排序。
 - Operator 通过 Harness interface / verb 操作原生 agent loop，恢复参数由 Operator 自己保存。Personal 的 status.agent 只是调用参数；Harness verb 不读写 CRD。原生持久化、历史与恢复属于 Harness，实时投影和诊断日志不承担恢复。
 - Route、Chief、Task、Routine、Weave Agent 只由各自对应的 Reconcile 触发，包括 prompt、steer 与 followUp；协作组件和 Agent 工具通过资源变化协作，不直接触发其它角色。
-- Input、Task、Routine 通过 status.topic 保存唯一且可调整的材料 Topic UID 引用；Input.assess.topic 保存处理负责人，Input.assess 保存全局唯一研判及 Chief 接纳 executionId，自动 prompt / steer / followUp 在提交前通过资源事务竞争接纳；Topic 保存 Chief 执行与原生会话。Route 保存首次路由回执，Chief 在树内整理归属，Weave 只改变父子关系。
+- Input、Task、Routine 通过 status.topic 保存唯一且可调整的材料 Topic UID 引用；Input.assess.topic 保存未领取待办的最终一致负责人缓存，领取后保留实际执行归属，Input.assess 保存全局唯一研判及 Chief 接纳 executionId，自动 prompt / steer / followUp 在提交前通过资源事务竞争接纳；Topic 保存 Chief 执行与原生会话。Route 保存首次路由回执，Chief 在树内整理归属，Weave 只改变父子关系。
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。可能已有外部副作用的中断先核对，不自动重放。
 - Channel / Source 通过绑定 Definition 的入口形成 Input，正文保存事实，证据留在 observation。路由统一归 Route，Default Topic 由系统按需创建并维护，只兜底，不提供手动切换；Input.status 的 route / assess / handle 是处理事实，消费者按索引查询。
 - Person 保存人物身份与认识，Me 是可选标记，与访问凭证独立。Input.sender / Input.receivers / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。

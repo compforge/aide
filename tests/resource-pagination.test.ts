@@ -42,11 +42,7 @@ test("paged queries filter before limiting, return stable pages and decode only 
     names.push(...page.items.map(r => r.metadata.name));
   } while (token);
   assert.deepEqual(names, Array.from({ length: 15 }, (_, i) => String(i * 6).padStart(3, "0")));
-  const plan = f.store.storage.db.prepare(`EXPLAIN QUERY PLAN SELECT r.key FROM resource_indexes i INDEXED BY resource_index_lookup
-    CROSS JOIN resources r INDEXED BY resource_scope WHERE i.name=? AND i.value=? AND r.scope=? AND r.key=i.source LIMIT ?`)
-    .all("group", "selected", "pages", 5);
-  assert.ok(plan.some(r => String(r.detail).includes("SEARCH i USING COVERING INDEX resource_index_lookup")));
-  assert.ok(plan.some(r => String(r.detail).includes("SEARCH r USING COVERING INDEX resource_scope")));
+
 });
 test("namespace boundaries, API versions and plugin scopes remain isolated across pages", async t => {
   const f = fixture(t);
@@ -123,4 +119,58 @@ test("cursor encoding supports long canonical namespaces and equivalent label or
   const page = await f.client.listPage(TYPE, options);
   const last = await f.client.listPage(TYPE, { ...options, matchLabels: { second: "yes", selected: "yes" }, continue: page.metadata.continue });
   assert.equal(last.items[0]!.metadata.name, "b"); assert.equal(last.metadata.continue, "");
+});
+
+/** @case A live traversal survives its own writes and restart, with a fixed upper key bound. */
+test("live traversal advances across updates, removals and restart without growing its upper bound", async t => {
+  const f = fixture(t);
+  for (const name of ["a", "b", "c"]) await f.create(name);
+  const query = { limit: 1, consistency: "live" as const, matchIndex: { name: "group", value: "selected" } };
+  const first = await f.client.listPage(TYPE, query);
+  await f.client.patchStatus(first.items[0]!, { changed: true });
+  await f.create("aa"); await f.create("z");
+  f.store.storage.remove(f.store.key(TYPE, "b"));
+  const restarted = new ResourcePages(f.store.storage.db);
+  const next = restarted.list("pages", TYPE, { ...query, continue: first.metadata.continue });
+  assert.equal(next.keys[0], f.store.key(TYPE, "aa"));
+  const last = restarted.list("pages", TYPE, { ...query, continue: next.metadata.continue });
+  assert.deepEqual(last.keys, [f.store.key(TYPE, "c")]);
+  assert.equal(last.metadata.continue, "");
+  assert.throws(() => restarted.list("pages", TYPE, { ...query, matchIndex: { name: "group", value: "other" }, continue: next.metadata.continue }), { name: "ResourceContinueInvalid" });
+});
+
+test("production indexed page SQL uses ordered range seeks without a sorting table", async t => {
+  const f = fixture(t);
+  for (let i = 0; i < 80; i++) await f.create(String(i).padStart(3, "0"));
+  const db = f.store.storage.db, prepare = db.prepare.bind(db);
+  const plans: string[][] = [];
+  db.prepare = ((sql: string) => {
+    const statement = prepare(sql);
+    if (sql.includes(" AS key,") && sql.includes("resource_page_indexes")) {
+      const all = statement.all.bind(statement);
+      statement.all = ((...args: import("node:sqlite").SQLInputValue[]) => { plans.push(prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args).map(r => String(r.detail))); return all(...args); }) as typeof statement.all;
+    }
+    return statement;
+  }) as typeof db.prepare;
+  try {
+    const query = { limit: 2, matchIndex: { name: "group", value: "selected" } };
+    const first = await f.client.listPage(TYPE, query);
+    await f.client.listPage(TYPE, { ...query, continue: first.metadata.continue });
+  } finally { db.prepare = prepare; }
+  assert.equal(plans.length, 2);
+  for (const plan of plans) {
+    assert.ok(plan.some(p => p.includes("COVERING INDEX resource_page_lookup")));
+    assert.ok(plan.every(p => !p.includes("TEMP B-TREE")), plan.join("\n"));
+  }
+});
+
+/** @case Existing resource indexes gain the ordered projection atomically at installation. */
+test("ordered index installation backfills existing data and later replacements remove old memberships", async t => {
+  const f = fixture(t); const a = await f.create("a"); await f.create("b", "other");
+  f.store.storage.db.exec("DROP TRIGGER resource_page_index_insert; DROP TRIGGER resource_page_index_delete; DROP TABLE resource_page_indexes");
+  const pages = new ResourcePages(f.store.storage.db);
+  const query = { limit: 2, matchIndex: { name: "group", value: "selected" } };
+  assert.deepEqual(pages.list("pages", TYPE, query).keys, [f.store.key(TYPE, "a")]);
+  await f.client.replace(a, { group: "other" }, a.status);
+  assert.deepEqual(pages.list("pages", TYPE, query).keys, []);
 });

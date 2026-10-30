@@ -223,7 +223,7 @@ Chief 只在 root 启动新执行；运行中的 Topic 成为子节点后，旧 
 
 一个 root Topic 对应一个 Chief，常规读取范围是该 root 的整棵 Topic 子树。宿主和 Runner 从当前 Topic 出发，按 parent UID 索引逐层读取子节点，直到没有下一层；这是父节点先于子节点的拓扑排序，以广度优先遍历实现。按需的材料、Work 与认识查询限定在所得子树内，不先枚举全局 Topic。Weave 修改父子关系后，下次读取自然反映新的子树，Input 和 Work 的原始归属不变。
 
-Topic 的接收 Reconcile 按 status.assess.topic 和 assessReadyAttention 索引查询已分派待办，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 只挂载，Chief 被其它原因激活时可以主动处理。
+Topic 的接收 Reconcile 先按祖先指纹分批刷新直属待办的负责人缓存、补齐缺失分派，再按 status.assess.topic 和 assessReadyAttention 索引查询已分派待办，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 只挂载，Chief 被其它原因激活时可以主动处理。
 
 Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Topic Reconcile 在 prompt / steer / followUp 之前，通过资源事务竞争 Input 接纳；已有接纳或已完成则忽略。Topic 不保存逐条 Input 的通知进度，仍保存 execution、agent 与 Weave 通知版本。assess_input 原子完成唯一研判及 Work 交接，主动读取材料不会重新接纳；后续核对可以提交完成证据。未知投递结果保留标记，不自动重放。完整查询、并发和恢复契约见 [Input](input.md#归属与-chief-通知)。
 
@@ -259,7 +259,7 @@ Reconcile 先处理业务 Input、结构通知和子 summary 吸收。后台回�
 | aide:organize | maxChildren 超限；组织直属下属的分工与层次 |
 | aide:review | 静默回顾到期且有待处理材料或认识变化；回顾进展与知识 |
 
-内置请求复用 Input，status.topic 指向待处理节点，status.assess.topic 指向当前 root。origin 供程序调度，text 给 Chief 描述目的；没有单独的 maintenance 对象或字段。每个节点、每种 origin 最多保留一条未结束请求，创建由节点 CAS 和事务内 pending 索引校验去重；结果未知的接纳不会重复创建。capacityRequests 只记录该节点请求身份和检查时间，completedAt 决定结束后的冷却起点，回收后回退到 checkedAt；capacityCooldownSeconds 默认 60 秒。
+内置请求复用 Input，status.topic 指向待处理节点，未领取时 status.assess.topic 最终收敛到当前 root，领取后保留实际负责人。origin 供程序调度，text 给 Chief 描述目的；没有单独的 maintenance 对象或字段。每个节点、每种 origin 最多保留一条未结束请求，创建由节点 CAS 和事务内 pending 索引校验去重；结果未知的接纳不会重复创建。capacityRequests 只记录该节点请求身份和检查时间，completedAt 决定结束后的冷却起点，回收后回退到 checkedAt；capacityCooldownSeconds 默认 60 秒。
 
 root 空闲时按 aide:triage → aide:organize → 普通 Input 批次 → aide:review 选择。容量请求独立执行，不向该次执行追加普通 Input；每次容量执行后让等待的可激活业务获得一次机会。普通 Input 合并当前已有待办，最多 8 条，不要求攒满。Immediate/Normal 保留原有响应语义，Deferred 不单独激活；回顾可以带入 Deferred。排序在索引桶内使用底座稳定名称顺序，不承诺全局 FIFO。
 
