@@ -2,7 +2,7 @@
 
 ## 整体定位
 
-Input 保存收到的内容及来源证据，各组件在同一资源上留下自己的处理进展。它使一条信息从接收到路由、研判和办理的过程可追溯；输入数量与输出数量没有一对一关系。
+Input 保存收到的内容及来源证据，各组件在同一资源上留下自己的处理进展。它使一条信息从接收到路由、研判和办理的过程可追溯。值得持续保留的事项认识由 [Note](note.md) 整合，再按其价值提炼长期认识或调整主题结构；原始内容仍由 Input 保存。认知沉淀与行动的关系见 [Personal](README.md#从-input-到认识与成果)。
 
 `status.topic` 保存唯一的当前 Topic 归属，引用固定 UID。`status.route` 只保存首次路由处理记录；spec 中的 topicId / topicKey 保存入站定位信息。Chief 在树内移动 Input 时更新当前归属和迁移原因，保留原始事实与 route / assess / handle 回执；已接纳但尚未完成研判的 Input 先完成处理再迁移。内容查询使用 status.topic；自动待办查询使用 status.assess.topic。
 

@@ -65,7 +65,7 @@ Person 的 status.summary 保存长期认识；recent 通过独立 Note 的 peop
 
 summary 和 recent 查询视图只是人物资料的一部分，不代表完整的长期 profile。职责、关系、经历等资料可以按其自身语义继续组织；近期窗口的裁剪不授权删除长期资料。
 
-人物工具沿用 Work 的接入方式：模型工具调用 Personal 服务，再经 ResourceClient 更新 CRD，无需新增 Core verb 或人物输入队列。读取、补充、合并、纠错在正常 Chief 轮次内发生，Topic 摘要仍只维护话题窗口。详见 [Chief](chief.md#人物认知)。
+人物工具沿用 Work 的接入方式：模型工具调用 Personal 服务，再经 ResourceClient 更新 CRD，无需新增 Core verb 或人物输入队列。读取、补充、合并、纠错在正常 Chief 轮次内发生，Topic summary 维护主题认识，Person summary 维护人物认识；同一 Note 可为两者提供依据。详见 [Chief](chief.md#人物认知)。
 
 ## 验证
 

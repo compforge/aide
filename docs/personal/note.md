@@ -1,6 +1,8 @@
 # Note
 
-Note 是独立的近期事项资源。Chief 和 Work Agent 用同一个 upsert_note 维护事项；人物关联是 people，输出对象是 subject，不再区分“写 Topic Note”和“写 Person Note”。Topic、Task、Routine、Person 只保存长期 summary，recent 是查询投影。
+Note 是独立的事项认识资源，将围绕同一件事的多条 Input 整合为持续更新的当前认识。它保留理解这件事所需的进展、依据、结论和未决问题，以稳定 ID 承接后续变化。Chief 和 Work Agent 通过统一 upsert_note 维护 Note；subject 关联主题或工作，people 关联涉及的人物。
+
+Note 为主题与人物的长期认识、主题组织提供依据，提炼主线见 [Personal](README.md#从-input-到认识与成果)。summary 选择长期有效的内容，recent 按更新时间查询 Note；近期展示窗口与 Note 的独立生命周期分别管理。
 
 ## 模型与查询
 

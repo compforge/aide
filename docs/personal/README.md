@@ -2,17 +2,29 @@
 
 Personal 是 Aide 的内置个人助手插件。Input 带来内容、人物和地址；Aide 结合输入性质、已有委托与处理进展作判断，必要时向相关 Address 产生 Output。
 
-## 从大量输入到有价值的输出
+## 从 Input 到认识与成果
 
-Aide 从 Channel 和 Source 持续接收输入，围绕话题理解和推进事情，再通过 Channel 向相关的人发出有价值的输出，把成百上千条输入转化为人的注意力可以承受的沟通。判断价值要结合用户的目标、已有委托与当前处境，让用户把注意力放在需要了解和决定的事情上。
+Aide 围绕用户目标，将大量零散、暂时性的信息整合为可持续使用的认识，并据此判断、行动和沟通。单条消息或观察的价值往往要与其它信息结合才能确定；整理需要保留重要变化、事实来源、分歧与未决问题，让用户把注意力放在需要了解和决定的事情上。
 
-这个过程包含归属判断、关联上下文、核实事实、研判影响、推进工作和选择沟通时机。有些 Input 只更新认识、记忆或已有工作的进展；多条 Input 可以汇聚成一条 Output，一条 Input 也可能在持续跟进中促成多次 Output。静默处理同样可以有明确的判断和结果。
+认知沉淀的主线是：
 
-Input 同时承载收到的事实和围绕这份事实的处理进展。原始内容保持不变，各组件将自己负责环节的处理时间、去向、结论及异常写入 Input.status。沿着一条 Input，可以知道它被分派到哪些 Topic、哪些 Chief 已经研判、哪些 Task / Routine 正在办理，以及还有什么尚未完成。这为协作、恢复与问题排查提供共同依据。
+```text
+Input：收到的内容、来源与证据
+  ↓ 关联、核实、整合
+Note：一个具体事项持续更新的当前认识
+  ↓ 提炼、归纳、组织
+  ├─ Topic.summary：对主题的长期认识
+  ├─ Person.summary：对人物的长期认识
+  └─ Topic tree：主题之间的关系与组织层次
+```
 
-可以借用 Kubernetes Pod 的直觉理解这种协作：多个组件围绕同一个持久对象工作，各自在 status 中留下负责环节的痕迹。Aide 中，route、assess、handle 分别表达路由、研判和办理。Input 保存这些环节的状态与结果摘要；详细执行轨迹、工作目标与进展、输出正文分别由执行记录、Work 和 Output 承载，并遵循各自的保留策略。
+Input 保留原始内容，Note 将同一事项的多次变化整合为连贯认识；summary 提炼其中长期有效的结论，Topic tree 表达哪些事情值得共同理解、哪些需要独立跟进。Task / Routine 也维护各自的 Note 和长期 summary。Agent 根据证据与当前需要选择更新哪些对象；简单回答或静默判断可以直接结束，每条输入无需经过全部沉淀环节。
 
-这是理解 Aide 信息处理过程的一个视角。Aide 的完整职责还包括理解人、承接目标、持续行动以及在变化中调整判断；有价值的 Output 是这些判断与行动在需要沟通时的表达。
+例如，关于一次发布的讨论、评审与部署反馈形成多条 Input，相关 Note 持续记录这次发布的进展、判断依据与未决问题。得到验证的发布约束可以进入 Topic.summary，人物明确表达并确认的职责可以进入 Person.summary；这些事项与已有主题的联系也为 Topic tree 的调整提供依据。
+
+Topic tree 本身也是认知的一部分。同样一组发布信息，财务负责人可能围绕预算与成本组织，技术负责人可能围绕系统与可靠性组织。已有认识和结构帮助新输入找到位置，新证据与工作结果又推动认识和结构修订，内容与组织方式一起演化。
+
+认知服务于实际成果：回答问题、推进工作、帮助决策或及时提醒。Output 专指已经决定向外表达的内容；工作进展和认识更新各自保存，可以静默发生。多条 Input 可以汇聚成一条 Output，一条 Input 也可能在持续跟进中促成多次 Output。效果取决于判断是否有依据、工作是否推进、重要变化是否被识别，以及用户是否减少重复背景和无效关注。
 
 ## 对象与主流程
 
@@ -28,10 +40,11 @@ Weave 作用于 Topic 之间的关系：把值得共同理解的主题组织到�
 
 | 对象 | 承担的职责 | 详细设计 |
 | --- | --- | --- |
-| Input | 收到的事实，以及各组件的处理痕迹 | [输入](input.md) |
+| Input | 收到的内容、来源证据与处理痕迹 | [输入](input.md) |
+| Note | 围绕具体事项持续整合的当前认识，以稳定 ID 承接后续变化 | [事项笔记](note.md) |
 | Weave | 组织相关主题，促进跨来源知识融合，收敛独立处理上下文 | [Weave](weave.md)、[主题树](topic.md) |
 | Route | 为输入选择一个话题，无合适归属时使用 Default | [路由](route.md) |
-| Topic / Chief | Topic 保存主题认识，Chief 在 root 综合研判子树输入，直接处理或委托工作 | [主题](topic.md)、[Chief](chief.md) |
+| Topic / Chief | Topic 保存长期认识和主题组织关系，Chief 在 root 综合研判子树输入，直接处理或委托工作 | [主题](topic.md)、[Chief](chief.md) |
 | Task / Routine | 有限目标与持续职责的独立生命周期 | [Task](task.md)、[Routine](routine.md) |
 | Person | 人物身份、可选 Me 标记和持续积累的认识 | [人物](person.md) |
 | Output | 已决定表达的内容、对象、地址与投递状态 | [输出](output.md) |
@@ -42,14 +55,14 @@ Personal 采用 [工具驱动与持续接纳](../harness/README.md#agent-的使�
 
 ## 资源状态与组件协作
 
-Input、Task、Routine、Topic 使用 aide.dev/v1alpha2；Route、Weave、Person、Output 的当前版本为 aide.dev/v1alpha1。每个对象的字段、维护者与生命周期在其专属文档中展开；通用并发、Conditions 和版本演进见 [Resource](../plugin/resource.md)。
+各组件围绕持久资源协作，将负责环节的处理时间、去向、结论及异常写入状态。Input 的 route、assess、handle 分别记录路由、研判和办理；详细执行轨迹、工作目标与进展、输出正文分别由执行记录、Work 和 Output 承载。每个对象的字段、版本、维护者与生命周期在其专属文档中展开；通用并发、Conditions 和版本演进见 [Resource](../plugin/resource.md)。
 
 Input 保存原始事实，Task 承担有限目标，Routine 承担持续职责，Topic 保存主题认识和组织关系。Route、Chief、Weave 围绕对象工作；原生执行结束、Input 研判完成、目标达成和 Output 送达分别记录。
 
 | 共享片段 | 适用对象与边界 |
 | --- | --- |
 | status.topic | Input、Task、Routine 的唯一当前 Topic UID 引用；Topic 使用 spec.parentRef 表达父子关系 |
-| summary / Note | 各资源的长期认识与独立近期事项；recent 为查询视图，Input 的解释留在研判回执 |
+| summary / Note | 各资源的长期认识与独立事项认识；recent 为查询视图，Input 的解释留在研判回执 |
 | agent / execution | Topic、Task、Routine、Route、Weave 的原生会话与执行；Input 只在处理回执中引用执行 |
 | organization | Input、Task、Routine、Topic 最近一次组织调整的操作者、原因、时间和前后关系 |
 | conditions | Input、Task、Routine、Topic 按各自业务语义声明条件；不强求同一组状态判断 |
@@ -86,7 +99,7 @@ Source 和 trigger 提供重新判断的机会。已有委托决定可以继续�
 
 Topic、Task、Routine、Person 的 summary 保存长期有效、低频变化的认识。选择保留内容时比较重要性、稳定性和持久价值；较新或更详细不自动优于已有认识，用户明确修正优先于旧推断。
 
-近期事项保存为独立 [Note](note.md)。统一 upsert_note 用 subject 关联 Topic / Work、people 关联人物，不必为不同目标选择不同写入工具。recent 是查询窗口，不持久化在四类资源中；原始 Note 正文完整保存。summary 与 Note 分别校验自身内容，调度更新不制造模型侧误冲突。
+具体事项的当前认识保存为独立 [Note](note.md)，同一事项随新输入持续更新。统一 upsert_note 用 subject 关联 Topic / Work、people 关联人物。recent 是近期查询窗口，不持久化在四类资源中；Note 正文完整保存，生命周期由自身容量策略管理。summary 与 Note 分别校验自身内容，调度更新不制造模型侧误冲突。
 
 report_task / report_routine 只原子提交办理报告、业务状态与 Input 回执，不自动更新 summary 或 Note。维护认识也不确认 Input、不完成 Work、不授予新的执行权限。详细字段、工具、预算、并发和生命周期契约见 [Note](note.md)。
 
