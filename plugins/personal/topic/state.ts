@@ -7,20 +7,19 @@ import { readTopicSubtree, understandingVersion, summaryVersion } from "./tree.t
 import { z } from "zod";
 import { SUMMARY_CHARS } from "../context.ts";
 import { upsertNote, NoteUpdateSchema } from "../note/service.ts";
-import type { ResourceClient } from "@compforge/aide-plugin";
+import { retryOnConflict, type ResourceClient } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 
 /** @spec A stale execution cannot mutate a replacement Topic. */
 export async function updateTopic(resources: ResourceClient, ref: Readonly<TopicResource>,
   change: (current: Readonly<TopicResource>) => Partial<TopicStatus>): Promise<Readonly<TopicResource>> {
-  for (let attempt = 0; ; attempt++) {
+  return retryOnConflict(async () => {
     const current = await resources.get<TopicSpec, TopicStatus>({ ...TOPIC_TYPE, ...ref.metadata });
     if (!current || current.metadata.uid !== ref.metadata.uid || current.metadata.deletionTimestamp) throw new Error("Topic no longer exists");
     const patch = change(current);
     if (!Object.keys(patch).length) return current;
-    try { return await patchStatus(resources, current, patch); }
-    catch (error) { if (attempt >= 8 || !/version conflict/.test(String(error))) throw error; }
-  }
+    return patchStatus(resources, current, patch);
+  });
 }
 
 export const TopicContextSchema = z.object({ topicUid: z.string().optional(),

@@ -187,19 +187,26 @@ export class ResourceStorage {
     if (!this.definition(scope, type).indexes?.[name]) throw new Error(`Unknown resource index: ${name}`);
     for (const row of this.db.prepare("SELECT r.key FROM resource_indexes i JOIN resources r ON r.key=i.source WHERE r.scope=? AND substr(r.key,1,?)=? AND i.name=? AND i.value=? ORDER BY r.created,r.rowid").iterate(scope, prefix.length, prefix, name, value)) yield row.key as string;
   }
+  /** @spec Even idempotent patches validate against the current transaction's dependencies without producing a write.
+   * @case tests/note-knowledge.test.ts
+   * @link docs/plugin/resource.md#更新操作与并发
+   */
+  validateChange(scope: string, old: Resource<unknown, unknown> | undefined, resource: Resource<unknown, unknown>): void {
+    const definition = this.definition(scope, resource);
+    const context = this.validationContext(scope);
+    const current = structuredClone(resource);
+    const result: unknown = old
+      ? (!old.metadata.deletionTimestamp && current.metadata.deletionTimestamp
+        ? definition.validator?.delete?.(structuredClone(old), context)
+        : definition.validator?.update?.(structuredClone(old), current, context))
+      : definition.validator?.create?.(current, context);
+    if (result && typeof (result as { then?: unknown }).then === "function") throw new Error("Resource validation must be synchronous");
+  }
   write(key: string, scope: string, stored: StoredResource, receipt?: { key: string; value: string }): void {
     this.transaction(() => {
       this.parse(scope, stored.object);
       const old = this.read(key)?.object;
-      const definition = this.definition(scope, stored.object);
-      const context = this.validationContext(scope);
-      const current = structuredClone(stored.object);
-      const result: unknown = old
-        ? (!old.metadata.deletionTimestamp && current.metadata.deletionTimestamp
-          ? definition.validator?.delete?.(structuredClone(old), context)
-          : definition.validator?.update?.(structuredClone(old), current, context))
-        : definition.validator?.create?.(current, context);
-      if (result && typeof (result as { then?: unknown }).then === "function") throw new Error("Resource validation must be synchronous");
+      this.validateChange(scope, old, stored.object);
       const data = JSON.stringify(stored), bytes = Buffer.byteLength(data), resource = stored.object;
       const previous = this.db.prepare("SELECT bytes FROM resources WHERE key=?").get(key);
       const kind = kindKey(resource), limits = { ...this.config.defaults, ...this.config.kinds[kind] };

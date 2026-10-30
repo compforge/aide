@@ -1,3 +1,4 @@
+import { retryOnConflict, ResourceVersionConflict, ResourceIncarnationChanged } from "@compforge/aide-plugin";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -68,4 +69,29 @@ test("an old Resource handle cannot patch a recreated incarnation", async t => {
   await assert.rejects(client.patchStatus(old, { value: 1 }), /incarnation changed/);
   await assert.rejects(client.replace(old, old.spec, old.status), { name: "ResourceIncarnationChanged" });
   assert.deepEqual(store.get(TYPE, "one"), next);
+});
+
+
+test("bounded conflict retry re-reads state, recognizes IPC names and leaves other failures to its caller", async t => {
+  const { client } = fixture(t);
+  const initial = await client.create(TYPE, { name: "retry", spec: { title: "A" }, status: { count: 0 } });
+  await assert.rejects(client.create(TYPE, { name: "retry", spec: { title: "B" }, status: {} }),
+    error => restoredError(serializedError(error)).name === "ResourceAlreadyExists");
+  let attempts = 0;
+  await retryOnConflict(async () => {
+    const current = (await client.get<typeof initial.spec, typeof initial.status>({ ...TYPE, ...initial.metadata }))!;
+    if (++attempts === 1) await client.patchStatus(current, { count: 10 });
+    await client.patchStatus(current, { count: current.status.count + 1 }, { resourceVersion: current.metadata.resourceVersion });
+  });
+  assert.equal(attempts, 2);
+  assert.equal((await client.get<typeof initial.spec, typeof initial.status>({ ...TYPE, ...initial.metadata }))!.status.count, 11);
+  attempts = 0;
+  const conflict = restoredError(serializedError(new ResourceVersionConflict("race")));
+  await assert.rejects(retryOnConflict(async () => { attempts++; throw conflict; }), error => error === conflict);
+  assert.equal(attempts, 5);
+  for (const error of [new Error("version conflict in business content"), new ResourceIncarnationChanged("recreated")]) {
+    attempts = 0;
+    await assert.rejects(retryOnConflict(async () => { attempts++; throw error; }), actual => actual === error);
+    assert.equal(attempts, 1);
+  }
 });

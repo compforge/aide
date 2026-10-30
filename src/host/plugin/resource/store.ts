@@ -1,3 +1,4 @@
+import { ResourceAlreadyExists } from "@compforge/aide-plugin";
 import { ResourceVersionConflict, ResourceIncarnationChanged } from "@compforge/aide-plugin";
 import jsonPatch from "fast-json-patch";
 import mergePatch from "json-merge-patch";
@@ -269,7 +270,7 @@ export class PluginResourceStore {
     const path = this.resourceKey(type, name, namespace);
     return this.storage.transaction(() => withFileLock(this.lockPath(path), () => {
       if (this.storage.has(path)) {
-        throw new Error(`plugin resource already exists: ${type.kind}/${name}`);
+        throw new ResourceAlreadyExists(`plugin resource already exists: ${type.kind}/${name}`);
       }
       this.assertOwnerActive(owner);
       const stored = this.initialStoredResource<TSpec, TStatus>({
@@ -473,7 +474,10 @@ export class PluginResourceStore {
       const definition = this.storage.definition(this.scope, type);
       (next as { spec: TSpec }).spec = definition.schema.spec.parse(jsonObject("spec", next.spec));
       (next as { status: TStatus }).status = definition.schema.status.parse(jsonObject("status", next.status));
-      if (isDeepStrictEqual(current.object, next)) return current;
+      if (isDeepStrictEqual(current.object, next)) {
+        this.storage.validateChange(this.scope, current.object, next);
+        return current;
+      }
       return { ...current, object: { ...next, metadata: { ...next.metadata,
         generation: current.object.metadata.generation + Number(!isDeepStrictEqual(current.object.spec, next.spec)),
         resourceVersion: nextResourceVersion(current.object.metadata.resourceVersion),

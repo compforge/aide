@@ -1,4 +1,4 @@
-import type { PluginContext, ResourceValidationContext, Watch } from "@compforge/aide-plugin";
+import { retryOnConflict, type PluginContext, type ResourceValidationContext, type Watch } from "@compforge/aide-plugin";
 import { INPUT_TYPE } from "./model.ts";
 import { resourceRef, type Input } from "./state.ts";
 import { patchStatus } from "../status.ts";
@@ -10,13 +10,17 @@ import { requireTopic } from "../topic/ownership.ts";
  * @case tests/input-assignment.test.ts
  */
 export async function assignInput(context: Pick<PluginContext, "resources" | "logger">, input: Input) {
-  if (input.metadata.deletionTimestamp || !input.status.topic || !input.status.assess || input.status.assess.completedAt || input.status.assess.executionId) return;
-  const root = await readTopicRoot(context.resources, input.status.topic);
-  if (!root || input.status.assess?.topic?.uid === root.metadata.uid) return;
-  await patchStatus(context.resources, input, { assess: { ...input.status.assess, topic: resourceRef(root) } });
-  context.logger.info("Input processing assigned", { attributes: { inputId: input.metadata.name,
-    topicUid: input.status.topic.uid, previousAssigneeUid: input.status.assess?.topic?.uid ?? null,
-    assigneeUid: root.metadata.uid, executionId: input.status.assess?.executionId ?? null } });
+  return retryOnConflict(async () => {
+    const current = await context.resources.get<Input["spec"], Input["status"]>(resourceRef(input));
+    if (!current) return;
+    if (current.metadata.deletionTimestamp || !current.status.topic || !current.status.assess || current.status.assess.completedAt || current.status.assess.executionId) return;
+    const root = await readTopicRoot(context.resources, current.status.topic);
+    if (!root || current.status.assess?.topic?.uid === root.metadata.uid) return;
+    await patchStatus(context.resources, current, { assess: { ...current.status.assess, topic: resourceRef(root) } });
+    context.logger.info("Input processing assigned", { attributes: { inputId: current.metadata.name,
+      topicUid: current.status.topic.uid, previousAssigneeUid: current.status.assess?.topic?.uid ?? null,
+      assigneeUid: root.metadata.uid, executionId: current.status.assess?.executionId ?? null } });
+  });
 }
 
 /** Validate the real ancestry in the same transaction as assignment/admission, including ancestor-only moves. */

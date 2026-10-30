@@ -10,6 +10,7 @@ import { NOTE_TYPE, NoteSpecSchema, NoteStatusSchema, type NoteSpec, type NoteSt
  * @link docs/personal/note.md
  */
 function validate(note: NoteResource, context: ResourceValidationContext) {
+  if (note.metadata.deletionTimestamp) throw new Error("Note is being deleted");
   if (note.metadata.namespace !== "v1" || note.metadata.owner) throw new Error("Note requires the shared namespace and an independent lifecycle");
   const writer = note.status.writer;
   const subject = context.get(note.spec.subject, note.spec.subject.uid);

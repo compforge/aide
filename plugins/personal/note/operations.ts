@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ResourceClient } from "@compforge/aide-plugin";
+import { retryOnConflict, type ResourceClient } from "@compforge/aide-plugin";
 import { resourceRef } from "../input/state.ts";
 import { SubjectSchema, NOTE_TYPE, noteVersion, type NoteSpec, type NoteStatus } from "./model.ts";
 import type { TopicResource } from "../topic/model.ts";
@@ -22,17 +22,31 @@ export async function moveNote(resources: ResourceClient, actor: TopicResource, 
 }
 
 export const ReviewNotesSchema = z.object({ notes: z.array(z.object({ noteId: z.string().min(1), version: z.string().min(1) }).strict()).min(1).max(20) }).strict();
-/** Reviewing acknowledges an inspected content version, including a deliberate decision to retain no durable conclusion. */
+/** @spec A review acknowledges a set of inspected versions atomically; repeated acknowledgement preserves its first receipt.
+ * @why CAS serializes first-receipt creation; retry re-reads receipts but never substitutes a new content version.
+ * @case tests/note-knowledge.test.ts
+ * @link docs/personal/note.md
+ */
 export async function reviewNotes(resources: ResourceClient, actor: TopicResource, raw: unknown) {
   const args = ReviewNotesSchema.parse(raw);
+  const versions = new Map<string, string>();
+  for (const ref of args.notes) {
+    if (versions.has(ref.noteId) && versions.get(ref.noteId) !== ref.version)
+      throw new Error(`Conflicting review versions for Note ${ref.noteId}`);
+    versions.set(ref.noteId, ref.version);
+  }
   if (!actor.status.execution) throw new Error("Review requires an active Chief");
-  const writes = await Promise.all(args.notes.map(async ref => {
-    const note = await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: ref.noteId });
-    if (!note || note.metadata.deletionTimestamp || noteVersion(note) !== ref.version) throw new Error("Note changed before review; read_note again");
-    return { operation: "replace" as const, resource: note, spec: note.spec, status: { ...note.status,
-      writer: { resource: SubjectSchema.parse(resourceRef(actor)), executionId: actor.status.execution!.id },
-      reviewed: { version: ref.version, at: new Date().toISOString() } } };
-  }));
-  await resources.commit(writes);
-  return { reviewed: args.notes.length };
+  const writer = { resource: SubjectSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id };
+  await retryOnConflict(async () => {
+    const writes = await Promise.all([...versions].map(async ([noteId, version]) => {
+      const note = await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: noteId });
+      if (!note || note.metadata.deletionTimestamp || noteVersion(note) !== version)
+        throw new Error(`Note ${noteId} changed before review; read_note again`);
+      return { operation: "patchStatus" as const, resource: note,
+        options: { resourceVersion: note.metadata.resourceVersion }, patch: { writer,
+          reviewed: note.status.reviewed?.version === version ? note.status.reviewed : { version, at: new Date().toISOString() } } };
+    }));
+    await resources.commit(writes);
+  });
+  return { reviewed: versions.size };
 }
