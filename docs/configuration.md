@@ -302,7 +302,7 @@ plugins:
 plugins:
   personal:
     topic:
-      idleMs: 604800000       # 子树 7 天无新 Input，可在安全交接后回收
+      idleMs: 604800000       # 无新 Input 时释放 Chief 会话；Topic 由资源容量配额回收
       contextChars: 48000
       summaryChars: 4000
 ```

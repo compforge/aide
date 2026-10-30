@@ -110,7 +110,7 @@ test("Weave rejects stale understanding and cycles but does not wait for uncerta
   assert.equal(f.refresh(a).status.lastError, "Inspect prior effects");
 });
 
-test("Topic expiry checks child absorption, releases source key, and never revives an old routed Input", async t => {
+test("Explicit Topic deletion checks child absorption, releases source key, and never revives an old routed Input", async t => {
   const f = fixture(t); await f.initialize();
   const fact = await f.input("old", "a"), a = f.aide.topics.byKey("a")!, b = await ensureSourceTopic(f.resources, "b", "B");
   await f.resources.patchStatus(fact, { assess: { ...fact.status.assess, completedAt: new Date().toISOString() } });
@@ -124,6 +124,8 @@ test("Topic expiry checks child absorption, releases source key, and never reviv
   await summarizeTopic(f.resources, p, "synthesis", { version: contentVersion(p), summary: "Changed child finding retained",
     absorbed: [{ uid: a.metadata.uid, version: understandingVersion(f.refresh(a)) }] }, 4000);
   await collectTopic(f.context, f.refresh(a));
+  assert.ok(f.aide.topics.resource(a.spec.id), "silence retains the Topic until capacity or explicit deletion");
+  await f.resources.delete(TOPIC_TYPE, a.metadata.name, "v1", { uid: a.metadata.uid, resourceVersion: f.refresh(a).metadata.resourceVersion });
   assert.equal(f.aide.topics.resource(a.spec.id), undefined);
   assert.equal(f.aide.topics.byKey("a"), undefined);
   await routeByRules(f.context, fact);
@@ -207,7 +209,7 @@ test("Weave advances only the bounded snapshot and retries interrupted analysis"
   assert.equal(Object.keys((await f.weave()).status.reviewed ?? {}).length, 24, "a changed Topic does not reset other progress");
 });
 
-test("A quiet changed child wakes root synthesis without Input and can then expire", async t => {
+test("A quiet changed child wakes root synthesis without Input and can then be explicitly deleted", async t => {
   const f = fixture(t); await f.initialize();
   const a = await ensureSourceTopic(f.resources, "absorb:a", "A"), b = await ensureSourceTopic(f.resources, "absorb:b", "B");
   await f.group(a, b);
@@ -230,6 +232,8 @@ test("A quiet changed child wakes root synthesis without Input and can then expi
   assert.equal(f.aide.topics.inputs().length, 0);
   assert.equal(f.aide.topics.resource(root.id)!.status.lastInputAt, before);
   await collectTopic(f.context, f.refresh(a));
+  assert.ok(f.aide.topics.resource(a.spec.id), "silence retains the Topic until capacity or explicit deletion");
+  await f.resources.delete(TOPIC_TYPE, a.metadata.name, "v1", { uid: a.metadata.uid, resourceVersion: f.refresh(a).metadata.resourceVersion });
   assert.equal(f.aide.topics.resource(a.spec.id), undefined);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);

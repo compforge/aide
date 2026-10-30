@@ -1,3 +1,4 @@
+import { listNotes } from "./note/query.ts";
 import { contentVersion } from "./context-write.ts";
 import { SubjectSchema } from "./note/model.ts";
 import { resourceRef } from "./input/state.ts";
@@ -21,6 +22,9 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
     return resource;
   };
   return [
+    tool({ name: "list_notes", label: "Find Work Notes", description: "Find this Work's retained Notes beyond recent. Text q filters one bounded page; follow continue even when a page has no matches. Use read_note for complete content.",
+      parameters: Type.Object({ q: Type.Optional(Type.String({ maxLength: 500 })), continue: Type.Optional(Type.String()), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }, { additionalProperties: false }),
+      async execute(_id, args) { return result(await listNotes(resources, { ...args, subject: read().metadata.uid })); } }),
     tool({ name: "read_note", label: "Read note", description: "Read the complete text and content version of one Note belonging to this Work.",
       parameters: Type.Object({ noteId: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
       async execute(_id, args) {

@@ -241,6 +241,10 @@ export class ResourceStorage {
       for (const row of candidates.iterate(new Date().toISOString(), protectedKey, onlyKind ? 1 : 0, kind)) {
         if (enough()) break;
         if (this.writtenKeys.has(row.key as string)) continue;
+        const resource = (JSON.parse(row.data as string) as StoredResource).object;
+        const retention = this.definition(row.scope as string, resource).retention;
+        // @spec Candidate release time never substitutes for current dependency checks.
+        if (retention?.canEvict && !retention.canEvict(resource, this.validationContext(row.scope as string))) continue;
         this.remove(row.key as string);
         this.evicted.push({ scope: row.scope as string, resource: (JSON.parse(row.data as string) as StoredResource).object });
       }

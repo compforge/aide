@@ -110,3 +110,23 @@ test("Kind overrides inherit every unspecified default limit and order", () => {
   assert.deepEqual(config.kinds["example.dev/Record"], { maxCount: 5 });
   assert.deepEqual({ ...config.defaults, ...config.kinds["example.dev/Record"] }, { maxCount: 5, maxBytes: 4000, maxResourceBytes: 1048576, order: "lru" });
 });
+
+test("capacity predicates recheck transaction-local dependencies and roll back unsafe collection", t => {
+  const { db, record, type } = setup(t);
+  db.register("guarded", [{ ...definition(type), retention: {
+    releasedAt: r => r.metadata.creationTimestamp, references: () => [],
+    canEvict: (r, context) => !context.list(type).some(other => (other.spec as { refs: string[] }).refs.includes(r.metadata.uid)),
+  } }]);
+  db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 2 }, lowWatermark: 0.95 }));
+  db.write("old", "guarded", record("old"));
+  db.write("newer", "guarded", record("newer"));
+  db.transaction(() => {
+    db.write("dependent", "guarded", record("dependent", false, ["old"]));
+  });
+  assert.ok(db.has("old"), "the dependency created by this transaction protects the oldest candidate");
+  assert.equal(db.has("newer"), false);
+  assert.ok(db.has("dependent"));
+  assert.throws(() => db.write("overflow", "guarded", record("overflow", false, ["dependent"])), ResourceCapacityError);
+  assert.equal(db.has("overflow"), false);
+  assert.ok(db.has("old") && db.has("dependent"), "failed collection rolls back the dependent and every deletion");
+});

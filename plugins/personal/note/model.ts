@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Resource } from "@compforge/aide-plugin";
 import { PersonRefSchema } from "../person/model.ts";
@@ -8,13 +9,17 @@ export const SubjectSchema = z.object({ apiVersion: z.string().min(1), kind: z.e
 export const NoteSpecSchema = z.object({ subject: SubjectSchema, people: z.array(PersonRefSchema).default([]),
   text: z.string().trim().min(1).max(16000) }).strict();
 export const NoteWriterSchema = z.object({ resource: SubjectSchema, executionId: z.string().min(1) }).strict();
-export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), writer: NoteWriterSchema }).strict();
+export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), writer: NoteWriterSchema,
+  reviewed: z.object({ version: z.string(), at: z.string().datetime() }).strict().optional(),
+  organization: z.object({ at: z.string().datetime(), reason: z.string().min(1), from: SubjectSchema, to: SubjectSchema }).strict().optional(),
+}).strict();
 export const NoteViewSchema = NoteSpecSchema.extend({ id: z.string(), uid: z.string(), version: z.string(), createdAt: z.string(), updatedAt: z.string() });
 export type NoteSpec = z.infer<typeof NoteSpecSchema>;
 export type NoteStatus = z.infer<typeof NoteStatusSchema>;
 export type NoteResource = Resource<NoteSpec, NoteStatus>;
 /** A query projection; never embedded in another persisted Resource. */
 export interface Note extends NoteSpec { id: string; uid: string; version: string; createdAt: string; updatedAt: string }
-export const noteVersion = (r: NoteResource) => `${r.metadata.uid}:${r.metadata.resourceVersion}`;
+/** @spec Review receipts do not change the content version or refresh a Note's retention age. */
+export const noteVersion = (r: NoteResource) => createHash("sha256").update(JSON.stringify([r.metadata.uid, r.spec, r.status.updatedAt])).digest("hex");
 export const noteView = (r: NoteResource): Note => ({ ...r.spec, id: r.metadata.name, uid: r.metadata.uid,
   version: noteVersion(r), createdAt: r.metadata.creationTimestamp, updatedAt: r.status.updatedAt });

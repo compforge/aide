@@ -175,7 +175,7 @@ Use `await context.printers.describe(resource)` / `summarize(resource)` wherever
 
 Definitions resolve by Plugin Instance and apiVersion/kind. A plugin cannot claim another plugin's type. Without a Printer, details use indented JSON and summaries use kind/name. A Printer error is logged and propagated rather than replaced with fallback output.
 
-Retention rules belong to the same definition. `releasedAt` returns eligibility time, or undefined to protect the resource; `references` returns exact resource UIDs. Host applies quotas and eviction ordering only to released, unreferenced resources. Missing declarations protect restored records; new writes require declarations.
+Retention rules belong to the same definition. `releasedAt` returns eligibility time, or undefined to protect the resource; `references` returns exact resource UIDs. Host applies quotas and eviction ordering only to released, unreferenced resources. Optional `canEvict(resource, context)` rechecks current dependencies in the eviction transaction; false skips the candidate and an exception rolls back the write. Callbacks are synchronous and pure. Missing declarations protect restored records; new writes require declarations.
 
 
 ## Execution hooks and diagnostics
