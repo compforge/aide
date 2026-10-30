@@ -12,7 +12,7 @@ import { NOTE_TYPE, noteVersion, type NoteResource } from "../plugins/personal/n
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { OutputDisclosure, type DisclosurePorts, type OutputAudience } from "../plugins/personal/output/disclosure.ts";
 import { outputSpec } from "../plugins/personal/output.ts";
-import { webAddress, larkPersonAddress, isChannelAddress } from "../src/channel/address.ts";
+import { webAddress, larkAddress, larkPersonAddress, isChannelAddress } from "../src/channel/address.ts";
 import { outputView } from "../src/output.ts";
 import { channelOutputs } from "../src/channel/output.ts";
 import type { Sensitivity, Visibility } from "../plugins/personal/disclosure.ts";
@@ -53,7 +53,7 @@ test("unchecked Output is pending and cannot reach a Channel, even Web", async t
   assert.deepEqual(channelOutputs({ outputs: () => [outputView(output)] }), []);
   assert.throws(() => f.store.begin("x"), /not been checked/);
   await f.checker.reconcile("x");
-  assert.equal(f.store.get("x")!.status.phase, "delivered");
+  assert.equal(f.store.get("x")!.status.phase, "pending");
   assert.equal(f.checks(), 0, "Me can receive all private material without a model check");
 });
 
@@ -63,7 +63,7 @@ test("permitted output retains intended content and checked delivery survives re
   assert.equal(f.checks(), 1);
   assert.deepEqual(f.store.get("x")!.spec, original.spec);
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
-  f.store.begin("x"); f.store.retry("x", "transport refused", new Date().toISOString());
+  f.store.begin("x"); f.store.retry("x", "transport refused");
   await f.store.prepare("x");
   assert.equal(f.checks(), 1);
   assert.equal(f.store.get("x")!.status.delivery!.text, original.spec.text);
@@ -81,7 +81,7 @@ test("denied output redirects to Me on the same resource, preserving original in
   assert.deepEqual(result.status.delivery!.target, webAddress("topic"));
   assert.match(result.status.delivery!.text, /clearance L1/);
   assert.match(result.status.delivery!.text, /A verified fact/);
-  assert.equal(result.status.phase, "delivered");
+  assert.equal(result.status.phase, "pending");
   await f.checker.reconcile("x");
   assert.equal(f.store.list().length, 1);
 });
@@ -96,16 +96,13 @@ test("sufficient clearance does not grant people visibility; claimed receivers d
   assert.match(f.store.get("x")!.status.disclosure!.reason, /outside visibility/);
 });
 
-test("every cited material restricts the audience, including the latest Input", async t => {
-  const f = await setup(t);
-  const note = await f.note("L1", "any");
-  const { INPUT_TYPE } = await import("../plugins/personal/input/model.ts");
-  const input = await f.client.create(INPUT_TYPE, { name: "private-input", spec: { origin: "channel", originId: "web", text: "Private detail", sensitivity: "L3", visibility: "people", sender: personRef(f.me) }, status: {} });
-  f.store.create("topic", "x", { ...outputSpec(f.topic, { topicId: "topic", text: "A verified fact and private detail", target: larkPersonAddress("app", "ou_c") }), notes: [{ uid: note.metadata.uid, version: noteVersion(note) }], inputIds: [input.metadata.name], inputUids: { [input.metadata.name]: input.metadata.uid } });
+test("Input provenance does not add a second classification system", async t => {
+  const f = await setup(t); const note = await f.note();
+  f.store.create("topic", "x", { ...outputSpec(f.topic, { topicId: "topic", text: note.spec.text, target: larkPersonAddress("app", "ou_c") }),
+    notes: [{ uid: note.metadata.uid, version: noteVersion(note) }], inputIds: ["reclaimed-input"] });
   await f.checker.reconcile("x");
-  assert.equal(f.store.get("x")!.status.disclosure!.decision, "denied");
-  assert.match(f.store.get("x")!.status.disclosure!.reason, /Input|private-input/);
-  assert.equal(f.checks(), 0, "Deterministic denial does not spend a model call");
+  assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
+  assert.equal(f.checks(), 1);
 });
 
 test("missing or stale materials fail closed and unavailable checker notifies Me", async t => {
@@ -140,18 +137,17 @@ test("unknown group audience and unsafe fallback never authorize the original ta
 
 test("revoked permission after attempted delivery stops further effects as uncertain", async t => {
   const f = await setup(t); await f.clearance("L3"); f.output("x", await f.note("L3"));
-  await f.checker.reconcile("x"); f.store.begin("x"); f.store.retry("x", "unknown network failure", new Date().toISOString());
+  await f.checker.reconcile("x"); f.store.begin("x"); f.store.retry("x", "unknown network failure");
   const target = f.store.get("x")!.status.delivery!.target;
   await f.clearance("L1"); await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.phase, "uncertain");
   assert.deepEqual(f.store.get("x")!.status.delivery!.target, target);
 });
 
-test("topic visibility uses pinned authorization scope rather than recent associated people", async t => {
+test("topic visibility follows the current Note subject and explicit Topic participants", async t => {
   const f = await setup(t); const n = await f.note("L1", "topic");
   const topic = await f.client.replace(f.topic, { ...f.topic.spec, people: [personRef(f.other) as PersonRef] }, f.topic.status);
-  const scoped = await f.client.replace(n, { ...n.spec, disclosureScope: { ...resourceRef(topic), kind: "Topic", namespace: "v1", uid: topic.metadata.uid } }, n.status);
-  f.output("x", scoped); await f.checker.reconcile("x");
+  f.output("x", n); await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
   await f.client.replace(topic, { ...topic.spec, people: [] }, topic.status);
   await f.checker.reconcile("x");
@@ -167,7 +163,7 @@ test("failed fallback retries only the saved Me delivery without another Output"
   f.ports.contactMe = async () => ({ target, receivers: [personRef(f.me)] });
   f.output("x", await f.note("L3")); await f.checker.reconcile("x");
   const actual = f.store.get("x")!.status.delivery;
-  f.store.begin("x"); f.store.retry("x", "transport temporarily unavailable", new Date().toISOString());
+  f.store.begin("x"); f.store.retry("x", "transport temporarily unavailable");
   await f.checker.reconcile("x"); f.store.begin("x"); f.store.delivered("x");
   assert.deepEqual(f.store.get("x")!.status.delivery, actual);
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "denied");
@@ -200,4 +196,76 @@ test("real Runner automatically reconciles a newly submitted Output before Web p
   for (let i = 0; i < 100 && aide.outputStore.get(accepted.outputId)!.status.phase !== "delivered"; i++) await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(aide.outputStore.get(accepted.outputId)!.status.disclosure?.decision, "allowed");
   assert.equal(aide.outputStore.get(accepted.outputId)!.status.phase, "delivered");
+});
+
+/** @case Classification can change without invalidating cited content; people visibility uses a union. */
+test("Output policy combines current classifications and people across the cited Notes", async t => {
+  const f = await setup(t); const a = await f.note("L1", "people", [personRef(f.me) as PersonRef]);
+  const b = await f.note("L1", "people", [personRef(f.other) as PersonRef]);
+  f.store.create("topic", "x", { ...outputSpec(f.topic, { topicId: "topic", text: a.spec.text, target: larkPersonAddress("app", "ou_c") }),
+    notes: [a, b].map(n => ({ uid: n.metadata.uid, version: noteVersion(n) })) });
+  await f.checker.reconcile("x");
+  assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
+  assert.deepEqual(f.store.get("x")!.status.disclosure!.policy?.people, [f.me.metadata.uid, f.other.metadata.uid].sort());
+  await f.client.replace(a, { ...a.spec, sensitivity: "L3" }, a.status);
+  await f.checker.reconcile("x");
+  assert.match(f.store.get("x")!.status.disclosure!.reason, /sensitivity L3/);
+  assert.doesNotMatch(f.store.get("x")!.status.disclosure!.reason, /changed since generation/);
+});
+
+/** @case A typed classification can be stored even when its current subject cannot yield a disclosure audience. */
+test("Person-subject topic visibility falls back to Me during disclosure", async t => {
+  const f = await setup(t);
+  const note = await f.client.create(NOTE_TYPE, { name: "person-note", spec: { subject: personRef(f.other), text: "Profile fact", people: [], sensitivity: "L1", visibility: "topic" }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
+  f.output("person-scope", note); await f.checker.reconcile("person-scope");
+  assert.equal(f.store.get("person-scope")!.status.disclosure!.decision, "denied");
+  assert.deepEqual(f.store.get("person-scope")!.status.delivery!.target, webAddress("topic"));
+});
+
+/** @case A failed transport must not monopolize the real controller queue or require a Channel polling loop. */
+test("real Runner isolates one Output's transport failure and automatically retries it", async t => {
+  const { Aide } = await import("../src/app.ts");
+  const { fakeOptions } = await import("./fake-harness.ts");
+  const home = mkdtempSync(join(tmpdir(), "aide-output-retry-"));
+  const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No inference expected"); } }, home, [], home, "cli_test"),
+    destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: true }) }, pino({ level: "silent" }));
+  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  let attempts = 0;
+  aide.registerOutputTransport(() => ({ replay: "idempotent", async send() { if (++attempts === 1) throw new Error("temporary send failure"); return undefined; } }));
+  await aide.start(); await aide.topics.ensure("retry");
+  const slow = await aide.topics.say("retry", undefined, "Retry this", undefined, { target: larkAddress("cli_test", "oc_me") });
+  const ready = await aide.topics.say("retry", undefined, "Ready for Me");
+  for (let i = 0; i < 200 && [slow, ready].some(x => aide.outputStore.get(x.outputId)!.status.phase !== "delivered"); i++) await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(aide.outputStore.get(ready.outputId)!.status.phase, "delivered");
+  assert.equal(aide.outputStore.get(slow.outputId)!.status.phase, "delivered");
+  assert.equal(attempts, 2); assert.equal(aide.outputStore.get(slow.outputId)!.status.lastError, undefined);
+});
+
+/** @case Moving the subject under another root invalidates the cached scope without a separate authorization anchor. */
+test("root visibility follows current parent relationships before delivery", async t => {
+  const f = await setup(t);
+  const { TOPIC_TYPE } = await import("../plugins/personal/topic/model.ts");
+  const root = await f.client.create(TOPIC_TYPE, { name: "root", spec: { id: "root", people: [personRef(f.other)] }, status: {} });
+  const attached = await f.client.replace(f.topic, { ...f.topic.spec, parentRef: resourceRef(root) }, f.topic.status);
+  f.output("root-scope", await f.note("L1", "root"));
+  await f.checker.reconcile("root-scope");
+  assert.equal(f.store.get("root-scope")!.status.disclosure!.decision, "allowed");
+  const { parentRef: _parent, ...detached } = attached.spec;
+  await f.client.replace(attached, detached, attached.status);
+  await f.checker.reconcile("root-scope");
+  assert.equal(f.store.get("root-scope")!.status.disclosure!.decision, "denied");
+});
+
+test("policy aggregates mixed scopes in one place and does not turn an empty audience into public", async () => {
+  const { disclosurePolicy } = await import("../plugins/personal/output/policy.ts");
+  assert.deepEqual(disclosurePolicy([
+    { sensitivity: "L1", visibility: "people", people: ["a"] },
+    { sensitivity: "L3", visibility: "any", people: ["b"] },
+  ]), { sensitivity: "L3", visibility: "people", people: ["a", "b"] });
+  assert.deepEqual(disclosurePolicy([
+    { sensitivity: "L1", visibility: "topic", people: [], topicPeople: ["a"] },
+    { sensitivity: "L1", visibility: "topic", people: [], topicPeople: ["b"] },
+  ])?.people, ["a", "b"]);
+  assert.equal(disclosurePolicy([{ sensitivity: "L1", visibility: "root", people: [] }]), undefined);
+  assert.deepEqual(disclosurePolicy([{ sensitivity: "L1", visibility: "people", people: [] }]), { sensitivity: "L1", visibility: "people", people: [] });
 });

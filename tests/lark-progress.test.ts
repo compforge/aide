@@ -20,7 +20,7 @@ import { fakeOptions as baseFakeOptions } from "./fake-harness.ts";
 import { LOCAL_ME } from "../plugins/personal/person/model.ts";
 // These transport tests use a known Me audience; disclosure rejection has dedicated tests.
 const fakeOptions = (...args: Parameters<typeof baseFakeOptions>) => ({ ...baseFakeOptions(...args),
-  destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: false }),
+  destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: true }),
   checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }) });
 
 const log = pino({ level: "silent" });
@@ -86,7 +86,7 @@ test("Lark finalizes a say question and uses a new card for the next Input", asy
   await f.channel.deliver();
   assert.equal(f.calls.filter((call) => call.kind === "create").length, 2);
   assert.equal(f.calls.filter((call) => call.kind === "send").length, 2);
-  assert.equal(f.calls.filter((call) => call.kind === "text").length, 0, "A finalized card replaces normal delivery of the same Message");
+  assert.equal(f.calls.filter((call) => call.kind === "text").length, 0, "Rendering a card does not send or acknowledge business Output");
   const updates = f.calls.filter((call) => ["content", "settings", "update", "patch"].includes(call.kind));
   for (const cardId of ["card-1", "card-2"]) {
     const sequences = updates.filter((call) => call.args[0] === cardId).map((call) => call.args[call.kind === "content" ? 3 : 2] as number);
@@ -178,14 +178,16 @@ test("Lark preserves card ID and send uuid after an ambiguous card send", async 
   assert.deepEqual(sends[0]?.args, sends[1]?.args);
 });
 
-test("Lark card failure falls back to final text without reexecuting work", async (t) => {
+test("Lark card failure leaves independent text transport available", async (t) => {
   const f = setup(t); await f.channel.deliver();
   f.transport.cards!.content = async () => { throw new Error("permission or network failure"); };
   f.view({ phase: "running", think: "思考内容" }); await f.channel.deliver();
+  await f.channel.send({ id: "final", target: larkAddress("cli_progress", "oc_chat"), text: "完整结果" });
   f.messages.push(message("final", "完整结果")); f.view({ phase: "done", content: "完整结果", messageIds: ["final"] });
   await f.channel.deliver();
   assert.deepEqual(f.calls.filter((call) => call.kind === "text").map((call) => call.args[1]), ["完整结果"]);
   await f.reopen(); await f.channel.deliver();
+  await f.channel.send({ id: "final", target: larkAddress("cli_progress", "oc_chat"), text: "完整结果" });
   assert.equal(f.calls.filter((call) => call.kind === "text").length, 1);
 });
 
@@ -202,9 +204,10 @@ test("Lark retries a failed live layout update after reconnecting", async (t) =>
   assert.equal(card.body.elements[0]?.tag, "collapsible_panel");
 });
 
-test("Lark long answers retain full text via the existing split outbox", async (t) => {
+test("Lark long answers retain full text through the split transport", async (t) => {
   const f = setup(t); await f.channel.deliver();
   const text = "答案😀".repeat(2000);
+  await f.channel.send({ id: "long", target: larkAddress("cli_progress", "oc_chat"), text });
   f.messages.push(message("long", text)); f.view({ phase: "done", content: Array.from(text).slice(0, 4000).join(""), overflow: true, messageIds: ["long"] });
   await f.channel.deliver();
   const parts = f.calls.filter((call) => call.kind === "text").map((call) => call.args[1]);

@@ -1,3 +1,4 @@
+import { OutputDelivery, type OutputTransportResolver } from "../plugins/personal/output/delivery.ts";
 import { forgeCatalog } from "../connectors/forge/catalog.ts";
 import { validateForgeSources } from "../plugins/personal/source/pull-request/config.ts";
 import { personalConnectorConfig } from "./personal-connectors.ts";
@@ -6,7 +7,6 @@ import { initialTopicName } from "../plugins/personal/topic/model.ts";
 import { ROUTE_HARNESS } from "../plugins/personal/route/model.ts";
 import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { ResourceStorage } from "./host/resource/storage.ts";
-import { sameAddress } from "./address.ts";
 import { OutputDisclosure, type SemanticCheck } from "../plugins/personal/output/disclosure.ts";
 import { isChannelAddress, larkEndpoint } from "./channel/address.ts";
 import { SayInputSchema } from "../plugins/personal/output/action.ts";
@@ -16,7 +16,6 @@ import { outputView } from "./output.ts";
 import { personRequirements } from "../plugins/personal/person/requirements.ts";
 import { requirementOutputs } from "../plugins/personal/output/requirements.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
-import { reconcileChannelOutputs } from "./channel/delivery.ts";
 import { enabledLarkApps } from "./channel/config.ts";
 import { personRef } from "../plugins/personal/person/model.ts";
 import { larkPersonAddress, webAddress, assertChannelDelivery } from "./channel/address.ts";
@@ -83,6 +82,8 @@ export class Aide {
   private readonly inputs: InputStore;
   readonly outputStore: OutputStore;
   private readonly disclosure: OutputDisclosure;
+  private readonly delivery: OutputDelivery;
+  private readonly outputTransports = new Set<OutputTransportResolver>();
   private readonly unsubscribeOutputs: () => void;
   private readonly unsubscribeResources: () => void;
   private readonly connectors: ConnectorClient;
@@ -156,7 +157,7 @@ export class Aide {
         actions: { "personal/reconcile_output": async (context, raw) => {
           const id = (raw as { id: string }).id;
           if (context.resourceRef?.kind !== "Output" || context.resourceRef.name !== id) throw new Error("Output reconcile requires its own resource context");
-          await this.disclosure.reconcile(id); return { outputId: id };
+          await this.delivery.reconcile(id); return { outputId: id };
         }, "personal/submit_topic": (context, input) => this.personal.submitTopic(context, input), "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
           const input = SayInputSchema.parse(raw);
           const text = input.text;
@@ -185,6 +186,10 @@ export class Aide {
     this.disclosure = new OutputDisclosure(this.outputStore, { marks: this.meMarks,
       audience: target => this.outputAudience(target), contactMe: topicId => this.resolveContact(topicId, { me: true }), check: options.checkDisclosure }, log);
     this.outputStore.check = id => this.disclosure.reconcile(id);
+    this.delivery = new OutputDelivery(this.outputStore, async target => {
+      if (isChannelAddress(target) && target.channelId === "web") return { replay: "idempotent", async send() { return undefined; } };
+      for (const resolve of this.outputTransports) { const transport = await resolve(target); if (transport) return transport; }
+    }, log);
     this.runtime.subscribe(() => this.notify());
     this.personal.topics.subscribe(() => this.notify());
   }
@@ -221,14 +226,11 @@ export class Aide {
     return this.personal.chiefSession(scope, config);
   }
 
-  async outputDelivered(outputId: string) { if (this.outputStore.get(outputId)) this.outputStore.delivered(outputId); }
-  async outputSending(outputId: string, expected?: { target: import("@compforge/aide-plugin").Address; text: string }) {
-    if (!this.outputStore.get(outputId)) return true; // Channel-owned fixed system notices.
-    const output = await this.outputStore.prepare(outputId);
-    if (!["pending", "sending"].includes(output.status.phase) || !output.status.delivery || (expected && (!sameAddress(output.status.delivery.target, expected.target) || output.status.delivery.text !== expected.text))) return false;
-    this.outputStore.begin(outputId); return true;
+  registerOutputTransport(resolve: OutputTransportResolver): () => void {
+    this.outputTransports.add(resolve);
+    return () => { this.outputTransports.delete(resolve); };
   }
-  async outputRetry(outputId: string, error: string, nextAttemptAt: string) { if (this.outputStore.get(outputId)) this.outputStore.retry(outputId, error, nextAttemptAt); }
+  reconcileOutput(id: string): Promise<void> { return this.delivery.reconcile(id); }
   outputs() { return this.outputStore.list().map(outputView).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
 
   works() { return this.personal.works(); }
@@ -314,7 +316,6 @@ export class Aide {
   }
   start(): Promise<void> {
     return this.starting ??= Promise.resolve().then(async () => {
-      reconcileChannelOutputs(this.outputStore, enabledLarkApps(this.options.config?.channels ?? {}), this.log);
       await this.initializePeople();
       await this.personal.start();
     });
@@ -324,7 +325,9 @@ export class Aide {
     for (;;) {
       const before = JSON.stringify([this.inputs.list(), this.topics.list()]);
       await this.personal.settled();
-      for (const output of this.outputStore.list()) if (output.status.phase === "pending") await this.disclosure.reconcile(output.metadata.name);
+      // Fixture publications can bypass controller watches; drain independently without replacing runtime retry scheduling.
+      await Promise.allSettled(this.outputStore.list().filter(output => output.status.phase === "pending")
+        .map(output => this.delivery.reconcile(output.metadata.name)));
       const after = JSON.stringify([this.inputs.list(), this.topics.list()]);
       if (before === after) break;
     }

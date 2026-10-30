@@ -3,7 +3,7 @@ import { updateMarkdown } from '../shared/markdown.ts';
 import { historyBlocks, replyText, processPreview, replyLabels, toolLabels } from '../../channel/reply-layout.ts';
 import type { TopicBlock, TopicView } from '../../channel/view.ts';
 type LiveActivity = NonNullable<TopicView['meta']['activity']> & {
-  harnesses: TopicBlock[]; answers: string[];
+  harnesses: TopicBlock[]; answers: TopicBlock[];
   blocks: (TopicBlock & { kind: string; text: string })[];
 };
 const outputText = (block: TopicBlock) => block.label ? `**${block.label}**\n\n${block.content}` : block.content;
@@ -132,9 +132,9 @@ export function createTimeline() {
       const group = block.group_id ? roots.filter((item) => item.group_id === block.group_id) : [block];
       const executions = new Set(group.filter((item) => item.type === 'execution').map((item) => item.id));
       const children = history.filter((item) => executions.has(item.parent_id ?? ''));
-      const answers = group.filter((item) => item.type === 'message' && item.role === 'aide').map(outputText);
-      const answer = answers.join('\n\n');
-      const process = children.filter((item) => item.type !== 'text' || !answers.includes(item.content));
+      const answers = group.filter((item) => item.type === 'message' && item.role === 'aide');
+      const answer = answers.map(outputText).join('\n\n');
+      const process = children.filter((item) => item.type !== 'text' || !answers.some(answer => answer.content === item.content));
       const failed = group.some((item) => item.status === 'failed' || item.status === 'interrupted');
       const phase = failed ? 'failed' : 'done';
       const title = 'Aide · ' + replyLabels[phase];
@@ -194,10 +194,10 @@ export function createTimeline() {
       : last?.kind === 'tool' && last.status === 'in_progress' ? '正在调用工具'
       : last?.kind === 'thought' ? '正在思考' : last?.kind === 'text' ? '正在回复' : '正在处理';
     replyHeading(find(area, '.reply-envelope'), 'Aide · ' + label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : ''), activity.harnesses);
-    const answer = activity.answers.join('\n\n');
+    const answer = activity.answers.map(outputText).join('\n\n');
     updateAnswer($('activity-answer').parentElement as HTMLDetailsElement, activity.phase, answer);
     const process = activity.blocks.filter((block) => block.kind !== 'text' ||
-      !activity.answers.includes(block.text));
+      !activity.answers.some(answer => answer.content === block.text));
     updateProcess($<HTMLDetailsElement>('activity-thought'), activity.phase, process.map((block) => ({ type: block.kind, content: block.text, status: block.status })));
     const ids = new Set(process.map((block) => block.id));
     for (const [id, node] of activityNodes) if (!ids.has(id)) { node.remove(); activityNodes.delete(id); }
@@ -216,7 +216,7 @@ export function createTimeline() {
       (block.status === 'running' || (activity && block.group_id === activity.id))).map((block) => block.id));
     renderActivity(activity && { ...activity,
       harnesses: view.blocks.filter((block) => block.type === 'execution' && liveIds.has(block.id)),
-      answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === activity.id).map(outputText),
+      answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === activity.id),
       blocks: view.blocks.filter((block) => liveIds.has(block.parent_id ?? ''))
         .map((block) => ({ ...block, kind: block.type, text: block.content })) });
   }

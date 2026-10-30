@@ -1,6 +1,5 @@
 import type { TopicLocator } from "../../../plugins/personal/topic/locator.ts";
 import { larkAddress, larkThreadAddress, larkTopicKey, larkTopicLocator, larkEndpoint } from "../address.ts";
-import { channelOutputs } from "../output.ts";
 import type { OutputView } from "../../output.ts";
 import { CHANNELS, bindChannelInput } from "../definition.ts";
 import { createHash } from "node:crypto";
@@ -64,10 +63,10 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
   private stopped = false;
   private retryAt = 0;
   private readonly cardRetry = new Map<string, number>();
-  private readonly receiptRetry = new Map<string, number>();
+  private readonly unregisterOutput?: () => void;
   private readonly chatNames = new Map<string, { name?: string; until: number }>();
 
-  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "outputs" | "outputDelivered" | "outputSending" | "outputRetry">,
+  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "registerOutputTransport">,
     private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
     this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
@@ -77,6 +76,10 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     // Preserve previously registered chat-level topics and pending delivery receipts on upgrade.
     if (Array.isArray(saved.chats)) saved.chats = Object.fromEntries(saved.chats.map((chatId: string) => [larkTopicKey(appId, chatId), chatId]));
     this.state = StateSchema.parse(saved);
+    this.unregisterOutput = aide.registerOutputTransport?.(target => {
+      if (larkEndpoint(target)?.appId !== this.appId) return;
+      return { replay: "idempotent", send: message => this.send(message) };
+    });
   }
 
   async start(): Promise<void> {
@@ -204,11 +207,11 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
   deliver(): Promise<void> {
     if (this.outbound) return this.outbound;
     if (this.stopped || Date.now() < this.retryAt) return Promise.resolve();
-    this.outbound = this.drainOutbox().finally(() => { this.outbound = undefined; });
+    this.outbound = this.updatePresentation().finally(() => { this.outbound = undefined; });
     return this.outbound;
   }
 
-  private async drainOutbox(): Promise<void> {
+  private async updatePresentation(): Promise<void> {
     if (this.transport.cards && this.progress) {
       for (const [topicId, chatId] of Object.entries(this.state.chats)) {
         for (const view of this.progress(topicId)) {
@@ -223,16 +226,9 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
       }
     }
     const notices: OutputView[] = this.state.notices.map((n) => ({ ...n, topicUid: "", target: larkAddress(this.appId, this.state.chats[n.topicId]!), status: { phase: "pending", attempts: 0 } }));
-    const outputs = [...channelOutputs(this.aide), ...notices]
-      .filter((o) => larkEndpoint(o.target)?.appId === this.appId)
-      .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
-    for (const message of outputs) {
-      if (message.status.phase === "delivered" || message.status.phase === "failed" || message.status.phase === "uncertain") continue;
-      if (message.status.nextAttemptAt && Date.now() < Date.parse(message.status.nextAttemptAt)) continue;
-      const endpoint = larkEndpoint(message.target);
-      if (!endpoint) continue;
+    for (const message of notices) {
+      const endpoint = larkEndpoint(message.target)!;
       const { receiveId, receiveIdType } = endpoint;
-      if (await this.aide.outputSending?.(message.id, { target: message.target, text: message.text }) === false) continue;
       const parts = textParts(message.text);
       for (const [index, text] of parts.entries()) {
         if (this.stopped) return;
@@ -244,38 +240,43 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
           this.retryAt = Date.now() + 10_000;
           const nextAttemptAt = new Date(this.retryAt).toISOString(), failure = larkSendFailure(error);
           this.log.warn({ outputId: message.id, target: message.target, part: index, topicId: message.topicId,
-            attempt: message.status.attempts + 1, retryable: true, nextAttemptAt, ...failure }, "Lark Output send failed; retry scheduled");
-          await this.aide.outputRetry?.(message.id, failure.error, nextAttemptAt);
+            attempt: message.status.attempts + 1, retryable: true, nextAttemptAt, ...failure }, "Lark fixed notice send failed; retry scheduled");
           return;
         }
         this.save({ ...this.state, delivered: [...this.state.delivered, id] });
         this.log.info({ messageId: message.id, part: index, topicId: message.topicId }, "Lark message delivered");
       }
-      await this.acknowledge(message.topicId, message.id);
+      this.save({ ...this.state, notices: this.state.notices.filter(n => n.id !== message.id) });
     }
   }
 
-  /** @spec Receipt failures retain retryable messages without blocking unrelated outbound delivery. */
-  private async acknowledge(topicId: string, messageId: string): Promise<void> {
-    if (Date.now() < (this.receiptRetry.get(messageId) ?? 0)) return;
-    try {
-      await this.aide.outputDelivered?.(messageId);
-      this.receiptRetry.delete(messageId);
-    } catch (err) {
-      this.receiptRetry.set(messageId, Date.now() + 10_000);
-      this.log.warn({ err, topicId, messageId }, "Lark delivery receipt failed; retrying independently in 10 seconds");
+  /** @spec Sends one checked delivery with durable per-part receipts; scheduling belongs to Output Reconcile. */
+  async send(message: { id: string; target: import("@compforge/aide-plugin").Address; text: string }) {
+    if (this.stopped) throw new Error("Lark transport is stopped");
+    const endpoint = larkEndpoint(message.target);
+    if (!endpoint || endpoint.appId !== this.appId) throw new Error("Lark target belongs to another transport");
+    for (const [index, text] of textParts(message.text).entries()) {
+      const id = this.deliveryId(message.id, index);
+      if (this.state.delivered.includes(id)) continue;
+      try { await this.transport.send(endpoint.receiveId, text, id, endpoint.receiveIdType, endpoint.replyToMessageId); }
+      catch (error) {
+        this.log.warn({ outputId: message.id, target: message.target, part: index, ...larkSendFailure(error) }, "Lark send failed");
+        throw new Error("Lark send failed");
+      }
+      this.save({ ...this.state, delivered: [...this.state.delivered, id] });
     }
+    return undefined;
   }
 
   /**
-   * @spec Card operations share a persisted increasing sequence; only a finalized card acknowledges business Message delivery.
+   * @spec Card operations share a persisted increasing sequence; cards never acknowledge business Output delivery.
    * @link docs/channel/lark.md
    */
   private async updateCard(topicId: string, chatId: string, view: LarkProgress): Promise<void> {
     const transport = this.transport.cards!;
     const live = view.phase === "running" || view.phase === "queued";
     let card = this.state.cards[view.id];
-    // Completed history without a live card uses the existing durable text outbox.
+    // Completed history without a live card is delivered through Output Reconcile.
     if (!card && !live) return;
     if (!card) {
       card = { cardId: await transport.create(progressCard(view, live)), sent: false, sequence: 0,
@@ -321,11 +322,6 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
       this.saveCard(view.id, card);
     }
     if (!live) {
-      if (!view.overflow) {
-        const receipts = view.messageIds.map((id) => this.deliveryId(id, 0));
-        this.save({ ...this.state, delivered: [...new Set([...this.state.delivered, ...receipts])] });
-        for (const id of view.messageIds) await this.acknowledge(topicId, id);
-      }
       this.log.info({ inputId: view.id, phase: view.phase }, "Lark progress card settled");
     }
     card.signature = signature; this.saveCard(view.id, card);
@@ -340,6 +336,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
 
   async close(): Promise<void> {
     this.stopped = true;
+    this.unregisterOutput?.();
     clearInterval(this.timer);
     this.transport.close();
     await Promise.allSettled([this.inbound, this.outbound]);

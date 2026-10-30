@@ -80,7 +80,7 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const summaries = new Map(state.invocationSummaries.filter((turn) => relatedTurns.has(turn.invocationId)).map((turn) => [turn.invocationId, turn]));
   const executions = new Map<string, { header: TopicBlock; blocks: TopicBlock[] }>();
   const roots: TopicBlock[] = aide.outputs().filter((message) => resource && (visibleOutput(message, resource) || memberUids.has(message.topicUid) || message.inputIds?.some(id => inputIds.has(id))))
-    .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, label: message.status.phase === "uncertain" ? "投递结果待确认" : message.status.phase === "failed" ? "投递失败" : message.status.disclosure?.decision === "denied" ? (message.status.phase === "delivered" ? "已转告 Me，原目标未发送" : "原目标未发送，正在告知 Me") : !message.status.disclosure ? "待检查，尚未发送" : message.status.phase !== "delivered" ? "尚未送达" : undefined, detail: message.status.disclosure?.reason, receivers: message.receivers, target: message.target,
+    .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, label: outputLabel(message.status), detail: message.status.disclosure?.reason, receivers: message.receivers, target: message.target,
       ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
     }));
   if (resource && summaryText(aide.topics.resources, resource)) roots.push({ id: "topic-summary", type: "summary", label: "历史摘要", icon: "📝",
@@ -139,4 +139,12 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
       id: active?.id ?? `queued:${topicId}`, phase: active?.status.phase ?? "queued", queued,
     } : null },
   };
+}
+
+function outputLabel(status: import("../../plugins/personal/output/model.ts").OutputStatus): string | undefined {
+  if (status.phase === "uncertain") return "投递结果待确认";
+  if (status.phase === "failed") return "投递失败";
+  if (status.disclosure?.decision === "denied") return status.phase === "delivered" ? "已转告 Me，原目标未发送" : "原目标未发送，正在告知 Me";
+  if (!status.disclosure) return "待检查，尚未发送";
+  if (status.phase !== "delivered") return "尚未送达";
 }

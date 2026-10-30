@@ -1,4 +1,4 @@
-import type { InputSpec, InputStatus } from "./model.ts";
+import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
 import type { Resource } from "@compforge/aide-plugin";
 import type { InputStore } from "./store.ts";
 
@@ -24,7 +24,7 @@ const unfinished = (stage: string) => `EXISTS (SELECT 1 FROM json_each(data, '$.
 const completed = `(${field("status.route.completedAt")} IS NOT NULL AND (json_type(data, '$.object.status.assess') IS NULL OR ${field("status.assess.completedAt")} IS NOT NULL) AND NOT ${unfinished("handle")})`;
 const errors = `(${field("status.route.lastError")} IS NOT NULL OR ${field("status.assess.lastError")} IS NOT NULL OR EXISTS
   (SELECT 1 FROM json_each(data, '$.object.status.handle') WHERE json_extract(value, '$.lastError') IS NOT NULL))`;
-const scope = `scope = 'personal' AND kind = 'aide.dev/Input' AND ${field("apiVersion")} = 'aide.dev/v1alpha3' AND ${field("metadata.namespace")} = 'v1' AND ${field("metadata.deletionTimestamp")} IS NULL`;
+const scope = `scope = 'personal' AND kind = 'aide.dev/Input' AND ${field("apiVersion")} = '${INPUT_TYPE.apiVersion}' AND ${field("metadata.namespace")} = 'v1' AND ${field("metadata.deletionTimestamp")} IS NULL`;
 
 /**
  * @spec Filter before paging, newest first with a stable key tie-breaker. Browsing does not refresh retention access times.

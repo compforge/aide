@@ -1,4 +1,4 @@
-import { disclosureScope, type MaterialDisclosure } from "../disclosure.ts";
+import { type MaterialDisclosure } from "../disclosure.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { Resource, ResourceClient, ResourceCommit, ResourceValidationContext } from "@compforge/aide-plugin";
 import { NOTE_TYPE, SubjectSchema, NoteSpecSchema, noteReference, noteVersion, type NoteResource, type NoteSpec, type NoteStatus } from "./model.ts";
@@ -6,7 +6,7 @@ import { resourceRef } from "../input/state.ts";
 import { contentVersion } from "../context-write.ts";
 import type { ResourceContext } from "../context.ts";
 
-export interface SummaryUpdate extends MaterialDisclosure { text: string; people?: NoteSpec["people"] }
+export interface SummaryUpdate extends MaterialDisclosure { text?: string; people?: NoteSpec["people"] }
 export type SummaryResource = Resource<unknown, ResourceContext>;
 const summaryName = (resource: SummaryResource) => `summary-${resource.metadata.uid}`;
 type Reader = Pick<ResourceValidationContext, "page">;
@@ -39,10 +39,10 @@ export async function summaryView<R extends SummaryResource>(resources: Resource
 export async function prepareSummary(resources: ResourceClient, owner: SummaryResource, update: SummaryUpdate,
   writer?: NoteStatus["writer"], version = contentVersion(owner)) {
   if (contentVersion(owner) !== version) throw new Error("Summary version conflict; read and merge again");
-  const { text } = update;
-  if (text.length > 16000) throw new Error("Summary exceeds 16000 characters");
   let note = await readSummary(resources, owner);
-  if (!note && !text && !update.people?.length) return { note: undefined, writes: [] as ResourceCommit[], status: { summaryRevision: "" } };
+  const text = update.text ?? note?.spec.text ?? "";
+  if (text.length > 16000) throw new Error("Summary exceeds 16000 characters");
+  if (!note && !text && !update.people?.length && update.sensitivity === undefined && update.visibility === undefined) return { note: undefined, writes: [] as ResourceCommit[], status: { summaryRevision: "" } };
   if (!note) {
     // An empty reserved Note is safe across retries; only the commit below publishes content and its reference.
     const name = summaryName(owner);
@@ -61,10 +61,8 @@ export async function prepareSummary(resources: ResourceClient, owner: SummaryRe
   if (note.metadata.deletionTimestamp || note.spec.subject.uid !== owner.metadata.uid) throw new Error("Summary Note owner changed");
   const people = update.people === undefined ? note.spec.people : [...new Map(update.people.map(p => [p.uid, p])).values()];
   const visibility = update.visibility ?? note.spec.visibility ?? "people";
-  const scope = note.spec.visibility === visibility ? note.spec.disclosureScope : await disclosureScope(resources, resourceRef(owner), visibility);
-  const { disclosureScope: _oldScope, ...previousSpec } = note.spec;
-  const spec = NoteSpecSchema.parse({ ...previousSpec, summaryOf: resourceRef(owner), text, people,
-    sensitivity: update.sensitivity ?? note.spec.sensitivity ?? "L3", visibility, ...(scope ? { disclosureScope: scope } : {}) });
+  const spec = NoteSpecSchema.parse({ ...note.spec, summaryOf: resourceRef(owner), text, people,
+    sensitivity: update.sensitivity ?? note.spec.sensitivity ?? "L3", visibility });
   const changed = !isDeepStrictEqual(note.spec, spec);
   const { writer: _previousWriter, ...noteStatus } = note.status;
   const updated: NoteResource = { ...note, spec, status: { ...noteStatus,

@@ -23,11 +23,11 @@ Channel 提交用户消息时提供 source 地址、稳定 sessionId 与消息�
 
 Personal 决定输入进入哪个 Topic、是否创建 Work。普通回答直接进入消息流，需要持续跟进时才操作 Task / Routine。同一话题的后续消息可以回答问题或补充已有工作。Web 的 Topic 列表是 Personal 的业务视图，可以查看 Lark 或 Source 会话。
 
-Source 是外部观察入口，可以提交带话题 sessionId 或没有话题线索的 Input，也可以携带观察所在的 source 地址。Route 分派后，Chief决定是否及向哪里沟通；Lark 投递读取 Output.target，不从话题身份推导聊天目标。地址与收件处选择见 [Output](../personal/output.md)。
+Source 是外部观察入口，可以提交带话题 sessionId 或没有话题线索的 Input，也可以携带观察所在的 source 地址。Route 分派后，Chief决定是否及向哪里沟通；Lark transport 使用 Reconciler 传入的实际目标，不从话题身份推导聊天目标。地址与收件处选择见 [Output](../personal/output.md)。
 
 ## 投递与进度
 
-正式回复与工作结果是持久 Output，Channel 按检查后 status.delivery 保存的实际 target/text 与投递记录发送。失败重试不应重新执行已经完成的业务。客户端断开也不取消服务端 Task / Routine。
+正式回复与工作结果是持久 Output，Output Reconciler 按检查后 status.delivery 保存的实际 target/text 调用 Channel 发送并维护投递记录。失败重试不应重新执行已经完成的业务。客户端断开也不取消服务端 Task / Routine。
 
 思考、工具调用和文字增量属于执行进展，来自 Harness 事件的有界实时投影。Me 的 Web 私有界面使用 Markdown 展示完整进展；Lark 卡片只展示通用处理阶段和通过披露检查、已经投递的正文，不展示私有思考或工具内容。进展不写成新的用户 Input，也不触发 Work。
 

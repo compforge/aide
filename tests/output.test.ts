@@ -1,5 +1,5 @@
 import { approveFixtureOutput } from "./output-fixture.ts";
-import { reconcileChannelOutputs } from "../src/channel/delivery.ts";
+import { OutputDelivery, type OutputTransportResolver } from "../plugins/personal/output/delivery.ts";
 import { larkSendFailure } from "../src/channel/lark/client.ts";
 import { assertChannelDelivery, larkAddress, webAddress } from "../src/channel/address.ts";
 import { definition } from "./fixtures/resource-definition.ts";
@@ -12,7 +12,6 @@ import pino from "pino";
 import { OUTPUT_TYPE, type OutputSpec } from "../plugins/personal/output/model.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputPrinter } from "../plugins/personal/output/printer.ts";
-import { outputView } from "../src/output.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
@@ -139,21 +138,23 @@ test("Lark sends to explicit Output target after Topic deletion and reuses retry
   const transport: LarkTransport = { async start() {}, close() {}, async chatName() { return undefined; }, async send(chatId, _text, id) {
     sent.push({ chatId, id }); if (fail) { fail = false; throw new Error("ambiguous send"); }
   } };
-  const service = { receive: async () => { throw new Error("must not execute Input"); }, outputs: () => f.outputs.list().map(outputView),
-    outputSending: async (id: string) => f.outputs.begin(id), outputDelivered: async (id: string) => f.outputs.delivered(id),
-    outputRetry: async (id: string, error: string, at: string) => f.outputs.retry(id, error, at) };
+  let resolve: OutputTransportResolver = () => undefined;
+  const service = { receive: async () => { throw new Error("must not execute Input"); },
+    registerOutputTransport(next: OutputTransportResolver) { resolve = next; return () => { resolve = () => undefined; }; } };
+  const delivery = new OutputDelivery(f.outputs, target => resolve(target), pino({ level: "silent" }));
+  f.outputs.check = async id => { approveFixtureOutput(f.outputs, id); };
   let channel = new LarkChannel(f.root, "app", service, transport, pino({ level: "silent" }));
   t.after(() => channel.close());
-  await channel.deliver();
+  await assert.rejects(delivery.reconcile("delivery"));
   assert.equal(f.outputs.get("delivery")!.status.phase, "pending");
   await channel.close();
-  f.outputs.retry("delivery", "test retry due", new Date(0).toISOString());
   channel = new LarkChannel(f.root, "app", service, transport, pino({ level: "silent" }));
-  await channel.deliver();
+  await delivery.reconcile("delivery");
   assert.deepEqual(sent, [{ chatId: "unseen-chat", id: sent[0]!.id }, { chatId: "unseen-chat", id: sent[0]!.id }]);
   assert.equal(f.outputs.get("delivery")!.status.phase, "delivered");
   assert.equal(f.outputs.get("delivery")!.status.attempts, 2);
-  await channel.deliver(); assert.equal(sent.length, 2);
+  await delivery.reconcile("delivery"); assert.equal(sent.length, 2);
+  assert.equal(f.outputs.get("delivery")!.status.lastError, undefined);
 });
 
 
@@ -173,28 +174,26 @@ test("Output admission rejects disabled or mismatched Lark targets before persis
   assert.ok(f.outputs.create("owner", "valid", { ...f.spec(), target: larkAddress("app", "chat") }));
 });
 
-test("Reconfigured channels fail pending Outputs and preserve uncertain sends without replay", async t => {
+/** @case Reconciliation of one failed Output cannot hold later Outputs behind a global scan. */
+test("Output preflight failures are isolated; interrupted non-idempotent delivery stays uncertain", async t => {
   const f = await setup(t);
-  for (const id of ["pending", "sending", "retrying", "delivered"]) f.outputs.create("owner", id, { ...f.spec(), target: larkAddress("app", "chat") });
-  for (const output of f.outputs.list()) approveFixtureOutput(f.outputs, output.metadata.name);
-  f.outputs.begin("sending"); f.outputs.delivered("delivered");
-  f.outputs.begin("retrying"); f.outputs.retry("retrying", "ambiguous send", new Date(0).toISOString());
-  const reopened = new OutputStore(f.root, target => assertChannelDelivery(target, ["different-app"]));
-  const logs: Record<string, unknown>[] = [];
-  const log = pino({}, { write(line) { logs.push(JSON.parse(line)); } });
-  reconcileChannelOutputs(reopened, ["different-app"], log);
-  assert.deepEqual(new Set(logs.map(record => record.outputId)), new Set(["pending", "sending", "retrying"]));
-  assert.ok(logs.every(record => record.level === 50 && record.retryable === false && record.target && record.error));
-  assert.equal(reopened.get("pending")!.status.phase, "failed");
-  assert.equal(reopened.get("pending")!.status.attempts, 0);
-  assert.equal(reopened.get("sending")!.status.phase, "uncertain");
-  assert.equal(reopened.get("sending")!.status.attempts, 1);
-  assert.equal(reopened.get("retrying")!.status.phase, "uncertain");
-  assert.equal(reopened.get("retrying")!.status.attempts, 1);
-  assert.equal(reopened.get("delivered")!.status.phase, "delivered");
-  reconcileChannelOutputs(reopened, ["different-app"], log);
-  assert.equal(logs.length, 3, "Terminal failures are not logged on every restart");
-  assert.deepEqual(reopened.get("pending")!.spec.target, larkAddress("app", "chat"));
+  for (const id of ["offline", "ready", "interrupted"]) {
+    f.outputs.create("owner", id, { ...f.spec(id), target: larkAddress("app", id) });
+    approveFixtureOutput(f.outputs, id);
+  }
+  f.outputs.check = async id => { approveFixtureOutput(f.outputs, id); };
+  f.outputs.begin("interrupted");
+  const sent: string[] = [];
+  const delivery = new OutputDelivery(f.outputs, target => {
+    if (JSON.stringify(target).includes("offline")) throw new Error("Provider metadata unavailable");
+    return { replay: "idempotent", async send(message) { sent.push(message.id); return undefined; } };
+  }, pino({ level: "silent" }));
+  const results = await Promise.allSettled(["offline", "ready", "interrupted"].map(id => delivery.reconcile(id)));
+  assert.equal(results[0]!.status, "rejected");
+  assert.deepEqual(sent, ["ready"]);
+  assert.equal(f.outputs.get("offline")!.status.attempts, 0);
+  assert.equal(f.outputs.get("ready")!.status.phase, "delivered");
+  assert.equal(f.outputs.get("interrupted")!.status.phase, "uncertain");
 });
 
 test("say acknowledges acceptance independently of delivery without recreating messages", async t => {
@@ -227,22 +226,20 @@ test("Lark delivery failures retain diagnostic codes and delivery context withou
     config: { headers: { Authorization: "SECRET TOKEN" }, data: "PRIVATE MESSAGE" },
     response: { status: 403, data: { code: 99991672, msg: "PRIVATE RESPONSE" } } });
   const transport: LarkTransport = { async start() {}, close() {}, async chatName() { return undefined; }, async send() { throw error; } };
+  let resolve: OutputTransportResolver = () => undefined;
   const channel = new LarkChannel(f.root, "app", {
-    receive: async () => { throw new Error("unused"); }, outputs: () => f.outputs.list().map(outputView),
-    outputSending: async id => f.outputs.begin(id),
-    outputRetry: async (id, reason, at) => f.outputs.retry(id, reason, at),
+    receive: async () => { throw new Error("unused"); },
+    registerOutputTransport(next) { resolve = next; return () => {}; },
   }, transport, log);
   t.after(() => channel.close());
-  await channel.deliver();
-  const output = f.outputs.get("send-failure")!, record = logs.find(record => record.outputId === "send-failure")!;
+  f.outputs.check = async id => { approveFixtureOutput(f.outputs, id); };
+  const delivery = new OutputDelivery(f.outputs, target => resolve(target), log);
+  await assert.rejects(delivery.reconcile("send-failure"));
+  const output = f.outputs.get("send-failure")!, record = logs.find(record => record.apiCode === 99991672)!;
   assert.equal(record.level, 40);
   assert.deepEqual(record.target, target);
-  assert.equal(record.attempt, 1);
   assert.equal(record.apiCode, 99991672);
   assert.equal(record.httpStatus, 403);
-  assert.equal(record.retryable, true);
-  assert.equal(record.nextAttemptAt, output.status.nextAttemptAt);
-  assert.equal(record.error, output.status.lastError);
   assert.equal(output.status.phase, "pending");
   assert.equal(output.status.attempts, 1);
   assert.doesNotMatch(JSON.stringify({ logs, lastError: output.status.lastError }), /SECRET|PRIVATE|Authorization|config/);
@@ -295,4 +292,15 @@ test("Output retries preserve original call evidence without weakening immutable
   assert.equal(f.outputs.get(absent.outputId)!.spec.createdBy, undefined);
   await assert.rejects(say("tool-call", "different answer"), /different content/);
   assert.equal(f.outputs.list().length, 2);
+});
+
+/** @case An incompatible old Output version cannot enter the current delivery coordinator's query results. */
+test("Output queries isolate the declared API version", async t => {
+  const f = await setup(t);
+  const { OutputDefinition } = await import("../plugins/personal/output/definition.ts");
+  const oldType = { ...OUTPUT_TYPE, apiVersion: "aide.dev/v1alpha2" };
+  f.outputs.storage.register("personal", [{ ...OutputDefinition, type: oldType }]);
+  await f.client.create(oldType, { name: "previous-contract", spec: f.spec(), status: { phase: "pending", attempts: 0 } });
+  f.outputs.create("owner", "current-contract", f.spec());
+  assert.deepEqual(f.outputs.list().map(o => o.metadata.name), ["current-contract"]);
 });

@@ -32,7 +32,7 @@ summaryOf 按对象 UID 建立索引，事务校验每个对象至多一份摘�
 
 summarize_topic / summarize_task / summarize_routine / summarize_person 是维护摘要 Note 的便捷入口，支持 people；省略保留已有关联，[] 明确清空。upsert_note 也能编辑同一份 Note，自动原子同步对象上的内容指纹。只改 people 也改变内容版本，避免元数据变化绕过并发与依赖检查。用户仅修订正文时保留 people；Person 合并双方正文与 people，并保留历史人物引用，不猜测或重写来源。
 
-读取和常驻上下文提供正文与 summaryNote（id、uid、version、subject、summaryOf、people），部分列表另投影 summaryUid。自动上下文最多预览 8 个人物关联并标明省略数量；read_note 可按 Note ID 或 UID 读取完整内容与关联。Output 记录实际使用的 Note UID 与内容版本；summary Note 与普通 Note 使用相同的 sensitivity、visibility 和披露检查。
+读取和常驻上下文提供正文与 summaryNote（id、uid、version、subject、summaryOf、people），部分列表另投影 summaryUid。自动上下文最多预览 8 个人物关联并标明省略数量；read_note 可按 Note ID 或 UID 读取完整内容与关联。Note 正文与分类可独立编辑，省略字段保留原值；摘要 Note 通过同一更新入口保持依赖指纹一致。Output 记录实际使用的 Note UID、读取版本和接纳时校验的正文指纹；summary Note 与普通 Note 使用相同的 sensitivity、visibility 和披露检查。
 
 recent 展示与普通事项提炼队列排除 summaryOf 非空的 Note，摘要通过独立位置展示；list_notes 仍可查到它。Note Reconcile 对摘要只修复对象上的派生内容指纹，不将它重复送入自己的事项提炼队列。
 
@@ -81,7 +81,7 @@ resources:
 
 ## 版本与验证
 
-Topic、Task、Routine 使用 aide.dev/v1alpha4，Person 使用 aide.dev/v1alpha3，Note 使用 aide.dev/v1alpha2。模型字段和当前校验以各资源定义为准。
+Topic、Task、Routine 使用 aide.dev/v1alpha4，Person 使用 aide.dev/v1alpha3，Note 使用 aide.dev/v1alpha3。模型字段和当前校验以各资源定义为准。
 
 摘要引用场景见 tests/summary-notes.test.ts；事项场景见 tests/note-knowledge.test.ts、tests/notes.test.ts、tests/topic-persons.test.ts 和 tests/pi-agent.test.ts：独立并发、同 Note 冲突、创建重试、过期执行、祖先归属竞争、悬空历史引用、容量回收、完整读取与真实工具路径。
 

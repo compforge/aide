@@ -10,7 +10,7 @@ import { resolve, dirname } from "node:path";
 import { once } from "node:events";
 import pino from "pino";
 import { z } from "zod";
-import { RequirementOutputDelivery } from "../plugins/personal/output/requirements.ts";
+import { requirementTransport } from "../plugins/personal/output/requirements.ts";
 import { Connectors } from "../connectors/index.ts";
 import { Aide } from "./app.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
@@ -74,15 +74,14 @@ await withAsyncFileLock(path, async () => {
     const server = httpChannel(aide, log, new ChannelSettings(file, config, log));
     server.listen(port, host);
     await once(server, "listening");
-    await aide.start();
-    const requirementDelivery = new RequirementOutputDelivery(aide.outputStore, connectors, log);
-    requirementDelivery.start();
+    aide.registerOutputTransport(requirementTransport(aide.outputStore, connectors));
     const bots = Object.entries(config.channels).filter(([, channel]) => channel.enabled).map(([id, channel]) => {
       const channelLog = log.child({ channelId: id, appId: channel.appId });
       const bot = new LarkChannel(home, channel.appId, aide, transports.get(channel.appId)!, channelLog, topicId => larkProgress(aide, topicId));
       void bot.start().catch(() => channelLog.error("Lark channel startup failed; check credentials and network"));
       return bot;
     });
+    await aide.start();
     log.info({ host, port, path }, "Aide listening");
     await new Promise<void>((done) => {
       const stop = () => {
@@ -96,7 +95,6 @@ await withAsyncFileLock(path, async () => {
     server.close();
     server.closeAllConnections(); // Close long-lived web streams and release their subscriptions on shutdown.
     const closingBots = Promise.all(bots.map(bot => bot.close()));
-    await requirementDelivery.close();
     await aide.close();
     await closingBots;
     log.info("Aide stopped");

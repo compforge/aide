@@ -28,7 +28,7 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
   type: NOTE_TYPE, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
   validator: { create: validate, update: (before, after, context) => {
     if (after.status.writer && (before.spec.text || before.spec.summaryOf) && sensitivityRank(after.spec.sensitivity ?? "L3") < sensitivityRank(before.spec.sensitivity ?? "L3")) throw new Error("Agent cannot lower existing Note sensitivity");
-    if (!isDeepStrictEqual(before.spec.subject, after.spec.subject) && (!isDeepStrictEqual(before.spec.disclosureScope, after.spec.disclosureScope) || before.spec.sensitivity !== after.spec.sensitivity || before.spec.visibility !== after.spec.visibility)) throw new Error("Moving a Note cannot change disclosure scope");
+    if (!isDeepStrictEqual(before.spec.subject, after.spec.subject) && (before.spec.sensitivity !== after.spec.sensitivity || before.spec.visibility !== after.spec.visibility)) throw new Error("Move Note separately from classification edits");
     if (before.spec.summaryOf && (!isDeepStrictEqual(before.spec.summaryOf, after.spec.summaryOf)
       || !isDeepStrictEqual(before.spec.subject, after.spec.subject))) throw new Error("Summary Note target is immutable");
     const { reviewTopic: _oldCache, ...oldStatus } = before.status;

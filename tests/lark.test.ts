@@ -6,8 +6,7 @@ import { test } from "node:test";
 import pino from "pino";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
-import type { OutputView } from "../src/output.ts";
-import { fixtureOutput } from "./output-fixture.ts";
+import { larkAddress } from "../src/channel/address.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
 import type { Incoming } from "../src/channel/message.ts";
 import { larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark/client.ts";
@@ -15,7 +14,7 @@ import { fakeOptions as baseFakeOptions } from "./fake-harness.ts";
 import { LOCAL_ME } from "../plugins/personal/person/model.ts";
 // These transport tests use a known Me audience; disclosure rejection has dedicated tests.
 const fakeOptions = (...args: Parameters<typeof baseFakeOptions>) => ({ ...baseFakeOptions(...args),
-  destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: false }),
+  destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: true }),
   checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }) });
 
 const log = pino({ level: "silent" });
@@ -73,7 +72,7 @@ test("Lark inbox survives restart; duplicate events do not execute twice; ordina
 test("Lark rejects persisted inputs without an exact topic key before intake", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-key-"));
   let received = 0;
-  const aide = { receive: async () => { received++; throw new Error("Unexpected intake"); }, outputs: () => [] };
+  const aide = { receive: async () => { received++; throw new Error("Unexpected intake"); } };
   const { transport } = fakeTransport();
   const channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
@@ -91,39 +90,35 @@ test("Lark rejects persisted inputs without an exact topic key before intake", a
   assert.equal(received, 0, "An unlocatable persisted input must never reach routing");
 });
 
-test("Lark sends proactive output, retries the same part id after failure, and isolates apps/chats", async (t) => {
+test("Lark sends explicit destinations and retries the same part id after restart", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-outbox-"));
-  const messages: OutputView[] = [];
-  const aide = { receive: async () => { throw new Error("unused"); }, outputs: () => messages };
+  const aide = { receive: async () => { throw new Error("unused"); } };
   const { transport, sent } = fakeTransport();
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  channel.receive(event("om_1", "关注变化"));
-  const message = (id: string, topicId: string, text: string): OutputView => fixtureOutput({ id, topicId, text, role: "aide", workId: "routine", at: new Date().toISOString() });
-  messages.push(message("web", "me", "不要发送"), message("other", "lark:cli_other:oc_chat", "不要发送"),
-    message("news", "lark:cli_test:oc_chat", "有变化😀".repeat(2000)));
+  const message = { id: "news", target: larkAddress("cli_test", "oc_chat"), text: "有变化😀".repeat(2000) };
   let calls = 0;
   transport.send = async (chatId, text, id) => {
     sent.push({ chatId, text, id });
     if (++calls === 2) throw new Error("Timeout after provider may have accepted");
   };
-  await channel.deliver();
+  await assert.rejects(channel.send({ ...message, target: larkAddress("other", "oc_chat") }));
+  await assert.rejects(channel.send(message));
   assert.equal(sent.length, 2);
   await channel.close();
   channel = new LarkChannel(home, "cli_test", aide, transport, log);
-  await channel.deliver();
-  assert.equal(sent[1]!.id, sent[2]!.id, "Ambiguous sends must reuse Lark uuid");
-  assert.notEqual(sent[0]!.id, sent[2]!.id, "Confirmed parts must not be resent");
-  assert.equal(sent[0]!.text + sent.slice(2).map((part) => part.text).join(""), messages[2]!.text);
+  await channel.send(message);
+  assert.equal(sent[1]!.id, sent[2]!.id);
+  assert.notEqual(sent[0]!.id, sent[2]!.id);
+  assert.equal(sent[0]!.text + sent.slice(2).map(part => part.text).join(""), message.text);
   const count = sent.length;
-  await channel.deliver();
-  assert.equal(sent.length, count);
+  await channel.send(message); assert.equal(sent.length, count);
 });
 
 test("Lark ignores unaddressed group/bot events and reports unsupported input and intake failure without automatic reexecution", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-errors-"));
   let received = 0;
-  const aide = { receive: async () => { received++; throw new Error("private data"); }, outputs: () => [] };
+  const aide = { receive: async () => { received++; throw new Error("private data"); } };
   const { transport, sent } = fakeTransport();
   const channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
@@ -150,7 +145,7 @@ test("Lark malformed-event diagnostics identify invalid fields without logging m
   const diagnosticLog = pino({ level: "warn" }, { write(line) { entries.push(line); } });
   const { transport } = fakeTransport();
   const channel = new LarkChannel(home, "cli_invalid", {
-    receive: async () => { throw new Error("Invalid events must not execute"); }, outputs: () => [],
+    receive: async () => { throw new Error("Invalid events must not execute"); },
   }, transport, diagnosticLog);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   await channel.receive({ ...event("invalid", "sensitive message body"), sender: { sender_type: null } });
@@ -225,7 +220,7 @@ test("Lark persists thread topics while cards and failure notices retain the rea
     received.push(input);
     if (input.id === "failed") throw new Error("intake failed");
     return { inputId: input.id, at: new Date().toISOString() };
-  }, outputs: () => [] };
+  } };
   const reader = (id: string) => {
     queried.push(id);
     return [{ id, phase: "queued" as const, think: "", content: "", messageIds: [], overflow: false }];
@@ -276,7 +271,7 @@ test("Lark accepts nullable permission-restricted user IDs and still requires th
     receive: async (input) => {
       received.push(input);
       return { inputId: input.id, at: new Date().toISOString() };
-    }, outputs: () => [],
+    },
   }, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   // @case Live Lark group events may expose open_id while withholding user_id as null.
@@ -304,7 +299,7 @@ test("Lark accepts nullable permission-restricted user IDs and still requires th
 test("Lark leaves group mentions disabled without bot identity and handles empty or non-text mentions without executing Chief", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-group-empty-"));
   const { transport, sent } = fakeTransport();
-  const aide = { receive: async () => { throw new Error("No Chief execution expected"); }, outputs: () => [] };
+  const aide = { receive: async () => { throw new Error("No Chief execution expected"); } };
   let channel = new LarkChannel(home, "cli_group_empty", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   const group = { ...event("no-identity", "@_user_1"), message: { ...event("no-identity", "@_user_1").message,
@@ -384,25 +379,18 @@ test("official SDK sends bot text with a stable uuid and checks API-level failur
   assert.equal(sends, 3);
 });
 
-test("Lark receipt failures do not block later replies; restart retries receipts without resending", async (t) => {
+test("Persisted Lark part receipts allow Output acknowledgement recovery without another send", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-receipt-"));
-  const messages: OutputView[] = ["first", "second"].map((id) => fixtureOutput({ id, topicId: "lark:cli_test:oc_chat", text: id,
-    role: "aide", workId: null, at: id }));
-  const receipts: string[] = []; let failing = true;
-  const aide = { receive: async () => ({ inputId: "in", at: new Date().toISOString() }), outputs: () => messages,
-    async outputDelivered(id: string) { if (id === "first" && failing) throw new Error("receipt storage failed"); receipts.push(id); } };
+  const aide = { receive: async () => { throw new Error("unused"); } };
   const { transport, sent } = fakeTransport();
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  channel.receive(event("in", "hello"));
-  await channel.deliver();
-  assert.deepEqual(sent.map((m) => m.text), ["first", "second"]);
-  assert.deepEqual(receipts, ["second"]);
-  await channel.deliver(); assert.equal(sent.length, 2);
-  await channel.close(); failing = false;
+  const messages = ["first", "second"].map(id => ({ id, target: larkAddress("cli_test", "oc_chat"), text: id }));
+  await channel.send(messages[0]!); await channel.send(messages[1]!);
+  await channel.close();
   channel = new LarkChannel(home, "cli_test", aide, transport, log);
-  await channel.deliver();
-  assert.ok(receipts.includes("first")); assert.equal(sent.length, 2);
+  await channel.send(messages[0]!);
+  assert.deepEqual(sent.map(m => m.text), ["first", "second"]);
 });
 
 test("Chat name lookup failures keep group intake available and never expose SDK errors", async t => {
@@ -412,7 +400,7 @@ test("Chat name lookup failures keep group intake available and never expose SDK
   const { transport } = fakeTransport({ openId: "ou_bot", name: "Aide" });
   transport.chatName = async () => { reads++; throw new Error("secret credentials"); };
   const channel = new LarkChannel(home, "cli_names", {
-    async receive(input) { received.push(input); return { inputId: input.id, at: new Date().toISOString() }; }, outputs: () => [],
+    async receive(input) { received.push(input); return { inputId: input.id, at: new Date().toISOString() }; },
   }, transport, pino({ level: "warn" }, { write(line) { entries.push(line); } }));
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   for (const id of ["one", "two"]) {
