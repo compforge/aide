@@ -12,7 +12,7 @@ export interface InputTimelineEntry {
   id: string; at?: string; stage: "receive" | "route" | "assess" | "handle" | "output";
   title: string; text?: string; status?: string; consumer?: InputConsumer; executionId?: string;
 }
-function definition(aide: ChannelService, input: { origin: "channel" | "source" | "chief" | "trigger"; originId: string }) {
+function definition(aide: ChannelService, input: { origin: "channel" | "source" | "chief" | "aide:review" | "aide:triage" | "aide:organize"; originId: string }) {
   try { return aide.inputDefinition(input).label; }
   catch { return `${input.origin} / ${input.originId}`; }
 }
@@ -28,7 +28,7 @@ export function inputList(aide: ChannelService, query: InputBrowseQuery) {
 export function inputFilters(aide: ChannelService) {
   const facets = inputFacets(aide.topics.inputStore);
   return {
-    origins: [...new Map(facets.map(f => [`${f.origin}:${f.originId}`, { value: `${f.origin}:${f.originId}`, label: `${definition(aide, f)} · ${f.origin}` }])).values()],
+    origins: [...new Map(facets.map(f => [JSON.stringify([f.origin, f.originId]), { value: JSON.stringify([f.origin, f.originId]), label: `${definition(aide, f)} · ${f.origin}` }])).values()],
     connectors: [...new Set(facets.map(f => f.connector))].sort().map(value => ({ value, label: value || "无 Connector / 未记录" })),
     sources: [...new Map(facets.filter(f => f.sourceUid).map(f => [f.sourceUid, { value: f.sourceUid, label: `${f.sourceKind} / ${f.sourceName}` }])).values()],
   };

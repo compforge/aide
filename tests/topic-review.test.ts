@@ -16,7 +16,7 @@ import { inputJob } from "../plugins/personal/observation/job.ts";
 import { topicReview, createReviewInput, idleReviewSchedule } from "../plugins/personal/topic/review.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
 import { summaryVersion, understandingVersion } from "../plugins/personal/topic/tree.ts";
-import { reconcileChief } from "../plugins/personal/topic/reconcile.ts";
+import { reconcileChief, reconcileTopic } from "../plugins/personal/topic/reconcile.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { topicPolicy, TopicReviewPolicySchema, type TopicPolicy } from "../plugins/personal/topic/config.ts";
 import { maintenanceAgenda } from "../plugins/personal/topic/maintenance.ts";
@@ -165,15 +165,15 @@ test("Due deferred material creates a pre-routed review Input with independent r
   await f.input("deferred"); await f.due();
   const activity = f.read().status.lastInputAt;
   await f.run();
-  const input = f.aide.topics.inputStore.list().find(i => i.spec.origin === "trigger")!;
+  const input = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
   assert.deepEqual(input.status.route!.result!.topics, [resourceRef(f.read())]);
   assert.equal(input.status.route?.executionId, undefined);
   assert.ok(input.status.assess?.completedAt);
   assert.equal(f.read().status.lastInputAt, activity);
   assert.equal((await inputJob(input, [])).status, "completed");
-  assert.equal(inputList(f.aide, { origin: "trigger" }).items.length, 1);
+  assert.equal(inputList(f.aide, { origin: "aide:review" }).items.length, 1);
   assert.ok(inputDetail(f.aide, input.metadata.name)!.timeline.some(e => e.stage === "assess" && e.status === "completed"));
-  assert.ok(topicView(f.aide, "root").blocks.some(b => b.origin === "trigger"));
+  assert.ok(topicView(f.aide, "root").blocks.some(b => b.origin === "aide:review"));
   await f.run(); assert.equal(f.calls.length, 1);
 });
 
@@ -193,17 +193,17 @@ test(`${changed} maintenance is selected from Topic data`, async t => {
   }
   await f.run({ review: backoff });
   assert.equal(f.calls.length, 1);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "trigger").length, changed === "notes" ? 1 : 0);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, changed === "notes" ? 1 : 0);
 });
 
 test("Material pressure creates a bounded organization Input even without pending assessments", async t => {
   const f = await fixture(t);
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal); await f.run();
-  await f.due(); await f.run({ maxInput: 1 });
+  await f.due(); await f.run({ maxUnfiledInput: 1 });
   assert.equal(f.calls.length, 2);
-  const input = f.aide.topics.inputStore.list().find(i => i.spec.origin === "trigger")!;
-  assert.equal((input.spec.observation!.maintenance as { reason: string }).reason, "organize_material");
-  assert.match(input.spec.text, /direct Input and Work ownership/);
+  const input = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
+  assert.equal((input.spec.observation!.facts as { reason: string }).reason, "organize_material");
+  assert.match(input.spec.text, /direct unfiled Inputs and Work/);
 });
 
 test("Arrival racing an empty decision invalidates the inspected root and retries without advancing backoff", async t => {
@@ -226,7 +226,7 @@ test("Review creation is fenced; reopening before admission consumes the existin
   const topic = f.read(), due = idleReviewSchedule(topic, backoff).dueAt;
   const agenda = await maintenanceAgenda(f.resources, [topic]);
   await createReviewInput(f.context, topic, due, agenda);
-  await assert.rejects(createReviewInput(f.context, topic, due, agenda), /version conflict/);
+  assert.equal((await createReviewInput(f.context, topic, due, agenda)).metadata.name, f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!.metadata.name);
   await f.aide.close();
   const restarted = new Aide(f.home, f.options, log);
   try {
@@ -304,3 +304,83 @@ test("Runner keeps periodic checks while empty reviews back off and event Inputs
   } finally { await running.close(); }
 });
 
+
+
+test("Capacity maintenance precedes business outside idle review and yields even after cooldown expires", async t => {
+  const f = await fixture(t);
+  await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
+  await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Immediate);
+  await f.run({ maxUnfiledInput: 1 });
+  assert.equal(f.calls.length, 1);
+  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
+  assert.ok(request.status.assess?.completedAt);
+  assert.equal(f.aide.topics.inputStore.get("one")!.status.assess?.executionId, undefined);
+  assert.equal(f.aide.topics.inputStore.get("two")!.status.assess?.executionId, undefined);
+  await f.resources.patchStatus(f.read(), { capacityRequests: { "aide:triage": { ...f.read().status.capacityRequests!["aide:triage"]!, checkedAt: past() } } });
+  await f.run();
+  assert.equal(f.calls.length, 2);
+  assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
+  assert.ok(f.aide.topics.inputStore.get("two")!.status.assess?.completedAt);
+});
+
+test("Children pressure triggers organization without idle delay and live intake waits for that pass", async t => {
+  const f = await fixture(t);
+  for (const name of ["a", "b"]) await f.resources.create(TOPIC_TYPE, { name, spec: { id: name, parentRef: resourceRef(f.read()) }, status: { summary: "", receipts: [] } });
+  f.hooks.beforeAssess = async () => {
+    await f.input("arrival", InputAttention.Immediate);
+    await reconcileTopic(f.context, { verbs: { action() { throw new Error("Business must not enter maintenance execution"); } } } as unknown as ReconcileContext, f.read());
+    assert.equal(f.aide.topics.inputStore.get("arrival")!.status.assess?.executionId, undefined);
+  };
+  f.hooks.afterAssess = async () => {
+    await reconcileTopic(f.context, { verbs: { action() { throw new Error("Completed capacity receipt must still isolate the live round"); } } } as unknown as ReconcileContext, f.read());
+    assert.equal(f.aide.topics.inputStore.get("arrival")!.status.assess?.executionId, undefined);
+  };
+  await f.run({ maxChildren: 1 });
+  assert.match(f.calls[0]!.prompt, /organize_children/);
+  f.hooks.beforeAssess = undefined; f.hooks.afterAssess = undefined;
+  await f.run();
+  assert.ok(f.aide.topics.inputStore.get("arrival")!.status.assess?.completedAt);
+});
+
+test("Idle timer cannot bypass capacity cooldown when an organization pass makes no progress", async t => {
+  const f = await fixture(t);
+  await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal); await f.run();
+  await f.run({ maxUnfiledInput: 1 }); assert.equal(f.calls.length, 2);
+  await f.due(); await f.run();
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 1);
+});
+
+test("A persisted pressure request resumes before new business without duplicate maintenance", async t => {
+  const f = await fixture(t);
+  await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
+  const agenda = await maintenanceAgenda(f.resources, [f.read()], { maxUnfiledInput: 1 });
+  const request = await createReviewInput(f.context, f.read(), new Date().toISOString(), agenda, "aide:triage");
+  await f.run({ maxUnfiledInput: 1 });
+  assert.ok(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.completedAt);
+  assert.equal(f.aide.topics.inputStore.get("one")!.status.assess?.executionId, undefined);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 1);
+});
+
+test("Failed capacity execution retains its claim while waiting business is processed next", async t => {
+  const f = await fixture(t);
+  await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
+  await f.run({ maxUnfiledInput: 1 }, true);
+  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
+  assert.ok(request.status.assess?.executionId);
+  await f.run();
+  assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
+  assert.equal(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.executionId, request.status.assess?.executionId);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 1);
+});
+
+test("Chief activation keeps its character and admission budgets with large pending Inputs", async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 10; i++) {
+    const fact = await f.aide.topics.submit(`large-${i}`, { topicId: "root", origin: "source", originId: "personal.events", text: "x".repeat(32000) });
+    await routeTo(f.resources, f.read().metadata, fact);
+  }
+  await f.run({ contextChars: 4096 });
+  assert.ok(f.calls[0]!.prompt.length <= 4096);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.completedAt).length, 8);
+});

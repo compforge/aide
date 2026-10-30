@@ -15,9 +15,17 @@ export enum InputAttention {
   Deferred = "deferred",
 }
 
+export const INPUT_ORIGINS = ["channel", "source", "chief", "aide:review", "aide:triage", "aide:organize"] as const;
+export type InputOrigin = typeof INPUT_ORIGINS[number];
+export const isInternalInput = (input: Pick<InputSpec, "origin">): boolean =>
+  input.origin === "aide:review" || input.origin === "aide:triage" || input.origin === "aide:organize";
+export const isCapacityInput = (input: Pick<InputSpec, "origin">): boolean =>
+  input.origin === "aide:triage" || input.origin === "aide:organize";
+export const inputQueue = (input: InputSpec): string => isInternalInput(input) ? input.origin : inputAttention(input);
+
 export type InputRelation = "sent" | "received" | "observed";
 
-export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha2", kind: "Input" } as const;
+export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha3", kind: "Input" } as const;
 export interface InputSpec {
   /** Where the input was received; independent of its producer, sender and topic. */
   source?: Address;
@@ -33,7 +41,7 @@ export interface InputSpec {
   topicId?: string;
   /** Scheduling urgency, independent of authority or notification intent. */
   attention?: InputAttention;
-  origin: "channel" | "source" | "chief" | "trigger";
+  origin: InputOrigin;
   /** Channel/Source definition or internal producer ID, selected by origin. */
   originId: string;
   /** Producing Source or Topic resource; provenance, never an implicit routing destination. */
@@ -90,6 +98,6 @@ export interface InputStatus {
    * @link docs/personal/input.md#归属与-chief-通知
    * @case tests/input-admission.test.ts
    */
-  assess?: Assessment;
+  assess?: Assessment & { topic?: ResourceRef & { uid: string } };
   handle?: Record<string, Handling>;
 }

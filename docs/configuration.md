@@ -275,6 +275,9 @@ plugins:
     topic:
       trigger:
         intervalSeconds: 60   # 固定唤醒 Reconcile；业务事件也可以唤醒
+      capacityCooldownSeconds: 60
+      maxUnfiledInput: 40
+      maxChildren: 8  # 容量维护轮次的最小间隔
       review:
         idleSeconds: 900      # 基础回顾检查等待
         backoff:             # 可选；省略时固定等待
@@ -286,7 +289,7 @@ plugins:
 
 定时唤醒不会直接调用模型。Reconcile 在回顾到期后检查 deferred 输入、待吸收的子主题认识及材料/子节点整理压力；需要判断时生成已绑定 root 的维护 Input，无事可做时只记录检查时间并增加退避次数。以上配置的空检查依次等待 15、30、60、120 分钟，之后保持 120 分钟；期间的 Reconcile 唤醒间隔仍为 60 秒。
 
-正常业务 Input 直接复用，Immediate / Normal 与结构、子 summary 变化不等待回顾退避。Deferred 保持延后处理，新业务输入重置退避且连续到达不推迟已安排的机会。执行完成或中断恢复后重新开始基础等待；不自动重放已有未知效果。
+容量压力优先触发一轮有界维护，独立于静默回顾及其退避；维护之后让等待的业务获得一次处理机会。正常业务 Input 直接复用，Immediate / Normal 与结构、子 summary 变化不等待回顾退避。Deferred 保持延后处理，新业务输入重置退避且连续到达不推迟已安排的机会。执行完成或中断恢复后重新开始基础等待；不自动重放已有未知效果。
 
 修改基础等待、倍数或上限并重启后，按持久化时间事实与当前配置重新计算资格；最迟在下一次固定检查时应用，不从重启时重新等待，也不补跑历史周期。每个 Topic 通过 `spec.review.enabled` 开关后台回顾，关闭不停止定时协调、输入接纳或既有职责。完整契约见 [Topic 定时回顾](personal/topic.md#topic-定时回顾)。
 
@@ -307,7 +310,7 @@ plugins:
 - Channel 默认 immediate，Source 默认 normal；EnvironmentSource 明确使用 deferred，定时回顾使用 normal；紧迫性不代表授权或必须外发。
 - 普通输入在当前调用结束后 followup，复用原生历史；immediate 通过 steer 进入当前调用。明确不支持或拒绝时留队等待 followup，不中断现有动作。
 - root Topic 的 `review.enabled` 默认开启；定时协调根据数据决定是否发起回顾，无事时退避且不调用模型。运行中的 Chief 不因定时检查追加执行，一次调用最多两天。
-- `contextChars` 限制新 Input 的描述预览，全文通过 `read_input` 分页读取；原生历史和压缩由 SDK 管理。
+- `contextChars` 限制 Chief 自动激活提示的总字符数，全文通过 `read_input` 分页读取；原生历史和压缩由 SDK 管理。
 - `summaryChars` 限制 Topic 累计认识的长度，模型需合并后替换；近期处理记录使用 recent，统一限制条数和总字符数。长期认识使用共享记忆，委托进展保存在 Work。
 - `assess_input` 提交业务消费回执并原子建立 Work 办理记录。没有回执的已尝试输入保留失败证据，不自动重放。
 
@@ -380,7 +383,9 @@ harnesses:
 plugins:
   personal:
     topic:
-      maxInput: 40
+      maxInput: 40           # 保留，暂不参与策略
+      maxUnfiledInput: 40
+      capacityCooldownSeconds: 60
       maxWork: 8
       maxChildren: 8
     weave:
@@ -391,3 +396,5 @@ plugins:
 ```
 
 Topic 阈值按直接归属判断，由空闲 Chief 决定如何整理；Weave 的 maxRoots 统计普通 root，Default 单独兜底，允许无合理归并方案时超标。超过目标时，未变化但已检查的 root 在 reviewIntervalMs 后重查；独立子树有 15 分钟观察期。来源 topicKey 仍保留确定性定位语义。长期设计见 [Topic](personal/topic.md)。
+
+Topic 容量阈值：maxUnfiledInput 默认 40，统计直属无 topicKey 的业务 Input（包含已研判），maxChildren 默认 8，maxWork 保持默认 8。maxInput 保留配置但暂不参与策略。每个 Topic 超限时通过 aide:triage / aide:organize Input 请求 root；每种请求去重，完成后按 capacityCooldownSeconds 冷却。静默回顾使用 aide:review，独立遵循 review.backoff。详见 [Topic 内置请求](personal/topic.md#树内整理与维护优先级)。

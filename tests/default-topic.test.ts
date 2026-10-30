@@ -48,7 +48,8 @@ test("Default Topic is system-maintained, unique and persisted", async t => {
   await assert.rejects(resources.replace(ordinary, { ...ordinary.spec, default: true }, ordinary.status), /reserved/);
   await assert.rejects(resources.replace(fallback, { ...fallback.spec, default: false }, fallback.status), /reserved/);
   await assert.rejects(resources.replace(fallback, { ...fallback.spec, parentRef: resourceRef(ordinary) }, fallback.status), /remain a root/);
-  await assert.rejects(resources.replace(ordinary, { ...ordinary.spec, parentRef: resourceRef(fallback) }, ordinary.status), /parent unavailable/);
+  const organized = await resources.replace(ordinary, { ...ordinary.spec, parentRef: resourceRef(fallback) }, ordinary.status);
+  assert.equal(organized.spec.parentRef!.uid, fallback.metadata.uid, "Default can classify material into children");
   await assert.rejects(resources.create(TOPIC_TYPE, { name: "duplicate", spec: { id: "duplicate", default: true }, status: { receipts: [] } }), /reserved/);
   await assert.rejects(resources.delete(TOPIC_TYPE, fallback.metadata.name), /cannot be deleted/);
   const removed = await fetch(base + "/topics/default", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ topicId: "private", enabled: true }) });

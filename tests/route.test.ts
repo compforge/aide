@@ -177,7 +177,7 @@ test("routing is atomic: failed commit leaves no ownership or receipt; retry rec
   assert.deepEqual(aide.topics.inputStore.get("fanout")!.status, input.status);
   await deliver(ctx, input, [a.metadata], "shared");
   const committed = aide.topics.inputStore.get("fanout")!;
-  assert.deepEqual(committed.status.assess, {});
+  assert.equal(committed.status.assess!.topic!.uid, a.metadata.uid);
   assert.equal(committed.status.route!.result!.topics.length, 1);
   assert.ok(committed.status.route?.completedAt);
   await deliver(ctx, input, [b.metadata], "different retry must not change the decision");

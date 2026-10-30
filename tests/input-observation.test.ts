@@ -10,7 +10,7 @@ const at = "2026-10-26T01:00:00.000Z";
 const topic = { apiVersion: "aide.dev/v1alpha3", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } as const;
 const agent = { harness: "chief", sessionId: "native-1" };
 function fixture(): Input {
-  return { apiVersion: "aide.dev/v1alpha2", kind: "Input", metadata: { name: "input", uid: "uid-1", namespace: "v1", creationTimestamp: at, resourceVersion: "1", generation: 1 },
+  return { apiVersion: "aide.dev/v1alpha3", kind: "Input", metadata: { name: "input", uid: "uid-1", namespace: "v1", creationTimestamp: at, resourceVersion: "1", generation: 1 },
     spec: { origin: "channel", originId: "web", text: "check this" }, status: {
       route: { completedAt: at, result: { topics: [topic], reason: "explicit selection" } },
       assess: { startedAt: at, completedAt: at, agent,

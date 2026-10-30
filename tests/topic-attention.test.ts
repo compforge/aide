@@ -31,7 +31,7 @@ test("Input attention has three string values and source-specific defaults", () 
   for (const attention of Object.values(InputAttention))
     assert.equal(InputSpecSchema.parse({ origin: "source", originId: "fixture", text: "fact", attention }).attention, attention);
   assert.throws(() => InputSpecSchema.parse({ origin: "source", originId: "fixture", text: "fact", attention: "default" }));
-  for (const origin of ["channel", "source", "chief", "trigger"] as const) {
+  for (const origin of ["channel", "source", "chief", "aide:review"] as const) {
     assert.equal(inputAttention({ origin, originId: "fixture", text: "fact" }), origin === "channel" ? InputAttention.Immediate : InputAttention.Normal);
     assert.equal(inputAttention({ origin, originId: "fixture", text: "fact", attention: InputAttention.Deferred }), InputAttention.Deferred);
   }
@@ -92,7 +92,7 @@ test("Deferred backlog survives restart with review disabled and timer reviews r
       await restarted.settled();
       assert.equal(restarted.topics.pending(root.metadata.uid).length, remaining);
       assert.match(prompts.at(-1)!, /"kind":"input"/);
-      assert.match(prompts.at(-1)!, /Scheduled review/);
+      assert.match(prompts.at(-1)!, /aide:review/);
     }
     assert.equal(prompts.length, 2);
     assert.ok(restarted.topics.inputStore.list().every(i => i.status.assess!.completedAt));

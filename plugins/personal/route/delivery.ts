@@ -1,3 +1,4 @@
+import { assignInput } from "../input/assignment.ts";
 import { commitStatus } from "../status.ts";
 import type { AgentCall } from "../observation/reference.ts";
 import type { PluginContext, Resource, ResourceCommit } from "@compforge/aide-plugin";
@@ -5,7 +6,7 @@ import { TOPIC_TYPE, initialTopicName, type TopicSpec, type TopicStatus } from "
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
 import { resourceRef } from "../input/state.ts";
 import type { Destination } from "./model.ts";
-import { topicPath } from "../topic/tree.ts";
+
 export type RoutingContext = Pick<PluginContext, "resources"> & { logger: Pick<PluginContext["logger"], "info"> };
 export type RoutingInput = Readonly<Resource<InputSpec, InputStatus>>;
 export const routed = (input: RoutingInput) => !!input.status.route?.completedAt;
@@ -23,9 +24,12 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
     }));
     const at = new Date().toISOString();
     const assess = input.status.assess ?? {};
-    const all = await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-    const paths = topics.map(t => topicPath(all, t));
-    const touched = [...new Map(paths.flat().map(t => [t.metadata.uid, t])).values()];
+    const touched = [...topics];
+    for (let c = topics[0]!; c.spec.parentRef;) {
+      const parent = await context.resources.get<TopicSpec, TopicStatus>(c.spec.parentRef);
+      if (!parent || parent.metadata.deletionTimestamp || touched.some(t => t.metadata.uid === parent.metadata.uid)) throw new Error("Topic path unavailable");
+      touched.push(parent); c = parent;
+    }
     try {
       await commitStatus(context.resources, [
         ...touched.map(c => ({ operation: "replace", resource: c, spec: { ...c.spec, name: c.spec.name || initialTopicName(input.spec.text) },
@@ -34,6 +38,8 @@ export async function deliver(context: RoutingContext, original: RoutingInput, d
           result: { topics: topics.map(resourceRef), reason } } } },
       ]);
       context.logger.info("Input routed", { attributes: { inputId: input.metadata.name, topicUids: topics.map(c => c.metadata.uid), reason } });
+      const routedInput = await context.resources.get<InputSpec, InputStatus>(resourceRef(input));
+      if (routedInput) await assignInput(context as Pick<PluginContext, "resources" | "logger">, routedInput);
       return;
     } catch (e) { if (n >= 8 || !/version conflict/.test(String(e))) throw e; }
   }

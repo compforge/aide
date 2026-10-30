@@ -39,22 +39,22 @@ async function fixture(t: TestContext) {
 
 test("Current Input ownership moves independently of immutable route and completed assessment", async t => {
   const f = await fixture(t), child = await f.child(), fact = await f.input("fact");
-  const done = await patchStatus(f.resources, fact, { assess: { executionId: "chief", completedAt: new Date().toISOString(), result: { summary: "Reviewed" } } });
+  const done = await patchStatus(f.resources, fact, { assess: { ...fact.status.assess, executionId: "chief", completedAt: new Date().toISOString(), result: { summary: "Reviewed" } } });
   const moved = await moveMaterial(f.resources, f.root(), { kind: "Input", id: "fact", topicUid: child.metadata.uid, reason: "Implementation evidence" });
   assert.equal(moved.status.topic!.uid, child.metadata.uid);
   assert.deepEqual(moved.status, { ...done.status, topic: resourceRef(child), organization: (moved.status as typeof done.status).organization });
   assert.equal(f.aide.topics.inputStore.query("topic", f.root().metadata.uid).length, 0);
   assert.equal(f.aide.topics.inputStore.query("topic", child.metadata.uid).length, 1);
   assert.equal(f.aide.topics.pending(f.root().metadata.uid).length, 0);
-  const watch = assignmentWatch("assess", "Topic", f.resources);
-  assert.deepEqual(await watch.handler.update!({ oldObject: done, newObject: moved } as never), [{ name: f.root().metadata.name, namespace: "v1" }]);
+  const watch = assignmentWatch("assess", "Topic");
+  assert.deepEqual(await watch.handler.update!({ oldObject: done, newObject: moved } as never), [], "Material moves do not change processing assignment");
   await assert.rejects(f.resources.patchStatus(moved, { route: { ...done.status.route, result: { topics: [resourceRef(child)], reason: "rewrite" } } }), /routing receipt is immutable/);
 });
 
 test("Work moves without changing objective, schedule or history, and running consumers block reassignment", async t => {
   const f = await fixture(t), child = await f.child();
   const fact = await f.input("busy");
-  await f.resources.patchStatus(fact, { assess: { executionId: "chief" } });
+  await f.resources.patchStatus(fact, { assess: { ...fact.status.assess, executionId: "chief" } });
   await assert.rejects(moveMaterial(f.resources, f.root(), { kind: "Input", id: "busy", topicUid: child.metadata.uid, reason: "Move" }), /Finish Input/);
   const task = await f.aide.work("root").create({ kind: "task", title: "Implement", instruction: "Implement safely", trigger: null });
   const routine = await f.aide.work("root").create({ kind: "routine", title: "Observe", instruction: "Observe progress", trigger: { cron: "0 * * * *", timezone: "UTC", event: null } });
@@ -110,10 +110,10 @@ test("Maintenance counts direct ownership and Route includes bounded activity fr
   const f = await fixture(t), child = await f.child();
   await f.input("one"); await f.input("two");
   const tree = () => readTopicSubtree(f.resources, resourceRef(f.root()));
-  let agenda = await maintenanceAgenda(f.resources, await tree(), { maxInput: 1 });
+  let agenda = await maintenanceAgenda(f.resources, await tree(), { maxUnfiledInput: 1 });
   assert.equal(agenda.reason, "organize_material"); assert.equal(agenda.topics[0]!.uid, f.root().metadata.uid);
   await moveMaterial(f.resources, f.root(), { kind: "Input", id: "two", topicUid: child.metadata.uid, reason: "Specific subject" });
-  agenda = await maintenanceAgenda(f.resources, await tree(), { maxInput: 1 });
+  agenda = await maintenanceAgenda(f.resources, await tree(), { maxUnfiledInput: 1 });
   assert.equal(agenda.reason, "review", "moving one material resolves direct pressure without changing tree totals");
   const candidates = topicCandidatePage(f.aide.personal.store).items;
   const entry = candidates.find(c => c.uid === f.root().metadata.uid)!;
@@ -128,15 +128,15 @@ test("Maintenance agenda survives persistence for unnamed Topics and business In
   const f = await fixture(t);
   await f.input("one"); await f.input("two");
   await f.resources.patchStatus(f.root(), { execution: null, idleSince: "2000-01-01T00:00:00.000Z" });
-  const agenda = await maintenanceAgenda(f.resources, [f.root()], { maxInput: 1 });
+  const agenda = await maintenanceAgenda(f.resources, [f.root()], { maxUnfiledInput: 1 });
   const review = await createReviewInput({ resources: f.resources, logger }, f.root(), new Date(Date.now() + 60_000).toISOString(), agenda);
-  assert.match(review.spec.text, /direct Input and Work ownership/);
-  assert.deepEqual(review.spec.observation!.maintenance, agenda);
+  assert.match(review.spec.text, /Review current understanding/);
+  assert.deepEqual(review.spec.observation!.facts, agenda);
   const { inputPreview } = await import("../plugins/personal/input/prompt.ts");
-  assert.ok(inputPreview(review).includes(`Maintenance facts: ${JSON.stringify(agenda)}`), "Chief receives the selected pressure and counts in automatic context");
+  assert.ok(inputPreview(review).includes(`Facts: ${JSON.stringify(agenda)}`), "Chief receives the selected pressure and counts in automatic context");
   const ready = await nextInputs(f.resources, f.root(), 8);
-  assert.equal(ready.at(-1)!.metadata.uid, review.metadata.uid);
-  assert.equal((await maintenanceAgenda(f.resources, [f.root()], { maxInput: 1 })).topics[0]!.inputs, 2, "review Inputs never amplify maintenance pressure");
+  assert.ok(ready.every(i => i.spec.origin !== "aide:review"), "Business batch does not include queued review");
+  assert.equal((await maintenanceAgenda(f.resources, [f.root()], { maxUnfiledInput: 1 })).topics[0]!.inputs, 2, "review Inputs never amplify maintenance pressure");
 });
 
 
@@ -218,8 +218,24 @@ test("Detached subtrees reject admissions prepared by the previous root", async 
   await moveTopic(f.resources, owner, { uid: branch.metadata.uid, parentUid: null, reason: "Independent scope" });
   await assert.rejects(f.resources.commit([
     { operation: "patchStatus", resource: owner, options: { resourceVersion: owner.metadata.resourceVersion }, patch: { execution: { ...owner.status.execution!, admissionRevision: 1 } } },
-    { operation: "patchStatus", resource: input, patch: { assess: { executionId: "chief", startedAt: new Date().toISOString() } } },
+    { operation: "patchStatus", resource: input, patch: { assess: { ...input.status.assess, executionId: "chief", startedAt: new Date().toISOString() } } },
   ]), /version conflict/);
   assert.equal(f.aide.topics.inputStore.get("detaching")!.status.assess?.executionId, undefined);
   assert.equal(f.root().status.weaveRevision, (owner.status.weaveRevision ?? 0) + 1);
+});
+
+
+test("Maintenance reads only threshold witnesses through indexed pages", async t => {
+  const f = await fixture(t);
+  for (let i = 0; i < 30; i++) await f.input(`bounded-${i}`);
+  let decoded = 0;
+  const reader = { ...f.resources, async list() { throw new Error("Maintenance must not load full collections"); },
+    async listPage(...args: Parameters<ResourceClient["listPage"]>) {
+      const page = await f.resources.listPage(...args); decoded += page.items.length; return page;
+    } } as ResourceClient;
+  const agenda = await maintenanceAgenda(reader, [f.root()], { maxUnfiledInput: 2 });
+  assert.equal(agenda.reason, "organize_material");
+  assert.equal(agenda.topics[0]!.inputs, 3);
+  assert.equal(agenda.topics[0]!.truncated, true);
+  assert.equal(decoded, 3);
 });

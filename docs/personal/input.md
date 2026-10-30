@@ -4,18 +4,18 @@
 
 Input 保存收到的内容及来源证据，各组件在同一资源上留下自己的处理进展。它使一条信息从接收到路由、研判和办理的过程可追溯；输入数量与输出数量没有一对一关系。
 
-`status.topic` 保存唯一的当前 Topic 归属，引用固定 UID。`status.route` 只保存首次路由处理记录；spec 中的 topicId / topicKey 保存入站定位信息。Chief 在树内移动 Input 时更新当前归属和迁移原因，保留原始事实与 route / assess / handle 回执；已接纳但尚未完成研判的 Input 先完成处理再迁移。归属查询、待研判索引和工具范围均使用 status.topic。
+`status.topic` 保存唯一的当前 Topic 归属，引用固定 UID。`status.route` 只保存首次路由处理记录；spec 中的 topicId / topicKey 保存入站定位信息。Chief 在树内移动 Input 时更新当前归属和迁移原因，保留原始事实与 route / assess / handle 回执；已接纳但尚未完成研判的 Input 先完成处理再迁移。内容查询使用 status.topic；自动待办查询使用 status.assess.topic。
 
 ## CRD
 
-类型为 `aide.dev/v1alpha2 Input`。
+类型为 `aide.dev/v1alpha3 Input`。
 
 ### Spec
 
 | 信息 | 含义 |
 | --- | --- |
-| text、observation | 来源内容与证据；外部观察保留事实，系统 trigger 保存回顾请求及触发时间 |
-| origin、originId、originRef | Channel / Source / Chief / Trigger 分类、来源定义与可选产生资源引用 |
+| text、observation | 来源内容与证据；外部观察保留事实，内置 Input 保存回顾、分理、组织请求及触发证据 |
+| origin、originId、originRef | channel / source / chief / aide:review / aide:triage / aide:organize 分类、来源定义与可选产生资源引用 |
 | sender、receivers、relation | 可选的发送 Person、明确识别的接收 Person 引用列表，以及输入相对于 Me 的关系 |
 | source | 可选 Address，表示事情发生或可以联络的位置 |
 | topicId、topicKey | TopicLocator 提供的精确 Topic ID 或稳定来源关联键 |
@@ -46,27 +46,27 @@ Lark Source 根据私信实际收件账号、同一聊天内被回复消息的�
 
 ## 处理组件的协作
 
-Input 不单独启动 Reconciler 或 Agent。Route、Topic、Task、Routine 的 Reconciler 观察并处理属于自己的阶段；Agent 通过各角色工具提交判断。
+Input Reconcile 负责确定研判分派，不启动 Agent；Route、Topic、Task、Routine 的 Reconciler 观察并处理属于自己的阶段。Agent 通过各角色工具提交判断。
 
 ### 内容、身份与调度
 
 Immediate 在 Chief 空闲时启动处理，运行中通过 steer 加入；Normal 在空闲时启动处理，运行中通过 followUp 排队。Deferred 只路由和挂载，不因到达而启动所属 root Chief，也不进入其 steer / followUp 队列。Chief 因其它输入、定时回顾或知识整理运行时，可以顺带处理 Deferred；运行中主动发现的 Deferred 也可通过 assess_input 记录研判结果。
 
-未填写 attention 时，Channel 默认 Immediate，Source / Chief / Trigger 默认 Normal。attention 不限制 Route 分类，也不阻止 Chief 明确交给 Task / Routine 的办理。Deferred 未被研判时保持待处理；Topic review 可以关闭，不增加独立批处理计时器。
+未填写 attention 时，Channel 默认 Immediate，Source / Chief / 内置 Input 默认 Normal。attention 不限制 Route 分类，也不阻止 Chief 明确交给 Task / Routine 的办理。Deferred 未被研判时保持待处理；Topic review 可以关闭，不增加独立批处理计时器。
 
 Channel / Source 经绑定的入口提交 Input，稳定身份用于传输去重；接收回执只证明持久化成功。Source 先保存 Input，再推进观察水位。原始消息满足提交条件时，即使可选上下文读取失败仍可接收，具体证据与权限见对应接入文档。
 
-系统定时回顾使用 `origin: trigger`、`originId: personal.topic-review`，`originRef` 指向产生它的 root Topic。`observation` 保存检查到期时间、实际触发时间和空闲起点。Reconcile 在回顾到期且发现待处理材料或维护需求时才生成，创建时已包含路由结果与研判目标；既不调用 Route 模型，也不刷新 Topic 的业务活跃时间。Chief 复用普通材料通知和 `assess_input` 回执，详见 [定时回顾](topic.md#topic-定时回顾)。
+系统内置 Input 使用 `origin: aide:review / aide:triage / aide:organize`，分别表示静默回顾、材料分理和子节点组织；originId 为 personal.topic，originRef 指向需要处理的 Topic。text 说明目的、范围和要求，observation 保存触发证据，不增加 maintenance 字段。它们不刷新业务活跃时间、不计入业务材料容量，也不增加外发授权。详见 [Topic 内置请求](topic.md#树内整理与维护优先级)。
 
 ### 路由、研判与办理
 
 | status 阶段 | 写入者与完成条件 |
 | --- | --- |
-| route | Route 的规则或 route_input 保存完整去向与理由；系统 trigger 在创建时直接写入已知 root Topic |
+| route | Route 的规则或 route_input 保存完整去向与理由；内置 Input 在创建时直接写入待处理 Topic |
 | assess | Topic Reconcile 原子记录 Chief 接纳；Chief 用 assess_input 确认 Input 的唯一研判 |
 | handle[Work UID] | Work 应用请求，再用 report_task / report_routine 确认办理 |
 
-route_input 在同一事务写入 route 结果和一条空 assess；assess_input 在同一事务完成研判并建立必要的 handle。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 只有一个当前 Topic，保存一份研判；多个 Work 仍按各自 UID 独立确认。
+route_input 在同一事务写入 route 结果和一条空 assess；assess_input 在同一事务完成研判并建立必要的 handle。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 只有一个当前材料 Topic 和一个研判负责人，保存一份研判；多个 Work 仍按各自 UID 独立确认。
 
 未完成可能是尚未接纳、运行、退避或待核对。接纳记录不等于完成；原生调用结束也不代替工具回执。Route 分类失败可以按输入退避重试，Work 可能已经产生副作用，需核对后继续；Chief 执行失败记录在 Topic，未完成 Input 的 assess 保留接纳标记与异常供核对。详细策略分别归 [Route](route.md)、[Topic](topic.md)、[Task](task.md) 与 [Routine](routine.md)。
 
@@ -86,7 +86,7 @@ Task / Routine Watch Input.handle 并按自身 UID 索引读取未完成记录�
 
 Input 由 Route 确定初始 Topic，Chief 可在树内调整当前归属。明确规则允许直接绑定子 Topic；无规则时 Route 只选择当前 root。Weave 不迁移绑定或研判记录。
 
-root Chief 按拓扑顺序沿 parent 索引遍历自己整棵 Topic tree，取得所有 Topic UID，再用这些 UID 查询 Input 索引并按 Input UID 去重。Input 的当前挂载关系来自 `status.topic`：`topic` 查询全部材料，`assessPending` 查询未完成研判，`assessReady` 只查询尚未接纳且未完成的 Input。不会先读取全局 Input 再筛选。
+root Chief 直接通过 `assessReadyAttention` 按 status.assess.topic、来源优先级与 attention 分页查询未接纳待办，不遍历责任树。`status.topic` 仍供材料检索、归集和容量判断；`assessPending` 保留直属材料未完成索引，`assignedPending` 查询分派给某个 Chief 的未完成研判。
 
 初始 prompt、steer 和 followUp 在发送前，用同一资源事务检查当前 Topic 的版本与 execution，并写入 `Input.status.assess.executionId`、`startedAt`。executionId 指向实际 Chief 执行，不是接收 Reconcile 的执行。竞争失败者重读后忽略已接纳的 Input；初始批次有冲突时整批回滚，下一轮重新选择剩余 Input 并生成 prompt。接纳之后仍可被其它 Topic 的 Chief 主动读取为材料，但不会再次自动提交。Deferred 在被选入已激活 Chief 的批次之前不占接纳标记，主动读取也不占标记；直接完成研判则阻止后续自动提交。
 
@@ -104,7 +104,7 @@ root Chief 按拓扑顺序沿 parent 索引遍历自己整棵 Topic tree，取�
 
 ### 查询、保留与展示
 
-待办事实保存在 Input.status。Definition.indexes 为 routePending、topic / assessPending / assessReady / assessExecution、handle / handlePending 提供按阶段和资源 UID 的查询，消费方按索引读取。索引与资源更新在同一事务提交，机制见 [Resource](../plugin/resource.md#索引)。
+待办事实保存在 Input.status。Definition.indexes 为 routePending、topic / assessPending / assignedPending / assessReadyAttention / assessExecution、handle / handlePending 提供按阶段和资源 UID 的查询，消费方按索引读取。索引与资源更新在同一事务提交，机制见 [Resource](../plugin/resource.md#索引)。
 
 全部阶段完成后 Input 才可进入容量回收候选；Source 的未提交引用仍可保护它。目标删除明确取消剩余阶段。处理痕迹随 Input 保留，入站去重回执有独立的有界窗口；窗口内重投不会让已回收输入重新执行。用户核对后重新交办是新的 Input。
 
@@ -127,3 +127,19 @@ Output 只在其 inputIds 显式包含当前 Input 时关联，不按相邻顺�
 `tests/input-browse.test.ts` 覆盖筛选后分页、来源选项、稳定排序、消费回执终态、独立 Work 消费者、已删除目标、明确 Output 关联及 HTTP 页面与查询。
 
 [状态测试](../../tests/status.test.ts)覆盖条件转换、版本冲突与事务回滚。
+
+## 挂载、分派与执行
+
+Input v1alpha3 将内容归属和处理分派分开，不读取旧版 Input，也不提供历史兼容转换。
+
+1. 挂载：明确定位或 Route 分类写入 status.topic（topic1），保留首次 route 回执。
+2. 分派：沿 topic1 的 parent 链找到当前 root，写入 status.assess.topic（topic2）。Route 完成后立即尝试确定性分派；独立 Input Reconcile 恢复中断、处理后续归属变化，不调用模型；直接交给 Routine 的订阅事件没有 assess 阶段，不因此额外触发 Chief。
+3. 执行：唤醒 topic2，按分派索引有界选择待办；事务领取 executionId 后才向 Chief 投递，完成后保留 completedAt/result。
+
+Weave 或树内组织改变祖先时，Input Watch 对受影响子树按直属待办索引产生重新协调请求；这项开销发生在结构变化时，随受影响 Topic 与待办数量增长；每个节点使用一次索引快照，避免持续写入导致分页游标过期后漏掉通知。普通待办发现不扫描整棵树。启动时 Input Controller 重建分派，恢复遗漏通知。分派和领取在存储事务内沿当前祖先链核对负责人，结构 Watch 尚未追上时也不能由旧负责人新领取。
+
+处理负责人可随结构调整，executionId 与完成记录不随之重置。新 root 跳过有 executionId 或 completedAt 的 Input；旧执行按原 executionId 收尾。已完成的研判记录保持原负责人。结果未知保留接纳身份，明确拒绝投递才可撤回该次领取；不承诺必达或外部效果严格一次。
+
+普通内容归集只改变 topic1，未完成分派由 Input Reconcile 收敛；已处理材料下沉不重新研判。现有树内材料移动仍要求在途研判先完成，Weave 归组允许旧 Chief 自然收尾。
+
+验证：tests/input-assignment.test.ts 覆盖分派恢复、祖先换 root、事务拒绝过期分派、旧执行收尾、直属容量和无树扫描的待办查询。

@@ -122,7 +122,7 @@ test("Grouping and interrupted prompt keep admission global; Deferred claims wai
   await finalizeExecution(f.context, f.current(a), "a");
   const receipt = f.aide.topics.inputStore.get("fact")!.status.assess!;
   assert.equal(receipt.executionId, "a"); assert.match(receipt.lastError!, /connection lost/);
-  assert.deepEqual(f.aide.topics.inputStore.get("deferred")!.status.assess, {});
+  assert.deepEqual(f.aide.topics.inputStore.get("deferred")!.status.assess, { topic: resourceRef(b) });
   const originalList = f.aide.topics.inputStore.list;
   f.aide.topics.inputStore.list = () => { throw new Error("Material lookup must use Topic indexes"); };
   assert.equal(f.aide.topics.inputs("b").length, 2);
@@ -134,9 +134,10 @@ test("Only routing and completion wake assessment watchers, not claim or rejecti
   const { assignmentWatch } = await import("../plugins/personal/input/state.ts");
   const f = fixture(t), a = await f.aide.topics.ensure("a");
   const fact = await f.input("fact", [a]);
-  const watch = assignmentWatch("assess", "Topic", f.resources);
+  const watch = assignmentWatch("assess", "Topic");
+  await running(f, a);
   const claimed = await f.resources.patchStatus(fact, { assess: { executionId: "a", startedAt: new Date().toISOString() } });
-  const rejected = await f.resources.patch(claimed, { type: "json", value: [{ op: "replace", path: "/status/assess", value: {} }] });
+  const rejected = await f.resources.patch(claimed, { type: "json", value: [{ op: "replace", path: "/status/assess", value: { topic: resourceRef(a) } }] });
   const completed = await f.resources.patchStatus(rejected, { assess: { completedAt: new Date().toISOString() } });
   assert.deepEqual(await watch.handler.update!({ oldObject: fact, newObject: claimed } as any), []);
   assert.deepEqual(await watch.handler.update!({ oldObject: claimed, newObject: rejected } as any), []);

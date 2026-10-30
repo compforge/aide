@@ -1,3 +1,4 @@
+import { assignInput } from "../input/assignment.ts";
 import { commitStatus } from "../status.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { maintenanceAgenda } from "./maintenance.ts";
@@ -44,34 +45,35 @@ export function idleReviewSchedule(topic: Readonly<TopicResource>, config: Topic
   return { dueAt, count, patch };
 }
 
-/**
- * @spec An idle review is born routed to its root, with normal attention and no new authority.
- * @why Recording the decision and creating its Input atomically prevents duplicate reviews; the Topic version fences regrouping and concurrent execution.
- * @spec Timer Inputs do not refresh lastInputAt, so periodic reflection cannot keep a quiet Topic alive forever.
- * @case tests/topic-review.test.ts
- * @link docs/personal/topic.md#topic-定时回顾
+/** @spec Internal requests use ordinary Input assignment/admission; origin determines scheduling, text carries the task.
+ * @why A Topic CAS and pending-request index prevent duplicate requests across concurrent wakeups and restarts.
+ * @link docs/personal/topic.md#树内整理与维护优先级
  */
-export async function createReviewInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string, agenda: Awaited<ReturnType<typeof maintenanceAgenda>>) {
-  if (topic.spec.parentRef || topic.metadata.deletionTimestamp || topic.status.execution || !topicReview(topic.spec.review).enabled)
-    throw new Error("Idle review requires an enabled, idle root Topic");
-  const inputId = `topic-review-${digest([topic.metadata.uid, dueAt])}`;
+export async function createReviewInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: "aide:review" | "aide:triage" | "aide:organize" = "aide:review") {
+  if (topic.metadata.deletionTimestamp || (origin === "aide:review" && (topic.spec.parentRef || topic.status.execution || !topicReview(topic.spec.review).enabled)))
+    throw new Error("Review requires an idle enabled root Topic");
+  const pending = await context.resources.listPage<InputSpec, InputStatus>(INPUT_TYPE, {
+    matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
+  if (pending.items[0]) return pending.items[0];
+  const inputId = `${origin.slice(5)}-${digest([topic.metadata.uid, dueAt])}`;
   const at = new Date().toISOString();
-  const idleSince = topic.status.idleSince ?? topic.metadata.creationTimestamp;
   const target = resourceRef(topic);
   const spec: InputSpec = {
-    origin: "trigger", originId: "personal.topic-review", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
-    text: `${agenda.reason === "organize_material" ? "Review direct Input and Work ownership. Create meaningful children and move materials where useful; assess admitted Inputs before moving them." : agenda.reason === "organize_children" ? "Review child organization. Regroup children or detach a coherent independent subtree when justified; a count alone does not justify splitting." : "Review current understanding, unresolved questions and relevant Work; update summaries only when useful."} Scheduled review at ${at}. Act within existing authorization; this is not a new user request and communication is optional. Record the review with assess_input, including when nothing needs action.\nMaintenance facts: ${JSON.stringify(agenda)}`,
-    observation: { dueAt, triggeredAt: at, idleSince, maintenance: agenda },
+    origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
+    text: `${origin === "aide:triage" ? "Triage this Topic's direct unfiled Inputs and Work. Assess unclaimed Inputs when useful; file completed materials into coherent children, creating a child when needed. Never replay admitted or completed assessments." : origin === "aide:organize" ? "Organize this Topic's direct children. Establish meaningful intermediate groups or detach independent subtrees; do not split merely to satisfy a count." : "Review current understanding, unresolved questions and relevant Work; update summaries only when useful."} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request and communication is optional. Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}`,
+    observation: { dueAt, triggeredAt: at, facts: agenda },
   };
-  const status: InputStatus = {
-    topic: target,
-    route: { completedAt: at, result: { topics: [target], reason: "Scheduled review of this root Topic" } },
-    assess: {},
-  };
+  const status: InputStatus = { topic: target,
+    route: { completedAt: at, result: { topics: [target], reason: `Built-in ${origin} request for this Topic` } }, assess: {} };
   await commitStatus(context.resources, [
-    { operation: "patchStatus", resource: topic, patch: { reviewCheckedAt: at, idleReviewCount: 0, idleReviewReset: null } },
+    { operation: "patchStatus", resource: topic, patch: origin === "aide:review"
+      ? { reviewCheckedAt: at, idleReviewCount: 0, idleReviewReset: null }
+      : { capacityRequests: { ...topic.status.capacityRequests, [origin]: { checkedAt: at, inputId } } } },
     { operation: "create", type: INPUT_TYPE, name: inputId, spec, status },
   ]);
-  context.logger.info("Chief idle review requested", { attributes: { topicUid: topic.metadata.uid, inputId, dueAt, idleSince, reason: agenda.reason } });
+  const input = (await context.resources.get<InputSpec, InputStatus>(inputRef(inputId)))!;
+  await assignInput(context, input);
+  context.logger.info("Topic internal Input requested", { attributes: { origin, topicUid: topic.metadata.uid, inputId, dueAt } });
   return (await context.resources.get<InputSpec, InputStatus>(inputRef(inputId)))!;
 }

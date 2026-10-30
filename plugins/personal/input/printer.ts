@@ -1,5 +1,5 @@
 import type { ResourcePrinter } from "@compforge/aide-plugin";
-import type { InputSpec } from "./model.ts";
+import type { InputSpec, InputStatus } from "./model.ts";
 
 /**
  * @spec Render the original Input facts without fetching context or interpreting provider-specific observations.
@@ -7,13 +7,15 @@ import type { InputSpec } from "./model.ts";
  * @link docs/plugin/README.md
  * @case tests/input-printer.test.ts
  */
-export const inputPrinter: ResourcePrinter<InputSpec> = {
-  describe({ metadata, spec }) {
+export const inputPrinter: ResourcePrinter<InputSpec, InputStatus> = {
+  describe({ metadata, spec, status }) {
     const lines = [
       `Input: ${metadata.name}`,
       `Origin: ${spec.origin}/${spec.originId}`,
       `Received: ${metadata.creationTimestamp}`,
     ];
+    if (status.topic) lines.push(`Material Topic: ${status.topic.uid}`);
+    if (status.assess?.topic) lines.push(`Processing Topic: ${status.assess.topic.uid}`);
     if (spec.source) lines.push(`Source address: ${JSON.stringify(spec.source)}`);
     if (spec.topicName !== undefined) lines.push(`Suggested Topic name: ${spec.topicName}`);
     if (spec.topicKey !== undefined) lines.push(`Topic key: ${spec.topicKey}`);

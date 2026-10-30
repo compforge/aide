@@ -1,3 +1,4 @@
+import { isCapacityInput } from "./input/model.ts";
 import { readNote } from "./note/service.ts";
 import { contentVersion } from "./context-write.ts";
 import { SubjectSchema } from "./note/model.ts";
@@ -25,7 +26,7 @@ import type { OutputStore } from "./output/store.ts";
 import { createRouteAgent } from "../../agents/route/agent.ts";
 import { agentCall } from "./observation/reference.ts";
 import { assessInput, type AssessInput } from "./topic/assess.ts";
-import { belongsToTopic, attemptOf, topicScope, attemptPatch, resourceRef, changeAttempt, changeAssessment } from "./input/state.ts";
+import { belongsToTopic, attemptOf, attemptPatch, resourceRef, changeAttempt, changeAssessment } from "./input/state.ts";
 import { topicPolicy } from "./topic/config.ts";
 import { canActivate, eligible, finalizeExecution, type LoopStatus } from "./loop.ts";
 import { ROUTE_TYPE, type RouteStatus } from "./route/model.ts";
@@ -181,7 +182,7 @@ export class Personal {
     const inputs = owner.kind === "Route" ? this.topics.inputStore.query("routePending", "pending") : this.topics.pending(owner.uid!);
     const c = owner.kind === "Topic" ? this.store.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, owner.name) : undefined;
     const members = c ? new Set(this.topics.scope(c.metadata.uid).map(t => t.metadata.uid)) : undefined;
-    const status = (i: Readonly<Resource<InputSpec, InputStatus>>) => attemptOf(i, owner) ?? attemptOf(i, owner, members);
+    const status = (i: Readonly<Resource<InputSpec, InputStatus>>) => c ? i.status.assess : attemptOf(i, owner);
     if (!id) return { ...(c ? { context: { version: contentVersion(c), summary: c.status.summary, recent: notes(this.store.resources, c.metadata.uid),
       summaryChars: topicPolicy(this.options.topic).summaryChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, attention: inputAttention(i.spec), status: status(i) })),
       nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
@@ -258,11 +259,11 @@ export class Personal {
     for (let n = 0; ; n++) {
       const topic = await resources.get<TopicSpec, TopicStatus>(ref);
       if (!topic || topic.metadata.deletionTimestamp || topic.spec.parentRef || !topic.status.execution) return { accepted: false, reason: "not_running" };
+      if (topic.status.execution.inputOrigin && isCapacityInput({ origin: topic.status.execution.inputOrigin })) return { accepted: false, reason: "capacity_round" };
       const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === topic.status.execution!.id && i.phase === "running");
       if (!invocation) return { accepted: false, reason: "not_running" };
       const input = args.inputId ? this.topics.inputStore.get(args.inputId) : undefined;
-      const members = new Set((await topicScope(resources, ref)).map(t => t.metadata.uid));
-      if (args.inputId && (!input || !eligible(input, topic, members) || !canActivate(input.spec, topic))) return { accepted: false };
+      if (args.inputId && (!input || !eligible(input, topic) || !canActivate(input.spec, topic))) return { accepted: false };
       if (args.weaveRevision && (args.weaveRevision > (topic.status.weaveRevision ?? 0)
         || args.weaveRevision <= (topic.status.notifiedWeaveRevision ?? 0))) return { accepted: false };
       try {
@@ -275,7 +276,7 @@ export class Personal {
             executionId: topic.status.execution.id, startedAt: new Date().toISOString(), agent: topic.status.agent,
           } } }] : []),
         ]);
-      } catch (error) { if (n < 8 && /version conflict/.test(String(error))) continue; throw error; }
+      } catch (error) { if (/processing assignment changed/.test(String(error))) return { accepted: false, reason: "admission_conflict" }; if (n < 8 && /version conflict/.test(String(error))) continue; throw error; }
       if (input) this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid,
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const prompt = input ? `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nRead current Topic material and assess when useful.`

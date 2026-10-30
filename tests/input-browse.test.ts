@@ -219,3 +219,16 @@ test("Observation reader absence returns unavailable while Job export retains bu
   aide.readSession = async () => { throw new Error("Native file read failure"); };
   assert.equal((await fetch(`${base}/inputs/session?${query}&harness=route&sessionId=native`)).status, 500);
 });
+
+
+test("Built-in origins retain their colon through filter values and API queries", t => {
+  const { aide, store } = setup(t);
+  for (const origin of ["aide:review", "aide:triage", "aide:organize"] as const)
+    store.submit("test", origin, { origin, originId: "personal.topic", text: origin }, finished());
+  const filters = inputFilters(aide);
+  for (const option of filters.origins) {
+    const [origin, originId] = JSON.parse(option.value) as [InputSpec["origin"], string];
+    assert.ok(origin.startsWith("aide:"));
+    assert.equal(inputList(aide, { origin, originId }).items.length, 1);
+  }
+});

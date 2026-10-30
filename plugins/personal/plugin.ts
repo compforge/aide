@@ -1,3 +1,4 @@
+import { registerInputs } from "./input/assignment.ts";
 import { registerNotes } from "./note/reconcile.ts";
 import { registerRepositorySources } from "./source/repository/observe.ts";
 import { registerPullRequestSources } from "./source/pull-request/observe.ts";
@@ -18,6 +19,7 @@ const plugin: PluginPackage = {
     context.logger.info("Personal Plugin worker activated", { attributes: { pid: process.pid } });
     registerWeave(context);
     registerRoute(context);
+    registerInputs(context);
     registerTopics(context);
     registerSources(context);
     registerRepositorySources(context);

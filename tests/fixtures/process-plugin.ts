@@ -39,7 +39,7 @@ const plugin: PluginPackage = {
           if (operation === "no-builtins") {
             const rejected: string[] = [];
             for (const kind of ["Input", "Output", "Turn", "Session", "Target", "SessionTargetBinding"]) {
-              try { await context.resources.list({ apiVersion: ["Task", "Routine", "Topic"].includes(kind) ? "aide.dev/v1alpha3" : ["Input", "Person"].includes(kind) ? "aide.dev/v1alpha2" : "aide.dev/v1alpha1", kind }); }
+              try { await context.resources.list({ apiVersion: ["Task", "Routine", "Topic", "Input"].includes(kind) ? "aide.dev/v1alpha3" : ["Person"].includes(kind) ? "aide.dev/v1alpha2" : "aide.dev/v1alpha1", kind }); }
               catch (error) { if (!String(error).includes("Unknown resource definition")) throw error; rejected.push(kind); }
             }
             return rejected;

@@ -1,3 +1,4 @@
+import { isInternalInput } from "../input/model.ts";
 import { contentVersion } from "../context-write.ts";
 import { notes } from "../note/query.ts";
 import { topicPersons } from "./persons.ts";
@@ -36,7 +37,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
       async execute(_id, { topicUid, offset = 0 }) {
         const root = active(), topic = subtree().find(t => t.metadata.uid === (topicUid ?? root.metadata.uid));
         if (!topic) throw new Error("Topic is outside this root");
-        const items = store.topics.inputStore.query("topic", topic.metadata.uid).filter(i => !i.metadata.deletionTimestamp && i.spec.origin !== "trigger");
+        const items = store.topics.inputStore.query("topic", topic.metadata.uid).filter(i => !i.metadata.deletionTimestamp && !isInternalInput(i.spec));
         return result(contextPage(items.map(i => ({ id: i.metadata.name, topicUid: i.status.topic!.uid, text: i.spec.text.slice(0, 240), assessed: !!i.status.assess?.completedAt })), offset));
       } }),
     { name: "list_topics", label: "List child topics", description: "List direct children within this root's subtree with summary and Note previews for discovery. Text ending in [truncated] is incomplete; noteTotal counts Notes in the retained recent window, including omitted previews. Before relying on incomplete context or confirming absorbed versions, use read_topic(uid) and continue with offset=nextOffset until the needed context is read. Follow this list's nextOffset to discover remaining children.",

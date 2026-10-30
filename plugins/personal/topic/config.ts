@@ -9,6 +9,8 @@ export type TopicReviewPolicy = z.infer<typeof TopicReviewPolicySchema>;
 export const TopicPolicySchema = z.object({
   trigger: z.object({ intervalSeconds: seconds.default(60) }).strict().prefault({}),
   review: TopicReviewPolicySchema.prefault({}),
+  capacityCooldownSeconds: seconds.default(60),
+  maxUnfiledInput: z.number().int().min(1).default(40),
   maxInput: z.number().int().min(1).default(40),
   maxWork: z.number().int().min(1).default(8),
   maxChildren: z.number().int().min(1).default(8),

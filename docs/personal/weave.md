@@ -98,7 +98,7 @@ Input、Task、Routine 通过 status.topic 保存当前归属。初次路由确�
 
 候选必须是存活、非 Default 的 root，使用 UID 与认识版本核对。父子关系提交使用资源版本校验并拒绝环；分组事务只更新关系和父节点状态，不扫描或迁移 Input / Work，也不等待 Chief 或 Work 结束。创建父 Topic 需要先取得宿主分配的 UID，随后原子提交全部父子关系；提交失败清理未使用的新父节点。
 
-旧 Chief 运行期间允许其 Topic 成为子节点。旧执行可自然完成、提交研判和认识；后续不再为子 Topic 启动 Chief。子认识的后续变化由当前 root 吸收。已有材料可以被新旧 Chief 查看，不通过 Input 占有锁阻止重复研判。
+旧 Chief 运行期间允许其 Topic 成为子节点。旧执行可自然完成、提交研判和认识；后续不再为子 Topic 启动 Chief。子认识的后续变化由当前 root 吸收。已有材料可以被新旧 Chief 查看；Input 分派协调更新 status.assess.topic，已有 executionId 或 completedAt 阻止新 root 再次自动接纳。旧执行按原 executionId 提交完成，参见 [Input 三阶段](input.md#挂载分派与执行)。
 
 ## 效果验证
 
