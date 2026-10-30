@@ -14,9 +14,18 @@
     </div>
     <p id="person-list-notice" role="status" class="muted"></p></nav>
   <section class="person-detail" aria-label="人物详情">
-    <h2 id="person-heading">选择一个人物</h2><p id="person-empty" class="muted">随着消息和观察积累，Aide 会在这里记录认识的人。</p>
-    <form id="person-editor" hidden>
+    <div class="person-title"><h2 id="person-heading">选择一个人物</h2><button id="person-name-edit" class="person-edit-icon" type="button" title="编辑姓名或称呼" aria-label="编辑姓名或称呼" aria-controls="person-name-form" aria-expanded="false" hidden><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7"/><path d="m16 3 5 5M10 14l-1 4 4-1 9-9a3.5 3.5 0 0 0-5-5z"/></svg></button></div><p id="person-empty" class="muted">随着消息和观察积累，Aide 会在这里记录认识的人。</p>
+    <div id="person-editor" hidden>
+      <form id="person-name-form" hidden>
       <label>姓名或称呼<input id="person-name" required maxlength="200"></label>
+      <div class="person-actions"><button id="person-name-cancel" class="secondary" type="button">取消</button><button id="person-name-save" type="submit">保存称呼</button></div>
+      </form>
+      <div id="person-tabs" class="detail-tabs" role="tablist" aria-label="人物内容">
+        <button id="person-tab-summary" type="button" role="tab" aria-selected="true" aria-controls="person-panel-summary">认识</button>
+        <button id="person-tab-notes" type="button" role="tab" aria-selected="false" aria-controls="person-panel-notes" tabindex="-1">相关记录</button>
+        <button id="person-tab-identities" type="button" role="tab" aria-selected="false" aria-controls="person-panel-identities" tabindex="-1">身份</button>
+      </div>
+      <section id="person-panel-summary" class="person-panel" role="tabpanel" aria-labelledby="person-tab-summary" tabindex="0">
       <section class="person-summary" aria-labelledby="person-summary-heading">
         <div class="person-summary-heading"><h3 id="person-summary-heading">当前认识</h3><button id="person-summary-edit" class="person-edit-icon" type="button" title="编辑当前认识" aria-label="编辑当前认识" aria-controls="person-summary-editor" aria-expanded="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7"/><path d="m16 3 5 5M10 14l-1 4 4-1 9-9a3.5 3.5 0 0 0-5-5z"/></svg></button></div>
         <div id="person-summary-read" class="markdown"></div>
@@ -26,16 +35,28 @@
         </div>
         <p id="person-summary-notice" role="status" aria-live="polite"></p>
       </section>
-      <section><h3>近期依据</h3><div id="person-recent"></div></section>
+      <p id="person-updated" class="muted"></p>
+      </section>
+      <section id="person-panel-notes" class="person-panel" role="tabpanel" aria-labelledby="person-tab-notes" tabindex="0" hidden>
+        <button id="person-notes-refresh" type="button" class="secondary">刷新记录</button>
+        <div id="person-notes"></div>
+        <p id="person-notes-notice" role="status" aria-live="polite" class="muted"></p>
+        <button id="person-notes-more" type="button" class="secondary" hidden>加载更多</button>
+      </section>
+      <section id="person-panel-identities" class="person-panel" role="tabpanel" aria-labelledby="person-tab-identities" tabindex="0" hidden>
+      <form id="person-identities-form">
       <fieldset><legend>外部身份</legend><p class="muted">同一个人可以有多个身份。Lark 使用 app ID 作为作用域、open ID 作为身份 ID；姓名不用于身份匹配。</p><div id="person-identities"></div><button id="identity-add" type="button" class="secondary">添加身份</button></fieldset>
-      <p id="person-updated" class="muted"></p><div class="person-actions"><button id="person-save" type="submit">保存</button><button id="person-reload" class="secondary" type="button">重新加载</button></div>
-    </form>
-    <p id="person-notice" role="status" aria-live="polite"></p>
+      <div class="person-actions"><button id="person-save" type="submit">保存身份</button></div>
+      </form>
     <section id="person-same-names" aria-labelledby="person-same-names-heading" hidden>
       <h3 id="person-same-names-heading">同名人物</h3>
       <p class="muted">姓名相同不代表同一个人，请核对外部身份后合并。</p>
       <div id="person-same-name-list"></div>
     </section>
+      </section>
+      <button id="person-reload" class="secondary person-reload" type="button">重新加载</button>
+    </div>
+    <p id="person-notice" role="status" aria-live="polite"></p>
   </section>
 </main>
 <dialog id="person-merge-dialog" aria-labelledby="person-merge-heading" aria-describedby="person-merge-warning">

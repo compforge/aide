@@ -2,7 +2,7 @@ import { contentVersion } from "../context-write.ts";
 import type { NoteStatus } from "../note/model.ts";
 import { createHash } from "node:crypto";
 import type { ResourceClient } from "@compforge/aide-plugin";
-import { readNotes } from "../note/query.ts";
+import { pageNotes, readNotes } from "../note/query.ts";
 import { SUMMARY_CHARS } from "../context.ts";
 import { mergePersonSummary } from "./merge.ts";
 import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, LOCAL_ME, type Me, type Person, type PersonIdentity, type PersonResource, type PersonStatus } from "./model.ts";
@@ -18,9 +18,17 @@ export class Persons {
     return (await this.resources.list<Person, PersonStatus>(PERSON_TYPE))
       .filter((p) => !p.metadata.deletionTimestamp).map((p) => ({ ...p, isMe: isMe(p.spec, this.marks) }));
   }
-  async read(id: string, uid?: string) {
+  private async profile(id: string, uid?: string) {
     const person = await this.resources.get<Person, PersonStatus>({ ...PERSON_TYPE, namespace: "v1", name: id });
     if (!person || person.metadata.deletionTimestamp || (uid !== undefined && person.metadata.uid !== uid)) throw new Error(`Unknown Person: ${id}`);
+    return person;
+  }
+  async notes(id: string, uid: string, continuation?: string) {
+    const person = await this.profile(id, uid);
+    return pageNotes(this.resources, person.metadata.uid, "people", continuation);
+  }
+  async read(id: string, uid?: string) {
+    const person = await this.profile(id, uid);
     return { ...person, summaryVersion: contentVersion(person), recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
   }
   /** @spec Configured Me accounts identify one human; consolidate identity owners atomically before starting consumers.
