@@ -38,3 +38,8 @@ button:disabled { opacity: .5; cursor: wait; } button:focus-visible, textarea:fo
 
 .brand { display: flex; align-items: center; gap: 8px; }
 .brand img { display: block; border-radius: 7px; }
+
+.detail-tabs { display: flex; flex: none; gap: 8px; overflow-x: auto; border-bottom: 1px solid #d8dfd5; margin-bottom: 18px; padding-bottom: 8px; }
+.detail-tabs button { padding: 9px 12px; border-radius: 8px; background: transparent; color: #68776c; font-size: 14px; }
+.detail-tabs button[aria-selected="true"] { color: #294f3a; background: #dfeadd; font-weight: 600; }
+.detail-tabs[hidden] { display: none; }

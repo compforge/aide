@@ -1,5 +1,7 @@
 import './style.css';
 import { PersonMerge } from './merge.ts';
+import { PersonNotes } from './notes.ts';
+import { mountPersonTabs } from './tabs.ts';
 import { renderMarkdown } from '../shared/markdown.ts';
 import { byId as $, element as node, find } from '../shared/dom.ts';
 import { request, errorMessage } from '../shared/http.ts';
@@ -10,10 +12,12 @@ let people: PersonItem[] = [], selected: PersonView, page: PersonListView | unde
 let listRequest: AbortController | undefined, detailRequest: AbortController | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined, searchTimer: ReturnType<typeof setTimeout> | undefined, paused = false;
 let listGeneration = 0, detailGeneration = 0, lastList = '';
-let dirty = false, editingSummary = false, saving = false;
+let editingSummary = false, saving = false;
 let requestedPage: number | null = null, currentPage = 1;
 const initialId = new URL(location.href).searchParams.get('person');
 const initialUid = new URL(location.href).searchParams.get('uid');
+const records = new PersonNotes();
+const tabs = mountPersonTabs(() => records.show());
 const merging = new PersonMerge({ current: () => selected, hasUnsavedChanges, busy: setSaving,
   merged(source, target) {
     people = people.filter((p) => p.uid !== source.metadata.uid);
@@ -21,8 +25,17 @@ const merging = new PersonMerge({ current: () => selected, hasUnsavedChanges, bu
     $('person-notice').textContent = '已合并，被合并人物已删除。';
   },
 });
+function identities(): PersonIdentity[] {
+  return [...$('person-identities').children].map(row => ({
+    provider: find<HTMLInputElement>(row, '[data-key=provider]').value,
+    scope: find<HTMLInputElement>(row, '[data-key=scope]').value,
+    id: find<HTMLInputElement>(row, '[data-key=id]').value,
+  }));
+}
 function hasUnsavedChanges() {
-  return dirty || saving || (editingSummary && $<HTMLTextAreaElement>('person-summary').value !== selected.status.summary);
+  return saving || (selected && ($<HTMLInputElement>('person-name').value !== selected.spec.name
+    || JSON.stringify(identities()) !== JSON.stringify(selected.spec.identities)
+    || (editingSummary && $<HTMLTextAreaElement>('person-summary').value !== selected.status.summary)));
 }
 function renderList() {
   if (!page) return;
@@ -84,17 +97,16 @@ async function loadPeople() {
     }
   }
 }
-function schedulePeople() { clearTimeout(timer); schedulePeople(); }
+function schedulePeople() { clearTimeout(timer); if (!paused) timer = setTimeout(() => void loadPeople(), 5000); }
 function identityRow(identity: PersonIdentity = { provider: '', scope: '', id: '' }) {
   const row = node('div', undefined, 'person-identity');
   const local = identity.provider === 'web' && identity.scope === 'local' && identity.id === 'me';
   for (const [key, label] of [['provider', '系统'], ['scope', '身份作用域'], ['id', '身份 ID']] as const) {
-    const field = node('input'); field.value = identity[key]; field.placeholder = label; field.setAttribute('aria-label', label); field.dataset.key = key; field.required = true; field.readOnly = local; row.append(field);
+    const field = node('input'); field.value = identity[key]; field.placeholder = label; field.setAttribute('aria-label', label); field.dataset.key = key; field.required = true; field.readOnly = local; if (local) field.dataset.local = ''; row.append(field);
   }
-  const remove = node('button', '移除', 'secondary'); remove.type = 'button'; remove.disabled = local; remove.onclick = () => { row.remove(); dirty = true; }; row.append(remove); $('person-identities').append(row);
+  const remove = node('button', '移除', 'secondary'); remove.type = 'button'; remove.disabled = local; if (local) remove.dataset.local = ''; remove.onclick = () => row.remove(); row.append(remove); $('person-identities').append(row);
 }
 function renderSummary() {
-  $('person-recent').replaceChildren(...selected.recent.map((entry) => node('p', `${entry.updatedAt} · ${entry.text}`)));
   const text = selected.status.summary;
   $('person-summary-read').innerHTML = renderMarkdown(text || '尚未积累认识。');
   $('person-summary-read').classList.toggle('muted', !text);
@@ -106,16 +118,24 @@ function setSummaryEditing(editing: boolean) {
   $('person-summary-editor').hidden = !editing;
   $<HTMLButtonElement>('person-summary-edit').hidden = editing;
   $<HTMLButtonElement>('person-summary-edit').setAttribute('aria-expanded', String(editing));
-  $<HTMLButtonElement>('person-save').disabled = editing || saving;
   $('person-summary-notice').textContent = '';
+}
+function setNameEditing(editing: boolean) {
+  $('person-name-form').hidden = !editing;
+  $('person-name-edit').hidden = editing;
+  $('person-name-edit').setAttribute('aria-expanded', String(editing));
+  if (!editing) $<HTMLInputElement>('person-name').value = selected.spec.name;
 }
 function setSaving(value: boolean) {
   saving = value;
-  $<HTMLButtonElement>('person-save').disabled = value || editingSummary;
-  for (const id of ['person-reload', 'person-summary-edit', 'person-summary-cancel', 'person-summary-confirm']) $<HTMLButtonElement>(id).disabled = value;
+  for (const id of ['person-save', 'person-name-edit', 'person-name-cancel', 'person-name-save', 'person-reload', 'person-summary-edit', 'person-summary-cancel', 'person-summary-confirm', 'identity-add']) $<HTMLButtonElement>(id).disabled = value;
   $<HTMLTextAreaElement>('person-summary').readOnly = value;
+  $<HTMLInputElement>('person-name').readOnly = value;
+  for (const field of $('person-identities').querySelectorAll<HTMLInputElement>('input:not([data-local])')) field.readOnly = value;
+  for (const button of $('person-identities').querySelectorAll<HTMLButtonElement>('button:not([data-local])')) button.disabled = value;
 }
 function adoptPerson(person: PersonView, refreshList = true) {
+  if (selected?.metadata.uid !== person.metadata.uid) tabs.reset();
   selected = { ...selected, ...person };
   $('person-heading').textContent = selected.spec.name + (selected.isMe ? ' · 我' : '');
   $('person-updated').textContent = selected.status.updatedAt ? '最近更新：' + new Date(selected.status.updatedAt).toLocaleString() : '';
@@ -124,11 +144,11 @@ function adoptPerson(person: PersonView, refreshList = true) {
   if (refreshList) void loadPeople();
 }
 function renderEditor() {
-  dirty = false;
   $('person-empty').hidden = true; $('person-editor').hidden = false;
   $<HTMLInputElement>('person-name').value = selected.spec.name;
-  renderSummary(); setSummaryEditing(false);
+  renderSummary(); setSummaryEditing(false); setNameEditing(false);
   $('person-identities').replaceChildren(); selected.spec.identities.forEach(identityRow);
+  records.reset(selected); tabs.refresh();
 }
 async function select(id: string, uid?: string) {
   detailRequest?.abort(); const controller = new AbortController(), token = ++detailGeneration;
@@ -151,8 +171,7 @@ function savePerson(spec: Person, summary?: string) {
 $<HTMLInputElement>('person-search').oninput = () => { requestedPage = 1; listGeneration++; listRequest?.abort(); clearTimeout(timer); clearTimeout(searchTimer); searchTimer = setTimeout(() => void loadPeople(), 250); };
 $('person-previous').onclick = () => { requestedPage = currentPage - 1; void loadPeople(); };
 $('person-next').onclick = () => { requestedPage = currentPage + 1; void loadPeople(); };
-$('person-editor').oninput = (event) => { if (event.target !== $<HTMLTextAreaElement>('person-summary')) dirty = true; };
-$('identity-add').onclick = () => { identityRow(); dirty = true; };
+$('identity-add').onclick = () => identityRow();
 $<HTMLButtonElement>('person-reload').onclick = () => { if (!saving && (!hasUnsavedChanges() || confirm('重新加载将放弃尚未保存的修改，继续？'))) void select(selected.metadata.name, selected.metadata.uid); };
 $<HTMLButtonElement>('person-summary-edit').onclick = () => {
   renderSummary(); setSummaryEditing(true); $<HTMLTextAreaElement>('person-summary').focus();
@@ -171,25 +190,35 @@ $<HTMLButtonElement>('person-summary-confirm').onclick = async () => {
   } catch (error) { $('person-summary-notice').textContent = errorMessage(error); }
   finally { setSaving(false); }
 };
-$('person-editor').onsubmit = async (event) => {
-  event.preventDefault(); if (!selected || saving || editingSummary) return;
+// @spec Saving one profile area preserves unsaved drafts in the other areas.
+async function saveProfile(area: 'name' | 'identities') {
+  if (!selected || saving) return;
+  const spec = { ...selected.spec, ...(area === 'name' ? { name: $<HTMLInputElement>('person-name').value } : { identities: identities() }) };
   setSaving(true);
-  const spec = { name: $<HTMLInputElement>('person-name').value,
-    identities: [...$('person-identities').children].map((row) => ({ provider: find<HTMLInputElement>(row, '[data-key=provider]').value, scope: find<HTMLInputElement>(row, '[data-key=scope]').value, id: find<HTMLInputElement>(row, '[data-key=id]').value })) };
   try {
-    adoptPerson(await savePerson(spec)); dirty = false;
-    $<HTMLInputElement>('person-name').value = selected.spec.name;
-    $('person-identities').replaceChildren(); selected.spec.identities.forEach(identityRow);
-    $('person-notice').textContent = '已保存。';
+    adoptPerson(await savePerson(spec));
+    if (area === 'name') setNameEditing(false);
+    else { $('person-identities').replaceChildren(); selected.spec.identities.forEach(identityRow); }
+    $('person-notice').textContent = area === 'name' ? '称呼已保存。' : '身份已保存。';
   } catch (error) { $('person-notice').textContent = errorMessage(error); }
-  finally { setSaving(false); }
+  finally {
+    setSaving(false);
+    if (area === 'name' && $('person-name-form').hidden) $('person-name-edit').focus();
+  }
+}
+$('person-name-edit').onclick = () => { setNameEditing(true); $<HTMLInputElement>('person-name').focus(); };
+$('person-name-cancel').onclick = () => { setNameEditing(false); $('person-name-edit').focus(); };
+$('person-name-form').onkeydown = event => {
+  if (event.key === 'Escape' && !saving) { event.preventDefault(); setNameEditing(false); $('person-name-edit').focus(); }
 };
+$('person-name-form').onsubmit = event => { event.preventDefault(); void saveProfile('name'); };
+$('person-identities-form').onsubmit = event => { event.preventDefault(); void saveProfile('identities'); };
 window.addEventListener('beforeunload', (event) => { if (hasUnsavedChanges()) { event.preventDefault(); event.returnValue = ''; } });
 window.addEventListener('pagehide', () => {
   paused = true; listGeneration++; detailGeneration++;
-  clearTimeout(timer); clearTimeout(searchTimer); listRequest?.abort(); detailRequest?.abort(); merging.pause();
+  clearTimeout(timer); clearTimeout(searchTimer); listRequest?.abort(); detailRequest?.abort(); merging.pause(); records.pause();
 });
-window.addEventListener('pageshow', event => { if (event.persisted) { paused = false; void loadPeople(); if (selected) void merging.render(); } });
+window.addEventListener('pageshow', event => { if (event.persisted) { paused = false; void loadPeople(); if (selected) { void merging.render(); tabs.refresh(); } } });
 const initialParams = new URL(location.href).searchParams;
 $<HTMLInputElement>('person-search').value = initialParams.get('q') ?? '';
 const initialPage = Number(initialParams.get('page'));

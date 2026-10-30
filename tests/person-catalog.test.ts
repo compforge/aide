@@ -191,3 +191,33 @@ test("Web merge validates reviewed versions, finalizes the source and tolerates 
   assert.equal(await f.aide.catalog.client.get(personRef(source)), undefined);
   assert.equal((await f.aide.persons.observe(source.spec.identities[0]!)).metadata.uid, target.metadata.uid);
 });
+
+/** @case Person records paginate past the recent budget, isolate people by UID and reject stale cursors. */
+test("Web pages full related Notes newest first without persisting Person recent", async t => {
+  const f = await setup(t), server = httpChannel(f.aide, log);
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const person = await f.aide.persons.observe({ provider: "test", scope: "notes", id: "one" }, "One");
+  const other = await f.aide.persons.observe({ provider: "test", scope: "notes", id: "two" }, "Two");
+  const client = f.aide.runtime.plugins.resourceClient("personal");
+  const entries = Array.from({ length: 45 }, (_, i) => ({ id: `record-${i}`, text: `Record ${i}: ${"完整内容".repeat(200)}`,
+    updatedAt: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString() }));
+  await seedNotes(client, person, entries);
+  await seedNotes(client, other, [{ id: "unrelated", text: "Other person's record" }]);
+  const query = new URLSearchParams({ id: person.metadata.name, uid: person.metadata.uid });
+  const read = (cursor?: string) => fetch(base + '/persons/notes?' + new URLSearchParams({ ...Object.fromEntries(query), ...(cursor ? { continue: cursor } : {}) }));
+  const first = await (await read()).json() as Awaited<ReturnType<Persons["notes"]>>;
+  assert.equal(first.items.length, 20);
+  const second = await (await read(first.continue)).json() as typeof first;
+  const third = await (await read(second.continue)).json() as typeof first;
+  assert.deepEqual([second.items.length, third.items.length], [20, 5]);
+  assert.equal(third.continue, "");
+  assert.deepEqual([...first.items, ...second.items, ...third.items].map(n => n.text), entries.toReversed().map(n => n.text));
+  assert.equal("recent" in (await f.aide.persons.read(person.metadata.name, person.metadata.uid)).status, false);
+  assert.equal((await fetch(base + '/persons/notes?' + new URLSearchParams({ id: person.metadata.name, uid: 'old-incarnation' }))).status, 404);
+  assert.equal((await fetch(base + '/persons/notes?' + new URLSearchParams({ id: other.metadata.name, uid: other.metadata.uid, continue: first.continue! }))).status, 400);
+  await seedNotes(client, person, [{ id: 'new', text: 'A new record' }]);
+  assert.equal((await read(first.continue)).status, 410);
+  assert.equal((await read()).status, 200);
+});

@@ -13,6 +13,14 @@ export async function readNotes(reader: ResourceReader, uid: string, index: "sub
   return retainRecent(page.items.toReversed().map(noteView));
 }
 
+/** @spec Browse full Note content in bounded newest-first pages, independently of agent context budgets. */
+export async function pageNotes(reader: ResourceReader, uid: string, index: "subject" | "people", continuation?: string) {
+  const page = await reader.page<NoteSpec, NoteStatus>(NOTE_TYPE, {
+    ...recentQuery(uid, index), namespace: "v1", limit: 20, continue: continuation,
+  });
+  return { items: page.items.filter(n => !n.metadata.deletionTimestamp).map(noteView), continue: page.metadata.continue };
+}
+
 export const NoteQuerySchema = z.object({ subject: z.string().min(1).optional(), people: z.string().min(1).optional(),
   q: z.string().max(500).optional(), continue: z.string().optional(), limit: z.number().int().min(1).max(20).default(20) }).strict();
 /** @spec Scan at most one indexed page per request, including empty search pages; continue preserves coverage beyond recent.

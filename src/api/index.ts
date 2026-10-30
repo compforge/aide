@@ -1,3 +1,4 @@
+import { ResourceExpired, ResourceContinueInvalid } from "@compforge/aide-plugin";
 import { ChannelSettings, ChannelSettingsChangeSchema, ChannelSettingsError } from "../channel/settings.ts";
 import { createWebAssets } from "./assets.ts";
 import { visibleOutput } from "../channel/output.ts";
@@ -167,6 +168,18 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
           const query = PersonListSchema.parse(Object.fromEntries(url.searchParams));
           const started = performance.now();
           listJson(response, browsePersons(aide.topics.resources.storage, aide.persons.marks, query), "persons", started);
+        }
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/persons/notes") {
+        const query = z.object({ id: z.string().min(1), uid: z.string().min(1), continue: z.string().optional() }).strict().parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        try { json(response, 200, await aide.persons.notes(query.id, query.uid, query.continue)); }
+        catch (error) {
+          if (String(error).includes("Unknown Person")) { json(response, 404, { error: "人物不存在。" }); return; }
+          if (error instanceof ResourceExpired) { json(response, 410, { error: "记录已更新，请刷新后继续浏览。" }); return; }
+          if (error instanceof ResourceContinueInvalid) { json(response, 400, { error: "分页位置无效，请刷新记录。" }); return; }
+          throw error;
         }
         return;
       }

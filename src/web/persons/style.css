@@ -45,3 +45,14 @@ button.secondary { background: #e8eee3; color: #20342b; }
 #person-merge-notice { color: #735722; }
 @media (max-width: 600px) { .person-merge-comparison { grid-template-columns: 1fr; } #person-merge-dialog { padding: 16px; } }
 @media (max-width: 760px) { header { display: flex; flex-wrap: wrap; padding: 16px; } #connection { margin-left: auto; } .persons-page { display: block; height: auto; } .persons-page .person-list { max-height: 30vh; } .person-detail { padding: 20px; } .person-identity { grid-template-columns: 1fr; } }
+
+#person-tabs { margin-top: 24px; }
+.person-panel[hidden] { display: none; }
+.person-note { border-bottom: 1px solid #d8dfd5; padding: 20px 0; overflow-wrap: anywhere; }
+.person-note time { font-size: 13px; }
+#person-notes-more[hidden] { display: none; }
+
+.person-title { display: flex; align-items: center; gap: 6px; margin-bottom: 18px; }
+.person-title h2 { margin: 0; }
+#person-name-form[hidden], #person-name-edit[hidden] { display: none; }
+.person-reload { margin-top: 24px; padding: 6px 10px; font-size: 13px; }
