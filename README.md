@@ -8,6 +8,8 @@ Aide is a self-hosted personal agent that builds an understanding of the people 
 
 For example: “Follow this PR until it is merged. Handle review comments, ask me when a decision is needed, and tell me when it lands.” The same task can span multiple rounds of work and waiting. Aide continues working on your server when you close the chat or shut down your laptop.
 
+The project also develops a TypeScript controller-runtime foundation, guided by Kubernetes resource and reconciliation semantics. Personal is its first application: it owns the domain model, while the runtime provides persistence, indexed queries, watches and scheduling. See [runtime architecture](docs/kernel.md).
+
 ## What you can ask
 
 - **Get an answer or a small job done.** “Read this project's README and tell me how to run it.” Aide can inspect files and use the CLIs available in its environment.

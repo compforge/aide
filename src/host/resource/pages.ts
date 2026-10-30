@@ -7,7 +7,7 @@ const api = "json_extract(r.data,'$.object.apiVersion')";
 const kind = "json_extract(r.data,'$.object.kind')";
 const ns = "json_extract(r.data,'$.object.metadata.namespace')";
 const name = "json_extract(r.data,'$.object.metadata.name')";
-interface Cursor { query: string; revision: number; after: [string, string]; until?: [string, string] }
+interface Cursor { query: string; revision: number; after: string[]; until?: string[] }
 
 /** @spec SQL selects at most limit+1 keys; only returned page objects are decoded by the Store.
  * @spec Consistent cursors expire on collection changes; live cursors persist an upper key bound and survive restart.
@@ -51,23 +51,25 @@ export class ResourcePages {
     try {
       const cursor = JSON.parse(Buffer.from(payload, "base64url").toString()) as Cursor;
       if (typeof cursor.query !== "string" || !Number.isSafeInteger(cursor.revision) || !Array.isArray(cursor.after)
-        || cursor.after.length !== 2 || cursor.after.some(v => typeof v !== "string")) throw new Error("Invalid cursor fields");
-      if (live && (!Array.isArray(cursor.until) || cursor.until.length !== 2 || cursor.until.some(v => typeof v !== "string"))) throw new Error("Invalid upper bound");
+        || ![2, 3].includes(cursor.after.length) || cursor.after.some(v => typeof v !== "string")) throw new Error("Invalid cursor fields");
+      if (live && (!Array.isArray(cursor.until) || cursor.until.length !== cursor.after.length || cursor.until.some(v => typeof v !== "string"))) throw new Error("Invalid upper bound");
       return cursor;
     } catch { throw new ResourceContinueInvalid("Invalid Resource continue token"); }
   }
   /** Called inside the same storage transaction that loads the selected objects. */
-  list(scope: string, type: ResourceType, options: ResourcePageOptions) {
+  list(scope: string, type: ResourceType, options: ResourcePageOptions, ordered = false) {
     if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 1000)
       throw new Error("Resource page limit must be an integer in 1..1000");
     if (options.includeDescendants !== undefined && typeof options.includeDescendants !== "boolean") throw new Error("Invalid includeDescendants");
     if (options.matchIndex && (typeof options.matchIndex.name !== "string" || typeof options.matchIndex.value !== "string")) throw new Error("Invalid resource index selector");
     if (options.consistency !== undefined && !["consistent", "live"].includes(options.consistency)) throw new ResourceContinueInvalid("Invalid consistency mode");
+    if (options.direction !== undefined && !["asc", "desc"].includes(options.direction)) throw new Error("Invalid page direction");
+    const descending = options.direction === "desc";
     const live = options.consistency === "live";
     const namespace = options.namespace ?? "v1";
     const labels = Object.entries(options.matchLabels ?? {}).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
     const query = createHash("sha256").update(JSON.stringify([scope, type.apiVersion, type.kind, namespace,
-      !!options.includeDescendants, options.matchIndex ? [options.matchIndex.name, options.matchIndex.value] : null, labels, live])).digest("hex");
+      !!options.includeDescendants, options.matchIndex ? [options.matchIndex.name, options.matchIndex.value] : null, labels, live, ordered, descending])).digest("hex");
     const revision = Number(this.db.prepare("SELECT revision FROM resource_revisions WHERE scope=? AND api_version=? AND kind=?")
       .get(scope, type.apiVersion, type.kind)?.revision ?? 0);
     const cursor = options.continue === undefined || options.continue === "" ? undefined : this.decode(options.continue, live);
@@ -76,7 +78,8 @@ export class ResourcePages {
     const indexed = !!options.matchIndex;
     const namespaceColumn = indexed ? "p.namespace" : ns, nameColumn = indexed ? "p.resource_name" : name;
     const keyColumn = indexed ? "p.source" : "r.key";
-    let from = indexed ? "resource_page_indexes p INDEXED BY resource_page_lookup" : "resources r INDEXED BY resource_page";
+    let from = ordered ? "resource_ordered_indexes p INDEXED BY resource_ordered_lookup"
+      : indexed ? "resource_page_indexes p INDEXED BY resource_page_lookup" : "resources r INDEXED BY resource_page";
     if (indexed && labels.length) from += " JOIN resources r ON r.key=p.source";
     const values: SQLInputValue[] = [scope, type.apiVersion, type.kind];
     const where = indexed ? ["p.scope=?", "p.api_version=?", "p.kind=?"] : ["r.scope=?", `${api}=?`, `${kind}=?`];
@@ -89,23 +92,27 @@ export class ResourcePages {
       where.push("EXISTS (SELECT 1 FROM json_each(r.data,'$.object.metadata.labels') label WHERE label.key=? AND label.value=? AND label.type='text')");
       values.push(key, value);
     }
-    const order = `${namespaceColumn} COLLATE BINARY,${nameColumn} COLLATE BINARY`;
+    const columns = [namespaceColumn, ...(ordered ? ["p.order_key"] : []), nameColumn];
+    const fields = columns.map((column, i) => `${column} AS k${i}`).join(",");
+    const order = (desc: boolean) => columns.map(column => `${column} COLLATE BINARY ${desc ? "DESC" : "ASC"}`).join(",");
+    const tuple = `(${columns.join(",")})`, placeholders = `(${columns.map(() => "?").join(",")})`;
+    const rowKey = (row: Record<string, unknown>) => columns.map((_, i) => row[`k${i}`] as string);
     let until = cursor?.until;
     if (live && !cursor) {
-      const last = this.db.prepare(`SELECT ${namespaceColumn} AS namespace,${nameColumn} AS name FROM ${from}
-        WHERE ${where.join(" AND ")} ORDER BY ${namespaceColumn} COLLATE BINARY DESC,${nameColumn} COLLATE BINARY DESC LIMIT 1`).get(...values);
-      if (last) until = [last.namespace as string, last.name as string];
+      const last = this.db.prepare(`SELECT ${fields} FROM ${from}
+        WHERE ${where.join(" AND ")} ORDER BY ${order(!descending)} LIMIT 1`).get(...values);
+      if (last) until = rowKey(last);
     }
-    if (cursor) { where.push(`(${namespaceColumn},${nameColumn})>(?,?)`); values.push(...cursor.after); }
-    if (until) { where.push(`(${namespaceColumn},${nameColumn})<=(?,?)`); values.push(...until); }
+    if (cursor) { where.push(`${tuple}${descending ? "<" : ">"}${placeholders}`); values.push(...cursor.after); }
+    if (until) { where.push(`${tuple}${descending ? ">=" : "<="}${placeholders}`); values.push(...until); }
     values.push(options.limit + 1);
-    const rows = this.db.prepare(`SELECT ${keyColumn} AS key,${namespaceColumn} AS namespace,${nameColumn} AS name FROM ${from}
-      WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ?`).all(...values);
+    const rows = this.db.prepare(`SELECT ${keyColumn} AS key,${fields} FROM ${from}
+      WHERE ${where.join(" AND ")} ORDER BY ${order(descending)} LIMIT ?`).all(...values);
     const page = rows.slice(0, options.limit);
     let token = "";
     if (rows.length > options.limit) {
       const last = page.at(-1)!;
-      const payload = Buffer.from(JSON.stringify({ query, revision, after: [last.namespace as string, last.name as string], ...(until ? { until } : {}) } satisfies Cursor)).toString("base64url");
+      const payload = Buffer.from(JSON.stringify({ query, revision, after: rowKey(last), ...(until ? { until } : {}) } satisfies Cursor)).toString("base64url");
       token = `${payload}.${this.sign(payload, live)}`;
     }
     return { keys: page.map(row => row.key as string), metadata: { resourceVersion: String(revision), continue: token } };

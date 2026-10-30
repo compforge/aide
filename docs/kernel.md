@@ -1,6 +1,6 @@
 # Aide 的 Controller Runtime
 
-Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controller 根据变化读取当前状态，通过能力接口执行动作，再保存结果与下一次唤醒条件。Personal 在其上实现个人助手；单机是交付方式，资源协调模型可以由未来的 Kubernetes CRD 后端承载，当前使用本地持久化。
+Aide 同时发展个人助手与 TypeScript controller-runtime 底座；Personal 以真实业务检验底座能力，底座不感知其 CRD。Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controller 根据变化读取当前状态，通过能力接口执行动作，再保存结果与下一次唤醒条件。Personal 在其上实现个人助手；单机是交付方式，资源协调模型可以由未来的 Kubernetes CRD 后端承载，当前使用本地持久化。
 
 ## 概念与所有权
 
@@ -30,7 +30,9 @@ Aide 底座是 TypeScript 的 controller-runtime：插件声明资源，Controll
 4. Reconcile 读取最新状态，决定直接请求外部能力、调用 Harness，或等待。
 5. 业务组件保存进展和回执，必要时返回下次唤醒时间。
 
-同一 Controller 对同一资源串行，不同资源可以并行。多个具名 Controller 可以观察同一种资源，有各自的队列和定时记录，当前共享写入使用资源版本 CAS；局部 Patch 的演进见 [Resource 更新契约](plugin/resource.md#更新操作与并发)。纯 status 更新不自动唤醒主 Controller，协作方按需声明 Watch。事件用于唤醒，持久资源承载事实。
+同一 Controller 对同一资源串行，不同资源可以并行。多个具名 Controller 可以观察同一种资源，有各自的队列和定时记录，当前共享写入使用资源版本 CAS；局部 Patch 的演进见 [Resource 更新契约](plugin/resource.md#更新操作与并发)。纯 status 更新不自动唤醒主 Controller，协作方按需声明 Watch。事件用于唤醒，持久资源承载事实。Host 按插件实例与精确资源类型维护 Watch 订阅表，先过滤后分发到 Controller / Runner；namespace 和事件谓词继续在对应边界检查，注册、卸载同步维护订阅。
+
+动态 deadline 使用带位置索引的最小堆，新增、提前、延后和取消为 O(log n)，每个活跃 key 只有一个堆项；到期只弹出到期项，不扫描所有定时资源。scope 卸载仍遍历该进程的定时项。定时器不承载持久事实，重启从 control 恢复。
 
 ## Reconciler 与 Agent 的分工
 

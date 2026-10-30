@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import type { Resource, ResourceType, ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
+import type { Resource, ResourceType, ResourceDefinition, ResourceValidationContext, ResourcePageOptions, ResourcePage } from "@compforge/aide-plugin";
 import { validateResourceType } from "../plugin/resource/type.ts";
 
 const limit = z.number().int().positive();
@@ -90,6 +90,8 @@ export class ResourceStorage {
     const added: string[] = [];
     try {
       for (const definition of definitions) {
+        for (const name of Object.keys(definition.orderedIndexes ?? {}))
+          if (definition.indexes?.[name]) throw new Error(`Duplicate resource index: ${name}`);
         const key = this.definitionKey(owner, definition.type);
         if (!this.definitions.has(key)) { this.definitions.set(key, definition); added.push(key); }
       }
@@ -126,6 +128,7 @@ export class ResourceStorage {
    */
   private validationContext(scope: string): ResourceValidationContext {
     return {
+      page: <S, T>(type: ResourceType, options: ResourcePageOptions) => this.page<S, T>(scope, type, options),
       get: <S, T>(type: ResourceType, uid: string) => {
         const row = this.db.prepare("SELECT data FROM resources WHERE scope=? AND uid=? AND kind=?").get(scope, uid, kindKey(type));
         if (!row) return;
@@ -145,6 +148,17 @@ export class ResourceStorage {
       },
     };
   }
+  /** @spec Readers and validators share SQL paging; preceding transaction writes are visible. */
+  page<S, T>(scope: string, type: ResourceType, options: ResourcePageOptions): ResourcePage<S, T> {
+    const definition = this.definition(scope, type);
+    const index = options.matchIndex?.name;
+    const ordered = !!(index && definition.orderedIndexes?.[index]);
+    if (index && !ordered && !definition.indexes?.[index]) throw new Error(`Unknown resource index: ${index}`);
+    return this.transaction(() => {
+      const page = this.pages.list(scope, type, options, ordered);
+      return { metadata: page.metadata, items: page.keys.map(key => this.read(key)!.object as Resource<S, T>) };
+    });
+  }
   private indexLifecycle(key: string, scope: string, resource: Resource<unknown, unknown>): void {
     const definition = this.definitions.get(this.definitionKey(scope, resource));
     this.db.prepare("DELETE FROM resource_indexes WHERE source=?").run(key);
@@ -152,6 +166,15 @@ export class ResourceStorage {
       for (const value of new Set(values(structuredClone(resource)))) {
         if (typeof value !== "string") throw new Error(`Invalid index value: ${name}`);
         this.db.prepare("INSERT INTO resource_indexes VALUES (?,?,?)").run(key, name, value);
+      }
+    }
+    this.db.prepare("DELETE FROM resource_ordered_indexes WHERE source=?").run(key);
+    for (const [name, entries] of Object.entries(definition?.orderedIndexes ?? {})) {
+      if (definition?.indexes?.[name]) throw new Error(`Duplicate resource index: ${name}`);
+      for (const entry of entries(structuredClone(resource))) {
+        if (typeof entry.value !== "string" || typeof entry.order !== "string") throw new Error(`Invalid ordered index entry: ${name}`);
+        this.db.prepare("INSERT INTO resource_ordered_indexes VALUES (?,?,?,?,?,?,?,?,?)").run(
+          key, name, entry.value, scope, resource.apiVersion, resource.kind, resource.metadata.namespace, entry.order, resource.metadata.name);
       }
     }
     let released: string | undefined;

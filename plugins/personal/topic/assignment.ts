@@ -36,7 +36,7 @@ export async function reconcileAssignments(context: PluginContext, topic: TopicR
     context.logger.info("Topic assignment refresh started", { attributes: { topicUid: topic.metadata.uid, version } });
   }
   if (!progress.complete) {
-    const page = await context.resources.listPage<InputSpec, InputStatus>(INPUT_TYPE, {
+    const page = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
       namespace: topic.metadata.namespace, matchIndex: { name: "assignmentPending", value: topic.metadata.uid },
       consistency: "live", limit: batchSize, continue: progress.cursor });
     for (const input of page.items) await invalidateAssignment(context, input);
@@ -45,7 +45,7 @@ export async function reconcileAssignments(context: PluginContext, topic: TopicR
     topic = await patchStatus(context.resources, topic, { assignmentRefresh: progress });
     if (progress.complete) context.logger.info("Topic assignment refresh completed", { attributes: { topicUid: topic.metadata.uid, version } });
   }
-  const missing = await context.resources.listPage<InputSpec, InputStatus>(INPUT_TYPE, {
+  const missing = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
     namespace: topic.metadata.namespace, matchIndex: { name: "unassigned", value: topic.metadata.uid }, limit: batchSize });
   for (const input of missing.items) await assignInput(context, input);
   return !progress.complete || !!missing.metadata.continue;

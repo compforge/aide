@@ -14,9 +14,9 @@ import { resourceRef } from "../plugins/personal/input/state.ts";
 import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
 import { readNote } from "../plugins/personal/note/service.ts";
 import { moveNote, reviewNotes } from "../plugins/personal/note/operations.ts";
-import { listNotes } from "../plugins/personal/note/query.ts";
+import { listNotes, notes } from "../plugins/personal/note/query.ts";
 import { NOTE_TYPE, noteVersion, type NoteSpec, type NoteStatus } from "../plugins/personal/note/model.ts";
-import { pendingNoteReviews, reconcileNote } from "../plugins/personal/note/reconcile.ts";
+import { pendingNoteReviews, reconcileNote, registerNotes } from "../plugins/personal/note/reconcile.ts";
 import { collectTopic } from "../plugins/personal/topic/lifecycle.ts";
 import { ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
 import { topicTools } from "../plugins/personal/topic/tools.ts";
@@ -299,4 +299,46 @@ test(`racing review requests reuse one pending Input (same due: ${sameDue})`, as
   assert.equal(a.metadata.uid, b.metadata.uid);
   assert.equal(f.aide.topics.inputStore.list().length, 1);
   assert.equal(f.read().status.absorbAttempts, 1);
+});
+
+/** @case Recent projection never decodes retained history outside its index page. */
+test("recent Note projection reads at most 40 objects and no full list", async t => {
+  const f = await setup(t);
+  for (let i = 0; i < 45; i++) await f.note({ text: `matter ${i}` }, String(i));
+  const storage = f.aide.topics.resources.storage, read = storage.read.bind(storage);
+  let reads = 0;
+  storage.read = (...args) => { reads++; return read(...args); };
+  try {
+    const recent = notes(f.aide.topics.resources, f.root.metadata.uid);
+    assert.equal(recent.length, 40); assert.equal(reads, 40);
+  } finally { storage.read = read; }
+});
+
+/** @case Queue slots wake waiting Notes; a missed ancestor event is repaired without an active content writer. */
+test("Note dependency watches refill capacity and ancestry repair survives a finished writer", async t => {
+  const f = await setup(t);
+  const entries: import("../plugins/personal/note/model.ts").NoteResource[] = [];
+  for (let i = 0; i < 21; i++) {
+    const created = await f.note({ text: `matter ${i}` }, String(i));
+    const note = await f.get(created.noteId); entries.push(note);
+    assert.deepEqual(await reconcileNote(f.context, note), { requeueAfterMs: 15 * 60_000 });
+  }
+  let watches: readonly import("@compforge/aide-plugin").Watch[] = [];
+  registerNotes({ ...f.context, controllers: { register(definition: any) { watches = definition.watches; } } } as PluginContext);
+  const before = f.read();
+  await reviewNotes(f.resources, before, { notes: before.status.noteReviewQueue!.slice(0, 1) });
+  const after = await f.resources.patchStatus(f.read(), { noteReviewQueue: await pendingNoteReviews(f.context, f.read()) });
+  const watch = watches.find(w => w.resourceType.kind === "Topic")!;
+  const requests = await watch.handler.update({ oldObject: before, newObject: after });
+  assert.ok(requests.some(r => r.name === entries[20]!.metadata.name)); assert.ok(requests.length <= 40);
+  for (const request of requests) await reconcileNote(f.context, await f.get(request.name));
+  assert.equal(f.read().status.noteReviewQueue!.length, 20);
+  assert.ok(f.read().status.noteReviewQueue!.some(r => r.noteId === entries[20]!.metadata.name));
+  const newRoot = await f.aide.topics.ensure("repair-root");
+  await f.resources.patchStatus(f.read(), { execution: null });
+  await f.resources.replace(f.read(), { ...f.read().spec, parentRef: resourceRef(newRoot) }, f.read().status);
+  const pending = await f.get(entries[20]!.metadata.name), version = noteVersion(pending);
+  await reconcileNote(f.context, pending);
+  assert.equal((await f.get(pending.metadata.name)).status.reviewTopic?.uid, newRoot.metadata.uid);
+  assert.equal(noteVersion(await f.get(pending.metadata.name)), version);
 });

@@ -106,8 +106,8 @@ export async function replay(snapshot: Snapshot, options: ReplayOptions) {
       const roots = topics.filter(t => !t.default && !t.parentRef);
       const weave = await resources.get<Record<string, never>, WeaveStatus>({ ...WEAVE_TYPE, name: "global", namespace: "v1" });
       const quiet = done && !topics.some(t => aide.topics.resource(t.id)?.status.execution)
-        && (!options.weave || (weave && !weave.status.execution && (roots.length < 2 || roots.every(t => weave.status.reviewed?.[aide.topics.resource(t.id)!.metadata.uid]?.version === candidateVersion(aide.topics.resource(t.id)!)))));
-      const fingerprint = JSON.stringify([topics, inputs.map(i => i.status), weave?.status.reviewed, weave?.status.execution]);
+        && (!options.weave || (weave && !weave.status.execution && (roots.length < 2 || roots.every(t => aide.topics.resource(t.id)!.status.weaveReview?.version === candidateVersion(aide.topics.resource(t.id)!)))));
+      const fingerprint = JSON.stringify([topics, inputs.map(i => i.status), roots.map(t => aide.topics.resource(t.id)!.status.weaveReview), weave?.status.execution]);
       if (!quiet || fingerprint !== last) stableSince = Date.now();
       if (quiet && Date.now() - stableSince >= settleMs) return;
       last = fingerprint;

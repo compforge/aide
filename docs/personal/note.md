@@ -15,10 +15,11 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 | metadata.creationTimestamp | 创建时间 |
 | status.updatedAt | 最近一次内容修改时间 |
 | status.writer | 本次写入者资源和 executionId，用于事务内授权检查 |
+| status.reviewTopic | 当前回顾 root 的最终一致缓存，仅用于依赖唤醒；真实归属从 subject 沿 parent 求得 |
 | status.reviewed | Chief 已检查的内容版本与时间 |
 | status.organization | 最近一次移动的来源、目标、原因与时间 |
 
-subject 和 people 均有索引。Topic 按自身 UID 查询 Note，相关 Work 的 Note 通过 Work 视图展示；Person 按 people 查询，同一 Note 可以出现在多个人物视图中。不是将正文复制进每个对象。没有配置 owner；引用既不级联删除 Note，也不阻止 Topic、Work 或 Person 回收。Person 合并保留历史 people 引用，不将旧人物证据自动改写成目标人物。
+subject 和 people 均有索引；recentSubject / recentPeople 另按 updatedAt 排序，recent 直接查询最新 40 条后应用字符预算，不加载全部历史。Topic 按自身 UID 查询 Note，相关 Work 的 Note 通过 Work 视图展示；Person 按 people 查询，同一 Note 可以出现在多个人物视图中。不是将正文复制进每个对象。没有配置 owner；引用既不级联删除 Note，也不阻止 Topic、Work 或 Person 回收。Person 合并保留历史 people 引用，不将旧人物证据自动改写成目标人物。
 
 ## 工具与并发
 
@@ -66,3 +67,5 @@ Topic、Task、Routine 使用 aide.dev/v1alpha3，Person 使用 aide.dev/v1alpha
 核心场景见 tests/note-knowledge.test.ts、tests/notes.test.ts、tests/topic-persons.test.ts 和 tests/pi-agent.test.ts：独立并发、同 Note 冲突、创建重试、过期执行、祖先归属竞争、悬空历史引用、容量回收、完整读取与真实工具路径。
 
 Note 回顾请求与 nextAbsorbAt / absorbAttempts 在同一事务提交；Topic 的无关状态更新不制造请求冲突。创建时在事务内核验目标 Topic 仍存在且是空闲 root；普通回顾要求开关开启，Note 回顾独立于该开关。并发请求按 Topic / origin 的 pending 索引去重，复用已有 Input，不重复推进冷却。
+
+Note Controller 监听内容变化、直属 Topic / Work 归属变化及 root 回顾队列腾位，每次最多唤醒 40 个索引匹配的 Note。reviewTopic 缓存更新不要求历史内容作者仍在执行，也不改变内容版本或保留年龄；内容编辑与回顾仍检查当前权限。队列满时保留待办，每个未回顾 Note 以 15 分钟周期修复漏事件和祖先层级变化；事件不承担持久投递保证。

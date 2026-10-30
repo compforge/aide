@@ -55,6 +55,7 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   } },
   printer: inputPrinter,
   indexes: {
+    assessActive: r => r.status.topic && r.status.assess?.executionId && !r.status.assess.completedAt ? [r.status.topic.uid] : [],
     topic: r => r.status.topic ? [r.status.topic.uid] : [],
     assignmentPending: r => !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.executionId && !r.status.assess.completedAt ? [r.status.topic.uid] : [],
     unassigned: r => !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.topic && !r.status.assess.executionId && !r.status.assess.completedAt ? [r.status.topic.uid] : [],

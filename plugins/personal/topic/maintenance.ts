@@ -12,7 +12,7 @@ async function thresholdCount(resources: ResourceReader, type: ResourceType, nam
   let count = 0, token = "";
   const ids: string[] = [];
   do {
-    const page = await resources.listPage(type, { namespace, matchIndex: { name, value }, limit: Math.min(1000, threshold + 1 - count), continue: token });
+    const page = await resources.page(type, { namespace, matchIndex: { name, value }, limit: Math.min(1000, threshold + 1 - count), continue: token });
     count += page.items.length;
     for (const item of page.items) if (ids.length < 8) ids.push(type.kind === "Topic" ? item.metadata.uid : item.metadata.name);
     token = page.metadata.continue;

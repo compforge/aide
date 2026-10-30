@@ -33,6 +33,7 @@ export interface HookRegistration {
 export interface ControllerRegistration {
   readonly controllerName?: string;
   readonly kind: "controller";
+  readonly watchTypes?: readonly ResourceType[];
   readonly controllerId: string;
   readonly resourceType: ResourceType;
 }
@@ -87,7 +88,7 @@ export type HostRequest =
       readonly ref: ResourceRef;
     }
   | {
-      readonly method: "resource.listPage";
+      readonly method: "resource.page";
       readonly type: ResourceType;
       readonly options: ResourcePageOptions;
     }
@@ -151,8 +152,8 @@ export function hostOperation(request: HostRequest): HostOperation {
   }
   if (request.method === "resource.create") { operation.resourceName = request.init.name; operation.namespace = request.init.namespace ?? null; }
   if (request.method === "resource.delete") { operation.resourceName = request.name; operation.namespace = request.namespace ?? null; }
-  if (request.method === "resource.list" || request.method === "resource.listPage") operation.namespace = request.options?.namespace ?? null;
-  if (request.method === "resource.listPage") { operation.limit = request.options.limit; operation.continued = Number(!!request.options.continue); operation.consistency = request.options.consistency ?? "consistent"; }
+  if (request.method === "resource.list" || request.method === "resource.page") operation.namespace = request.options?.namespace ?? null;
+  if (request.method === "resource.page") { operation.limit = request.options.limit; operation.continued = Number(!!request.options.continue); operation.consistency = request.options.consistency ?? "consistent"; }
   if (request.method === "resource.commit") operation.writeCount = request.writes.length;
   return operation;
 }

@@ -230,8 +230,8 @@ test("Maintenance reads only threshold witnesses through indexed pages", async t
   for (let i = 0; i < 30; i++) await f.input(`bounded-${i}`);
   let decoded = 0;
   const reader = { ...f.resources, async list() { throw new Error("Maintenance must not load full collections"); },
-    async listPage(...args: Parameters<ResourceClient["listPage"]>) {
-      const page = await f.resources.listPage(...args); decoded += page.items.length; return page;
+    async page(...args: Parameters<ResourceClient["page"]>) {
+      const page = await f.resources.page(...args); decoded += page.items.length; return page;
     } } as ResourceClient;
   const agenda = await maintenanceAgenda(reader, [f.root()], { maxUnfiledInput: 2 });
   assert.equal(agenda.reason, "organize_material");

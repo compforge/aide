@@ -10,6 +10,7 @@ export const NoteSpecSchema = z.object({ subject: SubjectSchema, people: z.array
   text: z.string().trim().min(1).max(16000) }).strict();
 export const NoteWriterSchema = z.object({ resource: SubjectSchema, executionId: z.string().min(1) }).strict();
 export const NoteStatusSchema = z.object({ updatedAt: z.string().datetime(), writer: NoteWriterSchema,
+  reviewTopic: SubjectSchema.extend({ kind: z.literal("Topic") }).optional(),
   reviewed: z.object({ version: z.string(), at: z.string().datetime() }).strict().optional(),
   organization: z.object({ at: z.string().datetime(), reason: z.string().min(1), from: SubjectSchema, to: SubjectSchema }).strict().optional(),
 }).strict();

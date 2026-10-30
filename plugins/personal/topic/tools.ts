@@ -11,14 +11,13 @@ import type { Logger } from "pino";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Store } from "../store.ts";
-import type { TopicResource } from "./model.ts";
-import { understandingVersion } from "./tree.ts";
+import { TOPIC_TYPE, type TopicResource } from "./model.ts";
+import { readTopicInScope, understandingVersion } from "./tree.ts";
 import { contextPage, topicPage, understanding } from "../background.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<T> => definition;
 /** Root agents may inspect their own subtree, never expand unrelated trees into automatic context. */
 export function topicTools(store: Store, active: () => TopicResource, log?: Logger): ToolDefinition[] {
-  const subtree = () => store.topics.scope(active().metadata.uid);
   const report = (resource: { kind: string; metadata: { uid: string }; status: unknown }) => {
     log?.info({ kind: resource.kind, uid: resource.metadata.uid, organization: (resource.status as { organization?: unknown }).organization }, "Chief organization applied");
     return result(resource);
@@ -27,7 +26,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
     tool({ name: "release_topic", label: "Allow Topic reclamation", description: "Explicitly allow capacity reclamation of a root whose current knowledge is dispensable or safely retained elsewhere. Read this Topic first and supply its reclamationVersion and reason. Does not delete now. New knowledge invalidates the decision. Default, busy Topics and live dependencies remain protected.",
       parameters: Type.Object({ uid: Type.Optional(Type.String()), version: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
       async execute(_id, args) {
-        const actor = active(), topic = subtree().find(t => t.metadata.uid === (args.uid ?? actor.metadata.uid));
+        const actor = active(), topic = await readTopicInScope(store.client, actor, args.uid);
         if (!topic || !actor.status.execution || topic.spec.parentRef) throw new Error("Release requires an active Chief and a root Topic");
         if (reclamationVersion(topic, store.resources) !== args.version) throw new Error("Topic understanding changed; read_topic again");
         const updated = await store.client.patchStatus(topic, { reclamation: { version: args.version, reason: args.reason,
@@ -50,7 +49,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
     tool({ name: "list_inputs", label: "List Topic inputs", description: "Page through retained business Inputs directly assigned to a Topic in this tree, including already assessed material. Use read_input for full evidence before reorganizing.",
       parameters: Type.Object({ topicUid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, { topicUid, offset = 0 }) {
-        const root = active(), topic = subtree().find(t => t.metadata.uid === (topicUid ?? root.metadata.uid));
+        const root = active(), topic = await readTopicInScope(store.client, root, topicUid);
         if (!topic) throw new Error("Topic is outside this root");
         const items = store.topics.inputStore.query("topic", topic.metadata.uid).filter(i => !i.metadata.deletionTimestamp && !isInternalInput(i.spec));
         return result(contextPage(items.map(i => ({ id: i.metadata.name, topicUid: i.status.topic!.uid, text: i.spec.text.slice(0, 240), assessed: !!i.status.assess?.completedAt })), offset));
@@ -59,16 +58,15 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
       parameters: Type.Object({ parentUid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, { parentUid, offset = 0 }) {
         const root = active(), parent = parentUid ?? root.metadata.uid;
-        const all = subtree();
-        if (!all.some(t => t.metadata.uid === parent)) throw new Error("Topic is outside this root");
-        return result(topicPage(all.filter(t => t.spec.parentRef?.uid === parent), t => ({
+        if (!await readTopicInScope(store.client, root, parent)) throw new Error("Topic is outside this root");
+        return result(topicPage(store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { matchIndex: { name: "parent", value: parent } }), t => ({
           uid: t.metadata.uid, name: t.spec.name, persons: topicPersons(store, t), ...understanding({ ...t.status, recent: notes(store.resources, t.metadata.uid) }, 1200), version: understandingVersion(t, notes(store.resources, t.metadata.uid)), organization: t.status.organization,
         }), offset));
       } },
     { name: "read_topic", label: "Read topic", description: "Read this root or a descendant's full summary and recent Note window in text pages. Use read_note for the complete text of a truncated Note. A non-null nextOffset means more text remains: continue with offset=nextOffset; null marks the end. Use its content version for summarize_topic and understandingVersion for absorbed receipts after reviewing the child context.",
       parameters: Type.Object({ uid: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
       async execute(_id, { uid, offset = 0 }) {
-        const root = active(), topic = subtree().find(t => t.metadata.uid === (uid ?? root.metadata.uid));
+        const root = active(), topic = await readTopicInScope(store.client, root, uid);
         if (!topic) throw new Error("Topic is outside this root");
         const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: topic.status.summary, recent: notes(store.resources, topic.metadata.uid), organization: topic.status.organization });
         return result({ uid: topic.metadata.uid, version: contentVersion(topic), reclamationVersion: reclamationVersion(topic, store.resources), understandingVersion: understandingVersion(topic, notes(store.resources, topic.metadata.uid)),

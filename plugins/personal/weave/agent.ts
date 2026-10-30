@@ -39,8 +39,9 @@ export function weaveSession(scope: ExecutionScope, config: PiConfig, store: Sto
       { name: "read_topic", label: "Read root topic", description: "Read full root understanding in bounded text pages. version pins the understanding used by group_topics.",
         parameters: Type.Object({ uid: Type.String(), offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { uid, offset = 0 }) {
-          const t = roots().find(t => t.metadata.uid === uid);
-          if (!t) throw new Error("Root Topic unavailable");
+          active();
+          const t = store.resources.page<TopicSpec, TopicStatus>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: uid } }).items[0];
+          if (!t || t.metadata.deletionTimestamp || t.spec.parentRef || t.spec.default) throw new Error("Root Topic unavailable");
           const text = JSON.stringify({ name: t.spec.name, persons: topicPersons(store, t), summary: t.status.summary, recent: notes(store.resources, t.metadata.uid), organization: t.status.organization });
           return result({ uid, version: understandingVersion(t, notes(store.resources, t.metadata.uid)), text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
         } },

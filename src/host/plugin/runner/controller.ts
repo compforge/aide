@@ -22,6 +22,7 @@ export class RunnerController {
   private readonly executions = new Map<string, Resource<unknown, unknown>>();
   private closed = false;
   constructor(private readonly options: Options) { this.scope = options.scope; }
+  get watchTypes() { return this.options.registration.watchTypes ?? []; }
   async startSources(): Promise<void> {
     await this.options.runner.request({ method: "controller.start", controllerId: this.options.registration.controllerId,
       maxTotalConcurrency: this.options.maxTotalConcurrency, retryBackoff: this.options.retryBackoff });

@@ -84,6 +84,8 @@ export interface ResourceRetention<S = unknown, T = unknown> {
 export interface ResourceSchema<T> { parse(value: unknown): T }
 
 export interface ResourceValidationContext {
+  /** Bounded transaction-local query, with the same selectors and cursors as ResourceReader.page. */
+  page<S, T>(type: ResourceType, options: ResourcePageOptions): ResourcePage<S, T>;
   /** Transaction-local snapshots in the same resource scope, including preceding writes in a commit. */
   get<S, T>(type: ResourceType, uid: string): Readonly<Resource<S, T>> | undefined;
   list<S, T>(type: ResourceType, options?: Pick<ResourceListOptions, "namespace" | "matchIndex">): readonly Readonly<Resource<S, T>>[];
@@ -106,6 +108,8 @@ export interface ResourceDefinition<S = any, T = any> {
   readonly retention?: ResourceRetention<S, T>;
   /** Pure multi-value indexes, maintained atomically with the resource. */
   readonly indexes?: Readonly<Record<string, (resource: Readonly<Resource<S, T>>) => readonly string[]>>;
+  /** Exact key plus binary string order; names must differ from equality indexes. */
+  readonly orderedIndexes?: Readonly<Record<string, (resource: Readonly<Resource<S, T>>) => readonly { value: string; order: string }[]>>;
 }
 
 /** Exact-match label selector. All entries must match the Resource. */
@@ -125,6 +129,7 @@ export interface ResourceListOptions {
 export interface ResourcePageOptions extends ResourceListOptions {
   /** Required positive integer, at most 1000. */
   readonly limit: number;
+  readonly direction?: "asc" | "desc";
   readonly continue?: string;
   /** consistent expires on collection changes; live advances through changing objects up to an initial key bound. */
   readonly consistency?: "consistent" | "live";
@@ -137,7 +142,7 @@ export class ResourceExpired extends Error { override name = "ResourceExpired" }
 export class ResourceContinueInvalid extends Error { override name = "ResourceContinueInvalid" }
 
 export interface ResourceReader {
-  listPage<S, T>(type: ResourceType, options: ResourcePageOptions): Promise<ResourcePage<S, T>>;
+  page<S, T>(type: ResourceType, options: ResourcePageOptions): Promise<ResourcePage<S, T>>;
   get<TSpec, TStatus>(
     ref: ResourceRef,
   ): Promise<Readonly<Resource<TSpec, TStatus>> | undefined>;

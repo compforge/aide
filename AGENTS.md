@@ -4,7 +4,7 @@
 
 Aide 是小型、自托管的 personal agent，将持续到来的信息转化为认识、行动与有价值的沟通，围绕用户目标跨执行与等待持续跟进。Personal 将 Input 整合为具体事项的 Note，再提炼主题与人物的长期 summary，并形成和调整 Topic tree；这些认识与组织关系共同支撑后续判断。Web / Lark Channel 与 Source 提交输入，Chief 直接处理简单事情，将持续工作交给 Task / Routine。Host / Runner 提供通用运行机制。
 
-按绿地视角开发，先走通个人助手场景，不建设账号权限中心、共享 SDK 或多实例平台。业务判断放在 Personal 与 Chief Agent；修改通用机制前先说明具体需求和现有能力缺口。
+项目有两个目标：做好 personal agent，并积累可复用的 TypeScript controller-runtime 底座。Personal 是底座的首个应用与验证场景，领域模型留在插件，通用资源、查询和调度能力沉淀到底座。按绿地视角开发，不建设账号权限中心或多实例平台。业务判断放在 Personal 与 Chief Agent；修改通用机制前先说明具体需求和现有能力缺口。
 
 ## 代码地图
 
