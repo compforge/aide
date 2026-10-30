@@ -1,3 +1,5 @@
+import { createReviewInput } from "../plugins/personal/topic/review.ts";
+import { maintenanceAgenda } from "../plugins/personal/topic/maintenance.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -188,7 +190,7 @@ test("a review batch rolls back if a Note changes before the transaction", async
     await f.note({ ...b, text: "New evidence for second matter" }, "change");
     return f.resources.commit(writes);
   } };
-  await assert.rejects(reviewNotes(client, f.read(), { notes: [a, b] }), /version conflict/);
+  await assert.rejects(reviewNotes(client, f.read(), { notes: [a, b] }), /changed before review/);
   assert.equal((await f.get(a.noteId)).status.reviewed, undefined);
   assert.equal((await f.get(b.noteId)).status.reviewed, undefined);
 });
@@ -206,4 +208,95 @@ test("idle Chief release belongs to the serial agent controller; intake cannot c
   assert.equal(closes, 0); assert.ok(f.read().status.agent);
   await reconcileChief(f.context, execution, f.read());
   assert.equal(closes, 1); assert.equal(f.read().status.agent, undefined); assert.ok(f.read());
+});
+
+
+test("review_notes confirms a set idempotently, including racing first receipts", async t => {
+  const f = await setup(t), n = await f.note({ text: "Matter" }, "one");
+  await assert.rejects(reviewNotes(f.resources, f.read(), { notes: [n, { ...n, version: "different" }] }), /Conflicting review versions/);
+  assert.equal((await f.get(n.noteId)).status.reviewed, undefined);
+  const results = await Promise.all([reviewNotes(f.resources, f.read(), { notes: [n, n] }), reviewNotes(f.resources, f.read(), { notes: [n] })]);
+  assert.deepEqual(results, [{ reviewed: 1 }, { reviewed: 1 }]);
+  const first = await f.get(n.noteId);
+  await reviewNotes(f.resources, f.read(), { notes: [n] });
+  assert.deepEqual(await f.get(n.noteId), first, "repeat changes neither receipt time nor resource version");
+  const staleActor = f.read();
+  await f.resources.patchStatus(staleActor, { execution: null });
+  await assert.rejects(reviewNotes(f.resources, staleActor, { notes: [n] }), /no longer active/);
+});
+
+test("review_notes re-reads unrelated writes but never substitutes newly edited content", async t => {
+  const f = await setup(t), n = await f.note({ text: "Matter" }, "one");
+  let injected = false;
+  const client: ResourceClient = { ...f.resources, async commit(writes) {
+    if (!injected) { injected = true; await f.resources.patchMetadata(await f.get(n.noteId), { labels: { observed: "yes" } }); }
+    return f.resources.commit(writes);
+  } };
+  await reviewNotes(client, f.read(), { notes: [n] });
+  assert.equal((await f.get(n.noteId)).metadata.labels?.observed, "yes");
+  assert.equal((await f.get(n.noteId)).status.reviewed!.version, n.version);
+});
+
+test("review_notes checks current ancestry even when its receipt is already present", async t => {
+  const f = await setup(t);
+  const child = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.root) }, status: { summary: "", receipts: [] } });
+  const n = await f.note({ text: "Child matter", subject: resourceRef(child) }, "child");
+  await reviewNotes(f.resources, f.read(), { notes: [n] });
+  const client: ResourceClient = { ...f.resources, async commit(writes) {
+    await f.resources.replace(child, { id: "child" }, child.status);
+    return f.resources.commit(writes);
+  } };
+  await assert.rejects(reviewNotes(client, f.read(), { notes: [n] }), /outside/);
+});
+
+test("Note review request tolerates unrelated Topic writes and commits cooldown atomically", async t => {
+  const f = await setup(t), n = await f.note({ text: "Matter" }, "one");
+  await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, { ...f.read().status, execution: null });
+  const agenda = await maintenanceAgenda(f.resources, []);
+  let injected = false;
+  const resources: ResourceClient = { ...f.resources, async commit(writes) {
+    if (!injected) {
+      injected = true;
+      await f.resources.patchStatus(f.read(), { noteReviewQueue: [n], lastError: "preserved" });
+    }
+    return f.resources.commit(writes);
+  } };
+  const input = await createReviewInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review", [n]);
+  assert.equal(input.status.assess!.topic!.uid, f.root.metadata.uid);
+  assert.deepEqual(f.read().status.noteReviewQueue, [n]);
+  assert.equal(f.read().status.lastError, "preserved");
+  assert.equal(f.read().status.absorbAttempts, 1);
+  assert.ok(Date.parse(f.read().status.nextAbsorbAt!) > Date.now());
+});
+
+for (const race of ["parent", "execution", "disabled", "schedule-failure"] as const)
+test(`review request rolls back on ${race} at commit`, async t => {
+  const f = await setup(t), note = await f.note({ text: "Matter" }, "rollback");
+  await f.resources.patchStatus(f.read(), { execution: null });
+  const parent = await f.aide.topics.ensure("new-root");
+  const agenda = await maintenanceAgenda(f.resources, []);
+  const resources: ResourceClient = { ...f.resources, async commit(writes) {
+    if (race === "parent") await f.resources.replace(f.read(), { ...f.read().spec, parentRef: resourceRef(parent) }, f.read().status);
+    if (race === "execution") await f.resources.patchStatus(f.read(), { execution: { id: "other", startedAt: new Date().toISOString() } });
+    if (race === "disabled") await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
+    return f.resources.commit(race === "schedule-failure" ? [...writes, { operation: "patchStatus", resource: f.read(), patch: { unknown: true } }] : writes);
+  } };
+  await assert.rejects(createReviewInput({ ...f.context, resources }, f.read(), new Date().toISOString(), agenda, "aide:review", race === "schedule-failure" ? [note] : []), race === "schedule-failure" ? /unknown|Unrecognized/ : /idle enabled root/);
+  assert.equal(f.aide.topics.inputStore.list().length, 0);
+  assert.equal(f.read().status.reviewCheckedAt ?? null, null);
+  assert.equal(f.read().status.nextAbsorbAt, undefined);
+});
+
+for (const sameDue of [true, false])
+test(`racing review requests reuse one pending Input (same due: ${sameDue})`, async t => {
+  const f = await setup(t), n = await f.note({ text: "Matter" }, "one");
+  await f.resources.patchStatus(f.read(), { execution: null });
+  const agenda = await maintenanceAgenda(f.resources, []), due = new Date().toISOString();
+  const [a, b] = await Promise.all([
+    createReviewInput(f.context, f.read(), due, agenda, "aide:review", [n]),
+    createReviewInput(f.context, f.read(), sameDue ? due : "2000-01-01T00:00:00.000Z", agenda, "aide:review", [n]),
+  ]);
+  assert.equal(a.metadata.uid, b.metadata.uid);
+  assert.equal(f.aide.topics.inputStore.list().length, 1);
+  assert.equal(f.read().status.absorbAttempts, 1);
 });

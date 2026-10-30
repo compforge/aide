@@ -1,3 +1,4 @@
+import { ResourceAlreadyExists } from "@compforge/aide-plugin";
 import { inputStatus } from "../status.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { InputDefinition, InputSpecSchema } from "./definition.ts";
@@ -42,13 +43,13 @@ export class InputStore {
     const spec = InputSpecSchema.parse(raw);
     const key = this.key(id), existing = this.storage.read(key);
     if (existing) {
-      if (existing.owner !== owner || !isDeepStrictEqual(existing.object.spec, spec)) throw new Error("Input identity already exists with different content or owner");
+      if (existing.owner !== owner || !isDeepStrictEqual(existing.object.spec, spec)) throw new ResourceAlreadyExists("Input identity already exists with different content or owner");
       return existing.object as Resource<InputSpec, InputStatus>;
     }
     const fingerprint = createHash("sha256").update(JSON.stringify({ owner, spec }, (_key, value) =>
       value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value)).digest("hex");
     const receipt = this.receipt(id);
-    if (receipt && receipt.fingerprint !== fingerprint) throw new Error("Input identity already exists with different content or owner");
+    if (receipt && receipt.fingerprint !== fingerprint) throw new ResourceAlreadyExists("Input identity already exists with different content or owner");
     const resource: Resource<InputSpec, InputStatus> = { ...INPUT_TYPE, metadata: { name: id, namespace: "v1", uid: `input:${id}`,
       resourceVersion: "1", generation: 1, creationTimestamp: receipt?.at ?? new Date().toISOString() }, spec, status: receipt ? { route: { completedAt: receipt.at, result: { topics: [], reason: "Previously accepted Input has expired" } } } : inputStatus(status) };
     // A bounded receipt acknowledges redelivery without recreating a collected fact or waking consumers.

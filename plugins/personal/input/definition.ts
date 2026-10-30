@@ -1,3 +1,4 @@
+import { validateReviewRequest } from "../topic/review.ts";
 import { PersonRefSchema } from "../person/model.ts";
 import { ConditionsSchema } from "../conditions.ts";
 import { AgentStatusSchema } from "../session.ts";
@@ -8,7 +9,7 @@ import { guardAssessment } from "./assignment.ts";
 import { guardInputTopic } from "../topic/ownership.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
-import { type ResourceDefinition } from "@compforge/aide-plugin";
+import { ResourceVersionConflict, type ResourceDefinition } from "@compforge/aide-plugin";
 import { INPUT_TYPE, INPUT_ORIGINS, InputAttention, isInternalInput, inputQueue, type InputSpec, type InputStatus } from "./model.ts";
 import { AddressSchema } from "../../../src/address.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
@@ -36,9 +37,10 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     handle: z.record(z.string(), assessment.extend({ resource: ref, assignedAt: z.string(), appliedAt: z.string().optional(), request: WorkInputRequestSchema })).optional(),
   }).strict() },
   validator: { create(current, context) {
+    if (isInternalInput(current.spec) && current.spec.originId === "personal.topic") validateReviewRequest(current, context);
     if (isInternalInput(current.spec) && current.status.topic && !current.status.assess?.completedAt
       && context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "internalPending", value: JSON.stringify([current.status.topic.uid, current.spec.origin]) } })
-        .some(i => i.metadata.uid !== current.metadata.uid)) throw new Error("Topic already has this internal Input pending");
+        .some(i => i.metadata.uid !== current.metadata.uid)) throw new ResourceVersionConflict("Topic already has this internal Input pending");
   }, update(previous, current, context) {
     if (previous.status.assess?.completedAt && !isDeepStrictEqual({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error("Input assessment is already completed");
     guardInputTopic(previous, current, context);

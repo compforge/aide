@@ -154,7 +154,25 @@ export interface ResourceMergePatch {
 }
 
 /** Stable error names also survive the Runner IPC boundary. */
+export class ResourceAlreadyExists extends Error { override name = "ResourceAlreadyExists" }
 export class ResourceVersionConflict extends Error { override name = "ResourceVersionConflict" }
+/** IPC preserves error names, not class identity. */
+export const isResourceVersionConflict = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && "name" in error && error.name === "ResourceVersionConflict";
+
+/** @spec Retry only resource version competition, at most five attempts with short exponential delays.
+ * @rule Each attempt must re-read and recompute a pure resource mutation; never replay external effects.
+ * @link docs/plugin/resource.md#更新操作与并发
+ */
+export async function retryOnConflict<T>(change: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await change(); }
+    catch (error) {
+      if (attempt === 4 || !isResourceVersionConflict(error)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 10 * 2 ** attempt));
+    }
+  }
+}
 export class ResourceIncarnationChanged extends Error { override name = "ResourceIncarnationChanged" }
 
 /** RFC 6902 operations. Tests and writes run against one transaction-local snapshot. */

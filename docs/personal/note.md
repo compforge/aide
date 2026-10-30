@@ -42,7 +42,9 @@ move_note 接受 noteId、version、目标 subject 和 reason。当前 root Chie
 
 每个未回顾的 Note 通过自己的 Reconcile 实时解析当前 root，包括 Work Note 和 root 自身的 Note，将当前版本加入 root 的有界回顾队列。队列满时重试；领取前重新核对 Note 是否仍存在、是否已回顾、版本和当前 root，覆盖主题改树与 Note 移动。每轮最多回顾 20 条，复用 aide:review 和 Chief，无需遍历所有 Topic / Work / Note 才发现待办。
 
-Chief 完整读取事项后，决定更新 Topic.summary、Person.summary 或主题结构，也可以确认无需提炼。review_notes 只确认已检查的版本，不强制 summary 更新，不确认 Input 或 Work 完成。确认不改变内容版本和更新时间；后续内容或 subject 变化重新获得回顾机会。业务接纳保持原有优先级，Note 提炼属于知识维护，不受普通静默回顾开关限制；失败和无进展会退避，取得进展后复位。
+Chief 完整读取事项后，决定更新 Topic.summary、Person.summary 或主题结构，也可以确认无需提炼。review_notes 只确认已检查的版本，不强制 summary 更新，不确认 Input 或 Work 完成。请求按 Note ID 表达集合：重复相同版本只确认一次，同一 ID 的不同版本明确拒绝。已确认的相同版本再次提交成功且保留首次确认时间；返回唯一 Note 数量。整批原子提交，任何内容版本过期或权限失效均回滚，并指出需要重读的 Note。确认只 Patch 回执和写入身份；首次回执使用显式 CAS 与有界资源重试串行化，重试不替换调用者提供的内容版本。即使是空操作也在事务内重新检查当前执行与归属。
+
+确认不改变内容版本和更新时间；后续内容或 subject 变化重新获得回顾机会。业务接纳保持原有优先级，Note 提炼属于知识维护，不受普通静默回顾开关限制；失败和无进展会退避，取得进展后复位。
 
 ## 生命周期与容量
 
@@ -62,3 +64,5 @@ resources:
 Topic、Task、Routine 使用 aide.dev/v1alpha3，Person 使用 aide.dev/v1alpha2，Note 使用 aide.dev/v1alpha1。模型字段和当前校验以各资源定义为准。
 
 核心场景见 tests/note-knowledge.test.ts、tests/notes.test.ts、tests/topic-persons.test.ts 和 tests/pi-agent.test.ts：独立并发、同 Note 冲突、创建重试、过期执行、祖先归属竞争、悬空历史引用、容量回收、完整读取与真实工具路径。
+
+Note 回顾请求与 nextAbsorbAt / absorbAttempts 在同一事务提交；Topic 的无关状态更新不制造请求冲突。创建时在事务内核验目标 Topic 仍存在且是空闲 root；普通回顾要求开关开启，Note 回顾独立于该开关。并发请求按 Topic / origin 的 pending 索引去重，复用已有 Input，不重复推进冷却。

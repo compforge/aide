@@ -63,13 +63,17 @@ await resources.patchStatus(snapshot, { phase: "accepted" }, {
 
 普通 Patch 仍校验 UID，不能用旧句柄修改重建后的同名资源。可写路径仅限 spec、status、metadata.labels 和 metadata.annotations；身份、版本、结构 owner、删除标记和 Host 调度字段不可修改。`patchStatus` 无法越过 status 范围。已进入删除阶段的资源由领域 Validator 决定哪些终止写入仍允许，内容工具拒绝继续编辑。
 
-Storage 在 SQLite 写事务内读取当前对象，在副本上应用 Patch，验证元数据、Schema 和领域约束，再提交版本、索引与容量变化。spec 实际变化推进 generation；有效变更推进 resourceVersion；规范化后的空操作不增加版本、不发送 Watch。Watch 的前后对象来自真实事务快照。commit 可混合普通与条件 Patch，任何一步失败全部回滚；IPC 使用相同路径和错误名称。
+Storage 在 SQLite 写事务内读取当前对象，在副本上应用 Patch，验证元数据、Schema 和领域约束，再提交版本、索引与容量变化。spec 实际变化推进 generation；有效变更推进 resourceVersion；规范化后的空操作仍执行领域 Validator，核对当前执行身份等事务依赖，但不增加版本、不发送 Watch。Watch 的前后对象来自真实事务快照。commit 可混合普通与条件 Patch，任何一步失败全部回滚；IPC 使用相同路径和错误名称。
 
 显式版本冲突的 Error.name 是 ResourceVersionConflict，UID 变化是 ResourceIncarnationChanged；JSON test 失败保留 TEST_OPERATION_FAILED。Schema/Validator 错误原样返回。IPC 保留 name、message、stack、cause；跨进程根据 name 分类，不依赖 instanceof。条件失败需要重新读取实际依赖，不能盲目重放失败 test 或重做已发生的外部动作。
 
+资源已存在使用 `ResourceAlreadyExists`。创建方可读取并核对已有对象后复用；它与版本竞争、业务内容过期不是同一种错误。
+
+`retryOnConflict(change)` 为需要乐观锁的纯资源读改写提供局部重试：最多 5 次尝试，间隔 10 / 20 / 40 / 80ms。闭包每次重新读取、重新计算，仅按跨 IPC 保留的 `ResourceVersionConflict` 名称重试；其它错误和重试耗尽原样返回。不能在闭包里调用模型、发送消息或执行外部动作，也不能把调用者已检查的内容版本换成新版。Runner 不特殊处理冲突，未处理错误继续使用原有统一失败退避。
+
 ### 字段、集合与领域依赖
 
-调用方只提交实际变化。条件数组不是自动按 type 合并的 map：Personal 的状态转换辅助函数计算 JSON 差异、显式携带整份快照 CAS，保证事实和派生条件一致，冲突后由代码重新协调；不会展开旧 status 提交，也不会覆盖其它组件的条件。内容工具走独立条件 Patch，校验旧内容；执行身份和当前祖先链由插件 Validator 在事务内读取。底座不认识 summary、Note 或 Chief。
+调用方只提交实际变化。条件数组不是自动按 type 合并的 map：Personal 的状态转换辅助函数计算 JSON 差异、显式携带整份快照 CAS，保证事实和派生条件一致，冲突后由代码重新协调；不会展开旧 status 提交，也不会覆盖其它组件的条件。独立调度赋值直接走底座 patchStatus，不需要重算 Conditions 或锁整份对象；回顾请求在 Input 创建 Validator 中核对当前 Topic 资格，并与自身调度字段原子提交。内容工具走独立条件 Patch，校验旧内容；执行身份和当前祖先链由插件 Validator 在事务内读取。底座不认识 summary、Note 或 Chief。
 
 Aide 对齐 [Kubernetes 更新语义](https://kubernetes.io/docs/reference/using-api/api-concepts/#updates-to-existing-resources) 和 [controller-runtime 的显式乐观锁](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/client#MergeFromWithOptimisticLock)。本轮提供 JSON Merge Patch / JSON Patch，不提供 Strategic Merge Patch、Server-Side Apply 或 managedFields。多资源 commit 与跨资源 Validator 是 Aide 的本地事务扩展，不能视为 Kubernetes 的跨对象事务。
 

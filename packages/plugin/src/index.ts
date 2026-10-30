@@ -118,4 +118,4 @@ export { iconFor } from "./icon.ts";
 
 export type { ResourceDefinition, ResourceRetention, ResourceSchema, ResourceValidator, ResourceValidationContext } from "./resource.ts";
 
-export { ResourceVersionConflict, ResourceIncarnationChanged, ResourceExpired, ResourceContinueInvalid } from "./resource.ts";
+export { ResourceAlreadyExists, isResourceVersionConflict, retryOnConflict, ResourceVersionConflict, ResourceIncarnationChanged, ResourceExpired, ResourceContinueInvalid } from "./resource.ts";

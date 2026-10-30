@@ -1,3 +1,4 @@
+import { isResourceVersionConflict } from "@compforge/aide-plugin";
 import { pendingNoteReviews } from "../note/reconcile.ts";
 import { isDeepStrictEqual } from "node:util";
 import { reconcileAssignments } from "./assignment.ts";
@@ -158,8 +159,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     const agenda = await maintenanceAgenda(context.resources, [], policy);
     const request = await createReviewInput(context, c, new Date(now).toISOString(), agenda, "aide:review", noteReviews);
     pending.splice(0, 0, request);
-    c = await updateTopic(context.resources, c, current => ({ nextAbsorbAt: new Date(now + Math.min(900_000, 60_000 * 2 ** (current.status.absorbAttempts ?? 0))).toISOString(),
-      absorbAttempts: Math.min(5, (current.status.absorbAttempts ?? 0) + 1) }));
+    c = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(c)))!;
   }
   const weave = (c.status.weaveRevision ?? 0) > (c.status.notifiedWeaveRevision ?? 0);
   // Ordinary delivery reads a bounded direct-child view; full knowledge review is reserved for due/structural work.
@@ -197,7 +197,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
         } });
       }
     } catch (error) {
-      if (/version conflict/.test(String(error))) return { requeueAfterMs: 1 };
+      if (isResourceVersionConflict(error)) return { requeueAfterMs: 1 };
       throw error;
     }
   }
