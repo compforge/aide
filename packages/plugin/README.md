@@ -204,3 +204,5 @@ The Operator may persist AgentStatus = { harness, sessionId? } anywhere its sche
 Resource deletion accepts optional `{ uid, resourceVersion }` preconditions as the fourth argument to `resources.delete(type, name, namespace, preconditions)`. Check and deletion marking occur in the same transaction. Idle collection uses this guard so a newly assigned input invalidates an older collection decision. Once deletionTimestamp is set, domain validators must reject resumed business work; terminating observations may still be written.
 
 External Connector kinds are defined by their owning packages. Plugins can use `context.connectors.list(Kind)` / `get(Kind, description)` directly, or the same API through `execution.verbs.connectors({ timeoutMs })`. The new [Connector SDK](../connector/README.md) owns these contracts; Sources continue to use the existing Plugin Resource/Controller lifecycle.
+
+资源分页默认 `consistency: "consistent"`，集合变化时返回 ResourceExpired。后台协调可显式使用 `consistency: "live"`，按稳定键及首轮上界持续遍历，游标支持同一数据库重启恢复；每页是最新对象，消费者负责幂等处理、检查点和漏入对象的后续协调。详见 [分页契约](../../docs/plugin/resource.md#持续变化集合的遍历)。

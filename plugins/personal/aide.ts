@@ -1,3 +1,4 @@
+import { invalidateAssignment } from "./input/assignment.ts";
 import { isCapacityInput } from "./input/model.ts";
 import { readNote } from "./note/service.ts";
 import { contentVersion } from "./context-write.ts";
@@ -276,7 +277,11 @@ export class Personal {
             executionId: topic.status.execution.id, startedAt: new Date().toISOString(), agent: topic.status.agent,
           } } }] : []),
         ]);
-      } catch (error) { if (/processing assignment changed/.test(String(error))) return { accepted: false, reason: "admission_conflict" }; if (n < 8 && /version conflict/.test(String(error))) continue; throw error; }
+      } catch (error) { if (/processing assignment changed/.test(String(error))) {
+        const latest = args.inputId ? this.topics.inputStore.get(args.inputId) : undefined;
+        if (latest) await invalidateAssignment({ resources }, latest);
+        return { accepted: false, reason: "admission_conflict" };
+      } if (n < 8 && /version conflict/.test(String(error))) continue; throw error; }
       if (input) this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid,
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
       const prompt = input ? `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nRead current Topic material and assess when useful.`

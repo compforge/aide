@@ -136,10 +136,12 @@ Input v1alpha3 将内容归属和处理分派分开，不读取旧版 Input，�
 2. 分派：沿 topic1 的 parent 链找到当前 root，写入 status.assess.topic（topic2）。Route 完成后立即尝试确定性分派；独立 Input Reconcile 恢复中断、处理后续归属变化，不调用模型；直接交给 Routine 的订阅事件没有 assess 阶段，不因此额外触发 Chief。
 3. 执行：唤醒 topic2，按分派索引有界选择待办；事务领取 executionId 后才向 Chief 投递，完成后保留 completedAt/result。
 
-Weave 或树内组织改变祖先时，Input Watch 对受影响子树按直属待办索引产生重新协调请求；这项开销发生在结构变化时，随受影响 Topic 与待办数量增长；每个节点使用一次索引快照，避免持续写入导致分页游标过期后漏掉通知。普通待办发现不扫描整棵树。启动时 Input Controller 重建分派，恢复遗漏通知。分派和领取在存储事务内沿当前祖先链核对负责人，结构 Watch 尚未追上时也不能由旧负责人新领取。
+`status.topic` 是归属事实，沿 parent 链计算当前 root 的成本为 O(h)。未领取 Input 的 `assess.topic` 是最终一致的负责人缓存，也是 root 查询待办的索引键。Input Reconcile 在缓存为空或与真实 root 不同时修正；领取事务沿真实祖先链校验，拒绝过期负责人并持久化缓存失效，随后重新分派。
 
-处理负责人可随结构调整，executionId 与完成记录不随之重置。新 root 跳过有 executionId 或 completedAt 的 Input；旧执行按原 executionId 收尾。已完成的研判记录保持原负责人。结果未知保留接纳身份，明确拒绝投递才可撤回该次领取；不承诺必达或外部效果严格一次。
+每个 Topic 的接收 Reconcile 在固定周期及启动时检查祖先 UID/generation 指纹，发现变化后持久化 `assignmentRefresh`，通过 live 分页每轮最多检查 40 条直属未领取 Input，清空负责人后保存游标。指纹包含祖先 generation，连续移走又移回也会重新检查；中途再发生结构变化就按新指纹重开刷新。每个后代独立检查当前祖先链，不在 Watch 中执行子树扫描或一次性广播。parentRef/generation 本身是持久化的变化事实，漏掉通知也会由周期检查发现。
 
-普通内容归集只改变 topic1，未完成分派由 Input Reconcile 收敛；已处理材料下沉不重新研判。现有树内材料移动仍要求在途研判先完成，Weave 归组允许旧 Chief 自然收尾。
+刷新进度使用 Topic CAS，失败页面可以重复；已领取和已完成 Input 排除在刷新集合之外。缓存清空触发 Input Watch，Topic 每轮也按直属 unassigned 索引修复最多 40 条缺失缓存，覆盖通知丢失。普通材料移动将挂载变化与未领取缓存失效一起提交；这样在 live 游标之前移入的待办也可通过 unassigned 索引恢复。分派收敛的及时性受 Topic 协调周期和待办规模影响。
 
-验证：tests/input-assignment.test.ts 覆盖分派恢复、祖先换 root、事务拒绝过期分派、旧执行收尾、直属容量和无树扫描的待办查询。
+`executionId / completedAt` 是处理事实。领取后保留实际接纳 Topic，结构变化不改写其负责人或执行记录，旧执行按原 executionId 收尾；新 root 不再自动领取。结果未知保留接纳身份，明确拒绝投递才可撤回该次领取。已处理材料下沉不重新研判，现有树内材料移动仍要求在途研判先完成。
+
+验证：tests/input-assignment.test.ts 覆盖分派恢复、祖先换 root 与移回、分批刷新中断恢复、缓存失效 Watch 与周期补偿、事务拒绝过期分派、旧执行收尾、直属容量和无树扫描的待办查询。
