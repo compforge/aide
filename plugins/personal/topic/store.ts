@@ -215,7 +215,7 @@ export class TopicStore {
       const accepted = this.outputStore.get(id);
       const createdBy = accepted ? accepted.spec.createdBy
         : executionId ? agentCall((owner ?? c).status, options.idempotencyKey) : undefined;
-      const association = { ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
+      const association = { ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
       try {
         await commitStatus(this.client, [
           { operation: "patchStatus", resource: c, patch: {} },
@@ -225,6 +225,11 @@ export class TopicStore {
         return { outputId: id, accepted: true };
       } catch (error) { if (attempt >= 8 || !/version conflict/.test(String(error))) throw error; }
     }
+  }
+  async setPeople(id: string, uid: string, version: string, people: import("../person/model.ts").PersonRef[]) {
+    const topic = this.resource(id);
+    if (!topic || topic.metadata.uid !== uid) throw new Error("Topic no longer exists");
+    return this.client.patch(topic, { type: "merge", value: { spec: { people } } }, { resourceVersion: version });
   }
   scope(uid: string) {
     const storage = this.resources.storage;

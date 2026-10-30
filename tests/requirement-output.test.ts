@@ -1,3 +1,4 @@
+import { approveFixtureOutput } from "./output-fixture.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -14,6 +15,8 @@ const target: RequirementAddress = { kind: "requirement", source: "work", catego
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-comment-output-")), store = new OutputStore(root);
   t.after(() => rmSync(root, { recursive: true, force: true }));
+  store.subscribe(output => { if (!output.status.delivery) approveFixtureOutput(store, output.metadata.name); });
+  store.check = async id => { approveFixtureOutput(store, id); };
   const spec: OutputSpec = { text: "收到", target, topicId: "topic", topic: { apiVersion: "personal.aide.dev/v1", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } };
   const requirements = { ...emptyConnectors.requirements, async identity() { return { provider: "tracker", scope: target.scope }; } };
   return { root, store, spec, requirements };

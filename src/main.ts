@@ -1,3 +1,5 @@
+import { disclosureCheck } from "../agents/disclosure/check.ts";
+import { larkEndpoint } from "./channel/address.ts";
 import { PiObservations, ObservationConfigSchema } from "../agents/pi/observation.ts";
 import type { PiConfig } from "./host/harness/pi/config.ts";
 import { ChannelSettings } from "./channel/settings.ts";
@@ -42,7 +44,16 @@ await withAsyncFileLock(path, async () => {
     task: harnesses.task, routine: harnesses.routine, pi: harnesses.pi };
   const connectors = await Connectors.load(config.connectors, { environment, registration: environment.AIDE_CONNECTOR_REGISTRATION ?? options.connectorRegistration, baseDir: dirname(file), log: (message, attributes) => log.info(attributes, message) });
   try {
+    const transports = new Map(Object.values(config.channels).filter(c => c.enabled).map(c => [c.appId, larkTransport(c, log.child({ appId: c.appId }))]));
     const aide: Aide = new Aide(home, {
+      checkDisclosure: disclosureCheck(cwd, harnesses.chief),
+      destinationAudience: async target => {
+        const endpoint = larkEndpoint(target);
+        const transport = endpoint && transports.get(endpoint.appId);
+        if (!endpoint || !transport?.audience) return { identities: [], complete: false, private: false };
+        const audience = await transport.audience(endpoint.receiveId);
+        return { ...audience, identities: audience.openIds.map(id => ({ provider: "lark", scope: endpoint.appId, id })) };
+      },
       config, connectors, connectorCatalog: await connectors.list(),
       readSession: agent => {
         const selected = sessionConfigs[agent.harness];
@@ -68,7 +79,7 @@ await withAsyncFileLock(path, async () => {
     requirementDelivery.start();
     const bots = Object.entries(config.channels).filter(([, channel]) => channel.enabled).map(([id, channel]) => {
       const channelLog = log.child({ channelId: id, appId: channel.appId });
-      const bot = new LarkChannel(home, channel.appId, aide, larkTransport(channel, channelLog), channelLog, topicId => larkProgress(aide, topicId));
+      const bot = new LarkChannel(home, channel.appId, aide, transports.get(channel.appId)!, channelLog, topicId => larkProgress(aide, topicId));
       void bot.start().catch(() => channelLog.error("Lark channel startup failed; check credentials and network"));
       return bot;
     });

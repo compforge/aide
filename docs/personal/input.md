@@ -1,5 +1,7 @@
 # Input：事实与处理痕迹
 
+披露权限与实际投递见 [披露边界](disclosure.md)：材料使用 sensitivity/visibility，人物使用 clearance；Output 由 Reconciler 检查后投递。
+
 ## 整体定位
 
 Input 保存收到的内容及来源证据，各组件在同一资源上留下自己的处理进展。它使一条信息从接收到路由、研判和办理的过程可追溯。值得持续保留的事项认识由 [Note](note.md) 整合，再按其价值提炼长期认识或调整主题结构；原始内容仍由 Input 保存。认知沉淀与行动的关系见 [Personal](README.md#从-input-到认识与成果)。

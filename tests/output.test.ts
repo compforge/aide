@@ -1,3 +1,4 @@
+import { approveFixtureOutput } from "./output-fixture.ts";
 import { reconcileChannelOutputs } from "../src/channel/delivery.ts";
 import { larkSendFailure } from "../src/channel/lark/client.ts";
 import { assertChannelDelivery, larkAddress, webAddress } from "../src/channel/address.ts";
@@ -45,7 +46,7 @@ test("Output persists independent many-to-many associations, immutable content a
   assert.throws(() => f.outputs.create(f.session.id, "one", { ...first.spec, text: "修改内容" }), /different content/);
   assert.throws(() => f.outputs.create(f.session.id, "one", { ...first.spec, target: larkAddress("app", "chat") }), /different content/);
   assert.equal(new OutputStore(f.root).list({ topicUid: f.topic.metadata.uid }).length, 3);
-  assert.equal(first.status.phase, "delivered", "Web publication does not require a reader acknowledgement");
+  assert.equal(first.status.phase, "pending", "Web waits for disclosure before publication");
   assert.match(outputPrinter.describe(first), /第一条\n完整详情/);
   assert.equal(outputPrinter.summarize(first), "第一条 完整详情");
   assert.equal((await f.client.list(OUTPUT_TYPE)).length, 3);
@@ -93,6 +94,7 @@ test("Pending Output survives quota pressure; delivered unreferenced history is 
   const spec: OutputSpec = { ...f.spec(), target: larkAddress("app", "chat") };
   f.outputs.create(f.session.id, "pending", spec);
   assert.throws(() => f.outputs.create(f.session.id, "next", f.spec()), ResourceCapacityError);
+  approveFixtureOutput(f.outputs, "pending");
   f.outputs.begin("pending");
   assert.equal(f.outputs.get("pending")!.status.attempts, 1);
   f.outputs.delivered("pending");
@@ -116,8 +118,10 @@ test("say associates optional Inputs and records Outputs for the owning executio
   c = f.topics.resource("topic")!;
   assert.equal(f.outputs.list().length, 3);
   assert.deepEqual(f.topics.get("topic")!.pendingInputIds, ["a", "b"], "Saying something does not consume Inputs");
+  for (const output of f.outputs.list()) approveFixtureOutput(f.outputs, output.metadata.name, true);
   f.outputs.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Output": { maxCount: 3 } } }));
   f.outputs.create(f.session.id, "over-capacity", f.spec());
+  approveFixtureOutput(f.outputs, "over-capacity", true);
   await f.client.patchStatus(c, { execution: null });
   f.outputs.create(f.session.id, "after-handoff", f.spec());
   assert.equal(f.outputs.list().length, 3);
@@ -128,6 +132,7 @@ test("Lark sends to explicit Output target after Topic deletion and reuses retry
   const f = await setup(t);
   const spec: OutputSpec = { ...f.spec("发给明确的群"), target: larkAddress("app", "unseen-chat") };
   f.outputs.create(f.session.id, "delivery", spec);
+  approveFixtureOutput(f.outputs, "delivery");
   await f.client.delete(f.topic, f.topic.metadata.name);
   const sent: { chatId: string; id: string }[] = [];
   let fail = true;
@@ -171,6 +176,7 @@ test("Output admission rejects disabled or mismatched Lark targets before persis
 test("Reconfigured channels fail pending Outputs and preserve uncertain sends without replay", async t => {
   const f = await setup(t);
   for (const id of ["pending", "sending", "retrying", "delivered"]) f.outputs.create("owner", id, { ...f.spec(), target: larkAddress("app", "chat") });
+  for (const output of f.outputs.list()) approveFixtureOutput(f.outputs, output.metadata.name);
   f.outputs.begin("sending"); f.outputs.delivered("delivered");
   f.outputs.begin("retrying"); f.outputs.retry("retrying", "ambiguous send", new Date(0).toISOString());
   const reopened = new OutputStore(f.root, target => assertChannelDelivery(target, ["different-app"]));
@@ -198,6 +204,7 @@ test("say acknowledges acceptance independently of delivery without recreating m
   const first = await f.topics.say("topic", undefined, "reply", undefined, options);
   assert.deepEqual(first, { outputId: first.outputId, accepted: true });
   assert.equal(f.outputs.get(first.outputId)!.status.phase, "pending");
+  approveFixtureOutput(f.outputs, first.outputId);
   f.outputs.begin(first.outputId); f.outputs.delivered(first.outputId);
   const retry = await f.topics.say("topic", undefined, "reply", undefined, options);
   assert.deepEqual(retry, first);
@@ -205,7 +212,7 @@ test("say acknowledges acceptance independently of delivery without recreating m
   assert.equal(f.outputs.list().length, 1);
   const web = await f.topics.say("topic", undefined, "published", undefined, { target: webAddress("topic") });
   assert.equal(web.accepted, true);
-  assert.equal(f.outputs.get(web.outputId)!.status.phase, "delivered");
+  assert.equal(f.outputs.get(web.outputId)!.status.phase, "pending");
 });
 
 /** @case The durable retry and operational log share safe diagnostics, without exposing SDK request data. */
@@ -213,6 +220,7 @@ test("Lark delivery failures retain diagnostic codes and delivery context withou
   const f = await setup(t);
   const target = larkAddress("app", "chat");
   f.outputs.create("owner", "send-failure", { ...f.spec("PRIVATE MESSAGE"), target });
+  approveFixtureOutput(f.outputs, "send-failure");
   const logs: Record<string, unknown>[] = [];
   const log = pino({}, { write(line) { logs.push(JSON.parse(line)); } });
   const error = Object.assign(new Error("PRIVATE SDK ERROR"), { code: "ERR_BAD_REQUEST",
@@ -237,7 +245,7 @@ test("Lark delivery failures retain diagnostic codes and delivery context withou
   assert.equal(record.error, output.status.lastError);
   assert.equal(output.status.phase, "pending");
   assert.equal(output.status.attempts, 1);
-  assert.doesNotMatch(JSON.stringify({ logs, status: output.status }), /SECRET|PRIVATE|Authorization|config/);
+  assert.doesNotMatch(JSON.stringify({ logs, lastError: output.status.lastError }), /SECRET|PRIVATE|Authorization|config/);
   const timeout = larkSendFailure(Object.assign(new Error("SECRET TOKEN"), { code: "ETIMEDOUT" }));
   assert.equal(timeout.transportCode, "ETIMEDOUT");
   assert.match(timeout.error, /ETIMEDOUT/);

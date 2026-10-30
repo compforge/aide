@@ -34,11 +34,11 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
         return result(note);
       } }),
     tool({ name: `summarize_${kind}`, label: `Summarize ${kind}`, description: `${summaryDescription} Retain findings, constraints and conclusions that remain useful within this ${kind === "task" ? "task's lifetime" : "ongoing responsibility"}. The Host binds the target. Never changes the objective, schedule or business status.`,
-      parameters: Type.Object({ version: Type.String({ minLength: 1 }), summary: Type.String({ maxLength: 16000 }), people: noteFields.people }, { additionalProperties: false }),
+      parameters: Type.Object({ version: Type.String({ minLength: 1 }), summary: Type.String({ maxLength: 16000 }), people: noteFields.people, sensitivity: noteFields.sensitivity, visibility: noteFields.visibility }, { additionalProperties: false }),
       async execute(_id, args, signal) {
         signal?.throwIfAborted(); const owner = read();
         if (contentVersion(owner) !== args.version) throw new Error(`${kind} summary version conflict; read it again`);
-        const updated = await writeSummary(resources, owner, { text: args.summary, people: args.people },
+        const updated = await writeSummary(resources, owner, { text: args.summary, people: args.people, sensitivity: args.sensitivity, visibility: args.visibility },
           { resource: WriterResourceSchema.parse(resourceRef(owner)), executionId: owner.status.execution!.id }, args.version);
         log.info({ workUid: owner.metadata.uid, executionId: owner.status.execution!.id, kind, version: contentVersion(updated) }, "Work summary updated");
         return result({ version: contentVersion(updated) });

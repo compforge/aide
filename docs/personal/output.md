@@ -1,5 +1,7 @@
 # Output：持久输出与独立投递
 
+披露权限与实际投递见 [披露边界](disclosure.md)：材料使用 sensitivity/visibility，人物使用 clearance；Output 由 Reconciler 检查后投递。
+
 ## 整体定位
 
 Aide 基于已有的近期、长期 Note 与最新 Input 判断是否需要沟通；更新 Note 可以静默完成，答复也不以先持久化 Note 为前提。Aide 会把多条观察合成一条通知，也会围绕同一个请求先报告进展，再交付结果。Input 表达收到的事实，Output 表达已经决定向外表达的内容，两者没有一对一约束。主动提醒可以没有 Input，`inputIds` 仅在需要追溯时保存相关输入，不承担消费回执或回复义务。
@@ -16,7 +18,7 @@ Input → Route → Topic / Chief → Task / Routine
                                Channel / Connector 投递与回执
 ```
 
-Output 是 Personal 定义的 `aide.dev/v1alpha1 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Topic 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标单独保存为 `Address`：`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark 聊天 endpoint 是分别 URI 编码的 appId / chatId；按用户身份投递时为 appId / open_id / openId。Personal 在产出时明确选择地址，Channel 发送时只读 target，不解析 Topic ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
+Output 是 Personal 定义的 `aide.dev/v1alpha2 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Topic 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标单独保存为 `Address`：`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark 聊天 endpoint 是分别 URI 编码的 appId / chatId；按用户身份投递时为 appId / open_id / openId。Personal 在产出时明确选择地址，Channel 发送时只读检查后 status.delivery 的 target/text，不解析 Topic ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
 
 ### Status
 
@@ -24,7 +26,7 @@ phase 表达 pending、sending、delivered、failed 或 uncertain；attempts、n
 
 ## 投递与恢复
 
-Output 没有独立 Agent，实际投递由 Host 装配的 Channel / Connector 投递器执行。
+Output 由独立 Reconciler 检查材料与受众，并持久化实际投递目标及正文；正文一致性校验使用隔离的模型调用。实际投递由 Host 装配的 Channel / Connector 投递器执行。
 
 ### 原子提交与恢复
 
@@ -36,7 +38,7 @@ Output 没有独立 Agent，实际投递由 Host 装配的 Channel / Connector �
 
 投递层在启动时重新核对未完成 Channel Output，Store 只保存状态：没有已配置投递器接管且从未尝试发送的 pending 标为 failed，并记录目标和原因；sending 或已有发送尝试的 pending 标为 uncertain，保留可能已发生副作用的事实。不会自动改写目标或重发。无法接管时记录 error，包含 Output ID、目标、尝试次数和原因；实际发送失败按现有重试策略记录 warn，并带安全提取的平台错误码、HTTP 状态或网络错误码及下次重试时间。SDK 异常中的请求配置、凭证、消息正文和自由文本不写入日志或 Output.status。
 
-Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Topic 删除后仍可完成投递。进展卡片只展示和确认发往该聊天的 Output。
+Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Topic 删除后仍可完成投递。进展卡片只镜像已送达该聊天的 Output，不提前确认投递，也不展示私有思考和工具结果。
 
 需求平台评论发送使用独立的 Host 投递器。没有已确认的提供方幂等键时，发送中断或超时进入 uncertain；匹配目标、正文及持久投递记录的回读可以确认成功，自动重发停止。详情见 [需求平台](../connector/requirements.md)。
 
@@ -86,4 +88,4 @@ Channel 地址在 Output 持久化之前还要通过实际投递配置校验：�
 
 Work 的 say 与 Chief 使用同一目的地规则；所属 Topic 只提供业务归属。缺少可用地址时返回错误，不创建无目标 Output；业务 report 与沟通独立，是否已完成应分别核对。
 
-Output 的 `status` 由 Host 与 Channel 维护。Lark 持久记录 pending / sending、尝试次数、重试时间与最终 delivered；failed / uncertain 为终止或待核对状态，不自动重投。Web 创建成功即表示已发布，记录 delivered，不表示用户已经阅读。执行成功、业务目标完成、通知创建与外部送达各有独立证据。
+Output 的 `status` 由 Host 与 Channel 维护。Lark 持久记录 pending / sending、尝试次数、重试时间与最终 delivered；failed / uncertain 为终止或待核对状态，不自动重投。Web 在披露检查完成并准备实际正文后记录 delivered，不表示用户已经阅读。执行成功、业务目标完成、通知创建与外部送达各有独立证据。

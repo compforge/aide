@@ -37,6 +37,7 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   assert.equal(aide.topics.inputs().length, 0);
   const sent: Array<{ to: string; type?: string; text: string }> = [];
   const channel = new LarkChannel(home, "cli_work", aide, { start: async () => {}, close() {}, async chatName() { return undefined; }, async send(to, text, _id, type) { sent.push({ to, text, type }); } }, log);
+  await aide.outputStore.prepare(notification.outputId);
   await channel.deliver(); await channel.close();
   assert.deepEqual(sent, [{ to: "ou_me", type: "open_id", text: "需要你关注" }]);
   assert.equal(aide.outputStore.get(notification.outputId)!.status.phase, "delivered");
@@ -219,13 +220,16 @@ test("Interrupted addressless work retains notification intent until Me can be r
 
 test("Lark thread replies preserve the original message endpoint through Output delivery", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-thread-output-"));
-  const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No inference"); } }, home), config: config() }, log);
+  const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No inference"); } }, home), config: config(), checkDisclosure: async () => ({ allowed: true, reason: "test support" }),
+    destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: false }) }, log);
+  await aide.persons.initialize();
   const calls: unknown[][] = [];
   const channel = new LarkChannel(home, "cli_work", aide, { start: async () => {}, close() {}, async chatName() { return undefined; }, async send(...args) { calls.push(args); } }, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const target = larkThreadAddress("cli_work", "oc_group", "om_original");
   await seedInput(aide.topics, "thread-input", { topicId: "thread", origin: "channel", originId: "lark", source: target, text: "question" });
   const receipt = await aide.topics.say("thread", "thread-input", "reply", undefined, { respondToInputId: "thread-input" });
+  await aide.outputStore.prepare(receipt.outputId);
   await channel.deliver();
   assert.equal(calls.length, 1);
   assert.equal(calls[0]![0], "oc_group");

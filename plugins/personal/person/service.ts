@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+import { sensitivityRank, type MaterialDisclosure } from "../disclosure.ts";
 import { prepareSummary, readSummary, summaryView, writeSummary } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
 import { noteReference, type NoteStatus, type NoteSpec, type NoteReference } from "../note/model.ts";
@@ -64,8 +66,10 @@ export class Persons {
       personIds: people.map(p => p.metadata.name),
       reason: summary.length > SUMMARY_CHARS ? "Combined Me summary exceeds the Person budget; consolidate the summaries before merging" : "Combined Me identities exceed the Person budget",
     } };
+    const disclosure = mergeSummaryDisclosure(texts.flatMap(note => note?.spec.text ? [note.spec] : []));
+    if (!disclosure) return { merged: 0, conflict: { personIds: people.map(p => p.metadata.name), reason: "Summary disclosure scopes differ; classify the summaries before merging" } };
     const status = this.status("connector");
-    const prepared = await prepareSummary(this.resources, target, { text: summary, people: texts.flatMap(n => n?.spec.people ?? []) });
+    const prepared = await prepareSummary(this.resources, target, { text: summary, people: texts.flatMap(n => n?.spec.people ?? []), ...disclosure });
     await this.resources.commit([
       ...prepared.writes,
       ...sources.map(resource => ({ operation: "delete" as const, resource })),
@@ -115,10 +119,10 @@ export class Persons {
       { operation: "replace", resource: current, spec: PersonSchema.parse(spec), status: { ...status, ...prepared.status } }]);
     return this.view(results.at(-1) as PersonResource, summary ?? current.summaryText, noteReference(prepared.note) ?? current.summaryNote);
   }
-  async summarize(id: string, uid: string, version: string, summary: string, writer?: NoteStatus["writer"], people?: NoteSpec["people"]) {
+  async summarize(id: string, uid: string, version: string, summary: string, writer?: NoteStatus["writer"], people?: NoteSpec["people"], disclosure?: import("../disclosure.ts").MaterialDisclosure) {
     const current = await this.read(id, uid);
     if (contentVersion(current) !== version) throw new Error("Person summary version conflict; read it again");
-    const committed = await writeSummary(this.resources, current, { text: summary, people }, writer, version, this.status("chief"));
+    const committed = await writeSummary(this.resources, current, { text: summary, people, ...disclosure }, writer, version, this.status("chief"));
     return this.view(committed, summary, committed.summaryNote);
   }
 
@@ -136,7 +140,9 @@ export class Persons {
     const identities = [...new Map([...into.spec.identities, ...from.spec.identities].map((i) => [identityKey(i), i])).values()];
     const status = this.status("user");
     const mergedText = summary ?? mergePersonSummary(into.summaryText, from.summaryText);
-    const prepared = await prepareSummary(this.resources, into, { text: mergedText, people: [...into.summaryNote?.people ?? [], ...from.summaryNote?.people ?? []] });
+    const disclosure = mergeSummaryDisclosure([into, from].flatMap(person => person.summaryText && person.summaryNote ? [person.summaryNote] : []));
+    if (!disclosure) throw new Error("Summary disclosure scopes differ; classify the summaries before merging");
+    const prepared = await prepareSummary(this.resources, into, { text: mergedText, people: [...into.summaryNote?.people ?? [], ...from.summaryNote?.people ?? []], ...disclosure });
     const writes = await this.resources.commit([
       ...prepared.writes,
       // Exclude the retiring identity owner before validating the target, within the same transaction.
@@ -166,3 +172,14 @@ export class Persons {
 }
 
 export interface PersonVersion { id: string; uid: string; version: string }
+
+/** @spec Identity consolidation cannot lower material sensitivity or silently combine different authorization scopes. */
+function mergeSummaryDisclosure(materials: MaterialDisclosure[]): MaterialDisclosure | undefined {
+  if (!materials.length) return {};
+  const first = materials[0]!;
+  if (materials.some(material => (material.visibility ?? "people") !== (first.visibility ?? "people")
+    || !isDeepStrictEqual(material.disclosureScope, first.disclosureScope))) return;
+  const sensitivity = materials.map(material => material.sensitivity ?? "L3")
+    .reduce((a, b) => sensitivityRank(a) >= sensitivityRank(b) ? a : b);
+  return { sensitivity, visibility: first.visibility ?? "people" };
+}

@@ -9,13 +9,13 @@ import { assertChannelDelivery, isChannelAddress } from "./address.ts";
  */
 export function reconcileChannelOutputs(outputs: OutputStore, larkAppIds: readonly string[], log: Logger): void {
   for (const output of outputs.list()) {
-    if (!isChannelAddress(output.spec.target) || !["pending", "sending"].includes(output.status.phase)) continue;
-    try { assertChannelDelivery(output.spec.target, larkAppIds); }
+    if (!output.status.delivery || !isChannelAddress(output.status.delivery.target) || !["pending", "sending"].includes(output.status.phase)) continue;
+    try { assertChannelDelivery(output.status.delivery.target, larkAppIds); }
     catch (error) {
       const phase = output.status.phase === "sending" || output.status.attempts > 0 ? "uncertain" : "failed";
       const reason = String(error).slice(0, 4000);
       log.error({ outputId: output.metadata.name, topicId: output.spec.topicId,
-        target: output.spec.target, attempts: output.status.attempts, phase, retryable: false,
+        target: output.status.delivery.target, attempts: output.status.attempts, phase, retryable: false,
         error: reason }, "Output has no configured delivery Channel");
       outputs.update(output.metadata.name, status => ({ ...status, phase, nextAttemptAt: undefined, lastError: reason }));
     }

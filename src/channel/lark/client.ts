@@ -19,6 +19,7 @@ export interface LarkTransport {
   readonly botIdentity?: Lark.BotIdentity;
   cards?: LarkCardTransport;
   chatName(chatId: string): Promise<string | undefined>;
+  audience?(chatId: string): Promise<{ openIds: string[]; complete: boolean; private: boolean }>;
   start(receive: (event: unknown) => void | Promise<void>): Promise<void>;
   send(receiveId: string, text: string, id: string, receiveIdType?: "chat_id" | "open_id", replyToMessageId?: string): Promise<void>;
   close(): void;
@@ -82,6 +83,23 @@ export function larkTransport(config: LarkConfig, log: Logger): LarkTransport {
       const response = await client.im.chat.get({ path: { chat_id: chatId } });
       if (response.code !== 0) throw new Error(`Lark chat.get failed (code ${response.code ?? "missing"})`);
       return response.data?.name?.trim() || undefined;
+    },
+    async audience(chatId) {
+      const info = await client.im.chat.get({ path: { chat_id: chatId } });
+      if (info.code !== 0) throw new Error("Cannot read Lark audience metadata");
+      const openIds: string[] = []; let pageToken: string | undefined;
+      for (let page = 0; page < 10; page++) {
+        const response = await client.im.chatMembers.get({ path: { chat_id: chatId }, params: { member_id_type: "open_id", page_size: 100, page_token: pageToken, check_security_conf: true } });
+        if (response.code !== 0 || !response.data || response.data.trigger_security_conf_limit) throw new Error("Cannot establish complete Lark audience");
+        for (const item of response.data.items ?? []) {
+          if (!item.member_id || item.member_id_type !== "open_id") throw new Error("Lark audience has an unresolved identity");
+          openIds.push(item.member_id);
+        }
+        if (!response.data.has_more) return { openIds: [...new Set(openIds)], complete: true, private: info.data?.chat_mode === "p2p" };
+        if (!response.data.page_token || response.data.page_token === pageToken) throw new Error("Lark audience cursor did not advance");
+        pageToken = response.data.page_token;
+      }
+      return { openIds: [], complete: false, private: false };
     },
     async start(receive) {
       try {

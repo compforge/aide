@@ -163,6 +163,8 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - [Observation](docs/observation.md)：Input JobView、原生 SessionView、请求补录与证据缺口。
 - [配置](docs/configuration.md)、[部署与诊断](docs/deployment.md)、[真实验收](docs/e2e.md)。
 
+- Output.spec 保存发送意图，status.disclosure 保存检查，status.delivery 保存实际目标、正文与接收者；密级拒绝在同一 Output 上转告 Me。Channel 只能消费已检查的实际投递，进度卡不展示未经披露检查的私有推理。见 [披露边界](docs/personal/disclosure.md)。
+
 ## 定向验证
 
 根目录 `make test` 接收空格分隔的 `TEST_FILES`，路径相对于仓库根目录；未传或空值执行全套测试。devloop 先选择受影响的 Component，再自动传入文件列表，通常不手动指定。Bun 接收明确文件路径，避免 `npm test -- ...` 在原有 `tests` 参数之外追加筛选条件导致仍执行全量。

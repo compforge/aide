@@ -1,7 +1,7 @@
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { OutputDefinition, OutputSpecSchema, OutputStatusSchema } from "./definition.ts";
 export { OutputSpecSchema } from "./definition.ts";
-import { assertChannelDelivery, isChannelAddress } from "../../../src/channel/address.ts";
+import { assertChannelDelivery } from "../../../src/channel/address.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { type Address, type ResourceListOptions } from "@compforge/aide-plugin";
@@ -16,6 +16,14 @@ export class OutputStore {
   readonly storage: ResourceStorage;
   readonly resources: PluginResourceStore;
   key(id: string): string { return this.resources.key(OUTPUT_TYPE, id); }
+  check?: (id: string) => Promise<void>;
+  async prepare(id: string): Promise<Output> {
+    if (!this.check) throw new Error("Output disclosure checker is unavailable");
+    await this.check(id);
+    const output = this.get(id);
+    if (!output?.status.delivery || !output.status.disclosure) throw new Error("Output disclosure is pending");
+    return output;
+  }
   private readonly listeners = new Set<(output: Output) => void>();
   constructor(home: string, private readonly validateTarget: (target: Address) => void = assertChannelDelivery) {
     this.storage = ResourceStorage.open(home);
@@ -67,7 +75,7 @@ export class OutputStore {
     const output: Output = { ...OUTPUT_TYPE, metadata: { name: id, uid: `output:${id}`, namespace: "v1",
       creationTimestamp: at, resourceVersion: "1", generation: 1,
       labels: { "aide.dev/topic-uid": spec.topic.uid, ...(spec.executionId ? { "aide.dev/execution-id": spec.executionId } : {}) } }, spec,
-      status: isChannelAddress(spec.target) && spec.target.channelId === "web" ? { phase: "delivered", attempts: 0, deliveredAt: new Date().toISOString() } : { phase: "pending", attempts: 0 } };
+      status: { phase: "pending", attempts: 0 } };
     this.storage.write(key, "personal", { owner, object: output, control: {} }, { key: `output:${id}`, value: JSON.stringify({ fingerprint }) });
     this.notify(output); return output;
   }
@@ -84,11 +92,12 @@ export class OutputStore {
   begin(id: string): void { this.update(id, (s) => {
     if (s.phase === "delivered") return s;
     if (!["pending", "sending"].includes(s.phase)) throw new Error("Output requires explicit delivery recovery");
-    return { phase: "sending", attempts: s.attempts + 1 };
+    if (!s.disclosure || !s.delivery) throw new Error("Output disclosure has not been checked");
+    return { ...s, phase: "sending", attempts: s.attempts + 1, nextAttemptAt: undefined };
   }); }
-  delivered(id: string, receipt?: OutputStatus["receipt"]): void { this.update(id, (s) => s.phase === "delivered" ? s : { phase: "delivered", attempts: s.attempts, deliveredAt: new Date().toISOString(), ...(receipt ? { receipt } : {}) }); }
+  delivered(id: string, receipt?: OutputStatus["receipt"]): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "delivered", attempts: s.attempts, deliveredAt: new Date().toISOString(), ...(receipt ? { receipt } : {}) }); }
   uncertain(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "uncertain", lastError: error.slice(0, 4000) }); }
-  retry(id: string, error: string, nextAttemptAt: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { phase: "pending", attempts: s.attempts, lastError: error.slice(0, 4000), nextAttemptAt }); }
+  retry(id: string, error: string, nextAttemptAt: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "pending", attempts: s.attempts, lastError: error.slice(0, 4000), nextAttemptAt }); }
   subscribe(listener: (output: Output) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(output: Output): void { this.storage.afterCommit(() => { for (const listener of this.listeners) { try { listener(structuredClone(output)); } catch { /* persistence already committed */ } } }); }
 }

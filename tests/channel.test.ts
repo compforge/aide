@@ -250,7 +250,7 @@ test("Web deletes Tasks and Routines through WorkService and preserves other top
   await aide.settled();
   assert.deepEqual(await (await fetch(base + "/work?topicId=" + encodeURIComponent(group))).json(), []);
   assert.deepEqual(aide.work("other").list().map((item) => item.id), [foreign.id]);
-  assert.equal(aide.outputs().find((item) => item.id === "retained-reply")?.text, "已建立监控");
+  assert.equal(aide.outputStore.get("retained-reply")?.spec.text, "已建立监控");
   assert.equal(await aide.event({ id: "after-delete",  topicId: group, name: "memory.changed", text: "changed" }), 0);
   await aide.settled();
   assert.equal(requests.length, 0);

@@ -467,7 +467,7 @@ export class Personal {
         receivers = await knownReceivers(this.options.persons, observation.accountId, observation.mentions ?? []);
       }
     }
-    const fact = await this.topics.submit(id, { attention: InputAttention.Immediate, topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
+    const fact = await this.topics.submit(id, { attention: InputAttention.Immediate, topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone, sensitivity: input.sensitivity, visibility: input.visibility, disclosureScope: input.disclosureScope,
       origin: "channel", originId: input.channelId, source: input.source, ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });
     return fact;

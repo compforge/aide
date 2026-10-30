@@ -1,3 +1,4 @@
+import { approveFixtureOutput } from "./output-fixture.ts";
 import { assertChannelDelivery } from "../src/channel/address.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
@@ -39,9 +40,10 @@ export async function seedInput(store: PersonalTopics, id: string, spec: InputSp
     const write = outputWrite(c, o);
     if (write.operation !== "create") continue;
     const resource = store.outputStore.create(topicId, write.name, write.spec as import("../plugins/personal/output/model.ts").OutputSpec);
+    approveFixtureOutput(store.outputStore, o.id, true);
     const key = store.outputStore.key(o.id);
     const stored = store.outputStore.storage.read(key)!;
-    store.outputStore.storage.write(key, "personal", { ...stored, object: { ...resource, metadata: { ...resource.metadata, creationTimestamp: o.at } } });
+    store.outputStore.storage.write(key, "personal", { ...stored, object: { ...store.outputStore.get(o.id)!, metadata: { ...resource.metadata, creationTimestamp: o.at } } });
     // Fixture timestamps must also match the immutable SQL creation-time projection.
     store.outputStore.storage.db.prepare("UPDATE resources SET created=? WHERE key=?").run(o.at, key);
   }

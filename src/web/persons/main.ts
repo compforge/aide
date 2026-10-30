@@ -34,6 +34,7 @@ function identities(): PersonIdentity[] {
 }
 function hasUnsavedChanges() {
   return saving || (selected && ($<HTMLInputElement>('person-name').value !== selected.spec.name
+    || $<HTMLSelectElement>('person-clearance').value !== (selected.spec.clearance ?? 'L1')
     || JSON.stringify(identities()) !== JSON.stringify(selected.spec.identities)
     || (editingSummary && $<HTMLTextAreaElement>('person-summary').value !== selected.summaryText)));
 }
@@ -128,6 +129,7 @@ function setNameEditing(editing: boolean) {
 }
 function setSaving(value: boolean) {
   saving = value;
+  $<HTMLSelectElement>('person-clearance').disabled = value;
   for (const id of ['person-save', 'person-name-edit', 'person-name-cancel', 'person-name-save', 'person-reload', 'person-summary-edit', 'person-summary-cancel', 'person-summary-confirm', 'identity-add']) $<HTMLButtonElement>(id).disabled = value;
   $<HTMLTextAreaElement>('person-summary').readOnly = value;
   $<HTMLInputElement>('person-name').readOnly = value;
@@ -148,6 +150,7 @@ function renderEditor() {
   $<HTMLInputElement>('person-name').value = selected.spec.name;
   renderSummary(); setSummaryEditing(false); setNameEditing(false);
   $('person-identities').replaceChildren(); selected.spec.identities.forEach(identityRow);
+  $<HTMLSelectElement>('person-clearance').value = selected.spec.clearance ?? 'L1';
   records.reset(selected); tabs.refresh();
 }
 async function select(id: string, uid?: string) {
@@ -193,12 +196,13 @@ $<HTMLButtonElement>('person-summary-confirm').onclick = async () => {
 // @spec Saving one profile area preserves unsaved drafts in the other areas.
 async function saveProfile(area: 'name' | 'identities') {
   if (!selected || saving) return;
-  const spec = { ...selected.spec, ...(area === 'name' ? { name: $<HTMLInputElement>('person-name').value } : { identities: identities() }) };
+  const spec = { ...selected.spec, ...(area === 'name' ? { name: $<HTMLInputElement>('person-name').value } : { identities: identities(), clearance: $<HTMLSelectElement>('person-clearance').value as NonNullable<Person['clearance']> }) };
   setSaving(true);
   try {
     adoptPerson(await savePerson(spec));
     if (area === 'name') setNameEditing(false);
-    else { $('person-identities').replaceChildren(); selected.spec.identities.forEach(identityRow); }
+    else { $('person-identities').replaceChildren(); selected.spec.identities.forEach(identityRow);
+  $<HTMLSelectElement>('person-clearance').value = selected.spec.clearance ?? 'L1'; }
     $('person-notice').textContent = area === 'name' ? '称呼已保存。' : '身份已保存。';
   } catch (error) { $('person-notice').textContent = errorMessage(error); }
   finally {

@@ -16,7 +16,12 @@ import { LarkChannel } from "../src/channel/lark/index.ts";
 import { larkProgress, progressCard, cardPreviews, type LarkProgress } from "../src/channel/lark/card.ts";
 import { larkTransport, type LarkTransport } from "../src/channel/lark/client.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
-import { fakeOptions } from "./fake-harness.ts";
+import { fakeOptions as baseFakeOptions } from "./fake-harness.ts";
+import { LOCAL_ME } from "../plugins/personal/person/model.ts";
+// These transport tests use a known Me audience; disclosure rejection has dedicated tests.
+const fakeOptions = (...args: Parameters<typeof baseFakeOptions>) => ({ ...baseFakeOptions(...args),
+  destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: false }),
+  checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }) });
 
 const log = pino({ level: "silent" });
 const topicId = "lark:cli_progress:oc_chat";
@@ -224,22 +229,25 @@ test("Lark projects Harness progress but only explicit messages become replies",
   emitter.sink({ kind: "agent_thought_chunk", invocationId: emitter.turnId, payload: { messageId: "thought", content: { type: "text", text: "先读资料" } } });
   emitter.sink({ kind: "agent_message_chunk", invocationId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "正在核对" } } });
   const live = larkProgress(aide, topicId)[0]!;
-  assert.equal(live.phase, "running"); assert.equal(live.think, "先读资料"); assert.equal(live.content, "");
+  assert.equal(live.phase, "running"); assert.equal(live.think, ""); assert.equal(live.content, "");
   assert.deepEqual(larkProgress(aide, "me"), []);
   emitter.sink({ kind: "tool_call_update", invocationId: emitter.turnId, payload: { toolCallId: "active", title: "采集内存", status: "in_progress" } });
   emitter.sink({ kind: "tool_call_update", invocationId: emitter.turnId, payload: { toolCallId: "finished", title: "读取环境", status: "completed" } });
-  assert.equal(larkProgress(aide, topicId)[0]!.process?.tool, "采集内存 · 执行中");
+  assert.equal(larkProgress(aide, topicId)[0]!.process?.tool, "");
   emitter.sink({ kind: "tool_call_update", invocationId: emitter.turnId, payload: { toolCallId: "active", status: "failed" } });
-  assert.ok(larkProgress(aide, topicId)[0]!.think.includes("failed"), "Tool failure remains available in details");
+  assert.equal(larkProgress(aide, topicId)[0]!.think, "", "Private tool outcomes remain on the owner Web surface");
   emitter.sink({ kind: "agent_message_chunk", invocationId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "\u0000".repeat(4000) + "最新结果已到达" } } });
   const large = larkProgress(aide, topicId)[0]!;
   assert.equal(large.content, "", "Raw model text is internal, even while streaming");
   assert.equal(large.overflow, false);
   assert.ok(Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(large, false)) })) <= 28_000);
   release(); await aide.settled();
+  assert.equal(larkProgress(aide, topicId)[0]!.content, "", "Checked but unsent content cannot leak via the card");
+  const original = aide.outputStore.list()[0]!;
+  await aide.outputStore.prepare(original.metadata.name);
+  aide.outputStore.begin(original.metadata.name); aide.outputStore.delivered(original.metadata.name);
   const done = larkProgress(aide, topicId)[0]!;
-  assert.equal(done.phase, "done"); assert.equal(done.content, "最终答案"); assert.equal(done.messageIds.length, 1);
-  const original = aide.outputStore.get(done.messageIds[0]!)!;
+  assert.equal(done.phase, "done"); assert.equal(done.content, "最终答案"); assert.equal(done.messageIds.length, 0);
   aide.outputStore.create(("sessionId" in original.metadata ? "unexpected" : undefined)!, "another-destination", { ...original.spec,
     text: "另一群的专属内容", target: larkAddress("cli_progress", "another-chat") });
   const addressed = larkProgress(aide, topicId)[0]!;

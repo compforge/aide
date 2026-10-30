@@ -232,7 +232,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
       const endpoint = larkEndpoint(message.target);
       if (!endpoint) continue;
       const { receiveId, receiveIdType } = endpoint;
-      await this.aide.outputSending?.(message.id);
+      if (await this.aide.outputSending?.(message.id, { target: message.target, text: message.text }) === false) continue;
       const parts = textParts(message.text);
       for (const [index, text] of parts.entries()) {
         if (this.stopped) return;

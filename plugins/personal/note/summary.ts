@@ -1,3 +1,4 @@
+import { disclosureScope, type MaterialDisclosure } from "../disclosure.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { Resource, ResourceClient, ResourceCommit, ResourceValidationContext } from "@compforge/aide-plugin";
 import { NOTE_TYPE, SubjectSchema, NoteSpecSchema, noteReference, noteVersion, type NoteResource, type NoteSpec, type NoteStatus } from "./model.ts";
@@ -5,7 +6,7 @@ import { resourceRef } from "../input/state.ts";
 import { contentVersion } from "../context-write.ts";
 import type { ResourceContext } from "../context.ts";
 
-export interface SummaryUpdate { text: string; people?: NoteSpec["people"] }
+export interface SummaryUpdate extends MaterialDisclosure { text: string; people?: NoteSpec["people"] }
 export type SummaryResource = Resource<unknown, ResourceContext>;
 const summaryName = (resource: SummaryResource) => `summary-${resource.metadata.uid}`;
 type Reader = Pick<ResourceValidationContext, "page">;
@@ -59,7 +60,11 @@ export async function prepareSummary(resources: ResourceClient, owner: SummaryRe
   }
   if (note.metadata.deletionTimestamp || note.spec.subject.uid !== owner.metadata.uid) throw new Error("Summary Note owner changed");
   const people = update.people === undefined ? note.spec.people : [...new Map(update.people.map(p => [p.uid, p])).values()];
-  const spec = NoteSpecSchema.parse({ ...note.spec, summaryOf: resourceRef(owner), text, people });
+  const visibility = update.visibility ?? note.spec.visibility ?? "people";
+  const scope = note.spec.visibility === visibility ? note.spec.disclosureScope : await disclosureScope(resources, resourceRef(owner), visibility);
+  const { disclosureScope: _oldScope, ...previousSpec } = note.spec;
+  const spec = NoteSpecSchema.parse({ ...previousSpec, summaryOf: resourceRef(owner), text, people,
+    sensitivity: update.sensitivity ?? note.spec.sensitivity ?? "L3", visibility, ...(scope ? { disclosureScope: scope } : {}) });
   const changed = !isDeepStrictEqual(note.spec, spec);
   const { writer: _previousWriter, ...noteStatus } = note.status;
   const updated: NoteResource = { ...note, spec, status: { ...noteStatus,
