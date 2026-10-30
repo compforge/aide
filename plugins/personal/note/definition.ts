@@ -20,6 +20,11 @@ function validate(note: NoteResource, context: ResourceValidationContext) {
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
   type: NOTE_TYPE, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
   validator: { create: validate, update: (before, after, context) => {
+    const { reviewTopic: _oldCache, ...oldStatus } = before.status;
+    const { reviewTopic: _newCache, ...newStatus } = after.status;
+    // Scheduling repairs are independent of the historical content writer's execution.
+    if (!isDeepStrictEqual(before.status.reviewTopic, after.status.reviewTopic)
+      && isDeepStrictEqual(before.spec, after.spec) && isDeepStrictEqual(oldStatus, newStatus)) return;
     if (!isDeepStrictEqual(before.spec.subject, after.spec.subject)) {
       const actor = context.get(after.status.writer.resource, after.status.writer.resource.uid);
       if (actor?.kind !== "Topic" || !after.status.organization || after.status.organization.reason.trim() === ""
@@ -40,7 +45,11 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
       && after.status.reviewed?.version !== noteVersion(after)) throw new Error("Note changed before review");
     validate(after, context);
   } },
-  indexes: { unreviewed: r => !r.metadata.deletionTimestamp && r.status.reviewed?.version !== noteVersion(r) ? [r.spec.subject.uid] : [], subject: r => [r.spec.subject.uid], people: r => [...new Set(r.spec.people.map(p => p.uid))] },
+  indexes: { reviewRoot: r => !r.metadata.deletionTimestamp && r.status.reviewTopic && r.status.reviewed?.version !== noteVersion(r) ? [r.status.reviewTopic.uid] : [], unreviewed: r => !r.metadata.deletionTimestamp && r.status.reviewed?.version !== noteVersion(r) ? [r.spec.subject.uid] : [], subject: r => [r.spec.subject.uid], people: r => [...new Set(r.spec.people.map(p => p.uid))] },
+  orderedIndexes: {
+    recentSubject: r => r.metadata.deletionTimestamp ? [] : [{ value: r.spec.subject.uid, order: r.status.updatedAt }],
+    recentPeople: r => r.metadata.deletionTimestamp ? [] : [...new Set(r.spec.people.map(p => p.uid))].map(value => ({ value, order: r.status.updatedAt })),
+  },
   retention: { releasedAt: r => r.status.updatedAt, references: () => [] },
   printer: { describe: r => r.spec.text, summarize: r => r.spec.text.slice(0, 200) },
 };

@@ -8,7 +8,6 @@ export const WeaveDefinition: ResourceDefinition<Record<string, never>, WeaveSta
   schema: { spec: z.object({}).strict(), status: z.object({
     agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(),
     nextAt: z.string().datetime().optional(), lastRunAt: z.string().datetime().optional(),
-    reviewed: z.record(z.string(), z.object({ version: z.string(), at: z.string().datetime() }).strict()).optional(),
   }).strict() },
   validator: { create(r) { if (r.metadata.name !== WEAVE_NAME || r.metadata.namespace !== "v1") throw new Error("Weave must be the global singleton"); } },
   retention: { releasedAt: () => undefined, references: () => [] },

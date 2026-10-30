@@ -20,9 +20,9 @@ export async function groupTopics(resources: ResourceClient, weave: WeaveResourc
   if ((group.summary?.length ?? 0) > summaryChars) throw new Error("Condense the proposed summary");
   const refs = [...group.topics, ...(group.parent ? [group.parent] : [])];
   if (new Set(refs.map(t => t.uid)).size !== refs.length) throw new Error("Distinct roots required");
-  const all = await resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE);
-  const selected = new Set(refs.map(ref => ref.uid));
-  const versions = new Map(await Promise.all(all.filter(t => selected.has(t.metadata.uid)).map(async t => [t.metadata.uid, understandingVersion(t, await readNotes(resources, t.metadata.uid))] as const)));
+  const pages = await Promise.all(refs.map(ref => resources.page<TopicSpec, TopicStatus>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: ref.uid } })));
+  const all = pages.flatMap(page => page.items);
+  const versions = new Map(await Promise.all(all.map(async t => [t.metadata.uid, understandingVersion(t, await readNotes(resources, t.metadata.uid))] as const)));
   const resolve = (ref: { uid: string; version: string }) => {
     const topic = all.find(t => t.metadata.uid === ref.uid);
     if (!topic || topic.metadata.deletionTimestamp || topic.spec.default || topic.spec.parentRef) throw new Error("Only available non-Default roots can be grouped");

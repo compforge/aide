@@ -9,6 +9,7 @@ export const DEFAULT_TOPIC_ID = "default";
 export interface TopicSpec { address?: Address; id: string; name?: string; default?: boolean; review?: TopicReview;
   topicKey?: string; parentRef?: ResourceRef & { uid: string } }
 export interface TopicStatus extends ResourceContext {
+  weaveReview?: { version: string; at: string };
   noteReviewQueue?: Array<{ noteId: string; version: string }>;
   reclamation?: { version: string; reason: string; writer: import("../note/model.ts").NoteStatus["writer"] };
   assignmentRefresh?: { version: string; cursor: string; complete: boolean };

@@ -50,13 +50,13 @@ const plugin: PluginPackage = {
             for (const name of ["page-a", "page-b", "page-c"]) entries.push(await context.resources.create(PROCESS_RESOURCE_TYPE,
               { name, labels: { probe: "pages" }, spec: {}, status: {} }));
             const options = { limit: 1, matchLabels: { probe: "pages" } };
-            const first = await context.resources.listPage(PROCESS_RESOURCE_TYPE, options);
-            const second = await context.resources.listPage(PROCESS_RESOURCE_TYPE, { ...options, limit: 2, continue: first.metadata.continue });
+            const first = await context.resources.page(PROCESS_RESOURCE_TYPE, options);
+            const second = await context.resources.page(PROCESS_RESOURCE_TYPE, { ...options, limit: 2, continue: first.metadata.continue });
             let invalid = "", expired = "";
-            try { await context.resources.listPage(PROCESS_RESOURCE_TYPE, { limit: 1, continue: first.metadata.continue }); }
+            try { await context.resources.page(PROCESS_RESOURCE_TYPE, { limit: 1, continue: first.metadata.continue }); }
             catch (error) { invalid = (error as Error).name; }
             await context.resources.patchStatus(entries[0]!, { changed: true });
-            try { await context.resources.listPage(PROCESS_RESOURCE_TYPE, { ...options, continue: first.metadata.continue }); }
+            try { await context.resources.page(PROCESS_RESOURCE_TYPE, { ...options, continue: first.metadata.continue }); }
             catch (error) { expired = (error as Error).name; }
             return { names: [...first.items, ...second.items].map(r => r.metadata.name), end: second.metadata.continue,
               sameVersion: first.metadata.resourceVersion === second.metadata.resourceVersion, invalid, expired };

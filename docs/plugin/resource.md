@@ -101,7 +101,7 @@ Aide 对齐 [Kubernetes 更新语义](https://kubernetes.io/docs/reference/using
 
 ResourceClient.commit 在同一插件实例的存储事务中组合 create、replace、patch、patchStatus 和 delete。delete 携带资源快照，校验 UID 与 resourceVersion 后提交级联删除请求，最终移除仍走标准 Reconcile / finalize 生命周期。Schema、版本、引用、索引或配额失败会回滚，Watch 只在提交后收到通知。事务可提交资源与幂等回执，但不能包含外部请求；外部动作成功后的写入冲突不能靠重做动作解决。
 
-单次 commit 上限为 100 个写操作，业务不能通过对整棵树空写来把无界依赖集变成写集。Definition Validator 的 `context.get(type, uid)` 和 `context.list(type, { namespace, matchIndex })` 在当前存储事务中同步读取依赖，保留插件实例与精确 apiVersion/kind 隔离，读取结果是独立快照；list 未指定 namespace 时覆盖本插件该类型的全部 namespace。前序写入和索引变更对后续校验可见，校验失败整体回滚。Host 提供读取与事务机制，祖先链、责任归属和在途工作等业务约束由插件声明。
+单次 commit 上限为 100 个写操作，业务不能通过对整棵树空写来把无界依赖集变成写集。Definition Validator 的 `context.get(type, uid)` 、`context.page(type, { limit, matchIndex })` 和 `context.list(type, { namespace, matchIndex })` 在当前存储事务中同步读取依赖，保留插件实例与精确 apiVersion/kind 隔离，读取结果是独立快照；list 未指定 namespace 时覆盖本插件该类型的全部 namespace。前序写入和索引变更对后续校验可见，校验失败整体回滚。page 与异步 ResourceReader.page 共用 SQL 查询路径，默认 namespace 为 v1；存在性用 limit=1，阈值用阈值+1，只解码本页对象。Host 提供读取与事务机制，祖先链、责任归属和在途工作等业务约束由插件声明。
 
 资源引用使用精确 UID；跨外部能力等待后应重新读取，避免更新同名替代资源。删除先写 deletionTimestamp，再由 Controller 完成终止处理和 finalize；结构性 owner 关系支持级联删除。
 
@@ -109,20 +109,33 @@ ResourceClient.commit 在同一插件实例的存储事务中组合 create、rep
 
 Definition.indexes 声明纯函数 `(resource) => string[]`，可为一个字段产生多个索引值。`resources.list(type, { matchIndex: { name, value } })` 查询精确匹配，并保留插件实例、类型及 namespace 隔离。Host 将索引与资源写入同一事务，删除时级联移除，加载定义时重建；未知索引报错，不回退全表扫描。回调不得执行 I/O 或业务动作。
 
+`Definition.orderedIndexes` 声明 `(resource) => { value: string, order: string }[]`。value 是精确分区键，order 是领域定义的 UTF-8 二进制排序键（例如 ISO 时间），同一对象每个索引的 value 唯一，名称不能与 indexes 重复。资源写入与有序投影同事务提交，加载定义时重建。通过 page 的 matchIndex 选择有序索引；list 只接受普通索引。
+
+```ts
+orderedIndexes: {
+  recentSubject: note => note.metadata.deletionTimestamp ? []
+    : [{ value: note.spec.subject.uid, order: note.status.updatedAt }],
+}
+// 最近 40 个事项，不先加载全部 Note。
+resources.page(NOTE_TYPE, { matchIndex: { name: "recentSubject", value: uid }, limit: 40, direction: "desc" });
+```
+
+这是 Aide SQLite 存储能力，不能等同于 controller-runtime cache 的 List Limit 或 FieldIndexer：后者提供索引匹配，不保证任意排序查询按页有界执行。这里不提供任意 SQL、路径排序或公共 Count/Exists。
+
 ## 分页查询
 
-ResourceReader.listPage(type, options) 提供有界读取，Host 与 Runner 使用同一契约。options 复用 namespace、includeDescendants、matchLabels 和 matchIndex，consistency 默认为 consistent，可显式选 live；并要求 limit 为 1..1000 的整数；continue 为上一页返回的不透明游标。返回形态为 `{ items, metadata: { resourceVersion, continue } }`，continue 为空字符串表示结束。现有 list 返回完整数组；需要限制读取的路径显式使用 listPage，不能先 list 再 slice。
+ResourceReader.page(type, options) 提供有界读取，Host 与 Runner 使用同一契约。options 复用 namespace、includeDescendants、matchLabels 和 matchIndex，consistency 默认为 consistent，可显式选 live；并要求 limit 为 1..1000 的整数；continue 为上一页返回的不透明游标。返回形态为 `{ items, metadata: { resourceVersion, continue } }`，continue 为空字符串表示结束。现有 list 返回完整数组；需要限制读取的路径显式使用 page，不能先 list 再 slice。
 
 ```ts
 const query = { namespace: "v1" as const, matchIndex: { name: "topic", value: topicUid }, limit: 41 };
-const first = await resources.listPage(INPUT_TYPE, query);
+const first = await resources.page(INPUT_TYPE, query);
 // 若索引已准确表达待判断集合，41 条足以判断是否超过 40 条；无需精确 count。
 if (first.metadata.continue) {
-  const next = await resources.listPage(INPUT_TYPE, { ...query, continue: first.metadata.continue });
+  const next = await resources.page(INPUT_TYPE, { ...query, continue: first.metadata.continue });
 }
 ```
 
-页面按 metadata.namespace、metadata.name 的 UTF-8 二进制顺序排列，不依赖系统 locale。namespace 默认 v1，includeDescendants 只匹配路径边界内的后代；类型按完整 apiVersion/kind 隔离，查询始终受插件实例限制。标签为 AND 精确匹配，索引须已由 ResourceDefinition 注册。分页不隐含删除过滤，deletionTimestamp 对象仍可列出；需要业务过滤时由领域声明相应索引。
+页面默认按 metadata.namespace、metadata.name 的 UTF-8 二进制顺序排列，不依赖系统 locale。有序索引按 namespace、order、name 排列，name 在同分区中提供唯一 tie-break；direction 默认为 asc，可设为 desc，方向与索引均绑定游标。namespace 默认 v1，includeDescendants 只匹配路径边界内的后代；类型按完整 apiVersion/kind 隔离，查询始终受插件实例限制。标签为 AND 精确匹配，索引须已由 ResourceDefinition 注册。分页不隐含删除过滤，deletionTimestamp 对象仍可列出；需要业务过滤时由领域声明相应索引。
 
 游标绑定插件、资源类型、namespace 范围和规范化后的 selectors；limit 可以在下一页调整。过滤条件不匹配或游标格式错误返回 ResourceContinueInvalid。consistent 模式下，游标签名不可验证（包括 Host 重启）或集合修订变化返回 ResourceExpired；调用方须丢弃已收集的分页结果，从第一页重读。错误名称经过 IPC 保留，日志只记录 namespace、limit 和是否续页，不记录正文、selector 值或游标。
 
@@ -130,7 +143,7 @@ collection resourceVersion 属于同一插件和精确 apiVersion/kind 的整个
 
 这与 Kubernetes 的 limit/continue 及 ResourceExpired 恢复方式对齐，但不提供 API Server 保留历史快照的能力：Aide 在集合未变化时继续同一修订，一旦变化就明确过期。游标不跨 Host 重启保存，也不持有长事务、无界快照缓存或整个资源列表。活跃集合可能反复过期，调用方应由后续 Reconcile 重试，不能无界热循环。
 
-SQLite 执行 namespace/selector 过滤、稳定排序、keyset 续页和 LIMIT；先取至多 limit+1 个 key，再在同一事务内读取至多 limit 个完整对象。无索引条件时使用 scope/type/namespace/name 表达式索引；有 matchIndex 时使用 resource_page_lookup 覆盖索引，按插件、类型、索引名和值、namespace/name 有序定位资源键；没有标签附加过滤时，无需逐个读取匹配对象的 JSON 或建立临时排序表。索引投影与资源索引同事务维护，已有索引在首次安装时原子回填。不存在 includeDescendants 的全资源枚举。标签等附加过滤仍可能检查超过 limit 个候选，因此不承诺任意 selector 的 SQLite 工作量为 O(limit)。常用 namespace + matchIndex 查询通过有序范围查找限制候选读取；查询计划测试直接捕获生产 SQL，包含实际 ORDER BY 和续页条件。不增加公共 Count/Exists 或业务排序；存在性可用 limit=1，阈值判断可用 limit=阈值+1。
+SQLite 执行 namespace/selector 过滤、稳定排序、keyset 续页和 LIMIT；先取至多 limit+1 个 key，再在同一事务内读取至多 limit 个完整对象。无索引条件时使用 scope/type/namespace/name 表达式索引；有 matchIndex 时使用 resource_page_lookup 覆盖索引，按插件、类型、索引名和值、namespace/name 有序定位资源键；没有标签附加过滤时，无需逐个读取匹配对象的 JSON 或建立临时排序表。索引投影与资源索引同事务维护，已有索引在首次安装时原子回填。不存在 includeDescendants 的全资源枚举。标签等附加过滤仍可能检查超过 limit 个候选，因此不承诺任意 selector 的 SQLite 工作量为 O(limit)。常用 namespace + matchIndex 查询通过有序范围查找限制候选读取；查询计划测试直接捕获生产 SQL，包含实际 ORDER BY 和续页条件。有序索引使用 resource_ordered_lookup 覆盖索引，机制不感知领域排序键的含义；存在性可用 limit=1，阈值判断可用 limit=阈值+1。
 
 验证见 tests/resource-pagination.test.ts（隔离、页边界、读取预算、查询计划、过期与回滚）和 tests/plugin-runner.test.ts（真实 Runner 分页与错误跨进程）。
 
@@ -156,8 +169,10 @@ Printer 按插件实例与 GVK 选择，同一实例不能重复声明同一类�
 
 ### 持续变化集合的遍历
 
-`listPage(type, { ...selectors, limit, consistency: "live", continue })` 用于后台协调。首批记录当前最大 namespace/name，后续按 `(上次键, 初始上界]` 前进，返回每页读取时的最新对象；collection resourceVersion 仅描述该页观察值。状态更新、索引变更、删除和自身写入不使游标过期，签名密钥持久保存在同一个资源数据库中，重启可继续；游标仍绑定插件、类型、selectors 和模式。
+`page(type, { ...selectors, limit, consistency: "live", continue })` 用于后台协调。首批记录当前遍历方向的末端键，后续越过上次键向初始末端前进，返回每页读取时的最新对象；collection resourceVersion 仅描述该页观察值。状态更新、索引变更、删除和自身写入不使游标过期，签名密钥持久保存在同一个资源数据库中，重启可继续；游标仍绑定插件、类型、selectors 和模式。
 
 live 不保证快照、恰好一次或枚举所有并发新增对象：游标之前插入或移入的对象、上界之后新增对象由后续协调处理，同名重建也必须按 UID 验证。消费者持久化检查点前先完成该页幂等动作，失败可重复该页，执行业务动作时重新核验身份和真实依赖。上下界防止已有游标无止境追逐尾部新增；持续在剩余区间插入仍不承诺固定总工作量。该模式是 Aide 的可恢复遍历扩展，不等同于 Kubernetes 保留历史快照的 limit/continue。
+
+live 有序索引的 order 发生变化时，对象可能移过游标并被重读或遗漏；它不是快照，也不是 exactly-once 处理凭据。后台协调必须幂等并有后续重扫；固定集合完整遍历应使用 consistent。
 
 验证见 `tests/resource-pagination.test.ts`：默认一致性、live 自身写入/删除/重启、上界、选择器绑定及生产 SQL 的覆盖索引查询计划。

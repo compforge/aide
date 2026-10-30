@@ -224,10 +224,43 @@ export class ReconcileQueue {
 
 /**
  * Manager 级动态唤醒队列。所有 Controller 共享一个 timer；持久真相仍在
- * PluginResourceStore control state，当前 Map 只负责本进程唤醒。
+ * PluginResourceStore control state，当前堆只负责本进程唤醒。
+ * @spec Deadline updates and cancellation are O(log n), with one heap entry per live key.
+ * @case tests/reconcile-due.test.ts
+ * @link docs/kernel.md
  */
 export class ReconcileDueQueue {
   private readonly entries = new Map<string, DueReconcile>();
+  private readonly heap: string[] = [];
+  private readonly positions = new Map<string, number>();
+  private swap(a: number, b: number): void {
+    [this.heap[a], this.heap[b]] = [this.heap[b]!, this.heap[a]!];
+    this.positions.set(this.heap[a]!, a); this.positions.set(this.heap[b]!, b);
+  }
+  private earlier(a: number, b: number): boolean {
+    return this.entries.get(this.heap[a]!)!.dueAtMs < this.entries.get(this.heap[b]!)!.dueAtMs;
+  }
+  private repair(index: number): void {
+    while (index > 0 && this.earlier(index, (index - 1) >> 1)) {
+      const parent = (index - 1) >> 1; this.swap(index, parent); index = parent;
+    }
+    while (index * 2 + 1 < this.heap.length) {
+      let child = index * 2 + 1;
+      if (child + 1 < this.heap.length && this.earlier(child + 1, child)) child++;
+      if (!this.earlier(child, index)) break;
+      this.swap(index, child); index = child;
+    }
+  }
+  private remove(id: string): boolean {
+    const index = this.positions.get(id);
+    if (index === undefined) return false;
+    const last = this.heap.pop()!;
+    this.entries.delete(id); this.positions.delete(id);
+    if (index < this.heap.length) {
+      this.heap[index] = last; this.positions.set(last, index); this.repair(index);
+    }
+    return true;
+  }
   private readonly now: () => Date;
   private readonly onDue: DueQueueOptions["onDue"];
   private timer?: ReturnType<typeof setTimeout>;
@@ -240,7 +273,7 @@ export class ReconcileDueQueue {
   schedule(key: ReconcileKey, dueAt: Date | null): void {
     const id = reconcileKeyId(key);
     if (dueAt === null) {
-      if (this.entries.delete(id)) this.arm();
+      if (this.remove(id)) this.arm();
       return;
     }
     const dueAtMs = dueAt.getTime();
@@ -248,6 +281,8 @@ export class ReconcileDueQueue {
     const current = this.entries.get(id);
     if (current?.dueAtMs === dueAtMs) return;
     this.entries.set(id, { key, dueAtMs });
+    if (!this.positions.has(id)) { this.positions.set(id, this.heap.length); this.heap.push(id); }
+    this.repair(this.positions.get(id)!);
     this.arm();
   }
 
@@ -255,7 +290,7 @@ export class ReconcileDueQueue {
     let changed = false;
     for (const [id, entry] of this.entries) {
       if (!sameReconcileScope(entry.key, scope)) continue;
-      this.entries.delete(id);
+      this.remove(id);
       changed = true;
     }
     if (changed) this.arm();
@@ -265,15 +300,14 @@ export class ReconcileDueQueue {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
     this.entries.clear();
+    this.heap.length = 0;
+    this.positions.clear();
   }
 
   private arm(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
-    let earliest = Number.POSITIVE_INFINITY;
-    for (const entry of this.entries.values()) {
-      earliest = Math.min(earliest, entry.dueAtMs);
-    }
+    const earliest = this.heap.length ? this.entries.get(this.heap[0]!)!.dueAtMs : Infinity;
     if (!Number.isFinite(earliest)) return;
 
     const delay = Math.min(
@@ -288,9 +322,10 @@ export class ReconcileDueQueue {
     this.timer = undefined;
     const nowMs = timestamp(this.now, "plugin due queue");
     const due: ReconcileKey[] = [];
-    for (const [id, entry] of this.entries) {
-      if (entry.dueAtMs > nowMs) continue;
-      this.entries.delete(id);
+    while (this.heap.length) {
+      const id = this.heap[0]!, entry = this.entries.get(id)!;
+      if (entry.dueAtMs > nowMs) break;
+      this.remove(id);
       due.push(entry.key);
     }
     this.arm();

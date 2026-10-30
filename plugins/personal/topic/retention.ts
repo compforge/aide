@@ -21,15 +21,15 @@ export function reclamationVersion(topic: TopicResource, reader: NoteReader): st
 export function canReclaimTopic(topic: TopicResource, context: ResourceValidationContext): boolean {
   if (topic.spec.default || topic.metadata.deletionTimestamp || topic.status.execution || topic.status.agent?.sessionId || topic.status.lastError) return false;
   const uid = topic.metadata.uid;
-  if (context.list(TOPIC_TYPE, { matchIndex: { name: "parent", value: uid } }).length
-    || context.list(INPUT_TYPE, { matchIndex: { name: "assessPending", value: uid } }).length
-    || WORK_TYPES.some(t => context.list(t, { matchIndex: { name: "topic", value: uid } }).length)) return false;
+  if (context.page(TOPIC_TYPE, { limit: 1, matchIndex: { name: "parent", value: uid } }).items.length
+    || context.page(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessPending", value: uid } }).items.length
+    || WORK_TYPES.some(t => context.page(t, { limit: 1, matchIndex: { name: "topic", value: uid } }).items.length)) return false;
   const recent = notes(context, uid), version = understandingVersion(topic, recent);
   if (topic.spec.parentRef) {
-    if (context.list(NOTE_TYPE, { matchIndex: { name: "unreviewed", value: uid } }).length) return false;
+    if (context.page(NOTE_TYPE, { limit: 1, matchIndex: { name: "unreviewed", value: uid } }).items.length) return false;
     const parent = context.get<TopicResource["spec"], TopicResource["status"]>(topic.spec.parentRef, topic.spec.parentRef.uid);
     return !!parent && !parent.metadata.deletionTimestamp && parent.status.absorbed?.[uid] === version;
   }
-  return (!topic.status.summary && !context.list(NOTE_TYPE, { matchIndex: { name: "subject", value: uid } }).length)
+  return (!topic.status.summary && !context.page(NOTE_TYPE, { limit: 1, matchIndex: { name: "subject", value: uid } }).items.length)
     || topic.status.reclamation?.version === reclamationVersion(topic, context);
 }

@@ -25,11 +25,10 @@ export function guardTopicOrganization(current: TopicResource, context: Resource
   const subtree = [previous], seen = new Set([previous.metadata.uid]);
   for (const topic of subtree) {
     if (topic.status.execution) throw new Error("Subtree still has active processing; retry after completion");
-    const inputs = context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessPending", value: topic.metadata.uid } });
-    if (inputs.some(i => i.status.assess?.executionId)) throw new Error("Subtree still has active processing; retry after completion");
+    const inputs = context.page<InputSpec, InputStatus>(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessActive", value: topic.metadata.uid } }).items;
+    if (inputs.length) throw new Error("Subtree still has active processing; retry after completion");
     for (const type of WORK_TYPES) {
-      if (context.list<WorkResource["spec"], WorkResource["status"]>(type, { matchIndex: { name: "topic", value: topic.metadata.uid } })
-        .some(w => w.status.execution)) throw new Error("Subtree still has active processing; retry after completion");
+      if (context.page(type, { limit: 1, matchIndex: { name: "active", value: topic.metadata.uid } }).items.length) throw new Error("Subtree still has active processing; retry after completion");
     }
     for (const child of context.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "parent", value: topic.metadata.uid } })) {
       if (!seen.has(child.metadata.uid)) { seen.add(child.metadata.uid); subtree.push(child); }

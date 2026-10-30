@@ -191,8 +191,8 @@ export function createResourceClient(
   return Object.freeze({
     get,
     commit,
-    async listPage<S, T>(type: ResourceType, options: ResourcePageOptions) {
-      return deepFreeze(store.listPage<S, T>(type, options));
+    async page<S, T>(type: ResourceType, options: ResourcePageOptions) {
+      return deepFreeze(store.page<S, T>(type, options));
     },
     async list<TSpec, TStatus>(
       type: ResourceType,

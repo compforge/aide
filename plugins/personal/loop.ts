@@ -32,7 +32,7 @@ export async function nextInputs(resources: ResourceClient, owner: Readonly<Loop
     const queues = businessOnly ? [InputAttention.Immediate, InputAttention.Normal, InputAttention.Deferred]
       : ["aide:triage", "aide:organize", InputAttention.Immediate, InputAttention.Normal, InputAttention.Deferred, "aide:review"];
     for (const queue of queues) {
-      const page = await resources.listPage<InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE,
+      const page = await resources.page<InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE,
         { namespace: owner.metadata.namespace, matchIndex: { name: "assessReadyAttention", value: JSON.stringify([owner.metadata.uid, queue]) }, limit: Math.min(1000, limit - selected.length) });
       const items = page.items.filter(i => eligible(i, owner));
       if (items.length && (queue === "aide:triage" || queue === "aide:organize")) return items.slice(0, 1);
@@ -41,7 +41,7 @@ export async function nextInputs(resources: ResourceClient, owner: Readonly<Loop
       if (selected.length >= limit) break;
     }
     if (!businessOnly && !selected.some(i => canActivate(i.spec, owner))) {
-      const review = await resources.listPage<InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, {
+      const review = await resources.page<InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, {
         matchIndex: { name: "assessReadyAttention", value: JSON.stringify([owner.metadata.uid, "aide:review"]) }, limit: 1 });
       const ready = review.items.find(i => eligible(i, owner));
       if (ready) return [...selected.slice(0, Math.max(0, limit - 1)), ready];

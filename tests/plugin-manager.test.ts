@@ -1,3 +1,4 @@
+import { Controller } from "../src/host/plugin/controller.ts";
 import { HarnessCalls } from "../src/host/harness/calls.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -883,3 +884,27 @@ const testDefinitions = [definition({ apiVersion: "tests.aide.dev/v1alpha1", kin
 class PluginResourceStore extends BaseResourceStore {
   constructor(options: PluginResourceStoreOptions) { super(options); this.storage.register(options.pluginInstanceId, testDefinitions); }
 }
+
+/** @case Dispatch indexes primary types and watch dependencies, and unregisters both on close. */
+test("Manager filters change dispatch before controller mapping", async () => {
+  const root = testRoot(), resources = store(root, "indexed");
+  const manager = new Manager({ instances: instanceStore(root) });
+  const mapped: string[] = [];
+  const original = Controller.prototype.reconcileKeys;
+  Controller.prototype.reconcileKeys = async function(change) { mapped.push(this.scope.controllerName ?? this.scope.resourceKind); return original.call(this, change); };
+  try {
+    manager.registerController({ store: resources, resourceType: resourceType("Requirement"), async reconcile() {} });
+    manager.registerController({ store: resources, resourceType: resourceType("Deployment"), async reconcile() {} });
+    const watch = manager.registerController({ name: "observer", store: resources, resourceType: resourceType("Deployment"),
+      watches: [{ resourceType: resourceType("Requirement"), handler: { create: async () => [], update: async () => [], delete: async () => [] } }],
+      async reconcile() {},
+    });
+    createResource(resources, "Requirement", "one");
+    await manager.settled();
+    expect(mapped).toEqual(["Requirement", "observer"]);
+    mapped.length = 0; watch.close();
+    createResource(resources, "Requirement", "two");
+    await manager.settled();
+    expect(mapped).toEqual(["Requirement"]);
+  } finally { Controller.prototype.reconcileKeys = original; await manager.close(); }
+});

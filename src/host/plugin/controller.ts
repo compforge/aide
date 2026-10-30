@@ -200,6 +200,7 @@ interface ReconcileExecution {
 export class Controller<TSpec, TStatus> {
   readonly scope: ReconcileScope;
   readonly sources: readonly ControllerSource<TSpec>[];
+  get watchTypes() { return this.watches.map(watch => watch.resourceType); }
   readonly watches: readonly Watch[];
   private readonly store: PluginResourceStore;
   private readonly resourceType: ResourceType;

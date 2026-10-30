@@ -1,5 +1,5 @@
 import { isResourceVersionConflict } from "@compforge/aide-plugin";
-import { pendingNoteReviews } from "../note/reconcile.ts";
+import { pendingNoteReviews, noteReviewWatch } from "../note/reconcile.ts";
 import { isDeepStrictEqual } from "node:util";
 import { reconcileAssignments } from "./assignment.ts";
 import { INPUT_TYPE, isInternalInput, isCapacityInput, type InputSpec, type InputStatus } from "../input/model.ts";
@@ -69,9 +69,9 @@ function materialWatch(): Watch {
 export function registerTopics(context: PluginContext): void {
   registerTopicObservations(context);
   const policy = topicPolicy(context.instance.config.topic);
-  context.controllers.register({ resourceType: TOPIC_TYPE, maxConcurrency: 1, watches: [watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
+  context.controllers.register({ resourceType: TOPIC_TYPE, maxConcurrency: 1, watches: [noteReviewWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
     reconcile: (execution, c: Readonly<TopicResource>) => reconcileTopic(context, execution, c) });
-  context.controllers.register({ name: "agent", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
+  context.controllers.register({ name: "agent", resourceType: TOPIC_TYPE, maxConcurrency: 4, watches: [noteReviewWatch(context), watch(context), materialWatch(), assignmentWatch("assess", "Topic")],
     reconcile: (execution, c: Readonly<TopicResource>) => reconcileChief(context, execution, c, policy) });
 }
 
@@ -164,7 +164,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   const weave = (c.status.weaveRevision ?? 0) > (c.status.notifiedWeaveRevision ?? 0);
   // Ordinary delivery reads a bounded direct-child view; full knowledge review is reserved for due/structural work.
   const topics = due || weave ? await readTopicSubtree(context.resources, resourceRef(c)) : [c,
-    ...(await context.resources.listPage<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, {
+    ...(await context.resources.page<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, {
       matchIndex: { name: "liveParent", value: c.metadata.uid }, limit: 20 })).items];
   let inputs = pending.slice(0, 8);
   const versions = new Map<string, string>();

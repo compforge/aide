@@ -1,7 +1,7 @@
 import type { Resource } from "@compforge/aide-plugin";
 import { z } from "zod";
 import type { LoopStatus } from "../loop.ts";
-export const WEAVE_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Weave" } as const;
+export const WEAVE_TYPE = { apiVersion: "aide.dev/v1alpha2", kind: "Weave" } as const;
 export const WEAVE_NAME = "global";
 const topicVersion = z.object({ uid: z.string(), version: z.string() }).strict();
 export const GroupSchema = z.object({
@@ -16,6 +16,5 @@ export const GroupSchema = z.object({
 export interface WeaveStatus extends LoopStatus {
   nextAt?: string;
   lastRunAt?: string;
-  reviewed?: Record<string, { version: string; at: string }>;
 }
 export type WeaveResource = Resource<Record<string, never>, WeaveStatus>;

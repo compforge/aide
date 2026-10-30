@@ -93,8 +93,8 @@ async function getResource<TSpec, TStatus>(
 
 const resources: ResourceClient = Object.freeze({
   get: getResource,
-  async listPage<S, T>(type: ResourceType, options: ResourcePageOptions) {
-    return await callHost<ResourcePage<S, T>>({ method: "resource.listPage", type, options });
+  async page<S, T>(type: ResourceType, options: ResourcePageOptions) {
+    return await callHost<ResourcePage<S, T>>({ method: "resource.page", type, options });
   },
   async list<TSpec, TStatus>(
     type: ResourceType,
@@ -214,6 +214,7 @@ function hookRegistration(hook: Hook): PluginRegistration {
 
 function controllerRegistration(controller: Controller<unknown, unknown>): ControllerRegistration {
   return {
+    watchTypes: controller.watches?.map(watch => watch.resourceType),
     kind: "controller", controllerId: `controller:${controller.resourceType.apiVersion}:${controller.resourceType.kind}${controller.name ? `:${controller.name}` : ""}`,
     ...(controller.name ? { controllerName: controller.name } : {}),
     resourceType: controller.resourceType,

@@ -3,7 +3,7 @@ import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ResourceDefinition, ResourceValidationContext, ResourceCommit, ResourceType, ResourceListOptions } from "@compforge/aide-plugin";
+import type { ResourceDefinition, ResourceValidationContext, ResourceCommit, ResourceType, ResourceListOptions, ResourcePageOptions } from "@compforge/aide-plugin";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import definitions from "../plugins/personal/definitions.ts";
@@ -23,6 +23,11 @@ function fixture(t: TestContext) {
   const store = new PluginResourceStore({ home, pluginInstanceId: "personal" });
   const queries: { kind: string; index?: string; uid?: string; count: number }[] = [];
   const observe = (context: ResourceValidationContext): ResourceValidationContext => ({
+    page<S, T>(type: ResourceType, options: ResourcePageOptions) {
+      const result = context.page<S, T>(type, options);
+      queries.push({ kind: type.kind, index: options.matchIndex?.name, count: result.items.length });
+      return result;
+    },
     get<S, T>(type: ResourceType, uid: string) {
       const result = context.get<S, T>(type, uid);
       queries.push({ kind: type.kind, uid, count: Number(!!result) });
@@ -111,7 +116,7 @@ test("Topic deletion reads indexed dependents and the parent UID, not retained h
   await f.resources.delete(TOPIC_TYPE, leaf.metadata.name);
   assert.ok((await f.resources.get(resourceRef(leaf)))!.metadata.deletionTimestamp);
   const listed = f.queries.filter(q => q.index);
-  assert.deepEqual(listed.map(q => [q.kind, q.index]), [["Topic", "parent"], ["Input", "assessPending"], ["Task", "topic"], ["Routine", "topic"], ["Note", "subject"]]);
+  assert.deepEqual(listed.map(q => [q.kind, q.index]), [["Topic", "parent"], ["Input", "assessPending"], ["Task", "topic"], ["Routine", "topic"], ["Note", "recentSubject"]]);
   assert.ok(listed.every(q => q.count === 0));
   assert.ok(f.queries.some(q => q.uid === parent.metadata.uid));
 });

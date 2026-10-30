@@ -14,6 +14,14 @@ export function installPageIndex(db: DatabaseSync) {
       PRIMARY KEY(source,index_name,index_value));
       CREATE INDEX IF NOT EXISTS resource_page_lookup ON resource_page_indexes
         (scope,api_version,kind,index_name,index_value,namespace,resource_name,source);
+      CREATE TABLE IF NOT EXISTS resource_ordered_indexes (
+        source TEXT NOT NULL REFERENCES resources(key) ON DELETE CASCADE,
+        index_name TEXT NOT NULL, index_value TEXT NOT NULL, scope TEXT NOT NULL,
+        api_version TEXT NOT NULL, kind TEXT NOT NULL, namespace TEXT NOT NULL,
+        order_key TEXT NOT NULL, resource_name TEXT NOT NULL,
+        PRIMARY KEY(source,index_name,index_value));
+      CREATE INDEX IF NOT EXISTS resource_ordered_lookup ON resource_ordered_indexes
+        (scope,api_version,kind,index_name,index_value,namespace,order_key,resource_name,source);
       CREATE TABLE IF NOT EXISTS resource_page_secrets (id INTEGER PRIMARY KEY, secret TEXT NOT NULL);
       INSERT OR IGNORE INTO resource_page_secrets VALUES (1,hex(randomblob(32)));
       CREATE TRIGGER IF NOT EXISTS resource_page_index_insert AFTER INSERT ON resource_indexes BEGIN

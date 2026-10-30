@@ -57,7 +57,7 @@ export async function createReviewInput(context: Pick<PluginContext, "resources"
   const input = await retryOnConflict(async () => {
     const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(target);
     if (!current || current.metadata.deletionTimestamp) throw new Error("Review Topic no longer exists");
-    const pending = await context.resources.listPage<InputSpec, InputStatus>(INPUT_TYPE, {
+    const pending = await context.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
       matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
     if (pending.items[0]) return pending.items[0];
     const inputId = `${origin.slice(5)}-${digest([topic.metadata.uid, dueAt])}`;

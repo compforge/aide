@@ -70,6 +70,18 @@ export async function readTopicRoot(resources: ResourceReader, ref: ResourceRef)
     if (!topic) throw new Error("Topic parent no longer exists");
   }
 }
+/** @spec A single-target scope check follows only UID-pinned ancestors, never discovers the tree. */
+export async function readTopicInScope(resources: ResourceReader, owner: TopicResource, uid = owner.metadata.uid): Promise<TopicResource | undefined> {
+  const target = uid === owner.metadata.uid ? owner
+    : (await resources.page<TopicSpec, TopicStatus>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: uid } })).items[0];
+  let current = target;
+  const seen = new Set<string>();
+  while (current && !current.metadata.deletionTimestamp && !seen.has(current.metadata.uid)) {
+    if (current.metadata.uid === owner.metadata.uid) return target;
+    seen.add(current.metadata.uid);
+    current = current.spec.parentRef ? await resources.get<TopicSpec, TopicStatus>(current.spec.parentRef) : undefined;
+  }
+}
 /** Summary changes drive maintenance; full context versions still fence Weave and deletion. */
 export const summaryVersion = (topic: TopicResource): string =>
   createHash("sha256").update(topic.status.summary).digest("hex");

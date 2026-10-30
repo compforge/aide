@@ -35,7 +35,7 @@ Route 初分、Chief 闲时下沉与拆分、Weave 全局归拢的目标模型�
 
 ## CRD
 
-`aide.dev/v1alpha1 Weave/global` 是全局主题整理协调资源。
+`aide.dev/v1alpha2 Weave/global` 是全局主题整理协调资源。
 
 ### Spec
 
@@ -43,17 +43,19 @@ spec 为空对象；enabled、maxRoots、检查间隔、候选批量等策略来
 
 ### Status
 
-agent / execution 保存本轮原生会话与执行；nextAt / lastRunAt 保存检查计划与最近启动时间；reviewed 按 Topic UID 保存已展示的候选版本和检查时间。候选版本包含视图契约，旧的检查结果不能替代当前主题事实。
+agent / execution 保存本轮原生会话与执行；nextAt / lastRunAt 保存检查计划与最近启动时间；Topic.status.weaveReview 保存各自已展示的候选版本和检查时间，Weave 不保存随目录增长的全局回执表。候选版本包含视图契约，旧的检查结果不能替代当前主题事实。
 
 ## Reconciler
 
 ### 职责与策略
 
-Weave Agent 判断关联价值，Controller 负责有界候选、扫描覆盖和调用预算；分组只调整关系，不冻结执行或搬迁数据。周期整理和 maxRoots 软数量目标共同决定检查时机；最久没有新 Input 的主题优先检查，静默本身不证明相关。
+Weave Agent 判断关联价值，Controller 负责有界候选、扫描覆盖和调用预算；分组只调整关系，不冻结执行或搬迁数据。周期整理和 maxRoots 软数量目标共同决定检查时机；未检查主题优先，其后按最久检查时间安排，静默本身不证明相关。
 
-每轮使用新的原生会话，当前知识来自 Topic CRD，扫描进度保存在 Weave CRD；上轮会话只保留为执行证据，不承接下一批判断，避免历史压缩把旧规则和过期目录固化成约束。失败后的下一批同样读取当前资源，已生效的父子关系参与候选筛选。
+每轮使用新的原生会话，当前知识来自 Topic CRD，各主题回执保存在 Topic.status.weaveReview；上轮会话只保留为执行证据，不承接下一批判断，避免历史压缩把旧规则和过期目录固化成约束。失败后的下一批同样读取当前资源，已生效的父子关系参与候选筛选。
 
-本轮上下文分别说明全局普通 root 数、待检查数和实际候选；搜索工具另行说明全局数与匹配数。一条待检查候选也可以查找批外已有 root 并挂入其中，已有子节点的 root 可以继续组织。检查结果绑定候选视图契约与 Topic 认识版本；契约改变时，旧结果失效一次，存量主题重新获得检查机会。正常结束只确认本批已检查，不代表已经归组或达到数量目标。超过软目标时，已检查且未变化的 root 在 reviewIntervalMs 后重新获得检查机会；近期独立的子树保留 15 分钟观察期，归组时读取其拆分原因。已有父主题仍可继续接纳相关 root。
+每轮通过 weaveRoot 索引读取至多 maxRoots+1 个 root 判断压力，通过 weavePending 有序索引读取至多 40 个候选；需要压力复查时再取至多 batchSize 个最久已检查的 root。成功只更新实际提供给推理的 Topic 回执，旧版本回执不会覆盖并发产生的新认识。调度不全量遍历目录。maxRoots 上限为 999，与单页 1000 上限一致。
+
+本轮上下文的 rootCount 在 rootCountExact 为 false 时仅为下界，pendingCount 仅为本页可处理数，candidates 是实际展示集；搜索工具另行说明全局数与匹配数。一条待检查候选也可以查找批外已有 root 并挂入其中，已有子节点的 root 可以继续组织。检查结果绑定候选视图契约与 Topic 认识版本；契约改变时，旧结果失效一次，存量主题重新获得检查机会。正常结束只确认本批已检查，不代表已经归组或达到数量目标。超过软目标时，已检查且未变化的 root 在 reviewIntervalMs 后重新获得检查机会；近期独立的子树保留 15 分钟观察期，归组时读取其拆分原因。已有父主题仍可继续接纳相关 root。
 
 主题树与 Chief 接管见 [Topic](topic.md#agent-触发边界)。Weave 归组保留 Input 的当前归属，主题关系不产生通信目的地或外发授权。认识吸收和静默回收分别由 Topic / Chief 与生命周期协调负责，Weave 不替代它们。
 
@@ -110,3 +112,5 @@ Input、Task、Routine 通过 status.topic 保存当前归属。初次路由确�
 | 响应质量 | 紧迫输入延迟、遗漏、重复沟通及无价值打扰 |
 
 root 数下降本身不能证明收益；必须计入整理成本，并确认重要变化没有因压缩而漏报。验证使用 [历史回放](../e2e-lark-replay.md)，不把输出数量作为强制配额。覆盖、吸收与合批的验收见 [Topic](topic.md#落地范围与验收)及 tests/weave.test.ts。
+
+Weave 当前 API 版本为 aide.dev/v1alpha2。回执随 Topic 生命周期消失；归组后的子 Topic 即使保留回执，也不再出现在 root 候选索引中。

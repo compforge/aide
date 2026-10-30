@@ -33,7 +33,7 @@ test("paged queries filter before limiting, return stable pages and decode only 
   let token = "", revision = ""; const names: string[] = [];
   do {
     reads = 0;
-    const page = await f.client.listPage(TYPE, { ...options, continue: token });
+    const page = await f.client.page(TYPE, { ...options, continue: token });
     assert.equal(reads, page.items.length);
     assert.ok(page.items.length <= 4);
     assert.ok(Object.isFrozen(page.metadata) && Object.isFrozen(page.items));
@@ -55,7 +55,7 @@ test("namespace boundaries, API versions and plugin scopes remain isolated acros
   const options = { namespace: "v1/project/a" as const, includeDescendants: true, limit: 3 };
   let token = ""; const found: string[] = [];
   do {
-    const page = await f.client.listPage(TYPE, { ...options, continue: token });
+    const page = await f.client.page(TYPE, { ...options, continue: token });
     found.push(...page.items.map(r => `${r.metadata.namespace}:${r.metadata.name}`)); token = page.metadata.continue;
   } while (token);
   const expected = ["v1/project/a", "v1/project/a/session/s"].flatMap(n => ["z", "A", "a", "中", "a/b"].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b))).map(name => `${n}:${name}`));
@@ -63,45 +63,45 @@ test("namespace boundaries, API versions and plugin scopes remain isolated acros
 });
 test("continuations bind selectors, allow page size changes and expire on public mutations", async t => {
   const f = fixture(t); const a = await f.create("a"); await f.create("b"); await f.create("c");
-  const page = await f.client.listPage(TYPE, { limit: 1 });
+  const page = await f.client.page(TYPE, { limit: 1 });
   const token = page.metadata.continue;
-  await assert.rejects(f.client.listPage(TYPE, { limit: 1, continue: token, matchLabels: { selected: "yes" } }), { name: "ResourceContinueInvalid" });
-  await assert.rejects(f.client.listPage(NEXT, { limit: 1, continue: token }), { name: "ResourceContinueInvalid" });
-  assert.equal((await f.client.listPage(TYPE, { limit: 2, continue: token })).items.length, 2);
+  await assert.rejects(f.client.page(TYPE, { limit: 1, continue: token, matchLabels: { selected: "yes" } }), { name: "ResourceContinueInvalid" });
+  await assert.rejects(f.client.page(NEXT, { limit: 1, continue: token }), { name: "ResourceContinueInvalid" });
+  assert.equal((await f.client.page(TYPE, { limit: 2, continue: token })).items.length, 2);
   await f.client.create(NEXT, { name: "unrelated", spec: { group: "selected" } });
-  assert.equal((await f.client.listPage(TYPE, { limit: 2, continue: token })).items.length, 2, "Other API versions do not expire this collection");
+  assert.equal((await f.client.page(TYPE, { limit: 2, continue: token })).items.length, 2, "Other API versions do not expire this collection");
   await f.client.patchStatus(a, {});
   f.store.storage.read(f.store.key(TYPE, "a"), true);
   const stored = f.store.storage.read(f.store.key(TYPE, "a"))!;
   f.store.storage.write(f.store.key(TYPE, "a"), "pages", { ...stored, control: { nextReconcileAt: new Date().toISOString() } });
-  assert.equal((await f.client.listPage(TYPE, { limit: 2, continue: token })).items.length, 2, "No-op, LRU and control writes preserve collection revision");
+  assert.equal((await f.client.page(TYPE, { limit: 2, continue: token })).items.length, 2, "No-op, LRU and control writes preserve collection revision");
   await assert.rejects(f.client.commit([
     { operation: "patchStatus", resource: a, patch: { changed: true } },
     { operation: "patch", resource: a, patch: { type: "json", value: [{ op: "test", path: "/spec/group", value: "wrong" }] } },
   ]));
-  assert.equal((await f.client.listPage(TYPE, { limit: 2, continue: token })).items.length, 2, "Rolled-back writes preserve revision");
+  assert.equal((await f.client.page(TYPE, { limit: 2, continue: token })).items.length, 2, "Rolled-back writes preserve revision");
   await f.client.patchStatus(a, { changed: true });
-  await assert.rejects(f.client.listPage(TYPE, { limit: 2, continue: token }), { name: "ResourceExpired" });
+  await assert.rejects(f.client.page(TYPE, { limit: 2, continue: token }), { name: "ResourceExpired" });
 });
 test("deletion, index rebuilds and Host restart invalidate cursors", async t => {
   const f = fixture(t); await f.create("a"); await f.create("b");
-  const first = await f.client.listPage(TYPE, { limit: 1 });
+  const first = await f.client.page(TYPE, { limit: 1 });
   f.store.storage.remove(f.store.key(TYPE, "b"));
-  await assert.rejects(f.client.listPage(TYPE, { limit: 1, continue: first.metadata.continue }), { name: "ResourceExpired" });
+  await assert.rejects(f.client.page(TYPE, { limit: 1, continue: first.metadata.continue }), { name: "ResourceExpired" });
   await f.create("b");
-  const next = await f.client.listPage(TYPE, { limit: 1 });
+  const next = await f.client.page(TYPE, { limit: 1 });
   f.store.storage.pages.invalidate("pages", TYPE);
-  await assert.rejects(f.client.listPage(TYPE, { limit: 1, continue: next.metadata.continue }), { name: "ResourceExpired" });
-  const latest = await f.client.listPage(TYPE, { limit: 1 });
+  await assert.rejects(f.client.page(TYPE, { limit: 1, continue: next.metadata.continue }), { name: "ResourceExpired" });
+  const latest = await f.client.page(TYPE, { limit: 1 });
   const restarted = new ResourcePages(f.store.storage.db);
   assert.throws(() => restarted.list("pages", TYPE, { limit: 1, continue: latest.metadata.continue }), { name: "ResourceExpired" });
 });
 test("invalid limits and unknown indexes fail even on empty collections", async t => {
   const f = fixture(t);
-  for (const limit of [0, -1, 1.5, 1001, NaN, Infinity]) await assert.rejects(f.client.listPage(TYPE, { limit }), /1..1000/);
-  await assert.rejects(f.client.listPage(TYPE, { limit: 1, matchIndex: { name: "missing", value: "x" } }), /Unknown resource index/);
-  await assert.rejects(f.client.listPage(TYPE, { limit: 1, continue: "invalid" }), { name: "ResourceContinueInvalid" });
-  const empty = await f.client.listPage(TYPE, { limit: 1 });
+  for (const limit of [0, -1, 1.5, 1001, NaN, Infinity]) await assert.rejects(f.client.page(TYPE, { limit }), /1..1000/);
+  await assert.rejects(f.client.page(TYPE, { limit: 1, matchIndex: { name: "missing", value: "x" } }), /Unknown resource index/);
+  await assert.rejects(f.client.page(TYPE, { limit: 1, continue: "invalid" }), { name: "ResourceContinueInvalid" });
+  const empty = await f.client.page(TYPE, { limit: 1 });
   assert.deepEqual(empty.items, []); assert.equal(empty.metadata.continue, "");
 });
 
@@ -110,14 +110,14 @@ test("cursor encoding supports long canonical namespaces and equivalent label or
   const namespace = `v1/${"a".repeat(9000)}` as ResourceNamespace;
   await f.create("a", "selected", namespace, { selected: "yes" });
   await f.create("b", "selected", namespace, { selected: "yes" });
-  const first = await f.client.listPage(TYPE, { namespace, limit: 1 });
-  assert.equal((await f.client.listPage(TYPE, { namespace, limit: 1, continue: first.metadata.continue })).items[0]!.metadata.name, "b");
+  const first = await f.client.page(TYPE, { namespace, limit: 1 });
+  assert.equal((await f.client.page(TYPE, { namespace, limit: 1, continue: first.metadata.continue })).items[0]!.metadata.name, "b");
   const a = await f.create("a"); const b = await f.create("b");
   await f.client.patchMetadata(a, { labels: { second: "yes" } });
   await f.client.patchMetadata(b, { labels: { second: "yes" } });
   const options = { limit: 1, matchLabels: { selected: "yes", second: "yes" } };
-  const page = await f.client.listPage(TYPE, options);
-  const last = await f.client.listPage(TYPE, { ...options, matchLabels: { second: "yes", selected: "yes" }, continue: page.metadata.continue });
+  const page = await f.client.page(TYPE, options);
+  const last = await f.client.page(TYPE, { ...options, matchLabels: { second: "yes", selected: "yes" }, continue: page.metadata.continue });
   assert.equal(last.items[0]!.metadata.name, "b"); assert.equal(last.metadata.continue, "");
 });
 
@@ -126,7 +126,7 @@ test("live traversal advances across updates, removals and restart without growi
   const f = fixture(t);
   for (const name of ["a", "b", "c"]) await f.create(name);
   const query = { limit: 1, consistency: "live" as const, matchIndex: { name: "group", value: "selected" } };
-  const first = await f.client.listPage(TYPE, query);
+  const first = await f.client.page(TYPE, query);
   await f.client.patchStatus(first.items[0]!, { changed: true });
   await f.create("aa"); await f.create("z");
   f.store.storage.remove(f.store.key(TYPE, "b"));
@@ -154,8 +154,8 @@ test("production indexed page SQL uses ordered range seeks without a sorting tab
   }) as typeof db.prepare;
   try {
     const query = { limit: 2, matchIndex: { name: "group", value: "selected" } };
-    const first = await f.client.listPage(TYPE, query);
-    await f.client.listPage(TYPE, { ...query, continue: first.metadata.continue });
+    const first = await f.client.page(TYPE, query);
+    await f.client.page(TYPE, { ...query, continue: first.metadata.continue });
   } finally { db.prepare = prepare; }
   assert.equal(plans.length, 2);
   for (const plan of plans) {
@@ -173,4 +173,53 @@ test("ordered index installation backfills existing data and later replacements 
   assert.deepEqual(pages.list("pages", TYPE, query).keys, [f.store.key(TYPE, "a")]);
   await f.client.replace(a, { group: "other" }, a.status);
   assert.deepEqual(pages.list("pages", TYPE, query).keys, []);
+});
+
+/** @case Domain order is indexed before LIMIT, including ties, reverse continuation and rollback. */
+test("declared ordered indexes select the newest page without decoding history or sorting", async t => {
+  const f = fixture(t);
+  const type = { ...TYPE, kind: "Ordered" };
+  const observed: string[][] = [];
+  f.store.storage.register("pages", [{ ...definition(type),
+    orderedIndexes: { newest: r => [{ value: r.spec.group, order: String(r.status.rank ?? "") }] },
+    validator: { create(r, context) {
+      if (r.metadata.name !== "guard") return;
+      observed.push(context.page(type, { limit: 1, matchIndex: { name: "newest", value: "selected" }, direction: "desc" }).items.map(r => r.metadata.name));
+      throw new Error("rollback guard");
+    } },
+  }]);
+  for (let i = 0; i < 100; i++) await f.client.create(type, { name: String(i).padStart(3, "0"), spec: { group: "selected" }, status: { rank: String(Math.floor(i / 2)).padStart(3, "0") } });
+  const db = f.store.storage.db, prepare = db.prepare.bind(db), read = f.store.storage.read.bind(f.store.storage);
+  const plans: string[][] = []; let reads = 0;
+  f.store.storage.read = (...args) => { reads++; return read(...args); };
+  db.prepare = ((sql: string) => {
+    const stmt = prepare(sql);
+    if (sql.includes(" AS key,") && sql.includes("resource_ordered_indexes")) {
+      const all = stmt.all.bind(stmt);
+      stmt.all = ((...args: import("node:sqlite").SQLInputValue[]) => {
+        plans.push(prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args).map(r => String(r.detail))); return all(...args);
+      }) as typeof stmt.all;
+    }
+    return stmt;
+  }) as typeof db.prepare;
+  const query = { limit: 3, direction: "desc" as const, matchIndex: { name: "newest", value: "selected" } };
+  try {
+    const first = await f.client.page(type, query);
+    const second = await f.client.page(type, { ...query, continue: first.metadata.continue });
+    assert.deepEqual([...first.items, ...second.items].map(r => r.metadata.name), ["099", "098", "097", "096", "095", "094"]);
+    assert.equal(reads, 6);
+    assert.equal(plans.length, 2);
+    for (const plan of plans) {
+      assert.ok(plan.some(p => p.includes("COVERING INDEX resource_ordered_lookup")), plan.join("\n"));
+      assert.ok(plan.every(p => !p.includes("TEMP B-TREE")), plan.join("\n"));
+    }
+    await assert.rejects(f.client.page(type, { ...query, direction: "asc", continue: first.metadata.continue }), { name: "ResourceContinueInvalid" });
+    await assert.rejects(f.client.commit([
+      { operation: "create", type, name: "newest", spec: { group: "selected" }, status: { rank: "999" } },
+      { operation: "create", type, name: "guard", spec: { group: "selected" }, status: {} },
+    ]), /rollback guard/);
+    assert.deepEqual(observed, [["newest"]]);
+    assert.equal((await f.client.page(type, { ...query, continue: first.metadata.continue })).items[0]!.metadata.name, "096");
+    assert.equal(await f.client.get({ ...type, namespace: "v1", name: "newest" }), undefined);
+  } finally { db.prepare = prepare; f.store.storage.read = read; }
 });

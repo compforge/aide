@@ -389,21 +389,11 @@ export class PluginResourceStore {
       );
   }
 
-  listPage<S, T>(type: ResourceType, options: ResourcePageOptions): ResourcePage<S, T> {
+  page<S, T>(type: ResourceType, options: ResourcePageOptions): ResourcePage<S, T> {
     validateResourceType(type);
     const namespace = this.resourceNamespace(options.namespace ?? "v1");
     const matchLabels = labelMap("resource list matchLabels", options.matchLabels);
-    const definition = this.storage.definition(this.scope, type);
-    if (options.matchIndex && !definition.indexes?.[options.matchIndex.name])
-      throw new Error(`Unknown resource index: ${options.matchIndex.name}`);
-    return this.storage.transaction(() => {
-      const page = this.storage.pages.list(this.scope, type, { ...options, namespace, matchLabels });
-      return { metadata: page.metadata, items: page.keys.map(key => {
-        const stored = this.storage.read<StoredPluginResource<S, T>>(key)!;
-        const { name, namespace } = stored.object.metadata;
-        return this.validateStored<S, T>(key, type, name, namespace as ResourceNamespace, stored).object;
-      }) };
-    });
+    return this.storage.page<S, T>(this.scope, type, { ...options, namespace, matchLabels });
   }
 
   /** @spec Desired state and its initial observation commit atomically under one resource version. */

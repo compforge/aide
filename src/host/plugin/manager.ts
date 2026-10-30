@@ -169,6 +169,7 @@ export interface PluginReloadResult {
 }
 
 interface ManagedController {
+  readonly watchTypes: readonly { apiVersion: string; kind: string }[];
   scope: ReconcileScope;
   ownsResource(resource: ResourceRef): boolean;
   cronSources?(): readonly CronSource[];
@@ -187,6 +188,17 @@ interface ManagedController {
  * Plugin 域统一入口：注册和路由 Controller，并限制所有 Plugin 的进程总并发。
  */
 export class Manager {
+  private readonly subscriptions = new Map<string, Set<ManagedController>>();
+  private subscriptionKey(instance: string, apiVersion: string, kind: string) { return JSON.stringify([instance, apiVersion, kind]); }
+  private subscribe(controller: ManagedController, remove = false) {
+    const scope = controller.scope;
+    for (const type of [{ apiVersion: scope.resourceApiVersion, kind: scope.resourceKind }, ...controller.watchTypes]) {
+      const key = this.subscriptionKey(scope.pluginInstanceId, type.apiVersion, type.kind);
+      const subscribers = this.subscriptions.get(key) ?? new Set<ManagedController>();
+      if (remove) subscribers.delete(controller); else subscribers.add(controller);
+      if (subscribers.size) this.subscriptions.set(key, subscribers); else this.subscriptions.delete(key);
+    }
+  }
   private readonly unsubscribeResourceGc: () => void;
   private readonly resourceChanged?: (change: ResourceClientChange) => void;
   /** Plugin definitions remain registered independently of live bindings. */
@@ -316,7 +328,8 @@ export class Manager {
   async settled(): Promise<void> {
     do {
       await Promise.allSettled([...this.pendingReconciles]);
-      await Promise.all([...this.controllers.values()].filter((item): item is RunnerController => item instanceof RunnerController).map((item) => item.settled()));
+      // Waiting for quiescence is not a success receipt. Runner failures use the lifecycle observer, like local queue failures.
+      await Promise.allSettled([...this.controllers.values()].filter((item): item is RunnerController => item instanceof RunnerController).map((item) => item.settled()));
     } while (this.pendingReconciles.size);
   }
 
@@ -918,6 +931,7 @@ export class Manager {
     }
     for (const controller of this.controllers.values()) controller.close();
     this.controllers.clear();
+    this.subscriptions.clear();
     this.suspendedControllers.clear();
     this.dueQueue.close();
     this.cronSourceQueue.close();
@@ -964,7 +978,7 @@ export class Manager {
       controller: ManagedController;
       key: ReconcileKey;
     }>();
-    for (const controller of this.controllers.values()) {
+    for (const controller of this.subscriptions.get(this.subscriptionKey(change.pluginInstanceId, change.resource.apiVersion, change.resource.kind)) ?? []) {
       const scopeId = reconcileScopeId(controller.scope);
       if (
         controller.scope.pluginInstanceId !== change.pluginInstanceId ||
@@ -1113,6 +1127,7 @@ export class Manager {
       );
     }
     this.controllers.set(id, controller);
+    this.subscribe(controller);
     if (suspended) this.suspendedControllers.add(id);
     try {
       if (this.started && !suspended) {
@@ -1124,6 +1139,7 @@ export class Manager {
       }
     } catch (error) {
       this.controllers.delete(id);
+      this.subscribe(controller, true);
       this.suspendedControllers.delete(id);
       controller.close();
       this.dueQueue.removeScope(controller.scope);
@@ -1137,6 +1153,7 @@ export class Manager {
         active = false;
         if (this.controllers.get(id) !== controller) return;
         this.controllers.delete(id);
+        this.subscribe(controller, true);
         this.suspendedControllers.delete(id);
         controller.close();
         this.dueQueue.removeScope(controller.scope);

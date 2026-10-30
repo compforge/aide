@@ -1,3 +1,4 @@
+import { candidateVersion } from "../weave/candidates.ts";
 import { NoteWriterSchema } from "../note/model.ts";
 import { canReclaimTopic, reclamationVersion } from "./retention.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -54,6 +55,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   schema: { spec: z.object({ id: z.string(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({ conditions: ConditionsSchema, summaryDependencies: z.record(z.string(), z.string()).optional(), organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
+      weaveReview: z.object({ version: z.string(), at: z.string().datetime() }).strict().optional(),
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       capacityRequests: z.partialRecord(z.enum(["aide:triage", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), inputId: z.string() }).strict()).optional(),
@@ -95,19 +97,25 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     // @link docs/personal/topic.md#静默回收
     if (resource.spec.default) throw new TopicDeletionBlocked("default", "Default Topic cannot be deleted");
     if (resource.status.execution) throw new TopicDeletionBlocked("busy", "Topic is busy");
-    if (context.list<TopicSpec, TopicStatus>(TOPIC_TYPE, { matchIndex: { name: "parent", value: resource.metadata.uid } }).length) throw new TopicDeletionBlocked("children", "Topic still has children");
-    const pending = context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessPending", value: resource.metadata.uid } }).length;
+    if (context.page(TOPIC_TYPE, { limit: 1, matchIndex: { name: "parent", value: resource.metadata.uid } }).items.length) throw new TopicDeletionBlocked("children", "Topic still has children");
+    const pending = context.page(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessPending", value: resource.metadata.uid } }).items.length;
     if (pending) throw new TopicDeletionBlocked("busy", "Topic has pending Input");
-    if (WORK_TYPES.some(type => context.list<WorkResource["spec"], WorkResource["status"]>(type, { matchIndex: { name: "topic", value: resource.metadata.uid } }).length)) throw new TopicDeletionBlocked("work", "Topic still owns Work");
+    if (WORK_TYPES.some(type => context.page(type, { limit: 1, matchIndex: { name: "topic", value: resource.metadata.uid } }).items.length)) throw new TopicDeletionBlocked("work", "Topic still owns Work");
     if (resource.spec.parentRef) {
       const parent = context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, resource.spec.parentRef.uid);
       if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource, notes(context, resource.metadata.uid))) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");
     }
   } },
-  indexes: { default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],
+  indexes: { uid: r => [r.metadata.uid], default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],
     topicKey: r => r.metadata.deletionTimestamp || !r.spec.topicKey ? [] : [r.spec.topicKey],
     liveParent: r => !r.metadata.deletionTimestamp && r.spec.parentRef ? [r.spec.parentRef.uid] : [],
-    parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], root: r => !r.metadata.deletionTimestamp && !r.spec.parentRef ? ["root"] : [] },
+    parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], weaveRoot: r => !r.metadata.deletionTimestamp && !r.spec.parentRef && !r.spec.default ? ["root"] : [], root: r => !r.metadata.deletionTimestamp && !r.spec.parentRef ? ["root"] : [] },
+  orderedIndexes: {
+    weavePending: r => !r.metadata.deletionTimestamp && !r.spec.parentRef && !r.spec.default && r.status.weaveReview?.version !== candidateVersion(r)
+      ? [{ value: "root", order: r.status.weaveReview?.at ?? "" }] : [],
+    weaveReviewed: r => !r.metadata.deletionTimestamp && !r.spec.parentRef && !r.spec.default && r.status.weaveReview?.version === candidateVersion(r)
+      ? [{ value: "root", order: r.status.weaveReview.at }] : [],
+  },
   retention: { releasedAt: r => !r.spec.default && !r.status.execution && !r.status.agent?.sessionId
     ? r.status.lastInputAt ?? r.metadata.creationTimestamp : undefined,
     canEvict: canReclaimTopic, references: () => [] },

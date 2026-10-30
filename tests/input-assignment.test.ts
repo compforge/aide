@@ -55,7 +55,7 @@ test("Mounted Input recovers assignment independently; root pending lookup never
   const resources: ResourceClient = { ...f.resources,
     list: async () => { throw new Error("No unbounded lists"); },
     get: async () => { throw new Error("No Topic discovery"); },
-    async listPage(type, options) { assert.equal(type.kind, "Input"); queries++; return f.resources.listPage(type, options); },
+    async page(type, options) { assert.equal(type.kind, "Input"); queries++; return f.resources.page(type, options); },
   };
   assert.deepEqual((await nextInputs(resources, f.read(f.root), 8)).map(i => i.metadata.name), ["mounted"]);
   assert.ok(queries <= 6);
@@ -128,9 +128,9 @@ test("Refresh resumes bounded pages after interruption and a second root change"
   const root = f.read(f.root);
   await f.resources.replace(root, { ...root.spec, parentRef: resourceRef(f.other) }, root.status);
   let reads = 0;
-  const failing = { ...f.context, resources: { ...f.resources, listPage: async (...args: Parameters<ResourceClient["listPage"]>) => {
+  const failing = { ...f.context, resources: { ...f.resources, page: async (...args: Parameters<ResourceClient["page"]>) => {
     if (++reads === 2) throw new Error("interrupted after checkpoint");
-    return f.resources.listPage(...args);
+    return f.resources.page(...args);
   } } } as PluginContext;
   await assert.rejects(reconcileAssignments(failing, f.read(f.child)), /interrupted/);
   assert.ok(f.read(f.child).status.assignmentRefresh!.cursor);

@@ -3,7 +3,7 @@ import { SubjectSchema } from "../note/model.ts";
 import { readNotes } from "../note/query.ts";
 import { patchStatus } from "../status.ts";
 import { resourceRef } from "../input/state.ts";
-import { readTopicSubtree, understandingVersion, summaryVersion } from "./tree.ts";
+import { readTopicInScope, understandingVersion, summaryVersion } from "./tree.ts";
 import { z } from "zod";
 import { SUMMARY_CHARS } from "../context.ts";
 import { upsertNote, NoteUpdateSchema } from "../note/service.ts";
@@ -34,10 +34,9 @@ async function targetTopic(resources: ResourceClient, owner: Readonly<TopicResou
   const current = await resources.get<TopicSpec, TopicStatus>(resourceRef(owner));
   if (!current || current.metadata.uid !== owner.metadata.uid || current.metadata.deletionTimestamp
     || current.status.execution?.id !== executionId) throw new Error("Chief execution is no longer active");
-  const all = await readTopicSubtree(resources, resourceRef(current));
-  const target = all.find(t => t.metadata.uid === (topicUid ?? current.metadata.uid));
+  const target = await readTopicInScope(resources, current, topicUid);
   if (!target) throw new Error("Topic is outside this root");
-  return { current, target, all };
+  return { current, target };
 }
 
 /**
@@ -49,12 +48,12 @@ async function targetTopic(resources: ResourceClient, owner: Readonly<TopicResou
 export async function summarizeTopic(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, summaryChars: number) {
   const args = TopicContextSchema.parse(raw);
   if (args.summary !== undefined && args.summary.length > summaryChars) throw new Error(`Topic summary exceeds ${summaryChars} characters; select more durable understanding`);
-  const { current, target, all } = await targetTopic(resources, owner, executionId, args.topicUid);
+  const { current, target } = await targetTopic(resources, owner, executionId, args.topicUid);
   if (contentVersion(target) !== args.version) throw new Error("Topic context changed; read_topic and merge again");
   const absorbed = { ...target.status.absorbed }, absorbedSummaries = { ...target.status.absorbedSummaries };
   const children = await Promise.all((args.absorbed ?? []).map(async ref => {
-    const child = all.find(t => t.metadata.uid === ref.uid && t.spec.parentRef?.uid === target.metadata.uid && !t.metadata.deletionTimestamp);
-    if (!child || understandingVersion(child, await readNotes(resources, child.metadata.uid)) !== ref.version) throw new Error("Child understanding changed; read and review again");
+    const child = (await resources.page<TopicSpec, TopicStatus>(TOPIC_TYPE, { limit: 1, matchIndex: { name: "uid", value: ref.uid } })).items[0];
+    if (!child || child.metadata.deletionTimestamp || child.spec.parentRef?.uid !== target.metadata.uid || understandingVersion(child, await readNotes(resources, child.metadata.uid)) !== ref.version) throw new Error("Child understanding changed; read and review again");
     absorbed[ref.uid] = ref.version;
     absorbedSummaries[ref.uid] = summaryVersion(child);
     return child;

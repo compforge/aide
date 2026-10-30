@@ -45,7 +45,13 @@ function fixture(t: { after(fn: () => Promise<void>): void }) {
     await routeByRules(context, fact);
     return aide.topics.inputStore.get(id)!;
   };
-  return { aide, resources, context, weave, initialize, refresh, group, input };
+  const reviewed = () => Object.fromEntries(aide.topics.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE)
+    .filter(t => !t.spec.parentRef && t.status.weaveReview).map(t => [t.metadata.uid, t.status.weaveReview!]));
+  const mark = async (entries: Record<string, { version: string; at: string }>) => {
+    for (const topic of aide.topics.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE))
+      if (entries[topic.metadata.uid]) await resources.patchStatus(topic, { weaveReview: entries[topic.metadata.uid] });
+  };
+  return { aide, resources, context, weave, initialize, refresh, group, input, reviewed, mark };
 }
 
 test("Weave reparents a running Chief immediately; materials and old Work stay while new Work belongs to the new root", async t => {
@@ -194,19 +200,19 @@ test("Weave advances only the bounded snapshot and retries interrupted analysis"
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
   } } };
   await reconcile(execution, await f.weave());
-  assert.deepEqual((await f.weave()).status.reviewed, {});
+  assert.deepEqual(f.reviewed(), {});
   fail = false;
   for (let i = 0; i < 3; i++) {
     await f.resources.patchStatus(await f.weave(), { nextAt: "2000-01-01T00:00:00.000Z" });
     await reconcile(execution, await f.weave());
-    assert.equal(Object.keys((await f.weave()).status.reviewed ?? {}).length, seen.size);
+    assert.equal(Object.keys(f.reviewed() ?? {}).length, seen.size);
     await f.resources.patchStatus(f.refresh(roots[0]!), { summary: `Changed material ${i}`, lastInputAt: new Date().toISOString() });
   }
   assert.equal(seen.size, 24);
   await f.resources.patchStatus(f.refresh(roots[0]!), { summary: "changed during scan" });
   await f.resources.patchStatus(await f.weave(), { nextAt: "2000-01-01T00:00:00.000Z" });
   await reconcile(execution, await f.weave());
-  assert.equal(Object.keys((await f.weave()).status.reviewed ?? {}).length, 24, "a changed Topic does not reset other progress");
+  assert.equal(Object.keys(f.reviewed() ?? {}).length, 24, "a changed Topic does not reset other progress");
 });
 
 test("A quiet changed child wakes root synthesis without Input and can then be explicitly deleted", async t => {
@@ -316,7 +322,8 @@ test("Weave replaces legacy checks and sessions without repeatedly resetting cov
   const at = "2000-01-01T00:00:00.000Z";
   const legacy = Object.fromEntries(roots.map(topic => [topic.metadata.uid, { at,
     version: createHash("sha256").update(JSON.stringify([topic.spec.name, createHash("sha256").update(topic.status.summary).digest("hex")])).digest("hex") }]));
-  await f.resources.patchStatus(await f.weave(), { reviewed: legacy, agent: { harness: "weave", sessionId: "obsolete-rules" } });
+  await f.mark(legacy);
+  await f.resources.patchStatus(await f.weave(), { agent: { harness: "weave", sessionId: "obsolete-rules" } });
   let reconcile!: (execution: any, owner: any) => Promise<unknown>;
   registerWeave({ ...f.context, instance: { config: { weave: { intervalMs: 1000, batchSize: 2 } } },
     controllers: { register(def: any) { reconcile = def.reconcile; } } } as unknown as PluginContext);
@@ -341,7 +348,7 @@ test("Weave replaces legacy checks and sessions without repeatedly resetting cov
   assert.deepEqual(prompts.map(p => [p.rootCount, p.pendingCount, p.candidates.length]), [[3, 3, 2], [3, 1, 1]]);
   assert.ok(prompts.every(p => p.total === undefined), "pending count cannot masquerade as the catalog total");
   assert.equal(new Set(prompts.flatMap(p => p.candidates.map((c: any) => c.uid))).size, 3);
-  const reviewed = (await f.weave()).status.reviewed!;
+  const reviewed = f.reviewed()!;
   for (const root of roots) assert.equal(reviewed[root.metadata.uid]!.version, candidateVersion(root));
 });
 
@@ -354,8 +361,8 @@ test("Weave distinguishes a single candidate from its catalog and extends an exi
   const candidate = await ensureSourceTopic(f.resources, "new-child", "Related evidence");
   const other = await ensureSourceTopic(f.resources, "other", "Independent topic");
   const at = "2000-01-01T00:00:00.000Z";
-  await f.resources.patchStatus(await f.weave(), { reviewed: Object.fromEntries([parent, other].map(topic =>
-    [topic.metadata.uid, { at, version: candidateVersion(topic) }])) });
+  await f.mark(Object.fromEntries([parent, other].map(topic =>
+    [topic.metadata.uid, { at, version: candidateVersion(topic) }])));
   let reconcile!: (execution: any, owner: any) => Promise<unknown>;
   registerWeave({ ...f.context, controllers: { register(def: any) { reconcile = def.reconcile; } } } as unknown as PluginContext);
   const execution = { executionId: "single-candidate", verbs: { async harness(args: any) {
@@ -382,14 +389,14 @@ test("Weave distinguishes a single candidate from its catalog and extends an exi
   assert.equal(f.refresh(a).spec.parentRef?.uid, parent.metadata.uid);
   assert.equal(f.refresh(b).spec.parentRef?.uid, parent.metadata.uid);
   assert.equal(weaveCandidates(await f.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE)).length, 2);
-  assert.equal((await f.weave()).status.reviewed?.[candidate.metadata.uid], undefined, "grouped children leave the root scan");
+  assert.equal(f.reviewed()?.[candidate.metadata.uid], undefined, "grouped children leave the root scan");
 });
 
 test("Weave retains the old binding and coverage when session release fails", async t => {
   const f = fixture(t); await f.initialize();
   await ensureSourceTopic(f.resources, "a", "A"); await ensureSourceTopic(f.resources, "b", "B");
   const agent = { harness: "weave", sessionId: "previous-session" };
-  await f.resources.patchStatus(await f.weave(), { agent, reviewed: {} });
+  await f.resources.patchStatus(await f.weave(), { agent });
   let reconcile!: (execution: any, owner: any) => Promise<unknown>;
   registerWeave({ ...f.context, controllers: { register(def: any) { reconcile = def.reconcile; } } } as unknown as PluginContext);
   const execution = { executionId: "release-failed", verbs: { async harness(args: any) {
@@ -398,7 +405,7 @@ test("Weave retains the old binding and coverage when session release fails", as
   } } };
   await assert.rejects(reconcile(execution, await f.weave()), /Previous Weave session could not close/);
   assert.deepEqual((await f.weave()).status.agent, agent);
-  assert.deepEqual((await f.weave()).status.reviewed, {});
+  assert.deepEqual(f.reviewed(), {});
 });
 
 /** @case Checked roots above a soft target are reconsidered after a bounded interval, without forcing unrelated grouping. */
@@ -406,7 +413,7 @@ test("Weave revisits unchanged roots above its soft target without spinning betw
   const f = fixture(t); await f.initialize();
   const roots = await Promise.all(["one", "two"].map(key => ensureSourceTopic(f.resources, key, key)));
   const old = "2000-01-01T00:00:00.000Z";
-  await f.resources.patchStatus(await f.weave(), { reviewed: Object.fromEntries(roots.map(topic => [topic.metadata.uid, { version: candidateVersion(topic), at: old }])) });
+  await f.mark(Object.fromEntries(roots.map(topic => [topic.metadata.uid, { version: candidateVersion(topic), at: old }])));
   let reconcile!: (execution: any, owner: any) => Promise<unknown>;
   registerWeave({ ...f.context, instance: { config: { weave: { maxRoots: 1, intervalMs: 1000, reviewIntervalMs: 60_000 } } },
     controllers: { register(def: any) { reconcile = def.reconcile; } } } as unknown as PluginContext);
@@ -423,9 +430,36 @@ test("Weave revisits unchanged roots above its soft target without spinning betw
   await reconcile(execution, await f.weave());
   assert.equal(prompts.length, 1, "unchanged pressure does not immediately repeat inference");
   const current = await f.weave();
-  await f.resources.patchStatus(current, { nextAt: old, lastRunAt: old,
-    reviewed: Object.fromEntries(Object.entries(current.status.reviewed!).map(([uid, value]) => [uid, { ...value, at: old }])) });
+  await f.resources.patchStatus(current, { nextAt: old, lastRunAt: old });
+  await f.mark(Object.fromEntries(Object.entries(f.reviewed()).map(([uid, value]) => [uid, { ...value, at: old }])));
   await reconcile(execution, await f.weave());
   assert.equal(prompts.length, 2);
   assert.equal(f.aide.topics.list().filter(t => !t.parentRef).length, 2, "soft pressure does not force a grouping");
+});
+
+/** @case Reconciliation reads bounded indexed sets even when the catalog exceeds its soft target. */
+test("Weave does not list the full Topic catalog before or after a review", async t => {
+  const f = fixture(t); await f.initialize();
+  for (let i = 0; i < 65; i++) await ensureSourceTopic(f.resources, `bounded:${i}`, String(i));
+  const pages: Array<{ index?: string; count: number }> = [];
+  const resources: typeof f.resources = { ...f.resources,
+    async list(type, options) { assert.notEqual(type.kind, "Topic", "no full catalog lookup"); return f.resources.list(type, options); },
+    async page(type, options) {
+      const result = await f.resources.page(type, options);
+      if (type.kind === "Topic") pages.push({ index: options.matchIndex?.name, count: result.items.length });
+      return result as any;
+    },
+  };
+  let reconcile!: (execution: any, owner: any) => Promise<unknown>;
+  registerWeave({ ...f.context, resources, controllers: { register(def: any) { reconcile = def.reconcile; } } } as PluginContext);
+  const execution = { executionId: "bounded", verbs: { async harness(args: any) {
+    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "weave", sessionId: "bounded" } };
+    const batch = JSON.parse(args.prompt.split("\n").at(-1));
+    assert.equal(batch.rootCount, 21); assert.equal(batch.rootCountExact, false);
+    assert.ok(batch.candidates.length <= 12);
+    return { state: "success", value: { result: { stopReason: "end_turn" } } };
+  } } };
+  await reconcile(execution, await f.weave());
+  assert.deepEqual(pages, [{ index: "weaveRoot", count: 21 }, { index: "weavePending", count: 40 }]);
+  assert.equal(Object.keys(f.reviewed()).length, 12);
 });
