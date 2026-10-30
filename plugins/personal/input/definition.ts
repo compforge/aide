@@ -1,4 +1,3 @@
-import { DisclosureFields } from "../disclosure.ts";
 import { validateReviewRequest } from "../topic/review.ts";
 import { PersonRefSchema } from "../person/model.ts";
 import { ConditionsSchema } from "../conditions.ts";
@@ -23,7 +22,7 @@ export const InputSpecSchema = z.object({ source: AddressSchema.optional(), topi
   attention: z.enum(InputAttention).optional(),
   originRef: z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform((value) => value === "v1" ? value : parseResourceNamespace(value)), name: z.string(), uid: z.string() }).strict().optional(),
   text: z.string().min(1).max(32_000), timezone: z.string().optional(),
-  observation: z.record(z.string(), z.unknown()).optional(), ...DisclosureFields }).strict();
+  observation: z.record(z.string(), z.unknown()).optional() }).strict();
 
 const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict();
 const attempt = z.object({ agent: AgentStatusSchema.optional(), completedBy: AgentCallSchema.optional(), executionId: z.string().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(), lastError: z.string().optional() }).strict();

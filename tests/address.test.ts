@@ -167,7 +167,7 @@ test("Web displays explicitly addressed Output in the receiving endpoint and exc
   const store = aide.personal.topics;
   await aide.personal.topics.ensure("recipient", webAddress("recipient"));
   const result = await store.say("producer", undefined, "delivered to recipient", undefined, { target: webAddress("recipient") });
-  await aide.persons.initialize(); await aide.outputStore.prepare(result.outputId);
+  await aide.persons.initialize(); await aide.reconcileOutput(result.outputId);
   for (const id of ["producer", "recipient"]) {
     assert.ok(topicView(aide, id).blocks.some((b) => b.content === "delivered to recipient"));
     assert.equal(browseTopics(aide.topics).items.find((c) => c.id === id)!.preview, "delivered to recipient");
@@ -267,7 +267,7 @@ test("Aide rejects unowned targets and diagnoses pending delivery after the Chan
     assert.equal(output.status.disclosure?.decision, "denied");
     assert.match(output.status.disclosure!.reason, /audience/);
     assert.deepEqual(output.status.delivery?.target, webAddress("default"));
-    assert.equal(output.status.attempts, 0);
+    assert.equal(output.status.attempts, 1, "The same Output records its actual Web delivery attempt");
     await assert.rejects(restarted.topics.say("default", undefined, "still disabled", undefined,
       { target: larkAddress("app", "bot-chat") }), /disabled/);
     assert.equal(restarted.outputs().length, 1);

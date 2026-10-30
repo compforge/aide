@@ -1,3 +1,4 @@
+import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
 import { AgentCallSchema } from "../observation/reference.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
@@ -11,7 +12,7 @@ const ref = z.object({ apiVersion: z.string().min(1), kind: z.string().min(1), n
   uid: z.string().optional() }).strict();
 export const OutputSpecSchema = z.object({
   text: z.string().min(1).max(128_000),
-  notes: z.array(z.object({ uid: z.string().min(1), version: z.string().min(1) }).strict()).max(100).optional(),
+  notes: z.array(z.object({ uid: z.string().min(1), version: z.string().min(1), textVersion: z.string().min(1).optional() }).strict()).max(100).optional(),
   target: AddressSchema,
   receivers: z.array(ref.extend({ kind: z.literal("Person"), namespace: z.string().transform(parseResourceNamespace), uid: z.string().min(1) })).max(100).optional(),
   topic: ref.extend({ uid: z.string().min(1) }), topicId: z.string().min(1),
@@ -19,10 +20,10 @@ export const OutputSpecSchema = z.object({
   executionId: z.string().optional(), producer: ref.optional(), inputIds: z.array(z.string().min(1)).max(1001).optional(),
 }).strict();
 export const OutputStatusSchema = z.object({
-  disclosure: z.object({ decision: z.enum(["allowed", "denied"]), reason: z.string(), checkedAt: z.iso.datetime(), fingerprint: z.string() }).strict().optional(),
-  delivery: z.object({ target: AddressSchema, text: z.string().max(160_000), receivers: z.array(ref) }).strict().optional(),
+  disclosure: z.object({ decision: z.enum(["allowed", "denied"]), reason: z.string(), checkedAt: z.iso.datetime(), fingerprint: z.string(), policy: z.object({ sensitivity: SensitivitySchema, visibility: VisibilitySchema, people: z.array(z.string()) }).strict().optional() }).strict().optional(),
+  delivery: z.object({ replay: z.enum(["idempotent", "once"]).optional(), target: AddressSchema, text: z.string().max(160_000), receivers: z.array(ref) }).strict().optional(),
   phase: z.enum(["pending", "sending", "delivered", "failed", "uncertain"]), attempts: z.number().int().nonnegative(),
-  nextAttemptAt: z.iso.datetime().optional(), deliveredAt: z.iso.datetime().optional(), lastError: z.string().max(4000).optional(), receipt: z.object({ id: z.string().min(1), scope: z.string().min(1) }).strict().optional() }).strict();
+  deliveredAt: z.iso.datetime().optional(), lastError: z.string().max(4000).optional(), receipt: z.object({ id: z.string().min(1), scope: z.string().min(1) }).strict().optional() }).strict();
 
 
 export const OutputDefinition: ResourceDefinition<OutputSpec, OutputStatus> = {

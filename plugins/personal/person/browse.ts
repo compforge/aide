@@ -1,3 +1,4 @@
+import { NOTE_TYPE } from "../note/model.ts";
 import type { ResourceStorage } from "../../../src/host/resource/storage.ts";
 import type { Me } from "./model.ts";
 import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
@@ -6,7 +7,7 @@ export interface PersonBrowseQuery extends PageQuery { q?: string; name?: string
 export interface PersonListItem { id: string; uid: string; version: string; name: string; isMe: boolean; preview: string; updatedAt: string }
 const field = (path: string) => `json_extract(data, '$.object.${path}')`;
 const summary = `(SELECT json_extract(n.data, '$.object.spec.text') FROM resource_indexes i JOIN resources n ON n.key = i.source WHERE n.scope = 'personal'
-  AND n.kind = 'aide.dev/Note' AND i.name = 'summaryOf' AND i.value = resources.uid
+  AND n.kind = 'aide.dev/Note' AND json_extract(n.data, '$.object.apiVersion') = '${NOTE_TYPE.apiVersion}' AND i.name = 'summaryOf' AND i.value = resources.uid
   AND json_extract(n.data, '$.object.metadata.deletionTimestamp') IS NULL)`;
 const columns = `${field("metadata.name")} AS id, uid, ${field("metadata.resourceVersion")} AS version,
   ${field("spec.name")} AS name, substr(trim(coalesce(${summary}, '')), 1, 80) AS preview, ${field("status.updatedAt")} AS updatedAt,

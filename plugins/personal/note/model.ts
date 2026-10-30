@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Resource } from "@compforge/aide-plugin";
 import { PersonRefSchema } from "../person/model.ts";
 
-export const NOTE_TYPE = { apiVersion: "aide.dev/v1alpha2", kind: "Note" } as const;
+export const NOTE_TYPE = { apiVersion: "aide.dev/v1alpha3", kind: "Note" } as const;
 export const WriterResourceSchema = z.object({ apiVersion: z.string().min(1), kind: z.enum(["Topic", "Task", "Routine"]),
   namespace: z.literal("v1"), name: z.string().min(1), uid: z.string().min(1) }).strict();
 export const SubjectSchema = WriterResourceSchema.extend({ kind: z.enum(["Topic", "Task", "Routine", "Person"]) });
@@ -22,6 +22,8 @@ export type NoteStatus = z.infer<typeof NoteStatusSchema>;
 export type NoteResource = Resource<NoteSpec, NoteStatus>;
 /** A query projection; never embedded in another persisted Resource. */
 export interface Note extends NoteSpec { id: string; uid: string; version: string; createdAt: string; updatedAt: string }
+/** @spec A cited body stays valid across classification-only edits; the current classification is checked at delivery. */
+export const noteTextVersion = (r: NoteResource) => createHash("sha256").update(JSON.stringify([r.metadata.uid, r.spec.text])).digest("hex");
 /** @spec Review receipts do not change the content version or refresh a Note's retention age. */
 export const noteVersion = (r: NoteResource) => createHash("sha256").update(JSON.stringify([r.metadata.uid, r.spec, r.status.updatedAt])).digest("hex");
 export const noteView = (r: NoteResource): Note => ({ ...r.spec, id: r.metadata.name, uid: r.metadata.uid,
@@ -31,7 +33,7 @@ export const noteView = (r: NoteResource): Note => ({ ...r.spec, id: r.metadata.
 export const NoteReferenceSchema = NoteViewSchema.omit({ text: true, createdAt: true, updatedAt: true });
 export type NoteReference = z.infer<typeof NoteReferenceSchema>;
 export const noteReference = (note: NoteResource | undefined): NoteReference | undefined => note
-  ? { id: note.metadata.name, uid: note.metadata.uid, version: noteVersion(note), subject: note.spec.subject, ...(note.spec.summaryOf ? { summaryOf: note.spec.summaryOf } : {}), people: note.spec.people, sensitivity: note.spec.sensitivity ?? "L3", visibility: note.spec.visibility ?? "people", ...(note.spec.disclosureScope ? { disclosureScope: note.spec.disclosureScope } : {}) } : undefined;
+  ? { id: note.metadata.name, uid: note.metadata.uid, version: noteVersion(note), subject: note.spec.subject, ...(note.spec.summaryOf ? { summaryOf: note.spec.summaryOf } : {}), people: note.spec.people, sensitivity: note.spec.sensitivity ?? "L3", visibility: note.spec.visibility ?? "people" } : undefined;
 /** Automatic context bounds associations; explicit read_note returns the complete list. */
 export const previewNoteReference = (ref: NoteReference | undefined) => ref ? { ...ref, people: ref.people.slice(0, 8),
   ...(ref.people.length > 8 ? { peopleOmitted: ref.people.length - 8 } : {}) } : undefined;

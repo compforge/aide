@@ -449,7 +449,7 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
     const activation = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
     return activation.inputs[0].description.includes("Origin: source/") ? "source-private-reply" : "channel-reply";
   }, async execute() { throw new Error("Unexpected work"); } }, root, prompts, root, "cli_app"), config: loadConfig(configFile),
-    destinationAudience: async () => ({ identities: [{ provider: "web", scope: "local", id: "me" }], complete: true, private: false }),
+    destinationAudience: async () => ({ identities: [{ provider: "web", scope: "local", id: "me" }], complete: true, private: true }),
     checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }),
     connectors: { ...emptyConnectors, messages: {
       async identity() { return { accountId: "cli_app", userId: "ou_me" }; },

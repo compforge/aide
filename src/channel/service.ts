@@ -13,9 +13,7 @@ export interface ChannelService {
   receive(input: Incoming): Promise<InputReceipt>;
   inputDefinition(origin: Pick<InputSpec, "origin" | "originId">): { id: string; label: string; icon: string };
   outputs(): OutputView[];
-  outputDelivered?(outputId: string): Promise<void>;
-  outputSending?(outputId: string, expected?: { target: import("@compforge/aide-plugin").Address; text: string }): Promise<boolean | void>;
-  outputRetry?(outputId: string, error: string, nextAttemptAt: string): Promise<void>;
+  registerOutputTransport?(resolve: import("../../plugins/personal/output/delivery.ts").OutputTransportResolver): () => void;
   invocations(): readonly (HarnessInvocationSnapshot & { topicId?: string; inputId?: string; inputIds?: readonly string[] })[];
   topicIds(): string[];
 }

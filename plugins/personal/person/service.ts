@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import { sensitivityRank, type MaterialDisclosure } from "../disclosure.ts";
 import { prepareSummary, readSummary, summaryView, writeSummary } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
@@ -178,7 +177,7 @@ function mergeSummaryDisclosure(materials: MaterialDisclosure[]): MaterialDisclo
   if (!materials.length) return {};
   const first = materials[0]!;
   if (materials.some(material => (material.visibility ?? "people") !== (first.visibility ?? "people")
-    || !isDeepStrictEqual(material.disclosureScope, first.disclosureScope))) return;
+)) return;
   const sensitivity = materials.map(material => material.sensitivity ?? "L3")
     .reduce((a, b) => sensitivityRank(a) >= sensitivityRank(b) ? a : b);
   return { sensitivity, visibility: first.visibility ?? "people" };

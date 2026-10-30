@@ -11,7 +11,7 @@ export async function routeTo(resources: ResourceClient, target: { name: string;
   return before?.metadata.resourceVersion !== (await resources.get({ ...input, ...input.metadata }))?.metadata.resourceVersion;
 }
 export async function admit(resources: ResourceClient, inputId: string, executionId: string) {
-  const input = await resources.get<import("../plugins/personal/input/model.ts").InputSpec, import("../plugins/personal/input/model.ts").InputStatus>({ apiVersion: "aide.dev/v1alpha3", kind: "Input", name: inputId, namespace: "v1" });
+  const input = await resources.get<import("../plugins/personal/input/model.ts").InputSpec, import("../plugins/personal/input/model.ts").InputStatus>({ apiVersion: "aide.dev/v1alpha4", kind: "Input", name: inputId, namespace: "v1" });
   if (!input) throw new Error(`Input missing: ${inputId}`);
   if (input.status.assess?.completedAt || input.status.assess?.executionId) return input;
   return resources.patchStatus(input, { assess: { ...input.status.assess, executionId, startedAt: new Date().toISOString() } });

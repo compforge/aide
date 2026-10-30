@@ -25,9 +25,8 @@ export const inputQueue = (input: InputSpec): string => isInternalInput(input) ?
 
 export type InputRelation = "sent" | "received" | "observed";
 
-export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha3", kind: "Input" } as const;
-import type { MaterialDisclosure } from "../disclosure.ts";
-export interface InputSpec extends MaterialDisclosure {
+export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha4", kind: "Input" } as const;
+export interface InputSpec {
   /** Where the input was received; independent of its producer, sender and topic. */
   source?: Address;
   /**

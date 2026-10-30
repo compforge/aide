@@ -1,11 +1,11 @@
+import { disclosurePolicy, type PolicyNote } from "./policy.ts";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { Address, Resource, ResourceRef } from "@compforge/aide-plugin";
 import type { Logger } from "pino";
-import { isChannelAddress } from "../../../src/channel/address.ts";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
-import { NOTE_TYPE, noteVersion, type NoteResource } from "../note/model.ts";
+import { NOTE_TYPE, noteVersion, noteTextVersion, type NoteResource } from "../note/model.ts";
 import { isMe, type Me, type PersonResource, type Person, type PersonStatus } from "../person/model.ts";
-import { sensitivityRank, type MaterialDisclosure } from "../disclosure.ts";
+import { sensitivityRank } from "../disclosure.ts";
 import type { TopicSpec, TopicStatus } from "../topic/model.ts";
 import type { Output } from "./model.ts";
 import type { OutputStore } from "./store.ts";
@@ -20,7 +20,7 @@ export interface DisclosurePorts {
   check?: SemanticCheck;
 }
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-type Material = MaterialDisclosure & { text: string; people?: ResourceRef[] };
+
 
 /**
  * @spec Content/intent remain immutable. Only a persisted, checked actual delivery can cross a Channel boundary.
@@ -54,37 +54,45 @@ export class OutputDisclosure {
     const livePeople = audience.people.map(p => get<Person, PersonStatus>({ apiVersion: p.apiVersion, kind: p.kind, namespace: p.metadata.namespace, name: p.metadata.name, uid: p.metadata.uid }));
     if (livePeople.some(p => !p)) refusal ||= "Destination Person changed or was deleted";
     audience = { ...audience, complete: audience.complete && livePeople.every(Boolean), people: livePeople.filter((p): p is PersonResource => !!p) };
-    const assess = (id: string, material: Material) => {
-      materials.push({ id, text: material.text });
-      const visibility = material.visibility ?? "people";
-      let people = material.people ?? [];
-      if (visibility === "topic" || visibility === "root") {
-        const scope = material.disclosureScope && get<TopicSpec, TopicStatus>(material.disclosureScope);
-        if (!scope) { refusal ||= `${id}: disclosure scope is missing or no longer exists`; return; }
-        people = scope.spec.people ?? [];
-      }
-      for (const recipient of audience.people) {
-        if (isMe(recipient.spec, this.ports.marks)) continue;
-        if (sensitivityRank(material.sensitivity ?? "L3") > sensitivityRank(recipient.spec.clearance ?? "L1"))
-          refusal ||= `${id}: sensitivity ${material.sensitivity ?? "L3"} exceeds ${recipient.metadata.name}'s clearance ${recipient.spec.clearance ?? "L1"}`;
-        if (visibility !== "any" && !people.some(p => p.uid === recipient.metadata.uid))
-          refusal ||= `${id}: recipient ${recipient.metadata.name} is outside visibility ${visibility}`;
-      }
+    const policyNotes: PolicyNote[] = [];
+    const topicFor = (ref: ResourceRef): Resource<TopicSpec, TopicStatus> | undefined => {
+      const subject = get<TopicSpec, TopicStatus & { topic?: ResourceRef }>(ref);
+      if (!subject) return;
+      if (subject.kind === "Topic") return subject;
+      return subject.status.topic ? get<TopicSpec, TopicStatus>(subject.status.topic) : undefined;
     };
     for (const ref of output.spec.notes ?? []) {
       const note = this.store.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "uid", value: ref.uid } }).items[0];
       dependencies.push([ref, note && [note.metadata.uid, note.metadata.deletionTimestamp, note.spec, note.status.updatedAt]]);
-      if (!note || note.metadata.deletionTimestamp || noteVersion(note) !== ref.version) { refusal ||= `Note ${ref.uid} is missing or changed since generation`; continue; }
-      assess(ref.uid, note.spec);
+      if (!note || note.metadata.deletionTimestamp || (ref.textVersion ? noteTextVersion(note) !== ref.textVersion : noteVersion(note) !== ref.version)) {
+        refusal ||= `Note ${ref.uid} is missing or changed since generation`; continue;
+      }
+      materials.push({ id: ref.uid, text: note.spec.text });
+      const item: PolicyNote = { sensitivity: note.spec.sensitivity ?? "L3", visibility: note.spec.visibility ?? "people", people: note.spec.people.map(p => p.uid) };
+      if (item.visibility === "topic" || item.visibility === "root") {
+        let topic = topicFor(note.spec.subject);
+        item.topicPeople = topic?.spec.people?.map(p => p.uid) ?? (topic ? [] : undefined);
+        const visited = new Set<string>();
+        while (item.visibility === "root" && topic?.spec.parentRef) {
+          if (visited.has(topic.metadata.uid)) { topic = undefined; break; }
+          visited.add(topic.metadata.uid);
+          topic = get<TopicSpec, TopicStatus>(topic.spec.parentRef);
+        }
+        item.rootPeople = topic?.spec.people?.map(p => p.uid) ?? (topic ? [] : undefined);
+      }
+      policyNotes.push(item);
     }
-    for (const name of output.spec.inputIds ?? []) {
-      const input = get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name, uid: output.spec.inputUids?.[name] });
-      if (!input) { refusal ||= `Input ${name} is missing or replaced`; continue; }
-      assess(name, { ...input.spec, people: [...(input.spec.sender ? [input.spec.sender] : []), ...input.spec.receivers ?? []] });
+    const policy = disclosurePolicy(policyNotes);
+    if (!policy) refusal ||= "No verifiable Note scope; cannot establish disclosure permission";
+    if (policy) for (const recipient of audience.people) {
+      if (isMe(recipient.spec, this.ports.marks)) continue;
+      if (sensitivityRank(policy.sensitivity) > sensitivityRank(recipient.spec.clearance ?? "L1"))
+        refusal ||= `Output sensitivity ${policy.sensitivity} exceeds ${recipient.metadata.name}'s clearance ${recipient.spec.clearance ?? "L1"}`;
+      if (policy.visibility !== "any" && !policy.people.includes(recipient.metadata.uid))
+        refusal ||= `Recipient ${recipient.metadata.name} is outside visibility ${policy.visibility}`;
     }
-    if (!materials.length) refusal ||= "No verifiable material references; cannot establish disclosure permission";
     const privateMe = audience.complete && audience.private && audience.people.length === 1 && isMe(audience.people[0]!.spec, this.ports.marks);
-    return { fingerprint: hash([output.spec, dependencies, { ...audience, people: audience.people.map(p => [p.metadata.uid, p.metadata.deletionTimestamp, p.spec]) }, this.ports.marks]), privateMe,
+    return { policy, fingerprint: hash([output.spec, policy, dependencies, { ...audience, people: audience.people.map(p => [p.metadata.uid, p.metadata.deletionTimestamp, p.spec]) }, this.ports.marks]), privateMe,
       refusal: privateMe ? "" : refusal, evidence: { text: output.spec.text, materials } };
   }
   private async run(id: string) {
@@ -123,9 +131,9 @@ export class OutputDisclosure {
     }
     const decision = reason ? "denied" : "allowed";
     let fallbackPeople: PersonResource[] = [];
-    let delivery: NonNullable<Output["status"]["delivery"]> = { target: output.spec.target, text: output.spec.text, receivers: audience.people.map(p => ({ apiVersion: p.apiVersion, kind: p.kind, namespace: p.metadata.namespace, name: p.metadata.name, uid: p.metadata.uid })) };
+    let delivery: NonNullable<Output["status"]["delivery"]> = { ...(output.status.delivery?.replay ? { replay: output.status.delivery.replay } : {}), target: output.spec.target, text: output.spec.text, receivers: audience.people.map(p => ({ apiVersion: p.apiVersion, kind: p.kind, namespace: p.metadata.namespace, name: p.metadata.name, uid: p.metadata.uid })) };
     if (reason) {
-      this.store.update(id, status => ({ ...status, delivery: undefined, disclosure: { decision: "denied", reason, checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint } }));
+      this.store.update(id, status => ({ ...status, delivery: undefined, disclosure: { decision: "denied", reason, checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint, ...(snapshot.policy ? { policy: snapshot.policy } : {}) } }));
       const me = await this.ports.contactMe(output.spec.topicId);
       const fallback = await this.ports.audience(me.target);
       if (!fallback.complete || !fallback.private || fallback.people.length !== 1 || !isMe(fallback.people[0]!.spec, this.ports.marks)) throw new Error("Default Channel is not a verified private Me destination");
@@ -144,9 +152,11 @@ export class OutputDisclosure {
         const latestPerson = this.store.resources.find<Person, PersonStatus>(person, person.metadata.name, person.metadata.namespace);
         return !latestPerson || latestPerson.metadata.uid !== person.metadata.uid || latestPerson.metadata.deletionTimestamp || !isMe(latestPerson.spec, this.ports.marks);
       })) throw new Error("Me identity changed before fallback commit");
-      const web = isChannelAddress(delivery.target) && delivery.target.channelId === "web";
-      this.store.update(id, status => ({ ...status, disclosure: { decision, reason: reason || "Destination is permitted", checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint }, delivery,
-        ...(web ? { phase: "delivered", deliveredAt: new Date().toISOString() } : {}), lastError: undefined }));
+      if (latest.status.attempts > 0 && !isDeepStrictEqual(latest.status.delivery, delivery)) {
+        this.store.uncertain(id, "Actual recipients changed after a send attempt; verify external receipts"); return;
+      }
+      this.store.update(id, status => ({ ...status, disclosure: { decision, reason: reason || "Destination is permitted", checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint, ...(snapshot.policy ? { policy: snapshot.policy } : {}) }, delivery,
+        lastError: undefined }));
     });
     this.log.info({ outputId: id, decision, actualTarget: delivery.target }, "Output disclosure resolved");
   }

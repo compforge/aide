@@ -28,7 +28,7 @@ export async function updateTopic(resources: ResourceClient, ref: Readonly<Topic
 export const TopicContextSchema = z.object({ topicUid: z.string().optional(),
   absorbed: z.array(z.object({ uid: z.string(), version: z.string() }).strict()).max(20).optional(),
   sensitivity: SensitivitySchema.optional(), visibility: VisibilitySchema.optional(), version: z.string(), people: z.array(PersonRefSchema).optional(), summary: z.string().max(SUMMARY_CHARS).optional(),
-}).strict().refine(args => args.summary !== undefined || !!args.absorbed?.length, "Supply summary or reviewed child versions").refine(args => args.people === undefined || args.summary !== undefined, "Supply summary when changing its people");
+}).strict().refine(args => args.summary !== undefined || args.people !== undefined || args.sensitivity !== undefined || args.visibility !== undefined || !!args.absorbed?.length, "Supply summary, classification or reviewed child versions");
 export type TopicContextUpdate = z.infer<typeof TopicContextSchema>;
 export const TopicNoteSchema = NoteUpdateSchema;
 export type TopicNoteUpdate = z.infer<typeof TopicNoteSchema>;
@@ -62,7 +62,7 @@ export async function summarizeTopic(resources: ResourceClient, owner: Readonly<
     return child;
   }));
   const writer = { resource: WriterResourceSchema.parse(resourceRef(current)), executionId };
-  const prepared = args.summary === undefined ? { writes: [], status: {} } : await prepareSummary(resources, target, { text: args.summary, people: args.people, sensitivity: args.sensitivity, visibility: args.visibility }, writer, args.version);
+  const prepared = [args.summary, args.people, args.sensitivity, args.visibility].every(v => v === undefined) ? { writes: [], status: {} } : await prepareSummary(resources, target, { text: args.summary, people: args.people, sensitivity: args.sensitivity, visibility: args.visibility }, writer, args.version);
   const committed = await resources.commit([...prepared.writes, { operation: "patch", resource: target, patch: { type: "json", value: [
     ...(target.status.summaryRevision === undefined ? [] : [{ op: "test" as const, path: "/status/summaryRevision", value: target.status.summaryRevision }]),
     ...Object.entries(prepared.status).map(([key, value]) => ({ op: "add" as const, path: `/status/${key}`, value })),

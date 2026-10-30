@@ -1,5 +1,5 @@
+import type { OutputTransportResolver } from "./delivery.ts";
 import { createHash } from "node:crypto";
-import type { Logger } from "pino";
 import type { ConnectorClient, RequirementAddress, RequirementComment, RequirementIdentity } from "@compforge/aide-plugin";
 import { isRequirementAddress, requirementAddress } from "../../../connectors/requirements/address.ts";
 import { OutputStore } from "./store.ts";
@@ -47,67 +47,17 @@ export function requirementOutputs(requirements: ConnectorClient["requirements"]
  * @spec Correlation receipts survive Output reclamation within the Host's configured dedup window.
  * @link docs/connector/requirements.md
  */
-export class RequirementOutputDelivery {
-  private timer?: ReturnType<typeof setInterval>;
-  private unsubscribe?: () => void;
-  private running?: Promise<void>;
-  private stopped = false;
-  constructor(private readonly store: OutputStore, private readonly connectors: Writer, private readonly log: Logger) {}
-  start() {
-    this.unsubscribe = this.store.subscribe(() => this.schedule());
-    this.timer = setInterval(() => this.schedule(), 1000); this.timer.unref();
-    this.schedule();
-  }
-  private schedule() { void this.flush().catch((err) => this.log.error({ err }, "Requirement Output delivery scan failed")); }
-  flush(): Promise<void> {
-    if (this.stopped) return Promise.resolve();
-    return this.running ??= this.run().finally(() => { this.running = undefined; });
-  }
-  private async run() {
-    for (let output of this.store.list()) {
-      if (this.stopped) return;
-      const target = output.status.delivery?.target;
-      if (!target || !output.status.disclosure) continue;
-      if (!isRequirementAddress(target)) continue;
-      const id = output.metadata.name;
-      if (output.status.phase === "sending") {
-        this.store.uncertain(id, "Comment delivery was interrupted; reconcile provider receipt before retrying");
-        this.log.warn({ outputId: id }, "Interrupted requirement delivery requires verification");
-        continue;
-      }
-      if (output.status.phase !== "pending" || (output.status.nextAttemptAt && Date.parse(output.status.nextAttemptAt) > Date.now())) continue;
-      try {
-        const account = await this.connectors.requirements.identity(target.source);
-        if (account.scope !== target.scope) {
-          this.store.uncertain(id, "Connector project changed; saved destination is preserved");
-          this.log.warn({ outputId: id, connector: target.source }, "Requirement Output project no longer matches connector");
-          continue;
-        }
-      } catch (err) {
-        this.store.retry(id, String(err), new Date(Date.now() + 30_000).toISOString());
-        this.log.warn({ err, outputId: id }, "Requirement Output preflight failed; retry scheduled");
-        continue;
-      }
-      output = await this.store.prepare(id);
-      if (!output.status.delivery || !sameAddress(output.status.delivery.target, target) || output.status.phase !== "pending") continue;
-      this.store.storage.transaction(() => {
-        this.store.storage.addReceipt(deliveryKey(id), JSON.stringify({ target, hash: hash(output.status.delivery!.text) }));
-        this.store.begin(id);
-      });
-      try {
-        const external = await this.connectors.addRequirementComment(target, { text: output.status.delivery!.text, deliveryId: id });
-        receipt(this.store, id, target, output.status.delivery!.text, external);
-        this.log.info({ outputId: id, commentId: external.id, connector: target.source }, "Requirement comment delivered");
-      } catch (err) {
-        this.store.uncertain(id, String(err));
-        this.log.warn({ err, outputId: id, connector: target.source }, "Requirement comment delivery uncertain; automatic resend stopped");
-      }
-    }
-  }
-  async close() {
-    this.stopped = true;
-    if (this.timer) clearInterval(this.timer);
-    this.unsubscribe?.();
-    await this.running;
-  }
+export function requirementTransport(store: OutputStore, connectors: Writer): OutputTransportResolver {
+  return async target => {
+    if (!isRequirementAddress(target)) return;
+    const account = await connectors.requirements.identity(target.source);
+    if (account.scope !== target.scope) throw new Error("Connector project changed; cannot prepare the saved destination");
+    return { replay: "once", async send(message) {
+      store.storage.addReceipt(deliveryKey(message.id), JSON.stringify({ target, hash: hash(message.text) }));
+      const external = await connectors.addRequirementComment(target, { text: message.text, deliveryId: message.id });
+      if (external.scope !== target.scope) throw new Error("Comment receipt belongs to a different project");
+      store.storage.addReceipt(commentKey(target, external.id), JSON.stringify({ hash: hash(message.text), outputId: message.id }));
+      return external;
+    } };
+  };
 }

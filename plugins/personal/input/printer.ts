@@ -13,7 +13,6 @@ export const inputPrinter: ResourcePrinter<InputSpec, InputStatus> = {
       `Input: ${metadata.name}`,
       `Origin: ${spec.origin}/${spec.originId}`,
       `Received: ${metadata.creationTimestamp}`,
-      `Disclosure: sensitivity=${spec.sensitivity ?? "L3"}, visibility=${spec.visibility ?? "people"}`,
     ];
     if (status.topic) lines.push(`Material Topic: ${status.topic.uid}`);
     if (status.assess?.topic) lines.push(`Processing Topic: ${status.assess.topic.uid}`);

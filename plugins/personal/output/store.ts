@@ -1,3 +1,4 @@
+import { NOTE_TYPE, noteVersion, noteTextVersion, type NoteResource } from "../note/model.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { OutputDefinition, OutputSpecSchema, OutputStatusSchema } from "./definition.ts";
 export { OutputSpecSchema } from "./definition.ts";
@@ -8,8 +9,11 @@ import { type Address, type ResourceListOptions } from "@compforge/aide-plugin";
 import { OUTPUT_TYPE, type Output, type OutputSpec, type OutputStatus } from "./model.ts";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 
+// Derived citation fingerprints are evidence, not part of the caller's idempotent sending intent.
+const outputIntent = (spec: OutputSpec) => ({ ...spec, notes: spec.notes?.map(({ uid, version }) => ({ uid, version })) });
+
 /** @spec Output is independent of Input and Topic lifetime. Associations are provenance, not retention edges.
- * @spec Content, receivers and target never change after admission. Only the Host transport updates delivery state.
+ * @spec Content, receivers and target never change after admission. The Output coordinator owns delivery state.
  * @link docs/personal/output.md
  */
 export class OutputStore {
@@ -34,8 +38,8 @@ export class OutputStore {
   }
   get(id: string): Output | undefined { return this.storage.read(this.key(id), true)?.object as Output | undefined; }
   list(options: { owner?: string; topicUid?: string; executionId?: string; inputId?: string; after?: string; limit?: number; matchLabels?: ResourceListOptions["matchLabels"] } = {}): Output[] {
-    const clauses = ["kind='aide.dev/Output'"];
-    const args: string[] = [];
+    const clauses = ["scope='personal'", "kind='aide.dev/Output'", "json_extract(data, '$.object.apiVersion')=?"];
+    const args: string[] = [OUTPUT_TYPE.apiVersion];
     for (const [path, value] of [["$.owner", options.owner], ["$.object.spec.topic.uid", options.topicUid], ["$.object.spec.executionId", options.executionId]] as const) {
       if (value !== undefined) { clauses.push(`json_extract(data,'${path}')=?`); args.push(value); }
     }
@@ -55,12 +59,17 @@ export class OutputStore {
   create(owner: string, id: string, raw: OutputSpec): Output {
     if (!id || id.length > 200) throw new Error("Invalid Output ID");
     const spec = OutputSpecSchema.parse(JSON.parse(JSON.stringify(raw))) as OutputSpec;
+    // Pin the cited body separately from mutable classification. Never trust a caller-supplied body fingerprint.
+    if (spec.notes) spec.notes = spec.notes.map(({ uid, version }) => {
+      const note = this.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "uid", value: uid } }).items[0];
+      return { uid, version, ...(note && noteVersion(note) === version ? { textVersion: noteTextVersion(note) } : {}) };
+    });
     const key = this.key(id), previous = this.storage.read(key);
     if (previous) {
-      if (previous.owner !== owner || !isDeepStrictEqual(previous.object.spec, spec)) throw new Error("Output identity already exists with different content or owner");
+      if (previous.owner !== owner || !isDeepStrictEqual(outputIntent(previous.object.spec as OutputSpec), outputIntent(spec))) throw new Error("Output identity already exists with different content or owner");
       return previous.object as Output;
     }
-    const fingerprint = createHash("sha256").update(JSON.stringify({ owner, spec }, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
+    const fingerprint = createHash("sha256").update(JSON.stringify({ owner, spec: outputIntent(spec) }, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
       ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value)).digest("hex");
     const receipt = this.storage.receipt(`output:${id}`);
     if (receipt) {
@@ -93,11 +102,11 @@ export class OutputStore {
     if (s.phase === "delivered") return s;
     if (!["pending", "sending"].includes(s.phase)) throw new Error("Output requires explicit delivery recovery");
     if (!s.disclosure || !s.delivery) throw new Error("Output disclosure has not been checked");
-    return { ...s, phase: "sending", attempts: s.attempts + 1, nextAttemptAt: undefined };
+    return { ...s, phase: "sending", attempts: s.attempts + 1 };
   }); }
-  delivered(id: string, receipt?: OutputStatus["receipt"]): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "delivered", attempts: s.attempts, deliveredAt: new Date().toISOString(), ...(receipt ? { receipt } : {}) }); }
+  delivered(id: string, receipt?: OutputStatus["receipt"]): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "delivered", lastError: undefined, attempts: s.attempts, deliveredAt: new Date().toISOString(), ...(receipt ? { receipt } : {}) }); }
   uncertain(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "uncertain", lastError: error.slice(0, 4000) }); }
-  retry(id: string, error: string, nextAttemptAt: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "pending", attempts: s.attempts, lastError: error.slice(0, 4000), nextAttemptAt }); }
+  retry(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "pending", attempts: s.attempts, lastError: error.slice(0, 4000) }); }
   subscribe(listener: (output: Output) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(output: Output): void { this.storage.afterCommit(() => { for (const listener of this.listeners) { try { listener(structuredClone(output)); } catch { /* persistence already committed */ } } }); }
 }

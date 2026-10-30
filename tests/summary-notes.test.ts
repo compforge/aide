@@ -206,3 +206,51 @@ test("Note reconciliation repairs a cleared summary after the historical writer 
   assert.equal(latest.status.summaryRevision, noteVersion(changed));
   assert.equal((await readSummary(f.client, latest))!.spec.text, "");
 });
+
+/** @case Ordinary and summary Notes support independent classification updates without erasing content. */
+test("Note classification-only writes preserve body, associations and the summary owner's fingerprint", async t => {
+  const f = await fixture(t);
+  const actor = await f.client.patchStatus(f.topic, { execution: { id: "classify", startedAt: new Date().toISOString() } });
+  const person = await f.aide.persons.observe({ provider: "test", scope: "classification", id: "a" });
+  const people = [personRef(person) as PersonRef];
+  const ordinary = await upsertNote(f.client, actor, { text: "Recent finding", people, sensitivity: "L1" }, "recent");
+  const classified = await upsertNote(f.client, actor, { ...ordinary, sensitivity: "L2", visibility: "topic" }, "classification");
+  const recent = await readNote(f.client, ordinary.noteId);
+  assert.equal(recent.text, "Recent finding"); assert.deepEqual(recent.people, people);
+  assert.equal(recent.sensitivity, "L2"); assert.equal(recent.visibility, "topic");
+  await assert.rejects(upsertNote(f.client, actor, { ...ordinary, visibility: "any" }, "stale"), /version conflict/);
+  const rewritten = await upsertNote(f.client, actor, { ...classified, text: "Revised finding" }, "rewrite");
+  assert.equal((await readNote(f.client, rewritten.noteId)).sensitivity, "L2");
+  const owner = await writeSummary(f.client, actor, { text: "Long-term understanding", people, sensitivity: "L1" });
+  const summary = owner.summaryNote!;
+  await upsertNote(f.client, actor, { noteId: summary.id, version: summary.version, sensitivity: "L2", visibility: "root" }, "summary-classification");
+  const current = f.aide.topics.resource("summary")!;
+  const note = (await readSummary(f.client, current))!;
+  assert.equal(note.spec.text, "Long-term understanding"); assert.deepEqual(note.spec.people, people);
+  assert.equal(note.spec.visibility, "root"); assert.equal(note.spec.sensitivity, "L2");
+  assert.equal(current.status.summaryRevision, noteVersion(note));
+});
+
+/** @case Person has no Topic scope; storing internal knowledge must not depend on resolving a sending audience. */
+test("Person summaries accept topic and root classifications", async t => {
+  const f = await fixture(t), p = await f.aide.persons.observe({ provider: "test", scope: "classification", id: "person" });
+  for (const visibility of ["topic", "root"] as const) {
+    const current = (await f.aide.persons.read(p.metadata.name, p.metadata.uid))!;
+    const updated = await f.aide.persons.summarize(p.metadata.name, p.metadata.uid, current.summaryVersion, "Stable understanding", undefined, undefined, { visibility });
+    assert.equal((await readSummary(f.client, updated))!.spec.visibility, visibility);
+  }
+});
+
+/** @case Supplying absorbed receipts must never swallow a simultaneous classification-only edit. */
+test("Topic review receipts and summary classification commit together", async t => {
+  const f = await fixture(t);
+  const actor = await f.client.patchStatus(f.topic, { execution: { id: "review", startedAt: new Date().toISOString() } });
+  const owner = await writeSummary(f.client, actor, { text: "Durable finding", sensitivity: "L1" });
+  const child = await f.client.create(TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(owner) }, status: {} });
+  const { understandingVersion } = await import("../plugins/personal/topic/tree.ts");
+  const version = understandingVersion(child as import("../plugins/personal/topic/model.ts").TopicResource, []);
+  await summarizeTopic(f.client, owner, "review", { version: contentVersion(owner), sensitivity: "L2", visibility: "root", absorbed: [{ uid: child.metadata.uid, version }] }, 4000);
+  const current = f.aide.topics.resource("summary")!, note = (await readSummary(f.client, current))!;
+  assert.equal(current.status.absorbed![child.metadata.uid], version);
+  assert.equal(note.spec.text, "Durable finding"); assert.equal(note.spec.sensitivity, "L2"); assert.equal(note.spec.visibility, "root");
+});
