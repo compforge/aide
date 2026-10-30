@@ -975,7 +975,9 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
     assert.equal(notes(aide.topics.resources, get().metadata.uid)[0]!.text, "Evidence verification phase 1");
     assert.equal(get().status.summary, "Retain verified evidence and actual authorship.");
     assert.equal(get().status.lastReport!.text, "Verified 1");
-    assert.ok(aide.topics.inputStore.list().every(i => i.status.handle?.[work.uid!]?.completedAt));
+    const inputs = aide.topics.inputStore.list();
+    assert.ok(inputs.filter(i => i.status.handle?.[work.uid!]).every(i => i.status.handle![work.uid!]!.completedAt));
+    assert.ok(inputs.some(i => i.spec.origin === "aide:review"), "matter Notes create an independent Chief review request");
   } finally { await aide.close(); }
 });
 

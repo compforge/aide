@@ -50,8 +50,8 @@ export function idleReviewSchedule(topic: Readonly<TopicResource>, config: Topic
  * @link docs/personal/topic.md#树内整理与维护优先级
  */
 export async function createReviewInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: "aide:review" | "aide:triage" | "aide:organize" = "aide:review") {
-  if (topic.metadata.deletionTimestamp || (origin === "aide:review" && (topic.spec.parentRef || topic.status.execution || !topicReview(topic.spec.review).enabled)))
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: "aide:review" | "aide:triage" | "aide:organize" = "aide:review", notes: Array<{ noteId: string; version: string }> = []) {
+  if (topic.metadata.deletionTimestamp || (origin === "aide:review" && (topic.spec.parentRef || topic.status.execution || (!topicReview(topic.spec.review).enabled && !notes.length))))
     throw new Error("Review requires an idle enabled root Topic");
   const pending = await context.resources.listPage<InputSpec, InputStatus>(INPUT_TYPE, {
     matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
@@ -61,7 +61,7 @@ export async function createReviewInput(context: Pick<PluginContext, "resources"
   const target = resourceRef(topic);
   const spec: InputSpec = {
     origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
-    text: `${origin === "aide:triage" ? "Triage this Topic's direct unfiled Inputs and Work. Assess unclaimed Inputs when useful; file completed materials into coherent children, creating a child when needed. Never replay admitted or completed assessments." : origin === "aide:organize" ? "Organize this Topic's direct children. Establish meaningful intermediate groups or detach independent subtrees; do not split merely to satisfy a count." : "Review current understanding, unresolved questions and relevant Work; update summaries only when useful."} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request and communication is optional. Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nFacts: ${JSON.stringify(agenda)}`,
+    text: `${origin === "aide:triage" ? "Triage this Topic's direct unfiled Inputs and Work. Assess unclaimed Inputs when useful; file completed materials into coherent children, creating a child when needed. Never replay admitted or completed assessments." : origin === "aide:organize" ? "Organize this Topic's direct children. Establish meaningful intermediate groups or detach independent subtrees; do not split merely to satisfy a count." : "Review current understanding, unresolved questions and relevant Work; update summaries only when useful."} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request and communication is optional. Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nMatter Notes to review: ${JSON.stringify(notes)}. Read full Notes, consider durable Topic/Person summaries and topic organization, then call review_notes for the versions inspected, including when no durable change is useful.\nFacts: ${JSON.stringify(agenda)}`,
     observation: { dueAt, triggeredAt: at, facts: agenda },
   };
   const status: InputStatus = { topic: target,

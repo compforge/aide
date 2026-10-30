@@ -84,7 +84,7 @@ Chief 拆分时留下原因和所依据的主题状态，Weave 归拢时读取�
 
 #### 收敛效果
 
-树内下沉改善组织结构，但一个 root Chief 仍负责整棵树，负责的总材料和工作不会因此自动减少。要降低上下文成本，还需要让 Chief 主要读取各层 summary，按需展开相关分支；独立为 root 才改变 Chief 的责任范围。root 数量下降也不等于 Topic 总量下降，静默回收继续承担保留规模管理。
+树内下沉改善组织结构，但一个 root Chief 仍负责整棵树，负责的总材料和工作不会因此自动减少。要降低上下文成本，还需要让 Chief 主要读取各层 summary，按需展开相关分支；独立为 root 才改变 Chief 的责任范围。root 数量下降也不等于 Topic 总量下降，容量回收承担保留规模管理。
 
 | 维度 | 验收关注点 |
 | --- | --- |
@@ -279,28 +279,29 @@ Weave 更新父节点的 `weaveRevision`，资源 Watch 唤醒 root Topic Reconc
 
 ### 静默回收
 
-普通 Topic 默认 7 天没有新 Input 时可以回收，配置为 plugins.personal.topic.idleMs，Default 除外。静默从最后一次接纳新 Input 计算；父节点包含整个子树的活跃度。Weave 创建父节点时继承候选的输入活跃时间，整理、摘要更新、定时检查与 Agent 状态变化都不刷新这个时钟。
+静默只释放 Chief 会话，间隔由 plugins.personal.topic.idleMs 控制。Topic 的认识和树结构保留，数量和字节容量由 Resource 底座管理：
 
-回收按自底向上处理，避免删除父节点后留下孤儿。叶子满足静默条件时：
+```yaml
+resources:
+  kinds:
+    aide.dev/Topic:
+      maxCount: 1000
+      order: released
+```
 
-1. 重新核对活跃时间、UID 和版本，以及待处理 Input、执行和关联工作。
-2. 有父节点时，确保值得保留的最新认识已经被吸收；相关持续工作已交接。无父节点的普通 root 也可回收，无需永久保留其 Agent 上下文。
-3. 前置条件满足后先请求删除，由资源机制设置 deletionTimestamp，停止新输入绑定与新的关系修改。
-4. 完成资源清理再 finalize；Input / Output 仍按各自保留策略存在，读取方允许所引用 Topic 已不存在。
+容量压力下，按最后一次 Input 时间从早到晚检查候选；没有 Input 时使用创建时间。父节点包含子树的业务活跃度，整理、摘要、回顾与读取不刷新这个时间。底座 released 排序复用该业务时间，低水位与容量错误遵循 [Resource 容量](../plugin/resource.md#resource-容量与释放)。
 
-删除请求前若新输入已被接纳，版本检查使旧的回收决定失效。key 对应的 Topic 已进入删除时，新输入只能绑定新的可接纳实例；唯一性检查按可接纳对象计算，旧实例的 finalize 不能误删新实例的 key 归属。
+Topic 在实际淘汰事务内核验资格：Default、执行中或尚持有会话、有异常、有子节点、待处理 Input 或 Work 的对象受到保护。子 Topic 的 Note 必须已回顾，当前上下文版本须由父 Topic 吸收。普通 root 无认识与 Note 时可作为候选；有认识时，由 Chief 读取当前 reclamationVersion，通过 release_topic 明确记录知识可舍弃或已安全保留的理由。该版本覆盖完整 Note 集合，内容和归属变化使原判断失效。
 
-删除会移除来源 key 的有效归属，不把 key 转交父 Topic，不留下用于自动路由的别名。历史事实可以保留原 key，但不能作为隐藏映射。之后同 key 真正有新输入，就创建新 ID / UID 的 Topic；它可以依据当时语境被 Weave 组织到另一处。
+没有安全候选时，底座拒绝超出容量的写入。容量淘汰直接删除记录和索引，并在事务提交后发布删除事件；候选必须先释放会话。显式删除仍使用标准删除生命周期与原有依赖校验。
 
-例：A、B 被组织到 C 下，A 静默并被吸收后删除。此后 key A 再有新消息，创建独立 root A′；它不会直接回到 C。C 保留已吸收的认识，历史 Input 仍引用旧 A。
-
-活跃的子树不能因父节点没有直接 Input 而被回收；待处理输入、执行和工作也不能因 TTL 被丢弃。静默回收控制冷数据增长，不意味着活跃 Topic 数量存在硬上限。
+回收后来源 key 可以被新 Topic 使用，新实例有新 UID。历史 Input、Output 和独立 Note 保留原引用；不根据相同 key 自动继承旧实例的关系或知识。
 
 ### 删除与验证
 
 Topic 删除的事务校验只读取 parent、assessPending、Work topic 索引命中的当前关联对象，并按 UID 读取父 Topic 的吸收记录；历史 Input 和无关 Topic / Work 不进入校验查询。事务内新增的子节点或在途 Input 仍会阻止删除。
 
-显式删除与静默回收都在存储事务内校验 Default、子节点、执行、未完成 Input、相关 Work 和父节点吸收版本。删除请求使用 UID 与资源版本作为前置条件。历史 Input/Output 可引用已消失的 Topic，不根据同名或同 key 猜测替代实例。
+显式删除在存储事务内校验 Default、子节点、执行、未完成 Input、相关 Work 和父节点吸收版本。删除请求使用 UID 与资源版本作为前置条件。历史 Input/Output 可引用已消失的 Topic，不根据同名或同 key 猜测替代实例。
 
 [Weave 场景](../../tests/weave.test.ts)、[接纳](../../tests/topic-intake.test.ts)、[定时回顾](../../tests/topic-review.test.ts)、[默认主题](../../tests/default-topic.test.ts)和[删除](../../tests/topic-delete.test.ts)覆盖生命周期；[Pi 场景](../../tests/pi-agent.test.ts)覆盖原生连续执行。模拟测试不证明真实主题整理质量。
 
@@ -314,7 +315,7 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 沿用当前 [认识与回执分离](#研判与上下文) 的约定：assess 记录单次处理事实，summary 只在长期认识变化时修订；recent 按同一事项持续维护 Note，二者独立。静默完成一条 Input 不要求维护认识。
 
-父 Topic 按需综合子 Topic 的长期认识和近期事项，不机械拼接全文。摘要变化可以唤醒综合；Note 单独变化不启动额外的摘要维护，在新输入或定时回顾已激活时一并查看。review 可以只确认已查看的子认识版本，不要求重传或改写父 summary。记录完整上下文和摘要两种已查看版本；Weave 的候选扫描不因 Note 单独变化重新启动；新建父 Topic 保留子 Note 的原始 subject，按需综合时创建自己的 Note；完整上下文版本仍保护交接和子 Topic 回收，未查看的 Note 不被静默丢弃。
+父 Topic 按需综合子 Topic 的长期认识和近期事项，不机械拼接全文。摘要变化可以唤醒综合；Note 变化通过独立 Reconcile 汇入当前 root 的有界回顾队列，Chief 在知识回顾中决定提炼或确认无需提炼，见 [Note](note.md#事项归位与提炼回顾)。review 可以只确认已查看的子认识版本，不要求重传或改写父 summary。记录完整上下文和摘要两种已查看版本；Weave 的候选扫描不因 Note 单独变化重新启动；新建父 Topic 保留子 Note 的原始 subject，按需综合时创建自己的 Note；完整上下文版本仍保护交接和子 Topic 回收，未查看的 Note 不被静默丢弃。
 
 每次模型请求的 Background 只加载有界材料：
 
@@ -338,7 +339,7 @@ Route、Chief、Weave 的列表在确定范围、排序和 offset 后，逐条�
 
 `catalogFingerprint` 根据已加载的 Topic UID、名称、组织调整依据、认识版本和最近 Input 时间计算，覆盖目录顺序、名称、组织调整依据及已记录的认识；`fingerprint` 根据本页实际返回内容计算。目录指纹不为未展示项查询活动、人物名称，也不承诺这些派生数据仍然有效，依赖详情前重新读取相关页面。
 
-共同人物仅是语义关联的参考，结合名称、summary、近期活动与组织调整原因判断；不按人物交集阈值自动归组，也不以缺少交集否定关联。Me 的广泛出现尤其不能充当归组理由。人物关联变化沿用 Note 的刷新与回顾节奏，不单独激活 Agent。验证见 `tests/topic-persons.test.ts`。
+共同人物仅是语义关联的参考，结合名称、summary、近期活动与组织调整原因判断；不按人物交集阈值自动归组，也不以缺少交集否定关联。Me 的广泛出现尤其不能充当归组理由。人物关联变化沿用 Note 的有界提炼回顾流程。验证见 `tests/topic-persons.test.ts`。
 
 ### 研判与上下文
 

@@ -76,6 +76,8 @@ export interface ResourcePrinter<TSpec = unknown, TStatus = unknown> {
 export interface ResourceRetention<S = unknown, T = unknown> {
   releasedAt(resource: Readonly<Resource<S, T>>): string | undefined;
   references(resource: Readonly<Resource<S, T>>): readonly string[];
+  /** Recheck current dependencies in the eviction transaction; false keeps the candidate protected. */
+  canEvict?(resource: Readonly<Resource<S, T>>, context: ResourceValidationContext): boolean;
 }
 
 /** A synchronous parser; schema libraries are an implementation choice of the resource owner. */

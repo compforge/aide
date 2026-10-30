@@ -101,6 +101,8 @@ Topic、Task、Routine、Person 的 summary 保存长期有效、低频变化的
 
 具体事项的当前认识保存为独立 [Note](note.md)，同一事项随新输入持续更新。统一 upsert_note 用 subject 关联 Topic / Work、people 关联人物。recent 是近期查询窗口，不持久化在四类资源中；Note 正文完整保存，生命周期由自身容量策略管理。summary 与 Note 分别校验自身内容，调度更新不制造模型侧误冲突。
 
+Note 通常比单条 Input 跨越更长的跟进过程，summary 选择比具体事项更长期的认识。list_notes 发现 recent 之外的事项，move_note 调整其归属；Note 变化由有界回顾流程交给 Chief，review_notes 确认已检查的内容版本。具体见 [Note](note.md#事项归位与提炼回顾)。
+
 report_task / report_routine 只原子提交办理报告、业务状态与 Input 回执，不自动更新 summary 或 Note。维护认识也不确认 Input、不完成 Work、不授予新的执行权限。详细字段、工具、预算、并发和生命周期契约见 [Note](note.md)。
 
 ## 运行与验证

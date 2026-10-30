@@ -1,3 +1,6 @@
+import { NoteWriterSchema } from "../note/model.ts";
+import { canReclaimTopic, reclamationVersion } from "./retention.ts";
+import { isDeepStrictEqual } from "node:util";
 import { notes } from "../note/query.ts";
 import { requireContentWriter } from "../context-write.ts";
 import { guardContext } from "../context-write.ts";
@@ -54,6 +57,8 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       weaveRevision: z.number().int().nonnegative().optional(),
       notifiedWeaveRevision: z.number().int().nonnegative().optional(), lastError: z.string().nullable().optional(),
       capacityRequests: z.partialRecord(z.enum(["aide:triage", "aide:organize"]), z.object({ checkedAt: z.string().datetime(), inputId: z.string() }).strict()).optional(),
+      noteReviewQueue: z.array(z.object({ noteId: z.string(), version: z.string() }).strict()).max(20).optional(),
+      reclamation: z.object({ version: z.string(), reason: z.string().trim().min(1), writer: NoteWriterSchema }).strict().optional(),
       assignmentRefresh: z.object({ version: z.string(), cursor: z.string(), complete: z.boolean() }).strict().optional(),
       yieldToInput: z.boolean().optional(),
       idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
@@ -61,6 +66,11 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
   validator: { create: (resource, context) => { validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
     guardContext(previous, current, context);
+    if (current.status.reclamation && !isDeepStrictEqual(previous.status.reclamation, current.status.reclamation)) {
+      requireContentWriter(current, current.status.reclamation.writer, context);
+      if (current.status.reclamation.version !== reclamationVersion(current, context))
+        throw new Error("Topic understanding changed before release");
+    }
     const reviewed = current.status.organization?.reviewedVersion;
     if (reviewed && JSON.stringify(previous.status.organization) !== JSON.stringify(current.status.organization)
       && understandingVersion(previous, notes(context, previous.metadata.uid)) !== reviewed)
@@ -98,7 +108,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     topicKey: r => r.metadata.deletionTimestamp || !r.spec.topicKey ? [] : [r.spec.topicKey],
     liveParent: r => !r.metadata.deletionTimestamp && r.spec.parentRef ? [r.spec.parentRef.uid] : [],
     parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], root: r => !r.metadata.deletionTimestamp && !r.spec.parentRef ? ["root"] : [] },
-  retention: { releasedAt: () => undefined, references: () => {
-    return [];
-  } },
+  retention: { releasedAt: r => !r.spec.default && !r.status.execution && !r.status.agent?.sessionId
+    ? r.status.lastInputAt ?? r.metadata.creationTimestamp : undefined,
+    canEvict: canReclaimTopic, references: () => [] },
 };

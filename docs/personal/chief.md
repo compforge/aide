@@ -45,6 +45,7 @@ Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
 - say 产生独立 Output；答复是新的 Input，不挂起 Harness 等待。
 - Connector 工具使用 Host 的全局目录，查询需求、PR、评论和环境声明。`list_environments` 列举环境，`read_environment` 按名称或别名返回规范身份与访问坐标；这些声明不代表连通性或健康状态。
 - assess_input 原子保存单条 Input 的简短研判回执，并建立 Work handle；不改写 Topic.summary / recent，不值得通知的观察可以静默完成。
+- list_notes 查询 recent 之外仍保留的具体事项；move_note 在责任树内调整事项归属，保留内容与年龄；review_notes 确认本轮已检查的 Note 版本，即使没有可提炼的长期结论。
 - summarize_topic 只修订长期有效、低频变化的认识；只确认子版本时可省略 summary。upsert_note 独立维护近期事项，以同一 noteId 连接多次输入的进展，不要求改写 summary。
 
 提示词表达判断策略，工具边界保证持久化与会话范围。say 提问只产生 Output；用户是否回答不阻塞其它输入，已有 Work 的 waiting 状态表达具体工作的等待。

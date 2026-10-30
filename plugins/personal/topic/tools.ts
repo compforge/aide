@@ -1,3 +1,7 @@
+import { reclamationVersion } from "./retention.ts";
+import { SubjectSchema } from "../note/model.ts";
+import { resourceRef } from "../input/state.ts";
+import { noteTools } from "../note/tools.ts";
 import { isInternalInput } from "../input/model.ts";
 import { contentVersion } from "../context-write.ts";
 import { notes } from "../note/query.ts";
@@ -19,7 +23,18 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
     log?.info({ kind: resource.kind, uid: resource.metadata.uid, organization: (resource.status as { organization?: unknown }).organization }, "Chief organization applied");
     return result(resource);
   };
-  return [
+  return [...noteTools(store.client, active, log),
+    tool({ name: "release_topic", label: "Allow Topic reclamation", description: "Explicitly allow capacity reclamation of a root whose current knowledge is dispensable or safely retained elsewhere. Read this Topic first and supply its reclamationVersion and reason. Does not delete now. New knowledge invalidates the decision. Default, busy Topics and live dependencies remain protected.",
+      parameters: Type.Object({ uid: Type.Optional(Type.String()), version: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
+      async execute(_id, args) {
+        const actor = active(), topic = subtree().find(t => t.metadata.uid === (args.uid ?? actor.metadata.uid));
+        if (!topic || !actor.status.execution || topic.spec.parentRef) throw new Error("Release requires an active Chief and a root Topic");
+        if (reclamationVersion(topic, store.resources) !== args.version) throw new Error("Topic understanding changed; read_topic again");
+        const updated = await store.client.patchStatus(topic, { reclamation: { version: args.version, reason: args.reason,
+          writer: { resource: SubjectSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id } } });
+        log?.info({ topicUid: topic.metadata.uid, reason: args.reason }, "Topic approved for capacity reclamation");
+        return result({ uid: updated.metadata.uid, eligibleWhenSafe: true });
+      } }),
     tool({ name: "create_topic", label: "Create child Topic", description: "Create a meaningful child inside this root tree. Supply a stable scope and reason; do not split just to meet a count.",
       parameters: Type.Object({ parentUid: Type.Optional(Type.String()), name: Type.String({ minLength: 1, maxLength: 200 }), summary: Type.String({ maxLength: 4000 }), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
       async execute(id, args) { return report(await createChildTopic(store.client, active(), args, id)); } }),
@@ -56,7 +71,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
         const root = active(), topic = subtree().find(t => t.metadata.uid === (uid ?? root.metadata.uid));
         if (!topic) throw new Error("Topic is outside this root");
         const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: topic.status.summary, recent: notes(store.resources, topic.metadata.uid), organization: topic.status.organization });
-        return result({ uid: topic.metadata.uid, version: contentVersion(topic), understandingVersion: understandingVersion(topic, notes(store.resources, topic.metadata.uid)),
+        return result({ uid: topic.metadata.uid, version: contentVersion(topic), reclamationVersion: reclamationVersion(topic, store.resources), understandingVersion: understandingVersion(topic, notes(store.resources, topic.metadata.uid)),
           text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
       } },
   ];

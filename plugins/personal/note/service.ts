@@ -28,8 +28,9 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
   if (previous && noteVersion(previous) !== args.version) throw new Error("Note content version conflict; read the Note again");
   const spec = { subject: args.subject ?? previous?.spec.subject ?? writer.resource, text: args.text,
     people: args.people ? [...new Map(args.people.map(p => [p.uid, p])).values()] : previous?.spec.people ?? [] };
+  if (previous && !isDeepStrictEqual(previous.spec.subject, spec.subject)) throw new Error("Use move_note to change an existing Note subject");
   if (previous && isDeepStrictEqual(previous.spec, spec)) return { noteId: id, version: noteVersion(previous) };
-  const status = { updatedAt: new Date().toISOString(), writer };
+  const status = { ...previous?.status, updatedAt: new Date().toISOString(), writer };
   try {
     const updated = previous ? await resources.replace(previous, spec, status)
       : await resources.create(NOTE_TYPE, { name: id, spec, status });
