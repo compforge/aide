@@ -1,6 +1,7 @@
+import { writeSummary } from "./note/summary.ts";
 import { listNotes } from "./note/query.ts";
 import { contentVersion } from "./context-write.ts";
-import { SubjectSchema } from "./note/model.ts";
+import { WriterResourceSchema, SubjectSchema } from "./note/model.ts";
 import { resourceRef } from "./input/state.ts";
 import { Type, type TSchema } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -33,19 +34,12 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
         return result(note);
       } }),
     tool({ name: `summarize_${kind}`, label: `Summarize ${kind}`, description: `${summaryDescription} Retain findings, constraints and conclusions that remain useful within this ${kind === "task" ? "task's lifetime" : "ongoing responsibility"}. The Host binds the target. Never changes the objective, schedule or business status.`,
-      parameters: Type.Object({ version: Type.String({ minLength: 1 }), summary: Type.String({ maxLength: 16000 }) }, { additionalProperties: false }),
+      parameters: Type.Object({ version: Type.String({ minLength: 1 }), summary: Type.String({ maxLength: 16000 }), people: noteFields.people }, { additionalProperties: false }),
       async execute(_id, args, signal) {
         signal?.throwIfAborted(); const owner = read();
         if (contentVersion(owner) !== args.version) throw new Error(`${kind} summary version conflict; read it again`);
-        const updated = await resources.patch(owner, { type: "json", value: [
-          { op: "test", path: "/status/summary", value: owner.status.summary },
-          { op: "replace", path: "/status/summary", value: args.summary },
-          { op: "add", path: "/status/contextWriter", value: { resource: SubjectSchema.parse(resourceRef(owner)), executionId: owner.status.execution!.id } },
-        ] }).catch(error => {
-          if (error instanceof Error && error.name === "TEST_OPERATION_FAILED")
-            throw new Error(`${kind} summary version conflict; read_${kind} and merge again`, { cause: error });
-          throw error;
-        });
+        const updated = await writeSummary(resources, owner, { text: args.summary, people: args.people },
+          { resource: WriterResourceSchema.parse(resourceRef(owner)), executionId: owner.status.execution!.id }, args.version);
         log.info({ workUid: owner.metadata.uid, executionId: owner.status.execution!.id, kind, version: contentVersion(updated) }, "Work summary updated");
         return result({ version: contentVersion(updated) });
       } }),

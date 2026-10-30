@@ -1,3 +1,5 @@
+import { noteReference } from "../note/model.ts";
+import { readSummary } from "../note/summary.ts";
 import { patchStatus } from "../status.ts";
 import { candidateVersion, candidatePage } from "./candidates.ts";
 import type { PluginContext, ReconcileContext } from "@compforge/aide-plugin";
@@ -50,7 +52,8 @@ export function registerWeave(context: PluginContext) {
           && Date.parse(t.status.weaveReview!.at) + policy.reviewIntervalMs <= Date.now()));
       }
       const shouldRun = roots.items.length >= 2 && pending.length > 0;
-      const page = candidatePage(pending, 0, policy.batchSize);
+      const summaries = new Map(await Promise.all(pending.map(async t => [t.metadata.uid, await readSummary(context.resources, t)] as const)));
+      const page = candidatePage(pending, 0, policy.batchSize, undefined, t => summaries.get(t.metadata.uid)?.spec.text ?? "", t => noteReference(summaries.get(t.metadata.uid)));
       const at = new Date().toISOString();
       const versions = new Map(pending.map(t => [t.metadata.uid, candidateVersion(t)]));
       const owner = await patchStatus(context.resources, initial, { nextAt: new Date(Date.now() + policy.intervalMs).toISOString(),

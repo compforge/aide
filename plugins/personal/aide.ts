@@ -1,8 +1,9 @@
+import { summaryText, summaryReference } from "./note/summary.ts";
 import { invalidateAssignment } from "./input/assignment.ts";
 import { isCapacityInput } from "./input/model.ts";
 import { readNote } from "./note/service.ts";
 import { contentVersion } from "./context-write.ts";
-import { SubjectSchema } from "./note/model.ts";
+import { WriterResourceSchema, SubjectSchema } from "./note/model.ts";
 import { notes } from "./note/query.ts";
 import { knownReceivers } from "./person/receivers.ts";
 import { workPhase } from "./status.ts";
@@ -121,7 +122,7 @@ export class Personal {
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
         this.log.info({ topicId, topicUid: input.subject?.uid ?? c.metadata.uid, noteId: result.noteId, version: result.version }, "Topic Note updated");
         return result;
-      }, contextWriter: () => { const c = active(); return { resource: SubjectSchema.parse(resourceRef(c)), executionId: c.status.execution!.id }; }, beforeWorkMutation: () => { active(); } });
+      }, contextWriter: () => { const c = active(); return { resource: WriterResourceSchema.parse(resourceRef(c)), executionId: c.status.execution!.id }; }, beforeWorkMutation: () => { active(); } });
     };
   }
 
@@ -184,7 +185,7 @@ export class Personal {
     const c = owner.kind === "Topic" ? this.store.resources.get<TopicSpec, TopicStatus>(TOPIC_TYPE, owner.name) : undefined;
     const members = c ? new Set(this.topics.scope(c.metadata.uid).map(t => t.metadata.uid)) : undefined;
     const status = (i: Readonly<Resource<InputSpec, InputStatus>>) => c ? i.status.assess : attemptOf(i, owner);
-    if (!id) return { ...(c ? { context: { version: contentVersion(c), summary: c.status.summary, recent: notes(this.store.resources, c.metadata.uid),
+    if (!id) return { ...(c ? { context: { version: contentVersion(c), summary: summaryText(this.store.resources, c), summaryUid: summaryReference(this.store.resources, c)?.uid, summaryNote: summaryReference(this.store.resources, c), recent: notes(this.store.resources, c.metadata.uid, "subject"),
       summaryChars: topicPolicy(this.options.topic).summaryChars } } : {}), inputs: inputs.slice(offset, offset + 20).map(i => ({ inputId: i.metadata.name, attention: inputAttention(i.spec), status: status(i) })),
       nextOffset: offset + 20 < inputs.length ? offset + 20 : null };
     const input = this.topics.inputStore.get(id);

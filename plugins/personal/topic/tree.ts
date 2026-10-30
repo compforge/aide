@@ -84,9 +84,9 @@ export async function readTopicInScope(resources: ResourceReader, owner: TopicRe
 }
 /** Summary changes drive maintenance; full context versions still fence Weave and deletion. */
 export const summaryVersion = (topic: TopicResource): string =>
-  createHash("sha256").update(topic.status.summary).digest("hex");
+  createHash("sha256").update(topic.status.summaryRevision ?? "").digest("hex");
 export const understandingVersion = (topic: TopicResource, notes: readonly import("../note/model.ts").Note[] = []): string =>
-  createHash("sha256").update(JSON.stringify([topic.status.summary, notes.map(n => [n.uid, n.version])])).digest("hex");
+  createHash("sha256").update(JSON.stringify([topic.status.summaryRevision ?? "", notes.map(n => [n.uid, n.version])])).digest("hex");
 
 /** @spec Source identity is reusable; Topic identity is new after expiry. Uniqueness is checked in the storage transaction.
  * @spec A source name initializes a new Topic; later messages never rename an existing Topic or its Weave parent.
@@ -100,7 +100,7 @@ export async function ensureSourceTopic(resources: ResourceClient, key: string, 
   const id = randomUUID();
   try {
     return await resources.create(TOPIC_TYPE, { name: digest(id), spec: { id, topicKey: key, name: initialTopicName(name?.trim() || text) },
-      status: { receipts: [], summary: "" } });
+      status: { receipts: [] } });
   } catch (error) {
     if (!String(error).includes("Topic key already exists")) throw error;
     const created = await find();

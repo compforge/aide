@@ -1,5 +1,7 @@
+import { noteFields } from "../../../agents/context-tools.ts";
+import { summaryText, summaryReference } from "../note/summary.ts";
 import { reclamationVersion } from "./retention.ts";
-import { SubjectSchema } from "../note/model.ts";
+import { WriterResourceSchema, SubjectSchema } from "../note/model.ts";
 import { resourceRef } from "../input/state.ts";
 import { noteTools } from "../note/tools.ts";
 import { isInternalInput } from "../input/model.ts";
@@ -30,12 +32,12 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
         if (!topic || !actor.status.execution || topic.spec.parentRef) throw new Error("Release requires an active Chief and a root Topic");
         if (reclamationVersion(topic, store.resources) !== args.version) throw new Error("Topic understanding changed; read_topic again");
         const updated = await store.client.patchStatus(topic, { reclamation: { version: args.version, reason: args.reason,
-          writer: { resource: SubjectSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id } } });
+          writer: { resource: WriterResourceSchema.parse(resourceRef(actor)), executionId: actor.status.execution.id } } });
         log?.info({ topicUid: topic.metadata.uid, reason: args.reason }, "Topic approved for capacity reclamation");
         return result({ uid: updated.metadata.uid, eligibleWhenSafe: true });
       } }),
     tool({ name: "create_topic", label: "Create child Topic", description: "Create a meaningful child inside this root tree. Supply a stable scope and reason; do not split just to meet a count.",
-      parameters: Type.Object({ parentUid: Type.Optional(Type.String()), name: Type.String({ minLength: 1, maxLength: 200 }), summary: Type.String({ maxLength: 4000 }), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
+      parameters: Type.Object({ parentUid: Type.Optional(Type.String()), name: Type.String({ minLength: 1, maxLength: 200 }), summary: Type.String({ maxLength: 4000 }), people: noteFields.people, reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
       async execute(id, args) { return report(await createChildTopic(store.client, active(), args, id)); } }),
     tool({ name: "move_input", label: "Move Input", description: "Move an Input's current ownership within this tree. Finish any admitted assessment first. Facts, routing history and processing receipts remain intact.",
       parameters: Type.Object({ inputId: Type.String(), topicUid: Type.String(), reason: Type.String({ minLength: 1, maxLength: 2000 }) }),
@@ -60,7 +62,7 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
         const root = active(), parent = parentUid ?? root.metadata.uid;
         if (!await readTopicInScope(store.client, root, parent)) throw new Error("Topic is outside this root");
         return result(topicPage(store.resources.list<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE, { matchIndex: { name: "parent", value: parent } }), t => ({
-          uid: t.metadata.uid, name: t.spec.name, persons: topicPersons(store, t), ...understanding({ ...t.status, recent: notes(store.resources, t.metadata.uid) }, 1200), version: understandingVersion(t, notes(store.resources, t.metadata.uid)), organization: t.status.organization,
+          uid: t.metadata.uid, name: t.spec.name, persons: topicPersons(store, t), ...understanding({ ...t.status, summary: summaryText(store.resources, t), summaryUid: summaryReference(store.resources, t)?.uid, summaryNote: summaryReference(store.resources, t), recent: notes(store.resources, t.metadata.uid, "subject") }, 1200), version: understandingVersion(t, notes(store.resources, t.metadata.uid, "subject")), organization: t.status.organization,
         }), offset));
       } },
     { name: "read_topic", label: "Read topic", description: "Read this root or a descendant's full summary and recent Note window in text pages. Use read_note for the complete text of a truncated Note. A non-null nextOffset means more text remains: continue with offset=nextOffset; null marks the end. Use its content version for summarize_topic and understandingVersion for absorbed receipts after reviewing the child context.",
@@ -68,8 +70,8 @@ export function topicTools(store: Store, active: () => TopicResource, log?: Logg
       async execute(_id, { uid, offset = 0 }) {
         const root = active(), topic = await readTopicInScope(store.client, root, uid);
         if (!topic) throw new Error("Topic is outside this root");
-        const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: topic.status.summary, recent: notes(store.resources, topic.metadata.uid), organization: topic.status.organization });
-        return result({ uid: topic.metadata.uid, version: contentVersion(topic), reclamationVersion: reclamationVersion(topic, store.resources), understandingVersion: understandingVersion(topic, notes(store.resources, topic.metadata.uid)),
+        const text = JSON.stringify({ ...topic.spec, persons: topicPersons(store, topic), conditions: topic.status.conditions, summaryDependencies: topic.status.summaryDependencies, summary: summaryText(store.resources, topic), summaryUid: summaryReference(store.resources, topic)?.uid, summaryNote: summaryReference(store.resources, topic), recent: notes(store.resources, topic.metadata.uid, "subject"), organization: topic.status.organization });
+        return result({ uid: topic.metadata.uid, version: contentVersion(topic), reclamationVersion: reclamationVersion(topic, store.resources), understandingVersion: understandingVersion(topic, notes(store.resources, topic.metadata.uid, "subject")),
           text: text.slice(offset, offset + 8000), nextOffset: offset + 8000 < text.length ? offset + 8000 : null });
       } },
   ];

@@ -47,7 +47,7 @@ test("Chief can assess material without claiming it; redelivery and repeated com
   await assessAll(client, c, "live", { inputIds: ["later"], summary: "Read directly without notification" });
   assert.equal(await routeTo(client, c.metadata, aide.topics.inputStore.get("one")!), false);
   assert.equal(aide.outputs().length, 0);
-  assert.equal(aide.topics.resource("me")!.status.summary, "");
+  assert.equal(aide.topics.resource("me")!.status.summaryRevision ?? "", "");
   await assert.rejects(assessAll(client, c, "old", { inputIds: ["one"], summary: "stale" }), /no longer active/);
 });
 

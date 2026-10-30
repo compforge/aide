@@ -1,3 +1,4 @@
+import { createWithSummary } from "./summary-fixture.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -157,7 +158,7 @@ test("Child capacity creates deduplicated built-in Inputs assigned to root and e
   await ensureCapacityInputs(f.context, f.read(f.child));
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 0);
   await f.input("unfiled-two");
-  for (const name of ["grand-a", "grand-b"]) await f.resources.create(TOPIC_TYPE, { name,
+  for (const name of ["grand-a", "grand-b"]) await createWithSummary(f.resources, TOPIC_TYPE, { name,
     spec: { id: name, parentRef: resourceRef(f.child) }, status: { summary: "", receipts: [] } });
   await Promise.allSettled([ensureCapacityInputs(f.context, f.read(f.child)), ensureCapacityInputs(f.context, f.read(f.child))]);
   await ensureCapacityInputs(f.context, f.read(f.child));

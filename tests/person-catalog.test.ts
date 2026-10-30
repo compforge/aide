@@ -51,7 +51,7 @@ test("Person catalog resolves identities across sessions, preserves profiles acr
     { ...me.spec, identities: [] }), /cannot be removed/);
   await f.restart();
   assert.equal((await f.aide.persons.read(first.metadata.name)).metadata.uid, first.metadata.uid);
-  assert.deepEqual((await f.aide.persons.read(first.metadata.name)).status.summary, summarized.status.summary);
+  assert.deepEqual((await f.aide.persons.read(first.metadata.name)).summaryText, summarized.summaryText);
   assert.equal("sessionId" in (await f.aide.persons.read(first.metadata.name)).metadata, false);
   assert.equal(f.aide.topicIds().includes("personal:persons"), false);
 });
@@ -63,10 +63,10 @@ test("summarize_person guards shared summary versions while Input retention rema
     me.spec, "不要再把别人的观点当成我的偏好。");
   const tool = personTools(f.aide.persons).find((tool) => tool.name === "summarize_person")!;
   await assert.rejects(tool.execute("stale", { id: me.metadata.name, uid: me.metadata.uid, version: contentVersion(me), summary: "stale" }, undefined, undefined, {} as never), /version conflict/);
-  await tool.execute("fresh", { id: me.metadata.name, uid: edited.metadata.uid, version: contentVersion(edited), summary: edited.status.summary + "明确表达：关注机器人的可靠性。" }, undefined, undefined, {} as never);
+  await tool.execute("fresh", { id: me.metadata.name, uid: edited.metadata.uid, version: contentVersion(edited), summary: edited.summaryText + "明确表达：关注机器人的可靠性。" }, undefined, undefined, {} as never);
   const current = (await f.aide.persons.findIdentity(LOCAL_ME))!;
   assert.deepEqual(current.spec.identities, me.spec.identities);
-  assert.ok(current.status.summary.startsWith(edited.status.summary));
+  assert.ok(current.summaryText.startsWith(edited.summaryText));
   const inputs = new InputStore(f.home);
   inputs.storage.configure({ kinds: { "aide.dev/Input": { maxCount: 1 } } } as Parameters<typeof inputs.storage.configure>[0]);
   const input = inputs.submit("test", "old", { origin: "source", originId: "test", text: "evidence", sender: personRef(current) });
@@ -74,7 +74,7 @@ test("summarize_person guards shared summary versions while Input retention rema
   inputs.submit("test", "new", { origin: "source", originId: "test", text: "no sender" });
   assert.equal(inputs.get("old"), undefined);
   assert.equal(inputs.get("new")!.spec.sender, undefined);
-  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.status.summary, current.status.summary);
+  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.summaryText, current.summaryText);
 });
 
 test("Execution identities do not identify Me; connector reads contribute people without attributing their views", async (t) => {
@@ -87,7 +87,7 @@ test("Execution identities do not identify Me; connector reads contribute people
   const messages = personMessages({ ...emptyConnectors.messages, async search() { return { messages: [message], hasMore: false, observedThrough: message.createdAt }; } }, f.aide.persons, "cli_execution");
   await messages.search({ start: message.createdAt, end: message.createdAt });
   const other = (await f.aide.persons.list()).find((p) => p.spec.name === "李四")!;
-  assert.equal(other.isMe, false); assert.equal(other.status.summary, "");
+  assert.equal(other.isMe, false); assert.equal(other.status.summaryRevision ?? "", "");
 });
 
 test("Web exposes two navigation pages and edits the same Person with conflict detection", async (t) => {
@@ -105,7 +105,7 @@ test("Web exposes two navigation pages and edits the same Person with conflict d
     spec: { ...me.spec, name: "张三" }, summary: "偏好简洁中文" };
   const save = () => fetch(base + "/persons/edit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   assert.equal((await save()).status, 200);
-  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.status.summary, "偏好简洁中文");
+  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.summaryText, "偏好简洁中文");
   assert.equal((await save()).status, 409);
   const edit = async (summary?: string) => {
     const current = (await f.aide.persons.findIdentity(LOCAL_ME))!;
@@ -114,11 +114,11 @@ test("Web exposes two navigation pages and edits the same Person with conflict d
         spec: { ...current.spec, name: "张三（同事）" }, summary }) });
   };
   assert.equal((await edit()).status, 200);
-  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.status.summary, "偏好简洁中文", "Identity-only edits preserve the summary");
+  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.summaryText, "偏好简洁中文", "Identity-only edits preserve the summary");
   assert.equal((await edit("x".repeat(16001))).status, 400);
-  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.status.summary, "偏好简洁中文");
+  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.summaryText, "偏好简洁中文");
   assert.equal((await edit("")).status, 200);
-  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.status.summary, "", "An explicit empty summary clears it");
+  assert.equal((await f.aide.persons.findIdentity(LOCAL_ME))!.summaryText, "", "An explicit empty summary clears it");
   assert.equal((await fetch(base + "/persons?id=missing")).status, 404);
   const resource = await f.aide.catalog.client.get({ ...PERSON_TYPE, namespace: "v1", name: me.metadata.name });
   assert.equal(resource!.metadata.uid, me.metadata.uid);
@@ -133,23 +133,23 @@ test("Person context is bounded and survives identity enrichment, user correctio
   const recent = await readNotes(f.aide.runtime.plugins.resourceClient("personal"), current.metadata.uid, "people");
   assert.ok(recent.length <= 40);
   assert.ok(recent.reduce((sum, item) => sum + item.text.length, 0) <= 16000);
-  const summary = current.status.summary;
+  const summary = (await f.aide.persons.read(current.metadata.name)).summaryText;
   current = await f.aide.persons.observe(identity, "张三");
-  assert.equal(current.status.summary, summary);
+  assert.equal((await f.aide.persons.read(current.metadata.name)).summaryText, summary);
   assert.deepEqual(await readNotes(f.aide.runtime.plugins.resourceClient("personal"), current.metadata.uid, "people"), recent);
   current = await f.aide.persons.edit(current.metadata.name, current.metadata.uid, current.metadata.resourceVersion,
     current.spec, "以用户明确表述为准");
-  assert.equal(current.status.summary, "以用户明确表述为准");
+  assert.equal((await f.aide.persons.read(current.metadata.name)).summaryText, "以用户明确表述为准");
   assert.equal(current.status.updatedBy, "user");
   assert.deepEqual(await readNotes(f.aide.runtime.plugins.resourceClient("personal"), current.metadata.uid, "people"), recent, "User corrections preserve recent Notes");
   const correctedRecent = await readNotes(f.aide.runtime.plugins.resourceClient("personal"), current.metadata.uid, "people");
   current = await f.aide.persons.edit(current.metadata.name, current.metadata.uid, current.metadata.resourceVersion,
     { ...current.spec, name: "张三（同事）" });
-  assert.equal(current.status.summary, "以用户明确表述为准");
+  assert.equal((await f.aide.persons.read(current.metadata.name)).summaryText, "以用户明确表述为准");
   assert.deepEqual(await readNotes(f.aide.runtime.plugins.resourceClient("personal"), current.metadata.uid, "people"), correctedRecent);
   await f.restart();
   const restored = await f.aide.persons.read(current.metadata.name);
-  assert.equal(restored.status.summary, "以用户明确表述为准");
+  assert.equal(restored.summaryText, "以用户明确表述为准");
   assert.deepEqual(restored.recent, correctedRecent);
   assert.deepEqual(restored.spec, current.spec);
 });
@@ -175,7 +175,7 @@ test("Web merge validates reviewed versions, finalizes the source and tolerates 
   assert.equal(await f.aide.catalog.client.get(personRef(source)), undefined, "Standard lifecycle physically removes the merged Person");
   assert.equal((await fetch(base + "/persons?id=" + source.metadata.name)).status, 404);
   assert.equal((await merge(body)).status, 409, "A repeat cannot append the same data again");
-  assert.equal((await f.aide.persons.read(target.metadata.name)).status.summary, body.summary);
+  assert.equal((await f.aide.persons.read(target.metadata.name)).summaryText, body.summary);
   assert.equal((await f.aide.persons.observe(source.spec.identities[0]!)).metadata.uid, target.metadata.uid);
   const read = personTools(f.aide.persons).find(tool => tool.name === "read_person")!;
   const missing = await read.execute("deleted", { id: source.metadata.name, uid: source.metadata.uid }, undefined, undefined, {} as never);

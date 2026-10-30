@@ -1,3 +1,4 @@
+import { validateSummary } from "../note/summary.ts";
 import { candidateVersion } from "../weave/candidates.ts";
 import { NoteWriterSchema } from "../note/model.ts";
 import { canReclaimTopic, reclamationVersion } from "./retention.ts";
@@ -66,7 +67,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
       lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).default({}), absorbedSummaries: z.record(z.string(), z.string()).default({}),
       nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
-  validator: { create: (resource, context) => { validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
+  validator: { create: (resource, context) => { validateSummary(resource, context); validateDefault(resource, context); guardTopicOrganization(resource, context); }, update: (previous, current, context) => {
     guardContext(previous, current, context);
     if (current.status.reclamation && !isDeepStrictEqual(previous.status.reclamation, current.status.reclamation)) {
       requireContentWriter(current, current.status.reclamation.writer, context);
@@ -75,14 +76,14 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     }
     const reviewed = current.status.organization?.reviewedVersion;
     if (reviewed && JSON.stringify(previous.status.organization) !== JSON.stringify(current.status.organization)
-      && understandingVersion(previous, notes(context, previous.metadata.uid)) !== reviewed)
+      && understandingVersion(previous, notes(context, previous.metadata.uid, "subject")) !== reviewed)
       throw new Error("Topic understanding changed before organization");
     if (JSON.stringify(previous.status.absorbed) !== JSON.stringify(current.status.absorbed)) {
       if (current.status.contextWriter) requireContentWriter(current, current.status.contextWriter, context);
       for (const [uid, version] of Object.entries(current.status.absorbed ?? {})) {
         if (previous.status.absorbed?.[uid] === version) continue;
         const child = context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, uid);
-        if (!child || child.metadata.deletionTimestamp || child.spec.parentRef?.uid !== current.metadata.uid || understandingVersion(child, notes(context, uid)) !== version)
+        if (!child || child.metadata.deletionTimestamp || child.spec.parentRef?.uid !== current.metadata.uid || understandingVersion(child, notes(context, uid, "subject")) !== version)
           throw new Error("Child understanding changed; read and review again");
       }
     }
@@ -103,7 +104,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
     if (WORK_TYPES.some(type => context.page(type, { limit: 1, matchIndex: { name: "topic", value: resource.metadata.uid } }).items.length)) throw new TopicDeletionBlocked("work", "Topic still owns Work");
     if (resource.spec.parentRef) {
       const parent = context.get<TopicSpec, TopicStatus>(TOPIC_TYPE, resource.spec.parentRef.uid);
-      if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource, notes(context, resource.metadata.uid))) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");
+      if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource, notes(context, resource.metadata.uid, "subject"))) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");
     }
   } },
   indexes: { uid: r => [r.metadata.uid], default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],

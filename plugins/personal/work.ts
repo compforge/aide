@@ -21,7 +21,7 @@ export function newWork(topicId: string, definition: WorkDefinition, now = new D
   validateTrigger(desired.kind, desired.trigger, now);
   return { id: randomUUID(), topicId, ...desired,
     conditions: [], status: desired.kind === "routine" ? "scheduled" : "ready", revision: 1,
-    nextAt: nextOccurrence(desired.trigger, now), question: null, summary: "", recent: [] };
+    nextAt: nextOccurrence(desired.trigger, now), question: null, summary: "", summaryUid: "", summaryRevision: "", recent: [] };
 }
 
 /**
@@ -76,7 +76,7 @@ export class WorkService {
           } }] : []),
         { operation: "create", type: workType("task"), name: work.id,
           spec: { title: work.title, instruction: work.instruction, paused: false, initialInputId },
-          status: { topic: resourceRef(topic), waiting: null, summary: "" } },
+          status: { topic: resourceRef(topic), waiting: null } },
       ]);
     } else await this.store.save(work);
     this.log.info({ workId: work.id, topicId: this.topicId, kind: work.kind }, "Work tool created work");

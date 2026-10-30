@@ -172,7 +172,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   const absorbDelay = Math.max(0, Date.parse(c.status.nextAbsorbAt ?? "1970-01-01") - Date.now());
   const absorb = absorption.length > 0 && absorbDelay === 0;
   if (due || inputs.some(i => canActivate(i.spec, c)) || absorb || weave) {
-    for (const t of topics) versions.set(t.metadata.uid, understandingVersion(t, await readNotes(context.resources, t.metadata.uid)));
+    for (const t of topics) versions.set(t.metadata.uid, understandingVersion(t, await readNotes(context.resources, t.metadata.uid, "subject")));
     absorption = pendingAbsorption(topics, c, false, versions);
   }
   if (due && !inputs.some(i => canActivate(i.spec, c)) && !absorb && !weave) {
@@ -233,7 +233,7 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
     const all = await readTopicSubtree(context.resources, resourceRef(c));
     const root = all[0];
     if (root && !root.metadata.deletionTimestamp && !root.spec.parentRef) {
-      const latestVersions = new Map(await Promise.all(all.map(async t => [t.metadata.uid, understandingVersion(t, await readNotes(context.resources, t.metadata.uid))] as const)));
+      const latestVersions = new Map(await Promise.all(all.map(async t => [t.metadata.uid, understandingVersion(t, await readNotes(context.resources, t.metadata.uid, "subject"))] as const)));
       const remaining = pendingAbsorption(all, root, true, latestVersions);
       const progressed = absorption.some(before => !remaining.some(after => before.uid === after.uid && before.version === after.version));
       if (progressed) await updateTopic(context.resources, root, () => ({ absorbAttempts: 0, nextAbsorbAt: new Date(Date.now() + 60_000).toISOString() }));

@@ -1,3 +1,4 @@
+import { createWithSummary } from "./summary-fixture.ts";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -183,7 +184,7 @@ test(`${changed} maintenance is selected from Topic data`, async t => {
   await f.resources.patchStatus(f.read(), { idleSince: new Date().toISOString(), idleReviewCount: 3 });
   if (changed === "structure") await f.resources.patchStatus(f.read(), { weaveRevision: 1 });
   else {
-    const child = await f.resources.create<TopicSpec, TopicStatus>(TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.read()) },
+    const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "child", spec: { id: "child", parentRef: resourceRef(f.read()) },
       status: { summary: changed === "summary" ? "New understanding" : "", receipts: [] } });
     if (changed === "notes") {
       await f.resources.patchStatus(f.read(), { absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
@@ -325,7 +326,7 @@ test("Capacity maintenance precedes business outside idle review and yields even
 
 test("Children pressure triggers organization without idle delay and live intake waits for that pass", async t => {
   const f = await fixture(t);
-  for (const name of ["a", "b"]) await f.resources.create(TOPIC_TYPE, { name, spec: { id: name, parentRef: resourceRef(f.read()) }, status: { summary: "", receipts: [] } });
+  for (const name of ["a", "b"]) await createWithSummary(f.resources, TOPIC_TYPE, { name, spec: { id: name, parentRef: resourceRef(f.read()) }, status: { summary: "", receipts: [] } });
   f.hooks.beforeAssess = async () => {
     await f.input("arrival", InputAttention.Immediate);
     await reconcileTopic(f.context, { verbs: { action() { throw new Error("Business must not enter maintenance execution"); } } } as unknown as ReconcileContext, f.read());

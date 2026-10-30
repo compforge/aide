@@ -1,3 +1,4 @@
+import { summaryText } from "../../plugins/personal/note/summary.ts";
 import { notes } from "../../plugins/personal/note/query.ts";
 import { channelOutputs, visibleOutput } from "./output.ts";
 import { inputPrinter } from "../../plugins/personal/input/printer.ts";
@@ -82,8 +83,8 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
     .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, receivers: message.receivers, target: message.target,
       ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
     }));
-  if (resource?.status.summary) roots.push({ id: "topic-summary", type: "summary", label: "历史摘要", icon: "📝",
-    content: resource.status.summary!, at: resource.metadata.creationTimestamp });
+  if (resource && summaryText(aide.topics.resources, resource)) roots.push({ id: "topic-summary", type: "summary", label: "历史摘要", icon: "📝",
+    content: summaryText(aide.topics.resources, resource)!, at: resource.metadata.creationTimestamp });
   for (const run of runs) {
     if (!run.input) continue;
     const input = run.input, definition = aide.inputDefinition(input.spec);
@@ -134,7 +135,7 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const live = [...executions.values()].some((execution) => execution.header.status === "running");
   return {
     version: PROTOCOL_VERSION, biz: "aide.topic", blocks,
-    meta: { topic_id: topicId, context: resource ? { summary: resource.status.summary, recent: notes(aide.topics.resources, resource.metadata.uid) } : null, activity: active || queued || live ? {
+    meta: { topic_id: topicId, context: resource ? { summary: summaryText(aide.topics.resources, resource), recent: notes(aide.topics.resources, resource.metadata.uid, "subject") } : null, activity: active || queued || live ? {
       id: active?.id ?? `queued:${topicId}`, phase: active?.status.phase ?? "queued", queued,
     } : null },
   };

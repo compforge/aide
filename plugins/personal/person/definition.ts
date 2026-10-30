@@ -1,3 +1,4 @@
+import { validateSummary } from "../note/summary.ts";
 import { guardContext } from "../context-write.ts";
 import { ContextFields } from "../context.ts";
 import { z } from "zod";
@@ -20,7 +21,8 @@ function validate(resource: Readonly<Resource<Person, PersonStatus>>, context: R
 }
 export const PersonDefinition: ResourceDefinition<Person, PersonStatus> = { type: PERSON_TYPE,
   schema: { spec: PersonSchema, status: z.object({ ...ContextFields, updatedAt: z.string(), updatedBy: z.enum(["user", "chief", "connector"]) }).strict() },
+  retention: { releasedAt: () => undefined, references: () => [] },
   indexes: { identity: r => r.metadata.deletionTimestamp ? [] : r.spec.identities.map(identityKey) },
-  validator: { create: validate, update: (previous, resource, context) => { guardContext(previous, resource, context); validate(resource, context, previous); } },
-  printer: { describe: r => `${r.spec.name}\n${JSON.stringify({ ...r.spec, summary: r.status.summary }, null, 2)}`, summarize: r => r.spec.name },
+  validator: { create: (r, c) => { validateSummary(r, c); validate(r, c); }, update: (previous, resource, context) => { guardContext(previous, resource, context); validate(resource, context, previous); } },
+  printer: { describe: r => `${r.spec.name}\n${JSON.stringify({ ...r.spec, summaryRevision: r.status.summaryRevision }, null, 2)}`, summarize: r => r.spec.name },
 };

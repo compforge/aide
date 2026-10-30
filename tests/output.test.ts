@@ -159,10 +159,10 @@ test("Output admission rejects disabled or mismatched Lark targets before persis
   assert.throws(() => f.outputs.create("owner", "wrong-app", bad), /No configured Channel/);
   assert.throws(() => new OutputStore(f.root).create("owner", "disabled", { ...f.spec(), target: larkAddress("app", "chat") }), /disabled/);
   await assert.rejects(f.client.commit([
-    { operation: "patchStatus", resource: f.topic, patch: { summary: "must roll back" } },
+    { operation: "patchStatus", resource: f.topic, patch: { idleReviewCount: 99 } },
     { operation: "create", type: OUTPUT_TYPE, name: "atomic", spec: bad },
   ]), /No configured Channel/);
-  assert.equal(f.topics.resource("topic")!.status.summary, "");
+  assert.notEqual(f.topics.resource("topic")!.status.idleReviewCount, 99);
   assert.equal(f.outputs.list().length, 0);
   assert.equal(f.outputs.storage.hasReceipt("output:atomic"), false);
   assert.ok(f.outputs.create("owner", "valid", { ...f.spec(), target: larkAddress("app", "chat") }));

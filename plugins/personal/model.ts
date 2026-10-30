@@ -1,4 +1,4 @@
-import { NoteViewSchema } from "./note/model.ts";
+import { NoteViewSchema, NoteReferenceSchema } from "./note/model.ts";
 import { ConditionsSchema, type Condition } from "./conditions.ts";
 import { OrganizationSchema } from "./topic/ref.ts";
 import { ContextFields } from "./context.ts";
@@ -36,7 +36,7 @@ export const WorkSchema = z.object({ recent: z.array(NoteViewSchema).default([])
   question: z.string().nullable(),
   lastReport: z.object({ at: z.string(), text: z.string().max(16000) }).strict().optional(),
   recoveryNotice: z.object({ id: z.string(), text: z.string() }).strict().nullable().optional(),
-  ...ContextFields,
+  ...ContextFields, summary: z.string().default(""), summaryUid: z.string().default(""), summaryNote: NoteReferenceSchema.optional(),
 });
 export type Work = z.infer<typeof WorkSchema>;
 
@@ -44,7 +44,7 @@ export type WorkSpecFields = Pick<Work, "title" | "instruction"> & { paused?: bo
 export interface WorkStatus {
   topic: import("@compforge/aide-plugin").ResourceRef & { uid: string };
   organization?: z.infer<typeof OrganizationSchema>;
-  summary: string; contextWriter?: import("./note/model.ts").NoteStatus["writer"];
+  summaryRevision?: string; contextWriter?: import("./note/model.ts").NoteStatus["writer"];
   conditions?: Condition[];
   waiting?: { question?: string; until?: string } | null;
   recovery?: { reason: "ExecutionUncertain" | "InvalidResult"; message: string } | null;

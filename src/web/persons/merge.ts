@@ -81,9 +81,9 @@ export class PersonMerge {
       if (target.metadata.resourceVersion !== current.metadata.resourceVersion) throw new Error('当前人物资料已更新，请重新加载后合并。');
       this.source = source; this.target = target;
       for (const [id, person] of [['person-merge-source', source], ['person-merge-target', target]] as const) {
-        $(id).replaceChildren(node('strong', person.spec.name + (person.isMe ? ' · 我' : '')), identityDetails(person), node('p', person.status.summary || '尚未积累认识。'));
+        $(id).replaceChildren(node('strong', person.spec.name + (person.isMe ? ' · 我' : '')), identityDetails(person), node('p', person.summaryText || '尚未积累认识。'));
       }
-      $<HTMLTextAreaElement>('person-merge-summary').value = mergePersonSummary(target.status.summary, source.status.summary);
+      $<HTMLTextAreaElement>('person-merge-summary').value = mergePersonSummary(target.summaryText, source.summaryText);
       $('person-merge-notice').textContent = '';
       this.dialog.showModal();
     } catch (error) { $('person-notice').textContent = errorMessage(error); this.actions.busy(false); }

@@ -35,7 +35,7 @@ function identities(): PersonIdentity[] {
 function hasUnsavedChanges() {
   return saving || (selected && ($<HTMLInputElement>('person-name').value !== selected.spec.name
     || JSON.stringify(identities()) !== JSON.stringify(selected.spec.identities)
-    || (editingSummary && $<HTMLTextAreaElement>('person-summary').value !== selected.status.summary)));
+    || (editingSummary && $<HTMLTextAreaElement>('person-summary').value !== selected.summaryText)));
 }
 function renderList() {
   if (!page) return;
@@ -107,7 +107,7 @@ function identityRow(identity: PersonIdentity = { provider: '', scope: '', id: '
   const remove = node('button', '移除', 'secondary'); remove.type = 'button'; remove.disabled = local; if (local) remove.dataset.local = ''; remove.onclick = () => row.remove(); row.append(remove); $('person-identities').append(row);
 }
 function renderSummary() {
-  const text = selected.status.summary;
+  const text = selected.summaryText;
   $('person-summary-read').innerHTML = renderMarkdown(text || '尚未积累认识。');
   $('person-summary-read').classList.toggle('muted', !text);
   $<HTMLTextAreaElement>('person-summary').value = text;

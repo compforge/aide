@@ -6,10 +6,10 @@ export type NoteReader = Pick<ResourceValidationContext, "page" | "list">;
 const recentQuery = (uid: string, index: "subject" | "people") => ({ limit: RECENT_COUNT, direction: "desc" as const,
   matchIndex: { name: index === "subject" ? "recentSubject" : "recentPeople", value: uid } });
 export function notes(reader: Pick<NoteReader, "page">, uid: string, index: "subject" | "people" = "subject"): Note[] {
-  return retainRecent(reader.page<NoteSpec, NoteStatus>(NOTE_TYPE, recentQuery(uid, index)).items.toReversed().map(noteView));
+  return retainRecent(reader.page<NoteSpec, NoteStatus>(NOTE_TYPE, { ...recentQuery(uid, index), limit: RECENT_COUNT }).items.toReversed().map(noteView));
 }
 export async function readNotes(reader: ResourceReader, uid: string, index: "subject" | "people" = "subject"): Promise<Note[]> {
-  const page = await reader.page<NoteSpec, NoteStatus>(NOTE_TYPE, recentQuery(uid, index));
+  const page = await reader.page<NoteSpec, NoteStatus>(NOTE_TYPE, { ...recentQuery(uid, index), limit: RECENT_COUNT });
   return retainRecent(page.items.toReversed().map(noteView));
 }
 

@@ -1,3 +1,4 @@
+import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -51,9 +52,9 @@ function fixture(t: TestContext) {
   const declared: ResourceDefinition[] = [...definitions, PersonDefinition];
   store.storage.register("personal", declared.map(watched));
   const resources = createResourceClient(store);
-  const topic = (name: string, parent?: TopicResource) => resources.create<TopicResource["spec"], TopicResource["status"]>(TOPIC_TYPE,
+  const topic = (name: string, parent?: TopicResource) => createWithSummary<TopicResource["spec"], TopicResource["status"]>(resources, TOPIC_TYPE,
     { name, spec: { id: name, ...(parent ? { parentRef: resourceRef(parent) } : {}) }, status: { summary: "", receipts: [] } });
-  const person = (name: string, identities: PersonIdentity[]) => resources.create<Person, PersonStatus>(PERSON_TYPE,
+  const person = (name: string, identities: PersonIdentity[]) => createWithSummary<Person, PersonStatus>(resources, PERSON_TYPE,
     { name, spec: { name, identities }, status: { summary: "", updatedAt: new Date().toISOString(), updatedBy: "user" } });
   return { store, resources, queries, topic, person };
 }
@@ -65,7 +66,9 @@ test("Default creation uses its singleton index and updates perform no dependenc
   const fallback = await ensureDefaultTopic(f.resources);
   assert.deepEqual(f.queries, [{ kind: "Topic", index: "default", count: 0 }]);
   f.queries.length = 0;
-  const updated = await f.resources.patchStatus(fallback, { summary: "A fallback observation" });
+  const updated = await patchSummary(f.resources, fallback, { summary: "A fallback observation" });
+  assert.ok(f.queries.length <= 4 && f.queries.every(q => q.count <= 1 && (q.kind === "Note" || ("uid" in q && q.uid === fallback.metadata.uid))));
+  f.queries.length = 0;
   await f.resources.replace(updated, { ...updated.spec, name: "Fallback" }, updated.status);
   assert.deepEqual(f.queries, []);
   await assert.rejects(f.resources.create(TOPIC_TYPE, { name: fallback.metadata.name, namespace: "v1/project/other",
@@ -79,7 +82,9 @@ test("Person validation checks new identities only and rolls back transferred in
   const owner = await f.person("owner", [identity]);
   let target = await f.person("target", [{ ...identity, scope: "other" }]);
   f.queries.length = 0;
-  target = await f.resources.patchStatus(target, { summary: "New understanding" });
+  target = await patchSummary(f.resources, target, { summary: "New understanding" });
+  assert.ok(f.queries.length <= 4 && f.queries.every(q => q.count <= 1 && (q.kind === "Note" || q.uid === target.metadata.uid)));
+  f.queries.length = 0;
   target = await f.resources.replace(target, { ...target.spec, name: "Renamed" }, target.status);
   assert.deepEqual(f.queries, []);
   await assert.rejects(f.resources.replace(target, { ...target.spec, identities: [...target.spec.identities, identity] }, target.status), /already belongs/);

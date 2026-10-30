@@ -21,7 +21,7 @@ Aide relates new information to your topics and existing work. Within an existin
 
 ## Topics, tasks, and routines
 
-A **topic** organizes related information, understanding, and work. Aide brings successive updates about the same matter into a note, develops lasting knowledge about topics and people, and adjusts the topic hierarchy as its understanding grows. This knowledge helps it interpret new messages and continue from existing progress.
+A **topic** organizes related information, understanding, and work. Aide maintains notes for both recent matters and lasting knowledge, and adjusts the topic hierarchy as its understanding grows. It combines these notes with the latest input to decide what to do and when an answer, result, or reminder would be useful.
 
 Aide's assistant, **Chief**, answers everyday questions directly and helps you manage ongoing work as tasks and routines.
 

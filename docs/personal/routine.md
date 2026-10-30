@@ -8,7 +8,7 @@ Routine 是同一 Topic 下持续存在的委托职责。`agents/routine/` 与 C
 
 ## CRD
 
-类型为 `aide.dev/v1alpha2 Routine`。完整字段见 [模型](../../plugins/personal/routine/model.ts)与[状态 Schema](../../plugins/personal/work-status.ts)。
+类型为 `aide.dev/v1alpha4 Routine`。完整字段见 [模型](../../plugins/personal/routine/model.ts)与[状态 Schema](../../plugins/personal/work-status.ts)。
 
 ### Spec
 
@@ -19,7 +19,7 @@ title、instruction 保存持续职责；trigger 声明 cron、timezone 或 even
 | 字段 | 含义 |
 | --- | --- |
 | topic / organization | 当前 Topic UID 与最近一次归属调整依据 |
-| summary | 长期认识；recent 从独立 Note 查询，不在 status 中保存 |
+| summaryRevision | 摘要 Note 的派生内容指纹；正文通过 Note.summaryOf 索引读取，recent 查询普通 Note |
 | agent / execution / lastExecutionId | 原生会话、当前执行和最近报告的执行关联；execution 记录启动时的 observedGeneration |
 | waiting | question 表达待回答问题，until 表达等待到期时间 |
 | recovery / recoveryNotice | 需核对的结果或副作用，以及待创建的恢复通知 |

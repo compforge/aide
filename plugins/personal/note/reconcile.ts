@@ -24,7 +24,17 @@ export async function noteRoot(context: Pick<PluginContext, "resources">, note: 
  * @link docs/personal/note.md
  */
 export async function reconcileNote(context: PluginContext, note: NoteResource) {
-  if (note.metadata.deletionTimestamp || note.status.reviewed?.version === noteVersion(note)) return;
+  if (note.metadata.deletionTimestamp) return;
+  if (note.spec.summaryOf) {
+    const subject = await context.resources.get<unknown, { summaryRevision?: string }>(note.spec.summaryOf);
+    if (subject && !subject.metadata.deletionTimestamp && subject.status.summaryRevision !== noteVersion(note)) {
+      await context.resources.patchStatus(subject, { summaryRevision: noteVersion(note) });
+      context.logger.debug("Summary content observation refreshed", { attributes: { noteUid: note.metadata.uid, subjectUid: subject.metadata.uid } });
+    }
+    return { requeueAfterMs: repairAfterMs };
+  }
+  if (!note.spec.text.trim()) return;
+  if (note.status.reviewed?.version === noteVersion(note)) return;
   const root = await noteRoot(context, note);
   if (!root) return { requeueAfterMs: repairAfterMs };
   if (note.status.reviewTopic?.uid !== root.metadata.uid)
@@ -45,6 +55,7 @@ export async function pendingNoteReviews(context: PluginContext, root: import(".
   for (const ref of root.status.noteReviewQueue ?? []) {
     const note = await context.resources.get<NoteResource["spec"], NoteResource["status"]>({ ...NOTE_TYPE, namespace: "v1", name: ref.noteId });
     if (!note || note.metadata.deletionTimestamp || note.status.reviewed?.version === noteVersion(note)) continue;
+    if (note.spec.summaryOf) continue;
     if ((await noteRoot(context, note))?.metadata.uid === root.metadata.uid) result.push({ noteId: ref.noteId, version: noteVersion(note) });
   }
   return result;

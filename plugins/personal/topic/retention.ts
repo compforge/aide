@@ -1,3 +1,4 @@
+import { summaryText } from "../note/summary.ts";
 import type { ResourceValidationContext } from "@compforge/aide-plugin";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
 import { INPUT_TYPE } from "../input/model.ts";
@@ -24,12 +25,12 @@ export function canReclaimTopic(topic: TopicResource, context: ResourceValidatio
   if (context.page(TOPIC_TYPE, { limit: 1, matchIndex: { name: "parent", value: uid } }).items.length
     || context.page(INPUT_TYPE, { limit: 1, matchIndex: { name: "assessPending", value: uid } }).items.length
     || WORK_TYPES.some(t => context.page(t, { limit: 1, matchIndex: { name: "topic", value: uid } }).items.length)) return false;
-  const recent = notes(context, uid), version = understandingVersion(topic, recent);
+  const recent = notes(context, uid, "subject"), version = understandingVersion(topic, recent);
   if (topic.spec.parentRef) {
     if (context.page(NOTE_TYPE, { limit: 1, matchIndex: { name: "unreviewed", value: uid } }).items.length) return false;
     const parent = context.get<TopicResource["spec"], TopicResource["status"]>(topic.spec.parentRef, topic.spec.parentRef.uid);
     return !!parent && !parent.metadata.deletionTimestamp && parent.status.absorbed?.[uid] === version;
   }
-  return (!topic.status.summary && !context.page(NOTE_TYPE, { limit: 1, matchIndex: { name: "subject", value: uid } }).items.length)
+  return (!summaryText(context, topic) && !context.page(NOTE_TYPE, { limit: 1, matchIndex: { name: "recentSubject", value: uid } }).items.length)
     || topic.status.reclamation?.version === reclamationVersion(topic, context);
 }

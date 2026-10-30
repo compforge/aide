@@ -73,7 +73,7 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   const event = topics.list().at(-1)!.spec.observation!;
   assert.deepEqual((event.changes as { after?: unknown }[]).map((c) => c.after), [undefined]);
   assert.ok(topics.list().every((input) => input.spec.topicKey === "environment:dev" && input.spec.topicName === "dev"));
-  assert.equal(store.list({ apiVersion: "aide.dev/v1alpha3", kind: "Task" }).length, 0);
+  assert.equal(store.list({ apiVersion: "aide.dev/v1alpha4", kind: "Task" }).length, 0);
 });
 
 test("Environment policy selects namespaces independently of Connector defaults and resolves aliases", () => {
