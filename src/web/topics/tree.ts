@@ -4,6 +4,7 @@ import { request, errorMessage } from '../shared/http.ts';
 
 /**
  * @spec Show the selected topic's root tree using paged direct children; expand its ancestor path without scanning other branches.
+ * @spec Topic names are native detail links; the disclosure control independently expands children.
  * @spec Refresh and topic disposal cancel old requests before they can update the tree.
  * @see {@link component://docs/channel/web.md}
  */
@@ -30,10 +31,14 @@ export function createTopicTree(topicId: string | null, lifetime: AbortSignal) {
       function node(item: TopicItem, seen: Set<string>): HTMLLIElement {
         const li = element('li');
         if (item.uid === selected!.uid) li.classList.add('tree-current');
+        const link = element('a', item.name, 'tree-name');
+        link.href = '/?' + new URLSearchParams({ topic: item.id });
+        if (item.uid === selected!.uid) link.setAttribute('aria-current', 'page');
         if (!item.childCount || seen.has(item.uid)) {
-          li.append(element('span', item.name, 'tree-name')); return li;
+          li.append(link); return li;
         }
-        const details = element('details'), summary = element('summary', item.name);
+        const details = element('details'), summary = element('summary');
+        summary.append(link);
         const children = element('ul'), status = element('p', '', 'muted'), controls = element('div', undefined, 'tree-pages');
         const branch = new Set([...seen, item.uid]);
         let fetched = false, busy = false;
