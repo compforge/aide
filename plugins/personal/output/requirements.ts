@@ -64,9 +64,10 @@ export class RequirementOutputDelivery {
     return this.running ??= this.run().finally(() => { this.running = undefined; });
   }
   private async run() {
-    for (const output of this.store.list()) {
+    for (let output of this.store.list()) {
       if (this.stopped) return;
-      const target = output.spec.target;
+      const target = output.status.delivery?.target;
+      if (!target || !output.status.disclosure) continue;
       if (!isRequirementAddress(target)) continue;
       const id = output.metadata.name;
       if (output.status.phase === "sending") {
@@ -87,13 +88,15 @@ export class RequirementOutputDelivery {
         this.log.warn({ err, outputId: id }, "Requirement Output preflight failed; retry scheduled");
         continue;
       }
+      output = await this.store.prepare(id);
+      if (!output.status.delivery || !sameAddress(output.status.delivery.target, target) || output.status.phase !== "pending") continue;
       this.store.storage.transaction(() => {
-        this.store.storage.addReceipt(deliveryKey(id), JSON.stringify({ target, hash: hash(output.spec.text) }));
+        this.store.storage.addReceipt(deliveryKey(id), JSON.stringify({ target, hash: hash(output.status.delivery!.text) }));
         this.store.begin(id);
       });
       try {
-        const external = await this.connectors.addRequirementComment(target, { text: output.spec.text, deliveryId: id });
-        receipt(this.store, id, target, output.spec.text, external);
+        const external = await this.connectors.addRequirementComment(target, { text: output.status.delivery!.text, deliveryId: id });
+        receipt(this.store, id, target, output.status.delivery!.text, external);
         this.log.info({ outputId: id, commentId: external.id, connector: target.source }, "Requirement comment delivered");
       } catch (err) {
         this.store.uncertain(id, String(err));

@@ -14,6 +14,6 @@ export interface OutputView extends OutputDraft {
 export function outputView(output: Readonly<Output>): OutputView {
   const { metadata, spec, status } = output;
   return { role: "aide", id: metadata.name, topicId: spec.topicId, topicUid: spec.topic.uid,
-    text: spec.text, at: metadata.creationTimestamp, target: spec.target, receivers: spec.receivers, workId: spec.producer?.name ?? null,
+    text: status.delivery?.text ?? spec.text, at: metadata.creationTimestamp, target: status.delivery?.target ?? spec.target, receivers: status.delivery?.receivers ?? spec.receivers, workId: spec.producer?.name ?? null,
     executionId: spec.executionId, inputIds: spec.inputIds, status, deliveredAt: status.deliveredAt };
 }

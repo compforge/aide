@@ -14,7 +14,7 @@ export interface ChannelService {
   inputDefinition(origin: Pick<InputSpec, "origin" | "originId">): { id: string; label: string; icon: string };
   outputs(): OutputView[];
   outputDelivered?(outputId: string): Promise<void>;
-  outputSending?(outputId: string): Promise<void>;
+  outputSending?(outputId: string, expected?: { target: import("@compforge/aide-plugin").Address; text: string }): Promise<boolean | void>;
   outputRetry?(outputId: string, error: string, nextAttemptAt: string): Promise<void>;
   invocations(): readonly (HarnessInvocationSnapshot & { topicId?: string; inputId?: string; inputIds?: readonly string[] })[];
   topicIds(): string[];

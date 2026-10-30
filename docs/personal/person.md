@@ -1,5 +1,7 @@
 # Person：身份与认识
 
+披露权限与实际投递见 [披露边界](disclosure.md)：材料使用 sensitivity/visibility，人物使用 clearance；Output 由 Reconciler 检查后投递。
+
 ## 整体定位
 
 Person 保存人物身份和认识，供各 Topic 共享；Me 是基于已配置身份的本人标记，与执行凭证独立。人物的判断和认识更新发生在 Chief 的正常轮次，不启动 Person Agent。

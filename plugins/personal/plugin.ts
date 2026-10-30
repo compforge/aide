@@ -1,3 +1,4 @@
+import { registerOutputs } from "./output/reconcile.ts";
 import { registerInputs } from "./input/assignment.ts";
 import { registerNotes } from "./note/reconcile.ts";
 import { registerRepositorySources } from "./source/repository/observe.ts";
@@ -30,6 +31,7 @@ const plugin: PluginPackage = {
     registerRoutines(context);
     registerPersons(context);
     registerNotes(context);
+    registerOutputs(context);
   },
 };
 export default plugin;

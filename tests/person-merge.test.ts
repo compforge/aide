@@ -211,3 +211,19 @@ test("A conflicting Me consolidation cannot partially delete identity owners", a
   assert.equal((await persons.findIdentity(external))!.metadata.uid, local.metadata.uid);
   assert.equal((await persons.findIdentity(external))!.summaryText, "并发用户修正");
 });
+
+
+test("Person consolidation preserves higher summary sensitivity and refuses incompatible visibility", async t => {
+  const f = await setup(t);
+  const { writeSummary } = await import("../plugins/personal/note/summary.ts");
+  const source = await f.create("sensitive-source", "Source", "Private source fact");
+  const target = await f.create("public-target", "Target", "Target fact");
+  const low = await writeSummary(f.client, target, { text: target.summaryText, sensitivity: "L1", visibility: "people" });
+  const merged = await f.persons.merge(version(source), version(low));
+  assert.equal(merged.summaryNote!.sensitivity, "L3");
+  const another = await f.create("another-source", "Another", "Another fact");
+  const publicSummary = await writeSummary(f.client, another, { text: another.summaryText, sensitivity: "L1", visibility: "any" });
+  await assert.rejects(f.persons.merge(version(publicSummary), version(merged)), /disclosure scopes differ/);
+  assert.equal((await f.persons.read(another.metadata.name)).summaryText, "Another fact");
+  assert.equal((await f.persons.read(merged.metadata.name)).summaryNote!.visibility, "people");
+});

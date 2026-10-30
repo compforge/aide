@@ -76,13 +76,13 @@ test("Channel creation captures its first address, bypasses Default and subseque
   assert.deepEqual(topic.resource("opaque-topic")!.spec.address, group);
   assert.equal(topic.resource("opaque-topic")!.spec.name, "群名称");
   assert.deepEqual(aide.personal.topics.resource("inbox")!.spec.address, inbox);
-  const replies = aide.outputs().filter((o) => o.target.kind === "channel" && (o.target as ChannelAddress).endpoint === group.endpoint);
+  const replies = aide.outputStore.list().filter(o => (o.spec.target as ChannelAddress).endpoint === group.endpoint);
   assert.equal(replies.length, 1, "Only the explicit topic replies; Default receives no copy");
   await aide.receive({ id: "second", channelId: "lark", topicId: "opaque-topic", topicName: "不能覆盖已有名称", text: "second", source: elsewhere });
   await aide.settled();
   assert.deepEqual(topic.resource("opaque-topic")!.spec.address, group);
   assert.equal(topic.resource("opaque-topic")!.spec.name, "群名称");
-  assert.ok(aide.outputs().some((o) => o.topicId === "opaque-topic" && (o.target as ChannelAddress).endpoint === elsewhere.endpoint));
+  assert.ok(aide.outputStore.list().some((o) => o.spec.topicId === "opaque-topic" && (o.spec.target as ChannelAddress).endpoint === elsewhere.endpoint));
   await assert.rejects(aide.receive({ id: "wrong", channelId: "web", topicId: "must-not-exist", text: "wrong", source: group }), /different Channel/);
   assert.equal(aide.topics.get("must-not-exist"), undefined);
 });
@@ -100,13 +100,14 @@ test("An addressless Topic stays addressless after Source and Channel append; di
   await aide.receive({ id: "request", channelId: "lark", topicId: "topic", text: "reply here", source: address });
   await aide.settled();
   assert.equal(c.resource("topic")!.spec.address, undefined);
-  assert.deepEqual(aide.outputs()[0]!.target, address);
+  assert.deepEqual(aide.outputStore.list()[0]!.spec.target, address);
+  assert.equal(aide.outputStore.list()[0]!.status.disclosure?.decision, "denied", "Unknown actual audience is privately reported to Me");
   await aide.close();
   const reopened = new Aide(root, options, pino({ level: "silent" }));
   try {
     await reopened.start(); await reopened.settled();
     assert.equal(reopened.personal.topics.resource("topic")!.spec.address, undefined);
-    assert.deepEqual(reopened.outputs()[0]!.target, address);
+    assert.deepEqual(reopened.outputStore.list()[0]!.spec.target, address);
   } finally { await reopened.close(); }
 });
 
@@ -166,6 +167,7 @@ test("Web displays explicitly addressed Output in the receiving endpoint and exc
   const store = aide.personal.topics;
   await aide.personal.topics.ensure("recipient", webAddress("recipient"));
   const result = await store.say("producer", undefined, "delivered to recipient", undefined, { target: webAddress("recipient") });
+  await aide.persons.initialize(); await aide.outputStore.prepare(result.outputId);
   for (const id of ["producer", "recipient"]) {
     assert.ok(topicView(aide, id).blocks.some((b) => b.content === "delivered to recipient"));
     assert.equal(browseTopics(aide.topics).items.find((c) => c.id === id)!.preview, "delivered to recipient");
@@ -259,10 +261,12 @@ test("Aide rejects unowned targets and diagnoses pending delivery after the Chan
   await aide.close();
   const restarted = new Aide(root, { ...options, config: { ...options.config, channels: {} } }, pino({ level: "silent" }));
   try {
-    await restarted.start();
+    await restarted.start(); await restarted.settled();
     const output = restarted.outputStore.get(receipt.outputId)!;
-    assert.equal(output.status.phase, "failed");
-    assert.match(output.status.lastError!, /disabled/);
+    assert.equal(output.status.phase, "delivered");
+    assert.equal(output.status.disclosure?.decision, "denied");
+    assert.match(output.status.disclosure!.reason, /audience/);
+    assert.deepEqual(output.status.delivery?.target, webAddress("default"));
     assert.equal(output.status.attempts, 0);
     await assert.rejects(restarted.topics.say("default", undefined, "still disabled", undefined,
       { target: larkAddress("app", "bot-chat") }), /disabled/);

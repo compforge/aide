@@ -1,6 +1,6 @@
 import { summaryText } from "../../plugins/personal/note/summary.ts";
 import { notes } from "../../plugins/personal/note/query.ts";
-import { channelOutputs, visibleOutput } from "./output.ts";
+import { visibleOutput } from "./output.ts";
 import { inputPrinter } from "../../plugins/personal/input/printer.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { harnessIdentityFor } from "../host/harness/ids.ts";
@@ -72,15 +72,15 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const turnRuns = new Map(invocations.map((item) => [item.invocationId, runId(item)]));
   const runPhases = new Map(runs.map((input) => [input.id, input.status.phase]));
   const messageRuns = new Map<string, string>();
-  for (const message of channelOutputs(aide)) if (message.executionId) messageRuns.set(message.id, message.executionId);
+  for (const message of aide.outputs()) if (message.executionId) messageRuns.set(message.id, message.executionId);
   const inputExecutions = new Map(invocations.flatMap((i) => (i.inputIds ?? []).map((id) => [id, i.executionId] as const)));
   // Chief admission is persisted on Input, including steer/followUp and unconfirmed results.
   const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.invocationId))
     .map((input) => [input.invocationId, input]));
   const summaries = new Map(state.invocationSummaries.filter((turn) => relatedTurns.has(turn.invocationId)).map((turn) => [turn.invocationId, turn]));
   const executions = new Map<string, { header: TopicBlock; blocks: TopicBlock[] }>();
-  const roots: TopicBlock[] = channelOutputs(aide).filter((message) => resource && (visibleOutput(message, resource) || memberUids.has(message.topicUid) || message.inputIds?.some(id => inputIds.has(id))))
-    .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, receivers: message.receivers, target: message.target,
+  const roots: TopicBlock[] = aide.outputs().filter((message) => resource && (visibleOutput(message, resource) || memberUids.has(message.topicUid) || message.inputIds?.some(id => inputIds.has(id))))
+    .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, label: message.status.phase === "uncertain" ? "投递结果待确认" : message.status.phase === "failed" ? "投递失败" : message.status.disclosure?.decision === "denied" ? (message.status.phase === "delivered" ? "已转告 Me，原目标未发送" : "原目标未发送，正在告知 Me") : !message.status.disclosure ? "待检查，尚未发送" : message.status.phase !== "delivered" ? "尚未送达" : undefined, detail: message.status.disclosure?.reason, receivers: message.receivers, target: message.target,
       ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
     }));
   if (resource && summaryText(aide.topics.resources, resource)) roots.push({ id: "topic-summary", type: "summary", label: "历史摘要", icon: "📝",

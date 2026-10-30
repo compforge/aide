@@ -1,11 +1,12 @@
 import type { Address } from "@compforge/aide-plugin";
 import type { Resource, ResourceRef } from "@compforge/aide-plugin";
 
-export const OUTPUT_TYPE = { apiVersion: "aide.dev/v1alpha1", kind: "Output" } as const;
+export const OUTPUT_TYPE = { apiVersion: "aide.dev/v1alpha2", kind: "Output" } as const;
 
 /** @spec Output content, intended receivers and destination are immutable. Input associations are optional many-to-many provenance, never consumption receipts. */
 export interface OutputSpec {
   text: string;
+  notes?: Array<{ uid: string; version: string }>;
   target: Address;
   /** @spec Intended Person references may dangle after deletion; independent of the delivery address and contributing Inputs. */
   receivers?: ResourceRef[];
@@ -19,6 +20,8 @@ export interface OutputSpec {
   createdBy?: import("../observation/reference.ts").AgentCall;
 }
 export interface OutputStatus {
+  disclosure?: { decision: "allowed" | "denied"; reason: string; checkedAt: string; fingerprint: string };
+  delivery?: { target: Address; text: string; receivers: ResourceRef[] };
   phase: "pending" | "sending" | "delivered" | "failed" | "uncertain";
   attempts: number;
   nextAttemptAt?: string;
@@ -32,6 +35,7 @@ import type { VerbResult } from "@compforge/aide-plugin";
 /** Persists an Output; success acknowledges creation, while status separately reports delivery (never reading). */
 export interface SayInput {
   readonly text: string;
+  readonly notes?: readonly { uid: string; version: string }[];
   readonly inputIds?: readonly string[];
   readonly idempotencyKey?: string;
   /** Only a Channel Input establishes a direct reply path; observations require a separately chosen notification target. */

@@ -46,7 +46,8 @@
       <section id="person-panel-identities" class="person-panel" role="tabpanel" aria-labelledby="person-tab-identities" tabindex="0" hidden>
       <form id="person-identities-form">
       <fieldset><legend>外部身份</legend><p class="muted">同一个人可以有多个身份。Lark 使用 app ID 作为作用域、open ID 作为身份 ID；姓名不用于身份匹配。</p><div id="person-identities"></div><button id="identity-add" type="button" class="secondary">添加身份</button></fieldset>
-      <div class="person-actions"><button id="person-save" type="submit">保存身份</button></div>
+      <label for="person-clearance">可接收密级</label><select id="person-clearance"><option value="L1">L1</option><option value="L2">L2</option><option value="L3">L3</option></select>
+      <div class="person-actions"><button id="person-save" type="submit">保存身份与权限</button></div>
       </form>
     <section id="person-same-names" aria-labelledby="person-same-names-heading" hidden>
       <h3 id="person-same-names-heading">同名人物</h3>

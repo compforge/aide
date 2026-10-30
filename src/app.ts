@@ -6,6 +6,9 @@ import { initialTopicName } from "../plugins/personal/topic/model.ts";
 import { ROUTE_HARNESS } from "../plugins/personal/route/model.ts";
 import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { ResourceStorage } from "./host/resource/storage.ts";
+import { sameAddress } from "./address.ts";
+import { OutputDisclosure, type SemanticCheck } from "../plugins/personal/output/disclosure.ts";
+import { isChannelAddress, larkEndpoint } from "./channel/address.ts";
 import { SayInputSchema } from "../plugins/personal/output/action.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
@@ -22,7 +25,7 @@ import { SOURCES } from "../plugins/personal/source/definition.ts";
 import type { SourceDefinition } from "../plugins/personal/source/input.ts";
 import type { InputSpec } from "../plugins/personal/input/model.ts";
 import { resolve } from "node:path";
-import { LOCAL_ME, type Me, type PersonIdentity } from "../plugins/personal/person/model.ts";
+import { LOCAL_ME, PERSON_TYPE, type Me, type PersonIdentity, type Person, type PersonStatus } from "../plugins/personal/person/model.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import type { Logger } from "pino";
@@ -42,6 +45,8 @@ import { PluginSupervisor } from "./host/plugin/runner/index.ts";
 import { IncomingSchema, type Incoming } from "./channel/message.ts";
 
 export interface AideOptions {
+  checkDisclosure?: SemanticCheck;
+  destinationAudience?: (target: import("@compforge/aide-plugin").Address) => Promise<{ identities: PersonIdentity[]; complete: boolean; private: boolean }>;
   connectorCatalog?: readonly import("@compforge/aide-connector").ConnectorDescription[];
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   defaultHarnessConfig: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
@@ -77,6 +82,7 @@ export class Aide {
   private readonly messageSource: ReturnType<typeof messageWatch>;
   private readonly inputs: InputStore;
   readonly outputStore: OutputStore;
+  private readonly disclosure: OutputDisclosure;
   private readonly unsubscribeOutputs: () => void;
   private readonly unsubscribeResources: () => void;
   private readonly connectors: ConnectorClient;
@@ -147,7 +153,11 @@ export class Aide {
         defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { maxTotalConcurrency: config?.reconcile?.maxTotalConcurrency, connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.topics.changed(change); this.notify(); },
-        actions: { "personal/submit_topic": (context, input) => this.personal.submitTopic(context, input), "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
+        actions: { "personal/reconcile_output": async (context, raw) => {
+          const id = (raw as { id: string }).id;
+          if (context.resourceRef?.kind !== "Output" || context.resourceRef.name !== id) throw new Error("Output reconcile requires its own resource context");
+          await this.disclosure.reconcile(id); return { outputId: id };
+        }, "personal/submit_topic": (context, input) => this.personal.submitTopic(context, input), "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
           const input = SayInputSchema.parse(raw);
           const text = input.text;
           const association = personalExecution(context);
@@ -172,6 +182,9 @@ export class Aide {
         ...Object.entries(config?.channels ?? {}).filter(([, c]) => c.enabled).map(([id, c]) => ({ id, provider: "lark", scope: c.appId, default: config?.defaultChannel === id }))],
       topic: parsePersonalConfig(config?.plugins.personal).topic, weave: parsePersonalConfig(config?.plugins.personal).weave }, log,
       { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore, resolveContact: (topicId, to, channelId, target) => this.resolveContact(topicId, to, channelId, target) });
+    this.disclosure = new OutputDisclosure(this.outputStore, { marks: this.meMarks,
+      audience: target => this.outputAudience(target), contactMe: topicId => this.resolveContact(topicId, { me: true }), check: options.checkDisclosure }, log);
+    this.outputStore.check = id => this.disclosure.reconcile(id);
     this.runtime.subscribe(() => this.notify());
     this.personal.topics.subscribe(() => this.notify());
   }
@@ -209,7 +222,12 @@ export class Aide {
   }
 
   async outputDelivered(outputId: string) { if (this.outputStore.get(outputId)) this.outputStore.delivered(outputId); }
-  async outputSending(outputId: string) { if (this.outputStore.get(outputId)) this.outputStore.begin(outputId); }
+  async outputSending(outputId: string, expected?: { target: import("@compforge/aide-plugin").Address; text: string }) {
+    if (!this.outputStore.get(outputId)) return true; // Channel-owned fixed system notices.
+    const output = await this.outputStore.prepare(outputId);
+    if (!["pending", "sending"].includes(output.status.phase) || !output.status.delivery || (expected && (!sameAddress(output.status.delivery.target, expected.target) || output.status.delivery.text !== expected.text))) return false;
+    this.outputStore.begin(outputId); return true;
+  }
   async outputRetry(outputId: string, error: string, nextAttemptAt: string) { if (this.outputStore.get(outputId)) this.outputStore.retry(outputId, error, nextAttemptAt); }
   outputs() { return this.outputStore.list().map(outputView).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
 
@@ -264,6 +282,26 @@ export class Aide {
     return { target: id === "web" ? webAddress(topicId) : larkPersonAddress(identity.scope, identity.id), receivers: [personRef(person)] };
   }
 
+  private async outputAudience(target: import("@compforge/aide-plugin").Address) {
+    assertChannelDelivery(target, enabledLarkApps(this.options.config?.channels ?? {}));
+    let identities: PersonIdentity[] = [], complete = true, privateDestination = false;
+    if (isChannelAddress(target) && target.channelId === "web") { identities = [LOCAL_ME]; privateDestination = true; }
+    else {
+      const endpoint = larkEndpoint(target);
+      if (endpoint?.receiveIdType === "open_id") { identities = [{ provider: "lark", scope: endpoint.appId, id: endpoint.receiveId }]; privateDestination = true; }
+      else if (this.options.destinationAudience) {
+        const resolved = await this.options.destinationAudience(target);
+        identities = resolved.identities; complete = resolved.complete; privateDestination = resolved.private;
+      } else complete = false;
+    }
+    const people = [];
+    for (const identity of identities) {
+      const person = (await this.catalog.client.page<Person, PersonStatus>(PERSON_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "identity", value: JSON.stringify([identity.provider, identity.scope, identity.id]) } })).items[0];
+      if (person && !person.metadata.deletionTimestamp) people.push(person); else complete = false;
+    }
+    return { people: [...new Map(people.map(p => [p.metadata.uid, p])).values()], complete, private: privateDestination };
+  }
+
   private async initializePeople() {
     for (const config of this.requirementConnections) {
       if (!config.me) continue;
@@ -286,6 +324,7 @@ export class Aide {
     for (;;) {
       const before = JSON.stringify([this.inputs.list(), this.topics.list()]);
       await this.personal.settled();
+      for (const output of this.outputStore.list()) if (output.status.phase === "pending") await this.disclosure.reconcile(output.metadata.name);
       const after = JSON.stringify([this.inputs.list(), this.topics.list()]);
       if (before === after) break;
     }

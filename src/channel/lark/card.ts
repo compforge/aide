@@ -18,7 +18,7 @@ export type LarkProgressReader = (topicId: string) => LarkProgress[];
 const labels = replyLabels;
 
 /**
- * @spec Lark reads the same thought/text/tool projection as Web; progress is never persisted as a business Message.
+ * @spec External progress exposes lifecycle only; private thought/tool text never bypasses Output disclosure. Delivered replies may be mirrored.
  * @link docs/channel/lark.md
  */
 export function larkProgress(aide: ChannelService, topicId: string): LarkProgress[] {
@@ -45,16 +45,15 @@ export function larkProgress(aide: ChannelService, topicId: string): LarkProgres
     // A Topic may produce Outputs for another destination; a progress card cannot deliver those.
     const address = input.spec.source;
     const addressed = channelOutputs(aide).filter((o) => address && sameAddress(o.target, address));
-    const responses = addressed.filter((m) => ids.has(m.id));
+    const responses = addressed.filter((m) => ids.has(m.id) && m.status.phase === "delivered");
     const text = responses.map((message) => message.text).join("\n\n");
-    const think = (aide.topics.resource(topicId)?.spec.parentRef ? [] : blocks).filter((block) => block.type === "thought" || block.type === "tool")
-      .map((block) => block.type === "tool" ? `工具：${block.content} · ${block.status ?? "执行中"}` : block.content).join("\n\n");
+    const think = ""; // Private reasoning and tool output stay on Me's local Web surface.
     const points = Array.from(text), thought = Array.from(think);
     const result: LarkProgress = { id: input.metadata.name, phase, think: thought.length > 2000 ? "（仅展示最近过程，完整记录可在网页查看）\n" + thought.slice(-2000).join("") : think,
       content: points.slice(0, 4000).join(""), overflow: points.length > 4000,
-      process: processPreview(phase, blocks),
+      process: { thought: labels[phase] ?? "处理中", tool: "", summary: labels[phase] ?? "处理中" },
       liveAnswer: phase === "running" || phase === "queued" ? answerPreview(text, phase) : undefined,
-      messageIds: responses.map((message) => message.id) };
+      messageIds: [] };
     // Include the nested JSON escaping of the CardKit envelope in the size budget.
     while (Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(result, false)) })) > 28_000) {
       if (Array.from(result.think).length > 500) result.think = Array.from(result.think).slice(-500).join("");
@@ -90,7 +89,7 @@ export function cardPreviews(view: LarkProgress) {
   return {
     thought_preview: { text: { tag: "plain_text", content: live ? `思考：${process.thought}` : `过程：${process.summary}`, lines: 1 } },
     tool_preview: { text: { tag: "plain_text", content: live ? `工具：${process.tool}` : "", lines: 1 } },
-    answer_preview: { text: { tag: "plain_text", content: `回答：${view.liveAnswer ?? answerPreview(cardContent(view).trim(), view.phase)}`,
+    answer_preview: { text: { tag: "plain_text", content: `回答：${view.phase === "done" && !view.content.trim() ? "暂无对外回复" : view.liveAnswer ?? answerPreview(cardContent(view).trim(), view.phase)}`,
       lines: view.phase === "failed" ? 1000 : 3 } },
   };
 }

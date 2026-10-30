@@ -4,7 +4,7 @@ import { createWebAssets } from "./assets.ts";
 import { visibleOutput } from "../channel/output.ts";
 import { webAddress } from "../channel/address.ts";
 import { SUMMARY_CHARS } from "../../plugins/personal/context.ts";
-import { PersonSchema } from "../../plugins/personal/person/model.ts";
+import { PersonRefSchema, PersonSchema } from "../../plugins/personal/person/model.ts";
 import { CHANNELS, bindChannelInput } from "../channel/definition.ts";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { z } from "zod";
@@ -193,6 +193,15 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
           throw error;
         }
         return;
+      }
+      if (request.method === "POST" && url.pathname === "/topics/people") {
+        const input = z.object({ id: z.string(), uid: z.string(), version: z.string(), people: z.array(PersonRefSchema).max(1000) }).strict().parse(await body(request));
+        await aide.start();
+        const topic = aide.topics.resource(input.id);
+        if (!topic || topic.metadata.uid !== input.uid || topic.metadata.resourceVersion !== input.version) { json(response, 409, { error: "Topic changed; reload before editing participants" }); return; }
+        await aide.topics.setPeople(input.id, input.uid, input.version, input.people);
+        log.info({ topicUid: input.uid, people: input.people.map(p => p.uid) }, "Topic disclosure participants updated by Me");
+        json(response, 200, { updated: true }); return;
       }
       if (request.method === "POST" && url.pathname === "/persons/merge") {
         const input = MergePersonSchema.parse(await body(request));

@@ -441,6 +441,7 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   const root = mkdtempSync(join(tmpdir(), "aide-message-runner-"));
   const configFile = join(root, "config.yaml");
   writeFileSync(configFile, JSON.stringify({ connectors: {lark: {kind:"messages",version:"v1",config:{ appId: "cli_app", userId: "ou_me", me: [{ appId: "cli_app", openId: "ou_me" }] }}},
+    channels: { test: { kind: "lark", label: "Test bot", enabled: true, appId: "cli_app", appSecret: "test-secret" } },
     plugins: { personal: { sources: { lark: {} } } } }));
   let searches = 0;
   const prompts: string[] = [];
@@ -448,6 +449,8 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
     const activation = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
     return activation.inputs[0].description.includes("Origin: source/") ? "source-private-reply" : "channel-reply";
   }, async execute() { throw new Error("Unexpected work"); } }, root, prompts, root, "cli_app"), config: loadConfig(configFile),
+    destinationAudience: async () => ({ identities: [{ provider: "web", scope: "local", id: "me" }], complete: true, private: false }),
+    checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }),
     connectors: { ...emptyConnectors, messages: {
       async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
       async search(query: MessageSearchQuery) {
@@ -505,7 +508,7 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   await channel.dispatch(); await aide.settled(); await channel.deliver();
   assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }]);
   const reply = aide.outputs().find(output => output.topicId === groupId && output.text === "channel-reply")!;
-  assert.ok(larkProgress(aide, groupId).some(view => view.messageIds.includes(reply.id)), "Cards match the incoming address even without a Topic default address");
+  assert.ok(larkProgress(aide, groupId).some(view => view.content.includes(reply.text)), "Cards match the incoming address even without a Topic default address");
   const store = aide.personal.topics;
   assert.equal(store.list().filter((c) => c.id === groupId).length, 1);
   assert.equal(store.inputs(groupId).length, 3);

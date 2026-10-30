@@ -6,6 +6,7 @@ type LiveActivity = NonNullable<TopicView['meta']['activity']> & {
   harnesses: TopicBlock[]; answers: string[];
   blocks: (TopicBlock & { kind: string; text: string })[];
 };
+const outputText = (block: TopicBlock) => block.label ? `**${block.label}**\n\n${block.content}` : block.content;
 const inputLabels: Record<string, string> = { queued: '待处理', running: '处理中', done: '已处理', quiet: '已查看 · 保持安静', failed: '处理失败' };
 
 export function createTimeline() {
@@ -131,7 +132,7 @@ export function createTimeline() {
       const group = block.group_id ? roots.filter((item) => item.group_id === block.group_id) : [block];
       const executions = new Set(group.filter((item) => item.type === 'execution').map((item) => item.id));
       const children = history.filter((item) => executions.has(item.parent_id ?? ''));
-      const answers = group.filter((item) => item.type === 'message' && item.role === 'aide').map((item) => item.content);
+      const answers = group.filter((item) => item.type === 'message' && item.role === 'aide').map(outputText);
       const answer = answers.join('\n\n');
       const process = children.filter((item) => item.type !== 'text' || !answers.includes(item.content));
       const failed = group.some((item) => item.status === 'failed' || item.status === 'interrupted');
@@ -215,7 +216,7 @@ export function createTimeline() {
       (block.status === 'running' || (activity && block.group_id === activity.id))).map((block) => block.id));
     renderActivity(activity && { ...activity,
       harnesses: view.blocks.filter((block) => block.type === 'execution' && liveIds.has(block.id)),
-      answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === activity.id).map((block) => block.content),
+      answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === activity.id).map(outputText),
       blocks: view.blocks.filter((block) => liveIds.has(block.parent_id ?? ''))
         .map((block) => ({ ...block, kind: block.type, text: block.content })) });
   }
