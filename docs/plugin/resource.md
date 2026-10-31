@@ -4,11 +4,24 @@
 
 ## 定义与校验
 
-Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。 `ResourceDefinition` 统一声明 type、spec/status schema、可选 validator、printer、indexes 和 retention。Host 在恢复资源、启动 Controller 前加载声明；未知类型不能写入。进程内插件通过 resources 提供声明，独立 Runner 的 PackageEntry 通过 resourcesUrl 指向默认导出定义数组的纯模块，Host 直接加载它。声明模块不导入 Runner 或 Host 实现，不执行 I/O。
+Resource 用类型、namespace、name 和 uid 表达身份，spec 保存目标，status 保存插件的业务进展。 `ResourceDefinition` 统一声明 type、spec/status schema、可选 validator、printer、indexes 和 retention。Host 在恢复资源、启动 Controller 前加载声明；未知类型不能写入。进程内插件通过 resources 提供声明，独立 Runner 的 PackageEntry 通过 resourcesUrl 指向默认导出定义数组的纯模块，Host 与 Runner 分别加载同一声明模块。声明模块不导入 Runner 或 Host 实现，不执行 I/O。
 
 资源统一属于插件实例与 namespace，资源和调度身份不携带 sessionId。底座不预注册任何业务资源。每种资源可以没有 Controller，也可以由多个具名 Controller 观察。
 
 所有创建、更新和删除请求都在存储事务内经过 Schema 与 Validator，包括 Agent 工具、Source 与 commit。Schema 的规范化输出作为持久数据；Validator 可读取同一作用域内的事务快照，包含当前 commit 已完成的前序写入。它不能执行异步工作或外部副作用。校验、引用计算或配额失败会回滚整笔写入。
+
+### 集合值与进程边界
+
+Resource 的 spec/status 可使用 `@compforge/ts-stdx/collections` 的 `KeyedSet<T, K>`。
+成员身份由 schema 的 key selector 决定；schema.parse 必须同时接受 JSON 成员数组和已经解码的集合，并返回规范化的集合。
+需要稳定指纹的字段由 schema 统一排序。底座不猜测 `people`、`receivers` 等业务字段，也不传输 selector 函数。
+
+持久化和 IPC 将集合编码为成员数组；读取、分页、事务校验及 Runner 的事件/执行快照通过声明恢复类型。
+Merge Patch、JSON Patch（包括 test）操作编码后的 JSON 文档，完成后重新经过 schema。
+底座按数据投影比较变化，并递归克隆和冻结集合及成员；只读快照禁止 add/delete/clear。
+需要修改时复制集合，再通过 Resource 更新 API 提交；不要直接使用 structuredClone 或 Node 深比较处理含 KeyedSet 的资源。
+HTTP 和工具的展示 DTO 仍显式投影为 JSON 数组。
+
 
 ## API 版本与演进
 

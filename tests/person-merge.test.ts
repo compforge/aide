@@ -1,3 +1,4 @@
+import { personRefs } from "../plugins/personal/person/model.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
 import { personContext } from "../agents/chief/person.ts";
@@ -49,7 +50,7 @@ test("Same names only select candidates; merging appends to the chosen Person wi
   assert.deepEqual(new Set(browsePersons(ResourceStorage.open(f.home), marks, { name: target.spec.name, excludeUid: target.metadata.uid }).items.map(p => p.uid)), new Set([source.metadata.uid, namesake.metadata.uid]));
   const sender = personRef(source), inputs = new InputStore(f.home), outputs = new OutputStore(f.home);
   const input = inputs.submit("test", "historical", { origin: "channel", originId: "web", text: "历史消息", sender });
-  const output = outputs.create("test", "reply", { text: "历史回复", target: webAddress("topic"), receivers: [sender], topicId: "topic",
+  const output = outputs.create("test", "reply", { text: "历史回复", target: webAddress("topic"), receivers: personRefs([sender]), topicId: "topic",
     topic: { apiVersion: "aide.dev/v1alpha4", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } });
   const merged = await f.persons.merge(version(source), version(target));
   assert.equal(merged.metadata.uid, target.metadata.uid);

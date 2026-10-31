@@ -51,7 +51,7 @@ export function browseInputs(store: InputStore, query: InputBrowseQuery = {}) {
     const rows = store.storage.db.prepare(`SELECT data, ${connector} AS connector, ${completed} AS completed, ${errors} AS errors
       FROM resources WHERE ${where} ORDER BY created DESC, key DESC LIMIT ? OFFSET ?`).all(...args, size, (bounds.page - 1) * size);
     return { ...bounds, items: rows.map(row => ({
-      input: JSON.parse(row.data as string).object as Resource<InputSpec, InputStatus>,
+      input: store.storage.decode("personal", row.data as string).object as Resource<InputSpec, InputStatus>,
       connector: row.connector as string, state: row.completed ? "completed" as const : "pending" as const, errors: Boolean(row.errors),
     })) };
   });

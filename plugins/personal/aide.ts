@@ -1,3 +1,4 @@
+import { personRefs } from "./person/model.ts";
 import { summaryText, summaryReference } from "./note/summary.ts";
 import { invalidateAssignment } from "./input/assignment.ts";
 import { isCapacityInput } from "./input/model.ts";
@@ -464,7 +465,7 @@ export class Personal {
         const identity = (id: string) => ({ provider: "lark", scope: observation.accountId!, id });
         if (observation.sender?.type === "user" && observation.sender.id) sender = personRef(await this.options.persons.observe(identity(observation.sender.id), observation.sender.name));
         // Only already identified humans are recipients; bot/unresolved mentions remain observation evidence.
-        receivers = await knownReceivers(this.options.persons, observation.accountId, observation.mentions ?? []);
+        receivers = personRefs(await knownReceivers(this.options.persons, observation.accountId, observation.mentions ?? []));
       }
     }
     const fact = await this.topics.submit(id, { attention: InputAttention.Immediate, topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,

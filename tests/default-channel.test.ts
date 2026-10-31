@@ -30,11 +30,16 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   await aide.persons.initialize();
   const group = larkAddress("cli_work", "oc_group");
   await aide.topics.ensure("group-topic", group);
-  const notification = await aide.topics.say("group-topic", undefined, "需要你关注", undefined, { idempotencyKey: "notice" });
+  const intendedMe = personRef((await aide.persons.findIdentity({ provider: "lark", scope: "cli_work", id: "ou_me" }))!);
+  const notification = await aide.topics.say("group-topic", undefined, "需要你关注", undefined, { idempotencyKey: "notice", receivers: [intendedMe, intendedMe] });
   const original = aide.outputStore.get(notification.outputId)!;
   assert.deepEqual(original.spec.target, larkPersonAddress("cli_work", "ou_me"));
-  assert.equal(original.spec.receivers?.[0]?.uid, (await aide.persons.findIdentity({ provider: "lark", scope: "cli_work", id: "ou_me" }))!.metadata.uid);
+  assert.equal(original.spec.receivers?.toJSON()[0]?.uid, (await aide.persons.findIdentity({ provider: "lark", scope: "cli_work", id: "ou_me" }))!.metadata.uid);
   assert.equal(aide.topics.inputs().length, 0);
+  const me = original.spec.receivers!.toJSON()[0]!;
+  const duplicate = await aide.topics.say("group-topic", undefined, "需要你关注", undefined, { idempotencyKey: "notice", receivers: [me, me] });
+  assert.deepEqual(duplicate, notification);
+  await assert.rejects(aide.topics.say("group-topic", undefined, "不同成员", undefined, { receivers: [{ ...me, uid: "someone-else" }] }), /Default say contacts Me/);
   const sent: Array<{ to: string; type?: string; text: string }> = [];
   const channel = new LarkChannel(home, "cli_work", aide, { start: async () => {}, close() {}, async chatName() { return undefined; }, async send(to, text, _id, type) { sent.push({ to, text, type }); } }, log);
   await aide.reconcileOutput(notification.outputId);
@@ -61,8 +66,8 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   const fresh = await aide.topics.say("group-topic", undefined, "新通知");
   assert.deepEqual(aide.outputStore.get(fresh.outputId)!.spec.target, larkPersonAddress("cli_personal", "ou_personal"));
   const personal = (await aide.persons.findIdentity({ provider: "lark", scope: "cli_personal", id: "ou_personal" }))!;
-  assert.deepEqual(aide.outputStore.get(fresh.outputId)!.spec.receivers, [personRef(personal)]);
-  assert.equal(personal.metadata.uid, original.spec.receivers![0]!.uid, "Both Channels contact the same Person using different accounts");
+  assert.deepEqual(aide.outputStore.get(fresh.outputId)!.spec.receivers?.toJSON(), [personRef(personal)]);
+  assert.equal(personal.metadata.uid, original.spec.receivers!.toJSON()[0]!.uid, "Both Channels contact the same Person using different accounts");
 });
 
 test("Me is optional for replies and must be resolved in the sending app's scope", async t => {
@@ -150,7 +155,7 @@ test("Configuring existing Persons as Channel Me consolidates their accounts wit
   assert.equal((await aide.persons.findIdentity(LOCAL_ME))!.metadata.uid, web.metadata.uid);
   assert.ok(marked.spec.identities.some(i => i.scope === "cli_personal" && i.id === "ou_personal"));
   const output = await aide.topics.say("notice", undefined, "默认联系我");
-  assert.deepEqual(aide.outputStore.get(output.outputId)!.spec.receivers, [personRef(marked)]);
+  assert.deepEqual(aide.outputStore.get(output.outputId)!.spec.receivers?.toJSON(), [personRef(marked)]);
   assert.deepEqual(aide.outputStore.get(output.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_me"));
   await aide.close();
   // Connector knowledge alone neither selects the default recipient nor marks this Channel's sender as Me.
@@ -178,7 +183,7 @@ test("Shared say resolves Person identities by Channel, keeps Aide as sender and
   const to = { personId: person.metadata.name, uid: person.metadata.uid };
   const sent = await aide.topics.say("default", undefined, "我是 Aide，受托询问部署进展。", undefined, { to, channelId: "work", idempotencyKey: "question" });
   assert.deepEqual(aide.outputStore.get(sent.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_colleague"));
-  assert.deepEqual(aide.outputStore.get(sent.outputId)!.spec.receivers, [personRef(person)]);
+  assert.deepEqual(aide.outputStore.get(sent.outputId)!.spec.receivers?.toJSON(), [personRef(person)]);
   await assert.rejects(aide.topics.say("default", undefined, "bad", undefined, { to }), /requires channelId/);
   await assert.rejects(aide.topics.say("default", undefined, "bad", undefined, { to, channelId: "personal" }), /needs one Lark identity/);
   await assert.rejects(aide.topics.say("default", undefined, "bad", undefined, { to: { ...to, uid: "stale" }, channelId: "work" }), /Unknown Person/);

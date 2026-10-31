@@ -1,3 +1,4 @@
+import { freezeResourceValue as deepFreeze } from "../../../resource-value.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { Resource, ResourceCommit, ResourceClient as PublicResourceClient, ResourceListOptions, ResourcePageOptions, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 
@@ -39,12 +40,6 @@ export type ResourceAdmission = (type: ResourceType, init: { name: string; spec:
   patchStatus<S, T>(resource: Readonly<Resource<S, T>>, patch: Partial<T>): Readonly<Resource<S, T>>;
 }) => Resource<unknown, unknown> | undefined;
 
-function deepFreeze<T>(value: T): T {
-  if (!value || typeof value !== "object" || Object.isFrozen(value)) return value;
-  Object.freeze(value);
-  for (const child of Object.values(value)) deepFreeze(child);
-  return value;
-}
 
 /** Isolates Plugin-owned state by PluginInstance. */
 export function createResourceClient(

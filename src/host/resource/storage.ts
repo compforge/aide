@@ -1,3 +1,4 @@
+import { cloneResourceValue } from "../../resource-value.ts";
 import { ResourcePages } from "./pages.ts";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync, existsSync } from "node:fs";
@@ -134,6 +135,7 @@ export class ResourceStorage {
         if (!row) return;
         const resource = (JSON.parse(row.data as string) as StoredResource).object;
         if (resource.apiVersion !== type.apiVersion || resource.kind !== type.kind) return;
+        this.parse(scope, resource);
         return resource as Resource<S, T>;
       },
       list: <S, T>(type: ResourceType, options?: Parameters<ResourceValidationContext["list"]>[1]) => {
@@ -143,7 +145,7 @@ export class ResourceStorage {
           ? this.db.prepare("SELECT r.data FROM resource_indexes i JOIN resources r ON r.key=i.source WHERE r.scope=? AND r.kind=? AND i.name=? AND i.value=? ORDER BY r.created,r.rowid")
             .all(scope, kindKey(type), options.matchIndex.name, options.matchIndex.value)
           : this.db.prepare("SELECT data FROM resources WHERE scope=? AND kind=? ORDER BY created,rowid").all(scope, kindKey(type));
-        return rows.map(row => (JSON.parse(row.data as string) as StoredResource).object)
+        return rows.map(row => { const resource = (JSON.parse(row.data as string) as StoredResource).object; this.parse(scope, resource); return resource; })
           .filter(r => r.apiVersion === type.apiVersion && r.kind === type.kind && (!options?.namespace || r.metadata.namespace === options.namespace)) as Resource<S, T>[];
       },
     };
@@ -163,7 +165,7 @@ export class ResourceStorage {
     const definition = this.definitions.get(this.definitionKey(scope, resource));
     this.db.prepare("DELETE FROM resource_indexes WHERE source=?").run(key);
     for (const [name, values] of Object.entries(definition?.indexes ?? {})) {
-      for (const value of new Set(values(structuredClone(resource)))) {
+      for (const value of new Set(values(cloneResourceValue(resource)))) {
         if (typeof value !== "string") throw new Error(`Invalid index value: ${name}`);
         this.db.prepare("INSERT INTO resource_indexes VALUES (?,?,?)").run(key, name, value);
       }
@@ -171,7 +173,7 @@ export class ResourceStorage {
     this.db.prepare("DELETE FROM resource_ordered_indexes WHERE source=?").run(key);
     for (const [name, entries] of Object.entries(definition?.orderedIndexes ?? {})) {
       if (definition?.indexes?.[name]) throw new Error(`Duplicate resource index: ${name}`);
-      for (const entry of entries(structuredClone(resource))) {
+      for (const entry of entries(cloneResourceValue(resource))) {
         if (typeof entry.value !== "string" || typeof entry.order !== "string") throw new Error(`Invalid ordered index entry: ${name}`);
         this.db.prepare("INSERT INTO resource_ordered_indexes VALUES (?,?,?,?,?,?,?,?,?)").run(
           key, name, entry.value, scope, resource.apiVersion, resource.kind, resource.metadata.namespace, entry.order, resource.metadata.name);
@@ -180,7 +182,7 @@ export class ResourceStorage {
     let released: string | undefined;
     let refs: readonly string[] = [];
     try {
-      const snapshot = structuredClone(resource);
+      const snapshot = cloneResourceValue(resource);
       released = resource.metadata.deletionTimestamp ? undefined : definition?.retention?.releasedAt(snapshot);
       refs = definition?.retention?.references(snapshot) ?? [];
       if (released && !Number.isFinite(Date.parse(released))) throw new Error("Invalid resource release time");
@@ -197,11 +199,17 @@ export class ResourceStorage {
   }
   onRetentionError?: (resource: Resource<unknown, unknown>, error: unknown) => void;
   has(key: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM resources WHERE key=?").get(key)); }
+  /** Decode custom SQL results through the same schema boundary as get/list/page. */
+  decode<T extends StoredResource = StoredResource>(scope: string, data: string): T {
+    const stored = JSON.parse(data) as T;
+    this.parse(scope, stored.object);
+    return stored;
+  }
   read<T extends StoredResource = StoredResource>(key: string, touch = false): T | undefined {
-    const row = this.db.prepare("SELECT data FROM resources WHERE key=?").get(key);
+    const row = this.db.prepare("SELECT scope,data FROM resources WHERE key=?").get(key);
     if (!row) return;
     if (touch) this.db.prepare("UPDATE resources SET accessed=? WHERE key=?").run(Date.now(), key);
-    return JSON.parse(row.data as string) as T;
+    return this.decode<T>(row.scope as string, row.data as string);
   }
   *keys(scope: string, prefix = "", chronological = false): Iterable<string> {
     for (const row of this.db.prepare(`SELECT key FROM resources WHERE scope=? AND substr(key,1,?)=? ORDER BY ${chronological ? "created,rowid" : "key"}`).iterate(scope, prefix.length, prefix)) yield row.key as string;
@@ -217,11 +225,11 @@ export class ResourceStorage {
   validateChange(scope: string, old: Resource<unknown, unknown> | undefined, resource: Resource<unknown, unknown>): void {
     const definition = this.definition(scope, resource);
     const context = this.validationContext(scope);
-    const current = structuredClone(resource);
+    const current = cloneResourceValue(resource);
     const result: unknown = old
       ? (!old.metadata.deletionTimestamp && current.metadata.deletionTimestamp
-        ? definition.validator?.delete?.(structuredClone(old), context)
-        : definition.validator?.update?.(structuredClone(old), current, context))
+        ? definition.validator?.delete?.(cloneResourceValue(old), context)
+        : definition.validator?.update?.(cloneResourceValue(old), current, context))
       : definition.validator?.create?.(current, context);
     if (result && typeof (result as { then?: unknown }).then === "function") throw new Error("Resource validation must be synchronous");
   }
@@ -240,7 +248,7 @@ export class ResourceStorage {
       this.writtenKeys.add(key);
       this.indexLifecycle(key, scope, resource);
       if (!old || old.metadata.resourceVersion !== resource.metadata.resourceVersion) {
-        const snapshot = structuredClone(resource);
+        const snapshot = cloneResourceValue(resource);
         for (const listener of this.writeListeners) {
           this.afterCommit(() => listener(scope, snapshot, old));
         }
@@ -272,11 +280,12 @@ export class ResourceStorage {
         if (enough()) break;
         if (this.writtenKeys.has(row.key as string)) continue;
         const resource = (JSON.parse(row.data as string) as StoredResource).object;
+        this.parse(row.scope as string, resource);
         const retention = this.definition(row.scope as string, resource).retention;
         // @spec Candidate release time never substitutes for current dependency checks.
         if (retention?.canEvict && !retention.canEvict(resource, this.validationContext(row.scope as string))) continue;
         this.remove(row.key as string);
-        this.evicted.push({ scope: row.scope as string, resource: (JSON.parse(row.data as string) as StoredResource).object });
+        this.evicted.push({ scope: row.scope as string, resource });
       }
     };
     if (kindFull) {

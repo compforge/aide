@@ -1,3 +1,5 @@
+import { decodeResources, resourceJSON } from "../resource-value.ts";
+import type { ResourceDefinition } from "@compforge/aide-plugin";
 import { hostOperation, type HostOperation } from "../protocol/ipc.ts";
 import { runnerExecution } from "./execution.ts";
 import type { RuntimeScope } from "../protocol/runtime.ts";
@@ -37,6 +39,7 @@ interface PendingCall {
   readonly reject: (error: unknown) => void;
 }
 
+let resourceDefinitions: readonly ResourceDefinition[] = [];
 const handlers = new Map<string, (...args: never[]) => unknown>();
 const cleanups: Array<() => Promise<void> | void> = [];
 const pendingHostCalls = new Map<number, PendingCall>();
@@ -48,7 +51,7 @@ let closing = false;
 
 function send(message: ChildMessage): void {
   if (!process.send) throw new Error("Plugin Runner IPC is unavailable");
-  process.send(message);
+  process.send(resourceJSON(message) as ChildMessage);
 }
 
 function handler(
@@ -239,6 +242,7 @@ async function activate(
       `loaded Package identity ${plugin.pluginId}@${plugin.version} does not match ${entry.pluginId}@${entry.version}`,
     );
   }
+  resourceDefinitions = entry.resourcesUrl ? (await import(entry.resourcesUrl)).default : [];
   controllers = new Controllers(instance.pluginInstanceId, resources, callHost, pluginLogger());
   const registrations: PluginRegistration[] = [];
   let sealed = false;
@@ -354,7 +358,7 @@ async function dispatch(request: RunnerRequest): Promise<unknown> {
     case "controller.enqueue":
       return await controllers!.enqueue(request.controllerId, request.key);
     case "controller.change":
-      return await controllers!.changed(request.controllerId, request.change);
+      return await controllers!.changed(request.controllerId, decodeResources(request.change, resourceDefinitions));
     case "controller.stop":
       return controllers!.stop(request.controllerId);
 
@@ -368,7 +372,7 @@ async function dispatch(request: RunnerRequest): Promise<unknown> {
     case "invoke": {
       const callback = handlers.get(request.handlerId);
       if (!callback) throw new Error(`Unknown Plugin handler: ${request.handlerId}`);
-      return await callback(...request.args as never[]);
+      return await callback(...decodeResources(request.args, resourceDefinitions) as never[]);
     }
     case "close":
       await closeBinding();
@@ -388,7 +392,10 @@ function handleParentReply(reply: ParentReply): void {
       outsideHostHandlingMs: reply.hostElapsedMs === undefined ? null : Math.max(0, elapsedMs - reply.hostElapsedMs),
     } });
   }
-  if (reply.ok) pending.resolve(reply.value);
+  if (reply.ok) {
+    try { pending.resolve(decodeResources(reply.value, resourceDefinitions)); }
+    catch (error) { pending.reject(error); }
+  }
   else pending.reject(restoredError(reply.error));
 }
 

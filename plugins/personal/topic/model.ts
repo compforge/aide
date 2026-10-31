@@ -7,7 +7,7 @@ import type { TopicReview } from "./review.ts";
 export const TOPIC_TYPE = { apiVersion: "aide.dev/v1alpha4", kind: "Topic" } as const;
 export const DEFAULT_TOPIC_ID = "default";
 export interface TopicSpec { address?: Address; id: string; name?: string; default?: boolean; review?: TopicReview;
-  people?: import("../person/model.ts").PersonRef[]; topicKey?: string; parentRef?: ResourceRef & { uid: string } }
+  people?: import("../person/model.ts").PersonRefs; topicKey?: string; parentRef?: ResourceRef & { uid: string } }
 export interface TopicStatus extends ResourceContext {
   weaveReview?: { version: string; at: string };
   noteReviewQueue?: Array<{ noteId: string; version: string }>;

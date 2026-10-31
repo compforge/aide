@@ -197,3 +197,18 @@ test("summary response version identifies its committed content, not a later con
   assert.equal(result.version, committedVersion);
   await assert.rejects(summarizeTopic(f.resources, initial, "live", { version: result.version, summary: "Would overwrite unseen correction" }, 4000), /context changed/);
 });
+
+
+test("reordering or repeating Note people does not refresh its content version or retention age", async t => {
+  const f = await setup(t);
+  const a: PersonRef = { ...PERSON_TYPE, namespace: "v1", name: "a", uid: "person-a" };
+  const b: PersonRef = { ...PERSON_TYPE, namespace: "v1", name: "b", uid: "person-b" };
+  const first = await f.upsert({ text: "Matter", people: [b, a, b] }, "first");
+  const before = await readNote(f.resources, first.noteId);
+  assert.deepEqual(before.people, [a, b]);
+  const again = await f.upsert({ ...first, people: [b, a, a] }, "reorder");
+  assert.equal(again.version, first.version);
+  assert.equal((await readNote(f.resources, first.noteId)).updatedAt, before.updatedAt);
+  const changed = await f.upsert({ ...again, people: [a] }, "remove");
+  assert.notEqual(changed.version, first.version);
+});

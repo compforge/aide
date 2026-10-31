@@ -1,7 +1,7 @@
 import { runnerExecution } from "./execution.ts";
 import { deepFreeze } from "../reconcile/snapshot.ts";
 import { validateSources } from "../reconcile/source.ts";
-import { isDeepStrictEqual } from "node:util";
+import { equalResourceValue } from "../resource-value.ts";
 import type { Controller, PluginLogger, Resource, ResourceClient, ResourceNamespace, ReconcileSnapshot } from "@compforge/aide-plugin";
 import { createReconcileContext } from "../plugin-context.ts";
 import { reconcileKeyId, ReconcileCapacity, ReconcileDueQueue, ReconcileQueue, type ReconcileCapacityLease } from "../reconcile/queue.ts";
@@ -71,7 +71,7 @@ export class Controllers {
           const namespace = init.namespace ?? "v1";
           const existing = await this.resources.get({ ...entry.definition.resourceType, namespace, name: init.name });
           if (existing) {
-            if (!isDeepStrictEqual(existing.spec, init.spec)) throw new Error(`Source conflicts with ${existing.kind}/${init.name}`);
+            if (!equalResourceValue(existing.spec, init.spec)) throw new Error(`Source conflicts with ${existing.kind}/${init.name}`);
             this.background(this.enqueue(id, { ...entry.scope, namespace, resourceId: init.name }));
           } else await this.resources.create(entry.definition.resourceType, init);
         },

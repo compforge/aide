@@ -1,3 +1,4 @@
+import { personRefs } from "../plugins/personal/person/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { personRef, type PersonRef } from "../plugins/personal/person/model.ts";
 import { upsertNote, readNote } from "../plugins/personal/note/service.ts";
@@ -102,7 +103,7 @@ test("an existing Note can be selected as summary and edited through the shared 
   const actor = await f.client.patchStatus(f.topic, { execution: { id: "chief", startedAt: new Date().toISOString() } });
   const a = await f.aide.persons.observe({ provider: "test", scope: "summary", id: "a" });
   const b = await f.aide.persons.observe({ provider: "test", scope: "summary", id: "b" });
-  const people = [personRef(a) as PersonRef, personRef(b) as PersonRef];
+  const people = personRefs([personRef(a), personRef(b)]).toJSON();
   const entry = await upsertNote(f.client, actor, { text: "Stable verified understanding", people: [people[0]] }, "existing");
   const note = await readNote(f.client, entry.noteId);
   const existing = (await f.client.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: note.id }))!;
@@ -122,7 +123,7 @@ test("an existing Note can be selected as summary and edited through the shared 
   const latest = f.aide.topics.resource("summary")!;
   assert.equal((await readSummary(f.client, latest))!.metadata.uid, note.uid);
   assert.equal(latest.status.summaryRevision, result.version);
-  assert.deepEqual((await readSummary(f.client, latest))!.spec.people, people, "omitting people preserves associations");
+  assert.deepEqual((await readSummary(f.client, latest))!.spec.people.toJSON(), people, "omitting people preserves associations");
   await writeSummary(f.client, latest, { text: "Revised understanding", people: [] });
   assert.deepEqual((await readNote(f.client, note.uid)).people, []);
 });
@@ -131,7 +132,7 @@ test("Person summary metadata survives user corrections and merges without copyi
   const f = await fixture(t);
   const a = await f.aide.persons.observe({ provider: "test", scope: "summary", id: "a" });
   const b = await f.aide.persons.observe({ provider: "test", scope: "summary", id: "b" });
-  const people = [personRef(a) as PersonRef, personRef(b) as PersonRef];
+  const people = personRefs([personRef(a), personRef(b)]).toJSON();
   const first = await f.aide.persons.summarize(a.metadata.name, a.metadata.uid, contentVersion(a), "A understanding", undefined, [people[0]!]);
   const second = await f.aide.persons.summarize(b.metadata.name, b.metadata.uid, contentVersion(b), "B understanding", undefined, [people[1]!]);
   const corrected = await f.aide.persons.edit(first.metadata.name, first.metadata.uid, first.metadata.resourceVersion, first.spec, "User corrected understanding");
@@ -139,7 +140,7 @@ test("Person summary metadata survives user corrections and merges without copyi
   assert.equal(corrected.summaryNote!.uid, first.summaryNote!.uid);
   const ref = (p: typeof corrected) => ({ id: p.metadata.name, uid: p.metadata.uid, version: p.metadata.resourceVersion });
   const merged = await f.aide.persons.merge(ref(second), ref(corrected));
-  assert.deepEqual(merged.summaryNote!.people, people);
+  assert.deepEqual(merged.summaryNote!.people, [...people].sort((a, b) => a.uid < b.uid ? -1 : 1));
   assert.deepEqual((await f.aide.persons.read(merged.metadata.name)).summaryNote, merged.summaryNote);
   assert.ok((await readNote(f.client, second.summaryNote!.uid)).text, "source knowledge remains an independent Note");
 });
@@ -226,7 +227,7 @@ test("Note classification-only writes preserve body, associations and the summar
   await upsertNote(f.client, actor, { noteId: summary.id, version: summary.version, sensitivity: "L2", visibility: "root" }, "summary-classification");
   const current = f.aide.topics.resource("summary")!;
   const note = (await readSummary(f.client, current))!;
-  assert.equal(note.spec.text, "Long-term understanding"); assert.deepEqual(note.spec.people, people);
+  assert.equal(note.spec.text, "Long-term understanding"); assert.deepEqual(note.spec.people.toJSON(), people);
   assert.equal(note.spec.visibility, "root"); assert.equal(note.spec.sensitivity, "L2");
   assert.equal(current.status.summaryRevision, noteVersion(note));
 });
@@ -253,4 +254,20 @@ test("Topic review receipts and summary classification commit together", async t
   const current = f.aide.topics.resource("summary")!, note = (await readSummary(f.client, current))!;
   assert.equal(current.status.absorbed![child.metadata.uid], version);
   assert.equal(note.spec.text, "Durable finding"); assert.equal(note.spec.sensitivity, "L2"); assert.equal(note.spec.visibility, "root");
+});
+
+
+test("summary and Topic people are sets; a permutation does not change summary understanding", async t => {
+  const f = await fixture(t);
+  const a = personRef(await f.aide.persons.observe({ provider: "test", scope: "summary", id: "a" })) as PersonRef;
+  const b = personRef(await f.aide.persons.observe({ provider: "test", scope: "summary", id: "b" })) as PersonRef;
+  const topic = await f.client.replace(f.topic, { ...f.topic.spec, people: personRefs([b, a, b]) }, f.topic.status);
+  assert.deepEqual(topic.spec.people?.toJSON().map(p => p.uid), [a.uid, b.uid].sort());
+  const first = await writeSummary(f.client, topic, { text: "Stable", people: [b, a, b] });
+  const before = (await readSummary(f.client, first))!;
+  const next = await writeSummary(f.client, first, { people: [b, a, a] });
+  const after = (await readSummary(f.client, next))!;
+  assert.equal(next.status.summaryRevision, first.status.summaryRevision);
+  assert.equal(after.status.updatedAt, before.status.updatedAt);
+  assert.deepEqual(after.spec.people.toJSON().map(p => p.uid), [a.uid, b.uid].sort());
 });

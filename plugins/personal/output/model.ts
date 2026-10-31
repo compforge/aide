@@ -1,3 +1,4 @@
+import { KeyedSet } from "@compforge/ts-stdx/collections";
 import type { Address } from "@compforge/aide-plugin";
 import type { Resource, ResourceRef } from "@compforge/aide-plugin";
 
@@ -9,7 +10,7 @@ export interface OutputSpec {
   notes?: Array<{ uid: string; version: string; textVersion?: string }>;
   target: Address;
   /** @spec Intended Person references may dangle after deletion; independent of the delivery address and contributing Inputs. */
-  receivers?: ResourceRef[];
+  receivers?: import("../person/model.ts").PersonRefs;
   topic: ResourceRef & { uid: string };
   topicId: string;
   executionId?: string;
@@ -21,7 +22,7 @@ export interface OutputSpec {
 }
 export interface OutputStatus {
   disclosure?: { decision: "allowed" | "denied"; reason: string; checkedAt: string; fingerprint: string; policy?: import("./policy.ts").DisclosurePolicy };
-  delivery?: { replay?: "idempotent" | "once"; target: Address; text: string; receivers: ResourceRef[] };
+  delivery?: { replay?: "idempotent" | "once"; target: Address; text: string; receivers: import("../person/model.ts").PersonRefs };
   phase: "pending" | "sending" | "delivered" | "failed" | "uncertain";
   attempts: number;
   deliveredAt?: string;
@@ -45,9 +46,12 @@ export interface SayInput {
   /** Configured Channel for private Person contact; target selects an explicit group/address. */
   readonly channelId?: string;
   /** Person references; explicit [] suppresses inference from respondToInputId's sender. */
-  readonly receivers?: readonly ResourceRef[];
+  readonly receivers?: Iterable<ResourceRef>;
 }
 /** @spec Acceptance is durable and idempotent; it neither claims delivery nor requests Agent polling. */
 export interface SayReceipt { readonly outputId: string; readonly accepted: true; }
 export type SayResult = VerbResult<SayReceipt>;
 
+/** Compare intent/delivery by Person UID membership; reference serialization is not recipient identity. */
+export const receiverIdentity = <T extends { receivers?: Iterable<ResourceRef> }>(value: T | undefined) => value && ({ ...value,
+  receivers: value.receivers === undefined ? undefined : [...new KeyedSet(person => person.uid!, value.receivers)].map(person => person.uid).sort() });

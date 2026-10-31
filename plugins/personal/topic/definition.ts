@@ -1,4 +1,4 @@
-import { PersonRefSchema } from "../person/model.ts";
+import { PersonRefsSchema } from "../person/model.ts";
 import { validateSummary } from "../note/summary.ts";
 import { candidateVersion } from "../weave/candidates.ts";
 import { NoteWriterSchema } from "../note/model.ts";
@@ -55,7 +55,7 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
 export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   type: TOPIC_TYPE,
   schema: { spec: z.object({ id: z.string(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
-    people: z.array(PersonRefSchema).max(1000).optional(), review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
+    people: PersonRefsSchema(1000).optional(), review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({ conditions: ConditionsSchema, summaryDependencies: z.record(z.string(), z.string()).optional(), organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       weaveReview: z.object({ version: z.string(), at: z.string().datetime() }).strict().optional(),
       weaveRevision: z.number().int().nonnegative().optional(),

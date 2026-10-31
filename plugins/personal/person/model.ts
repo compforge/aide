@@ -1,7 +1,8 @@
+import { KeyedSet } from "@compforge/ts-stdx/collections";
 import { SensitivitySchema } from "../disclosure.ts";
 import type { ResourceContext } from "../context.ts";
 import { z } from "zod";
-import type { Resource, ResourceRef } from "@compforge/aide-plugin";
+import type { Resource } from "@compforge/aide-plugin";
 
 export const PERSON_TYPE = { apiVersion: "aide.dev/v1alpha3", kind: "Person" } as const;
 export const IdentitySchema = z.object({ provider: z.string().trim().min(1), scope: z.string().trim().min(1), id: z.string().trim().min(1) }).strict()
@@ -24,6 +25,17 @@ export const PersonRefSchema = z.object({ apiVersion: z.string().min(1), kind: z
 export type PersonRef = z.infer<typeof PersonRefSchema>;
 export interface PersonStatus extends ResourceContext { updatedAt: string; updatedBy: "user" | "chief" | "connector" }
 export type PersonResource = Resource<Person, PersonStatus>;
-export const personRef = (person: Readonly<PersonResource>): ResourceRef => ({ ...PERSON_TYPE,
-  namespace: person.metadata.namespace, name: person.metadata.name, uid: person.metadata.uid });
+export const personRef = (person: Readonly<PersonResource>): PersonRef => ({ ...PERSON_TYPE,
+  namespace: "v1", name: person.metadata.name, uid: person.metadata.uid });
 export const isMe = (person: Pick<Person, "identities">, me: Me) => person.identities.some((i) => me.identities.some((mark) => identityKey(i) === identityKey(mark)));
+
+/** @spec people and receivers are Person UID sets: order and duplicate entries carry no meaning.
+ * @link docs/personal/disclosure.md
+ * @case tests/output-disclosure.test.ts
+ */
+export type PersonRefs = KeyedSet<PersonRef>;
+/** Canonical UID order makes storage and fingerprints independent of insertion order. */
+export const personRefs = (people: Iterable<PersonRef>): PersonRefs =>
+  new KeyedSet(person => person.uid, [...people].sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0));
+export const PersonRefsSchema = (max?: number) => z.preprocess(value => value instanceof KeyedSet ? [...value] : value,
+  (max === undefined ? z.array(PersonRefSchema) : z.array(PersonRefSchema).max(max)).transform(personRefs));

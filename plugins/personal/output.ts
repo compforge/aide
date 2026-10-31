@@ -1,3 +1,4 @@
+import { PersonRefsSchema } from "./person/model.ts";
 import { type Address, type ResourceCommit, type ResourceRef } from "@compforge/aide-plugin";
 import { OUTPUT_TYPE, type OutputSpec } from "./output/model.ts";
 import type { OutputDraft } from "../../src/output.ts";
@@ -11,7 +12,7 @@ export function outputSpec(c: Readonly<TopicResource>, draft: Pick<OutputDraft, 
   if (!target) throw new Error(`Output target required for Topic: ${c.spec.id}`);
   return { text: draft.text, topicId: c.spec.id,
     topic: { apiVersion: c.apiVersion, kind: c.kind, namespace: c.metadata.namespace, name: c.metadata.name, uid: c.metadata.uid },
-    target, ...(receivers !== undefined ? { receivers } : {}), ...provenance };
+    target, ...(receivers !== undefined ? { receivers: PersonRefsSchema().parse(receivers) } : {}), ...provenance };
 }
 export function outputWrite(c: Readonly<TopicResource>, draft: OutputDraft,
   association: Parameters<typeof outputSpec>[2] = {}): ResourceCommit {

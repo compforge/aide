@@ -68,7 +68,7 @@ export class Persons {
     const disclosure = mergeSummaryDisclosure(texts.flatMap(note => note?.spec.text ? [note.spec] : []));
     if (!disclosure) return { merged: 0, conflict: { personIds: people.map(p => p.metadata.name), reason: "Summary disclosure scopes differ; classify the summaries before merging" } };
     const status = this.status("connector");
-    const prepared = await prepareSummary(this.resources, target, { text: summary, people: texts.flatMap(n => n?.spec.people ?? []), ...disclosure });
+    const prepared = await prepareSummary(this.resources, target, { text: summary, people: texts.flatMap(n => [...n?.spec.people ?? []]), ...disclosure });
     await this.resources.commit([
       ...prepared.writes,
       ...sources.map(resource => ({ operation: "delete" as const, resource })),
@@ -118,7 +118,7 @@ export class Persons {
       { operation: "replace", resource: current, spec: PersonSchema.parse(spec), status: { ...status, ...prepared.status } }]);
     return this.view(results.at(-1) as PersonResource, summary ?? current.summaryText, noteReference(prepared.note) ?? current.summaryNote);
   }
-  async summarize(id: string, uid: string, version: string, summary: string, writer?: NoteStatus["writer"], people?: NoteSpec["people"], disclosure?: import("../disclosure.ts").MaterialDisclosure) {
+  async summarize(id: string, uid: string, version: string, summary: string, writer?: NoteStatus["writer"], people?: Iterable<import("./model.ts").PersonRef>, disclosure?: import("../disclosure.ts").MaterialDisclosure) {
     const current = await this.read(id, uid);
     if (contentVersion(current) !== version) throw new Error("Person summary version conflict; read it again");
     const committed = await writeSummary(this.resources, current, { text: summary, people, ...disclosure }, writer, version, this.status("chief"));

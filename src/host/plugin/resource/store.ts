@@ -4,7 +4,7 @@ import jsonPatch from "fast-json-patch";
 import mergePatch from "json-merge-patch";
 import { ResourceStorage } from "../../resource/storage.ts";
 import { assertPathSegment, assertResourceUid, validateResourceType } from "./type.ts";
-import { isDeepStrictEqual } from "node:util";
+import { equalResourceValue, resourceJSON, cloneResourceValue } from "../../../resource-value.ts";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
@@ -98,16 +98,16 @@ function jsonObject<T>(name: string, value: T): T {
   }
   let text: string;
   try {
-    text = JSON.stringify(value);
+    text = JSON.stringify(resourceJSON(value));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`${name} must contain only JSON values: ${detail}`);
   }
   const parsed = JSON.parse(text) as unknown;
-  if (!isDeepStrictEqual(value, parsed)) {
+  if (!equalResourceValue(value, parsed)) {
     throw new Error(`${name} must contain only lossless JSON values`);
   }
-  return parsed as T;
+  return cloneResourceValue(value);
 }
 
 function annotationMap(
@@ -329,10 +329,10 @@ export class PluginResourceStore {
         namespace,
       ).object;
       if (
-        !isDeepStrictEqual(current.spec, spec) ||
+        !equalResourceValue(current.spec, spec) ||
         !containsStringMap(current.metadata.labels, labels) ||
         !containsStringMap(current.metadata.annotations, annotations) ||
-        !isDeepStrictEqual(current.metadata.owner, owner)
+        !equalResourceValue(current.metadata.owner, owner)
       ) {
         throw new Error(
           `Controller Source input conflicts with existing Resource: ${type.kind}/${name}`,
@@ -398,11 +398,11 @@ export class PluginResourceStore {
 
   /** @spec Desired state and its initial observation commit atomically under one resource version. */
   replace<TSpec, TStatus>(type: ResourceType, name: string, spec: TSpec, status: TStatus, options: MutationOptions = {}): PluginResource<TSpec, TStatus> {
-    const desired = jsonObject("spec", spec);
-    const observed = jsonObject("status", status);
+    const desired = this.storage.definition(this.scope, type).schema.spec.parse(jsonObject("spec", spec)) as TSpec;
+    const observed = this.storage.definition(this.scope, type).schema.status.parse(jsonObject("status", status)) as TStatus;
     return this.mutate<TSpec, TStatus>(type, name, options, (current) => {
-      const specChanged = !isDeepStrictEqual(current.object.spec, desired);
-      if (!specChanged && isDeepStrictEqual(current.object.status, observed)) return current;
+      const specChanged = !equalResourceValue(current.object.spec, desired);
+      if (!specChanged && equalResourceValue(current.object.status, observed)) return current;
       return { ...current, object: { ...current.object, spec: desired, status: observed,
         metadata: { ...current.object.metadata,
           generation: current.object.metadata.generation + (specChanged ? 1 : 0),
@@ -416,9 +416,9 @@ export class PluginResourceStore {
     spec: TSpec,
     options: MutationOptions = {},
   ): PluginResource<TSpec, TStatus> {
-    const nextSpec = jsonObject("spec", spec);
+    const nextSpec = this.storage.definition(this.scope, type).schema.spec.parse(jsonObject("spec", spec)) as TSpec;
     return this.mutate<TSpec, TStatus>(type, name, options, (current) => {
-      if (isDeepStrictEqual(current.object.spec, nextSpec)) return current;
+      if (equalResourceValue(current.object.spec, nextSpec)) return current;
       return {
         ...current,
         object: {
@@ -457,19 +457,19 @@ export class PluginResourceStore {
       }
     } else throw new Error("Unknown resource patch type");
     return this.mutate<TSpec, TStatus>(type, name, options, current => {
-      const document = structuredClone(current.object);
-      const next = (patch.type === "merge" ? mergePatch.apply(document, structuredClone(patch.value))
-        : jsonPatch.applyPatch(document, structuredClone(patch.value) as jsonPatch.Operation[], true, true).newDocument) as PluginResource<TSpec, TStatus>;
+      const document = resourceJSON(current.object);
+      const next = (patch.type === "merge" ? mergePatch.apply(document, resourceJSON(patch.value))
+        : jsonPatch.applyPatch(document, resourceJSON(patch.value) as jsonPatch.Operation[], true, true).newDocument) as PluginResource<TSpec, TStatus>;
       this.validateObject(type, name, current.object.metadata.namespace as ResourceNamespace, next);
       const definition = this.storage.definition(this.scope, type);
       (next as { spec: TSpec }).spec = definition.schema.spec.parse(jsonObject("spec", next.spec));
       (next as { status: TStatus }).status = definition.schema.status.parse(jsonObject("status", next.status));
-      if (isDeepStrictEqual(current.object, next)) {
+      if (equalResourceValue(current.object, next)) {
         this.storage.validateChange(this.scope, current.object, next);
         return current;
       }
       return { ...current, object: { ...next, metadata: { ...next.metadata,
-        generation: current.object.metadata.generation + Number(!isDeepStrictEqual(current.object.spec, next.spec)),
+        generation: current.object.metadata.generation + Number(!equalResourceValue(current.object.spec, next.spec)),
         resourceVersion: nextResourceVersion(current.object.metadata.resourceVersion),
       } } };
     }).object;
@@ -511,8 +511,8 @@ export class PluginResourceStore {
           annotationPatch,
         );
       if (
-        isDeepStrictEqual(current.object.metadata.labels, labels) &&
-        isDeepStrictEqual(current.object.metadata.annotations, annotations)
+        equalResourceValue(current.object.metadata.labels, labels) &&
+        equalResourceValue(current.object.metadata.annotations, annotations)
       ) {
         return current;
       }
@@ -719,7 +719,7 @@ export class PluginResourceStore {
         );
       }
       const next = update(current);
-      if (!isDeepStrictEqual(current, next)) this.storage.write(path, this.scope, next);
+      if (!equalResourceValue(current, next)) this.storage.write(path, this.scope, next);
       return next;
     }));
   }

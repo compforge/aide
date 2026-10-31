@@ -1,3 +1,4 @@
+import { cloneResourceValue } from "../../../resource-value.ts";
 import type { Resource, ResourceDefinition, ResourceType } from "@compforge/aide-plugin";
 
 type PrintMethod = "describe" | "summarize";
@@ -17,7 +18,7 @@ export class ResourcePrinters {
     const printer = this.resolve(pluginInstanceId, resource)?.printer;
     if (!printer) return method === "describe" ? JSON.stringify(resource, null, 2) : `${resource.kind}/${resource.metadata.name}`;
     try {
-      const result = printer[method](structuredClone(resource));
+      const result = printer[method](cloneResourceValue(resource));
       if (typeof result !== "string") throw new Error("Resource Printer must synchronously return a string");
       return result;
     } catch (error) {
