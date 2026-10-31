@@ -1,5 +1,5 @@
 import jsonPatch from "fast-json-patch";
-import { isDeepStrictEqual } from "node:util";
+import { equalResourceValue } from "../../src/resource-value.ts";
 import type { Resource, ResourceClient, ResourceCommit, ResourcePatchOperation } from "@compforge/aide-plugin";
 import { setConditions, type Condition, type ConditionValue } from "./conditions.ts";
 import type { InputStatus } from "./input/model.ts";
@@ -61,7 +61,7 @@ export function commitStatus(resources: ResourceClient, writes: readonly Resourc
     if (write.operation === "patchStatus") return { operation: "patch" as const, resource: write.resource, options: { resourceVersion: write.resource.metadata.resourceVersion },
       patch: { type: "json" as const, value: jsonPatch.compare(write.resource.status as object, statusPatch(write.resource, write.patch) as object).map(op => ({ ...op, path: `/status${op.path}` })) as ResourcePatchOperation[] } };
     if (write.operation === "replace") return { ...write, status: observed(write.resource.kind, write.spec, write.status,
-      write.resource.metadata.generation + Number(!isDeepStrictEqual(write.resource.spec, write.spec)), write.resource.metadata.deletionTimestamp) };
+      write.resource.metadata.generation + Number(!equalResourceValue(write.resource.spec, write.spec)), write.resource.metadata.deletionTimestamp) };
     if (write.operation === "create" && ["aide.dev/v1alpha2", "aide.dev/v1alpha3", "aide.dev/v1alpha4"].includes(write.type.apiVersion)) return { ...write, status: observed(write.type.kind, write.spec, write.status ?? {}, 1) };
     return write;
   }));

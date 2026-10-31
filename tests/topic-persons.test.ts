@@ -1,3 +1,4 @@
+import { personRefs } from "../plugins/personal/person/model.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { seedNotes } from "./fixtures/notes.ts";
@@ -43,13 +44,13 @@ test("receiver facts are optional, immutable Person references; empty does not e
   const f = fixture(t), root = await f.aide.topics.ensure("receivers"), receiver = await f.person("receiver");
   const base = { origin: "source", originId: "test", text: "fact" };
   assert.equal(InputSpecSchema.parse(base).receivers, undefined);
-  assert.deepEqual(InputSpecSchema.parse({ ...base, receivers: [] }).receivers, []);
+  assert.deepEqual(InputSpecSchema.parse({ ...base, receivers: [] }).receivers?.toJSON(), []);
   for (const receivers of ["all", ["all"], [{ ...receiver, kind: "Audience" }], [{ ...receiver, uid: undefined }]])
     assert.equal(InputSpecSchema.safeParse({ ...base, receivers }).success, false);
-  const fact = await f.input("addressed", root, { receivers: [receiver] });
-  assert.deepEqual(f.aide.topics.inputStore.get("addressed")!.spec.receivers, [receiver]);
+  const fact = await f.input("addressed", root, { receivers: personRefs([receiver]) });
+  assert.deepEqual(f.aide.topics.inputStore.get("addressed")!.spec.receivers?.toJSON(), [receiver]);
   assert.match(inputPrinter.describe(fact), /Explicit receiver Persons/);
-  await assert.rejects(f.resources.replace(fact, { ...fact.spec, receivers: [] }, fact.status), /immutable/);
+  await assert.rejects(f.resources.replace(fact, { ...fact.spec, receivers: personRefs([]) }, fact.status), /immutable/);
 });
 
 test("receiver resolution uses scoped verified humans and actual direct/reply evidence without expanding an audience", async t => {
@@ -104,7 +105,7 @@ test("Notes keep optional UID-pinned people through updates, clearing, retention
 test("Topic people use only its own recent Notes and project names without Input scans or retention writes", async t => {
   const f = fixture(t), root = await f.aide.topics.ensure("root"), child = await f.aide.topics.ensure("child");
   const refs = await Promise.all(Array.from({ length: 10 }, (_, i) => f.person(`p${i}`)));
-  await f.input("unnoted", root, { sender: refs[0], receivers: refs });
+  await f.input("unnoted", root, { sender: refs[0], receivers: personRefs(refs) });
   const at = new Date().toISOString();
   await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
   await seedNotes(f.resources, child, [{ id: "child-note", text: "Child matter", people: refs }]);

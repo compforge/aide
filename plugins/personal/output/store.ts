@@ -1,16 +1,16 @@
+import { cloneResourceValue, equalResourceValue } from "../../../src/resource-value.ts";
 import { NOTE_TYPE, noteVersion, noteTextVersion, type NoteResource } from "../note/model.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { OutputDefinition, OutputSpecSchema, OutputStatusSchema } from "./definition.ts";
 export { OutputSpecSchema } from "./definition.ts";
 import { assertChannelDelivery } from "../../../src/channel/address.ts";
 import { createHash } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 import { type Address, type ResourceListOptions } from "@compforge/aide-plugin";
-import { OUTPUT_TYPE, type Output, type OutputSpec, type OutputStatus } from "./model.ts";
+import { OUTPUT_TYPE, receiverIdentity, type Output, type OutputSpec, type OutputStatus } from "./model.ts";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 
 // Derived citation fingerprints are evidence, not part of the caller's idempotent sending intent.
-const outputIntent = (spec: OutputSpec) => ({ ...spec, notes: spec.notes?.map(({ uid, version }) => ({ uid, version })) });
+const outputIntent = (spec: OutputSpec) => ({ ...receiverIdentity(spec), notes: spec.notes?.map(({ uid, version }) => ({ uid, version })) });
 
 /** @spec Output is independent of Input and Topic lifetime. Associations are provenance, not retention edges.
  * @spec Content, receivers and target never change after admission. The Output coordinator owns delivery state.
@@ -50,7 +50,7 @@ export class OutputStore {
     const rows = this.storage.db.prepare(`SELECT data FROM resources WHERE ${clauses.join(" AND ")} ORDER BY key`);
     const result: Output[] = [];
     for (const row of rows.iterate(...args)) {
-      const output = JSON.parse(row.data as string).object as Output;
+      const output = this.storage.decode("personal", row.data as string).object as Output;
       if (Object.entries(options.matchLabels ?? {}).some(([k, v]) => output.metadata.labels?.[k] !== v)) continue;
       result.push(output); if (options.limit && result.length >= options.limit) break;
     }
@@ -66,7 +66,7 @@ export class OutputStore {
     });
     const key = this.key(id), previous = this.storage.read(key);
     if (previous) {
-      if (previous.owner !== owner || !isDeepStrictEqual(outputIntent(previous.object.spec as OutputSpec), outputIntent(spec))) throw new Error("Output identity already exists with different content or owner");
+      if (previous.owner !== owner || !equalResourceValue(outputIntent(previous.object.spec as OutputSpec), outputIntent(spec))) throw new Error("Output identity already exists with different content or owner");
       return previous.object as Output;
     }
     const fingerprint = createHash("sha256").update(JSON.stringify({ owner, spec: outputIntent(spec) }, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
@@ -93,7 +93,7 @@ export class OutputStore {
       const stored = this.storage.read(this.key(id)); if (!stored) throw new Error(`Output missing: ${id}`);
       const output = stored.object as Output;
       const status = OutputStatusSchema.parse(change(output.status));
-      if (isDeepStrictEqual(status, output.status)) return;
+      if (equalResourceValue(status, output.status)) return;
       const next: Output = { ...output, metadata: { ...output.metadata, resourceVersion: String(Number(output.metadata.resourceVersion) + 1) }, status };
       this.storage.write(this.key(id), "personal", { ...stored, object: next }); this.notify(next);
     });
@@ -108,5 +108,5 @@ export class OutputStore {
   uncertain(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "uncertain", lastError: error.slice(0, 4000) }); }
   retry(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "pending", attempts: s.attempts, lastError: error.slice(0, 4000) }); }
   subscribe(listener: (output: Output) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  private notify(output: Output): void { this.storage.afterCommit(() => { for (const listener of this.listeners) { try { listener(structuredClone(output)); } catch { /* persistence already committed */ } } }); }
+  private notify(output: Output): void { this.storage.afterCommit(() => { for (const listener of this.listeners) { try { listener(cloneResourceValue(output)); } catch { /* persistence already committed */ } } }); }
 }

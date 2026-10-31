@@ -1,3 +1,4 @@
+import { personRefs } from "../../person/model.ts";
 import { patchStatus } from "../../status.ts";
 import { messageReceivers } from "../../person/receivers.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
@@ -272,8 +273,8 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
       source: larkAddress(this.watch.accountId, message.chatId),
       ...(relation ? { relation } : {}),
       ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
-      receivers: entry.sequence ? [...new Map((context?.messages ?? []).flatMap(m => recipients.get(m.id) ?? []).map(ref => [ref.uid, ref])).values()]
-        : recipients.get(entry.message.id) ?? [],
+      receivers: personRefs(entry.sequence ? [...new Map((context?.messages ?? []).flatMap(m => recipients.get(m.id) ?? []).map(ref => [ref.uid, ref])).values()]
+        : recipients.get(entry.message.id) ?? []),
       topicKey: location.selector.key, ...(location.name ? { topicName: location.name } : {}),
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,

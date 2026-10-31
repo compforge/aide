@@ -80,7 +80,7 @@ export interface ResourceRetention<S = unknown, T = unknown> {
   canEvict?(resource: Readonly<Resource<S, T>>, context: ResourceValidationContext): boolean;
 }
 
-/** A synchronous parser; schema libraries are an implementation choice of the resource owner. */
+/** A synchronous parser, owned by the resource declaration. Accept wire JSON and typed values; restore KeyedSet identity on reads. */
 export interface ResourceSchema<T> { parse(value: unknown): T }
 
 export interface ResourceValidationContext {

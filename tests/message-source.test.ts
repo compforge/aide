@@ -92,7 +92,7 @@ test("Direct messages include my speech; exact group mentions exclude bots, dele
   assert.deepEqual(f.inputs.list().map((input) => input.spec.relation).sort(), ["received", "received", "sent"]);
   const direct = f.inputs.list().find(input => input.spec.observation!.originalMessageId === "om_dm")!;
   const self = f.inputs.list().find(input => input.spec.observation!.originalMessageId === "om_self")!;
-  assert.deepEqual(direct.spec.receivers, [self.spec.sender], "Direct inbound evidence identifies the account recipient");
+  assert.deepEqual(direct.spec.receivers?.toJSON(), [self.spec.sender], "Direct inbound evidence identifies the account recipient");
   assert.ok(f.inputs.list().every((input) => input.spec.originRef?.uid === f.resource().metadata.uid));
   assert.ok(f.inputs.list().every((input) => input.spec.text.includes(String((input.spec.observation!.message as { content: string }).content))));
   assert.ok(f.inputs.list().every((input) => input.spec.origin === "source" && input.spec.originId === SOURCES.lark.id && input.spec.topicKey === "lark:cli_app:oc_chat"));
@@ -144,7 +144,7 @@ test("Empty context is omitted; retrieved messages are included without read err
   await f.observe(now + 60_000);
   const input = f.inputs.list().find((input) => input.spec.observation!.originalMessageId === "om_with_context")!;
   assert.deepEqual(input.spec.observation!.context, {
-    messages: [{ ...message("om_before", { content: "earlier discussion" }), relation: "received", person: input.spec.sender, receivers: input.spec.receivers }],
+    messages: [{ ...message("om_before", { content: "earlier discussion" }), relation: "received", person: input.spec.sender, receivers: input.spec.receivers?.toJSON() }],
     observedThrough: new Date(now + 60_000).toISOString(), truncated: false,
   });
   assert.equal(f.warnings.length, 0);
@@ -419,11 +419,11 @@ test("Discussion batches retain each person's relation; replies to my own messag
   assert.match(inputPreview(sent), /"relationToMe":"sent"/);
   const update = f.inputs.list().find((input) => input.spec.observation!.kind === "discussion")!;
   assert.equal(update.spec.relation, "observed");
-  const context = update.spec.observation!.context as { messages: Array<{ id: string; relation: string; receivers: typeof update.spec.receivers }> };
+  const context = update.spec.observation!.context as { messages: Array<{ id: string; relation: string; receivers: import("../plugins/personal/person/model.ts").PersonRef[] }> };
   assert.deepEqual(context.messages.find(item => item.id === reply.id)!.receivers, [sent.spec.sender]);
   const anchor = f.inputs.list().find(input => input.spec.observation!.originalMessageId === "om_at" && input.spec.observation!.kind === "mention")!;
   assert.deepEqual(context.messages.find(item => item.id === ambient.id)!.receivers, [anchor.spec.sender]);
-  assert.deepEqual(new Set(update.spec.receivers!.map(ref => ref.uid)), new Set([sent.spec.sender!.uid, anchor.spec.sender!.uid]));
+  assert.deepEqual(new Set(update.spec.receivers!.toJSON().map(ref => ref.uid)), new Set([sent.spec.sender!.uid, anchor.spec.sender!.uid]));
   assert.deepEqual(context.messages.map(({ id, relation }) => [id, relation]), [
     [reply.id, "received"], [ambient.id, "observed"],
   ]);

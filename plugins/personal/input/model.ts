@@ -55,7 +55,7 @@ export interface InputSpec {
   /** Optional sender reference; the Person may have been deleted. System events and multi-author observations may have no sender. */
   sender?: ResourceRef;
   /** Explicitly identified human recipients; absent/empty never means all. No audience expansion. */
-  receivers?: PersonRef[];
+  receivers?: import("../person/model.ts").PersonRefs;
   text: string;
   timezone?: string;
   observation?: Record<string, unknown>;

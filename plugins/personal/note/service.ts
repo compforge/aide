@@ -1,16 +1,16 @@
 import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
 import { writeSummary, type SummaryResource } from "./summary.ts";
-import { isDeepStrictEqual } from "node:util";
+import { equalResourceValue } from "../../../src/resource-value.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Resource, ResourceClient } from "@compforge/aide-plugin";
-import { PersonRefSchema } from "../person/model.ts";
+import { personRefs, PersonRefsSchema } from "../person/model.ts";
 import { resourceRef } from "../input/state.ts";
 import { NOTE_TYPE, WriterResourceSchema, SubjectSchema, noteView, noteVersion, type NoteSpec, type NoteStatus } from "./model.ts";
 
 export const NoteUpdateSchema = z.object({ version: z.string().min(1).optional(), noteId: z.string().min(1).optional(),
   sensitivity: SensitivitySchema.optional(), visibility: VisibilitySchema.optional(),
-  subject: SubjectSchema.optional(), text: z.string().trim().min(1).max(16000).optional(), people: z.array(PersonRefSchema).optional(),
+  subject: SubjectSchema.optional(), text: z.string().trim().min(1).max(16000).optional(), people: PersonRefsSchema().optional(),
 }).strict().refine(a => !a.noteId || !!a.version, "Updating a Note requires its version")
   .refine(a => !!a.noteId || a.text !== undefined, "Creating a Note requires text")
   .refine(a => [a.text, a.people, a.sensitivity, a.visibility].some(v => v !== undefined), "Supply Note content or classification");
@@ -34,8 +34,8 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
   const visibility = args.visibility ?? previous?.spec.visibility ?? "people";
   const spec = { ...previous?.spec, sensitivity: args.sensitivity ?? previous?.spec.sensitivity ?? "L3", visibility,
     subject: args.subject ?? previous?.spec.subject ?? writer.resource, text: args.text ?? previous?.spec.text ?? "",
-    people: args.people ? [...new Map(args.people.map(p => [p.uid, p])).values()] : previous?.spec.people ?? [] };
-  if (previous && !isDeepStrictEqual(previous.spec.subject, spec.subject)) throw new Error("Use move_note to change an existing Note subject");
+    people: args.people ?? previous?.spec.people ?? personRefs([]) };
+  if (previous && !equalResourceValue(previous.spec.subject, spec.subject)) throw new Error("Use move_note to change an existing Note subject");
   if (previous?.spec.summaryOf) {
     const owner = await resources.get<SummaryResource["spec"], SummaryResource["status"]>(previous.spec.subject);
     if (owner) {
@@ -45,7 +45,7 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
       return { noteId: id, version: updated.status.summaryRevision! };
     }
   }
-  if (previous && isDeepStrictEqual(previous.spec, spec)) return { noteId: id, version: noteVersion(previous) };
+  if (previous && equalResourceValue(previous.spec, spec)) return { noteId: id, version: noteVersion(previous) };
   const status = { ...previous?.status, updatedAt: new Date().toISOString(), writer };
   try {
     const updated = previous ? await resources.replace(previous, spec, status)

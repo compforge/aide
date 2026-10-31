@@ -1,3 +1,5 @@
+import { KeyedSet } from "@compforge/ts-stdx/collections";
+import { personRefs } from "../plugins/personal/person/model.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -11,6 +13,8 @@ import { PERSON_TYPE, LOCAL_ME, personRef, type PersonResource, type PersonRef }
 import { NOTE_TYPE, noteVersion, type NoteResource } from "../plugins/personal/note/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { OutputDisclosure, type DisclosurePorts, type OutputAudience } from "../plugins/personal/output/disclosure.ts";
+import { OutputDefinition } from "../plugins/personal/output/definition.ts";
+import { OutputDelivery } from "../plugins/personal/output/delivery.ts";
 import { outputSpec } from "../plugins/personal/output.ts";
 import { webAddress, larkAddress, larkPersonAddress, isChannelAddress } from "../src/channel/address.ts";
 import { outputView } from "../src/output.ts";
@@ -36,7 +40,7 @@ async function setup(t: TestContext) {
   const checker = new OutputDisclosure(store, ports, pino({ level: "silent" }));
   store.check = id => checker.reconcile(id);
   async function note(sensitivity: Sensitivity = "L1", visibility: Visibility = "any", people: PersonRef[] = []) {
-    return await client.create(NOTE_TYPE, { name: `n-${store.resources.list(NOTE_TYPE).length}`, spec: { subject: resourceRef(topic), text: "A verified fact", sensitivity, visibility, people }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
+    return await client.create(NOTE_TYPE, { name: `n-${store.resources.list(NOTE_TYPE).length}`, spec: { subject: resourceRef(topic), text: "A verified fact", sensitivity, visibility, people: personRefs(people) }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
   }
   function output(id: string, n?: NoteResource, target = larkPersonAddress("app", "ou_c")) {
     return store.create("topic", id, { ...outputSpec(topic, { topicId: "topic", text: "A verified fact", target }),
@@ -146,10 +150,10 @@ test("revoked permission after attempted delivery stops further effects as uncer
 
 test("topic visibility follows the current Note subject and explicit Topic participants", async t => {
   const f = await setup(t); const n = await f.note("L1", "topic");
-  const topic = await f.client.replace(f.topic, { ...f.topic.spec, people: [personRef(f.other) as PersonRef] }, f.topic.status);
+  const topic = await f.client.replace(f.topic, { ...f.topic.spec, people: personRefs([personRef(f.other) as PersonRef]) }, f.topic.status);
   f.output("x", n); await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
-  await f.client.replace(topic, { ...topic.spec, people: [] }, topic.status);
+  await f.client.replace(topic, { ...topic.spec, people: personRefs([]) }, topic.status);
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "denied");
 });
@@ -216,7 +220,7 @@ test("Output policy combines current classifications and people across the cited
 /** @case A typed classification can be stored even when its current subject cannot yield a disclosure audience. */
 test("Person-subject topic visibility falls back to Me during disclosure", async t => {
   const f = await setup(t);
-  const note = await f.client.create(NOTE_TYPE, { name: "person-note", spec: { subject: personRef(f.other), text: "Profile fact", people: [], sensitivity: "L1", visibility: "topic" }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
+  const note = await f.client.create(NOTE_TYPE, { name: "person-note", spec: { subject: personRef(f.other), text: "Profile fact", people: personRefs([]), sensitivity: "L1", visibility: "topic" }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
   f.output("person-scope", note); await f.checker.reconcile("person-scope");
   assert.equal(f.store.get("person-scope")!.status.disclosure!.decision, "denied");
   assert.deepEqual(f.store.get("person-scope")!.status.delivery!.target, webAddress("topic"));
@@ -268,4 +272,97 @@ test("policy aggregates mixed scopes in one place and does not turn an empty aud
   ])?.people, ["a", "b"]);
   assert.equal(disclosurePolicy([{ sensitivity: "L1", visibility: "root", people: [] }]), undefined);
   assert.deepEqual(disclosurePolicy([{ sensitivity: "L1", visibility: "people", people: [] }]), { sensitivity: "L1", visibility: "people", people: [] });
+});
+
+// @case Audience order and duplicates are not permission changes; membership still is.
+test("audience permutations survive failed and interrupted idempotent delivery", async t => {
+  for (const interrupted of [false, true]) {
+    const f = await setup(t);
+    f.audience({ people: [f.me, f.other], complete: true, private: false });
+    f.output("x", await f.note());
+    let sends = 0;
+    const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", send: async () => {
+      if (++sends === 1) throw new Error("temporary failure");
+      return { id: "receipt", scope: "test" };
+    } }), pino({ level: "silent" }));
+    await assert.rejects(delivery.reconcile("x"), /transport failed/);
+    const fingerprint = f.store.get("x")!.status.disclosure!.fingerprint;
+    if (interrupted) f.store.update("x", s => ({ ...s, phase: "sending" }));
+    f.audience({ people: [f.other, f.me, f.other], complete: true, private: false });
+    await delivery.reconcile("x");
+    const result = f.store.get("x")!;
+    assert.equal(result.status.phase, "delivered");
+    assert.equal(result.status.attempts, 2);
+    assert.equal(sends, 2);
+    assert.equal(f.checks(), 1);
+    assert.equal(result.status.disclosure!.fingerprint, fingerprint);
+    assert.deepEqual(result.status.delivery!.receivers.toJSON().map(p => p.uid), [f.me.metadata.uid, f.other.metadata.uid].sort());
+  }
+});
+
+test("audience reorder during asynchronous review does not invalidate the check", async t => {
+  const f = await setup(t);
+  f.audience({ people: [f.me, f.other], complete: true, private: false });
+  f.output("x", await f.note());
+  f.ports.check = async () => {
+    f.audience({ people: [f.other, f.me, f.me], complete: true, private: false });
+    return { allowed: true, reason: "supported" };
+  };
+  await f.checker.reconcile("x");
+  assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
+});
+
+test("actual audience membership change stops a pending retry even when all recipients are allowed", async t => {
+  const f = await setup(t);
+  f.audience({ people: [f.me, f.other], complete: true, private: false });
+  f.output("x", await f.note());
+  let sends = 0;
+  const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", send: async () => { sends++; throw new Error("temporary failure"); } }), pino({ level: "silent" }));
+  await assert.rejects(delivery.reconcile("x"), /transport failed/);
+  f.audience({ people: [f.other], complete: true, private: false });
+  await delivery.reconcile("x");
+  assert.equal(f.store.get("x")!.status.phase, "uncertain");
+  assert.equal(sends, 1);
+});
+
+
+test("rechecking changed evidence preserves the same recipient set after an attempt", async t => {
+  const f = await setup(t), note = await f.note();
+  f.audience({ people: [f.me, f.other], complete: true, private: false });
+  f.output("x", note);
+  await f.checker.reconcile("x");
+  f.store.begin("x"); f.store.retry("x", "temporary failure");
+  // Both policies permit this audience, but the classification change must produce a new check.
+  await f.client.replace(note, { ...note.spec, visibility: "people", people: personRefs([personRef(f.other) as PersonRef]) }, note.status);
+  f.audience({ people: [f.other, f.me, f.me], complete: true, private: false });
+  await f.checker.reconcile("x");
+  assert.equal(f.store.get("x")!.status.phase, "pending");
+  assert.equal(f.store.get("x")!.status.disclosure!.policy!.visibility, "people");
+  assert.equal(f.checks(), 2);
+});
+
+test("Output admission and immutable delivery compare Person UID sets on both sides", async t => {
+  const f = await setup(t), a = personRef(f.me), b = personRef(f.other);
+  const spec = { ...outputSpec(f.topic, { topicId: "topic", text: "fact", target: webAddress("topic") }), receivers: personRefs([b, a, b]) };
+  let received: import("../plugins/personal/output/model.ts").Output | undefined;
+  f.store.subscribe(value => { received = value; });
+  const original = f.store.create("topic", "sets", spec);
+  assert(received?.spec.receivers instanceof KeyedSet);
+  assert.equal(received.spec.receivers.size, 2);
+  received.spec.receivers.clear();
+  const listed = f.store.list({ topicUid: f.topic.metadata.uid })[0]!;
+  assert(listed.spec.receivers instanceof KeyedSet);
+  assert.equal(listed.spec.receivers.size, 2);
+  assert.deepEqual(f.store.create("topic", "sets", { ...spec, receivers: personRefs([a, b]) }), original);
+  assert.throws(() => f.store.create("topic", "sets", { ...spec, receivers: personRefs([a]) }), /different content/);
+  const previous = { ...original, spec, status: { phase: "pending" as const, attempts: 1,
+    delivery: { target: spec.target, text: spec.text, receivers: personRefs([b, a, b]) } } };
+  const current = { ...previous, spec: { ...spec, receivers: personRefs([a, b]) }, status: { ...previous.status,
+    delivery: { ...previous.status.delivery, receivers: personRefs([a, b]) } } };
+  const context = { get() { throw new Error("Unexpected lookup"); }, page() { throw new Error("Unexpected lookup"); }, list() { throw new Error("Unexpected lookup"); } };
+  OutputDefinition.validator!.update!(previous, current, context);
+  assert.throws(() => OutputDefinition.validator!.update!(previous, { ...current, status: { ...current.status,
+    delivery: { ...current.status.delivery, receivers: personRefs([a]) } } }, context), /delivery is immutable/);
+  assert.throws(() => OutputDefinition.validator!.update!(previous, { ...current, status: { ...current.status,
+    delivery: { ...current.status.delivery, text: "different" } } }, context), /delivery is immutable/);
 });

@@ -7,7 +7,8 @@ import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
 import type { ResourceClient, Address } from "@compforge/aide-plugin";
 import { InputAttention, inputAttention, type InputSpec } from "../input/model.ts";
-import type { SayInput, SayReceipt } from "../output/model.ts";
+import { isDeepStrictEqual } from "node:util";
+import { receiverIdentity, type SayInput, type SayReceipt } from "../output/model.ts";
 import { InputStore } from "../input/store.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import type { ResourceClientChange } from "../../../src/host/plugin/resource/client.ts";
@@ -157,8 +158,8 @@ export class TopicStore {
       if (!this.resolveContact) throw new Error("Person contact is unavailable");
       if (previous) {
         const recipient = options.to;
-        if ("personId" in recipient && !previous.spec.receivers?.some(r => r.uid === recipient.uid)) throw new Error("Output identity already exists with a different recipient");
-        target = previous.spec.target; receivers = previous.spec.receivers;
+        if ("personId" in recipient && ![...previous.spec.receivers ?? []].some(r => r.uid === recipient.uid)) throw new Error("Output identity already exists with a different recipient");
+        target = previous.spec.target; receivers = previous.spec.receivers === undefined ? undefined : [...previous.spec.receivers];
       } else {
         const destination = await this.resolveContact(topicId, options.to, options.channelId, target);
         target = destination.target; receivers = destination.receivers;
@@ -178,7 +179,7 @@ export class TopicStore {
     // A repeated tool call keeps its admitted destination even if new immediate Inputs have arrived.
     if (!target && previous) {
       target = previous.spec.target;
-      receivers ??= previous.spec.receivers;
+      receivers ??= previous.spec.receivers?.toJSON();
     }
     if (!target) {
       const candidates = (inputIds.length ? inputIds : owner ? [] : this.pending(initial.metadata.uid).map(i => i.metadata.name)).map(attached)
@@ -192,7 +193,7 @@ export class TopicStore {
       if (!target && this.resolveContact) {
         const destination = await this.resolveContact(topicId);
         target = destination.target;
-        if (receivers !== undefined && JSON.stringify(receivers) !== JSON.stringify(destination.receivers))
+        if (receivers !== undefined && !isDeepStrictEqual(receiverIdentity({ receivers }), receiverIdentity({ receivers: destination.receivers })))
           throw new Error("Default say contacts Me; other receivers require an explicit target");
         receivers = destination.receivers;
       }

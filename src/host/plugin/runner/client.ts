@@ -1,3 +1,4 @@
+import { resourceJSON } from "../../../resource-value.ts";
 import { hostOperation, type HostOperation } from "../../../protocol/ipc.ts";
 import type { RuntimeScope } from "../../../protocol/runtime.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
@@ -258,11 +259,11 @@ export class PluginRunnerClient {
       }
       this.armCallTimeout(callId, pending);
       try {
-        this.child.send({
+        this.child.send(resourceJSON({
           kind: "parent-call",
           callId,
           request,
-        } satisfies ParentCall);
+        } satisfies ParentCall));
       } catch (error) {
         if (pending.timeout) clearTimeout(pending.timeout);
         this.pending.delete(callId);
@@ -377,7 +378,7 @@ export class PluginRunnerClient {
   private replyToChild(reply: ParentReply): void {
     if (this.closing || this.failed || this.child.exitCode !== null) return;
     try {
-      this.child.send(reply);
+      this.child.send(resourceJSON(reply));
     } catch (error) {
       if (this.closing || this.failed) return;
       this.fail(

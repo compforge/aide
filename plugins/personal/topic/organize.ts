@@ -25,7 +25,7 @@ async function scope(resources: ResourceClient, actor: TopicResource) {
     throw new Error("Organization requires the active root Chief");
   return { root, topics };
 }
-export async function createChildTopic(resources: ResourceClient, actor: TopicResource, args: { parentUid?: string; name: string; summary: string; people?: import("../note/model.ts").NoteSpec["people"]; reason: string }, callId: string) {
+export async function createChildTopic(resources: ResourceClient, actor: TopicResource, args: { parentUid?: string; name: string; summary: string; people?: Iterable<import("../person/model.ts").PersonRef>; reason: string }, callId: string) {
   const { root, topics } = await scope(resources, actor);
   const parent = topics.find(t => t.metadata.uid === (args.parentUid ?? root.metadata.uid));
   if (!parent) throw new Error("Child parent is unavailable");

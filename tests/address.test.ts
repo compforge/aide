@@ -208,20 +208,21 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
   assert.deepEqual(await say.execute("reply", { text: "确认了", respondToInputId: "question" }, undefined, undefined, {} as never), reply);
   await say.execute("report", { text: "综合进展", target, receivers: [manager, sender], inputIds: ["question"] }, undefined, undefined, {} as never);
   const report = aide.outputs().find((output) => output.text === "综合进展")!;
-  assert.deepEqual(report.receivers, [manager, sender]); assert.deepEqual(report.target, target);
+  const receivers = [manager, sender].sort((a, b) => a.uid! < b.uid! ? -1 : 1);
+  assert.deepEqual(report.receivers, receivers); assert.deepEqual(report.target, target);
   await say.execute("broadcast", { text: "群公告", respondToInputId: "question", receivers: [] }, undefined, undefined, {} as never);
   assert.deepEqual(aide.outputs().find((output) => output.text === "群公告")!.receivers, []);
   await store.say("topic", undefined, "unspecified audience", undefined, { target, inputIds: ["question"] });
   assert.equal(aide.outputs().find((output) => output.text === "unspecified audience")!.receivers, undefined);
   const persisted = new OutputStore(root).get(report.id)!;
-  assert.deepEqual(persisted.spec.receivers, [manager, sender]);
-  assert.deepEqual(JSON.parse(outputPrinter.describe(persisted).split("Receiver Persons: ")[1]!.split("\n")[0]!), [manager, sender]);
+  assert.deepEqual(persisted.spec.receivers?.toJSON(), receivers);
+  assert.deepEqual(JSON.parse(outputPrinter.describe(persisted).split("Receiver Persons: ")[1]!.split("\n")[0]!), receivers);
   const input = store.inputStore.get("question")!;
   assert.ok(inputPrinter.describe(input).includes(`Source address: ${JSON.stringify(source)}`));
   assert.ok(inputPrinter.describe(input).includes(JSON.stringify(sender)));
   const blocks = topicView(aide, "topic").blocks;
   assert.deepEqual(blocks.find((block) => block.inputId === "question")!.source, source);
-  assert.deepEqual(blocks.find((block) => block.id === `message:${report.id}`)!.receivers, [manager, sender]);
+  assert.deepEqual(blocks.find((block) => block.id === `message:${report.id}`)!.receivers, receivers);
   assert.deepEqual(store.get("topic")!.pendingInputIds, ["question"]);
   assert.equal(aide.outputs().length, 4, "Two receivers describe one Output; they do not fan out delivery");
 });
@@ -244,7 +245,7 @@ test("Invalid receivers cannot publish an Output or mutate its Topic; receiver i
   const sent = await store.say("topic", undefined, "reply", "run", options);
   await assert.rejects(store.say("topic", undefined, "reply", "run", { ...options, receivers: [] }), /different content/);
   const persisted = await scope.plugins.resourceClient("personal").get({ ...OUTPUT_TYPE, namespace: "v1", name: sent.outputId });
-  assert.deepEqual((persisted!.spec as { receivers: unknown }).receivers, [sender]);
+  assert.deepEqual((persisted!.spec as import("../plugins/personal/output/model.ts").OutputSpec).receivers?.toJSON(), [sender]);
   assert.deepEqual(store.outputs("topic").map(o => o.id), [sent.outputId]);
 });
 

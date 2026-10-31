@@ -84,9 +84,9 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   assert.equal(inputs.find((input) => input.spec.text === "other")!.spec.relation, "received");
   const self = (await aide.persons.findIdentity(me))!;
   assert.equal(inputs.find((input) => input.spec.text === "mine")!.spec.sender!.uid, self.metadata.uid);
-  assert.deepEqual(inputs.find(input => input.spec.text === "mine")!.spec.receivers, [], "A bot DM has no implicit human receiver");
-  assert.equal(inputs.find(input => input.spec.text === "other")!.spec.receivers?.[0]?.uid, self.metadata.uid);
-  assert.equal(inputs.find(input => input.spec.text === "other")!.spec.receivers?.length, 1, "Unresolved bot mentions do not become Persons");
+  assert.deepEqual(inputs.find(input => input.spec.text === "mine")!.spec.receivers?.toJSON(), [], "A bot DM has no implicit human receiver");
+  assert.equal(inputs.find(input => input.spec.text === "other")!.spec.receivers?.toJSON()[0]?.uid, self.metadata.uid);
+  assert.equal(inputs.find(input => input.spec.text === "other")!.spec.receivers?.size, 1, "Unresolved bot mentions do not become Persons");
   const other = inputs.find((input) => input.spec.text === "other")!.spec.sender!;
   assert.equal((await aide.persons.read(other.name)).isMe, false);
   assert.deepEqual(inputs.find((input) => input.spec.text === "mine")!.spec.observation!.sender, { id: "ou_me", type: "user" });

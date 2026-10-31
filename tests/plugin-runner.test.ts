@@ -475,3 +475,27 @@ describe("Plugin Runner process boundary", () => {
     } finally { await manager.close(); }
   });
 });
+
+
+test("KeyedSet resources retain methods and read-only membership across actual Host/Runner IPC", async () => {
+  const { KEYED_TYPE, members } = await import("./fixtures/keyed-definitions.ts");
+  const { instances, session } = stores();
+  instances.create({ pluginInstanceId: "sets", pluginId: "tests/keyed-plugin", marketplace: "fixtures", packageVersion: "1.0.0" });
+  const failures: unknown[] = [];
+  const manager = new Manager({ instances, log: record => session.log(record), pluginSupervisor: new PluginSupervisor(),
+    onActivationError: ({ error }) => failures.push(error),
+    async loadPackageEntry(pluginId, version) { return { pluginId, version,
+      entryUrl: new URL("./fixtures/keyed-plugin.ts", import.meta.url).href,
+      resourcesUrl: new URL("./fixtures/keyed-definitions.ts", import.meta.url).href }; },
+  });
+  try {
+    await manager.start();
+    expect(failures).toEqual([]);
+    const client = manager.resourceClient("sets");
+    await client.create(KEYED_TYPE, { name: "one", spec: { people: members([{ uid: "a" }]) }, status: { receivers: members() } });
+    await manager.settled();
+    const resource = await client.get<unknown, { receivers: ReturnType<typeof members>; done?: boolean }>({ ...KEYED_TYPE, namespace: "v1", name: "one" });
+    expect(resource?.status.done).toBe(true);
+    expect(resource?.status.receivers.has({ uid: "b" })).toBe(true);
+  } finally { await manager.close(); }
+});

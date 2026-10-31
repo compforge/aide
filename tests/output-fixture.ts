@@ -1,3 +1,4 @@
+import { personRefs } from "../plugins/personal/person/model.ts";
 import { fixtureAddress } from "./address-fixture.ts";
 import type { OutputDraft, OutputView } from "../src/output.ts";
 export function fixtureOutput(value: OutputDraft & { at: string; role?: "aide" }): OutputView {
@@ -9,6 +10,6 @@ export function approveFixtureOutput(store: import("../plugins/personal/output/s
   const output = store.get(id)!;
   if (!output.status.delivery) store.update(id, status => ({ ...status,
     disclosure: { decision: "allowed", reason: "Transport fixture", checkedAt: new Date().toISOString(), fingerprint: "fixture" },
-    delivery: { target: output.spec.target, text: output.spec.text, receivers: output.spec.receivers ?? [] } }));
+    delivery: { target: output.spec.target, text: output.spec.text, receivers: output.spec.receivers ?? personRefs([]) } }));
   if (delivered) store.delivered(id);
 }

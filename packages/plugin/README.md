@@ -149,7 +149,7 @@ Harness inference returns an invocation ID and execution result. Reconcile snaps
 
 ## Resource Printers
 
-[ResourceDefinition](src/resource.ts) is the declaration entrypoint for type, schema, optional validators, Printer, indexes and retention. Declare resources before activation. For an isolated Runner, the Host package entry supplies `resourcesUrl`, a pure module whose default export is the definition array; in-process plugins use `PluginPackage.resources`. The Host loads definitions before restoration and Controllers, independently of the Runner lifetime.
+[ResourceDefinition](src/resource.ts) is the declaration entrypoint for type, schema, optional validators, Printer, indexes and retention. Declare resources before activation. For an isolated Runner, the Host package entry supplies `resourcesUrl`, a pure module whose default export is the definition array; in-process plugins use `PluginPackage.resources`. The Host loads definitions before restoration and Controllers, independently of the Runner lifetime. The Runner loads the same definitions to decode resource snapshots. Schemas accept both JSON member arrays and typed `KeyedSet` values; the Host owns recursive cloning/freezing and wire encoding. See [collection values](../../docs/plugin/resource.md#集合值与进程边界).
 
 ```ts
 import type { ResourceDefinition } from "@compforge/aide-plugin";

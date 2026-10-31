@@ -30,7 +30,7 @@ export async function listNotes(reader: ResourceReader, raw: unknown) {
   const args = NoteQuerySchema.parse(raw);
   const page = await reader.page<NoteSpec, NoteStatus>(NOTE_TYPE, { namespace: "v1", limit: args.limit, continue: args.continue,
     ...(args.subject ? { matchIndex: { name: "subject", value: args.subject } } : args.people ? { matchIndex: { name: "people", value: args.people } } : {}) });
-  const items = page.items.filter(n => !n.metadata.deletionTimestamp && (!args.people || n.spec.people.some(p => p.uid === args.people))
+  const items = page.items.filter(n => !n.metadata.deletionTimestamp && (!args.people || [...n.spec.people].some(p => p.uid === args.people))
     && (!args.q || n.spec.text.toLowerCase().includes(args.q.toLowerCase()))).map(n => ({ ...noteView(n), text: n.spec.text.slice(0, 500), truncated: n.spec.text.length > 500 }));
   return { items, scanned: page.items.length, continue: page.metadata.continue, resourceVersion: page.metadata.resourceVersion };
 }

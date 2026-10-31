@@ -1,6 +1,6 @@
 import { summaryText, summaryReference } from "./note/summary.ts";
 import { notes } from "./note/query.ts";
-import { isDeepStrictEqual } from "node:util";
+import { equalResourceValue } from "../../src/resource-value.ts";
 import { workObservation } from "./status.ts";
 import { commitStatus } from "./status.ts";
 import { resourceRef } from "./input/state.ts";
@@ -76,7 +76,7 @@ export class Store {
     const current = this.findResource(id);
     if (current && current.kind !== type.kind) throw new Error("Work kind is immutable; create the other type and pause or delete the original work");
     const c = await this.topics.ensure(topicId);
-    const generation = current ? current.metadata.generation + Number(!isDeepStrictEqual({ ...current.spec, ...spec }, current.spec)) : 1;
+    const generation = current ? current.metadata.generation + Number(!equalResourceValue({ ...current.spec, ...spec }, current.spec)) : 1;
     const status: WorkStatus = { ...current?.status, ...workObservation(work, generation), summaryRevision: current?.status.summaryRevision ?? "", topic: resourceRef(c) };
     await commitStatus(this.client, [
       current ? { operation: "replace", resource: current, spec: { ...current.spec, ...spec }, status } : { operation: "create", type, name: id, spec, status },

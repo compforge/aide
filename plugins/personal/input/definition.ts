@@ -1,5 +1,5 @@
 import { validateReviewRequest } from "../topic/review.ts";
-import { PersonRefSchema } from "../person/model.ts";
+import { PersonRefSchema, PersonRefsSchema } from "../person/model.ts";
 import { ConditionsSchema } from "../conditions.ts";
 import { AgentStatusSchema } from "../session.ts";
 import { AgentCallSchema } from "../observation/reference.ts";
@@ -8,7 +8,7 @@ import { ResourceRefSchema, OrganizationSchema } from "../topic/ref.ts";
 import { guardAssessment } from "./assignment.ts";
 import { guardInputTopic } from "../topic/ownership.ts";
 import { z } from "zod";
-import { isDeepStrictEqual } from "node:util";
+import { equalResourceValue } from "../../../src/resource-value.ts";
 import { ResourceVersionConflict, type ResourceDefinition } from "@compforge/aide-plugin";
 import { INPUT_TYPE, INPUT_ORIGINS, InputAttention, isInternalInput, inputQueue, type InputSpec, type InputStatus } from "./model.ts";
 import { AddressSchema } from "../../../src/address.ts";
@@ -18,7 +18,7 @@ export const InputSpecSchema = z.object({ source: AddressSchema.optional(), topi
   topicName: z.string().trim().min(1).max(80).optional(),
   originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
   sender: PersonRefSchema.optional(),
-  receivers: z.array(PersonRefSchema).optional(),
+  receivers: PersonRefsSchema().optional(),
   attention: z.enum(InputAttention).optional(),
   originRef: z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform((value) => value === "v1" ? value : parseResourceNamespace(value)), name: z.string(), uid: z.string() }).strict().optional(),
   text: z.string().min(1).max(32_000), timezone: z.string().optional(),
@@ -42,7 +42,7 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
       && context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "internalPending", value: JSON.stringify([current.status.topic.uid, current.spec.origin]) } })
         .some(i => i.metadata.uid !== current.metadata.uid)) throw new ResourceVersionConflict("Topic already has this internal Input pending");
   }, update(previous, current, context) {
-    if (previous.status.assess?.completedAt && !isDeepStrictEqual({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error("Input assessment is already completed");
+    if (previous.status.assess?.completedAt && !equalResourceValue({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error("Input assessment is already completed");
     guardInputTopic(previous, current, context);
     if (previous.status.topic && previous.status.topic.uid !== current.status.topic?.uid
       && current.status.assess && !current.status.assess.executionId && !current.status.assess.completedAt && current.status.assess.topic)
@@ -50,8 +50,8 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     guardAssessment(previous, current, context);
     if (previous.status.assess?.executionId && current.status.assess?.executionId
       && previous.status.assess.executionId !== current.status.assess.executionId) throw new Error("Input is already admitted to a Chief execution");
-    if (!isDeepStrictEqual(previous.spec, current.spec)) throw new Error("Input content is immutable");
-    if (previous.status.route?.completedAt && !isDeepStrictEqual(previous.status.route.result, current.status.route?.result)) throw new Error("Input routing receipt is immutable");
+    if (!equalResourceValue(previous.spec, current.spec)) throw new Error("Input content is immutable");
+    if (previous.status.route?.completedAt && !equalResourceValue(previous.status.route.result, current.status.route?.result)) throw new Error("Input routing receipt is immutable");
   } },
   printer: inputPrinter,
   indexes: {

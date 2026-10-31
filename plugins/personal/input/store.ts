@@ -1,10 +1,11 @@
+import { cloneResourceValue } from "../../../src/resource-value.ts";
 import { ResourceAlreadyExists } from "@compforge/aide-plugin";
 import { inputStatus } from "../status.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { InputDefinition, InputSpecSchema } from "./definition.ts";
 import { createHash } from "node:crypto";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
-import { isDeepStrictEqual } from "node:util";
+import { equalResourceValue } from "../../../src/resource-value.ts";
 import { type Resource } from "@compforge/aide-plugin";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
 /** @spec Input facts are immutable and read on demand; shared ResourceStorage owns quotas and collection. */
@@ -43,7 +44,7 @@ export class InputStore {
     const spec = InputSpecSchema.parse(raw);
     const key = this.key(id), existing = this.storage.read(key);
     if (existing) {
-      if (existing.owner !== owner || !isDeepStrictEqual(existing.object.spec, spec)) throw new ResourceAlreadyExists("Input identity already exists with different content or owner");
+      if (existing.owner !== owner || !equalResourceValue(existing.object.spec, spec)) throw new ResourceAlreadyExists("Input identity already exists with different content or owner");
       return existing.object as Resource<InputSpec, InputStatus>;
     }
     const fingerprint = createHash("sha256").update(JSON.stringify({ owner, spec }, (_key, value) =>
@@ -60,11 +61,11 @@ export class InputStore {
   update(resource: Resource<InputSpec, InputStatus>, patch: Partial<InputStatus>): Resource<InputSpec, InputStatus> {
     const key = this.key(resource.metadata.name), stored = this.storage.read(key);
     if (!stored || stored.object.metadata.uid !== resource.metadata.uid || stored.object.metadata.resourceVersion !== resource.metadata.resourceVersion) throw new Error("Input resource version conflict; read it again");
-    const next = { ...resource, metadata: { ...resource.metadata, resourceVersion: String(Number(resource.metadata.resourceVersion) + 1) }, status: inputStatus({ ...resource.status, ...structuredClone(patch) }) };
+    const next = { ...resource, metadata: { ...resource.metadata, resourceVersion: String(Number(resource.metadata.resourceVersion) + 1) }, status: inputStatus({ ...resource.status, ...cloneResourceValue(patch) }) };
     this.storage.write(key, "personal", { ...stored, object: next }); this.notify(stored.owner as string, next); return next;
   }
   subscribe(listener: (owner: string, input: Resource<InputSpec, InputStatus>) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(owner: string, input: Resource<InputSpec, InputStatus>): void {
-    this.storage.afterCommit(() => { for (const listener of this.listeners) listener(owner, structuredClone(input)); });
+    this.storage.afterCommit(() => { for (const listener of this.listeners) listener(owner, cloneResourceValue(input)); });
   }
 }
