@@ -157,7 +157,7 @@ export class Aide {
         actions: { "personal/reconcile_output": async (context, raw) => {
           const id = (raw as { id: string }).id;
           if (context.resourceRef?.kind !== "Output" || context.resourceRef.name !== id) throw new Error("Output reconcile requires its own resource context");
-          await this.delivery.reconcile(id); return { outputId: id };
+          return { outputId: id, ...await this.delivery.reconcile(id) };
         }, "personal/submit_topic": (context, input) => this.personal.submitTopic(context, input), "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
           const input = SayInputSchema.parse(raw);
           const text = input.text;
@@ -230,7 +230,7 @@ export class Aide {
     this.outputTransports.add(resolve);
     return () => { this.outputTransports.delete(resolve); };
   }
-  reconcileOutput(id: string): Promise<void> { return this.delivery.reconcile(id); }
+  async reconcileOutput(id: string): Promise<void> { await this.delivery.reconcile(id); }
   outputs() { return this.outputStore.list().map(outputView).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
 
   works() { return this.personal.works(); }

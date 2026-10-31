@@ -24,6 +24,7 @@
         <button id="person-tab-summary" type="button" role="tab" aria-selected="true" aria-controls="person-panel-summary">认识</button>
         <button id="person-tab-notes" type="button" role="tab" aria-selected="false" aria-controls="person-panel-notes" tabindex="-1">相关记录</button>
         <button id="person-tab-identities" type="button" role="tab" aria-selected="false" aria-controls="person-panel-identities" tabindex="-1">身份</button>
+        <button id="person-tab-delivery" type="button" role="tab" aria-selected="false" aria-controls="person-panel-delivery" tabindex="-1">投递</button>
       </div>
       <section id="person-panel-summary" class="person-panel" role="tabpanel" aria-labelledby="person-tab-summary" tabindex="0">
       <section class="person-summary" aria-labelledby="person-summary-heading">
@@ -54,6 +55,16 @@
       <p class="muted">姓名相同不代表同一个人，请核对外部身份后合并。</p>
       <div id="person-same-name-list"></div>
     </section>
+      </section>
+      <section id="person-panel-delivery" class="person-panel" role="tabpanel" aria-labelledby="person-tab-delivery" tabindex="0" hidden>
+        <form id="person-delivery-form">
+          <p class="muted">留空表示不限制。同一人物在不同渠道共享频率，成功送达后计数。</p>
+          <label>统计窗口<input id="delivery-window" placeholder="例如 1h" aria-describedby="delivery-help"></label>
+          <label>窗口内最多条数<input id="delivery-max" type="number" min="1" max="1000" step="1" placeholder="例如 10"></label>
+          <label>最小投递间隔<input id="delivery-interval" placeholder="例如 1m" aria-describedby="delivery-help"></label>
+          <p id="delivery-help" class="muted">时长支持 ms、s、m、h、d。统计窗口按最近一段时间计算；窗口与条数需同时填写。</p>
+          <button id="delivery-save" type="submit">保存投递频率</button>
+        </form>
       </section>
       <button id="person-reload" class="secondary person-reload" type="button">重新加载</button>
     </div>

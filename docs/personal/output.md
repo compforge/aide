@@ -89,3 +89,20 @@ Channel 地址在 Output 持久化之前还要通过实际投递配置校验：�
 Work 的 say 与 Chief 使用同一目的地规则；所属 Topic 只提供业务归属。缺少可用地址时返回错误，不创建无目标 Output；业务 report 与沟通独立，是否已完成应分别核对。
 
 Output 的 `status` 由 Reconciler 维护，记录 pending / sending、尝试次数与最终 delivered；failed / uncertain 为终止或待核对状态，不自动重投。Web 在披露检查完成并准备实际正文后记录 delivered，不表示用户已经阅读。执行成功、业务目标完成、通知创建与外部送达各有独立证据。
+
+
+## 投递频控
+
+Output 创建不受投递频率限制。Person 的 `spec.delivery` 可配置 `window: { duration: "1h", maxMessages: 10 }` 和 `minInterval: "1m"`；二者独立可选，缺省不限制。时长使用正整数与 ms/s/m/h/d，最长 2147483647ms；窗口最大条数为 1..1000，保证单次统计查询有界。人物页面的“投递”页签可以编辑，修改通过 Person 的正常版本校验保存。
+
+窗口为滑动窗口：最近 duration 内最多成功投递 maxMessages 条 Output；最小间隔从上次成功投递时刻起算。一次 Output 计一条，传输分片不重复计数，失败和不确定结果不计为成功。平台处理延迟与未知结果使实际通知次数无法得到绝对保证。
+
+统计以 `status.delivery.receivers` 的实际 Person UID 为准，跨 Topic、Channel 和 Connector 共享；披露拒绝转告 Me 时只计算 Me 的额度。多人消息需要所有接收人满足条件。Person.status 不存计数，Output 的 delivered 状态与 deliveredAt 是唯一事实来源。`deliveredPerson` 多值有序索引按 Person UID 和 deliveredAt 查询最近 N 条记录；降低额度后同样按第 N 条最新记录计算窗口释放时间，不扫描历史全集。
+
+Output Reconciler 在检查披露后查询额度，未到期保持 pending，通过 requeueAfterMs 进入持久定时协调。`status.deliveryWait` 仅投影等待原因和预计重试时间，不是准入凭据；每次执行重新检查最新策略、权限和记录。Person 策略变更按 pendingReceiver 索引唤醒待投递 Output，旧 deadline 不压住新配置。频控等待不增加 attempts，也不记为投递错误。
+
+Host 对实际接收者同时取得执行权，覆盖最终复核、发送与结果落盘。不能全部取得时释放本轮协调并稍后重试，不持有部分人物的执行权，也不积累 Promise 等待队列。不同接收人独立推进；频控时间等待期间不占用执行权。此互斥是单 Host 执行保护，不是持久额度预约，也不承诺多 Host 同库并行投递。
+
+Output 回收在事务内根据当前 Person 策略重查：有效窗口或最小间隔内的成功记录受保护，过期后可按原容量策略回收。启用或扩大频控只使用仍保留的历史，不能恢复此前已回收的投递记录。Person 合并仍保留历史引用原 UID，不改写过去的实际接收者，合并前不同 UID 的历史不自动合并统计。
+
+频控不替代下游服务的并发预算、鉴权或投递幂等性。Channel / Connector 不另建 Person 计数或生命周期；重试仍由同一个 Output 协调。验证见 `tests/output-frequency.test.ts`。
