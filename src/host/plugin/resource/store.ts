@@ -4,7 +4,7 @@ import jsonPatch from "fast-json-patch";
 import mergePatch from "json-merge-patch";
 import { ResourceStorage } from "../../resource/storage.ts";
 import { assertPathSegment, assertResourceUid, validateResourceType } from "./type.ts";
-import { equalResourceValue, resourceJSON, cloneResourceValue } from "../../../resource-value.ts";
+import { equalResourceValue, resourceJSON, cloneResourceValue } from "../../../resource/value.ts";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 

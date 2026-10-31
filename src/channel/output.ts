@@ -1,6 +1,6 @@
 import { isChannelAddress } from "./address.ts";
 import type { ChannelService } from "./service.ts";
-import type { OutputView } from "../output.ts";
+import type { OutputView } from "../../plugins/personal/output/view.ts";
 
 export function channelOutputs(service: Pick<ChannelService, "outputs">): OutputView[] { return service.outputs().filter(output => !!output.status.delivery && !!output.status.disclosure); }
 

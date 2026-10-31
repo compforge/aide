@@ -1,4 +1,4 @@
-import { cloneResourceValue, equalResourceValue } from "../../../src/resource-value.ts";
+import { cloneResourceValue, equalResourceValue } from "../../../src/resource/value.ts";
 import { NOTE_TYPE, noteVersion, noteTextVersion, type NoteResource } from "../note/model.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { OutputDefinition, OutputSpecSchema, OutputStatusSchema } from "./definition.ts";

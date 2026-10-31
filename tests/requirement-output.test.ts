@@ -8,7 +8,7 @@ import { join } from "node:path";
 import pino from "pino";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { requirementTransport, requirementOutputs } from "../plugins/personal/output/requirements.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 import { parseAddress, sameAddress } from "../src/address.ts";
 import type { RequirementAddress, RequirementComment } from "@compforge/aide-plugin";
 import type { OutputSpec } from "../plugins/personal/output/model.ts";

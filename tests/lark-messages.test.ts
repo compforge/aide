@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LarkMessages, larkFailure } from "../connectors/lark/messages.ts";
 import { LarkMessagesConfigSchema } from "../connectors/lark/config.ts";
-import { createConnectorClient, dispatchConnector, emptyConnectors } from "../src/connector-client.ts";
+import { createConnectorClient, dispatchConnector, emptyConnectors } from "../src/connector/client.ts";
 import { chiefTools } from "../agents/chief/chief-tools.ts";
 
 const config = { ...LarkMessagesConfigSchema.parse({ appId: "cli_app", userId: "ou_me" }), appId: "cli_app", userId: "ou_me" };

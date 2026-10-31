@@ -5,7 +5,7 @@ import { type LogSink, logError } from "../logging.ts";
 import type { ReconcileSnapshot } from "./reconcile-snapshot.ts";
 import {
   createHookContext,
-} from "../../plugin-context.ts";
+} from "../../plugin/context.ts";
 import {
   type ExecutionScope,
   type InvokeVerb,

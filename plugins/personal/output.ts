@@ -1,7 +1,7 @@
 import { PersonRefsSchema } from "./person/model.ts";
 import { type Address, type ResourceCommit, type ResourceRef } from "@compforge/aide-plugin";
 import { OUTPUT_TYPE, type OutputSpec } from "./output/model.ts";
-import type { OutputDraft } from "../../src/output.ts";
+import type { OutputDraft } from "./output/view.ts";
 import type { TopicResource } from "./topic/model.ts";
 
 /** Personal resolves the destination once. Channel delivery never infers it from business identity. */

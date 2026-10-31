@@ -1,7 +1,7 @@
 import type { RuntimeScope } from "../../protocol/runtime.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorRequest } from "../../protocol/connectors.ts";
-import { createConnectorClient, dispatchConnector, emptyConnectors } from "../../connector-client.ts";
+import { createConnectorClient, dispatchConnector, emptyConnectors } from "../../connector/client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
 import type { DeferredHookStage, Hook, HookStage, HookSubjectMap, InlineHookStage, Controller, ControllerSource, CronSource, CreateEvent, DeleteEvent, EventHandler, EventResource, MapFunc, PluginContext, PluginDataDirectories, PluginLogContext, PluginLogger, PluginLogLevel, PluginPackage, Resource, ReconcileRequest, ResourceRef, Source, SourceContext, SourceSignal, ResourceType, ResourceMergePatch, UpdateEvent, Watch } from "@compforge/aide-plugin";
 import type { PluginInstance } from "./instance.ts";

@@ -1,6 +1,6 @@
 import { createConnectorAccess } from "@compforge/aide-connector";
 import type { ConnectorClient } from "@compforge/aide-plugin";
-import type { ConnectorRequest } from "./protocol/connectors.ts";
+import type { ConnectorRequest } from "../protocol/connectors.ts";
 
 /** Typed facade over the existing Host/Runner request transport. */
 export function createConnectorClient(invoke: <T>(request: ConnectorRequest) => Promise<T>): ConnectorClient {

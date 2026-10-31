@@ -11,7 +11,7 @@ import { Aide, type AideOptions } from "../../src/app.ts";
 import { ConfigSchema } from "../../src/config.ts";
 import { PiAdapter } from "../../src/host/harness/pi/adapter.ts";
 import type { PiConfig } from "../../src/host/harness/pi/config.ts";
-import { emptyConnectors } from "../../src/connector-client.ts";
+import { emptyConnectors } from "../../src/connector/client.ts";
 import { inputDetail } from "../../src/api/inputs.ts";
 import { MESSAGE_KINDS, MessageWatchSchema, type MessageWatch } from "../../plugins/personal/source/message/config.ts";
 import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "../../plugins/personal/source/message/observe.ts";

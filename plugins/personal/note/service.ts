@@ -1,6 +1,6 @@
 import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
 import { writeSummary, type SummaryResource } from "./summary.ts";
-import { equalResourceValue } from "../../../src/resource-value.ts";
+import { equalResourceValue } from "../../../src/resource/value.ts";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Resource, ResourceClient } from "@compforge/aide-plugin";

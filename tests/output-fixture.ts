@@ -1,6 +1,6 @@
 import { personRefs } from "../plugins/personal/person/model.ts";
 import { fixtureAddress } from "./address-fixture.ts";
-import type { OutputDraft, OutputView } from "../src/output.ts";
+import type { OutputDraft, OutputView } from "../plugins/personal/output/view.ts";
 export function fixtureOutput(value: OutputDraft & { at: string; role?: "aide" }): OutputView {
   return { ...value, role: "aide", topicUid: "fixture", target: fixtureAddress(value.topicId), status: { phase: "pending", attempts: 0, disclosure: { decision: "allowed", reason: "Transport fixture", checkedAt: new Date().toISOString(), fingerprint: "fixture" }, delivery: { target: value.target ?? fixtureAddress(value.topicId), text: value.text, receivers: value.receivers ?? [] } } };
 }

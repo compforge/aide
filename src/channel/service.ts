@@ -1,4 +1,4 @@
-import type { OutputView } from "../output.ts";
+import type { OutputView } from "../../plugins/personal/output/view.ts";
 import type { TopicStore } from "../../plugins/personal/topic/store.ts";
 import type { ApplicationRuntime } from "../host/runtime/index.ts";
 import type { HarnessInvocationSnapshot } from "../host/harness/invocation.ts";

@@ -15,7 +15,7 @@ import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { routeByRules } from "../plugins/personal/route/rules.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 import { nextPullRequestPollDelay } from "../plugins/personal/source/pull-request/state.ts";
 import { observePullRequests, PULL_REQUEST_SOURCE_TYPE, type PullRequestSourceStatus } from "../plugins/personal/source/pull-request/observe.ts";
 import { PullRequestSourceSpecSchema, validateForgeSources, type PullRequestSourceSpec } from "../plugins/personal/source/pull-request/config.ts";

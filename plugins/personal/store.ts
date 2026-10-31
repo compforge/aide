@@ -1,6 +1,6 @@
 import { summaryText, summaryReference } from "./note/summary.ts";
 import { notes } from "./note/query.ts";
-import { equalResourceValue } from "../../src/resource-value.ts";
+import { equalResourceValue } from "../../src/resource/value.ts";
 import { workObservation } from "./status.ts";
 import { commitStatus } from "./status.ts";
 import { resourceRef } from "./input/state.ts";

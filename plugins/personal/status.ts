@@ -1,5 +1,5 @@
 import jsonPatch from "fast-json-patch";
-import { equalResourceValue } from "../../src/resource-value.ts";
+import { equalResourceValue } from "../../src/resource/value.ts";
 import type { Resource, ResourceClient, ResourceCommit, ResourcePatchOperation } from "@compforge/aide-plugin";
 import { setConditions, type Condition, type ConditionValue } from "./conditions.ts";
 import type { InputStatus } from "./input/model.ts";

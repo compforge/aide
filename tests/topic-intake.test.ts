@@ -10,7 +10,7 @@ import { fakeOptions } from "./fake-harness.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import { routeTo } from "./input-state-fixture.ts";
 import { chiefTools } from "../agents/chief/chief-tools.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 
 /** @case Pending references do not impose a per-Topic admission limit, regardless of producer. */
 test("Channel and Source Inputs share idempotent admission beyond the old pending limit", async (t) => {

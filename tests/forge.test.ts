@@ -5,7 +5,7 @@ import {
 } from "bun:test";
 
 import { createConnectors } from "./connector-fixture.ts";
-import { createConnectorClient, dispatchConnector } from "../src/connector-client.ts";
+import { createConnectorClient, dispatchConnector } from "../src/connector/client.ts";
 import { chiefTools } from "../agents/chief/chief-tools.ts";
 import { createForgeReader } from "@compforge/repocli";
 

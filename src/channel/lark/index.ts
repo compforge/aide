@@ -1,6 +1,6 @@
 import type { TopicLocator } from "../../../plugins/personal/topic/locator.ts";
 import { larkAddress, larkThreadAddress, larkTopicKey, larkTopicLocator, larkEndpoint } from "../address.ts";
-import type { OutputView } from "../../output.ts";
+import type { OutputView } from "../../../plugins/personal/output/view.ts";
 import { CHANNELS, bindChannelInput } from "../definition.ts";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";

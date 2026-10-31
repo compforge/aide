@@ -15,7 +15,7 @@ import { InputStore } from "../plugins/personal/input/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 import { observeRequirements, SOURCE_TYPE, type RequirementSourceStatus } from "../plugins/personal/source/requirement/observe.ts";
 import type { Watch } from "../plugins/personal/source/requirement/config.ts";
 

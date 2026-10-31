@@ -1,6 +1,6 @@
 import { personRefs, type PersonRef } from "../person/model.ts";
 import { type MaterialDisclosure } from "../disclosure.ts";
-import { equalResourceValue } from "../../../src/resource-value.ts";
+import { equalResourceValue } from "../../../src/resource/value.ts";
 import type { Resource, ResourceClient, ResourceCommit, ResourceValidationContext } from "@compforge/aide-plugin";
 import { NOTE_TYPE, SubjectSchema, NoteSpecSchema, noteReference, noteVersion, type NoteResource, type NoteSpec, type NoteStatus } from "./model.ts";
 import { resourceRef } from "../input/state.ts";

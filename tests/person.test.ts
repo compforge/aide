@@ -102,7 +102,7 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
 });
 
 test("Configured Forge Me accounts join the same Person without marking the execution account", async t => {
-  const { emptyConnectors } = await import("../src/connector-client.ts");
+  const { emptyConnectors } = await import("../src/connector/client.ts");
   const { forgeCatalog } = await import("../connectors/forge/catalog.ts");
   const home = mkdtempSync(join(tmpdir(), "aide-forge-me-"));
   const descriptions = [

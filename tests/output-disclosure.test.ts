@@ -17,7 +17,7 @@ import { OutputDefinition } from "../plugins/personal/output/definition.ts";
 import { OutputDelivery } from "../plugins/personal/output/delivery.ts";
 import { outputSpec } from "../plugins/personal/output.ts";
 import { webAddress, larkAddress, larkPersonAddress, isChannelAddress } from "../src/channel/address.ts";
-import { outputView } from "../src/output.ts";
+import { outputView } from "../plugins/personal/output/view.ts";
 import { channelOutputs } from "../src/channel/output.ts";
 import type { Sensitivity, Visibility } from "../plugins/personal/disclosure.ts";
 

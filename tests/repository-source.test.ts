@@ -10,7 +10,7 @@ import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import definitions from "../plugins/personal/definitions.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 import { RepositoryWatchSchema, RepositorySourceSpecSchema, type RepositorySourceSpec } from "../plugins/personal/source/repository/config.ts";
 import { REPOSITORY_SOURCE_TYPE } from "../plugins/personal/source/repository/definition.ts";
 import { observeRepositories } from "../plugins/personal/source/repository/observe.ts";

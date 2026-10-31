@@ -7,7 +7,7 @@ import pino from "pino";
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
 import { Aide } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 const workCatalog = (me?: { userKey: string }) => [{ kind: "requirement", version: "v1", name: "work", revision: "fixture", methods: ["list", "identity"], metadata: { ...(me ? { me } : {}) } }];
 import { fakeOptions } from "./fake-harness.ts";
 

@@ -16,7 +16,7 @@ import { personTools } from "../agents/chief/person-tools.ts";
 import { PERSON_TYPE, LOCAL_ME, personRef } from "../plugins/personal/person/model.ts";
 import { Persons } from "../plugins/personal/person/service.ts";
 import { messageRelation } from "../plugins/personal/source/message/relation.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 

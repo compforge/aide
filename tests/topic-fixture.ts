@@ -12,7 +12,7 @@ import { TopicStore as PersonalTopics } from "../plugins/personal/topic/store.ts
 import type { InputSpec } from "../plugins/personal/input/model.ts";
 import { initialTopicName } from "../plugins/personal/topic/model.ts";
 
-import type { OutputDraft } from "../src/output.ts";
+import type { OutputDraft } from "../plugins/personal/output/view.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputWrite } from "../plugins/personal/output.ts";
 export interface FixtureProcessing { phase?: "queued" | "running" | "done" | "failed" | "interrupted"; executionId?: string; result?: { summary: string; error?: string }; }

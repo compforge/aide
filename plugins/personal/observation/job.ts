@@ -1,5 +1,5 @@
 import { inspect, selectNodes, type JobView, type Node, type Operation, type SessionView, type ToolCall, type Input as ObservedInput } from "@compforge/agent-observation";
-import type { ReadSession } from "../../../src/observation.ts";
+import type { ReadSession } from "./session.ts";
 import type { Input } from "../input/state.ts";
 import type { Attempt, Handling } from "../input/model.ts";
 import type { Output } from "../output/model.ts";

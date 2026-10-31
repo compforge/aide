@@ -1,10 +1,10 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import pino from "pino";
-import { configPath, loadConfig } from "./config.ts";
+import { configPath, loadConfig } from "../config.ts";
 import { z } from "zod";
-import { syncHarnessPackages } from "./host/harness/packages.ts";
-import { withAsyncFileLock } from "./host/file-lock.ts";
+import { syncHarnessPackages } from "../host/harness/packages.ts";
+import { withAsyncFileLock } from "../host/file-lock.ts";
 
 const harness = z.enum(["pi", "chief", "task", "routine"]).parse(process.argv[2]);
 const log = pino({ level: process.env.LOG_LEVEL ?? "info" });

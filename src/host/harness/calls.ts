@@ -3,7 +3,7 @@ import type { HarnessActivity } from "./activity.ts";
 import { HarnessInvocations, type ScheduledHarnessInvocation, type HarnessInvocationSnapshot } from "./invocation.ts";
 import type { ExecutionScope, VerbRequest, VerbResponse } from "../../protocol/verbs.ts";
 import { logError, type LogSink } from "../logging.ts";
-import { isHarnessInvocation } from "../../plugin-context.ts";
+import { isHarnessInvocation } from "../../plugin/context.ts";
 export type HarnessRequest = Extract<VerbRequest, { verb: "harness" }>;
 /** The scheduler can request/cancel execution without accessing persistence or native bindings. */
 export interface HarnessExecution {

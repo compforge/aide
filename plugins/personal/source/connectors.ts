@@ -1,6 +1,6 @@
-import type { ConnectorsConfig } from "../connectors/config.ts";
-import { LarkMessagesConfigSchema } from "../connectors/lark/config.ts";
-import { resolveEnvironmentConfig } from "../connectors/environments/config.ts";
+import type { ConnectorsConfig } from "../../../connectors/config.ts";
+import { LarkMessagesConfigSchema } from "../../../connectors/lark/config.ts";
+import { resolveEnvironmentConfig } from "../../../connectors/environments/config.ts";
 
 /** Personal's existing message and environment Sources each select one configured directory/account. */
 export function personalConnectorConfig(config: ConnectorsConfig = {}) {

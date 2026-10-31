@@ -1,4 +1,4 @@
-import { freezeResourceValue as deepFreeze } from "../../../resource-value.ts";
+import { freezeResourceValue as deepFreeze } from "../../../resource/value.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { Resource, ResourceCommit, ResourceClient as PublicResourceClient, ResourceListOptions, ResourcePageOptions, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 

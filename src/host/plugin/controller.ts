@@ -17,7 +17,7 @@ import { validateWatches, watchRequests } from "./watch.ts";
 import { namespaceContains } from "./namespace.ts";
 import {
   createReconcileContext,
-} from "../../plugin-context.ts";
+} from "../../plugin/context.ts";
 import {
   type ExecutionScope,
   type InvokeVerb,
