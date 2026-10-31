@@ -55,7 +55,7 @@ export class OutputDisclosure {
     let refusal = audience.complete && audience.people.length ? "" : "Cannot establish the complete destination audience";
     const get = <S, T>(ref: ResourceRef & { uid?: string }): Resource<S, T> | undefined => {
       const r = this.store.resources.find<S, T>(ref, ref.name, ref.namespace);
-      dependencies.push([ref, r && [r.metadata.uid, r.metadata.deletionTimestamp, r.spec]]);
+      dependencies.push([ref, r && [r.metadata.uid, r.metadata.deletionTimestamp, r.kind === "Person" ? personDisclosure(r.spec as Person) : r.spec]]);
       return r && r.metadata.uid === ref.uid && !r.metadata.deletionTimestamp ? r : undefined;
     };
     const livePeople = audience.people.map(p => get<Person, PersonStatus>({ apiVersion: p.apiVersion, kind: p.kind, namespace: p.metadata.namespace, name: p.metadata.name, uid: p.metadata.uid }));
@@ -99,7 +99,7 @@ export class OutputDisclosure {
         refusal ||= `Recipient ${recipient.metadata.name} is outside visibility ${policy.visibility}`;
     }
     const privateMe = audience.complete && audience.private && audience.people.length === 1 && isMe(audience.people[0]!.spec, this.ports.marks);
-    return { policy, fingerprint: hash([receiverIdentity(output.spec), policy, dependencies, { ...audience, people: audience.people.map(p => [p.metadata.uid, p.metadata.deletionTimestamp, p.spec]) }, this.ports.marks]), privateMe,
+    return { policy, fingerprint: hash([receiverIdentity(output.spec), policy, dependencies, { ...audience, people: audience.people.map(p => [p.metadata.uid, p.metadata.deletionTimestamp, personDisclosure(p.spec)]) }, this.ports.marks]), privateMe,
       refusal: privateMe ? "" : refusal, evidence: { text: output.spec.text, materials } };
   }
   private async run(id: string) {
@@ -167,4 +167,10 @@ export class OutputDisclosure {
     });
     this.log.info({ outputId: id, decision, actualTarget: delivery.target }, "Output disclosure resolved");
   }
+}
+
+/** @spec Delivery timing is not disclosure permission; editing it cannot invalidate an attempted Output's authorization. */
+function personDisclosure(person: Person) {
+  const { delivery: _delivery, ...disclosure } = person;
+  return disclosure;
 }

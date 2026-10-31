@@ -1,4 +1,5 @@
 import './style.css';
+import { renderDelivery, readDelivery, deliveryDirty, disableDelivery } from './delivery.ts';
 import { PersonMerge } from './merge.ts';
 import { PersonNotes } from './notes.ts';
 import { mountPersonTabs } from './tabs.ts';
@@ -35,6 +36,7 @@ function identities(): PersonIdentity[] {
 function hasUnsavedChanges() {
   return saving || (selected && ($<HTMLInputElement>('person-name').value !== selected.spec.name
     || $<HTMLSelectElement>('person-clearance').value !== (selected.spec.clearance ?? 'L1')
+    || deliveryDirty(selected.spec.delivery)
     || JSON.stringify(identities()) !== JSON.stringify(selected.spec.identities)
     || (editingSummary && $<HTMLTextAreaElement>('person-summary').value !== selected.summaryText)));
 }
@@ -129,6 +131,7 @@ function setNameEditing(editing: boolean) {
 }
 function setSaving(value: boolean) {
   saving = value;
+  disableDelivery(value);
   $<HTMLSelectElement>('person-clearance').disabled = value;
   for (const id of ['person-save', 'person-name-edit', 'person-name-cancel', 'person-name-save', 'person-reload', 'person-summary-edit', 'person-summary-cancel', 'person-summary-confirm', 'identity-add']) $<HTMLButtonElement>(id).disabled = value;
   $<HTMLTextAreaElement>('person-summary').readOnly = value;
@@ -151,6 +154,7 @@ function renderEditor() {
   renderSummary(); setSummaryEditing(false); setNameEditing(false);
   $('person-identities').replaceChildren(); selected.spec.identities.forEach(identityRow);
   $<HTMLSelectElement>('person-clearance').value = selected.spec.clearance ?? 'L1';
+  renderDelivery(selected.spec.delivery);
   records.reset(selected); tabs.refresh();
 }
 async function select(id: string, uid?: string) {
@@ -210,6 +214,18 @@ async function saveProfile(area: 'name' | 'identities') {
     if (area === 'name' && $('person-name-form').hidden) $('person-name-edit').focus();
   }
 }
+$('person-delivery-form').onsubmit = async event => {
+  event.preventDefault();
+  if (!selected || saving) return;
+  try {
+    const delivery = readDelivery();
+    setSaving(true);
+    adoptPerson(await savePerson({ ...selected.spec, delivery }));
+    renderDelivery(selected.spec.delivery);
+    $('person-notice').textContent = '投递频率已保存。';
+  } catch (error) { $('person-notice').textContent = errorMessage(error); }
+  finally { setSaving(false); }
+};
 $('person-name-edit').onclick = () => { setNameEditing(true); $<HTMLInputElement>('person-name').focus(); };
 $('person-name-cancel').onclick = () => { setNameEditing(false); $('person-name-edit').focus(); };
 $('person-name-form').onkeydown = event => {

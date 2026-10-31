@@ -1,3 +1,4 @@
+import { PersonDeliverySchema } from "./delivery.ts";
 import { KeyedSet } from "@compforge/ts-stdx/collections";
 import { SensitivitySchema } from "../disclosure.ts";
 import type { ResourceContext } from "../context.ts";
@@ -17,7 +18,7 @@ export const IdentitiesSchema = z.array(IdentitySchema).max(100).refine((items) 
 /** Me marks are independent of execution credentials and never inferred from a profile. */
 export interface Me { readonly identities: readonly PersonIdentity[] }
 export const LOCAL_ME: PersonIdentity = { provider: "web", scope: "local", id: "me" };
-export const PersonSchema = z.object({ name: z.string().trim().min(1).max(200), identities: IdentitiesSchema.default([]), clearance: SensitivitySchema.default("L1") }).strict();
+export const PersonSchema = z.object({ name: z.string().trim().min(1).max(200), identities: IdentitiesSchema.default([]), clearance: SensitivitySchema.default("L1"), delivery: PersonDeliverySchema.optional() }).strict();
 export type Person = Omit<z.infer<typeof PersonSchema>, "clearance"> & { clearance?: import("../disclosure.ts").Sensitivity };
 /** A historical reference pins an incarnation; it does not require the Person to remain alive. */
 export const PersonRefSchema = z.object({ apiVersion: z.string().min(1), kind: z.literal("Person"),

@@ -366,3 +366,23 @@ test("Output admission and immutable delivery compare Person UID sets on both si
   assert.throws(() => OutputDefinition.validator!.update!(previous, { ...current, status: { ...current.status,
     delivery: { ...current.status.delivery, text: "different" } } }, context), /delivery is immutable/);
 });
+
+
+test("Person frequency changes do not invalidate disclosure or interrupt an Output retry", async t => {
+  const f = await setup(t);
+  f.output("frequency-change", await f.note());
+  let sends = 0;
+  const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", send: async () => {
+    if (++sends === 1) throw new Error("temporary failure");
+    return undefined;
+  } }), pino({ level: "silent" }));
+  await assert.rejects(delivery.reconcile("frequency-change"));
+  const fingerprint = f.store.get("frequency-change")!.status.disclosure!.fingerprint;
+  const checks = f.checks();
+  await f.client.patch(f.other, { type: "merge", value: { spec: { delivery: { window: { duration: "1h", maxMessages: 10 }, minInterval: "1m" } } } });
+  await delivery.reconcile("frequency-change");
+  assert.equal(f.store.get("frequency-change")!.status.phase, "delivered");
+  assert.equal(f.store.get("frequency-change")!.status.disclosure!.fingerprint, fingerprint);
+  assert.equal(f.checks(), checks);
+  assert.equal(sends, 2);
+});

@@ -102,9 +102,9 @@ export class OutputStore {
     if (s.phase === "delivered") return s;
     if (!["pending", "sending"].includes(s.phase)) throw new Error("Output requires explicit delivery recovery");
     if (!s.disclosure || !s.delivery) throw new Error("Output disclosure has not been checked");
-    return { ...s, phase: "sending", attempts: s.attempts + 1 };
+    return { ...s, phase: "sending", deliveryWait: undefined, lastError: undefined, attempts: s.attempts + 1 };
   }); }
-  delivered(id: string, receipt?: OutputStatus["receipt"]): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "delivered", lastError: undefined, attempts: s.attempts, deliveredAt: new Date().toISOString(), ...(receipt ? { receipt } : {}) }); }
+  delivered(id: string, receipt?: OutputStatus["receipt"]): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "delivered", deliveryWait: undefined, lastError: undefined, attempts: s.attempts, deliveredAt: new Date().toISOString(), ...(receipt ? { receipt } : {}) }); }
   uncertain(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "uncertain", lastError: error.slice(0, 4000) }); }
   retry(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "pending", attempts: s.attempts, lastError: error.slice(0, 4000) }); }
   subscribe(listener: (output: Output) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }

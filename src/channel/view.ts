@@ -141,9 +141,11 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   };
 }
 
-function outputLabel(status: Pick<import("../../plugins/personal/output/model.ts").OutputStatus, "phase" | "lastError" | "disclosure">): string | undefined {
+function outputLabel(status: Pick<import("../../plugins/personal/output/model.ts").OutputStatus, "phase" | "lastError" | "disclosure" | "deliveryWait">): string | undefined {
   if (status.phase === "uncertain") return "投递结果待确认";
   if (status.phase === "failed") return "投递失败";
+  if (status.deliveryWait && ["pending", "sending"].includes(status.phase)) return status.deliveryWait.reason === "frequency"
+    ? `等待投递频控，预计 ${new Date(status.deliveryWait.until).toLocaleString()} 重试` : "等待接收人的上一条投递完成";
   if (status.disclosure?.decision === "denied") return status.phase === "delivered" ? "已转告 Me，原目标未发送" : "原目标未发送，正在告知 Me";
   if (!status.disclosure) return "待检查，尚未发送";
   if (status.phase !== "delivered") return "尚未送达";

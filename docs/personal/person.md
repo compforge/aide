@@ -74,3 +74,5 @@ summary 和 recent 查询视图只是人物资料的一部分，不代表完整�
 `tests/person-catalog.test.ts` 覆盖身份唯一性、Me、版本检查和用户编辑；`tests/person.test.ts` 与消息 Source 测试覆盖关系归因。Chief 的人物工具与记忆验证见 [Chief](chief.md#验证)。
 
 `tests/person-merge.test.ts` 覆盖合并方向、同名独立、事务回滚、并发合并、Connector 身份重查与历史悬空引用；`tests/person-catalog.test.ts` 验证 HTTP 合并、标准 finalize 与重启后的身份归属。
+
+人物的 `spec.delivery` 配置滑动窗口额度和最小投递间隔，默认不限制；统计来自 Output 成功投递历史，Person.status 不保存计数。配置和执行契约见 [投递频控](output.md#投递频控)。

@@ -85,6 +85,9 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
       text: output.spec.text, status: output.status.phase, consumer: target, executionId: output.spec.executionId });
     if (output.status.deliveredAt) timeline.push({ id: `output:${output.metadata.name}:delivered`, stage: "output", at: output.status.deliveredAt,
       title: "Output 已送达", status: "delivered", consumer: target });
+    if (output.status.deliveryWait && ["pending", "sending"].includes(output.status.phase)) timeline.push({ id: `output:${output.metadata.name}:waiting`, stage: "output",
+      title: output.status.deliveryWait.reason === "frequency" ? "等待投递频控" : "等待接收人的上一条投递完成",
+      text: `预计重试：${output.status.deliveryWait.until}`, status: output.status.phase, consumer: target });
     if (output.status.lastError) timeline.push({ id: `output:${output.metadata.name}:error`, stage: "output", title: "Output 投递异常记录", text: output.status.lastError, status: output.status.phase, consumer: target });
   }
   timeline.sort((a, b) => a.at && b.at ? a.at.localeCompare(b.at) : a.at ? -1 : b.at ? 1 : 0);
