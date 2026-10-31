@@ -13,7 +13,7 @@ import { InputStore } from "../input/store.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import type { ResourceClientChange } from "../../../src/host/plugin/resource/client.ts";
 import { DEFAULT_TOPIC_ID, TOPIC_TYPE, initialTopicName, type Topic, type TopicResource, type TopicInput, type TopicRun, type TopicSpec, type TopicStatus } from "./model.ts";
-import { outputView, type OutputDraft, type OutputView } from "../../../src/output.ts";
+import { outputView, type OutputDraft, type OutputView } from "../output/view.ts";
 import { OutputStore } from "../output/store.ts";
 import { outputWrite } from "../output.ts";
 import { digest } from "../chief-model.ts";

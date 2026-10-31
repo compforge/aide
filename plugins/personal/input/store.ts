@@ -1,11 +1,11 @@
-import { cloneResourceValue } from "../../../src/resource-value.ts";
+import { cloneResourceValue } from "../../../src/resource/value.ts";
 import { ResourceAlreadyExists } from "@compforge/aide-plugin";
 import { inputStatus } from "../status.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { InputDefinition, InputSpecSchema } from "./definition.ts";
 import { createHash } from "node:crypto";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
-import { equalResourceValue } from "../../../src/resource-value.ts";
+import { equalResourceValue } from "../../../src/resource/value.ts";
 import { type Resource } from "@compforge/aide-plugin";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
 /** @spec Input facts are immutable and read on demand; shared ResourceStorage owns quotas and collection. */

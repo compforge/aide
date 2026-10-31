@@ -9,7 +9,7 @@ import { EventLedger } from "../src/host/event/ledger.ts";
 import { ENVELOPE_VERSION } from "../src/host/event/index.ts";
 import { ReconcileCapacity } from "../src/reconcile/queue.ts";
 import { emptyReconcileSnapshot } from "../src/host/plugin/reconcile-snapshot.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 
 test("Connector Verb persists dispatch and outcome; orphan recovery records uncertainty without replay", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-connector-verb-"));

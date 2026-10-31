@@ -1,8 +1,8 @@
-import { resourceJSON } from "../../../resource-value.ts";
+import { resourceJSON } from "../../../resource/value.ts";
 import { hostOperation, type HostOperation } from "../../../protocol/ipc.ts";
 import type { RuntimeScope } from "../../../protocol/runtime.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
-import { dispatchConnector, emptyConnectors } from "../../../connector-client.ts";
+import { dispatchConnector, emptyConnectors } from "../../../connector/client.ts";
 import { AsyncResource } from "node:async_hooks";
 import { fileURLToPath } from "node:url";
 

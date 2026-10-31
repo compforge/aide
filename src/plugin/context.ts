@@ -1,7 +1,7 @@
-import { createConnectorClient } from "./connector-client.ts";
+import { createConnectorClient } from "../connector/client.ts";
 import { MAX_VERB_TIMEOUT_MS, type HarnessVerbInput, type HookContext, type HookStage, type HookSubjectMap, type PluginVerbs, type ReconcileContext, type ReconcileSnapshot } from "@compforge/aide-plugin";
 
-import type { ExecutionScope, InvokeVerb } from "./protocol/verbs.ts";
+import type { ExecutionScope, InvokeVerb } from "../protocol/verbs.ts";
 
 const reconcileScopes = new WeakMap<ReconcileContext, ExecutionScope>();
 const hookScopes = new WeakMap<HookContext, ExecutionScope>();
@@ -49,7 +49,7 @@ export function validateHarness(input: HarnessVerbInput): void {
 /**
  * @spec Host and Runner use the same facade; only the invocation transport differs.
  * @rule Context construction depends only on the public Plugin contract, never Host execution or storage.
- * @see {@link ../docs/kernel.md}
+ * @see {@link ../../docs/kernel.md}
  */
 export function createPluginVerbs(
   scope: ExecutionScope,
@@ -62,7 +62,7 @@ export function createPluginVerbs(
     },
     connectors(options: { timeoutMs: number }) {
       validateTimeout("connector", options.timeoutMs);
-      return createConnectorClient(async <T>(request: import("./protocol/connectors.ts").ConnectorRequest): Promise<T> => {
+      return createConnectorClient(async <T>(request: import("../protocol/connectors.ts").ConnectorRequest): Promise<T> => {
         const result = await invoke(scope, { verb: "connector", input: { request: request.operation === "connector.call" ? { ...request, timeoutMs: options.timeoutMs } : request, timeoutMs: options.timeoutMs } });
         if (result.state !== "success") throw new Error(`Connector ${request.operation} ${result.state}${result.state === "failure" ? `: ${result.error}` : ""}`);
         return result.value as T;

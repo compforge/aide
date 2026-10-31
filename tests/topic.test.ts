@@ -4,7 +4,7 @@ import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { assessAll } from "./input-state-fixture.ts";
 import { admit } from "./input-state-fixture.ts";
 import { loadConfig } from "../src/config.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 import { SOURCE_TYPE } from "../plugins/personal/source/requirement/observe.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";

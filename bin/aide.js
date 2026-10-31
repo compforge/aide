@@ -9,7 +9,7 @@ if (args.length === 1 && ["version", "--version", "-v"].includes(args[0])) {
   process.stdout.write(`${readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim()}\n`);
 } else if (args.length === 3 && args[0] === "harness" && args[1] === "sync" && ["pi", "chief", "task", "routine"].includes(args[2])) {
   const localBun = fileURLToPath(new URL("../node_modules/.bin/bun", import.meta.url));
-  const result = spawnSync(existsSync(localBun) ? localBun : "bun", [fileURLToPath(new URL("../src/sync-harness.ts", import.meta.url)), args[2]], { stdio: "inherit" });
+  const result = spawnSync(existsSync(localBun) ? localBun : "bun", [fileURLToPath(new URL("../src/cli/sync-harness.ts", import.meta.url)), args[2]], { stdio: "inherit" });
   if (result.error) process.stderr.write(`Cannot start Bun: ${result.error.message}\n`);
   process.exitCode = result.status ?? 1;
 } else {

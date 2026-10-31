@@ -3,7 +3,7 @@ import {
 } from "../package.ts";
 import {
   hookScope,
-} from "../../../plugin-context.ts";
+} from "../../../plugin/context.ts";
 import type { PluginRunnerClient } from "./client.ts";
 import type {
   HookRegistration,

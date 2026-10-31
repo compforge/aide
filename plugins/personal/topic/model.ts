@@ -1,7 +1,7 @@
 import type { ResourceContext } from "../context.ts";
 import type { Resource, Address, ResourceRef } from "@compforge/aide-plugin";
 import type { InputSpec, InputStatus } from "../input/model.ts";
-import type { OutputView } from "../../../src/output.ts";
+import type { OutputView } from "../output/view.ts";
 import type { LoopExecution } from "../loop.ts";
 import type { TopicReview } from "./review.ts";
 export const TOPIC_TYPE = { apiVersion: "aide.dev/v1alpha4", kind: "Topic" } as const;

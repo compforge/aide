@@ -8,7 +8,7 @@ import { ResourceRefSchema, OrganizationSchema } from "../topic/ref.ts";
 import { guardAssessment } from "./assignment.ts";
 import { guardInputTopic } from "../topic/ownership.ts";
 import { z } from "zod";
-import { equalResourceValue } from "../../../src/resource-value.ts";
+import { equalResourceValue } from "../../../src/resource/value.ts";
 import { ResourceVersionConflict, type ResourceDefinition } from "@compforge/aide-plugin";
 import { INPUT_TYPE, INPUT_ORIGINS, InputAttention, isInternalInput, inputQueue, type InputSpec, type InputStatus } from "./model.ts";
 import { AddressSchema } from "../../../src/address.ts";

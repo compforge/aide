@@ -1,4 +1,4 @@
-import { cloneResourceValue } from "../../resource-value.ts";
+import { cloneResourceValue } from "../../resource/value.ts";
 import { ResourcePages } from "./pages.ts";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync, existsSync } from "node:fs";

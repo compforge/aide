@@ -1,5 +1,5 @@
 import { sensitivityRank } from "../disclosure.ts";
-import { equalResourceValue } from "../../../src/resource-value.ts";
+import { equalResourceValue } from "../../../src/resource/value.ts";
 import { requireOrganization, requireTopic } from "../topic/ownership.ts";
 import { noteVersion } from "./model.ts";
 import { requireContentWriter } from "../context-write.ts";

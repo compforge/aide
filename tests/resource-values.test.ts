@@ -7,7 +7,7 @@ import { KeyedSet } from "@compforge/ts-stdx/collections";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ResourceStorage } from "../src/host/resource/storage.ts";
-import { cloneResourceValue, equalResourceValue } from "../src/resource-value.ts";
+import { cloneResourceValue, equalResourceValue } from "../src/resource/value.ts";
 import { KEYED_TYPE, KeyedDefinition, members } from "./fixtures/keyed-definitions.ts";
 
 test("Resource sets survive storage, patch, paging, validators, indexes and restart without sharing mutable members", async t => {

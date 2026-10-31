@@ -58,7 +58,7 @@ export interface WorkOutcome { at: string; text: string; observedGeneration: num
 
 
 export { IncomingSchema, type Incoming } from "../../src/channel/message.ts";
-export type { OutputDraft, OutputView } from "../../src/output.ts";
+export type { OutputDraft, OutputView } from "./output/view.ts";
 
 /** @spec Task completion ends a goal; Routine completion only ends its current occurrence. */
 export function nextOccurrence(trigger: Trigger | null, now: Date): string | null {

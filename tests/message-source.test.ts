@@ -17,7 +17,7 @@ import { InputStore } from "../plugins/personal/input/store.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 import { MESSAGE_SOURCE_TYPE, observeMessages, type MessageSourceStatus } from "../plugins/personal/source/message/observe.ts";
 import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageKind, type MessageWatch } from "../plugins/personal/source/message/config.ts";
 import { readMessageContext } from "../plugins/personal/source/message/context.ts";

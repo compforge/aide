@@ -1,4 +1,4 @@
-import { cloneResourceValue } from "../../../resource-value.ts";
+import { cloneResourceValue } from "../../../resource/value.ts";
 import type { Resource, ResourceDefinition, ResourceType } from "@compforge/aide-plugin";
 
 type PrintMethod = "describe" | "summarize";

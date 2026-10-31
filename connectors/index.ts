@@ -6,7 +6,7 @@ import type { ConnectorClient } from "@compforge/aide-plugin";
 import type { ConnectorApi, ConnectorPackage } from "@compforge/aide-connector";
 import { ConnectorRegistry, type ConnectorInvocationOptions } from "../src/host/connector/registry.ts";
 import { loadConnectorPackages, type ConnectorConfigurations } from "../src/host/connector/packages.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 import { builtinDefinitions } from "./definitions.ts";
 
 /** One Host registry is shared by typed built-in adapters, arbitrary external kinds, Plugins and verbs. */

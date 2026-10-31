@@ -1,5 +1,5 @@
 import { InputAttention, inputAttention } from "../plugins/personal/input/model.ts";
-import { emptyConnectors } from "../src/connector-client.ts";
+import { emptyConnectors } from "../src/connector/client.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
 import type { Resource } from "@compforge/aide-plugin";
 import type { WorkSpec } from "../plugins/personal/resources.ts";

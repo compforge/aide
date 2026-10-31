@@ -1,12 +1,12 @@
 import { DEFAULT_MAX_TOTAL_CONCURRENCY } from "../../reconcile/config.ts";
-import { createPluginVerbs } from "../../plugin-context.ts";
+import { createPluginVerbs } from "../../plugin/context.ts";
 import { ResourceStorage } from "../resource/storage.ts";
 import { ResourcePrinters } from "./resource/printer.ts";
 import { RunnerController } from "./runner/controller.ts";
 import type { PluginRunnerClient } from "./runner/client.ts";
 import type { ControllerRegistration as RemoteRegistration, HostRequest } from "../../protocol/ipc.ts";
 import type { ConnectorClient } from "@compforge/aide-plugin";
-import { emptyConnectors } from "../../connector-client.ts";
+import { emptyConnectors } from "../../connector/client.ts";
 import type { PluginLogRecord } from "../../protocol/ipc.ts";
 
 import {

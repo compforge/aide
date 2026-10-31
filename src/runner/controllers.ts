@@ -1,9 +1,9 @@
 import { runnerExecution } from "./execution.ts";
 import { deepFreeze } from "../reconcile/snapshot.ts";
 import { validateSources } from "../reconcile/source.ts";
-import { equalResourceValue } from "../resource-value.ts";
+import { equalResourceValue } from "../resource/value.ts";
 import type { Controller, PluginLogger, Resource, ResourceClient, ResourceNamespace, ReconcileSnapshot } from "@compforge/aide-plugin";
-import { createReconcileContext } from "../plugin-context.ts";
+import { createReconcileContext } from "../plugin/context.ts";
 import { reconcileKeyId, ReconcileCapacity, ReconcileDueQueue, ReconcileQueue, type ReconcileCapacityLease } from "../reconcile/queue.ts";
 import { CronSourceQueue } from "../reconcile/cron-source.ts";
 import type { ReconcileKey, ReconcileScope } from "../protocol/reconcile.ts";

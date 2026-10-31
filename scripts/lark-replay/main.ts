@@ -39,7 +39,7 @@ export async function main(args = process.argv.slice(2)) {
     const maxPages = z.coerce.number().int().min(1).max(1000).parse(values["max-pages"] ?? 100);
     const { loadConfig } = await import("../../src/config.ts");
     const { LarkMessages } = await import("../../connectors/lark/messages.ts");
-    const { personalConnectorConfig } = await import("../../src/personal-connectors.ts");
+    const { personalConnectorConfig } = await import("../../plugins/personal/source/connectors.ts");
     const lark = personalConnectorConfig(loadConfig(required(values.config, "config")).connectors).lark;
     if (!lark?.appId || !lark.userId) throw new Error("Collection requires explicit connectors.lark appId/userId");
     const meIds = lark.me.filter(m => m.appId === lark.appId).map(m => m.openId);

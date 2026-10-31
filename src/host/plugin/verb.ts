@@ -1,6 +1,6 @@
 import { ConnectorTimeoutError } from "@compforge/aide-connector";
 import type { ConnectorClient } from "@compforge/aide-plugin";
-import { dispatchConnector, emptyConnectors } from "../../connector-client.ts";
+import { dispatchConnector, emptyConnectors } from "../../connector/client.ts";
 import { randomUUID } from "node:crypto";
 import {
   type LogSink,

@@ -51,7 +51,11 @@ src/
   runner/                  # Plugin 注册、Watch、队列、重试、Source 与 Reconcile
   reconcile/               # 共用的去重队列、容量与定时机制
   protocol/                # Host / Runner 共用 IPC 与 verb 契约
-  plugin-context.ts        # 共用上下文构造与 verb 参数校验
+  plugin/                  # Host / Runner 共用的插件能力
+    context.ts             # 执行上下文构造与 verb 参数校验
+  connector/client.ts      # Connector 共用访问代理与请求分发
+  resource/value.ts        # Resource 编解码、克隆、冻结与比较
+  cli/sync-harness.ts      # Harness 包同步命令入口
 plugins/personal/
   note/                    # 独立事项 CRD、subject/people 索引与容量保留
   person/                  # Person CRD 与跨会话人物目录
@@ -62,7 +66,7 @@ plugins/personal/
     relation.ts            # 输入与 Me 的关系
     messages.ts            # Connector 消息贡献人物事实
   input/                   # Input 定义、幂等接收、分页检索、保留策略与 Printer
-  output/                  # Output 定义、投递状态、action 与 Printer
+  output/                  # Output 定义、投递状态、action、展示投影与 Printer
   observation/             # Input JobView、原生调用引用与业务证据关联
   aide.ts                  # 全局 Personal 服务：领域工具装配、输入与恢复
   plugin.ts                # 插件入口：注册 Chief / Source / Task / Routine

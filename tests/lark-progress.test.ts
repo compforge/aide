@@ -10,7 +10,7 @@ import { test, type TestContext } from "node:test";
 import pino from "pino";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
-import type { OutputView } from "../src/output.ts";
+import type { OutputView } from "../plugins/personal/output/view.ts";
 import { fixtureOutput } from "./output-fixture.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
 import { larkProgress, progressCard, cardPreviews, type LarkProgress } from "../src/channel/lark/card.ts";

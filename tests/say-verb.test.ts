@@ -11,7 +11,7 @@ import { HarnessFixtures } from "./harness-fixture.ts";
 import { TopicStore, seedInput } from "./topic-fixture.ts";
 import { ReconcileCapacity } from "../src/reconcile/queue.ts";
 import { emptyReconcileSnapshot } from "../src/host/plugin/reconcile-snapshot.ts";
-import { createPluginVerbs } from "../src/plugin-context.ts";
+import { createPluginVerbs } from "../src/plugin/context.ts";
 
 test("say persists an independent scoped Output and validates Input ownership", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-say-"));

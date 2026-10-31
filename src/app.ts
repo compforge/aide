@@ -1,7 +1,7 @@
 import { OutputDelivery, type OutputTransportResolver } from "../plugins/personal/output/delivery.ts";
 import { forgeCatalog } from "../connectors/forge/catalog.ts";
 import { validateForgeSources } from "../plugins/personal/source/pull-request/config.ts";
-import { personalConnectorConfig } from "./personal-connectors.ts";
+import { personalConnectorConfig } from "../plugins/personal/source/connectors.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { initialTopicName } from "../plugins/personal/topic/model.ts";
 import { ROUTE_HARNESS } from "../plugins/personal/route/model.ts";
@@ -12,7 +12,7 @@ import { isChannelAddress, larkEndpoint } from "./channel/address.ts";
 import { SayInputSchema } from "../plugins/personal/output/action.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
-import { outputView } from "./output.ts";
+import { outputView } from "../plugins/personal/output/view.ts";
 import { personRequirements } from "../plugins/personal/person/requirements.ts";
 import { requirementOutputs } from "../plugins/personal/output/requirements.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
@@ -50,7 +50,7 @@ export interface AideOptions {
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   defaultHarnessConfig: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
   createAdapter: ExecutionOptions["createAdapter"];
-  readSession?: import("./observation.ts").ReadSession;
+  readSession?: import("../plugins/personal/observation/session.ts").ReadSession;
 }
 
 /**
@@ -59,7 +59,7 @@ export interface AideOptions {
  * @link docs/kernel.md
  */
 export class Aide {
-  readSession?: import("./observation.ts").ReadSession;
+  readSession?: import("../plugins/personal/observation/session.ts").ReadSession;
   private readonly inputDefinitions = new Map<string, ChannelDefinition | SourceDefinition>([
     ...Object.values(CHANNELS).map((definition) => [`channel:${definition.id}`, definition] as const),
     ...Object.values(SOURCES).map((definition) => [`source:${definition.id}`, definition] as const),

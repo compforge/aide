@@ -1,15 +1,15 @@
-import { decodeResources, resourceJSON } from "../resource-value.ts";
+import { decodeResources, resourceJSON } from "../resource/value.ts";
 import type { ResourceDefinition } from "@compforge/aide-plugin";
 import { hostOperation, type HostOperation } from "../protocol/ipc.ts";
 import { runnerExecution } from "./execution.ts";
 import type { RuntimeScope } from "../protocol/runtime.ts";
 import { Controllers } from "./controllers.ts";
-import { createConnectorClient } from "../connector-client.ts";
+import { createConnectorClient } from "../connector/client.ts";
 import type { Controller, Hook, HookStage, HookSubjectMap, PluginContext, PluginDataDirectories, PluginInstance, PluginLogContext, PluginLogLevel, PluginPackage, ReconcileSnapshot, Resource, ResourceClient, ResourceListOptions, ResourcePageOptions, ResourcePage, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 import type { PluginLogRecord } from "../protocol/ipc.ts";
 import {
   createHookContext
-} from "../plugin-context.ts";
+} from "../plugin/context.ts";
 import {
   type ExecutionScope,
   type VerbResponse,

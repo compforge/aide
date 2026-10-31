@@ -192,7 +192,7 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
   const { aide, root } = setup(t);
   const { personRef } = await import("../plugins/personal/person/model.ts");
   const { chiefTools } = await import("../agents/chief/chief-tools.ts");
-  const { emptyConnectors } = await import("../src/connector-client.ts");
+  const { emptyConnectors } = await import("../src/connector/client.ts");
   const { outputPrinter } = await import("../plugins/personal/output/printer.ts");
   const { inputPrinter } = await import("../plugins/personal/input/printer.ts");
   const { OutputStore } = await import("../plugins/personal/output/store.ts");

@@ -9,7 +9,7 @@ import { HarnessCalls, type HarnessExecution, type HarnessRequest } from "../har
 import type { ExecutionScope } from "../../protocol/verbs.ts";
 import { acquireWriterLock, releaseWriterLock } from "../store/lease.ts";
 import { logError } from "../logging.ts";
-import { validateHarness, isHarnessInvocation } from "../../plugin-context.ts";
+import { validateHarness, isHarnessInvocation } from "../../plugin/context.ts";
 
 export type ExecutionOptions = Omit<InvocationExecutorOptions, "records">;
 type Configuration = { id: string; harness: string; model?: string; effort?: string };
