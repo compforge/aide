@@ -8,3 +8,17 @@
 #list .list-link { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 10px; text-decoration: none; color: inherit; overflow-wrap: anywhere; }
 #list .list-link:hover, #list .list-link[aria-current="true"] { background: #e4ecdf; }
 @media (max-width: 700px) { .persons-page { grid-template-columns: 1fr; overflow: auto; } .person-list { max-height: 30vh; border-right: none; border-bottom: 1px solid #d8dfd5; } .person-detail { padding: 20px; overflow: visible; } }
+
+.address-list-heading { display: flex; align-items: center; justify-content: space-between; margin: 0 10px; }
+.address-list-heading h2 { margin: 0; }
+.address-refresh { display: inline-flex; padding: 6px; background: transparent; color: #68776c; }
+.address-refresh:hover { background: #e8eee3; }
+.address-entry { position: relative; }
+.address-entry .list-link strong { padding-right: 30px; }
+.address-more { position: absolute; top: 8px; right: 6px; padding: 2px 8px; background: transparent; color: #68776c; font-size: 20px; }
+.address-more:hover { background: #e8eee3; }
+.address-indicators { display: flex; gap: 8px; color: #68776c; }
+.address-status-icon { display: inline-flex; align-items: center; }
+.address-menu { position: fixed; inset: auto; margin: 0; padding: 5px; min-width: 148px; border: 1px solid #d8dfd5; border-radius: 10px; background: #fff; color: #20342b; box-shadow: 0 6px 24px #20342b24; }
+.address-menu button { display: block; width: 100%; padding: 9px 12px; border-radius: 6px; background: transparent; color: inherit; text-align: left; font-size: 13px; }
+.address-menu button:hover, .address-menu button:focus-visible { background: #edf1e8; }

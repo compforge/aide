@@ -20,7 +20,7 @@ channels:
 
 `defaultAddress` 保存具体 Address 的完整 UID 引用，由 Addresses 页面选择。缺省使用稳定的“Me 的 Web 收件处”。可选择当前连接可用、已确认仅面向 Me 的私有地址；选择不会解除禁言。应用 ID 在 Channel 实例间唯一，启动时为配置确认的 Me 发现私聊 Address，不要求先收到一条私聊。
 
-Web「Addresses → 接入管理」编辑同一份连接配置，显示当前启动快照与已保存配置是否不同；连接变更保存后需重启。Addresses 详情中的默认通知地址选择保存后立即生效，只影响新通知，已有 Output 继续使用原目标。页面不返回 App Secret，编辑同一应用时留空保留，更换应用需重新填写。服务用版本校验拒绝过期编辑，原子替换 YAML 并保留无关字段及注释，文件权限为 600。实际连接和投递仍需检查运行日志及 Output 状态。
+连接配置在配置文件中维护，修改后需重启。Addresses 列表每个地址的三点菜单可选择默认通知地址，保存后立即生效，只影响新通知，已有 Output 继续使用原目标。实际连接和投递仍需检查运行日志及 Output 状态。
 
 Lark Channel 不再读取 `AIDE_LARK_APP_ID` / `AIDE_LARK_APP_SECRET`。机器人配置属于 channels；`connectors.lark` 的应用与用户登录态继续用于观察消息，二者互不替代。详细语义见 [Channel](channel/README.md#默认通知地址)。
 

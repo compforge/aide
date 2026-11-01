@@ -13,7 +13,7 @@ Default Topic 是系统维护的输入兜底处；defaultAddress 是 Aide 主动
 
 Chief、Task、Routine 通过已知 AddressRef 选择目的地。明确答复保留 Input.source 和原消息坐标；没有唯一回复位置时联系 Me。默认选路在 say 接纳时固定到 Output，后续发送和重试不受默认配置切换影响。
 
-Channel 只负责接收、平台位置标准化和实际发送；它消费应用注入的只读发言权限，不创建或更新 Address。连接凭证在 Addresses 的“接入管理”中集中配置，地址详情负责禁言、认识和默认通知地址。凭证与 Person 身份的作用域独立，不能替换 appId 复用其他应用的 open_id。
+Channel 只负责接收、平台位置标准化和实际发送；它消费应用注入的只读发言权限，不创建或更新 Address。连接凭证通过配置文件维护；Addresses 列表菜单负责禁言和默认通知地址，详情展示场合认识。凭证与 Person 身份的作用域独立，不能替换 appId 复用其他应用的 open_id。
 
 ## 输入、会话与回复
 
