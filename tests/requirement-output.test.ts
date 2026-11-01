@@ -148,3 +148,24 @@ test("Host delivery errors accept another SDK copy while untyped errors and inva
   for (const retryAfterMs of [-1, NaN, Infinity, "1", 0.1, 2147483648])
     assert.equal(deliveryFailure({ name: "DeliveryError", failure: { ...failure, retryAfterMs } }), undefined);
 });
+
+
+test("Explicit undefined adapter fields preserve retryable and permanent outcomes for once-only writes", async t => {
+  const f = fixture(t);
+  const optionals = [{}, { code: undefined }, { retryAfterMs: undefined }, { code: undefined, retryAfterMs: undefined }, { code: undefined, retryAfterMs: 0 }];
+  for (const kind of ["retryable", "permanent"] as const) for (const [index, optional] of optionals.entries()) {
+    const id = `${kind}-${index}`, failure = { kind, message: "Provider rejected comment", ...optional };
+    const error = new DeliveryError(failure);
+    assert.deepEqual(deliveryFailure(error), { kind, message: failure.message,
+      ...(optional.retryAfterMs !== undefined ? { retryAfterMs: optional.retryAfterMs } : {}) });
+    f.store.create("s", id, f.spec);
+    const worker = delivery(f.store, { requirements: f.requirements, async addRequirementComment() { throw error; } });
+    if (kind === "retryable" && optional.retryAfterMs === undefined) await assert.rejects(worker.reconcile(id), /Provider rejected comment/);
+    else await worker.reconcile(id);
+    assert.equal(f.store.get(id)!.status.phase, kind === "retryable" ? "pending" : "failed");
+    assert.equal(f.store.get(id)!.status.attempts, 1);
+    assert.equal(f.store.get(id)!.status.lastError, failure.message);
+  }
+  for (const invalid of [{ code: null }, { retryAfterMs: null }, { code: 429 }, { retryAfterMs: "1000" }])
+    assert.equal(deliveryFailure({ name: "DeliveryError", failure: { kind: "retryable", message: "Rejected", ...invalid } }), undefined);
+});
