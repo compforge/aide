@@ -160,7 +160,7 @@ test("Address Web API edits muted and summary independently and exposes known pa
   assert.equal((await fetch(base + "/addresses/notes?" + query)).status, 410);
   query.set("continue", "invalid");
   assert.equal((await fetch(base + "/addresses/notes?" + query)).status, 400);
-  const html = await (await fetch(base + "/addresses")).text(); assert.match(html, /参与者/); assert.match(html, /禁言/);
+  const html = await (await fetch(base + "/addresses")).text(); assert.match(html, /参与者/); assert.match(html, /aria-label="刷新地址"/);
 });
 
 /** @case Permission checks are queries; missing places cannot be discovered or granted authority by a send attempt. */
