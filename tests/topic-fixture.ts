@@ -9,7 +9,7 @@ import { InputStore } from "../plugins/personal/input/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { TopicStore as PersonalTopics } from "../plugins/personal/topic/store.ts";
-import type { InputSpec } from "../plugins/personal/input/model.ts";
+import type { InputSubmission } from "../plugins/personal/input/model.ts";
 import { initialTopicName } from "../plugins/personal/topic/model.ts";
 
 import type { OutputDraft } from "../plugins/personal/output/view.ts";
@@ -29,11 +29,11 @@ export class TopicStore extends PersonalTopics {
     this.defaultTopicId = scope.id;
   }
 }
-export async function seedInput(store: PersonalTopics, id: string, spec: InputSpec & { topicId?: string }, status: FixtureProcessing & { outputs?: Array<OutputDraft & { at: string }> } = {}) {
+export async function seedInput(store: PersonalTopics, id: string, spec: InputSubmission & { topicId?: string }, status: FixtureProcessing & { outputs?: Array<OutputDraft & { at: string }> } = {}) {
   const { topicId = spec.topicId ?? "test", ...input } = spec;
   if (input.origin === "channel" && !input.source) input.source = fixtureAddress(topicId);
   store.inputStore.submit(input.topicKey ?? "personal", id, input);
-  const c = await store.ensure(topicId, input.origin === "channel" ? input.source : undefined);
+  const c = await store.ensure(topicId, input.origin === "channel" && input.source ? new (await import("../plugins/personal/address/service.ts")).Addresses(store.resources.storage.home).endpoint(input.source) : undefined);
   const resources = createResourceClient(store.resources, (change) => store.changed(change));
   const outputs = status.outputs ?? [];
   for (const o of outputs) {

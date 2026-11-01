@@ -1,3 +1,5 @@
+import { transportFixture } from "./output-fixture.ts";
+import { allowAddress } from "./address-fixture.ts";
 import { KeyedSet } from "@compforge/ts-stdx/collections";
 import { personRefs } from "../plugins/personal/person/model.ts";
 import assert from "node:assert/strict";
@@ -31,10 +33,10 @@ async function setup(t: TestContext) {
   const status = { updatedAt: new Date().toISOString(), updatedBy: "user" as const };
   const me = await client.create(PERSON_TYPE, { name: "me", spec: { name: "Me", identities: [LOCAL_ME] }, status }) as PersonResource;
   let other = await client.create(PERSON_TYPE, { name: "c", spec: { name: "C", identities: [], clearance: "L1" }, status }) as PersonResource;
-  let audience: OutputAudience = { people: [other], complete: true, private: true };
+  let audience: OutputAudience = { people: [other], private: true };
   let checks = 0;
   const ports: DisclosurePorts = { marks: { identities: [LOCAL_ME] },
-    audience: async target => isChannelAddress(target) && target.channelId === "web" ? { people: [me], complete: true, private: true } : audience,
+    audience: async target => isChannelAddress(target) && target.channelId === "web" ? { people: [me], private: true } : audience,
     contactMe: async () => ({ target: webAddress("topic"), receivers: [personRef(me)] }),
     check: async () => { checks++; return { allowed: true, reason: "supported" }; } };
   const checker = new OutputDisclosure(store, ports, pino({ level: "silent" }));
@@ -43,6 +45,7 @@ async function setup(t: TestContext) {
     return await client.create(NOTE_TYPE, { name: `n-${store.resources.list(NOTE_TYPE).length}`, spec: { subject: resourceRef(topic), text: "A verified fact", sensitivity, visibility, people: personRefs(people) }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
   }
   function output(id: string, n?: NoteResource, target = larkPersonAddress("app", "ou_c")) {
+    allowAddress(home, target);
     return store.create("topic", id, { ...outputSpec(topic, { topicId: "topic", text: "A verified fact", target }),
       ...(n ? { notes: [{ uid: n.metadata.uid, version: noteVersion(n) }] } : {}) });
   }
@@ -94,7 +97,7 @@ test("sufficient clearance does not grant people visibility; claimed receivers d
   const f = await setup(t); await f.clearance("L3");
   const n = await f.note("L1", "people", [personRef(f.me) as PersonRef]);
   const draft = f.store.create("topic", "x", { ...outputSpec(f.topic, { topicId: "topic", text: n.spec.text, target: larkPersonAddress("app", "ou_c"), receivers: [personRef(f.me)] }), notes: [{ uid: n.metadata.uid, version: noteVersion(n) }] });
-  f.audience({ people: [f.me, f.other], complete: true, private: false });
+  f.audience({ people: [f.me, f.other], private: false });
   await f.checker.reconcile("x");
   assert.equal(f.store.get(draft.metadata.name)!.status.disclosure!.decision, "denied");
   assert.match(f.store.get("x")!.status.disclosure!.reason, /outside visibility/);
@@ -131,7 +134,7 @@ test("permission change during async review never publishes a stale authorizatio
 });
 
 test("unknown group audience and unsafe fallback never authorize the original target", async t => {
-  const f = await setup(t); f.audience({ people: [f.other], complete: false, private: false });
+  const f = await setup(t); f.audience({ people: [], private: false });
   f.output("x", await f.note());
   f.ports.contactMe = async () => ({ target: larkPersonAddress("app", "ou_c"), receivers: [personRef(f.me)] });
   await assert.rejects(f.checker.reconcile("x"), /not a verified private/);
@@ -163,7 +166,7 @@ test("failed fallback retries only the saved Me delivery without another Output"
   const f = await setup(t); const target = larkPersonAddress("app", "ou_me");
   const audience = f.ports.audience;
   f.ports.audience = async address => JSON.stringify(address) === JSON.stringify(target)
-    ? { people: [f.me], complete: true, private: true } : audience(address);
+    ? { people: [f.me], private: true } : audience(address);
   f.ports.contactMe = async () => ({ target, receivers: [personRef(f.me)] });
   f.output("x", await f.note("L3")); await f.checker.reconcile("x");
   const actual = f.store.get("x")!.status.delivery;
@@ -231,8 +234,8 @@ test("real Runner isolates one Output's transport failure and automatically retr
   const { Aide } = await import("../src/app.ts");
   const { fakeOptions } = await import("./fake-harness.ts");
   const home = mkdtempSync(join(tmpdir(), "aide-output-retry-"));
-  const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No inference expected"); } }, home, [], home, "cli_test"),
-    destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: true }) }, pino({ level: "silent" }));
+  const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No inference expected"); } }, home, [], home, "cli_test") }, pino({ level: "silent" }));
+  transportFixture(aide);
   t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
   let attempts = 0;
   aide.registerOutputTransport(() => ({ replay: "idempotent", async send() { if (++attempts === 1) throw new Error("temporary send failure"); return undefined; } }));
@@ -278,7 +281,7 @@ test("policy aggregates mixed scopes in one place and does not turn an empty aud
 test("audience permutations survive failed and interrupted idempotent delivery", async t => {
   for (const interrupted of [false, true]) {
     const f = await setup(t);
-    f.audience({ people: [f.me, f.other], complete: true, private: false });
+    f.audience({ people: [f.me, f.other], private: false });
     f.output("x", await f.note());
     let sends = 0;
     const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", send: async () => {
@@ -288,7 +291,7 @@ test("audience permutations survive failed and interrupted idempotent delivery",
     await assert.rejects(delivery.reconcile("x"), /transport failed/);
     const fingerprint = f.store.get("x")!.status.disclosure!.fingerprint;
     if (interrupted) f.store.update("x", s => ({ ...s, phase: "sending" }));
-    f.audience({ people: [f.other, f.me, f.other], complete: true, private: false });
+    f.audience({ people: [f.other, f.me, f.other], private: false });
     await delivery.reconcile("x");
     const result = f.store.get("x")!;
     assert.equal(result.status.phase, "delivered");
@@ -302,10 +305,10 @@ test("audience permutations survive failed and interrupted idempotent delivery",
 
 test("audience reorder during asynchronous review does not invalidate the check", async t => {
   const f = await setup(t);
-  f.audience({ people: [f.me, f.other], complete: true, private: false });
+  f.audience({ people: [f.me, f.other], private: false });
   f.output("x", await f.note());
   f.ports.check = async () => {
-    f.audience({ people: [f.other, f.me, f.me], complete: true, private: false });
+    f.audience({ people: [f.other, f.me, f.me], private: false });
     return { allowed: true, reason: "supported" };
   };
   await f.checker.reconcile("x");
@@ -314,12 +317,12 @@ test("audience reorder during asynchronous review does not invalidate the check"
 
 test("actual audience membership change stops a pending retry even when all recipients are allowed", async t => {
   const f = await setup(t);
-  f.audience({ people: [f.me, f.other], complete: true, private: false });
+  f.audience({ people: [f.me, f.other], private: false });
   f.output("x", await f.note());
   let sends = 0;
   const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", send: async () => { sends++; throw new Error("temporary failure"); } }), pino({ level: "silent" }));
   await assert.rejects(delivery.reconcile("x"), /transport failed/);
-  f.audience({ people: [f.other], complete: true, private: false });
+  f.audience({ people: [f.other], private: false });
   await delivery.reconcile("x");
   assert.equal(f.store.get("x")!.status.phase, "uncertain");
   assert.equal(sends, 1);
@@ -328,13 +331,13 @@ test("actual audience membership change stops a pending retry even when all reci
 
 test("rechecking changed evidence preserves the same recipient set after an attempt", async t => {
   const f = await setup(t), note = await f.note();
-  f.audience({ people: [f.me, f.other], complete: true, private: false });
+  f.audience({ people: [f.me, f.other], private: false });
   f.output("x", note);
   await f.checker.reconcile("x");
   f.store.begin("x"); f.store.retry("x", "temporary failure");
   // Both policies permit this audience, but the classification change must produce a new check.
   await f.client.replace(note, { ...note.spec, visibility: "people", people: personRefs([personRef(f.other) as PersonRef]) }, note.status);
-  f.audience({ people: [f.other, f.me, f.me], complete: true, private: false });
+  f.audience({ people: [f.other, f.me, f.me], private: false });
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.phase, "pending");
   assert.equal(f.store.get("x")!.status.disclosure!.policy!.visibility, "people");
@@ -355,9 +358,9 @@ test("Output admission and immutable delivery compare Person UID sets on both si
   assert.equal(listed.spec.receivers.size, 2);
   assert.deepEqual(f.store.create("topic", "sets", { ...spec, receivers: personRefs([a, b]) }), original);
   assert.throws(() => f.store.create("topic", "sets", { ...spec, receivers: personRefs([a]) }), /different content/);
-  const previous = { ...original, spec, status: { phase: "pending" as const, attempts: 1,
+  const previous = { ...original, spec: { ...spec, target: original.spec.target }, status: { phase: "pending" as const, attempts: 1,
     delivery: { target: spec.target, text: spec.text, receivers: personRefs([b, a, b]) } } };
-  const current = { ...previous, spec: { ...spec, receivers: personRefs([a, b]) }, status: { ...previous.status,
+  const current = { ...previous, spec: { ...previous.spec, receivers: personRefs([a, b]) }, status: { ...previous.status,
     delivery: { ...previous.status.delivery, receivers: personRefs([a, b]) } } };
   const context = { get() { throw new Error("Unexpected lookup"); }, page() { throw new Error("Unexpected lookup"); }, list() { throw new Error("Unexpected lookup"); } };
   OutputDefinition.validator!.update!(previous, current, context);

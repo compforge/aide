@@ -2,7 +2,7 @@
 
 Aide 服务于 Me。Chief 可结合全部已有 Note 与最新 Input 生成正文和引用列表；Output Reconciler 决定这段正文能否送到原目标。Me 的已确认私有目的地可接收全部信息；写 `receivers=[Me]` 不会把群聊变成私有目的地。
 
-本次资源契约为 Input v1alpha4、Note v1alpha3、Output v1alpha3。不读取或转换旧版本资源，遵循 [资源版本约定](../plugin/resource.md#api-版本与演进)。
+本次资源契约为 Input v1alpha5、Note v1alpha4、Output v1alpha4。不读取或转换旧版本资源，遵循 [资源版本约定](../plugin/resource.md#api-版本与演进)。
 
 ## Note 分类与接收者
 
@@ -29,7 +29,7 @@ Me 在人物页面编辑 clearance；主题参与者通过 `POST /topics/people`
 2. visibility 取较窄类型，顺序为 people、topic、root、any。
 3. people 类型使用所有引用 Note.people 的并集；接收者出现在任意一份 Note.people 即满足范围。
 4. topic/root 类型使用设定该类型的 Note 所解析参与名单的并集；无法解析时不外发。any 没有成员限制。
-5. 每个实际接收者都须满足计算出的范围与密级；Me 豁免。完整且私有的 Me 目的地不要求材料引用或模型校验。
+5. 每个实际接收者都须满足计算出的范围与密级；Me 豁免。已确认私有且未禁言的 Me 目的地不要求材料引用或模型校验。
 
 混合范围的合成规则属于可调整策略，并不声称 people/topic/root 的实际成员集合天然包含彼此。后续策略变更集中在此处；已送达内容不追回，也不会自动重发。
 
@@ -39,9 +39,9 @@ Me 在人物页面编辑 clearance；主题参与者通过 `POST /topics/people`
 
 接纳时核对 Note 读取版本，并单独固定正文指纹。发送前读取当前分类：分类变化触发重新计算，正文修改或 Note 回收导致引用失效。`status.disclosure.policy` 保存本次计算结果，fingerprint 标识材料、组织关系、人物与实际受众等依赖。
 
-Reconciler 检查完整实际受众和计算出的权限，再使用隔离 Pi 校验正文是否受引用支持。模型复用 Chief 配置，禁用环境上下文、skills 和外部工具，材料预算 100000 字符，最多 30 秒。无有效引用、受众不完整、模型不可用或校验拒绝都不外发。引用一致性校验无法保证所有背景信息都已被引用。
+Reconciler 检查 Address 的已知参与者、禁言设置和计算出的权限，再使用隔离 Pi 校验正文是否受引用支持。模型复用 Chief 配置，禁用环境上下文、skills 和外部工具，材料预算 100000 字符，最多 30 秒。无有效引用、没有已知参与者、失效人物、地址禁言、模型不可用或校验拒绝都不外发。引用一致性校验无法保证所有背景信息都已被引用。
 
-Web 是 Me 的私有界面。Lark 私聊按 app/open_id 解析人物；chat/thread 使用已配置 Channel 的 SDK 查询成员，最多 10 页，名单不完整或有人物无法解析时不外发。该接口覆盖平台返回的人类成员，不能控制未知机器人、转发或截图。Requirement 当前缺少完整受众能力，原目标不能通过检查，转告 Me。
+Web 是 Me 的私有界面。Lark 私聊按 app/open_id 或已观察的私聊人物解析；群聊按 Address.people 的已知参与者检查，不要求完整名单、不额外请求所有群成员。这是用户选择的近似边界，未知旁观者、机器人和转发不在保证内。Address 不另设 sensitivity / visibility，内容分类来自 Note，人物权限来自 clearance；参见 [Address](address.md)。
 
 ## 一个 Output 的投递生命周期
 

@@ -10,7 +10,7 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 
 ## CRD
 
-类型为 `aide.dev/v1alpha4 Input`。
+类型为 `aide.dev/v1alpha5 Input`。
 
 ### Spec
 
@@ -19,7 +19,8 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 | text、observation | 来源内容与证据；外部观察保留事实，内置 Input 保存回顾、分理、组织请求及触发证据 |
 | origin、originId、originRef | channel / source / chief / aide:review / aide:triage / aide:organize 分类、来源定义与可选产生资源引用 |
 | sender、receivers、relation | 可选的发送 Person、明确识别的接收 Person 引用列表，以及输入相对于 Me 的关系 |
-| source | 可选 Address，表示事情发生或可以联络的位置 |
+| source | 可选 AddressRef，固定资源 UID，表示事情发生或可以联络的场合 |
+| replyToMessageId | 可选原消息回复坐标，不参与 Address 身份 |
 | topicId、topicKey | TopicLocator 提供的精确 Topic ID 或稳定来源关联键 |
 | topicName | 来源提供的初始名称建议；不参与匹配，不覆盖既有 Topic 名称 |
 | attention | InputAttention 字符串枚举：immediate、normal、deferred，表达注意力调度需求 |
@@ -132,7 +133,7 @@ Output 只在其 inputIds 显式包含当前 Input 时关联，不按相邻顺�
 
 ## 挂载、分派与执行
 
-Input v1alpha4 将内容归属和处理分派分开，披露分类统一放在 Note，不读取旧版 Input，也不提供历史兼容转换。
+Input v1alpha5 使用 AddressRef 保存来源位置，并将内容归属和处理分派分开，披露分类统一放在 Note，不读取旧版 Input，也不提供历史兼容转换。
 
 1. 挂载：明确定位或 Route 分类写入 status.topic（topic1），保留首次 route 回执。
 2. 分派：沿 topic1 的 parent 链找到当前 root，写入 status.assess.topic（topic2）。Route 完成后立即尝试确定性分派；独立 Input Reconcile 恢复中断、处理后续归属变化，不调用模型；直接交给 Routine 的订阅事件没有 assess 阶段，不因此额外触发 Chief。

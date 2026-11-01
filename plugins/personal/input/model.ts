@@ -25,10 +25,12 @@ export const inputQueue = (input: InputSpec): string => isInternalInput(input) ?
 
 export type InputRelation = "sent" | "received" | "observed";
 
-export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha4", kind: "Input" } as const;
+export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha5", kind: "Input" } as const;
 export interface InputSpec {
   /** Where the input was received; independent of its producer, sender and topic. */
-  source?: Address;
+  source?: import("../address/model.ts").AddressRef;
+  /** Transport reply coordinates belong to this message, not the Address place. */
+  replyToMessageId?: string;
   /**
    * @spec Optional topic affinity supplied by the Channel or Source, which owns its stable identity and granularity.
    * Inputs sharing this ID have common context; different IDs do not imply unrelated topics or exclusive routing.
@@ -60,6 +62,7 @@ export interface InputSpec {
   timezone?: string;
   observation?: Record<string, unknown>;
 }
+export type InputSubmission = Omit<InputSpec, "source"> & { source?: import("../address/service.ts").AddressTarget };
 export const inputAttention = (input: InputSpec): InputAttention =>
   input.attention ?? (input.origin === "channel" ? InputAttention.Immediate : InputAttention.Normal);
 

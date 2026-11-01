@@ -1,3 +1,4 @@
+import { personRef, personRefs } from "./model.ts";
 import { sensitivityRank, type MaterialDisclosure } from "../disclosure.ts";
 import { prepareSummary, readSummary, summaryView, writeSummary } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
@@ -73,7 +74,7 @@ export class Persons {
       ...prepared.writes,
       ...sources.map(resource => ({ operation: "delete" as const, resource })),
       { operation: "replace", resource: target, spec: PersonSchema.parse({ ...target.spec, identities }), status: {
-        ...status, ...prepared.status,
+        ...target.status, ...status, ...prepared.status, participantSources: this.participantSources(sources, target),
       } },
     ]);
     return { merged: sources.length };
@@ -125,6 +126,10 @@ export class Persons {
     return this.view(committed, summary, committed.summaryNote);
   }
 
+  private participantSources(sources: PersonResource[], target: PersonResource) {
+    return personRefs([...(target.status.participantSources ?? []), ...sources.flatMap(source =>
+      [personRef(source), ...(source.status.participantSources ?? [])])]);
+  }
   /**
    * @spec Append to the target and delete the source atomically. Names never prove identity.
    * @spec Historical Input/Output references may dangle and are never rewritten by a merge.
@@ -147,7 +152,7 @@ export class Persons {
       // Exclude the retiring identity owner before validating the target, within the same transaction.
       { operation: "delete", resource: from },
       { operation: "replace", resource: into, spec: PersonSchema.parse({ ...into.spec, identities }), status: {
-        ...status, ...prepared.status,
+        ...into.status, ...status, ...prepared.status, participantSources: this.participantSources([from], into),
       } },
     ]);
     const person = writes.at(-1) as PersonResource;

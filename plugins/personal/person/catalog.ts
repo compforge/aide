@@ -1,3 +1,4 @@
+import { AddressDefinition } from "../address/definition.ts";
 import { NoteDefinition } from "../note/definition.ts";
 import type { Logger } from "pino";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
@@ -8,7 +9,7 @@ import type { Me } from "./model.ts";
 import { Persons } from "./service.ts";
 
 export function openPersonCatalog(home: string, marks: Me, log: Logger, changed: () => void) {
-  ResourceStorage.open(home).register("personal", [PersonDefinition, NoteDefinition]);
+  ResourceStorage.open(home).register("personal", [PersonDefinition, NoteDefinition, AddressDefinition]);
   const store = new PluginResourceStore({ home, pluginInstanceId: "personal" });
   const client = createResourceClient(store, (change) => {
     if (change.resource.kind !== "Person") return;

@@ -52,7 +52,7 @@ AIDE_CWD=/path/to/work AIDE_TIMEZONE=Asia/Shanghai npm start
 
 Open <http://127.0.0.1:7433> and try: “Read the README in the working directory and tell me how to run the project.” Make sure the service can access the files, CLIs, and credentials needed for your requests.
 
-In the web app, select a topic on the left, follow messages and execution progress in the center, and view its summary, recent context, tasks, and routines on the right. Refreshing restores the execution details retained by the running service.
+In the web app, select a topic on the left, follow messages and execution progress in the center, and view its summary, recent context, tasks, and routines on the right. Refreshing restores the execution details retained by the running service. The Addresses page shows known communication places, their participants, recent matters and long-term understanding. Mute or unmute Aide separately for each place; allowing speech still requires disclosure checks.
 
 For an always-on Linux setup, proxy settings, or access through an SSH tunnel, see [deployment and troubleshooting](docs/deployment.md).
 

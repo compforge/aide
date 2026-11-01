@@ -24,7 +24,7 @@ export type Person = Omit<z.infer<typeof PersonSchema>, "clearance"> & { clearan
 export const PersonRefSchema = z.object({ apiVersion: z.string().min(1), kind: z.literal("Person"),
   namespace: z.literal("v1"), name: z.string().min(1), uid: z.string().min(1) }).strict();
 export type PersonRef = z.infer<typeof PersonRefSchema>;
-export interface PersonStatus extends ResourceContext { updatedAt: string; updatedBy: "user" | "chief" | "connector" }
+export interface PersonStatus extends ResourceContext { updatedAt: string; updatedBy: "user" | "chief" | "connector"; participantSources?: PersonRefs }
 export type PersonResource = Resource<Person, PersonStatus>;
 export const personRef = (person: Readonly<PersonResource>): PersonRef => ({ ...PERSON_TYPE,
   namespace: "v1", name: person.metadata.name, uid: person.metadata.uid });

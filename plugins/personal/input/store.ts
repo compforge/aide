@@ -1,3 +1,7 @@
+import { PersonRefSchema } from "../person/model.ts";
+import { Addresses } from "../address/service.ts";
+import { addressRef } from "../address/model.ts";
+import { larkEndpoint } from "../../../src/channel/address.ts";
 import { cloneResourceValue } from "../../../src/resource/value.ts";
 import { ResourceAlreadyExists } from "@compforge/aide-plugin";
 import { inputStatus } from "../status.ts";
@@ -7,7 +11,7 @@ import { createHash } from "node:crypto";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { type Resource } from "@compforge/aide-plugin";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "./model.ts";
+import { INPUT_TYPE, type InputSpec, type InputSubmission, type InputStatus } from "./model.ts";
 /** @spec Input facts are immutable and read on demand; shared ResourceStorage owns quotas and collection. */
 export class InputStore {
   readonly storage: ResourceStorage;
@@ -40,8 +44,21 @@ export class InputStore {
     return value ? JSON.parse(value) : undefined;
   }
   get(id: string): Resource<InputSpec, InputStatus> | undefined { return this.storage.read(this.key(id), true)?.object as Resource<InputSpec, InputStatus> | undefined; }
-  submit(owner: string, id: string, raw: InputSpec, status: InputStatus = {}): Resource<InputSpec, InputStatus> {
-    const spec = InputSpecSchema.parse(raw);
+  submit(owner: string, id: string, raw: InputSubmission, status: InputStatus = {}): Resource<InputSpec, InputStatus> {
+    const addresses = new Addresses(this.storage.home);
+    const participants = [...(raw.sender ? [raw.sender] : []), ...raw.receivers ?? []] as import("../person/model.ts").PersonRef[];
+    const context = (raw.observation as { context?: { messages?: Array<{ person?: unknown; receivers?: unknown[] }> } } | undefined)?.context;
+    for (const message of context?.messages ?? []) for (const value of [message.person, ...message.receivers ?? []]) {
+      const ref = PersonRefSchema.safeParse(value); if (ref.success) participants.push(ref.data);
+    }
+    const evidence = raw.observation as { chatName?: string; chatType?: string; message?: { chatName?: string; chatType?: string } } | undefined;
+    const endpoint = raw.source && addresses.endpoint(raw.source);
+    const address = raw.source && addresses.observe(raw.source, participants, {
+      name: evidence?.message?.chatName ?? evidence?.chatName,
+      ...((evidence?.chatType ?? evidence?.message?.chatType) === "p2p" ? { type: "direct" as const } : {}),
+    });
+    const spec = InputSpecSchema.parse({ ...raw, ...(address ? { source: addressRef(address) } : {}),
+      ...(endpoint && larkEndpoint(endpoint)?.replyToMessageId ? { replyToMessageId: larkEndpoint(endpoint)!.replyToMessageId } : {}) });
     const key = this.key(id), existing = this.storage.read(key);
     if (existing) {
       if (existing.owner !== owner || !equalResourceValue(existing.object.spec, spec)) throw new ResourceAlreadyExists("Input identity already exists with different content or owner");

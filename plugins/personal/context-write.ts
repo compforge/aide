@@ -20,7 +20,7 @@ export function requireContentWriter(target: Resource<unknown, unknown>, writer:
     return;
   }
   requireTopic(writer.resource, context);
-  if (target.kind === "Person") return;
+  if (target.kind === "Person" || target.kind === "Address") return;
   let topic = target.kind === "Topic" ? requireTopic({ ...target, ...target.metadata }, context)
     : requireTopic((target.status as { topic?: import("@compforge/aide-plugin").ResourceRef }).topic, context);
   const seen = new Set<string>();

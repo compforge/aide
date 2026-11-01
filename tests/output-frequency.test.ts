@@ -1,3 +1,4 @@
+import { Addresses } from "../plugins/personal/address/service.ts";
 import { DeliveryError } from "@compforge/aide-connector";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
@@ -185,7 +186,7 @@ test("real Runner persists waits and Person changes only relax Person deadlines"
     await manager.start();
     const create = async (name: string) => manager.resourceClient("personal").create(OUTPUT_TYPE, { name, spec: {
       text: name, topicId: "topic", topic: { apiVersion: "aide.dev/v1alpha4", kind: "Topic", namespace: "v1", name: "topic", uid: "topic" },
-      target: webAddress("topic"), receivers: personRefs([personRef(a)]),
+      target: new Addresses(f.home).ref(webAddress("topic")), receivers: personRefs([personRef(a)]),
     }, status: { phase: "pending", attempts: 0 } });
     await create("one"); await waitFor(() => sends.length === 1);
     await create("two"); await waitFor(() => !!f.store.get("two")?.status.deliveryWait);

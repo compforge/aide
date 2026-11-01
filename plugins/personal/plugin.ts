@@ -12,6 +12,7 @@ import { registerSources } from "./source/requirement/observe.ts";
 import { registerMessageSources } from "./source/message/observe.ts";
 import { registerTasks } from "./task/reconcile.ts";
 import { registerRoutines } from "./routine/reconcile.ts";
+import { ADDRESS_TYPE } from "./address/model.ts";
 import { registerPersons } from "./person/reconcile.ts";
 
 const plugin: PluginPackage = {
@@ -30,6 +31,7 @@ const plugin: PluginPackage = {
     registerTasks(context);
     registerRoutines(context);
     registerPersons(context);
+    context.controllers.register({ resourceType: ADDRESS_TYPE, reconcile: async () => {} });
     registerNotes(context);
     registerOutputs(context);
   },

@@ -11,4 +11,5 @@ import { RoutineDefinition } from "./routine/definition.ts";
 import { EnvironmentSourceDefinition } from "./source/environment/definition.ts";
 import { MessageSourceDefinition } from "./source/message/definition.ts";
 import { RequirementSourceDefinition } from "./source/requirement/definition.ts";
-export default [NoteDefinition, RepositorySourceDefinition, PullRequestSourceDefinition, WeaveDefinition, RouteDefinition, InputDefinition, OutputDefinition, TopicDefinition, TaskDefinition, RoutineDefinition, EnvironmentSourceDefinition, MessageSourceDefinition, RequirementSourceDefinition];
+import { AddressDefinition } from "./address/definition.ts";
+export default [AddressDefinition, NoteDefinition, RepositorySourceDefinition, PullRequestSourceDefinition, WeaveDefinition, RouteDefinition, InputDefinition, OutputDefinition, TopicDefinition, TaskDefinition, RoutineDefinition, EnvironmentSourceDefinition, MessageSourceDefinition, RequirementSourceDefinition];

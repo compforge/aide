@@ -1,3 +1,4 @@
+import { Addresses } from "../address/service.ts";
 import { deliveryFailure, type DeliveryFailure } from "@compforge/aide-connector";
 import { nextDeliveryAt } from "./frequency.ts";
 import type { ResourceStorage } from "../../../src/host/resource/storage.ts";
@@ -50,9 +51,12 @@ export class OutputDelivery {
     }
     const wait = output.status.deliveryWait;
     // Provider deadlines survive early watches and Host restarts; Person policy waits are recomputed below.
-    if (wait?.reason === "provider" && Date.parse(wait.until) > Date.now()) return { requeueAfterMs: Math.max(1, Date.parse(wait.until) - Date.now()) };
     output = await this.store.prepare(id);
-    if (!["pending", "sending"].includes(output.status.phase)) return {};
+    if (!["pending", "sending"].includes(output.status.phase)) {
+      this.log.info({ outputId: id, phase: output.status.phase }, "Output no longer requires delivery");
+      return {};
+    }
+    if (wait?.reason === "provider" && Date.parse(wait.until) > Date.now()) return { requeueAfterMs: Math.max(1, Date.parse(wait.until) - Date.now()) };
     // Acquire every receiver together without waiting; no partial acquisition or unbounded Promise queue.
     // The shared Host retains this execution right through actual transport completion, including Runner restarts.
     const receivers = [...output.status.delivery!.receivers].map(p => p.uid).sort();
@@ -91,6 +95,7 @@ export class OutputDelivery {
       this.store.uncertain(id, "Transport replay contract changed after a send attempt"); return {};
     }
     if (!output.status.attempts) this.store.update(id, s => ({ ...s, delivery: { ...s.delivery!, replay: transport.replay } }));
+    if (new Addresses(this.store.storage.home).observe(target).spec.muted) throw new Error("Address was muted before transport dispatch");
     this.store.begin(id);
     try {
       const receipt = await transport.send({ id, target, text: output.status.delivery!.text });

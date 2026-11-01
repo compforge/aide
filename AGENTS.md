@@ -15,6 +15,7 @@ src/
   web/                     # 浏览器页面；每页的 HTML、TS 入口、样式与交互模块放在一起
     topics/                # 导航、时间线、输入、工作与审批；main 管理轮询和 SSE
     persons/               # 人物导航、资料和认识编辑
+    addresses/             # 场合列表、禁言设置、认识与已知参与者
     inputs/                # 跨会话输入筛选、分页与处理 Timeline
     connections/           # 沟通渠道配置与默认沟通渠道
     shared/                # DOM、HTTP、剪贴板、Markdown 与公共样式
@@ -62,7 +63,7 @@ plugins/personal/
     model.ts               # 人物资料、外部身份、Me 标记与认识
     catalog.ts             # Host 共享资源作用域与身份唯一性校验
     service.ts             # 人物解析、用户编辑、显式合并和 Chief 认知更新
-    reconcile.ts           # 无外部清理动作的标准删除生命周期
+    reconcile.ts           # 合并后分批迁移 Address 参与者与标准删除生命周期
     relation.ts            # 输入与 Me 的关系
     messages.ts            # Connector 消息贡献人物事实
   input/                   # Input 定义、幂等接收、分页检索、保留策略与 Printer
@@ -158,7 +159,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 - [文档导航](docs/README.md)：使用、开发与验收的阅读入口。
 - [Kernel](docs/kernel.md)、[Plugin](docs/plugin/README.md)、[Resource](docs/plugin/resource.md)：底座边界、协调、定义、事务与容量；[公共契约](packages/plugin/README.md)。
-- [Personal](docs/personal/README.md)：认知沉淀、对象与完整流程；[Input](docs/personal/input.md)、[Note](docs/personal/note.md)、[Route](docs/personal/route.md)、[Topic](docs/personal/topic.md)、[Output](docs/personal/output.md)。
+- [Personal](docs/personal/README.md)：认知沉淀、对象与完整流程；[Input](docs/personal/input.md)、[Address](docs/personal/address.md)、[Note](docs/personal/note.md)、[Route](docs/personal/route.md)、[Topic](docs/personal/topic.md)、[Output](docs/personal/output.md)。
 - [Topic](docs/personal/topic.md)、[Weave](docs/personal/weave.md)：来源归属、知识融合、root 处理与容量回收契约。
 - [Chief](docs/personal/chief.md)：判断、提示词、上下文与记忆优化；[Person](docs/personal/person.md)、[Task](docs/personal/task.md)、[Routine](docs/personal/routine.md)。
 - [Harness](docs/harness/README.md)、[Pi](docs/harness/pi.md)：通用执行契约与原生适配。
@@ -174,3 +175,5 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 根目录 `make test` 接收空格分隔的 `TEST_FILES`，路径相对于仓库根目录；未传或空值执行全套测试。devloop 先选择受影响的 Component，再自动传入文件列表，通常不手动指定。Bun 接收明确文件路径，避免 `npm test -- ...` 在原有 `tests` 参数之外追加筛选条件导致仍执行全量。
 
 `make lint` 接收 `LINT_FILES`，但当前静态检查只有 TypeScript typecheck，会保留 tsconfig 并扩展到整个 Component 的类型依赖图。`packages/plugin` 使用自己的 tsconfig；没有包内测试，`make test` 清空文件选择后委托根目录的集成测试。未配置 formatter，因此不添加空操作的 `make fix`。
+
+- Address 是 Personal 的独立沟通场合；Input.source / Output.spec.target 引用其 UID，平台 endpoint 留在 Address，回复消息坐标留在 Input/Output。status.people 累积已知参与者，不声明名单完整。muted 同时约束正文、进度卡和提示，Agent 不自行解除禁言。

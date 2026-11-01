@@ -1,5 +1,5 @@
 import type { Resource, ResourceClient } from "@compforge/aide-plugin";
-import { INPUT_TYPE, type InputSpec, type InputStatus } from "../input/model.ts";
+import { INPUT_TYPE, type InputSpec, type InputSubmission, type InputStatus } from "../input/model.ts";
 /** Input-producing Source identity; distinct from a Controller's resource discovery lifecycle. */
 export interface SourceDefinition {
   readonly id: string;
@@ -9,13 +9,13 @@ export interface SourceDefinition {
 }
 
 
-export type SourceInput = Omit<InputSpec, "origin" | "originId" | "originRef">;
+export type SourceInput = Omit<InputSubmission, "origin" | "originId" | "originRef">;
 
 /** @spec A Source-bound input port stamps category and concrete resource identity before durable submission. */
 export function bindSourceInput(definition: SourceDefinition, resource: Resource<unknown, unknown>, resources: ResourceClient) {
   const { apiVersion, kind, metadata: { namespace, name, uid } } = resource;
   const originRef = { apiVersion, kind, namespace, name, uid };
-  return (inputId: string, spec: SourceInput) => resources.create<InputSpec, InputStatus>(INPUT_TYPE, {
+  return (inputId: string, spec: SourceInput) => resources.create<InputSubmission, InputStatus>(INPUT_TYPE, {
     name: inputId, spec: { ...spec, origin: "source", originId: definition.id, originRef },
   });
 }

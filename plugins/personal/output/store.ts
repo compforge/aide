@@ -1,3 +1,6 @@
+import { INPUT_TYPE } from "../input/model.ts";
+import { Addresses } from "../address/service.ts";
+import { larkEndpoint, larkThreadAddress } from "../../../src/channel/address.ts";
 import { cloneResourceValue, equalResourceValue } from "../../../src/resource/value.ts";
 import { NOTE_TYPE, noteVersion, noteTextVersion, type NoteResource } from "../note/model.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
@@ -6,7 +9,7 @@ export { OutputSpecSchema } from "./definition.ts";
 import { assertChannelDelivery } from "../../../src/channel/address.ts";
 import { createHash } from "node:crypto";
 import { type Address, type ResourceListOptions } from "@compforge/aide-plugin";
-import { OUTPUT_TYPE, receiverIdentity, type Output, type OutputSpec, type OutputStatus } from "./model.ts";
+import { OUTPUT_TYPE, receiverIdentity, type Output, type OutputSpec, type OutputSubmission, type OutputStatus } from "./model.ts";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 
 // Derived citation fingerprints are evidence, not part of the caller's idempotent sending intent.
@@ -23,8 +26,15 @@ export class OutputStore {
   check?: (id: string) => Promise<void>;
   async prepare(id: string): Promise<Output> {
     if (!this.check) throw new Error("Output disclosure checker is unavailable");
+    const pending = this.get(id);
+    if (pending?.status.phase === "pending" && !pending.status.attempts && pending.spec.replyTo
+      && this.resources.page(INPUT_TYPE, { limit: 1, matchIndex: { name: "obsoleteReply", value: pending.spec.replyTo.key } }).items.length) {
+      this.cancel(id, "Me already replied to the original message, or it was withdrawn");
+      return this.get(id)!;
+    }
     await this.check(id);
     const output = this.get(id);
+    if (output?.status.phase === "cancelled") return output;
     if (!output?.status.delivery || !output.status.disclosure) throw new Error("Output disclosure is pending");
     return output;
   }
@@ -56,9 +66,12 @@ export class OutputStore {
     }
     return result;
   }
-  create(owner: string, id: string, raw: OutputSpec): Output {
+  create(owner: string, id: string, raw: OutputSubmission): Output {
     if (!id || id.length > 200) throw new Error("Invalid Output ID");
-    const spec = OutputSpecSchema.parse(JSON.parse(JSON.stringify(raw))) as OutputSpec;
+    const addresses = new Addresses(this.storage.home);
+    const endpoint = addresses.endpoint(raw.target);
+    const spec = OutputSpecSchema.parse({ ...JSON.parse(JSON.stringify(raw)), target: addresses.ref(raw.target),
+      ...(larkEndpoint(endpoint)?.replyToMessageId ? { replyToMessageId: larkEndpoint(endpoint)!.replyToMessageId } : {}) }) as OutputSpec;
     // Pin the cited body separately from mutable classification. Never trust a caller-supplied body fingerprint.
     if (spec.notes) spec.notes = spec.notes.map(({ uid, version }) => {
       const note = this.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "uid", value: uid } }).items[0];
@@ -77,7 +90,7 @@ export class OutputStore {
       if (saved.fingerprint !== fingerprint) throw new Error("Output identity already exists with different content or owner");
       throw new Error("Output was already created and reclaimed; do not recreate delivery");
     }
-    this.validateTarget(spec.target);
+    this.validateTarget(endpoint);
     // Preserve admission order even for same-ms outputs and after restart.
     const latest = this.storage.db.prepare("SELECT max(created) AS at FROM resources WHERE kind='aide.dev/Output'").get()?.at as string | null;
     const at = new Date(Math.max(Date.now(), latest ? Date.parse(latest) + 1 : 0)).toISOString();
@@ -98,6 +111,12 @@ export class OutputStore {
       this.storage.write(this.key(id), "personal", { ...stored, object: next }); this.notify(next);
     });
   }
+  destination(output: Output): Address {
+    const endpoint = new Addresses(this.storage.home).endpoint(output.spec.target);
+    const lark = larkEndpoint(endpoint);
+    return output.spec.replyToMessageId && lark?.receiveIdType === "chat_id" ? larkThreadAddress(lark.appId, lark.receiveId, output.spec.replyToMessageId) : endpoint;
+  }
+  cancel(id: string, reason: string): void { this.update(id, s => s.phase === "pending" && !s.attempts ? { ...s, phase: "cancelled", deliveryWait: undefined, lastError: reason } : s); }
   begin(id: string): void { this.update(id, (s) => {
     if (s.phase === "delivered") return s;
     if (!["pending", "sending"].includes(s.phase)) throw new Error("Output requires explicit delivery recovery");

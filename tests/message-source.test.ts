@@ -1,3 +1,4 @@
+import { transportFixture } from "./output-fixture.ts";
 import jsonPatch from "fast-json-patch";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
@@ -449,7 +450,6 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
     const activation = JSON.parse(prompt.split("Activation: ")[1]!.split("\n")[0]!);
     return activation.inputs[0].description.includes("Origin: source/") ? "source-private-reply" : "channel-reply";
   }, async execute() { throw new Error("Unexpected work"); } }, root, prompts, root, "cli_app"), config: loadConfig(configFile),
-    destinationAudience: async () => ({ identities: [{ provider: "web", scope: "local", id: "me" }], complete: true, private: true }),
     checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }),
     connectors: { ...emptyConnectors, messages: {
       async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
@@ -461,11 +461,13 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
       async history() { return page([]); }, async thread() { return page([]); },
     } } };
   let aide = new Aide(root, options, pino({ level: "silent" }));
+  transportFixture(aide);
   const sent: Array<{ chatId: string; text: string }> = [];
   const channelFor = () => new LarkChannel(root, "cli_app", aide, {
     botIdentity: { openId: "ou_bot", name: "Aide" },
     async start() {}, close() {}, async chatName() { return undefined; }, async send(chatId, text) { sent.push({ chatId, text }); },
   }, pino({ level: "silent" }));
+  transportFixture(aide);
   let channel = channelFor();
   t.after(async () => { await channel.close(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.personal.topics.ensure("inbox", fixtureAddress("inbox"));
@@ -524,6 +526,7 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   aide.topics.get("another"); await aide.settled();
   assert.equal(searches, previous);
   await channel.close(); await aide.close(); aide = new Aide(root, options, pino({ level: "silent" }));
+  transportFixture(aide);
   channel = channelFor();
   await aide.start(); await aide.settled(); await channel.dispatch(); await channel.deliver();
   assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }], "Restart must neither leak historical Source replies nor duplicate delivered Channel replies");

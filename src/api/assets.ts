@@ -7,6 +7,7 @@ interface Asset { type: string; content: string | Buffer }
 export function createWebAssets() {
   const pages = [
     { route: "/", directory: "topics", bundle: "/app" },
+    { route: "/addresses", directory: "addresses", bundle: "/addresses" },
     { route: "/people", directory: "persons", bundle: "/persons" },
     { route: "/inputs", directory: "inputs", bundle: "/inputs" },
     { route: "/connections", directory: "connections", bundle: "/connections" },

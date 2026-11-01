@@ -12,7 +12,7 @@ import type { TopicSpec, TopicStatus } from "../topic/model.ts";
 import { receiverIdentity, type Output } from "./model.ts";
 import type { OutputStore } from "./store.ts";
 
-export interface OutputAudience { people: PersonResource[]; complete: boolean; private: boolean }
+export interface OutputAudience { people: PersonResource[]; private: boolean; muted?: boolean; unavailable?: string }
 export interface DisclosureEvidence { text: string; materials: Array<{ id: string; text: string }> }
 export type SemanticCheck = (evidence: DisclosureEvidence) => Promise<{ allowed: boolean; reason: string }>;
 export interface DisclosurePorts {
@@ -52,7 +52,7 @@ export class OutputDisclosure {
   private snapshot(output: Output, audience: OutputAudience) {
     const dependencies: unknown[] = [];
     const materials: DisclosureEvidence["materials"] = [];
-    let refusal = audience.complete && audience.people.length ? "" : "Cannot establish the complete destination audience";
+    let refusal = audience.unavailable ?? (audience.muted ? "Aide is muted at this Address" : audience.people.length ? "" : "No known destination participants");
     const get = <S, T>(ref: ResourceRef & { uid?: string }): Resource<S, T> | undefined => {
       const r = this.store.resources.find<S, T>(ref, ref.name, ref.namespace);
       dependencies.push([ref, r && [r.metadata.uid, r.metadata.deletionTimestamp, r.kind === "Person" ? personDisclosure(r.spec as Person) : r.spec]]);
@@ -60,7 +60,7 @@ export class OutputDisclosure {
     };
     const livePeople = audience.people.map(p => get<Person, PersonStatus>({ apiVersion: p.apiVersion, kind: p.kind, namespace: p.metadata.namespace, name: p.metadata.name, uid: p.metadata.uid }));
     if (livePeople.some(p => !p)) refusal ||= "Destination Person changed or was deleted";
-    audience = { ...audience, complete: audience.complete && livePeople.every(Boolean), people: livePeople.filter((p): p is PersonResource => !!p) };
+    audience = { ...audience, people: livePeople.filter((p): p is PersonResource => !!p) };
     const policyNotes: PolicyNote[] = [];
     const topicFor = (ref: ResourceRef): Resource<TopicSpec, TopicStatus> | undefined => {
       const subject = get<TopicSpec, TopicStatus & { topic?: ResourceRef }>(ref);
@@ -98,23 +98,21 @@ export class OutputDisclosure {
       if (policy.visibility !== "any" && !policy.people.includes(recipient.metadata.uid))
         refusal ||= `Recipient ${recipient.metadata.name} is outside visibility ${policy.visibility}`;
     }
-    const privateMe = audience.complete && audience.private && audience.people.length === 1 && isMe(audience.people[0]!.spec, this.ports.marks);
+    const privateMe = audience.private && audience.people.length === 1 && isMe(audience.people[0]!.spec, this.ports.marks);
     return { policy, fingerprint: hash([receiverIdentity(output.spec), policy, dependencies, { ...audience, people: audience.people.map(p => [p.metadata.uid, p.metadata.deletionTimestamp, personDisclosure(p.spec)]) }, this.ports.marks]), privateMe,
-      refusal: privateMe ? "" : refusal, evidence: { text: output.spec.text, materials } };
+      refusal: privateMe && !audience.muted && !audience.unavailable ? "" : refusal, evidence: { text: output.spec.text, materials } };
   }
   private async run(id: string) {
     const output = this.store.get(id);
-    if (!output || output.metadata.deletionTimestamp || ["delivered", "failed", "uncertain"].includes(output.status.phase)) return;
+    if (!output || output.metadata.deletionTimestamp || ["delivered", "failed", "uncertain", "cancelled"].includes(output.status.phase)) return;
     // A refused Output has only a Me delivery left. Permission changes never silently resurrect its original intent.
     if (output.status.disclosure?.decision === "denied" && output.status.delivery) {
       const audience = await this.audience(output.status.delivery.target);
-      if (!audience.complete || !audience.private || audience.people.length !== 1 || !isMe(audience.people[0]!.spec, this.ports.marks))
+      if (audience.unavailable || audience.muted || !audience.private || audience.people.length !== 1 || !isMe(audience.people[0]!.spec, this.ports.marks))
         throw new Error("Saved fallback destination is no longer a verified private Me channel");
       return;
     }
-    let audience: OutputAudience;
-    try { audience = await this.audience(output.spec.target); }
-    catch { audience = { people: [], complete: false, private: false }; }
+    const audience = await this.audience(this.store.destination(output));
     const snapshot = this.snapshot(output, audience);
     if (output.status.phase === "sending") {
       if (snapshot.fingerprint !== output.status.disclosure?.fingerprint) this.store.uncertain(id, "Disclosure changed after an interrupted send; verify external receipts");
@@ -138,19 +136,17 @@ export class OutputDisclosure {
     }
     const decision = reason ? "denied" : "allowed";
     let fallbackPeople: PersonResource[] = [];
-    let delivery: NonNullable<Output["status"]["delivery"]> = { ...(output.status.delivery?.replay ? { replay: output.status.delivery.replay } : {}), target: output.spec.target, text: output.spec.text, receivers: personRefs(audience.people.map(personRef)) };
+    let delivery: NonNullable<Output["status"]["delivery"]> = { ...(output.status.delivery?.replay ? { replay: output.status.delivery.replay } : {}), target: this.store.destination(output), text: output.spec.text, receivers: personRefs(audience.people.map(personRef)) };
     if (reason) {
       this.store.update(id, status => ({ ...status, delivery: undefined, disclosure: { decision: "denied", reason, checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint, ...(snapshot.policy ? { policy: snapshot.policy } : {}) } }));
       const me = await this.ports.contactMe(output.spec.topicId);
       const fallback = await this.audience(me.target);
-      if (!fallback.complete || !fallback.private || fallback.people.length !== 1 || !isMe(fallback.people[0]!.spec, this.ports.marks)) throw new Error("Default Channel is not a verified private Me destination");
+      if (fallback.unavailable || fallback.muted || !fallback.private || fallback.people.length !== 1 || !isMe(fallback.people[0]!.spec, this.ports.marks)) throw new Error("Default Channel is not a verified private Me destination");
       fallbackPeople = fallback.people;
       delivery = { ...me, receivers: PersonRefsSchema().parse(me.receivers), text: `原计划发送至：${JSON.stringify(output.spec.target)}\n接收者：${JSON.stringify(output.spec.receivers ?? [])}\n未发送原因：${reason}\n\n原文：\n${output.spec.text}` };
     }
     // Awaited model/provider calls cannot authorize a changed resource or audience.
-    let currentAudience: OutputAudience;
-    try { currentAudience = await this.audience(output.spec.target); }
-    catch { currentAudience = { people: [], complete: false, private: false }; }
+    const currentAudience = await this.audience(this.store.destination(output));
     this.store.storage.transaction(() => {
       const latest = this.store.get(id);
       if (!latest || latest.status.phase !== "pending") return;

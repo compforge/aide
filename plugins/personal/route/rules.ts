@@ -24,11 +24,12 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
   const topics = (await context.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE)).filter(c => !c.metadata.deletionTimestamp);
   const destinations = new Map<string, Destination>();
   if (input.spec.topicId) {
+    const address = input.spec.source && await context.resources.get<import("../address/model.ts").AddressSpec, import("../address/model.ts").AddressStatus>(input.spec.source);
     let topic = input.spec.topicId === DEFAULT_TOPIC_ID ? await ensureDefaultTopic(context.resources) : topics.find(t => t.spec.id === input.spec.topicId);
     if (!topic && input.spec.origin === "channel") {
       try {
         topic = await context.resources.create(TOPIC_TYPE, { name: digest(input.spec.topicId),
-          spec: { id: input.spec.topicId, name: initialTopicName(input.spec.topicName || input.spec.text), ...(input.spec.source ? { address: input.spec.source } : {}) },
+          spec: { id: input.spec.topicId, name: initialTopicName(input.spec.topicName || input.spec.text), ...(address && address.metadata.uid === input.spec.source?.uid ? { address: address.spec.endpoint } : {}) },
           status: { receipts: [] } });
       } catch (error) {
         if (!String(error).includes("resource already exists")) throw error;

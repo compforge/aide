@@ -13,9 +13,10 @@ export interface InputFacet { origin: InputSpec["origin"]; originId: string; con
 
 // Derive connector identity from retained, producer-stamped facts, including deleted Source resources.
 const field = (path: string) => `json_extract(data, '$.object.${path}')`;
+const endpoint = (key: string) => `(SELECT json_extract(a.data, '$.object.spec.endpoint.${key}') FROM resources a WHERE a.scope = 'personal' AND a.kind = 'aide.dev/Address' AND a.uid = json_extract(resources.data, '$.object.spec.source.uid'))`;
 const connector = `CASE
-  WHEN ${field("spec.source.kind")} = 'requirement' THEN 'requirements:' || ${field("spec.source.source")}
-  WHEN ${field("spec.source.channelId")} = 'lark' OR (${field("spec.origin")} = 'channel' AND ${field("spec.originId")} = 'lark')
+  WHEN ${endpoint("kind")} = 'requirement' THEN 'requirements:' || ${endpoint("source")}
+  WHEN ${endpoint("channelId")} = 'lark' OR (${field("spec.origin")} = 'channel' AND ${field("spec.originId")} = 'lark')
     OR ${field("spec.originId")} = 'personal.lark' THEN 'lark'
   WHEN ${field("spec.originId")} = 'personal.environments' AND json_type(data, '$.object.spec.observation.environment') = 'text'
     THEN 'environments:' || ${field("spec.observation.environment")}

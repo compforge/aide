@@ -1,3 +1,4 @@
+import { AddressRefSchema } from "../../plugins/personal/address/model.ts";
 import { ResourceExpired, ResourceContinueInvalid } from "@compforge/aide-plugin";
 import { ChannelSettings, ChannelSettingsChangeSchema, ChannelSettingsError } from "../channel/settings.ts";
 import { createWebAssets } from "./assets.ts";
@@ -119,6 +120,39 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         const topicId = url.searchParams.get("topicId");
         if (!topicId || topicId.length > 200) { json(response, 400, { error: "topicId is required (max 200 characters)" }); return; }
         streamTopic(response, aide, topicId, log); return;
+      }
+      if (url.pathname.startsWith("/addresses/")) {
+        try {
+          await aide.start();
+          if (request.method === "GET" && url.pathname === "/addresses/list") {
+            const query = z.object({ continue: z.string().optional(), person: z.string().optional() }).strict().parse(Object.fromEntries(url.searchParams));
+            json(response, 200, aide.addresses.page(query.continue, query.person)); return;
+          }
+          if (request.method === "GET" && ["/addresses/detail", "/addresses/notes"].includes(url.pathname)) {
+            const query = z.object({ name: z.string().min(1), uid: z.string().min(1), continue: z.string().optional() }).strict().parse(Object.fromEntries(url.searchParams));
+            const ref = AddressRefSchema.parse({ apiVersion: "aide.dev/v1alpha1", kind: "Address", namespace: "v1", name: query.name, uid: query.uid });
+            json(response, 200, url.pathname.endsWith("/notes") ? await aide.addresses.recent(ref, query.continue) : aide.addresses.view(ref)); return;
+          }
+          if (request.method === "POST" && url.pathname === "/addresses/muted") {
+            const value = z.object({ address: AddressRefSchema, muted: z.boolean(), expected: z.boolean() }).strict().parse(await body(request));
+            aide.addresses.setMuted(value.address, value.muted, value.expected);
+            log.info({ addressUid: value.address.uid, muted: value.muted }, "Address speaking policy changed by user");
+            json(response, 200, aide.addresses.view(value.address)); return;
+          }
+          if (request.method === "POST" && url.pathname === "/addresses/summary") {
+            const value = z.object({ address: AddressRefSchema, text: z.string().max(16000), version: z.string() }).strict().parse(await body(request));
+            await aide.addresses.summarize(value.address, value.text, value.version);
+            log.info({ addressUid: value.address.uid }, "Address understanding updated by user");
+            json(response, 200, aide.addresses.view(value.address)); return;
+          }
+        } catch (error) {
+          if (error instanceof ResourceExpired) { json(response, 410, { error: "记录已更新，请刷新后继续浏览。" }); return; }
+          if (error instanceof ResourceContinueInvalid) { json(response, 400, { error: "分页位置无效，请刷新记录。" }); return; }
+          if (error instanceof Error && (error.name === "ResourceVersionConflict" || error.name === "TEST_OPERATION_FAILED" || error.message.includes("version conflict"))) {
+            json(response, 409, { error: url.pathname === "/addresses/muted" ? "禁言设置已更新，请重新加载后再修改。" : "地址认识已更新，请重新加载并合并修改；当前编辑内容已保留。" }); return;
+          }
+          throw error;
+        }
       }
       if (request.method === "GET" && url.pathname === "/topics") {
         const query = TopicListSchema.parse(Object.fromEntries(url.searchParams));

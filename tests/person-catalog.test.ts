@@ -1,3 +1,5 @@
+import { webAddress } from "../src/channel/address.ts";
+import { ADDRESS_TYPE } from "../plugins/personal/address/model.ts";
 import { seedNotes } from "./fixtures/notes.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
 import { readNotes } from "../plugins/personal/note/query.ts";
@@ -162,6 +164,7 @@ test("Web merge validates reviewed versions, finalizes the source and tolerates 
   const source = await f.aide.persons.observe({ provider: "test", scope: "one", id: "source" }, "田斐");
   const target = await f.aide.persons.observe({ provider: "test", scope: "two", id: "target" }, "田斐");
   const version = (p: typeof source) => ({ id: p.metadata.name, uid: p.metadata.uid, version: p.metadata.resourceVersion });
+  for (let i = 0; i < 105; i++) f.aide.addresses.observe(webAddress(`merge-place-${i}`), [personRef(source)]);
   // Let ordinary initial reconciles finish before taking the review snapshots.
   await f.aide.settled();
   const currentSource = await f.aide.persons.read(source.metadata.name), currentTarget = await f.aide.persons.read(target.metadata.name);
@@ -172,6 +175,9 @@ test("Web merge validates reviewed versions, finalizes the source and tolerates 
   assert.equal((await merge({ ...body, summary: "x".repeat(16001) })).status, 400);
   assert.equal((await merge(body)).status, 200);
   await f.aide.settled();
+  for (let turn = 0; turn < 100 && (await f.aide.persons.read(target.metadata.name)).status.participantSources?.size; turn++) await Bun.sleep(20);
+  assert.equal((await f.aide.persons.read(target.metadata.name)).status.participantSources!.size, 0);
+  assert.equal((await f.aide.catalog.client.page(ADDRESS_TYPE, { limit: 1000, matchIndex: { name: "people", value: target.metadata.uid } })).items.length, 105);
   assert.equal(await f.aide.catalog.client.get(personRef(source)), undefined, "Standard lifecycle physically removes the merged Person");
   assert.equal((await fetch(base + "/persons?id=" + source.metadata.name)).status, 404);
   assert.equal((await merge(body)).status, 409, "A repeat cannot append the same data again");
