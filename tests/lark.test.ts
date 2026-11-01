@@ -243,7 +243,7 @@ test("Lark persists thread topics while cards and failure notices retain the rea
   const group = (id: string, threadId?: string, messageType = "text") => ({
     sender: { sender_type: "user", sender_id: { open_id: id === "a2" ? "ou_another" : "ou_sender" } },
     message: { ...event(id, "@_user_1 check", "oc_group").message, chat_type: "group", thread_id: threadId,
-      message_type: messageType, mentions: [{ key: "@_user_1", id: { open_id: "ou_bot" } }] },
+      parent_id: "om_quoted", root_id: "om_root", message_type: messageType, mentions: [{ key: "@_user_1", id: { open_id: "ou_bot" } }] },
   });
   await Promise.all([channel.receive(group("a", "omt_a")), channel.receive(group("a", "omt_a"))]);
   await channel.receive(group("a2", "omt_a"));
@@ -251,7 +251,7 @@ test("Lark persists thread topics while cards and failure notices retain the rea
   await channel.receive(group("image", "omt_b", "image"));
   await channel.receive(group("failed", "omt_a"));
   const dm = event("dm", "hello", "oc_dm");
-  await channel.receive({ ...dm, message: { ...dm.message, thread_id: "omt_ignored" } });
+  await channel.receive({ ...dm, message: { ...dm.message, thread_id: "omt_ignored", parent_id: "om_dm_quote" } });
   await channel.close();
   channel = new LarkChannel(home, "cli_app", aide, transport, log, reader);
   await channel.dispatch(); await channel.deliver();
@@ -260,8 +260,12 @@ test("Lark persists thread topics while cards and failure notices retain the rea
     "lark:cli_app:oc_group", "lark:cli_app:oc_group:thread:omt_a", "lark:cli_app:oc_dm",
   ]);
   assert.equal(received[0]!.observation!.threadId, "omt_a");
+  assert.equal(received[0]!.observation!.parentId, "om_quoted");
+  assert.equal(received[0]!.observation!.rootId, "om_root");
+  assert.equal(received[0]!.replyToMessageId, "a", "Reply destination remains the new request");
   assert.equal(received[0]!.topicName, "支持群 · check");
   assert.equal(received[2]!.topicName, "支持群");
+  assert.equal(received.at(-1)!.observation!.parentId, "om_dm_quote");
   assert.equal(nameReads, 1, "Same-chat metadata is cached independently of thread keys");
   assert.deepEqual(new Set(queried), new Set([
     "lark:cli_app:oc_group:thread:omt_a", "lark:cli_app:oc_group:thread:omt_b",

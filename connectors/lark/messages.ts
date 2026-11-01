@@ -94,6 +94,20 @@ export class LarkMessages implements MessageConnector {
     return { accountId: this.config.appId, userId: this.config.userId };
   }
 
+  /** @spec Exact reads share the user identity, timeout and concurrency budget of history reads.
+   * @case tests/lark-messages.test.ts
+   */
+  async get(query: { messageId: string }): Promise<ChatMessage | null> {
+    const id = z.string().regex(/^om_[a-zA-Z0-9]+$/).parse(query.messageId);
+    const value = await this.request(["im", "+messages-mget", "--message-ids", id]);
+    const parsed = z.object({ ok: z.literal(true), identity: z.literal("user"),
+      data: z.object({ messages: z.array(z.unknown()) }) }).safeParse(value);
+    if (!parsed.success) throw larkFailure(value);
+    const rows = parsed.data.data.messages.map(message);
+    if (rows.some(row => row.id !== id) || rows.length > 1) throw new Error("Lark CLI returned unexpected message IDs");
+    return rows[0] ?? null;
+  }
+
   search(query: MessageSearchQuery): Promise<MessagePage> {
     const input = QuerySchema.parse(query);
     const chatType = z.enum(["p2p", "group"]).optional().parse(query.chatType);
@@ -124,18 +138,22 @@ export class LarkMessages implements MessageConnector {
   }
 
   private async read(args: string[], observedThrough: string): Promise<MessagePage> {
+    const parsed = PageSchema.safeParse(await this.request(args));
+    if (!parsed.success) throw new Error("Lark CLI returned an invalid message page");
+    const { messages, has_more, page_token } = parsed.data.data;
+    if (has_more && !page_token) throw new Error("Lark CLI omitted a required continuation token");
+    return { messages: messages.map(message), hasMore: has_more,
+      ...(has_more ? { nextToken: page_token! } : {}), observedThrough };
+  }
+
+  private async request(args: string[]): Promise<unknown> {
     if (this.running >= 2) throw new Error("Lark read concurrency limit reached; retry later");
     this.running++;
     try {
       await this.identity();
       const value = await this.run([...args, "--as", "user", "--no-reactions", "--format", "json"]);
-      const parsed = PageSchema.safeParse(value);
-      if (!parsed.success) throw larkFailure(value);
-      const { messages, has_more, page_token } = parsed.data.data;
-      if (has_more && !page_token) throw new Error("Lark CLI omitted a required continuation token");
-      // Embedded thread previews are not complete pages. Follow explicit thread_id through thread().
-      return { messages: messages.map(message), hasMore: has_more,
-        ...(has_more ? { nextToken: page_token! } : {}), observedThrough };
+      if (!z.object({ ok: z.literal(true) }).safeParse(value).success) throw larkFailure(value);
+      return value;
     } finally { this.running--; }
   }
 }

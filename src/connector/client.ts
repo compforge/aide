@@ -9,6 +9,7 @@ export function createConnectorClient(invoke: <T>(request: ConnectorRequest) => 
     describe: () => invoke({ operation: "describe" }),
     messages: Object.freeze({
       identity: () => invoke({ operation: "messages.identity" }),
+      get: (query) => invoke({ operation: "messages.get", query }),
       search: (query) => invoke({ operation: "messages.search", query }),
       history: (query) => invoke({ operation: "messages.history", query }),
       thread: (query) => invoke({ operation: "messages.thread", query }),
@@ -45,6 +46,7 @@ export function dispatchConnector(client: ConnectorClient, request: ConnectorReq
     case "connector.call": return client.call(request.connector, request.method, request.args, { timeoutMs: request.timeoutMs });
     case "describe": return client.describe();
     case "messages.identity": return client.messages.identity();
+    case "messages.get": return client.messages.get(request.query);
     case "messages.search": return client.messages.search(request.query);
     case "messages.history": return client.messages.history(request.query);
     case "messages.thread": return client.messages.thread(request.query);

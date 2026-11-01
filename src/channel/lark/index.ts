@@ -22,6 +22,7 @@ const EventSchema = z.object({
     sender_id: UserIdsSchema.optional() }),
   message: z.object({ message_id: z.string().min(1), chat_id: z.string().min(1),
     chat_type: z.string(), message_type: z.string(), content: z.string(), thread_id: z.string().optional(),
+    parent_id: z.string().optional(), root_id: z.string().optional(),
     mentions: z.array(z.object({ key: z.string().min(1), name: z.string().optional(),
       id: UserIdsSchema })).optional() }),
 });
@@ -45,6 +46,7 @@ type State = z.infer<typeof StateSchema>;
 /**
  * @spec Persist inbound messages before acknowledging Lark; acknowledge outbound delivery only after send succeeds.
  * @spec Topic identity includes a group thread when available; delivery retains the actual chat address.
+ * @spec Quoted parent/root IDs are evidence; the reply destination remains the incoming request message.
  * @case tests/message-source.test.ts
  * @why Platform acknowledgement must not depend on business processing or model latency.
  * @see {@link ../../../docs/channel/lark.md}
@@ -138,6 +140,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     if (this.state.received.includes(id)) return;
     const input = LarkIncomingSchema.safeParse({ id, topicKey: topicId, text, source: larkAddress(this.appId, chatId), replyToMessageId: id, addressObservation: { type: message.chat_type === "p2p" ? "direct" : "group" },
       observation: { provider: "lark", accountId: this.appId, messageId: id, chatId, chatType: message.chat_type, ...(threadId ? { threadId } : {}),
+        ...(message.parent_id ? { parentId: message.parent_id } : {}), ...(message.root_id ? { rootId: message.root_id } : {}),
         ...(botIdentity ? { assistant: { id: botIdentity.openId, name: botIdentity.name } } : {}),
         sender: { type: sender.sender_type, ...(sender.sender_id?.open_id ? { id: sender.sender_id.open_id } : {}) },
         mentions: (message.mentions ?? []).flatMap((mention) => mention.id.open_id ? [mention.id.open_id] : []) } });

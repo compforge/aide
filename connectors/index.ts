@@ -30,7 +30,7 @@ export class Connectors implements ConnectorClient {
     };
     const messages = () => this.single<ConnectorClient["messages"]>(MessageKind, MessageVersion) ?? emptyConnectors.messages;
     this.messages = {
-      identity: () => messages().identity(), search: query => messages().search(query),
+      identity: () => messages().identity(), get: query => messages().get(query), search: query => messages().search(query),
       history: query => messages().history(query), thread: query => messages().thread(query),
     };
     this.requirements = Object.freeze({

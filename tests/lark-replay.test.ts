@@ -34,6 +34,9 @@ test("Replay snapshot gates all read paths by cutoff and never guesses pre-edit 
   connector.advance("2026-10-19T00:10:00.000Z");
   for (const page of [await connector.search({ start, end }), await connector.history({ chatId: "oc_test", start, end }),
     await connector.thread({ threadId: "omt_test" })]) assert.deepEqual(page.messages.map(m => m.id), ["first"]);
+  assert.equal((await connector.get({ messageId: "first" }))!.id, "first");
+  for (const messageId of ["future", "edited", "absent"]) await assert.rejects(connector.get({ messageId }), /Incomplete snapshot coverage/);
+  assert.throws(() => connector.assertCoverage(), /Incomplete snapshot coverage/);
   assert.deepEqual(triggerMessages(snapshot).map(m => m.id), ["first", "future"]);
   connector.advance(end);
   assert.deepEqual((await connector.thread({ threadId: "omt_test" })).messages.map(m => m.id), ["first", "future"]);
@@ -80,6 +83,7 @@ test("Collection follows pages, keeps context separate and records gaps without 
   let calls = 0;
   const original = fixture();
   const connector: MessageConnector = {
+    async get() { throw new Error("Unexpected exact message read"); },
     identity: async () => original.identity,
     async search(query) {
       calls++;
@@ -214,6 +218,7 @@ test("Replay collects Me group speech separately and never substitutes mention c
   const context = message("context-only", "2026-10-19T00:06:00.000Z");
   const queries: import("@compforge/aide-plugin").MessageSearchQuery[] = [];
   const snapshot = await collectSnapshot({
+    async get() { throw new Error("Unexpected exact message read"); },
     identity: async () => fixture().identity,
     async search(query) { queries.push(query); return { messages: query.senderIds ? [mine] : [], hasMore: false, observedThrough: end }; },
     async history() { return { messages: [mine, context], hasMore: false, observedThrough: end }; },
@@ -233,6 +238,7 @@ test("Replay retains search chat names when history omits metadata while still r
   const row = message("named", "2026-10-19T00:01:00.000Z", { mentions: ["ou_me"] });
   let changed = false;
   const connector: MessageConnector = {
+    async get() { throw new Error("Unexpected exact message read"); },
     async identity() { return { accountId: "cli_test", userId: "ou_me" }; },
     async search(query) { return { messages: query.chatType === "group" && !query.senderIds ? [{ ...row, chatName: "DBA 优化讨论" }] : [], hasMore: false, observedThrough: end }; },
     async history() { return { messages: [{ ...row, ...(changed ? { content: "edited" } : {}) }], hasMore: false, observedThrough: end }; },

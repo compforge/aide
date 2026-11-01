@@ -60,6 +60,7 @@ function fixture(t: TestContext, spec = watch(), discoveryKind?: MessageKind) {
   const warnings: unknown[] = [];
   const sourceLogger: PluginLogger = { ...logger, warn(message, detail) { warnings.push({ message, ...detail }); } };
   const connectors = { ...emptyConnectors, messages: {
+    async get() { throw new Error("Unexpected exact message read"); },
     async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
     async search(query: MessageSearchQuery) {
       if (discoveryKind && (query.chatType === "p2p" ? "direct" : query.senderIds ? "sent" : "mention") !== discoveryKind) return page([]);
@@ -452,6 +453,7 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   }, async execute() { throw new Error("Unexpected work"); } }, root, prompts, root, "cli_app"), config: loadConfig(configFile),
     checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }),
     connectors: { ...emptyConnectors, messages: {
+    async get() { throw new Error("Unexpected exact message read"); },
       async identity() { return { accountId: "cli_app", userId: "ou_me" }; },
       async search(query: MessageSearchQuery) {
         searches++;
