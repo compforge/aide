@@ -1,4 +1,6 @@
-import { createWithSummary } from "./summary-fixture.ts";
+import { NOTE_TYPE, type NoteSpec, type NoteStatus } from "../plugins/personal/note/model.ts";
+import { reconcileNote } from "../plugins/personal/note/reconcile.ts";
+import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -17,6 +19,7 @@ import { inputJob } from "../plugins/personal/observation/job.ts";
 import { topicReview, createReviewInput, idleReviewSchedule } from "../plugins/personal/topic/review.ts";
 import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/personal/topic/model.ts";
 import { summaryVersion, understandingVersion } from "../plugins/personal/topic/tree.ts";
+import { reconcileAssignments } from "../plugins/personal/topic/assignment.ts";
 import { reconcileChief, reconcileTopic } from "../plugins/personal/topic/reconcile.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { topicPolicy, TopicReviewPolicySchema, type TopicPolicy } from "../plugins/personal/topic/config.ts";
@@ -75,7 +78,9 @@ test("Topic owns independent trigger and review policies; Harness and misplaced 
   const parse = (topic: unknown) => parsePersonalConfig(ConfigSchema.parse({ plugins: { personal: { topic } } }).plugins.personal).topic!;
   assert.deepEqual(topicReview(), { enabled: true });
   assert.deepEqual(parse({}).trigger, { intervalSeconds: 60 });
-  assert.deepEqual(parse({}).review, { idleSeconds: 900 });
+  assert.deepEqual(parse({}).review, { idleSeconds: 900, backoff: { factor: 2, maxIdleSeconds: 7200 } });
+  assert.deepEqual(parse({ review: { backoff: null } }).review, { idleSeconds: 900, backoff: null });
+  assert.equal(parse({ review: { idleSeconds: 8000 } }).review.backoff!.maxIdleSeconds, 8000);
   assert.deepEqual(parse({ trigger: { intervalSeconds: 17 }, review: backoff }).review, backoff);
   assert.throws(() => parse({ trigger: { backoff: { factor: 2, maxIdleSeconds: 7200 } } }));
   assert.throws(() => parse({ review: { intervalSeconds: 60 } }));
@@ -228,6 +233,8 @@ test("Review creation is fenced; reopening before admission consumes the existin
   const agenda = await maintenanceAgenda(f.resources, [topic]);
   await createReviewInput(f.context, topic, due, agenda);
   assert.equal((await createReviewInput(f.context, topic, due, agenda)).metadata.name, f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!.metadata.name);
+  // Assignment refresh has its own restart tests; here both materials are ready before admission.
+  await reconcileAssignments(f.context, f.read());
   await f.aide.close();
   const restarted = new Aide(f.home, f.options, log);
   try {
@@ -239,13 +246,13 @@ test("Review creation is fenced; reopening before admission consumes the existin
 });
 
 for (const mode of ["failure", "missing_receipt", "interrupted"] as const)
-test(`${mode} resets review waiting without replaying uncertain inputs`, async t => {
+test(`${mode} finalizes review waiting without replaying uncertain inputs`, async t => {
   const f = await fixture(t); await f.input("deferred"); await f.due();
   if (mode === "interrupted") await f.resources.patchStatus(f.read(), { execution: { id: "interrupted", startedAt: past() } });
   if (mode === "missing_receipt") f.hooks.skipAssessment = true;
   await f.run({ review: backoff }, mode === "failure");
   assert.equal(f.read().status.execution, null);
-  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.read().status.idleReviewCount ?? 0, 0);
   assert.equal(f.read().status.reviewCheckedAt, null);
   assert.ok(Date.parse(f.read().status.idleSince!) > Date.now() - 2000);
   const calls = f.calls.length; await f.run(); assert.equal(f.calls.length, calls);
@@ -384,4 +391,133 @@ test("Chief activation keeps its character and admission budgets with large pend
   await f.run({ contextChars: 4096 });
   assert.ok(f.calls[0]!.prompt.length <= 4096);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.completedAt).length, 8);
+});
+
+
+async function unabsorbedChild(f: Awaited<ReturnType<typeof fixture>>) {
+  const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "quiet-child",
+    spec: { id: "quiet-child", parentRef: resourceRef(f.read()) }, status: { summary: "Stable child knowledge", receipts: [] } });
+  await f.resources.patchStatus(f.read(), { absorbedSummaries: { [child.metadata.uid]: summaryVersion(child) } });
+  return child;
+}
+
+/** @case Idle review completion alone must neither reset backoff nor repeatedly invoke Chief for identical child material. */
+test("Acknowledging only the review backs off and unchanged material skips inference across due checks", async t => {
+  const f = await fixture(t);
+  await unabsorbedChild(f);
+  await f.due(); await f.run();
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.read().status.idleReviewCount, 1);
+  assert.ok(f.read().status.reviewedMaterialVersion);
+  assert.equal(Date.parse(idleReviewSchedule(f.read(), backoff).dueAt) - Date.parse(f.read().status.idleSince!), 1800_000);
+  for (const count of [2, 3, 4]) {
+    await f.due(); await f.run();
+    assert.equal(f.read().status.idleReviewCount, count);
+    assert.equal(f.calls.length, 1);
+  }
+  assert.equal(f.aide.topics.inputStore.list().length, 1);
+  assert.deepEqual(f.read().status.absorbed, {}, "Skipping inference is not a fabricated absorption receipt");
+  await f.input("new-deferred"); await f.due(); await f.run();
+  assert.equal(f.calls.length, 2, "Unchanged knowledge must not suppress new deferred business");
+  assert.ok(f.aide.topics.inputStore.get("new-deferred")!.status.assess?.completedAt);
+  assert.equal(f.read().status.idleReviewCount, 0);
+});
+
+test("Unchanged summary maintenance skips inference without creating a one millisecond loop", async t => {
+  const f = await fixture(t);
+  const child = await createWithSummary<TopicSpec, TopicStatus>(f.resources, TOPIC_TYPE, { name: "summary-child",
+    spec: { id: "summary-child", parentRef: resourceRef(f.read()) }, status: { summary: "Stable knowledge", receipts: [] } });
+  await f.run();
+  assert.equal(f.calls.length, 1);
+  await f.resources.patchStatus(f.read(), { nextAbsorbAt: past() });
+  assert.equal((await f.run())!.requeueAfterMs, 60000);
+  assert.equal(f.calls.length, 1);
+  await patchSummary(f.resources, child, { summary: "New durable evidence" });
+  await f.run();
+  assert.equal(f.calls.length, 2, "Changed child knowledge bypasses idle review backoff");
+});
+
+test("Completed absorption is progress even without a summary edit", async t => {
+  const f = await fixture(t), child = await unabsorbedChild(f);
+  await f.resources.patchStatus(f.read(), { idleReviewCount: 3 });
+  f.hooks.afterAssess = async () => {
+    await f.resources.patchStatus(f.read(), { absorbed: { [child.metadata.uid]: understandingVersion(child) } });
+  };
+  await f.due(); await f.run();
+  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.read().status.absorbAttempts, 0);
+});
+
+test("Material arriving during review remains eligible and the internal receipt cannot hide it", async t => {
+  const f = await fixture(t), child = await unabsorbedChild(f);
+  f.hooks.afterAssess = async () => { await patchSummary(f.resources, child, { summary: "Changed while Chief was running" }); };
+  await f.due(); await f.run();
+  assert.equal(f.read().status.idleReviewCount, 0);
+  f.hooks.afterAssess = undefined;
+  await f.resources.patchStatus(f.read(), { nextAbsorbAt: past() });
+  await f.run();
+  assert.equal(f.calls.length, 2);
+});
+
+for (const mode of ["failure", "missing_receipt"] as const)
+test(`A ${mode} does not certify maintenance material as reviewed`, async t => {
+  const f = await fixture(t);
+  await unabsorbedChild(f);
+  if (mode === "missing_receipt") f.hooks.skipAssessment = true;
+  await f.due(); await f.run({}, mode === "failure");
+  assert.equal(f.read().status.reviewedMaterialVersion, undefined);
+});
+
+test("Restart retains reviewed material identity while new Normal input still activates Chief", async t => {
+  const f = await fixture(t);
+  await unabsorbedChild(f);
+  await f.due(); await f.run();
+  const version = f.read().status.reviewedMaterialVersion;
+  await f.due(); await f.aide.close();
+  const restarted = new Aide(f.home, f.options, log);
+  try {
+    await restarted.start();
+    await until(() => restarted.topics.resource("root")!.status.idleReviewCount === 2);
+    await restarted.settled();
+    assert.equal(restarted.topics.resource("root")!.status.reviewedMaterialVersion, version);
+    assert.equal(restarted.invocations().length, 0);
+    const resources = restarted.runtime.plugins.resourceClient("personal");
+    const input = await restarted.topics.submit("after-restart", { topicId: "root", origin: "source", originId: "test", text: "New business" });
+    await routeTo(resources, restarted.topics.resource("root")!.metadata, input);
+    await until(() => !!restarted.topics.inputStore.get("after-restart")!.status.assess?.completedAt);
+    await restarted.settled();
+    assert.equal(restarted.invocations().filter(i => i.topicId === "root").length, 1);
+  } finally { await restarted.close(); }
+});
+
+
+test("Acknowledged review without Note changes does not repeatedly review the same queued Note", async t => {
+  const f = await fixture(t);
+  await f.resources.create(NOTE_TYPE, { name: "matter", spec: { subject: resourceRef(f.read()), text: "A current matter" },
+    status: { updatedAt: new Date().toISOString() } });
+  const ref = { ...NOTE_TYPE, namespace: "v1", name: "matter" } as const;
+  let note = (await f.resources.get<NoteSpec, NoteStatus>(ref))!;
+  await reconcileNote(f.context, note);
+  await f.run();
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.read().status.idleReviewCount, 1);
+  assert.equal((await f.resources.get<NoteSpec, NoteStatus>(ref))!.status.reviewed, undefined);
+  await f.resources.patchStatus(f.read(), { nextAbsorbAt: past() });
+  assert.equal((await f.run())!.requeueAfterMs, 60000);
+  assert.equal(f.calls.length, 1);
+  note = (await f.resources.get<NoteSpec, NoteStatus>(ref))!;
+  note = await f.resources.replace(note, { ...note.spec, text: "New evidence for the matter" }, note.status);
+  await reconcileNote(f.context, note);
+  await f.run();
+  assert.equal(f.calls.length, 2);
+});
+
+
+test("Internal review completion preserves accumulated backoff", async t => {
+  const f = await fixture(t);
+  await unabsorbedChild(f);
+  await f.resources.patchStatus(f.read(), { idleReviewCount: 2 });
+  await f.due(); await f.run();
+  assert.equal(f.read().status.idleReviewCount, 3);
+  assert.equal(Date.parse(idleReviewSchedule(f.read(), backoff).dueAt) - Date.parse(f.read().status.idleSince!), 7200_000);
 });

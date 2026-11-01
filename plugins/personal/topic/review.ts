@@ -16,6 +16,20 @@ export const TopicReviewSchema = z.object({ enabled: z.boolean().default(true) }
 export type TopicReview = z.infer<typeof TopicReviewSchema>;
 export const topicReview = (review?: TopicReview): TopicReview => TopicReviewSchema.parse(review ?? {});
 
+/**
+ * @spec Review identity includes knowledge, tree relationships and absorption receipts, not scheduling or execution status.
+ * @why Completing a synthetic Input does not create new evidence for another model call.
+ * @link docs/personal/topic.md#topic-定时回顾
+ */
+export function reviewMaterialVersion(topics: readonly TopicResource[], versions: ReadonlyMap<string, string>, notes: readonly { noteId: string; version: string }[]) {
+  const entries = (values: Record<string, string> = {}) => Object.entries(values).sort(([a], [b]) => a.localeCompare(b));
+  return digest([
+    [...topics].sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid)).map(t => [t.metadata.uid, t.spec.name ?? "", t.spec.parentRef?.uid ?? "",
+      versions.get(t.metadata.uid), entries(t.status.absorbed), entries(t.status.absorbedSummaries)]),
+    [...notes].sort((a, b) => a.noteId.localeCompare(b.noteId)),
+  ]);
+}
+
 export function idleReviewDelay(config: TopicReviewPolicy, count = 0): number {
   return 1000 * (config.backoff
     ? Math.min(config.idleSeconds * config.backoff.factor ** count, config.backoff.maxIdleSeconds)
@@ -72,7 +86,7 @@ export async function createReviewInput(context: Pick<PluginContext, "resources"
     try { await context.resources.commit([
       { operation: "create", type: INPUT_TYPE, name: inputId, spec, status: inputStatus(status) },
       { operation: "patchStatus", resource: current, patch: origin === "aide:review"
-        ? { reviewCheckedAt: at, idleReviewCount: 0, idleReviewReset: null,
+        ? { reviewCheckedAt: at, idleReviewReset: null,
             ...(notes.length ? { nextAbsorbAt: new Date(Date.parse(at) + Math.min(900_000, 60_000 * 2 ** (current.status.absorbAttempts ?? 0))).toISOString(),
               absorbAttempts: Math.min(5, (current.status.absorbAttempts ?? 0) + 1) } : {}) }
         : { capacityRequests: { [origin]: { checkedAt: at, inputId } } } },

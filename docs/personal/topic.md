@@ -136,7 +136,8 @@ id 保存业务标识；name、topicKey、parentRef、default 表达展示、来
 | weaveRevision / notifiedWeaveRevision | 结构调整与 Chief 通知进度 |
 | nextAbsorbAt / absorbAttempts | 认识吸收的重试时间与退避进度 |
 | reviewCheckedAt / idleSince | Reconcile 上次到期检查时间 / Chief 最近执行完成时间 |
-| idleReviewCount | 连续无事可做的到期检查次数，缺省为 0；用于可选指数退避 |
+| idleReviewCount | 连续无事可做的到期检查或无进展回顾次数，缺省为 0；用于指数退避 |
+| reviewedMaterialVersion | 最近成功完成的维护轮次所依据的材料指纹；用于跳过未变化材料，不代替 absorbed / review_notes 回执 |
 | idleReviewReset | 本轮空闲期首次观察到业务输入的时间与重置前次数；执行完成或责任边界重置时清除 |
 | organization | Chief 或 Weave 最近一次组织调整的原因和前后关系 |
 | lastError / receipts | 执行异常与幂等请求回执 |
@@ -235,13 +236,17 @@ Topic 配置区分 `trigger.intervalSeconds`（默认 60 秒，固定唤醒 Reco
 
 Reconcile 先处理业务 Input、结构通知和子 summary 吸收。后台回顾到期时，检查尚未接纳的 deferred 输入、待吸收的完整子认识和直接材料/子节点数量压力。存在这些需求才创建维护 Input；否则只记录 `reviewCheckedAt` 并增加 `idleReviewCount`，不创建 Input、不调用模型。中间的固定 tick 不递增次数、不移动回顾基准。Task / Routine 的期限、cron/event 由各自 Reconcile 负责。
 
-`review.idleSeconds` 默认 900 秒，可选 `review.backoff` 将等待调整为 `min(idleSeconds × factor ^ idleReviewCount, maxIdleSeconds)`。不配置时使用固定基础等待。等待基准取最近一次 Chief 完成时间和到期检查时间中更晚的时间；两者缺失时从创建时间开始。新业务输入重置次数，持久保存本轮首次观察到的业务时间和重置前次数：取原等待基准按当前策略计算的时间，与首次业务时间加当前基础等待中更早者，连续输入不反复推迟。
+`review.idleSeconds` 默认 900 秒，`review.backoff` 默认倍数 2、上限 7200 秒（基础等待更长时上限至少为基础等待），将等待调整为 `min(idleSeconds × factor ^ idleReviewCount, maxIdleSeconds)`。显式配置 `backoff: null` 使用固定基础等待。等待基准取最近一次 Chief 完成时间和到期检查时间中更晚的时间；两者缺失时从创建时间开始。新业务输入重置次数，持久保存本轮首次观察到的业务时间和重置前次数：取原等待基准按当前策略计算的时间，与首次业务时间加当前基础等待中更早者，连续输入不反复推迟。
 
-回顾截止时间由事实和当前策略计算，不持久化独立 deadline。修改基础等待、倍数或上限并重启后，下一次固定检查使用新策略，已到期只检查一次，不补跑错过的周期。执行完成、失败和中断恢复均清除前一轮检查/重置状态并恢复基础等待，已有未知效果继续等待核对。关闭回顾清除次数和检查状态；重新开启或子 Topic 独立时从基础等待开始。
+回顾截止时间由事实和当前策略计算，不持久化独立 deadline。修改基础等待、倍数或上限并重启后，下一次固定检查使用新策略，已到期只检查一次，不补跑错过的周期。执行完成、失败和中断恢复均清除前一轮检查/重置状态，以完成时间开始等待；内置请求和无输入维护保留退避次数，完成业务处理或材料/吸收进度变化才重置次数，已有未知效果继续等待核对。关闭回顾清除次数和检查状态；重新开启或子 Topic 独立时从基础等待开始。
 
 维护请求沿现有 Input 链路处理：`origin: aide:review`、`attention: normal`，创建即绑定当前 root 并建立研判目标，无需 Route 模型。检查记录与 Input 原子提交，由 Topic 版本保护并发到达和归组；已有业务或维护 Input 直接复用。Chief 复用原生 session，通过 `assess_input` 留下研判回执。系统 Input 不刷新 `lastInputAt`、不新增授权；运行中不追加定时维护或积攒补跑。
 
-运行日志区分「生成维护 Input」与「无事退避」，记录 Topic、原因、检查时间、次数及按当前策略计算的下一次资格时间。
+成功完成且所有本批 Input 有研判回执的维护轮次保存本轮开始时的材料指纹：Topic UID、名称、父子关系、认识版本、吸收回执及待回顾 Note 版本。纯调度、执行状态和内置 Input 回执不改变指纹。同一材料未变化时，定时回顾与认识吸收直接跳过模型；不伪造 Note 或子 Topic 的吸收回执。新 deferred 待办仍能在到期时触发回顾，Immediate / Normal、容量请求和结构通知保持原有优先级。
+
+只完成内置 `assess_input` 不算业务进展，增加退避次数；处理业务 Input、更新认识、组织或确认吸收才重置。持久化本轮开始时的版本，避免把推理期间到达的新版本误记为已回顾。失败、缺少回执或中断不记录材料已回顾；重启保留已记录的指纹和次数。
+
+运行日志区分「生成维护 Input」「材料未变/无事退避」与「维护结果」，记录 Topic、材料版本、是否有进展、次数及按当前策略计算的下一次资格时间。
 
 ### 汇总调谐
 

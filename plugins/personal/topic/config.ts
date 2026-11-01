@@ -2,8 +2,9 @@ import { z } from "zod";
 const seconds = z.number().int().positive().max(2_147_483);
 export const TopicReviewPolicySchema = z.object({
   idleSeconds: seconds.default(900),
-  backoff: z.object({ factor: z.number().gt(1), maxIdleSeconds: seconds }).strict().optional(),
-}).strict().refine(config => !config.backoff || config.backoff.maxIdleSeconds >= config.idleSeconds,
+  backoff: z.object({ factor: z.number().gt(1), maxIdleSeconds: seconds }).strict().nullable().optional(),
+}).strict().transform(config => ({ ...config, backoff: config.backoff === undefined
+  ? { factor: 2, maxIdleSeconds: Math.max(7200, config.idleSeconds) } : config.backoff })).refine(config => !config.backoff || config.backoff.maxIdleSeconds >= config.idleSeconds,
   { path: ["backoff", "maxIdleSeconds"], message: "Must be at least idleSeconds" });
 export type TopicReviewPolicy = z.infer<typeof TopicReviewPolicySchema>;
 export const TopicPolicySchema = z.object({

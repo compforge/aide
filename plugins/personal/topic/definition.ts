@@ -65,6 +65,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       reclamation: z.object({ version: z.string(), reason: z.string().trim().min(1), writer: NoteWriterSchema }).strict().optional(),
       assignmentRefresh: z.object({ version: z.string(), cursor: z.string(), complete: z.boolean() }).strict().optional(),
       yieldToInput: z.boolean().optional(),
+      reviewedMaterialVersion: z.string().optional(),
       idleReviewReset: z.object({ at: z.string().datetime(), previousCount: z.number().int().nonnegative() }).strict().nullable().optional(),
       lastInputAt: z.string().datetime().optional(), absorbed: z.record(z.string(), z.string()).default({}), absorbedSummaries: z.record(z.string(), z.string()).default({}),
       nextAbsorbAt: z.string().datetime().optional(), absorbAttempts: z.number().int().min(0).max(5).optional(), reviewCheckedAt: z.string().datetime().nullable().optional(), idleReviewCount: z.number().int().nonnegative().optional(), idleSince: z.string().datetime().optional(), agent: AgentStatusSchema.optional(), execution: LoopExecutionSchema.nullable().optional(), ...ContextFields }).strict() },
