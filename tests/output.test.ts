@@ -1,3 +1,5 @@
+import { addressFor } from "./address-fixture.ts";
+import { fixtureCanSpeak } from "./address-fixture.ts";
 import { approveFixtureOutput } from "./output-fixture.ts";
 import { OutputDelivery, type OutputTransportResolver } from "../plugins/personal/output/delivery.ts";
 import { larkSendFailure } from "../src/channel/lark/client.ts";
@@ -139,7 +141,7 @@ test("Lark sends to explicit Output target after Topic deletion and reuses retry
     sent.push({ chatId, id }); if (fail) { fail = false; throw new Error("ambiguous send"); }
   } };
   let resolve: OutputTransportResolver = () => undefined;
-  const service = { receive: async () => { throw new Error("must not execute Input"); },
+  const service = { canSpeak: fixtureCanSpeak(f.root), receive: async () => { throw new Error("must not execute Input"); },
     registerOutputTransport(next: OutputTransportResolver) { resolve = next; return () => { resolve = () => undefined; }; } };
   const delivery = new OutputDelivery(f.outputs, target => resolve(target), pino({ level: "silent" }));
   f.outputs.check = async id => { approveFixtureOutput(f.outputs, id); };
@@ -199,7 +201,7 @@ test("Output preflight failures are isolated; interrupted non-idempotent deliver
 test("say acknowledges acceptance independently of delivery without recreating messages", async t => {
   const f = await setup(t);
   const target = larkAddress("app", "chat");
-  const options = { target, idempotencyKey: "one" };
+  const options = { target: addressFor(f.root, target), idempotencyKey: "one" };
   const first = await f.topics.say("topic", undefined, "reply", undefined, options);
   assert.deepEqual(first, { outputId: first.outputId, accepted: true });
   assert.equal(f.outputs.get(first.outputId)!.status.phase, "pending");
@@ -209,7 +211,7 @@ test("say acknowledges acceptance independently of delivery without recreating m
   assert.deepEqual(retry, first);
   assert.equal(f.outputs.get(first.outputId)!.status.phase, "delivered");
   assert.equal(f.outputs.list().length, 1);
-  const web = await f.topics.say("topic", undefined, "published", undefined, { target: webAddress("topic") });
+  const web = await f.topics.say("topic", undefined, "published", undefined, { target: addressFor(f.root, webAddress("topic")) });
   assert.equal(web.accepted, true);
   assert.equal(f.outputs.get(web.outputId)!.status.phase, "pending");
 });
@@ -227,7 +229,7 @@ test("Lark delivery failures retain diagnostic codes and delivery context withou
     response: { status: 403, data: { code: 99991672, msg: "PRIVATE RESPONSE" } } });
   const transport: LarkTransport = { async start() {}, close() {}, async chatName() { return undefined; }, async send() { throw error; } };
   let resolve: OutputTransportResolver = () => undefined;
-  const channel = new LarkChannel(f.root, "app", {
+  const channel = new LarkChannel(f.root, "app", { canSpeak: fixtureCanSpeak(f.root),
     receive: async () => { throw new Error("unused"); },
     registerOutputTransport(next) { resolve = next; return () => {}; },
   }, transport, log);
@@ -255,7 +257,7 @@ test("Lark delivery failures retain diagnostic codes and delivery context withou
 test("System notifications never borrow a live Chief call and remain idempotent across execution changes", async t => {
   const f = await setup(t);
   const notice = (key: string) => f.topics.say("topic", undefined, "Recovery notification", undefined,
-    { target: webAddress("topic"), inputIds: [], idempotencyKey: key });
+    { target: addressFor(f.root, webAddress("topic")), inputIds: [], idempotencyKey: key });
   const idle = await notice("idle-notice");
   await f.client.patchStatus(f.topics.resource("topic")!, {
     agent: { harness: "chief", sessionId: "chief-session-1" }, execution: { id: "unrelated-1", startedAt: new Date().toISOString() },
@@ -279,7 +281,7 @@ test("Output retries preserve original call evidence without weakening immutable
   await f.client.patchStatus(f.topics.resource("topic")!, {
     agent: { harness: "chief", sessionId: "first-session" }, execution: { id: "run", startedAt: new Date().toISOString() },
   });
-  const say = (key: string, text = "answer") => f.topics.say("topic", undefined, text, "run", { target: webAddress("topic"), idempotencyKey: key });
+  const say = (key: string, text = "answer") => f.topics.say("topic", undefined, text, "run", { target: addressFor(f.root, webAddress("topic")), idempotencyKey: key });
   const first = await say("tool-call");
   const recorded = f.outputs.get(first.outputId)!.spec.createdBy;
   assert.deepEqual(recorded, { agent: { harness: "chief", sessionId: "first-session" }, executionId: "run", toolCallId: "tool-call" });

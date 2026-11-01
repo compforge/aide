@@ -1,6 +1,5 @@
-import { Addresses } from "../../../plugins/personal/address/service.ts";
 import type { TopicLocator } from "../../../plugins/personal/topic/locator.ts";
-import { larkAddress, larkThreadAddress, larkTopicKey, larkTopicLocator, larkEndpoint } from "../address.ts";
+import { larkAddress, larkTopicKey, larkTopicLocator, larkEndpoint } from "../address.ts";
 import type { OutputView } from "../../../plugins/personal/output/view.ts";
 import { CHANNELS, bindChannelInput } from "../definition.ts";
 import { createHash } from "node:crypto";
@@ -65,12 +64,10 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
   private retryAt = 0;
   private readonly cardRetry = new Map<string, number>();
   private readonly unregisterOutput?: () => void;
-  private readonly addresses: Addresses;
   private readonly chatNames = new Map<string, { name?: string; until: number }>();
 
-  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "registerOutputTransport">,
+  constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "registerOutputTransport" | "canSpeak">,
     private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
-    this.addresses = new Addresses(home);
     this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
     this.path = join(home, "channels", `lark-${createHash("sha256").update(appId).digest("hex").slice(0, 16)}.json`);
@@ -139,7 +136,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     // Group normalization yields; concurrent duplicate deliveries must still persist only once.
     if (this.stopped) throw new Error("Lark channel is stopping");
     if (this.state.received.includes(id)) return;
-    const input = LarkIncomingSchema.safeParse({ id, topicKey: topicId, text, source: threadId ? larkThreadAddress(this.appId, chatId, id) : larkAddress(this.appId, chatId),
+    const input = LarkIncomingSchema.safeParse({ id, topicKey: topicId, text, source: larkAddress(this.appId, chatId), replyToMessageId: id, addressObservation: { type: message.chat_type === "p2p" ? "direct" : "group" },
       observation: { provider: "lark", accountId: this.appId, messageId: id, chatId, chatType: message.chat_type, ...(threadId ? { threadId } : {}),
         ...(botIdentity ? { assistant: { id: botIdentity.openId, name: botIdentity.name } } : {}),
         sender: { type: sender.sender_type, ...(sender.sender_id?.open_id ? { id: sender.sender_id.open_id } : {}) },
@@ -174,7 +171,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     }
     const location = this.locate({ chatId, ...(typeof observation.threadId === "string" ? { threadId: observation.threadId } : {}),
       chatName: cached.name, text: input.text });
-    return location.name ? { ...input, topicName: location.name, observation: { ...observation, chatName: cached.name } } : input;
+    return location.name ? { ...input, topicName: location.name, addressObservation: { ...input.addressObservation, name: cached.name }, observation: { ...observation, chatName: cached.name } } : input;
   }
 
   dispatch(): Promise<void> {
@@ -217,7 +214,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
   private async updatePresentation(): Promise<void> {
     if (this.transport.cards && this.progress) {
       for (const [topicId, chatId] of Object.entries(this.state.chats)) {
-        if (this.addresses.observe(larkAddress(this.appId, chatId)).spec.muted) continue;
+        if (!this.aide.canSpeak(larkAddress(this.appId, chatId))) continue;
         for (const view of this.progress(topicId)) {
           if (this.stopped) return;
           if (Date.now() < (this.cardRetry.get(view.id) ?? 0)) continue;
@@ -231,12 +228,12 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     }
     const notices: OutputView[] = this.state.notices.map((n) => ({ ...n, topicUid: "", target: larkAddress(this.appId, this.state.chats[n.topicId]!), status: { phase: "pending", attempts: 0 } }));
     for (const message of notices) {
-      if (this.addresses.observe(message.target).spec.muted) continue;
+      if (!this.aide.canSpeak(message.target)) continue;
       const endpoint = larkEndpoint(message.target)!;
       const { receiveId, receiveIdType } = endpoint;
       const parts = textParts(message.text);
       for (const [index, text] of parts.entries()) {
-        if (this.stopped || this.addresses.observe(message.target).spec.muted) return;
+        if (this.stopped || !this.aide.canSpeak(message.target)) return;
         const id = this.deliveryId(message.id, index);
         if (this.state.delivered.includes(id)) continue;
         try {
@@ -263,7 +260,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     for (const [index, text] of textParts(message.text).entries()) {
       const id = this.deliveryId(message.id, index);
       if (this.state.delivered.includes(id)) continue;
-      try { if (this.addresses.observe(message.target).spec.muted) throw new Error("Aide is muted at this Address");
+      try { if (!this.aide.canSpeak(message.target)) throw new Error("Aide is muted at this Address");
         await this.transport.send(endpoint.receiveId, text, id, endpoint.receiveIdType, endpoint.replyToMessageId); }
       catch (error) {
         this.log.warn({ outputId: message.id, target: message.target, part: index, ...larkSendFailure(error) }, "Lark send failed");
@@ -290,7 +287,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
         streaming: live, think: cardThought(view), content: cardContent(view), signature: "" };
       this.saveCard(view.id, card);
     }
-    if (this.addresses.observe(larkAddress(this.appId, chatId)).spec.muted) return;
+    if (!this.aide.canSpeak(larkAddress(this.appId, chatId))) return;
     if (!card.sent) {
       await transport.send(chatId, card.cardId, this.deliveryId(`card:${view.id}`, 0));
       card.sent = true; this.saveCard(view.id, card);
@@ -299,7 +296,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     const signature = JSON.stringify(view);
     if (card.signature === signature) return;
     const operation = async (run: (sequence: number, id: string) => Promise<void>) => {
-      if (this.addresses.observe(larkAddress(this.appId, chatId)).spec.muted) throw new Error("Address muted during presentation update");
+      if (!this.aide.canSpeak(larkAddress(this.appId, chatId))) throw new Error("Address muted during presentation update");
       card.sequence++; this.saveCard(view.id, card);
       await run(card.sequence, this.deliveryId(`card:${view.id}`, card.sequence));
     };

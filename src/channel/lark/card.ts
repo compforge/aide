@@ -1,5 +1,3 @@
-import { Addresses, placeEndpoint } from "../../../plugins/personal/address/service.ts";
-import { sameAddress } from "../../address.ts";
 import { channelOutputs } from "../output.ts";
 import { answerPreview, processPreview, replyLabels } from "../reply-layout.ts";
 import type { ChannelService } from "../service.ts";
@@ -44,8 +42,7 @@ export function larkProgress(aide: ChannelService, topicId: string): LarkProgres
       : members.length > 0 && members.every(i => i.consumption.phase === "done") ? "done" : "queued";
     const ids = new Set(view.blocks.filter((b) => b.type === "message" && b.group_id === group).map((b) => b.id.replace(/^message:/, "")));
     // Match the communication place, then retain the turn membership below; reply message coordinates are not a different audience.
-    const address = input.spec.source && new Addresses(aide.topics.resources.storage.home).endpoint(input.spec.source);
-    const addressed = channelOutputs(aide).filter((o) => address && sameAddress(placeEndpoint(o.target), address));
+    const addressed = channelOutputs(aide).filter(o => input.spec.source && o.status.delivery?.address.uid === input.spec.source.uid);
     const responses = addressed.filter((m) => ids.has(m.id) && m.status.phase === "delivered");
     const text = responses.map((message) => message.text).join("\n\n");
     const think = ""; // Private reasoning and tool output stay on Me's local Web surface.

@@ -110,7 +110,16 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
       }
       if (url.pathname === "/channels/config" && (request.method === "GET" || request.method === "POST")) {
         if (!settings) { json(response, 503, { error: "此运行实例未提供配置编辑能力。" }); return; }
-        json(response, 200, request.method === "GET" ? settings.snapshot() : settings.change(ChannelSettingsChangeSchema.parse(await body(request))));
+        await aide.start();
+        if (request.method === "POST") {
+          const change = ChannelSettingsChangeSchema.parse(await body(request));
+          if (change.operation === "default") {
+            try { await aide.validateDefaultAddress(change.address); }
+            catch (error) { throw new ChannelSettingsError(400, error instanceof Error ? error.message : "Invalid default Address"); }
+          }
+          settings.change(change);
+        }
+        json(response, 200, { ...settings.snapshot(), defaultAddress: aide.defaultAddress() });
         return;
       }
       if (request.method === "GET" && url.pathname === "/health") {

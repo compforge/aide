@@ -1,15 +1,14 @@
+import { AddressRefSchema, type AddressRef } from "../address/model.ts";
 import { OUTPUT_TYPE } from "../output/model.ts";
 import { Addresses, type AddressTarget } from "../address/service.ts";
 import { replyIdentity } from "../address/reply.ts";
-import { larkThreadAddress, larkEndpoint } from "../../../src/channel/address.ts";
 import { commitStatus } from "../status.ts";
 import { agentCall } from "../observation/reference.ts";
 import { ensureDefaultTopic } from "./default.ts";
 import { topicSubtree } from "./tree.ts";
 import { resourceRef, belongsToTopic } from "../input/state.ts";
-import { parseAddress, sameAddress } from "../../../src/address.ts";
 import { randomUUID } from "node:crypto";
-import type { ResourceClient, Address } from "@compforge/aide-plugin";
+import type { ResourceClient } from "@compforge/aide-plugin";
 import { InputAttention, inputAttention, type InputSpec, type InputSubmission } from "../input/model.ts";
 import { isDeepStrictEqual } from "node:util";
 import { receiverIdentity, type SayInput, type SayReceipt } from "../output/model.ts";
@@ -28,7 +27,7 @@ export const topicKey = digest;
 export class TopicStore {
   private readonly listeners = new Set<(topic: Topic) => void>();
   constructor(readonly resources: PluginResourceStore, private readonly client: ResourceClient, readonly inputStore: InputStore, readonly outputStore = new OutputStore(resources.storage.home),
-    private readonly resolveContact?: (topicId: string, to?: SayInput["to"], channelId?: string, target?: Address) => Promise<{ target: Address; receivers: import("@compforge/aide-plugin").ResourceRef[] }>) {
+    private readonly resolveContact?: () => Promise<{ target: AddressRef; receivers: import("@compforge/aide-plugin").ResourceRef[] }>) {
 
   }
   changed(change: ResourceClientChange): void {
@@ -51,12 +50,12 @@ export class TopicStore {
   list(): Topic[] { return this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE).filter((r) => !r.metadata.deletionTimestamp).map((r) => this.project(r as TopicResource)); }
   get(id: string): Topic | undefined { const r = this.resource(id); return r && this.project(r); }
   /** @spec The creating Channel supplies its address and first-input name before asynchronous routing; later attachment cannot replace either. */
-  async ensure(id: string, address?: Address, name?: string): Promise<TopicResource> {
+  async ensure(id: string, address?: AddressTarget, name?: string): Promise<TopicResource> {
     if (id === DEFAULT_TOPIC_ID) return ensureDefaultTopic(this.client);
     const previous = this.resources.find<TopicSpec, TopicStatus>(TOPIC_TYPE, topicKey(id));
     if (previous?.metadata.deletionTimestamp) throw new Error("Topic is being deleted; retry after deletion completes");
     if (previous) return previous;
-    return this.client.create(TOPIC_TYPE, { name: topicKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: parseAddress(address) } : {}), review: topicReview() }, status: { receipts: [] } });
+    return this.client.create(TOPIC_TYPE, { name: topicKey(id), spec: { id, ...(name ? { name } : {}), ...(address ? { address: new Addresses(this.resources.storage.home).ref(address) } : {}), review: topicReview() }, status: { receipts: [] } });
   }
   /**
    * @spec Presentation follows the completing execution when recorded; the original admission stays on Input for recovery.
@@ -144,7 +143,7 @@ export class TopicStore {
     const initial = await this.ensure(topicId);
     const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
     const previous = this.outputStore.get(id);
-    if (options.respondToInputId && (options.to || options.channelId)) throw new Error("say cannot combine respondToInputId with to or channelId");
+    if (options.respondToInputId && options.to) throw new Error("say cannot combine respondToInputId with to");
     const inputIds = [...new Set([...(options.inputIds ?? (inputId ? [inputId] : [])), ...(options.respondToInputId ? [options.respondToInputId] : [])])];
     const attached = (id: string) => {
       const input = this.inputStore.get(id);
@@ -155,23 +154,15 @@ export class TopicStore {
       return input;
     };
     for (const id of inputIds) attached(id);
-    const addresses = new Addresses(this.resources.storage.home);
-    let target: Address | undefined = options.target && addresses.endpoint(options.target);
+    let target = options.target && AddressRefSchema.parse(options.target);
+    let replyToMessageId: string | undefined;
     let replyTo: import("../output/model.ts").OutputSpec["replyTo"];
     let receivers = options.receivers === undefined ? undefined : [...options.receivers];
-    if (options.to || options.channelId) {
-      if (options.receivers !== undefined) throw new Error("say must choose to or receivers, not both");
-      if (options.target && options.channelId) throw new Error("say must choose target or channelId, not both");
-      if (!options.to) throw new Error("say channelId requires an explicit recipient");
-      if (!this.resolveContact) throw new Error("Person contact is unavailable");
-      if (previous) {
-        const recipient = options.to;
-        if ("personId" in recipient && ![...previous.spec.receivers ?? []].some(r => r.uid === recipient.uid)) throw new Error("Output identity already exists with a different recipient");
-        target = this.outputStore.destination(previous); receivers = previous.spec.receivers === undefined ? undefined : [...previous.spec.receivers];
-      } else {
-        const destination = await this.resolveContact(topicId, options.to, options.channelId, target);
-        target = destination.target; receivers = destination.receivers;
-      }
+    if (options.to) {
+      if (target || options.receivers !== undefined) throw new Error("say must choose contact Me or an explicit destination");
+      if (!this.resolveContact) throw new Error("Me contact is unavailable");
+      const destination = previous ? { target: previous.spec.target, receivers: previous.spec.receivers?.toJSON() } : await this.resolveContact();
+      target = destination.target; receivers = destination.receivers;
     }
     if (options.respondToInputId) {
       const replyInput = attached(options.respondToInputId), reply = replyInput.spec;
@@ -181,11 +172,9 @@ export class TopicStore {
       replyTo = { input: resourceRef(replyInput), key: identity?.key ?? replyInput.metadata.uid, ...(identity ? { messageId: identity.messageId } : {}) };
       const priorReply = this.resources.page<import("../output/model.ts").OutputSpec, import("../output/model.ts").OutputStatus>(OUTPUT_TYPE, { limit: 1, matchIndex: { name: "reply", value: replyTo.key } }).items[0];
       if (priorReply && priorReply.metadata.name !== id) return { outputId: priorReply.metadata.name, accepted: true };
-      if (!target && reply.source) {
-        target = addresses.endpoint(reply.source);
-        const lark = larkEndpoint(target);
-        const messageId = identity?.messageId ?? reply.replyToMessageId;
-        if (messageId && lark?.receiveIdType === "chat_id") target = larkThreadAddress(lark.appId, lark.receiveId, messageId);
+      if (reply.source && (!target || target.uid === reply.source.uid)) {
+        target ??= reply.source;
+        replyToMessageId = identity?.messageId ?? reply.replyToMessageId;
       }
       // A direct reply identifies its sender; explicit receivers (including []) remain the caller's decision.
       if (receivers === undefined && reply.sender) receivers = [reply.sender];
@@ -193,7 +182,7 @@ export class TopicStore {
     }
     // A repeated tool call keeps its admitted destination even if new immediate Inputs have arrived.
     if (!target && previous) {
-      target = this.outputStore.destination(previous);
+      target = previous.spec.target; replyToMessageId = previous.spec.replyToMessageId;
       receivers ??= previous.spec.receivers?.toJSON();
     }
     if (!target) {
@@ -201,19 +190,23 @@ export class TopicStore {
         .filter((i) => i.spec.origin === "channel" && inputAttention(i.spec) === InputAttention.Immediate);
       if (candidates.length) {
         const first = candidates[0]!.spec.source;
-        if (first && candidates.every(i => i.spec.source && first.uid === i.spec.source.uid)) target = addresses.endpoint(first);
+        if (first && candidates.every(i => i.spec.source && first.uid === i.spec.source.uid)) {
+          target = first;
+          const coordinates = new Set(candidates.map(i => i.spec.replyToMessageId));
+          if (coordinates.size === 1) replyToMessageId = candidates[0]!.spec.replyToMessageId;
+        }
       }
       // @spec Rules resolve an unambiguous reply; the Agent can choose an explicit address. An unresolved choice contacts Me.
       // @link docs/personal/output.md#地址与收件处
       if (!target && this.resolveContact) {
-        const destination = await this.resolveContact(topicId);
+        const destination = await this.resolveContact();
         target = destination.target;
         if (receivers !== undefined && !isDeepStrictEqual(receiverIdentity({ receivers }), receiverIdentity({ receivers: destination.receivers })))
           throw new Error("Default say contacts Me; other receivers require an explicit target");
         receivers = destination.receivers;
       }
     }
-    if (!target) throw new Error("say requires an explicit target or a configured default Channel");
+    if (!target) throw new Error("say requires an explicit target or a configured default Address");
     for (let attempt = 0; ; attempt++) {
       const c = this.resource(topicId);
       if (!c || c.metadata.uid !== initial.metadata.uid) throw new Error("Output Topic was replaced");
@@ -231,7 +224,7 @@ export class TopicStore {
       const accepted = this.outputStore.get(id);
       const createdBy = accepted ? accepted.spec.createdBy
         : executionId ? agentCall((owner ?? c).status, options.idempotencyKey) : undefined;
-      const association = { ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
+      const association = { ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
       try {
         await commitStatus(this.client, [
           { operation: "patchStatus", resource: c, patch: {} },
@@ -256,7 +249,7 @@ export class TopicStore {
   }
   scope(uid: string) {
     const storage = this.resources.storage;
-    const row = storage.db.prepare("SELECT key FROM resources WHERE uid = ? AND scope = ? AND kind = 'aide.dev/Topic' AND json_extract(data, '$.object.apiVersion') = 'aide.dev/v1alpha4'")
+    const row = storage.db.prepare(`SELECT key FROM resources WHERE uid = ? AND scope = ? AND kind = 'aide.dev/Topic' AND json_extract(data, '$.object.apiVersion') = '${TOPIC_TYPE.apiVersion}'`)
       .get(uid, this.resources.scope);
     const root = row ? storage.read(row.key as string)?.object as TopicResource | undefined : undefined;
     return root && root.metadata.namespace === "v1" ? topicSubtree(root, parent => this.resources.list<TopicSpec, TopicStatus>(TOPIC_TYPE,

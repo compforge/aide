@@ -29,7 +29,7 @@ export async function routeByRules(context: RoutingContext, original: RoutingInp
     if (!topic && input.spec.origin === "channel") {
       try {
         topic = await context.resources.create(TOPIC_TYPE, { name: digest(input.spec.topicId),
-          spec: { id: input.spec.topicId, name: initialTopicName(input.spec.topicName || input.spec.text), ...(address && address.metadata.uid === input.spec.source?.uid ? { address: address.spec.endpoint } : {}) },
+          spec: { id: input.spec.topicId, name: initialTopicName(input.spec.topicName || input.spec.text), ...(address && address.metadata.uid === input.spec.source?.uid ? { address: input.spec.source } : {}) },
           status: { receipts: [] } });
       } catch (error) {
         if (!String(error).includes("resource already exists")) throw error;

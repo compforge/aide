@@ -64,9 +64,9 @@ Personal 声明 OutputPrinter，由 Host 加载，`describe` 返回完整正文�
 
 `say` 成功返回 `{ outputId, accepted: true }`，只确认内容已持久化接纳，不表示已送达。Agent 记录已创建输出即可，不负责查询送达或投递重试；Output Reconciler 维护持久投递状态，界面与诊断按需查看。不因 pending 重建消息。Chief 用工具调用 ID 去重；同一调用的重试返回原 Output，主动沟通的不同调用可以为同一批材料创建多个 Output；明确 respondToInputId 的答复按原始消息去重，见 [Address](address.md)。Task / Routine 的 report 原子提交业务进展与 Input 办理回执，say 独立创建 Output；两个工具不是同一笔事务。投递失败不会重新运行 Harness 或外部动作，输出存在也不证明 report 已成功。
 
-Chief、Task、Routine 共用 say 和只读 list_contacts。Aide 始终是发送者；to={me:true} 联系被服务者，to={personId,uid} 联系其他 Person。Agent 根据已有委托判断主动联系权限；工具验证活跃执行、输入归属、身份与目的地，Channel 使用自己的机器人身份发送。知道某人的身份、能读取其消息，不构成主动联系授权。
+Chief、Task、Routine 共用 say 和 list_addresses / read_address。Aide 始终是发送者；to={me:true} 联系被服务者，target=AddressRef 选择已知场合。Agent 根据已有委托判断主动联系权限；工具验证活跃执行、输入归属、身份与目的地，Channel 使用自己的机器人身份发送。知道某人的身份、能读取其消息，不构成主动联系授权。
 
-list_contacts 提供分页联系人和不含凭证的 Channel 配置名。指定 Person 与 channelId 时，解析该 Channel app 作用域内唯一的身份并私聊；指定 target 则明确群聊或其他地址。显式联系 Me 可以省略 channelId，使用默认 Channel。缺失、过期或有歧义的身份报错，不改投其他人。to 与 receivers 互斥；respondToInputId 与 to / channelId 互斥，可与 target 一起指定答复及场合。
+list_addresses 可按 Person UID 查找相关场合，read_address 提供其认识、禁言和已知参与者。Agent 不传平台 endpoint 或 Channel 配置名。to 与 target / receivers 互斥；respondToInputId 与 to 互斥，可与 target 一起指定答复及场合。
 
 Lark Input 引用聊天 Address，replyToMessageId 单独记录原消息 ID。回复时使用 SDK message.reply 和 reply_in_thread，Output 持久保存该位置；不会仅因同属一个 Topic 就在群主流发出话题答复。
 
@@ -74,13 +74,13 @@ Lark Input 引用聊天 Address，replyToMessageId 单独记录原消息 ID。�
 
 Input 的 `source?: AddressRef` 表达事情发生、可以联络的位置；`sender` 引用 Person，`sessionId` 表达话题共性，三者独立。Lark Source 可以记录观察消息所在群的地址，这本身不要求回复。
 
-Topic 的 `spec.address?: Address` 只在创建时从首个 Channel Input 初始化。Source 创建的会话不自动拥有默认地址；后续追加或路由到系统 Default 均不覆盖地址，也不为无地址会话补值。
+Topic 的 `spec.address?: AddressRef` 只在创建时从首个 Channel Input 初始化。Source 创建的会话不自动拥有默认地址；后续追加或路由到系统 Default 均不覆盖地址，也不为无地址会话补值。
 
 `say` 的目标选择：
 
 1. `respondToInputId` 接受 Channel Input 和 Source 的原始群内 @Me 消息，默认回复 source，并将它加入 inputIds；没有显式 receivers 时以 Input.sender 为收件人。普通 Source 观察不自动成为代答入口。
 2. `target` 明确选择场合；可与 respondToInputId 同时提供，例如将群内问题的敏感答复改到合适的私有地址。
-3. 两者都未提供时，关联 Input（未指定时为当前调用关联的材料）中的 immediate Channel 输入具有同一个有效地址，则按规则回复该地址，包括原群。不能唯一确定时，由当前 Agent 判断相关 Address 并通过 target 指定；Agent 也无法确定、仍省略地址时，通过默认 Channel 联系 Me。Topic.address 不作为通知的隐式目标。Source 的 attention 即使为 immediate，也不使观察地址成为隐式回复目标。
+3. 两者都未提供时，关联 Input（未指定时为当前调用关联的材料）中的 immediate Channel 输入具有同一个有效地址，则按规则回复该地址，包括原群。不能唯一确定时，由当前 Agent 判断相关 Address 并通过 target 指定；Agent 也无法确定、仍省略地址时，通过默认 Address 联系 Me。Topic.address 不作为通知的隐式目标。Source 的 attention 即使为 immediate，也不使观察地址成为隐式回复目标。
 
 根据外部观察主动沟通时，Agent 仍须独立判断授权，并选择已知的通知目标；指定 target 只是明确目的地，不自动产生授权。助理身份和代理边界见 [Kernel](../kernel.md#助理定位与身份边界)。
 

@@ -1,4 +1,4 @@
-import "./style.css";
+import "./connections.css";
 import { byId as $, element } from "../shared/dom.ts";
 import { request, errorMessage } from "../shared/http.ts";
 import type { ChannelSettingsView, ChannelSettingsChange } from "../../channel/settings.ts";
@@ -16,15 +16,10 @@ function identities() {
 }
 function render() {
   if (!view) return;
-  const settings = view;
-  $("channel-status").textContent = view.restartRequired ? `配置已保存，重启 Aide 后生效。当前默认渠道：${view.activeDefaultChannel}。` : "配置与当前启动快照一致；实际连接和投递结果请查看运行日志。";
-  const select = $<HTMLSelectElement>("default-channel");
-  select.replaceChildren(new Option("Web · 本地页面", "web"));
-  for (const channel of view.channels.filter(c => c.enabled)) select.add(new Option(channel.label, channel.id));
-  select.value = view.defaultChannel;
+  $("channel-status").textContent = view.restartRequired ? "接入配置已保存，重启 Aide 后生效。" : "接入配置已保存。连接设置变更后需重启 Aide。";
   $("channel-list").replaceChildren(...view.channels.map(channel => {
     const card = element("article", undefined, "channel-card");
-    card.append(element("h3", channel.label + (channel.id === settings.defaultChannel ? " · 默认沟通渠道" : "")),
+    card.append(element("h3", channel.label),
       element("p", `${channel.id} · ${channel.enabled ? "启用" : "停用"}${channel.changed ? " · 待重启生效" : ""}`),
       element("p", `Aide：${channel.appId} · 密钥${channel.secretConfigured ? "已配置" : "缺失"}`),
       element("p", `Me：${channel.me?.openId ?? "未在渠道配置中指定；默认联系我时需要该应用下的 Me 身份"}`));
@@ -51,7 +46,7 @@ function open(id?: string) {
   if (!view) return;
   const channel = view.channels.find(c => c.id === id);
   $<HTMLFormElement>("channel-form").reset();
-  $("editor").hidden = false; $("editor-heading").textContent = channel ? "编辑渠道" : "新增渠道";
+  $("connection-editor").hidden = false; $("connection-editor-heading").textContent = channel ? "编辑渠道" : "新增渠道";
   $<HTMLInputElement>("channel-id").value = id ?? "";
   $<HTMLInputElement>("channel-id").disabled = Boolean(channel);
   $<HTMLInputElement>("channel-label").value = channel?.label ?? "";
@@ -59,25 +54,21 @@ function open(id?: string) {
   $<HTMLInputElement>("channel-me").value = channel?.me?.openId ?? "";
   $<HTMLInputElement>("channel-enabled").checked = channel?.enabled ?? true;
   $<HTMLInputElement>("channel-secret").required = !channel;
-  identities(); $("editor-heading").scrollIntoView({ block: "nearest" });
+  identities(); $("connection-editor-heading").scrollIntoView({ block: "nearest" });
 }
 async function run(action: () => Promise<void>) {
   if (busy) return;
   busy = true; $("channel-error").textContent = "";
-  const controls = [...document.querySelectorAll<HTMLButtonElement>("button")]; controls.forEach(b => b.disabled = true);
+  const controls = [...document.querySelectorAll<HTMLButtonElement>("#connections-dialog button")]; controls.forEach(b => b.disabled = true);
   try { await action(); } catch (error) { $("channel-error").textContent = errorMessage(error); }
-  finally { busy = false; controls.forEach(b => b.disabled = !view && b.id !== "refresh"); }
+  finally { busy = false; controls.forEach(b => b.disabled = !view && b.id !== "connection-refresh"); }
 }
 async function save(change: ChannelSettingsChange) { view = await request<ChannelSettingsView>("/channels/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(change) }); render(); }
-$("refresh").onclick = () => void run(load);
+$("connection-refresh").onclick = () => void run(load);
 $("add-channel").onclick = () => open();
-$("cancel-edit").onclick = () => { $("editor").hidden = true; };
+$("cancel-edit").onclick = () => { $("connection-editor").hidden = true; };
 $("channel-app").oninput = identities;
 $("known-me").onchange = () => { $<HTMLInputElement>("channel-me").value = $<HTMLSelectElement>("known-me").value; };
-$("save-default").onclick = () => void run(async () => {
-  if (!view) throw new Error("请先刷新加载渠道配置。");
-  await save({ operation: "default", revision: view.revision, id: value("default-channel") });
-});
 $("channel-form").onsubmit = event => {
   event.preventDefault();
   void run(async () => {
@@ -87,7 +78,8 @@ $("channel-form").onsubmit = event => {
       appId: value("channel-app"), ...(value("channel-secret") ? { appSecret: value("channel-secret") } : {}),
       ...(value("channel-me") ? { me: { openId: value("channel-me") } } : {}),
     } });
-    $<HTMLInputElement>("channel-secret").value = ""; $("editor").hidden = true;
+    $<HTMLInputElement>("channel-secret").value = ""; $("connection-editor").hidden = true;
   });
 };
-void run(load);
+$("manage-connections").onclick = () => { $<HTMLDialogElement>("connections-dialog").showModal(); void run(load); };
+$("close-connections").onclick = () => $<HTMLDialogElement>("connections-dialog").close();

@@ -10,6 +10,7 @@ import { HARNESSES } from "./host/harness/ids.ts";
 import { HarnessesConfigSchema } from "./host/harness/config.ts";
 import { ConnectorsConfigSchema } from "../connectors/config.ts";
 
+import { AddressRefSchema } from "../plugins/personal/address/model.ts";
 import { ChannelsConfigSchema } from "./channel/config.ts";
 import { ResourceStorageConfigSchema } from "./host/resource/storage.ts";
 
@@ -22,7 +23,7 @@ export type DefaultHarness = z.infer<typeof DefaultHarnessSchema>;
 /** @spec Explicit values win; defaults apply only to absent fields, never to empty lists or invalid values. */
 export const ConfigSchema = z.object({
   defaultHarness: DefaultHarnessSchema,
-  defaultChannel: z.string().min(1).default("web"),
+  defaultAddress: AddressRefSchema.optional(),
   channels: ChannelsConfigSchema,
   resources: ResourceStorageConfigSchema.optional(),
   reconcile: ReconcileConfigSchema.optional(),
@@ -30,10 +31,7 @@ export const ConfigSchema = z.object({
   connectors: ConnectorsConfigSchema.prefault({}),
   plugins: z.record(z.string(), record).default({}),
   harnesses: HarnessesConfigSchema.prefault({}),
-}).strict().superRefine((config, ctx) => {
-  if (config.defaultChannel !== "web" && !config.channels[config.defaultChannel]?.enabled)
-    ctx.addIssue({ code: "custom", path: ["defaultChannel"], message: "Default Channel must name an enabled instance" });
-});
+}).strict();
 export type AideConfig = z.infer<typeof ConfigSchema>;
 
 export function configPath(home = process.env.AIDE_HOME ?? join(homedir(), ".aide")): string {

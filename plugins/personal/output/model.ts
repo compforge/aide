@@ -2,7 +2,7 @@ import { KeyedSet } from "@compforge/ts-stdx/collections";
 import type { Address } from "@compforge/aide-plugin";
 import type { Resource, ResourceRef } from "@compforge/aide-plugin";
 
-export const OUTPUT_TYPE = { apiVersion: "aide.dev/v1alpha4", kind: "Output" } as const;
+export const OUTPUT_TYPE = { apiVersion: "aide.dev/v1alpha5", kind: "Output" } as const;
 
 /** @spec Output content, intended receivers and destination are immutable. Input associations are optional many-to-many provenance, never consumption receipts. */
 export interface OutputSpec {
@@ -25,7 +25,8 @@ export interface OutputSpec {
 export type OutputSubmission = Omit<OutputSpec, "target"> & { target: import("../address/service.ts").AddressTarget };
 export interface OutputStatus {
   disclosure?: { decision: "allowed" | "denied"; reason: string; checkedAt: string; fingerprint: string; policy?: import("./policy.ts").DisclosurePolicy };
-  delivery?: { replay?: "idempotent" | "once"; target: Address; text: string; receivers: import("../person/model.ts").PersonRefs };
+  delivery?: { replay?: "idempotent" | "once"; address: import("../address/model.ts").AddressRef; target: Address; text: string; receivers: import("../person/model.ts").PersonRefs };
+  waitingAddress?: import("../address/model.ts").AddressRef;
   phase: "pending" | "sending" | "delivered" | "failed" | "uncertain" | "cancelled";
   attempts: number;
   deliveryWait?: { reason: "frequency" | "receiver-busy" | "provider"; until: string };
@@ -45,11 +46,9 @@ export interface SayInput {
   readonly idempotencyKey?: string;
   /** Only a Channel Input establishes a direct reply path; observations require a separately chosen notification target. */
   readonly respondToInputId?: string;
-  readonly target?: import("../address/service.ts").AddressTarget;
+  readonly target?: import("../address/model.ts").AddressRef;
   /** Aide is always the speaker; this selects the recipient, never an impersonation identity. */
-  readonly to?: { me: true } | { personId: string; uid: string };
-  /** Configured Channel for private Person contact; target selects an explicit group/address. */
-  readonly channelId?: string;
+  readonly to?: { me: true };
   /** Person references; explicit [] suppresses inference from respondToInputId's sender. */
   readonly receivers?: Iterable<ResourceRef>;
 }

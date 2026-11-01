@@ -29,7 +29,7 @@ async function setup(t: TestContext) {
   const person = async (name: string, delivery?: PersonDelivery) => await client.create(PERSON_TYPE, { name,
     spec: { name, identities: [], ...(delivery ? { delivery } : {}) }, status: { updatedAt: new Date().toISOString(), updatedBy: "user" } }) as PersonResource;
   const output = (id: string, people: PersonResource[], target = webAddress("topic")) => {
-    store.create("topic", id, { text: id, topicId: "topic", topic: { apiVersion: "aide.dev/v1alpha4", kind: "Topic", namespace: "v1", name: "topic", uid: "topic" },
+    store.create("topic", id, { text: id, topicId: "topic", topic: { apiVersion: "aide.dev/v1alpha5", kind: "Topic", namespace: "v1", name: "topic", uid: "topic" },
       target, receivers: personRefs(people.map(personRef)) });
     approveFixtureOutput(store, id);
     return store.get(id)!;
@@ -185,7 +185,7 @@ test("real Runner persists waits and Person changes only relax Person deadlines"
   try {
     await manager.start();
     const create = async (name: string) => manager.resourceClient("personal").create(OUTPUT_TYPE, { name, spec: {
-      text: name, topicId: "topic", topic: { apiVersion: "aide.dev/v1alpha4", kind: "Topic", namespace: "v1", name: "topic", uid: "topic" },
+      text: name, topicId: "topic", topic: { apiVersion: "aide.dev/v1alpha5", kind: "Topic", namespace: "v1", name: "topic", uid: "topic" },
       target: new Addresses(f.home).ref(webAddress("topic")), receivers: personRefs([personRef(a)]),
     }, status: { phase: "pending", attempts: 0 } });
     await create("one"); await waitFor(() => sends.length === 1);

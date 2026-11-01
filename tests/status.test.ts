@@ -140,9 +140,8 @@ test("Large Topic observations propagate bottom-up without making Chief intake w
   assert.deepEqual(await summaryWatch().handler.update!({ oldObject: parent, newObject: parent } as never), []);
 });
 
-test("Domain v1alpha2 schemas reject the former Work state bag and do not read old-version identities", async t => {
+test("Domain schemas reject the former Work state bag and do not read old-version identities", async t => {
   const f = fixture(t), root = await f.topic("root");
-  assert.ok([TASK_TYPE, ROUTINE_TYPE, TOPIC_TYPE].every(type => type.apiVersion === TOPIC_TYPE.apiVersion));
   await assert.rejects(f.resources.create(TASK_TYPE, { name: "old-shape", spec: { title: "old", instruction: "old", initialInputId: "fact", revision: 1 },
     status: { topic: resourceRef(root), status: "done", nextAt: null, question: null } }));
   const oldType = { ...TOPIC_TYPE, apiVersion: "aide.dev/v1alpha1" };

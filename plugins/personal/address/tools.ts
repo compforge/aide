@@ -6,13 +6,13 @@ import { ADDRESS_TYPE, AddressRefSchema } from "./model.ts";
 import { writeSummary } from "../note/summary.ts";
 import { WriterResourceSchema } from "../note/model.ts";
 import { resourceRef } from "../input/state.ts";
-import type { TopicResource } from "../topic/model.ts";
+import type { Resource } from "@compforge/aide-plugin";
 import { disclosureFields, summaryDescription } from "../../../agents/context-tools.ts";
 import { PersonRefsSchema } from "../person/model.ts";
 import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
 const ref = Type.Object({ apiVersion: Type.Literal(ADDRESS_TYPE.apiVersion), kind: Type.Literal("Address"), namespace: Type.Literal("v1"), name: Type.String(), uid: Type.String() });
 const result = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v) }], details: {} });
-export function addressTools(addresses: Addresses, active: () => TopicResource): ToolDefinition[] {
+export function addressTools(addresses: Addresses, active: () => Resource<unknown, { execution?: { id: string } | null }>): ToolDefinition[] {
   return [{ name: "list_addresses", label: "Find addresses", description: "Find known communication places and participants. Filter by Person UID. muted means Aide cannot speak there. Original place is preferred only when suitable for the content. Known participants are partial evidence, not a complete membership roster. Follow continue for more places.",
     parameters: Type.Object({ person: Type.Optional(Type.String()), continue: Type.Optional(Type.String()) }),
     async execute(_id, args) { active(); const query = z.object({ continue: z.string().optional(), person: z.string().optional() }).parse(args); return result(addresses.page(query.continue, query.person)); } },

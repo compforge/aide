@@ -270,7 +270,8 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     const location = this.locate({ chatId: message.chatId, threadId: entry.kind === "direct" ? undefined : message.threadId,
       chatName: message.chatName, text: root?.content || message.content });
     const spec: Delivery["spec"] = {
-      source: larkAddress(this.watch.accountId, message.chatId),
+      source: larkAddress(this.watch.accountId, message.chatId), replyToMessageId: message.id,
+      addressObservation: { name: message.chatName, type: entry.kind === "direct" ? "direct" : "group", people: [...senders.values(), ...[...recipients.values()].flat()] },
       ...(relation ? { relation } : {}),
       ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
       receivers: personRefs(entry.sequence ? [...new Map((context?.messages ?? []).flatMap(m => recipients.get(m.id) ?? []).map(ref => [ref.uid, ref])).values()]

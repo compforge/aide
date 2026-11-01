@@ -1,8 +1,10 @@
+import { Addresses } from "../address/service.ts";
+import { addressTools } from "../address/tools.ts";
 import { summaryText, summaryReference } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
 import { notes } from "../note/query.ts";
 import { workContextTools } from "../work-context.ts";
-import { sayTool, contactsTool, type ContactChannel } from "../output/tool.ts";
+import { sayTool } from "../output/tool.ts";
 import { identityBackground } from "../../../agents/personal.ts";
 import type { Persons } from "../person/service.ts";
 import { contextPage, relatedWork } from "../background.ts";
@@ -23,7 +25,7 @@ import { say } from "../output/action.ts";
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<T> => definition;
 /** Host binds scope; the model never supplies Routine or Topic identity. */
-export function routineSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, log: Logger, persons?: Persons, channels: readonly ContactChannel[] = []): PiSessionFactory {
+export function routineSession(scope: ExecutionScope, config: PiConfig, store: Store, plugins: Manager, log: Logger, persons?: Persons): PiSessionFactory {
   const ref = scope.resourceRef;
   if (scope.pluginInstanceId !== "personal" || ref?.kind !== ROUTINE_TYPE.kind || ref.apiVersion !== ROUTINE_TYPE.apiVersion || !ref.uid) throw new Error("Routine requires its owning resource scope");
   return async options => {
@@ -35,8 +37,8 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
     };
     const verbs = () => { const routine = current(); return plugins.executionVerbs(routine.status.execution!.id, { topicId: store.topicId(routine.status.topic), routineId: routine.metadata.name }); };
     const tools: ToolDefinition[] = [
+      ...addressTools(new Addresses(store.resources.storage.home), current),
       ...workContextTools("routine", plugins.resourceClient("personal"), current, log),
-      ...(persons ? [contactsTool(persons, channels, current)] : []),
       tool({ name: "list_work", label: "List related work", description: "Page through this Topic's Task and Routine summaries; does not delegate or resume work.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),
         async execute(_id, { offset = 0 }) { return result(contextPage(relatedWork(store, store.topicId(current().status.topic)), offset)); } }),

@@ -1,3 +1,4 @@
+import { addressFor } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -39,10 +40,10 @@ async function setup(t: TestContext) {
   const topic = await topics.ensure("test");
   const store = topics.outputStore;
   const checker = new OutputDisclosure(store, { marks: { identities: [LOCAL_ME] },
-    audience: async endpoint => {
-      const address = addresses.observe(endpoint, endpoint.kind === "channel" && (endpoint as { channelId?: string }).channelId === "web" ? [personRef(me)] : []);
+    audience: async ref => {
+      const address = addresses.read(ref);
       return { people: [...address.status.people].map(ref => people.find(p => p.metadata.uid === ref.uid)!), private: address.spec.type === "web" || address.spec.type === "direct", muted: address.spec.muted };
-    }, contactMe: async () => ({ target: webAddress("test"), receivers: [personRef(me)] }), check: async () => ({ allowed: true, reason: "Supported by cited Notes" }) }, log);
+    }, contactMe: async () => ({ address: addressRef(addresses.observe(webAddress("test"), [personRef(me)])), target: webAddress("test"), receivers: [personRef(me)] }), check: async () => ({ allowed: true, reason: "Supported by cited Notes" }) }, log);
   store.check = id => checker.reconcile(id);
   return { home, topics, addresses, me, a, b, topic, store, checker };
 }
@@ -54,7 +55,7 @@ test("Address discovery unifies threads and accumulates known people without ove
   assert.equal(original.spec.muted, true);
   f.addresses.setMuted(first, false, true);
   await f.addresses.summarize(first, "发布协调场合", contentVersion(original));
-  inputs.submit("test", "two", { origin: "channel", originId: "lark", source: larkThreadAddress("app", "group", "message"), sender: personRef(f.b), text: "two" });
+  inputs.submit("test", "two", { origin: "channel", originId: "lark", source: group, replyToMessageId: "message", sender: personRef(f.b), text: "two" });
   assert.deepEqual(inputs.get("two")!.spec.source, first);
   const current = f.addresses.read(first);
   assert.equal(current.spec.muted, false);
@@ -102,7 +103,7 @@ test("Source and Channel mentions share one reply; explicit target remains Chief
   await seedInput(f.topics, "source", { origin: "source", originId: "personal.lark", source: group, text: "问题", observation });
   await seedInput(f.topics, "channel", { origin: "channel", originId: "lark", source: group, text: "问题", observation: { provider: "lark", accountId: "app", chatId: "group", messageId: "external-message" } });
   assert.equal(replyIdentity(f.topics.inputStore.get("source")!)!.key, replyIdentity(f.topics.inputStore.get("channel")!)!.key);
-  const [one, two] = await Promise.all([f.topics.say("test", "source", "答复", undefined, { respondToInputId: "source", target: webAddress("test") }), f.topics.say("test", "channel", "答复", undefined, { respondToInputId: "channel", target: webAddress("test") })]);
+  const [one, two] = await Promise.all([f.topics.say("test", "source", "答复", undefined, { respondToInputId: "source", target: addressFor(f.home, webAddress("test")) }), f.topics.say("test", "channel", "答复", undefined, { respondToInputId: "channel", target: addressFor(f.home, webAddress("test")) })]);
   assert.equal(one.outputId, two.outputId);
   assert.deepEqual(f.store.destination(f.store.get(one.outputId)!), webAddress("test"));
   assert.equal(f.store.list().length, 1);
@@ -130,7 +131,7 @@ test("Address Web API edits muted and summary independently and exposes known pa
   const me = (await aide.persons.list()).find(p => p.isMe)!;
   const address = aide.addresses.observe(group, [personRef(me)], { name: "发布协调" });
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  const page = await (await fetch(base + "/addresses/list")).json(); assert.equal(page.items[0].name, "发布协调");
+  const page = await (await fetch(base + "/addresses/list")).json(); assert.ok(page.items.some((item: { name: string }) => item.name === "发布协调"));
   const post = (path: string, value: unknown) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
   const result = await post("/addresses/muted", { address: addressRef(address), muted: false, expected: true }); assert.equal(result.status, 200);
   const view = await result.json(); assert.equal(view.spec.muted, false); assert.equal(view.participants[0].name, "我");
@@ -160,4 +161,51 @@ test("Address Web API edits muted and summary independently and exposes known pa
   query.set("continue", "invalid");
   assert.equal((await fetch(base + "/addresses/notes?" + query)).status, 400);
   const html = await (await fetch(base + "/addresses")).text(); assert.match(html, /参与者/); assert.match(html, /禁言/);
+});
+
+/** @case Permission checks are queries; missing places cannot be discovered or granted authority by a send attempt. */
+test("Address permission reads preserve resource versions and never discover missing places", async t => {
+  const f = await setup(t), endpoint = larkAddress("app", "missing");
+  const before = f.addresses.resources.list(ADDRESS_TYPE);
+  assert.equal(f.addresses.canSpeak(endpoint), false);
+  assert.equal(f.addresses.find(endpoint), undefined);
+  assert.deepEqual(f.addresses.resources.list(ADDRESS_TYPE), before);
+  const ref = addressRef(f.addresses.observe(group, [personRef(f.a)]));
+  const original = f.addresses.read(ref);
+  f.addresses.audience(ref); f.addresses.ref(ref); f.addresses.endpoint(ref); f.addresses.canSpeak(group);
+  assert.deepEqual(f.addresses.read(ref), original);
+  assert.throws(() => f.addresses.read({ ...ref, uid: "replaced" }), /no longer exists/);
+});
+
+test("Denied Output indexes the waiting and actual Me Address until delivery completes", async t => {
+  const f = await setup(t);
+  const fallback = addressRef(f.addresses.observe(webAddress("test"), [personRef(f.me)]));
+  f.addresses.setMuted(fallback, true, false);
+  const origin = f.addresses.ref(group);
+  f.store.create("test", "blocked", outputSpec(f.topic, { topicId: "test", text: "private", target: origin }));
+  await assert.rejects(f.checker.reconcile("blocked"), /not a verified private/);
+  assert.deepEqual(f.store.get("blocked")!.status.waitingAddress, fallback);
+  const { OUTPUT_TYPE } = await import("../plugins/personal/output/model.ts");
+  const pending = () => f.store.resources.page(OUTPUT_TYPE, { limit: 10, matchIndex: { name: "pendingAddress", value: fallback.uid } }).items;
+  assert.equal(pending().length, 1);
+  f.addresses.setMuted(fallback, false, true);
+  await f.checker.reconcile("blocked");
+  assert.equal(f.store.get("blocked")!.status.waitingAddress, undefined);
+  assert.deepEqual(f.store.get("blocked")!.status.delivery!.address, fallback);
+  assert.equal(pending().length, 1);
+  f.store.delivered("blocked"); assert.equal(pending().length, 0);
+});
+
+test("Topic replies retain message coordinates separately from the selected Address", async t => {
+  const f = await setup(t);
+  await seedInput(f.topics, "thread", { topicId: "test", origin: "channel", originId: "lark", source: group, replyToMessageId: "om_original", text: "question" });
+  const ref = f.topics.inputStore.get("thread")!.spec.source!;
+  const implicit = await f.topics.say("test", undefined, "implicit", undefined, { inputIds: ["thread"] });
+  const explicit = await f.topics.say("test", undefined, "explicit", undefined, { respondToInputId: "thread", target: ref });
+  for (const receipt of [implicit, explicit]) {
+    const output = f.store.get(receipt.outputId)!;
+    assert.deepEqual(output.spec.target, ref);
+    assert.equal(output.spec.replyToMessageId, "om_original");
+    assert.equal(larkEndpoint(f.store.destination(output))!.replyToMessageId, "om_original");
+  }
 });

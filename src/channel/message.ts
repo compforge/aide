@@ -9,6 +9,8 @@ export const IncomingSchema = z.object({
   topicId: z.string().min(1).optional(),
   topicName: z.string().trim().min(1).max(80).optional(),
   text: z.string().min(1).max(32_000),
+  replyToMessageId: z.string().min(1).optional(),
+  addressObservation: z.object({ name: z.string().optional(), type: z.enum(["direct", "group", "web", "external"]).optional() }).optional(),
   observation: z.record(z.string(), z.unknown()).optional(),
 });
 export type Incoming = z.infer<typeof IncomingSchema>;

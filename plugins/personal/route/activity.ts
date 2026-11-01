@@ -1,7 +1,7 @@
 import { INPUT_TYPE } from "../input/model.ts";
 import { notes } from "../note/query.ts";
 import type { Store } from "../store.ts";
-import type { TopicResource } from "../topic/model.ts";
+import { TOPIC_TYPE, type TopicResource } from "../topic/model.ts";
 
 /** @spec Each Route candidate includes bounded recent activity even when its summary is absent or stale.
  * @why Indexed tree membership and SQL LIMIT keep historical Input bodies out of automatic context.
@@ -12,7 +12,7 @@ export function recentActivity(store: Store, topic: TopicResource) {
   const field = (path: string) => `json_extract(r.data, '$.object.${path}')`;
   const rows = store.resources.storage.db.prepare(`WITH RECURSIVE tree(uid) AS (
     SELECT ? UNION SELECT r.uid FROM tree t JOIN resource_indexes i ON i.name='parent' AND i.value=t.uid
-      JOIN resources r ON r.key=i.source WHERE r.scope='personal' AND ${field('apiVersion')}='aide.dev/v1alpha4' AND r.kind='aide.dev/Topic'
+      JOIN resources r ON r.key=i.source WHERE r.scope='personal' AND ${field('apiVersion')}='${TOPIC_TYPE.apiVersion}' AND r.kind='aide.dev/Topic'
       AND ${field('metadata.deletionTimestamp')} IS NULL
   ) SELECT r.uid, r.kind, coalesce(${field('status.lastReport.at')}, r.created) AS at,
     substr(CASE WHEN r.kind='aide.dev/Input' THEN ${field('spec.text')}

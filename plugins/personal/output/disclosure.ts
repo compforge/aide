@@ -1,5 +1,6 @@
+import type { AddressSpec, AddressStatus, AddressRef } from "../address/model.ts";
 import { KeyedSet } from "@compforge/ts-stdx/collections";
-import { personRef, personRefs, PersonRefsSchema } from "../person/model.ts";
+import { personRef, personRefs } from "../person/model.ts";
 import { disclosurePolicy, type PolicyNote } from "./policy.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -17,8 +18,8 @@ export interface DisclosureEvidence { text: string; materials: Array<{ id: strin
 export type SemanticCheck = (evidence: DisclosureEvidence) => Promise<{ allowed: boolean; reason: string }>;
 export interface DisclosurePorts {
   marks: Me;
-  audience(target: Address): Promise<OutputAudience>;
-  contactMe(topicId: string): Promise<{ target: Address; receivers: ResourceRef[] }>;
+  audience(target: AddressRef): Promise<OutputAudience>;
+  contactMe(topicId: string): Promise<{ address: AddressRef; target: Address; receivers: ResourceRef[] }>;
   check?: SemanticCheck;
 }
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -44,13 +45,17 @@ export class OutputDisclosure {
     this.running.set(id, run);
     return run;
   }
-  private async audience(target: Address): Promise<OutputAudience> {
+  private async audience(target: AddressRef): Promise<OutputAudience> {
     const audience = await this.ports.audience(target);
     // Canonicalize before collecting dependencies as well as before choosing actual receivers.
     return { ...audience, people: [...new KeyedSet(person => person.metadata.uid, audience.people)].sort((a, b) => a.metadata.uid < b.metadata.uid ? -1 : a.metadata.uid > b.metadata.uid ? 1 : 0) };
   }
+  private addressPolicy(ref: AddressRef) {
+    const address = this.store.resources.find<AddressSpec, AddressStatus>(ref, ref.name, ref.namespace);
+    return address && hash([address.metadata.uid, address.metadata.deletionTimestamp, address.spec.endpoint, address.spec.type, address.spec.muted, [...address.status.people].map(p => p.uid).sort()]);
+  }
   private snapshot(output: Output, audience: OutputAudience) {
-    const dependencies: unknown[] = [];
+    const dependencies: unknown[] = [this.addressPolicy(output.spec.target)];
     const materials: DisclosureEvidence["materials"] = [];
     let refusal = audience.unavailable ?? (audience.muted ? "Aide is muted at this Address" : audience.people.length ? "" : "No known destination participants");
     const get = <S, T>(ref: ResourceRef & { uid?: string }): Resource<S, T> | undefined => {
@@ -107,12 +112,12 @@ export class OutputDisclosure {
     if (!output || output.metadata.deletionTimestamp || ["delivered", "failed", "uncertain", "cancelled"].includes(output.status.phase)) return;
     // A refused Output has only a Me delivery left. Permission changes never silently resurrect its original intent.
     if (output.status.disclosure?.decision === "denied" && output.status.delivery) {
-      const audience = await this.audience(output.status.delivery.target);
+      const audience = await this.audience(output.status.delivery.address);
       if (audience.unavailable || audience.muted || !audience.private || audience.people.length !== 1 || !isMe(audience.people[0]!.spec, this.ports.marks))
         throw new Error("Saved fallback destination is no longer a verified private Me channel");
       return;
     }
-    const audience = await this.audience(this.store.destination(output));
+    const audience = await this.audience(output.spec.target);
     const snapshot = this.snapshot(output, audience);
     if (output.status.phase === "sending") {
       if (snapshot.fingerprint !== output.status.disclosure?.fingerprint) this.store.uncertain(id, "Disclosure changed after an interrupted send; verify external receipts");
@@ -136,21 +141,25 @@ export class OutputDisclosure {
     }
     const decision = reason ? "denied" : "allowed";
     let fallbackPeople: PersonResource[] = [];
-    let delivery: NonNullable<Output["status"]["delivery"]> = { ...(output.status.delivery?.replay ? { replay: output.status.delivery.replay } : {}), target: this.store.destination(output), text: output.spec.text, receivers: personRefs(audience.people.map(personRef)) };
+    let fallbackPolicy: string | undefined;
+    let delivery: NonNullable<Output["status"]["delivery"]> = { ...(output.status.delivery?.replay ? { replay: output.status.delivery.replay } : {}), address: output.spec.target, target: this.store.destination(output), text: output.spec.text, receivers: personRefs(audience.people.map(personRef)) };
     if (reason) {
       this.store.update(id, status => ({ ...status, delivery: undefined, disclosure: { decision: "denied", reason, checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint, ...(snapshot.policy ? { policy: snapshot.policy } : {}) } }));
       const me = await this.ports.contactMe(output.spec.topicId);
-      const fallback = await this.audience(me.target);
-      if (fallback.unavailable || fallback.muted || !fallback.private || fallback.people.length !== 1 || !isMe(fallback.people[0]!.spec, this.ports.marks)) throw new Error("Default Channel is not a verified private Me destination");
+      this.store.update(id, status => ({ ...status, waitingAddress: me.address }));
+      const fallback = await this.audience(me.address);
+      if (fallback.unavailable || fallback.muted || !fallback.private || fallback.people.length !== 1 || !isMe(fallback.people[0]!.spec, this.ports.marks)) throw new Error("Default Address is not a verified private Me destination");
       fallbackPeople = fallback.people;
-      delivery = { ...me, receivers: PersonRefsSchema().parse(me.receivers), text: `原计划发送至：${JSON.stringify(output.spec.target)}\n接收者：${JSON.stringify(output.spec.receivers ?? [])}\n未发送原因：${reason}\n\n原文：\n${output.spec.text}` };
+      fallbackPolicy = this.addressPolicy(me.address);
+      delivery = { ...me, receivers: personRefs(fallback.people.map(personRef)), text: `原计划发送至：${JSON.stringify(output.spec.target)}\n接收者：${JSON.stringify(output.spec.receivers ?? [])}\n未发送原因：${reason}\n\n原文：\n${output.spec.text}` };
     }
     // Awaited model/provider calls cannot authorize a changed resource or audience.
-    const currentAudience = await this.audience(this.store.destination(output));
+    const currentAudience = await this.audience(output.spec.target);
     this.store.storage.transaction(() => {
       const latest = this.store.get(id);
       if (!latest || latest.status.phase !== "pending") return;
       if (this.snapshot(latest, currentAudience).fingerprint !== snapshot.fingerprint) throw new Error("Disclosure dependencies changed during review; retry with current evidence");
+      if (decision === "denied" && this.addressPolicy(delivery.address) !== fallbackPolicy) throw new Error("Fallback Address changed before delivery commit");
       if (decision === "denied" && fallbackPeople.some(person => {
         const latestPerson = this.store.resources.find<Person, PersonStatus>(person, person.metadata.name, person.metadata.namespace);
         return !latestPerson || latestPerson.metadata.uid !== person.metadata.uid || latestPerson.metadata.deletionTimestamp || !isMe(latestPerson.spec, this.ports.marks);
@@ -159,7 +168,7 @@ export class OutputDisclosure {
         this.store.uncertain(id, "Actual recipients changed after a send attempt; verify external receipts"); return;
       }
       this.store.update(id, status => ({ ...status, disclosure: { decision, reason: reason || "Destination is permitted", checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint, ...(snapshot.policy ? { policy: snapshot.policy } : {}) }, delivery,
-        lastError: undefined }));
+        waitingAddress: undefined, lastError: undefined }));
     });
     this.log.info({ outputId: id, decision, actualTarget: delivery.target }, "Output disclosure resolved");
   }

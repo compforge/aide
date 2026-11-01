@@ -9,6 +9,7 @@ import type { Incoming } from "./message.ts";
 export interface ChannelService {
   readonly runtime: Pick<ApplicationRuntime, "executions">;
   readonly topics: TopicStore;
+  canSpeak(target: import("@compforge/aide-plugin").Address): boolean;
   subscribe(listener: () => void): () => void;
   receive(input: Incoming): Promise<InputReceipt>;
   inputDefinition(origin: Pick<InputSpec, "origin" | "originId">): { id: string; label: string; icon: string };
