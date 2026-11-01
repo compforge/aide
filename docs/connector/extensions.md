@@ -73,7 +73,7 @@ Source 可以遍历同 Kind 的所有Connector；各Connector的观察范围、�
 
 ## 容量、期限与关闭
 
-同一Connector的调用共享活动与等待容量，默认最多四个活动调用、六十四个等待调用，可在Connector 配置中覆盖。期限包含等待时间，排队调用过期后不再执行。容量只约束方法调用，方法内部分页或并发请求仍受其提供方客户端约束；统一请求速率、突发额度等能力见[长期访问约束](README.md#外部访问约束长期方向)。
+同一Connector的调用共享活动与等待容量，默认最多四个活动调用、六十四个等待调用，可在Connector 配置中覆盖。期限包含等待时间，排队调用过期后不再执行。容量只约束方法调用，方法内部分页或并发请求仍受其提供方客户端约束；提供方请求速率、突发额度等策略由接入侧负责，见[外部访问约束](README.md#外部访问约束)。
 
 Host 向 handler 传入 call.signal，Connector关闭或期限到达时取消。实现应遵守信号并设置自身 I/O 超时；无法强制终止不合作的受信任 JavaScript。调用超时与执行失败保留不同的 verb outcome。中断不能证明外部写入未发生，不自动重放调用。
 
@@ -98,3 +98,28 @@ Personal 通过 `identity()` 返回的 provider/scope 建立身份，绝不解�
 Forge 提供方使用公共 `@compforge/aide-connector/forge` 的 `forgeImplementation(reader)`，
 由它统一转接 repocli ForgeReader、限流 issue、可选 withSignal 协作取消与 close。
 内置和外部提供方采用同一路径；SDK 不识别私有平台协议。
+
+
+### Host 投递错误
+
+受信任的 Connector `hostHandlers` 和 Channel 可抛出 `@compforge/aide-connector` 的 `DeliveryError`。
+它只用于 Host 进程内投递，不是通用 verb / IPC 错误协议。外部包加载另一份 SDK 时，Host 按契约形状识别。
+
+```ts
+throw new DeliveryError({
+  kind: "retryable",
+  code: "http:429",
+  message: "Provider rejected comment because of rate limiting",
+  retryAfterMs: 30_000,
+});
+```
+
+`kind` 为 `retryable` 时，适配器确认本次没有产生副作用，因此非幂等写入也可稍后重试；
+`permanent` 表示同一请求继续尝试无法解决的明确拒绝，Output 记录 failed；
+`unknown` 表示可能已有副作用，仅有幂等投递契约时自动重试，其余进入 uncertain 并核对回执。
+普通异常、连接超时和缺少成功回执都不能证明写入未发生，不能仅凭错误文本中的 429 判定可重试。
+
+`message`（最多 4000 字符）和可选 `code`（最多 200 字符）必须是适配器安全提取的诊断，禁止原样透传 SDK 自由文本、请求体、凭证或响应体。
+可选 `retryAfterMs` 是 0..2147483647 的整数毫秒；应表达最早可重试时间，缺省使用控制器退避。
+平台字段、单位、频控范围和默认策略由适配器解释，Output 不识别平台错误码或配置 QPS。
+现有外部 Connector 必须显式采用此契约才能区分拒绝与未知结果；Host 不猜测 CLI 的非零退出原因。

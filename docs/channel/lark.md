@@ -72,3 +72,15 @@ Chief 通过 say 提问，用户在原聊天回复形成新 Input，群内回复
 ## 话题内回复
 
 群话题的 Channel Input 使用包含 appId、chatId 与原消息 ID 的地址；say 回复该 Input 时，Output 保留这个位置。投递使用原生 SDK 的 message.reply 与 reply_in_thread，按 Output 分段生成稳定 UUID 并保存回执。普通群消息、私聊和按 open_id 主动联系仍走对应的发送路径。Topic key 决定信息归属，回复地址决定实际投递位置，两者分别保存。
+
+
+## 出站失败与频控
+
+业务 Output 的发送由 Lark 适配器将 HTTP 429、接口频控码 99991400 和群频控码 230020 转为可重试拒绝。
+优先遵守响应头 `x-ogw-ratelimit-reset`（秒）及 `Retry-After`（秒或 HTTP 日期），同时有效时取更晚的时间；
+缺失或非法提示交给 Output 控制器退避，不在 Channel 内等待或重发整条消息。
+已知权限拒绝转为永久失败，网络超时、服务端错误及缺少 message_id 保持结果未知。
+错误码依据[消息常见问题](https://open.larksuite.com/document/server-docs/im-v1/faq)、[通用错误码](https://open.feishu.cn/document/server-docs/api-call-guide/generic-error-code)和[频控策略](https://open.feishu.cn/document/server-docs/api-call-guide/frequency-control)。
+
+Output 重试继续使用稳定的分片 UUID；已持久确认的分片不重发，后续分片失败不会提前确认整个 Output。
+适配器报告安全诊断，不透传 SDK 自由文本、响应体或凭证。完整生命周期见 [Output 投递与恢复](../personal/output.md#投递与恢复)。

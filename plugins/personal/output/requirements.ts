@@ -1,3 +1,4 @@
+import { DeliveryError } from "@compforge/aide-connector";
 import type { OutputTransportResolver } from "./delivery.ts";
 import { createHash } from "node:crypto";
 import type { ConnectorClient, RequirementAddress, RequirementComment, RequirementIdentity } from "@compforge/aide-plugin";
@@ -42,7 +43,7 @@ export function requirementOutputs(requirements: ConnectorClient["requirements"]
 }
 
 /**
- * @spec A non-idempotent comment is attempted once. Interrupted sending becomes uncertain, never an automatic resend.
+ * @spec Non-idempotent comments retry only explicit pre-effect rejection. Interrupted sending becomes uncertain.
  * @spec Preflight failures can retry; a saved Output and provider scope fix the destination before any write.
  * @spec Correlation receipts survive Output reclamation within the Host's configured dedup window.
  * @link docs/connector/requirements.md
@@ -51,7 +52,7 @@ export function requirementTransport(store: OutputStore, connectors: Writer): Ou
   return async target => {
     if (!isRequirementAddress(target)) return;
     const account = await connectors.requirements.identity(target.source);
-    if (account.scope !== target.scope) throw new Error("Connector project changed; cannot prepare the saved destination");
+    if (account.scope !== target.scope) throw new DeliveryError({ kind: "permanent", code: "project_changed", message: "Connector project changed; cannot prepare the saved destination" });
     return { replay: "once", async send(message) {
       store.storage.addReceipt(deliveryKey(message.id), JSON.stringify({ target, hash: hash(message.text) }));
       const external = await connectors.addRequirementComment(target, { text: message.text, deliveryId: message.id });

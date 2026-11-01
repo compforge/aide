@@ -1,3 +1,4 @@
+import { DeliveryError, deliveryFailure } from "@compforge/aide-connector";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, cpSync, readFileSync } from "node:fs";
@@ -236,12 +237,13 @@ test("all built-in kinds are assembled under their declared names", async () => 
 
 test("embedded external requirement keeps Host delivery out of discovery and public calls", async () => {
   let sent = 0;
+  let rejection: DeliveryError | undefined;
   const connectors = await Connectors.load({ work: { kind: "requirement", version: "v1" } }, { registration: {
     id: "external.requirements", version: "1", connectors: { work: {
       kind: "requirement", version: "v1", config: { parse: value => value },
       create: () => ({ metadata: { provider: "tracker", me: { userKey: "human" } }, handlers: {
         identity: async () => ({ provider: "tracker", scope: "project" }), list: async () => ({ items: [] }),
-      }, hostHandlers: { addComment: async () => { sent++; return { id: "receipt", scope: "project" }; } } }),
+      }, hostHandlers: { addComment: async () => { sent++; if (rejection) throw rejection; return { id: "receipt", scope: "project" }; } } }),
     } },
   } });
   try {
@@ -251,6 +253,11 @@ test("embedded external requirement keeps Host delivery out of discovery and pub
     assert.equal(sent, 0);
     assert.deepEqual(await connectors.addRequirementComment({ source: "work", category: "issue", id: "1" }, { text: "ok", deliveryId: "out:1" }), { id: "receipt", scope: "project" });
     assert.equal(sent, 1);
+    rejection = new DeliveryError({ kind: "retryable", code: "429", message: "Provider rejected comment", retryAfterMs: 7500 });
+    await assert.rejects(connectors.addRequirementComment({ source: "work", category: "issue", id: "1" }, { text: "ok", deliveryId: "out:2" }), error => {
+      assert.deepEqual(deliveryFailure(error), rejection!.failure); return true;
+    });
+    assert.equal(sent, 2);
   } finally { await connectors.close(); }
 });
 

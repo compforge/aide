@@ -1,3 +1,4 @@
+import { DeliveryError, deliveryFailure } from "@compforge/aide-connector";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import type { Logger } from "pino";
@@ -43,6 +44,43 @@ export function larkSendFailure(error: unknown) {
   const httpStatus = value?.response?.status;
   const detail = { ...(code !== undefined ? { apiCode: code } : {}), ...(httpStatus ? { httpStatus } : {}), ...(transportCode ? { transportCode } : {}) };
   return { ...detail, error: `Lark message.create failed${Object.keys(detail).length ? ` (${JSON.stringify(detail)})` : "; no diagnostic code available"}` };
+}
+
+const RetryHeadersSchema = z.object({ response: z.object({ headers: z.record(z.string(), z.unknown()) }) });
+function retryAfterMs(error: unknown): number | undefined {
+  const parsed = RetryHeadersSchema.safeParse(error);
+  if (!parsed.success) return;
+  const headers = Object.fromEntries(Object.entries(parsed.data.response.headers).map(([key, value]) => [key.toLowerCase(), value]));
+  const delays: number[] = [];
+  for (const key of ["x-ogw-ratelimit-reset", "retry-after"]) {
+    const value = headers[key];
+    if (typeof value !== "string" && typeof value !== "number") continue;
+    const text = String(value).trim();
+    const delay = /^\d+(?:\.\d+)?$/.test(text) ? Math.ceil(Number(text) * 1000)
+      : key === "retry-after" && /^[A-Za-z]{3},/.test(text) ? Math.max(0, Date.parse(text) - Date.now()) : NaN;
+    if (Number.isSafeInteger(delay) && delay >= 0 && delay <= 2147483647) delays.push(delay);
+  }
+  return delays.length ? Math.max(...delays) : undefined;
+}
+
+/** @spec Only documented rejection is retryable or terminal; timeouts, server errors and missing receipts remain unknown.
+ * @link https://open.larksuite.com/document/server-docs/im-v1/faq
+ * @link https://open.feishu.cn/document/server-docs/api-call-guide/generic-error-code
+ * @link https://open.feishu.cn/document/server-docs/api-call-guide/frequency-control
+ * @case tests/lark.test.ts
+ */
+export function larkDeliveryError(error: unknown): DeliveryError {
+  const known = deliveryFailure(error);
+  if (known) return new DeliveryError(known);
+  const failure = larkSendFailure(error);
+  const rateLimited = failure.httpStatus === 429 || failure.apiCode === 99991400 || failure.apiCode === 230020;
+  const rejected = [99991672, 99991676, 99991679, 99991401].includes(failure.apiCode ?? -1) ||
+    (failure.apiCode === undefined && [400, 401, 403, 404, 405, 413, 422].includes(failure.httpStatus ?? -1));
+  const delay = rateLimited ? retryAfterMs(error) : undefined;
+  return new DeliveryError({ kind: rateLimited ? "retryable" : rejected ? "permanent" : "unknown", message: failure.error,
+    ...(failure.apiCode !== undefined ? { code: `lark:${failure.apiCode}` }
+      : failure.httpStatus ? { code: `http:${failure.httpStatus}` } : failure.transportCode ? { code: failure.transportCode } : {}),
+    ...(delay !== undefined ? { retryAfterMs: delay } : {}) });
 }
 
 /** @why SDK errors may contain credentials in HTTP config; only log known lifecycle signals. */

@@ -1,3 +1,4 @@
+import { DeliveryError, deliveryFailure } from "@compforge/aide-connector";
 import { OutputDelivery } from "../plugins/personal/output/delivery.ts";
 import { approveFixtureOutput } from "./output-fixture.ts";
 import assert from "node:assert/strict";
@@ -63,16 +64,87 @@ test("Interrupted sending and connector reconfiguration never produce another co
   const writer = { requirements: { ...f.requirements, async identity() { return { provider: "tracker", scope: "elsewhere" }; } }, async addRequirementComment() { sends++; return { id: "bad", scope: "elsewhere" }; } };
   const worker = delivery(f.store, writer);
   await worker.reconcile("interrupted");
-  await assert.rejects(worker.reconcile("reconfigured"), /project changed/);
+  await worker.reconcile("reconfigured");
   assert.equal(sends, 0);
   assert.equal(f.store.get("interrupted")!.status.phase, "uncertain");
-  assert.equal(f.store.get("reconfigured")!.status.phase, "pending");
+  assert.equal(f.store.get("reconfigured")!.status.phase, "failed");
+  assert.match(f.store.get("reconfigured")!.status.lastError!, /project changed/);
 });
 
 test("Preflight failure remains retryable without a send attempt", async (t) => {
   const f = fixture(t); f.store.create("s", "offline", f.spec);
   const writer = { requirements: { ...f.requirements, async identity(): Promise<never> { throw new Error("offline"); } }, async addRequirementComment(): Promise<never> { throw new Error("must not send"); } };
-  await assert.rejects(delivery(f.store, writer).reconcile("offline"), /offline/);
+  await assert.rejects(delivery(f.store, writer).reconcile("offline"), /preparation failed/);
   const status = f.store.get("offline")!.status;
   assert.equal(status.phase, "pending"); assert.equal(status.attempts, 0); assert.match(status.lastError!, /preparation failed/);
+});
+
+
+test("Known rejection retries a once-only comment after the adapter deadline, including restart and early wakes", async t => {
+  const f = fixture(t); f.store.create("s", "limited", f.spec); f.store.create("s", "other", f.spec);
+  let now = Date.now(), sends = 0;
+  const clock = Date.now; Date.now = () => now; t.after(() => { Date.now = clock; });
+  const writer = { requirements: f.requirements, async addRequirementComment() {
+    if (++sends === 1) throw new DeliveryError({ kind: "retryable", code: "http:429", message: "Tracker rejected request", retryAfterMs: 30_000 });
+    return { id: `c${sends}`, scope: target.scope };
+  } };
+  const result = await delivery(f.store, writer).reconcile("limited");
+  assert.equal(result.requeueAfterMs, 30_000);
+  assert.equal(f.store.get("limited")!.status.phase, "pending");
+  assert.equal(f.store.get("limited")!.status.attempts, 1);
+  assert.match(f.store.get("limited")!.status.lastError!, /http:429/);
+  const reopened = new OutputStore(f.root); reopened.check = async id => approveFixtureOutput(reopened, id);
+  const restarted = delivery(reopened, writer);
+  now += 10_000;
+  assert.equal((await restarted.reconcile("limited")).requeueAfterMs, 20_000);
+  assert.equal(sends, 1);
+  // Another destination has an independent adapter policy and can deliver during this wait.
+  await delivery(reopened, { requirements: f.requirements, async addRequirementComment() { return { id: "other", scope: target.scope }; } }).reconcile("other");
+  assert.equal(reopened.get("other")!.status.phase, "delivered");
+  now += 20_000;
+  await restarted.reconcile("limited");
+  assert.equal(sends, 2);
+  assert.equal(reopened.get("limited")!.status.phase, "delivered");
+  assert.equal(reopened.get("limited")!.status.deliveryWait, undefined);
+  assert.equal(reopened.get("limited")!.status.lastError, undefined);
+});
+
+test("Adapters retain distinct retry delays; absent hints use controller backoff and explicit denial stops", async t => {
+  const f = fixture(t);
+  for (const [id, delay] of [["quick", 1000], ["slow", 60_000]] as const) {
+    f.store.create("s", id, f.spec);
+    const result = await delivery(f.store, { requirements: f.requirements, async addRequirementComment() {
+      throw new DeliveryError({ kind: "retryable", message: "Provider cooldown", retryAfterMs: delay });
+    } }).reconcile(id);
+    assert.ok(result.requeueAfterMs! > delay - 100 && result.requeueAfterMs! <= delay);
+  }
+  f.store.create("s", "backoff", f.spec);
+  const retry = delivery(f.store, { requirements: f.requirements, async addRequirementComment() {
+    throw new DeliveryError({ kind: "retryable", message: "Provider rejected request", code: "busy" });
+  } });
+  await assert.rejects(retry.reconcile("backoff"), /busy/);
+  assert.equal(f.store.get("backoff")!.status.phase, "pending");
+  assert.equal(f.store.get("backoff")!.status.deliveryWait, undefined);
+  // Even after an earlier rejection, a new preparation failure must replace the saved diagnosis.
+  await delivery(f.store, { requirements: { ...f.requirements, async identity() {
+    throw new DeliveryError({ kind: "permanent", message: "Account disabled", code: "disabled" });
+  } }, async addRequirementComment() { assert.fail("must not send"); } }).reconcile("backoff");
+  assert.equal(f.store.get("backoff")!.status.phase, "failed");
+  assert.match(f.store.get("backoff")!.status.lastError!, /disabled/);
+  f.store.create("s", "denied", f.spec); let sends = 0;
+  const denied = delivery(f.store, { requirements: f.requirements, async addRequirementComment() {
+    sends++; throw new DeliveryError({ kind: "permanent", code: "forbidden", message: "Comment permission denied" });
+  } });
+  await denied.reconcile("denied"); await denied.reconcile("denied");
+  assert.equal(sends, 1); assert.equal(f.store.get("denied")!.status.phase, "failed");
+  assert.match(f.store.get("denied")!.status.lastError!, /forbidden/);
+});
+
+test("Host delivery errors accept another SDK copy while untyped errors and invalid hints remain unknown", () => {
+  const failure = { kind: "retryable", code: "429", message: "Rejected", retryAfterMs: 1000 };
+  assert.deepEqual(deliveryFailure({ name: "DeliveryError", failure }), failure);
+  assert.equal(deliveryFailure(new Error("429")), undefined);
+  assert.equal(deliveryFailure({ name: "DeliveryError", failure: { ...failure, kind: { toString: () => "retryable" } } }), undefined);
+  for (const retryAfterMs of [-1, NaN, Infinity, "1", 0.1, 2147483648])
+    assert.equal(deliveryFailure({ name: "DeliveryError", failure: { ...failure, retryAfterMs } }), undefined);
 });

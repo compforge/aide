@@ -105,8 +105,9 @@ export class OutputStore {
     return { ...s, phase: "sending", deliveryWait: undefined, lastError: undefined, attempts: s.attempts + 1 };
   }); }
   delivered(id: string, receipt?: OutputStatus["receipt"]): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "delivered", deliveryWait: undefined, lastError: undefined, attempts: s.attempts, deliveredAt: new Date().toISOString(), ...(receipt ? { receipt } : {}) }); }
-  uncertain(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "uncertain", lastError: error.slice(0, 4000) }); }
-  retry(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "pending", attempts: s.attempts, lastError: error.slice(0, 4000) }); }
+  failed(id: string, error: string): void { this.update(id, s => s.phase === "delivered" ? s : { ...s, phase: "failed", deliveryWait: undefined, lastError: error.slice(0, 4000) }); }
+  uncertain(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "uncertain", deliveryWait: undefined, lastError: error.slice(0, 4000) }); }
+  retry(id: string, error: string, until?: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "pending", deliveryWait: until ? { reason: "provider", until } : undefined, attempts: s.attempts, lastError: error.slice(0, 4000) }); }
   subscribe(listener: (output: Output) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private notify(output: Output): void { this.storage.afterCommit(() => { for (const listener of this.listeners) { try { listener(cloneResourceValue(output)); } catch { /* persistence already committed */ } } }); }
 }

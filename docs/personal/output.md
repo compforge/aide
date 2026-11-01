@@ -36,7 +36,11 @@ Output 由独立 Reconciler 检查材料与受众，并持久化实际投递目�
 
 事务内写过的资源不能被后续写入的容量回收淘汰。内容非法、版本冲突或受保护资源超过容量都会整笔回滚。业务执行已经发生后的提交冲突只重试提交，不重新执行动作。Output 身份对应内容指纹，回收后在 Host 去重窗口内仍拒绝恢复同一 Output 的投递。
 
-启动时，底座唤醒未完成 Output，由各自 Reconciler 重新检查依赖和投递能力。准备失败按资源退避，不阻断其它 Output；幂等发送保持消息身份继续，非幂等发送中断标记 uncertain。实际发送失败记录 Output ID、目的地及安全提取的平台错误码、HTTP 状态或网络错误码。SDK 请求配置、凭证、消息正文和自由文本不写入日志或 Output.status。
+启动时，底座唤醒未完成 Output，由各自 Reconciler 重新检查依赖和投递能力。准备失败按资源退避，明确的永久拒绝转为 failed；其它 Output 独立推进。投递适配器通过 [DeliveryError](../connector/extensions.md#host-投递错误) 区分结果：明确未产生副作用的可重试拒绝保持 pending（包括非幂等写入的 429）；永久拒绝进入 failed；未知结果只有幂等发送能保持消息身份继续，其余进入 uncertain。非幂等 sending 中断仍标记 uncertain。
+
+适配器提供 retryAfterMs 时，拒绝原因和 `deliveryWait: {reason: "provider", until}` 一起持久化，再通过已有 requeueAfterMs 定时协调。提前 Watch 或重启唤醒不会绕过该 deadline；到期重新检查披露和人物频率。没有提示时使用控制器错误退避。等待不占据发送执行权，不增加 attempts，不创建新 Output 或重做 Chief；只有再次调用发送才增加 attempts。重试成功清除等待和错误，永久失败保留原因。
+
+失败日志记录 Output ID 和安全提取的诊断，Lark 另记录目的地、分片、平台错误码、HTTP 状态或网络错误码。SDK 请求配置、凭证、消息正文和自由文本不写入日志或 Output.status。
 
 Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Topic 删除后仍可完成投递。进展卡片只镜像已送达该聊天的 Output，不提前确认投递，也不展示私有思考和工具结果。
 
@@ -99,10 +103,10 @@ Output 创建不受投递频率限制。Person 的 `spec.delivery` 可配置 `wi
 
 统计以 `status.delivery.receivers` 的实际 Person UID 为准，跨 Topic、Channel 和 Connector 共享；披露拒绝转告 Me 时只计算 Me 的额度。多人消息需要所有接收人满足条件。Person.status 不存计数，Output 的 delivered 状态与 deliveredAt 是唯一事实来源。`deliveredPerson` 多值有序索引按 Person UID 和 deliveredAt 查询最近 N 条记录；降低额度后同样按第 N 条最新记录计算窗口释放时间，不扫描历史全集。
 
-Output Reconciler 在检查披露后查询额度，未到期保持 pending，通过 requeueAfterMs 进入持久定时协调。`status.deliveryWait` 仅投影等待原因和预计重试时间，不是准入凭据；每次执行重新检查最新策略、权限和记录。Person 策略变更按 pendingReceiver 索引唤醒待投递 Output，旧 deadline 不压住新配置。频控等待不增加 attempts，也不记为投递错误。
+Output Reconciler 在检查披露后查询额度，未到期保持 pending，通过 requeueAfterMs 进入持久定时协调。`status.deliveryWait` 的 frequency / receiver-busy 仅投影人物等待原因和预计重试时间，不是准入凭据；每次执行重新检查最新策略、权限和记录。provider 则保存外部拒绝给出的最早重试时间，不能被人物策略变更缩短。Person 策略变更按 pendingReceiver 索引唤醒待投递 Output，旧 deadline 不压住新配置。频控等待不增加 attempts，也不记为投递错误。
 
 Host 对实际接收者同时取得执行权，覆盖最终复核、发送与结果落盘。不能全部取得时释放本轮协调并稍后重试，不持有部分人物的执行权，也不积累 Promise 等待队列。不同接收人独立推进；频控时间等待期间不占用执行权。此互斥是单 Host 执行保护，不是持久额度预约，也不承诺多 Host 同库并行投递。
 
 Output 回收在事务内根据当前 Person 策略重查：有效窗口或最小间隔内的成功记录受保护，过期后可按原容量策略回收。启用或扩大频控只使用仍保留的历史，不能恢复此前已回收的投递记录。Person 合并仍保留历史引用原 UID，不改写过去的实际接收者，合并前不同 UID 的历史不自动合并统计。
 
-频控不替代下游服务的并发预算、鉴权或投递幂等性。Channel / Connector 不另建 Person 计数或生命周期；重试仍由同一个 Output 协调。验证见 `tests/output-frequency.test.ts`。
+人物频控独立于下游服务的访问限制、鉴权和投递幂等性；外部频控策略与数值属于各自 Channel / Connector。Channel / Connector 不另建 Person 计数或生命周期；重试仍由同一个 Output 协调。验证见 `tests/output-frequency.test.ts`。

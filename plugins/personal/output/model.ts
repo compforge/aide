@@ -25,7 +25,7 @@ export interface OutputStatus {
   delivery?: { replay?: "idempotent" | "once"; target: Address; text: string; receivers: import("../person/model.ts").PersonRefs };
   phase: "pending" | "sending" | "delivered" | "failed" | "uncertain";
   attempts: number;
-  deliveryWait?: { reason: "frequency" | "receiver-busy"; until: string };
+  deliveryWait?: { reason: "frequency" | "receiver-busy" | "provider"; until: string };
   deliveredAt?: string;
   lastError?: string;
   receipt?: { id: string; scope: string };
