@@ -31,6 +31,8 @@ export interface TopicStatus extends ResourceContext {
   yieldToInput?: boolean;
   reviewCheckedAt?: string | null;
   idleReviewCount?: number;
+  /** Material inspected by the last completed maintenance turn; not an absorption receipt. */
+  reviewedMaterialVersion?: string;
   idleReviewReset?: { at: string; previousCount: number } | null;
   idleSince?: string;
   execution?: LoopExecution | null;

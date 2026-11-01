@@ -3,7 +3,7 @@ import { commitStatus } from "./status.ts";
 import { z } from "zod";
 import { prepareAgent, saveAgent } from "./session.ts";
 import type { PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
-import { InputAttention, INPUT_ORIGINS, inputAttention, isCapacityInput, INPUT_TYPE, type InputSpec } from "./input/model.ts";
+import { InputAttention, INPUT_ORIGINS, inputAttention, isCapacityInput, isInternalInput, INPUT_TYPE, type InputSpec } from "./input/model.ts";
 import { inputRef, pendingInputs, resourceRef, changeAttempt, changeAssessment, attemptOf, attemptPatch, type Input } from "./input/state.ts";
 export { inputRef } from "./input/state.ts";
 /** A persistent native session owns context; each invocation has a separate durable admission identity. */
@@ -126,6 +126,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
 /**
  * @spec Admission evidence survives completion of the invocation and restart; unknown effects never automatically replay.
  * @why Chief idle time starts after every execution, including failure or recovery; missed timer checks never force continuation.
+ * @spec Internal execution completion preserves review backoff; Topic reconciliation owns material progress and no-op outcomes.
  * @case tests/topic-review.test.ts
  */
 export async function finalizeExecution(context: Pick<PluginContext, "resources" | "logger">, owner: Readonly<LoopResource>, executionId: string,
@@ -141,7 +142,8 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
       await commitStatus(context.resources, [
         ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: latest.kind === "Topic" ? { assess: { ...i.status.assess, lastError: error || "Chief ended without confirming input completion" } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error,
           ...(latest.kind === "Route" ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
-        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, reviewCheckedAt: null, idleReviewCount: 0, idleReviewReset: null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
+        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, reviewCheckedAt: null, ...(latest.status.execution.inputOrigin && !isInternalInput({ origin: latest.status.execution.inputOrigin })
+            ? { idleReviewCount: 0 } : {}), idleReviewReset: null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
           lastExecutionId: executionId,
           ...((unfinished.length || (latest.status as import("./work-status.ts").WorkAgentStatus).lastExecutionId !== executionId)
             ? { recovery: { reason: "ExecutionUncertain", message: error || "Execution ended without a business receipt" } } : {}),
