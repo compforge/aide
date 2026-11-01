@@ -15,7 +15,7 @@ src/
   web/                     # 浏览器页面；每页的 HTML、TS 入口、样式与交互模块放在一起
     topics/                # 导航、时间线、输入、工作与审批；main 管理轮询和 SSE
     persons/               # 人物导航、资料和认识编辑
-    addresses/             # 场合列表、禁言设置、认识、参与者、默认通知地址与接入管理
+    addresses/             # 场合列表、禁言设置、认识、参与者、默认通知地址与禁言操作
     inputs/                # 跨会话输入筛选、分页与处理 Timeline
     shared/                # DOM、HTTP、剪贴板、Markdown 与公共样式
   api/                     # HTTP handler 与 SSE，调用 Core / Personal 能力
@@ -150,7 +150,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Forge 的 Repository / PullRequest 模型复用 harness-common，平台读取、增量发现完整性、不透明游标与 HTTP 约束由 repocli lib 承担；Aide Connector 负责配置与调用路由，Personal RepositorySource 负责清单缓存与观察任务交接，PullRequestSource 负责 PR 基线、检查点与 Input。契约见 [Forge](docs/connector/forge.md)。
 - Connector kind 与 version 是独立字符串，connectors 直接按 name 声明；领域 interface 定义操作契约，安装入口按 name 注册实现，配置不使用 type 或 packages/instances 包装；Plugin 与 verb 按 kind 发现 Connector 并通过同一客户端调用，私有配置和凭证不进入 Runner。Source 继续复用 Plugin 机制，Connector 是否作为 Resource 独立演进。契约见 [Connector 扩展](docs/connector/extensions.md)。
 - Connector 按外部系统或服务组织操作与适配；一个 Connector 可支持多个业务 Source，Source 可细到单个业务 Resource，按观察生命周期独立保存状态与调度。外部频控的策略、数值和配额范围由 Connector / Channel 适配并复用共享客户端；Output 只消费安全错误与重试时间，使用已有持久队列协调。边界与建设状态见 [Connector 与 Source](docs/connector/README.md)。
-- plugins.<plugin>.sources 声明观察策略，形成 Input 的 Source 先保存 Input 再推进水位。所有模块在自己的 config.ts 声明契约，启动时解析一次；显式值优先于默认值，空数组不回退，运行中不重读配置。Web Addresses 中的接入管理保存命名 Channel，重启生效；defaultAddress 保存具体 AddressRef，Web 选择立即用于新通知；默认 say 联系 Me，不依赖 Topic 的来源地址或私聊历史。
+- plugins.<plugin>.sources 声明观察策略，形成 Input 的 Source 先保存 Input 再推进水位。所有模块在自己的 config.ts 声明契约，启动时解析一次；显式值优先于默认值，空数组不回退，运行中不重读配置。命名 Channel 通过配置文件维护，重启生效；defaultAddress 保存具体 AddressRef，Web 选择立即用于新通知；默认 say 联系 Me，不依赖 Topic 的来源地址或私聊历史。
 - Web 按页面组织，入口管理轮询与 SSE 生命周期，交互模块持有自身状态；共用浏览器能力放在 web/shared，展示类型经 type-only import 使用。Channel 展示进展不产生业务 Output。
 - 根目录 VERSION 是产品版本，每次提交递增一次，默认 patch。设计文档描述当前模型与 why，详细契约各有主说明位置，其它文档用链接引用；代码意图标记链接到对应主题。
 

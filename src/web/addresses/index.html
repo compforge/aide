@@ -4,10 +4,9 @@
 <title>Addresses · Aide</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/addresses.css">
 <header><h1 class="brand"><img src="/icon.png" width="32" height="32" alt="">Aide</h1><span class="muted">在合适的场合，与合适的人交流。</span><nav class="main-tabs" aria-label="主导航"><a href="/">Topics</a><a href="/people">Persons</a><a href="/addresses" aria-current="page">Addresses</a><a href="/inputs">Inputs</a></nav></header>
 <main class="persons-page">
-<nav class="person-list" aria-label="地址列表"><h2>地址</h2><button id="manage-connections" class="secondary">接入管理</button><button id="refresh" class="secondary">刷新</button><div id="list"></div><button id="more" class="secondary" hidden>加载更多</button></nav>
+<nav class="person-list" aria-label="地址列表"><div class="address-list-heading"><h2>地址</h2><button id="refresh" class="address-refresh" type="button" title="刷新地址" aria-label="刷新地址"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9"/></svg></button></div><div id="list"></div><button id="more" class="secondary" hidden>加载更多</button></nav>
 <section class="person-detail"><h2 id="heading">选择一个地址</h2><p id="coordinates" class="muted"></p><p id="notice" role="status" aria-live="polite"></p>
 <div id="detail" hidden>
-<div class="person-actions"><span id="state"></span><button id="set-default" class="secondary">设为默认通知地址</button><button id="mute" class="secondary">禁言 Aide</button></div>
 <div class="detail-tabs" role="tablist" aria-label="地址内容">
 <button id="tab-summary" role="tab" aria-controls="panel-summary" aria-selected="true">认识</button>
 <button id="tab-notes" role="tab" aria-controls="panel-notes" aria-selected="false" tabindex="-1">近期记录</button>
@@ -20,29 +19,4 @@
 </section>
 <section id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" hidden><div id="notes"></div><button id="notes-more" class="secondary" hidden>加载更多</button></section>
 <section id="panel-people" role="tabpanel" aria-labelledby="tab-people" hidden><p class="muted">随着消息积累认识到的参与者。</p><div id="people"></div></section>
-</div></section></main><dialog id="connections-dialog" class="connections-page" aria-labelledby="channels-heading"><button id="close-connections" type="button">关闭</button>  <section aria-labelledby="channels-heading">
-    <h2 id="channels-heading">沟通渠道</h2>
-    <p>管理 Aide 的应用连接。每个群聊或私聊的发言设置在地址中维护。</p>
-    <p id="channel-status" role="status" aria-live="polite"></p>
-    <p id="channel-error" role="alert"></p>
-    <p id="person-warning" role="status" class="muted"></p>
-    <button id="connection-refresh" type="button">刷新</button>
-    <div id="channel-list"></div>
-    <button id="add-channel" type="button">新增 Lark 渠道</button>
-  </section>
-  <section id="connection-editor" aria-labelledby="connection-editor-heading" hidden>
-    <h2 id="connection-editor-heading">新增渠道</h2>
-    <form id="channel-form">
-      <label>标识<input id="channel-id" required pattern="[a-zA-Z][a-zA-Z0-9_-]{0,63}" maxlength="64" placeholder="lark-work"></label>
-      <label>名称<input id="channel-label" required maxlength="100" placeholder="飞书 · 工作账号"></label>
-      <label><span><input id="channel-enabled" type="checkbox" checked>启用渠道</span></label>
-      <label>Aide 应用 App ID<input id="channel-app" required pattern="cli_[a-zA-Z0-9]+" placeholder="cli_..."></label>
-      <label>App Secret<input id="channel-secret" type="password" autocomplete="new-password" maxlength="1000"></label>
-      <p class="muted">密钥仅写入服务器配置，不会返回页面。修改同一应用时留空保留；更换应用需重新填写。</p>
-      <label>选择已知的 Me 身份（可选）<select id="known-me"><option value="">选择已知身份，或在下方填写</option></select></label>
-      <label>Me 的 open_id（可选）<input id="channel-me" pattern="ou_[a-zA-Z0-9]+" placeholder="ou_..."></label>
-      <p class="muted">Me 是可选身份标记，与机器人凭证独立。配置此身份后，启动时会发现你的私聊地址，无需先发消息；其他应用的 open_id 不能直接复用。</p>
-      <div class="toolbar"><button type="submit">保存</button><button id="cancel-edit" type="button">取消</button></div>
-    </form>
-  </section>
-</dialog><script type="module" src="/addresses.js"></script></html>
+</div></section></main><script type="module" src="/addresses.js"></script></html>

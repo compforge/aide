@@ -1,4 +1,3 @@
-import { mountConnections } from "./connections.ts";
 import type { ChannelSettingsView } from "../../channel/settings.ts";
 import './style.css';
 import { byId as $, element as node } from '../shared/dom.ts';
@@ -9,11 +8,13 @@ import type { AddressRef } from '../../../plugins/personal/address/model.ts';
 import type { Note } from '../../../plugins/personal/note/model.ts';
 type View = ReturnType<Addresses['view']>;
 type Page = ReturnType<Addresses['page']>;
+type Item = Page['items'][number];
+const items = new Map<string, Item>();
 let selected: View | undefined, continuation: string | undefined, noteContinue: string | undefined;
 let settings: ChannelSettingsView | undefined;
 async function loadSettings() {
   try { settings = await request<ChannelSettingsView>("/channels/config"); } catch { settings = undefined; }
-  if (selected) render(selected);
+  renderList();
 }
 let notesLoading = false;
 let busy = false, generation = 0, listGeneration = 0;
@@ -29,11 +30,6 @@ function render(value: View) {
   $('heading').textContent = value.spec.name;
   for (const link of document.querySelectorAll<HTMLAnchorElement>('#list a')) link.setAttribute('aria-current', String(new URL(link.href).searchParams.get('uid') === value.metadata.uid));
   $('coordinates').textContent = types[value.spec.type];
-  const isDefault = settings?.defaultAddress?.uid === value.metadata.uid;
-  $('set-default').textContent = isDefault ? '默认通知地址' : '设为默认通知地址';
-  $<HTMLButtonElement>('set-default').disabled = !settings || isDefault || !['direct', 'web'].includes(value.spec.type);
-  $('state').textContent = value.spec.muted ? 'Aide 已禁言，仍可接收消息和积累认识。' : 'Aide 可以在此发言。';
-  $('mute').textContent = value.spec.muted ? '解除禁言' : '禁言 Aide';
   updateMarkdown($('summary'), value.summaryText || '尚未积累长期认识。');
   $('people').replaceChildren(...value.participants.map(person => {
     const a = node('a', person.name + (person.clearance ? ` · ${person.clearance}` : ''));
@@ -65,6 +61,7 @@ async function loadNotes(reset = false) {
 async function select(ref: AddressRef) {
   if (busy) return;
   if (!$('editor').hidden && !confirm('放弃尚未保存的修改？')) return;
+  menu.hidePopover();
   const turn = ++generation;
   const value = await request<View>('/addresses/detail?' + parameters(ref));
   if (turn !== generation) return;
@@ -82,34 +79,100 @@ async function list(reset = false) {
     throw error;
   }
   if (turn !== listGeneration) return;
-  if (reset) $('list').replaceChildren();
-  for (const item of page.items) {
-    const link = node('a', undefined, 'list-link'); link.href = '/addresses?' + parameters(item.ref);
-    link.setAttribute('aria-current', String(item.ref.uid === selected?.metadata.uid));
-    link.append(node('strong', item.name), node('span', `${types[item.type]} · ${item.muted ? '已禁言' : '可发言'}`, 'muted'));
-    link.onclick = event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button) return; event.preventDefault(); void select(item.ref).catch(report); };
-    $('list').append(link);
-  }
+  if (reset) items.clear();
+  for (const item of page.items) items.set(item.ref.uid, item);
+  renderList();
   continuation = page.continue; $('more').hidden = !continuation;
 }
 async function save(path: string, value: object) {
-  busy = true; $<HTMLButtonElement>('mute').disabled = true; $<HTMLButtonElement>('save').disabled = true;
+  setBusy(true); $<HTMLButtonElement>('save').disabled = true;
   try {
     const updated = await request<View>(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address: currentRef(), ...value }) });
     render(updated); $('notice').textContent = '已保存'; await list(true); return true;
   } catch (error) { report(error); return false; }
-  finally { busy = false; $<HTMLButtonElement>('mute').disabled = false; $<HTMLButtonElement>('save').disabled = false; }
+  finally { setBusy(false); $<HTMLButtonElement>('save').disabled = false; }
 }
-$('set-default').onclick = () => { void (async () => {
-  if (!settings || busy) return;
-  const address = currentRef(); busy = true;
-  try { settings = await request<ChannelSettingsView>('/channels/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operation: 'default', revision: settings.revision, address }) }); if (selected) render(selected); $('notice').textContent = '默认通知地址已更新'; }
-  catch (error) { await loadSettings(); report(error); }
-  finally { busy = false; }
-})().catch(report); };
-mountConnections(value => { settings = value; if (selected) render(selected); });
+const menu = node('div', undefined, 'address-menu');
+menu.id = 'address-menu'; menu.popover = 'auto';
+menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', '地址操作');
+document.body.append(menu);
+let menuButton: HTMLButtonElement | undefined;
+menu.addEventListener('toggle', event => { if (event.newState === 'closed') menuButton?.setAttribute('aria-expanded', 'false'); });
+menu.addEventListener('keydown', event => {
+  const buttons = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+  const index = buttons.findIndex(button => button === document.activeElement);
+  if (event.key === 'Escape') { menu.hidePopover(); menuButton?.focus(); return; }
+  const next = event.key === 'ArrowDown' ? (index + 1) % buttons.length : event.key === 'ArrowUp' ? (index - 1 + buttons.length) % buttons.length
+    : event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : null;
+  if (next !== null) { event.preventDefault(); buttons[next]?.focus(); }
+});
+$('list').parentElement!.addEventListener('scroll', () => menu.hidePopover());
+window.addEventListener('resize', () => menu.hidePopover());
+function setBusy(value: boolean) {
+  busy = value;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('.address-more, #refresh')) button.disabled = value;
+}
+function statusIcon(label: string, drawing: string) {
+  const icon = node('span', undefined, 'address-status-icon');
+  icon.title = label; icon.setAttribute('aria-label', label); icon.setAttribute('role', 'img');
+  icon.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + drawing + '</svg>';
+  return icon;
+}
+function renderList() {
+  menu.hidePopover();
+  $('list').replaceChildren(...[...items.values()].map(item => {
+    const row = node('div', undefined, 'address-entry');
+    const link = node('a', undefined, 'list-link'); link.href = '/addresses?' + parameters(item.ref);
+    link.setAttribute('aria-current', String(item.ref.uid === selected?.metadata.uid));
+    link.append(node('strong', item.name), node('span', types[item.type], 'muted'));
+    const indicators = node('span', undefined, 'address-indicators');
+    if (settings?.defaultAddress?.uid === item.ref.uid) indicators.append(statusIcon('默认通知地址', '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>'));
+    if (item.muted) indicators.append(statusIcon('Aide 已被禁言', '<path d="m3 3 18 18M9 5l3-2v9M6 8H3v8h4l5 5v-5m4-10a9 9 0 0 1 3 9M15 9a5 5 0 0 1 1 3"/>'));
+    if (indicators.childElementCount) link.append(indicators);
+    link.onclick = event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button) return; event.preventDefault(); void select(item.ref).catch(report); };
+    const button = node('button', '⋯', 'address-more'); button.type = 'button'; button.title = '地址操作'; button.dataset.uid = item.ref.uid;
+    button.setAttribute('aria-label', '地址操作：' + item.name); button.setAttribute('aria-haspopup', 'menu');
+    button.setAttribute('aria-controls', menu.id); button.setAttribute('aria-expanded', 'false'); button.disabled = busy;
+    button.onclick = () => {
+      const wasOpen = menu.matches(':popover-open'); menu.hidePopover(); menuButton?.setAttribute('aria-expanded', 'false');
+      if (wasOpen && menuButton === button) return;
+      menuButton = button; menu.replaceChildren();
+      const isDefault = settings?.defaultAddress?.uid === item.ref.uid;
+      for (const [action, label, disabled] of [
+        ['default', isDefault ? '默认通知地址' : '设为默认通知地址', !settings || isDefault || !['direct', 'web'].includes(item.type)],
+        ['mute', item.muted ? '解除禁言' : '禁言 Aide', false],
+      ] as const) {
+        const option = node('button', label); option.type = 'button'; option.setAttribute('role', 'menuitem'); option.disabled = disabled;
+        option.onclick = () => { void changeAddress(item, action); }; menu.append(option);
+      }
+      menu.showPopover(); button.setAttribute('aria-expanded', 'true');
+      const rect = button.getBoundingClientRect();
+      menu.style.left = Math.max(8, Math.min(rect.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8)) + 'px';
+      menu.style.top = Math.max(8, Math.min(rect.bottom + 4, innerHeight - menu.offsetHeight - 8)) + 'px';
+      menu.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    };
+    row.append(link, button); return row;
+  }));
+}
+/** @spec Sidebar actions target their own Address UID, independently of the selected detail or its unsaved summary. */
+async function changeAddress(item: Item, action: 'default' | 'mute') {
+  menu.hidePopover(); if (busy) return;
+  setBusy(true);
+  try {
+    if (action === 'default') {
+      if (!settings) return;
+      settings = await request<ChannelSettingsView>('/channels/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operation: 'default', revision: settings.revision, address: item.ref }) });
+      renderList(); $('notice').textContent = '已将「' + item.name + '」设为默认通知地址';
+    } else {
+      const updated = await request<View>('/addresses/muted', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address: item.ref, muted: !item.muted, expected: item.muted }) });
+      items.set(item.ref.uid, { ...item, ...updated.spec });
+      if (selected?.metadata.uid === item.ref.uid) render(updated);
+      renderList(); $('notice').textContent = updated.spec.muted ? '已在「' + item.name + '」禁言 Aide' : '已解除「' + item.name + '」的禁言';
+    }
+  } catch (error) { await loadSettings(); await list(true).catch(report); report(error); }
+  finally { setBusy(false); document.querySelector<HTMLButtonElement>('.address-more[data-uid="' + CSS.escape(item.ref.uid) + '"]')?.focus(); }
+}
 void loadSettings();
-$('mute').onclick = () => { if (selected && !busy) void save('/addresses/muted', { muted: !selected.spec.muted, expected: selected.spec.muted }); };
 $('edit').onclick = () => { if (!selected) return; $<HTMLTextAreaElement>('text').value = selected.summaryText; $('editor').hidden = false; $('summary').hidden = true; $('text').focus(); };
 $('cancel').onclick = () => { if (busy) return; $('editor').hidden = true; $('summary').hidden = false; };
 $('editor').onsubmit = async event => { event.preventDefault(); if (!selected || busy) return; if (await save('/addresses/summary', { text: $<HTMLTextAreaElement>('text').value, version: selected.summaryVersion })) { $('editor').hidden = true; $('summary').hidden = false; } };
@@ -120,6 +183,6 @@ for (const [index, name] of tabs.entries()) {
   $('tab-' + name).onkeydown = event => { const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : -1; if (next >= 0) { event.preventDefault(); tab(tabs[next]!); $('tab-' + tabs[next]).focus(); } };
 }
 $('more').onclick = () => { void list().catch(report); };
-$('refresh').onclick = () => { void (async () => { await list(true); if (selected) await select(currentRef()); })().catch(report); };
+$('refresh').onclick = () => { void (async () => { if (busy) return; await loadSettings(); await list(true); if (selected) await select(currentRef()); })().catch(report); };
 $('notes-more').onclick = () => { void loadNotes().catch(report); };
 void list(true).then(async () => { const q = new URLSearchParams(location.search); if (q.get('name') && q.get('uid')) await select({ apiVersion: 'aide.dev/v1alpha1', kind: 'Address', namespace: 'v1', name: q.get('name')!, uid: q.get('uid')! }); }).catch(report);

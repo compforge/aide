@@ -84,7 +84,7 @@ test("Addresses owns connection settings and validates default destinations thro
   const socket = server.address(); assert.ok(socket && typeof socket !== "string");
   const base = `http://127.0.0.1:${socket.port}`;
   const html = await (await fetch(base + "/addresses")).text();
-  assert.match(html, /接入管理/); assert.match(html, /设为默认通知地址/); assert.doesNotMatch(html, /href="\/connections"/);
+  assert.doesNotMatch(html, /接入管理|connections-dialog|id="set-default"|id="mute"/); assert.match(html, /aria-label="刷新地址"/); assert.doesNotMatch(html, /href="\/connections"/);
   for (const asset of ["/addresses.js", "/addresses.css"]) assert.equal((await fetch(base + asset)).status, 200);
   assert.equal((await fetch(base + "/connections")).status, 404);
   const post = (value: unknown) => fetch(base + "/channels/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value) });
