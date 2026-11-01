@@ -1,3 +1,4 @@
+import { DeliveryError } from "@compforge/aide-connector";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -151,7 +152,7 @@ test("Person policy watch wakes pending Outputs and relaxed policy ignores the p
 });
 
 
-test("real Runner schedules frequency waits and Person changes wake an old deadline", { timeout: 15_000 }, async t => {
+test("real Runner persists waits and Person changes only relax Person deadlines", { timeout: 15_000 }, async t => {
   const { PluginInstanceStore } = await import("../src/host/plugin/instance.ts");
   const { Manager } = await import("../src/host/plugin/manager.ts");
   const { PluginSupervisor } = await import("../src/host/plugin/runner/index.ts");
@@ -160,7 +161,14 @@ test("real Runner schedules frequency waits and Person changes wake an old deadl
   const instances = new PluginInstanceStore({ home: f.home });
   instances.create({ pluginInstanceId: "personal", pluginId: "tests/output-frequency", marketplace: "fixtures", packageVersion: "1.0.0" });
   const sends: number[] = [], errors: unknown[] = [];
-  const delivery = f.service(async () => { sends.push(Date.now()); return undefined; });
+  let rejectedAt: number | undefined;
+  const delivery = f.service(async message => {
+    if (message.id === "provider" && rejectedAt === undefined) {
+      rejectedAt = Date.now();
+      throw new DeliveryError({ kind: "retryable", message: "Provider cooldown", retryAfterMs: 1500 });
+    }
+    sends.push(Date.now()); return undefined;
+  });
   const makeManager = () => new Manager({ instances, pluginSupervisor: new PluginSupervisor(),
     onRunnerFailure: failure => errors.push(failure.error), onActivationError: failure => errors.push(failure.error),
     actions: { "personal/reconcile_output": async (_context, input) => delivery.reconcile((input as { id: string }).id) },
@@ -192,6 +200,17 @@ test("real Runner schedules frequency waits and Person changes wake an old deadl
     await restarted.patch(a, { type: "merge", value: { spec: { delivery: null } } });
     await waitFor(() => sends.length === 3);
     assert.equal(f.store.get("three")!.status.phase, "delivered");
+    await create("provider"); await waitFor(() => f.store.get("provider")?.status.deliveryWait?.reason === "provider");
+    await manager.close(); manager = makeManager(); await manager.start();
+    const resumed = manager.resourceClient("personal");
+    const person = await resumed.get(personRef(a));
+    await resumed.patch(person!, { type: "merge", value: { spec: { delivery: { minInterval: "1ms" } } } });
+    await create("independent"); await waitFor(() => f.store.get("independent")?.status.phase === "delivered");
+    await waitFor(() => f.store.get("provider")?.status.phase === "delivered");
+    const provider = f.store.get("provider")!;
+    assert.ok(Date.parse(provider.status.deliveredAt!) - rejectedAt! >= 1500);
+    assert.ok(Date.parse(f.store.get("independent")!.status.deliveredAt!) < Date.parse(provider.status.deliveredAt!));
+    assert.equal(provider.status.attempts, 2);
     assert.deepEqual(errors, []);
   } finally { await manager.close(); }
 });

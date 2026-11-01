@@ -234,14 +234,15 @@ test("Lark delivery failures retain diagnostic codes and delivery context withou
   t.after(() => channel.close());
   f.outputs.check = async id => { approveFixtureOutput(f.outputs, id); };
   const delivery = new OutputDelivery(f.outputs, target => resolve(target), log);
-  await assert.rejects(delivery.reconcile("send-failure"));
+  await delivery.reconcile("send-failure");
   const output = f.outputs.get("send-failure")!, record = logs.find(record => record.apiCode === 99991672)!;
   assert.equal(record.level, 40);
   assert.deepEqual(record.target, target);
   assert.equal(record.apiCode, 99991672);
   assert.equal(record.httpStatus, 403);
-  assert.equal(output.status.phase, "pending");
+  assert.equal(output.status.phase, "failed");
   assert.equal(output.status.attempts, 1);
+  assert.match(output.status.lastError!, /99991672/);
   assert.doesNotMatch(JSON.stringify({ logs, lastError: output.status.lastError }), /SECRET|PRIVATE|Authorization|config/);
   const timeout = larkSendFailure(Object.assign(new Error("SECRET TOKEN"), { code: "ETIMEDOUT" }));
   assert.equal(timeout.transportCode, "ETIMEDOUT");

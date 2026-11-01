@@ -8,6 +8,7 @@ import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { httpChannel } from "../src/api/index.ts";
+import { topicView } from "../src/channel/view.ts";
 import { inputList, inputFilters, inputDetail } from "../src/api/inputs.ts";
 import { browseInputs, inputFacets } from "../plugins/personal/input/browse.ts";
 import { INPUT_TYPE, type InputStatus, type InputSpec } from "../plugins/personal/input/model.ts";
@@ -231,5 +232,26 @@ test("Built-in origins retain their colon through filter values and API queries"
     const [origin, originId] = JSON.parse(option.value) as [InputSpec["origin"], string];
     assert.ok(origin.startsWith("aide:"));
     assert.equal(inputList(aide, { origin, originId }).items.length, 1);
+  }
+});
+
+
+test("Timeline and chat distinguish provider waits from Person delivery policy and receiver locks", async t => {
+  const { aide, store } = setup(t);
+  const topic = await aide.topics.ensure("waiting", webAddress("waiting"));
+  const input = store.submit("test", "waiting-input", observation(1), finished());
+  const until = "2026-11-01T16:00:00.000Z";
+  for (const [reason, label] of [["frequency", "等待投递频控"], ["receiver-busy", "等待接收人的上一条投递完成"],
+    ["provider", "等待外部服务允许重试"]] as const) {
+    aide.outputStore.create("waiting", reason, { target: webAddress("waiting"), topicId: "waiting",
+      topic: { ...resourceRef(topic), uid: topic.metadata.uid }, text: reason, inputIds: [input.metadata.name] });
+    aide.outputStore.update(reason, status => ({ ...status, deliveryWait: { reason, until } }));
+    const entry = inputDetail(aide, input.metadata.name)!.timeline.find(e => e.id === `output:${reason}:waiting`)!;
+    assert.equal(entry.title, label); assert.equal(entry.text, `预计重试：${until}`);
+    const block = topicView(aide, "waiting").blocks.find(b => b.id === `message:${reason}`)!;
+    assert.equal(block.label, reason === "receiver-busy" ? label : `${label}，预计 ${new Date(until).toLocaleString()} 重试`);
+    aide.outputStore.failed(reason, "Permanent rejection");
+    assert.equal(inputDetail(aide, input.metadata.name)!.timeline.some(e => e.id === `output:${reason}:waiting`), false);
+    assert.equal(topicView(aide, "waiting").blocks.find(b => b.id === `message:${reason}`)!.label, "投递失败");
   }
 });

@@ -1,3 +1,4 @@
+import { deliveryFailure, type DeliveryFailure } from "@compforge/aide-connector";
 import { nextDeliveryAt } from "./frequency.ts";
 import type { ResourceStorage } from "../../../src/host/resource/storage.ts";
 import { sameAddress } from "../../../src/address.ts";
@@ -11,6 +12,8 @@ export interface OutputTransport {
   send(message: { id: string; target: Address; text: string }): Promise<OutputStatus["receipt"]>;
 }
 export type OutputTransportResolver = (target: Address) => Promise<OutputTransport | undefined> | OutputTransport | undefined;
+
+class OutputRetryError extends Error {}
 
 const activeReceivers = new WeakMap<ResourceStorage, Set<string>>();
 
@@ -29,10 +32,13 @@ export class OutputDelivery {
     const existing = this.running.get(id);
     if (existing) return existing;
     const run = this.run(id).catch(error => {
+      if (error instanceof OutputRetryError) throw error;
       const current = this.store.get(id);
-      if (current && current.status.phase === "pending" && !current.status.lastError) this.store.update(id, s => ({ ...s, lastError: "Output preparation failed; retry scheduled by controller" }));
-      this.log.warn({ outputId: id }, "Output reconcile failed; independent retry required");
-      throw error;
+      // A sending state can already have an external effect; leave recovery to the replay contract.
+      if (current?.status.phase === "pending") {
+        return this.failure(id, deliveryFailure(error) ?? { kind: "retryable", message: "Output preparation failed; retry scheduled by controller" }, true);
+      }
+      throw new Error(current?.status.lastError ?? "Output reconcile failed");
     }).finally(() => this.running.delete(id));
     this.running.set(id, run); return run;
   }
@@ -42,6 +48,9 @@ export class OutputDelivery {
     if (output.status.phase === "sending" && output.status.delivery?.replay !== "idempotent") {
       this.store.uncertain(id, "Delivery was interrupted; verify external receipt before retrying"); return {};
     }
+    const wait = output.status.deliveryWait;
+    // Provider deadlines survive early watches and Host restarts; Person policy waits are recomputed below.
+    if (wait?.reason === "provider" && Date.parse(wait.until) > Date.now()) return { requeueAfterMs: Math.max(1, Date.parse(wait.until) - Date.now()) };
     output = await this.store.prepare(id);
     if (!["pending", "sending"].includes(output.status.phase)) return {};
     // Acquire every receiver together without waiting; no partial acquisition or unbounded Promise queue.
@@ -65,8 +74,7 @@ export class OutputDelivery {
       if (JSON.stringify(currentReceivers) !== JSON.stringify(receivers)) return this.defer(id, Date.now() + 1, "receiver-busy");
       const due = nextDeliveryAt(this.store, output);
       if (due > Date.now()) return this.defer(id, due, "frequency");
-      await this.send(id, output, transport);
-      return {};
+      return await this.send(id, output, transport);
     } finally { for (const uid of receivers) active.delete(uid); }
   }
 
@@ -88,13 +96,24 @@ export class OutputDelivery {
       const receipt = await transport.send({ id, target, text: output.status.delivery!.text });
       this.store.delivered(id, receipt);
       this.log.info({ outputId: id, target }, "Output delivered");
-    } catch {
-      if (transport.replay === "once") {
-        this.store.uncertain(id, "Delivery result is unknown; verify external receipt before retrying");
-        this.log.warn({ outputId: id }, "Output delivery uncertain"); return {};
-      }
-      this.store.retry(id, "Transport send failed; retry scheduled by controller");
-      throw new Error("Output transport failed");
+      return {};
+    } catch (error) {
+      return this.failure(id, deliveryFailure(error) ?? { kind: "unknown", message: "Output transport failed; delivery result is unknown" }, transport.replay === "idempotent");
     }
+  }
+
+  /** @spec Explicit rejection can retry even a non-idempotent write; uncertain effects require safe replay or receipt recovery.
+   * @case tests/requirement-output.test.ts
+   */
+  private failure(id: string, failure: DeliveryFailure, safeReplay: boolean): OutputReconcileResult {
+    const reason = `${failure.message}${failure.code ? ` [${failure.code}]` : ""}`.slice(0, 4000);
+    this.log.warn({ outputId: id, kind: failure.kind, code: failure.code, retryAfterMs: failure.retryAfterMs, reason }, "Output delivery failed");
+    if (failure.kind === "permanent") { this.store.failed(id, reason); return {}; }
+    if (failure.kind === "unknown" && !safeReplay) { this.store.uncertain(id, reason); return {}; }
+    const until = failure.retryAfterMs === undefined ? undefined : new Date(Date.now() + failure.retryAfterMs).toISOString();
+    // Commit the rejection and provider deadline together before yielding the controller.
+    this.store.retry(id, reason, until);
+    if (until) return { requeueAfterMs: Math.max(1, Date.parse(until) - Date.now()) };
+    throw new OutputRetryError(reason);
   }
 }

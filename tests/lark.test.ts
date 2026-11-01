@@ -1,3 +1,4 @@
+import { DeliveryError, deliveryFailure } from "@compforge/aide-connector";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,7 +10,7 @@ import { Aide } from "../src/app.ts";
 import { larkAddress } from "../src/channel/address.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
 import type { Incoming } from "../src/channel/message.ts";
-import { larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark/client.ts";
+import { larkDeliveryError, larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark/client.ts";
 import { fakeOptions as baseFakeOptions } from "./fake-harness.ts";
 import { LOCAL_ME } from "../plugins/personal/person/model.ts";
 // These transport tests use a known Me audience; disclosure rejection has dedicated tests.
@@ -414,4 +415,45 @@ test("Chat name lookup failures keep group intake available and never expose SDK
   assert.equal(entries.length, 1);
   assert.match(entries[0]!, /chat name unavailable/);
   assert.doesNotMatch(entries[0]!, /secret credentials/);
+});
+
+
+test("Lark maps rate limits and retry headers without leaking SDK data", () => {
+  for (const apiCode of [99991400, 230020]) {
+    const error = { message: "SECRET", response: { status: 400, data: { code: apiCode, msg: "SECRET" },
+      headers: { "Retry-After": "2", "x-ogw-ratelimit-reset": "7", Authorization: "SECRET" } } };
+    const failure = larkDeliveryError(error).failure;
+    assert.equal(failure.kind, "retryable"); assert.equal(failure.retryAfterMs, 7000);
+    assert.equal(failure.code, `lark:${apiCode}`); assert.doesNotMatch(JSON.stringify(failure), /SECRET|Authorization/);
+  }
+  const now = Date.now;
+  try {
+    Date.now = () => Date.parse("2026-11-01T00:00:00Z");
+    assert.equal(larkDeliveryError({ response: { status: 429, headers: { "retry-after": "Sun, 01 Nov 2026 00:00:30 GMT" } } }).failure.retryAfterMs, 30_000);
+  } finally { Date.now = now; }
+  for (const value of ["invalid", "-2", "", "Infinity", {}, ["2"]]) {
+    const failure = larkDeliveryError({ response: { status: 429, headers: { "retry-after": value } } }).failure;
+    assert.equal(failure.kind, "retryable"); assert.equal(failure.retryAfterMs, undefined);
+  }
+  assert.equal(larkDeliveryError({ code: 99991672 }).failure.kind, "permanent");
+  assert.equal(larkDeliveryError({ response: { status: 403 } }).failure.kind, "permanent");
+  for (const error of [{ code: "ETIMEDOUT" }, { response: { status: 503 } }, { code: 0 }, { code: 987654 }])
+    assert.equal(larkDeliveryError(error).failure.kind, "unknown");
+});
+
+test("Lark preserves adapter retry semantics and resumes only unconfirmed parts after restart", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-limited-"));
+  const aide = { receive: async () => { throw new Error("unused"); } };
+  const { transport, sent } = fakeTransport(); let calls = 0;
+  const rejected = new DeliveryError({ kind: "retryable", code: "limited", message: "Chat cooldown", retryAfterMs: 2500 });
+  transport.send = async (chatId, text, id) => { sent.push({ chatId, text, id }); if (++calls === 2) throw rejected; };
+  let channel = new LarkChannel(home, "cli_test", aide, transport, log);
+  t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
+  const message = { id: "parts", target: larkAddress("cli_test", "oc_chat"), text: "分片😀".repeat(3000) };
+  await assert.rejects(channel.send(message), error => { assert.deepEqual(deliveryFailure(error), rejected.failure); return true; });
+  await channel.close(); channel = new LarkChannel(home, "cli_test", aide, transport, log);
+  await channel.send(message);
+  assert.equal(sent[1]!.id, sent[2]!.id);
+  assert.equal(sent.filter(p => p.id === sent[0]!.id).length, 1);
+  assert.equal(sent[0]!.text + sent.slice(2).map(p => p.text).join(""), message.text);
 });

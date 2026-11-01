@@ -134,7 +134,7 @@ relation=observed 不表示 Me 发言或授权修改代码。
 ## 覆盖与调度
 
 不同 PullRequestSource 独立保存进度，单仓库失败不阻止其它仓库输入。当前 Repository Controller 并发为一，
-PullRequest Controller 并发为二；它们限制本地观察工作量，Connector 级统一配额仍属于[长期访问约束](README.md#外部访问约束长期方向)。
+PullRequest Controller 并发为二；它们限制本地观察工作量，实际外部访问限制由 Forge 提供方客户端适配，见[外部访问约束](README.md#外部访问约束)。
 
 PR 部分失败批次仍消费成功 items，保存结构化 issues。pending=true 表示本轮还有工作，
 complete=false 表示工作未完成或尚存覆盖缺口。404 不阻止下一批健康对象；pending=false 回到正常轮询。

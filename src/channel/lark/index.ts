@@ -11,7 +11,7 @@ import { normalize } from "@larksuiteoapi/node-sdk";
 import type { ChannelService } from "../service.ts";
 import { IncomingSchema } from "../message.ts";
 import { progressCard, cardPreviews, cardContent, cardThought, type LarkProgressReader, type LarkProgress } from "./card.ts";
-import { larkSendFailure, type LarkTransport } from "./client.ts";
+import { larkDeliveryError, larkSendFailure, type LarkTransport } from "./client.ts";
 
 /** @why Lark can return null for permission-restricted user_id; SDK normalization expects absent IDs as undefined. */
 const UserIdsSchema = z.object({ open_id: z.string().optional(),
@@ -261,7 +261,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
       try { await this.transport.send(endpoint.receiveId, text, id, endpoint.receiveIdType, endpoint.replyToMessageId); }
       catch (error) {
         this.log.warn({ outputId: message.id, target: message.target, part: index, ...larkSendFailure(error) }, "Lark send failed");
-        throw new Error("Lark send failed");
+        throw larkDeliveryError(error);
       }
       this.save({ ...this.state, delivered: [...this.state.delivered, id] });
     }
