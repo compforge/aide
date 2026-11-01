@@ -17,8 +17,8 @@
 .address-entry .list-link strong { padding-right: 30px; }
 .address-more { position: absolute; top: 8px; right: 6px; padding: 2px 8px; background: transparent; color: #68776c; font-size: 20px; }
 .address-more:hover { background: #e8eee3; }
-.address-indicators { display: flex; gap: 8px; color: #68776c; }
-.address-status-icon { display: inline-flex; align-items: center; }
+.list-link .address-indicators { display: flex; gap: 8px; color: #68776c; margin: 0; overflow: visible; }
+.address-indicators .address-status-icon { display: inline-flex; align-items: center; margin: 0; overflow: visible; }
 .address-menu { position: fixed; inset: auto; margin: 0; padding: 5px; min-width: 148px; border: 1px solid #d8dfd5; border-radius: 10px; background: #fff; color: #20342b; box-shadow: 0 6px 24px #20342b24; }
 .address-menu button { display: block; width: 100%; padding: 9px 12px; border-radius: 6px; background: transparent; color: inherit; text-align: left; font-size: 13px; }
 .address-menu button:hover, .address-menu button:focus-visible { background: #edf1e8; }
