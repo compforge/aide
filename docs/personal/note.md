@@ -11,9 +11,10 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 | 字段 | 含义 |
 | --- | --- |
 | metadata.name / uid | 稳定 Note ID 和具体资源实例 |
-| spec.subject | 必填的 Topic / Task / Routine / Person UID 引用；subject 表示认识的关联对象，people 表示相关人物 |
+| spec.subject | 必填的 Topic / Task / Routine / Person / Address UID 引用；subject 表示认识的关联对象，people 表示相关人物 |
 | spec.summaryOf | 可选的摘要对象引用，与 subject 一致；按对象 UID 索引，每个对象至多一份摘要 Note |
 | spec.people | 涉及的人物引用，按 UID 去重；默认空数组 |
+| spec.addresses | 涉及的 Address UID 集合，近期记录按此关联分页，不改变 subject |
 | spec.text | 事项或长期摘要的完整正文，最多 16000 字符；摘要正文可清空 |
 | metadata.creationTimestamp | 创建时间 |
 | status.updatedAt | 最近一次内容修改时间 |
@@ -22,11 +23,11 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 | status.reviewed | Chief 已检查的内容版本与时间 |
 | status.organization | 最近一次移动的来源、目标、原因与时间 |
 
-subject 和 people 均有索引；recentSubject / recentPeople 另按 updatedAt 排序，recent 直接查询最新 40 条后应用字符预算，不加载全部历史。Topic 按自身 UID 查询 Note，相关 Work 的 Note 通过 Work 视图展示；Person 按 people 查询，同一 Note 可以出现在多个人物视图中。不是将正文复制进每个对象。普通事项没有配置 owner；subject / people 不阻止其所关联资源回收。Person 合并保留历史 people 引用，不将旧人物证据自动改写成目标人物。
+subject、people 和 addresses 均有索引；recentSubject / recentPeople / recentAddresses 另按 updatedAt 排序，recent 直接查询最新 40 条后应用字符预算，不加载全部历史。Topic 按自身 UID 查询 Note，相关 Work 的 Note 通过 Work 视图展示；Person 按 people 查询，同一 Note 可以出现在多个人物视图中。不是将正文复制进每个对象。普通事项没有配置 owner；subject / people 不阻止其所关联资源回收。Person 合并保留历史 people 引用，不将旧人物证据自动改写成目标人物。
 
 ## 作为 summary 的 Note
 
-Note 首先是一份独立认识，text、people、subject 和内容版本使用同一套模型。摘要 Note 的 summaryOf 指向它所总结的 Topic、Task、Routine 或 Person，与 subject 一致；普通事项 Note 不设置 summaryOf。四类对象不再保存 summary 字段，正文只保存在 Note.spec.text。
+Note 首先是一份独立认识，text、people、subject 和内容版本使用同一套模型。摘要 Note 的 summaryOf 指向它所总结的 Topic、Task、Routine、Person 或 Address，与 subject 一致；普通事项 Note 不设置 summaryOf。这些对象不再保存 summary 字段，正文只保存在 Note.spec.text。
 
 summaryOf 按对象 UID 建立索引，事务校验每个对象至多一份摘要 Note，读取无需扫描 Note 列表。已有同 subject 的 Note 可设置 summaryOf；一旦设置，该关联不可修改，归位工具只移动普通事项 Note。summarize_* 在没有摘要时创建 Note，内部名称 summary-<resource uid> 仅保证创建重试幂等，不用于识别摘要角色。之后修改正文或 people 均保持 Note UID；清空正文也保留身份。
 
@@ -81,7 +82,7 @@ resources:
 
 ## 版本与验证
 
-Topic、Task、Routine 使用 aide.dev/v1alpha4，Person 使用 aide.dev/v1alpha3，Note 使用 aide.dev/v1alpha3。模型字段和当前校验以各资源定义为准。
+Topic、Task、Routine 使用 aide.dev/v1alpha4，Person 使用 aide.dev/v1alpha3，Note 使用 aide.dev/v1alpha4。模型字段和当前校验以各资源定义为准。
 
 摘要引用场景见 tests/summary-notes.test.ts；事项场景见 tests/note-knowledge.test.ts、tests/notes.test.ts、tests/topic-persons.test.ts 和 tests/pi-agent.test.ts：独立并发、同 Note 冲突、创建重试、过期执行、祖先归属竞争、悬空历史引用、容量回收、完整读取与真实工具路径。
 

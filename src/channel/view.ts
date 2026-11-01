@@ -22,7 +22,7 @@ export interface TopicBlock extends BaseBlock {
   relation?: import("../../plugins/personal/input/model.ts").InputRelation;
   sender?: import("@compforge/aide-plugin").ResourceRef;
   receivers?: import("@compforge/aide-plugin").ResourceRef[];
-  source?: import("@compforge/aide-plugin").Address;
+  source?: import("../../plugins/personal/address/model.ts").AddressRef;
   target?: import("@compforge/aide-plugin").Address;
   label?: string;
   icon?: string;
@@ -143,6 +143,7 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
 }
 
 function outputLabel(status: Pick<import("../../plugins/personal/output/model.ts").OutputStatus, "phase" | "lastError" | "disclosure" | "deliveryWait">): string | undefined {
+  if (status.phase === "cancelled") return "已取消答复，尚未发送";
   if (status.phase === "uncertain") return "投递结果待确认";
   if (status.phase === "failed") return "投递失败";
   if (status.deliveryWait && ["pending", "sending"].includes(status.phase)) {

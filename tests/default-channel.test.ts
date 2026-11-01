@@ -1,3 +1,4 @@
+import { transportFixture } from "./output-fixture.ts";
 import { TASK_TYPE } from "../plugins/personal/task/model.ts";
 import { LOCAL_ME, personRef } from "../plugins/personal/person/model.ts";
 import assert from "node:assert/strict";
@@ -33,7 +34,7 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   const intendedMe = personRef((await aide.persons.findIdentity({ provider: "lark", scope: "cli_work", id: "ou_me" }))!);
   const notification = await aide.topics.say("group-topic", undefined, "需要你关注", undefined, { idempotencyKey: "notice", receivers: [intendedMe, intendedMe] });
   const original = aide.outputStore.get(notification.outputId)!;
-  assert.deepEqual(original.spec.target, larkPersonAddress("cli_work", "ou_me"));
+  assert.deepEqual(aide.outputStore.destination(original), larkPersonAddress("cli_work", "ou_me"));
   assert.equal(original.spec.receivers?.toJSON()[0]?.uid, (await aide.persons.findIdentity({ provider: "lark", scope: "cli_work", id: "ou_me" }))!.metadata.uid);
   assert.equal(aide.topics.inputs().length, 0);
   const me = original.spec.receivers!.toJSON()[0]!;
@@ -50,11 +51,11 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   await aide.topics.ensure("default");
   await seedInput(aide.topics, "mention", { topicId: "group-topic", origin: "channel", originId: "lark", source: group, text: "@Aide 回复我" });
   assert.deepEqual(await aide.topics.say("group-topic", undefined, "尚未投递", undefined, { idempotencyKey: "pending" }), pending);
-  assert.deepEqual(aide.outputStore.get(pending.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_me"));
+  assert.deepEqual(aide.outputStore.destination(aide.outputStore.get(pending.outputId)!), larkPersonAddress("cli_work", "ou_me"));
   const reply = await aide.topics.say("group-topic", undefined, "群内答复", undefined, { respondToInputId: "mention" });
   const immediate = await aide.topics.say("group-topic", undefined, "立即答复", undefined, { inputIds: ["mention"] });
-  assert.deepEqual(aide.outputStore.get(reply.outputId)!.spec.target, group);
-  assert.deepEqual(aide.outputStore.get(immediate.outputId)!.spec.target, group);
+  assert.deepEqual(aide.outputStore.destination(aide.outputStore.get(reply.outputId)!), group);
+  assert.deepEqual(aide.outputStore.destination(aide.outputStore.get(immediate.outputId)!), group);
   // Mark assessment complete so the following notification is not another reply to the pending mention.
   const input = aide.topics.inputStore.get("mention")!, topic = aide.topics.resource("group-topic")!;
   aide.topics.inputStore.update(input, { assess: { ...input.status.assess, completedAt: new Date().toISOString(), result: { summary: "done" } } });
@@ -62,9 +63,9 @@ test("Default Channel contacts Me independently of Topic and preserves delivery 
   aide = new Aide(home, { ...options, config: { ...options.config, defaultChannel: "personal" } }, log);
   await aide.persons.initialize();
   assert.deepEqual(await aide.topics.say("group-topic", undefined, "尚未投递", undefined, { idempotencyKey: "pending" }), pending);
-  assert.deepEqual(aide.outputStore.get(pending.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_me"));
+  assert.deepEqual(aide.outputStore.destination(aide.outputStore.get(pending.outputId)!), larkPersonAddress("cli_work", "ou_me"));
   const fresh = await aide.topics.say("group-topic", undefined, "新通知");
-  assert.deepEqual(aide.outputStore.get(fresh.outputId)!.spec.target, larkPersonAddress("cli_personal", "ou_personal"));
+  assert.deepEqual(aide.outputStore.destination(aide.outputStore.get(fresh.outputId)!), larkPersonAddress("cli_personal", "ou_personal"));
   const personal = (await aide.persons.findIdentity({ provider: "lark", scope: "cli_personal", id: "ou_personal" }))!;
   assert.deepEqual(aide.outputStore.get(fresh.outputId)!.spec.receivers?.toJSON(), [personRef(personal)]);
   assert.equal(personal.metadata.uid, original.spec.receivers!.toJSON()[0]!.uid, "Both Channels contact the same Person using different accounts");
@@ -156,7 +157,7 @@ test("Configuring existing Persons as Channel Me consolidates their accounts wit
   assert.ok(marked.spec.identities.some(i => i.scope === "cli_personal" && i.id === "ou_personal"));
   const output = await aide.topics.say("notice", undefined, "默认联系我");
   assert.deepEqual(aide.outputStore.get(output.outputId)!.spec.receivers?.toJSON(), [personRef(marked)]);
-  assert.deepEqual(aide.outputStore.get(output.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_me"));
+  assert.deepEqual(aide.outputStore.destination(aide.outputStore.get(output.outputId)!), larkPersonAddress("cli_work", "ou_me"));
   await aide.close();
   // Connector knowledge alone neither selects the default recipient nor marks this Channel's sender as Me.
   const withoutMe = config(); delete withoutMe.channels.work!.me;
@@ -170,7 +171,7 @@ test("Configuring existing Persons as Channel Me consolidates their accounts wit
   assert.equal(incoming.spec.relation, undefined);
   assert.equal(incoming.spec.sender!.uid, marked.metadata.uid);
   const reply = await aide.topics.say("message", undefined, "仍可回复原群", undefined, { respondToInputId: incoming.metadata.name });
-  assert.deepEqual(aide.outputStore.get(reply.outputId)!.spec.target, larkAddress("cli_work", "oc_group"));
+  assert.deepEqual(aide.outputStore.destination(aide.outputStore.get(reply.outputId)!), larkAddress("cli_work", "oc_group"));
 });
 
 
@@ -182,14 +183,14 @@ test("Shared say resolves Person identities by Channel, keeps Aide as sender and
   const person = await aide.persons.observe({ provider: "lark", scope: "cli_work", id: "ou_colleague" }, "李阳");
   const to = { personId: person.metadata.name, uid: person.metadata.uid };
   const sent = await aide.topics.say("default", undefined, "我是 Aide，受托询问部署进展。", undefined, { to, channelId: "work", idempotencyKey: "question" });
-  assert.deepEqual(aide.outputStore.get(sent.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_colleague"));
+  assert.deepEqual(aide.outputStore.destination(aide.outputStore.get(sent.outputId)!), larkPersonAddress("cli_work", "ou_colleague"));
   assert.deepEqual(aide.outputStore.get(sent.outputId)!.spec.receivers?.toJSON(), [personRef(person)]);
   await assert.rejects(aide.topics.say("default", undefined, "bad", undefined, { to }), /requires channelId/);
   await assert.rejects(aide.topics.say("default", undefined, "bad", undefined, { to, channelId: "personal" }), /needs one Lark identity/);
   await assert.rejects(aide.topics.say("default", undefined, "bad", undefined, { to: { ...to, uid: "stale" }, channelId: "work" }), /Unknown Person/);
   await seedInput(aide.topics, "group-mention", { topicId: "default", origin: "channel", originId: "lark", source: larkAddress("cli_work", "oc_group"), text: "question" });
   const me = await aide.topics.say("default", "group-mention", "联系被服务者", undefined, { to: { me: true } });
-  assert.deepEqual(aide.outputStore.get(me.outputId)!.spec.target, larkPersonAddress("cli_work", "ou_me"));
+  assert.deepEqual(aide.outputStore.destination(aide.outputStore.get(me.outputId)!), larkPersonAddress("cli_work", "ou_me"));
   const resources = aide.runtime.plugins.resourceClient("personal");
   await resources.delete(person, person.metadata.name, "v1");
   assert.deepEqual(await aide.topics.say("default", undefined, "我是 Aide，受托询问部署进展。", undefined, { to, channelId: "work", idempotencyKey: "question" }), sent);
@@ -215,7 +216,7 @@ test("Interrupted addressless work retains notification intent until Me can be r
   await aide.personal.recoverInterrupted();
   assert.equal(aide.personal.store.get(work.id).recoveryNotice, null);
   assert.equal(aide.outputs().length, 1);
-  assert.deepEqual(aide.outputs()[0]!.target, larkPersonAddress("cli_work", "ou_me"));
+  assert.deepEqual(aide.addresses.endpoint(aide.outputs()[0]!.target), larkPersonAddress("cli_work", "ou_me"));
   // Simulate a crash after Output acceptance but before clearing the durable notice.
   await aide.personal.store.save({ ...aide.personal.store.get(work.id), recoveryNotice: notice });
   await aide.personal.recoverInterrupted();
@@ -225,8 +226,8 @@ test("Interrupted addressless work retains notification intent until Me can be r
 
 test("Lark thread replies preserve the original message endpoint through Output delivery", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-thread-output-"));
-  const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No inference"); } }, home), config: config(), checkDisclosure: async () => ({ allowed: true, reason: "test support" }),
-    destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: true }) }, log);
+  const aide = new Aide(home, { ...fakeOptions({ async execute() { throw new Error("No inference"); } }, home), config: config(), checkDisclosure: async () => ({ allowed: true, reason: "test support" }) }, log);
+  transportFixture(aide);
   await aide.persons.initialize();
   const calls: unknown[][] = [];
   const channel = new LarkChannel(home, "cli_work", aide, { start: async () => {}, close() {}, async chatName() { return undefined; }, async send(...args) { calls.push(args); } }, log);

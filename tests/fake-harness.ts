@@ -113,7 +113,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const ids = new InputStore(home).list().filter(i => i.status.assess?.executionId === c.status.execution?.id && !i.status.assess?.completedAt).map(i => i.metadata.name);
             const immediate = ids.map(id => new InputStore(home).get(id)!.spec).filter(i => inputAttention(i) === InputAttention.Immediate);
             const first = immediate[0]?.source;
-            const address = immediate.length ? (first && immediate.every(i => i.source && sameAddress(first, i.source)) ? first : undefined) : c.spec.address;
+            const address = immediate.length ? (first && immediate.every(i => i.source && first.uid === i.source.uid) ? first : undefined) : c.spec.address;
             if (run && address && agent.notify !== false && typeof result === "string" && result) {
               new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])).create(topicId, randomUUID(), outputSpec(c, { topicId, text: result }, { executionId: run.id, target: address, inputIds: ids, inputUids: Object.fromEntries(ids.map(id => [id, new InputStore(home).get(id)!.metadata.uid])) }));
             }

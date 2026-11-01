@@ -18,11 +18,11 @@ Input → Route → Topic / Chief → Task / Routine
                                Channel / Connector 投递与回执
 ```
 
-Output 是 Personal 定义的 `aide.dev/v1alpha3 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Topic 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标单独保存为 `Address`：`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark 聊天 endpoint 是分别 URI 编码的 appId / chatId；按用户身份投递时为 appId / open_id / openId。Personal 在产出时明确选择地址，Channel 发送时只读检查后 status.delivery 的 target/text，不解析 Topic ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
+Output 是 Personal 定义的 `aide.dev/v1alpha4 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Topic 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标保存为独立 Address 资源的 UID 引用；平台位置保存在 Address.spec.endpoint，实际发送坐标保存在 status.delivery.target。传输地址中，`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark 聊天 endpoint 是分别 URI 编码的 appId / chatId；按用户身份投递时为 appId / open_id / openId。Personal 在产出时明确选择地址，Channel 发送时只读检查后 status.delivery 的 target/text，不解析 Topic ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
 
 ### Status
 
-phase 表达 pending、sending、delivered、failed 或 uncertain；attempts 保存尝试次数，底座队列负责错误退避，deliveredAt、receipt 保存投递依据，lastError 保存安全提取的错误。字段见 [OutputStatus](../../plugins/personal/output/model.ts)。状态由 Output Reconciler 维护，创建成功与外部送达分开。
+phase 表达 pending、sending、delivered、failed、uncertain 或 cancelled；attempts 保存尝试次数，底座队列负责错误退避，deliveredAt、receipt 保存投递依据，lastError 保存安全提取的错误。字段见 [OutputStatus](../../plugins/personal/output/model.ts)。状态由 Output Reconciler 维护，创建成功与外部送达分开。
 
 ## 投递与恢复
 
@@ -42,7 +42,7 @@ Output 由独立 Reconciler 检查材料与受众，并持久化实际投递目�
 
 失败日志记录 Output ID 和安全提取的诊断，Lark 另记录目的地、分片、平台错误码、HTTP 状态或网络错误码。SDK 请求配置、凭证、消息正文和自由文本不写入日志或 Output.status。
 
-Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Topic 删除后仍可完成投递。进展卡片只镜像已送达该聊天的 Output，不提前确认投递，也不展示私有思考和工具结果。
+Address.muted 对最终发送、分片及进度卡均生效。群成员使用持续观察积累的 Address.people。Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Topic 删除后仍可完成投递。进展卡片只镜像已送达该聊天的 Output，不提前确认投递，也不展示私有思考和工具结果。
 
 需求平台评论发送使用独立的 Host 投递器。没有已确认的提供方幂等键时，发送中断或超时进入 uncertain；匹配目标、正文及持久投递记录的回读可以确认成功，自动重发停止。详情见 [需求平台](../connector/requirements.md)。
 
@@ -62,24 +62,24 @@ Personal 声明 OutputPrinter，由 Host 加载，`describe` 返回完整正文�
 
 ### 统一沟通工具
 
-`say` 成功返回 `{ outputId, accepted: true }`，只确认内容已持久化接纳，不表示已送达。Agent 记录已创建输出即可，不负责查询送达或投递重试；Output Reconciler 维护持久投递状态，界面与诊断按需查看。不因 pending 重建消息。Chief 用工具调用 ID 去重；同一调用的重试返回原 Output，不同调用可以为同一批输入创建多个 Output。Task / Routine 的 report 原子提交业务进展与 Input 办理回执，say 独立创建 Output；两个工具不是同一笔事务。投递失败不会重新运行 Harness 或外部动作，输出存在也不证明 report 已成功。
+`say` 成功返回 `{ outputId, accepted: true }`，只确认内容已持久化接纳，不表示已送达。Agent 记录已创建输出即可，不负责查询送达或投递重试；Output Reconciler 维护持久投递状态，界面与诊断按需查看。不因 pending 重建消息。Chief 用工具调用 ID 去重；同一调用的重试返回原 Output，主动沟通的不同调用可以为同一批材料创建多个 Output；明确 respondToInputId 的答复按原始消息去重，见 [Address](address.md)。Task / Routine 的 report 原子提交业务进展与 Input 办理回执，say 独立创建 Output；两个工具不是同一笔事务。投递失败不会重新运行 Harness 或外部动作，输出存在也不证明 report 已成功。
 
 Chief、Task、Routine 共用 say 和只读 list_contacts。Aide 始终是发送者；to={me:true} 联系被服务者，to={personId,uid} 联系其他 Person。Agent 根据已有委托判断主动联系权限；工具验证活跃执行、输入归属、身份与目的地，Channel 使用自己的机器人身份发送。知道某人的身份、能读取其消息，不构成主动联系授权。
 
-list_contacts 提供分页联系人和不含凭证的 Channel 配置名。指定 Person 与 channelId 时，解析该 Channel app 作用域内唯一的身份并私聊；指定 target 则明确群聊或其他地址。显式联系 Me 可以省略 channelId，使用默认 Channel。缺失、过期或有歧义的身份报错，不改投其他人。to 与 receivers 互斥；respondToInputId 与 to / channelId / target 互斥。
+list_contacts 提供分页联系人和不含凭证的 Channel 配置名。指定 Person 与 channelId 时，解析该 Channel app 作用域内唯一的身份并私聊；指定 target 则明确群聊或其他地址。显式联系 Me 可以省略 channelId，使用默认 Channel。缺失、过期或有歧义的身份报错，不改投其他人。to 与 receivers 互斥；respondToInputId 与 to / channelId 互斥，可与 target 一起指定答复及场合。
 
-Lark 话题 Channel Input 的地址包含原消息 ID。回复时使用 SDK message.reply 和 reply_in_thread，Output 持久保存该位置；不会仅因同属一个 Topic 就在群主流发出话题答复。
+Lark Input 引用聊天 Address，replyToMessageId 单独记录原消息 ID。回复时使用 SDK message.reply 和 reply_in_thread，Output 持久保存该位置；不会仅因同属一个 Topic 就在群主流发出话题答复。
 
 ### 地址与收件处
 
-Input 的 `source?: Address` 表达事情发生、可以联络的位置；`sender` 引用 Person，`sessionId` 表达话题共性，三者独立。Lark Source 可以记录观察消息所在群的地址，这本身不要求回复。
+Input 的 `source?: AddressRef` 表达事情发生、可以联络的位置；`sender` 引用 Person，`sessionId` 表达话题共性，三者独立。Lark Source 可以记录观察消息所在群的地址，这本身不要求回复。
 
 Topic 的 `spec.address?: Address` 只在创建时从首个 Channel Input 初始化。Source 创建的会话不自动拥有默认地址；后续追加或路由到系统 Default 均不覆盖地址，也不为无地址会话补值。
 
 `say` 的目标选择：
 
-1. `respondToInputId` 仅接受 Channel Input，直接回复其 source，并将它加入可选 inputIds；没有显式指定 receivers 时，以该 Input.sender 作为收件人。Source 观察和 Chief 自主决定不构成直接回复入口，使用它们会拒绝创建 Output。
-2. `target` 明确选择通知地址，不能同时指定 respondToInputId。
+1. `respondToInputId` 接受 Channel Input 和 Source 的原始群内 @Me 消息，默认回复 source，并将它加入 inputIds；没有显式 receivers 时以 Input.sender 为收件人。普通 Source 观察不自动成为代答入口。
+2. `target` 明确选择场合；可与 respondToInputId 同时提供，例如将群内问题的敏感答复改到合适的私有地址。
 3. 两者都未提供时，关联 Input（未指定时为当前调用关联的材料）中的 immediate Channel 输入具有同一个有效地址，则按规则回复该地址，包括原群。不能唯一确定时，由当前 Agent 判断相关 Address 并通过 target 指定；Agent 也无法确定、仍省略地址时，通过默认 Channel 联系 Me。Topic.address 不作为通知的隐式目标。Source 的 attention 即使为 immediate，也不使观察地址成为隐式回复目标。
 
 根据外部观察主动沟通时，Agent 仍须独立判断授权，并选择已知的通知目标；指定 target 只是明确目的地，不自动产生授权。助理身份和代理边界见 [Kernel](../kernel.md#助理定位与身份边界)。

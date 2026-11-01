@@ -1,3 +1,5 @@
+import { allowAddress } from "./address-fixture.ts";
+import { transportFixture } from "./output-fixture.ts";
 import { DeliveryError, deliveryFailure } from "@compforge/aide-connector";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -15,7 +17,6 @@ import { fakeOptions as baseFakeOptions } from "./fake-harness.ts";
 import { LOCAL_ME } from "../plugins/personal/person/model.ts";
 // These transport tests use a known Me audience; disclosure rejection has dedicated tests.
 const fakeOptions = (...args: Parameters<typeof baseFakeOptions>) => ({ ...baseFakeOptions(...args),
-  destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: true }),
   checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }) });
 
 const log = pino({ level: "silent" });
@@ -35,12 +36,14 @@ function fakeTransport(botIdentity?: LarkTransport["botIdentity"]) {
 
 test("Lark inbox survives restart; duplicate events do not execute twice; ordinary topic does not create Work", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   let routes = 0;
   const aide = new Aide(home, fakeOptions({
     async chief(prompt) { routes++; return prompt.includes('小明') ? "你好，小明" : "怎么称呼你？"; },
     async execute() { throw new Error("No work expected"); },
   }, home, [], home, "cli_test"), log);
   const { transport, sent } = fakeTransport();
+  if (aide instanceof Aide) transportFixture(aide);
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
   channel.receive(event("om_1", "写个问候"));
@@ -72,6 +75,7 @@ test("Lark inbox survives restart; duplicate events do not execute twice; ordina
 
 test("Lark rejects persisted inputs without an exact topic key before intake", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-key-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   let received = 0;
   const aide = { receive: async () => { received++; throw new Error("Unexpected intake"); } };
   const { transport } = fakeTransport();
@@ -93,8 +97,10 @@ test("Lark rejects persisted inputs without an exact topic key before intake", a
 
 test("Lark sends explicit destinations and retries the same part id after restart", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-outbox-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const aide = { receive: async () => { throw new Error("unused"); } };
   const { transport, sent } = fakeTransport();
+  if (aide instanceof Aide) transportFixture(aide);
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   const message = { id: "news", target: larkAddress("cli_test", "oc_chat"), text: "有变化😀".repeat(2000) };
@@ -118,6 +124,7 @@ test("Lark sends explicit destinations and retries the same part id after restar
 
 test("Lark ignores unaddressed group/bot events and reports unsupported input and intake failure without automatic reexecution", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-errors-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   let received = 0;
   const aide = { receive: async () => { received++; throw new Error("private data"); } };
   const { transport, sent } = fakeTransport();
@@ -142,6 +149,7 @@ test("Lark ignores unaddressed group/bot events and reports unsupported input an
 
 test("Lark malformed-event diagnostics identify invalid fields without logging message content", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-invalid-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const entries: string[] = [];
   const diagnosticLog = pino({ level: "warn" }, { write(line) { entries.push(line); } });
   const { transport } = fakeTransport();
@@ -159,6 +167,7 @@ test("Lark malformed-event diagnostics identify invalid fields without logging m
 
 test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats and deduplicates concurrent group events", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-group-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const prompts: string[] = [];
   const aide = new Aide(home, fakeOptions({
     async chief(prompt) { prompts.push(prompt); return "已收到群内请求"; },
@@ -167,6 +176,7 @@ test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats a
   const { transport, sent } = fakeTransport({ openId: "ou_aide", name: "Aide" });
   const lookups: string[] = [];
   transport.chatName = async chatId => { lookups.push(chatId); return chatId === "oc_group" ? "沙箱支持群" : "另一支持群"; };
+  transportFixture(aide);
   let channel = new LarkChannel(home, "cli_group", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const group = (id: string, text: string, chatId = "oc_group", mentions = [
@@ -209,6 +219,7 @@ test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats a
 
 test("Lark persists thread topics while cards and failure notices retain the real chat destination", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-threads-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const received: Incoming[] = [], queried: string[] = [], cardChats: string[] = [];
   const { transport, sent } = fakeTransport({ openId: "ou_bot", name: "Aide" });
   let nameReads = 0;
@@ -266,6 +277,7 @@ test("Lark persists thread topics while cards and failure notices retain the rea
 
 test("Lark accepts nullable permission-restricted user IDs and still requires the bot open ID", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-null-ids-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const received: { id: string; text: string }[] = [];
   const { transport } = fakeTransport({ openId: "ou_aide", name: "Aide" });
   const channel = new LarkChannel(home, "cli_null_ids", {
@@ -299,6 +311,7 @@ test("Lark accepts nullable permission-restricted user IDs and still requires th
 
 test("Lark leaves group mentions disabled without bot identity and handles empty or non-text mentions without executing Chief", async (t) => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-group-empty-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const { transport, sent } = fakeTransport();
   const aide = { receive: async () => { throw new Error("No Chief execution expected"); } };
   let channel = new LarkChannel(home, "cli_group_empty", aide, transport, log);
@@ -382,8 +395,10 @@ test("official SDK sends bot text with a stable uuid and checks API-level failur
 
 test("Persisted Lark part receipts allow Output acknowledgement recovery without another send", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-receipt-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const aide = { receive: async () => { throw new Error("unused"); } };
   const { transport, sent } = fakeTransport();
+  if (aide instanceof Aide) transportFixture(aide);
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   const messages = ["first", "second"].map(id => ({ id, target: larkAddress("cli_test", "oc_chat"), text: id }));
@@ -396,6 +411,7 @@ test("Persisted Lark part receipts allow Output acknowledgement recovery without
 
 test("Chat name lookup failures keep group intake available and never expose SDK errors", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-name-failure-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const received: Incoming[] = [], entries: string[] = [];
   let reads = 0;
   const { transport } = fakeTransport({ openId: "ou_bot", name: "Aide" });
@@ -443,10 +459,12 @@ test("Lark maps rate limits and retry headers without leaking SDK data", () => {
 
 test("Lark preserves adapter retry semantics and resumes only unconfirmed parts after restart", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-limited-"));
+  for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const aide = { receive: async () => { throw new Error("unused"); } };
   const { transport, sent } = fakeTransport(); let calls = 0;
   const rejected = new DeliveryError({ kind: "retryable", code: "limited", message: "Chat cooldown", retryAfterMs: 2500 });
   transport.send = async (chatId, text, id) => { sent.push({ chatId, text, id }); if (++calls === 2) throw rejected; };
+  if (aide instanceof Aide) transportFixture(aide);
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   const message = { id: "parts", target: larkAddress("cli_test", "oc_chat"), text: "分片😀".repeat(3000) };

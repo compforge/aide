@@ -1,3 +1,5 @@
+import { Addresses } from "../plugins/personal/address/service.ts";
+import { addressRef } from "../plugins/personal/address/model.ts";
 import { personRefs } from "../plugins/personal/person/model.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
@@ -227,4 +229,17 @@ test("Person consolidation preserves higher summary sensitivity and refuses inco
   await assert.rejects(f.persons.merge(version(publicSummary), version(merged)), /disclosure scopes differ/);
   assert.equal((await f.persons.read(another.metadata.name)).summaryText, "Another fact");
   assert.equal((await f.persons.read(merged.metadata.name)).summaryNote!.visibility, "people");
+});
+
+/** @case Current Address participants follow explicit identity consolidation; observed history stays unchanged. */
+test("Person merge transfers Address participants without changing mute or summary", async t => {
+  const f = await setup(t), source = await f.create("source"), target = await f.create("target");
+  const places = new Addresses(f.home);
+  const place = places.observe(webAddress("shared"), [personRef(source), personRef(target)], { muted: true });
+  await places.summarize(addressRef(place), "讨论安排", places.view(addressRef(place)).summaryVersion);
+  await f.persons.merge(version(source), version(target));
+  const current = places.read(addressRef(place));
+  assert.deepEqual([...current.status.people].map(p => p.uid), [target.metadata.uid]);
+  assert.equal(current.spec.muted, true);
+  assert.equal(places.view(addressRef(place)).summaryText, "讨论安排");
 });

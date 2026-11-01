@@ -278,7 +278,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
       topicKey: location.selector.key, ...(location.name ? { topicName: location.name } : {}),
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,
-        kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,
+        chatType: entry.kind === "direct" ? "p2p" : "group", kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,
         originalInputId: inputName(this.watch, message.id, 0), ...(annotatedContext?.messages.length ? { context: annotatedContext } : {}),
         messageTruncated: message.content.length !== entry.message.content.length } };
     const planned = { ...entry, delivery: { name, spec, known, related } };

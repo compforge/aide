@@ -34,18 +34,18 @@ test("Source addresses never supply direct or urgency-based reply destinations",
   await seedInput(store, "external", { topicId: "observations", origin: "source", originId: "personal.lark",
     source: observed, attention: InputAttention.Immediate, relation: "sent", text: "Me asks a colleague a question" });
   const before = store.outputs().length;
-  await assert.rejects(store.say("observations", "external", "unsolicited reply", undefined, { respondToInputId: "external" }), /Direct replies require a Channel Input/);
+  await assert.rejects(store.say("observations", "external", "unsolicited reply", undefined, { respondToInputId: "external" }), /Source reply requires an original group mention/);
   assert.equal(store.outputs().length, before);
   await aide.persons.initialize();
   const fallback = await store.say("observations", "external", "Notify Me rather than the observed group");
-  assert.deepEqual(store.outputStore.get(fallback.outputId)!.spec.target, webAddress("observations"));
+  assert.deepEqual(store.outputStore.destination(store.outputStore.get(fallback.outputId)!), webAddress("observations"));
   const explicit = await store.say("observations", "external", "Aide's suggestion", undefined, { target: contact });
-  assert.deepEqual(store.outputStore.get(explicit.outputId)!.spec.target, contact);
+  assert.deepEqual(store.outputStore.destination(store.outputStore.get(explicit.outputId)!), contact);
   await store.ensure("known-contact", contact);
   await seedInput(store, "urgent-observation", { topicId: "known-contact", origin: "source", originId: "personal.lark",
     source: observed, attention: InputAttention.Immediate, text: "external change" });
   const notification = await store.say("known-contact", "urgent-observation", "Update within an existing mandate");
-  assert.deepEqual(store.outputStore.get(notification.outputId)!.spec.target, webAddress("known-contact"), "Topic address does not override default contact");
+  assert.deepEqual(store.outputStore.destination(store.outputStore.get(notification.outputId)!), webAddress("known-contact"), "Topic address does not override default contact");
 });
 
 test("ChannelAddress extends Address and owns canonical endpoint encoding and admission", () => {
@@ -76,13 +76,13 @@ test("Channel creation captures its first address, bypasses Default and subseque
   assert.deepEqual(topic.resource("opaque-topic")!.spec.address, group);
   assert.equal(topic.resource("opaque-topic")!.spec.name, "群名称");
   assert.deepEqual(aide.personal.topics.resource("inbox")!.spec.address, inbox);
-  const replies = aide.outputStore.list().filter(o => (o.spec.target as ChannelAddress).endpoint === group.endpoint);
+  const replies = aide.outputStore.list().filter(o => (aide.addresses.endpoint(o.spec.target) as ChannelAddress).endpoint === group.endpoint);
   assert.equal(replies.length, 1, "Only the explicit topic replies; Default receives no copy");
   await aide.receive({ id: "second", channelId: "lark", topicId: "opaque-topic", topicName: "不能覆盖已有名称", text: "second", source: elsewhere });
   await aide.settled();
   assert.deepEqual(topic.resource("opaque-topic")!.spec.address, group);
   assert.equal(topic.resource("opaque-topic")!.spec.name, "群名称");
-  assert.ok(aide.outputStore.list().some((o) => o.spec.topicId === "opaque-topic" && (o.spec.target as ChannelAddress).endpoint === elsewhere.endpoint));
+  assert.ok(aide.outputStore.list().some((o) => o.spec.topicId === "opaque-topic" && (aide.addresses.endpoint(o.spec.target) as ChannelAddress).endpoint === elsewhere.endpoint));
   await assert.rejects(aide.receive({ id: "wrong", channelId: "web", topicId: "must-not-exist", text: "wrong", source: group }), /different Channel/);
   assert.equal(aide.topics.get("must-not-exist"), undefined);
 });
@@ -100,14 +100,14 @@ test("An addressless Topic stays addressless after Source and Channel append; di
   await aide.receive({ id: "request", channelId: "lark", topicId: "topic", text: "reply here", source: address });
   await aide.settled();
   assert.equal(c.resource("topic")!.spec.address, undefined);
-  assert.deepEqual(aide.outputStore.list()[0]!.spec.target, address);
+  assert.deepEqual(aide.outputStore.destination(aide.outputStore.list()[0]!), address);
   assert.equal(aide.outputStore.list()[0]!.status.disclosure?.decision, "denied", "Unknown actual audience is privately reported to Me");
   await aide.close();
   const reopened = new Aide(root, options, pino({ level: "silent" }));
   try {
     await reopened.start(); await reopened.settled();
     assert.equal(reopened.personal.topics.resource("topic")!.spec.address, undefined);
-    assert.deepEqual(reopened.outputStore.list()[0]!.spec.target, address);
+    assert.deepEqual(reopened.outputStore.destination(reopened.outputStore.list()[0]!), address);
   } finally { await reopened.close(); }
 });
 
@@ -121,25 +121,25 @@ test("say resolves direct, aggregate and proactive targets without guessing from
   await scope.plugins.resourceClient("personal").patchStatus(store.resource("mixed")!, { execution: { id: "run", startedAt: new Date().toISOString() } });
   await aide.persons.initialize();
   const fallback = await store.say("mixed", undefined, "unable to choose", "run");
-  assert.deepEqual(store.outputStore.get(fallback.outputId)!.spec.target, webAddress("mixed"));
+  assert.deepEqual(store.outputStore.destination(store.outputStore.get(fallback.outputId)!), webAddress("mixed"));
   const rule = await store.say("mixed", undefined, "reply to a", "run", { inputIds: ["a"] });
-  assert.deepEqual(store.outputStore.get(rule.outputId)!.spec.target, a);
+  assert.deepEqual(store.outputStore.destination(store.outputStore.get(rule.outputId)!), a);
   const options = { respondToInputId: "b", idempotencyKey: "tool-1" };
   const first = await store.say("mixed", undefined, "reply to b", "run", options);
   assert.deepEqual(await store.say("mixed", undefined, "reply to b", "run", options), first);
-  assert.deepEqual(store.outputStore.get(first.outputId)!.spec.target, b);
+  assert.deepEqual(store.outputStore.destination(store.outputStore.get(first.outputId)!), b);
   assert.deepEqual(store.outputStore.get(first.outputId)!.spec.inputIds, ["b"]);
   const aggregate = await store.say("mixed", undefined, "aggregate", "run", { target: a, inputIds: ["a", "b"] });
   assert.deepEqual(store.outputStore.get(aggregate.outputId)!.spec.inputIds, ["a", "b"]);
-  assert.deepEqual(store.outputStore.get(aggregate.outputId)!.spec.target, a);
+  assert.deepEqual(store.outputStore.destination(store.outputStore.get(aggregate.outputId)!), a);
   assert.deepEqual(store.get("mixed")!.pendingInputIds, ["a", "b"]);
-  await assert.rejects(store.say("mixed", undefined, "conflict", "run", { target: a, respondToInputId: "b" }), /not both/);
+  assert.deepEqual(await store.say("mixed", undefined, "already answered", "run", { target: a, respondToInputId: "b" }), first);
   await store.ensure("addressless");
   await aide.persons.initialize();
   const defaultReply = await store.say("addressless", undefined, "contact me");
-  assert.deepEqual(store.outputStore.get(defaultReply.outputId)!.spec.target, webAddress("addressless"));
+  assert.deepEqual(store.outputStore.destination(store.outputStore.get(defaultReply.outputId)!), webAddress("addressless"));
   const proactive = await store.say("addressless", undefined, "proactive", undefined, { target: b });
-  assert.deepEqual(store.outputStore.get(proactive.outputId)!.spec.target, b);
+  assert.deepEqual(store.outputStore.destination(store.outputStore.get(proactive.outputId)!), b);
   assert.equal(store.outputStore.get(proactive.outputId)!.spec.inputIds, undefined);
 });
 
@@ -204,13 +204,13 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
   const say = chiefTools(emptyConnectors, (id, input) => store.say("topic", undefined, input.text, undefined, { ...input, idempotencyKey: id })).find((tool) => tool.name === "say")!;
   const reply = await say.execute("reply", { text: "确认了", respondToInputId: "question" }, undefined, undefined, {} as never);
   const direct = aide.outputs().find((output) => output.text === "确认了")!;
-  assert.deepEqual(direct.receivers, [sender]); assert.deepEqual(direct.target, source);
+  assert.deepEqual(direct.receivers, [sender]); assert.deepEqual(aide.addresses.endpoint(direct.target), source);
   assert.deepEqual(await say.execute("reply", { text: "确认了", respondToInputId: "question" }, undefined, undefined, {} as never), reply);
   await say.execute("report", { text: "综合进展", target, receivers: [manager, sender], inputIds: ["question"] }, undefined, undefined, {} as never);
   const report = aide.outputs().find((output) => output.text === "综合进展")!;
   const receivers = [manager, sender].sort((a, b) => a.uid! < b.uid! ? -1 : 1);
-  assert.deepEqual(report.receivers, receivers); assert.deepEqual(report.target, target);
-  await say.execute("broadcast", { text: "群公告", respondToInputId: "question", receivers: [] }, undefined, undefined, {} as never);
+  assert.deepEqual(report.receivers, receivers); assert.deepEqual(aide.addresses.endpoint(report.target), target);
+  await say.execute("broadcast", { text: "群公告", target: source, inputIds: ["question"], receivers: [] }, undefined, undefined, {} as never);
   assert.deepEqual(aide.outputs().find((output) => output.text === "群公告")!.receivers, []);
   await store.say("topic", undefined, "unspecified audience", undefined, { target, inputIds: ["question"] });
   assert.equal(aide.outputs().find((output) => output.text === "unspecified audience")!.receivers, undefined);
@@ -218,10 +218,10 @@ test("say retains receiver Persons through the Chief tool, storage, projection a
   assert.deepEqual(persisted.spec.receivers?.toJSON(), receivers);
   assert.deepEqual(JSON.parse(outputPrinter.describe(persisted).split("Receiver Persons: ")[1]!.split("\n")[0]!), receivers);
   const input = store.inputStore.get("question")!;
-  assert.ok(inputPrinter.describe(input).includes(`Source address: ${JSON.stringify(source)}`));
+  assert.ok(inputPrinter.describe(input).includes(`Source address: ${JSON.stringify(input.spec.source)}`));
   assert.ok(inputPrinter.describe(input).includes(JSON.stringify(sender)));
   const blocks = topicView(aide, "topic").blocks;
-  assert.deepEqual(blocks.find((block) => block.inputId === "question")!.source, source);
+  assert.deepEqual(blocks.find((block) => block.inputId === "question")!.source, input.spec.source);
   assert.deepEqual(blocks.find((block) => block.id === `message:${report.id}`)!.receivers, receivers);
   assert.deepEqual(store.get("topic")!.pendingInputIds, ["question"]);
   assert.equal(aide.outputs().length, 4, "Two receivers describe one Output; they do not fan out delivery");
@@ -266,7 +266,7 @@ test("Aide rejects unowned targets and diagnoses pending delivery after the Chan
     const output = restarted.outputStore.get(receipt.outputId)!;
     assert.equal(output.status.phase, "delivered");
     assert.equal(output.status.disclosure?.decision, "denied");
-    assert.match(output.status.disclosure!.reason, /audience/);
+    assert.match(output.status.disclosure!.reason, /Channel is disabled/);
     assert.deepEqual(output.status.delivery?.target, webAddress("default"));
     assert.equal(output.status.attempts, 1, "The same Output records its actual Web delivery attempt");
     await assert.rejects(restarted.topics.say("default", undefined, "still disabled", undefined,

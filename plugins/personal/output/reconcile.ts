@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { ADDRESS_TYPE } from "../address/model.ts";
 import { PERSON_TYPE, type PersonResource } from "../person/model.ts";
 import type { PluginContext, ReconcileRequest } from "@compforge/aide-plugin";
 import { OUTPUT_TYPE, type Output, type OutputReconcileResult } from "./model.ts";
@@ -6,12 +7,12 @@ import { OUTPUT_TYPE, type Output, type OutputReconcileResult } from "./model.ts
 /** @spec Output uses the shared per-resource serialized queue and restart recovery. Channels cannot send unchecked intent. */
 export function registerOutputs(context: PluginContext): void {
   // Policy changes wake waiting Outputs; an old deadline never overrides a newly relaxed policy.
-  const pending = async (uid: string) => {
+  const pending = async (uid: string, index = "pendingReceiver") => {
     const requests: ReconcileRequest[] = [];
     let continuation: string | undefined;
     do {
       const page = await context.resources.page(OUTPUT_TYPE, { limit: 100, consistency: "live",
-        matchIndex: { name: "pendingReceiver", value: uid }, ...(continuation ? { continue: continuation } : {}) });
+        matchIndex: { name: index, value: uid }, ...(continuation ? { continue: continuation } : {}) });
       requests.push(...page.items.map(r => ({ name: r.metadata.name, namespace: r.metadata.namespace })));
       continuation = page.metadata.continue || undefined;
     } while (continuation);
@@ -25,6 +26,10 @@ export function registerOutputs(context: PluginContext): void {
         return !isDeepStrictEqual(before.spec.delivery, after.spec.delivery) || before.metadata.deletionTimestamp !== after.metadata.deletionTimestamp
           ? pending(after.metadata.uid) : [];
       },
+    } }, { resourceType: ADDRESS_TYPE, handler: {
+      create: async () => [], delete: ({ object }) => pending(object.metadata.uid, "pendingAddress"),
+      update: async ({ oldObject, newObject }) => !isDeepStrictEqual(oldObject.spec, newObject.spec)
+        || !isDeepStrictEqual(oldObject.status, newObject.status) ? pending(newObject.metadata.uid, "pendingAddress") : [],
     } }],
     reconcile: async (execution, output: Readonly<Output>) => {
       if (output.metadata.deletionTimestamp || !["pending", "sending"].includes(output.status.phase)) return;

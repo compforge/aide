@@ -71,7 +71,7 @@ Chief 通过 say 提问，用户在原聊天回复形成新 Input，群内回复
 
 ## 话题内回复
 
-群话题的 Channel Input 使用包含 appId、chatId 与原消息 ID 的地址；say 回复该 Input 时，Output 保留这个位置。投递使用原生 SDK 的 message.reply 与 reply_in_thread，按 Output 分段生成稳定 UUID 并保存回执。普通群消息、私聊和按 open_id 主动联系仍走对应的发送路径。Topic key 决定信息归属，回复地址决定实际投递位置，两者分别保存。
+群话题的 Input 引用按 appId/chatId 归一的 Address，另存原消息 ID；say 回复该 Input 时，Output 保留这个位置。投递使用原生 SDK 的 message.reply 与 reply_in_thread，按 Output 分段生成稳定 UUID 并保存回执。普通群消息、私聊和按 open_id 主动联系仍走对应的发送路径。Topic key 决定信息归属，回复地址决定实际投递位置，两者分别保存。
 
 
 ## 出站失败与频控
@@ -84,3 +84,5 @@ Chief 通过 say 提问，用户在原聊天回复形成新 Input，群内回复
 
 Output 重试继续使用稳定的分片 UUID；已持久确认的分片不重发，后续分片失败不会提前确认整个 Output。
 适配器报告安全诊断，不透传 SDK 自由文本、响应体或凭证。完整生命周期见 [Output 投递与恢复](../personal/output.md#投递与恢复)。
+
+发送前由 [Address](../personal/address.md) 的 muted 控制 Aide 能否发言；进度卡和固定提示也遵守此设置。新发现的外部场合默认禁言，在 Web Addresses 页面解除禁言后仍须通过披露检查。

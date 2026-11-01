@@ -1,3 +1,4 @@
+import { addressRefs, type AddressRef } from "../address/model.ts";
 import { personRefs, type PersonRef } from "../person/model.ts";
 import { type MaterialDisclosure } from "../disclosure.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
@@ -7,7 +8,7 @@ import { resourceRef } from "../input/state.ts";
 import { contentVersion } from "../context-write.ts";
 import type { ResourceContext } from "../context.ts";
 
-export interface SummaryUpdate extends MaterialDisclosure { text?: string; people?: Iterable<PersonRef> }
+export interface SummaryUpdate extends MaterialDisclosure { text?: string; people?: Iterable<PersonRef>; addresses?: Iterable<AddressRef> }
 export type SummaryResource = Resource<unknown, ResourceContext>;
 const summaryName = (resource: SummaryResource) => `summary-${resource.metadata.uid}`;
 type Reader = Pick<ResourceValidationContext, "page">;
@@ -51,7 +52,7 @@ export async function prepareSummary(resources: ResourceClient, owner: SummaryRe
     note = await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name });
     if (!note) {
       try { note = await resources.create(NOTE_TYPE, { name,
-        spec: { subject: SubjectSchema.parse(resourceRef(owner)), people: personRefs([]), text: "" },
+        spec: { subject: SubjectSchema.parse(resourceRef(owner)), people: personRefs([]), addresses: addressRefs([]), text: "" },
         status: { updatedAt: new Date().toISOString(), ...(writer ? { writer } : {}) } }); }
       catch (error) {
         if (!(error instanceof Error) || error.name !== "ResourceAlreadyExists") throw error;
@@ -63,7 +64,7 @@ export async function prepareSummary(resources: ResourceClient, owner: SummaryRe
   if (note.metadata.deletionTimestamp || note.spec.subject.uid !== owner.metadata.uid) throw new Error("Summary Note owner changed");
   const people = incomingPeople ?? note.spec.people;
   const visibility = update.visibility ?? note.spec.visibility ?? "people";
-  const spec = NoteSpecSchema.parse({ ...note.spec, summaryOf: resourceRef(owner), text, people,
+  const spec = NoteSpecSchema.parse({ ...note.spec, summaryOf: resourceRef(owner), text, people, addresses: update.addresses === undefined ? note.spec.addresses : addressRefs(update.addresses),
     sensitivity: update.sensitivity ?? note.spec.sensitivity ?? "L3", visibility });
   const changed = !equalResourceValue(note.spec, spec);
   const { writer: _previousWriter, ...noteStatus } = note.status;

@@ -1,3 +1,5 @@
+import { Addresses } from "./address/service.ts";
+import { addressTools } from "./address/tools.ts";
 import { personRefs } from "./person/model.ts";
 import { summaryText, summaryReference } from "./note/summary.ts";
 import { invalidateAssignment } from "./input/assignment.ts";
@@ -118,7 +120,7 @@ export class Personal {
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
       });
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, contactsTool(this.options.persons, this.options.channels ?? [], active), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active), contactsTool(this.options.persons, this.options.channels ?? [], active), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
         const c = active();
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
         this.log.info({ topicId, topicUid: input.subject?.uid ?? c.metadata.uid, noteId: result.noteId, version: result.version }, "Topic Note updated");
@@ -468,6 +470,10 @@ export class Personal {
         receivers = personRefs(await knownReceivers(this.options.persons, observation.accountId, observation.mentions ?? []));
       }
     }
+    const channelEvidence = input.observation as { chatType?: string; chatName?: string } | undefined;
+    if (input.channelId === "web" || (relation === "sent" && channelEvidence?.chatType === "p2p"))
+      new Addresses(this.store.resources.storage.home).observe(input.source, sender ? [sender] : [], { muted: false,
+        type: input.channelId === "web" ? "web" : "direct", name: channelEvidence?.chatName });
     const fact = await this.topics.submit(id, { attention: InputAttention.Immediate, topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
       origin: "channel", originId: input.channelId, source: input.source, ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });

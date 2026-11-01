@@ -13,14 +13,14 @@ Aide 围绕用户目标，将大量零散、暂时性的信息整合为可持续
           ↓ 关联、核实、判断
           ├─ 按需更新 Note
           │    ├─ 近期：持续跟进具体事情的进展、依据与未决问题
-          │    └─ 长期：关于主题、人物或工作的稳定认识（summary）
+          │    └─ 长期：关于主题、人物、工作或沟通场合的稳定认识（summary）
           ├─ 按需调整 Topic tree
           └─ 产生必要的 Output：答复、结果、提醒或待决事项
 
 更新后的 Note 参与下一次判断
 ```
 
-Input 保留收到的原始内容；Agent 结合已有 Note 与最新 Input，修订对事情的认识，并判断是否需要行动或沟通。近期与长期认识统一保存为 Note：近期 Note 跟进具体事情，长期摘要 Note 通过 summaryOf 关联 Topic、Task、Routine 或 Person。近期和长期表达内容的使用跨度，不代表固定 TTL，也不增加另一套正文存储。
+Input 保留收到的原始内容；Agent 结合已有 Note 与最新 Input，修订对事情的认识，并判断是否需要行动或沟通。近期与长期认识统一保存为 Note：近期 Note 跟进具体事情，长期摘要 Note 通过 summaryOf 关联 Topic、Task、Routine、Person 或 Address。近期和长期表达内容的使用跨度，不代表固定 TTL，也不增加另一套正文存储。
 
 这是持续更新的过程，不要求每条 Input 先写 Note 才能答复。简单问题可以直接回答；认知更新可以静默发生。Output 基于当前相关的 Note 与最新事实按需形成，不能只依赖可能尚未更新的摘要。Topic tree 表达哪些事情值得共同理解、哪些需要独立跟进。
 
@@ -114,3 +114,5 @@ report_task / report_routine 只原子提交办理报告、业务状态与 Input
 Personal 的资源定义与 Controller 经普通 Plugin 契约注册；Source、Route、Topic、Task 和 Routine 各自协调资源，Person 共享目录按需读写。Controller 之间通过资源变更与索引协作，依据持久回执判断业务完成状态。
 
 框架机制见 [Plugin](../plugin/README.md)，原生执行边界见 [Harness](../harness/README.md)，外部接入见 [Connector 与 Source](../connector/README.md)。配置阈值集中在 [配置](../configuration.md)，真实模型和平台效果按 [E2E](../e2e.md) 验收。各主题文档链接相应自动测试；替身测试不证明真实提供方连通或模型判断质量。
+
+[Address](address.md) 保存场合的认识、已知人物和发言设置，帮助 Chief 判断在什么地方与谁交流。

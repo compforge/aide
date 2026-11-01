@@ -1,3 +1,5 @@
+import { isMe } from "../plugins/personal/person/model.ts";
+import { Addresses } from "../plugins/personal/address/service.ts";
 import { OutputDelivery, type OutputTransportResolver } from "../plugins/personal/output/delivery.ts";
 import { forgeCatalog } from "../connectors/forge/catalog.ts";
 import { validateForgeSources } from "../plugins/personal/source/pull-request/config.ts";
@@ -45,7 +47,6 @@ import { IncomingSchema, type Incoming } from "./channel/message.ts";
 
 export interface AideOptions {
   checkDisclosure?: SemanticCheck;
-  destinationAudience?: (target: import("@compforge/aide-plugin").Address) => Promise<{ identities: PersonIdentity[]; complete: boolean; private: boolean }>;
   connectorCatalog?: readonly import("@compforge/aide-connector").ConnectorDescription[];
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   defaultHarnessConfig: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
@@ -81,6 +82,7 @@ export class Aide {
   private readonly messageSource: ReturnType<typeof messageWatch>;
   private readonly inputs: InputStore;
   readonly outputStore: OutputStore;
+  readonly addresses: Addresses;
   private readonly disclosure: OutputDisclosure;
   private readonly delivery: OutputDelivery;
   private readonly outputTransports = new Set<OutputTransportResolver>();
@@ -126,6 +128,7 @@ export class Aide {
     const storage = ResourceStorage.open(home);
     storage.configure(config?.resources);
     storage.register("personal", personalDefinitions);
+    this.addresses = new Addresses(home);
     this.inputs = new InputStore(home);
     this.outputStore = new OutputStore(home, target => assertChannelDelivery(target, enabledLarkApps(config?.channels ?? {})));
     this.unsubscribeOutputs = this.outputStore.subscribe(() => this.notify());
@@ -263,7 +266,8 @@ export class Aide {
     if (target) {
       const person = explicitPerson ?? (await this.persons.list()).find(p => p.isMe);
       if (!person) throw new Error("Me is not configured");
-      return { target, receivers: [personRef(person)] };
+      const endpoint = this.addresses.endpoint(target);
+      return { target: endpoint, receivers: [personRef(person)] };
     }
     const id = channelId ?? this.options.config?.defaultChannel ?? "web";
     let identity = LOCAL_ME;
@@ -281,27 +285,26 @@ export class Aide {
     } else if (explicitPerson && !explicitPerson.isMe) throw new Error("Web Channel only contacts Me; specify another Channel or an explicit target");
     const person = explicitPerson ?? await this.persons.findIdentity(identity);
     if (!person) throw new Error(`Default Channel ${id} has no Person for its configured Me identity`);
-    return { target: id === "web" ? webAddress(topicId) : larkPersonAddress(identity.scope, identity.id), receivers: [personRef(person)] };
+    const destination = id === "web" ? webAddress(topicId) : larkPersonAddress(identity.scope, identity.id);
+    this.addresses.observe(destination, [personRef(person)], isMe(person.spec, this.meMarks) ? { muted: false } : {});
+    return { target: destination, receivers: [personRef(person)] };
   }
 
   private async outputAudience(target: import("@compforge/aide-plugin").Address) {
-    assertChannelDelivery(target, enabledLarkApps(this.options.config?.channels ?? {}));
-    let identities: PersonIdentity[] = [], complete = true, privateDestination = false;
-    if (isChannelAddress(target) && target.channelId === "web") { identities = [LOCAL_ME]; privateDestination = true; }
-    else {
-      const endpoint = larkEndpoint(target);
-      if (endpoint?.receiveIdType === "open_id") { identities = [{ provider: "lark", scope: endpoint.appId, id: endpoint.receiveId }]; privateDestination = true; }
-      else if (this.options.destinationAudience) {
-        const resolved = await this.options.destinationAudience(target);
-        identities = resolved.identities; complete = resolved.complete; privateDestination = resolved.private;
-      } else complete = false;
-    }
+    try { assertChannelDelivery(target, enabledLarkApps(this.options.config?.channels ?? {})); }
+    catch { return { people: [], private: false, unavailable: "Destination Channel is disabled or unavailable" }; }
+    const endpoint = larkEndpoint(target);
+    const identity = isChannelAddress(target) && target.channelId === "web" ? LOCAL_ME
+      : endpoint?.receiveIdType === "open_id" ? { provider: "lark", scope: endpoint.appId, id: endpoint.receiveId } : undefined;
+    const person = identity && await this.persons.findIdentity(identity);
+    const address = this.addresses.observe(target, person ? [personRef(person)] : []);
     const people = [];
-    for (const identity of identities) {
-      const person = (await this.catalog.client.page<Person, PersonStatus>(PERSON_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "identity", value: JSON.stringify([identity.provider, identity.scope, identity.id]) } })).items[0];
-      if (person && !person.metadata.deletionTimestamp) people.push(person); else complete = false;
+    for (const ref of address.status.people) {
+      const p = await this.catalog.client.get<Person, PersonStatus>(ref);
+      if (p && p.metadata.uid === ref.uid && !p.metadata.deletionTimestamp) people.push(p);
+      else return { people, private: false, unavailable: "Known Address participant no longer resolves" };
     }
-    return { people: [...new Map(people.map(p => [p.metadata.uid, p])).values()], complete, private: privateDestination };
+    return { people, private: address.spec.type === "direct" || address.spec.type === "web", muted: address.spec.muted };
   }
 
   private async initializePeople() {
@@ -311,6 +314,11 @@ export class Aide {
       this.meMarks.identities.push({ provider: account.provider, scope: account.scope, id: config.me.userKey });
     }
     const result = await this.persons.initialize();
+    for (const identity of this.meMarks.identities) {
+      if (identity.provider !== "lark") continue;
+      const me = await this.persons.findIdentity(identity);
+      if (me) this.addresses.observe(larkPersonAddress(identity.scope, identity.id), [personRef(me)], { muted: false, type: "direct", name: "Me" });
+    }
     if (result.conflict) this.log.error(result.conflict, "Me consolidation deferred; original Persons preserved");
     this.log.info({ meIdentities: this.meMarks.identities.length, mePersons: (await this.persons.list()).filter(p => p.isMe).length, merged: result.merged }, "Me identities reconciled");
   }

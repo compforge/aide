@@ -1,0 +1,10 @@
+@import '../persons/style.css';
+#coordinates { overflow-wrap: anywhere; }
+#notes article { padding: 1rem 0; border-bottom: 1px solid var(--border, #d9e1d6); }
+#people a { display: block; padding: .65rem 0; }
+#list { margin-top: 1rem; }
+
+#text { width: 100%; padding: 12px; border: 1px solid #c9d5ca; border-radius: 8px; font: inherit; background: white; color: inherit; resize: vertical; }
+#list .list-link { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 10px; text-decoration: none; color: inherit; overflow-wrap: anywhere; }
+#list .list-link:hover, #list .list-link[aria-current="true"] { background: #e4ecdf; }
+@media (max-width: 700px) { .persons-page { grid-template-columns: 1fr; overflow: auto; } .person-list { max-height: 30vh; border-right: none; border-bottom: 1px solid #d8dfd5; } .person-detail { padding: 20px; overflow: visible; } }

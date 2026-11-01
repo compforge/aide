@@ -1,3 +1,4 @@
+import { obsoleteReplies, replyIdentity } from "../address/reply.ts";
 import { validateReviewRequest } from "../topic/review.ts";
 import { PersonRefSchema, PersonRefsSchema } from "../person/model.ts";
 import { ConditionsSchema } from "../conditions.ts";
@@ -11,10 +12,10 @@ import { z } from "zod";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { ResourceVersionConflict, type ResourceDefinition } from "@compforge/aide-plugin";
 import { INPUT_TYPE, INPUT_ORIGINS, InputAttention, isInternalInput, inputQueue, type InputSpec, type InputStatus } from "./model.ts";
-import { AddressSchema } from "../../../src/address.ts";
+import { AddressRefSchema } from "../address/model.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { inputPrinter } from "./printer.ts";
-export const InputSpecSchema = z.object({ source: AddressSchema.optional(), topicKey: z.string().min(1).max(500).optional(), topicId: z.string().min(1).optional(), origin: z.enum(INPUT_ORIGINS),
+export const InputSpecSchema = z.object({ source: AddressRefSchema.optional(), replyToMessageId: z.string().optional(), topicKey: z.string().min(1).max(500).optional(), topicId: z.string().min(1).optional(), origin: z.enum(INPUT_ORIGINS),
   topicName: z.string().trim().min(1).max(80).optional(),
   originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
   sender: PersonRefSchema.optional(),
@@ -55,6 +56,9 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   } },
   printer: inputPrinter,
   indexes: {
+    obsoleteReply: r => obsoleteReplies(r.spec),
+    message: r => { const identity = replyIdentity(r); return identity ? [identity.key] : []; },
+    address: r => r.spec.source ? [r.spec.source.uid] : [],
     assessActive: r => r.status.topic && r.status.assess?.executionId && !r.status.assess.completedAt ? [r.status.topic.uid] : [],
     topic: r => r.status.topic ? [r.status.topic.uid] : [],
     assignmentPending: r => !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.executionId && !r.status.assess.completedAt ? [r.status.topic.uid] : [],

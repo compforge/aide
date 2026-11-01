@@ -29,7 +29,7 @@ function setup(t: TestContext) {
   return { home, aide, store: aide.topics.inputStore };
 }
 const finished = (): InputStatus => ({ route: { completedAt: new Date().toISOString(), result: { topics: [], reason: "Quiet observation" } } });
-const observation = (n: number): InputSpec => ({ origin: "source", originId: "personal.requirements", text: `需求 ${n} needle 中文 %_`,
+const observation = (n: number): import("../plugins/personal/input/model.ts").InputSubmission => ({ origin: "source", originId: "personal.requirements", text: `需求 ${n} needle 中文 %_`,
   source: requirementAddress({ source: "work", category: "story", id: String(n) }, "project"),
   originRef: { apiVersion: "aide.dev/v1alpha1", kind: "RequirementSource", namespace: "v1", name: n % 2 ? "watch-a" : "watch-b", uid: n % 2 ? "source-a" : "source-b" } });
 
@@ -78,8 +78,8 @@ test("Browsing is scoped, does not refresh eviction access times and recognizes 
   store.submit("test", "lark", { origin: "source", originId: "personal.lark", text: "message" }, finished());
   store.submit("test", "env", { origin: "source", originId: "personal.environments", text: "workload", observation: { environment: "qa" } }, finished());
   store.storage.register("foreign", [InputDefinition]);
-  new PluginResourceStore({ home, pluginInstanceId: "foreign" }).create({ type: INPUT_TYPE, name: "foreign", spec: observation(1), status: finished() });
-  store.resources.create({ type: INPUT_TYPE, name: "nested", namespace: "v1/project/other", spec: observation(2), status: finished() });
+  new PluginResourceStore({ home, pluginInstanceId: "foreign" }).create({ type: INPUT_TYPE, name: "foreign", spec: { origin: "source", originId: "fixture", text: "foreign input" }, status: finished() });
+  store.resources.create({ type: INPUT_TYPE, name: "nested", namespace: "v1/project/other", spec: { origin: "source", originId: "fixture", text: "nested input" }, status: finished() });
   const accessed = () => store.storage.db.prepare("SELECT key, accessed FROM resources ORDER BY key").all();
   const before = accessed();
   assert.equal(browseInputs(store).total, 2);

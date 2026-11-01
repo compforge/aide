@@ -1,3 +1,4 @@
+import { AddressRefsSchema, addressRefs } from "../address/model.ts";
 import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
 import { writeSummary, type SummaryResource } from "./summary.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
@@ -10,10 +11,10 @@ import { NOTE_TYPE, WriterResourceSchema, SubjectSchema, noteView, noteVersion, 
 
 export const NoteUpdateSchema = z.object({ version: z.string().min(1).optional(), noteId: z.string().min(1).optional(),
   sensitivity: SensitivitySchema.optional(), visibility: VisibilitySchema.optional(),
-  subject: SubjectSchema.optional(), text: z.string().trim().min(1).max(16000).optional(), people: PersonRefsSchema().optional(),
+  addresses: AddressRefsSchema.optional(), subject: SubjectSchema.optional(), text: z.string().trim().min(1).max(16000).optional(), people: PersonRefsSchema().optional(),
 }).strict().refine(a => !a.noteId || !!a.version, "Updating a Note requires its version")
   .refine(a => !!a.noteId || a.text !== undefined, "Creating a Note requires text")
-  .refine(a => [a.text, a.people, a.sensitivity, a.visibility].some(v => v !== undefined), "Supply Note content or classification");
+  .refine(a => [a.text, a.people, a.addresses, a.sensitivity, a.visibility].some(v => v !== undefined), "Supply Note content or classification");
 export type NoteUpdate = z.infer<typeof NoteUpdateSchema>;
 /** @spec A tool call creates one Note; updates compare only that Note's incarnation/version.
  * @spec Writer execution and current subject ownership are checked by the Note validator inside the write transaction.
@@ -34,13 +35,13 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
   const visibility = args.visibility ?? previous?.spec.visibility ?? "people";
   const spec = { ...previous?.spec, sensitivity: args.sensitivity ?? previous?.spec.sensitivity ?? "L3", visibility,
     subject: args.subject ?? previous?.spec.subject ?? writer.resource, text: args.text ?? previous?.spec.text ?? "",
-    people: args.people ?? previous?.spec.people ?? personRefs([]) };
+    people: args.people ?? previous?.spec.people ?? personRefs([]), addresses: args.addresses ?? previous?.spec.addresses ?? addressRefs([]) };
   if (previous && !equalResourceValue(previous.spec.subject, spec.subject)) throw new Error("Use move_note to change an existing Note subject");
   if (previous?.spec.summaryOf) {
     const owner = await resources.get<SummaryResource["spec"], SummaryResource["status"]>(previous.spec.subject);
     if (owner) {
       if (owner.status.summaryRevision !== args.version) throw new Error("Note content version conflict; read the Note again");
-      const updated = await writeSummary(resources, owner, { text: args.text ?? previous?.spec.text ?? "", people: args.people, sensitivity: spec.sensitivity, visibility }, writer,
+      const updated = await writeSummary(resources, owner, { text: args.text ?? previous?.spec.text ?? "", people: args.people, addresses: args.addresses, sensitivity: spec.sensitivity, visibility }, writer,
         undefined, owner.kind === "Person" ? { updatedAt: new Date().toISOString(), updatedBy: "chief" } : {});
       return { noteId: id, version: updated.status.summaryRevision! };
     }

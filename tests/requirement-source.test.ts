@@ -92,7 +92,7 @@ test("Comments are independent of work item timestamps; authors, Me and own Outp
   f.setComments(async () => ({ items: comments })); await f.observe(10);
   const inputs = f.inputs.list().filter((i) => i.spec.observation?.kind === "requirement.comment");
   assert.equal(inputs.length, 3); assert.deepEqual(inputs.map((i) => i.spec.relation).sort(), ["observed", "received", "sent"]);
-  assert.ok(inputs.every((i) => i.spec.sender && i.spec.source?.kind === "requirement"));
+  assert.ok(inputs.every((i) => i.spec.sender && i.spec.source?.kind === "Address"));
   const people = await f.catalog.persons.list(); assert.ok(people.some((p) => p.spec.name === "张三"));
   await f.restart(); await f.observe(15); assert.equal(f.inputs.list().length, 4);
   f.setComments(async () => { throw new Error("comments unavailable"); });

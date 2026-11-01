@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Addresses · Aide</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/addresses.css">
+<header><h1 class="brand"><img src="/icon.png" width="32" height="32" alt="">Aide</h1><span class="muted">在合适的场合，与合适的人交流。</span><nav class="main-tabs" aria-label="主导航"><a href="/">Topics</a><a href="/people">Persons</a><a href="/addresses" aria-current="page">Addresses</a><a href="/inputs">Inputs</a><a href="/connections">接入</a></nav></header>
+<main class="persons-page">
+<nav class="person-list" aria-label="地址列表"><h2>地址</h2><button id="refresh" class="secondary">刷新</button><div id="list"></div><button id="more" class="secondary" hidden>加载更多</button></nav>
+<section class="person-detail"><h2 id="heading">选择一个地址</h2><p id="coordinates" class="muted"></p><p id="notice" role="status" aria-live="polite"></p>
+<div id="detail" hidden>
+<div class="person-actions"><span id="state"></span><button id="mute" class="secondary">禁言 Aide</button></div>
+<div class="detail-tabs" role="tablist" aria-label="地址内容">
+<button id="tab-summary" role="tab" aria-controls="panel-summary" aria-selected="true">认识</button>
+<button id="tab-notes" role="tab" aria-controls="panel-notes" aria-selected="false" tabindex="-1">近期记录</button>
+<button id="tab-people" role="tab" aria-controls="panel-people" aria-selected="false" tabindex="-1">参与者</button>
+</div>
+<section id="panel-summary" role="tabpanel" aria-labelledby="tab-summary">
+<div class="person-summary-heading"><h3>当前认识</h3><button id="edit" class="person-edit-icon" title="编辑当前认识" aria-label="编辑当前认识">✎</button></div>
+<div id="summary" class="markdown"></div>
+<form id="editor" hidden><textarea id="text" rows="10" maxlength="16000" aria-label="当前认识"></textarea><div class="person-actions"><button id="cancel" type="button" class="secondary">取消</button><button id="save" type="submit">保存认识</button></div></form>
+</section>
+<section id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" hidden><div id="notes"></div><button id="notes-more" class="secondary" hidden>加载更多</button></section>
+<section id="panel-people" role="tabpanel" aria-labelledby="tab-people" hidden><p class="muted">随着消息积累认识到的参与者。</p><div id="people"></div></section>
+</div></section></main><script type="module" src="/addresses.js"></script></html>

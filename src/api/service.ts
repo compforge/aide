@@ -4,6 +4,7 @@ import type { Incoming } from "../channel/message.ts";
 /** Product-specific sidebar and external event input supplied by application composition. */
 export interface WebService extends ChannelService {
   readSession?: import("../../plugins/personal/observation/session.ts").ReadSession;
+  readonly addresses: import("../../plugins/personal/address/service.ts").Addresses;
   readonly persons: import("../../plugins/personal/person/service.ts").Persons;
   start(): Promise<void>;
   deleteTopic(topicId: string, revision: number, uid: string): Promise<import("../../plugins/personal/topic/model.ts").TopicDeletion>;

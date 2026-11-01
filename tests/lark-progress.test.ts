@@ -1,3 +1,7 @@
+import { Addresses } from "../plugins/personal/address/service.ts";
+import { addressRef } from "../plugins/personal/address/model.ts";
+import { allowAddress } from "./address-fixture.ts";
+import { transportFixture } from "./output-fixture.ts";
 import { seedInput } from "./topic-fixture.ts";
 import { assessAll } from "./input-state-fixture.ts";
 import { larkAddress } from "../src/channel/address.ts";
@@ -20,7 +24,6 @@ import { fakeOptions as baseFakeOptions } from "./fake-harness.ts";
 import { LOCAL_ME } from "../plugins/personal/person/model.ts";
 // These transport tests use a known Me audience; disclosure rejection has dedicated tests.
 const fakeOptions = (...args: Parameters<typeof baseFakeOptions>) => ({ ...baseFakeOptions(...args),
-  destinationAudience: async () => ({ identities: [LOCAL_ME], complete: true, private: true }),
   checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }) });
 
 const log = pino({ level: "silent" });
@@ -36,6 +39,7 @@ function cardRegions(card: ReturnType<typeof progressCard>) {
 
 function setup(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-progress-"));
+  allowAddress(home, larkAddress("cli_progress", "oc_chat"));
   const messages: OutputView[] = [], calls: { kind: string; args: unknown[] }[] = [];
   let view: LarkProgress = { id: "input", phase: "queued", think: "", content: "", messageIds: [], overflow: false };
   const record = (kind: string, args: unknown[]) => { calls.push({ kind, args }); };
@@ -226,6 +230,7 @@ test("Lark projects Harness progress but only explicit messages become replies",
     adapter.prompt = async (ref, input) => { emitter = { sink, turnId: input.invocationId }; return send(ref, input); }; return adapter;
   } }, log);
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
+  transportFixture(aide);
   await aide.receive(fixtureIncoming({ channelId: "lark", id: "om_live",  topicId, text: "查看工作" }));
   for (let i = 0; i < 200 && !emitter; i++) await Bun.sleep(10);
   assert.ok(emitter);
@@ -319,6 +324,7 @@ test("Lark keeps a shared invocation card running until steered input and execut
   } }, log);
   t.after(async () => { release(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
   await aide.topics.ensure(topicId);
+  transportFixture(aide);
   await aide.start();
   const spec = { topicId, origin: "channel" as const, originId: "lark", source: larkAddress("cli_progress", "oc_chat"), text: "request" };
   await aide.topics.submit("first", spec);
@@ -353,4 +359,19 @@ test("Lark chat names use the existing SDK client and timeout", async t => {
   assert.ok(requests[0]!.endsWith("/im/v1/chats/oc_group"));
   code = 99991672;
   await assert.rejects(transport.chatName("oc_group"), /99991672/);
+});
+
+/** @case A mute arriving during card creation prevents the visible send and survives retries. */
+test("Address mute blocks presentation after awaited card creation", async t => {
+  const f = setup(t), places = new Addresses(f.home), place = places.observe(larkAddress("cli_progress", "oc_chat"));
+  const create = f.transport.cards!.create;
+  f.transport.cards!.create = async (...args) => {
+    const result = await create(...args);
+    places.setMuted(addressRef(place), true, false);
+    return result;
+  };
+  await f.channel.deliver();
+  assert.equal(f.calls.filter(c => c.kind === "send").length, 0);
+  await f.channel.deliver();
+  assert.equal(f.calls.filter(c => c.kind === "send").length, 0);
 });

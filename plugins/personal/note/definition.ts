@@ -10,6 +10,12 @@ import { NOTE_TYPE, NoteSpecSchema, NoteStatusSchema, type NoteSpec, type NoteSt
  * @case tests/notes.test.ts
  * @link docs/personal/note.md
  */
+function validateAddresses(note: NoteResource, context: ResourceValidationContext) {
+  for (const ref of note.spec.addresses) {
+    const address = context.get(ref, ref.uid);
+    if (!address || address.metadata.deletionTimestamp || address.metadata.name !== ref.name) throw new Error("Associated Address no longer exists");
+  }
+}
 function validate(note: NoteResource, context: ResourceValidationContext) {
   if (note.metadata.deletionTimestamp) throw new Error("Note is being deleted");
   if (note.metadata.namespace !== "v1" || note.metadata.owner) throw new Error("Note requires the shared namespace and an independent lifecycle");
@@ -26,7 +32,8 @@ function validate(note: NoteResource, context: ResourceValidationContext) {
 }
 export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
   type: NOTE_TYPE, schema: { spec: NoteSpecSchema, status: NoteStatusSchema },
-  validator: { create: validate, update: (before, after, context) => {
+  validator: { create: (note, context) => { validateAddresses(note, context); validate(note, context); }, update: (before, after, context) => {
+    if (!equalResourceValue(before.spec.addresses, after.spec.addresses)) validateAddresses(after, context);
     if (after.status.writer && (before.spec.text || before.spec.summaryOf) && sensitivityRank(after.spec.sensitivity ?? "L3") < sensitivityRank(before.spec.sensitivity ?? "L3")) throw new Error("Agent cannot lower existing Note sensitivity");
     if (!equalResourceValue(before.spec.subject, after.spec.subject) && (before.spec.sensitivity !== after.spec.sensitivity || before.spec.visibility !== after.spec.visibility)) throw new Error("Move Note separately from classification edits");
     if (before.spec.summaryOf && (!equalResourceValue(before.spec.summaryOf, after.spec.summaryOf)
@@ -61,9 +68,10 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
     if (note.spec.summaryOf && context.get(note.spec.summaryOf, note.spec.summaryOf.uid))
       throw new Error("Summary subject still exists");
   } },
-  indexes: { summaryOf: r => r.spec.summaryOf ? [r.spec.summaryOf.uid] : [], uid: r => [r.metadata.uid], reviewRoot: r => !r.spec.summaryOf && !r.metadata.deletionTimestamp && r.status.reviewTopic && r.status.reviewed?.version !== noteVersion(r) ? [r.status.reviewTopic.uid] : [], unreviewed: r => !r.spec.summaryOf && !r.metadata.deletionTimestamp && r.status.reviewed?.version !== noteVersion(r) ? [r.spec.subject.uid] : [], subject: r => [r.spec.subject.uid], people: r => [...new Set([...r.spec.people].map(p => p.uid))] },
+  indexes: { summaryOf: r => r.spec.summaryOf ? [r.spec.summaryOf.uid] : [], uid: r => [r.metadata.uid], reviewRoot: r => !r.spec.summaryOf && !r.metadata.deletionTimestamp && r.status.reviewTopic && r.status.reviewed?.version !== noteVersion(r) ? [r.status.reviewTopic.uid] : [], unreviewed: r => !r.spec.summaryOf && !r.metadata.deletionTimestamp && r.status.reviewed?.version !== noteVersion(r) ? [r.spec.subject.uid] : [], subject: r => [r.spec.subject.uid], addresses: r => [...r.spec.addresses].map(a => a.uid), people: r => [...new Set([...r.spec.people].map(p => p.uid))] },
   orderedIndexes: {
     recentSubject: r => r.spec.summaryOf || r.metadata.deletionTimestamp ? [] : [{ value: r.spec.subject.uid, order: r.status.updatedAt }],
+    recentAddresses: r => r.spec.summaryOf || r.metadata.deletionTimestamp ? [] : [...r.spec.addresses].map(a => ({ value: a.uid, order: r.status.updatedAt })),
     recentPeople: r => r.spec.summaryOf || r.metadata.deletionTimestamp ? [] : [...new Set([...r.spec.people].map(p => p.uid))].map(value => ({ value, order: r.status.updatedAt })),
   },
   retention: { releasedAt: r => r.status.updatedAt, canEvict: (r, context) => !r.spec.summaryOf || !context.get(r.spec.summaryOf, r.spec.summaryOf.uid), references: () => [] },

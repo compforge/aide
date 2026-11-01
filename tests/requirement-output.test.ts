@@ -12,7 +12,7 @@ import { requirementTransport, requirementOutputs } from "../plugins/personal/ou
 import { emptyConnectors } from "../src/connector/client.ts";
 import { parseAddress, sameAddress } from "../src/address.ts";
 import type { RequirementAddress, RequirementComment } from "@compforge/aide-plugin";
-import type { OutputSpec } from "../plugins/personal/output/model.ts";
+import type { OutputSubmission as OutputSpec } from "../plugins/personal/output/model.ts";
 const target: RequirementAddress = { kind: "requirement", source: "work", category: "issue", id: "1", scope: "https://tracker.test/p" };
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-comment-output-")), store = new OutputStore(root);
