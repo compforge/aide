@@ -1,5 +1,4 @@
 import { disclosureCheck } from "../agents/disclosure/check.ts";
-import { larkEndpoint } from "./channel/address.ts";
 import { PiObservations, ObservationConfigSchema } from "../agents/pi/observation.ts";
 import type { PiConfig } from "./host/harness/pi/config.ts";
 import { ChannelSettings } from "./channel/settings.ts";

@@ -1,5 +1,6 @@
 import { Addresses } from "../plugins/personal/address/service.ts";
-import { addressRef } from "../plugins/personal/address/model.ts";
+import { ADDRESS_TYPE, addressRef } from "../plugins/personal/address/model.ts";
+import { reconcilePerson } from "../plugins/personal/person/reconcile.ts";
 import { personRefs } from "../plugins/personal/person/model.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
@@ -237,9 +238,73 @@ test("Person merge transfers Address participants without changing mute or summa
   const places = new Addresses(f.home);
   const place = places.observe(webAddress("shared"), [personRef(source), personRef(target)], { muted: true });
   await places.summarize(addressRef(place), "讨论安排", places.view(addressRef(place)).summaryVersion);
-  await f.persons.merge(version(source), version(target));
+  const merged = await f.persons.merge(version(source), version(target));
+  await reconcilePerson({ resources: f.client, logger: log }, merged);
   const current = places.read(addressRef(place));
   assert.deepEqual([...current.status.people].map(p => p.uid), [target.metadata.uid]);
   assert.equal(current.spec.muted, true);
   assert.equal(places.view(addressRef(place)).summaryText, "讨论安排");
+});
+
+/** @case Hundreds of participant references drain in bounded transactions, surviving restart, conflicts and a second merge. */
+test("Person Address migration is bounded and follows the survivor across merges", async t => {
+  const f = await setup(t), source = await f.create("bulk-source"), target = await f.create("bulk-target"), last = await f.create("last-target");
+  const places = new Addresses(f.home);
+  for (let i = 0; i < 121; i++) places.observe(webAddress(`bulk-${i}`), [personRef(source)]);
+  const merged = await f.persons.merge(version(source), version(target));
+  assert.equal(merged.status.participantSources!.size, 1);
+  const writes: number[] = [];
+  const client: ResourceClient = { ...f.client, async commit(batch) { writes.push(batch.length); return f.client.commit(batch); } };
+  await reconcilePerson({ resources: client, logger: log }, merged);
+  assert.equal((await client.page(ADDRESS_TYPE, { limit: 1000, matchIndex: { name: "people", value: source.metadata.uid } })).items.length, 71);
+  assert.equal((await client.page(ADDRESS_TYPE, { limit: 1000, matchIndex: { name: "people", value: target.metadata.uid } })).items.length, 50);
+  // Reopen the catalog and transfer both the retired source and the partly migrated survivor.
+  const reopened = openPersonCatalog(f.home, marks, log, () => {});
+  const final = await reopened.persons.merge(version(await reopened.persons.read(target.metadata.name)), version(last));
+  assert.equal(final.status.participantSources!.size, 2);
+  await assert.rejects(reconcilePerson({ resources: client, logger: log }, merged), /version conflict/);
+  for (let round = 0; round < 10; round++) {
+    const person = await reopened.persons.read(last.metadata.name);
+    if (!person.status.participantSources?.size) break;
+    await reconcilePerson({ resources: client, logger: log }, person);
+  }
+  assert.equal((await reopened.persons.read(last.metadata.name)).status.participantSources!.size, 0);
+  assert.equal((await client.page(ADDRESS_TYPE, { limit: 1000, matchIndex: { name: "people", value: last.metadata.uid } })).items.length, 121);
+  assert.ok(writes.every(count => count <= 51));
+  assert.throws(() => places.observe(webAddress("bulk-0"), [personRef(source)]), /participant no longer exists/);
+});
+
+test("Me initialization defers large Address migrations without expanding its atomic commit", async t => {
+  const f = await setup(t), local = (await f.persons.findIdentity(LOCAL_ME))!;
+  const external = { provider: "lark", scope: "cli_bulk", id: "ou_me" };
+  const source = await f.persons.observe(external);
+  const places = new Addresses(f.home);
+  for (let i = 0; i < 105; i++) places.observe(webAddress(`me-${i}`), [personRef(source)]);
+  const persons = new Persons(f.client, { identities: [LOCAL_ME, external] });
+  assert.deepEqual(await persons.initialize(), { merged: 1 });
+  assert.equal((await persons.findIdentity(external))!.metadata.uid, local.metadata.uid);
+  let current = await persons.read(local.metadata.name);
+  for (let round = 0; current.status.participantSources?.size && round < 5; round++) {
+    await reconcilePerson({ resources: f.client, logger: log }, current);
+    current = await persons.read(local.metadata.name);
+  }
+  assert.equal(current.status.participantSources!.size, 0);
+  assert.equal((await f.client.page(ADDRESS_TYPE, { limit: 1000, matchIndex: { name: "people", value: local.metadata.uid } })).items.length, 105);
+});
+
+/** @case A new participant observed during a batch is never overwritten; conflicts roll back every Address and retry from fresh data. */
+test("Person participant migration preserves concurrent Address observations", async t => {
+  const f = await setup(t), source = await f.create("race-source"), target = await f.create("race-target"), other = await f.create("new-participant");
+  const places = new Addresses(f.home);
+  const a = places.observe(webAddress("race-a"), [personRef(source)]);
+  places.observe(webAddress("race-b"), [personRef(source)]);
+  const merged = await f.persons.merge(version(source), version(target));
+  const racing: ResourceClient = { ...f.client, async commit(writes) {
+    places.observe(webAddress("race-a"), [personRef(other)]);
+    return f.client.commit(writes);
+  } };
+  await assert.rejects(reconcilePerson({ resources: racing, logger: log }, merged), /Test operation failed/);
+  assert.equal((await f.client.page(ADDRESS_TYPE, { limit: 10, matchIndex: { name: "people", value: target.metadata.uid } })).items.length, 0);
+  await reconcilePerson({ resources: f.client, logger: log }, await f.persons.read(target.metadata.name));
+  assert.deepEqual(new Set([...places.read(addressRef(a)).status.people].map(p => p.uid)), new Set([target.metadata.uid, other.metadata.uid]));
 });

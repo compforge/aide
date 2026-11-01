@@ -9,7 +9,7 @@ import { InputStore } from "../plugins/personal/input/store.ts";
 import { PluginResourceStore } from "../src/host/plugin/resource/store.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { TopicStore as PersonalTopics } from "../plugins/personal/topic/store.ts";
-import type { InputSpec } from "../plugins/personal/input/model.ts";
+import type { InputSubmission } from "../plugins/personal/input/model.ts";
 import { initialTopicName } from "../plugins/personal/topic/model.ts";
 
 import type { OutputDraft } from "../plugins/personal/output/view.ts";
@@ -29,7 +29,7 @@ export class TopicStore extends PersonalTopics {
     this.defaultTopicId = scope.id;
   }
 }
-export async function seedInput(store: PersonalTopics, id: string, spec: import("../plugins/personal/input/model.ts").InputSubmission & { topicId?: string }, status: FixtureProcessing & { outputs?: Array<OutputDraft & { at: string }> } = {}) {
+export async function seedInput(store: PersonalTopics, id: string, spec: InputSubmission & { topicId?: string }, status: FixtureProcessing & { outputs?: Array<OutputDraft & { at: string }> } = {}) {
   const { topicId = spec.topicId ?? "test", ...input } = spec;
   if (input.origin === "channel" && !input.source) input.source = fixtureAddress(topicId);
   store.inputStore.submit(input.topicKey ?? "personal", id, input);

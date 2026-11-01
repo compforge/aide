@@ -136,5 +136,28 @@ test("Address Web API edits muted and summary independently and exposes known pa
   const view = await result.json(); assert.equal(view.spec.muted, false); assert.equal(view.participants[0].name, "我");
   const saved = await post("/addresses/summary", { address: addressRef(address), text: "讨论发布安排", version: view.summaryVersion });
   assert.equal(saved.status, 200); assert.equal((await saved.json()).summaryText, "讨论发布安排");
+  const staleMute = await post("/addresses/muted", { address: addressRef(address), muted: false, expected: true });
+  assert.equal(staleMute.status, 409); assert.match((await staleMute.json()).error, /重新加载/);
+  const staleSummary = await post("/addresses/summary", { address: addressRef(address), text: "过期修改", version: view.summaryVersion });
+  assert.equal(staleSummary.status, 409); assert.match((await staleSummary.json()).error, /合并修改/);
+  assert.equal(aide.addresses.view(addressRef(address)).summaryText, "讨论发布安排");
+  for (let i = 0; i < 21; i++) aide.addresses.observe(webAddress(`page-${i}`));
+  const first = await (await fetch(base + "/addresses/list")).json(); assert.ok(first.continue);
+  aide.addresses.observe(webAddress("page-new"));
+  const expired = await fetch(base + "/addresses/list?" + new URLSearchParams({ continue: first.continue }));
+  assert.equal(expired.status, 410); assert.match((await expired.json()).error, /刷新/);
+  assert.equal((await fetch(base + "/addresses/list?continue=invalid")).status, 400);
+  const query = new URLSearchParams({ name: address.metadata.name, uid: address.metadata.uid });
+  for (let i = 0; i < 21; i++) await aide.addresses.client.create(NOTE_TYPE, {
+    name: `address-note-${i}`, spec: { subject: addressRef(address), text: `事项 ${i}`, addresses: addressRefs([addressRef(address)]), people: personRefs([]) },
+    status: { updatedAt: new Date().toISOString() },
+  });
+  const notes = await (await fetch(base + "/addresses/notes?" + query)).json(); assert.ok(notes.continue);
+  query.set("continue", notes.continue);
+  const latest = aide.addresses.view(addressRef(address));
+  await aide.addresses.summarize(addressRef(address), "最新认识", latest.summaryVersion);
+  assert.equal((await fetch(base + "/addresses/notes?" + query)).status, 410);
+  query.set("continue", "invalid");
+  assert.equal((await fetch(base + "/addresses/notes?" + query)).status, 400);
   const html = await (await fetch(base + "/addresses")).text(); assert.match(html, /参与者/); assert.match(html, /禁言/);
 });

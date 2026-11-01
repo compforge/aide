@@ -63,7 +63,7 @@ plugins/personal/
     model.ts               # 人物资料、外部身份、Me 标记与认识
     catalog.ts             # Host 共享资源作用域与身份唯一性校验
     service.ts             # 人物解析、用户编辑、显式合并和 Chief 认知更新
-    reconcile.ts           # 无外部清理动作的标准删除生命周期
+    reconcile.ts           # 合并后分批迁移 Address 参与者与标准删除生命周期
     relation.ts            # 输入与 Me 的关系
     messages.ts            # Connector 消息贡献人物事实
   input/                   # Input 定义、幂等接收、分页检索、保留策略与 Printer

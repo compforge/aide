@@ -3,7 +3,7 @@ import { guardContext } from "../context-write.ts";
 import { ContextFields } from "../context.ts";
 import { z } from "zod";
 import type { ResourceDefinition, ResourceValidationContext, Resource } from "@compforge/aide-plugin";
-import { PersonSchema, PERSON_TYPE, identityKey, type Person, type PersonStatus } from "./model.ts";
+import { PersonSchema, PersonRefsSchema, PERSON_TYPE, identityKey, type Person, type PersonStatus } from "./model.ts";
 
 /** @spec Account ownership is unique; Me consolidation can transfer identities atomically between Persons.
  * @why Only newly claimed identities need indexed conflict checks; profile updates do not rescan the catalog.
@@ -20,7 +20,7 @@ function validate(resource: Readonly<Resource<Person, PersonStatus>>, context: R
   }
 }
 export const PersonDefinition: ResourceDefinition<Person, PersonStatus> = { type: PERSON_TYPE,
-  schema: { spec: PersonSchema, status: z.object({ ...ContextFields, updatedAt: z.string(), updatedBy: z.enum(["user", "chief", "connector"]) }).strict() },
+  schema: { spec: PersonSchema, status: z.object({ ...ContextFields, updatedAt: z.string(), updatedBy: z.enum(["user", "chief", "connector"]), participantSources: PersonRefsSchema().optional() }).strict() },
   retention: { releasedAt: () => undefined, references: () => [] },
   indexes: { identity: r => r.metadata.deletionTimestamp ? [] : r.spec.identities.map(identityKey) },
   validator: { create: (r, c) => { validateSummary(r, c); validate(r, c); }, update: (previous, resource, context) => { guardContext(previous, resource, context); validate(resource, context, previous); } },

@@ -4,7 +4,7 @@ import { allowAddress } from "./address-fixture.ts";
 import { transportFixture } from "./output-fixture.ts";
 import { seedInput } from "./topic-fixture.ts";
 import { assessAll } from "./input-state-fixture.ts";
-import { larkAddress } from "../src/channel/address.ts";
+import { larkAddress, larkThreadAddress } from "../src/channel/address.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -231,7 +231,7 @@ test("Lark projects Harness progress but only explicit messages become replies",
   } }, log);
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
   transportFixture(aide);
-  await aide.receive(fixtureIncoming({ channelId: "lark", id: "om_live",  topicId, text: "查看工作" }));
+  await aide.receive(fixtureIncoming({ channelId: "lark", id: "om_live", topicId, source: larkThreadAddress("cli_progress", "oc_chat", "om_live"), text: "查看工作" }));
   for (let i = 0; i < 200 && !emitter; i++) await Bun.sleep(10);
   assert.ok(emitter);
   emitter.sink({ kind: "agent_thought_chunk", invocationId: emitter.turnId, payload: { messageId: "thought", content: { type: "text", text: "先读资料" } } });
@@ -251,13 +251,18 @@ test("Lark projects Harness progress but only explicit messages become replies",
   assert.ok(Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(large, false)) })) <= 28_000);
   release(); await aide.settled();
   assert.equal(larkProgress(aide, topicId)[0]!.content, "", "Checked but unsent content cannot leak via the card");
-  const original = aide.outputStore.list()[0]!;
+  const generated = aide.outputStore.list()[0]!;
+  const original = aide.outputStore.create(topicId, "thread-reply", { ...generated.spec,
+    target: larkThreadAddress("cli_progress", "oc_chat", "om_live") });
   await aide.outputStore.prepare(original.metadata.name);
   aide.outputStore.begin(original.metadata.name); aide.outputStore.delivered(original.metadata.name);
+  assert.deepEqual(aide.outputStore.get(original.metadata.name)!.status.delivery!.target, larkThreadAddress("cli_progress", "oc_chat", "om_live"));
   const done = larkProgress(aide, topicId)[0]!;
   assert.equal(done.phase, "done"); assert.equal(done.content, "最终答案"); assert.equal(done.messageIds.length, 0);
   aide.outputStore.create(("sessionId" in original.metadata ? "unexpected" : undefined)!, "another-destination", { ...original.spec,
     text: "另一群的专属内容", target: larkAddress("cli_progress", "another-chat") });
+  await aide.outputStore.prepare("another-destination");
+  aide.outputStore.begin("another-destination"); aide.outputStore.delivered("another-destination");
   const addressed = larkProgress(aide, topicId)[0]!;
   assert.equal(addressed.content, "最终答案");
   assert.deepEqual(addressed.messageIds, done.messageIds, "A card cannot deliver or acknowledge another destination's Output");

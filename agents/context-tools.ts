@@ -1,3 +1,4 @@
+import { ADDRESS_TYPE } from "../plugins/personal/address/model.ts";
 import { PERSON_TYPE } from "../plugins/personal/person/model.ts";
 import { Type } from "typebox";
 
@@ -11,7 +12,7 @@ export const disclosureFields = {
 export const noteFields = {
   ...disclosureFields,
   subject: Type.Optional(subjectField),
-  addresses: Type.Optional(Type.Array(Type.Object({ apiVersion: Type.Literal("aide.dev/v1alpha1"), kind: Type.Literal("Address"), namespace: Type.Literal("v1"), name: Type.String(), uid: Type.String() }))),
+  addresses: Type.Optional(Type.Array(Type.Object({ apiVersion: Type.Literal(ADDRESS_TYPE.apiVersion), kind: Type.Literal(ADDRESS_TYPE.kind), namespace: Type.Literal("v1"), name: Type.String({ minLength: 1 }), uid: Type.String({ minLength: 1 }) }, { additionalProperties: false }))),
   people: Type.Optional(Type.Array(Type.Object({ apiVersion: Type.Literal(PERSON_TYPE.apiVersion), kind: Type.Literal("Person"),
     namespace: Type.Literal("v1"), name: Type.String({ minLength: 1 }), uid: Type.String({ minLength: 1 }) }, { additionalProperties: false }))),
   version: Type.Optional(Type.String({ minLength: 1, description: "The existing Note version; required only when updating." })),

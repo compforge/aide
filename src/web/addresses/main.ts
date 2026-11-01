@@ -1,6 +1,6 @@
 import './style.css';
 import { byId as $, element as node } from '../shared/dom.ts';
-import { request, errorMessage } from '../shared/http.ts';
+import { request, errorMessage, HttpError } from '../shared/http.ts';
 import { updateMarkdown } from '../shared/markdown.ts';
 import type { Addresses } from '../../../plugins/personal/address/service.ts';
 import type { AddressRef } from '../../../plugins/personal/address/model.ts';
@@ -42,7 +42,12 @@ async function loadNotes(reset = false) {
   const ref = currentRef(), turn = generation;
   const query = parameters(ref); if (!reset && noteContinue) query.set('continue', noteContinue);
   let result: { items: Note[]; continue?: string };
-  try { result = await request('/addresses/notes?' + query); } finally { if (turn === generation) notesLoading = false; }
+  try { result = await request('/addresses/notes?' + query); }
+  catch (error) {
+    if (turn !== generation) return;
+    if (!reset && error instanceof HttpError && [400, 410].includes(error.status)) { await loadNotes(true); return; }
+    throw error;
+  } finally { if (turn === generation) notesLoading = false; }
   if (turn !== generation) return;
   if (reset) $('notes').replaceChildren();
   appendNotes(result.items); noteContinue = result.continue; $('notes-more').hidden = !noteContinue;
@@ -59,7 +64,13 @@ async function select(ref: AddressRef) {
 }
 async function list(reset = false) {
   const turn = ++listGeneration;
-  const page = await request<Page>('/addresses/list' + (!reset && continuation ? '?' + new URLSearchParams({ continue: continuation }) : ''));
+  let page: Page;
+  try { page = await request<Page>('/addresses/list' + (!reset && continuation ? '?' + new URLSearchParams({ continue: continuation }) : '')); }
+  catch (error) {
+    if (turn !== listGeneration) return;
+    if (!reset && error instanceof HttpError && [400, 410].includes(error.status)) { await list(true); return; }
+    throw error;
+  }
   if (turn !== listGeneration) return;
   if (reset) $('list').replaceChildren();
   for (const item of page.items) {

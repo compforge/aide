@@ -1,6 +1,4 @@
-import { ADDRESS_TYPE, type AddressSpec, type AddressStatus } from "../address/model.ts";
 import { personRef, personRefs } from "./model.ts";
-import type { ResourceCommit } from "@compforge/aide-plugin";
 import { sensitivityRank, type MaterialDisclosure } from "../disclosure.ts";
 import { prepareSummary, readSummary, summaryView, writeSummary } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
@@ -74,10 +72,9 @@ export class Persons {
     const prepared = await prepareSummary(this.resources, target, { text: summary, people: texts.flatMap(n => [...n?.spec.people ?? []]), ...disclosure });
     await this.resources.commit([
       ...prepared.writes,
-      ...await this.moveParticipants(sources, target),
       ...sources.map(resource => ({ operation: "delete" as const, resource })),
       { operation: "replace", resource: target, spec: PersonSchema.parse({ ...target.spec, identities }), status: {
-        ...status, ...prepared.status,
+        ...target.status, ...status, ...prepared.status, participantSources: this.participantSources(sources, target),
       } },
     ]);
     return { merged: sources.length };
@@ -129,22 +126,9 @@ export class Persons {
     return this.view(committed, summary, committed.summaryNote);
   }
 
-  private async moveParticipants(sources: PersonResource[], target: PersonResource): Promise<ResourceCommit[]> {
-    const retired = new Set(sources.map(p => p.metadata.uid));
-    const affected = new Map<string, import("../address/model.ts").AddressResource>();
-    for (const source of sources) {
-      let continuation: string | undefined;
-      do {
-        const page = await this.resources.page<AddressSpec, AddressStatus>(ADDRESS_TYPE, { namespace: "v1", limit: 100,
-          matchIndex: { name: "people", value: source.metadata.uid }, ...(continuation ? { continue: continuation } : {}) });
-        for (const place of page.items) if (!place.metadata.deletionTimestamp) affected.set(place.metadata.uid, place);
-        continuation = page.metadata.continue || undefined;
-      } while (continuation);
-    }
-    return [...affected.values()].map(resource => ({ operation: "patch", resource, patch: { type: "json", value: [
-      { op: "test", path: "/status/people", value: resource.status.people },
-      { op: "replace", path: "/status/people", value: personRefs([...resource.status.people].map(p => retired.has(p.uid) ? personRef(target) : p)) },
-    ] } }));
+  private participantSources(sources: PersonResource[], target: PersonResource) {
+    return personRefs([...(target.status.participantSources ?? []), ...sources.flatMap(source =>
+      [personRef(source), ...(source.status.participantSources ?? [])])]);
   }
   /**
    * @spec Append to the target and delete the source atomically. Names never prove identity.
@@ -165,11 +149,10 @@ export class Persons {
     const prepared = await prepareSummary(this.resources, into, { text: mergedText, people: [...into.summaryNote?.people ?? [], ...from.summaryNote?.people ?? []], ...disclosure });
     const writes = await this.resources.commit([
       ...prepared.writes,
-      ...await this.moveParticipants([from], into),
       // Exclude the retiring identity owner before validating the target, within the same transaction.
       { operation: "delete", resource: from },
       { operation: "replace", resource: into, spec: PersonSchema.parse({ ...into.spec, identities }), status: {
-        ...status, ...prepared.status,
+        ...into.status, ...status, ...prepared.status, participantSources: this.participantSources([from], into),
       } },
     ]);
     const person = writes.at(-1) as PersonResource;
