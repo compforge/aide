@@ -16,7 +16,7 @@ Address 的长期认识是 `Note.summaryOf = AddressRef` 的普通摘要 Note，
 
 近期事项通过 `Note.addresses` 的 UID 集合关联同一场合，按更新时间分页查询。事项仍保留原 Topic / Work subject；同一 Note 可以同时出现在多个场合中，无需复制正文。场合认识不自动授予发送权限。
 
-Chief、Task、Routine 通过 list_addresses / read_address 了解场合，通过 summarize_address 更新长期认识，通过 upsert_note 的 addresses 关联近期事项。Agent 工具不提供解除禁言能力。
+Chief、Task、Routine 通过 list_addresses / read_address 了解场合，通过 upsert_note 的 addresses 关联各自近期事项。Address 的共享长期认识由 Chief 通过 summarize_address 更新；Task / Routine 只修改自身内容。Agent 工具不提供解除禁言能力。
 
 ## 答复与投递
 

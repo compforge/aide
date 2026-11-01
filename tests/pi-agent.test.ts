@@ -915,8 +915,9 @@ test(`${kind} native session resumes by ID with scoped reading, say and report t
   let currentWork: () => import("../plugins/personal/resources.ts").WorkResource;
   const fixture = await setup(t, (request, index) => {
     const names = (request.tools as Array<{ function: { name: string } }>).map(t => t.function.name);
-    for (const tool of [`read_${kind}`, "read_input", "read_topic", "say", `report_${kind}`, "upsert_note", `summarize_${kind}`]) assert.ok(names.includes(tool));
+    for (const tool of [`read_${kind}`, "read_input", "read_topic", "list_addresses", "read_address", "say", `report_${kind}`, "upsert_note", `summarize_${kind}`]) assert.ok(names.includes(tool));
     assert.equal(names.includes("create_work"), false);
+    assert.equal(names.includes("summarize_address"), false, "Work cannot edit shared Address summaries");
     switch (index % 8) {
       case 0: return { tool: `read_${kind}`, args: {} };
       case 1: return { tool: "read_input", args: { inputId } };

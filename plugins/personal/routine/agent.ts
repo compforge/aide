@@ -1,5 +1,5 @@
 import { Addresses } from "../address/service.ts";
-import { addressTools } from "../address/tools.ts";
+import { addressReadTools } from "../address/tools.ts";
 import { summaryText, summaryReference } from "../note/summary.ts";
 import { contentVersion } from "../context-write.ts";
 import { notes } from "../note/query.ts";
@@ -37,7 +37,7 @@ export function routineSession(scope: ExecutionScope, config: PiConfig, store: S
     };
     const verbs = () => { const routine = current(); return plugins.executionVerbs(routine.status.execution!.id, { topicId: store.topicId(routine.status.topic), routineId: routine.metadata.name }); };
     const tools: ToolDefinition[] = [
-      ...addressTools(new Addresses(store.resources.storage.home), current),
+      ...addressReadTools(new Addresses(store.resources.storage.home), current),
       ...workContextTools("routine", plugins.resourceClient("personal"), current, log),
       tool({ name: "list_work", label: "List related work", description: "Page through this Topic's Task and Routine summaries; does not delegate or resume work.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),

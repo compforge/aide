@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { once } from "node:events";
 import pino from "pino";
 import { Addresses } from "../plugins/personal/address/service.ts";
+import { addressTools } from "../plugins/personal/address/tools.ts";
 import { ADDRESS_TYPE, addressRef, addressRefs } from "../plugins/personal/address/model.ts";
 import { personRefs, personRef, PERSON_TYPE, LOCAL_ME, type PersonResource } from "../plugins/personal/person/model.ts";
 import { PersonDefinition } from "../plugins/personal/person/definition.ts";
@@ -14,7 +15,6 @@ import { InputStore } from "../plugins/personal/input/store.ts";
 import { NOTE_TYPE, noteVersion, type NoteResource } from "../plugins/personal/note/model.ts";
 import { upsertNote } from "../plugins/personal/note/service.ts";
 import { contentVersion } from "../plugins/personal/context-write.ts";
-import { writeSummary } from "../plugins/personal/note/summary.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { larkAddress, larkThreadAddress, webAddress, larkEndpoint } from "../src/channel/address.ts";
 import { TopicStore, seedInput } from "./topic-fixture.ts";
@@ -68,8 +68,8 @@ test("Address discovery unifies threads and accumulates known people without ove
 test("Address summary uses a protected Note and recent address association preserves matter ownership", async t => {
   const f = await setup(t), place = f.addresses.observe(group, [personRef(f.a)]), ref = addressRef(place);
   const actor = await f.addresses.client.patchStatus(f.topic, { execution: { id: "chief", startedAt: new Date().toISOString() } });
-  const writer = { resource: { ...resourceRef(actor), kind: "Topic" as const, namespace: "v1" as const }, executionId: "chief" };
-  await writeSummary(f.addresses.client, place, { text: "讨论发布风险", people: [personRef(f.a)], sensitivity: "L1", visibility: "people" }, writer);
+  const summarize = addressTools(f.addresses, () => actor).find(tool => tool.name === "summarize_address")!;
+  await summarize.execute("summary", { address: ref, version: contentVersion(place), text: "讨论发布风险", people: [personRef(f.a)], sensitivity: "L1", visibility: "people" }, undefined, undefined, {} as never);
   const view = f.addresses.view(ref);
   assert.equal(view.summaryNote!.summaryOf!.kind, "Address");
   const summary = f.addresses.resources.get<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, view.summaryNote!.id);

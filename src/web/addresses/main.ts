@@ -1,4 +1,4 @@
-import "./connections.ts";
+import { mountConnections } from "./connections.ts";
 import type { ChannelSettingsView } from "../../channel/settings.ts";
 import './style.css';
 import { byId as $, element as node } from '../shared/dom.ts';
@@ -107,6 +107,7 @@ $('set-default').onclick = () => { void (async () => {
   catch (error) { await loadSettings(); report(error); }
   finally { busy = false; }
 })().catch(report); };
+mountConnections(value => { settings = value; if (selected) render(selected); });
 void loadSettings();
 $('mute').onclick = () => { if (selected && !busy) void save('/addresses/muted', { muted: !selected.spec.muted, expected: selected.spec.muted }); };
 $('edit').onclick = () => { if (!selected) return; $<HTMLTextAreaElement>('text').value = selected.summaryText; $('editor').hidden = false; $('summary').hidden = true; $('text').focus(); };
