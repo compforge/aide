@@ -24,7 +24,7 @@ export function builtinDefinitions(): readonly ConnectorDefinition[] {
       if (!config.appId || !config.userId) throw new Error("Lark appId and userId are required");
       const reader = new LarkMessages({ appId: config.appId, userId: config.userId, timeoutMs: config.timeoutMs });
       return { metadata: { provider: "lark", accountId: config.appId, userId: config.userId }, handlers: {
-        identity: () => reader.identity(), search: (_call, query) => reader.search(query),
+        identity: () => reader.identity(), get: (_call, query) => reader.get(query), search: (_call, query) => reader.search(query),
         history: (_call, query) => reader.history(query), thread: (_call, query) => reader.thread(query),
       } };
     },

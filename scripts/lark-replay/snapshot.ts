@@ -44,6 +44,12 @@ export class SnapshotMessages implements MessageConnector {
     this.cutoff = next;
   }
   async identity() { return this.snapshot.identity; }
+  async get(query: { messageId: string }) {
+    const message = this.visible().find(row => row.id === query.messageId);
+    if (message) return message;
+    this.coverageFailure ??= new Error(`Incomplete snapshot coverage: message ${query.messageId}; recollect before replay`);
+    throw this.coverageFailure;
+  }
   private visible() {
     return this.snapshot.messages.filter(m => Date.parse(m.createdAt) <= this.cutoff && !edited(m));
   }

@@ -3,6 +3,7 @@ import type { MessageConnector, MessageSearchQuery, PageQuery, PullRequestKey, P
 export type ConnectorRequest = import("@compforge/aide-connector").ConnectorRequest
   | { readonly operation: "describe" }
   | { readonly operation: "messages.identity" }
+  | { readonly operation: "messages.get"; readonly query: Parameters<MessageConnector["get"]>[0] }
   | { readonly operation: "messages.search"; readonly query: MessageSearchQuery }
   | { readonly operation: "messages.history"; readonly query: Parameters<MessageConnector["history"]>[0] }
   | { readonly operation: "messages.thread"; readonly query: Parameters<MessageConnector["thread"]>[0] }

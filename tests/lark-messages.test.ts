@@ -104,3 +104,46 @@ test("Missing chat names do not reject otherwise complete Lark messages", async 
     assert.equal(page.messages[0]!.chatName, undefined);
   }
 });
+
+/** @case Referenced evidence is fetched by exact ID across Chief, IPC and the configured user reader. */
+test("Exact message lookup crosses Chief and Connector IPC without requiring pagination", async () => {
+  const commands: string[][] = [];
+  let rows: unknown[] = [row];
+  let auth = identity;
+  const messages = new LarkMessages(config, async args => {
+    commands.push([...args]);
+    return args[0] === "auth" ? auth : { ok: true, identity: "user", data: { messages: rows, total: rows.length } };
+  });
+  const client = createConnectorClient(async <T>(request: Parameters<typeof dispatchConnector>[1]): Promise<T> =>
+    await dispatchConnector({ ...emptyConnectors, messages }, request) as T);
+  const tool = chiefTools(client).find(t => t.name === "read_message")!;
+  const value = await tool.execute("get", { messageId: "om_one" }, undefined, undefined, {} as never);
+  assert.equal(JSON.parse((value.content[0] as { text: string }).text).id, "om_one");
+  assert.deepEqual(commands[1], ["im", "+messages-mget", "--message-ids", "om_one", "--as", "user", "--no-reactions", "--format", "json"]);
+  rows = []; assert.equal(await client.messages.get({ messageId: "om_one" }), null);
+  rows = [{ ...row, deleted: true }]; assert.equal((await client.messages.get({ messageId: "om_one" }))!.deleted, true);
+  rows = [{ ...row, message_id: "om_other" }]; await assert.rejects(client.messages.get({ messageId: "om_one" }), /unexpected message IDs/);
+  const count = commands.length;
+  await assert.rejects(messages.get({ messageId: "om_one,om_other" })); assert.equal(commands.length, count);
+  auth = { ...identity, appId: "cli_other" };
+  await assert.rejects(client.messages.get({ messageId: "om_one" }), /does not match/);
+});
+
+test("Exact reads share the existing concurrency budget and preserve permission failures", async () => {
+  const releases: Array<() => void> = [];
+  const messages = new LarkMessages(config, async args => {
+    if (args[0] === "auth") return identity;
+    await new Promise<void>(resolve => releases.push(resolve));
+    return { ok: false, error: { type: "authorization", code: 403, message: "private credential" } };
+  });
+  const one = messages.get({ messageId: "om_one" }), two = messages.search(query);
+  await assert.rejects(messages.get({ messageId: "om_one" }), /concurrency limit/);
+  await new Promise(resolve => setImmediate(resolve)); releases.forEach(release => release());
+  for (const pending of [one, two]) await assert.rejects(pending, error => {
+    assert.match((error as Error).message, /authorization.*403/);
+    assert.doesNotMatch((error as Error).message, /private credential/); return true;
+  });
+  const next = messages.get({ messageId: "om_one" });
+  await new Promise(resolve => setImmediate(resolve)); releases.at(-1)!();
+  await assert.rejects(next, /authorization/);
+});

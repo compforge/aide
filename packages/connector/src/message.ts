@@ -41,6 +41,8 @@ export interface MessagePage {
 export interface MessageConnector {
   /** Confirms the configured account before reading with its user credentials. */
   identity(): Promise<{ accountId: string; userId: string }>;
+  /** Exact lookup; null means unavailable to this reader, not proof that it never existed. */
+  get(query: { messageId: string }): Promise<ChatMessage | null>;
   search(query: MessageSearchQuery): Promise<MessagePage>;
   history(query: MessageQuery & { chatId: string; order?: "asc" | "desc" }): Promise<MessagePage>;
   thread(query: { threadId: string; pageToken?: string; limit?: number; order?: "asc" | "desc" }): Promise<MessagePage>;

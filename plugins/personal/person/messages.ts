@@ -13,6 +13,11 @@ export async function observePeople(persons: Persons, scope: string, messages: r
 /** Reading connector messages also contributes external identity facts; it never synthesizes a profile. */
 export function personMessages(messages: MessageConnector, persons: Persons, scope: string): MessageConnector {
   const observe = async (page: Awaited<ReturnType<MessageConnector["search"]>>) => { await observePeople(persons, scope, page.messages); return page; };
-  return { identity: () => messages.identity(), search: async (query) => observe(await messages.search(query)),
+  return { identity: () => messages.identity(),
+    get: async query => {
+      const message = await messages.get(query);
+      if (message) await observePeople(persons, scope, [message]);
+      return message;
+    }, search: async (query) => observe(await messages.search(query)),
     history: async (query) => observe(await messages.history(query)), thread: async (query) => observe(await messages.thread(query)) };
 }
