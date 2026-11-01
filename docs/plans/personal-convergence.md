@@ -20,28 +20,7 @@ Aide 可以在已有授权范围内主动联系其他 Person。例如 Me 要求�
 
 ### 接口语义与目标解析
 
-三个 Agent 共用 say 和只读 list_contacts；后者分页展示 Person ID / UID、可用 Channel 配置名，不暴露凭证。调用示例：
-
-```ts
-say({
-  to: { personId: "...", uid: "..." }, // 或 { me: true }
-  channelId: "work", // 私聊；群或其他位置使用 target
-  text: "..."
-})
-
-say({ respondToInputId: "...", text: "..." })
-```
-
-respondToInputId 同时提供接收对象和回复位置，与显式目标形式互斥。位置包含 Channel 以及必要的私聊、群聊、话题等 endpoint；平台字段由对应 Channel 解释。
-
-| 沟通表达 | 工具的目的地依据 |
-| --- | --- |
-| 回复某条消息 | 对应 Channel Input，保留其群聊或话题回复位置 |
-| 联系 Me，未指定位置 | 配置的默认 Channel 与该作用域下 Me 的身份 |
-| 联系指定 Person，并指定 Channel | 对应作用域下的 Person 身份及明确的沟通位置 |
-| 向指定平台目标沟通 | 显式目标地址与适用授权 |
-
-显式 to={me:true} 总是联系被服务者，忽略当前 Input 的隐式回复位置。完全省略收件人和位置时，保留无歧义 immediate Channel Input 的回复规则，否则默认联系 Me。仅有 Person 和 Channel、仍无法确定是私聊还是某个群时，不能任意选择。无效地址、Person 已删除或缺少必要身份时，返回明确的解析失败，不悄悄改投 Me。Person 是可缺失的引用，已持久化 Output 的投递不能依赖 Person 持续存在。
+三个 Agent 共用 say 与 list_addresses / read_address。target 只接收已知 AddressRef，receivers 表达预期人物；to={me:true} 显式联系被服务者。respondToInputId 提供原处回复线索，可与 target 同时指定另一个合适场合。无唯一隐式回复位置时采用 defaultAddress；已经接纳的 Output 固定原目标与后续投递事实。详细契约见 [Address](../personal/address.md)、[Output](../personal/output.md)。
 
 ### 职责与持久化
 

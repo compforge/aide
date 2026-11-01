@@ -1,3 +1,4 @@
+import { fixtureCanSpeak } from "./address-fixture.ts";
 import { allowAddress } from "./address-fixture.ts";
 import { transportFixture } from "./output-fixture.ts";
 import { DeliveryError, deliveryFailure } from "@compforge/aide-connector";
@@ -77,7 +78,7 @@ test("Lark rejects persisted inputs without an exact topic key before intake", a
   const home = mkdtempSync(join(tmpdir(), "aide-lark-key-"));
   for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   let received = 0;
-  const aide = { receive: async () => { received++; throw new Error("Unexpected intake"); } };
+  const aide = { canSpeak: fixtureCanSpeak(home), receive: async () => { received++; throw new Error("Unexpected intake"); } };
   const { transport } = fakeTransport();
   const channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
@@ -98,7 +99,7 @@ test("Lark rejects persisted inputs without an exact topic key before intake", a
 test("Lark sends explicit destinations and retries the same part id after restart", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-outbox-"));
   for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
-  const aide = { receive: async () => { throw new Error("unused"); } };
+  const aide = { canSpeak: fixtureCanSpeak(home), receive: async () => { throw new Error("unused"); } };
   const { transport, sent } = fakeTransport();
   if (aide instanceof Aide) transportFixture(aide);
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
@@ -126,7 +127,7 @@ test("Lark ignores unaddressed group/bot events and reports unsupported input an
   const home = mkdtempSync(join(tmpdir(), "aide-lark-errors-"));
   for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   let received = 0;
-  const aide = { receive: async () => { received++; throw new Error("private data"); } };
+  const aide = { canSpeak: fixtureCanSpeak(home), receive: async () => { received++; throw new Error("private data"); } };
   const { transport, sent } = fakeTransport();
   const channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
@@ -153,7 +154,7 @@ test("Lark malformed-event diagnostics identify invalid fields without logging m
   const entries: string[] = [];
   const diagnosticLog = pino({ level: "warn" }, { write(line) { entries.push(line); } });
   const { transport } = fakeTransport();
-  const channel = new LarkChannel(home, "cli_invalid", {
+  const channel = new LarkChannel(home, "cli_invalid", { canSpeak: fixtureCanSpeak(home),
     receive: async () => { throw new Error("Invalid events must not execute"); },
   }, transport, diagnosticLog);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
@@ -228,7 +229,7 @@ test("Lark persists thread topics while cards and failure notices retain the rea
     async create() { return "card"; }, async send(chatId) { cardChats.push(chatId); },
     async content() {}, async patch() {}, async settings() {}, async update() {},
   };
-  const aide = { async receive(input: Incoming) {
+  const aide = { canSpeak: fixtureCanSpeak(home), async receive(input: Incoming) {
     received.push(input);
     if (input.id === "failed") throw new Error("intake failed");
     return { inputId: input.id, at: new Date().toISOString() };
@@ -280,7 +281,7 @@ test("Lark accepts nullable permission-restricted user IDs and still requires th
   for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const received: { id: string; text: string }[] = [];
   const { transport } = fakeTransport({ openId: "ou_aide", name: "Aide" });
-  const channel = new LarkChannel(home, "cli_null_ids", {
+  const channel = new LarkChannel(home, "cli_null_ids", { canSpeak: fixtureCanSpeak(home),
     receive: async (input) => {
       received.push(input);
       return { inputId: input.id, at: new Date().toISOString() };
@@ -313,7 +314,7 @@ test("Lark leaves group mentions disabled without bot identity and handles empty
   const home = mkdtempSync(join(tmpdir(), "aide-lark-group-empty-"));
   for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
   const { transport, sent } = fakeTransport();
-  const aide = { receive: async () => { throw new Error("No Chief execution expected"); } };
+  const aide = { canSpeak: fixtureCanSpeak(home), receive: async () => { throw new Error("No Chief execution expected"); } };
   let channel = new LarkChannel(home, "cli_group_empty", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   const group = { ...event("no-identity", "@_user_1"), message: { ...event("no-identity", "@_user_1").message,
@@ -396,7 +397,7 @@ test("official SDK sends bot text with a stable uuid and checks API-level failur
 test("Persisted Lark part receipts allow Output acknowledgement recovery without another send", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-receipt-"));
   for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
-  const aide = { receive: async () => { throw new Error("unused"); } };
+  const aide = { canSpeak: fixtureCanSpeak(home), receive: async () => { throw new Error("unused"); } };
   const { transport, sent } = fakeTransport();
   if (aide instanceof Aide) transportFixture(aide);
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
@@ -416,7 +417,7 @@ test("Chat name lookup failures keep group intake available and never expose SDK
   let reads = 0;
   const { transport } = fakeTransport({ openId: "ou_bot", name: "Aide" });
   transport.chatName = async () => { reads++; throw new Error("secret credentials"); };
-  const channel = new LarkChannel(home, "cli_names", {
+  const channel = new LarkChannel(home, "cli_names", { canSpeak: fixtureCanSpeak(home),
     async receive(input) { received.push(input); return { inputId: input.id, at: new Date().toISOString() }; },
   }, transport, pino({ level: "warn" }, { write(line) { entries.push(line); } }));
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
@@ -460,7 +461,7 @@ test("Lark maps rate limits and retry headers without leaking SDK data", () => {
 test("Lark preserves adapter retry semantics and resumes only unconfirmed parts after restart", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-limited-"));
   for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
-  const aide = { receive: async () => { throw new Error("unused"); } };
+  const aide = { canSpeak: fixtureCanSpeak(home), receive: async () => { throw new Error("unused"); } };
   const { transport, sent } = fakeTransport(); let calls = 0;
   const rejected = new DeliveryError({ kind: "retryable", code: "limited", message: "Chat cooldown", retryAfterMs: 2500 });
   transport.send = async (chatId, text, id) => { sent.push({ chatId, text, id }); if (++calls === 2) throw rejected; };

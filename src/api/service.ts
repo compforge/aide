@@ -3,6 +3,8 @@ import type { Incoming } from "../channel/message.ts";
 
 /** Product-specific sidebar and external event input supplied by application composition. */
 export interface WebService extends ChannelService {
+  defaultAddress(): import("../../plugins/personal/address/model.ts").AddressRef;
+  validateDefaultAddress(ref: import("../../plugins/personal/address/model.ts").AddressRef): Promise<void>;
   readSession?: import("../../plugins/personal/observation/session.ts").ReadSession;
   readonly addresses: import("../../plugins/personal/address/service.ts").Addresses;
   readonly persons: import("../../plugins/personal/person/service.ts").Persons;

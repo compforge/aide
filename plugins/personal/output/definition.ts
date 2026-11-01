@@ -26,14 +26,15 @@ export const OutputSpecSchema = z.object({
 }).strict();
 export const OutputStatusSchema = z.object({
   disclosure: z.object({ decision: z.enum(["allowed", "denied"]), reason: z.string(), checkedAt: z.iso.datetime(), fingerprint: z.string(), policy: z.object({ sensitivity: SensitivitySchema, visibility: VisibilitySchema, people: z.array(z.string()) }).strict().optional() }).strict().optional(),
-  delivery: z.object({ replay: z.enum(["idempotent", "once"]).optional(), target: AddressSchema, text: z.string().max(160_000), receivers: PersonRefsSchema() }).strict().optional(),
+  waitingAddress: AddressRefSchema.optional(),
+  delivery: z.object({ address: AddressRefSchema, replay: z.enum(["idempotent", "once"]).optional(), target: AddressSchema, text: z.string().max(160_000), receivers: PersonRefsSchema() }).strict().optional(),
   phase: z.enum(["pending", "sending", "delivered", "failed", "uncertain", "cancelled"]), attempts: z.number().int().nonnegative(),
   deliveryWait: z.object({ reason: z.enum(["frequency", "receiver-busy", "provider"]), until: z.iso.datetime() }).strict().optional(),
   deliveredAt: z.iso.datetime().optional(), lastError: z.string().max(4000).optional(), receipt: z.object({ id: z.string().min(1), scope: z.string().min(1) }).strict().optional() }).strict();
 
 
 export const OutputDefinition: ResourceDefinition<OutputSpec, OutputStatus> = {
-  indexes: { reply: r => r.spec.replyTo ? [r.spec.replyTo.key] : [], address: r => [r.spec.target.uid], pendingAddress: r => ["pending", "sending"].includes(r.status.phase) ? [r.spec.target.uid] : [], pendingReceiver: r => ["pending", "sending"].includes(r.status.phase) ? [...r.status.delivery?.receivers ?? []].map(p => p.uid) : [], topic: r => [r.spec.topic.uid], webEndpoint: r => r.status.delivery && r.status.phase === "delivered" && isChannelAddress(r.status.delivery.target) && r.status.delivery.target.channelId === "web" ? [r.status.delivery.target.endpoint] : [] },
+  indexes: { reply: r => r.spec.replyTo ? [r.spec.replyTo.key] : [], address: r => [r.spec.target.uid], pendingAddress: r => ["pending", "sending"].includes(r.status.phase) ? [...new Set([r.spec.target.uid, r.status.delivery?.address.uid, r.status.waitingAddress?.uid].filter((uid): uid is string => !!uid))] : [], pendingReceiver: r => ["pending", "sending"].includes(r.status.phase) ? [...r.status.delivery?.receivers ?? []].map(p => p.uid) : [], topic: r => [r.spec.topic.uid], webEndpoint: r => r.status.delivery && r.status.phase === "delivered" && isChannelAddress(r.status.delivery.target) && r.status.delivery.target.channelId === "web" ? [r.status.delivery.target.endpoint] : [] },
   orderedIndexes: { deliveredPerson: r => r.status.phase === "delivered" && r.status.deliveredAt
     ? [...r.status.delivery?.receivers ?? []].map(p => ({ value: p.uid, order: r.status.deliveredAt! })) : [] },
   type: OUTPUT_TYPE, schema: { spec: OutputSpecSchema, status: OutputStatusSchema }, printer: outputPrinter,

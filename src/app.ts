@@ -1,4 +1,5 @@
 import { isMe } from "../plugins/personal/person/model.ts";
+import { addressRef, type AddressRef } from "../plugins/personal/address/model.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
 import { OutputDelivery, type OutputTransportResolver } from "../plugins/personal/output/delivery.ts";
 import { forgeCatalog } from "../connectors/forge/catalog.ts";
@@ -10,7 +11,7 @@ import { ROUTE_HARNESS } from "../plugins/personal/route/model.ts";
 import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { ResourceStorage } from "./host/resource/storage.ts";
 import { OutputDisclosure, type SemanticCheck } from "../plugins/personal/output/disclosure.ts";
-import { isChannelAddress, larkEndpoint } from "./channel/address.ts";
+import { isChannelAddress } from "./channel/address.ts";
 import { SayInputSchema } from "../plugins/personal/output/action.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
@@ -26,7 +27,7 @@ import { SOURCES } from "../plugins/personal/source/definition.ts";
 import type { SourceDefinition } from "../plugins/personal/source/input.ts";
 import type { InputSpec } from "../plugins/personal/input/model.ts";
 import { resolve } from "node:path";
-import { LOCAL_ME, PERSON_TYPE, type Me, type PersonIdentity, type Person, type PersonStatus } from "../plugins/personal/person/model.ts";
+import { LOCAL_ME, type Me, type PersonIdentity } from "../plugins/personal/person/model.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import { openPersonCatalog } from "../plugins/personal/person/catalog.ts";
 import type { Logger } from "pino";
@@ -182,12 +183,10 @@ export class Aide {
       },
     });
     this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, channelMe,
-      channels: [{ id: "web", provider: "local", default: (config?.defaultChannel ?? "web") === "web" },
-        ...Object.entries(config?.channels ?? {}).filter(([, c]) => c.enabled).map(([id, c]) => ({ id, provider: "lark", scope: c.appId, default: config?.defaultChannel === id }))],
       topic: parsePersonalConfig(config?.plugins.personal).topic, weave: parsePersonalConfig(config?.plugins.personal).weave }, log,
-      { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore, resolveContact: (topicId, to, channelId, target) => this.resolveContact(topicId, to, channelId, target) });
+      { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore, resolveContact: () => this.resolveContact() });
     this.disclosure = new OutputDisclosure(this.outputStore, { marks: this.meMarks,
-      audience: target => this.outputAudience(target), contactMe: topicId => this.resolveContact(topicId, { me: true }), check: options.checkDisclosure }, log);
+      audience: target => this.outputAudience(target), contactMe: async () => { const address = this.defaultAddress(); return { address, target: this.addresses.endpoint(address), receivers: [] }; }, check: options.checkDisclosure }, log);
     this.outputStore.check = id => this.disclosure.reconcile(id);
     this.delivery = new OutputDelivery(this.outputStore, async target => {
       if (isChannelAddress(target) && target.channelId === "web") return { replay: "idempotent", async send() { return undefined; } };
@@ -257,54 +256,35 @@ export class Aide {
     return review;
   }
 
-  /** @spec Resolve recipients in the selected Channel scope; Aide remains the sender. Default Me contact never relies on Topic address.
-   * @link docs/channel/README.md
+  /** @spec Business routing selects an Address incarnation; endpoint resolution and permissions are read-only.
+   * @link docs/personal/address.md
    */
-  private async resolveContact(topicId: string, to?: import("../plugins/personal/output/model.ts").SayInput["to"], channelId?: string, target?: import("@compforge/aide-plugin").Address) {
-    const explicitPerson = to && "personId" in to ? await this.persons.read(to.personId, to.uid) : undefined;
-    if (explicitPerson && !channelId && !target) throw new Error("Contacting a Person requires channelId or an explicit target");
-    if (target) {
-      const person = explicitPerson ?? (await this.persons.list()).find(p => p.isMe);
-      if (!person) throw new Error("Me is not configured");
-      const endpoint = this.addresses.endpoint(target);
-      return { target: endpoint, receivers: [personRef(person)] };
-    }
-    const id = channelId ?? this.options.config?.defaultChannel ?? "web";
-    let identity = LOCAL_ME;
-    if (id !== "web") {
-      const channel = this.options.config?.channels[id];
-      if (!channel?.enabled) throw new Error(`Channel is unavailable: ${id}`);
-      if (explicitPerson) {
-        const identities = explicitPerson.spec.identities.filter(i => i.provider === "lark" && i.scope === channel.appId);
-        if (identities.length !== 1) throw new Error(`Person ${explicitPerson.metadata.name} needs one Lark identity in Channel ${id}`);
-        identity = identities[0]!;
-      } else {
-        if (!channel.me) throw new Error(`Default Channel ${id} needs Me's identity in app ${channel.appId}; configure channels.${id}.me`);
-        identity = { provider: "lark", scope: channel.appId, id: channel.me.openId };
-      }
-    } else if (explicitPerson && !explicitPerson.isMe) throw new Error("Web Channel only contacts Me; specify another Channel or an explicit target");
-    const person = explicitPerson ?? await this.persons.findIdentity(identity);
-    if (!person) throw new Error(`Default Channel ${id} has no Person for its configured Me identity`);
-    const destination = id === "web" ? webAddress(topicId) : larkPersonAddress(identity.scope, identity.id);
-    this.addresses.observe(destination, [personRef(person)], isMe(person.spec, this.meMarks) ? { muted: false } : {});
-    return { target: destination, receivers: [personRef(person)] };
+  defaultAddress(): AddressRef {
+    if (this.options.config?.defaultAddress) return this.options.config.defaultAddress;
+    const address = this.addresses.find(webAddress("me"));
+    if (!address) throw new Error("Me Web inbox is not initialized");
+    return addressRef(address);
   }
 
-  private async outputAudience(target: import("@compforge/aide-plugin").Address) {
-    try { assertChannelDelivery(target, enabledLarkApps(this.options.config?.channels ?? {})); }
+  async validateDefaultAddress(ref: AddressRef): Promise<void> {
+    const audience = await this.outputAudience(ref);
+    if (audience.unavailable || !audience.private || !audience.people.length || audience.people.some(p => !isMe(p.spec, this.meMarks)))
+      throw new Error("Default Address must be a private, available destination for Me");
+  }
+
+  private async resolveContact() {
+    const target = this.defaultAddress();
+    await this.validateDefaultAddress(target);
+    return { target, receivers: this.addresses.audience(target).people.map(personRef) };
+  }
+
+  canSpeak(target: import("@compforge/aide-plugin").Address): boolean { return this.addresses.canSpeak(target); }
+
+  private async outputAudience(ref: AddressRef) {
+    const address = this.addresses.read(ref);
+    try { assertChannelDelivery(address.spec.endpoint, enabledLarkApps(this.options.config?.channels ?? {})); }
     catch { return { people: [], private: false, unavailable: "Destination Channel is disabled or unavailable" }; }
-    const endpoint = larkEndpoint(target);
-    const identity = isChannelAddress(target) && target.channelId === "web" ? LOCAL_ME
-      : endpoint?.receiveIdType === "open_id" ? { provider: "lark", scope: endpoint.appId, id: endpoint.receiveId } : undefined;
-    const person = identity && await this.persons.findIdentity(identity);
-    const address = this.addresses.observe(target, person ? [personRef(person)] : []);
-    const people = [];
-    for (const ref of address.status.people) {
-      const p = await this.catalog.client.get<Person, PersonStatus>(ref);
-      if (p && p.metadata.uid === ref.uid && !p.metadata.deletionTimestamp) people.push(p);
-      else return { people, private: false, unavailable: "Known Address participant no longer resolves" };
-    }
-    return { people, private: address.spec.type === "direct" || address.spec.type === "web", muted: address.spec.muted };
+    return this.addresses.audience(ref);
   }
 
   private async initializePeople() {
@@ -314,6 +294,8 @@ export class Aide {
       this.meMarks.identities.push({ provider: account.provider, scope: account.scope, id: config.me.userKey });
     }
     const result = await this.persons.initialize();
+    const localMe = await this.persons.findIdentity(LOCAL_ME);
+    if (localMe) this.addresses.observe(webAddress("me"), [personRef(localMe)], { muted: false, type: "web", name: "Me 的 Web 收件处" });
     for (const identity of this.meMarks.identities) {
       if (identity.provider !== "lark") continue;
       const me = await this.persons.findIdentity(identity);

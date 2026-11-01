@@ -95,7 +95,7 @@ export class OutputDelivery {
       this.store.uncertain(id, "Transport replay contract changed after a send attempt"); return {};
     }
     if (!output.status.attempts) this.store.update(id, s => ({ ...s, delivery: { ...s.delivery!, replay: transport.replay } }));
-    if (new Addresses(this.store.storage.home).observe(target).spec.muted) throw new Error("Address was muted before transport dispatch");
+    if (new Addresses(this.store.storage.home).read(output.status.delivery!.address).spec.muted) throw new Error("Address was muted before transport dispatch");
     this.store.begin(id);
     try {
       const receipt = await transport.send({ id, target, text: output.status.delivery!.text });

@@ -2,7 +2,7 @@ import { approveFixtureOutput } from "./output-fixture.ts";
 import { assertChannelDelivery } from "../src/channel/address.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
-import { fixtureAddress } from "./address-fixture.ts";
+import { addressFor, fixtureAddress } from "./address-fixture.ts";
 import personalDefinitions from "../plugins/personal/definitions.ts";
 import type { Address } from "@compforge/aide-plugin";
 import { InputStore } from "../plugins/personal/input/store.ts";
@@ -25,7 +25,7 @@ export class TopicStore extends PersonalTopics {
     resources.storage.register("personal", personalDefinitions);
     const outputStore = new OutputStore(scope.home, target => assertChannelDelivery(target, ["app"]));
     const provider = personalAdmission(new InputStore(scope.home), outputStore);
-    super(resources, createResourceClient(resources, (change) => this.changed(change), undefined, provider), new InputStore(scope.home), outputStore, async id => ({ target: fixtureAddress(id), receivers: [] }));
+    super(resources, createResourceClient(resources, (change) => this.changed(change), undefined, provider), new InputStore(scope.home), outputStore, async () => ({ target: addressFor(scope.home, fixtureAddress(scope.id)), receivers: [] }));
     this.defaultTopicId = scope.id;
   }
 }

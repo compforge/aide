@@ -1,4 +1,3 @@
-import type { Address } from "@compforge/aide-plugin";
 import type { ResourceRef } from "@compforge/aide-plugin";
 import type { PersonRefs } from "../person/model.ts";
 
@@ -62,7 +61,8 @@ export interface InputSpec {
   timezone?: string;
   observation?: Record<string, unknown>;
 }
-export type InputSubmission = Omit<InputSpec, "source"> & { source?: import("../address/service.ts").AddressTarget };
+export type InputSubmission = Omit<InputSpec, "source"> & { source?: import("../address/service.ts").AddressTarget;
+  addressObservation?: { name?: string; type?: import("../address/model.ts").AddressSpec["type"]; people?: Iterable<import("../person/model.ts").PersonRef> } };
 export const inputAttention = (input: InputSpec): InputAttention =>
   input.attention ?? (input.origin === "channel" ? InputAttention.Immediate : InputAttention.Normal);
 

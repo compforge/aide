@@ -39,7 +39,7 @@ test("Work tool -> Runner Watch -> Connector verb -> Harness uses explicit topic
     await manager.settled();
     const observer = { apiVersion: "tests.aide.dev/v1alpha1", kind: "WorkObserver" };
     expect(resources.get(observer, "observer", "v1/project/coordination").status).toMatchObject({ answer: "observed", count: 1 });
-    const projection: ChannelService = { inputDefinition: input => ({ id: input.originId, label: "Fixture input", icon: "fixture" }), runtime: core, topics,
+    const projection: ChannelService = { canSpeak: () => true, inputDefinition: input => ({ id: input.originId, label: "Fixture input", icon: "fixture" }), runtime: core, topics,
       subscribe: (listener) => core.subscribe(listener), outputs: () => [], invocations: () => manager.listHarnessInvocations().map(invocation => ({ ...invocation, ...personalExecution(invocation) })), topicIds: () => ["group-a"], receive: async () => { throw new Error("Not used"); } };
     expect(topicView(projection, "group-a").blocks.some((block) => block.type === "execution")).toBe(true);
     expect(topicView(projection, "group-b").blocks).toHaveLength(0);

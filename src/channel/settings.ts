@@ -6,6 +6,7 @@ import { parseDocument } from "yaml";
 import { z } from "zod";
 import type { Logger } from "pino";
 import { ConfigSchema, type AideConfig } from "../config.ts";
+import { AddressRefSchema } from "../../plugins/personal/address/model.ts";
 import { LarkChannelConfigSchema } from "./config.ts";
 
 export class ChannelSettingsError extends Error {
@@ -14,13 +15,13 @@ export class ChannelSettingsError extends Error {
 export const ChannelSettingsChangeSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("save"), revision: z.string(), id: z.string().regex(/^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/),
     channel: LarkChannelConfigSchema.extend({ appSecret: z.string().min(1).max(1000).optional() }) }).strict(),
-  z.object({ operation: z.literal("default"), revision: z.string(), id: z.string().min(1) }).strict(),
+  z.object({ operation: z.literal("default"), revision: z.string(), address: AddressRefSchema }).strict(),
   z.object({ operation: z.literal("remove"), revision: z.string(), id: z.string().min(1) }).strict(),
 ]);
 export type ChannelSettingsChange = z.infer<typeof ChannelSettingsChangeSchema>;
 const revision = (text: string) => createHash("sha256").update(text).digest("hex");
 
-/** @spec Configuration edits persist the next startup snapshot, never pretend to reload running transports.
+/** @spec Connection edits apply at restart; selecting a default Address persists it and updates only new notification routing.
  * @spec Secrets are write-only; omission retains an existing secret only for the same app. YAML edits preserve unrelated configuration.
  * @link docs/configuration.md
  */
@@ -37,8 +38,8 @@ export class ChannelSettings {
   }
   snapshot() {
     const { config, revision } = this.read();
-    return { revision, defaultChannel: config.defaultChannel, activeDefaultChannel: this.active.defaultChannel,
-      restartRequired: config.defaultChannel !== this.active.defaultChannel || !isDeepStrictEqual(config.channels, this.active.channels),
+    return { revision, defaultAddress: config.defaultAddress,
+      restartRequired: !isDeepStrictEqual(config.defaultAddress, this.active.defaultAddress) || !isDeepStrictEqual(config.channels, this.active.channels),
       channels: Object.entries(config.channels).map(([id, { appSecret, ...channel }]) => ({ id, ...channel,
         secretConfigured: Boolean(appSecret), active: Boolean(this.active.channels[id]?.enabled),
         changed: !isDeepStrictEqual(config.channels[id], this.active.channels[id]) })),
@@ -53,7 +54,7 @@ export class ChannelSettings {
       const appSecret = input.channel.appSecret ?? (previous?.appId === input.channel.appId ? previous.appSecret : undefined);
       if (!appSecret) throw new ChannelSettingsError(400, "新增或更换应用时，请填写 App Secret。");
       saved.document.setIn(["channels", input.id], { ...input.channel, appSecret });
-    } else if (input.operation === "default") saved.document.set("defaultChannel", input.id);
+    } else if (input.operation === "default") saved.document.set("defaultAddress", input.address);
     else {
       if (input.id === "web") throw new ChannelSettingsError(400, "Web 是内置渠道，不能删除。");
       saved.document.deleteIn(["channels", input.id]);
@@ -69,7 +70,8 @@ export class ChannelSettings {
       writeFileSync(temporary, saved.document.toString(), { mode: 0o600, flag: "wx" });
       renameSync(temporary, this.path);
     } finally { try { unlinkSync(temporary); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; } }
-    this.log.info({ operation: input.operation, channelId: input.id }, "Channel configuration saved; restart required to apply");
+    if (input.operation === "default") this.active.defaultAddress = input.address;
+    this.log.info({ operation: input.operation, ...(input.operation === "default" ? { addressUid: input.address.uid } : { channelId: input.id }) }, "Communication configuration saved");
     return this.snapshot();
   }
 }

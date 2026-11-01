@@ -11,7 +11,6 @@ import { notes } from "./note/query.ts";
 import { knownReceivers } from "./person/receivers.ts";
 import { workPhase } from "./status.ts";
 import { commitStatus, patchStatus } from "./status.ts";
-import { contactsTool, type ContactChannel } from "./output/tool.ts";
 import { identityBackground } from "../../agents/personal.ts";
 import { weavePolicy } from "./weave/config.ts";
 import { topicTools } from "./topic/tools.ts";
@@ -77,7 +76,7 @@ export class Personal {
   readonly core: ApplicationRuntime;
   private readonly pending = new Set<Promise<unknown>>();
 
-  constructor(private readonly options: { timezone: string; persons: Persons; channelMe: Me; channels?: readonly ContactChannel[]; topic?: unknown; weave?: unknown }, private readonly log: Logger,
+  constructor(private readonly options: { timezone: string; persons: Persons; channelMe: Me; topic?: unknown; weave?: unknown }, private readonly log: Logger,
     runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore; resolveContact?: ConstructorParameters<typeof TopicStore>[4] }) {
     this.core = runtime.runtime;
     this.connectors = runtime.connectors;
@@ -120,7 +119,7 @@ export class Personal {
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
       });
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active), contactsTool(this.options.persons, this.options.channels ?? [], active), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
         const c = active();
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
         this.log.info({ topicId, topicUid: input.subject?.uid ?? c.metadata.uid, noteId: result.noteId, version: result.version }, "Topic Note updated");
@@ -134,11 +133,11 @@ export class Personal {
   }
 
   routineSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
-    return routineSession(scope, config, this.store, this.plugins, this.log, this.options.persons, this.options.channels);
+    return routineSession(scope, config, this.store, this.plugins, this.log, this.options.persons);
   }
 
   taskSession(scope: ExecutionScope, config: PiConfig): PiSessionFactory {
-    return taskSession(scope, config, this.store, this.plugins, this.log, this.options.persons, this.options.channels);
+    return taskSession(scope, config, this.store, this.plugins, this.log, this.options.persons);
   }
 
   routeSession(scope: ExecutionScope, config: ChiefAgentOptions["config"]): PiSessionFactory {
@@ -470,12 +469,12 @@ export class Personal {
         receivers = personRefs(await knownReceivers(this.options.persons, observation.accountId, observation.mentions ?? []));
       }
     }
-    const channelEvidence = input.observation as { chatType?: string; chatName?: string } | undefined;
-    if (input.channelId === "web" || (relation === "sent" && channelEvidence?.chatType === "p2p"))
+    const place = input.addressObservation;
+    if (input.channelId === "web" || (relation === "sent" && place?.type === "direct"))
       new Addresses(this.store.resources.storage.home).observe(input.source, sender ? [sender] : [], { muted: false,
-        type: input.channelId === "web" ? "web" : "direct", name: channelEvidence?.chatName });
+        type: input.channelId === "web" ? "web" : "direct", name: place?.name });
     const fact = await this.topics.submit(id, { attention: InputAttention.Immediate, topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
-      origin: "channel", originId: input.channelId, source: input.source, ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
+      origin: "channel", originId: input.channelId, source: input.source, replyToMessageId: input.replyToMessageId, addressObservation: place, ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });
     return fact;
   }

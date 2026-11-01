@@ -21,6 +21,11 @@ import { renderHTML } from "@compforge/agent-observation";
 import { inputObservation, ObservationQuery } from "./observation.ts";
 import { inputList, inputFilters, inputDetail } from "./inputs.ts";
 
+/** @spec Web callers submit message content and a Topic choice; adapter observations and reply coordinates are server-owned.
+ * @case tests/web-progress.test.ts
+ */
+const WebMessageSchema = IncomingSchema.pick({ id: true, text: true }).extend({ topicId: z.string().min(1) });
+
 const EventSchema = IncomingSchema.omit({ text: true, channelId: true, source: true }).extend({
   name: z.string().min(1).max(200), text: z.string().max(32_000),
 });
@@ -110,7 +115,16 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
       }
       if (url.pathname === "/channels/config" && (request.method === "GET" || request.method === "POST")) {
         if (!settings) { json(response, 503, { error: "此运行实例未提供配置编辑能力。" }); return; }
-        json(response, 200, request.method === "GET" ? settings.snapshot() : settings.change(ChannelSettingsChangeSchema.parse(await body(request))));
+        await aide.start();
+        if (request.method === "POST") {
+          const change = ChannelSettingsChangeSchema.parse(await body(request));
+          if (change.operation === "default") {
+            try { await aide.validateDefaultAddress(change.address); }
+            catch (error) { throw new ChannelSettingsError(400, error instanceof Error ? error.message : "Invalid default Address"); }
+          }
+          settings.change(change);
+        }
+        json(response, 200, { ...settings.snapshot(), defaultAddress: aide.defaultAddress() });
         return;
       }
       if (request.method === "GET" && url.pathname === "/health") {
@@ -277,7 +291,7 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         log.info({ messageId, kind: result.kind, completed: completed }, "Native approval response");
         json(response, completed ? 200 : 409, { completed: completed });
       } else if (request.method === "POST" && url.pathname === "/messages") {
-        const input = IncomingSchema.omit({ channelId: true, observation: true, source: true, topicKey: true, topicName: true }).extend({ topicId: z.string().min(1) }).parse(await body(request));
+        const input = WebMessageSchema.parse(await body(request));
         const topicId = webTopicLocator.locate(input).selector.id;
         json(response, 200, await receive({ ...input, topicId, source: webAddress(topicId) }));
       } else if (request.method === "POST" && url.pathname === "/topics/review") {

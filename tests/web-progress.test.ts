@@ -89,8 +89,17 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(first.events[0]!.op, "start");
   assert.deepEqual(first.views[0], { version: "1.0", biz: "aide.topic", blocks: [], meta: { topic_id: "a", context: null, activity: null } });
   const accepted = await fetch(base + "/messages", { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id: "a1", topicId: "a", text: "查看资料", channelId: "forged-channel" }) });
+    body: JSON.stringify({ id: "a1", topicId: "a", text: "查看资料", channelId: "forged-channel",
+      addressObservation: { type: "group", name: "forged-place" }, replyToMessageId: "forged-reply", source: larkAddress("forged-app", "forged-chat") }) });
   assert.equal(accepted.status, 200);
+  const receipt = await accepted.json();
+  const input = aide.topics.inputStore.get(receipt.inputId)!;
+  assert.equal(input.spec.originId, "web");
+  assert.equal(input.spec.replyToMessageId, undefined);
+  const place = aide.addresses.read(input.spec.source!);
+  assert.deepEqual(place.spec.endpoint, webAddress("a"));
+  assert.equal(place.spec.type, "web");
+  assert.notEqual(place.spec.name, "forged-place");
   await aide.receive(fixtureIncoming({ channelId: "web", id: "b1",  topicId: "b", text: "另一会话的私有内容" }));
   const firstKey = aide.personal.topics.resource("a")!.metadata.name;
   const secondKey = aide.personal.topics.resource("b")!.metadata.name;
@@ -192,8 +201,8 @@ test("AgentUE reducer reconstructs growing, corrected and removed progress witho
   let previous: TopicView | undefined;
   let snapshot = {};
   for (const next of [initial,
-    { ...initial, meta: { ...initial.meta, context: { summary: "当前话题", recent: [{ id: "first", uid: "first-uid", version: "one", people: [], addresses: [], subject: { apiVersion: "aide.dev/v1alpha4", kind: "Topic" as const, namespace: "v1" as const, name: "topic", uid: "topic-uid" }, createdAt: "2026-10-23T08:00:00Z", updatedAt: "2026-10-23T08:00:00Z", text: "确认当前结论" }] } } },
-    { ...initial, meta: { ...initial.meta, context: { summary: "修订后的话题", recent: [{ id: "note", uid: "note-uid", version: "one", people: [], addresses: [], subject: { apiVersion: "aide.dev/v1alpha4", kind: "Topic" as const, namespace: "v1" as const, name: "topic", uid: "topic-uid" }, createdAt: "2026-10-23T09:00:00Z", updatedAt: "2026-10-23T09:00:00Z", text: "补充待办依据" }] } } },
+    { ...initial, meta: { ...initial.meta, context: { summary: "当前话题", recent: [{ id: "first", uid: "first-uid", version: "one", people: [], addresses: [], subject: { apiVersion: "aide.dev/v1alpha5", kind: "Topic" as const, namespace: "v1" as const, name: "topic", uid: "topic-uid" }, createdAt: "2026-10-23T08:00:00Z", updatedAt: "2026-10-23T08:00:00Z", text: "确认当前结论" }] } } },
+    { ...initial, meta: { ...initial.meta, context: { summary: "修订后的话题", recent: [{ id: "note", uid: "note-uid", version: "one", people: [], addresses: [], subject: { apiVersion: "aide.dev/v1alpha5", kind: "Topic" as const, namespace: "v1" as const, name: "topic", uid: "topic-uid" }, createdAt: "2026-10-23T09:00:00Z", updatedAt: "2026-10-23T09:00:00Z", text: "补充待办依据" }] } } },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "整理重点" }] },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "已完成" }] },
     { ...initial, blocks: [] }]) {

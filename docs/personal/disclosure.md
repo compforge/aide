@@ -49,7 +49,7 @@ Web 是 Me 的私有界面。Lark 私聊按 app/open_id 或已观察的私聊人
 
 Output Reconciler 是检查、投递和重试的唯一协调者。底座按资源串行、不同资源并发，并负责错误退避和重启恢复。Channel/Connector 仅提供具体目的地的 transport，不遍历 Output，也不维护业务重试定时器。Lark 的入站、进度卡及固定错误提示仍由 Channel 管理。
 
-允许则投递原文。拒绝则在同一 Output 上通过 defaultChannel 私下通知 Me：“原计划给谁发什么、因为什么未发送”。不新建通知 Output。默认渠道暂不可用时保留 pending/error，由此 Output 自己重试，不阻断其它 Output。
+允许则投递原文。拒绝则在同一 Output 上通过 defaultAddress 私下通知 Me：“原计划给谁发什么、因为什么未发送”。不新建通知 Output。默认地址暂不可用时保留 pending/error，由此 Output 自己重试，不阻断其它 Output。
 
 异步检查完成后重新核对依赖；transport 准备完成后再检查一次，再记录 sending 并调用发送。被拒绝的原意图不会因权限放宽自动恢复外发。开始尝试后实际正文、目的地与接收者不可改变；变化使原投递无法继续时转 uncertain，核对外部回执。
 

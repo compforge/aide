@@ -32,6 +32,26 @@ export class Addresses {
     if (r.metadata.uid !== ref.uid || r.metadata.deletionTimestamp) throw new Error("Address no longer exists");
     return r;
   }
+  find(endpoint: Endpoint): AddressResource | undefined {
+    const address = this.resources.page<AddressSpec, AddressStatus>(ADDRESS_TYPE, { namespace: "v1", limit: 1,
+      matchIndex: { name: "endpoint", value: JSON.stringify(placeEndpoint(endpoint)) } }).items[0];
+    return address?.metadata.deletionTimestamp ? undefined : address;
+  }
+  canSpeak(endpoint: Endpoint): boolean { const address = this.find(endpoint); return !!address && !address.spec.muted; }
+  /** @spec Permission reads neither discover places nor alter participants. All membership reads share one transaction snapshot. */
+  audience(ref: AddressRef) {
+    return this.resources.storage.transaction(() => {
+      const address = this.read(ref);
+      const people = [];
+      for (const ref of address.status.people) {
+        const person = this.resources.find<Person, PersonStatus>(PERSON_TYPE, ref.name, ref.namespace);
+        if (!person || person.metadata.uid !== ref.uid || person.metadata.deletionTimestamp)
+          return { people, private: false, muted: address.spec.muted, unavailable: "Known Address participant no longer resolves" };
+        people.push(person);
+      }
+      return { people, private: address.spec.type === "direct" || address.spec.type === "web", muted: address.spec.muted };
+    });
+  }
   endpoint(target: AddressTarget): Endpoint { return target.kind === "Address" ? this.read(AddressRefSchema.parse(target)).spec.endpoint : target; }
   /** @spec Discovery only accumulates facts; it never unmutes a known Address or overwrites its summary.
    * @case tests/address-resource.test.ts
@@ -54,7 +74,9 @@ export class Addresses {
         muted: options.muted ?? type !== "web" }, status: { people: members } });
     });
   }
-  ref(target: AddressTarget, people: Iterable<PersonRef> = []) { return addressRef(this.observe(target, people)); }
+  ref(target: AddressTarget, people: Iterable<PersonRef> = []) {
+    return target.kind === "Address" ? addressRef(this.read(AddressRefSchema.parse(target))) : addressRef(this.observe(target, people));
+  }
   view(ref: AddressRef) {
     const r = this.read(ref);
     return { ...r, status: { ...r.status, people: [...r.status.people] }, summaryText: summaryText(this.resources, r),

@@ -1,3 +1,4 @@
+import { fixtureCanSpeak } from "./address-fixture.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
 import { addressRef } from "../plugins/personal/address/model.ts";
 import { allowAddress } from "./address-fixture.ts";
@@ -57,7 +58,7 @@ function setup(t: TestContext) {
       async patch(...args) { record("patch", args); for (const [id, value] of Object.entries(args[1])) patchElement(card.body.elements, id, value); },
       async settings(...args) { record("settings", args); card.config.streaming_mode = args[1]; },
       async update(...args) { record("update", args); card = structuredClone(args[1]) as typeof card; } } };
-  const aide = { receive: async () => { throw new Error("Delivery must not execute input"); }, outputs: () => messages };
+  const aide = { canSpeak: fixtureCanSpeak(home), receive: async () => { throw new Error("Delivery must not execute input"); }, outputs: () => messages };
   const reader = (id: string) => { assert.equal(id, topicId); return [view]; };
   let channel = new LarkChannel(home, "cli_progress", aide, transport, log, reader);
   channel.receive(event);

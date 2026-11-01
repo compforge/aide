@@ -7,15 +7,13 @@ Channel 是 Aide 与用户沟通的入口和出口，负责接收消息、提供
 | [Web](web.md) | URL 选择 topicId，左侧列表切换已有会话 | 消息、流式进展、历史执行、事项与安排；回答问题和原生 Harness 请求 |
 | [Lark](lark.md) | 应用 ID + chat ID 确定会话；接收单聊与群内 @本机器人 | 流式卡片展示处理阶段与已投递回复；业务 Output 经披露检查后送到实际目标 |
 
-## 默认沟通渠道
+## 默认通知地址
 
-Default Topic 是系统维护的输入兜底处，接收无法明确归类的 Input；用户配置 Default Channel，决定 Aide 主动联系 Me 时使用哪个沟通实例。两者独立，Topic 归属不决定默认通知出口。
+Default Topic 是系统维护的输入兜底处；defaultAddress 是 Aide 主动联系 Me 的具体私有场合，两者独立。缺省使用稳定的 Me Web 收件处，Web 仍按产出 Topic 展示消息记录。
 
-默认 say 的语义是 `defaultChannel.send(aide, me, content)`。from 由实例的机器人凭证确定，to 来自所选 Channel 的 me 配置；具体平台地址属于 Channel 内部。无需用户再配置默认地址，也不要求此前聊过。Lark 可以直接向 open_id 发送；Web 将内容发布在产出 Topic 的页面中。
+Chief、Task、Routine 通过已知 AddressRef 选择目的地。明确答复保留 Input.source 和原消息坐标；没有唯一回复位置时联系 Me。默认选路在 say 接纳时固定到 Output，后续发送和重试不受默认配置切换影响。
 
-明确目标、直接回复和同址 immediate 输入优先。其余通知通过默认渠道联系 Me，默认渠道缺省为 Web。Me 标记是附加项；缺少所选 Channel 的 Me 配置时，默认联系失败并提示补齐身份，正常接收与明确目标的回复不受影响。Connector 用户凭证与 Channel 机器人凭证分别配置，不把其他应用下的身份替换 appId 后复用。
-
-默认选路在 say 接纳时落实到持久 Output。随后发送和重试只使用该 Output 的目标，不重新选择默认渠道。界面「接入」支持新增、编辑、启停和选择默认渠道，配置保存到 config.yaml，重启后生效；不将配置齐全称为连接或投递成功。字段见[配置](../configuration.md#沟通渠道)。
+Channel 只负责接收、平台位置标准化和实际发送；它消费应用注入的只读发言权限，不创建或更新 Address。连接凭证在 Addresses 的“接入管理”中集中配置，地址详情负责禁言、认识和默认通知地址。凭证与 Person 身份的作用域独立，不能替换 appId 复用其他应用的 open_id。
 
 ## 输入、会话与回复
 

@@ -1,13 +1,11 @@
-import { AddressSchema } from "../../../src/address.ts";
 import { z } from "zod";
 import type { PluginVerbs } from "@compforge/aide-plugin";
 import type { SayInput, SayResult, SayReceipt } from "./model.ts";
 import { OutputSpecSchema } from "./definition.ts";
 export const SayInputSchema = z.object({ text: z.string().trim().min(1), inputIds: z.array(z.string()).optional(),
   idempotencyKey: z.string().min(1).optional(), respondToInputId: z.string().min(1).optional(),
-  to: z.union([z.object({ me: z.literal(true) }).strict(), z.object({ personId: z.string().min(1), uid: z.string().min(1) }).strict()]).optional(),
-  channelId: z.string().min(1).optional(),
-  notes: z.array(z.object({ uid: z.string().min(1), version: z.string().min(1) }).strict()).max(100).optional(), target: z.union([OutputSpecSchema.shape.target, AddressSchema]).optional(), receivers: OutputSpecSchema.shape.receivers.optional() }).strict();
+  to: z.object({ me: z.literal(true) }).strict().optional(),
+  notes: z.array(z.object({ uid: z.string().min(1), version: z.string().min(1) }).strict()).max(100).optional(), target: OutputSpecSchema.shape.target.optional(), receivers: OutputSpecSchema.shape.receivers.optional() }).strict();
 export async function say(verbs: PluginVerbs, input: SayInput): Promise<SayResult> {
   return verbs.action<SayReceipt>("say", SayInputSchema.parse(input));
 }

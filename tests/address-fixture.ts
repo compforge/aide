@@ -17,3 +17,17 @@ export function allowAddress(home: string, target: import("../plugins/personal/a
   const addresses = new Addresses(home), address = addresses.observe(target);
   if (address.spec.muted) addresses.setMuted(addressRef(address), false, true);
 }
+
+export function addressFor(home: string, endpoint: import("@compforge/aide-plugin").Address) {
+  return new Addresses(home).ref(endpoint);
+}
+export const fixtureCanSpeak = (home: string) => (target: import("@compforge/aide-plugin").Address) => new Addresses(home).canSpeak(target);
+
+/** Initialize the configured Me inbox without starting background controllers in routing-only tests. */
+export async function fixtureMe(aide: import("../src/app.ts").Aide) {
+  await aide.persons.initialize();
+  const { personRef, LOCAL_ME } = await import("../plugins/personal/person/model.ts");
+  const me = (await aide.persons.findIdentity(LOCAL_ME))!;
+  aide.addresses.observe(webAddress("me"), [personRef(me)], { type: "web", muted: false });
+  return personRef(me);
+}

@@ -1,13 +1,12 @@
 # Aide 配置
 
 Host 在启动时加载一份配置快照，验证后按职责装配 Connector、Harness 和 Plugin。
-`config.yaml` 是 Aide 声明的事实来源。启动时完成模块校验后才恢复业务资源 和启动 Channel；修改配置后重启服务。
+`config.yaml` 是 Aide 声明的事实来源。启动时完成模块校验后才恢复业务资源 和启动 Channel；连接和运行参数修改后重启服务；Web 保存默认通知地址可立即生效。
 新建、恢复和重建 Harness 都复用启动配置，运行期间修改 Aide 或 Pi 的 models/settings 文件不会改变它。
 
 ## 沟通渠道
 
 ```yaml
-defaultChannel: lark-work
 channels:
   lark-work:
     kind: lark
@@ -19,11 +18,11 @@ channels:
       openId: ou_yourOpenId      # 必须属于上面的机器人应用
 ```
 
-`defaultChannel` 引用启用的实例，或内置 `web`。应用 ID 在实例间唯一；停用当前默认实例前需选择其他默认渠道。主动联系 Me 使用所选 Channel 自己的 me 配置，并按该身份查找 Person；不从 Connector 配置或其他 Person 账号推导。不需要配置 chatId 或先发一条消息。
+`defaultAddress` 保存具体 Address 的完整 UID 引用，由 Addresses 页面选择。缺省使用稳定的“Me 的 Web 收件处”。可选择当前连接可用、已确认仅面向 Me 的私有地址；选择不会解除禁言。应用 ID 在 Channel 实例间唯一，启动时为配置确认的 Me 发现私聊 Address，不要求先收到一条私聊。
 
-Web「接入」页编辑同一份配置，显示当前启动快照与已保存配置是否不同；保存后需重启。页面不返回 App Secret，编辑同一应用时留空保留，更换应用需重新填写。服务用版本校验拒绝过期编辑，原子替换 YAML 并保留无关字段及注释，文件权限为 600。实际连接和投递仍需检查运行日志及 Output 状态。
+Web「Addresses → 接入管理」编辑同一份连接配置，显示当前启动快照与已保存配置是否不同；连接变更保存后需重启。Addresses 详情中的默认通知地址选择保存后立即生效，只影响新通知，已有 Output 继续使用原目标。页面不返回 App Secret，编辑同一应用时留空保留，更换应用需重新填写。服务用版本校验拒绝过期编辑，原子替换 YAML 并保留无关字段及注释，文件权限为 600。实际连接和投递仍需检查运行日志及 Output 状态。
 
-Lark Channel 不再读取 `AIDE_LARK_APP_ID` / `AIDE_LARK_APP_SECRET`。机器人配置属于 channels；`connectors.lark` 的应用与用户登录态继续用于观察消息，二者互不替代。详细语义见 [Channel](channel/README.md#默认沟通渠道)。
+Lark Channel 不再读取 `AIDE_LARK_APP_ID` / `AIDE_LARK_APP_SECRET`。机器人配置属于 channels；`connectors.lark` 的应用与用户登录态继续用于观察消息，二者互不替代。详细语义见 [Channel](channel/README.md#默认通知地址)。
 
 ## 来源与优先级
 
@@ -38,7 +37,7 @@ Lark Channel 不再读取 `AIDE_LARK_APP_ID` / `AIDE_LARK_APP_SECRET`。机器�
 
 | 配置 | 所有者与用途 |
 |---|---|
-| `defaultChannel` | 主动联系 Me 的默认 Channel 实例，缺省为内置 `web` |
+| `defaultAddress` | 主动联系 Me 的 AddressRef；缺省为稳定的 Me Web 收件处 |
 | `channels` | 命名沟通实例、机器人凭证与可选 Me 身份 |
 | `resources` | Host 的持久 Resource 容量、按 Group/Kind 的回收策略与去重窗口 |
 | `connectors` | Host 装配全局环境目录、需求、Forge 与 Lark 消息读取能力 |

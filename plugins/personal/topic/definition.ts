@@ -17,7 +17,7 @@ import { ContextFields } from "../context.ts";
 import { z } from "zod";
 import { TopicReviewSchema } from "./review.ts";
 import type { ResourceDefinition, ResourceValidationContext } from "@compforge/aide-plugin";
-import { AddressSchema } from "../../../src/address.ts";
+import { AddressRefSchema } from "../address/model.ts";
 import { TOPIC_TYPE, TopicDeletionBlocked, DEFAULT_TOPIC_ID, type TopicStatus, type TopicSpec, type TopicResource } from "./model.ts";
 import { LoopExecutionSchema } from "../loop.ts";
 import { ResourceRefSchema } from "../topic/ref.ts";
@@ -54,7 +54,7 @@ function validateDefault(resource: Readonly<TopicResource>, context: ResourceVal
 }
 export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
   type: TOPIC_TYPE,
-  schema: { spec: z.object({ id: z.string(), address: AddressSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
+  schema: { spec: z.object({ id: z.string(), address: AddressRefSchema.optional(), name: z.string().optional(), default: z.boolean().optional(),
     people: PersonRefsSchema(1000).optional(), review: TopicReviewSchema.optional(), topicKey: z.string().min(1).max(500).optional(), parentRef: ResourceRefSchema.optional() }).strict(),
     status: z.object({ conditions: ConditionsSchema, summaryDependencies: z.record(z.string(), z.string()).optional(), organization: OrganizationSchema.optional(), receipts: z.array(z.object({ key: z.string(), responseId: z.string() }).strict()).default([]),
       weaveReview: z.object({ version: z.string(), at: z.string().datetime() }).strict().optional(),

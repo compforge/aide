@@ -1,3 +1,5 @@
+import { Addresses } from "../plugins/personal/address/service.ts";
+import { addressFor } from "./address-fixture.ts";
 import { transportFixture } from "./output-fixture.ts";
 import { allowAddress } from "./address-fixture.ts";
 import { KeyedSet } from "@compforge/ts-stdx/collections";
@@ -36,8 +38,8 @@ async function setup(t: TestContext) {
   let audience: OutputAudience = { people: [other], private: true };
   let checks = 0;
   const ports: DisclosurePorts = { marks: { identities: [LOCAL_ME] },
-    audience: async target => isChannelAddress(target) && target.channelId === "web" ? { people: [me], private: true } : audience,
-    contactMe: async () => ({ target: webAddress("topic"), receivers: [personRef(me)] }),
+    audience: async ref => { const target = new Addresses(home).endpoint(ref); return isChannelAddress(target) && target.channelId === "web" ? { people: [me], private: true } : audience; },
+    contactMe: async () => ({ address: addressFor(home, webAddress("topic")), target: webAddress("topic"), receivers: [personRef(me)] }),
     check: async () => { checks++; return { allowed: true, reason: "supported" }; } };
   const checker = new OutputDisclosure(store, ports, pino({ level: "silent" }));
   store.check = id => checker.reconcile(id);
@@ -136,7 +138,7 @@ test("permission change during async review never publishes a stale authorizatio
 test("unknown group audience and unsafe fallback never authorize the original target", async t => {
   const f = await setup(t); f.audience({ people: [], private: false });
   f.output("x", await f.note());
-  f.ports.contactMe = async () => ({ target: larkPersonAddress("app", "ou_c"), receivers: [personRef(f.me)] });
+  f.ports.contactMe = async () => ({ address: addressFor(f.store.storage.home, larkPersonAddress("app", "ou_c")), target: larkPersonAddress("app", "ou_c"), receivers: [personRef(f.me)] });
   await assert.rejects(f.checker.reconcile("x"), /not a verified private/);
   assert.equal(f.store.get("x")!.status.delivery, undefined);
   assert.equal(f.store.get("x")!.status.phase, "pending");
@@ -165,9 +167,9 @@ test("topic visibility follows the current Note subject and explicit Topic parti
 test("failed fallback retries only the saved Me delivery without another Output", async t => {
   const f = await setup(t); const target = larkPersonAddress("app", "ou_me");
   const audience = f.ports.audience;
-  f.ports.audience = async address => JSON.stringify(address) === JSON.stringify(target)
+  f.ports.audience = async address => JSON.stringify(new Addresses(f.store.storage.home).endpoint(address)) === JSON.stringify(target)
     ? { people: [f.me], private: true } : audience(address);
-  f.ports.contactMe = async () => ({ target, receivers: [personRef(f.me)] });
+  f.ports.contactMe = async () => ({ address: addressFor(f.store.storage.home, target), target, receivers: [personRef(f.me)] });
   f.output("x", await f.note("L3")); await f.checker.reconcile("x");
   const actual = f.store.get("x")!.status.delivery;
   f.store.begin("x"); f.store.retry("x", "transport temporarily unavailable");
@@ -240,7 +242,7 @@ test("real Runner isolates one Output's transport failure and automatically retr
   let attempts = 0;
   aide.registerOutputTransport(() => ({ replay: "idempotent", async send() { if (++attempts === 1) throw new Error("temporary send failure"); return undefined; } }));
   await aide.start(); await aide.topics.ensure("retry");
-  const slow = await aide.topics.say("retry", undefined, "Retry this", undefined, { target: larkAddress("cli_test", "oc_me") });
+  const slow = await aide.topics.say("retry", undefined, "Retry this", undefined, { target: addressFor(home, larkAddress("cli_test", "oc_me")) });
   const ready = await aide.topics.say("retry", undefined, "Ready for Me");
   for (let i = 0; i < 200 && [slow, ready].some(x => aide.outputStore.get(x.outputId)!.status.phase !== "delivered"); i++) await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(aide.outputStore.get(ready.outputId)!.status.phase, "delivered");
@@ -359,7 +361,7 @@ test("Output admission and immutable delivery compare Person UID sets on both si
   assert.deepEqual(f.store.create("topic", "sets", { ...spec, receivers: personRefs([a, b]) }), original);
   assert.throws(() => f.store.create("topic", "sets", { ...spec, receivers: personRefs([a]) }), /different content/);
   const previous = { ...original, spec: { ...spec, target: original.spec.target }, status: { phase: "pending" as const, attempts: 1,
-    delivery: { target: spec.target, text: spec.text, receivers: personRefs([b, a, b]) } } };
+    delivery: { address: original.spec.target, target: spec.target, text: spec.text, receivers: personRefs([b, a, b]) } } };
   const current = { ...previous, spec: { ...previous.spec, receivers: personRefs([a, b]) }, status: { ...previous.status,
     delivery: { ...previous.status.delivery, receivers: personRefs([a, b]) } } };
   const context = { get() { throw new Error("Unexpected lookup"); }, page() { throw new Error("Unexpected lookup"); }, list() { throw new Error("Unexpected lookup"); } };

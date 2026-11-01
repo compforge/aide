@@ -1,3 +1,5 @@
+import { mountConnections } from "./connections.ts";
+import type { ChannelSettingsView } from "../../channel/settings.ts";
 import './style.css';
 import { byId as $, element as node } from '../shared/dom.ts';
 import { request, errorMessage, HttpError } from '../shared/http.ts';
@@ -8,6 +10,11 @@ import type { Note } from '../../../plugins/personal/note/model.ts';
 type View = ReturnType<Addresses['view']>;
 type Page = ReturnType<Addresses['page']>;
 let selected: View | undefined, continuation: string | undefined, noteContinue: string | undefined;
+let settings: ChannelSettingsView | undefined;
+async function loadSettings() {
+  try { settings = await request<ChannelSettingsView>("/channels/config"); } catch { settings = undefined; }
+  if (selected) render(selected);
+}
 let notesLoading = false;
 let busy = false, generation = 0, listGeneration = 0;
 const types = { group: '群聊', direct: '私聊', web: 'Web', external: '外部系统' };
@@ -22,6 +29,9 @@ function render(value: View) {
   $('heading').textContent = value.spec.name;
   for (const link of document.querySelectorAll<HTMLAnchorElement>('#list a')) link.setAttribute('aria-current', String(new URL(link.href).searchParams.get('uid') === value.metadata.uid));
   $('coordinates').textContent = types[value.spec.type];
+  const isDefault = settings?.defaultAddress?.uid === value.metadata.uid;
+  $('set-default').textContent = isDefault ? '默认通知地址' : '设为默认通知地址';
+  $<HTMLButtonElement>('set-default').disabled = !settings || isDefault || !['direct', 'web'].includes(value.spec.type);
   $('state').textContent = value.spec.muted ? 'Aide 已禁言，仍可接收消息和积累认识。' : 'Aide 可以在此发言。';
   $('mute').textContent = value.spec.muted ? '解除禁言' : '禁言 Aide';
   updateMarkdown($('summary'), value.summaryText || '尚未积累长期认识。');
@@ -90,6 +100,15 @@ async function save(path: string, value: object) {
   } catch (error) { report(error); return false; }
   finally { busy = false; $<HTMLButtonElement>('mute').disabled = false; $<HTMLButtonElement>('save').disabled = false; }
 }
+$('set-default').onclick = () => { void (async () => {
+  if (!settings || busy) return;
+  const address = currentRef(); busy = true;
+  try { settings = await request<ChannelSettingsView>('/channels/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operation: 'default', revision: settings.revision, address }) }); if (selected) render(selected); $('notice').textContent = '默认通知地址已更新'; }
+  catch (error) { await loadSettings(); report(error); }
+  finally { busy = false; }
+})().catch(report); };
+mountConnections(value => { settings = value; if (selected) render(selected); });
+void loadSettings();
 $('mute').onclick = () => { if (selected && !busy) void save('/addresses/muted', { muted: !selected.spec.muted, expected: selected.spec.muted }); };
 $('edit').onclick = () => { if (!selected) return; $<HTMLTextAreaElement>('text').value = selected.summaryText; $('editor').hidden = false; $('summary').hidden = true; $('text').focus(); };
 $('cancel').onclick = () => { if (busy) return; $('editor').hidden = true; $('summary').hidden = false; };
