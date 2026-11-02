@@ -17,6 +17,7 @@ src/
     persons/               # 人物导航、资料和认识编辑
     addresses/             # 场合列表、禁言设置、认识、参与者、默认通知地址与禁言操作
     inputs/                # 跨会话输入筛选、分页与处理 Timeline
+    outputs/               # 跨 Topic 输出筛选、生成详情、披露检查与投递状态
     shared/                # DOM、HTTP、剪贴板、Markdown 与公共样式
   api/                     # HTTP handler 与 SSE，调用 Core / Personal 能力
     assets.ts              # 固定页面路由、浏览器入口打包和静态资源缓存

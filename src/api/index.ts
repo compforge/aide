@@ -19,6 +19,7 @@ import { browsePersons } from "../../plugins/personal/person/browse.ts";
 import { streamTopic } from "./stream.ts";
 import { renderHTML } from "@compforge/agent-observation";
 import { inputObservation, ObservationQuery } from "./observation.ts";
+import { outputList, outputFilters, outputDetail, outputSession } from "./outputs.ts";
 import { inputList, inputFilters, inputDetail } from "./inputs.ts";
 
 /** @spec Web callers submit message content and a Topic choice; adapter observations and reply coordinates are server-owned.
@@ -46,6 +47,14 @@ const PageSchema = z.object({
 const TopicListSchema = PageSchema.extend({ parentId: z.string().trim().max(200).optional(), q: z.string().trim().max(200).optional(), selectedId: z.string().min(1).max(200).optional() }).strict();
 const PersonListSchema = PageSchema.extend({ q: z.string().trim().max(200).optional(), name: z.string().max(200).optional(),
   excludeUid: z.string().min(1).max(250).optional(), selectedId: z.string().min(1).max(200).optional() }).strict();
+const OutputListSchema = PageSchema.extend({
+  q: z.string().trim().max(200).optional(), topicUid: z.string().min(1).max(250).optional(),
+  receiverUid: z.string().min(1).max(250).optional(), addressUid: z.string().min(1).max(250).optional(),
+  phase: z.enum(["pending", "sending", "delivered", "failed", "uncertain", "cancelled"]).optional(),
+  disclosure: z.enum(["pending", "allowed", "denied"]).optional(),
+  from: z.string().datetime().transform(v => new Date(v).toISOString()).optional(), to: z.string().datetime().transform(v => new Date(v).toISOString()).optional(),
+}).strict().refine(q => !q.from || !q.to || q.from <= q.to, "Start must precede end");
+const OutputDetailSchema = z.object({ id: z.string().min(1).max(200), uid: z.string().min(1).max(250).optional() }).strict();
 const InputListSchema = PageSchema.extend({
   q: z.string().trim().max(200).optional(), origin: z.enum(["channel", "source", "chief", "aide:review", "aide:triage", "aide:organize"]).optional(),
   originId: z.string().max(200).optional(), connector: z.string().max(200).optional(), sourceUid: z.string().max(200).optional(),
@@ -173,6 +182,31 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         await aide.start();
         const started = performance.now();
         listJson(response, browseTopics(aide.topics, query), "topics", started); return;
+      }
+      if (request.method === "GET" && url.pathname === "/outputs/list") {
+        const query = OutputListSchema.parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const started = performance.now();
+        listJson(response, outputList(aide, query), "outputs", started); return;
+      }
+      if (request.method === "GET" && url.pathname === "/outputs/filters") {
+        await aide.start();
+        json(response, 200, outputFilters(aide)); return;
+      }
+      if (request.method === "GET" && url.pathname === "/outputs/detail") {
+        const query = OutputDetailSchema.parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const detail = outputDetail(aide, query.id, query.uid);
+        json(response, detail ? 200 : 404, detail ?? { error: "Output 已回收或不存在。" }); return;
+      }
+      if (request.method === "GET" && url.pathname === "/outputs/session") {
+        const query = OutputDetailSchema.extend({ uid: z.string().min(1).max(250) }).parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const view = await outputSession(aide, query.id, query.uid);
+        if (!view) { json(response, 404, { error: "Output 或生成它的 Session 不可用。" }); return; }
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
+          "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'" });
+        response.end(renderHTML(view)); return;
       }
       if (request.method === "GET" && url.pathname === "/inputs/list") {
         const query = InputListSchema.parse(Object.fromEntries(url.searchParams));
