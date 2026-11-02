@@ -11,9 +11,17 @@ type Page = ReturnType<Addresses['page']>;
 type Item = Page['items'][number];
 const items = new Map<string, Item>();
 let selected: View | undefined, continuation: string | undefined, noteContinue: string | undefined;
-let settings: ChannelSettingsView | undefined;
+let settings: ChannelSettingsView | undefined, defaultItem: Item | undefined;
 async function loadSettings() {
   try { settings = await request<ChannelSettingsView>("/channels/config"); } catch { settings = undefined; }
+  defaultItem = undefined;
+  if (settings?.defaultAddress) {
+    try {
+      const ref = settings.defaultAddress;
+      const value = await request<View>('/addresses/detail?' + parameters(ref));
+      defaultItem = { ref, ...value.spec, people: value.status.people };
+    } catch (error) { report(error); }
+  }
   renderList();
 }
 let notesLoading = false;
@@ -118,9 +126,17 @@ function statusIcon(label: string, drawing: string) {
   icon.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + drawing + '</svg>';
   return icon;
 }
+/**
+ * @spec Pin the configured default even when its resource is beyond the loaded pagination window.
+ * @link docs/personal/address.md
+ */
 function renderList() {
   menu.hidePopover();
-  $('list').replaceChildren(...[...items.values()].map(item => {
+  const ordered = [...items.values()];
+  if (defaultItem && defaultItem.ref.uid === settings?.defaultAddress?.uid && !items.has(defaultItem.ref.uid)) ordered.unshift(defaultItem);
+  const defaultUid = settings?.defaultAddress?.uid;
+  ordered.sort((a, b) => Number(b.ref.uid === defaultUid) - Number(a.ref.uid === defaultUid));
+  $('list').replaceChildren(...ordered.map(item => {
     const row = node('div', undefined, 'address-entry');
     const link = node('a', undefined, 'list-link'); link.href = '/addresses?' + parameters(item.ref);
     link.setAttribute('aria-current', String(item.ref.uid === selected?.metadata.uid));
@@ -162,10 +178,13 @@ async function changeAddress(item: Item, action: 'default' | 'mute') {
     if (action === 'default') {
       if (!settings) return;
       settings = await request<ChannelSettingsView>('/channels/config', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ operation: 'default', revision: settings.revision, address: item.ref }) });
+      defaultItem = item;
       renderList(); $('notice').textContent = '已将「' + item.name + '」设为默认通知地址';
     } else {
       const updated = await request<View>('/addresses/muted', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ address: item.ref, muted: !item.muted, expected: item.muted }) });
-      items.set(item.ref.uid, { ...item, ...updated.spec });
+      const next = { ...item, ...updated.spec };
+      items.set(item.ref.uid, next);
+      if (defaultItem?.ref.uid === item.ref.uid) defaultItem = next;
       if (selected?.metadata.uid === item.ref.uid) render(updated);
       renderList(); $('notice').textContent = updated.spec.muted ? '已在「' + item.name + '」禁言 Aide' : '已解除「' + item.name + '」的禁言';
     }

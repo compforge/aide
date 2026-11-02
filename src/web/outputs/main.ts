@@ -70,7 +70,8 @@ function renderList(result: OutputListView) {
     };
     $('output-list').append(link);
   }
-  $('output-count').textContent = `${result.total} 个 Output · 每页 ${result.pageSize} 条`;
+  $('output-count').textContent = String(result.total);
+  $('output-count').setAttribute('aria-label', `${result.total} 个 Output`);
   $('output-page').textContent = `${result.page} / ${result.pages}`;
   $<HTMLButtonElement>('output-previous').disabled = result.page <= 1;
   $<HTMLButtonElement>('output-next').disabled = result.page >= result.pages;
