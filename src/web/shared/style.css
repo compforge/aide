@@ -43,3 +43,10 @@ button:disabled { opacity: .5; cursor: wait; } button:focus-visible, textarea:fo
 .detail-tabs button { padding: 9px 12px; border-radius: 8px; background: transparent; color: #68776c; font-size: 14px; }
 .detail-tabs button[aria-selected="true"] { color: #294f3a; background: #dfeadd; font-weight: 600; }
 .detail-tabs[hidden] { display: none; }
+
+/* Five navigation destinations stay visible on small screens, in input-to-output order. */
+@media (max-width: 1000px) { header { display: flex; flex-wrap: wrap; } }
+@media (max-width: 760px) {
+  .main-tabs { gap: 2px; max-width: 100%; overflow-x: auto; }
+  .main-tabs a { font-size: 12px; padding: 8px 6px; }
+}

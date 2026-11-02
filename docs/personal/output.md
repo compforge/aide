@@ -58,6 +58,14 @@ Personal 声明 OutputPrinter，由 Host 加载，`describe` 返回完整正文�
 
 验证场景见 `tests/address.test.ts`、`tests/output.test.ts`、`tests/topic-delete.test.ts` 与 Lark / Web 的投递、进展测试。
 
+## Web 查询
+
+`/outputs` 提供跨 Topic 的列表与详情，按创建时间倒序分页，可按正文或 ID、Topic、接收人、Address、披露结果、投递状态与创建时间范围筛选。接收人与地址匹配原定意图或实际投递，列表与详情分别标注。导航按 Inputs、Topics、Persons、Addresses、Outputs 排列，体现从输入到输出的流程。
+
+详情分别展示生成正文、原定发送、披露检查和实际投递；拒绝原内容外发与转告 Me 的通知送达可以同时成立。等待原因与预计重试仅在 pending / sending 展示，当前状态不被拼成完整重试历史；送达不表示已读。创建 Output 之前的失败需从执行记录追查。
+
+生成 Session 仅按 Output.createdBy 中的原生身份读取，不接受用户指定路径或任意 Session。关联对象按精确 UID 解析；删除或同名重建后保留原引用并标明不可用。列表按数据库过滤后分页，不加载历史全集或刷新回收访问时间。列表与详情自动刷新，隐藏页面暂停轮询请求；回收后的记录不再可查。
+
 ## 产出 Agent 的职责
 
 ### 统一沟通工具

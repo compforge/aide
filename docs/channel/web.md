@@ -10,7 +10,7 @@ Topics 的 `main.ts` 组合导航、会话 tab、时间线、输入框、工作�
 
 Persons 的状态留在自己的页面入口，人物选择、资料草稿与认识编辑不依赖 Topic。页面使用 `src/api/types.ts` 中的展示契约和现有领域类型，跨服务边界的引用均为 type-only import，宿主实现不进入浏览器 bundle。
 
-`src/api/assets.ts` 独立管理固定静态资源路由：`/`、`/people` 与 `/inputs` 提供页面，分别使用 `/app`、`/persons` 与 `/inputs` 前缀的 JavaScript / CSS 资产。每页入口首次请求时由 Bun 打包并缓存；HTML、CSS 和依赖随页面归属组织，不另设浏览器 SDK 汇总入口。资源构建失败进入 HTTP 日志，后续请求可以重新构建。
+`src/api/assets.ts` 独立管理固定静态资源路由：`/`、`/people`、`/addresses`、`/inputs` 与 `/outputs` 提供页面，分别使用 `/app`、`/persons`、`/addresses`、`/inputs` 与 `/outputs` 前缀的 JavaScript / CSS 资产。每页入口首次请求时由 Bun 打包并缓存；HTML、CSS 和依赖随页面归属组织，不另设浏览器 SDK 汇总入口。资源构建失败进入 HTTP 日志，后续请求可以重新构建。
 
 ## 产品图标
 
@@ -129,7 +129,9 @@ curl -s http://127.0.0.1:7433/events \
 
 ## 人物导航与编辑
 
-主导航提供 Topics、Persons 和 Inputs 三个同级页面，切换时保持位置一致，滚动内容时页头仍留在视口顶部。Topics 保留会话列表、消息和工作；Persons 展示跨会话共享的人物列表，以“我”标记服务对象，可按姓名搜索并进入详情。消息带 sender 时提供人物详情链接，Input 卡片提供处理 Timeline 链接。
+主导航从左到右提供 Inputs、Topics、Persons、Addresses 和 Outputs 五个同级页面，切换时保持位置一致，滚动内容时页头仍留在视口顶部。Topics 保留会话列表、消息和工作；Persons 展示跨会话共享的人物列表，以“我”标记服务对象，可按姓名搜索并进入详情。消息带 sender 时提供人物详情链接，Input 卡片提供处理 Timeline 链接。
+
+Outputs 提供跨 Topic 的生成与投递目录，独立展示原始发送意图、披露结果和实际投递，详见 [Output Web 查询](../personal/output.md#web-查询)。
 
 Inputs 提供全局输入目录，支持按 Connector、来源类型、具体观察源、处理状态、异常记录和正文或 ID 组合筛选。筛选区位于主导航下方，横跨列表与详情；宽屏横向排列，窄屏自动换行，列表和详情在其下方展示。服务端先筛选再分页，默认每页 20 条，按接收时间倒序并以资源键稳定排序；列表不读取完整来源证据，也不刷新输入的容量访问时间。筛选和选中项保存在 URL 中，页面轮询刷新已保留的处理事实。
 
