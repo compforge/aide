@@ -9,7 +9,10 @@ let lastDetail = '', lastList = '';
 let filtersRequest: AbortController | undefined;
 const query = new URLSearchParams();
 const selects = { topicUid: 'output-topic', receiverUid: 'output-receiver', addressUid: 'output-address', phase: 'output-phase', disclosure: 'output-disclosure' } as const;
-const time = (at?: string) => at ? Number.isFinite(Date.parse(at)) ? new Date(at).toLocaleString() : at : '时间未记录';
+function time(at?: string) {
+  if (!at) return '时间未记录';
+  return Number.isFinite(Date.parse(at)) ? new Date(at).toLocaleString() : at;
+}
 const statusLabels = { pending: '待投递', sending: '投递中', delivered: '已送达', failed: '投递失败', uncertain: '投递待核对', cancelled: '已取消' };
 const disclosureLabels = { pending: '待检查', allowed: '允许', denied: '拒绝原内容外发' };
 function localTime(value: string | null) {
@@ -42,7 +45,9 @@ function options(id: string, allLabel: string, items: { value: string; label: st
   select.replaceChildren(new Option(allLabel, '*'), ...items.map(item => new Option(item.label, item.value)));
   selectValue(id, value);
 }
+/** @spec Successful polls clear previous request errors even when cached list content is unchanged. */
 function renderList(result: OutputListView) {
+  $('output-list-notice').textContent = result.total ? '' : '没有匹配的 Output。';
   const signature = JSON.stringify({ result, query: query.toString(), selected });
   if (signature === lastList) return;
   lastList = signature;
@@ -69,7 +74,6 @@ function renderList(result: OutputListView) {
   $('output-page').textContent = `${result.page} / ${result.pages}`;
   $<HTMLButtonElement>('output-previous').disabled = result.page <= 1;
   $<HTMLButtonElement>('output-next').disabled = result.page >= result.pages;
-  $('output-list-notice').textContent = result.total ? '' : '没有匹配的 Output。';
 }
 async function refreshFilters() {
   filtersRequest?.abort(); const controller = new AbortController(); filtersRequest = controller;
@@ -124,7 +128,10 @@ function renderDetail(detail: OutputDetailView) {
     fact('output-delivery', '投递位置', JSON.stringify(detail.delivery.target));
     fact('output-delivery', '实际接收人', detail.delivery.receivers.length ? detail.delivery.receivers.map(refNode) : '未指定个人');
   } else fact('output-delivery', '实际内容', '尚未准备实际投递内容');
-  fact('output-provenance', '生成者', detail.producer ? [node('span', detail.producer.ref.kind === 'Topic' ? 'Chief' : detail.producer.ref.kind), refNode(detail.producer)] : '未记录');
+  if (detail.producer) {
+    const kind = detail.producer.ref.kind === 'Topic' ? 'Chief' : detail.producer.ref.kind;
+    fact('output-provenance', '生成者', [node('span', kind), refNode(detail.producer)]);
+  } else fact('output-provenance', '生成者', '未记录');
   fact('output-provenance', 'Execution ID', detail.executionId ?? detail.createdBy?.executionId ?? '未记录');
   if (detail.createdBy) {
     const link = node('a', '查看生成 Session');
