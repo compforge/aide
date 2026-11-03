@@ -534,5 +534,9 @@ test("Lark typed mentions survive durable intake and discover only human contact
   const inputs = aide.topics.inputStore.query("topic", aide.topics.resource(aide.topics.list()[0]!.id)!.metadata.uid);
   const fact = inputs.find(i => i.spec.observation?.messageId === "om_mentions")!;
   assert.ok(fact);
-  assert.deepEqual([...fact.spec.receivers!].map(p => p.uid).sort(), [recipient.metadata.uid, known.metadata.uid].sort());
+  assert.equal("receivers" in fact.spec, false);
+  const audience = new Addresses(home).audience(fact.spec.source!);
+  assert.equal(audience.private, true);
+  assert.deepEqual(audience.people.map(p => p.metadata.uid), [fact.spec.sender!.uid]);
+  assert.ok(!audience.people.some(p => p.metadata.uid === recipient.metadata.uid || p.metadata.uid === known.metadata.uid), "Mentioned people never join the source DM");
 });

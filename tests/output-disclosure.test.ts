@@ -134,6 +134,7 @@ test("unknown group audience and unsafe fallback never authorize the original ta
   await assert.rejects(f.checker.reconcile("x"), /not a verified private/);
   assert.equal(f.store.get("x")!.status.delivery, undefined);
   assert.equal(f.store.get("x")!.status.phase, "pending");
+  assert.equal(f.store.get("x")!.status.lastError, "Default Address is not a verified private Me destination");
 });
 
 test("revoked permission after attempted delivery stops further effects as uncertain", async t => {
@@ -488,4 +489,32 @@ test("cite_output rejects an invalid batch atomically and permits a corrected re
   writer.cite([good]);
   assert.equal(f.store.streams.get(output.spec.stream).status.references[0]!.uid, good.uid);
   assert.equal(f.store.streams.get(output.spec.stream).status.phase, "open");
+});
+
+// @case Mentioning another Person in a private Me conversation cannot block refusal delivery back to Me.
+test("a mention in Me's DM leaves fallback private and delivers the refusal", async t => {
+  const f = await setup(t);
+  const { InputStore } = await import("../plugins/personal/input/store.ts");
+  const inputs = new InputStore(f.store.storage.home);
+  const raw = inputs.submit("test", "mention", { origin: "channel", originId: "web", source: webAddress("topic"),
+    sender: personRef(f.me), text: "Say hello to @C", observation: { mentions: [f.other.metadata.uid] } });
+  const addresses = new Addresses(f.store.storage.home);
+  assert.deepEqual(addresses.audience(raw.spec.source!).people.map(p => p.metadata.uid), [f.me.metadata.uid]);
+  const originalAudience = f.ports.audience;
+  f.ports.audience = async ref => ref.uid === raw.spec.source!.uid ? addresses.audience(ref) : originalAudience(ref);
+  f.output("mention-refusal", await f.note("L3"));
+  await f.checker.reconcile("mention-refusal");
+  const pending = f.store.get("mention-refusal")!;
+  assert.equal(pending.status.disclosure!.decision, "denied");
+  assert.deepEqual(pending.status.delivery!.receivers.toJSON(), [personRef(f.me)]);
+  assert.deepEqual(pending.status.delivery!.target, webAddress("topic"));
+  let sent = 0;
+  const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", async send(message) {
+    assert.deepEqual(message.target, webAddress("topic")); sent++; return { id: "refusal-receipt", scope: "test" };
+  } }), pino({ level: "silent" }));
+  t.after(() => delivery.close());
+  await delivery.reconcile("mention-refusal");
+  for (let i = 0; i < 50 && f.store.get("mention-refusal")!.status.phase !== "delivered"; i++) await new Promise(r => setTimeout(r, 10));
+  assert.equal(sent, 1);
+  assert.equal(f.store.get("mention-refusal")!.status.phase, "delivered");
 });

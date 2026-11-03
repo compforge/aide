@@ -65,4 +65,4 @@ Chief 只提交 raw Output，Reconciler 根据策略选择实际 target/stream�
 
 `tests/output-disclosure.test.ts` 覆盖 Me 例外、people 并集、当前分类、动态归属、正文失效、异步受众解析期间权限变化、长内容不经正文读取即可投递与同资源转告。`tests/output.test.ts`、`tests/requirement-output.test.ts`、`tests/lark.test.ts` 覆盖失败隔离、幂等续传、回执恢复与非幂等发送不确定性。`tests/summary-notes.test.ts` 验证分类独立编辑及摘要依赖一致性。
 
-Person 引用集合在 Resource 的 TS 字段中使用 `KeyedSet<PersonRef>`，按 UID 判断成员身份；Note.people、Topic.people、Input.receivers、Output.spec.receivers 与 Output.status.delivery.receivers 共用这一契约。持久化和对外 DTO 使用规范顺序的数组，重复项和顺序不改变披露指纹或重试目标。
+Person 引用集合在 Resource 的 TS 字段中使用 `KeyedSet<PersonRef>`，按 UID 判断成员身份；Note.people、Topic.people、Output.spec.receivers 与 Output.status.delivery.receivers 共用这一契约。持久化和对外 DTO 使用规范顺序的数组，重复项和顺序不改变披露指纹或重试目标。

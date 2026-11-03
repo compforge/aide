@@ -1,7 +1,6 @@
 import { MailSender } from "./stream/sender.ts";
 import { Addresses } from "./address/service.ts";
 import { addressTools } from "./address/tools.ts";
-import { personRefs } from "./person/model.ts";
 import { summaryText, summaryReference } from "./note/summary.ts";
 import { invalidateAssignment } from "./input/assignment.ts";
 import { isCapacityInput } from "./input/model.ts";
@@ -10,7 +9,7 @@ import { contentVersion } from "./context-write.ts";
 import { WriterResourceSchema, SubjectSchema } from "./note/model.ts";
 import { notes } from "./note/query.ts";
 import { inputIdentity } from "./input/identity.ts";
-import { channelReceivers, type LarkMention } from "./person/receivers.ts";
+import { observeMentionedPeople, type LarkMention } from "./person/mentions.ts";
 import { workPhase } from "./status.ts";
 import { commitStatus, patchStatus } from "./status.ts";
 import { identityBackground } from "../../agents/personal.ts";
@@ -466,7 +465,6 @@ export class Personal {
     const relation = channelRelation(this.options.channelMe, input);
     let sender;
     let larkSenderId: string | undefined;
-    let receivers: InputSpec["receivers"];
     if (input.channelId === "web") { const me = await this.options.persons.findIdentity(LOCAL_ME); if (me) sender = personRef(me); }
     else if (input.channelId === "lark") {
       const observation = input.observation as { provider?: string; accountId?: string; sender?: { id?: string; type?: string; name?: string }; mentions?: string[]; mentionDetails?: LarkMention[]; assistant?: { id?: string } } | undefined;
@@ -476,9 +474,8 @@ export class Personal {
           larkSenderId = observation.sender.id;
           sender = personRef(await this.options.persons.observe(identity(larkSenderId), observation.sender.name));
         }
-        receivers = personRefs(await channelReceivers(this.options.persons, observation.accountId, observation.mentions ?? [],
-          observation.mentionDetails ?? [], observation.assistant?.id));
-        this.log.info({ inputId: id, accountId: observation.accountId, receiverUids: [...receivers].map(ref => ref.uid) }, "Lark receiver Persons resolved");
+        await observeMentionedPeople(this.options.persons, observation.accountId, observation.mentions ?? [],
+          observation.mentionDetails ?? [], observation.assistant?.id);
       }
     }
     const place = input.addressObservation;
@@ -487,7 +484,7 @@ export class Personal {
         type: input.channelId === "web" ? "web" : "direct", name: place?.name });
     const fact = await this.topics.submit(id, { ...(input.inputKey !== undefined ? { inputKey: input.inputKey } : {}), attention: InputAttention.Immediate,
       ...(input.topicKey ? { topicKey: input.topicKey } : {}), ...(input.topicId ? { topicId: input.topicId } : {}), ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
-      origin: "channel", originId: input.channelId, source: input.source, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}), ...(place ? { addressObservation: place } : {}), ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
+      origin: "channel", originId: input.channelId, source: input.source, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}), ...(place ? { addressObservation: place } : {}), ...(sender ? { sender } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });
     return fact;
   }
