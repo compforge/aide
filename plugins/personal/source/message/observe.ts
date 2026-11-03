@@ -1,3 +1,4 @@
+import { larkInputIdentity } from "../../input/identity.ts";
 import { personRefs } from "../../person/model.ts";
 import { patchStatus } from "../../status.ts";
 import { messageReceivers } from "../../person/receivers.ts";
@@ -49,8 +50,9 @@ export interface MessageSourceStatus {
 type Context = Pick<PluginContext, "resources" | "logger">;
 type Source = Resource<MessageWatch, MessageSourceStatus>;
 const iso = (ms: number) => new Date(ms).toISOString();
-const inputName = (watch: MessageWatch, id: string, sequence: number) =>
-  digest(["lark", watch.accountId, watch.userId, id, sequence]);
+const inputName = (watch: MessageWatch, message: ChatMessage, sequence: number) => sequence
+  ? digest(["lark", watch.accountId, watch.userId, message.id, sequence])
+  : larkInputIdentity({ origin: "source", originId: "personal.lark", observation: { provider: "lark", message } })!.name;
 const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, name });
 
 /**
@@ -158,7 +160,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
           (kind === "sent" && !this.discoversSent(message))) continue;
       ids.push(message.id);
       if (pending.some((item) => item.message.id === message.id) ||
-          await this.context.resources.get(inputRef(inputName(this.watch, message.id, 0)))) continue;
+          await this.context.resources.get(inputRef(inputName(this.watch, message, 0)))) continue;
       pending.push({ message, kind, discoveredAt: iso(this.now), followUntil: iso(this.now + this.watch.followupMs),
         sequence: 0, known: [], related: [message.id] });
     }
@@ -245,7 +247,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
   }
 
   private async plan(entry: PendingMessage, context: MessageContext | undefined, known: string[], related: string[], relatedMessages: ChatMessage[] = []) {
-    const name = inputName(this.watch, entry.message.id, entry.sequence);
+    const name = inputName(this.watch, entry.message, entry.sequence);
     const evidence = [entry.message, ...(context?.messages ?? [])];
     const persons = new Persons(this.context.resources, { identities: this.watch.personIds.map((id) => ({ provider: "lark", scope: this.watch.accountId, id })) });
     const senders = await observePeople(persons, this.watch.accountId, evidence);
@@ -280,7 +282,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,
         chatType: entry.kind === "direct" ? "p2p" : "group", kind: entry.sequence ? "discussion" : entry.kind, message, originalMessageId: message.id,
-        originalInputId: inputName(this.watch, message.id, 0), ...(annotatedContext?.messages.length ? { context: annotatedContext } : {}),
+        originalInputId: inputName(this.watch, message, 0), ...(annotatedContext?.messages.length ? { context: annotatedContext } : {}),
         messageTruncated: message.content.length !== entry.message.content.length } };
     const planned = { ...entry, delivery: { name, spec, known, related } };
     await this.update(planned);

@@ -27,7 +27,7 @@ const EventSchema = z.object({
   message: z.object({ message_id: z.string().min(1), chat_id: z.string().min(1),
     chat_type: z.string(), message_type: z.string(), content: z.string(), thread_id: z.string().optional(),
     parent_id: z.string().optional(), root_id: z.string().optional(),
-    mentions: z.array(z.object({ key: z.string().min(1), name: z.string().optional(),
+    mentions: z.array(z.object({ key: z.string().min(1), name: z.string().optional(), mentioned_type: z.string().optional(),
       id: UserIdsSchema })).optional() }),
 });
 const CardSchema = z.object({ cardId: z.string(), sent: z.boolean(), sequence: z.number().int(),
@@ -130,15 +130,15 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     const topicId = this.locate({ chatId, threadId }).selector.key;
     let text: unknown;
     if (message.message_type === "text") {
-      if (message.chat_type === "group") {
+      if (botIdentity) {
         const normalized = await normalize({ sender: { ...sender, sender_id: sender.sender_id ?? {} },
-          message: { ...message, chat_type: "group" } }, { botIdentity: botIdentity!, stripBotMentions: true });
+          message: { ...message, chat_type: message.chat_type } }, { botIdentity, stripBotMentions: message.chat_type === "group" });
         text = normalized.content;
       } else {
         try { text = JSON.parse(message.content).text; } catch { /* Send a helpful response below. */ }
       }
     }
-    // Group normalization yields; concurrent duplicate deliveries must still persist only once.
+    // Message normalization yields; concurrent duplicate deliveries must still persist only once.
     if (this.stopped) throw new Error("Lark channel is stopping");
     if (this.state.received.includes(id)) return;
     const input = LarkIncomingSchema.safeParse({ id, topicKey: topicId, text, source: larkAddress(this.appId, chatId), replyToMessageId: id, addressObservation: { type: message.chat_type === "p2p" ? "direct" : "group" },
@@ -146,7 +146,11 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
         ...(message.parent_id ? { parentId: message.parent_id } : {}), ...(message.root_id ? { rootId: message.root_id } : {}),
         ...(botIdentity ? { assistant: { id: botIdentity.openId, name: botIdentity.name } } : {}),
         sender: { type: sender.sender_type, ...(sender.sender_id?.open_id ? { id: sender.sender_id.open_id } : {}) },
-        mentions: (message.mentions ?? []).flatMap((mention) => mention.id.open_id ? [mention.id.open_id] : []) } });
+        mentions: (message.mentions ?? []).flatMap((mention) => mention.id.open_id ? [mention.id.open_id] : []),
+        mentionDetails: (message.mentions ?? []).flatMap(mention => mention.id.open_id ? [{
+          key: mention.key, id: mention.id.open_id, ...(mention.name ? { name: mention.name } : {}),
+          ...(mention.mentioned_type ? { type: mention.mentioned_type } : {}),
+        }] : []) } });
     this.save({ ...this.state,
       pending: input.success ? [...this.state.pending, input.data] : this.state.pending,
       notices: input.success ? this.state.notices : [...this.state.notices,

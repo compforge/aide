@@ -31,7 +31,7 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 
 `spec.receivers?: PersonRef[]` 保存来源证据中明确识别的接收人物，每个引用固定 Person UID；与 sender 一样属于不可变的输入事实。缺省表示未提供这项信息，`[]` 表示没有列出明确接收人物，**不等于 all**。本版不建模 all，不展开群成员，也不把 Aide 或机器人作为 Person。旧 Input 无需回填。
 
-Lark Source 根据私信实际收件账号、同一聊天内被回复消息的发送人物、已对应 Person 的 @ 对象填写；讨论批次保留逐条人物证据，并将本批明确接收者去重写入 receivers。Lark Channel 记录已知人物 @，私信机器人本身不产生人物收件人。裸 @ ID 不能证明是人，不凭它创建 Person；原始 mentions 继续留在 observation。该列表是可确认的接收者，不承诺完整受众，也不证明实际已读、认可或授权。
+Lark Source 根据私信实际收件账号、同一聊天内被回复消息的发送人物、已对应 Person 的 @ 对象填写；讨论批次保留逐条人物证据，并将本批明确接收者去重写入 receivers。Lark Channel 根据事件 `mentioned_type=user` 发现当前 app scope 内的 Person，并由既有联系地址发现流程建立单聊 Address；`bot`、Aide 自身和 `@all` 不建立 Person。类型未知时只关联已知 Person，裸 @ ID 和名字不能证明是人，也不按名字合并跨应用身份。observation 的 mentionDetails 保留 key、id、name 和 type，mentions 保留 ID 列表；私信和群聊正文通过 SDK 解析 mention 名字。该列表是可确认的接收者，不承诺完整受众，也不证明实际已读、认可或授权。
 
 这些事实供 Chief 维护近期 Note 时识别相关人物；[Topic 近期相关人物](topic.md#近期相关人物) 从 Note 的人物关联派生；移动 Input 只改 status.topic，不改 sender / receivers。验证见 `tests/topic-persons.test.ts`、`tests/message-source.test.ts` 与 `tests/person.test.ts`。
 
@@ -148,3 +148,9 @@ Input v1alpha5 使用 AddressRef 保存来源位置，并将内容归属和处�
 `executionId / completedAt` 是处理事实。领取后保留实际接纳 Topic，结构变化不改写其负责人或执行记录，旧执行按原 executionId 收尾；新 root 不再自动领取。结果未知保留接纳身份，明确拒绝投递才可撤回该次领取。已处理材料下沉不重新研判，现有树内材料移动仍要求在途研判先完成。
 
 验证：tests/input-assignment.test.ts 覆盖分派恢复、祖先换 root 与移回、分批刷新中断恢复、缓存失效 Watch 与周期补偿、事务拒绝过期分派、旧执行收尾、直属容量和无树扫描的待办查询。
+
+### 平台消息去重
+
+同一条 Lark 消息通过 Channel、不同 app 的 MessageSource 或多个观察账号被发现时，只接纳一个 Input。消息身份使用平台 `chatId + messageId`，不包含入口、appId、观察人或正文；同样的正文在不同发送中仍是不同 Input。Channel 和 Source 共用此身份及持久去重回执，入站在资源事务中接纳，重启和容量回收后的重投沿用原回执窗口。
+
+Channel 是直接请求的接纳入口。若 Source 先发现消息，后到的 Channel 在原 Input 上接纳其直接请求事实，更新正文、人物、Immediate、来源 Address 与回复坐标；保持 Input UID、创建时间、既有 Topic 归属和所有处理回执。该单向接纳是 Input 内容不可变约束的唯一消息入口例外，之后的 Source 观察和 Channel 重投均不改写事实，不重新触发已经领取或完成的处理。接纳更正不自动补发已产生的 Output，也不重放外部动作。讨论批次包含新的消息事实，不能用锚点原消息把它当作重复请求吞掉。

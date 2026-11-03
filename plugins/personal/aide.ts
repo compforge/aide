@@ -9,7 +9,8 @@ import { readNote } from "./note/service.ts";
 import { contentVersion } from "./context-write.ts";
 import { WriterResourceSchema, SubjectSchema } from "./note/model.ts";
 import { notes } from "./note/query.ts";
-import { knownReceivers } from "./person/receivers.ts";
+import { larkInputIdentity } from "./input/identity.ts";
+import { channelReceivers, type LarkMention } from "./person/receivers.ts";
 import { workPhase } from "./status.ts";
 import { commitStatus, patchStatus } from "./status.ts";
 import { identityBackground } from "../../agents/personal.ts";
@@ -122,7 +123,7 @@ export class Personal {
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
       }, notes => this.mailSender.cite(active().status.execution!.id, notes));
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active, ref => this.store.topics.outputStore.deliveryCapability(ref)), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
         const c = active();
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
         this.log.info({ topicId, topicUid: input.subject?.uid ?? c.metadata.uid, noteId: result.noteId, version: result.version }, "Topic Note updated");
@@ -444,14 +445,16 @@ export class Personal {
 
   private async submit(incoming: Incoming): Promise<InputReceipt> {
     const input = incoming;
-    const id = digest([input.channelId, input.topicKey ?? input.topicId ?? "", input.id]);
+    const id = larkInputIdentity({ origin: "channel", originId: input.channelId, observation: input.observation })?.name
+      ?? digest([input.channelId, input.topicKey ?? input.topicId ?? "", input.id]);
     // @spec Deleting a Topic never turns redelivery of an accepted Input into a new command.
     const fact = this.topics.inputStore.get(id);
-    if (fact && routed(fact)) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
+    if (fact && fact.spec.origin === "channel" && routed(fact)) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
     const receipt = this.topics.inputStore.receipt(id);
     if (!fact && receipt) return { inputId: id, at: receipt.at };
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
     const accepted = await this.acceptChannel(id, input);
+    if (fact) this.log.info({ inputId: id, previousOrigin: fact.spec.origin, channelId: input.channelId }, "Channel reused existing platform message Input");
     // Resolve explicit admission before the next Channel Input; receipt dedup above precedes creation.
     if (input.topicKey || input.topicId) await routeByRules({ resources: this.plugins.resourceClient("personal"),
       logger: { info: (message, detail) => this.log.info({ detail }, message) } }, accepted);
@@ -466,23 +469,25 @@ export class Personal {
     let receivers: InputSpec["receivers"];
     if (input.channelId === "web") { const me = await this.options.persons.findIdentity(LOCAL_ME); if (me) sender = personRef(me); }
     else if (input.channelId === "lark") {
-      const observation = input.observation as { provider?: string; accountId?: string; sender?: { id?: string; type?: string; name?: string }; mentions?: string[] } | undefined;
+      const observation = input.observation as { provider?: string; accountId?: string; sender?: { id?: string; type?: string; name?: string }; mentions?: string[]; mentionDetails?: LarkMention[]; assistant?: { id?: string } } | undefined;
       if (observation?.provider === "lark" && observation.accountId) {
         const identity = (id: string) => ({ provider: "lark", scope: observation.accountId!, id });
         if (observation.sender?.type === "user" && observation.sender.id) {
           larkSenderId = observation.sender.id;
           sender = personRef(await this.options.persons.observe(identity(larkSenderId), observation.sender.name));
         }
-        // Only already identified humans are recipients; bot/unresolved mentions remain observation evidence.
-        receivers = personRefs(await knownReceivers(this.options.persons, observation.accountId, observation.mentions ?? []));
+        receivers = personRefs(await channelReceivers(this.options.persons, observation.accountId, observation.mentions ?? [],
+          observation.mentionDetails ?? [], observation.assistant?.id));
+        this.log.info({ inputId: id, accountId: observation.accountId, receiverUids: [...receivers].map(ref => ref.uid) }, "Lark receiver Persons resolved");
       }
     }
     const place = input.addressObservation;
     if (input.channelId === "web" || (input.channelId === "lark" && place?.type === "direct" && sender && larkSenderId))
       new Addresses(this.store.resources.storage.home).observe(input.source, sender ? [sender] : [], { muted: false,
         type: input.channelId === "web" ? "web" : "direct", name: place?.name });
-    const fact = await this.topics.submit(id, { attention: InputAttention.Immediate, topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
-      origin: "channel", originId: input.channelId, source: input.source, replyToMessageId: input.replyToMessageId, addressObservation: place, ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
+    const fact = await this.topics.submit(id, { attention: InputAttention.Immediate,
+      ...(input.topicKey ? { topicKey: input.topicKey } : {}), ...(input.topicId ? { topicId: input.topicId } : {}), ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
+      origin: "channel", originId: input.channelId, source: input.source, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}), ...(place ? { addressObservation: place } : {}), ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });
     return fact;
   }

@@ -146,3 +146,5 @@ Lark 搜索分页 token 被 API 1020 判为无效或过期时，只清除当前�
 机器人入站保留 `observation.parentId`（直接引用的消息）和 `rootId`（根消息），重启后仍随 Input 保留；`replyToMessageId` 仍指向本次请求，供出站答复定位。
 Chief 对“答复这条”等引用请求先通过 `read_input` 查看引用，再用 `read_message(messageId)` 精确读取；必要时补充聊天或话题上下文。读取走既有用户授权的 Message Connector，复用身份检查、超时和并发预算；机器人收到请求不代表用户读取身份有权访问原文。
 缺失结果、已删除消息或权限错误须明确作为证据缺口，不猜测正文，不自动切换身份。引用内容是材料，不授予额外执行或披露权限；实际回复仍经 Output 检查。合并转发和附件内容解析不在本能力内。
+
+Channel 与 Source 对同一次发送共用 Input 身份；Source 不再把另一个入口已接纳的原消息作为新的 Chief 请求。到达顺序、持久回执与 Channel 接纳优先级见 [平台消息去重](../personal/input.md#平台消息去重)。讨论进展包含新消息，继续使用独立批次身份。

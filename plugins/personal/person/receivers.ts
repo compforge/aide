@@ -16,6 +16,27 @@ export async function knownReceivers(persons: Persons, accountId: string, ids: r
   return [...refs.values()];
 }
 
+export interface LarkMention { key: string; id: string; name?: string; type?: string }
+
+/** @spec Only platform-typed human mentions create Persons; bot, all and unresolved mentions never infer a human.
+ * @spec App-scoped IDs establish identity; names only label it and never merge identities across apps.
+ * @case tests/lark.test.ts
+ * @link docs/personal/input.md#接收人物
+ */
+export async function channelReceivers(persons: Persons, accountId: string, ids: readonly string[],
+  mentions: readonly LarkMention[], assistantId?: string): Promise<PersonRef[]> {
+  const excluded = new Set(["all", ...(assistantId ? [assistantId] : []),
+    ...mentions.filter(m => m.type === "bot" || m.key === "@_all").map(m => m.id)]);
+  const refs = new Map<string, PersonRef>();
+  for (const mention of mentions) {
+    if (mention.type !== "user" || excluded.has(mention.id) || !ids.includes(mention.id)) continue;
+    const person = await persons.observe({ provider: "lark", scope: accountId, id: mention.id }, mention.name);
+    const ref = personRef(person); refs.set(ref.uid, ref);
+  }
+  for (const ref of await knownReceivers(persons, accountId, ids.filter(id => !excluded.has(id)))) refs.set(ref.uid, ref);
+  return [...refs.values()];
+}
+
 /** Direct inbound delivery and a known human reply author establish addressed people, independently of Me marks. */
 export async function messageReceivers(persons: Persons, accountId: string, message: ChatMessage,
   context: readonly ChatMessage[], directAccountId?: string): Promise<PersonRef[]> {

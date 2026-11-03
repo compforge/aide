@@ -1,3 +1,4 @@
+import { channelPromotion, larkInputIdentity } from "./identity.ts";
 import { admitInput } from "./admission.ts";
 import { Addresses } from "../address/service.ts";
 import { cloneResourceValue } from "../../../src/resource/value.ts";
@@ -10,7 +11,7 @@ import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { type Resource } from "@compforge/aide-plugin";
 import { INPUT_TYPE, type InputSpec, type InputSubmission, type InputStatus } from "./model.ts";
-/** @spec Input facts are immutable and read on demand; shared ResourceStorage owns quotas and collection. */
+/** @spec Input identity and processing receipts are stable; Channel admission may promote its Source observation. Shared ResourceStorage owns quotas and collection. */
 export class InputStore {
   readonly storage: ResourceStorage;
   readonly resources: PluginResourceStore;
@@ -43,8 +44,22 @@ export class InputStore {
   }
   get(id: string): Resource<InputSpec, InputStatus> | undefined { return this.storage.read(this.key(id), true)?.object as Resource<InputSpec, InputStatus> | undefined; }
   submit(owner: string, id: string, raw: InputSubmission, status: InputStatus = {}): Resource<InputSpec, InputStatus> {
-    const spec = admitInput(new Addresses(this.storage.home), raw);
+    return this.storage.transaction(() => this.admit(owner, id, raw, status));
+  }
+  private admit(owner: string, id: string, raw: InputSubmission, status: InputStatus): Resource<InputSpec, InputStatus> {
+    const identity = larkInputIdentity(raw);
+    id = identity?.name ?? id;
     const key = this.key(id), existing = this.storage.read(key);
+    if (existing && identity) {
+      const input = existing.object as Resource<InputSpec, InputStatus>;
+      if (larkInputIdentity(input.spec)?.key !== identity.key) throw new ResourceAlreadyExists("Input message identity conflicts");
+      if (!channelPromotion(input.spec, raw)) return input;
+      const spec = admitInput(new Addresses(this.storage.home), raw);
+      const promoted = this.resources.replace(INPUT_TYPE, id, spec, input.status);
+      this.notify(existing.owner as string, promoted);
+      return promoted;
+    }
+    const spec = admitInput(new Addresses(this.storage.home), raw);
     if (existing) {
       if (existing.owner !== owner || !equalResourceValue(existing.object.spec, spec)) throw new ResourceAlreadyExists("Input identity already exists with different content or owner");
       return existing.object as Resource<InputSpec, InputStatus>;
@@ -52,7 +67,7 @@ export class InputStore {
     const fingerprint = createHash("sha256").update(JSON.stringify({ owner, spec }, (_key, value) =>
       value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value)).digest("hex");
     const receipt = this.receipt(id);
-    if (receipt && receipt.fingerprint !== fingerprint) throw new ResourceAlreadyExists("Input identity already exists with different content or owner");
+    if (receipt && receipt.fingerprint !== fingerprint && !identity) throw new ResourceAlreadyExists("Input identity already exists with different content or owner");
     const resource: Resource<InputSpec, InputStatus> = { ...INPUT_TYPE, metadata: { name: id, namespace: "v1", uid: `input:${id}`,
       resourceVersion: "1", generation: 1, creationTimestamp: receipt?.at ?? new Date().toISOString() }, spec, status: receipt ? { route: { completedAt: receipt.at, result: { topics: [], reason: "Previously accepted Input has expired" } } } : inputStatus(status) };
     // A bounded receipt acknowledges redelivery without recreating a collected fact or waking consumers.
