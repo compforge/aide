@@ -198,28 +198,3 @@ test("Recovered assessment groups the Input with the completing Chief execution"
   assert.equal(aide.topics.input(input.metadata.name, "me")!.consumption.executionId, "new-run");
   assert.equal(topicView(aide, "me").blocks.find(b => b.inputId === input.metadata.name)!.group_id, "new-run");
 });
-
-/** @case A Source duplicate can finish first without erasing the Immediate Input's completion obligation. */
-test("Chief assessment feedback and refreshed context retain each input receipt in a shared execution", async t => {
-  const { aide, resources, context } = setup(t);
-  const c = await aide.topics.ensure("dual-entry");
-  const immediate = await aide.topics.submit("original", { origin: "channel", originId: "lark", attention: InputAttention.Immediate,
-    text: "Send hello", observation: { messageId: "om_same", accountId: "cli_bot" } });
-  const duplicate = await aide.topics.submit("duplicate", { origin: "source", originId: "lark",
-    text: "Observed send hello", observation: { messageId: "om_same", accountId: "cli_observer" } });
-  for (const input of [immediate, duplicate]) await deliver(context, input, [c.metadata], "Same request observed twice");
-  await resources.patchStatus(aide.topics.resource("dual-entry")!, { execution: { id: "live", startedAt: new Date().toISOString() } });
-  for (const id of ["original", "duplicate"]) await admit(resources, id, "live");
-  const { Background } = await import("../plugins/personal/topic/background.ts");
-  const snapshot = () => new Background(aide.personal.store, aide.topics.resource("dual-entry"), "dual-entry").text();
-  assert.match(snapshot(), /"pendingInputIds":\["duplicate","original"\]/);
-  const receipt = await assessInput(resources, c, "live", { inputId: "duplicate", summary: "Duplicate observation; no repeated send" });
-  assert.deepEqual(receipt.pendingInputIds, ["original"]);
-  assert.equal(aide.topics.inputStore.get("original")!.status.assess!.completedAt, undefined);
-  assert.match(snapshot(), /"pendingInputIds":\["original"\]/);
-  const repeated = await assessInput(resources, c, "live", { inputId: "duplicate", summary: "Already handled" });
-  assert.deepEqual(repeated.pendingInputIds, ["original"]);
-  const done = await assessInput(resources, c, "live", { inputId: "original", summary: "Request handled; output acceptance is separate from delivery" });
-  assert.deepEqual(done.pendingInputIds, []);
-  assert.match(snapshot(), /"pendingInputIds":\[\]/);
-});

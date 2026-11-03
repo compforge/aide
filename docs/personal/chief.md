@@ -148,8 +148,6 @@ PiAdapter 在 open 时绑定无 TUI 的扩展运行环境并触发 `session_star
 
 现有 Source → Chief → 用户决定 → Work 验证继续覆盖 Personal 装配。以上不能证明真实模型会正确选择值得保存的事实，或后台提炼、压缩后召回的实际质量；这些效果需要真实使用评估。真实 Channel 验收见 [E2E](../e2e.md)。
 
-### 并发接收与逐条回执
-
-同一原生执行可接收 Channel 请求与 Source 重复观察。每次模型请求的 `assessments` 上下文列出当前 execution 尚未确认的 Input；`assess_input` 回执也返回 `pendingInputIds`，重复调用同样返回最新未确认集合。新 Input 不替代先前请求，静默去重仍需分别确认原请求和观察，不能重新发送消息来补回执。流式回答与 Output 送达不代替研判确认；遗漏回执仍保留不确定状态，不自动重放副作用。
+### 当前发送能力
 
 Chief 通过 `read_person.contacts` 找到联系地址，再由 `read_address.delivery.configured` 核对 Host 的当前发送路径。该值复用 Output 的目标配置检查，不证明平台可达、权限或投递成功，也不覆盖禁言和披露判定。Lark open_id 单聊不要求已经观察到机器人私聊或先拉群；Host Channel 凭证独立于 lark-cli 登录与 shell 配置。历史 Note 的能力判断不能替代当前 Host 查询；实际发信仍经 Output。

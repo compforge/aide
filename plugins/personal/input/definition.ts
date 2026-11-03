@@ -1,3 +1,4 @@
+import { channelPromotion } from "./identity.ts";
 import { obsoleteReplies, replyIdentity } from "../address/reply.ts";
 import { validateReviewRequest } from "../topic/review.ts";
 import { PersonRefSchema, PersonRefsSchema } from "../person/model.ts";
@@ -51,7 +52,7 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     guardAssessment(previous, current, context);
     if (previous.status.assess?.executionId && current.status.assess?.executionId
       && previous.status.assess.executionId !== current.status.assess.executionId) throw new Error("Input is already admitted to a Chief execution");
-    if (!equalResourceValue(previous.spec, current.spec)) throw new Error("Input content is immutable");
+    if (!equalResourceValue(previous.spec, current.spec) && !(channelPromotion(previous.spec, current.spec) && equalResourceValue(previous.status, current.status))) throw new Error("Input content is immutable except Channel promotion of the same platform message");
     if (previous.status.route?.completedAt && !equalResourceValue(previous.status.route.result, current.status.route?.result)) throw new Error("Input routing receipt is immutable");
   } },
   printer: inputPrinter,

@@ -26,7 +26,6 @@ import { TopicStore, seedInput } from "./topic-fixture.ts";
 import { OutputDisclosure } from "../plugins/personal/output/disclosure.ts";
 import { OutputDelivery } from "../plugins/personal/output/delivery.ts";
 import { mailDraft } from "../plugins/personal/output.ts";
-import { replyIdentity } from "../plugins/personal/address/reply.ts";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { httpChannel } from "../src/api/index.ts";
@@ -167,10 +166,11 @@ test("An Immediate mute notice remains fixed through retry, Input loss and unmut
 
 test("Source and Channel mentions share one reply; explicit target remains Chief's choice", async t => {
   const f = await setup(t), observation = { provider: "lark", accountId: "app", kind: "mention", originalMessageId: "external-message", message: { id: "external-message", chatId: "group" } };
-  await seedInput(f.topics, "source", { origin: "source", originId: "personal.lark", source: group, text: "问题", observation });
-  await seedInput(f.topics, "channel", { origin: "channel", originId: "lark", source: group, text: "问题", observation: { provider: "lark", accountId: "app", chatId: "group", messageId: "external-message" } });
-  assert.equal(replyIdentity(f.topics.inputStore.get("source")!)!.key, replyIdentity(f.topics.inputStore.get("channel")!)!.key);
-  const [one, two] = await Promise.all([f.topics.say("test", "source", "答复", undefined, { respondToInputId: "source", target: addressFor(f.home, webAddress("test")) }), f.topics.say("test", "channel", "答复", undefined, { respondToInputId: "channel", target: addressFor(f.home, webAddress("test")) })]);
+  const source = await seedInput(f.topics, "source", { origin: "source", originId: "personal.lark", source: group, text: "问题", observation });
+  const channel = await seedInput(f.topics, "channel", { origin: "channel", originId: "lark", source: group, text: "问题", observation: { provider: "lark", accountId: "app", chatId: "group", messageId: "external-message" } });
+  assert.equal(source.metadata.uid, channel.metadata.uid);
+  assert.equal(f.topics.inputStore.list().length, 1);
+  const [one, two] = await Promise.all([f.topics.say("test", source.metadata.name, "答复", undefined, { respondToInputId: source.metadata.name, target: addressFor(f.home, webAddress("test")) }), f.topics.say("test", channel.metadata.name, "答复", undefined, { respondToInputId: channel.metadata.name, target: addressFor(f.home, webAddress("test")) })]);
   assert.equal(one.outputId, two.outputId);
   assert.deepEqual(f.store.destination(f.store.get(one.outputId)!), webAddress("test"));
   assert.equal(f.store.list().length, 1);
@@ -178,8 +178,8 @@ test("Source and Channel mentions share one reply; explicit target remains Chief
 
 test("An explicit Me reply cancels unsent reply but unrelated Me speech does not", async t => {
   const f = await setup(t);
-  await seedInput(f.topics, "question", { origin: "source", originId: "personal.lark", source: group, text: "问题", observation: { provider: "lark", accountId: "app", kind: "mention", message: { id: "question", chatId: "group" } } });
-  const receipt = await f.topics.say("test", "question", "答复", undefined, { respondToInputId: "question" });
+  const question = await seedInput(f.topics, "question", { origin: "source", originId: "personal.lark", source: group, text: "问题", observation: { provider: "lark", accountId: "app", kind: "mention", message: { id: "question", chatId: "group" } } });
+  const receipt = await f.topics.say("test", question.metadata.name, "答复", undefined, { respondToInputId: question.metadata.name });
   assert.equal(larkEndpoint(f.store.destination(f.store.get(receipt.outputId)!))!.replyToMessageId, "question");
   f.topics.inputStore.submit("test", "unrelated", { origin: "source", originId: "personal.lark", relation: "sent", source: group, text: "另一件事", observation: { provider: "lark", accountId: "app", message: { id: "other", chatId: "group" } } });
   assert.equal(f.store.get(receipt.outputId)!.status.phase, "pending");

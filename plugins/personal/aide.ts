@@ -9,6 +9,7 @@ import { readNote } from "./note/service.ts";
 import { contentVersion } from "./context-write.ts";
 import { WriterResourceSchema, SubjectSchema } from "./note/model.ts";
 import { notes } from "./note/query.ts";
+import { larkInputIdentity } from "./input/identity.ts";
 import { channelReceivers, type LarkMention } from "./person/receivers.ts";
 import { workPhase } from "./status.ts";
 import { commitStatus, patchStatus } from "./status.ts";
@@ -290,7 +291,7 @@ export class Personal {
       } if (n < 8 && /version conflict/.test(String(error))) continue; throw error; }
       if (input) this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid,
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
-      const prompt = input ? `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nCall assess_input for this Input and every still-pending Input in the assessments context. This arrival does not replace earlier requests; duplicate observations need separate receipts, not repeated external actions.`
+      const prompt = input ? `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nRead current Topic material and assess when useful.`
         : "Topic structure changed. Review the current subtree's understanding, Inputs and Work; decide what needs attention. Existing Work retains its original Topic.";
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
@@ -444,14 +445,16 @@ export class Personal {
 
   private async submit(incoming: Incoming): Promise<InputReceipt> {
     const input = incoming;
-    const id = digest([input.channelId, input.topicKey ?? input.topicId ?? "", input.id]);
+    const id = larkInputIdentity({ origin: "channel", originId: input.channelId, observation: input.observation })?.name
+      ?? digest([input.channelId, input.topicKey ?? input.topicId ?? "", input.id]);
     // @spec Deleting a Topic never turns redelivery of an accepted Input into a new command.
     const fact = this.topics.inputStore.get(id);
-    if (fact && routed(fact)) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
+    if (fact && fact.spec.origin === "channel" && routed(fact)) return { inputId: fact.metadata.name, at: fact.metadata.creationTimestamp };
     const receipt = this.topics.inputStore.receipt(id);
     if (!fact && receipt) return { inputId: id, at: receipt.at };
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin is unavailable");
     const accepted = await this.acceptChannel(id, input);
+    if (fact) this.log.info({ inputId: id, previousOrigin: fact.spec.origin, channelId: input.channelId }, "Channel reused existing platform message Input");
     // Resolve explicit admission before the next Channel Input; receipt dedup above precedes creation.
     if (input.topicKey || input.topicId) await routeByRules({ resources: this.plugins.resourceClient("personal"),
       logger: { info: (message, detail) => this.log.info({ detail }, message) } }, accepted);
@@ -482,8 +485,9 @@ export class Personal {
     if (input.channelId === "web" || (input.channelId === "lark" && place?.type === "direct" && sender && larkSenderId))
       new Addresses(this.store.resources.storage.home).observe(input.source, sender ? [sender] : [], { muted: false,
         type: input.channelId === "web" ? "web" : "direct", name: place?.name });
-    const fact = await this.topics.submit(id, { attention: InputAttention.Immediate, topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
-      origin: "channel", originId: input.channelId, source: input.source, replyToMessageId: input.replyToMessageId, addressObservation: place, ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
+    const fact = await this.topics.submit(id, { attention: InputAttention.Immediate,
+      ...(input.topicKey ? { topicKey: input.topicKey } : {}), ...(input.topicId ? { topicId: input.topicId } : {}), ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
+      origin: "channel", originId: input.channelId, source: input.source, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}), ...(place ? { addressObservation: place } : {}), ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });
     return fact;
   }

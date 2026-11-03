@@ -28,7 +28,7 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
     const topics = await topicScope(resources, resourceRef(c));
     const topicUids = new Set(topics.map(t => t.metadata.uid));
     if (input.status.assess?.executionId !== executionId && !belongsToTopic(input, resourceRef(c), topicUids)) throw new Error("Input does not belong to this Topic subtree");
-    if (input.status.assess?.completedAt) return { assessed: args.inputId, pendingInputIds: await pendingAssessmentIds(resources, executionId) };
+    if (input.status.assess?.completedAt) return { assessed: args.inputId };
     if (input.status.assess?.executionId && input.status.assess.executionId !== executionId && !input.status.assess.lastError)
       throw new Error("Input is already admitted to another Chief execution");
     const work = args.workRequests.length ? (await Promise.all(topics.flatMap(topic => WORK_TYPES.map(type =>
@@ -54,15 +54,7 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
         // Guard the owning execution/version without turning every receipt into durable topic understanding.
         { operation: "patchStatus", resource: c, patch: {} },
       ]);
-      return { assessed: args.inputId, workUids: args.workRequests.map(r => r.workUid), pendingInputIds: await pendingAssessmentIds(resources, executionId) };
+      return { assessed: args.inputId, workUids: args.workRequests.map(r => r.workUid) };
     } catch (e) { if (n >= 8 || !/version conflict/.test(String(e))) throw e; }
   }
-}
-
-/** @spec Every admitted Input needs its own receipt, even when another entry observes the same platform message.
- * @case tests/input-assessment.test.ts
- */
-async function pendingAssessmentIds(resources: ResourceClient, executionId: string) {
-  return (await resources.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessExecution", value: executionId } }))
-    .map(input => input.metadata.name).sort();
 }
