@@ -20,12 +20,23 @@ export type MailDraft = Omit<OutputSubmission, "stream"> & { content: MailConten
 export class MailWriter {
   constructor(readonly streams: StreamStore, readonly ref: StreamRef) {}
   append(events: readonly AgentStreamEvent[]) { this.streams.append(this.ref, events); }
+  /** @spec Invalid citations fail atomically before acceptance, so the sender can repair them.
+   * @why A successful say must not conceal an already missing/stale Note behind a later delivery fallback.
+   * @case tests/output-disclosure.test.ts
+   * @link docs/personal/disclosure.md
+   */
   cite(notes: readonly NoteCitation[]) {
-    const references = notes.map(({ uid, version }) => {
-      const note = this.streams.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "uid", value: uid } }).items[0];
-      return { ...NOTE_TYPE, uid, version, ...(note && noteVersion(note) === version ? { contentVersion: noteTextVersion(note) } : {}) };
+    this.streams.storage.transaction(() => {
+      const references = notes.map(({ uid, version }) => {
+        const note = this.streams.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "uid", value: uid } }).items[0];
+        if (!note || note.metadata.deletionTimestamp)
+          throw new Error(`Note ${uid} is unavailable; use the uid and version returned by upsert_note or read_note`);
+        if (noteVersion(note) !== version)
+          throw new Error(`Note ${uid} citation version conflict; read_note again and cite its current uid and version`);
+        return { ...NOTE_TYPE, uid, version, contentVersion: noteTextVersion(note) };
+      });
+      this.streams.cite(this.ref, references);
     });
-    this.streams.cite(this.ref, references);
   }
   close(error?: string) { if (error) this.streams.interrupt(this.ref, error); else this.streams.complete(this.ref); }
 }

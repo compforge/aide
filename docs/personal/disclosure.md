@@ -37,6 +37,8 @@ Me 在人物页面编辑 clearance；主题参与者通过 `POST /topics/people`
 
 `say` 原子创建邮件和投递任务。Output 保存不可变的 stream（UID 引用）、target、receivers，以及可选的 Input 追溯信息；notes 转为 Stream.status.references（UID、读取版本与正文指纹）。实时生成通过 cite_output 补充引用，关闭后冻结。真正使用的近期和长期 Note 都应引用；对外正文使用新 Input 的事实时，先将相关事实整理到可引用、可分类的 Note。仅向 Me 沟通不强制先写 Note。工具只确认已接纳，不确认送达。
 
+upsert_note 回执返回 noteId、uid、version；引用使用 uid/version，后续编辑使用 noteId。say 与 cite_output 写入引用时拒绝不存在、已删除或版本失效的 Note，返回可修正的工具错误；整批失败不保留部分引用，say 不提交 Output、Stream 或接纳回执。已接纳的同键重试仍返回原回执。投递前继续检查后续变化。
+
 写入引用时核对 Note 读取版本，并单独固定引用 Note 的正文指纹。发送前读取当前分类：分类变化触发重新计算，正文修改或 Note 回收导致引用失效。`status.disclosure.policy` 保存本次计算结果，fingerprint 标识材料、组织关系、人物与实际受众等依赖。
 
 Reconciler 检查 Address 的已知参与者、禁言设置和计算出的权限，再委托内容 checker 解释邮件协议并使用隔离 Pi 校验正文、思考与工具证据是否受引用支持。模型复用 Chief 配置，禁用环境上下文、skills 和外部工具，材料预算 100000 字符，最多 30 秒。无有效引用、没有已知参与者、失效人物、地址禁言、模型不可用或校验拒绝都不外发。引用一致性校验无法保证所有背景信息都已被引用。

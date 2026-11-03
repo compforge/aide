@@ -123,6 +123,7 @@ test("an existing Note can be selected as summary and edited through the shared 
   const latest = f.aide.topics.resource("summary")!;
   assert.equal((await readSummary(f.client, latest))!.metadata.uid, note.uid);
   assert.equal(latest.status.summaryRevision, result.version);
+  assert.equal(result.uid, note.uid);
   assert.deepEqual((await readSummary(f.client, latest))!.spec.people.toJSON(), people, "omitting people preserves associations");
   await writeSummary(f.client, latest, { text: "Revised understanding", people: [] });
   assert.deepEqual((await readNote(f.client, note.uid)).people, []);
@@ -215,12 +216,12 @@ test("Note classification-only writes preserve body, associations and the summar
   const person = await f.aide.persons.observe({ provider: "test", scope: "classification", id: "a" });
   const people = [personRef(person) as PersonRef];
   const ordinary = await upsertNote(f.client, actor, { text: "Recent finding", people, sensitivity: "L1" }, "recent");
-  const classified = await upsertNote(f.client, actor, { ...ordinary, sensitivity: "L2", visibility: "topic" }, "classification");
+  const classified = await upsertNote(f.client, actor, { noteId: ordinary.noteId, version: ordinary.version, sensitivity: "L2", visibility: "topic" }, "classification");
   const recent = await readNote(f.client, ordinary.noteId);
   assert.equal(recent.text, "Recent finding"); assert.deepEqual(recent.people, people);
   assert.equal(recent.sensitivity, "L2"); assert.equal(recent.visibility, "topic");
-  await assert.rejects(upsertNote(f.client, actor, { ...ordinary, visibility: "any" }, "stale"), /version conflict/);
-  const rewritten = await upsertNote(f.client, actor, { ...classified, text: "Revised finding" }, "rewrite");
+  await assert.rejects(upsertNote(f.client, actor, { noteId: ordinary.noteId, version: ordinary.version, visibility: "any" }, "stale"), /version conflict/);
+  const rewritten = await upsertNote(f.client, actor, { noteId: classified.noteId, version: classified.version, text: "Revised finding" }, "rewrite");
   assert.equal((await readNote(f.client, rewritten.noteId)).sensitivity, "L2");
   const owner = await writeSummary(f.client, actor, { text: "Long-term understanding", people, sensitivity: "L1" });
   const summary = owner.summaryNote!;
