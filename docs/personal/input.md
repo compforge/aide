@@ -10,7 +10,7 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 
 ## CRD
 
-类型为 `aide.dev/v1alpha5 Input`。
+类型为 `aide.dev/v1alpha6 Input`。
 
 ### Spec
 
@@ -136,7 +136,7 @@ Output 只在其 inputIds 显式包含当前 Input 时关联，不按相邻顺�
 
 ## 挂载、分派与执行
 
-Input v1alpha5 使用 AddressRef 保存来源位置，并将内容归属和处理分派分开，披露分类统一放在 Note，不读取旧版 Input，也不提供历史兼容转换。
+Input v1alpha6 使用 AddressRef 保存来源位置，并将内容归属和处理分派分开，披露分类统一放在 Note。Input 通过 sender 表示发言人，通过 source 表示场合，不声明 receivers。
 
 1. 挂载：明确定位或 Route 分类写入 status.topic（topic1），保留首次 route 回执。
 2. 分派：沿 topic1 的 parent 链找到当前 root，写入 status.assess.topic（topic2）。Route 完成后立即尝试确定性分派；独立 Input Reconcile 恢复中断、处理后续归属变化，不调用模型；直接交给 Routine 的订阅事件没有 assess 阶段，不因此额外触发 Chief。

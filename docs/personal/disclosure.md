@@ -2,7 +2,7 @@
 
 Aide 服务于 Me。Chief 可结合全部已有 Note 与最新 Input 生成正文和引用列表；Output Reconciler 决定这段正文能否送到原目标。Me 的已确认私有目的地可接收全部信息；写 `receivers=[Me]` 不会把群聊变成私有目的地。
 
-本次资源契约为 Input v1alpha5、Note v1alpha4、Output v1alpha5。不读取或转换旧版本资源，遵循 [资源版本约定](../plugin/resource.md#api-版本与演进)。
+本次资源契约为 Input v1alpha6、Note v1alpha4、Output v1alpha5。不读取或转换旧版本资源，遵循 [资源版本约定](../plugin/resource.md#api-版本与演进)。
 
 ## Note 分类与接收者
 

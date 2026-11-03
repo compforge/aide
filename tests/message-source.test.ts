@@ -422,7 +422,6 @@ test("Discussion batches retain each person's relation; replies to my own messag
   const update = f.inputs.list().find((input) => input.spec.observation!.kind === "discussion")!;
   assert.equal(update.spec.relation, "observed");
   const context = update.spec.observation!.context as { messages: Array<{ id: string; relation: string }> };
-  const anchor = f.inputs.list().find(input => input.spec.observation!.originalMessageId === "om_at" && input.spec.observation!.kind === "mention")!;
   assert.ok(context.messages.every(item => !("receivers" in item)));
   assert.deepEqual(context.messages.map(({ id, relation }) => [id, relation]), [
     [reply.id, "received"], [ambient.id, "observed"],
