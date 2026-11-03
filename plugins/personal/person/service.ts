@@ -1,3 +1,4 @@
+import { addressRefs, type AddressSpec, type AddressStatus } from "../address/model.ts";
 import { personRef, personRefs } from "./model.ts";
 import { sensitivityRank, type MaterialDisclosure } from "../disclosure.ts";
 import { prepareSummary, readSummary, summaryView, writeSummary } from "../note/summary.ts";
@@ -16,7 +17,7 @@ import { IdentitySchema, PersonSchema, PERSON_TYPE, identityKey, isMe, LOCAL_ME,
  * @link docs/personal/person.md
  */
 export class Persons {
-  constructor(private readonly resources: ResourceClient, readonly marks: Me) {}
+  constructor(private readonly resources: ResourceClient, readonly marks: Me, private readonly discover?: (person: Readonly<PersonResource>) => Readonly<PersonResource>) {}
   async list() {
     return (await this.resources.list<Person, PersonStatus>(PERSON_TYPE))
       .filter((p) => !p.metadata.deletionTimestamp).map((p) => ({ ...p, isMe: isMe(p.spec, this.marks) }));
@@ -32,7 +33,7 @@ export class Persons {
   }
   async read(id: string, uid?: string) {
     const person = await this.profile(id, uid);
-    return { ...await summaryView(this.resources, person), recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
+    return { ...await summaryView(this.resources, person), contacts: await this.contacts(person), recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
   }
   /** @spec Configured Me accounts identify one human; consolidate identity owners atomically before starting consumers.
    * @spec Preserve the local Me owner when present, otherwise the oldest matching Person. Repeated initialization is a no-op.
@@ -73,13 +74,17 @@ export class Persons {
     await this.resources.commit([
       ...prepared.writes,
       ...sources.map(resource => ({ operation: "delete" as const, resource })),
-      { operation: "replace", resource: target, spec: PersonSchema.parse({ ...target.spec, identities }), status: {
+      { operation: "replace", resource: target, spec: PersonSchema.parse({ ...target.spec, identities, addresses: addressRefs([...(target.spec.addresses ?? []), ...sources.flatMap(p => [...p.spec.addresses ?? []])]) }), status: {
         ...target.status, ...status, ...prepared.status, participantSources: this.participantSources(sources, target),
       } },
     ]);
     return { merged: sources.length };
   }
   async observe(raw: PersonIdentity, name?: string): Promise<Readonly<PersonResource>> {
+    const person = await this.observeIdentity(raw, name);
+    return this.discover?.(person) ?? person;
+  }
+  private async observeIdentity(raw: PersonIdentity, name?: string): Promise<Readonly<PersonResource>> {
     const identity = IdentitySchema.parse(raw);
     const existing = await this.findIdentity(identity);
     if (existing) {
@@ -151,16 +156,23 @@ export class Persons {
       ...prepared.writes,
       // Exclude the retiring identity owner before validating the target, within the same transaction.
       { operation: "delete", resource: from },
-      { operation: "replace", resource: into, spec: PersonSchema.parse({ ...into.spec, identities }), status: {
+      { operation: "replace", resource: into, spec: PersonSchema.parse({ ...into.spec, identities, addresses: addressRefs([...(into.spec.addresses ?? []), ...(from.spec.addresses ?? [])]) }), status: {
         ...into.status, ...status, ...prepared.status, participantSources: this.participantSources([from], into),
       } },
     ]);
     const person = writes.at(-1) as PersonResource;
     return this.view(person, mergedText, noteReference(prepared.note));
   }
+  private async contacts(person: Readonly<PersonResource>) {
+    return Promise.all([...person.spec.addresses ?? []].map(async ref => {
+      const address = await this.resources.get<AddressSpec, AddressStatus>(ref);
+      return { ref, ...(address?.metadata.uid === ref.uid && !address.metadata.deletionTimestamp ? { name: address.spec.name, endpoint: address.spec.endpoint, muted: address.spec.muted, type: address.spec.type } : { unavailable: true as const }) };
+    }));
+  }
   private async view(person: PersonResource, summaryText: string, summaryNote?: NoteReference) {
+    person = this.discover?.(person) ?? person;
     return { ...person, summaryText, summaryNote, summaryVersion: contentVersion(person),
-      recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
+      contacts: await this.contacts(person), recent: await readNotes(this.resources, person.metadata.uid, "people"), isMe: isMe(person.spec, this.marks) };
   }
   async findIdentity(identity: PersonIdentity) {
     const person = (await this.resources.list<Person, PersonStatus>(PERSON_TYPE, { matchIndex: { name: "identity", value: identityKey(identity) } }))

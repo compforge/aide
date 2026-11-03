@@ -113,7 +113,9 @@ export class OutputStore {
     });
   }
   destination(output: Output): Address {
-    const endpoint = new Addresses(this.storage.home).endpoint(output.spec.target);
+    const address = new Addresses(this.storage.home).read(output.spec.target);
+    // A direct contact may be keyed by open_id; replying still uses its observed chat coordinates.
+    const endpoint = (output.spec.replyToMessageId ? address.spec.aliases.find(alias => larkEndpoint(alias)?.receiveIdType === "chat_id") : undefined) ?? address.spec.endpoint;
     const lark = larkEndpoint(endpoint);
     return output.spec.replyToMessageId && lark?.receiveIdType === "chat_id" ? larkThreadAddress(lark.appId, lark.receiveId, output.spec.replyToMessageId) : endpoint;
   }

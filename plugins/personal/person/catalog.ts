@@ -1,3 +1,4 @@
+import { PersonContacts } from "./contacts.ts";
 import { AddressDefinition } from "../address/definition.ts";
 import { NoteDefinition } from "../note/definition.ts";
 import type { Logger } from "pino";
@@ -8,7 +9,7 @@ import { PersonDefinition } from "./definition.ts";
 import type { Me } from "./model.ts";
 import { Persons } from "./service.ts";
 
-export function openPersonCatalog(home: string, marks: Me, log: Logger, changed: () => void) {
+export function openPersonCatalog(home: string, marks: Me, log: Logger, changed: () => void, larkApps: readonly string[] = []) {
   ResourceStorage.open(home).register("personal", [PersonDefinition, NoteDefinition, AddressDefinition]);
   const store = new PluginResourceStore({ home, pluginInstanceId: "personal" });
   const client = createResourceClient(store, (change) => {
@@ -16,5 +17,6 @@ export function openPersonCatalog(home: string, marks: Me, log: Logger, changed:
     log.info({ personId: change.resource.metadata.name, version: change.resource.metadata.resourceVersion, action: change.kind }, "Person resource changed");
     changed();
   });
-  return { client, persons: new Persons(client, marks) };
+  const contacts = new PersonContacts(home, larkApps, log);
+  return { client, contacts, persons: new Persons(client, marks, person => contacts.ensure(person)) };
 }

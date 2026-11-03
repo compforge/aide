@@ -1,5 +1,5 @@
 import { Addresses } from "../plugins/personal/address/service.ts";
-import { addressRef } from "../plugins/personal/address/model.ts";
+import { addressRef, addressRefs } from "../plugins/personal/address/model.ts";
 import type { ChannelAddress } from "@compforge/aide-plugin";
 import { larkAddress, webAddress } from "../src/channel/address.ts";
 
@@ -28,6 +28,7 @@ export async function fixtureMe(aide: import("../src/app.ts").Aide) {
   await aide.persons.initialize();
   const { personRef, LOCAL_ME } = await import("../plugins/personal/person/model.ts");
   const me = (await aide.persons.findIdentity(LOCAL_ME))!;
-  aide.addresses.observe(webAddress("me"), [personRef(me)], { type: "web", muted: false });
+  const address = aide.addresses.observe(webAddress("me"), [personRef(me)], { type: "web", muted: false });
+  await aide.persons.edit(me.metadata.name, me.metadata.uid, me.metadata.resourceVersion, { ...me.spec, addresses: addressRefs([...me.spec.addresses ?? [], addressRef(address)]) });
   return personRef(me);
 }

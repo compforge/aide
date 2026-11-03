@@ -1,3 +1,4 @@
+import { equalResourceValue } from "../../../src/resource/value.ts";
 import { createHash } from "node:crypto";
 import type { Address as Endpoint } from "@compforge/aide-plugin";
 import { createResourceClient } from "../../../src/host/plugin/resource/client.ts";
@@ -60,17 +61,18 @@ export class Addresses {
     return this.resources.storage.transaction(() => {
       const endpoint = target.kind === "Address" ? this.read(AddressRefSchema.parse(target)).spec.endpoint : placeEndpoint(target);
       const name = `address-${createHash("sha256").update(JSON.stringify(endpoint)).digest("hex").slice(0, 32)}`;
-      const previous = this.resources.find<AddressSpec, AddressStatus>(ADDRESS_TYPE, name, "v1");
+      const previous = this.find(endpoint);
       const members = personRefs([...(previous?.status.people ?? []), ...people]);
       if (previous) {
         if (previous.metadata.deletionTimestamp) throw new Error("Address is being deleted");
         const displayName = options.name?.trim().slice(0, 200);
         const spec = { ...previous.spec, ...(displayName ? { name: displayName } : {}), ...(options.type ? { type: options.type } : {}) };
-        return this.resources.replace(ADDRESS_TYPE, name, spec, { ...previous.status, people: members });
+        if (equalResourceValue(previous.spec, spec) && equalResourceValue(previous.status.people, members)) return previous;
+        return this.resources.replace(ADDRESS_TYPE, previous.metadata.name, spec, { ...previous.status, people: members });
       }
       const lark = larkEndpoint(endpoint);
       const type = options.type ?? (isChannelAddress(endpoint) && endpoint.channelId === "web" ? "web" : lark?.receiveIdType === "open_id" ? "direct" : lark ? "group" : "external");
-      return this.resources.create({ type: ADDRESS_TYPE, name, spec: { endpoint, type, name: options.name?.trim().slice(0, 200) || (isChannelAddress(endpoint) ? endpoint.endpoint : JSON.stringify(endpoint)),
+      return this.resources.create({ type: ADDRESS_TYPE, name, spec: { endpoint, aliases: [], type, name: options.name?.trim().slice(0, 200) || (isChannelAddress(endpoint) ? endpoint.endpoint : JSON.stringify(endpoint)),
         muted: options.muted ?? type !== "web" }, status: { people: members } });
     });
   }

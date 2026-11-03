@@ -45,9 +45,21 @@ Web 输入为 sent。别人私信机器人或仅 @ 机器人不能据此认定�
 
 Input 的 sender / receivers 引用人物 UID；Chief 可将明确相关的人物引用记入近期 Note，Topic 从自身 Note 派生[近期相关人物](topic.md#近期相关人物)，但不维护另一份人物名单，也不据此自动更新 Person 认识。
 
+## 联系地址
+
+`Person.spec.addresses` 是按 Address UID 去重的 `KeyedSet<AddressRef>`，序列化为 UID 排序的数组。它表示直接联系这个人的地址，不表示此人参与的所有群；顺序不表达优先级，也不意味着广播。多地址来自不同 Connector / Channel 的接触渠道，初期自动发现仅支持已启用的 Lark Channel。`Address.status.people` 继续保存场合参与者，二者方向与用途不同。
+
+Input、Source 和 Connector 贡献 app-scoped Lark 人物身份后，Personal 按同一 app 的 open_id 发现或创建单聊 Address，写入参与者并补全 Person 引用。没有对应发送 Channel 的身份不会通过替换 app ID 变成可发送地址。首次创建的个人单聊允许发言，后续发现、重启和补全保留显式禁言及摘要。Person Controller 通过 Host action 补全 Runner 新建或改过身份的 Person；启动补全已有目录，重复处理不产生写入。
+
+已有 bot 单聊可复用原 Address；机器人 p2p 入站将 chat_id 作为同一 Address 的 endpoint alias。仅观察到他人私聊并不能证明那是机器人单聊，详见 [Address](address.md#字段与发现)。新加入的地址引用必须固定到仍存在的非群聊资源，查询会标记已失效的历史引用；失效地址或参与者不能授权发送。
+
+Chief 从 read_person 的 `spec.addresses` 与 `contacts` 查看候选和当前状态，再结合原 Input、当前 Channel、场合及信息权限明确选择 target 和 receivers。合适时优先原处答复；已有委托内可以直接答复相关的人，减少让 Me 转达。需要 Me 决策、新授权、信息不能向对方披露或收件场合不明确时再联系 Me。联系地址仅提供到达能力，不扩大行动或披露授权；发送后结果不明确时不能换地址盲目重发。
+
+Me 使用同一个地址集合，Web 收件处也在其中；全局 `defaultAddress` 仍明确选定集合内一个私有地址用于通知与兜底，不能从无序集合取第一个。Persons 页面展示联系地址、失效及禁言状态，并链接 Addresses 页面管理。人物合并对地址做 UID 集合并集，参与者沿用已有分批迁移。
+
 ## Reconciler
 
-Person Controller 按 `status.participantSources` 分批迁移 Address 参与者，每轮最多更新 50 个 Address；没有外部清理动作。身份补全和用户合并由 Personal 服务在资源事务中完成。
+Person Controller 先补全联系地址，再按 `status.participantSources` 分批迁移 Address 参与者，每轮最多更新 50 个 Address；没有外部清理动作。身份补全和用户合并由 Personal 服务在资源事务中完成。
 
 ### 用户合并人物
 

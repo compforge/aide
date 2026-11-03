@@ -142,11 +142,23 @@ function setSaving(value: boolean) {
 function adoptPerson(person: PersonView, refreshList = true) {
   if (selected?.metadata.uid !== person.metadata.uid) tabs.reset();
   selected = { ...selected, ...person };
+  renderContacts();
   $('person-heading').textContent = selected.spec.name + (selected.isMe ? ' · 我' : '');
   $('person-updated').textContent = selected.status.updatedAt ? '最近更新：' + new Date(selected.status.updatedAt).toLocaleString() : '';
   renderList();
   void merging.render();
   if (refreshList) void loadPeople();
+}
+function renderContacts() {
+  $('person-addresses').replaceChildren();
+  if (!selected?.contacts.length) $('person-addresses').append(node('p', '尚未发现可用的联系地址', 'muted'));
+  for (const contact of selected?.contacts ?? []) {
+    const link = node('a', 'name' in contact ? contact.name : contact.ref.name, 'list-link');
+    link.href = '/addresses?' + new URLSearchParams({ name: contact.ref.name, uid: contact.ref.uid });
+    link.append(node('span', 'unavailable' in contact ? '地址已失效' : contact.muted ? '已禁言' : '允许发言', 'muted'));
+    if ('endpoint' in contact) link.append(node('span', contact.endpoint.kind === 'channel' ? contact.endpoint.endpoint : JSON.stringify(contact.endpoint), 'muted'));
+    $('person-addresses').append(link);
+  }
 }
 function renderEditor() {
   $('person-empty').hidden = true; $('person-editor').hidden = false;

@@ -34,5 +34,12 @@ export function registerPersons(context: PluginContext): void {
       return !equalResourceValue(before.status.participantSources, after.status.participantSources)
         ? [{ name: after.metadata.name, namespace: after.metadata.namespace }] : [];
     },
-  } }], reconcile: (_execution, person: Readonly<PersonResource>) => reconcilePerson(context, person) });
+  } }], reconcile: async (execution, person: Readonly<PersonResource>) => {
+    if (person.metadata.deletionTimestamp) return;
+    const result = await execution.verbs.action("reconcile_person_contacts", { id: person.metadata.name });
+    if (result.state !== "success") throw new Error("Person contacts reconcile did not complete");
+    // Contact discovery may update spec; use the new version for the merge migration CAS.
+    const current = await context.resources.get<PersonResource["spec"], PersonResource["status"]>({ ...PERSON_TYPE, name: person.metadata.name, namespace: person.metadata.namespace });
+    if (current && current.metadata.uid === person.metadata.uid) return reconcilePerson(context, current);
+  } });
 }

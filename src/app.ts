@@ -21,7 +21,7 @@ import { requirementOutputs } from "../plugins/personal/output/requirements.ts";
 import { personMessages } from "../plugins/personal/person/messages.ts";
 import { enabledLarkApps } from "./channel/config.ts";
 import { personRef } from "../plugins/personal/person/model.ts";
-import { larkPersonAddress, webAddress, assertChannelDelivery } from "./channel/address.ts";
+import { webAddress, assertChannelDelivery } from "./channel/address.ts";
 import { CHANNELS, type ChannelDefinition } from "./channel/definition.ts";
 import { SOURCES } from "../plugins/personal/source/definition.ts";
 import type { SourceDefinition } from "../plugins/personal/source/input.ts";
@@ -144,7 +144,7 @@ export class Aide {
       lark: this.messageSource ? { intervalMs: this.messageSource.intervalMs, scenarios: ["direct", "mention", ...(this.messageSource.personIds.length ? ["sent"] : [])] } : null,
     }, "Personal observation sources configured");
     const connectors = options.connectors ?? (this.ownedConnectors = new Connectors());
-    this.catalog = openPersonCatalog(home, this.meMarks, log, () => this.notify());
+    this.catalog = openPersonCatalog(home, this.meMarks, log, () => this.notify(), enabledLarkApps(config?.channels ?? {}));
     this.connectors = { ...(connectors instanceof Connectors ? { withCallOptions: connectors.withCallOptions.bind(connectors) } : {}), list: (kind, version) => connectors.list(kind, version), get: connectors.get.bind(connectors), call: connectors.call.bind(connectors), requirements: requirementOutputs(personRequirements(connectors.requirements, this.persons), this.outputStore), forges: connectors.forges,
       environments: connectors.environments, describe: () => connectors.describe(),
       messages: personalConnectors.lark?.appId ? personMessages(connectors.messages, this.persons, personalConnectors.lark.appId) : connectors.messages };
@@ -157,7 +157,13 @@ export class Aide {
         defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { maxTotalConcurrency: config?.reconcile?.maxTotalConcurrency, connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.topics.changed(change); this.notify(); },
-        actions: { "personal/begin_output_stream": async (context, raw) => {
+        actions: { "personal/reconcile_person_contacts": async (context, raw) => {
+          const { id } = raw as { id: string };
+          if (context.resourceRef?.kind !== "Person" || context.resourceRef.name !== id) throw new Error("Person contacts reconcile requires its own resource context");
+          const person = await this.persons.read(id, context.resourceRef.uid);
+          this.catalog.contacts.ensure(person);
+          return {};
+        }, "personal/begin_output_stream": async (context, raw) => {
           const { inputIds } = raw as { inputIds: string[] };
           const association = personalExecution(context);
           if (context.resourceRef?.kind !== "Topic" || !association.topicId) throw new Error("Chief streaming requires a Topic context");
@@ -189,7 +195,7 @@ export class Aide {
         },
       },
     });
-    this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, channelMe,
+    this.personal = personal = new Personal({ timezone: options.timezone, persons: this.persons, contacts: this.catalog.contacts, channelMe,
       topic: parsePersonalConfig(config?.plugins.personal).topic, weave: parsePersonalConfig(config?.plugins.personal).weave }, log,
       { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore, resolveContact: () => this.resolveContact() });
     this.disclosure = new OutputDisclosure(this.outputStore, { marks: this.meMarks,
@@ -283,6 +289,8 @@ export class Aide {
     const audience = await this.outputAudience(ref);
     if (audience.unavailable || !audience.private || !audience.people.length || audience.people.some(p => !isMe(p.spec, this.meMarks)))
       throw new Error("Default Address must be a private, available destination for Me");
+    if (!audience.people.some(person => [...person.spec.addresses ?? []].some(address => address.uid === ref.uid)))
+      throw new Error("Default Address must belong to Me contact Addresses");
   }
 
   private async resolveContact() {
@@ -308,11 +316,13 @@ export class Aide {
     }
     const result = await this.persons.initialize();
     const localMe = await this.persons.findIdentity(LOCAL_ME);
-    if (localMe) this.addresses.observe(webAddress("me"), [personRef(localMe)], { muted: false, type: "web", name: "Me 的 Web 收件处" });
-    for (const identity of this.meMarks.identities) {
-      if (identity.provider !== "lark") continue;
-      const me = await this.persons.findIdentity(identity);
-      if (me) this.addresses.observe(larkPersonAddress(identity.scope, identity.id), [personRef(me)], { muted: false, type: "direct", name: "Me" });
+    if (localMe) this.catalog.contacts.linkAddress(personRef(localMe), this.addresses.observe(webAddress("me"), [personRef(localMe)], { muted: false, type: "web", name: "Me 的 Web 收件处" }));
+    for (const person of await this.persons.list()) this.catalog.contacts.ensure(person);
+    const selected = this.options.config?.defaultAddress;
+    if (selected) {
+      const audience = this.addresses.audience(selected);
+      if (!audience.unavailable && audience.private && audience.people.length && audience.people.every(person => isMe(person.spec, this.meMarks)))
+        for (const person of audience.people) this.catalog.contacts.linkAddress(personRef(person), this.addresses.read(selected));
     }
     if (result.conflict) this.log.error(result.conflict, "Me consolidation deferred; original Persons preserved");
     this.log.info({ meIdentities: this.meMarks.identities.length, mePersons: (await this.persons.list()).filter(p => p.isMe).length, merged: result.merged }, "Me identities reconciled");
