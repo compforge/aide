@@ -1,4 +1,5 @@
 import { AddressRefSchema } from "../../plugins/personal/address/model.ts";
+import { browseAddresses } from "../../plugins/personal/address/browse.ts";
 import { ResourceExpired, ResourceContinueInvalid } from "@compforge/aide-plugin";
 import { ChannelSettings, ChannelSettingsChangeSchema, ChannelSettingsError } from "../channel/settings.ts";
 import { createWebAssets } from "./assets.ts";
@@ -45,6 +46,7 @@ const PageSchema = z.object({
   page: z.coerce.number().int().min(1).max(1_000_000).optional(), pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 const TopicListSchema = PageSchema.extend({ parentId: z.string().trim().max(200).optional(), q: z.string().trim().max(200).optional(), selectedId: z.string().min(1).max(200).optional() }).strict();
+const AddressListSchema = PageSchema.extend({ selectedUid: z.string().min(1).max(250).optional() }).strict();
 const PersonListSchema = PageSchema.extend({ q: z.string().trim().max(200).optional(), name: z.string().max(200).optional(),
   excludeUid: z.string().min(1).max(250).optional(), selectedId: z.string().min(1).max(200).optional() }).strict();
 const OutputListSchema = PageSchema.extend({
@@ -148,8 +150,9 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         try {
           await aide.start();
           if (request.method === "GET" && url.pathname === "/addresses/list") {
-            const query = z.object({ continue: z.string().optional(), person: z.string().optional() }).strict().parse(Object.fromEntries(url.searchParams));
-            json(response, 200, aide.addresses.page(query.continue, query.person)); return;
+            const query = AddressListSchema.parse(Object.fromEntries(url.searchParams));
+            const started = performance.now();
+            listJson(response, browseAddresses(aide.addresses.resources.storage, aide.defaultAddress(), query), "addresses", started); return;
           }
           if (request.method === "GET" && ["/addresses/detail", "/addresses/notes"].includes(url.pathname)) {
             const query = z.object({ name: z.string().min(1), uid: z.string().min(1), continue: z.string().optional() }).strict().parse(Object.fromEntries(url.searchParams));

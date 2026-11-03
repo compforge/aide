@@ -32,6 +32,8 @@ Output.status.delivery.address 固定实际 Address，target 保存具体投递�
 
 共享连接与凭证通过配置文件维护。Addresses 列表中每个地址的三点菜单提供设为默认通知地址、禁言或解除禁言；小房子图标标记默认地址，禁言图标标记 Aide 已被禁言，悬停可查看含义。列表标题旁的刷新图标重新读取地址和默认设置。默认未配置时使用稳定的 Me Web 收件处。连接调整重启生效，默认地址选择立即用于新通知。
 
-Addresses 页面分页展示场合，并提供认识、近期记录、参与者三个子页。Me 可以禁言/解除禁言、编辑当前认识；保存按实际编辑字段检查并发冲突。参与者展示已知人物，不表示群成员已收集完整。
+Addresses 页面通过上一页 / 下一页展示场合，每页 10 条普通地址；默认通知地址固定置顶，不占分页名额或普通地址总数。`GET /addresses/list` 使用 `page` / `pageSize`，返回 `items`、`pinned`、`total`、`page`、`pageSize`、`pages`；服务端先排除已删除及置顶地址，再按创建时间和资源键倒序分页。页码保存在 URL 中，未指定页码的详情链接通过 `selectedUid` 定位所在页；刷新和修改默认地址保留当前页，越界时收敛到最后一页。翻页不关闭详情或覆盖认识草稿。Agent 的 `list_addresses` 继续使用 `continue` 游标。
+
+详情提供认识、近期记录、参与者三个子页。Me 可以禁言/解除禁言、编辑当前认识；保存按实际编辑字段检查并发冲突。参与者展示已知人物，不表示群成员已收集完整。
 
 验证见 `tests/address-resource.test.ts`、`tests/default-address.test.ts`、`tests/lark-progress.test.ts`、`tests/person-merge.test.ts`。Input、Output、Note 的资源版本随本次持久契约更新；不提供旧数据迁移。旧版本不读取，部署前需要按资源契约重建不兼容数据及其摘要依赖，不能直接混用旧摘要指纹与新版本 Note。
