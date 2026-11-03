@@ -12,7 +12,7 @@ import { test } from "node:test";
 import pino from "pino";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
-import { larkAddress } from "../src/channel/address.ts";
+import { larkAddress, larkPersonAddress } from "../src/channel/address.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
 import type { Incoming } from "../src/channel/message.ts";
 import { larkDeliveryError, larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark/client.ts";
@@ -488,4 +488,51 @@ test("Muted Lark sends only the courier-authorized system mail and preserves its
   await channel.close(); channel = new LarkChannel(home, "cli_test", aide, transport, log);
   await channel.send(message);
   assert.equal(sent.length, 1); assert.equal(sent[0]!.text, MUTED_OUTPUT_TEXT); assert.equal(sent[0]!.chatId, "oc_chat");
+});
+
+/** @case Typed p2p mentions discover scoped human contacts before Chief sees the request. */
+test("Lark typed mentions survive durable intake and discover only human contact Addresses", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-mentions-"));
+  const aide = new Aide(home, fakeOptions({ async execute() { throw new Error("No work expected"); } }, home, [], home, "cli_bot"), log);
+  const { transport } = fakeTransport({ openId: "ou_bot", name: "Aide" });
+  const received: Incoming[] = [];
+  let channel = new LarkChannel(home, "cli_bot", { canSpeak: target => aide.canSpeak(target), receive: async input => {
+    received.push(input); return aide.receive(input);
+  } }, transport, log);
+  t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  const otherApp = await aide.persons.observe({ provider: "lark", scope: "cli_observer", id: "ou_otherscope" }, "章进洲");
+  const known = await aide.persons.observe({ provider: "lark", scope: "cli_bot", id: "ou_known" }, "Known");
+  const message = event("om_mentions", "@_user_1 给@_user_2 发一下你好");
+  await channel.receive({ ...message, sender: { sender_type: "user", sender_id: { open_id: "ou_sender" } },
+    message: { ...message.message, mentions: [
+      { key: "@_user_1", id: { open_id: "ou_bot" }, name: "Aide", mentioned_type: "bot" },
+      { key: "@_user_2", id: { open_id: "ou_recipient", user_id: null }, name: "章进洲", mentioned_type: "user" },
+      { key: "@_user_3", id: { open_id: "ou_otherbot" }, name: "Other bot", mentioned_type: "bot" },
+      { key: "@_user_4", id: { open_id: "ou_unknown" }, name: "Unknown" },
+      { key: "@_user_5", id: { open_id: "ou_known" }, name: "Known" },
+      { key: "@_all", id: { open_id: "all" }, name: "All", mentioned_type: "user" },
+    ] } });
+  await channel.close();
+  channel = new LarkChannel(home, "cli_bot", { canSpeak: target => aide.canSpeak(target), receive: async input => {
+    received.push(input); return aide.receive(input);
+  } }, transport, log);
+  await channel.dispatch(); await aide.settled();
+  assert.equal(received[0]!.text, "@Aide 给@章进洲 发一下你好");
+  const details = received[0]!.observation!.mentionDetails as Array<{ id: string; key: string; name?: string; type?: string }>;
+  assert.deepEqual(details.find(m => m.id === "ou_recipient"), { key: "@_user_2", id: "ou_recipient", name: "章进洲", type: "user" });
+  const recipient = await aide.persons.findIdentity({ provider: "lark", scope: "cli_bot", id: "ou_recipient" });
+  assert.ok(recipient); assert.equal(recipient.spec.name, "章进洲");
+  assert.notEqual(recipient.metadata.uid, otherApp.metadata.uid, "Names never establish cross-app identity");
+  for (const id of ["ou_bot", "ou_otherbot", "ou_unknown", "all"])
+    assert.equal(await aide.persons.findIdentity({ provider: "lark", scope: "cli_bot", id }), undefined);
+  const person = await aide.persons.read(recipient.metadata.name);
+  assert.equal(person.contacts.length, 1);
+  const { Addresses } = await import("../plugins/personal/address/service.ts");
+  const address = new Addresses(home).read(person.contacts[0]!.ref);
+  assert.deepEqual([...address.spec.locators], [larkPersonAddress("cli_bot", "ou_recipient")]);
+  assert.equal(address.spec.muted, false);
+  const inputs = aide.topics.inputStore.query("topic", aide.topics.resource(aide.topics.list()[0]!.id)!.metadata.uid);
+  const fact = inputs.find(i => i.spec.observation?.messageId === "om_mentions")!;
+  assert.ok(fact);
+  assert.deepEqual([...fact.spec.receivers!].map(p => p.uid).sort(), [recipient.metadata.uid, known.metadata.uid].sort());
 });

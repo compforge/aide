@@ -97,3 +97,21 @@ test("Raw identity edits are completed by the same contacts reconciler and stale
   const recreated = await f.client.get({ ...PERSON_TYPE, name: person.metadata.name, namespace: "v1" });
   assert.ok(recreated?.metadata.deletionTimestamp);
 });
+
+test("read_address exposes the Host delivery route independently of mute and CLI credentials", async t => {
+  const f = setup(t), person = await f.persons.observe(identity());
+  const ref = (await f.persons.read(person.metadata.name)).contacts[0]!.ref;
+  f.addresses.setMuted(ref, true, false);
+  const { OutputStore } = await import("../plugins/personal/output/store.ts");
+  const { assertChannelDelivery } = await import("../src/channel/address.ts");
+  const { addressReadTools } = await import("../plugins/personal/address/tools.ts");
+  const outputs = new OutputStore(f.home, target => assertChannelDelivery(target, ["cli_one"]));
+  const tool = addressReadTools(f.addresses, () => ({ ...person, status: {} }), target => outputs.deliveryCapability(target))
+    .find(tool => tool.name === "read_address")!;
+  const result = await tool.execute("read", { address: ref }, undefined, undefined, {} as never);
+  const view = JSON.parse((result.content[0] as { text: string }).text);
+  assert.equal(view.delivery.configured, true);
+  assert.equal(view.spec.muted, true, "Configured delivery never grants permission to speak");
+  const disabled = new OutputStore(f.home);
+  assert.deepEqual(disabled.deliveryCapability(ref), { configured: false, reason: "No configured delivery route for this Address" });
+});

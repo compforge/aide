@@ -9,7 +9,7 @@ import { readNote } from "./note/service.ts";
 import { contentVersion } from "./context-write.ts";
 import { WriterResourceSchema, SubjectSchema } from "./note/model.ts";
 import { notes } from "./note/query.ts";
-import { knownReceivers } from "./person/receivers.ts";
+import { channelReceivers, type LarkMention } from "./person/receivers.ts";
 import { workPhase } from "./status.ts";
 import { commitStatus, patchStatus } from "./status.ts";
 import { identityBackground } from "../../agents/personal.ts";
@@ -122,7 +122,7 @@ export class Personal {
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
       }, notes => this.mailSender.cite(active().status.execution!.id, notes));
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active, ref => this.store.topics.outputStore.deliveryCapability(ref)), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
         const c = active();
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
         this.log.info({ topicId, topicUid: input.subject?.uid ?? c.metadata.uid, noteId: result.noteId, version: result.version }, "Topic Note updated");
@@ -290,7 +290,7 @@ export class Personal {
       } if (n < 8 && /version conflict/.test(String(error))) continue; throw error; }
       if (input) this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid,
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
-      const prompt = input ? `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nRead current Topic material and assess when useful.`
+      const prompt = input ? `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nCall assess_input for this Input and every still-pending Input in the assessments context. This arrival does not replace earlier requests; duplicate observations need separate receipts, not repeated external actions.`
         : "Topic structure changed. Review the current subtree's understanding, Inputs and Work; decide what needs attention. Existing Work retains its original Topic.";
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
@@ -466,15 +466,16 @@ export class Personal {
     let receivers: InputSpec["receivers"];
     if (input.channelId === "web") { const me = await this.options.persons.findIdentity(LOCAL_ME); if (me) sender = personRef(me); }
     else if (input.channelId === "lark") {
-      const observation = input.observation as { provider?: string; accountId?: string; sender?: { id?: string; type?: string; name?: string }; mentions?: string[] } | undefined;
+      const observation = input.observation as { provider?: string; accountId?: string; sender?: { id?: string; type?: string; name?: string }; mentions?: string[]; mentionDetails?: LarkMention[]; assistant?: { id?: string } } | undefined;
       if (observation?.provider === "lark" && observation.accountId) {
         const identity = (id: string) => ({ provider: "lark", scope: observation.accountId!, id });
         if (observation.sender?.type === "user" && observation.sender.id) {
           larkSenderId = observation.sender.id;
           sender = personRef(await this.options.persons.observe(identity(larkSenderId), observation.sender.name));
         }
-        // Only already identified humans are recipients; bot/unresolved mentions remain observation evidence.
-        receivers = personRefs(await knownReceivers(this.options.persons, observation.accountId, observation.mentions ?? []));
+        receivers = personRefs(await channelReceivers(this.options.persons, observation.accountId, observation.mentions ?? [],
+          observation.mentionDetails ?? [], observation.assistant?.id));
+        this.log.info({ inputId: id, accountId: observation.accountId, receiverUids: [...receivers].map(ref => ref.uid) }, "Lark receiver Persons resolved");
       }
     }
     const place = input.addressObservation;

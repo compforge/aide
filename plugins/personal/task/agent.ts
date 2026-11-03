@@ -37,7 +37,7 @@ export function taskSession(scope: ExecutionScope, config: PiConfig, store: Stor
     };
     const verbs = () => { const task = current(); return plugins.executionVerbs(task.status.execution!.id, { topicId: store.topicId(task.status.topic), taskId: task.metadata.name }); };
     const tools: ToolDefinition[] = [
-      ...addressReadTools(new Addresses(store.resources.storage.home), current),
+      ...addressReadTools(new Addresses(store.resources.storage.home), current, ref => store.topics.outputStore.deliveryCapability(ref)),
       ...workContextTools("task", plugins.resourceClient("personal"), current, log),
       tool({ name: "list_work", label: "List related work", description: "Page through this Topic's Task and Routine summaries; does not delegate or resume work.",
         parameters: Type.Object({ offset: Type.Optional(Type.Integer({ minimum: 0 })) }),

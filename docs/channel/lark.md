@@ -94,3 +94,5 @@ Output 重试继续使用稳定的分片 UUID；已持久确认的分片不重�
 发送前由 [Address](../personal/address.md) 的 muted 控制 Aide 能否发言；进度卡和 Channel 固定错误提示也遵守此设置。唯一例外是 Output Reconcile 为 Immediate Input 保存的固定禁言提示，标记与文本均须匹配，仍使用原目标和逐段回执去重。新发现的外部场合默认禁言，在 Web Addresses 页面解除禁言后仍须通过披露检查。
 
 引用消息的 `parentId` / `rootId` 随 Input 保留，Chief 可按需读取原文；详见[引用消息读取](../connector/lark-messages.md#引用消息读取)。
+
+事件的 `mentioned_type` 区分真人与机器人；适配器保留 mention 的占位符、open_id、姓名和类型，Personal 只为明确的真人发现 Person 与联系 Address，不额外请求通讯录权限。协议来源：[接收消息](https://open.feishu.cn/document/server-docs/im-v1/message/events/receive.md)。缺少类型的 mention 保留证据，不猜测身份。私信中的 mention 与群聊一样使用 SDK 转为可读名字，原始对应关系仍可从 Input observation 回查。

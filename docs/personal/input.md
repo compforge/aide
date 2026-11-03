@@ -31,7 +31,7 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 
 `spec.receivers?: PersonRef[]` 保存来源证据中明确识别的接收人物，每个引用固定 Person UID；与 sender 一样属于不可变的输入事实。缺省表示未提供这项信息，`[]` 表示没有列出明确接收人物，**不等于 all**。本版不建模 all，不展开群成员，也不把 Aide 或机器人作为 Person。旧 Input 无需回填。
 
-Lark Source 根据私信实际收件账号、同一聊天内被回复消息的发送人物、已对应 Person 的 @ 对象填写；讨论批次保留逐条人物证据，并将本批明确接收者去重写入 receivers。Lark Channel 记录已知人物 @，私信机器人本身不产生人物收件人。裸 @ ID 不能证明是人，不凭它创建 Person；原始 mentions 继续留在 observation。该列表是可确认的接收者，不承诺完整受众，也不证明实际已读、认可或授权。
+Lark Source 根据私信实际收件账号、同一聊天内被回复消息的发送人物、已对应 Person 的 @ 对象填写；讨论批次保留逐条人物证据，并将本批明确接收者去重写入 receivers。Lark Channel 根据事件 `mentioned_type=user` 发现当前 app scope 内的 Person，并由既有联系地址发现流程建立单聊 Address；`bot`、Aide 自身和 `@all` 不建立 Person。类型未知时只关联已知 Person，裸 @ ID 和名字不能证明是人，也不按名字合并跨应用身份。observation 的 mentionDetails 保留 key、id、name 和 type，mentions 保留 ID 列表；私信和群聊正文通过 SDK 解析 mention 名字。该列表是可确认的接收者，不承诺完整受众，也不证明实际已读、认可或授权。
 
 这些事实供 Chief 维护近期 Note 时识别相关人物；[Topic 近期相关人物](topic.md#近期相关人物) 从 Note 的人物关联派生；移动 Input 只改 status.topic，不改 sender / receivers。验证见 `tests/topic-persons.test.ts`、`tests/message-source.test.ts` 与 `tests/person.test.ts`。
 

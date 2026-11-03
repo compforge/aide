@@ -1,4 +1,4 @@
-import { larkEndpoint } from "../../../src/channel/address.ts";
+import { isChannelAddress, larkEndpoint } from "../../../src/channel/address.ts";
 import { StreamStore } from "../../../src/host/stream/store.ts";
 import { INPUT_TYPE } from "../input/model.ts";
 import { Addresses } from "../address/service.ts";
@@ -48,6 +48,13 @@ export class OutputStore {
     this.resources = new PluginResourceStore({ home: this.storage.home, pluginInstanceId: "personal" });
     this.storage.db.exec(`CREATE INDEX IF NOT EXISTS output_topic ON resources(json_extract(data,'$.object.spec.topic.uid')) WHERE kind='aide.dev/Output';
       CREATE INDEX IF NOT EXISTS output_execution ON resources(json_extract(data,'$.object.spec.executionId')) WHERE kind='aide.dev/Output';`);
+  }
+  /** @spec Configured delivery is a local capability, independent of mute, disclosure and platform acceptance. */
+  deliveryCapability(target: import("../address/model.ts").AddressRef) {
+    const endpoint = new Addresses(this.storage.home).endpoint(target);
+    if (!isChannelAddress(endpoint)) return { reason: "Connector delivery is not checked by Channel configuration" };
+    try { this.validateTarget(endpoint); return { configured: true }; }
+    catch { return { configured: false, reason: "No configured delivery route for this Address" }; }
   }
   get(id: string): Output | undefined { return this.storage.read(this.key(id), true)?.object as Output | undefined; }
   list(options: { owner?: string; topicUid?: string; executionId?: string; inputId?: string; after?: string; limit?: number; matchLabels?: ResourceListOptions["matchLabels"] } = {}): Output[] {
