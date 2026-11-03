@@ -66,6 +66,7 @@ export class ResourceStorage {
       CREATE INDEX IF NOT EXISTS reference_target ON resource_refs(target);
       CREATE TABLE IF NOT EXISTS resource_indexes (source TEXT NOT NULL REFERENCES resources(key) ON DELETE CASCADE, name TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(source,name,value));
       CREATE INDEX IF NOT EXISTS resource_index_lookup ON resource_indexes(name,value,source);
+      CREATE TABLE IF NOT EXISTS resource_payload_sizes (uid TEXT PRIMARY KEY REFERENCES resources(uid) ON DELETE CASCADE, bytes INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, expires INTEGER NOT NULL, value TEXT NOT NULL);`);
     this.pages = new ResourcePages(this.db);
     this.db.exec("UPDATE resources SET released=NULL");
@@ -245,7 +246,8 @@ export class ResourceStorage {
       const controlOnly = prior && !equalResourceValue(prior.control, stored.control)
         && equalResourceValue({ ...prior, control: undefined }, { ...stored, control: undefined });
       if (!controlOnly) this.validateChange(scope, old, stored.object);
-      const data = JSON.stringify(stored), bytes = Buffer.byteLength(data), resource = stored.object;
+      const data = JSON.stringify(stored), resource = stored.object;
+      const bytes = Buffer.byteLength(data) + Number(this.db.prepare("SELECT bytes FROM resource_payload_sizes WHERE uid=?").get(resource.metadata.uid)?.bytes ?? 0);
       const previous = this.db.prepare("SELECT bytes FROM resources WHERE key=?").get(key);
       const kind = kindKey(resource), limits = { ...this.config.defaults, ...this.config.kinds[kind] };
       // Completion/deletion may shrink an oversized pre-existing record even when the host is full.
@@ -282,8 +284,8 @@ export class ResourceStorage {
     if (!kindFull && !totalFull) return;
     const evict = (onlyKind: boolean, order: string, enough: () => boolean) => {
       const candidates = this.db.prepare(`SELECT key,scope,data FROM resources r WHERE released IS NOT NULL AND released<=? AND key<>?
-        AND (?=0 OR kind=?) AND NOT EXISTS(SELECT 1 FROM resource_refs WHERE target=r.uid) ORDER BY ${order},key`);
-      for (const row of candidates.iterate(new Date().toISOString(), protectedKey, onlyKind ? 1 : 0, kind)) {
+        AND NOT EXISTS(SELECT 1 FROM resources parent WHERE parent.uid=json_extract(r.data,'$.object.metadata.owner.uid')) ORDER BY ${order},key`);
+      for (const row of candidates.iterate(new Date().toISOString(), protectedKey)) {
         if (enough()) break;
         if (this.writtenKeys.has(row.key as string)) continue;
         const resource = (JSON.parse(row.data as string) as StoredResource).object;
@@ -291,8 +293,26 @@ export class ResourceStorage {
         const retention = this.definition(row.scope as string, resource).retention;
         // @spec Candidate release time never substitutes for current dependency checks.
         if (retention?.canEvict && !retention.canEvict(resource, this.validationContext(row.scope as string))) continue;
-        this.remove(row.key as string);
-        this.evicted.push({ scope: row.scope as string, resource });
+        // Structural dependents are retained with their owner, rather than pinning it forever.
+        // Every member must be released and no reference outside this ownership tree may pin it.
+        const tree = this.db.prepare(`WITH RECURSIVE owned(key,uid,scope,data,released) AS (
+          SELECT key,uid,scope,data,released FROM resources WHERE key=? UNION ALL
+          SELECT child.key,child.uid,child.scope,child.data,child.released FROM resources child JOIN owned parent
+          ON json_extract(child.data,'$.object.metadata.owner.uid')=parent.uid
+        ) SELECT * FROM owned`).all(row.key as string);
+        if (onlyKind && !tree.some(member => kindKey((JSON.parse(member.data as string) as StoredResource).object) === kind)) continue;
+        const keys = new Set(tree.map(member => member.key as string));
+        if (tree.some(member => !member.released || Date.parse(member.released as string) > Date.now() || this.writtenKeys.has(member.key as string))) continue;
+        if (tree.some(member => this.db.prepare("SELECT source FROM resource_refs WHERE target=?").all(member.uid as string)
+          .some(reference => !keys.has(reference.source as string)))) continue;
+        if (tree.some(member => {
+          const child = this.decode(member.scope as string, member.data as string).object;
+          return this.definition(member.scope as string, child).retention?.canEvict?.(child, this.validationContext(member.scope as string)) === false;
+        })) continue;
+        for (const member of tree.reverse()) {
+          this.remove(member.key as string);
+          this.evicted.push({ scope: member.scope as string, resource: this.decode(member.scope as string, member.data as string).object });
+        }
       }
     };
     if (kindFull) {

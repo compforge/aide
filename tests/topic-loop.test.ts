@@ -107,7 +107,7 @@ for (const kind of ["Topic", "Route"] as const) for (const failure of ["write fa
       return client.commit(writes);
     } }, logger: { info() {}, warn() {}, error() {} }, instance: { config: {} } } as unknown as PluginContext;
     const execution = (executionId: string): ReconcileContext => {
-      const e = { executionId, withContext() { return e; }, verbs: { async harness() { calls++; return { state: "failure" }; } } };
+      const e = { executionId, withContext() { return e; }, verbs: { async action() { return { state: "success", value: { streaming: false } }; }, async harness() { calls++; return { state: "failure" }; } } };
       return e as unknown as ReconcileContext;
     };
     const read = async () => (await client.get<unknown, LoopStatus>({ ...resource, ...resource.metadata }))!;

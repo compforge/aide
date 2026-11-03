@@ -30,7 +30,7 @@ const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(valu
  * @spec Content/intent remain immutable. Only a persisted, checked actual delivery can cross a Channel boundary.
  * @spec Me's exemption depends on verified private destination identity, never intended receivers alone.
  * @spec Immediate Input Outputs replace muted content with a fixed notice at the intended address; other refusals contact Me.
- * @why Reconcile owns actual target/text; Chief's raw intent stays immutable, and retries never rerun Chief.
+ * @why Reconcile owns actual target/stream; Chief's raw intent stays immutable, and retries never rerun Chief.
  * @case tests/address-resource.test.ts
  * @link docs/personal/disclosure.md
  */
@@ -117,7 +117,11 @@ export class OutputDisclosure {
     }
     const privateMe = audience.private && audience.people.length === 1 && isMe(audience.people[0]!.spec, this.ports.marks);
     return { policy, immediate, fingerprint: hash([receiverIdentity(output.spec), policy, dependencies, { ...audience, people: audience.people.map(p => [p.metadata.uid, p.metadata.deletionTimestamp, personDisclosure(p.spec)]) }, this.ports.marks]), privateMe,
-      refusal: privateMe && !audience.muted && !audience.unavailable ? "" : refusal, evidence: { text: output.spec.text, materials } };
+      refusal: privateMe && !audience.muted && !audience.unavailable ? "" : refusal, evidence: { text: [this.store.content(output).think, this.store.content(output).text].filter(Boolean).join("\n\n"), materials } };
+  }
+  private isMuteNotice(output: Output) {
+    const content = this.store.content(output, true);
+    return content.phase === "completed" && !content.think && isMutedNotice({ notice: output.status.delivery?.notice, text: content.text });
   }
   private async run(id: string) {
     const output = this.store.get(id);
@@ -125,7 +129,7 @@ export class OutputDisclosure {
     // A refused Output keeps its saved notice or Me fallback. Permission changes never resurrect its original intent.
     if (output.status.disclosure?.decision === "denied" && output.status.delivery) {
       const audience = await this.audience(output.status.delivery.address);
-      if (isMutedNotice(output.status.delivery)) {
+      if (this.isMuteNotice(output)) {
         if (audience.unavailable || output.status.delivery.address.uid !== output.spec.target.uid)
           throw new Error("Saved mute notice destination is no longer available");
         return;
@@ -136,8 +140,15 @@ export class OutputDisclosure {
     }
     const audience = await this.audience(output.spec.target);
     const snapshot = this.snapshot(output, audience);
-    if (output.status.phase === "sending") {
-      if (snapshot.fingerprint !== output.status.disclosure?.fingerprint) this.store.uncertain(id, "Disclosure changed after an interrupted send; verify external receipts");
+    // Recheck an existing authorization before waiting for external review: a formerly private
+    // destination must never keep receiving new chunks after its audience changes.
+    if ((output.status.phase === "sending" || (output.status.attempts > 0 && this.store.content(output).phase === "open"))
+      && snapshot.fingerprint !== output.status.disclosure?.fingerprint) {
+      this.store.uncertain(id, "Disclosure changed during delivery; verify external receipts"); return;
+    }
+    // A private Me destination authorizes ongoing content. External destinations require a complete reviewed body.
+    if (!snapshot.privateMe && !audience.muted && this.store.content(output).phase === "open") {
+      if (output.status.delivery) this.store.update(id, status => ({ ...status, delivery: undefined, disclosure: undefined }));
       return;
     }
     let reason = output.status.disclosure?.decision === "denied" ? output.status.disclosure.reason : snapshot.refusal;
@@ -159,9 +170,9 @@ export class OutputDisclosure {
     const decision = reason ? "denied" : "allowed";
     let fallbackPeople: PersonResource[] = [];
     let fallbackPolicy: string | undefined;
-    let delivery: NonNullable<Output["status"]["delivery"]> = { ...(output.status.delivery?.replay ? { replay: output.status.delivery.replay } : {}), address: output.spec.target, target: this.store.destination(output), text: output.spec.text, receivers: personRefs(audience.people.map(personRef)) };
+    let delivery: NonNullable<Output["status"]["delivery"]> = { ...(output.status.delivery?.replay ? { replay: output.status.delivery.replay } : {}), address: output.spec.target, target: this.store.destination(output), stream: output.spec.stream, receivers: personRefs(audience.people.map(personRef)) };
     if (reason && audience.muted && !audience.unavailable && snapshot.immediate) {
-      delivery = { ...delivery, notice: "muted", text: MUTED_OUTPUT_TEXT };
+      delivery = { ...delivery, notice: "muted", stream: this.store.replacement(output, "muted", MUTED_OUTPUT_TEXT) };
     } else if (reason) {
       this.store.update(id, status => ({ ...status, delivery: undefined, disclosure: { decision: "denied", reason, checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint, ...(snapshot.policy ? { policy: snapshot.policy } : {}) } }));
       const me = await this.ports.contactMe(output.spec.topicId);
@@ -170,7 +181,7 @@ export class OutputDisclosure {
       if (fallback.unavailable || fallback.muted || !fallback.private || fallback.people.length !== 1 || !isMe(fallback.people[0]!.spec, this.ports.marks)) throw new Error("Default Address is not a verified private Me destination");
       fallbackPeople = fallback.people;
       fallbackPolicy = this.addressPolicy(me.address);
-      delivery = { ...me, receivers: personRefs(fallback.people.map(personRef)), text: `原计划发送至：${JSON.stringify(output.spec.target)}\n接收者：${JSON.stringify(output.spec.receivers ?? [])}\n未发送原因：${reason}\n\n原文：\n${output.spec.text}` };
+      delivery = { ...me, receivers: personRefs(fallback.people.map(personRef)), stream: audience.muted ? output.spec.stream : this.store.replacement(output, "disclosure", `原计划发送至：${JSON.stringify(output.spec.target)}\n未发送原因：${reason}\n\n原文：\n${this.store.content(output).text}`) };
     }
     // Awaited model/provider calls cannot authorize a changed resource or audience.
     const currentAudience = await this.audience(output.spec.target);
@@ -178,7 +189,7 @@ export class OutputDisclosure {
       const latest = this.store.get(id);
       if (!latest || latest.status.phase !== "pending") return;
       if (this.snapshot(latest, currentAudience).fingerprint !== snapshot.fingerprint) throw new Error("Disclosure dependencies changed during review; retry with current evidence");
-      if (decision === "denied" && !isMutedNotice(delivery) && this.addressPolicy(delivery.address) !== fallbackPolicy) throw new Error("Fallback Address changed before delivery commit");
+      if (decision === "denied" && delivery.notice !== "muted" && this.addressPolicy(delivery.address) !== fallbackPolicy) throw new Error("Fallback Address changed before delivery commit");
       if (decision === "denied" && fallbackPeople.some(person => {
         const latestPerson = this.store.resources.find<Person, PersonStatus>(person, person.metadata.name, person.metadata.namespace);
         return !latestPerson || latestPerson.metadata.uid !== person.metadata.uid || latestPerson.metadata.deletionTimestamp || !isMe(latestPerson.spec, this.ports.marks);

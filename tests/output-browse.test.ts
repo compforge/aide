@@ -61,7 +61,7 @@ test("Disclosure denial and successful fallback delivery remain separate and bot
   const actualAddress = addressFor(home, webAddress('me'));
   store.update('redirected', s => ({ ...s, phase: 'delivered', attempts: 1, deliveredAt: new Date().toISOString(),
     disclosure: { decision: 'denied', reason: '接收人不可见', checkedAt: new Date().toISOString(), fingerprint: 'test' },
-    delivery: { address: actualAddress, target: webAddress('me'), text: '已阻止外发', receivers: personRefs([person('me')]) },
+    delivery: { address: actualAddress, target: webAddress('me'), stream: store.replacement(output, 'test', '已阻止外发'), receivers: personRefs([person('me')]) },
     receipt: { id: 'message', scope: 'web' } }));
   for (const receiverUid of ['person-other', 'person-me']) assert.equal(browseOutputs(store, { receiverUid }).total, 1);
   for (const addressUid of [output.spec.target.uid, actualAddress.uid]) assert.equal(browseOutputs(store, { addressUid }).total, 1);

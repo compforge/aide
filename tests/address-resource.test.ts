@@ -128,9 +128,9 @@ test("Muted Output uses pinned Input attention to choose an original-address not
     assert.deepEqual(sent[0]!.target, item.notice ? larkThreadAddress("app", "group", "original-message") : webAddress("test"), item.id);
     assert.equal(sent[0]!.notice, item.notice ? "muted" : undefined, item.id);
     if (item.notice) assert.equal(sent[0]!.text, MUTED_OUTPUT_TEXT);
-    else { assert.match(sent[0]!.text, /原始隐私正文/); assert.match(sent[0]!.text, /muted/); }
+    else { assert.match(sent[0]!.text, /原始隐私正文/); }
     const output = f.store.get(item.id)!;
-    assert.equal(output.spec.text, raw); assert.equal(output.spec.target.uid, ref.uid);
+    assert.equal(f.store.content(output).text, raw); assert.equal(output.spec.target.uid, ref.uid);
     assert.equal(output.status.phase, "delivered"); assert.equal(output.status.disclosure!.decision, "denied");
     assert.equal(f.addresses.read(ref).spec.muted, true);
   }
@@ -160,7 +160,7 @@ test("An Immediate mute notice remains fixed through retry, Input loss and unmut
   assert.equal(sent.length, 2); assert.deepEqual(sent[0], sent[1]);
   assert.equal(sent[1]!.text, MUTED_OUTPUT_TEXT); assert.deepEqual(sent[1]!.target, group);
   assert.equal(f.store.get("retry-notice")!.status.phase, "delivered");
-  assert.equal(f.store.get("retry-notice")!.spec.text, "不能泄露的原文");
+  assert.equal(f.store.content(f.store.get("retry-notice")!).text, "不能泄露的原文");
 });
 
 test("Source and Channel mentions share one reply; explicit target remains Chief's choice", async t => {

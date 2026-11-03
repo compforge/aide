@@ -1,3 +1,5 @@
+import { setTimeout as delay } from "node:timers/promises";
+import type { StreamSnapshot } from "@compforge/aide-plugin";
 import { Addresses } from "../address/service.ts";
 import { deliveryFailure, type DeliveryFailure } from "@compforge/aide-connector";
 import { nextDeliveryAt } from "./frequency.ts";
@@ -8,9 +10,10 @@ import type { Logger } from "pino";
 import type { OutputStore } from "./store.ts";
 import { isMutedNotice, type Output, type OutputReconcileResult, type OutputStatus } from "./model.ts";
 
-export type OutputMessage = { id: string; target: Address; text: string; notice?: "muted" };
+export type OutputMessage = { id: string; target: Address; text: string; stream?: StreamSnapshot; notice?: "muted" };
 export interface OutputTransport {
   replay: "idempotent" | "once";
+  streaming?: boolean;
   send(message: OutputMessage): Promise<OutputStatus["receipt"]>;
 }
 export type OutputTransportResolver = (target: Address) => Promise<OutputTransport | undefined> | OutputTransport | undefined;
@@ -28,12 +31,15 @@ const activeReceivers = new WeakMap<ResourceStorage, Set<string>>();
  * @case tests/output-frequency.test.ts
  */
 export class OutputDelivery {
+  private readonly stopping = new AbortController();
   private readonly running = new Map<string, Promise<OutputReconcileResult>>();
   constructor(private readonly store: OutputStore, private readonly transport: OutputTransportResolver, private readonly log: Logger) {}
-  reconcile(id: string): Promise<OutputReconcileResult> {
+  async reconcile(id: string): Promise<OutputReconcileResult> {
+    if (this.stopping.signal.aborted) return {};
     const existing = this.running.get(id);
-    if (existing) return existing;
+    if (existing) return { requeueAfterMs: 1000 };
     const run = this.run(id).catch(error => {
+      if (this.stopping.signal.aborted || !this.store.get(id) || this.store.get(id)?.metadata.deletionTimestamp) return {};
       if (error instanceof OutputRetryError) throw error;
       const current = this.store.get(id);
       // A sending state can already have an external effect; leave recovery to the replay contract.
@@ -42,7 +48,15 @@ export class OutputDelivery {
       }
       throw new Error(current?.status.lastError ?? "Output reconcile failed");
     }).finally(() => this.running.delete(id));
-    this.running.set(id, run); return run;
+    this.running.set(id, run);
+    // The Host owns active subscriptions; Runner reconciliation remains short and can bind other Outputs.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try { return await Promise.race([run, new Promise<OutputReconcileResult>(resolve => { timer = setTimeout(() => resolve({ requeueAfterMs: 1000 }), 25); })]); }
+    finally { clearTimeout(timer); }
+  }
+  async close(): Promise<void> {
+    this.stopping.abort(new Error("Output delivery is stopping"));
+    await Promise.allSettled(this.running.values());
   }
   private async run(id: string): Promise<OutputReconcileResult> {
     let output = this.store.get(id);
@@ -53,6 +67,14 @@ export class OutputDelivery {
     const wait = output.status.deliveryWait;
     // Provider deadlines survive early watches and Host restarts; Person policy waits are recomputed below.
     output = await this.store.prepare(id);
+    if (!["pending", "sending"].includes(output.status.phase)) return {};
+    while (!output.status.delivery || !output.status.disclosure) {
+      const stream = this.store.content(output);
+      if (stream.phase !== "open") throw new Error("Output disclosure did not authorize a closed stream");
+      await this.store.streams.wait(output.spec.stream, stream.lastSeq, this.stopping.signal);
+      output = await this.store.prepare(id);
+      if (output.metadata.deletionTimestamp || !["pending", "sending"].includes(output.status.phase)) return {};
+    }
     if (!["pending", "sending"].includes(output.status.phase)) {
       this.log.info({ outputId: id, phase: output.status.phase }, "Output no longer requires delivery");
       return {};
@@ -74,6 +96,7 @@ export class OutputDelivery {
       // Awaited preparation can change permission, audience or frequency policy. Recheck before sending.
       output = await this.store.prepare(id);
       if (!["pending", "sending"].includes(output.status.phase)) return {};
+      if (!output.status.delivery) return { requeueAfterMs: 1000 };
       if (!sameAddress(output.status.delivery!.target, target)) throw new Error("Actual Output destination changed; reconcile again");
       const currentReceivers = [...output.status.delivery!.receivers].map(p => p.uid).sort();
       if (JSON.stringify(currentReceivers) !== JSON.stringify(receivers)) return this.defer(id, Date.now() + 1, "receiver-busy");
@@ -96,14 +119,39 @@ export class OutputDelivery {
       this.store.uncertain(id, "Transport replay contract changed after a send attempt"); return {};
     }
     if (!output.status.attempts) this.store.update(id, s => ({ ...s, delivery: { ...s.delivery!, replay: transport.replay } }));
-    if (new Addresses(this.store.storage.home).read(output.status.delivery!.address).spec.muted && !isMutedNotice(output.status.delivery!)) throw new Error("Address was muted before transport dispatch");
-    this.store.begin(id);
     try {
-      const receipt = await transport.send({ id, target, text: output.status.delivery!.text, ...(output.status.delivery!.notice ? { notice: output.status.delivery!.notice } : {}) });
-      this.store.delivered(id, receipt);
-      this.log.info({ outputId: id, target }, "Output delivered");
-      return {};
+      for (;;) {
+        this.stopping.signal.throwIfAborted();
+        output = await this.store.prepare(id);
+        if (output.metadata.deletionTimestamp || !["pending", "sending"].includes(output.status.phase)) return {};
+        if (!output.status.delivery) return { requeueAfterMs: 1000 };
+        const delivery = output.status.delivery;
+        const content = this.store.content(output, true);
+        const notice = content.phase === "completed" && !content.think && isMutedNotice({ notice: delivery.notice, text: content.text });
+        if (new Addresses(this.store.storage.home).read(delivery.address).spec.muted && !notice) throw new Error("Address was muted before transport dispatch");
+        if (content.phase === "open" && (!transport.streaming || content.lastSeq === (delivery.confirmedSeq ?? 0))) {
+          await this.store.streams.wait(delivery.stream, content.lastSeq, this.stopping.signal);
+          continue;
+        }
+        if (content.phase === "interrupted" && !content.text && !transport.streaming) {
+          this.store.failed(id, content.error ?? "Output generation was interrupted"); return {};
+        }
+        // A saved destination/stream never changes within this subscription.
+        if (!sameAddress(delivery.target, target)) throw new Error("Actual Output destination changed during streaming");
+        this.store.begin(id);
+        const receipt = await transport.send({ id, target, text: content.text, ...(transport.streaming ? { stream: content } : {}), ...(delivery.notice ? { notice: delivery.notice } : {}) });
+        if (!this.store.get(id) || this.store.get(id)?.metadata.deletionTimestamp) return {};
+        this.store.update(id, status => ({ ...status, delivery: { ...status.delivery!, confirmedSeq: content.lastSeq }, ...(receipt ? { receipt } : {}) }));
+        if (content.phase !== "open") {
+          if (content.phase === "interrupted") this.store.failed(id, content.error ?? "Output generation was interrupted");
+          else this.store.delivered(id, receipt);
+          this.log.info({ outputId: id, streamUid: delivery.stream.uid, confirmedSeq: content.lastSeq, phase: content.phase }, "Output stream delivery settled");
+          return {};
+        }
+        await delay(750, undefined, { signal: this.stopping.signal });
+      }
     } catch (error) {
+      if (this.stopping.signal.aborted || !this.store.get(id) || this.store.get(id)?.metadata.deletionTimestamp) return {};
       return this.failure(id, deliveryFailure(error) ?? { kind: "unknown", message: "Output transport failed; delivery result is unknown" }, transport.replay === "idempotent");
     }
   }

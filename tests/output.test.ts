@@ -48,8 +48,8 @@ test("Output persists independent many-to-many associations, immutable content a
   assert.throws(() => f.outputs.create(f.session.id, "one", { ...first.spec, target: larkAddress("app", "chat") }), /different content/);
   assert.equal(new OutputStore(f.root).list({ topicUid: f.topic.metadata.uid }).length, 3);
   assert.equal(first.status.phase, "pending", "Web waits for disclosure before publication");
-  assert.match(outputPrinter.describe(first), /第一条\n完整详情/);
-  assert.equal(outputPrinter.summarize(first), "第一条 完整详情");
+  assert.match(outputPrinter.describe(first), /stream:output:one:raw/);
+  assert.equal(outputPrinter.summarize(first), "Stream: stream:output:one:raw");
   assert.equal((await f.client.list(OUTPUT_TYPE)).length, 3);
   assert.equal((await f.client.get({ ...OUTPUT_TYPE, namespace: "v1", name: "one", uid: first.metadata.uid }))?.metadata.uid, first.metadata.uid);
   assert.equal((await f.client.patchStatus(first, { phase: "pending" })).status.phase, "pending");

@@ -415,9 +415,8 @@ test("Aide isolates continuous native contexts across topics, restart and recrea
     const messages = request.messages as Array<{role: string; content: unknown}>;
     const activation = messageText(messages.findLast(m => m.role === "user")!.content).split("Activation: ").at(-1)!.split("\n")[0]!;
     const inputId = JSON.parse(activation).inputId;
-    return index % 3 === 0 ? { tool: "say", args: { text: `native-response-${index / 3}` } }
-      : index % 3 === 1 ? { tool: "assess_input", args: { inputId, summary: "Handled request" } }
-      : { text: `Internal summary ${Math.floor(index / 3)}` };
+    return index % 2 === 0 ? { tool: "assess_input", args: { inputId, summary: "Handled request" } }
+      : { text: `native-response-${Math.floor(index / 2)}` };
   });
   const home = join(fixture.config.cwd, "aide");
   const log = pino({ level: "silent" });
@@ -438,17 +437,17 @@ test("Aide isolates continuous native contexts across topics, restart and recrea
     const original = binding("lark:app:group-a", "lark:app:group-a");
     await send("lark:app:group-a", "lark:app:group-a", "a2");
     assert.equal(binding("lark:app:group-a", "lark:app:group-a"), original);
-    assert.match(JSON.stringify(fixture.requests[3]), /native-response-0/);
+    assert.match(JSON.stringify(fixture.requests[2]), /native-response-0/);
     await send("lark:app:group-b", "lark:app:group-b", "b1");
     assert.notEqual(binding("lark:app:group-b", "lark:app:group-b"), original);
-    assert.doesNotMatch(JSON.stringify(fixture.requests[6]), /question-a1|native-response-0/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[4]), /question-a1|native-response-0/);
     await aide.close();
     aide = open(); await aide.start();
     assert.equal(aide.runtime.plugins.listInstances().length, 1);
     await send("lark:app:group-a", "lark:app:group-a", "a3");
     assert.equal(binding("lark:app:group-a", "lark:app:group-a"), original);
-    assert.match(JSON.stringify(fixture.requests[9]), /native-response-1/);
-    assert.doesNotMatch(JSON.stringify(fixture.requests[9]), /question-b1/);
+    assert.match(JSON.stringify(fixture.requests[6]), /native-response-1/);
+    assert.doesNotMatch(JSON.stringify(fixture.requests[6]), /question-b1/);
     assert.equal(aide.outputs().filter((message) => message.topicId === "lark:app:group-a").length, 3);
     await aide.close();
     aide = open(); await aide.start();

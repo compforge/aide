@@ -33,9 +33,10 @@ export function browseOutputs(store: OutputStore, query: OutputBrowseQuery = {})
   for (const [operator, value] of [[">=", query.from], ["<=", query.to]] as const)
     if (value) { clauses.push(`created ${operator} ?`); args.push(value); }
   if (query.q) {
-    clauses.push(`(instr(lower(${field("spec.text")}), lower(?)) > 0 OR instr(lower(${field("metadata.name")}), lower(?)) > 0
-      OR instr(lower(coalesce(${field("status.delivery.text")}, '')), lower(?)) > 0)`);
-    args.push(query.q, query.q, query.q);
+    clauses.push(`(instr(lower(${field("metadata.name")}), lower(?)) > 0 OR EXISTS (
+      SELECT 1 FROM (SELECT uid,group_concat(delta,'') AS body FROM (SELECT uid,delta FROM stream_chunks ORDER BY uid,seq) GROUP BY uid) content
+      WHERE content.uid IN (${field("spec.stream.uid")}, ${field("status.delivery.stream.uid")}) AND instr(lower(content.body), lower(?)) > 0))`);
+    args.push(query.q, query.q);
   }
   const where = clauses.join(" AND ");
   return store.storage.transaction(() => {

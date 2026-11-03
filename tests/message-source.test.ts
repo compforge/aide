@@ -24,7 +24,6 @@ import { messageWatch, MessageWatchSchema, MESSAGE_SESSION, type MessageKind, ty
 import { readMessageContext } from "../plugins/personal/source/message/context.ts";
 import { Aide } from "../src/app.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
-import { larkProgress } from "../src/channel/lark/card.ts";
 import { loadConfig } from "../src/config.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { messageRelation } from "../plugins/personal/source/message/relation.ts";
@@ -512,7 +511,7 @@ test("Real Runner shares Lark chat topics across Source and Channel without infe
   await channel.dispatch(); await aide.settled(); await channel.deliver();
   assert.deepEqual(sent, [{ chatId: "oc_group", text: "channel-reply" }]);
   const reply = aide.outputs().find(output => output.topicId === groupId && output.text === "channel-reply")!;
-  assert.ok(larkProgress(aide, groupId).some(view => view.content.includes(reply.text)), "Cards match the incoming address even without a Topic default address");
+  assert.equal(reply.status.phase, "delivered", "Checked Output owns delivery even without a Topic default address");
   const store = aide.personal.topics;
   assert.equal(store.list().filter((c) => c.id === groupId).length, 1);
   assert.equal(store.inputs(groupId).length, 3);

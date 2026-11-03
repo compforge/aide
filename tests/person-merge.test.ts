@@ -70,7 +70,8 @@ test("Same names only select candidates; merging appends to the chosen Person wi
   assert.deepEqual(inputs.get("historical"), input);
   assert.deepEqual(outputs.get("reply"), output);
   assert.match(inputPrinter.describe(input), /历史消息/);
-  assert.match(outputPrinter.describe(output), /历史回复/);
+  assert.match(outputs.content(output).text, /历史回复/);
+  assert.match(outputPrinter.describe(output), /stream:output:reply:raw/);
   // Even if a resource name is reused, an old UID must not resolve to the new person.
   await f.client.create(PERSON_TYPE, { name: source.metadata.name, spec: { name: "其他人", identities: [] }, status: { ...source.status, summaryRevision: "" } });
   await assert.rejects(f.persons.read(sender.name, sender.uid), /Unknown Person/);

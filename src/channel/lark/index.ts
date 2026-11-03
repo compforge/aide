@@ -12,7 +12,7 @@ import { z } from "zod";
 import { normalize } from "@larksuiteoapi/node-sdk";
 import type { ChannelService } from "../service.ts";
 import { IncomingSchema } from "../message.ts";
-import { progressCard, cardPreviews, cardContent, cardThought, type LarkProgressReader, type LarkProgress } from "./card.ts";
+import { progressCard, cardPreviews, cardContent, cardThought, type LarkProgress } from "./card.ts";
 import { larkDeliveryError, larkSendFailure, type LarkTransport } from "./client.ts";
 
 /** @why Lark can return null for permission-restricted user_id; SDK normalization expects absent IDs as undefined. */
@@ -66,12 +66,11 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
   private outbound?: Promise<void>;
   private stopped = false;
   private retryAt = 0;
-  private readonly cardRetry = new Map<string, number>();
   private readonly unregisterOutput?: () => void;
   private readonly chatNames = new Map<string, { name?: string; until: number }>();
 
   constructor(home: string, private readonly appId: string, private readonly aide: Pick<ChannelService, "receive" | "registerOutputTransport" | "canSpeak">,
-    private readonly transport: LarkTransport, private readonly log: Logger, private readonly progress?: LarkProgressReader) {
+    private readonly transport: LarkTransport, private readonly log: Logger) {
     this.acceptInput = bindChannelInput(CHANNELS.lark, (input) => aide.receive(input));
     this.prefix = `lark:${appId}:`;
     this.path = join(home, "channels", `lark-${createHash("sha256").update(appId).digest("hex").slice(0, 16)}.json`);
@@ -82,7 +81,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     this.state = StateSchema.parse(saved);
     this.unregisterOutput = aide.registerOutputTransport?.(target => {
       if (larkEndpoint(target)?.appId !== this.appId) return;
-      return { replay: "idempotent", send: message => this.send(message) };
+      return { replay: "idempotent", streaming: !!this.transport.cards, send: message => this.send(message) };
     });
   }
 
@@ -217,20 +216,6 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
   }
 
   private async updatePresentation(): Promise<void> {
-    if (this.transport.cards && this.progress) {
-      for (const [topicId, chatId] of Object.entries(this.state.chats)) {
-        if (!this.aide.canSpeak(larkAddress(this.appId, chatId))) continue;
-        for (const view of this.progress(topicId)) {
-          if (this.stopped) return;
-          if (Date.now() < (this.cardRetry.get(view.id) ?? 0)) continue;
-          try { await this.updateCard(topicId, chatId, view); }
-          catch {
-            this.cardRetry.set(view.id, Date.now() + 10_000);
-            this.log.warn({ inputId: view.id, topicId }, "Lark progress update failed; final text delivery remains available. Check cardkit:card:write scope and network");
-          }
-        }
-      }
-    }
     const notices: OutputView[] = this.state.notices.map((n) => ({ ...n, topicUid: "", target: larkAddress(this.appId, this.state.chats[n.topicId]!), status: { phase: "pending", attempts: 0 } }));
     for (const message of notices) {
       if (!this.aide.canSpeak(message.target)) continue;
@@ -262,6 +247,20 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     if (this.stopped) throw new Error("Lark transport is stopped");
     const endpoint = larkEndpoint(message.target);
     if (!endpoint || endpoint.appId !== this.appId) throw new Error("Lark target belongs to another transport");
+    if (message.stream && this.transport.cards && !message.notice) {
+      const content = message.stream;
+      const view: LarkProgress = { id: `output:${message.id}`, phase: content.phase === "open" ? "running" : content.phase === "completed" ? "done" : "failed",
+        think: Array.from(content.think).slice(-2000).join(""), content: Array.from(content.text).slice(0, 4000).join(""), overflow: Array.from(content.text).length > 4000, messageIds: [] };
+      while (Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(view, content.phase === "open")) })) > 28_000) {
+        view.think = Array.from(view.think).slice(-Math.floor(Array.from(view.think).length * 0.75)).join("");
+        view.content = Array.from(view.content).slice(0, Math.floor(Array.from(view.content).length * 0.75)).join("");
+        view.overflow = view.content.length < content.text.length;
+      }
+      try { await this.updateCard("", endpoint.receiveId, view, message.target); }
+      catch (error) { throw larkDeliveryError(error); }
+      if (content.phase !== "open" && view.overflow) await this.send({ ...message, stream: undefined, id: `${message.id}:overflow`, text: content.text.slice(view.content.length) });
+      return { id: this.state.cards[view.id]!.cardId, scope: this.appId };
+    }
     for (const [index, text] of textParts(message.text).entries()) {
       const id = this.deliveryId(message.id, index);
       if (this.state.delivered.includes(id)) continue;
@@ -277,31 +276,31 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
   }
 
   /**
-   * @spec Card operations share a persisted increasing sequence; cards never acknowledge business Output delivery.
+   * @spec Card operations share a persisted increasing sequence; checked Output streams own cards and acknowledge delivery after the final update.
    * @link docs/channel/lark.md
    */
-  private async updateCard(topicId: string, chatId: string, view: LarkProgress): Promise<void> {
+  private async updateCard(topicId: string, chatId: string, view: LarkProgress, target: import("@compforge/aide-plugin").Address = larkAddress(this.appId, chatId)): Promise<void> {
     const transport = this.transport.cards!;
     const live = view.phase === "running" || view.phase === "queued";
     let card = this.state.cards[view.id];
     // Completed history without a live card is delivered through Output Reconcile.
-    if (!card && !live) return;
+
     if (!card) {
       card = { cardId: await transport.create(progressCard(view, live)), sent: false, sequence: 0,
         layout: 1, previews: JSON.stringify(cardPreviews(view)),
         streaming: live, think: cardThought(view), content: cardContent(view), signature: "" };
       this.saveCard(view.id, card);
     }
-    if (!this.aide.canSpeak(larkAddress(this.appId, chatId))) return;
+    if (!this.aide.canSpeak(target)) throw new Error("Address muted before card delivery");
     if (!card.sent) {
-      await transport.send(chatId, card.cardId, this.deliveryId(`card:${view.id}`, 0));
+      await transport.send(chatId, card.cardId, this.deliveryId(`card:${view.id}`, 0), larkEndpoint(target)?.receiveIdType, larkEndpoint(target)?.replyToMessageId);
       card.sent = true; this.saveCard(view.id, card);
       this.log.info({ inputId: view.id, topicId }, "Lark progress card delivered");
     }
     const signature = JSON.stringify(view);
     if (card.signature === signature) return;
     const operation = async (run: (sequence: number, id: string) => Promise<void>) => {
-      if (!this.aide.canSpeak(larkAddress(this.appId, chatId))) throw new Error("Address muted during presentation update");
+      if (!this.aide.canSpeak(target)) throw new Error("Address muted during presentation update");
       card.sequence++; this.saveCard(view.id, card);
       await run(card.sequence, this.deliveryId(`card:${view.id}`, card.sequence));
     };

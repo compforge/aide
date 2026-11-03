@@ -11,7 +11,7 @@ export const OUTPUT_TYPE = { apiVersion: "aide.dev/v1alpha5", kind: "Output" } a
 
 /** @spec Output content, intended receivers and destination are immutable. Input associations are optional many-to-many provenance, never consumption receipts. */
 export interface OutputSpec {
-  text: string;
+  stream: import("@compforge/aide-plugin").StreamRef;
   notes?: Array<{ uid: string; version: string; textVersion?: string }>;
   target: import("../address/model.ts").AddressRef;
   replyTo?: { input: ResourceRef & { uid: string }; key: string; messageId?: string };
@@ -27,11 +27,11 @@ export interface OutputSpec {
   inputUids?: Record<string, string>;
   createdBy?: import("../observation/reference.ts").AgentCall;
 }
-export type OutputSubmission = Omit<OutputSpec, "target"> & { target: import("../address/service.ts").AddressTarget };
-/** @spec delivery records who actually receives what and where; it never rewrites the expected receivers/text/target in spec. */
+export type OutputSubmission = Omit<OutputSpec, "target" | "stream"> & { target: import("../address/service.ts").AddressTarget; text?: string; streaming?: boolean; stream?: import("@compforge/aide-plugin").StreamRef };
+/** @spec delivery records who actually receives what and where; it never rewrites the expected receivers/stream/target in spec. */
 export interface OutputStatus {
   disclosure?: { decision: "allowed" | "denied"; reason: string; checkedAt: string; fingerprint: string; policy?: import("./policy.ts").DisclosurePolicy };
-  delivery?: { notice?: "muted"; replay?: "idempotent" | "once"; address: import("../address/model.ts").AddressRef; target: Address; text: string; receivers: import("../person/model.ts").PersonRefs };
+  delivery?: { notice?: "muted"; replay?: "idempotent" | "once"; address: import("../address/model.ts").AddressRef; target: Address; stream: import("@compforge/aide-plugin").StreamRef; confirmedSeq?: number; receivers: import("../person/model.ts").PersonRefs };
   waitingAddress?: import("../address/model.ts").AddressRef;
   phase: "pending" | "sending" | "delivered" | "failed" | "uncertain" | "cancelled";
   attempts: number;

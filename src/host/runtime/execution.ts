@@ -1,3 +1,4 @@
+import type { AnyEventEnvelope } from "../event/index.ts";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { InvocationExecutor, type InvocationExecutorOptions } from "../controller/index.ts";
@@ -26,6 +27,7 @@ export class ExecutionService implements HarnessExecution {
   private readonly usingRuntimes = new Map<string, number>();
   private readonly idleRuntimes = new Set<string>();
   private readonly retiringRuntimes = new Map<string, Promise<void>>();
+  private readonly eventListeners = new Set<(event: AnyEventEnvelope) => void>();
   private readonly listeners = new Set<() => void>();
   private readonly harnesses = new Map<string, Configuration>();
   constructor(private readonly home: string, private readonly options: ExecutionOptions & {
@@ -53,6 +55,7 @@ export class ExecutionService implements HarnessExecution {
         log: entry => records!.log(entry),
       });
       const unsubscribe = records.subscribe(event => {
+        for (const listener of this.eventListeners) listener(event);
         for (const listener of this.listeners) {
           try { listener(); }
           catch (error) {
@@ -156,6 +159,7 @@ export class ExecutionService implements HarnessExecution {
     });
   }
   cancel(id: string) { return this.backend?.controller.cancelHarnessInvocation(id); }
+  subscribeEvents(listener: (event: AnyEventEnvelope) => void) { this.eventListeners.add(listener); return () => { this.eventListeners.delete(listener); }; }
   subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   approvals() { return [...(this.backend?.records.projection.approvals.values() ?? [])]; }
   approval(id: string) { return this.backend?.records.projection.approvals.get(id)?.request; }

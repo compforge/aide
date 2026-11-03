@@ -45,13 +45,19 @@ journalctl --user -u aide -f
 
 ## 过程反馈与最终答复
 
-Lark Channel 使用 CardKit JSON 2.0 卡片，遵循 [Channel 的三态展示约定](README.md#回复展示状态)。卡片外层默认展开，内部包含「过程」和「回答」，各自有可见预览及原生折叠详情。执行中只展示通用处理阶段；私有思考、工具内容和未送达正文不进入群卡片。回答只镜像已通过披露检查并投递的正文，最多预览三行；没有对外回复时明确显示“暂无对外回复”。完成后保留通用阶段与已投递回答。客户端按实际宽度截断并显示省略号；正文预览是纯文本，详情保留 Markdown。
+Lark Channel 使用 CardKit JSON 2.0 卡片，内容来自 Output Reconcile 选定的实际 Stream。
+Chief 为 Immediate Channel Input 提前创建 Output，以批次追加 think/text；Channel 不再旁路读取 Harness 投影。
+私密 Me 地址可展示进行中的内容；外部地址等 Stream 结束并通过完整披露检查后才发送。
 
-原生折叠操作由 Lark 客户端控制。内容更新只修改有稳定 ID 的文本组件，并调整 streaming_mode，不重建折叠面板或重新写入 expanded；用户查看详情时，流式输出、结束及问答续轮都保留其选择。等待回答与中断提示取消预览行数限制，使需处理的信息可见。进行中的回答节选取最近文本，Lark 负责三行截断；完整文字同时积累在详情区域。
+卡片外层默认展开，内部包含「过程」和「回答」预览及原生折叠详情。更新只修改稳定 ID 的文本组件，
+不重新设置 expanded，保留读者的展开选择。每 750ms 合并一次当前内容，复用官方 SDK 客户端、凭证和超时。
+卡片 ID、发送 UUID、递增 sequence 与已确认组件内容持久化，重启或重试继续同一卡片。
+回复使用 Output 实际目标中的 replyToMessageId，保留原消息位置。
 
-每秒合并当前内容，所有更新串行复用官方 SDK 客户端、凭证和超时。同一张卡片共享持久化递增 sequence，卡片 ID、发送 uuid 与已更新组件内容保存到 Channel 状态；重启或重试继续更新同一卡片。
-
-结束或等待用户时关闭 streaming_mode。卡片只镜像已投递正文，不确认业务 Output 送达；Output Reconciler 统一负责送达状态和重试，Channel 保存分段回执。用户后续答复形成新的 Input 和执行，生成新的执行卡片。过程反馈不写入业务 Output，不改变工作状态。卡片失败时保留最终文本投递；超长答复沿用分段文本完整发送，卡片过程受平台体积预算限制，当前进程保留的近期执行细节可在 Web 查看。Task / Routine 的异步通知使用同一 Output 流程。
+Stream 结束后关闭 streaming_mode，最终更新成功才返回回执；Output 的 delivered 还要求确认最后一个 seq。
+更新失败交给 Output 重试，不把成功创建卡片当成送达。正文超过卡片预算时，卡片显示前缀，剩余正文按稳定 UUID
+分段补发，确认全部成功才结束投递。卡片预算包含序列化 JSON 的转义开销；完整内容保留在 Stream / Web。
+中断的 Stream 显示中断状态，Output 记录 failed。固定禁言提示仍走普通文字发送，不带任何 raw think/text。
 
 需要额外开通 `cardkit:card:write` 并发布应用，客户端需支持 Card JSON 2.0。协议依据：[创建卡片实体](https://open.feishu.cn/document/cardkit-v1/card/create)、[流式更新文本](https://open.feishu.cn/document/cardkit-v1/card-element/content)、[更新卡片配置](https://open.feishu.cn/document/cardkit-v1/card/settings)、[批量局部更新](https://open.feishu.cn/document/cardkit-v1/card/batch_update)、[全量更新](https://open.feishu.cn/document/cardkit-v1/card/update)。
 
@@ -65,7 +71,7 @@ Lark Channel 使用 CardKit JSON 2.0 卡片，遵循 [Channel 的三态展示约
 
 Chief 通过 say 提问，用户在原聊天回复形成新 Input，群内回复仍需 @Aide。消息不会自动转换为确认结果；Chief 根据上下文理解。Hooks 信任和工具权限仍通过网页 Approval 处理。详见 [Personal](../personal/README.md)。
 
-流式协议测试覆盖真实 SDK 请求、积累文本与递增序号、问答续轮、重启去重、更新失败回退、超长答复，以及真实 Harness 投影中的思考和正文增量；网络与模型使用替身。真实效果需在已授权机器人上验收：发起需多次工具调用的问题，观察处理状态、思考和正文变化，完成后检查过程折叠、最终答案不重复，再验证追问和中断。
+流式协议测试覆盖真实 SDK 请求、积累文本与递增序号、问答续轮、重启去重、更新失败重试、超长答复，以及真实 Harness 事件写入 Stream 的思考和正文增量；网络与模型使用替身。真实效果需在已授权机器人上验收：发起需多次工具调用的问题，观察处理状态、思考和正文变化，完成后检查过程折叠、最终答案不重复，再验证追问和中断。
 
 群聊自动测试覆盖真实 SDK mention 解析、精确身份匹配、清理占位符、其他人名保留、并发重复事件、重启恢复与群/单聊隔离。真实验收还需在目标群 @Aide，核对事件收到、进入 Chief、卡片送回原群；随后发送不 @、@其他机器人和 @所有人的消息，确认不触发新的 Chief 输入。截图或替身测试不代替这项群聊现场验证。
 

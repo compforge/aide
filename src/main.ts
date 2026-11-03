@@ -14,7 +14,6 @@ import { Connectors } from "../connectors/index.ts";
 import { Aide } from "./app.ts";
 import { createHarnessAdapter } from "./host/harness/registry.ts";
 import { httpChannel } from "./api/index.ts";
-import { larkProgress } from "./channel/lark/card.ts";
 import { LarkChannel } from "./channel/lark/index.ts";
 import { larkTransport } from "./channel/lark/client.ts";
 import { withAsyncFileLock } from "./host/file-lock.ts";
@@ -69,7 +68,7 @@ await withAsyncFileLock(path, async () => {
     aide.registerOutputTransport(requirementTransport(aide.outputStore, connectors));
     const bots = Object.entries(config.channels).filter(([, channel]) => channel.enabled).map(([id, channel]) => {
       const channelLog = log.child({ channelId: id, appId: channel.appId });
-      const bot = new LarkChannel(home, channel.appId, aide, transports.get(channel.appId)!, channelLog, topicId => larkProgress(aide, topicId));
+      const bot = new LarkChannel(home, channel.appId, aide, transports.get(channel.appId)!, channelLog);
       void bot.start().catch(() => channelLog.error("Lark channel startup failed; check credentials and network"));
       return bot;
     });

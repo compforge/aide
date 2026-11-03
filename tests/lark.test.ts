@@ -239,7 +239,7 @@ test("Lark persists thread topics while cards and failure notices retain the rea
     queried.push(id);
     return [{ id, phase: "queued" as const, think: "", content: "", messageIds: [], overflow: false }];
   };
-  let channel = new LarkChannel(home, "cli_app", aide, transport, log, reader);
+  let channel = new LarkChannel(home, "cli_app", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   const group = (id: string, threadId?: string, messageType = "text") => ({
     sender: { sender_type: "user", sender_id: { open_id: id === "a2" ? "ou_another" : "ou_sender" } },
@@ -254,7 +254,7 @@ test("Lark persists thread topics while cards and failure notices retain the rea
   const dm = event("dm", "hello", "oc_dm");
   await channel.receive({ ...dm, message: { ...dm.message, thread_id: "omt_ignored", parent_id: "om_dm_quote" } });
   await channel.close();
-  channel = new LarkChannel(home, "cli_app", aide, transport, log, reader);
+  channel = new LarkChannel(home, "cli_app", aide, transport, log);
   await channel.dispatch(); await channel.deliver();
   assert.deepEqual(received.map(i => i.topicKey), [
     "lark:cli_app:oc_group:thread:omt_a", "lark:cli_app:oc_group:thread:omt_a",
@@ -268,17 +268,14 @@ test("Lark persists thread topics while cards and failure notices retain the rea
   assert.equal(received[2]!.topicName, "支持群");
   assert.equal(received.at(-1)!.observation!.parentId, "om_dm_quote");
   assert.equal(nameReads, 1, "Same-chat metadata is cached independently of thread keys");
-  assert.deepEqual(new Set(queried), new Set([
-    "lark:cli_app:oc_group:thread:omt_a", "lark:cli_app:oc_group:thread:omt_b",
-    "lark:cli_app:oc_group", "lark:cli_app:oc_dm",
-  ]));
-  assert.deepEqual(cardChats.sort(), ["oc_dm", "oc_group", "oc_group", "oc_group"]);
+  assert.deepEqual(queried, [], "Topic progress must not bypass checked Output streams");
+  assert.deepEqual(cardChats, []);
   assert.equal(sent.length, 2);
   assert.ok(sent.every(n => n.chatId === "oc_group"));
   await channel.close();
-  channel = new LarkChannel(home, "cli_app", aide, transport, log, reader);
+  channel = new LarkChannel(home, "cli_app", aide, transport, log);
   await channel.receive(group("a", "omt_a")); await channel.dispatch(); await channel.deliver();
-  assert.equal(received.length, 5); assert.equal(sent.length, 2); assert.equal(cardChats.length, 4);
+  assert.equal(received.length, 5); assert.equal(sent.length, 2); assert.equal(cardChats.length, 0);
 });
 
 test("Lark accepts nullable permission-restricted user IDs and still requires the bot open ID", async (t) => {

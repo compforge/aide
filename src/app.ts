@@ -158,11 +158,19 @@ export class Aide {
         defaultHarness: this.defaultHarnessConfig.id, createAdapter: options.createAdapter },
       plugins: { maxTotalConcurrency: config?.reconcile?.maxTotalConcurrency, connectors: this.connectors, resourceAdmissions: { personal: personalAdmission(this.inputs, this.outputStore) },
         onResourceChange: (change) => { personal?.topics.changed(change); this.notify(); },
-        actions: { "personal/reconcile_output": async (context, raw) => {
+        actions: { "personal/begin_output_stream": async (context, raw) => {
+          const { inputIds } = raw as { inputIds: string[] };
+          const association = personalExecution(context);
+          if (context.resourceRef?.kind !== "Topic" || !association.topicId) throw new Error("Chief streaming requires a Topic context");
+          return { streaming: await this.personal.outputProducer.begin(association.topicId, context.executionId, inputIds) };
+        }, "personal/finish_output_stream": async (context, raw) => {
+          this.personal.outputProducer.finish(context.executionId, (raw as { error?: string }).error);
+          return {};
+        }, "personal/reconcile_output": async (context, raw) => {
           const id = (raw as { id: string }).id;
           if (context.resourceRef?.kind !== "Output" || context.resourceRef.name !== id) throw new Error("Output reconcile requires its own resource context");
           return { outputId: id, ...await this.delivery.reconcile(id) };
-        }, "personal/submit_topic": (context, input) => this.personal.submitTopic(context, input), "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": (context, raw) => {
+        }, "personal/submit_topic": (context, input) => this.personal.submitTopic(context, input), "personal/submit_input": (context, input) => this.personal.submitInput(context, input), "personal/say": async (context, raw) => {
           const input = SayInputSchema.parse(raw);
           const text = input.text;
           const association = personalExecution(context);
@@ -189,7 +197,7 @@ export class Aide {
       audience: target => this.outputAudience(target), contactMe: async () => { const address = this.defaultAddress(); return { address, target: this.addresses.endpoint(address), receivers: [] }; }, check: options.checkDisclosure }, log);
     this.outputStore.check = id => this.disclosure.reconcile(id);
     this.delivery = new OutputDelivery(this.outputStore, async target => {
-      if (isChannelAddress(target) && target.channelId === "web") return { replay: "idempotent", async send() { return undefined; } };
+      if (isChannelAddress(target) && target.channelId === "web") return { replay: "idempotent", streaming: true, async send() { return undefined; } };
       for (const resolve of this.outputTransports) { const transport = await resolve(target); if (transport) return transport; }
     }, log);
     this.runtime.subscribe(() => this.notify());
@@ -239,7 +247,7 @@ export class Aide {
     return () => { this.outputTransports.delete(resolve); };
   }
   async reconcileOutput(id: string): Promise<void> { await this.delivery.reconcile(id); }
-  outputs() { return this.outputStore.list().map(outputView).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
+  outputs() { return this.outputStore.list().map(output => outputView(output, this.outputStore.streams)).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
 
   works() { return this.personal.works(); }
   invocations() { return this.personal.invocations(); }
@@ -331,6 +339,7 @@ export class Aide {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    await this.delivery.close();
     await this.personal.close();
     await this.ownedConnectors?.close();
     this.listeners.clear();

@@ -1,3 +1,4 @@
+import type { StreamStore } from "../../../src/host/stream/store.ts";
 import type { Address, ResourceRef } from "@compforge/aide-plugin";
 import type { Output, OutputStatus } from "./model.ts";
 export interface OutputDraft { id: string; topicId: string; text: string; workId: string | null; target?: Address; receivers?: ResourceRef[] }
@@ -11,10 +12,11 @@ export interface OutputView extends OutputDraft {
   status: Omit<OutputStatus, "delivery"> & { delivery?: Omit<NonNullable<OutputStatus["delivery"]>, "receivers"> & { receivers: ResourceRef[] } };
   deliveredAt?: string;
 }
-export function outputView(output: Readonly<Output>): OutputView {
+export function outputView(output: Readonly<Output>, streams: StreamStore): OutputView {
   const { metadata, spec, status } = output;
+  const content = streams.snapshot(status.delivery?.stream ?? spec.stream);
   return { role: "aide", id: metadata.name, topicId: spec.topicId, topicUid: spec.topic.uid,
-    text: status.delivery?.text ?? spec.text, at: metadata.creationTimestamp, target: status.delivery?.target ?? spec.target, receivers: (status.delivery?.receivers ?? spec.receivers)?.toJSON(), workId: spec.producer?.name ?? null,
+    text: content.text, at: metadata.creationTimestamp, target: status.delivery?.target ?? spec.target, receivers: (status.delivery?.receivers ?? spec.receivers)?.toJSON(), workId: spec.producer?.name ?? null,
     executionId: spec.executionId, inputIds: spec.inputIds, status: { ...status, ...(status.delivery ? { delivery: { ...status.delivery, receivers: [...status.delivery.receivers] } } : { delivery: undefined }) }, deliveredAt: status.deliveredAt };
 }
 

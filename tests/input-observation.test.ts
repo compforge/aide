@@ -22,7 +22,7 @@ const tool: ToolCall = { kind: "tool_call", id: "tool-1", tool_call_id: "ack", m
 const session = (): SessionView => ({ schema_version: "agent-ledger/session@1", session: { source: "pi", id: agent.sessionId }, nodes: [model, tool,
   { kind: "tool_call", id: "other-input-tool", tool_call_id: "unrelated" } as ToolCall] });
 const output = (): Output => ({ apiVersion: "aide.dev/v1alpha1", kind: "Output", metadata: { ...fixture().metadata, name: "output", uid: "output-1" },
-  spec: { text: "answer", topic, topicId: "topic", target: { apiVersion: "aide.dev/v1alpha1", kind: "Address", namespace: "v1", name: "web", uid: "web-uid" }, inputIds: ["input"], inputUids: { input: "uid-1" },
+  spec: { stream: { apiVersion: "aide.dev/v1alpha1", kind: "Stream", namespace: "v1", name: "stream", uid: "stream-1" }, topic, topicId: "topic", target: { apiVersion: "aide.dev/v1alpha1", kind: "Address", namespace: "v1", name: "web", uid: "web-uid" }, inputIds: ["input"], inputUids: { input: "uid-1" },
     createdBy: { agent, executionId: "recovery-run", toolCallId: "say" } }, status: { phase: "failed", attempts: 1, lastError: "transport unavailable" } });
 
 test("Job joins explicit acknowledgement and shared model, not all calls in a continuous Session", async () => {

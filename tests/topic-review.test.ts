@@ -51,7 +51,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   const run = async (policy: Partial<TopicPolicy> = {}, fail = false) => {
     config.topic = topicPolicy({ ...config.topic, ...policy });
     const executionId = `run-${++sequence}`;
-    const execution = { executionId, withContext() { return this; }, verbs: { async harness(args: { operation?: string; prompt: string; sessionId: string }) {
+    const execution = { executionId, withContext() { return this; }, verbs: { async action() { return { state: "success", value: { streaming: false } }; }, async harness(args: { operation?: string; prompt: string; sessionId: string }) {
       if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
       calls.push(args);
       if (fail) return { state: "failure", error: "provider disconnected" };

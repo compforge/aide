@@ -114,13 +114,14 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const immediate = ids.map(id => new InputStore(home).get(id)!.spec).filter(i => inputAttention(i) === InputAttention.Immediate);
             const first = immediate[0]?.source;
             const address = immediate.length ? (first && immediate.every(i => i.source && first.uid === i.source.uid) ? first : undefined) : c.spec.address;
-            if (run && address && agent.notify !== false && typeof result === "string" && result) {
+            const live = run && new OutputStore(home).list({ executionId: run.id }).some(o => new OutputStore(home).content(o).phase === "open");
+            if (!live && run && address && agent.notify !== false && typeof result === "string" && result) {
               new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])).create(topicId, randomUUID(), outputSpec(c, { topicId, text: result }, { executionId: run.id, target: address, inputIds: ids, inputUids: Object.fromEntries(ids.map(id => [id, new InputStore(home).get(id)!.metadata.uid])) }));
             }
             if (run && ids.length && agent.complete !== false) await assessAll(resources, c, run.id, { inputIds: ids, summary: String(result) || "Handled silently" });
           }
-          sink({ kind: "agent_message", invocationId: input.invocationId,
-            payload: { messageId: randomUUID(), phase: "commentary", content: [{ type: "text", text: "我先检查当前工作。" }] } });
+          sink({ kind: "agent_thought", invocationId: input.invocationId,
+            payload: { messageId: randomUUID(), content: [{ type: "text", text: "我先检查当前工作。" }] } });
           sink({ kind: "agent_message", invocationId: input.invocationId,
             payload: { messageId: randomUUID(), phase: "final", content: [{ type: "text", text: typeof result === "string" ? result : JSON.stringify(result) }] } });
           finish(input.invocationId, "end_turn");
