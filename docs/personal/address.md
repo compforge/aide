@@ -4,11 +4,13 @@ Address 是 Personal 的独立资源，表示一个群聊、私聊、Web 收件�
 
 ## 字段与发现
 
-`spec.endpoint` 保存规范的平台位置，创建后不可变；`name` 和 `type` 描述场合；`muted` 表示是否禁止 Aide 在此发言。新发现的外部地址默认禁言，Web 和配置确认的 Me 私有地址首次创建时允许发言。后续 Input、启动或发送准备不会覆盖用户已经设置的 muted。
+`spec.endpoint` 保存规范的平台位置，创建后不可变；`name` 和 `type` 描述场合；`muted` 表示是否禁止 Aide 在此发言。新发现的外部地址默认禁言，Web 和根据已配置 Lark Channel 的人物身份发现的单聊地址首次创建时允许发言。后续 Input、启动或发送准备不会覆盖用户已经设置的 muted。
 
 `status.people` 是按 Person UID 去重的 KeyedSet。Input 接纳时根据发送者、明确收件人和上下文中已确认的人物持续积累；它不是完整或实时的群成员名单。不保存 audienceComplete、audienceObservedAt，也不为积累成员额外遍历平台通讯录。Person 合并时保留参与者迁移来源，由 Reconciler 分批转移 Address 的当前成员关联，历史 Input/Output 人物证据不改写。
 
 Input.source、Topic.spec.address、Output.spec.target 保存固定 UID 的 AddressRef。Connector / Channel 边界仍可提交平台 endpoint，由接纳层统一解析为资源引用。来源适配器显式提交场合名称、类型、已知人物和回复坐标，Input 存储不解析 observation 来猜这些信息。Lark 同一 app/chat 的普通消息和多个 thread 共用一个 Address；原消息 ID 单独保存在 Input / Output 的回复坐标中。
+
+Lark bot 单聊的 `open_id` 和入站 `chat_id` 是同一场合的两个坐标，`spec.aliases` 记录另一个坐标，endpoint 索引同时覆盖两者。仅 Channel p2p 事件或已有 Channel 单聊 Input 可以证明该关系；Connector 观察到的人与人私聊不能据此绑定。绑定保留 Address UID、muted 和摘要；消息回复使用已观察的 chat 坐标，主动联系可以使用 open_id。冲突的已有 Address 不会被静默覆盖或解除禁言。
 
 ## 对场合的认识
 

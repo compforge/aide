@@ -72,7 +72,7 @@ test("Lark sender evidence survives its durable inbox and Personal classifies it
   let channel = new LarkChannel(home, "cli_app", aide, transport, log);
   t.after(async () => { await channel.close(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
   const event = (id: string, userId: string) => ({ sender: { sender_type: "user", sender_id: { open_id: userId } },
-    message: { message_id: id, chat_id: "oc_chat", chat_type: "p2p", message_type: "text", content: JSON.stringify({ text: id }) } });
+    message: { message_id: id, chat_id: `oc_${userId}`, chat_type: "p2p", message_type: "text", content: JSON.stringify({ text: id }) } });
   await channel.receive(event("mine", "ou_me"));
   const addressed = event("other", "ou_other");
   await channel.receive({ ...addressed, message: { ...addressed.message,

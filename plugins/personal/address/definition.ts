@@ -1,3 +1,4 @@
+import { larkEndpoint } from "../../../src/channel/address.ts";
 import { z } from "zod";
 import { ContextFields } from "../context.ts";
 import { PersonRefsSchema } from "../person/model.ts";
@@ -18,17 +19,31 @@ function validatePeople(after: AddressStatus, context: ResourceValidationContext
   }
 }
 
+function validateEndpoints(resource: import("./model.ts").AddressResource, context: ResourceValidationContext) {
+  const canonical = larkEndpoint(resource.spec.endpoint);
+  if (resource.spec.aliases.length && (resource.spec.type !== "direct" || !canonical)) throw new Error("Only Lark direct Addresses have endpoint aliases");
+  for (const alias of resource.spec.aliases) {
+    const endpoint = larkEndpoint(alias);
+    if (!endpoint || endpoint.appId !== canonical?.appId || endpoint.receiveIdType === canonical.receiveIdType
+      || endpoint.replyToMessageId || canonical.replyToMessageId) throw new Error("Direct Address aliases must pair chat_id and open_id in the same Lark app");
+  }
+  for (const endpoint of [resource.spec.endpoint, ...resource.spec.aliases]) {
+    if (context.page(ADDRESS_TYPE, { limit: 2, matchIndex: { name: "endpoint", value: JSON.stringify(endpoint) } }).items.some(a => a.metadata.uid !== resource.metadata.uid))
+      throw new Error("Address endpoint already exists");
+  }
+}
+
 export const AddressDefinition: ResourceDefinition<AddressSpec, AddressStatus> = {
   type: ADDRESS_TYPE, schema: { spec: AddressSpecSchema, status: z.object({ ...ContextFields, people: PersonRefsSchema().prefault([]) }).strict() },
-  indexes: { uid: r => [r.metadata.uid], endpoint: r => [JSON.stringify(r.spec.endpoint)], people: r => [...r.status.people].map(p => p.uid) },
+  indexes: { uid: r => [r.metadata.uid], endpoint: r => [r.spec.endpoint, ...r.spec.aliases].map(endpoint => JSON.stringify(endpoint)), people: r => [...r.status.people].map(p => p.uid) },
   validator: { create(r, context) {
     if (r.metadata.namespace !== "v1" || r.metadata.owner) throw new Error("Address requires an independent shared identity");
-    if (context.page(ADDRESS_TYPE, { limit: 2, matchIndex: { name: "endpoint", value: JSON.stringify(r.spec.endpoint) } }).items.some(a => a.metadata.uid !== r.metadata.uid))
-      throw new Error("Address endpoint already exists");
+    validateEndpoints(r, context);
     validatePeople(r.status, context);
     validateSummary(r, context);
   }, update(before, after, context) {
     if (!equalResourceValue(before.spec.endpoint, after.spec.endpoint)) throw new Error("Address endpoint is immutable");
+    if (!equalResourceValue(before.spec.aliases, after.spec.aliases) || before.spec.type !== after.spec.type) validateEndpoints(after, context);
     validatePeople(after.status, context, before.status);
     guardContext(before, after, context);
   } },
