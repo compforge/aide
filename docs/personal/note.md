@@ -33,7 +33,7 @@ summaryOf 按对象 UID 建立索引，事务校验每个对象至多一份摘�
 
 summarize_topic / summarize_task / summarize_routine / summarize_person 是维护摘要 Note 的便捷入口，支持 people；省略保留已有关联，[] 明确清空。upsert_note 也能编辑同一份 Note，自动原子同步对象上的内容指纹。只改 people 也改变内容版本，避免元数据变化绕过并发与依赖检查。用户仅修订正文时保留 people；Person 合并双方正文与 people，并保留历史人物引用，不猜测或重写来源。
 
-读取和常驻上下文提供正文与 summaryNote（id、uid、version、subject、summaryOf、people），部分列表另投影 summaryUid。自动上下文最多预览 8 个人物关联并标明省略数量；read_note 可按 Note ID 或 UID 读取完整内容与关联。Note 正文与分类可独立编辑，省略字段保留原值；摘要 Note 通过同一更新入口保持依赖指纹一致。Output 记录实际使用的 Note UID、读取版本和接纳时校验的正文指纹；summary Note 与普通 Note 使用相同的 sensitivity、visibility 和披露检查。
+读取和常驻上下文提供正文与 summaryNote（id、uid、version、subject、summaryOf、people），部分列表另投影 summaryUid。自动上下文最多预览 8 个人物关联并标明省略数量；read_note 可按 Note ID 或 UID 读取完整内容与关联。Note 正文与分类可独立编辑，省略字段保留原值；摘要 Note 通过同一更新入口保持依赖指纹一致。upsert_note 的回执提供 noteId、uid、version：noteId 用于继续编辑，uid/version 可直接用于 say.notes 或 cite_output，调用方无需推断 UID。Stream.status.references 记录实际使用的 Note UID、读取版本和接纳时校验的正文指纹；summary Note 与普通 Note 使用相同的 sensitivity、visibility 和披露检查。
 
 recent 展示与普通事项提炼队列排除 summaryOf 非空的 Note，摘要通过独立位置展示；list_notes 仍可查到它。Note Reconcile 对摘要只修复对象上的派生内容指纹，不将它重复送入自己的事项提炼队列。
 

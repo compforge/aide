@@ -456,3 +456,37 @@ test("Live citations belong to Stream, freeze on close, and do not interrupt pri
   assert.equal(changes.some(c => c.resource.kind === "Note"), false);
   assert.equal((await f.client.get(resourceRef(note)))!.metadata.uid, note.metadata.uid);
 });
+
+
+test("say rejects missing, deleted and stale citations without committing Output, Stream or receipt", async t => {
+  const f = await setup(t), note = await f.note(), deleted = await f.note();
+  await f.client.delete(NOTE_TYPE, deleted.metadata.name);
+  const good = { uid: note.metadata.uid, version: noteVersion(note) };
+  for (const bad of [{ uid: "invented-uid", version: good.version }, { uid: deleted.metadata.uid, version: noteVersion(deleted) }, { ...good, version: "stale" }]) {
+    const draft = mailDraft(f.topic, { topicId: "topic", text: "Verified fact", target: webAddress("topic") }, { notes: [good, bad] });
+    const before = f.store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Stream" }).length;
+    assert.throws(() => composeMail(f.store, "topic", "repairable", draft), /Note .*unavailable|citation version conflict/);
+    assert.equal(f.store.get("repairable"), undefined);
+    assert.equal(f.store.storage.hasReceipt("output:repairable"), false);
+    assert.equal(f.store.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Stream" }).length, before);
+  }
+  const draft = mailDraft(f.topic, { topicId: "topic", text: "Verified fact", target: webAddress("topic") }, { notes: [good] });
+  const accepted = composeMail(f.store, "topic", "repairable", draft);
+  await f.client.replace(note, { ...note.spec, text: "Changed after acceptance" }, note.status);
+  assert.deepEqual(composeMail(f.store, "topic", "repairable", draft), accepted, "idempotent replay does not re-admit an accepted mail");
+  await f.checker.reconcile("repairable");
+  // Private Me is exempt; external post-admission revocation remains covered above.
+  assert.equal(f.store.get("repairable")!.status.disclosure!.decision, "allowed");
+});
+
+test("cite_output rejects an invalid batch atomically and permits a corrected retry", async t => {
+  const f = await setup(t), note = await f.note();
+  const output = composeMail(f.store, "topic", "live-citation", mailDraft(f.topic, { topicId: "topic", text: "", target: webAddress("topic") }, { contentKind: "agent" }));
+  const writer = new MailWriter(f.store.streams, output.spec.stream), good = { uid: note.metadata.uid, version: noteVersion(note) };
+  assert.throws(() => writer.cite([good, { uid: "invented-uid", version: good.version }]), /unavailable/);
+  assert.deepEqual(f.store.streams.get(output.spec.stream).status.references, []);
+  assert.throws(() => writer.cite([{ ...good, version: "stale" }]), /citation version conflict/);
+  writer.cite([good]);
+  assert.equal(f.store.streams.get(output.spec.stream).status.references[0]!.uid, good.uid);
+  assert.equal(f.store.streams.get(output.spec.stream).status.phase, "open");
+});

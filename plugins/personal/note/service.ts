@@ -16,7 +16,8 @@ export const NoteUpdateSchema = z.object({ version: z.string().min(1).optional()
   .refine(a => !!a.noteId || a.text !== undefined, "Creating a Note requires text")
   .refine(a => [a.text, a.people, a.addresses, a.sensitivity, a.visibility].some(v => v !== undefined), "Supply Note content or classification");
 export type NoteUpdate = z.infer<typeof NoteUpdateSchema>;
-/** @spec A tool call creates one Note; updates compare only that Note's incarnation/version.
+/** @spec Receipts expose noteId for mutation and uid/version for citation; callers never infer a UID.
+ * @spec A tool call creates one Note; updates compare only that Note's incarnation/version.
  * @spec Writer execution and current subject ownership are checked by the Note validator inside the write transaction.
  * @case tests/notes.test.ts
  * @link docs/personal/note.md
@@ -29,7 +30,7 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
   const id = args.noteId ?? `note-${createHash("sha256").update(JSON.stringify([actor.metadata.uid, writer.executionId, callId])).digest("hex").slice(0, 32)}`;
   const ref = { ...NOTE_TYPE, namespace: "v1" as const, name: id };
   const previous = await resources.get<NoteSpec, NoteStatus>(ref);
-  if (!args.noteId && previous && !previous.metadata.deletionTimestamp) return { noteId: id, version: noteVersion(previous) };
+  if (!args.noteId && previous && !previous.metadata.deletionTimestamp) return { noteId: id, uid: previous.metadata.uid, version: noteVersion(previous) };
   if (args.noteId && (!previous || previous.metadata.deletionTimestamp)) throw new Error(`Note no longer exists: ${id}`);
   if (previous && noteVersion(previous) !== args.version) throw new Error("Note content version conflict; read the Note again");
   const visibility = args.visibility ?? previous?.spec.visibility ?? "people";
@@ -43,20 +44,20 @@ export async function upsertNote(resources: ResourceClient, actor: Resource<unkn
       if (owner.status.summaryRevision !== args.version) throw new Error("Note content version conflict; read the Note again");
       const updated = await writeSummary(resources, owner, { text: args.text ?? previous?.spec.text ?? "", people: args.people, addresses: args.addresses, sensitivity: spec.sensitivity, visibility }, writer,
         undefined, owner.kind === "Person" ? { updatedAt: new Date().toISOString(), updatedBy: "chief" } : {});
-      return { noteId: id, version: updated.status.summaryRevision! };
+      return { noteId: id, uid: previous.metadata.uid, version: updated.status.summaryRevision! };
     }
   }
-  if (previous && equalResourceValue(previous.spec, spec)) return { noteId: id, version: noteVersion(previous) };
+  if (previous && equalResourceValue(previous.spec, spec)) return { noteId: id, uid: previous.metadata.uid, version: noteVersion(previous) };
   const status = { ...previous?.status, updatedAt: new Date().toISOString(), writer };
   try {
     const updated = previous ? await resources.replace(previous, spec, status)
       : await resources.create(NOTE_TYPE, { name: id, spec, status });
-    return { noteId: id, version: noteVersion(updated) };
+    return { noteId: id, uid: updated.metadata.uid, version: noteVersion(updated) };
   } catch (error) {
     if (args.noteId || !String(error).includes("already exists")) throw error;
     const duplicate = await resources.get<NoteSpec, NoteStatus>(ref);
     if (!duplicate || duplicate.metadata.deletionTimestamp) throw error;
-    return { noteId: id, version: noteVersion(duplicate) };
+    return { noteId: id, uid: duplicate.metadata.uid, version: noteVersion(duplicate) };
   }
 }
 

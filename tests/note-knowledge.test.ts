@@ -35,7 +35,10 @@ async function setup(t: TestContext) {
   const original = await aide.topics.ensure("knowledge");
   const root = await resources.patchStatus(original, { execution: { id: "live", startedAt: new Date().toISOString() } });
   const read = () => aide.topics.resource("knowledge")!;
-  const note = (raw: unknown, callId: string) => upsertTopicNote(resources, read(), "live", raw, callId);
+  const note = async (raw: unknown, callId: string) => {
+    const { noteId, version } = await upsertTopicNote(resources, read(), "live", raw, callId);
+    return { noteId, version };
+  };
   const get = async (id: string) => (await resources.get<NoteSpec, NoteStatus>({ ...NOTE_TYPE, namespace: "v1", name: id }))!;
   const context = { resources, logger: { info() {}, debug() {} }, instance: { config: { topic: { idleMs: 1000 } } } } as unknown as PluginContext;
   return { aide, resources, root, read, note, get, context };

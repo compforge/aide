@@ -1,3 +1,6 @@
+import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
+import { mailDraft } from "../plugins/personal/output.ts";
+import { webAddress } from "../src/channel/address.ts";
 import { summaryText } from "../plugins/personal/note/summary.ts";
 import { patchSummary, createWithSummary } from "./summary-fixture.ts";
 import { groupTopics } from "../plugins/personal/weave/service.ts";
@@ -41,18 +44,20 @@ async function setup(t: TestContext) {
 test("one independent Note follows progress; tool retries preserve newer content and concurrent notes do not conflict", async t => {
   const f = await setup(t), initial = f.read();
   const first = await f.upsert({ text: "Started X" }, "start");
+  assert.equal(first.uid, (await readNote(f.resources, first.noteId)).uid);
   const at = f.recent()[0]!.createdAt;
   await f.resources.patchStatus(initial, { reviewCheckedAt: new Date().toISOString(), idleReviewCount: 5 });
   const other = await f.upsert({ text: "Separate matter" }, "other");
-  const done = await f.upsert({ ...first, text: "X reported complete; verification pending" }, "done");
+  const done = await f.upsert({ noteId: first.noteId, version: first.version, text: "X reported complete; verification pending" }, "done");
   assert.notEqual(other.noteId, done.noteId);
   const replay = await f.upsert({ text: "Started X" }, "start");
   assert.equal(replay.version, done.version);
-  assert.equal((await f.upsert({ ...done, text: "X reported complete; verification pending" }, "same")).version, done.version);
+  assert.equal(replay.uid, first.uid); assert.equal(done.uid, first.uid);
+  assert.equal((await f.upsert({ noteId: done.noteId, version: done.version, text: "X reported complete; verification pending" }, "same")).version, done.version);
   assert.equal(f.recent().find(n => n.id === first.noteId)!.createdAt, at);
   assert.equal(f.read().status.summaryRevision, initial.status.summaryRevision);
   assert.equal("recent" in f.read().status, false);
-  await assert.rejects(f.upsert({ ...first, text: "stale edit" }, "stale"), /version conflict/);
+  await assert.rejects(f.upsert({ noteId: first.noteId, version: first.version, text: "stale edit" }, "stale"), /version conflict/);
   await assert.rejects(f.upsert({ noteId: "missing", version: done.version, text: "resurrection" }, "missing"), /no longer exists/);
 });
 test("summary edits survive scheduling and Note changes, but reject concurrent content changes", async t => {
@@ -112,7 +117,7 @@ test("Notes outlive subjects and capacity evicts old Notes without recreating ev
   await f.upsert({ text: "Second" }, "second");
   await f.upsert({ text: "Third" }, "third");
   assert.ok((await f.resources.list(NOTE_TYPE)).length <= 2);
-  await assert.rejects(f.upsert({ ...first, text: "revive" }, "revive"), /no longer exists/);
+  await assert.rejects(f.upsert({ noteId: first.noteId, version: first.version, text: "revive" }, "revive"), /no longer exists/);
   const retained = await f.resources.list(NOTE_TYPE);
   assert.ok(retained.length > 0);
   const live = f.read();
@@ -206,9 +211,23 @@ test("reordering or repeating Note people does not refresh its content version o
   const first = await f.upsert({ text: "Matter", people: [b, a, b] }, "first");
   const before = await readNote(f.resources, first.noteId);
   assert.deepEqual(before.people, [a, b]);
-  const again = await f.upsert({ ...first, people: [b, a, a] }, "reorder");
-  assert.equal(again.version, first.version);
+  const again = await f.upsert({ noteId: first.noteId, version: first.version, people: [b, a, a] }, "reorder");
+  assert.equal(again.version, first.version); assert.equal(again.uid, first.uid);
   assert.equal((await readNote(f.resources, first.noteId)).updatedAt, before.updatedAt);
-  const changed = await f.upsert({ ...again, people: [a] }, "remove");
+  const changed = await f.upsert({ noteId: again.noteId, version: again.version, people: [a] }, "remove");
   assert.notEqual(changed.version, first.version);
+});
+
+
+test("upsert_note receipt supplies an exact citation for a newly submitted Output", async t => {
+  const f = await setup(t);
+  const tools = chiefNoteTools((input, id) => f.upsert(input, id), undefined, id => readNote(f.resources, id));
+  const result = await tools.find(tool => tool.name === "upsert_note")!.execute("citation-note", { text: "Verified finding", sensitivity: "L1", visibility: "any" }, undefined, undefined, {} as never);
+  const receipt = JSON.parse((result.content[0] as { text: string }).text);
+  const actual = await readNote(f.resources, receipt.noteId);
+  assert.equal(receipt.uid, actual.uid); assert.equal(receipt.version, actual.version);
+  const output = composeMail(f.aide.outputStore, "notes", "receipt-citation", mailDraft(f.root, { text: actual.text, topicId: "notes", target: webAddress("notes") },
+    { notes: [{ uid: receipt.uid, version: receipt.version }] }));
+  const mail = mailView(f.aide.outputStore, output);
+  assert.equal(mail.references[0]!.uid, actual.uid); assert.ok(mail.references[0]!.contentVersion);
 });
