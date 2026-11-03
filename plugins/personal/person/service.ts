@@ -1,4 +1,5 @@
-import { addressRefs, type AddressSpec, type AddressStatus } from "../address/model.ts";
+import { identityContactLocator } from "../../../src/channel/address.ts";
+import { ADDRESS_TYPE, addressRef, locatorKey, type AddressSpec, type AddressStatus } from "../address/model.ts";
 import { personRef, personRefs } from "./model.ts";
 import { sensitivityRank, type MaterialDisclosure } from "../disclosure.ts";
 import { prepareSummary, readSummary, summaryView, writeSummary } from "../note/summary.ts";
@@ -74,7 +75,7 @@ export class Persons {
     await this.resources.commit([
       ...prepared.writes,
       ...sources.map(resource => ({ operation: "delete" as const, resource })),
-      { operation: "replace", resource: target, spec: PersonSchema.parse({ ...target.spec, identities, addresses: addressRefs([...(target.spec.addresses ?? []), ...sources.flatMap(p => [...p.spec.addresses ?? []])]) }), status: {
+      { operation: "replace", resource: target, spec: PersonSchema.parse({ ...target.spec, identities }), status: {
         ...target.status, ...status, ...prepared.status, participantSources: this.participantSources(sources, target),
       } },
     ]);
@@ -156,17 +157,24 @@ export class Persons {
       ...prepared.writes,
       // Exclude the retiring identity owner before validating the target, within the same transaction.
       { operation: "delete", resource: from },
-      { operation: "replace", resource: into, spec: PersonSchema.parse({ ...into.spec, identities, addresses: addressRefs([...(into.spec.addresses ?? []), ...(from.spec.addresses ?? [])]) }), status: {
+      { operation: "replace", resource: into, spec: PersonSchema.parse({ ...into.spec, identities }), status: {
         ...into.status, ...status, ...prepared.status, participantSources: this.participantSources([from], into),
       } },
     ]);
     const person = writes.at(-1) as PersonResource;
     return this.view(person, mergedText, noteReference(prepared.note));
   }
+  /** @spec Contacts are a read-only UID-deduplicated projection of scoped identities and live direct locators. */
   private async contacts(person: Readonly<PersonResource>) {
-    return Promise.all([...person.spec.addresses ?? []].map(async ref => {
-      const address = await this.resources.get<AddressSpec, AddressStatus>(ref);
-      return { ref, ...(address?.metadata.uid === ref.uid && !address.metadata.deletionTimestamp ? { name: address.spec.name, endpoint: address.spec.endpoint, muted: address.spec.muted, type: address.spec.type } : { unavailable: true as const }) };
+    const matches = await Promise.all(person.spec.identities.map(async identity => {
+      const locator = identityContactLocator(identity);
+      if (!locator) return [];
+      return this.resources.list<AddressSpec, AddressStatus>(ADDRESS_TYPE, { matchIndex: { name: "locator", value: locatorKey(locator) } });
+    }));
+    const addresses = new Map(matches.flat().filter(address => !address.metadata.deletionTimestamp && !address.status.retiring
+      && ["direct", "web"].includes(address.spec.type)).map(address => [address.metadata.uid, address]));
+    return [...addresses.values()].sort((a, b) => a.metadata.uid.localeCompare(b.metadata.uid)).map(address => ({
+      ref: addressRef(address), name: address.spec.name, locators: [...address.spec.locators], muted: address.spec.muted, type: address.spec.type,
     }));
   }
   private async view(person: PersonResource, summaryText: string, summaryNote?: NoteReference) {

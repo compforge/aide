@@ -144,7 +144,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Input、Task、Routine 通过 status.topic 保存唯一且可调整的材料 Topic UID 引用；Input.assess.topic 保存未领取待办的最终一致负责人缓存，领取后保留实际执行归属，Input.assess 保存全局唯一研判及 Chief 接纳 executionId，自动 prompt / steer / followUp 在提交前通过资源事务竞争接纳；Topic 保存 Chief 执行与原生会话。Route 保存首次路由回执，Chief 在树内整理归属，Weave 只改变父子关系。
 - 接纳回执、Input 处理完成、工作目标达成与 Output 送达是独立事实。持续 Agent 使用原生 followUp / steer；工具回执确认业务完成。可能已有外部副作用的中断先核对，不自动重放。
 - Channel / Source 通过绑定 Definition 的入口形成 Input，正文保存事实，证据留在 observation。路由统一归 Route，Default Topic 由系统按需创建并维护，只兜底，不提供手动切换；Input.status 的 route / assess / handle 是处理事实，消费者按索引查询。
-- Person 保存人物身份、认识和按 Address UID 去重的 spec.addresses 联系地址集合；已配置 Lark Channel 的人物单聊首次发现允许发言，后续发现保留禁言。Me 是可选标记，与访问凭证独立。Input.sender / Input.receivers / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。
+- Person 保存人物身份与认识，联系地址由 scoped identities 和 Address locators 查询推导，不保存 spec.addresses；已配置 Lark Channel 的人物单聊首次发现允许发言，后续发现保留禁言。Me 是可选标记，与访问凭证独立。Input.sender / Input.receivers / Output.receivers 引用 Person，Input.source / Output.target 使用 Address；来源 topicKey、通信地址和授权分别判断。
 - 长期认识保存在 summaryOf 指向 Topic、Task、Routine、Person 的 Note 中，对象不保存 summary 字段；summaryRevision 仅为派生内容指纹。summaryOf 按对象 UID 索引且唯一；目标对象存在时保护该 Note，目标实际移除后按普通容量回收，同名重建不算原对象。独立 Note 按稳定 ID 保存具体事项的当前认识，subject 关联 Topic/Work、people 关联人物，recent 仅作查询投影，完整发现走 list_notes，事项归位走 move_note，提炼回顾走 review_notes；两者独立写入，办理报告只确认业务状态与 Input 回执。结构化目标与身份各自保留。用户修订直接进入 Person 的同一个 summary，Agent 按最新版本继续维护。
 - Topic tree 表达对主题关系与职责层次的理解，并决定 root Chief 的处理范围。整理以关联价值和用户目标为依据，容量阈值安排整理时机；压缩保留影响判断的事实、分歧与未决问题。认知沉淀主线见 [Personal](docs/personal/README.md#从-input-到认识与成果)。
 - Task 承担有限目标，Routine 承担持续职责。领域 Agent 与通用 Pi 共用适配，工具按资源 UID 和当前 execution 绑定；业务请求与消费凭据落在 Input。Chief / Work 通过 say 产生独立 Output，report 与 say 分别提交；普通回答是新 Input，原生权限由独立 Approval 处理。
@@ -176,4 +176,4 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 `make lint` 接收 `LINT_FILES`，但当前静态检查只有 TypeScript typecheck，会保留 tsconfig 并扩展到整个 Component 的类型依赖图。`packages/plugin` 使用自己的 tsconfig；没有包内测试，`make test` 清空文件选择后委托根目录的集成测试。未配置 formatter，因此不添加空操作的 `make fix`。
 
-- Address 是 Personal 的独立沟通场合；Input.source / Output.spec.target 引用其 UID，平台 endpoint 留在 Address，回复消息坐标留在 Input/Output。status.people 累积已知参与者，不声明名单完整。muted 约束原文、进度卡和 Channel 错误提示；Output Reconcile 对 Immediate Input 在原地址发送固定禁言提示，其它禁言 Output 转投 Me 的 defaultAddress。Chief 提交 raw Output，Agent 不自行解除禁言。
+- Address 是 Personal 的独立沟通场合；Input.source / Output.spec.target 引用其 UID，平台 locators 留在 Address，回复消息坐标留在 Input/Output。status.people 累积已知参与者，不声明名单完整。muted 约束原文、进度卡和 Channel 错误提示；Output Reconcile 对 Immediate Input 在原地址发送固定禁言提示，其它禁言 Output 转投 Me 的 defaultAddress。Chief 提交 raw Output，Agent 不自行解除禁言。

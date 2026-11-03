@@ -6,7 +6,7 @@ import type { ResourceDefinition, ResourceValidationContext } from "@compforge/a
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { guardContext } from "../context-write.ts";
 import { validateSummary } from "../note/summary.ts";
-import { ADDRESS_TYPE, AddressSpecSchema, type AddressSpec, type AddressStatus } from "./model.ts";
+import { ADDRESS_TYPE, AddressSpecSchema, AddressRefsSchema, type AddressSpec, type AddressStatus } from "./model.ts";
 
 /** @spec New participant observations must pin a live Person; stale observations cannot refill a completed merge migration. */
 function validatePeople(after: AddressStatus, context: ResourceValidationContext, before?: AddressStatus) {
@@ -19,31 +19,32 @@ function validatePeople(after: AddressStatus, context: ResourceValidationContext
   }
 }
 
-function validateEndpoints(resource: import("./model.ts").AddressResource, context: ResourceValidationContext) {
-  const canonical = larkEndpoint(resource.spec.endpoint);
-  if (resource.spec.aliases.length && (resource.spec.type !== "direct" || !canonical)) throw new Error("Only Lark direct Addresses have endpoint aliases");
-  for (const alias of resource.spec.aliases) {
-    const endpoint = larkEndpoint(alias);
-    if (!endpoint || endpoint.appId !== canonical?.appId || endpoint.receiveIdType === canonical.receiveIdType
-      || endpoint.replyToMessageId || canonical.replyToMessageId) throw new Error("Direct Address aliases must pair chat_id and open_id in the same Lark app");
+function validateLocators(resource: import("./model.ts").AddressResource, context: ResourceValidationContext) {
+  const values = [...resource.spec.locators];
+  if (values.length > 1) {
+    const coordinates = values.map(larkEndpoint);
+    if (resource.spec.type !== "direct" || coordinates.some(c => !c || c.replyToMessageId || c.appId !== coordinates[0]?.appId)
+      || new Set(coordinates.map(c => c?.receiveIdType)).size !== values.length)
+      throw new Error("Multiple locators require a proven Lark direct chat/open_id pair");
   }
-  for (const endpoint of [resource.spec.endpoint, ...resource.spec.aliases]) {
-    if (context.page(ADDRESS_TYPE, { limit: 2, matchIndex: { name: "endpoint", value: JSON.stringify(endpoint) } }).items.some(a => a.metadata.uid !== resource.metadata.uid))
-      throw new Error("Address endpoint already exists");
+  for (const locator of values) {
+    if (context.page(ADDRESS_TYPE, { limit: 2, matchIndex: { name: "locator", value: JSON.stringify(locator) } }).items.some(a => a.metadata.uid !== resource.metadata.uid))
+      throw new Error("Address locator already exists");
   }
 }
 
 export const AddressDefinition: ResourceDefinition<AddressSpec, AddressStatus> = {
-  type: ADDRESS_TYPE, schema: { spec: AddressSpecSchema, status: z.object({ ...ContextFields, people: PersonRefsSchema().prefault([]) }).strict() },
-  indexes: { uid: r => [r.metadata.uid], endpoint: r => [r.spec.endpoint, ...r.spec.aliases].map(endpoint => JSON.stringify(endpoint)), people: r => [...r.status.people].map(p => p.uid) },
+  type: ADDRESS_TYPE, schema: { spec: AddressSpecSchema, status: z.object({ ...ContextFields, people: PersonRefsSchema().prefault([]), retiring: z.boolean().optional(), mergeSources: AddressRefsSchema.optional() }).strict() },
+  indexes: { uid: r => [r.metadata.uid], locator: r => r.metadata.deletionTimestamp || r.status.retiring ? [] : [...r.spec.locators].map(locator => JSON.stringify(locator)), people: r => [...r.status.people].map(p => p.uid) },
   validator: { create(r, context) {
     if (r.metadata.namespace !== "v1" || r.metadata.owner) throw new Error("Address requires an independent shared identity");
-    validateEndpoints(r, context);
+    validateLocators(r, context);
     validatePeople(r.status, context);
     validateSummary(r, context);
   }, update(before, after, context) {
-    if (!equalResourceValue(before.spec.endpoint, after.spec.endpoint)) throw new Error("Address endpoint is immutable");
-    if (!equalResourceValue(before.spec.aliases, after.spec.aliases) || before.spec.type !== after.spec.type) validateEndpoints(after, context);
+    // A stable Address UID cannot be repurposed to another place; discovery only adds equivalent locators.
+    if ([...before.spec.locators].some(locator => !after.spec.locators.has(locator))) throw new Error("Existing Address locators cannot be removed or replaced");
+    if (!equalResourceValue(before.spec.locators, after.spec.locators) || before.spec.type !== after.spec.type) validateLocators(after, context);
     validatePeople(after.status, context, before.status);
     guardContext(before, after, context);
   } },

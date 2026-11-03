@@ -34,11 +34,13 @@ export const OutputStatusSchema = z.object({
 
 
 export const OutputDefinition: ResourceDefinition<OutputSpec, OutputStatus> = {
-  indexes: { reply: r => r.spec.replyTo ? [r.spec.replyTo.key] : [], address: r => [r.spec.target.uid], pendingAddress: r => ["pending", "sending"].includes(r.status.phase) ? [...new Set([r.spec.target.uid, r.status.delivery?.address.uid, r.status.waitingAddress?.uid].filter((uid): uid is string => !!uid))] : [], pendingReceiver: r => ["pending", "sending"].includes(r.status.phase) ? [...r.status.delivery?.receivers ?? []].map(p => p.uid) : [], topic: r => [r.spec.topic.uid], webEndpoint: r => r.status.delivery && r.status.phase === "delivered" && isChannelAddress(r.status.delivery.target) && r.status.delivery.target.channelId === "web" ? [r.status.delivery.target.endpoint] : [] },
+  indexes: { activeAddress: r => ["pending", "sending", "uncertain"].includes(r.status.phase) ? [...new Set([r.spec.target.uid, r.status.delivery?.address.uid, r.status.waitingAddress?.uid].filter((uid): uid is string => !!uid))] : [], reply: r => r.spec.replyTo ? [r.spec.replyTo.key] : [], address: r => [r.spec.target.uid], pendingAddress: r => ["pending", "sending"].includes(r.status.phase) ? [...new Set([r.spec.target.uid, r.status.delivery?.address.uid, r.status.waitingAddress?.uid].filter((uid): uid is string => !!uid))] : [], pendingReceiver: r => ["pending", "sending"].includes(r.status.phase) ? [...r.status.delivery?.receivers ?? []].map(p => p.uid) : [], topic: r => [r.spec.topic.uid], webEndpoint: r => r.status.delivery && r.status.phase === "delivered" && isChannelAddress(r.status.delivery.target) && r.status.delivery.target.channelId === "web" ? [r.status.delivery.target.endpoint] : [] },
   orderedIndexes: { deliveredPerson: r => r.status.phase === "delivered" && r.status.deliveredAt
     ? [...r.status.delivery?.receivers ?? []].map(p => ({ value: p.uid, order: r.status.deliveredAt! })) : [] },
   type: OUTPUT_TYPE, schema: { spec: OutputSpecSchema, status: OutputStatusSchema }, printer: outputPrinter,
   validator: { create(current, context) {
+    const address = context.get<unknown, { retiring?: boolean }>(current.spec.target, current.spec.target.uid);
+    if (address?.metadata.deletionTimestamp || address?.status.retiring) throw new Error("Output Address is merging; resolve current contact Addresses");
     if (current.spec.replyTo && context.page(OUTPUT_TYPE, { limit: 2, matchIndex: { name: "reply", value: current.spec.replyTo.key } }).items.some(o => o.metadata.uid !== current.metadata.uid)) throw new Error("Message already has a reply Output");
   }, update(previous, current) { if (!isDeepStrictEqual(receiverIdentity(previous.spec), receiverIdentity(current.spec))) throw new Error("Output content is immutable");
     if (previous.status.phase === "cancelled" && current.status.phase !== "cancelled") throw new Error("Cancelled Output cannot be reopened");

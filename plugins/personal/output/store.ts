@@ -1,7 +1,8 @@
+import { larkEndpoint } from "../../../src/channel/address.ts";
 import { StreamStore } from "../../../src/host/stream/store.ts";
 import { INPUT_TYPE } from "../input/model.ts";
 import { Addresses } from "../address/service.ts";
-import { larkEndpoint, larkThreadAddress } from "../../../src/channel/address.ts";
+import { deliveryEndpoint } from "../address/locator.ts";
 import { cloneResourceValue, equalResourceValue } from "../../../src/resource/value.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { OutputDefinition, OutputSpecSchema, OutputStatusSchema } from "./definition.ts";
@@ -114,10 +115,7 @@ export class OutputStore {
   }
   destination(output: Output): Address {
     const address = new Addresses(this.storage.home).read(output.spec.target);
-    // A direct contact may be keyed by open_id; replying still uses its observed chat coordinates.
-    const endpoint = (output.spec.replyToMessageId ? address.spec.aliases.find(alias => larkEndpoint(alias)?.receiveIdType === "chat_id") : undefined) ?? address.spec.endpoint;
-    const lark = larkEndpoint(endpoint);
-    return output.spec.replyToMessageId && lark?.receiveIdType === "chat_id" ? larkThreadAddress(lark.appId, lark.receiveId, output.spec.replyToMessageId) : endpoint;
+    return deliveryEndpoint(address, output.spec.replyToMessageId);
   }
   cancel(id: string, reason: string): void { this.update(id, s => s.phase === "pending" && !s.attempts ? { ...s, phase: "cancelled", deliveryWait: undefined, lastError: reason } : s); }
   begin(id: string): void { this.update(id, (s) => {

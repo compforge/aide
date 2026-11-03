@@ -109,7 +109,7 @@ export const TopicDefinition: ResourceDefinition<TopicSpec, TopicStatus> = {
       if (!parent || parent.status.absorbed?.[resource.metadata.uid] !== understandingVersion(resource, notes(context, resource.metadata.uid, "subject"))) throw new TopicDeletionBlocked("unabsorbed", "Parent must absorb Topic understanding before deletion");
     }
   } },
-  indexes: { uid: r => [r.metadata.uid], default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],
+  indexes: { address: r => !r.metadata.deletionTimestamp && r.spec.address ? [r.spec.address.uid] : [], uid: r => [r.metadata.uid], default: r => r.spec.default && !r.metadata.deletionTimestamp ? ["default"] : [],
     topicKey: r => r.metadata.deletionTimestamp || !r.spec.topicKey ? [] : [r.spec.topicKey],
     liveParent: r => !r.metadata.deletionTimestamp && r.spec.parentRef ? [r.spec.parentRef.uid] : [],
     parent: r => r.spec.parentRef ? [r.spec.parentRef.uid] : [], weaveRoot: r => !r.metadata.deletionTimestamp && !r.spec.parentRef && !r.spec.default ? ["root"] : [], root: r => !r.metadata.deletionTimestamp && !r.spec.parentRef ? ["root"] : [] },

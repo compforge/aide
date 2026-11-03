@@ -50,7 +50,7 @@ Input → Route → Topic / Chief → Task / Routine
                                Channel / Connector 投递与回执
 ```
 
-Output 是 Personal 定义的 `aide.dev/v1alpha5 Output`。`spec.stream`、`spec.receivers` 与 `spec.target` 在创建后不可变；Topic 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标保存为独立 Address 资源的 UID 引用；平台位置保存在 Address.spec.endpoint，实际发送坐标保存在 status.delivery.target。传输地址中，`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark 聊天 endpoint 是分别 URI 编码的 appId / chatId；按用户身份投递时为 appId / open_id / openId。Personal 在产出时明确选择地址，Channel 发送时只读检查后 status.delivery 的 target/stream，不解析 Topic ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
+Output 是 Personal 定义的 `aide.dev/v1alpha5 Output`。`spec.stream`、`spec.receivers` 与 `spec.target` 在创建后不可变；Topic 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标保存为独立 Address 资源的 UID 引用；平台位置保存在 Address.spec.locators，实际发送坐标保存在 status.delivery.target。传输地址中，`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark 聊天 endpoint 是分别 URI 编码的 appId / chatId；按用户身份投递时为 appId / open_id / openId。Personal 在产出时明确选择地址，Channel 发送时只读检查后 status.delivery 的 target/stream，不解析 Topic ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
 
 ### Status
 

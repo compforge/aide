@@ -4,13 +4,23 @@ Address 是 Personal 的独立资源，表示一个群聊、私聊、Web 收件�
 
 ## 字段与发现
 
-`spec.endpoint` 保存规范的平台位置，创建后不可变；`name` 和 `type` 描述场合；`muted` 表示是否禁止 Aide 在此发言。新发现的外部地址默认禁言，Web 和根据已配置 Lark Channel 的人物身份发现的单聊地址首次创建时允许发言。后续 Input、启动或发送准备不会覆盖用户已经设置的 muted。
+`spec.locators` 是按规范 locator 去重的 KeyedSet，保存同一场合的多个定位方式；它们地位平等，数组顺序不表示投递优先级。`name` 和 `type` 描述场合；`muted` 表示是否禁止 Aide 在此发言。新发现的外部地址默认禁言，Web 和根据已配置 Lark Channel 的人物身份发现的单聊地址首次创建时允许发言。后续 Input、启动或发送准备不会覆盖用户已经设置的 muted。
 
 `status.people` 是按 Person UID 去重的 KeyedSet。Input 接纳时根据发送者、明确收件人和上下文中已确认的人物持续积累；它不是完整或实时的群成员名单。不保存 audienceComplete、audienceObservedAt，也不为积累成员额外遍历平台通讯录。Person 合并时保留参与者迁移来源，由 Reconciler 分批转移 Address 的当前成员关联，历史 Input/Output 人物证据不改写。
 
 Input.source、Topic.spec.address、Output.spec.target 保存固定 UID 的 AddressRef。Connector / Channel 边界仍可提交平台 endpoint，由接纳层统一解析为资源引用。来源适配器显式提交场合名称、类型、已知人物和回复坐标，Input 存储不解析 observation 来猜这些信息。Lark 同一 app/chat 的普通消息和多个 thread 共用一个 Address；原消息 ID 单独保存在 Input / Output 的回复坐标中。
 
-Lark bot 单聊的 `open_id` 和入站 `chat_id` 是同一场合的两个坐标，`spec.aliases` 记录另一个坐标，endpoint 索引同时覆盖两者。仅 Channel p2p 事件或已有 Channel 单聊 Input 可以证明该关系；Connector 观察到的人与人私聊不能据此绑定。绑定保留 Address UID、muted 和摘要；消息回复使用已观察的 chat 坐标，主动联系可以使用 open_id。冲突的已有 Address 不会被静默覆盖或解除禁言。
+Lark bot 单聊的 `open_id` 和入站 `chat_id` 可以是同一场合的两个 locator，locator 索引覆盖两者。当前多 locator 仅支持同 app 的 Lark direct chat/open_id 对；其它地址保留单 locator。只有 Channel p2p Input 中的 app、chat、人物身份一致时才证明该关系；Connector 观察到的人与人私聊不能据此绑定。投递适配优先使用已确认的 chat_id，只有 open_id 时通过它主动联系；回复坐标仍独立保存在 Input / Output。
+
+## 归并与生命周期
+
+Input 先持久接纳，再唤醒 Address Reconcile。已有两个独立 Address 时，保留已观察的 chat Address UID，将另一个标记为 retiring，并在保留资源上记录 status.mergeSources 作为可恢复的工作进度。同一事务中存续 Address 接管全部 locators；locator 索引排除 retiring 资源，使新联系查询立即命中存续 UID。参与者取并集，禁言取更严格值；这些状态不构成 redirectTo。新 Output 和联系人发现不再选择 retiring 资源，已有 Output 的目标及投递事实不改写。
+
+Reconcile 分批迁移 Topic 当前地址和 Note 场合关联，更新显式 defaultAddress。遇到 pending、sending、uncertain Output 时等待处理完成，不删除其仍依赖的 Address，也不改投或重发。合并独立摘要时，保留每份 Note 的 UID、正文、分类与原 summaryOf，通过存续 Address 的近期关联发现它们；不拼接正文或降低敏感度。事务只改变关联，不以失效的历史执行重新写内容。
+
+当前引用排空后，给重复 Address 请求标准删除；Controller 随后完成实际删除。重启按 mergeSources 继续，人物联系地址由身份查询自然得到，无需改写 Person。历史 Input 和已完成 Output 保留原 UID，允许成为悬空历史引用，不自动重定向。
+
+Schema 严格使用 locators；旧 endpoint / aliases 字段不读取、不迁移。
 
 ## 对场合的认识
 
