@@ -31,10 +31,11 @@
     <p id="output-detail-notice" role="status" aria-live="polite">选择左侧记录，查看生成内容、披露检查与实际投递。</p>
     <div id="output-detail-content" hidden>
       <dl id="output-facts"></dl>
-      <h3>生成内容</h3><div id="output-text" class="output-text"></div>
+      <h3>生成内容</h3><details><summary>生成过程</summary><pre id="output-think"></pre></details><div id="output-text" class="output-text"></div>
       <h3>原定发送</h3><dl id="output-intent"></dl>
       <h3>披露检查</h3><dl id="output-check"></dl>
       <h3>实际投递</h3><dl id="output-delivery"></dl><div id="output-delivered-text" class="output-text" hidden></div>
+      <details><summary>实际投递的过程</summary><pre id="output-delivered-think"></pre></details>
       <p class="muted">已送达不表示用户已读。这里只展示当前保留的状态，不是完整的逐次重试历史。</p>
       <h3>生成与材料关联</h3><dl id="output-provenance"></dl>
       <details><summary>引用的 Note 版本</summary><pre id="output-notes"></pre></details>

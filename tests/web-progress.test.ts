@@ -29,7 +29,7 @@ async function until(check: () => boolean) {
   assert.fail("Timed out waiting for web progress");
 }
 
-test("Web receives scoped progress before final reply, reconnects with a snapshot, and never delivers progress as messages", { timeout: 20_000 }, async (t) => {
+test("Web receives scoped progress before final reply, reconnects with a snapshot, and retains a single durable Output stream", { timeout: 20_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-web-progress-"));
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -131,7 +131,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(channel.icon, CHANNELS.web.icon);
   assert.equal(progress.blocks.find((block) => block.type === "tool")!.detail, "/tmp/README");
   assert.doesNotMatch(JSON.stringify(progress), /另一会话/);
-  assert.equal(aide.outputs().filter((message) => message.role === "aide").length, 0);
+  assert.equal(aide.outputs().filter((message) => message.role === "aide").length, 2, "Each active Input has a durable Output before its answer finishes");
   sink({ kind: "agent_message_chunk", invocationId: turnId, payload: { messageId: "text-a", content: { type: "text", text: "重点" } } });
   await until(() => first.events.some((event) => event.op === "append"));
   assert.equal(first.views.at(-1)!.blocks.at(-1)!.content, "正在整理重点");
@@ -144,7 +144,8 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   release(); await aide.settled();
   await until(() => second.views.at(-1)?.meta.activity === null && second.views.at(-1)!.blocks.find((block) => block.type === "input")?.status === "done" && second.views.at(-1)!.blocks.filter((block) => block.type === "message").length === 1);
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.role === "aide").length, 1);
-  assert.equal(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content, "最终答复");
+  assert.ok(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content.endsWith("最终答复"));
+  await until(() => second.views.at(-1)!.blocks.find(block => block.role === "aide")?.label === undefined);
   const completed = second.views.at(-1)!;
   const topic = aide.topics.resource("a")!;
   assert.deepEqual(completed.meta.context, { summary: summaryText(aide.topics.resources, topic), recent: notes(aide.topics.resources, aide.topics.resource("a")!.metadata.uid, "subject") });
@@ -228,7 +229,7 @@ test("Web retains Input material and shows interrupted Chief execution without a
   assert.ok(aide.topics.resource("failed")!.status.lastError);
   assert.ok(aide.invocations().some((invocation) => invocation.executionId === reply.group_id));
   assert.match(reply.content, /检查展示故障/);
-  assert.ok(!view.blocks.some((block) => block.role === "aide"));
+  assert.equal(aide.outputStore.content(aide.outputStore.list()[0]!).phase, "interrupted");
 });
 
 

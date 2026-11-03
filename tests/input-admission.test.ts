@@ -29,7 +29,7 @@ function fixture(t: TestContext) {
     return aide.topics.inputStore.get(id)!;
   };
   const prompts: { id: string; prompt: string }[] = [];
-  const execution = (id: string, onPrompt?: () => Promise<void>) => ({ executionId: id, withContext() { return this; }, verbs: { async harness(args: { operation?: string; prompt?: string }) {
+  const execution = (id: string, onPrompt?: () => Promise<void>) => ({ executionId: id, withContext() { return this; }, verbs: { async action() { return { state: "success", value: { streaming: false } }; }, async harness(args: { operation?: string; prompt?: string }) {
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: `session-${id}` } };
     prompts.push({ id, prompt: args.prompt! }); await onPrompt?.();
     return { state: "success", value: { result: { stopReason: "end_turn" } } };

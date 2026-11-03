@@ -152,7 +152,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - Connector kind 与 version 是独立字符串，connectors 直接按 name 声明；领域 interface 定义操作契约，安装入口按 name 注册实现，配置不使用 type 或 packages/instances 包装；Plugin 与 verb 按 kind 发现 Connector 并通过同一客户端调用，私有配置和凭证不进入 Runner。Source 继续复用 Plugin 机制，Connector 是否作为 Resource 独立演进。契约见 [Connector 扩展](docs/connector/extensions.md)。
 - Connector 按外部系统或服务组织操作与适配；一个 Connector 可支持多个业务 Source，Source 可细到单个业务 Resource，按观察生命周期独立保存状态与调度。外部频控的策略、数值和配额范围由 Connector / Channel 适配并复用共享客户端；Output 只消费安全错误与重试时间，使用已有持久队列协调。边界与建设状态见 [Connector 与 Source](docs/connector/README.md)。
 - plugins.<plugin>.sources 声明观察策略，形成 Input 的 Source 先保存 Input 再推进水位。所有模块在自己的 config.ts 声明契约，启动时解析一次；显式值优先于默认值，空数组不回退，运行中不重读配置。命名 Channel 通过配置文件维护，重启生效；defaultAddress 保存具体 AddressRef，Web 选择立即用于新通知；默认 say 联系 Me，不依赖 Topic 的来源地址或私聊历史。
-- Web 按页面组织，入口管理轮询与 SSE 生命周期，交互模块持有自身状态；共用浏览器能力放在 web/shared，展示类型经 type-only import 使用。Channel 展示进展不产生业务 Output。
+- Web 按页面组织，入口管理轮询与 SSE 生命周期，交互模块持有自身状态；共用浏览器能力放在 web/shared，展示类型经 type-only import 使用。Channel 通过 Output 实际 Stream 展示进展，不旁路投递 Harness 投影。
 - 根目录 VERSION 是产品版本，每次提交递增一次，默认 patch。设计文档描述当前模型与 why，详细契约各有主说明位置，其它文档用链接引用；代码意图标记链接到对应主题。
 
 ## References
@@ -168,7 +168,7 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 - [Observation](docs/observation.md)：Input JobView、原生 SessionView、请求补录与证据缺口。
 - [配置](docs/configuration.md)、[部署与诊断](docs/deployment.md)、[真实验收](docs/e2e.md)。
 
-- Output.spec 保存发送意图，status.disclosure 保存检查，status.delivery 保存实际目标、正文与接收者；密级拒绝在同一 Output 上转告 Me。同一 Output Reconciler 负责检查、投递和重试，Channel 只提供具体目的地的发送能力，进度卡不展示未经披露检查的私有推理。见 [披露边界](docs/personal/disclosure.md)。
+- Output.spec 保存发送意图，status.disclosure 保存检查，status.delivery 保存实际目标、Stream 与接收者；密级拒绝在同一 Output 上转告 Me。同一 Output Reconciler 负责检查、投递和重试，Channel 只提供具体目的地的发送能力，进度卡不展示未经披露检查的私有推理。见 [披露边界](docs/personal/disclosure.md)。
 
 ## 定向验证
 

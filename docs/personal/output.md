@@ -6,6 +6,33 @@
 
 Aide 基于已有的近期、长期 Note 与最新 Input 判断是否需要沟通；更新 Note 可以静默完成，私下答复 Me 不以先持久化 Note 为前提，对外正文须引用可分类的 Note。Aide 会把多条观察合成一条通知，也会围绕同一个请求先报告进展，再交付结果。Input 表达收到的事实，Output 表达已经决定向外表达的内容，两者没有一对一约束。主动提醒可以没有 Input，`inputIds` 仅在需要追溯时保存相关输入，不承担消费回执或回复义务。
 
+## 流式生成与投递
+
+需要直接回复的 Immediate Channel Input 在 Chief 调用模型前建立 Output 与原始 Stream。
+两者在同一存储事务建立，提交后消费者才能看到，`spec.stream` 是固定 UID 的 ResourceRef。
+Chief 的 think/text 增量按 150ms 批次追加；适配器的最终消息快照不会重复追加已收到的增量。
+其它后台执行保持静默，需要沟通时通过 say 创建已完成的 Stream。
+
+Output.spec 的 receivers/target/stream 表达原定意图，status.delivery 对应实际接收人、
+投递坐标和 Stream，并通过 confirmedSeq 与 receipt 保存实际投递进度。Reconcile 无需
+更改内容时复用原始 Stream；需要话术时创建自己的 Stream，写入 text 并完成，不改原始流。
+
+Immediate Input 遇到 mute：实际地址保持原计划地址，实际流替换成固定禁言提示。
+其它 Input 遇到 mute：实际地址改为 Me 默认地址，正文复用原始流。默认地址仍需通过
+私密 Me 身份、可用性和禁言检查。禁言例外只允许固定提示，不能夹带生成内容。
+
+Reconcile 建立投递后，Host 持有可关闭、可恢复的 Stream 消费任务，Runner 只进行生命周期
+协调与失败重试。Stream 追加不通过 Watch 唤醒 Output。投递按 750ms 节奏合并更新，
+不支持消息更新的 Connector 等待流结束后发送完整正文。
+
+已验证的私密 Me 地址可持续展示新内容；外部地址等待完整内容并对 think/text 一起检查。
+空流上的检查不能授权未来内容。权限变化后停止继续投递，已发生的外部效果不会被改写。
+Lark 卡片由实际 Output Stream 驱动，停止原有按 Topic 投影、旁路发送的执行卡片。
+
+Stream.completed 只表示生成完成；Output.delivered 还要求实际流的末尾内容已确认送达。
+中断流保留已有内容并显示失败，重启不会把残缺内容伪装成成功。Output 删除级联清理原始与
+替换 Stream 及追加数据。底座契约见 [Stream](../plugin/stream.md)。不提供旧 text 数据兼容。
+
 ## CRD
 
 ### Spec
@@ -18,7 +45,7 @@ Input → Route → Topic / Chief → Task / Routine
                                Channel / Connector 投递与回执
 ```
 
-Output 是 Personal 定义的 `aide.dev/v1alpha4 Output`。`spec.text`、`spec.receivers` 与 `spec.target` 在创建后不可变；Topic 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标保存为独立 Address 资源的 UID 引用；平台位置保存在 Address.spec.endpoint，实际发送坐标保存在 status.delivery.target。传输地址中，`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark 聊天 endpoint 是分别 URI 编码的 appId / chatId；按用户身份投递时为 appId / open_id / openId。Personal 在产出时明确选择地址，Channel 发送时只读检查后 status.delivery 的 target/text，不解析 Topic ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
+Output 是 Personal 定义的 `aide.dev/v1alpha5 Output`。`spec.stream`、`spec.receivers` 与 `spec.target` 在创建后不可变；Topic 的精确资源引用（包括 UID）记录归属，可选的 `executionId`、`producer`、`inputIds` 记录产出与材料。目标保存为独立 Address 资源的 UID 引用；平台位置保存在 Address.spec.endpoint，实际发送坐标保存在 status.delivery.target。传输地址中，`ChannelAddress extends Address` 使用 `kind: "channel"`、`channelId` 与 Channel 定义的 `endpoint`。Web endpoint 是会话标识，Lark 聊天 endpoint 是分别 URI 编码的 appId / chatId；按用户身份投递时为 appId / open_id / openId。Personal 在产出时明确选择地址，Channel 发送时只读检查后 status.delivery 的 target/stream，不解析 Topic ID 或 sessionId。`RequirementAddress` 使用 Connector 名称、类别、工作项 ID 与规范项目 scope，供 Host 投递为工作项评论。更改正文、收件人或目标需要产生新的 Output。
 
 ### Status
 
@@ -42,7 +69,7 @@ Output 由独立 Reconciler 检查材料与受众，并持久化实际投递目�
 
 失败日志记录 Output ID 和安全提取的诊断，Lark 另记录目的地、分片、平台错误码、HTTP 状态或网络错误码。SDK 请求配置、凭证、消息正文和自由文本不写入日志或 Output.status。
 
-Address.muted 对原文、分片及进度卡均生效；Immediate Input 对应的 Output 由 Reconcile 在原地址投递固定禁言提示，其它禁言 Output 转投 Me 的默认地址，详见 [披露边界](disclosure.md)。Chief 提交 raw Output，实际 target/text 调整只保存在 status.delivery。群成员使用持续观察积累的 Address.people。Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Topic 删除后仍可完成投递。进展卡片只镜像已送达该聊天的 Output，不提前确认投递，也不展示私有思考和工具结果。
+Address.muted 对原文、分片及进度卡均生效；Immediate Input 对应的 Output 由 Reconcile 在原地址投递固定禁言提示，其它禁言 Output 转投 Me 的默认地址，详见 [披露边界](disclosure.md)。Chief 提交 raw Output，实际 target/stream 调整只保存在 status.delivery。群成员使用持续观察积累的 Address.people。Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Topic 删除后仍可完成投递。进展卡片消费实际 Stream；私密 Me 地址可显示 think/text，外部地址等待完整披露检查，不旁路展示 Harness 工具结果。
 
 需求平台评论发送使用独立的 Host 投递器。没有已确认的提供方幂等键时，发送中断或超时进入 uncertain；匹配目标、正文及持久投递记录的回读可以确认成功，自动重发停止。详情见 [需求平台](../connector/requirements.md)。
 
@@ -52,7 +79,7 @@ Topic 不保存输出正文或无限增长的输出 ID 列表。界面按 Topic 
 
 Output 进入 Host 统一资源容量管理，配置键为 `aide.dev/Output`。pending / sending / uncertain 保持受保护；delivered 且无人引用时可以按配置回收；failed 保留诊断窗口后可释放。Input、Topic 与 producer 是追溯关系，不永久互相保活。Output 内容回收后，可读的长期上下文由 Topic summary / memory 承接。
 
-Personal 声明 OutputPrinter，由 Host 加载，`describe` 返回完整正文、目标和投递信息，`summarize` 返回有界文本预览。ResourceClient 可以获取和列出 Output；投递状态由应用装配的投递器通过相同资源契约维护。
+Personal 声明 OutputPrinter，由 Host 加载，`describe` 返回 Stream 引用、目标和投递信息，`summarize` 返回流标识与状态。Web 查询通过 StreamStore 解析正文预览与详情。ResourceClient 可以获取和列出 Output；投递状态由应用装配的投递器通过相同资源契约维护。
 
 问题也是普通 Output；用户答复是新的 Input，由 Chief 的后续调用理解。原生工具权限与 Hook 信任使用独立 Approval，不通过普通业务消息确认。
 

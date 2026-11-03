@@ -55,7 +55,7 @@ test("Chief serializes inputs within a topic while another topic can proceed", a
     calls.push({ ...spec, prompt });
     if (spec.text === "a-first") await gate;
     return `answer:${spec.text}`;
-  }, async execute() { throw new Error("Unexpected work"); } }, root), pino({ level: "silent" }));
+  }, async execute() { throw new Error("Unexpected work"); } }, root, [], root, "bot"), pino({ level: "silent" }));
   t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.receive(fixtureIncoming({ channelId: "lark", id: "1",  topicId: "lark:bot:group-a", text: "a-first" }));
   await until(() => calls.length === 1);

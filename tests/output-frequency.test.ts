@@ -171,6 +171,7 @@ test("real Runner persists waits and Person changes only relax Person deadlines"
     sends.push(Date.now()); return undefined;
   });
   const makeManager = () => new Manager({ instances, pluginSupervisor: new PluginSupervisor(),
+    resourceAdmissions: { personal: (type, init) => type.kind === "Output" ? f.store.create("topic", init.name, init.spec as import("../plugins/personal/output/model.ts").OutputSubmission) : undefined },
     onRunnerFailure: failure => { errors.push(failure.error); }, onActivationError: failure => errors.push(failure.error),
     actions: { "personal/reconcile_output": async (_context, input) => delivery.reconcile((input as { id: string }).id) },
     async loadPackageEntry(pluginId, version) { return { pluginId, version,

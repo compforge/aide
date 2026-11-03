@@ -59,7 +59,7 @@ async function setup(t: TestContext) {
 test("unchecked Output is pending and cannot reach a Channel, even Web", async t => {
   const f = await setup(t); const output = f.output("x", undefined, webAddress("topic"));
   assert.equal(output.status.phase, "pending");
-  assert.deepEqual(channelOutputs({ outputs: () => [outputView(output)] }), []);
+  assert.deepEqual(channelOutputs({ outputs: () => [outputView(output, f.store.streams)] }), []);
   assert.throws(() => f.store.begin("x"), /not been checked/);
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.phase, "pending");
@@ -75,7 +75,7 @@ test("permitted output retains intended content and checked delivery survives re
   f.store.begin("x"); f.store.retry("x", "transport refused");
   await f.store.prepare("x");
   assert.equal(f.checks(), 1);
-  assert.equal(f.store.get("x")!.status.delivery!.text, original.spec.text);
+  assert.equal(f.store.content(f.store.get("x")!, true).text, f.store.content(original).text);
   f.store.begin("x"); f.store.delivered("x");
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.phase, "delivered");
@@ -88,8 +88,8 @@ test("denied output redirects to Me on the same resource, preserving original in
   assert.deepEqual(result.spec, original.spec);
   assert.equal(result.status.disclosure!.decision, "denied");
   assert.deepEqual(result.status.delivery!.target, webAddress("topic"));
-  assert.match(result.status.delivery!.text, /clearance L1/);
-  assert.match(result.status.delivery!.text, /A verified fact/);
+  assert.match(f.store.content(result, true).text, /clearance L1/);
+  assert.match(f.store.content(result, true).text, /A verified fact/);
   assert.equal(result.status.phase, "pending");
   await f.checker.reconcile("x");
   assert.equal(f.store.list().length, 1);
@@ -360,8 +360,8 @@ test("Output admission and immutable delivery compare Person UID sets on both si
   assert.equal(listed.spec.receivers.size, 2);
   assert.deepEqual(f.store.create("topic", "sets", { ...spec, receivers: personRefs([a, b]) }), original);
   assert.throws(() => f.store.create("topic", "sets", { ...spec, receivers: personRefs([a]) }), /different content/);
-  const previous = { ...original, spec: { ...spec, target: original.spec.target }, status: { phase: "pending" as const, attempts: 1,
-    delivery: { address: original.spec.target, target: spec.target, text: spec.text, receivers: personRefs([b, a, b]) } } };
+  const previous = { ...original, spec: { ...original.spec, target: original.spec.target }, status: { phase: "pending" as const, attempts: 1,
+    delivery: { address: original.spec.target, target: spec.target, stream: original.spec.stream, receivers: personRefs([b, a, b]) } } };
   const current = { ...previous, spec: { ...previous.spec, receivers: personRefs([a, b]) }, status: { ...previous.status,
     delivery: { ...previous.status.delivery, receivers: personRefs([a, b]) } } };
   const context = { get() { throw new Error("Unexpected lookup"); }, page() { throw new Error("Unexpected lookup"); }, list() { throw new Error("Unexpected lookup"); } };
@@ -369,7 +369,7 @@ test("Output admission and immutable delivery compare Person UID sets on both si
   assert.throws(() => OutputDefinition.validator!.update!(previous, { ...current, status: { ...current.status,
     delivery: { ...current.status.delivery, receivers: personRefs([a]) } } }, context), /delivery is immutable/);
   assert.throws(() => OutputDefinition.validator!.update!(previous, { ...current, status: { ...current.status,
-    delivery: { ...current.status.delivery, text: "different" } } }, context), /delivery is immutable/);
+    delivery: { ...current.status.delivery, stream: { ...current.status.delivery.stream, uid: "different" } } } }, context), /delivery is immutable/);
 });
 
 
@@ -390,4 +390,46 @@ test("Person frequency changes do not invalidate disclosure or interrupt an Outp
   assert.equal(f.store.get("frequency-change")!.status.disclosure!.fingerprint, fingerprint);
   assert.equal(f.checks(), checks);
   assert.equal(sends, 2);
+});
+
+
+test("External streams wait for the complete think and text; private Me can bind while open", async t => {
+  const f = await setup(t), note = await f.note();
+  const target = larkPersonAddress("app", "ou_c");
+  allowAddress(f.store.storage.home, target);
+  const external = f.store.create("topic", "external", { ...outputSpec(f.topic, { topicId: "topic", text: "", target }), streaming: true,
+    notes: [{ uid: note.metadata.uid, version: noteVersion(note) }] });
+  f.store.streams.append(external.spec.stream, [{ kind: "think", delta: "private reasoning" }, { kind: "text", delta: "public answer" }]);
+  await f.checker.reconcile("external");
+  assert.equal(f.store.get("external")!.status.delivery, undefined);
+  assert.equal(f.checks(), 0);
+  let checked = "";
+  f.ports.check = async evidence => { checked = evidence.text; return { allowed: true, reason: "supported" }; };
+  f.store.streams.complete(external.spec.stream);
+  await f.checker.reconcile("external");
+  assert.match(checked, /private reasoning/); assert.match(checked, /public answer/);
+  assert.deepEqual(f.store.get("external")!.status.delivery!.stream, external.spec.stream);
+  const direct = f.store.create("topic", "private", { ...outputSpec(f.topic, { topicId: "topic", text: "", target: webAddress("topic") }), streaming: true });
+  await f.checker.reconcile("private");
+  assert.deepEqual(f.store.get("private")!.status.delivery!.stream, direct.spec.stream);
+});
+
+
+test("An open Stream loses its private authorization before any later chunk when the audience changes", async t => {
+  const f = await setup(t), target = larkPersonAddress("app", "ou_c");
+  allowAddress(f.store.storage.home, target);
+  for (const attempted of [false, true]) {
+    const id = `private-${attempted}`;
+    f.audience({ people: [f.me], private: true });
+    const output = f.store.create("topic", id, { ...outputSpec(f.topic, { topicId: "topic", text: "", target }), streaming: true });
+    f.store.streams.append(output.spec.stream, [{ kind: "text", delta: "first" }]);
+    await f.checker.reconcile(id);
+    assert(f.store.get(id)!.status.delivery);
+    if (attempted) f.store.begin(id);
+    f.audience({ people: [f.me, f.other], private: false });
+    f.store.streams.append(output.spec.stream, [{ kind: "text", delta: "private continuation" }]);
+    await f.checker.reconcile(id);
+    if (attempted) assert.equal(f.store.get(id)!.status.phase, "uncertain");
+    else assert.equal(f.store.get(id)!.status.delivery, undefined);
+  }
 });

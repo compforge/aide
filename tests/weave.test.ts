@@ -255,7 +255,7 @@ test("Root Chief admits a bounded backlog with urgent Input first and independen
   const urgent = await f.aide.topics.submit("urgent", { origin: "channel", originId: "web", topicKey: "batch", attention: InputAttention.Immediate, text: "urgent question" });
   await routeByRules(f.context, urgent);
   let prompts = 0;
-  const execution: any = { executionId: "batch", withContext() { return this; }, verbs: { async harness(args: any) {
+  const execution: any = { executionId: "batch", withContext() { return this; }, verbs: { async action() { return { state: "success", value: { streaming: false } }; }, async harness(args: any) {
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
     prompts++;
     const activation = JSON.parse(args.prompt.split("Activation: ")[1].split("\n")[0]);

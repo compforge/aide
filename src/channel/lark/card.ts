@@ -1,7 +1,4 @@
-import { channelOutputs } from "../output.ts";
 import { answerPreview, processPreview, replyLabels } from "../reply-layout.ts";
-import type { ChannelService } from "../service.ts";
-import { topicView } from "../view.ts";
 
 export interface LarkProgress {
   id: string;
@@ -13,53 +10,7 @@ export interface LarkProgress {
   messageIds: string[];
   overflow: boolean;
 }
-export type LarkProgressReader = (topicId: string) => LarkProgress[];
 const labels = replyLabels;
-
-/**
- * @spec External progress exposes lifecycle only; private thought/tool text never bypasses Output disclosure. Delivered replies may be mirrored.
- * @link docs/channel/lark.md
- */
-export function larkProgress(aide: ChannelService, topicId: string): LarkProgress[] {
-  topicId = aide.topics.byKey(topicId)?.spec.id ?? topicId;
-  const view = topicView(aide, topicId);
-  const inputs = aide.topics.inputs(topicId) ?? [];
-  const seen = new Set<string>();
-  return inputs.filter((input) => {
-    if (input.spec.origin !== "channel") return false;
-    const group = view.blocks.find((b) => b.inputId === input.metadata.name)?.group_id ?? input.metadata.name;
-    if (seen.has(group)) return false;
-    seen.add(group); return true;
-  }).map((input) => {
-    const group = view.blocks.find((b) => b.inputId === input.metadata.name)?.group_id ?? input.metadata.name;
-    const executions = view.blocks.filter((block) => block.type === "execution" && block.group_id === group);
-    const parents = new Set(executions.map((block) => block.id));
-    const blocks = view.blocks.filter((block) => block.parent_id && parents.has(block.parent_id));
-    const members = inputs.filter(i => (view.blocks.find(b => b.inputId === i.metadata.name)?.group_id ?? i.metadata.name) === group);
-    const live = view.meta.activity?.id === group || executions.some(e => e.status === "running");
-    const phase = live || members.some(i => i.consumption.phase === "running") ? "running"
-      : executions.some(e => e.status === "interrupted") ? "failed"
-      : members.length > 0 && members.every(i => i.consumption.phase === "done") ? "done" : "queued";
-    const ids = new Set(view.blocks.filter((b) => b.type === "message" && b.group_id === group).map((b) => b.id.replace(/^message:/, "")));
-    // Match the communication place, then retain the turn membership below; reply message coordinates are not a different audience.
-    const addressed = channelOutputs(aide).filter(o => input.spec.source && o.status.delivery?.address.uid === input.spec.source.uid);
-    const responses = addressed.filter((m) => ids.has(m.id) && m.status.phase === "delivered");
-    const text = responses.map((message) => message.text).join("\n\n");
-    const think = ""; // Private reasoning and tool output stay on Me's local Web surface.
-    const points = Array.from(text), thought = Array.from(think);
-    const result: LarkProgress = { id: input.metadata.name, phase, think: thought.length > 2000 ? "（仅展示最近过程，完整记录可在网页查看）\n" + thought.slice(-2000).join("") : think,
-      content: points.slice(0, 4000).join(""), overflow: points.length > 4000,
-      process: { thought: labels[phase] ?? "处理中", tool: "", summary: labels[phase] ?? "处理中" },
-      liveAnswer: phase === "running" || phase === "queued" ? answerPreview(text, phase) : undefined,
-      messageIds: [] };
-    // Include the nested JSON escaping of the CardKit envelope in the size budget.
-    while (Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(result, false)) })) > 28_000) {
-      if (Array.from(result.think).length > 500) result.think = Array.from(result.think).slice(-500).join("");
-      else { result.content = Array.from(result.content).slice(0, Math.floor(Array.from(result.content).length / 2)).join(""); result.overflow = true; }
-    }
-    return result;
-  });
-}
 
 /**
  * @spec Stable panels retain reader-owned expansion while text previews change from live progress to completed summaries.

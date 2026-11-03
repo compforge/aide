@@ -18,6 +18,8 @@ Host 持有 Resource 存储、Connector 和可选 Harness 执行能力；Runner 
 
 事件用于唤醒，Reconcile 每次读取当前事实决定是否行动。主资源的纯 status 更新不自动唤醒自身，需感知该变化的协作方显式声明 Watch。回调重试不保证外部副作用只发生一次，插件应保存接纳状态与完成凭据。
 
+追加型 think/text 内容使用 [Stream](stream.md)，正文独立持久化并按 seq 读取，结构性 owner 控制生命周期。Stream 变化不隐式唤醒消费方。
+
 ## Source 与 Watch
 
 框架 Source 负责发现和订阅资源，Watch 把其它资源变化映射为协调请求，CronSource 定期唤醒已有资源。这些机制提供触发，业务 Controller 决定如何推进。

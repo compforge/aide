@@ -9,7 +9,7 @@ export type LarkConfig = Pick<LarkChannelConfig, "appId" | "appSecret">;
 
 export interface LarkCardTransport {
   create(card: unknown): Promise<string>;
-  send(chatId: string, cardId: string, id: string): Promise<void>;
+  send(chatId: string, cardId: string, id: string, receiveIdType?: "chat_id" | "open_id", replyToMessageId?: string): Promise<void>;
   content(cardId: string, elementId: string, content: string, sequence: number, id: string): Promise<void>;
   patch(cardId: string, elements: Record<string, unknown>, sequence: number, id: string): Promise<void>;
   settings(cardId: string, streaming: boolean, sequence: number, id: string): Promise<void>;
@@ -171,9 +171,11 @@ export function larkTransport(config: LarkConfig, log: Logger): LarkTransport {
         if (response.code !== 0 || !response.data?.card_id) throw new Error(`Lark card.create failed (code ${response.code ?? "missing"})`);
         return response.data.card_id;
       },
-      async send(chatId, cardId, id) {
-        const response = await client.im.message.create({ params: { receive_id_type: "chat_id" },
-          data: { receive_id: chatId, msg_type: "interactive", content: JSON.stringify({ type: "card", data: { card_id: cardId } }), uuid: id } });
+      async send(chatId, cardId, id, receiveIdType = "chat_id", replyToMessageId) {
+        const content = JSON.stringify({ type: "card", data: { card_id: cardId } });
+        const response = replyToMessageId
+          ? await client.im.message.reply({ path: { message_id: replyToMessageId }, data: { msg_type: "interactive", content, uuid: id, reply_in_thread: true } })
+          : await client.im.message.create({ params: { receive_id_type: receiveIdType }, data: { receive_id: chatId, msg_type: "interactive", content, uuid: id } });
         if (response.code !== 0 || !response.data?.message_id) throw new Error(`Lark card.send failed (code ${response.code ?? "missing"})`);
       },
       async content(cardId, elementId, content, sequence, id) {

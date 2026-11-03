@@ -109,18 +109,33 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   }
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", inputIds, executionId: execution.executionId } });
   let completed = false;
+  let streaming = false;
   let error = "Agent ended without confirming input completion";
   try {
     const agent = await prepareAgent(context.resources, execution, current, target);
     for (const input of current.kind === "Topic" ? inputs as Input[] : []) await changeAssessment(context.resources, input, execution.executionId, { agent });
     for (const id of current.kind === "Topic" ? [] : inputIds) await changeAttempt(context.resources, id, resourceRef(current), receipt =>
       receipt?.executionId === execution.executionId && !receipt.completedAt ? { agent } : {});
+    if (current.kind === "Topic" && inputs.some(input => input?.spec.origin === "channel" && immediate(input.spec))) {
+      const stream = await execution.verbs.action<{ streaming: boolean }>("begin_output_stream", { inputIds });
+      if (stream.state !== "success") throw new Error("Could not establish Chief output stream");
+      streaming = stream.value.streaming;
+      if (streaming) prompt += "\nA live Output is already bound to this Immediate Input. Your thinking and text are streamed through Output disclosure. Write the reply directly in assistant text; do not call say for this same reply. Use say only for a separately intended communication. Do not emit an internal final acknowledgement.";
+    }
     const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Topic" ? "Chief" : current.kind, prompt, timeoutMs: 172800_000 });
     completed = result.state === "success" && result.value.result.stopReason === "end_turn";
     if (result.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, result.agent);
     if (result.state !== "success" || result.value.result.stopReason !== "end_turn") error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
   } catch (cause) { error = String(cause); }
-  finally { await finalizeExecution(context, current, execution.executionId, current.kind === "Topic" && completed ? "" : error); }
+  finally {
+    try {
+      if (streaming) {
+        const closed = await execution.verbs.action("finish_output_stream", completed ? {} : { error });
+        if (closed.state !== "success") { completed = false; error = `Could not close Chief output stream: ${closed.state === "failure" ? closed.error : closed.state}`; }
+      }
+    } catch (cause) { completed = false; error = String(cause); }
+    finally { await finalizeExecution(context, current, execution.executionId, current.kind === "Topic" && completed ? "" : error); }
+  }
   return completed;
 }
 /**

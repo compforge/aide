@@ -1,3 +1,4 @@
+import { OutputProducer } from "./output/producer.ts";
 import { Addresses } from "./address/service.ts";
 import { addressTools } from "./address/tools.ts";
 import { personRefs } from "./person/model.ts";
@@ -64,6 +65,7 @@ import type { Persons } from "./person/service.ts";
 
 /** Channels and Sources submit durable input; Chief decides whether Work is needed. */
 export class Personal {
+  readonly outputProducer: OutputProducer;
   readonly store: Store;
   readonly plugins: Manager;
   private readonly connectors: ConnectorClient;
@@ -84,6 +86,7 @@ export class Personal {
     const resources = new PluginResourceStore({ home: runtime.inputs.storage.home, pluginInstanceId: "personal" });
     const client = this.plugins.resourceClient("personal");
     this.store = new Store(resources, client, new TopicStore(resources, client, runtime.inputs, runtime.outputs, runtime.resolveContact));
+    this.outputProducer = new OutputProducer(runtime.outputs, this.store.topics, runtime.inputs, this.core.executions, log);
   }
 
   /** @spec Persistent native tools resolve the live execution on each call, never capture a completed invocation's verbs. */
@@ -353,6 +356,7 @@ export class Personal {
   }
 
   private async startOnce(): Promise<void> {
+    this.outputProducer.recover();
     await this.recoverInterrupted();
     await this.core.start();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin failed to start");
@@ -512,6 +516,7 @@ export class Personal {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.outputProducer.close();
     if (this.noticeTimer) clearTimeout(this.noticeTimer);
     await this.noticeDelivery;
     await this.starting; await this.core.close(); await this.intake;

@@ -1,274 +1,142 @@
-import { fixtureCanSpeak } from "./address-fixture.ts";
+import { fixtureCanSpeak, allowAddress, fixtureIncoming } from "./address-fixture.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
 import { addressRef } from "../plugins/personal/address/model.ts";
-import { allowAddress } from "./address-fixture.ts";
 import { transportFixture } from "./output-fixture.ts";
-import { seedInput } from "./topic-fixture.ts";
-import { assessAll } from "./input-state-fixture.ts";
 import { larkAddress, larkThreadAddress } from "../src/channel/address.ts";
-import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
-import type { OutputView } from "../plugins/personal/output/view.ts";
-import { fixtureOutput } from "./output-fixture.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
-import { larkProgress, progressCard, cardPreviews, type LarkProgress } from "../src/channel/lark/card.ts";
+import { progressCard, cardPreviews } from "../src/channel/lark/card.ts";
 import { larkTransport, type LarkTransport } from "../src/channel/lark/client.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
-import { fakeOptions as baseFakeOptions } from "./fake-harness.ts";
-import { LOCAL_ME } from "../plugins/personal/person/model.ts";
-// These transport tests use a known Me audience; disclosure rejection has dedicated tests.
-const fakeOptions = (...args: Parameters<typeof baseFakeOptions>) => ({ ...baseFakeOptions(...args),
-  checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }) });
+import { fakeOptions } from "./fake-harness.ts";
+import type { StreamSnapshot } from "@compforge/aide-plugin";
 
 const log = pino({ level: "silent" });
 const topicId = "lark:cli_progress:oc_chat";
-const event = { sender: { sender_type: "user" }, message: { message_id: "om_input", chat_id: "oc_chat", chat_type: "p2p", message_type: "text", content: '{"text":"检查工作"}' } };
-const message = (id: string, text: string): OutputView => fixtureOutput({ id, text, topicId, role: "aide", workId: null, at: new Date().toISOString() });
-
-function cardRegions(card: ReturnType<typeof progressCard>) {
-  const envelope = card.body.elements.find((element) => "elements" in element)!;
-  const panels = envelope.elements.filter((element) => (element as { tag: string }).tag === "collapsible_panel");
-  return { envelope, thought: panels[0] as typeof envelope, answer: panels[1] as typeof envelope };
-}
-
 function setup(t: TestContext) {
-  const home = mkdtempSync(join(tmpdir(), "aide-lark-progress-"));
-  allowAddress(home, larkAddress("cli_progress", "oc_chat"));
-  const messages: OutputView[] = [], calls: { kind: string; args: unknown[] }[] = [];
-  let view: LarkProgress = { id: "input", phase: "queued", think: "", content: "", messageIds: [], overflow: false };
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-stream-"));
+  const target = larkThreadAddress("cli_progress", "oc_chat", "request");
+  allowAddress(home, target);
+  const calls: { kind: string; args: unknown[] }[] = [];
   const record = (kind: string, args: unknown[]) => { calls.push({ kind, args }); };
   let card!: ReturnType<typeof progressCard>;
-  const patchElement = (elements: unknown[], id: string, patch: unknown): void => {
-    for (const item of elements) {
+  const patch = (items: unknown[], id: string, value: unknown): void => {
+    for (const item of items) {
       const element = item as { element_id?: string; elements?: unknown[] };
-      if (element.element_id === id) Object.assign(element, patch);
-      if (element.elements) patchElement(element.elements, id, patch);
+      if (element.element_id === id) Object.assign(element, value);
+      if (element.elements) patch(element.elements, id, value);
     }
   };
   const transport: LarkTransport = { async start() {}, close() {}, async chatName() { return undefined; }, async send(...args) { record("text", args); },
-    cards: { async create(...args) { record("create", args); card = structuredClone(args[0]) as typeof card; return `card-${calls.filter((call) => call.kind === "create").length}`; }, async send(...args) { record("send", args); },
-      async content(...args) { record("content", args); patchElement(card.body.elements, args[1], { content: args[2] }); },
-      async patch(...args) { record("patch", args); for (const [id, value] of Object.entries(args[1])) patchElement(card.body.elements, id, value); },
+    cards: { async create(...args) { record("create", args); card = structuredClone(args[0]) as typeof card; return "card"; }, async send(...args) { record("send", args); },
+      async content(...args) { record("content", args); patch(card.body.elements, args[1], { content: args[2] }); },
+      async patch(...args) { record("patch", args); for (const [id, value] of Object.entries(args[1])) patch(card.body.elements, id, value); },
       async settings(...args) { record("settings", args); card.config.streaming_mode = args[1]; },
       async update(...args) { record("update", args); card = structuredClone(args[1]) as typeof card; } } };
-  const aide = { canSpeak: fixtureCanSpeak(home), receive: async () => { throw new Error("Delivery must not execute input"); }, outputs: () => messages };
-  const reader = (id: string) => { assert.equal(id, topicId); return [view]; };
-  let channel = new LarkChannel(home, "cli_progress", aide, transport, log, reader);
-  channel.receive(event);
+  const aide = { canSpeak: fixtureCanSpeak(home), async receive() { throw new Error("No intake expected"); } };
+  let channel = new LarkChannel(home, "cli_progress", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  return { home, calls, messages, transport, get card() { return card; }, get channel() { return channel; }, view: (next: Partial<LarkProgress>) => { view = { ...view, ...next }; },
-    async reopen() { await channel.close(); channel = new LarkChannel(home, "cli_progress", aide, transport, log, reader); } };
+  const send = (stream: StreamSnapshot, id = "output") => channel.send({ id, target, text: stream.text, stream });
+  return { home, target, calls, transport, send, get card() { return card; }, get channel() { return channel; },
+    async reopen() { await channel.close(); channel = new LarkChannel(home, "cli_progress", aide, transport, log); } };
 }
+const open = (lastSeq: number, think = "", text = ""): StreamSnapshot => ({ phase: "open", lastSeq, think, text });
+const completed = (lastSeq: number, think = "", text = ""): StreamSnapshot => ({ phase: "completed", lastSeq, think, text, closedAt: new Date(0).toISOString() });
+const until = async (check: () => boolean) => { for (let n = 0; n < 400 && !check(); n++) await Bun.sleep(10); assert(check()); };
 
-test("Lark finalizes a say question and uses a new card for the next Input", async (t) => {
+test("Lark sends one checked stream card, preserves reply coordinates and finalizes before returning a receipt", async t => {
   const f = setup(t);
-  await f.channel.deliver();
-  f.view({ phase: "running" }); await f.channel.deliver();
-  assert.ok(f.calls.some((call) => call.kind === "content" && call.args[1] === "think" && call.args[2] === "正在处理"));
-  f.view({ think: "检查 **工作**", content: "第一" });
-  await Promise.all([f.channel.deliver(), f.channel.deliver()]);
-  f.view({ content: "第一段回复" }); await f.channel.deliver();
-  const contents = f.calls.filter((call) => call.kind === "content");
-  assert.ok(contents.some((call) => call.args[1] === "think" && call.args[2] === "检查 **工作**"));
-  assert.equal(contents.at(-1)?.args[2], "第一段回复", "Updates send accumulated text, not a token delta");
-  f.messages.push(message("question", "确认继续吗？"));
-  f.view({ phase: "done", content: "确认继续吗？", messageIds: ["question"] });
-  await f.channel.deliver();
-  assert.ok(f.calls.find((call) => call.kind === "settings" && call.args[1] === false));
-  const card = f.card;
-  assert.equal(cardRegions(card).thought.expanded, false); assert.equal(cardRegions(card).envelope.expanded, true);
-  assert.equal(f.calls.filter((call) => call.kind === "text").length, 0);
-  const before = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, before);
-  f.view({ id: "next-input", phase: "running", content: "继续检查", messageIds: [] }); await f.channel.deliver();
-  f.messages.push(message("final", "检查完成")); f.view({ phase: "done", content: "检查完成", messageIds: ["final"] });
-  await f.channel.deliver();
-  assert.equal(f.calls.filter((call) => call.kind === "create").length, 2);
-  assert.equal(f.calls.filter((call) => call.kind === "send").length, 2);
-  assert.equal(f.calls.filter((call) => call.kind === "text").length, 0, "Rendering a card does not send or acknowledge business Output");
-  const updates = f.calls.filter((call) => ["content", "settings", "update", "patch"].includes(call.kind));
-  for (const cardId of ["card-1", "card-2"]) {
-    const sequences = updates.filter((call) => call.args[0] === cardId).map((call) => call.args[call.kind === "content" ? 3 : 2] as number);
-    assert.ok(sequences.every((value, index) => index === 0 || value > sequences[index - 1]!));
-  }
-  const after = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, after);
+  await f.send(open(1, "检查中"));
+  await f.send(open(2, "检查中", "第一"));
+  const receipt = await f.send(completed(3, "检查完成", "第一段回答"));
+  assert.deepEqual(receipt, { id: "card", scope: "cli_progress" });
+  assert.equal(f.calls.filter(c => c.kind === "send").length, 1);
+  assert.deepEqual(f.calls.find(c => c.kind === "send")!.args.slice(3), ["chat_id", "request"]);
+  assert.equal(f.card.config.streaming_mode, false);
+  const serialized = JSON.stringify(f.card);
+  assert(serialized.includes("检查完成")); assert(serialized.includes("第一段回答"));
+  assert.equal(f.calls.filter(c => c.kind === "text").length, 0);
+  const before = f.calls.length;
+  await f.reopen(); await f.send(completed(3, "检查完成", "第一段回答"));
+  assert.equal(f.calls.length, before, "Restart reuses the durable card and final signature");
+  const seq = f.calls.filter(c => ["content", "settings", "patch"].includes(c.kind)).map(c => Number(c.args[c.kind === "content" ? 3 : 2]));
+  assert(seq.every((value, index) => !index || value > seq[index - 1]!));
 });
 
-test("Lark collapses completed long replies with a bounded preview and preserves the full delivered answer", async (t) => {
-  const f = setup(t); await f.channel.deliver();
-  const text = "**已建好监控，每 5 分钟检查一次。**\n\n| 项 | 值 |\n| --- | --- |\n" + "| 环境 | hf |\n".repeat(12);
-  f.messages.push(message("long-table", text));
-  f.view({ phase: "done", think: "已创建 Routine", content: text, messageIds: ["long-table"] });
-  await f.channel.deliver();
-  const card = f.card;
-  const { envelope: panel, thought, answer: answerPanel } = cardRegions(card);
-  assert.equal(panel.tag, "collapsible_panel"); assert.equal(panel.expanded, true);
-  assert.equal(panel.header.title.tag, "plain_text");
-  assert.equal(panel.header.title.content, "过程与回答");
-  const preview = cardPreviews({ id: "preview", phase: "done", think: "", content: text, messageIds: [], overflow: false }).answer_preview;
-  assert.equal(preview.text.tag, "plain_text"); assert.equal(preview.text.lines, 3);
-  assert.ok(preview.text.content.startsWith("回答：已建好监控，每 5 分钟检查一次。 项 值 环境 hf"));
-  assert.ok(!preview.text.content.includes("**"));
-  assert.equal(thought.expanded, false); assert.equal(answerPanel.expanded, false);
-  const body = answerPanel.elements[0] as { element_id: string; content: string };
-  assert.equal(body.element_id, "content"); assert.equal(body.content, text);
-  assert.equal(f.calls.filter((call) => call.kind === "text").length, 0);
-  const before = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, before);
-
-  const unicode = cardPreviews({ id: "unicode", phase: "done", think: "", content: "😀".repeat(400), messageIds: [], overflow: false }).answer_preview;
-  assert.equal(unicode.text.content, "回答：" + "😀".repeat(400), "Lark clamps visual lines without cutting Unicode");
-  assert.equal(unicode.text.lines, 3);
-
+test("Reader expansion survives stream updates and completion", async t => {
+  const f = setup(t); await f.send(open(1, "思考"));
+  const panels = f.card.body.elements[0]!.elements.filter(item => (item as { tag: string }).tag === "collapsible_panel") as Array<{ expanded: boolean }>;
+  panels[0]!.expanded = true; panels[1]!.expanded = true;
+  await f.send(open(2, "继续思考", "回答")); await f.send(completed(2, "继续思考", "回答"));
+  assert(panels.every(panel => panel.expanded));
+  assert.equal(f.calls.filter(c => c.kind === "update").length, 0);
 });
 
-test("Lark keeps stable panels with compact defaults and exposes questions and failures in the preview", () => {
-  const base: LarkProgress = { id: "visible", phase: "done", think: "", content: "已完成。", messageIds: [], overflow: false };
-  for (const [phase, streaming, content] of [
-    ["done", false, base.content], ["done", false, "需要确认的项目\n".repeat(40)],
-    ["failed", false, "处理中断\n".repeat(40)], ["running", true, "正在输出\n".repeat(40)],
-  ] as const) {
-    const card = progressCard({ ...base, phase, content }, streaming);
-    assert.equal(card.body.elements.length, 1);
-    const { envelope, thought, answer } = cardRegions(card);
-    assert.equal(envelope.expanded, true);
-    assert.equal(thought.expanded, false); assert.equal(answer.expanded, false);
-    assert.equal(cardPreviews({ ...base, phase, content }).answer_preview.text.lines, phase === "failed" ? 1000 : 3);
-    const reply = answer.elements[0] as { element_id: string; content: string };
-    assert.equal(reply.element_id, "content"); assert.equal(reply.content, content);
-  }
+test("Failed card update is surfaced for Output retry and resumes on the same card", async t => {
+  const f = setup(t); await f.send(open(1, "思考"));
+  const update = f.transport.cards!.content;
+  f.transport.cards!.content = async () => { throw new Error("network failure"); };
+  await assert.rejects(f.send(open(2, "新进展")));
+  f.transport.cards!.content = update;
+  await f.reopen(); await f.send(open(2, "新进展"));
+  assert.equal(f.calls.filter(c => c.kind === "send").length, 1);
+  assert(JSON.stringify(f.card).includes("新进展"));
 });
 
-test("Lark previews answer text across paragraphs, lists and code without truncating at the first line", () => {
-  const text = "## hf 内存\n\n当前 **1.8 GiB**，容器 `server`。\n\n- request: 2 GiB\n- limit: 4 GiB\n\n```text\n无 OOM\n```";
-  const card = progressCard({ id: "preview", phase: "done", think: "查询过程", content: text, messageIds: [], overflow: false }, false);
-  const preview = cardPreviews({ id: "preview", phase: "done", think: "", content: text, messageIds: [], overflow: false }).answer_preview;
-  assert.deepEqual(preview.text, { tag: "plain_text", lines: 3,
-    content: "回答：hf 内存 当前 1.8 GiB，容器 server。 request: 2 GiB limit: 4 GiB 无 OOM" });
-  const { answer } = cardRegions(card);
-  assert.equal((answer.elements[0] as { content: string }).content, text, "Expanded answer keeps its original Markdown");
+test("Long stream answers retain their complete tail through idempotent text parts", async t => {
+  const f = setup(t), text = "答案😀".repeat(3000);
+  await f.send(completed(1, "", text));
+  const tail = f.calls.filter(c => c.kind === "text").map(c => String(c.args[1])).join("");
+  const panels = f.card.body.elements[0]!.elements as Array<{ elements?: Array<{ element_id?: string; content?: string }> }>;
+  const prefix = panels.flatMap(p => p.elements ?? []).find(e => e.element_id === "content")!.content!.split("\n\n（内容较长")[0]!;
+  assert.equal(prefix + tail, text);
+  const count = f.calls.length; await f.reopen(); await f.send(completed(1, "", text));
+  assert.equal(f.calls.length, count);
 });
 
-test("Lark text updates preserve reader expansion across streaming, reconnection and completion", async (t) => {
-  const f = setup(t); await f.channel.deliver();
-  const { envelope, thought, answer } = cardRegions(f.card);
-  thought.expanded = true; answer.expanded = true; envelope.expanded = false;
-  f.view({ phase: "running", think: "当前思考", content: "正在回答" }); await f.channel.deliver();
-  f.view({ content: "正在核对" }); await f.channel.deliver();
-  await f.reopen();
-  f.view({ phase: "running", content: "继续执行" }); await f.channel.deliver();
-  f.messages.push(message("done", "最终回答"));
-  f.view({ phase: "done", content: "最终回答", messageIds: ["done"] }); await f.channel.deliver();
-  const current = cardRegions(f.card);
-  assert.equal(current.envelope, envelope); assert.equal(current.envelope.expanded, false);
-  assert.equal(current.thought.expanded, true); assert.equal(current.answer.expanded, true);
-  assert.equal(f.calls.filter((call) => call.kind === "update").length, 0, "Never replace panels during normal updates");
-  for (const call of f.calls.filter((call) => call.kind === "patch")) assert.ok(!JSON.stringify(call.args[1]).includes('"expanded"'));
-  assert.equal((current.answer.elements[0] as { content: string }).content, "最终回答");
-  const count = f.calls.length; await f.reopen(); await f.channel.deliver(); assert.equal(f.calls.length, count);
+test("A mute arriving during awaited card creation prevents acknowledgement", async t => {
+  const f = setup(t), places = new Addresses(f.home), place = places.observe(f.target);
+  const create = f.transport.cards!.create;
+  f.transport.cards!.create = async (...args) => { const card = await create(...args); places.setMuted(addressRef(place), true, false); return card; };
+  await assert.rejects(f.send(open(1, "not permitted")));
+  assert.equal(f.calls.filter(c => c.kind === "send").length, 0);
 });
 
-test("Lark preserves card ID and send uuid after an ambiguous card send", async (t) => {
-  const f = setup(t); const send = f.transport.cards!.send;
-  let fail = true;
-  f.transport.cards!.send = async (...args) => { await send(...args); if (fail) { fail = false; throw new Error("timeout after send"); } };
-  await f.channel.deliver(); await f.reopen(); await f.channel.deliver();
-  const sends = f.calls.filter((call) => call.kind === "send");
-  assert.equal(f.calls.filter((call) => call.kind === "create").length, 1);
-  assert.deepEqual(sends[0]?.args, sends[1]?.args);
-});
-
-test("Lark card failure leaves independent text transport available", async (t) => {
-  const f = setup(t); await f.channel.deliver();
-  f.transport.cards!.content = async () => { throw new Error("permission or network failure"); };
-  f.view({ phase: "running", think: "思考内容" }); await f.channel.deliver();
-  await f.channel.send({ id: "final", target: larkAddress("cli_progress", "oc_chat"), text: "完整结果" });
-  f.messages.push(message("final", "完整结果")); f.view({ phase: "done", content: "完整结果", messageIds: ["final"] });
-  await f.channel.deliver();
-  assert.deepEqual(f.calls.filter((call) => call.kind === "text").map((call) => call.args[1]), ["完整结果"]);
-  await f.reopen(); await f.channel.deliver();
-  await f.channel.send({ id: "final", target: larkAddress("cli_progress", "oc_chat"), text: "完整结果" });
-  assert.equal(f.calls.filter((call) => call.kind === "text").length, 1);
-});
-
-
-test("Lark retries a failed live layout update after reconnecting", async (t) => {
-  const f = setup(t); await f.channel.deliver();
-  const update = f.transport.cards!.patch;
-  let fail = true;
-  f.transport.cards!.patch = async (...args) => { if (fail) { fail = false; throw new Error("layout update failed"); } await update(...args); };
-  f.view({ phase: "running", think: "读取资料", content: "继续" }); await f.channel.deliver();
-  await f.reopen(); await f.channel.deliver();
-  const card = f.card;
-  assert.equal(card.config.streaming_mode, true);
-  assert.equal(card.body.elements[0]?.tag, "collapsible_panel");
-});
-
-test("Lark long answers retain full text through the split transport", async (t) => {
-  const f = setup(t); await f.channel.deliver();
-  const text = "答案😀".repeat(2000);
-  await f.channel.send({ id: "long", target: larkAddress("cli_progress", "oc_chat"), text });
-  f.messages.push(message("long", text)); f.view({ phase: "done", content: Array.from(text).slice(0, 4000).join(""), overflow: true, messageIds: ["long"] });
-  await f.channel.deliver();
-  const parts = f.calls.filter((call) => call.kind === "text").map((call) => call.args[1]);
-  assert.equal(parts.join(""), text); assert.equal(parts.length, 2);
-});
-
-test("Lark projects Harness progress but only explicit messages become replies", { timeout: 20_000 }, async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "aide-lark-live-"));
-  let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
+test("Chief publishes think and text before completion, without duplicating the final Harness snapshot", { timeout: 20_000 }, async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-chief-stream-"));
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
   let emitter: { sink: HarnessEventSink; turnId: string } | undefined;
-  const options = fakeOptions({ chief: async () => { await gate; return "最终答案"; }, execute: async () => { throw new Error("No Work expected"); } }, root, [], root, "cli_progress");
-  const aide = new Aide(root, { ...options, createAdapter(target) {
-    const adapter = options.createAdapter(target), open = adapter.create.bind(adapter), send = adapter.prompt.bind(adapter);
+  const options = fakeOptions({ async chief() { await gate; return "最终答案"; }, async execute() { throw new Error("No Work expected"); } }, home, [], home, "cli_progress");
+  const aide = new Aide(home, { ...options, createAdapter(target) {
+    const adapter = options.createAdapter(target), create = adapter.create.bind(adapter), prompt = adapter.prompt.bind(adapter);
     let sink: HarnessEventSink;
-    adapter.create = async (...args) => { sink = args[1]; return open(...args); };
-    adapter.prompt = async (ref, input) => { emitter = { sink, turnId: input.invocationId }; return send(ref, input); }; return adapter;
+    adapter.create = async (...args) => { sink = args[1]; return create(...args); };
+    adapter.prompt = async (ref, input) => { if (target.harness === "chief") emitter = { sink, turnId: input.invocationId }; return prompt(ref, input); }; return adapter;
   } }, log);
-  t.after(async () => { release(); await aide.close(); rmSync(root, { recursive: true, force: true }); });
+  t.after(async () => { release(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
   transportFixture(aide);
-  await aide.receive(fixtureIncoming({ channelId: "lark", id: "om_live", topicId, source: larkThreadAddress("cli_progress", "oc_chat", "om_live"), text: "查看工作" }));
-  for (let i = 0; i < 200 && !emitter; i++) await Bun.sleep(10);
-  assert.ok(emitter);
-  emitter.sink({ kind: "agent_thought_chunk", invocationId: emitter.turnId, payload: { messageId: "thought", content: { type: "text", text: "先读资料" } } });
-  emitter.sink({ kind: "agent_message_chunk", invocationId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "正在核对" } } });
-  const live = larkProgress(aide, topicId)[0]!;
-  assert.equal(live.phase, "running"); assert.equal(live.think, ""); assert.equal(live.content, "");
-  assert.deepEqual(larkProgress(aide, "me"), []);
-  emitter.sink({ kind: "tool_call_update", invocationId: emitter.turnId, payload: { toolCallId: "active", title: "采集内存", status: "in_progress" } });
-  emitter.sink({ kind: "tool_call_update", invocationId: emitter.turnId, payload: { toolCallId: "finished", title: "读取环境", status: "completed" } });
-  assert.equal(larkProgress(aide, topicId)[0]!.process?.tool, "");
-  emitter.sink({ kind: "tool_call_update", invocationId: emitter.turnId, payload: { toolCallId: "active", status: "failed" } });
-  assert.equal(larkProgress(aide, topicId)[0]!.think, "", "Private tool outcomes remain on the owner Web surface");
-  emitter.sink({ kind: "agent_message_chunk", invocationId: emitter.turnId, payload: { messageId: "reply", content: { type: "text", text: "\u0000".repeat(4000) + "最新结果已到达" } } });
-  const large = larkProgress(aide, topicId)[0]!;
-  assert.equal(large.content, "", "Raw model text is internal, even while streaming");
-  assert.equal(large.overflow, false);
-  assert.ok(Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(large, false)) })) <= 28_000);
+  await aide.receive(fixtureIncoming({ channelId: "lark", id: "live", topicId, source: larkThreadAddress("cli_progress", "oc_chat", "live"), text: "查看工作" }));
+  await until(() => !!emitter);
+  assert.equal(aide.outputStore.list().length, 1, "Output exists before the first token");
+  emitter!.sink({ kind: "agent_thought_chunk", invocationId: emitter!.turnId, payload: { messageId: "thought", content: { type: "text", text: "先读资料" } } });
+  emitter!.sink({ kind: "agent_thought", invocationId: emitter!.turnId, payload: { messageId: "thought", content: [{ type: "text", text: "先读资料，再核对" }] } });
+  emitter!.sink({ kind: "agent_message_chunk", invocationId: emitter!.turnId, payload: { messageId: "reply", content: { type: "text", text: "正在核对" } } });
+  const output = aide.outputStore.list()[0]!;
+  await until(() => aide.outputStore.content(output).text === "正在核对");
+  assert.equal(aide.outputStore.content(output).think, "先读资料，再核对");
+  assert.equal(aide.outputStore.content(output).phase, "open");
   release(); await aide.settled();
-  assert.equal(larkProgress(aide, topicId)[0]!.content, "", "Checked but unsent content cannot leak via the card");
-  const generated = aide.outputStore.list()[0]!;
-  const original = aide.outputStore.create(topicId, "thread-reply", { ...generated.spec,
-    target: larkThreadAddress("cli_progress", "oc_chat", "om_live") });
-  await aide.outputStore.prepare(original.metadata.name);
-  aide.outputStore.begin(original.metadata.name); aide.outputStore.delivered(original.metadata.name);
-  assert.deepEqual(aide.outputStore.get(original.metadata.name)!.status.delivery!.target, larkThreadAddress("cli_progress", "oc_chat", "om_live"));
-  const done = larkProgress(aide, topicId)[0]!;
-  assert.equal(done.phase, "done"); assert.equal(done.content, "最终答案"); assert.equal(done.messageIds.length, 0);
-  aide.outputStore.create(("sessionId" in original.metadata ? "unexpected" : undefined)!, "another-destination", { ...original.spec,
-    text: "另一群的专属内容", target: larkAddress("cli_progress", "another-chat") });
-  await aide.outputStore.prepare("another-destination");
-  aide.outputStore.begin("another-destination"); aide.outputStore.delivered("another-destination");
-  const addressed = larkProgress(aide, topicId)[0]!;
-  assert.equal(addressed.content, "最终答案");
-  assert.deepEqual(addressed.messageIds, done.messageIds, "A card cannot deliver or acknowledge another destination's Output");
+  assert.equal(aide.outputStore.list().length, 1);
+  assert.equal(aide.outputStore.content(output).phase, "completed");
+  assert(aide.outputStore.content(output).text.endsWith("最终答案"));
 });
-
 test("official SDK creates, sends, streams and finalizes CardKit cards through the shared client", async (t) => {
   const original = Lark.defaultHttpInstance.defaults.adapter;
   t.after(() => { Lark.defaultHttpInstance.defaults.adapter = original; });
@@ -304,50 +172,6 @@ test("official SDK creates, sends, streams and finalizes CardKit cards through t
 });
 
 
-test("Lark upgrades persisted legacy panels only once when execution continues", async (t) => {
-  const f = setup(t); await f.channel.deliver(); await f.channel.close();
-  const path = join(f.home, "channels", readdirSync(join(f.home, "channels"))[0]!);
-  const state = JSON.parse(readFileSync(path, "utf8"));
-  delete state.cards.input.layout; delete state.cards.input.previews;
-  state.chats = ["oc_chat"];
-  writeFileSync(path, JSON.stringify(state));
-  await f.reopen();
-  f.view({ phase: "running", think: "继续处理" }); await f.channel.deliver();
-  assert.equal(f.calls.filter((call) => call.kind === "update").length, 1);
-  f.view({ think: "新进展" }); await f.channel.deliver();
-  assert.equal(f.calls.filter((call) => call.kind === "update").length, 1);
-  assert.equal(f.calls.filter((call) => call.kind === "send").length, 1);
-});
-
-
-/** @case One native invocation can acknowledge inputs incrementally without closing its IM card early. */
-test("Lark keeps a shared invocation card running until steered input and execution settle", async t => {
-  const home = mkdtempSync(join(tmpdir(), "aide-lark-steer-card-"));
-  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
-  const options = fakeOptions({ notify: false, async chief() { await gate; return "Handled"; }, async execute() { throw new Error("No work"); } }, home);
-  const aide = new Aide(home, { ...options, createAdapter(target) {
-    return { ...options.createAdapter(target), async steer() { return { accepted: true as const, effective: "steer" as const }; } };
-  } }, log);
-  t.after(async () => { release(); await aide.close(); rmSync(home, { recursive: true, force: true }); });
-  await aide.topics.ensure(topicId);
-  transportFixture(aide);
-  await aide.start();
-  const spec = { topicId, origin: "channel" as const, originId: "lark", source: larkAddress("cli_progress", "oc_chat"), text: "request" };
-  await aide.topics.submit("first", spec);
-  for (let n = 0; n < 200 && !aide.topics.resource(topicId)!.status.execution; n++) await Bun.sleep(10);
-  await aide.topics.submit("urgent", spec);
-  for (let n = 0; n < 200 && !aide.topics.inputStore.get("urgent")!.status.assess?.executionId; n++) await Bun.sleep(10);
-  assert.equal(larkProgress(aide, topicId).length, 1);
-  assert.equal(larkProgress(aide, topicId)[0]!.phase, "running");
-  const client = aide.runtime.plugins.resourceClient("personal");
-  const current = aide.topics.resource(topicId)!;
-  await assessAll(client, current, current.status.execution!.id, { inputIds: ["first"], summary: "Handled" });
-  assert.equal(larkProgress(aide, topicId)[0]!.phase, "running");
-  release(); await aide.settled();
-  assert.equal(larkProgress(aide, topicId).length, 1);
-  assert.equal(larkProgress(aide, topicId)[0]!.phase, "done");
-});
-
 test("Lark chat names use the existing SDK client and timeout", async t => {
   const original = Lark.defaultHttpInstance.defaults.adapter;
   t.after(() => { Lark.defaultHttpInstance.defaults.adapter = original; });
@@ -367,36 +191,15 @@ test("Lark chat names use the existing SDK client and timeout", async t => {
   await assert.rejects(transport.chatName("oc_group"), /99991672/);
 });
 
-/** @case A mute arriving during card creation prevents the visible send and survives retries. */
-test("Address mute blocks presentation after awaited card creation", async t => {
-  const f = setup(t), places = new Addresses(f.home), place = places.observe(larkAddress("cli_progress", "oc_chat"));
-  const create = f.transport.cards!.create;
-  f.transport.cards!.create = async (...args) => {
-    const result = await create(...args);
-    places.setMuted(addressRef(place), true, false);
-    return result;
-  };
-  await f.channel.deliver();
-  assert.equal(f.calls.filter(c => c.kind === "send").length, 0);
-  await f.channel.deliver();
-  assert.equal(f.calls.filter(c => c.kind === "send").length, 0);
-});
 
-
-test("progress for one Topic does not read unrelated Topic material", async t => {
-  const home = mkdtempSync(join(tmpdir(), "aide-scoped-progress-"));
-  const aide = new Aide(home, fakeOptions({ async chief() { throw new Error("No inference expected"); }, async execute() { throw new Error("No Work expected"); } }, home), pino({ level: "silent" }));
-  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
-  await seedInput(aide.topics, "selected", { topicId: "selected", origin: "channel", originId: "web", text: "selected" });
-  const storage = aide.topics.resources.storage;
-  let reads = 0;
-  const read = storage.read.bind(storage);
-  storage.read = (...args) => { reads++; return read(...args); };
-  const expected = larkProgress(aide, "selected"), baseline = reads;
-  for (let i = 0; i < 25; i++) await seedInput(aide.topics, `other-${i}`, {
-    topicId: `other-${i}`, origin: "channel", originId: "web", text: "Unrelated pending input",
-  });
-  reads = 0;
-  assert.deepEqual(larkProgress(aide, "selected"), expected);
-  assert.equal(reads, baseline, "Unrelated Topics must not increase per-chat resource reads");
+test("Card serialization budget includes escaped content without losing the answer tail", async t => {
+  const f = setup(t), text = "\0\\\"".repeat(4000);
+  await f.send(completed(1, "\0".repeat(4000), text));
+  const payload = f.calls.find(c => c.kind === "create")!.args[0];
+  assert(Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(payload) })) <= 28_000);
+  const panels = f.card.body.elements[0]!.elements as Array<{ elements?: Array<{ element_id?: string; content?: string }> }>;
+  const rendered = panels.flatMap(p => p.elements ?? []).find(e => e.element_id === "content")!.content!;
+  const prefix = rendered.split("\n\n（内容较长")[0]!;
+  const tail = f.calls.filter(c => c.kind === "text").map(c => String(c.args[1])).join("");
+  assert.equal(prefix + tail, text);
 });

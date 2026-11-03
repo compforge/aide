@@ -53,7 +53,8 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   });
   assert.equal(failed.status, 200);
   await aide.settled();
-  assert.equal(aide.outputs().length, 0);
+  assert.equal(aide.outputs().length, 1);
+  assert.equal(aide.outputStore.content(aide.outputStore.list()[0]!).phase, "interrupted");
   assert.equal(aide.topics.inputs("me")[0]!.consumption.phase, undefined);
   assert.ok(aide.topics.resource("me")!.status.lastError);
   assert.equal(aide.works().length, 0);
@@ -65,10 +66,10 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   const ack = await response.json() as { inputId: string; at: string };
   await aide.settled();
   const outgoing = await (await fetch(`${url}/messages?topicId=me&role=all`)).json() as { text: string }[];
-  assert.equal(outgoing.length, 1);
-  assert.equal(outgoing[0]?.text, "今天完成了三件事");
+  assert.equal(outgoing.length, 2);
+  assert.equal(outgoing.at(-1)?.text, "今天完成了三件事");
   const history = await (await fetch(`${url}/messages?topicId=me&role=all`)).json() as { role: string; text: string }[];
-  assert.equal(history.length, 1);
+  assert.equal(history.length, 2);
   assert.ok(aide.personal.topics.inputStore.get(ack.inputId));
   assert.ok(history.every((message) => message.role === "aide"));
   const works = await (await fetch(`${url}/work?topicId=me`)).json() as { status: string; id: string }[];
@@ -250,7 +251,7 @@ test("Web deletes Tasks and Routines through WorkService and preserves other top
   await aide.settled();
   assert.deepEqual(await (await fetch(base + "/work?topicId=" + encodeURIComponent(group))).json(), []);
   assert.deepEqual(aide.work("other").list().map((item) => item.id), [foreign.id]);
-  assert.equal(aide.outputStore.get("retained-reply")?.spec.text, "已建立监控");
+  assert.equal(aide.outputStore.content(aide.outputStore.get("retained-reply")!).text, "已建立监控");
   assert.equal(await aide.event({ id: "after-delete",  topicId: group, name: "memory.changed", text: "changed" }), 0);
   await aide.settled();
   assert.equal(requests.length, 0);

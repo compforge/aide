@@ -1,3 +1,4 @@
+import { STREAM_TYPE } from "@compforge/aide-plugin";
 import { registerOutputs } from "./output/reconcile.ts";
 import { registerInputs } from "./input/assignment.ts";
 import { registerNotes } from "./note/reconcile.ts";
@@ -34,6 +35,7 @@ const plugin: PluginPackage = {
     context.controllers.register({ resourceType: ADDRESS_TYPE, reconcile: async () => {} });
     registerNotes(context);
     registerOutputs(context);
+    context.controllers.register({ resourceType: STREAM_TYPE, reconcile: async () => {} });
   },
 };
 export default plugin;

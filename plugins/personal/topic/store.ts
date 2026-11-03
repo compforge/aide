@@ -116,7 +116,7 @@ export class TopicStore {
   outputs(topicId?: string): OutputView[] {
     const selected = topicId ? this.resource(topicId) : undefined;
     const resources = topicId ? selected ? this.scope(selected.metadata.uid) : [] : this.listResources();
-    return resources.flatMap((c) => this.outputStore.list({ topicUid: c.metadata.uid }).map(outputView))
+    return resources.flatMap((c) => this.outputStore.list({ topicUid: c.metadata.uid }).map(output => outputView(output, this.outputStore.streams)))
       .sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
   }
   private listResources(id?: string): TopicResource[] {
@@ -141,11 +141,11 @@ export class TopicStore {
     for (const c of this.listResources()) {
       const receipt = c.status.receipts.find((r) => r.key === key);
       const output = receipt && this.outputStore.get(receipt.responseId);
-      if (output) return outputView(output);
+      if (output) return outputView(output, this.outputStore.streams);
     }
   }
   async say(topicId: string, inputId: string | undefined, text: string, executionId?: string,
-    options: Omit<SayInput, "text"> = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { agent?: import("@compforge/aide-plugin").AgentStatus; execution?: { id: string } | null }>): Promise<SayReceipt> {
+    options: Omit<SayInput, "text"> & { streaming?: boolean } = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { agent?: import("@compforge/aide-plugin").AgentStatus; execution?: { id: string } | null }>): Promise<SayReceipt> {
     const initial = await this.ensure(topicId);
     const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
     const previous = this.outputStore.get(id);
@@ -230,7 +230,7 @@ export class TopicStore {
       const accepted = this.outputStore.get(id);
       const createdBy = accepted ? accepted.spec.createdBy
         : executionId ? agentCall((owner ?? c).status, options.idempotencyKey) : undefined;
-      const association = { ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
+      const association = { ...(options.streaming ? { streaming: true } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
       try {
         await commitStatus(this.client, [
           { operation: "patchStatus", resource: c, patch: {} },
@@ -268,6 +268,6 @@ export class TopicStore {
   private project(r: TopicResource): Topic {
     const pending = this.pending(r.metadata.uid);
     return { ...r.spec, name: r.spec.name || initialTopicName(pending[0]?.spec.text ?? ""), revision: Number(r.metadata.resourceVersion), createdAt: r.metadata.creationTimestamp,
-      pendingInputIds: pending.map(i => i.metadata.name), outputs: this.outputStore.list({ topicUid: r.metadata.uid }).map(outputView) };
+      pendingInputIds: pending.map(i => i.metadata.name), outputs: this.outputStore.list({ topicUid: r.metadata.uid }).map(output => outputView(output, this.outputStore.streams)) };
   }
 }
