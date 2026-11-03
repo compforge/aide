@@ -221,16 +221,22 @@ test("Note classification-only writes preserve body, associations and the summar
   const recent = await readNote(f.client, ordinary.noteId);
   assert.equal(recent.text, "Recent finding"); assert.deepEqual(recent.people, people);
   assert.equal(recent.sensitivity, "L2"); assert.equal(recent.visibility, "topic");
+  assert.equal(classified.sensitivity, recent.sensitivity); assert.equal(classified.visibility, recent.visibility);
   await assert.rejects(upsertNote(f.client, actor, { noteId: ordinary.noteId, version: ordinary.version, visibility: "any" }, "stale"), /version conflict/);
   const rewritten = await upsertNote(f.client, actor, { noteId: classified.noteId, version: classified.version, text: "Revised finding" }, "rewrite");
   assert.equal((await readNote(f.client, rewritten.noteId)).sensitivity, "L2");
-  const owner = await writeSummary(f.client, actor, { text: "Long-term understanding", people, sensitivity: "L1" });
+  assert.equal(rewritten.sensitivity, "L2"); assert.equal(rewritten.visibility, "topic");
+  const owner = await writeSummary(f.client, actor, { text: "Long-term understanding", people, sensitivity: "L3" });
   const summary = owner.summaryNote!;
-  await upsertNote(f.client, actor, { noteId: summary.id, version: summary.version, sensitivity: "L2", visibility: "root" }, "summary-classification");
+  const receipt = await upsertNote(f.client, actor, { noteId: summary.id, version: summary.version, sensitivity: "L2", visibility: "root" }, "summary-classification");
   const current = f.aide.topics.resource("summary")!;
   const note = (await readSummary(f.client, current))!;
   assert.equal(note.spec.text, "Long-term understanding"); assert.deepEqual(note.spec.people.toJSON(), people);
   assert.equal(note.spec.visibility, "root"); assert.equal(note.spec.sensitivity, "L2");
+  assert.equal(receipt.sensitivity, note.spec.sensitivity); assert.equal(receipt.visibility, note.spec.visibility);
+  assert.equal(receipt.version, noteVersion(note)); assert.equal(receipt.uid, note.metadata.uid);
+  const unchanged = await upsertNote(f.client, actor, { noteId: receipt.noteId, version: receipt.version, text: note.spec.text }, "summary-unchanged");
+  assert.deepEqual(unchanged, receipt);
   assert.equal(current.status.summaryRevision, noteVersion(note));
 });
 

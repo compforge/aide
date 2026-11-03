@@ -50,7 +50,7 @@ export function workContextTools(kind: "task" | "routine", resources: ResourceCl
       async execute(callId, args, signal) {
         signal?.throwIfAborted(); const owner = read();
         const value = await upsertNote(resources, owner, args, `${owner.status.execution!.id}:${callId}`);
-        log.info({ workUid: owner.metadata.uid, executionId: owner.status.execution!.id, kind, noteId: value.noteId, version: value.version }, "Work Note updated");
+        log.info({ workUid: owner.metadata.uid, executionId: owner.status.execution!.id, kind, noteId: value.noteId, version: value.version, sensitivity: value.sensitivity, visibility: value.visibility }, "Work Note updated");
         return result(value);
       } }),
   ];

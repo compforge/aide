@@ -60,6 +60,26 @@ test("one independent Note follows progress; tool retries preserve newer content
   await assert.rejects(f.upsert({ noteId: first.noteId, version: first.version, text: "stale edit" }, "stale"), /version conflict/);
   await assert.rejects(f.upsert({ noteId: "missing", version: done.version, text: "resurrection" }, "missing"), /no longer exists/);
 });
+test("Note receipts report stored classification across defaults, partial edits and retries", async t => {
+  const f = await setup(t);
+  const first = await f.upsert({ text: "Current finding" }, "classification-default");
+  assert.equal(first.sensitivity, "L3"); assert.equal(first.visibility, "people");
+  const lowered = await f.upsert({ noteId: first.noteId, version: first.version, sensitivity: "L1" }, "lower");
+  assert.equal(lowered.sensitivity, "L1"); assert.equal(lowered.visibility, "people");
+  const scoped = await f.upsert({ noteId: lowered.noteId, version: lowered.version, visibility: "any" }, "scope");
+  assert.equal(scoped.sensitivity, "L1"); assert.equal(scoped.visibility, "any");
+  assert.equal((await readNote(f.resources, scoped.noteId)).text, "Current finding");
+  const unchanged = await f.upsert({ noteId: scoped.noteId, version: scoped.version, text: "Current finding" }, "same-classification");
+  assert.deepEqual(unchanged, scoped);
+  const replay = await f.upsert({ text: "Current finding" }, "classification-default");
+  assert.deepEqual(replay, scoped);
+  const raised = await f.upsert({ noteId: scoped.noteId, version: scoped.version, sensitivity: "L2" }, "raise");
+  assert.equal(raised.sensitivity, "L2"); assert.equal(raised.visibility, "any");
+  const actual = await readNote(f.resources, raised.noteId);
+  assert.equal(raised.version, actual.version);
+  assert.equal(raised.sensitivity, actual.sensitivity); assert.equal(raised.visibility, actual.visibility);
+  await assert.rejects(f.upsert({ noteId: first.noteId, version: first.version, sensitivity: "L1" }, "stale-classification"), /version conflict/);
+});
 test("summary edits survive scheduling and Note changes, but reject concurrent content changes", async t => {
   const f = await setup(t), original = f.read(), version = contentVersion(original);
   await f.resources.patchStatus(original, { reviewCheckedAt: new Date().toISOString(), idleReviewCount: 2 });
@@ -226,6 +246,7 @@ test("upsert_note receipt supplies an exact citation for a newly submitted Outpu
   const receipt = JSON.parse((result.content[0] as { text: string }).text);
   const actual = await readNote(f.resources, receipt.noteId);
   assert.equal(receipt.uid, actual.uid); assert.equal(receipt.version, actual.version);
+  assert.equal(receipt.sensitivity, actual.sensitivity); assert.equal(receipt.visibility, actual.visibility);
   const output = composeMail(f.aide.outputStore, "notes", "receipt-citation", mailDraft(f.root, { text: actual.text, topicId: "notes", target: webAddress("notes") },
     { notes: [{ uid: receipt.uid, version: receipt.version }] }));
   const mail = mailView(f.aide.outputStore, output);

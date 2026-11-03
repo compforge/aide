@@ -1,4 +1,3 @@
-import { sensitivityRank } from "../disclosure.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { requireOrganization, requireTopic } from "../topic/ownership.ts";
 import { noteVersion } from "./model.ts";
@@ -48,7 +47,6 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
         })) return;
       }
     }
-    if (after.status.writer && (before.spec.text || before.spec.summaryOf) && sensitivityRank(after.spec.sensitivity ?? "L3") < sensitivityRank(before.spec.sensitivity ?? "L3")) throw new Error("Agent cannot lower existing Note sensitivity");
     if (!equalResourceValue(before.spec.subject, after.spec.subject) && (before.spec.sensitivity !== after.spec.sensitivity || before.spec.visibility !== after.spec.visibility)) throw new Error("Move Note separately from classification edits");
     if (before.spec.summaryOf && (!equalResourceValue(before.spec.summaryOf, after.spec.summaryOf)
       || !equalResourceValue(before.spec.subject, after.spec.subject))) throw new Error("Summary Note target is immutable");

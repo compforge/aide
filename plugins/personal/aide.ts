@@ -125,7 +125,7 @@ export class Personal {
       return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active, ref => this.store.topics.outputStore.deliveryCapability(ref)), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
         const c = active();
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
-        this.log.info({ topicId, topicUid: input.subject?.uid ?? c.metadata.uid, noteId: result.noteId, version: result.version }, "Topic Note updated");
+        this.log.info({ topicId, topicUid: input.subject?.uid ?? c.metadata.uid, noteId: result.noteId, version: result.version, sensitivity: result.sensitivity, visibility: result.visibility }, "Topic Note updated");
         return result;
       }, contextWriter: () => { const c = active(); return { resource: WriterResourceSchema.parse(resourceRef(c)), executionId: c.status.execution!.id }; }, beforeWorkMutation: () => { active(); } });
     };

@@ -89,6 +89,21 @@ test("move_note rechecks ancestor changes in the write transaction and supports 
   assert.equal((await f.get(initial.noteId)).spec.subject.uid, routine.metadata.uid);
 });
 
+test("Note review confirms the revised classification rather than the inspected old version", async t => {
+  const f = await setup(t);
+  const initial = await f.note({ text: "Finding is now public" }, "classification-review");
+  await reviewNotes(f.resources, f.read(), { notes: [{ noteId: initial.noteId, version: initial.version }] });
+  const revised = await f.note({ noteId: initial.noteId, version: initial.version, sensitivity: "L1", visibility: "any" }, "publish");
+  const beforeReview = await f.get(revised.noteId);
+  assert.equal(beforeReview.spec.text, "Finding is now public");
+  assert.equal(beforeReview.spec.sensitivity, "L1"); assert.equal(beforeReview.spec.visibility, "any");
+  await assert.rejects(reviewNotes(f.resources, f.read(), { notes: [{ noteId: initial.noteId, version: initial.version }] }), /changed before review/);
+  await reviewNotes(f.resources, f.read(), { notes: [{ noteId: revised.noteId, version: revised.version }] });
+  const reviewed = await f.get(revised.noteId);
+  assert.equal(reviewed.status.reviewed!.version, revised.version);
+  assert.equal(noteVersion(reviewed), revised.version);
+  assert.equal(reviewed.status.updatedAt, beforeReview.status.updatedAt);
+});
 test("Note review is versioned, bounded and follows current roots without refreshing content age", async t => {
   const f = await setup(t);
   for (let i = 0; i < 21; i++) {

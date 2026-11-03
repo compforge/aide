@@ -6,7 +6,7 @@ Aide 服务于 Me。Chief 可结合全部已有 Note 与最新 Input 生成正�
 
 ## Note 分类与接收者
 
-普通 Note 与 summaryOf Note 使用相同的 `sensitivity: L1 | L2 | L3` 和 `visibility: people | topic | root | any`。Person 的 `clearance` 表示允许接收的最高密级。Chief 创建 Note 时应明确给出分类；存储对未分类 Note 仍以 L3/people 兜底，Person 默认 L1。Input 可选携带 sensitivity/visibility，供 Chief 定级参考；未填写表示尚未定级，不自动等同于 L3。
+普通 Note 与 summaryOf Note 使用相同的 `sensitivity: L1 | L2 | L3` 和 `visibility: people | topic | root | any`。Person 的 `clearance` 表示允许接收的最高密级。Chief 可在创建或更新 Note 时指定分类；省略字段时，更新保留原值，新建使用 L3/people 默认值，Person 默认 L1。Input 可选携带 sensitivity/visibility，供 Chief 定级参考；未填写表示尚未定级，不自动等同于 L3。
 
 ### 定级与 Note 边界
 
@@ -18,7 +18,7 @@ Aide 服务于 Me。Chief 可结合全部已有 Note 与最新 Input 生成正�
 
 Input 的 sensitivity 是所使用事实的来源定级下限，显式 visibility 必须保留其限制。未定级 IM 由 Chief 根据正文与上下文判断；普通代码、MR、需求、部署和环境事实仍采用 L1/any。即使来源默认 L1，夹带的凭证或隐私也必须另作 L3 信息处理。无法判断的内容才以 L3/people 兜底，不因“来自 IM”或“属于代码”直接抬高所有信息。
 
-**一条 Note 的全部正文必须适用同一组 sensitivity/visibility 和相容的受众范围。** Chief 先判断事项是否相同，再判断分类是否相同；两者都满足才更新已有 Note，否则另建 Note。同一事项可以有开放进展 Note 和受限细节 Note，不通过扩大可见范围或整体提高密级来凑成一条。summaryOf Note 同样遵守这个约束，不同分类的细节保留为独立 Note。分类纠正仍使用现有分类编辑入口；Agent 不能降低已有 Note 密级。
+**一条 Note 的全部正文必须适用同一组 sensitivity/visibility 和相容的受众范围。** Chief 先判断事项是否相同，再判断分类是否相同；两者都满足才更新已有 Note，否则另建 Note。同一事项可以有开放进展 Note 和受限细节 Note，不通过扩大可见范围或整体提高密级来凑成一条。summaryOf Note 同样遵守这个约束，不同分类的细节保留为独立 Note。sensitivity/visibility 可随内容、公开状态或协作范围变化按需调整，包括提高或降低密级；分类适用性也是 Note review 的一部分。
 
 这属于 Agent 的内容组织职责；存储保存整条 Note 的分类，Output Reconcile 读取分类元数据，不解析正文判断其中各段属于什么级别。
 
@@ -49,7 +49,7 @@ Note 正文、people、sensitivity、visibility 可以独立修改，也可以�
 
 `people` 和 `receivers` 按 Person UID 集合表达，存储时统一去重、排序。人物顺序或重复项变化不改变含义，也不会改变披露指纹、发送意图或重试投递；实际成员或权限变化仍会重新检查，已尝试的投递不可更换接收者。
 
-没有额外授权锚点。move_note、工作归属与 Topic parent 变化会影响下一次检查；删除或无法解析的关系不能凭空授予权限。既有 Note 的 Agent 更新不能降低 sensitivity；合成或匿名化不是降低密级的理由。Person 合并摘要保留最高 sensitivity，不同 visibility 需要先统一分类。
+没有额外授权锚点。move_note、工作归属与 Topic parent 变化会影响下一次检查；删除或无法解析的关系不能凭空授予权限。Agent 可通过现有分类编辑入口调整 Note 的 sensitivity/visibility；合成或匿名化本身不意味着分类已经变化。Person 合并摘要保留最高 sensitivity，不同 visibility 需要先统一分类。
 
 Me 在人物页面编辑 clearance；主题参与者通过 `POST /topics/people` 设置 `{id,uid,version,people}`。近期人物预览不是完整参与名单。people 范围是产品采用的近似策略，不是来源证明或严格的信息流追踪。
 
@@ -69,7 +69,7 @@ Me 在人物页面编辑 clearance；主题参与者通过 `POST /topics/people`
 
 `say` 原子创建邮件和投递任务。Output 保存不可变的 stream（UID 引用）、target、receivers，以及可选的 Input 追溯信息；notes 转为 Stream.status.references（UID、读取版本与正文指纹）。实时生成通过 cite_output 补充引用，关闭后冻结。Agent 负责内容正确性、分类准确性和引用完整性；引用覆盖整份可发送 Stream，包括回答、思考和工具结果使用的近期与长期 Note。对外内容使用新 Input 的事实时，先将相关事实整理到可引用、可分类的 Note。仅向 Me 沟通不强制先写 Note。工具只确认已接纳，不确认送达。
 
-upsert_note 回执返回 noteId、uid、version；引用使用 uid/version，后续编辑使用 noteId。say 与 cite_output 写入引用时拒绝不存在、已删除或版本失效的 Note，返回可修正的工具错误；整批失败不保留部分引用，say 不提交 Output、Stream 或接纳回执。已接纳的同键重试仍返回原回执。投递前继续检查后续变化。
+upsert_note 回执返回 noteId、uid、version 和实际生效的 sensitivity/visibility（包括继承值、默认值和重试时的当前值）；引用使用 uid/version，后续编辑使用 noteId。say 与 cite_output 写入引用时拒绝不存在、已删除或版本失效的 Note，返回可修正的工具错误；整批失败不保留部分引用，say 不提交 Output、Stream 或接纳回执。已接纳的同键重试仍返回原回执。投递前继续检查后续变化。
 
 写入引用时核对 Note 读取版本，并单独固定引用 Note 的正文指纹。发送前读取当前分类：分类变化触发重新计算，正文修改或 Note 回收导致引用失效。`status.disclosure.policy` 保存本次计算结果，fingerprint 标识材料、组织关系、人物与实际受众等依赖。
 
