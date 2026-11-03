@@ -1,9 +1,11 @@
+import { InputClassificationFields, inputClassification } from "../../disclosure.ts";
 import { z } from "zod";
 import type { RepositoryKey, Resource } from "@compforge/aide-plugin";
 import type { RepositoryWatch, RepositorySourceSpec } from "../repository/config.ts";
 import { digest } from "../../chief-model.ts";
 
 const policy = {
+  ...InputClassificationFields,
   id: z.string().trim().min(1),
   author: z.string().regex(/^[a-zA-Z0-9_.-]+$/),
   intervalMs: z.number().int().min(30_000).max(3_600_000).default(300_000),
@@ -46,9 +48,9 @@ export function validateForgeSources(repositories: readonly RepositoryWatch[], p
 
 export function pullRequestSpec(watch: PullRequestWatch, parent?: Resource<RepositorySourceSpec, unknown>, repository?: RepositoryKey, connectionRevision = ""): PullRequestSourceSpec {
   const { id, author, intervalMs, initialLookbackMs } = watch;
-  if ("forge" in watch) return { id, forge: watch.forge, author, intervalMs, initialLookbackMs, connectionRevision };
+  if ("forge" in watch) return { ...inputClassification(watch), id, forge: watch.forge, author, intervalMs, initialLookbackMs, connectionRevision };
   if (!parent || !repository || parent.spec.id !== watch.repositories || repository.forge.name !== parent.spec.forge) throw new Error("PullRequest repository scope does not match its configured Source");
-  return { id, forge: parent.spec.forge, author, intervalMs, initialLookbackMs, repository, connectionRevision: parent.spec.connectionRevision,
+  return { ...inputClassification(parent.spec), ...inputClassification(watch), id, forge: parent.spec.forge, author, intervalMs, initialLookbackMs, repository, connectionRevision: parent.spec.connectionRevision,
     repositorySource: { name: parent.metadata.name, uid: parent.metadata.uid } };
 }
 export const pullRequestSourceName = (spec: PullRequestSourceSpec) => digest([

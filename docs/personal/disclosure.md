@@ -6,7 +6,39 @@ Aide 服务于 Me。Chief 可结合全部已有 Note 与最新 Input 生成正�
 
 ## Note 分类与接收者
 
-普通 Note 与 summaryOf Note 使用相同的 `sensitivity: L1 | L2 | L3` 和 `visibility: people | topic | root | any`。Person 的 `clearance` 表示允许接收的最高密级。创建 Note 时可省略分类，存储默认 L3/people；Person 默认 L1。Input 只保存输入事实，不建立第二套分类。
+普通 Note 与 summaryOf Note 使用相同的 `sensitivity: L1 | L2 | L3` 和 `visibility: people | topic | root | any`。Person 的 `clearance` 表示允许接收的最高密级。Chief 创建 Note 时应明确给出分类；存储对未分类 Note 仍以 L3/people 兜底，Person 默认 L1。Input 可选携带 sensitivity/visibility，供 Chief 定级参考；未填写表示尚未定级，不自动等同于 L3。
+
+### 定级与 Note 边界
+
+| 敏感度 | 定义 | 典型内容 |
+| --- | --- | --- |
+| L1 开放协作信息 | 可以向任何人交流的日常工作信息，通常为 any | 代码、仓库、PR/MR、需求、部署与 environment 信息，以及普通问候和工作进展 |
+| L2 限定协作信息 | 具有工作价值，但仅适合在明确协作范围内交流 | 未公开商务报价、内部决策讨论等；按实际依据选择 people/topic/root |
+| L3 严格保密信息 | 凭证和工作不必要知晓的个人隐私 | 密钥、令牌、密码、健康、家庭、私人财务等；按实际依据限制范围 |
+
+Input 的 sensitivity 是所使用事实的来源定级下限，显式 visibility 必须保留其限制。未定级 IM 由 Chief 根据正文与上下文判断；普通代码、MR、需求、部署和环境事实仍采用 L1/any。即使来源默认 L1，夹带的凭证或隐私也必须另作 L3 信息处理。无法判断的内容才以 L3/people 兜底，不因“来自 IM”或“属于代码”直接抬高所有信息。
+
+**一条 Note 的全部正文必须适用同一组 sensitivity/visibility 和相容的受众范围。** Chief 先判断事项是否相同，再判断分类是否相同；两者都满足才更新已有 Note，否则另建 Note。同一事项可以有开放进展 Note 和受限细节 Note，不通过扩大可见范围或整体提高密级来凑成一条。summaryOf Note 同样遵守这个约束，不同分类的细节保留为独立 Note。分类纠正仍使用现有分类编辑入口；Agent 不能降低已有 Note 密级。
+
+这属于 Agent 的内容组织职责；存储保存整条 Note 的分类，Output Reconcile 读取分类元数据，不解析正文判断其中各段属于什么级别。
+
+### 来源配置
+
+`plugins.personal.sources.repositories[]`、`pullRequests[]`、`requirements[]`、`environments`、`lark` 均可选配置 sensitivity 和 visibility。PR/MR、需求和 environment producer 默认生成 L1/any Input。RepositorySource 负责仓库目录，其分类传给关联的 PullRequestSource；PullRequest watch 的显式值优先。IM producer 默认不填，两字段也可以分别配置。
+
+```yaml
+plugins:
+  personal:
+    sources:
+      pullRequests:
+        - id: work
+          forge: github
+          author: me
+          sensitivity: L1
+          visibility: any
+```
+
+分类在生成 Input 及其持久化待提交计划时确定；重试复用同一计划。Input 详情页与 Agent 预览展示来源分类。Input 元数据不直接授权发送；Chief 生成 Note 的分类仍由现有披露策略消费。
 
 Note 正文、people、sensitivity、visibility 可以独立修改，也可以一次提交。upsert_note 更新时只需给出要改的字段，省略保留原值；新建必须提供正文。摘要 Note 通过同一接口修改，事务内同步所属对象的摘要指纹。summarize_topic 可只更新分类，也可同时确认 absorbed 子主题版本，两种效果都必须落盘。Person 摘要允许 topic/root 分类；范围无法解析只影响对外投递，不妨碍内部认识更新。
 

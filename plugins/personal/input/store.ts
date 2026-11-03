@@ -1,3 +1,4 @@
+import { inputClassification } from "../disclosure.ts";
 import { channelPromotion, inputIdentity } from "./identity.ts";
 import { admitInput } from "./admission.ts";
 import { Addresses } from "../address/service.ts";
@@ -54,7 +55,9 @@ export class InputStore {
       const input = existing.object as Resource<InputSpec, InputStatus>;
       if (inputIdentity(input.spec)?.key !== identity.key) throw new ResourceAlreadyExists("Input message identity conflicts");
       if (!channelPromotion(input.spec, raw)) return input;
-      const spec = admitInput(new Addresses(this.storage.home), raw);
+      const spec = admitInput(new Addresses(this.storage.home), { ...raw, ...inputClassification({
+        sensitivity: raw.sensitivity ?? input.spec.sensitivity, visibility: raw.visibility ?? input.spec.visibility,
+      }) });
       const promoted = this.resources.replace(INPUT_TYPE, id, spec, input.status);
       this.notify(existing.owner as string, promoted);
       return promoted;

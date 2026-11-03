@@ -1,6 +1,6 @@
 # Input：事实与处理痕迹
 
-披露权限与实际投递见 [披露边界](disclosure.md)：Note 使用 sensitivity/visibility，Input 不重复分类，人物使用 clearance；Output 由 Reconciler 检查后投递。
+披露权限与实际投递见 [披露边界](disclosure.md)：Input 可携带 producer 给出的 sensitivity/visibility，Chief 据此形成 Note 分类，人物使用 clearance；Output 由 Reconciler 检查后投递。
 
 ## 整体定位
 
@@ -16,6 +16,7 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 
 | 信息 | 含义 |
 | --- | --- |
+| sensitivity、visibility | 可选的来源分类；未填表示尚未定级，由 Chief 根据内容判断；不是投递授权 |
 | text、observation | 来源内容与证据；外部观察保留事实，内置 Input 保存回顾、分理、组织请求及触发证据 |
 | origin、originId、originRef | channel / source / chief / aide:review / aide:triage / aide:organize 分类、来源定义与可选产生资源引用 |
 | sender、relation | 可选的发送 Person 引用，以及输入相对于 Me 的关系 |
@@ -136,7 +137,7 @@ Output 只在其 inputIds 显式包含当前 Input 时关联，不按相邻顺�
 
 ## 挂载、分派与执行
 
-Input v1alpha6 使用 AddressRef 保存来源位置，并将内容归属和处理分派分开，披露分类统一放在 Note。Input 通过 sender 表示发言人，通过 source 表示场合，不声明 receivers。
+Input v1alpha6 使用 AddressRef 保存来源位置，并将内容归属和处理分派分开，投递检查使用 Note 的最终分类，Input 分类提供来源依据。Input 通过 sender 表示发言人，通过 source 表示场合，不声明 receivers。
 
 1. 挂载：明确定位或 Route 分类写入 status.topic（topic1），保留首次 route 回执。
 2. 分派：沿 topic1 的 parent 链找到当前 root，写入 status.assess.topic（topic2）。Route 完成后立即尝试确定性分派；独立 Input Reconcile 恢复中断、处理后续归属变化，不调用模型；直接交给 Routine 的订阅事件没有 assess 阶段，不因此额外触发 Chief。

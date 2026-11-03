@@ -145,3 +145,14 @@ test("Without inputKey, name and content retain the existing admission contract"
   await assert.rejects(f.submit("empty-key", { ...spec, inputKey: "" }), /inputKey/);
   await assert.rejects(f.submit("null-key", { ...spec, inputKey: null as unknown as string }), /inputKey/);
 });
+
+test("Unclassified Channel promotion preserves the source classification of the same Input", async t => {
+  const f = fixture(t);
+  const source = await f.submit("source", { ...f.source, sensitivity: "L2", visibility: "people" });
+  const promoted = await f.submit("channel", f.channel);
+  assert.equal(promoted.metadata.uid, source.metadata.uid);
+  assert.equal(promoted.spec.origin, "channel");
+  assert.equal(promoted.spec.sensitivity, "L2");
+  assert.equal(promoted.spec.visibility, "people");
+  assert.deepEqual(promoted.status, source.status);
+});

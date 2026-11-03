@@ -9,6 +9,10 @@ export const NOTE_TYPE = { apiVersion: "aide.dev/v1alpha4", kind: "Note" } as co
 export const WriterResourceSchema = z.object({ apiVersion: z.string().min(1), kind: z.enum(["Topic", "Task", "Routine"]),
   namespace: z.literal("v1"), name: z.string().min(1), uid: z.string().min(1) }).strict();
 export const SubjectSchema = WriterResourceSchema.extend({ kind: z.enum(["Topic", "Task", "Routine", "Person", "Address"]) });
+/** @spec One Note's entire body shares one sensitivity, visibility and compatible disclosure audience.
+ * @why Differently classified facts belong in separate Notes, even when they concern the same matter.
+ * @link docs/personal/disclosure.md
+ */
 export const NoteSpecSchema = z.object({ subject: SubjectSchema, summaryOf: SubjectSchema.optional(), people: PersonRefsSchema().prefault([]),
   addresses: AddressRefsSchema.prefault([]), text: z.string().max(16000), ...DisclosureFields }).strict();
 export const NoteWriterSchema = z.object({ resource: WriterResourceSchema, executionId: z.string().min(1) }).strict();

@@ -1,7 +1,9 @@
+import { InputClassificationFields } from "../../disclosure.ts";
 import { z } from "zod";
 
 export const RepositorySchema = z.object({ forge: z.string().min(1), path: z.string().min(1) });
 export const WatchSchema = z.object({
+  ...InputClassificationFields,
   id: z.string().min(1), source: z.string().min(1), topicKey: z.string().min(1).max(200).optional(),
   intervalMs: z.number().int().min(30_000).default(300_000),
   repositories: z.array(RepositorySchema).default([]),

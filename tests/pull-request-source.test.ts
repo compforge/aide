@@ -70,6 +70,7 @@ test("merged is admitted once while coverage issues survive and successful items
   assert.equal(f.resource().status.error,null);assert.equal(f.resource().status.cursor,"scan-cursor");
   const input=f.inputs.list()[0]!;assert.equal(input.spec.observation?.kind,"forge.merged");
   assert.equal(input.spec.originRef?.uid,f.resource().metadata.uid);
+  assert.equal(input.spec.sensitivity, "L1"); assert.equal(input.spec.visibility, "any");
   f.setRead(async()=>scanResult([merged()]));await f.restart();await f.observe(60);
   assert.equal(f.inputs.list().length,1);assert.deepEqual(f.resource().status.issues,[]);assert.equal(f.resource().status.scanComplete,true);
 });
@@ -249,4 +250,12 @@ test("a retired observer drains frozen Inputs and batches without another Forge 
   await observePullRequests({ logger, resources: f.resources }, f.resource(), f.connectors, at(60), false);
   assert.equal(f.inputs.list().length, 2); assert.equal(f.resource().status.batch, null);
   assert.equal(f.resource().status.pending, null); assert.equal(f.resource().status.retiredAt, at(60));
+});
+
+test("PullRequest classification overrides are preserved in admitted Inputs", async t => {
+  const f = fixture(t), source = f.resource();
+  await f.resources.replace(source, { ...source.spec, sensitivity: "L2", visibility: "topic" }, source.status);
+  f.setRead(async () => scanResult([merged()])); await f.observe(30);
+  assert.equal(f.inputs.list()[0]!.spec.sensitivity, "L2");
+  assert.equal(f.inputs.list()[0]!.spec.visibility, "topic");
 });

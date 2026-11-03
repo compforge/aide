@@ -1,3 +1,4 @@
+import { workInputClassification } from "../../disclosure.ts";
 import { patchStatus } from "../../status.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
 import { InputAttention } from "../../input/model.ts";
@@ -69,7 +70,7 @@ class PullRequestObservation {
     const name = digest([this.resource.metadata.uid, sequence]);
     const change = previous ? `${previous.snapshot.state ?? "未知"} → merged` : "首次观察到已合并";
     const location = repositoryTopics.locate(identity.repository);
-    const spec: SourceInput = { topicKey: location.selector.key, topicName: location.name.slice(0, 80), relation: "observed", attention: InputAttention.Normal,
+    const spec: SourceInput = { ...workInputClassification(this.resource.spec), topicKey: location.selector.key, topicName: location.name.slice(0, 80), relation: "observed", attention: InputAttention.Normal,
       text: `PR/MR ${identity.repository.forge.name}/${identity.repository.path} #${identity.number}：${snapshot.title ?? ""}
 ${change}
 revision：${snapshot.headSha ?? "未知"}

@@ -1,3 +1,4 @@
+import { renderNoteClassification } from "../shared/note-classification.ts";
 import type { TopicView } from "../../channel/view.ts";
 import { byId, element } from "../shared/dom.ts";
 import { updateMarkdown } from "../shared/markdown.ts";
@@ -12,6 +13,7 @@ export function createTopicContextPanel() {
     const text = context?.summary.trim() ?? "";
     updateMarkdown(summary, text || "尚未形成话题摘要。");
     summary.classList.toggle("muted", !text);
+    renderNoteClassification(summary, context?.summaryNote);
     const recent = byId("topic-recent");
     recent.replaceChildren();
     if (!context?.recent.length) recent.append(element("p", "暂无近期记录。", "muted"));
@@ -22,6 +24,7 @@ export function createTopicContextPanel() {
       const content = element("div", undefined, "markdown");
       updateMarkdown(content, entry.text);
       item.append(time, content);
+      renderNoteClassification(item, entry);
       recent.append(item);
     }
   }

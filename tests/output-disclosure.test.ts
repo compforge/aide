@@ -518,3 +518,21 @@ test("a mention in Me's DM leaves fallback private and delivers the refusal", as
   assert.equal(sent, 1);
   assert.equal(f.store.get("mention-refusal")!.status.phase, "delivered");
 });
+
+/** @case Open work facts and private details about the same Topic remain independent disclosure units. */
+test("L1 any work Note reaches an unrelated L1 recipient while a separate private Note stays restricted", async t => {
+  const f = await setup(t);
+  const { InputStore } = await import("../plugins/personal/input/store.ts");
+  const { workInputClassification } = await import("../plugins/personal/disclosure.ts");
+  const input = new InputStore(f.store.storage.home).submit("test", "merged-mr", {
+    origin: "source", originId: "personal.pullRequests", text: "MR merged", ...workInputClassification({}),
+  });
+  const work = await f.note(input.spec.sensitivity, input.spec.visibility);
+  const privateDetail = await f.note("L3", "people", [personRef(f.me)]);
+  f.output("public-progress", work); await f.checker.reconcile("public-progress");
+  assert.equal(f.store.get("public-progress")!.status.disclosure!.decision, "allowed");
+  assert.deepEqual(f.store.get("public-progress")!.status.delivery!.receivers.toJSON(), [personRef(f.other)]);
+  f.output("private-detail", privateDetail); await f.checker.reconcile("private-detail");
+  assert.equal(f.store.get("private-detail")!.status.disclosure!.decision, "denied");
+  assert.deepEqual(f.store.get("private-detail")!.status.delivery!.receivers.toJSON(), [personRef(f.me)]);
+});

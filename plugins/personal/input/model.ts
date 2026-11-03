@@ -1,3 +1,4 @@
+import type { MaterialDisclosure } from "../disclosure.ts";
 import type { ResourceRef } from "@compforge/aide-plugin";
 
 export interface InputReceipt { inputId: string; at: string }
@@ -24,7 +25,7 @@ export const inputQueue = (input: InputSpec): string => isInternalInput(input) ?
 export type InputRelation = "sent" | "received" | "observed";
 
 export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha6", kind: "Input" } as const;
-export interface InputSpec {
+export interface InputSpec extends MaterialDisclosure {
   /** Producer-owned event key, stable across retries and intake paths; opaque to Personal. */
   inputKey?: string;
   /** Where the input was received; independent of its producer, sender and topic. */

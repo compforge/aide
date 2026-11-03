@@ -1,3 +1,4 @@
+import { renderNoteClassification } from "../shared/note-classification.ts";
 import './style.css';
 import { renderDelivery, readDelivery, deliveryDirty, disableDelivery } from './delivery.ts';
 import { PersonMerge } from './merge.ts';
@@ -113,6 +114,7 @@ function renderSummary() {
   const text = selected.summaryText;
   $('person-summary-read').innerHTML = renderMarkdown(text || '尚未积累认识。');
   $('person-summary-read').classList.toggle('muted', !text);
+  renderNoteClassification($('person-summary-read'), selected.summaryNote);
   $<HTMLTextAreaElement>('person-summary').value = text;
 }
 function setSummaryEditing(editing: boolean) {

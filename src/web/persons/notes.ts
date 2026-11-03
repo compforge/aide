@@ -1,3 +1,4 @@
+import { renderNoteClassification } from "../shared/note-classification.ts";
 import type { PersonView, PersonNotesView } from '../../api/types.ts';
 import { byId as $, element } from '../shared/dom.ts';
 import { request, errorMessage } from '../shared/http.ts';
@@ -41,7 +42,7 @@ export class PersonNotes {
         const item = element('article', undefined, 'person-note');
         const time = element('time', new Date(note.updatedAt).toLocaleString(), 'muted'); time.dateTime = note.updatedAt;
         const content = element('div', undefined, 'markdown'); updateMarkdown(content, note.text);
-        item.append(time, content); $('person-notes').append(item);
+        item.append(time, content); renderNoteClassification(item, note); $('person-notes').append(item);
       }
       this.loaded = true; this.continuation = page.continue;
       more.hidden = !page.continue;

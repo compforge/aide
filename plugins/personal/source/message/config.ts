@@ -1,9 +1,11 @@
+import { InputClassificationFields } from "../../disclosure.ts";
 import type { Me } from "../../person/model.ts";
 import { z } from "zod";
 
 export const MESSAGE_SESSION = "source:lark-messages";
 /** Observation policy belongs to Personal; the Connector only exposes account-scoped IM reads. */
 export const MessageWatchSchema = z.object({
+  ...InputClassificationFields,
   intervalMs: z.number().int().min(30_000).max(3_600_000).default(60_000),
   overlapMs: z.number().int().min(60_000).max(3_600_000).default(300_000),
   initialLookbackMs: z.number().int().min(60_000).max(86_400_000).default(300_000),
