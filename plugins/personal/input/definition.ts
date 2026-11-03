@@ -1,7 +1,7 @@
 import { channelPromotion } from "./identity.ts";
 import { obsoleteReplies, replyIdentity } from "../address/reply.ts";
 import { validateReviewRequest } from "../topic/review.ts";
-import { PersonRefSchema, PersonRefsSchema } from "../person/model.ts";
+import { PersonRefSchema } from "../person/model.ts";
 import { ConditionsSchema } from "../conditions.ts";
 import { AgentStatusSchema } from "../session.ts";
 import { AgentCallSchema } from "../observation/reference.ts";
@@ -20,7 +20,6 @@ export const InputSpecSchema = z.object({ inputKey: z.string().min(1).max(2000).
   topicName: z.string().trim().min(1).max(80).optional(),
   originId: z.string().min(1), relation: z.enum(["sent", "received", "observed"]).optional(),
   sender: PersonRefSchema.optional(),
-  receivers: PersonRefsSchema().optional(),
   attention: z.enum(InputAttention).optional(),
   originRef: z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform((value) => value === "v1" ? value : parseResourceNamespace(value)), name: z.string(), uid: z.string() }).strict().optional(),
   text: z.string().min(1).max(32_000), timezone: z.string().optional(),

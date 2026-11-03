@@ -1,4 +1,3 @@
-import { personRefs } from "../plugins/personal/person/model.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { seedNotes } from "./fixtures/notes.ts";
@@ -13,9 +12,7 @@ import { fakeOptions } from "./fake-harness.ts";
 import { InputSpecSchema } from "../plugins/personal/input/definition.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "../plugins/personal/input/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
-import { inputPrinter } from "../plugins/personal/input/printer.ts";
 import { personRef, PERSON_TYPE, type PersonRef } from "../plugins/personal/person/model.ts";
-import { knownReceivers, messageReceivers } from "../plugins/personal/person/receivers.ts";
 import { topicPersons } from "../plugins/personal/topic/persons.ts";
 import { retainRecent } from "../plugins/personal/context.ts";
 import { upsertTopicNote } from "../plugins/personal/topic/state.ts";
@@ -24,7 +21,6 @@ import { SOURCES } from "../plugins/personal/source/definition.ts";
 import { topicCandidatePage, topicParts, understanding } from "../plugins/personal/background.ts";
 import { searchRootTopics } from "../plugins/personal/weave/candidates.ts";
 import { topicTools } from "../plugins/personal/topic/tools.ts";
-import type { ChatMessage } from "@compforge/aide-plugin";
 
 function fixture(t: TestContext) {
   const home = mkdtempSync(join(tmpdir(), "aide-topic-persons-"));
@@ -40,33 +36,10 @@ function fixture(t: TestContext) {
   return { aide, resources, store, person, input };
 }
 
-test("receiver facts are optional, immutable Person references; empty does not encode all", async t => {
-  const f = fixture(t), root = await f.aide.topics.ensure("receivers"), receiver = await f.person("receiver");
-  const base = { origin: "source", originId: "test", text: "fact" };
-  assert.equal(InputSpecSchema.parse(base).receivers, undefined);
-  assert.deepEqual(InputSpecSchema.parse({ ...base, receivers: [] }).receivers?.toJSON(), []);
-  for (const receivers of ["all", ["all"], [{ ...receiver, kind: "Audience" }], [{ ...receiver, uid: undefined }]])
-    assert.equal(InputSpecSchema.safeParse({ ...base, receivers }).success, false);
-  const fact = await f.input("addressed", root, { receivers: personRefs([receiver]) });
-  assert.deepEqual(f.aide.topics.inputStore.get("addressed")!.spec.receivers?.toJSON(), [receiver]);
-  assert.match(inputPrinter.describe(fact), /Explicit receiver Persons/);
-  await assert.rejects(f.resources.replace(fact, { ...fact.spec, receivers: personRefs([]) }, fact.status), /immutable/);
-});
-
-test("receiver resolution uses scoped verified humans and actual direct/reply evidence without expanding an audience", async t => {
-  const f = fixture(t), known = await f.person("known");
-  await f.aide.persons.observe({ provider: "lark", scope: "cli_elsewhere", id: "ou_foreign" });
-  const before = (await f.aide.persons.list()).length;
-  assert.deepEqual(await knownReceivers(f.aide.persons, "cli_people", ["ou_known", "ou_known", "ou_unknown", "ou_foreign", "all"]), [known]);
-  assert.equal((await f.aide.persons.list()).length, before, "untyped IDs never create people");
-  const message: ChatMessage = { id: "child", chatId: "chat", sender: { id: "ou_sender", type: "user" },
-    mentions: [], content: "reply", parentId: "parent", deleted: false, createdAt: new Date().toISOString() };
-  const parent = { ...message, id: "parent", sender: { id: "ou_parent", type: "user" } };
-  const refs = await messageReceivers(f.aide.persons, "cli_people", message, [parent], "ou_account");
-  const ids = await Promise.all(refs.map(ref => f.aide.persons.read(ref.name, ref.uid).then(p => p.spec.identities[0]!.id)));
-  assert.deepEqual(ids.sort(), ["ou_account", "ou_parent"]);
-  assert.deepEqual(await messageReceivers(f.aide.persons, "cli_people", { ...message, sender: { id: "ou_account", type: "user" } }, [] , "ou_account"), []);
-  assert.deepEqual(await messageReceivers(f.aide.persons, "cli_people", message, [{ ...parent, chatId: "different" }]), []);
+test("Input rejects receiver fields; message mentions stay in observation", () => {
+  const base = { origin: "source", originId: "test", text: "fact", observation: { mentions: ["ou_other"] } };
+  assert.deepEqual(InputSpecSchema.parse(base).observation, base.observation);
+  assert.equal(InputSpecSchema.safeParse({ ...base, receivers: [] }).success, false);
 });
 
 test("Notes keep optional UID-pinned people through updates, clearing, retention and stale references", async t => {
@@ -108,7 +81,7 @@ test("Notes keep optional UID-pinned people through updates, clearing, retention
 test("Topic people use only its own recent Notes and project names without Input scans or retention writes", async t => {
   const f = fixture(t), root = await f.aide.topics.ensure("root"), child = await f.aide.topics.ensure("child");
   const refs = await Promise.all(Array.from({ length: 10 }, (_, i) => f.person(`p${i}`)));
-  await f.input("unnoted", root, { sender: refs[0], receivers: personRefs(refs) });
+  await f.input("unnoted", root, { sender: refs[0], observation: { mentions: refs.map(ref => ref.uid) } });
   const at = new Date().toISOString();
   await f.resources.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
   await seedNotes(f.resources, child, [{ id: "child-note", text: "Child matter", people: refs }]);

@@ -1,3 +1,4 @@
+import { DeliveryError, deliveryFailure } from "@compforge/aide-connector";
 import { deliveryEndpoint } from "../address/locator.ts";
 import type { AddressSpec, AddressStatus, AddressRef } from "../address/model.ts";
 import { KeyedSet } from "@compforge/ts-stdx/collections";
@@ -42,8 +43,8 @@ export class OutputDisclosure {
     const existing = this.running.get(id);
     if (existing) return existing;
     const run = this.run(id).catch(error => {
-      this.store.update(id, status => ({ ...status, lastError: "Output disclosure preparation failed; original destination has not been authorized" }));
-      this.log.warn({ outputId: id }, "Output disclosure preparation failed; retry required");
+      this.store.update(id, status => ({ ...status, lastError: deliveryFailure(error)?.message ?? "Output disclosure preparation failed; original destination has not been authorized" }));
+      this.log.warn({ outputId: id, reason: deliveryFailure(error)?.message ?? "Unclassified disclosure preparation error" }, "Output disclosure preparation failed; retry required");
       throw error;
     }).finally(() => this.running.delete(id));
     this.running.set(id, run);
@@ -168,7 +169,7 @@ export class OutputDisclosure {
       const me = await this.ports.contactMe(output.spec.topicId);
       this.store.update(id, status => ({ ...status, waitingAddress: me.address }));
       const fallback = await this.audience(me.address);
-      if (fallback.unavailable || fallback.muted || !fallback.private || fallback.people.length !== 1 || !isMe(fallback.people[0]!.spec, this.ports.marks)) throw new Error("Default Address is not a verified private Me destination");
+      if (fallback.unavailable || fallback.muted || !fallback.private || fallback.people.length !== 1 || !isMe(fallback.people[0]!.spec, this.ports.marks)) throw new DeliveryError({ kind: "retryable", message: "Default Address is not a verified private Me destination" });
       fallbackPeople = fallback.people;
       fallbackPolicy = this.addressPolicy(me.address);
       delivery = { ...me, receivers: personRefs(fallback.people.map(personRef)), stream: audience.muted ? output.spec.stream : refusalMail(this.store, output, reason) };

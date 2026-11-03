@@ -1,3 +1,4 @@
+import { INPUT_TYPE } from "../plugins/personal/input/model.ts";
 import type { ResourceClient } from "@compforge/aide-plugin";
 import { assessInput } from "../plugins/personal/topic/assess.ts";
 import type { TopicResource } from "../plugins/personal/topic/model.ts";
@@ -11,7 +12,7 @@ export async function routeTo(resources: ResourceClient, target: { name: string;
   return before?.metadata.resourceVersion !== (await resources.get({ ...input, ...input.metadata }))?.metadata.resourceVersion;
 }
 export async function admit(resources: ResourceClient, inputId: string, executionId: string) {
-  const input = await resources.get<import("../plugins/personal/input/model.ts").InputSpec, import("../plugins/personal/input/model.ts").InputStatus>({ apiVersion: "aide.dev/v1alpha5", kind: "Input", name: inputId, namespace: "v1" });
+  const input = await resources.get<import("../plugins/personal/input/model.ts").InputSpec, import("../plugins/personal/input/model.ts").InputStatus>({ ...INPUT_TYPE, name: inputId, namespace: "v1" });
   if (!input) throw new Error(`Input missing: ${inputId}`);
   if (input.status.assess?.completedAt || input.status.assess?.executionId) return input;
   return resources.patchStatus(input, { assess: { ...input.status.assess, executionId, startedAt: new Date().toISOString() } });

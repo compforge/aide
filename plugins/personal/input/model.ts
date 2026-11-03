@@ -1,5 +1,4 @@
 import type { ResourceRef } from "@compforge/aide-plugin";
-import type { PersonRefs } from "../person/model.ts";
 
 export interface InputReceipt { inputId: string; at: string }
 
@@ -24,7 +23,7 @@ export const inputQueue = (input: InputSpec): string => isInternalInput(input) ?
 
 export type InputRelation = "sent" | "received" | "observed";
 
-export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha5", kind: "Input" } as const;
+export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha6", kind: "Input" } as const;
 export interface InputSpec {
   /** Producer-owned event key, stable across retries and intake paths; opaque to Personal. */
   inputKey?: string;
@@ -57,8 +56,6 @@ export interface InputSpec {
   relation?: InputRelation;
   /** Optional sender reference; the Person may have been deleted. System events and multi-author observations may have no sender. */
   sender?: ResourceRef;
-  /** Explicitly identified human recipients; absent/empty never means all. No audience expansion. */
-  receivers?: PersonRefs;
   text: string;
   timezone?: string;
   observation?: Record<string, unknown>;

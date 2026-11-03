@@ -2,7 +2,10 @@ import jsonPatch from "fast-json-patch";
 import { equalResourceValue } from "../../src/resource/value.ts";
 import type { Resource, ResourceClient, ResourceCommit, ResourcePatchOperation } from "@compforge/aide-plugin";
 import { setConditions, type Condition, type ConditionValue } from "./conditions.ts";
-import type { InputStatus } from "./input/model.ts";
+import { INPUT_TYPE, type InputStatus } from "./input/model.ts";
+import { TOPIC_TYPE } from "./topic/model.ts";
+import { TASK_TYPE } from "./task/model.ts";
+import { ROUTINE_TYPE } from "./routine/model.ts";
 import type { WorkSpecFields, WorkStatus, Work } from "./model.ts";
 import type { WorkAgentStatus } from "./work-status.ts";
 
@@ -62,7 +65,7 @@ export function commitStatus(resources: ResourceClient, writes: readonly Resourc
       patch: { type: "json" as const, value: jsonPatch.compare(write.resource.status as object, statusPatch(write.resource, write.patch) as object).map(op => ({ ...op, path: `/status${op.path}` })) as ResourcePatchOperation[] } };
     if (write.operation === "replace") return { ...write, status: observed(write.resource.kind, write.spec, write.status,
       write.resource.metadata.generation + Number(!equalResourceValue(write.resource.spec, write.spec)), write.resource.metadata.deletionTimestamp) };
-    if (write.operation === "create" && ["aide.dev/v1alpha2", "aide.dev/v1alpha3", "aide.dev/v1alpha4", "aide.dev/v1alpha5"].includes(write.type.apiVersion)) return { ...write, status: observed(write.type.kind, write.spec, write.status ?? {}, 1) };
+    if (write.operation === "create" && [INPUT_TYPE, TOPIC_TYPE, TASK_TYPE, ROUTINE_TYPE].some(type => type.apiVersion === write.type.apiVersion && type.kind === write.type.kind)) return { ...write, status: observed(write.type.kind, write.spec, write.status ?? {}, 1) };
     return write;
   }));
 }

@@ -1,3 +1,4 @@
+import { INPUT_TYPE } from "../plugins/personal/input/model.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { inspect, renderHTML, type ModelCall, type ToolCall, type SessionView, type Operation } from "@compforge/agent-observation";
@@ -10,7 +11,7 @@ const at = "2026-10-26T01:00:00.000Z";
 const topic = { apiVersion: "aide.dev/v1alpha5", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } as const;
 const agent = { harness: "chief", sessionId: "native-1" };
 function fixture(): Input {
-  return { apiVersion: "aide.dev/v1alpha5", kind: "Input", metadata: { name: "input", uid: "uid-1", namespace: "v1", creationTimestamp: at, resourceVersion: "1", generation: 1 },
+  return { ...INPUT_TYPE, metadata: { name: "input", uid: "uid-1", namespace: "v1", creationTimestamp: at, resourceVersion: "1", generation: 1 },
     spec: { origin: "channel", originId: "web", text: "check this" }, status: {
       route: { completedAt: at, result: { topics: [topic], reason: "explicit selection" } },
       assess: { startedAt: at, completedAt: at, agent,

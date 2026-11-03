@@ -62,6 +62,15 @@ test("Input conditions follow exact receipts atomically and stale writers cannot
   assert.equal(done.status.conditions![0]!.lastTransitionTime, assessed.status.conditions![0]!.lastTransitionTime);
 });
 
+test("Current Input creation through commitStatus initializes its conditions", async t => {
+  const f = fixture(t);
+  const [input] = await commitStatus(f.resources, [{ operation: "create", type: INPUT_TYPE, name: "new-input",
+    spec: { origin: "source", originId: "fixture", text: "evidence" }, status: {} }]);
+  const status = input!.status as InputStatus;
+  assert.equal(status.conditions?.find(condition => condition.type === "Assessed")?.status, "False");
+  assert.equal(status.conditions?.find(condition => condition.type === "HandlingComplete")?.status, "Unknown");
+});
+
 test("Task completion is generation-bound; Routine completion records one occurrence and remains operational", async t => {
   const f = fixture(t), root = await f.topic("root");
   for (const type of [TASK_TYPE, ROUTINE_TYPE]) {

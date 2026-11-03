@@ -1,8 +1,7 @@
 import { inputIdentity } from "../../input/identity.ts";
 import { larkInputKey } from "../../../../src/channel/lark/input-key.ts";
-import { personRefs } from "../../person/model.ts";
+import { personRef } from "../../person/model.ts";
 import { patchStatus } from "../../status.ts";
-import { messageReceivers } from "../../person/receivers.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
 import { larkAddress, larkTopicLocator } from "../../../../src/channel/address.ts";
 import { Persons } from "../../person/service.ts";
@@ -252,15 +251,15 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     const name = inputName(this.watch, entry.message, entry.sequence);
     const evidence = [entry.message, ...(context?.messages ?? [])];
     const persons = new Persons(this.context.resources, { identities: this.watch.personIds.map((id) => ({ provider: "lark", scope: this.watch.accountId, id })) });
-    const senders = await observePeople(persons, this.watch.accountId, evidence);
+    const senders = await observePeople(persons, this.watch.accountId,
+      evidence.filter(message => !message.deleted && message.chatId === entry.message.chatId));
+    const participants = [...senders.values()];
+    if (entry.kind === "direct") participants.push(personRef(await persons.observe({ provider: "lark", scope: this.watch.accountId, id: this.watch.userId })));
     // Reply authorship can depend on a message already admitted by another discovery scan.
     const relationContext = [...evidence, ...relatedMessages];
-    const recipients = new Map<string, Awaited<ReturnType<typeof messageReceivers>>>();
-    for (const message of evidence) recipients.set(message.id,
-      await messageReceivers(persons, this.watch.accountId, message, relationContext, entry.kind === "direct" ? this.watch.userId : undefined));
     const annotate = (message: ChatMessage) => {
       const relation = messageRelation(this.watch, message, entry.kind === "direct", relationContext);
-      return { ...message, receivers: recipients.get(message.id) ?? [], ...(senders.has(message.id) ? { person: senders.get(message.id) } : {}),
+      return { ...message, ...(senders.has(message.id) ? { person: senders.get(message.id) } : {}),
         ...(relation ? { relation } : {}) };
     };
     const message = { ...annotate(entry.message), content: entry.message.content.slice(0, this.watch.maxContextChars) };
@@ -276,11 +275,9 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     const spec: Delivery["spec"] = {
       inputKey: inputKey(this.watch, entry.message, entry.sequence),
       source: larkAddress(this.watch.accountId, message.chatId), replyToMessageId: message.id,
-      addressObservation: { name: message.chatName, type: entry.kind === "direct" ? "direct" : "group", people: [...senders.values(), ...[...recipients.values()].flat()] },
+      addressObservation: { name: message.chatName, type: entry.kind === "direct" ? "direct" : "group", people: participants },
       ...(relation ? { relation } : {}),
       ...(!entry.sequence && senders.has(entry.message.id) ? { sender: senders.get(entry.message.id) } : {}),
-      receivers: personRefs(entry.sequence ? [...new Map((context?.messages ?? []).flatMap(m => recipients.get(m.id) ?? []).map(ref => [ref.uid, ref])).values()]
-        : recipients.get(entry.message.id) ?? []),
       topicKey: location.selector.key, ...(location.name ? { topicName: location.name } : {}),
       text: `Lark ${kind}：${content}`.slice(0, 32_000),
       observation: { provider: "lark", accountId: this.watch.accountId, userId: this.watch.userId,

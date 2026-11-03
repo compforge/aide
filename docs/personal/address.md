@@ -6,7 +6,7 @@ Address 是 Personal 的独立资源，表示一个群聊、私聊、Web 收件�
 
 `spec.locators` 是按规范 locator 去重的 KeyedSet，保存同一场合的多个定位方式；它们地位平等，数组顺序不表示投递优先级。`name` 和 `type` 描述场合；`muted` 表示是否禁止 Aide 在此发言。新发现的外部地址默认禁言，Web 和根据已配置 Lark Channel 的人物身份发现的单聊地址首次创建时允许发言。后续 Input、启动或发送准备不会覆盖用户已经设置的 muted。
 
-`status.people` 是按 Person UID 去重的 KeyedSet。Input 接纳时根据发送者、明确收件人和上下文中已确认的人物持续积累；它不是完整或实时的群成员名单。不保存 audienceComplete、audienceObservedAt，也不为积累成员额外遍历平台通讯录。Person 合并时保留参与者迁移来源，由 Reconciler 分批转移 Address 的当前成员关联，历史 Input/Output 人物证据不改写。
+`status.people` 是按 Person UID 去重的 KeyedSet。Input 接纳时根据当前聊天的发送者与接入层提供的场合参与证据持续积累；@、转发正文和跨场合引用中的人物不能据此加入；它不是完整或实时的群成员名单。不保存 audienceComplete、audienceObservedAt，也不为积累成员额外遍历平台通讯录。Person 合并时保留参与者迁移来源，由 Reconciler 分批转移 Address 的当前成员关联，历史 Input/Output 人物证据不改写。
 
 Input.source、Topic.spec.address、Output.spec.target 保存固定 UID 的 AddressRef。Connector / Channel 边界仍可提交平台 endpoint，由接纳层统一解析为资源引用。来源适配器显式提交场合名称、类型、已知人物和回复坐标，Input 存储不解析 observation 来猜这些信息。Lark 同一 app/chat 的普通消息和多个 thread 共用一个 Address；原消息 ID 单独保存在 Input / Output 的回复坐标中。
 

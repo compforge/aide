@@ -10,7 +10,7 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 
 ## CRD
 
-类型为 `aide.dev/v1alpha5 Input`。
+类型为 `aide.dev/v1alpha6 Input`。
 
 ### Spec
 
@@ -18,7 +18,7 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 | --- | --- |
 | text、observation | 来源内容与证据；外部观察保留事实，内置 Input 保存回顾、分理、组织请求及触发证据 |
 | origin、originId、originRef | channel / source / chief / aide:review / aide:triage / aide:organize 分类、来源定义与可选产生资源引用 |
-| sender、receivers、relation | 可选的发送 Person、明确识别的接收 Person 引用列表，以及输入相对于 Me 的关系 |
+| sender、relation | 可选的发送 Person 引用，以及输入相对于 Me 的关系 |
 | source | 可选 AddressRef，固定资源 UID，表示事情发生或可以联络的场合 |
 | replyToMessageId | 可选原消息回复坐标，不参与 Address 身份 |
 | inputKey | 可选的 producer 事件身份字符串，用于跨入口去重 |
@@ -28,13 +28,15 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 
 字段的完整类型与必选性见 [InputSpec](../../plugins/personal/input/model.ts)。人物、地址、话题线索和调度分别回答不同问题；紧迫性、来源和 relation 都不自动授予执行权限或要求外发。
 
-### 接收人物
+### 人物与场合
 
-`spec.receivers?: PersonRef[]` 保存来源证据中明确识别的接收人物，每个引用固定 Person UID；与 sender 一样属于不可变的输入事实。缺省表示未提供这项信息，`[]` 表示没有列出明确接收人物，**不等于 all**。本版不建模 all，不展开群成员，也不把 Aide 或机器人作为 Person。旧 Input 无需回填。
+IM 消息由 sender 在 source 指向的 Address 中发出。单聊与群聊都以场合表达可见范围；Input 不保存 receivers。Address.people 积累当前聊天中已确认的参与者，不声明完整或实时成员名单，也不代表实际已读。
 
-Lark Source 根据私信实际收件账号、同一聊天内被回复消息的发送人物、已对应 Person 的 @ 对象填写；讨论批次保留逐条人物证据，并将本批明确接收者去重写入 receivers。Lark Channel 根据事件 `mentioned_type=user` 发现当前 app scope 内的 Person，并由既有联系地址发现流程建立单聊 Address；`bot`、Aide 自身和 `@all` 不建立 Person。类型未知时只关联已知 Person，裸 @ ID 和名字不能证明是人，也不按名字合并跨应用身份。observation 的 mentionDetails 保留 key、id、name 和 type，mentions 保留 ID 列表；私信和群聊正文通过 SDK 解析 mention 名字。该列表是可确认的接收者，不承诺完整受众，也不证明实际已读、认可或授权。
+mentions / mentionDetails 保留在 observation 中，表示正文提及与提醒。@ 不改变可见范围，也不能证明被提及者属于当前场合。Lark Channel 可根据平台明确的 user 类型发现 Person 及其联系地址，但不会把这些人物加入来源 Address；bot、Aide 自身和 @all 不建立 Person，类型未知时保留原始证据，不按名字合并跨应用身份。
 
-这些事实供 Chief 维护近期 Note 时识别相关人物；[Topic 近期相关人物](topic.md#近期相关人物) 从 Note 的人物关联派生；移动 Input 只改 status.topic，不改 sender / receivers。验证见 `tests/topic-persons.test.ts`、`tests/message-source.test.ts` 与 `tests/person.test.ts`。
+Bot 单聊登记与机器人对话的人；Source 观察的人与人单聊登记观察账号与当前聊天中已确认的发言者。群聊积累当前聊天中实际发言的人；转发正文、跨场合引用和 mentions 中的人物不参与这项推导。多作者讨论的逐条 sender、relation 和原始 mentions 保留在 observation 中。
+
+Chief 可从这些证据维护 Note 的相关人物；Topic 的近期人物继续从 Note 派生。相关人物与场合参与者是不同关系。验证见 `tests/lark.test.ts`、`tests/message-source.test.ts`、`tests/output-disclosure.test.ts`。
 
 ### Status
 
@@ -134,7 +136,7 @@ Output 只在其 inputIds 显式包含当前 Input 时关联，不按相邻顺�
 
 ## 挂载、分派与执行
 
-Input v1alpha5 使用 AddressRef 保存来源位置，并将内容归属和处理分派分开，披露分类统一放在 Note，不读取旧版 Input，也不提供历史兼容转换。
+Input v1alpha6 使用 AddressRef 保存来源位置，并将内容归属和处理分派分开，披露分类统一放在 Note。Input 通过 sender 表示发言人，通过 source 表示场合，不声明 receivers。
 
 1. 挂载：明确定位或 Route 分类写入 status.topic（topic1），保留首次 route 回执。
 2. 分派：沿 topic1 的 parent 链找到当前 root，写入 status.assess.topic（topic2）。Route 完成后立即尝试确定性分派；独立 Input Reconcile 恢复中断、处理后续归属变化，不调用模型；直接交给 Routine 的订阅事件没有 assess 阶段，不因此额外触发 Chief。
