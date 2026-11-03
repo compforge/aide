@@ -74,16 +74,18 @@ test("Notes keep optional UID-pinned people through updates, clearing, retention
   await f.resources.patchStatus(initial, { execution: { id: "chief", startedAt: new Date().toISOString() } });
   const read = () => f.aide.topics.resource("notes")!;
   const one = await f.person("one", "Same name"), two = await f.person("two", "Same name");
+  // UID order is canonical; creation order can differ for IDs generated in the same millisecond.
+  const expectedPeople = [one, two].sort((a, b) => a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0);
   const update = (args: Record<string, unknown>, call: string) => upsertTopicNote(f.resources, read(), "chief", {
     version: args.noteId ? notes(f.store.resources, read().metadata.uid, "subject").find(n => n.id === args.noteId)?.version : undefined, text: "Discuss release", ...args,
   } as never, call);
   const created = await update({}, "create");
   assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, []);
   await update({ noteId: created.noteId, people: [one, two, one] }, "people");
-  assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, [one, two], "Same text can gain people; UID deduplicates, names do not");
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, expectedPeople, "Same text can gain people; UID deduplicates, names do not");
   await update({ noteId: created.noteId, text: "Discuss release progress" }, "progress");
-  assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, [one, two]);
-  assert.deepEqual(retainRecent(notes(f.store.resources, read().metadata.uid, "subject"))[0]!.people, [one, two], "Synthesis/retention preserves associations");
+  assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject")[0]!.people, expectedPeople);
+  assert.deepEqual(retainRecent(notes(f.store.resources, read().metadata.uid, "subject"))[0]!.people, expectedPeople, "Synthesis/retention preserves associations");
   await assert.rejects(update({ noteId: created.noteId, people: [{ ...one, kind: "Topic" }] }, "invalid"), /Person/);
   await f.resources.delete(PERSON_TYPE, one.name);
   f.store.resources.finalizeDeletion(PERSON_TYPE, one.name);
@@ -92,7 +94,8 @@ test("Notes keep optional UID-pinned people through updates, clearing, retention
   await update({ noteId: created.noteId, text: "Keep historical attribution" }, "historical");
   const view = topicPersons(f.store, read());
   assert.equal(view.items.length, 2);
-  assert.ok("unavailable" in view.items[0]! && view.items[0].unavailable);
+  const historical = view.items.find(item => item.ref.uid === one.uid)!;
+  assert.ok("unavailable" in historical && historical.unavailable);
   assert.doesNotMatch(JSON.stringify(view), /Replacement|private-profile-marker/);
   const copied = await update({ people: [one] }, "copy-historical");
   assert.deepEqual(notes(f.store.resources, read().metadata.uid, "subject").find(n => n.id === copied.noteId)!.people, [one]);
