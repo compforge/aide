@@ -1,4 +1,4 @@
-import { cloneResourceValue } from "../../resource/value.ts";
+import { cloneResourceValue, equalResourceValue } from "../../resource/value.ts";
 import { ResourcePages } from "./pages.ts";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync, existsSync } from "node:fs";
@@ -233,11 +233,18 @@ export class ResourceStorage {
       : definition.validator?.create?.(current, context);
     if (result && typeof (result as { then?: unknown }).then === "function") throw new Error("Resource validation must be synchronous");
   }
+  /** @spec Host-only control updates preserve Resource identity, indexes and domain authorization boundaries.
+   * @case tests/resource-pagination.test.ts
+   * @link docs/plugin/resource.md#更新操作与并发
+   */
   write(key: string, scope: string, stored: StoredResource, receipt?: { key: string; value: string }): void {
     this.transaction(() => {
       this.parse(scope, stored.object);
-      const old = this.read(key)?.object;
-      this.validateChange(scope, old, stored.object);
+      const prior = this.read(key), old = prior?.object;
+      // Host scheduling is outside the Resource object and cannot renew a historical content writer.
+      const controlOnly = prior && !equalResourceValue(prior.control, stored.control)
+        && equalResourceValue({ ...prior, control: undefined }, { ...stored, control: undefined });
+      if (!controlOnly) this.validateChange(scope, old, stored.object);
       const data = JSON.stringify(stored), bytes = Buffer.byteLength(data), resource = stored.object;
       const previous = this.db.prepare("SELECT bytes FROM resources WHERE key=?").get(key);
       const kind = kindKey(resource), limits = { ...this.config.defaults, ...this.config.kinds[kind] };
@@ -246,7 +253,7 @@ export class ResourceStorage {
       this.db.prepare(`INSERT INTO resources VALUES (?,?,?,?,?,?,?,?,NULL) ON CONFLICT(key) DO UPDATE SET
         data=excluded.data, bytes=excluded.bytes, accessed=excluded.accessed`).run(key, scope, kind, resource.metadata.uid, data, bytes, resource.metadata.creationTimestamp, Date.now());
       this.writtenKeys.add(key);
-      this.indexLifecycle(key, scope, resource);
+      if (!controlOnly) this.indexLifecycle(key, scope, resource);
       if (!old || old.metadata.resourceVersion !== resource.metadata.resourceVersion) {
         const snapshot = cloneResourceValue(resource);
         for (const listener of this.writeListeners) {

@@ -22,7 +22,7 @@ Output 是 Personal 定义的 `aide.dev/v1alpha4 Output`。`spec.text`、`spec.r
 
 ### Status
 
-phase 表达 pending、sending、delivered、failed、uncertain 或 cancelled；attempts 保存尝试次数，底座队列负责错误退避，deliveredAt、receipt 保存投递依据，lastError 保存安全提取的错误。字段见 [OutputStatus](../../plugins/personal/output/model.ts)。状态由 Output Reconciler 维护，创建成功与外部送达分开。
+phase 表达 pending、sending、delivered、failed、uncertain 或 cancelled；attempts 保存尝试次数，底座队列负责错误退避，deliveredAt、receipt 保存投递依据，lastError 保存安全提取的错误。字段见 [OutputStatus](../../plugins/personal/output/model.ts)。spec 的 receivers/text/target 表示预期发给谁、发什么、在哪里发；status.delivery 的对应字段记录实际投递给谁、发什么、在哪里发。状态由 Output Reconciler 维护，创建成功与外部送达分开。
 
 ## 投递与恢复
 
@@ -42,7 +42,7 @@ Output 由独立 Reconciler 检查材料与受众，并持久化实际投递目�
 
 失败日志记录 Output ID 和安全提取的诊断，Lark 另记录目的地、分片、平台错误码、HTTP 状态或网络错误码。SDK 请求配置、凭证、消息正文和自由文本不写入日志或 Output.status。
 
-Address.muted 对最终发送、分片及进度卡均生效。群成员使用持续观察积累的 Address.people。Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Topic 删除后仍可完成投递。进展卡片只镜像已送达该聊天的 Output，不提前确认投递，也不展示私有思考和工具结果。
+Address.muted 对原文、分片及进度卡均生效；Immediate Input 对应的 Output 由 Reconcile 在原地址投递固定禁言提示，其它禁言 Output 转投 Me 的默认地址，详见 [披露边界](disclosure.md)。Chief 提交 raw Output，实际 target/text 调整只保存在 status.delivery。群成员使用持续观察积累的 Address.people。Lark 长消息继续使用逐段回执和稳定的 provider UUID；重启后 sending 可继续投递。网络超时可能发生在远端接受之后，稳定 UUID 与本地回执降低重复风险，但不能超出提供方的去重保证。已保存的 target 让待发 Output 在 Topic 删除后仍可完成投递。进展卡片只镜像已送达该聊天的 Output，不提前确认投递，也不展示私有思考和工具结果。
 
 需求平台评论发送使用独立的 Host 投递器。没有已确认的提供方幂等键时，发送中断或超时进入 uncertain；匹配目标、正文及持久投递记录的回读可以确认成功，自动重发停止。详情见 [需求平台](../connector/requirements.md)。
 

@@ -90,11 +90,17 @@ export class TopicStore {
     return inputs[0];
   }
   async submit(id: string, spec: InputSubmission): Promise<ReturnType<InputStore["submit"]>> { return this.inputStore.submit(spec.topicKey ?? spec.topicId ?? "personal", id, spec); }
+  /** @spec A scoped progress query reads only its Topic and subtree, never projects unrelated Topics.
+   * @case tests/lark-progress.test.ts
+   * @link docs/channel/lark.md
+   */
   runs(topicId?: string): TopicRun[] {
     const runs: TopicRun[] = this.inputs(topicId).map((input) => ({ id: input.metadata.name, topicId: input.topicId, input, status: input.consumption }));
-    for (const c of this.list().filter((c) => !topicId || c.id === topicId)) {
-      const execution = this.resource(c.id)!.status.execution;
-      if (execution) runs.push({ id: execution.id, topicId: c.id, status: { phase: "running", executionId: execution.id } });
+    const selected = topicId ? this.resource(topicId) : undefined;
+    const topics = topicId ? selected ? [selected] : [] : this.listResources();
+    for (const topic of topics) {
+      const execution = topic.status.execution;
+      if (execution) runs.push({ id: execution.id, topicId: topic.spec.id, status: { phase: "running", executionId: execution.id } });
     }
     return runs;
   }

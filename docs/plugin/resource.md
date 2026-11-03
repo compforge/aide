@@ -76,7 +76,7 @@ await resources.patchStatus(snapshot, { phase: "accepted" }, {
 
 普通 Patch 仍校验 UID，不能用旧句柄修改重建后的同名资源。可写路径仅限 spec、status、metadata.labels 和 metadata.annotations；身份、版本、结构 owner、删除标记和 Host 调度字段不可修改。`patchStatus` 无法越过 status 范围。已进入删除阶段的资源由领域 Validator 决定哪些终止写入仍允许，内容工具拒绝继续编辑。
 
-Storage 在 SQLite 写事务内读取当前对象，在副本上应用 Patch，验证元数据、Schema 和领域约束，再提交版本、索引与容量变化。spec 实际变化推进 generation；有效变更推进 resourceVersion；规范化后的空操作仍执行领域 Validator，核对当前执行身份等事务依赖，但不增加版本、不发送 Watch。Watch 的前后对象来自真实事务快照。commit 可混合普通与条件 Patch，任何一步失败全部回滚；IPC 使用相同路径和错误名称。
+Storage 在 SQLite 写事务内读取当前对象，在副本上应用 Patch，验证元数据、Schema 和领域约束，再提交版本、索引与容量变化。spec 实际变化推进 generation；有效变更推进 resourceVersion；规范化后的空操作仍执行领域 Validator，核对当前执行身份等事务依赖，但不增加版本、不发送 Watch。Host 私有 control 调度记录不属于 Resource 对象；仅 control 变化时保留对象、版本和索引，不调用领域内容 Validator。显式 Resource 空 Patch 仍执行 Validator。Watch 的前后对象来自真实事务快照。commit 可混合普通与条件 Patch，任何一步失败全部回滚；IPC 使用相同路径和错误名称。
 
 显式版本冲突的 Error.name 是 ResourceVersionConflict，UID 变化是 ResourceIncarnationChanged；JSON test 失败保留 TEST_OPERATION_FAILED。Schema/Validator 错误原样返回。IPC 保留 name、message、stack、cause；跨进程根据 name 分类，不依赖 instanceof。条件失败需要重新读取实际依赖，不能盲目重放失败 test 或重做已发生的外部动作。
 

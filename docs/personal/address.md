@@ -24,9 +24,9 @@ Chief 选择内容、收件人物及目标 Address，合适时优先原处答复
 
 Source @Me 和 Channel @Aide 以 app/chat/message 作为同一原消息身份，在事务中限制为一份明确答复 Output；同一工具调用仍检查不可变发送意图。该约束覆盖保留中的答复记录，不声称超过历史回收窗口后仍恰好一次。观察到 Me 对原消息的明确回复或原消息撤回证据时，尚未尝试的答复转 cancelled；无关发言不取消。已经尝试的投递保留原有不确定性和重试规则。
 
-Output Reconciler 检查 Address 是否禁言，并按已知 people 逐个检查 clearance 和引用 Note 算出的披露策略。空名单或失效身份不能授权外发；已确认私有 Me 地址保留内容豁免，但仍遵守 muted。拒发继续在同一 Output 中私下告知 Me 原计划、正文及原因。不会自动改投另一个外部场合。
+Output Reconciler 检查 Address 是否禁言，并按已知 people 逐个检查 clearance 和引用 Note 算出的披露策略。空名单或失效身份不能授权外发；已确认私有 Me 地址保留内容豁免，但仍遵守 muted。禁言时，关联 Immediate Input 的 Output 在原目标以固定禁言提示替换正文；其它 Input 或无 Input 的 Output 通过 defaultAddress 私下告知 Me 原计划、正文及原因。其它披露拒绝同样私下告知 Me，具体规则见 [披露边界](disclosure.md)。不会自动改投另一个外部场合。
 
-Output.status.delivery.address 固定实际 Address，target 保存具体投递坐标；等待默认地址可用时保存 waitingAddress。原目标、实际地址和等待地址共同参与 pendingAddress 索引，Address 政策或成员变化按索引唤醒待发 Output；异步检查和 transport 准备后重查，实际发送边界再核验禁言。平台请求已经发出后不能撤回既有副作用。禁言同时约束 Lark 进度卡、固定提示和长消息后续分片，不影响接收与积累认识。
+Output.status.delivery.address 固定实际 Address，target 保存具体投递坐标；等待默认地址可用时保存 waitingAddress。原目标、实际地址和等待地址共同参与 pendingAddress 索引，Address 政策或成员变化按索引唤醒待发 Output；异步检查和 transport 准备后重查，实际发送边界再核验禁言。平台请求已经发出后不能撤回既有副作用。除 Output Reconcile 持久化的 Immediate 禁言提示外，禁言同时约束 Lark 进度卡、Channel 固定错误提示和长消息后续分片，不影响接收与积累认识。
 
 ## Web 与验证
 

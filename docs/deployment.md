@@ -77,10 +77,18 @@ HTTP 与 Personal 装配日志进入标准输出；应用根目录的 `runtime.l
 
 Pi 和 Chief 可分别在 Aide 配置中声明模型并引用凭证环境变量，也可继承 Pi 原生配置。连接器设置见 [Connector 与 Source](connector/README.md)，Lark 机器人设置见 [Lark](channel/lark.md)。通过 `/health` 不能证明这些依赖可用。
 
+## Runner 可用性与恢复
+
+`/health` 在启用的 Plugin 尚未激活、Runner 失败或恢复期间返回 503，并列出 `unavailablePlugins`；全部就绪返回 200。Host 存活不代表业务协调可用。
+
+Runner 失败后先撤销旧 Binding 与执行能力，应用完成持久中断状态处理后才退避重启。Personal 保留已生成 Output，对未确认执行标记需要核对，不重放原来的 verb。日志 `Plugin Runner restart scheduled` / `restart failed` / `recovered` 记录实例与尝试次数。关闭或禁用实例会取消恢复。
+
 ## Controller 超时诊断
+
+Controller 使用两种计时：默认 60 秒无进展超时由成功的 Host 操作续期；另有默认 10 分钟的累计活跃执行预算，防止持续资源调用无限循环。等待 Host verb 时两种计时都暂停，由 verb 自己负责截止时间。诊断中的 `timeoutReason` 区分 `idle` 和 `budget`。
 
 Runner 的 Reconcile 日志自动携带 `executionId`；资源与 Printer IPC 使用同一标识关联。`Plugin Runner Controller execution timed out` 在终止进程前记录 Controller、资源身份、执行总耗时、当前 watchdog 计时、未完成的 Host 操作（最多 8 项）、最近完成的操作，以及各操作的次数和累计/最大耗时。
 
 `Plugin Runner Host operation slow` 记录超过 1 秒的非 verb Host 操作、结果数量和耗时；verb 沿用已有起止日志。`Plugin Runner Host round trip slow` 在 Runner 记录超过 1 秒的非 verb RPC 往返时间，并附 Host 回复前的处理耗时与差额。差额包含请求/回复传输、序列化和调度，不能单独等同网络延迟。Host 操作日志耗时从收到请求到回复发出，不包含请求到达 Host 之前的传输等待；并行操作的累计耗时不能当作执行墙钟时间。若未完成操作为空，可结合最近完成操作、Source 阶段日志判断 Runner 内部处理、IPC 传输或事件循环阻塞的可能性，不能仅据此断言 CPU 卡死。
 
-Repository Source 记录清单状态、交接批次与当前子观察器；PullRequest Source 记录策略检查、扫描、冻结批次、消费进度与游标提交。按同一个 `executionId` 查询即可区分外部调用、资源访问和批处理阶段。诊断不输出资源正文、patch、配置或不透明游标，也不改变超时和恢复行为。
+Repository Source 记录清单状态、交接批次与当前子观察器；PullRequest Source 记录策略检查、扫描、冻结批次、消费进度与游标提交。按同一个 `executionId` 查询即可区分外部调用、资源访问和批处理阶段。诊断不输出资源正文、patch、配置或不透明游标，不包含业务正文。

@@ -139,7 +139,8 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         return;
       }
       if (request.method === "GET" && url.pathname === "/health") {
-        json(response, 200, { status: "ok", revision: process.env.AIDE_REVISION ?? "development" }); return;
+        const health = aide.health();
+        json(response, health.status === "ok" ? 200 : 503, { ...health, revision: process.env.AIDE_REVISION ?? "development" }); return;
       }
       if (request.method === "GET" && url.pathname === "/stream") {
         const topicId = url.searchParams.get("topicId");

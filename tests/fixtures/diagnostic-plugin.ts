@@ -8,6 +8,13 @@ const plugin: PluginPackage = {
         if (resource.status.done) return;
         await context.resources.get({ ...TYPE, ...resource.metadata });
         context.logger.info("Diagnostic fixture stage", { attributes: { name: resource.metadata.name } });
+        if (resource.spec.mode === "crash") {
+          await context.resources.patchStatus(resource, { done: true });
+          process.exit(17);
+        }
+        if (resource.spec.mode === "progress") {
+          for (let step = 0; step < 8; step++) await context.resources.list(TYPE);
+        }
         if (resource.spec.mode === "wait") await context.resources.list(TYPE);
         if (resource.spec.mode === "cpu") {
           const until = Date.now() + 1500;

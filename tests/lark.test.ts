@@ -1,3 +1,4 @@
+import { MUTED_OUTPUT_TEXT } from "../plugins/personal/output/model.ts";
 import { fixtureCanSpeak } from "./address-fixture.ts";
 import { allowAddress } from "./address-fixture.ts";
 import { transportFixture } from "./output-fixture.ts";
@@ -479,4 +480,21 @@ test("Lark preserves adapter retry semantics and resumes only unconfirmed parts 
   assert.equal(sent[1]!.id, sent[2]!.id);
   assert.equal(sent.filter(p => p.id === sent[0]!.id).length, 1);
   assert.equal(sent[0]!.text + sent.slice(2).map(p => p.text).join(""), message.text);
+});
+
+
+test("Muted Lark only sends a typed fixed notice and preserves its receipt across restart", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-lark-muted-notice-"));
+  const aide = { canSpeak: () => false, receive: async () => { throw new Error("unused"); } };
+  const { transport, sent } = fakeTransport();
+  let channel = new LarkChannel(home, "cli_test", aide, transport, log);
+  t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
+  const message = { id: "notice", target: larkAddress("cli_test", "oc_chat"), text: MUTED_OUTPUT_TEXT, notice: "muted" as const };
+  await assert.rejects(channel.send({ ...message, text: "生成的原文" }));
+  await assert.rejects(channel.send({ ...message, notice: undefined }));
+  assert.equal(sent.length, 0);
+  await channel.send(message);
+  await channel.close(); channel = new LarkChannel(home, "cli_test", aide, transport, log);
+  await channel.send(message);
+  assert.equal(sent.length, 1); assert.equal(sent[0]!.text, MUTED_OUTPUT_TEXT); assert.equal(sent[0]!.chatId, "oc_chat");
 });

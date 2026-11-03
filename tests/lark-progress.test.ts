@@ -381,3 +381,22 @@ test("Address mute blocks presentation after awaited card creation", async t => 
   await f.channel.deliver();
   assert.equal(f.calls.filter(c => c.kind === "send").length, 0);
 });
+
+
+test("progress for one Topic does not read unrelated Topic material", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-scoped-progress-"));
+  const aide = new Aide(home, fakeOptions({ async chief() { throw new Error("No inference expected"); }, async execute() { throw new Error("No Work expected"); } }, home), pino({ level: "silent" }));
+  t.after(async () => { await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  await seedInput(aide.topics, "selected", { topicId: "selected", origin: "channel", originId: "web", text: "selected" });
+  const storage = aide.topics.resources.storage;
+  let reads = 0;
+  const read = storage.read.bind(storage);
+  storage.read = (...args) => { reads++; return read(...args); };
+  const expected = larkProgress(aide, "selected"), baseline = reads;
+  for (let i = 0; i < 25; i++) await seedInput(aide.topics, `other-${i}`, {
+    topicId: `other-${i}`, origin: "channel", originId: "web", text: "Unrelated pending input",
+  });
+  reads = 0;
+  assert.deepEqual(larkProgress(aide, "selected"), expected);
+  assert.equal(reads, baseline, "Unrelated Topics must not increase per-chat resource reads");
+});

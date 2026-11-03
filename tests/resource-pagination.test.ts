@@ -223,3 +223,31 @@ test("declared ordered indexes select the newest page without decoding history o
     assert.equal(await f.client.get({ ...type, namespace: "v1", name: "newest" }), undefined);
   } finally { db.prepare = prepare; f.store.storage.read = read; }
 });
+
+
+test("Host scheduling does not reauthorize historical Resource content or invalidate pages", async t => {
+  const home = mkdtempSync(join(tmpdir(), "control-metadata-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const store = new PluginResourceStore({ home, pluginInstanceId: "pages" });
+  let writerActive = true, validations = 0;
+  store.storage.register("pages", [{ ...definition(), validator: { update() {
+    validations++;
+    if (!writerActive) throw new Error("Content writer execution is no longer active");
+  } } }]);
+  const client = createResourceClient(store);
+  const first = await client.create(TYPE, { name: "first", spec: { group: "selected" }, status: {} });
+  await client.create(TYPE, { name: "second", spec: { group: "selected" }, status: {} });
+  const page = await client.page(TYPE, { limit: 1 });
+  writerActive = false;
+  const due = new Date(Date.now() + 1000);
+  store.setNextReconcileAt(TYPE, "first", due);
+  store.setNextReconcileAt(TYPE, "first", due, { controllerName: "agent" });
+  assert.deepEqual(store.get(TYPE, "first"), first);
+  assert.equal(validations, 0);
+  assert.equal(store.scheduledReconciles(TYPE)[0]!.nextReconcileAt.getTime(), due.getTime());
+  assert.equal(store.scheduledReconciles(TYPE, "agent")[0]!.nextReconcileAt.getTime(), due.getTime());
+  assert.equal((await client.page(TYPE, { limit: 1, continue: page.metadata.continue })).items[0]!.metadata.name, "second");
+  await assert.rejects(client.patchStatus(first, {}), /Content writer execution/);
+  await assert.rejects(client.patchStatus(first, { changed: true }), /Content writer execution/);
+  assert.equal(validations, 2, "Even explicit no-op Resource patches retain domain authorization");
+});

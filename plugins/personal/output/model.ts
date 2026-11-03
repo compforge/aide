@@ -2,6 +2,11 @@ import { KeyedSet } from "@compforge/ts-stdx/collections";
 import type { Address } from "@compforge/aide-plugin";
 import type { Resource, ResourceRef } from "@compforge/aide-plugin";
 
+/** @spec Only this typed fixed notice may be delivered into a muted Address; it contains no generated content. */
+export const MUTED_OUTPUT_TEXT = "我当前被禁言。如需听我发言，请解除该地址的禁言。";
+export const isMutedNotice = (delivery: { notice?: "muted"; text: string }): boolean =>
+  delivery.notice === "muted" && delivery.text === MUTED_OUTPUT_TEXT;
+
 export const OUTPUT_TYPE = { apiVersion: "aide.dev/v1alpha5", kind: "Output" } as const;
 
 /** @spec Output content, intended receivers and destination are immutable. Input associations are optional many-to-many provenance, never consumption receipts. */
@@ -23,9 +28,10 @@ export interface OutputSpec {
   createdBy?: import("../observation/reference.ts").AgentCall;
 }
 export type OutputSubmission = Omit<OutputSpec, "target"> & { target: import("../address/service.ts").AddressTarget };
+/** @spec delivery records who actually receives what and where; it never rewrites the expected receivers/text/target in spec. */
 export interface OutputStatus {
   disclosure?: { decision: "allowed" | "denied"; reason: string; checkedAt: string; fingerprint: string; policy?: import("./policy.ts").DisclosurePolicy };
-  delivery?: { replay?: "idempotent" | "once"; address: import("../address/model.ts").AddressRef; target: Address; text: string; receivers: import("../person/model.ts").PersonRefs };
+  delivery?: { notice?: "muted"; replay?: "idempotent" | "once"; address: import("../address/model.ts").AddressRef; target: Address; text: string; receivers: import("../person/model.ts").PersonRefs };
   waitingAddress?: import("../address/model.ts").AddressRef;
   phase: "pending" | "sending" | "delivered" | "failed" | "uncertain" | "cancelled";
   attempts: number;
