@@ -1,3 +1,5 @@
+import { readAgentStream } from "../src/stream/agent.ts";
+import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { addressFor } from "./address-fixture.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
@@ -13,7 +15,7 @@ import { personRefs, personRef, PERSON_TYPE, LOCAL_ME, type PersonResource } fro
 import { PersonDefinition } from "../plugins/personal/person/definition.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { DeliveryError } from "@compforge/aide-connector";
-import { MUTED_OUTPUT_TEXT } from "../plugins/personal/output/model.ts";
+import { MUTED_OUTPUT_TEXT } from "../plugins/personal/stream/notices.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import { NOTE_TYPE, noteVersion, type NoteResource } from "../plugins/personal/note/model.ts";
 import { upsertNote } from "../plugins/personal/note/service.ts";
@@ -23,7 +25,7 @@ import { larkAddress, larkThreadAddress, webAddress, larkEndpoint } from "../src
 import { TopicStore, seedInput } from "./topic-fixture.ts";
 import { OutputDisclosure } from "../plugins/personal/output/disclosure.ts";
 import { OutputDelivery } from "../plugins/personal/output/delivery.ts";
-import { outputSpec } from "../plugins/personal/output.ts";
+import { mailDraft } from "../plugins/personal/output.ts";
 import { replyIdentity } from "../plugins/personal/address/reply.ts";
 import { Aide } from "../src/app.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -88,7 +90,7 @@ test("Unmuted group checks all known people; late mute privately redirects the u
   const f = await setup(t), place = f.addresses.observe(group, [personRef(f.a)]), ref = addressRef(place);
   f.addresses.setMuted(ref, false, true);
   const note = await f.addresses.client.create(NOTE_TYPE, { name: "evidence", spec: { subject: resourceRef(f.topic), text: "公开进展", people: personRefs([personRef(f.a)]), addresses: addressRefs([]), sensitivity: "L1", visibility: "people" }, status: { updatedAt: new Date().toISOString() } }) as NoteResource;
-  const create = (id: string) => f.store.create("test", id, outputSpec(f.topic, { topicId: "test", text: "公开进展", target: group }, { notes: [{ uid: note.metadata.uid, version: noteVersion(note) }] }));
+  const create = (id: string) => composeMail(f.store, "test", id, mailDraft(f.topic, { topicId: "test", text: "公开进展", target: group }, { notes: [{ uid: note.metadata.uid, version: noteVersion(note) }] }));
   create("one"); await f.checker.reconcile("one"); assert.equal(f.store.get("one")!.status.disclosure!.decision, "allowed");
   f.addresses.observe(group, [personRef(f.b)]);
   await f.checker.reconcile("one"); assert.equal(f.store.get("one")!.status.disclosure!.decision, "denied");
@@ -117,7 +119,7 @@ test("Muted Output uses pinned Input attention to choose an original-address not
     inputs.submit("test", item.id, { origin: item.origin, originId: "test", attention: item.attention, source: group, text: "问题" });
     const input = inputs.get(item.id)!;
     const raw = "原始隐私正文";
-    f.store.create("test", item.id, outputSpec(f.topic, { topicId: "test", text: raw, target: group }, {
+    composeMail(f.store, "test", item.id, mailDraft(f.topic, { topicId: "test", text: raw, target: group }, {
       ...(item.id === "no-input" ? {} : { inputIds: [item.id], inputUids: { [item.id]: item.id === "stale-uid" ? "deleted-input-uid" : input.metadata.uid } }),
       replyToMessageId: "original-message",
     }));
@@ -126,11 +128,11 @@ test("Muted Output uses pinned Input attention to choose an original-address not
     await reconcile.reconcile(item.id); await reconcile.reconcile(item.id);
     assert.equal(sent.length, 1, item.id);
     assert.deepEqual(sent[0]!.target, item.notice ? larkThreadAddress("app", "group", "original-message") : webAddress("test"), item.id);
-    assert.equal(sent[0]!.notice, item.notice ? "muted" : undefined, item.id);
-    if (item.notice) assert.equal(sent[0]!.text, MUTED_OUTPUT_TEXT);
-    else { assert.match(sent[0]!.text, /原始隐私正文/); }
+    assert.equal(sent[0]!.permitMuted, item.notice, item.id);
+    if (item.notice) assert.equal(readAgentStream(sent[0]!.stream).text, MUTED_OUTPUT_TEXT);
+    else { assert.match(readAgentStream(sent[0]!.stream).text, /原始隐私正文/); }
     const output = f.store.get(item.id)!;
-    assert.equal(f.store.content(output).text, raw); assert.equal(output.spec.target.uid, ref.uid);
+    assert.equal(mailView(f.store, output).text, raw); assert.equal(output.spec.target.uid, ref.uid);
     assert.equal(output.status.phase, "delivered"); assert.equal(output.status.disclosure!.decision, "denied");
     assert.equal(f.addresses.read(ref).spec.muted, true);
   }
@@ -141,7 +143,7 @@ test("An Immediate mute notice remains fixed through retry, Input loss and unmut
   const ref = addressRef(f.addresses.observe(group, [personRef(f.a)]));
   inputs.submit("test", "immediate", { origin: "channel", originId: "test", source: group, text: "问题" });
   const input = inputs.get("immediate")!;
-  f.store.create("test", "retry-notice", outputSpec(f.topic, { topicId: "test", text: "不能泄露的原文", target: group }, {
+  composeMail(f.store, "test", "retry-notice", mailDraft(f.topic, { topicId: "test", text: "不能泄露的原文", target: group }, {
     inputIds: ["immediate"], inputUids: { immediate: input.metadata.uid },
   }));
   const sent: import("../plugins/personal/output/delivery.ts").OutputMessage[] = [];
@@ -157,10 +159,10 @@ test("An Immediate mute notice remains fixed through retry, Input loss and unmut
   f.addresses.setMuted(ref, false, true);
   const recovered = new OutputDelivery(f.store, () => transport, log);
   await recovered.reconcile("retry-notice"); await recovered.reconcile("retry-notice");
-  assert.equal(sent.length, 2); assert.deepEqual(sent[0], sent[1]);
-  assert.equal(sent[1]!.text, MUTED_OUTPUT_TEXT); assert.deepEqual(sent[1]!.target, group);
+  assert.equal(sent.length, 2); assert.deepEqual(readAgentStream(sent[0]!.stream), readAgentStream(sent[1]!.stream));
+  assert.equal(readAgentStream(sent[1]!.stream).text, MUTED_OUTPUT_TEXT); assert.deepEqual(sent[1]!.target, group);
   assert.equal(f.store.get("retry-notice")!.status.phase, "delivered");
-  assert.equal(f.store.content(f.store.get("retry-notice")!).text, "不能泄露的原文");
+  assert.equal(mailView(f.store, f.store.get("retry-notice")!).text, "不能泄露的原文");
 });
 
 test("Source and Channel mentions share one reply; explicit target remains Chief's choice", async t => {
@@ -256,7 +258,7 @@ test("Denied Output indexes the waiting and actual Me Address until delivery com
   const fallback = addressRef(f.addresses.observe(webAddress("test"), [personRef(f.me)]));
   f.addresses.setMuted(fallback, true, false);
   const origin = f.addresses.ref(group);
-  f.store.create("test", "blocked", outputSpec(f.topic, { topicId: "test", text: "private", target: origin }));
+  composeMail(f.store, "test", "blocked", mailDraft(f.topic, { topicId: "test", text: "private", target: origin }));
   await assert.rejects(f.checker.reconcile("blocked"), /not a verified private/);
   assert.deepEqual(f.store.get("blocked")!.status.waitingAddress, fallback);
   const { OUTPUT_TYPE } = await import("../plugins/personal/output/model.ts");

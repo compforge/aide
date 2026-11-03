@@ -1,3 +1,4 @@
+import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
 import { ADDRESS_TYPE, addressRef } from "../plugins/personal/address/model.ts";
 import { reconcilePerson } from "../plugins/personal/person/reconcile.ts";
@@ -53,8 +54,7 @@ test("Same names only select candidates; merging appends to the chosen Person wi
   assert.deepEqual(new Set(browsePersons(ResourceStorage.open(f.home), marks, { name: target.spec.name, excludeUid: target.metadata.uid }).items.map(p => p.uid)), new Set([source.metadata.uid, namesake.metadata.uid]));
   const sender = personRef(source), inputs = new InputStore(f.home), outputs = new OutputStore(f.home);
   const input = inputs.submit("test", "historical", { origin: "channel", originId: "web", text: "历史消息", sender });
-  const output = outputs.create("test", "reply", { text: "历史回复", target: webAddress("topic"), receivers: personRefs([sender]), topicId: "topic",
-    topic: { apiVersion: "aide.dev/v1alpha5", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } });
+  const output = composeMail(outputs, "test", "reply", { target: webAddress("topic"), receivers: personRefs([sender]), topicId: "topic", topic: { apiVersion: "aide.dev/v1alpha5", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" }, content: { kind: "text", text: "历史回复" } });
   const merged = await f.persons.merge(version(source), version(target));
   assert.equal(merged.metadata.uid, target.metadata.uid);
   assert.equal(merged.spec.name, target.spec.name);
@@ -70,8 +70,8 @@ test("Same names only select candidates; merging appends to the chosen Person wi
   assert.deepEqual(inputs.get("historical"), input);
   assert.deepEqual(outputs.get("reply"), output);
   assert.match(inputPrinter.describe(input), /历史消息/);
-  assert.match(outputs.content(output).text, /历史回复/);
-  assert.match(outputPrinter.describe(output), /stream:output:reply:raw/);
+  assert.match(mailView(outputs, output).text, /历史回复/);
+  assert.ok(outputPrinter.describe(output).includes(output.spec.stream.uid));
   // Even if a resource name is reused, an old UID must not resolve to the new person.
   await f.client.create(PERSON_TYPE, { name: source.metadata.name, spec: { name: "其他人", identities: [] }, status: { ...source.status, summaryRevision: "" } });
   await assert.rejects(f.persons.read(sender.name, sender.uid), /Unknown Person/);

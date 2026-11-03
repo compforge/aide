@@ -1,4 +1,6 @@
-import { isMutedNotice } from "../../../plugins/personal/output/model.ts";
+import { readAgentStream } from "../../stream/agent.ts";
+import { mailProcess } from "../mail.ts";
+import { processPreview } from "../reply-layout.ts";
 import type { OutputMessage } from "../../../plugins/personal/output/delivery.ts";
 import type { TopicLocator } from "../../../plugins/personal/topic/locator.ts";
 import { larkAddress, larkTopicKey, larkTopicLocator, larkEndpoint } from "../address.ts";
@@ -247,10 +249,12 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     if (this.stopped) throw new Error("Lark transport is stopped");
     const endpoint = larkEndpoint(message.target);
     if (!endpoint || endpoint.appId !== this.appId) throw new Error("Lark target belongs to another transport");
-    if (message.stream && this.transport.cards && !message.notice) {
-      const content = message.stream;
+    const content = readAgentStream(message.stream, this);
+    if (this.transport.cards && !message.permitMuted) {
       const view: LarkProgress = { id: `output:${message.id}`, phase: content.phase === "open" ? "running" : content.phase === "completed" ? "done" : "failed",
         think: Array.from(content.think).slice(-2000).join(""), content: Array.from(content.text).slice(0, 4000).join(""), overflow: Array.from(content.text).length > 4000, messageIds: [] };
+      view.process = processPreview(view.phase, [{ type: "thought", content: content.think }, ...content.tools.map(t => ({ type: "tool", content: t.title ?? t.toolCallId, status: t.status ?? undefined }))]);
+      view.think = Array.from(mailProcess(content)).slice(-2000).join("");
       while (Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(progressCard(view, content.phase === "open")) })) > 28_000) {
         view.think = Array.from(view.think).slice(-Math.floor(Array.from(view.think).length * 0.75)).join("");
         view.content = Array.from(view.content).slice(0, Math.floor(Array.from(view.content).length * 0.75)).join("");
@@ -258,13 +262,18 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
       }
       try { await this.updateCard("", endpoint.receiveId, view, message.target); }
       catch (error) { throw larkDeliveryError(error); }
-      if (content.phase !== "open" && view.overflow) await this.send({ ...message, stream: undefined, id: `${message.id}:overflow`, text: content.text.slice(view.content.length) });
+      if (content.phase !== "open" && view.overflow) await this.sendText({ ...message, id: `${message.id}:overflow` }, content.text.slice(view.content.length));
       return { id: this.state.cards[view.id]!.cardId, scope: this.appId };
     }
-    for (const [index, text] of textParts(message.text).entries()) {
+    return this.sendText(message, content.text);
+  }
+
+  private async sendText(message: OutputMessage, body: string) {
+    const endpoint = larkEndpoint(message.target)!;
+    for (const [index, text] of textParts(body).entries()) {
       const id = this.deliveryId(message.id, index);
       if (this.state.delivered.includes(id)) continue;
-      try { if (!this.aide.canSpeak(message.target) && !isMutedNotice(message)) throw new Error("Aide is muted at this Address");
+      try { if (!this.aide.canSpeak(message.target) && !message.permitMuted) throw new Error("Aide is muted at this Address");
         await this.transport.send(endpoint.receiveId, text, id, endpoint.receiveIdType, endpoint.replyToMessageId); }
       catch (error) {
         this.log.warn({ outputId: message.id, target: message.target, part: index, ...larkSendFailure(error) }, "Lark send failed");

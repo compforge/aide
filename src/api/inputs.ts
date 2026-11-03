@@ -1,3 +1,4 @@
+import { mailView } from "../../plugins/personal/stream/writer.ts";
 import { outputWaitLabels } from "../../plugins/personal/output/view.ts";
 import { inputSessions } from "../../plugins/personal/observation/job.ts";
 import type { ResourceRef, ResourceNamespace } from "@compforge/aide-plugin";
@@ -83,7 +84,7 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
   for (const output of outputs) {
     const target = consumer(output.spec.topic);
     timeline.push({ id: `output:${output.metadata.name}`, stage: "output", at: output.metadata.creationTimestamp, title: "创建 Output",
-      text: aide.topics.outputStore.content(output).text, status: output.status.phase, consumer: target, executionId: output.spec.executionId });
+      text: mailView(aide.topics.outputStore, output).text, status: output.status.phase, consumer: target, executionId: output.spec.executionId });
     if (output.status.deliveredAt) timeline.push({ id: `output:${output.metadata.name}:delivered`, stage: "output", at: output.status.deliveredAt,
       title: "Output 已送达", status: "delivered", consumer: target });
     if (output.status.deliveryWait && ["pending", "sending"].includes(output.status.phase)) timeline.push({ id: `output:${output.metadata.name}:waiting`, stage: "output",

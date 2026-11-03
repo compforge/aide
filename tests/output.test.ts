@@ -1,3 +1,4 @@
+import { composeMail } from "../plugins/personal/stream/writer.ts";
 import { addressFor } from "./address-fixture.ts";
 import { fixtureCanSpeak } from "./address-fixture.ts";
 import { approveFixtureOutput } from "./output-fixture.ts";
@@ -11,7 +12,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pino from "pino";
-import { OUTPUT_TYPE, type OutputSubmission as OutputSpec } from "../plugins/personal/output/model.ts";
+import { OUTPUT_TYPE } from "../plugins/personal/output/model.ts";
+import type { MailDraft as OutputSpec } from "../plugins/personal/stream/writer.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
 import { outputPrinter } from "../plugins/personal/output/printer.ts";
 import { HarnessFixtures } from "./harness-fixture.ts";
@@ -19,7 +21,7 @@ import { personalAdmission } from "../plugins/personal/admission.ts";
 import { createResourceClient } from "../src/host/plugin/resource/client.ts";
 import { ResourceCapacityError, ResourceStorageConfigSchema } from "../src/host/resource/storage.ts";
 import { TopicStore, seedInput } from "./topic-fixture.ts";
-import { outputSpec } from "../plugins/personal/output.ts";
+import { mailDraft } from "../plugins/personal/output.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
 import type { LarkTransport } from "../src/channel/lark/client.ts";
 
@@ -32,24 +34,24 @@ async function setup(t: TestContext) {
   const provider = personalAdmission(topics.inputStore, outputs);
   const changes: string[] = [];
   const client = createResourceClient(topics.resources, (c) => changes.push(c.resource.metadata.name), undefined, provider);
-  const spec = (text = "结果"): OutputSpec => outputSpec(topic, { text, topicId: "topic" });
+  const spec = (text = "结果"): OutputSpec => mailDraft(topic, { text, topicId: "topic" });
   return { root, session, topics, topic, outputs, client, changes, spec };
 }
 
 /** @case A notification can have no Input; several Outputs can explain the same group of Inputs. */
 test("Output persists independent many-to-many associations, immutable content and destination, and a Printer", async (t) => {
   const f = await setup(t);
-  const first = f.outputs.create(f.session.id, "one", { ...f.spec("第一条\n完整详情"), inputIds: ["a", "b"] });
-  f.outputs.create(f.session.id, "two", { ...f.spec("第二条"), inputIds: ["a", "b"] });
-  const proactive = f.outputs.create(f.session.id, "proactive", f.spec("主动提醒"));
+  const first = composeMail(f.outputs, f.session.id, "one", { ...f.spec("第一条\n完整详情"), inputIds: ["a", "b"] });
+  composeMail(f.outputs, f.session.id, "two", { ...f.spec("第二条"), inputIds: ["a", "b"] });
+  const proactive = composeMail(f.outputs, f.session.id, "proactive", f.spec("主动提醒"));
   assert.equal(proactive.spec.inputIds, undefined);
   assert.deepEqual(f.outputs.create(f.session.id, "one", first.spec), first);
-  assert.throws(() => f.outputs.create(f.session.id, "one", { ...first.spec, text: "修改内容" }), /different content/);
+  assert.throws(() => composeMail(f.outputs, f.session.id, "one", { ...first.spec, content: { kind: "text", text: "修改内容" } }), /different content/);
   assert.throws(() => f.outputs.create(f.session.id, "one", { ...first.spec, target: larkAddress("app", "chat") }), /different content/);
   assert.equal(new OutputStore(f.root).list({ topicUid: f.topic.metadata.uid }).length, 3);
   assert.equal(first.status.phase, "pending", "Web waits for disclosure before publication");
-  assert.match(outputPrinter.describe(first), /stream:output:one:raw/);
-  assert.equal(outputPrinter.summarize(first), "Stream: stream:output:one:raw");
+  assert.match(outputPrinter.describe(first), /stream:output:one:/);
+  assert.equal(outputPrinter.summarize(first), `Stream: ${first.spec.stream.uid}`);
   assert.equal((await f.client.list(OUTPUT_TYPE)).length, 3);
   assert.equal((await f.client.get({ ...OUTPUT_TYPE, namespace: "v1", name: "one", uid: first.metadata.uid }))?.metadata.uid, first.metadata.uid);
   assert.equal((await f.client.patchStatus(first, { phase: "pending" })).status.phase, "pending");
@@ -67,7 +69,7 @@ test("Resource commit rolls back result and Output together on validation, confl
   f.outputs.subscribe(() => { notifications++; observed.push(f.topics.resources.get<{}, { done: boolean }>(type, "work").status.done); });
   f.changes.length = 0;
   await assert.rejects(f.client.commit([
-    { operation: "patchStatus", resource: work, patch: { done: true } }, write("invalid", { ...f.spec(), text: "" }),
+    { operation: "patchStatus", resource: work, patch: { done: true } }, write("invalid", { ...f.spec(), content: { kind: "text", text: "" } }),
   ]));
   assert.equal(f.topics.resources.get<{}, { done: boolean }>(type, "work").status.done, false);
   assert.deepEqual(f.changes, []); assert.equal(notifications, 0);
@@ -82,6 +84,8 @@ test("Resource commit rolls back result and Output together on validation, confl
     { operation: "patchStatus", resource: current, patch: { done: false } }, write("first"), write("second"),
   ]), ResourceCapacityError);
   assert.equal(f.outputs.list().length, 0, "A later write must not evict an earlier write from the same transaction");
+  assert.equal(f.outputs.storage.db.prepare("SELECT count(*) AS n FROM stream_records").get()!.n, 0);
+  assert.equal(f.outputs.resources.list({ apiVersion: "aide.dev/v1alpha1", kind: "Stream" }).length, 0);
   assert.equal(f.topics.resources.get<{}, { done: boolean }>(type, "work").status.done, true);
   assert.equal(notifications, 0);
   await f.client.commit([{ operation: "patchStatus", resource: current, patch: { done: true } }, write("success")]);
@@ -93,15 +97,15 @@ test("Pending Output survives quota pressure; delivered unreferenced history is 
   const f = await setup(t);
   f.outputs.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Output": { maxCount: 1 } } }));
   const spec: OutputSpec = { ...f.spec(), target: larkAddress("app", "chat") };
-  f.outputs.create(f.session.id, "pending", spec);
-  assert.throws(() => f.outputs.create(f.session.id, "next", f.spec()), ResourceCapacityError);
+  composeMail(f.outputs, f.session.id, "pending", spec);
+  assert.throws(() => composeMail(f.outputs, f.session.id, "next", f.spec()), ResourceCapacityError);
   approveFixtureOutput(f.outputs, "pending");
   f.outputs.begin("pending");
   assert.equal(f.outputs.get("pending")!.status.attempts, 1);
   f.outputs.delivered("pending");
-  f.outputs.create(f.session.id, "next", f.spec());
+  composeMail(f.outputs, f.session.id, "next", f.spec());
   assert.equal(f.outputs.get("pending"), undefined);
-  assert.throws(() => f.outputs.create(f.session.id, "pending", spec), /already created and reclaimed/);
+  assert.throws(() => composeMail(f.outputs, f.session.id, "pending", spec), /already created and reclaimed/);
 });
 
 test("say associates optional Inputs and records Outputs for the owning execution, with tool-call idempotency", async (t) => {
@@ -121,10 +125,10 @@ test("say associates optional Inputs and records Outputs for the owning executio
   assert.deepEqual(f.topics.get("topic")!.pendingInputIds, ["a", "b"], "Saying something does not consume Inputs");
   for (const output of f.outputs.list()) approveFixtureOutput(f.outputs, output.metadata.name, true);
   f.outputs.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Output": { maxCount: 3 } } }));
-  f.outputs.create(f.session.id, "over-capacity", f.spec());
+  composeMail(f.outputs, f.session.id, "over-capacity", f.spec());
   approveFixtureOutput(f.outputs, "over-capacity", true);
   await f.client.patchStatus(c, { execution: null });
-  f.outputs.create(f.session.id, "after-handoff", f.spec());
+  composeMail(f.outputs, f.session.id, "after-handoff", f.spec());
   assert.equal(f.outputs.list().length, 3);
 });
 
@@ -132,7 +136,7 @@ test("say associates optional Inputs and records Outputs for the owning executio
 test("Lark sends to explicit Output target after Topic deletion and reuses retry identity after restart", async (t) => {
   const f = await setup(t);
   const spec: OutputSpec = { ...f.spec("发给明确的群"), target: larkAddress("app", "unseen-chat") };
-  f.outputs.create(f.session.id, "delivery", spec);
+  composeMail(f.outputs, f.session.id, "delivery", spec);
   approveFixtureOutput(f.outputs, "delivery");
   await f.client.delete(f.topic, f.topic.metadata.name);
   const sent: { chatId: string; id: string }[] = [];
@@ -164,8 +168,8 @@ test("Lark sends to explicit Output target after Topic deletion and reuses retry
 test("Output admission rejects disabled or mismatched Lark targets before persistence", async t => {
   const f = await setup(t);
   const bad = { ...f.spec(), target: larkAddress("connector-app", "chat") };
-  assert.throws(() => f.outputs.create("owner", "wrong-app", bad), /No configured Channel/);
-  assert.throws(() => new OutputStore(f.root).create("owner", "disabled", { ...f.spec(), target: larkAddress("app", "chat") }), /disabled/);
+  assert.throws(() => composeMail(f.outputs, "owner", "wrong-app", bad), /No configured Channel/);
+  assert.throws(() => composeMail(new OutputStore(f.root), "owner", "disabled", { ...f.spec(), target: larkAddress("app", "chat") }), /disabled/);
   await assert.rejects(f.client.commit([
     { operation: "patchStatus", resource: f.topic, patch: { idleReviewCount: 99 } },
     { operation: "create", type: OUTPUT_TYPE, name: "atomic", spec: bad },
@@ -173,14 +177,14 @@ test("Output admission rejects disabled or mismatched Lark targets before persis
   assert.notEqual(f.topics.resource("topic")!.status.idleReviewCount, 99);
   assert.equal(f.outputs.list().length, 0);
   assert.equal(f.outputs.storage.hasReceipt("output:atomic"), false);
-  assert.ok(f.outputs.create("owner", "valid", { ...f.spec(), target: larkAddress("app", "chat") }));
+  assert.ok(composeMail(f.outputs, "owner", "valid", { ...f.spec(), target: larkAddress("app", "chat") }));
 });
 
 /** @case Reconciliation of one failed Output cannot hold later Outputs behind a global scan. */
 test("Output preflight failures are isolated; interrupted non-idempotent delivery stays uncertain", async t => {
   const f = await setup(t);
   for (const id of ["offline", "ready", "interrupted"]) {
-    f.outputs.create("owner", id, { ...f.spec(id), target: larkAddress("app", id) });
+    composeMail(f.outputs, "owner", id, { ...f.spec(id), target: larkAddress("app", id) });
     approveFixtureOutput(f.outputs, id);
   }
   f.outputs.check = async id => { approveFixtureOutput(f.outputs, id); };
@@ -220,7 +224,7 @@ test("say acknowledges acceptance independently of delivery without recreating m
 test("Lark delivery failures retain diagnostic codes and delivery context without leaking credentials or text", async t => {
   const f = await setup(t);
   const target = larkAddress("app", "chat");
-  f.outputs.create("owner", "send-failure", { ...f.spec("PRIVATE MESSAGE"), target });
+  composeMail(f.outputs, "owner", "send-failure", { ...f.spec("PRIVATE MESSAGE"), target });
   approveFixtureOutput(f.outputs, "send-failure");
   const logs: Record<string, unknown>[] = [];
   const log = pino({}, { write(line) { logs.push(JSON.parse(line)); } });
@@ -303,8 +307,8 @@ test("Output queries isolate the declared API version", async t => {
   const { OutputDefinition } = await import("../plugins/personal/output/definition.ts");
   const oldType = { ...OUTPUT_TYPE, apiVersion: "aide.dev/v1alpha2" };
   f.outputs.storage.register("personal", [{ ...OutputDefinition, type: oldType }]);
-  const admitted = f.outputs.create("owner", "template", f.spec()).spec;
+  const admitted = composeMail(f.outputs, "owner", "template", f.spec()).spec;
   await f.client.create(oldType, { name: "previous-contract", spec: admitted, status: { phase: "pending", attempts: 0 } });
-  f.outputs.create("owner", "current-contract", f.spec());
+  composeMail(f.outputs, "owner", "current-contract", f.spec());
   assert.deepEqual(f.outputs.list().map(o => o.metadata.name), ["current-contract", "template"]);
 });

@@ -1,3 +1,4 @@
+import { mailView } from "../plugins/personal/stream/writer.ts";
 import { fixtureAddress } from "./address-fixture.ts";
 import { seedInput } from "./topic-fixture.ts";
 import assert from "node:assert/strict";
@@ -54,7 +55,7 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   assert.equal(failed.status, 200);
   await aide.settled();
   assert.equal(aide.outputs().length, 1);
-  assert.equal(aide.outputStore.content(aide.outputStore.list()[0]!).phase, "interrupted");
+  assert.equal(mailView(aide.outputStore, aide.outputStore.list()[0]!).phase, "interrupted");
   assert.equal(aide.topics.inputs("me")[0]!.consumption.phase, undefined);
   assert.ok(aide.topics.resource("me")!.status.lastError);
   assert.equal(aide.works().length, 0);
@@ -251,7 +252,7 @@ test("Web deletes Tasks and Routines through WorkService and preserves other top
   await aide.settled();
   assert.deepEqual(await (await fetch(base + "/work?topicId=" + encodeURIComponent(group))).json(), []);
   assert.deepEqual(aide.work("other").list().map((item) => item.id), [foreign.id]);
-  assert.equal(aide.outputStore.content(aide.outputStore.get("retained-reply")!).text, "已建立监控");
+  assert.equal(mailView(aide.outputStore, aide.outputStore.get("retained-reply")!).text, "已建立监控");
   assert.equal(await aide.event({ id: "after-delete",  topicId: group, name: "memory.changed", text: "changed" }), 0);
   await aide.settled();
   assert.equal(requests.length, 0);

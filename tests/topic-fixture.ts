@@ -1,3 +1,4 @@
+import { composeMail } from "../plugins/personal/stream/writer.ts";
 import { approveFixtureOutput } from "./output-fixture.ts";
 import { assertChannelDelivery } from "../src/channel/address.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
@@ -39,7 +40,7 @@ export async function seedInput(store: PersonalTopics, id: string, spec: InputSu
   for (const o of outputs) {
     const write = outputWrite(c, o);
     if (write.operation !== "create") continue;
-    const resource = store.outputStore.create(topicId, write.name, write.spec as import("../plugins/personal/output/model.ts").OutputSpec);
+    const resource = composeMail(store.outputStore, topicId, write.name, write.spec as import("../plugins/personal/stream/writer.ts").MailDraft);
     approveFixtureOutput(store.outputStore, o.id, true);
     const key = store.outputStore.key(o.id);
     const stored = store.outputStore.storage.read(key)!;

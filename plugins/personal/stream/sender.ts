@@ -1,22 +1,24 @@
+import { agentStreamKinds, type AgentStreamEvent } from "../../../src/stream/agent.ts";
+import { MailWriter, type NoteCitation } from "./writer.ts";
 import type { Logger } from "pino";
-import type { StreamDelta, StreamRef } from "@compforge/aide-plugin";
-import { textOf, type AnyEventEnvelope } from "../../../src/host/event/index.ts";
+import type { StreamRef } from "@compforge/aide-plugin";
+import { type AnyEventEnvelope } from "../../../src/host/event/index.ts";
 import type { ExecutionService } from "../../../src/host/runtime/execution.ts";
 import { InputAttention, inputAttention } from "../input/model.ts";
 import type { InputStore } from "../input/store.ts";
 import type { TopicStore } from "../topic/store.ts";
-import type { OutputStore } from "./store.ts";
+import type { OutputStore } from "../output/store.ts";
 
 interface Writer {
-  outputId: string; stream: StreamRef; chunks: StreamDelta[];
-  messages: Map<string, string>; timer?: ReturnType<typeof setTimeout>; error?: string;
+  outputId: string; stream: StreamRef; chunks: AgentStreamEvent[];
+  timer?: ReturnType<typeof setTimeout>; error?: string;
 }
 /** @spec Only an admitted Immediate Channel reply starts automatically; background work stays silent.
  * @spec A writer keeps its original Input/address binding when another Input steers the same invocation.
- * @spec Full Harness message snapshots never duplicate already emitted chunks.
+ * @spec Harness events preserve message upserts, clears and tool updates in their original order.
  * @link docs/personal/output.md
  */
-export class OutputProducer {
+export class MailSender {
   private readonly writers = new Map<string, Writer>();
   private readonly unsubscribe: () => void;
   constructor(private readonly outputs: OutputStore, private readonly topics: TopicStore, private readonly inputs: InputStore,
@@ -29,12 +31,18 @@ export class OutputProducer {
     const input = candidates[0];
     if (!input?.spec.source || candidates.some(i => i!.spec.source?.uid !== input.spec.source!.uid)) return false;
     const receipt = await this.topics.say(topicId, input.metadata.name, "", executionId,
-      { idempotencyKey: `stream:${executionId}`, respondToInputId: input.metadata.name, inputIds, streaming: true });
+      { idempotencyKey: `stream:${executionId}`, respondToInputId: input.metadata.name, inputIds, contentKind: "agent" });
     const output = this.outputs.get(receipt.outputId)!;
-    if (this.outputs.content(output).phase !== "open") return false;
-    this.writers.set(executionId, { outputId: receipt.outputId, stream: output.spec.stream, chunks: [], messages: new Map() });
+    if (this.outputs.streams.get(output.spec.stream).status.phase !== "open") return false;
+    this.writers.set(executionId, { outputId: receipt.outputId, stream: output.spec.stream, chunks: [] });
     this.log.info({ outputId: receipt.outputId, streamUid: output.spec.stream.uid, executionId }, "Chief output stream opened");
     return true;
+  }
+  cite(executionId: string, notes: readonly NoteCitation[]) {
+    const writer = this.writers.get(executionId);
+    if (!writer || writer.error) throw new Error("No writable live Stream for this execution");
+    new MailWriter(this.outputs.streams, writer.stream).cite(notes);
+    return { stream: writer.stream };
   }
   finish(executionId: string, error?: string): void {
     const writer = this.writers.get(executionId);
@@ -53,7 +61,7 @@ export class OutputProducer {
   recover(): void {
     for (const output of this.outputs.list()) {
       if (output.metadata.deletionTimestamp) continue;
-      if (this.outputs.content(output).phase === "open") this.outputs.streams.interrupt(output.spec.stream, "Generating execution was interrupted by Host restart");
+      if (this.outputs.streams.get(output.spec.stream).status.phase === "open") this.outputs.streams.interrupt(output.spec.stream, "Generating execution was interrupted by Host restart");
     }
   }
   private observe(event: AnyEventEnvelope) {
@@ -61,23 +69,8 @@ export class OutputProducer {
     const invocation = this.executions.listHarnessInvocations().find(i => i.invocationId === event.invocationId);
     const writer = invocation && this.writers.get(invocation.executionId);
     if (!writer || writer.error) return;
-    if (!["agent_message_chunk", "agent_thought_chunk", "agent_message", "agent_thought"].includes(event.kind)) return;
-    const payload = event.payload as { messageId: string; content: Parameters<typeof textOf>[0] };
-    const kind = event.kind.startsWith("agent_thought") ? "think" : "text";
-    const chunk = event.kind.endsWith("_chunk");
-    const key = `${kind}:${payload.messageId}`;
-    const previous = writer.messages.get(key) ?? "";
-    const content = textOf(Array.isArray(payload.content) ? payload.content : [payload.content]);
-    if (!chunk && !content.startsWith(previous)) {
-      this.fail(writer, new Error("Harness revised already streamed content"));
-      return;
-    }
-    const text = chunk ? content : content.slice(previous.length);
-    if (!text) return;
-    writer.messages.set(key, previous + text);
-    const last = writer.chunks.at(-1);
-    if (last?.kind === kind) last.delta += text;
-    else writer.chunks.push({ kind, delta: text });
+    if (!(agentStreamKinds as readonly string[]).includes(event.kind)) return;
+    writer.chunks.push({ kind: event.kind, payload: event.payload } as AgentStreamEvent);
     writer.timer ??= setTimeout(() => {
       try { this.flush(writer); }
       catch (error) { this.fail(writer, error); }

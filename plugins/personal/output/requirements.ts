@@ -1,3 +1,4 @@
+import { readAgentStream } from "../../../src/stream/agent.ts";
 import { DeliveryError } from "@compforge/aide-connector";
 import type { OutputTransportResolver } from "./delivery.ts";
 import { createHash } from "node:crypto";
@@ -54,10 +55,12 @@ export function requirementTransport(store: OutputStore, connectors: Writer): Ou
     const account = await connectors.requirements.identity(target.source);
     if (account.scope !== target.scope) throw new DeliveryError({ kind: "permanent", code: "project_changed", message: "Connector project changed; cannot prepare the saved destination" });
     return { replay: "once", async send(message) {
-      store.storage.addReceipt(deliveryKey(message.id), JSON.stringify({ target, hash: hash(message.text) }));
-      const external = await connectors.addRequirementComment(target, { text: message.text, deliveryId: message.id });
+      const text = readAgentStream(message.stream).text;
+      if (!text.trim()) return undefined;
+      store.storage.addReceipt(deliveryKey(message.id), JSON.stringify({ target, hash: hash(text) }));
+      const external = await connectors.addRequirementComment(target, { text: text, deliveryId: message.id });
       if (external.scope !== target.scope) throw new Error("Comment receipt belongs to a different project");
-      store.storage.addReceipt(commentKey(target, external.id), JSON.stringify({ hash: hash(message.text), outputId: message.id }));
+      store.storage.addReceipt(commentKey(target, external.id), JSON.stringify({ hash: hash(text), outputId: message.id }));
       return external;
     } };
   };

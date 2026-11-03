@@ -1,3 +1,4 @@
+import { composeMail } from "../plugins/personal/stream/writer.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { once } from "node:events";
@@ -96,7 +97,7 @@ test("Topic summaries use indexed facts without global views and quiet input nev
   const topic = await store.ensure("topic", webAddress("topic"), "Named Topic");
   tieTopics(db);
   const work = await aide.work("topic").create({ kind: "task", title: "Check", instruction: "Inspect", trigger: null });
-  store.outputStore.create("topic", "reply", { text: "Latest\n reply", topicId: "topic", topic: { ...resourceRef(topic), uid: topic.metadata.uid }, target: webAddress("topic") });
+  composeMail(store.outputStore, "topic", "reply", { topicId: "topic", topic: { ...resourceRef(topic), uid: topic.metadata.uid }, target: webAddress("topic"), content: { kind: "text", text: "Latest\n reply" } });
   store.inputStore.submit("test", "quiet", { origin: "source", originId: "test", text: "private source fact", observation: { huge: "secret".repeat(1000) } }, {
     topic: resourceRef(topic), route: { completedAt: new Date().toISOString(), result: { topics: [resourceRef(topic)], reason: "fixture" } },
   });

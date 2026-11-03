@@ -1,3 +1,4 @@
+import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { InputAttention, inputAttention } from "../plugins/personal/input/model.ts";
 import { emptyConnectors } from "../src/connector/client.ts";
 import { ROUTINE_TYPE } from "../plugins/personal/routine/model.ts";
@@ -18,7 +19,7 @@ import { InputStore } from "../plugins/personal/input/store.ts";
 import { assertChannelDelivery } from "../src/channel/address.ts";
 import { sameAddress } from "../src/address.ts";
 import { OutputStore } from "../plugins/personal/output/store.ts";
-import { outputSpec } from "../plugins/personal/output.ts";
+import { mailDraft } from "../plugins/personal/output.ts";
 import type { TopicResource } from "../plugins/personal/topic/model.ts";
 import { ConfigSchema } from "../src/config.ts";
 import type { TopicStatus } from "../plugins/personal/topic/model.ts";
@@ -93,7 +94,7 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             await reportWork(resources, task, task.status.execution!.id, { observedGeneration: task.metadata.generation, inputIds: inputs.map(i => i.metadata.name), report: outcome.report, action: outcome.action, question: outcome.question, nextAt: outcome.nextAt });
             const c = (await resources.list<TopicResource["spec"], TopicStatus>(TOPIC_TYPE)).find(c => c.metadata.uid === task.status.topic.uid);
             const text = outcome.action === "ask" ? outcome.question : outcome.notification;
-            if (c?.spec.address && text) new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])).create(c.spec.id, randomUUID(), outputSpec(c, { topicId: c.spec.id, text }, { producer: { ...workType, name: workId, namespace: "v1", uid: task.metadata.uid } }));
+            if (c?.spec.address && text) composeMail(new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])), c.spec.id, randomUUID(), mailDraft(c, { topicId: c.spec.id, text }, { producer: { ...workType, name: workId, namespace: "v1", uid: task.metadata.uid } }));
           }
           if (target.harness === "route") {
             for (const decision of JSON.parse(String(result)).decisions) {
@@ -114,9 +115,9 @@ export function fakeOptions(agent: Agent, cwd: string, requests: string[] = [], 
             const immediate = ids.map(id => new InputStore(home).get(id)!.spec).filter(i => inputAttention(i) === InputAttention.Immediate);
             const first = immediate[0]?.source;
             const address = immediate.length ? (first && immediate.every(i => i.source && first.uid === i.source.uid) ? first : undefined) : c.spec.address;
-            const live = run && new OutputStore(home).list({ executionId: run.id }).some(o => new OutputStore(home).content(o).phase === "open");
+            const live = run && new OutputStore(home).list({ executionId: run.id }).some(o => mailView(new OutputStore(home), o).phase === "open");
             if (!live && run && address && agent.notify !== false && typeof result === "string" && result) {
-              new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])).create(topicId, randomUUID(), outputSpec(c, { topicId, text: result }, { executionId: run.id, target: address, inputIds: ids, inputUids: Object.fromEntries(ids.map(id => [id, new InputStore(home).get(id)!.metadata.uid])) }));
+              composeMail(new OutputStore(home, target => assertChannelDelivery(target, larkAppId ? [larkAppId] : [])), topicId, randomUUID(), mailDraft(c, { topicId, text: result }, { executionId: run.id, target: address, inputIds: ids, inputUids: Object.fromEntries(ids.map(id => [id, new InputStore(home).get(id)!.metadata.uid])) }));
             }
             if (run && ids.length && agent.complete !== false) await assessAll(resources, c, run.id, { inputIds: ids, summary: String(result) || "Handled silently" });
           }

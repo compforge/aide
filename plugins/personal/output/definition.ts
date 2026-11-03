@@ -16,7 +16,6 @@ const ref = z.object({ apiVersion: z.string().min(1), kind: z.string().min(1), n
   uid: z.string().optional() }).strict();
 export const OutputSpecSchema = z.object({
   stream: StreamRefSchema,
-  notes: z.array(z.object({ uid: z.string().min(1), version: z.string().min(1), textVersion: z.string().min(1).optional() }).strict()).max(100).optional(),
   target: AddressRefSchema,
   replyTo: z.object({ input: ref.extend({ uid: z.string().min(1) }), key: z.string().min(1), messageId: z.string().optional() }).strict().optional(),
   replyToMessageId: z.string().optional(),

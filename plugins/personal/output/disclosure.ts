@@ -11,12 +11,13 @@ import { isMe, type Me, type PersonResource, type Person, type PersonStatus } fr
 import { sensitivityRank } from "../disclosure.ts";
 import type { TopicSpec, TopicStatus } from "../topic/model.ts";
 import { INPUT_TYPE, InputAttention, inputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
-import { MUTED_OUTPUT_TEXT, isMutedNotice, receiverIdentity, type Output } from "./model.ts";
+import { receiverIdentity, type Output } from "./model.ts";
+import { muteMail, refusalMail, isMuteMail } from "../stream/notices.ts";
+import { checkMail, type DisclosureEvidence, type SemanticCheck } from "../stream/check.ts";
+export type { DisclosureEvidence, SemanticCheck } from "../stream/check.ts";
 import type { OutputStore } from "./store.ts";
 
 export interface OutputAudience { people: PersonResource[]; private: boolean; muted?: boolean; unavailable?: string }
-export interface DisclosureEvidence { text: string; materials: Array<{ id: string; text: string }> }
-export type SemanticCheck = (evidence: DisclosureEvidence) => Promise<{ allowed: boolean; reason: string }>;
 export interface DisclosurePorts {
   marks: Me;
   audience(target: AddressRef): Promise<OutputAudience>;
@@ -78,6 +79,7 @@ export class OutputDisclosure {
     const livePeople = audience.people.map(p => get<Person, PersonStatus>({ apiVersion: p.apiVersion, kind: p.kind, namespace: p.metadata.namespace, name: p.metadata.name, uid: p.metadata.uid }));
     if (livePeople.some(p => !p)) refusal ||= "Destination Person changed or was deleted";
     audience = { ...audience, people: livePeople.filter((p): p is PersonResource => !!p) };
+    const privateMe = audience.private && audience.people.length === 1 && isMe(audience.people[0]!.spec, this.ports.marks);
     const policyNotes: PolicyNote[] = [];
     const topicFor = (ref: ResourceRef): Resource<TopicSpec, TopicStatus> | undefined => {
       const subject = get<TopicSpec, TopicStatus & { topic?: ResourceRef }>(ref);
@@ -85,10 +87,11 @@ export class OutputDisclosure {
       if (subject.kind === "Topic") return subject;
       return subject.status.topic ? get<TopicSpec, TopicStatus>(subject.status.topic) : undefined;
     };
-    for (const ref of output.spec.notes ?? []) {
+    for (const ref of privateMe ? [] : this.store.streams.get(output.spec.stream).status.references) {
+      if (ref.kind !== NOTE_TYPE.kind || ref.apiVersion !== NOTE_TYPE.apiVersion) { refusal ||= "Unsupported disclosure reference"; continue; }
       const note = this.store.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "uid", value: ref.uid } }).items[0];
       dependencies.push([ref, note && [note.metadata.uid, note.metadata.deletionTimestamp, note.spec, note.status.updatedAt]]);
-      if (!note || note.metadata.deletionTimestamp || (ref.textVersion ? noteTextVersion(note) !== ref.textVersion : noteVersion(note) !== ref.version)) {
+      if (!note || note.metadata.deletionTimestamp || (ref.contentVersion ? noteTextVersion(note) !== ref.contentVersion : noteVersion(note) !== ref.version)) {
         refusal ||= `Note ${ref.uid} is missing or changed since generation`; continue;
       }
       materials.push({ id: ref.uid, text: note.spec.text });
@@ -115,13 +118,11 @@ export class OutputDisclosure {
       if (policy.visibility !== "any" && !policy.people.includes(recipient.metadata.uid))
         refusal ||= `Recipient ${recipient.metadata.name} is outside visibility ${policy.visibility}`;
     }
-    const privateMe = audience.private && audience.people.length === 1 && isMe(audience.people[0]!.spec, this.ports.marks);
     return { policy, immediate, fingerprint: hash([receiverIdentity(output.spec), policy, dependencies, { ...audience, people: audience.people.map(p => [p.metadata.uid, p.metadata.deletionTimestamp, personDisclosure(p.spec)]) }, this.ports.marks]), privateMe,
-      refusal: privateMe && !audience.muted && !audience.unavailable ? "" : refusal, evidence: { text: [this.store.content(output).think, this.store.content(output).text].filter(Boolean).join("\n\n"), materials } };
+      refusal: privateMe && !audience.muted && !audience.unavailable ? "" : refusal, materials };
   }
   private isMuteNotice(output: Output) {
-    const content = this.store.content(output, true);
-    return content.phase === "completed" && !content.think && isMutedNotice({ notice: output.status.delivery?.notice, text: content.text });
+    return isMuteMail(this.store, output);
   }
   private async run(id: string) {
     const output = this.store.get(id);
@@ -142,26 +143,20 @@ export class OutputDisclosure {
     const snapshot = this.snapshot(output, audience);
     // Recheck an existing authorization before waiting for external review: a formerly private
     // destination must never keep receiving new chunks after its audience changes.
-    if ((output.status.phase === "sending" || (output.status.attempts > 0 && this.store.content(output).phase === "open"))
+    if ((output.status.phase === "sending" || (output.status.attempts > 0 && this.store.streams.get(output.spec.stream).status.phase === "open"))
       && snapshot.fingerprint !== output.status.disclosure?.fingerprint) {
       this.store.uncertain(id, "Disclosure changed during delivery; verify external receipts"); return;
     }
     // A private Me destination authorizes ongoing content. External destinations require a complete reviewed body.
-    if (!snapshot.privateMe && !audience.muted && this.store.content(output).phase === "open") {
+    if (!snapshot.privateMe && !audience.muted && this.store.streams.get(output.spec.stream).status.phase === "open") {
       if (output.status.delivery) this.store.update(id, status => ({ ...status, delivery: undefined, disclosure: undefined }));
       return;
     }
     let reason = output.status.disclosure?.decision === "denied" ? output.status.disclosure.reason : snapshot.refusal;
     if (!reason && !snapshot.privateMe && output.status.disclosure?.fingerprint !== snapshot.fingerprint) {
-      if (!this.ports.check) reason = "Content/reference verification is unavailable";
-      else if (JSON.stringify(snapshot.evidence).length > 100_000) reason = "Evidence exceeds the bounded disclosure review budget";
-      else {
-        try {
-          const verdict = await this.ports.check(snapshot.evidence);
-          if (!verdict.allowed) reason = verdict.reason || "Content is not supported by the disclosed materials";
-        } catch { reason = "Content/reference verification failed; original message was not sent"; }
-      }
+      reason = await checkMail(this.store.streams.reader(output.spec.stream), snapshot.materials, this.ports.check);
     }
+
     if (!reason && output.status.disclosure?.decision === "allowed" && output.status.disclosure.fingerprint === snapshot.fingerprint && output.status.delivery) return;
     if (reason && output.status.attempts > 0) {
       this.store.uncertain(id, "Disclosure changed after a send attempt; inspect provider receipts before any further delivery");
@@ -172,7 +167,7 @@ export class OutputDisclosure {
     let fallbackPolicy: string | undefined;
     let delivery: NonNullable<Output["status"]["delivery"]> = { ...(output.status.delivery?.replay ? { replay: output.status.delivery.replay } : {}), address: output.spec.target, target: this.store.destination(output), stream: output.spec.stream, receivers: personRefs(audience.people.map(personRef)) };
     if (reason && audience.muted && !audience.unavailable && snapshot.immediate) {
-      delivery = { ...delivery, notice: "muted", stream: this.store.replacement(output, "muted", MUTED_OUTPUT_TEXT) };
+      delivery = { ...delivery, notice: "muted", stream: muteMail(this.store, output) };
     } else if (reason) {
       this.store.update(id, status => ({ ...status, delivery: undefined, disclosure: { decision: "denied", reason, checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint, ...(snapshot.policy ? { policy: snapshot.policy } : {}) } }));
       const me = await this.ports.contactMe(output.spec.topicId);
@@ -181,7 +176,7 @@ export class OutputDisclosure {
       if (fallback.unavailable || fallback.muted || !fallback.private || fallback.people.length !== 1 || !isMe(fallback.people[0]!.spec, this.ports.marks)) throw new Error("Default Address is not a verified private Me destination");
       fallbackPeople = fallback.people;
       fallbackPolicy = this.addressPolicy(me.address);
-      delivery = { ...me, receivers: personRefs(fallback.people.map(personRef)), stream: audience.muted ? output.spec.stream : this.store.replacement(output, "disclosure", `原计划发送至：${JSON.stringify(output.spec.target)}\n未发送原因：${reason}\n\n原文：\n${this.store.content(output).text}`) };
+      delivery = { ...me, receivers: personRefs(fallback.people.map(personRef)), stream: audience.muted ? output.spec.stream : refusalMail(this.store, output, reason) };
     }
     // Awaited model/provider calls cannot authorize a changed resource or audience.
     const currentAudience = await this.audience(output.spec.target);

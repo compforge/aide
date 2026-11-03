@@ -1,3 +1,4 @@
+import { mailView } from "../plugins/personal/stream/writer.ts";
 import { summaryText } from "../plugins/personal/note/summary.ts";
 import { notes } from "../plugins/personal/note/query.ts";
 import { historyBlocks } from "../src/channel/reply-layout.ts";
@@ -144,7 +145,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   release(); await aide.settled();
   await until(() => second.views.at(-1)?.meta.activity === null && second.views.at(-1)!.blocks.find((block) => block.type === "input")?.status === "done" && second.views.at(-1)!.blocks.filter((block) => block.type === "message").length === 1);
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.role === "aide").length, 1);
-  assert.ok(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content.endsWith("最终答复"));
+  assert.equal(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content, "正在整理重点，请稍候\n\n最终答复");
   await until(() => second.views.at(-1)!.blocks.find(block => block.role === "aide")?.label === undefined);
   const completed = second.views.at(-1)!;
   const topic = aide.topics.resource("a")!;
@@ -229,7 +230,8 @@ test("Web retains Input material and shows interrupted Chief execution without a
   assert.ok(aide.topics.resource("failed")!.status.lastError);
   assert.ok(aide.invocations().some((invocation) => invocation.executionId === reply.group_id));
   assert.match(reply.content, /检查展示故障/);
-  assert.equal(aide.outputStore.content(aide.outputStore.list()[0]!).phase, "interrupted");
+  assert.equal(mailView(aide.outputStore, aide.outputStore.list()[0]!).phase, "interrupted");
+  assert.equal(view.blocks.filter(block => block.type === "message" && !block.content.trim()).length, 0);
 });
 
 

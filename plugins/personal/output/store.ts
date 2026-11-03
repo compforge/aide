@@ -1,10 +1,8 @@
 import { StreamStore } from "../../../src/host/stream/store.ts";
-import type { StreamRef } from "@compforge/aide-plugin";
 import { INPUT_TYPE } from "../input/model.ts";
 import { Addresses } from "../address/service.ts";
 import { larkEndpoint, larkThreadAddress } from "../../../src/channel/address.ts";
 import { cloneResourceValue, equalResourceValue } from "../../../src/resource/value.ts";
-import { NOTE_TYPE, noteVersion, noteTextVersion, type NoteResource } from "../note/model.ts";
 import { PluginResourceStore } from "../../../src/host/plugin/resource/store.ts";
 import { OutputDefinition, OutputSpecSchema, OutputStatusSchema } from "./definition.ts";
 export { OutputSpecSchema } from "./definition.ts";
@@ -14,8 +12,8 @@ import { type Address, type ResourceListOptions } from "@compforge/aide-plugin";
 import { OUTPUT_TYPE, receiverIdentity, type Output, type OutputSpec, type OutputSubmission, type OutputStatus } from "./model.ts";
 import { ResourceStorage } from "../../../src/host/resource/storage.ts";
 
-// Derived citation fingerprints are evidence, not part of the caller's idempotent sending intent.
-const outputIntent = (spec: OutputSpec) => ({ ...receiverIdentity(spec), notes: spec.notes?.map(({ uid, version }) => ({ uid, version })) });
+// The Stream UID is part of the envelope identity; its body belongs to its writer.
+const outputIntent = (spec: OutputSpec) => receiverIdentity(spec);
 
 /** @spec Output is independent of Input and Topic lifetime. Associations are provenance, not retention edges.
  * @spec Content, receivers and target never change after admission. The Output coordinator owns delivery state.
@@ -71,30 +69,21 @@ export class OutputStore {
     return result;
   }
   create(owner: string, id: string, raw: OutputSubmission): Output {
-    return this.storage.transaction(() => this.createWithStream(owner, id, raw));
+    return this.storage.transaction(() => this.createEnvelope(owner, id, raw));
   }
-  private createWithStream(owner: string, id: string, raw: OutputSubmission): Output {
+  private createEnvelope(owner: string, id: string, raw: OutputSubmission): Output {
     if (!id || id.length > 200) throw new Error("Invalid Output ID");
     const addresses = new Addresses(this.storage.home);
     const endpoint = addresses.endpoint(raw.target);
-    const { text, streaming, stream: supplied, ...intent } = raw;
-    if (!streaming && !supplied && !text?.trim()) throw new Error("Output requires nonempty text or a Stream");
-    const stream = supplied ?? this.streams.reference(`${id}-raw`, `stream:output:${id}:raw`);
-    const spec = OutputSpecSchema.parse({ ...JSON.parse(JSON.stringify(intent)), stream, target: addresses.ref(raw.target),
+    const spec = OutputSpecSchema.parse({ ...JSON.parse(JSON.stringify(raw)), target: addresses.ref(raw.target),
       ...(larkEndpoint(endpoint)?.replyToMessageId ? { replyToMessageId: larkEndpoint(endpoint)!.replyToMessageId } : {}) }) as OutputSpec;
-    // Pin the cited body separately from mutable classification. Never trust a caller-supplied body fingerprint.
-    if (spec.notes) spec.notes = spec.notes.map(({ uid, version }) => {
-      const note = this.resources.page<NoteResource["spec"], NoteResource["status"]>(NOTE_TYPE, { namespace: "v1", limit: 1, matchIndex: { name: "uid", value: uid } }).items[0];
-      return { uid, version, ...(note && noteVersion(note) === version ? { textVersion: noteTextVersion(note) } : {}) };
-    });
     const key = this.key(id), previous = this.storage.read(key);
     if (previous) {
       if (previous.owner !== owner || !equalResourceValue(outputIntent(previous.object.spec as OutputSpec), outputIntent(spec))) throw new Error("Output identity already exists with different content or owner");
       const output = previous.object as Output;
-      if (text !== undefined && !streaming && this.streams.snapshot(output.spec.stream).text !== text) throw new Error("Output identity already exists with different content");
       return output;
     }
-    const fingerprint = createHash("sha256").update(JSON.stringify({ owner, spec: outputIntent(spec), text, streaming }, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
+    const fingerprint = createHash("sha256").update(JSON.stringify({ owner, spec: outputIntent(spec) }, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
       ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value)).digest("hex");
     const receipt = this.storage.receipt(`output:${id}`);
     if (receipt) {
@@ -111,20 +100,7 @@ export class OutputStore {
       labels: { "aide.dev/topic-uid": spec.topic.uid, ...(spec.executionId ? { "aide.dev/execution-id": spec.executionId } : {}) } }, spec,
       status: { phase: "pending", attempts: 0 } };
     this.storage.write(key, "personal", { owner, object: output, control: {} }, { key: `output:${id}`, value: JSON.stringify({ fingerprint }) });
-    this.streams.create(stream, { ...OUTPUT_TYPE, namespace: output.metadata.namespace, name: id, uid: output.metadata.uid });
-    if (text) this.streams.append(stream, [{ kind: "text", delta: text }]);
-    if (!streaming) this.streams.complete(stream);
     this.notify(output); return output;
-  }
-  content(output: Output, actual = false) { return this.streams.snapshot(actual && output.status.delivery ? output.status.delivery.stream : output.spec.stream); }
-  replacement(output: Output, name: string, text: string): StreamRef {
-    const suffix = createHash("sha256").update(text).digest("hex").slice(0, 16);
-    const ref = this.streams.reference(`${output.metadata.name}-${name}-${suffix}`, `stream:${output.metadata.uid}:${name}:${suffix}`);
-    return this.storage.transaction(() => {
-      const stream = this.streams.create(ref, { ...OUTPUT_TYPE, namespace: output.metadata.namespace, name: output.metadata.name, uid: output.metadata.uid });
-      if (stream.status.phase === "open") { this.streams.append(ref, [{ kind: "text", delta: text }]); this.streams.complete(ref); }
-      return ref;
-    });
   }
   update(id: string, change: (current: OutputStatus) => OutputStatus): void {
     this.storage.transaction(() => {

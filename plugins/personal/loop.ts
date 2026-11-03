@@ -120,7 +120,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
       const stream = await execution.verbs.action<{ streaming: boolean }>("begin_output_stream", { inputIds });
       if (stream.state !== "success") throw new Error("Could not establish Chief output stream");
       streaming = stream.value.streaming;
-      if (streaming) prompt += "\nA live Output is already bound to this Immediate Input. Your thinking and text are streamed through Output disclosure. Write the reply directly in assistant text; do not call say for this same reply. Use say only for a separately intended communication. Do not emit an internal final acknowledgement.";
+      if (streaming) prompt += "\nA live Output is already bound to this Immediate Input. Your agent events are written to its Stream. Before finishing, call cite_output for all Notes used by this reply; external new facts need a classified Note first. Write the reply directly in assistant text; do not call say for this same reply. Use say only for a separately intended communication. Do not emit an internal final acknowledgement.";
     }
     const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Topic" ? "Chief" : current.kind, prompt, timeoutMs: 172800_000 });
     completed = result.state === "success" && result.value.result.stopReason === "end_turn";
