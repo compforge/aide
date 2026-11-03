@@ -10,7 +10,7 @@ import { initialTopicName } from "../plugins/personal/topic/model.ts";
 import { ROUTE_HARNESS } from "../plugins/personal/route/model.ts";
 import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { ResourceStorage } from "./host/resource/storage.ts";
-import { OutputDisclosure, type SemanticCheck } from "../plugins/personal/output/disclosure.ts";
+import { OutputDisclosure } from "../plugins/personal/output/disclosure.ts";
 import { isChannelAddress } from "./channel/address.ts";
 import { SayInputSchema } from "../plugins/personal/output/action.ts";
 import { personalAdmission } from "../plugins/personal/admission.ts";
@@ -47,7 +47,6 @@ import { PluginSupervisor } from "./host/plugin/runner/index.ts";
 import { IncomingSchema, type Incoming } from "./channel/message.ts";
 
 export interface AideOptions {
-  checkDisclosure?: SemanticCheck;
   connectorCatalog?: readonly import("@compforge/aide-connector").ConnectorDescription[];
   cwd: string; timezone: string; config?: AideConfig; connectors?: ConnectorClient;
   defaultHarnessConfig: Readonly<{ id: string; harness: DefaultHarness; model?: string }>;
@@ -194,7 +193,7 @@ export class Aide {
       topic: parsePersonalConfig(config?.plugins.personal).topic, weave: parsePersonalConfig(config?.plugins.personal).weave }, log,
       { runtime: this.runtime, connectors: this.connectors, inputs: this.inputs, outputs: this.outputStore, resolveContact: () => this.resolveContact() });
     this.disclosure = new OutputDisclosure(this.outputStore, { marks: this.meMarks,
-      audience: target => this.outputAudience(target), contactMe: async () => { const address = this.defaultAddress(); return { address, target: this.addresses.endpoint(address), receivers: [] }; }, check: options.checkDisclosure }, log);
+      audience: target => this.outputAudience(target), contactMe: async () => { const address = this.defaultAddress(); return { address, target: this.addresses.endpoint(address), receivers: [] }; } }, log);
     this.outputStore.check = id => this.disclosure.reconcile(id);
     this.delivery = new OutputDelivery(this.outputStore, async target => {
       if (isChannelAddress(target) && target.channelId === "web") return { replay: "idempotent", streaming: true, async send() { return undefined; } };

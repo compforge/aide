@@ -16,11 +16,8 @@ import { larkAddress } from "../src/channel/address.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
 import type { Incoming } from "../src/channel/message.ts";
 import { larkDeliveryError, larkTransport, larkSendFailure, type LarkTransport } from "../src/channel/lark/client.ts";
-import { fakeOptions as baseFakeOptions } from "./fake-harness.ts";
+import { fakeOptions } from "./fake-harness.ts";
 import { LOCAL_ME } from "../plugins/personal/person/model.ts";
-// These transport tests use a known Me audience; disclosure rejection has dedicated tests.
-const fakeOptions = (...args: Parameters<typeof baseFakeOptions>) => ({ ...baseFakeOptions(...args),
-  checkDisclosure: async () => ({ allowed: true, reason: "Transport fixture" }) });
 
 const log = pino({ level: "silent" });
 const event = (id: string, text: string, chatId = "oc_chat") => ({

@@ -1,4 +1,3 @@
-import { disclosureCheck } from "../agents/disclosure/check.ts";
 import { PiObservations, ObservationConfigSchema } from "../agents/pi/observation.ts";
 import type { PiConfig } from "./host/harness/pi/config.ts";
 import { ChannelSettings } from "./channel/settings.ts";
@@ -44,7 +43,6 @@ await withAsyncFileLock(path, async () => {
   try {
     const transports = new Map(Object.values(config.channels).filter(c => c.enabled).map(c => [c.appId, larkTransport(c, log.child({ appId: c.appId }))]));
     const aide: Aide = new Aide(home, {
-      checkDisclosure: disclosureCheck(cwd, harnesses.chief),
       config, connectors, connectorCatalog: await connectors.list(),
       readSession: agent => {
         const selected = sessionConfigs[agent.harness];

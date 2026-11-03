@@ -48,7 +48,7 @@ async function setup(t: TestContext) {
     audience: async ref => {
       const address = addresses.read(ref);
       return { people: [...address.status.people].map(ref => people.find(p => p.metadata.uid === ref.uid)!), private: address.spec.type === "web" || address.spec.type === "direct", muted: address.spec.muted };
-    }, contactMe: async () => ({ address: addressRef(addresses.observe(webAddress("test"), [personRef(me)])), target: webAddress("test"), receivers: [personRef(me)] }), check: async () => ({ allowed: true, reason: "Supported by cited Notes" }) }, log);
+    }, contactMe: async () => ({ address: addressRef(addresses.observe(webAddress("test"), [personRef(me)])), target: webAddress("test"), receivers: [personRef(me)] }) }, log);
   store.check = id => checker.reconcile(id);
   return { home, topics, addresses, me, a, b, topic, store, checker };
 }
