@@ -1,3 +1,4 @@
+import { renderNoteClassification } from "../shared/note-classification.ts";
 import type { ChannelSettingsView } from "../../channel/settings.ts";
 import './style.css';
 import { byId as $, element as node } from '../shared/dom.ts';
@@ -39,6 +40,7 @@ function render(value: View) {
   for (const link of document.querySelectorAll<HTMLAnchorElement>('#list a')) link.setAttribute('aria-current', String(new URL(link.href).searchParams.get('uid') === value.metadata.uid));
   $('coordinates').textContent = types[value.spec.type];
   updateMarkdown($('summary'), value.summaryText || '尚未积累长期认识。');
+  renderNoteClassification($('summary'), value.summaryNote);
   $('people').replaceChildren(...value.participants.map(person => {
     const a = node('a', person.name + (person.clearance ? ` · ${person.clearance}` : ''));
     a.href = '/people?' + new URLSearchParams({ person: person.ref.name, uid: person.ref.uid }); return a;
@@ -47,7 +49,7 @@ function render(value: View) {
 function appendNotes(items: Note[]) {
   for (const note of items) {
     const card = node('article'), content = node('div', undefined, 'markdown');
-    updateMarkdown(content, note.text); card.append(content, node('small', new Date(note.updatedAt).toLocaleString(), 'muted')); $('notes').append(card);
+    updateMarkdown(content, note.text); card.append(content, node('small', new Date(note.updatedAt).toLocaleString(), 'muted')); renderNoteClassification(card, note); $('notes').append(card);
   }
 }
 async function loadNotes(reset = false) {

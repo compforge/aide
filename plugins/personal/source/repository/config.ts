@@ -1,7 +1,9 @@
+import { InputClassificationFields } from "../../disclosure.ts";
 import { z } from "zod";
 import { digest } from "../../chief-model.ts";
 
 export const RepositoryWatchSchema = z.object({
+  ...InputClassificationFields,
   id: z.string().trim().min(1),
   forge: z.string().trim().min(1),
   refreshIntervalMs: z.number().int().min(60_000).max(7 * 86_400_000).default(6 * 3_600_000),

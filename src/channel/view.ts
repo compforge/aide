@@ -1,5 +1,5 @@
 import { outputWaitLabels } from "../../plugins/personal/output/view.ts";
-import { summaryText } from "../../plugins/personal/note/summary.ts";
+import { summaryText, summaryReference } from "../../plugins/personal/note/summary.ts";
 import { notes } from "../../plugins/personal/note/query.ts";
 import { visibleOutput } from "./output.ts";
 import { inputPrinter } from "../../plugins/personal/input/printer.ts";
@@ -136,7 +136,7 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const live = [...executions.values()].some((execution) => execution.header.status === "running");
   return {
     version: PROTOCOL_VERSION, biz: "aide.topic", blocks,
-    meta: { topic_id: topicId, context: resource ? { summary: summaryText(aide.topics.resources, resource), recent: notes(aide.topics.resources, resource.metadata.uid, "subject") } : null, activity: active || queued || live ? {
+    meta: { topic_id: topicId, context: resource ? { summary: summaryText(aide.topics.resources, resource), summaryNote: summaryReference(aide.topics.resources, resource), recent: notes(aide.topics.resources, resource.metadata.uid, "subject") } : null, activity: active || queued || live ? {
       id: active?.id ?? `queued:${topicId}`, phase: active?.status.phase ?? "queued", queued,
     } : null },
   };

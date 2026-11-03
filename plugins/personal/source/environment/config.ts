@@ -1,10 +1,13 @@
+import type { MaterialDisclosure } from "../../disclosure.ts";
+import { InputClassificationFields, inputClassification } from "../../disclosure.ts";
 import { z } from "zod";
 import type { EnvironmentDefinition } from "@compforge/aide-plugin";
 
 export const ENVIRONMENT_SESSION = "source:environments";
-export interface EnvironmentSourceSpec { environment: string; namespace: string; intervalMs: number }
+export interface EnvironmentSourceSpec extends MaterialDisclosure { environment: string; namespace: string; intervalMs: number }
 const text = z.string().trim().min(1);
 export const EnvironmentWatchSchema = z.object({
+  ...InputClassificationFields,
   targets: z.array(z.object({ environment: text, namespaces: z.array(text).min(1) }).strict()),
   intervalMs: z.number().int().min(30_000).max(3_600_000).default(300_000),
 }).strict();
@@ -28,7 +31,7 @@ export function environmentSources(policy: z.infer<typeof EnvironmentWatchSchema
       const key = JSON.stringify([environment.name, namespace]);
       if (seen.has(key)) throw new Error(`Duplicate Environment Source target: ${environment.name}/${namespace}`);
       seen.add(key);
-      return { environment: environment.name, namespace, intervalMs: policy.intervalMs };
+      return { ...inputClassification(policy), environment: environment.name, namespace, intervalMs: policy.intervalMs };
     });
   });
 }

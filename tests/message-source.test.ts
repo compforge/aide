@@ -90,6 +90,7 @@ test("Direct messages include my speech; exact group mentions exclude bots, dele
       message("om_bot", { sender: { id: "bot", type: "app" } })]));
   await f.observe();
   assert.equal(f.inputs.list().length, 3);
+  assert.ok(f.inputs.list().every(input => input.spec.sensitivity === undefined && input.spec.visibility === undefined));
   assert.deepEqual(f.inputs.list().map((input) => input.spec.observation!.kind).sort(), ["direct", "direct", "mention"]);
   assert.deepEqual(f.inputs.list().map((input) => input.spec.relation).sort(), ["received", "received", "sent"]);
   const direct = f.inputs.list().find(input => input.spec.observation!.originalMessageId === "om_dm")!;
@@ -611,4 +612,13 @@ test("Lark Source freezes readable chat names and preserves them in compact mode
   assert.equal(inputs.find(i => i.spec.observation?.originalMessageId === direct.id)!.spec.topicName, "李萌");
   await f.restart(); await f.observe(now + 1000);
   assert.equal(f.inputs.list().length, inputs.length);
+});
+
+test("Message Source preserves an explicitly configured classification without inventing a default", async t => {
+  const f = fixture(t, watch({ sensitivity: "L2", visibility: "people" }), "direct");
+  f.incoming(async () => page([message("classified-dm", { mentions: [] })]));
+  await f.observe();
+  assert.equal(f.inputs.list().length, 1);
+  assert.equal(f.inputs.list()[0]!.spec.sensitivity, "L2");
+  assert.equal(f.inputs.list()[0]!.spec.visibility, "people");
 });

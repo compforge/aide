@@ -1,3 +1,4 @@
+import { topicView } from "../src/channel/view.ts";
 import { personRefs } from "../plugins/personal/person/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { personRef, type PersonRef } from "../plugins/personal/person/model.ts";
@@ -271,4 +272,18 @@ test("summary and Topic people are sets; a permutation does not change summary u
   assert.equal(next.status.summaryRevision, first.status.summaryRevision);
   assert.equal(after.status.updatedAt, before.status.updatedAt);
   assert.deepEqual(after.spec.people.toJSON().map(p => p.uid), [a.uid, b.uid].sort());
+});
+
+test("Web summary classification follows the current Note even when the body is unchanged", async t => {
+  const f = await fixture(t);
+  const first = await writeSummary(f.client, f.topic, { text: "Deployment overview", sensitivity: "L1", visibility: "any" });
+  const before = topicView(f.aide, "summary").meta.context!;
+  assert.equal(before.summaryNote!.sensitivity, "L1");
+  assert.equal(before.summaryNote!.visibility, "any");
+  await writeSummary(f.client, first, { text: "Deployment overview", sensitivity: "L2", visibility: "topic" });
+  const after = topicView(f.aide, "summary").meta.context!;
+  assert.equal(after.summary, before.summary);
+  assert.equal(after.summaryNote!.uid, before.summaryNote!.uid);
+  assert.equal(after.summaryNote!.sensitivity, "L2");
+  assert.equal(after.summaryNote!.visibility, "topic");
 });

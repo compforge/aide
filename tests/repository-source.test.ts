@@ -177,3 +177,15 @@ test("changing a PR polling policy preserves its resource identity and checkpoin
   assert.equal(after.metadata.uid, before.metadata.uid); assert.equal(after.status.sequence, 7);
   assert.equal(after.spec.intervalMs, 60_000); assert.equal(f.reads, 1);
 });
+
+test("Repository classification is inherited by child PR sources and explicit PR policy takes precedence", async t => {
+  const f = fixture(t), source = f.resource();
+  await f.resources.replace(source, { ...source.spec, sensitivity: "L2", visibility: "topic" }, source.status);
+  await f.observe();
+  const child = f.children()[0]!;
+  assert.equal(child.spec.sensitivity, "L2"); assert.equal(child.spec.visibility, "topic");
+  await observeRepositories({ resources: f.resources, logger }, f.resource(), f.connectors,
+    [{ ...f.policy, sensitivity: "L1", visibility: "any" }], at(1));
+  assert.equal(f.children()[0]!.metadata.uid, child.metadata.uid);
+  assert.equal(f.children()[0]!.spec.sensitivity, "L1"); assert.equal(f.children()[0]!.spec.visibility, "any");
+});

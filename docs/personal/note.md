@@ -2,7 +2,7 @@
 
 披露权限与实际投递见 [披露边界](disclosure.md)：材料使用 sensitivity/visibility，人物使用 clearance；Output 由 Reconciler 检查后投递。
 
-Note 是近期与长期认识的统一正文资源。Agent 结合已有 Note 和最新 Input 形成判断，按需修订 Note、推进工作并产生必要的 Output。普通 Note 是独立的事项认识，将围绕同一件事的多条 Input 整合为持续更新的当前认识。它保留理解这件事所需的进展、依据、结论和未决问题，以稳定 ID 承接后续变化。Note 通常跨越多条 Input 跟进一件具体事情，summary 从中选择更长期、可复用的认识，通过 summaryOf 关联其所总结的对象。Chief 和 Work Agent 通过统一 upsert_note 维护 Note；subject 关联主题或工作，people 关联涉及的人物。
+Note 是近期与长期认识的统一正文资源。Agent 结合已有 Note 和最新 Input 形成判断，按需修订 Note、推进工作并产生必要的 Output。普通 Note 是独立的事项认识，将围绕同一件事、适用同一组 sensitivity/visibility 的事实整合为持续更新的当前认识。分类或受众范围不同的事实另建 Note；是否同一事项与是否同一分类共同决定新增还是更新。它保留理解这件事所需的进展、依据、结论和未决问题，以稳定 ID 承接后续变化。Note 通常跨越多条 Input 跟进一件具体事情，summary 从中选择更长期、可复用的认识，通过 summaryOf 关联其所总结的对象。Chief 和 Work Agent 通过统一 upsert_note 维护 Note；subject 关联主题或工作，people 关联涉及的人物。
 
 Note 为主题与人物的长期认识、主题组织提供依据，提炼主线见 [Personal](README.md#从-input-到认识与成果)。summary 选择长期有效的内容，recent 按更新时间查询 Note；近期展示窗口与 Note 的独立生命周期分别管理。
 
@@ -15,6 +15,7 @@ Note 为主题与人物的长期认识、主题组织提供依据，提炼主线
 | spec.summaryOf | 可选的摘要对象引用，与 subject 一致；按对象 UID 索引，每个对象至多一份摘要 Note |
 | spec.people | 涉及的人物引用，按 UID 去重；默认空数组 |
 | spec.addresses | 涉及的 Address UID 集合，近期记录按此关联分页，不改变 subject |
+| spec.sensitivity / visibility | 整条 Note 统一适用的敏感度与可见范围；定级和拆分规则见 [披露边界](disclosure.md#定级与-note-边界) |
 | spec.text | 事项或长期摘要的完整正文，最多 16000 字符；摘要正文可清空 |
 | metadata.creationTimestamp | 创建时间 |
 | status.updatedAt | 最近一次内容修改时间 |
@@ -89,3 +90,5 @@ Topic、Task、Routine 使用 aide.dev/v1alpha4，Person 使用 aide.dev/v1alpha
 Note 回顾请求与 nextAbsorbAt / absorbAttempts 在同一事务提交；Topic 的无关状态更新不制造请求冲突。创建时在事务内核验目标 Topic 仍存在且是空闲 root；普通回顾要求开关开启，Note 回顾独立于该开关。并发请求按 Topic / origin 的 pending 索引去重，复用已有 Input，不重复推进冷却。
 
 Note Controller 监听内容变化、直属 Topic / Work 归属变化及 root 回顾队列腾位，每次最多唤醒 40 个索引匹配的 Note。reviewTopic 缓存更新不要求历史内容作者仍在执行，也不改变内容版本或保留年龄；内容编辑与回顾仍检查当前权限。队列满时保留待办，每个未回顾 Note 以 15 分钟周期修复漏事件和祖先层级变化；事件不承担持久投递保证。
+
+Web 的近期记录项及 summary 正文左下角展示 sensitivity 和 visibility 原值（例如 `L1 · any`）；分类修改即使不改变正文，也会刷新标记。

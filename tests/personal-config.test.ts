@@ -127,3 +127,20 @@ test("Requirement Me resolves canonical identity without equating profile or wat
   assert.ok(me?.spec.identities.some((identity) => identity.provider === "tracker" && identity.scope === "https://tracker.test/canonical" && identity.id === "human"));
   assert.ok(!me?.spec.identities.some((identity) => identity.id === "robot"));
 });
+
+test("Source classification is optional, validated and supports explicit restricted policies", () => {
+  const policy = parsePersonalConfig({ sources: {
+    repositories: [{ id: "repos", forge: "github", sensitivity: "L2", visibility: "topic" }],
+    pullRequests: [{ id: "mine", repositories: "repos", author: "me", sensitivity: "L1", visibility: "any" }],
+    requirements: [{ id: "work", source: "work", userKeys: ["me"], sensitivity: "L3", visibility: "people" }],
+    environments: { targets: [], sensitivity: "L2", visibility: "root" }, lark: {},
+  } });
+  assert.equal(policy.sources.repositories[0]!.sensitivity, "L2");
+  assert.equal(policy.sources.pullRequests[0]!.visibility, "any");
+  assert.equal(policy.sources.requirements[0]!.sensitivity, "L3");
+  assert.equal(policy.sources.environments!.visibility, "root");
+  assert.equal(policy.sources.lark!.sensitivity, undefined);
+  assert.equal(policy.sources.lark!.visibility, undefined);
+  assert.throws(() => parsePersonalConfig({ sources: { lark: { sensitivity: "L0" } } }), /sensitivity/);
+  assert.throws(() => parsePersonalConfig({ sources: { environments: { targets: [], visibility: "public" } } }), /visibility/);
+});

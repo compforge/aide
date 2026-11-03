@@ -1,3 +1,4 @@
+import { inputClassification } from "../../disclosure.ts";
 import { inputIdentity } from "../../input/identity.ts";
 import { larkInputKey } from "../../../../src/channel/lark/input-key.ts";
 import { personRef } from "../../person/model.ts";
@@ -273,6 +274,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     const location = this.locate({ chatId: message.chatId, threadId: entry.kind === "direct" ? undefined : message.threadId,
       chatName: message.chatName, text: root?.content || message.content });
     const spec: Delivery["spec"] = {
+      ...inputClassification(this.watch),
       inputKey: inputKey(this.watch, entry.message, entry.sequence),
       source: larkAddress(this.watch.accountId, message.chatId), replyToMessageId: message.id,
       addressObservation: { name: message.chatName, type: entry.kind === "direct" ? "direct" : "group", people: participants },

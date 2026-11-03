@@ -84,3 +84,19 @@ test("preview distinguishes Me, the channel assistant and the credential observe
   assert.match(inputPreview(input()), /Me → Aide/);
   assert.ok(inputPreview(direct, 400).length <= 400);
 });
+
+test("Input classification remains optional and reaches both full and automatic context", async () => {
+  const { InputSpecSchema } = await import("../plugins/personal/input/definition.ts");
+  const raw = { origin: "channel", originId: "lark", text: "hello" };
+  const unclassified = InputSpecSchema.parse(raw);
+  assert.equal(unclassified.sensitivity, undefined);
+  assert.equal(unclassified.visibility, undefined);
+  assert.doesNotMatch(inputPreview(input(unclassified)), /Sensitivity:|Visibility:/);
+  for (const sensitivity of ["L1", "L2", "L3"] as const) {
+    const spec = InputSpecSchema.parse({ ...raw, sensitivity, visibility: "any" });
+    assert.match(inputPreview(input(spec)), new RegExp(`Sensitivity: ${sensitivity}`));
+    assert.match(inputPrinter.describe(input(spec)), /Visibility: any/);
+  }
+  assert.equal(InputSpecSchema.safeParse({ ...raw, sensitivity: "L0" }).success, false);
+  assert.equal(InputSpecSchema.safeParse({ ...raw, visibility: "everyone" }).success, false);
+});

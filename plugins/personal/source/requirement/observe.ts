@@ -1,3 +1,4 @@
+import { workInputClassification } from "../../disclosure.ts";
 import { patchStatus } from "../../status.ts";
 import { InputAttention } from "../../input/model.ts";
 import type { TopicLocator } from "../../topic/locator.ts";
@@ -59,7 +60,7 @@ class RequirementObservation implements TopicLocator<RequirementIdentity> {
   private async publish(key: string, entry: TrackedRequirement, spec: SourceInput) {
     const sequence = (this.resource.status.sequence ?? 0) + 1;
     const name = digest([this.resource.metadata.uid, this.account.scope, sequence]);
-    await this.save({ sequence, pending: { name, spec: { ...spec, text: spec.text.slice(0, 32_000) || "需求评论（无文本）" }, key, entry } });
+    await this.save({ sequence, pending: { name, spec: { ...workInputClassification(this.resource.spec), ...spec, text: spec.text.slice(0, 32_000) || "需求评论（无文本）" }, key, entry } });
     await this.deliver();
   }
   private relation(author?: string, recipients: readonly string[] = []) {

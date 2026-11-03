@@ -60,6 +60,7 @@ test("Input plans survive interruption and repeated A-B-A-B changes remain disti
   } };
   await assert.rejects(observeRequirements({ logger, resources: failing }, f.resource(), f.connectors, at()), /Interrupted/);
   assert.equal(f.inputs.list().length, 1); assert.ok(f.resource().status.pending);
+  assert.equal(f.inputs.list()[0]!.spec.sensitivity, "L1"); assert.equal(f.inputs.list()[0]!.spec.visibility, "any");
   await f.restart(); await f.observe();
   assert.equal(f.inputs.list().length, 1); assert.equal(f.resource().status.pending, null);
   for (const [index, state] of ["in_progress", "open", "in_progress"].entries()) {
@@ -146,4 +147,14 @@ test("An expired query session replays its frozen discovery window without dupli
   assert.equal(f.resource().status.scannedThrough, null);
   await f.observe(20); await f.observe(30);
   assert.equal(f.inputs.list().length, 2); assert.equal(f.resource().status.scannedThrough, at());
+});
+
+test("Requirement classification overrides apply to snapshot and comment Inputs", async t => {
+  const f = fixture(t), source = f.resource();
+  await f.resources.replace(source, { ...source.spec, sensitivity: "L3", visibility: "people" }, source.status);
+  await f.observe();
+  f.setComments(async () => ({ items: [{ id: "comment", text: "details", createdAt: at(2), author: { key: "zhang" } }] }));
+  await f.observe(10);
+  assert.equal(f.inputs.list().length, 2);
+  assert.ok(f.inputs.list().every(input => input.spec.sensitivity === "L3" && input.spec.visibility === "people"));
 });

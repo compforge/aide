@@ -84,6 +84,7 @@ function renderDetail(detail: InputDetailView) {
   const input = detail.input;
   for (const [label, value] of [
     ['Input ID', input.metadata.name], ['接收时间', time(input.metadata.creationTimestamp)],
+    ['敏感度', input.spec.sensitivity ?? '未定级'], ['可见范围', input.spec.visibility ?? '未指定'],
     ['来源', `${input.spec.origin} / ${input.spec.originId}`], ['来源 Topic Key', input.spec.topicKey],
     ['来源地址', input.spec.source && JSON.stringify(input.spec.source)], ['观察源', input.spec.originRef && `${input.spec.originRef.kind} / ${input.spec.originRef.name}`],
   ] as const) if (value) $('input-facts').append(node('dt', label), node('dd', value));

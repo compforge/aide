@@ -51,6 +51,8 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   current = snapshot("B");
   await assert.rejects(observeEnvironment({ logger, resources: { ...resources(), async patch() { throw new Error("Crash"); } } }, resource(), connectors), /Crash/);
   assert.equal(topics.list().length, 1);
+  assert.equal(topics.list()[0]!.spec.sensitivity, "L1");
+  assert.equal(topics.list()[0]!.spec.visibility, "any");
   assert.match(topics.list()[0]!.spec.text, /dev \/ app.*Workload/);
   assert.match(topics.list()[0]!.spec.text, /Deployment api.*镜像 api=A → api=B/);
   assert.equal(topics.list()[0]!.spec.originRef!.uid, resource().metadata.uid);
@@ -74,6 +76,11 @@ test("Environment baseline, interrupted input commit, restart, and repeated A-B 
   assert.deepEqual((event.changes as { after?: unknown }[]).map((c) => c.after), [undefined]);
   assert.ok(topics.list().every((input) => input.spec.topicKey === "environment:dev" && input.spec.topicName === "dev"));
   assert.equal(store.list({ apiVersion: "aide.dev/v1alpha4", kind: "Task" }).length, 0);
+  const before = resource();
+  await resources().replace(before, { ...before.spec, sensitivity: "L2", visibility: "root" }, before.status);
+  current = snapshot("C"); await observe();
+  assert.equal(topics.list().at(-1)!.spec.sensitivity, "L2");
+  assert.equal(topics.list().at(-1)!.spec.visibility, "root");
 });
 
 test("Environment policy selects namespaces independently of Connector defaults and resolves aliases", () => {

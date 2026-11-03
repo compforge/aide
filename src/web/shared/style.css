@@ -50,3 +50,6 @@ button:disabled { opacity: .5; cursor: wait; } button:focus-visible, textarea:fo
   .main-tabs { gap: 2px; max-width: 100%; overflow-x: auto; }
   .main-tabs a { font-size: 12px; padding: 8px 6px; }
 }
+
+/* Classification belongs to the Note body and stays at its lower left. */
+.note-classification { display: block; margin-top: 10px; color: #68776c; font-size: 12px; line-height: 1.5; font-weight: 400; text-align: left; }
