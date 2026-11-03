@@ -72,3 +72,9 @@ export const ChannelAddressSchema = z.object({ kind: z.literal("channel"), chann
     else if (address.channelId !== "web") throw new Error(`Unsupported Channel address: ${address.channelId}`);
   } catch (error) { ctx.addIssue({ code: "custom", message: String(error) }); }
 });
+
+/** @spec A Channel maps a scoped person identity to its direct-contact locator; group participation is not contact ownership. */
+export function identityContactLocator(identity: { provider: string; scope: string; id: string }): ChannelAddress | undefined {
+  if (identity.provider === "lark") return larkPersonAddress(identity.scope, identity.id);
+  if (identity.provider === "web" && identity.scope === "local" && identity.id === "me") return webAddress("me");
+}

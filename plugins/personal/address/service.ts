@@ -1,3 +1,4 @@
+import { deliveryEndpoint } from "./locator.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { createHash } from "node:crypto";
 import type { Address as Endpoint } from "@compforge/aide-plugin";
@@ -11,11 +12,11 @@ import { summaryReference, summaryText, writeSummary, summaryView } from "../not
 import { contentVersion } from "../context-write.ts";
 import { notes, pageNotes } from "../note/query.ts";
 import { AddressDefinition } from "./definition.ts";
-import { ADDRESS_TYPE, addressRef, AddressRefSchema, type AddressRef, type AddressResource, type AddressSpec, type AddressStatus } from "./model.ts";
+import { ADDRESS_TYPE, locators, addressRef, AddressRefSchema, type AddressRef, type AddressResource, type AddressSpec, type AddressStatus } from "./model.ts";
 
 export type AddressTarget = AddressRef | Endpoint;
 /** Transport reply coordinates never create another communication place. */
-export function placeEndpoint(raw: Endpoint): AddressSpec["endpoint"] {
+export function placeEndpoint(raw: Endpoint): Endpoint {
   const endpoint = AddressSchema.parse(raw);
   const lark = larkEndpoint(endpoint);
   return lark?.replyToMessageId ? larkAddress(lark.appId, lark.receiveId) : endpoint;
@@ -35,7 +36,7 @@ export class Addresses {
   }
   find(endpoint: Endpoint): AddressResource | undefined {
     const address = this.resources.page<AddressSpec, AddressStatus>(ADDRESS_TYPE, { namespace: "v1", limit: 1,
-      matchIndex: { name: "endpoint", value: JSON.stringify(placeEndpoint(endpoint)) } }).items[0];
+      matchIndex: { name: "locator", value: JSON.stringify(placeEndpoint(endpoint)) } }).items[0];
     return address?.metadata.deletionTimestamp ? undefined : address;
   }
   canSpeak(endpoint: Endpoint): boolean { const address = this.find(endpoint); return !!address && !address.spec.muted; }
@@ -53,13 +54,13 @@ export class Addresses {
       return { people, private: address.spec.type === "direct" || address.spec.type === "web", muted: address.spec.muted };
     });
   }
-  endpoint(target: AddressTarget): Endpoint { return target.kind === "Address" ? this.read(AddressRefSchema.parse(target)).spec.endpoint : target; }
+  endpoint(target: AddressTarget): Endpoint { return target.kind === "Address" ? deliveryEndpoint(this.read(AddressRefSchema.parse(target))) : target; }
   /** @spec Discovery only accumulates facts; it never unmutes a known Address or overwrites its summary.
    * @case tests/address-resource.test.ts
    */
   observe(target: AddressTarget, people: Iterable<PersonRef> = [], options: { name?: string; type?: AddressSpec["type"]; muted?: boolean } = {}): AddressResource {
     return this.resources.storage.transaction(() => {
-      const endpoint = target.kind === "Address" ? this.read(AddressRefSchema.parse(target)).spec.endpoint : placeEndpoint(target);
+      const endpoint = target.kind === "Address" ? deliveryEndpoint(this.read(AddressRefSchema.parse(target))) : placeEndpoint(target);
       const name = `address-${createHash("sha256").update(JSON.stringify(endpoint)).digest("hex").slice(0, 32)}`;
       const previous = this.find(endpoint);
       const members = personRefs([...(previous?.status.people ?? []), ...people]);
@@ -72,7 +73,7 @@ export class Addresses {
       }
       const lark = larkEndpoint(endpoint);
       const type = options.type ?? (isChannelAddress(endpoint) && endpoint.channelId === "web" ? "web" : lark?.receiveIdType === "open_id" ? "direct" : lark ? "group" : "external");
-      return this.resources.create({ type: ADDRESS_TYPE, name, spec: { endpoint, aliases: [], type, name: options.name?.trim().slice(0, 200) || (isChannelAddress(endpoint) ? endpoint.endpoint : JSON.stringify(endpoint)),
+      return this.resources.create({ type: ADDRESS_TYPE, name, spec: { locators: locators([endpoint]), type, name: options.name?.trim().slice(0, 200) || (isChannelAddress(endpoint) ? endpoint.endpoint : JSON.stringify(endpoint)),
         muted: options.muted ?? type !== "web" }, status: { people: members } });
     });
   }
@@ -88,7 +89,7 @@ export class Addresses {
   page(continuation?: string, person?: string) {
     const page = this.resources.page<AddressSpec, AddressStatus>(ADDRESS_TYPE, { namespace: "v1", limit: 20, continue: continuation,
       ...(person ? { matchIndex: { name: "people", value: person } } : {}) });
-    return { items: page.items.filter(r => !r.metadata.deletionTimestamp).map(r => ({ ref: addressRef(r), ...r.spec, people: [...r.status.people] })), continue: page.metadata.continue };
+    return { items: page.items.filter(r => !r.metadata.deletionTimestamp && !r.status.retiring).map(r => ({ ref: addressRef(r), ...r.spec, people: [...r.status.people] })), continue: page.metadata.continue };
   }
   setMuted(ref: AddressRef, muted: boolean, expected: boolean) {
     this.read(ref);

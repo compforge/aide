@@ -1,3 +1,4 @@
+import { deliveryEndpoint } from "../address/locator.ts";
 import type { AddressSpec, AddressStatus, AddressRef } from "../address/model.ts";
 import { KeyedSet } from "@compforge/ts-stdx/collections";
 import { personRef, personRefs } from "../person/model.ts";
@@ -55,7 +56,7 @@ export class OutputDisclosure {
   }
   private addressPolicy(ref: AddressRef) {
     const address = this.store.resources.find<AddressSpec, AddressStatus>(ref, ref.name, ref.namespace);
-    return address && hash([address.metadata.uid, address.metadata.deletionTimestamp, address.spec.endpoint, address.spec.type, address.spec.muted, [...address.status.people].map(p => p.uid).sort()]);
+    return address && hash([address.metadata.uid, address.metadata.deletionTimestamp, deliveryEndpoint(address), address.spec.type, address.spec.muted, [...address.status.people].map(p => p.uid).sort()]);
   }
   private hasImmediateInput(output: Output): boolean {
     const refs = new Map(Object.entries(output.spec.inputUids ?? {}));

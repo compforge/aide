@@ -18,5 +18,8 @@ export function openPersonCatalog(home: string, marks: Me, log: Logger, changed:
     changed();
   });
   const contacts = new PersonContacts(home, larkApps, log);
-  return { client, contacts, persons: new Persons(client, marks, person => contacts.ensure(person)) };
+  return { client, contacts, persons: new Persons(client, marks, person => {
+    try { return contacts.ensure(person); }
+    catch (err) { log.warn({ err, personUid: person.metadata.uid }, "Person contact discovery deferred to reconcile"); return person; }
+  }) };
 }

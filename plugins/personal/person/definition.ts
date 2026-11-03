@@ -12,14 +12,6 @@ import { PersonSchema, PersonRefsSchema, PERSON_TYPE, identityKey, type Person, 
  */
 function validate(resource: Readonly<Resource<Person, PersonStatus>>, context: ResourceValidationContext, previous?: Readonly<Resource<Person, PersonStatus>>) {
   if (resource.metadata.namespace !== "v1") throw new Error("Person requires the shared v1 namespace");
-  const priorAddresses = new Set([...previous?.spec.addresses ?? []].map(ref => ref.uid));
-  for (const ref of resource.spec.addresses ?? []) {
-    if (priorAddresses.has(ref.uid)) continue;
-    const address = context.get(ref, ref.uid);
-    if (!address || address.metadata.deletionTimestamp || address.metadata.name !== ref.name || address.metadata.namespace !== ref.namespace)
-      throw new Error("Person contact Address no longer exists");
-    if (!["direct", "web", "external"].includes((address.spec as { type: string }).type)) throw new Error("Person contact Address cannot be a group");
-  }
   const retained = new Set(previous?.spec.identities.map(identityKey));
   for (const key of resource.spec.identities.map(identityKey)) {
     if (retained.has(key)) continue;

@@ -47,15 +47,17 @@ Input 的 sender / receivers 引用人物 UID；Chief 可将明确相关的人�
 
 ## 联系地址
 
-`Person.spec.addresses` 是按 Address UID 去重的 `KeyedSet<AddressRef>`，序列化为 UID 排序的数组。它表示直接联系这个人的地址，不表示此人参与的所有群；顺序不表达优先级，也不意味着广播。多地址来自不同 Connector / Channel 的接触渠道，初期自动发现仅支持已启用的 Lark Channel。`Address.status.people` 继续保存场合参与者，二者方向与用途不同。
+Person 不保存 addresses；`read_person.contacts` 是 identities 与 Address locators 的只读关联投影，按 Address UID 去重，顺序不表达优先级或广播。Channel 定义身份到直接联系 locator 的映射：Lark 使用同一 app scope 的 open_id，本地 Web 使用 web / local / me。不会只比较裸 ID，也不会将 Address.status.people 中的参与关系解释为联系地址。查询排除已删除、归并退出中的地址及群聊；没有匹配身份的 chat_id 不自动成为联系地址。
 
-Input、Source 和 Connector 贡献 app-scoped Lark 人物身份后，Personal 按同一 app 的 open_id 发现或创建单聊 Address，写入参与者并补全 Person 引用。没有对应发送 Channel 的身份不会通过替换 app ID 变成可发送地址。首次创建的个人单聊允许发言，后续发现、重启和补全保留显式禁言及摘要。Person Controller 通过 Host action 补全 Runner 新建或改过身份的 Person；启动补全已有目录，重复处理不产生写入。
+Input、Source 和 Connector 贡献 app-scoped Lark 人物身份后，Personal 根据已启用的同 app Channel 发现或创建 open_id 单聊 Address，写入已知参与者；发现过程不修改 Person。没有对应发送 Channel 时不自动创建，也不替换 app ID。首次创建允许发言，后续发现与重启保留显式禁言及摘要。Person Controller 补全 Runner 新建或改过身份的 Person 对应的 Address；重复处理不产生写入。联系人发现失败记录上下文并交给协调重试，不阻断 Input 接纳。
 
-已有 bot 单聊可复用原 Address；机器人 p2p 入站将 chat_id 作为同一 Address 的 endpoint alias。仅观察到他人私聊并不能证明那是机器人单聊，详见 [Address](address.md#字段与发现)。新加入的地址引用必须固定到仍存在的非群聊资源，查询会标记已失效的历史引用；失效地址或参与者不能授权发送。
+机器人 p2p 入站证明 open_id 与 chat_id 属于同一 Address，联系查询会自然指向归并后保留的 UID；仅观察到人与人私聊不能证明机器人单聊，详见 [Address](address.md#字段与发现)。身份变更、人物合并或 Address 删除后，查询结果直接反映当前事实，无需同步人物上的地址集合。
 
-Chief 从 read_person 的 `spec.addresses` 与 `contacts` 查看候选和当前状态，再结合原 Input、当前 Channel、场合及信息权限明确选择 target 和 receivers。合适时优先原处答复；已有委托内可以直接答复相关的人，减少让 Me 转达。需要 Me 决策、新授权、信息不能向对方披露或收件场合不明确时再联系 Me。联系地址仅提供到达能力，不扩大行动或披露授权；发送后结果不明确时不能换地址盲目重发。
+Chief 从 read_person 的 `contacts` 查看候选及禁言状态，再结合原 Input、当前 Channel 能力、场合和披露权限明确选择 target 与 receivers。找到关联不保证 Channel 当前可发送。合适时优先原处答复；已有委托内可以直接答复相关的人，减少让 Me 转达。需要 Me 决策、新授权、信息不能向对方披露或收件场合不明确时再联系 Me。联系地址不扩大行动或披露授权；发送结果不明确时不能换地址盲目重发。
 
-Me 使用同一个地址集合，Web 收件处也在其中；全局 `defaultAddress` 仍明确选定集合内一个私有地址用于通知与兜底，不能从无序集合取第一个。Persons 页面展示联系地址、失效及禁言状态，并链接 Addresses 页面管理。人物合并对地址做 UID 集合并集，参与者沿用已有分批迁移。
+Me 使用相同关联规则，Web 收件处可由本地身份找到。全局 `defaultAddress` 是独立的路由偏好，显式选择 Me 的一个私有联系地址用于通知与兜底，不能从无序查询结果取第一个。Persons 页面展示当前联系地址及禁言状态，并链接 Addresses 页面管理。人物合并转移 identities，参与者继续沿用分批迁移。
+
+Person Schema 严格拒绝旧 spec.addresses，不提供历史数据兼容或迁移。
 
 ## Reconciler
 

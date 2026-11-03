@@ -98,7 +98,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(input.spec.originId, "web");
   assert.equal(input.spec.replyToMessageId, undefined);
   const place = aide.addresses.read(input.spec.source!);
-  assert.deepEqual(place.spec.endpoint, webAddress("a"));
+  assert.deepEqual([...place.spec.locators][0], webAddress("a"));
   assert.equal(place.spec.type, "web");
   assert.notEqual(place.spec.name, "forged-place");
   await aide.receive(fixtureIncoming({ channelId: "web", id: "b1",  topicId: "b", text: "另一会话的私有内容" }));

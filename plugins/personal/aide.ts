@@ -78,7 +78,7 @@ export class Personal {
   readonly core: ApplicationRuntime;
   private readonly pending = new Set<Promise<unknown>>();
 
-  constructor(private readonly options: { timezone: string; persons: Persons; contacts?: import("./person/contacts.ts").PersonContacts; channelMe: Me; topic?: unknown; weave?: unknown }, private readonly log: Logger,
+  constructor(private readonly options: { timezone: string; persons: Persons; channelMe: Me; topic?: unknown; weave?: unknown }, private readonly log: Logger,
     runtime: { runtime: ApplicationRuntime; connectors: ConnectorClient; inputs: InputStore; outputs: OutputStore; resolveContact?: ConstructorParameters<typeof TopicStore>[4] }) {
     this.core = runtime.runtime;
     this.connectors = runtime.connectors;
@@ -478,8 +478,7 @@ export class Personal {
       }
     }
     const place = input.addressObservation;
-    if (input.channelId === "lark" && place?.type === "direct" && sender && larkSenderId) this.options.contacts?.bindDirect(sender, input.source, larkSenderId);
-    if (input.channelId === "web" || (relation === "sent" && place?.type === "direct"))
+    if (input.channelId === "web" || (input.channelId === "lark" && place?.type === "direct" && sender && larkSenderId))
       new Addresses(this.store.resources.storage.home).observe(input.source, sender ? [sender] : [], { muted: false,
         type: input.channelId === "web" ? "web" : "direct", name: place?.name });
     const fact = await this.topics.submit(id, { attention: InputAttention.Immediate, topicKey: input.topicKey, topicId: input.topicId, ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,

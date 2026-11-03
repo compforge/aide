@@ -200,10 +200,10 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
         }
         await this.acceptInput(input);
         this.log.info({ messageId: input.id, topicId: input.topicKey }, "Lark input routed");
-      } catch {
+      } catch (error) {
         if (this.stopped) return;
         failure = this.notice(input.id, input.topicKey,  "这条请求处理失败。请查看网页中的事项状态，再发一条消息要求重试或继续。");
-        this.log.error({ messageId: input.id, topicId: input.topicKey }, "Lark input failed; explicit user retry required");
+        this.log.error({ err: error, messageId: input.id, topicId: input.topicKey, stage: "admission" }, "Lark input failed; explicit user retry required");
       }
       this.save({ ...this.state, pending: this.state.pending.slice(1),
         notices: failure ? [...this.state.notices, failure] : this.state.notices });
