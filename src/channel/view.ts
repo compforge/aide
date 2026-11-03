@@ -80,7 +80,7 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
     .map((input) => [input.invocationId, input]));
   const summaries = new Map(state.invocationSummaries.filter((turn) => relatedTurns.has(turn.invocationId)).map((turn) => [turn.invocationId, turn]));
   const executions = new Map<string, { header: TopicBlock; blocks: TopicBlock[] }>();
-  const roots: TopicBlock[] = aide.outputs().filter((message) => resource && (visibleOutput(message, resource) || memberUids.has(message.topicUid) || message.inputIds?.some(id => inputIds.has(id))))
+  const roots: TopicBlock[] = aide.outputs().filter((message) => (message.text.trim() || message.generation === "open") && resource && (visibleOutput(message, resource) || memberUids.has(message.topicUid) || message.inputIds?.some(id => inputIds.has(id))))
     .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, label: outputLabel(message.status), detail: message.status.disclosure?.reason, receivers: message.receivers, target: message.target,
       ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
     }));

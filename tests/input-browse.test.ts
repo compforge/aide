@@ -1,3 +1,4 @@
+import { composeMail } from "../plugins/personal/stream/writer.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { once } from "node:events";
@@ -117,8 +118,8 @@ test("Timeline retains independent consumers, resolves exact UIDs and includes o
   const replacement = await aide.topics.ensure("b", webAddress("b"), "新会话 B");
   assert.notEqual(replacement.metadata.uid, b.metadata.uid);
   const base = { target: webAddress("a"), topicId: "a", topic: { ...resourceRef(a), uid: a.metadata.uid }, executionId: "chief-run" };
-  aide.outputStore.create("a", "related", { ...base, text: "显式关联的回复", inputIds: [input.metadata.name, "other"] });
-  aide.outputStore.create("a", "unrelated", { ...base, text: "同一 execution 的其他回复", inputIds: ["other"] });
+  composeMail(aide.outputStore, "a", "related", { ...base, inputIds: [input.metadata.name, "other"], content: { kind: "text", text: "显式关联的回复" } });
+  composeMail(aide.outputStore, "a", "unrelated", { ...base, inputIds: ["other"], content: { kind: "text", text: "同一 execution 的其他回复" } });
   const detail = inputDetail(aide, input.metadata.name)!;
   assert.equal(detail.outputCount, 1);
   assert.equal(detail.routeAttempts, 2);
@@ -243,8 +244,7 @@ test("Timeline and chat distinguish provider waits from Person delivery policy a
   const until = "2026-11-01T16:00:00.000Z";
   for (const [reason, label] of [["frequency", "等待投递频控"], ["receiver-busy", "等待接收人的上一条投递完成"],
     ["provider", "等待外部服务允许重试"]] as const) {
-    aide.outputStore.create("waiting", reason, { target: webAddress("waiting"), topicId: "waiting",
-      topic: { ...resourceRef(topic), uid: topic.metadata.uid }, text: reason, inputIds: [input.metadata.name] });
+    composeMail(aide.outputStore, "waiting", reason, { target: webAddress("waiting"), topicId: "waiting", topic: { ...resourceRef(topic), uid: topic.metadata.uid }, inputIds: [input.metadata.name], content: { kind: "text", text: reason } });
     aide.outputStore.update(reason, status => ({ ...status, deliveryWait: { reason, until } }));
     const entry = inputDetail(aide, input.metadata.name)!.timeline.find(e => e.id === `output:${reason}:waiting`)!;
     assert.equal(entry.title, label); assert.equal(entry.text, `预计重试：${until}`);

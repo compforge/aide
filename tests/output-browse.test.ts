@@ -1,3 +1,4 @@
+import { composeMail, replacementMail } from "../plugins/personal/stream/writer.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { once } from "node:events";
@@ -25,7 +26,7 @@ async function setup(t: TestContext) {
   const topic = await aide.topics.ensure("a", webAddress("a"), "主题 A");
   const store = aide.topics.outputStore;
   const spec = { topic: { ...resourceRef(topic), uid: topic.metadata.uid }, topicId: "a", target: webAddress("a") };
-  const create = (id: string, text = `正文 ${id} needle 中文 %_`) => store.create("test", id, { ...spec, text });
+  const create = (id: string, text = `正文 ${id} needle 中文 %_`) => composeMail(store, "test", id, { ...spec, content: { kind: "text", text: text } });
   return { home, aide, topic, store, spec, create };
 }
 
@@ -57,11 +58,11 @@ test("Outputs filter before stable pagination and browsing never refreshes reten
 test("Disclosure denial and successful fallback delivery remain separate and both audiences are searchable", async t => {
   const { aide, store, home, spec } = await setup(t);
   const person = (name: string) => ({ ...PERSON_TYPE, namespace: 'v1' as const, name, uid: `person-${name}` });
-  const output = store.create('test', 'redirected', { ...spec, text: '原始私密内容', receivers: personRefs([person('other')]) });
+  const output = composeMail(store, 'test', 'redirected', { ...spec, receivers: personRefs([person('other')]), content: { kind: "text", text: '原始私密内容' } });
   const actualAddress = addressFor(home, webAddress('me'));
   store.update('redirected', s => ({ ...s, phase: 'delivered', attempts: 1, deliveredAt: new Date().toISOString(),
     disclosure: { decision: 'denied', reason: '接收人不可见', checkedAt: new Date().toISOString(), fingerprint: 'test' },
-    delivery: { address: actualAddress, target: webAddress('me'), stream: store.replacement(output, 'test', '已阻止外发'), receivers: personRefs([person('me')]) },
+    delivery: { address: actualAddress, target: webAddress('me'), stream: replacementMail(store, output, 'test', '已阻止外发'), receivers: personRefs([person('me')]) },
     receipt: { id: 'message', scope: 'web' } }));
   for (const receiverUid of ['person-other', 'person-me']) assert.equal(browseOutputs(store, { receiverUid }).total, 1);
   for (const addressUid of [output.spec.target.uid, actualAddress.uid]) assert.equal(browseOutputs(store, { addressUid }).total, 1);
@@ -79,7 +80,7 @@ test("Disclosure denial and successful fallback delivery remain separate and bot
 test("Waiting projections retain reasons; deleted and replaced identities never receive historical links", async t => {
   const { aide, store, spec, topic } = await setup(t);
   const input = aide.topics.inputStore.submit('test', 'input', { origin: 'source', originId: 'test', text: 'material' });
-  const output = store.create('test', 'waiting', { ...spec, text: '等待', inputIds: ['input', 'legacy'], inputUids: { input: input.metadata.uid } });
+  const output = composeMail(store, 'test', 'waiting', { ...spec, inputIds: ['input', 'legacy'], inputUids: { input: input.metadata.uid }, content: { kind: "text", text: '等待' } });
   for (const reason of ['frequency', 'receiver-busy', 'provider'] as const) {
     store.update('waiting', s => ({ ...s, deliveryWait: { reason, until: '2030-01-01T00:00:00.000Z' } }));
     assert.equal(outputDetail(aide, 'waiting')!.wait!.reason, reason);
@@ -100,8 +101,7 @@ test("Waiting projections retain reasons; deleted and replaced identities never 
 
 test("Outputs HTTP validates requests, links only the recorded native Session and serves the new navigation", async t => {
   const { aide, store, spec, create } = await setup(t);
-  const output = store.create('test', 'session-output', { ...spec, text: '<script>unsafe</script>',
-    executionId: 'execution', createdBy: { agent: { harness: 'chief', sessionId: 'native' }, executionId: 'execution', toolCallId: 'say-call' } });
+  const output = composeMail(store, 'test', 'session-output', { ...spec, executionId: 'execution', createdBy: { agent: { harness: 'chief', sessionId: 'native' }, executionId: 'execution', toolCallId: 'say-call' }, content: { kind: "text", text: '<script>unsafe</script>' } });
   create('no-session');
   let reads = 0;
   aide.readSession = async agent => { reads++; assert.equal(agent.sessionId, 'native'); return { schema_version: 'agent-ledger/session@1', session: { source: 'pi', id: agent.sessionId }, nodes: [] }; };
@@ -132,4 +132,19 @@ test("Outputs HTTP validates requests, links only the recorded native Session an
     assert.deepEqual([...nav.matchAll(/>(Inputs|Topics|Persons|Addresses|Outputs)<\/a>/g)].map(m => m[1]), ['Inputs', 'Topics', 'Persons', 'Addresses', 'Outputs']);
   }
   for (const path of ['/outputs.js', '/outputs.css']) assert.equal((await get(path)).status, 200);
+});
+
+
+test("Output preview preserves Unicode and detail reuses one projection per mail", async t => {
+  const { aide, store, create } = await setup(t);
+  const output = create("unicode", "字".repeat(119) + "😀尾");
+  let reads = 0;
+  const read = store.streams.read.bind(store.streams);
+  store.streams.read = (...args) => { reads++; return read(...args); };
+  const detail = outputDetail(aide, output.metadata.name)!;
+  assert.equal(detail.preview, "字".repeat(119) + "😀");
+  assert.equal(reads, 1);
+  outputDetail(aide, output.metadata.name);
+  outputList(aide, {});
+  assert.equal(reads, 1, "unchanged list/detail does not replay old records");
 });

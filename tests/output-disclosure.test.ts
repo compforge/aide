@@ -1,3 +1,4 @@
+import { MailWriter, composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
 import { addressFor } from "./address-fixture.ts";
 import { transportFixture } from "./output-fixture.ts";
@@ -19,7 +20,7 @@ import { resourceRef } from "../plugins/personal/input/state.ts";
 import { OutputDisclosure, type DisclosurePorts, type OutputAudience } from "../plugins/personal/output/disclosure.ts";
 import { OutputDefinition } from "../plugins/personal/output/definition.ts";
 import { OutputDelivery } from "../plugins/personal/output/delivery.ts";
-import { outputSpec } from "../plugins/personal/output.ts";
+import { mailDraft } from "../plugins/personal/output.ts";
 import { webAddress, larkAddress, larkPersonAddress, isChannelAddress } from "../src/channel/address.ts";
 import { outputView } from "../plugins/personal/output/view.ts";
 import { channelOutputs } from "../src/channel/output.ts";
@@ -48,8 +49,8 @@ async function setup(t: TestContext) {
   }
   function output(id: string, n?: NoteResource, target = larkPersonAddress("app", "ou_c")) {
     allowAddress(home, target);
-    return store.create("topic", id, { ...outputSpec(topic, { topicId: "topic", text: "A verified fact", target }),
-      ...(n ? { notes: [{ uid: n.metadata.uid, version: noteVersion(n) }] } : {}) });
+    return composeMail(store, "topic", id, mailDraft(topic, { topicId: "topic", text: "A verified fact", target },
+      n ? { notes: [{ uid: n.metadata.uid, version: noteVersion(n) }] } : {}));
   }
   return { store, client, topic, me, other, note, output, checker, ports, checks: () => checks,
     audience: (next: OutputAudience) => { audience = next; },
@@ -75,7 +76,7 @@ test("permitted output retains intended content and checked delivery survives re
   f.store.begin("x"); f.store.retry("x", "transport refused");
   await f.store.prepare("x");
   assert.equal(f.checks(), 1);
-  assert.equal(f.store.content(f.store.get("x")!, true).text, f.store.content(original).text);
+  assert.equal(mailView(f.store, f.store.get("x")!, true).text, mailView(f.store, original).text);
   f.store.begin("x"); f.store.delivered("x");
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.phase, "delivered");
@@ -88,8 +89,8 @@ test("denied output redirects to Me on the same resource, preserving original in
   assert.deepEqual(result.spec, original.spec);
   assert.equal(result.status.disclosure!.decision, "denied");
   assert.deepEqual(result.status.delivery!.target, webAddress("topic"));
-  assert.match(f.store.content(result, true).text, /clearance L1/);
-  assert.match(f.store.content(result, true).text, /A verified fact/);
+  assert.match(mailView(f.store, result, true).text, /clearance L1/);
+  assert.match(mailView(f.store, result, true).text, /A verified fact/);
   assert.equal(result.status.phase, "pending");
   await f.checker.reconcile("x");
   assert.equal(f.store.list().length, 1);
@@ -98,7 +99,7 @@ test("denied output redirects to Me on the same resource, preserving original in
 test("sufficient clearance does not grant people visibility; claimed receivers do not override actual audience", async t => {
   const f = await setup(t); await f.clearance("L3");
   const n = await f.note("L1", "people", [personRef(f.me) as PersonRef]);
-  const draft = f.store.create("topic", "x", { ...outputSpec(f.topic, { topicId: "topic", text: n.spec.text, target: larkPersonAddress("app", "ou_c"), receivers: [personRef(f.me)] }), notes: [{ uid: n.metadata.uid, version: noteVersion(n) }] });
+  const draft = composeMail(f.store, "topic", "x", { ...mailDraft(f.topic, { topicId: "topic", text: n.spec.text, target: larkPersonAddress("app", "ou_c"), receivers: [personRef(f.me)] }, { notes: [{ uid: n.metadata.uid, version: noteVersion(n) }] }) });
   f.audience({ people: [f.me, f.other], private: false });
   await f.checker.reconcile("x");
   assert.equal(f.store.get(draft.metadata.name)!.status.disclosure!.decision, "denied");
@@ -107,8 +108,7 @@ test("sufficient clearance does not grant people visibility; claimed receivers d
 
 test("Input provenance does not add a second classification system", async t => {
   const f = await setup(t); const note = await f.note();
-  f.store.create("topic", "x", { ...outputSpec(f.topic, { topicId: "topic", text: note.spec.text, target: larkPersonAddress("app", "ou_c") }),
-    notes: [{ uid: note.metadata.uid, version: noteVersion(note) }], inputIds: ["reclaimed-input"] });
+  composeMail(f.store, "topic", "x", { ...mailDraft(f.topic, { topicId: "topic", text: note.spec.text, target: larkPersonAddress("app", "ou_c") }, { notes: [{ uid: note.metadata.uid, version: noteVersion(note) }] }), inputIds: ["reclaimed-input"] });
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
   assert.equal(f.checks(), 1);
@@ -211,8 +211,7 @@ test("real Runner automatically reconciles a newly submitted Output before Web p
 test("Output policy combines current classifications and people across the cited Notes", async t => {
   const f = await setup(t); const a = await f.note("L1", "people", [personRef(f.me) as PersonRef]);
   const b = await f.note("L1", "people", [personRef(f.other) as PersonRef]);
-  f.store.create("topic", "x", { ...outputSpec(f.topic, { topicId: "topic", text: a.spec.text, target: larkPersonAddress("app", "ou_c") }),
-    notes: [a, b].map(n => ({ uid: n.metadata.uid, version: noteVersion(n) })) });
+  composeMail(f.store, "topic", "x", { ...mailDraft(f.topic, { topicId: "topic", text: a.spec.text, target: larkPersonAddress("app", "ou_c") }, { notes: [a, b].map(n => ({ uid: n.metadata.uid, version: noteVersion(n) })) }) });
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
   assert.deepEqual(f.store.get("x")!.status.disclosure!.policy?.people, [f.me.metadata.uid, f.other.metadata.uid].sort());
@@ -348,18 +347,18 @@ test("rechecking changed evidence preserves the same recipient set after an atte
 
 test("Output admission and immutable delivery compare Person UID sets on both sides", async t => {
   const f = await setup(t), a = personRef(f.me), b = personRef(f.other);
-  const spec = { ...outputSpec(f.topic, { topicId: "topic", text: "fact", target: webAddress("topic") }), receivers: personRefs([b, a, b]) };
+  const spec = { ...mailDraft(f.topic, { topicId: "topic", text: "fact", target: webAddress("topic") }), receivers: personRefs([b, a, b]) };
   let received: import("../plugins/personal/output/model.ts").Output | undefined;
   f.store.subscribe(value => { received = value; });
-  const original = f.store.create("topic", "sets", spec);
+  const original = composeMail(f.store, "topic", "sets", spec);
   assert(received?.spec.receivers instanceof KeyedSet);
   assert.equal(received.spec.receivers.size, 2);
   received.spec.receivers.clear();
   const listed = f.store.list({ topicUid: f.topic.metadata.uid })[0]!;
   assert(listed.spec.receivers instanceof KeyedSet);
   assert.equal(listed.spec.receivers.size, 2);
-  assert.deepEqual(f.store.create("topic", "sets", { ...spec, receivers: personRefs([a, b]) }), original);
-  assert.throws(() => f.store.create("topic", "sets", { ...spec, receivers: personRefs([a]) }), /different content/);
+  assert.deepEqual(composeMail(f.store, "topic", "sets", { ...spec, receivers: personRefs([a, b]) }), original);
+  assert.throws(() => composeMail(f.store, "topic", "sets", { ...spec, receivers: personRefs([a]) }), /different content/);
   const previous = { ...original, spec: { ...original.spec, target: original.spec.target }, status: { phase: "pending" as const, attempts: 1,
     delivery: { address: original.spec.target, target: spec.target, stream: original.spec.stream, receivers: personRefs([b, a, b]) } } };
   const current = { ...previous, spec: { ...previous.spec, receivers: personRefs([a, b]) }, status: { ...previous.status,
@@ -397,19 +396,20 @@ test("External streams wait for the complete think and text; private Me can bind
   const f = await setup(t), note = await f.note();
   const target = larkPersonAddress("app", "ou_c");
   allowAddress(f.store.storage.home, target);
-  const external = f.store.create("topic", "external", { ...outputSpec(f.topic, { topicId: "topic", text: "", target }), streaming: true,
-    notes: [{ uid: note.metadata.uid, version: noteVersion(note) }] });
-  f.store.streams.append(external.spec.stream, [{ kind: "think", delta: "private reasoning" }, { kind: "text", delta: "public answer" }]);
+  const external = composeMail(f.store, "topic", "external", { ...mailDraft(f.topic, { topicId: "topic", text: "", target }), content: { kind: "agent" } });
+  f.store.streams.append(external.spec.stream, [{ kind: "agent_thought_chunk", payload: { messageId: "reply", content: { type: "text", text: "private reasoning" } } }, { kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "public answer" } } }]);
   await f.checker.reconcile("external");
   assert.equal(f.store.get("external")!.status.delivery, undefined);
   assert.equal(f.checks(), 0);
   let checked = "";
   f.ports.check = async evidence => { checked = evidence.text; return { allowed: true, reason: "supported" }; };
+  new MailWriter(f.store.streams, external.spec.stream).cite([{ uid: note.metadata.uid, version: noteVersion(note) }]);
+  f.store.streams.append(external.spec.stream, [{ kind: "tool_call_update", payload: { toolCallId: "read", title: "Referenced tool", status: "completed", rawOutput: "private tool evidence" } }]);
   f.store.streams.complete(external.spec.stream);
   await f.checker.reconcile("external");
-  assert.match(checked, /private reasoning/); assert.match(checked, /public answer/);
+  assert.match(checked, /private reasoning/); assert.match(checked, /public answer/); assert.match(checked, /private tool evidence/);
   assert.deepEqual(f.store.get("external")!.status.delivery!.stream, external.spec.stream);
-  const direct = f.store.create("topic", "private", { ...outputSpec(f.topic, { topicId: "topic", text: "", target: webAddress("topic") }), streaming: true });
+  const direct = composeMail(f.store, "topic", "private", { ...mailDraft(f.topic, { topicId: "topic", text: "", target: webAddress("topic") }), content: { kind: "agent" } });
   await f.checker.reconcile("private");
   assert.deepEqual(f.store.get("private")!.status.delivery!.stream, direct.spec.stream);
 });
@@ -421,15 +421,38 @@ test("An open Stream loses its private authorization before any later chunk when
   for (const attempted of [false, true]) {
     const id = `private-${attempted}`;
     f.audience({ people: [f.me], private: true });
-    const output = f.store.create("topic", id, { ...outputSpec(f.topic, { topicId: "topic", text: "", target }), streaming: true });
-    f.store.streams.append(output.spec.stream, [{ kind: "text", delta: "first" }]);
+    const output = composeMail(f.store, "topic", id, { ...mailDraft(f.topic, { topicId: "topic", text: "", target }), content: { kind: "agent" } });
+    f.store.streams.append(output.spec.stream, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "first" } } }]);
     await f.checker.reconcile(id);
     assert(f.store.get(id)!.status.delivery);
     if (attempted) f.store.begin(id);
     f.audience({ people: [f.me, f.other], private: false });
-    f.store.streams.append(output.spec.stream, [{ kind: "text", delta: "private continuation" }]);
+    f.store.streams.append(output.spec.stream, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "private continuation" } } }]);
     await f.checker.reconcile(id);
     if (attempted) assert.equal(f.store.get(id)!.status.phase, "uncertain");
     else assert.equal(f.store.get(id)!.status.delivery, undefined);
   }
+});
+
+
+test("Live citations belong to Stream, freeze on close, and do not interrupt private Me delivery", async t => {
+  const f = await setup(t), note = await f.note();
+  const output = composeMail(f.store, "topic", "citations", { ...mailDraft(f.topic, { topicId: "topic", text: "", target: webAddress("topic") }), content: { kind: "agent" } });
+  await f.checker.reconcile("citations"); f.store.begin("citations");
+  const fingerprint = f.store.get("citations")!.status.disclosure!.fingerprint;
+  const writer = new MailWriter(f.store.streams, output.spec.stream);
+  writer.cite([{ uid: note.metadata.uid, version: noteVersion(note) }]);
+  writer.cite([{ uid: note.metadata.uid, version: noteVersion(note) }]);
+  await f.checker.reconcile("citations");
+  assert.equal(f.store.get("citations")!.status.phase, "sending");
+  assert.equal(f.store.get("citations")!.status.disclosure!.fingerprint, fingerprint);
+  assert.equal("notes" in output.spec, false);
+  const references = f.store.streams.get(output.spec.stream).status.references;
+  assert.equal(references.length, 1); assert.equal(references[0]!.uid, note.metadata.uid);
+  assert.ok(references[0]!.contentVersion);
+  writer.close();
+  assert.throws(() => writer.cite([{ uid: note.metadata.uid, version: noteVersion(note) }]), /closed/);
+  const changes = f.store.resources.requestDeletion(output, output.metadata.name);
+  assert.equal(changes.some(c => c.resource.kind === "Note"), false);
+  assert.equal((await f.client.get(resourceRef(note)))!.metadata.uid, note.metadata.uid);
 });

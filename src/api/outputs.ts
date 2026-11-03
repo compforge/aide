@@ -1,3 +1,5 @@
+import { mailProcess } from "../channel/mail.ts";
+import { mailView } from "../../plugins/personal/stream/writer.ts";
 import type { ResourceRef, Resource } from "@compforge/aide-plugin";
 import type { WebService } from "./service.ts";
 import { browseOutputs, outputFacets, type OutputBrowseQuery } from "../../plugins/personal/output/browse.ts";
@@ -19,10 +21,10 @@ function reference(aide: WebService, ref: ResourceRef) {
   }
   return { ref, label: typeof label === "string" ? label : ref.name, available, href };
 }
-function summary(aide: WebService, output: Output) {
+function summary(aide: WebService, output: Output, content = mailView(aide.topics.outputStore, output, true)) {
   const { metadata, spec, status } = output;
   const wait = ["pending", "sending"].includes(status.phase) ? status.deliveryWait : undefined;
-  return { id: metadata.name, uid: metadata.uid, at: metadata.creationTimestamp, preview: aide.topics.outputStore.content(output, true).text.replace(/\s+/gu, " ").slice(0, 120) || outputPrinter.summarize(output),
+  return { id: metadata.name, uid: metadata.uid, at: metadata.creationTimestamp, preview: Array.from(content.text.replace(/\s+/gu, " ").trim()).slice(0, 120).join("") || outputPrinter.summarize(output),
     topic: reference(aide, spec.topic), receivers: [...(spec.receivers ?? [])].map(ref => reference(aide, ref)),
     address: reference(aide, spec.target), actualAddress: status.delivery && reference(aide, status.delivery.address),
     phase: status.phase, disclosure: status.disclosure?.decision ?? "pending" as const,
@@ -49,10 +51,11 @@ export function outputDetail(aide: WebService, id: string, uid?: string) {
   const output = store.storage.read(store.key(id))?.object as Output | undefined;
   if (!output || output.metadata.deletionTimestamp || (uid !== undefined && uid !== output.metadata.uid)) return;
   const { spec, status } = output;
-  return { ...summary(aide, output), text: store.content(output).text, think: store.content(output).think, stream: { ref: spec.stream, ...store.content(output) }, target: spec.target, disclosureDetail: status.disclosure,
-    delivery: status.delivery && { ...status.delivery, text: store.content(output, true).text, think: store.content(output, true).think, streamStatus: store.content(output, true), receivers: [...status.delivery.receivers].map(ref => reference(aide, ref)) },
+  const raw = mailView(store, output), actual = status.delivery?.stream.uid === spec.stream.uid ? raw : mailView(store, output, true);
+  return { ...summary(aide, output, actual), text: raw.text, think: raw.think, process: mailProcess(raw), stream: { ref: spec.stream, ...raw }, target: spec.target, disclosureDetail: status.disclosure,
+    delivery: status.delivery && { ...status.delivery, text: actual.text, think: actual.think, process: mailProcess(actual), streamStatus: actual, receivers: [...status.delivery.receivers].map(ref => reference(aide, ref)) },
     receipt: status.receipt, producer: spec.producer ? reference(aide, spec.producer) : spec.executionId || spec.createdBy ? reference(aide, spec.topic) : undefined, executionId: spec.executionId,
-    createdBy: spec.createdBy, notes: spec.notes ?? [], inputs: (spec.inputIds ?? []).map(id => {
+    createdBy: spec.createdBy, notes: raw.references, inputs: (spec.inputIds ?? []).map(id => {
       const uid = spec.inputUids?.[id], store = aide.topics.inputStore;
       const input = store.storage.read(store.key(id))?.object;
       const available = !!uid && input?.metadata.uid === uid && !input.metadata.deletionTimestamp;

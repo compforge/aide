@@ -1,3 +1,4 @@
+import { composeMail } from "../plugins/personal/stream/writer.ts";
 import { DeliveryError, deliveryFailure } from "@compforge/aide-connector";
 import { OutputDelivery } from "../plugins/personal/output/delivery.ts";
 import { approveFixtureOutput } from "./output-fixture.ts";
@@ -12,14 +13,14 @@ import { requirementTransport, requirementOutputs } from "../plugins/personal/ou
 import { emptyConnectors } from "../src/connector/client.ts";
 import { parseAddress, sameAddress } from "../src/address.ts";
 import type { RequirementAddress, RequirementComment } from "@compforge/aide-plugin";
-import type { OutputSubmission as OutputSpec } from "../plugins/personal/output/model.ts";
+import type { MailDraft as OutputSpec } from "../plugins/personal/stream/writer.ts";
 const target: RequirementAddress = { kind: "requirement", source: "work", category: "issue", id: "1", scope: "https://tracker.test/p" };
 function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "aide-comment-output-")), store = new OutputStore(root);
   t.after(() => rmSync(root, { recursive: true, force: true }));
   store.subscribe(output => { if (!output.status.delivery) approveFixtureOutput(store, output.metadata.name); });
   store.check = async id => { approveFixtureOutput(store, id); };
-  const spec: OutputSpec = { text: "收到", target, topicId: "topic", topic: { apiVersion: "personal.aide.dev/v1", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" } };
+  const spec: OutputSpec = { target, topicId: "topic", topic: { apiVersion: "personal.aide.dev/v1", kind: "Topic", namespace: "v1", name: "topic", uid: "topic-uid" }, content: { kind: "text", text: "收到" } };
   const requirements = { ...emptyConnectors.requirements, async identity() { return { provider: "tracker", scope: target.scope }; } };
   return { root, store, spec, requirements };
 }
@@ -35,7 +36,7 @@ test("Requirement addresses pin project scope independently of Person and Topic"
 });
 
 test("Output delivery persists a comment receipt and filters only its own comment across reclamation", async (t) => {
-  const f = fixture(t); f.store.create("s", "output-1", f.spec); let sends = 0;
+  const f = fixture(t); composeMail(f.store, "s", "output-1", f.spec); let sends = 0;
   const worker = delivery(f.store, { requirements: f.requirements, async addRequirementComment() { sends++; return { id: "c1", scope: target.scope }; } });
   await worker.reconcile("output-1"); await worker.reconcile("output-1");
   assert.equal(sends, 1); assert.equal(f.store.get("output-1")!.status.phase, "delivered");
@@ -48,7 +49,7 @@ test("Output delivery persists a comment receipt and filters only its own commen
 });
 
 test("Ambiguous send is not retried; correlated observation can recover the receipt", async (t) => {
-  const f = fixture(t); f.store.create("s", "ambiguous", f.spec); let sends = 0;
+  const f = fixture(t); composeMail(f.store, "s", "ambiguous", f.spec); let sends = 0;
   const writer = { requirements: f.requirements, async addRequirementComment() { sends++; throw new Error("network timeout after server accepted"); } };
   await delivery(f.store, writer).reconcile("ambiguous");
   assert.equal(f.store.get("ambiguous")!.status.phase, "uncertain");
@@ -59,7 +60,7 @@ test("Ambiguous send is not retried; correlated observation can recover the rece
 });
 
 test("Interrupted sending and connector reconfiguration never produce another comment", async (t) => {
-  const f = fixture(t); f.store.create("s", "interrupted", f.spec); f.store.begin("interrupted"); f.store.create("s", "reconfigured", f.spec);
+  const f = fixture(t); composeMail(f.store, "s", "interrupted", f.spec); f.store.begin("interrupted"); composeMail(f.store, "s", "reconfigured", f.spec);
   let sends = 0;
   const writer = { requirements: { ...f.requirements, async identity() { return { provider: "tracker", scope: "elsewhere" }; } }, async addRequirementComment() { sends++; return { id: "bad", scope: "elsewhere" }; } };
   const worker = delivery(f.store, writer);
@@ -72,7 +73,7 @@ test("Interrupted sending and connector reconfiguration never produce another co
 });
 
 test("Preflight failure remains retryable without a send attempt", async (t) => {
-  const f = fixture(t); f.store.create("s", "offline", f.spec);
+  const f = fixture(t); composeMail(f.store, "s", "offline", f.spec);
   const writer = { requirements: { ...f.requirements, async identity(): Promise<never> { throw new Error("offline"); } }, async addRequirementComment(): Promise<never> { throw new Error("must not send"); } };
   await assert.rejects(delivery(f.store, writer).reconcile("offline"), /preparation failed/);
   const status = f.store.get("offline")!.status;
@@ -81,7 +82,7 @@ test("Preflight failure remains retryable without a send attempt", async (t) => 
 
 
 test("Known rejection retries a once-only comment after the adapter deadline, including restart and early wakes", async t => {
-  const f = fixture(t); f.store.create("s", "limited", f.spec); f.store.create("s", "other", f.spec);
+  const f = fixture(t); composeMail(f.store, "s", "limited", f.spec); composeMail(f.store, "s", "other", f.spec);
   let now = Date.now(), sends = 0;
   const clock = Date.now; Date.now = () => now; t.after(() => { Date.now = clock; });
   const writer = { requirements: f.requirements, async addRequirementComment() {
@@ -112,13 +113,13 @@ test("Known rejection retries a once-only comment after the adapter deadline, in
 test("Adapters retain distinct retry delays; absent hints use controller backoff and explicit denial stops", async t => {
   const f = fixture(t);
   for (const [id, delay] of [["quick", 1000], ["slow", 60_000]] as const) {
-    f.store.create("s", id, f.spec);
+    composeMail(f.store, "s", id, f.spec);
     const result = await delivery(f.store, { requirements: f.requirements, async addRequirementComment() {
       throw new DeliveryError({ kind: "retryable", message: "Provider cooldown", retryAfterMs: delay });
     } }).reconcile(id);
     assert.ok(result.requeueAfterMs! > delay - 100 && result.requeueAfterMs! <= delay);
   }
-  f.store.create("s", "backoff", f.spec);
+  composeMail(f.store, "s", "backoff", f.spec);
   const retry = delivery(f.store, { requirements: f.requirements, async addRequirementComment() {
     throw new DeliveryError({ kind: "retryable", message: "Provider rejected request", code: "busy" });
   } });
@@ -131,7 +132,7 @@ test("Adapters retain distinct retry delays; absent hints use controller backoff
   } }, async addRequirementComment() { assert.fail("must not send"); } }).reconcile("backoff");
   assert.equal(f.store.get("backoff")!.status.phase, "failed");
   assert.match(f.store.get("backoff")!.status.lastError!, /disabled/);
-  f.store.create("s", "denied", f.spec); let sends = 0;
+  composeMail(f.store, "s", "denied", f.spec); let sends = 0;
   const denied = delivery(f.store, { requirements: f.requirements, async addRequirementComment() {
     sends++; throw new DeliveryError({ kind: "permanent", code: "forbidden", message: "Comment permission denied" });
   } });
@@ -158,7 +159,7 @@ test("Explicit undefined adapter fields preserve retryable and permanent outcome
     const error = new DeliveryError(failure);
     assert.deepEqual(deliveryFailure(error), { kind, message: failure.message,
       ...(optional.retryAfterMs !== undefined ? { retryAfterMs: optional.retryAfterMs } : {}) });
-    f.store.create("s", id, f.spec);
+    composeMail(f.store, "s", id, f.spec);
     const worker = delivery(f.store, { requirements: f.requirements, async addRequirementComment() { throw error; } });
     if (kind === "retryable" && optional.retryAfterMs === undefined) await assert.rejects(worker.reconcile(id), /Provider rejected comment/);
     else await worker.reconcile(id);

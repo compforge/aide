@@ -1,3 +1,5 @@
+import { readAgentStream } from "../src/stream/agent.ts";
+import { composeMail, replacementMail } from "../plugins/personal/stream/writer.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -7,7 +9,7 @@ import pino from "pino";
 import { StreamStore } from "../src/host/stream/store.ts";
 import { STREAM_TYPE } from "@compforge/aide-plugin";
 import { OUTPUT_TYPE } from "../plugins/personal/output/model.ts";
-import { outputSpec } from "../plugins/personal/output.ts";
+import { mailDraft } from "../plugins/personal/output.ts";
 import { TopicStore } from "./topic-fixture.ts";
 import { approveFixtureOutput } from "./output-fixture.ts";
 import { OutputDelivery, type OutputMessage } from "../plugins/personal/output/delivery.ts";
@@ -19,7 +21,7 @@ async function setup(t: TestContext) {
   const topics = new TopicStore({ dir: home });
   const topic = await topics.ensure("test");
   const store = topics.outputStore;
-  const output = store.create("test", "live", { ...outputSpec(topic, { topicId: "test", text: "" }), streaming: true });
+  const output = composeMail(store, "test", "live", { ...mailDraft(topic, { topicId: "test", text: "" }), content: { kind: "agent" } });
   return { home, topics, store, output, streams: store.streams, ref: output.spec.stream };
 }
 const until = async (predicate: () => boolean) => {
@@ -30,36 +32,36 @@ const until = async (predicate: () => boolean) => {
 test("Stream appends and closes atomically, resumes by seq, and rejects a replaced identity", async t => {
   const f = await setup(t);
   assert.equal(f.streams.get(f.ref).metadata.owner!.uid, f.output.metadata.uid);
-  f.streams.append(f.ref, [{ kind: "think", delta: "检查中" }, { kind: "text", delta: "答" }]);
+  f.streams.append(f.ref, [{ kind: "agent_thought_chunk", payload: { messageId: "reply", content: { type: "text", text: "检查中" } } }, { kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "答" } } }]);
   const reopened = new StreamStore(f.home, "personal");
-  assert.deepEqual(reopened.read(f.ref, 1), [{ seq: 2, kind: "text", delta: "答" }]);
-  reopened.append(f.ref, [{ kind: "text", delta: "案" }]);
+  assert.deepEqual(reopened.read(f.ref, 1), [{ seq: 2, kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "答" } } }]);
+  reopened.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "案" } } }]);
   reopened.complete(f.ref);
-  assert.equal(f.streams.snapshot(f.ref).text, "答案");
-  assert.equal(f.streams.snapshot(f.ref).think, "检查中");
+  assert.equal(readAgentStream(f.streams.reader(f.ref)).text, "答案");
+  assert.equal(readAgentStream(f.streams.reader(f.ref)).think, "检查中");
   assert.equal(f.streams.get(f.ref).status.lastSeq, 3);
-  assert.throws(() => f.streams.append(f.ref, [{ kind: "text", delta: "晚到" }]), /closed/);
+  assert.throws(() => f.streams.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "晚到" } } }]), /closed/);
   assert.throws(() => f.streams.get({ ...f.ref, uid: "replaced" }), /unavailable/);
 });
 
 test("Content capacity rollback leaves neither a chunk nor a tail advancement", async t => {
   const f = await setup(t);
   f.store.storage.configure({ defaults: { maxResourceBytes: 3000, maxCount: 10000, maxBytes: 128 * 1024 * 1024, order: "released" } });
-  assert.throws(() => f.streams.append(f.ref, [{ kind: "text", delta: "x".repeat(4000) }]), ResourceCapacityError);
+  assert.throws(() => f.streams.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "x".repeat(4000) } } }]), ResourceCapacityError);
   assert.equal(f.streams.get(f.ref).status.lastSeq, 0);
   assert.deepEqual(f.streams.read(f.ref), []);
 });
 
 test("Deleting Output marks all owned streams, rejects writers, and deletes chunk storage", async t => {
   const f = await setup(t);
-  f.streams.append(f.ref, [{ kind: "text", delta: "raw" }]);
-  const replacement = f.store.replacement(f.output, "notice", "muted");
+  f.streams.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "raw" } } }]);
+  const replacement = replacementMail(f.store, f.output, "notice", "muted");
   const changes = f.store.resources.requestDeletion(OUTPUT_TYPE, "live");
   assert.deepEqual(new Set(changes.map(c => c.resource.kind)), new Set(["Output", "Stream"]));
-  assert.throws(() => f.streams.append(f.ref, [{ kind: "text", delta: "late" }]), /unavailable/);
+  assert.throws(() => f.streams.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "late" } } }]), /unavailable/);
   for (const ref of [f.ref, replacement]) f.store.resources.finalizeDeletion(STREAM_TYPE, ref.name);
   f.store.resources.finalizeDeletion(OUTPUT_TYPE, "live");
-  assert.equal(f.store.storage.db.prepare("SELECT count(*) AS n FROM stream_chunks").get()!.n, 0);
+  assert.equal(f.store.storage.db.prepare("SELECT count(*) AS n FROM stream_records").get()!.n, 0);
   assert.equal(f.store.storage.db.prepare("SELECT count(*) AS n FROM resource_payload_sizes").get()!.n, 0);
 });
 
@@ -70,40 +72,97 @@ test("Output sends early chunks but delivered waits for closed stream and acknow
   let release: (() => void) | undefined;
   const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", streaming: true, async send(message) {
     sent.push(message);
-    if (message.stream?.phase === "completed") await new Promise<void>(resolve => { release = resolve; });
+    if (message.stream.status.phase === "completed") await new Promise<void>(resolve => { release = resolve; });
     return { id: "card", scope: "test" };
   } }), pino({ level: "silent" }));
   t.after(() => delivery.close());
   await delivery.reconcile("live");
-  f.streams.append(f.ref, [{ kind: "think", delta: "checking" }]);
+  f.streams.append(f.ref, [{ kind: "agent_thought_chunk", payload: { messageId: "reply", content: { type: "text", text: "checking" } } }]);
   await until(() => sent.length === 1);
   assert.equal(f.store.get("live")!.status.phase, "sending");
-  f.streams.append(f.ref, [{ kind: "text", delta: "answer" }]);
+  f.streams.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "answer" } } }]);
   f.streams.complete(f.ref);
   await until(() => !!release);
   assert.notEqual(f.store.get("live")!.status.phase, "delivered");
   release!();
   await until(() => f.store.get("live")!.status.phase === "delivered");
   assert.equal(f.store.get("live")!.status.delivery!.confirmedSeq, 2);
-  assert.equal(sent.at(-1)!.text, "answer");
-  assert.equal(sent.at(-1)!.stream!.think, "checking");
+  assert.equal(readAgentStream(sent.at(-1)!.stream).text, "answer");
+  assert.equal(readAgentStream(sent.at(-1)!.stream).think, "checking");
 });
 
 
 test("A full Stream can still close, and Stream quota reclaims the released Output ownership tree", async t => {
   const f = await setup(t);
   f.store.storage.configure({ defaults: { maxResourceBytes: 3500, maxCount: 10000, maxBytes: 128 * 1024 * 1024, order: "released" } });
-  for (;;) {
-    try { f.streams.append(f.ref, [{ kind: "text", delta: "x".repeat(100) }]); }
-    catch (error) { assert(error instanceof ResourceCapacityError); break; }
+  let full = false;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    try { f.streams.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "x".repeat(100) } } }]); }
+    catch (error) { assert(error instanceof ResourceCapacityError); full = true; break; }
   }
+  assert(full, "bounded attempts must reach the configured quota");
+  assert(f.streams.get(f.ref).status.lastSeq > 0);
   f.streams.interrupt(f.ref, "full");
   assert.equal(f.streams.get(f.ref).status.phase, "interrupted");
   approveFixtureOutput(f.store, "live"); f.store.begin("live"); f.store.delivered("live");
   f.store.storage.configure({ kinds: { "aide.dev/Stream": { maxCount: 1 } } });
-  const next = f.store.create("test", "next", { ...outputSpec(f.topics.resource("test")!, { topicId: "test", text: "next" }) });
+  const next = composeMail(f.store, "test", "next", { ...mailDraft(f.topics.resource("test")!, { topicId: "test", text: "next" }) });
   assert.equal(f.store.get("live"), undefined);
   assert.throws(() => f.streams.get(f.ref), /unavailable/);
-  assert.equal(f.streams.snapshot(next.spec.stream).text, "next");
-  assert.equal(f.store.storage.db.prepare("SELECT count(*) AS n FROM stream_chunks WHERE uid=?").get(f.ref.uid)!.n, 0);
+  assert.equal(readAgentStream(f.streams.reader(next.spec.stream)).text, "next");
+  assert.equal(f.store.storage.db.prepare("SELECT count(*) AS n FROM stream_records WHERE uid=?").get(f.ref.uid)!.n, 0);
+});
+
+
+test("Agent mail replays upserts, clears and tool patches without rewriting its history", async t => {
+  const f = await setup(t), append = (events: import("../src/stream/agent.ts").AgentStreamEvent[]) => f.streams.append(f.ref, events);
+  append([
+    { kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "draft" } } },
+    { kind: "agent_message", payload: { messageId: "reply", content: [{ type: "text", text: "revised" }] } },
+    { kind: "agent_message", payload: { messageId: "reply", phase: "final" } },
+    { kind: "agent_thought", payload: { messageId: "thought", content: [{ type: "text", text: "checking" }] } },
+    { kind: "tool_call_update", payload: { toolCallId: "read", title: "Read evidence", status: "in_progress", rawInput: { path: "note" } } },
+    { kind: "tool_call_content_chunk", payload: { toolCallId: "read", content: { type: "text", text: "evidence" } } },
+  ]);
+  const pinned = f.streams.reader(f.ref), before = readAgentStream(pinned, f.streams);
+  assert.equal(before.text, "revised");
+  assert.equal(before.tools[0]!.status, "in_progress");
+  append([
+    { kind: "agent_message", payload: { messageId: "reply", content: null } },
+    { kind: "agent_thought", payload: { messageId: "thought", content: [] } },
+    { kind: "tool_call_update", payload: { toolCallId: "read", status: "completed" } },
+  ]);
+  assert.equal(readAgentStream(pinned).text, "revised", "reader cannot cross its captured tail");
+  const after = readAgentStream(f.streams.reader(f.ref), f.streams);
+  assert.equal(after.text, ""); assert.equal(after.think, "");
+  assert.equal(after.tools[0]!.status, "completed");
+  assert.deepEqual(after.tools[0]!.content, [{ type: "text", text: "evidence" }]);
+  assert.deepEqual(after.tools[0]!.rawInput, { path: "note" });
+  assert.equal(before.tools[0]!.status, "in_progress", "later patches cannot mutate returned views");
+  append([{ kind: "tool_call_update", payload: { toolCallId: "read", content: null, rawInput: null } }]);
+  assert.deepEqual(readAgentStream(f.streams.reader(f.ref), f.streams).tools[0]!.content, []);
+  f.streams.complete(f.ref);
+  let reads = 0;
+  const reader = f.streams.reader(f.ref), cached = { ...reader, read: (...args: Parameters<typeof reader.read>) => { reads++; return reader.read(...args); } };
+  readAgentStream(cached, f.streams); readAgentStream(cached, f.streams);
+  assert.equal(reads, 0, "unchanged previews reuse the projection cursor");
+  assert.equal(f.streams.read(f.ref).length, 10, "upserts append records instead of editing earlier content");
+});
+
+test("Output courier acknowledges opaque mail without decoding its body", async t => {
+  const f = await setup(t);
+  f.streams.append(f.ref, [{ kind: "opaque", payload: { value: "courier does not read this" } }]);
+  f.streams.complete(f.ref);
+  f.store.check = async id => approveFixtureOutput(f.store, id);
+  let received = false;
+  const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", async send(message) {
+    assert.equal("text" in message, false);
+    assert.equal(message.stream.ref.uid, f.ref.uid);
+    assert.deepEqual(message.stream.read().map(r => r.kind), ["opaque"]);
+    received = true;
+    return { id: "opaque-receipt", scope: "test" };
+  } }), pino({ level: "silent" }));
+  t.after(() => delivery.close());
+  await delivery.reconcile("live");
+  assert(received); assert.equal(f.store.get("live")!.status.phase, "delivered");
 });

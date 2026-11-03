@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
-import type { StreamSnapshot } from "@compforge/aide-plugin";
+import type { StreamReader } from "@compforge/aide-plugin";
+import { isMuteMail } from "../stream/notices.ts";
 import { Addresses } from "../address/service.ts";
 import { deliveryFailure, type DeliveryFailure } from "@compforge/aide-connector";
 import { nextDeliveryAt } from "./frequency.ts";
@@ -8,9 +9,9 @@ import { sameAddress } from "../../../src/address.ts";
 import type { Address } from "@compforge/aide-plugin";
 import type { Logger } from "pino";
 import type { OutputStore } from "./store.ts";
-import { isMutedNotice, type Output, type OutputReconcileResult, type OutputStatus } from "./model.ts";
+import { type Output, type OutputReconcileResult, type OutputStatus } from "./model.ts";
 
-export type OutputMessage = { id: string; target: Address; text: string; stream?: StreamSnapshot; notice?: "muted" };
+export type OutputMessage = { id: string; target: Address; stream: StreamReader; permitMuted?: boolean };
 export interface OutputTransport {
   replay: "idempotent" | "once";
   streaming?: boolean;
@@ -69,7 +70,7 @@ export class OutputDelivery {
     output = await this.store.prepare(id);
     if (!["pending", "sending"].includes(output.status.phase)) return {};
     while (!output.status.delivery || !output.status.disclosure) {
-      const stream = this.store.content(output);
+      const stream = this.store.streams.get(output.spec.stream).status;
       if (stream.phase !== "open") throw new Error("Output disclosure did not authorize a closed stream");
       await this.store.streams.wait(output.spec.stream, stream.lastSeq, this.stopping.signal);
       output = await this.store.prepare(id);
@@ -126,20 +127,17 @@ export class OutputDelivery {
         if (output.metadata.deletionTimestamp || !["pending", "sending"].includes(output.status.phase)) return {};
         if (!output.status.delivery) return { requeueAfterMs: 1000 };
         const delivery = output.status.delivery;
-        const content = this.store.content(output, true);
-        const notice = content.phase === "completed" && !content.think && isMutedNotice({ notice: delivery.notice, text: content.text });
+        const stream = this.store.streams.reader(delivery.stream), content = stream.status;
+        const notice = isMuteMail(this.store, output);
         if (new Addresses(this.store.storage.home).read(delivery.address).spec.muted && !notice) throw new Error("Address was muted before transport dispatch");
         if (content.phase === "open" && (!transport.streaming || content.lastSeq === (delivery.confirmedSeq ?? 0))) {
           await this.store.streams.wait(delivery.stream, content.lastSeq, this.stopping.signal);
           continue;
         }
-        if (content.phase === "interrupted" && !content.text && !transport.streaming) {
-          this.store.failed(id, content.error ?? "Output generation was interrupted"); return {};
-        }
         // A saved destination/stream never changes within this subscription.
         if (!sameAddress(delivery.target, target)) throw new Error("Actual Output destination changed during streaming");
         this.store.begin(id);
-        const receipt = await transport.send({ id, target, text: content.text, ...(transport.streaming ? { stream: content } : {}), ...(delivery.notice ? { notice: delivery.notice } : {}) });
+        const receipt = await transport.send({ id, target, stream, permitMuted: notice });
         if (!this.store.get(id) || this.store.get(id)?.metadata.deletionTimestamp) return {};
         this.store.update(id, status => ({ ...status, delivery: { ...status.delivery!, confirmedSeq: content.lastSeq }, ...(receipt ? { receipt } : {}) }));
         if (content.phase !== "open") {

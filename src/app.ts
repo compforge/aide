@@ -162,9 +162,9 @@ export class Aide {
           const { inputIds } = raw as { inputIds: string[] };
           const association = personalExecution(context);
           if (context.resourceRef?.kind !== "Topic" || !association.topicId) throw new Error("Chief streaming requires a Topic context");
-          return { streaming: await this.personal.outputProducer.begin(association.topicId, context.executionId, inputIds) };
+          return { streaming: await this.personal.mailSender.begin(association.topicId, context.executionId, inputIds) };
         }, "personal/finish_output_stream": async (context, raw) => {
-          this.personal.outputProducer.finish(context.executionId, (raw as { error?: string }).error);
+          this.personal.mailSender.finish(context.executionId, (raw as { error?: string }).error);
           return {};
         }, "personal/reconcile_output": async (context, raw) => {
           const id = (raw as { id: string }).id;

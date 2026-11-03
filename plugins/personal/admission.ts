@@ -1,3 +1,4 @@
+import { composeMail, type MailDraft } from "./stream/writer.ts";
 import { statusPatch } from "./status.ts";
 import { topicSubtree } from "./topic/tree.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -7,7 +8,7 @@ import { digest } from "./chief-model.ts";
 import { resourceRef } from "./input/state.ts";
 import type { ResourceAdmission } from "../../src/host/plugin/resource/client.ts";
 import { INPUT_TYPE, type InputSpec, type InputStatus } from "./input/model.ts";
-import { OUTPUT_TYPE, type OutputSubmission } from "./output/model.ts";
+import { OUTPUT_TYPE } from "./output/model.ts";
 import type { InputStore } from "./input/store.ts";
 import type { OutputStore } from "./output/store.ts";
 
@@ -44,8 +45,8 @@ export function personalAdmission(inputs: InputStore, outputs: OutputStore): Res
     }
     if (type.apiVersion === OUTPUT_TYPE.apiVersion && type.kind === OUTPUT_TYPE.kind) {
       if (init.namespace && init.namespace !== "v1") throw new Error("Output uses the Personal global namespace");
-      const spec = init.spec as OutputSubmission;
-      return outputs.create(spec.topicId, init.name, spec);
+      const draft = init.spec as MailDraft;
+      return composeMail(outputs, draft.topicId, init.name, draft);
     }
   };
 }

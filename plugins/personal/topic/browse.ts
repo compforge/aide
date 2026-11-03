@@ -1,3 +1,4 @@
+import { mailView } from "../stream/writer.ts";
 import { INPUT_TYPE } from "../input/model.ts";
 import { OUTPUT_TYPE } from "../output/model.ts";
 import { digest } from "../chief-model.ts";
@@ -59,8 +60,8 @@ export function browseTopics(store: TopicStore, query: TopicBrowseQuery = {}) {
     const counts = new Map<string, { taskCount: number; routineCount: number }>();
     const childCounts = new Map<string, number>();
     const project = (row: Record<string, unknown>): TopicListItem => {
-      const reply = row.replyKey ? db.prepare(`SELECT group_concat(delta,'') AS text FROM (SELECT delta FROM stream_chunks WHERE kind='text' AND uid=(
-        SELECT coalesce(${field("r", "status.delivery.stream.uid")},${field("r", "spec.stream.uid")}) FROM resources r WHERE key=?) ORDER BY seq)`).get(row.replyKey as string) : undefined;
+      const saved = row.replyKey ? storage.read(row.replyKey as string)?.object as import("../output/model.ts").Output | undefined : undefined;
+      const reply = saved ? mailView(store.outputStore, saved, true) : undefined;
       const pending = !row.name ? db.prepare(`SELECT ${field("r", "spec.text")} AS text FROM resource_indexes i CROSS JOIN resources r ON r.key = i.source
         WHERE i.name = 'assessPending' AND i.value = ? AND ${activeInput} ORDER BY r.created, r.key LIMIT 1`).get(row.uid as string) : undefined;
       return { id: row.id as string, uid: row.uid as string, revision: Number(row.revision),

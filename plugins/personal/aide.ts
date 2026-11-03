@@ -1,4 +1,4 @@
-import { OutputProducer } from "./output/producer.ts";
+import { MailSender } from "./stream/sender.ts";
 import { Addresses } from "./address/service.ts";
 import { addressTools } from "./address/tools.ts";
 import { personRefs } from "./person/model.ts";
@@ -65,7 +65,7 @@ import type { Persons } from "./person/service.ts";
 
 /** Channels and Sources submit durable input; Chief decides whether Work is needed. */
 export class Personal {
-  readonly outputProducer: OutputProducer;
+  readonly mailSender: MailSender;
   readonly store: Store;
   readonly plugins: Manager;
   private readonly connectors: ConnectorClient;
@@ -86,7 +86,7 @@ export class Personal {
     const resources = new PluginResourceStore({ home: runtime.inputs.storage.home, pluginInstanceId: "personal" });
     const client = this.plugins.resourceClient("personal");
     this.store = new Store(resources, client, new TopicStore(resources, client, runtime.inputs, runtime.outputs, runtime.resolveContact));
-    this.outputProducer = new OutputProducer(runtime.outputs, this.store.topics, runtime.inputs, this.core.executions, log);
+    this.mailSender = new MailSender(runtime.outputs, this.store.topics, runtime.inputs, this.core.executions, log);
   }
 
   /** @spec Persistent native tools resolve the live execution on each call, never capture a completed invocation's verbs. */
@@ -121,7 +121,7 @@ export class Personal {
           topicPolicy(this.options.topic).summaryChars);
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
-      });
+      }, notes => this.mailSender.cite(active().status.execution!.id, notes));
       return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
         const c = active();
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
@@ -356,7 +356,7 @@ export class Personal {
   }
 
   private async startOnce(): Promise<void> {
-    this.outputProducer.recover();
+    this.mailSender.recover();
     await this.recoverInterrupted();
     await this.core.start();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin failed to start");
@@ -516,7 +516,7 @@ export class Personal {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    this.outputProducer.close();
+    this.mailSender.close();
     if (this.noticeTimer) clearTimeout(this.noticeTimer);
     await this.noticeDelivery;
     await this.starting; await this.core.close(); await this.intake;

@@ -1,3 +1,4 @@
+import { mailView } from "../stream/writer.ts";
 import { OUTPUT_TYPE, type Output, type OutputStatus } from "./model.ts";
 import type { OutputStore } from "./store.ts";
 import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
@@ -32,14 +33,19 @@ export function browseOutputs(store: OutputStore, query: OutputBrowseQuery = {})
   }
   for (const [operator, value] of [[">=", query.from], ["<=", query.to]] as const)
     if (value) { clauses.push(`created ${operator} ?`); args.push(value); }
-  if (query.q) {
-    clauses.push(`(instr(lower(${field("metadata.name")}), lower(?)) > 0 OR EXISTS (
-      SELECT 1 FROM (SELECT uid,group_concat(delta,'') AS body FROM (SELECT uid,delta FROM stream_chunks ORDER BY uid,seq) GROUP BY uid) content
-      WHERE content.uid IN (${field("spec.stream.uid")}, ${field("status.delivery.stream.uid")}) AND instr(lower(content.body), lower(?)) > 0))`);
-    args.push(query.q, query.q);
-  }
   const where = clauses.join(" AND ");
   return store.storage.transaction(() => {
+    if (query.q) {
+      const term = query.q.toLowerCase();
+      const matches: Output[] = [];
+      for (const row of store.storage.db.prepare(`SELECT data FROM resources WHERE ${where} ORDER BY created DESC, key DESC`).iterate(...args)) {
+        const item = store.storage.decode("personal", row.data as string).object as Output;
+        const raw = mailView(store, item), actual = item.status.delivery?.stream.uid === item.spec.stream.uid ? raw : mailView(store, item, true);
+        if ([item.metadata.name, raw.text, raw.think, actual.text, actual.think].some(text => text.toLowerCase().includes(term))) matches.push(item);
+      }
+      const bounds = pageBounds(matches.length, size, query.page);
+      return { ...bounds, items: matches.slice((bounds.page - 1) * size, bounds.page * size) };
+    }
     const total = Number(store.storage.db.prepare(`SELECT count(*) AS count FROM resources WHERE ${where}`).get(...args)!.count);
     const bounds = pageBounds(total, size, query.page);
     const rows = store.storage.db.prepare(`SELECT data FROM resources WHERE ${where} ORDER BY created DESC, key DESC LIMIT ? OFFSET ?`)

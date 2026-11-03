@@ -1,4 +1,5 @@
-import { MUTED_OUTPUT_TEXT } from "../plugins/personal/output/model.ts";
+import { mailReader } from "./stream-fixture.ts";
+import { MUTED_OUTPUT_TEXT } from "../plugins/personal/stream/notices.ts";
 import { fixtureCanSpeak } from "./address-fixture.ts";
 import { allowAddress } from "./address-fixture.ts";
 import { transportFixture } from "./output-fixture.ts";
@@ -105,7 +106,8 @@ test("Lark sends explicit destinations and retries the same part id after restar
   if (aide instanceof Aide) transportFixture(aide);
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  const message = { id: "news", target: larkAddress("cli_test", "oc_chat"), text: "有变化😀".repeat(2000) };
+  const body = "有变化😀".repeat(2000);
+  const message = { id: "news", target: larkAddress("cli_test", "oc_chat"), stream: mailReader("completed", 1, "", body) };
   let calls = 0;
   transport.send = async (chatId, text, id) => {
     sent.push({ chatId, text, id });
@@ -119,7 +121,7 @@ test("Lark sends explicit destinations and retries the same part id after restar
   await channel.send(message);
   assert.equal(sent[1]!.id, sent[2]!.id);
   assert.notEqual(sent[0]!.id, sent[2]!.id);
-  assert.equal(sent[0]!.text + sent.slice(2).map(part => part.text).join(""), message.text);
+  assert.equal(sent[0]!.text + sent.slice(2).map(part => part.text).join(""), body);
   const count = sent.length;
   await channel.send(message); assert.equal(sent.length, count);
 });
@@ -222,7 +224,7 @@ test("Lark accepts exact bot mentions, strips SDK placeholders, isolates chats a
 test("Lark persists thread topics while cards and failure notices retain the real chat destination", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-threads-"));
   for (const app of ["cli_test", "cli_app", "cli_group", "cli_group_empty"]) for (const chat of ["oc_chat", "oc_group", "oc_dm"]) allowAddress(home, larkAddress(app, chat));
-  const received: Incoming[] = [], queried: string[] = [], cardChats: string[] = [];
+  const received: Incoming[] = [], cardChats: string[] = [];
   const { transport, sent } = fakeTransport({ openId: "ou_bot", name: "Aide" });
   let nameReads = 0;
   transport.chatName = async () => { nameReads++; return "支持群"; };
@@ -235,10 +237,6 @@ test("Lark persists thread topics while cards and failure notices retain the rea
     if (input.id === "failed") throw new Error("intake failed");
     return { inputId: input.id, at: new Date().toISOString() };
   } };
-  const reader = (id: string) => {
-    queried.push(id);
-    return [{ id, phase: "queued" as const, think: "", content: "", messageIds: [], overflow: false }];
-  };
   let channel = new LarkChannel(home, "cli_app", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
   const group = (id: string, threadId?: string, messageType = "text") => ({
@@ -268,7 +266,6 @@ test("Lark persists thread topics while cards and failure notices retain the rea
   assert.equal(received[2]!.topicName, "支持群");
   assert.equal(received.at(-1)!.observation!.parentId, "om_dm_quote");
   assert.equal(nameReads, 1, "Same-chat metadata is cached independently of thread keys");
-  assert.deepEqual(queried, [], "Topic progress must not bypass checked Output streams");
   assert.deepEqual(cardChats, []);
   assert.equal(sent.length, 2);
   assert.ok(sent.every(n => n.chatId === "oc_group"));
@@ -404,7 +401,7 @@ test("Persisted Lark part receipts allow Output acknowledgement recovery without
   if (aide instanceof Aide) transportFixture(aide);
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  const messages = ["first", "second"].map(id => ({ id, target: larkAddress("cli_test", "oc_chat"), text: id }));
+  const messages = ["first", "second"].map(id => ({ id, target: larkAddress("cli_test", "oc_chat"), stream: mailReader("completed", 1, "", id, id) }));
   await channel.send(messages[0]!); await channel.send(messages[1]!);
   await channel.close();
   channel = new LarkChannel(home, "cli_test", aide, transport, log);
@@ -470,25 +467,25 @@ test("Lark preserves adapter retry semantics and resumes only unconfirmed parts 
   if (aide instanceof Aide) transportFixture(aide);
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  const message = { id: "parts", target: larkAddress("cli_test", "oc_chat"), text: "分片😀".repeat(3000) };
+  const body = "分片😀".repeat(3000);
+  const message = { id: "parts", target: larkAddress("cli_test", "oc_chat"), stream: mailReader("completed", 1, "", body) };
   await assert.rejects(channel.send(message), error => { assert.deepEqual(deliveryFailure(error), rejected.failure); return true; });
   await channel.close(); channel = new LarkChannel(home, "cli_test", aide, transport, log);
   await channel.send(message);
   assert.equal(sent[1]!.id, sent[2]!.id);
   assert.equal(sent.filter(p => p.id === sent[0]!.id).length, 1);
-  assert.equal(sent[0]!.text + sent.slice(2).map(p => p.text).join(""), message.text);
+  assert.equal(sent[0]!.text + sent.slice(2).map(p => p.text).join(""), body);
 });
 
 
-test("Muted Lark only sends a typed fixed notice and preserves its receipt across restart", async t => {
+test("Muted Lark sends only the courier-authorized system mail and preserves its receipt across restart", async t => {
   const home = mkdtempSync(join(tmpdir(), "aide-lark-muted-notice-"));
   const aide = { canSpeak: () => false, receive: async () => { throw new Error("unused"); } };
   const { transport, sent } = fakeTransport();
   let channel = new LarkChannel(home, "cli_test", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  const message = { id: "notice", target: larkAddress("cli_test", "oc_chat"), text: MUTED_OUTPUT_TEXT, notice: "muted" as const };
-  await assert.rejects(channel.send({ ...message, text: "生成的原文" }));
-  await assert.rejects(channel.send({ ...message, notice: undefined }));
+  const message = { id: "notice", target: larkAddress("cli_test", "oc_chat"), stream: mailReader("completed", 1, "", MUTED_OUTPUT_TEXT), permitMuted: true };
+  await assert.rejects(channel.send({ ...message, permitMuted: false }));
   assert.equal(sent.length, 0);
   await channel.send(message);
   await channel.close(); channel = new LarkChannel(home, "cli_test", aide, transport, log);

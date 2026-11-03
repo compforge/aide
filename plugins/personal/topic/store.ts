@@ -145,7 +145,7 @@ export class TopicStore {
     }
   }
   async say(topicId: string, inputId: string | undefined, text: string, executionId?: string,
-    options: Omit<SayInput, "text"> & { streaming?: boolean } = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { agent?: import("@compforge/aide-plugin").AgentStatus; execution?: { id: string } | null }>): Promise<SayReceipt> {
+    options: Omit<SayInput, "text"> & { contentKind?: "agent" } = {}, owner?: import("@compforge/aide-plugin").Resource<unknown, { agent?: import("@compforge/aide-plugin").AgentStatus; execution?: { id: string } | null }>): Promise<SayReceipt> {
     const initial = await this.ensure(topicId);
     const id = options.idempotencyKey ? digest([initial.metadata.uid, executionId ?? "", options.idempotencyKey]) : randomUUID();
     const previous = this.outputStore.get(id);
@@ -230,7 +230,7 @@ export class TopicStore {
       const accepted = this.outputStore.get(id);
       const createdBy = accepted ? accepted.spec.createdBy
         : executionId ? agentCall((owner ?? c).status, options.idempotencyKey) : undefined;
-      const association = { ...(options.streaming ? { streaming: true } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
+      const association = { ...(options.contentKind ? { contentKind: options.contentKind } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(replyTo ? { replyTo } : {}), ...(options.notes ? { notes: [...options.notes] } : {}), ...(createdBy ? { createdBy } : {}), ...(owner ? { producer: resourceRef(owner) } : {}), target, ...(receivers !== undefined ? { receivers } : {}), ...(executionId ? { executionId } : {}), ...(inputIds.length ? { inputIds, inputUids: Object.fromEntries(inputIds.map(id => [id, attached(id).metadata.uid])) } : {}) };
       try {
         await commitStatus(this.client, [
           { operation: "patchStatus", resource: c, patch: {} },

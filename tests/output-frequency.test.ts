@@ -1,3 +1,4 @@
+import { composeMail } from "../plugins/personal/stream/writer.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
 import { DeliveryError } from "@compforge/aide-connector";
 import { test, type TestContext } from "node:test";
@@ -29,8 +30,7 @@ async function setup(t: TestContext) {
   const person = async (name: string, delivery?: PersonDelivery) => await client.create(PERSON_TYPE, { name,
     spec: { name, identities: [], ...(delivery ? { delivery } : {}) }, status: { updatedAt: new Date().toISOString(), updatedBy: "user" } }) as PersonResource;
   const output = (id: string, people: PersonResource[], target = webAddress("topic")) => {
-    store.create("topic", id, { text: id, topicId: "topic", topic: { apiVersion: "aide.dev/v1alpha5", kind: "Topic", namespace: "v1", name: "topic", uid: "topic" },
-      target, receivers: personRefs(people.map(personRef)) });
+    composeMail(store, "topic", id, { topicId: "topic", topic: { apiVersion: "aide.dev/v1alpha5", kind: "Topic", namespace: "v1", name: "topic", uid: "topic" }, target, receivers: personRefs(people.map(personRef)), content: { kind: "text", text: id } });
     approveFixtureOutput(store, id);
     return store.get(id)!;
   };
@@ -171,7 +171,7 @@ test("real Runner persists waits and Person changes only relax Person deadlines"
     sends.push(Date.now()); return undefined;
   });
   const makeManager = () => new Manager({ instances, pluginSupervisor: new PluginSupervisor(),
-    resourceAdmissions: { personal: (type, init) => type.kind === "Output" ? f.store.create("topic", init.name, init.spec as import("../plugins/personal/output/model.ts").OutputSubmission) : undefined },
+    resourceAdmissions: { personal: (type, init) => type.kind === "Output" ? composeMail(f.store, "topic", init.name, init.spec as import("../plugins/personal/stream/writer.ts").MailDraft) : undefined },
     onRunnerFailure: failure => { errors.push(failure.error); }, onActivationError: failure => errors.push(failure.error),
     actions: { "personal/reconcile_output": async (_context, input) => delivery.reconcile((input as { id: string }).id) },
     async loadPackageEntry(pluginId, version) { return { pluginId, version,
@@ -186,7 +186,7 @@ test("real Runner persists waits and Person changes only relax Person deadlines"
   try {
     await manager.start();
     const create = async (name: string) => manager.resourceClient("personal").create(OUTPUT_TYPE, { name, spec: {
-      text: name, topicId: "topic", topic: { apiVersion: "aide.dev/v1alpha5", kind: "Topic", namespace: "v1", name: "topic", uid: "topic" },
+      content: { kind: "text", text: name }, topicId: "topic", topic: { apiVersion: "aide.dev/v1alpha5", kind: "Topic", namespace: "v1", name: "topic", uid: "topic" },
       target: new Addresses(f.home).ref(webAddress("topic")), receivers: personRefs([personRef(a)]),
     }, status: { phase: "pending", attempts: 0 } });
     await create("one"); await waitFor(() => sends.length === 1);

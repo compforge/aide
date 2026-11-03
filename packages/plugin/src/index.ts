@@ -121,4 +121,4 @@ export type { ResourceDefinition, ResourceRetention, ResourceSchema, ResourceVal
 export { ResourceAlreadyExists, isResourceVersionConflict, retryOnConflict, ResourceVersionConflict, ResourceIncarnationChanged, ResourceExpired, ResourceContinueInvalid } from "./resource.ts";
 
 export { STREAM_TYPE } from "./stream.ts";
-export type { Stream, StreamRef, StreamStatus, StreamChunk, StreamDelta, StreamSnapshot } from "./stream.ts";
+export type { Stream, StreamRef, StreamStatus, StreamRecord, StreamEvent, StreamReference, StreamReader } from "./stream.ts";

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Stream, StreamRef, StreamDelta, StreamChunk, StreamSnapshot, ResourceOwnerReference } from "@compforge/aide-plugin";
+import type { Stream, StreamRef, StreamEvent, StreamRecord, StreamReader, StreamReference, ResourceOwnerReference } from "@compforge/aide-plugin";
 import { STREAM_TYPE } from "@compforge/aide-plugin";
 import { ResourceStorage } from "../resource/storage.ts";
 import { PluginResourceStore } from "../plugin/resource/store.ts";
@@ -20,26 +20,26 @@ export class StreamStore {
     this.storage = ResourceStorage.open(home);
     this.storage.register(scope, [StreamDefinition]);
     this.resources = new PluginResourceStore({ home, pluginInstanceId: scope });
-    this.storage.db.exec(`CREATE TABLE IF NOT EXISTS stream_chunks (
+    this.storage.db.exec(`CREATE TABLE IF NOT EXISTS stream_records (
       uid TEXT NOT NULL REFERENCES resources(uid) ON DELETE CASCADE,
-      seq INTEGER NOT NULL, kind TEXT NOT NULL, delta TEXT NOT NULL, PRIMARY KEY(uid,seq));`);
+      seq INTEGER NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(uid,seq));`);
   }
   reference(name: string, uid = `stream:${randomUUID()}`): StreamRef { return { ...STREAM_TYPE, namespace: "v1", name, uid }; }
-  create(ref: StreamRef, owner: ResourceOwnerReference): Stream {
-    return this.storage.transaction(() => this.createOwned(ref, owner));
+  create(ref: StreamRef, owner: ResourceOwnerReference, protocol: string): Stream {
+    return this.storage.transaction(() => this.createOwned(ref, owner, protocol));
   }
-  private createOwned(ref: StreamRef, owner: ResourceOwnerReference): Stream {
+  private createOwned(ref: StreamRef, owner: ResourceOwnerReference, protocol: string): Stream {
     const key = this.resources.key(ref, ref.name, ref.namespace);
     const current = this.storage.read(key);
     if (current) {
       const stream = this.get(ref);
-      if (stream.metadata.owner?.uid !== owner.uid) throw new Error("Stream owner mismatch");
+      if (stream.metadata.owner?.uid !== owner.uid || stream.spec.protocol !== protocol) throw new Error("Stream owner mismatch");
       return stream;
     }
     const parent = this.resources.get(owner, owner.name, owner.namespace);
     if (parent.metadata.uid !== owner.uid || parent.metadata.deletionTimestamp) throw new Error("Stream owner is unavailable");
     const stream: Stream = { ...STREAM_TYPE, metadata: { name: ref.name, namespace: owner.namespace, uid: ref.uid,
-      owner, creationTimestamp: new Date().toISOString(), generation: 1, resourceVersion: "1" }, spec: {}, status: { phase: "open", lastSeq: 0 } };
+      owner, creationTimestamp: new Date().toISOString(), generation: 1, resourceVersion: "1" }, spec: { protocol }, status: { phase: "open", lastSeq: 0, references: [] } };
     this.storage.write(key, this.scope, { object: stream, control: {} });
     this.storage.db.prepare("INSERT INTO resource_payload_sizes VALUES (?,?)").run(ref.uid, closeReserveBytes);
     this.storage.write(key, this.scope, { object: stream, control: {} });
@@ -50,19 +50,27 @@ export class StreamStore {
     if (!stream || stream.metadata.uid !== ref.uid || stream.metadata.deletionTimestamp) throw new Error(`Stream unavailable: ${ref.uid}`);
     return stream;
   }
-  append(ref: StreamRef, chunks: readonly StreamDelta[]): void {
-    if (!chunks.length) return;
+  append(ref: StreamRef, records: readonly StreamEvent[]): void {
+    if (!records.length) return;
     this.change(ref, stream => {
-      const insert = this.storage.db.prepare("INSERT INTO stream_chunks VALUES (?,?,?,?)");
+      const insert = this.storage.db.prepare("INSERT INTO stream_records VALUES (?,?,?,?)");
       let bytes = 0;
-      for (const chunk of chunks) {
-        if (!["think", "text"].includes(chunk.kind) || typeof chunk.delta !== "string") throw new Error("Invalid Stream delta");
-        if (!chunk.delta) continue;
-        insert.run(ref.uid, ++stream.status.lastSeq, chunk.kind, chunk.delta);
-        bytes += Buffer.byteLength(chunk.delta);
+      for (const record of records) {
+        if (!record.kind || record.payload === undefined) throw new Error("Invalid Stream record");
+        const payload = JSON.stringify(record.payload);
+        if (payload === undefined) throw new Error("Stream payload must be JSON");
+        insert.run(ref.uid, ++stream.status.lastSeq, record.kind, payload);
+        bytes += Buffer.byteLength(record.kind) + Buffer.byteLength(payload);
       }
-      this.storage.db.prepare("INSERT INTO resource_payload_sizes VALUES (?,?) ON CONFLICT(uid) DO UPDATE SET bytes=bytes+excluded.bytes").run(ref.uid, bytes);
-      // ResourceStorage accounts attached content against the same per-resource, kind and Host quotas.
+      this.storage.db.prepare("UPDATE resource_payload_sizes SET bytes=bytes+? WHERE uid=?").run(bytes, ref.uid);
+    });
+  }
+  cite(ref: StreamRef, references: readonly StreamReference[]): void {
+    if (!references.length) return;
+    this.change(ref, stream => {
+      const unique = new Map(stream.status.references.map(item => [JSON.stringify(item), item]));
+      for (const item of references) unique.set(JSON.stringify(item), item);
+      stream.status.references = [...unique.values()];
     });
   }
   complete(ref: StreamRef): void { this.finish(ref, "completed"); }
@@ -83,21 +91,21 @@ export class StreamStore {
       if (stream.status.phase !== "open") throw new Error(`Stream is closed: ${ref.uid}`);
       apply(stream);
       const next = { ...stream, metadata: { ...stream.metadata, resourceVersion: String(Number(stream.metadata.resourceVersion) + 1) } };
-      this.storage.write(this.resources.key(ref, ref.name, ref.namespace), this.scope, { object: next, control: {} });
+      const key = this.resources.key(ref, ref.name, ref.namespace);
+      this.storage.write(key, this.scope, { ...this.storage.read(key)!, object: next });
       this.storage.afterCommit(() => { for (const listener of this.listeners.get(ref.uid) ?? []) listener(); });
     });
   }
-  read(ref: StreamRef, afterSeq = 0, limit = 256): StreamChunk[] {
+  read(ref: StreamRef, afterSeq = 0, limit = 256, throughSeq = this.get(ref).status.lastSeq): StreamRecord[] {
     this.get(ref);
     if (!Number.isSafeInteger(afterSeq) || afterSeq < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 1024) throw new Error("Invalid Stream cursor or page size");
-    return this.storage.db.prepare("SELECT seq,kind,delta FROM stream_chunks WHERE uid=? AND seq>? ORDER BY seq LIMIT ?").all(ref.uid, afterSeq, limit).map(row => ({ seq: Number(row.seq), kind: row.kind as StreamChunk["kind"], delta: String(row.delta) }));
+    return this.storage.db.prepare("SELECT seq,kind,payload FROM stream_records WHERE uid=? AND seq>? AND seq<=? ORDER BY seq LIMIT ?")
+      .all(ref.uid, afterSeq, throughSeq, limit).map(row => ({ seq: Number(row.seq), kind: String(row.kind), payload: JSON.parse(String(row.payload)) }));
   }
-  snapshot(ref: StreamRef): StreamSnapshot {
-    return this.storage.transaction(() => {
-      const stream = this.get(ref);
-      const rows = this.storage.db.prepare("SELECT kind,group_concat(delta,'') AS text FROM (SELECT kind,delta FROM stream_chunks WHERE uid=? ORDER BY seq) GROUP BY kind").all(ref.uid);
-      return { ...stream.status, think: String(rows.find(r => r.kind === "think")?.text ?? ""), text: String(rows.find(r => r.kind === "text")?.text ?? "") };
-    });
+  reader(ref: StreamRef): StreamReader {
+    const stream = this.get(ref), throughSeq = stream.status.lastSeq;
+    return { ref, protocol: stream.spec.protocol, status: stream.status,
+      read: (afterSeq = 0, limit = 256) => this.read(ref, afterSeq, limit, throughSeq) };
   }
   async wait(ref: StreamRef, afterSeq: number, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();

@@ -111,8 +111,8 @@ function renderDetail(detail: OutputDetailView) {
   fact('output-facts', 'Topic', refNode(detail.topic));
   fact('output-facts', '投递状态', statusLabels[detail.phase]);
   $('output-text').textContent = detail.text;
-  $('output-think').textContent = detail.think;
-  $('output-delivered-think').textContent = detail.delivery?.think ?? '';
+  $('output-think').textContent = detail.process;
+  $('output-delivered-think').textContent = detail.delivery?.process ?? '';
   fact('output-facts', '生成状态', detail.stream.phase);
   fact('output-delivery', '已确认片段', String(detail.delivery?.confirmedSeq ?? 0));
   fact('output-intent', '接收人', detail.receivers.length ? detail.receivers.map(refNode) : '未指定个人');

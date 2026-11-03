@@ -1,3 +1,5 @@
+import { mailReader } from "./stream-fixture.ts";
+import { mailView } from "../plugins/personal/stream/writer.ts";
 import { fixtureCanSpeak, allowAddress, fixtureIncoming } from "./address-fixture.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
 import { addressRef } from "../plugins/personal/address/model.ts";
@@ -16,7 +18,7 @@ import { progressCard, cardPreviews } from "../src/channel/lark/card.ts";
 import { larkTransport, type LarkTransport } from "../src/channel/lark/client.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
 import { fakeOptions } from "./fake-harness.ts";
-import type { StreamSnapshot } from "@compforge/aide-plugin";
+import type { StreamReader } from "@compforge/aide-plugin";
 
 const log = pino({ level: "silent" });
 const topicId = "lark:cli_progress:oc_chat";
@@ -43,12 +45,12 @@ function setup(t: TestContext) {
   const aide = { canSpeak: fixtureCanSpeak(home), async receive() { throw new Error("No intake expected"); } };
   let channel = new LarkChannel(home, "cli_progress", aide, transport, log);
   t.after(async () => { await channel.close(); rmSync(home, { recursive: true, force: true }); });
-  const send = (stream: StreamSnapshot, id = "output") => channel.send({ id, target, text: stream.text, stream });
+  const send = (stream: StreamReader, id = "output") => channel.send({ id, target, stream });
   return { home, target, calls, transport, send, get card() { return card; }, get channel() { return channel; },
     async reopen() { await channel.close(); channel = new LarkChannel(home, "cli_progress", aide, transport, log); } };
 }
-const open = (lastSeq: number, think = "", text = ""): StreamSnapshot => ({ phase: "open", lastSeq, think, text });
-const completed = (lastSeq: number, think = "", text = ""): StreamSnapshot => ({ phase: "completed", lastSeq, think, text, closedAt: new Date(0).toISOString() });
+const open = (lastSeq: number, think = "", text = ""): StreamReader => mailReader("open", lastSeq, think, text);
+const completed = (lastSeq: number, think = "", text = ""): StreamReader => mailReader("completed", lastSeq, think, text);
 const until = async (check: () => boolean) => { for (let n = 0; n < 400 && !check(); n++) await Bun.sleep(10); assert(check()); };
 
 test("Lark sends one checked stream card, preserves reply coordinates and finalizes before returning a receipt", async t => {
@@ -129,13 +131,14 @@ test("Chief publishes think and text before completion, without duplicating the 
   emitter!.sink({ kind: "agent_thought", invocationId: emitter!.turnId, payload: { messageId: "thought", content: [{ type: "text", text: "先读资料，再核对" }] } });
   emitter!.sink({ kind: "agent_message_chunk", invocationId: emitter!.turnId, payload: { messageId: "reply", content: { type: "text", text: "正在核对" } } });
   const output = aide.outputStore.list()[0]!;
-  await until(() => aide.outputStore.content(output).text === "正在核对");
-  assert.equal(aide.outputStore.content(output).think, "先读资料，再核对");
-  assert.equal(aide.outputStore.content(output).phase, "open");
+  await until(() => mailView(aide.outputStore, output).text === "正在核对");
+  assert.equal(mailView(aide.outputStore, output).think, "先读资料，再核对");
+  assert.equal(mailView(aide.outputStore, output).phase, "open");
+  emitter!.sink({ kind: "agent_message", invocationId: emitter!.turnId, payload: { messageId: "reply", content: [{ type: "text", text: "进展已修正" }] } });
   release(); await aide.settled();
   assert.equal(aide.outputStore.list().length, 1);
-  assert.equal(aide.outputStore.content(output).phase, "completed");
-  assert(aide.outputStore.content(output).text.endsWith("最终答案"));
+  assert.equal(mailView(aide.outputStore, output).phase, "completed");
+  assert.equal(mailView(aide.outputStore, output).text, "进展已修正\n\n最终答案");
 });
 test("official SDK creates, sends, streams and finalizes CardKit cards through the shared client", async (t) => {
   const original = Lark.defaultHttpInstance.defaults.adapter;
@@ -202,4 +205,16 @@ test("Card serialization budget includes escaped content without losing the answ
   const prefix = rendered.split("\n\n（内容较长")[0]!;
   const tail = f.calls.filter(c => c.kind === "text").map(c => String(c.args[1])).join("");
   assert.equal(prefix + tail, text);
+});
+
+
+test("Lark renders tool updates from the selected mail and retains them at completion", async t => {
+  const f = setup(t), initial = mailReader("open", 1, "正在核对"), records = initial.read();
+  records.push({ seq: 3, kind: "tool_call_update", payload: { toolCallId: "read", title: "读取资料", status: "in_progress", content: [{ type: "text", text: "发现证据" }] } });
+  await f.send({ ...initial, status: { ...initial.status, lastSeq: 3 }, read: after => records.filter(r => r.seq > (after ?? 0)) });
+  assert.match(JSON.stringify(f.card), /读取资料/); assert.match(JSON.stringify(f.card), /执行中/);
+  const end = [...records, { seq: 4, kind: "tool_call_update", payload: { toolCallId: "read", status: "completed" } }];
+  await f.send({ ...initial, status: { ...initial.status, phase: "completed", lastSeq: 4, closedAt: new Date().toISOString() }, read: after => end.filter(r => r.seq > (after ?? 0)) });
+  assert.match(JSON.stringify(f.card), /发现证据/); assert.match(JSON.stringify(f.card), /已完成/);
+  assert.equal(f.calls.filter(c => c.kind === "send").length, 1);
 });
