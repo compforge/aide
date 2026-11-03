@@ -143,11 +143,18 @@ test("Address Web API edits muted and summary independently and exposes known pa
   assert.equal(staleSummary.status, 409); assert.match((await staleSummary.json()).error, /合并修改/);
   assert.equal(aide.addresses.view(addressRef(address)).summaryText, "讨论发布安排");
   for (let i = 0; i < 21; i++) aide.addresses.observe(webAddress(`page-${i}`));
-  const first = await (await fetch(base + "/addresses/list")).json(); assert.ok(first.continue);
+  const first = await (await fetch(base + "/addresses/list?pageSize=10")).json();
+  const second = await (await fetch(base + "/addresses/list?pageSize=10&page=2")).json();
+  assert.equal(first.items.length, 10); assert.equal(first.total, 22); assert.equal(first.pages, 3);
+  assert.equal(second.page, 2); assert.equal(second.items.length, 10);
+  assert.deepEqual(first.pinned.map((item: { ref: { uid: string } }) => item.ref.uid), [aide.defaultAddress().uid]);
+  assert.deepEqual(second.pinned, first.pinned);
+  assert.equal(new Set([...first.items, ...second.items].map(item => item.ref.uid)).size, 20);
+  for (const query of ["page=0", "pageSize=101", "selectedUid=", "continue=invalid"])
+    assert.equal((await fetch(base + "/addresses/list?" + query)).status, 400);
+  const cursorPage = aide.addresses.page(); assert.ok(cursorPage.continue);
   aide.addresses.observe(webAddress("page-new"));
-  const expired = await fetch(base + "/addresses/list?" + new URLSearchParams({ continue: first.continue }));
-  assert.equal(expired.status, 410); assert.match((await expired.json()).error, /刷新/);
-  assert.equal((await fetch(base + "/addresses/list?continue=invalid")).status, 400);
+  assert.throws(() => aide.addresses.page(cursorPage.continue), /expir|chang/i);
   const query = new URLSearchParams({ name: address.metadata.name, uid: address.metadata.uid });
   for (let i = 0; i < 21; i++) await aide.addresses.client.create(NOTE_TYPE, {
     name: `address-note-${i}`, spec: { subject: addressRef(address), text: `事项 ${i}`, addresses: addressRefs([addressRef(address)]), people: personRefs([]) },
@@ -161,6 +168,8 @@ test("Address Web API edits muted and summary independently and exposes known pa
   query.set("continue", "invalid");
   assert.equal((await fetch(base + "/addresses/notes?" + query)).status, 400);
   const html = await (await fetch(base + "/addresses")).text(); assert.match(html, /参与者/); assert.match(html, /aria-label="刷新地址"/);
+  assert.match(html, /aria-label="地址分页"/); assert.match(html, /上一页/); assert.match(html, /下一页/);
+  assert.equal((await fetch(base + "/addresses.js")).status, 200);
 });
 
 /** @case Permission checks are queries; missing places cannot be discovered or granted authority by a send attempt. */
