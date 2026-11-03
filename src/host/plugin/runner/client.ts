@@ -45,6 +45,8 @@ interface ControllerExecution {
   scope: ExecutionScope;
   startedAt: number;
   armedAt: number;
+  budgetRemainingMs: number;
+  budgetStartedAt: number;
   timer?: ReturnType<typeof setTimeout>;
   blockers: number;
   pending: Map<number, { operation: HostOperation; startedAt: number }>;
@@ -76,6 +78,7 @@ const MAX_OUTPUT_LINE_CHARS = 8 * 1024;
 
 export interface PluginRunnerClientOptions extends PluginRunnerCallbacks {
   readonly requestTimeoutMs?: number;
+  readonly controllerBudgetMs?: number;
 }
 
 /**
@@ -91,6 +94,7 @@ export class PluginRunnerClient {
   private readonly child: Bun.Subprocess<"ignore", "pipe", "pipe">;
   private readonly callbacks: PluginRunnerCallbacks;
   private readonly requestTimeoutMs: number;
+  private readonly controllerBudgetMs: number;
   private readonly pending = new Map<number, PendingCall>();
   private readonly executionCalls = new Map<string, ExecutionCall>();
   private nextCallId = 1;
@@ -107,6 +111,9 @@ export class PluginRunnerClient {
     ) {
       throw new Error("Plugin Runner request timeout must be a positive integer");
     }
+    this.controllerBudgetMs = options.controllerBudgetMs ?? this.requestTimeoutMs * 10;
+    if (!Number.isSafeInteger(this.controllerBudgetMs) || this.controllerBudgetMs < this.requestTimeoutMs)
+      throw new Error("Controller execution budget must be at least the Runner request timeout");
     this.child = Bun.spawn(
       [
         process.execPath,
@@ -360,6 +367,7 @@ export class PluginRunnerClient {
         const stats = diagnostic.operations[operation.method] ??= { count: 0, totalMs: 0, maxMs: 0 };
         stats.count++; stats.totalMs += elapsedMs; stats.maxMs = Math.max(stats.maxMs, elapsedMs);
         diagnostic.lastCompleted = { operation, elapsedMs, finishedAt: performance.now() };
+        if (outcome === "success" && this.controllerTimers.get(executionId!) === diagnostic) this.armControllerTimeout(executionId!);
       }
       if (call.request.method !== "verb.invoke" && elapsedMs >= 1000) {
         this.diagnosticLog("warn", "Plugin Runner Host operation slow", {
@@ -400,7 +408,7 @@ export class PluginRunnerClient {
           const result = await this.callbacks.controllerRequest(request);
           if (request.method === "controller.begin" && result) {
             const { scope } = result as { scope: ExecutionScope };
-            this.controllerTimers.set(scope.executionId, { scope, startedAt: performance.now(), armedAt: performance.now(), blockers: 0, pending: new Map(), completed: 0, operations: {} });
+            this.controllerTimers.set(scope.executionId, { scope, startedAt: performance.now(), armedAt: performance.now(), budgetStartedAt: performance.now(), budgetRemainingMs: this.controllerBudgetMs, blockers: 0, pending: new Map(), completed: 0, operations: {} });
             this.armControllerTimeout(scope.executionId);
           }
           return result;
@@ -519,18 +527,23 @@ export class PluginRunnerClient {
     if (execution?.timer) clearTimeout(execution.timer);
     this.controllerTimers.delete(id);
   }
-  /** @spec Capture bounded, payload-free Host operation evidence before terminating a timed-out Controller.
+  /** @spec Successful Host calls renew the idle watchdog; a separate active budget bounds busy loops.
+   * @spec Verb waits pause both clocks because each verb owns its timeout.
+   * @spec Capture bounded, payload-free Host operation evidence before terminating a timed-out Controller.
    * @case tests/runner-diagnostics.test.ts
    * @link docs/deployment.md#controller-超时诊断
    */
   private armControllerTimeout(id: string): void {
     const execution = this.controllerTimers.get(id);
     if (!execution || execution.blockers || this.closing || this.failed) return;
+    if (execution.timer) clearTimeout(execution.timer);
     execution.armedAt = performance.now();
+    const budgetMs = execution.budgetRemainingMs - (execution.armedAt - execution.budgetStartedAt);
+    const reason = budgetMs <= this.requestTimeoutMs ? "budget" : "idle";
     execution.timer = setTimeout(() => {
       const now = performance.now();
       this.diagnosticLog("error", "Plugin Runner Controller execution timed out", {
-        executionId: id, controllerName: execution.scope.controllerName ?? "default",
+        executionId: id, timeoutReason: reason, controllerBudgetMs: this.controllerBudgetMs, controllerName: execution.scope.controllerName ?? "default",
         resourceKind: execution.scope.resourceRef?.kind ?? null, resourceName: execution.scope.resourceRef?.name ?? null,
         resourceUid: execution.scope.resourceRef?.uid ?? null,
         elapsedMs: Math.round(now - execution.startedAt), watchdogElapsedMs: Math.round(now - execution.armedAt),
@@ -540,17 +553,20 @@ export class PluginRunnerClient {
         lastCompletedHostCall: execution.lastCompleted ? { ...execution.lastCompleted.operation, elapsedMs: execution.lastCompleted.elapsedMs,
           finishedAgoMs: Math.round(now - execution.lastCompleted.finishedAt) } : null,
       });
-      this.fail(new Error(`Plugin Runner Controller execution ${id} timed out after ${this.requestTimeoutMs}ms`), true);
-    }, this.requestTimeoutMs);
+      this.fail(new Error(`Plugin Runner Controller execution ${id} timed out (${reason})`), true);
+    }, Math.max(0, Math.min(this.requestTimeoutMs, budgetMs)));
     execution.timer.unref?.();
   }
   private pauseControllerTimeout(id: string): (() => void) | undefined {
     const execution = this.controllerTimers.get(id);
     if (!execution) return;
-    execution.blockers++;
+    if (execution.blockers++ === 0) execution.budgetRemainingMs -= performance.now() - execution.budgetStartedAt;
     if (execution.timer) clearTimeout(execution.timer);
     execution.timer = undefined;
-    return () => { execution.blockers--; if (this.controllerTimers.get(id) === execution) this.armControllerTimeout(id); };
+    return () => {
+      if (--execution.blockers === 0) execution.budgetStartedAt = performance.now();
+      if (this.controllerTimers.get(id) === execution) this.armControllerTimeout(id);
+    };
   }
 
   private armCallTimeout(callId: number, pending: PendingCall): void {

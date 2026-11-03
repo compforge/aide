@@ -1,3 +1,4 @@
+import { RunnerRecovery } from "./runner/recovery.ts";
 import { DEFAULT_MAX_TOTAL_CONCURRENCY } from "../../reconcile/config.ts";
 import { createPluginVerbs } from "../../plugin/context.ts";
 import { ResourceStorage } from "../resource/storage.ts";
@@ -139,8 +140,8 @@ export interface ManagerOptions {
   now?: () => Date;
   /** 单个 Instance 激活失败不阻断其他 Plugin；宿主可将失败展示到 UI 或诊断日志。 */
   onActivationError?(failure: PluginActivationFailure): void;
-  /** 已激活 Runner 意外退出；Manager 会撤销该 Binding 的全部宿主注册。 */
-  onRunnerFailure?(failure: PluginRunnerFailure): void;
+  /** Called after failed Binding cleanup; recovery awaits this before restarting scheduling. */
+  onRunnerFailure?(failure: PluginRunnerFailure): void | Promise<void>;
   /** 自动重试已安排；宿主可将错误展示到 UI 或诊断日志。 */
   onReconcileError?(failure: ReconcileFailure): void;
   /** Controller resource Source initial/live observation failure. */
@@ -222,7 +223,7 @@ export class Manager {
   private readonly activations = new Map<string, Promise<void>>();
   private readonly capacity: ReconcileCapacity;
   private readonly onActivationError: ManagerOptions["onActivationError"];
-  private readonly onRunnerFailure: ManagerOptions["onRunnerFailure"];
+  private readonly recovery: RunnerRecovery;
   private readonly onReconcileError: ManagerOptions["onReconcileError"];
   private readonly onControllerSourceError:
     ManagerOptions["onControllerSourceError"];
@@ -283,7 +284,15 @@ export class Manager {
         : { deferredQueueLimit: options.deferredHookQueueLimit }),
     });
     this.onActivationError = options.onActivationError;
-    this.onRunnerFailure = options.onRunnerFailure;
+    this.recovery = new RunnerRecovery({
+      backoff: reconcileRetryBackoff(options.retryBackoff), log: options.log,
+      enabled: id => !this.closed && this.instances.list().some(instance => instance.pluginInstanceId === id && instance.enabled),
+      prepare: async (id, error) => {
+        await this.closeBinding(id);
+        await options.onRunnerFailure?.({ pluginInstanceId: id, error: error instanceof Error ? error : new Error(String(error)) });
+      },
+      activate: id => this.activateInstance(id),
+    });
     this.onReconcileError = options.onReconcileError;
     this.onControllerSourceError = options.onControllerSourceError;
     this.retryBackoff = reconcileRetryBackoff(options.retryBackoff);
@@ -582,8 +591,13 @@ export class Manager {
   }
 
   async deactivateInstance(pluginInstanceId: string): Promise<void> {
+    await this.recovery.cancel(pluginInstanceId);
+    await this.closeBinding(pluginInstanceId);
+  }
+
+  private async closeBinding(pluginInstanceId: string): Promise<void> {
     const activation = this.activations.get(pluginInstanceId);
-    if (activation) await activation;
+    if (activation) await activation.catch(() => {});
     const binding = this.bindings.get(pluginInstanceId);
     if (!binding) return;
     this.bindings.delete(pluginInstanceId);
@@ -595,7 +609,7 @@ export class Manager {
   }
 
   isInstanceActive(pluginInstanceId: string): boolean {
-    return this.bindings.has(pluginInstanceId);
+    return !this.closed && this.bindings.has(pluginInstanceId) && !this.recovery.has(pluginInstanceId);
   }
 
   listInstances(): PluginInstance[] {
@@ -918,6 +932,7 @@ export class Manager {
 
 
   private async closeManager(): Promise<void> {
+    await this.recovery.close();
     await Promise.allSettled(this.activations.values());
     this.verb.failAll("Plugin Manager was closed");
     const errors: unknown[] = [];
@@ -1089,24 +1104,7 @@ export class Manager {
       pluginInstanceId,
       error: logError(error),
     });
-    try {
-      this.onRunnerFailure?.({ pluginInstanceId, error });
-    } catch {
-      // Failure reporting cannot keep a dead Binding registered.
-    }
-    void (async () => {
-      const activation = this.activations.get(pluginInstanceId);
-      if (activation) {
-        try {
-          await activation;
-        } catch {
-          return;
-        }
-      }
-      await this.deactivateInstance(pluginInstanceId);
-    })().catch(() => {
-      // Binding close errors are surfaced through diagnostics at their origin.
-    });
+    this.recovery.fail(pluginInstanceId, error);
   }
 
   private restoreDueReconciles(controller: ManagedController): void {

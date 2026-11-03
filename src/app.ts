@@ -176,9 +176,9 @@ export class Aide {
           if (pluginId !== "aide.personal" || version !== "0.1.0") throw new Error(`Plugin package is not installed: ${pluginId}@${version}`);
           return { pluginId, version, entryUrl: new URL("../plugins/personal/plugin.ts", import.meta.url).href,
             resourcesUrl: new URL("../plugins/personal/definitions.ts", import.meta.url).href };
-        }, onRunnerFailure: ({ error }) => {
+        }, onRunnerFailure: async ({ error }) => {
           this.log.error({ err: error }, "Personal Runner stopped");
-          void personal?.recoverInterrupted().catch((err) => this.log.error({ err }, "Recovery failed"));
+          await personal?.recoverInterrupted();
         },
       },
     });
@@ -194,6 +194,12 @@ export class Aide {
     }, log);
     this.runtime.subscribe(() => this.notify());
     this.personal.topics.subscribe(() => this.notify());
+  }
+
+  health(): { status: "ok" | "unavailable"; unavailablePlugins: string[] } {
+    const unavailablePlugins = this.runtime.plugins.listInstances().filter(instance => instance.enabled
+      && !this.runtime.plugins.isInstanceActive(instance.pluginInstanceId)).map(instance => instance.pluginInstanceId);
+    return { status: unavailablePlugins.length ? "unavailable" : "ok", unavailablePlugins };
   }
 
   get topics() { return this.personal.topics; }

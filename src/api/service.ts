@@ -3,6 +3,7 @@ import type { Incoming } from "../channel/message.ts";
 
 /** Product-specific sidebar and external event input supplied by application composition. */
 export interface WebService extends ChannelService {
+  health(): { status: "ok" | "unavailable"; unavailablePlugins: string[] };
   defaultAddress(): import("../../plugins/personal/address/model.ts").AddressRef;
   validateDefaultAddress(ref: import("../../plugins/personal/address/model.ts").AddressRef): Promise<void>;
   readSession?: import("../../plugins/personal/observation/session.ts").ReadSession;

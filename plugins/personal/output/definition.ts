@@ -27,7 +27,7 @@ export const OutputSpecSchema = z.object({
 export const OutputStatusSchema = z.object({
   disclosure: z.object({ decision: z.enum(["allowed", "denied"]), reason: z.string(), checkedAt: z.iso.datetime(), fingerprint: z.string(), policy: z.object({ sensitivity: SensitivitySchema, visibility: VisibilitySchema, people: z.array(z.string()) }).strict().optional() }).strict().optional(),
   waitingAddress: AddressRefSchema.optional(),
-  delivery: z.object({ address: AddressRefSchema, replay: z.enum(["idempotent", "once"]).optional(), target: AddressSchema, text: z.string().max(160_000), receivers: PersonRefsSchema() }).strict().optional(),
+  delivery: z.object({ notice: z.literal("muted").optional(), address: AddressRefSchema, replay: z.enum(["idempotent", "once"]).optional(), target: AddressSchema, text: z.string().max(160_000), receivers: PersonRefsSchema() }).strict().optional(),
   phase: z.enum(["pending", "sending", "delivered", "failed", "uncertain", "cancelled"]), attempts: z.number().int().nonnegative(),
   deliveryWait: z.object({ reason: z.enum(["frequency", "receiver-busy", "provider"]), until: z.iso.datetime() }).strict().optional(),
   deliveredAt: z.iso.datetime().optional(), lastError: z.string().max(4000).optional(), receipt: z.object({ id: z.string().min(1), scope: z.string().min(1) }).strict().optional() }).strict();

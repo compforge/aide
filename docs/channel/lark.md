@@ -85,6 +85,6 @@ Chief 通过 say 提问，用户在原聊天回复形成新 Input，群内回复
 Output 重试继续使用稳定的分片 UUID；已持久确认的分片不重发，后续分片失败不会提前确认整个 Output。
 适配器报告安全诊断，不透传 SDK 自由文本、响应体或凭证。完整生命周期见 [Output 投递与恢复](../personal/output.md#投递与恢复)。
 
-发送前由 [Address](../personal/address.md) 的 muted 控制 Aide 能否发言；进度卡和固定提示也遵守此设置。新发现的外部场合默认禁言，在 Web Addresses 页面解除禁言后仍须通过披露检查。
+发送前由 [Address](../personal/address.md) 的 muted 控制 Aide 能否发言；进度卡和 Channel 固定错误提示也遵守此设置。唯一例外是 Output Reconcile 为 Immediate Input 保存的固定禁言提示，标记与文本均须匹配，仍使用原目标和逐段回执去重。新发现的外部场合默认禁言，在 Web Addresses 页面解除禁言后仍须通过披露检查。
 
 引用消息的 `parentId` / `rootId` 随 Input 保留，Chief 可按需读取原文；详见[引用消息读取](../connector/lark-messages.md#引用消息读取)。

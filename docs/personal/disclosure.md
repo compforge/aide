@@ -49,9 +49,11 @@ Web 是 Me 的私有界面。Lark 私聊按 app/open_id 或已观察的私聊人
 
 Output Reconciler 是检查、投递和重试的唯一协调者。底座按资源串行、不同资源并发，并负责错误退避和重启恢复。Channel/Connector 仅提供具体目的地的 transport，不遍历 Output，也不维护业务重试定时器。Lark 的入站、进度卡及固定错误提示仍由 Channel 管理。
 
-允许则投递原文。拒绝则在同一 Output 上通过 defaultAddress 私下通知 Me：“原计划给谁发什么、因为什么未发送”。不新建通知 Output。默认地址暂不可用时保留 pending/error，由此 Output 自己重试，不阻断其它 Output。
+Chief 只提交 raw Output，Reconciler 根据策略选择实际 target/text，允许则投递原文。原目标禁言时，关联的精确 Input UID 中存在 Immediate Input（包括 Channel 的默认 Immediate）才将实际正文替换为固定话术“我当前被禁言。如需听我发言，请解除该地址的禁言。”，发送到原计划被禁言的 Address，保留回复坐标；不携带原文、引用材料或其它生成内容。实际投递持久化 notice=muted，发送边界只允许带此标记且正文完全匹配的固定提示穿过禁言。原 spec 与 Address.muted 保持不变。Input 缺失、UID 不符、Normal、Deferred 或没有关联 Input 时均不获得这一例外。
 
-异步检查完成后重新核对依赖；transport 准备完成后再检查一次，再记录 sending 并调用发送。被拒绝的原意图不会因权限放宽自动恢复外发。开始尝试后实际正文、目的地与接收者不可改变；变化使原投递无法继续时转 uncertain，核对外部回执。
+其它拒绝（包括非 Immediate Output 的禁言）在同一 Output 上通过 defaultAddress 私下通知 Me：“原计划给谁发什么、因为什么未发送”。不新建通知 Output。默认地址暂不可用时保留 pending/error，由此 Output 自己重试，不阻断其它 Output。
+
+异步检查完成后重新核对依赖；transport 准备完成后再检查一次，再记录 sending 并调用发送。被拒绝的原意图不会因权限放宽自动恢复外发；已经保存的禁言提示在 Input 回收、解除禁言或重启后仍只重试该提示。开始尝试后实际正文、目的地与接收者不可改变；变化使原投递无法继续时转 uncertain，核对外部回执。
 
 幂等 transport 使用同一 Output ID 重试；Lark 按稳定分段 UUID 和本地回执续传。非幂等 transport 发送结果未知或进程中断后转 uncertain，不盲目重发或转投。Requirement 回读匹配目标、正文和投递标记后可恢复 delivered。提供方去重窗口之外不能承诺恰好一次。送达清理 lastError，运行时掌管退避时间，Output 不另存 nextAttemptAt。
 

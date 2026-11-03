@@ -11,6 +11,9 @@ import { addressTools } from "../plugins/personal/address/tools.ts";
 import { ADDRESS_TYPE, addressRef, addressRefs } from "../plugins/personal/address/model.ts";
 import { personRefs, personRef, PERSON_TYPE, LOCAL_ME, type PersonResource } from "../plugins/personal/person/model.ts";
 import { PersonDefinition } from "../plugins/personal/person/definition.ts";
+import { InputAttention } from "../plugins/personal/input/model.ts";
+import { DeliveryError } from "@compforge/aide-connector";
+import { MUTED_OUTPUT_TEXT } from "../plugins/personal/output/model.ts";
 import { InputStore } from "../plugins/personal/input/store.ts";
 import { NOTE_TYPE, noteVersion, type NoteResource } from "../plugins/personal/note/model.ts";
 import { upsertNote } from "../plugins/personal/note/service.ts";
@@ -96,6 +99,68 @@ test("Unmuted group checks all known people; late mute privately redirects the u
   await delivery.reconcile("muted");
   assert.deepEqual(sent, [webAddress("test")]);
   assert.match(f.store.get("muted")!.status.disclosure!.reason, /muted/);
+});
+
+test("Muted Output uses pinned Input attention to choose an original-address notice or default-address fallback", async t => {
+  const f = await setup(t), inputs = new InputStore(f.home);
+  const place = f.addresses.observe(group, [personRef(f.a)]), ref = addressRef(place);
+  const cases = [
+    { id: "channel-default", origin: "channel" as const, notice: true },
+    { id: "source-immediate", origin: "source" as const, attention: InputAttention.Immediate, notice: true },
+    { id: "channel-normal", origin: "channel" as const, attention: InputAttention.Normal, notice: false },
+    { id: "source-normal", origin: "source" as const, notice: false },
+    { id: "deferred", origin: "channel" as const, attention: InputAttention.Deferred, notice: false },
+    { id: "stale-uid", origin: "channel" as const, notice: false },
+    { id: "no-input", origin: "channel" as const, notice: false },
+  ];
+  for (const item of cases) {
+    inputs.submit("test", item.id, { origin: item.origin, originId: "test", attention: item.attention, source: group, text: "问题" });
+    const input = inputs.get(item.id)!;
+    const raw = "原始隐私正文";
+    f.store.create("test", item.id, outputSpec(f.topic, { topicId: "test", text: raw, target: group }, {
+      ...(item.id === "no-input" ? {} : { inputIds: [item.id], inputUids: { [item.id]: item.id === "stale-uid" ? "deleted-input-uid" : input.metadata.uid } }),
+      replyToMessageId: "original-message",
+    }));
+    const sent: import("../plugins/personal/output/delivery.ts").OutputMessage[] = [];
+    const reconcile = new OutputDelivery(f.store, () => ({ replay: "idempotent", async send(message) { sent.push(message); return undefined; } }), log);
+    await reconcile.reconcile(item.id); await reconcile.reconcile(item.id);
+    assert.equal(sent.length, 1, item.id);
+    assert.deepEqual(sent[0]!.target, item.notice ? larkThreadAddress("app", "group", "original-message") : webAddress("test"), item.id);
+    assert.equal(sent[0]!.notice, item.notice ? "muted" : undefined, item.id);
+    if (item.notice) assert.equal(sent[0]!.text, MUTED_OUTPUT_TEXT);
+    else { assert.match(sent[0]!.text, /原始隐私正文/); assert.match(sent[0]!.text, /muted/); }
+    const output = f.store.get(item.id)!;
+    assert.equal(output.spec.text, raw); assert.equal(output.spec.target.uid, ref.uid);
+    assert.equal(output.status.phase, "delivered"); assert.equal(output.status.disclosure!.decision, "denied");
+    assert.equal(f.addresses.read(ref).spec.muted, true);
+  }
+});
+
+test("An Immediate mute notice remains fixed through retry, Input loss and unmute", async t => {
+  const f = await setup(t), inputs = new InputStore(f.home);
+  const ref = addressRef(f.addresses.observe(group, [personRef(f.a)]));
+  inputs.submit("test", "immediate", { origin: "channel", originId: "test", source: group, text: "问题" });
+  const input = inputs.get("immediate")!;
+  f.store.create("test", "retry-notice", outputSpec(f.topic, { topicId: "test", text: "不能泄露的原文", target: group }, {
+    inputIds: ["immediate"], inputUids: { immediate: input.metadata.uid },
+  }));
+  const sent: import("../plugins/personal/output/delivery.ts").OutputMessage[] = [];
+  const transport = { replay: "idempotent" as const, async send(message: import("../plugins/personal/output/delivery.ts").OutputMessage) {
+    sent.push(message);
+    if (sent.length === 1) throw new DeliveryError({ kind: "retryable", message: "limited", retryAfterMs: 0 });
+    return undefined;
+  } };
+  await new OutputDelivery(f.store, () => transport, log).reconcile("retry-notice");
+  assert.equal(f.store.get("retry-notice")!.status.phase, "pending");
+  // Once fixed, the notice no longer depends on the Input's lifetime or a later unmute.
+  f.store.storage.db.prepare("DELETE FROM resources WHERE key=?").run(inputs.resources.key(input, input.metadata.name));
+  f.addresses.setMuted(ref, false, true);
+  const recovered = new OutputDelivery(f.store, () => transport, log);
+  await recovered.reconcile("retry-notice"); await recovered.reconcile("retry-notice");
+  assert.equal(sent.length, 2); assert.deepEqual(sent[0], sent[1]);
+  assert.equal(sent[1]!.text, MUTED_OUTPUT_TEXT); assert.deepEqual(sent[1]!.target, group);
+  assert.equal(f.store.get("retry-notice")!.status.phase, "delivered");
+  assert.equal(f.store.get("retry-notice")!.spec.text, "不能泄露的原文");
 });
 
 test("Source and Channel mentions share one reply; explicit target remains Chief's choice", async t => {

@@ -176,4 +176,4 @@ scripts/install-service.sh # Linux 用户级 systemd 服务
 
 `make lint` 接收 `LINT_FILES`，但当前静态检查只有 TypeScript typecheck，会保留 tsconfig 并扩展到整个 Component 的类型依赖图。`packages/plugin` 使用自己的 tsconfig；没有包内测试，`make test` 清空文件选择后委托根目录的集成测试。未配置 formatter，因此不添加空操作的 `make fix`。
 
-- Address 是 Personal 的独立沟通场合；Input.source / Output.spec.target 引用其 UID，平台 endpoint 留在 Address，回复消息坐标留在 Input/Output。status.people 累积已知参与者，不声明名单完整。muted 同时约束正文、进度卡和提示，Agent 不自行解除禁言。
+- Address 是 Personal 的独立沟通场合；Input.source / Output.spec.target 引用其 UID，平台 endpoint 留在 Address，回复消息坐标留在 Input/Output。status.people 累积已知参与者，不声明名单完整。muted 约束原文、进度卡和 Channel 错误提示；Output Reconcile 对 Immediate Input 在原地址发送固定禁言提示，其它禁言 Output 转投 Me 的 defaultAddress。Chief 提交 raw Output，Agent 不自行解除禁言。

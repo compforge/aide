@@ -6,7 +6,7 @@ Plugin 是领域模型与业务判断的所有者。Package 声明纯资源定�
 
 Host 持有 Resource 存储、Connector 和可选 Harness 执行能力；Runner 运行插件回调、观察、队列、重试和 Reconcile。双方通过协议通信，不相互导入实现。PluginContext 将资源、Connector 和 verb 操作转为宿主请求。
 
-实例关闭或 Runner 失败时撤销运行能力并终止未完成调用；资源定义随 Host 保留。Runner 不自动重启，重启 Aide 会重新激活插件。内存状态与异步调用栈不跨进程恢复，插件依据持久业务进展决定下一步。
+实例关闭或 Runner 失败时撤销运行能力并终止未完成调用；资源定义随 Host 保留。Runner 意外退出后，Manager 撤销旧 Binding，等待应用的中断协调回调完成，再按指数退避重新激活；默认从 1 秒增至最多 1 分钟，稳定运行一分钟后重置退避。中断协调失败继续重试，不提前启动新 Controller。禁用实例或关闭 Manager 会取消重启。内存状态与异步调用栈不跨进程恢复，插件依据持久业务进展决定下一步。
 
 插件私有目录分为 package global 与 instance，见 [部署状态目录](../deployment.md#状态目录)。纯资源插件无需配置 Harness。
 

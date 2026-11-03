@@ -1,3 +1,5 @@
+import { isMutedNotice } from "../../../plugins/personal/output/model.ts";
+import type { OutputMessage } from "../../../plugins/personal/output/delivery.ts";
 import type { TopicLocator } from "../../../plugins/personal/topic/locator.ts";
 import { larkAddress, larkTopicKey, larkTopicLocator, larkEndpoint } from "../address.ts";
 import type { OutputView } from "../../../plugins/personal/output/view.ts";
@@ -256,14 +258,14 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
   }
 
   /** @spec Sends one checked delivery with durable per-part receipts; scheduling belongs to Output Reconcile. */
-  async send(message: { id: string; target: import("@compforge/aide-plugin").Address; text: string }) {
+  async send(message: OutputMessage) {
     if (this.stopped) throw new Error("Lark transport is stopped");
     const endpoint = larkEndpoint(message.target);
     if (!endpoint || endpoint.appId !== this.appId) throw new Error("Lark target belongs to another transport");
     for (const [index, text] of textParts(message.text).entries()) {
       const id = this.deliveryId(message.id, index);
       if (this.state.delivered.includes(id)) continue;
-      try { if (!this.aide.canSpeak(message.target)) throw new Error("Aide is muted at this Address");
+      try { if (!this.aide.canSpeak(message.target) && !isMutedNotice(message)) throw new Error("Aide is muted at this Address");
         await this.transport.send(endpoint.receiveId, text, id, endpoint.receiveIdType, endpoint.replyToMessageId); }
       catch (error) {
         this.log.warn({ outputId: message.id, target: message.target, part: index, ...larkSendFailure(error) }, "Lark send failed");

@@ -18,16 +18,19 @@ export interface ActivePluginRunner {
 
 export interface PluginSupervisorOptions {
   readonly requestTimeoutMs?: number;
+  readonly controllerBudgetMs?: number;
 }
 
 /** Aide-owned lifecycle boundary for per-Binding Plugin Runner processes. */
 export class PluginSupervisor {
   private readonly active = new Set<PluginRunnerClient>();
   private readonly requestTimeoutMs?: number;
+  private readonly controllerBudgetMs?: number;
   private closed = false;
 
   constructor(options: PluginSupervisorOptions = {}) {
     this.requestTimeoutMs = options.requestTimeoutMs;
+    this.controllerBudgetMs = options.controllerBudgetMs;
   }
 
   async activate(
@@ -41,6 +44,7 @@ export class PluginSupervisor {
     let client!: PluginRunnerClient;
     client = new PluginRunnerClient({
       ...callbacks,
+      controllerBudgetMs: this.controllerBudgetMs,
       ...(this.requestTimeoutMs === undefined
         ? {}
         : { requestTimeoutMs: this.requestTimeoutMs }),

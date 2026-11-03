@@ -171,7 +171,7 @@ test("real Runner persists waits and Person changes only relax Person deadlines"
     sends.push(Date.now()); return undefined;
   });
   const makeManager = () => new Manager({ instances, pluginSupervisor: new PluginSupervisor(),
-    onRunnerFailure: failure => errors.push(failure.error), onActivationError: failure => errors.push(failure.error),
+    onRunnerFailure: failure => { errors.push(failure.error); }, onActivationError: failure => errors.push(failure.error),
     actions: { "personal/reconcile_output": async (_context, input) => delivery.reconcile((input as { id: string }).id) },
     async loadPackageEntry(pluginId, version) { return { pluginId, version,
       entryUrl: new URL("./fixtures/output-frequency-plugin.ts", import.meta.url).href,

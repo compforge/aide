@@ -6,11 +6,12 @@ import { sameAddress } from "../../../src/address.ts";
 import type { Address } from "@compforge/aide-plugin";
 import type { Logger } from "pino";
 import type { OutputStore } from "./store.ts";
-import type { Output, OutputReconcileResult, OutputStatus } from "./model.ts";
+import { isMutedNotice, type Output, type OutputReconcileResult, type OutputStatus } from "./model.ts";
 
+export type OutputMessage = { id: string; target: Address; text: string; notice?: "muted" };
 export interface OutputTransport {
   replay: "idempotent" | "once";
-  send(message: { id: string; target: Address; text: string }): Promise<OutputStatus["receipt"]>;
+  send(message: OutputMessage): Promise<OutputStatus["receipt"]>;
 }
 export type OutputTransportResolver = (target: Address) => Promise<OutputTransport | undefined> | OutputTransport | undefined;
 
@@ -95,10 +96,10 @@ export class OutputDelivery {
       this.store.uncertain(id, "Transport replay contract changed after a send attempt"); return {};
     }
     if (!output.status.attempts) this.store.update(id, s => ({ ...s, delivery: { ...s.delivery!, replay: transport.replay } }));
-    if (new Addresses(this.store.storage.home).read(output.status.delivery!.address).spec.muted) throw new Error("Address was muted before transport dispatch");
+    if (new Addresses(this.store.storage.home).read(output.status.delivery!.address).spec.muted && !isMutedNotice(output.status.delivery!)) throw new Error("Address was muted before transport dispatch");
     this.store.begin(id);
     try {
-      const receipt = await transport.send({ id, target, text: output.status.delivery!.text });
+      const receipt = await transport.send({ id, target, text: output.status.delivery!.text, ...(output.status.delivery!.notice ? { notice: output.status.delivery!.notice } : {}) });
       this.store.delivered(id, receipt);
       this.log.info({ outputId: id, target }, "Output delivered");
       return {};

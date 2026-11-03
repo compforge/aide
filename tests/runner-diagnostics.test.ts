@@ -16,7 +16,7 @@ async function waitFor(predicate: () => boolean, timeout = 3000) {
   const until = Date.now() + timeout;
   while (!predicate()) { if (Date.now() > until) throw new Error("Missing diagnostic record"); await Bun.sleep(5); }
 }
-async function setup(timeoutMs: number, wait: () => Promise<void>) {
+async function setup(timeoutMs: number, wait: () => Promise<void>, controllerBudgetMs?: number) {
   const root = mkdtempSync(join(tmpdir(), "aide-runner-diagnostics-")); roots.push(root);
   const entry = join(root, "package", "index.ts"); mkdirSync(join(root, "package"));
   cpSync(join(import.meta.dir, "fixtures/diagnostic-plugin.ts"), entry);
@@ -24,7 +24,7 @@ async function setup(timeoutMs: number, wait: () => Promise<void>) {
   instances.create({ pluginInstanceId: "diagnostics", pluginId: "tests/diagnostics", packageVersion: "1.0.0", marketplace: "fixtures" });
   const logs: LogEntry[] = [];
   const manager = new Manager({ instances, log: record => { logs.push(record); },
-    pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: timeoutMs }),
+    pluginSupervisor: new PluginSupervisor({ requestTimeoutMs: timeoutMs, controllerBudgetMs }),
     async loadPackageEntry(pluginId, version) { return { pluginId, version, entryUrl: pathToFileURL(entry).href,
       resourcesUrl: new URL("./fixtures/process-definitions.ts", import.meta.url).href }; },
   });
@@ -104,5 +104,40 @@ test("Runner scheduling delay is visible separately from fast Host handling", as
     expect(slow.hostHandlingMs).toBeLessThan(1000);
     expect(slow.outsideHostHandlingMs).toBeGreaterThanOrEqual(1000);
     expect(f.logs.some(l => l.message === "Plugin Runner Controller execution timed out")).toBe(false);
+  } finally { await f.manager.close(); }
+});
+
+
+test("resource progress renews idle timeout without limiting total reconcile to one request deadline", async () => {
+  const f = await setup(750, () => Bun.sleep(180), 4000);
+  try {
+    await f.resources.create(TYPE, { name: "progress", spec: { mode: "progress" } });
+    await f.manager.settled();
+    expect((await f.resources.get({ ...TYPE, namespace: "v1", name: "progress" }))?.status).toMatchObject({ done: true });
+    expect(f.logs.some(l => l.message === "Plugin Runner Controller execution timed out")).toBe(false);
+  } finally { await f.manager.close(); }
+});
+
+test("continuous resource progress is still bounded by the active execution budget", async () => {
+  const f = await setup(750, () => Bun.sleep(180), 1000);
+  try {
+    await f.resources.create(TYPE, { name: "budget", spec: { mode: "progress" } });
+    await waitFor(() => f.logs.some(l => l.message === "Plugin Runner Controller execution timed out"));
+    expect(f.logs.find(l => l.message === "Plugin Runner Controller execution timed out")?.attributes).toMatchObject({ timeoutReason: "budget" });
+  } finally { await f.manager.close(); }
+});
+
+test("a crashed Runner recovers scheduling after cleanup without repeating a completed effect", async () => {
+  const f = await setup(3000, async () => {});
+  try {
+    await f.resources.create(TYPE, { name: "crash", spec: { mode: "crash" } });
+    await waitFor(() => f.logs.some(l => l.message === "Plugin Runner restart scheduled"));
+    expect(f.manager.isInstanceActive("diagnostics")).toBe(false);
+    await f.resources.create(TYPE, { name: "after", spec: { mode: "quick" } });
+    await waitFor(() => f.manager.isInstanceActive("diagnostics"), 5000);
+    await f.manager.settled();
+    expect((await f.resources.get({ ...TYPE, namespace: "v1", name: "after" }))?.status).toMatchObject({ done: true });
+    expect(f.logs.filter(l => l.message === "Diagnostic fixture stage" && l.attributes?.name === "crash")).toHaveLength(1);
+    expect(f.logs.filter(l => l.message === "Plugin Runner recovered")).toHaveLength(1);
   } finally { await f.manager.close(); }
 });

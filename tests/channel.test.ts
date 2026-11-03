@@ -30,7 +30,7 @@ test("HTTP accepts Chief input durably and exposes asynchronous failure without 
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  aide.start();
+  await aide.start();
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const url = `http://127.0.0.1:${address.port}`;
@@ -254,4 +254,22 @@ test("Web deletes Tasks and Routines through WorkService and preserves other top
   assert.equal(await aide.event({ id: "after-delete",  topicId: group, name: "memory.changed", text: "changed" }), 0);
   await aide.settled();
   assert.equal(requests.length, 0);
+});
+
+
+test("health reports unavailable when the required Plugin is absent", async t => {
+  const dir = mkdtempSync(join(tmpdir(), "aide-health-"));
+  const log = pino({ level: "silent" });
+  const aide = new Aide(dir, fakeOptions({ async chief() { return ""; }, async execute() { throw new Error("No Work"); } }, dir), log);
+  const server = httpChannel(aide, log);
+  t.after(async () => { await aide.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); rmSync(dir, { recursive: true, force: true }); });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const url = `http://127.0.0.1:${address.port}/health`;
+  const starting = await fetch(url); assert.equal(starting.status, 503);
+  assert.deepEqual((await starting.json() as { unavailablePlugins: string[] }).unavailablePlugins, ["personal"]);
+  await aide.start(); assert.equal((await fetch(url)).status, 200);
+  await aide.runtime.plugins.deactivateInstance("personal");
+  const stopped = await fetch(url); assert.equal(stopped.status, 503);
+  assert.equal((await stopped.json() as { status: string }).status, "unavailable");
 });
