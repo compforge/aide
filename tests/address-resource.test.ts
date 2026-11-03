@@ -1,3 +1,4 @@
+import { larkInputKey } from "../src/channel/lark/input-key.ts";
 import { readAgentStream } from "../src/stream/agent.ts";
 import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { addressFor } from "./address-fixture.ts";
@@ -166,8 +167,8 @@ test("An Immediate mute notice remains fixed through retry, Input loss and unmut
 
 test("Source and Channel mentions share one reply; explicit target remains Chief's choice", async t => {
   const f = await setup(t), observation = { provider: "lark", accountId: "app", kind: "mention", originalMessageId: "external-message", message: { id: "external-message", chatId: "group" } };
-  const source = await seedInput(f.topics, "source", { origin: "source", originId: "personal.lark", source: group, text: "问题", observation });
-  const channel = await seedInput(f.topics, "channel", { origin: "channel", originId: "lark", source: group, text: "问题", observation: { provider: "lark", accountId: "app", chatId: "group", messageId: "external-message" } });
+  const source = await seedInput(f.topics, "source", { origin: "source", originId: "personal.lark", source: group, inputKey: larkInputKey("group", "external-message"), text: "问题", observation });
+  const channel = await seedInput(f.topics, "channel", { origin: "channel", originId: "lark", source: group, inputKey: larkInputKey("group", "external-message"), text: "问题", observation: { provider: "lark", accountId: "app", chatId: "group", messageId: "external-message" } });
   assert.equal(source.metadata.uid, channel.metadata.uid);
   assert.equal(f.topics.inputStore.list().length, 1);
   const [one, two] = await Promise.all([f.topics.say("test", source.metadata.name, "答复", undefined, { respondToInputId: source.metadata.name, target: addressFor(f.home, webAddress("test")) }), f.topics.say("test", channel.metadata.name, "答复", undefined, { respondToInputId: channel.metadata.name, target: addressFor(f.home, webAddress("test")) })]);

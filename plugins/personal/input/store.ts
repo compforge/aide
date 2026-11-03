@@ -1,4 +1,4 @@
-import { channelPromotion, larkInputIdentity } from "./identity.ts";
+import { channelPromotion, inputIdentity } from "./identity.ts";
 import { admitInput } from "./admission.ts";
 import { Addresses } from "../address/service.ts";
 import { cloneResourceValue } from "../../../src/resource/value.ts";
@@ -47,12 +47,12 @@ export class InputStore {
     return this.storage.transaction(() => this.admit(owner, id, raw, status));
   }
   private admit(owner: string, id: string, raw: InputSubmission, status: InputStatus): Resource<InputSpec, InputStatus> {
-    const identity = larkInputIdentity(raw);
+    const identity = inputIdentity(raw);
     id = identity?.name ?? id;
     const key = this.key(id), existing = this.storage.read(key);
     if (existing && identity) {
       const input = existing.object as Resource<InputSpec, InputStatus>;
-      if (larkInputIdentity(input.spec)?.key !== identity.key) throw new ResourceAlreadyExists("Input message identity conflicts");
+      if (inputIdentity(input.spec)?.key !== identity.key) throw new ResourceAlreadyExists("Input message identity conflicts");
       if (!channelPromotion(input.spec, raw)) return input;
       const spec = admitInput(new Addresses(this.storage.home), raw);
       const promoted = this.resources.replace(INPUT_TYPE, id, spec, input.status);

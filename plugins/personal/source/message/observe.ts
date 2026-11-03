@@ -1,4 +1,5 @@
-import { larkInputIdentity } from "../../input/identity.ts";
+import { inputIdentity } from "../../input/identity.ts";
+import { larkInputKey } from "../../../../src/channel/lark/input-key.ts";
 import { personRefs } from "../../person/model.ts";
 import { patchStatus } from "../../status.ts";
 import { messageReceivers } from "../../person/receivers.ts";
@@ -50,9 +51,10 @@ export interface MessageSourceStatus {
 type Context = Pick<PluginContext, "resources" | "logger">;
 type Source = Resource<MessageWatch, MessageSourceStatus>;
 const iso = (ms: number) => new Date(ms).toISOString();
-const inputName = (watch: MessageWatch, message: ChatMessage, sequence: number) => sequence
-  ? digest(["lark", watch.accountId, watch.userId, message.id, sequence])
-  : larkInputIdentity({ origin: "source", originId: "personal.lark", observation: { provider: "lark", message } })!.name;
+const inputKey = (watch: MessageWatch, message: ChatMessage, sequence: number) => sequence
+  ? JSON.stringify(["lark", "discussion", watch.accountId, watch.userId, message.chatId, message.id, sequence])
+  : larkInputKey(message.chatId, message.id);
+const inputName = (watch: MessageWatch, message: ChatMessage, sequence: number) => inputIdentity({ inputKey: inputKey(watch, message, sequence) })!.name;
 const inputRef = (name: string) => ({ ...INPUT_TYPE, namespace: "v1" as const, name });
 
 /**
@@ -272,6 +274,7 @@ class MessageObservation implements TopicLocator<{ chatId: string; threadId?: st
     const location = this.locate({ chatId: message.chatId, threadId: entry.kind === "direct" ? undefined : message.threadId,
       chatName: message.chatName, text: root?.content || message.content });
     const spec: Delivery["spec"] = {
+      inputKey: inputKey(this.watch, entry.message, entry.sequence),
       source: larkAddress(this.watch.accountId, message.chatId), replyToMessageId: message.id,
       addressObservation: { name: message.chatName, type: entry.kind === "direct" ? "direct" : "group", people: [...senders.values(), ...[...recipients.values()].flat()] },
       ...(relation ? { relation } : {}),

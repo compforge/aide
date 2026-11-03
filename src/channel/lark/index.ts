@@ -1,3 +1,4 @@
+import { larkInputKey } from "./input-key.ts";
 import { readAgentStream } from "../../stream/agent.ts";
 import { mailProcess } from "../mail.ts";
 import { processPreview } from "../reply-layout.ts";
@@ -141,7 +142,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
     // Message normalization yields; concurrent duplicate deliveries must still persist only once.
     if (this.stopped) throw new Error("Lark channel is stopping");
     if (this.state.received.includes(id)) return;
-    const input = LarkIncomingSchema.safeParse({ id, topicKey: topicId, text, source: larkAddress(this.appId, chatId), replyToMessageId: id, addressObservation: { type: message.chat_type === "p2p" ? "direct" : "group" },
+    const input = LarkIncomingSchema.safeParse({ id, inputKey: larkInputKey(chatId, id), topicKey: topicId, text, source: larkAddress(this.appId, chatId), replyToMessageId: id, addressObservation: { type: message.chat_type === "p2p" ? "direct" : "group" },
       observation: { provider: "lark", accountId: this.appId, messageId: id, chatId, chatType: message.chat_type, ...(threadId ? { threadId } : {}),
         ...(message.parent_id ? { parentId: message.parent_id } : {}), ...(message.root_id ? { rootId: message.root_id } : {}),
         ...(botIdentity ? { assistant: { id: botIdentity.openId, name: botIdentity.name } } : {}),

@@ -26,6 +26,8 @@ export type InputRelation = "sent" | "received" | "observed";
 
 export const INPUT_TYPE = { apiVersion: "aide.dev/v1alpha5", kind: "Input" } as const;
 export interface InputSpec {
+  /** Producer-owned event key, stable across retries and intake paths; opaque to Personal. */
+  inputKey?: string;
   /** Where the input was received; independent of its producer, sender and topic. */
   source?: import("../address/model.ts").AddressRef;
   /** Transport reply coordinates belong to this message, not the Address place. */
