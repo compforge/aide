@@ -9,7 +9,7 @@ import { readNote } from "./note/service.ts";
 import { contentVersion } from "./context-write.ts";
 import { WriterResourceSchema, SubjectSchema } from "./note/model.ts";
 import { notes } from "./note/query.ts";
-import { larkInputIdentity } from "./input/identity.ts";
+import { inputIdentity } from "./input/identity.ts";
 import { channelReceivers, type LarkMention } from "./person/receivers.ts";
 import { workPhase } from "./status.ts";
 import { commitStatus, patchStatus } from "./status.ts";
@@ -445,7 +445,7 @@ export class Personal {
 
   private async submit(incoming: Incoming): Promise<InputReceipt> {
     const input = incoming;
-    const id = larkInputIdentity({ origin: "channel", originId: input.channelId, observation: input.observation })?.name
+    const id = inputIdentity(input)?.name
       ?? digest([input.channelId, input.topicKey ?? input.topicId ?? "", input.id]);
     // @spec Deleting a Topic never turns redelivery of an accepted Input into a new command.
     const fact = this.topics.inputStore.get(id);
@@ -485,7 +485,7 @@ export class Personal {
     if (input.channelId === "web" || (input.channelId === "lark" && place?.type === "direct" && sender && larkSenderId))
       new Addresses(this.store.resources.storage.home).observe(input.source, sender ? [sender] : [], { muted: false,
         type: input.channelId === "web" ? "web" : "direct", name: place?.name });
-    const fact = await this.topics.submit(id, { attention: InputAttention.Immediate,
+    const fact = await this.topics.submit(id, { ...(input.inputKey !== undefined ? { inputKey: input.inputKey } : {}), attention: InputAttention.Immediate,
       ...(input.topicKey ? { topicKey: input.topicKey } : {}), ...(input.topicId ? { topicId: input.topicId } : {}), ...(input.topicName ? { topicName: input.topicName } : {}), text: input.text, timezone: this.options.timezone,
       origin: "channel", originId: input.channelId, source: input.source, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}), ...(place ? { addressObservation: place } : {}), ...(sender ? { sender } : {}), ...(receivers !== undefined ? { receivers } : {}), ...(relation ? { relation } : {}),
       ...(input.observation ? { observation: input.observation } : {}) });

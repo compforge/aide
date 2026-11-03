@@ -21,6 +21,7 @@ Input 保存收到的内容及来源证据，各组件在同一资源上留下�
 | sender、receivers、relation | 可选的发送 Person、明确识别的接收 Person 引用列表，以及输入相对于 Me 的关系 |
 | source | 可选 AddressRef，固定资源 UID，表示事情发生或可以联络的场合 |
 | replyToMessageId | 可选原消息回复坐标，不参与 Address 身份 |
+| inputKey | 可选的 producer 事件身份字符串，用于跨入口去重 |
 | topicId、topicKey | TopicLocator 提供的精确 Topic ID 或稳定来源关联键 |
 | topicName | 来源提供的初始名称建议；不参与匹配，不覆盖既有 Topic 名称 |
 | attention | InputAttention 字符串枚举：immediate、normal、deferred，表达注意力调度需求 |
@@ -149,8 +150,10 @@ Input v1alpha5 使用 AddressRef 保存来源位置，并将内容归属和处�
 
 验证：tests/input-assignment.test.ts 覆盖分派恢复、祖先换 root 与移回、分批刷新中断恢复、缓存失效 Watch 与周期补偿、事务拒绝过期分派、旧执行收尾、直属容量和无树扫描的待办查询。
 
-### 平台消息去重
+### 输入事件身份
 
-同一条 Lark 消息通过 Channel、不同 app 的 MessageSource 或多个观察账号被发现时，只接纳一个 Input。消息身份使用平台 `chatId + messageId`，不包含入口、appId、观察人或正文；同样的正文在不同发送中仍是不同 Input。Channel 和 Source 共用此身份及持久去重回执，入站在资源事务中接纳，重启和容量回收后的重投沿用原回执窗口。
+`spec.inputKey?: string` 是 producer 提供的不透明事件键，与话题关联 `topicKey` 和资源身份 `metadata.uid` 分开。提供时必须在 Personal 全局接纳范围内唯一，同一事件重试或经不同入口发现时必须稳定一致。InputStore 只按完整字符串比较，并派生稳定资源名，不解析平台字段；未提供时沿用资源名、owner 与内容的既有幂等检查。
+
+同一条 Lark 消息通过 Channel、不同 app 的 MessageSource 或多个观察账号被发现时，只接纳一个 Input。两个入口共用 Lark 接入层的字符串 key 生成函数，消息身份使用平台 `chatId + messageId`，不包含入口、appId、观察人或正文；同样的正文在不同发送中仍是不同 Input。Channel 和 Source 共用此身份及持久去重回执，入站在资源事务中接纳，重启和容量回收后的重投沿用原回执窗口。
 
 Channel 是直接请求的接纳入口。若 Source 先发现消息，后到的 Channel 在原 Input 上接纳其直接请求事实，更新正文、人物、Immediate、来源 Address 与回复坐标；保持 Input UID、创建时间、既有 Topic 归属和所有处理回执。该单向接纳是 Input 内容不可变约束的唯一消息入口例外，之后的 Source 观察和 Channel 重投均不改写事实，不重新触发已经领取或完成的处理。接纳更正不自动补发已产生的 Output，也不重放外部动作。讨论批次包含新的消息事实，不能用锚点原消息把它当作重复请求吞掉。
