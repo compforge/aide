@@ -37,11 +37,9 @@ async function setup(t: TestContext) {
   const me = await client.create(PERSON_TYPE, { name: "me", spec: { name: "Me", identities: [LOCAL_ME] }, status }) as PersonResource;
   let other = await client.create(PERSON_TYPE, { name: "c", spec: { name: "C", identities: [], clearance: "L1" }, status }) as PersonResource;
   let audience: OutputAudience = { people: [other], private: true };
-  let checks = 0;
   const ports: DisclosurePorts = { marks: { identities: [LOCAL_ME] },
     audience: async ref => { const target = new Addresses(home).endpoint(ref); return isChannelAddress(target) && target.channelId === "web" ? { people: [me], private: true } : audience; },
-    contactMe: async () => ({ address: addressFor(home, webAddress("topic")), target: webAddress("topic"), receivers: [personRef(me)] }),
-    check: async () => { checks++; return { allowed: true, reason: "supported" }; } };
+    contactMe: async () => ({ address: addressFor(home, webAddress("topic")), target: webAddress("topic"), receivers: [personRef(me)] }) };
   const checker = new OutputDisclosure(store, ports, pino({ level: "silent" }));
   store.check = id => checker.reconcile(id);
   async function note(sensitivity: Sensitivity = "L1", visibility: Visibility = "any", people: PersonRef[] = []) {
@@ -52,7 +50,7 @@ async function setup(t: TestContext) {
     return composeMail(store, "topic", id, mailDraft(topic, { topicId: "topic", text: "A verified fact", target },
       n ? { notes: [{ uid: n.metadata.uid, version: noteVersion(n) }] } : {}));
   }
-  return { store, client, topic, me, other, note, output, checker, ports, checks: () => checks,
+  return { store, client, topic, me, other, note, output, checker, ports,
     audience: (next: OutputAudience) => { audience = next; },
     clearance: async (clearance: Sensitivity) => { other = await client.replace(other, { ...other.spec, clearance }, other.status); audience = { ...audience, people: [other] }; } };
 }
@@ -64,18 +62,15 @@ test("unchecked Output is pending and cannot reach a Channel, even Web", async t
   assert.throws(() => f.store.begin("x"), /not been checked/);
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.phase, "pending");
-  assert.equal(f.checks(), 0, "Me can receive all private material without a model check");
 });
 
 test("permitted output retains intended content and checked delivery survives retries", async t => {
   const f = await setup(t); const original = f.output("x", await f.note());
   await Promise.all([f.checker.reconcile("x"), f.checker.reconcile("x")]);
-  assert.equal(f.checks(), 1);
   assert.deepEqual(f.store.get("x")!.spec, original.spec);
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
   f.store.begin("x"); f.store.retry("x", "transport refused");
   await f.store.prepare("x");
-  assert.equal(f.checks(), 1);
   assert.equal(mailView(f.store, f.store.get("x")!, true).text, mailView(f.store, original).text);
   f.store.begin("x"); f.store.delivered("x");
   await f.checker.reconcile("x");
@@ -111,25 +106,22 @@ test("Input provenance does not add a second classification system", async t => 
   composeMail(f.store, "topic", "x", { ...mailDraft(f.topic, { topicId: "topic", text: note.spec.text, target: larkPersonAddress("app", "ou_c") }, { notes: [{ uid: note.metadata.uid, version: noteVersion(note) }] }), inputIds: ["reclaimed-input"] });
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
-  assert.equal(f.checks(), 1);
 });
 
-test("missing or stale materials fail closed and unavailable checker notifies Me", async t => {
+test("missing or stale Note references fail closed", async t => {
   const f = await setup(t); const n = await f.note();
   f.output("stale", n); await f.client.replace(n, { ...n.spec, text: "Changed" }, n.status);
   await f.checker.reconcile("stale");
   assert.match(f.store.get("stale")!.status.disclosure!.reason, /changed/);
   f.output("missing"); await f.checker.reconcile("missing");
   assert.match(f.store.get("missing")!.status.disclosure!.reason, /No verifiable/);
-  f.ports.check = async () => { throw new Error("model unavailable"); };
-  f.output("failed", await f.note()); await f.checker.reconcile("failed");
-  assert.equal(f.store.get("failed")!.status.disclosure!.decision, "denied");
 });
 
-test("permission change during async review never publishes a stale authorization", async t => {
+test("permission change during audience resolution never publishes a stale authorization", async t => {
   const f = await setup(t); await f.clearance("L3"); f.output("x", await f.note("L3"));
-  f.ports.check = async () => { await f.clearance("L1"); return { allowed: true, reason: "supported" }; };
-  await assert.rejects(f.checker.reconcile("x"), /changed during review/);
+  const audience = f.ports.audience; let reads = 0;
+  f.ports.audience = async ref => { if (++reads === 2) await f.clearance("L1"); return audience(ref); };
+  await assert.rejects(f.checker.reconcile("x"), /changed during resolution/);
   assert.equal(f.store.get("x")!.status.delivery, undefined);
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "denied");
@@ -298,19 +290,19 @@ test("audience permutations survive failed and interrupted idempotent delivery",
     assert.equal(result.status.phase, "delivered");
     assert.equal(result.status.attempts, 2);
     assert.equal(sends, 2);
-    assert.equal(f.checks(), 1);
     assert.equal(result.status.disclosure!.fingerprint, fingerprint);
     assert.deepEqual(result.status.delivery!.receivers.toJSON().map(p => p.uid), [f.me.metadata.uid, f.other.metadata.uid].sort());
   }
 });
 
-test("audience reorder during asynchronous review does not invalidate the check", async t => {
+test("audience reorder during asynchronous resolution does not invalidate the check", async t => {
   const f = await setup(t);
   f.audience({ people: [f.me, f.other], private: false });
   f.output("x", await f.note());
-  f.ports.check = async () => {
-    f.audience({ people: [f.other, f.me, f.me], private: false });
-    return { allowed: true, reason: "supported" };
+  const audience = f.ports.audience; let reads = 0;
+  f.ports.audience = async ref => {
+    if (++reads === 2) f.audience({ people: [f.other, f.me, f.me], private: false });
+    return audience(ref);
   };
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "allowed");
@@ -342,7 +334,6 @@ test("rechecking changed evidence preserves the same recipient set after an atte
   await f.checker.reconcile("x");
   assert.equal(f.store.get("x")!.status.phase, "pending");
   assert.equal(f.store.get("x")!.status.disclosure!.policy!.visibility, "people");
-  assert.equal(f.checks(), 2);
 });
 
 test("Output admission and immutable delivery compare Person UID sets on both sides", async t => {
@@ -382,33 +373,41 @@ test("Person frequency changes do not invalidate disclosure or interrupt an Outp
   } }), pino({ level: "silent" }));
   await assert.rejects(delivery.reconcile("frequency-change"));
   const fingerprint = f.store.get("frequency-change")!.status.disclosure!.fingerprint;
-  const checks = f.checks();
   await f.client.patch(f.other, { type: "merge", value: { spec: { delivery: { window: { duration: "1h", maxMessages: 10 }, minInterval: "1m" } } } });
   await delivery.reconcile("frequency-change");
   assert.equal(f.store.get("frequency-change")!.status.phase, "delivered");
   assert.equal(f.store.get("frequency-change")!.status.disclosure!.fingerprint, fingerprint);
-  assert.equal(f.checks(), checks);
   assert.equal(sends, 2);
 });
 
 
-test("External streams wait for the complete think and text; private Me can bind while open", async t => {
+test("External streams wait for frozen references; large bodies route without content inspection", async t => {
   const f = await setup(t), note = await f.note();
-  const target = larkPersonAddress("app", "ou_c");
+  const target = larkAddress("app", "oc_group");
+  f.audience({ people: [f.me, f.other], private: false });
   allowAddress(f.store.storage.home, target);
   const external = composeMail(f.store, "topic", "external", { ...mailDraft(f.topic, { topicId: "topic", text: "", target }), content: { kind: "agent" } });
   f.store.streams.append(external.spec.stream, [{ kind: "agent_thought_chunk", payload: { messageId: "reply", content: { type: "text", text: "private reasoning" } } }, { kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "public answer" } } }]);
   await f.checker.reconcile("external");
   assert.equal(f.store.get("external")!.status.delivery, undefined);
-  assert.equal(f.checks(), 0);
-  let checked = "";
-  f.ports.check = async evidence => { checked = evidence.text; return { allowed: true, reason: "supported" }; };
   new MailWriter(f.store.streams, external.spec.stream).cite([{ uid: note.metadata.uid, version: noteVersion(note) }]);
-  f.store.streams.append(external.spec.stream, [{ kind: "tool_call_update", payload: { toolCallId: "read", title: "Referenced tool", status: "completed", rawOutput: "private tool evidence" } }]);
-  f.store.streams.complete(external.spec.stream);
+  f.store.streams.append(external.spec.stream, [{ kind: "tool_call_update", payload: { toolCallId: "read", title: "Referenced tool", status: "completed", rawOutput: "tool evidence".repeat(20_000) } }]);
   await f.checker.reconcile("external");
-  assert.match(checked, /private reasoning/); assert.match(checked, /public answer/); assert.match(checked, /private tool evidence/);
+  assert.equal(f.store.get("external")!.status.delivery, undefined, "citations may still change while open");
+  f.store.streams.complete(external.spec.stream);
+  const reader = f.store.streams.reader;
+  f.store.streams.reader = () => { throw new Error("Policy must not read Stream content"); };
+  try { await f.checker.reconcile("external"); } finally { f.store.streams.reader = reader; }
+  assert.equal(f.store.get("external")!.status.disclosure!.decision, "allowed");
   assert.deepEqual(f.store.get("external")!.status.delivery!.stream, external.spec.stream);
+  let delivered = false;
+  const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", send: async ({ target, stream }) => {
+    assert.deepEqual(target, larkAddress("app", "oc_group"));
+    assert.deepEqual(stream.ref, external.spec.stream);
+    delivered = true; return { id: "large-mail", scope: "test" };
+  } }), pino({ level: "silent" }));
+  await delivery.reconcile("external");
+  assert(delivered); assert.equal(f.store.get("external")!.status.phase, "delivered");
   const direct = composeMail(f.store, "topic", "private", { ...mailDraft(f.topic, { topicId: "topic", text: "", target: webAddress("topic") }), content: { kind: "agent" } });
   await f.checker.reconcile("private");
   assert.deepEqual(f.store.get("private")!.status.delivery!.stream, direct.spec.stream);

@@ -19,8 +19,8 @@ Output.spec 的 receivers/target/stream 表达原定意图，status.delivery 对
 
 Note 引用放在 Stream.status.references，记录 UID、读取版本与正文指纹。实时生成期间通过
 `cite_output` 补充引用，关闭后冻结；say 的 notes 参数在写信时转成相同引用。Note 保持原 subject
-和生命周期。Reconcile 可读取引用以及 Note 的当前权限、敏感度，正文一致性由独立 checker 解释
-邮件协议后验证。Output.spec 不再承载 notes、think、text 或工具事件。
+和生命周期。Agent 负责整份 Stream 的内容、分类和引用完整性。Reconcile 读取引用及 Note 当前权限、敏感度，
+核对引用有效性后决定下一跳；内容不经模型复审或长度门槛。Output.spec 不再承载 notes、think、text 或工具事件。
 
 Immediate Input 遇到 mute：实际地址保持原计划地址，实际流替换成固定禁言提示。
 其它 Input 遇到 mute：实际地址改为 Me 默认地址，正文复用原始流。默认地址仍需通过
@@ -30,8 +30,8 @@ Reconcile 建立投递后，Host 持有可关闭、可恢复的 Stream 消费任
 协调与失败重试。Stream 追加不通过 Watch 唤醒 Output。投递按 750ms 节奏合并更新，
 不支持消息更新的 Connector 等待流结束后发送完整正文。
 
-已验证的私密 Me 地址可持续展示新内容；外部地址等待完整内容，由内容 checker 连同思考与工具证据一起检查。
-空流上的检查不能授权未来内容。权限变化后停止继续投递，已发生的外部效果不会被改写。
+已验证的私密 Me 地址可持续展示新内容；外部地址等待 Stream 关闭、引用集合冻结后按元数据授权。
+生成中的引用集合尚未完整，不能提前授权外部投递。权限变化后停止继续投递，已发生的外部效果不会被改写。
 Lark 卡片由实际 Output Stream 驱动，停止原有按 Topic 投影、旁路发送的执行卡片。
 
 Stream.completed 只表示生成完成；Output.delivered 还要求实际流的末尾内容已确认送达。

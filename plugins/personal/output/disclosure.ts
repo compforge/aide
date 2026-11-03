@@ -13,8 +13,6 @@ import type { TopicSpec, TopicStatus } from "../topic/model.ts";
 import { INPUT_TYPE, InputAttention, inputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
 import { receiverIdentity, type Output } from "./model.ts";
 import { muteMail, refusalMail, isMuteMail } from "../stream/notices.ts";
-import { checkMail, type DisclosureEvidence, type SemanticCheck } from "../stream/check.ts";
-export type { DisclosureEvidence, SemanticCheck } from "../stream/check.ts";
 import type { OutputStore } from "./store.ts";
 
 export interface OutputAudience { people: PersonResource[]; private: boolean; muted?: boolean; unavailable?: string }
@@ -22,12 +20,13 @@ export interface DisclosurePorts {
   marks: Me;
   audience(target: AddressRef): Promise<OutputAudience>;
   contactMe(topicId: string): Promise<{ address: AddressRef; target: Address; receivers: ResourceRef[] }>;
-  check?: SemanticCheck;
 }
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 
 /**
+ * @spec Disclosure uses Note references, classification and audience metadata; Stream bodies are opaque.
+ * @why Agent owns content and complete citations; delivery never invokes a model or applies a content-length gate.
  * @spec Content/intent remain immutable. Only a persisted, checked actual delivery can cross a Channel boundary.
  * @spec Me's exemption depends on verified private destination identity, never intended receivers alone.
  * @spec Immediate Input Outputs replace muted content with a fixed notice at the intended address; other refusals contact Me.
@@ -69,7 +68,6 @@ export class OutputDisclosure {
   private snapshot(output: Output, audience: OutputAudience) {
     const immediate = !!audience.muted && this.hasImmediateInput(output);
     const dependencies: unknown[] = [this.addressPolicy(output.spec.target), immediate];
-    const materials: DisclosureEvidence["materials"] = [];
     let refusal = audience.unavailable ?? (audience.muted ? "Aide is muted at this Address" : audience.people.length ? "" : "No known destination participants");
     const get = <S, T>(ref: ResourceRef & { uid?: string }): Resource<S, T> | undefined => {
       const r = this.store.resources.find<S, T>(ref, ref.name, ref.namespace);
@@ -94,7 +92,6 @@ export class OutputDisclosure {
       if (!note || note.metadata.deletionTimestamp || (ref.contentVersion ? noteTextVersion(note) !== ref.contentVersion : noteVersion(note) !== ref.version)) {
         refusal ||= `Note ${ref.uid} is missing or changed since generation`; continue;
       }
-      materials.push({ id: ref.uid, text: note.spec.text });
       const item: PolicyNote = { sensitivity: note.spec.sensitivity ?? "L3", visibility: note.spec.visibility ?? "people", people: [...note.spec.people].map(p => p.uid) };
       if (item.visibility === "topic" || item.visibility === "root") {
         let topic = topicFor(note.spec.subject);
@@ -119,7 +116,7 @@ export class OutputDisclosure {
         refusal ||= `Recipient ${recipient.metadata.name} is outside visibility ${policy.visibility}`;
     }
     return { policy, immediate, fingerprint: hash([receiverIdentity(output.spec), policy, dependencies, { ...audience, people: audience.people.map(p => [p.metadata.uid, p.metadata.deletionTimestamp, personDisclosure(p.spec)]) }, this.ports.marks]), privateMe,
-      refusal: privateMe && !audience.muted && !audience.unavailable ? "" : refusal, materials };
+      refusal: privateMe && !audience.muted && !audience.unavailable ? "" : refusal };
   }
   private isMuteNotice(output: Output) {
     return isMuteMail(this.store, output);
@@ -141,21 +138,18 @@ export class OutputDisclosure {
     }
     const audience = await this.audience(output.spec.target);
     const snapshot = this.snapshot(output, audience);
-    // Recheck an existing authorization before waiting for external review: a formerly private
+    // Recheck an existing authorization before waiting for references to freeze: a formerly private
     // destination must never keep receiving new chunks after its audience changes.
     if ((output.status.phase === "sending" || (output.status.attempts > 0 && this.store.streams.get(output.spec.stream).status.phase === "open"))
       && snapshot.fingerprint !== output.status.disclosure?.fingerprint) {
       this.store.uncertain(id, "Disclosure changed during delivery; verify external receipts"); return;
     }
-    // A private Me destination authorizes ongoing content. External destinations require a complete reviewed body.
+    // A private Me destination authorizes ongoing content. External destinations require frozen references.
     if (!snapshot.privateMe && !audience.muted && this.store.streams.get(output.spec.stream).status.phase === "open") {
       if (output.status.delivery) this.store.update(id, status => ({ ...status, delivery: undefined, disclosure: undefined }));
       return;
     }
-    let reason = output.status.disclosure?.decision === "denied" ? output.status.disclosure.reason : snapshot.refusal;
-    if (!reason && !snapshot.privateMe && output.status.disclosure?.fingerprint !== snapshot.fingerprint) {
-      reason = await checkMail(this.store.streams.reader(output.spec.stream), snapshot.materials, this.ports.check);
-    }
+    const reason = output.status.disclosure?.decision === "denied" ? output.status.disclosure.reason : snapshot.refusal;
 
     if (!reason && output.status.disclosure?.decision === "allowed" && output.status.disclosure.fingerprint === snapshot.fingerprint && output.status.delivery) return;
     if (reason && output.status.attempts > 0) {
@@ -178,12 +172,12 @@ export class OutputDisclosure {
       fallbackPolicy = this.addressPolicy(me.address);
       delivery = { ...me, receivers: personRefs(fallback.people.map(personRef)), stream: audience.muted ? output.spec.stream : refusalMail(this.store, output, reason) };
     }
-    // Awaited model/provider calls cannot authorize a changed resource or audience.
+    // Awaited audience/fallback lookups cannot authorize a changed resource or audience.
     const currentAudience = await this.audience(output.spec.target);
     this.store.storage.transaction(() => {
       const latest = this.store.get(id);
       if (!latest || latest.status.phase !== "pending") return;
-      if (this.snapshot(latest, currentAudience).fingerprint !== snapshot.fingerprint) throw new Error("Disclosure dependencies changed during review; retry with current evidence");
+      if (this.snapshot(latest, currentAudience).fingerprint !== snapshot.fingerprint) throw new Error("Disclosure dependencies changed during resolution; retry with current evidence");
       if (decision === "denied" && delivery.notice !== "muted" && this.addressPolicy(delivery.address) !== fallbackPolicy) throw new Error("Fallback Address changed before delivery commit");
       if (decision === "denied" && fallbackPeople.some(person => {
         const latestPerson = this.store.resources.find<Person, PersonStatus>(person, person.metadata.name, person.metadata.namespace);
@@ -195,7 +189,7 @@ export class OutputDisclosure {
       this.store.update(id, status => ({ ...status, disclosure: { decision, reason: reason || "Destination is permitted", checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint, ...(snapshot.policy ? { policy: snapshot.policy } : {}) }, delivery,
         waitingAddress: undefined, lastError: undefined }));
     });
-    this.log.info({ outputId: id, decision, notice: delivery.notice, actualTarget: delivery.target }, "Output disclosure resolved");
+    this.log.info({ outputId: id, decision, reason: reason || "Destination is permitted", notice: delivery.notice, actualTarget: delivery.target }, "Output disclosure resolved");
   }
 }
 

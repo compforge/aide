@@ -50,7 +50,3 @@ function apply(state: Projection, event: StreamEvent) {
     if (record.kind === "agent_message" && record.payload.phase !== undefined) message.phase = record.payload.phase; }
   state.messages.set(key, message);
 }
-export function streamEvidence(reader: StreamReader): string {
-  const view = readAgentStream(reader);
-  return [view.think, view.text, ...view.tools.map(t => [t.title, t.status, textOf(t.content), JSON.stringify(t.rawInput), JSON.stringify(t.rawOutput)].filter(Boolean).join("\n"))].filter(Boolean).join("\n\n");
-}

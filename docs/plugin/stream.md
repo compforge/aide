@@ -31,7 +31,7 @@ Stream 更新不通过资源 Watch 唤醒 Output Reconcile。
 - message upsert 的 content 缺省保留，null 或空数组清空，数组整体替换。完整快照不会重复累计增量。
 - tool update 按字段更新，缺省保留、null 清空；工具状态与输入输出保留在协议中。
 
-通道 renderer、Web 查询和语义 checker 解释该协议。Output 的投递状态机只传递读取句柄，
+通道 renderer 和 Web 查询解释该协议。Output 的投递状态机只传递读取句柄，
 不拼接 think/text 或解析工具内容。内容投影按 UID 缓存并从游标增量回放，缓存有数量上限。
 
 例如正在生成的原始 Stream：

@@ -29,19 +29,19 @@ Me 在人物页面编辑 clearance；主题参与者通过 `POST /topics/people`
 2. visibility 取较窄类型，顺序为 people、topic、root、any。
 3. people 类型使用所有引用 Note.people 的并集；接收者出现在任意一份 Note.people 即满足范围。
 4. topic/root 类型使用设定该类型的 Note 所解析参与名单的并集；无法解析时不外发。any 没有成员限制。
-5. 每个实际接收者都须满足计算出的范围与密级；Me 豁免。已确认私有且未禁言的 Me 目的地不要求材料引用或模型校验。
+5. 每个实际接收者都须满足计算出的范围与密级；Me 豁免。已确认私有且未禁言的 Me 目的地不要求材料引用。
 
 混合范围的合成规则属于可调整策略，并不声称 people/topic/root 的实际成员集合天然包含彼此。后续策略变更集中在此处；已送达内容不追回，也不会自动重发。
 
 ## 生成与检查
 
-`say` 原子创建邮件和投递任务。Output 保存不可变的 stream（UID 引用）、target、receivers，以及可选的 Input 追溯信息；notes 转为 Stream.status.references（UID、读取版本与正文指纹）。实时生成通过 cite_output 补充引用，关闭后冻结。真正使用的近期和长期 Note 都应引用；对外正文使用新 Input 的事实时，先将相关事实整理到可引用、可分类的 Note。仅向 Me 沟通不强制先写 Note。工具只确认已接纳，不确认送达。
+`say` 原子创建邮件和投递任务。Output 保存不可变的 stream（UID 引用）、target、receivers，以及可选的 Input 追溯信息；notes 转为 Stream.status.references（UID、读取版本与正文指纹）。实时生成通过 cite_output 补充引用，关闭后冻结。Agent 负责内容正确性、分类准确性和引用完整性；引用覆盖整份可发送 Stream，包括回答、思考和工具结果使用的近期与长期 Note。对外内容使用新 Input 的事实时，先将相关事实整理到可引用、可分类的 Note。仅向 Me 沟通不强制先写 Note。工具只确认已接纳，不确认送达。
 
 upsert_note 回执返回 noteId、uid、version；引用使用 uid/version，后续编辑使用 noteId。say 与 cite_output 写入引用时拒绝不存在、已删除或版本失效的 Note，返回可修正的工具错误；整批失败不保留部分引用，say 不提交 Output、Stream 或接纳回执。已接纳的同键重试仍返回原回执。投递前继续检查后续变化。
 
 写入引用时核对 Note 读取版本，并单独固定引用 Note 的正文指纹。发送前读取当前分类：分类变化触发重新计算，正文修改或 Note 回收导致引用失效。`status.disclosure.policy` 保存本次计算结果，fingerprint 标识材料、组织关系、人物与实际受众等依赖。
 
-Reconciler 检查 Address 的已知参与者、禁言设置和计算出的权限，再委托内容 checker 解释邮件协议并使用隔离 Pi 校验正文、思考与工具证据是否受引用支持。模型复用 Chief 配置，禁用环境上下文、skills 和外部工具，材料预算 100000 字符，最多 30 秒。无有效引用、没有已知参与者、失效人物、地址禁言、模型不可用或校验拒绝都不外发。引用一致性校验无法保证所有背景信息都已被引用。
+Reconciler 按 Note 引用有效性、当前分类、Address 已知参与者与禁言设置决定实际投递。它将 Stream 内容视为不透明邮件，不解析正文、思考或工具结果，不调用审核模型，也不以内容长度决定权限。无有效引用、没有已知参与者、失效人物、地址禁言或权限不足时执行相应转投或提示策略。引用完整性由 Agent 负责，元数据检查不证明内容受到引用支持。Channel 按平台限制处理展示与消息分段。
 
 Web 是 Me 的私有界面。Lark 私聊按 app/open_id 或已观察的私聊人物解析；群聊按 Address.people 的已知参与者检查，不要求完整名单、不额外请求所有群成员。这是用户选择的近似边界，未知旁观者、机器人和转发不在保证内。Address 不另设 sensitivity / visibility，内容分类来自 Note，人物权限来自 clearance；参见 [Address](address.md)。
 
@@ -55,14 +55,14 @@ Chief 只提交 raw Output，Reconciler 根据策略选择实际 target/stream�
 
 非 Immediate Output 遇到禁言时改投 Me 的 defaultAddress，复用 raw Stream。其它拒绝在同一 Output 上创建替换 Stream，通过 defaultAddress 私下通知 Me：“原计划给谁发什么、因为什么未发送”。不新建通知 Output。默认地址暂不可用时保留 pending/error，由此 Output 自己重试，不阻断其它 Output。
 
-异步检查完成后重新核对依赖；transport 准备完成后再检查一次，再记录 sending 并调用发送。被拒绝的原意图不会因权限放宽自动恢复外发；已经保存的禁言提示在 Input 回收、解除禁言或重启后仍只重试该提示。开始尝试后实际正文、目的地与接收者不可改变；变化使原投递无法继续时转 uncertain，核对外部回执。
+异步解析受众或回退目的地后重新核对依赖；transport 准备完成后再检查一次，再记录 sending 并调用发送。被拒绝的原意图不会因权限放宽自动恢复外发；已经保存的禁言提示在 Input 回收、解除禁言或重启后仍只重试该提示。开始尝试后实际正文、目的地与接收者不可改变；变化使原投递无法继续时转 uncertain，核对外部回执。
 
 幂等 transport 使用同一 Output ID 重试；Lark 按稳定分段 UUID 和本地回执续传。非幂等 transport 发送结果未知或进程中断后转 uncertain，不盲目重发或转投。Requirement 回读匹配目标、正文和投递标记后可恢复 delivered。提供方去重窗口之外不能承诺恰好一次。送达清理 lastError，运行时掌管退避时间，Output 不另存 nextAttemptAt。
 
-网络无法把本地权限快照与远端群成员变化纳入同一事务。Web 的 delivered 代表发布完成，不表示用户已阅读。私密 Me 地址可持续展示实际 Stream 的 think/text；外部地址等待终态并对正文、思考和工具证据一起检查后才能发送。页面按原始正文去重，再装饰投递状态标签。
+网络无法把本地权限快照与远端群成员变化纳入同一事务。Web 的 delivered 代表发布完成，不表示用户已阅读。私密 Me 地址可持续展示实际 Stream 的 think/text；外部地址等待 Stream 终态、引用冻结后按权限元数据判定并发送。页面按原始正文去重，再装饰投递状态标签。
 
 ## 验证
 
-`tests/output-disclosure.test.ts` 覆盖 Me 例外、people 并集、当前分类、动态归属、正文失效、异步检查期间权限变化与同资源转告。`tests/output.test.ts`、`tests/requirement-output.test.ts`、`tests/lark.test.ts` 覆盖失败隔离、幂等续传、回执恢复与非幂等发送不确定性。`tests/summary-notes.test.ts` 验证分类独立编辑及摘要依赖一致性。
+`tests/output-disclosure.test.ts` 覆盖 Me 例外、people 并集、当前分类、动态归属、正文失效、异步受众解析期间权限变化、长内容不经正文读取即可投递与同资源转告。`tests/output.test.ts`、`tests/requirement-output.test.ts`、`tests/lark.test.ts` 覆盖失败隔离、幂等续传、回执恢复与非幂等发送不确定性。`tests/summary-notes.test.ts` 验证分类独立编辑及摘要依赖一致性。
 
 Person 引用集合在 Resource 的 TS 字段中使用 `KeyedSet<PersonRef>`，按 UID 判断成员身份；Note.people、Topic.people、Input.receivers、Output.spec.receivers 与 Output.status.delivery.receivers 共用这一契约。持久化和对外 DTO 使用规范顺序的数组，重复项和顺序不改变披露指纹或重试目标。
