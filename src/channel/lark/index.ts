@@ -15,7 +15,7 @@ import { z } from "zod";
 import { normalize } from "@larksuiteoapi/node-sdk";
 import type { ChannelService } from "../service.ts";
 import { IncomingSchema } from "../message.ts";
-import { progressCard, cardPreviews, cardContent, cardThought, type LarkProgress } from "./card.ts";
+import { progressCard, cardHeaders, cardContent, cardThought, type LarkProgress } from "./card.ts";
 import { larkDeliveryError, larkSendFailure, type LarkTransport } from "./client.ts";
 
 /** @why Lark can return null for permission-restricted user_id; SDK normalization expects absent IDs as undefined. */
@@ -32,7 +32,7 @@ const EventSchema = z.object({
       id: UserIdsSchema })).optional() }),
 });
 const CardSchema = z.object({ cardId: z.string(), sent: z.boolean(), sequence: z.number().int(),
-  layout: z.number().default(0), previews: z.string().default(""),
+  headers: z.string(),
   streaming: z.boolean(), think: z.string(), content: z.string(), signature: z.string() });
 type Card = z.infer<typeof CardSchema>;
 const NoticeSchema = z.object({ id: z.string(), topicId: z.string(), at: z.string(), role: z.literal("aide"), text: z.string(), workId: z.null() });
@@ -301,7 +301,7 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
 
     if (!card) {
       card = { cardId: await transport.create(progressCard(view, live)), sent: false, sequence: 0,
-        layout: 1, previews: JSON.stringify(cardPreviews(view)),
+        headers: JSON.stringify(cardHeaders(view)),
         streaming: live, think: cardThought(view), content: cardContent(view), signature: "" };
       this.saveCard(view.id, card);
     }
@@ -322,12 +322,6 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
       await operation((sequence, id) => transport.settings(card.cardId, live, sequence, id));
       card.streaming = live; this.saveCard(view.id, card);
     }
-    if (card.layout !== 1) {
-      await operation((sequence, id) => transport.update(card.cardId, progressCard(view, live), sequence, id));
-      card.layout = 1; card.think = cardThought(view); card.content = cardContent(view);
-      card.previews = JSON.stringify(cardPreviews(view)); this.saveCard(view.id, card);
-      this.log.info({ inputId: view.id, cardId: card.cardId }, "Lark card upgraded to stable reply panels");
-    }
     const patches: Record<string, unknown> = {};
     for (const [field, elementId, text] of [["think", "think", cardThought(view)], ["content", "content", cardContent(view)]] as const) {
       if (card[field] === text) continue;
@@ -336,12 +330,12 @@ export class LarkChannel implements TopicLocator<{ chatId: string; threadId?: st
         card[field] = text; this.saveCard(view.id, card);
       } else patches[elementId] = { content: text };
     }
-    const previews = cardPreviews(view), previewSignature = JSON.stringify(previews);
-    if (card.previews !== previewSignature) Object.assign(patches, previews);
-    // Text-only patches never write expanded or replace panels, including at completion and resumption.
+    const headers = cardHeaders(view), headerSignature = JSON.stringify(headers);
+    if (card.headers !== headerSignature) Object.assign(patches, headers);
+    // Content/header patches never write expanded or replace panel children, including at completion and resumption.
     if (Object.keys(patches).length) {
       await operation((sequence, id) => transport.patch(card.cardId, patches, sequence, id));
-      card.think = cardThought(view); card.content = cardContent(view); card.previews = previewSignature;
+      card.think = cardThought(view); card.content = cardContent(view); card.headers = headerSignature;
       this.saveCard(view.id, card);
     }
     if (!live) {

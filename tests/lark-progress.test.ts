@@ -14,7 +14,7 @@ import pino from "pino";
 import * as Lark from "@larksuiteoapi/node-sdk";
 import { Aide } from "../src/app.ts";
 import { LarkChannel } from "../src/channel/lark/index.ts";
-import { progressCard, cardPreviews } from "../src/channel/lark/card.ts";
+import { progressCard, cardHeaders } from "../src/channel/lark/card.ts";
 import { larkTransport, type LarkTransport } from "../src/channel/lark/client.ts";
 import type { HarnessEventSink } from "../src/host/harness/adapter.ts";
 import { fakeOptions } from "./fake-harness.ts";
@@ -74,10 +74,15 @@ test("Lark sends one checked stream card, preserves reply coordinates and finali
 
 test("Reader expansion survives stream updates and completion", async t => {
   const f = setup(t); await f.send(open(1, "思考"));
-  const panels = f.card.body.elements[0]!.elements.filter(item => (item as { tag: string }).tag === "collapsible_panel") as Array<{ expanded: boolean }>;
-  panels[0]!.expanded = true; panels[1]!.expanded = true;
-  await f.send(open(2, "继续思考", "回答")); await f.send(completed(2, "继续思考", "回答"));
-  assert(panels.every(panel => panel.expanded));
+  const panels = f.card.body.elements;
+  assert.deepEqual(panels.map(p => [p.element_id, p.expanded]), [["answer_panel", true], ["process_panel", false]]);
+  panels[0]!.expanded = false; panels[1]!.expanded = true;
+  await f.send(open(2, "继续思考", "回答")); await f.reopen(); await f.send(completed(2, "继续思考", "回答"));
+  assert.equal(panels[0]!.expanded, false); assert.equal(panels[1]!.expanded, true);
+  assert.match(panels[1]!.header.title.content, /已完成/);
+  const patches = f.calls.filter(c => c.kind === "patch").map(c => c.args[1]);
+  assert(!JSON.stringify(patches).includes('"expanded"'));
+  assert(!JSON.stringify(patches).includes('"elements"'));
   assert.equal(f.calls.filter(c => c.kind === "update").length, 0);
 });
 
@@ -96,7 +101,7 @@ test("Long stream answers retain their complete tail through idempotent text par
   const f = setup(t), text = "答案😀".repeat(3000);
   await f.send(completed(1, "", text));
   const tail = f.calls.filter(c => c.kind === "text").map(c => String(c.args[1])).join("");
-  const panels = f.card.body.elements[0]!.elements as Array<{ elements?: Array<{ element_id?: string; content?: string }> }>;
+  const panels = f.card.body.elements;
   const prefix = panels.flatMap(p => p.elements ?? []).find(e => e.element_id === "content")!.content!.split("\n\n（内容较长")[0]!;
   assert.equal(prefix + tail, text);
   const count = f.calls.length; await f.reopen(); await f.send(completed(1, "", text));
@@ -161,7 +166,7 @@ test("official SDK creates, sends, streams and finalizes CardKit cards through t
   await cards.send("oc_chat", "card-1", "stable-send");
   await cards.content("card-1", "think", "思考全文", 1, "seq-1");
   await cards.settings("card-1", false, 2, "seq-2");
-  await cards.patch("card-1", { answer_preview: { text: { tag: "plain_text", content: "三行预览", lines: 3 } } }, 3, "seq-3");
+  await cards.patch("card-1", cardHeaders({ id: "sdk", phase: "done", think: "", content: "全文", messageIds: [], overflow: false }), 3, "seq-3");
   assert.equal(calls[0]!.body.type, "card_json");
   assert.deepEqual(JSON.parse(calls[1]!.body.content as string), { type: "card", data: { card_id: "card-1" } });
   assert.ok(calls[2]!.url.endsWith("/cardkit/v1/cards/card-1/elements/think/content"));
@@ -169,7 +174,7 @@ test("official SDK creates, sends, streams and finalizes CardKit cards through t
   assert.deepEqual(JSON.parse(calls[3]!.body.settings as string), { config: { streaming_mode: false } });
   assert.ok(calls[4]!.url.endsWith("/cardkit/v1/cards/card-1/batch_update"));
   assert.deepEqual(JSON.parse(calls[4]!.body.actions as string), [{ action: "partial_update_element",
-    params: { element_id: "answer_preview", partial_element: { text: { tag: "plain_text", content: "三行预览", lines: 3 } } } }]);
+    params: { element_id: "process_panel", partial_element: cardHeaders({ id: "sdk", phase: "done", think: "", content: "全文", messageIds: [], overflow: false }).process_panel } }]);
   rejectUpdate = true;
   await assert.rejects(cards.patch("card-1", {}, 4, "seq-4"), /code 99991672/);
 });
@@ -200,7 +205,7 @@ test("Card serialization budget includes escaped content without losing the answ
   await f.send(completed(1, "\0".repeat(4000), text));
   const payload = f.calls.find(c => c.kind === "create")!.args[0];
   assert(Buffer.byteLength(JSON.stringify({ type: "card_json", data: JSON.stringify(payload) })) <= 28_000);
-  const panels = f.card.body.elements[0]!.elements as Array<{ elements?: Array<{ element_id?: string; content?: string }> }>;
+  const panels = f.card.body.elements;
   const rendered = panels.flatMap(p => p.elements ?? []).find(e => e.element_id === "content")!.content!;
   const prefix = rendered.split("\n\n（内容较长")[0]!;
   const tail = f.calls.filter(c => c.kind === "text").map(c => String(c.args[1])).join("");
@@ -217,4 +222,18 @@ test("Lark renders tool updates from the selected mail and retains them at compl
   await f.send({ ...initial, status: { ...initial.status, phase: "completed", lastSeq: 4, closedAt: new Date().toISOString() }, read: after => end.filter(r => r.seq > (after ?? 0)) });
   assert.match(JSON.stringify(f.card), /发现证据/); assert.match(JSON.stringify(f.card), /已完成/);
   assert.equal(f.calls.filter(c => c.kind === "send").length, 1);
+});
+
+
+// @case Completed answers remain full Markdown in one expanded panel, without duplicated previews or nested wrappers.
+test("Completed card exposes the whole Markdown answer once and keeps process separate", async t => {
+  const f = setup(t);
+  const text = "首段\n\n第二段\n\n第三段\n\n第四段 searchable-tail-42\n\n```ts\nconsole.log('hello');\n```";
+  await f.send(completed(1, "过程详情", text));
+  const panels = f.card.body.elements;
+  assert.equal(panels.length, 2);
+  assert.equal(panels[0]!.expanded, true); assert.equal(panels[1]!.expanded, false);
+  assert.equal(panels[0]!.elements[0]!.content, text);
+  assert.equal(panels[1]!.elements[0]!.content, "过程详情");
+  assert.equal(JSON.stringify(f.card).split("searchable-tail-42").length - 1, 1);
 });
