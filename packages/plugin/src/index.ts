@@ -1,3 +1,4 @@
+export { AideError, aideErrorDetails, type AideErrorOptions } from "@compforge/aide-common";
 export type { AgentStatus } from "./harness.ts";
 export type { Address, ChannelAddress, RequirementAddress } from "./address.ts";
 

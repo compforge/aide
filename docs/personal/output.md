@@ -68,9 +68,16 @@ Output 由独立 Reconciler 检查材料与受众，并持久化实际投递目�
 
 事务内写过的资源不能被后续写入的容量回收淘汰。内容非法、版本冲突或受保护资源超过容量都会整笔回滚。业务执行已经发生后的提交冲突只重试提交，不重新执行动作。Output 身份对应内容指纹，回收后在 Host 去重窗口内仍拒绝恢复同一 Output 的投递。
 
-启动时，底座唤醒未完成 Output，由各自 Reconciler 重新检查依赖和投递能力。准备失败按资源退避，明确的永久拒绝转为 failed；其它 Output 独立推进。投递适配器通过 [DeliveryError](../connector/extensions.md#host-投递错误) 区分结果：明确未产生副作用的可重试拒绝保持 pending（包括非幂等写入的 429）；永久拒绝进入 failed；未知结果只有幂等发送能保持消息身份继续，其余进入 uncertain。非幂等 sending 中断仍标记 uncertain。
+启动时，底座唤醒未完成 Output，由各自 Reconciler 重新检查依赖和投递能力。准备阶段失败停止自动投递，尚未发送时转 failed，恢复 sending 时不能排除已有副作用则转 uncertain；明确的永久拒绝转为 failed；其它 Output 独立推进。投递适配器通过 [DeliveryError](../connector/extensions.md#host-投递错误) 区分结果：明确未产生副作用的可重试拒绝保持 pending（包括非幂等写入的 429）；永久拒绝进入 failed；未知结果只有幂等发送能保持消息身份继续，其余进入 uncertain。非幂等 sending 中断仍标记 uncertain。
 
 适配器提供 retryAfterMs 时，拒绝原因和 `deliveryWait: {reason: "provider", until}` 一起持久化，再通过已有 requeueAfterMs 定时协调。提前 Watch 或重启唤醒不会绕过该 deadline；到期重新检查披露和人物频率。没有提示时使用控制器错误退避。等待不占据发送执行权，不增加 attempts，不创建新 Output 或重做 Chief；只有再次调用发送才增加 attempts。重试成功清除等待和错误，永久失败保留原因。
+
+投递总次数由 `plugins.personal.output.maxAttempts` 限制，默认 5，最小 1（只允许首次投递）。每次调用 OutputTransport.send 前，在同一存储事务内检查预算并递增 `status.attempts`，成功和失败均计数，包括成功的流式更新。调用内部的平台 HTTP 请求数量不是这个计数单位；人物频控、接收者互斥、提供方 deadline 和 Stream 内容等待不计数。次数先持久化再调用，进程在两者之间退出可能消耗一次预算；重启不清零，已有记录的 attempts 直接参与判断，降低上限后超额 Output 不再发送。
+
+完整内容已确认送达则 delivered。永久拒绝或次数耗尽且确认尚未完整送达则 failed；最后一次是否生效未知则 uncertain。保留最后诊断、已确认 Stream 位置、回执与尝试次数；停止自动投递后不会因 Stream 更新或进程重启重新发送，也不会换址重放。准备异常不会增加投递次数，也不在预算之外自动循环；普通发送异常仅在幂等且还有次数预算时可重放。
+
+Chief 生产 Stream 与 Output 投递是独立生命周期。Chief 自行完成或中断 Stream；Output 达到上限或被拒绝只结束投递，不取消 Chief、不关闭或修改 Stream。即使全部投递失败，Chief 仍可继续写完，生成内容通过 Stream 引用保留供查看和跟进。成功的流式更新也消耗预算，因此 Output 可能在 Stream 仍 open 时转为 failed；它不代表生成已结束。开放 Stream 同时阻止其 Output 所有权树被容量回收。
+
 
 失败日志记录 Output ID 和安全提取的诊断，Lark 另记录目的地、分片、平台错误码、HTTP 状态或网络错误码。SDK 请求配置、凭证、消息正文和自由文本不写入日志或 Output.status。
 

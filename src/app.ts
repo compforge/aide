@@ -1,6 +1,7 @@
 import { isMe } from "../plugins/personal/person/model.ts";
 import { addressRef, type AddressRef } from "../plugins/personal/address/model.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
+import { outputPolicy } from "../plugins/personal/output/config.ts";
 import { OutputDelivery, type OutputTransportResolver } from "../plugins/personal/output/delivery.ts";
 import { forgeCatalog } from "../connectors/forge/catalog.ts";
 import { validateForgeSources } from "../plugins/personal/source/pull-request/config.ts";
@@ -107,7 +108,7 @@ export class Aide {
     if (!options.connectors && Object.values(config?.connectors ?? {}).some(c => c.enabled)) {
       throw new Error("Configured Connectors require await Connectors.load() before constructing Aide");
     }
-    const { sources } = parsePersonalConfig(config?.plugins.personal);
+    const { sources, output } = parsePersonalConfig(config?.plugins.personal);
     const personalConnectors = personalConnectorConfig(config?.connectors);
     const connectorCatalog = options.connectorCatalog ?? (options.connectors instanceof Connectors ? options.connectors.registry.descriptions() : []);
     const discoveredForges = forgeCatalog(connectorCatalog);
@@ -217,7 +218,7 @@ export class Aide {
     this.delivery = new OutputDelivery(this.outputStore, async target => {
       if (isChannelAddress(target) && target.channelId === "web") return { replay: "idempotent", streaming: true, async send() { return undefined; } };
       for (const resolve of this.outputTransports) { const transport = await resolve(target); if (transport) return transport; }
-    }, log);
+    }, log, outputPolicy(output));
     this.runtime.subscribe(() => this.notify());
     this.personal.topics.subscribe(() => this.notify());
   }

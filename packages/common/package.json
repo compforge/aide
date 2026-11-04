@@ -1,0 +1,28 @@
+{
+  "name": "@compforge/aide-common",
+  "version": "0.1.0",
+  "description": "Shared Aide error contracts across Host, plugins and connectors.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/compforge/aide.git",
+    "directory": "packages/common"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

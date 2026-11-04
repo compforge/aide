@@ -45,7 +45,7 @@ export function requirementOutputs(requirements: ConnectorClient["requirements"]
 
 /**
  * @spec Non-idempotent comments retry only explicit pre-effect rejection. Interrupted sending becomes uncertain.
- * @spec Preflight failures can retry; a saved Output and provider scope fix the destination before any write.
+ * @spec Preflight failures stop before any write; a saved Output and provider scope fix the destination.
  * @spec Correlation receipts survive Output reclamation within the Host's configured dedup window.
  * @link docs/connector/requirements.md
  */

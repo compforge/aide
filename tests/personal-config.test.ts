@@ -29,6 +29,13 @@ test("Personal sources use one strict namespace, explicit scopes and no Lark kin
     (error: unknown) => error instanceof Error && error.message.includes("sources.lark.intervalMs") && !error.message.includes("SECRET_SENTINEL"));
 });
 
+test("Output attempt limits use defaults and reject invalid configuration", () => {
+  assert.equal(parsePersonalConfig({ output: {} }).output!.maxAttempts, 5);
+  assert.equal(parsePersonalConfig({ output: { maxAttempts: 1 } }).output!.maxAttempts, 1);
+  assert.equal(parsePersonalConfig({ output: { maxAttempts: 12 } }).output!.maxAttempts, 12);
+  for (const maxAttempts of [-1, 0, 1.5, "5", null]) assert.throws(() => parsePersonalConfig({ output: { maxAttempts } }), /output.maxAttempts/);
+});
+
 test("Startup rejects Source references without matching Connectors before opening Sessions", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-source-config-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));

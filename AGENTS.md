@@ -125,6 +125,7 @@ agents/
   routine/                 # 持续职责 Agent，复用 Pi
   chief/                   # Personal 提示词、Person / Work / 问答 / Connector 工具
 connectors/                # 全局环境目录、需求平台访问；Forge 配置装配与 repocli 只读能力
+packages/common/           # @compforge/aide-common：跨 Host、Plugin、Connector、Channel 的公共错误契约
 packages/connector/        # @compforge/aide-connector：通用 Kind、连接描述、外部实现与调用契约
 packages/plugin/           # @compforge/aide-plugin：Resource、Controller、Source、Watch 与 Hook 公共契约
 tests/                     # 内核、插件、Channel 与 Agent 验证
