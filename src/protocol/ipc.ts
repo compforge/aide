@@ -1,3 +1,5 @@
+import { AideError, aideErrorDetails, type AideErrorOptions } from "@compforge/aide-common";
+import { DeliveryError, deliveryFailure, type DeliveryFailure } from "@compforge/aide-connector";
 import type { RuntimeScope } from "./runtime.ts";
 import type { ReconcileKey } from "./reconcile.ts";
 import type { ConnectorRequest } from "./connectors.ts";
@@ -164,6 +166,8 @@ export interface RunnerSignal {
 }
 
 export interface SerializedError {
+  readonly aide?: AideErrorOptions;
+  readonly delivery?: DeliveryFailure;
   readonly name: string;
   readonly message: string;
   readonly stack?: string;
@@ -225,7 +229,10 @@ export type ChildMessage =
 
 export function serializedError(error: unknown): SerializedError {
   if (error instanceof Error) {
+    const aide = aideErrorDetails(error), delivery = deliveryFailure(error);
     return {
+      ...(aide ? { aide } : {}),
+      ...(delivery ? { delivery } : {}),
       name: error.name,
       message: error.message,
       ...(error.stack === undefined ? {} : { stack: error.stack }),
@@ -241,12 +248,10 @@ export function serializedError(error: unknown): SerializedError {
 }
 
 export function restoredError(error: SerializedError): Error {
-  const restored = new Error(
-    error.message,
-    error.cause === undefined
-      ? undefined
-      : { cause: restoredError(error.cause) },
-  );
+  const delivery = error.delivery && deliveryFailure({ name: "DeliveryError", failure: error.delivery });
+  const details = aideErrorDetails(error.aide);
+  const restored: Error = delivery ? new DeliveryError(delivery) : details ? new AideError(details) : new Error(error.message);
+  if (error.cause !== undefined) restored.cause = restoredError(error.cause);
   restored.name = error.name;
   if (error.stack !== undefined) restored.stack = error.stack;
   return restored;

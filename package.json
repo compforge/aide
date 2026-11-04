@@ -21,6 +21,7 @@
     "@compforge/agent-observation": "0.2.0",
     "@compforge/agent-pi": "0.3.0",
     "@compforge/agentue": "0.0.1",
+    "@compforge/aide-common": "file:packages/common",
     "@compforge/aide-connector": "file:packages/connector",
     "@compforge/aide-plugin": "file:packages/plugin",
     "@compforge/harness-toolbox": "0.3.10",

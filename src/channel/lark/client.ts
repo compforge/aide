@@ -74,12 +74,13 @@ export function larkDeliveryError(error: unknown): DeliveryError {
   if (known) return new DeliveryError(known);
   const failure = larkSendFailure(error);
   const rateLimited = failure.httpStatus === 429 || failure.apiCode === 99991400 || failure.apiCode === 230020;
-  const rejected = [99991672, 99991676, 99991679, 99991401].includes(failure.apiCode ?? -1) ||
+  const rejected = [230013, 99991672, 99991676, 99991679, 99991401].includes(failure.apiCode ?? -1) ||
     (failure.apiCode === undefined && [400, 401, 403, 404, 405, 413, 422].includes(failure.httpStatus ?? -1));
   const delay = rateLimited ? retryAfterMs(error) : undefined;
   return new DeliveryError({ kind: rateLimited ? "retryable" : rejected ? "permanent" : "unknown", message: failure.error,
-    ...(failure.apiCode !== undefined ? { code: `lark:${failure.apiCode}` }
-      : failure.httpStatus ? { code: `http:${failure.httpStatus}` } : failure.transportCode ? { code: failure.transportCode } : {}),
+    code: rateLimited ? "rate_limited" : failure.apiCode === 230013 || [401, 403].includes(failure.httpStatus ?? -1) || [99991672, 99991676, 99991679].includes(failure.apiCode ?? -1)
+      ? "permission_denied" : rejected ? "request_rejected" : "delivery_unknown",
+    ...(failure.apiCode !== undefined ? { biz_code: String(failure.apiCode) } : {}),
     ...(delay !== undefined ? { retryAfterMs: delay } : {}) });
 }
 

@@ -195,7 +195,8 @@ test("Output preflight failures are isolated; interrupted non-idempotent deliver
     return { replay: "idempotent", async send(message) { sent.push(message.id); return undefined; } };
   }, pino({ level: "silent" }));
   const results = await Promise.allSettled(["offline", "ready", "interrupted"].map(id => delivery.reconcile(id)));
-  assert.equal(results[0]!.status, "rejected");
+  assert.equal(results[0]!.status, "fulfilled");
+  assert.equal(f.outputs.get("offline")!.status.phase, "failed");
   assert.deepEqual(sent, ["ready"]);
   assert.equal(f.outputs.get("offline")!.status.attempts, 0);
   assert.equal(f.outputs.get("ready")!.status.phase, "delivered");

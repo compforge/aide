@@ -26,6 +26,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@compforge/aide-common": "0.1.0",
     "@compforge/aide-connector": "0.1.0"
   }
 }

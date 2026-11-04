@@ -1,3 +1,5 @@
+import { aideErrorDetails } from "@compforge/aide-common";
+import { outputPolicy, type OutputPolicy } from "./config.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import type { StreamReader } from "@compforge/aide-plugin";
 import { isMuteMail } from "../stream/notices.ts";
@@ -34,7 +36,7 @@ const activeReceivers = new WeakMap<ResourceStorage, Set<string>>();
 export class OutputDelivery {
   private readonly stopping = new AbortController();
   private readonly running = new Map<string, Promise<OutputReconcileResult>>();
-  constructor(private readonly store: OutputStore, private readonly transport: OutputTransportResolver, private readonly log: Logger) {}
+  constructor(private readonly store: OutputStore, private readonly transport: OutputTransportResolver, private readonly log: Logger, private readonly policy: OutputPolicy = outputPolicy()) {}
   async reconcile(id: string): Promise<OutputReconcileResult> {
     if (this.stopping.signal.aborted) return {};
     const existing = this.running.get(id);
@@ -42,12 +44,7 @@ export class OutputDelivery {
     const run = this.run(id).catch(error => {
       if (this.stopping.signal.aborted || !this.store.get(id) || this.store.get(id)?.metadata.deletionTimestamp) return {};
       if (error instanceof OutputRetryError) throw error;
-      const current = this.store.get(id);
-      // A sending state can already have an external effect; leave recovery to the replay contract.
-      if (current?.status.phase === "pending") {
-        return this.failure(id, deliveryFailure(error) ?? { kind: "retryable", message: "Output preparation failed; retry scheduled by controller" }, true);
-      }
-      throw new Error(current?.status.lastError ?? "Output reconcile failed");
+      return this.stopPreparation(id, error);
     }).finally(() => this.running.delete(id));
     this.running.set(id, run);
     // The Host owns active subscriptions; Runner reconciliation remains short and can bind other Outputs.
@@ -59,12 +56,28 @@ export class OutputDelivery {
     this.stopping.abort(new Error("Output delivery is stopping"));
     await Promise.allSettled(this.running.values());
   }
+  /** @spec Preparation failures do not consume send attempts; they stop instead of looping outside the delivery budget. */
+  private stopPreparation(id: string, error: unknown): OutputReconcileResult {
+    const current = this.store.get(id);
+    if (!current || !["pending", "sending"].includes(current.status.phase)) return {};
+    const failure = deliveryFailure(error), details = aideErrorDetails(error);
+    const reason = failure?.message ?? details?.message ?? "Output preparation failed; automatic delivery stopped";
+    const code = details?.code ?? failure?.code ?? "output_preparation_failed";
+    const biz_code = details?.biz_code ?? failure?.biz_code;
+    const diagnostic = `${reason} [${code}]${biz_code ? ` [${biz_code}]` : ""}`;
+    // A recovered sending state can already have an external effect even if this preparation did no write.
+    if (current.status.phase === "sending") this.store.uncertain(id, diagnostic); else this.store.failed(id, diagnostic);
+    this.log.warn({ outputId: id, code, biz_code, attempts: current.status.attempts, phase: this.store.get(id)!.status.phase }, "Output preparation failed; automatic delivery stopped");
+    return {};
+  }
   private async run(id: string): Promise<OutputReconcileResult> {
     let output = this.store.get(id);
     if (!output || output.metadata.deletionTimestamp || !["pending", "sending"].includes(output.status.phase)) return {};
     if (output.status.phase === "sending" && output.status.delivery?.replay !== "idempotent") {
       this.store.uncertain(id, "Delivery was interrupted; verify external receipt before retrying"); return {};
     }
+    if (output.status.attempts >= this.policy.maxAttempts)
+      return this.exhaustAttempts(id, output.status.lastError ?? "No send budget remains", output.status.attempts > 0);
     const wait = output.status.deliveryWait;
     // Provider deadlines survive early watches and Host restarts; Person policy waits are recomputed below.
     output = await this.store.prepare(id);
@@ -120,6 +133,7 @@ export class OutputDelivery {
       this.store.uncertain(id, "Transport replay contract changed after a send attempt"); return {};
     }
     if (!output.status.attempts) this.store.update(id, s => ({ ...s, delivery: { ...s.delivery!, replay: transport.replay } }));
+    let dispatching = false;
     try {
       for (;;) {
         this.stopping.signal.throwIfAborted();
@@ -136,8 +150,11 @@ export class OutputDelivery {
         }
         // A saved destination/stream never changes within this subscription.
         if (!sameAddress(delivery.target, target)) throw new Error("Actual Output destination changed during streaming");
-        this.store.begin(id);
+        if (!this.store.begin(id, this.policy.maxAttempts))
+          return this.exhaustAttempts(id, "Stream delivery is incomplete", false);
+        dispatching = true;
         const receipt = await transport.send({ id, target, stream, permitMuted: notice });
+        dispatching = false;
         if (!this.store.get(id) || this.store.get(id)?.metadata.deletionTimestamp) return {};
         this.store.update(id, status => ({ ...status, delivery: { ...status.delivery!, confirmedSeq: content.lastSeq }, ...(receipt ? { receipt } : {}) }));
         if (content.phase !== "open") {
@@ -146,22 +163,44 @@ export class OutputDelivery {
           this.log.info({ outputId: id, streamUid: delivery.stream.uid, confirmedSeq: content.lastSeq, phase: content.phase }, "Output stream delivery settled");
           return {};
         }
+        if (this.store.get(id)!.status.attempts >= this.policy.maxAttempts)
+          return this.exhaustAttempts(id, "Stream delivery is incomplete", false);
         await delay(750, undefined, { signal: this.stopping.signal });
       }
     } catch (error) {
       if (this.stopping.signal.aborted || !this.store.get(id) || this.store.get(id)?.metadata.deletionTimestamp) return {};
-      return this.failure(id, deliveryFailure(error) ?? { kind: "unknown", message: "Output transport failed; delivery result is unknown" }, transport.replay === "idempotent");
+      if (!dispatching) return this.stopPreparation(id, error);
+      const failure = deliveryFailure(error), details = aideErrorDetails(error);
+      return this.failure(id, failure ?? { kind: "unknown", message: details?.message ?? "Output transport failed; delivery result is unknown",
+        code: details?.code ?? "delivery_unknown", biz_code: details?.biz_code }, transport.replay === "idempotent",
+        details?.retryable ?? (failure?.kind !== "permanent"));
     }
+  }
+
+  /** @spec The lifetime attempt budget counts successful and failed sends, including streaming updates, across restarts.
+   * @spec Exhaustion only ends delivery; it never closes the Stream or cancels its producing execution. Unknown outcomes remain uncertain.
+   * @link docs/personal/output.md
+   * @case tests/output-retry.test.ts
+   */
+  private exhaustAttempts(id: string, reason: string, uncertain: boolean): OutputReconcileResult {
+    const output = this.store.get(id)!;
+    const error = `Output attempt limit reached (${this.policy.maxAttempts} attempts): ${reason}`;
+    if (uncertain) this.store.uncertain(id, error); else this.store.failed(id, error);
+    this.log.warn({ outputId: id, maxAttempts: this.policy.maxAttempts,
+      attempts: output.status.attempts, phase: uncertain ? "uncertain" : "failed" }, "Output attempt limit reached");
+    return {};
   }
 
   /** @spec Explicit rejection can retry even a non-idempotent write; uncertain effects require safe replay or receipt recovery.
    * @case tests/requirement-output.test.ts
    */
-  private failure(id: string, failure: DeliveryFailure, safeReplay: boolean): OutputReconcileResult {
-    const reason = `${failure.message}${failure.code ? ` [${failure.code}]` : ""}`.slice(0, 4000);
-    this.log.warn({ outputId: id, kind: failure.kind, code: failure.code, retryAfterMs: failure.retryAfterMs, reason }, "Output delivery failed");
+  private failure(id: string, failure: DeliveryFailure, safeReplay: boolean, retryable: boolean): OutputReconcileResult {
+    const reason = `${failure.message}${failure.code ? ` [${failure.code}]` : ""}${failure.biz_code ? ` [${failure.biz_code}]` : ""}`.slice(0, 4000);
+    this.log.warn({ outputId: id, kind: failure.kind, retryable, code: failure.code, biz_code: failure.biz_code, retryAfterMs: failure.retryAfterMs, reason }, "Output delivery failed");
     if (failure.kind === "permanent") { this.store.failed(id, reason); return {}; }
-    if (failure.kind === "unknown" && !safeReplay) { this.store.uncertain(id, reason); return {}; }
+    if (failure.kind === "unknown" && (!retryable || !safeReplay)) { this.store.uncertain(id, reason); return {}; }
+    if (this.store.get(id)!.status.attempts >= this.policy.maxAttempts)
+      return this.exhaustAttempts(id, reason, failure.kind === "unknown");
     const until = failure.retryAfterMs === undefined ? undefined : new Date(Date.now() + failure.retryAfterMs).toISOString();
     // Commit the rejection and provider deadline together before yielding the controller.
     this.store.retry(id, reason, until);

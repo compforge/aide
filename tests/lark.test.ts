@@ -437,7 +437,7 @@ test("Lark maps rate limits and retry headers without leaking SDK data", () => {
       headers: { "Retry-After": "2", "x-ogw-ratelimit-reset": "7", Authorization: "SECRET" } } };
     const failure = larkDeliveryError(error).failure;
     assert.equal(failure.kind, "retryable"); assert.equal(failure.retryAfterMs, 7000);
-    assert.equal(failure.code, `lark:${apiCode}`); assert.doesNotMatch(JSON.stringify(failure), /SECRET|Authorization/);
+    assert.equal(failure.code, "rate_limited"); assert.equal(failure.biz_code, String(apiCode)); assert.doesNotMatch(JSON.stringify(failure), /SECRET|Authorization/);
   }
   const now = Date.now;
   try {
@@ -448,6 +448,7 @@ test("Lark maps rate limits and retry headers without leaking SDK data", () => {
     const failure = larkDeliveryError({ response: { status: 429, headers: { "retry-after": value } } }).failure;
     assert.equal(failure.kind, "retryable"); assert.equal(failure.retryAfterMs, undefined);
   }
+  assert.equal(larkDeliveryError({ response: { status: 400, data: { code: 230013 } } }).failure.kind, "permanent");
   assert.equal(larkDeliveryError({ code: 99991672 }).failure.kind, "permanent");
   assert.equal(larkDeliveryError({ response: { status: 403 } }).failure.kind, "permanent");
   for (const error of [{ code: "ETIMEDOUT" }, { response: { status: 503 } }, { code: 0 }, { code: 987654 }])

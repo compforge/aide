@@ -26,3 +26,5 @@ kernel 说明整体边界；plugin / harness 说明通用机制；personal 说�
 同一行为契约在所属主题中展开，其它文档通过链接引用。设计文档说明当前模型与取舍，字段和局部分支以类型、实现与测试为准；代码中的 @link 指向设计依据。源码地图与修改约束见 [AGENTS.md](../AGENTS.md)。
 
 通用 Spec / Status、Conditions 与版本边界见 [Resource](plugin/resource.md)；Personal 共享片段见[资源状态与组件协作](personal/README.md#资源状态与组件协作)，对象专属字段与行为见各自文档。
+
+- [公共错误契约](errors.md)：AideError、平台错误映射与跨进程诊断。

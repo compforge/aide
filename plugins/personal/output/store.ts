@@ -125,12 +125,19 @@ export class OutputStore {
     return deliveryEndpoint(address, output.spec.replyToMessageId);
   }
   cancel(id: string, reason: string): void { this.update(id, s => s.phase === "pending" && !s.attempts ? { ...s, phase: "cancelled", deliveryWait: undefined, lastError: reason } : s); }
-  begin(id: string): void { this.update(id, (s) => {
-    if (s.phase === "delivered") return s;
-    if (!["pending", "sending"].includes(s.phase)) throw new Error("Output requires explicit delivery recovery");
-    if (!s.disclosure || !s.delivery) throw new Error("Output disclosure has not been checked");
-    return { ...s, phase: "sending", deliveryWait: undefined, lastError: undefined, attempts: s.attempts + 1 };
-  }); }
+  /** @spec Reserve a send in the same transaction as checking its lifetime budget, before any external effect.
+   * @case tests/output-retry.test.ts
+   */
+  begin(id: string, maxAttempts = Number.MAX_SAFE_INTEGER): boolean {
+    let started = false;
+    this.update(id, s => {
+      if (!["pending", "sending"].includes(s.phase) || s.attempts >= maxAttempts) return s;
+      if (!s.disclosure || !s.delivery) throw new Error("Output disclosure has not been checked");
+      started = true;
+      return { ...s, phase: "sending", deliveryWait: undefined, lastError: undefined, attempts: s.attempts + 1 };
+    });
+    return started;
+  }
   delivered(id: string, receipt?: OutputStatus["receipt"]): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "delivered", deliveryWait: undefined, lastError: undefined, attempts: s.attempts, deliveredAt: new Date().toISOString(), ...(receipt ? { receipt } : {}) }); }
   failed(id: string, error: string): void { this.update(id, s => s.phase === "delivered" ? s : { ...s, phase: "failed", deliveryWait: undefined, lastError: error.slice(0, 4000) }); }
   uncertain(id: string, error: string): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "uncertain", deliveryWait: undefined, lastError: error.slice(0, 4000) }); }

@@ -103,7 +103,7 @@ Forge 提供方使用公共 `@compforge/aide-connector/forge` 的 `forgeImplemen
 ### Host 投递错误
 
 受信任的 Connector `hostHandlers` 和 Channel 可抛出 `@compforge/aide-connector` 的 `DeliveryError`。
-它只用于 Host 进程内投递，不是通用 verb / IPC 错误协议。外部包加载另一份 SDK 时，Host 按契约形状识别。
+它继承公共 [AideError](../errors.md)，提供统一的 retryable、code、biz_code 和 message；投递专属的 kind、retryAfterMs 随 Host/Runner IPC 保留。外部包加载另一份 SDK 时，Host 按契约形状识别。普通 Connector 操作可以直接抛出 AideError，不必使用投递类别。
 
 ```ts
 throw new DeliveryError({
@@ -119,7 +119,9 @@ throw new DeliveryError({
 `unknown` 表示可能已有副作用，仅有幂等投递契约时自动重试，其余进入 uncertain 并核对回执。
 普通异常、连接超时和缺少成功回执都不能证明写入未发生，不能仅凭错误文本中的 429 判定可重试。
 
-`message`（最多 4000 字符）和可选 `code`（最多 200 字符）必须是适配器安全提取的诊断，禁止原样透传 SDK 自由文本、请求体、凭证或响应体。
+`message`（最多 4000 字符）、可选 `code` 和 `biz_code`（各最多 200 字符）必须是适配器安全提取的诊断，禁止原样透传 SDK 自由文本、请求体、凭证或响应体。
 可选 `retryAfterMs` 是 0..2147483647 的整数毫秒；应表达最早可重试时间，缺省使用控制器退避。可选字段显式为 `undefined` 与省略等价；`null` 和其它非法类型仍不属于契约。
 平台字段、单位、频控范围和默认策略由适配器解释，Output 不识别平台错误码或配置 QPS。
 现有外部 Connector 必须显式采用此契约才能区分拒绝与未知结果；Host 不猜测 CLI 的非零退出原因。
+
+DeliveryError 的 retryable 由 kind 推导：permanent 为 false，其余为 true；code 未指定时使用 delivery_retryable / delivery_permanent / delivery_unknown。业务上是否实际重放仍取决于 kind 和幂等契约，不能仅按 retryable 布尔值处理非幂等写入。飞书 230013 映射为 permanent、code=permission_denied、biz_code="230013"，立即停止自动投递。

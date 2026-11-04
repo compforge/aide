@@ -1,3 +1,5 @@
+import { DeliveryError } from "@compforge/aide-connector";
+import { outputPolicy } from "../plugins/personal/output/config.ts";
 import { readAgentStream } from "../src/stream/agent.ts";
 import { composeMail, replacementMail } from "../plugins/personal/stream/writer.ts";
 import { test, type TestContext } from "node:test";
@@ -74,7 +76,7 @@ test("Output sends early chunks but delivered waits for closed stream and acknow
     sent.push(message);
     if (message.stream.status.phase === "completed") await new Promise<void>(resolve => { release = resolve; });
     return { id: "card", scope: "test" };
-  } }), pino({ level: "silent" }));
+  } }), pino({ level: "silent" }), outputPolicy({ maxAttempts: 2 }));
   t.after(() => delivery.close());
   await delivery.reconcile("live");
   f.streams.append(f.ref, [{ kind: "agent_thought_chunk", payload: { messageId: "reply", content: { type: "text", text: "checking" } } }]);
@@ -87,6 +89,7 @@ test("Output sends early chunks but delivered waits for closed stream and acknow
   release!();
   await until(() => f.store.get("live")!.status.phase === "delivered");
   assert.equal(f.store.get("live")!.status.delivery!.confirmedSeq, 2);
+  assert.equal(f.store.get("live")!.status.attempts, 2);
   assert.equal(readAgentStream(sent.at(-1)!.stream).text, "answer");
   assert.equal(readAgentStream(sent.at(-1)!.stream).think, "checking");
 });
@@ -161,8 +164,55 @@ test("Output courier acknowledges opaque mail without decoding its body", async 
     assert.deepEqual(message.stream.read().map(r => r.kind), ["opaque"]);
     received = true;
     return { id: "opaque-receipt", scope: "test" };
-  } }), pino({ level: "silent" }));
+  } }), pino({ level: "silent" }), outputPolicy({ maxAttempts: 1 }));
   t.after(() => delivery.close());
   await delivery.reconcile("live");
   assert(received); assert.equal(f.store.get("live")!.status.phase, "delivered");
+});
+
+/** @case Exhausting successful streaming sends stops only the courier; the producer can finish and retain the full answer. */
+test("Output attempt exhaustion never closes its generating Stream", async t => {
+  const f = await setup(t);
+  f.store.check = async id => approveFixtureOutput(f.store, id);
+  let sends = 0;
+  const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", streaming: true, async send() {
+    sends++; return { id: "partial-card", scope: "test" };
+  } }), pino({ level: "silent" }), outputPolicy({ maxAttempts: 2 }));
+  t.after(() => delivery.close());
+  const append = (text: string) => f.streams.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text } } }]);
+  await delivery.reconcile("live");
+  append("part one ");
+  await until(() => f.store.get("live")!.status.delivery?.confirmedSeq === 1);
+  append("part two ");
+  await until(() => f.store.get("live")!.status.phase === "failed");
+  assert.equal(f.streams.get(f.ref).status.phase, "open");
+  const status = f.store.get("live")!.status;
+  assert.equal(status.attempts, 2); assert.equal(status.delivery!.confirmedSeq, 2);
+  assert.deepEqual(status.receipt, { id: "partial-card", scope: "test" });
+  assert.match(status.lastError!, /attempt limit reached/);
+  // Simulate subsequent Chief events and normal completion after delivery has already stopped.
+  append("final answer"); f.streams.complete(f.ref);
+  await delivery.reconcile("live");
+  assert.equal(sends, 2); assert.equal(f.store.get("live")!.status.phase, "failed");
+  assert.equal(f.streams.get(f.ref).status.phase, "completed");
+  assert.equal(readAgentStream(f.streams.reader(f.ref)).text, "part one part two final answer");
+});
+
+
+test("A permanently rejected delivery leaves the producer free to finish its Stream", async t => {
+  const f = await setup(t); let sends = 0;
+  f.store.check = async id => approveFixtureOutput(f.store, id);
+  const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", streaming: true, async send() {
+    sends++; throw new DeliveryError({ kind: "permanent", code: "permission_denied", biz_code: "230013", message: "Denied" });
+  } }), pino({ level: "silent" }));
+  t.after(() => delivery.close());
+  f.streams.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "draft " } } }]);
+  await delivery.reconcile("live");
+  assert.equal(f.store.get("live")!.status.phase, "failed");
+  assert.equal(f.streams.get(f.ref).status.phase, "open");
+  f.streams.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text: "complete answer" } } }]);
+  f.streams.complete(f.ref);
+  await delivery.reconcile("live");
+  assert.equal(sends, 1); assert.equal(readAgentStream(f.streams.reader(f.ref)).text, "draft complete answer");
+  assert.equal(f.store.get("live")!.status.phase, "failed");
 });

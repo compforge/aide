@@ -72,12 +72,12 @@ test("Interrupted sending and connector reconfiguration never produce another co
   assert.match(f.store.get("reconfigured")!.status.lastError!, /project changed/);
 });
 
-test("Preflight failure remains retryable without a send attempt", async (t) => {
+test("Preflight failure stops without a send attempt", async (t) => {
   const f = fixture(t); composeMail(f.store, "s", "offline", f.spec);
   const writer = { requirements: { ...f.requirements, async identity(): Promise<never> { throw new Error("offline"); } }, async addRequirementComment(): Promise<never> { throw new Error("must not send"); } };
-  await assert.rejects(delivery(f.store, writer).reconcile("offline"), /preparation failed/);
+  await delivery(f.store, writer).reconcile("offline");
   const status = f.store.get("offline")!.status;
-  assert.equal(status.phase, "pending"); assert.equal(status.attempts, 0); assert.match(status.lastError!, /preparation failed/);
+  assert.equal(status.phase, "failed"); assert.equal(status.attempts, 0); assert.match(status.lastError!, /preparation failed/);
 });
 
 
