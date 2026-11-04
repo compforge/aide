@@ -121,7 +121,13 @@ function renderDetail(detail: OutputDetailView) {
   fact('output-check', '检查时间', detail.disclosureDetail && time(detail.disclosureDetail.checkedAt));
   fact('output-check', '原因', detail.disclosureDetail?.reason);
   fact('output-delivery', '状态', statusLabels[detail.phase]);
-  fact('output-delivery', '尝试次数', String(detail.attempts));
+  fact('output-delivery', '累计调用次数', String(detail.attempts));
+  const operation = detail.delivery?.operation;
+  if (operation) {
+    fact('output-delivery', '当前操作尝试次数', `${operation.attempts} / ${operation.maxAttempts}`);
+    fact('output-delivery', '当前投递片段', `${operation.snapshot.lastSeq} · ${operation.snapshot.phase}`);
+  }
+  if (detail.preparationAttempts) fact('output-delivery', '连续准备失败次数', String(detail.preparationAttempts));
   if (detail.wait) { fact('output-delivery', '等待原因', detail.wait.label); fact('output-delivery', '预计重试', time(detail.wait.until)); }
   fact('output-delivery', '最近错误', detail.lastError);
   fact('output-delivery', '送达时间', detail.deliveredAt && time(detail.deliveredAt));

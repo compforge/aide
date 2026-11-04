@@ -1,4 +1,4 @@
-import { StreamRefSchema } from "../../../src/host/stream/definition.ts";
+import { StreamRefSchema, StreamStatusSchema } from "../../../src/host/stream/definition.ts";
 import { AddressRefSchema } from "../address/model.ts";
 import { canEvictOutput } from "./frequency.ts";
 import { PersonRefsSchema } from "../person/model.ts";
@@ -7,7 +7,7 @@ import { AgentCallSchema } from "../observation/reference.ts";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { type ResourceDefinition } from "@compforge/aide-plugin";
-import { OUTPUT_TYPE, receiverIdentity, type OutputSpec, type OutputStatus } from "./model.ts";
+import { OUTPUT_TYPE, receiverIdentity, deliveryIdentity, type OutputSpec, type OutputStatus } from "./model.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { AddressSchema } from "../../../src/address.ts";
 import { isChannelAddress } from "../../../src/channel/address.ts";
@@ -27,8 +27,9 @@ export const OutputSpecSchema = z.object({
 export const OutputStatusSchema = z.object({
   disclosure: z.object({ decision: z.enum(["allowed", "denied"]), reason: z.string(), checkedAt: z.iso.datetime(), fingerprint: z.string(), policy: z.object({ sensitivity: SensitivitySchema, visibility: VisibilitySchema, people: z.array(z.string()) }).strict().optional() }).strict().optional(),
   waitingAddress: AddressRefSchema.optional(),
-  delivery: z.object({ notice: z.literal("muted").optional(), address: AddressRefSchema, replay: z.enum(["idempotent", "once"]).optional(), target: AddressSchema, stream: StreamRefSchema, confirmedSeq: z.number().int().nonnegative().optional(), receivers: PersonRefsSchema() }).strict().optional(),
+  delivery: z.object({ notice: z.literal("muted").optional(), address: AddressRefSchema, replay: z.enum(["idempotent", "once"]).optional(), target: AddressSchema, stream: StreamRefSchema, confirmedSeq: z.number().int().nonnegative().optional(), operation: z.object({ snapshot: StreamStatusSchema, attempts: z.number().int().nonnegative(), maxAttempts: z.number().int().positive(), lastFailureKind: z.enum(["retryable", "permanent", "unknown"]).optional() }).strict().optional(), receivers: PersonRefsSchema() }).strict().optional(),
   phase: z.enum(["pending", "sending", "delivered", "failed", "uncertain", "cancelled"]), attempts: z.number().int().nonnegative(),
+  preparationAttempts: z.number().int().nonnegative().optional(),
   deliveryWait: z.object({ reason: z.enum(["frequency", "receiver-busy", "provider"]), until: z.iso.datetime() }).strict().optional(),
   deliveredAt: z.iso.datetime().optional(), lastError: z.string().max(4000).optional(), receipt: z.object({ id: z.string().min(1), scope: z.string().min(1) }).strict().optional() }).strict();
 
@@ -45,7 +46,9 @@ export const OutputDefinition: ResourceDefinition<OutputSpec, OutputStatus> = {
   }, update(previous, current) { if (!isDeepStrictEqual(receiverIdentity(previous.spec), receiverIdentity(current.spec))) throw new Error("Output content is immutable");
     if (previous.status.phase === "cancelled" && current.status.phase !== "cancelled") throw new Error("Cancelled Output cannot be reopened");
     if (previous.status.phase === "delivered" && current.status.phase !== "delivered") throw new Error("Delivered Output cannot be reopened");
-    if ((previous.status.attempts > 0 || previous.status.phase === "delivered") && !isDeepStrictEqual(receiverIdentity(previous.status.delivery && { ...previous.status.delivery, confirmedSeq: undefined }), receiverIdentity(current.status.delivery && { ...current.status.delivery, confirmedSeq: undefined }))) throw new Error("Attempted Output delivery is immutable");
+    if ((previous.status.attempts > 0 || previous.status.phase === "delivered") && !isDeepStrictEqual(deliveryIdentity(previous.status.delivery), deliveryIdentity(current.status.delivery))) throw new Error("Attempted Output delivery is immutable");
+    if (previous.status.delivery?.operation && current.status.delivery?.operation
+      && !isDeepStrictEqual(previous.status.delivery.operation.snapshot, current.status.delivery.operation.snapshot)) throw new Error("Unconfirmed delivery snapshot is immutable");
     if (["sending", "delivered"].includes(current.status.phase) && (!current.status.delivery || !current.status.disclosure)) throw new Error("Output must be checked before delivery"); } },
   retention: { canEvict: canEvictOutput, releasedAt: (r) => (r.status as OutputStatus).phase === "delivered" ? (r.status as OutputStatus).deliveredAt
     : ["failed", "cancelled"].includes((r.status as OutputStatus).phase) ? new Date(Date.parse(r.metadata.creationTimestamp) + 7 * 86400_000).toISOString() : undefined, references: () => [] },

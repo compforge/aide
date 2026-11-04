@@ -4,10 +4,11 @@ import { STREAM_TYPE, type Stream, type ResourceDefinition } from "@compforge/ai
 
 export const StreamRefSchema = z.object({ apiVersion: z.literal(STREAM_TYPE.apiVersion), kind: z.literal("Stream"),
   namespace: z.string().transform(value => value === "v1" ? value : parseResourceNamespace(value)), name: z.string().min(1), uid: z.string().min(1) }).strict();
+export const StreamStatusSchema = z.object({ phase: z.enum(["open", "completed", "interrupted"]),
+  lastSeq: z.number().int().nonnegative(), references: z.array(z.object({ apiVersion: z.string(), kind: z.string(), uid: z.string(), version: z.string(), contentVersion: z.string().optional() }).strict()).max(100), closedAt: z.iso.datetime().optional(), error: z.string().optional() }).strict();
 export const StreamDefinition: ResourceDefinition<Stream["spec"], Stream["status"]> = {
   type: STREAM_TYPE,
-  schema: { spec: z.object({ protocol: z.string().min(1) }).strict(), status: z.object({ phase: z.enum(["open", "completed", "interrupted"]),
-    lastSeq: z.number().int().nonnegative(), references: z.array(z.object({ apiVersion: z.string(), kind: z.string(), uid: z.string(), version: z.string(), contentVersion: z.string().optional() }).strict()).max(100), closedAt: z.iso.datetime().optional(), error: z.string().optional() }).strict() },
+  schema: { spec: z.object({ protocol: z.string().min(1) }).strict(), status: StreamStatusSchema },
   validator: {
     create(resource) { if (!resource.metadata.owner) throw new Error("Stream requires a structural owner"); },
     update(before, after) {

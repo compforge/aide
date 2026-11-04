@@ -13,7 +13,7 @@ import { isMe, type Me, type PersonResource, type Person, type PersonStatus } fr
 import { sensitivityRank } from "../disclosure.ts";
 import type { TopicSpec, TopicStatus } from "../topic/model.ts";
 import { INPUT_TYPE, InputAttention, inputAttention, type InputSpec, type InputStatus } from "../input/model.ts";
-import { receiverIdentity, type Output } from "./model.ts";
+import { deliveryIdentity, receiverIdentity, type Output } from "./model.ts";
 import { muteMail, refusalMail, isMuteMail } from "../stream/notices.ts";
 import type { OutputStore } from "./store.ts";
 
@@ -185,9 +185,11 @@ export class OutputDisclosure {
         const latestPerson = this.store.resources.find<Person, PersonStatus>(person, person.metadata.name, person.metadata.namespace);
         return !latestPerson || latestPerson.metadata.uid !== person.metadata.uid || latestPerson.metadata.deletionTimestamp || !isMe(latestPerson.spec, this.ports.marks);
       })) throw new Error("Me identity changed before fallback commit");
-      if (latest.status.attempts > 0 && !isDeepStrictEqual(receiverIdentity(latest.status.delivery), receiverIdentity(delivery))) {
+      if (latest.status.attempts > 0 && !isDeepStrictEqual(deliveryIdentity(latest.status.delivery), deliveryIdentity(delivery))) {
         this.store.uncertain(id, "Actual recipients changed after a send attempt; verify external receipts"); return;
       }
+      if (latest.status.delivery && isDeepStrictEqual(deliveryIdentity(latest.status.delivery), deliveryIdentity(delivery)))
+        delivery = { ...delivery, confirmedSeq: latest.status.delivery.confirmedSeq, operation: latest.status.delivery.operation };
       this.store.update(id, status => ({ ...status, disclosure: { decision, reason: reason || "Destination is permitted", checkedAt: new Date().toISOString(), fingerprint: snapshot.fingerprint, ...(snapshot.policy ? { policy: snapshot.policy } : {}) }, delivery,
         waitingAddress: undefined, lastError: undefined }));
     });
