@@ -176,19 +176,20 @@ test("Output attempt exhaustion never closes its generating Stream", async t => 
   f.store.check = async id => approveFixtureOutput(f.store, id);
   let sends = 0;
   const delivery = new OutputDelivery(f.store, () => ({ replay: "idempotent", streaming: true, async send() {
-    sends++; return { id: "partial-card", scope: "test" };
+    sends++; throw new DeliveryError({ kind: "retryable", code: "http:429", message: "Rejected", retryAfterMs: 0 });
   } }), pino({ level: "silent" }), outputPolicy({ maxAttempts: 2 }));
   t.after(() => delivery.close());
   const append = (text: string) => f.streams.append(f.ref, [{ kind: "agent_message_chunk", payload: { messageId: "reply", content: { type: "text", text } } }]);
   await delivery.reconcile("live");
   append("part one ");
-  await until(() => f.store.get("live")!.status.delivery?.confirmedSeq === 1);
+  await until(() => sends === 1);
   append("part two ");
+  await delivery.reconcile("live");
   await until(() => f.store.get("live")!.status.phase === "failed");
   assert.equal(f.streams.get(f.ref).status.phase, "open");
   const status = f.store.get("live")!.status;
-  assert.equal(status.attempts, 2); assert.equal(status.delivery!.confirmedSeq, 2);
-  assert.deepEqual(status.receipt, { id: "partial-card", scope: "test" });
+  assert.equal(status.attempts, 2); assert.equal(status.delivery!.confirmedSeq, undefined);
+  assert.equal(status.receipt, undefined);
   assert.match(status.lastError!, /attempt limit reached/);
   // Simulate subsequent Chief events and normal completion after delivery has already stopped.
   append("final answer"); f.streams.complete(f.ref);
@@ -215,4 +216,73 @@ test("A permanently rejected delivery leaves the producer free to finish its Str
   await delivery.reconcile("live");
   assert.equal(sends, 1); assert.equal(readAgentStream(f.streams.reader(f.ref)).text, "draft complete answer");
   assert.equal(f.store.get("live")!.status.phase, "failed");
+});
+
+
+// @case More successful progress operations than maxAttempts still deliver the terminal snapshot, including a close with no new sequence.
+test("Successful streaming operations each get a fresh attempt budget and deliver the final close", { timeout: 15000 }, async t => {
+  const f = await setup(t); f.store.check = async id => approveFixtureOutput(f.store, id);
+  const seen: { seq: number; phase: string; text: string }[] = [];
+  const worker = new OutputDelivery(f.store, () => ({ replay: "idempotent", streaming: true, async send({ stream }) {
+    seen.push({ seq: stream.status.lastSeq, phase: stream.status.phase, text: readAgentStream(stream).text });
+    if (seen.length < 7) f.streams.append(f.ref, [{ kind: "agent_message", payload: { messageId: "reply", content: [{ type: "text", text: `progress ${seen.length}` }] } }]);
+    else if (seen.length === 7) f.streams.complete(f.ref);
+    return { id: "one-card", scope: "fixture" };
+  } }), pino({ level: "silent" }), outputPolicy({ maxAttempts: 1 }));
+  t.after(() => worker.close());
+  f.streams.append(f.ref, [{ kind: "agent_message", payload: { messageId: "reply", content: [{ type: "text", text: "start" }] } }]);
+  await worker.reconcile("live");
+  const deadline = Date.now() + 12000;
+  while (f.store.get("live")!.status.phase !== "delivered") { assert(Date.now() < deadline); await new Promise(r => setTimeout(r, 10)); }
+  assert.equal(seen.length, 8);
+  assert.equal(seen.at(-1)!.seq, seen.at(-2)!.seq);
+  assert.equal(seen.at(-1)!.phase, "completed");
+  assert.equal(f.store.get("live")!.status.attempts, 8);
+  assert.equal(f.store.get("live")!.status.delivery!.operation, undefined);
+});
+
+// @case A retry reopens the saved snapshot after append, close and worker reconstruction; later events cannot reset its budget.
+test("Stream operation snapshots and retry counts survive growth, closure and reconstruction", async t => {
+  const f = await setup(t); f.store.check = async id => approveFixtureOutput(f.store, id);
+  f.streams.append(f.ref, [{ kind: "agent_message", payload: { messageId: "reply", content: [{ type: "text", text: "original" }] } }]);
+  let sends = 0;
+  const transport = () => ({ replay: "idempotent" as const, streaming: true, async send({ stream }: OutputMessage) {
+    sends++;
+    assert.equal(stream.status.phase, "open"); assert.equal(stream.status.lastSeq, 1);
+    assert.equal(readAgentStream(stream).text, "original");
+    throw new DeliveryError({ kind: "retryable", message: "Rejected", retryAfterMs: 0 });
+  } });
+  const first = new OutputDelivery(f.store, transport, pino({ level: "silent" }), outputPolicy({ maxAttempts: 2 }));
+  await first.reconcile("live"); await first.close();
+  f.streams.append(f.ref, [{ kind: "agent_message", payload: { messageId: "reply", content: [{ type: "text", text: "final" }] } }]);
+  f.streams.complete(f.ref);
+  const store = new (await import("../plugins/personal/output/store.ts")).OutputStore(f.home);
+  store.check = async id => approveFixtureOutput(store, id);
+  const second = new OutputDelivery(store, transport, pino({ level: "silent" }), outputPolicy({ maxAttempts: 2 }));
+  t.after(() => second.close());
+  await second.reconcile("live");
+  assert.equal(sends, 2); assert.equal(store.get("live")!.status.phase, "failed");
+  assert.equal(store.get("live")!.status.delivery!.operation!.attempts, 2);
+  assert.equal(f.streams.get(f.ref).status.phase, "completed");
+});
+
+
+test("A successful retry confirms its pinned progress before starting the latest terminal operation", async t => {
+  const f = await setup(t); f.store.check = async id => approveFixtureOutput(f.store, id);
+  f.streams.append(f.ref, [{ kind: "agent_message", payload: { messageId: "reply", content: [{ type: "text", text: "draft" }] } }]);
+  const seen: string[] = [];
+  const worker = new OutputDelivery(f.store, () => ({ replay: "idempotent", streaming: true, async send({ stream }) {
+    seen.push(`${stream.status.phase}:${readAgentStream(stream).text}`);
+    if (seen.length === 1) throw new DeliveryError({ kind: "retryable", message: "Rejected", retryAfterMs: 0 });
+    return { id: "one-card", scope: "fixture" };
+  } }), pino({ level: "silent" }), outputPolicy({ maxAttempts: 2 }));
+  t.after(() => worker.close());
+  await worker.reconcile("live");
+  f.streams.append(f.ref, [{ kind: "agent_message", payload: { messageId: "reply", content: [{ type: "text", text: "answer" }] } }]);
+  f.streams.complete(f.ref);
+  await worker.reconcile("live");
+  await until(() => f.store.get("live")!.status.phase === "delivered");
+  assert.deepEqual(seen, ["open:draft", "open:draft", "completed:answer"]);
+  assert.equal(f.store.get("live")!.status.attempts, 3);
+  assert.equal(f.store.get("live")!.status.delivery!.confirmedSeq, 2);
 });

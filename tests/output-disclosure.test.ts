@@ -1,3 +1,4 @@
+import { deliveryIdentity } from "../plugins/personal/output/model.ts";
 import { MailWriter, composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
 import { addressFor } from "./address-fixture.ts";
@@ -167,7 +168,7 @@ test("failed fallback retries only the saved Me delivery without another Output"
   const actual = f.store.get("x")!.status.delivery;
   f.store.begin("x"); f.store.retry("x", "transport temporarily unavailable");
   await f.checker.reconcile("x"); f.store.begin("x"); f.store.delivered("x");
-  assert.deepEqual(f.store.get("x")!.status.delivery, actual);
+  assert.deepEqual(deliveryIdentity(f.store.get("x")!.status.delivery), deliveryIdentity(actual));
   assert.equal(f.store.get("x")!.status.disclosure!.decision, "denied");
   assert.equal(f.store.list().length, 1);
 });

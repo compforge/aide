@@ -23,12 +23,20 @@ export interface OutputSpec {
 }
 export type OutputSubmission = Omit<OutputSpec, "target"> & { target: import("../address/service.ts").AddressTarget };
 /** @spec delivery records who actually receives what and where; it never rewrites the expected receivers/stream/target in spec. */
+/** One transport operation pins a Stream snapshot until a successful acknowledgement; new progress gets a new budget. */
+export interface OutputOperation {
+  snapshot: import("@compforge/aide-plugin").StreamStatus;
+  attempts: number;
+  maxAttempts: number;
+  lastFailureKind?: "retryable" | "permanent" | "unknown";
+}
 export interface OutputStatus {
   disclosure?: { decision: "allowed" | "denied"; reason: string; checkedAt: string; fingerprint: string; policy?: import("./policy.ts").DisclosurePolicy };
-  delivery?: { notice?: "muted"; replay?: "idempotent" | "once"; address: import("../address/model.ts").AddressRef; target: Address; stream: import("@compforge/aide-plugin").StreamRef; confirmedSeq?: number; receivers: import("../person/model.ts").PersonRefs };
+  delivery?: { notice?: "muted"; replay?: "idempotent" | "once"; address: import("../address/model.ts").AddressRef; target: Address; stream: import("@compforge/aide-plugin").StreamRef; confirmedSeq?: number; operation?: OutputOperation; receivers: import("../person/model.ts").PersonRefs };
   waitingAddress?: import("../address/model.ts").AddressRef;
   phase: "pending" | "sending" | "delivered" | "failed" | "uncertain" | "cancelled";
   attempts: number;
+  preparationAttempts?: number;
   deliveryWait?: { reason: "frequency" | "receiver-busy" | "provider"; until: string };
   deliveredAt?: string;
   lastError?: string;
@@ -59,3 +67,6 @@ export type SayResult = VerbResult<SayReceipt>;
 /** Compare intent/delivery by Person UID membership; reference serialization is not recipient identity. */
 export const receiverIdentity = <T extends { receivers?: Iterable<ResourceRef> }>(value: T | undefined) => value && ({ ...value,
   receivers: value.receivers === undefined ? undefined : [...new KeyedSet(person => person.uid!, value.receivers)].map(person => person.uid).sort() });
+
+/** Delivery progress can change without changing the authorized recipient, destination or Stream identity. */
+export const deliveryIdentity = (value: OutputStatus["delivery"]) => value && receiverIdentity({ ...value, confirmedSeq: undefined, operation: undefined });

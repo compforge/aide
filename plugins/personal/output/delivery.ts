@@ -44,7 +44,7 @@ export class OutputDelivery {
     const run = this.run(id).catch(error => {
       if (this.stopping.signal.aborted || !this.store.get(id) || this.store.get(id)?.metadata.deletionTimestamp) return {};
       if (error instanceof OutputRetryError) throw error;
-      return this.stopPreparation(id, error);
+      return this.preparationFailure(id, error);
     }).finally(() => this.running.delete(id));
     this.running.set(id, run);
     // The Host owns active subscriptions; Runner reconciliation remains short and can bind other Outputs.
@@ -56,8 +56,8 @@ export class OutputDelivery {
     this.stopping.abort(new Error("Output delivery is stopping"));
     await Promise.allSettled(this.running.values());
   }
-  /** @spec Preparation failures do not consume send attempts; they stop instead of looping outside the delivery budget. */
-  private stopPreparation(id: string, error: unknown): OutputReconcileResult {
+  /** @spec Typed transient preparation failures have a bounded budget; successful dispatch preparation resets it without consuming extra send attempts. */
+  private preparationFailure(id: string, error: unknown): OutputReconcileResult {
     const current = this.store.get(id);
     if (!current || !["pending", "sending"].includes(current.status.phase)) return {};
     const failure = deliveryFailure(error), details = aideErrorDetails(error);
@@ -65,20 +65,27 @@ export class OutputDelivery {
     const code = details?.code ?? failure?.code ?? "output_preparation_failed";
     const biz_code = details?.biz_code ?? failure?.biz_code;
     const diagnostic = `${reason} [${code}]${biz_code ? ` [${biz_code}]` : ""}`;
+    const attempts = (current.status.preparationAttempts ?? 0) + 1;
+    this.store.update(id, s => ({ ...s, preparationAttempts: attempts }));
+    if (details?.retryable && attempts < this.policy.maxAttempts) {
+      this.log.warn({ outputId: id, code, biz_code, preparationAttempts: attempts, maxAttempts: this.policy.maxAttempts }, "Output preparation failed; retry scheduled");
+      return this.scheduleRetry(id, diagnostic, failure?.retryAfterMs);
+    }
     // A recovered sending state can already have an external effect even if this preparation did no write.
-    if (current.status.phase === "sending") this.store.uncertain(id, diagnostic); else this.store.failed(id, diagnostic);
+    if (current.status.phase === "sending" && current.status.delivery?.operation) this.store.uncertain(id, diagnostic); else this.store.failed(id, diagnostic);
     this.log.warn({ outputId: id, code, biz_code, attempts: current.status.attempts, phase: this.store.get(id)!.status.phase }, "Output preparation failed; automatic delivery stopped");
     return {};
   }
   private async run(id: string): Promise<OutputReconcileResult> {
     let output = this.store.get(id);
     if (!output || output.metadata.deletionTimestamp || !["pending", "sending"].includes(output.status.phase)) return {};
-    if (output.status.phase === "sending" && output.status.delivery?.replay !== "idempotent") {
+    if (output.status.phase === "sending" && output.status.delivery?.operation && output.status.delivery.operation.lastFailureKind !== "retryable" && output.status.delivery.replay !== "idempotent") {
       this.store.uncertain(id, "Delivery was interrupted; verify external receipt before retrying"); return {};
     }
-    if (output.status.attempts >= this.policy.maxAttempts)
-      return this.exhaustAttempts(id, output.status.lastError ?? "No send budget remains", output.status.attempts > 0);
+    if ((output.status.delivery?.operation?.attempts ?? 0) >= this.policy.maxAttempts)
+      return this.exhaustAttempts(id, output.status.lastError ?? "No operation budget remains", output.status.delivery?.operation?.lastFailureKind !== "retryable");
     const wait = output.status.deliveryWait;
+    if (wait?.reason === "provider" && Date.parse(wait.until) > Date.now()) return { requeueAfterMs: Math.max(1, Date.parse(wait.until) - Date.now()) };
     // Provider deadlines survive early watches and Host restarts; Person policy waits are recomputed below.
     output = await this.store.prepare(id);
     if (!["pending", "sending"].includes(output.status.phase)) return {};
@@ -93,7 +100,6 @@ export class OutputDelivery {
       this.log.info({ outputId: id, phase: output.status.phase }, "Output no longer requires delivery");
       return {};
     }
-    if (wait?.reason === "provider" && Date.parse(wait.until) > Date.now()) return { requeueAfterMs: Math.max(1, Date.parse(wait.until) - Date.now()) };
     // Acquire every receiver together without waiting; no partial acquisition or unbounded Promise queue.
     // The shared Host retains this execution right through actual transport completion, including Runner restarts.
     const receivers = [...output.status.delivery!.receivers].map(p => p.uid).sort();
@@ -141,10 +147,10 @@ export class OutputDelivery {
         if (output.metadata.deletionTimestamp || !["pending", "sending"].includes(output.status.phase)) return {};
         if (!output.status.delivery) return { requeueAfterMs: 1000 };
         const delivery = output.status.delivery;
-        const stream = this.store.streams.reader(delivery.stream), content = stream.status;
+        const content = delivery.operation?.snapshot ?? this.store.streams.get(delivery.stream).status;
         const notice = isMuteMail(this.store, output);
         if (new Addresses(this.store.storage.home).read(delivery.address).spec.muted && !notice) throw new Error("Address was muted before transport dispatch");
-        if (content.phase === "open" && (!transport.streaming || content.lastSeq === (delivery.confirmedSeq ?? 0))) {
+        if (!delivery.operation && content.phase === "open" && (!transport.streaming || content.lastSeq === (delivery.confirmedSeq ?? 0))) {
           await this.store.streams.wait(delivery.stream, content.lastSeq, this.stopping.signal);
           continue;
         }
@@ -152,24 +158,23 @@ export class OutputDelivery {
         if (!sameAddress(delivery.target, target)) throw new Error("Actual Output destination changed during streaming");
         if (!this.store.begin(id, this.policy.maxAttempts))
           return this.exhaustAttempts(id, "Stream delivery is incomplete", false);
+        const operation = this.store.get(id)!.status.delivery!.operation!;
+        const stream = this.store.streams.reader(delivery.stream, operation.snapshot);
         dispatching = true;
         const receipt = await transport.send({ id, target, stream, permitMuted: notice });
         dispatching = false;
         if (!this.store.get(id) || this.store.get(id)?.metadata.deletionTimestamp) return {};
-        this.store.update(id, status => ({ ...status, delivery: { ...status.delivery!, confirmedSeq: content.lastSeq }, ...(receipt ? { receipt } : {}) }));
+        this.store.confirm(id, receipt);
+        this.log.debug({ outputId: id, confirmedSeq: content.lastSeq, operationAttempts: operation.attempts, attempts: this.store.get(id)!.status.attempts }, "Output operation confirmed");
         if (content.phase !== "open") {
-          if (content.phase === "interrupted") this.store.failed(id, content.error ?? "Output generation was interrupted");
-          else this.store.delivered(id, receipt);
           this.log.info({ outputId: id, streamUid: delivery.stream.uid, confirmedSeq: content.lastSeq, phase: content.phase }, "Output stream delivery settled");
           return {};
         }
-        if (this.store.get(id)!.status.attempts >= this.policy.maxAttempts)
-          return this.exhaustAttempts(id, "Stream delivery is incomplete", false);
         await delay(750, undefined, { signal: this.stopping.signal });
       }
     } catch (error) {
       if (this.stopping.signal.aborted || !this.store.get(id) || this.store.get(id)?.metadata.deletionTimestamp) return {};
-      if (!dispatching) return this.stopPreparation(id, error);
+      if (!dispatching) return this.preparationFailure(id, error);
       const failure = deliveryFailure(error), details = aideErrorDetails(error);
       return this.failure(id, failure ?? { kind: "unknown", message: details?.message ?? "Output transport failed; delivery result is unknown",
         code: details?.code ?? "delivery_unknown", biz_code: details?.biz_code }, transport.replay === "idempotent",
@@ -177,7 +182,7 @@ export class OutputDelivery {
     }
   }
 
-  /** @spec The lifetime attempt budget counts successful and failed sends, including streaming updates, across restarts.
+  /** @spec Each persisted Stream snapshot gets its own bounded send budget across restarts; successful progress never exhausts later operations.
    * @spec Exhaustion only ends delivery; it never closes the Stream or cancels its producing execution. Unknown outcomes remain uncertain.
    * @link docs/personal/output.md
    * @case tests/output-retry.test.ts
@@ -187,7 +192,7 @@ export class OutputDelivery {
     const error = `Output attempt limit reached (${this.policy.maxAttempts} attempts): ${reason}`;
     if (uncertain) this.store.uncertain(id, error); else this.store.failed(id, error);
     this.log.warn({ outputId: id, maxAttempts: this.policy.maxAttempts,
-      attempts: output.status.attempts, phase: uncertain ? "uncertain" : "failed" }, "Output attempt limit reached");
+      attempts: output.status.attempts, operationAttempts: output.status.delivery?.operation?.attempts, phase: uncertain ? "uncertain" : "failed" }, "Output attempt limit reached");
     return {};
   }
 
@@ -196,12 +201,16 @@ export class OutputDelivery {
    */
   private failure(id: string, failure: DeliveryFailure, safeReplay: boolean, retryable: boolean): OutputReconcileResult {
     const reason = `${failure.message}${failure.code ? ` [${failure.code}]` : ""}${failure.biz_code ? ` [${failure.biz_code}]` : ""}`.slice(0, 4000);
-    this.log.warn({ outputId: id, kind: failure.kind, retryable, code: failure.code, biz_code: failure.biz_code, retryAfterMs: failure.retryAfterMs, reason }, "Output delivery failed");
+    this.store.update(id, s => ({ ...s, delivery: { ...s.delivery!, operation: { ...s.delivery!.operation!, lastFailureKind: failure.kind } } }));
+    this.log.warn({ outputId: id, attempts: this.store.get(id)!.status.attempts, operationAttempts: this.store.get(id)!.status.delivery!.operation!.attempts, maxAttempts: this.policy.maxAttempts, kind: failure.kind, retryable, code: failure.code, biz_code: failure.biz_code, retryAfterMs: failure.retryAfterMs, reason }, "Output delivery failed");
     if (failure.kind === "permanent") { this.store.failed(id, reason); return {}; }
     if (failure.kind === "unknown" && (!retryable || !safeReplay)) { this.store.uncertain(id, reason); return {}; }
-    if (this.store.get(id)!.status.attempts >= this.policy.maxAttempts)
+    if ((this.store.get(id)!.status.delivery?.operation?.attempts ?? 0) >= this.policy.maxAttempts)
       return this.exhaustAttempts(id, reason, failure.kind === "unknown");
-    const until = failure.retryAfterMs === undefined ? undefined : new Date(Date.now() + failure.retryAfterMs).toISOString();
+    return this.scheduleRetry(id, reason, failure.retryAfterMs);
+  }
+  private scheduleRetry(id: string, reason: string, retryAfterMs?: number): OutputReconcileResult {
+    const until = retryAfterMs === undefined ? undefined : new Date(Date.now() + retryAfterMs).toISOString();
     // Commit the rejection and provider deadline together before yielding the controller.
     this.store.retry(id, reason, until);
     if (until) return { requeueAfterMs: Math.max(1, Date.parse(until) - Date.now()) };

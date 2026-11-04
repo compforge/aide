@@ -28,7 +28,7 @@ function summary(aide: WebService, output: Output, content = mailView(aide.topic
     topic: reference(aide, spec.topic), receivers: [...(spec.receivers ?? [])].map(ref => reference(aide, ref)),
     address: reference(aide, spec.target), actualAddress: status.delivery && reference(aide, status.delivery.address),
     phase: status.phase, disclosure: status.disclosure?.decision ?? "pending" as const,
-    wait: wait && { ...wait, label: outputWaitLabels[wait.reason] }, attempts: status.attempts, lastError: status.lastError,
+    wait: wait && { ...wait, label: outputWaitLabels[wait.reason] }, attempts: status.attempts, preparationAttempts: status.preparationAttempts, lastError: status.lastError,
     deliveredAt: status.deliveredAt };
 }
 export function outputList(aide: WebService, query: OutputBrowseQuery) {

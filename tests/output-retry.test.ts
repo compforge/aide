@@ -86,7 +86,9 @@ test("Preparation failure stops without claiming a send attempt", async t => {
 
 test("Lowering an attempt policy stops an already over-budget Output before another send", async t => {
   const f = fixture(t); f.create("old"); approveFixtureOutput(f.store, "old");
-  f.store.update("old", s => ({ ...s, attempts: 20, lastError: "Unknown previous outcome" }));
+  f.store.update("old", s => ({ ...s, delivery: { ...s.delivery!, replay: "idempotent" } }));
+  f.store.begin("old");
+  f.store.update("old", s => ({ ...s, attempts: 20, delivery: { ...s.delivery!, operation: { ...s.delivery!.operation!, attempts: 20 } }, lastError: "Unknown previous outcome" }));
   let sends = 0;
   const worker = new OutputDelivery(f.store, () => ({ replay: "idempotent", async send() { sends++; return undefined; } }), log, outputPolicy({ maxAttempts: 2 }));
   t.after(() => worker.close());
@@ -161,7 +163,7 @@ test("Concurrent wakes and exhausted reservations cannot exceed the send budget"
 });
 
 
-test("A preparation error inside the stream loop stops without consuming or bypassing attempts", async t => {
+test("A retryable preparation error inside the stream loop recovers without consuming a send attempt", async t => {
   const f = fixture(t); f.create("prepare"); let checks = 0, sends = 0;
   f.store.check = async id => {
     if (++checks === 3) throw new AideError({ retryable: true, code: "unavailable", message: "Metadata unavailable" });
@@ -169,9 +171,83 @@ test("A preparation error inside the stream loop stops without consuming or bypa
   };
   const worker = new OutputDelivery(f.store, () => ({ replay: "idempotent", async send() { sends++; return undefined; } }), log);
   t.after(() => worker.close());
-  await worker.reconcile("prepare"); await worker.reconcile("prepare");
+  await assert.rejects(worker.reconcile("prepare"), /unavailable/);
   assert.equal(checks, 3); assert.equal(sends, 0);
-  assert.equal(f.store.get("prepare")!.status.attempts, 0);
-  assert.equal(f.store.get("prepare")!.status.phase, "failed");
-  assert.match(f.store.get("prepare")!.status.lastError!, /unavailable/);
+  assert.equal(f.store.get("prepare")!.status.preparationAttempts, 1);
+  await worker.reconcile("prepare");
+  assert.equal(sends, 1); assert.equal(f.store.get("prepare")!.status.attempts, 1);
+  assert.equal(f.store.get("prepare")!.status.phase, "delivered");
+  assert.equal(f.store.get("prepare")!.status.preparationAttempts, undefined);
+});
+
+
+// @case Transient resolution failures remain bounded across restarts and early provider wakes.
+test("Preparation API retries honor deadlines and retain their budget across restart", async t => {
+  const f = fixture(t); f.create("prepare-limit"); let lookups = 0, now = Date.now();
+  const clock = Date.now; Date.now = () => now; t.after(() => { Date.now = clock; });
+  for (let round = 0; round < 2; round++) {
+    const store = f.open();
+    const worker = new OutputDelivery(store, () => {
+      lookups++; throw new DeliveryError({ kind: "retryable", code: "http:429", message: "Metadata limited", retryAfterMs: 30000 });
+    }, log, outputPolicy({ maxAttempts: 2 }));
+    await worker.reconcile("prepare-limit");
+    for (let n = 0; n < 3; n++) await worker.reconcile("prepare-limit");
+    assert.equal(lookups, round + 1);
+    assert.equal(store.get("prepare-limit")!.status.attempts, 0);
+    assert.equal(store.get("prepare-limit")!.status.preparationAttempts, round + 1);
+    await worker.close(); now += 30001;
+  }
+  assert.equal(f.store.get("prepare-limit")!.status.phase, "failed");
+});
+
+
+// @case A restart immediately after terminal acknowledgement cannot recreate the send, including once-only transports.
+test("Terminal confirmation atomically saves the receipt, cursor and delivered state", async t => {
+  const f = fixture(t); f.create("confirmed"); approveFixtureOutput(f.store, "confirmed");
+  f.store.update("confirmed", s => ({ ...s, delivery: { ...s.delivery!, replay: "once" } }));
+  f.store.begin("confirmed", 1);
+  const states: string[] = [];
+  const unsubscribe = f.store.subscribe(o => { if (o.metadata.name === "confirmed") states.push(o.status.phase); });
+  f.store.confirm("confirmed", { id: "external", scope: "fixture" }); unsubscribe();
+  assert.deepEqual(states, ["delivered"]);
+  const reopened = f.open(); let sends = 0;
+  const worker = new OutputDelivery(reopened, () => ({ replay: "once", async send() { sends++; return undefined; } }), log, outputPolicy({ maxAttempts: 1 }));
+  t.after(() => worker.close()); await worker.reconcile("confirmed");
+  assert.equal(sends, 0);
+  assert.equal(reopened.get("confirmed")!.status.delivery!.operation, undefined);
+  assert.equal(reopened.get("confirmed")!.status.delivery!.confirmedSeq, 1);
+  assert.deepEqual(reopened.get("confirmed")!.status.receipt, { id: "external", scope: "fixture" });
+});
+
+// @case An acknowledged open update is not an interrupted external write when the worker resumes.
+test("Recovery after confirmed progress starts the next operation without replaying the old frame", async t => {
+  const f = fixture(t);
+  const output = composeMail(f.store, "owner", "progress", { target: webAddress("me"), topicId: "topic",
+    topic: { apiVersion: "aide.dev/v1alpha5", kind: "Topic", namespace: "v1", name: "topic", uid: "topic" }, content: { kind: "agent" } });
+  f.store.streams.append(output.spec.stream, [{ kind: "agent_message", payload: { messageId: "reply", content: [{ type: "text", text: "partial" }] } }]);
+  approveFixtureOutput(f.store, "progress");
+  f.store.update("progress", s => ({ ...s, delivery: { ...s.delivery!, replay: "once" } }));
+  f.store.begin("progress", 1); f.store.confirm("progress");
+  f.store.streams.complete(output.spec.stream);
+  const store = f.open(); let sends = 0;
+  const worker = new OutputDelivery(store, () => ({ replay: "once", streaming: true, async send({ stream }) {
+    sends++; assert.equal(stream.status.phase, "completed"); return { id: "final", scope: "fixture" };
+  } }), log, outputPolicy({ maxAttempts: 1 }));
+  t.after(() => worker.close()); await worker.reconcile("progress");
+  assert.equal(sends, 1); assert.equal(store.get("progress")!.status.phase, "delivered");
+  assert.equal(store.get("progress")!.status.attempts, 2);
+});
+
+
+// @case A crash after persisting explicit rejection cannot turn a safe once-only retry into an uncertain result.
+test("Recovery may retry a once-only operation with a persisted no-effect rejection", async t => {
+  const f = fixture(t); f.create("rejected"); approveFixtureOutput(f.store, "rejected");
+  f.store.update("rejected", s => ({ ...s, delivery: { ...s.delivery!, replay: "once" } }));
+  f.store.begin("rejected", 2);
+  f.store.update("rejected", s => ({ ...s, delivery: { ...s.delivery!, operation: { ...s.delivery!.operation!, lastFailureKind: "retryable" } } }));
+  const store = f.open(); let sends = 0;
+  const worker = new OutputDelivery(store, () => ({ replay: "once", async send() { sends++; return undefined; } }), log, outputPolicy({ maxAttempts: 2 }));
+  t.after(() => worker.close()); await worker.reconcile("rejected");
+  assert.equal(sends, 1); assert.equal(store.get("rejected")!.status.phase, "delivered");
+  assert.equal(store.get("rejected")!.status.attempts, 2);
 });

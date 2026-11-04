@@ -125,18 +125,33 @@ export class OutputStore {
     return deliveryEndpoint(address, output.spec.replyToMessageId);
   }
   cancel(id: string, reason: string): void { this.update(id, s => s.phase === "pending" && !s.attempts ? { ...s, phase: "cancelled", deliveryWait: undefined, lastError: reason } : s); }
-  /** @spec Reserve a send in the same transaction as checking its lifetime budget, before any external effect.
+  /** @spec Pin the current operation and reserve its attempt atomically before an external effect; acknowledgement releases this budget.
    * @case tests/output-retry.test.ts
    */
   begin(id: string, maxAttempts = Number.MAX_SAFE_INTEGER): boolean {
     let started = false;
     this.update(id, s => {
-      if (!["pending", "sending"].includes(s.phase) || s.attempts >= maxAttempts) return s;
+      if (!["pending", "sending"].includes(s.phase)) return s;
       if (!s.disclosure || !s.delivery) throw new Error("Output disclosure has not been checked");
+      const operation = s.delivery.operation ?? { snapshot: this.streams.get(s.delivery.stream).status, attempts: 0, maxAttempts };
+      if (operation.attempts >= maxAttempts) return s;
       started = true;
-      return { ...s, phase: "sending", deliveryWait: undefined, lastError: undefined, attempts: s.attempts + 1 };
+      return { ...s, phase: "sending", deliveryWait: undefined, lastError: undefined, preparationAttempts: undefined, attempts: s.attempts + 1,
+        delivery: { ...s.delivery, operation: { ...operation, attempts: operation.attempts + 1, maxAttempts, lastFailureKind: undefined } } };
     });
     return started;
+  }
+  /** @spec Confirm exactly the reserved snapshot and terminal delivery in one transaction, even if the producer appended or closed during transport. */
+  confirm(id: string, receipt?: OutputStatus["receipt"]): void {
+    this.update(id, s => {
+      const operation = s.delivery?.operation;
+      if (!operation) throw new Error("Output has no delivery operation to confirm");
+      const snapshot = operation.snapshot;
+      return { ...s, phase: snapshot.phase === "completed" ? "delivered" : snapshot.phase === "interrupted" ? "failed" : "sending",
+        deliveryWait: undefined, lastError: snapshot.phase === "interrupted" ? snapshot.error ?? "Output generation was interrupted" : undefined,
+        ...(snapshot.phase === "completed" ? { deliveredAt: new Date().toISOString() } : {}),
+        delivery: { ...s.delivery!, confirmedSeq: snapshot.lastSeq, operation: undefined }, ...(receipt ? { receipt } : {}) };
+    });
   }
   delivered(id: string, receipt?: OutputStatus["receipt"]): void { this.update(id, (s) => s.phase === "delivered" ? s : { ...s, phase: "delivered", deliveryWait: undefined, lastError: undefined, attempts: s.attempts, deliveredAt: new Date().toISOString(), ...(receipt ? { receipt } : {}) }); }
   failed(id: string, error: string): void { this.update(id, s => s.phase === "delivered" ? s : { ...s, phase: "failed", deliveryWait: undefined, lastError: error.slice(0, 4000) }); }

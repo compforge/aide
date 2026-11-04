@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import type { Stream, StreamRef, StreamEvent, StreamRecord, StreamReader, StreamReference, ResourceOwnerReference } from "@compforge/aide-plugin";
+import type { Stream, StreamRef, StreamEvent, StreamRecord, StreamReader, StreamReference, StreamStatus, ResourceOwnerReference } from "@compforge/aide-plugin";
 import { STREAM_TYPE } from "@compforge/aide-plugin";
 import { ResourceStorage } from "../resource/storage.ts";
 import { PluginResourceStore } from "../plugin/resource/store.ts";
-import { StreamDefinition } from "./definition.ts";
+import { StreamDefinition, StreamStatusSchema } from "./definition.ts";
 
 /** @spec Append batches and the durable tail commit atomically. Notifications are hints; readers resume by sequence.
  * @spec Terminal streams never reopen. Owner deletion removes content through the resource foreign key.
@@ -102,9 +102,13 @@ export class StreamStore {
     return this.storage.db.prepare("SELECT seq,kind,payload FROM stream_records WHERE uid=? AND seq>? AND seq<=? ORDER BY seq LIMIT ?")
       .all(ref.uid, afterSeq, throughSeq, limit).map(row => ({ seq: Number(row.seq), kind: String(row.kind), payload: JSON.parse(String(row.payload)) }));
   }
-  reader(ref: StreamRef): StreamReader {
-    const stream = this.get(ref), throughSeq = stream.status.lastSeq;
-    return { ref, protocol: stream.spec.protocol, status: stream.status,
+  /** @spec A persisted snapshot can be reopened after append/close without exposing later records or terminal state.
+   * @link docs/plugin/stream.md
+   */
+  reader(ref: StreamRef, snapshot?: StreamStatus): StreamReader {
+    const stream = this.get(ref), status = StreamStatusSchema.parse(snapshot ?? stream.status), throughSeq = status.lastSeq;
+    if (throughSeq > stream.status.lastSeq || (status.phase !== "open" && (status.phase !== stream.status.phase || throughSeq !== stream.status.lastSeq))) throw new Error("Stream snapshot is not committed");
+    return { ref, protocol: stream.spec.protocol, status,
       read: (afterSeq = 0, limit = 256) => this.read(ref, afterSeq, limit, throughSeq) };
   }
   async wait(ref: StreamRef, afterSeq: number, signal: AbortSignal): Promise<void> {

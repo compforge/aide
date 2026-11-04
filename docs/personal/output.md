@@ -72,12 +72,13 @@ Output 由独立 Reconciler 检查材料与受众，并持久化实际投递目�
 
 适配器提供 retryAfterMs 时，拒绝原因和 `deliveryWait: {reason: "provider", until}` 一起持久化，再通过已有 requeueAfterMs 定时协调。提前 Watch 或重启唤醒不会绕过该 deadline；到期重新检查披露和人物频率。没有提示时使用控制器错误退避。等待不占据发送执行权，不增加 attempts，不创建新 Output 或重做 Chief；只有再次调用发送才增加 attempts。重试成功清除等待和错误，永久失败保留原因。
 
-投递总次数由 `plugins.personal.output.maxAttempts` 限制，默认 5，最小 1（只允许首次投递）。每次调用 OutputTransport.send 前，在同一存储事务内检查预算并递增 `status.attempts`，成功和失败均计数，包括成功的流式更新。调用内部的平台 HTTP 请求数量不是这个计数单位；人物频控、接收者互斥、提供方 deadline 和 Stream 内容等待不计数。次数先持久化再调用，进程在两者之间退出可能消耗一次预算；重启不清零，已有记录的 attempts 直接参与判断，降低上限后超额 Output 不再发送。
+每次投递操作由 `plugins.personal.output.maxAttempts` 限制尝试次数，默认 5，最小 1（只允许首次调用）。一次操作固定实际 Stream 的末尾序号、生成状态、引用等快照；`status.delivery.operation` 保存该快照、尝试次数和本次使用的上限。失败重试始终读取同一快照；新内容到达或 Stream 关闭不能重置当前操作预算。每次调用 OutputTransport.send 前，在同一存储事务内建立操作、检查预算、递增操作次数和累计 `status.attempts`，再产生外部效果。人物频控、接收者互斥、提供方 deadline 和等待新内容不计数。
 
-完整内容已确认送达则 delivered。永久拒绝或次数耗尽且确认尚未完整送达则 failed；最后一次是否生效未知则 uncertain。保留最后诊断、已确认 Stream 位置、回执与尝试次数；停止自动投递后不会因 Stream 更新或进程重启重新发送，也不会换址重放。准备异常不会增加投递次数，也不在预算之外自动循环；普通发送异常仅在幂等且还有次数预算时可重放。
+一次成功即确认当前操作：持久化 confirmedSeq 和回执并清除 operation，后续进度可合并成新操作，获得完整的尝试额度。成功的流式更新再多也不会耗尽整个 Output。Stream 关闭即使没有增加序号，仍有独立的最终投递操作；只有该操作成功才标记 delivered，最终确认的位置、回执与终态在同一事务提交，避免确认后重启重复发送。次数在外部调用前持久化，进程中断可能消耗一次额度；重启复用未确认快照和计数，降低上限后超额操作不再发送。
 
-Chief 生产 Stream 与 Output 投递是独立生命周期。Chief 自行完成或中断 Stream；Output 达到上限或被拒绝只结束投递，不取消 Chief、不关闭或修改 Stream。即使全部投递失败，Chief 仍可继续写完，生成内容通过 Stream 引用保留供查看和跟进。成功的流式更新也消耗预算，因此 Output 可能在 Stream 仍 open 时转为 failed；它不代表生成已结束。开放 Stream 同时阻止其 Output 所有权树被容量回收。
+永久拒绝或本次操作次数耗尽且确认未送达则 failed；最后一次是否生效未知则 uncertain。未知结果只有在传输支持幂等重放时才能重试。保留最后诊断、未确认操作、已确认位置和回执；终止后不因 Stream 更新或重启自动重投，不换址重放。准备阶段的类型化可重试外部 API 错误按同一 maxAttempts 有界重试，连续失败次数保存在 preparationAttempts；重试遵守提供方截止时间或控制器退避。准备失败不增加投递调用次数，成功进入发送时清除该失败计数。本地校验及不可重试准备错误直接终止。
 
+Chief 生产 Stream 与 Output 投递是独立生命周期。Chief 自行完成或中断 Stream；Output 达到上限或被拒绝只结束投递，不取消 Chief、不关闭或修改 Stream。即使全部投递失败，Chief 仍可继续写完，生成内容保留供查看和跟进；开放 Stream 同时阻止其 Output 所有权树被容量回收。Web、Printer 和日志分别展示累计调用次数、当前操作尝试次数与上限、确认位置和等待原因。
 
 失败日志记录 Output ID 和安全提取的诊断，Lark 另记录目的地、分片、平台错误码、HTTP 状态或网络错误码。SDK 请求配置、凭证、消息正文和自由文本不写入日志或 Output.status。
 

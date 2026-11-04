@@ -70,3 +70,6 @@ status:
 
 Personal 的用法见 [Output](../personal/output.md)。原始和替换 Stream 都由同一个 Output 拥有。
 不提供旧字段或历史记录兼容。
+
+
+Host 的 `StreamStore.reader(ref, snapshot)` 可以重新打开已提交的状态快照，读取范围固定到快照的 lastSeq，保留当时的生成状态和引用。Personal 投递器持久化这一快照用于失败重试；后续追加或关闭不会改变重试内容。该能力只提供读取边界，不改变 Stream 的生成和关闭生命周期。
