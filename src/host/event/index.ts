@@ -383,6 +383,8 @@ export interface InvocationSummaryToolCall {
  * 一次调用结束时生成的实时结果；不是原生历史或恢复 checkpoint。
  */
 export interface InvocationSummary {
+  /** Terminal execution error for this invocation, absent on successful completion. */
+  readonly error?: string;
   invocationId: string;
   stopReason?: StopReason;
   userText?: string;

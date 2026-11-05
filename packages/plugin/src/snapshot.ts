@@ -6,6 +6,8 @@ export interface HarnessToolCall {
 }
 
 export interface HarnessExecutionResult {
+  /** Terminal execution error for this invocation, absent on successful completion. */
+  readonly error?: string;
   readonly stopReason?: string;
   readonly userText?: string;
   readonly agentText?: string;

@@ -504,7 +504,7 @@ test("restart configuration overrides the restored model without losing topic hi
   await fixture.run("remember the original request", "before-restart");
   const previous = fixture.config.config;
   fixture.config.config = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir, skillPaths: [],
-    model: { provider: "fixture", id: "new-deployment" } });
+    model: { provider: "fixture", id: "new-deployment", contextWindow: 1000000, maxTokens: 8192 } });
   await fixture.reopen();
   await fixture.run("continue", "after-restart");
   assert.equal(fixture.requests.at(-1)!.model, "new-deployment");
@@ -512,15 +512,16 @@ test("restart configuration overrides the restored model without losing topic hi
   assert.equal(previous.model.id, "test-model");
   assert.equal(previous.modelRuntime.getModel("fixture", "new-deployment"), undefined);
   assert.equal(previous.modelRuntime.getModel("fixture", "test-model")!.maxTokens, 4096);
-  // New IDs use SDK defaults, not the old model's maxTokens.
-  assert.equal(fixture.config.config.model.maxTokens, 16384);
+  // New endpoint capacities are declared independently of the old model.
+  assert.equal(fixture.config.config.model.maxTokens, 8192);
+  assert.equal(fixture.requests.at(-1)!.max_completion_tokens, 8192);
 });
 
 test("an entirely Aide-defined provider performs a real SDK request with explicit credentials", { timeout: 20_000 }, async (t) => {
   const fixture = await setup(t, () => ({ text: "independent provider" }), "chief");
   fixture.config.config = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir, skillPaths: [],
     model: { provider: "only-in-aide", id: "deployment", api: "openai-completions",
-      baseUrl: fixture.config.config.model.baseUrl, apiKeyEnv: "AIDE_TEST_KEY" }, environment: { AIDE_TEST_KEY: "explicit-test-key" } });
+      baseUrl: fixture.config.config.model.baseUrl, apiKeyEnv: "AIDE_TEST_KEY", contextWindow: 64000, maxTokens: 8192 }, environment: { AIDE_TEST_KEY: "explicit-test-key" } });
   await fixture.reopen();
   assert.equal((await fixture.run("check", "independent-provider")).finalText, "independent provider");
   assert.equal(fixture.requests.at(-1)!.model, "deployment");
@@ -627,7 +628,7 @@ test("Routine uses its dedicated Pi agent and independently configured package s
   const skill = join(fixture.config.cwd, "capabilities", "as-ops"); mkdirSync(skill, { recursive: true });
   writeFileSync(join(skill, "SKILL.md"), "---\nname: fixture-as-ops\ndescription: Inspect environment evidence.\n---\nRead-only environment operations.\n");
   const routineConfig = await resolvePiConfig({ cwd: fixture.config.cwd, agentDir: fixture.config.agentDir,
-    model: { provider: "fixture", id: "work-model" }, skillPaths: [join(skill, "SKILL.md")] });
+    model: { provider: "fixture", id: "work-model", contextWindow: 128000, maxTokens: 4096 }, skillPaths: [join(skill, "SKILL.md")] });
   const aide: Aide = new Aide(home, { cwd: fixture.config.cwd, timezone: "UTC", defaultHarnessConfig: { id: "default", harness: "pi" }, createAdapter: (target, ports) =>
     createHarnessAdapter(target, { ...ports, routineSession: aide.routineSession(ports.scope, routineConfig), targetConfig: { harness: target.harness } }) }, pino({ level: "silent" }));
   t.after(() => aide.close());

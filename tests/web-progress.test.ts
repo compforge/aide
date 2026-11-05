@@ -215,22 +215,40 @@ test("AgentUE reducer reconstructs growing, corrected and removed progress witho
 });
 
 
-test("Web retains Input material and shows interrupted Chief execution without an automatic warning", async (t) => {
+test("Web retains unfinished Input and exposes the original compaction error through Stream and Topic", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "aide-web-failed-reply-"));
-  const aide = new Aide(root, fakeOptions({
-    chief: async () => { throw new Error("controlled model failure"); },
+  const message = "Pi compaction failed: summary token cap";
+  const options = fakeOptions({
+    chief: async () => { throw new Error(message); },
     execute: async () => { throw new Error("No Work expected"); },
-  }, root), pino({ level: "silent" }));
+  }, root);
+  const aide = new Aide(root, { ...options, createAdapter(target) {
+    const adapter = options.createAdapter(target);
+    const create = adapter.create.bind(adapter);
+    adapter.create = (input, sink, binding) => create(input, event => {
+      if (event.kind === "state_update" && event.payload.stopReason === "error") {
+        sink({ kind: "_aide_error_update", invocationId: event.invocationId,
+          payload: { code: "pi_execution_failed", message, retryable: false, willRetry: false } });
+      }
+      sink(event);
+    }, binding);
+    return adapter;
+  } }, pino({ level: "silent" }));
   t.after(async () => { await aide.close(); rmSync(root, { recursive: true, force: true }); });
   await aide.receive(fixtureIncoming({ channelId: "web", id: "failed-reply",  topicId: "failed", text: "检查展示故障" }));
   await aide.settled();
   const view = topicView(aide, "failed");
   const reply = view.blocks.find((block) => block.type === "input")!;
   assert.equal(reply.status, "queued");
-  assert.ok(aide.topics.resource("failed")!.status.lastError);
+  assert.equal(aide.topics.resource("failed")!.status.lastError, "Pi compaction failed: summary token cap");
+  assert.equal(aide.topics.inputStore.get(reply.inputId!)!.status.assess?.lastError, "Pi compaction failed: summary token cap");
+  assert.equal(aide.topics.inputStore.get(reply.inputId!)!.status.assess?.completedAt, undefined);
+  assert.equal(view.meta.activity?.phase, "failed");
+  assert.equal(view.meta.activity?.error, "Pi compaction failed: summary token cap");
   assert.ok(aide.invocations().some((invocation) => invocation.executionId === reply.group_id));
   assert.match(reply.content, /检查展示故障/);
   assert.equal(mailView(aide.outputStore, aide.outputStore.list()[0]!).phase, "interrupted");
+  assert.equal(mailView(aide.outputStore, aide.outputStore.list()[0]!).error, "Pi compaction failed: summary token cap");
   assert.equal(view.blocks.filter(block => block.type === "message" && !block.content.trim()).length, 0);
 });
 

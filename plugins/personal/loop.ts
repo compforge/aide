@@ -125,7 +125,11 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
     const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Topic" ? "Chief" : current.kind, prompt, timeoutMs: 172800_000 });
     completed = result.state === "success" && result.value.result.stopReason === "end_turn";
     if (result.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, result.agent);
-    if (result.state !== "success" || result.value.result.stopReason !== "end_turn") error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
+    if (!completed) {
+      // Preserve the Harness cause through Input receipts, Topic status and interrupted Streams.
+      const detail = result.state === "success" ? result.value.result.error : result.state === "failure" ? result.error : undefined;
+      error = detail || `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
+    }
   } catch (cause) { error = String(cause); }
   finally {
     try {

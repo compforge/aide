@@ -179,6 +179,7 @@ export function createTimeline() {
     const area = $('activity');
     const nearBottom = $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
     area.hidden = !activity;
+    area.dataset.phase = activity?.phase ?? '';
     if (!activity) { area.replaceChildren(); activityNodes.clear(); activityId = undefined; return; }
     if (activity.id !== activityId) {
       activityId = activity.id; activityNodes.clear(); area.replaceChildren();
@@ -190,11 +191,14 @@ export function createTimeline() {
       envelope.append(thought, reply); area.append(envelope);
     }
     const last = activity.blocks.at(-1);
-    const label = activity.phase === 'queued' ? '正在排队'
+    const label = activity.phase === 'failed' ? '处理已中断' : activity.phase === 'queued' ? '正在排队'
       : last?.kind === 'tool' && last.status === 'in_progress' ? '正在调用工具'
       : last?.kind === 'thought' ? '正在思考' : last?.kind === 'text' ? '正在回复' : '正在处理';
-    replyHeading(find(area, '.reply-envelope'), 'Aide · ' + label + '…' + (activity.queued ? ` · ${activity.queued} 条待处理` : ''), activity.harnesses);
+    replyHeading(find(area, '.reply-envelope'), 'Aide · ' + label + (activity.phase === 'failed' ? '' : '…') + (activity.queued ? ` · ${activity.queued} 条待处理` : ''), activity.harnesses);
     const answer = activity.answers.map(outputText).join('\n\n');
+    let failure = area.querySelector<HTMLElement>('.activity-error');
+    if (activity.error && !failure) { failure = element('p', undefined, 'error activity-error'); find(area, '.reply-envelope').append(failure); }
+    if (failure) { failure.textContent = activity.error ?? ''; failure.hidden = !activity.error; }
     updateAnswer($('activity-answer').parentElement as HTMLDetailsElement, activity.phase, answer);
     const process = activity.blocks.filter((block) => block.kind !== 'text' ||
       !activity.answers.some(answer => answer.content === block.text));
