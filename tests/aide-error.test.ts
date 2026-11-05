@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AideError, aideErrorDetails } from "@compforge/aide-common";
 import { AideError as ConnectorAideError, DeliveryError, deliveryFailure } from "@compforge/aide-connector";
-import { HarnessError, harnessErrorDetails, AideError as PluginAideError } from "@compforge/aide-plugin";
+import { HarnessError, newHarnessError, asHarnessError, AideError as PluginAideError } from "@compforge/aide-plugin";
 import { serializedError, restoredError } from "../src/protocol/ipc.ts";
 
 test("Aide errors share one public contract and survive a JSON IPC round trip with false intact", () => {
@@ -46,12 +46,15 @@ test("Harness errors survive IPC with classification and native recovery identit
   for (const retryable of [false, true]) {
     const options = { retryable, code: "harness_compaction_failed", biz_code: "length", message: "Summary token cap",
       agent: { harness: "chief", sessionId: "native-session" } };
-    for (const error of [new HarnessError(options), Object.assign(new Error(options.message), options, { name: "HarnessError" })]) {
+    for (const error of [HarnessError.from(new AideError(options), options.agent), Object.assign(new Error(options.message), options, { name: "HarnessError" })]) {
       const restored = restoredError(JSON.parse(JSON.stringify(serializedError(error))));
       assert(restored instanceof HarnessError);
       assert(restored instanceof AideError);
-      assert.deepEqual(harnessErrorDetails(restored), options);
-      assert.deepEqual(harnessErrorDetails(HarnessError.from(restored)), options);
+      for (const normalized of [asHarnessError(restored), HarnessError.from(restored)]) {
+        assert(normalized instanceof HarnessError);
+        assert.deepEqual({ ...aideErrorDetails(normalized), agent: normalized.agent }, options);
+      }
+      assert.deepEqual(serializedError(restored).harness, options);
     }
   }
   const plain = HarnessError.from(new Error("Unknown adapter failure"));
@@ -61,4 +64,40 @@ test("Harness errors survive IPC with classification and native recovery identit
   assert.equal(classified.code, "rate_limited");
   assert.equal(classified.biz_code, "429");
   assert.equal(classified.retryable, true);
+});
+
+/** @case Construction is simple; fallback identity does not overwrite a known native session. */
+test("Harness error construction and recognition return Errors with the expected identity", () => {
+  const fallback = { harness: "chief", sessionId: "admitted" };
+  const original = newHarnessError("harness_compaction_failed", "Summary token cap");
+  assert(original instanceof HarnessError);
+  assert(original instanceof AideError);
+  assert.equal(original.retryable, false);
+  assert.equal(original.agent, undefined);
+  original.cause = new Error("Provider stopped at length");
+  const restored = asHarnessError(original, fallback)!;
+  assert(restored instanceof HarnessError);
+  assert.deepEqual(restored.agent, fallback);
+  assert.equal(restored.stack, original.stack);
+  assert.equal(restored.cause, original.cause);
+  assert.equal(original.agent, undefined, "Recognition must not mutate the caught error");
+  const known = { harness: "chief", sessionId: "reported" };
+  assert.deepEqual(asHarnessError(newHarnessError("harness_compaction_failed", "Failed", known), fallback)!.agent, known);
+  assert.deepEqual(asHarnessError(newHarnessError("harness_compaction_failed", "Failed", { harness: "chief" }), fallback)!.agent, fallback);
+  const wire = JSON.parse(JSON.stringify(serializedError(restored)));
+  assert.deepEqual(Object.keys(wire.harness).sort(), ["agent", "code", "message", "retryable"]);
+  const roundTrip = restoredError(wire) as HarnessError;
+  assert.deepEqual(roundTrip.agent, fallback);
+  assert.equal(roundTrip.stack, original.stack);
+  assert.equal((roundTrip.cause as Error).message, "Provider stopped at length");
+});
+
+test("Harness recognition validates foreign error fields without inferring classification from text", () => {
+  const valid = { name: "HarnessError", code: "harness_compaction_failed", message: "Summary failed", retryable: false };
+  assert(asHarnessError(valid) instanceof HarnessError);
+  for (const agent of [null, "chief", {}, { harness: "" }, { harness: "chief", sessionId: 123 }, { harness: "chief", sessionId: "" }]) {
+    assert.equal(asHarnessError({ ...valid, agent }), undefined);
+  }
+  assert.equal(asHarnessError({ ...valid, retryable: "false" }), undefined);
+  assert.equal(asHarnessError(new Error("harness_compaction_failed")), undefined);
 });

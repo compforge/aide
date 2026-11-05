@@ -24,6 +24,12 @@ for (const rejects of [false, true]) test(`Pi compaction failure is scoped to th
     async prompt() {
       prompts++;
       if (prompts === 1) {
+        emit({ type: "compaction_end", reason: "threshold", result: undefined,
+          aborted: true, willRetry: false, errorMessage: "summary cancelled" });
+        assert.equal(aborted, 0, "Cancelled compaction does not become a failure");
+        emit({ type: "compaction_end", reason: "overflow", result: undefined,
+          aborted: false, willRetry: true, errorMessage: "summary retry pending" });
+        assert.equal(aborted, 0, "Native recovery must finish before the Adapter reports failure");
         for (let i = 0; i < 2; i++) emit({ type: "compaction_end", reason: "threshold", result: undefined,
           aborted: false, willRetry: false, errorMessage: "summary token cap" });
         failed(); await gate;

@@ -166,9 +166,9 @@ export class PiAdapter implements Harness {
         attributes: { sessionId: session.native.sessionId, reason: event.reason, willRetry: event.willRetry,
           ...(event.result ? { tokensBefore: event.result.tokensBefore, summaryChars: event.result.summary.length,
             ...(event.result.estimatedTokensAfter === undefined ? {} : { tokensAfter: event.result.estimatedTokensAfter }) } : {}) } });
-      // @spec A failed compaction ends this invocation, not the native session. Pi owns subsequent recovery.
+      // @spec Final compaction failure ends this invocation; the Operator owns whether to retain its session binding.
       // @why Do not continue this failed turn or permanently reject independent future inputs.
-      if (event.errorMessage && turn && !turn.compactionFailure) {
+      if (event.errorMessage && !event.aborted && !event.willRetry && turn && !turn.cancelled && !turn.compactionFailure) {
         turn.compactionFailure = `Pi compaction failed: ${event.errorMessage}`;
         void session.native.abort().catch(() => {});
       }

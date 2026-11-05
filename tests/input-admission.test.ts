@@ -1,3 +1,6 @@
+import { newHarnessError } from "@compforge/aide-plugin";
+import { committedStatus } from "./fixtures/resource-write.ts";
+import { ROUTE_TYPE, ROUTE_NAME } from "../plugins/personal/route/model.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -143,4 +146,107 @@ test("Only routing and completion wake assessment watchers, not claim or rejecti
   assert.deepEqual(await watch.handler.update!({ oldObject: claimed, newObject: rejected } as any), []);
   assert.deepEqual(await watch.handler.update!({ oldObject: rejected, newObject: completed } as any), [{ name: a.metadata.name, namespace: a.metadata.namespace }]);
   await assert.rejects(f.resources.patch(completed, { type: "json", value: [{ op: "replace", path: "/status/assess", value: {} }] }), /already completed/);
+});
+
+/** @case Failure only releases the binding; a later independent admission creates the next session without replay. */
+for (const closeFails of [false, true]) test(`Compaction failure unbinds Chief and preserves its receipt (close fails: ${closeFails})`, async t => {
+  const f = fixture(t), topic = await f.aide.topics.ensure("compaction");
+  await f.input("failed", [topic]);
+  const calls: { operation: string; sessionId?: string }[] = [];
+  const agent = { harness: "chief", sessionId: "old-session" };
+  await f.resources.patchStatus(f.current(topic), { agent });
+  const execution = { executionId: "failed-run", verbs: { async harness(args: { operation?: string; sessionId?: string }) {
+    calls.push({ operation: args.operation ?? "prompt", sessionId: args.sessionId });
+    if (args.operation === "close") {
+      assert.equal(f.current(topic).status.agent, undefined);
+      assert.equal(f.current(topic).status.execution, null);
+      assert.equal(f.aide.topics.inputStore.get("failed")!.status.assess!.lastError, "summary token cap");
+      if (closeFails) throw new Error("runtime cleanup unavailable");
+      return { state: "success", value: { outcome: "accepted" } };
+    }
+    // A transport may omit agent; the admitted identity remains known to the caller.
+    throw newHarnessError("harness_compaction_failed", "summary token cap");
+  } } } as unknown as ReconcileContext;
+  assert.equal(await runInput(f.context, execution, f.current(topic), "chief", "failed", "failed"), false);
+  assert.deepEqual(calls, [{ operation: "prompt", sessionId: "old-session" }, { operation: "close", sessionId: "old-session" }]);
+  const receipt = f.aide.topics.inputStore.get("failed")!.status.assess!;
+  assert.deepEqual(receipt.agent, agent);
+  assert.equal(receipt.executionId, "failed-run");
+  assert.equal(receipt.lastError, "summary token cap");
+  assert.equal(receipt.completedAt, undefined);
+  assert.deepEqual(await nextInputs(f.resources, f.current(topic), 8), []);
+  assert.equal(f.current(topic).status.lastError, "summary token cap");
+
+  await f.input("fresh", [topic]);
+  assert.deepEqual((await nextInputs(f.resources, f.current(topic), 8)).map(i => i.metadata.name), ["fresh"]);
+  await runInput(f.context, f.execution("fresh-run", async () => {
+    assert.equal(f.current(topic).status.agent?.sessionId, "session-fresh-run");
+    await assessInput(f.resources, f.current(topic), "fresh-run", { inputId: "fresh", summary: "Handled" });
+  }), f.current(topic), "chief", "fresh", "fresh");
+  assert.deepEqual(f.aide.topics.inputStore.get("failed")!.status.assess, receipt);
+  assert.ok(f.aide.topics.inputStore.get("fresh")!.status.assess?.completedAt);
+});
+
+for (const outcome of ["error", "cancelled", "timeout"] as const) test(`${outcome} retains the existing Agent binding`, async t => {
+  const f = fixture(t), topic = await f.aide.topics.ensure("retained");
+  await f.input("fact", [topic]);
+  const agent = { harness: "chief", sessionId: "retained-session" };
+  await f.resources.patchStatus(f.current(topic), { agent });
+  const execution = { executionId: "run", verbs: { async harness(args: { operation?: string }) {
+    assert.equal(args.operation, undefined);
+    if (outcome === "error") throw newHarnessError("harness_execution_failed", "summary token cap", agent);
+    return { state: outcome === "cancelled" ? "dismissed" : "timeout", agent };
+  } } } as unknown as ReconcileContext;
+  await runInput(f.context, execution, f.current(topic), "chief", "fact", "fact");
+  assert.deepEqual(f.current(topic).status.agent, agent);
+});
+
+for (const race of ["status", "session", "execution"] as const) test(`Compaction cleanup rechecks ${race} after a finalization conflict`, async t => {
+  const f = fixture(t), topic = await f.aide.topics.ensure("race");
+  const agent = { harness: "chief", sessionId: "old-session" };
+  await f.resources.patchStatus(f.current(topic), { agent, execution: { id: "old-run", startedAt: new Date().toISOString() } });
+  const owner = f.current(topic);
+  let raced = false;
+  const resources: ResourceClient = { ...f.resources, async commit(writes) {
+    if (!raced && writes.some(write => committedStatus(write)?.execution === null)) {
+      raced = true;
+      await f.resources.patchStatus(f.current(topic), race === "status" ? { idleReviewCount: 7 }
+        : race === "session" ? { agent: { harness: "chief", sessionId: "new-session" } }
+        : { execution: { id: "new-run", startedAt: new Date().toISOString() } });
+    }
+    return f.resources.commit(writes);
+  } };
+  const released = await finalizeExecution({ ...f.context, resources }, owner, "old-run", "summary token cap",
+    newHarnessError("harness_compaction_failed", "summary token cap", agent));
+  assert.ok(raced);
+  if (race === "status") {
+    assert.deepEqual(released, agent);
+    assert.equal(f.current(topic).status.agent, undefined);
+    assert.equal(f.current(topic).status.idleReviewCount, 7);
+  } else {
+    assert.equal(released, undefined);
+    assert.equal(f.current(topic).status.agent?.sessionId, race === "session" ? "new-session" : "old-session");
+    if (race === "execution") assert.equal(f.current(topic).status.execution?.id, "new-run");
+  }
+});
+
+test("Route compaction failure does not schedule replay of its failed Input", async t => {
+  const f = fixture(t);
+  const route = await f.resources.create<Record<string, never>, import("../plugins/personal/loop.ts").LoopStatus>(ROUTE_TYPE, { name: ROUTE_NAME, spec: {} });
+  f.aide.topics.inputStore.submit("fixture", "route-failed", { origin: "source", originId: "fixture", text: "route-failed" });
+  const agent = { harness: "route", sessionId: "route-session" };
+  const calls: string[] = [];
+  const execution = { executionId: "route-run", verbs: { async harness(args: { operation?: string }) {
+    calls.push(args.operation ?? "prompt");
+    if (args.operation) return { state: "success", value: { outcome: "accepted" }, agent };
+    throw newHarnessError("harness_compaction_failed", "summary token cap", agent);
+  } } } as unknown as ReconcileContext;
+  await runInput(f.context, execution, route, "route", "route-failed", "route-failed");
+  const latest = (await f.resources.get<unknown, import("../plugins/personal/loop.ts").LoopStatus>(resourceRef(route)))!;
+  assert.equal(latest.status.agent, undefined);
+  assert.deepEqual(calls, ["create", "prompt", "close"]);
+  const receipt = f.aide.topics.inputStore.get("route-failed")!.status.route!;
+  assert.equal(receipt.lastError, "summary token cap");
+  assert.equal(receipt.nextAttemptAt, undefined);
+  assert.deepEqual(await nextInputs(f.resources, latest, 8), []);
 });

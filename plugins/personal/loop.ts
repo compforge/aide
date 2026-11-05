@@ -1,9 +1,9 @@
-import { harnessErrorDetails } from "@compforge/aide-plugin";
+import { asHarnessError } from "@compforge/aide-plugin";
 import { invalidateAssignment } from "./input/assignment.ts";
 import { commitStatus } from "./status.ts";
 import { z } from "zod";
 import { prepareAgent, saveAgent } from "./session.ts";
-import type { PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
+import type { AgentStatus, HarnessError, PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
 import { assessmentFinished, InputAttention, INPUT_ORIGINS, inputAttention, isCapacityInput, isInternalInput, INPUT_TYPE, type InputSpec } from "./input/model.ts";
 import { inputRef, pendingInputs, resourceRef, changeAttempt, changeAssessment, attemptOf, attemptPatch, type Input } from "./input/state.ts";
 export { inputRef } from "./input/state.ts";
@@ -110,10 +110,12 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   }
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", inputIds, executionId: execution.executionId } });
   let completed = false;
+  let agent: AgentStatus | undefined;
+  let failure: HarnessError | undefined;
   let streaming = false;
   let error = "Agent ended without confirming input completion";
   try {
-    const agent = await prepareAgent(context.resources, execution, current, target);
+    agent = await prepareAgent(context.resources, execution, current, target);
     for (const input of current.kind === "Topic" ? inputs as Input[] : []) await changeAssessment(context.resources, input, execution.executionId, { agent });
     for (const id of current.kind === "Topic" ? [] : inputIds) await changeAttempt(context.resources, id, resourceRef(current), receipt =>
       receipt?.executionId === execution.executionId && !receipt.completedAt ? { agent } : {});
@@ -128,18 +130,34 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
     if (result.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, result.agent);
     if (!completed) error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
   } catch (cause) {
-    const failure = harnessErrorDetails(cause);
+    failure = asHarnessError(cause, agent);
     error = failure?.message ?? String(cause);
-    if (failure?.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, failure.agent);
+    if (failure?.code !== "harness_compaction_failed" && failure?.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, failure.agent);
   }
   finally {
     try {
       if (streaming) {
         const closed = await execution.verbs.action("finish_output_stream", completed ? {} : { error });
-        if (closed.state !== "success") { completed = false; error = `Could not close Chief output stream: ${closed.state === "failure" ? closed.error : closed.state}`; }
+        if (closed.state !== "success") throw new Error(`Could not close Chief output stream: ${closed.state === "failure" ? closed.error : closed.state}`);
       }
-    } catch (cause) { completed = false; error = String(cause); }
-    finally { await finalizeExecution(context, current, execution.executionId, current.kind === "Topic" && completed ? "" : error); }
+    } catch (cause) {
+      completed = false;
+      error = failure?.message ?? String(cause);
+      context.logger.warn("Chief output stream cleanup failed", { attributes: { resourceUid: current.metadata.uid,
+        executionId: execution.executionId, error: String(cause) } });
+    }
+    finally {
+      const released = await finalizeExecution(context, current, execution.executionId, current.kind === "Topic" && completed ? "" : error, failure);
+      if (released?.sessionId) {
+        try {
+          const closed = await execution.verbs.harness({ operation: "close", ...released, sessionId: released.sessionId, timeoutMs: 30_000 });
+          if (closed.state !== "success" || closed.value.outcome !== "accepted") throw new Error(`Could not close failed Agent: ${closed.state}`);
+        } catch (cause) {
+          context.logger.warn("Failed Agent runtime cleanup failed", { attributes: { resourceUid: current.metadata.uid,
+            executionId: execution.executionId, harness: released.harness, sessionId: released.sessionId, error: String(cause) } });
+        }
+      }
+    }
   }
   return completed;
 }
@@ -147,13 +165,20 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
  * @spec Admission evidence survives completion of the invocation and restart; unknown effects never automatically replay.
  * @why Chief idle time starts after every execution, including failure or recovery; missed timer checks never force continuation.
  * @spec Internal execution completion preserves review backoff; Topic reconciliation owns material progress and no-op outcomes.
+ * @spec Final compaction failure releases only the matching binding with its execution; future admission independently creates an Agent.
+ * @why This is a Personal fallback, not a verdict that native history is corrupt; failed Inputs and native files remain evidence.
+ * @link docs/harness/pi.md#压缩与失败恢复
+ * @case tests/input-admission.test.ts
  * @case tests/topic-review.test.ts
  */
 export async function finalizeExecution(context: Pick<PluginContext, "resources" | "logger">, owner: Readonly<LoopResource>, executionId: string,
-  error = "Previous execution interrupted; inspect existing effects before continuing") {
+  error = "Previous execution interrupted; inspect existing effects before continuing", failure?: HarnessError) {
+  const compactionFailed = failure?.code === "harness_compaction_failed";
   for (let n = 0; ; n++) {
     const latest = await context.resources.get<unknown, LoopStatus>(resourceRef(owner));
-    if (!latest || latest.status.execution?.id !== executionId) return;
+    if (!latest || latest.metadata.uid !== owner.metadata.uid || latest.status.execution?.id !== executionId) return;
+    const released = compactionFailed && failure.agent?.sessionId && latest.status.agent?.harness === failure.agent.harness
+      && latest.status.agent.sessionId === failure.agent.sessionId ? latest.status.agent : undefined;
     const unfinished = latest.kind === "Topic"
       ? await context.resources.list<import("./input/model.ts").InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessExecution", value: executionId } })
       : (await pendingInputs(context.resources, resourceRef(latest))).filter(i => attemptOf(i, resourceRef(latest))?.executionId === executionId);
@@ -161,18 +186,20 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
     try {
       await commitStatus(context.resources, [
         ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: latest.kind === "Topic" ? { assess: { ...i.status.assess, lastError: error || "Chief ended without confirming input completion" } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error,
-          ...(latest.kind === "Route" ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
-        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, reviewCheckedAt: null, ...(latest.status.execution.inputOrigin && !isInternalInput({ origin: latest.status.execution.inputOrigin })
+          ...(latest.kind === "Route" && !compactionFailed ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
+        { operation: "patchStatus", resource: latest, patch: { execution: null, ...(released ? { agent: undefined } : {}), ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, reviewCheckedAt: null, ...(latest.status.execution.inputOrigin && !isInternalInput({ origin: latest.status.execution.inputOrigin })
             ? { idleReviewCount: 0 } : {}), idleReviewReset: null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
           lastExecutionId: executionId,
-          ...((unfinished.length || (latest.status as import("./work-status.ts").WorkAgentStatus).lastExecutionId !== executionId)
+          ...(!compactionFailed && (unfinished.length || (latest.status as import("./work-status.ts").WorkAgentStatus).lastExecutionId !== executionId)
             ? { recovery: { reason: "ExecutionUncertain", message: error || "Execution ended without a business receipt" } } : {}),
         } : {}) } },
       ]);
       if (latest.kind === "Topic" && error) context.logger.warn("Chief execution failed", { attributes: { topicUid: latest.metadata.uid, executionId, error } });
-      if (unfinished.length) context.logger.warn(latest.kind === "Topic" ? "Chief input assessments failed" : "Agent inputs await recovery", { attributes: { resourceUid: latest.metadata.uid, executionId,
-        inputIds: unfinished.map(i => i.metadata.name), recovery: latest.kind === "Route" ? "retry" : latest.kind === "Topic" ? "none" : "inspect", error } });
-      return;
+      if (unfinished.length) context.logger.warn(latest.kind === "Topic" ? "Chief input assessments failed" : compactionFailed ? "Agent inputs failed" : "Agent inputs await recovery", { attributes: { resourceUid: latest.metadata.uid, executionId,
+        inputIds: unfinished.map(i => i.metadata.name), recovery: compactionFailed || latest.kind === "Topic" ? "none" : latest.kind === "Route" ? "retry" : "inspect", error } });
+      if (released) context.logger.warn("Agent binding released after compaction failure", { attributes: { resourceUid: latest.metadata.uid,
+        executionId, harness: released.harness, sessionId: released.sessionId ?? null, code: failure!.code, error: failure!.message } });
+      return released;
     } catch (cause) { if (n >= 8 || !/version conflict/.test(String(cause))) throw cause; }
   }
 }
