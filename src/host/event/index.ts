@@ -339,6 +339,7 @@ export interface ContextWindowUpdate {
  */
 export interface ErrorUpdate {
   code?: string;
+  biz_code?: string;
   message: string;
   retryable?: boolean;
   willRetry?: boolean;
@@ -384,7 +385,7 @@ export interface InvocationSummaryToolCall {
  */
 export interface InvocationSummary {
   /** Terminal execution error for this invocation, absent on successful completion. */
-  readonly error?: string;
+  readonly error?: import("@compforge/aide-common").AideErrorOptions;
   invocationId: string;
   stopReason?: StopReason;
   userText?: string;

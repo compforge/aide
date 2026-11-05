@@ -238,7 +238,7 @@ export class Personal {
       const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
         operation, invocationId, messageId: `input:${input.metadata.uid}`, prompt: message, timeoutMs: 30_000,
       });
-      if (result.state !== "success") throw new Error(`Harness ${operation} ${result.state}${result.state === "failure" ? `: ${result.error}` : ""}`);
+      if (result.state !== "success") throw new Error(`Harness ${operation} ${result.state}`);
       const outcome = { accepted: result.value.outcome === "accepted", reason: result.value.reason };
       if (!outcome.accepted) {
         await changeAttempt(resources, inputId, ref, p => p?.executionId === id && !p.completedAt ? { executionId: undefined, agent: undefined, startedAt: undefined } : {});

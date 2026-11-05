@@ -208,3 +208,7 @@ External Connector kinds are defined by their owning packages. Plugins can use `
 资源分页默认 `consistency: "consistent"`，集合变化时返回 ResourceExpired。后台协调可显式使用 `consistency: "live"`，按稳定键及首轮上界持续遍历，游标支持同一数据库重启恢复；每页是最新对象，消费者负责幂等处理、检查点和漏入对象的后续协调。详见 [分页契约](../../docs/plugin/resource.md#持续变化集合的遍历)。
 
 `ResourceReader.page` 与事务内 `ResourceValidationContext.page` 共享分页契约；Definition 的 `indexes` 声明等值选择，`orderedIndexes` 声明分区内排序键，业务通过 `direction` 获取所需一页。完整语义与 Kubernetes 差异见 [Resource](../../docs/plugin/resource.md#分页查询)。
+
+## Harness failures
+
+`execution.verbs.harness()` rejects with `HarnessError extends AideError` when model execution, compaction, dispatch or session operations fail. Use `harnessErrorDetails(error)` to read `code`, `message`, `retryable`, optional `biz_code`, and the optional `agent` recovery reference across SDK copies and IPC. Dismissal and deadlines remain distinct `dismissed` / `timeout` results. A retryable error does not authorize replaying tools or the whole invocation; the caller owns business recovery. See [error contracts](../../docs/errors.md).

@@ -6,7 +6,7 @@ import type { ReconcileSnapshot, HarnessExecutionResult } from "./snapshot.ts";
 export const MAX_VERB_TIMEOUT_MS = 2_147_483_647 as const;
 
 /**
- * @spec Every Plugin verb has exactly four terminal outcomes: success with a business value, explicit user dismissal, deadline timeout, or execution failure.
+ * @spec Action verbs have four terminal outcomes: success with a business value, explicit user dismissal, deadline timeout, or execution failure.
  * @rule Cancellation is dismissed; a deadline is timeout. Neither proves that external effects were undone.
  */
 export type VerbResult<T> =
@@ -39,7 +39,8 @@ export interface CompletedHarnessValue {
 
 export type HarnessValue = CompletedHarnessValue;
 
-export type HarnessResult = VerbResult<HarnessValue> & { readonly agent?: import("./harness.ts").AgentStatus };
+/** Execution failures reject with HarnessError; dismissal and deadlines remain distinct outcomes. */
+export type HarnessResult = Exclude<VerbResult<HarnessValue>, { state: "failure" }> & { readonly agent?: import("./harness.ts").AgentStatus };
 
 /** A receipt acknowledges an operation, never completion of its business inputs. */
 export interface HarnessOperationValue {
@@ -58,7 +59,7 @@ export type HarnessOperationInput = HarnessOperationOptions & (
   | { readonly operation: "followUp" | "steer"; readonly invocationId: string; readonly messageId: string; readonly prompt: string }
 );
 export type HarnessVerbInput = HarnessInvocationInput | HarnessOperationInput;
-export type HarnessOperationResult = VerbResult<HarnessOperationValue> & { readonly agent?: import("./harness.ts").AgentStatus };
+export type HarnessOperationResult = Exclude<VerbResult<HarnessOperationValue>, { state: "failure" }> & { readonly agent?: import("./harness.ts").AgentStatus };
 
 /**
  * @spec Controller verbs suspend the same live Plugin execution until a terminal result; Aide never re-enqueues a Resource merely to deliver that result.

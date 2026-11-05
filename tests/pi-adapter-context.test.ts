@@ -54,7 +54,7 @@ for (const rejects of [false, true]) test(`Pi compaction failure is scoped to th
     release(); await done;
     assert.equal(aborted, 1);
     assert.equal(events.filter(e => e.kind === "state_update" && e.payload.stopReason === "error").length, 1);
-    assert.ok(events.some(e => e.kind === "_aide_error_update" && e.payload.message.includes("summary token cap")));
+    assert.ok(events.some(e => e.kind === "_aide_error_update" && e.payload.code === "harness_compaction_failed" && e.payload.retryable === false && e.payload.message.includes("summary token cap")));
     assert.ok(!events.some(e => e.kind === "agent_message" && e.payload.phase === "final"));
     assert.ok(logs.some(e => e.level === "error" && e.attributes?.sessionId === "native" && e.invocationId === "turn"));
     assert.equal(prompts, 1, "No automatic replay");

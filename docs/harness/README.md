@@ -24,6 +24,8 @@ Harness 向 Aide 提供 Agent 执行能力。宿主通过统一接口提交输�
 
 ## Operator 调用边界
 
+Harness 运行失败通过 `HarnessError extends AideError` 报告；IPC 保留结构化错误和可用的原生会话引用。成功收口、取消、超时与失败分别处理，不将失败包装成成功值；契约见 [Aide 错误](../errors.md)。
+
 Operator 根据 Harness interface，通过 verb 操作原生 agent loop。调用需要的配置名和会话引用都是显式参数；Harness verb 不读取或修改 CRD，也不知道 status.agent、Topic、Task 或 Routine。
 
 调用方可以为服务重启保存少量参数，例如：

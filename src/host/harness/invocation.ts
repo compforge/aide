@@ -1,6 +1,7 @@
 import type { ExecutionAssociation } from "@compforge/aide-plugin";
 import type { HarnessExecutionResult } from "@compforge/aide-plugin";
-type InvocationSummary = HarnessExecutionResult & { readonly invocationId: string };
+import type { InvocationSummary as CoreInvocationSummary } from "../event/index.ts";
+type InvocationSummary = HarnessExecutionResult & Pick<CoreInvocationSummary, "invocationId" | "error">;
 
 import { newId } from "../event/ids.ts";
 import type {

@@ -57,7 +57,7 @@ test("invocation summaries retain their terminal error without leaking other cal
       payload: { code: "execution_failed", message, retryable: false, willRetry: false } });
     session.appendEvent({ kind: "state_update", source, harness: "pi", invocationId, payload: { state: "idle", stopReason } });
   }
-  assert.equal(session.summarizeInvocation("failed").error, "Pi compaction failed: summary token cap");
-  assert.equal(session.summarizeInvocation("other").error, "Different model failed");
+  assert.equal(session.summarizeInvocation("failed").error?.message, "Pi compaction failed: summary token cap");
+  assert.equal(session.summarizeInvocation("other").error?.message, "Different model failed");
   assert.equal(session.summarizeInvocation("recovered").error, undefined);
 });

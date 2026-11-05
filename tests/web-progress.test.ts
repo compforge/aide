@@ -228,7 +228,7 @@ test("Web retains unfinished Input and exposes the original compaction error thr
     adapter.create = (input, sink, binding) => create(input, event => {
       if (event.kind === "state_update" && event.payload.stopReason === "error") {
         sink({ kind: "_aide_error_update", invocationId: event.invocationId,
-          payload: { code: "pi_execution_failed", message, retryable: false, willRetry: false } });
+          payload: { code: "harness_compaction_failed", message, retryable: false, willRetry: false } });
       }
       sink(event);
     }, binding);

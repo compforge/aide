@@ -1,3 +1,4 @@
+import { HarnessError } from "@compforge/aide-plugin";
 import {
   type Harness,
   type ApprovalContext,
@@ -662,9 +663,7 @@ export class InvocationExecutor {
       this.runtimes.delete(this.runtimeKey(input.runtimeId, input.target.id));
       await this.closeHarness(binding).catch(() => {});
       if (record.status === "finalized" && this.options.records.projection.stopReasons.get(input.invocationId) === "cancelled") return;
-      throw new Error(`Harness ${targetKey}: ${detail}`, {
-        cause: error,
-      });
+      throw HarnessError.from(error);
     } finally {
       this.processing.delete(input.runtimeId);
       this.deliveryAttempts.release(input.invocationId);

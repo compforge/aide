@@ -18,3 +18,9 @@ throw new AideError({
 `DeliveryError` 是 AideError 的投递专用类别，保留结果确定性和 retryAfterMs；细节见 [Connector 投递错误](connector/extensions.md#host-投递错误)。公共错误不强行携带各领域的专有字段。普通异常没有明确可重试分类；Output 仅在幂等发送且还有预算时允许未知结果重放，准备阶段异常则停止，不在投递预算之外无限重试。
 
 Host/Runner IPC 保存并恢复四个公共字段，同时保留 DeliveryError 的专属诊断。SDK 通过结构化契约识别外部包的错误，不依赖 instanceof；恢复后的公共错误仍可通过 aideErrorDetails 读取。错误不会自动授权重新执行操作。
+
+`HarnessError` 由 `@compforge/aide-plugin` 定义并继承 `AideError`，表示 Harness 模型调用、上下文压缩、调度或会话操作失败。`harness()` 对这些失败 reject，不再返回 `success + stopReason=error` 或字符串 failure。取消与请求期限仍返回 `dismissed`、`timeout`，操作被拒绝仍是明确的 `outcome: rejected` 回执。
+
+`HarnessError.agent` 可携带已知的 `harness/sessionId`，使失败后的调用方仍能保存原生恢复身份。Host/Runner IPC 按 `harnessErrorDetails` 结构化识别和恢复错误；业务层不依赖异常来自同一 SDK 副本。已有 `AideError` 保留 code、biz_code 和 retryable；未分类异常归为 `harness_operation_failed`，默认不可重试。Pi 压缩失败使用 `harness_compaction_failed`，普通终态执行失败使用 `harness_execution_failed`；不解析错误文案推断可重试性。
+
+Personal 捕获 HarnessError 后保存未完成 Input、Topic 和 Stream 的安全诊断；`retryable: true` 也不自动重跑整个 Agent。模型请求重试与整轮业务执行恢复分属不同层，后者必须核对已发生的工具效果与业务回执。

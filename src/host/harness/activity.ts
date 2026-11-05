@@ -76,7 +76,8 @@ export class HarnessActivity {
     }).filter(Boolean).join("\n") || undefined;
     const stopReason = state.stopReasons.get(id);
     // Concurrent invocations and recovered transient errors must not contaminate this result.
-    const error = stopReason === "error" ? [...state.errors.values()].filter(e => e.invocationId === id).at(-1)?.message : undefined;
+    const failure = stopReason === "error" ? [...state.errors.values()].filter(e => e.invocationId === id).at(-1) : undefined;
+    const error = failure ? { code: failure.code ?? "harness_execution_failed", message: failure.message.slice(0, 4000), retryable: failure.retryable ?? false, ...(failure.biz_code ? { biz_code: failure.biz_code } : {}) } : undefined;
     const summary: InvocationSummary = { invocationId: id, stopReason, ...(error ? { error } : {}),
       userText: invocationUserText(state, id) || undefined, agentText: text(), finalText: text(true),
       toolCalls: [...state.toolCalls.values()].filter(t => t.invocationId === id).map(t => ({ toolCallId: t.toolCallId, title: t.title, kind: t.kind, status: t.status })),
