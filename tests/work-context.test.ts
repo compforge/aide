@@ -1,3 +1,4 @@
+import { HarnessError } from "@compforge/aide-plugin";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import { workObservation, workDueAt } from "../plugins/personal/status.ts";
 import { workPhase } from "../plugins/personal/status.ts";
@@ -18,7 +19,7 @@ import { newWork } from "../plugins/personal/work.ts";
 import type { WorkAgentStatus } from "../plugins/personal/work-status.ts";
 import { consumeWorkInputs } from "../plugins/personal/work-input.ts";
 import { reportWork } from "../plugins/personal/work-report.ts";
-import { finalizeExecution, runInput } from "../plugins/personal/loop.ts";
+import { finalizeExecution, nextInput, runInput } from "../plugins/personal/loop.ts";
 import { resourceRef, changeAttempt } from "../plugins/personal/input/state.ts";
 import { RECENT_CHARS, RECENT_COUNT } from "../plugins/personal/context.ts";
 
@@ -142,4 +143,35 @@ test("Shared Input admission conflicts occur before Harness effects; a fresh rec
   assert.equal((await f.pending()).length, 0);
   const input = await f.resources.get<InputSpec, InputStatus>({ ...INPUT_TYPE, namespace: "v1", name: "shared" });
   assert.equal(input!.status.route!.lastError, "Concurrent coordinator update");
+});
+
+for (const kind of ["task", "routine"] as const) test(`${kind} compaction failure releases its Agent without blocking a new Input`, async t => {
+  const f = await fixture(t, kind);
+  await f.add("failed"); await consumeWorkInputs(f.context, await f.read());
+  let creates = 0;
+  const calls: string[] = [];
+  const execution = (executionId: string) => ({ executionId, verbs: { async harness(args: { operation?: string; sessionId?: string }) {
+    calls.push(args.operation ?? "prompt");
+    if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: kind, sessionId: `session-${++creates}` } };
+    if (args.operation === "close") return { state: "success", value: { outcome: "accepted" } };
+    if (executionId === "failed-run") throw new HarnessError({ code: "harness_compaction_failed", message: "summary token cap", retryable: false,
+      agent: { harness: kind, sessionId: args.sessionId } });
+    await reportWork(f.resources, await f.read(), executionId, { inputIds: ["fresh"], action: "done", report: "Fresh input handled" });
+    return { state: "success", value: { result: { stopReason: "end_turn" } } };
+  } } } as unknown as ReconcileContext);
+  await runInput(f.context, execution("failed-run"), await f.read(), kind, "failed", "failed");
+  assert.equal((await f.read()).status.agent, undefined);
+  assert.equal((await f.read()).status.execution, null);
+  assert.equal(workPhase(await f.read()), "ready");
+  assert.equal(await nextInput(f.resources, await f.read()), undefined);
+  assert.deepEqual(calls, ["create", "prompt", "close"]);
+  const receipt = (await f.pending())[0]!.status.handle![f.original.metadata.uid]!;
+  assert.equal(receipt.lastError, "summary token cap");
+  assert.equal(receipt.agent?.sessionId, "session-1");
+  await f.add("fresh"); await consumeWorkInputs(f.context, await f.read());
+  assert.equal((await nextInput(f.resources, await f.read()))?.metadata.name, "fresh");
+  await runInput(f.context, execution("fresh-run"), await f.read(), kind, "fresh", "fresh");
+  assert.equal(creates, 2);
+  assert.equal((await f.read()).status.agent?.sessionId, "session-2");
+  assert.deepEqual((await f.pending())[0]!.status.handle![f.original.metadata.uid], receipt);
 });

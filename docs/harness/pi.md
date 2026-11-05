@@ -46,9 +46,13 @@ Personal 的 Route、Topic、Task、Routine 分别在自己的目录实现 Backg
 
 Pi 原生管理上下文压缩与 checkpoint。使用 Pi 1.4.0 的摘要预算：`reserveTokens` 决定压缩触发时机，摘要输出受模型能力与实际请求剩余空间约束，不再额外限制为 `0.8 × reserveTokens`。模型的 `contextWindow` 和 `maxTokens` 仍需按实际服务配置。
 
-压缩失败时，Adapter 终止当前调用并报告错误，未应用的 followUp / steer 按失败回执清理；不会把失败状态永久保存在 session 上。后续显式调用继续使用同一个原生 session，由 Pi 决定是否需要再次压缩。Aide 不自动重放失败输入、不替换会话，也不保存不完整摘要。Chief / Work 对可能已有副作用的输入仍要求核对。
+压缩最终失败时（非取消且不再由 Pi 内部重试），Adapter 终止当前调用，报告 `HarnessError`，code 为 `harness_compaction_failed`；未应用的 followUp / steer 按失败回执清理。IPC 保留分类、原始安全诊断和原生会话引用。Adapter 不替换 session，也不保存不完整摘要。
 
-Harness 将同一 invocation 的终态错误转换为 `HarnessError`（压缩失败 code 为 `harness_compaction_failed`），经 IPC 保留分类、可重试性和原生会话引用；Personal 捕获后将原因保存到未完成 Input、Topic 和中断 Stream，Web 显示处理已中断及具体原因。失败不确认 Input 完成，后续新的执行开始时清除旧错误。
+Personal 将失败原因保存到未完成 Input、Topic 和中断 Stream，并在同一资源事务中结束 execution、移除匹配的 `status.agent`。匹配要求资源 UID、executionId、harness 和 sessionId 一致，迟到的失败不得移除较新的绑定。随后只关闭旧运行实例，保留原生文件和 Input 中的 session 引用；关闭异常单独记日志，不覆盖原始失败或重新绑定。
+
+失败收尾不创建新 Agent、不重放已失败 Input，也不为该压缩错误安排 Route 重试或设置 Work 的恢复阻塞。后续新 Input 或正常定时触发独立经过 `prepareAgent`，发现没有绑定便按正常流程创建 session，并从当前业务资源组织 Background。其它失败仍沿用原处理规则，用户取消不会触发绑定清理。
+
+这是 Personal 避免持续卡在同一份历史上的兜底策略，不意味着原生文件损坏。即使压缩失败是偶发错误，也会放弃该绑定；尚未沉淀到业务资源的临时上下文不会自动带入新 session。
 
 压缩日志记录 sessionId、invocationId、触发原因，以及成功时的压缩前后 token 估计和摘要字符数；失败时记录原生错误。日志不包含摘要正文。
 

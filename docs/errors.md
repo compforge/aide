@@ -24,3 +24,5 @@ Host/Runner IPC 保存并恢复四个公共字段，同时保留 DeliveryError �
 `HarnessError.agent` 可携带已知的 `harness/sessionId`，使失败后的调用方仍能保存原生恢复身份。Host/Runner IPC 按 `harnessErrorDetails` 结构化识别和恢复错误；业务层不依赖异常来自同一 SDK 副本。已有 `AideError` 保留 code、biz_code 和 retryable；未分类异常归为 `harness_operation_failed`，默认不可重试。Pi 压缩失败使用 `harness_compaction_failed`，普通终态执行失败使用 `harness_execution_failed`；不解析错误文案推断可重试性。
 
 Personal 捕获 HarnessError 后保存未完成 Input、Topic 和 Stream 的安全诊断；`retryable: true` 也不自动重跑整个 Agent。模型请求重试与整轮业务执行恢复分属不同层，后者必须核对已发生的工具效果与业务回执。
+
+Personal 对最终 `harness_compaction_failed` 的收尾会解除匹配的 Agent 绑定，保留失败 Input 与原生历史，供后续新输入走正常创建流程。该策略不依赖 message，也不授权重放旧输入；具体边界见 [Pi 压缩与失败恢复](harness/pi.md#压缩与失败恢复)。
