@@ -1,3 +1,4 @@
+import { HarnessError } from "@compforge/aide-plugin";
 import { summaryText } from "../plugins/personal/note/summary.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { assignInput } from "../plugins/personal/input/assignment.ts";
@@ -197,7 +198,7 @@ test("Weave advances only the bounded snapshot and retries interrupted analysis"
   const execution = { executionId: "scan", verbs: { async harness(args: any) {
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "weave", sessionId: "native" } };
     if (args.operation === "close") return { state: "success", value: { outcome: "accepted" } };
-    if (fail) return { state: "failure", error: "interrupted" };
+    if (fail) throw new HarnessError({ code: "harness_execution_failed", retryable: false, message: "interrupted" });
     const batch = JSON.parse(args.prompt.split("\n").at(-1));
     batch.candidates.forEach((item: any) => seen.add(item.uid));
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
@@ -286,7 +287,7 @@ test("Unfinished synthesis backs off without inventing Input or refreshing activ
   const execution: any = { executionId: "retry", withContext() { return this; }, verbs: { async harness(args: any) {
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
     prompts++;
-    return { state: "failure", error: "unavailable" };
+    throw new HarnessError({ code: "harness_execution_failed", retryable: false, message: "unavailable" });
   } } };
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
@@ -404,9 +405,9 @@ test("Weave retains the old binding and coverage when session release fails", as
   registerWeave({ ...f.context, controllers: { register(def: any) { reconcile = def.reconcile; } } } as unknown as PluginContext);
   const execution = { executionId: "release-failed", verbs: { async harness(args: any) {
     assert.equal(args.operation, "close", "do not start inference before the prior session is released");
-    return { state: "failure", error: "close unavailable" };
+    throw new HarnessError({ code: "harness_execution_failed", retryable: false, message: "close unavailable" });
   } } };
-  await assert.rejects(reconcile(execution, await f.weave()), /Previous Weave session could not close/);
+  await assert.rejects(reconcile(execution, await f.weave()), { name: "HarnessError", message: "close unavailable" });
   assert.deepEqual((await f.weave()).status.agent, agent);
   assert.deepEqual(f.reviewed(), {});
 });

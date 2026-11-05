@@ -1,3 +1,4 @@
+import { HarnessError } from "@compforge/aide-plugin";
 import type { AnyEventEnvelope } from "../event/index.ts";
 import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -76,14 +77,15 @@ export class ExecutionService implements HarnessExecution {
   async invoke(scope: ExecutionScope, request: HarnessRequest): Promise<import("@compforge/aide-plugin").HarnessResult | import("@compforge/aide-plugin").HarnessOperationResult> {
     validateHarness(request.input);
     const running = this.performInvocation(scope, request);
-    if (isHarnessInvocation(request.input)) return running;
+    if (isHarnessInvocation(request.input)) return running.catch(error => { throw HarnessError.from(error); });
     // A timed-out operation may already have been accepted. Its eventual effects are not replayed.
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([running, new Promise<{ state: "timeout" }>(resolve => {
         timer = setTimeout(() => resolve({ state: "timeout" }), request.input.timeoutMs);
       })]);
-    } finally { if (timer) clearTimeout(timer); }
+    } catch (error) { throw HarnessError.from(error); }
+    finally { if (timer) clearTimeout(timer); }
   }
   private async performInvocation(scope: ExecutionScope, request: HarnessRequest) {
     const backend = this.open();
@@ -118,7 +120,7 @@ export class ExecutionService implements HarnessExecution {
       } else result = await backend.calls.invoke(scope, request, runtimeId);
       return { ...result, agent: reference() };
     } catch (error) {
-      return { state: "failure" as const, error: error instanceof Error ? error.message : String(error), agent: reference() };
+      throw HarnessError.from(error, reference());
     } finally {
       const remaining = this.usingRuntimes.get(runtimeId)! - 1;
       if (remaining) this.usingRuntimes.set(runtimeId, remaining);

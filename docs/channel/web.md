@@ -51,6 +51,8 @@ src/api/stream.ts 使用 SDK 的 PatchEmitter / encodeSse。首次和重连发�
 
 空闲连接发送 ping，连接定期 end 后由 EventSource 重连；投影错误以 error / end 收口，首次失败返回 HTTP 500。背压时等待 drain，再根据最新模型生成 patch。断开清理订阅与定时器，不取消服务端执行；seq 属于当前连接，不通过 Last-Event-ID 回放历史补丁。
 
+没有活跃执行但 Topic 保存失败原因时，活动区显示“处理已中断”、具体原因及待处理数量，停止运行指示动画；不把排队数量当作 Agent 仍在执行的证据。
+
 当前进程保留活跃和有限近期执行细节，浏览器刷新从快照恢复；Aide 重启后只恢复持久业务 Input、Output 和处理记录，实时执行细节清空。原生历史由 Harness 管理，网页不维护第二份轨迹存储。
 
 tests/web-progress.test.ts 用真实 Host / Runner / HTTP、浏览器 reducer 和模拟 Harness 验证 SSE、隔离、重连、结束、会话上下文与重启边界；tests/pi-agent.test.ts 另用真实 Pi SDK 和模拟模型验证增量事件。这些测试不代表真实模型或平台验收。

@@ -60,6 +60,10 @@ export class HarnessActivity {
   flushLogs() { return this.logger.flush(); }
   closeLogs() { return this.logger.close(); }
   summarizeInvocation(id: string): InvocationSummary { return this.summarizeInvocationEvent(id).payload; }
+  /**
+   * @spec Failed results retain their invocation's error; concurrent or recovered errors never contaminate successful results.
+   * @case tests/harness-result.test.ts
+   */
   summarizeInvocationEvent(id: string): EventEnvelope<"_aide_invocation_summary"> {
     const previous = this.summaries.get(id);
     if (previous) return previous;
@@ -70,7 +74,11 @@ export class HarnessActivity {
       const message = item.type === "message" ? state.messages.get(item.id) : undefined;
       return message?.role === "agent" && message.invocationId === id && (!final || message.phase === "final") ? [textOf(message.content)] : [];
     }).filter(Boolean).join("\n") || undefined;
-    const summary: InvocationSummary = { invocationId: id, stopReason: state.stopReasons.get(id),
+    const stopReason = state.stopReasons.get(id);
+    // Concurrent invocations and recovered transient errors must not contaminate this result.
+    const failure = stopReason === "error" ? [...state.errors.values()].filter(e => e.invocationId === id).at(-1) : undefined;
+    const error = failure ? { code: failure.code ?? "harness_execution_failed", message: failure.message.slice(0, 4000), retryable: failure.retryable ?? false, ...(failure.biz_code ? { biz_code: failure.biz_code } : {}) } : undefined;
+    const summary: InvocationSummary = { invocationId: id, stopReason, ...(error ? { error } : {}),
       userText: invocationUserText(state, id) || undefined, agentText: text(), finalText: text(true),
       toolCalls: [...state.toolCalls.values()].filter(t => t.invocationId === id).map(t => ({ toolCallId: t.toolCallId, title: t.title, kind: t.kind, status: t.status })),
       usage: invocation.usage, startedAt: invocation.startedAt, endedAt: invocation.endedAt };

@@ -51,6 +51,7 @@ main { grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: auto min
 #activity[hidden] { display: none; }
 .activity-heading { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #42634c; }
 .activity-heading::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: #64886b; animation: pulse 1.4s ease-in-out infinite; }
+#activity[data-phase="failed"] .activity-heading::before { animation: none; background: #a33; }
 .activity-block { margin-top: 12px; font-size: 13px; }
 .activity-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; margin: 6px 0; }
 .activity-content.markdown { white-space: normal; }

@@ -1,3 +1,4 @@
+import { HarnessError } from "@compforge/aide-plugin";
 import { deliver } from "../plugins/personal/route/delivery.ts";
 import { routeByRules } from "../plugins/personal/route/rules.ts";
 import { larkAddress } from "../src/channel/address.ts";
@@ -215,7 +216,7 @@ test("due Route retries compete with fresh arrivals and an undecided predecessor
   assert.equal((await nextInput(context(aide).resources, owner))!.metadata.name, "followup");
   const { reconcileRouteAgent } = await import("../plugins/personal/route/reconcile.ts");
   let calls = 0;
-  const execution = { executionId: "followup", withContext() { return this; }, verbs: { async harness() { calls++; return { state: "failure" }; } } } as unknown as ReconcileContext;
+  const execution = { executionId: "followup", withContext() { return this; }, verbs: { async harness() { calls++; throw new HarnessError({ code: "harness_execution_failed", retryable: false, message: "Fixture execution failed" }); } } } as unknown as ReconcileContext;
   await reconcileRouteAgent(context(aide), execution, owner);
   assert.equal(calls, 1);
   assert.ok(inputs.get("followup")!.status.route?.nextAttemptAt);

@@ -1,3 +1,4 @@
+import { HarnessError } from "@compforge/aide-plugin";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -90,7 +91,8 @@ test("Resource-only runtime does not load Harness history or require an executio
     pluginId: "example", version: "1.0.0", resources: [definition],
     async activate(context) {
       context.controllers.register({ resourceType: TYPE, async reconcile(execution, resource) {
-        results.push(await execution.verbs.harness({ title: "Unavailable", prompt: "Hello", timeoutMs: 1000 }));
+        try { await execution.verbs.harness({ title: "Unavailable", prompt: "Hello", timeoutMs: 1000 }); }
+        catch (error) { results.push(error); }
         await context.resources.patchStatus(resource, { reconciled: true });
       } });
     },
@@ -106,7 +108,10 @@ test("Resource-only runtime does not load Harness history or require an executio
   const client = runtime.plugins.resourceClient("example");
   const resource = await client.create(TYPE, { name: "one", spec: { text: "hello" } });
   await runtime.plugins.settled();
-  assert.deepEqual(results, [{ state: "failure", error: "harness() requires a configured Harness execution capability" }]);
+  assert.equal(results.length, 1);
+  assert(results[0] instanceof HarnessError);
+  assert.equal(results[0].message, "harness() requires a configured Harness execution capability");
+  assert.equal(results[0].retryable, false);
   assert.equal((await client.get<{ text: string }, { reconciled: boolean }>({ ...TYPE, namespace: "v1", name: "one", uid: resource.metadata.uid }))?.status.reconciled, true);
   await runtime.close();
   assert.equal(readFileSync(metadata, "utf8"), "invalid unused Harness metadata");

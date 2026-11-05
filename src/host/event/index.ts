@@ -339,6 +339,7 @@ export interface ContextWindowUpdate {
  */
 export interface ErrorUpdate {
   code?: string;
+  biz_code?: string;
   message: string;
   retryable?: boolean;
   willRetry?: boolean;
@@ -383,6 +384,8 @@ export interface InvocationSummaryToolCall {
  * 一次调用结束时生成的实时结果；不是原生历史或恢复 checkpoint。
  */
 export interface InvocationSummary {
+  /** Terminal execution error for this invocation, absent on successful completion. */
+  readonly error?: import("@compforge/aide-common").AideErrorOptions;
   invocationId: string;
   stopReason?: StopReason;
   userText?: string;

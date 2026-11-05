@@ -1,3 +1,4 @@
+import { HarnessError } from "@compforge/aide-plugin";
 import { randomUUID } from "node:crypto";
 import type { HarnessActivity } from "./activity.ts";
 import { HarnessInvocations, type ScheduledHarnessInvocation, type HarnessInvocationSnapshot } from "./invocation.ts";
@@ -89,14 +90,20 @@ export class HarnessCalls implements HarnessExecution {
       deadline,
     );
     try { await this.dispatchedHarnessInvocations.get(snapshot.invocationId); }
+    catch (error) { throw HarnessError.from(error); }
     finally { this.dispatchedHarnessInvocations.delete(snapshot.invocationId); this.records.release(snapshot.invocationId); this.harnessInvocations.release(snapshot.invocationId); }
     if (terminal.phase === "completed" && terminal.result && terminal.runtimeId) {
+      if (terminal.result.stopReason === "cancelled") return Object.freeze({ state: "dismissed" });
+      if (terminal.result.stopReason !== "end_turn") throw new HarnessError(terminal.result.error ?? {
+        code: "harness_execution_failed", retryable: false,
+        message: `Harness execution did not complete: ${terminal.result.stopReason ?? "unknown"}`,
+      });
       return Object.freeze({
         state: "success",
         value: {
           outcome: "completed" as const,
           invocationId: terminal.invocationId,
-          result: (({ invocationId, ...result }) => result)(terminal.result),
+          result: (({ invocationId, error: _error, ...result }) => result)(terminal.result),
         },
       });
     }
@@ -107,19 +114,11 @@ export class HarnessCalls implements HarnessExecution {
       if (terminal.cancellation?.reason === "timeout") {
         return Object.freeze({ state: "timeout" });
       }
-      return Object.freeze({
-        state: "failure",
-        ...(terminal.cancellation?.detail === undefined
-          ? {}
-          : { error: terminal.cancellation.detail }),
-      });
+      throw new HarnessError({ code: "harness_interrupted", retryable: false,
+        message: terminal.cancellation?.detail ?? "Harness execution interrupted" });
     }
-    return Object.freeze({
-      state: "failure",
-      ...(terminal.failure?.detail === undefined
-        ? {}
-        : { error: terminal.failure.detail }),
-    });
+    throw new HarnessError({ code: terminal.failure?.reason === "dispatch" ? "harness_dispatch_failed" : "harness_interrupted", retryable: false,
+      message: terminal.failure?.detail ?? "Harness execution failed" });
   }
 
   private async waitForHarnessInvocation(

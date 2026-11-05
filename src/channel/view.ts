@@ -31,7 +31,7 @@ export interface TopicBlock extends BaseBlock {
 interface TopicMeta extends ModelMeta {
   topic_id: string;
   context: ContextView | null;
-  activity: { id: string; phase: string; queued: number } | null;
+  activity: { id: string; phase: string; queued: number; error?: string } | null;
 }
 export type TopicView = UIModel<TopicBlock, TopicMeta>;
 
@@ -134,10 +134,11 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const blocks = roots.sort((a, b) => (a.at ?? "").localeCompare(b.at ?? ""))
     .flatMap((block) => [block, ...children.get(block.id) ?? []]);
   const live = [...executions.values()].some((execution) => execution.header.status === "running");
+  const error = !active && !live ? resource.status.lastError : undefined;
   return {
     version: PROTOCOL_VERSION, biz: "aide.topic", blocks,
-    meta: { topic_id: topicId, context: resource ? { summary: summaryText(aide.topics.resources, resource), summaryNote: summaryReference(aide.topics.resources, resource), recent: notes(aide.topics.resources, resource.metadata.uid, "subject") } : null, activity: active || queued || live ? {
-      id: active?.id ?? `queued:${topicId}`, phase: active?.status.phase ?? "queued", queued,
+    meta: { topic_id: topicId, context: resource ? { summary: summaryText(aide.topics.resources, resource), summaryNote: summaryReference(aide.topics.resources, resource), recent: notes(aide.topics.resources, resource.metadata.uid, "subject") } : null, activity: active || queued || live || error ? {
+      id: active?.id ?? `queued:${topicId}`, phase: active?.status.phase ?? (error ? "failed" : "queued"), queued, ...(error ? { error } : {}),
     } : null },
   };
 }

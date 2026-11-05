@@ -1,3 +1,4 @@
+import { HarnessError } from "@compforge/aide-plugin";
 import { ConnectorTimeoutError } from "@compforge/aide-connector";
 import type { ConnectorClient } from "@compforge/aide-plugin";
 import { dispatchConnector, emptyConnectors } from "../../connector/client.ts";
@@ -92,8 +93,15 @@ export class Verb {
       operation: request.verb === "harness" ? request.input.operation ?? "prompt" : request.verb === "action" ? request.name : request.input.request.operation };
     this.log?.({ level: "info", source: "plugin", component: "verb", pluginInstanceId: context.pluginInstanceId,
       message: "Verb started", attributes });
-    const operation = this.perform(context, request).catch((error) => ({ state: "failure" as const,
-      error: error instanceof Error ? error.message : String(error) })).then(result => {
+    const operation = this.perform(context, request).catch((error) => {
+      if (request.verb === "harness") {
+        const failure = HarnessError.from(error);
+        this.log?.({ level: "error", source: "plugin", component: "verb", pluginInstanceId: context.pluginInstanceId,
+          message: "Verb failed", attributes: { ...attributes, code: failure.code, retryable: failure.retryable, error: failure.message, durationMs: Date.now() - startedAt } });
+        throw failure;
+      }
+      return { state: "failure" as const, error: error instanceof Error ? error.message : String(error) };
+    }).then(result => {
       this.log?.({ level: result.state === "failure" ? "error" : "info", source: "plugin", component: "verb", pluginInstanceId: context.pluginInstanceId,
         message: "Verb settled", attributes: { ...attributes, state: result.state, durationMs: Date.now() - startedAt,
           ...(result.state === "failure" ? { error: result.error ?? "unknown" } : {}) } });

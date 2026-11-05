@@ -55,6 +55,12 @@ function snapshotProvider(provider: Provider, source: ModelRuntime, selected: Mo
   };
 }
 
+/**
+ * @spec Model capacities come from explicit configuration or the same registered model, never guessed endpoint defaults.
+ * @why Model maxTokens is an output capability; Pi owns each request budget and compaction reserve.
+ * @link docs/configuration.md
+ * @case tests/harness-config.test.ts
+ */
 function resolveModel(input: PiModelConfigInput, source: ModelRuntime): Model {
   const inherited = source.getModel(input.provider, input.id);
   const provider = source.getProvider(input.provider);
@@ -65,12 +71,16 @@ function resolveModel(input: PiModelConfigInput, source: ModelRuntime): Model {
   if (!api) throw new Error("model.api is required for this model");
   if (!getApiProvider(api)) throw new Error("model.api has no registered SDK implementation");
   if (!baseUrl) throw new Error("model.baseUrl is required for this model");
+  const contextWindow = input.contextWindow ?? inherited?.contextWindow;
+  const maxTokens = input.maxTokens ?? inherited?.maxTokens;
+  for (const [field, value] of Object.entries({ contextWindow, maxTokens })) {
+    if (!Number.isInteger(value) || value! <= 0) throw new Error(`model.${field} must declare a positive integer capacity for ${input.provider}/${input.id}; configure it explicitly or register this model in Pi`);
+  }
   const { apiKeyEnv: _credential, ...overrides } = input;
   return {
-    // Pi's documented custom-model defaults; a different model ID starts here.
-    name: input.id, reasoning: false, input: ["text"], contextWindow: 128000, maxTokens: 16384,
+    name: input.id, reasoning: false, input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    ...inherited, ...overrides, api, baseUrl,
+    ...inherited, ...overrides, api, baseUrl, contextWindow: contextWindow!, maxTokens: maxTokens!,
   };
 }
 

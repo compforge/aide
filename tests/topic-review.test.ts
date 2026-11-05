@@ -1,3 +1,4 @@
+import { HarnessError } from "@compforge/aide-plugin";
 import { NOTE_TYPE, type NoteSpec, type NoteStatus } from "../plugins/personal/note/model.ts";
 import { reconcileNote } from "../plugins/personal/note/reconcile.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
@@ -54,7 +55,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
     const execution = { executionId, withContext() { return this; }, verbs: { async action() { return { state: "success", value: { streaming: false } }; }, async harness(args: { operation?: string; prompt: string; sessionId: string }) {
       if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
       calls.push(args);
-      if (fail) return { state: "failure", error: "provider disconnected" };
+      if (fail) throw new HarnessError({ code: "harness_execution_failed", retryable: false, message: "provider disconnected" });
       await hooks.beforeAssess?.();
       const admitted = aide.topics.inputStore.list().filter(i => i.status.assess?.executionId === executionId && !i.status.assess?.completedAt);
       if (!hooks.skipAssessment) await assessAll(resources, read(), executionId, { inputIds: admitted.map(i => i.metadata.name), summary: "Nothing needs action" });

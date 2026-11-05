@@ -1,3 +1,4 @@
+import { HarnessError } from "@compforge/aide-plugin";
 import { HarnessCalls } from "../src/host/harness/calls.ts";
 import { personalExecution } from "../plugins/personal/execution-context.ts";
 import { say, SayInputSchema } from "../plugins/personal/output/action.ts";
@@ -64,7 +65,13 @@ test("Harness timeout and Host shutdown settle the caller and cancel execution w
   } });
   await Promise.resolve();
   verb.failAll("Host shutdown");
-  assert.deepEqual(await pending, { state: "failure", error: "Host shutdown" });
+  await assert.rejects(pending, error => {
+    assert(error instanceof HarnessError);
+    assert.equal(error.message, "Host shutdown");
+    assert.equal(error.code, "harness_interrupted");
+    assert.equal(error.retryable, false);
+    return true;
+  });
   assert.equal(dispatched.length, 2);
   assert.deepEqual(cancelled, dispatched);
   assert.equal(session.projection.approvals.size, 0);

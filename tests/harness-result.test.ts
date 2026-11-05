@@ -41,3 +41,23 @@ test("JSON-shaped commentary or unclassified messages are never promoted to a fi
     assert.equal(summary.finalText, undefined);
   }
 });
+
+/** @case Interleaved invocation failures remain scoped; a recovered error does not mark success as failed. */
+test("invocation summaries retain their terminal error without leaking other calls or transient failures", t => {
+  const root = mkdtempSync(join(tmpdir(), "aide-result-error-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const session = new HarnessFixtures(root).create({ cwd: "/repo" });
+  const source = { type: "harness" as const, harnessName: "pi" };
+  for (const [invocationId, message, stopReason] of [
+    ["failed", "Pi compaction failed: summary token cap", "error"],
+    ["other", "Different model failed", "error"],
+    ["recovered", "Transient failure", "end_turn"],
+  ] as const) {
+    session.appendEvent({ kind: "_aide_error_update", source, harness: "pi", invocationId,
+      payload: { code: "execution_failed", message, retryable: false, willRetry: false } });
+    session.appendEvent({ kind: "state_update", source, harness: "pi", invocationId, payload: { state: "idle", stopReason } });
+  }
+  assert.equal(session.summarizeInvocation("failed").error?.message, "Pi compaction failed: summary token cap");
+  assert.equal(session.summarizeInvocation("other").error?.message, "Different model failed");
+  assert.equal(session.summarizeInvocation("recovered").error, undefined);
+});

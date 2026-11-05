@@ -48,6 +48,8 @@ Pi 原生管理上下文压缩与 checkpoint。使用 Pi 1.4.0 的摘要预算�
 
 压缩失败时，Adapter 终止当前调用并报告错误，未应用的 followUp / steer 按失败回执清理；不会把失败状态永久保存在 session 上。后续显式调用继续使用同一个原生 session，由 Pi 决定是否需要再次压缩。Aide 不自动重放失败输入、不替换会话，也不保存不完整摘要。Chief / Work 对可能已有副作用的输入仍要求核对。
 
+Harness 将同一 invocation 的终态错误转换为 `HarnessError`（压缩失败 code 为 `harness_compaction_failed`），经 IPC 保留分类、可重试性和原生会话引用；Personal 捕获后将原因保存到未完成 Input、Topic 和中断 Stream，Web 显示处理已中断及具体原因。失败不确认 Input 完成，后续新的执行开始时清除旧错误。
+
 压缩日志记录 sessionId、invocationId、触发原因，以及成功时的压缩前后 token 估计和摘要字符数；失败时记录原生错误。日志不包含摘要正文。
 
 ## 输出与验证

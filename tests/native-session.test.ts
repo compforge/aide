@@ -1,3 +1,4 @@
+import { AideError, HarnessError } from "@compforge/aide-plugin";
 import jsonPatch from "fast-json-patch";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -148,7 +149,7 @@ test("Operator persistence failure cannot dispatch prompt or poison the next cre
   assert.deepEqual((await resources.get<unknown, { agent: AgentStatus }>(scope.resourceRef!))!.status.agent, agent);
 });
 
-test("omitting session creates a new native loop and failed calls still return known recovery parameters", async t => {
+test("omitting session creates a new native loop and failed calls preserve known recovery parameters on HarnessError", async t => {
   const { home, scope } = await setup(t);
   let creates = 0;
   const service = new ExecutionService(home, { cwd: home, harnesses: [target], defaultHarness: target.id, resolveHarness: () => target,
@@ -158,12 +159,15 @@ test("omitting session creates a new native loop and failed calls still return k
       async prompt() { throw new Error("dispatch failed"); }, async abort() {}, async close() {},
     }) });
   t.after(() => service.close());
-  const first = await service.invoke(scope, request);
-  assert.equal(first.state, "failure");
-  assert.equal(first.agent?.sessionId, "native-1");
-  const second = await service.invoke(scope, request);
-  assert.equal(second.state, "failure");
-  assert.equal(second.agent?.sessionId, "native-2");
+  for (const id of ["native-1", "native-2"]) {
+    await assert.rejects(service.invoke(scope, request), error => {
+      assert(error instanceof HarnessError);
+      assert.equal(error.message, "dispatch failed");
+      assert.equal(error.agent?.sessionId, id);
+      assert.equal(error.retryable, false);
+      return true;
+    });
+  }
 });
 
 test("a requested Codex session cannot silently fall back to a new thread", async () => {
@@ -305,4 +309,35 @@ test("idle native handles are bounded and evicted resources resume through their
   assert.deepEqual(reopened, ["native-1"]);
   assert.equal(created, 46);
   assert.equal(live, 40);
+});
+
+/** @case Adapter events and thrown errors both preserve classification; retryable does not replay an invocation. */
+for (const mode of ["event", "throw"] as const) test(`Harness ${mode} failure rejects with its classification and native identity`, async t => {
+  const { home, scope } = await setup(t);
+  let sink!: HarnessEventSink;
+  let prompts = 0;
+  const details = { code: "rate_limited", biz_code: "429", message: "Provider rate limit", retryable: true };
+  const service = new ExecutionService(home, { cwd: home, harnesses: [target], defaultHarness: target.id, resolveHarness: () => target,
+    createAdapter: () => ({ harness: "test", capabilities: { prompt: {} },
+      async create(_options, events, publish) { sink = events; publish({ identity: { id: "native-failed" } }); return { harness: "test", handleId: "handle" }; },
+      async resume(options, events, publish) { return this.create(options, events, publish); },
+      async prompt(_ref, input) {
+        prompts++;
+        if (mode === "throw") throw new AideError(details);
+        sink({ kind: "_aide_error_update", invocationId: input.invocationId, payload: { ...details, willRetry: false } });
+        sink({ kind: "state_update", invocationId: input.invocationId, payload: { state: "idle", stopReason: "error" } });
+        return { accepted: true, effective: "new_turn" };
+      }, async abort() {}, async close() {},
+    }) });
+  t.after(() => service.close());
+  await assert.rejects(service.invoke(scope, request), error => {
+    assert(error instanceof HarnessError);
+    assert.equal(error.code, details.code);
+    assert.equal(error.biz_code, details.biz_code);
+    assert.equal(error.message, details.message);
+    assert.equal(error.retryable, true);
+    assert.deepEqual(error.agent, { harness: target.id, sessionId: "native-failed" });
+    return true;
+  });
+  assert.equal(prompts, 1);
 });

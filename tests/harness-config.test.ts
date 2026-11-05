@@ -186,7 +186,7 @@ test("invalid Chief model stops Aide before listening or restoring persisted Ses
 test("startup resolves independent Pi and Chief models with explicit package skill lists", async () => {
   const home = mkdtempSync(join(tmpdir(), "aide-pi-chief-config-"));
   const file = join(home, "config.yaml");
-  const definition = { provider: "fixture", api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1", apiKeyEnv: "TEST_MODEL_KEY" };
+  const definition = { provider: "fixture", api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1", apiKeyEnv: "TEST_MODEL_KEY", contextWindow: 64000, maxTokens: 8192 };
   try {
     writeFileSync(file, JSON.stringify({ harnesses: {
       pi: { model: { ...definition, id: "work-model" }, packages: [] },
@@ -251,7 +251,7 @@ test(`${harness} selection resolves native settings without loading inactive Pi 
   };
   try {
     writeFileSync(file, JSON.stringify({ defaultHarness: harness, harnesses: {
-      chief: { model: { provider: "fixture", id: "chief-model", api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1", apiKeyEnv: "TEST_MODEL_KEY" } },
+      chief: { model: { provider: "fixture", id: "chief-model", api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1", apiKeyEnv: "TEST_MODEL_KEY", contextWindow: 64000, maxTokens: 8192 } },
       pi: { model: { provider: "missing", id: "inactive" }, packages: ["git:fixture.invalid/unsynced"] },
       [harness]: native[harness],
     } }));
@@ -273,5 +273,27 @@ test(`${harness} selection resolves native settings without loading inactive Pi 
     expect(resolved.defaultHarnessConfig.harness).toBe(harness);
     expect(resolved.defaultHarnessOptions).toMatchObject({ harness, ...native[harness] });
     expect(existsSync(join(home, "harnesses", "pi", "synced"))).toBe(false);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+/** @case Endpoint capacities are explicit or inherited only from the exact registered model. */
+test("model capacities reject unknown endpoint defaults and allow per-field same-model overrides", async () => {
+  const home = mkdtempSync(join(tmpdir(), "aide-model-capacity-"));
+  try {
+    writeFileSync(join(home, "models.json"), JSON.stringify({ providers: { fixture: {
+      api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1", apiKey: "fixture-key",
+      models: [{ id: "known", contextWindow: 1000000, maxTokens: 131072 }],
+    } } }));
+    const sources = { cwd: home, agentDir: home, skillPaths: [] };
+    const resolve = (model: Parameters<typeof resolvePiConfig>[0]["model"]) => resolvePiConfig({ ...sources, model });
+    expect((await resolve({ provider: "fixture", id: "known" })).model).toMatchObject({ contextWindow: 1000000, maxTokens: 131072 });
+    expect((await resolve({ provider: "fixture", id: "known", maxTokens: 65536 })).model).toMatchObject({ contextWindow: 1000000, maxTokens: 65536 });
+    expect((await resolve({ provider: "fixture", id: "known", contextWindow: 500000 })).model).toMatchObject({ contextWindow: 500000, maxTokens: 131072 });
+    for (const capacity of [{}, { maxTokens: 8192 }]) {
+      await expect(resolve({ provider: "fixture", id: "new-endpoint", ...capacity })).rejects.toThrow("model.contextWindow");
+    }
+    await expect(resolve({ provider: "fixture", id: "new-endpoint", contextWindow: 1000000 })).rejects.toThrow("model.maxTokens");
+    expect((await resolve({ provider: "fixture", id: "new-endpoint", contextWindow: 1000000, maxTokens: 65536 })).model)
+      .toMatchObject({ id: "new-endpoint", contextWindow: 1000000, maxTokens: 65536 });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

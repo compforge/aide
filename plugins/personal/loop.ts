@@ -1,3 +1,4 @@
+import { harnessErrorDetails } from "@compforge/aide-plugin";
 import { invalidateAssignment } from "./input/assignment.ts";
 import { commitStatus } from "./status.ts";
 import { z } from "zod";
@@ -125,8 +126,12 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
     const result = await execution.verbs.harness({ ...agent, title: current.kind === "Route" ? "Route" : current.kind === "Topic" ? "Chief" : current.kind, prompt, timeoutMs: 172800_000 });
     completed = result.state === "success" && result.value.result.stopReason === "end_turn";
     if (result.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, result.agent);
-    if (result.state !== "success" || result.value.result.stopReason !== "end_turn") error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
-  } catch (cause) { error = String(cause); }
+    if (!completed) error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
+  } catch (cause) {
+    const failure = harnessErrorDetails(cause);
+    error = failure?.message ?? String(cause);
+    if (failure?.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, failure.agent);
+  }
   finally {
     try {
       if (streaming) {

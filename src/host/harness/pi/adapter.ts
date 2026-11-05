@@ -237,7 +237,7 @@ export class PiAdapter implements Harness {
     if (reason === "end_turn" && turn.lastMessage) session.sink({ kind: "agent_message", invocationId: turn.id,
       payload: { messageId: turn.lastMessage.id, phase: "final", content: [{ type: "text", text: turn.lastMessage.text }] } });
     if (reason === "error") session.sink({ kind: "_aide_error_update", invocationId: turn.id,
-      payload: { code: "pi_execution_failed", message: error ?? "Pi execution failed", retryable: false, willRetry: false } });
+      payload: { code: turn.compactionFailure ? "harness_compaction_failed" : "harness_execution_failed", message: error ?? "Pi execution failed", retryable: false, willRetry: false } });
     this.log("Pi turn settled", turn.id, reason);
     session.sink({ kind: "state_update", invocationId: turn.id, payload: { state: "idle", stopReason: reason } });
   }

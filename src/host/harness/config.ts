@@ -79,6 +79,7 @@ export async function resolveHarnessConfigs(config: AideConfig, sources: {
   for (const [harness, resolved] of [["weave", weave], ["chief", chief], ["route", route], ["task", task], ["routine", routine], ["pi", pi]] as const) {
     if (!resolved) continue;
     sources.log.info({ harness, provider: resolved.model.provider, model: resolved.model.id,
+      contextWindow: resolved.model.contextWindow, maxTokens: resolved.model.maxTokens,
       skills: resolved.skillPaths?.length ?? 0,
       modelSource: config.harnesses[harness].model ? sources.file : ["weave", "route", "task", "routine"].includes(harness) ? "Chief model" : "Pi defaults", inheritedFrom: resolved.agentDir },
     "Resolved startup harness configuration");
