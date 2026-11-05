@@ -78,6 +78,9 @@ export interface Attempt {
 export interface Assessment extends Attempt {
   result?: { summary: string; disposition?: "completed" | "cancelled" | "rejected" };
 }
+/** @spec Chief assessment ends with either a business receipt or a recorded failure, regardless of Input origin. */
+export const assessmentFinished = (assessment?: Assessment): boolean => !!(assessment?.completedAt || assessment?.lastError);
+
 export interface Handling extends Assessment {
   resource: ResourceRef & { uid: string };
   assignedAt: string;

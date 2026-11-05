@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import type { Resource, ResourceReader, ResourceRef, ResourceValidationContext } from "@compforge/aide-plugin";
-import type { InputSpec, InputStatus } from "../input/model.ts";
+import { assessmentFinished, type InputSpec, type InputStatus } from "../input/model.ts";
 import type { Organization } from "./ref.ts";
 import { TOPIC_TYPE, type TopicResource, type TopicSpec, type TopicStatus } from "./model.ts";
 
@@ -23,8 +23,8 @@ export function guardInputTopic(previous: Resource<InputSpec, InputStatus>, curr
   if (isDeepStrictEqual(previous.status.topic, current.status.topic)) return;
   const target = requireTopic(current.status.topic, context);
   if (previous.status.topic) requireOrganization(current.status.organization, context, [requireTopic(previous.status.topic, context), target]);
-  if (previous.status.topic && ((previous.status.assess?.executionId && !previous.status.assess.completedAt)
-    || (current.status.assess?.executionId && !current.status.assess.completedAt)))
+  if (previous.status.topic && ((previous.status.assess?.executionId && !assessmentFinished(previous.status.assess))
+    || (current.status.assess?.executionId && !assessmentFinished(current.status.assess))))
     throw new Error("Finish Input assessment before moving Topic ownership");
 }
 

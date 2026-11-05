@@ -2,7 +2,7 @@ import { createReviewInput } from "./review.ts";
 import { resourceRef, inputRef } from "../input/state.ts";
 import type { InputSpec, InputStatus } from "../input/model.ts";
 import type { ResourceReader, ResourceType } from "@compforge/aide-plugin";
-import { INPUT_TYPE } from "../input/model.ts";
+import { assessmentFinished, INPUT_TYPE } from "../input/model.ts";
 import { WORK_TYPES } from "../resources.ts";
 import { TOPIC_TYPE, type TopicResource } from "./model.ts";
 import { topicPolicy } from "./config.ts";
@@ -66,7 +66,7 @@ export async function ensureCapacityInputs(context: import("@compforge/aide-plug
     const previous = current.status.capacityRequests?.[origin];
     if (previous) {
       const input = await context.resources.get<InputSpec, InputStatus>(inputRef(previous.inputId));
-      if (input && !input.status.assess?.completedAt) continue;
+      if (input && !assessmentFinished(input.status.assess)) continue;
       const since = input?.status.assess?.completedAt ?? previous.checkedAt;
       if (Date.parse(since) + policy.capacityCooldownSeconds * 1000 > Date.now()) continue;
     }

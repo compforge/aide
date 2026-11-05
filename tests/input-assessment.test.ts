@@ -178,23 +178,22 @@ test("Assessment records completion evidence without claiming Chief execution ow
   assert.deepEqual(aide.topics.inputStore.get("recover")!.status.assess, receipt);
 });
 
-/** @case Recovery completion changes presentation grouping while preserving the original admission fence. */
-test("Recovered assessment groups the Input with the completing Chief execution", async t => {
+/** @case A failed Input keeps its terminal receipt even when a later Chief can inspect its effects. */
+test("Failed assessment cannot be completed by a later Chief execution", async t => {
   const { aide, resources, context } = setup(t);
   const c = await aide.topics.ensure("me");
-  const input = await aide.topics.submit("recover-view", { origin: "channel", originId: "web", text: "verify prior effects" });
+  const input = await aide.topics.submit("failed-input", { origin: "channel", originId: "web", text: "verify prior effects" });
   await deliver(context, input, [c.metadata], "explicit");
   const admitted = aide.topics.inputStore.get(input.metadata.name)!;
   await resources.patchStatus(aide.topics.resource("me")!, { execution: { id: "old-run", startedAt: new Date().toISOString() } });
   await resources.patchStatus(admitted, { assess: { executionId: "old-run", startedAt: new Date().toISOString(), lastError: "Interrupted" } });
-  assert.equal(aide.topics.input(input.metadata.name, "me")!.consumption.executionId, "old-run");
-  assert.equal(topicView(aide, "me").blocks.find(b => b.inputId === input.metadata.name)!.group_id, "old-run");
-  const agent = { harness: "chief", sessionId: "recovery-native" };
+  const failed = aide.topics.inputStore.get(input.metadata.name)!;
+  const agent = { harness: "chief", sessionId: "another-native" };
   await resources.patchStatus(aide.topics.resource("me")!, { agent, execution: { id: "new-run", startedAt: new Date().toISOString() } });
-  await assessInput(resources, c, "new-run", { inputId: input.metadata.name, summary: "Verified prior effects" }, "recovery-ack");
-  const receipt = aide.topics.inputStore.get(input.metadata.name)!.status.assess!;
-  assert.equal(receipt.executionId, "old-run", "completion must preserve the admission fence");
-  assert.equal(receipt.completedBy!.executionId, "new-run");
-  assert.equal(aide.topics.input(input.metadata.name, "me")!.consumption.executionId, "new-run");
-  assert.equal(topicView(aide, "me").blocks.find(b => b.inputId === input.metadata.name)!.group_id, "new-run");
+  await assert.rejects(assessInput(resources, c, "new-run", { inputId: input.metadata.name, summary: "Verified prior effects" }, "later-ack"), /has failed; submit a new Input/);
+  await assert.rejects(resources.patchStatus(failed, { assess: { ...failed.status.assess, completedAt: new Date().toISOString() } }), /has failed/);
+  await assert.rejects(aide.work("me").create(task, input.metadata.name, "retry-failed-input"), /Failed Input cannot be assigned/);
+  assert.equal((await resources.list(TASK_TYPE)).length, 0, "failed handoff rolls back Task creation");
+  assert.deepEqual(aide.topics.inputStore.get(input.metadata.name)!.status.assess, failed.status.assess);
+  assert.equal(topicView(aide, "me").blocks.find(b => b.inputId === input.metadata.name)!.group_id, "old-run");
 });

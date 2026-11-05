@@ -67,8 +67,9 @@ export function inputDetail(aide: ChannelService, id: string, uid?: string) {
     if (value.startedAt) append("started", `${label}开始（最近记录）`, value.startedAt, undefined, "started");
     if (value.completedAt) append("completed", `${label}${(value as Assessment).result?.disposition === "cancelled" ? "取消" : (value as Assessment).result?.disposition === "rejected" ? "拒绝" : "完成"}`,
       value.completedAt, (value as Assessment).result?.summary, (value as Assessment).result?.disposition ?? "completed");
-    if (value.lastError) append("error", `${label}异常记录`, undefined, value.lastError, value.completedAt ? "recorded" : "attention");
-    if (!value.completedAt) append("pending", `${label}尚未确认完成`, undefined, undefined, "pending");
+    const failed = stage === "assess" && !!value.lastError && !value.completedAt;
+    if (value.lastError) append("error", `${label}${failed ? "失败" : "异常记录"}`, undefined, value.lastError, failed ? "failed" : value.completedAt ? "recorded" : "attention");
+    if (!value.completedAt && !failed) append("pending", `${label}尚未确认完成`, undefined, undefined, "pending");
   };
   const route = input.status.route;
   if (route) {

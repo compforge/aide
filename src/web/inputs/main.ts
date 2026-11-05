@@ -49,7 +49,7 @@ function renderList(result: InputListView) {
     link.href = '/inputs?' + params;
     if (selected?.id === input.id) link.setAttribute('aria-current', 'page');
     link.append(node('strong', input.preview), node('span', `${input.label} · ${input.connector || '无 Connector / 未记录'}`, 'muted'),
-      node('span', `${input.state === 'completed' ? '处理完成' : '尚未完成'}${input.errors ? ' · 有异常记录' : ''} · ${time(input.at)}`, 'muted'));
+      node('span', `${input.state === 'completed' ? '处理完成' : input.state === 'failed' ? '处理失败' : '尚未完成'}${input.errors ? ' · 有异常记录' : ''} · ${time(input.at)}`, 'muted'));
     link.onclick = event => {
       event.preventDefault(); selected = { id: input.id, uid: input.uid }; lastDetail = ''; saveLocation(true);
       void refresh().then(() => { if (matchMedia('(max-width: 760px)').matches) $('input-heading').scrollIntoView(); });

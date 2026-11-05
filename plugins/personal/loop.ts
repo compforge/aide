@@ -4,7 +4,7 @@ import { commitStatus } from "./status.ts";
 import { z } from "zod";
 import { prepareAgent, saveAgent } from "./session.ts";
 import type { PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
-import { InputAttention, INPUT_ORIGINS, inputAttention, isCapacityInput, isInternalInput, INPUT_TYPE, type InputSpec } from "./input/model.ts";
+import { assessmentFinished, InputAttention, INPUT_ORIGINS, inputAttention, isCapacityInput, isInternalInput, INPUT_TYPE, type InputSpec } from "./input/model.ts";
 import { inputRef, pendingInputs, resourceRef, changeAttempt, changeAssessment, attemptOf, attemptPatch, type Input } from "./input/state.ts";
 export { inputRef } from "./input/state.ts";
 /** A persistent native session owns context; each invocation has a separate durable admission identity. */
@@ -20,7 +20,7 @@ export const canActivate = (input: InputSpec, owner: Pick<LoopResource, "kind">)
 export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
   if (input.metadata.deletionTimestamp) return false;
   if (owner.kind === "Topic") return !(owner.spec as { parentRef?: unknown }).parentRef
-    && input.status.assess?.topic?.uid === owner.metadata.uid && !!input.status.assess && !input.status.assess.completedAt && !input.status.assess.executionId;
+    && input.status.assess?.topic?.uid === owner.metadata.uid && !!input.status.assess && !assessmentFinished(input.status.assess) && !input.status.assess.executionId;
   const receipt = attemptOf(input, resourceRef(owner));
   if (receipt?.completedAt) return false;
   if (owner.kind === "Route") return !receipt?.executionId || (!!input.status.route?.nextAttemptAt && Date.parse(input.status.route.nextAttemptAt) <= Date.now());
@@ -169,9 +169,9 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
             ? { recovery: { reason: "ExecutionUncertain", message: error || "Execution ended without a business receipt" } } : {}),
         } : {}) } },
       ]);
-      if (latest.kind === "Topic" && error) context.logger.warn("Chief execution requires inspection", { attributes: { topicUid: latest.metadata.uid, executionId, error } });
-      if (unfinished.length) context.logger.warn("Agent inputs await recovery", { attributes: { resourceUid: latest.metadata.uid, executionId,
-        inputIds: unfinished.map(i => i.metadata.name), recovery: latest.kind === "Route" ? "retry" : "inspect", error } });
+      if (latest.kind === "Topic" && error) context.logger.warn("Chief execution failed", { attributes: { topicUid: latest.metadata.uid, executionId, error } });
+      if (unfinished.length) context.logger.warn(latest.kind === "Topic" ? "Chief input assessments failed" : "Agent inputs await recovery", { attributes: { resourceUid: latest.metadata.uid, executionId,
+        inputIds: unfinished.map(i => i.metadata.name), recovery: latest.kind === "Route" ? "retry" : latest.kind === "Topic" ? "none" : "inspect", error } });
       return;
     } catch (cause) { if (n >= 8 || !/version conflict/.test(String(cause))) throw cause; }
   }

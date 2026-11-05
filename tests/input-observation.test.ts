@@ -60,7 +60,7 @@ test("Missing native Session, unfinished processing and ambiguous tool IDs prese
   const pending = structuredClone(input); delete pending.status.assess!.completedAt; delete pending.status.assess!.completedBy;
   pending.status.assess!.lastError = "Interrupted";
   const interrupted = await inputJob(pending, [], async () => session());
-  assert.equal(interrupted.status, "outcome_unknown"); assert.equal(interrupted.nodes.some(n => n.kind === "model_call"), false);
+  assert.equal(interrupted.status, "failed"); assert.equal(interrupted.nodes.some(n => n.kind === "model_call"), false);
 });
 
 /** @case Output admission timestamps enforce ordering, so a same-ms delivered receipt can precede its logical creation time. */

@@ -57,6 +57,10 @@ test("Work moves without changing objective, schedule or history, and running co
   const fact = await f.input("busy");
   await f.resources.patchStatus(fact, { assess: { ...fact.status.assess, executionId: "chief" } });
   await assert.rejects(moveMaterial(f.resources, f.root(), { kind: "Input", id: "busy", topicUid: child.metadata.uid, reason: "Move" }), /Finish Input/);
+  const admitted = f.aide.topics.inputStore.get("busy")!;
+  const failed = await f.resources.patchStatus(admitted, { assess: { ...admitted.status.assess, lastError: "Execution failed" } });
+  const filed = await moveMaterial(f.resources, f.root(), { kind: "Input", id: "busy", topicUid: child.metadata.uid, reason: "File failed history" });
+  assert.deepEqual((filed.status as typeof failed.status).assess, failed.status.assess, "filing failed history preserves its terminal receipt");
   const task = await f.aide.work("root").create({ kind: "task", title: "Implement", instruction: "Implement safely", trigger: null });
   const routine = await f.aide.work("root").create({ kind: "routine", title: "Observe", instruction: "Observe progress", trigger: { cron: "0 * * * *", timezone: "UTC", event: null } });
   for (const [kind, type, work] of [["Task", TASK_TYPE, task], ["Routine", ROUTINE_TYPE, routine]] as const) {

@@ -7,7 +7,7 @@ import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
 export interface InputBrowseQuery extends PageQuery {
   q?: string;
   origin?: InputSpec["origin"]; originId?: string; connector?: string; sourceUid?: string;
-  state?: "pending" | "completed"; errors?: boolean;
+  state?: "pending" | "completed" | "failed"; errors?: boolean;
 }
 export interface InputFacet { origin: InputSpec["origin"]; originId: string; connector: string; sourceUid: string; sourceName: string; sourceKind: string }
 
@@ -23,6 +23,7 @@ const connector = `CASE
   ELSE '' END`;
 const unfinished = (stage: string) => `EXISTS (SELECT 1 FROM json_each(data, '$.object.status.${stage}') WHERE json_extract(value, '$.completedAt') IS NULL)`;
 const completed = `(${field("status.route.completedAt")} IS NOT NULL AND (json_type(data, '$.object.status.assess') IS NULL OR ${field("status.assess.completedAt")} IS NOT NULL) AND NOT ${unfinished("handle")})`;
+const failed = `(${field("status.assess.completedAt")} IS NULL AND ${field("status.assess.lastError")} IS NOT NULL AND ${field("status.assess.lastError")} != '')`;
 const errors = `(${field("status.route.lastError")} IS NOT NULL OR ${field("status.assess.lastError")} IS NOT NULL OR EXISTS
   (SELECT 1 FROM json_each(data, '$.object.status.handle') WHERE json_extract(value, '$.lastError') IS NOT NULL))`;
 const scope = `scope = 'personal' AND kind = 'aide.dev/Input' AND ${field("apiVersion")} = '${INPUT_TYPE.apiVersion}' AND ${field("metadata.namespace")} = 'v1' AND ${field("metadata.deletionTimestamp")} IS NULL`;
@@ -39,7 +40,7 @@ export function browseInputs(store: InputStore, query: InputBrowseQuery = {}) {
     [field("spec.origin"), query.origin], [field("spec.originId"), query.originId],
     [connector, query.connector], [field("spec.originRef.uid"), query.sourceUid],
   ] as const) if (value !== undefined) { clauses.push(`${expression} = ?`); args.push(value); }
-  if (query.state) clauses.push(query.state === "completed" ? completed : `NOT ${completed}`);
+  if (query.state) clauses.push(query.state === "completed" ? completed : query.state === "failed" ? failed : `(NOT ${completed} AND NOT ${failed})`);
   if (query.errors) clauses.push(errors);
   if (query.q) {
     clauses.push(`(instr(lower(${field("spec.text")}), lower(?)) > 0 OR instr(lower(${field("metadata.name")}), lower(?)) > 0)`);
@@ -49,11 +50,11 @@ export function browseInputs(store: InputStore, query: InputBrowseQuery = {}) {
   return store.storage.transaction(() => {
     const total = Number(store.storage.db.prepare(`SELECT count(*) AS count FROM resources WHERE ${where}`).get(...args)!.count);
     const bounds = pageBounds(total, size, query.page);
-    const rows = store.storage.db.prepare(`SELECT data, ${connector} AS connector, ${completed} AS completed, ${errors} AS errors
+    const rows = store.storage.db.prepare(`SELECT data, ${connector} AS connector, ${completed} AS completed, ${failed} AS failed, ${errors} AS errors
       FROM resources WHERE ${where} ORDER BY created DESC, key DESC LIMIT ? OFFSET ?`).all(...args, size, (bounds.page - 1) * size);
     return { ...bounds, items: rows.map(row => ({
       input: store.storage.decode("personal", row.data as string).object as Resource<InputSpec, InputStatus>,
-      connector: row.connector as string, state: row.completed ? "completed" as const : "pending" as const, errors: Boolean(row.errors),
+      connector: row.connector as string, state: row.completed ? "completed" as const : row.failed ? "failed" as const : "pending" as const, errors: Boolean(row.errors),
     })) };
   });
 }
