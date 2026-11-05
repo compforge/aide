@@ -1,4 +1,4 @@
-import { HarnessError } from "@compforge/aide-plugin";
+import { HarnessError, newHarnessError } from "@compforge/aide-plugin";
 import { randomUUID } from "node:crypto";
 import type { HarnessActivity } from "./activity.ts";
 import { HarnessInvocations, type ScheduledHarnessInvocation, type HarnessInvocationSnapshot } from "./invocation.ts";
@@ -94,10 +94,9 @@ export class HarnessCalls implements HarnessExecution {
     finally { this.dispatchedHarnessInvocations.delete(snapshot.invocationId); this.records.release(snapshot.invocationId); this.harnessInvocations.release(snapshot.invocationId); }
     if (terminal.phase === "completed" && terminal.result && terminal.runtimeId) {
       if (terminal.result.stopReason === "cancelled") return Object.freeze({ state: "dismissed" });
-      if (terminal.result.stopReason !== "end_turn") throw new HarnessError(terminal.result.error ?? {
-        code: "harness_execution_failed", retryable: false,
-        message: `Harness execution did not complete: ${terminal.result.stopReason ?? "unknown"}`,
-      });
+      if (terminal.result.stopReason !== "end_turn") throw terminal.result.error
+        ? HarnessError.from(terminal.result.error)
+        : newHarnessError("harness_execution_failed", `Harness execution did not complete: ${terminal.result.stopReason ?? "unknown"}`);
       return Object.freeze({
         state: "success",
         value: {
@@ -114,11 +113,10 @@ export class HarnessCalls implements HarnessExecution {
       if (terminal.cancellation?.reason === "timeout") {
         return Object.freeze({ state: "timeout" });
       }
-      throw new HarnessError({ code: "harness_interrupted", retryable: false,
-        message: terminal.cancellation?.detail ?? "Harness execution interrupted" });
+      throw newHarnessError("harness_interrupted", terminal.cancellation?.detail ?? "Harness execution interrupted");
     }
-    throw new HarnessError({ code: terminal.failure?.reason === "dispatch" ? "harness_dispatch_failed" : "harness_interrupted", retryable: false,
-      message: terminal.failure?.detail ?? "Harness execution failed" });
+    throw newHarnessError(terminal.failure?.reason === "dispatch" ? "harness_dispatch_failed" : "harness_interrupted",
+      terminal.failure?.detail ?? "Harness execution failed");
   }
 
   private async waitForHarnessInvocation(

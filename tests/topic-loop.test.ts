@@ -1,4 +1,4 @@
-import { HarnessError } from "@compforge/aide-plugin";
+import { newHarnessError } from "@compforge/aide-plugin";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import { InputAttention } from "../plugins/personal/input/model.ts";
 import { attemptOf, resourceRef } from "../plugins/personal/input/state.ts";
@@ -108,7 +108,7 @@ for (const kind of ["Topic", "Route"] as const) for (const failure of ["write fa
       return client.commit(writes);
     } }, logger: { info() {}, warn() {}, error() {} }, instance: { config: {} } } as unknown as PluginContext;
     const execution = (executionId: string): ReconcileContext => {
-      const e = { executionId, withContext() { return e; }, verbs: { async action() { return { state: "success", value: { streaming: false } }; }, async harness() { calls++; throw new HarnessError({ code: "harness_execution_failed", retryable: false, message: "Fixture execution failed" }); } } };
+      const e = { executionId, withContext() { return e; }, verbs: { async action() { return { state: "success", value: { streaming: false } }; }, async harness() { calls++; throw newHarnessError("harness_execution_failed", "Fixture execution failed"); } } };
       return e as unknown as ReconcileContext;
     };
     const read = async () => (await client.get<unknown, LoopStatus>({ ...resource, ...resource.metadata }))!;

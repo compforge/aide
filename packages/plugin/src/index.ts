@@ -1,5 +1,5 @@
 export { AideError, aideErrorDetails, type AideErrorOptions } from "@compforge/aide-common";
-export { HarnessError, harnessErrorDetails, type HarnessErrorOptions, type AgentStatus } from "./harness.ts";
+export { HarnessError, newHarnessError, asHarnessError, type AgentStatus } from "./harness.ts";
 export type { Address, ChannelAddress, RequirementAddress } from "./address.ts";
 
 

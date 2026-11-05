@@ -21,8 +21,10 @@ Host/Runner IPC 保存并恢复四个公共字段，同时保留 DeliveryError �
 
 `HarnessError` 由 `@compforge/aide-plugin` 定义并继承 `AideError`，表示 Harness 模型调用、上下文压缩、调度或会话操作失败。`harness()` 对这些失败 reject，不再返回 `success + stopReason=error` 或字符串 failure。取消与请求期限仍返回 `dismissed`、`timeout`，操作被拒绝仍是明确的 `outcome: rejected` 回执。
 
-`HarnessError.agent` 可携带已知的 `harness/sessionId`，使失败后的调用方仍能保存原生恢复身份。Host/Runner IPC 按 `harnessErrorDetails` 结构化识别和恢复错误；业务层不依赖异常来自同一 SDK 副本。已有 `AideError` 保留 code、biz_code 和 retryable；未分类异常归为 `harness_operation_failed`，默认不可重试。Pi 压缩失败使用 `harness_compaction_failed`，普通终态执行失败使用 `harness_execution_failed`；不解析错误文案推断可重试性。
+`HarnessError.agent` 可携带已知的 `harness/sessionId`，使失败后的调用方仍能保存原生恢复身份。Host/Runner IPC 按 `asHarnessError` 结构化识别和恢复错误；业务层不依赖异常来自同一 SDK 副本。已有 `AideError` 保留 code、biz_code 和 retryable；未分类异常归为 `harness_operation_failed`，默认不可重试。Pi 压缩失败使用 `harness_compaction_failed`，普通终态执行失败使用 `harness_execution_failed`；不解析错误文案推断可重试性。
 
 Personal 捕获 HarnessError 后保存未完成 Input、Topic 和 Stream 的安全诊断；`retryable: true` 也不自动重跑整个 Agent。模型请求重试与整轮业务执行恢复分属不同层，后者必须核对已发生的工具效果与业务回执。
 
 Personal 对最终 `harness_compaction_failed` 的收尾会解除匹配的 Agent 绑定，保留失败 Input 与原生历史，供后续新输入走正常创建流程。该策略不依赖 message，也不授权重放旧输入；具体边界见 [Pi 压缩与失败恢复](harness/pi.md#压缩与失败恢复)。
+
+新建 Harness 错误使用 `newHarnessError(code, message, agent?)`，默认不可重试。`HarnessError.from(error, agent?)` 转换已有异常并保留分类，`asHarnessError(error, fallbackAgent?)` 只识别 Harness 错误、校验跨 SDK / IPC 字段并返回错误对象。构造和补齐原生引用集中在错误定义模块；业务层直接使用 `HarnessError`，不公开独立的构造 Options 类型。

@@ -1,9 +1,9 @@
-import { harnessErrorDetails } from "@compforge/aide-plugin";
+import { asHarnessError } from "@compforge/aide-plugin";
 import { invalidateAssignment } from "./input/assignment.ts";
 import { commitStatus } from "./status.ts";
 import { z } from "zod";
 import { prepareAgent, saveAgent } from "./session.ts";
-import type { AgentStatus, HarnessErrorOptions, PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
+import type { AgentStatus, HarnessError, PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
 import { assessmentFinished, InputAttention, INPUT_ORIGINS, inputAttention, isCapacityInput, isInternalInput, INPUT_TYPE, type InputSpec } from "./input/model.ts";
 import { inputRef, pendingInputs, resourceRef, changeAttempt, changeAssessment, attemptOf, attemptPatch, type Input } from "./input/state.ts";
 export { inputRef } from "./input/state.ts";
@@ -111,7 +111,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   context.logger.info("Agent input admitted", { attributes: { resourceUid: current.metadata.uid, inputId: inputId ?? "timer", inputIds, executionId: execution.executionId } });
   let completed = false;
   let agent: AgentStatus | undefined;
-  let failure: HarnessErrorOptions | undefined;
+  let failure: HarnessError | undefined;
   let streaming = false;
   let error = "Agent ended without confirming input completion";
   try {
@@ -130,10 +130,9 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
     if (result.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, result.agent);
     if (!completed) error = `Agent execution did not complete: ${result.state === "success" ? result.value.result.stopReason : result.state}`;
   } catch (cause) {
-    failure = harnessErrorDetails(cause);
+    failure = asHarnessError(cause, agent);
     error = failure?.message ?? String(cause);
-    if (failure?.code === "harness_compaction_failed") failure = { ...failure, agent: failure.agent?.sessionId ? failure.agent : agent };
-    else if (failure?.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, failure.agent);
+    if (failure?.code !== "harness_compaction_failed" && failure?.agent?.sessionId) await saveAgent(context.resources, current, execution.executionId, failure.agent);
   }
   finally {
     try {
@@ -173,7 +172,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
  * @case tests/topic-review.test.ts
  */
 export async function finalizeExecution(context: Pick<PluginContext, "resources" | "logger">, owner: Readonly<LoopResource>, executionId: string,
-  error = "Previous execution interrupted; inspect existing effects before continuing", failure?: HarnessErrorOptions) {
+  error = "Previous execution interrupted; inspect existing effects before continuing", failure?: HarnessError) {
   const compactionFailed = failure?.code === "harness_compaction_failed";
   for (let n = 0; ; n++) {
     const latest = await context.resources.get<unknown, LoopStatus>(resourceRef(owner));

@@ -1,4 +1,4 @@
-import { HarnessError } from "@compforge/aide-plugin";
+import { newHarnessError } from "@compforge/aide-plugin";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import { ROUTE_TYPE, ROUTE_NAME } from "../plugins/personal/route/model.ts";
 import assert from "node:assert/strict";
@@ -165,7 +165,7 @@ for (const closeFails of [false, true]) test(`Compaction failure unbinds Chief a
       return { state: "success", value: { outcome: "accepted" } };
     }
     // A transport may omit agent; the admitted identity remains known to the caller.
-    throw new HarnessError({ code: "harness_compaction_failed", retryable: false, message: "summary token cap" });
+    throw newHarnessError("harness_compaction_failed", "summary token cap");
   } } } as unknown as ReconcileContext;
   assert.equal(await runInput(f.context, execution, f.current(topic), "chief", "failed", "failed"), false);
   assert.deepEqual(calls, [{ operation: "prompt", sessionId: "old-session" }, { operation: "close", sessionId: "old-session" }]);
@@ -194,7 +194,7 @@ for (const outcome of ["error", "cancelled", "timeout"] as const) test(`${outcom
   await f.resources.patchStatus(f.current(topic), { agent });
   const execution = { executionId: "run", verbs: { async harness(args: { operation?: string }) {
     assert.equal(args.operation, undefined);
-    if (outcome === "error") throw new HarnessError({ code: "harness_execution_failed", retryable: false, message: "summary token cap", agent });
+    if (outcome === "error") throw newHarnessError("harness_execution_failed", "summary token cap", agent);
     return { state: outcome === "cancelled" ? "dismissed" : "timeout", agent };
   } } } as unknown as ReconcileContext;
   await runInput(f.context, execution, f.current(topic), "chief", "fact", "fact");
@@ -217,7 +217,7 @@ for (const race of ["status", "session", "execution"] as const) test(`Compaction
     return f.resources.commit(writes);
   } };
   const released = await finalizeExecution({ ...f.context, resources }, owner, "old-run", "summary token cap",
-    { code: "harness_compaction_failed", retryable: false, message: "summary token cap", agent });
+    newHarnessError("harness_compaction_failed", "summary token cap", agent));
   assert.ok(raced);
   if (race === "status") {
     assert.deepEqual(released, agent);
@@ -239,7 +239,7 @@ test("Route compaction failure does not schedule replay of its failed Input", as
   const execution = { executionId: "route-run", verbs: { async harness(args: { operation?: string }) {
     calls.push(args.operation ?? "prompt");
     if (args.operation) return { state: "success", value: { outcome: "accepted" }, agent };
-    throw new HarnessError({ code: "harness_compaction_failed", retryable: false, message: "summary token cap", agent });
+    throw newHarnessError("harness_compaction_failed", "summary token cap", agent);
   } } } as unknown as ReconcileContext;
   await runInput(f.context, execution, route, "route", "route-failed", "route-failed");
   const latest = (await f.resources.get<unknown, import("../plugins/personal/loop.ts").LoopStatus>(resourceRef(route)))!;

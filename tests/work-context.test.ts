@@ -1,4 +1,4 @@
-import { HarnessError } from "@compforge/aide-plugin";
+import { newHarnessError } from "@compforge/aide-plugin";
 import { committedStatus } from "./fixtures/resource-write.ts";
 import { workObservation, workDueAt } from "../plugins/personal/status.ts";
 import { workPhase } from "../plugins/personal/status.ts";
@@ -154,8 +154,7 @@ for (const kind of ["task", "routine"] as const) test(`${kind} compaction failur
     calls.push(args.operation ?? "prompt");
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: kind, sessionId: `session-${++creates}` } };
     if (args.operation === "close") return { state: "success", value: { outcome: "accepted" } };
-    if (executionId === "failed-run") throw new HarnessError({ code: "harness_compaction_failed", message: "summary token cap", retryable: false,
-      agent: { harness: kind, sessionId: args.sessionId } });
+    if (executionId === "failed-run") throw newHarnessError("harness_compaction_failed", "summary token cap", { harness: kind, sessionId: args.sessionId });
     await reportWork(f.resources, await f.read(), executionId, { inputIds: ["fresh"], action: "done", report: "Fresh input handled" });
     return { state: "success", value: { result: { stopReason: "end_turn" } } };
   } } } as unknown as ReconcileContext);
