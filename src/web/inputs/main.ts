@@ -10,8 +10,9 @@ let filtersRequest: AbortController | undefined;
 const query = new URLSearchParams();
 const selects = { connector: 'input-connector', sourceUid: 'input-source', state: 'input-state' } as const;
 const time = (at?: string) => at ? Number.isFinite(Date.parse(at)) ? new Date(at).toLocaleString() : at : '时间未记录';
+const stateLabels: Record<InputListView['items'][number]['state'], string> = { pending: '尚未完成', completed: '处理完成', failed: '处理失败' };
 const statusLabels: Record<string, string> = { completed: '已确认完成', cancelled: '已取消', rejected: '已拒绝', assigned: '已分派', bound: '已绑定', applied: '已应用',
-  started: '已开始', attention: '待核对', recorded: '保留的异常记录', pending: '尚未完成', retrying: '等待重试', delivered: '已送达', sending: '投递中', failed: '投递失败', uncertain: '投递待核对' };
+  started: '已开始', attention: '待核对', recorded: '保留的异常记录', pending: '尚未完成', retrying: '等待重试', delivered: '已送达', sending: '投递中', failed: '失败', uncertain: '投递待核对' };
 
 function loadLocation() {
   const params = new URL(location.href).searchParams;
@@ -49,7 +50,7 @@ function renderList(result: InputListView) {
     link.href = '/inputs?' + params;
     if (selected?.id === input.id) link.setAttribute('aria-current', 'page');
     link.append(node('strong', input.preview), node('span', `${input.label} · ${input.connector || '无 Connector / 未记录'}`, 'muted'),
-      node('span', `${input.state === 'completed' ? '处理完成' : input.state === 'failed' ? '处理失败' : '尚未完成'}${input.errors ? ' · 有异常记录' : ''} · ${time(input.at)}`, 'muted'));
+      node('span', `${stateLabels[input.state]}${input.errors ? ' · 有异常记录' : ''} · ${time(input.at)}`, 'muted'));
     link.onclick = event => {
       event.preventDefault(); selected = { id: input.id, uid: input.uid }; lastDetail = ''; saveLocation(true);
       void refresh().then(() => { if (matchMedia('(max-width: 760px)').matches) $('input-heading').scrollIntoView(); });
