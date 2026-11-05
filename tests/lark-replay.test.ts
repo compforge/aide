@@ -129,7 +129,7 @@ test("Replay initialization failures release their directory and restore process
       const root = ${JSON.stringify(directory)}, run = join(root, "run"), modelPath = join(root, "model.json");
       const args = ["replay", "--dataset", join(root, "snapshot.json"), "--run", run, "--model", modelPath,
         "--weave", "off", "--timeout-ms", "5000"];
-      const valid = { provider: "replay-fixture", id: "test", api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1" };
+      const valid = { provider: "replay-fixture", id: "test", api: "openai-completions", baseUrl: "http://127.0.0.1:1/v1", contextWindow: 128000, maxTokens: 4096 };
       delete process.env.REPLAY_MISSING_TEST_KEY;
       process.env.REPLAY_LOCAL_TEST_KEY = "local-fixture-only";
       const previousUmask = process.umask(0o022);
