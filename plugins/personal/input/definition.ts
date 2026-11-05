@@ -13,7 +13,7 @@ import { guardInputTopic } from "../topic/ownership.ts";
 import { z } from "zod";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { ResourceVersionConflict, type ResourceDefinition } from "@compforge/aide-plugin";
-import { INPUT_TYPE, INPUT_ORIGINS, InputAttention, isInternalInput, inputQueue, type InputSpec, type InputStatus } from "./model.ts";
+import { assessmentFinished, INPUT_TYPE, INPUT_ORIGINS, InputAttention, isInternalInput, inputQueue, type InputSpec, type InputStatus } from "./model.ts";
 import { AddressRefSchema } from "../address/model.ts";
 import { parseResourceNamespace } from "../../../src/host/plugin/namespace.ts";
 import { inputPrinter } from "./printer.ts";
@@ -29,6 +29,12 @@ export const InputSpecSchema = z.object({ ...InputClassificationFields, inputKey
 const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict();
 const attempt = z.object({ agent: AgentStatusSchema.optional(), completedBy: AgentCallSchema.optional(), executionId: z.string().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(), lastError: z.string().optional() }).strict();
 const assessment = attempt.extend({ result: z.object({ summary: z.string(), disposition: z.enum(["completed", "cancelled", "rejected"]).optional() }).strict().optional() });
+/**
+ * @spec Internal request deduplication covers queued and running assessments, excluding recorded failures.
+ * @why A failed assessment keeps its admission receipt without blocking a later independent maintenance Input.
+ * @link docs/personal/topic.md#树内整理与维护优先级
+ * @case tests/topic-review.test.ts
+ */
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   type: INPUT_TYPE,
   schema: { spec: InputSpecSchema, status: z.object({
@@ -40,11 +46,14 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   }).strict() },
   validator: { create(current, context) {
     if (isInternalInput(current.spec) && current.spec.originId === "personal.topic") validateReviewRequest(current, context);
-    if (isInternalInput(current.spec) && current.status.topic && !current.status.assess?.completedAt
+    if (isInternalInput(current.spec) && current.status.topic && !assessmentFinished(current.status.assess)
       && context.list<InputSpec, InputStatus>(INPUT_TYPE, { matchIndex: { name: "internalPending", value: JSON.stringify([current.status.topic.uid, current.spec.origin]) } })
         .some(i => i.metadata.uid !== current.metadata.uid)) throw new ResourceVersionConflict("Topic already has this internal Input pending");
   }, update(previous, current, context) {
-    if (previous.status.assess?.completedAt && !equalResourceValue({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error("Input assessment is already completed");
+    if (assessmentFinished(previous.status.assess) && !equalResourceValue({ ...previous.status.assess, topic: undefined }, { ...current.status.assess, topic: undefined })) throw new Error(previous.status.assess?.lastError ? "Input assessment has failed; submit a new Input" : "Input assessment is already completed");
+    if (previous.status.assess?.lastError && !previous.status.assess.completedAt
+      && Object.keys(current.status.handle ?? {}).some(uid => !previous.status.handle?.[uid]))
+      throw new Error("Failed Input cannot be assigned to new Work");
     guardInputTopic(previous, current, context);
     if (previous.status.topic && previous.status.topic.uid !== current.status.topic?.uid
       && current.status.assess && !current.status.assess.executionId && !current.status.assess.completedAt && current.status.assess.topic)
@@ -60,20 +69,20 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     obsoleteReply: r => obsoleteReplies(r.spec),
     message: r => { const identity = replyIdentity(r); return identity ? [identity.key] : []; },
     address: r => r.spec.source ? [r.spec.source.uid] : [],
-    assessActive: r => r.status.topic && r.status.assess?.executionId && !r.status.assess.completedAt ? [r.status.topic.uid] : [],
+    assessActive: r => r.status.topic && r.status.assess?.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
     topic: r => r.status.topic ? [r.status.topic.uid] : [],
-    assignmentPending: r => !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.executionId && !r.status.assess.completedAt ? [r.status.topic.uid] : [],
-    unassigned: r => !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.topic && !r.status.assess.executionId && !r.status.assess.completedAt ? [r.status.topic.uid] : [],
+    assignmentPending: r => !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
+    unassigned: r => !r.metadata.deletionTimestamp && r.status.topic && r.status.assess && !r.status.assess.topic && !r.status.assess.executionId && !assessmentFinished(r.status.assess) ? [r.status.topic.uid] : [],
     unfiled: r => !r.metadata.deletionTimestamp && !isInternalInput(r.spec) && !r.spec.topicKey && r.status.topic ? [r.status.topic.uid] : [],
-    internalPending: r => !r.metadata.deletionTimestamp && isInternalInput(r.spec) && r.status.topic && !r.status.assess?.completedAt
+    internalPending: r => !r.metadata.deletionTimestamp && isInternalInput(r.spec) && r.status.topic && !assessmentFinished(r.status.assess)
       ? [JSON.stringify([r.status.topic.uid, r.spec.origin])] : [],
-    assignedPending: r => !r.metadata.deletionTimestamp && r.status.assess?.topic && !r.status.assess.completedAt ? [r.status.assess.topic.uid] : [],
+    assignedPending: r => !r.metadata.deletionTimestamp && r.status.assess?.topic && !assessmentFinished(r.status.assess) ? [r.status.assess.topic.uid] : [],
     assessReadyAttention: r => !r.metadata.deletionTimestamp && r.status.assess?.topic
-      && !r.status.assess.completedAt && !r.status.assess.executionId
+      && !assessmentFinished(r.status.assess) && !r.status.assess.executionId
       ? [JSON.stringify([r.status.assess.topic.uid, inputQueue(r.spec)])] : [],
     routePending: r => r.status.route?.completedAt ? [] : ["pending"],
-    assessPending: r => r.status.assess && !r.status.assess.completedAt ? (r.status.topic ? [r.status.topic.uid] : []) : [],
-    assessExecution: r => r.status.assess?.executionId && !r.status.assess.completedAt ? [r.status.assess.executionId] : [],
+    assessPending: r => r.status.assess && !assessmentFinished(r.status.assess) ? (r.status.topic ? [r.status.topic.uid] : []) : [],
+    assessExecution: r => r.status.assess?.executionId && !assessmentFinished(r.status.assess) ? [r.status.assess.executionId] : [],
     handle: r => Object.keys(r.status.handle ?? {}),
     handlePending: r => Object.entries(r.status.handle ?? {}).filter(([, s]) => !s.completedAt).map(([uid]) => uid),
   },

@@ -60,7 +60,7 @@ const OutputDetailSchema = z.object({ id: z.string().min(1).max(200), uid: z.str
 const InputListSchema = PageSchema.extend({
   q: z.string().trim().max(200).optional(), origin: z.enum(["channel", "source", "chief", "aide:review", "aide:triage", "aide:organize"]).optional(),
   originId: z.string().max(200).optional(), connector: z.string().max(200).optional(), sourceUid: z.string().max(200).optional(),
-  state: z.enum(["pending", "completed"]).optional(), errors: z.enum(["true", "false"]).transform(v => v === "true").optional(),
+  state: z.enum(["pending", "completed", "failed"]).optional(), errors: z.enum(["true", "false"]).transform(v => v === "true").optional(),
 }).strict();
 
 const ApprovalResponseSchema = z.object({

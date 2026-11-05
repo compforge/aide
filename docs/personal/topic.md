@@ -264,7 +264,7 @@ Reconcile 先处理业务 Input、结构通知和子 summary 吸收。后台回�
 | aide:organize | maxChildren 超限；组织直属下属的分工与层次 |
 | aide:review | 静默回顾到期且有待处理材料或认识变化；回顾进展与知识 |
 
-内置请求复用 Input，status.topic 指向待处理节点，未领取时 status.assess.topic 最终收敛到当前 root，领取后保留实际负责人。origin 供程序调度，text 给 Chief 描述目的；没有单独的 maintenance 对象或字段。每个节点、每种 origin 最多保留一条未结束请求，创建由节点 CAS 和事务内 pending 索引校验去重；结果未知的接纳不会重复创建。capacityRequests 只记录该节点请求身份和检查时间，completedAt 决定结束后的冷却起点，回收后回退到 checkedAt；capacityCooldownSeconds 默认 60 秒。
+内置请求复用 Input，status.topic 指向待处理节点，未领取时 status.assess.topic 最终收敛到当前 root，领取后保留实际负责人。origin 供程序调度，text 给 Chief 描述目的；没有单独的 maintenance 对象或字段。每个节点、每种 origin 最多保留一条排队中或执行中的请求，创建由节点 CAS 和事务内 pending 索引校验去重。研判记录 lastError 后退出 pending 去重集合，保留原错误和接纳回执，不把失败标记为成功，也不自动重放该 Input。后续定时回顾到期且仍有材料待处理时创建新的 review Input；新一轮读取当前事实，已接纳和已完成的业务 Input 不重新接纳。capacityRequests 只记录该节点请求身份和检查时间，成功时 completedAt 决定冷却起点，失败或回收后回退到 checkedAt；capacityCooldownSeconds 默认 60 秒。
 
 root 空闲时按 aide:triage → aide:organize → 普通 Input 批次 → aide:review 选择。容量请求独立执行，不向该次执行追加普通 Input；每次容量执行后让等待的可激活业务获得一次机会。普通 Input 合并当前已有待办，最多 8 条，不要求攒满。Immediate/Normal 保留原有响应语义，Deferred 不单独激活；回顾可以带入 Deferred。排序在索引桶内使用底座稳定名称顺序，不承诺全局 FIFO。
 

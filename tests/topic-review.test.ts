@@ -22,7 +22,8 @@ import { TOPIC_TYPE, type TopicSpec, type TopicStatus } from "../plugins/persona
 import { summaryVersion, understandingVersion } from "../plugins/personal/topic/tree.ts";
 import { reconcileAssignments } from "../plugins/personal/topic/assignment.ts";
 import { reconcileChief, reconcileTopic } from "../plugins/personal/topic/reconcile.ts";
-import { InputAttention } from "../plugins/personal/input/model.ts";
+import { INPUT_TYPE, InputAttention, type InputSpec, type InputStatus } from "../plugins/personal/input/model.ts";
+import { finalizeExecution } from "../plugins/personal/loop.ts";
 import { topicPolicy, TopicReviewPolicySchema, type TopicPolicy } from "../plugins/personal/topic/config.ts";
 import { maintenanceAgenda } from "../plugins/personal/topic/maintenance.ts";
 import { parsePersonalConfig } from "../plugins/personal/config.ts";
@@ -257,6 +258,71 @@ test(`${mode} finalizes review waiting without replaying uncertain inputs`, asyn
   assert.equal(f.read().status.reviewCheckedAt, null);
   assert.ok(Date.parse(f.read().status.idleSince!) > Date.now() - 2000);
   const calls = f.calls.length; await f.run(); assert.equal(f.calls.length, calls);
+});
+
+test("A later execution failure preserves already completed Input receipts", async t => {
+  const f = await fixture(t); await f.input("completed-before-error", InputAttention.Normal);
+  f.hooks.afterAssess = async () => { throw new Error("provider failed after acknowledgement"); };
+  await f.run();
+  const receipt = f.aide.topics.inputStore.get("completed-before-error")!.status.assess!;
+  assert.ok(receipt.completedAt);
+  assert.equal(receipt.lastError, undefined);
+  assert.match(f.read().status.lastError!, /failed after acknowledgement/);
+});
+
+// @case Failed internal requests retain their receipts without blocking independent future maintenance.
+for (const mode of ["failure", "missing_receipt"] as const)
+test(`${mode} review allows the next due review to process new deferred Inputs`, async t => {
+  const f = await fixture(t);
+  await f.input("old-deferred"); await f.due();
+  f.hooks.skipAssessment = mode === "missing_receipt";
+  await f.run({ review: backoff }, mode === "failure");
+  const failed = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
+  const old = f.aide.topics.inputStore.get("old-deferred")!;
+  assert.ok(failed.status.assess?.lastError);
+  assert.ok(old.status.assess?.lastError);
+  assert.equal(failed.status.assess?.completedAt, undefined);
+  for (const name of ["assessPending", "assignedPending", "assessActive"]) {
+    const pending = await f.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
+      matchIndex: { name, value: f.read().metadata.uid }, limit: 10 });
+    assert.equal(pending.items.length, 0, `${name} excludes failed review and ordinary Inputs`);
+  }
+  await f.input("new-deferred");
+  await f.run();
+  assert.equal(f.calls.length, 1, "failure still observes the review cooldown");
+  f.hooks.skipAssessment = false;
+  await f.due(); await f.run();
+  assert.equal(f.calls.length, 2, "a failed review cannot occupy the next maintenance slot");
+  const reviews = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review");
+  assert.equal(reviews.length, 2);
+  assert.ok(reviews.find(i => i.metadata.uid !== failed.metadata.uid)!.status.assess?.completedAt);
+  assert.ok(f.aide.topics.inputStore.get("new-deferred")!.status.assess?.completedAt);
+  assert.deepEqual(f.aide.topics.inputStore.get(failed.metadata.name)!.status, failed.status);
+  assert.deepEqual(f.aide.topics.inputStore.get("old-deferred")!.status, old.status, "failed business Input is not replayed");
+});
+
+for (const origin of ["aide:review", "aide:triage", "aide:organize"] as const)
+test(`${origin} deduplicates queued and active requests but releases an interrupted request`, async t => {
+  const f = await fixture(t);
+  const topic = f.read(), agenda = await maintenanceAgenda(f.resources, [topic]);
+  const due = "2026-11-01T00:00:00.000Z", later = "2026-11-02T00:00:00.000Z";
+  const first = await createReviewInput(f.context, topic, due, agenda, origin);
+  assert.equal((await createReviewInput(f.context, f.read(), later, agenda, origin)).metadata.uid, first.metadata.uid);
+  const executionId = "interrupted-review";
+  await f.resources.commit([
+    { operation: "patchStatus", resource: f.read(), patch: { execution: { id: executionId, startedAt: past(), inputOrigin: origin } } },
+    { operation: "patchStatus", resource: first, patch: { assess: { ...first.status.assess, executionId, startedAt: past() } } },
+  ]);
+  assert.equal((await createReviewInput(f.context, f.read(), later, agenda, origin)).metadata.uid, first.metadata.uid);
+  await finalizeExecution(f.context, f.read(), executionId);
+  const failed = f.aide.topics.inputStore.get(first.metadata.name)!;
+  assert.match(failed.status.assess!.lastError!, /interrupted/);
+  const pending = await f.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
+    matchIndex: { name: "internalPending", value: JSON.stringify([topic.metadata.uid, origin]) }, limit: 1 });
+  assert.equal(pending.items.length, 0);
+  const next = await createReviewInput(f.context, f.read(), later, agenda, origin);
+  assert.notEqual(next.metadata.uid, first.metadata.uid);
+  assert.deepEqual(f.aide.topics.inputStore.get(first.metadata.name)!.status, failed.status);
 });
 
 test("Restart preserves empty-check backoff and recalculates it from new policy", async t => {

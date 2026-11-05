@@ -74,6 +74,20 @@ test("Completion requires every consumer receipt; exceptions remain searchable w
   assert.equal(recovered.items[0]!.state, "completed");
 });
 
+test("Failed assessment is a separate terminal list state and has no pending Timeline entry", async t => {
+  const { aide, store } = setup(t);
+  const at = new Date().toISOString();
+  store.submit("test", "failed", observation(1), { ...finished(), assess: { executionId: "failed-run", startedAt: at, lastError: "Pi compaction failed" } });
+  store.submit("test", "waiting", observation(2), { ...finished(), assess: {} });
+  assert.deepEqual(browseInputs(store, { state: "failed" }).items.map(i => i.input.metadata.name), ["failed"]);
+  assert.deepEqual(browseInputs(store, { state: "pending" }).items.map(i => i.input.metadata.name), ["waiting"]);
+  assert.equal(browseInputs(store, { state: "completed" }).total, 0);
+  assert.equal(inputList(aide, { state: "failed" }).items[0]!.state, "failed");
+  const detail = inputDetail(aide, "failed")!;
+  assert.ok(detail.timeline.some(e => e.stage === "assess" && e.status === "failed" && e.text === "Pi compaction failed"));
+  assert.equal(detail.timeline.some(e => e.stage === "assess" && e.status === "pending"), false);
+});
+
 test("Browsing is scoped, does not refresh eviction access times and recognizes Lark and environment connectors", t => {
   const { store, home } = setup(t);
   store.submit("test", "lark", { origin: "source", originId: "personal.lark", text: "message" }, finished());
@@ -157,7 +171,8 @@ test("Inputs HTTP routes validate filters and paginate all retained inputs, incl
   const detail = await (await fetch(url + "/inputs/detail?" + new URLSearchParams({ id: item.id, uid: item.uid }))).json() as InputDetailView;
   assert.ok(detail.timeline.some(e => e.title === "接收 Input"));
   assert.equal(detail.outputCount, 0);
-  for (const query of ['page=-1', 'pageSize=101', 'errors=maybe', 'state=failed', 'extra=true']) assert.equal((await fetch(url + '/inputs/list?' + query)).status, 400);
+  assert.equal((await fetch(url + '/inputs/list?state=failed')).status, 200);
+  for (const query of ['page=-1', 'pageSize=101', 'errors=maybe', 'state=invalid', 'extra=true']) assert.equal((await fetch(url + '/inputs/list?' + query)).status, 400);
   assert.equal((await fetch(url + '/inputs/detail?id=missing')).status, 404);
   assert.equal((await fetch(url + '/inputs/detail?uid=missing')).status, 400);
   for (const path of ['/', '/people', '/inputs']) {

@@ -13,7 +13,7 @@ export const AssessInputSchema = z.object({ inputId: z.string().min(1), summary:
 export type AssessInput = z.input<typeof AssessInputSchema>;
 /**
  * @spec Finishing Chief assessment and assigning Work handling are atomic; receipts remain on Input.
- * @spec Active Chief may assess any material in its Topic subtree, including Deferred; completion does not automatically resubmit material.
+ * @spec Active Chief may assess pending material in its Topic subtree, including Deferred; failed assessments remain terminal.
  * @spec Assessment does not update Topic summary/recent; meaningful understanding is maintained explicitly.
  * @link docs/personal/chief.md
  */
@@ -28,8 +28,9 @@ export async function assessInput(resources: ResourceClient, owner: Readonly<Top
     const topics = await topicScope(resources, resourceRef(c));
     const topicUids = new Set(topics.map(t => t.metadata.uid));
     if (input.status.assess?.executionId !== executionId && !belongsToTopic(input, resourceRef(c), topicUids)) throw new Error("Input does not belong to this Topic subtree");
+    if (input.status.assess?.lastError && !input.status.assess.completedAt) throw new Error("Input assessment has failed; submit a new Input");
     if (input.status.assess?.completedAt) return { assessed: args.inputId };
-    if (input.status.assess?.executionId && input.status.assess.executionId !== executionId && !input.status.assess.lastError)
+    if (input.status.assess?.executionId && input.status.assess.executionId !== executionId)
       throw new Error("Input is already admitted to another Chief execution");
     const work = args.workRequests.length ? (await Promise.all(topics.flatMap(topic => WORK_TYPES.map(type =>
       resources.list<WorkSpec, WorkStatus>(type, { matchIndex: { name: "topic", value: topic.metadata.uid } }))))).flat() : [];
