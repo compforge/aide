@@ -21,7 +21,11 @@ export const ResourceStorageConfigSchema = z.object({
   defaults: DefaultLimits.prefault({}),
   kinds: z.record(z.string().regex(/^[^/]+\/[^/]+$/), Limits.partial()).default({}),
   lowWatermark: z.number().min(0.1).max(0.95).default(0.8),
-  gc: z.object({ intervalMs: limit.default(60_000), batchSize: limit.max(256).default(16), maxTreeSize: limit.max(4096).default(256) }).strict().prefault({}),
+  gc: z.object({
+    // @why Larger timer delays overflow to 1 ms in Node/Bun, turning rare checks into continuous scans.
+    intervalMs: limit.max(2_147_483_647).default(60_000),
+    batchSize: limit.max(256).default(16), maxTreeSize: limit.max(4096).default(256),
+  }).strict().prefault({}),
   dedupSeconds: limit.default(7 * 86400),
   maxReceipts: limit.default(100_000),
 }).strict();

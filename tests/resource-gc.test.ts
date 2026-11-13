@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { ResourceStorage, ResourceCapacityError, type StoredResource } from "../src/host/resource/storage.ts";
+import { ResourceStorage, ResourceStorageConfigSchema, ResourceCapacityError, type StoredResource } from "../src/host/resource/storage.ts";
 import { ResourceGarbageCollector } from "../src/host/resource/gc.ts";
 import { definition } from "./fixtures/resource-definition.ts";
 import type { LogEntry } from "../src/host/logging.ts";
@@ -36,11 +36,23 @@ async function eventually(check: () => boolean): Promise<void> {
   while (!check()) { assert.ok(Date.now() < deadline, "GC did not converge"); await delay(5); }
 }
 
+// @case Reject timer overflow at configuration admission instead of scheduling GC every millisecond.
+test("GC interval rejects overflowing timer delays and accepts the maximum supported delay", () => {
+  const parse = (intervalMs: number) => ResourceStorageConfigSchema.parse({ gc: { intervalMs } });
+  assert.equal(ResourceStorageConfigSchema.parse({}).gc.intervalMs, 60_000);
+  assert.equal(parse(2_147_483_647).gc.intervalMs, 2_147_483_647);
+  for (const intervalMs of [2_147_483_648, 2_592_000_000, Infinity]) {
+    assert.throws(() => parse(intervalMs), `Unsafe GC interval ${intervalMs} must be rejected`);
+  }
+});
+
 test("admission rolls back immediately without examining eligible trees; pressure wakes GC outside the write", async t => {
   const f = fixture(t);
+  f.gc.start();
+  // Drain startup work on an empty database; the 60-second periodic timer cannot satisfy eventually().
+  await f.gc.run();
   f.write("old");
   f.storage.configure({ kinds: { "gc.test/Record": { maxCount: 1 } } });
-  f.gc.start();
   const changes: string[] = [];
   f.storage.subscribeWrites((_scope, r) => changes.push(r.metadata.name));
   assert.throws(() => f.write("new"), ResourceCapacityError);
