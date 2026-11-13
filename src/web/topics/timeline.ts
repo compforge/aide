@@ -1,6 +1,7 @@
 import { preserveTranscriptPosition } from './scroll.ts';
 import { byId as $, element, find } from '../shared/dom.ts';
 import { updateMarkdown } from '../shared/markdown.ts';
+import { request, errorMessage } from '../shared/http.ts';
 import { historyBlocks, replyText, processPreview, replyLabels, toolLabels } from '../../channel/reply-layout.ts';
 import type { TopicBlock, TopicView } from '../../channel/view.ts';
 type LiveActivity = NonNullable<TopicView['meta']['activity']> & {
@@ -10,8 +11,54 @@ type LiveActivity = NonNullable<TopicView['meta']['activity']> & {
 const outputText = (block: TopicBlock) => block.label ? `**${block.label}**\n\n${block.content}` : block.content;
 const inputLabels: Record<string, string> = { queued: '待处理', running: '处理中', done: '已处理', quiet: '已查看 · 保持安静', failed: '处理失败' };
 
-export function createTimeline() {
+export function createTimeline(topicId: string | null, signal: AbortSignal) {
   let lastMessages = '';
+  const messageNodes = new Map<string, { version: string; node: HTMLDetailsElement }>();
+  /**
+   * @spec Only an expanded message fetches and renders its body; unchanged identities reuse their mounted detail.
+   * @spec Topic changes abort detail requests; replaced rows reject late responses and offer retry on failure.
+   * @link docs/channel/web.md#实时进展与历史
+   */
+  function messageRow(block: TopicBlock) {
+    const identity = block.lazy!;
+    const version = JSON.stringify([identity, block.status, block.content]);
+    const saved = messageNodes.get(block.id);
+    if (saved?.version === version) return saved.node;
+    const node = replyRegion('message-detail:' + block.id, '', saved?.node.open ?? false);
+    node.className = 'message message-list-item'; node.dataset.scrollKey = block.id;
+    const heading = find(node, 'summary');
+    const label = block.type === 'input' ? block.label || '输入' : 'Aide';
+    const statuses: Record<string, string> = { ...inputLabels, pending: '待投递', sending: '投递中', delivered: '已送达', uncertain: '结果待确认', cancelled: '已取消' };
+    heading.append(element('code', block.id.replace(/^(input|message):/, ''), 'message-id'),
+      element('span', label + ' · ' + (statuses[block.status ?? ''] || block.status || ''), 'muted'),
+      element('time', new Date(block.at!).toLocaleString(), 'muted'),
+      element('span', block.content || '点击消息 ID 查看正文与过程', 'message-list-preview'));
+    const body = element('div', undefined, 'message-detail'); node.append(body);
+    const entry = { version, node }; messageNodes.set(block.id, entry);
+    let loading = false, loaded = false;
+    async function load() {
+      if (!node.open || loading || loaded || signal.aborted || !topicId) return;
+      loading = true; body.replaceChildren(element('p', '加载消息详情…', 'muted'));
+      try {
+        const view = await request<TopicView>('/topics/message?' + new URLSearchParams({ topicId,
+          topicUid: identity.topicUid, id: block.id, uid: identity.uid }), { signal });
+        if (signal.aborted || messageNodes.get(block.id) !== entry) return;
+        renderMessages(view.blocks, null, body);
+        for (const detail of body.querySelectorAll<HTMLDetailsElement>('.reply-envelope, .reply-part[data-kind="answer"]')) {
+          detail.open = true; detail.dataset.state = 'full';
+        }
+        loaded = true;
+      } catch (error) {
+        if (signal.aborted || messageNodes.get(block.id) !== entry) return;
+        const retry = element('button', '重试'); retry.type = 'button';
+        retry.addEventListener('click', () => void load());
+        body.replaceChildren(element('p', errorMessage(error), 'error'), retry);
+      } finally { loading = false; }
+    }
+    node.addEventListener('toggle', () => { if (node.open) void load(); });
+    if (node.open) void load();
+    return node;
+  }
   function identityBadge(drawing: string | undefined, label: string | undefined) {
     const badge = element('span', undefined, 'identity-badge'); badge.title = label ?? '';
     const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -109,23 +156,26 @@ export function createTimeline() {
     }
   }
   /** @spec Each Input renders one collapsible reply with independently collapsible process and answer regions; final text appears once. */
-  function renderMessages(blocks: TopicBlock[], activity: TopicView["meta"]["activity"]) {
+  function renderMessages(blocks: TopicBlock[], activity: TopicView["meta"]["activity"], target = $('history')) {
     const history = historyBlocks(blocks, activity);
     const signature = JSON.stringify(history);
-    if (signature === lastMessages) return;
-    lastMessages = signature;
-    const expanded = new Map([...$('messages').querySelectorAll('details')].map((node) => [node.dataset.blockId, node.open]));
-    $('history').replaceChildren();
+    if (target.id === 'history') {
+      if (signature === lastMessages) return;
+      lastMessages = signature;
+    }
+    const expanded = new Map([...target.querySelectorAll('details')].map((node) => [node.dataset.blockId, node.open]));
+    target.replaceChildren();
     if (!history.length) {
       const empty = element('div', undefined, 'empty');
       empty.append(element('h2', '从一件具体的事开始'), element('p', '例如：总结工作目录里的 README；每天上午检查项目进展；关注某件事，发生变化时告诉我。'));
-      $('history').append(empty);
+      target.append(empty);
     }
     const rendered = new Set();
     const roots = history.filter((block) => !block.parent_id);
     for (const block of roots) {
+      if (block.lazy) { target.append(messageRow(block)); continue; }
       if (block.type === 'input' || block.type === 'summary') {
-        $('history').append(receivedInput(block)); continue;
+        target.append(receivedInput(block)); continue;
       }
       const groupId = block.group_id || block.id;
       if (rendered.has(groupId)) continue;
@@ -154,7 +204,7 @@ export function createTimeline() {
         const body = element('div', undefined, 'markdown message-body'); updateMarkdown(body, answer);
         reply.append(body); updateAnswer(reply, phase, answer); node.append(reply);
       }
-      $('history').append(node);
+      target.append(node);
     }
   }
   let activityId: string | undefined;

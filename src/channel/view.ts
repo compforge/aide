@@ -1,5 +1,5 @@
 import { outputWaitLabels } from "../../plugins/personal/output/view.ts";
-import { topicHistory } from "../../plugins/personal/topic/history.ts";
+import { topicHistory, type HistorySelection } from "../../plugins/personal/topic/history.ts";
 import { outputView } from "../../plugins/personal/output/view.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { harnessIdentityFor } from "../host/harness/ids.ts";
@@ -24,6 +24,7 @@ export interface TopicBlock extends BaseBlock {
   label?: string;
   icon?: string;
   harness?: string;
+  lazy?: { topicUid: string; uid: string; version: string };
 }
 interface TopicMeta extends ModelMeta {
   topic_id: string;
@@ -42,19 +43,24 @@ export type TopicView = UIModel<TopicBlock, TopicMeta>;
  * @why Completion folds execution details; it never deletes them or creates extra delivered Messages.
  * @link docs/channel/web.md
  */
-export function topicView(aide: ChannelService, topicId: string, before?: string): TopicView {
+export function topicView(aide: ChannelService, topicId: string, before?: string, selection: HistorySelection = {}): TopicView {
   const resource = aide.topics.resource(topicId);
   if (!resource) return { version: PROTOCOL_VERSION, biz: "aide.topic", blocks: [], meta: { topic_id: topicId, before: null, activity: null } };
   const members = aide.topics.scope(resource.metadata.uid);
   const memberIds = new Set(members.map(t => t.spec.id)), memberUids = new Set(members.map(t => t.metadata.uid));
-  const page = topicHistory(aide.topics, resource, members, before);
+  const active = !before && !selection.message ? resource.status.execution : undefined;
+  const allInvocations = aide.invocations();
+  const liveExecutions = new Set(!before ? allInvocations.filter(item => item.phase === "running" && memberIds.has(item.topicId ?? ""))
+    .map(item => item.executionId) : []);
+  if (active) liveExecutions.add(active.id);
+  const page = topicHistory(aide.topics, resource, members, before, { ...selection, liveExecutions });
   const messages = page.outputs.map(output => outputView(output, aide.topics.outputStore.streams));
-  const inputIds = new Set(page.inputs.map(i => i.metadata.name));
+  const inputIds = new Set(page.items.filter(i => i.type === "input").map(i => i.id.slice(6)));
   const executionIds = new Set([...messages.flatMap(m => m.executionId ? [m.executionId] : []),
     ...page.inputs.flatMap(i => [i.status.assess?.completedBy?.executionId, i.status.assess?.executionId].filter((id): id is string => !!id))]);
-  const active = !before ? resource.status.execution : undefined;
-  const history = aide.invocations().filter(item => item.inputIds?.some(id => inputIds.has(id)) || executionIds.has(item.executionId)
-    || (!before && memberIds.has(item.topicId ?? "") && (item.executionId === active?.id || item.phase === "running" || !item.inputIds?.length)));
+  const history = allInvocations.filter(item => (!selection.summaries || liveExecutions.has(item.executionId)) &&
+    (item.inputIds?.some(id => inputIds.has(id)) || executionIds.has(item.executionId)
+    || (!before && !selection.message && memberIds.has(item.topicId ?? "") && (item.executionId === active?.id || item.phase === "running" || !item.inputIds?.length))));
   const state = aide.runtime.executions.view(history.flatMap(item => item.invocationId ? [item.invocationId] : []));
   const queued = before ? 0 : page.queued;
   const runId = (item: { inputId?: string; executionId: string }) => item.executionId;
@@ -93,6 +99,16 @@ export function topicView(aide: ChannelService, topicId: string, before?: string
       at: input.metadata.creationTimestamp, content: input.spec.text,
       status: receipt?.completedAt ? "done" : "queued",
       detail: [receipt?.result?.summary, receipt?.lastError].filter(Boolean).join("\n\n") });
+  }
+  if (selection.summaries) for (const item of page.items) {
+    if (roots.some(block => block.id === item.id)) continue;
+    const definition = item.origin && aide.inputDefinition({ origin: item.origin, originId: item.originId ?? "" });
+    roots.push({ id: item.id, type: item.type, at: item.at, content: item.preview,
+      role: item.type === "message" ? "aide" : item.origin === "channel" ? "user" : undefined,
+      status: item.status, group_id: item.executionId, origin: item.origin, originId: definition ? definition.id : undefined,
+      ...(definition ? { label: definition.label, icon: definition.icon } : {}),
+      ...(item.type === "input" ? { inputId: item.id.slice(6) } : {}),
+      lazy: { topicUid: resource.metadata.uid, uid: item.uid, version: item.version } });
   }
   const append = (turnId: string, block: TopicBlock) => {
     const input = turns.get(turnId);

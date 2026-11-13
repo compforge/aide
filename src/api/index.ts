@@ -185,6 +185,21 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
           throw error;
         }
       }
+      if (request.method === "GET" && url.pathname === "/topics/message") {
+        const query = z.object({ topicId: z.string().min(1).max(200), topicUid: z.string().min(1).max(250),
+          id: z.string().min(1).max(250), uid: z.string().min(1).max(250) }).strict().parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        if (aide.topics.resource(query.topicId)?.metadata.uid !== query.topicUid) {
+          json(response, 404, { error: "Topic 已删除或被替换，请重新打开。" }); return;
+        }
+        const started = performance.now(), value = topicView(aide, query.topicId, undefined, { message: query });
+        if (!value.blocks.some(block => block.id === query.id)) {
+          json(response, 404, { error: "消息已回收或不再属于当前 Topic。" }); return;
+        }
+        log.debug({ topicId: query.topicId, messageId: query.id, queryMs: Math.round(performance.now() - started) }, "Web message detail queried");
+        response.setHeader("cache-control", "no-store");
+        json(response, 200, value); return;
+      }
       if (request.method === "GET" && ["/topics/summary", "/topics/recent", "/topics/history"].includes(url.pathname)) {
         const query = z.object({ topicId: z.string().min(1).max(200), before: z.string().max(2000).optional() }).strict().parse(Object.fromEntries(url.searchParams));
         await aide.start();
@@ -194,7 +209,7 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         }
         const started = performance.now();
         const value = url.pathname.endsWith("/summary") ? topicSummary(aide.topics, query.topicId)
-          : url.pathname.endsWith("/recent") ? topicRecent(aide.topics, query.topicId) : topicView(aide, query.topicId, query.before);
+          : url.pathname.endsWith("/recent") ? topicRecent(aide.topics, query.topicId) : topicView(aide, query.topicId, query.before, { summaries: true });
         log.debug({ query: url.pathname, topicId: query.topicId, queryMs: Math.round(performance.now() - started) }, "Web topic panel queried");
         json(response, 200, value); return;
       }
