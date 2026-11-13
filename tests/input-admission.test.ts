@@ -250,3 +250,25 @@ test("Route compaction failure does not schedule replay of its failed Input", as
   assert.equal(receipt.nextAttemptAt, undefined);
   assert.deepEqual(await nextInputs(f.resources, latest, 8), []);
 });
+
+/** @case A successful immediate interruption preserves maintenance as pending without replaying completed business. */
+test("Immediate business can interrupt internal maintenance and unfinished maintenance remains pending", async t => {
+  const { createReviewInput } = await import("../plugins/personal/topic/review.ts");
+  const { maintenanceAgenda } = await import("../plugins/personal/topic/maintenance.ts");
+  const f = fixture(t), root = await f.aide.topics.ensure("a");
+  const maintenance = await createReviewInput(f.context, root, new Date().toISOString(), await maintenanceAgenda(f.resources, []));
+  await running(f, root);
+  await f.resources.patchStatus(f.current(root), { execution: { ...f.current(root).status.execution!, inputOrigin: "aide:review" } });
+  await f.resources.patchStatus(maintenance, { assess: { ...maintenance.status.assess, executionId: "a", startedAt: new Date().toISOString() } });
+  await f.input("urgent", [root], InputAttention.Immediate);
+  mockRunning(f, async () => ({ state: "success", value: { outcome: "accepted" } }));
+  assert.equal((await f.aide.personal.submitTopic(intake(root), { inputId: "urgent", operation: "steer" })).accepted, true);
+  await assessInput(f.resources, f.current(root), "a", { inputId: "urgent", summary: "Answered" });
+  await finalizeExecution(f.context, f.current(root), "a", "");
+  const pending = f.aide.topics.inputStore.get(maintenance.metadata.name)!;
+  assert.equal(pending.status.assess?.completedAt, undefined);
+  assert.equal(pending.status.assess?.lastError, undefined);
+  assert.equal(pending.status.assess?.executionId, undefined);
+  assert.deepEqual((await nextInputs(f.resources, f.current(root), 8)).map(i => i.metadata.name), [maintenance.metadata.name]);
+  assert.ok(f.aide.topics.inputStore.get("urgent")!.status.assess?.completedAt);
+});

@@ -159,8 +159,9 @@ test("Real Runner groups deferred observations by canonical environment and rest
   await scope.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1", resourceApiVersion: topic.apiVersion,
     resourceKind: topic.kind, resourceId: topic.metadata.name, controllerName: "agent" });
   await aide.settled();
-  assert.ok(aide.topics.inputStore.get(input.metadata.name)!.status.assess!.completedAt);
-  assert.match(prompts.at(-1)!, /镜像 api=A → api=B/);
+  assert.equal(aide.topics.inputStore.get(input.metadata.name)!.status.assess!.completedAt, undefined);
+  assert.ok(aide.topics.inputStore.list().some(i => i.spec.origin === "aide:review" && i.status.assess?.completedAt));
+  assert.match(prompts.at(-1)!, /aide:review/);
   assert.doesNotMatch(prompts.at(-1)!, /"before"|"after"/);
   assert.equal(aide.outputs().filter((message) => message.topicId !== "other").length, 0, "Source Topics do not inherit a reply address");
   assert.equal(aide.works().length, 0);

@@ -1,3 +1,4 @@
+import { digest } from "../chief-model.ts";
 import { SensitivitySchema, VisibilitySchema } from "../disclosure.ts";
 import { PersonRefSchema } from "../person/model.ts";
 import { prepareSummary } from "../note/summary.ts";
@@ -30,7 +31,7 @@ export const TopicContextSchema = z.object({ topicUid: z.string().optional(),
   sensitivity: SensitivitySchema.optional(), visibility: VisibilitySchema.optional(), version: z.string(), people: z.array(PersonRefSchema).optional(), summary: z.string().max(SUMMARY_CHARS).optional(),
 }).strict().refine(args => args.summary !== undefined || args.people !== undefined || args.sensitivity !== undefined || args.visibility !== undefined || !!args.absorbed?.length, "Supply summary, classification or reviewed child versions");
 export type TopicContextUpdate = z.infer<typeof TopicContextSchema>;
-export const TopicNoteSchema = NoteUpdateSchema;
+export const TopicNoteSchema = NoteUpdateSchema.safeExtend({ topicId: z.string().min(1).optional() });
 export type TopicNoteUpdate = z.infer<typeof TopicNoteSchema>;
 
 async function targetTopic(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, topicUid?: string) {
@@ -76,7 +77,20 @@ export async function summarizeTopic(resources: ResourceClient, owner: Readonly<
   return { version: contentVersion(updated), understandingVersion: understandingVersion(updated, await readNotes(resources, updated.metadata.uid, "subject")) };
 }
 
+/**
+ * @spec Editing an existing Note preserves its subject; only move_note relocates it.
+ * @spec A new Note defaults to the active Chief root; topicId may select a Topic in that tree.
+ * @link docs/personal/note.md
+ */
 export async function upsertTopicNote(resources: ResourceClient, owner: Readonly<TopicResource>, executionId: string, raw: unknown, callId: string) {
   const { current } = await targetTopic(resources, owner, executionId);
-  return upsertNote(resources, current, raw, callId);
+  const { topicId, ...args } = TopicNoteSchema.parse(raw);
+  if (topicId && args.noteId) throw new Error("topicId applies only to new Notes; use move_note to change an existing Note subject");
+  if (topicId && args.subject) throw new Error("Choose topicId or subject, not both");
+  if (topicId) {
+    const target = await resources.get<TopicSpec, TopicStatus>({ ...TOPIC_TYPE, namespace: current.metadata.namespace, name: digest(topicId) });
+    if (!target || !await readTopicInScope(resources, current, target.metadata.uid)) throw new Error("Topic is outside this root");
+    args.subject = resourceRef(target) as typeof args.subject;
+  }
+  return upsertNote(resources, current, args, callId);
 }

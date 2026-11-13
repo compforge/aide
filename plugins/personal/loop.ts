@@ -4,7 +4,7 @@ import { commitStatus } from "./status.ts";
 import { z } from "zod";
 import { prepareAgent, saveAgent } from "./session.ts";
 import type { AgentStatus, HarnessError, PluginContext, ReconcileContext, Resource, ResourceClient } from "@compforge/aide-plugin";
-import { assessmentFinished, InputAttention, INPUT_ORIGINS, inputAttention, isCapacityInput, isInternalInput, INPUT_TYPE, type InputSpec } from "./input/model.ts";
+import { assessmentFinished, InputAttention, INPUT_ORIGINS, inputAttention, isInternalInput, INPUT_TYPE, type InputSpec } from "./input/model.ts";
 import { inputRef, pendingInputs, resourceRef, changeAttempt, changeAssessment, attemptOf, attemptPatch, type Input } from "./input/state.ts";
 export { inputRef } from "./input/state.ts";
 /** A persistent native session owns context; each invocation has a separate durable admission identity. */
@@ -31,21 +31,17 @@ export async function nextInputs(resources: ResourceClient, owner: Readonly<Loop
   if (owner.kind === "Topic") {
     const selected: Input[] = [];
     const queues = businessOnly ? [InputAttention.Immediate, InputAttention.Normal, InputAttention.Deferred]
-      : ["aide:triage", "aide:organize", InputAttention.Immediate, InputAttention.Normal, InputAttention.Deferred, "aide:review"];
+      : [InputAttention.Immediate, InputAttention.Normal, "aide:triage", "aide:organize", "aide:review", InputAttention.Deferred];
     for (const queue of queues) {
       const page = await resources.page<InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE,
         { namespace: owner.metadata.namespace, matchIndex: { name: "assessReadyAttention", value: JSON.stringify([owner.metadata.uid, queue]) }, limit: Math.min(1000, limit - selected.length) });
       const items = page.items.filter(i => eligible(i, owner));
-      if (items.length && (queue === "aide:triage" || queue === "aide:organize")) return items.slice(0, 1);
-      if (queue === "aide:review" && selected.some(i => canActivate(i.spec, owner))) break;
+      if (queue.startsWith("aide:")) {
+        if (selected.some(i => canActivate(i.spec, owner))) continue;
+        if (items.length) return items.slice(0, 1);
+      }
       selected.push(...items);
       if (selected.length >= limit) break;
-    }
-    if (!businessOnly && !selected.some(i => canActivate(i.spec, owner))) {
-      const review = await resources.page<InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, {
-        matchIndex: { name: "assessReadyAttention", value: JSON.stringify([owner.metadata.uid, "aide:review"]) }, limit: 1 });
-      const ready = review.items.find(i => eligible(i, owner));
-      if (ready) return [...selected.slice(0, Math.max(0, limit - 1)), ready];
     }
     return selected;
   }
@@ -67,7 +63,7 @@ export async function submitPending(context: PluginContext, execution: Reconcile
   if (!owner.status.execution) return;
   let retry = false;
 
-  const batch = owner.kind === "Topic" ? await nextInputs(context.resources, owner, 8, true)
+  const batch = owner.kind === "Topic" ? await nextInputs(context.resources, owner, 8)
     : await pendingInputs(context.resources, resourceRef(owner));
   for (const input of batch) {
     if (!eligible(input, owner) || !canActivate(input.spec, owner)) continue;
@@ -87,11 +83,13 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
   const inputs = await Promise.all(inputIds.map(id => context.resources.get<InputSpec, import("./input/model.ts").InputStatus>(inputRef(id))));
 
   if (inputs.some(input => !input || !eligible(input, current))) return;
+  if (current.kind === "Topic" && inputs.some(input => input && isInternalInput(input.spec))
+    && inputs.length !== 1) throw new Error("Chief maintenance admits exactly one Input origin");
   const startedAt = new Date().toISOString();
   try {
     await commitStatus(context.resources, [
       { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, ...(inputs[0] ? { inputOrigin: inputs[0].spec.origin } : {}), admissionRevision: 0, observedGeneration: current.metadata.generation },
-        ...(current.kind === "Topic" ? { notifiedWeaveRevision: (owner.status as import("./topic/model.ts").TopicStatus).weaveRevision ?? 0, lastError: null, yieldToInput: inputs.some(i => i && isCapacityInput(i.spec)) } : {}) } },
+        ...(current.kind === "Topic" ? { ...(inputs[0]?.spec.origin === "aide:review" ? { notifiedWeaveRevision: (owner.status as import("./topic/model.ts").TopicStatus).weaveRevision ?? 0 } : {}), lastError: null } : {}) } },
       ...inputs.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: attemptPatch(input!, resourceRef(current), {
         executionId: execution.executionId, agent: undefined, startedAt, lastError: undefined, nextAttemptAt: undefined,
         ...(current.kind === "Route" ? { attempts: (input!.status.route?.attempts ?? 0) + 1 } : {}) }) })),
@@ -182,10 +180,16 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
     const unfinished = latest.kind === "Topic"
       ? await context.resources.list<import("./input/model.ts").InputSpec, import("./input/model.ts").InputStatus>(INPUT_TYPE, { matchIndex: { name: "assessExecution", value: executionId } })
       : (await pendingInputs(context.resources, resourceRef(latest))).filter(i => attemptOf(i, resourceRef(latest))?.executionId === executionId);
+    const suspended = new Set(!error && latest.kind === "Topic" && (latest.status.execution.admissionRevision ?? 0) > 0
+      ? unfinished.filter(i => isInternalInput(i.spec)).map(i => i.metadata.name) : []);
+    const failed = unfinished.filter(i => !suspended.has(i.metadata.name));
     const at = new Date().toISOString();
     try {
       await commitStatus(context.resources, [
-        ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: latest.kind === "Topic" ? { assess: { ...i.status.assess, lastError: error || "Chief ended without confirming input completion" } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error,
+        ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: latest.kind === "Topic" ? { assess: { ...i.status.assess,
+          ...(suspended.has(i.metadata.name)
+            ? { executionId: undefined, agent: undefined, startedAt: undefined, lastError: undefined }
+            : { lastError: error || "Chief ended without confirming input completion" }) } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error,
           ...(latest.kind === "Route" && !compactionFailed ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
         { operation: "patchStatus", resource: latest, patch: { execution: null, ...(released ? { agent: undefined } : {}), ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, reviewCheckedAt: null, ...(latest.status.execution.inputOrigin && !isInternalInput({ origin: latest.status.execution.inputOrigin })
             ? { idleReviewCount: 0 } : {}), idleReviewReset: null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {
@@ -195,8 +199,11 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
         } : {}) } },
       ]);
       if (latest.kind === "Topic" && error) context.logger.warn("Chief execution failed", { attributes: { topicUid: latest.metadata.uid, executionId, error } });
-      if (unfinished.length) context.logger.warn(latest.kind === "Topic" ? "Chief input assessments failed" : compactionFailed ? "Agent inputs failed" : "Agent inputs await recovery", { attributes: { resourceUid: latest.metadata.uid, executionId,
-        inputIds: unfinished.map(i => i.metadata.name), recovery: compactionFailed || latest.kind === "Topic" ? "none" : latest.kind === "Route" ? "retry" : "inspect", error } });
+      if (suspended.size) context.logger.info("Chief interrupted maintenance returned to pending", { attributes: {
+        topicUid: latest.metadata.uid, executionId, inputIds: [...suspended],
+      } });
+      if (failed.length) context.logger.warn(latest.kind === "Topic" ? "Chief input assessments failed" : compactionFailed ? "Agent inputs failed" : "Agent inputs await recovery", { attributes: { resourceUid: latest.metadata.uid, executionId,
+        inputIds: failed.map(i => i.metadata.name), recovery: compactionFailed || latest.kind === "Topic" ? "none" : latest.kind === "Route" ? "retry" : "inspect", error } });
       if (released) context.logger.warn("Agent binding released after compaction failure", { attributes: { resourceUid: latest.metadata.uid,
         executionId, harness: released.harness, sessionId: released.sessionId ?? null, code: failure!.code, error: failure!.message } });
       return released;

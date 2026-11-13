@@ -252,3 +252,19 @@ test("upsert_note receipt supplies an exact citation for a newly submitted Outpu
   const mail = mailView(f.aide.outputStore, output);
   assert.equal(mail.references[0]!.uid, actual.uid); assert.ok(mail.references[0]!.contentVersion);
 });
+
+/** @case Chief edits child Notes without relocation; new Notes default to root or explicitly target a child. */
+test("Chief upsert_note preserves existing placement and accepts topicId only on creation", async t => {
+  const f = await setup(t);
+  const original = await f.aide.topics.ensure("child");
+  const child = await f.resources.replace(original, { ...original.spec, parentRef: resourceRef(f.root) }, original.status);
+  const created = await f.upsert({ topicId: "child", text: "Initial child matter" }, "new-child");
+  assert.equal((await readNote(f.resources, created.noteId)).subject.uid, child.metadata.uid);
+  const edited = await f.upsert({ noteId: created.noteId, version: created.version, text: "Updated from root business Input" }, "edit-child");
+  assert.equal((await readNote(f.resources, edited.noteId)).subject.uid, child.metadata.uid);
+  const root = await f.upsert({ text: "New unfiled matter" }, "new-root");
+  assert.equal((await readNote(f.resources, root.noteId)).subject.uid, f.root.metadata.uid);
+  await assert.rejects(f.upsert({ noteId: edited.noteId, version: edited.version, topicId: "notes", text: "Move implicitly" }, "bad-move"), /move_note/);
+  await f.aide.topics.ensure("unrelated");
+  await assert.rejects(f.upsert({ topicId: "unrelated", text: "Outside the tree" }, "outside"), /outside this root/);
+});
