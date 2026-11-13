@@ -1,0 +1,71 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { once } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import pino from "pino";
+import { Aide } from "../src/app.ts";
+import { httpChannel } from "../src/api/index.ts";
+import { fakeOptions } from "./fake-harness.ts";
+import { TOPIC_TYPE, type TopicResource } from "../plugins/personal/topic/model.ts";
+import { understandingVersion } from "../plugins/personal/topic/tree.ts";
+import { resourceRef } from "../plugins/personal/input/state.ts";
+import { browseTopicChildren } from "../plugins/personal/topic/children.ts";
+import type { TopicChildrenView } from "../src/api/types.ts";
+
+/** @case Organization reads only live direct children, pages before expandability checks and never projects business history. */
+test("Topic children API pages direct children and respects parent identity and deletion", async t => {
+  const home = mkdtempSync(join(tmpdir(), "aide-topic-children-")), log = pino({ level: "silent" });
+  const aide = new Aide(home, fakeOptions({ async chief() { return ""; }, async execute() { throw new Error("Unexpected inference"); } }, home), log);
+  const store = aide.topics, server = httpChannel(aide, log);
+  t.after(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await aide.close(); rmSync(home, { recursive: true, force: true }); });
+  const parent = await store.ensure("组织/a?b#c", undefined, "组织");
+  const attach = (value: TopicResource, owner: TopicResource) => store.resources.replace(TOPIC_TYPE, value.metadata.name,
+    { ...value.spec, parentRef: resourceRef(owner) }, value.status);
+  const removeChild = (value: TopicResource, owner: TopicResource) => {
+    store.resources.patchStatus(TOPIC_TYPE, owner.metadata.name, { absorbed: { [value.metadata.uid]: understandingVersion(value) } });
+    store.resources.requestDeletion(TOPIC_TYPE, value.metadata.name);
+  };
+  const children: TopicResource[] = [];
+  for (let i = 0; i < 21; i++) children.push(attach(await store.ensure(`child-${String(i).padStart(2, "0")}`), parent));
+  const grandchild = attach(await store.ensure("grandchild"), children[0]!);
+  const deleted = attach(await store.ensure("deleted"), children[1]!);
+  removeChild(deleted, children[1]!);
+  const gone = attach(await store.ensure("gone"), parent);
+  removeChild(gone, parent);
+  // Model GC removing an old parent while its UID-pinned child is still awaiting collection.
+  const old = await store.ensure("recreated");
+  attach(await store.ensure("stale"), old);
+  store.resources.storage.remove(store.resources.key(TOPIC_TYPE, old.metadata.name));
+  const recreated = await store.ensure("recreated");
+  assert.notEqual(recreated.metadata.uid, old.metadata.uid);
+  assert.equal(browseTopicChildren(store, "recreated")!.total, 0);
+  store.get = () => { throw new Error("Full Topic projection"); };
+  store.runs = () => { throw new Error("Input history"); };
+  aide.outputs = () => { throw new Error("Output projection"); };
+  aide.start = async () => {};
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const path = `/topics/${encodeURIComponent(parent.spec.id)}/children`;
+  const response = await fetch(base + path);
+  assert.equal(response.status, 200);
+  const first = await response.json() as TopicChildrenView;
+  assert.equal(first.total, 21); assert.equal(first.items.length, 20); assert.equal(first.pages, 2);
+  assert.deepEqual(first.items[0], { id: "child-00", uid: children[0]!.metadata.uid, name: "child-00", hasChildren: true });
+  assert.equal(first.items[1]!.hasChildren, false, "Deleting grandchildren do not expose an expansion arrow");
+  const last = await (await fetch(base + path + "?page=999")).json() as TopicChildrenView;
+  assert.equal(last.page, 2); assert.deepEqual(last.items.map(v => v.id), ["child-20"]);
+  assert.deepEqual(browseTopicChildren(store, "child-00")!.items.map(v => v.uid), [grandchild.metadata.uid]);
+  assert.equal(browseTopicChildren(store, "child-20")!.total, 0);
+  attach(children[20]!, children[1]!);
+  assert.equal(browseTopicChildren(store, parent.spec.id)!.total, 20, "Reparented children leave the old branch");
+  assert.equal(browseTopicChildren(store, "child-01")!.items[0]!.id, "child-20");
+  assert.equal((await fetch(base + path + "?pageSize=101")).status, 400);
+  assert.equal((await fetch(base + path + "?page=0")).status, 400);
+  assert.equal((await fetch(base + "/topics/%ZZ/children")).status, 400);
+  assert.equal((await fetch(base + "/topics/missing/children")).status, 404);
+  const deletingRoot = await store.ensure("deleting-root");
+  store.resources.requestDeletion(TOPIC_TYPE, deletingRoot.metadata.name);
+  assert.equal((await fetch(base + "/topics/deleting-root/children")).status, 404);
+});

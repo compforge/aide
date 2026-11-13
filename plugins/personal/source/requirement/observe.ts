@@ -82,7 +82,7 @@ class RequirementObservation implements TopicLocator<RequirementIdentity> {
       fingerprint, retiring: finished(item) || assigned === false };
     if (previous?.fingerprint === fingerprint && previous.retiring === entry.retiring) return;
     const relation = this.relation();
-    await this.publish(key, entry, { ...this.base(item), ...(relation ? { relation } : {}), text: `需求 ${item.id}：${item.title}\n状态：${item.state}`,
+    await this.publish(key, entry, { ...this.base(item), ...(relation ? { relation } : {}), addressObservation: { name: item.title.trim() || `${item.category} #${item.id}` }, text: `需求 ${item.id}：${item.title}\n状态：${item.state}`,
       observation: { kind: previous ? "requirement.changed" : "requirement.discovered", requirement: item, ...(previous ? { previousFingerprint: previous.fingerprint } : {}) } });
   }
   private async discover() {

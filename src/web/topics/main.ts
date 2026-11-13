@@ -1,12 +1,10 @@
 import "./style.css";
-import { applyPatch, parsePatchEvent } from "@compforge/agentue/ui";
-import type { TopicView } from "../../channel/view.ts";
 import type { Approval } from "../../api/types.ts";
 import type { Work } from "../../../plugins/personal/model.ts";
 import { byId } from "../shared/dom.ts";
 import { request } from "../shared/http.ts";
 import { createNavigation } from "./navigation.ts";
-import { createTimeline } from "./timeline.ts";
+import { createDialogue } from "./dialogue.ts";
 import { createWorkPanel } from "./work.ts";
 import { createTopicContextPanel } from "./context.ts";
 import { createApprovals } from "./approvals.ts";
@@ -29,17 +27,13 @@ function mountTopic(topicId: string | null) {
   const controller = new AbortController();
   const signal = controller.signal;
   const query = "?topicId=" + encodeURIComponent(topicId ?? "");
-  const timeline = createTimeline();
-  let latestView: TopicView | undefined;
   const tree = createTopicTree(topicId, signal);
-  const tabs = mountTopicTabs(!!topicId, signal, () => {
-    if (latestView) timeline.render(latestView);
-  }, () => tree.show());
+  const tabs = mountTopicTabs(!!topicId, signal, () => { dialogue.pause(); showPanel(); });
+  const dialogue = createDialogue(topicId, signal, () => tabs.isDialogue() && timer !== undefined && !document.hidden);
   const work = createWorkPanel(topicId ?? "", poll, signal);
-  const context = createTopicContextPanel();
+  const context = createTopicContextPanel(topicId, signal);
   const approvals = createApprovals(poll, signal);
   let polling = false;
-  let stream: EventSource | undefined;
 
   byId("history").replaceChildren();
   byId("activity").replaceChildren(); byId("activity").hidden = true;
@@ -51,9 +45,9 @@ function mountTopic(topicId: string | null) {
   byId<HTMLTextAreaElement>("input").disabled = false;
   byId<HTMLButtonElement>("send").disabled = false;
   byId("composer").hidden = !topicId;
-  context.render(null); work.render([]); approvals.render([]);
+  work.render([]); approvals.render([]);
   if (topicId) {
-    byId("connection").textContent = "连接中";
+    byId("connection").textContent = "";
     byId("notice").textContent = "Enter 发送 · Shift + Enter 换行";
     mountComposer(topicId, poll, signal);
   } else {
@@ -65,6 +59,7 @@ function mountTopic(topicId: string | null) {
   async function poll() {
     if (polling || signal.aborted || document.hidden) return;
     polling = true;
+    refreshContext();
     try {
       if (!topicId) { await navigation.refresh(); return; }
       const [works, pending] = await Promise.all([
@@ -77,37 +72,22 @@ function mountTopic(topicId: string | null) {
     finally { polling = false; }
   }
 
-  function connect() {
-    if (!topicId || stream || signal.aborted) return;
-    const connection = new EventSource("/stream" + query);
-    stream = connection;
-    let view = {};
-    connection.onmessage = (event) => {
-      if (stream !== connection || signal.aborted) return;
-      try {
-        const patch = parsePatchEvent(event.data);
-        view = applyPatch(view, patch);
-        if (patch.op === "ping" || patch.op === "end") return;
-        const snapshot = view as TopicView;
-        latestView = snapshot;
-        context.render(snapshot.meta.context);
-        if (tabs.isDialogue()) timeline.render(snapshot);
-        byId("connection").textContent = snapshot.meta.error?.message ?? "实时连接";
-      } catch (error) {
-        console.error("Unable to render topic progress", error);
-        connection.close(); byId("connection").textContent = "无法读取对话进展，请刷新页面重试";
-      }
-    };
-    connection.onopen = () => { if (stream === connection && !signal.aborted) byId("connection").textContent = "实时连接"; };
-    connection.onerror = () => { if (stream === connection && !signal.aborted) byId("connection").textContent = "连接断开 · 正在重连"; };
+  function refreshContext() {
+    if (tabs.current() === "tab-summary") void context.load("summary");
+    if (tabs.current() === "tab-recent") void context.load("recent");
   }
-  function pause() { stream?.close(); stream = undefined; }
-  return { poll, connect, pause, dispose() { controller.abort(); pause(); } };
+  function showPanel() {
+    if (signal.aborted || document.hidden) return;
+    if (tabs.isDialogue()) dialogue.show();
+    else if (tabs.current() === "tab-tree") void tree.show();
+    refreshContext();
+  }
+  return { poll, connect: showPanel, pause: dialogue.pause, dispose() { controller.abort(); dialogue.pause(); } };
 }
 
 function start() {
   if (timer !== undefined) return;
-  void current.poll(); timer = setInterval(() => void current.poll(), 5000);
+  timer = setInterval(() => void current.poll(), 5000); void current.poll();
   current.connect();
 }
 
@@ -119,3 +99,8 @@ window.addEventListener("pagehide", (event) => {
 });
 window.addEventListener("pageshow", (event) => { if (event.persisted) start(); });
 start();
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) current.pause();
+  else { void current.poll(); current.connect(); }
+}, { signal: lifetime.signal });

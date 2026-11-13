@@ -2,6 +2,8 @@ import type { Persons } from "../../plugins/personal/person/service.ts";
 
 /** HTTP projections shared with browser consumers; imports here remain type-only. */
 export type TopicItem = import("../../plugins/personal/topic/browse.ts").TopicListItem;
+export type TopicChild = import("../../plugins/personal/topic/children.ts").TopicChild;
+export type TopicChildrenView = NonNullable<ReturnType<typeof import("../../plugins/personal/topic/children.ts").browseTopicChildren>>;
 export type TopicListView = ReturnType<typeof import("../../plugins/personal/topic/browse.ts").browseTopics>;
 export type PersonItem = import("../../plugins/personal/person/browse.ts").PersonListItem;
 export type PersonListView = ReturnType<typeof import("../../plugins/personal/person/browse.ts").browsePersons>;
