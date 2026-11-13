@@ -1,3 +1,4 @@
+import { ResourceGarbageCollector } from "../src/host/resource/gc.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
 import { topicView } from "../src/channel/view.ts";
 import { personRefs } from "../plugins/personal/person/model.ts";
@@ -179,6 +180,12 @@ test("terminating subjects protect summaries but a same-name replacement does no
   const create = () => f.client.create(NOTE_TYPE, { name: "arrival", spec: { subject: resourceRef(other), people: [], text: "Fresh evidence" },
     status: { updatedAt: new Date().toISOString() } });
   await assert.rejects(create());
+  // Keep the terminating Topic under Controller ownership while GC evaluates its summary.
+  const gc = new ResourceGarbageCollector(f.aide.topics.resources.storage, {
+    lifecycle: (_scope, resource) => resource.kind === TOPIC_TYPE.kind ? "controller" : "unmanaged",
+  });
+  try { await gc.run(); } finally { await gc.close(); }
+  assert.ok((await f.client.get(resourceRef(owner)))?.metadata.deletionTimestamp);
   assert.ok(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: note.metadata.name }));
   f.aide.topics.resources.finalizeDeletion(TOPIC_TYPE, owner.metadata.name);
   const replacement = await f.aide.topics.ensure("summary");

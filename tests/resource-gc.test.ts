@@ -185,8 +185,20 @@ test("GC propagates an absent or deleting owner through protected dependents wit
   f.write("b-child", { kind: "Child", owner: "z-owner", released: false });
   f.write("a-grandchild", { kind: "Child", owner: "b-child", released: false });
   f.storage.requestDeletion("z-owner");
+  const joined: Promise<void>[] = [];
+  f.storage.subscribeWrites((_scope, resource) => {
+    if (resource.metadata.name === "b-child" && resource.metadata.deletionTimestamp) joined.push(f.gc.run());
+  });
   f.gc.start();
+  const first = f.gc.run();
+  await first;
+  assert.equal(joined.length, 1);
+  assert.equal(joined[0], first, "synchronous deletion listeners must join the already registered pass");
   await eventually(() => !f.storage.has("a-grandchild") && !f.storage.has("b-child") && !f.storage.has("z-owner"));
+});
+
+test("a one-shot GC pass discovers an orphan without relying on background scheduling", async t => {
+  const f = fixture(t);
   f.write("orphan", { kind: "Child", owner: "missing", released: false });
   await f.gc.run(); assert.equal(f.storage.has("orphan"), false);
 });

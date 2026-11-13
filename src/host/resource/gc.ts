@@ -50,7 +50,9 @@ export class ResourceGarbageCollector {
   run(): Promise<void> {
     if (this.closed) return Promise.resolve();
     if (this.running) return this.running;
-    const running = this.collect().finally(() => {
+    clearTimeout(this.wakeup); this.wakeup = undefined;
+    // @why Register the pass before synchronous writes can notify listeners and request another pass.
+    const running = Promise.resolve().then(() => this.collect()).finally(() => {
       this.running = undefined;
       if (this.requested) { this.requested = false; this.wake(); }
     });
