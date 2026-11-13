@@ -1,3 +1,4 @@
+import { collectResources } from "./fixtures/resource-gc.ts";
 import { composeMail } from "../plugins/personal/stream/writer.ts";
 import { Addresses } from "../plugins/personal/address/service.ts";
 import { DeliveryError } from "@compforge/aide-connector";
@@ -134,6 +135,7 @@ test("frequency history is protected from capacity eviction until policy no long
   assert.throws(() => f.output("new", [a]), ResourceCapacityError);
   assert.ok(f.store.get("protected"));
   await f.client.patch(a, { type: "merge", value: { spec: { delivery: null } } });
+  await collectResources(f.store.storage);
   f.output("new", [a]);
   assert.equal(f.store.get("protected"), undefined);
 });

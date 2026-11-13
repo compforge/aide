@@ -1,3 +1,4 @@
+import { collectResources } from "./fixtures/resource-gc.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -22,7 +23,7 @@ function setup(t: { after(fn: () => void): void }) {
   return { root, db, record, type };
 }
 
-test("Group/Kind quota spans versions and scopes; protected references survive eviction and notifications follow commit", (t) => {
+test("Group/Kind quota spans versions and scopes; protected references survive eviction and notifications follow commit", async (t) => {
   const { db, record } = setup(t);
   const evicted: string[] = [];
   db.subscribe((_scope, r) => evicted.push(r.metadata.uid));
@@ -30,6 +31,8 @@ test("Group/Kind quota spans versions and scopes; protected references survive e
   const second = record("b"); second.object = { ...second.object, apiVersion: "example.dev/v2" };
   db.write("b", "two", second);
   db.write("c", "one", record("c", false, ["a"]));
+  assert.throws(() => db.write("d", "two", record("d", false)), ResourceCapacityError);
+  await collectResources(db);
   db.write("d", "two", record("d", false));
   assert.ok(db.has("a"), "An exact UID reference protects an otherwise released resource");
   assert.ok(!db.has("b")); assert.deepEqual(evicted, ["b"]);
@@ -38,12 +41,14 @@ test("Group/Kind quota spans versions and scopes; protected references survive e
   assert.ok(db.has("a") && db.has("c") && db.has("d"));
 });
 
-test("LRU is explicit reads; listing does not refresh access, and unknown resource kinds are protected", (t) => {
+test("LRU is explicit reads; listing does not refresh access, and unknown resource kinds are protected", async (t) => {
   const { root, db, record } = setup(t);
   db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 2, order: "lru" }, lowWatermark: 0.95 }));
   db.write("a", "one", record("a")); db.write("b", "one", record("b"));
   db.db.prepare("UPDATE resources SET accessed=0 WHERE key='b'").run();
   [...db.keys("one")]; db.read("a", true);
+  assert.throws(() => db.write("c", "one", record("c", false)), ResourceCapacityError);
+  await collectResources(db);
   db.write("c", "one", record("c", false));
   assert.ok(db.has("a")); assert.ok(!db.has("b"));
   const unknown = record("x"); unknown.object = { ...unknown.object, kind: "Unknown" };
@@ -57,7 +62,7 @@ test("LRU is explicit reads; listing does not refresh access, and unknown resour
   } finally { reopened.db.close(); }
 });
 
-test("Failed writes roll back receipts and collection; immutable history can shrink while over quota", (t) => {
+test("Failed writes roll back receipts and collection; immutable history can shrink while over quota", async (t) => {
   const { db, record } = setup(t);
   db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 1 } }));
   db.write("a", "one", record("a", false));
@@ -70,7 +75,7 @@ test("Failed writes roll back receipts and collection; immutable history can shr
   assert.doesNotThrow(() => db.write("a", "one", original));
 });
 
-test("Plugin resources reopen from SQLite with the same version and bounded individual payloads", (t) => {
+test("Plugin resources reopen from SQLite with the same version and bounded individual payloads", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "resource-sqlite-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const options = { home: root, pluginInstanceId: "plugin" };
@@ -94,6 +99,8 @@ test("Collected Input redelivery is acknowledged without recreating the resource
   const spec = { origin: "source" as const, originId: "fixture", text: "fact" };
   const first = store.submit("owner", "one", spec);
   store.update(first, { route: { completedAt: new Date().toISOString(), result: { topics: [], reason: "ignored" } } });
+  assert.throws(() => store.submit("owner", "two", spec), ResourceCapacityError);
+  await collectResources(store.storage);
   store.submit("owner", "two", spec);
   assert.equal(store.get("one"), undefined);
   let notifications = 0; store.subscribe(() => notifications++);
@@ -111,19 +118,21 @@ test("Kind overrides inherit every unspecified default limit and order", () => {
   assert.deepEqual({ ...config.defaults, ...config.kinds["example.dev/Record"] }, { maxCount: 5, maxBytes: 4000, maxResourceBytes: 1048576, order: "lru" });
 });
 
-test("capacity predicates recheck transaction-local dependencies and roll back unsafe collection", t => {
+test("capacity predicates recheck transaction-local dependencies and roll back unsafe collection", async t => {
   const { db, record, type } = setup(t);
   db.register("guarded", [{ ...definition(type), retention: {
-    releasedAt: r => r.metadata.creationTimestamp, references: () => [],
+    releasedAt: r => r.status.released ? r.metadata.creationTimestamp : undefined, references: () => [],
     canEvict: (r, context) => !context.list(type).some(other => (other.spec as { refs: string[] }).refs.includes(r.metadata.uid)),
   } }]);
-  db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 2 }, lowWatermark: 0.95 }));
   db.write("old", "guarded", record("old"));
   db.write("newer", "guarded", record("newer"));
   db.transaction(() => {
     db.write("dependent", "guarded", record("dependent", false, ["old"]));
   });
-  assert.ok(db.has("old"), "the dependency created by this transaction protects the oldest candidate");
+  db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 3 }, lowWatermark: 0.95 }));
+  await collectResources(db);
+  db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 2 } }));
+  assert.ok(db.has("old"), "the committed dependency protects the oldest candidate");
   assert.equal(db.has("newer"), false);
   assert.ok(db.has("dependent"));
   assert.throws(() => db.write("overflow", "guarded", record("overflow", false, ["dependent"])), ResourceCapacityError);

@@ -1,6 +1,7 @@
 import { RunnerRecovery } from "./runner/recovery.ts";
 import { DEFAULT_MAX_TOTAL_CONCURRENCY } from "../../reconcile/config.ts";
 import { createPluginVerbs } from "../../plugin/context.ts";
+import { ResourceGarbageCollector } from "../resource/gc.ts";
 import { ResourceStorage } from "../resource/storage.ts";
 import { ResourcePrinters } from "./resource/printer.ts";
 import { RunnerController } from "./runner/controller.ts";
@@ -200,6 +201,7 @@ export class Manager {
       if (subscribers.size) this.subscriptions.set(key, subscribers); else this.subscriptions.delete(key);
     }
   }
+  private readonly gc: ResourceGarbageCollector;
   private readonly unsubscribeResourceGc: () => void;
   private readonly resourceChanged?: (change: ResourceClientChange) => void;
   /** Plugin definitions remain registered independently of live bindings. */
@@ -308,6 +310,17 @@ export class Manager {
       now: this.now,
       onDue: (scope, sources) =>
         this.enqueueCronSourceResources(scope, sources),
+    });
+    this.gc = new ResourceGarbageCollector(ResourceStorage.open(this.resourceHome), {
+      log: this.log,
+      lifecycle: (scope, resource) => {
+        const controllers = [...this.controllers.values()].filter(controller => controller.scope.pluginInstanceId === scope
+          && controller.scope.resourceApiVersion === resource.apiVersion && controller.scope.resourceKind === resource.kind
+          && namespaceContains(controller.scope.namespace, resource.metadata.namespace));
+        if (controllers.length) return controllers.some(controller => this.suspendedControllers.has(reconcileScopeId(controller.scope))) ? "unavailable" : "controller";
+        // Missing bindings during activation/recovery are not evidence that a resource has no Controller.
+        return this.bindings.has(scope) && !this.activations.has(scope) ? "unmanaged" : "unavailable";
+      },
     });
     this.resourceChanged = options.onResourceChange;
     this.unsubscribeWrites = ResourceStorage.open(this.resourceHome).subscribeWrites((scope, resource, oldResource) => {
@@ -855,6 +868,7 @@ export class Manager {
     }
     if (this.closed) throw new Error("plugin Manager is closed");
     this.started = true;
+    this.gc.start();
     await Promise.all(
       controllers.map(async (controller) => {
         if (
@@ -932,6 +946,7 @@ export class Manager {
 
 
   private async closeManager(): Promise<void> {
+    await this.gc.close();
     await this.recovery.close();
     await Promise.allSettled(this.activations.values());
     this.verb.failAll("Plugin Manager was closed");

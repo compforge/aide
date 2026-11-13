@@ -1,3 +1,4 @@
+import { collectResources } from "./fixtures/resource-gc.ts";
 import { fixtureAddress } from "./address-fixture.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
 import assert from "node:assert/strict";
@@ -354,6 +355,7 @@ test("Routine event Input deduplication survives Input collection and restart", 
   const fact = store.list().find(input => input.spec.originId === "personal.events")!;
   assert.ok(Object.values(fact.status.handle!).every(receipt => receipt.completedAt));
   store.storage.configure({ kinds: { "aide.dev/Input": { maxCount: 1 } } } as Parameters<typeof store.storage.configure>[0]);
+  await collectResources(store.storage);
   store.submit("unrouted", "eviction-pressure", { origin: "source", originId: "test", text: "new fact" }, {
     route: { completedAt: new Date().toISOString(), result: { topics: [], reason: "test" } },
   });

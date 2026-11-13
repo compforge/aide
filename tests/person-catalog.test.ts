@@ -1,3 +1,4 @@
+import { collectResources } from "./fixtures/resource-gc.ts";
 import { webAddress } from "../src/channel/address.ts";
 import { ADDRESS_TYPE } from "../plugins/personal/address/model.ts";
 import { seedNotes } from "./fixtures/notes.ts";
@@ -73,6 +74,7 @@ test("summarize_person guards shared summary versions while Input retention rema
   inputs.storage.configure({ kinds: { "aide.dev/Input": { maxCount: 1 } } } as Parameters<typeof inputs.storage.configure>[0]);
   const input = inputs.submit("test", "old", { origin: "source", originId: "test", text: "evidence", sender: personRef(current) });
   inputs.update(input, { route: { completedAt: new Date().toISOString(), result: { topics: [], reason: "test" } } });
+  await collectResources(inputs.storage);
   inputs.submit("test", "new", { origin: "source", originId: "test", text: "no sender" });
   assert.equal(inputs.get("old"), undefined);
   assert.equal(inputs.get("new")!.spec.sender, undefined);
