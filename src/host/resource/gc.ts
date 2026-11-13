@@ -11,7 +11,7 @@ interface Usage { count: number; bytes: number; pendingCount: number; pendingByt
 /** @spec Capacity GC requests deletion only for fully released, unreferenced ownership trees.
  * Admission and GC commit independently; deleting resources count until actually finalized.
  * @why Timers alone do not isolate synchronous SQLite work: candidate pages and tree transactions are bounded.
- * @link docs/plugin/resource.md#resource-容量与释放
+ * @link docs/plugin/resource.md#gc
  * @case tests/resource-gc.test.ts
  */
 export class ResourceGarbageCollector {
