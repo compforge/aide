@@ -1,3 +1,5 @@
+import { InputPolicySchema } from "./config.ts";
+import { inputExpiry, inputHardExpiry, inputPressure } from "./retention.ts";
 import { InputClassificationFields } from "../disclosure.ts";
 import { channelPromotion } from "./identity.ts";
 import { obsoleteReplies, replyIdentity } from "../address/reply.ts";
@@ -27,7 +29,7 @@ export const InputSpecSchema = z.object({ ...InputClassificationFields, inputKey
   observation: z.record(z.string(), z.unknown()).optional() }).strict();
 
 const ref = z.object({ apiVersion: z.string(), kind: z.string(), namespace: z.string().transform(parseResourceNamespace), name: z.string(), uid: z.string() }).strict();
-const attempt = z.object({ agent: AgentStatusSchema.optional(), completedBy: AgentCallSchema.optional(), executionId: z.string().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(), lastError: z.string().optional() }).strict();
+const attempt = z.object({ agent: AgentStatusSchema.optional(), completedBy: AgentCallSchema.optional(), executionId: z.string().optional(), deliveryId: z.string().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(), lastError: z.string().optional(), errorAt: z.iso.datetime().optional(), retryable: z.boolean().optional() }).strict();
 const assessment = attempt.extend({ result: z.object({ summary: z.string(), disposition: z.enum(["completed", "cancelled", "rejected"]).optional() }).strict().optional() });
 /**
  * @spec Internal request deduplication covers queued and running assessments, excluding recorded failures.
@@ -38,7 +40,7 @@ const assessment = attempt.extend({ result: z.object({ summary: z.string(), disp
 export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
   type: INPUT_TYPE,
   schema: { spec: InputSpecSchema, status: z.object({
-    conditions: ConditionsSchema, topic: ResourceRefSchema.optional(), organization: OrganizationSchema.optional(),
+    retention: InputPolicySchema.shape.retention.optional(), conditions: ConditionsSchema, topic: ResourceRefSchema.optional(), organization: OrganizationSchema.optional(),
     route: attempt.extend({ nextAttemptAt: z.string().optional(), attempts: z.number().int().nonnegative().optional(),
       result: z.object({ topics: z.array(ref), reason: z.string() }).strict().optional() }).optional(),
     assess: assessment.extend({ topic: ResourceRefSchema.optional() }).optional(),
@@ -80,16 +82,20 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     assessReadyAttention: r => !r.metadata.deletionTimestamp && r.status.assess?.topic
       && !assessmentFinished(r.status.assess) && !r.status.assess.executionId
       ? [JSON.stringify([r.status.assess.topic.uid, inputQueue(r.spec)])] : [],
-    routePending: r => r.status.route?.completedAt ? [] : ["pending"],
-    assessPending: r => r.status.assess && !assessmentFinished(r.status.assess) ? (r.status.topic ? [r.status.topic.uid] : []) : [],
-    assessExecution: r => r.status.assess?.executionId && !assessmentFinished(r.status.assess) ? [r.status.assess.executionId] : [],
+    routePending: r => r.metadata.deletionTimestamp || r.status.route?.completedAt ? [] : ["pending"],
+    assessPending: r => !r.metadata.deletionTimestamp && r.status.assess && !assessmentFinished(r.status.assess) ? (r.status.topic ? [r.status.topic.uid] : []) : [],
+    assessDeferredExecution: r => !r.metadata.deletionTimestamp && r.spec.attention === InputAttention.Deferred
+      && r.status.assess?.executionId && !assessmentFinished(r.status.assess) ? [r.status.assess.executionId] : [],
+    assessExecution: r => !r.metadata.deletionTimestamp && r.status.assess?.executionId && !assessmentFinished(r.status.assess) ? [r.status.assess.executionId] : [],
     handle: r => Object.keys(r.status.handle ?? {}),
-    handlePending: r => Object.entries(r.status.handle ?? {}).filter(([, s]) => !s.completedAt).map(([uid]) => uid),
+    handlePending: r => r.metadata.deletionTimestamp ? [] : Object.entries(r.status.handle ?? {}).filter(([, s]) => !s.completedAt).map(([uid]) => uid),
   },
-  orderedIndexes: { topicActivity: r => !r.metadata.deletionTimestamp && r.status.topic
+  orderedIndexes: {
+    assessReadyArrival: r => !r.metadata.deletionTimestamp && r.status.assess?.topic
+      && !assessmentFinished(r.status.assess) && !r.status.assess.executionId
+      ? [{ value: JSON.stringify([r.status.assess.topic.uid, inputQueue(r.spec)]), order: r.metadata.creationTimestamp }] : [],
+    topicActivity: r => !r.metadata.deletionTimestamp && r.status.topic
     ? [{ value: r.status.topic.uid, order: r.metadata.creationTimestamp }] : [] },
-  retention: { releasedAt: r => {
-    const completed = [r.status.route?.completedAt, ...(r.status.assess ? [r.status.assess.completedAt] : []), ...Object.values(r.status.handle ?? {}).map(s => s.completedAt)];
-    return completed.every(Boolean) ? (completed as string[]).sort().at(-1) : undefined;
-  }, references: () => [] },
+  retention: { collectOnRelease: true, expiresAt: inputHardExpiry, pressure: inputPressure,
+    releasedAt: r => r.status.retention ? inputExpiry(r.status, r.status.retention) : undefined, references: () => [] },
 };

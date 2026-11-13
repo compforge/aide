@@ -113,3 +113,14 @@ export function validateReviewRequest(input: { spec: InputSpec; status: InputSta
   if (input.spec.origin === "aide:review" && (topic.spec.parentRef || topic.status.execution || (!topicReview(topic.spec.review).enabled && !notes.length && input.spec.observation?.trigger !== "understanding")))
     throw new Error("Review requires an idle enabled root Topic");
 }
+
+/** Quota exhaustion postpones maintenance, not already persisted business input admission. */
+export async function tryCreateReviewInput(...args: Parameters<typeof createReviewInput>) {
+  try { return await createReviewInput(...args); }
+  catch (error) {
+    if (!String(error).includes("Resource capacity exhausted")) throw error;
+    const [context, topic, , , origin = "aide:review"] = args;
+    context.logger.warn("Topic maintenance deferred at resource capacity", { attributes: { topicUid: topic.metadata.uid, origin, error: String(error) } });
+    return;
+  }
+}

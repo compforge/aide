@@ -273,6 +273,9 @@ Personal 只绑定会话与业务工具，不参与模型配置来源或覆盖�
 plugins:
   personal:
     topic:
+      deferred:
+        count: 10
+        maxWaitSeconds: 600
       trigger:
         intervalSeconds: 60   # 固定唤醒 Reconcile；业务事件也可以唤醒
       capacityCooldownSeconds: 60
@@ -289,7 +292,7 @@ plugins:
 
 定时唤醒不会直接调用模型。Reconcile 在回顾到期后检查 deferred 输入、待吸收的子主题认识及材料/子节点整理压力；需要判断时生成已绑定 root 的维护 Input，无事可做时只记录检查时间并增加退避次数。默认配置的空检查或无进展回顾依次等待 15、30、60、120 分钟，之后保持 120 分钟；期间的 Reconcile 唤醒间隔仍为 60 秒。
 
-容量压力优先触发一轮有界维护，独立于静默回顾及其退避；维护之后让等待的业务获得一次处理机会。正常业务 Input 直接复用，Immediate / Normal 与结构、子 summary 变化不等待回顾退避。Deferred 保持延后处理，新业务输入重置退避且连续到达不推迟已安排的机会。内置回执不清零退避；成功回顾过的材料未变化时跳过模型，完成业务处理或有实质进展才重置次数。执行完成或中断恢复以完成时间重新计时，不自动重放已有未知效果。
+业务 Input 优先于维护创建和执行；维护创建遇到资源容量不足时推迟，已持久化业务仍可处理。正常业务 Input 直接复用，Immediate / Normal 与结构、子 summary 变化不等待回顾退避。Deferred 达到 count 条或最老一条等待 maxWaitSeconds 后按 Normal 处理，独立于 review 开关和退避。新业务输入重置退避且连续到达不推迟已安排的机会。内置回执不清零退避；成功回顾过的材料未变化时跳过模型，完成业务处理或有实质进展才重置次数。执行完成或中断恢复以完成时间重新计时，不自动重放已有未知效果。
 
 修改基础等待、倍数或上限并重启后，按持久化时间事实与当前配置重新计算资格；最迟在下一次固定检查时应用，不从重启时重新等待，也不补跑历史周期。每个 Topic 通过 `spec.review.enabled` 开关后台回顾，关闭不停止定时协调、输入接纳或既有职责。完整契约见 [Topic 定时回顾](personal/topic.md#topic-定时回顾)。
 
@@ -331,7 +334,8 @@ resources:
     aide.dev/Input:
       maxCount: 10000
       order: created
-  lowWatermark: 0.8
+  lowWatermark: 0.9
+  highWatermark: 0.95
   gc:
     intervalMs: 60000
     batchSize: 16
@@ -340,7 +344,9 @@ resources:
   maxReceipts: 100000
 ```
 
-`kinds` 的字段覆盖 `defaults`。可选排序为 `released`、`created`、`lru`；LRU 由显式读取更新，列表扫描不刷新。排序只用于资源所有者允许释放且无人引用的记录；全局字节压力按释放时间回收。超限写入立即回滚并返回容量错误，同时唤醒独立 GC。GC 在启动、周期检查和压力通知时运行，以 lowWatermark 为回收目标；只有实际移除才释放准入容量。缩小已有记录及标准删除标记仍可提交。`gc.intervalMs` 是周期检查间隔（1..2147483647 ms，默认 60000 ms）；上限防止运行时将溢出的延迟转成 1 ms，`batchSize` 是候选页大小（1..256），`maxTreeSize` 是一次事务允许检查和标记的最大树节点数（1..4096）；过大的树保留并告警。生命周期与回收契约见 [Resource GC](plugin/resource.md#gc)。
+`kinds` 的字段覆盖 `defaults`。可选排序为 `released`、`created`、`lru`；LRU 由显式读取更新，列表扫描不刷新。排序只用于资源所有者允许释放且无人引用的记录；全局字节压力按释放时间回收。超限写入立即回滚并返回容量错误，同时唤醒独立 GC。GC 在启动、周期检查和达到低水位时运行。lowWatermark/highWatermark 默认 0.9/0.95，要求 0.1 ≤ low < high < 1：先处理到期对象；仍达到低水位才清理完成档，仍达到高水位才清理错误档，仍满额才清理创建时间档。各类型显式声明是否参与压力档，未声明类型继续遵守 release/reference 保护；只有实际移除才释放准入容量。缩小已有记录及标准删除标记仍可提交。`gc.intervalMs` 是周期检查间隔（1..2147483647 ms，默认 60000 ms）；上限防止运行时将溢出的延迟转成 1 ms，`batchSize` 是候选页大小（1..256），`maxTreeSize` 是一次事务允许检查和标记的最大树节点数（1..4096）；过大的树保留并告警。生命周期与回收契约见 [Resource GC](plugin/resource.md#gc)。
+
+Input 的时间策略位于 `plugins.personal.input.retention`：`successSeconds` 默认 86400，`errorSeconds` 默认 604800。创建后的总存活上限直接复用 errorSeconds；成功、失败和创建期限取最早到期时间，详见 [Input 保留](personal/input.md#保留与回收)。
 
 去重回执独立限量并在窗口到期后清理。窗口内的重复 Input 只确认已接收，不重新创建或执行；窗口外不承诺永久去重。源水位与待提交引用共同保护 Source 的恢复过程。
 

@@ -131,7 +131,7 @@ test("one Chief tool writes subject and people; Person and Topic queries find th
 });
 test("Notes outlive subjects and capacity evicts old Notes without recreating evicted updates", async t => {
   const f = await setup(t);
-  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Note": { maxCount: 2 } }, lowWatermark: 0.95 }));
+  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Note": { maxCount: 2 } }, lowWatermark: 0.95, highWatermark: 0.99 }));
   const first = await f.upsert({ text: "Old" }, "first");
   const old = (await f.resources.get({ ...NOTE_TYPE, namespace: "v1", name: first.noteId }))!;
   await f.resources.patchStatus(old, { updatedAt: "2000-01-01T00:00:00.000Z" });

@@ -64,7 +64,7 @@ async function running(f: ReturnType<typeof fixture>, c: TopicResource) {
 /** @case Native steer and followUp must use the Chief execution ID, not the intake Reconcile execution ID. */
 test("Steer and followUp racing within one root dispatch once and retain uncertain admission across recovery", async t => {
   const f = fixture(t), a = await f.aide.topics.ensure("a"), b = await f.aide.topics.ensure("b");
-  await running(f, a); await f.input("shared", [a]);
+  await running(f, a); await f.input("shared", [a], InputAttention.Immediate);
   let count = 0;
   mockRunning(f, async () => { count++; return { state: "success", value: { outcome: "accepted" } }; });
   const results = await Promise.all([f.aide.personal.submitTopic(intake(a), { inputId: "shared", operation: "steer" }),
@@ -271,4 +271,80 @@ test("Immediate business can interrupt internal maintenance and unfinished maint
   assert.equal(pending.status.assess?.executionId, undefined);
   assert.deepEqual((await nextInputs(f.resources, f.current(root), 8)).map(i => i.metadata.name), [maintenance.metadata.name]);
   assert.ok(f.aide.topics.inputStore.get("urgent")!.status.assess?.completedAt);
+});
+
+/** @case Deferred batches drain at a full Input quota without allocating a maintenance or synthetic Input. */
+test("Ten deferred Inputs activate one bounded business batch before full-quota maintenance", async t => {
+  const f = fixture(t), root = await f.aide.topics.ensure("a");
+  for (let i = 0; i < 10; i++) await f.input(`batch-${i}`, [root], InputAttention.Deferred);
+  f.aide.topics.inputStore.storage.configure({ kinds: { "aide.dev/Input": { maxCount: 10 } } });
+  await reconcileChief(f.context, f.execution("batch"), f.current(root), (await import("../plugins/personal/topic/config.ts")).topicPolicy({ maxUnfiledInput: 1 }));
+  assert.equal(f.prompts.length, 1); assert.equal(f.aide.topics.inputStore.list().length, 10);
+  assert.doesNotMatch(f.prompts[0]!.prompt, /aide:triage/);
+  for (let i = 0; i < 10; i++) {
+    const receipt = f.aide.topics.inputStore.get(`batch-${i}`)!.status.assess!;
+    assert.equal(receipt.executionId, "batch"); assert.ok(receipt.errorAt, "missing confirmation records a dated failure");
+  }
+});
+
+test("Deferred deadline uses oldest creation, independently of review, and queries are bounded", async t => {
+  const { readyBusinessInputs } = await import("../plugins/personal/input/scheduling.ts");
+  const { topicPolicy } = await import("../plugins/personal/topic/config.ts");
+  const f = fixture(t), root = await f.aide.topics.ensure("a");
+  const first = await f.input("oldest", [root], InputAttention.Deferred);
+  await f.input("later", [root], InputAttention.Deferred);
+  const now = Date.parse(first.metadata.creationTimestamp);
+  const resources = { ...f.resources, list: async () => { throw new Error("Selection must not list a whole tree"); },
+    page: <S, T>(type: import("@compforge/aide-plugin").ResourceType, options: import("@compforge/aide-plugin").ResourcePageOptions) => { assert.ok(options.limit <= 10); return f.resources.page<S, T>(type, options); } };
+  assert.equal((await readyBusinessInputs(resources, f.current(root), topicPolicy(), now + 599999)).inputs.length, 0);
+  const ready = await readyBusinessInputs(resources, f.current(root), topicPolicy(), now + 600000);
+  assert.equal(ready.reason, "age"); assert.equal(ready.inputs[0]!.metadata.name, "oldest");
+});
+
+for (const outcome of ["accepted", "rejected", "uncertain"] as const) test(`Deferred followUp batch ${outcome} keeps individual atomic receipts`, async t => {
+  const { submitPending } = await import("../plugins/personal/loop.ts");
+  const f = fixture(t), root = await f.aide.topics.ensure("a");
+  await running(f, root);
+  for (let i = 0; i < 10; i++) await f.input(`batch-${i}`, [root], InputAttention.Deferred);
+  const deliveries: any[] = [];
+  mockRunning(f, async args => {
+    deliveries.push(args);
+    assert.ok(f.aide.topics.inputStore.list().every(i => i.status.assess?.executionId === "a"));
+    if (outcome === "uncertain") throw new Error("delivery result unknown");
+    return { state: "success", value: { outcome, reason: outcome === "rejected" ? "unsupported" : undefined } };
+  });
+  const execution = { verbs: { action: async (_: string, args: unknown) => ({ state: "success", value: await f.aide.personal.submitTopic(intake(root), args) }) } } as unknown as ReconcileContext;
+  const submitted = submitPending(f.context, execution, f.current(root));
+  if (outcome === "uncertain") await assert.rejects(submitted, /result unknown/); else await submitted;
+  assert.equal(deliveries.length, 1); assert.equal(deliveries[0].operation, "followUp");
+  const inputs = f.aide.topics.inputStore.list();
+  for (const input of inputs) {
+    assert.equal(input.spec.attention, InputAttention.Deferred);
+    assert.equal(input.status.assess!.executionId, outcome === "rejected" ? undefined : "a");
+    if (outcome === "uncertain") assert.ok(input.status.assess!.errorAt);
+    if (outcome === "accepted") assert.equal(input.status.assess!.deliveryId, deliveries[0].messageId);
+  }
+});
+
+
+test("A running Chief admits one outstanding deferred batch and resumes after its receipts", async t => {
+  const { submitPending } = await import("../plugins/personal/loop.ts");
+  const f = fixture(t), root = await f.aide.topics.ensure("a"); await running(f, root);
+  for (let i = 0; i < 20; i++) await f.input(`bounded-${String(i).padStart(2, "0")}`, [root], InputAttention.Deferred);
+  const deliveries: any[] = [];
+  mockRunning(f, async args => { deliveries.push(args); return { state: "success", value: { outcome: "accepted" } }; });
+  const execution = { verbs: { action: async (_: string, args: unknown) => ({ state: "success", value: await f.aide.personal.submitTopic(intake(root), args) }) } } as unknown as ReconcileContext;
+  await submitPending(f.context, execution, f.current(root));
+  await submitPending(f.context, execution, f.current(root));
+  assert.equal(deliveries.length, 1);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.executionId).length, 10);
+  await f.input("urgent-during-batch", [root], InputAttention.Immediate);
+  await submitPending(f.context, execution, f.current(root));
+  assert.equal(deliveries.length, 2); assert.equal(deliveries[1].operation, "steer");
+  for (let i = 0; i < 10; i++) await assessInput(f.resources, f.current(root), "a", {
+    inputId: `bounded-${String(i).padStart(2, "0")}`, summary: "Handled",
+  });
+  await submitPending(f.context, execution, f.current(root));
+  assert.equal(deliveries.length, 3); assert.equal(deliveries[2].operation, "followUp");
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.executionId && !i.status.assess.completedAt).length, 11);
 });

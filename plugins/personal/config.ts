@@ -1,3 +1,4 @@
+import { InputPolicySchema } from "./input/config.ts";
 import { OutputPolicySchema } from "./output/config.ts";
 import { RepositoryWatchSchema } from "./source/repository/config.ts";
 import { PullRequestWatchSchema } from "./source/pull-request/config.ts";
@@ -18,6 +19,7 @@ import { WatchSchema } from "./source/requirement/config.ts";
  * @case tests/personal-config.test.ts
  */
 export const PersonalConfigSchema = z.object({
+  input: InputPolicySchema.optional(),
   output: OutputPolicySchema.optional(),
   topic: TopicPolicySchema.optional(),
   task: TaskPolicySchema.optional(),

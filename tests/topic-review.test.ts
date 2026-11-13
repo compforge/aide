@@ -387,14 +387,15 @@ test("Business Inputs precede capacity maintenance even when idle review is disa
   await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Immediate);
   await f.run({ maxUnfiledInput: 1 });
-  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
-  assert.equal(request.status.assess?.executionId, undefined);
+  assert.equal(f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage"), undefined,
+    "Business handling must not allocate maintenance first");
   assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
   assert.ok(f.aide.topics.inputStore.get("two")!.status.assess?.completedAt);
   assert.ok(f.calls[0]!.prompt.indexOf("two") < f.calls[0]!.prompt.indexOf("one"));
   await f.run();
   assert.equal(f.calls.length, 2);
-  assert.ok(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.completedAt);
+  const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
+  assert.ok(request.status.assess?.completedAt);
 });
 
 test("Immediate intake can steer a running organization pass", async t => {
@@ -409,7 +410,7 @@ test("Immediate intake can steer a running organization pass", async t => {
     } } } as unknown as ReconcileContext, f.read());
   };
   await f.run({ maxChildren: 1 });
-  assert.deepEqual(requests, [{ name: "submit_topic", args: { inputId: "arrival", operation: "steer" } }]);
+  assert.deepEqual(requests, [{ name: "submit_topic", args: { inputId: "arrival", inputIds: ["arrival"], operation: "steer" } }]);
   f.hooks.beforeAssess = undefined;
   await f.run();
   assert.ok(f.aide.topics.inputStore.get("arrival")!.status.assess?.completedAt);
@@ -460,7 +461,7 @@ test("Chief activation keeps its character and admission budgets with large pend
   }
   await f.run({ contextChars: 4096 });
   assert.ok(f.calls[0]!.prompt.length <= 4096);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.completedAt).length, 8);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.status.assess?.completedAt).length, 10);
 });
 
 

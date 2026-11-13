@@ -38,7 +38,7 @@ test("Input attention has three string values and source-specific defaults", () 
   }
 });
 
-/** @case Deferred attachment to roots or children never starts or continues Chief; another input may include the backlog. */
+/** @case Below-threshold Deferred attachment to roots or children waits; another input may include the backlog. */
 for (const target of ["root", "child"]) test(`Deferred ${target} inputs wait and can join a normally activated Chief`, async t => {
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
   const { aide, client, submit, prompts } = setup(t, { chief: async () => { await gate; return "Handled"; } });
@@ -75,7 +75,7 @@ test("Deferred backlog survives restart with review disabled and timer reviews r
   const root = await aide.topics.ensure("root");
   await aide.setTopicReview("root", false);
   await aide.start();
-  for (let i = 0; i < 10; i++) await submit(`deferred-${i}`);
+  for (let i = 0; i < 9; i++) await submit(`deferred-${i}`);
   await aide.settled(); assert.equal(prompts.length, 0);
   await aide.close();
   const restarted = new Aide(home, options, pino({ level: "silent" }));
@@ -83,7 +83,7 @@ test("Deferred backlog survives restart with review disabled and timer reviews r
     await restarted.start(); await restarted.settled();
     assert.equal(prompts.length, 0);
     const resources = restarted.runtime.plugins.resourceClient("personal");
-    for (const remaining of [10, 10]) {
+    for (const remaining of [9, 9]) {
       const c = restarted.topics.resource("root")!;
       await resources.replace(c, { ...c.spec, review: { enabled: true } },
         { ...c.status, reviewCheckedAt: null, idleSince: new Date(Date.now() - 901_000).toISOString() });
@@ -114,4 +114,25 @@ test("Child understanding activates a review Input while Deferred business stays
   assert.match(prompts[0]!, /aide:review/);
   assert.doesNotMatch(prompts[0]!, /fact deferred/);
   assert.equal(aide.topics.inputStore.get("deferred")!.status.assess!.completedAt, undefined);
+});
+
+
+test("Deferred timer drains across restart with review disabled, using the original creation time", async t => {
+  const { aide, submit, prompts, home, options } = setup(t);
+  options.config.plugins.personal = { ...options.config.plugins.personal, topic: { trigger: { intervalSeconds: 1 }, deferred: { count: 10, maxWaitSeconds: 1 } } };
+  await aide.topics.ensure("root"); await aide.setTopicReview("root", false);
+  await submit("timer-backlog");
+  const created = aide.topics.inputStore.get("timer-backlog")!.metadata.creationTimestamp;
+  await aide.close();
+  const restarted = new Aide(home, options, pino({ level: "silent" }));
+  try {
+    await restarted.start();
+    await until(() => !!restarted.topics.inputStore.get("timer-backlog")?.status.assess?.completedAt);
+    const input = restarted.topics.inputStore.get("timer-backlog")!;
+    assert.equal(input.metadata.creationTimestamp, created);
+    assert.equal(input.spec.attention, InputAttention.Deferred);
+    assert.ok(Date.now() >= Date.parse(created) + 1000);
+    assert.ok(prompts.some(p => p.includes("fact timer-backlog")));
+    assert.equal(restarted.topics.inputStore.list().filter(i => i.spec.origin.startsWith("aide:")).length, 0);
+  } finally { await restarted.close(); }
 });

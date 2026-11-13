@@ -1,3 +1,4 @@
+import { reconcileInputRetention } from "./retention.ts";
 import { retryOnConflict, type PluginContext, type ResourceValidationContext, type Watch } from "@compforge/aide-plugin";
 import { INPUT_TYPE } from "./model.ts";
 import { resourceRef, type Input } from "./state.ts";
@@ -53,7 +54,7 @@ export function registerInputs(context: PluginContext) {
     return (a.status.topic?.uid !== b.status.topic?.uid || (!!a.status.assess?.topic && !b.status.assess?.topic)) ? [{ name: b.metadata.name, namespace: b.metadata.namespace }] : [];
   } } };
   context.controllers.register({ resourceType: INPUT_TYPE, maxConcurrency: 4, watches: [changed],
-    reconcile: async (_execution, input: Input) => assignInput(context, input) });
+    reconcile: async (_execution, input: Input) => { await assignInput(context, input); await reconcileInputRetention(context, input); } });
 }
 
 /** Invalidation is durable; the Input Watch and Topic repair both rebuild missing assignments. */

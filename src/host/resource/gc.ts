@@ -6,9 +6,11 @@ import { ResourceStorage } from "./storage.ts";
 type ObjectResource = Resource<unknown, unknown>;
 type Lifecycle = "controller" | "unmanaged" | "unavailable";
 interface Candidate { key: string; position: string | number }
+type PressureTier = "low" | "high" | "full";
+const tiers: PressureTier[] = ["low", "high", "full"];
 interface Usage { count: number; bytes: number; pendingCount: number; pendingBytes: number }
 
-/** @spec Capacity GC requests deletion only for fully released, unreferenced ownership trees.
+/** @spec GC first expires due objects, then applies low/high/full pressure tiers explicitly declared by each owner.
  * Admission and GC commit independently; deleting resources count until actually finalized.
  * @why Timers alone do not isolate synchronous SQLite work: candidate pages and tree transactions are bounded.
  * @link docs/plugin/resource.md#gc
@@ -78,15 +80,15 @@ export class ResourceGarbageCollector {
     return { count: Number(row.n), bytes: Number(row.bytes), pendingCount: Number(pending.n), pendingBytes: Number(pending.bytes) };
   }
 
-  private satisfied(kind: string, projected: boolean): boolean {
+  private satisfied(kind: string, projected: boolean, tier: PressureTier = "low"): boolean {
     const config = this.storage.configuration, usage = this.usage(kind);
     const limits = { ...config.defaults, ...config.kinds[kind] };
     // Project pending deletion only to avoid scheduling excess eviction, never for write admission.
     const count = usage.count - (projected ? usage.pendingCount : 0);
     const bytes = usage.bytes - (projected ? usage.pendingBytes : 0);
-    // Round down: a full integer quota must gain at least one slot after a rejected create.
-    return (kind === "*" || count <= Math.floor(limits.maxCount * config.lowWatermark))
-      && bytes <= (kind === "*" ? config.maxBytes : limits.maxBytes) * config.lowWatermark;
+    const watermark = tier === "full" ? 1 : tier === "high" ? config.highWatermark : config.lowWatermark;
+    return (kind === "*" || count < limits.maxCount * watermark)
+      && bytes < (kind === "*" ? config.maxBytes : limits.maxBytes) * watermark;
   }
   private detectPressure(): void {
     const config = this.storage.configuration;
@@ -95,9 +97,9 @@ export class ResourceGarbageCollector {
     for (const row of rows) {
       const kind = String(row.kind), limits = { ...config.defaults, ...config.kinds[kind] };
       total += Number(row.bytes);
-      if (Number(row.n) >= limits.maxCount || Number(row.bytes) >= limits.maxBytes) this.storage.capacityPressure.add(kind);
+      if (Number(row.n) >= limits.maxCount * config.lowWatermark || Number(row.bytes) >= limits.maxBytes * config.lowWatermark) this.storage.capacityPressure.add(kind);
     }
-    if (total >= config.maxBytes) this.storage.capacityPressure.add("*");
+    if (total >= config.maxBytes * config.lowWatermark) this.storage.capacityPressure.add("*");
   }
   private candidates(kind: string, after?: Candidate): Candidate[] {
     const config = this.storage.configuration, limits = { ...config.defaults, ...config.kinds[kind] };
@@ -119,7 +121,15 @@ export class ResourceGarbageCollector {
       ]);
     return rows.map(row => ({ key: String(row.key), position: row.position as string | number }));
   }
-  private requestTree(key: string): number {
+  private pressureCandidates(kind: string, tier: PressureTier, after?: Candidate): Candidate[] {
+    const rows = this.storage.db.prepare(`SELECT source AS key,position FROM resource_pressure
+      WHERE tier=? ${kind === "*" ? "" : "AND kind=?"}
+      ${after ? "AND (position>? OR (position=? AND source>?))" : ""}
+      ORDER BY position,source LIMIT ?`).all(tier, ...(kind === "*" ? [] : [kind]),
+        ...(after ? [after.position, after.position, after.key] : []), this.storage.configuration.gc.batchSize);
+    return rows.map(row => ({ key: String(row.key), position: String(row.position) }));
+  }
+  private requestTree(key: string, reason: "released" | "expiry" | PressureTier = "released"): number {
     return this.storage.transaction(() => {
       if (!this.storage.ready) return 0;
       const rows = this.storage.db.prepare(`WITH RECURSIVE owned(key,uid,scope,data,released) AS (
@@ -135,16 +145,22 @@ export class ResourceGarbageCollector {
       const keys = new Set(rows.map(row => String(row.key)));
       const members: string[] = [];
       for (const row of rows) {
-        if (!row.released || String(row.released) > new Date().toISOString()) return 0;
         const scope = String(row.scope), resource = this.storage.decode(scope, String(row.data)).object;
         if (this.options.lifecycle(scope, resource) === "unavailable" || !this.storage.canCollect(scope, resource)) return 0;
-        for (const reference of this.storage.db.prepare("SELECT source FROM resource_refs WHERE target=?").iterate(String(row.uid))) {
+        const expired = this.storage.expired(scope, resource);
+        const pressure = this.storage.pressureTier(scope, resource);
+        const discard = tiers.includes(reason as PressureTier) && pressure && tiers.indexOf(pressure) <= tiers.indexOf(reason as PressureTier);
+        if (!discard && (!row.released || String(row.released) > new Date().toISOString())) return 0;
+        if (String(row.key) === key && reason === "expiry" && !expired && !this.storage.collectOnRelease(scope, resource)) return 0;
+        if (!expired && !discard) for (const reference of this.storage.db.prepare("SELECT source FROM resource_refs WHERE target=?").iterate(String(row.uid))) {
           if (!keys.has(String(reference.source))) return 0;
         }
         members.push(String(row.key));
       }
       // Eligibility and all deletion marks share a transaction: no partially admitted ownership tree.
       for (const member of members) this.storage.requestDeletion(member);
+      if (members.length) this.storage.afterCommit(() => this.options.log?.({ level: "info", source: "aide", component: "resource.gc",
+        message: "Resource collection requested", attributes: { key, reason, count: members.length } }));
       return members.length;
     });
   }
@@ -196,6 +212,26 @@ export class ResourceGarbageCollector {
     if (!this.storage.ready) return;
     const started = performance.now();
     let requested = await this.propagateDeletion(), checked = 0, removed = await this.finalizeUnmanaged();
+    // Expiry is opt-in per definition. Use the existing release index and the same transactional guards as capacity GC.
+    for (const { scope, kind } of this.storage.expiringCollections()) {
+      let after: Candidate | undefined;
+      const now = new Date().toISOString();
+      while (!this.closed) {
+        const rows = this.storage.db.prepare(`SELECT key,released AS position FROM resources
+          WHERE scope=? AND kind=? AND released<=?
+          ${after ? "AND (released>? OR (released=? AND key>?))" : ""}
+          ORDER BY released,key LIMIT ?`).all(scope, kind, now,
+            ...(after ? [after.position, after.position, after.key] : []), this.storage.configuration.gc.batchSize);
+        if (!rows.length) break;
+        for (const row of rows) {
+          if (this.closed) break;
+          after = { key: String(row.key), position: String(row.position) }; checked++;
+          try { requested += this.requestTree(after.key, "expiry"); }
+          catch (error) { this.reportError(error, after.key); }
+          await yieldToHost();
+        }
+      }
+    }
     this.detectPressure();
     for (const kind of this.storage.capacityPressure) {
       if (this.closed) break;
@@ -209,6 +245,21 @@ export class ResourceGarbageCollector {
           try { requested += this.requestTree(candidate.key); }
           catch (error) { this.reportError(error, candidate.key); }
           await yieldToHost();
+        }
+      }
+      // Each tier has its own watermark. Exhausting eligible completed records does not make failures eligible below the high watermark.
+      for (const tier of tiers) {
+        after = undefined;
+        while (!this.closed && !this.satisfied(kind, true, tier)) {
+          const candidates = this.pressureCandidates(kind, tier, after);
+          if (!candidates.length) break;
+          for (const candidate of candidates) {
+            if (this.closed || this.satisfied(kind, true, tier)) break;
+            after = candidate; checked++;
+            try { requested += this.requestTree(candidate.key, tier); }
+            catch (error) { this.reportError(error, candidate.key); }
+            await yieldToHost();
+          }
         }
       }
       if (this.satisfied(kind, false)) this.storage.capacityPressure.delete(kind);

@@ -1,4 +1,4 @@
-import { createReviewInput } from "./review.ts";
+import { tryCreateReviewInput } from "./review.ts";
 import { resourceRef, inputRef } from "../input/state.ts";
 import type { InputSpec, InputStatus } from "../input/model.ts";
 import type { ResourceReader, ResourceType } from "@compforge/aide-plugin";
@@ -70,6 +70,6 @@ export async function ensureCapacityInputs(context: import("@compforge/aide-plug
       const since = input?.status.assess?.completedAt ?? previous.checkedAt;
       if (Date.parse(since) + policy.capacityCooldownSeconds * 1000 > Date.now()) continue;
     }
-    await createReviewInput(context, current, new Date().toISOString(), agenda, origin);
+    await tryCreateReviewInput(context, current, new Date().toISOString(), agenda, origin);
   }
 }

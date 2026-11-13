@@ -53,13 +53,13 @@ Chief 可从这些证据维护 Note 的相关人物；Topic 的近期人物继�
 
 ## 处理组件的协作
 
-Input Reconcile 负责确定研判分派，不启动 Agent；Route、Topic、Task、Routine 的 Reconciler 观察并处理属于自己的阶段。Agent 通过各角色工具提交判断。
+Input Reconcile 负责确定研判分派和解析保留策略，不启动 Agent；Route、Topic、Task、Routine 的 Reconciler 观察并处理属于自己的阶段。Agent 通过各角色工具提交判断。
 
 ### 内容、身份与调度
 
-Immediate 在 Chief 空闲时启动处理，运行中通过 steer 加入；Normal 在空闲时启动处理，运行中通过 followUp 排队。Deferred 只路由和挂载，不因到达而启动所属 root Chief，也不进入其 steer / followUp 队列。Chief 因其它输入、定时回顾或知识整理运行时，可以顺带处理 Deferred；运行中主动发现的 Deferred 也可通过 assess_input 记录研判结果。
+Immediate 在 Chief 空闲时启动处理，运行中通过 steer 加入；Normal 在空闲时启动处理，运行中通过 followUp 排队。Deferred 先路由和挂载；同一 root 下尚未接纳的 Deferred 达到 10 条，或最老一条从 metadata.creationTimestamp 起等待满 600 秒，就按 Normal 调度。空闲时启动 Chief，运行中合并为一个 followUp；只有 Immediate 使用 steer。其它业务 Input 可以带入未达阈值的 Deferred，内部维护不消费业务回执。attention 原值不改，提升的是调度优先级，不是权限。
 
-未填写 attention 时，Channel 默认 Immediate，Source / Chief / 内置 Input 默认 Normal。attention 不限制 Route 分类，也不阻止 Chief 明确交给 Task / Routine 的办理。Deferred 未被研判时保持待处理；Topic review 可以关闭，不增加独立批处理计时器。
+未填写 attention 时，Channel 默认 Immediate，Source / Chief / 内置 Input 默认 Normal。attention 不限制 Route 分类，也不阻止 Chief 明确交给 Task / Routine 的办理。Deferred 的数量检查由输入事件触发，时间检查复用 Topic 定时 Reconcile，独立于 review 开关和退避；重启、后续到达和 Topic 迁移不重置创建时间。root 通过 assessReadyArrival 有序索引读取至多 10 条，不展开整棵树。每批最多 10 条且受上下文字符预算约束；同一执行最多保留一批尚未确认的 Deferred，确认后才追加下一批，避免积压淹没原生队列，Immediate/Normal 仍独立接纳。不创建合成 Input，原始 ID、时间、来源及独立回执保留，详情按需 read_input。
 
 Channel / Source 经绑定的入口提交 Input，稳定身份用于传输去重；接收回执只证明持久化成功。Source 先保存 Input，再推进观察水位。原始消息满足提交条件时，即使可选上下文读取失败仍可接收，具体证据与权限见对应接入文档。
 
@@ -75,7 +75,7 @@ Channel / Source 经绑定的入口提交 Input，稳定身份用于传输去重
 
 route_input 在同一事务写入 route 结果和一条空 assess；assess_input 在同一事务完成研判并建立必要的 handle。目标引用固定 UID，不能把旧实例的请求转给同名新资源。一个 Input 只有一个当前材料 Topic 和一个研判负责人，保存一份研判；多个 Work 仍按各自 UID 独立确认。
 
-未完成可能是尚未接纳、运行或路由退避。接纳记录不等于完成；原生调用结束也不代替工具回执。Route 分类失败可以按输入退避重试，Work 可能已经产生副作用，需核对后继续；Chief 执行失败记录在 Topic，未确认完成的 Input.assess 记录 lastError 后成为失败终态，保留接纳标记与异常；普通消息和 review 等内置 Input 遵循同一规则。失败记录退出 Chief 待办集合，不能由后续执行补成成功或重新接纳；如需再次交办，创建新的 Input。原 session 的恢复或重建不改变旧 Input 的失败结果。详细策略分别归 [Route](route.md)、[Topic](topic.md)、[Task](task.md) 与 [Routine](routine.md)。
+未完成可能是尚未接纳、运行或路由退避。接纳记录不等于完成；原生调用结束也不代替工具回执。Route 分类失败可以按输入退避重试，Work 可能已经产生副作用，需核对后继续；Chief 执行失败记录在 Topic，未确认完成的 Input.assess 记录 lastError/errorAt 后成为失败终态，保留接纳标记与异常；普通消息和 review 等内置 Input 遵循同一规则。失败记录退出 Chief 待办集合，不能由后续执行补成成功或重新接纳；如需再次交办，创建新的 Input。原 session 的恢复或重建不改变旧 Input 的失败结果。详细策略分别归 [Route](route.md)、[Topic](topic.md)、[Task](task.md) 与 [Routine](routine.md)。
 
 ### 研判与办理
 
@@ -160,3 +160,21 @@ Input v1alpha6 使用 AddressRef 保存来源位置，并将内容归属和处�
 同一条 Lark 消息通过 Channel、不同 app 的 MessageSource 或多个观察账号被发现时，只接纳一个 Input。两个入口共用 Lark 接入层的字符串 key 生成函数，消息身份使用平台 `chatId + messageId`，不包含入口、appId、观察人或正文；同样的正文在不同发送中仍是不同 Input。Channel 和 Source 共用此身份及持久去重回执，入站在资源事务中接纳，重启和容量回收后的重投沿用原回执窗口。
 
 Channel 是直接请求的接纳入口。若 Source 先发现消息，后到的 Channel 在原 Input 上接纳其直接请求事实，更新正文、人物、Immediate、来源 Address 与回复坐标；保持 Input UID、创建时间、既有 Topic 归属和所有处理回执。该单向接纳是 Input 内容不可变约束的唯一消息入口例外，之后的 Source 观察和 Channel 重投均不改写事实，不重新触发已经领取或完成的处理。接纳更正不自动补发已产生的 Output，也不重放外部动作。讨论批次包含新的消息事实，不能用锚点原消息把它当作重复请求吞掉。
+
+
+## 保留与回收
+
+创建时间使用 `metadata.creationTimestamp`。每个处理阶段保存 `completedAt`，错误同时保存 `lastError/errorAt`；仍需重试或核对的 Route/Work 记录 `retryable: true`。新的尝试清理旧错误状态，失败不伪装成成功。
+
+`plugins.personal.input.retention` 默认 `successSeconds: 86400`、`errorSeconds: 604800`，要求后者大于前者。Input Reconcile 将解析结果保存到 status.retention，Host 在每次回执事务内重新计算资格，避免异步更新到期时间导致提前删除。所有处理义务结束后，取各阶段「完成时间 + 成功保留期」或「失败时间 + 错误保留期」的最晚期限；另有硬性期限「创建时间 + errorSeconds」，两者取最早值。创建上限复用错误保留期，不另加配置；一直未处理、重试中、等待 Work 的记录也受硬上限约束。
+
+GC 不仅在满额时工作：到期 Input 在周期检查中进入标准删除流程。压力下按以下顺序选择，阶段之间重新检查水位：
+
+| 条件 | Input 候选顺序 |
+| --- | --- |
+| 到期 | 到期时间最早优先，不要求容量压力 |
+| 达到 lowWatermark，默认 90% | 所有处理义务已完成，按完成时间从早到晚 |
+| 仍达到 highWatermark，默认 95% | 有 errorAt 的记录，按错误时间从早到晚 |
+| 仍达到容量上限 100% | 其它 Input，按创建时间从早到晚 |
+
+后两档明确允许丢弃尚未完成的处理记录；这是保存容量优先的保留策略，不表示业务已经完成。硬到期或压力丢弃不被入向保留引用无限延长，Source 只能在独立的去重窗口内依赖接收回执，窗口外不承诺永久去重。进入 deleting 后立即从待办索引移除，不再自动接纳；原生执行不会因记录回收而重放。实际删除仍由资源生命周期完成，只有物理移除才释放准入额度。通用机制见 [Resource GC](../plugin/resource.md#gc)。

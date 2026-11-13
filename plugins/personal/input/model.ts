@@ -4,7 +4,7 @@ import type { ResourceRef } from "@compforge/aide-plugin";
 export interface InputReceipt { inputId: string; at: string }
 
 /**
- * @spec Deferred Inputs attach without activating Chief or entering its native input queue.
+ * @spec Deferred Inputs wait until their root backlog reaches the count or age threshold, then enter Chief as normal followUp work.
  * A Chief handling business Inputs may assess related Deferred material; internal maintenance does not consume business receipts.
  * @link docs/personal/input.md#内容身份与调度
  */
@@ -71,9 +71,14 @@ export interface Attempt {
   agent?: import("@compforge/aide-plugin").AgentStatus;
   completedBy?: import("../observation/reference.ts").AgentCall;
   executionId?: string;
+  /** Native delivery identity shared by the original Inputs in one followUp batch. */
+  deliveryId?: string;
   startedAt?: string;
   completedAt?: string;
   lastError?: string;
+  errorAt?: string;
+  /** Retry/recovery remains outstanding; an error alone does not release this obligation. */
+  retryable?: boolean;
 }
 export interface Assessment extends Attempt {
   result?: { summary: string; disposition?: "completed" | "cancelled" | "rejected" };
@@ -89,6 +94,8 @@ export interface Handling extends Assessment {
   request: import("../model.ts").WorkInputRequest;
 }
 export interface InputStatus {
+  /** Resolved policy; Host computes release eligibility atomically with each receipt write. */
+  retention?: { successSeconds: number; errorSeconds: number };
   conditions?: import("../conditions.ts").Condition[];
   organization?: import("../topic/ref.ts").Organization;
   /** Current ownership; routing receipts retain the initial decision. */
