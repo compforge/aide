@@ -34,7 +34,7 @@ Channel 与 Source 都从 Topic 关联的 Input 生成输入卡片，不创建�
 
 ## 实时进展与历史
 
-Input、Output 与执行进展分别投影。输入卡片显示来源图标、接收时间、原文和处理状态，完整原文和来源证据通过 Input 详情链接读取；静默研判仍保留输入和回执。正式回复来自 Output，模型增量只属于执行过程。
+Input、Output 与执行进展分别投影。消息列表显示 ID、来源、接收时间、处理状态和至多 120 字符的输入预览；点击 ID 加载完整正文和保留的执行过程，来源证据通过 Input 详情链接读取；静默研判仍保留输入和回执。正式回复来自 Output，模型增量只属于执行过程。
 
 过程与回答的折叠遵循 [Channel 展示约定](README.md#回复展示状态)。用户展开选择、输入焦点和浏览历史的位置由页面维护，增量更新与执行结束不覆盖手动选择。原生权限 Approval 在独立区域处理；say 问题以普通 Output 展示，回答形成新 Input。
 
@@ -49,7 +49,9 @@ src/channel/view.ts 按明确的 Topic UID 与 execution / invocation 关联选�
 
 src/api/stream.ts 使用 SDK 的 PatchEmitter / encodeSse。首次和重连发送 start 快照，内容更新使用 set / append，会话运行状态和历史分页位置分别更新 meta.activity / meta.before。顺序变化时用新快照替换。客户端通过同一 SDK 的 applyPatch 更新模型，Aide 负责页面渲染。
 
-对话首次只加载最近 10 条 Input / Output；服务端先按 Topic UID 范围筛选和 `(created, key)` 排序分页，再读取当页正文、Output Stream 与相关执行细节。`GET /topics/history?topicId=...&before=...` 读取更早一页，游标绑定 Topic UID 与时间边界，新记录不会挤动旧页。对话区向上滚动到距顶部 120 像素以内时，按需加载更早的 10 条并插入当前记录之前，不用翻页按钮替换整页。补入历史保持可见消息及其偏移；已加载记录和实时快照按块 ID 去重，旧请求不覆盖新进展。加载过程中继续接收 SSE，只有读者原本在底部时才跟随新内容；短首屏可通过向上滚轮继续加载。失败保留记录和游标，提供重试；同一主题一次只请求一页，切换主题取消旧请求。重连期间若最新窗口与已加载记录断开，用相同的有界分页补齐中间缺口，SSE 自身始终只发送最近一页。来源 observation 不随对话重复发送，点击 Input 的“处理 Timeline”查看完整证据。摘要与近期 Note 不属于对话 SSE。
+对话首次只加载最近 10 条 Input / Output；服务端先按 Topic UID 范围筛选和 `(created, key)` 排序分页，再返回当页消息元数据。已结束消息的正文、Output Stream 与执行细节不进入列表或 SSE；只有当前执行保留实时内容。`GET /topics/history?topicId=...&before=...` 读取更早一页，游标绑定 Topic UID 与时间边界，新记录不会挤动旧页。对话区向上滚动到距顶部 120 像素以内时，按需加载更早的 10 条并插入当前记录之前，不用翻页按钮替换整页。补入历史保持可见消息及其偏移；已加载记录和实时快照按块 ID 去重，旧请求不覆盖新进展。加载过程中继续接收 SSE，只有读者原本在底部时才跟随新内容；短首屏可通过向上滚轮继续加载。失败保留记录和游标，提供重试；同一主题一次只请求一页，切换主题取消旧请求。重连期间若最新窗口与已加载记录断开，用相同的有界分页补齐中间缺口，SSE 自身始终只发送最近一页。来源 observation 不随对话重复发送，点击 Input 的“处理 Timeline”查看完整证据。摘要与近期 Note 不属于对话 SSE。
+
+点击消息 ID 后，`GET /topics/message?topicId=...&topicUid=...&id=...&uid=...` 读取该条消息及其关联执行过程。查询重新校验 Topic incarnation、消息 UID 与当前 Topic 范围，已回收、已移出或身份不匹配返回 404。列表里的 Output 不读取 Stream 生成正文预览，展示 ID、时间与投递状态。相同消息版本再次展开复用已加载详情；版本变化时重新读取，切换 Topic 取消请求，迟到响应不覆盖新列表项。详情加载失败保留消息行并提供重试。只有点击详情后才执行正文 Markdown 渲染，列表更新复用未变化的详情节点。
 
 空闲连接发送 ping，连接定期 end 后由 EventSource 重连；投影错误以 error / end 收口，首次失败返回 HTTP 500。背压时等待 drain，再根据最新模型生成 patch。断开清理订阅与定时器，不取消服务端执行；seq 属于当前连接，不通过 Last-Event-ID 回放历史补丁。
 

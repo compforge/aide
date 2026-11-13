@@ -6,6 +6,11 @@ import type { TopicResource } from "./model.ts";
 import type { TopicStore } from "./store.ts";
 
 const PAGE_SIZE = 10;
+export interface HistorySelection { summaries?: boolean; message?: { id: string; uid: string }; liveExecutions?: ReadonlySet<string> }
+export interface HistoryItem {
+  id: string; uid: string; version: string; type: "input" | "message"; at: string;
+  preview: string; origin?: InputSpec["origin"]; originId?: string; executionId?: string; status: string;
+}
 const Cursor = z.object({ topic: z.string(), at: z.string(), key: z.string() }).strict();
 export function historyCursor(value: string) {
   try { return Cursor.parse(JSON.parse(Buffer.from(value, "base64url").toString())); }
@@ -15,10 +20,11 @@ export function historyCursor(value: string) {
 /**
  * @spec Select a bounded page of Input/Output identities before decoding resources or reading Output streams.
  * @spec A cursor pins the Topic incarnation and a stable (created, key) boundary; newer arrivals do not shift older pages.
+ * @spec Summary queries never decode historical bodies or open their streams. Only active replies keep full live content.
  * @why Observation evidence belongs to Input detail, not the repeatedly rebuilt dialogue snapshot.
  * @link docs/channel/web.md#实时进展与历史
  */
-export function topicHistory(store: TopicStore, topic: TopicResource, members: readonly TopicResource[], before?: string) {
+export function topicHistory(store: TopicStore, topic: TopicResource, members: readonly TopicResource[], before?: string, selection: HistorySelection = {}) {
   const storage = store.resources.storage;
   const cursor = before ? historyCursor(before) : undefined;
   if (cursor && cursor.topic !== topic.metadata.uid) throw new Error("Invalid topic history cursor");
@@ -40,17 +46,37 @@ export function topicHistory(store: TopicStore, topic: TopicResource, members: r
             AND ${field("status.delivery.target.channelId")}='web' AND ${field("status.delivery.target.endpoint") }=?)
         )
     )`;
-    const rows = storage.db.prepare(`${candidates} SELECT key, created FROM candidates
-      ${cursor ? "WHERE (created, key) < (?, ?)" : ""} ORDER BY created DESC, key DESC LIMIT ${PAGE_SIZE + 1}`)
-      .all(uids, uids, topic.spec.id, topic.metadata.creationTimestamp, topic.spec.id, ...(cursor ? [cursor.at, cursor.key] : []));
+    const message = selection.message;
+    const messageKey = message?.id.startsWith("input:") ? store.inputStore.key(message.id.slice(6))
+      : message?.id.startsWith("message:") ? store.outputStore.key(message.id.slice(8)) : "";
+    const rows = storage.db.prepare(`${candidates}, selected AS MATERIALIZED (
+      SELECT key, created FROM candidates ${message ? "WHERE key=?" : cursor ? "WHERE (created, key) < (?, ?)" : ""}
+      ORDER BY created DESC, key DESC LIMIT ${PAGE_SIZE + 1}
+    ) SELECT r.key, r.created, r.uid,
+      CASE WHEN r.kind='aide.dev/Input' THEN 'input:' ELSE 'message:' END || ${field("metadata.name")} AS id,
+      CASE WHEN r.kind='aide.dev/Input' THEN 'input' ELSE 'message' END AS type,
+      ${field("metadata.resourceVersion")} AS version,
+      substr(${field("spec.text")}, 1, 120) AS preview, ${field("spec.origin")} AS origin, ${field("spec.originId")} AS originId,
+      coalesce(${field("spec.executionId")}, ${field("status.assess.completedBy.executionId")}, ${field("status.assess.executionId")}) AS executionId,
+      CASE WHEN r.kind='aide.dev/Output' THEN ${field("status.phase")}
+        WHEN ${field("status.assess.completedAt")} IS NOT NULL THEN 'done' ELSE 'queued' END AS status
+      FROM selected c JOIN resources r ON r.key=c.key ${message ? "WHERE r.uid=?" : ""}
+      ORDER BY r.created DESC, r.key DESC`)
+      .all(uids, uids, topic.spec.id, topic.metadata.creationTimestamp, topic.spec.id,
+        ...(message ? [messageKey, message.uid] : cursor ? [cursor.at, cursor.key] : []));
     const page = rows.slice(0, PAGE_SIZE), last = page.at(-1);
-    const objects = page.map(row => storage.read(row.key as string)!.object);
-    const queued = cursor ? 0 : storage.db.prepare(`SELECT count(*) AS count FROM resource_indexes pending
+    const objects = page.filter(row => !selection.summaries || row.type === "message" && selection.liveExecutions?.has(row.executionId as string))
+      .map(row => storage.read(row.key as string)!.object);
+    const items: HistoryItem[] = page.map(row => ({ id: row.id as string, uid: row.uid as string, version: row.version as string,
+      type: row.type as HistoryItem["type"], at: row.created as string, preview: row.preview as string ?? "",
+      origin: row.origin as HistoryItem["origin"] ?? undefined, originId: row.originId as string ?? undefined,
+      executionId: row.executionId as string ?? undefined, status: row.status as string }));
+    const queued = cursor || message ? 0 : storage.db.prepare(`SELECT count(*) AS count FROM resource_indexes pending
       JOIN resource_ordered_indexes i ON i.source=pending.source
       WHERE pending.name='assessPending' AND pending.value IN (SELECT value FROM json_each(?))
         AND i.scope='personal' AND i.api_version='${INPUT_TYPE.apiVersion}' AND i.kind='Input' AND i.namespace='v1'
         AND i.index_name='topicActivity' AND i.index_value=pending.value`).get(uids)!.count as number;
-    return { inputs: objects.filter(r => r.kind === "Input") as Resource<InputSpec, InputStatus>[], outputs: objects.filter(r => r.kind === "Output") as Output[], queued,
+    return { items, inputs: objects.filter(r => r.kind === "Input") as Resource<InputSpec, InputStatus>[], outputs: objects.filter(r => r.kind === "Output") as Output[], queued,
       before: rows.length > PAGE_SIZE && last ? Buffer.from(JSON.stringify({ topic: topic.metadata.uid, at: last.created, key: last.key })).toString("base64url") : null };
   });
 }

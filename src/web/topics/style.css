@@ -161,3 +161,12 @@ details { font-size: 12px; color: #68776c; margin-top: 8px; }
 #topic-tree a.tree-name:focus-visible { outline: 2px solid #42634c; outline-offset: 2px; }
 
 .history-loading { min-height: 28px; text-align: center; font-size: .85rem; }
+.message-list-item > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; cursor: pointer; padding: 10px; }
+.message-list-item .message-id { color: #285f43; overflow-wrap: anywhere; text-decoration: underline; }
+.message-list-item .message-id::before { content: '▸ '; }
+.message-list-item[open] > summary .message-id::before { content: '▾ '; }
+.message-list-item time { font-size: 12px; }
+.message-list-preview { grid-column: 1 / -1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.message-detail { padding: 0 10px 10px; }
+.message-detail > .message { margin: 8px 0; }
+@media (max-width: 600px) { .message-list-item > summary { grid-template-columns: minmax(0, 1fr); } }

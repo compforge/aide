@@ -31,7 +31,7 @@ export function topicPatches(emitter: PatchEmitter, previous: TopicView | undefi
 /** Every connection starts a fresh delivery from the authoritative projection, without replaying actions. */
 export function streamTopic(response: ServerResponse, aide: ChannelService, topicId: string, log: Logger): void {
   const started = performance.now();
-  const initial = topicView(aide, topicId);
+  const initial = topicView(aide, topicId, undefined, { summaries: true });
   log.debug({ topicId, queryMs: Math.round(performance.now() - started), blocks: initial.blocks.length, hasOlder: !!initial.meta.before }, "Web dialogue opened");
   response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", "x-accel-buffering": "no" });
   const emitter = new PatchEmitter();
@@ -47,7 +47,7 @@ export function streamTopic(response: ServerResponse, aide: ChannelService, topi
     timer = undefined;
     if (closed || blocked) return;
     try {
-      const next = topicView(aide, topicId);
+      const next = topicView(aide, topicId, undefined, { summaries: true });
       const events = topicPatches(emitter, previous, next);
       previous = next;
       if (events.length) blocked = !response.write(events.map((event) => encodeSse(event)).join(""));
