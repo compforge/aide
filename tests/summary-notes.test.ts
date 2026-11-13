@@ -1,3 +1,5 @@
+import { ResourceGarbageCollector } from "../src/host/resource/gc.ts";
+import { collectResources } from "./fixtures/resource-gc.ts";
 import { topicView } from "../src/channel/view.ts";
 import { personRefs } from "../plugins/personal/person/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
@@ -89,11 +91,13 @@ test("capacity evicts a Topic with cleared understanding, then its unreferenced 
   await f.client.patchStatus(cleared, { lastInputAt: "2000-01-01T00:00:00.000Z" });
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95,
     kinds: { "aide.dev/Topic": { maxCount: f.aide.topics.list().length } } }));
+  await collectResources(f.aide.topics.resources.storage);
   const arrival = await f.aide.topics.ensure("new-arrival");
   assert.equal(f.aide.topics.resource("summary"), undefined);
   await reconcileNote({ resources: f.client, logger: { info() {} } } as never, note);
   assert.ok(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: note.metadata.name }));
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, kinds: { "aide.dev/Note": { maxCount: 1 } } }));
+  await collectResources(f.aide.topics.resources.storage);
   await f.client.create(NOTE_TYPE, { name: "new-note", spec: { subject: resourceRef(arrival), people: [], text: "New evidence" }, status: { updatedAt: new Date().toISOString() } });
   assert.equal(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: note.metadata.name }), undefined);
 });
@@ -156,6 +160,7 @@ test("Note capacity preserves every referenced summary and evicts an older ordin
     status: { updatedAt: "2000-01-01T00:00:00.000Z" } });
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95,
     kinds: { "aide.dev/Note": { maxCount: 2 } } }));
+  await collectResources(f.aide.topics.resources.storage);
   await f.client.create(NOTE_TYPE, { name: "arrival", spec: { subject, people: [], text: "New detail" },
     status: { updatedAt: new Date().toISOString() } });
   assert.equal(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: "ordinary" }), undefined);
@@ -175,10 +180,17 @@ test("terminating subjects protect summaries but a same-name replacement does no
   const create = () => f.client.create(NOTE_TYPE, { name: "arrival", spec: { subject: resourceRef(other), people: [], text: "Fresh evidence" },
     status: { updatedAt: new Date().toISOString() } });
   await assert.rejects(create());
+  // Keep the terminating Topic under Controller ownership while GC evaluates its summary.
+  const gc = new ResourceGarbageCollector(f.aide.topics.resources.storage, {
+    lifecycle: (_scope, resource) => resource.kind === TOPIC_TYPE.kind ? "controller" : "unmanaged",
+  });
+  try { await gc.run(); } finally { await gc.close(); }
+  assert.ok((await f.client.get(resourceRef(owner)))?.metadata.deletionTimestamp);
   assert.ok(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: note.metadata.name }));
   f.aide.topics.resources.finalizeDeletion(TOPIC_TYPE, owner.metadata.name);
   const replacement = await f.aide.topics.ensure("summary");
   assert.notEqual(replacement.metadata.uid, owner.metadata.uid);
+  await collectResources(f.aide.topics.resources.storage);
   await create();
   assert.equal(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: note.metadata.name }), undefined);
 });

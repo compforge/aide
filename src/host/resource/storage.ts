@@ -21,6 +21,11 @@ export const ResourceStorageConfigSchema = z.object({
   defaults: DefaultLimits.prefault({}),
   kinds: z.record(z.string().regex(/^[^/]+\/[^/]+$/), Limits.partial()).default({}),
   lowWatermark: z.number().min(0.1).max(0.95).default(0.8),
+  gc: z.object({
+    // @why Larger timer delays overflow to 1 ms in Node/Bun, turning rare checks into continuous scans.
+    intervalMs: limit.max(2_147_483_647).default(60_000),
+    batchSize: limit.max(256).default(16), maxTreeSize: limit.max(4096).default(256),
+  }).strict().prefault({}),
   dedupSeconds: limit.default(7 * 86400),
   maxReceipts: limit.default(100_000),
 }).strict();
@@ -47,8 +52,13 @@ export class ResourceStorage {
   private afterCommitCallbacks: Array<() => void> = [];
   private rollbackError: unknown;
   private rollbackOnly = false;
-  private readonly writtenKeys = new Set<string>();
-  private evicted: Array<{ scope: string; resource: Resource<unknown, unknown> }> = [];
+  private readonly pressureListeners = new Set<() => void>();
+  readonly capacityPressure = new Set<string>();
+  get configuration(): ResourceStorageConfig { return this.config; }
+  subscribePressure(listener: () => void): () => void { this.pressureListeners.add(listener); return () => this.pressureListeners.delete(listener); }
+  canCollect(scope: string, resource: Resource<unknown, unknown>): boolean {
+    return this.definition(scope, resource).retention?.canEvict?.(resource, this.validationContext(scope)) !== false;
+  }
   static open(home: string): ResourceStorage {
     const path = resolve(home); let storage = databases.get(path);
     if (!storage || !existsSync(join(path, "resources.sqlite"))) { storage?.db.close(); storage = new ResourceStorage(path); databases.set(path, storage); }
@@ -62,6 +72,10 @@ export class ResourceStorage {
         data TEXT NOT NULL, bytes INTEGER NOT NULL, created TEXT NOT NULL, accessed INTEGER NOT NULL, released TEXT);
       CREATE INDEX IF NOT EXISTS resource_kind ON resources(kind, created);
       CREATE INDEX IF NOT EXISTS resource_scope ON resources(scope, key);
+      CREATE INDEX IF NOT EXISTS resource_owner ON resources(json_extract(data,'$.object.metadata.owner.uid'));
+      CREATE INDEX IF NOT EXISTS resource_released_kind ON resources(kind,released,key);
+      CREATE INDEX IF NOT EXISTS resource_released ON resources(released,key);
+      CREATE INDEX IF NOT EXISTS resource_gc_deleting ON resources(json_extract(data,'$.object.metadata.deletionTimestamp'),kind,bytes,key);
       CREATE TABLE IF NOT EXISTS resource_refs (source TEXT NOT NULL REFERENCES resources(key) ON DELETE CASCADE, target TEXT NOT NULL, PRIMARY KEY(source,target));
       CREATE INDEX IF NOT EXISTS reference_target ON resource_refs(target);
       CREATE TABLE IF NOT EXISTS resource_indexes (source TEXT NOT NULL REFERENCES resources(key) ON DELETE CASCADE, name TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(source,name,value));
@@ -250,11 +264,11 @@ export class ResourceStorage {
       const bytes = Buffer.byteLength(data) + Number(this.db.prepare("SELECT bytes FROM resource_payload_sizes WHERE uid=?").get(resource.metadata.uid)?.bytes ?? 0);
       const previous = this.db.prepare("SELECT bytes FROM resources WHERE key=?").get(key);
       const kind = kindKey(resource), limits = { ...this.config.defaults, ...this.config.kinds[kind] };
-      // Completion/deletion may shrink an oversized pre-existing record even when the host is full.
-      if (bytes > limits.maxResourceBytes && bytes > Number(previous?.bytes ?? 0)) throw new ResourceCapacityError(kind, `record bytes ${bytes}/${limits.maxResourceBytes}`);
+      const deleting = !!old && !old.metadata.deletionTimestamp && !!resource.metadata.deletionTimestamp;
+      // Deletion metadata must be admitted even at capacity, so GC can make progress.
+      if (!deleting && bytes > limits.maxResourceBytes && bytes > Number(previous?.bytes ?? 0)) throw new ResourceCapacityError(kind, `record bytes ${bytes}/${limits.maxResourceBytes}`);
       this.db.prepare(`INSERT INTO resources VALUES (?,?,?,?,?,?,?,?,NULL) ON CONFLICT(key) DO UPDATE SET
         data=excluded.data, bytes=excluded.bytes, accessed=excluded.accessed`).run(key, scope, kind, resource.metadata.uid, data, bytes, resource.metadata.creationTimestamp, Date.now());
-      this.writtenKeys.add(key);
       if (!controlOnly) this.indexLifecycle(key, scope, resource);
       if (!old || old.metadata.resourceVersion !== resource.metadata.resourceVersion) {
         const snapshot = cloneResourceValue(resource);
@@ -263,10 +277,37 @@ export class ResourceStorage {
         }
       }
       if (receipt) this.addReceipt(receipt.key, receipt.value);
-      if (!previous || bytes > Number(previous.bytes)) this.collect(kind, key);
+      if (!deleting && (!previous || bytes > Number(previous.bytes))) this.checkCapacity(kind);
     });
   }
   remove(key: string): void { this.db.prepare("DELETE FROM resources WHERE key=?").run(key); }
+  /** @spec Deletion preserves stored identity and payload extensions; only scheduling state is cleared. */
+  requestDeletion(key: string): void {
+    this.transaction(() => {
+      const row = this.db.prepare("SELECT scope,data FROM resources WHERE key=?").get(key);
+      if (!row) return;
+      const stored = this.decode(String(row.scope), String(row.data)), resource = stored.object;
+      if (resource.metadata.deletionTimestamp) return;
+      this.write(key, String(row.scope), { ...stored, object: { ...resource, metadata: {
+        ...resource.metadata, resourceVersion: String(Number(resource.metadata.resourceVersion) + 1), deletionTimestamp: new Date().toISOString(),
+      } }, control: {} });
+    });
+  }
+  /** Removal by the collector publishes through the same committed resource dispatcher. */
+  collectFinalized(key: string): void {
+    this.transaction(() => {
+      const row = this.db.prepare("SELECT scope,data FROM resources WHERE key=?").get(key);
+      if (!row) return;
+      const resource = this.decode(row.scope as string, row.data as string).object;
+      if (!resource.metadata.deletionTimestamp) throw new Error("Collection requires a deletion request");
+      this.remove(key);
+      this.afterCommit(() => { for (const listener of this.listeners) listener(row.scope as string, resource); });
+    });
+  }
+  children(scope: string, uid: string): Resource<unknown, unknown>[] {
+    return this.db.prepare("SELECT data FROM resources WHERE scope=? AND json_extract(data,'$.object.metadata.owner.uid')=? ORDER BY key")
+      .all(scope, uid).map(row => this.decode(scope, row.data as string).object);
+  }
   hasReceipt(key: string): boolean { return Boolean(this.db.prepare("SELECT 1 FROM receipts WHERE key=? AND expires>?").get(key, Date.now())); }
   receipt(key: string): string | undefined { return this.db.prepare("SELECT value FROM receipts WHERE key=? AND expires>?").get(key, Date.now())?.value as string | undefined; }
   addReceipt(key: string, value: string): void {
@@ -274,60 +315,20 @@ export class ResourceStorage {
     if (!this.hasReceipt(key) && Number(this.db.prepare("SELECT count(*) AS n FROM receipts").get()!.n) >= this.config.maxReceipts) throw new ResourceCapacityError("receipts", `count limit ${this.config.maxReceipts}`);
     this.db.prepare("INSERT OR IGNORE INTO receipts VALUES (?,?,?)").run(key, Date.now() + this.config.dedupSeconds * 1000, value);
   }
-  private collect(kind: string, protectedKey: string): void {
+  /** @spec Admission never collects. Pressure survives rollback and wakes GC outside this synchronous transaction.
+   * @link docs/plugin/resource.md#resource-容量与释放
+   */
+  private checkCapacity(kind: string): void {
     const limits = { ...this.config.defaults, ...this.config.kinds[kind] };
-    const usage = () => this.db.prepare("SELECT count(*) AS n,coalesce(sum(bytes),0) AS bytes FROM resources WHERE kind=?").get(kind)!;
-    const total = () => Number(this.db.prepare("SELECT coalesce(sum(bytes),0) AS n FROM resources").get()!.n);
-    const before = usage();
-    const kindFull = Number(before.n) > limits.maxCount || Number(before.bytes) > limits.maxBytes;
-    const totalFull = total() > this.config.maxBytes;
+    const usage = this.db.prepare("SELECT count(*) AS n,coalesce(sum(bytes),0) AS bytes FROM resources WHERE kind=?").get(kind)!;
+    const total = Number(this.db.prepare("SELECT coalesce(sum(bytes),0) AS n FROM resources").get()!.n);
+    const kindFull = Number(usage.n) > limits.maxCount || Number(usage.bytes) > limits.maxBytes;
+    const totalFull = total > this.config.maxBytes;
     if (!kindFull && !totalFull) return;
-    const evict = (onlyKind: boolean, order: string, enough: () => boolean) => {
-      const candidates = this.db.prepare(`SELECT key,scope,data FROM resources r WHERE released IS NOT NULL AND released<=? AND key<>?
-        AND NOT EXISTS(SELECT 1 FROM resources parent WHERE parent.uid=json_extract(r.data,'$.object.metadata.owner.uid')) ORDER BY ${order},key`);
-      for (const row of candidates.iterate(new Date().toISOString(), protectedKey)) {
-        if (enough()) break;
-        if (this.writtenKeys.has(row.key as string)) continue;
-        const resource = (JSON.parse(row.data as string) as StoredResource).object;
-        this.parse(row.scope as string, resource);
-        const retention = this.definition(row.scope as string, resource).retention;
-        // @spec Candidate release time never substitutes for current dependency checks.
-        if (retention?.canEvict && !retention.canEvict(resource, this.validationContext(row.scope as string))) continue;
-        // Structural dependents are retained with their owner, rather than pinning it forever.
-        // Every member must be released and no reference outside this ownership tree may pin it.
-        const tree = this.db.prepare(`WITH RECURSIVE owned(key,uid,scope,data,released) AS (
-          SELECT key,uid,scope,data,released FROM resources WHERE key=? UNION ALL
-          SELECT child.key,child.uid,child.scope,child.data,child.released FROM resources child JOIN owned parent
-          ON json_extract(child.data,'$.object.metadata.owner.uid')=parent.uid
-        ) SELECT * FROM owned`).all(row.key as string);
-        if (onlyKind && !tree.some(member => kindKey((JSON.parse(member.data as string) as StoredResource).object) === kind)) continue;
-        const keys = new Set(tree.map(member => member.key as string));
-        if (tree.some(member => !member.released || Date.parse(member.released as string) > Date.now() || this.writtenKeys.has(member.key as string))) continue;
-        if (tree.some(member => this.db.prepare("SELECT source FROM resource_refs WHERE target=?").all(member.uid as string)
-          .some(reference => !keys.has(reference.source as string)))) continue;
-        if (tree.some(member => {
-          const child = this.decode(member.scope as string, member.data as string).object;
-          return this.definition(member.scope as string, child).retention?.canEvict?.(child, this.validationContext(member.scope as string)) === false;
-        })) continue;
-        for (const member of tree.reverse()) {
-          this.remove(member.key as string);
-          this.evicted.push({ scope: member.scope as string, resource: this.decode(member.scope as string, member.data as string).object });
-        }
-      }
-    };
-    if (kindFull) {
-      const order = limits.order === "lru" ? "accessed" : limits.order === "created" ? "created" : "released";
-      evict(true, order, () => {
-        const u = usage();
-        return Number(u.n) <= Math.ceil(limits.maxCount * this.config.lowWatermark) && Number(u.bytes) <= limits.maxBytes * this.config.lowWatermark;
-      });
-    }
-    // Global pressure can be relieved by any eligible kind, after the triggering kind's own quota is satisfied.
-    if (totalFull) evict(false, "released", () => total() <= this.config.maxBytes * this.config.lowWatermark);
-    const after = usage();
-    if (Number(after.n) > limits.maxCount || Number(after.bytes) > limits.maxBytes || total() > this.config.maxBytes) {
-      throw new ResourceCapacityError(kind, `count ${after.n}/${limits.maxCount}, kind bytes ${after.bytes}/${limits.maxBytes}, host bytes ${total()}/${this.config.maxBytes}`);
-    }
+    if (kindFull) this.capacityPressure.add(kind);
+    if (totalFull) this.capacityPressure.add("*");
+    for (const listener of this.pressureListeners) listener();
+    throw new ResourceCapacityError(kind, `count ${usage.n}/${limits.maxCount}, kind bytes ${usage.bytes}/${limits.maxBytes}, host bytes ${total}/${this.config.maxBytes}`);
   }
   afterCommit(callback: () => void): void {
     if (this.inTransaction) this.afterCommitCallbacks.push(callback);
@@ -347,7 +348,6 @@ export class ResourceStorage {
     this.inTransaction = true;
     this.rollbackError = undefined;
     this.rollbackOnly = false;
-    this.writtenKeys.clear();
     let result: T;
     try {
       result = fn();
@@ -355,12 +355,10 @@ export class ResourceStorage {
       if (this.rollbackOnly) throw this.rollbackError;
       this.db.exec("COMMIT");
     } catch (error) {
-      this.db.exec("ROLLBACK"); this.evicted = []; this.afterCommitCallbacks = []; throw error;
-    } finally { this.inTransaction = false; this.writtenKeys.clear(); }
+      this.db.exec("ROLLBACK"); this.afterCommitCallbacks = []; throw error;
+    } finally { this.inTransaction = false; }
     const callbacks = this.afterCommitCallbacks; this.afterCommitCallbacks = [];
     for (const callback of callbacks) { try { callback(); } catch { /* already committed */ } }
-    const removed = this.evicted; this.evicted = [];
-    for (const item of removed) for (const listener of this.listeners) { try { listener(item.scope, item.resource); } catch { /* committed; a subscriber cannot roll back deletion */ } }
     return result;
   }
 }

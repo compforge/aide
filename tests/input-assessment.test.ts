@@ -1,3 +1,4 @@
+import { collectResources } from "./fixtures/resource-gc.ts";
 import { summaryText } from "../plugins/personal/note/summary.ts";
 import { patchSummary } from "./summary-fixture.ts";
 import { TASK_TYPE } from "../plugins/personal/task/model.ts";
@@ -82,6 +83,7 @@ test("Input protects every unfinished stage; deleting its Work ends handling and
   const initialTask = (await resources.list(TASK_TYPE))[0]!;
   await cancelAssignments(resources, resourceRef(initialTask));
   store.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Input": { maxCount: 1 } } }));
+  await collectResources(store.storage);
   const input = await aide.topics.submit("one", { origin: "source", originId: "fixture", text: "fact" });
   await deliver(context, input, [c.metadata], "topic");
   const second = () => aide.topics.submit("two", { origin: "source", originId: "fixture", text: "another" });
@@ -94,6 +96,7 @@ test("Input protects every unfinished stage; deleting its Work ends handling and
   await resources.delete(target, target.metadata.name);
   await cancelAssignments(resources, resourceRef(target));
   assert.equal(store.get("one")!.status.handle![w.uid!]!.result!.disposition, "cancelled");
+  await collectResources(store.storage);
   await second();
   assert.equal(store.get("one"), undefined);
   assert.deepEqual(store.query("topic", c.metadata.uid), []);

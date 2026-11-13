@@ -571,6 +571,7 @@ export class PluginResourceStore {
                 return current;
               }
               return {
+                ...current,
                 object: {
                   ...current.object,
                   metadata: {
@@ -599,9 +600,7 @@ export class PluginResourceStore {
         // Mark this node first so create() rejects new dependents before the
         // scan. Repeating the scan also repairs partially propagated requests.
         pending.push(
-          ...this.listAll().filter((candidate) => {
-            return candidate.metadata.owner?.uid === resource.metadata.uid;
-          }),
+          ...this.storage.children(this.pluginInstanceId, resource.metadata.uid),
         );
       }
       return Object.freeze(updates);

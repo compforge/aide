@@ -1,3 +1,4 @@
+import { collectResources } from "./fixtures/resource-gc.ts";
 import { DeliveryError } from "@compforge/aide-connector";
 import { outputPolicy } from "../plugins/personal/output/config.ts";
 import { readAgentStream } from "../src/stream/agent.ts";
@@ -109,6 +110,7 @@ test("A full Stream can still close, and Stream quota reclaims the released Outp
   assert.equal(f.streams.get(f.ref).status.phase, "interrupted");
   approveFixtureOutput(f.store, "live"); f.store.begin("live"); f.store.delivered("live");
   f.store.storage.configure({ kinds: { "aide.dev/Stream": { maxCount: 1 } } });
+  await collectResources(f.store.storage);
   const next = composeMail(f.store, "test", "next", { ...mailDraft(f.topics.resource("test")!, { topicId: "test", text: "next" }) });
   assert.equal(f.store.get("live"), undefined);
   assert.throws(() => f.streams.get(f.ref), /unavailable/);

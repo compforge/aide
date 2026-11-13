@@ -1,3 +1,4 @@
+import { collectResources } from "./fixtures/resource-gc.ts";
 import { createWithSummary, patchSummary } from "./summary-fixture.ts";
 import { createReviewInput } from "../plugins/personal/topic/review.ts";
 import { maintenanceAgenda } from "../plugins/personal/topic/maintenance.ts";
@@ -146,6 +147,8 @@ test("Topic silence retains knowledge; capacity evicts oldest safe candidates an
     status: { topic: resourceRef(protectedTopic), assess: {} } });
   const count = f.aide.topics.list().length;
   f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, kinds: { "aide.dev/Topic": { maxCount: count } } }));
+  await assert.rejects(f.aide.topics.ensure("new-arrival"), /capacity/);
+  await collectResources(f.aide.topics.resources.storage);
   await f.aide.topics.ensure("new-arrival");
   assert.equal(f.aide.topics.resource("knowledge"), undefined, "oldest eligible candidate is reclaimed");
   assert.ok(f.aide.topics.resource("protected"), "new pending dependency blocks even an older candidate");
@@ -199,6 +202,7 @@ test("full Topic capacity preserves root knowledge until a current explicit rele
   const release = topicTools(f.aide.personal.store, f.read, log).find(t => t.name === "release_topic")!;
   await release.execute("release", { version: reclamationVersion(f.read(), f.aide.topics.resources), reason: "Safe knowledge retained elsewhere" }, undefined, undefined, {} as never);
   await f.resources.patchStatus(f.read(), { execution: null });
+  await collectResources(f.aide.topics.resources.storage);
   await f.aide.topics.ensure("overflow");
   assert.equal(f.read(), undefined);
 });

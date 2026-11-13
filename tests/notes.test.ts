@@ -1,3 +1,4 @@
+import { collectResources } from "./fixtures/resource-gc.ts";
 import { composeMail, mailView } from "../plugins/personal/stream/writer.ts";
 import { mailDraft } from "../plugins/personal/output.ts";
 import { webAddress } from "../src/channel/address.ts";
@@ -134,7 +135,9 @@ test("Notes outlive subjects and capacity evicts old Notes without recreating ev
   const first = await f.upsert({ text: "Old" }, "first");
   const old = (await f.resources.get({ ...NOTE_TYPE, namespace: "v1", name: first.noteId }))!;
   await f.resources.patchStatus(old, { updatedAt: "2000-01-01T00:00:00.000Z" });
+  await collectResources(f.aide.topics.resources.storage);
   await f.upsert({ text: "Second" }, "second");
+  await collectResources(f.aide.topics.resources.storage);
   await f.upsert({ text: "Third" }, "third");
   assert.ok((await f.resources.list(NOTE_TYPE)).length <= 2);
   await assert.rejects(f.upsert({ noteId: first.noteId, version: first.version, text: "revive" }, "revive"), /no longer exists/);
