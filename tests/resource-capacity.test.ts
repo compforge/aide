@@ -118,14 +118,17 @@ test("Kind overrides inherit every unspecified default limit and order", () => {
   assert.deepEqual({ ...config.defaults, ...config.kinds["example.dev/Record"] }, { maxCount: 5, maxBytes: 4000, maxResourceBytes: 1048576, order: "lru" });
 });
 
-test("capacity predicates recheck transaction-local dependencies and roll back unsafe collection", async t => {
+test("GC predicates protect committed dependencies before reclaiming newer resources", async t => {
   const { db, record, type } = setup(t);
   db.register("guarded", [{ ...definition(type), retention: {
     releasedAt: r => r.status.released ? r.metadata.creationTimestamp : undefined, references: () => [],
     canEvict: (r, context) => !context.list(type).some(other => (other.spec as { refs: string[] }).refs.includes(r.metadata.uid)),
   } }]);
   db.write("old", "guarded", record("old"));
-  db.write("newer", "guarded", record("newer"));
+  // GC must evaluate the protected candidate before another deletion can satisfy the watermark.
+  const newer = record("newer");
+  newer.object = { ...newer.object, metadata: { ...newer.object.metadata, creationTimestamp: new Date(1000).toISOString() } };
+  db.write("newer", "guarded", newer);
   db.transaction(() => {
     db.write("dependent", "guarded", record("dependent", false, ["old"]));
   });
@@ -137,5 +140,5 @@ test("capacity predicates recheck transaction-local dependencies and roll back u
   assert.ok(db.has("dependent"));
   assert.throws(() => db.write("overflow", "guarded", record("overflow", false, ["dependent"])), ResourceCapacityError);
   assert.equal(db.has("overflow"), false);
-  assert.ok(db.has("old") && db.has("dependent"), "failed collection rolls back the dependent and every deletion");
+  assert.ok(db.has("old") && db.has("dependent"), "rejected admission preserves the existing resources");
 });
