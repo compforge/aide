@@ -6,17 +6,21 @@ import { pageBounds, pageSize, type PageQuery } from "../browse.ts";
 export interface PersonBrowseQuery extends PageQuery { q?: string; name?: string; excludeUid?: string; selectedId?: string }
 export interface PersonListItem { id: string; uid: string; version: string; name: string; isMe: boolean; preview: string; updatedAt: string }
 const field = (path: string) => `json_extract(data, '$.object.${path}')`;
-const summary = `(SELECT json_extract(n.data, '$.object.spec.text') FROM resource_indexes i JOIN resources n ON n.key = i.source WHERE n.scope = 'personal'
-  AND n.kind = 'aide.dev/Note' AND json_extract(n.data, '$.object.apiVersion') = '${NOTE_TYPE.apiVersion}' AND i.name = 'summaryOf' AND i.value = resources.uid
+const summary = `(SELECT json_extract(n.data, '$.object.spec.text') FROM resource_page_indexes i CROSS JOIN resources n ON n.key = i.source
+  WHERE i.scope = 'personal' AND i.api_version = '${NOTE_TYPE.apiVersion}' AND i.kind = 'Note'
+  AND i.index_name = 'summaryOf' AND i.index_value = resources.uid AND i.namespace = 'v1'
   AND json_extract(n.data, '$.object.metadata.deletionTimestamp') IS NULL)`;
-const columns = `${field("metadata.name")} AS id, uid, ${field("metadata.resourceVersion")} AS version,
-  ${field("spec.name")} AS name, substr(trim(coalesce(${summary}, '')), 1, 80) AS preview, ${field("status.updatedAt")} AS updatedAt,
-  length(trim(coalesce(${summary}, ''), char(9,10,11,12,13,32))) > 0 AS known`;
+const known = `EXISTS (SELECT 1 FROM resource_page_indexes i WHERE i.scope = 'personal' AND i.api_version = '${NOTE_TYPE.apiVersion}'
+  AND i.kind = 'Note' AND i.index_name = 'knownSummary' AND i.index_value = resources.uid AND i.namespace = 'v1')`;
+const selection = `key, ${field("metadata.name")} AS id, uid, ${field("spec.name")} AS name, ${known} AS known`;
+const columns = `page.id, page.uid, ${field("metadata.resourceVersion")} AS version,
+  page.name, page.isMe, substr(trim(coalesce(${summary}, '')), 1, 80) AS preview, ${field("status.updatedAt")} AS updatedAt`;
 const order = "known DESC, id ASC, uid ASC";
 
 /**
  * @spec Search and understanding-first ordering precede SQL paging. Only configured identities establish pinned Me entries.
  * @spec Pinned entries do not consume the page quota or total; lists never load full profiles or touch retention times.
+ * @spec Understanding-first ranking reads summary membership, while summary text and presentation fields are read only after page selection.
  * @link docs/channel/web.md#人物导航与编辑
  */
 export function browsePersons(storage: ResourceStorage, marks: Me, query: PersonBrowseQuery = {}) {
@@ -24,7 +28,7 @@ export function browsePersons(storage: ResourceStorage, marks: Me, query: Person
   if (query.q) { clauses.push("instr(lower(name), lower(?)) > 0"); args.push(query.q); }
   if (query.name !== undefined) { clauses.push("name = ?"); args.push(query.name); }
   if (query.excludeUid) { clauses.push("uid <> ?"); args.push(query.excludeUid); }
-  const people = `WITH people AS (SELECT ${columns}, EXISTS (
+  const people = `WITH people AS (SELECT ${selection}, EXISTS (
     SELECT 1 FROM json_each(data, '$.object.spec.identities') identity JOIN json_each(?) mark
       ON json_extract(identity.value, '$.provider') = json_extract(mark.value, '$.provider')
       AND json_extract(identity.value, '$.scope') = json_extract(mark.value, '$.scope')
@@ -43,9 +47,11 @@ export function browsePersons(storage: ResourceStorage, marks: Me, query: Person
       if (position) requested = Math.ceil(Number(position.position) / size);
     }
     const bounds = pageBounds(total, size, requested);
-    const rows = storage.db.prepare(`${people} SELECT * FROM matches WHERE NOT isMe ORDER BY ${order} LIMIT ? OFFSET ?`)
+    const rows = storage.db.prepare(`${people}, page AS MATERIALIZED (SELECT * FROM matches WHERE NOT isMe ORDER BY ${order} LIMIT ? OFFSET ?)
+      SELECT ${columns} FROM page JOIN resources ON resources.key = page.key ORDER BY page.known DESC, page.id, page.uid`)
       .all(...args, size, (bounds.page - 1) * size);
-    const pinned = storage.db.prepare(`${people} SELECT * FROM matches WHERE isMe ORDER BY id, uid`).all(...args).map(map);
+    const pinned = storage.db.prepare(`${people}, page AS MATERIALIZED (SELECT * FROM matches WHERE isMe)
+      SELECT ${columns} FROM page JOIN resources ON resources.key = page.key ORDER BY page.id, page.uid`).all(...args).map(map);
     return { ...bounds, items: rows.map(map), pinned };
   });
 }

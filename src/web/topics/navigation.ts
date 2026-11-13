@@ -202,6 +202,12 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
         children.setAttribute('aria-label', children.title);
         indicators.append(children);
       }
+      const noteCount = item.noteCount ?? 0;
+      const notes = element('span', '📝 ' + noteCount, 'topic-status-icon');
+      notes.title = '直属 Note：' + noteCount + '（不含 summary）';
+      notes.setAttribute('role', 'img');
+      notes.setAttribute('aria-label', notes.title);
+      indicators.append(notes);
       if (item.default) indicators.append(topicStatusIcon('系统兜底主题', '<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/>'));
       if (item.review?.enabled) indicators.append(topicStatusIcon('主动回顾已开启', '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M3 5l3-3m12 0 3 3M6 20l-2 2m14-2 2 2"/>'));
       if (indicators.childElementCount) link.append(indicators);

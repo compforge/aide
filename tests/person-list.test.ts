@@ -49,6 +49,8 @@ test("Person SQL selection follows reordered profiles while explicit page reques
   seedSummaryPatch(f.store, PERSON_TYPE, selected.metadata.name, { summary: "Now known" });
   assert.equal(browsePersons(f.storage, marks, { selectedId: selected.metadata.name, pageSize: 10 }).page, 1);
   assert.equal(browsePersons(f.storage, marks, { selectedId: selected.metadata.name, pageSize: 10, page: 2 }).page, 2);
+  seedSummaryPatch(f.store, PERSON_TYPE, selected.metadata.name, { summary: " \n\t " });
+  assert.equal(browsePersons(f.storage, marks, { selectedId: selected.metadata.name, pageSize: 10 }).page, 3, "Clearing understanding removes known-summary membership");
   f.store.requestDeletion(PERSON_TYPE, selected.metadata.name);
   assert.equal(browsePersons(f.storage, marks, { page: 3, pageSize: 10 }).page, 2);
 });

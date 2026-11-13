@@ -15,6 +15,10 @@ import { resourceRef } from "../plugins/personal/input/state.ts";
 import { webAddress } from "../src/channel/address.ts";
 import { httpChannel } from "../src/api/index.ts";
 import type { TopicListView } from "../src/api/types.ts";
+import { NOTE_TYPE } from "../plugins/personal/note/model.ts";
+import { INPUT_TYPE } from "../plugins/personal/input/model.ts";
+import { OUTPUT_TYPE } from "../plugins/personal/output/model.ts";
+import { patchSummary } from "./summary-fixture.ts";
 
 const log = pino({ level: "silent" });
 function setup(t: TestContext) {
@@ -92,6 +96,31 @@ test("Topic parent filtering excludes grandchildren and locates deep links witho
   assert.equal(regrouped.items.find(i => i.id === "other")!.childCount, 1);
 });
 
+/** @case Note totals cover all direct matter Notes beyond recent limits, including pinned and path entries, without counting child or summary Notes. */
+test("Topic Note counts follow direct live subjects after paging", async t => {
+  const { aide, store, db } = setup(t);
+  const root = await store.ensure("root"), pinned = await store.ensure("default");
+  const leaf = child(store, await store.ensure("leaf"), root);
+  const empty = await store.ensure("empty");
+  const client = aide.runtime.plugins.resourceClient("personal");
+  for (const [topic, count] of [[root, 25], [leaf, 2], [pinned, 1]] as const) {
+    for (let i = 0; i < count; i++) await client.create(NOTE_TYPE, { name: `${topic.spec.id}-${i}`,
+      spec: { subject: resourceRef(topic), text: "Matter" }, status: { updatedAt: new Date().toISOString() } });
+  }
+  await patchSummary(client, root, { summary: "Long-lived understanding" });
+  store.resources.requestDeletion(NOTE_TYPE, "root-0");
+  const before = db.prepare("SELECT key, accessed FROM resources ORDER BY key").all();
+  const result = browseTopics(store, { selectedId: "leaf", pageSize: 1 });
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0]!.id, root.spec.id);
+  assert.equal(result.items[0]!.noteCount, 24);
+  assert.equal(result.pinned[0]!.noteCount, 1);
+  assert.deepEqual(result.path.map(i => [i.id, i.noteCount]), [["root", 24], ["leaf", 2]]);
+  assert.equal(browseTopics(store, { parentId: "root" }).items[0]!.noteCount, 2);
+  assert.equal(browseTopics(store, { q: empty.spec.id }).items[0]!.noteCount, 0);
+  assert.deepEqual(db.prepare("SELECT key, accessed FROM resources ORDER BY key").all(), before);
+});
+
 test("Topic summaries use indexed facts without global views and quiet input never erases the reply preview", async t => {
   const { aide, store, db } = setup(t);
   const topic = await store.ensure("topic", webAddress("topic"), "Named Topic");
@@ -110,6 +139,24 @@ test("Topic summaries use indexed facts without global views and quiet input nev
   assert.ok(!JSON.stringify(result).includes("private source fact"));
   assert.deepEqual(db.prepare("SELECT key, accessed FROM resources ORDER BY key").all(), before);
   assert.ok(work.id);
+});
+
+/** @case Latest-activity indexes drop deleting records and retain the prior reply when a newer quiet Input arrives. */
+test("Topic activity and previews follow live indexed history", async t => {
+  const { store, db } = setup(t);
+  const topic = await store.ensure("topic", webAddress("topic"), "Named Topic");
+  tieTopics(db);
+  const reply = composeMail(store.outputStore, "topic", "reply", { topicId: "topic", topic: resourceRef(topic), target: webAddress("topic"), content: { kind: "text", text: "Reply preview" } });
+  await new Promise(resolve => setTimeout(resolve, 5));
+  const input = store.inputStore.submit("test", "quiet", { origin: "source", originId: "test", text: "Quiet fact" }, { topic: resourceRef(topic) });
+  assert.equal(browseTopics(store).items[0]!.updatedAt, input.metadata.creationTimestamp);
+  assert.equal(browseTopics(store).items[0]!.preview, "Reply preview");
+  store.resources.requestDeletion(INPUT_TYPE, input.metadata.name);
+  assert.equal(browseTopics(store).items[0]!.updatedAt, reply.metadata.creationTimestamp);
+  store.resources.requestDeletion(OUTPUT_TYPE, reply.metadata.name);
+  const item = browseTopics(store).items[0]!;
+  assert.equal(item.preview, "");
+  assert.equal(item.updatedAt, "2000-01-01T00:00:00.000Z");
 });
 
 test("Topic HTTP validates paging and filters and serves the integrated browser bundle", async t => {

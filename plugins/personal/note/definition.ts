@@ -80,7 +80,9 @@ export const NoteDefinition: ResourceDefinition<NoteSpec, NoteStatus> = {
     if (note.spec.summaryOf && context.get(note.spec.summaryOf, note.spec.summaryOf.uid))
       throw new Error("Summary subject still exists");
   } },
-  indexes: { summaryOf: r => r.spec.summaryOf ? [r.spec.summaryOf.uid] : [], uid: r => [r.metadata.uid], reviewRoot: r => !r.spec.summaryOf && !r.metadata.deletionTimestamp && r.status.reviewTopic && r.status.reviewed?.version !== noteVersion(r) ? [r.status.reviewTopic.uid] : [], unreviewed: r => !r.spec.summaryOf && !r.metadata.deletionTimestamp && r.status.reviewed?.version !== noteVersion(r) ? [r.spec.subject.uid] : [], subject: r => [r.spec.subject.uid], addresses: r => [...r.spec.addresses].map(a => a.uid), people: r => [...new Set([...r.spec.people].map(p => p.uid))] },
+  indexes: { summaryOf: r => r.spec.summaryOf ? [r.spec.summaryOf.uid] : [],
+    knownSummary: r => r.spec.summaryOf && !r.metadata.deletionTimestamp && r.spec.text.trim() ? [r.spec.summaryOf.uid] : [],
+    uid: r => [r.metadata.uid], reviewRoot: r => !r.spec.summaryOf && !r.metadata.deletionTimestamp && r.status.reviewTopic && r.status.reviewed?.version !== noteVersion(r) ? [r.status.reviewTopic.uid] : [], unreviewed: r => !r.spec.summaryOf && !r.metadata.deletionTimestamp && r.status.reviewed?.version !== noteVersion(r) ? [r.spec.subject.uid] : [], subject: r => [r.spec.subject.uid], addresses: r => [...r.spec.addresses].map(a => a.uid), people: r => [...new Set([...r.spec.people].map(p => p.uid))] },
   orderedIndexes: {
     recentSubject: r => r.spec.summaryOf || r.metadata.deletionTimestamp ? [] : [{ value: r.spec.subject.uid, order: r.status.updatedAt }],
     recentAddresses: r => r.metadata.deletionTimestamp ? [] : [...r.spec.addresses].filter(a => a.uid !== r.spec.summaryOf?.uid).map(a => ({ value: a.uid, order: r.status.updatedAt })),

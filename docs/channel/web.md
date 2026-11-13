@@ -61,9 +61,9 @@ tests/web-progress.test.ts 用真实 Host / Runner / HTTP、浏览器 reducer �
 
 浏览器 Tab 标题固定为 `Aide`，会话名称只显示在页面内。
 
-root 会话条目以孩子图标加数字（如 `👶 3`）显示直属子主题数量（含 0），悬停提示“直属子主题”，只统计存活的直接子主题，不含孙级；计数按当前页及定位条目的 parent 索引批量聚合，与列表搜索条件独立。
+root 会话条目以孩子图标加数字（如 `👶 3`）显示直属子主题数量（含 0），悬停提示“直属子主题”，只统计存活的直接子主题，不含孙级；计数按当前页及定位条目的 parent 索引批量聚合，与列表搜索条件独立。每个条目同时以 `📝 数量` 显示直接挂载的事项 Note 总数（含 0），不含 summary、已删除 Note 或子主题的 Note；按当前页、置顶和祖先路径的 Topic UID 批量统计，不受 recent 上下文窗口限制。
 
-Topic 列表由 Personal 在 SQLite 中先筛选、按最近活动排序，再使用 LIMIT / OFFSET 分页；浏览器每页请求 10 条。`GET /topics` 接收 `page`、`pageSize`、`q`、`parentId` 和 `selectedId`，返回 `{ items, pinned, total, page, pageSize, pages, path }`。接口默认每页 20 条，上限 100；`total` 只统计普通条目，Default 放在 `pinned`，不占普通页名额。计数与页面读取处于同一数据库事务，不更新容量访问时间。
+Topic 列表由 Personal 在 SQLite 中先筛选、按最近活动排序，再使用 LIMIT / OFFSET 分页；浏览器每页请求 10 条。`GET /topics` 接收 `page`、`pageSize`、`q`、`parentId` 和 `selectedId`，返回 `{ items, pinned, total, page, pageSize, pages, path }`。接口默认每页 20 条，上限 100；`total` 只统计普通条目，Default 放在 `pinned`，不占普通页名额。计数与页面读取处于同一数据库事务，不更新容量访问时间。分页候选只读取身份、筛选字段与最近活跃时间；Input / Output 通过有序索引定位最新记录，不遍历每个候选的完整历史。确定当前页后，才查询名称、回顾状态、回复预览和关联计数。
 
 过滤区域位于列表与详情上方。`q` 按名称或 Topic ID 做字面子串搜索；`parentId` 留空时只查询 root，填写父主题 ID 后只查询其直接子主题，不递归展开。过滤发生在分页前，Default 也必须匹配当前条件才置顶。筛选、页码和选中项保存在 URL，筛选变化回到第一页，重置恢复 root 列表。不存在的父主题返回空列表。
 
@@ -143,7 +143,7 @@ Inputs 提供全局输入目录，支持按 Connector、来源类型、具体观
 
 `GET /persons/notes?id=...&uid=...` 按 Note.people 查询人物相关记录，每页最多 20 条，按更新时间倒序，通过 `continue` 继续读取；不受 Agent recent 上下文窗口截断。记录在首次打开 tab 时加载，可手动刷新。分页集合变化返回 410，页面提示刷新后继续。Person 不存储记录副本。
 
-`GET /persons` 使用同样的固定分页契约，额外返回 `pinned`。`q` 在 SQL 中按姓名筛选；普通人物先按是否已有认识排序，再按资源名稳定排序，显式 Me 根据配置身份置顶，不按名字推断。列表只返回 ID、UID、版本、姓名、认识预览和更新时间；完整身份、summary、recent 通过 `GET /persons?id=...&uid=...` 按需读取。点击人物不重新获取全量目录，5 秒轮询只刷新当前列表页，编辑草稿不被轮询覆盖。
+`GET /persons` 使用同样的固定分页契约，额外返回 `pinned`。`q` 在 SQL 中按姓名筛选；普通人物先按是否已有认识排序，再按资源名稳定排序，显式 Me 根据配置身份置顶，不按名字推断。排序通过 Note 的非空 summary 索引判断是否已有认识，不在候选集合中读取 summary 正文；确定当前页和置顶项后，才读取认识预览、版本和更新时间。列表只返回 ID、UID、版本、姓名、认识预览和更新时间；完整身份、summary、recent 通过 `GET /persons?id=...&uid=...` 按需读取。点击人物不重新获取全量目录，5 秒轮询只刷新当前列表页，编辑草稿不被轮询覆盖。
 
 同名合并候选使用独立的 `name` 精确筛选和 `excludeUid` 条件分页查询，与导航当前页无关。候选列表不判断身份相同；进入确认框时重新读取双方完整身份和资源版本，继续执行原有 UID / version 校验。`POST /persons/edit` 和 `/persons/merge` 沿用同一 Personal 人物服务。打开页面不创建 Topic。
 
