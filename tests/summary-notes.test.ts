@@ -89,14 +89,14 @@ test("capacity evicts a Topic with cleared understanding, then its unreferenced 
   const note = (await readSummary(f.client, cleared))!;
   assert.equal(note.spec.text, "");
   await f.client.patchStatus(cleared, { lastInputAt: "2000-01-01T00:00:00.000Z" });
-  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95,
+  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99,
     kinds: { "aide.dev/Topic": { maxCount: f.aide.topics.list().length } } }));
   await collectResources(f.aide.topics.resources.storage);
   const arrival = await f.aide.topics.ensure("new-arrival");
   assert.equal(f.aide.topics.resource("summary"), undefined);
   await reconcileNote({ resources: f.client, logger: { info() {} } } as never, note);
   assert.ok(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: note.metadata.name }));
-  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, kinds: { "aide.dev/Note": { maxCount: 1 } } }));
+  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99, kinds: { "aide.dev/Note": { maxCount: 1 } } }));
   await collectResources(f.aide.topics.resources.storage);
   await f.client.create(NOTE_TYPE, { name: "new-note", spec: { subject: resourceRef(arrival), people: [], text: "New evidence" }, status: { updatedAt: new Date().toISOString() } });
   assert.equal(await f.client.get({ ...NOTE_TYPE, namespace: "v1", name: note.metadata.name }), undefined);
@@ -158,7 +158,7 @@ test("Note capacity preserves every referenced summary and evicts an older ordin
   const subject = resourceRef(summary);
   await f.client.create(NOTE_TYPE, { name: "ordinary", spec: { subject, people: [], text: "Temporary detail" },
     status: { updatedAt: "2000-01-01T00:00:00.000Z" } });
-  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95,
+  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99,
     kinds: { "aide.dev/Note": { maxCount: 2 } } }));
   await collectResources(f.aide.topics.resources.storage);
   await f.client.create(NOTE_TYPE, { name: "arrival", spec: { subject, people: [], text: "New detail" },
@@ -174,7 +174,7 @@ test("terminating subjects protect summaries but a same-name replacement does no
   const note = (await readSummary(f.client, owner))!;
   await f.client.delete(TOPIC_TYPE, owner.metadata.name);
   await assert.rejects(f.client.delete(NOTE_TYPE, note.metadata.name), /Summary subject still exists/);
-  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95,
+  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99,
     kinds: { "aide.dev/Note": { maxCount: 1 } } }));
   const other = await f.aide.topics.ensure("other");
   const create = () => f.client.create(NOTE_TYPE, { name: "arrival", spec: { subject: resourceRef(other), people: [], text: "Fresh evidence" },

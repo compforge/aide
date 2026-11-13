@@ -42,7 +42,7 @@ import type { TopicSpec, TopicStatus } from "./topic/model.ts";
 import { inputPrinter } from "./input/printer.ts";
 import type { Logger } from "pino";
 import type { Resource, ResourceType } from "@compforge/aide-plugin";
-import { InputAttention, inputAttention, type InputReceipt, type InputSpec, type InputStatus } from "./input/model.ts";
+import { InputAttention, inputAttention, isInternalInput, type InputReceipt, type InputSpec, type InputStatus } from "./input/model.ts";
 import type { Manager } from "../../src/host/plugin/manager.ts";
 import { ApplicationRuntime } from "../../src/host/runtime/index.ts";
 import { PluginResourceStore } from "../../src/host/plugin/resource/store.ts";
@@ -126,7 +126,7 @@ export class Personal {
           const c = active();
           return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "aide:review",
             inputs: this.topics.inputStore.query("assessExecution", c.status.execution!.id).map(i => ({
-              id: i.metadata.name, deliveryId: `input:${i.metadata.uid}`, initial: i.status.assess?.startedAt === c.status.execution!.startedAt,
+              id: i.metadata.name, deliveryId: i.status.assess?.deliveryId ?? `input:${i.metadata.uid}`, initial: !i.status.assess?.deliveryId && i.status.assess?.startedAt === c.status.execution!.startedAt,
               origin: i.spec.origin, immediate: immediate(i.spec), text: inputPreview(i, Math.floor(topicPolicy(this.options.topic).contextChars / 8)),
             })) };
         },
@@ -230,7 +230,7 @@ export class Personal {
         await commitStatus(resources, [
           // This is an admission revision, including rejected dispatches, not a count of consumed Inputs.
           { operation: "patchStatus", resource: resource!, patch: { execution: { ...resource!.status.execution!, admissionRevision: (resource!.status.execution!.admissionRevision ?? 0) + 1 } } },
-          { operation: "patchStatus", resource: input, patch: attemptPatch(input, ref, { executionId: id, agent: resource.status.agent, startedAt: new Date().toISOString(), lastError: undefined, nextAttemptAt: undefined,
+          { operation: "patchStatus", resource: input, patch: attemptPatch(input, ref, { executionId: id, agent: resource.status.agent, startedAt: new Date().toISOString(), lastError: undefined, errorAt: undefined, retryable: undefined, nextAttemptAt: undefined,
             ...(ref.kind === "Route" ? { attempts: (input.status.route?.attempts ?? 0) + 1 } : {}) }) },
         ]);
         admitted = { input, executionId: id, invocationId: invocation.invocationId };
@@ -260,14 +260,14 @@ export class Personal {
       this.log.info({ inputId, consumerUid: ref.uid, invocationId, attention: inputAttention(input.spec), operation, ...outcome }, "Agent Input admission");
       return outcome;
     } catch (error) {
-      await changeAttempt(resources, inputId, ref, p => p?.executionId === id && !p.completedAt ? { lastError: String(error) } : {});
+      await changeAttempt(resources, inputId, ref, p => p?.executionId === id && !p.completedAt ? { lastError: String(error), errorAt: new Date().toISOString(), retryable: true } : {});
       throw error;
     }
   }
 
   /** @spec Only Topic Reconcile chooses when/how to notify Chief. This Host bridge dispatches the requested verb and atomically admits each Input once across all Topics. */
   async submitTopic(scope: ExecutionScope, raw: unknown) {
-    const args = z.object({ inputId: z.string().min(1), operation: z.enum(["steer", "followUp"]) }).strict().parse(raw);
+    const args = z.object({ inputId: z.string().min(1), inputIds: z.array(z.string().min(1)).min(1).max(10).optional(), operation: z.enum(["steer", "followUp"]) }).strict().parse(raw);
     const ref = scope.resourceRef;
     if (scope.pluginInstanceId !== "personal" || !ref?.uid || ref.kind !== "Topic" || scope.controllerName)
       throw new Error("submit_topic requires the owning Topic intake Reconcile");
@@ -277,35 +277,44 @@ export class Personal {
       if (!topic || topic.metadata.deletionTimestamp || topic.spec.parentRef || !topic.status.execution) return { accepted: false, reason: "not_running" };
       const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === topic.status.execution!.id && i.phase === "running");
       if (!invocation) return { accepted: false, reason: "not_running" };
-      const input = this.topics.inputStore.get(args.inputId);
-      if (!input || !eligible(input, topic) || !canActivate(input.spec, topic)) return { accepted: false };
+      const ids = [...new Set(args.inputIds ?? [args.inputId])];
+      if (ids[0] !== args.inputId) throw new Error("Chief batch inputId must identify its first Input");
+      const inputs = ids.map(id => this.topics.inputStore.get(id));
+      if (inputs.some(i => !i || !eligible(i, topic))) return { accepted: false };
+      const batch = inputs as NonNullable<typeof inputs[number]>[];
+      const input = batch[0]!;
+      if (batch.some(i => isInternalInput(i.spec)) && batch.length !== 1) throw new Error("Maintenance admits exactly one Input");
+      if (args.operation === "steer" && batch.some(i => !immediate(i.spec))) throw new Error("Only Immediate Inputs may steer Chief");
+      const deliveryId = `input:${input.metadata.uid}`;
+      const startedAt = new Date().toISOString();
       try {
         await commitStatus(resources, [
           { operation: "patchStatus", resource: topic, patch: {
             execution: { ...topic.status.execution, admissionRevision: (topic.status.execution.admissionRevision ?? 0) + 1 },
           } },
-          { operation: "patchStatus" as const, resource: input, patch: { assess: { ...input.status.assess,
-            executionId: topic.status.execution.id, startedAt: new Date().toISOString(), agent: topic.status.agent,
-          } } },
+          ...batch.map(i => ({ operation: "patchStatus" as const, resource: i, patch: { assess: { ...i.status.assess,
+            executionId: topic.status.execution!.id, startedAt, deliveryId, agent: topic.status.agent,
+          } } })),
         ]);
       } catch (error) { if (/processing assignment changed/.test(String(error))) {
         const latest = args.inputId ? this.topics.inputStore.get(args.inputId) : undefined;
         if (latest) await invalidateAssignment({ resources }, latest);
         return { accepted: false, reason: "admission_conflict" };
       } if (n < 8 && /version conflict/.test(String(error))) continue; throw error; }
-      this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid,
+      this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid, inputIds: ids,
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
-      const prompt = `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nHandle this Input with the tools for its origin; leave any unfinished prior task pending without acknowledging it.`;
+      const budget = topicPolicy(this.options.topic).contextChars;
+      const prompt = `New Inputs:\n${JSON.stringify({ inputId: args.inputId, inputIds: ids })}\n${batch.map(i => inputPreview(i, Math.floor((budget - 2000) / batch.length))).join("\n\n")}\nAssess each original Input separately with the tools for its origin; leave unfinished prior tasks pending.`;
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,
-          messageId: `input:${input.metadata.uid}`, prompt, timeoutMs: 30_000,
+          messageId: deliveryId, prompt, timeoutMs: 30_000,
         });
         if (result.state !== "success") throw new Error(`Chief notification failed: ${result.state}`);
         const accepted = result.value.outcome === "accepted";
         if (!accepted) {
-          await changeAssessment(resources, input, topic.status.execution.id,
-            { executionId: undefined, agent: undefined, startedAt: undefined, lastError: undefined });
+          for (const i of batch) await changeAssessment(resources, i, topic.status.execution.id,
+            { executionId: undefined, deliveryId: undefined, agent: undefined, startedAt: undefined, lastError: undefined, errorAt: undefined, retryable: undefined });
           // Queue the owning agent Reconcile after the current execution; retrying intake on this bookkeeping would hot-loop unsupported verbs.
           void this.plugins.enqueue({ pluginInstanceId: "personal", namespace: ref.namespace, resourceApiVersion: ref.apiVersion,
             resourceKind: ref.kind, resourceId: ref.name, controllerName: "agent" })
@@ -314,7 +323,7 @@ export class Personal {
         this.log.info({ topicUid: ref.uid, inputId: args.inputId, operation: args.operation, accepted }, "Chief notification dispatched by Reconcile");
         return { accepted, reason: result.value.reason };
       } catch (error) {
-        if (input) await changeAssessment(resources, input, topic.status.execution.id, { lastError: String(error) });
+        for (const i of batch) await changeAssessment(resources, i, topic.status.execution.id, { lastError: String(error), errorAt: new Date().toISOString() });
         await updateTopic(resources, topic, () => ({ lastError: String(error) }));
         throw error;
       }

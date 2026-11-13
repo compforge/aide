@@ -22,7 +22,8 @@ export const ResourceStorageConfigSchema = z.object({
   maxBytes: limit.default(512 * 1024 * 1024),
   defaults: DefaultLimits.prefault({}),
   kinds: z.record(z.string().regex(/^[^/]+\/[^/]+$/), Limits.partial()).default({}),
-  lowWatermark: z.number().min(0.1).max(0.95).default(0.8),
+  lowWatermark: z.number().min(0.1).lt(1).default(0.9),
+  highWatermark: z.number().min(0.1).lt(1).default(0.95),
   gc: z.object({
     // @why Larger timer delays overflow to 1 ms in Node/Bun, turning rare checks into continuous scans.
     intervalMs: limit.max(2_147_483_647).default(60_000),
@@ -30,7 +31,7 @@ export const ResourceStorageConfigSchema = z.object({
   }).strict().prefault({}),
   dedupSeconds: limit.default(7 * 86400),
   maxReceipts: limit.default(100_000),
-}).strict();
+}).strict().refine(config => config.lowWatermark < config.highWatermark, { path: ["highWatermark"], message: "Must exceed lowWatermark" });
 export type ResourceStorageConfig = z.infer<typeof ResourceStorageConfigSchema>;
 export interface StoredResource { object: Resource<unknown, unknown>; control?: object; [key: string]: unknown }
 export class ResourceCapacityError extends Error {
@@ -39,7 +40,7 @@ export class ResourceCapacityError extends Error {
 const kindKey = (type: ResourceType) => `${type.apiVersion.split("/")[0]}/${type.kind}`;
 const databases = new Map<string, ResourceStorage>();
 /** @spec All persisted Resources share quotas by Group/Kind across versions and scopes. Reads never materialize a whole database.
- * @spec Only explicitly released, unreferenced resources can be evicted. Protected writes fail closed at capacity.
+ * @spec Retention owners opt into expiry and pressure tiers; other resources require release and reference safety. Protected writes fail closed at capacity.
  * @case tests/resource-capacity.test.ts
  */
 export class ResourceStorage {
@@ -62,6 +63,20 @@ export class ResourceStorage {
   subscribePressure(listener: () => void): () => void { this.pressureListeners.add(listener); return () => this.pressureListeners.delete(listener); }
   canCollect(scope: string, resource: Resource<unknown, unknown>): boolean {
     return this.definition(scope, resource).retention?.canEvict?.(resource, this.validationContext(scope)) !== false;
+  }
+  pressureTier(scope: string, resource: Resource<unknown, unknown>): "low" | "high" | "full" | undefined {
+    return this.definition(scope, resource).retention?.pressure?.(resource)?.tier;
+  }
+  collectOnRelease(scope: string, resource: Resource<unknown, unknown>): boolean {
+    return this.definition(scope, resource).retention?.collectOnRelease === true;
+  }
+  expired(scope: string, resource: Resource<unknown, unknown>, now = Date.now()): boolean {
+    const at = this.definition(scope, resource).retention?.expiresAt?.(resource);
+    return !!at && Date.parse(at) <= now;
+  }
+  expiringCollections(): Array<{ scope: string; kind: string }> {
+    return [...this.definitions].flatMap(([key, definition]) => (definition.retention?.collectOnRelease || definition.retention?.expiresAt)
+      ? [{ scope: (JSON.parse(key) as string[])[0]!, kind: kindKey(definition.type) }] : []);
   }
   static open(home: string): ResourceStorage {
     const path = resolve(home); let storage = databases.get(path);
@@ -86,9 +101,13 @@ export class ResourceStorage {
       CREATE INDEX IF NOT EXISTS resource_index_lookup ON resource_indexes(name,value,source);
       CREATE TABLE IF NOT EXISTS resource_payload_sizes (uid TEXT PRIMARY KEY REFERENCES resources(uid) ON DELETE CASCADE, bytes INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS resource_index_versions (scope TEXT NOT NULL, api_version TEXT NOT NULL, kind TEXT NOT NULL, version TEXT NOT NULL, PRIMARY KEY(scope,api_version,kind));
+      CREATE TABLE IF NOT EXISTS resource_pressure (
+        source TEXT PRIMARY KEY REFERENCES resources(key) ON DELETE CASCADE, kind TEXT NOT NULL, tier TEXT NOT NULL, position TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS resource_pressure_kind ON resource_pressure(kind,tier,position,source);
+      CREATE INDEX IF NOT EXISTS resource_pressure_global ON resource_pressure(tier,position,source);
       CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, expires INTEGER NOT NULL, value TEXT NOT NULL);`);
     this.pages = new ResourcePages(this.db);
-    this.db.exec("UPDATE resources SET released=NULL");
+    this.db.exec("UPDATE resources SET released=NULL; DELETE FROM resource_pressure");
   }
   configure(config?: Partial<ResourceStorageConfig>): void { this.config = ResourceStorageConfigSchema.parse(config ?? {}); }
   subscribe(listener: (scope: string, resource: Resource<unknown, unknown>) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -300,17 +319,26 @@ export class ResourceStorage {
     const definition = this.definition(scope, resource);
     let released: string | undefined;
     let refs: readonly string[] = [];
+    let pressure: ReturnType<NonNullable<NonNullable<ResourceDefinition["retention"]>["pressure"]>>;
     try {
       const snapshot = cloneResourceValue(resource);
-      released = resource.metadata.deletionTimestamp ? undefined : definition?.retention?.releasedAt(snapshot);
-      refs = definition?.retention?.references(snapshot) ?? [];
-      if (released && !Number.isFinite(Date.parse(released))) throw new Error("Invalid resource release time");
+      const times = resource.metadata.deletionTimestamp ? [] : [definition.retention?.releasedAt(snapshot), definition.retention?.expiresAt?.(snapshot)]
+        .filter((at): at is string => !!at);
+      if (times.some(at => !Number.isFinite(Date.parse(at)))) throw new Error("Invalid resource release time");
+      released = times.length ? new Date(Math.min(...times.map(Date.parse))).toISOString() : undefined;
+      refs = definition.retention?.references(snapshot) ?? [];
+      pressure = resource.metadata.deletionTimestamp ? undefined : definition.retention?.pressure?.(snapshot);
+      if (pressure && (!["low", "high", "full"].includes(pressure.tier) || !Number.isFinite(Date.parse(pressure.at))))
+        throw new Error("Invalid resource pressure retention");
     } catch (error) {
       this.onRetentionError?.(resource, error);
       // Roll back the write or declaration: an unknown edge could otherwise expose a live dependency to collection.
       throw new Error(`Resource retention failed for ${resource.kind}/${resource.metadata.name}`, { cause: error });
     }
     this.db.prepare("UPDATE resources SET released=? WHERE key=?").run(released ?? null, key);
+    this.db.prepare("DELETE FROM resource_pressure WHERE source=?").run(key);
+    if (pressure) this.db.prepare("INSERT INTO resource_pressure VALUES (?,?,?,?)")
+      .run(key, kindKey(resource), pressure.tier, new Date(pressure.at).toISOString());
     this.db.prepare("DELETE FROM resource_refs WHERE source=?").run(key);
     for (const target of new Set([...refs, ...(resource.metadata.owner ? [resource.metadata.owner.uid] : [])])) {
       this.db.prepare("INSERT INTO resource_refs VALUES (?,?)").run(key, target);
@@ -431,10 +459,15 @@ export class ResourceStorage {
     const total = Number(this.db.prepare("SELECT coalesce(sum(bytes),0) AS n FROM resources").get()!.n);
     const kindFull = Number(usage.n) > limits.maxCount || Number(usage.bytes) > limits.maxBytes;
     const totalFull = total > this.config.maxBytes;
+    const kindPressure = Number(usage.n) >= limits.maxCount * this.config.lowWatermark || Number(usage.bytes) >= limits.maxBytes * this.config.lowWatermark;
+    const hostPressure = total >= this.config.maxBytes * this.config.lowWatermark;
+    if (kindPressure) this.capacityPressure.add(kind);
+    if (hostPressure) this.capacityPressure.add("*");
+    if (kindPressure || hostPressure) {
+      const notify = () => { for (const listener of this.pressureListeners) listener(); };
+      if (kindFull || totalFull) notify(); else this.afterCommit(notify);
+    }
     if (!kindFull && !totalFull) return;
-    if (kindFull) this.capacityPressure.add(kind);
-    if (totalFull) this.capacityPressure.add("*");
-    for (const listener of this.pressureListeners) listener();
     throw new ResourceCapacityError(kind, `count ${usage.n}/${limits.maxCount}, kind bytes ${usage.bytes}/${limits.maxBytes}, host bytes ${total}/${this.config.maxBytes}`);
   }
   afterCommit(callback: () => void): void {

@@ -113,7 +113,7 @@ export function bindChiefInputs(session: AgentSession, tools: readonly ChiefTool
     const prefix = at < 0 ? history.length : at;
     return [...history.slice(0, prefix), {
       role: "custom" as const, customType: "aide.chief-task", display: false, timestamp: 0,
-      content: `Current Input origin: ${current.origin}\n${instructions[current.origin]}\nAdmitted inputs for this task: ${JSON.stringify(current.inputs.slice(0, 8))}\nOther origins are background evidence only. An interrupted maintenance Input remains pending; do not acknowledge work you have not performed.`,
+      content: `Current Input origin: ${current.origin}\n${instructions[current.origin]}\nAdmitted inputs for this task: ${JSON.stringify(current.inputs.slice(0, 10))}\nOther origins are background evidence only. An interrupted maintenance Input remains pending; do not acknowledge work you have not performed.`,
     }, ...history.slice(prefix)];
   };
   session.agent.beforeToolCall = async (context, signal) => {

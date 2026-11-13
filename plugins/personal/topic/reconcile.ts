@@ -1,3 +1,4 @@
+import { readyBusinessInputs } from "../input/scheduling.ts";
 import { isResourceVersionConflict } from "@compforge/aide-plugin";
 import { pendingNoteReviews, noteReviewWatch } from "../note/reconcile.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -16,7 +17,7 @@ import { inputPreview } from "../input/prompt.ts";
 import { canActivate, finalizeExecution, nextInputs, runInput, submitPending } from "../loop.ts";
 import { topicPolicy, type TopicPolicy } from "./config.ts";
 import { commitStatus } from "../status.ts";
-import { topicReview, createReviewInput, idleReviewSchedule, reviewMaterialVersion } from "./review.ts";
+import { topicReview, tryCreateReviewInput, idleReviewSchedule, reviewMaterialVersion } from "./review.ts";
 import { updateTopic } from "./state.ts";
 
 const instructions = `Handle the activated Input using only the tools available for its origin. Keep the current task separate from background evidence and earlier unfinished tasks.
@@ -74,19 +75,18 @@ export async function reconcileTopic(context: PluginContext, execution: Reconcil
   if (c.metadata.deletionTimestamp) { await releaseTopicAgent(context, execution, c); return; }
   if (await reconcileAssignments(context, c)) return { requeueAfterMs: 1 };
   c = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(c)))!;
-  await ensureCapacityInputs(context, c);
-  c = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(c)))!;
   if (!c.spec.parentRef) {
     const retry = await submitPending(context, execution, c);
     if (retry) return retry;
   }
+  await ensureCapacityInputs(context, c);
   const result = await collectTopic(context, c);
   return { ...result, requeueAfterMs: Math.min(result?.requeueAfterMs ?? Infinity, topicPolicy(context.instance.config.topic).trigger.intervalSeconds * 1000) };
 }
 
 /**
- * @spec Deferred backlog cannot activate Chief, but may join a bounded batch activated by
- * another business Input. Maintenance uses its own Input and does not consume business backlog. Later arrivals never force continuation.
+ * @spec Deferred backlog activates a normal business batch at the root count/age threshold, independently of review.
+ * Maintenance uses its own Input and does not consume business backlog. Only Immediate Inputs steer.
  * @spec Fixed periodic wakeups inspect review eligibility; empty due checks back off without producing an Input or invoking Chief.
  * @spec Business Inputs take priority over maintenance; each maintenance activation admits only its own origin.
  * @spec Every capacity pass persists cooldown before inference and yields one activation to waiting business Inputs.
@@ -112,6 +112,21 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
       topicUid: c.metadata.uid, previousCount: initial.status.idleReviewCount ?? 0, idleReviewCount: c.status.idleReviewCount ?? 0,
       resetAt: c.status.idleReviewReset?.at ?? null, dueAt: idleReviewSchedule(c, policy.review).dueAt,
     } });
+  }
+  const ready = await readyBusinessInputs(context.resources, c, policy, now);
+  if (ready.inputs.length) {
+    const inputs = ready.inputs, input = inputs[0]!;
+    context.logger.info("Chief business batch ready", { attributes: { topicUid: c.metadata.uid,
+      inputIds: inputs.map(i => i.metadata.name), count: inputs.length, trigger: ready.reason ?? "business",
+      oldestDeferredAt: ready.oldestAt ?? null } });
+    const prompt = `${instructions}\nActivation: ${JSON.stringify({ kind: "input", topicId: c.spec.id,
+      inputId: input.metadata.name, inputIds: inputs.map(i => i.metadata.name), inputs: inputs.map(i => ({ inputId: i.metadata.name,
+        description: inputPreview(i, Math.floor((policy.contextChars - 3000) / inputs.length)) })),
+      at: new Date(now).toISOString() })}\nAssess each original Input separately; use read_input for complete evidence.`;
+    await runInput(context, execution.withContext({ topicId: c.spec.id, inputId: input.metadata.name,
+      inputIds: inputs.map(i => i.metadata.name) }), c, "chief", boundedPrompt(prompt, policy.contextChars),
+      input.metadata.name, inputs.map(i => i.metadata.name));
+    return { requeueAfterMs: 1 };
   }
   const schedule = idleReviewSchedule(c, policy.review);
   const due = review.enabled && Date.parse(schedule.dueAt) <= now;
@@ -160,7 +175,8 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
   noteReviewDue &&= !unchanged;
   if ((noteReviewDue || absorb || weave) && !pending.some(i => canActivate(i.spec, c))) {
     const agenda = await maintenanceAgenda(context.resources, [], policy);
-    const request = await createReviewInput(context, c, new Date(now).toISOString(), agenda, "aide:review", noteReviews, absorb || weave ? "understanding" : "idle");
+    const request = await tryCreateReviewInput(context, c, new Date(now).toISOString(), agenda, "aide:review", noteReviews, absorb || weave ? "understanding" : "idle");
+    if (!request) return { requeueAfterMs: intervalMs };
     pending.splice(0, 0, request);
     inputs = [request];
     c = (await context.resources.get<TopicResource["spec"], TopicResource["status"]>(resourceRef(c)))!;
@@ -171,7 +187,8 @@ export async function reconcileChief(context: PluginContext, execution: Reconcil
       || (!unchanged && pendingAbsorption(topics, c, true, versions).length > 0) || agenda.reason !== "review";
     try {
       if (needsReview) {
-        const request = await createReviewInput(context, c, schedule.dueAt, agenda);
+        const request = await tryCreateReviewInput(context, c, schedule.dueAt, agenda);
+        if (!request) return { requeueAfterMs: intervalMs };
         // Business arrivals retain priority over the maintenance Input.
         inputs = await nextInputs(context.resources, c, 8);
         if (!inputs.some(i => !isInternalInput(i.spec) && canActivate(i.spec, c))

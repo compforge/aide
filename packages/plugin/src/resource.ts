@@ -75,6 +75,16 @@ export interface ResourcePrinter<TSpec = unknown, TStatus = unknown> {
  */
 export interface ResourceRetention<S = unknown, T = unknown> {
   releasedAt(resource: Readonly<Resource<S, T>>): string | undefined;
+  /** Expire released objects even without capacity pressure; all tree/reference guards still apply. */
+  readonly collectOnRelease?: boolean;
+  /** Hard lifetime bound: once due, expiration may ignore incoming retention references and unfinished business receipts.
+   * Owners explicitly opt in; deletion still follows the normal controller lifecycle and bounded tree checks.
+   */
+  expiresAt?(resource: Readonly<Resource<S, T>>): string | undefined;
+  /** Explicitly allow discarding this object under pressure, even before release or while referenced.
+   * low/high/full are admission watermarks; at orders candidates within the owner's chosen tier.
+   */
+  pressure?(resource: Readonly<Resource<S, T>>): { tier: "low" | "high" | "full"; at: string } | undefined;
   references(resource: Readonly<Resource<S, T>>): readonly string[];
   /** Recheck current dependencies in the eviction transaction; false keeps the candidate protected. */
   canEvict?(resource: Readonly<Resource<S, T>>, context: ResourceValidationContext): boolean;

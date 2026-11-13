@@ -146,7 +146,7 @@ test("Topic silence retains knowledge; capacity evicts oldest safe candidates an
   await f.resources.create(INPUT_TYPE, { name: "pending", spec: { origin: "chief", originId: "test", text: "Unprocessed", attention: InputAttention.Normal },
     status: { topic: resourceRef(protectedTopic), assess: {} } });
   const count = f.aide.topics.list().length;
-  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, kinds: { "aide.dev/Topic": { maxCount: count } } }));
+  f.aide.topics.resources.storage.configure(ResourceStorageConfigSchema.parse({ lowWatermark: 0.95, highWatermark: 0.99, kinds: { "aide.dev/Topic": { maxCount: count } } }));
   await assert.rejects(f.aide.topics.ensure("new-arrival"), /capacity/);
   await collectResources(f.aide.topics.resources.storage);
   await f.aide.topics.ensure("new-arrival");

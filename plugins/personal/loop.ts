@@ -1,3 +1,6 @@
+import { inputExpired } from "./input/retention.ts";
+import { readyBusinessInputs } from "./input/scheduling.ts";
+import { topicPolicy } from "./topic/config.ts";
 import { asHarnessError } from "@compforge/aide-plugin";
 import { invalidateAssignment } from "./input/assignment.ts";
 import { commitStatus } from "./status.ts";
@@ -18,7 +21,7 @@ const attentionOrder = { [InputAttention.Immediate]: 0, [InputAttention.Normal]:
 export const canActivate = (input: InputSpec, owner: Pick<LoopResource, "kind">) =>
   owner.kind !== "Topic" || inputAttention(input) !== InputAttention.Deferred;
 export function eligible(input: Input, owner: Readonly<LoopResource>): boolean {
-  if (input.metadata.deletionTimestamp) return false;
+  if (input.metadata.deletionTimestamp || inputExpired(input)) return false;
   if (owner.kind === "Topic") return !(owner.spec as { parentRef?: unknown }).parentRef
     && input.status.assess?.topic?.uid === owner.metadata.uid && !!input.status.assess && !assessmentFinished(input.status.assess) && !input.status.assess.executionId;
   const receipt = attemptOf(input, resourceRef(owner));
@@ -62,8 +65,24 @@ export async function retryDelay(resources: ResourceClient, owner: Readonly<Loop
 export async function submitPending(context: PluginContext, execution: ReconcileContext, owner: Readonly<LoopResource>) {
   if (!owner.status.execution) return;
   let retry = false;
+  if (owner.kind === "Topic") {
+    const ready = await readyBusinessInputs(context.resources, owner as import("./topic/model.ts").TopicResource, topicPolicy(context.instance.config.topic));
+    if (ready.inputs.length) {
+      const urgent = ready.inputs.filter(i => immediate(i.spec));
+      const inputs = urgent.length ? urgent : ready.inputs;
+      const result = await execution.verbs.action<{ accepted: boolean; reason?: string }>("submit_topic", {
+        inputId: inputs[0]!.metadata.name, inputIds: inputs.map(i => i.metadata.name), operation: urgent.length ? "steer" : "followUp",
+      });
+      if (result.state === "failure") throw new Error(`Agent Input admission failed: ${result.error ?? "unknown error"}`);
+      context.logger.info("Chief business batch notification", { attributes: { topicUid: owner.metadata.uid,
+        count: inputs.length, trigger: ready.reason ?? "business", oldestDeferredAt: ready.oldestAt ?? null,
+        operation: urgent.length ? "steer" : "followUp", accepted: result.state === "success" && result.value.accepted } });
+      return result.state === "success" && (result.value.accepted || ["not_running", "admission_conflict"].includes(result.value.reason ?? ""))
+        ? { requeueAfterMs: 100 } : undefined;
+    }
+  }
 
-  const batch = owner.kind === "Topic" ? await nextInputs(context.resources, owner, 8)
+  const batch = owner.kind === "Topic" ? (await nextInputs(context.resources, owner, 8)).filter(i => isInternalInput(i.spec))
     : await pendingInputs(context.resources, resourceRef(owner));
   for (const input of batch) {
     if (!eligible(input, owner) || !canActivate(input.spec, owner)) continue;
@@ -91,7 +110,7 @@ export async function runInput(context: PluginContext, execution: ReconcileConte
       { operation: "patchStatus", resource: current, patch: { execution: { id: execution.executionId, startedAt, ...(inputs[0] ? { inputOrigin: inputs[0].spec.origin } : {}), admissionRevision: 0, observedGeneration: current.metadata.generation },
         ...(current.kind === "Topic" ? { ...(inputs[0]?.spec.origin === "aide:review" ? { notifiedWeaveRevision: (owner.status as import("./topic/model.ts").TopicStatus).weaveRevision ?? 0 } : {}), lastError: null } : {}) } },
       ...inputs.map(input => ({ operation: "patchStatus" as const, resource: input!, patch: attemptPatch(input!, resourceRef(current), {
-        executionId: execution.executionId, agent: undefined, startedAt, lastError: undefined, nextAttemptAt: undefined,
+        executionId: execution.executionId, agent: undefined, startedAt, lastError: undefined, errorAt: undefined, retryable: undefined, nextAttemptAt: undefined,
         ...(current.kind === "Route" ? { attempts: (input!.status.route?.attempts ?? 0) + 1 } : {}) }) })),
     ]);
   } catch (error) {
@@ -188,8 +207,8 @@ export async function finalizeExecution(context: Pick<PluginContext, "resources"
       await commitStatus(context.resources, [
         ...unfinished.map(i => ({ operation: "patchStatus" as const, resource: i, patch: latest.kind === "Topic" ? { assess: { ...i.status.assess,
           ...(suspended.has(i.metadata.name)
-            ? { executionId: undefined, agent: undefined, startedAt: undefined, lastError: undefined }
-            : { lastError: error || "Chief ended without confirming input completion" }) } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error,
+            ? { executionId: undefined, agent: undefined, startedAt: undefined, deliveryId: undefined, lastError: undefined, errorAt: undefined, retryable: undefined }
+            : { lastError: error || "Chief ended without confirming input completion", errorAt: at }) } } : attemptPatch(i, resourceRef(latest), receipt => receipt?.executionId !== executionId || receipt.completedAt ? {} : { lastError: error, errorAt: at, retryable: !compactionFailed,
           ...(latest.kind === "Route" && !compactionFailed ? { nextAttemptAt: new Date(Date.now() + Math.min(300_000, 1000 * 2 ** Math.min(i.status.route?.attempts ?? 1, 8))).toISOString() } : {}) }) })),
         { operation: "patchStatus", resource: latest, patch: { execution: null, ...(released ? { agent: undefined } : {}), ...(latest.kind === "Topic" ? { idleSince: at, lastError: error || null, reviewCheckedAt: null, ...(latest.status.execution.inputOrigin && !isInternalInput({ origin: latest.status.execution.inputOrigin })
             ? { idleReviewCount: 0 } : {}), idleReviewReset: null } : {}), ...(["Task", "Routine"].includes(latest.kind) ? {

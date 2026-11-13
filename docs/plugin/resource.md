@@ -180,7 +180,7 @@ SQLite 执行 namespace/selector 过滤、稳定排序、keyset 续页和 LIMIT�
 
 Host 的 `ResourceStorage` 将所有插件 Resource 存入共享 SQLite，以按需读取替代常驻完整快照集合。容量按 Group/Kind 汇总，配额覆盖不同 API 版本、namespace 和插件实例；同时限制单条大小、每种数量/字节以及 Host 总字节。配置见 [Resource 容量](../configuration.md#resource-容量)。
 
-资源所有者通过 `ResourceDefinition.retention` 定义释放时间和引用的精确 uid，与类型一起注册。没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。需要依赖其它资源判断安全资格的类型可声明 retention.canEvict；底座在实际淘汰的同一事务内传入当前 ResourceValidationContext，返回 false 时跳过候选。该回调纯同步，异常使写入回滚，不能只依赖提前计算的释放时间保证安全。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。业务资源的释放条件由所属插件说明。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
+资源所有者通过 `ResourceDefinition.retention` 定义释放时间和引用的精确 uid，与类型一起注册。默认没有释放时间的资源保持保护；排序策略只决定合格记录的回收次序。类型可显式声明 collectOnRelease（到释放时间即主动清理）、expiresAt（硬到期上限）以及 pressure（low/high/full 档及候选排序时间）；插件拥有业务分类，Host 不解释 completedAt/errorAt 等领域字段。需要依赖其它资源判断安全资格的类型可声明 retention.canEvict；底座在实际淘汰的同一事务内传入当前 ResourceValidationContext，返回 false 时跳过候选。该回调纯同步，异常使写入回滚，不能只依赖提前计算的释放时间保证安全。声明中的 owner 也进入引用索引，正在删除的资源交由原有删除流程完成。业务资源的释放条件由所属插件说明。未知 kind 同样参与配额，未声明释放规则时不会自动删除。
 
 每次写入在事务内同步记录、引用索引和回执，并检查硬配额；超限时回滚写入并通知 Host GC，不在写入调用中回收，也不等待空间释放。GC 通知不随写事务回滚撤销。缩小已有记录和提交标准删除标记允许在超配额状态下进行；deleting 对象仍计入真实容量，实际移除后才释放空间。回收流程见 [GC](#gc)。
 
@@ -188,13 +188,13 @@ Host 的 `ResourceStorage` 将所有插件 Resource 存入共享 SQLite，以按
 
 ## GC
 
-Host GC 在 Manager 启动时、周期检查和容量压力通知时运行，同一 Host 的重复唤醒合并为一次执行，关闭 Manager 时停止并等待当前批次退出。周期检查只在达到硬阈值或仍有未解决的压力时选择新候选，不因资源已 released 就主动清空历史。压力回收以 lowWatermark 为目标，已进入 deleting 的用量只用于避免重复安排过量回收，不能用于准入。
+Host GC 在 Manager 启动时、周期检查和容量压力通知时运行，同一 Host 的重复唤醒合并为一次执行，关闭 Manager 时停止并等待当前批次退出。首先无条件检查显式开启的到期清理。容量达到 lowWatermark（默认 90%）就产生压力通知；先处理已释放候选，再处理 low 档。仍达到 highWatermark（默认 95%）才处理 high 档，仍达到硬容量上限才处理 full 档。每次删除接纳后重查水位，不因低档候选耗尽而越级清理。未显式开启到期或压力清理的类型继续保留原有保护。已进入 deleting 的用量只用于避免重复安排过量回收，不能用于准入。
 
 按 kind 回收先从该 kind 已到释放时间的成员沿 owner UID 找到 root，再按原有顺序分页选择 root；总字节压力允许选择任何 kind。owner children 查询使用索引。每棵候选树在独立短事务内重新检查全部成员的 released、外部引用和 canEvict，校验通过后原子写入整棵树的 deletionTimestamp。任何成员拒绝删除会回滚整棵树的标记，不影响其它候选。
 
-删除标记经已有 Watch 唤醒资源 Controller，成功完成终止 reconcile 后 finalize。没有 Controller 的资源由 GC finalize；插件未激活、恢复中或 Controller 暂停时保留，不把缺失绑定视为无 Controller。重启从持久化删除标记继续处理。每轮也按 owner 索引查找 owner 已消失或进入 deleting 的 dependent，分批补齐删除请求；这是已决定的生命周期传播，不再依赖容量压力或 released。容量选择仍先保护未释放子资源，不会为了腾空间主动触发这类级联。容量 GC 不跨事务保持整棵树的原子移除，而是保证整棵树的删除接纳原子性，之后沿各对象的生命周期完成。
+删除标记经已有 Watch 唤醒资源 Controller，成功完成终止 reconcile 后 finalize。没有 Controller 的资源由 GC finalize；插件未激活、恢复中或 Controller 暂停时保留，不把缺失绑定视为无 Controller。重启从持久化删除标记继续处理。每轮也按 owner 索引查找 owner 已消失或进入 deleting 的 dependent，分批补齐删除请求；这是已决定的生命周期传播，不再依赖容量压力或 released。默认容量选择保护未释放子资源；显式 expiresAt 或 pressure 规则可授权丢弃未完成且被引用的对象，不能被保留引用无限延期。整棵树仍逐节点检查各自资格、canEvict 和生命周期可用性，不因父节点可丢弃而旁路未授权子节点。容量 GC 不跨事务保持整棵树的原子移除，而是保证整棵树的删除接纳原子性，之后沿各对象的生命周期完成。
 
-GC 按配置分页，每棵树检查后让出 Host 执行权。为约束同步事务，超过 maxTreeSize 的树整棵保留并记录告警，不截断删除。该限制不影响显式删除契约。retention.canEvict 和领域 Validator 仍必须是纯同步、成本可控的检查；节点上限不是任意回调的硬超时保证。
+GC 按配置分页，每棵树检查后让出 Host 执行权。released 与 pressure 档/时间投影随对象写入同一事务更新；候选查询走索引，并在删除事务内重新核验当前资格。为约束同步事务，超过 maxTreeSize 的树整棵保留并记录告警，不截断删除。该限制不影响显式删除契约。retention.canEvict 和领域 Validator 仍必须是纯同步、成本可控的检查；节点上限不是任意回调的硬超时保证。
 
 ## Resource Printer
 

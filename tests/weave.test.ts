@@ -260,7 +260,7 @@ test("Root Chief admits a bounded backlog with urgent Input first and independen
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
     prompts++;
     const activation = JSON.parse(args.prompt.split("Activation: ")[1].split("\n")[0]);
-    assert.equal(activation.inputs.length, 8);
+    assert.equal(activation.inputs.length, 10);
     assert.equal(activation.inputs[0].inputId, "urgent");
     for (const item of activation.inputs) {
       const fact = f.aide.topics.inputStore.get(item.inputId)!;
@@ -271,7 +271,7 @@ test("Root Chief admits a bounded backlog with urgent Input first and independen
   } } };
   await reconcileChief(f.context, execution, f.refresh(root));
   assert.equal(prompts, 1);
-  assert.equal(f.aide.topics.pending(root.metadata.uid).length, 3);
+  assert.equal(f.aide.topics.pending(root.metadata.uid).length, 1);
   assert.ok(f.aide.topics.pending(root.metadata.uid).every(i => !i.status.assess!.executionId));
 });
 

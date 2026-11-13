@@ -43,7 +43,7 @@ test("Group/Kind quota spans versions and scopes; protected references survive e
 
 test("LRU is explicit reads; listing does not refresh access, and unknown resource kinds are protected", async (t) => {
   const { root, db, record } = setup(t);
-  db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 2, order: "lru" }, lowWatermark: 0.95 }));
+  db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 2, order: "lru" }, lowWatermark: 0.95, highWatermark: 0.99 }));
   db.write("a", "one", record("a")); db.write("b", "one", record("b"));
   db.db.prepare("UPDATE resources SET accessed=0 WHERE key='b'").run();
   [...db.keys("one")]; db.read("a", true);
@@ -98,7 +98,7 @@ test("Collected Input redelivery is acknowledged without recreating the resource
   store.storage.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 1 } }));
   const spec = { origin: "source" as const, originId: "fixture", text: "fact" };
   const first = store.submit("owner", "one", spec);
-  store.update(first, { route: { completedAt: new Date().toISOString(), result: { topics: [], reason: "ignored" } } });
+  store.update(first, { retention: { successSeconds: 1, errorSeconds: 2 }, route: { completedAt: new Date(Date.now() - 1500).toISOString(), result: { topics: [], reason: "ignored" } } });
   assert.throws(() => store.submit("owner", "two", spec), ResourceCapacityError);
   await collectResources(store.storage);
   store.submit("owner", "two", spec);
@@ -132,7 +132,7 @@ test("GC predicates protect committed dependencies before reclaiming newer resou
   db.transaction(() => {
     db.write("dependent", "guarded", record("dependent", false, ["old"]));
   });
-  db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 3 }, lowWatermark: 0.95 }));
+  db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 3 }, lowWatermark: 0.95, highWatermark: 0.99 }));
   await collectResources(db);
   db.configure(ResourceStorageConfigSchema.parse({ defaults: { maxCount: 2 } }));
   assert.ok(db.has("old"), "the committed dependency protects the oldest candidate");
