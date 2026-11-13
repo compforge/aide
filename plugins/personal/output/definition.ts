@@ -36,7 +36,11 @@ export const OutputStatusSchema = z.object({
 
 export const OutputDefinition: ResourceDefinition<OutputSpec, OutputStatus> = {
   indexes: { activeAddress: r => ["pending", "sending", "uncertain"].includes(r.status.phase) ? [...new Set([r.spec.target.uid, r.status.delivery?.address.uid, r.status.waitingAddress?.uid].filter((uid): uid is string => !!uid))] : [], reply: r => r.spec.replyTo ? [r.spec.replyTo.key] : [], address: r => [r.spec.target.uid], pendingAddress: r => ["pending", "sending"].includes(r.status.phase) ? [...new Set([r.spec.target.uid, r.status.delivery?.address.uid, r.status.waitingAddress?.uid].filter((uid): uid is string => !!uid))] : [], pendingReceiver: r => ["pending", "sending"].includes(r.status.phase) ? [...r.status.delivery?.receivers ?? []].map(p => p.uid) : [], topic: r => [r.spec.topic.uid], webEndpoint: r => r.status.delivery && r.status.phase === "delivered" && isChannelAddress(r.status.delivery.target) && r.status.delivery.target.channelId === "web" ? [r.status.delivery.target.endpoint] : [] },
-  orderedIndexes: { deliveredPerson: r => r.status.phase === "delivered" && r.status.deliveredAt
+  orderedIndexes: {
+    topicActivity: r => !r.metadata.deletionTimestamp ? [{ value: r.spec.topic.uid, order: r.metadata.creationTimestamp }] : [],
+    webActivity: r => !r.metadata.deletionTimestamp && r.status.phase === "delivered" && r.status.delivery && isChannelAddress(r.status.delivery.target) && r.status.delivery.target.channelId === "web"
+      ? [{ value: r.status.delivery.target.endpoint, order: r.metadata.creationTimestamp }] : [],
+    deliveredPerson: r => r.status.phase === "delivered" && r.status.deliveredAt
     ? [...r.status.delivery?.receivers ?? []].map(p => ({ value: p.uid, order: r.status.deliveredAt! })) : [] },
   type: OUTPUT_TYPE, schema: { spec: OutputSpecSchema, status: OutputStatusSchema }, printer: outputPrinter,
   validator: { create(current, context) {

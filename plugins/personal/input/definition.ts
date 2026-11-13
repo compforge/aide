@@ -86,6 +86,8 @@ export const InputDefinition: ResourceDefinition<InputSpec, InputStatus> = {
     handle: r => Object.keys(r.status.handle ?? {}),
     handlePending: r => Object.entries(r.status.handle ?? {}).filter(([, s]) => !s.completedAt).map(([uid]) => uid),
   },
+  orderedIndexes: { topicActivity: r => !r.metadata.deletionTimestamp && r.status.topic
+    ? [{ value: r.status.topic.uid, order: r.metadata.creationTimestamp }] : [] },
   retention: { releasedAt: r => {
     const completed = [r.status.route?.completedAt, ...(r.status.assess ? [r.status.assess.completedAt] : []), ...Object.values(r.status.handle ?? {}).map(s => s.completedAt)];
     return completed.every(Boolean) ? (completed as string[]).sort().at(-1) : undefined;
