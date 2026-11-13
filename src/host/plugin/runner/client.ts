@@ -56,7 +56,7 @@ interface ControllerExecution {
 }
 
 export interface PluginRunnerCallbacks {
-  readonly controllerRequest?: (request: Extract<HostRequest, { method: "controller.begin" | "controller.finish" | "controller.schedule" }>) => Promise<unknown>;
+  readonly controllerRequest?: (request: Extract<HostRequest, { method: "controller.scan" | "controller.begin" | "controller.finish" | "controller.schedule" }>) => Promise<unknown>;
   readonly connectors?: ConnectorClient;
   readonly resources: ResourceClient;
   readonly printers: Pick<import("@compforge/aide-plugin").PluginPrinters, "describe" | "summarize">;
@@ -400,6 +400,7 @@ export class PluginRunnerClient {
 
   private async handleHostRequest(request: HostRequest): Promise<unknown> {
     switch (request.method) {
+      case "controller.scan":
       case "controller.begin":
       case "controller.finish":
       case "controller.schedule": {

@@ -183,7 +183,7 @@ interface ManagedController {
   close(): void;
   scheduledReconciles(): ScheduledReconcile[];
   resourceKeys?(): ReconcileKey[];
-  initialReconciles?(): ReconcileKey[];
+  initialReconciles?(): AsyncIterable<ReconcileKey>;
 }
 
 /**
@@ -239,6 +239,7 @@ export class Manager {
   private started = false;
   private starting?: Promise<void>;
   private closed = false;
+  private readonly startupAbort = new AbortController();
   private closing?: Promise<void>;
 
   private readonly resourceHome: string;
@@ -346,6 +347,8 @@ export class Manager {
   /** @spec All callers publish resource changes through the same Watch dispatcher. */
   private readonly remoteConcurrency: number;
   private readonly pendingReconciles = new Set<Promise<unknown>>();
+  private readonly initialScans = new Set<ManagedController>();
+  private readonly scanRetries = new Map<ManagedController, ReturnType<typeof setTimeout>>();
 
   async settled(): Promise<void> {
     do {
@@ -487,6 +490,7 @@ export class Manager {
     }
     const packageSource = await this.packageLoader.load(instance);
     await this.prepareResourceDefinitions(instance, packageSource);
+    await ResourceStorage.open(this.resourceHome).prepare({ scope: instance.pluginInstanceId, signal: this.startupAbort.signal, log: this.log });
     const runtime = { cwd: this.snapshot().cwd };
 
     const resources = this.resourceClient(instance.pluginInstanceId);
@@ -794,6 +798,9 @@ export class Manager {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.closed = true;
+    this.startupAbort.abort();
+    for (const timer of this.scanRetries.values()) clearTimeout(timer);
+    this.scanRetries.clear();
     const closing = this.closeManager();
     this.closing = closing;
     return closing;
@@ -899,7 +906,13 @@ export class Manager {
     return () => registration.close();
   }
 
-  private async handleControllerRequest(instance: PluginInstance, request: Extract<HostRequest, { method: "controller.begin" | "controller.finish" | "controller.schedule" }>): Promise<unknown> {
+  private async handleControllerRequest(instance: PluginInstance, request: Extract<HostRequest, { method: "controller.scan" | "controller.begin" | "controller.finish" | "controller.schedule" }>): Promise<unknown> {
+    if (request.method === "controller.scan") {
+      if (request.scope.pluginInstanceId !== instance.pluginInstanceId) throw new Error("Runner Controller scope mismatch");
+      const controller = this.controllers.get(reconcileScopeId(request.scope));
+      if (!(controller instanceof RunnerController)) throw new Error("Unknown Runner Controller");
+      return controller.scan(request.continue);
+    }
     const ref = request.method === "controller.finish" ? request.scope.resourceRef : undefined;
     const key: ReconcileKey = request.method !== "controller.finish" ? request.key : {
       pluginInstanceId: request.scope.pluginInstanceId,
@@ -1176,11 +1189,27 @@ export class Manager {
   }
 
   private enqueueInitial(controller: ManagedController): void {
-    for (const key of controller.initialReconciles?.() ?? []) {
-      void this.enqueue(key).catch(() => {
-        // Queue callback has already scheduled retry and reported diagnostics.
-      });
-    }
+    if (this.closed || this.initialScans.has(controller)) return;
+    clearTimeout(this.scanRetries.get(controller)); this.scanRetries.delete(controller);
+    this.initialScans.add(controller);
+    const scan = async () => {
+      for await (const key of controller.initialReconciles?.() ?? []) {
+        if (this.closed || this.controllers.get(reconcileScopeId(controller.scope)) !== controller) return;
+        void this.enqueue(key).catch(() => { /* Reconcile failures already schedule retry. */ });
+      }
+    };
+    const pending = scan().catch(error => {
+      if (this.closed || this.controllers.get(reconcileScopeId(controller.scope)) !== controller) return;
+      this.log?.({ level: "error", source: "aide", component: "plugin.controller", message: "Controller resource discovery failed; retry scheduled",
+        error: logError(error), pluginInstanceId: controller.scope.pluginInstanceId, attributes: { retryAfterMs: 1000 } });
+      const timer = setTimeout(() => {
+        this.scanRetries.delete(controller);
+        if (this.controllers.get(reconcileScopeId(controller.scope)) === controller) this.enqueueInitial(controller);
+      }, 1000);
+      timer.unref(); this.scanRetries.set(controller, timer);
+    }).finally(() => this.initialScans.delete(controller));
+    this.pendingReconciles.add(pending);
+    void pending.finally(() => this.pendingReconciles.delete(pending));
   }
 
   /** @spec Host-managed Source discovery gates Watch delivery independently of execution capacity.
@@ -1244,11 +1273,7 @@ export class Manager {
     ) {
       return;
     }
-    for (const key of controller.resourceKeys?.() ?? []) {
-      void this.enqueue(key).catch(() => {
-        // Queue callback has already scheduled retry and reported diagnostics.
-      });
-    }
+    this.enqueueInitial(controller);
   }
 
 

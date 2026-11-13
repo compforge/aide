@@ -1,3 +1,4 @@
+import { setImmediate as yieldToRunner } from "node:timers/promises";
 import { runnerExecution } from "./execution.ts";
 import { deepFreeze } from "../reconcile/snapshot.ts";
 import { validateSources } from "../reconcile/source.ts";
@@ -8,13 +9,13 @@ import { reconcileKeyId, ReconcileCapacity, ReconcileDueQueue, ReconcileQueue, t
 import { CronSourceQueue } from "../reconcile/cron-source.ts";
 import type { ReconcileKey, ReconcileScope } from "../protocol/reconcile.ts";
 import type { ExecutionScope, VerbResponse } from "../protocol/verbs.ts";
-import type { HostRequest, RunnerRequest } from "../protocol/ipc.ts";
+import type { ControllerResourcePage, HostRequest, RunnerRequest } from "../protocol/ipc.ts";
 
 type Change = Extract<RunnerRequest, { method: "controller.change" }>["change"];
 export interface ReconcileAdmission { scope: ExecutionScope; resource: Resource<unknown, unknown>; snapshot: ReconcileSnapshot }
 interface Registration {
   definition: Controller<unknown, unknown>; scope: ReconcileScope; queue?: ReconcileQueue;
-  abort: AbortController; attempts: Map<string, number>;
+  abort: AbortController; attempts: Map<string, number>; scanning?: Promise<void>; scanRetry?: ReturnType<typeof setTimeout>;
 }
 
 /** @spec One Runner owns Watch mapping, coalescing queues, retries and timers. Host owns durable state and action execution.
@@ -79,14 +80,38 @@ export class Controllers {
         });
       } catch (error) { reportError(error); }
     }
-    await this.enqueueAll(id);
+    this.background(this.enqueueAll(id));
   }
 
-  private async enqueueAll(id: string): Promise<void> {
+  /** @spec The queue receives changes before initial discovery; live cursors plus Watch avoid gaps during paging.
+   * @link docs/plugin/resource.md#存储准备与启动
+   */
+  private enqueueAll(id: string): Promise<void> {
     const entry = this.require(id);
-    const resources = await this.resources.list(entry.definition.resourceType, { namespace: "v1", includeDescendants: true });
-    for (const resource of resources) this.background(this.enqueue(id, { ...entry.scope, resourceId: resource.metadata.name,
-      namespace: resource.metadata.namespace }));
+    if (entry.scanning) return entry.scanning;
+    clearTimeout(entry.scanRetry); entry.scanRetry = undefined;
+    const scan = async () => {
+      let cursor = "", count = 0, batches = 0;
+      const started = performance.now();
+      do {
+        if (entry.abort.signal.aborted) return;
+        const page = await this.callHost<ControllerResourcePage>({ method: "controller.scan", scope: entry.scope, continue: cursor });
+        if (entry.abort.signal.aborted) return;
+        for (const ref of page.items) this.background(this.enqueue(id, { ...entry.scope, resourceId: ref.name, namespace: ref.namespace }));
+        count += page.items.length; batches++;
+        cursor = page.metadata.continue;
+        await yieldToRunner(undefined, { signal: entry.abort.signal });
+      } while (cursor);
+      this.log.info("Controller resource discovery completed", { attributes: { controllerId: id, count, batches, elapsedMs: Math.round(performance.now() - started) } });
+    };
+    entry.scanning = scan().catch(error => {
+      if (!entry.abort.signal.aborted) {
+        this.log.error("Controller resource discovery failed; retry scheduled", { error, attributes: { controllerId: id, retryAfterMs: 1000 } });
+        entry.scanRetry = setTimeout(() => this.background(this.enqueueAll(id)), 1000);
+        entry.scanRetry.unref();
+      }
+    }).finally(() => { entry.scanning = undefined; });
+    return entry.scanning;
   }
   enqueue(id: string, key: ReconcileKey): Promise<void> {
     const entry = this.require(id);
@@ -148,7 +173,7 @@ export class Controllers {
   }
   async settled(): Promise<void> { do { await Promise.allSettled([...this.pending]); } while (this.pending.size); }
   stop(id: string): void {
-    const entry = this.require(id); entry.abort.abort(); entry.queue?.close(); this.due.removeScope(entry.scope); this.cron.removeScope(entry.scope);
+    const entry = this.require(id); entry.abort.abort(); clearTimeout(entry.scanRetry); entry.queue?.close(); this.due.removeScope(entry.scope); this.cron.removeScope(entry.scope);
   }
   close(): void { for (const id of this.registrations.keys()) this.stop(id); this.due.close(); this.cron.close(); }
   private require(id: string): Registration { const entry = this.registrations.get(id); if (!entry) throw new Error(`Unknown Controller: ${id}`); return entry; }

@@ -52,6 +52,7 @@ test("Resource sets survive storage, patch, paging, validators, indexes and rest
   const reopened = new ResourceStorage(home);
   t.after(() => reopened.db.close());
   reopened.register("example", [KeyedDefinition]);
+  await reopened.prepare();
   const restored = reopened.read(store.key(KEYED_TYPE, "one"))!.object as typeof resource;
   assert(restored.spec.people.has({ uid: "c" }));
   assert(restored.status.receivers.has({ uid: "b" }));

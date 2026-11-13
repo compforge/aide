@@ -150,3 +150,20 @@ test("Chief notification bookkeeping does not wake Topic Reconcile", async t => 
       definition.name === "summary" ? [] : [{ name: topic.metadata.name, namespace: "v1" }]);
   }
 });
+
+/** @case Existing Topics resume through Controller discovery without loading presentation histories. */
+test("startup resumes existing Topic inputs without Topic or Work display projections", async t => {
+  let calls = 0;
+  const { aide, submit } = setup(t, { async chief() { calls++; return "Handled"; } });
+  const topic = await aide.topics.ensure("me");
+  const client = aide.runtime.plugins.resourceClient("personal");
+  await routeTo(client, topic.metadata, await submit("before-start"));
+  const list = aide.topics.list, read = aide.personal.store.read;
+  aide.topics.list = () => { throw new Error("Startup must not render Topic history"); };
+  aide.personal.store.read = () => { throw new Error("Startup must not render Work history"); };
+  try { await aide.start(); }
+  finally { aide.topics.list = list; aide.personal.store.read = read; }
+  await aide.settled();
+  assert.equal(calls, 1);
+  assert.equal(aide.topics.inputStore.get("before-start")!.status.assess?.completedAt !== undefined, true);
+});

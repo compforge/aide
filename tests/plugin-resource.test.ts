@@ -393,7 +393,9 @@ describe("PluginResourceStore", () => {
     // Bypass admission to model corrupt on-disk content, not a valid API write.
     resources.storage.db.prepare("UPDATE resources SET data=? WHERE key=?").run(JSON.stringify(corrupt), key);
     expect(() => resources.get(REQ_LOOP_RUN, "run_1")).toThrow(`invalid plugin resource ${key}: namespace must be v1`);
-    expect(() => resources.list(REQ_LOOP_RUN)).toThrow(`invalid plugin resource ${key}: namespace must be v1`);
+    // SQL selection excludes rows outside the requested namespace; matching rows still validate storage identity.
+    expect(resources.list(REQ_LOOP_RUN)).toEqual([]);
+    expect(() => resources.list(REQ_LOOP_RUN, { includeDescendants: true })).toThrow(`invalid plugin resource ${key}: namespace must be v1`);
     expect(resources.storage.read(key)!.object.metadata.namespace).toBe("v1/project/another-project");
   });
 

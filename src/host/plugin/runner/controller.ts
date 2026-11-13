@@ -46,6 +46,12 @@ export class RunnerController {
     this.executions.clear();
     void this.options.runner.request({ method: "controller.stop", controllerId: this.options.registration.controllerId }).catch(() => {});
   }
+  scan(cursor?: string) {
+    if (this.closed) throw new Error("Controller is closed");
+    return this.options.store.storage.identities(this.scope.pluginInstanceId,
+      { apiVersion: this.scope.resourceApiVersion, kind: this.scope.resourceKind },
+      { namespace: this.scope.namespace, includeDescendants: true, limit: 64, consistency: "live", continue: cursor });
+  }
   async begin(key: ReconcileKey) {
     if (this.closed) throw new Error("Controller is closed");
     const ref = { apiVersion: key.resourceApiVersion, kind: key.resourceKind, namespace: key.namespace, name: key.resourceId };

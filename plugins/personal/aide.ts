@@ -52,7 +52,7 @@ import { Store } from "./store.ts";
 import { workType, WORK_TYPES, type WorkSpec } from "./resources.ts";
 import { TOPIC_TYPE, INPUT_TYPE, digest } from "./chief-model.ts";
 import { TopicDeletionBlocked, type TopicDeletion } from "./topic/model.ts";
-import { TopicStore, topicKey } from "./topic/store.ts";
+import { TopicStore } from "./topic/store.ts";
 import type { InputStore } from "./input/store.ts";
 import { chiefTools } from "../../agents/chief/chief-tools.ts";
 import { createChiefAgent, type ChiefAgentOptions } from "../../agents/chief/agent.ts";
@@ -362,10 +362,7 @@ export class Personal {
     await this.recoverInterrupted();
     await this.core.start();
     if (!this.plugins.isInstanceActive("personal")) throw new Error("Personal Plugin failed to start");
-    for (const work of this.store.read().works) this.wake(workType(work.kind), work.id);
-    for (const topic of this.store.topics.list()) {
-      this.wake(TOPIC_TYPE, topicKey(topic.id));
-    }
+    // @why Controller discovery owns restart wakeups; display projections load unrelated Input/Output history.
   }
 
   /** @spec Recovery retains unacknowledged effects as failed evidence; it never silently resubmits Chief actions. */
