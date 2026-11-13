@@ -23,6 +23,22 @@ Merge Patch、JSON Patch（包括 test）操作编码后的 JSON 文档，完成
 HTTP 和工具的展示 DTO 仍显式投影为 JSON 数组。
 
 
+## 存储准备与启动
+
+ResourceDefinition 注册只建立类型与回调映射，不读取历史对象。Host 在业务初始化和对应 Plugin 激活前显式调用 ResourceStorage.prepare；已有记录的类型在准备完成前拒绝读写，空类型可以直接使用。同一存储的准备任务串行执行，支持取消；某个 Plugin 准备失败不阻止其它 Plugin 独立准备和激活。
+
+查询索引按插件实例、完整 apiVersion/kind 保存准备版本。indexVersion 默认为 1；索引回调或影响索引结果的 schema 规范化规则变化时必须递增。索引名称集合变化同样触发重建。只有缺失或版本变化的类型重建查询索引；开始重建先撤销原版本标记，全部成功后才写入新版本，中断或失败后重新遍历，未完成的索引不标记为就绪。准备过程不改写 Resource 内容、UID 或 resourceVersion。
+
+每次进程启动仍重新确认已注册类型的 released 和引用关系，不凭查询索引版本信任旧 retention 结果。启动先清空持久化 released 投影，准备按类型分批恢复；任何已注册集合尚未准备完成时，GC 暂停回收，避免使用部分引用图。未知类型保持原引用边且不可回收。正常写入仍在同一事务内更新对象、查询索引和 retention。
+
+准备每批最多读取 64 个对象，处理达到 8 ms 后提交当前批次，并通过 event-loop yield 继续；单个回调与 SQLite 语句无法被该预算抢占。日志记录类型、是否重建、处理数量、批次数、总耗时和最大单批耗时。准备失败使对应 Plugin 保持不可用；reconcile 队列全部清空不是 readiness 的前提。
+
+List 与 page 共用 SQL 选择器，先限定插件实例、类型与 namespace 范围，再加载匹配对象；不通过全库解码发现 namespace。List 返回完整结果并保留原排序，分页接口用于有界遍历。仅查询命中记录参与读取校验，List 不承担全库完整性检查。
+
+Controller 的初始发现与 cron 重扫按 live 游标分批读取资源身份，每批最多 64 个，入队后让出 event loop；执行 reconcile 时再读取最新对象。Runner 先建立队列接收 Watch，再在后台扫描；Host 内置 Controller 同样通过已安装的 Watch 与初始扫描衔接。游标之前的新增或更新由 Watch 唤醒，重复 key 由 workqueue 合并；重启从头发现，删除后的 key 在执行时确认不存在。初始发现任务计入 settled 等待，失败后从头重试，同一 Controller 的扫描合并；关闭后停止继续取页和重试。恢复持久化 deadline 只读取身份与时间，不解码 spec/status。Personal 不再为启动唤醒构造 Topic/Work 展示投影；已有资源统一由 Controller 初始发现恢复。
+
+验证见 tests/resource-startup.test.ts，以及 Resource 分页、Controller 和 workqueue 的回归用例。
+
 ## API 版本与演进
 
 apiVersion 表达资源结构与语义契约，metadata.generation 表达 spec 修订，metadata.resourceVersion 用于并发控制；产品 VERSION 与它们独立。

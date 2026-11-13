@@ -371,12 +371,12 @@ export class Controller<TSpec, TStatus> {
   }
 
   scheduledReconciles(): ScheduledReconcile[] {
-    return this.store.scheduledReconciles(this.resourceType, this.scope.controllerName).map((entry) =>
+    return this.store.scheduledReconcileRefs(this.resourceType, this.scope.controllerName).map((entry) =>
       Object.freeze({
         key: ownedKey({
           ...this.scope,
-          namespace: entry.resource.metadata.namespace,
-          resourceId: entry.resource.metadata.name,
+          namespace: entry.namespace,
+          resourceId: entry.name,
         }),
         nextReconcileAt: entry.nextReconcileAt,
       })
@@ -417,8 +417,19 @@ export class Controller<TSpec, TStatus> {
     );
   }
 
-  initialReconciles(): ReconcileKey[] {
-    return this.resourceKeys();
+  async *initialReconciles(): AsyncIterable<ReconcileKey> {
+    let cursor = "";
+    do {
+      if (this.closed) return;
+      const page = this.store.storage.identities(this.scope.pluginInstanceId, this.resourceType,
+        { namespace: this.scope.namespace, includeDescendants: true, limit: 64, consistency: "live", continue: cursor });
+      for (const ref of page.items) {
+        if (this.closed) return;
+        yield ownedKey({ ...this.scope, namespace: ref.namespace, resourceId: ref.name });
+      }
+      cursor = page.metadata.continue;
+      await new Promise<void>(resolve => setImmediate(resolve));
+    } while (cursor);
   }
 
   setNextReconcileAt(key: ReconcileKey, next: Date): void {

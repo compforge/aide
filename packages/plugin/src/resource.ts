@@ -103,6 +103,8 @@ export interface ResourceValidator<S, T> {
 export interface ResourceDefinition<S = any, T = any> {
   readonly type: ResourceType;
   readonly schema: { readonly spec: ResourceSchema<S>; readonly status: ResourceSchema<T> };
+  /** Increment when index callbacks or schema normalization affecting indexes change. Defaults to 1. */
+  readonly indexVersion?: number;
   readonly validator?: ResourceValidator<S, T>;
   readonly printer?: ResourcePrinter<S, T>;
   readonly retention?: ResourceRetention<S, T>;

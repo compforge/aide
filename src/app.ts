@@ -99,6 +99,7 @@ export class Aide {
   readonly catalog: ReturnType<typeof openPersonCatalog>;
   get persons() { return this.catalog.persons; }
   private starting?: Promise<void>;
+  private readonly startupAbort = new AbortController();
   private closed = false;
 
   constructor(home: string, private readonly options: AideOptions, private readonly log: Logger) {
@@ -337,6 +338,7 @@ export class Aide {
   }
   start(): Promise<void> {
     return this.starting ??= Promise.resolve().then(async () => {
+      await this.inputs.storage.prepare({ signal: this.startupAbort.signal, log: entry => this.log[entry.level]({ ...entry.attributes, err: entry.error }, entry.message) });
       await this.initializePeople();
       await this.personal.start();
     });
@@ -356,6 +358,7 @@ export class Aide {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.startupAbort.abort();
     await this.delivery.close();
     await this.personal.close();
     await this.ownedConnectors?.close();

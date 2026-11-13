@@ -121,6 +121,7 @@ export class ResourceGarbageCollector {
   }
   private requestTree(key: string): number {
     return this.storage.transaction(() => {
+      if (!this.storage.ready) return 0;
       const rows = this.storage.db.prepare(`WITH RECURSIVE owned(key,uid,scope,data,released) AS (
         SELECT key,uid,scope,data,released FROM resources WHERE key=?
         UNION ALL SELECT c.key,c.uid,c.scope,c.data,c.released FROM resources c JOIN owned p
@@ -192,6 +193,7 @@ export class ResourceGarbageCollector {
     return removed;
   }
   private async collect(): Promise<void> {
+    if (!this.storage.ready) return;
     const started = performance.now();
     let requested = await this.propagateDeletion(), checked = 0, removed = await this.finalizeUnmanaged();
     this.detectPressure();

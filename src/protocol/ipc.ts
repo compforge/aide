@@ -2,7 +2,7 @@ import { asHarnessError, type HarnessError } from "@compforge/aide-plugin";
 import { AideError, aideErrorDetails, type AideErrorOptions } from "@compforge/aide-common";
 import { DeliveryError, deliveryFailure, type DeliveryFailure } from "@compforge/aide-connector";
 import type { RuntimeScope } from "./runtime.ts";
-import type { ReconcileKey } from "./reconcile.ts";
+import type { ReconcileScope, ReconcileKey } from "./reconcile.ts";
 import type { ConnectorRequest } from "./connectors.ts";
 import type { PluginDataDirectories, PluginInstance, PluginLogLevel, PluginLogContext, HookStage, Resource, ResourceListOptions, ResourcePageOptions, ResourcePatch, ResourcePatchOptions, ResourceOwnerReference, ResourceRef, ResourceNamespace, ResourceType } from "@compforge/aide-plugin";
 import type {
@@ -72,7 +72,14 @@ export type RunnerRequest =
       readonly method: "close";
     };
 
+/** Bounded controller discovery transfers identities, never resource payloads. */
+export interface ControllerResourcePage {
+  readonly items: readonly ResourceRef[];
+  readonly metadata: { readonly resourceVersion: string; readonly continue: string };
+}
+
 export type HostRequest =
+  | { readonly method: "controller.scan"; readonly scope: ReconcileScope; readonly continue?: string }
   | { readonly method: "printer.describe" | "printer.summarize"; readonly resource: Readonly<Resource<unknown, unknown>> }
   | { readonly method: "controller.begin"; readonly key: ReconcileKey }
   | { readonly method: "controller.finish"; readonly scope: ExecutionScope; readonly resource: Resource<unknown, unknown>; readonly requeueAfterMs?: number; readonly failed?: string }

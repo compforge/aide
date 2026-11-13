@@ -1,10 +1,12 @@
+import { setImmediate as yieldToHost } from "node:timers/promises";
+import { logError, type LogSink } from "../logging.ts";
 import { cloneResourceValue, equalResourceValue } from "../../resource/value.ts";
 import { ResourcePages } from "./pages.ts";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, chmodSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
-import type { Resource, ResourceType, ResourceDefinition, ResourceValidationContext, ResourcePageOptions, ResourcePage } from "@compforge/aide-plugin";
+import type { Resource, ResourceType, ResourceDefinition, ResourceValidationContext, ResourcePageOptions, ResourcePage, ResourceNamespace } from "@compforge/aide-plugin";
 import { validateResourceType } from "../plugin/resource/type.ts";
 
 const limit = z.number().int().positive();
@@ -45,6 +47,8 @@ export class ResourceStorage {
   readonly pages: ResourcePages;
   private config = ResourceStorageConfigSchema.parse({});
   private readonly definitions = new Map<string, ResourceDefinition>();
+  private readonly prepared = new Set<string>();
+  private preparing?: Promise<void>;
   private readonly listeners = new Set<(scope: string, resource: Resource<unknown, unknown>) => void>();
   private readonly writeListeners = new Set<(scope: string, resource: Resource<unknown, unknown>, previous?: Resource<unknown, unknown>) => void>();
   subscribeWrites(listener: (scope: string, resource: Resource<unknown, unknown>, previous?: Resource<unknown, unknown>) => void): () => void { this.writeListeners.add(listener); return () => this.writeListeners.delete(listener); }
@@ -81,6 +85,7 @@ export class ResourceStorage {
       CREATE TABLE IF NOT EXISTS resource_indexes (source TEXT NOT NULL REFERENCES resources(key) ON DELETE CASCADE, name TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(source,name,value));
       CREATE INDEX IF NOT EXISTS resource_index_lookup ON resource_indexes(name,value,source);
       CREATE TABLE IF NOT EXISTS resource_payload_sizes (uid TEXT PRIMARY KEY REFERENCES resources(uid) ON DELETE CASCADE, bytes INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS resource_index_versions (scope TEXT NOT NULL, api_version TEXT NOT NULL, kind TEXT NOT NULL, version TEXT NOT NULL, PRIMARY KEY(scope,api_version,kind));
       CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, expires INTEGER NOT NULL, value TEXT NOT NULL);`);
     this.pages = new ResourcePages(this.db);
     this.db.exec("UPDATE resources SET released=NULL");
@@ -92,6 +97,7 @@ export class ResourceStorage {
     const keys = new Set<string>();
     for (const definition of definitions) {
       validateResourceType(definition.type);
+      if (definition.indexVersion !== undefined && (!Number.isSafeInteger(definition.indexVersion) || definition.indexVersion < 1)) throw new Error("Invalid resource indexVersion");
       const key = this.definitionKey(owner, definition.type);
       if (keys.has(key)) throw new Error(`Resource definition already registered: ${key}`);
       keys.add(key);
@@ -111,19 +117,94 @@ export class ResourceStorage {
         const key = this.definitionKey(owner, definition.type);
         if (!this.definitions.has(key)) { this.definitions.set(key, definition); added.push(key); }
       }
-      if (!added.length) return;
-      this.transaction(() => {
-        for (const definition of definitions) this.pages.invalidate(owner, definition.type);
-        for (const row of this.db.prepare("SELECT key,scope,data FROM resources").iterate()) {
-          if (row.scope as string !== owner) continue;
-          const resource = (JSON.parse(row.data as string) as StoredResource).object;
-          if (definitions.some((d) => this.definitionKey(owner, d.type) === this.definitionKey(owner, resource))) {
-            this.parse(row.scope as string, resource);
-            this.indexLifecycle(row.key as string, row.scope as string, resource);
-          }
-        }
-      });
     } catch (error) { for (const key of added) this.definitions.delete(key); throw error; }
+  }
+  private indexVersion(definition: ResourceDefinition): string {
+    return JSON.stringify([1, definition.indexVersion ?? 1, Object.keys(definition.indexes ?? {}).sort(), Object.keys(definition.orderedIndexes ?? {}).sort()]);
+  }
+  private markPrepared(scope: string, definition: ResourceDefinition): void {
+    this.db.prepare("INSERT INTO resource_index_versions VALUES (?,?,?,?) ON CONFLICT(scope,api_version,kind) DO UPDATE SET version=excluded.version")
+      .run(scope, definition.type.apiVersion, definition.type.kind, this.indexVersion(definition));
+    this.prepared.add(this.definitionKey(scope, definition.type));
+  }
+  /** Empty collections need no historical preparation. Existing collections fail closed until prepare completes. */
+  assertPrepared(scope: string, type: ResourceType): void {
+    const definition = this.definition(scope, type), key = this.definitionKey(scope, type);
+    if (this.prepared.has(key)) return;
+    if (this.db.prepare("SELECT 1 FROM resources WHERE scope=? AND json_extract(data,'$.object.apiVersion')=? AND json_extract(data,'$.object.kind')=? LIMIT 1")
+      .get(scope, type.apiVersion, type.kind)) throw new Error(`Resource storage is not prepared: ${scope} ${type.apiVersion}/${type.kind}`);
+    this.markPrepared(scope, definition);
+  }
+  /** GC must not trust a partial reference graph while any registered collection is awaiting preparation. */
+  get ready(): boolean {
+    for (const [key, definition] of this.definitions) {
+      if (this.prepared.has(key)) continue;
+      const [scope] = JSON.parse(key) as [string];
+      try { this.assertPrepared(scope, definition.type); } catch { return false; }
+    }
+    return true;
+  }
+  /** @spec Registration is metadata-only; historical indexes and retention are prepared before activation.
+   * @spec Each transaction is bounded by 64 rows and an 8 ms processing budget; batches yield to the event loop.
+   * @why Persisted indexes survive restart, but release eligibility and references must be confirmed for this process.
+   * @link docs/plugin/resource.md#存储准备与启动
+   * @case tests/resource-startup.test.ts
+   */
+  async prepare(options: { scope?: string; signal?: AbortSignal; log?: LogSink } = {}): Promise<void> {
+    if (this.preparing) { await this.preparing.catch(() => {}); options.signal?.throwIfAborted(); return this.prepare(options); }
+    const pending = Promise.resolve().then(async () => {
+      for (const [key, definition] of this.definitions) {
+        options.signal?.throwIfAborted();
+        if (this.prepared.has(key)) continue;
+        const [scope] = JSON.parse(key) as [string];
+        if (options.scope !== undefined && options.scope !== scope) continue;
+        const type = definition.type;
+        const previous = this.db.prepare("SELECT version FROM resource_index_versions WHERE scope=? AND api_version=? AND kind=?")
+          .get(scope, type.apiVersion, type.kind)?.version;
+        const rebuild = previous !== this.indexVersion(definition);
+        const started = performance.now(); let count = 0, batches = 0, maxBatchMs = 0;
+        let after: [string, string] | undefined;
+        const attributes = { scope, apiVersion: type.apiVersion, kind: type.kind, rebuild };
+        options.log?.({ level: "info", source: "aide", component: "resource.prepare", message: "Resource storage preparation started", attributes });
+        try {
+          if (rebuild) {
+            // Only a completed preparation can publish a query index version.
+            this.db.prepare("DELETE FROM resource_index_versions WHERE scope=? AND api_version=? AND kind=?").run(scope, type.apiVersion, type.kind);
+            this.pages.invalidate(scope, type);
+          }
+          for (;;) {
+            options.signal?.throwIfAborted();
+            const batchStart = performance.now();
+            const rows = this.db.prepare(`SELECT key,data,json_extract(data,'$.object.metadata.namespace') AS namespace,json_extract(data,'$.object.metadata.name') AS name
+              FROM resources INDEXED BY resource_page WHERE scope=? AND json_extract(data,'$.object.apiVersion')=? AND json_extract(data,'$.object.kind')=?
+              ${after ? "AND (json_extract(data,'$.object.metadata.namespace'),json_extract(data,'$.object.metadata.name'))>(?,?)" : ""}
+              ORDER BY json_extract(data,'$.object.metadata.namespace'),json_extract(data,'$.object.metadata.name') LIMIT 64`)
+              .all(scope, type.apiVersion, type.kind, ...(after ?? []));
+            if (!rows.length) break;
+            this.transaction(() => {
+              for (const row of rows) {
+                const resource = (JSON.parse(row.data as string) as StoredResource).object;
+                this.parse(scope, resource);
+                if (rebuild) this.indexResource(String(row.key), scope, resource);
+                this.indexRetention(String(row.key), scope, resource);
+                after = [String(row.namespace), String(row.name)]; count++;
+                if (performance.now() - batchStart >= 8) break;
+              }
+            });
+            batches++; maxBatchMs = Math.max(maxBatchMs, performance.now() - batchStart);
+            await yieldToHost(undefined, { signal: options.signal });
+          }
+          this.markPrepared(scope, definition);
+          options.log?.({ level: "info", source: "aide", component: "resource.prepare", message: "Resource storage prepared",
+            attributes: { ...attributes, count, batches, elapsedMs: Math.round(performance.now() - started), maxBatchMs: Math.round(maxBatchMs) } });
+        } catch (error) {
+          options.log?.({ level: "error", source: "aide", component: "resource.prepare", message: "Resource storage preparation failed; collection remains unavailable", error: logError(error), attributes: { ...attributes, count, batches } });
+          throw error;
+        }
+      }
+    });
+    this.preparing = pending;
+    try { await pending; } finally { if (this.preparing === pending) this.preparing = undefined; }
   }
   private definitionKey(owner: string, type: ResourceType): string { return JSON.stringify([owner, type.apiVersion, type.kind]); }
   findDefinition(owner: string, type: ResourceType): ResourceDefinition | undefined { return this.definitions.get(this.definitionKey(owner, type)); }
@@ -146,6 +227,7 @@ export class ResourceStorage {
     return {
       page: <S, T>(type: ResourceType, options: ResourcePageOptions) => this.page<S, T>(scope, type, options),
       get: <S, T>(type: ResourceType, uid: string) => {
+        this.assertPrepared(scope, type);
         const row = this.db.prepare("SELECT data FROM resources WHERE scope=? AND uid=? AND kind=?").get(scope, uid, kindKey(type));
         if (!row) return;
         const resource = (JSON.parse(row.data as string) as StoredResource).object;
@@ -154,6 +236,7 @@ export class ResourceStorage {
         return resource as Resource<S, T>;
       },
       list: <S, T>(type: ResourceType, options?: Parameters<ResourceValidationContext["list"]>[1]) => {
+        this.assertPrepared(scope, type);
         if (options?.matchIndex && !this.definition(scope, type).indexes?.[options.matchIndex.name])
           throw new Error(`Unknown resource index: ${options.matchIndex.name}`);
         const rows = options?.matchIndex
@@ -166,17 +249,35 @@ export class ResourceStorage {
     };
   }
   /** @spec Readers and validators share SQL paging; preceding transaction writes are visible. */
-  page<S, T>(scope: string, type: ResourceType, options: ResourcePageOptions): ResourcePage<S, T> {
+  pageKeys(scope: string, type: ResourceType, options: ResourcePageOptions) {
+    this.assertPrepared(scope, type);
     const definition = this.definition(scope, type);
     const index = options.matchIndex?.name;
     const ordered = !!(index && definition.orderedIndexes?.[index]);
     if (index && !ordered && !definition.indexes?.[index]) throw new Error(`Unknown resource index: ${index}`);
+    return this.pages.list(scope, type, options, ordered);
+  }
+  page<S, T>(scope: string, type: ResourceType, options: ResourcePageOptions): ResourcePage<S, T> {
     return this.transaction(() => {
-      const page = this.pages.list(scope, type, options, ordered);
+      const page = this.pageKeys(scope, type, options);
       return { metadata: page.metadata, items: page.keys.map(key => this.read(key)!.object as Resource<S, T>) };
     });
   }
+  identities(scope: string, type: ResourceType, options: ResourcePageOptions) {
+    this.assertPrepared(scope, type);
+    return this.transaction(() => {
+      const page = this.pageKeys(scope, type, options);
+      return { metadata: page.metadata, items: page.keys.map(key => {
+        const row = this.db.prepare("SELECT uid,json_extract(data,'$.object.metadata.namespace') AS namespace,json_extract(data,'$.object.metadata.name') AS name FROM resources WHERE key=?").get(key)!;
+        return { apiVersion: type.apiVersion, kind: type.kind, namespace: String(row.namespace) as ResourceNamespace, name: String(row.name), uid: String(row.uid) };
+      }) };
+    });
+  }
   private indexLifecycle(key: string, scope: string, resource: Resource<unknown, unknown>): void {
+    this.indexResource(key, scope, resource);
+    this.indexRetention(key, scope, resource);
+  }
+  private indexResource(key: string, scope: string, resource: Resource<unknown, unknown>): void {
     const definition = this.definitions.get(this.definitionKey(scope, resource));
     this.db.prepare("DELETE FROM resource_indexes WHERE source=?").run(key);
     for (const [name, values] of Object.entries(definition?.indexes ?? {})) {
@@ -194,6 +295,9 @@ export class ResourceStorage {
           key, name, entry.value, scope, resource.apiVersion, resource.kind, resource.metadata.namespace, entry.order, resource.metadata.name);
       }
     }
+  }
+  private indexRetention(key: string, scope: string, resource: Resource<unknown, unknown>): void {
+    const definition = this.definition(scope, resource);
     let released: string | undefined;
     let refs: readonly string[] = [];
     try {
@@ -217,6 +321,7 @@ export class ResourceStorage {
   /** Decode custom SQL results through the same schema boundary as get/list/page. */
   decode<T extends StoredResource = StoredResource>(scope: string, data: string): T {
     const stored = JSON.parse(data) as T;
+    this.assertPrepared(scope, stored.object);
     this.parse(scope, stored.object);
     return stored;
   }
@@ -230,6 +335,7 @@ export class ResourceStorage {
     for (const row of this.db.prepare(`SELECT key FROM resources WHERE scope=? AND substr(key,1,?)=? ORDER BY ${chronological ? "created,rowid" : "key"}`).iterate(scope, prefix.length, prefix)) yield row.key as string;
   }
   *indexedKeys(scope: string, type: ResourceType, prefix: string, name: string, value: string): Iterable<string> {
+    this.assertPrepared(scope, type);
     if (!this.definition(scope, type).indexes?.[name]) throw new Error(`Unknown resource index: ${name}`);
     for (const row of this.db.prepare("SELECT r.key FROM resource_indexes i JOIN resources r ON r.key=i.source WHERE r.scope=? AND substr(r.key,1,?)=? AND i.name=? AND i.value=? ORDER BY r.created,r.rowid").iterate(scope, prefix.length, prefix, name, value)) yield row.key as string;
   }
@@ -253,6 +359,7 @@ export class ResourceStorage {
    * @link docs/plugin/resource.md#更新操作与并发
    */
   write(key: string, scope: string, stored: StoredResource, receipt?: { key: string; value: string }): void {
+    this.assertPrepared(scope, stored.object);
     this.transaction(() => {
       this.parse(scope, stored.object);
       const prior = this.read(key), old = prior?.object;

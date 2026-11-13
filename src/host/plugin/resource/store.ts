@@ -13,7 +13,6 @@ import type { Resource, ResourcePatch, ResourceListOptions, ResourcePageOptions,
 import { newId } from "../../event/ids.ts";
 import { withAsyncFileLock, withFileLock } from "../../store/file-lock.ts";
 import {
-  namespaceContains,
   parseResourceNamespace,
 } from "../namespace.ts";
 
@@ -373,20 +372,17 @@ export class PluginResourceStore {
       "resource list matchLabels",
       options.matchLabels,
     );
-    const namespaces = options.includeDescendants
-      ? this.managedNamespaces().filter((candidate) =>
-          namespaceContains(namespace, candidate)
-        )
-      : [namespace];
-    return namespaces.flatMap((candidate) => [...(options.matchIndex ? this.storage.indexedKeys(this.scope, type, this.kindPrefix(type, candidate), options.matchIndex.name, options.matchIndex.value) : this.storage.keys(this.scope, this.kindPrefix(type, candidate)))]
-      .map((key) => this.readStored<TSpec, TStatus>(type, decodeURIComponent(key.slice(key.lastIndexOf("/") + 1)), candidate).object))
-      .filter((resource) =>
-        containsStringMap(resource.metadata.labels, matchLabels)
-      )
-      .sort((left, right) =>
-        left.metadata.namespace.localeCompare(right.metadata.namespace) ||
-        left.metadata.name.localeCompare(right.metadata.name)
-      );
+    const items: PluginResource<TSpec, TStatus>[] = [];
+    let cursor = "";
+    do {
+      const page = this.storage.pageKeys(this.scope, type, { ...options, namespace, matchLabels, limit: 256, continue: cursor });
+      for (const key of page.keys) {
+        const parts = key.split("/");
+        items.push(this.readStored<TSpec, TStatus>(type, decodeURIComponent(parts.at(-1)!), parseResourceNamespace(decodeURIComponent(parts[1]!))).object);
+      }
+      cursor = page.metadata.continue;
+    } while (cursor);
+    return items.sort((left, right) => left.metadata.namespace.localeCompare(right.metadata.namespace) || left.metadata.name.localeCompare(right.metadata.name));
   }
 
   page<S, T>(type: ResourceType, options: ResourcePageOptions): ResourcePage<S, T> {
@@ -647,6 +643,17 @@ export class PluginResourceStore {
       else control.nextReconcileAt = nextReconcileAt;
       return { ...current, control };
     });
+  }
+
+  /** Scheduling restoration needs identities and deadlines, never spec/status payloads. */
+  scheduledReconcileRefs(type: ResourceType, controllerName?: string) {
+    this.storage.assertPrepared(this.scope, type);
+    const path = controllerName ? `$.control.controllerDue.${controllerName}` : "$.control.nextReconcileAt";
+    return this.storage.db.prepare(`SELECT json_extract(data,'$.object.metadata.namespace') AS namespace,
+      json_extract(data,'$.object.metadata.name') AS name,json_extract(data,?) AS due FROM resources
+      WHERE scope=? AND json_extract(data,'$.object.apiVersion')=? AND json_extract(data,'$.object.kind')=? AND json_extract(data,?) IS NOT NULL`)
+      .all(path, this.scope, type.apiVersion, type.kind, path)
+      .map(row => ({ namespace: parseResourceNamespace(row.namespace), name: String(row.name), nextReconcileAt: new Date(String(row.due)) }));
   }
 
   scheduledReconciles(
@@ -922,10 +929,6 @@ export class PluginResourceStore {
     }
   }
 
-  private listAll(): PluginResource<unknown, unknown>[] {
-    return [...this.storage.keys(this.scope)].map((key) => this.storage.read(key)!.object);
-  }
-
   private remove(
     type: ResourceType,
     name: string,
@@ -968,7 +971,5 @@ export class PluginResourceStore {
     return parseResourceNamespace(namespace);
   }
 
-  private managedNamespaces(): ResourceNamespace[] {
-    return [...new Set<ResourceNamespace>(["v1", ...this.listAll().map((r) => r.metadata.namespace as ResourceNamespace)])].sort();
-  }
+
 }

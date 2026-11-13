@@ -165,7 +165,7 @@ export class ReconcileQueue {
 
     const item = queuedReconcile(key);
     this.pending.set(id, item);
-    this.drain();
+    this.admit(id, item);
     return item.completion;
   }
 
@@ -185,13 +185,11 @@ export class ReconcileQueue {
     this.pending.clear();
   }
 
-  private drain(): void {
-    if (this.closed) return;
-    for (const [id, item] of this.pending) {
-      if (this.admitting.has(id) || this.running.has(id)) continue;
-      this.admitting.add(id);
-      void this.executeOne(id, item);
-    }
+  /** @why Each key enters capacity once; rescanning the pending map on every enqueue makes restoration quadratic. */
+  private admit(id: string, item: QueuedReconcile): void {
+    if (this.closed || this.admitting.has(id) || this.running.has(id)) return;
+    this.admitting.add(id);
+    void this.executeOne(id, item);
   }
 
   private async executeOne(id: string, item: QueuedReconcile): Promise<void> {
@@ -217,7 +215,8 @@ export class ReconcileQueue {
     } finally {
       this.admitting.delete(id);
       if (admitted) this.running.delete(id);
-      this.drain();
+      const next = this.pending.get(id);
+      if (next) this.admit(id, next);
     }
   }
 }
