@@ -133,7 +133,8 @@ test("frequency history is protected from capacity eviction until policy no long
   f.delivered("protected", [a], Date.now());
   f.store.storage.configure(ResourceStorageConfigSchema.parse({ kinds: { "aide.dev/Output": { maxCount: 1 } } }));
   assert.throws(() => f.output("new", [a]), ResourceCapacityError);
-  assert.ok(f.store.get("protected"));
+  await collectResources(f.store.storage);
+  assert.ok(f.store.get("protected"), "GC must preserve delivery history while the frequency policy needs it");
   await f.client.patch(a, { type: "merge", value: { spec: { delivery: null } } });
   await collectResources(f.store.storage);
   f.output("new", [a]);

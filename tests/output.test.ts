@@ -133,7 +133,8 @@ test("say associates optional Inputs and records Outputs for the owning executio
   await f.client.patchStatus(c, { execution: null });
   await collectResources(f.outputs.storage);
   composeMail(f.outputs, f.session.id, "after-handoff", f.spec());
-  assert.ok(f.outputs.list().length <= 3);
+  assert.equal(f.outputs.list().length, 3);
+  assert.ok(f.outputs.get("after-handoff"), "The new Output must survive collection and admission");
 });
 
 /** @case Delivery is routed by the stored target after Topic deletion, including process restart and ambiguous sends. */
