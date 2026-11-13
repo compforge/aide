@@ -66,7 +66,7 @@ export function idleReviewSchedule(topic: Readonly<TopicResource>, config: Topic
  * @link docs/personal/topic.md#树内整理与维护优先级
  */
 export async function createReviewInput(context: Pick<PluginContext, "resources" | "logger">, topic: Readonly<TopicResource>, dueAt: string,
-  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: "aide:review" | "aide:triage" | "aide:organize" = "aide:review", notes: Array<{ noteId: string; version: string }> = []) {
+  agenda: Awaited<ReturnType<typeof maintenanceAgenda>>, origin: "aide:review" | "aide:triage" | "aide:organize" = "aide:review", notes: Array<{ noteId: string; version: string }> = [], trigger: "idle" | "understanding" = "idle") {
   const target = resourceRef(topic);
   const input = await retryOnConflict(async () => {
     const current = await context.resources.get<TopicResource["spec"], TopicResource["status"]>(target);
@@ -78,8 +78,8 @@ export async function createReviewInput(context: Pick<PluginContext, "resources"
     const at = new Date().toISOString();
     const spec: InputSpec = {
       origin, originId: "personal.topic", originRef: target, topicId: topic.spec.id, attention: InputAttention.Normal,
-      text: `${origin === "aide:triage" ? "Triage this Topic's direct unfiled Inputs and Work. Assess unclaimed Inputs when useful; file completed materials into coherent children, creating a child when needed. Never replay admitted or completed assessments." : origin === "aide:organize" ? "Organize this Topic's direct children. Establish meaningful intermediate groups or detach independent subtrees; do not split merely to satisfy a count." : "Review current understanding, unresolved questions and relevant Work; update summaries only when useful."} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request and communication is optional. Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.\nMatter Notes to review: ${JSON.stringify(notes)}. Read full Notes and review content accuracy and whether sensitivity/visibility still fit; adjust them with upsert_note when needed. Consider durable Topic/Person summaries and topic organization, then call review_notes with the resulting versions after edits, or the inspected versions when unchanged, including when no durable change is useful.\nFacts: ${JSON.stringify(agenda)}`,
-      observation: { dueAt, triggeredAt: at, facts: agenda, notes },
+      text: `${origin === "aide:triage" ? "Triage this Topic's direct unfiled Inputs and Work. Inspect business Inputs as evidence only; file completed materials into coherent children, creating a child when needed. Never replay admitted or completed assessments." : origin === "aide:organize" ? "Organize this Topic's direct children. Establish meaningful intermediate groups or detach independent subtrees; do not split merely to satisfy a count." : "Review current understanding, unresolved questions and relevant Work; update summaries only when useful."} Target Topic: ${topic.metadata.uid}. Recheck current state before acting. Act within existing authority; this is not a new user request; do not communicate or hand off business Work. Work on at most 8 materials or 8 direct children this round, preserve all processing receipts, and record completion with assess_input even if no action remains.${origin === "aide:review" ? `\nMatter Notes to review: ${JSON.stringify(notes)}. Read full Notes and review content accuracy and classification; adjust with upsert_note when needed. Consider durable summaries, then call review_notes with the resulting or unchanged inspected versions.` : ""}\nFacts: ${JSON.stringify(agenda)}`,
+      observation: { dueAt, triggeredAt: at, facts: agenda, notes, trigger },
     };
     const status: InputStatus = { topic: target,
       route: { completedAt: at, result: { topics: [target], reason: `Built-in ${origin} request for this Topic` } }, assess: {} };
@@ -110,6 +110,6 @@ export function validateReviewRequest(input: { spec: InputSpec; status: InputSta
   const topic = requireTopic(input.status.topic, context);
   if (input.spec.originRef?.uid !== topic.metadata.uid) throw new Error("Internal Input target changed");
   const notes = z.array(z.object({ noteId: z.string(), version: z.string() }).strict()).max(20).parse(input.spec.observation?.notes ?? []);
-  if (input.spec.origin === "aide:review" && (topic.spec.parentRef || topic.status.execution || (!topicReview(topic.spec.review).enabled && !notes.length)))
+  if (input.spec.origin === "aide:review" && (topic.spec.parentRef || topic.status.execution || (!topicReview(topic.spec.review).enabled && !notes.length && input.spec.observation?.trigger !== "understanding")))
     throw new Error("Review requires an idle enabled root Topic");
 }

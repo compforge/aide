@@ -13,7 +13,7 @@ export const AssessInputSchema = z.object({ inputId: z.string().min(1), summary:
 export type AssessInput = z.input<typeof AssessInputSchema>;
 /**
  * @spec Finishing Chief assessment and assigning Work handling are atomic; receipts remain on Input.
- * @spec Active Chief may assess pending material in its Topic subtree, including Deferred; failed assessments remain terminal.
+ * @spec Chief handling business Inputs may assess pending material in its Topic subtree, including Deferred; failed assessments remain terminal.
  * @spec Assessment does not update Topic summary/recent; meaningful understanding is maintained explicitly.
  * @link docs/personal/chief.md
  */

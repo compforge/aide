@@ -151,10 +151,10 @@ test("First deferred arrival resets waiting without activating Chief or allowing
   assert.equal(idleReviewSchedule(f.read(), longer).dueAt, new Date(Date.parse(arrival) + 1800_000).toISOString());
   await f.due(); await f.run();
   assert.equal(f.calls.length, 1);
-  assert.ok(f.aide.topics.inputStore.get("first")!.status.assess?.completedAt);
-  assert.ok(f.aide.topics.inputStore.get("second")!.status.assess?.completedAt);
+  assert.equal(f.aide.topics.inputStore.get("first")!.status.assess?.completedAt, undefined);
+  assert.equal(f.aide.topics.inputStore.get("second")!.status.assess?.completedAt, undefined);
   assert.equal(f.read().status.idleReviewReset, null);
-  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.read().status.idleReviewCount, 1);
 });
 
 for (const attention of [InputAttention.Normal, InputAttention.Immediate])
@@ -201,7 +201,7 @@ test(`${changed} maintenance is selected from Topic data`, async t => {
   }
   await f.run({ review: backoff });
   assert.equal(f.calls.length, 1);
-  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, changed === "notes" ? 1 : 0);
+  assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").length, 1);
 });
 
 test("Material pressure creates a bounded organization Input even without pending assessments", async t => {
@@ -243,7 +243,8 @@ test("Review creation is fenced; reopening before admission consumes the existin
     await restarted.start(); await restarted.settled();
     assert.equal(restarted.invocations().filter(i => i.topicId === "root").length, 1);
     assert.equal(restarted.topics.inputStore.list().length, 2);
-    assert.ok(restarted.topics.inputStore.list().every(i => i.status.assess?.completedAt));
+    assert.ok(restarted.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").every(i => i.status.assess?.completedAt));
+    assert.equal(restarted.topics.inputStore.get("deferred")!.status.assess?.executionId, undefined);
   } finally { await restarted.close(); }
 });
 
@@ -272,7 +273,7 @@ test("A later execution failure preserves already completed Input receipts", asy
 
 // @case Failed internal requests retain their receipts without blocking independent future maintenance.
 for (const mode of ["failure", "missing_receipt"] as const)
-test(`${mode} review allows the next due review to process new deferred Inputs`, async t => {
+test(`${mode} review preserves deferred business and permits the next maintenance request`, async t => {
   const f = await fixture(t);
   await f.input("old-deferred"); await f.due();
   f.hooks.skipAssessment = mode === "missing_receipt";
@@ -280,12 +281,12 @@ test(`${mode} review allows the next due review to process new deferred Inputs`,
   const failed = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!;
   const old = f.aide.topics.inputStore.get("old-deferred")!;
   assert.ok(failed.status.assess?.lastError);
-  assert.ok(old.status.assess?.lastError);
+  assert.equal(old.status.assess?.executionId, undefined);
   assert.equal(failed.status.assess?.completedAt, undefined);
   for (const name of ["assessPending", "assignedPending", "assessActive"]) {
     const pending = await f.resources.page<InputSpec, InputStatus>(INPUT_TYPE, {
       matchIndex: { name, value: f.read().metadata.uid }, limit: 10 });
-    assert.equal(pending.items.length, 0, `${name} excludes failed review and ordinary Inputs`);
+    assert.deepEqual(pending.items.map(i => i.metadata.name), name === "assessActive" ? [] : ["old-deferred"], `${name} excludes failed review and preserves business`);
   }
   await f.input("new-deferred");
   await f.run();
@@ -296,7 +297,7 @@ test(`${mode} review allows the next due review to process new deferred Inputs`,
   const reviews = f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:review");
   assert.equal(reviews.length, 2);
   assert.ok(reviews.find(i => i.metadata.uid !== failed.metadata.uid)!.status.assess?.completedAt);
-  assert.ok(f.aide.topics.inputStore.get("new-deferred")!.status.assess?.completedAt);
+  assert.equal(f.aide.topics.inputStore.get("new-deferred")!.status.assess?.executionId, undefined);
   assert.deepEqual(f.aide.topics.inputStore.get(failed.metadata.name)!.status, failed.status);
   assert.deepEqual(f.aide.topics.inputStore.get("old-deferred")!.status, old.status, "failed business Input is not replayed");
 });
@@ -381,38 +382,35 @@ test("Runner keeps periodic checks while empty reviews back off and event Inputs
 
 
 
-test("Capacity maintenance precedes business outside idle review and yields even after cooldown expires", async t => {
+test("Business Inputs precede capacity maintenance even when idle review is disabled", async t => {
   const f = await fixture(t);
   await f.resources.replace(f.read(), { ...f.read().spec, review: { enabled: false } }, f.read().status);
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Immediate);
   await f.run({ maxUnfiledInput: 1 });
-  assert.equal(f.calls.length, 1);
   const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
-  assert.ok(request.status.assess?.completedAt);
-  assert.equal(f.aide.topics.inputStore.get("one")!.status.assess?.executionId, undefined);
-  assert.equal(f.aide.topics.inputStore.get("two")!.status.assess?.executionId, undefined);
-  await f.resources.patchStatus(f.read(), { capacityRequests: { "aide:triage": { ...f.read().status.capacityRequests!["aide:triage"]!, checkedAt: past() } } });
-  await f.run();
-  assert.equal(f.calls.length, 2);
+  assert.equal(request.status.assess?.executionId, undefined);
   assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
   assert.ok(f.aide.topics.inputStore.get("two")!.status.assess?.completedAt);
+  assert.ok(f.calls[0]!.prompt.indexOf("two") < f.calls[0]!.prompt.indexOf("one"));
+  await f.run();
+  assert.equal(f.calls.length, 2);
+  assert.ok(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.completedAt);
 });
 
-test("Children pressure triggers organization without idle delay and live intake waits for that pass", async t => {
+test("Immediate intake can steer a running organization pass", async t => {
   const f = await fixture(t);
   for (const name of ["a", "b"]) await createWithSummary(f.resources, TOPIC_TYPE, { name, spec: { id: name, parentRef: resourceRef(f.read()) }, status: { summary: "", receipts: [] } });
+  const requests: unknown[] = [];
   f.hooks.beforeAssess = async () => {
     await f.input("arrival", InputAttention.Immediate);
-    await reconcileTopic(f.context, { verbs: { action() { throw new Error("Business must not enter maintenance execution"); } } } as unknown as ReconcileContext, f.read());
-    assert.equal(f.aide.topics.inputStore.get("arrival")!.status.assess?.executionId, undefined);
-  };
-  f.hooks.afterAssess = async () => {
-    await reconcileTopic(f.context, { verbs: { action() { throw new Error("Completed capacity receipt must still isolate the live round"); } } } as unknown as ReconcileContext, f.read());
-    assert.equal(f.aide.topics.inputStore.get("arrival")!.status.assess?.executionId, undefined);
+    await reconcileAssignments(f.context, f.read());
+    await reconcileTopic(f.context, { verbs: { async action(name: string, args: unknown) {
+      requests.push({ name, args }); return { state: "success", value: { accepted: true } };
+    } } } as unknown as ReconcileContext, f.read());
   };
   await f.run({ maxChildren: 1 });
-  assert.match(f.calls[0]!.prompt, /organize_children/);
-  f.hooks.beforeAssess = undefined; f.hooks.afterAssess = undefined;
+  assert.deepEqual(requests, [{ name: "submit_topic", args: { inputId: "arrival", operation: "steer" } }]);
+  f.hooks.beforeAssess = undefined;
   await f.run();
   assert.ok(f.aide.topics.inputStore.get("arrival")!.status.assess?.completedAt);
 });
@@ -426,24 +424,29 @@ test("Idle timer cannot bypass capacity cooldown when an organization pass makes
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 1);
 });
 
-test("A persisted pressure request resumes before new business without duplicate maintenance", async t => {
+test("A persisted pressure request waits for business without duplicate maintenance", async t => {
   const f = await fixture(t);
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
   const agenda = await maintenanceAgenda(f.resources, [f.read()], { maxUnfiledInput: 1 });
   const request = await createReviewInput(f.context, f.read(), new Date().toISOString(), agenda, "aide:triage");
   await f.run({ maxUnfiledInput: 1 });
+  assert.equal(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.executionId, undefined);
+  assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
+  await f.run();
   assert.ok(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.completedAt);
-  assert.equal(f.aide.topics.inputStore.get("one")!.status.assess?.executionId, undefined);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 1);
 });
 
 test("Failed capacity execution retains its claim while waiting business is processed next", async t => {
   const f = await fixture(t);
   await f.input("one", InputAttention.Normal); await f.input("two", InputAttention.Normal);
+  await f.run();
   await f.run({ maxUnfiledInput: 1 }, true);
   const request = f.aide.topics.inputStore.list().find(i => i.spec.origin === "aide:triage")!;
   assert.ok(request.status.assess?.executionId);
+  await f.input("later", InputAttention.Normal);
   await f.run();
+  assert.ok(f.aide.topics.inputStore.get("later")!.status.assess?.completedAt);
   assert.ok(f.aide.topics.inputStore.get("one")!.status.assess?.completedAt);
   assert.equal(f.aide.topics.inputStore.get(request.metadata.name)!.status.assess?.executionId, request.status.assess?.executionId);
   assert.equal(f.aide.topics.inputStore.list().filter(i => i.spec.origin === "aide:triage").length, 1);
@@ -486,8 +489,8 @@ test("Acknowledging only the review backs off and unchanged material skips infer
   assert.deepEqual(f.read().status.absorbed, {}, "Skipping inference is not a fabricated absorption receipt");
   await f.input("new-deferred"); await f.due(); await f.run();
   assert.equal(f.calls.length, 2, "Unchanged knowledge must not suppress new deferred business");
-  assert.ok(f.aide.topics.inputStore.get("new-deferred")!.status.assess?.completedAt);
-  assert.equal(f.read().status.idleReviewCount, 0);
+  assert.equal(f.aide.topics.inputStore.get("new-deferred")!.status.assess?.executionId, undefined);
+  assert.equal(f.read().status.idleReviewCount, 1);
 });
 
 test("Unchanged summary maintenance skips inference without creating a one millisecond loop", async t => {

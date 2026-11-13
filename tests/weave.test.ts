@@ -219,7 +219,7 @@ test("Weave advances only the bounded snapshot and retries interrupted analysis"
   assert.equal(Object.keys(f.reviewed() ?? {}).length, 24, "a changed Topic does not reset other progress");
 });
 
-test("A quiet changed child wakes root synthesis without Input and can then be explicitly deleted", async t => {
+test("A quiet changed child creates a review Input for root synthesis and can then be explicitly deleted", async t => {
   const f = fixture(t); await f.initialize();
   const a = await ensureSourceTopic(f.resources, "absorb:a", "A"), b = await ensureSourceTopic(f.resources, "absorb:b", "B");
   await f.group(a, b);
@@ -231,7 +231,7 @@ test("A quiet changed child wakes root synthesis without Input and can then be e
   const execution: any = { executionId: "absorb", withContext() { return this; }, verbs: { async harness(args: any) {
     if (args.operation === "create") return { state: "success", value: { outcome: "accepted" }, agent: { harness: "chief", sessionId: "native" } };
     prompts++;
-    assert.match(args.prompt, /"kind":"absorb"/);
+    assert.match(args.prompt, /aide:review/);
     const current = f.aide.topics.resource(root.id)!;
     await summarizeTopic(f.resources, current, "absorb", { version: contentVersion(current), summary: "New evidence retained",
       absorbed: [{ uid: a.metadata.uid, version: understandingVersion(f.refresh(a)) }] }, 4000);
@@ -239,7 +239,7 @@ test("A quiet changed child wakes root synthesis without Input and can then be e
   } } };
   await reconcileChief(f.context, execution, f.aide.topics.resource(root.id)!);
   assert.equal(prompts, 1);
-  assert.equal(f.aide.topics.inputs().length, 0);
+  assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:review"));
   assert.equal(f.aide.topics.resource(root.id)!.status.lastInputAt, before);
   await collectTopic(f.context, f.refresh(a));
   assert.ok(f.aide.topics.resource(a.spec.id), "silence retains the Topic until capacity or explicit deletion");
@@ -276,7 +276,7 @@ test("Root Chief admits a bounded backlog with urgent Input first and independen
 });
 
 
-test("Unfinished synthesis backs off without inventing Input or refreshing activity", async t => {
+test("Unfinished synthesis retains failed review Inputs and backs off without refreshing business activity", async t => {
   const f = fixture(t); await f.initialize();
   const a = await ensureSourceTopic(f.resources, "retry:a", "A"), b = await ensureSourceTopic(f.resources, "retry:b", "B");
   await f.group(a, b);
@@ -298,7 +298,7 @@ test("Unfinished synthesis backs off without inventing Input or refreshing activ
   assert.equal(prompts, 2);
   assert.equal(f.aide.topics.resource(root.id)!.status.absorbAttempts, 2);
   assert.ok(Date.parse(f.aide.topics.resource(root.id)!.status.nextAbsorbAt!) > Date.now() + 110_000);
-  assert.equal(f.aide.topics.inputs().length, 0);
+  assert.ok(f.aide.topics.inputStore.list().every(i => i.spec.origin === "aide:review"));
 });
 
 /** @case Grouping retains recent matters with their stable identities instead of moving progress into parent summary. */

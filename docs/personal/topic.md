@@ -224,7 +224,7 @@ Chief 只在 root 启动新执行；运行中的 Topic 成为子节点后，旧 
 
 一个 root Topic 对应一个 Chief，常规读取范围是该 root 的整棵 Topic 子树。宿主和 Runner 从当前 Topic 出发，按 parent UID 索引逐层读取子节点，直到没有下一层；这是父节点先于子节点的拓扑排序，以广度优先遍历实现。按需的材料、Work 与认识查询限定在所得子树内，不先枚举全局 Topic。Weave 修改父子关系后，下次读取自然反映新的子树，Input 和 Work 的原始归属不变。
 
-Topic 的接收 Reconcile 先按祖先指纹分批刷新直属待办的负责人缓存、补齐缺失分派，再按 status.assess.topic 和 assessReadyAttention 索引查询已分派待办，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 只挂载，Chief 被其它原因激活时可以主动处理。
+Topic 的接收 Reconcile 先按祖先指纹分批刷新直属待办的负责人缓存、补齐缺失分派，再按 status.assess.topic 和 assessReadyAttention 索引查询已分派待办，具名 agent Reconcile 驱动 root Chief。Immediate / Normal 在空闲时 prompt，运行中分别使用 steer / followUp；Deferred 只挂载，Chief 处理其它业务 Input 时可以主动处理相关积存事实；内部维护不消费业务回执。
 
 Input.assess 保存全局唯一研判和 Chief 接纳 executionId。Topic Reconcile 在 prompt / steer / followUp 之前，通过资源事务竞争 Input 接纳；已有接纳或已完成则忽略。Topic 不保存逐条 Input 的通知进度，仍保存 execution、agent 与 Weave 通知版本。assess_input 原子完成唯一研判及 Work 交接，主动读取材料不会重新接纳；后续核对可以提交完成证据。未知投递结果保留标记，不自动重放。完整查询、并发和恢复契约见 [Input](input.md#归属与-chief-通知)。
 
@@ -240,9 +240,9 @@ Reconcile 先处理业务 Input、结构通知和子 summary 吸收。后台回�
 
 回顾截止时间由事实和当前策略计算，不持久化独立 deadline。修改基础等待、倍数或上限并重启后，下一次固定检查使用新策略，已到期只检查一次，不补跑错过的周期。执行完成、失败和中断恢复均清除前一轮检查/重置状态，以完成时间开始等待；内置请求和无输入维护保留退避次数，完成业务处理或材料/吸收进度变化才重置次数，已有未知效果继续等待核对。关闭回顾清除次数和检查状态；重新开启或子 Topic 独立时从基础等待开始。
 
-维护请求沿现有 Input 链路处理：`origin: aide:review`、`attention: normal`，创建即绑定当前 root 并建立研判目标，无需 Route 模型。检查记录与 Input 原子提交，由 Topic 版本保护并发到达和归组；已有业务或维护 Input 直接复用。Chief 复用原生 session，通过 `assess_input` 留下研判回执。系统 Input 不刷新 `lastInputAt`、不新增授权；运行中不追加定时维护或积攒补跑。
+维护请求沿现有 Input 链路处理：`origin: aide:review`、`attention: normal`，创建即绑定当前 root 并建立研判目标，无需 Route 模型。检查记录与 Input 原子提交，由 Topic 版本保护并发到达和归组；已有同 origin 维护 Input 直接复用，业务 Input 独立调度。Chief 复用原生 session，通过 `assess_input` 留下研判回执。系统 Input 不刷新 `lastInputAt`、不新增授权；运行中不追加定时维护或积攒补跑。
 
-成功完成且所有本批 Input 有研判回执的维护轮次保存本轮开始时的材料指纹：Topic UID、名称、父子关系、认识版本、吸收回执及待回顾 Note 版本。纯调度、执行状态和内置 Input 回执不改变指纹。同一材料未变化时，定时回顾与认识吸收直接跳过模型；不伪造 Note 或子 Topic 的吸收回执。新 deferred 待办仍能在到期时触发回顾，Immediate / Normal、容量请求和结构通知保持原有优先级。
+成功完成且所有本批 Input 有研判回执的维护轮次保存本轮开始时的材料指纹：Topic UID、名称、父子关系、认识版本、吸收回执及待回顾 Note 版本。纯调度、执行状态和内置 Input 回执不改变指纹。同一材料未变化时，定时回顾与认识吸收直接跳过模型；不伪造 Note 或子 Topic 的吸收回执。新 deferred 待办仍能在到期时触发回顾，Immediate / Normal 优先于内部维护。
 
 只完成内置 `assess_input` 不算业务进展，增加退避次数；处理业务 Input、更新认识、组织或确认吸收才重置。持久化本轮开始时的版本，避免把推理期间到达的新版本误记为已回顾。失败、缺少回执或中断不记录材料已回顾；重启保留已记录的指纹和次数。
 
@@ -266,7 +266,7 @@ Reconcile 先处理业务 Input、结构通知和子 summary 吸收。后台回�
 
 内置请求复用 Input，status.topic 指向待处理节点，未领取时 status.assess.topic 最终收敛到当前 root，领取后保留实际负责人。origin 供程序调度，text 给 Chief 描述目的；没有单独的 maintenance 对象或字段。每个节点、每种 origin 最多保留一条排队中或执行中的请求，创建由节点 CAS 和事务内 pending 索引校验去重。研判记录 lastError 后退出 pending 去重集合，保留原错误和接纳回执，不把失败标记为成功，也不自动重放该 Input。后续定时回顾到期且仍有材料待处理时创建新的 review Input；新一轮读取当前事实，已接纳和已完成的业务 Input 不重新接纳。capacityRequests 只记录该节点请求身份和检查时间，成功时 completedAt 决定冷却起点，失败或回收后回退到 checkedAt；capacityCooldownSeconds 默认 60 秒。
 
-root 空闲时按 aide:triage → aide:organize → 普通 Input 批次 → aide:review 选择。容量请求独立执行，不向该次执行追加普通 Input；每次容量执行后让等待的可激活业务获得一次机会。普通 Input 合并当前已有待办，最多 8 条，不要求攒满。Immediate/Normal 保留原有响应语义，Deferred 不单独激活；回顾可以带入 Deferred。排序在索引桶内使用底座稳定名称顺序，不承诺全局 FIFO。
+root 空闲时按 Immediate → Normal → aide:triage → aide:organize → aide:review 选择。业务批次最多 8 条，可带入 Deferred；Deferred 不单独激活。维护只接纳本轮内部 Input，不消费业务待办。Immediate 可在维护期间 steer 同一 Chief，下一次模型轮次切换工具与任务指令；Normal 通过 followUp 排队，当前原生 turn 收尾后继续处理，并在实际取出 Input 时切换工具。工具范围与共享 session 的取舍见 [Chief](chief.md#按-input-选择工具)。排序在索引桶内使用底座稳定名称顺序，不承诺全局 FIFO。
 
 maxUnfiledInput 统计直属、无 topicKey、未删除的业务 Input，包含已研判材料；三类内置 Input 排除。maxInput 字段暂时保留，不参与策略。maxChildren 统计直属有效 child。归集到 child 后，该 child 同样检查阈值并请求 root 继续整理；已完成回执不重置。容量触发独立于静默回顾退避，执行前重查需求，已消失则直接完成请求。提示每轮至多处理 8 条材料或直属 child；这是 Agent 执行要求，不是工具调用次数硬配额，整体激活提示还受 contextChars 限制。
 
@@ -278,7 +278,7 @@ Chief 用 `list_inputs` 分页发现已处理材料，通过 `create_topic`、`m
 
 Route、Chief、Task、Routine、Weave Agent 只能由各自对应的 Reconcile 触发，包含 prompt、steer 和 followUp。工具与协作组件只修改资源，不跨角色直接调用 Agent。Host action 只执行对应 Reconcile 请求的 Harness 操作。
 
-Weave 更新父节点的 `weaveRevision`，资源 Watch 唤醒 root Topic Reconcile。Chief 空闲时，由 agent Reconcile 复用或创建原生 session 发起回顾；正在运行时，由接收 Reconcile 发 followUp。`notifiedWeaveRevision` 合并已通知的变化，重复 Reconcile 不重复排队；明确拒绝投递时恢复待通知状态。新父即使已有综合摘要，也会收到结构变化通知。
+Weave 更新父节点的 `weaveRevision`，资源 Watch 唤醒 root Topic Reconcile。结构变化和子认识吸收统一创建 aide:review Input，复用 Chief session；正在处理业务时保留变化，之后独立进入维护。只有 review 接纳才推进 `notifiedWeaveRevision`，业务接纳不吞掉结构通知，也不把维护指令塞进业务 followUp。结构与认识触发独立于静默回顾开关。
 
 无明确规则的 Input 只由 Route 选择当前 root，提交时重新核对；有明确规则的 Input 初始挂到指定 Topic，包括子节点。Weave 不重绑定 Input；Chief 的归属迁移不改写已经完成的路由记录。内置 Input 的材料归属保留在目标 Topic，处理分派随当前 root 收敛；非 root 继续检查直属容量，但不独立启动 Chief 或产生静默回顾。
 
@@ -330,7 +330,7 @@ root Chief 可维护来源 Topic 的局部认识和 root 的综合认识。子�
 
 原生会话通过 Harness 支持的方式初始化、持久化与恢复。新父 Topic 的 Chief 读取子主题认识，不拼接、改写子 Chief 的原生会话文件，不重放已完成的输入。模型请求前的业务背景继续使用 [Background](../harness/pi.md#当前业务背景) 通道。
 
-子主题 summary 变化唤醒当前 root；Note 单独变化等待其它原因激活后一起检查。无新 Input 时仍核对未吸收的 summary 版本，并由现有 Chief 自底向上吸收。吸收尝试间隔至少 60 秒，无进展时逐步退避至 15 分钟，等待和重启不会伪造 Input 或刷新活跃时间。Chief 被其它输入、定时回顾或知识整理激活时，最多合批提示 8 条积压 Input，按 Immediate、Normal、Deferred 排序；每条保留独立回执。Deferred 积压本身不激活 Chief，运行中也不自动追加投递；Chief 可主动读取并研判相关积存事实。
+子主题 summary 变化唤醒当前 root；Note 变化进入有界回顾队列。认识吸收通过 aide:review Input 调度，由同一 Chief 自底向上检查。吸收尝试间隔至少 60 秒，无进展时逐步退避至 15 分钟；维护 Input 不刷新业务活跃时间。业务批次最多 8 条，按 Immediate、Normal、Deferred 排序并保留独立回执；维护 Input 独立执行，不与业务批次混合。Deferred 积压本身不激活 Chief，运行中也不自动追加投递；处理业务 Input 的 Chief 可主动读取并研判相关积存事实。
 
 树结构本身不保证模型负担下降。root 数量、背景字符数、按需读取量与模型调用频率都需要预算；突发的普通输入可合批处理，不把每次资源变化都变成一次模型调用。
 

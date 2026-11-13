@@ -1,23 +1,23 @@
 import { contentVersion } from "../../plugins/personal/context-write.ts";
 import { summaryDescription, noteFields } from "../context-tools.ts";
 import { Type, type TSchema } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { INPUT_ORIGINS, type ChiefToolDefinition } from "./input-tools.ts";
 import type { Persons } from "../../plugins/personal/person/service.ts";
-const tool = <T extends TSchema>(definition: ToolDefinition<T>): ToolDefinition<T> => definition;
+const tool = <T extends TSchema>(definition: ChiefToolDefinition<T>): ChiefToolDefinition<T> => definition;
 const result = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }], details: {} });
 /** @spec Chief revises understanding, preserving user corrections in summary; never changes identities or Me marks. */
-export function personTools(persons: Persons, beforeMutation?: () => void, writer?: () => import("../../plugins/personal/note/model.ts").NoteStatus["writer"]): ToolDefinition[] {
+export function personTools(persons: Persons, beforeMutation?: () => void, writer?: () => import("../../plugins/personal/note/model.ts").NoteStatus["writer"]): ChiefToolDefinition[] {
   return [
-    tool({ name: "list_persons", label: "List persons", description: "Find known people across topics. Names are not unique. Read a person before revising their summary.",
+    tool({ name: "list_persons", inputOrigins: INPUT_ORIGINS, label: "List persons", description: "Find known people across topics. Names are not unique. Read a person before revising their summary.",
       parameters: Type.Object({}), async execute() { return result((await persons.list()).map((p) => ({ id: p.metadata.name, name: p.spec.name, isMe: p.isMe }))); } }),
-    tool({ name: "read_person", label: "Read person", description: "Read identities, contact Addresses (spec.addresses is an unordered UID set), their current endpoint/mute state, long-lived summary, recent matter Notes and resource version. Contacts are direct ways to reach this human, not all their groups. Select one suitable Address explicitly; never fan out or use array order as priority.",
+    tool({ name: "read_person", inputOrigins: INPUT_ORIGINS, label: "Read person", description: "Read identities, contact Addresses (spec.addresses is an unordered UID set), their current endpoint/mute state, long-lived summary, recent matter Notes and resource version. Contacts are direct ways to reach this human, not all their groups. Select one suitable Address explicitly; never fan out or use array order as priority.",
       parameters: Type.Object({ id: Type.String({ minLength: 1, description: "Person metadata.name, or id returned by list_persons. For Input/Output references use ref.name here, not ref.uid or the channel user ID." }), uid: Type.Optional(Type.String({ minLength: 1, description: "Supply ref.uid separately when reading an Input/Output Person reference to verify the exact resource." })) }),
       async execute(_id, args) {
         try { return result(await persons.read(args.id, args.uid)); }
         // @spec An unmatched lookup does not prove deletion; wrong identifier kinds can produce the same result.
         catch (error) { if (!String(error).includes("Unknown Person")) throw error; return result({ found: false, id: args.id, message: "No Person matched the supplied id/uid. This does not establish deletion. Use ref.name as id and ref.uid separately, or list_persons; original message evidence remains available." }); }
       } }),
-    tool({ name: "summarize_person", label: "Summarize person", description: `${summaryDescription} For this Person, retain durable background, views, preferences and relationships. Other people's statements and Aide suggestions do not establish this Person's intentions. Preserve explicit user corrections. Temporary plans and interactions belong in Notes linked through people. Never changes identities or Me marks.`,
+    tool({ name: "summarize_person", inputOrigins: ["aide:review"], label: "Summarize person", description: `${summaryDescription} For this Person, retain durable background, views, preferences and relationships. Other people's statements and Aide suggestions do not establish this Person's intentions. Preserve explicit user corrections. Temporary plans and interactions belong in Notes linked through people. Never changes identities or Me marks.`,
       parameters: Type.Object({ id: Type.String({ minLength: 1 }), uid: Type.String({ minLength: 1 }), version: Type.String({ minLength: 1, description: "summaryVersion from read_person" }), summary: Type.String({ maxLength: 16000 }), people: noteFields.people, sensitivity: noteFields.sensitivity, visibility: noteFields.visibility }),
       async execute(_id, args, signal) { signal?.throwIfAborted(); beforeMutation?.(); const updated = await persons.summarize(args.id, args.uid, args.version, args.summary, writer?.(), args.people, { sensitivity: args.sensitivity, visibility: args.visibility }); return result({ version: contentVersion(updated) }); } }),
   ];

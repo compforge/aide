@@ -1,3 +1,4 @@
+import { INPUT_ORIGINS, type ChiefToolDefinition } from "../../../agents/chief/input-tools.ts";
 import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
@@ -26,9 +27,9 @@ export function addressReadTools(addresses: Addresses, active: Active, delivery?
     async execute(_id, args) { active(); const ref = z.object({ address: AddressRefSchema }).parse(args).address; return result({ ...addresses.view(ref), ...(delivery ? { delivery: delivery(ref) } : {}) }); } },
   ];
 }
-export function addressTools(addresses: Addresses, active: Active, delivery?: DeliveryCapability): ToolDefinition[] {
-  return [...addressReadTools(addresses, active, delivery),
-  { name: "summarize_address", label: "Understand address", description: `${summaryDescription} Describe this place's purpose, roles and communication conventions. Preserve uncertainty. Cannot change muted or grant authority. Associate recent matter Notes with addresses through upsert_note.`,
+export function addressTools(addresses: Addresses, active: Active, delivery?: DeliveryCapability): ChiefToolDefinition[] {
+  return [...addressReadTools(addresses, active, delivery).map(tool => ({ ...tool, inputOrigins: INPUT_ORIGINS })),
+  { name: "summarize_address", inputOrigins: ["aide:review"], label: "Understand address", description: `${summaryDescription} Describe this place's purpose, roles and communication conventions. Preserve uncertainty. Cannot change muted or grant authority. Associate recent matter Notes with addresses through upsert_note.`,
     parameters: Type.Object({ address: ref, version: Type.String(), text: Type.Optional(Type.String({ maxLength: 16000 })), ...disclosureFields,
       people: Type.Optional(Type.Array(Type.Object({ apiVersion: Type.String(), kind: Type.Literal("Person"), namespace: Type.Literal("v1"), name: Type.String(), uid: Type.String() }))) }),
     async execute(_id, args) {

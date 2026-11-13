@@ -44,7 +44,7 @@ recent 展示与普通事项提炼队列排除 summaryOf 非空的 Note，摘要
 
 ## 工具与并发
 
-upsert_note 的 subject 默认当前 Topic 或当前 Work；Chief 可指定自己当前子树中的 Topic / Task / Routine，Work Agent 只可写自身。people 省略保留已有值，[] 明确清空；不能凭姓名猜测 UID。
+Chief 的 upsert_note 新建时可指定 topicId，目标必须在当前责任树内；省略时挂在当前 Chief 的 root Topic。更新已有 noteId 时只编辑内容与分类、人物等关联，保留原 subject，不因 Chief 当前在 root 执行而迁移；改变归属使用 move_note。此语义不随 Input.origin 改变。Work Agent 默认并且只可写自身。people 省略保留已有值，[] 明确清空；不能凭姓名猜测 UID。
 
 不传 noteId 时创建，不需要版本；同一执行内相同 tool-call identity 使用同一 Note 名称，重试返回已有 Note，不能覆盖较新的进展。传 noteId 时必须提交该 Note 的 version，由 UID、完整 spec 和内容更新时间计算。不存在或已淘汰的 ID 拒绝更新。相同内容不刷新年龄或版本。
 

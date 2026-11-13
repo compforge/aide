@@ -20,6 +20,25 @@ Chief Agent 负责判断，Personal Route 负责话题归位。Topic 的接收 C
 
 原生会话由 Pi SDK 管理持久化；Chief scope 使用 Topic UID，防止同名重建后恢复旧会话。Operator 在 status.agent 保存配置名和 sessionId，后续原样传给 Harness verb；底座不读写这个字段。用户通过 say 收到问题，后续答复以新的 Input 进入。空闲时 prompt，运行中普通输入 followUp、紧急输入 steer；一个 invocation 可以处理多个 Input，assess_input 的业务回执分别确认完成。
 
+### 按 Input 选择工具
+
+同一 root 的业务响应、回顾与整理共用一个 Chief 和一个原生 session。每个 Chief 工具在定义旁声明 `inputOrigins`，装配层依据当前 Input.origin 选择工具；Input.attention 独立决定调度紧迫性。不增加 mode 字段，也不维护 Respond / Review 等独立工具集合。共享工具声明全部 origin；原生 Pi 与 Hermes 工具的支持范围由 Chief 装配层声明，通用 Pi 不认识 Personal 的 Input。
+
+这样每次模型请求只暴露当前任务需要的工具，减少无关选择，让 LLM 更聚焦。切换时同时投影当前 origin、任务指令与已接纳 Input，明确此前维护任务仍是背景，不能继续使用旧工具或替它确认完成。执行前再次校验当前 execution、工具范围及 assess_input 的目标。
+
+| Input.origin | 任务专属能力（此外共享读取、检索和 upsert_note） |
+| --- | --- |
+| channel / source / chief | say、cite_output、Work 创建和请求、文件与 CLI 操作；assess_input 可原子交接业务 Input |
+| aide:review | Note 回顾与归位、Topic/Person/Address summary、Topic 回收许可、Hermes memory/skill 写入 |
+| aide:triage | 创建 child、迁移 Input/Work/Note；只完成本轮维护 Input |
+| aide:organize | 创建或移动 Topic、维护 Topic summary；只完成本轮维护 Input |
+
+同一批次可以包含工具能力相同的业务 Input；维护 Input 独立接纳，不与业务取工具并集。业务 Input 优先于内部维护，Immediate 可通过 steer 在下一次安全模型请求边界接入；已经开始的模型调用或工具不会被瞬间撤销。运行中仅 Immediate 使用 steer，其他可投递 Input 始终使用 followUp，业务和内部维护遵循同一规则；工具范围在 Pi 实际取出 followUp 开始处理时切换，排队本身不会打断当前任务。FollowUp 每次取一条，不同 origin 不合并工具列表。被业务打断且未确认的维护 Input 在正常收尾后回到待办；失败与未知结果仍保留错误，不自动重放。
+
+Pi 的 `setActiveToolsByName` 替换可用工具，Chief 在首轮 prompt 前初始化，在后续模型轮次准备时更新。Pi 负责生成下一请求的工具声明；当前任务指令通过不持久化的 context projection 注入，原生历史继续共享。日志记录 executionId、origin、Input IDs、实际工具名与数量。
+
+另一种选择是每类任务一个 Agent，各自有工具与 session。它能直接分隔工具，但多个 Agent 写同一 Topic tree 需要 root Reconcile 协调；互斥会让 Immediate 等待维护结束，独立 session 还需补传上下文。单 Chief 复用串行 loop，避免这组 Agent 之间的并行写入与上下文交接；Note、Topic 的版本和事务校验仍处理 Web、Work、Weave 等其他写入方的竞争。
+
 ### 主动判断与沟通
 
 Chief 持续关注用户已交付的目标，并发现与这些目标相关的新情况。每次输入到来时，先结合已有 Work、最新外部事实与相关记忆判断：是否属于已有委托，是否具备继续推进的条件，是否需要用户参与。定时 trigger 提供 Reconcile 检查机会，Source 提供外部变化；触发本身不要求生成消息或新建工作。
@@ -38,7 +57,7 @@ Chief 持续关注用户已交付的目标，并发现与这些目标相关的�
 
 当前稳定角色规则在 `agents/chief/agent.ts`，包括自然接话、按需创建工作、先检查关联工作、依据工具结果报告操作，以及对外部内容的处理原则。`plugins/personal/topic/reconcile.ts` 组装运行提示，补充 Source 判断约定、当前时间、输入与近期消息；后续回答同样作为普通 Input 接纳。
 
-Chief 在 Pi 的文件与 CLI 能力上增加以下业务工具：
+Chief 注册以下业务工具，并按上述 Input 范围向每次模型请求暴露：
 
 - Work 工具读取、创建、更新与删除绑定会话的 Task / Routine，具体契约见 [输入交接](input.md#研判与办理)、[Task](task.md) 与 [Routine](routine.md)。
 - read_input 按页读取会话关联的 Input 原文与证据，补足大输入的预览。

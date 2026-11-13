@@ -5,7 +5,7 @@ export interface InputReceipt { inputId: string; at: string }
 
 /**
  * @spec Deferred Inputs attach without activating Chief or entering its native input queue.
- * An already active Chief may assess them, regardless of what activated it.
+ * A Chief handling business Inputs may assess related Deferred material; internal maintenance does not consume business receipts.
  * @link docs/personal/input.md#内容身份与调度
  */
 export enum InputAttention {

@@ -83,7 +83,7 @@ test("Deferred backlog survives restart with review disabled and timer reviews r
     await restarted.start(); await restarted.settled();
     assert.equal(prompts.length, 0);
     const resources = restarted.runtime.plugins.resourceClient("personal");
-    for (const remaining of [3, 0]) {
+    for (const remaining of [10, 10]) {
       const c = restarted.topics.resource("root")!;
       await resources.replace(c, { ...c.spec, review: { enabled: true } },
         { ...c.status, reviewCheckedAt: null, idleSince: new Date(Date.now() - 901_000).toISOString() });
@@ -95,12 +95,13 @@ test("Deferred backlog survives restart with review disabled and timer reviews r
       assert.match(prompts.at(-1)!, /"kind":"input"/);
       assert.match(prompts.at(-1)!, /aide:review/);
     }
-    assert.equal(prompts.length, 2);
-    assert.ok(restarted.topics.inputStore.list().every(i => i.status.assess!.completedAt));
+    assert.equal(prompts.length, 1, "unchanged material does not create another review");
+    assert.ok(restarted.topics.inputStore.list().filter(i => i.spec.origin === "aide:review").every(i => i.status.assess!.completedAt));
+    assert.ok(restarted.topics.inputStore.list().filter(i => i.spec.origin === "source").every(i => !i.status.assess!.executionId));
   } finally { await restarted.close(); }
 });
 
-test("Child understanding can activate Chief and include Deferred without a timer", async t => {
+test("Child understanding activates a review Input while Deferred business stays pending", async t => {
   const { aide, client, submit, prompts } = setup(t);
   const root = await aide.topics.ensure("root"), child = await aide.topics.ensure("child");
   await client.replace(child, { ...child.spec, parentRef: resourceRef(root) }, child.status);
@@ -110,7 +111,7 @@ test("Child understanding can activate Chief and include Deferred without a time
   await patchSummary(client, aide.topics.resource("child")!, { summary: "New understanding" });
   await aide.settled();
   assert.equal(prompts.length, 1);
-  assert.match(prompts[0]!, /"kind":"absorb"/);
-  assert.match(prompts[0]!, /fact deferred/);
-  assert.ok(aide.topics.inputStore.get("deferred")!.status.assess!.completedAt);
+  assert.match(prompts[0]!, /aide:review/);
+  assert.doesNotMatch(prompts[0]!, /fact deferred/);
+  assert.equal(aide.topics.inputStore.get("deferred")!.status.assess!.completedAt, undefined);
 });

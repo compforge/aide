@@ -3,7 +3,6 @@ import { Addresses } from "./address/service.ts";
 import { addressTools } from "./address/tools.ts";
 import { summaryText, summaryReference } from "./note/summary.ts";
 import { invalidateAssignment } from "./input/assignment.ts";
-import { isCapacityInput } from "./input/model.ts";
 import { readNote } from "./note/service.ts";
 import { contentVersion } from "./context-write.ts";
 import { WriterResourceSchema, SubjectSchema } from "./note/model.ts";
@@ -33,7 +32,7 @@ import { agentCall } from "./observation/reference.ts";
 import { assessInput, type AssessInput } from "./topic/assess.ts";
 import { belongsToTopic, attemptOf, attemptPatch, resourceRef, changeAttempt, changeAssessment } from "./input/state.ts";
 import { topicPolicy } from "./topic/config.ts";
-import { canActivate, eligible, finalizeExecution, type LoopStatus } from "./loop.ts";
+import { canActivate, eligible, immediate, finalizeExecution, type LoopStatus } from "./loop.ts";
 import { ROUTE_TYPE, type RouteStatus } from "./route/model.ts";
 import { deliver, routed } from "./route/delivery.ts";
 import { defaultDestination, routeByRules } from "./route/rules.ts";
@@ -122,10 +121,22 @@ export class Personal {
         this.log.info({ topicId, topicUid: input.topicUid ?? c.metadata.uid, summaryChanged: input.summary !== undefined, reviewedChildren: input.absorbed?.length ?? 0, version: result.version }, "Chief understanding updated");
         return result;
       }, notes => this.mailSender.cite(active().status.execution!.id, notes));
-      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active, ref => this.store.topics.outputStore.deliveryCapability(ref)), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
+      return createChiefAgent({ ...options, scope: `chief:${initial.metadata.uid}`, config, inputBinding: {
+        read: () => {
+          const c = active();
+          return { executionId: c.status.execution!.id, origin: c.status.execution!.inputOrigin ?? "aide:review",
+            inputs: this.topics.inputStore.query("assessExecution", c.status.execution!.id).map(i => ({
+              id: i.metadata.name, deliveryId: `input:${i.metadata.uid}`, initial: i.status.assess?.startedAt === c.status.execution!.startedAt,
+              origin: i.spec.origin, immediate: immediate(i.spec), text: inputPreview(i, Math.floor(topicPolicy(this.options.topic).contextChars / 8)),
+            })) };
+        },
+        inputOrigin: id => this.topics.inputStore.get(id)?.spec.origin,
+        changed: (task, tools) => this.log.info({ topicId, executionId: task.executionId, inputOrigin: task.origin,
+          inputIds: task.inputs.map(i => i.id), tools, toolCount: tools.length }, "Chief Input tools selected"),
+      }, work: this.work(topicId), persons: this.options.persons, tools: [...tools, ...addressTools(new Addresses(this.store.resources.storage.home), active, ref => this.store.topics.outputStore.deliveryCapability(ref)), ...topicTools(this.store, active, this.log)], background: () => new TopicBackground(this.store, active(), topicId), readNote: id => readNote(this.plugins.resourceClient("personal"), id), topicNote: async (input, callId) => {
         const c = active();
         const result = await upsertTopicNote(this.plugins.resourceClient("personal"), c, c.status.execution!.id, input, callId);
-        this.log.info({ topicId, topicUid: input.subject?.uid ?? c.metadata.uid, noteId: result.noteId, version: result.version, sensitivity: result.sensitivity, visibility: result.visibility }, "Topic Note updated");
+        this.log.info({ topicId, targetTopicId: input.topicId, noteId: result.noteId, version: result.version, sensitivity: result.sensitivity, visibility: result.visibility }, "Topic Note updated");
         return result;
       }, contextWriter: () => { const c = active(); return { resource: WriterResourceSchema.parse(resourceRef(c)), executionId: c.status.execution!.id }; }, beforeWorkMutation: () => { active(); } });
     };
@@ -256,60 +267,51 @@ export class Personal {
 
   /** @spec Only Topic Reconcile chooses when/how to notify Chief. This Host bridge dispatches the requested verb and atomically admits each Input once across all Topics. */
   async submitTopic(scope: ExecutionScope, raw: unknown) {
-    const args = z.object({ inputId: z.string().min(1).optional(), weaveRevision: z.number().int().positive().optional(),
-      operation: z.enum(["steer", "followUp"]) }).strict().refine(a => !!a.inputId !== !!a.weaveRevision).parse(raw);
+    const args = z.object({ inputId: z.string().min(1), operation: z.enum(["steer", "followUp"]) }).strict().parse(raw);
     const ref = scope.resourceRef;
     if (scope.pluginInstanceId !== "personal" || !ref?.uid || ref.kind !== "Topic" || scope.controllerName)
       throw new Error("submit_topic requires the owning Topic intake Reconcile");
-    if (args.weaveRevision && args.operation !== "followUp") throw new Error("Weave notifications use followUp");
     const resources = this.plugins.resourceClient("personal");
     for (let n = 0; ; n++) {
       const topic = await resources.get<TopicSpec, TopicStatus>(ref);
       if (!topic || topic.metadata.deletionTimestamp || topic.spec.parentRef || !topic.status.execution) return { accepted: false, reason: "not_running" };
-      if (topic.status.execution.inputOrigin && isCapacityInput({ origin: topic.status.execution.inputOrigin })) return { accepted: false, reason: "capacity_round" };
       const invocation = this.plugins.listHarnessInvocations().find(i => i.executionId === topic.status.execution!.id && i.phase === "running");
       if (!invocation) return { accepted: false, reason: "not_running" };
-      const input = args.inputId ? this.topics.inputStore.get(args.inputId) : undefined;
-      if (args.inputId && (!input || !eligible(input, topic) || !canActivate(input.spec, topic))) return { accepted: false };
-      if (args.weaveRevision && (args.weaveRevision > (topic.status.weaveRevision ?? 0)
-        || args.weaveRevision <= (topic.status.notifiedWeaveRevision ?? 0))) return { accepted: false };
+      const input = this.topics.inputStore.get(args.inputId);
+      if (!input || !eligible(input, topic) || !canActivate(input.spec, topic)) return { accepted: false };
       try {
         await commitStatus(resources, [
           { operation: "patchStatus", resource: topic, patch: {
             execution: { ...topic.status.execution, admissionRevision: (topic.status.execution.admissionRevision ?? 0) + 1 },
-            ...(!input ? { notifiedWeaveRevision: args.weaveRevision } : {}),
           } },
-          ...(input ? [{ operation: "patchStatus" as const, resource: input, patch: { assess: { ...input.status.assess,
+          { operation: "patchStatus" as const, resource: input, patch: { assess: { ...input.status.assess,
             executionId: topic.status.execution.id, startedAt: new Date().toISOString(), agent: topic.status.agent,
-          } } }] : []),
+          } } },
         ]);
       } catch (error) { if (/processing assignment changed/.test(String(error))) {
         const latest = args.inputId ? this.topics.inputStore.get(args.inputId) : undefined;
         if (latest) await invalidateAssignment({ resources }, latest);
         return { accepted: false, reason: "admission_conflict" };
       } if (n < 8 && /version conflict/.test(String(error))) continue; throw error; }
-      if (input) this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid,
+      this.log.info({ topicUid: ref.uid, inputId: input.metadata.name, inputUid: input.metadata.uid,
         executionId: topic.status.execution.id, operation: args.operation }, "Chief Input admitted before dispatch");
-      const prompt = input ? `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nRead current Topic material and assess when useful.`
-        : "Topic structure changed. Review the current subtree's understanding, Inputs and Work; decide what needs attention. Existing Work retains its original Topic.";
+      const prompt = `New Input:\n${JSON.stringify({ inputId: args.inputId })}\n${inputPreview(input)}\nHandle this Input with the tools for its origin; leave any unfinished prior task pending without acknowledging it.`;
       try {
         const result = await this.plugins.executionVerbs(scope.executionId, scope.attributes ?? {}).harness({
           operation: args.operation, invocationId: invocation.invocationId,
-          messageId: input ? `input:${input.metadata.uid}` : `weave:${ref.uid}:${args.weaveRevision}`, prompt, timeoutMs: 30_000,
+          messageId: `input:${input.metadata.uid}`, prompt, timeoutMs: 30_000,
         });
         if (result.state !== "success") throw new Error(`Chief notification failed: ${result.state}`);
         const accepted = result.value.outcome === "accepted";
         if (!accepted) {
-          if (input) await changeAssessment(resources, input, topic.status.execution.id,
+          await changeAssessment(resources, input, topic.status.execution.id,
             { executionId: undefined, agent: undefined, startedAt: undefined, lastError: undefined });
-          else await updateTopic(resources, topic, current => current.status.notifiedWeaveRevision === args.weaveRevision
-            ? { notifiedWeaveRevision: topic.status.notifiedWeaveRevision ?? 0 } : {});
           // Queue the owning agent Reconcile after the current execution; retrying intake on this bookkeeping would hot-loop unsupported verbs.
           void this.plugins.enqueue({ pluginInstanceId: "personal", namespace: ref.namespace, resourceApiVersion: ref.apiVersion,
             resourceKind: ref.kind, resourceId: ref.name, controllerName: "agent" })
             .catch(error => this.log.error({ err: error, topicUid: ref.uid }, "Could not schedule rejected Chief notification"));
         }
-        this.log.info({ topicUid: ref.uid, inputId: args.inputId, weaveRevision: args.weaveRevision, operation: args.operation, accepted }, "Chief notification dispatched by Reconcile");
+        this.log.info({ topicUid: ref.uid, inputId: args.inputId, operation: args.operation, accepted }, "Chief notification dispatched by Reconcile");
         return { accepted, reason: result.value.reason };
       } catch (error) {
         if (input) await changeAssessment(resources, input, topic.status.execution.id, { lastError: String(error) });

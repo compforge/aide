@@ -204,7 +204,7 @@ test("Replay SDK groups roots and routes subsequent source input to the new root
   const result = JSON.parse(readFileSync(join(directory, "result.json"), "utf8"));
   assert.equal(result.topics.length, 3);
   const root = result.topics.find((topic: { parentRef?: unknown }) => !topic.parentRef);
-  const later = result.inputs.find((input: any) => input.input.spec.observation.message.id === "later").input;
+  const later = result.inputs.find((input: any) => input.input.spec.observation?.message?.id === "later").input;
   assert.notEqual(later.status.route.result.topics[0].uid, root.uid);
   assert.ok(later.status.assess);
   assert.ok(result.usage.chief.calls > 0); assert.ok(result.usage.weave.calls > 0);
@@ -1203,8 +1203,8 @@ test("Chief can read and assess a late Deferred Input without steer or followUp"
   assert.ok([...state.harnessInputs.values()].every(i => i.delivery !== "steer" && i.delivery !== "followUp"));
 });
 
-/** @case Weave changes resources only; the owning Topic Reconcile sends one native followUp while Chief is busy. */
-test("Weave wakes busy root Chief through its Reconcile without moving or claiming Input", { timeout: 20_000 }, async t => {
+/** @case Weave changes resources only; the owning Topic Reconcile schedules a separate review Input after business, sharing the native session. */
+test("Weave queues a review Input after busy Chief business without mixing tools", { timeout: 20_000 }, async t => {
   const { ConfigSchema } = await import("../src/config.ts");
   const { WEAVE_TYPE } = await import("../plugins/personal/weave/model.ts");
   const { groupTopics } = await import("../plugins/personal/weave/service.ts");
@@ -1212,13 +1212,14 @@ test("Weave wakes busy root Chief through its Reconcile without moving or claimi
   let release!: () => void; const pause = new Promise<void>(resolve => { release = resolve; });
   let aide: Aide;
   const fixture = await setup(t, (_request, index) => {
-    if (index === 0) return { text: "Reviewing material", pause };
-    if (index === 1) return { tool: "assess_input", args: { inputId: "first", summary: "Reviewed" } };
+    if (index === 0) return { tool: "assess_input", args: { inputId: "first", summary: "Reviewed" }, pause };
+    if (index === 1) return { text: "Business finished" };
     if (index === 2) {
       const parent = aide.topics.resource("parent")!, child = aide.topics.resource("child")!;
       return { tool: "summarize_topic", args: { version: contentVersion(parent), summary: "Combined understanding",
         absorbed: [{ uid: child.metadata.uid, version: understandingVersion(child) }] } };
     }
+    if (index === 3) return { tool: "assess_input", args: { inputId: aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!.metadata.name, summary: "Reviewed tree change" } };
     return { text: "Done" };
   });
   aide = new Aide(join(fixture.config.cwd, "weave-notify-home"), { cwd: fixture.config.cwd, timezone: "UTC",
@@ -1241,19 +1242,139 @@ test("Weave wakes busy root Chief through its Reconcile without moving or claimi
   assert.equal(fixture.requests.length, 1);
   await groupTopics(resources, weave, { topics: [{ uid: child.metadata.uid, version: understandingVersion(child) }],
     parent: { uid: parent.metadata.uid, version: understandingVersion(aide.topics.resource("parent")!) } }, 4000);
-  for (let n = 0; n < 200 && aide.topics.resource("parent")!.status.notifiedWeaveRevision !== 1; n++) await Bun.sleep(10);
-  assert.equal(aide.topics.resource("parent")!.status.notifiedWeaveRevision, 1);
-  for (let n = 0; n < 3; n++) await aide.runtime.plugins.enqueue({ pluginInstanceId: "personal", namespace: "v1", resourceApiVersion: parent.apiVersion,
-    resourceKind: parent.kind, resourceId: parent.metadata.name });
   await Bun.sleep(100);
-  assert.equal(notices.length, 1);
-  assert.equal(notices[0].scope.resourceRef.uid, parent.metadata.uid);
-  assert.equal(notices[0].scope.controllerName, undefined);
-  assert.equal(notices[0].args.operation, "followUp");
+  assert.equal(aide.topics.resource("parent")!.status.notifiedWeaveRevision ?? 0, 0);
+  assert.equal(notices.length, 0);
+  assert.equal(fixture.requests.length, 1, "maintenance must wait for business");
   release(); await aide.settled();
   assert.match(JSON.stringify(fixture.requests.at(-1)!.messages), /Topic structure changed/);
-  assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 1);
+  assert.equal(aide.invocations().filter(i => i.topicId === "parent").length, 2);
+  assert.equal(aide.topics.resource("parent")!.status.notifiedWeaveRevision, 1);
+  assert.ok(aide.topics.inputStore.list().find(i => i.spec.origin === "aide:review")!.status.assess?.completedAt);
   const state = aide.runtime.executions.view(aide.invocations().map(i => i.invocationId));
-  assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 1);
+  assert.equal([...state.harnessInputs.values()].filter(i => i.delivery === "followUp").length, 0);
   assert.ok(aide.topics.inputStore.get("first")!.status.assess?.executionId);
+});
+
+/** @case One native loop changes provider-visible tools and rejects out-of-task assessments and stale tool names. */
+test("Chief switches Input tools inside one Pi loop when immediate business interrupts review", { timeout: 30_000 }, async t => {
+  const { Type } = await import("typebox");
+  const { INPUT_ORIGINS, BUSINESS_INPUT_ORIGINS } = await import("../agents/chief/input-tools.ts");
+  type Task = import("../agents/chief/input-tools.ts").ChiefInputTask;
+  let task: Task = { executionId: "review-run", origin: "aide:review", inputs: [
+    { id: "maintenance", origin: "aide:review", immediate: false, text: "Review changed Notes" },
+  ] };
+  let reviewed = 0, assessed = 0, said = 0;
+  const switched: string[] = [];
+  const fixture = await setup(t, (request, index) => {
+    const names = (request.tools as { function: { name: string } }[]).map(tool => tool.function.name);
+    assert.ok(!names.includes("write"), "task switches must retain caller tool restrictions");
+    if (index < 2) {
+      assert.ok(names.includes("review_notes")); assert.ok(names.includes("memory_add"));
+      assert.ok(!names.includes("say")); assert.ok(!names.includes("bash"));
+    } else {
+      assert.ok(names.includes("say")); assert.ok(names.includes("bash"));
+      assert.ok(!names.includes("review_notes")); assert.ok(!names.includes("memory_add"));
+      assert.match(JSON.stringify(request.messages), /Current Input origin: channel/);
+    }
+    if (index === 0) return { tool: "assess_input", args: { inputId: "business", summary: "wrong task" } };
+    if (index === 1) return { tool: "review_notes", args: {} };
+    if (index === 2) return { tool: "review_notes", args: {} };
+    if (index === 3) return { tool: "say", args: {} };
+    return { text: "Answered the immediate input" };
+  }, "chief");
+  const result = () => ({ content: [{ type: "text" as const, text: "ok" }], details: {} });
+  const session = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding: {
+    read: () => task,
+    inputOrigin: id => id === "business" ? "channel" : "aide:review",
+    changed: current => switched.push(current.origin),
+  }, tools: [
+    { name: "assess_input", label: "Assess", inputOrigins: INPUT_ORIGINS, description: "Assess current input",
+      parameters: Type.Object({ inputId: Type.String(), summary: Type.String() }), async execute() { assessed++; return result(); } },
+    { name: "review_notes", label: "Review", inputOrigins: ["aide:review"], description: "Review notes",
+      parameters: Type.Object({}), async execute() {
+        reviewed++;
+        task = { ...task, inputs: [...task.inputs, { id: "business", origin: "channel", immediate: true, text: "Answer now" }] };
+        await session.steer('New Input: {"inputId":"business"}');
+        return result();
+      } },
+    { name: "say", label: "Say", inputOrigins: BUSINESS_INPUT_ORIGINS, description: "Answer business input",
+      parameters: Type.Object({}), async execute() { said++; task = { ...task, inputs: task.inputs.filter(i => i.id !== "business") }; return result(); } },
+  ] });
+  session.setActiveToolsByName(session.getActiveToolNames().filter(name => name !== "write"));
+  try {
+    await session.prompt('Activation: {"inputId":"maintenance"}');
+    assert.equal(fixture.requests.length, 5);
+    assert.equal(reviewed, 1); assert.equal(assessed, 0); assert.equal(said, 1);
+    assert.deepEqual(switched, ["aide:review", "channel"]);
+    assert.match(JSON.stringify(fixture.requests[1]!.messages), /Assess only Inputs supported/);
+    assert.match(JSON.stringify(fixture.requests[3]!.messages), /not found|unavailable|not available/i);
+    assert.ok(task.inputs.some(i => i.id === "maintenance"), "interruption does not acknowledge maintenance");
+  } finally { session.dispose(); }
+});
+
+/** @case Restoring native review history does not retain its tool scope for a new business execution. */
+test("Chief restores the same session with the new execution's Input tools", { timeout: 20_000 }, async t => {
+  const fixture = await setup(t, () => ({ text: "Done" }), "chief");
+  let task: import("../agents/chief/input-tools.ts").ChiefInputTask = {
+    executionId: "review", origin: "aide:review", inputs: [{ id: "review", origin: "aide:review", immediate: false, text: "Review" }],
+  };
+  const inputBinding: import("../agents/chief/input-tools.ts").ChiefInputBinding = {
+    read: () => task, inputOrigin: () => task.origin, changed() {},
+  };
+  const first = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding });
+  const sessionId = first.sessionId;
+  try { await first.prompt("Review input"); } finally { first.dispose(); }
+  task = { executionId: "business", origin: "channel", inputs: [{ id: "business", origin: "channel", immediate: true, text: "Respond now" }] };
+  const resumed = await createChiefAgent({ ...fixture.config, sessionId, work: fixture.work, inputBinding });
+  try {
+    await resumed.prompt("Business input");
+    assert.equal(resumed.sessionId, sessionId);
+    const names = (index: number) => (fixture.requests[index]!.tools as { function: { name: string } }[]).map(tool => tool.function.name);
+    assert.ok(names(0).includes("memory_add")); assert.ok(!names(0).includes("create_work"));
+    assert.ok(names(1).includes("create_work")); assert.ok(!names(1).includes("memory_add"));
+    const transcript = JSON.stringify(fixture.requests[1]!.messages);
+    assert.match(transcript, /Review input/); assert.match(transcript, /Business input/);
+    assert.match(transcript, /Current Input origin: channel/);
+    assert.doesNotMatch(transcript, /Current Input origin: aide:review/);
+  } finally { resumed.dispose(); }
+});
+
+/** @case Queued admission alone cannot change tools; a delivered followUp switches even with a prior Immediate receipt unfinished. */
+for (const [initialOrigin, origin] of [["aide:review", "source"], ["aide:review", "aide:organize"], ["channel", "aide:organize"]] as const)
+test(`Chief changes tools only when Pi delivers ${origin} followUp after ${initialOrigin}`, { timeout: 20_000 }, async t => {
+  const { Type } = await import("typebox");
+  let task: import("../agents/chief/input-tools.ts").ChiefInputTask = { executionId: "initial", origin: initialOrigin, inputs: [
+    { id: "initial", origin: initialOrigin, immediate: initialOrigin === "channel", text: "Initial task" },
+  ] };
+  const action = origin === "source" ? "say" : "move_topic";
+  let reviewed = 0, said = 0;
+  const fixture = await setup(t, (_request, index) => {
+    if (index === 0) return { tool: "review_notes", args: {} };
+    if (index === 1) return { text: "Maintenance turn complete" };
+    if (index === 2) return { tool: action, args: {} };
+    return { text: "Business turn complete" };
+  }, "chief");
+  const session = await createChiefAgent({ ...fixture.config, work: fixture.work, inputBinding: {
+    read: () => task, inputOrigin: () => task.origin, changed() {},
+  }, tools: [
+    { name: "review_notes", label: "Initial action", description: "Handle initial task", inputOrigins: [initialOrigin], parameters: Type.Object({}),
+      async execute() {
+        reviewed++;
+        task = { ...task, inputs: [...task.inputs, { id: "normal", initial: false, origin, immediate: false, text: "Normal business fact" }] };
+        await session.followUp('[aide-input:normal]\nNew Input: {"inputId":"normal"}');
+        return { content: [{ type: "text", text: "Reviewed" }], details: {} };
+      } },
+    { name: action, label: "Followup action", description: "Handle the followUp", inputOrigins: [origin], parameters: Type.Object({}),
+      async execute() { said++; return { content: [{ type: "text", text: "Accepted" }], details: {} }; } },
+  ] });
+  try {
+    await session.prompt("Review input");
+    assert.equal(fixture.requests.length, 4); assert.equal(reviewed, 1); assert.equal(said, 1);
+    const names = (index: number) => (fixture.requests[index]!.tools as { function: { name: string } }[]).map(t => t.function.name);
+    for (const index of [0, 1]) { assert.ok(names(index).includes("review_notes")); assert.ok(!names(index).includes(action)); }
+    for (const index of [2, 3]) { assert.ok(names(index).includes(action)); assert.ok(!names(index).includes("review_notes")); }
+    assert.doesNotMatch(JSON.stringify(fixture.requests[1]!.messages), /Normal business fact/);
+    assert.ok(JSON.stringify(fixture.requests[2]!.messages).includes(`Current Input origin: ${origin}`));
+  } finally { session.dispose(); }
 });

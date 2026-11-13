@@ -1,3 +1,4 @@
+import { inputDeliveryMarker } from "../../../../agents/pi/input.ts";
 import { randomUUID } from "node:crypto";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type {
@@ -101,7 +102,7 @@ export class PiAdapter implements Harness {
       if (operation === "prompt" || turn.id !== input.invocationId || turn.cancelled || turn.compactionFailure || turn.settled || turn.closing || !session.native[operation] || !session.native.clearQueue) {
         return { accepted: false, effective: "rejected", reason: "Pi cannot accept this operation in the current invocation" };
       }
-      const marker = `[aide-input:${input.messageId}]`;
+      const marker = inputDeliveryMarker(input.messageId);
       turn.steering.set(input.messageId, marker);
       const admission = session.native[operation]!(`${marker}\n${text}`);
       turn.admissions.add(admission);

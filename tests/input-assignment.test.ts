@@ -170,7 +170,7 @@ test("Child capacity creates deduplicated built-in Inputs assigned to root and e
     assert.equal(request.status.assess!.topic!.uid, f.root.metadata.uid);
     assert.equal("maintenance" in request.spec, false);
   }
-  assert.equal((await nextInputs(f.resources, f.read(f.root), 8))[0]!.spec.origin, "aide:triage");
+  assert.equal((await nextInputs(f.resources, f.read(f.root), 8))[0]!.spec.origin, "source");
   assert.equal(f.aide.topics.inputStore.query("unfiled", f.child.metadata.uid).length, 2);
 });
 
