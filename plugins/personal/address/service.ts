@@ -1,3 +1,4 @@
+import { isRequirementAddress } from "../../../connectors/requirements/address.ts";
 import { deliveryEndpoint } from "./locator.ts";
 import { equalResourceValue } from "../../../src/resource/value.ts";
 import { createHash } from "node:crypto";
@@ -73,7 +74,7 @@ export class Addresses {
       }
       const lark = larkEndpoint(endpoint);
       const type = options.type ?? (isChannelAddress(endpoint) && endpoint.channelId === "web" ? "web" : lark?.receiveIdType === "open_id" ? "direct" : lark ? "group" : "external");
-      return this.resources.create({ type: ADDRESS_TYPE, name, spec: { locators: locators([endpoint]), type, name: options.name?.trim().slice(0, 200) || (isChannelAddress(endpoint) ? endpoint.endpoint : JSON.stringify(endpoint)),
+      return this.resources.create({ type: ADDRESS_TYPE, name, spec: { locators: locators([endpoint]), type, name: options.name?.trim().slice(0, 200) || (isChannelAddress(endpoint) ? endpoint.endpoint : isRequirementAddress(endpoint) ? `${endpoint.source} · ${endpoint.category} #${endpoint.id}` : endpoint.kind),
         muted: options.muted ?? type !== "web" }, status: { people: members } });
     });
   }

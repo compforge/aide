@@ -46,7 +46,7 @@
     <div id="approvals" aria-label="等待你处理的执行请求" aria-live="polite"></div>
     <p id="work-notice" role="status" class="muted"></p>
     <div id="panel-dialogue" class="topic-panel dialogue-panel" role="tabpanel" aria-labelledby="tab-dialogue">
-      <div id="messages" role="log" aria-label="消息记录"><div id="history"></div><section id="activity" aria-label="Aide 执行进展" hidden></section></div>
+      <div id="messages" tabindex="0" role="log" aria-label="消息记录"><div class="history-loading"><span id="history-notice" class="muted" role="status"></span><button id="history-retry" type="button" hidden>重试加载</button></div><div id="history"></div><section id="activity" aria-label="Aide 执行进展" hidden></section></div>
       <form id="composer">
         <textarea id="input" aria-label="交办事情或回答问题" placeholder="交办一件事，或者告诉我你想长期关注什么…" maxlength="32000" required></textarea>
         <button id="send" type="submit">发送</button>
@@ -60,6 +60,7 @@
       <button id="topic-tree-refresh" type="button">刷新</button>
       <p id="topic-tree-notice" role="status" class="muted"></p>
       <ul id="topic-tree" aria-label="主题父子关系"></ul>
+      <div id="topic-tree-pages" class="tree-pages"></div>
     </section>
     <section id="panel-recent" class="topic-panel" role="tabpanel" aria-labelledby="tab-recent" tabindex="0" hidden>
       <div id="topic-recent"></div>

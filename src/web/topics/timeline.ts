@@ -1,3 +1,4 @@
+import { preserveTranscriptPosition } from './scroll.ts';
 import { byId as $, element, find } from '../shared/dom.ts';
 import { updateMarkdown } from '../shared/markdown.ts';
 import { historyBlocks, replyText, processPreview, replyLabels, toolLabels } from '../../channel/reply-layout.ts';
@@ -29,6 +30,7 @@ export function createTimeline() {
     const originLabel = ['aide:review', 'aide:triage', 'aide:organize'].includes(block.origin ?? '') ? '系统' : source ? 'Source' : 'Channel';
     const summary = block.type === 'summary';
     const node = element('article', undefined, 'message received-input ' + (source || summary ? 'source' : 'user'));
+    node.dataset.scrollKey = block.id;
     if (block.inputId) node.dataset.inputId = block.inputId;
     const header = element('div', undefined, 'input-heading');
     header.append(identityBadge(block.icon, summary ? block.label : originLabel + (block.label ? ' · ' + block.label : '') + (block.relation === 'sent' ? ' · 你' : '')));
@@ -112,7 +114,6 @@ export function createTimeline() {
     const signature = JSON.stringify(history);
     if (signature === lastMessages) return;
     lastMessages = signature;
-    const nearBottom = $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
     const expanded = new Map([...$('messages').querySelectorAll('details')].map((node) => [node.dataset.blockId, node.open]));
     $('history').replaceChildren();
     if (!history.length) {
@@ -139,7 +140,7 @@ export function createTimeline() {
       const phase = failed ? 'failed' : 'done';
       const title = 'Aide · ' + replyLabels[phase];
       const node = replyRegion('input:' + groupId + ':whole', title, true);
-      node.className = 'message aide assistant-reply reply-envelope'; node.dataset.inputId = groupId;
+      node.className = 'message aide assistant-reply reply-envelope'; node.dataset.inputId = groupId; node.dataset.scrollKey = 'reply:' + groupId;
       replyHeading(node, title, group.filter((item) => item.type === 'execution'));
       if (executions.size || block.group_id || process.length) {
         const thought = replyPart('input:' + groupId + ':think', '过程', phase, 'process');
@@ -155,7 +156,6 @@ export function createTimeline() {
       }
       $('history').append(node);
     }
-    if (nearBottom) $('messages').scrollTop = $('messages').scrollHeight;
   }
   let activityId: string | undefined;
   const activityNodes = new Map<string, HTMLElement>();
@@ -177,13 +177,12 @@ export function createTimeline() {
   }
   function renderActivity(activity: LiveActivity | null) {
     const area = $('activity');
-    const nearBottom = $('messages').scrollHeight - $('messages').scrollTop - $('messages').clientHeight < 100;
     area.hidden = !activity;
     area.dataset.phase = activity?.phase ?? '';
     if (!activity) { area.replaceChildren(); activityNodes.clear(); activityId = undefined; return; }
     if (activity.id !== activityId) {
       activityId = activity.id; activityNodes.clear(); area.replaceChildren();
-      const envelope = replyRegion('input:' + activity.id + ':whole', 'Aide · 正在处理', true); envelope.className = 'reply-envelope';
+      const envelope = replyRegion('input:' + activity.id + ':whole', 'Aide · 正在处理', true); envelope.className = 'reply-envelope'; envelope.dataset.scrollKey = 'activity:' + activity.id;
       const heading = find(envelope, 'summary'); heading.id = 'activity-heading'; heading.className = 'activity-heading'; heading.setAttribute('role', 'status');
       const thought = replyPart('input:' + activity.id + ':think', '过程', activity.phase, 'process'); thought.id = 'activity-thought';
       const reply = replyPart('input:' + activity.id + ':answer', '回答', activity.phase, 'answer');
@@ -210,19 +209,20 @@ export function createTimeline() {
       if (!node) { node = progressNode(block.kind); activityNodes.set(block.id, node); $('activity-thought').append(node); }
       updateProgress(node, block.kind, block.text, block.status, block.detail);
     }
-    if (nearBottom) $('messages').scrollTop = $('messages').scrollHeight;
   }
 
-  function render(view: TopicView) {
-    renderMessages(view.blocks, view.meta.activity);
-    const activity = view.meta.activity;
-    const liveIds = new Set(view.blocks.filter((block) => block.type === 'execution' &&
-      (block.status === 'running' || (activity && block.group_id === activity.id))).map((block) => block.id));
-    renderActivity(activity && { ...activity,
-      harnesses: view.blocks.filter((block) => block.type === 'execution' && liveIds.has(block.id)),
-      answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === activity.id),
-      blocks: view.blocks.filter((block) => liveIds.has(block.parent_id ?? ''))
-        .map((block) => ({ ...block, kind: block.type, text: block.content })) });
+  function render(view: TopicView, preservePosition = false) {
+    preserveTranscriptPosition($("messages"), () => {
+      renderMessages(view.blocks, view.meta.activity);
+      const activity = view.meta.activity;
+      const liveIds = new Set(view.blocks.filter((block) => block.type === 'execution' &&
+        (block.status === 'running' || (activity && block.group_id === activity.id))).map((block) => block.id));
+      renderActivity(activity && { ...activity,
+        harnesses: view.blocks.filter((block) => block.type === 'execution' && liveIds.has(block.id)),
+        answers: view.blocks.filter((block) => block.type === 'message' && block.role === 'aide' && block.group_id === activity.id),
+        blocks: view.blocks.filter((block) => liveIds.has(block.parent_id ?? ''))
+          .map((block) => ({ ...block, kind: block.type, text: block.content })) });
+    }, preservePosition);
   }
   return { render };
 }

@@ -1,6 +1,6 @@
 import { ResourceGarbageCollector } from "../src/host/resource/gc.ts";
 import { collectResources } from "./fixtures/resource-gc.ts";
-import { topicView } from "../src/channel/view.ts";
+import { topicSummary } from "../src/api/topic.ts";
 import { personRefs } from "../plugins/personal/person/model.ts";
 import { resourceRef } from "../plugins/personal/input/state.ts";
 import { personRef, type PersonRef } from "../plugins/personal/person/model.ts";
@@ -295,11 +295,11 @@ test("summary and Topic people are sets; a permutation does not change summary u
 test("Web summary classification follows the current Note even when the body is unchanged", async t => {
   const f = await fixture(t);
   const first = await writeSummary(f.client, f.topic, { text: "Deployment overview", sensitivity: "L1", visibility: "any" });
-  const before = topicView(f.aide, "summary").meta.context!;
+  const before = topicSummary(f.aide.topics, "summary");
   assert.equal(before.summaryNote!.sensitivity, "L1");
   assert.equal(before.summaryNote!.visibility, "any");
   await writeSummary(f.client, first, { text: "Deployment overview", sensitivity: "L2", visibility: "topic" });
-  const after = topicView(f.aide, "summary").meta.context!;
+  const after = topicSummary(f.aide.topics, "summary");
   assert.equal(after.summary, before.summary);
   assert.equal(after.summaryNote!.uid, before.summaryNote!.uid);
   assert.equal(after.summaryNote!.sensitivity, "L2");

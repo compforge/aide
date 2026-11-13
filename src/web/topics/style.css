@@ -32,7 +32,7 @@ main { grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: auto min
 .topic-copy { flex: none; padding: 5px 8px; background: transparent; color: #68776c; font-size: 12px; }
 .topic-copy:hover { background: #e8eee3; }
 .topic-actions { position: absolute; top: 10px; right: 6px; display: flex; align-items: center; gap: 2px; }
-#messages { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 24px 0; }
+#messages { overflow-anchor: none; flex: 1; min-height: 0; overflow: auto; padding: 0 12px 24px 0; }
 .message { padding: 16px 18px; background: white; border: 1px solid #e1e6dc; border-radius: 12px; margin: 12px 0; }
 .message.user { background: #e8eee3; margin-left: 10%; }
 .message.source { background: #f0f3f7; border-color: #d7dfe8; border-left: 3px solid #8194a9; }
@@ -159,3 +159,5 @@ details { font-size: 12px; color: #68776c; margin-top: 8px; }
 #topic-tree a.tree-name { color: inherit; text-decoration: none; }
 #topic-tree a.tree-name:hover { color: #285f43; text-decoration: underline; text-underline-offset: 3px; }
 #topic-tree a.tree-name:focus-visible { outline: 2px solid #42634c; outline-offset: 2px; }
+
+.history-loading { min-height: 28px; text-align: center; font-size: .85rem; }

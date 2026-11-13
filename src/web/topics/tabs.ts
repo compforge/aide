@@ -5,7 +5,7 @@ import { byId } from "../shared/dom.ts";
  * @why A hidden timeline has no layout; defer its rendering until it is visible to preserve scroll-follow intent.
  * @see {@link component://docs/channel/web.md}
  */
-export function mountTopicTabs(enabled: boolean, signal: AbortSignal, onDialogue: () => void, onTree: () => void) {
+export function mountTopicTabs(enabled: boolean, signal: AbortSignal, onSelect: (tab: string) => void) {
   const buttons = [...byId("topic-tabs").querySelectorAll<HTMLButtonElement>('[role="tab"]')];
   const panels = buttons.map((button) => byId(button.getAttribute("aria-controls")!));
   const scrollers = panels.map((panel, index) => index === 0 ? byId("messages") : panel);
@@ -25,8 +25,7 @@ export function mountTopicTabs(enabled: boolean, signal: AbortSignal, onDialogue
     selected = index;
     display();
     scrollers[selected]!.scrollTop = positions[selected]!;
-    if (selected === 0) onDialogue();
-    if (buttons[selected]!.id === "tab-tree") onTree();
+    onSelect(buttons[selected]!.id);
   }
   buttons.forEach((button, index) => {
     button.addEventListener("click", () => select(index), { signal });
@@ -42,5 +41,5 @@ export function mountTopicTabs(enabled: boolean, signal: AbortSignal, onDialogue
   });
   display();
   scrollers.forEach((scroller) => { scroller.scrollTop = 0; });
-  return { isDialogue: () => selected === 0 };
+  return { isDialogue: () => selected === 0, current: () => buttons[selected]!.id };
 }

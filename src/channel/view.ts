@@ -1,12 +1,9 @@
 import { outputWaitLabels } from "../../plugins/personal/output/view.ts";
-import { summaryText, summaryReference } from "../../plugins/personal/note/summary.ts";
-import { notes } from "../../plugins/personal/note/query.ts";
-import { visibleOutput } from "./output.ts";
-import { inputPrinter } from "../../plugins/personal/input/printer.ts";
+import { topicHistory } from "../../plugins/personal/topic/history.ts";
+import { outputView } from "../../plugins/personal/output/view.ts";
 import { iconFor } from "@compforge/aide-plugin";
 import { harnessIdentityFor } from "../host/harness/ids.ts";
 import type { ChannelService } from "./service.ts";
-import type { ContextView } from "../../plugins/personal/context.ts";
 import { PROTOCOL_VERSION, type BaseBlock, type ModelMeta, type UIModel } from "@compforge/agentue/ui";
 
 export interface TopicBlock extends BaseBlock {
@@ -30,7 +27,7 @@ export interface TopicBlock extends BaseBlock {
 }
 interface TopicMeta extends ModelMeta {
   topic_id: string;
-  context: ContextView | null;
+  before?: string | null;
   activity: { id: string; phase: string; queued: number; error?: string } | null;
 }
 export type TopicView = UIModel<TopicBlock, TopicMeta>;
@@ -45,18 +42,21 @@ export type TopicView = UIModel<TopicBlock, TopicMeta>;
  * @why Completion folds execution details; it never deletes them or creates extra delivered Messages.
  * @link docs/channel/web.md
  */
-export function topicView(aide: ChannelService, topicId: string): TopicView {
-  if (!aide.topics.get(topicId)) return { version: PROTOCOL_VERSION, biz: "aide.topic", blocks: [], meta: { topic_id: topicId, context: null, activity: null } };
-  const resource = aide.topics.resource(topicId)!;
+export function topicView(aide: ChannelService, topicId: string, before?: string): TopicView {
+  const resource = aide.topics.resource(topicId);
+  if (!resource) return { version: PROTOCOL_VERSION, biz: "aide.topic", blocks: [], meta: { topic_id: topicId, before: null, activity: null } };
   const members = aide.topics.scope(resource.metadata.uid);
   const memberIds = new Set(members.map(t => t.spec.id)), memberUids = new Set(members.map(t => t.metadata.uid));
-  const runs = aide.topics.runs(topicId);
-  const facts = runs.flatMap(run => run.input ? [run.input] : []);
-  const inputIds = new Set(facts.map(i => i.metadata.name));
-  const history = aide.invocations().filter(item => memberIds.has(item.topicId ?? "") || item.inputIds?.some(id => inputIds.has(id)));
+  const page = topicHistory(aide.topics, resource, members, before);
+  const messages = page.outputs.map(output => outputView(output, aide.topics.outputStore.streams));
+  const inputIds = new Set(page.inputs.map(i => i.metadata.name));
+  const executionIds = new Set([...messages.flatMap(m => m.executionId ? [m.executionId] : []),
+    ...page.inputs.flatMap(i => [i.status.assess?.completedBy?.executionId, i.status.assess?.executionId].filter((id): id is string => !!id))]);
+  const active = !before ? resource.status.execution : undefined;
+  const history = aide.invocations().filter(item => item.inputIds?.some(id => inputIds.has(id)) || executionIds.has(item.executionId)
+    || (!before && memberIds.has(item.topicId ?? "") && (item.executionId === active?.id || item.phase === "running" || !item.inputIds?.length)));
   const state = aide.runtime.executions.view(history.flatMap(item => item.invocationId ? [item.invocationId] : []));
-  const active = runs.find((input) => !input.input && input.status.phase === "running");
-  const queued = runs.filter((input) => !input.status.phase).length;
+  const queued = before ? 0 : page.queued;
   const runId = (item: { inputId?: string; executionId: string }) => item.executionId;
   const turnInputs = new Map([...state.harnessInputs.values()].map((input) => [input.invocationId, input]));
   const invocations = history.filter((item) => {
@@ -71,30 +71,28 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const relatedTurns = new Set(invocations.map((item) => item.invocationId));
   // Group presentation by persisted Chief activation, never by message order or similar text.
   const turnRuns = new Map(invocations.map((item) => [item.invocationId, runId(item)]));
-  const runPhases = new Map(runs.map((input) => [input.id, input.status.phase]));
+  const runPhases = new Map<string, string>(active ? [[active.id, "running"]] : []);
   const messageRuns = new Map<string, string>();
-  for (const message of aide.outputs()) if (message.executionId) messageRuns.set(message.id, message.executionId);
+  for (const message of messages) if (message.executionId) messageRuns.set(message.id, message.executionId);
   const inputExecutions = new Map(invocations.flatMap((i) => (i.inputIds ?? []).map((id) => [id, i.executionId] as const)));
   // Chief admission is persisted on Input, including steer/followUp and unconfirmed results.
   const turns = new Map([...state.harnessInputs.values()].filter((input) => relatedTurns.has(input.invocationId))
     .map((input) => [input.invocationId, input]));
   const summaries = new Map(state.invocationSummaries.filter((turn) => relatedTurns.has(turn.invocationId)).map((turn) => [turn.invocationId, turn]));
   const executions = new Map<string, { header: TopicBlock; blocks: TopicBlock[] }>();
-  const roots: TopicBlock[] = aide.outputs().filter((message) => (message.text.trim() || message.generation === "open") && resource && (visibleOutput(message, resource) || memberUids.has(message.topicUid) || message.inputIds?.some(id => inputIds.has(id))))
+  const roots: TopicBlock[] = messages.filter(message => message.text.trim() || message.generation === "open")
     .map((message) => ({ id: `message:${message.id}`, type: "message", role: message.role, at: message.at, content: message.text, label: outputLabel(message.status), detail: message.status.disclosure?.reason, receivers: message.receivers, target: message.target,
       ...(messageRuns.has(message.id) ? { group_id: messageRuns.get(message.id), status: runPhases.get(messageRuns.get(message.id)!) } : {}),
     }));
-  if (resource && summaryText(aide.topics.resources, resource)) roots.push({ id: "topic-summary", type: "summary", label: "历史摘要", icon: "📝",
-    content: summaryText(aide.topics.resources, resource)!, at: resource.metadata.creationTimestamp });
-  for (const run of runs) {
-    if (!run.input) continue;
-    const input = run.input, definition = aide.inputDefinition(input.spec);
+  for (const input of page.inputs) {
+    const definition = aide.inputDefinition(input.spec);
+    const receipt = input.status.assess;
     roots.push({ id: `input:${input.metadata.name}`, type: "input", relation: input.spec.relation, sender: input.spec.sender, source: input.spec.source, origin: input.spec.origin, originId: definition.id,
-      inputId: input.metadata.name, group_id: input.consumption.executionId ?? inputExecutions.get(input.metadata.name) ?? input.metadata.name, label: definition.label, icon: definition.icon,
+      inputId: input.metadata.name, group_id: receipt?.completedBy?.executionId ?? receipt?.executionId ?? inputExecutions.get(input.metadata.name) ?? input.metadata.name, label: definition.label, icon: definition.icon,
       ...(input.spec.origin === "channel" ? { role: "user" as const } : {}),
       at: input.metadata.creationTimestamp, content: input.spec.text,
-      status: run.status.phase ?? "queued",
-      detail: [inputPrinter.describe(input), run.status.summary, run.status.error].filter(Boolean).join("\n\n") });
+      status: receipt?.completedAt ? "done" : "queued",
+      detail: [receipt?.result?.summary, receipt?.lastError].filter(Boolean).join("\n\n") });
   }
   const append = (turnId: string, block: TopicBlock) => {
     const input = turns.get(turnId);
@@ -134,11 +132,11 @@ export function topicView(aide: ChannelService, topicId: string): TopicView {
   const blocks = roots.sort((a, b) => (a.at ?? "").localeCompare(b.at ?? ""))
     .flatMap((block) => [block, ...children.get(block.id) ?? []]);
   const live = [...executions.values()].some((execution) => execution.header.status === "running");
-  const error = !active && !live ? resource.status.lastError : undefined;
+  const error = !before && !active && !live ? resource.status.lastError : undefined;
   return {
     version: PROTOCOL_VERSION, biz: "aide.topic", blocks,
-    meta: { topic_id: topicId, context: resource ? { summary: summaryText(aide.topics.resources, resource), summaryNote: summaryReference(aide.topics.resources, resource), recent: notes(aide.topics.resources, resource.metadata.uid, "subject") } : null, activity: active || queued || live || error ? {
-      id: active?.id ?? `queued:${topicId}`, phase: active?.status.phase ?? (error ? "failed" : "queued"), queued, ...(error ? { error } : {}),
+    meta: { topic_id: topicId, before: page.before, activity: active || queued || live || error ? {
+      id: active?.id ?? `queued:${topicId}`, phase: active ? "running" : error ? "failed" : "queued", queued, ...(error ? { error } : {}),
     } : null },
   };
 }

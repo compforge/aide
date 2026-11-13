@@ -158,3 +158,25 @@ test("Requirement classification overrides apply to snapshot and comment Inputs"
   assert.equal(f.inputs.list().length, 2);
   assert.ok(f.inputs.list().every(input => input.spec.sensitivity === "L3" && input.spec.visibility === "people"));
 });
+
+test("Requirement titles name the same Address across changes and comments without changing speaking policy", async t => {
+  const f = fixture(t);
+  await f.observe();
+  const { Addresses } = await import("../plugins/personal/address/service.ts");
+  const addresses = new Addresses(f.root);
+  const ref = f.inputs.list()[0]!.spec.source!;
+  const first = addresses.read(ref);
+  assert.equal(first.spec.name, "调查");
+  addresses.setMuted(ref, false, true);
+  f.setItem({ ...item(), title: "核对发布窗口" });
+  await f.observe(10);
+  const changed = addresses.read(ref);
+  assert.equal(changed.spec.name, "核对发布窗口");
+  assert.equal(changed.metadata.uid, first.metadata.uid);
+  assert.deepEqual(changed.spec.locators, first.spec.locators);
+  assert.equal(changed.spec.muted, false);
+  f.setComments(async () => ({ items: [{ id: "comment", text: "补充", createdAt: at(15) }] }));
+  await f.observe(20);
+  assert.equal(addresses.read(ref).spec.name, "核对发布窗口");
+  assert.equal(addresses.read(ref).spec.muted, false);
+});

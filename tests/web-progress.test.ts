@@ -1,6 +1,4 @@
 import { mailView } from "../plugins/personal/stream/writer.ts";
-import { summaryText } from "../plugins/personal/note/summary.ts";
-import { notes } from "../plugins/personal/note/query.ts";
 import { historyBlocks } from "../src/channel/reply-layout.ts";
 import { larkAddress, webAddress } from "../src/channel/address.ts";
 import { fixtureIncoming } from "./address-fixture.ts";
@@ -88,7 +86,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   const first = await connect("a");
   await until(() => first.views.length > 0);
   assert.equal(first.events[0]!.op, "start");
-  assert.deepEqual(first.views[0], { version: "1.0", biz: "aide.topic", blocks: [], meta: { topic_id: "a", context: null, activity: null } });
+  assert.deepEqual(first.views[0], { version: "1.0", biz: "aide.topic", blocks: [], meta: { topic_id: "a", before: null, activity: null } });
   const accepted = await fetch(base + "/messages", { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ id: "a1", topicId: "a", text: "查看资料", channelId: "forged-channel",
       addressObservation: { type: "group", name: "forged-place" }, replyToMessageId: "forged-reply", source: larkAddress("forged-app", "forged-chat") }) });
@@ -148,8 +146,7 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.equal(second.views.at(-1)!.blocks.filter((block) => block.type === "message").at(-1)!.content, "正在整理重点，请稍候\n\n最终答复");
   await until(() => second.views.at(-1)!.blocks.find(block => block.role === "aide")?.label === undefined);
   const completed = second.views.at(-1)!;
-  const topic = aide.topics.resource("a")!;
-  assert.deepEqual(completed.meta.context, { summary: summaryText(aide.topics.resources, topic), recent: notes(aide.topics.resources, aide.topics.resource("a")!.metadata.uid, "subject") });
+  assert.equal(completed.meta.context, undefined, "Knowledge panels do not ride on dialogue SSE");
   assert.equal(completed.blocks.find((block) => block.type === "execution")!.status, "completed");
   const groupId = completed.blocks.find((block) => block.type === "execution")!.group_id;
   assert.ok(groupId, "Execution grouping must use durable Input ownership");
@@ -167,14 +164,14 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
   assert.deepEqual(refreshed.views[0], completed);
   await refreshed.close();
   assert.equal(aide.works().length, 0);
-  const messages = aide.outputs.bind(aide);
-  aide.outputs = () => { throw new Error("projection unavailable"); };
+  const resource = aide.topics.resource.bind(aide.topics);
+  aide.topics.resource = () => { throw new Error("projection unavailable"); };
   try {
     await until(() => second.events.at(-1)?.op === "end");
     assert.deepEqual(second.events.slice(-2).map((event) => event.op), ["error", "end"]);
     assert.equal(second.views.at(-1)!.meta.error!.code, "view_failed");
     assert.equal((await fetch(base + "/stream?topicId=a")).status, 500);
-  } finally { aide.outputs = messages; }
+  } finally { aide.topics.resource = resource; }
   await second.close();
   await aide.receive(fixtureIncoming({ channelId: "web", id: "a2",  topicId: "a", text: "再聊一个问题" }));
   await aide.settled();
@@ -198,13 +195,12 @@ test("Web receives scoped progress before final reply, reconnects with a snapsho
 
 test("AgentUE reducer reconstructs growing, corrected and removed progress without duplicated text", () => {
   const emitter = new PatchEmitter();
-  const initial: TopicView = { version: "1.0", biz: "aide.topic", meta: { topic_id: "a", context: null, activity: null },
+  const initial: TopicView = { version: "1.0", biz: "aide.topic", meta: { topic_id: "a", before: null, activity: null },
     blocks: [{ id: "output:answer", type: "text", content: "整理" }] };
   let previous: TopicView | undefined;
   let snapshot = {};
   for (const next of [initial,
-    { ...initial, meta: { ...initial.meta, context: { summary: "当前话题", recent: [{ id: "first", uid: "first-uid", version: "one", people: [], addresses: [], subject: { apiVersion: "aide.dev/v1alpha5", kind: "Topic" as const, namespace: "v1" as const, name: "topic", uid: "topic-uid" }, createdAt: "2026-10-23T08:00:00Z", updatedAt: "2026-10-23T08:00:00Z", text: "确认当前结论" }] } } },
-    { ...initial, meta: { ...initial.meta, context: { summary: "修订后的话题", recent: [{ id: "note", uid: "note-uid", version: "one", people: [], addresses: [], subject: { apiVersion: "aide.dev/v1alpha5", kind: "Topic" as const, namespace: "v1" as const, name: "topic", uid: "topic-uid" }, createdAt: "2026-10-23T09:00:00Z", updatedAt: "2026-10-23T09:00:00Z", text: "补充待办依据" }] } } },
+    { ...initial, meta: { ...initial.meta, before: "older-page" } },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "整理重点" }] },
     { ...initial, blocks: [{ id: "output:answer", type: "text" as const, content: "已完成" }] },
     { ...initial, blocks: [] }]) {
@@ -301,16 +297,18 @@ test("Source receipts expose original evidence before processing and remain visi
   assert.equal(environment.label, SOURCES.environments.label);
   assert.equal(environment.status, "done", "Historical facts stay visible after their invocation completes");
   assert.match(environment.content, /Deployment sandbox-server/);
-  assert.deepEqual(JSON.parse(environment.detail!.split("\n\nObservation:\n")[1]!.split("\n\n")[0]!), observation);
+  assert.doesNotMatch(JSON.stringify(environment), /snapshotEvidence/);
+  assert.deepEqual(aide.topics.inputStore.get("environment")!.spec.observation, observation);
   const mention = receipts.find((block) => block.inputId === "mention")!;
   assert.equal(mention.status, "queued");
   assert.equal(mention.icon, SOURCES.lark.icon);
   assert.equal(receipts.find((block) => block.inputId === "failed")!.icon, SOURCES.requirements.icon);
   assert.equal(mention.content, "Lark 群内 @：请确认发布窗口");
-  assert.match(mention.detail!, /完整上下文/);
+  assert.doesNotMatch(JSON.stringify(mention), /完整上下文/);
+  assert.match(JSON.stringify(aide.topics.inputStore.get("mention")!.spec.observation), /完整上下文/);
   assert.equal(receipts.find((block) => block.inputId === "failed")!.status, "queued");
   assert.ok(store.resource("inbox")!.status.lastError);
-  assert.match(receipts.find((block) => block.inputId === "failed")!.detail!, /其它 Source 的原始输入/);
+  assert.match(receipts.find((block) => block.inputId === "failed")!.content, /其它 Source 的原始输入/);
   assert.doesNotMatch(JSON.stringify(view), /另一会话/);
   assert.equal(aide.outputs().length, 0, "Showing Input facts must not manufacture outbound messages");
   // Close without starting a Runner: queued and consumed receipts both reconstruct directly from persisted facts.

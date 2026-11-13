@@ -15,8 +15,12 @@ import type { WebService } from "./service.ts";
 import { validInputResult } from "../host/approval/answer.ts";
 import { IncomingSchema, webTopicLocator } from "../channel/message.ts";
 import { browseTopics } from "../../plugins/personal/topic/browse.ts";
+import { browseTopicChildren } from "../../plugins/personal/topic/children.ts";
 import { DEFAULT_TOPIC_ID } from "../../plugins/personal/topic/model.ts";
 import { browsePersons } from "../../plugins/personal/person/browse.ts";
+import { topicSummary, topicRecent } from "./topic.ts";
+import { topicView } from "../channel/view.ts";
+import { historyCursor } from "../../plugins/personal/topic/history.ts";
 import { streamTopic } from "./stream.ts";
 import { renderHTML } from "@compforge/agent-observation";
 import { inputObservation, ObservationQuery } from "./observation.ts";
@@ -180,6 +184,31 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
           }
           throw error;
         }
+      }
+      if (request.method === "GET" && ["/topics/summary", "/topics/recent", "/topics/history"].includes(url.pathname)) {
+        const query = z.object({ topicId: z.string().min(1).max(200), before: z.string().max(2000).optional() }).strict().parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        if (query.before) {
+          try { if (historyCursor(query.before).topic !== aide.topics.resource(query.topicId)?.metadata.uid) throw new Error("Topic changed"); }
+          catch { json(response, 400, { error: "对话分页位置无效，请重新打开主题。" }); return; }
+        }
+        const started = performance.now();
+        const value = url.pathname.endsWith("/summary") ? topicSummary(aide.topics, query.topicId)
+          : url.pathname.endsWith("/recent") ? topicRecent(aide.topics, query.topicId) : topicView(aide, query.topicId, query.before);
+        log.debug({ query: url.pathname, topicId: query.topicId, queryMs: Math.round(performance.now() - started) }, "Web topic panel queried");
+        json(response, 200, value); return;
+      }
+      const childrenRoute = /^\/topics\/([^/]+)\/children$/.exec(url.pathname);
+      if (request.method === "GET" && childrenRoute) {
+        let topicId: string;
+        try { topicId = decodeURIComponent(childrenRoute[1]!); }
+        catch { json(response, 400, { error: "Invalid Topic ID encoding" }); return; }
+        z.string().min(1).max(200).parse(topicId);
+        const query = PageSchema.strict().parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const started = performance.now(), value = browseTopicChildren(aide.topics, topicId, query);
+        if (!value) { json(response, 404, { error: "主题尚未创建或已删除。" }); return; }
+        listJson(response, value, `topics/${topicId}/children`, started); return;
       }
       if (request.method === "GET" && url.pathname === "/topics") {
         const query = TopicListSchema.parse(Object.fromEntries(url.searchParams));

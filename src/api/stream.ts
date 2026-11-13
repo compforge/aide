@@ -12,8 +12,8 @@ import { topicView, type TopicView } from "../channel/view.ts";
 export function topicPatches(emitter: PatchEmitter, previous: TopicView | undefined, next: TopicView): PatchEvent[] {
   if (!previous || previous.blocks.some((block, index) => next.blocks[index]?.id !== block.id)) return [emitter.start(next)];
   const events: PatchEvent[] = [];
-  if (JSON.stringify(previous.meta.context) !== JSON.stringify(next.meta.context)) {
-    events.push(emitter.metaSet("meta.context", { context: next.meta.context }));
+  if (JSON.stringify(previous.meta.before) !== JSON.stringify(next.meta.before)) {
+    events.push(emitter.metaSet("meta.before", { before: next.meta.before }));
   }
   if (JSON.stringify(previous.meta.activity) !== JSON.stringify(next.meta.activity)) {
     events.push(emitter.metaSet("meta.activity", { activity: next.meta.activity }));
@@ -30,7 +30,9 @@ export function topicPatches(emitter: PatchEmitter, previous: TopicView | undefi
 
 /** Every connection starts a fresh delivery from the authoritative projection, without replaying actions. */
 export function streamTopic(response: ServerResponse, aide: ChannelService, topicId: string, log: Logger): void {
+  const started = performance.now();
   const initial = topicView(aide, topicId);
+  log.debug({ topicId, queryMs: Math.round(performance.now() - started), blocks: initial.blocks.length, hasOlder: !!initial.meta.before }, "Web dialogue opened");
   response.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache", "x-accel-buffering": "no" });
   const emitter = new PatchEmitter();
   let previous = initial;

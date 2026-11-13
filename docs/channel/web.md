@@ -34,7 +34,7 @@ Channel 与 Source 都从 Topic 关联的 Input 生成输入卡片，不创建�
 
 ## 实时进展与历史
 
-Input、Output 与执行进展分别投影。输入卡片显示来源图标、接收时间、原文和处理状态，详情使用 InputPrinter；静默研判仍保留输入和回执。正式回复来自 Output，模型增量只属于执行过程。
+Input、Output 与执行进展分别投影。输入卡片显示来源图标、接收时间、原文和处理状态，完整原文和来源证据通过 Input 详情链接读取；静默研判仍保留输入和回执。正式回复来自 Output，模型增量只属于执行过程。
 
 过程与回答的折叠遵循 [Channel 展示约定](README.md#回复展示状态)。用户展开选择、输入焦点和浏览历史的位置由页面维护，增量更新与执行结束不覆盖手动选择。原生权限 Approval 在独立区域处理；say 问题以普通 Output 展示，回答形成新 Input。
 
@@ -47,7 +47,9 @@ topicView → AgentUE UIModel → SSE → 浏览器 reducer 与渲染
 
 src/channel/view.ts 按明确的 Topic UID 与 execution / invocation 关联选取进展，生成 biz=aide.topic 的 AgentUE UIModel。输入卡片直接来自 Input，message 展示块来自 Output，execution 下有 thought / text / tool 子块。group_id 关联同一执行与正式回复，不按相邻位置猜测归属。内部提示词和完整工具原始响应不直接发给浏览器。
 
-src/api/stream.ts 使用 SDK 的 PatchEmitter / encodeSse。首次和重连发送 start 快照，内容更新使用 set / append，会话运行状态和摘要、近期记录分别更新 meta.activity / meta.context。顺序变化时用新快照替换。客户端通过同一 SDK 的 applyPatch 更新模型，Aide 负责页面渲染。
+src/api/stream.ts 使用 SDK 的 PatchEmitter / encodeSse。首次和重连发送 start 快照，内容更新使用 set / append，会话运行状态和历史分页位置分别更新 meta.activity / meta.before。顺序变化时用新快照替换。客户端通过同一 SDK 的 applyPatch 更新模型，Aide 负责页面渲染。
+
+对话首次只加载最近 10 条 Input / Output；服务端先按 Topic UID 范围筛选和 `(created, key)` 排序分页，再读取当页正文、Output Stream 与相关执行细节。`GET /topics/history?topicId=...&before=...` 读取更早一页，游标绑定 Topic UID 与时间边界，新记录不会挤动旧页。对话区向上滚动到距顶部 120 像素以内时，按需加载更早的 10 条并插入当前记录之前，不用翻页按钮替换整页。补入历史保持可见消息及其偏移；已加载记录和实时快照按块 ID 去重，旧请求不覆盖新进展。加载过程中继续接收 SSE，只有读者原本在底部时才跟随新内容；短首屏可通过向上滚轮继续加载。失败保留记录和游标，提供重试；同一主题一次只请求一页，切换主题取消旧请求。重连期间若最新窗口与已加载记录断开，用相同的有界分页补齐中间缺口，SSE 自身始终只发送最近一页。来源 observation 不随对话重复发送，点击 Input 的“处理 Timeline”查看完整证据。摘要与近期 Note 不属于对话 SSE。
 
 空闲连接发送 ping，连接定期 end 后由 EventSource 重连；投影错误以 error / end 收口，首次失败返回 HTTP 500。背压时等待 drain，再根据最新模型生成 patch。断开清理订阅与定时器，不取消服务端执行；seq 属于当前连接，不通过 Last-Event-ID 回放历史补丁。
 
@@ -85,11 +87,11 @@ Topic 列表由 Personal 在 SQLite 中先筛选、按最近活动排序，再�
 
 选中会话后，中间区域提供“对话、摘要、近期记录、事项、安排”五个 tab，默认显示对话，不再使用右侧栏。输入框仅在对话中展示；原生权限 Approval 和更新失败提示位于 tab 内容之外，在任何 tab 都可处理。事项与安排 tab 展示总数，需要用户回答或核对结果时显示提示圆点；卡片保留具体状态。
 
-同一会话切换 tab 保留输入草稿、展开选择与各面板滚动位置，不重连 SSE、不停止后台执行。隐藏对话继续接收最新快照，回到对话后再渲染，避免隐藏布局影响自动跟随判断。tab 支持左右方向键与 Home / End 切换，窄屏可横向滚动。切换到另一个会话时回到对话 tab，并清空旧会话内容。
+同一会话切换 tab 保留输入草稿、展开选择与各面板滚动位置，不停止后台执行。只有可见的对话 tab 连接 SSE，切走或页面隐藏时关闭，回来后重新读取当前快照。tab 支持左右方向键与 Home / End 切换，窄屏可横向滚动。切换到另一个会话时回到对话 tab，并清空旧会话内容。
 
 对话区保留最小可用高度。横屏手机或矮窗口放不下审批与输入框时，会话详情允许整体滚动，审批区保留自身滚动；手动放大输入框后，对话区也允许滚动到发送按钮，避免裁切操作入口。
 
-摘要与记录读取 Topic 的 summary / recent，并随 SSE 更新；近期记录按最新在前展示时间与正文。每个 tab 使用完整内容区滚动，空摘要和空记录分别显示占位提示。
+对话、摘要、近期记录各自请求各自的数据。摘要通过 `GET /topics/summary?topicId=...`，近期记录通过 `GET /topics/recent?topicId=...`，只在打开对应 tab 时请求，并在该 tab 可见时每 5 秒刷新。它们不读取对话历史、Output Stream 或执行投影。首次请求完成前显示“加载中”，失败独立提示并重试，只有成功的空结果才显示暂无内容；切换 Topic 取消旧请求。近期记录按最新在前展示时间与正文，沿用近期 Note 的数量与字符预算。
 
 事项和安排卡片均提供“复制 ID”按钮，复制完整工作 ID 后短暂显示“已复制”；复制失败时展示可手动复制的 ID。
 
@@ -153,4 +155,6 @@ Inputs 提供全局输入目录，支持按 Connector、来源类型、具体观
 
 ### 主题组织
 
-详情页的“组织”tab 展示当前主题所属 root 的父子层级，仅显示主题名称和连线，突出当前主题。点击名称进入对应主题详情，保留原生链接的新标签页打开与返回能力；展开箭头独立控制折叠，不触发跳转。默认展开 root 到当前主题的路径，其余分支按需展开；每次读取最多 20 个直属子主题，同级数量较多时提供分页。复用 `/topics` 的祖先链与直属子主题查询，首次打开 tab 时加载，手动刷新重新读取层级；切换主题后取消旧请求。树视图不混入 Input、Note 或 Work。
+详情页的“组织”tab 首次只展示当前 Topic 的直属孩子。使用独立接口 `GET /topics/{topicId}/children?page=1&pageSize=20`，返回 `items: [{ id, uid, name, hasChildren }]` 与 `total/page/pageSize/pages`；无名称时用 Topic ID 展示，主题不存在或正在删除时返回 404。按名称、ID、UID 稳定排序，默认每页 20 条、最多 100 条。查询使用当前父 Topic 的 UID 过滤直属孩子，先分页，再通过索引判断本页孩子是否可展开，不计算活动排序、对话预览、Note/Work 数量或祖先路径。
+
+点击名称进入对应主题详情，保留原生链接的新标签页打开与返回能力；展开箭头独立控制折叠，首次展开才请求该孩子的 children。同级数量较多时提供分页，手动刷新重新读取；切换主题后取消旧请求。树视图不混入 Input、Note 或 Work。
