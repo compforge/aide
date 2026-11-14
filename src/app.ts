@@ -269,7 +269,7 @@ export class Aide {
   async reconcileOutput(id: string): Promise<void> { await this.delivery.reconcile(id); }
   outputs() { return this.outputStore.list().map(output => outputView(output, this.outputStore.streams)).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id)); }
 
-  works() { return this.personal.works(); }
+  works(topicId?: string) { return this.personal.works(topicId); }
   invocations() { return this.personal.invocations(); }
   topicIds() { return this.personal.topicIds(); }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }

@@ -12,7 +12,7 @@ export interface WebService extends ChannelService {
   start(): Promise<void>;
   deleteTopic(topicId: string, revision: number, uid: string): Promise<import("../../plugins/personal/topic/model.ts").TopicDeletion>;
   setTopicReview(topicId: string, enabled: boolean): Promise<import("../../plugins/personal/topic/review.ts").TopicReview>;
-  works(): readonly { id: string; topicId: string; revision: number; kind: "task" | "routine" }[];
+  works(topicId?: string): readonly { id: string; topicId: string; revision: number; kind: "task" | "routine" }[];
   event(input: Omit<Incoming, "channelId" | "source"> & { name: string }): Promise<number>;
   work(topicId: string): { delete(id: string, revision: number): Promise<void> };
 }

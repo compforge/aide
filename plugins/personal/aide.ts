@@ -333,7 +333,7 @@ export class Personal {
   get topics() { return this.store.topics; }
   invocations() { return this.plugins.listHarnessInvocations().map(invocation => ({ ...invocation, ...personalExecution(invocation) })); }
   topicIds() { return [...new Set([...this.store.topics.list().map((item) => item.id), ...this.works().map((item) => item.topicId)])]; }
-  works() { return this.store.read().works; }
+  works(topicId?: string) { return this.store.listWorks(topicId); }
 
   start(): Promise<void> { return this.starting ??= this.startOnce(); }
 
@@ -504,7 +504,7 @@ export class Personal {
     const spec: InputSpec = { origin: "source", originId: "personal.events", topicId: input.topicId,
       text: input.text, observation: { event: input.name } };
     if (store.get(name) || store.receipt(name)) { store.submit(input.topicId, name, spec); return 0; }
-    const targets = this.store.read().works.filter(work => work.kind === "routine" && work.topicId === input.topicId
+    const targets = this.store.listWorks(input.topicId).filter(work => work.kind === "routine"
       && work.trigger?.event === input.name && ["scheduled", "ready", "running"].includes(work.status));
     await this.topics.ensure(input.topicId);
     const c = this.topics.resource(input.topicId)!;

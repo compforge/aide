@@ -18,7 +18,7 @@ import { browseTopics } from "../../plugins/personal/topic/browse.ts";
 import { browseTopicChildren } from "../../plugins/personal/topic/children.ts";
 import { DEFAULT_TOPIC_ID } from "../../plugins/personal/topic/model.ts";
 import { browsePersons } from "../../plugins/personal/person/browse.ts";
-import { topicSummary, topicRecent } from "./topic.ts";
+import { topicSummary, topicRecent, browseTopicNotes } from "./topic.ts";
 import { topicView } from "../channel/view.ts";
 import { historyCursor } from "../../plugins/personal/topic/history.ts";
 import { streamTopic } from "./stream.ts";
@@ -199,6 +199,12 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         log.debug({ topicId: query.topicId, messageId: query.id, queryMs: Math.round(performance.now() - started) }, "Web message detail queried");
         response.setHeader("cache-control", "no-store");
         json(response, 200, value); return;
+      }
+      if (request.method === "GET" && url.pathname === "/topics/notes") {
+        const query = PageSchema.extend({ topicId: z.string().min(1).max(200), pageSize: PageSchema.shape.pageSize.default(5) }).strict().parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        const started = performance.now();
+        listJson(response, browseTopicNotes(aide.topics, query.topicId, query), "topic-notes", started); return;
       }
       if (request.method === "GET" && ["/topics/summary", "/topics/recent", "/topics/history"].includes(url.pathname)) {
         const query = z.object({ topicId: z.string().min(1).max(200), before: z.string().max(2000).optional() }).strict().parse(Object.fromEntries(url.searchParams));
@@ -399,7 +405,7 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         json(response, result.reason === "missing" ? 404 : 409, { error: errors[result.reason] });
       } else if (request.method === "POST" && url.pathname === "/work/delete") {
         const { id, topicId, revision } = DeleteWorkSchema.parse(await body(request));
-        const work = aide.works().find((item) => item.id === id && item.topicId === topicId);
+        const work = aide.works(topicId).find((item) => item.id === id);
         if (!work) { json(response, 404, { error: "该工作已删除或不属于当前会话。" }); return; }
         if (work.revision !== revision) {
           json(response, 409, { error: "工作已更新，请刷新后重新确认删除。" }); return;
@@ -413,7 +419,12 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         const topicId = url.searchParams.get("topicId");
         if (!topicId) { json(response, 400, { error: "topicId is required" }); return; }
         if (url.pathname === "/work") {
-          json(response, 200, aide.works().filter((work) => work.topicId === topicId));
+          const started = performance.now();
+          const works = aide.works(topicId);
+          const queryMs = Math.round(performance.now() - started);
+          const attributes = { query: "work", topicId, queryMs, returned: works.length };
+          if (queryMs >= 500) log.warn(attributes, "Slow Web Work query"); else log.debug(attributes, "Web Work queried");
+          json(response, 200, works);
         } else {
           const topic = aide.topics.resource(topicId);
           const messages = aide.outputs().filter((item) => topic && visibleOutput(item, topic));
