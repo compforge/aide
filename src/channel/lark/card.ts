@@ -5,6 +5,7 @@ export interface LarkProgress {
   phase: "queued" | "running" | "done" | "failed";
   think: string;
   content: string;
+  processUrl?: string;
   process?: ReturnType<typeof processPreview>;
   messageIds: string[];
   overflow: boolean;
@@ -12,7 +13,7 @@ export interface LarkProgress {
 const labels = replyLabels;
 
 /**
- * @spec Answer starts expanded and process starts collapsed; later text/header patches preserve reader-owned expansion.
+ * @spec Answer is top-level Markdown and process starts collapsed; later text/header patches preserve reader-owned expansion.
  * @link docs/channel/README.md#回复展示状态
  */
 export function progressCard(view: LarkProgress, streaming: boolean) {
@@ -21,7 +22,7 @@ export function progressCard(view: LarkProgress, streaming: boolean) {
     config: { update_multi: true, width_mode: "default", streaming_mode: streaming },
     header: { title: { tag: "plain_text", content: "Aide" }, template: "blue" },
     body: { elements: [
-      cardPanel("answer_panel", "回答", [{ tag: "markdown", element_id: "content", content: cardContent(view) }], true),
+      { tag: "markdown" as const, element_id: "content", content: cardContent(view) },
       cardPanel("process_panel", processTitle(view), [{ tag: "markdown", element_id: "think", content: cardThought(view) }], false),
     ] },
   };
@@ -34,7 +35,7 @@ export function cardHeaders(view: LarkProgress) {
 
 function processTitle(view: LarkProgress): string {
   const process = view.process ?? processPreview(view.phase, view.think ? [{ type: "thought", content: view.think }] : []);
-  return `过程 · ${process.summary}`;
+  return `查看过程 · ${process.summary}`;
 }
 function panelHeader(title: string) {
   return { title: { tag: "plain_text", content: title },
@@ -46,9 +47,10 @@ function cardPanel<T>(id: string, title: string, elements: T[], expanded: boolea
 
 export function cardContent(view: LarkProgress): string {
   return (view.content || (view.phase === "failed" ? "这次处理已中断，请核对后重新交办。" : view.phase === "done" ? "暂无对外回复。" : "等待生成回答…"))
+    + (view.phase === "failed" && view.content ? "\n\n这次处理已中断，请核对后重新交办。" : "")
     + (view.overflow ? "\n\n（内容较长，完整回复见后续消息。）" : "");
 }
 
 export function cardThought(view: LarkProgress): string {
-  return view.think || labels[view.phase]!;
+  return (view.think || labels[view.phase]!) + (view.processUrl ? `\n\n[在 Web 查看完整过程](${view.processUrl})` : "");
 }

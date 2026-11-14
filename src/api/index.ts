@@ -216,6 +216,21 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
           throw error;
         }
       }
+      if (request.method === "GET" && url.pathname === "/topics/process") {
+        const query = z.object({ topicId: z.string().min(1).max(200), topicUid: z.string().min(1).max(250),
+          executionId: z.string().min(1).max(250) }).strict().parse(Object.fromEntries(url.searchParams));
+        await aide.start();
+        if (aide.topics.resource(query.topicId)?.metadata.uid !== query.topicUid) {
+          json(response, 404, { error: "Topic 已删除或被替换，请重新打开。" }); return;
+        }
+        const started = performance.now();
+        const value = topicView(aide, query.topicId, undefined, { executionId: query.executionId });
+        if (!value.blocks.some(block => block.group_id === query.executionId) && value.meta.activity?.id !== query.executionId) {
+          json(response, 404, { error: "执行记录已回收或不属于当前对话。" }); return;
+        }
+        log.debug({ topicId: query.topicId, executionId: query.executionId, queryMs: Math.round(performance.now() - started) }, "Web process queried");
+        response.setHeader("cache-control", "no-store"); json(response, 200, value); return;
+      }
       if (request.method === "GET" && url.pathname === "/topics/message") {
         const query = z.object({ topicId: z.string().min(1).max(200), topicUid: z.string().min(1).max(250),
           id: z.string().min(1).max(250), uid: z.string().min(1).max(250) }).strict().parse(Object.fromEntries(url.searchParams));
@@ -223,7 +238,7 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         if (aide.topics.resource(query.topicId)?.metadata.uid !== query.topicUid) {
           json(response, 404, { error: "Topic 已删除或被替换，请重新打开。" }); return;
         }
-        const started = performance.now(), value = topicView(aide, query.topicId, undefined, { message: query });
+        const started = performance.now(), value = topicView(aide, query.topicId, undefined, { message: query, process: false });
         if (!value.blocks.some(block => block.id === query.id)) {
           json(response, 404, { error: "消息已回收或不再属于当前 Topic。" }); return;
         }
@@ -246,7 +261,7 @@ export function httpChannel(aide: WebService, log: Logger, settings?: ChannelSet
         }
         const started = performance.now();
         const value = url.pathname.endsWith("/summary") ? topicSummary(aide.topics, query.topicId)
-          : url.pathname.endsWith("/recent") ? topicRecent(aide.topics, query.topicId) : topicView(aide, query.topicId, query.before, { summaries: true });
+          : url.pathname.endsWith("/recent") ? topicRecent(aide.topics, query.topicId) : topicView(aide, query.topicId, query.before, { summaries: true, process: false });
         log.debug({ query: url.pathname, topicId: query.topicId, queryMs: Math.round(performance.now() - started) }, "Web topic panel queried");
         json(response, 200, value); return;
       }

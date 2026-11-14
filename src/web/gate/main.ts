@@ -16,7 +16,7 @@ let timer: ReturnType<typeof setInterval> | undefined;
 let ready = false, polling = false;
 const topicId = "gate", query = "?topicId=" + topicId;
 const tabs = mountTopicTabs(true, signal, () => { dialogue.pause(); if (tabs.isDialogue()) dialogue.show(); });
-const dialogue = createDialogue(topicId, signal, () => ready && timer !== undefined && tabs.isDialogue() && !document.hidden, true);
+const dialogue = createDialogue(topicId, signal, () => ready && timer !== undefined && tabs.isDialogue() && !document.hidden);
 const approvals = createApprovals(poll, signal);
 let handoffCursor = "", expandedHandoffs = false;
 const handoffItems = new Map<string, HandoffSummary & { topicUrl?: string }>();

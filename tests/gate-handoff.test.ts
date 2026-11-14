@@ -6,6 +6,8 @@ import { join } from "node:path";
 import pino from "pino";
 import { Aide } from "../src/app.ts";
 import { parseUIModel } from "@compforge/agentue/ui";
+import { processLink } from "../src/channel/process-link.ts";
+import { mailReader } from "./stream-fixture.ts";
 import { topicView } from "../src/channel/view.ts";
 import { fakeOptions } from "./fake-harness.ts";
 import { fixtureMe } from "./address-fixture.ts";
@@ -41,6 +43,19 @@ test("only Me bot DM enters Gate; Me group mention and other senders remain doma
   assert.notEqual(other.status.topic?.uid, dm.status.topic?.uid);
   assert.equal(gateCalls, 1); assert.equal(chiefCalls, 2);
   assert.deepEqual(aide.outputs().find(o => o.text === "private reply")?.target, larkAddress("cli_test", "oc_private"));
+  const link = processLink(aide.topics, aide.addresses, ref => aide.privateMeAddress(ref), "https://aide.example.com");
+  const outputs = aide.outputs();
+  for (const output of outputs) {
+    const url = await link({ id: output.id, target: output.target, stream: mailReader("completed", 1) });
+    if (output.text === "private reply") {
+      assert(url); assert.equal(new URL(url).pathname, "/gate");
+      assert.equal(new URL(url).searchParams.get("process"), output.executionId);
+      assert.equal(new URL(url).searchParams.get("processTopicUid"), dm.status.topic!.uid);
+    } else assert.equal(url, undefined, "Groups and other people's DMs never link to private Web process");
+  }
+  const privateOutput = outputs.find(o => o.text === "private reply")!;
+  assert.equal(await processLink(aide.topics, aide.addresses, ref => aide.privateMeAddress(ref))({ id: privateOutput.id, target: privateOutput.target, stream: mailReader("completed", 1) }), undefined);
+
 });
 
 test("durable handoff deduplicates, replies on original DM, tracks followups and fences stale or foreign reports", async t => {
@@ -108,6 +123,23 @@ test("durable handoff deduplicates, replies on original DM, tracks followups and
   assert.doesNotThrow(() => parseUIModel(history));
   assert.equal(history.blocks.find(block => block.id === "input:followup")!.group_id, "followup");
   assert.equal(history.blocks.find(block => block.id === `message:${lateReply.outputId}`)!.group_id, "chief-execution");
+  const originalInvocations = aide.invocations.bind(aide), originalView = aide.runtime.executions.view.bind(aide.runtime.executions);
+  const queries: string[][] = [];
+  aide.invocations = () => [{ invocationId: "domain-turn", pluginInstanceId: "personal", executionId: "chief-execution", verb: "harness", phase: "running", harnessName: "chief", topicId: "domain", resourceRef: resourceRef(domain) },
+    { invocationId: "domain-previous", pluginInstanceId: "personal", executionId: "chief-execution", verb: "harness", phase: "failed", harnessName: "chief", topicId: "domain", resourceRef: resourceRef(domain) },
+    { invocationId: "foreign-turn", pluginInstanceId: "personal", executionId: "foreign-execution", verb: "harness", phase: "running", harnessName: "chief", topicId: "foreign", resourceRef: resourceRef(foreign) }];
+  aide.runtime.executions.view = ids => { queries.push([...ids]); return originalView(ids); };
+  try {
+    const transcript = topicView(aide, "gate", undefined, { summaries: true, process: false });
+    assert.equal(queries.length, 0, "Main transcript never reads runtime process detail");
+    assert(transcript.blocks.some(b => b.type === "message" && b.group_id === "chief-execution" && !b.lazy), "Foreign live replies keep streaming in Gate");
+    const process = topicView(aide, "gate", undefined, { executionId: "chief-execution" });
+    assert.deepEqual(queries, [["domain-turn", "domain-previous"]]);
+    assert.deepEqual(process.blocks.filter(b => b.type === "execution").map(b => b.id), ["execution:domain-turn", "execution:domain-previous"]);
+    assert.deepEqual(process.blocks.filter(b => b.type === "execution").map(b => b.status), ["running", "failed"], "Each invocation keeps its own phase");
+    assert.equal(topicView(aide, "gate", undefined, { executionId: "foreign-execution" }).blocks.length, 0);
+  } finally { aide.invocations = originalInvocations; aide.runtime.executions.view = originalView; }
+
   await service.report(aide.topics.resource("domain")!, { ...waiting, phase: "completed", coordinate: false }, "finished-after-expiry");
   await service.followup(activeGate(), { id: latest.metadata.name, inputId: "followup", request: next.spec.text });
   assert.equal(service.read(latest.metadata.name).status.sequence, 2, "expired delegated Inputs retain replay receipts");

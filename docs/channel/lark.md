@@ -49,11 +49,12 @@ Lark Channel 使用 CardKit JSON 2.0 卡片，内容来自 Output Reconcile 选�
 Chief 为 Immediate Channel Input 提前创建 Output，以批次追加 think/text；Channel 不再旁路读取 Harness 投影。
 私密 Me 地址可展示进行中的内容；外部地址等 Stream 结束并通过完整披露检查后才发送。
 
-卡片包含两个同级原生折叠面板：「回答」在前且默认展开，直接展示 Markdown 正文；「过程」默认收缩，
-标题显示当前处理状态与工具调用数量，展开后查看思考及工具记录。没有外层整体面板或重复的三行正文预览。
+卡片正文直接使用顶层 Markdown；同级“查看过程”折叠面板默认收缩，标题显示处理状态与工具调用数量，展开后查看已获准披露的阶段说明及工具记录。没有“回答”折叠容器或重复正文预览。中断提示在正文中保持可见。
 增量更新只修改稳定 ID 的正文、过程文本及过程标题；不重新设置 expanded 或替换子组件，保留读者的展开选择。每 750ms 合并一次当前内容，复用官方 SDK 客户端、凭证和超时。
 卡片 ID、发送 UUID、递增 sequence 与已确认组件内容持久化，重启或重试继续同一卡片。
 回复使用 Output 实际目标中的 replyToMessageId，保留原消息位置。
+
+可选环境变量 `AIDE_WEB_URL` 指定 Me 可访问的 Web origin（例如 `https://aide.example.com`，不含路径、查询或凭证）；未配置不显示链接。只有实际目的地通过私有 Me 场合校验时才在过程面板附“在 Web 查看完整过程”。链接绑定 Output 的 conversation UID 与真实 executionId；Gate 接收的领域答复打开领域执行。群聊和其他人的私聊不附链接，也不读取 Gate 私有过程。
 
 Stream 结束后关闭 streaming_mode，最终更新成功才返回回执；Output 的 delivered 还要求确认最后一个 seq。
 更新失败交给 Output 重试，不把成功创建卡片当成送达。正文超过卡片预算时，卡片显示前缀，剩余正文按稳定 UUID

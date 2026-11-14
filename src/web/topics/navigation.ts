@@ -37,9 +37,10 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
   const initialPage = Number(new URL(location.href).searchParams.get('page'));
   let requestedPage = Number.isSafeInteger(initialPage) && initialPage > 0 ? initialPage : null;
   let currentPage = 1;
-  function navigate(url: URL, replace = false) {
+  function navigate(url: URL, replace = false, restore = false) {
     const next = url.searchParams.get('topic');
     const changed = next !== topicId;
+    if (changed && !restore) { url.searchParams.delete('process'); url.searchParams.delete('processTopicUid'); }
     topicMenu.hidePopover();
     topicId = next;
     const page = Number(url.searchParams.get('page'));
@@ -52,7 +53,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
   }
   window.addEventListener('popstate', () => {
     const next = new URL(location.href);
-    navigate(next, true);
+    navigate(next, true, true);
   }, { signal });
   for (const [id, offset] of [['topic-previous', -1], ['topic-next', 1]] as const) {
     $(id).addEventListener('click', () => {
@@ -180,6 +181,7 @@ export function createNavigation(topicId: string | null, signal: AbortSignal, on
     const links = topicItems.map((item) => {
       const link = element('a', undefined, 'list-link');
       const url = new URL(location.href); url.searchParams.set('topic', item.id);
+      if (item.id !== topicId) { url.searchParams.delete('process'); url.searchParams.delete('processTopicUid'); }
       url.searchParams.set('page', String(currentPage));
       link.href = url.href;
       link.dataset.topicId = item.id;

@@ -6,8 +6,8 @@ import { createTimeline } from "./timeline.ts";
 import { createDialogueHistory } from "./history.ts";
 
 /** @spec Upward scrolling loads ten older records without stopping live updates, replacing the transcript or moving the reader's anchor. */
-export function createDialogue(topicId: string | null, signal: AbortSignal, visible: () => boolean, expandLatest = false) {
-  const timeline = createTimeline(topicId, signal, expandLatest), history = createDialogueHistory();
+export function createDialogue(topicId: string | null, signal: AbortSignal, visible: () => boolean) {
+  const timeline = createTimeline(topicId, signal), history = createDialogueHistory();
   let stream: EventSource | undefined;
   let loading = false, failed = false;
   const messages = byId("messages"), notice = byId("history-notice");
@@ -25,7 +25,7 @@ export function createDialogue(topicId: string | null, signal: AbortSignal, visi
     if (view && visible()) timeline.render(view, preservePosition);
     previousTop = messages.scrollTop;
   }
-  function pause() { stream?.close(); stream = undefined; byId("connection").textContent = ""; }
+  function pause() { timeline.pause(); stream?.close(); stream = undefined; byId("connection").textContent = ""; }
   async function load(older = false) {
     if (!topicId || loading || signal.aborted || !visible()) return;
     const pending = history.next(older);
@@ -77,5 +77,5 @@ export function createDialogue(topicId: string | null, signal: AbortSignal, visi
     };
     connection.onerror = () => { if (stream === connection && !signal.aborted) byId("connection").textContent = "连接断开 · 正在重连"; };
   }
-  return { pause, show() { render(); connect(); if (!failed) void load(); } };
+  return { pause, show() { timeline.show(); render(); connect(); if (!failed) void load(); } };
 }
